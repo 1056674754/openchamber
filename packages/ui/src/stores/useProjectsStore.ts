@@ -40,6 +40,7 @@ interface ProjectsStore {
   activeProjectId: string | null;
 
   addProject: (path: string, options?: { label?: string; id?: string }) => ProjectEntry | null;
+  ensureRemoteProject: (path: string, serverId: string, label?: string) => ProjectEntry | null;
   removeProject: (id: string) => void;
   setActiveProject: (id: string) => void;
   setActiveProjectIdOnly: (id: string) => void;
@@ -232,6 +233,9 @@ const sanitizeProjects = (value: unknown): ProjectEntry[] => {
     if (typeof candidate.sidebarCollapsed === 'boolean') {
       project.sidebarCollapsed = candidate.sidebarCollapsed;
     }
+    if (typeof candidate.serverId === 'string' && candidate.serverId.trim().length > 0) {
+      project.serverId = candidate.serverId.trim();
+    }
     result.push(project);
   }
 
@@ -392,6 +396,30 @@ export const useProjectsStore = create<ProjectsStore>()(
 
       get().setActiveProject(entry.id);
       void get().discoverProjectIcon(entry.id);
+      return entry;
+    },
+
+    ensureRemoteProject: (path: string, serverId: string, label?: string) => {
+      const normalizedPath = path.replace(/\\/g, '/').replace(/\/+$/, '') || '/';
+      const id = createProjectIdFromPath(normalizedPath);
+      if (!id) return null;
+
+      const existing = get().projects.find((p) => p.id === id);
+      if (existing) return existing;
+
+      const entry: ProjectEntry = {
+        id,
+        path: normalizedPath,
+        label: label?.trim() || deriveProjectLabel(normalizedPath),
+        color: pickAutoColor(get().projects),
+        addedAt: Date.now(),
+        lastOpenedAt: Date.now(),
+        serverId,
+      };
+
+      const nextProjects = [...get().projects, entry];
+      set({ projects: nextProjects, activeProjectId: entry.id });
+      persistProjects(nextProjects, entry.id);
       return entry;
     },
 

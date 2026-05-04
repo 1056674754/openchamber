@@ -24,14 +24,14 @@ const classifyReadError = (error: unknown): ContextFileOpenFailureReason => {
   return 'unreadable';
 };
 
-const readFileContent = async (files: FilesAPI, path: string): Promise<string> => {
+const readFileContent = async (files: FilesAPI, path: string, baseUrl: string = ''): Promise<string> => {
   if (files.readFile) {
     const result = await files.readFile(path, { allowOutsideWorkspace: true, optional: true });
     return result.content ?? '';
   }
 
   const params = new URLSearchParams({ path, allowOutsideWorkspace: 'true', optional: 'true' });
-  const response = await fetch(`/api/fs/read?${params.toString()}`, {
+  const response = await fetch(`${baseUrl}/api/fs/read?${params.toString()}`, {
     // Avoid conditional requests (304 + empty body).
     cache: 'no-store',
   });
@@ -43,9 +43,9 @@ const readFileContent = async (files: FilesAPI, path: string): Promise<string> =
   return response.text();
 };
 
-export const validateContextFileOpen = async (files: FilesAPI, path: string): Promise<ContextFileOpenValidationResult> => {
+export const validateContextFileOpen = async (files: FilesAPI, path: string, baseUrl: string = ''): Promise<ContextFileOpenValidationResult> => {
   try {
-    const content = await readFileContent(files, path);
+    const content = await readFileContent(files, path, baseUrl);
     const lineCount = countLinesWithLimit(content, MAX_OPEN_FILE_LINES);
     if (lineCount > MAX_OPEN_FILE_LINES) {
       return { ok: false, reason: 'too-large' };

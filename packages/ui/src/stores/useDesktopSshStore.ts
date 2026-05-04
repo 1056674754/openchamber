@@ -12,6 +12,7 @@ import {
   type DesktopSshInstance,
   type DesktopSshInstanceStatus,
 } from '@/lib/desktopSsh';
+import { serverRegistry } from '@/lib/opencode/server-registry';
 
 type DesktopSshState = {
   instances: DesktopSshInstance[];
@@ -70,6 +71,17 @@ export const useDesktopSshStore = create<DesktopSshState>((set, get) => ({
               [status.id]: status,
             },
           }));
+          const instance = get().instances.find((i) => i.id === status.id);
+          const label = instance?.nickname || instance?.sshCommand || status.id;
+          if (status.phase === 'ready' && status.localUrl) {
+            serverRegistry.register({
+              id: status.id,
+              label,
+              baseUrl: status.localUrl,
+            });
+          } else if (status.phase === 'error' || status.phase === 'idle') {
+            serverRegistry.unregister(status.id);
+          }
         });
       }
 
@@ -80,6 +92,18 @@ export const useDesktopSshStore = create<DesktopSshState>((set, get) => ({
         initialized: true,
         listenerReady: true,
       });
+
+      for (const instance of config.instances) {
+        const status = statusMap[instance.id];
+        const label = instance.nickname || instance.sshCommand || instance.id;
+        if (status?.phase === 'ready' && status.localUrl) {
+          serverRegistry.register({
+            id: instance.id,
+            label,
+            baseUrl: status.localUrl,
+          });
+        }
+      }
     } catch (error) {
       set({
         isLoading: false,

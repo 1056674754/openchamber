@@ -76,6 +76,7 @@ export async function listGlobalSessionPages(
         const response = await retry(
             () => apiClient.experimental.session.list({
                 archived: options.archived,
+                roots: options.archived ? true : undefined,
                 limit: options.pageSize,
                 ...(cursor !== undefined ? { cursor } : {}),
             }),

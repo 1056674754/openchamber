@@ -16,6 +16,7 @@ import type { SortableDragHandleProps } from './sortableItems';
 import { SortableGroupItem, SortableProjectItem } from './sortableItems';
 import { formatProjectLabel } from './utils';
 import { useI18n } from '@/lib/i18n';
+import { serverRegistry } from '@/lib/opencode/server-registry';
 
 type ProjectSection = {
   project: {
@@ -26,6 +27,7 @@ type ProjectSection = {
     color?: string;
     iconImage?: { mime: string; updatedAt: number; source: 'custom' | 'auto' };
     iconBackground?: string;
+    serverId?: string;
   };
   groups: SessionGroup[];
 };
@@ -137,10 +139,12 @@ export function SidebarProjectsList(props: Props): React.ReactNode {
               {props.sectionsForRender.map((section) => {
                 const project = section.project;
                 const projectKey = project.id;
+                const rawProjectLabel = project.label?.trim();
+                const serverLabel = project.serverId ? serverRegistry.getServerLabel(project.serverId)?.trim() : '';
                 const projectLabel = formatProjectLabel(
-                  project.label?.trim()
-                  || formatDirectoryName(project.normalizedPath, props.homeDirectory)
-                  || project.normalizedPath,
+                  rawProjectLabel && rawProjectLabel !== serverLabel
+                    ? rawProjectLabel
+                    : formatDirectoryName(project.normalizedPath, props.homeDirectory) || project.normalizedPath,
                 );
                 const projectDescription = formatPathForDisplay(project.normalizedPath, props.homeDirectory);
                 const isCollapsed = props.collapsedProjects.has(projectKey);
@@ -170,6 +174,8 @@ export function SidebarProjectsList(props: Props): React.ReactNode {
                     hideDirectoryControls={props.hideDirectoryControls}
                     mobileVariant={props.mobileVariant}
                     alwaysShowActions={props.alwaysShowActions}
+                    serverId={project.serverId}
+                    serverHealthStatus={project.serverId ? serverRegistry.get(project.serverId)?.healthStatus ?? null : undefined}
                     onToggle={() => props.toggleProject(projectKey)}
                     onNewSession={() => {
                       if (projectKey !== props.activeProjectId) props.setActiveProjectIdOnly(projectKey);

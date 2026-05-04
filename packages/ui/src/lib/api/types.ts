@@ -65,17 +65,20 @@ export interface CreateTerminalOptions {
   cwd: string;
   cols?: number;
   rows?: number;
+  baseUrl?: string;
 }
 
 export interface TerminalStreamOptions {
   retry?: Partial<RetryPolicy>;
   connectionTimeoutMs?: number;
+  baseUrl?: string;
 }
 
 export interface ResizeTerminalPayload {
   sessionId: string;
   cols: number;
   rows: number;
+  baseUrl?: string;
 }
 
 export interface TerminalHandlers {
@@ -86,14 +89,15 @@ export interface TerminalHandlers {
 export interface ForceKillOptions {
   sessionId?: string;
   cwd?: string;
+  baseUrl?: string;
 }
 
 export interface TerminalAPI {
   createSession(options: CreateTerminalOptions): Promise<TerminalSession>;
   connect(sessionId: string, handlers: TerminalHandlers, options?: TerminalStreamOptions): Subscription;
-  sendInput(sessionId: string, input: string): Promise<void>;
+  sendInput(sessionId: string, input: string, baseUrl?: string): Promise<void>;
   resize(payload: ResizeTerminalPayload): Promise<void>;
-  close(sessionId: string): Promise<void>;
+  close(sessionId: string, baseUrl?: string): Promise<void>;
   restartSession?(currentSessionId: string, options: CreateTerminalOptions): Promise<TerminalSession>;
   forceKill?(options: ForceKillOptions): Promise<void>;
 }
@@ -544,6 +548,7 @@ export interface ProjectEntry {
   addedAt?: number;
   lastOpenedAt?: number;
   sidebarCollapsed?: boolean;
+  serverId?: string;
 }
 
 export interface SettingsPayload {

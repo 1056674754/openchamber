@@ -13,22 +13,26 @@ import {
   RiChatNewLine,
   RiEqualizer2Line,
   RiFolderAddLine,
+  RiGlobeLine,
   RiLayoutLeftLine,
   RiSearchLine,
   RiCloseLine,
   RiContractUpDownLine,
   RiExpandUpDownLine,
   RiCalendarScheduleLine,
+  RiFolderLine,
 } from '@remixicon/react';
 import { cn } from '@/lib/utils';
 import { ArrowsMerge } from '@/components/icons/ArrowsMerge';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { useI18n } from '@/lib/i18n';
+import { sessionEvents } from '@/lib/sessionEvents';
 
 type Props = {
   hideDirectoryControls: boolean;
   handleOpenDirectoryDialog: () => void;
   handleNewSession: () => void;
+  handleNewTempSession?: () => void;
   canOpenMultiRun: boolean;
   openMultiRunLauncher: () => void;
   headerActionIconClass: string;
@@ -57,6 +61,7 @@ export function SidebarHeader(props: Props): React.ReactNode {
     hideDirectoryControls,
     handleOpenDirectoryDialog,
     handleNewSession,
+    handleNewTempSession,
     canOpenMultiRun,
     openMultiRunLauncher,
     headerActionIconClass,
@@ -124,19 +129,32 @@ export function SidebarHeader(props: Props): React.ReactNode {
                   <TooltipContent side="bottom" sideOffset={4}><p>{t('sessions.sidebar.header.actions.closeSessions')}</p></TooltipContent>
                 </Tooltip>
               ) : null}
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    type="button"
-                    onClick={handleOpenDirectoryDialog}
-                    className={headerActionButtonClass}
-                    aria-label={t('sessions.sidebar.header.actions.addProject')}
-                  >
-                    <RiFolderAddLine className={headerActionIconClass} />
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent side="bottom" sideOffset={4}><p>{t('sessions.sidebar.header.actions.addProject')}</p></TooltipContent>
-              </Tooltip>
+              <DropdownMenu>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <DropdownMenuTrigger asChild>
+                      <button
+                        type="button"
+                        className={headerActionButtonClass}
+                        aria-label={t('sessions.sidebar.header.actions.addProject')}
+                      >
+                        <RiFolderAddLine className={headerActionIconClass} />
+                      </button>
+                    </DropdownMenuTrigger>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom" sideOffset={4}><p>{t('sessions.sidebar.header.actions.addProject')}</p></TooltipContent>
+                </Tooltip>
+                <DropdownMenuContent align="start" className="min-w-[180px]">
+                  <DropdownMenuItem onClick={handleOpenDirectoryDialog} className="flex items-center gap-2">
+                    <RiFolderLine className="h-4 w-4" />
+                    {t('sessions.sidebar.header.actions.addLocalProject')}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => sessionEvents.requestRemoteDirectoryDialog()} className="flex items-center gap-2">
+                    <RiGlobeLine className="h-4 w-4" />
+                    {t('sessions.sidebar.header.actions.addRemoteProject')}
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
               <Tooltip>
                 <TooltipTrigger asChild>
                   <button
@@ -150,6 +168,22 @@ export function SidebarHeader(props: Props): React.ReactNode {
                 </TooltipTrigger>
                 <TooltipContent side="bottom" sideOffset={4}><p>{t('sessions.sidebar.header.actions.newSession')}</p></TooltipContent>
               </Tooltip>
+
+              {handleNewTempSession ? (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      onClick={handleNewTempSession}
+                      className={headerActionButtonClass}
+                      aria-label={t('sessions.sidebar.header.actions.newTempSession')}
+                    >
+                      <RiFolderLine className={headerActionIconClass} />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom" sideOffset={4}><p>{t('sessions.sidebar.header.actions.newTempSession')}</p></TooltipContent>
+                </Tooltip>
+              ) : null}
 
               <Tooltip>
                 <TooltipTrigger asChild>

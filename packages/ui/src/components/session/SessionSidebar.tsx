@@ -10,7 +10,7 @@ import { isDesktopWindowFullscreen as getDesktopWindowFullscreen, onDesktopWindo
 import { sessionEvents } from '@/lib/sessionEvents';
 import { formatDirectoryName, cn } from '@/lib/utils';
 import { useSessionUIStore } from '@/sync/session-ui-store';
-import { useAllLiveSessions, useAllSessionStatuses } from '@/sync/sync-context';
+import { useAllServersLiveSessions, useAllServersSessionStatuses } from '@/sync/multi-server-hooks';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useSync } from '@/sync/use-sync';
 import { useSessionPrefetch } from './sidebar/hooks/useSessionPrefetch';
@@ -44,11 +44,13 @@ import { SidebarActivitySections } from './sidebar/SidebarActivitySections';
 import { SidebarFooter } from './sidebar/SidebarFooter';
 import { SidebarProjectsList } from './sidebar/SidebarProjectsList';
 import { SessionNodeItem } from './sidebar/SessionNodeItem';
+import { TempSessionsSection, type TempSessionEntry } from './sidebar/TempSessionsSection';
 import { useUpdateStore } from '@/stores/useUpdateStore';
 import { useShallow } from 'zustand/react/shallow';
 import { listProjectWorktrees } from '@/lib/worktrees/worktreeManager';
 import type { WorktreeMetadata } from '@/types/worktree';
 import type { SortableDragHandleProps } from './sidebar/sortableItems';
+import { listTempSessions, deleteTempSession } from '@/lib/tempSessions';
 import {
   BulkSessionDeleteConfirmDialog,
   FolderDeleteConfirmDialog,
@@ -71,7 +73,7 @@ import {
   readActiveNowEntries,
 } from './sidebar/activitySections';
 import {
-  compareSessionsByPinnedAndTime,
+  compareSessions,
   formatProjectLabel,
   normalizePath,
 } from './sidebar/utils';
@@ -86,6 +88,7 @@ const GROUP_COLLAPSE_STORAGE_KEY = 'oc.sessions.groupCollapse';
 const PROJECT_ACTIVE_SESSION_STORAGE_KEY = 'oc.sessions.activeSessionByProject';
 const SESSION_EXPANDED_STORAGE_KEY = 'oc.sessions.expandedParents';
 const SESSION_PINNED_STORAGE_KEY = 'oc.sessions.pinned';
+const SESSION_PINNED_PER_PROJECT_STORAGE_KEY = 'oc.sessions.pinnedByProject';
 
 type PrVisualState = 'draft' | 'open' | 'blocked' | 'merged' | 'closed';
 
@@ -195,6 +198,27 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
       return new Set();
     }
   });
+  const [pinnedSessionIdsByProject, setPinnedSessionIdsByProject] = React.useState<Map<string, Set<string>>>(() => {
+    try {
+      const raw = getSafeStorage().getItem(SESSION_PINNED_PER_PROJECT_STORAGE_KEY);
+      if (!raw) {
+        return new Map();
+      }
+      const parsed = JSON.parse(raw) as Record<string, string[]>;
+      if (typeof parsed !== 'object' || Array.isArray(parsed)) {
+        return new Map();
+      }
+      const map = new Map<string, Set<string>>();
+      for (const [key, ids] of Object.entries(parsed)) {
+        if (Array.isArray(ids)) {
+          map.set(key, new Set(ids.filter((item) => typeof item === 'string')));
+        }
+      }
+      return map;
+    } catch {
+      return new Map();
+    }
+  });
   const [collapsedGroups, setCollapsedGroups] = React.useState<Set<string>>(() => {
     try {
       const raw = getSafeStorage().getItem(GROUP_COLLAPSE_STORAGE_KEY);
@@ -205,6 +229,15 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
       return new Set(Array.isArray(parsed) ? parsed.filter((item) => typeof item === 'string') : []);
     } catch {
       return new Set();
+    }
+  });
+  const [tempSessions, setTempSessions] = React.useState<TempSessionEntry[]>([]);
+  const [tempSessionsCollapsed, setTempSessionsCollapsed] = React.useState(() => {
+    try {
+      const raw = getSafeStorage().getItem('oc.tempSessions.collapsed');
+      return raw === 'true';
+    } catch {
+      return false;
     }
   });
   const [groupOrderByProject, setGroupOrderByProject] = React.useState<Map<string, string[]>>(() => {
@@ -268,9 +301,12 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   const setScheduledTasksDialogOpen = useUIStore((state) => state.setScheduledTasksDialogOpen);
   const toggleSidebar = useUIStore((state) => state.toggleSidebar);
   const openMultiRunLauncher = useUIStore((state) => state.openMultiRunLauncher);
+const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
   const notifyOnSubtasks = useUIStore((state) => state.notifyOnSubtasks);
   const showDeletionDialog = useUIStore((state) => state.showDeletionDialog);
   const setShowDeletionDialog = useUIStore((state) => state.setShowDeletionDialog);
+  const sessionSortMode = useUIStore((state) => state.sessionSortMode);
+  const pinMode = useUIStore((state) => state.pinMode);
 
   const debouncedSessionSearchQuery = useDebouncedValue(sessionSearchQuery, 120);
   const normalizedSessionSearchQuery = React.useMemo(
@@ -305,13 +341,14 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   const gitBranches = useGitAllBranches();
 
   const sync = useSync();
-  const liveSessions = useAllLiveSessions();
-  const liveSessionStatuses = useAllSessionStatuses();
+  const liveSessions = useAllServersLiveSessions();
+  const liveSessionStatuses = useAllServersSessionStatuses();
   const hasLoadedGlobalSessions = useGlobalSessionsStore((state) => state.hasLoaded);
   const globalActiveSessions = useGlobalSessionsStore((state) => state.activeSessions);
   const archivedSessions = useGlobalSessionsStore((state) => state.archivedSessions);
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
   const newSessionDraftOpen = useSessionUIStore((state) => Boolean(state.newSessionDraft?.open));
+  const tempDraftSubmitting = useSessionUIStore((state) => Boolean(state.newSessionDraft?.open && state.newSessionDraft?.preserveDirectoryOverride === false && state.newSessionDraft?.submitting));
   const setCurrentSession = useSessionUIStore((state) => state.setCurrentSession);
   const updateSessionTitle = useSessionUIStore((state) => state.updateSessionTitle);
   const shareSession = useSessionUIStore((state) => state.shareSession);
@@ -352,6 +389,33 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
 
     return merged.filter((session) => isKnownActiveSessionDirectory(session, knownSessionDirectories));
   }, [globalActiveSessions, knownSessionDirectories, liveSessions]);
+
+  const tempSessionsWithSession = React.useMemo<TempSessionEntry[]>(() => {
+    const sessionsByDirectory = new Map<string, Session>();
+    const merged = [...globalActiveSessions, ...liveSessions];
+
+    for (const session of merged) {
+      const directory = resolveGlobalSessionDirectory(session);
+      if (!directory || !directory.includes('/temp-sessions/')) {
+        continue;
+      }
+
+      const existing = sessionsByDirectory.get(directory);
+      const existingTime = existing?.time?.updated ?? existing?.time?.created ?? 0;
+      const nextTime = session.time?.updated ?? session.time?.created ?? 0;
+      if (!existing || nextTime >= existingTime) {
+        sessionsByDirectory.set(directory, session);
+      }
+    }
+
+    return tempSessions.map((entry) => {
+      const normalizedPath = normalizePath(entry.path) ?? entry.path;
+      const session = sessionsByDirectory.get(normalizedPath);
+      return session
+        ? { ...entry, sessionId: session.id, sessionDirectory: normalizedPath }
+        : entry;
+    });
+  }, [globalActiveSessions, liveSessions, tempSessions]);
 
   const syncSessionStructureSignature = React.useMemo(
     () => liveSessions
@@ -438,6 +502,25 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   const isTabletStandalonePwa = useTabletStandalonePwaRuntime();
   const [isDesktopWindowFullscreen, setIsDesktopWindowFullscreen] = React.useState(false);
 
+  React.useEffect(() => {
+    const loadTempSessions = async () => {
+      try {
+        const sessions = await listTempSessions();
+        setTempSessions(sessions);
+      } catch {
+        void 0;
+      }
+    };
+
+    void loadTempSessions();
+
+    const interval = setInterval(() => {
+      void loadTempSessions();
+    }, 30000);
+
+    return () => clearInterval(interval);
+  }, []);
+
   const isVSCode = React.useMemo(() => isVSCodeRuntime(), []);
   const { isTablet } = useDeviceInfo();
   const alwaysShowSidebarActions = mobileVariant || isTablet;
@@ -513,6 +596,20 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     await startDesktopWindowDrag();
   }, [isDesktopShellRuntime]);
 
+  // [2026-05-04] Resolve effective pinned IDs based on pinMode.
+  // When 'global': use the flat global set.
+  // When 'per-project': merge all per-project sets for top-level sorting.
+  const effectivePinnedSessionIds = React.useMemo(() => {
+    if (pinMode === 'global') {
+      return pinnedSessionIds;
+    }
+    const merged = new Set<string>();
+    pinnedSessionIdsByProject.forEach((ids) => {
+      ids.forEach((id) => merged.add(id));
+    });
+    return merged;
+  }, [pinMode, pinnedSessionIds, pinnedSessionIdsByProject]);
+
   const {
     buildGroupSearchText,
     filterSessionNodesForSearch,
@@ -520,7 +617,8 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   } = useSessionGrouping({
     homeDirectory,
     worktreeMetadata,
-    pinnedSessionIds,
+    pinnedSessionIds: effectivePinnedSessionIds,
+    sessionSortMode,
     gitBranches,
     isVSCode,
   });
@@ -547,21 +645,53 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     setCollapsedProjects,
   });
 
-  const togglePinnedSession = React.useCallback((sessionId: string) => {
-    setPinnedSessionIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(sessionId)) {
-        next.delete(sessionId);
-      } else {
-        next.add(sessionId);
-      }
-      return next;
-    });
-  }, []);
+  // [2026-05-04] Persist per-project pins to safeStorage
+  React.useEffect(() => {
+    try {
+      const obj: Record<string, string[]> = {};
+      pinnedSessionIdsByProject.forEach((ids, key) => {
+        obj[key] = Array.from(ids);
+      });
+      getSafeStorage().setItem(SESSION_PINNED_PER_PROJECT_STORAGE_KEY, JSON.stringify(obj));
+    } catch {
+      // ignored
+    }
+  }, [pinnedSessionIdsByProject]);
+
+  const togglePinnedSession = React.useCallback((sessionId: string, projectPath?: string | null) => {
+    if (pinMode === 'per-project' && projectPath) {
+      setPinnedSessionIdsByProject((prev) => {
+        const next = new Map(prev);
+        const existing = next.get(projectPath) ?? new Set<string>();
+        const updated = new Set(existing);
+        if (updated.has(sessionId)) {
+          updated.delete(sessionId);
+        } else {
+          updated.add(sessionId);
+        }
+        if (updated.size === 0) {
+          next.delete(projectPath);
+        } else {
+          next.set(projectPath, updated);
+        }
+        return next;
+      });
+    } else {
+      setPinnedSessionIds((prev) => {
+        const next = new Set(prev);
+        if (next.has(sessionId)) {
+          next.delete(sessionId);
+        } else {
+          next.add(sessionId);
+        }
+        return next;
+      });
+    }
+  }, [pinMode]);
 
   const sortedSessions = React.useMemo(() => {
-    return [...sessions].sort((a, b) => compareSessionsByPinnedAndTime(a, b, pinnedSessionIds));
-  }, [sessions, pinnedSessionIds]);
+    return [...sessions].sort((a, b) => compareSessions(a, b, effectivePinnedSessionIds, sessionSortMode));
+  }, [sessions, effectivePinnedSessionIds, sessionSortMode]);
 
   const sessionOrderIndex = React.useMemo(
     () => new Map(sortedSessions.map((session, index) => [session.id, index])),
@@ -579,9 +709,9 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
       collection.push(session);
       map.set(parentID, collection);
     });
-    map.forEach((list) => list.sort((a, b) => compareSessionsByPinnedAndTime(a, b, pinnedSessionIds)));
+    map.forEach((list) => list.sort((a, b) => compareSessions(a, b, effectivePinnedSessionIds, sessionSortMode)));
     return map;
-  }, [sortedSessions, pinnedSessionIds]);
+  }, [sortedSessions, effectivePinnedSessionIds, sessionSortMode]);
 
   const emptyState = (
     <div className="py-6 text-center text-muted-foreground">
@@ -826,6 +956,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
         color?: string;
         iconImage?: { mime: string; updatedAt: number; source: 'custom' | 'auto' };
         iconBackground?: string;
+        serverId?: string;
       }>;
   }, [projects]);
 
@@ -1009,8 +1140,8 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     }
 
     return deriveActiveNowSessions(activeNowEntries, new Map(sessions.map((session) => [session.id, session])))
-      .sort((a, b) => compareSessionsByPinnedAndTime(a, b, pinnedSessionIds));
-  }, [activeNowEntries, pinnedSessionIds, sessions, showRecentSection]);
+      .sort((a, b) => compareSessions(a, b, effectivePinnedSessionIds, sessionSortMode));
+  }, [activeNowEntries, effectivePinnedSessionIds, sessions, sessionSortMode, showRecentSection]);
 
   const liveActiveSessions = React.useMemo(() => {
     if (!showRecentSection) {
@@ -1624,6 +1755,18 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     openMultiRunLauncher();
   }, [mobileVariant, openMultiRunLauncher, setActiveMainTab, setSessionSwitcherOpen]);
 
+  const handleNewTempSession = React.useCallback(() => {
+    setActiveMainTab('chat');
+    if (mobileVariant) {
+      setSessionSwitcherOpen(false);
+    }
+
+    openNewSessionDraft({ 
+      directoryOverride: null,
+      preserveDirectoryOverride: false,
+    });
+  }, [mobileVariant, openNewSessionDraft, setActiveMainTab, setSessionSwitcherOpen]);
+
   return (
     <div
       ref={sessionSearchContainerRef}
@@ -1662,7 +1805,8 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
         hideDirectoryControls={hideDirectoryControls}
         handleOpenDirectoryDialog={handleOpenDirectoryDialog}
         handleNewSession={handleSidebarNewSession}
-        canOpenMultiRun={projects.length > 0}
+        handleNewTempSession={handleNewTempSession}
+        canOpenMultiRun={multiRunEnabled && projects.length > 0}
         openMultiRunLauncher={handleOpenMultiRunFromHeader}
         headerActionIconClass={headerActionIconClass}
         reserveHeaderActionsSpace={reserveHeaderActionsSpace}
@@ -1733,6 +1877,46 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
           onDone={handleExitSelectionMode}
         />
       ) : null}
+
+      {!hasSessionSearchQuery && (
+        <TempSessionsSection
+          tempSessions={tempSessionsWithSession}
+          currentSessionDirectory={currentDirectory}
+          onSelectTempSession={(session) => {
+            setActiveMainTab('chat');
+            if (!session.sessionId) {
+              toast.error(t('sessions.sidebar.tempSession.unavailable'));
+              return;
+            }
+            setCurrentSession(session.sessionId, session.sessionDirectory ?? session.path);
+            if (mobileVariant) {
+              setSessionSwitcherOpen(false);
+            }
+          }}
+          onArchiveTempSession={async (path) => {
+            try {
+              await deleteTempSession(path);
+              setTempSessions((prev) => prev.filter((s) => s.path !== path));
+            } catch {
+              toast.error(t('sessions.sidebar.tempSession.archiveError'));
+            }
+          }}
+          onCreateTempSession={handleNewTempSession}
+          collapsed={tempSessionsCollapsed}
+          onToggleCollapse={() => {
+            setTempSessionsCollapsed((prev) => {
+              const next = !prev;
+              try {
+                getSafeStorage().setItem('oc.tempSessions.collapsed', String(next));
+              } catch {
+                void 0;
+              }
+              return next;
+            });
+          }}
+          isSubmitting={tempDraftSubmitting}
+        />
+      )}
 
       <SidebarFooter
         onOpenSettings={handleOpenSettings}

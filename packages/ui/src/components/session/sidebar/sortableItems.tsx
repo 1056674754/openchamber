@@ -22,6 +22,8 @@ import { cn } from '@/lib/utils';
 import { PROJECT_COLOR_MAP, PROJECT_ICON_MAP, getProjectIconImageUrl } from '@/lib/projectMeta';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useI18n } from '@/lib/i18n';
+import { serverRegistry } from '@/lib/opencode/server-registry';
+import { useDesktopSshStore } from '@/stores/useDesktopSshStore';
 
 export interface SortableProjectItemProps {
   id: string;
@@ -50,6 +52,8 @@ export interface SortableProjectItemProps {
   hideHeader?: boolean;
   openSidebarMenuKey: string | null;
   setOpenSidebarMenuKey: (key: string | null) => void;
+  serverId?: string;
+  serverHealthStatus?: 'healthy' | 'unhealthy' | 'connecting' | null;
 }
 
 export type SortableDragHandleProps = {
@@ -83,9 +87,31 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
   hideHeader = false,
   openSidebarMenuKey,
   setOpenSidebarMenuKey,
+  serverId,
+  serverHealthStatus,
 }) => {
   const { t } = useI18n();
   const { currentTheme } = useThemeSystem();
+  const sshInstance = useDesktopSshStore((state) => serverId ? state.instances.find((entry) => entry.id === serverId) : undefined);
+  const sshStatus = useDesktopSshStore((state) => serverId ? state.statusesById[serverId] : undefined);
+  const serverLabel = serverId
+    ? serverRegistry.getServerLabel(serverId) || sshInstance?.nickname || sshInstance?.sshCommand || serverId
+    : undefined;
+  const effectiveServerHealthStatus = serverHealthStatus
+    || (sshStatus?.phase === 'ready'
+      ? 'healthy'
+      : sshStatus?.phase === 'error'
+        ? 'unhealthy'
+        : sshStatus && sshStatus.phase !== 'idle'
+          ? 'connecting'
+          : null);
+  const dotColor = effectiveServerHealthStatus === 'healthy'
+    ? currentTheme.colors.status.success
+    : effectiveServerHealthStatus === 'unhealthy'
+      ? currentTheme.colors.status.error
+      : effectiveServerHealthStatus === 'connecting'
+        ? currentTheme.colors.status.warning
+        : currentTheme.colors.surface.subtle;
   const {
     attributes,
     listeners,
@@ -216,6 +242,19 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
                     )}>
                       {projectLabel}
                     </span>
+                    {serverId && (
+                      <span className="inline-flex items-center gap-1 flex-shrink-0">
+                        <span
+                          className="h-1.5 w-1.5 rounded-full flex-shrink-0"
+                          style={{ backgroundColor: dotColor, transition: 'background-color 0.2s' }}
+                        />
+                        {serverId !== 'default' && (
+                          <span className="text-[10px] leading-none text-muted-foreground max-w-[80px] truncate">
+                            {serverLabel}
+                          </span>
+                        )}
+                      </span>
+                    )}
                   </button>
                 </TooltipTrigger>
                 <TooltipContent side="right" sideOffset={8}>

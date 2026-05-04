@@ -40,6 +40,7 @@ import {
 } from '@/lib/projectActions';
 import { detectDevServerCommand, readPackageJsonScripts } from '@/lib/detectDevServer';
 import { connectTerminalStream } from '@/lib/terminalApi';
+import { useActiveServerBaseUrl, useActiveServerId } from '@/hooks/useActiveServerId';
 
 type UrlWatchEntry = {
   lastSeenChunkId: number | null;
@@ -187,6 +188,8 @@ export const ProjectActionsButton = ({
   const isDesktopShellApp = React.useMemo(() => isDesktopShell(), []);
   const desktopSshInstances = useDesktopSshStore((state) => state.instances);
   const loadDesktopSsh = useDesktopSshStore((state) => state.load);
+  const activeServerId = useActiveServerId();
+  const activeServerBaseUrl = useActiveServerBaseUrl();
 
   const setBottomTerminalOpen = useUIStore((state) => state.setBottomTerminalOpen);
   const setActiveMainTab = useUIStore((state) => state.setActiveMainTab);
@@ -419,10 +422,10 @@ export const ProjectActionsButton = ({
     }
 
     const key = toProjectActionRunKey(normalizedDirectory, action.id);
-    ensureDirectory(normalizedDirectory);
+    ensureDirectory(normalizedDirectory, activeServerId);
 
     const currentStore = useTerminalStore.getState();
-    const existingDirectoryState = currentStore.getDirectoryState(normalizedDirectory);
+    const existingDirectoryState = currentStore.getDirectoryState(normalizedDirectory, activeServerId);
 
     let tabId = tabByKeyRef.current[key] || null;
     const hasTab = tabId
@@ -430,19 +433,19 @@ export const ProjectActionsButton = ({
       : false;
 
     if (!tabId || !hasTab) {
-      tabId = currentStore.createTab(normalizedDirectory);
+      tabId = currentStore.createTab(normalizedDirectory, activeServerId);
       tabByKeyRef.current[key] = tabId;
     }
 
-    setTabLabel(normalizedDirectory, tabId, `Action: ${action.name}`);
-    setTabIconKey(normalizedDirectory, tabId, action.icon || 'play');
+    setTabLabel(normalizedDirectory, tabId, `Action: ${action.name}`, activeServerId);
+    setTabIconKey(normalizedDirectory, tabId, action.icon || 'play', activeServerId);
     if (options.revealTerminal !== false) {
-      setActiveTab(normalizedDirectory, tabId);
+      setActiveTab(normalizedDirectory, tabId, activeServerId);
       setBottomTerminalOpen(true);
       setActiveMainTab('terminal');
     }
 
-    const stateAfterTab = useTerminalStore.getState().getDirectoryState(normalizedDirectory);
+    const stateAfterTab = useTerminalStore.getState().getDirectoryState(normalizedDirectory, activeServerId);
     const tab = stateAfterTab?.tabs.find((entry) => entry.id === tabId);
     return {
       key,
@@ -450,6 +453,7 @@ export const ProjectActionsButton = ({
       sessionId: tab?.terminalSessionId ?? null,
     };
   }, [
+    activeServerId,
     ensureDirectory,
     normalizedDirectory,
     setActiveMainTab,
@@ -525,16 +529,16 @@ export const ProjectActionsButton = ({
 
       if (discovered.id === AUTO_DISCOVER_ACTION_ID) {
         streamCleanupByRunKeyRef.current[key]?.();
-        setConnecting(normalizedDirectory, tabId, true);
+        setConnecting(normalizedDirectory, tabId, true, activeServerId);
         streamCleanupByRunKeyRef.current[key] = connectTerminalStream(
           activeSessionId,
           (event) => {
             if (event.type === 'data' && typeof event.data === 'string' && event.data.length > 0) {
-              useTerminalStore.getState().appendToBuffer(normalizedDirectory, tabId, event.data);
+              useTerminalStore.getState().appendToBuffer(normalizedDirectory, tabId, event.data, activeServerId);
             }
             if (event.type === 'exit') {
-              useTerminalStore.getState().setTabLifecycle(normalizedDirectory, tabId, 'exited');
-              useTerminalStore.getState().setConnecting(normalizedDirectory, tabId, false);
+              useTerminalStore.getState().setTabLifecycle(normalizedDirectory, tabId, 'exited', activeServerId);
+              useTerminalStore.getState().setConnecting(normalizedDirectory, tabId, false, activeServerId);
               useTerminalStore.getState().removeProjectActionRun(key);
               delete urlWatchByRunKeyRef.current[key];
               streamCleanupByRunKeyRef.current[key]?.();
@@ -544,9 +548,10 @@ export const ProjectActionsButton = ({
             }
           },
           () => {
-            useTerminalStore.getState().setConnecting(normalizedDirectory, tabId, false);
+            useTerminalStore.getState().setConnecting(normalizedDirectory, tabId, false, activeServerId);
           },
           { maxRetries: 60, initialRetryDelay: 250, maxRetryDelay: 2000, connectionTimeout: 5000 },
+          activeServerBaseUrl || undefined,
         );
       }
 
@@ -612,6 +617,8 @@ export const ProjectActionsButton = ({
       toast.error(error instanceof Error ? error.message : t('projectActions.error.failedToRunAction'));
     }
   }, [
+    activeServerBaseUrl,
+    activeServerId,
     desktopSshInstances,
     getOrCreateActionTab,
     allowMobile,
@@ -651,26 +658,27 @@ export const ProjectActionsButton = ({
       window.setTimeout(resolve, 1000);
     });
 
-    const afterTab = useTerminalStore.getState().getDirectoryState(activeRun.directory)?.tabs
+    const afterTab = useTerminalStore.getState().getDirectoryState(activeRun.directory, activeServerId)?.tabs
       .find((entry) => entry.id === activeRun.tabId);
 
     const sessionStillSame = afterTab?.terminalSessionId === activeRun.sessionId;
 
     if (sessionStillSame) {
+      const baseUrl = activeServerBaseUrl || undefined;
       if (typeof terminal.forceKill === 'function') {
         try {
-          await terminal.forceKill({ sessionId: activeRun.sessionId });
+          await terminal.forceKill({ sessionId: activeRun.sessionId, baseUrl });
         } catch {
           // noop
         }
       } else {
         try {
-          await terminal.close(activeRun.sessionId);
+          await terminal.close(activeRun.sessionId, baseUrl);
         } catch {
           // noop
         }
       }
-      setTabSessionId(activeRun.directory, activeRun.tabId, null);
+      setTabSessionId(activeRun.directory, activeRun.tabId, null, activeServerId);
     }
 
     removeProjectActionRun(runKey);
@@ -679,7 +687,7 @@ export const ProjectActionsButton = ({
     delete streamCleanupByRunKeyRef.current[runKey];
     window.clearTimeout(previewWaitTimeoutByRunKeyRef.current[runKey]);
     delete previewWaitTimeoutByRunKeyRef.current[runKey];
-  }, [normalizedDirectory, projectActionRuns, removeProjectActionRun, setTabSessionId, terminal, updateProjectActionRunStatus]);
+  }, [activeServerBaseUrl, activeServerId, normalizedDirectory, projectActionRuns, removeProjectActionRun, setTabSessionId, terminal, updateProjectActionRunStatus]);
 
   const handlePrimaryClick = React.useCallback(() => {
     const action = selectedAction ?? displayActions[0];

@@ -211,6 +211,7 @@ const areEqual = (prev: Props, next: Props): boolean => {
   if (prev.alwaysShowActions !== next.alwaysShowActions) return false;
   if ((prev.renderContext ?? 'project') !== (next.renderContext ?? 'project')) return false;
   if (prev.renamingFolderId !== next.renamingFolderId) return false;
+  if (prev.renderSessionNode !== next.renderSessionNode) return false;
 
   return true;
 };
@@ -526,12 +527,13 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
         }
       }}
       className={cn(
-        'absolute left-[-10px] inline-flex h-3.5 w-3.5 items-center justify-center rounded-md text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 transition-opacity',
+        'absolute inline-flex h-3.5 w-3.5 items-center justify-center rounded-md text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 transition-opacity',
         isMinimalMode ? 'top-1/2 -translate-y-1/2' : 'top-[14.5px] -translate-y-1/2',
         isMinimalMode && showStatusMarker && !alwaysShowActions
           ? 'opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto'
           : '',
       )}
+      style={{ left: `${(depth > 0 ? depth * 16 + 4 : 6) - 16}px` }}
       aria-label={isExpanded
         ? t('sessions.sidebar.session.subsessions.collapse')
         : t('sessions.sidebar.session.subsessions.expand')}
@@ -719,9 +721,9 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
           className={cn(
             'group relative my-0.5 flex items-center rounded-sm px-1.5 py-1',
             isMissingDirectory ? 'opacity-75' : '',
-            depth > 0 && 'pl-[20px]',
             isRowSelected && 'bg-primary/15',
           )}
+          style={depth > 0 ? { paddingLeft: `${depth * 16 + 4}px` } : undefined}
         >
           {leadingIndicators}
           {subsessionChevron}

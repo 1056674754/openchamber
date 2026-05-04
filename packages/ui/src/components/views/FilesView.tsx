@@ -85,6 +85,7 @@ import { openDesktopFileInApp, openDesktopPath } from '@/lib/desktop';
 import { useOpenInAppsStore } from '@/stores/useOpenInAppsStore';
 import { eventMatchesShortcut, getEffectiveShortcutCombo } from '@/lib/shortcuts';
 import { useI18n } from '@/lib/i18n';
+import { useActiveServerBaseUrl } from '@/hooks/useActiveServerId';
 
 type FileNode = {
   name: string;
@@ -498,6 +499,7 @@ interface FilesViewProps {
 export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   const { t } = useI18n();
   const { files, runtime } = useRuntimeAPIs();
+  const serverBaseUrl = useActiveServerBaseUrl();
   const { currentTheme, availableThemes, lightThemeId, darkThemeId } = useThemeSystem();
   const { isMobile, isTablet, screenWidth } = useDeviceInfo();
   const alwaysShowActions = isMobile || isTablet;
@@ -886,17 +888,32 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     inFlightDirsRef.current.add(normalizedDir);
 
     const respectGitignore = !showGitignored;
-    const listPromise = runtime.isDesktop
-      ? files.listDirectory(normalizedDir, { respectGitignore }).then((result) => result.entries.map((entry) => ({
+    let listPromise: Promise<Array<{ name: string; path: string; isDirectory: boolean }>>;
+
+    if (runtime.isDesktop && !serverBaseUrl) {
+      listPromise = files.listDirectory(normalizedDir, { respectGitignore }).then((result) => result.entries.map((entry) => ({
         name: entry.name,
         path: entry.path,
-        isDirectory: entry.isDirectory,
-      })))
-      : opencodeClient.listLocalDirectory(normalizedDir, { respectGitignore }).then((result) => result.map((entry) => ({
-        name: entry.name,
-        path: entry.path,
-        isDirectory: entry.isDirectory,
+        isDirectory: !!entry.isDirectory,
       })));
+    } else if (!serverBaseUrl) {
+      listPromise = opencodeClient.listLocalDirectory(normalizedDir, { respectGitignore }).then((result) => result.map((entry) => ({
+        name: entry.name,
+        path: entry.path,
+        isDirectory: !!entry.isDirectory,
+      })));
+    } else {
+      listPromise = fetch(`${serverBaseUrl}/api/fs/list?path=${encodeURIComponent(normalizedDir)}&respectGitignore=${respectGitignore ? 'false' : 'true'}`)
+        .then((response) => {
+          if (!response.ok) throw new Error(`Failed to list directory: ${response.status}`);
+          return response.json() as Promise<{ entries: Array<{ name: string; path: string; isDirectory: boolean; isFile: boolean }> }>;
+        })
+        .then((data) => data.entries.map((entry) => ({
+          name: entry.name,
+          path: entry.path,
+          isDirectory: entry.isDirectory,
+        })));
+    }
 
     await listPromise
       .then((entries) => {
@@ -916,7 +933,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
         inFlightDirsRef.current = new Set(inFlightDirsRef.current);
         inFlightDirsRef.current.delete(normalizedDir);
       });
-  }, [files, mapDirectoryEntries, runtime.isDesktop, showGitignored]);
+  }, [files, mapDirectoryEntries, runtime.isDesktop, serverBaseUrl, showGitignored]);
 
   const refreshRoot = React.useCallback(async () => {
     if (!root) {
@@ -987,7 +1004,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
 
   // Auto-refresh expanded directories when user returns to the tab
   React.useEffect(() => {
-    if (!files.listDirectory) return;
+    if (!files.listDirectory && !serverBaseUrl) return;
 
     const handleVisibilityChange = () => {
       if (!document.hidden && expandedPaths.length > 0) {
@@ -999,11 +1016,11 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
 
     document.addEventListener('visibilitychange', handleVisibilityChange);
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
-  }, [expandedPaths, files.listDirectory, refreshDirectory]);
+  }, [expandedPaths, files.listDirectory, refreshDirectory, serverBaseUrl]);
 
   // Poll expanded directories for external changes
   React.useEffect(() => {
-    if (!files.listDirectory) return;
+    if (!files.listDirectory && !serverBaseUrl) return;
     if (expandedPaths.length === 0) return;
 
     const interval = setInterval(() => {
@@ -1014,7 +1031,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     }, 8000);
 
     return () => clearInterval(interval);
-  }, [expandedPaths, files.listDirectory, refreshDirectory]);
+  }, [expandedPaths, files.listDirectory, refreshDirectory, serverBaseUrl]);
 
   const handleDialogSubmit = React.useCallback(async (e?: React.FormEvent) => {
     e?.preventDefault();
@@ -1226,7 +1243,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   }, [currentDirectory, debouncedSearchQuery, searchFiles, showHidden, showGitignored]);
 
   const readFile = React.useCallback(async (path: string, options?: { allowOutsideWorkspace?: boolean; optional?: boolean }): Promise<string> => {
-    if (files.readFile) {
+    if (files.readFile && !serverBaseUrl) {
       const result = await files.readFile(path, options);
       return result.content ?? '';
     }
@@ -1238,7 +1255,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     if (options?.optional) {
       params.set('optional', 'true');
     }
-    const response = await fetch(`/api/fs/read?${params.toString()}`, {
+    const response = await fetch(`${serverBaseUrl}/api/fs/read?${params.toString()}`, {
       // Avoid conditional requests (304 + empty body).
       cache: options?.optional ? 'no-store' : 'default',
     });
@@ -1247,7 +1264,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
       throw new Error((error as { error?: string }).error || t('filesView.error.readFileFailed'));
     }
     return response.text();
-  }, [files, t]);
+  }, [files, serverBaseUrl, t]);
 
   const readFileStat = React.useCallback(async (path: string, options?: { allowOutsideWorkspace?: boolean }): Promise<FileStatSnapshot | null> => {
     if (files.statFile) {
@@ -2315,13 +2332,13 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   );
 
   const imageSrc = selectedFile?.path && isSelectedImage
-    ? (runtime.isDesktop
+    ? (runtime.isDesktop && !serverBaseUrl
       ? (isSelectedSvg
         ? `data:${getImageMimeType(selectedFile.path)};utf8,${encodeURIComponent(fileContent)}`
         : desktopImageSrc)
       : (isSelectedSvg
         ? `data:${getImageMimeType(selectedFile.path)};utf8,${encodeURIComponent(fileContent)}`
-        : `/api/fs/raw?${new URLSearchParams({
+        : `${serverBaseUrl}/api/fs/raw?${new URLSearchParams({
           path: selectedFile.path,
           ...(selectedFileReadOptions.allowOutsideWorkspace ? { allowOutsideWorkspace: 'true' } : {}),
         }).toString()}`))
@@ -2334,7 +2351,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     let cancelled = false;
 
     const resolveDesktopImage = async () => {
-      if (!runtime.isDesktop || !selectedFile?.path || !isSelectedImage || isSelectedSvg) {
+      if (!runtime.isDesktop || serverBaseUrl || !selectedFile?.path || !isSelectedImage || isSelectedSvg) {
         setDesktopImageSrc('');
         return;
       }
@@ -2371,7 +2388,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     return () => {
       cancelled = true;
     };
-  }, [files, isSelectedImage, isSelectedSvg, runtime.isDesktop, selectedFile?.path, selectedFileReadOptions, t]);
+  }, [files, isSelectedImage, isSelectedSvg, runtime.isDesktop, selectedFile?.path, selectedFileReadOptions, serverBaseUrl, t]);
 
   const renderDialogs = () => (
     <Dialog open={!!activeDialog} onOpenChange={(open) => !open && setActiveDialog(null)}>

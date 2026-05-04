@@ -1,6 +1,7 @@
 import React from 'react';
 import type { Session } from '@opencode-ai/sdk/v2';
 import type { SessionSummaryMeta } from './types';
+import type { SessionSortMode } from '@/stores/useUIStore';
 
 const formatDateLabel = (value: string | number) => {
   const targetDate = new Date(value);
@@ -145,6 +146,18 @@ export const compareSessionsByPinnedAndCreated = (
   }
 
   return getSessionCreatedAt(b) - getSessionCreatedAt(a);
+};
+
+export const compareSessions = (
+  a: Session,
+  b: Session,
+  pinnedSessionIds: Set<string>,
+  sortMode: SessionSortMode,
+): number => {
+  if (sortMode === 'created-desc') {
+    return compareSessionsByPinnedAndCreated(a, b, pinnedSessionIds);
+  }
+  return compareSessionsByPinnedAndTime(a, b, pinnedSessionIds);
 };
 
 export const dedupeSessionsById = (sessions: Session[]): Session[] => {

@@ -9,7 +9,7 @@ interface FileState {
 
 interface FileActions {
     addAttachedFile: (file: File) => Promise<void>;
-    addServerFile: (path: string, name: string, content?: string) => Promise<void>;
+    addServerFile: (path: string, name: string, content?: string, options?: { baseUrl?: string }) => Promise<void>;
     removeAttachedFile: (id: string) => void;
     clearAttachedFiles: () => void;
 }
@@ -102,8 +102,8 @@ const toFileUrl = (inputPath: string): string => {
     return `file://${encodeURI(withLeadingSlash)}`;
 };
 
-const readRawFileAsDataUrl = async (absolutePath: string): Promise<string> => {
-    const response = await fetch(`/api/fs/raw?path=${encodeURIComponent(absolutePath)}`);
+const readRawFileAsDataUrl = async (absolutePath: string, baseUrl: string = ''): Promise<string> => {
+    const response = await fetch(`${baseUrl}/api/fs/raw?path=${encodeURIComponent(absolutePath)}`);
     if (!response.ok) {
         throw new Error(`Failed to read raw file: ${response.status}`);
     }
@@ -194,8 +194,8 @@ export const useFileStore = create<FileStore>()(
                         }));
                 },
 
-                addServerFile: async (path: string, name: string, content?: string) => {
-
+                addServerFile: async (path: string, name: string, content?: string, options?: { baseUrl?: string }) => {
+                        const baseUrl = options?.baseUrl ?? '';
                         const normalizedPath = normalizeServerPath(path);
                         const { attachedFiles } = get();
                         const isDuplicate = attachedFiles.some((f) => normalizeServerPath(f.serverPath || "") === normalizedPath && f.source === "server");
@@ -212,7 +212,7 @@ export const useFileStore = create<FileStore>()(
                         let dataUrl = toFileUrl(normalizedPath);
                         if (shouldInlineBinary) {
                             try {
-                                dataUrl = await readRawFileAsDataUrl(normalizedPath);
+                                dataUrl = await readRawFileAsDataUrl(normalizedPath, baseUrl);
                             } catch (error) {
                                 console.warn("Failed to inline binary server file, falling back to file://", error);
                             }

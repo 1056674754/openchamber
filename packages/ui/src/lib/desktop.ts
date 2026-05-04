@@ -130,6 +130,8 @@ export type DesktopSettings = {
   chatRenderMode?: 'sorted' | 'live';
   messageStreamTransport?: 'auto' | 'ws' | 'sse';
   activityRenderMode?: 'collapsed' | 'summary';
+  sessionSortMode?: 'updated-desc' | 'created-desc';
+  pinMode?: 'global' | 'per-project';
   mermaidRenderingMode?: 'svg' | 'ascii';
   userMessageRenderingMode?: 'markdown' | 'plain';
   stickyUserHeader?: boolean;
@@ -164,6 +166,7 @@ export type DesktopSettings = {
   responseStyleEnabled?: boolean;
   responseStylePreset?: 'concise' | 'detailed' | 'mentor' | 'pushback' | 'noFiller' | 'matchEnergy' | 'warmPeer' | 'custom';
   responseStyleCustomInstructions?: string;
+  multiRunEnabled?: boolean;
 };
 
 type TauriGlobal = {
