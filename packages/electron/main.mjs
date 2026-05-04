@@ -2399,6 +2399,22 @@ app.whenReady().then(async () => {
   const { initialUrl, localOrigin, bootOutcome } = await resolveInitialUrl();
   await activateMainWindow(initialUrl, localOrigin, bootOutcome);
 
+  // Auto-connect all configured SSH instances in parallel.
+  // The sshManager handles dedup, reconnection, and health monitoring.
+  try {
+    const sshInstances = sshManager.readInstances();
+    if (sshInstances.instances.length > 0) {
+      log.info('[electron] auto-connecting SSH instances', { count: sshInstances.instances.length });
+      for (const instance of sshInstances.instances) {
+        sshManager.connect(instance.id).catch((err) => {
+          log.warn('[electron] auto-connect SSH failed', { id: instance.id, error: String(err) });
+        });
+      }
+    }
+  } catch (err) {
+    log.warn('[electron] SSH auto-connect setup failed:', err);
+  }
+
   // Notify renderer on OS wake-from-sleep so the SSE event pipeline can
   // reconnect immediately instead of waiting for the heartbeat watchdog.
   powerMonitor.on('resume', () => {

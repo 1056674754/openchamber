@@ -425,6 +425,8 @@ export class ElectronSshManager {
     this.reconnectAttempts = new Map();
     this.connectAttempts = new Map();
     this.connecting = new Map();
+    this.cancelled = new Set();
+    this.connectionGenerations = new Map();
   }
 
   appendLogWithLevel(id, level, message) {
@@ -503,6 +505,38 @@ export class ElectronSshManager {
     const next = (this.connectAttempts.get(id) || 0) + 1;
     this.connectAttempts.set(id, next);
     return next;
+  }
+
+  nextConnectionGeneration(id) {
+    const next = (this.connectionGenerations.get(id) || 0) + 1;
+    this.connectionGenerations.set(id, next);
+    return next;
+  }
+
+  assertConnectionActive(id, generation) {
+    if (this.cancelled.has(id) || this.connectionGenerations.get(id) !== generation) {
+      const error = new Error('SSH connection cancelled');
+      error.code = 'ERR_SSH_CONNECTION_CANCELLED';
+      throw error;
+    }
+  }
+
+  scheduleReconnect(id, detail) {
+    const attempt = this.nextRetryAttempt(id);
+    if (attempt > DEFAULT_RECONNECT_MAX_ATTEMPTS) {
+      this.setStatus(id, 'error', `${detail}. Retry limit reached`, null, null, null, false, attempt, true);
+      return;
+    }
+
+    const delayMs = Math.min((2 ** Math.max(attempt - 1, 0)) * 1000 + (nowMillis() % 700) + 100, 30000);
+    this.setStatus(id, 'degraded', `${detail}. Retrying`, null, null, null, false, attempt, false);
+    const existing = this.monitorTimers.get(id);
+    if (existing) clearTimeout(existing);
+    this.monitorTimers.set(id, setTimeout(() => {
+      this.monitorTimers.delete(id);
+      if (this.cancelled.has(id)) return;
+      void this.connect(id).catch(() => {});
+    }, delayMs));
   }
 
   logsForInstance(id, limit = 200) {
@@ -847,7 +881,7 @@ export class ElectronSshManager {
   async probeRemoteSystemInfo(parsed, controlPath, port, openchamberPassword) {
     const authPayload = openchamberPassword ? JSON.stringify({ password: openchamberPassword }) : '{}';
     const authEnabled = openchamberPassword ? '1' : '0';
-    const script = `AUTH_STATUS=0; INFO_STATUS=0; HEALTH_STATUS=0; BODY_FILE="$(mktemp)"; COOKIE_FILE="$(mktemp)"; cleanup(){ rm -f "$BODY_FILE" "$COOKIE_FILE"; }; trap cleanup EXIT; if command -v curl >/dev/null 2>&1; then if [ "${authEnabled}" = "1" ]; then AUTH_STATUS="$(curl -sS --max-time 3 -o /dev/null -w '%{http_code}' -c "$COOKIE_FILE" -H 'content-type: application/json' --data ${shellQuote(authPayload)} http://127.0.0.1:${port}/auth/session || true)"; if [ "$AUTH_STATUS" = "200" ]; then INFO_STATUS="$(curl -sS --max-time 3 -b "$COOKIE_FILE" -o "$BODY_FILE" -w '%{http_code}' http://127.0.0.1:${port}/api/system/info || true)"; else INFO_STATUS="$(curl -sS --max-time 3 -o "$BODY_FILE" -w '%{http_code}' http://127.0.0.1:${port}/api/system/info || true)"; fi; else INFO_STATUS="$(curl -sS --max-time 3 -o "$BODY_FILE" -w '%{http_code}' http://127.0.0.1:${port}/api/system/info || true)"; fi; HEALTH_STATUS="$(curl -sS --max-time 3 -o /dev/null -w '%{http_code}' http://127.0.0.1:${port}/health || true)"; elif command -v wget >/dev/null 2>&1; then wget -qO "$BODY_FILE" http://127.0.0.1:${port}/api/system/info >/dev/null 2>&1; if [ $? -eq 0 ]; then INFO_STATUS=200; fi; wget -qO- http://127.0.0.1:${port}/health >/dev/null 2>&1; if [ $? -eq 0 ]; then HEALTH_STATUS=200; fi; else exit 127; fi; printf 'INFO_STATUS=%s\\nAUTH_STATUS=%s\\nHEALTH_STATUS=%s\\n' "$INFO_STATUS" "$AUTH_STATUS" "$HEALTH_STATUS"; cat "$BODY_FILE" 2>/dev/null || true`;
+    const script = `AUTH_STATUS=0; INFO_STATUS=0; HEALTH_STATUS=0; BODY_FILE="$(mktemp)"; COOKIE_FILE="$(mktemp)"; cleanup(){ rm -f "$BODY_FILE" "$COOKIE_FILE"; }; trap cleanup EXIT; if command -v curl >/dev/null 2>&1; then CURL="curl --noproxy '*' -sS --max-time 3"; if [ "${authEnabled}" = "1" ]; then AUTH_STATUS="$($CURL -o /dev/null -w '%{http_code}' -c "$COOKIE_FILE" -H 'content-type: application/json' --data ${shellQuote(authPayload)} http://127.0.0.1:${port}/auth/session || true)"; if [ "$AUTH_STATUS" = "200" ]; then INFO_STATUS="$($CURL -b "$COOKIE_FILE" -o "$BODY_FILE" -w '%{http_code}' http://127.0.0.1:${port}/api/system/info || true)"; else INFO_STATUS="$($CURL -o "$BODY_FILE" -w '%{http_code}' http://127.0.0.1:${port}/api/system/info || true)"; fi; else INFO_STATUS="$($CURL -o "$BODY_FILE" -w '%{http_code}' http://127.0.0.1:${port}/api/system/info || true)"; fi; HEALTH_STATUS="$($CURL -o /dev/null -w '%{http_code}' http://127.0.0.1:${port}/health || true)"; elif command -v wget >/dev/null 2>&1; then env -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PROXY wget -qO "$BODY_FILE" http://127.0.0.1:${port}/api/system/info >/dev/null 2>&1; if [ $? -eq 0 ]; then INFO_STATUS=200; fi; env -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PROXY wget -qO- http://127.0.0.1:${port}/health >/dev/null 2>&1; if [ $? -eq 0 ]; then HEALTH_STATUS=200; fi; else exit 127; fi; printf 'INFO_STATUS=%s\\nAUTH_STATUS=%s\\nHEALTH_STATUS=%s\\n' "$INFO_STATUS" "$AUTH_STATUS" "$HEALTH_STATUS"; cat "$BODY_FILE" 2>/dev/null || true`;
     const output = await runRemoteCommand(parsed, controlPath, script);
     const lines = output.split(/\r?\n/);
     const infoStatus = parseProbeStatusLine(lines[0], 'INFO_STATUS=') || 0;
@@ -977,6 +1011,12 @@ export class ElectronSshManager {
   }
 
   async disconnectInternal(id, reportIdle) {
+    if (reportIdle) {
+      this.cancelled.add(id);
+      this.nextConnectionGeneration(id);
+      this.connecting.delete(id);
+    }
+
     const timer = this.monitorTimers.get(id);
     if (timer) {
       clearTimeout(timer);
@@ -1007,17 +1047,19 @@ export class ElectronSshManager {
       }
     }
 
-    this.clearRetryAttempt(id);
     if (reportIdle) {
+      this.clearRetryAttempt(id);
       this.setStatus(id, 'idle', null, null, null, null, false, 0, false);
     }
   }
 
-  async connectBlocking(instance) {
+  async connectBlocking(instance, generation) {
     const id = instance.id;
+    this.assertConnectionActive(id, generation);
     this.setStatus(id, 'config_resolved', 'Resolving SSH command');
     const parsed = instance.sshParsed || parseSshCommand(instance.sshCommand);
     await this.resolveSshConfig(parsed);
+    this.assertConnectionActive(id, generation);
 
     this.setStatus(id, 'auth_check', 'Checking SSH connectivity');
     const sessionDir = this.ensureSessionDir(id);
@@ -1030,15 +1072,18 @@ export class ElectronSshManager {
     const sshPassword = instance.auth?.sshPassword?.enabled ? instance.auth.sshPassword.value : null;
     const master = await this.spawnMasterProcess(parsed, controlPath, askpassPath, sshPassword);
     await this.waitForMasterReady(parsed, controlPath, instance.connectionTimeoutSec || DEFAULT_CONNECTION_TIMEOUT_SEC, master);
+    this.assertConnectionActive(id, generation);
 
     this.setStatus(id, 'remote_probe', 'Probing remote platform');
     const remoteOs = (await runRemoteCommand(parsed, controlPath, 'uname -s', instance.connectionTimeoutSec || DEFAULT_CONNECTION_TIMEOUT_SEC)).trim().toLowerCase();
+    this.assertConnectionActive(id, generation);
     if (!['linux', 'darwin'].includes(remoteOs)) {
       master.kill('SIGTERM');
       throw new Error(`Unsupported remote OS: ${remoteOs}`);
     }
 
     const { remotePort, startedByUs } = await this.ensureRemoteServer(instance, parsed, controlPath);
+    this.assertConnectionActive(id, generation);
     this.setStatus(id, 'forwarding', 'Setting up port forwards', null, null, remotePort, startedByUs, 0, false);
 
     const bindHost = sanitizeBindHost(instance.localForward?.bindHost);
@@ -1053,6 +1098,7 @@ export class ElectronSshManager {
     const mainForward = await this.spawnMainForward(parsed, controlPath, bindHost, localPort, remotePort);
     let mainForwardDetached = false;
     await new Promise((resolve) => setTimeout(resolve, 250));
+    this.assertConnectionActive(id, generation);
     if (typeof mainForward.exitCode === 'number') {
       if (mainForward.exitCode === 0) {
         mainForwardDetached = true;
@@ -1079,6 +1125,7 @@ export class ElectronSshManager {
     }
 
     await waitLocalForwardReady(localPort);
+    this.assertConnectionActive(id, generation);
 
     const localUrl = `http://127.0.0.1:${localPort}`;
     const label = instance.nickname?.trim() || parsed.destination || id;
@@ -1086,6 +1133,7 @@ export class ElectronSshManager {
     if (instance.localForward?.preferredLocalPort !== localPort) {
       await this.persistLocalPort(id, localPort);
     }
+    this.assertConnectionActive(id, generation);
 
     this.sessions.set(id, {
       instance,
@@ -1178,7 +1226,7 @@ export class ElectronSshManager {
       try {
         await this.connect(id);
       } catch (error) {
-        this.setStatus(id, 'error', error instanceof Error ? error.message : String(error), null, null, null, false, attempt, true);
+        this.scheduleReconnect(id, error instanceof Error ? error.message : String(error));
       }
     };
     this.monitorTimers.set(id, setTimeout(tick, MONITOR_INITIAL_POLL_MS));
@@ -1205,12 +1253,17 @@ export class ElectronSshManager {
     this.appendAttemptSeparator(trimmed, connectAttempt, retryAttempt);
     this.appendLog(trimmed, 'Starting SSH connection');
     await this.disconnectInternal(trimmed, false);
+    this.cancelled.delete(trimmed);
+    const generation = this.nextConnectionGeneration(trimmed);
 
-    const task = this.connectBlocking(this.sanitizeInstance(instance))
+    const task = this.connectBlocking(this.sanitizeInstance(instance), generation)
       .catch(async (error) => {
-        this.setStatus(trimmed, 'error', error instanceof Error ? error.message : String(error), null, null, null, false, 0, true);
+        if (error?.code === 'ERR_SSH_CONNECTION_CANCELLED' || this.cancelled.has(trimmed)) {
+          return;
+        }
+        const detail = error instanceof Error ? error.message : String(error);
         await this.disconnectInternal(trimmed, false);
-        throw error;
+        this.scheduleReconnect(trimmed, detail);
       })
       .finally(() => {
         this.connecting.delete(trimmed);
