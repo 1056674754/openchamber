@@ -28,6 +28,7 @@ type ProjectSection = {
     iconImage?: { mime: string; updatedAt: number; source: 'custom' | 'auto' };
     iconBackground?: string;
     serverId?: string;
+    unavailable?: boolean;
   };
   groups: SessionGroup[];
 };
@@ -176,6 +177,7 @@ export function SidebarProjectsList(props: Props): React.ReactNode {
                     alwaysShowActions={props.alwaysShowActions}
                     serverId={project.serverId}
                     serverHealthStatus={project.serverId ? serverRegistry.get(project.serverId)?.healthStatus ?? null : undefined}
+                    unavailable={project.unavailable}
                     onToggle={() => props.toggleProject(projectKey)}
                     onNewSession={() => {
                       if (projectKey !== props.activeProjectId) props.setActiveProjectIdOnly(projectKey);

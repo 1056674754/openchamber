@@ -13,6 +13,7 @@ import {
   RiArrowDownSLine,
   RiArrowRightSLine,
   RiCloseLine,
+  RiErrorWarningLine,
   RiFolderLine,
   RiMore2Line,
   RiNodeTree,
@@ -54,6 +55,7 @@ export interface SortableProjectItemProps {
   setOpenSidebarMenuKey: (key: string | null) => void;
   serverId?: string;
   serverHealthStatus?: 'healthy' | 'unhealthy' | 'connecting' | null;
+  unavailable?: boolean;
 }
 
 export type SortableDragHandleProps = {
@@ -89,6 +91,7 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
   setOpenSidebarMenuKey,
   serverId,
   serverHealthStatus,
+  unavailable,
 }) => {
   const { t } = useI18n();
   const { currentTheme } = useThemeSystem();
@@ -239,15 +242,20 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
                     <span className={cn(
                       'text-[14px] font-normal truncate lowercase',
                       isActiveProject ? 'text-foreground' : 'text-foreground group-hover/project:text-foreground',
+                      unavailable && 'opacity-50',
                     )}>
                       {projectLabel}
                     </span>
                     {serverId && (
                       <span className="inline-flex items-center gap-1 flex-shrink-0">
-                        <span
-                          className="h-1.5 w-1.5 rounded-full flex-shrink-0"
-                          style={{ backgroundColor: dotColor, transition: 'background-color 0.2s' }}
-                        />
+                        {unavailable ? (
+                          <RiErrorWarningLine className="h-2.5 w-2.5 flex-shrink-0" style={{ color: currentTheme.colors.status.warning }} />
+                        ) : (
+                          <span
+                            className="h-1.5 w-1.5 rounded-full flex-shrink-0"
+                            style={{ backgroundColor: dotColor, transition: 'background-color 0.2s' }}
+                          />
+                        )}
                         {serverId !== 'default' && (
                           <span className="text-[10px] leading-none text-muted-foreground max-w-[80px] truncate">
                             {serverLabel}

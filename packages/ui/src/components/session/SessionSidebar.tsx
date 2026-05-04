@@ -957,6 +957,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
         iconImage?: { mime: string; updatedAt: number; source: 'custom' | 'auto' };
         iconBackground?: string;
         serverId?: string;
+        unavailable?: boolean;
       }>;
   }, [projects]);
 
