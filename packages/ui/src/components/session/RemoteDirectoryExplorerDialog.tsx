@@ -163,9 +163,9 @@ export const RemoteDirectoryExplorerDialog: React.FC<RemoteDirectoryExplorerDial
       return;
     }
 
-    const absPath = query.startsWith('~/')
-      ? `${remoteHome}${query.slice(1)}`
-      : query;
+    const absPath = browseDirectoryDisplayPath.startsWith('~/')
+      ? `${remoteHome}${browseDirectoryDisplayPath.slice(1)}`
+      : browseDirectoryDisplayPath;
 
     if (!absPath) return;
 
@@ -212,7 +212,7 @@ export const RemoteDirectoryExplorerDialog: React.FC<RemoteDirectoryExplorerDial
     return () => {
       cancelled = true;
     };
-  }, [open, selectedServer, selectedFetchBaseUrl, browseDirectoryDisplayPath, remoteHome, query, t]);
+  }, [open, selectedServer, selectedFetchBaseUrl, browseDirectoryDisplayPath, remoteHome, t]);
 
   const filteredEntries = React.useMemo(() => {
     const lowerFilter = browseFilterQuery.toLowerCase();
@@ -490,7 +490,7 @@ export const RemoteDirectoryExplorerDialog: React.FC<RemoteDirectoryExplorerDial
                       {t('remoteDirectoryExplorer.noFolders')}
                     </div>
                   ) : (
-                    <div className="space-y-0.5">
+                    <div>
                       {rows.map((row, index) => {
                         const isActive = index === highlightedIndex;
                         return (
@@ -502,22 +502,22 @@ export const RemoteDirectoryExplorerDialog: React.FC<RemoteDirectoryExplorerDial
                             onMouseDown={(event) => event.preventDefault()}
                             onClick={() => handleRowClick(row)}
                             className={cn(
-                              'flex w-full cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50',
+                              'flex w-full cursor-pointer items-center gap-1.5 rounded-md px-2 py-[1px] text-left text-[13px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50',
                               isActive && 'bg-[var(--interactive-selection)] text-[var(--interactive-selection-foreground)]',
                               !isActive && 'hover:bg-[var(--interactive-hover)]',
                               row.type === 'directory' && row.disabled && 'cursor-not-allowed opacity-45 hover:bg-transparent'
                             )}
                           >
                             {row.type === 'up' ? (
-                              <RiArrowUpSLine className="h-4 w-4 flex-shrink-0 text-[var(--surface-mutedForeground)]" />
+                              <RiArrowUpSLine className="h-3.5 w-3.5 flex-shrink-0 text-[var(--surface-mutedForeground)]" />
                             ) : (
-                              <RiFolderLine className="h-4 w-4 flex-shrink-0 text-[var(--surface-mutedForeground)]" />
+                              <RiFolderLine className="h-3.5 w-3.5 flex-shrink-0 text-[var(--surface-mutedForeground)]" />
                             )}
                             <span className="flex min-w-0 flex-1 items-center gap-1.5">
                               <span className="truncate text-[var(--surface-foreground)]">{row.name}</span>
                             </span>
                             {row.type === 'directory' && row.disabled ? (
-                              <span className="rounded-full border border-[var(--interactive-border)] px-2 py-0.5 text-xs text-[var(--surface-mutedForeground)]">
+                              <span className="rounded-full border border-[var(--interactive-border)] px-1.5 py-px text-[11px] text-[var(--surface-mutedForeground)]">
                                 {t('remoteDirectoryExplorer.alreadyAdded')}
                               </span>
                             ) : null}
