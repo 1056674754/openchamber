@@ -1627,6 +1627,13 @@ class OpencodeService {
 // Exported singleton instance
 export const opencodeClient = new OpencodeService();
 
+import { serverRegistry, DEFAULT_SERVER_ID } from "./server-registry";
+serverRegistry.register({
+  id: DEFAULT_SERVER_ID,
+  label: "Local",
+  baseUrl: opencodeClient.getBaseUrl(),
+});
+
 // Exported types
 export type { Session, Message, Part, Provider, Config, Model };
 export type { App };
