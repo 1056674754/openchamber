@@ -5,6 +5,7 @@
  * - tts: concise speakable text
  * - notification: concise notification text
  * - note: distilled project note
+ * - topic: short directory-name-friendly topic
  */
 
 function buildSummarizationPrompt(maxLength, mode = 'tts') {
@@ -37,6 +38,19 @@ Rules:
 2. Do not use markdown, bullets, headings, code fences, backticks, or quotes.
 3. Output only the summary text.
 4. Prefer a short notification-friendly sentence.`;
+  }
+
+  if (mode === 'topic') {
+    return `Generate a very short topic name (2-5 words) for this conversation, suitable as a directory name.
+
+Rules:
+1. Output ONLY the topic name. Nothing else.
+2. Use lowercase words separated by hyphens (e.g. "fix-auth-bug", "add-search-feature").
+3. No special characters except hyphens.
+4. Maximum 50 characters.
+5. Be descriptive but extremely concise.
+6. Do not use generic words like "conversation", "chat", "task", "help".
+7. Focus on the primary action or subject of the conversation.`;
   }
 
   return `You are a text summarizer for text-to-speech output. Create a concise, natural-sounding summary that captures the key points. Keep the summary under ${maxLength} characters.
@@ -110,9 +124,22 @@ export function sanitizeForNote(text) {
 }
 
 function sanitizeByMode(text, mode) {
+  if (mode === 'topic') return sanitizeForTopic(text);
   if (mode === 'note') return sanitizeForNote(text);
   if (mode === 'notification') return sanitizeForNotification(text);
   return sanitizeForTTS(text);
+}
+
+function sanitizeForTopic(text) {
+  if (!text || typeof text !== 'string') return '';
+  return text
+    .trim()
+    .toLowerCase()
+    .replace(/[\/\\:*?"<>|]/g, '-')
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 50);
 }
 
 function extractZenOutputText(data) {
@@ -194,6 +221,7 @@ function distillNoteFallback(text, maxLength) {
 }
 
 function fallbackByMode(text, maxLength, mode) {
+  if (mode === 'topic') return sanitizeForTopic(text || '');
   if (mode === 'note') return distillNoteFallback(text, maxLength);
   return sanitizeByMode(text, mode);
 }

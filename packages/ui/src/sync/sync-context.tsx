@@ -26,6 +26,8 @@ import { stripMessageDiffSnapshots, stripSessionDiffSnapshots } from "./sanitize
 import { syncDebug } from "./debug"
 import { getReconnectCandidateSessionIds } from "./reconnect-recovery"
 import { opencodeClient } from "@/lib/opencode/client"
+import { DEFAULT_SERVER_ID, serverRegistry } from "@/lib/opencode/server-registry"
+import { registerSyncStores } from "./multi-server-registry"
 import { usePermissionStore } from "@/stores/permissionStore"
 import { useConfigStore } from "@/stores/useConfigStore"
 import { useTodosPersistStore } from "@/stores/useTodosPersistStore"
@@ -46,6 +48,7 @@ type SyncSystem = {
   childStores: ChildStoreManager
   sdk: OpencodeClient
   directory: string
+  serverId: string
 }
 
 const SYNC_CONTEXT_GLOBAL_KEY = "__openchamber_sync_context__"
@@ -57,7 +60,7 @@ const syncGlobal = globalThis as SyncGlobal
 const SyncContext = syncGlobal[SYNC_CONTEXT_GLOBAL_KEY] ?? createContext<SyncSystem | null>(null)
 syncGlobal[SYNC_CONTEXT_GLOBAL_KEY] = SyncContext
 
-function useSyncSystem() {
+export function useSyncSystem() {
   const ctx = useContext(SyncContext)
   if (!ctx) throw new Error("useSyncSystem must be used within <SyncProvider>")
   return ctx
@@ -972,6 +975,19 @@ function handleEvent(
 ) {
   const directory = resolveDirectoryFromRoutingIndex(routingIndex, rawDirectory, payload, childStores)
 
+  if (directory && directory !== "global") {
+    if (
+      (payload.type === "session.created" || payload.type === "session.updated")
+      && !childStores.getChild(directory)
+    ) {
+      const info = (payload.properties as { info?: Session }).info
+      if (info?.id) {
+        setIndexedSessionDirectory(routingIndex, info.id, directory)
+        childStores.ensureChild(directory)
+      }
+    }
+  }
+
   // Global events
   if (directory === "global" || !directory) {
     const recent = isRecentBoot()
@@ -1247,8 +1263,11 @@ function handleEvent(
 export function SyncProvider(props: {
   sdk: OpencodeClient
   directory: string
+  serverId?: string
+  baseUrl?: string
   children: React.ReactNode
 }) {
+  const serverId = props.serverId ?? DEFAULT_SERVER_ID
   const messageStreamTransport = useConfigStore((state) => state.settingsMessageStreamTransport)
   const childStoresRef = useRef<ChildStoreManager | null>(null)
   if (!childStoresRef.current) childStoresRef.current = new ChildStoreManager()
@@ -1262,9 +1281,19 @@ export function SyncProvider(props: {
       childStores,
       sdk: props.sdk,
       directory: props.directory,
+      serverId,
     }),
-    [childStores, props.sdk, props.directory],
+    [childStores, props.sdk, props.directory, serverId],
   )
+
+  useEffect(() => {
+    const unregister = registerSyncStores(
+      serverId,
+      childStores,
+      () => {},
+    )
+    return unregister
+  }, [serverId, childStores])
 
   // Configure child store manager
   useEffect(() => {
@@ -1331,6 +1360,11 @@ export function SyncProvider(props: {
                 return
               }
               store.setState({ session: sessions, sessionTotal: sessions.length, limit: Math.max(sessions.length, 50) })
+              if (serverId !== DEFAULT_SERVER_ID) {
+                for (const s of sessions) {
+                  if (s.id) serverRegistry.indexSession(s.id, serverId)
+                }
+              }
               ingestDirectoryStateIntoRoutingIndex(routingIndex, directory, store.getState())
             }),
           })
@@ -1358,11 +1392,12 @@ export function SyncProvider(props: {
       isBooting: (directory) => bootingDirs.has(directory),
       isLoadingSessions: () => false,
     })
-  }, [childStores, props.sdk, routingIndex])
+  }, [childStores, props.sdk, routingIndex, serverId])
 
   // Bootstrap global state — set bootingRoot/bootedAt to suppress
   // redundant refresh events during startup
   useEffect(() => {
+    if (serverId !== DEFAULT_SERVER_ID) return
     bootingRoot = true
     const globalActions = useGlobalSyncStore.getState().actions
     bootstrapGlobal(props.sdk, globalActions.set)
@@ -1372,7 +1407,7 @@ export function SyncProvider(props: {
       .finally(() => {
         bootingRoot = false
       })
-  }, [props.sdk])
+  }, [props.sdk, serverId])
 
   // Event pipeline — created once per mount. No class, no start/stop.
   // Abort controller owned by the pipeline closure. Cleanup aborts + flushes.
@@ -1396,6 +1431,7 @@ export function SyncProvider(props: {
 
     const { cleanup } = createEventPipeline({
       sdk: props.sdk,
+      baseUrl: props.baseUrl,
       transport: messageStreamTransport,
       routeDirectory: (directory, payload) => {
         return resolveDirectoryFromRoutingIndex(routingIndex, directory, payload, childStores)
@@ -1436,7 +1472,7 @@ export function SyncProvider(props: {
       },
     })
     return cleanup
-  }, [props.sdk, childStores, routingIndex, messageStreamTransport])
+  }, [props.sdk, props.baseUrl, childStores, routingIndex, messageStreamTransport])
 
   // Ensure current directory's child store exists
   useEffect(() => {

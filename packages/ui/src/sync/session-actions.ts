@@ -13,6 +13,8 @@ import { useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
 import { useConfigStore } from "@/stores/useConfigStore"
 import { registerSessionDirectory } from "./sync-refs"
 import { isSyntheticPart } from "@/lib/messages/synthetic"
+import { serverRegistry, DEFAULT_SERVER_ID } from "@/lib/opencode/server-registry"
+import { getSyncStoresForServer } from "./multi-server-registry"
 
 // Reference set by SyncProvider — allows actions to access SDK and stores
 let _sdk: OpencodeClient | null = null
@@ -53,6 +55,46 @@ function dirStore() {
 
 function dir() {
   return _getDirectory() || undefined
+}
+
+/** Get the SDK client for a session's server. Falls back to default server. */
+function sdkForSession(sessionId?: string | null): OpencodeClient {
+  if (sessionId) {
+    const conn = serverRegistry.getClientForSession(sessionId)
+    if (conn) return conn.client
+  }
+  return sdk()
+}
+
+/** Get the child store manager for a session's server. Falls back to default. */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+function storesForSession(sessionId?: string | null): ChildStoreManager {
+  if (sessionId) {
+    const serverId = serverRegistry.getServerForSession(sessionId)
+    if (serverId && serverId !== DEFAULT_SERVER_ID) {
+      const stores = getSyncStoresForServer(serverId)
+      if (stores) return stores
+    }
+  }
+  if (!_childStores) throw new Error("Child stores not initialized")
+  return _childStores
+}
+
+/** Get the directory store for a session. Uses the remote server's child stores
+    (keyed by "" since MultiServerSyncLayer mounts with directory="") for remote sessions,
+    or the current directory's store for local sessions. Falls back to dirStore(). */
+function storeForSession(sessionId: string | null | undefined): ReturnType<ChildStoreManager["ensureChild"]> {
+  if (sessionId) {
+    const serverId = serverRegistry.getServerForSession(sessionId)
+    if (serverId && serverId !== DEFAULT_SERVER_ID) {
+      const remoteStores = getSyncStoresForServer(serverId)
+      if (remoteStores) {
+        const store = remoteStores.getChild("")
+        if (store) return store
+      }
+    }
+  }
+  return dirStore()
 }
 
 function connectionLostError(): Error {
@@ -98,6 +140,10 @@ function getDirectoryStore(directory?: string) {
 }
 
 function getSessionReplyClient(sessionId?: string): OpencodeClient {
+  if (sessionId) {
+    const conn = serverRegistry.getClientForSession(sessionId)
+    if (conn) return conn.client
+  }
   const directory = sessionId
     ? useSessionUIStore.getState().getDirectoryForSession(sessionId)
     : null
@@ -153,6 +199,8 @@ function getRequestReplyClient(
   sessionId: string,
   requestId: string,
 ): OpencodeClient {
+  const conn = serverRegistry.getClientForSession(sessionId)
+  if (conn) return conn.client
   const requestDirectory = resolveDirectoryForBlockingRequest(type, sessionId, requestId)
   if (requestDirectory) {
     return opencodeClient.getScopedSdkClient(requestDirectory)
@@ -170,8 +218,13 @@ export async function createSession(
   parentID?: string | null,
 ): Promise<Session | null> {
   try {
+    const fallbackDir = directoryOverride ?? dir()
+    if (!fallbackDir) {
+      console.error("[session-actions] createSession: no directory available")
+      return null
+    }
     const result = await sdk().session.create({
-      directory: directoryOverride ?? dir(),
+      directory: fallbackDir,
       title,
       parentID: parentID ?? undefined,
     })
@@ -238,7 +291,7 @@ export async function deleteSession(sessionId: string, _options?: Record<string,
     ui.setCurrentSession(null)
   }
   try {
-    await sdk().session.delete({ sessionID: sessionId, directory: sessionDirectory })
+    await sdkForSession(sessionId).session.delete({ sessionID: sessionId, directory: sessionDirectory })
     useGlobalSessionsStore.getState().removeSessions([sessionId])
     return true
   } catch (error) {
@@ -270,7 +323,7 @@ export async function deleteSessionInDirectory(sessionId: string, directory: str
   const ui = useSessionUIStore.getState()
   if (ui.currentSessionId === sessionId) ui.setCurrentSession(null)
   try {
-    await sdk().session.delete({ sessionID: sessionId, directory })
+    await sdkForSession(sessionId).session.delete({ sessionID: sessionId, directory })
     useGlobalSessionsStore.getState().removeSessions([sessionId])
     return true
   } catch (error) {
@@ -289,7 +342,7 @@ export async function archiveSession(sessionId: string): Promise<boolean> {
   }
   try {
     const archivedAt = Date.now()
-    await sdk().session.update({ sessionID: sessionId, directory: sessionDirectory, time: { archived: archivedAt } })
+    await sdkForSession(sessionId).session.update({ sessionID: sessionId, directory: sessionDirectory, time: { archived: archivedAt } })
     useGlobalSessionsStore.getState().archiveSessions([sessionId], archivedAt)
     return true
   } catch (error) {
@@ -301,7 +354,7 @@ export async function archiveSession(sessionId: string): Promise<boolean> {
 
 export async function updateSessionTitle(sessionId: string, title: string): Promise<void> {
   const sessionDirectory = getSessionDirectory(sessionId)
-  const result = await sdk().session.update({ sessionID: sessionId, directory: sessionDirectory, title })
+  const result = await sdkForSession(sessionId).session.update({ sessionID: sessionId, directory: sessionDirectory, title })
   if (result.data) {
     useGlobalSessionsStore.getState().upsertSession(result.data)
   }
@@ -309,7 +362,7 @@ export async function updateSessionTitle(sessionId: string, title: string): Prom
 
 export async function shareSession(sessionId: string): Promise<Session | null> {
   const sessionDirectory = getSessionDirectory(sessionId)
-  const result = await sdk().session.share({ sessionID: sessionId, directory: sessionDirectory })
+  const result = await sdkForSession(sessionId).session.share({ sessionID: sessionId, directory: sessionDirectory })
   if (result.data) {
     useGlobalSessionsStore.getState().upsertSession(result.data)
   }
@@ -318,7 +371,7 @@ export async function shareSession(sessionId: string): Promise<Session | null> {
 
 export async function unshareSession(sessionId: string): Promise<Session | null> {
   const sessionDirectory = getSessionDirectory(sessionId)
-  const result = await sdk().session.unshare({ sessionID: sessionId, directory: sessionDirectory })
+  const result = await sdkForSession(sessionId).session.unshare({ sessionID: sessionId, directory: sessionDirectory })
   if (result.data) {
     useGlobalSessionsStore.getState().upsertSession(result.data)
   }
@@ -385,7 +438,7 @@ export async function optimisticSend(input: {
 
   await waitForConnectionOrThrow()
 
-  const store = dirStore()
+  const store = storeForSession(input.sessionId)
   const messageID = ascendingId("msg")
   const textPartId = ascendingId("prt")
 
@@ -453,7 +506,7 @@ export async function optimisticSend(input: {
 
 export async function abortCurrentOperation(sessionId: string): Promise<void> {
   try {
-    await sdk().session.abort({ sessionID: sessionId, directory: dir() })
+    await sdkForSession(sessionId).session.abort({ sessionID: sessionId, directory: dir() })
   } catch (error) {
     console.error("[session-actions] abort failed", error)
   }
@@ -554,14 +607,14 @@ export async function rejectQuestion(
  * 5. Set pendingInputText so the reverted message text appears in the input
  */
 export async function revertToMessage(sessionId: string, messageId: string): Promise<void> {
-  const store = dirStore()
+  const store = storeForSession(sessionId)
   const state = store.getState()
 
   // Abort if busy before mutating session state
   const status = state.session_status[sessionId]
   if (status && status.type !== "idle") {
     try {
-      await sdk().session.abort({ sessionID: sessionId, directory: dir() })
+      await sdkForSession(sessionId).session.abort({ sessionID: sessionId, directory: dir() })
     } catch {
       // ignore abort errors
     }
@@ -620,7 +673,7 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
 
   // Call SDK and merge authoritative result into store
   try {
-    const result = await sdk().session.revert({ sessionID: sessionId, directory: dir(), messageID: messageId })
+    const result = await sdkForSession(sessionId).session.revert({ sessionID: sessionId, directory: dir(), messageID: messageId })
     if (result.data) {
       const current = store.getState()
       const updated = [...current.session]
@@ -652,20 +705,20 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
  * Restore all previously reverted messages. Aborts if busy, merges result.
  */
 export async function unrevertSession(sessionId: string): Promise<void> {
-  const store = dirStore()
+  const store = storeForSession(sessionId)
   const state = store.getState()
 
   // Abort if busy
   const status = state.session_status[sessionId]
   if (status && status.type !== "idle") {
     try {
-      await sdk().session.abort({ sessionID: sessionId, directory: dir() })
+      await sdkForSession(sessionId).session.abort({ sessionID: sessionId, directory: dir() })
     } catch {
       // ignore
     }
   }
 
-  const result = await sdk().session.unrevert({ sessionID: sessionId, directory: dir() })
+  const result = await sdkForSession(sessionId).session.unrevert({ sessionID: sessionId, directory: dir() })
   if (result.data) {
     const current = store.getState()
     const sessions = [...current.session]
@@ -686,7 +739,7 @@ export async function unrevertSession(sessionId: string): Promise<void> {
  * 4. Switch to new session and set pending input text
  */
 export async function forkFromMessage(sessionId: string, messageId: string): Promise<void> {
-  const store = dirStore()
+  const store = storeForSession(sessionId)
   const state = store.getState()
 
   // Extract message text for input restoration (only non-synthetic text parts —
@@ -699,7 +752,7 @@ export async function forkFromMessage(sessionId: string, messageId: string): Pro
     .join("\n")
     .trim()
 
-  const result = await sdk().session.fork({ sessionID: sessionId, directory: dir(), messageID: messageId })
+  const result = await sdkForSession(sessionId).session.fork({ sessionID: sessionId, directory: dir(), messageID: messageId })
   if (!result.data) return
 
   const forkedSession = result.data
