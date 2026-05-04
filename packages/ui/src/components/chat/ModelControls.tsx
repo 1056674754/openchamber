@@ -69,6 +69,8 @@ import { useIsTextTruncated } from '@/hooks/useIsTextTruncated';
 import { formatEffortLabel, getCycledPrimaryAgentName, type MobileControlsPanel } from './mobileControlsUtils';
 import { useI18n } from '@/lib/i18n';
 import { useOpenCodeReadiness } from '@/hooks/useOpenCodeReadiness';
+import { useActiveServerId } from '@/hooks/useActiveServerId';
+import { DEFAULT_SERVER_ID, serverRegistry } from '@/lib/opencode/server-registry';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type IconComponent = ComponentType<any>;
@@ -345,7 +347,13 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     const { t } = useI18n();
     const { isReady, isUnavailable } = useOpenCodeReadiness();
     const readinessLabel = isUnavailable ? t('common.unavailable') : t('common.loading');
-    const providers = useConfigStore((state) => state.providers);
+    const localProviders = useConfigStore((state) => state.providers);
+    const activeServerId = useActiveServerId();
+    const [remoteProviders, setRemoteProviders] = React.useState<typeof localProviders | null>(null);
+    const providers = React.useMemo(
+        () => activeServerId === DEFAULT_SERVER_ID ? localProviders : (remoteProviders ?? []),
+        [activeServerId, localProviders, remoteProviders],
+    );
     const currentProviderId = useConfigStore((state) => state.currentProviderId);
     const currentModelId = useConfigStore((state) => state.currentModelId);
     const currentVariant = useConfigStore((state) => state.currentVariant);
@@ -370,6 +378,40 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     const currentSessionId = useSessionUIStore((s) => s.currentSessionId);
     const getDirectoryForSession = useSessionUIStore((s) => s.getDirectoryForSession);
     const sync = useSync();
+
+    React.useEffect(() => {
+        if (activeServerId === DEFAULT_SERVER_ID) {
+            setRemoteProviders(null);
+            return;
+        }
+        const connection = serverRegistry.get(activeServerId);
+        if (!connection) {
+            setRemoteProviders([]);
+            return;
+        }
+        let cancelled = false;
+        setRemoteProviders(null);
+        void connection.client.provider.list()
+            .then((result) => {
+                if (cancelled) return;
+                if (result.data?.all) {
+                    const processedProviders = result.data.all.map((provider) => ({
+                        ...provider,
+                        models: Object.values(provider.models ?? {}),
+                    }));
+                    setRemoteProviders(processedProviders);
+                } else {
+                    setRemoteProviders([]);
+                }
+            })
+            .catch((error: unknown) => {
+                console.warn('Failed to load remote providers', error);
+                if (!cancelled) setRemoteProviders([]);
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [activeServerId]);
 
     const getSessionModelSelection = useSelectionStore((state) => state.getSessionModelSelection);
     const saveSessionModelSelection = useSelectionStore((state) => state.saveSessionModelSelection);

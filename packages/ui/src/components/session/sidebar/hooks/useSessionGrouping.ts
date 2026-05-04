@@ -2,8 +2,9 @@ import React from 'react';
 import type { Session } from '@opencode-ai/sdk/v2';
 import type { WorktreeMetadata } from '@/types/worktree';
 import type { SessionGroup, SessionNode } from '../types';
+import type { SessionSortMode } from '@/stores/useUIStore';
 import {
-  compareSessionsByPinnedAndTime,
+  compareSessions,
   dedupeSessionsById,
   getArchivedScopeKey,
   normalizeForBranchComparison,
@@ -16,6 +17,7 @@ type Args = {
   homeDirectory: string | null;
   worktreeMetadata: Map<string, WorktreeMetadata>;
   pinnedSessionIds: Set<string>;
+  sessionSortMode: SessionSortMode;
   gitBranches: Map<string, string | null>;
   isVSCode: boolean;
 };
@@ -67,7 +69,7 @@ export const useSessionGrouping = (args: Args) => {
     ) => {
       const normalizedProjectRoot = normalizePath(projectRoot ?? null);
       const sortedProjectSessions = dedupeSessionsById(projectSessions)
-        .sort((a, b) => compareSessionsByPinnedAndTime(a, b, args.pinnedSessionIds));
+        .sort((a, b) => compareSessions(a, b, args.pinnedSessionIds, args.sessionSortMode));
 
       const sessionMap = new Map(sortedProjectSessions.map((session) => [session.id, session]));
       const childrenMap = new Map<string, Session[]>();
@@ -82,7 +84,7 @@ export const useSessionGrouping = (args: Args) => {
         collection.push(session);
         childrenMap.set(parentID, collection);
       });
-      childrenMap.forEach((list) => list.sort((a, b) => compareSessionsByPinnedAndTime(a, b, args.pinnedSessionIds)));
+      childrenMap.forEach((list) => list.sort((a, b) => compareSessions(a, b, args.pinnedSessionIds, args.sessionSortMode)));
 
       const worktreeByPath = new Map<string, WorktreeMetadata>();
       availableWorktrees.forEach((meta) => {
@@ -241,7 +243,7 @@ export const useSessionGrouping = (args: Args) => {
 
       return groups;
     },
-    [args.homeDirectory, args.worktreeMetadata, args.pinnedSessionIds, args.gitBranches, args.isVSCode, t],
+    [args.homeDirectory, args.worktreeMetadata, args.pinnedSessionIds, args.sessionSortMode, args.gitBranches, args.isVSCode, t],
   );
 
   return {

@@ -278,7 +278,7 @@ export interface SessionStore {
     setSessionDirectory: (sessionId: string, directory: string | null) => void;
 
     addAttachedFile: (file: File) => Promise<void>;
-    addServerFile: (path: string, name: string, content?: string) => Promise<void>;
+    addServerFile: (path: string, name: string, content?: string, options?: { baseUrl?: string }) => Promise<void>;
     removeAttachedFile: (id: string) => void;
     clearAttachedFiles: () => void;
 

@@ -82,6 +82,7 @@ export const MainLayout: React.FC = () => {
     const isMultiRunLauncherOpen = useUIStore((state) => state.isMultiRunLauncherOpen);
     const setMultiRunLauncherOpen = useUIStore((state) => state.setMultiRunLauncherOpen);
     const multiRunLauncherPrefillPrompt = useUIStore((state) => state.multiRunLauncherPrefillPrompt);
+    const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
 
     const { isMobile } = useDeviceInfo();
     const isDesktopShellRuntime = React.useMemo(() => isDesktopShell(), []);
@@ -251,7 +252,8 @@ export const MainLayout: React.FC = () => {
     React.useEffect(() => {
         if (isContextPanelOpen) {
             const currentlyOpen = useUIStore.getState().isSidebarOpen;
-            if (currentlyOpen) {
+            const autoCollapseEnabled = useUIStore.getState().autoCollapseSidebarOnContextPanel;
+            if (currentlyOpen && autoCollapseEnabled) {
                 setSidebarOpen(false);
                 leftSidebarAutoClosedByContextRef.current = true;
             }
@@ -567,7 +569,7 @@ export const MainLayout: React.FC = () => {
                                     <ErrorBoundary>{secondaryView}</ErrorBoundary>
                                 </div>
                             )}
-                            {isMultiRunLauncherOpen && (
+                            {multiRunEnabled && isMultiRunLauncherOpen && (
                                 <div className="absolute inset-0 z-10 bg-background">
                                     <ErrorBoundary>
                                         <MultiRunLauncher
@@ -728,13 +730,15 @@ export const MainLayout: React.FC = () => {
                             onOpenChange={setSettingsDialogOpen}
                         />
                     </React.Suspense>
-                    <React.Suspense fallback={null}>
-                        <MultiRunWindow
-                            open={isMultiRunLauncherOpen}
-                            onOpenChange={setMultiRunLauncherOpen}
-                            initialPrompt={multiRunLauncherPrefillPrompt}
-                        />
-                    </React.Suspense>
+                    {multiRunEnabled && (
+                        <React.Suspense fallback={null}>
+                            <MultiRunWindow
+                                open={isMultiRunLauncherOpen}
+                                onOpenChange={setMultiRunLauncherOpen}
+                                initialPrompt={multiRunLauncherPrefillPrompt}
+                            />
+                        </React.Suspense>
+                    )}
                 </>
             )}
 

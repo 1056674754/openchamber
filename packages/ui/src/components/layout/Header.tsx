@@ -21,6 +21,8 @@ import { DiffIcon } from '@/components/icons/DiffIcon';
 import { useUIStore, type MainTab } from '@/stores/useUIStore';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useActiveServerId } from '@/hooks/useActiveServerId';
+import { serverRegistry, DEFAULT_SERVER_ID } from '@/lib/opencode/server-registry';
 import { useSessionWorktreeStore } from '@/sync/session-worktree-store';
 import { formatSessionWorktreeBadge } from '@/sync/session-worktree-contract';
 import { useAllLiveSessions, useSession, useSessionMessagesResolved } from '@/sync/sync-context';
@@ -824,6 +826,13 @@ export const Header: React.FC<HeaderProps> = ({
     ? Math.min(999, (stableDesktopContextUsage.totalTokens / stableDesktopContextUsage.contextLimit) * 100)
     : 0;
 
+  const activeServerId = useActiveServerId();
+
+  const activeServerLabel = React.useMemo(() => {
+    if (activeServerId === DEFAULT_SERVER_ID) return null;
+    return serverRegistry.get(activeServerId)?.config.label || null;
+  }, [activeServerId]);
+
   const refreshCurrentInstanceLabel = React.useCallback(async () => {
     if (typeof window === 'undefined' || !isDesktopApp) {
       return;
@@ -855,8 +864,12 @@ export const Header: React.FC<HeaderProps> = ({
   }, [isDesktopApp]);
 
   useEffect(() => {
+    if (activeServerLabel) {
+      setCurrentInstanceLabel(activeServerLabel);
+      return;
+    }
     void refreshCurrentInstanceLabel();
-  }, [refreshCurrentInstanceLabel]);
+  }, [activeServerLabel, refreshCurrentInstanceLabel]);
   useQuotaAutoRefresh();
   const selectedModels = useQuotaStore((state) => state.selectedModels);
   const expandedFamilies = useQuotaStore((state) => state.expandedFamilies);
@@ -1091,6 +1104,8 @@ export const Header: React.FC<HeaderProps> = ({
     const raw = typeof currentSession?.directory === 'string' ? currentSession.directory : '';
     return normalize(raw || '');
   }, [currentSession?.directory]);
+
+  const isTempSessionDirectory = sessionDirectory.includes('/temp-sessions/');
 
   const draftDirectory = useSessionUIStore((state) => {
     if (!state.newSessionDraft?.open) {
@@ -1851,9 +1866,9 @@ export const Header: React.FC<HeaderProps> = ({
             <div className="truncate pl-1 typography-ui-label text-[14px] font-normal leading-tight text-foreground">
               {currentSessionTitle}
             </div>
-            {(activeProjectLabel || currentBranchLabel || hasNonZeroSessionChanges) ? (
+            {((!isTempSessionDirectory && activeProjectLabel) || currentBranchLabel || hasNonZeroSessionChanges) ? (
               <div className="flex min-w-0 items-center gap-1.5 truncate pl-1 typography-micro text-[10.5px] font-normal leading-tight text-muted-foreground/75">
-                {activeProjectLabel ? <span className="truncate">{activeProjectLabel}</span> : null}
+                {(!isTempSessionDirectory && activeProjectLabel) ? <span className="truncate">{activeProjectLabel}</span> : null}
                 {currentBranchLabel ? (
                   <span className="inline-flex min-w-0 items-center gap-0.5">
                     <RiGitBranchLine className="h-3 w-3 flex-shrink-0 text-muted-foreground/70" />

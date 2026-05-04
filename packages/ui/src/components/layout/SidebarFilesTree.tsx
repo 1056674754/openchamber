@@ -50,6 +50,7 @@ import { opencodeClient } from '@/lib/opencode/client';
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
 import { getContextFileOpenFailureMessage, validateContextFileOpen } from '@/lib/contextFileOpenGuard';
 import { useI18n } from '@/lib/i18n';
+import { useActiveServerBaseUrl } from '@/hooks/useActiveServerId';
 
 type FileNode = {
   name: string;
@@ -325,6 +326,7 @@ const FileRow: React.FC<FileRowProps> = ({
 export const SidebarFilesTree: React.FC = () => {
   const { t } = useI18n();
   const { files, runtime } = useRuntimeAPIs();
+  const serverBaseUrl = useActiveServerBaseUrl();
   const currentDirectory = useEffectiveDirectory() ?? '';
   const root = normalizePath(currentDirectory.trim());
   const showHidden = useDirectoryShowHidden();
@@ -424,17 +426,32 @@ export const SidebarFilesTree: React.FC = () => {
     inFlightDirsRef.current.add(normalizedDir);
 
     const respectGitignore = !showGitignored;
-    const listPromise = runtime.isDesktop
-      ? files.listDirectory(normalizedDir, { respectGitignore }).then((result) => result.entries.map((entry) => ({
+    let listPromise: Promise<Array<{ name: string; path: string; isDirectory: boolean }>>;
+
+    if (runtime.isDesktop && !serverBaseUrl) {
+      listPromise = files.listDirectory(normalizedDir, { respectGitignore }).then((result) => result.entries.map((entry) => ({
         name: entry.name,
         path: entry.path,
-        isDirectory: entry.isDirectory,
-      })))
-      : opencodeClient.listLocalDirectory(normalizedDir, { respectGitignore }).then((result) => result.map((entry) => ({
-        name: entry.name,
-        path: entry.path,
-        isDirectory: entry.isDirectory,
+        isDirectory: !!entry.isDirectory,
       })));
+    } else if (!serverBaseUrl) {
+      listPromise = opencodeClient.listLocalDirectory(normalizedDir, { respectGitignore }).then((result) => result.map((entry) => ({
+        name: entry.name,
+        path: entry.path,
+        isDirectory: !!entry.isDirectory,
+      })));
+    } else {
+      listPromise = fetch(`${serverBaseUrl}/api/fs/list?path=${encodeURIComponent(normalizedDir)}&respectGitignore=${respectGitignore ? 'false' : 'true'}`)
+        .then((response) => {
+          if (!response.ok) throw new Error(`Failed to list directory: ${response.status}`);
+          return response.json() as Promise<{ entries: Array<{ name: string; path: string; isDirectory: boolean; isFile: boolean }> }>;
+        })
+        .then((data) => data.entries.map((entry) => ({
+          name: entry.name,
+          path: entry.path,
+          isDirectory: entry.isDirectory,
+        })));
+    }
 
     await listPromise
       .then((entries) => {
@@ -454,7 +471,7 @@ export const SidebarFilesTree: React.FC = () => {
         inFlightDirsRef.current = new Set(inFlightDirsRef.current);
         inFlightDirsRef.current.delete(normalizedDir);
       });
-  }, [files, mapDirectoryEntries, runtime.isDesktop, showGitignored]);
+  }, [files, mapDirectoryEntries, runtime.isDesktop, serverBaseUrl, showGitignored]);
 
   const refreshRoot = React.useCallback(async () => {
     if (!root) return;
@@ -613,7 +630,7 @@ export const SidebarFilesTree: React.FC = () => {
   const handleOpenFile = React.useCallback(async (node: FileNode) => {
     if (!root) return;
 
-    const openValidation = await validateContextFileOpen(files, node.path);
+    const openValidation = await validateContextFileOpen(files, node.path, serverBaseUrl);
     if (!openValidation.ok) {
       toast.error(getContextFileOpenFailureMessage(openValidation.reason));
       return;
@@ -622,7 +639,7 @@ export const SidebarFilesTree: React.FC = () => {
     setSelectedPath(root, node.path);
     addOpenPath(root, node.path);
     openContextFile(root, node.path);
-  }, [addOpenPath, files, openContextFile, root, setSelectedPath]);
+  }, [addOpenPath, files, openContextFile, root, serverBaseUrl, setSelectedPath]);
 
   const toggleDirectory = React.useCallback(async (dirPath: string) => {
     const normalized = normalizePath(dirPath);

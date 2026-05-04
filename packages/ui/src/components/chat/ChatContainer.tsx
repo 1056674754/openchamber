@@ -492,6 +492,7 @@ export const ChatContainer: React.FC = () => {
 
     const { isMobile } = useDeviceInfo();
     const draftOpen = Boolean(newSessionDraft?.open);
+    const draftSubmitting = Boolean(newSessionDraft?.submitting);
     const isDesktopExpandedInput = isExpandedInput && !isMobile;
     const messageListRef = React.useRef<MessageListHandle | null>(null);
 
@@ -817,7 +818,7 @@ export const ChatContainer: React.FC = () => {
 			<div className="relative flex flex-col h-full bg-background transform-gpu">
 				{!isDesktopExpandedInput ? (
 				<div className="flex-1 flex items-center justify-center">
-					<ChatEmptyState />
+					<ChatEmptyState isSubmitting={draftSubmitting} />
 				</div>
 				) : null}
                 <div

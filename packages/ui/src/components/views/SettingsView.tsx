@@ -109,7 +109,7 @@ const pageOrder: SettingsPageSlug[] = [
 function buildRuntimeContext(isDesktop: boolean): SettingsRuntimeContext {
   const isVSCode = isVSCodeRuntime();
   const isWeb = !isDesktop && isWebRuntime();
-  return { isVSCode, isWeb, isDesktop };
+  return { isVSCode, isWeb, isDesktop, isDesktopServer: isDesktop };
 }
 
 function isPageAvailable(page: SettingsPageMeta, ctx: SettingsRuntimeContext): boolean {
@@ -271,9 +271,25 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
     return isDesktopShell();
   }, []);
 
-  // keep platform check available for future window chrome tweaks
+  const [runtimeCtx, setRuntimeCtx] = React.useState<SettingsRuntimeContext>(
+    () => buildRuntimeContext(isDesktopApp),
+  );
 
-  const runtimeCtx = React.useMemo(() => buildRuntimeContext(isDesktopApp), [isDesktopApp]);
+  React.useEffect(() => {
+    if (isDesktopApp) return;
+    const controller = new AbortController();
+    fetch('/api/system/info', { signal: controller.signal })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (controller.signal.aborted) return;
+        const serverRuntime = typeof data?.runtime === 'string' ? data.runtime : null;
+        if (serverRuntime === 'desktop') {
+          setRuntimeCtx((prev) => (prev.isDesktopServer ? prev : { ...prev, isDesktopServer: true }));
+        }
+      })
+      .catch(() => {});
+    return () => controller.abort();
+  }, [isDesktopApp]);
 
   const visiblePages = React.useMemo(() => {
     return SETTINGS_PAGE_METADATA

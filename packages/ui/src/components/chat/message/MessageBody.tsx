@@ -5,6 +5,8 @@ import UserTextPart from './parts/UserTextPart';
 import ToolPart from './parts/ToolPart';
 import AssistantTextPart from './parts/AssistantTextPart';
 import ReasoningPart from './parts/ReasoningPart';
+import BackgroundTaskPart from './parts/BackgroundTaskPart';
+import { isBackgroundTaskPart } from './partUtils';
 import { MessageFilesDisplay } from '../FileAttachment';
 import { TurnChangedFilesDropdown } from '../TurnChangedFilesDropdown';
 import type { ToolPart as ToolPartType } from '@opencode-ai/sdk/v2';
@@ -1000,6 +1002,7 @@ const AssistantMessageBody = React.memo(({
     const createSessionFromAssistantMessage = useSessionUIStore((state) => state.createSessionFromAssistantMessage);
     const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
     const openMultiRunLauncherWithPrompt = useUIStore((state) => state.openMultiRunLauncherWithPrompt);
+    const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
     const projects = useProjectsStore((state) => state.projects);
     const effectiveDirectory = useEffectiveDirectory();
     const sessions = useSessions();
@@ -1515,6 +1518,16 @@ const AssistantMessageBody = React.memo(({
                     i += 1;
                     continue;
                 }
+                if (isBackgroundTaskPart(part)) {
+                    rendered.push(
+                        <BackgroundTaskPart
+                            key={`background-task-${messageId}-${i}`}
+                            part={part}
+                        />
+                    );
+                    i++;
+                    continue;
+                }
                 rendered.push(
                     <div key={`assistant-text-${messageId}-${i}`} ref={messageTextContentRef} data-message-text-export-source="true">
                         <AssistantTextPart
@@ -1764,7 +1777,7 @@ const AssistantMessageBody = React.memo(({
                 </TooltipTrigger>
                 <TooltipContent sideOffset={6}>{t('chat.messageBody.actions.startNewSession')}</TooltipContent>
             </Tooltip>
-            {!isVSCode ? (
+            {!isVSCode && multiRunEnabled ? (
                 <Tooltip>
                     <TooltipTrigger asChild>
                         <Button

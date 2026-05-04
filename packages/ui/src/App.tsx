@@ -39,6 +39,8 @@ import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { opencodeClient } from '@/lib/opencode/client';
 import { SyncProvider, useSessions } from '@/sync/sync-context';
+import { MultiServerSyncLayer } from '@/sync/MultiServerSyncLayer';
+import { RemoteProjectDiscovery } from '@/sync/RemoteProjectDiscovery';
 import { useSync } from '@/sync/use-sync';
 import { setOptimisticRefs } from '@/sync/session-actions';
 import { useFontPreferences } from '@/hooks/useFontPreferences';
@@ -913,6 +915,8 @@ function App({ apis }: AppProps) {
   return (
     <ErrorBoundary>
       <SyncProvider sdk={opencodeClient.getSdkClient()} directory={currentDirectory || ''}>
+        <MultiServerSyncLayer />
+        <RemoteProjectDiscovery />
         <RuntimeAPIProvider apis={apis}>
           <FireworksProvider>
             <VoiceProvider>
