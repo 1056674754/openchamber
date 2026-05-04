@@ -16,6 +16,13 @@ export type ActivityRenderMode = 'collapsed' | 'summary';
 export type SessionRetentionAction = 'archive' | 'delete';
 export type TimeFormatPreference = 'auto' | '12h' | '24h';
 export type WeekStartPreference = 'auto' | 'sunday' | 'monday';
+// [2026-05-04] Session sort mode — controls session list ordering.
+// [Custom] Added 2025-05: Session sort mode — controls whether sessions sort by
+// last-updated time (original behavior) or by creation time (stable ordering).
+// Design purpose: prevents sessions from jumping around when multitasking.
+// Default 'created-desc' keeps sessions stable during multi-task workflows.
+export type SessionSortMode = 'updated-desc' | 'created-desc';
+export type PinMode = 'global' | 'per-project';
 
 type ContextPanelTab = {
   id: string;
@@ -508,6 +515,8 @@ interface UIStore {
   showReasoningTraces: boolean;
   chatRenderMode: ChatRenderMode;
   activityRenderMode: ActivityRenderMode;
+  pinMode: PinMode;
+  sessionSortMode: SessionSortMode;
   showDeletionDialog: boolean;
   autoDeleteEnabled: boolean;
   autoDeleteAfterDays: number;
@@ -576,7 +585,9 @@ interface UIStore {
   isMobileSessionStatusBarCollapsed: boolean;
   isExpandedInput: boolean;
   reportUsage: boolean;
+  multiRunEnabled: boolean;
   shortcutOverrides: Record<string, ShortcutCombo>;
+  autoCollapseSidebarOnContextPanel: boolean;
 
   setTheme: (theme: 'light' | 'dark' | 'system') => void;
   toggleSidebar: () => void;
@@ -632,6 +643,8 @@ interface UIStore {
   setShowReasoningTraces: (value: boolean) => void;
   setChatRenderMode: (value: ChatRenderMode) => void;
   setActivityRenderMode: (value: ActivityRenderMode) => void;
+  setPinMode: (value: PinMode) => void;
+  setSessionSortMode: (value: SessionSortMode) => void;
   setShowDeletionDialog: (value: boolean) => void;
   setAutoDeleteEnabled: (value: boolean) => void;
   setAutoDeleteAfterDays: (days: number) => void;
@@ -706,6 +719,8 @@ interface UIStore {
   openMultiRunLauncher: () => void;
   openMultiRunLauncherWithPrompt: (prompt: string) => void;
   setReportUsage: (value: boolean) => void;
+  setMultiRunEnabled: (value: boolean) => void;
+  setAutoCollapseSidebarOnContextPanel: (value: boolean) => void;
   setShortcutOverride: (actionId: string, combo: ShortcutCombo) => void;
   clearShortcutOverride: (actionId: string) => void;
   resetAllShortcutOverrides: () => void;
@@ -759,6 +774,8 @@ export const useUIStore = create<UIStore>()(
         showReasoningTraces: true,
         chatRenderMode: 'live',
         activityRenderMode: 'summary',
+        pinMode: 'per-project',
+        sessionSortMode: 'created-desc',
         showDeletionDialog: true,
         autoDeleteEnabled: false,
         autoDeleteAfterDays: 30,
@@ -823,7 +840,9 @@ export const useUIStore = create<UIStore>()(
         isMobileSessionStatusBarCollapsed: false,
         isExpandedInput: false,
         reportUsage: true,
+        multiRunEnabled: true,
         shortcutOverrides: {},
+        autoCollapseSidebarOnContextPanel: false,
 
         setTheme: (theme) => {
           set({ theme });
@@ -1369,6 +1388,14 @@ export const useUIStore = create<UIStore>()(
           set({ activityRenderMode: value });
         },
 
+        setPinMode: (value) => {
+          set({ pinMode: value });
+        },
+
+        setSessionSortMode: (value) => {
+          set({ sessionSortMode: value });
+        },
+
         setShowDeletionDialog: (value) => {
           set({ showDeletionDialog: value });
         },
@@ -1742,6 +1769,8 @@ export const useUIStore = create<UIStore>()(
         },
 
         openMultiRunLauncher: () => {
+          const { multiRunEnabled } = get();
+          if (!multiRunEnabled) return;
           set({
             isMultiRunLauncherOpen: true,
             multiRunLauncherPrefillPrompt: '',
@@ -1750,6 +1779,8 @@ export const useUIStore = create<UIStore>()(
         },
 
         openMultiRunLauncherWithPrompt: (prompt) => {
+          const { multiRunEnabled } = get();
+          if (!multiRunEnabled) return;
           set({
             isMultiRunLauncherOpen: true,
             multiRunLauncherPrefillPrompt: prompt,
@@ -1835,6 +1866,12 @@ export const useUIStore = create<UIStore>()(
         },
         setReportUsage: (value) => {
           set({ reportUsage: value });
+        },
+        setMultiRunEnabled: (value) => {
+          set({ multiRunEnabled: value });
+        },
+        setAutoCollapseSidebarOnContextPanel: (value: boolean) => {
+          set({ autoCollapseSidebarOnContextPanel: value });
         },
         viewPagerPage: 'center',
         setViewPagerPage: (page: 'left' | 'center' | 'right') => {
@@ -1983,6 +2020,8 @@ export const useUIStore = create<UIStore>()(
           showReasoningTraces: state.showReasoningTraces,
           chatRenderMode: state.chatRenderMode,
           activityRenderMode: state.activityRenderMode,
+          pinMode: state.pinMode,
+          sessionSortMode: state.sessionSortMode,
           showDeletionDialog: state.showDeletionDialog,
           autoDeleteEnabled: state.autoDeleteEnabled,
           autoDeleteAfterDays: state.autoDeleteAfterDays,

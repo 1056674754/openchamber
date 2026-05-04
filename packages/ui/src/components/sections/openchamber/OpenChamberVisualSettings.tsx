@@ -220,7 +220,7 @@ const normalizeUserMessageRenderingMode = (mode: unknown): 'markdown' | 'plain' 
     return mode === 'markdown' ? 'markdown' : 'plain';
 };
 
-export type VisibleSetting = 'theme' | 'pwaInstallName' | 'pwaOrientation' | 'timeFormat' | 'weekStart' | 'fontSize' | 'terminalFontSize' | 'spacing' | 'inputBarOffset' | 'mermaidRendering' | 'userMessageRendering' | 'chatRenderMode' | 'messageTransport' | 'activityRenderMode' | 'stickyUserHeader' | 'wideChatLayout' | 'splitAssistantMessageActions' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'reasoning' | 'showToolFileIcons' | 'expandedTools' | 'queueMode' | 'terminalQuickKeys' | 'persistDraft' | 'inputSpellcheck' | 'reportUsage';
+export type VisibleSetting = 'theme' | 'pwaInstallName' | 'pwaOrientation' | 'timeFormat' | 'weekStart' | 'fontSize' | 'terminalFontSize' | 'spacing' | 'inputBarOffset' | 'mermaidRendering' | 'userMessageRendering' | 'chatRenderMode' | 'messageTransport' | 'activityRenderMode' | 'stickyUserHeader' | 'wideChatLayout' | 'splitAssistantMessageActions' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'reasoning' | 'showToolFileIcons' | 'expandedTools' | 'queueMode' | 'terminalQuickKeys' | 'persistDraft' | 'inputSpellcheck' | 'reportUsage' | 'multiRun';
 
 interface OpenChamberVisualSettingsProps {
     /** Which settings to show. If undefined, shows all. */
@@ -306,11 +306,19 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const reportUsage = useUIStore(state => state.reportUsage);
     const setReportUsage = useUIStore(state => state.setReportUsage);
 
+    const multiRunEnabled = useUIStore(state => state.multiRunEnabled);
+    const setMultiRunEnabled = useUIStore(state => state.setMultiRunEnabled);
+
     // Sync reportUsage changes to server settings
     const handleReportUsageChange = React.useCallback((enabled: boolean) => {
         setReportUsage(enabled);
         void updateDesktopSettings({ reportUsage: enabled });
     }, [setReportUsage]);
+
+    const handleMultiRunEnabledChange = React.useCallback((enabled: boolean) => {
+        setMultiRunEnabled(enabled);
+        void updateDesktopSettings({ multiRunEnabled: enabled });
+    }, [setMultiRunEnabled]);
 
     const shouldAnimateChatPreview = isSettingsDialogOpen
         && (visibleSettings ? visibleSettings.includes('chatRenderMode') : true);
@@ -486,7 +494,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         || shouldShow('persistDraft')
         || shouldShow('showToolFileIcons')
         || shouldShow('expandedTools')
-        || (!isMobile && shouldShow('inputSpellcheck'));
+        || (!isMobile && shouldShow('inputSpellcheck'))
+        || shouldShow('multiRun');
 
     const showPwaInstallNameSetting = shouldShow('pwaInstallName') && isWebRuntime() && browserTab && !isDesktopShell() && !isVSCode;
     const showPwaOrientationSetting = shouldShow('pwaOrientation') && isWebRuntime() && !isDesktopShell() && !isVSCode;
@@ -1459,7 +1468,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                 </div>
                             )}
 
-                            {(shouldShow('stickyUserHeader') || shouldShow('wideChatLayout') || shouldShow('splitAssistantMessageActions') || (shouldShow('mobileStatusBar') && isMobile) || shouldShow('dotfiles') || shouldShow('queueMode') || shouldShow('persistDraft') || shouldShow('showToolFileIcons') || (!isMobile && shouldShow('inputSpellcheck')) || shouldShow('reasoning')) && (
+                            {(shouldShow('stickyUserHeader') || shouldShow('wideChatLayout') || shouldShow('splitAssistantMessageActions') || (shouldShow('mobileStatusBar') && isMobile) || shouldShow('dotfiles') || shouldShow('queueMode') || shouldShow('persistDraft') || shouldShow('showToolFileIcons') || (!isMobile && shouldShow('inputSpellcheck')) || shouldShow('reasoning') || shouldShow('multiRun')) && (
                                 <section className="p-2 space-y-0.5">
                                     {shouldShow('reasoning') && (
                                         <div
@@ -1659,6 +1668,39 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                     </TooltipTrigger>
                                                     <TooltipContent sideOffset={8} className="max-w-xs">
                                                         {t('settings.openchamber.visual.field.queueMessagesByDefaultTooltip', { modifier: getModifierLabel() })}
+                                                    </TooltipContent>
+                                                </Tooltip>
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {shouldShow('multiRun') && (
+                                        <div
+                                            className="group flex cursor-pointer items-center gap-2 py-0.5"
+                                            role="button"
+                                            tabIndex={0}
+                                            aria-pressed={multiRunEnabled}
+                                            onClick={() => handleMultiRunEnabledChange(!multiRunEnabled)}
+                                            onKeyDown={(event) => {
+                                                if (event.key === ' ' || event.key === 'Enter') {
+                                                    event.preventDefault();
+                                                    handleMultiRunEnabledChange(!multiRunEnabled);
+                                                }
+                                            }}
+                                        >
+                                            <Checkbox
+                                                checked={multiRunEnabled}
+                                                onChange={handleMultiRunEnabledChange}
+                                                ariaLabel={t('settings.openchamber.visual.field.multiRunEnabledAria')}
+                                            />
+                                            <div className="flex min-w-0 items-center gap-1.5">
+                                                <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.multiRunEnabled')}</span>
+                                                <Tooltip>
+                                                    <TooltipTrigger asChild>
+                                                        <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
+                                                    </TooltipTrigger>
+                                                    <TooltipContent sideOffset={8} className="max-w-xs">
+                                                        {t('settings.openchamber.visual.field.multiRunEnabledTooltip')}
                                                     </TooltipContent>
                                                 </Tooltip>
                                             </div>

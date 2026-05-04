@@ -35,6 +35,10 @@ export const DefaultsSettings: React.FC = () => {
   const settingsDefaultFileViewerPreview = useConfigStore((state) => state.settingsDefaultFileViewerPreview);
   const showDeletionDialog = useUIStore((state) => state.showDeletionDialog);
   const setShowDeletionDialog = useUIStore((state) => state.setShowDeletionDialog);
+  const pinMode = useUIStore((state) => state.pinMode);
+  const setPinMode = useUIStore((state) => state.setPinMode);
+  const sessionSortMode = useUIStore((state) => state.sessionSortMode);
+  const setSessionSortMode = useUIStore((state) => state.setSessionSortMode);
   const providers = useConfigStore((state) => state.providers);
 
   const [defaultModel, setDefaultModel] = React.useState<string | undefined>();
@@ -290,6 +294,52 @@ export const DefaultsSettings: React.FC = () => {
           </div>
           <div className="flex min-w-0 flex-1 items-center gap-2 sm:w-fit sm:flex-initial">
             <AgentSelector agentName={defaultAgent || ''} onChange={handleAgentChange} />
+          </div>
+        </div>
+
+        <div className={cn('flex flex-col gap-2 py-1 sm:flex-row sm:items-center sm:gap-8')}>
+          <div className="flex min-w-0 flex-col sm:w-56 shrink-0">
+            <span className="typography-ui-label text-foreground">{t('settings.openchamber.defaults.field.pinMode')}</span>
+          </div>
+          <div className="flex flex-wrap items-center gap-1">
+            {(['global', 'per-project'] as const).map((mode) => (
+              <button
+                key={mode}
+                type="button"
+                className={cn(
+                  'flex items-center gap-1 px-2.5 py-1.5 rounded-md text-xs whitespace-nowrap transition-colors border !min-h-0 leading-none select-none !font-normal',
+                  pinMode === mode
+                    ? 'border-[var(--primary-base)]/60 text-[var(--primary-base)]/80 bg-[var(--primary-base)]/5'
+                    : 'border-[var(--interactive-border)] text-[var(--surface-foreground)] bg-[var(--surface-elevated)] hover:bg-[var(--interactive-hover)]'
+                )}
+                onClick={() => { setPinMode(mode); updateDesktopSettings({ pinMode: mode }).catch(console.warn); }}
+              >
+                {t(`settings.openchamber.defaults.field.pinMode${mode === 'global' ? 'Global' : 'PerProject'}`)}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className={cn('flex flex-col gap-2 py-1 sm:flex-row sm:items-center sm:gap-8')}>
+          <div className="flex min-w-0 flex-col sm:w-56 shrink-0">
+            <span className="typography-ui-label text-foreground">{t('settings.openchamber.defaults.field.sessionSortMode')}</span>
+          </div>
+          <div className="flex flex-wrap items-center gap-1">
+            {(['updated-desc', 'created-desc'] as const).map((mode) => (
+              <button
+                key={mode}
+                type="button"
+                className={cn(
+                  'flex items-center gap-1 px-2.5 py-1.5 rounded-md text-xs whitespace-nowrap transition-colors border !min-h-0 leading-none select-none !font-normal',
+                  sessionSortMode === mode
+                    ? 'border-[var(--primary-base)]/60 text-[var(--primary-base)]/80 bg-[var(--primary-base)]/5'
+                    : 'border-[var(--interactive-border)] text-[var(--surface-foreground)] bg-[var(--surface-elevated)] hover:bg-[var(--interactive-hover)]'
+                )}
+                onClick={() => { setSessionSortMode(mode); updateDesktopSettings({ sessionSortMode: mode }).catch(console.warn); }}
+              >
+                {t(`settings.openchamber.defaults.field.sessionSortMode${mode === 'updated-desc' ? 'Updated' : 'Created'}`)}
+              </button>
+            ))}
           </div>
         </div>
 
