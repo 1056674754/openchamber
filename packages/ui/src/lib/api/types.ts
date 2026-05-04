@@ -549,6 +549,7 @@ export interface ProjectEntry {
   lastOpenedAt?: number;
   sidebarCollapsed?: boolean;
   serverId?: string;
+  unavailable?: boolean;
 }
 
 export interface SettingsPayload {

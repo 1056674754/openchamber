@@ -53,6 +53,7 @@ interface ProjectsStore {
   validateProjectPath: (path: string) => ProjectPathValidationResult;
   synchronizeFromSettings: (settings: DesktopSettings) => void;
   getActiveProject: () => ProjectEntry | null;
+  markProjectAvailability: (id: string, available: boolean) => void;
 }
 
 const safeStorage = getSafeStorage();
@@ -175,7 +176,7 @@ const sanitizeProjects = (value: unknown): ProjectEntry[] => {
 
   const result: ProjectEntry[] = [];
   const seenIds = new Set<string>();
-  const seenPaths = new Set<string>();
+  const seenKeys = new Set<string>();
 
   for (const entry of value) {
     if (!entry || typeof entry !== 'object') continue;
@@ -187,12 +188,18 @@ const sanitizeProjects = (value: unknown): ProjectEntry[] => {
     const normalizedPath = normalizeProjectPath(rawPath);
     if (!normalizedPath) continue;
 
-    const id = createProjectIdFromPath(normalizedPath);
+    const hasServerId = typeof candidate.serverId === 'string' && candidate.serverId.trim().length > 0;
+    const serverId = hasServerId ? (candidate.serverId as string).trim() : undefined;
+
+    const id = serverId
+      ? createProjectIdFromPath(`${serverId}:${normalizedPath}`)
+      : createProjectIdFromPath(normalizedPath);
     if (!id) continue;
 
-    if (seenIds.has(id) || seenPaths.has(normalizedPath)) continue;
+    const dedupKey = `${serverId ?? ''}:${normalizedPath}`;
+    if (seenIds.has(id) || seenKeys.has(dedupKey)) continue;
     seenIds.add(id);
-    seenPaths.add(normalizedPath);
+    seenKeys.add(dedupKey);
 
     const project: ProjectEntry = {
       id,
@@ -235,6 +242,9 @@ const sanitizeProjects = (value: unknown): ProjectEntry[] => {
     }
     if (typeof candidate.serverId === 'string' && candidate.serverId.trim().length > 0) {
       project.serverId = candidate.serverId.trim();
+    }
+    if (candidate.unavailable === true) {
+      project.unavailable = true;
     }
     result.push(project);
   }
@@ -332,9 +342,17 @@ const getVSCodeWorkspaceProject = (): { projects: ProjectEntry[]; activeProjectI
 const vscodeWorkspace = getVSCodeWorkspaceProject();
 const effectiveInitialProjects = vscodeWorkspace?.projects ?? initialProjects;
 const persistedInitialActiveProjectId = vscodeWorkspace?.activeProjectId ?? readPersistedActiveProjectId();
-const initialActiveProjectId = effectiveInitialProjects.some((project) => project.id === persistedInitialActiveProjectId)
-  ? persistedInitialActiveProjectId
-  : effectiveInitialProjects[0]?.id ?? null;
+let initialActiveProjectId: string | null = null;
+if (persistedInitialActiveProjectId) {
+  if (effectiveInitialProjects.some((project) => project.id === persistedInitialActiveProjectId)) {
+    initialActiveProjectId = persistedInitialActiveProjectId;
+  } else {
+    initialActiveProjectId = effectiveInitialProjects[0]?.id ?? null;
+  }
+}
+if (!initialActiveProjectId) {
+  initialActiveProjectId = effectiveInitialProjects[0]?.id ?? null;
+}
 
 if (vscodeWorkspace) {
   cacheProjects(effectiveInitialProjects, initialActiveProjectId);
@@ -401,7 +419,7 @@ export const useProjectsStore = create<ProjectsStore>()(
 
     ensureRemoteProject: (path: string, serverId: string, label?: string) => {
       const normalizedPath = path.replace(/\\/g, '/').replace(/\/+$/, '') || '/';
-      const id = createProjectIdFromPath(normalizedPath);
+      const id = createProjectIdFromPath(`${serverId}:${normalizedPath}`);
       if (!id) return null;
 
       const existing = get().projects.find((p) => p.id === id);
@@ -458,6 +476,20 @@ export const useProjectsStore = create<ProjectsStore>()(
       } else {
         void useDirectoryStore.getState().goHome();
       }
+    },
+
+    markProjectAvailability: (id: string, available: boolean) => {
+      const current = get();
+      const project = current.projects.find((p) => p.id === id);
+      if (!project || !project.serverId) return;
+      if (available && !project.unavailable) return;
+      if (!available && project.unavailable) return;
+
+      const nextProjects = current.projects.map((p) =>
+        p.id === id ? { ...p, unavailable: available ? undefined : true as const } : p,
+      );
+      set({ projects: nextProjects });
+      cacheProjects(nextProjects, current.activeProjectId);
     },
 
     setActiveProject: (id: string) => {
@@ -737,8 +769,16 @@ export const useProjectsStore = create<ProjectsStore>()(
       set({ projects: mergedProjects, activeProjectId: incomingActive });
       cacheProjects(mergedProjects, incomingActive);
 
-      if (incomingActive) {
-        const activeProject = mergedProjects.find((project) => project.id === incomingActive);
+      const resolvedActive = incomingActive && mergedProjects.some((p) => p.id === incomingActive)
+        ? incomingActive
+        : mergedProjects[0]?.id ?? null;
+      if (resolvedActive !== incomingActive) {
+        set({ activeProjectId: resolvedActive });
+        cacheProjects(mergedProjects, resolvedActive);
+      }
+
+      if (resolvedActive) {
+        const activeProject = mergedProjects.find((project) => project.id === resolvedActive);
         if (activeProject) {
           opencodeClient.setDirectory(activeProject.path);
           useDirectoryStore.getState().setDirectory(activeProject.path, { showOverlay: false });
