@@ -31,6 +31,7 @@ import { refreshGlobalSessions } from '@/stores/useGlobalSessionsStore';
 import { subscribeOpenchamberEvents } from '@/lib/openchamberEvents';
 import { PROJECT_COLOR_MAP, PROJECT_ICON_MAP, getProjectIconImageUrl } from '@/lib/projectMeta';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
+import { serverRegistry } from '@/lib/opencode/server-registry';
 import { cn, formatDirectoryName } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 import type { ProjectEntry } from '@/lib/api/types';
@@ -204,6 +205,11 @@ export function ScheduledTasksDialog() {
     [projects, selectedProjectID],
   );
 
+  const scheduledTasksBaseUrl = React.useMemo(() => {
+    if (!selectedProject?.serverId || selectedProject.serverId === 'default') return undefined;
+    return serverRegistry.get(selectedProject.serverId)?.config.baseUrl;
+  }, [selectedProject]);
+
   const renderProjectLabel = React.useCallback((project: ProjectEntry) => {
     const displayLabel = project.label?.trim() || formatDirectoryName(project.path, homeDirectory || undefined);
     const imageUrl = getProjectIconImageUrl(
@@ -244,7 +250,7 @@ export function ScheduledTasksDialog() {
       setLoading(true);
     }
     try {
-      const nextTasks = await fetchScheduledTasks(projectID);
+      const nextTasks = await fetchScheduledTasks(projectID, scheduledTasksBaseUrl);
       nextTasks.sort((a, b) => {
         if (a.enabled !== b.enabled) {
           return a.enabled ? -1 : 1;
@@ -266,7 +272,7 @@ export function ScheduledTasksDialog() {
         setLoading(false);
       }
     }
-  }, [t]);
+  }, [t, scheduledTasksBaseUrl]);
 
   React.useEffect(() => {
     if (!open) {
@@ -313,10 +319,10 @@ export function ScheduledTasksDialog() {
     if (!selectedProjectID) {
       throw new Error(t('sessions.scheduledTasks.dialog.error.chooseProjectFirst'));
     }
-    await upsertScheduledTask(selectedProjectID, taskDraft);
+    await upsertScheduledTask(selectedProjectID, taskDraft, scheduledTasksBaseUrl);
     await reloadTasks(selectedProjectID);
     toast.success(t('sessions.scheduledTasks.dialog.toast.saved'));
-  }, [selectedProjectID, reloadTasks, t]);
+  }, [selectedProjectID, reloadTasks, t, scheduledTasksBaseUrl]);
 
   const handleToggleEnabled = React.useCallback(async (task: ScheduledTask, enabled: boolean) => {
     if (!selectedProjectID) {
@@ -328,7 +334,7 @@ export function ScheduledTasksDialog() {
       await upsertScheduledTask(selectedProjectID, {
         ...task,
         enabled,
-      });
+      }, scheduledTasksBaseUrl);
       await reloadTasks(selectedProjectID, { silent: true });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : t('sessions.scheduledTasks.dialog.toast.updateFailed'));
@@ -336,7 +342,7 @@ export function ScheduledTasksDialog() {
     } finally {
       setMutatingTaskID(null);
     }
-  }, [selectedProjectID, reloadTasks, t]);
+  }, [selectedProjectID, reloadTasks, t, scheduledTasksBaseUrl]);
 
   const handleDeleteTask = React.useCallback(async (task: ScheduledTask) => {
     if (!selectedProjectID) {
@@ -349,7 +355,7 @@ export function ScheduledTasksDialog() {
 
     setMutatingTaskID(task.id);
     try {
-      await deleteScheduledTask(selectedProjectID, task.id);
+      await deleteScheduledTask(selectedProjectID, task.id, scheduledTasksBaseUrl);
       await reloadTasks(selectedProjectID, { silent: true });
       toast.success(t('sessions.scheduledTasks.dialog.toast.deleted'));
     } catch (error) {
@@ -357,7 +363,7 @@ export function ScheduledTasksDialog() {
     } finally {
       setMutatingTaskID(null);
     }
-  }, [selectedProjectID, reloadTasks, t]);
+  }, [selectedProjectID, reloadTasks, t, scheduledTasksBaseUrl]);
 
   const handleRunNow = React.useCallback(async (task: ScheduledTask) => {
     if (!selectedProjectID) {
@@ -365,7 +371,7 @@ export function ScheduledTasksDialog() {
     }
     setMutatingTaskID(task.id);
     try {
-      await runScheduledTaskNow(selectedProjectID, task.id);
+      await runScheduledTaskNow(selectedProjectID, task.id, scheduledTasksBaseUrl);
       await Promise.all([
         reloadTasks(selectedProjectID, { silent: true }),
         refreshGlobalSessions(),
@@ -376,7 +382,7 @@ export function ScheduledTasksDialog() {
     } finally {
       setMutatingTaskID(null);
     }
-  }, [selectedProjectID, reloadTasks, t]);
+  }, [selectedProjectID, reloadTasks, t, scheduledTasksBaseUrl]);
 
   const projectSelector = (
     <div className="flex flex-col items-start gap-1">
