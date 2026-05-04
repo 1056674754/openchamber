@@ -36,6 +36,9 @@ export interface SettingsRuntimeContext {
   isVSCode: boolean;
   isWeb: boolean;
   isDesktop: boolean;
+  /** True when the server was started by the Desktop app (Electron), even if the
+   *  client is a plain browser accessing it via tunnel from a phone/iPad. */
+  isDesktopServer: boolean;
 }
 
 export interface SettingsPageMeta {
@@ -81,7 +84,7 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
     group: 'projects',
     kind: 'split',
     keywords: ['ssh', 'remote', 'instances', 'tunnels', 'forwarding', 'connection'],
-    isAvailable: (ctx) => ctx.isDesktop && !ctx.isWeb && !ctx.isVSCode,
+    isAvailable: (ctx) => ctx.isDesktopServer,
   },
   {
     slug: 'providers',
