@@ -1,6 +1,6 @@
 {
   "name": "@openchamber/electron",
-  "version": "1.9.10",
+  "version": "1.9.10-modified-by-sscity",
   "private": true,
   "description": "Electron desktop runtime for OpenChamber",
   "author": "OpenChamber",
