@@ -52,9 +52,14 @@ const ensureProjectID = (projectID: string): string => {
   return trimmed;
 };
 
-export const fetchScheduledTasks = async (projectID: string): Promise<ScheduledTask[]> => {
+const projectUrl = (projectID: string, suffix: string, baseUrl?: string): string => {
+  const path = `/api/projects/${encodeURIComponent(projectID)}${suffix}`;
+  return baseUrl ? `${baseUrl.replace(/\/+$/, '')}${path}` : path;
+};
+
+export const fetchScheduledTasks = async (projectID: string, baseUrl?: string): Promise<ScheduledTask[]> => {
   const safeProjectID = ensureProjectID(projectID);
-  const response = await fetch(`/api/projects/${encodeURIComponent(safeProjectID)}/scheduled-tasks`);
+  const response = await fetch(projectUrl(safeProjectID, '/scheduled-tasks', baseUrl));
   if (!response.ok) {
     throw new Error(await parseErrorMessage(response, 'Failed to load scheduled tasks'));
   }
@@ -65,9 +70,9 @@ export const fetchScheduledTasks = async (projectID: string): Promise<ScheduledT
   return parsed.tasks as ScheduledTask[];
 };
 
-export const upsertScheduledTask = async (projectID: string, task: Partial<ScheduledTask>): Promise<ScheduledTask[]> => {
+export const upsertScheduledTask = async (projectID: string, task: Partial<ScheduledTask>, baseUrl?: string): Promise<ScheduledTask[]> => {
   const safeProjectID = ensureProjectID(projectID);
-  const response = await fetch(`/api/projects/${encodeURIComponent(safeProjectID)}/scheduled-tasks`, {
+  const response = await fetch(projectUrl(safeProjectID, '/scheduled-tasks', baseUrl), {
     method: 'PUT',
     headers: {
       'content-type': 'application/json',
@@ -85,10 +90,10 @@ export const upsertScheduledTask = async (projectID: string, task: Partial<Sched
   return parsed.tasks as ScheduledTask[];
 };
 
-export const deleteScheduledTask = async (projectID: string, taskID: string): Promise<ScheduledTask[]> => {
+export const deleteScheduledTask = async (projectID: string, taskID: string, baseUrl?: string): Promise<ScheduledTask[]> => {
   const safeProjectID = ensureProjectID(projectID);
   const safeTaskID = ensureProjectID(taskID);
-  const response = await fetch(`/api/projects/${encodeURIComponent(safeProjectID)}/scheduled-tasks/${encodeURIComponent(safeTaskID)}`, {
+  const response = await fetch(projectUrl(safeProjectID, `/scheduled-tasks/${encodeURIComponent(safeTaskID)}`, baseUrl), {
     method: 'DELETE',
     headers: {
       accept: 'application/json',
@@ -104,10 +109,10 @@ export const deleteScheduledTask = async (projectID: string, taskID: string): Pr
   return parsed.tasks as ScheduledTask[];
 };
 
-export const runScheduledTaskNow = async (projectID: string, taskID: string): Promise<{ sessionId?: string }> => {
+export const runScheduledTaskNow = async (projectID: string, taskID: string, baseUrl?: string): Promise<{ sessionId?: string }> => {
   const safeProjectID = ensureProjectID(projectID);
   const safeTaskID = ensureProjectID(taskID);
-  const response = await fetch(`/api/projects/${encodeURIComponent(safeProjectID)}/scheduled-tasks/${encodeURIComponent(safeTaskID)}/run`, {
+  const response = await fetch(projectUrl(safeProjectID, `/scheduled-tasks/${encodeURIComponent(safeTaskID)}/run`, baseUrl), {
     method: 'POST',
     headers: {
       accept: 'application/json',

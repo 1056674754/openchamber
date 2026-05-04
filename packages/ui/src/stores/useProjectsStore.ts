@@ -714,18 +714,31 @@ export const useProjectsStore = create<ProjectsStore>()(
         return;
       }
 
-      const projectsChanged = JSON.stringify(current.projects) !== JSON.stringify(incomingProjects);
+      const currentRemoteProjectIds = new Set(
+        current.projects
+          .filter((p) => typeof p.serverId === 'string' && p.serverId.trim().length > 0)
+          .map((p) => p.id),
+      );
+      const incomingIds = new Set(incomingProjects.map((p) => p.id));
+      const missingRemoteProjects = current.projects.filter(
+        (p) => currentRemoteProjectIds.has(p.id) && !incomingIds.has(p.id),
+      );
+      const mergedProjects = missingRemoteProjects.length > 0
+        ? [...incomingProjects, ...missingRemoteProjects]
+        : incomingProjects;
+
+      const projectsChanged = JSON.stringify(current.projects) !== JSON.stringify(mergedProjects);
       const activeChanged = current.activeProjectId !== incomingActive;
 
       if (!projectsChanged && !activeChanged) {
         return;
       }
 
-      set({ projects: incomingProjects, activeProjectId: incomingActive });
-      cacheProjects(incomingProjects, incomingActive);
+      set({ projects: mergedProjects, activeProjectId: incomingActive });
+      cacheProjects(mergedProjects, incomingActive);
 
       if (incomingActive) {
-        const activeProject = incomingProjects.find((project) => project.id === incomingActive);
+        const activeProject = mergedProjects.find((project) => project.id === incomingActive);
         if (activeProject) {
           opencodeClient.setDirectory(activeProject.path);
           useDirectoryStore.getState().setDirectory(activeProject.path, { showOverlay: false });
