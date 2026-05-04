@@ -29,7 +29,7 @@ const getRetryPolicy = (options?: TerminalStreamOptions) => {
 
 export const createWebTerminalAPI = (): TerminalAPI => ({
   async createSession(options: CreateTerminalOptions): Promise<TerminalSession> {
-    return createTerminalSession(options);
+    return createTerminalSession(options, options.baseUrl);
   },
 
   connect(sessionId: string, handlers: TerminalHandlers, options?: TerminalStreamOptions) {
@@ -37,7 +37,8 @@ export const createWebTerminalAPI = (): TerminalAPI => ({
       sessionId,
       handlers.onEvent,
       handlers.onError,
-      getRetryPolicy(options)
+      getRetryPolicy(options),
+      options?.baseUrl
     );
 
     return {
@@ -45,16 +46,16 @@ export const createWebTerminalAPI = (): TerminalAPI => ({
     };
   },
 
-  async sendInput(sessionId: string, input: string): Promise<void> {
-    await sendTerminalInput(sessionId, input);
+  async sendInput(sessionId: string, input: string, baseUrl?: string): Promise<void> {
+    await sendTerminalInput(sessionId, input, baseUrl);
   },
 
   async resize(payload: ResizeTerminalPayload): Promise<void> {
-    await resizeTerminal(payload.sessionId, payload.cols, payload.rows);
+    await resizeTerminal(payload.sessionId, payload.cols, payload.rows, payload.baseUrl);
   },
 
-  async close(sessionId: string): Promise<void> {
-    await closeTerminal(sessionId);
+  async close(sessionId: string, baseUrl?: string): Promise<void> {
+    await closeTerminal(sessionId, baseUrl);
   },
 
   async restartSession(
@@ -65,10 +66,10 @@ export const createWebTerminalAPI = (): TerminalAPI => ({
       cwd: options.cwd ?? '',
       cols: options.cols,
       rows: options.rows,
-    });
+    }, options.baseUrl);
   },
 
   async forceKill(options: ForceKillOptions): Promise<void> {
-    await forceKillTerminal(options);
+    await forceKillTerminal(options, options.baseUrl);
   },
 });

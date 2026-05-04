@@ -712,7 +712,7 @@ const ensureTerminalTransportManager = (): TerminalTransportManager => {
   return globalState.manager;
 };
 
-const applyTerminalTransportCapabilities = (capabilities: TerminalSession['capabilities'] | undefined): void => {
+const applyTerminalTransportCapabilities = (capabilities: TerminalSession['capabilities'] | undefined, baseUrl?: string): void => {
   const globalState = getTerminalTransportGlobalState();
   globalState.inputCapability = capabilities?.input ?? null;
   globalState.streamCapability = capabilities?.stream ?? null;
@@ -723,7 +723,11 @@ const applyTerminalTransportCapabilities = (capabilities: TerminalSession['capab
     return;
   }
 
-  const socketUrl = normalizeWebSocketPath(getPreferredTerminalWsPath(globalState));
+  let wsPath = getPreferredTerminalWsPath(globalState);
+  if (baseUrl) {
+    wsPath = baseUrl + wsPath;
+  }
+  const socketUrl = normalizeWebSocketPath(wsPath);
   if (!socketUrl) {
     return;
   }
@@ -732,8 +736,9 @@ const applyTerminalTransportCapabilities = (capabilities: TerminalSession['capab
   manager.configure(socketUrl);
 };
 
-const sendTerminalInputHttp = async (sessionId: string, data: string): Promise<void> => {
-  const response = await fetch(`/api/terminal/${sessionId}/input`, {
+const sendTerminalInputHttp = async (sessionId: string, data: string, baseUrl?: string): Promise<void> => {
+  const prefix = baseUrl ?? '';
+  const response = await fetch(`${prefix}/api/terminal/${sessionId}/input`, {
     method: 'POST',
     headers: { 'Content-Type': 'text/plain' },
     body: data,
@@ -745,8 +750,9 @@ const sendTerminalInputHttp = async (sessionId: string, data: string): Promise<v
   }
 };
 
-export async function createTerminalSession(options: CreateTerminalOptions): Promise<TerminalSession> {
-  const response = await fetch('/api/terminal/create', {
+export async function createTerminalSession(options: CreateTerminalOptions, baseUrl?: string): Promise<TerminalSession> {
+  const prefix = baseUrl ?? '';
+  const response = await fetch(`${prefix}/api/terminal/create`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -762,7 +768,7 @@ export async function createTerminalSession(options: CreateTerminalOptions): Pro
   }
 
   const session = await response.json() as TerminalSession;
-  applyTerminalTransportCapabilities(session.capabilities);
+  applyTerminalTransportCapabilities(session.capabilities, baseUrl);
   return session;
 }
 
@@ -770,7 +776,8 @@ const connectTerminalStreamViaSse = (
   sessionId: string,
   onEvent: (event: TerminalStreamEvent) => void,
   onError?: (error: Error, fatal?: boolean) => void,
-  options: ConnectStreamOptions = {}
+  options: ConnectStreamOptions = {},
+  baseUrl?: string
 ): (() => void) => {
   const maxRetries = options.maxRetries ?? 3;
   const initialRetryDelay = options.initialRetryDelay ?? 1000;
@@ -845,7 +852,8 @@ const connectTerminalStreamViaSse = (
       return;
     }
 
-    eventSource = new EventSource(`/api/terminal/${sessionId}/stream`);
+    const prefix = baseUrl ?? '';
+    eventSource = new EventSource(`${prefix}/api/terminal/${sessionId}/stream`);
 
     connectionTimeoutId = setTimeout(() => {
       if (!hasDispatchedOpen && eventSource?.readyState !== EventSource.OPEN) {
@@ -901,41 +909,49 @@ export function connectTerminalStream(
   sessionId: string,
   onEvent: (event: TerminalStreamEvent) => void,
   onError?: (error: Error, fatal?: boolean) => void,
-  options: ConnectStreamOptions = {}
+  options: ConnectStreamOptions = {},
+  baseUrl?: string
 ): () => void {
   const globalState = getTerminalTransportGlobalState();
   if (!isWsTransportSupported(globalState.streamCapability)) {
-    return connectTerminalStreamViaSse(sessionId, onEvent, onError, options);
+    return connectTerminalStreamViaSse(sessionId, onEvent, onError, options, baseUrl);
+  }
+
+  let wsPath = getPreferredTerminalWsPath(globalState);
+  if (baseUrl) {
+    wsPath = baseUrl + wsPath;
+  }
+  const socketUrl = normalizeWebSocketPath(wsPath);
+  if (!socketUrl) {
+    return connectTerminalStreamViaSse(sessionId, onEvent, onError, options, baseUrl);
   }
 
   const manager = ensureTerminalTransportManager();
-  const socketUrl = normalizeWebSocketPath(getPreferredTerminalWsPath(globalState));
-  if (!socketUrl) {
-    return connectTerminalStreamViaSse(sessionId, onEvent, onError, options);
-  }
-
   manager.configure(socketUrl);
   return manager.subscribe(sessionId, onEvent, onError, options);
 }
 
 export async function sendTerminalInput(
   sessionId: string,
-  data: string
+  data: string,
+  baseUrl?: string
 ): Promise<void> {
   const globalState = getTerminalTransportGlobalState();
   if (globalState.manager && await globalState.manager.sendInput(sessionId, data)) {
     return;
   }
 
-  await sendTerminalInputHttp(sessionId, data);
+  await sendTerminalInputHttp(sessionId, data, baseUrl);
 }
 
 export async function resizeTerminal(
   sessionId: string,
   cols: number,
-  rows: number
+  rows: number,
+  baseUrl?: string
 ): Promise<void> {
-  const response = await fetch(`/api/terminal/${sessionId}/resize`, {
+  const prefix = baseUrl ?? '';
+  const response = await fetch(`${prefix}/api/terminal/${sessionId}/resize`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ cols, rows }),
@@ -947,10 +963,11 @@ export async function resizeTerminal(
   }
 }
 
-export async function closeTerminal(sessionId: string): Promise<void> {
+export async function closeTerminal(sessionId: string, baseUrl?: string): Promise<void> {
   getTerminalTransportGlobalState().manager?.unbindSession(sessionId);
 
-  const response = await fetch(`/api/terminal/${sessionId}`, {
+  const prefix = baseUrl ?? '';
+  const response = await fetch(`${prefix}/api/terminal/${sessionId}`, {
     method: 'DELETE',
   });
 
@@ -962,11 +979,13 @@ export async function closeTerminal(sessionId: string): Promise<void> {
 
 export async function restartTerminalSession(
   currentSessionId: string,
-  options: { cwd: string; cols?: number; rows?: number }
+  options: { cwd: string; cols?: number; rows?: number },
+  baseUrl?: string
 ): Promise<TerminalSession> {
   getTerminalTransportGlobalState().manager?.unbindSession(currentSessionId);
 
-  const response = await fetch(`/api/terminal/${currentSessionId}/restart`, {
+  const prefix = baseUrl ?? '';
+  const response = await fetch(`${prefix}/api/terminal/${currentSessionId}/restart`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -982,15 +1001,16 @@ export async function restartTerminalSession(
   }
 
   const session = await response.json() as TerminalSession;
-  applyTerminalTransportCapabilities(session.capabilities);
+  applyTerminalTransportCapabilities(session.capabilities, baseUrl);
   return session;
 }
 
 export async function forceKillTerminal(options: {
   sessionId?: string;
   cwd?: string;
-}): Promise<void> {
-  const response = await fetch('/api/terminal/force-kill', {
+}, baseUrl?: string): Promise<void> {
+  const prefix = baseUrl ?? '';
+  const response = await fetch(`${prefix}/api/terminal/force-kill`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(options),
@@ -1014,7 +1034,7 @@ export function disposeTerminalInputTransport(): void {
   globalState.streamCapability = null;
 }
 
-export function primeTerminalInputTransport(): void {
+export function primeTerminalInputTransport(baseUrl?: string): void {
   const globalState = getTerminalTransportGlobalState();
   if (
     globalState.inputCapability &&
@@ -1025,8 +1045,11 @@ export function primeTerminalInputTransport(): void {
     return;
   }
 
-  const preferredPath = getPreferredTerminalWsPath(globalState) || DEFAULT_TERMINAL_WS_PATH;
-  const socketUrl = normalizeWebSocketPath(preferredPath);
+  let wsPath = getPreferredTerminalWsPath(globalState) || DEFAULT_TERMINAL_WS_PATH;
+  if (baseUrl) {
+    wsPath = baseUrl + wsPath;
+  }
+  const socketUrl = normalizeWebSocketPath(wsPath);
   if (!socketUrl) {
     return;
   }
