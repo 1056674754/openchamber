@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { devtools, persist, createJSONStorage } from 'zustand/middleware';
 
+import { DEFAULT_SERVER_ID } from '@/lib/opencode/server-registry';
 import { closeTerminal } from '@/lib/terminalApi';
 import { getSafeSessionStorage } from '@/stores/utils/safeStorage';
 
@@ -47,28 +48,28 @@ interface TerminalStore {
   nextTabId: number;
   hasHydrated: boolean;
 
-  ensureDirectory: (directory: string) => void;
-  getDirectoryState: (directory: string) => DirectoryTerminalState | undefined;
-  getActiveTab: (directory: string) => TerminalTab | undefined;
+  ensureDirectory: (directory: string, serverId?: string) => void;
+  getDirectoryState: (directory: string, serverId?: string) => DirectoryTerminalState | undefined;
+  getActiveTab: (directory: string, serverId?: string) => TerminalTab | undefined;
 
-  createTab: (directory: string) => string;
-  setActiveTab: (directory: string, tabId: string) => void;
-  setTabLabel: (directory: string, tabId: string, label: string) => void;
-  setTabIconKey: (directory: string, tabId: string, iconKey: string | null) => void;
-  closeTab: (directory: string, tabId: string) => Promise<void>;
+  createTab: (directory: string, serverId?: string) => string;
+  setActiveTab: (directory: string, tabId: string, serverId?: string) => void;
+  setTabLabel: (directory: string, tabId: string, label: string, serverId?: string) => void;
+  setTabIconKey: (directory: string, tabId: string, iconKey: string | null, serverId?: string) => void;
+  closeTab: (directory: string, tabId: string, serverId?: string) => Promise<void>;
 
-  setTabSessionId: (directory: string, tabId: string, sessionId: string | null) => void;
-  setTabLifecycle: (directory: string, tabId: string, lifecycle: TerminalTabLifecycle) => void;
-  setConnecting: (directory: string, tabId: string, isConnecting: boolean) => void;
-  appendToBuffer: (directory: string, tabId: string, chunk: string) => void;
-  clearBuffer: (directory: string, tabId: string) => void;
-  setTabPreviewUrl: (directory: string, tabId: string, url: string | null, options?: { locked?: boolean; autoOpened?: boolean }) => void;
-  markPreviewAutoOpened: (directory: string, tabId: string) => void;
+  setTabSessionId: (directory: string, tabId: string, sessionId: string | null, serverId?: string) => void;
+  setTabLifecycle: (directory: string, tabId: string, lifecycle: TerminalTabLifecycle, serverId?: string) => void;
+  setConnecting: (directory: string, tabId: string, isConnecting: boolean, serverId?: string) => void;
+  appendToBuffer: (directory: string, tabId: string, chunk: string, serverId?: string) => void;
+  clearBuffer: (directory: string, tabId: string, serverId?: string) => void;
+  setTabPreviewUrl: (directory: string, tabId: string, url: string | null, options?: { locked?: boolean; autoOpened?: boolean }, serverId?: string) => void;
+  markPreviewAutoOpened: (directory: string, tabId: string, serverId?: string) => void;
   setProjectActionRun: (run: TerminalProjectActionRun) => void;
   updateProjectActionRunStatus: (runKey: string, status: TerminalProjectActionRun['status']) => void;
   removeProjectActionRun: (runKey: string) => void;
 
-  removeDirectory: (directory: string) => void;
+  removeDirectory: (directory: string, serverId?: string) => void;
   clearAll: () => void;
 }
 
@@ -104,6 +105,14 @@ function normalizeDirectory(dir: string): string {
     normalized = normalized.slice(0, -1);
   }
   return normalized;
+}
+
+function makeStoreKey(directory: string, serverId?: string): string {
+  const normalizedDir = normalizeDirectory(directory);
+  if (!serverId || serverId === DEFAULT_SERVER_ID) {
+    return normalizedDir;
+  }
+  return `${serverId}:${normalizedDir}`;
 }
 
 const createEmptyTab = (id: string, label: string): TerminalTab => ({
@@ -200,8 +209,8 @@ export const useTerminalStore = create<TerminalStore>()(
         nextTabId: 1,
         hasHydrated: typeof window === 'undefined',
 
-        ensureDirectory: (directory: string) => {
-          const key = normalizeDirectory(directory);
+        ensureDirectory: (directory: string, serverId?: string) => {
+          const key = makeStoreKey(directory, serverId);
           if (!key) return;
 
           set((state) => {
@@ -218,13 +227,13 @@ export const useTerminalStore = create<TerminalStore>()(
           });
         },
 
-        getDirectoryState: (directory: string) => {
-          const key = normalizeDirectory(directory);
+        getDirectoryState: (directory: string, serverId?: string) => {
+          const key = makeStoreKey(directory, serverId);
           return get().sessions.get(key);
         },
 
-        getActiveTab: (directory: string) => {
-          const key = normalizeDirectory(directory);
+        getActiveTab: (directory: string, serverId?: string) => {
+          const key = makeStoreKey(directory, serverId);
           const entry = get().sessions.get(key);
           if (!entry) return undefined;
           const activeId = entry.activeTabId;
@@ -232,8 +241,8 @@ export const useTerminalStore = create<TerminalStore>()(
           return entry.tabs.find((t) => t.id === activeId) ?? entry.tabs[0];
         },
 
-        createTab: (directory: string) => {
-          const key = normalizeDirectory(directory);
+        createTab: (directory: string, serverId?: string) => {
+          const key = makeStoreKey(directory, serverId);
           if (!key) {
             return 'tab-invalid';
           }
@@ -264,8 +273,8 @@ export const useTerminalStore = create<TerminalStore>()(
           return tabId;
         },
 
-        setActiveTab: (directory: string, tabId: string) => {
-          const key = normalizeDirectory(directory);
+        setActiveTab: (directory: string, tabId: string, serverId?: string) => {
+          const key = makeStoreKey(directory, serverId);
           set((state) => {
             const newSessions = new Map(state.sessions);
             const existing = newSessions.get(key);
@@ -284,8 +293,8 @@ export const useTerminalStore = create<TerminalStore>()(
           });
         },
 
-        setTabLabel: (directory: string, tabId: string, label: string) => {
-          const key = normalizeDirectory(directory);
+        setTabLabel: (directory: string, tabId: string, label: string, serverId?: string) => {
+          const key = makeStoreKey(directory, serverId);
           const normalizedLabel = label.trim();
           if (!normalizedLabel) {
             return;
@@ -321,8 +330,8 @@ export const useTerminalStore = create<TerminalStore>()(
           });
         },
 
-        setTabIconKey: (directory: string, tabId: string, iconKey: string | null) => {
-          const key = normalizeDirectory(directory);
+        setTabIconKey: (directory: string, tabId: string, iconKey: string | null, serverId?: string) => {
+          const key = makeStoreKey(directory, serverId);
           set((state) => {
             const newSessions = new Map(state.sessions);
             const existing = newSessions.get(key);
@@ -354,8 +363,8 @@ export const useTerminalStore = create<TerminalStore>()(
           });
         },
 
-        closeTab: async (directory: string, tabId: string) => {
-          const key = normalizeDirectory(directory);
+        closeTab: async (directory: string, tabId: string, serverId?: string) => {
+          const key = makeStoreKey(directory, serverId);
           const entry = get().sessions.get(key);
           const tab = entry?.tabs.find((t) => t.id === tabId);
           const sessionId = tab?.terminalSessionId ?? null;
@@ -382,7 +391,7 @@ export const useTerminalStore = create<TerminalStore>()(
 
             const nextTabs = existing.tabs.filter((t) => t.id !== tabId);
             const nextRuns = Object.fromEntries(
-              Object.entries(state.projectActionRuns).filter(([, run]) => !(run.directory === key && run.tabId === tabId))
+              Object.entries(state.projectActionRuns).filter(([, run]) => !(run.directory === directory && run.tabId === tabId))
             );
             const runsChanged = Object.keys(nextRuns).length !== Object.keys(state.projectActionRuns).length;
 
@@ -416,8 +425,8 @@ export const useTerminalStore = create<TerminalStore>()(
           });
         },
 
-        setTabSessionId: (directory: string, tabId: string, sessionId: string | null) => {
-          const key = normalizeDirectory(directory);
+        setTabSessionId: (directory: string, tabId: string, sessionId: string | null, serverId?: string) => {
+          const key = makeStoreKey(directory, serverId);
           set((state) => {
             const newSessions = new Map(state.sessions);
             const existing = newSessions.get(key);
@@ -452,8 +461,8 @@ export const useTerminalStore = create<TerminalStore>()(
           });
         },
 
-        setTabLifecycle: (directory: string, tabId: string, lifecycle: TerminalTabLifecycle) => {
-          const key = normalizeDirectory(directory);
+        setTabLifecycle: (directory: string, tabId: string, lifecycle: TerminalTabLifecycle, serverId?: string) => {
+          const key = makeStoreKey(directory, serverId);
           set((state) => {
             const newSessions = new Map(state.sessions);
             const existing = newSessions.get(key);
@@ -473,8 +482,8 @@ export const useTerminalStore = create<TerminalStore>()(
           });
         },
 
-        setConnecting: (directory: string, tabId: string, isConnecting: boolean) => {
-          const key = normalizeDirectory(directory);
+        setConnecting: (directory: string, tabId: string, isConnecting: boolean, serverId?: string) => {
+          const key = makeStoreKey(directory, serverId);
           set((state) => {
             const newSessions = new Map(state.sessions);
             const existing = newSessions.get(key);
@@ -494,12 +503,12 @@ export const useTerminalStore = create<TerminalStore>()(
           });
         },
 
-        appendToBuffer: (directory: string, tabId: string, chunk: string) => {
+        appendToBuffer: (directory: string, tabId: string, chunk: string, serverId?: string) => {
           if (!chunk) {
             return;
           }
 
-          const key = normalizeDirectory(directory);
+          const key = makeStoreKey(directory, serverId);
           set((state) => {
             const newSessions = new Map(state.sessions);
             const existing = newSessions.get(key);
@@ -545,8 +554,8 @@ export const useTerminalStore = create<TerminalStore>()(
           });
         },
 
-        setTabPreviewUrl: (directory: string, tabId: string, url: string | null, options = {}) => {
-          const key = normalizeDirectory(directory);
+        setTabPreviewUrl: (directory: string, tabId: string, url: string | null, options = {}, serverId?: string) => {
+          const key = makeStoreKey(directory, serverId);
           set((state) => {
             const newSessions = new Map(state.sessions);
             const existing = newSessions.get(key);
@@ -578,8 +587,8 @@ export const useTerminalStore = create<TerminalStore>()(
           });
         },
 
-        markPreviewAutoOpened: (directory: string, tabId: string) => {
-          const key = normalizeDirectory(directory);
+        markPreviewAutoOpened: (directory: string, tabId: string, serverId?: string) => {
+          const key = makeStoreKey(directory, serverId);
           set((state) => {
             const newSessions = new Map(state.sessions);
             const existing = newSessions.get(key);
@@ -645,8 +654,8 @@ export const useTerminalStore = create<TerminalStore>()(
           });
         },
 
-        clearBuffer: (directory: string, tabId: string) => {
-          const key = normalizeDirectory(directory);
+        clearBuffer: (directory: string, tabId: string, serverId?: string) => {
+          const key = makeStoreKey(directory, serverId);
           set((state) => {
             const newSessions = new Map(state.sessions);
             const existing = newSessions.get(key);
@@ -670,8 +679,8 @@ export const useTerminalStore = create<TerminalStore>()(
           });
         },
 
-        removeDirectory: (directory: string) => {
-          const key = normalizeDirectory(directory);
+        removeDirectory: (directory: string, serverId?: string) => {
+          const key = makeStoreKey(directory, serverId);
           set((state) => {
             const newSessions = new Map(state.sessions);
             newSessions.delete(key);
