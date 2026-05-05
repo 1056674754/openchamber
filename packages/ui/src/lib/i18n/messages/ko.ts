@@ -1317,6 +1317,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.fileAttachment.activeEditor.addFile': '컨텍스트에 파일 추가:{name}',
   'chat.fileAttachment.activeEditor.pinSelection': '컨텍스트에 선택 고정',
   'chat.fileAttachment.activeEditor.remove': '컨텍스트에서 제거',
+  'chat.file.notFound': '파일을 찾을 수 없음',
   'chat.pendingChanges.fileCountSingle': '{count} 파일',
   'chat.pendingChanges.fileCountPlural': '{count} 파일',
   'chat.pendingChanges.changedInWorkspace': '워크스페이스에서 변경됨',

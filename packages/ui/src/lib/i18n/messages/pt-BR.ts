@@ -1281,6 +1281,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.fileAttachment.activeEditor.addFile": "Adicionar arquivo:{name} ao contexto",
   "chat.fileAttachment.activeEditor.pinSelection": "Fixar seleção no contexto",
   "chat.fileAttachment.activeEditor.remove": "Remover do contexto",
+  "chat.file.notFound": "Arquivo não encontrado",
   "chat.pendingChanges.fileCountSingle": "{count} arquivo",
   "chat.pendingChanges.fileCountPlural": "{count} arquivos",
   "chat.pendingChanges.changedInWorkspace": "modificado no workspace",

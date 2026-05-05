@@ -1281,6 +1281,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.fileAttachment.activeEditor.addFile': '将文件添加到上下文:{name}',
   'chat.fileAttachment.activeEditor.pinSelection': '将选择固定到上下文',
   'chat.fileAttachment.activeEditor.remove': '从上下文中移除',
+  'chat.file.notFound': '文件未找到',
   'chat.pendingChanges.fileCountSingle': '{count} 个文件',
   'chat.pendingChanges.fileCountPlural': '{count} 个文件',
   'chat.pendingChanges.changedInWorkspace': '工作区中有变更',

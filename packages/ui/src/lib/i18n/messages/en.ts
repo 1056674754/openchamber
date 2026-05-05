@@ -1315,6 +1315,7 @@ export const dict = {
   'chat.fileAttachment.activeEditor.addFile': 'Add file:{name} to context',
   'chat.fileAttachment.activeEditor.pinSelection': 'Pin selection to context',
   'chat.fileAttachment.activeEditor.remove': 'Remove from context',
+  'chat.file.notFound': 'File not found',
   'chat.pendingChanges.fileCountSingle': '{count} file',
   'chat.pendingChanges.fileCountPlural': '{count} files',
   'chat.pendingChanges.changedInWorkspace': 'changed in workspace',

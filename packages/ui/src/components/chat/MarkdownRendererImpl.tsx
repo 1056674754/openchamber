@@ -1284,7 +1284,12 @@ const useFileReferenceInteractions = ({
   editor?: EditorAPI;
   preferRuntimeEditor?: boolean;
 }) => {
+  const { t } = useI18n();
+  const tRef = React.useRef(t);
+  tRef.current = t;
   const annotationDebounceRef = React.useRef<number | null>(null);
+  const validatedPathsRef = React.useRef<Set<string>>(new Set());
+  const validateDebounceRef = React.useRef<number | null>(null);
 
   React.useEffect(() => {
     const container = containerRef.current;
@@ -1302,6 +1307,7 @@ const useFileReferenceInteractions = ({
           candidate.removeAttribute('data-openchamber-file-link');
           candidate.removeAttribute('data-openchamber-file-ref');
           candidate.removeAttribute('data-openchamber-file-path');
+          candidate.removeAttribute('data-openchamber-file-status');
           if (candidate.getAttribute('title') === 'Open file') {
             candidate.removeAttribute('title');
           }
@@ -1309,16 +1315,87 @@ const useFileReferenceInteractions = ({
             candidate.removeAttribute('role');
             candidate.removeAttribute('tabindex');
           }
+          const nextSibling = candidate.nextElementSibling;
+          if (nextSibling?.classList.contains('oc-file-missing-badge')) {
+            nextSibling.remove();
+          }
           continue;
         }
 
         candidate.setAttribute('data-openchamber-file-link', 'true');
         candidate.setAttribute('data-openchamber-file-ref', rawCandidate);
         candidate.setAttribute('data-openchamber-file-path', resolved.resolvedPath);
+        candidate.setAttribute('data-openchamber-file-status', 'pending');
         candidate.setAttribute('title', 'Open file');
         if (candidate.tagName.toLowerCase() !== 'a') {
           candidate.setAttribute('role', 'button');
           candidate.setAttribute('tabindex', '0');
+        }
+      }
+    };
+
+    const validateFileLinks = async () => {
+      const container = containerRef.current;
+      if (!container) return;
+
+      const pending = container.querySelectorAll<HTMLElement>('[data-openchamber-file-status="pending"]');
+      if (pending.length === 0) return;
+
+      const pathsToCheck = new Map<string, HTMLElement[]>();
+      for (const el of pending) {
+        if (!el.isConnected) continue;
+        const path = el.getAttribute('data-openchamber-file-path');
+        if (!path || validatedPathsRef.current.has(path)) continue;
+        if (!pathsToCheck.has(path)) pathsToCheck.set(path, []);
+        pathsToCheck.get(path)!.push(el);
+      }
+
+      if (pathsToCheck.size === 0) return;
+
+      const note = tRef.current('chat.file.notFound');
+      const results = await Promise.allSettled(
+        Array.from(pathsToCheck.keys()).map(async (path) => {
+          try {
+            const res = await fetch(`/api/fs/stat?path=${encodeURIComponent(path)}&allowOutsideWorkspace=true`);
+            return { path, ok: res.ok };
+          } catch {
+            return { path, ok: null };
+          }
+        })
+      );
+
+      for (const result of results) {
+        if (result.status === 'rejected') continue;
+        const { path, ok } = result.value;
+
+        if (ok === null) {
+          validatedPathsRef.current.add(path);
+          continue;
+        }
+
+        const elements = pathsToCheck.get(path) || [];
+        validatedPathsRef.current.add(path);
+
+        for (const el of elements) {
+          if (!el.isConnected) continue;
+          if (ok) {
+            el.setAttribute('data-openchamber-file-status', 'valid');
+            const nextSibling = el.nextElementSibling;
+            if (nextSibling?.classList.contains('oc-file-missing-badge')) {
+              nextSibling.remove();
+            }
+          } else {
+            el.setAttribute('data-openchamber-file-status', 'missing');
+            el.setAttribute('title', note);
+            const nextSibling = el.nextElementSibling;
+            if (!nextSibling?.classList.contains('oc-file-missing-badge')) {
+              const badge = document.createElement('span');
+              badge.className = 'oc-file-missing-badge';
+              badge.setAttribute('aria-label', note);
+              badge.textContent = '✗';
+              el.insertAdjacentElement('afterend', badge);
+            }
+          }
         }
       }
     };
@@ -1370,6 +1447,10 @@ const useFileReferenceInteractions = ({
         return;
       }
 
+      if (fileRefElement.getAttribute('data-openchamber-file-status') === 'missing') {
+        return;
+      }
+
       event.preventDefault();
       event.stopPropagation();
 
@@ -1392,7 +1473,22 @@ const useFileReferenceInteractions = ({
       openFileReference(target);
     };
 
+    const scheduleValidate = () => {
+      if (validateDebounceRef.current !== null && typeof window !== 'undefined') {
+        window.clearTimeout(validateDebounceRef.current);
+      }
+      if (typeof window === 'undefined') {
+        void validateFileLinks();
+        return;
+      }
+      validateDebounceRef.current = window.setTimeout(() => {
+        validateDebounceRef.current = null;
+        void validateFileLinks();
+      }, 80);
+    };
+
     annotateFileLinks();
+    scheduleValidate();
 
     const observer = new MutationObserver(() => {
       if (annotationDebounceRef.current !== null && typeof window !== 'undefined') {
@@ -1400,11 +1496,13 @@ const useFileReferenceInteractions = ({
       }
       if (typeof window === 'undefined') {
         annotateFileLinks();
+        scheduleValidate();
         return;
       }
       annotationDebounceRef.current = window.setTimeout(() => {
         annotationDebounceRef.current = null;
         annotateFileLinks();
+        scheduleValidate();
       }, 120);
     });
     observer.observe(container, {
@@ -1419,7 +1517,11 @@ const useFileReferenceInteractions = ({
       if (annotationDebounceRef.current !== null && typeof window !== 'undefined') {
         window.clearTimeout(annotationDebounceRef.current);
       }
+      if (validateDebounceRef.current !== null && typeof window !== 'undefined') {
+        window.clearTimeout(validateDebounceRef.current);
+      }
       annotationDebounceRef.current = null;
+      validateDebounceRef.current = null;
       observer.disconnect();
       container.removeEventListener('click', handleClick);
       container.removeEventListener('keydown', handleKeyDown);
