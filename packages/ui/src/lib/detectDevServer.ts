@@ -76,7 +76,7 @@ export async function detectDevServerCommand(
 
 async function hasStaticIndexHtml(directory: string): Promise<boolean> {
   const target = `${directory}/index.html`;
-  const content = await readOptionalTextFile(target);
+  const content = await readOptionalTextFile(target, directory);
   return typeof content === 'string' && content.trim().length > 0;
 }
 
@@ -138,7 +138,7 @@ function findDevScript(scripts: Record<string, string>): string | null {
  * For server-side operations, the server's package-manager.js is used.
  */
 async function detectPackageManager(directory: string): Promise<PackageManager> {
-  const packageJsonContent = await readOptionalTextFile(`${directory}/package.json`);
+  const packageJsonContent = await readOptionalTextFile(`${directory}/package.json`, directory);
   if (packageJsonContent) {
     try {
       const pkg = JSON.parse(packageJsonContent) as { packageManager?: unknown };
@@ -161,7 +161,7 @@ async function detectPackageManager(directory: string): Promise<PackageManager> 
   ];
 
   for (const [fileName, packageManager] of lockfiles) {
-    const content = await readOptionalTextFile(`${directory}/${fileName}`);
+    const content = await readOptionalTextFile(`${directory}/${fileName}`, directory);
     if (typeof content === 'string' && content.trim().length > 0) {
       return packageManager;
     }
@@ -170,7 +170,7 @@ async function detectPackageManager(directory: string): Promise<PackageManager> 
   return 'npm';
 }
 
-async function readOptionalTextFile(path: string): Promise<string | null> {
+async function readOptionalTextFile(path: string, directory?: string): Promise<string | null> {
   const runtimeFiles = getRegisteredRuntimeAPIs()?.files;
   if (runtimeFiles?.readFile) {
     try {
@@ -182,7 +182,11 @@ async function readOptionalTextFile(path: string): Promise<string | null> {
   }
 
   try {
-    const response = await fetch(`/api/fs/read?path=${encodeURIComponent(path)}&optional=true`, {
+    const params = new URLSearchParams({ path, optional: 'true' });
+    if (directory) {
+      params.set('directory', directory);
+    }
+    const response = await fetch(`/api/fs/read?${params.toString()}`, {
       cache: 'no-store',
     });
     if (!response.ok) return null;
@@ -197,7 +201,7 @@ async function readOptionalTextFile(path: string): Promise<string | null> {
  */
 export async function readPackageJsonScripts(directory: string): Promise<Record<string, string> | null> {
   try {
-    const content = await readOptionalTextFile(`${directory}/package.json`);
+    const content = await readOptionalTextFile(`${directory}/package.json`, directory);
 
     if (content == null) return null;
     const pkg = JSON.parse(content);

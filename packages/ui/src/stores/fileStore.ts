@@ -103,7 +103,10 @@ const toFileUrl = (inputPath: string): string => {
 };
 
 const readRawFileAsDataUrl = async (absolutePath: string, baseUrl: string = ''): Promise<string> => {
-    const response = await fetch(`${baseUrl}/api/fs/raw?path=${encodeURIComponent(absolutePath)}`);
+    const response = await fetch(`${baseUrl}/api/fs/raw?${new URLSearchParams({
+        path: absolutePath,
+        allowOutsideWorkspace: 'true',
+    }).toString()}`);
     if (!response.ok) {
         throw new Error(`Failed to read raw file: ${response.status}`);
     }

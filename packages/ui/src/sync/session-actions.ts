@@ -57,39 +57,91 @@ function dir() {
   return _getDirectory() || undefined
 }
 
+const normalizeDirectoryKey = (directory: string): string =>
+  directory.replace(/\\/g, "/").replace(/\/+$/, "") || "/"
+
+function findProjectForDirectory(directory: string) {
+  const normalizedDir = normalizeDirectoryKey(directory)
+  const projects = useProjectsStore.getState().projects
+  let best: typeof projects[number] | null = null
+  for (const project of projects) {
+    const projectPath = normalizeDirectoryKey(project.path)
+    if (normalizedDir !== projectPath && !normalizedDir.startsWith(`${projectPath}/`)) {
+      continue
+    }
+    if (!best || projectPath.length > normalizeDirectoryKey(best.path).length) {
+      best = project
+    }
+  }
+  return best
+}
+
 /** Get the SDK client for a session's server. Falls back to default server. */
 function sdkForSession(sessionId?: string | null): OpencodeClient {
   if (sessionId) {
     const conn = serverRegistry.getClientForSession(sessionId)
-    if (conn) return conn.client
+    if (conn && conn.config.id !== DEFAULT_SERVER_ID) {
+      return conn.client
+    }
+    if (conn) {
+      return conn.client
+    }
   }
+  const defaultConn = serverRegistry.get(DEFAULT_SERVER_ID)
+  if (defaultConn) return defaultConn.client
   return sdk()
 }
 
 /** Resolve the correct SDK client for a directory by looking up its project's serverId. */
 export function resolveSdkForDirectory(directory: string): OpencodeClient {
-  const projects = useProjectsStore.getState().projects
-  const normalizedDir = directory.replace(/\\/g, '/').replace(/\/+$/, '') || '/'
-  const project = projects.find(
-    (p) => p.path === normalizedDir && p.serverId && p.serverId !== DEFAULT_SERVER_ID,
-  )
-  if (project?.serverId) {
+  const normalizedDir = normalizeDirectoryKey(directory)
+  const project = findProjectForDirectory(normalizedDir)
+  if (project?.serverId && project.serverId !== DEFAULT_SERVER_ID) {
     const conn = serverRegistry.get(project.serverId)
-    if (conn) return conn.client
+    if (conn) {
+      console.log(`[resolveSdk] dir="${normalizedDir}" → server=${project.serverId} url=${conn.config.baseUrl}`)
+      return conn.client
+    }
+    throw new Error(`Remote server "${project.serverId}" is not available for ${normalizedDir}`)
   }
+  // Fallback: use the DEFAULT server's client from the registry, NOT the module-level
+  // _sdk which may have been overwritten by a remote SyncProvider's setActionRefs.
+  const defaultConn = serverRegistry.get(DEFAULT_SERVER_ID)
+  if (defaultConn) return defaultConn.client
   return sdk()
+}
+
+/** Resolve the base URL (including /api suffix) for a directory's server.
+ *  Returns undefined if the directory belongs to the local default server. */
+export function resolveBaseUrl(directory: string): string | undefined {
+  const normalizedDir = normalizeDirectoryKey(directory)
+  const project = findProjectForDirectory(normalizedDir)
+  if (!project?.serverId || project.serverId === DEFAULT_SERVER_ID) return undefined
+  const conn = serverRegistry.get(project.serverId)
+  if (!conn) throw new Error(`Remote server "${project.serverId}" is not available for ${normalizedDir}`)
+  return conn.config.baseUrl
+}
+
+export function resolveBaseUrlForSession(sessionId: string | null | undefined, directory?: string | null): string | undefined {
+  if (sessionId) {
+    const serverId = serverRegistry.getServerForSession(sessionId)
+    if (serverId) {
+      if (serverId === DEFAULT_SERVER_ID) return undefined
+      const conn = serverRegistry.get(serverId)
+      if (!conn) throw new Error(`Remote server "${serverId}" is not available for session ${sessionId}`)
+      return conn.config.baseUrl
+    }
+  }
+  return directory ? resolveBaseUrl(directory) : undefined
 }
 
 /** Resolve the base API URL (raw origin, no /api suffix) for a directory's server. */
 export function resolveApiUrl(directory: string): string | undefined {
-  const projects = useProjectsStore.getState().projects
-  const normalizedDir = directory.replace(/\\/g, '/').replace(/\/+$/, '') || '/'
-  const project = projects.find(
-    (p) => p.path === normalizedDir && p.serverId && p.serverId !== DEFAULT_SERVER_ID,
-  )
-  if (!project?.serverId) return undefined
+  const normalizedDir = normalizeDirectoryKey(directory)
+  const project = findProjectForDirectory(normalizedDir)
+  if (!project?.serverId || project.serverId === DEFAULT_SERVER_ID) return undefined
   const conn = serverRegistry.get(project.serverId)
-  if (!conn) return undefined
+  if (!conn) throw new Error(`Remote server "${project.serverId}" is not available for ${normalizedDir}`)
   // Extract raw origin from the baseUrl (which includes /api suffix)
   try {
     return new URL(conn.config.baseUrl).origin
@@ -118,15 +170,26 @@ function storesForSession(sessionId?: string | null): ChildStoreManager {
 function storeForSession(sessionId: string | null | undefined): ReturnType<ChildStoreManager["ensureChild"]> {
   if (sessionId) {
     const serverId = serverRegistry.getServerForSession(sessionId)
+    const sessionDirectory = getSessionDirectory(sessionId)
     if (serverId && serverId !== DEFAULT_SERVER_ID) {
       const remoteStores = getSyncStoresForServer(serverId)
       if (remoteStores) {
-        const store = remoteStores.getChild("")
+        const store = sessionDirectory
+          ? remoteStores.getChild(sessionDirectory)
+          : remoteStores.getChild("")
         if (store) return store
       }
     }
+    if (sessionDirectory && _childStores) {
+      const store = _childStores.getChild(sessionDirectory)
+      if (store) return store
+    }
+    if (sessionDirectory && _childStores) {
+      return _childStores.ensureChild(sessionDirectory)
+    }
   }
-  return dirStore()
+  if (!sessionId) return dirStore()
+  throw new Error(`Directory store for session ${sessionId} is not available`)
 }
 
 function connectionLostError(): Error {
@@ -161,7 +224,33 @@ export async function waitForConnectionOrThrow(): Promise<void> {
 }
 
 function getSessionDirectory(sessionId: string): string | undefined {
-  return useSessionUIStore.getState().getDirectoryForSession(sessionId) || dir()
+  const uiDirectory = useSessionUIStore.getState().getDirectoryForSession(sessionId)
+  if (uiDirectory) return uiDirectory
+
+  if (_childStores) {
+    for (const [directory, store] of _childStores.children) {
+      const state = store.getState()
+      if (
+        state.session.some((session) => session.id === sessionId)
+        || Object.prototype.hasOwnProperty.call(state.message, sessionId)
+        || Object.prototype.hasOwnProperty.call(state.session_status ?? {}, sessionId)
+        || Object.prototype.hasOwnProperty.call(state.permission ?? {}, sessionId)
+        || Object.prototype.hasOwnProperty.call(state.question ?? {}, sessionId)
+      ) {
+        return directory
+      }
+    }
+  }
+
+  return undefined
+}
+
+function requireSessionDirectory(sessionId: string, operation: string): string {
+  const sessionDirectory = getSessionDirectory(sessionId)
+  if (!sessionDirectory) {
+    throw new Error(`${operation}: directory for session ${sessionId} is not available`)
+  }
+  return sessionDirectory
 }
 
 function getDirectoryStore(directory?: string) {
@@ -182,7 +271,7 @@ function getSessionReplyClient(sessionId?: string): OpencodeClient {
   if (directory) {
     return resolveSdkForDirectory(directory)
   }
-  return sdk()
+  throw new Error(`Reply target directory for session ${sessionId ?? "(unknown)"} is not available`)
 }
 
 function resolveDirectoryForBlockingRequest(
@@ -238,6 +327,18 @@ function getRequestReplyClient(
     return resolveSdkForDirectory(requestDirectory)
   }
   return getSessionReplyClient(sessionId)
+}
+
+function requireBlockingRequestDirectory(
+  type: "permission" | "question",
+  sessionId: string,
+  requestId: string,
+): string {
+  const directory = resolveDirectoryForBlockingRequest(type, sessionId, requestId)
+  if (!directory) {
+    throw new Error(`${type} reply target directory for request ${requestId} is not available`)
+  }
+  return directory
 }
 
 // ---------------------------------------------------------------------------
@@ -307,7 +408,7 @@ function optimisticRemoveSession(sessionId: string, directory?: string): Session
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 export async function deleteSession(sessionId: string, _options?: Record<string, unknown>): Promise<boolean> {
-  const sessionDirectory = getSessionDirectory(sessionId)
+  const sessionDirectory = requireSessionDirectory(sessionId, "deleteSession")
   // Remove from UI immediately, rollback on error
   let snapshot = optimisticRemoveSession(sessionId, sessionDirectory)
   let removedFromDir: string | null = snapshot ? (sessionDirectory ?? null) : null
@@ -377,7 +478,7 @@ export async function deleteSessionInDirectory(sessionId: string, directory: str
 }
 
 export async function archiveSession(sessionId: string): Promise<boolean> {
-  const sessionDirectory = getSessionDirectory(sessionId)
+  const sessionDirectory = requireSessionDirectory(sessionId, "archiveSession")
   const snapshot = optimisticRemoveSession(sessionId, sessionDirectory)
   const ui = useSessionUIStore.getState()
   if (ui.currentSessionId === sessionId) {
@@ -396,7 +497,7 @@ export async function archiveSession(sessionId: string): Promise<boolean> {
 }
 
 export async function updateSessionTitle(sessionId: string, title: string): Promise<void> {
-  const sessionDirectory = getSessionDirectory(sessionId)
+  const sessionDirectory = requireSessionDirectory(sessionId, "updateSessionTitle")
   const result = await sdkForSession(sessionId).session.update({ sessionID: sessionId, directory: sessionDirectory, title })
   if (result.data) {
     useGlobalSessionsStore.getState().upsertSession(result.data)
@@ -404,7 +505,7 @@ export async function updateSessionTitle(sessionId: string, title: string): Prom
 }
 
 export async function shareSession(sessionId: string): Promise<Session | null> {
-  const sessionDirectory = getSessionDirectory(sessionId)
+  const sessionDirectory = requireSessionDirectory(sessionId, "shareSession")
   const result = await sdkForSession(sessionId).session.share({ sessionID: sessionId, directory: sessionDirectory })
   if (result.data) {
     useGlobalSessionsStore.getState().upsertSession(result.data)
@@ -413,7 +514,7 @@ export async function shareSession(sessionId: string): Promise<Session | null> {
 }
 
 export async function unshareSession(sessionId: string): Promise<Session | null> {
-  const sessionDirectory = getSessionDirectory(sessionId)
+  const sessionDirectory = requireSessionDirectory(sessionId, "unshareSession")
   const result = await sdkForSession(sessionId).session.unshare({ sessionID: sessionId, directory: sessionDirectory })
   if (result.data) {
     useGlobalSessionsStore.getState().upsertSession(result.data)
@@ -549,7 +650,8 @@ export async function optimisticSend(input: {
 
 export async function abortCurrentOperation(sessionId: string): Promise<void> {
   try {
-    await sdkForSession(sessionId).session.abort({ sessionID: sessionId, directory: dir() })
+    const sessionDirectory = requireSessionDirectory(sessionId, "abortCurrentOperation")
+    await sdkForSession(sessionId).session.abort({ sessionID: sessionId, directory: sessionDirectory })
   } catch (error) {
     console.error("[session-actions] abort failed", error)
   }
@@ -565,9 +667,7 @@ export async function respondToPermission(
   response: "once" | "always" | "reject",
 ): Promise<void> {
   await waitForConnectionOrThrow()
-  const directory = resolveDirectoryForBlockingRequest("permission", sessionId, requestId)
-    || getSessionDirectory(sessionId)
-    || dir()
+  const directory = requireBlockingRequestDirectory("permission", sessionId, requestId)
   const result = await getRequestReplyClient("permission", sessionId, requestId).permission.reply({
     requestID: requestId,
     reply: response,
@@ -583,9 +683,7 @@ export async function dismissPermission(
   requestId: string,
 ): Promise<void> {
   await waitForConnectionOrThrow()
-  const directory = resolveDirectoryForBlockingRequest("permission", sessionId, requestId)
-    || getSessionDirectory(sessionId)
-    || dir()
+  const directory = requireBlockingRequestDirectory("permission", sessionId, requestId)
   const result = await getRequestReplyClient("permission", sessionId, requestId).permission.reply({
     requestID: requestId,
     reply: "reject",
@@ -606,9 +704,7 @@ export async function respondToQuestion(
   answers: string[] | string[][],
 ): Promise<void> {
   await waitForConnectionOrThrow()
-  const directory = resolveDirectoryForBlockingRequest("question", sessionId, requestId)
-    || getSessionDirectory(sessionId)
-    || dir()
+  const directory = requireBlockingRequestDirectory("question", sessionId, requestId)
   const result = await getRequestReplyClient("question", sessionId, requestId).question.reply({
     requestID: requestId,
     answers: answers as Array<Array<string>>,
@@ -624,9 +720,7 @@ export async function rejectQuestion(
   requestId: string,
 ): Promise<void> {
   await waitForConnectionOrThrow()
-  const directory = resolveDirectoryForBlockingRequest("question", sessionId, requestId)
-    || getSessionDirectory(sessionId)
-    || dir()
+  const directory = requireBlockingRequestDirectory("question", sessionId, requestId)
   const result = await getRequestReplyClient("question", sessionId, requestId).question.reject({
     requestID: requestId,
     ...(directory ? { directory } : {}),
@@ -650,6 +744,7 @@ export async function rejectQuestion(
  * 5. Set pendingInputText so the reverted message text appears in the input
  */
 export async function revertToMessage(sessionId: string, messageId: string): Promise<void> {
+  const sessionDirectory = requireSessionDirectory(sessionId, "revertToMessage")
   const store = storeForSession(sessionId)
   const state = store.getState()
 
@@ -657,7 +752,7 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
   const status = state.session_status[sessionId]
   if (status && status.type !== "idle") {
     try {
-      await sdkForSession(sessionId).session.abort({ sessionID: sessionId, directory: dir() })
+      await sdkForSession(sessionId).session.abort({ sessionID: sessionId, directory: sessionDirectory })
     } catch {
       // ignore abort errors
     }
@@ -704,9 +799,6 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
     patch.session = sessions
   }
 
-  store.setState(patch)
-
-  // Restore reverted message text to input
   if (messageText) {
     useInputStore.setState({
       pendingInputText: messageText,
@@ -714,9 +806,11 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
     })
   }
 
+  store.setState(patch)
+
   // Call SDK and merge authoritative result into store
   try {
-    const result = await sdkForSession(sessionId).session.revert({ sessionID: sessionId, directory: dir(), messageID: messageId })
+    const result = await sdkForSession(sessionId).session.revert({ sessionID: sessionId, directory: sessionDirectory, messageID: messageId })
     if (result.data) {
       const current = store.getState()
       const updated = [...current.session]
@@ -748,6 +842,7 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
  * Restore all previously reverted messages. Aborts if busy, merges result.
  */
 export async function unrevertSession(sessionId: string): Promise<void> {
+  const sessionDirectory = requireSessionDirectory(sessionId, "unrevertSession")
   const store = storeForSession(sessionId)
   const state = store.getState()
 
@@ -755,13 +850,13 @@ export async function unrevertSession(sessionId: string): Promise<void> {
   const status = state.session_status[sessionId]
   if (status && status.type !== "idle") {
     try {
-      await sdkForSession(sessionId).session.abort({ sessionID: sessionId, directory: dir() })
+      await sdkForSession(sessionId).session.abort({ sessionID: sessionId, directory: sessionDirectory })
     } catch {
       // ignore
     }
   }
 
-  const result = await sdkForSession(sessionId).session.unrevert({ sessionID: sessionId, directory: dir() })
+  const result = await sdkForSession(sessionId).session.unrevert({ sessionID: sessionId, directory: sessionDirectory })
   if (result.data) {
     const current = store.getState()
     const sessions = [...current.session]
@@ -782,6 +877,7 @@ export async function unrevertSession(sessionId: string): Promise<void> {
  * 4. Switch to new session and set pending input text
  */
 export async function forkFromMessage(sessionId: string, messageId: string): Promise<void> {
+  const sessionDirectory = requireSessionDirectory(sessionId, "forkFromMessage")
   const store = storeForSession(sessionId)
   const state = store.getState()
 
@@ -795,7 +891,7 @@ export async function forkFromMessage(sessionId: string, messageId: string): Pro
     .join("\n")
     .trim()
 
-  const result = await sdkForSession(sessionId).session.fork({ sessionID: sessionId, directory: dir(), messageID: messageId })
+  const result = await sdkForSession(sessionId).session.fork({ sessionID: sessionId, directory: sessionDirectory, messageID: messageId })
   if (!result.data) return
 
   const forkedSession = result.data

@@ -15,7 +15,7 @@ import { useDirectoryStore } from "@/stores/useDirectoryStore";
 import { streamDebugEnabled } from "@/stores/utils/streamDebug";
 import { parseModelIdentifier } from "@/lib/modelIdentifier";
 import { resolveApiUrl } from "@/lib/api/serverUrl";
-import { resolveSdkForDirectory } from "@/sync/session-actions";
+import { resolveSdkForDirectory, resolveApiUrl as resolveRemoteApiOrigin } from "@/sync/session-actions";
 
 const MODELS_DEV_API_URL = "https://models.dev/api.json";
 const MODELS_DEV_PROXY_URL = "/api/openchamber/models-metadata";
@@ -37,71 +37,44 @@ interface OpenChamberDefaults {
 }
 
 const fetchOpenChamberDefaults = async (serverBaseUrl?: string): Promise<OpenChamberDefaults> => {
-    try {
-        // 1. Runtime settings API (VSCode)
-        const runtimeSettings = getRegisteredRuntimeAPIs()?.settings;
-        if (runtimeSettings) {
-            try {
-                const result = await runtimeSettings.load();
-                const data = result?.settings;
-                if (data) {
-                    const defaultModel = typeof data?.defaultModel === 'string' ? data.defaultModel.trim() : '';
-                    const defaultVariant = typeof data?.defaultVariant === 'string' ? data.defaultVariant.trim() : '';
-                    const defaultAgent = typeof data?.defaultAgent === 'string' ? data.defaultAgent.trim() : '';
-                    const gitmojiEnabled = typeof data?.gitmojiEnabled === 'boolean' ? data.gitmojiEnabled : undefined;
-                    const defaultFileViewerPreview = typeof data?.defaultFileViewerPreview === 'boolean' ? data.defaultFileViewerPreview : undefined;
-                    const zenModel = typeof data?.zenModel === 'string' ? data.zenModel.trim() : '';
-                    const messageStreamTransport =
-                        data?.messageStreamTransport === 'ws' || data?.messageStreamTransport === 'sse' || data?.messageStreamTransport === 'auto'
-                            ? data.messageStreamTransport
-                            : undefined;
-
-                    return {
-                        defaultModel: defaultModel.length > 0 ? defaultModel : undefined,
-                        defaultVariant: defaultVariant.length > 0 ? defaultVariant : undefined,
-                        defaultAgent: defaultAgent.length > 0 ? defaultAgent : undefined,
-                        autoCreateWorktree: typeof data?.autoCreateWorktree === 'boolean' ? data.autoCreateWorktree : undefined,
-                        gitmojiEnabled,
-                        defaultFileViewerPreview,
-                        zenModel: zenModel.length > 0 ? zenModel : undefined,
-                        messageStreamTransport,
-                    };
-                }
-            } catch {
-                // Fall through to fetch
-            }
-        }
-
-        // 2. Fetch API (Web/server)
-        const response = await fetch(resolveApiUrl('/api/config/settings', serverBaseUrl), {
-            method: 'GET',
-            headers: { Accept: 'application/json' },
-        });
-        if (!response.ok) {
-            return {};
-        }
-        const data = await response.json();
+    const buildFromApi = (data: Record<string, unknown> | null): Partial<OpenChamberDefaults> => {
+        if (!data) return {};
         const defaultModel = typeof data?.defaultModel === 'string' ? data.defaultModel.trim() : '';
         const defaultVariant = typeof data?.defaultVariant === 'string' ? data.defaultVariant.trim() : '';
         const defaultAgent = typeof data?.defaultAgent === 'string' ? data.defaultAgent.trim() : '';
-        const gitmojiEnabled = typeof data?.gitmojiEnabled === 'boolean' ? data.gitmojiEnabled : undefined;
-        const defaultFileViewerPreview = typeof data?.defaultFileViewerPreview === 'boolean' ? data.defaultFileViewerPreview : undefined;
-        const zenModel = typeof data?.zenModel === 'string' ? data.zenModel.trim() : '';
-        const messageStreamTransport =
-            data?.messageStreamTransport === 'ws' || data?.messageStreamTransport === 'sse' || data?.messageStreamTransport === 'auto'
-                ? data.messageStreamTransport
-                : undefined;
-
         return {
             defaultModel: defaultModel.length > 0 ? defaultModel : undefined,
             defaultVariant: defaultVariant.length > 0 ? defaultVariant : undefined,
             defaultAgent: defaultAgent.length > 0 ? defaultAgent : undefined,
             autoCreateWorktree: typeof data?.autoCreateWorktree === 'boolean' ? data.autoCreateWorktree : undefined,
-            gitmojiEnabled,
-            defaultFileViewerPreview,
-            zenModel: zenModel.length > 0 ? zenModel : undefined,
-            messageStreamTransport,
+            gitmojiEnabled: typeof data?.gitmojiEnabled === 'boolean' ? data.gitmojiEnabled : undefined,
+            defaultFileViewerPreview: typeof data?.defaultFileViewerPreview === 'boolean' ? data.defaultFileViewerPreview : undefined,
+            zenModel: typeof data?.zenModel === 'string' ? data.zenModel.trim() : '',
+            messageStreamTransport:
+                data?.messageStreamTransport === 'ws' || data?.messageStreamTransport === 'sse' || data?.messageStreamTransport === 'auto'
+                    ? data.messageStreamTransport
+                    : undefined,
         };
+    };
+
+    try {
+        const runtimeSettings = getRegisteredRuntimeAPIs()?.settings;
+        if (runtimeSettings) {
+            try {
+                const result = await runtimeSettings.load();
+                const data = result?.settings;
+                if (data) return buildFromApi(data) as OpenChamberDefaults;
+            } catch {
+                // ignore
+            }
+        }
+
+        const response = await fetch(resolveApiUrl('/api/config/settings', serverBaseUrl), {
+            method: 'GET',
+            headers: { Accept: 'application/json' },
+        });
+        const apiData = response.ok ? await response.json() : null;
+        return buildFromApi(apiData) as OpenChamberDefaults;
     } catch {
         return {};
     }
@@ -850,7 +823,9 @@ export const useConfigStore = create<ConfigStore>()(
                     }
 
                     await get().loadProviders({ directory: fromDirectoryKey(directoryKey) });
-                    await get().loadAgents({ directory: fromDirectoryKey(directoryKey) });
+                    const dir = fromDirectoryKey(directoryKey)
+                    const remoteBaseUrl = dir ? resolveRemoteApiOrigin(dir) : undefined
+                    await get().loadAgents({ directory: dir, serverBaseUrl: remoteBaseUrl });
                 },
 
                 loadProviders: async (options) => {
@@ -1247,6 +1222,23 @@ export const useConfigStore = create<ConfigStore>()(
                                 ).then(r => r.data ?? []),
                                 fetchOpenChamberDefaults(options?.serverBaseUrl),
                             ]);
+
+                            if (!openChamberDefaults.defaultModel || !openChamberDefaults.defaultAgent) {
+                                try {
+                                    const configResult = await targetSdk.config.get();
+                                    const config = configResult.data;
+                                    if (config) {
+                                        if (!openChamberDefaults.defaultModel && config.model) {
+                                            openChamberDefaults.defaultModel = config.model;
+                                        }
+                                        if (!openChamberDefaults.defaultAgent && config.default_agent) {
+                                            openChamberDefaults.defaultAgent = config.default_agent;
+                                        }
+                                    }
+                                } catch {
+                                    // ignore
+                                }
+                            }
 
                             const safeAgents = Array.isArray(rawAgents) ? rawAgents as Agent[] : [];
 
@@ -1999,6 +1991,33 @@ export const useConfigStore = create<ConfigStore>()(
 
                         if (debug) console.log("Loading agents...");
                         await get().loadAgents();
+
+                        const state = get();
+                        if (!state.settingsDefaultModel || !state.settingsDefaultAgent) {
+                            try {
+                                const opencodeConfig = await opencodeClient.getConfig();
+                                const persisted: Record<string, string> = {};
+
+                                if (!state.settingsDefaultModel && opencodeConfig.model) {
+                                    set({ settingsDefaultModel: opencodeConfig.model });
+                                    persisted.defaultModel = opencodeConfig.model;
+                                }
+                                if (!state.settingsDefaultAgent && opencodeConfig.default_agent) {
+                                    set({ settingsDefaultAgent: opencodeConfig.default_agent });
+                                    persisted.defaultAgent = opencodeConfig.default_agent;
+                                }
+
+                                if (Object.keys(persisted).length > 0) {
+                                    fetch('/api/config/settings', {
+                                        method: 'PUT',
+                                        headers: { 'Content-Type': 'application/json' },
+                                        body: JSON.stringify(persisted),
+                                    }).catch(() => {});
+                                }
+                            } catch {
+                                // ignore
+                            }
+                        }
 
                         set({ isInitialized: true, isConnected: true, hasEverConnected: true, connectionPhase: "connected" });
                         if (debug) console.log("App initialized successfully");

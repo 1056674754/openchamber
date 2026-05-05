@@ -43,12 +43,33 @@ export const createProjectDirectoryRuntime = (dependencies) => {
     }
   };
 
-  const resolveProjectDirectory = async (req) => {
+  const getExplicitRequestedDirectory = (req) => {
     const headerDirectory = typeof req.get === 'function' ? req.get('x-opencode-directory') : null;
     const queryDirectory = Array.isArray(req.query?.directory)
       ? req.query.directory[0]
       : req.query?.directory;
-    const requested = headerDirectory || queryDirectory || null;
+    const bodyDirectory = Array.isArray(req.body?.directory)
+      ? req.body.directory[0]
+      : req.body?.directory;
+    return headerDirectory || queryDirectory || bodyDirectory || null;
+  };
+
+  const resolveRequiredExplicitProjectDirectory = async (req) => {
+    const requested = getExplicitRequestedDirectory(req);
+    if (!requested) {
+      return { directory: null, error: 'Directory parameter is required' };
+    }
+
+    const validated = await validateDirectoryPath(requested);
+    if (!validated.ok) {
+      return { directory: null, error: validated.error };
+    }
+
+    return { directory: validated.directory, error: null };
+  };
+
+  const resolveProjectDirectory = async (req) => {
+    const requested = getExplicitRequestedDirectory(req);
 
     if (requested) {
       const validated = await validateDirectoryPath(requested);
@@ -97,11 +118,7 @@ export const createProjectDirectoryRuntime = (dependencies) => {
   };
 
   const resolveOptionalProjectDirectory = async (req) => {
-    const headerDirectory = typeof req.get === 'function' ? req.get('x-opencode-directory') : null;
-    const queryDirectory = Array.isArray(req.query?.directory)
-      ? req.query.directory[0]
-      : req.query?.directory;
-    const requested = headerDirectory || queryDirectory || null;
+    const requested = getExplicitRequestedDirectory(req);
 
     if (!requested) {
       return { directory: null, error: null };
@@ -118,6 +135,7 @@ export const createProjectDirectoryRuntime = (dependencies) => {
   return {
     resolveDirectoryCandidate,
     validateDirectoryPath,
+    resolveRequiredExplicitProjectDirectory,
     resolveProjectDirectory,
     resolveOptionalProjectDirectory,
   };

@@ -50,6 +50,7 @@ interface ProjectsStore {
   removeProjectIcon: (id: string) => Promise<{ ok: boolean; error?: string }>;
   discoverProjectIcon: (id: string, options?: { force?: boolean }) => Promise<{ ok: boolean; skipped?: boolean; reason?: string; error?: string }>;
   reorderProjects: (fromIndex: number, toIndex: number) => void;
+  toggleProjectPin: (id: string) => void;
   validateProjectPath: (path: string) => ProjectPathValidationResult;
   synchronizeFromSettings: (settings: DesktopSettings) => void;
   getActiveProject: () => ProjectEntry | null;
@@ -239,6 +240,9 @@ const sanitizeProjects = (value: unknown): ProjectEntry[] => {
     }
     if (typeof candidate.sidebarCollapsed === 'boolean') {
       project.sidebarCollapsed = candidate.sidebarCollapsed;
+    }
+    if (candidate.pinned === true) {
+      project.pinned = true;
     }
     if (typeof candidate.serverId === 'string' && candidate.serverId.trim().length > 0) {
       project.serverId = candidate.serverId.trim();
@@ -435,9 +439,10 @@ export const useProjectsStore = create<ProjectsStore>()(
         serverId,
       };
 
+      const currentActiveProjectId = get().activeProjectId;
       const nextProjects = [...get().projects, entry];
-      set({ projects: nextProjects, activeProjectId: entry.id });
-      persistProjects(nextProjects, entry.id);
+      set({ projects: nextProjects });
+      persistProjects(nextProjects, currentActiveProjectId);
       return entry;
     },
 
@@ -713,6 +718,15 @@ export const useProjectsStore = create<ProjectsStore>()(
       const [moved] = nextProjects.splice(fromIndex, 1);
       nextProjects.splice(toIndex, 0, moved);
 
+      set({ projects: nextProjects });
+      persistProjects(nextProjects, activeProjectId);
+    },
+
+    toggleProjectPin: (id: string) => {
+      const { projects, activeProjectId } = get();
+      const nextProjects = projects.map((p) =>
+        p.id === id ? { ...p, pinned: !p.pinned } : p,
+      );
       set({ projects: nextProjects });
       persistProjects(nextProjects, activeProjectId);
     },

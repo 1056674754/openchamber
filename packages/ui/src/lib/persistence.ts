@@ -222,6 +222,9 @@ const sanitizeProjects = (value: unknown): DesktopSettings['projects'] | undefin
     if (typeof candidate.sidebarCollapsed === 'boolean') {
       (project as unknown as Record<string, unknown>).sidebarCollapsed = candidate.sidebarCollapsed;
     }
+    if (candidate.pinned === true) {
+      (project as unknown as Record<string, unknown>).pinned = true;
+    }
     if (typeof candidate.serverId === 'string' && candidate.serverId.trim().length > 0) {
       (project as unknown as Record<string, unknown>).serverId = candidate.serverId.trim();
     }
@@ -413,16 +416,24 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
       store.setActivityRenderMode(settings.activityRenderMode);
     }
   }
-  if (typeof settings.pinMode === 'string'
-    && (settings.pinMode === 'global' || settings.pinMode === 'per-project')) {
-    if (settings.pinMode !== store.pinMode) {
-      store.setPinMode(settings.pinMode);
-    }
-  }
   if (typeof settings.sessionSortMode === 'string'
     && (settings.sessionSortMode === 'updated-desc' || settings.sessionSortMode === 'created-desc')) {
     if (settings.sessionSortMode !== store.sessionSortMode) {
       store.setSessionSortMode(settings.sessionSortMode);
+    }
+  }
+  if (typeof settings.sessionGroupMinVisible === 'number'
+    && Number.isFinite(settings.sessionGroupMinVisible)
+    && settings.sessionGroupMinVisible >= 1) {
+    if (settings.sessionGroupMinVisible !== store.sessionGroupMinVisible) {
+      store.setSessionGroupMinVisible(settings.sessionGroupMinVisible);
+    }
+  }
+  if (typeof settings.sessionGroupRecentHours === 'number'
+    && Number.isFinite(settings.sessionGroupRecentHours)
+    && settings.sessionGroupRecentHours >= 1) {
+    if (settings.sessionGroupRecentHours !== store.sessionGroupRecentHours) {
+      store.setSessionGroupRecentHours(settings.sessionGroupRecentHours);
     }
   }
   if (typeof settings.mermaidRenderingMode === 'string'
@@ -869,13 +880,19 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
     && (candidate.activityRenderMode === 'collapsed' || candidate.activityRenderMode === 'summary')) {
     result.activityRenderMode = candidate.activityRenderMode;
   }
-  if (typeof candidate.pinMode === 'string'
-    && (candidate.pinMode === 'global' || candidate.pinMode === 'per-project')) {
-    result.pinMode = candidate.pinMode;
-  }
   if (typeof candidate.sessionSortMode === 'string'
     && (candidate.sessionSortMode === 'updated-desc' || candidate.sessionSortMode === 'created-desc')) {
     result.sessionSortMode = candidate.sessionSortMode;
+  }
+  if (typeof candidate.sessionGroupMinVisible === 'number'
+    && Number.isFinite(candidate.sessionGroupMinVisible)
+    && candidate.sessionGroupMinVisible >= 1) {
+    result.sessionGroupMinVisible = candidate.sessionGroupMinVisible;
+  }
+  if (typeof candidate.sessionGroupRecentHours === 'number'
+    && Number.isFinite(candidate.sessionGroupRecentHours)
+    && candidate.sessionGroupRecentHours >= 1) {
+    result.sessionGroupRecentHours = candidate.sessionGroupRecentHours;
   }
   if (typeof candidate.mermaidRenderingMode === 'string'
     && (candidate.mermaidRenderingMode === 'svg' || candidate.mermaidRenderingMode === 'ascii')) {

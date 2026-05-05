@@ -248,6 +248,26 @@ const CLOUDFLARE_MANAGED_REMOTE_TUNNELS_FILE_PATH = path.join(OPENCHAMBER_DATA_D
 const CLOUDFLARE_LEGACY_NAMED_TUNNELS_FILE_PATH = path.join(OPENCHAMBER_DATA_DIR, 'cloudflare-named-tunnels.json');
 const CLOUDFLARE_MANAGED_REMOTE_TUNNELS_VERSION = 1;
 
+const LAST_OPENCODE_PORT_FILE = path.join(OPENCHAMBER_DATA_DIR, 'last-opencode-port');
+
+const persistOpenCodePort = (port) => {
+  try {
+    fs.writeFileSync(LAST_OPENCODE_PORT_FILE, String(port), 'utf8');
+  } catch {
+  }
+};
+
+const readPersistedOpenCodePort = () => {
+  try {
+    if (!fs.existsSync(LAST_OPENCODE_PORT_FILE)) return null;
+    const raw = fs.readFileSync(LAST_OPENCODE_PORT_FILE, 'utf8').trim();
+    const port = parseInt(raw, 10);
+    return Number.isFinite(port) && port > 0 && port <= 65535 ? port : null;
+  } catch {
+    return null;
+  }
+};
+
 const managedTunnelConfigRuntime = createManagedTunnelConfigRuntime({
   fsPromises,
   path,
@@ -299,6 +319,7 @@ const projectDirectoryRuntime = createProjectDirectoryRuntime({
 
 const resolveDirectoryCandidate = (...args) => projectDirectoryRuntime.resolveDirectoryCandidate(...args);
 const validateDirectoryPath = (...args) => projectDirectoryRuntime.validateDirectoryPath(...args);
+const resolveRequiredExplicitProjectDirectory = (...args) => projectDirectoryRuntime.resolveRequiredExplicitProjectDirectory(...args);
 const resolveProjectDirectory = (...args) => projectDirectoryRuntime.resolveProjectDirectory(...args);
 const resolveOptionalProjectDirectory = (...args) => projectDirectoryRuntime.resolveOptionalProjectDirectory(...args);
 
@@ -896,6 +917,8 @@ const openCodeLifecycleRuntime = createOpenCodeLifecycleRuntime({
   buildManagedOpenCodePath,
   getManagedOpenCodeShellEnvSnapshot: getLoginShellEnvSnapshot,
   getActiveSessionCount,
+  persistOpenCodePort,
+  readPersistedOpenCodePort,
 });
 
 const restartOpenCode = (...args) => openCodeLifecycleRuntime.restartOpenCode(...args);
@@ -1180,6 +1203,7 @@ async function main(options = {}) {
     openchamberDataDir: OPENCHAMBER_DATA_DIR,
     openchamberUserConfigRoot: OPENCHAMBER_USER_CONFIG_ROOT,
     normalizeDirectoryPath,
+    resolveRequiredExplicitProjectDirectory,
     resolveProjectDirectory,
     resolveOptionalProjectDirectory,
     validateDirectoryPath,

@@ -45,7 +45,7 @@ import { MobileSessionStatusBar } from './MobileSessionStatusBar';
 import { useCurrentSessionActivity } from '@/hooks/useSessionActivity';
 import { toast } from '@/components/ui';
 // useMessageStore removed — messages now come from sync system
-import { isTauriShell, isVSCodeRuntime } from '@/lib/desktop';
+import { isTauriShell, isElectronShell, isVSCodeRuntime } from '@/lib/desktop';
 import { isIMECompositionEvent } from '@/lib/ime';
 import { StopIcon } from '@/components/icons/StopIcon';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -509,7 +509,9 @@ type ComposerActionButtonsProps = {
     newSessionDraftOpen: boolean;
     onPrimaryAction: () => void;
     onQueueMessage: () => void;
+    onSendNow: () => void;
     onAbort: () => void;
+    queueModeEnabled: boolean;
 };
 
 const ComposerActionButtons = React.memo(function ComposerActionButtons(props: ComposerActionButtonsProps) {
@@ -525,9 +527,52 @@ const ComposerActionButtons = React.memo(function ComposerActionButtons(props: C
         newSessionDraftOpen,
         onPrimaryAction,
         onQueueMessage,
+        onSendNow,
         onAbort,
+        queueModeEnabled,
     } = props;
     const { t } = useI18n();
+    const [isCtrlHeld, setIsCtrlHeld] = React.useState(false);
+
+    React.useEffect(() => {
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if (e.key === 'Control' || e.key === 'Meta') setIsCtrlHeld(true);
+        };
+        const handleKeyUp = (e: KeyboardEvent) => {
+            if ((e.key === 'Control' || e.key === 'Meta') && !e.ctrlKey && !e.metaKey) {
+                setIsCtrlHeld(false);
+            }
+        };
+        const handleBlur = () => setIsCtrlHeld(false);
+
+        window.addEventListener('keydown', handleKeyDown);
+        window.addEventListener('keyup', handleKeyUp);
+        window.addEventListener('blur', handleBlur);
+
+        return () => {
+            window.removeEventListener('keydown', handleKeyDown);
+            window.removeEventListener('keyup', handleKeyUp);
+            window.removeEventListener('blur', handleBlur);
+        };
+    }, []);
+
+    const ctrlKeyLabel = isMacOS() ? '⌘' : 'Ctrl';
+
+    const defaultAction = queueModeEnabled
+        ? t('chat.chatInput.actions.queueButton.queue')
+        : t('chat.chatInput.actions.queueButton.send');
+
+    const alternateAction = queueModeEnabled
+        ? t('chat.chatInput.actions.queueButton.send')
+        : t('chat.chatInput.actions.queueButton.queue');
+
+    const tooltipText = isCtrlHeld
+        ? t('chat.chatInput.actions.queueButton.ctrlEnter', { ctrlKey: ctrlKeyLabel, action: alternateAction })
+        : t('chat.chatInput.actions.queueButton.enter', { action: defaultAction });
+
+    const ariaLabel = isCtrlHeld
+        ? t('chat.chatInput.actions.queueButton.ctrlEnter', { ctrlKey: ctrlKeyLabel, action: alternateAction })
+        : t('chat.chatInput.actions.queueButton.enter', { action: defaultAction });
 
     const sendButton = (
         <button
@@ -560,24 +605,40 @@ const ComposerActionButtons = React.memo(function ComposerActionButtons(props: C
     return (
         <div className="relative">
             {hasContent ? (
-                <button
-                    type="button"
-                    disabled={!currentSessionId}
-                    onClick={(event) => {
-                        if (isMobile) {
-                            event.preventDefault();
-                        }
-                        onQueueMessage();
-                    }}
-                    className={cn(
-                        footerIconButtonClass,
-                        'absolute z-20 bottom-full left-1/2 -translate-x-1/2 mb-1',
-                        currentSessionId ? 'text-primary hover:text-primary' : 'opacity-30'
-                    )}
-                    aria-label={t('chat.chatInput.actions.queueMessageAria')}
-                >
-                    <RiSendPlane2Line className={cn(sendIconSizeClass, '-rotate-90')} />
-                </button>
+                <Tooltip>
+                    <TooltipTrigger asChild>
+                        <button
+                            type="button"
+                            disabled={!currentSessionId}
+                            onClick={(event) => {
+                                if (isMobile) {
+                                    event.preventDefault();
+                                }
+                                const isCtrlClick = event.ctrlKey || event.metaKey;
+                                if (isCtrlClick) {
+                                    if (queueModeEnabled) {
+                                        onSendNow();
+                                    } else {
+                                        onQueueMessage();
+                                    }
+                                } else {
+                                    onPrimaryAction();
+                                }
+                            }}
+                            className={cn(
+                                footerIconButtonClass,
+                                'absolute z-20 bottom-full left-1/2 -translate-x-1/2 mb-1',
+                                currentSessionId ? 'text-primary hover:text-primary' : 'opacity-30'
+                            )}
+                            aria-label={ariaLabel}
+                        >
+                            <RiSendPlane2Line className={cn(sendIconSizeClass, '-rotate-45')} />
+                        </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="top" sideOffset={8}>
+                        {tooltipText}
+                    </TooltipContent>
+                </Tooltip>
             ) : null}
             <button
                 type="button"
@@ -602,6 +663,7 @@ const ComposerActionButtons = React.memo(function ComposerActionButtons(props: C
     && prev.hasContent === next.hasContent
     && prev.currentSessionId === next.currentSessionId
     && prev.newSessionDraftOpen === next.newSessionDraftOpen
+    && prev.queueModeEnabled === next.queueModeEnabled
 ));
 
 const appendWithLineBreaks = (base: string, next: string): string => {
@@ -1681,6 +1743,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             void handleSubmitRef.current();
         }
     }, [inputMode, getCurrentInputSnapshot, currentSessionId, sessionPhase, queueModeEnabled, handleQueueMessage]);
+
+    const handleSendNow = React.useCallback(() => {
+        void handleSubmitRef.current();
+    }, []);
 
     const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
         // Early return during IME composition to prevent interference with autocomplete.
@@ -2811,8 +2877,11 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     };
 
     // Tauri desktop: handle native file drops via onDragDropEvent
+    // Electron uses the renderer's native DOM drag/drop events instead —
+    // the __TAURI__ shim makes isTauriShell() true, so we must explicitly skip.
     React.useEffect(() => {
         if (!isTauriShell()) return;
+        if (isElectronShell()) return;
         let cancelled = false;
         let unlisten: (() => void) | null = null;
 
@@ -2888,7 +2957,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                     const blob = new Blob([byteArray], { type: result.mime || 'application/octet-stream' });
                                     file = new File([blob], fileName, { type: result.mime || 'application/octet-stream' });
                                 } else {
-                                    const response = await fetch(`/api/fs/raw?path=${encodeURIComponent(normalizedPath)}`);
+                                    const response = await fetch(`/api/fs/raw?${new URLSearchParams({
+                                        path: normalizedPath,
+                                        allowOutsideWorkspace: 'true',
+                                    }).toString()}`);
                                     if (!response.ok) {
                                         throw new Error(`Failed to read dropped file (${response.status})`);
                                     }
@@ -3284,8 +3356,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         const imageUrl = getProjectIconImageUrl(
             { id: project.id, iconImage: project.iconImage ?? null },
             {
-                themeVariant: currentTheme.metadata.variant,
-                iconColor: currentTheme.colors.surface.foreground,
+                themeVariant: currentTheme?.metadata?.variant,
+                iconColor: currentTheme?.colors?.surface?.foreground,
             },
         );
         const ProjectIcon = project.icon ? PROJECT_ICON_MAP[project.icon] : null;
@@ -3308,7 +3380,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                 <span className="truncate">{getProjectDisplayLabel(project)}</span>
             </span>
         );
-    }, [currentTheme.colors.surface.foreground, currentTheme.metadata.variant]);
+    }, [currentTheme?.colors?.surface?.foreground, currentTheme?.metadata?.variant]);
 
     React.useEffect(() => {
         if (!showDraftTargetSelectors || !selectedDraftProject || !selectedDraftDirectory) {
@@ -3900,7 +3972,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                                 newSessionDraftOpen={newSessionDraftOpen}
                                                 onPrimaryAction={handlePrimaryAction}
                                                 onQueueMessage={handleQueueMessage}
+                                                onSendNow={handleSendNow}
                                                 onAbort={handleAbort}
+                                                queueModeEnabled={queueModeEnabled}
                                             />
                                         </div>
                                     </div>
@@ -3957,7 +4031,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                         newSessionDraftOpen={newSessionDraftOpen}
                                         onPrimaryAction={handlePrimaryAction}
                                         onQueueMessage={handleQueueMessage}
+                                        onSendNow={handleSendNow}
                                         onAbort={handleAbort}
+                                        queueModeEnabled={queueModeEnabled}
                                     />
                                 </div>
                             </>

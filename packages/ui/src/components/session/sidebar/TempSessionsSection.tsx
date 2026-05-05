@@ -81,8 +81,10 @@ export function TempSessionsSection(props: Props): React.ReactNode {
       {!collapsed && (
         <div className="mt-0.5 space-y-0.5">
           {isSubmitting && (
-            <div className="flex items-center gap-1.5 rounded-sm px-1.5 py-1 text-muted-foreground">
-              <RiFolderLine className="h-3.5 w-3.5 flex-shrink-0 animate-pulse text-muted-foreground/60" />
+            <div className="flex items-center gap-1.5 rounded-sm px-0.5 py-1 text-muted-foreground">
+              <span className="inline-flex h-3.5 w-3.5 flex-shrink-0 items-center justify-center">
+                <RiFolderLine className="h-3.5 w-3.5 animate-pulse text-muted-foreground/60" />
+              </span>
               <span className="truncate text-[14px] font-normal italic">{t('sessions.sidebar.tempSession.creating')}</span>
             </div>
           )}
@@ -94,7 +96,7 @@ export function TempSessionsSection(props: Props): React.ReactNode {
               <div
                 key={session.path}
                 className={cn(
-                  'group relative flex items-center justify-between rounded-sm px-1.5 py-1 transition-colors',
+                  'group relative flex items-center justify-between rounded-sm px-0.5 py-1 transition-colors',
                   isActive
                     ? 'bg-interactive-hover text-foreground'
                     : 'text-foreground hover:bg-interactive-hover',
@@ -106,7 +108,9 @@ export function TempSessionsSection(props: Props): React.ReactNode {
                   onClick={() => onSelectTempSession(session)}
                   className="flex flex-1 items-center gap-1.5 overflow-hidden text-left"
                 >
-                  <RiFolderLine className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground/80" />
+                  <span className="inline-flex h-3.5 w-3.5 flex-shrink-0 items-center justify-center">
+                    <RiFolderLine className="h-3.5 w-3.5 text-muted-foreground/80" />
+                  </span>
                   <span className="truncate text-[14px] font-normal lowercase">{session.topic}</span>
                 </button>
                 <button

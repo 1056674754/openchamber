@@ -1,7 +1,9 @@
 import { create } from 'zustand';
 import type { Session } from '@opencode-ai/sdk/v2';
+import type { SessionStatus } from '@opencode-ai/sdk/v2/client';
 import { opencodeClient } from '@/lib/opencode/client';
 import { listGlobalSessionPages } from '@/stores/globalSessions';
+import { retry } from '@/sync/retry';
 
 type GlobalSessionsStatus = 'idle' | 'loading' | 'ready' | 'error';
 
@@ -16,11 +18,16 @@ type GlobalSessionsState = {
   sessionsByDirectory: Map<string, Session[]>;
   hasLoaded: boolean;
   status: GlobalSessionsStatus;
+  /** Session running status across all directories — single source of truth for sidebar indicators */
+  sessionStatuses: Map<string, SessionStatus>;
   loadSessions: (fallbackActive?: Session[]) => Promise<LoadResult>;
   applySnapshot: (activeSessions: Session[], archivedSessions: Session[], status?: GlobalSessionsStatus) => void;
   upsertSession: (session: Session) => void;
   removeSessions: (ids: Iterable<string>) => void;
   archiveSessions: (ids: Iterable<string>, archivedAt?: number) => void;
+  upsertStatus: (sessionId: string, status: SessionStatus) => void;
+  removeStatuses: (ids: Iterable<string>) => void;
+  batchLoadStatuses: (directories: string[]) => Promise<void>;
 };
 
 const PAGE_SIZE = 200;
@@ -188,6 +195,7 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
   activeSessions: [],
   archivedSessions: [],
   sessionsByDirectory: new Map(),
+  sessionStatuses: new Map(),
   hasLoaded: false,
   status: 'idle',
 
@@ -228,6 +236,20 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
         }
 
         set((state) => applySnapshot(state, nextActiveSessions, nextArchivedSessions, 'ready'));
+
+        if (nextActiveSessions.length > 0) {
+          const directories = new Set<string>();
+          for (const session of nextActiveSessions) {
+            const dir = resolveGlobalSessionDirectory(session);
+            if (dir) directories.add(dir);
+          }
+          if (directories.size > 0) {
+            void get().batchLoadStatuses([...directories]).catch((err) => {
+              console.warn('[GlobalSessions] Failed to batch-load statuses:', err);
+            });
+          }
+        }
+
         return { activeSessions: nextActiveSessions, archivedSessions: nextArchivedSessions };
       } catch (error) {
         const nextActiveSessions = mergeSessionLists(current.activeSessions, fallbackActive);
@@ -287,10 +309,19 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
         return state;
       }
 
+      const nextStatuses = new Map(state.sessionStatuses);
+      let statusChanged = false;
+      for (const id of idSet) {
+        if (nextStatuses.delete(id)) {
+          statusChanged = true;
+        }
+      }
+
       return {
         activeSessions: nextActiveSessions,
         archivedSessions: nextArchivedSessions,
         sessionsByDirectory: buildSessionsByDirectory(nextActiveSessions),
+        ...(statusChanged ? { sessionStatuses: nextStatuses } : {}),
       };
     });
   },
@@ -330,6 +361,69 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
         sessionsByDirectory: buildSessionsByDirectory(nextActiveSessions),
       };
     });
+  },
+
+  upsertStatus: (sessionId, status) => {
+    set((state) => {
+      const current = state.sessionStatuses.get(sessionId);
+      if (current && current.type === status.type) {
+        return state;
+      }
+      const next = new Map(state.sessionStatuses);
+      next.set(sessionId, status);
+      return { sessionStatuses: next };
+    });
+  },
+
+  removeStatuses: (ids) => {
+    const idSet = ids instanceof Set ? ids : new Set(ids);
+    if (idSet.size === 0) {
+      return;
+    }
+    set((state) => {
+      let changed = false;
+      const next = new Map(state.sessionStatuses);
+      for (const id of idSet) {
+        if (next.delete(id)) {
+          changed = true;
+        }
+      }
+      return changed ? { sessionStatuses: next } : state;
+    });
+  },
+
+  batchLoadStatuses: async (directories) => {
+    if (directories.length === 0) {
+      return;
+    }
+
+    const sdk = opencodeClient.getSdkClient();
+    const results = await Promise.allSettled(
+      directories.map((directory) =>
+        retry(() => sdk.session.status({ directory }), { attempts: 2, delay: 300, retryIf: () => true })
+      )
+    );
+
+    const next = new Map(get().sessionStatuses);
+    for (const result of results) {
+      if (result.status !== 'fulfilled') {
+        continue;
+      }
+      const response = result.value;
+      const payload = Array.isArray(response?.data)
+        ? undefined
+        : response?.data as Record<string, SessionStatus> | undefined;
+      if (!payload || typeof payload !== 'object') {
+        continue;
+      }
+      for (const [sessionId, status] of Object.entries(payload)) {
+        if (status && typeof status.type === 'string') {
+          next.set(sessionId, status);
+        }
+      }
+    }
+
+    set({ sessionStatuses: next });
   },
 }));
 

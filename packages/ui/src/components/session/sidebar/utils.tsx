@@ -120,6 +120,7 @@ export const compareSessionsByPinnedAndTime = (
   a: Session,
   b: Session,
   pinnedSessionIds: Set<string>,
+  pinnedOrder?: string[],
 ): number => {
   const aPinned = pinnedSessionIds.has(a.id);
   const bPinned = pinnedSessionIds.has(b.id);
@@ -128,6 +129,13 @@ export const compareSessionsByPinnedAndTime = (
   }
 
   if (aPinned && bPinned) {
+    if (pinnedOrder && pinnedOrder.length > 0) {
+      const aIdx = pinnedOrder.indexOf(a.id);
+      const bIdx = pinnedOrder.indexOf(b.id);
+      if (aIdx !== -1 && bIdx !== -1 && aIdx !== bIdx) return aIdx - bIdx;
+      if (aIdx !== -1 && bIdx === -1) return -1;
+      if (aIdx === -1 && bIdx !== -1) return 1;
+    }
     return getSessionCreatedAt(b) - getSessionCreatedAt(a);
   }
 
@@ -138,11 +146,20 @@ export const compareSessionsByPinnedAndCreated = (
   a: Session,
   b: Session,
   pinnedSessionIds: Set<string>,
+  pinnedOrder?: string[],
 ): number => {
   const aPinned = pinnedSessionIds.has(a.id);
   const bPinned = pinnedSessionIds.has(b.id);
   if (aPinned !== bPinned) {
     return aPinned ? -1 : 1;
+  }
+
+  if (aPinned && bPinned && pinnedOrder && pinnedOrder.length > 0) {
+    const aIdx = pinnedOrder.indexOf(a.id);
+    const bIdx = pinnedOrder.indexOf(b.id);
+    if (aIdx !== -1 && bIdx !== -1 && aIdx !== bIdx) return aIdx - bIdx;
+    if (aIdx !== -1 && bIdx === -1) return -1;
+    if (aIdx === -1 && bIdx !== -1) return 1;
   }
 
   return getSessionCreatedAt(b) - getSessionCreatedAt(a);
@@ -153,11 +170,12 @@ export const compareSessions = (
   b: Session,
   pinnedSessionIds: Set<string>,
   sortMode: SessionSortMode,
+  pinnedOrder?: string[],
 ): number => {
   if (sortMode === 'created-desc') {
-    return compareSessionsByPinnedAndCreated(a, b, pinnedSessionIds);
+    return compareSessionsByPinnedAndCreated(a, b, pinnedSessionIds, pinnedOrder);
   }
-  return compareSessionsByPinnedAndTime(a, b, pinnedSessionIds);
+  return compareSessionsByPinnedAndTime(a, b, pinnedSessionIds, pinnedOrder);
 };
 
 export const dedupeSessionsById = (sessions: Session[]): Session[] => {

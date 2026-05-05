@@ -14,9 +14,9 @@ import {
   RiErrorWarningLine,
   RiFolderLine,
   RiFolderOpenLine,
-  RiMore2Line,
   RiNodeTree,
   RiPencilAiLine,
+  RiPushpinLine,
 } from '@remixicon/react';
 import { cn } from '@/lib/utils';
 import { PROJECT_COLOR_MAP, PROJECT_ICON_MAP, getProjectIconImageUrl } from '@/lib/projectMeta';
@@ -52,6 +52,8 @@ export interface SortableProjectItemProps {
   hideHeader?: boolean;
   openSidebarMenuKey: string | null;
   setOpenSidebarMenuKey: (key: string | null) => void;
+  isPinned?: boolean;
+  onTogglePin?: () => void;
   serverId?: string;
   serverHealthStatus?: 'healthy' | 'unhealthy' | 'connecting' | null;
   unavailable?: boolean;
@@ -85,8 +87,11 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
   children,
   showCreateButtons = true,
   hideHeader = false,
+  mobileVariant,
   openSidebarMenuKey,
   setOpenSidebarMenuKey,
+  isPinned,
+  onTogglePin,
   serverId,
   serverHealthStatus,
   unavailable,
@@ -126,6 +131,7 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
   const suppressNextToggleRef = React.useRef(false);
   const menuInstanceKey = `project:${id}`;
   const isMenuOpen = openSidebarMenuKey === menuInstanceKey;
+  const [menuPosition, setMenuPosition] = React.useState<{ x: number; y: number } | null>(null);
 
   React.useEffect(() => {
     setImageFailed(false);
@@ -143,18 +149,6 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
   const handleMenuOpenChange = React.useCallback((open: boolean) => {
     setOpenSidebarMenuKey(open ? menuInstanceKey : null);
   }, [menuInstanceKey, setOpenSidebarMenuKey]);
-
-  const handleMenuTriggerClick = React.useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
-    event.stopPropagation();
-  }, []);
-
-  const handleMenuTriggerPointerDown = React.useCallback((event: React.PointerEvent<HTMLButtonElement>) => {
-    event.stopPropagation();
-  }, []);
-
-  const handleMenuTriggerMouseDown = React.useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
-    event.stopPropagation();
-  }, []);
 
   const handleToggleMouseDown = React.useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
     if (event.button === 2 || (event.button === 0 && event.ctrlKey)) {
@@ -192,6 +186,11 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
               'w-full text-left group/project select-none',
             )}
             style={{ backgroundColor: isDesktopShell && isStuck ? 'transparent' : undefined }}
+            onContextMenu={!mobileVariant ? (e) => {
+              e.preventDefault();
+              setMenuPosition({ x: e.clientX, y: e.clientY });
+              setOpenSidebarMenuKey(menuInstanceKey);
+            } : undefined}
           >
             <div className="relative flex items-center gap-1 px-0.5 py-px" {...attributes}>
               <Tooltip>
@@ -203,7 +202,7 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
                       {...listeners}
                       className={cn(
                         'flex-1 min-w-0 flex items-center gap-1.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 rounded-md cursor-grab active:cursor-grabbing transition-[padding]',
-                        isRepo && !hideDirectoryControls && showCreateButtons && onNewWorktreeSession ? 'pr-14' : 'pr-10',
+                        isRepo && !hideDirectoryControls && showCreateButtons && Boolean(onNewWorktreeSession) ? 'pr-12' : (showCreateButtons ? 'pr-8' : ''),
                       )}
                     >
                     <span className="inline-flex h-3.5 w-3.5 flex-shrink-0 items-center justify-center">
@@ -271,42 +270,41 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
                 open={isMenuOpen}
                 onOpenChange={handleMenuOpenChange}
               >
-                <div className="absolute right-0 top-1/2 z-10 -translate-y-1/2">
-                  <DropdownMenuTrigger asChild>
-                    <button
-                      type="button"
-                      className="inline-flex h-5 w-4 items-center justify-center rounded-sm text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 hover:text-foreground"
-                      aria-label={t('sessions.sidebar.project.actions.projectMenu')}
-                      onPointerDown={handleMenuTriggerPointerDown}
-                      onMouseDown={handleMenuTriggerMouseDown}
-                      onClick={handleMenuTriggerClick}
-                    >
-                      <RiMore2Line className="h-3 w-3" />
-                    </button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="min-w-[180px]">
-                    {showCreateButtons && !isRepo && !hideDirectoryControls && onNewSession && (
-                    <DropdownMenuItem onClick={onNewSession}>
-                      <RiAddLine className="mr-1.5 h-4 w-4" />
-                      {t('sessions.sidebar.project.actions.newSession')}
-                    </DropdownMenuItem>
-                  )}
-                  <DropdownMenuItem onClick={onRenameStart}>
-                    <RiPencilAiLine className="mr-1.5 h-4 w-4" />
-                    {t('sessions.sidebar.session.menu.rename')}
+                <DropdownMenuTrigger asChild>
+                  <div
+                    className="fixed w-0 h-0 overflow-hidden"
+                    style={menuPosition ? { left: menuPosition.x, top: menuPosition.y } : undefined}
+                    aria-hidden="true"
+                  />
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="min-w-[180px]">
+                  {showCreateButtons && !isRepo && !hideDirectoryControls && onNewSession && (
+                  <DropdownMenuItem onClick={onNewSession}>
+                    <RiAddLine className="mr-1.5 h-4 w-4" />
+                    {t('sessions.sidebar.project.actions.newSession')}
                   </DropdownMenuItem>
-                  <DropdownMenuItem
-                    onClick={onClose}
-                    className="text-destructive focus:text-destructive"
-                  >
-                    <RiCloseLine className="mr-1.5 h-4 w-4" />
-                    {t('sessions.sidebar.project.actions.closeProject')}
+                )}
+                <DropdownMenuItem onClick={onRenameStart}>
+                  <RiPencilAiLine className="mr-1.5 h-4 w-4" />
+                  {t('sessions.sidebar.session.menu.rename')}
+                </DropdownMenuItem>
+                {onTogglePin ? (
+                  <DropdownMenuItem onClick={onTogglePin}>
+                    <RiPushpinLine className="mr-1.5 h-4 w-4" />
+                    {isPinned ? t('directoryTree.actions.unpinDirectory') : t('directoryTree.actions.pinDirectory')}
                   </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </div>
+                ) : null}
+                <DropdownMenuItem
+                  onClick={onClose}
+                  className="text-destructive focus:text-destructive"
+                >
+                  <RiCloseLine className="mr-1.5 h-4 w-4" />
+                  {t('sessions.sidebar.project.actions.closeProject')}
+                </DropdownMenuItem>
+                </DropdownMenuContent>
               </DropdownMenu>
 
-              <div className="absolute right-4 top-1/2 z-10 flex flex-row-reverse -translate-y-1/2 items-center gap-0.5">
+              <div className="absolute right-0.5 top-1/2 z-10 flex flex-row-reverse -translate-y-1/2 items-center gap-0.5">
                 {showCreateButtons && onNewSession ? (
                   <Tooltip>
                     <TooltipTrigger asChild>
@@ -400,3 +398,32 @@ const SortableGroupItemBase: React.FC<{
 };
 
 export const SortableGroupItem = React.memo(SortableGroupItemBase);
+
+export const SortableSessionItem: React.FC<{
+  id: string;
+  children: React.ReactNode;
+}> = ({ id, children }) => {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id });
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={{
+        transform: CSS.Transform.toString(transform),
+        transition,
+      }}
+      className={cn(isDragging && 'opacity-30')}
+      {...attributes}
+      {...listeners}
+    >
+      {children}
+    </div>
+  );
+};

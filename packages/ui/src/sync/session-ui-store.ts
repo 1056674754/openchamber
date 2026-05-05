@@ -48,6 +48,8 @@ import {
   shareSession as shareSessionAction,
   unshareSession as unshareSessionAction,
   optimisticSend,
+  resolveSdkForDirectory,
+  resolveBaseUrlForSession,
 } from "./session-actions"
 import { useInputStore, type SyntheticContextPart } from "./input-store"
 import { useSelectionStore } from "./selection-store"
@@ -72,12 +74,16 @@ function routeMessage(params: {
   files?: Array<{ type: "file"; mime: string; url: string; filename: string }>
   additionalParts?: Array<{ text: string; synthetic?: boolean; files?: Array<{ type: "file"; mime: string; url: string; filename: string }> }>
 }): Promise<void> {
+  const sessionDirectory = useSessionUIStore.getState().getDirectoryForSession(params.sessionId)
+  if (!sessionDirectory) {
+    throw new Error(`Cannot send message: directory for session ${params.sessionId} is not available`)
+  }
+
   if (params.inputMode === "shell") {
-    const sdk = opencodeClient.getSdkClient()
-    const dir = opencodeClient.getDirectory() || undefined
-    return sdk.session.shell({
+    const client = resolveSdkForDirectory(sessionDirectory)
+    return client.session.shell({
       sessionID: params.sessionId,
-      directory: dir,
+      directory: sessionDirectory,
       agent: params.agent,
       model: { providerID: params.providerID, modelID: params.modelID },
       command: params.content,
@@ -104,7 +110,7 @@ function routeMessage(params: {
         modelID: params.modelID,
         agent: params.agent,
         files: params.files,
-        send: (messageID) => opencodeClient.sendCommand({
+        send: (messageID) => opencodeClient.withDirectory(sessionDirectory, () => opencodeClient.sendCommand({
           id: params.sessionId,
           providerID: params.providerID,
           modelID: params.modelID,
@@ -114,7 +120,7 @@ function routeMessage(params: {
           variant: params.variant,
           files: params.files,
           messageId: messageID,
-        }).then(() => {}),
+        })).then(() => {}),
       })
     }
   }
@@ -127,7 +133,7 @@ function routeMessage(params: {
     modelID: params.modelID,
     agent: params.agent,
     files: params.files,
-    send: (messageID) => opencodeClient.sendMessage({
+    send: (messageID) => opencodeClient.withDirectory(sessionDirectory, () => opencodeClient.sendMessage({
       id: params.sessionId,
       providerID: params.providerID,
       modelID: params.modelID,
@@ -137,12 +143,14 @@ function routeMessage(params: {
       files: params.files,
       additionalParts: params.additionalParts,
       messageId: messageID,
-    }).then(() => {}),
+    })).then(() => {}),
   })
 }
 
-function notifyMessageSent(sessionId: string): void {
-  fetch(`/api/sessions/${sessionId}/message-sent`, { method: "POST" })
+function notifyMessageSent(sessionId: string, directory?: string | null): void {
+  const baseUrl = resolveBaseUrlForSession(sessionId, directory)
+  const url = baseUrl ? `${baseUrl.replace(/\/+$/, '')}/session/${sessionId}/message-sent` : `/api/sessions/${sessionId}/message-sent`
+  fetch(url, { method: "POST" })
     .catch(() => { /* ignore */ })
 }
 
@@ -383,14 +391,15 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       id,
       (sid) => get().worktreeMetadata.get(sid),
     )
-    const fallbackDir = opencodeClient.getDirectory() ?? directoryState.currentDirectory ?? null
-    const resolvedDir = (directoryHint ? normalizePath(directoryHint) : null) ?? sessionDir ?? fallbackDir
+    const resolvedDir = (directoryHint ? normalizePath(directoryHint) : null) ?? sessionDir
 
     try {
       if (resolvedDir && directoryState.currentDirectory !== resolvedDir) {
         directoryState.setDirectory(resolvedDir, { showOverlay: false })
       }
-      opencodeClient.setDirectory(resolvedDir ?? undefined)
+      if (resolvedDir) {
+        opencodeClient.setDirectory(resolvedDir)
+      }
     } catch (e) {
       console.warn("Failed to set OpenCode directory for session switch:", e)
     }
@@ -413,7 +422,9 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     // Mark session viewed in notification store + update active session ref
     if (id) {
       markSessionViewed(id)
-      setActiveSession(resolvedDir ?? "", id)
+      if (resolvedDir) {
+        setActiveSession(resolvedDir, id)
+      }
     }
   },
 
@@ -786,7 +797,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
             get().setCurrentSession(serverSession.id, createdDirectory)
             await activateConfigForDirectory(createdDirectory)
 
-            notifyMessageSent(serverSession.id)
+            notifyMessageSent(serverSession.id, createdDirectory)
             markPendingUserSendAnimation(serverSession.id)
 
             const files = attachments?.map((a) => ({
@@ -872,7 +883,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         await waitForWorktreeBootstrap(createdDirectory)
       }
 
-      notifyMessageSent(created.id)
+      notifyMessageSent(created.id, createdDirectory)
 
       markPendingUserSendAnimation(created.id)
 
@@ -947,17 +958,16 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     const currentSessionDirectory = currentSessionId
       ? normalizePath(get().getDirectoryForSession(currentSessionId))
       : null
+    if (!currentSessionId || !currentSessionDirectory) {
+      throw new Error("Cannot send message: current session directory is not available")
+    }
     if (currentSessionDirectory) {
       await waitForWorktreeBootstrap(currentSessionDirectory)
     }
 
-    if (currentSessionId) {
-      notifyMessageSent(currentSessionId)
-    }
+    notifyMessageSent(currentSessionId, currentSessionDirectory)
 
-    if (currentSessionId) {
-      markPendingUserSendAnimation(currentSessionId)
-    }
+    markPendingUserSendAnimation(currentSessionId)
 
     const files = attachments?.map((a) => ({
       type: "file" as const,
@@ -967,7 +977,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     }))
 
     await routeMessage({
-      sessionId: currentSessionId || "",
+      sessionId: currentSessionId,
       content,
       providerID,
       modelID,

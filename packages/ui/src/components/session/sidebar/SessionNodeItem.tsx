@@ -13,6 +13,7 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import {
   RiAddLine,
+  RiArchiveLine,
   RiArrowDownSLine,
   RiArrowRightSLine,
   RiChat4Line,
@@ -24,11 +25,11 @@ import {
   RiFileCopyLine,
   RiFolderLine,
   RiLinkUnlinkM,
-  RiMore2Line,
   RiPencilAiLine,
   RiPushpinLine,
   RiShare2Line,
   RiShieldLine,
+  RiComputerLine,
   RiUnpinLine,
   RiGitBranchLine,
 } from '@remixicon/react';
@@ -45,9 +46,15 @@ import { useViewportStore } from '@/sync/viewport-store';
 import { DraggableSessionRow } from './sessionFolderDnd';
 import type { SessionNode, SessionSummaryMeta } from './types';
 import { formatSessionCompactDateLabel, formatSessionDateLabel, normalizePath, renderHighlightedText, resolveSessionDiffStats } from './utils';
+import { resolveGlobalSessionDirectory } from '@/stores/useGlobalSessionsStore';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { useSessionUnseenCount } from '@/sync/notification-store';
 import { useSessionMultiSelectStore } from '@/stores/useSessionMultiSelectStore';
+import { useProjectsStore } from '@/stores/useProjectsStore';
+import { useDesktopSshStore } from '@/stores/useDesktopSshStore';
+import { resolveInstanceLabel } from '@/lib/desktopSsh';
+import { serverRegistry, DEFAULT_SERVER_ID } from '@/lib/opencode/server-registry';
+import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useI18n } from '@/lib/i18n';
 
 type Folder = { id: string; name: string; sessionIds: string[] };
@@ -79,7 +86,8 @@ type Props = {
   toggleParent: (sessionId: string) => void;
   handleSessionSelect: (sessionId: string, sessionDirectory: string | null, isMissingDirectory: boolean, projectId?: string | null) => void;
   handleSessionDoubleClick: () => void;
-  togglePinnedSession: (sessionId: string) => void;
+  togglePinnedSession: (sessionId: string, scope: 'global' | string) => void;
+  pinnedSessionIdsByProject: Map<string, Set<string>>;
   handleShareSession: (session: Session) => void;
   copiedSessionId: string | null;
   handleCopyShareUrl: (url: string, sessionId: string) => void;
@@ -96,9 +104,9 @@ type Props = {
   handleDeleteSession: (session: Session, source?: { archivedBucket?: boolean }) => void;
   mobileVariant: boolean;
   alwaysShowActions: boolean;
-  renderSessionNode: (node: SessionNode, depth?: number, groupDirectory?: string | null, projectId?: string | null, archivedBucket?: boolean, secondaryMeta?: SecondaryMeta | null, renderContext?: 'project' | 'recent') => React.ReactNode;
+  renderSessionNode: (node: SessionNode, depth?: number, groupDirectory?: string | null, projectId?: string | null, archivedBucket?: boolean, secondaryMeta?: SecondaryMeta | null, renderContext?: 'project' | 'recent' | 'global-pinned') => React.ReactNode;
   secondaryMeta?: SecondaryMeta | null;
-  renderContext?: 'project' | 'recent';
+  renderContext?: 'project' | 'recent' | 'global-pinned';
 };
 
 const getNodeChildSignature = (node: SessionNode): string => {
@@ -109,6 +117,13 @@ const getNodeChildSignature = (node: SessionNode): string => {
   return node.children
     .map((child) => `${child.session.id}:${child.children.length}`)
     .join('|');
+};
+
+const directoryBelongsToProject = (directory: string | null | undefined, projectPath: string): boolean => {
+  const normalizedDirectory = normalizePath(directory ?? null);
+  const normalizedProjectPath = normalizePath(projectPath);
+  if (!normalizedDirectory || !normalizedProjectPath) return false;
+  return normalizedDirectory === normalizedProjectPath || normalizedDirectory.startsWith(`${normalizedProjectPath}/`);
 };
 
 const treeContainsSessionId = (node: SessionNode, sessionId: string | null): boolean => {
@@ -132,7 +147,7 @@ const treeContainsSessionId = (node: SessionNode, sessionId: string | null): boo
 const treeContainsMenuKey = (
   node: SessionNode,
   menuKey: string | null,
-  renderContext: 'project' | 'recent',
+  renderContext: 'project' | 'recent' | 'global-pinned',
   archivedBucket: boolean,
 ): boolean => {
   if (!menuKey) {
@@ -173,7 +188,11 @@ const areEqual = (prev: Props, next: Props): boolean => {
       return false;
     }
   }
-  if (prev.pinnedSessionIds.has(prevSessionId) !== next.pinnedSessionIds.has(nextSessionId)) return false;
+  const prevIsPinned = prev.pinnedSessionIds.has(prevSessionId)
+    || Boolean(prev.groupDirectory && prev.pinnedSessionIdsByProject.get(prev.groupDirectory)?.has(prevSessionId));
+  const nextIsPinned = next.pinnedSessionIds.has(nextSessionId)
+    || Boolean(next.groupDirectory && next.pinnedSessionIdsByProject.get(next.groupDirectory)?.has(nextSessionId));
+  if (prevIsPinned !== nextIsPinned) return false;
   if (prev.expandedParents.has(prevSessionId) !== next.expandedParents.has(nextSessionId)) return false;
   if (prev.hasSessionSearchQuery !== next.hasSessionSearchQuery) return false;
   if (prev.normalizedSessionSearchQuery !== next.normalizedSessionSearchQuery) return false;
@@ -198,9 +217,9 @@ const areEqual = (prev: Props, next: Props): boolean => {
   const nextMenuInTree = treeContainsMenuKey(next.node, next.openSidebarMenuKey, next.renderContext ?? 'project', next.archivedBucket ?? false);
   if (prevMenuInTree !== nextMenuInTree) return false;
 
-  const prevDirectory = normalizePath((prevSession as Session & { directory?: string | null }).directory ?? null)
+  const prevDirectory = resolveGlobalSessionDirectory(prevSession)
     ?? normalizePath(prev.groupDirectory ?? null);
-  const nextDirectory = normalizePath((nextSession as Session & { directory?: string | null }).directory ?? null)
+  const nextDirectory = resolveGlobalSessionDirectory(nextSession)
     ?? normalizePath(next.groupDirectory ?? null);
   if (prevDirectory !== nextDirectory) return false;
   if ((prevDirectory ? prev.directoryStatus.get(prevDirectory) : null) !== (nextDirectory ? next.directoryStatus.get(nextDirectory) : null)) return false;
@@ -227,6 +246,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
     directoryStatus,
     currentSessionId,
     pinnedSessionIds,
+    pinnedSessionIdsByProject,
     expandedParents,
     hasSessionSearchQuery,
     normalizedSessionSearchQuery,
@@ -261,9 +281,6 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
     secondaryMeta,
     renderContext = 'project',
   } = props;
-  const hasSecondaryProjectLabel = Boolean(secondaryMeta?.projectLabel);
-  const hasSecondaryBranchLabel = Boolean(secondaryMeta?.branchLabel);
-
   const displayMode = useSessionDisplayStore((state) => state.displayMode);
   const isMinimalMode = displayMode === 'minimal';
   const isVSCode = React.useMemo(() => isVSCodeRuntime(), []);
@@ -273,23 +290,95 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
   const hideOnHoverClass = isVSCode
     ? 'group-hover:opacity-0'
     : 'group-hover:opacity-0 group-focus-within:opacity-0';
-  const revealPaddingClass = isMinimalMode
-    ? (isVSCode
-        ? 'group-hover:pr-1'
-        : 'group-hover:pr-1 group-focus-within:pr-1')
-    : (isVSCode
-        ? 'group-hover:pr-5'
-        : 'group-hover:pr-5 group-focus-within:pr-5');
   const suppressNextSelectRef = React.useRef(false);
   const [isTouchPressed, setIsTouchPressed] = React.useState(false);
 
   const session = node.session;
   const liveSession = useSession(session.id);
   const resolvedSession = liveSession ?? session;
+  const isGlobalPinnedContext = renderContext === 'global-pinned';
+  const globalPinnedTitleOffsetStyle = isGlobalPinnedContext ? { paddingLeft: 1.5 } : undefined;
 
   const sessionDirectory =
-    normalizePath((session as Session & { directory?: string | null }).directory ?? null)
+    resolveGlobalSessionDirectory(session)
     ?? normalizePath(groupDirectory ?? null);
+
+  const hasSecondaryProjectLabel = Boolean(secondaryMeta?.projectLabel);
+  const hasSecondaryBranchLabel = Boolean(secondaryMeta?.branchLabel);
+
+  const projectsStore = useProjectsStore((state) => state.projects);
+  const { currentTheme } = useThemeSystem();
+  const remoteProject = React.useMemo(() => {
+    const indexedServerId = serverRegistry.getServerForSession(session.id);
+    const serverScopedProjects = indexedServerId && indexedServerId !== DEFAULT_SERVER_ID
+      ? projectsStore.filter((project) => project.serverId === indexedServerId)
+      : [];
+
+    const candidates = serverScopedProjects.length > 0
+      ? serverScopedProjects
+      : projectsStore.filter((project) => project.serverId);
+
+    const projectById = projectId
+      ? candidates.find((project) => project.id === projectId && project.serverId)
+      : null;
+    if (projectById) return projectById;
+
+    const directory = sessionDirectory ?? groupDirectory ?? null;
+    return candidates
+      .filter((project) => project.serverId && directoryBelongsToProject(directory, project.path))
+      .sort((a, b) => normalizePath(b.path)!.length - normalizePath(a.path)!.length)[0] ?? null;
+  }, [groupDirectory, projectId, projectsStore, session.id, sessionDirectory]);
+  const remoteIndicatorProject = isGlobalPinnedContext ? remoteProject : null;
+  const sshInstance = useDesktopSshStore((state) =>
+    remoteIndicatorProject?.serverId ? state.instances.find((entry) => entry.id === remoteIndicatorProject.serverId) : undefined,
+  );
+  const sshStatus = useDesktopSshStore((state) =>
+    remoteIndicatorProject?.serverId ? state.statusesById[remoteIndicatorProject.serverId] : undefined,
+  );
+  const remoteStatusLabel = sshStatus?.phase === 'ready'
+    ? t('sessions.sidebar.remote.connected')
+    : sshStatus?.phase === 'error'
+      ? t('sessions.sidebar.remote.error')
+      : sshStatus && sshStatus.phase !== 'idle'
+        ? t('sessions.sidebar.remote.connecting')
+        : t('sessions.sidebar.remote.disconnected');
+  const remoteInstanceLabel = remoteIndicatorProject?.serverId
+    ? (sshInstance ? resolveInstanceLabel(sshInstance) : remoteIndicatorProject.serverId)
+    : null;
+  const remoteProjectDirectory = remoteIndicatorProject?.path ?? sessionDirectory ?? null;
+  const remoteStatusColor = React.useMemo(() => {
+    if (!sshStatus || sshStatus.phase === 'idle') return currentTheme.colors.surface.subtle;
+    if (sshStatus.phase === 'ready') return currentTheme.colors.status.success;
+    if (sshStatus.phase === 'error') return currentTheme.colors.status.error;
+    return currentTheme.colors.status.warning;
+  }, [sshStatus, currentTheme.colors.surface.subtle, currentTheme.colors.status]);
+  const remoteIndicator = remoteIndicatorProject ? (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span
+          className="flex-shrink-0 inline-flex items-center"
+          aria-label={t('sessions.sidebar.session.status.remoteInstance', { status: remoteStatusLabel })}
+        >
+          <RiComputerLine className="h-3.5 w-3.5" style={{ color: remoteStatusColor, transition: 'color 0.2s' }} />
+        </span>
+      </TooltipTrigger>
+      <TooltipContent side="right" sideOffset={8} className="max-w-xs text-left">
+        <div className="flex flex-col gap-1 text-xs">
+          <div className="flex items-center gap-2">
+            <RiComputerLine className="h-3.5 w-3.5 flex-shrink-0" style={{ color: remoteStatusColor }} />
+            <span className="font-medium text-foreground">{remoteInstanceLabel}</span>
+            <span className="text-muted-foreground">({remoteStatusLabel})</span>
+          </div>
+          {remoteProjectDirectory ? (
+            <div className="min-w-0 text-muted-foreground">
+              <span className="font-medium text-foreground">{t('sessions.sidebar.session.status.remoteProjectDir')}</span>
+              <span className="ml-1 break-all">{remoteProjectDirectory}</span>
+            </div>
+          ) : null}
+        </div>
+      </TooltipContent>
+    </Tooltip>
+  ) : null;
   const directoryStore = useDirectoryStore(sessionDirectory ?? undefined);
   const sync = useSync();
 
@@ -326,7 +415,9 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
   const isActive = currentSessionId === session.id;
   const sessionTitle = resolvedSession.title || t('sessions.sidebar.session.untitled');
   const hasChildren = node.children.length > 0;
-  const isPinnedSession = pinnedSessionIds.has(session.id);
+  const isPinnedSession = pinnedSessionIds.has(session.id)
+    || Boolean(groupDirectory && pinnedSessionIdsByProject.get(groupDirectory)?.has(session.id));
+  const isGloballyPinned = pinnedSessionIds.has(session.id);
   const isExpanded = hasSessionSearchQuery ? true : expandedParents.has(session.id);
   const isSubtaskSession = Boolean((resolvedSession as Session & { parentID?: string | null }).parentID);
   const unseenCount = useSessionUnseenCount(session.id);
@@ -337,6 +428,14 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
   const sessionUpdatedLabel = formatSessionDateLabel(sessionTimestamp);
   const sessionCompactUpdatedLabel = formatSessionCompactDateLabel(sessionTimestamp);
   const isMenuOpen = openSidebarMenuKey === menuInstanceKey;
+  const [menuPosition, setMenuPosition] = React.useState<{ x: number; y: number } | null>(null);
+  const [archiveConfirming, setArchiveConfirming] = React.useState(false);
+
+  React.useEffect(() => {
+    if (!archiveConfirming) return;
+    const timer = setTimeout(() => setArchiveConfirming(false), 3000);
+    return () => clearTimeout(timer);
+  }, [archiveConfirming]);
 
   const descendantCount = React.useMemo(() => collectNodeDescendantIds(node).length, [collectNodeDescendantIds, node]);
 
@@ -483,34 +582,50 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
   const pendingPermissionCount = sessionPermissions.length;
   const showUnreadStatus = !isStreaming && needsAttention && !isActive;
   const showStatusMarker = isStreaming || showUnreadStatus;
-  const statusMarkerContent = isStreaming
-    ? (
+
+  const pinMarker = isPinnedSession ? (
+    <RiPushpinLine
+      className={cn(
+        'h-3.5 w-3.5 flex-shrink-0',
+        isStreaming ? 'text-primary animate-busy-pulse' : showUnreadStatus ? 'text-[var(--status-info)]' : 'text-foreground',
+      )}
+      aria-label={isGloballyPinned ? t('sessions.sidebar.session.status.pinnedGlobal') : t('sessions.sidebar.session.status.pinned')}
+    />
+  ) : null;
+
+  const statusMarkerContent = !isPinnedSession && showStatusMarker ? (
+    isStreaming
+      ? (
         <span
           className="h-1.5 w-1.5 rounded-full bg-primary animate-busy-pulse"
           aria-label={t('sessions.sidebar.session.status.active')}
           title={t('sessions.sidebar.session.status.active')}
         />
       )
-    : (
+      : (
         <span
           className="h-1.5 w-1.5 rounded-full bg-[var(--status-info)]"
           aria-label={t('sessions.sidebar.session.status.unread')}
           title={t('sessions.sidebar.session.status.unread')}
         />
-      );
-  const leadingIndicators = showStatusMarker || isPinnedSession ? (
+      )
+  ) : null;
+
+  const leadingIndicators = (pinMarker || hasChildren || statusMarkerContent) ? (
     <span
       className={cn(
-        'pointer-events-none absolute inline-flex h-3.5 items-center justify-center gap-0.5 transition-opacity',
+        'pointer-events-none absolute inline-flex h-3.5 items-center justify-center gap-0.5',
         isMinimalMode ? 'top-1/2 -translate-y-1/2' : 'top-[14.5px] -translate-y-1/2',
-        showStatusMarker && isPinnedSession ? 'left-[-18px] w-6' : 'left-[-10px] w-3.5',
-        hasChildren && !alwaysShowActions ? 'opacity-100 group-hover:opacity-0 group-focus-within:opacity-0' : '',
+        isGlobalPinnedContext && isPinnedSession ? 'left-[2.25px]' : null,
+        !isGlobalPinnedContext && (isPinnedSession || statusMarkerContent) ? 'left-[-9px]' : null,
+        !isGlobalPinnedContext && !isPinnedSession && !statusMarkerContent ? 'left-[-5px]' : null,
       )}
     >
-      {showStatusMarker ? statusMarkerContent : null}
-      {isPinnedSession ? <RiPushpinLine className="h-3 w-3 flex-shrink-0 text-primary" aria-label={t('sessions.sidebar.session.status.pinned')} /> : null}
+      {pinMarker}
+      {statusMarkerContent}
     </span>
   ) : null;
+
   const subsessionChevron = hasChildren ? (
     <span
       role="button"
@@ -527,13 +642,11 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
         }
       }}
       className={cn(
-        'absolute inline-flex h-3.5 w-3.5 items-center justify-center rounded-md text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 transition-opacity',
+        'absolute inline-flex h-3.5 w-3.5 items-center justify-center rounded-md text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50',
         isMinimalMode ? 'top-1/2 -translate-y-1/2' : 'top-[14.5px] -translate-y-1/2',
-        isMinimalMode && showStatusMarker && !alwaysShowActions
-          ? 'opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto'
-          : '',
+        !alwaysShowActions ? 'opacity-0 group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto' : '',
       )}
-      style={{ left: `${(depth > 0 ? depth * 16 + 4 : 6) - 16}px` }}
+      style={{ left: isPinnedSession ? '-18px' : '-10px' }}
       aria-label={isExpanded
         ? t('sessions.sidebar.session.subsessions.collapse')
         : t('sessions.sidebar.session.subsessions.expand')}
@@ -548,22 +661,6 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
 
   const handleMenuOpenChange = (open: boolean) => {
     setOpenSidebarMenuKey(open ? menuInstanceKey : null);
-  };
-
-  const handleMenuTriggerClick = (event: React.MouseEvent<HTMLButtonElement>) => {
-    event.preventDefault();
-    event.stopPropagation();
-    setOpenSidebarMenuKey(isMenuOpen ? null : menuInstanceKey);
-  };
-
-  const handleMenuTriggerPointerDown = (event: React.PointerEvent<HTMLButtonElement>) => {
-    event.preventDefault();
-    event.stopPropagation();
-  };
-
-  const handleMenuTriggerMouseDown = (event: React.MouseEvent<HTMLButtonElement>) => {
-    event.preventDefault();
-    event.stopPropagation();
   };
 
   const handleRowSelect = (event?: React.MouseEvent<HTMLButtonElement>) => {
@@ -621,10 +718,30 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
         <RiPencilAiLine className="mr-1 h-4 w-4" />
         {t('sessions.sidebar.session.menu.rename')}
       </DropdownMenuItem>
-      <DropdownMenuItem onClick={() => togglePinnedSession(session.id)} className="[&>svg]:mr-1">
-        {isPinnedSession ? <RiUnpinLine className="mr-1 h-4 w-4" /> : <RiPushpinLine className="mr-1 h-4 w-4" />}
-        {isPinnedSession ? t('sessions.sidebar.session.menu.unpin') : t('sessions.sidebar.session.menu.pin')}
-      </DropdownMenuItem>
+      {isGloballyPinned ? (
+        <DropdownMenuItem onClick={() => togglePinnedSession(session.id, 'global')} className="[&>svg]:mr-1">
+          <RiUnpinLine className="mr-1 h-4 w-4" />
+          {t('sessions.sidebar.session.menu.unpinGlobal')}
+        </DropdownMenuItem>
+      ) : isPinnedSession ? (
+        <DropdownMenuItem onClick={() => togglePinnedSession(session.id, groupDirectory ?? '')} className="[&>svg]:mr-1">
+          <RiUnpinLine className="mr-1 h-4 w-4" />
+          {t('sessions.sidebar.session.menu.unpin')}
+        </DropdownMenuItem>
+      ) : (
+        <>
+          <DropdownMenuItem onClick={() => togglePinnedSession(session.id, 'global')} className="[&>svg]:mr-1">
+            <RiPushpinLine className="mr-1 h-4 w-4" />
+            {t('sessions.sidebar.session.menu.pinGlobal')}
+          </DropdownMenuItem>
+          {groupDirectory ? (
+            <DropdownMenuItem onClick={() => togglePinnedSession(session.id, groupDirectory)} className="[&>svg]:mr-1">
+              <RiPushpinLine className="mr-1 h-4 w-4" />
+              {t('sessions.sidebar.session.menu.pinToProject')}
+            </DropdownMenuItem>
+          ) : null}
+        </>
+      )}
       {!resolvedSession.share ? (
         <DropdownMenuItem onClick={() => handleShareSession(resolvedSession)} className="[&>svg]:mr-1">
           <RiShare2Line className="mr-1 h-4 w-4" />
@@ -703,11 +820,6 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
         </DropdownMenuItem>
       ) : null}
 
-      <DropdownMenuSeparator />
-      <DropdownMenuItem className="text-destructive focus:text-destructive [&>svg]:mr-1" onClick={() => handleDeleteSession(session, { archivedBucket })}>
-        <RiDeleteBinLine className="mr-1 h-4 w-4" />
-        {archivedBucket ? t('sessions.sidebar.bulkActions.delete') : t('sessions.sidebar.bulkActions.archive')}
-      </DropdownMenuItem>
     </DropdownMenuContent>
   );
 
@@ -719,11 +831,17 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
           data-session-scope={sessionDirectory ?? ''}
           data-session-archived={archivedBucket ? '1' : '0'}
           className={cn(
-            'group relative my-0.5 flex items-center rounded-sm px-1.5 py-1',
+            'group relative my-0.5 flex items-center rounded-sm py-1',
+            isGlobalPinnedContext ? 'px-0.5 pl-5' : 'px-1.5',
             isMissingDirectory ? 'opacity-75' : '',
             isRowSelected && 'bg-primary/15',
           )}
           style={depth > 0 ? { paddingLeft: `${depth * 16 + 4}px` } : undefined}
+          onContextMenu={!mobileVariant ? (e) => {
+            e.preventDefault();
+            setMenuPosition({ x: e.clientX, y: e.clientY });
+            setOpenSidebarMenuKey(menuInstanceKey);
+          } : undefined}
         >
           {leadingIndicators}
           {subsessionChevron}
@@ -733,26 +851,30 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
                 <TooltipTrigger asChild>
                   <button
                     type="button"
-	                    disabled={isMissingDirectory}
-	                    onPointerDown={handleRowPointerDown}
-	                    onPointerUp={handleRowPointerEnd}
-	                    onPointerCancel={handleRowPointerEnd}
-	                    onMouseDown={handleRowMouseDown}
-	                    onClick={(event) => handleRowSelect(event)}
+                    disabled={isMissingDirectory}
+                    onPointerDown={handleRowPointerDown}
+                    onPointerUp={handleRowPointerEnd}
+                    onPointerCancel={handleRowPointerEnd}
+                    onMouseDown={handleRowMouseDown}
+                    onClick={(event) => handleRowSelect(event)}
                     onDoubleClick={(e) => {
                       e.stopPropagation();
                       handleSessionDoubleClick();
                     }}
                     className={cn(
-	                      'flex min-w-0 flex-1 cursor-pointer flex-col gap-0 overflow-hidden rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 text-foreground select-none disabled:cursor-not-allowed transition-[padding]',
-	                      isTouchPressed && 'bg-interactive-hover/70',
-                      alwaysShowActions
-                        ? (isVSCode ? revealPaddingClass : 'pr-7')
-                        : revealPaddingClass,
+                      'flex min-w-0 flex-1 cursor-pointer flex-col gap-0 overflow-hidden rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 text-foreground select-none disabled:cursor-not-allowed',
+                      isTouchPressed && 'bg-interactive-hover/70',
+                      alwaysShowActions ? 'pr-7' : null,
                     )}
                   >
                     <div className={cn('flex w-full items-center min-w-0 flex-1 overflow-hidden', isMinimalMode ? 'gap-1' : 'gap-1')}>
-                      <div className={cn('block min-w-0 flex-1 truncate typography-ui-label font-normal', isActive ? 'text-primary' : 'text-foreground')}>{renderHighlightedText(sessionTitle, normalizedSessionSearchQuery)}</div>
+                      <div
+                        className={cn('block min-w-0 flex-1 truncate typography-ui-label font-normal', isActive ? 'text-primary' : 'text-foreground')}
+                        style={globalPinnedTitleOffsetStyle}
+                      >
+                        {renderHighlightedText(sessionTitle, normalizedSessionSearchQuery)}
+                      </div>
+                      {remoteIndicator}
                       {alwaysShowActions ? <span className="ml-2 flex-shrink-0 text-[0.72rem] text-muted-foreground/75">{sessionCompactUpdatedLabel}</span> : null}
                       {!alwaysShowActions ? (
                         <div className="relative ml-1 flex h-4 min-w-4 flex-shrink-0 items-center justify-end">
@@ -797,34 +919,38 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
             ) : (
               <button
                 type="button"
-	                disabled={isMissingDirectory}
-	                onPointerDown={handleRowPointerDown}
-	                onPointerUp={handleRowPointerEnd}
-	                onPointerCancel={handleRowPointerEnd}
-	                onMouseDown={handleRowMouseDown}
-	                onClick={(event) => handleRowSelect(event)}
+                disabled={isMissingDirectory}
+                onPointerDown={handleRowPointerDown}
+                onPointerUp={handleRowPointerEnd}
+                onPointerCancel={handleRowPointerEnd}
+                onMouseDown={handleRowMouseDown}
+                onClick={(event) => handleRowSelect(event)}
                 onDoubleClick={(e) => {
                   e.stopPropagation();
                   handleSessionDoubleClick();
                 }}
                 className={cn(
-	                  'flex min-w-0 flex-1 cursor-pointer flex-col gap-0 overflow-hidden rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 text-foreground select-none disabled:cursor-not-allowed transition-[padding]',
-	                  isTouchPressed && 'bg-interactive-hover/70',
-                  alwaysShowActions
-                    ? (isVSCode ? revealPaddingClass : 'pr-7')
-                    : revealPaddingClass
+                  'flex min-w-0 flex-1 cursor-pointer flex-col gap-0 overflow-hidden rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 text-foreground select-none disabled:cursor-not-allowed',
+                  isTouchPressed && 'bg-interactive-hover/70',
+                  alwaysShowActions ? 'pr-7' : null,
                 )}
               >
                 <div className={cn('flex w-full items-center min-w-0 flex-1 overflow-hidden', isMinimalMode ? 'gap-1' : 'gap-1')}>
-                    <div className={cn('block min-w-0 flex-1 truncate typography-ui-label font-normal', isActive ? 'text-primary' : 'text-foreground')}>{renderHighlightedText(sessionTitle, normalizedSessionSearchQuery)}</div>
-                    {pendingPermissionCount > 0 ? (
-                      <span className="inline-flex items-center gap-1 rounded bg-destructive/10 px-1 py-0.5 text-[0.7rem] text-destructive flex-shrink-0" title={t('sessions.sidebar.session.status.permissionRequired')} aria-label={t('sessions.sidebar.session.status.permissionRequired')}>
-                        <RiShieldLine className="h-3 w-3" />
-                        <span className="leading-none">{pendingPermissionCount}</span>
-                      </span>
-                    ) : null}
+                  <div
+                    className={cn('block min-w-0 flex-1 truncate typography-ui-label font-normal', isActive ? 'text-primary' : 'text-foreground')}
+                    style={globalPinnedTitleOffsetStyle}
+                  >
+                    {renderHighlightedText(sessionTitle, normalizedSessionSearchQuery)}
                   </div>
- 
+                  {remoteIndicator}
+                  {pendingPermissionCount > 0 ? (
+                    <span className="inline-flex items-center gap-1 rounded bg-destructive/10 px-1 py-0.5 text-[0.7rem] text-destructive flex-shrink-0" title={t('sessions.sidebar.session.status.permissionRequired')} aria-label={t('sessions.sidebar.session.status.permissionRequired')}>
+                      <RiShieldLine className="h-3 w-3" />
+                      <span className="leading-none">{pendingPermissionCount}</span>
+                    </span>
+                  ) : null}
+                </div>
+
                 {!isMinimalMode ? (
                   <div className="flex items-center justify-between gap-3 text-muted-foreground/60 min-w-0 overflow-hidden leading-tight" style={{ fontSize: 'calc(var(--text-ui-label) * 0.85)' }}>
                     <div className="flex min-w-0 items-center gap-1.5 overflow-hidden">
@@ -846,37 +972,48 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
           ) : null}
 
           <div className={cn(
-            'absolute right-0 top-1/2 z-10 -translate-y-1/2 transition-opacity',
-            isMenuOpen
-              ? 'opacity-100'
-              : (alwaysShowActions && !isVSCode)
-                ? 'opacity-100'
-                : cn('opacity-0', revealOnHoverClass),
+            'absolute right-0.5 top-1/2 z-10 -translate-y-1/2',
+            isMenuOpen || archiveConfirming ? 'opacity-100' : cn('opacity-0', revealOnHoverClass),
           )}>
-            <DropdownMenu open={isMenuOpen} onOpenChange={handleMenuOpenChange}>
-              <DropdownMenuTrigger asChild>
-                <button
-                  type="button"
-                  className={cn(
-                    'inline-flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 transition-opacity',
-                    isMinimalMode && !alwaysShowActions
-                      ? (isMenuOpen
-                          ? 'h-4 w-4 opacity-100'
-                          : cn('h-4 w-4 opacity-0', revealOnHoverClass))
-                      : 'h-6 w-6 opacity-100',
-                  )}
-                  aria-label={t('sessions.sidebar.session.menu.label')}
-                  onPointerDown={handleMenuTriggerPointerDown}
-                  onMouseDown={handleMenuTriggerMouseDown}
-                  onClick={handleMenuTriggerClick}
-                  onKeyDown={(event) => event.stopPropagation()}
-                >
-                   <RiMore2Line className={cn(isMinimalMode && !alwaysShowActions ? 'h-2.5 w-2.5' : 'h-3.5 w-3.5')} />
-                </button>
-              </DropdownMenuTrigger>
-              {sessionMenuContent}
-            </DropdownMenu>
+            <button
+              type="button"
+              className={cn(
+                'inline-flex h-5 w-5 items-center justify-center rounded-sm',
+                archiveConfirming
+                  ? 'text-white bg-[var(--status-error)] hover:bg-[var(--status-error)]/80'
+                  : 'text-muted-foreground hover:text-[var(--status-error)]',
+              )}
+              aria-label={archiveConfirming
+                ? (archivedBucket ? t('sessions.sidebar.bulkActions.deleteConfirm') : t('sessions.sidebar.bulkActions.archiveConfirm'))
+                : (archivedBucket ? t('sessions.sidebar.bulkActions.delete') : t('sessions.sidebar.bulkActions.archive'))}
+              onClick={(e) => {
+                e.stopPropagation();
+                if (archiveConfirming) {
+                  handleDeleteSession(session, { archivedBucket });
+                  setArchiveConfirming(false);
+                } else {
+                  setArchiveConfirming(true);
+                }
+              }}
+            >
+              {archivedBucket ? (
+                <RiDeleteBinLine className="h-3.5 w-3.5" />
+              ) : (
+                <RiArchiveLine className="h-3.5 w-3.5" />
+              )}
+            </button>
           </div>
+
+          <DropdownMenu open={isMenuOpen} onOpenChange={handleMenuOpenChange}>
+            <DropdownMenuTrigger asChild>
+              <div
+                className="fixed w-0 h-0 overflow-hidden"
+                style={menuPosition ? { left: menuPosition.x, top: menuPosition.y } : undefined}
+                aria-hidden="true"
+              />
+            </DropdownMenuTrigger>
+            {sessionMenuContent}
+          </DropdownMenu>
         </div>
       </DraggableSessionRow>
       {hasChildren && isExpanded

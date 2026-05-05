@@ -11,6 +11,7 @@ import {
 } from "./optimistic"
 import { useDirectoryStore, useSyncDirectory, useChildStoreManager } from "./sync-context"
 import { resolveSdkForDirectory } from "./session-actions"
+import { useSessionUIStore } from "./session-ui-store"
 import { dropSessionCaches } from "./session-cache"
 import { stripMessageDiffSnapshots } from "./sanitize"
 import {
@@ -298,7 +299,8 @@ export function useSync() {
         // Fetch session info if needed
         if (!hasSession || force) {
           try {
-            const client = resolveSdkForDirectory(directory)
+            const sessionDir = useSessionUIStore.getState().getDirectoryForSession(sessionID) || directory
+            const client = resolveSdkForDirectory(sessionDir)
             const result = await retry(() => client.session.get({ sessionID }))
             if (result.data) {
               const s = store.getState()

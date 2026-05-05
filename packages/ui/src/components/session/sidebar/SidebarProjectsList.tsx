@@ -31,6 +31,7 @@ type ProjectSection = {
     iconBackground?: string;
     serverId?: string;
     unavailable?: boolean;
+    pinned?: boolean;
   };
   groups: SessionGroup[];
 };
@@ -63,6 +64,7 @@ type Props = {
   removeProject: (id: string) => void;
   projectHeaderSentinelRefs: React.MutableRefObject<Map<string, HTMLDivElement | null>>;
   reorderProjects: (fromIndex: number, toIndex: number) => void;
+  toggleProjectPin: (id: string) => void;
   getOrderedGroups: (projectId: string, groups: SessionGroup[]) => SessionGroup[];
   setGroupOrderByProject: React.Dispatch<React.SetStateAction<Map<string, string[]>>>;
   openSidebarMenuKey: string | null;
@@ -140,7 +142,13 @@ export function SidebarProjectsList(props: Props): React.ReactNode {
             }}
           >
             <SortableContext items={props.sectionsForRender.map((section) => section.project.id)} strategy={verticalListSortingStrategy}>
-              {props.sectionsForRender.map((section) => {
+              {(() => {
+                const sorted = [...props.sectionsForRender].sort((a, b) => {
+                  if (a.project.pinned && !b.project.pinned) return -1;
+                  if (!a.project.pinned && b.project.pinned) return 1;
+                  return 0;
+                });
+                return sorted.map((section) => {
                 const project = section.project;
                 const projectKey = project.id;
                 const rawProjectLabel = project.label?.trim();
@@ -201,6 +209,8 @@ export function SidebarProjectsList(props: Props): React.ReactNode {
                     showCreateButtons
                     openSidebarMenuKey={props.openSidebarMenuKey}
                     setOpenSidebarMenuKey={props.setOpenSidebarMenuKey}
+                    isPinned={project.pinned}
+                    onTogglePin={() => props.toggleProjectPin(projectKey)}
                   >
                     {!isCollapsed ? (
                       <div className="space-y-0 pt-0 pb-0.5 pl-3">
@@ -244,7 +254,7 @@ export function SidebarProjectsList(props: Props): React.ReactNode {
                     ) : null}
                   </SortableProjectItem>
                 );
-              })}
+              })})()}
             </SortableContext>
             <DragOverlay dropAnimation={null} />
           </DndContext>

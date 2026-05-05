@@ -741,7 +741,10 @@ const MermaidPreviewDialog: React.FC<{
             if (!normalizedPath) {
                 sourcePromise = Promise.reject(new Error('Invalid local file path for Mermaid preview.'));
             } else {
-                sourcePromise = fetch(`${serverBaseUrl}/api/fs/raw?path=${encodeURIComponent(normalizedPath)}`)
+                sourcePromise = fetch(`${serverBaseUrl}/api/fs/raw?${new URLSearchParams({
+                    path: normalizedPath,
+                    allowOutsideWorkspace: 'true',
+                }).toString()}`)
                     .then((response) => {
                         if (!response.ok) {
                             return Promise.reject(new Error(`Failed to read diagram file (${response.status})`));

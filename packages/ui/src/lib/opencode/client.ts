@@ -15,6 +15,7 @@ import type {
 import type { PermissionRequest } from "@/types/permission";
 import type { QuestionRequest } from "@/types/question";
 import { waitForWorktreeBootstrap } from "@/lib/worktrees/worktreeBootstrap";
+import { resolveSdkForDirectory, resolveBaseUrlForSession } from "@/sync/session-actions";
 import {
   assertProviderCircuitClosed,
   recordProviderSuccess,
@@ -270,11 +271,20 @@ class OpencodeService {
       }
 
       const previousDirectory = this.currentDirectory;
+      const previousClient = this.client;
       this.currentDirectory = this.normalizeCandidatePath(directory) ?? directory;
       try {
+        // When the directory belongs to a remote server, swap the SDK client
+        // so all wrapper methods (listAgents, createSession, sendMessage, etc.)
+        // route to the correct server's baseUrl.
+        const remoteClient = resolveSdkForDirectory(this.currentDirectory)
+        if (remoteClient) {
+          this.client = remoteClient
+        }
         return await fn();
       } finally {
         this.currentDirectory = previousDirectory;
+        this.client = previousClient;
       }
     };
 
@@ -706,7 +716,9 @@ class OpencodeService {
     // Use async prompt endpoint so the client doesn't block waiting
     // for model work (SSE will deliver output/status).
     // This avoids 504s from proxy timeouts on long-running turns.
-    const base = this.baseUrl.replace(/\/+$/, '');
+    const remoteBaseUrl = resolveBaseUrlForSession(params.id, this.currentDirectory)
+    const effectiveBase = remoteBaseUrl ?? this.baseUrl
+    const base = effectiveBase.replace(/\/+$/, '');
     let url: URL;
     try {
       url = new URL(`${base}/session/${encodeURIComponent(params.id)}/prompt_async`);
@@ -827,7 +839,9 @@ class OpencodeService {
       }
     }
 
-    const base = this.baseUrl.replace(/\/+$/, '');
+    const remoteBaseUrl = resolveBaseUrlForSession(params.id, this.currentDirectory)
+    const effectiveBase = remoteBaseUrl ?? this.baseUrl
+    const base = effectiveBase.replace(/\/+$/, '');
     const url = new URL(`${base}/session/${encodeURIComponent(params.id)}/command`);
     if (this.currentDirectory) {
       url.searchParams.set('directory', this.currentDirectory);

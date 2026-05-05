@@ -131,7 +131,8 @@ export type DesktopSettings = {
   messageStreamTransport?: 'auto' | 'ws' | 'sse';
   activityRenderMode?: 'collapsed' | 'summary';
   sessionSortMode?: 'updated-desc' | 'created-desc';
-  pinMode?: 'global' | 'per-project';
+  sessionGroupMinVisible?: number;
+  sessionGroupRecentHours?: number;
   mermaidRenderingMode?: 'svg' | 'ascii';
   userMessageRenderingMode?: 'markdown' | 'plain';
   stickyUserHeader?: boolean;
