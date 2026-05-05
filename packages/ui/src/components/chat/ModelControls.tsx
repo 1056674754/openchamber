@@ -351,15 +351,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     const activeServerId = useActiveServerId();
     const [remoteProviders, setRemoteProviders] = React.useState<typeof localProviders | null>(null);
     const providers = React.useMemo(
-        () => {
-            if (activeServerId === DEFAULT_SERVER_ID) return localProviders;
-            if (!remoteProviders) return localProviders;
-            // Merge: remote providers take priority for same provider IDs,
-            // but all locally-known providers are still shown.
-            const remoteIds = new Set(remoteProviders.map(p => p.id));
-            const localOnly = localProviders.filter(p => !remoteIds.has(p.id));
-            return [...remoteProviders, ...localOnly];
-        },
+        () => activeServerId === DEFAULT_SERVER_ID ? localProviders : (remoteProviders ?? []),
         [activeServerId, localProviders, remoteProviders],
     );
     const currentProviderId = useConfigStore((state) => state.currentProviderId);
@@ -403,7 +395,13 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             .then((result) => {
                 if (cancelled) return;
                 if (result.data?.all) {
-                    const processedProviders = result.data.all.map((provider) => ({
+                    const connectedIds = result.data?.connected
+                        ? new Set(result.data.connected)
+                        : null;
+                    const visible = connectedIds
+                        ? result.data.all.filter((provider) => connectedIds.has(provider.id))
+                        : result.data.all;
+                    const processedProviders = visible.map((provider) => ({
                         ...provider,
                         models: Object.values(provider.models ?? {}),
                     }));
