@@ -883,6 +883,14 @@ html:not(.dark) .chat-scroll {
   color: var(--surface-foreground) !important;
 }
 
+.markdown-content.markdown-reasoning [data-openchamber-file-link="true"][data-openchamber-file-status="missing"],
+.markdown-content.markdown-reasoning [data-openchamber-file-link="true"][data-openchamber-file-status="missing"]:hover {
+  color: var(--surface-muted-foreground) !important;
+  cursor: default !important;
+  text-decoration: line-through !important;
+  text-decoration-color: var(--surface-muted-foreground) !important;
+}
+
 .markdown-content.markdown-reasoning strong,
 .markdown-content.markdown-reasoning b,
 .markdown-content.markdown-reasoning [data-markdown="strong"],
@@ -980,6 +988,27 @@ html:not(.dark) .chat-scroll {
 
 .markdown-content [data-openchamber-file-link="true"]:hover {
   color: var(--markdown-link-hover, var(--primary));
+}
+
+.markdown-content [data-openchamber-file-link="true"][data-openchamber-file-status="missing"] {
+  color: var(--muted-foreground);
+  cursor: default;
+  text-decoration: line-through;
+  text-decoration-color: var(--muted-foreground);
+}
+
+.markdown-content [data-openchamber-file-link="true"][data-openchamber-file-status="missing"]:hover {
+  color: var(--muted-foreground);
+}
+
+.oc-file-missing-badge {
+  display: inline;
+  margin-left: 1px;
+  font-size: 0.65em;
+  color: var(--destructive);
+  vertical-align: super;
+  cursor: default;
+  user-select: none;
 }
 
 /* Markdown blockquote - use theme colors */
