@@ -22,9 +22,10 @@ import MessageBody from './message/MessageBody';
 import type { AgentMentionInfo } from './message/types';
 import type { StreamPhase, ToolPopupContent } from './message/types';
 import { deriveMessageRole } from './message/messageRole';
-import { filterVisibleParts, normalizeParts } from './message/partUtils';
+import { extractTextContent, filterVisibleParts, normalizeParts } from './message/partUtils';
 import { normalizeUserDisplayParts } from './message/normalizeUserDisplayParts';
 import { flattenAssistantTextParts } from '@/lib/messages/messageText';
+import { isFullySyntheticMessage } from '@/lib/messages/synthetic';
 import { isLikelyProviderAuthFailure, PROVIDER_AUTH_FAILURE_MESSAGE } from '@/lib/messages/providerAuthError';
 import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
 import type { TurnGroupingContext } from './lib/turns/types';
@@ -32,6 +33,8 @@ import { copyTextToClipboard } from '@/lib/clipboard';
 import { FadeInOnReveal } from './message/FadeInOnReveal';
 import { streamPerfCount } from '@/stores/utils/streamDebug';
 import { areOptionalRenderRelevantMessagesEqual, areRenderRelevantMessagesEqual, areRelevantTurnGroupingContextsEqual } from './message/renderCompare';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { useI18n } from '@/lib/i18n';
 
 const ToolOutputDialog = lazyWithChunkRecovery(() => import('./message/ToolOutputDialog'));
 
@@ -192,6 +195,8 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
         title: '',
         content: '',
     });
+    const [showRevertConfirm, setShowRevertConfirm] = React.useState(false);
+    const { t } = useI18n();
 
     React.useEffect(() => {
         setExpandedTools(readExpandedToolsCache(message.info.id));
@@ -201,7 +206,15 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
 
 
     const messageRole = React.useMemo(() => deriveMessageRole(message.info), [message.info]);
-    const isUser = messageRole.isUser;
+    const shouldRenderAsAssistant = React.useMemo(() => {
+        if (!messageRole.isUser) return false;
+        const parts = Array.isArray(message.parts) ? message.parts : [];
+        if (parts.some((p) => p?.type === 'subtask')) return true;
+        if (isFullySyntheticMessage(parts)) return true;
+        if (parts.filter((p) => p?.type === 'text').some((p) => extractTextContent(p).includes('<system-reminder>'))) return true;
+        return false;
+    }, [message.parts, messageRole.isUser]);
+    const isUser = messageRole.isUser && !shouldRenderAsAssistant;
     const useExternalUserActionsRow = isUser && (isMobile || !stickyUserHeader);
     const showStickyInlineHoverRow = isUser && !isMobile && stickyUserHeader && !useExternalUserActionsRow;
 
@@ -766,8 +779,8 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
 
     const handleRevert = React.useCallback(() => {
         if (!sessionId || !message.info.id) return;
-        revertToMessage(sessionId, message.info.id);
-    }, [sessionId, message.info.id, revertToMessage]);
+        setShowRevertConfirm(true);
+    }, [sessionId, message.info.id]);
 
     // NEW: Fork handler
     const handleFork = React.useCallback(() => {
@@ -1153,6 +1166,37 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                     isMobile={isMobile}
                 />
             </React.Suspense>
+            <Dialog open={showRevertConfirm} onOpenChange={setShowRevertConfirm}>
+                <DialogContent showCloseButton={false} className="max-w-sm gap-5">
+                    <DialogHeader>
+                        <DialogTitle>{t('chat.revertConfirm.title')}</DialogTitle>
+                        <DialogDescription>
+                            {t('chat.revertConfirm.description')}
+                        </DialogDescription>
+                    </DialogHeader>
+                    <DialogFooter>
+                        <button
+                            type="button"
+                            onClick={() => setShowRevertConfirm(false)}
+                            className="inline-flex h-8 items-center justify-center rounded-md border border-border px-3 typography-ui-label text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+                        >
+                            {t('chat.revertConfirm.cancel')}
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => {
+                                setShowRevertConfirm(false);
+                                if (sessionId && message.info.id) {
+                                    revertToMessage(sessionId, message.info.id);
+                                }
+                            }}
+                            className="inline-flex h-8 items-center justify-center rounded-md bg-destructive px-3 typography-ui-label text-destructive-foreground hover:bg-destructive/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive/50"
+                        >
+                            {t('chat.revertConfirm.confirm')}
+                        </button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
         </>
     );
 };

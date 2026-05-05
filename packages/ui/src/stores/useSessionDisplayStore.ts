@@ -15,7 +15,7 @@ export const useSessionDisplayStore = create<SessionDisplayStore>()(
   persist(
     (set) => ({
       displayMode: 'default',
-      showRecentSection: true,
+      showRecentSection: false,
       setDisplayMode: (mode) => set({ displayMode: mode }),
       setShowRecentSection: (show) => set({ showRecentSection: show }),
       toggleRecentSection: () => set((state) => ({ showRecentSection: !state.showRecentSection })),

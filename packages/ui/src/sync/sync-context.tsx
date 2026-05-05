@@ -1,6 +1,6 @@
 /* eslint-disable react-refresh/only-export-components */
 import React, { createContext, useContext, useEffect, useRef, useCallback, useMemo } from "react"
-import type { Event, Message, Part } from "@opencode-ai/sdk/v2/client"
+import type { Event, Message, Part, SessionStatus } from "@opencode-ai/sdk/v2/client"
 import type { Session } from "@opencode-ai/sdk/v2"
 import type { StoreApi } from "zustand"
 import { useStore } from "zustand"
@@ -32,10 +32,10 @@ import { useProjectsStore } from "@/stores/useProjectsStore"
 import { usePermissionStore } from "@/stores/permissionStore"
 import { useConfigStore } from "@/stores/useConfigStore"
 import { useTodosPersistStore } from "@/stores/useTodosPersistStore"
+import { useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
 import { toast } from "@/components/ui"
 import { appendNotification } from "./notification-store"
 import type { State } from "./types"
-import type { SessionStatus } from "@opencode-ai/sdk/v2/client"
 import type { PermissionRequest } from "@/types/permission"
 import type { QuestionRequest } from "@/types/question"
 import * as sessionActions from "./session-actions"
@@ -102,9 +102,15 @@ function useLiveSyncSelector<T>(selector: (states: State[]) => T, isEqual: (left
 
 /** Read status for a session across all directories */
 export function useGlobalSessionStatus(sessionId: string): SessionStatus | undefined {
-  return useLiveSyncSelector(
+  const globalStatus = useGlobalSessionsStore(
+    useCallback((state) => state.sessionStatuses.get(sessionId), [sessionId]),
+  )
+
+  const liveStatus = useLiveSyncSelector(
     useCallback((states) => findLiveSessionStatus(states, sessionId), [sessionId]),
   )
+
+  return globalStatus ?? liveStatus
 }
 
 /** Read all session statuses (for sidebar) */
@@ -641,6 +647,7 @@ const updateRoutingIndexFromEvent = (
   routingIndex: EventRoutingIndex,
   directory: string,
   payload: Event,
+  serverId: string,
 ) => {
   if (!directory || directory === "global") {
     return
@@ -657,6 +664,7 @@ const updateRoutingIndexFromEvent = (
       const info = (payload.properties as { info?: Session }).info
       if (info?.id) {
         setIndexedSessionDirectory(routingIndex, info.id, directory)
+        serverRegistry.indexSession(info.id, serverId)
       }
       return
     }
@@ -665,6 +673,7 @@ const updateRoutingIndexFromEvent = (
       const deletedSessionID = (payload.properties as { sessionID?: string }).sessionID
       if (deletedSessionID) {
         removeIndexedSession(routingIndex, deletedSessionID)
+        serverRegistry.forgetSession(deletedSessionID)
       }
       return
     }
@@ -743,8 +752,14 @@ async function resyncDirectoryAfterReconnect(
   const scopedClient = resolveSdkForDirectory(directory)
   await Promise.all(candidateSessionIds.map(async (sessionId) => {
     const [sessionResponse, messageResponse] = await Promise.all([
-      scopedClient.session.get({ sessionID: sessionId }).catch(() => null),
-      scopedClient.session.messages({ sessionID: sessionId, limit: RECONNECT_MESSAGE_LIMIT }).catch(() => null),
+      scopedClient.session.get({ sessionID: sessionId }).catch((e: unknown) => {
+        console.warn(`[resync] session.get failed for ${sessionId} on ${directory}`, e instanceof Error ? e.message : e)
+        return null
+      }),
+      scopedClient.session.messages({ sessionID: sessionId, limit: RECONNECT_MESSAGE_LIMIT }).catch((e: unknown) => {
+        console.warn(`[resync] session.messages failed for ${sessionId} on ${directory}`, e instanceof Error ? e.message : e)
+        return null
+      }),
     ])
     const session = sessionResponse?.data
     const records = messageResponse?.data
@@ -977,6 +992,7 @@ function handleEvent(
   payload: Event,
   childStores: ChildStoreManager,
   routingIndex: EventRoutingIndex,
+  serverId: string,
 ) {
   const directory = resolveDirectoryFromRoutingIndex(routingIndex, rawDirectory, payload, childStores)
 
@@ -1064,7 +1080,7 @@ function handleEvent(
     const permission = payload.properties as PermissionRequest
     const permissionStore = usePermissionStore.getState()
     if (permissionStore.isSessionAutoAccepting(permission.sessionID)) {
-      updateRoutingIndexFromEvent(routingIndex, resolvedDirectory, payload)
+      updateRoutingIndexFromEvent(routingIndex, resolvedDirectory, payload, serverId)
       void sessionActions.respondToPermission(permission.sessionID, permission.id, "once").catch(() => undefined)
       return
     }
@@ -1233,6 +1249,17 @@ function handleEvent(
     const messageID = getMessageIdFromPayload(payload) ?? undefined
     syncDebug.dispatch.eventApplied(payload.type, sessionID, messageID)
 
+    if (payload.type === "session.status") {
+      const statusProps = payload.properties as { sessionID: string; status: SessionStatus }
+      if (statusProps.sessionID && statusProps.status) {
+        useGlobalSessionsStore.getState().upsertStatus(statusProps.sessionID, statusProps.status)
+      }
+    } else if (payload.type === "session.idle" || payload.type === "session.error") {
+      if (sessionID) {
+        useGlobalSessionsStore.getState().upsertStatus(sessionID, { type: "idle" })
+      }
+    }
+
     // Parts-gap recovery on message.updated: if the message was inserted or
     // replaced but draft.part[messageID] is empty, the parts were lost or
     // never arrived. Trigger repair so the UI doesn't render a blank bubble.
@@ -1258,7 +1285,7 @@ function handleEvent(
     }
   }
 
-  updateRoutingIndexFromEvent(routingIndex, resolvedDirectory, payload)
+  updateRoutingIndexFromEvent(routingIndex, resolvedDirectory, payload, serverId)
 }
 
 // ---------------------------------------------------------------------------
@@ -1366,10 +1393,8 @@ export function SyncProvider(props: {
                 return
               }
               store.setState({ session: sessions, sessionTotal: sessions.length, limit: Math.max(sessions.length, 50) })
-              if (serverId !== DEFAULT_SERVER_ID) {
-                for (const s of sessions) {
-                  if (s.id) serverRegistry.indexSession(s.id, serverId)
-                }
+              for (const s of sessions) {
+                if (s.id) serverRegistry.indexSession(s.id, serverId)
               }
               ingestDirectoryStateIntoRoutingIndex(routingIndex, directory, store.getState())
             }),
@@ -1445,7 +1470,7 @@ export function SyncProvider(props: {
         return resolveDirectoryFromRoutingIndex(routingIndex, directory, payload, childStores)
       },
       onEvent: (directory, payload) => {
-        handleEvent(directory, payload, childStores, routingIndex)
+        handleEvent(directory, payload, childStores, routingIndex, serverId)
       },
       onReconnect: () => {
         useConfigStore.setState({
@@ -1480,7 +1505,7 @@ export function SyncProvider(props: {
       },
     })
     return cleanup
-  }, [props.sdk, props.baseUrl, childStores, routingIndex, messageStreamTransport])
+  }, [props.sdk, props.baseUrl, childStores, routingIndex, messageStreamTransport, serverId])
 
   // Ensure current directory's child store exists
   useEffect(() => {

@@ -22,7 +22,6 @@ export type WeekStartPreference = 'auto' | 'sunday' | 'monday';
 // Design purpose: prevents sessions from jumping around when multitasking.
 // Default 'created-desc' keeps sessions stable during multi-task workflows.
 export type SessionSortMode = 'updated-desc' | 'created-desc';
-export type PinMode = 'global' | 'per-project';
 
 type ContextPanelTab = {
   id: string;
@@ -515,8 +514,9 @@ interface UIStore {
   showReasoningTraces: boolean;
   chatRenderMode: ChatRenderMode;
   activityRenderMode: ActivityRenderMode;
-  pinMode: PinMode;
   sessionSortMode: SessionSortMode;
+  sessionGroupMinVisible: number;
+  sessionGroupRecentHours: number;
   showDeletionDialog: boolean;
   autoDeleteEnabled: boolean;
   autoDeleteAfterDays: number;
@@ -643,8 +643,9 @@ interface UIStore {
   setShowReasoningTraces: (value: boolean) => void;
   setChatRenderMode: (value: ChatRenderMode) => void;
   setActivityRenderMode: (value: ActivityRenderMode) => void;
-  setPinMode: (value: PinMode) => void;
   setSessionSortMode: (value: SessionSortMode) => void;
+  setSessionGroupMinVisible: (value: number) => void;
+  setSessionGroupRecentHours: (value: number) => void;
   setShowDeletionDialog: (value: boolean) => void;
   setAutoDeleteEnabled: (value: boolean) => void;
   setAutoDeleteAfterDays: (days: number) => void;
@@ -774,8 +775,9 @@ export const useUIStore = create<UIStore>()(
         showReasoningTraces: true,
         chatRenderMode: 'live',
         activityRenderMode: 'summary',
-        pinMode: 'per-project',
         sessionSortMode: 'created-desc',
+        sessionGroupMinVisible: 7,
+        sessionGroupRecentHours: 48,
         showDeletionDialog: true,
         autoDeleteEnabled: false,
         autoDeleteAfterDays: 30,
@@ -1388,12 +1390,16 @@ export const useUIStore = create<UIStore>()(
           set({ activityRenderMode: value });
         },
 
-        setPinMode: (value) => {
-          set({ pinMode: value });
-        },
-
         setSessionSortMode: (value) => {
           set({ sessionSortMode: value });
+        },
+
+        setSessionGroupMinVisible: (value) => {
+          set({ sessionGroupMinVisible: value });
+        },
+
+        setSessionGroupRecentHours: (value) => {
+          set({ sessionGroupRecentHours: value });
         },
 
         setShowDeletionDialog: (value) => {
@@ -2020,8 +2026,9 @@ export const useUIStore = create<UIStore>()(
           showReasoningTraces: state.showReasoningTraces,
           chatRenderMode: state.chatRenderMode,
           activityRenderMode: state.activityRenderMode,
-          pinMode: state.pinMode,
           sessionSortMode: state.sessionSortMode,
+          sessionGroupMinVisible: state.sessionGroupMinVisible,
+          sessionGroupRecentHours: state.sessionGroupRecentHours,
           showDeletionDialog: state.showDeletionDialog,
           autoDeleteEnabled: state.autoDeleteEnabled,
           autoDeleteAfterDays: state.autoDeleteAfterDays,

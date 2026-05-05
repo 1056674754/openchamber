@@ -1588,6 +1588,14 @@ const AssistantMessageBody = React.memo(({
                 continue;
             }
 
+            if (isSubtaskPart(part)) {
+                rendered.push(
+                    <UserSubtaskPart key={`subtask-${messageId}-${i}`} part={part} />
+                );
+                i++;
+                continue;
+            }
+
             if (part.type === 'tool') {
                 const toolPart = part as ToolPartType;
                 const toolName = toolPart.tool?.toLowerCase() ?? '';

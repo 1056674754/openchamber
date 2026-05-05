@@ -714,6 +714,18 @@ export class ElectronSshManager {
           ? instance.remoteOpenchamber.installMethod
           : 'bun',
         uploadBundleOverSsh: Boolean(instance?.remoteOpenchamber?.uploadBundleOverSsh),
+        ...(typeof instance?.remoteOpenchamber?.releaseDownloadUrl === 'string'
+          ? (() => {
+              try {
+                const trimmed = instance.remoteOpenchamber.releaseDownloadUrl.trim();
+                if (!trimmed) return {};
+                const parsed = new URL(trimmed);
+                if (!['http:', 'https:'].includes(parsed.protocol)) return {};
+                parsed.hash = '';
+                return { releaseDownloadUrl: parsed.toString() };
+              } catch { return {}; }
+            })()
+          : {}),
       },
       localForward: {
         bindHost: sanitizeBindHost(instance?.localForward?.bindHost),
@@ -839,14 +851,37 @@ export class ElectronSshManager {
 
   async currentRemoteOpenChamberVersion(parsed, controlPath) {
     try {
-      const output = await runRemoteCommand(parsed, controlPath, 'openchamber --version 2>/dev/null || true');
+      const output = await runRemoteCommand(parsed, controlPath, 'PATH=$HOME/.local/bin:$PATH openchamber --version 2>/dev/null || $HOME/.local/bin/openchamber --version 2>/dev/null || true');
       return parseVersionToken(output);
     } catch {
       return null;
     }
   }
 
-  async installOpenChamberManaged(parsed, controlPath, version, preferred) {
+  async installOpenChamberManaged(parsed, controlPath, version, remoteOpenchamber) {
+    const preferred = remoteOpenchamber.installMethod;
+
+    if (preferred === 'download_release') {
+      const baseUrl = (remoteOpenchamber.releaseDownloadUrl || '').replace(/\/+$/, '');
+      if (!baseUrl) {
+        throw new Error('Release download URL is required for download_release install method. Configure it in Settings → Remote Instances.');
+      }
+      const downloadUrl = `${baseUrl}/releases/download/build-${version}/openchamber-linux`;
+      const binDir = '$HOME/.local/bin';
+      const script = [
+        `mkdir -p ${binDir}`,
+        `if command -v curl >/dev/null 2>&1; then curl -fsSL ${shellQuote(downloadUrl)} -o "${binDir}/openchamber"; elif command -v wget >/dev/null 2>&1; then wget -q ${shellQuote(downloadUrl)} -O "${binDir}/openchamber"; else echo "E: neither curl nor wget found" >&2; exit 127; fi`,
+        `chmod +x "${binDir}/openchamber"`,
+        `echo "Installed to ${binDir}/openchamber"`,
+      ].join(' && ');
+      await runRemoteCommand(parsed, controlPath, script);
+      return;
+    }
+
+    if (preferred === 'upload_bundle') {
+      throw new Error('upload_bundle install method is not yet implemented');
+    }
+
     const hasBun = await this.remoteCommandExists(parsed, controlPath, 'bun');
     const hasNpm = await this.remoteCommandExists(parsed, controlPath, 'npm');
     const commands = [];
@@ -925,9 +960,21 @@ export class ElectronSshManager {
     if (secret) {
       envPrefix += ` OPENCHAMBER_UI_PASSWORD=${shellQuote(secret)}`;
     }
-    const output = await runRemoteCommand(parsed, controlPath, `${envPrefix} openchamber serve --hostname 127.0.0.1 --port ${desiredPort}`);
-    const port = output.split(/\s+/).map((token) => Number.parseInt(token, 10)).find((value) => Number.isFinite(value));
-    return port || desiredPort;
+    const cmd = `PATH=$HOME/.local/bin:$PATH nohup env ${envPrefix} openchamber --port ${desiredPort} > /dev/null 2>&1 &`;
+    await runRemoteCommand(parsed, controlPath, cmd);
+
+    // Poll until server is reachable (up to ~15s)
+    const deadline = Date.now() + 15000;
+    let pollMs = 500;
+    while (Date.now() < deadline) {
+      if (await this.remoteServerRunning(parsed, controlPath, desiredPort, secret)) {
+        this.appendLogWithLevel(instance.id, 'INFO', `Managed server reachable on remote port ${desiredPort}`);
+        return desiredPort;
+      }
+      await new Promise((r) => setTimeout(r, pollMs));
+      pollMs = Math.min(pollMs * 2, 2000);
+    }
+    throw new Error(`Managed OpenChamber server failed to become reachable on port ${desiredPort}`);
   }
 
   async stopRemoteServerBestEffort(parsed, controlPath, remotePort) {
@@ -986,10 +1033,10 @@ export class ElectronSshManager {
     const installedVersion = await this.currentRemoteOpenChamberVersion(parsed, controlPath);
     if (!installedVersion) {
       this.setStatus(instance.id, 'installing', 'Installing OpenChamber on remote host');
-      await this.installOpenChamberManaged(parsed, controlPath, this.appVersion, instance.remoteOpenchamber.installMethod);
+      await this.installOpenChamberManaged(parsed, controlPath, this.appVersion, instance.remoteOpenchamber);
     } else if (installedVersion !== this.appVersion) {
       this.setStatus(instance.id, 'updating', `Updating remote OpenChamber from ${installedVersion} to ${this.appVersion}`);
-      await this.installOpenChamberManaged(parsed, controlPath, this.appVersion, instance.remoteOpenchamber.installMethod);
+      await this.installOpenChamberManaged(parsed, controlPath, this.appVersion, instance.remoteOpenchamber);
     }
 
     this.setStatus(instance.id, 'server_detecting', 'Detecting managed OpenChamber server');

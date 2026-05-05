@@ -4,8 +4,35 @@ import type {
   FileSearchResult,
   FilesAPI,
 } from '@openchamber/ui/lib/api/types';
+import { opencodeClient } from '@openchamber/ui/lib/opencode/client';
+import { useDirectoryStore } from '@openchamber/ui/stores/useDirectoryStore';
 
 const normalizePath = (path: string): string => path.replace(/\\/g, '/');
+
+const resolveCurrentDirectory = (): string => {
+  const storeDirectory = useDirectoryStore.getState().currentDirectory;
+  if (typeof storeDirectory === 'string' && storeDirectory.trim()) {
+    return normalizePath(storeDirectory.trim());
+  }
+
+  const clientDirectory = opencodeClient.getDirectory();
+  return typeof clientDirectory === 'string' ? normalizePath(clientDirectory.trim()) : '';
+};
+
+const appendExplicitDirectory = (params: URLSearchParams): void => {
+  const directory = resolveCurrentDirectory();
+  if (directory) {
+    params.set('directory', directory);
+  }
+};
+
+const explicitDirectoryBody = <T extends Record<string, unknown>>(body: T): T & { directory?: string } => {
+  const directory = resolveCurrentDirectory();
+  if (!directory) {
+    return body;
+  }
+  return { ...body, directory };
+};
 
 type WebDirectoryEntry = {
   name?: string;
@@ -95,7 +122,7 @@ export const createWebFilesAPI = (): FilesAPI => ({
     const response = await fetch('/api/fs/mkdir', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ path: target }),
+      body: JSON.stringify(explicitDirectoryBody({ path: target })),
     });
 
     if (!response.ok) {
@@ -115,6 +142,8 @@ export const createWebFilesAPI = (): FilesAPI => ({
     const params = new URLSearchParams({ path: target });
     if (options?.allowOutsideWorkspace) {
       params.set('allowOutsideWorkspace', 'true');
+    } else {
+      appendExplicitDirectory(params);
     }
     const response = await fetch(`/api/fs/stat?${params.toString()}`);
 
@@ -137,6 +166,8 @@ export const createWebFilesAPI = (): FilesAPI => ({
     const params = new URLSearchParams({ path: target });
     if (options?.allowOutsideWorkspace) {
       params.set('allowOutsideWorkspace', 'true');
+    } else {
+      appendExplicitDirectory(params);
     }
     if (options?.optional) {
       params.set('optional', 'true');
@@ -159,7 +190,7 @@ export const createWebFilesAPI = (): FilesAPI => ({
     const response = await fetch('/api/fs/write', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ path: target, content }),
+      body: JSON.stringify(explicitDirectoryBody({ path: target, content })),
     });
 
     if (!response.ok) {
@@ -179,7 +210,7 @@ export const createWebFilesAPI = (): FilesAPI => ({
     const response = await fetch('/api/fs/delete', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ path: target }),
+      body: JSON.stringify(explicitDirectoryBody({ path: target })),
     });
 
     if (!response.ok) {
@@ -195,7 +226,7 @@ export const createWebFilesAPI = (): FilesAPI => ({
     const response = await fetch('/api/fs/rename', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ oldPath, newPath }),
+      body: JSON.stringify(explicitDirectoryBody({ oldPath, newPath })),
     });
 
     if (!response.ok) {
@@ -228,7 +259,9 @@ export const createWebFilesAPI = (): FilesAPI => ({
 
   async downloadFile(path: string): Promise<void> {
     const target = normalizePath(path);
-    const url = `/api/fs/raw?path=${encodeURIComponent(target)}&download=true`;
+    const params = new URLSearchParams({ path: target, download: 'true' });
+    appendExplicitDirectory(params);
+    const url = `/api/fs/raw?${params.toString()}`;
     const a = document.createElement('a');
     a.href = url;
     a.download = target.split('/').pop() || 'file';

@@ -47,6 +47,7 @@ import {
   desktopSshLogsClear,
   desktopSshLogs,
   resolveInstanceLabel,
+  createDesktopSshInstance,
   type DesktopSshInstance,
   type DesktopSshPortForward,
   type DesktopSshPortForwardType,
@@ -995,6 +996,8 @@ export const RemoteInstancesPage: React.FC = () => {
           </div>
 
           {isManagedMode ? (
+            <>
+
             <div className="flex flex-col gap-1.5 py-1.5 md:flex-row md:items-center md:gap-8">
               <div className="w-56 shrink-0">
                 <HintLabel
@@ -1028,9 +1031,56 @@ export const RemoteInstancesPage: React.FC = () => {
                 </SelectContent>
               </Select>
             </div>
-          ) : null}
 
-          {isManagedMode ? (
+            {draft.remoteOpenchamber.installMethod === 'download_release' ? (
+              <div className="flex flex-col gap-1.5 py-1.5 md:flex-row md:items-center md:gap-8">
+                <div className="w-56 shrink-0">
+                  <HintLabel
+                    label={t('settings.remoteInstances.page.field.releaseDownloadUrl')}
+                    hint={t('settings.remoteInstances.page.field.releaseDownloadUrlHint')}
+                  />
+                </div>
+                <Input
+                  className="h-7 md:max-w-xl"
+                  value={draft.remoteOpenchamber.releaseDownloadUrl || ''}
+                  onChange={(event) =>
+                    updateDraft((current) => ({
+                      ...current,
+                      remoteOpenchamber: {
+                        ...current.remoteOpenchamber,
+                        releaseDownloadUrl: event.target.value,
+                      },
+                    }))
+                  }
+                  placeholder={t('settings.remoteInstances.page.field.releaseDownloadUrlPlaceholder')}
+                />
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="xs"
+                      className="!font-normal h-7 shrink-0"
+                      onClick={() =>
+                        updateDraft((current) => ({
+                          ...current,
+                          remoteOpenchamber: {
+                            ...current.remoteOpenchamber,
+                            releaseDownloadUrl: createDesktopSshInstance('', '').remoteOpenchamber.releaseDownloadUrl,
+                          },
+                        }))
+                      }
+                    >
+                      {t('settings.remoteInstances.page.actions.resetToDefault')}
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent sideOffset={8}>
+                    <div className="typography-meta text-foreground">{t('settings.remoteInstances.page.actions.resetToDefault')}</div>
+                  </TooltipContent>
+                </Tooltip>
+              </div>
+            ) : null}
+
             <div className="flex flex-col gap-1.5 py-1.5 md:flex-row md:items-center md:gap-8">
               <div className="w-56 shrink-0">
                 <HintLabel
@@ -1053,6 +1103,8 @@ export const RemoteInstancesPage: React.FC = () => {
                 />
               </div>
             </div>
+
+            </>
           ) : null}
         </section>
       </div>

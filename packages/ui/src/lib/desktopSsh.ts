@@ -51,6 +51,8 @@ export type DesktopSshInstance = {
     preferredPort?: number;
     installMethod: DesktopSshInstallMethod;
     uploadBundleOverSsh: boolean;
+    /** URL template for download_release install method. {version} is replaced with app version. */
+    releaseDownloadUrl?: string;
   };
   localForward: {
     preferredLocalPort?: number;
@@ -255,6 +257,9 @@ const parseInstance = (value: unknown): DesktopSshInstance | null => {
         readBoolean(remoteRaw, 'uploadBundleOverSsh') ??
         readBoolean(remoteRaw, 'upload_bundle_over_ssh') ??
         false,
+      ...(readString(remoteRaw, 'releaseDownloadUrl') || readString(remoteRaw, 'release_download_url')
+        ? { releaseDownloadUrl: (readString(remoteRaw, 'releaseDownloadUrl') || readString(remoteRaw, 'release_download_url') || '').trim() }
+        : {}),
     },
     localForward: {
       ...(preferredLocalPort ? { preferredLocalPort } : {}),
@@ -339,6 +344,7 @@ export const createDesktopSshInstance = (id: string, sshCommand: string): Deskto
       keepRunning: true,
       installMethod: 'bun',
       uploadBundleOverSsh: false,
+      releaseDownloadUrl: 'https://github.com/1056674754/openchamber',
     },
     localForward: {
       bindHost: '127.0.0.1',

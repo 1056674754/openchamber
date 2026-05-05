@@ -372,7 +372,11 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
         return result?.content ?? '';
       }
 
-      const response = await fetch(`/api/fs/read?path=${encodeURIComponent(path)}&optional=true`, {
+      const params = new URLSearchParams({ path, optional: 'true' });
+      if (sessionDirectory) {
+        params.set('directory', sessionDirectory);
+      }
+      const response = await fetch(`/api/fs/read?${params.toString()}`, {
         // Avoid conditional requests (304 + empty body).
         cache: 'no-store',
       });
@@ -479,7 +483,11 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
           const response = await fetch('/api/fs/write', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ path: resolvedPath, content }),
+            body: JSON.stringify({
+              path: resolvedPath,
+              content,
+              ...(sessionDirectory ? { directory: sessionDirectory } : {}),
+            }),
           });
           if (!response.ok) {
             throw new Error(t('planView.error.writePlanFileFailed', { status: response.status }));
@@ -493,7 +501,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
     return () => {
       window.clearTimeout(controller);
     };
-  }, [content, resolvedPath, runtimeApis.files, t]);
+  }, [content, resolvedPath, runtimeApis.files, sessionDirectory, t]);
 
   React.useEffect(() => {
     return () => {

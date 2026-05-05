@@ -201,6 +201,7 @@ This module provides OpenCode server integration utilities for the web server ru
 - Returned API:
   - `resolveDirectoryCandidate(value)`
   - `validateDirectoryPath(candidate)`
+  - `resolveRequiredExplicitProjectDirectory(req)`
   - `resolveProjectDirectory(req)`
   - `resolveOptionalProjectDirectory(req)`
 

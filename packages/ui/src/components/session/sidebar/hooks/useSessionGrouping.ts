@@ -16,7 +16,9 @@ import { useI18n } from '@/lib/i18n';
 type Args = {
   homeDirectory: string | null;
   worktreeMetadata: Map<string, WorktreeMetadata>;
-  pinnedSessionIds: Set<string>;
+  globalPinnedSessionIds: Set<string>;
+  pinnedSessionIdsByProject: Map<string, Set<string>>;
+  pinnedOrderByProject: Map<string, string[]>;
   sessionSortMode: SessionSortMode;
   gitBranches: Map<string, string | null>;
   isVSCode: boolean;
@@ -68,8 +70,48 @@ export const useSessionGrouping = (args: Args) => {
       projectIsRepo: boolean,
     ) => {
       const normalizedProjectRoot = normalizePath(projectRoot ?? null);
-      const sortedProjectSessions = dedupeSessionsById(projectSessions)
-        .sort((a, b) => compareSessions(a, b, args.pinnedSessionIds, args.sessionSortMode));
+
+      // Resolve project-scoped pinned IDs (excludes global pins - those appear only in the Global Pinned section)
+      const projectPinnedSet = normalizedProjectRoot
+        ? (args.pinnedSessionIdsByProject.get(normalizedProjectRoot) ?? new Set<string>())
+        : new Set<string>();
+      const projectPinnedOrder = normalizedProjectRoot
+        ? (args.pinnedOrderByProject.get(normalizedProjectRoot) ?? [])
+        : [];
+
+      // Exclude globally-pinned sessions AND their full descendant tree from project sections
+      // (they appear only in the Global Pinned section). Without this, subagent children of a
+      // globally-pinned parent become orphan roots because their parent is removed from sessionMap.
+      const childrenByParentId = new Map<string, Session[]>();
+      for (const session of projectSessions) {
+        const parentID = (session as Session & { parentID?: string | null }).parentID;
+        if (!parentID) continue;
+        const list = childrenByParentId.get(parentID) ?? [];
+        list.push(session);
+        childrenByParentId.set(parentID, list);
+      }
+
+      const globallyPinnedTreeIds = new Set<string>();
+      const collectPinnedDescendants = (sessionId: string) => {
+        const children = childrenByParentId.get(sessionId) ?? [];
+        for (const child of children) {
+          if (globallyPinnedTreeIds.has(child.id)) continue;
+          globallyPinnedTreeIds.add(child.id);
+          collectPinnedDescendants(child.id);
+        }
+      };
+      for (const s of projectSessions) {
+        if (args.globalPinnedSessionIds.has(s.id)) {
+          globallyPinnedTreeIds.add(s.id);
+          collectPinnedDescendants(s.id);
+        }
+      }
+      const projectOnlySessions = projectSessions.filter(
+        (s) => !globallyPinnedTreeIds.has(s.id),
+      );
+
+      const sortedProjectSessions = dedupeSessionsById(projectOnlySessions)
+        .sort((a, b) => compareSessions(a, b, projectPinnedSet, args.sessionSortMode, projectPinnedOrder));
 
       const sessionMap = new Map(sortedProjectSessions.map((session) => [session.id, session]));
       const childrenMap = new Map<string, Session[]>();
@@ -84,7 +126,7 @@ export const useSessionGrouping = (args: Args) => {
         collection.push(session);
         childrenMap.set(parentID, collection);
       });
-      childrenMap.forEach((list) => list.sort((a, b) => compareSessions(a, b, args.pinnedSessionIds, args.sessionSortMode)));
+      childrenMap.forEach((list) => list.sort((a, b) => compareSessions(a, b, projectPinnedSet, args.sessionSortMode, projectPinnedOrder)));
 
       const worktreeByPath = new Map<string, WorktreeMetadata>();
       availableWorktrees.forEach((meta) => {
@@ -243,7 +285,7 @@ export const useSessionGrouping = (args: Args) => {
 
       return groups;
     },
-    [args.homeDirectory, args.worktreeMetadata, args.pinnedSessionIds, args.sessionSortMode, args.gitBranches, args.isVSCode, t],
+    [args.homeDirectory, args.worktreeMetadata, args.globalPinnedSessionIds, args.pinnedSessionIdsByProject, args.pinnedOrderByProject, args.sessionSortMode, args.gitBranches, args.isVSCode, t],
   );
 
   return {

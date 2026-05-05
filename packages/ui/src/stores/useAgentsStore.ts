@@ -10,6 +10,7 @@ import {
   updateConfigUpdateMessage,
 } from "@/lib/configUpdate";
 import { getSafeStorage } from "./utils/safeStorage";
+import { resolveApiUrl } from "@/sync/session-actions";
 import { useConfigStore } from "@/stores/useConfigStore";
 import { useCommandsStore } from "@/stores/useCommandsStore";
 import { useProjectsStore } from "@/stores/useProjectsStore";
@@ -622,7 +623,7 @@ async function performConfigRefresh(options: {
         sdkRefreshTasks.push(configStore.loadProviders({ directory }).then(() => undefined));
       }
       if (refreshSdkAgents) {
-        sdkRefreshTasks.push(configStore.loadAgents({ directory }).then(() => undefined));
+        sdkRefreshTasks.push(configStore.loadAgents({ directory, serverBaseUrl: resolveApiUrl(directory) }).then(() => undefined));
       }
     }
 

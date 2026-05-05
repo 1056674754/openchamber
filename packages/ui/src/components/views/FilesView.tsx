@@ -1251,6 +1251,8 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     const params = new URLSearchParams({ path });
     if (options?.allowOutsideWorkspace) {
       params.set('allowOutsideWorkspace', 'true');
+    } else if (currentDirectory) {
+      params.set('directory', currentDirectory);
     }
     if (options?.optional) {
       params.set('optional', 'true');
@@ -1264,7 +1266,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
       throw new Error((error as { error?: string }).error || t('filesView.error.readFileFailed'));
     }
     return response.text();
-  }, [files, serverBaseUrl, t]);
+  }, [currentDirectory, files, serverBaseUrl, t]);
 
   const readFileStat = React.useCallback(async (path: string, options?: { allowOutsideWorkspace?: boolean }): Promise<FileStatSnapshot | null> => {
     if (files.statFile) {
@@ -2341,6 +2343,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
         : `${serverBaseUrl}/api/fs/raw?${new URLSearchParams({
           path: selectedFile.path,
           ...(selectedFileReadOptions.allowOutsideWorkspace ? { allowOutsideWorkspace: 'true' } : {}),
+          ...(!selectedFileReadOptions.allowOutsideWorkspace && currentDirectory ? { directory: currentDirectory } : {}),
         }).toString()}`))
     : '';
 

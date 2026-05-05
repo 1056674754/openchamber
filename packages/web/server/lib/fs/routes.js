@@ -68,8 +68,8 @@ const resolveWorkspacePathFromWorktrees = async ({ targetPath, baseDirectory, pa
   return { ok: false, error: 'Path is outside of active workspace' };
 };
 
-const resolveWorkspacePathFromContext = async ({ req, targetPath, resolveProjectDirectory, path, os, normalizeDirectoryPath, openchamberUserConfigRoot }) => {
-  const resolvedProject = await resolveProjectDirectory(req);
+const resolveWorkspacePathFromContext = async ({ req, targetPath, resolveRequiredExplicitProjectDirectory, path, os, normalizeDirectoryPath, openchamberUserConfigRoot }) => {
+  const resolvedProject = await resolveRequiredExplicitProjectDirectory(req);
   if (!resolvedProject.directory) {
     return { ok: false, error: resolvedProject.error || 'Active workspace is required' };
   }
@@ -95,7 +95,7 @@ const resolveWorkspacePathFromContext = async ({ req, targetPath, resolveProject
   });
 };
 
-const resolveReadPathFromContext = async ({ req, targetPath, resolveProjectDirectory, path, os, normalizeDirectoryPath, openchamberUserConfigRoot }) => {
+const resolveReadPathFromContext = async ({ req, targetPath, resolveRequiredExplicitProjectDirectory, path, os, normalizeDirectoryPath, openchamberUserConfigRoot }) => {
   if (req.query?.allowOutsideWorkspace === 'true') {
     const normalized = normalizeDirectoryPath(targetPath);
     if (!normalized || typeof normalized !== 'string') {
@@ -108,7 +108,7 @@ const resolveReadPathFromContext = async ({ req, targetPath, resolveProjectDirec
   return resolveWorkspacePathFromContext({
     req,
     targetPath,
-    resolveProjectDirectory,
+    resolveRequiredExplicitProjectDirectory,
     path,
     os,
     normalizeDirectoryPath,
@@ -193,7 +193,7 @@ export const registerFsRoutes = (app, dependencies) => {
     spawn,
     crypto,
     normalizeDirectoryPath,
-    resolveProjectDirectory,
+    resolveRequiredExplicitProjectDirectory,
     buildAugmentedPath,
     resolveGitBinaryForSpawn,
     openchamberUserConfigRoot,
@@ -284,7 +284,7 @@ export const registerFsRoutes = (app, dependencies) => {
         const resolved = await resolveWorkspacePathFromContext({
           req,
           targetPath: dirPath,
-          resolveProjectDirectory,
+          resolveRequiredExplicitProjectDirectory,
           path,
           os,
           normalizeDirectoryPath,
@@ -314,7 +314,7 @@ export const registerFsRoutes = (app, dependencies) => {
       const resolved = await resolveReadPathFromContext({
         req,
         targetPath: filePath,
-        resolveProjectDirectory,
+        resolveRequiredExplicitProjectDirectory,
         path,
         os,
         normalizeDirectoryPath,
@@ -363,7 +363,7 @@ export const registerFsRoutes = (app, dependencies) => {
       const resolved = await resolveReadPathFromContext({
         req,
         targetPath: filePath,
-        resolveProjectDirectory,
+        resolveRequiredExplicitProjectDirectory,
         path,
         os,
         normalizeDirectoryPath,
@@ -415,7 +415,7 @@ export const registerFsRoutes = (app, dependencies) => {
       const resolved = await resolveReadPathFromContext({
         req,
         targetPath: filePath,
-        resolveProjectDirectory,
+        resolveRequiredExplicitProjectDirectory,
         path,
         os,
         normalizeDirectoryPath,
@@ -488,7 +488,7 @@ export const registerFsRoutes = (app, dependencies) => {
       const resolved = await resolveWorkspacePathFromContext({
         req,
         targetPath: filePath,
-        resolveProjectDirectory,
+        resolveRequiredExplicitProjectDirectory,
         path,
         os,
         normalizeDirectoryPath,
@@ -521,7 +521,7 @@ export const registerFsRoutes = (app, dependencies) => {
       const resolved = await resolveWorkspacePathFromContext({
         req,
         targetPath,
-        resolveProjectDirectory,
+        resolveRequiredExplicitProjectDirectory,
         path,
         os,
         normalizeDirectoryPath,
@@ -559,7 +559,7 @@ export const registerFsRoutes = (app, dependencies) => {
       const resolvedOld = await resolveWorkspacePathFromContext({
         req,
         targetPath: oldPath,
-        resolveProjectDirectory,
+        resolveRequiredExplicitProjectDirectory,
         path,
         os,
         normalizeDirectoryPath,
@@ -572,7 +572,7 @@ export const registerFsRoutes = (app, dependencies) => {
       const resolvedNew = await resolveWorkspacePathFromContext({
         req,
         targetPath: newPath,
-        resolveProjectDirectory,
+        resolveRequiredExplicitProjectDirectory,
         path,
         os,
         normalizeDirectoryPath,
