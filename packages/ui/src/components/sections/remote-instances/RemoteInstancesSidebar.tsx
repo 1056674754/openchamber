@@ -4,9 +4,10 @@ import { Button } from '@/components/ui/button';
 import { SettingsSidebarLayout } from '@/components/sections/shared/SettingsSidebarLayout';
 import { SettingsSidebarItem } from '@/components/sections/shared/SettingsSidebarItem';
 import { useDesktopSshStore } from '@/stores/useDesktopSshStore';
+import { useShallow } from 'zustand/react/shallow';
 import { useUIStore } from '@/stores/useUIStore';
 import { toast } from '@/components/ui';
-import type { DesktopSshInstance } from '@/lib/desktopSsh';
+import { resolveInstanceLabel, type DesktopSshInstance } from '@/lib/desktopSsh';
 import { useI18n } from '@/lib/i18n';
 
 type RemoteInstancesSidebarProps = {
@@ -55,7 +56,7 @@ const phaseLabelKey = (phase?: string) => {
 export const RemoteInstancesSidebar: React.FC<RemoteInstancesSidebarProps> = ({ onItemSelect }) => {
   const { t } = useI18n();
   const instances = useDesktopSshStore((state) => state.instances);
-  const statusesById = useDesktopSshStore((state) => state.statusesById);
+  const statusesById = useDesktopSshStore(useShallow((state) => state.statusesById));
   const isLoading = useDesktopSshStore((state) => state.isLoading);
   const load = useDesktopSshStore((state) => state.load);
   const loadImports = useDesktopSshStore((state) => state.loadImports);
@@ -154,7 +155,7 @@ export const RemoteInstancesSidebar: React.FC<RemoteInstancesSidebarProps> = ({ 
       {instances.map((instance) => {
         const status = statusesById[instance.id];
         const selected = instance.id === selectedId;
-        const title = instance.nickname?.trim() || instance.sshParsed?.destination || instance.id;
+        const title = resolveInstanceLabel(instance);
         const metadata = `${t(phaseLabelKey(status?.phase))}${status?.localUrl ? ` · ${status.localUrl}` : ''}`;
         const isReady = status?.phase === 'ready';
         const canRetry = status?.phase === 'error' || status?.phase === 'degraded';

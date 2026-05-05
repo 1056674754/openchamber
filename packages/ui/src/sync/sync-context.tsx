@@ -20,14 +20,15 @@ import {
 import { bootstrapGlobal, bootstrapDirectory } from "./bootstrap"
 import { retry } from "./retry"
 import { updateStreamingState } from "./streaming"
-import { setActionRefs } from "./session-actions"
+import { setActionRefs, resolveSdkForDirectory } from "./session-actions"
 import { setSyncRefs } from "./sync-refs"
 import { stripMessageDiffSnapshots, stripSessionDiffSnapshots } from "./sanitize"
 import { syncDebug } from "./debug"
 import { getReconnectCandidateSessionIds } from "./reconnect-recovery"
 import { opencodeClient } from "@/lib/opencode/client"
 import { DEFAULT_SERVER_ID, serverRegistry } from "@/lib/opencode/server-registry"
-import { registerSyncStores } from "./multi-server-registry"
+import { registerSyncStores, getSyncStoresForServer } from "./multi-server-registry"
+import { useProjectsStore } from "@/stores/useProjectsStore"
 import { usePermissionStore } from "@/stores/permissionStore"
 import { useConfigStore } from "@/stores/useConfigStore"
 import { useTodosPersistStore } from "@/stores/useTodosPersistStore"
@@ -217,9 +218,13 @@ async function repairSessionParts(
   sessionID: string,
   store: StoreApi<DirectoryStore>,
 ) {
-  const scopedClient = opencodeClient.getScopedSdkClient(directory)
+  const projects = useProjectsStore.getState().projects
+  const project = projects.find((p) => p.path === directory && p.serverId && p.serverId !== DEFAULT_SERVER_ID)
+  const sdkClient = project?.serverId
+    ? serverRegistry.get(project.serverId)?.client ?? resolveSdkForDirectory(directory)
+    : resolveSdkForDirectory(directory)
   const result = await retry(() =>
-    scopedClient.session.messages({ sessionID, limit: RECONNECT_MESSAGE_LIMIT }),
+    sdkClient.session.messages({ sessionID, limit: RECONNECT_MESSAGE_LIMIT }),
   )
   const records = (result.data ?? []).filter((record: { info?: { id?: string } }) => !!record?.info?.id)
   if (records.length === 0) return
@@ -735,7 +740,7 @@ async function resyncDirectoryAfterReconnect(
     })
   }
 
-  const scopedClient = opencodeClient.getScopedSdkClient(directory)
+  const scopedClient = resolveSdkForDirectory(directory)
   await Promise.all(candidateSessionIds.map(async (sessionId) => {
     const [sessionResponse, messageResponse] = await Promise.all([
       scopedClient.session.get({ sessionID: sessionId }).catch(() => null),
@@ -1265,6 +1270,7 @@ export function SyncProvider(props: {
   directory: string
   serverId?: string
   baseUrl?: string
+  remoteDirectories?: string[]
   children: React.ReactNode
 }) {
   const serverId = props.serverId ?? DEFAULT_SERVER_ID
@@ -1372,13 +1378,15 @@ export function SyncProvider(props: {
           // VS Code race: if sessions are still empty after bootstrap, OpenCode
           // wasn't ready yet (bridge returned 503). Retry a few times.
           const state = store.getState()
-          if (state.session.length === 0 && attempt < 5) {
+          const sessionCount = Array.isArray(state.session) ? state.session.length : 0
+          if (sessionCount === 0 && attempt < 5) {
             console.warn(`[bootstrap] sessions empty for ${directory} after attempt ${attempt + 1}; retrying in 2s`)
             await new Promise((r) => setTimeout(r, 2000))
             store.setState({ status: "loading" as const })
             await runBootstrap(attempt + 1)
-          } else if (state.session.length === 0) {
+          } else if (sessionCount === 0) {
             console.warn(`[bootstrap] sessions empty for ${directory} after ${attempt + 1} attempts; giving up`)
+            store.setState({ status: "complete" as const })
           }
         }
 
@@ -1482,6 +1490,17 @@ export function SyncProvider(props: {
     }
   }, [props.directory, childStores, routingIndex])
 
+  useEffect(() => {
+    if (serverId === DEFAULT_SERVER_ID) return
+    const dirs = props.remoteDirectories
+    if (!dirs?.length) return
+
+    for (const dir of dirs) {
+      const store = childStores.ensureChild(dir)
+      ingestDirectoryStateIntoRoutingIndex(routingIndex, dir, store.getState())
+    }
+  }, [serverId, props.remoteDirectories, childStores, routingIndex])
+
   // Set refs so non-React code (session-actions, session-ui-store) can access sync state
   useEffect(() => {
     setSyncRefs(props.sdk, childStores, props.directory, (sessionID, dir) => {
@@ -1526,6 +1545,18 @@ export function useGlobalSyncSelector<T>(selector: (state: GlobalSyncStore) => T
 export function useDirectoryStore(directory?: string): StoreApi<DirectoryStore> {
   const system = useSyncSystem()
   const dir = directory ?? system.directory
+
+  if (dir) {
+    const projects = useProjectsStore.getState().projects
+    const project = projects.find((p) => p.path === dir && p.serverId && p.serverId !== DEFAULT_SERVER_ID)
+    if (project?.serverId) {
+      const remoteStores = getSyncStoresForServer(project.serverId)
+      if (remoteStores) {
+        return remoteStores.ensureChild(dir)
+      }
+    }
+  }
+
   return system.childStores.ensureChild(dir)
 }
 
@@ -1989,7 +2020,7 @@ export function useEnsureSessionMessages(sessionID: string, directory?: string) 
 
     void (async () => {
       try {
-        const scopedClient = opencodeClient.getScopedSdkClient(dir ?? "")
+        const scopedClient = resolveSdkForDirectory(dir ?? "")
         const response = await scopedClient.session.messages({
           sessionID: sessionID,
           limit: RECONNECT_MESSAGE_LIMIT,

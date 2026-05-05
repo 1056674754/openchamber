@@ -278,13 +278,32 @@ export const startDesktopWindowDrag = async (): Promise<boolean> => {
   if (!isDesktopShell() || !isTauriShell()) {
     return false;
   }
-
   try {
-    const { getCurrentWindow } = await import('@tauri-apps/api/window');
-    const appWindow = getCurrentWindow();
-    await appWindow.startDragging();
+    const tauri = (window as unknown as { __TAURI__?: TauriGlobal }).__TAURI__;
+    await tauri?.core?.invoke?.('desktop_start_window_drag');
     return true;
   } catch {
+    return false;
+  }
+};
+
+export const openSshTerminalAtPath = async (
+  sshDestination: string,
+  sshArgs: string[],
+  remotePath: string,
+  appName: string,
+): Promise<boolean> => {
+  try {
+    const tauri = (window as unknown as { __TAURI__?: TauriGlobal }).__TAURI__;
+    await tauri?.core?.invoke?.('desktop_ssh_open_terminal', {
+      sshDestination,
+      sshArgs,
+      remotePath,
+      appName,
+    });
+    return true;
+  } catch (e) {
+    console.warn('Failed to open SSH terminal', e);
     return false;
   }
 };

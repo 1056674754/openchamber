@@ -75,7 +75,10 @@ export function useAllServersLiveSessions(): Session[] {
       }
     }
 
+    const interval = setInterval(updateExtra, 3000);
+
     return () => {
+      clearInterval(interval);
       unsubRegistry();
       for (const u of storeUnsubs) u();
     };
@@ -126,22 +129,43 @@ export function useAllServersSessionStatuses(): Record<string, SessionStatus> {
 
   useEffect(() => {
     const updateExtra = () => setExtraStatuses(collectExtraStatuses());
+    const storeUnsubs: (() => void)[] = [];
 
     updateExtra();
     const unsubRegistry = subscribeSyncStoresRegistry(updateExtra);
 
-    const storeUnsubs: (() => void)[] = [];
     for (const entry of getAllSyncStores()) {
       for (const store of entry.childStores.children.values()) {
         storeUnsubs.push(store.subscribe(updateExtra));
       }
     }
 
+    const interval = setInterval(updateExtra, 3000);
+
     return () => {
+      clearInterval(interval);
       unsubRegistry();
       for (const u of storeUnsubs) u();
     };
   }, []);
 
   return { ...defaultStatuses, ...extraStatuses };
+}
+
+export function useAllServersLiveAgents(): { id: string; name: string }[] {
+  const { childStores } = useSyncSystem();
+  const getDefaultAgents = useCallback(
+    () => {
+      const states = Array.from(childStores.children.values(), (s) => s.getState());
+      const map = new Map<string, { id: string; name: string }>();
+      for (const state of states) {
+        for (const agent of state.agent ?? []) {
+          if (!map.has(agent.name)) map.set(agent.name, { id: agent.name, name: agent.name });
+        }
+      }
+      return Array.from(map.values());
+    },
+    [childStores],
+  );
+  return getDefaultAgents();
 }

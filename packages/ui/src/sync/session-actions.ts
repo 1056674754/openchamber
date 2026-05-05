@@ -8,13 +8,13 @@ import { Binary } from "./binary"
 import { useSessionUIStore } from "./session-ui-store"
 import { useInputStore } from "./input-store"
 import type { ChildStoreManager } from "./child-store"
-import { opencodeClient } from "@/lib/opencode/client"
 import { useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
 import { useConfigStore } from "@/stores/useConfigStore"
 import { registerSessionDirectory } from "./sync-refs"
 import { isSyntheticPart } from "@/lib/messages/synthetic"
 import { serverRegistry, DEFAULT_SERVER_ID } from "@/lib/opencode/server-registry"
 import { getSyncStoresForServer } from "./multi-server-registry"
+import { useProjectsStore } from "@/stores/useProjectsStore"
 
 // Reference set by SyncProvider — allows actions to access SDK and stores
 let _sdk: OpencodeClient | null = null
@@ -64,6 +64,38 @@ function sdkForSession(sessionId?: string | null): OpencodeClient {
     if (conn) return conn.client
   }
   return sdk()
+}
+
+/** Resolve the correct SDK client for a directory by looking up its project's serverId. */
+export function resolveSdkForDirectory(directory: string): OpencodeClient {
+  const projects = useProjectsStore.getState().projects
+  const normalizedDir = directory.replace(/\\/g, '/').replace(/\/+$/, '') || '/'
+  const project = projects.find(
+    (p) => p.path === normalizedDir && p.serverId && p.serverId !== DEFAULT_SERVER_ID,
+  )
+  if (project?.serverId) {
+    const conn = serverRegistry.get(project.serverId)
+    if (conn) return conn.client
+  }
+  return sdk()
+}
+
+/** Resolve the base API URL (raw origin, no /api suffix) for a directory's server. */
+export function resolveApiUrl(directory: string): string | undefined {
+  const projects = useProjectsStore.getState().projects
+  const normalizedDir = directory.replace(/\\/g, '/').replace(/\/+$/, '') || '/'
+  const project = projects.find(
+    (p) => p.path === normalizedDir && p.serverId && p.serverId !== DEFAULT_SERVER_ID,
+  )
+  if (!project?.serverId) return undefined
+  const conn = serverRegistry.get(project.serverId)
+  if (!conn) return undefined
+  // Extract raw origin from the baseUrl (which includes /api suffix)
+  try {
+    return new URL(conn.config.baseUrl).origin
+  } catch {
+    return undefined
+  }
 }
 
 /** Get the child store manager for a session's server. Falls back to default. */
@@ -148,7 +180,7 @@ function getSessionReplyClient(sessionId?: string): OpencodeClient {
     ? useSessionUIStore.getState().getDirectoryForSession(sessionId)
     : null
   if (directory) {
-    return opencodeClient.getScopedSdkClient(directory)
+    return resolveSdkForDirectory(directory)
   }
   return sdk()
 }
@@ -203,7 +235,7 @@ function getRequestReplyClient(
   if (conn) return conn.client
   const requestDirectory = resolveDirectoryForBlockingRequest(type, sessionId, requestId)
   if (requestDirectory) {
-    return opencodeClient.getScopedSdkClient(requestDirectory)
+    return resolveSdkForDirectory(requestDirectory)
   }
   return getSessionReplyClient(sessionId)
 }
@@ -223,7 +255,9 @@ export async function createSession(
       console.error("[session-actions] createSession: no directory available")
       return null
     }
-    const result = await sdk().session.create({
+
+    const client = resolveSdkForDirectory(fallbackDir)
+    const result = await client.session.create({
       directory: fallbackDir,
       title,
       parentID: parentID ?? undefined,
@@ -237,6 +271,15 @@ export async function createSession(
       if (sessionDirectory) {
         registerSessionDirectory(session.id, sessionDirectory)
       }
+
+      const normalizedDir = fallbackDir.replace(/\\/g, '/').replace(/\/+$/, '') || '/'
+      const project = useProjectsStore.getState().projects.find(
+        (p) => p.path === normalizedDir && p.serverId && p.serverId !== DEFAULT_SERVER_ID,
+      )
+      if (project?.serverId) {
+        serverRegistry.indexSession(session.id, project.serverId)
+      }
+
       useSessionUIStore.getState().setCurrentSession(session.id, sessionDirectory)
       useSessionUIStore.getState().markSessionAsOpenChamberCreated(session.id)
       useGlobalSessionsStore.getState().upsertSession(session)
