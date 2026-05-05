@@ -2441,7 +2441,6 @@ app.whenReady().then(async () => {
   await activateMainWindow(initialUrl, localOrigin, bootOutcome);
 
   // Auto-connect all configured SSH instances in parallel.
-  // The sshManager handles dedup, reconnection, and health monitoring.
   try {
     const sshInstances = sshManager.readInstances();
     if (sshInstances.instances.length > 0) {
