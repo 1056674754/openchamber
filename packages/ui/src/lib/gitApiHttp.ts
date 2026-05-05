@@ -28,6 +28,7 @@ import type {
   DiscoveredGitCredential,
   MergeConflictDetails,
 } from './api/types';
+import { resolveApiUrl } from '@/sync/session-actions';
 
 declare global {
   interface Window {
@@ -51,6 +52,11 @@ const resolveBaseOrigin = (): string => {
   return window.location.origin;
 };
 
+const resolveBaseOriginForDirectory = (directory: string | null | undefined): string | undefined => {
+  if (!directory) return undefined;
+  return resolveApiUrl(directory);
+};
+
 const API_BASE = '/api/git';
 const GIT_STATUS_CACHE_TTL_MS = 1200;
 const GIT_REPO_CHECK_CACHE_TTL_MS = 5000;
@@ -68,7 +74,8 @@ function buildUrl(
   params?: Record<string, string | number | boolean | undefined>,
   baseUrl?: string,
 ): string {
-  const url = new URL(path, baseUrl || resolveBaseOrigin());
+  const resolvedBase = baseUrl || resolveBaseOriginForDirectory(directory) || resolveBaseOrigin();
+  const url = new URL(path, resolvedBase);
   if (directory) {
     url.searchParams.set('directory', directory);
   }

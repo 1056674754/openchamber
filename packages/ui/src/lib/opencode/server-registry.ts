@@ -4,6 +4,7 @@ export interface ServerConfig {
   id: string;
   label: string;
   baseUrl: string;
+  sseUrl?: string;
   authToken?: string;
 }
 

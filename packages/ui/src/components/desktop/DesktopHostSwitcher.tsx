@@ -56,6 +56,7 @@ import {
   desktopSshDisconnect,
   desktopSshInstancesGet,
   desktopSshStatus,
+  resolveInstanceLabel,
   type DesktopSshInstanceStatus,
 } from '@/lib/desktopSsh';
 
@@ -1311,9 +1312,7 @@ export function DesktopHostSwitcherButton({ headerIconButtonClass }: DesktopHost
           const defaultSsh = sshCfg.instances.find((instance) => instance.id === cfg.defaultHostId);
           if (defaultSsh) {
             attemptedDefaultSshConnectRef.current = true;
-            const hostLabel = redactSensitiveUrl(
-              defaultSsh.nickname?.trim() || defaultSsh.sshParsed?.destination || defaultSsh.id,
-            );
+            const hostLabel = redactSensitiveUrl(resolveInstanceLabel(defaultSsh));
             const connected = await connectDefaultSshInstance(cfg.defaultHostId, hostLabel);
             if (connected || cancelled) {
               return;

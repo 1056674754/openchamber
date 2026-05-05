@@ -22,5 +22,10 @@ export function useActiveServerBaseUrl(): string {
   const serverId = useActiveServerId();
   if (serverId === DEFAULT_SERVER_ID) return '';
   const connection = serverRegistry.get(serverId);
-  return connection?.config.baseUrl || '';
+  if (!connection?.config.baseUrl) return '';
+  try {
+    return new URL(connection.config.baseUrl).origin;
+  } catch {
+    return '';
+  }
 }

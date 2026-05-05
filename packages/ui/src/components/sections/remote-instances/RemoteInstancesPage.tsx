@@ -37,6 +37,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
 import { useDesktopSshStore } from '@/stores/useDesktopSshStore';
+import { useShallow } from 'zustand/react/shallow';
 import { useUIStore } from '@/stores/useUIStore';
 import { toast } from '@/components/ui';
 import { copyTextToClipboard } from '@/lib/clipboard';
@@ -45,6 +46,7 @@ import { useI18n, type I18nKey } from '@/lib/i18n';
 import {
   desktopSshLogsClear,
   desktopSshLogs,
+  resolveInstanceLabel,
   type DesktopSshInstance,
   type DesktopSshPortForward,
   type DesktopSshPortForwardType,
@@ -257,7 +259,7 @@ const normalizeForSave = (instance: DesktopSshInstance): DesktopSshInstance => {
 export const RemoteInstancesPage: React.FC = () => {
   const { t } = useI18n();
   const instances = useDesktopSshStore((state) => state.instances);
-  const statusesById = useDesktopSshStore((state) => state.statusesById);
+  const statusesById = useDesktopSshStore(useShallow((state) => state.statusesById));
   const importCandidates = useDesktopSshStore((state) => state.importCandidates);
   const isImportsLoading = useDesktopSshStore((state) => state.isImportsLoading);
   const isSaving = useDesktopSshStore((state) => state.isSaving);
@@ -779,7 +781,7 @@ export const RemoteInstancesPage: React.FC = () => {
   }
 
   const isManagedMode = draft.remoteOpenchamber.mode === 'managed';
-  const instanceTitle = draft.nickname?.trim() || draft.sshParsed?.destination || draft.id;
+  const instanceTitle = resolveInstanceLabel(draft);
 
   return (
     <SettingsPageLayout>
@@ -1566,7 +1568,7 @@ export const RemoteInstancesPage: React.FC = () => {
           <DialogHeader>
             <DialogTitle>{t('settings.remoteInstances.page.logsDialog.title')}</DialogTitle>
             <DialogDescription>
-              {draft?.nickname?.trim() || draft?.sshParsed?.destination || draft?.id || t('settings.remoteInstances.page.logsDialog.selectedInstanceFallback')}
+              {draft ? resolveInstanceLabel(draft) : t('settings.remoteInstances.page.logsDialog.selectedInstanceFallback')}
             </DialogDescription>
           </DialogHeader>
           <div className="flex items-center justify-end gap-2">

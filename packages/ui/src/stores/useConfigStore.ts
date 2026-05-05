@@ -14,6 +14,8 @@ import { updateDesktopSettings } from "@/lib/persistence";
 import { useDirectoryStore } from "@/stores/useDirectoryStore";
 import { streamDebugEnabled } from "@/stores/utils/streamDebug";
 import { parseModelIdentifier } from "@/lib/modelIdentifier";
+import { resolveApiUrl } from "@/lib/api/serverUrl";
+import { resolveSdkForDirectory } from "@/sync/session-actions";
 
 const MODELS_DEV_API_URL = "https://models.dev/api.json";
 const MODELS_DEV_PROXY_URL = "/api/openchamber/models-metadata";
@@ -34,7 +36,7 @@ interface OpenChamberDefaults {
     messageStreamTransport?: 'auto' | 'ws' | 'sse';
 }
 
-const fetchOpenChamberDefaults = async (): Promise<OpenChamberDefaults> => {
+const fetchOpenChamberDefaults = async (serverBaseUrl?: string): Promise<OpenChamberDefaults> => {
     try {
         // 1. Runtime settings API (VSCode)
         const runtimeSettings = getRegisteredRuntimeAPIs()?.settings;
@@ -71,7 +73,7 @@ const fetchOpenChamberDefaults = async (): Promise<OpenChamberDefaults> => {
         }
 
         // 2. Fetch API (Web/server)
-        const response = await fetch('/api/config/settings', {
+        const response = await fetch(resolveApiUrl('/api/config/settings', serverBaseUrl), {
             method: 'GET',
             headers: { Accept: 'application/json' },
         });
@@ -543,7 +545,7 @@ interface ConfigStore {
     activateDirectory: (directory: string | null | undefined) => Promise<void>;
 
     loadProviders: (options?: { directory?: string | null }) => Promise<void>;
-    loadAgents: (options?: { directory?: string | null }) => Promise<boolean>;
+    loadAgents: (options?: { directory?: string | null; serverBaseUrl?: string }) => Promise<boolean>;
     invalidateModelMetadataCache: () => void;
     setProvider: (providerId: string) => void;
     setModel: (modelId: string) => void;
@@ -870,10 +872,13 @@ export const useConfigStore = create<ConfigStore>()(
                                 () => get().modelsMetadata,
                                 (metadata) => set({ modelsMetadata: metadata }),
                             );
-                            const apiResult = await opencodeClient.withDirectory(
-                                fromDirectoryKey(directoryKey),
-                                () => opencodeClient.getProviders()
-                            );
+                            const targetDir = fromDirectoryKey(directoryKey)
+                            const targetSdk = resolveSdkForDirectory(targetDir ?? "")
+                            const rawResult = await targetSdk.config.providers(
+                                targetDir ? { directory: targetDir } : undefined,
+                            )
+                            if (!rawResult.data) throw new Error('Failed to get providers')
+                            const apiResult = rawResult.data;
                             const providers = Array.isArray(apiResult?.providers) ? apiResult.providers : [];
                             const defaults = apiResult?.default || {};
 
@@ -1234,12 +1239,16 @@ export const useConfigStore = create<ConfigStore>()(
                     for (let attempt = 0; attempt < 3; attempt++) {
                         try {
                             // Fetch agents and OpenChamber settings in parallel
-                            const [agents, openChamberDefaults] = await Promise.all([
-                                opencodeClient.withDirectory(fromDirectoryKey(directoryKey), () => opencodeClient.listAgents()),
-                                fetchOpenChamberDefaults(),
+                            const targetDir = fromDirectoryKey(directoryKey)
+                            const targetSdk = resolveSdkForDirectory(targetDir ?? "")
+                            const [rawAgents, openChamberDefaults] = await Promise.all([
+                                targetSdk.app.agents(
+                                    targetDir ? { directory: targetDir } : undefined,
+                                ).then(r => r.data ?? []),
+                                fetchOpenChamberDefaults(options?.serverBaseUrl),
                             ]);
 
-                            const safeAgents = Array.isArray(agents) ? agents : [];
+                            const safeAgents = Array.isArray(rawAgents) ? rawAgents as Agent[] : [];
 
                             const providers = get().activeDirectoryKey === directoryKey
                                 ? get().providers

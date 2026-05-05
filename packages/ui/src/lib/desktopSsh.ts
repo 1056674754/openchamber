@@ -67,6 +67,10 @@ export type DesktopSshInstancesConfig = {
   instances: DesktopSshInstance[];
 };
 
+export function resolveInstanceLabel(instance: DesktopSshInstance): string {
+  return instance.nickname?.trim() || instance.sshParsed?.destination || instance.id;
+}
+
 export type DesktopSshPhase =
   | 'idle'
   | 'config_resolved'

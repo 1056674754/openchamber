@@ -23,9 +23,10 @@ import type {
   OpenChamberProjectAction,
   OpenChamberProjectActionPlatform,
 } from '@/lib/openchamberConfig';
-import type {
-  DesktopSshInstance,
-  DesktopSshPortForward,
+import {
+  resolveInstanceLabel,
+  type DesktopSshInstance,
+  type DesktopSshPortForward,
 } from '@/lib/desktopSsh';
 
 export type ProjectActionIconKey =
@@ -156,7 +157,7 @@ const buildForwardOption = (instance: DesktopSshInstance, forward: DesktopSshPor
 
   const localHost = toBrowserHost(forward.localHost || instance.localForward.bindHost || '127.0.0.1');
   const remoteHost = (forward.remoteHost || '127.0.0.1').trim();
-  const instanceLabel = (instance.nickname || instance.id || 'instance').trim();
+  const instanceLabel = resolveInstanceLabel(instance).trim();
 
   return {
     id: `${instance.id}::${forward.id}`,

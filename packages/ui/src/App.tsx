@@ -41,8 +41,10 @@ import { opencodeClient } from '@/lib/opencode/client';
 import { SyncProvider, useSessions } from '@/sync/sync-context';
 import { MultiServerSyncLayer } from '@/sync/MultiServerSyncLayer';
 import { RemoteProjectDiscovery } from '@/sync/RemoteProjectDiscovery';
+import { useDesktopSshStore } from '@/stores/useDesktopSshStore';
 import { useSync } from '@/sync/use-sync';
 import { setOptimisticRefs } from '@/sync/session-actions';
+import { BootstrapDebug } from '@/components/debug/BootstrapDebug';
 import { useFontPreferences } from '@/hooks/useFontPreferences';
 import { CODE_FONT_OPTION_MAP, DEFAULT_MONO_FONT, DEFAULT_UI_FONT, UI_FONT_OPTION_MAP } from '@/lib/fontOptions';
 import { loadMonoFont, loadUiFont } from '@/lib/fontLoader';
@@ -225,6 +227,11 @@ function App({ apis }: AppProps) {
   const [manualInitRetrying, setManualInitRetrying] = React.useState(false);
   const wideChatLayoutEnabled = useUIStore((state) => state.wideChatLayoutEnabled);
   const isDesktopRuntime = React.useMemo(() => isDesktopShell(), []);
+
+  React.useEffect(() => {
+    if (!isDesktopRuntime) return;
+    void useDesktopSshStore.getState().load();
+  }, [isDesktopRuntime]);
   const setPlanModeEnabled = useFeatureFlagsStore((state) => state.setPlanModeEnabled);
   const [bootInjectionStatus, setBootInjectionStatus] = React.useState<BootInjectionStatus>(() => {
     return getBootInjectionStatus();
@@ -917,6 +924,7 @@ function App({ apis }: AppProps) {
       <SyncProvider sdk={opencodeClient.getSdkClient()} directory={currentDirectory || ''}>
         <MultiServerSyncLayer />
         <RemoteProjectDiscovery />
+        <BootstrapDebug />
         <RuntimeAPIProvider apis={apis}>
           <FireworksProvider>
             <VoiceProvider>

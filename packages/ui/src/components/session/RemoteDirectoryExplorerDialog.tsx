@@ -1,7 +1,9 @@
 import React from 'react';
 import { serverRegistry } from '@/lib/opencode/server-registry';
+import { resolveInstanceLabel } from '@/lib/desktopSsh';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useDesktopSshStore } from '@/stores/useDesktopSshStore';
+import { useShallow } from 'zustand/react/shallow';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -105,7 +107,7 @@ export const RemoteDirectoryExplorerDialog: React.FC<RemoteDirectoryExplorerDial
   const inputRef = React.useRef<HTMLInputElement>(null);
 
   const sshInstances = useDesktopSshStore((s) => s.instances);
-  const sshStatuses = useDesktopSshStore((s) => s.statusesById);
+  const sshStatuses = useDesktopSshStore(useShallow((s) => s.statusesById));
   const sshConnect = useDesktopSshStore((s) => s.connect);
   const sshLoad = useDesktopSshStore((s) => s.load);
   const [selectedServerId, setSelectedServerId] = React.useState<string | null>(null);
@@ -401,7 +403,7 @@ export const RemoteDirectoryExplorerDialog: React.FC<RemoteDirectoryExplorerDial
                       const isConnecting = !['idle', 'ready', 'error'].includes(phase);
                       const isError = phase === 'error';
                       const isSelected = selectedServerId === instance.id;
-                      const label = instance.nickname || instance.sshCommand || instance.id;
+                      const label = resolveInstanceLabel(instance);
 
                       return (
                         <button

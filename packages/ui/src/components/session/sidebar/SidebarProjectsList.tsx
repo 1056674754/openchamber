@@ -18,6 +18,7 @@ import { formatProjectLabel } from './utils';
 import { useI18n } from '@/lib/i18n';
 import { serverRegistry } from '@/lib/opencode/server-registry';
 import { useDesktopSshStore } from '@/stores/useDesktopSshStore';
+import { resolveInstanceLabel } from '@/lib/desktopSsh';
 
 type ProjectSection = {
   project: {
@@ -71,13 +72,7 @@ type Props = {
 
 export function SidebarProjectsList(props: Props): React.ReactNode {
   const { t } = useI18n();
-  const sshInstancesById = useDesktopSshStore((state) => {
-    const map: Record<string, typeof state.instances[number]> = {};
-    for (const inst of state.instances) {
-      map[inst.id] = inst;
-    }
-    return map;
-  });
+  const sshInstances = useDesktopSshStore((state) => state.instances);
   const projectSensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
@@ -149,10 +144,8 @@ export function SidebarProjectsList(props: Props): React.ReactNode {
                 const project = section.project;
                 const projectKey = project.id;
                 const rawProjectLabel = project.label?.trim();
-                const sshInst = project.serverId ? sshInstancesById[project.serverId] : undefined;
-                const serverLabel = project.serverId
-                  ? (serverRegistry.getServerLabel(project.serverId) || sshInst?.nickname || sshInst?.sshCommand || project.serverId).trim()
-                  : '';
+                const sshInst = project.serverId ? sshInstances.find((i) => i.id === project.serverId) : undefined;
+                const serverLabel = sshInst ? resolveInstanceLabel(sshInst) : (project.serverId || '');
                 const projectLabel = formatProjectLabel(
                   rawProjectLabel && rawProjectLabel !== serverLabel
                     ? rawProjectLabel
