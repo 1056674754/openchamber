@@ -25,6 +25,7 @@ import { setSyncRefs } from "./sync-refs"
 import { stripMessageDiffSnapshots, stripSessionDiffSnapshots } from "./sanitize"
 import { syncDebug } from "./debug"
 import { getReconnectCandidateSessionIds } from "./reconnect-recovery"
+import { STUCK_SESSION_TIMEOUT_MS } from "@/stores/types/sessionTypes"
 import { opencodeClient } from "@/lib/opencode/client"
 import { DEFAULT_SERVER_ID, serverRegistry } from "@/lib/opencode/server-registry"
 import { registerSyncStores, getSyncStoresForServer } from "./multi-server-registry"
@@ -724,9 +725,11 @@ async function resyncDirectoryAfterReconnect(
 
   for (const sessionId of candidateSessionIds) {
     const nextStatus = toSessionStatus(nextStatuses[sessionId])
-    if (nextStatus) {
-      relevantStatuses[sessionId] = nextStatus
-    }
+    // Force idle when the server returns no status for a candidate session.
+    // This covers the case where OpenCode restarted and lost its in-memory
+    // session state — the server won't know about previously busy sessions,
+    // so we reset them to idle instead of leaving stale "busy" indefinitely.
+    relevantStatuses[sessionId] = nextStatus ?? { type: "idle" }
   }
 
   if (Object.keys(relevantStatuses).length > 0) {
@@ -1415,7 +1418,17 @@ export function SyncProvider(props: {
           }
         }
 
-        runBootstrap(0).finally(() => {
+        runBootstrap(0).then(() => {
+          // Post-bootstrap status refresh: if SSE is already connected when
+          // bootstrap finishes, the session_status from Phase 1 may be stale
+          // (SSE could have delivered session.idle while bootstrap was in-flight
+          // but the child store didn't exist yet). Trigger a recovery resync to
+          // pick up the authoritative live status from the server.
+          const { isConnected } = useConfigStore.getState()
+          if (isConnected && store.getState().status === "complete") {
+            void resyncDirectoryAfterReconnect(directory, store, routingIndex).catch(() => {})
+          }
+        }).finally(() => {
           bootingDirs.delete(directory)
         })
       },
@@ -1548,6 +1561,76 @@ export function SyncProvider(props: {
     })
     return unsubscribe
   }, [props.directory, childStores])
+
+  // Stuck-session timeout: periodically scan child stores for sessions stuck
+  // in busy/retry longer than STUCK_SESSION_TIMEOUT_MS with no SSE events.
+  // This is the last-resort safety net — reconnect recovery handles the
+  // common case, but this catches sessions that slip through (e.g. SSE
+  // reconnect recovery returned empty, or OpenCode crashed mid-stream).
+  useEffect(() => {
+    const stuckCheckInterval = setInterval(() => {
+      const { isConnected } = useConfigStore.getState()
+      // Only enforce when SSE is connected — during disconnection the
+      // reconnect recovery handles correction on reconnect.
+      if (!isConnected) return
+
+      const now = Date.now()
+      for (const [, store] of childStores.children) {
+        const state = store.getState()
+        const statuses = state.session_status
+        if (!statuses) continue
+
+        let needsUpdate = false
+        const nextStatuses: Record<string, SessionStatus> = { ...statuses }
+
+        for (const [sessionId, status] of Object.entries(statuses)) {
+          if (!status || status.type === "idle") continue
+
+          // Check if the session has received any recent activity.
+          // If messages exist, use the latest assistant message's creation time.
+          // If no messages, use a heuristic based on session existence.
+          const messages = state.message[sessionId]
+          let lastActivityAt = 0
+          if (messages && messages.length > 0) {
+            for (let i = messages.length - 1; i >= 0; i--) {
+              const msg = messages[i]
+              if (msg.role === "assistant") {
+                const created = typeof (msg as { time?: { created?: number } }).time?.created === "number"
+                  ? (msg as { time?: { created?: number } }).time!.created!
+                  : 0
+                const completed = typeof (msg as { time?: { completed?: number } }).time?.completed === "number"
+                  ? (msg as { time?: { completed?: number } }).time!.completed!
+                  : 0
+                lastActivityAt = Math.max(created, completed)
+                break
+              }
+            }
+          }
+
+          // If the last activity was longer than the timeout ago, force idle.
+          if (lastActivityAt > 0 && now - lastActivityAt > STUCK_SESSION_TIMEOUT_MS) {
+            nextStatuses[sessionId] = { type: "idle" }
+            needsUpdate = true
+          } else if (lastActivityAt === 0) {
+            // No messages for this session but status is busy — if the session
+            // metadata exists, check its updated time.
+            const session = state.session.find((s) => s.id === sessionId)
+            const sessionUpdated = session?.time?.updated ?? 0
+            if (sessionUpdated > 0 && now - sessionUpdated > STUCK_SESSION_TIMEOUT_MS) {
+              nextStatuses[sessionId] = { type: "idle" }
+              needsUpdate = true
+            }
+          }
+        }
+
+        if (needsUpdate) {
+          store.setState({ session_status: nextStatuses })
+        }
+      }
+    }, STUCK_SESSION_TIMEOUT_MS / 2) // Check at half the timeout for reasonable resolution
+
+    return () => clearInterval(stuckCheckInterval)
+  }, [childStores])
 
   return <SyncContext.Provider value={system}>{props.children}</SyncContext.Provider>
 }
