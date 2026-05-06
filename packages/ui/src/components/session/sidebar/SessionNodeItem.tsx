@@ -40,13 +40,14 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { buildExportFilename, downloadAsMarkdown, formatSessionAsMarkdown, getExportRevealLabelKey, revealExportedMarkdown, saveAsMarkdownDesktop } from '@/lib/exportSession';
 import type { ChildSessionExport } from '@/lib/exportSession';
-import { buildSessionMessageRecordsSnapshot, useDirectoryStore, useGlobalSessionStatus, useSession, useSessionPermissions } from '@/sync/sync-context';
+import { buildSessionMessageRecordsSnapshot, useAllSessionStatuses, useDirectoryStore, useGlobalSessionStatus, useSession, useSessionPermissions } from '@/sync/sync-context';
 import { useSync } from '@/sync/use-sync';
 import { useViewportStore } from '@/sync/viewport-store';
 import { DraggableSessionRow } from './sessionFolderDnd';
+import { SidebarSpinner } from './SidebarSpinner';
 import type { SessionNode, SessionSummaryMeta } from './types';
 import { formatSessionCompactDateLabel, formatSessionDateLabel, normalizePath, renderHighlightedText, resolveSessionDiffStats } from './utils';
-import { resolveGlobalSessionDirectory } from '@/stores/useGlobalSessionsStore';
+import { resolveGlobalSessionDirectory, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { useSessionUnseenCount } from '@/sync/notification-store';
 import { useSessionMultiSelectStore } from '@/stores/useSessionMultiSelectStore';
@@ -437,7 +438,23 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
     return () => clearTimeout(timer);
   }, [archiveConfirming]);
 
-  const descendantCount = React.useMemo(() => collectNodeDescendantIds(node).length, [collectNodeDescendantIds, node]);
+  const descendantIds = React.useMemo(() => collectNodeDescendantIds(node), [collectNodeDescendantIds, node]);
+  const descendantCount = descendantIds.length;
+  const liveSessionStatuses = useAllSessionStatuses();
+  const descendantStatusSignature = useGlobalSessionsStore(
+    React.useCallback(
+      (state) => descendantIds.map((id) => `${id}:${state.sessionStatuses.get(id)?.type ?? ''}`).join('|'),
+      [descendantIds],
+    ),
+  );
+  const hasRunningChildSession = React.useMemo(() => {
+    if (descendantIds.length === 0) return false;
+    const globalStatuses = useGlobalSessionsStore.getState().sessionStatuses;
+    return descendantIds.some((id) => {
+      const status = globalStatuses.get(id) ?? liveSessionStatuses[id];
+      return status?.type === 'busy' || status?.type === 'retry';
+    });
+  }, [descendantIds, descendantStatusSignature, liveSessionStatuses]);
 
   const collectChildExports = React.useCallback(async (children: SessionNode[]): Promise<{ children: ChildSessionExport[]; skipped: number }> => {
     const results: ChildSessionExport[] = [];
@@ -581,7 +598,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
   const isStreaming = statusType === 'busy' || statusType === 'retry';
   const pendingPermissionCount = sessionPermissions.length;
   const showUnreadStatus = !isStreaming && needsAttention && !isActive;
-  const showStatusMarker = isStreaming || showUnreadStatus;
+  const showStatusMarker = showUnreadStatus && !hasRunningChildSession;
 
   const pinMarker = isPinnedSession ? (
     <RiPushpinLine
@@ -593,36 +610,42 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
     />
   ) : null;
 
-  const statusMarkerContent = !isPinnedSession && showStatusMarker ? (
-    isStreaming
-      ? (
-        <span
-          className="h-1.5 w-1.5 rounded-full bg-primary animate-busy-pulse"
-          aria-label={t('sessions.sidebar.session.status.active')}
-          title={t('sessions.sidebar.session.status.active')}
-        />
-      )
-      : (
-        <span
-          className="h-1.5 w-1.5 rounded-full bg-[var(--status-info)]"
-          aria-label={t('sessions.sidebar.session.status.unread')}
-          title={t('sessions.sidebar.session.status.unread')}
-        />
-      )
+  const spinnerState = (() => {
+    if (isStreaming) return 'streaming' as const;
+    if (hasRunningChildSession) return 'subagent' as const;
+    return 'hidden' as const;
+  })();
+
+  const shouldShowSpinner = spinnerState !== 'hidden';
+
+  const statusMarkerContent = !isPinnedSession && showUnreadStatus ? (
+    <span
+      className="h-1.5 w-1.5 rounded-full bg-[var(--status-info)]"
+      aria-label={t('sessions.sidebar.session.status.unread')}
+      title={t('sessions.sidebar.session.status.unread')}
+    />
   ) : null;
 
-  const leadingIndicators = (pinMarker || hasChildren || statusMarkerContent) ? (
+  const leadingIndicators = (pinMarker || statusMarkerContent || shouldShowSpinner) ? (
     <span
       className={cn(
         'pointer-events-none absolute inline-flex h-3.5 items-center justify-center gap-0.5',
         isMinimalMode ? 'top-1/2 -translate-y-1/2' : 'top-[14.5px] -translate-y-1/2',
         isGlobalPinnedContext && isPinnedSession ? 'left-[2.25px]' : null,
-        !isGlobalPinnedContext && (isPinnedSession || statusMarkerContent) ? 'left-[-9px]' : null,
-        !isGlobalPinnedContext && !isPinnedSession && !statusMarkerContent ? 'left-[-5px]' : null,
+        !isGlobalPinnedContext && (isPinnedSession || statusMarkerContent || shouldShowSpinner) ? 'left-[-9px]' : null,
+        !isGlobalPinnedContext && !isPinnedSession && !statusMarkerContent && !shouldShowSpinner ? 'left-[-5px]' : null,
       )}
     >
       {pinMarker}
       {statusMarkerContent}
+      {shouldShowSpinner && (
+        <SidebarSpinner
+          state={spinnerState}
+          aria-label={spinnerState === 'streaming'
+            ? t('sessions.sidebar.session.status.active')
+            : t('sessions.sidebar.session.status.active')}
+        />
+      )}
     </span>
   ) : null;
 
@@ -644,7 +667,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
       className={cn(
         'absolute inline-flex h-3.5 w-3.5 items-center justify-center rounded-md text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50',
         isMinimalMode ? 'top-1/2 -translate-y-1/2' : 'top-[14.5px] -translate-y-1/2',
-        !alwaysShowActions ? 'opacity-0 group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto' : '',
+        !alwaysShowActions && shouldShowSpinner ? 'opacity-0 group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto' : '',
       )}
       style={{ left: isPinnedSession ? '-18px' : '-10px' }}
       aria-label={isExpanded
