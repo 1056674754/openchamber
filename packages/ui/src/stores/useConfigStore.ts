@@ -558,6 +558,7 @@ declare global {
 // In-flight dedup: prevent concurrent duplicate loadProviders/loadAgents calls for the same directory
 const _inFlightProviders = new Map<string, Promise<void>>();
 const _inFlightAgents = new Map<string, Promise<boolean>>();
+let _initializeAppInFlight: Promise<void> | null = null;
 
 export const useConfigStore = create<ConfigStore>()(
     devtools(
@@ -1966,70 +1967,81 @@ export const useConfigStore = create<ConfigStore>()(
                 },
 
                 initializeApp: async () => {
-                    try {
-                        const debug = streamDebugEnabled();
-                        if (debug) console.log("Starting app initialization...");
+                    if (_initializeAppInFlight) {
+                        return _initializeAppInFlight;
+                    }
 
-                        const isConnected = await get().checkConnection();
-                        if (debug) console.log("Connection check result:", isConnected);
+                    const run = (async () => {
+                        try {
+                            const debug = streamDebugEnabled();
+                            if (debug) console.log("Starting app initialization...");
 
-                        if (!isConnected) {
-                            if (debug) console.log("Server not connected");
-                            // checkConnection already set lastDisconnectReason; do not overwrite.
+                            const isConnected = await get().checkConnection();
+                            if (debug) console.log("Connection check result:", isConnected);
+
+                            if (!isConnected) {
+                                if (debug) console.log("Server not connected");
+                                // checkConnection already set lastDisconnectReason; do not overwrite.
+                                set({
+                                    isConnected: false,
+                                    connectionPhase: get().hasEverConnected ? "reconnecting" : "connecting",
+                                });
+                                return;
+                            }
+
+                            if (debug) console.log("Initializing app...");
+                            await opencodeClient.initApp();
+
+                            if (debug) console.log("Loading providers...");
+                            await get().loadProviders();
+
+                            if (debug) console.log("Loading agents...");
+                            await get().loadAgents();
+
+                            const state = get();
+                            if (!state.settingsDefaultModel || !state.settingsDefaultAgent) {
+                                try {
+                                    const opencodeConfig = await opencodeClient.getConfig();
+                                    const persisted: Record<string, string> = {};
+
+                                    if (!state.settingsDefaultModel && opencodeConfig.model) {
+                                        set({ settingsDefaultModel: opencodeConfig.model });
+                                        persisted.defaultModel = opencodeConfig.model;
+                                    }
+                                    if (!state.settingsDefaultAgent && opencodeConfig.default_agent) {
+                                        set({ settingsDefaultAgent: opencodeConfig.default_agent });
+                                        persisted.defaultAgent = opencodeConfig.default_agent;
+                                    }
+
+                                    if (Object.keys(persisted).length > 0) {
+                                        fetch('/api/config/settings', {
+                                            method: 'PUT',
+                                            headers: { 'Content-Type': 'application/json' },
+                                            body: JSON.stringify(persisted),
+                                        }).catch(() => {});
+                                    }
+                                } catch {
+                                    // ignore
+                                }
+                            }
+
+                            set({ isInitialized: true, isConnected: true, hasEverConnected: true, connectionPhase: "connected" });
+                            if (debug) console.log("App initialized successfully");
+                        } catch (error) {
+                            console.error("Failed to initialize app:", error);
                             set({
+                                isInitialized: false,
                                 isConnected: false,
                                 connectionPhase: get().hasEverConnected ? "reconnecting" : "connecting",
+                                lastDisconnectReason: 'init_error',
                             });
-                            return;
                         }
+                    })().finally(() => {
+                        _initializeAppInFlight = null;
+                    });
 
-                        if (debug) console.log("Initializing app...");
-                        await opencodeClient.initApp();
-
-                        if (debug) console.log("Loading providers...");
-                        await get().loadProviders();
-
-                        if (debug) console.log("Loading agents...");
-                        await get().loadAgents();
-
-                        const state = get();
-                        if (!state.settingsDefaultModel || !state.settingsDefaultAgent) {
-                            try {
-                                const opencodeConfig = await opencodeClient.getConfig();
-                                const persisted: Record<string, string> = {};
-
-                                if (!state.settingsDefaultModel && opencodeConfig.model) {
-                                    set({ settingsDefaultModel: opencodeConfig.model });
-                                    persisted.defaultModel = opencodeConfig.model;
-                                }
-                                if (!state.settingsDefaultAgent && opencodeConfig.default_agent) {
-                                    set({ settingsDefaultAgent: opencodeConfig.default_agent });
-                                    persisted.defaultAgent = opencodeConfig.default_agent;
-                                }
-
-                                if (Object.keys(persisted).length > 0) {
-                                    fetch('/api/config/settings', {
-                                        method: 'PUT',
-                                        headers: { 'Content-Type': 'application/json' },
-                                        body: JSON.stringify(persisted),
-                                    }).catch(() => {});
-                                }
-                            } catch {
-                                // ignore
-                            }
-                        }
-
-                        set({ isInitialized: true, isConnected: true, hasEverConnected: true, connectionPhase: "connected" });
-                        if (debug) console.log("App initialized successfully");
-                    } catch (error) {
-                        console.error("Failed to initialize app:", error);
-                        set({
-                            isInitialized: false,
-                            isConnected: false,
-                            connectionPhase: get().hasEverConnected ? "reconnecting" : "connecting",
-                            lastDisconnectReason: 'init_error',
-                        });
-                    }
+                    _initializeAppInFlight = run;
+                    return run;
                 },
 
                 getCurrentProvider: () => {

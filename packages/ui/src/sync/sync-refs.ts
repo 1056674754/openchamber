@@ -14,18 +14,23 @@ let _sdk: OpencodeClient | null = null
 let _childStores: ChildStoreManager | null = null
 let _directory: string = ""
 let _registerSessionDirectory: ((sessionID: string, directory: string) => void) | null = null
+let _getSessionDirectoryFromRoutingIndex: ((sessionID: string) => string | undefined) | null = null
 
 export function setSyncRefs(
   sdk: OpencodeClient,
   childStores: ChildStoreManager,
   directory: string,
   registerSessionDirectory?: (sessionID: string, directory: string) => void,
+  getSessionDirectoryFromRoutingIndex?: (sessionID: string) => string | undefined,
 ) {
   _sdk = sdk
   _childStores = childStores
   _directory = directory
   if (registerSessionDirectory) {
     _registerSessionDirectory = registerSessionDirectory
+  }
+  if (getSessionDirectoryFromRoutingIndex) {
+    _getSessionDirectoryFromRoutingIndex = getSessionDirectoryFromRoutingIndex
   }
 }
 
@@ -48,6 +53,13 @@ export function getSyncChildStores(): ChildStoreManager {
 
 export function getSyncDirectory(): string {
   return _directory
+}
+
+/** Look up a session's directory from the SSE routing index.
+ *  Survives child-store eviction since the routing index is retained
+ *  for the full SyncProvider lifecycle. */
+export function getSessionDirectoryFromRoutingIndex(sessionID: string): string | undefined {
+  return _getSessionDirectoryFromRoutingIndex?.(sessionID)
 }
 
 /** Read current directory's child store state. Returns undefined if not bootstrapped. */
