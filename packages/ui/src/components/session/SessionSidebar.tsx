@@ -1570,11 +1570,11 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
   ]);
 
   const desktopHeaderActionButtonClass =
-    'inline-flex h-6 w-6 cursor-pointer items-center justify-center rounded-md leading-none text-foreground hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 disabled:cursor-not-allowed';
+    'inline-flex h-6 w-6 cursor-pointer items-center justify-center rounded-md leading-none text-muted-foreground hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 disabled:cursor-not-allowed';
   const mobileHeaderActionButtonClass =
     'inline-flex h-6 w-6 cursor-pointer items-center justify-center rounded-md leading-none text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 disabled:cursor-not-allowed';
   const headerActionButtonClass = mobileVariant ? mobileHeaderActionButtonClass : desktopHeaderActionButtonClass;
-  const headerActionIconClass = 'h-4.5 w-4.5';
+  const headerActionIconClass = 'h-4 w-4';
   const stuckProjectHeaders = useStickyProjectHeaders({
     isDesktopShellRuntime,
     projectSections,

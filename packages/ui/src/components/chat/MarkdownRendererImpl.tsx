@@ -997,10 +997,6 @@ interface MarkdownRendererProps {
 
 const MERMAID_BLOCK_SELECTOR = '[data-markdown="mermaid-block"]';
 const FILE_LINK_SELECTOR = '[data-openchamber-file-link="true"]';
-const FILE_REFERENCE_STAT_CONCURRENCY = 4;
-const FILE_REFERENCE_STAT_CACHE = new Map<string, Promise<boolean>>();
-let activeFileReferenceStatCount = 0;
-const pendingFileReferenceStats: Array<() => void> = [];
 
 type ParsedFileReference = {
   path: string;
@@ -1267,44 +1263,6 @@ const getResolvedReference = (rawValue: string, effectiveDirectory: string): (Pa
   };
 };
 
-const fileReferenceExists = (resolvedPath: string): Promise<boolean> => {
-  const normalizedPath = normalizePath(resolvedPath);
-  if (!normalizedPath) {
-    return Promise.resolve(false);
-  }
-
-  const cached = FILE_REFERENCE_STAT_CACHE.get(normalizedPath);
-  if (cached) {
-    return cached;
-  }
-
-  const request = new Promise<boolean>((resolve) => {
-    const run = () => {
-      activeFileReferenceStatCount += 1;
-      void fetch(`/api/fs/stat?path=${encodeURIComponent(normalizedPath)}`, {
-        method: 'GET',
-        cache: 'no-store',
-      })
-        .then((response) => resolve(response.ok))
-        .catch(() => resolve(false))
-        .finally(() => {
-          activeFileReferenceStatCount = Math.max(0, activeFileReferenceStatCount - 1);
-          pendingFileReferenceStats.shift()?.();
-        });
-    };
-
-    if (activeFileReferenceStatCount < FILE_REFERENCE_STAT_CONCURRENCY) {
-      run();
-      return;
-    }
-
-    pendingFileReferenceStats.push(run);
-  });
-
-  FILE_REFERENCE_STAT_CACHE.set(normalizedPath, request);
-  return request;
-};
-
 const getContextDirectory = (effectiveDirectory: string, resolvedPath: string): string => {
   const normalizedDirectory = normalizePath(effectiveDirectory);
   if (normalizedDirectory) {
@@ -1341,7 +1299,6 @@ const useFileReferenceInteractions = ({
     if (!container) {
       return;
     }
-    let cancelled = false;
 
     const clearFileLinkAttributes = (candidate: HTMLElement) => {
       candidate.removeAttribute('data-openchamber-file-link');
@@ -1566,7 +1523,6 @@ const useFileReferenceInteractions = ({
     container.addEventListener('keydown', handleKeyDown);
 
     return () => {
-      cancelled = true;
       if (annotationDebounceRef.current !== null && typeof window !== 'undefined') {
         window.clearTimeout(annotationDebounceRef.current);
       }
