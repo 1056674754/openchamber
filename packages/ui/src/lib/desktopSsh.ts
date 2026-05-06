@@ -73,6 +73,19 @@ export function resolveInstanceLabel(instance: DesktopSshInstance): string {
   return instance.nickname?.trim() || instance.sshParsed?.destination || instance.id;
 }
 
+export function phaseDotClass(phase?: DesktopSshPhase): string {
+  if (phase === 'ready') {
+    return 'bg-[var(--status-success)] animate-pulse';
+  }
+  if (phase === 'error') {
+    return 'bg-[var(--status-error)] animate-pulse';
+  }
+  if (phase === 'degraded' || (phase && phase !== 'idle')) {
+    return 'bg-[var(--status-warning)] animate-pulse';
+  }
+  return 'bg-muted-foreground/40';
+}
+
 export type DesktopSshPhase =
   | 'idle'
   | 'config_resolved'
