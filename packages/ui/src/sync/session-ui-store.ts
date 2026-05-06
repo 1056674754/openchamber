@@ -21,7 +21,7 @@ import { useConfigStore } from "@/stores/useConfigStore"
 import { useProjectsStore } from "@/stores/useProjectsStore"
 import { useDirectoryStore } from "@/stores/useDirectoryStore"
 import { useSessionFoldersStore } from "@/stores/useSessionFoldersStore"
-import { useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
+import { resolveGlobalSessionDirectory, useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
 import { useCommandsStore } from "@/stores/useCommandsStore"
 import { getSafeStorage } from "@/stores/utils/safeStorage"
 import { markPendingUserSendAnimation } from "@/lib/userSendAnimation"
@@ -37,6 +37,8 @@ import {
   getSyncParts,
   getDirectoryState,
   registerSessionDirectory,
+  getSessionDirectoryFromRoutingIndex,
+  getSyncChildStores,
 } from "./sync-refs"
 import { markSessionViewed } from "./notification-store"
 import { setActiveSession } from "./sync-context"
@@ -382,6 +384,15 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
 
     const previousSessionId = get().currentSessionId
 
+    // Pin the new session's child store to prevent eviction while active.
+    // Unpin the previous session's directory when switching away.
+    try {
+      if (previousSessionId && previousSessionId !== id) {
+        const prevDir = get().getDirectoryForSession(previousSessionId)
+        if (prevDir) getSyncChildStores().unpin(prevDir)
+      }
+    } catch { /* child stores may not be initialized yet */ }
+
     // Set currentSessionId immediately so the skeleton renders without delay.
     set({ currentSessionId: id })
 
@@ -424,6 +435,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       markSessionViewed(id)
       if (resolvedDir) {
         setActiveSession(resolvedDir, id)
+        try { getSyncChildStores().pin(resolvedDir) } catch { /* not initialized */ }
       }
     }
   },
@@ -1231,10 +1243,24 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
   getDirectoryForSession: (sessionId) => {
     const attachmentDirectory = getAttachedSessionDirectory(getAttachmentForSession(sessionId))
     if (attachmentDirectory) return attachmentDirectory
+
+    const metaPath = get().worktreeMetadata.get(sessionId)?.path
+    if (typeof metaPath === "string" && metaPath.trim().length > 0) return normalizePath(metaPath)
+
     const sessions = getAllSyncSessions()
     const session = sessions.find((s) => s.id === sessionId)
-    if (!session) return null
-    return resolveDirectoryKey(session)
+    if (session) return resolveDirectoryKey(session)
+
+    const globalState = useGlobalSessionsStore.getState()
+    const globalSession =
+      globalState.activeSessions.find((s) => s.id === sessionId) ??
+      globalState.archivedSessions.find((s) => s.id === sessionId)
+    if (globalSession) return resolveGlobalSessionDirectory(globalSession)
+
+    const routingDir = getSessionDirectoryFromRoutingIndex(sessionId)
+    if (routingDir) return normalizePath(routingDir)
+
+    return null
   },
 
   getLastUserChoice: (sessionId) => {

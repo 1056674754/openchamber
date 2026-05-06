@@ -1261,6 +1261,11 @@ function handleEvent(
       if (sessionID) {
         useGlobalSessionsStore.getState().upsertStatus(sessionID, { type: "idle" })
       }
+    } else if (payload.type === "session.updated") {
+      const info = (payload.properties as { info?: Session }).info
+      if (info?.id) {
+        useGlobalSessionsStore.getState().upsertSession(info)
+      }
     }
 
     // Parts-gap recovery on message.updated: if the message was inserted or
@@ -1543,7 +1548,7 @@ export function SyncProvider(props: {
   useEffect(() => {
     setSyncRefs(props.sdk, childStores, props.directory, (sessionID, dir) => {
       setIndexedSessionDirectory(routingIndex, sessionID, dir)
-    })
+    }, (sessionID) => routingIndex.sessionDirectoryById.get(sessionID))
     setActionRefs(
       props.sdk,
       childStores,
