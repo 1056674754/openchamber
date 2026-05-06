@@ -17,6 +17,7 @@ import {
   RiNodeTree,
   RiPencilAiLine,
   RiPushpinLine,
+  RiRefreshLine,
 } from '@remixicon/react';
 import { cn } from '@/lib/utils';
 import { PROJECT_COLOR_MAP, PROJECT_ICON_MAP, getProjectIconImageUrl } from '@/lib/projectMeta';
@@ -54,6 +55,7 @@ export interface SortableProjectItemProps {
   setOpenSidebarMenuKey: (key: string | null) => void;
   isPinned?: boolean;
   onTogglePin?: () => void;
+  onRefresh?: () => void;
   serverId?: string;
   serverHealthStatus?: 'healthy' | 'unhealthy' | 'connecting' | null;
   unavailable?: boolean;
@@ -90,9 +92,10 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
   mobileVariant,
   openSidebarMenuKey,
   setOpenSidebarMenuKey,
-  isPinned,
-  onTogglePin,
-  serverId,
+    isPinned,
+    onTogglePin,
+    onRefresh,
+    serverId,
   serverHealthStatus,
   unavailable,
 }) => {
@@ -292,6 +295,12 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
                   <DropdownMenuItem onClick={onTogglePin}>
                     <RiPushpinLine className="mr-1.5 h-4 w-4" />
                     {isPinned ? t('directoryTree.actions.unpinDirectory') : t('directoryTree.actions.pinDirectory')}
+                  </DropdownMenuItem>
+                ) : null}
+                {onRefresh ? (
+                  <DropdownMenuItem onClick={onRefresh}>
+                    <RiRefreshLine className="mr-1.5 h-4 w-4" />
+                    {t('sessions.sidebar.project.actions.refresh')}
                   </DropdownMenuItem>
                 ) : null}
                 <DropdownMenuItem
