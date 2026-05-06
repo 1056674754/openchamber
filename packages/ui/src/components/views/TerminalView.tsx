@@ -94,11 +94,13 @@ export const TerminalView: React.FC = () => {
     const terminalFontSize = useUIStore(state => state.terminalFontSize);
     const bottomTerminalHeight = useUIStore((state) => state.bottomTerminalHeight);
     const isBottomTerminalExpanded = useUIStore((state) => state.isBottomTerminalExpanded);
-    const { isMobile, hasTouchInput } = useDeviceInfo();
+    const { isMobile, isTablet, hasTouchOnlyPointer } = useDeviceInfo();
+    const isTouchTerminal = isMobile || isTablet;
+    const useTouchTerminalInput = (isTouchTerminal || hasTouchOnlyPointer) && runtime.platform === 'web';
     // Tabs are supported for web + desktop runtimes, including mobile (not VSCode).
     const enableTabs = runtime.platform !== 'vscode';
     const showTerminalQuickKeysOnDesktop = useUIStore((state) => state.showTerminalQuickKeysOnDesktop);
-    const showQuickKeys = isMobile || showTerminalQuickKeysOnDesktop;
+    const showQuickKeys = isTouchTerminal || showTerminalQuickKeysOnDesktop;
 
     const currentSessionId = useSessionUIStore((s) => s.currentSessionId);
     const newSessionDraft = useSessionUIStore((s) => s.newSessionDraft);
@@ -191,11 +193,21 @@ export const TerminalView: React.FC = () => {
     const rehydratedSnapshotTakenRef = React.useRef(false);
 
     const focusTerminalWhenWindowActive = React.useCallback(() => {
+        if (useTouchTerminalInput) {
+            return;
+        }
         if (typeof document !== 'undefined' && !document.hasFocus()) {
             return;
         }
         terminalControllerRef.current?.focus();
-    }, []);
+    }, [useTouchTerminalInput]);
+
+    const focusTerminalController = React.useCallback(() => {
+        if (useTouchTerminalInput) {
+            return;
+        }
+        terminalControllerRef.current?.focus();
+    }, [useTouchTerminalInput]);
 
     React.useEffect(() => {
         if (!terminalHydrated) {
@@ -568,7 +580,7 @@ export const TerminalView: React.FC = () => {
     ]);
 
     React.useEffect(() => {
-        if (!isTerminalVisible) {
+        if (!isTerminalVisible || useTouchTerminalInput) {
             return;
         }
 
@@ -584,7 +596,7 @@ export const TerminalView: React.FC = () => {
         return () => {
             window.cancelAnimationFrame(rafId);
         };
-    }, [activeTabId, focusTerminalWhenWindowActive, isTerminalVisible]);
+    }, [activeTabId, focusTerminalWhenWindowActive, isTerminalVisible, useTouchTerminalInput]);
 
     const handleRestart = React.useCallback(async () => {
         if (!effectiveDirectory) return;
@@ -701,10 +713,10 @@ export const TerminalView: React.FC = () => {
 
             if (modifierConsumed) {
                 setActiveModifier(null);
-                terminalControllerRef.current?.focus();
+                focusTerminalController();
             }
         },
-        [activeModifier, isReconnectPending, setActiveModifier, t, terminal]
+        [activeModifier, focusTerminalController, isReconnectPending, setActiveModifier, t, terminal]
     );
 
     const handleViewportResize = React.useCallback(
@@ -725,9 +737,9 @@ export const TerminalView: React.FC = () => {
     const handleModifierToggle = React.useCallback(
         (modifier: Modifier) => {
             setActiveModifier((current) => (current === modifier ? null : modifier));
-            terminalControllerRef.current?.focus();
+            focusTerminalController();
         },
-        [setActiveModifier]
+        [focusTerminalController, setActiveModifier]
     );
 
     const handleMobileKeyPress = React.useCallback(
@@ -738,9 +750,9 @@ export const TerminalView: React.FC = () => {
             }
             handleViewportInput(sequence);
             setActiveModifier(null);
-            terminalControllerRef.current?.focus();
+            focusTerminalController();
         },
-        [activeModifier, handleViewportInput, setActiveModifier]
+        [activeModifier, focusTerminalController, handleViewportInput, setActiveModifier]
     );
 
     React.useEffect(() => {
@@ -804,7 +816,7 @@ export const TerminalView: React.FC = () => {
                     event.stopPropagation();
                     handleViewportInput(controlCode);
                     setActiveModifier(null);
-                    terminalControllerRef.current?.focus();
+                    focusTerminalController();
                 }
             }
         };
@@ -817,6 +829,7 @@ export const TerminalView: React.FC = () => {
         activeModifier,
         handleMobileKeyPress,
         handleViewportInput,
+        focusTerminalController,
         showQuickKeys,
         setActiveModifier,
         terminalSessionId,
@@ -843,21 +856,20 @@ export const TerminalView: React.FC = () => {
 
     const xtermTheme = React.useMemo(() => convertThemeToXterm(currentTheme), [currentTheme]);
 
-    const terminalSessionKey = React.useMemo(() => {
+    const terminalViewportKey = React.useMemo(() => {
         const serverPart = activeServerId === 'default' ? '' : `${activeServerId}::`;
         const directoryPart = effectiveDirectory ?? 'no-dir';
         const tabPart = activeTabId ?? 'no-tab';
-        const terminalPart = terminalSessionId ?? `pending-${tabPart}`;
+        const terminalPart = terminalSessionId ?? 'no-terminal';
         return `${serverPart}${directoryPart}::${tabPart}::${terminalPart}`;
     }, [activeServerId, effectiveDirectory, activeTabId, terminalSessionId]);
 
     const viewportSessionKey = React.useMemo(() => {
-        const base = terminalSessionId ?? terminalSessionKey;
-        return `${base}::layout-${viewportLayoutVersion}`;
-    }, [terminalSessionId, terminalSessionKey, viewportLayoutVersion]);
+        return `${terminalViewportKey}::layout-${viewportLayoutVersion}`;
+    }, [terminalViewportKey, viewportLayoutVersion]);
 
     React.useEffect(() => {
-        if (isMobile || !isBottomTerminalOpen || !isTerminalVisible) {
+        if (useTouchTerminalInput || !isBottomTerminalOpen || !isTerminalVisible) {
             return;
         }
 
@@ -873,10 +885,10 @@ export const TerminalView: React.FC = () => {
         return () => {
             window.clearTimeout(timeoutId);
         };
-    }, [bottomTerminalHeight, isBottomTerminalExpanded, isBottomTerminalOpen, isMobile, isTerminalVisible]);
+    }, [bottomTerminalHeight, isBottomTerminalExpanded, isBottomTerminalOpen, isTerminalVisible, useTouchTerminalInput]);
 
     React.useEffect(() => {
-        if (!isTerminalVisible) {
+        if (!isTerminalVisible || useTouchTerminalInput) {
             return;
         }
         const controller = terminalControllerRef.current;
@@ -898,10 +910,10 @@ export const TerminalView: React.FC = () => {
             };
         }
         fitOnce();
-    }, [focusTerminalWhenWindowActive, isTerminalVisible, terminalSessionKey, terminalSessionId]);
+    }, [focusTerminalWhenWindowActive, isTerminalVisible, useTouchTerminalInput, terminalViewportKey, terminalSessionId]);
 
     React.useEffect(() => {
-        if (isMobile || !isTerminalVisible || !isBottomTerminalOpen) {
+        if (useTouchTerminalInput || !isTerminalVisible || !isBottomTerminalOpen) {
             return;
         }
 
@@ -926,7 +938,7 @@ export const TerminalView: React.FC = () => {
         }
 
         fitOnce();
-    }, [bottomTerminalHeight, isBottomTerminalExpanded, isBottomTerminalOpen, isMobile, isTerminalVisible]);
+    }, [bottomTerminalHeight, isBottomTerminalExpanded, isBottomTerminalOpen, isTerminalVisible, useTouchTerminalInput]);
 
     if (!hasActiveContext) {
         return (
@@ -951,8 +963,8 @@ export const TerminalView: React.FC = () => {
     }
 
     const quickKeysDisabled = !terminalSessionId || isConnecting || isRestarting || isReconnectPending;
-    const shouldRenderViewport = isMobile ? isTerminalVisible : hasOpenedTerminalViewport;
-    const showBottomDockControls = !isMobile && isBottomTerminalOpen && !isTerminalActive;
+    const shouldRenderViewport = hasOpenedTerminalViewport;
+    const showBottomDockControls = !isTouchTerminal && isBottomTerminalOpen && !isTerminalActive;
     const quickKeysControls = (
         <>
             <Button
@@ -1060,10 +1072,10 @@ export const TerminalView: React.FC = () => {
 
     return (
         <div className="flex h-full flex-col overflow-hidden bg-[var(--surface-background)]">
-            <div className={cn('app-region-no-drag sticky top-0 z-20 shrink-0 bg-[var(--surface-background)] text-xs', isMobile ? 'pl-3 pr-1.5 py-1' : 'pl-3 pr-1.5 py-1')}>
+            <div className={cn('app-region-no-drag sticky top-0 z-20 shrink-0 bg-[var(--surface-background)] text-xs', isTouchTerminal ? 'px-3 py-1.5' : 'pl-3 pr-1.5 py-1')}>
                 {enableTabs && directoryTerminalState ? (
                     <div className="flex items-center gap-2 pl-1 pr-1">
-                        <div className={cn('min-w-0 flex-1', isMobile ? 'h-8' : 'h-7')}>
+                        <div className={cn('min-w-0 flex-1', isTouchTerminal ? 'h-8' : 'h-7')}>
                             <SortableTabsStrip
                                 items={terminalTabItems}
                                 activeId={activeTabId}
@@ -1079,11 +1091,11 @@ export const TerminalView: React.FC = () => {
                             type="button"
                             size="xs"
                             variant="ghost"
-                            className={cn('shrink-0', isMobile ? 'h-8 w-8 p-0' : 'h-7 w-7 p-0')}
+                            className={cn('shrink-0', isTouchTerminal ? 'h-8 w-8 p-0' : 'h-7 w-7 p-0')}
                             onClick={handleCreateTab}
                             title={t('terminalView.tabs.newTabTitle')}
                         >
-                            <RiAddLine size={isMobile ? 18 : 16} />
+                            <RiAddLine size={isTouchTerminal ? 18 : 16} />
                         </Button>
 
                         <div className="flex shrink-0 items-center gap-1 overflow-visible">
@@ -1153,7 +1165,6 @@ export const TerminalView: React.FC = () => {
                 <div className="h-full w-full box-border pl-4 pr-1.5 pt-3 pb-4">
                     {shouldRenderViewport ? (
                         <TerminalViewport
-                            key={viewportSessionKey}
                             ref={(controller) => {
                                 terminalControllerRef.current = controller;
                             }}
@@ -1164,8 +1175,9 @@ export const TerminalView: React.FC = () => {
                             theme={xtermTheme}
                             fontFamily={resolvedFontStack}
                             fontSize={terminalFontSize}
-                            enableTouchScroll={hasTouchInput}
-                            autoFocus={isTerminalVisible}
+                            enableTouchScroll={useTouchTerminalInput}
+                            autoFocus={!useTouchTerminalInput && isTerminalVisible}
+                            isVisible={isTerminalVisible}
                         />
                     ) : null}
                 </div>
