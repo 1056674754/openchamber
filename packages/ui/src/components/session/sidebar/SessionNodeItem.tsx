@@ -25,7 +25,6 @@ import {
   RiFileCopyLine,
   RiFolderLine,
   RiLinkUnlinkM,
-  RiMore2Line,
   RiPencilAiLine,
   RiPushpinLine,
   RiShare2Line,
@@ -292,14 +291,6 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
   const hideOnHoverClass = isVSCode
     ? 'group-hover:opacity-0'
     : 'group-hover:opacity-0 group-focus-within:opacity-0';
-  const revealPaddingClass = isMinimalMode
-    ? (isVSCode
-        ? 'group-hover:pr-2'
-        : 'group-hover:pr-2 group-focus-within:pr-2')
-    : (isVSCode
-        ? (archivedBucket ? 'group-hover:pr-5' : 'group-hover:pr-12')
-        : (archivedBucket ? 'group-hover:pr-5 group-focus-within:pr-5' : 'group-hover:pr-12 group-focus-within:pr-12'));
-  const alwaysActionPaddingClass = archivedBucket ? 'pr-7' : 'pr-13';
   const suppressNextSelectRef = React.useRef(false);
   const [isTouchPressed, setIsTouchPressed] = React.useState(false);
 
@@ -607,7 +598,6 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
   const isStreaming = statusType === 'busy' || statusType === 'retry';
   const pendingPermissionCount = sessionPermissions.length;
   const showUnreadStatus = !isStreaming && needsAttention && !isActive;
-  const showStatusMarker = showUnreadStatus && !hasRunningChildSession;
 
   const pinMarker = isPinnedSession ? (
     <RiPushpinLine
@@ -693,39 +683,6 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
 
   const handleMenuOpenChange = (open: boolean) => {
     setOpenSidebarMenuKey(open ? menuInstanceKey : null);
-  };
-
-  const handleMenuTriggerClick = (event: React.MouseEvent<HTMLButtonElement>) => {
-    event.preventDefault();
-    event.stopPropagation();
-    setOpenSidebarMenuKey(isMenuOpen ? null : menuInstanceKey);
-  };
-
-  const handleMenuTriggerPointerDown = (event: React.PointerEvent<HTMLButtonElement>) => {
-    event.preventDefault();
-    event.stopPropagation();
-  };
-
-  const handleMenuTriggerMouseDown = (event: React.MouseEvent<HTMLButtonElement>) => {
-    event.preventDefault();
-    event.stopPropagation();
-  };
-
-  const handleQuickArchivePointerDown = (event: React.PointerEvent<HTMLButtonElement>) => {
-    event.preventDefault();
-    event.stopPropagation();
-  };
-
-  const handleQuickArchiveMouseDown = (event: React.MouseEvent<HTMLButtonElement>) => {
-    event.preventDefault();
-    event.stopPropagation();
-  };
-
-  const handleQuickArchiveClick = (event: React.MouseEvent<HTMLButtonElement>) => {
-    event.preventDefault();
-    event.stopPropagation();
-    setOpenSidebarMenuKey(null);
-    handleDeleteSession(session, { archivedBucket });
   };
 
   const handleRowSelect = (event?: React.MouseEvent<HTMLButtonElement>) => {
@@ -927,11 +884,9 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
                       handleSessionDoubleClick();
                     }}
                     className={cn(
-                      'flex min-w-0 flex-1 cursor-pointer flex-col gap-0 overflow-hidden rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 text-foreground select-none disabled:cursor-not-allowed transition-[padding]',
+                      'flex min-w-0 flex-1 cursor-pointer flex-col gap-0 overflow-hidden rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 text-foreground select-none disabled:cursor-not-allowed',
                       isTouchPressed && 'bg-interactive-hover/70',
-                      alwaysShowActions
-                        ? (isVSCode ? revealPaddingClass : alwaysActionPaddingClass)
-                        : revealPaddingClass,
+                      alwaysShowActions ? 'pr-7' : null,
                     )}
                   >
                     <div className={cn('flex w-full items-center min-w-0 flex-1 overflow-hidden', isMinimalMode ? 'gap-1' : 'gap-1')}>
@@ -997,11 +952,9 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
                   handleSessionDoubleClick();
                 }}
                 className={cn(
-                  'flex min-w-0 flex-1 cursor-pointer flex-col gap-0 overflow-hidden rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 text-foreground select-none disabled:cursor-not-allowed transition-[padding]',
+                  'flex min-w-0 flex-1 cursor-pointer flex-col gap-0 overflow-hidden rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 text-foreground select-none disabled:cursor-not-allowed',
                   isTouchPressed && 'bg-interactive-hover/70',
-                  alwaysShowActions
-                    ? (isVSCode ? revealPaddingClass : alwaysActionPaddingClass)
-                    : revealPaddingClass
+                  alwaysShowActions ? 'pr-7' : null,
                 )}
               >
                 <div className={cn('flex w-full items-center min-w-0 flex-1 overflow-hidden', isMinimalMode ? 'gap-1' : 'gap-1')}>
@@ -1048,76 +1001,34 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
                 ? 'opacity-100'
                 : cn('opacity-0', revealOnHoverClass),
           )}>
-            {!archivedBucket ? (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    type="button"
-                    className={cn(
-                      'inline-flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 transition-opacity',
-                      isMinimalMode && !alwaysShowActions ? 'h-4 w-4' : 'h-6 w-6',
-                    )}
-                    aria-label={t('sessions.sidebar.bulkActions.archive')}
-                    onPointerDown={handleQuickArchivePointerDown}
-                    onMouseDown={handleQuickArchiveMouseDown}
-                    onClick={handleQuickArchiveClick}
-                    onKeyDown={(event) => event.stopPropagation()}
-                  >
-                    <RiArchiveLine className={cn(isMinimalMode && !alwaysShowActions ? 'h-2.5 w-2.5' : 'h-3.5 w-3.5')} />
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent side="left" sideOffset={8}>
-                  {t('sessions.sidebar.bulkActions.archive')}
-                </TooltipContent>
-              </Tooltip>
-            ) : (
-              <button
-                type="button"
-                className={cn(
-                  'inline-flex h-5 w-5 items-center justify-center rounded-sm',
-                  archiveConfirming
-                    ? 'text-white bg-[var(--status-error)] hover:bg-[var(--status-error)]/80'
-                    : 'text-muted-foreground hover:text-[var(--status-error)]',
-                )}
-                aria-label={archiveConfirming
-                  ? t('sessions.sidebar.bulkActions.deleteConfirm')
-                  : t('sessions.sidebar.bulkActions.delete')}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (archiveConfirming) {
-                    handleDeleteSession(session, { archivedBucket });
-                    setArchiveConfirming(false);
-                  } else {
-                    setArchiveConfirming(true);
-                  }
-                }}
-              >
+            {/* Context menu uses hidden positioned trigger only — no visible "..." button (removed per project convention, do not re-add) */}
+            <button
+              type="button"
+              className={cn(
+                'inline-flex h-5 w-5 items-center justify-center rounded-sm',
+                archiveConfirming
+                  ? 'text-white bg-[var(--status-error)] hover:bg-[var(--status-error)]/80'
+                  : 'text-muted-foreground hover:text-[var(--status-error)]',
+              )}
+              aria-label={archiveConfirming
+                ? (archivedBucket ? t('sessions.sidebar.bulkActions.deleteConfirm') : t('sessions.sidebar.bulkActions.archiveConfirm'))
+                : (archivedBucket ? t('sessions.sidebar.bulkActions.delete') : t('sessions.sidebar.bulkActions.archive'))}
+              onClick={(e) => {
+                e.stopPropagation();
+                if (archiveConfirming) {
+                  handleDeleteSession(session, { archivedBucket });
+                  setArchiveConfirming(false);
+                } else {
+                  setArchiveConfirming(true);
+                }
+              }}
+            >
+              {archivedBucket ? (
                 <RiDeleteBinLine className="h-3.5 w-3.5" />
-              </button>
-            )}
-            <DropdownMenu open={isMenuOpen} onOpenChange={handleMenuOpenChange}>
-              <DropdownMenuTrigger asChild>
-                <button
-                  type="button"
-                  className={cn(
-                    'inline-flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 transition-opacity',
-                    isMinimalMode && !alwaysShowActions
-                      ? (isMenuOpen
-                          ? 'h-4 w-4 opacity-100'
-                          : cn('h-4 w-4 opacity-0', revealOnHoverClass))
-                      : 'h-6 w-6 opacity-100',
-                  )}
-                  aria-label={t('sessions.sidebar.session.menu.label')}
-                  onPointerDown={handleMenuTriggerPointerDown}
-                  onMouseDown={handleMenuTriggerMouseDown}
-                  onClick={handleMenuTriggerClick}
-                  onKeyDown={(event) => event.stopPropagation()}
-                >
-                  <RiMore2Line className={cn(isMinimalMode && !alwaysShowActions ? 'h-2.5 w-2.5' : 'h-3.5 w-3.5')} />
-                </button>
-              </DropdownMenuTrigger>
-              {sessionMenuContent}
-            </DropdownMenu>
+              ) : (
+                <RiArchiveLine className="h-3.5 w-3.5" />
+              )}
+            </button>
           </div>
 
           <DropdownMenu open={isMenuOpen} onOpenChange={handleMenuOpenChange}>
