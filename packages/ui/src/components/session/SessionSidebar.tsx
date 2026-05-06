@@ -2054,6 +2054,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
         showSidebarToggle={isWebRuntime}
         onToggleSidebar={toggleSidebar}
         avoidWindowControlsOverlay={isTabletStandalonePwa}
+        onRefresh={() => { void refreshGlobalSessions(syncSessionsSnapshotRef.current); }}
       />
 
       <SidebarProjectsList
@@ -2089,6 +2090,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
         setGroupOrderByProject={setGroupOrderByProject}
         openSidebarMenuKey={openSidebarMenuKey}
         setOpenSidebarMenuKey={setOpenSidebarMenuKey}
+        onRefreshProject={() => { void refreshGlobalSessions(syncSessionsSnapshotRef.current); }}
         isInlineEditing={isInlineEditing}
       />
 

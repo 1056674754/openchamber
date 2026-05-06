@@ -69,6 +69,7 @@ type Props = {
   setGroupOrderByProject: React.Dispatch<React.SetStateAction<Map<string, string[]>>>;
   openSidebarMenuKey: string | null;
   setOpenSidebarMenuKey: (key: string | null) => void;
+  onRefreshProject?: () => void;
   isInlineEditing: boolean;
 };
 
@@ -211,6 +212,7 @@ export function SidebarProjectsList(props: Props): React.ReactNode {
                     setOpenSidebarMenuKey={props.setOpenSidebarMenuKey}
                     isPinned={project.pinned}
                     onTogglePin={() => props.toggleProjectPin(projectKey)}
+                    onRefresh={props.onRefreshProject}
                   >
                     {!isCollapsed ? (
                       <div className="space-y-0 pt-0 pb-0.5 pl-3">

@@ -15,6 +15,7 @@ import {
   RiFolderAddLine,
   RiGlobeLine,
   RiLayoutLeftLine,
+  RiRefreshLine,
   RiSearchLine,
   RiCloseLine,
   RiContractUpDownLine,
@@ -50,6 +51,7 @@ type Props = {
   openScheduledTasksDialog: () => void;
   selectionModeEnabled: boolean;
   onToggleSelectionMode: () => void;
+  onRefresh?: () => void;
   showSidebarToggle?: boolean;
   onToggleSidebar?: () => void;
   avoidWindowControlsOverlay?: boolean;
@@ -79,6 +81,7 @@ export function SidebarHeader(props: Props): React.ReactNode {
     openScheduledTasksDialog,
     selectionModeEnabled,
     onToggleSelectionMode,
+    onRefresh,
     showSidebarToggle = false,
     onToggleSidebar,
     avoidWindowControlsOverlay = false,
@@ -155,33 +158,48 @@ export function SidebarHeader(props: Props): React.ReactNode {
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    type="button"
-                    onClick={handleNewSession}
-                    className={headerActionButtonClass}
-                    aria-label={t('sessions.sidebar.header.actions.newSession')}
-                  >
-                    <RiChatNewLine className={headerActionIconClass} />
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent side="bottom" sideOffset={4}><p>{t('sessions.sidebar.header.actions.newSession')}</p></TooltipContent>
-              </Tooltip>
+              <DropdownMenu>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <DropdownMenuTrigger asChild>
+                      <button
+                        type="button"
+                        className={headerActionButtonClass}
+                        aria-label={t('sessions.sidebar.header.actions.newSession')}
+                      >
+                        <RiChatNewLine className={headerActionIconClass} />
+                      </button>
+                    </DropdownMenuTrigger>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom" sideOffset={4}><p>{t('sessions.sidebar.header.actions.newSession')}</p></TooltipContent>
+                </Tooltip>
+                <DropdownMenuContent align="start" className="min-w-[180px]">
+                  <DropdownMenuItem onClick={handleNewSession} className="flex items-center gap-2">
+                    <RiChatNewLine className="h-4 w-4" />
+                    {t('sessions.sidebar.header.actions.newSession')}
+                  </DropdownMenuItem>
+                  {handleNewTempSession ? (
+                    <DropdownMenuItem onClick={handleNewTempSession} className="flex items-center gap-2">
+                      <RiFolderLine className="h-4 w-4" />
+                      {t('sessions.sidebar.header.actions.newTempSession')}
+                    </DropdownMenuItem>
+                  ) : null}
+                </DropdownMenuContent>
+              </DropdownMenu>
 
-              {handleNewTempSession ? (
+              {onRefresh ? (
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <button
                       type="button"
-                      onClick={handleNewTempSession}
+                      onClick={onRefresh}
                       className={headerActionButtonClass}
-                      aria-label={t('sessions.sidebar.header.actions.newTempSession')}
+                      aria-label={t('sessions.sidebar.header.actions.refresh')}
                     >
-                      <RiFolderLine className={headerActionIconClass} />
+                      <RiRefreshLine className={headerActionIconClass} />
                     </button>
                   </TooltipTrigger>
-                  <TooltipContent side="bottom" sideOffset={4}><p>{t('sessions.sidebar.header.actions.newTempSession')}</p></TooltipContent>
+                  <TooltipContent side="bottom" sideOffset={4}><p>{t('sessions.sidebar.header.actions.refresh')}</p></TooltipContent>
                 </Tooltip>
               ) : null}
 
