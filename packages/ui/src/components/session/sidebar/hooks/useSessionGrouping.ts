@@ -159,6 +159,7 @@ export const useSessionGrouping = (args: Args) => {
         if (!parentID) return true;
         const parentSession = sessionMap.get(parentID);
         if (!parentSession) return true;
+        if (isArchivedSession(parentSession)) return false;
         return isArchivedSession(parentSession) !== isArchivedSession(session);
       });
 
