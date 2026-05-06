@@ -703,6 +703,9 @@ const openCodeWatcherRuntime = createOpenCodeWatcherRuntime({
     void maybeSendPushForTrigger(payload);
     sessionRuntime.processOpenCodeSsePayload(payload);
   },
+  onReconnect: () => {
+    sessionRuntime.resetAllSessionActivityToIdle();
+  },
 });
 
 const processForwardedEventPayload = (payload, emitSyntheticEvent) => {

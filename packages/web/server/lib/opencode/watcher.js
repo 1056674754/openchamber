@@ -6,6 +6,7 @@ export const createOpenCodeWatcherRuntime = (deps) => {
     buildOpenCodeUrl,
     getOpenCodeAuthHeaders,
     onPayload,
+    onReconnect,
     fetchImpl = fetch,
     upstreamStallTimeoutMs,
     upstreamReconnectDelayMs = 1000,
@@ -53,6 +54,7 @@ export const createOpenCodeWatcherRuntime = (deps) => {
         }
         if (status.type === 'connect') {
           console.log('[PushWatcher] connected');
+          onReconnect?.();
           return;
         }
         if (status.type === 'error' || status.type === 'initial-error') {
@@ -72,6 +74,7 @@ export const createOpenCodeWatcherRuntime = (deps) => {
       reconnectDelayMs: upstreamReconnectDelayMs,
       onConnect() {
         console.log('[PushWatcher] connected');
+        onReconnect?.();
       },
       onEvent(event) {
         const payload = unwrapGlobalEventPayload(event.payload);
