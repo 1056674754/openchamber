@@ -1683,7 +1683,7 @@ const MarkdownRendererImpl: React.FC<MarkdownRendererProps> = ({
     ? 'markdown-content markdown-tool'
     : variant === 'reasoning'
       ? 'markdown-content markdown-reasoning'
-      : 'markdown-content leading-relaxed';
+      : 'markdown-content leading-snug';
 
   const markdownContent = (
     <div className={cn('break-words w-full min-w-0', className)} ref={containerRef}>
@@ -1770,7 +1770,7 @@ const SimpleMarkdownRendererImpl: React.FC<{
     ? 'markdown-content markdown-tool'
     : variant === 'reasoning'
       ? 'markdown-content markdown-reasoning'
-      : 'markdown-content leading-relaxed';
+      : 'markdown-content leading-snug';
 
   return (
     <div className={cn('break-words w-full min-w-0', className)} ref={containerRef}>

@@ -492,13 +492,6 @@ const MemoStaticGroupedToolRow = React.memo(StaticGroupedToolRow, (prev, next) =
         && areActivityListsEqual(prev.activities, next.activities);
 });
 
-/**
- * Aggregate sorted activity parts into display rows.
- * Static tools are rendered as one row per call.
- * Reasoning/justification become inline text.
- * Expandable tools (edit, bash, write, question) stay as individual rows.
- * Unknown tools stay as individual expandable rows (fallback).
- */
 const aggregateRows = (parts: TurnActivityPart[]): AggregatedRow[] => {
     const rows: AggregatedRow[] = [];
 
@@ -535,8 +528,18 @@ const aggregateRows = (parts: TurnActivityPart[]): AggregatedRow[] => {
         }
 
         if (isStaticTool(toolName)) {
-            rows.push({ type: 'tool-static-group', toolName, activities: [activity] });
-            i++;
+            const group: TurnActivityPart[] = [activity];
+            let j = i + 1;
+            while (j < parts.length) {
+                const nextActivity = parts[j];
+                if (nextActivity.kind !== 'tool') break;
+                const nextTool = (nextActivity.part as ToolPartType).tool?.toLowerCase() ?? '';
+                if (!isStaticTool(nextTool)) break;
+                group.push(nextActivity);
+                j++;
+            }
+            rows.push({ type: 'tool-static-group', toolName, activities: group });
+            i = j;
             continue;
         }
 

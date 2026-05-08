@@ -71,7 +71,7 @@ export const filterVisibleParts = (parts: Part[], options: VisibleFilterOptions 
 export const isBackgroundTaskPart = (part: Part): boolean => {
     if (part.type !== 'text') return false;
     const text = extractTextContent(part);
-    return text.includes('[BACKGROUND TASK') || text.includes('Background_output');
+    return text.includes('BACKGROUND TASK') || text.includes('Background_output') || text.includes('background_output');
 };
 
 type PartWithTime = Part & { time?: { start?: number; end?: number } };

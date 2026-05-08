@@ -38,7 +38,9 @@ import { toast } from '@/components/ui';
 import { formatTimestampForDisplay } from './timeFormat';
 import { ToolRevealOnMount } from './parts/ToolRevealOnMount';
 import { StaticToolRow } from './parts/ProgressiveGroup';
-import { isExpandableTool, isStandaloneTool } from './parts/toolRenderUtils';
+import { ToolCallGroup } from './parts/ToolCallGroup';
+import type { ToolCallGroupActivity } from './parts/ToolCallGroup';
+import { isExpandableTool, isStandaloneTool, isStaticTool } from './parts/toolRenderUtils';
 import TurnActivity from '../components/TurnActivity';
 import { createProjectPlanFile } from '@/lib/openchamberConfig';
 import { resolveProjectForSessionDirectory } from '@/lib/projectResolution';
@@ -303,6 +305,8 @@ interface MessageBodyProps {
     showReasoningTraces?: boolean;
     agentMention?: AgentMentionInfo;
     turnGroupingContext?: TurnGroupingContext;
+    absorbedToolPartIds?: Set<string>;
+    extraTrailingTools?: ToolPartType[];
     onRevert?: () => void;
     onFork?: () => void;
     errorMessage?: string;
@@ -855,6 +859,8 @@ const AssistantMessageBody = React.memo(({
     onAuxiliaryContentComplete,
     showReasoningTraces = false,
     turnGroupingContext,
+    absorbedToolPartIds,
+    extraTrailingTools,
     errorMessage,
     errorVariant = 'error',
 }: Omit<MessageBodyProps, 'isUser'>) => {
@@ -864,6 +870,19 @@ const AssistantMessageBody = React.memo(({
     const messageContentRef = React.useRef<HTMLDivElement>(null);
     const messageTextContentRef = React.useRef<HTMLDivElement>(null);
     const toolRevealReadyRef = React.useRef(false);
+
+    const [expandedToolGroups, setExpandedToolGroups] = React.useState<Set<string>>(new Set());
+    const toggleToolGroup = React.useCallback((groupId: string) => {
+        setExpandedToolGroups((prev) => {
+            const next = new Set(prev);
+            if (next.has(groupId)) {
+                next.delete(groupId);
+            } else {
+                next.add(groupId);
+            }
+            return next;
+        });
+    }, []);
 
     React.useEffect(() => {
         toolRevealReadyRef.current = true;
@@ -1616,6 +1635,12 @@ const AssistantMessageBody = React.memo(({
                     continue;
                 }
 
+                const tcgAbsorbed = turnGroupingContext?.absorbedToolPartIds;
+                if (absorbedToolPartIds?.has(toolPart.id) || tcgAbsorbed?.has(toolPart.id)) {
+                    i++;
+                    continue;
+                }
+
                 // Expandable tools: bash, edit, write, task, question — individual rows
                 if (isExpandableTool(toolName)) {
                     rendered.push(
@@ -1639,7 +1664,64 @@ const AssistantMessageBody = React.memo(({
                     continue;
                 }
 
-                // Static tools: one row per tool call (no grouping)
+                // Static tools: group consecutive adjacent static tools
+                {
+                    const group: ToolPartType[] = [toolPart];
+                    let j = i + 1;
+                    while (j < visibleParts.length) {
+                        const nextPart = visibleParts[j];
+                        if (nextPart.type !== 'tool') break;
+                        const nextTool = nextPart as ToolPartType;
+                        const nextName = nextTool.tool?.toLowerCase() ?? '';
+                        if (!isStaticTool(nextName)) break;
+                        if (!shouldShowTool(nextTool)) break;
+                        group.push(nextTool);
+                        j++;
+                    }
+
+                    const tcgExtra = (turnGroupingContext?.extraTrailingTools ?? []) as ToolPartType[];
+                    const allExtraTrailing: ToolPartType[] = [
+                        ...(extraTrailingTools ?? []),
+                        ...tcgExtra,
+                    ];
+                    if (j >= visibleParts.length && allExtraTrailing.length > 0) {
+                        for (const extra of allExtraTrailing) {
+                            const extraName = extra.tool?.toLowerCase() ?? '';
+                            if (!isStaticTool(extraName)) break;
+                            group.push(extra);
+                        }
+                    }
+
+                    if (group.length >= 2) {
+                        const groupKey = toolPart.id;
+                        const groupActivities: ToolCallGroupActivity[] = group.map((tp, idx) => ({
+                            id: tp.id,
+                            turnId: '',
+                            messageId,
+                            partIndex: i + idx,
+                            part: tp,
+                            kind: 'tool' as const,
+                        }));
+                        const isGroupExpanded = expandedToolGroups.has(groupKey);
+                        const hasAnyAnimatedTool = group.some((tp) => animatedToolIdsLookup.has(tp.id));
+                        rendered.push(
+                            <FadeInOnReveal key={`tool-group-${groupKey}`}>
+                                <ToolRevealOnMount animate={hasAnyAnimatedTool} wipe>
+                                    <ToolCallGroup
+                                        tools={group}
+                                        messageParts={groupActivities}
+                                        isExpanded={isGroupExpanded}
+                                        onToggle={() => toggleToolGroup(groupKey)}
+                                        animateTailText={hasAnyAnimatedTool}
+                                    />
+                                </ToolRevealOnMount>
+                            </FadeInOnReveal>
+                        );
+                        i = j;
+                        continue;
+                    }
+                }
+
                 rendered.push(
                     <FadeInOnReveal key={`static-tools-${toolPart.id}`}>
                         <ToolRevealOnMount animate={animatedToolIdsLookup.has(toolPart.id)} wipe>
@@ -1697,7 +1779,11 @@ const AssistantMessageBody = React.memo(({
         shouldDeferSortedInlineText,
         syntaxTheme,
         toggleActivityGroup,
+        toggleToolGroup,
+        expandedToolGroups,
         turnGroupingContext,
+        absorbedToolPartIds,
+        extraTrailingTools,
         visibleParts,
     ]);
 

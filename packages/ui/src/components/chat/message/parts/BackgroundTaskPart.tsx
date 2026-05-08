@@ -18,12 +18,13 @@ interface ParsedBackgroundTask {
 }
 
 const BACKGROUND_TASK_MARKERS = [
-    '[BACKGROUND TASK',
+    'BACKGROUND TASK',
     'Background_output',
+    'background_output',
 ];
 
 const STATUS_PATTERNS = {
-    completed: ['[BACKGROUND TASK COMPLETED]', 'COMPLETED', 'COMPLETE'],
+    completed: ['BACKGROUND TASK COMPLETE', 'COMPLETED', 'COMPLETE'],
     failed: ['FAILED', 'ERROR', 'FAIL'],
 };
 
@@ -34,7 +35,7 @@ const METADATA_PATTERNS = {
 };
 
 const METADATA_PREFIXES = [
-    '[BACKGROUND TASK',
+    'BACKGROUND TASK',
     'ID:',
     'Description:',
     'Duration:',
