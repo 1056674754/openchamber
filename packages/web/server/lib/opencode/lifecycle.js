@@ -26,6 +26,8 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     buildManagedOpenCodePath,
     getManagedOpenCodeShellEnvSnapshot,
     getActiveSessionCount = () => 0,
+    persistOpenCodePort = () => {},
+    readPersistedOpenCodePort = () => null,
   } = deps;
 
   const killProcessOnPort = (port) => {
@@ -465,6 +467,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
 
       if (await waitForReady(serverInstance.url, 10000)) {
         setOpenCodePort(port);
+        persistOpenCodePort(port);
         setDetectedOpenCodeApiPrefix(prefix);
 
         state.isOpenCodeReady = true;
@@ -774,17 +777,28 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
         state.openCodeNotReadySince = 0;
         syncToHmrState();
       } else {
-        if (env.ENV_EFFECTIVE_PORT) {
-          console.log(`Using OpenCode port from environment: ${env.ENV_EFFECTIVE_PORT}`);
-          setOpenCodePort(env.ENV_EFFECTIVE_PORT);
+        const lastPort = readPersistedOpenCodePort();
+        if (lastPort && lastPort !== 4096 && await probeExternalOpenCode(lastPort)) {
+          console.log(`Reconnected to previous OpenCode server on port ${lastPort}`);
+          setOpenCodePort(lastPort);
+          state.isOpenCodeReady = true;
+          state.isExternalOpenCode = true;
+          state.lastOpenCodeError = null;
+          state.openCodeNotReadySince = 0;
+          syncToHmrState();
         } else {
-          state.openCodePort = null;
+          if (env.ENV_EFFECTIVE_PORT) {
+            console.log(`Using OpenCode port from environment: ${env.ENV_EFFECTIVE_PORT}`);
+            setOpenCodePort(env.ENV_EFFECTIVE_PORT);
+          } else {
+            state.openCodePort = null;
+            syncToHmrState();
+          }
+
+          state.lastOpenCodeError = null;
+          state.openCodeProcess = await startOpenCode();
           syncToHmrState();
         }
-
-        state.lastOpenCodeError = null;
-        state.openCodeProcess = await startOpenCode();
-        syncToHmrState();
       }
       await waitForOpenCodePort();
       try {

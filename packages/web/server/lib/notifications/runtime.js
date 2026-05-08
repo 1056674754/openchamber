@@ -24,6 +24,11 @@ export const createNotificationTriggerRuntime = (deps) => {
   const notifiedPermissionRequests = new Set();
   const lastReadyNotificationAt = new Map();
 
+  // Cache the last message.updated payload per session so the session.idle
+  // handler can send a notification with the correct template variables
+  // (mode, modelID, path, etc.) which session.idle events don't carry.
+  const pendingCompletionPayloads = new Map();
+
   const sessionParentIdCache = new Map();
   const SESSION_PARENT_CACHE_TTL_MS = 60 * 1000;
 
@@ -183,6 +188,92 @@ export const createNotificationTriggerRuntime = (deps) => {
       .join(' ');
   };
 
+  const sendCompletionNotification = async (payload, sessionId) => {
+    const info = payload.properties?.info;
+    const settings = await readSettingsFromDisk();
+
+    if (settings.notifyOnCompletion === false) {
+      return;
+    }
+
+    const now = Date.now();
+    const lastAt = lastReadyNotificationAt.get(sessionId) ?? 0;
+    if (now - lastAt < PUSH_READY_COOLDOWN_MS) {
+      return;
+    }
+    lastReadyNotificationAt.set(sessionId, now);
+
+    let title = `${formatMode(info?.mode)} agent is ready`;
+    let body = `${formatModelId(info?.modelID)} completed the task`;
+
+    try {
+      const templates = settings.notificationTemplates || {};
+      const isSubtask = await fetchSessionParentId(sessionId);
+      const completionTemplate = isSubtask && settings.notifyOnSubtasks !== false
+        ? (templates.subtask || templates.completion || { title: '{agent_name} is ready', message: '{model_name} completed the task' })
+        : (templates.completion || { title: '{agent_name} is ready', message: '{model_name} completed the task' });
+
+      const variables = await buildTemplateVariables(payload, sessionId);
+
+      console.log('[Notification:DEBUG:variables]', JSON.stringify({
+        project_name: variables.project_name,
+        worktree: variables.worktree,
+        branch: variables.branch,
+        session_name: variables.session_name,
+        agent_name: variables.agent_name,
+        isSubtask: !!isSubtask,
+        completionTemplateTitle: completionTemplate.title,
+      }));
+
+      const messageId = info?.id;
+      let lastMessage = extractLastMessageText(payload);
+      if (!lastMessage) {
+        lastMessage = await fetchLastAssistantMessageText(sessionId, messageId);
+      }
+
+      const notifZenModel = await resolveZenModel(settings?.zenModel);
+      variables.last_message = await prepareNotificationLastMessage({
+        message: lastMessage,
+        settings,
+        summarize: (text, len) => summarizeText(text, len, notifZenModel),
+      });
+
+      const resolvedTitle = resolveNotificationTemplate(completionTemplate.title, variables);
+      const resolvedBody = resolveNotificationTemplate(completionTemplate.message, variables);
+      if (resolvedTitle) title = resolvedTitle;
+      if (shouldApplyResolvedTemplateMessage(completionTemplate.message, resolvedBody, variables)) body = resolvedBody;
+    } catch (error) {
+      console.warn('[Notification] Template resolution failed, using defaults:', error?.message || error);
+    }
+
+    if (settings.nativeNotificationsEnabled) {
+      const notificationPayload = {
+        title,
+        body,
+        tag: `ready-${sessionId}`,
+        kind: 'ready',
+        sessionId,
+        requireHidden: settings.notificationMode !== 'always',
+      };
+      emitDesktopNotification(notificationPayload);
+      broadcastUiNotification(notificationPayload);
+    }
+
+    await sendPushToAllUiSessions(
+      {
+        title,
+        body,
+        tag: `ready-${sessionId}`,
+        data: {
+          url: buildSessionDeepLinkUrl(sessionId),
+          sessionId,
+          type: 'ready',
+        },
+      },
+      { requireNoSse: true },
+    );
+  };
+
   const maybeSendPushForTrigger = async (payload) => {
     if (!payload || typeof payload !== 'object') {
       return;
@@ -191,6 +282,15 @@ export const createNotificationTriggerRuntime = (deps) => {
     maybeCacheSessionParentFromPayload(payload);
 
     const sessionId = extractSessionIdFromPayload(payload);
+    if (payload.type === 'session.idle' && sessionId) {
+      const cached = pendingCompletionPayloads.get(sessionId);
+      if (cached) {
+        pendingCompletionPayloads.delete(sessionId);
+        await sendCompletionNotification(cached, sessionId);
+      }
+      return;
+    }
+
     if (payload.type === 'message.updated') {
       const info = payload.properties?.info;
       if (info?.role === 'assistant' && info?.finish === 'stop' && sessionId) {
@@ -211,72 +311,7 @@ export const createNotificationTriggerRuntime = (deps) => {
           return;
         }
 
-        const now = Date.now();
-        const lastAt = lastReadyNotificationAt.get(sessionId) ?? 0;
-        if (now - lastAt < PUSH_READY_COOLDOWN_MS) {
-          return;
-        }
-        lastReadyNotificationAt.set(sessionId, now);
-
-        let title = `${formatMode(info?.mode)} agent is ready`;
-        let body = `${formatModelId(info?.modelID)} completed the task`;
-
-        try {
-          const templates = settings.notificationTemplates || {};
-          const isSubtask = await fetchSessionParentId(sessionId);
-          const completionTemplate = isSubtask && settings.notifyOnSubtasks !== false
-            ? (templates.subtask || templates.completion || { title: '{agent_name} is ready', message: '{model_name} completed the task' })
-            : (templates.completion || { title: '{agent_name} is ready', message: '{model_name} completed the task' });
-
-          const variables = await buildTemplateVariables(payload, sessionId);
-
-          const messageId = info?.id;
-          let lastMessage = extractLastMessageText(payload);
-          if (!lastMessage) {
-            lastMessage = await fetchLastAssistantMessageText(sessionId, messageId);
-          }
-
-          const notifZenModel = await resolveZenModel(settings?.zenModel);
-          variables.last_message = await prepareNotificationLastMessage({
-            message: lastMessage,
-            settings,
-            summarize: (text, len) => summarizeText(text, len, notifZenModel),
-          });
-
-          const resolvedTitle = resolveNotificationTemplate(completionTemplate.title, variables);
-          const resolvedBody = resolveNotificationTemplate(completionTemplate.message, variables);
-          if (resolvedTitle) title = resolvedTitle;
-          if (shouldApplyResolvedTemplateMessage(completionTemplate.message, resolvedBody, variables)) body = resolvedBody;
-        } catch (error) {
-          console.warn('[Notification] Template resolution failed, using defaults:', error?.message || error);
-        }
-
-        if (settings.nativeNotificationsEnabled) {
-          const notificationPayload = {
-            title,
-            body,
-            tag: `ready-${sessionId}`,
-            kind: 'ready',
-            sessionId,
-            requireHidden: settings.notificationMode !== 'always',
-          };
-          emitDesktopNotification(notificationPayload);
-          broadcastUiNotification(notificationPayload);
-        }
-
-        await sendPushToAllUiSessions(
-          {
-            title,
-            body,
-            tag: `ready-${sessionId}`,
-            data: {
-              url: buildSessionDeepLinkUrl(sessionId),
-              sessionId,
-              type: 'ready',
-            },
-          },
-          { requireNoSse: true },
-        );
+        pendingCompletionPayloads.set(sessionId, payload);
       }
 
       if (info?.role === 'assistant' && info?.finish === 'error' && sessionId) {

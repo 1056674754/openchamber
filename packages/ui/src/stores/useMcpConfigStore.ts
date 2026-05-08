@@ -8,6 +8,7 @@ import {
 import { refreshAfterOpenCodeRestart } from '@/stores/useAgentsStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { opencodeClient } from '@/lib/opencode/client';
+import { resolveApiUrl } from "@/lib/api/serverUrl";
 
 export type McpScope = 'user' | 'project';
 
@@ -121,10 +122,10 @@ interface McpConfigStore {
 
   setSelectedMcp: (name: string | null) => void;
   setMcpDraft: (draft: McpDraft | null) => void;
-  loadMcpConfigs: (options?: { force?: boolean }) => Promise<boolean>;
-  createMcp: (config: McpDraft) => Promise<McpMutationResult>;
-  updateMcp: (name: string, config: Partial<McpDraft>) => Promise<McpMutationResult>;
-  deleteMcp: (name: string) => Promise<McpMutationResult>;
+  loadMcpConfigs: (options?: { force?: boolean; serverBaseUrl?: string }) => Promise<boolean>;
+  createMcp: (config: McpDraft, serverBaseUrl?: string) => Promise<McpMutationResult>;
+  updateMcp: (name: string, config: Partial<McpDraft>, serverBaseUrl?: string) => Promise<McpMutationResult>;
+  deleteMcp: (name: string, serverBaseUrl?: string) => Promise<McpMutationResult>;
   getMcpByName: (name: string) => McpServerWithScope | undefined;
 }
 
@@ -165,7 +166,7 @@ export const useMcpConfigStore = create<McpConfigStore>()(
             set({ isLoading: true });
             try {
               const queryParams = configDirectory ? `?directory=${encodeURIComponent(configDirectory)}` : '';
-              const response = await fetch(`/api/config/mcp${queryParams}`, {
+              const response = await fetch(resolveApiUrl(`/api/config/mcp${queryParams}`, options?.serverBaseUrl), {
                 headers: configDirectory ? { 'x-opencode-directory': configDirectory } : undefined,
               });
               if (!response.ok) {
@@ -190,14 +191,14 @@ export const useMcpConfigStore = create<McpConfigStore>()(
           }
         },
 
-        createMcp: async (config: McpDraft) => {
+        createMcp: async (config: McpDraft, serverBaseUrl?: string) => {
           startConfigUpdate('Creating MCP server configuration…');
           let requiresReload = false;
           try {
             const body = buildMcpBody(config);
             const configDirectory = getConfigDirectory();
             const queryParams = configDirectory ? `?directory=${encodeURIComponent(configDirectory)}` : '';
-            const response = await fetch(`/api/config/mcp/${encodeURIComponent(config.name)}${queryParams}`, {
+            const response = await fetch(resolveApiUrl(`/api/config/mcp/${encodeURIComponent(config.name)}${queryParams}`, serverBaseUrl), {
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',
@@ -244,14 +245,14 @@ export const useMcpConfigStore = create<McpConfigStore>()(
           }
         },
 
-        updateMcp: async (name: string, config: Partial<McpDraft>) => {
+        updateMcp: async (name: string, config: Partial<McpDraft>, serverBaseUrl?: string) => {
           startConfigUpdate('Updating MCP server configuration…');
           let requiresReload = false;
           try {
             const body = buildMcpBody(config);
             const configDirectory = getConfigDirectory();
             const queryParams = configDirectory ? `?directory=${encodeURIComponent(configDirectory)}` : '';
-            const response = await fetch(`/api/config/mcp/${encodeURIComponent(name)}${queryParams}`, {
+            const response = await fetch(resolveApiUrl(`/api/config/mcp/${encodeURIComponent(name)}${queryParams}`, serverBaseUrl), {
               method: 'PATCH',
               headers: {
                 'Content-Type': 'application/json',
@@ -298,13 +299,13 @@ export const useMcpConfigStore = create<McpConfigStore>()(
           }
         },
 
-        deleteMcp: async (name: string) => {
+        deleteMcp: async (name: string, serverBaseUrl?: string) => {
           startConfigUpdate('Deleting MCP server configuration…');
           let requiresReload = false;
           try {
             const configDirectory = getConfigDirectory();
             const queryParams = configDirectory ? `?directory=${encodeURIComponent(configDirectory)}` : '';
-            const response = await fetch(`/api/config/mcp/${encodeURIComponent(name)}${queryParams}`, {
+            const response = await fetch(resolveApiUrl(`/api/config/mcp/${encodeURIComponent(name)}${queryParams}`, serverBaseUrl), {
               method: 'DELETE',
               headers: configDirectory ? { 'x-opencode-directory': configDirectory } : undefined,
             });

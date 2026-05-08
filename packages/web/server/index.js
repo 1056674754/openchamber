@@ -268,6 +268,26 @@ const CLOUDFLARE_MANAGED_REMOTE_TUNNELS_FILE_PATH = path.join(OPENCHAMBER_DATA_D
 const CLOUDFLARE_LEGACY_NAMED_TUNNELS_FILE_PATH = path.join(OPENCHAMBER_DATA_DIR, 'cloudflare-named-tunnels.json');
 const CLOUDFLARE_MANAGED_REMOTE_TUNNELS_VERSION = 1;
 
+const LAST_OPENCODE_PORT_FILE = path.join(OPENCHAMBER_DATA_DIR, 'last-opencode-port');
+
+const persistOpenCodePort = (port) => {
+  try {
+    fs.writeFileSync(LAST_OPENCODE_PORT_FILE, String(port), 'utf8');
+  } catch {
+  }
+};
+
+const readPersistedOpenCodePort = () => {
+  try {
+    if (!fs.existsSync(LAST_OPENCODE_PORT_FILE)) return null;
+    const raw = fs.readFileSync(LAST_OPENCODE_PORT_FILE, 'utf8').trim();
+    const port = parseInt(raw, 10);
+    return Number.isFinite(port) && port > 0 && port <= 65535 ? port : null;
+  } catch {
+    return null;
+  }
+};
+
 const managedTunnelConfigRuntime = createManagedTunnelConfigRuntime({
   fsPromises,
   path,
@@ -319,6 +339,7 @@ const projectDirectoryRuntime = createProjectDirectoryRuntime({
 
 const resolveDirectoryCandidate = (...args) => projectDirectoryRuntime.resolveDirectoryCandidate(...args);
 const validateDirectoryPath = (...args) => projectDirectoryRuntime.validateDirectoryPath(...args);
+const resolveRequiredExplicitProjectDirectory = (...args) => projectDirectoryRuntime.resolveRequiredExplicitProjectDirectory(...args);
 const resolveProjectDirectory = (...args) => projectDirectoryRuntime.resolveProjectDirectory(...args);
 const resolveOptionalProjectDirectory = (...args) => projectDirectoryRuntime.resolveOptionalProjectDirectory(...args);
 
@@ -702,6 +723,9 @@ const openCodeWatcherRuntime = createOpenCodeWatcherRuntime({
     void maybeSendPushForTrigger(payload);
     sessionRuntime.processOpenCodeSsePayload(payload);
   },
+  onReconnect: () => {
+    sessionRuntime.resetAllSessionActivityToIdle();
+  },
 });
 
 const processForwardedEventPayload = (payload, emitSyntheticEvent) => {
@@ -925,6 +949,8 @@ const openCodeLifecycleRuntime = createOpenCodeLifecycleRuntime({
   buildManagedOpenCodePath,
   getManagedOpenCodeShellEnvSnapshot: getLoginShellEnvSnapshot,
   getActiveSessionCount,
+  persistOpenCodePort,
+  readPersistedOpenCodePort,
 });
 
 const restartOpenCode = (...args) => openCodeLifecycleRuntime.restartOpenCode(...args);
@@ -1038,6 +1064,36 @@ const gracefulShutdownRuntime = createGracefulShutdownRuntime({
 
 const gracefulShutdown = (...args) => gracefulShutdownRuntime.gracefulShutdown(...args);
 
+function isLoopbackOrigin(origin) {
+  if (!origin || typeof origin !== 'string') return false;
+  try {
+    const { protocol, hostname } = new URL(origin);
+    if (protocol !== 'http:' && protocol !== 'https:') return false;
+    return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1' || hostname === '[::1]';
+  } catch {
+    return false;
+  }
+}
+
+function installLoopbackCors(app) {
+  app.use((req, res, next) => {
+    const origin = req.headers.origin;
+    if (isLoopbackOrigin(origin)) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Access-Control-Allow-Credentials', 'true');
+      res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', req.headers['access-control-request-headers'] || 'Content-Type, Authorization');
+      res.setHeader('Vary', 'Origin');
+    }
+    if (req.method === 'OPTIONS') {
+      res.statusCode = 204;
+      res.end();
+      return;
+    }
+    next();
+  });
+}
+
 async function main(options = {}) {
   const port = Number.isFinite(options.port) && options.port >= 0 ? Math.trunc(options.port) : DEFAULT_PORT;
   const host = typeof options.host === 'string' && options.host.length > 0 ? options.host : undefined;
@@ -1084,6 +1140,7 @@ async function main(options = {}) {
   const app = express();
   const serverStartedAt = new Date().toISOString();
   app.set('trust proxy', true);
+  installLoopbackCors(app);
   app.use(compression({
     filter: (req, res) => {
       if (shouldSkipCompression(req, res)) return false;
@@ -1179,6 +1236,7 @@ async function main(options = {}) {
     openchamberDataDir: OPENCHAMBER_DATA_DIR,
     openchamberUserConfigRoot: OPENCHAMBER_USER_CONFIG_ROOT,
     normalizeDirectoryPath,
+    resolveRequiredExplicitProjectDirectory,
     resolveProjectDirectory,
     resolveOptionalProjectDirectory,
     validateDirectoryPath,

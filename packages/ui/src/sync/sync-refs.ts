@@ -9,23 +9,29 @@ import type { OpencodeClient } from "@opencode-ai/sdk/v2/client"
 import type { ChildStoreManager } from "./child-store"
 import { getSessionMaterializationStatus } from "./materialization"
 import type { State } from "./types"
+import { getAllSyncStores } from "./multi-server-registry"
 
 let _sdk: OpencodeClient | null = null
 let _childStores: ChildStoreManager | null = null
 let _directory: string = ""
 let _registerSessionDirectory: ((sessionID: string, directory: string) => void) | null = null
+let _getSessionDirectoryFromRoutingIndex: ((sessionID: string) => string | undefined) | null = null
 
 export function setSyncRefs(
   sdk: OpencodeClient,
   childStores: ChildStoreManager,
   directory: string,
   registerSessionDirectory?: (sessionID: string, directory: string) => void,
+  getSessionDirectoryFromRoutingIndex?: (sessionID: string) => string | undefined,
 ) {
   _sdk = sdk
   _childStores = childStores
   _directory = directory
   if (registerSessionDirectory) {
     _registerSessionDirectory = registerSessionDirectory
+  }
+  if (getSessionDirectoryFromRoutingIndex) {
+    _getSessionDirectoryFromRoutingIndex = getSessionDirectoryFromRoutingIndex
   }
 }
 
@@ -50,6 +56,13 @@ export function getSyncDirectory(): string {
   return _directory
 }
 
+/** Look up a session's directory from the SSE routing index.
+ *  Survives child-store eviction since the routing index is retained
+ *  for the full SyncProvider lifecycle. */
+export function getSessionDirectoryFromRoutingIndex(sessionID: string): string | undefined {
+  return _getSessionDirectoryFromRoutingIndex?.(sessionID)
+}
+
 /** Read current directory's child store state. Returns undefined if not bootstrapped. */
 export function getDirectoryState(directory?: string): State | undefined {
   const stores = _childStores
@@ -66,16 +79,26 @@ export function getSyncSessions(directory?: string) {
 
 /** Read sessions across all initialized child stores */
 export function getAllSyncSessions() {
-  const stores = _childStores
-  if (!stores) return []
-
   const deduped = new Map<string, State["session"][number]>()
-  for (const store of stores.children.values()) {
-    for (const session of store.getState().session) {
-      if (!session?.id) continue
-      deduped.set(session.id, session)
+
+  if (_childStores) {
+    for (const store of _childStores.children.values()) {
+      for (const session of store.getState().session) {
+        if (!session?.id) continue
+        deduped.set(session.id, session)
+      }
     }
   }
+
+  for (const entry of getAllSyncStores()) {
+    for (const store of entry.childStores.children.values()) {
+      for (const session of store.getState().session) {
+        if (!session?.id || deduped.has(session.id)) continue
+        deduped.set(session.id, session)
+      }
+    }
+  }
+
   return Array.from(deduped.values())
 }
 

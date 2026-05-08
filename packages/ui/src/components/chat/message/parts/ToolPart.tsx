@@ -13,10 +13,10 @@ import { useOptionalThemeSystem } from '@/contexts/useThemeSystem';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useDirectorySync, useSessionMessageRecords, useEnsureSessionMessages } from '@/sync/sync-context';
+import { resolveSdkForDirectory } from '@/sync/session-actions';
 import { getSyncChildStores } from '@/sync/sync-refs';
 import { useUIStore } from '@/stores/useUIStore';
 import { useSessionActivity } from '@/hooks/useSessionActivity';
-import { opencodeClient } from '@/lib/opencode/client';
 import { sessionEvents } from '@/lib/sessionEvents';
 import { ScrollShadow } from '@/components/ui/ScrollShadow';
 import { Text } from '@/components/ui/text';
@@ -2195,7 +2195,7 @@ const ToolPart: React.FC<ToolPartProps> = ({
 
         const runFinalFetch = async () => {
             try {
-                const scopedClient = opencodeClient.getScopedSdkClient(currentDirectory);
+                const scopedClient = resolveSdkForDirectory(currentDirectory);
                 const response = await scopedClient.session.messages({
                     sessionID: capturedSessionId,
                     limit: TASK_TOOL_INITIAL_FETCH_LIMIT,
@@ -2335,7 +2335,7 @@ const ToolPart: React.FC<ToolPartProps> = ({
 
         const fetchSessionMessages = async (isInitialFetch: boolean) => {
             try {
-                const scopedClient = opencodeClient.getScopedSdkClient(currentDirectory);
+                const scopedClient = resolveSdkForDirectory(currentDirectory);
                 const response = await scopedClient.session.messages({
                     sessionID: taskSessionId,
                     limit: resolveFetchLimit(isInitialFetch),

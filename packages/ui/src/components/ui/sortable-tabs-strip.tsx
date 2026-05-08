@@ -7,6 +7,9 @@ import {
   useSensor,
   useSensors,
   type DragEndEvent,
+  type DragMoveEvent,
+  type DragCancelEvent,
+  type DragStartEvent,
   type Modifier,
 } from '@dnd-kit/core';
 import {
@@ -37,6 +40,10 @@ type SortableTabsStripProps = {
   onSelect: (id: string) => void;
   onClose?: (id: string) => void;
   onReorder?: (activeId: string, overId: string) => void;
+  onDragStart?: (id: string) => void;
+  onDragMove?: (id: string, event: DragMoveEvent) => void;
+  onDragCancel?: (id: string) => void;
+  onDragEnd?: (id: string, event: DragEndEvent) => void;
   layoutMode?: 'scrollable' | 'fit';
   variant?: 'default' | 'active-pill' | 'animated';
   activePillInsetClassName?: string;
@@ -90,6 +97,10 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
   onSelect,
   onClose,
   onReorder,
+  onDragStart,
+  onDragMove,
+  onDragCancel,
+  onDragEnd,
   layoutMode = 'scrollable',
   variant = 'default',
   activePillInsetClassName,
@@ -120,6 +131,7 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
   const reorderEnabled = typeof onReorder === 'function';
   const Wrapper = reorderEnabled ? SortableTabWrapper : StaticTabWrapper;
   const tabRefs = React.useRef<Map<string, HTMLElement>>(new Map());
+  const activeDragIDRef = React.useRef<string | null>(null);
   const [pillRect, setPillRect] = React.useState<{ left: number; top: number; width: number; height: number } | null>(null);
 
 
@@ -286,7 +298,30 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
     };
   }, [activeId, isScrollable, items.length, updateOverflow]);
 
+  const handleDragStart = React.useCallback((event: DragStartEvent) => {
+    const id = String(event.active.id);
+    activeDragIDRef.current = id;
+    onDragStart?.(id);
+  }, [onDragStart]);
+
+  const handleDragMove = React.useCallback((event: DragMoveEvent) => {
+    const id = activeDragIDRef.current;
+    if (!id) {
+      return;
+    }
+    onDragMove?.(id, event);
+  }, [onDragMove]);
+
+  const handleDragCancel = React.useCallback((event: DragCancelEvent) => {
+    const id = String(event.active.id);
+    activeDragIDRef.current = null;
+    onDragCancel?.(id);
+  }, [onDragCancel]);
+
   const handleDragEnd = React.useCallback((event: DragEndEvent) => {
+    const activeID = String(event.active.id);
+    activeDragIDRef.current = null;
+    onDragEnd?.(activeID, event);
     if (!onReorder) {
       return;
     }
@@ -297,7 +332,7 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
     }
 
     onReorder(String(active.id), String(over.id));
-  }, [onReorder]);
+  }, [onDragEnd, onReorder]);
 
   const list = (
     <div className={cn('relative flex h-full min-w-0 flex-1', className)}>
@@ -543,7 +578,10 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
     <DndContext
       sensors={sensors}
       collisionDetection={closestCenter}
+      onDragStart={handleDragStart}
+      onDragMove={handleDragMove}
       onDragEnd={handleDragEnd}
+      onDragCancel={handleDragCancel}
       modifiers={[restrictToXAxis]}
     >
       <SortableContext items={itemIDs} strategy={horizontalListSortingStrategy}>

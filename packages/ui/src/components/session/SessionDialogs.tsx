@@ -13,6 +13,7 @@ import {
 import { RiCheckboxBlankLine, RiCheckboxLine, RiDeleteBinLine, RiGitBranchLine } from '@remixicon/react';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { DirectoryExplorerDialog } from './DirectoryExplorerDialog';
+import { RemoteDirectoryExplorerDialog } from './RemoteDirectoryExplorerDialog';
 import { cn, formatPathForDisplay } from '@/lib/utils';
 import type { Session } from '@opencode-ai/sdk/v2';
 import type { WorktreeMetadata } from '@/types/worktree';
@@ -51,6 +52,7 @@ type DeleteDialogState = {
 export const SessionDialogs: React.FC = () => {
     const { t } = useI18n();
     const [isDirectoryDialogOpen, setIsDirectoryDialogOpen] = React.useState(false);
+    const [isRemoteDirectoryDialogOpen, setIsRemoteDirectoryDialogOpen] = React.useState(false);
     const [hasShownInitialDirectoryPrompt, setHasShownInitialDirectoryPrompt] = React.useState(false);
     const [deleteDialog, setDeleteDialog] = React.useState<DeleteDialogState | null>(null);
     const [deleteDialogSummaries, setDeleteDialogSummaries] = React.useState<Array<{ session: Session; metadata: WorktreeMetadata }>>([]);
@@ -204,6 +206,12 @@ export const SessionDialogs: React.FC = () => {
     React.useEffect(() => {
         return sessionEvents.onDirectoryRequest(() => {
             setIsDirectoryDialogOpen(true);
+        });
+    }, []);
+
+    React.useEffect(() => {
+        return sessionEvents.onRemoteDirectoryRequest(() => {
+            setIsRemoteDirectoryDialogOpen(true);
         });
     }, []);
 
@@ -799,6 +807,11 @@ export const SessionDialogs: React.FC = () => {
             <DirectoryExplorerDialog
                 open={isDirectoryDialogOpen}
                 onOpenChange={setIsDirectoryDialogOpen}
+            />
+
+            <RemoteDirectoryExplorerDialog
+                open={isRemoteDirectoryDialogOpen}
+                onOpenChange={setIsRemoteDirectoryDialogOpen}
             />
         </>
     );

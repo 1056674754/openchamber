@@ -105,19 +105,21 @@ export type Turn = Pick<TurnRecord, 'turnId' | 'userMessage' | 'assistantMessage
 
 export interface TurnGroupingContext {
     turnId: string;
-    activityOwnerMessageId?: string;
+    activityOwnerMessageId?: string | null;
     isFirstAssistantInTurn: boolean;
     isLastAssistantInTurn: boolean;
+    isWorking: boolean;
+    hasTools: boolean;
+    hasReasoning: boolean;
     summaryBody?: string;
     activityParts?: TurnActivityRecord[];
     activityGroupSegments?: TurnActivityGroup[];
     headerMessageId?: string;
-    hasTools: boolean;
-    hasReasoning: boolean;
     diffStats?: TurnDiffStats;
     userMessageCreatedAt?: number;
     userMessageVariant?: string;
-    isWorking: boolean;
     isGroupExpanded?: boolean;
     toggleGroup?: () => void;
+    absorbedToolPartIds?: Set<string>;
+    extraTrailingTools?: Part[];
 }

@@ -1,7 +1,7 @@
 import React from 'react';
 import type { Session } from '@opencode-ai/sdk/v2';
-import { opencodeClient } from '@/lib/opencode/client';
 import { ensureGlobalSessionsLoaded, useGlobalSessionsStore, resolveGlobalSessionDirectory } from '@/stores/useGlobalSessionsStore';
+import { resolveSdkForDirectory } from '@/sync/session-actions';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { getAllSyncSessions } from '@/sync/sync-refs';
 import { useUIStore } from '@/stores/useUIStore';
@@ -152,7 +152,7 @@ export const useSessionAutoCleanup = (enabledOrOptions?: boolean | CleanupOption
             continue;
           }
 
-          const scopedSdk = opencodeClient.getScopedSdkClient(directory);
+          const scopedSdk = resolveSdkForDirectory(directory);
 
           try {
             if (sessionRetentionAction === 'archive') {

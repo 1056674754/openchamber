@@ -32,6 +32,15 @@ import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { opencodeClient } from '@/lib/opencode/client';
 import { SyncProvider, useSessions } from '@/sync/sync-context';
+import { MultiServerSyncLayer } from '@/sync/MultiServerSyncLayer';
+import { RemoteProjectDiscovery } from '@/sync/RemoteProjectDiscovery';
+import { useDesktopSshStore } from '@/stores/useDesktopSshStore';
+import { useSync } from '@/sync/use-sync';
+import { setOptimisticRefs } from '@/sync/session-actions';
+import { BootstrapDebug } from '@/components/debug/BootstrapDebug';
+import { useFontPreferences } from '@/hooks/useFontPreferences';
+import { CODE_FONT_OPTION_MAP, DEFAULT_MONO_FONT, DEFAULT_UI_FONT, UI_FONT_OPTION_MAP } from '@/lib/fontOptions';
+import { loadMonoFont, loadUiFont } from '@/lib/fontLoader';
 import { ConfigUpdateOverlay } from '@/components/ui/ConfigUpdateOverlay';
 import { AboutDialog } from '@/components/ui/AboutDialog';
 import { RuntimeAPIProvider } from '@/contexts/RuntimeAPIProvider';
@@ -185,6 +194,11 @@ function App({ apis }: AppProps) {
   const wideChatLayoutEnabled = useUIStore((state) => state.wideChatLayoutEnabled);
   const mobileKeyboardMode = useUIStore((state) => state.mobileKeyboardMode);
   const isDesktopRuntime = React.useMemo(() => isDesktopShell(), []);
+
+  React.useEffect(() => {
+    if (!isDesktopRuntime) return;
+    void useDesktopSshStore.getState().load();
+  }, [isDesktopRuntime]);
   const setPlanModeEnabled = useFeatureFlagsStore((state) => state.setPlanModeEnabled);
   const [bootInjectionStatus, setBootInjectionStatus] = React.useState<BootInjectionStatus>(() => {
     return getBootInjectionStatus();
@@ -790,6 +804,9 @@ function App({ apis }: AppProps) {
   return (
     <ErrorBoundary>
       <SyncProvider sdk={opencodeClient.getSdkClient()} directory={currentDirectory || ''}>
+        <MultiServerSyncLayer />
+        <RemoteProjectDiscovery />
+        <BootstrapDebug />
         <RuntimeAPIProvider apis={apis}>
           <FireworksProvider>
             <VoiceProvider>

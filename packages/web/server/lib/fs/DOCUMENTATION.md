@@ -22,13 +22,13 @@ Own filesystem API behavior for the web server runtime, including workspace-boun
     - `GET /api/fs/exec/:jobId`
     - `GET /api/fs/list`
   - Owns exec job queue state (`execJobs`) and lifecycle/TTL pruning.
-  - Enforces workspace boundary checks with active project + worktree fallback support.
+  - Enforces workspace boundary checks with an explicit request directory + worktree fallback support.
 - `createFsSearchRuntime({ fsPromises, path, spawn, resolveGitBinaryForSpawn })` from `search.js`
   - Returns `{ searchFilesystemFiles(rootPath, options) }`.
   - Supports fuzzy matching, hidden-file handling, and optional `git check-ignore` filtering.
 
 ## Composition contract with `index.js`
-- `index.js` provides composition-time dependencies only (platform primitives + callbacks such as `resolveProjectDirectory`, `normalizeDirectoryPath`, and `buildAugmentedPath`).
+- `index.js` provides composition-time dependencies only (platform primitives + callbacks such as `resolveRequiredExplicitProjectDirectory`, `normalizeDirectoryPath`, and `buildAugmentedPath`).
 - `index.js` no longer owns FS route handlers or FS exec job state.
 
 ## Notes for contributors

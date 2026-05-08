@@ -30,6 +30,7 @@ import type {
   DiscoveredGitCredential,
   MergeConflictDetails,
 } from './api/types';
+import { resolveApiUrl } from '@/sync/session-actions';
 
 declare global {
   interface Window {
@@ -53,6 +54,11 @@ const resolveBaseOrigin = (): string => {
   return window.location.origin;
 };
 
+const resolveBaseOriginForDirectory = (directory: string | null | undefined): string | undefined => {
+  if (!directory) return undefined;
+  return resolveApiUrl(directory);
+};
+
 const API_BASE = '/api/git';
 const GIT_STATUS_CACHE_TTL_MS = 1200;
 const GIT_REPO_CHECK_CACHE_TTL_MS = 5000;
@@ -67,9 +73,11 @@ const normalizeDirectoryKey = (directory: string): string => directory.trim();
 function buildUrl(
   path: string,
   directory: string | null | undefined,
-  params?: Record<string, string | number | boolean | undefined>
+  params?: Record<string, string | number | boolean | undefined>,
+  baseUrl?: string,
 ): string {
-  const url = new URL(path, resolveBaseOrigin());
+  const resolvedBase = baseUrl || resolveBaseOriginForDirectory(directory) || resolveBaseOrigin();
+  const url = new URL(path, resolvedBase);
   if (directory) {
     url.searchParams.set('directory', directory);
   }
@@ -84,8 +92,8 @@ function buildUrl(
   return url.toString();
 }
 
-export async function checkIsGitRepository(directory: string): Promise<boolean> {
-  const key = normalizeDirectoryKey(directory);
+export async function checkIsGitRepository(directory: string, baseUrl?: string): Promise<boolean> {
+  const key = baseUrl ? `${normalizeDirectoryKey(directory)}::${baseUrl}` : normalizeDirectoryKey(directory);
   const now = Date.now();
   const cached = gitRepoCache.get(key);
   if (cached && cached.expiresAt > now) {
@@ -98,7 +106,7 @@ export async function checkIsGitRepository(directory: string): Promise<boolean> 
   }
 
   const task = (async () => {
-    const response = await fetch(buildUrl(`${API_BASE}/check`, directory));
+    const response = await fetch(buildUrl(`${API_BASE}/check`, directory, undefined, baseUrl));
     if (!response.ok) {
       throw new Error(`Failed to check git repository: ${response.statusText}`);
     }
@@ -121,9 +129,10 @@ export async function checkIsGitRepository(directory: string): Promise<boolean> 
   }
 }
 
-export async function getGitStatus(directory: string, options?: { mode?: 'light' }): Promise<GitStatus> {
+export async function getGitStatus(directory: string, options?: { mode?: 'light' }, baseUrl?: string): Promise<GitStatus> {
   const mode = options?.mode;
-  const key = mode === 'light' ? `${normalizeDirectoryKey(directory)}::light` : normalizeDirectoryKey(directory);
+  const baseKey = baseUrl ? `${normalizeDirectoryKey(directory)}::${baseUrl}` : normalizeDirectoryKey(directory);
+  const key = mode === 'light' ? `${baseKey}::light` : baseKey;
   const now = Date.now();
   const cached = gitStatusCache.get(key);
   if (cached && cached.expiresAt > now) {
@@ -136,7 +145,7 @@ export async function getGitStatus(directory: string, options?: { mode?: 'light'
   }
 
   const task = (async () => {
-    const response = await fetch(buildUrl(`${API_BASE}/status`, directory, mode ? { mode } : undefined));
+    const response = await fetch(buildUrl(`${API_BASE}/status`, directory, mode ? { mode } : undefined, baseUrl));
     if (!response.ok) {
       throw new Error(`Failed to get git status: ${response.statusText}`);
     }
@@ -230,8 +239,8 @@ export async function isLinkedWorktree(directory: string): Promise<boolean> {
   return Boolean(data.linked);
 }
 
-export async function getGitBranches(directory: string): Promise<GitBranch> {
-  const response = await fetch(buildUrl(`${API_BASE}/branches`, directory));
+export async function getGitBranches(directory: string, baseUrl?: string): Promise<GitBranch> {
+  const response = await fetch(buildUrl(`${API_BASE}/branches`, directory, undefined, baseUrl));
   if (!response.ok) {
     throw new Error(`Failed to get branches: ${response.statusText}`);
   }
@@ -403,8 +412,8 @@ export async function generatePullRequestDescription(
   return { title, body };
 }
 
-export async function listGitWorktrees(directory: string): Promise<GitWorktreeInfo[]> {
-  const response = await fetch(buildUrl(`${API_BASE}/worktrees`, directory));
+export async function listGitWorktrees(directory: string, baseUrl?: string): Promise<GitWorktreeInfo[]> {
+  const response = await fetch(buildUrl(`${API_BASE}/worktrees`, directory, undefined, baseUrl));
   if (!response.ok) {
     const error = await response.json().catch(() => ({ error: response.statusText }));
     throw new Error(error.error || 'Failed to list worktrees');

@@ -3,6 +3,7 @@ import { ModelSelector } from '@/components/sections/agents/ModelSelector';
 import { AgentSelector } from '@/components/sections/commands/AgentSelector';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
+import { NumberInput } from '@/components/ui/number-input';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
@@ -33,16 +34,43 @@ export const DefaultsSettings: React.FC = () => {
   const setSettingsDefaultAgent = useConfigStore((state) => state.setSettingsDefaultAgent);
   const setSettingsDefaultFileViewerPreview = useConfigStore((state) => state.setSettingsDefaultFileViewerPreview);
   const settingsDefaultFileViewerPreview = useConfigStore((state) => state.settingsDefaultFileViewerPreview);
+  const configDefaultModel = useConfigStore((state) => state.settingsDefaultModel);
+  const configDefaultVariant = useConfigStore((state) => state.settingsDefaultVariant);
+  const configDefaultAgent = useConfigStore((state) => state.settingsDefaultAgent);
   const showDeletionDialog = useUIStore((state) => state.showDeletionDialog);
   const setShowDeletionDialog = useUIStore((state) => state.setShowDeletionDialog);
+  const sessionSortMode = useUIStore((state) => state.sessionSortMode);
+  const setSessionSortMode = useUIStore((state) => state.setSessionSortMode);
+  const sessionGroupMinVisible = useUIStore((state) => state.sessionGroupMinVisible);
+  const setSessionGroupMinVisible = useUIStore((state) => state.setSessionGroupMinVisible);
+  const sessionGroupRecentHours = useUIStore((state) => state.sessionGroupRecentHours);
+  const setSessionGroupRecentHours = useUIStore((state) => state.setSessionGroupRecentHours);
   const providers = useConfigStore((state) => state.providers);
 
-  const [defaultModel, setDefaultModel] = React.useState<string | undefined>();
-  const [defaultVariant, setDefaultVariant] = React.useState<string | undefined>();
-  const [defaultAgent, setDefaultAgent] = React.useState<string | undefined>();
-  const [isLoading, setIsLoading] = React.useState(true);
+  const [defaultModel, setDefaultModel] = React.useState<string | undefined>(configDefaultModel);
+  const [defaultVariant, setDefaultVariant] = React.useState<string | undefined>(configDefaultVariant);
+  const [defaultAgent, setDefaultAgent] = React.useState<string | undefined>(configDefaultAgent);
+  const [isLoading, setIsLoading] = React.useState(!configDefaultModel && !configDefaultAgent);
 
   const parsedModel = React.useMemo(() => getDisplayModel(defaultModel), [defaultModel]);
+
+  React.useEffect(() => {
+    if (configDefaultModel && !defaultModel) {
+      setDefaultModel(configDefaultModel);
+    }
+  }, [configDefaultModel, defaultModel]);
+
+  React.useEffect(() => {
+    if (configDefaultAgent && !defaultAgent) {
+      setDefaultAgent(configDefaultAgent);
+    }
+  }, [configDefaultAgent, defaultAgent]);
+
+  React.useEffect(() => {
+    if (configDefaultVariant) {
+      setDefaultVariant(configDefaultVariant);
+    }
+  }, [configDefaultVariant]);
 
   React.useEffect(() => {
     const loadSettings = async () => {
@@ -292,6 +320,67 @@ export const DefaultsSettings: React.FC = () => {
             <AgentSelector agentName={defaultAgent || ''} onChange={handleAgentChange} />
           </div>
         </div>
+
+        <div className={cn('flex flex-col gap-2 py-1 sm:flex-row sm:items-center sm:gap-8')}>
+          <div className="flex min-w-0 flex-col sm:w-56 shrink-0">
+            <span className="typography-ui-label text-foreground">{t('settings.openchamber.defaults.field.sessionSortMode')}</span>
+          </div>
+          <div className="flex flex-wrap items-center gap-1">
+            {(['updated-desc', 'created-desc'] as const).map((mode) => (
+              <button
+                key={mode}
+                type="button"
+                className={cn(
+                  'flex items-center gap-1 px-2.5 py-1.5 rounded-md text-xs whitespace-nowrap transition-colors border !min-h-0 leading-none select-none !font-normal',
+                  sessionSortMode === mode
+                    ? 'border-[var(--primary-base)]/60 text-[var(--primary-base)]/80 bg-[var(--primary-base)]/5'
+                    : 'border-[var(--interactive-border)] text-[var(--surface-foreground)] bg-[var(--surface-elevated)] hover:bg-[var(--interactive-hover)]'
+              )}
+              onClick={() => { setSessionSortMode(mode); updateDesktopSettings({ sessionSortMode: mode }).catch(console.warn); }}
+            >
+              {t(`settings.openchamber.defaults.field.sessionSortMode${mode === 'updated-desc' ? 'Updated' : 'Created'}`)}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className={cn('flex flex-col gap-2 py-1 sm:flex-row sm:items-center sm:gap-8')}>
+        <div className="flex min-w-0 flex-col sm:w-56 shrink-0">
+          <span className="typography-ui-label text-foreground">{t('settings.openchamber.defaults.field.sessionGroupMinVisible')}</span>
+          <span className="typography-meta text-muted-foreground">{t('settings.openchamber.defaults.field.sessionGroupMinVisibleDesc')}</span>
+        </div>
+        <div className="flex items-center gap-2 sm:w-fit">
+          <NumberInput
+            value={sessionGroupMinVisible}
+            onValueChange={(v) => {
+              setSessionGroupMinVisible(v);
+              updateDesktopSettings({ sessionGroupMinVisible: v }).catch(console.warn);
+            }}
+            min={1}
+            max={50}
+            step={1}
+          />
+        </div>
+      </div>
+
+      <div className={cn('flex flex-col gap-2 py-1 sm:flex-row sm:items-center sm:gap-8')}>
+        <div className="flex min-w-0 flex-col sm:w-56 shrink-0">
+          <span className="typography-ui-label text-foreground">{t('settings.openchamber.defaults.field.sessionGroupRecentHours')}</span>
+          <span className="typography-meta text-muted-foreground">{t('settings.openchamber.defaults.field.sessionGroupRecentHoursDesc')}</span>
+        </div>
+        <div className="flex items-center gap-2 sm:w-fit">
+          <NumberInput
+            value={sessionGroupRecentHours}
+            onValueChange={(v) => {
+              setSessionGroupRecentHours(v);
+              updateDesktopSettings({ sessionGroupRecentHours: v }).catch(console.warn);
+            }}
+            min={1}
+            max={720}
+            step={1}
+          />
+        </div>
+      </div>
 
         <div
           className="group flex cursor-pointer items-center gap-2 py-1"

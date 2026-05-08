@@ -36,7 +36,9 @@ import {
 import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui';
 import { isTauriShell, isDesktopShell } from '@/lib/desktop';
+import { serverRegistry, DEFAULT_SERVER_ID } from '@/lib/opencode/server-registry';
 import { useUIStore } from '@/stores/useUIStore';
+import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useI18n } from '@/lib/i18n';
 import {
   desktopHostProbe,
@@ -54,6 +56,7 @@ import {
   desktopSshDisconnect,
   desktopSshInstancesGet,
   desktopSshStatus,
+  resolveInstanceLabel,
   type DesktopSshInstanceStatus,
 } from '@/lib/desktopSsh';
 
@@ -227,7 +230,21 @@ const buildLocalHost = (): DesktopHost => ({
   url: getLocalOrigin(),
 });
 
-const resolveCurrentHost = (hosts: DesktopHost[]) => {
+const resolveCurrentHost = (hosts: DesktopHost[], activeSessionId?: string | null): DesktopHost => {
+  // Priority 1: If we have an active session, check which server it belongs to
+  if (activeSessionId) {
+    const serverId = serverRegistry.getServerForSession(activeSessionId);
+    if (serverId && serverId !== DEFAULT_SERVER_ID) {
+      const connection = serverRegistry.get(serverId);
+      if (connection) {
+        const match = hosts.find(h => locationMatchesHost(connection.config.baseUrl, h.url));
+        if (match) return { id: match.id, label: match.label, url: normalizeHostUrl(match.url) || match.url };
+        return { id: connection.config.id, label: connection.config.label, url: connection.config.baseUrl };
+      }
+    }
+  }
+
+  // Priority 2: Existing window.location logic
   const currentHref = typeof window === 'undefined' ? '' : window.location.href;
   const localOrigin = getLocalOrigin();
   const normalizedLocal = normalizeHostUrl(localOrigin) || localOrigin;
@@ -313,7 +330,9 @@ export function DesktopHostSwitcherDialog({
     return [local, ...normalizedRemote];
   }, [configHosts]);
 
-  const current = React.useMemo(() => resolveCurrentHost(allHosts), [allHosts]);
+  const currentSessionId = useSessionUIStore((s) => s.currentSessionId);
+
+  const current = React.useMemo(() => resolveCurrentHost(allHosts, currentSessionId), [allHosts, currentSessionId]);
   const currentDefaultLabel = React.useMemo(() => {
     const id = defaultHostId || LOCAL_HOST_ID;
     return allHosts.find((h) => h.id === id)?.label || t('desktopHostSwitcher.instance.local');
@@ -328,6 +347,18 @@ export function DesktopHostSwitcherDialog({
       await desktopHostsSet({ hosts: remote, defaultHostId: nextDefaultHostId });
       setConfigHosts(remote);
       setDefaultHostId(nextDefaultHostId);
+      for (const host of remote) {
+        const url = normalizeHostUrl(host.url);
+        if (url) {
+          serverRegistry.register({ id: host.id, label: host.label, baseUrl: url });
+        }
+      }
+      const registeredIds = new Set(remote.map((h) => h.id));
+      for (const conn of serverRegistry.getAll()) {
+        if (conn.config.id !== 'default' && !registeredIds.has(conn.config.id)) {
+          serverRegistry.unregister(conn.config.id);
+        }
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : t('desktopHostSwitcher.error.failedToSave'));
     } finally {
@@ -359,6 +390,12 @@ export function DesktopHostSwitcherDialog({
       setDefaultHostId(cfg.defaultHostId ?? null);
       setSshHostIds(nextSshHostIds);
       setSshStatusesById(sshStatusMap);
+      for (const host of cfg.hosts || []) {
+        const url = normalizeHostUrl(host.url);
+        if (url) {
+          serverRegistry.register({ id: host.id, label: host.label, baseUrl: url });
+        }
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : t('desktopHostSwitcher.error.failedToLoad'));
       setConfigHosts([]);
@@ -462,9 +499,9 @@ export function DesktopHostSwitcherDialog({
 
       const existingUrl = normalizeHostUrl(existingStatus?.localUrl || host.url || '');
       if (existingStatus?.phase === 'ready' && existingUrl) {
-        const target = toNavigationUrl(existingUrl);
+        serverRegistry.register({ id: host.id, label: host.label, baseUrl: existingUrl });
         onHostSwitched?.();
-        window.location.assign(target);
+        onOpenChange(false);
         return;
       }
 
@@ -502,9 +539,10 @@ export function DesktopHostSwitcherDialog({
         }
 
         const targetOrigin = normalizeHostUrl(readyStatus.localUrl || '') || origin;
-        const target = toNavigationUrl(targetOrigin);
+        serverRegistry.register({ id: host.id, label: host.label, baseUrl: targetOrigin });
+        setSshSwitchModal((prev) => ({ ...prev, open: false }));
         onHostSwitched?.();
-        window.location.assign(target);
+        onOpenChange(false);
         return;
       } catch (err) {
         if (switchToken !== sshSwitchTokenRef.current) {
@@ -547,14 +585,19 @@ export function DesktopHostSwitcherDialog({
     }
 
     const target = toNavigationUrl(origin);
-    onHostSwitched?.();
+    if (host.id !== LOCAL_HOST_ID) {
+      serverRegistry.register({ id: host.id, label: host.label, baseUrl: origin });
+      onHostSwitched?.();
+      onOpenChange(false);
+      return;
+    }
 
     try {
       window.location.assign(target);
     } catch {
       window.location.href = target;
     }
-  }, [onHostSwitched, sshHostIds, sshStatusesById, t]);
+  }, [onHostSwitched, onOpenChange, sshHostIds, sshStatusesById, t]);
 
   const beginEdit = React.useCallback((host: DesktopHost) => {
     setEditingId(host.id);
@@ -1166,6 +1209,7 @@ type DesktopHostSwitcherButtonProps = {
 
 export function DesktopHostSwitcherButton({ headerIconButtonClass }: DesktopHostSwitcherButtonProps) {
   const { t } = useI18n();
+  const currentSessionId = useSessionUIStore((s) => s.currentSessionId);
   const [open, setOpen] = React.useState(false);
   const [label, setLabel] = React.useState('Local');
   const [status, setStatus] = React.useState<HostProbeResult['status'] | null>(null);
@@ -1207,7 +1251,8 @@ export function DesktopHostSwitcherButton({ headerIconButtonClass }: DesktopHost
       if (!localUrl) {
         throw new Error('Connected but missing forwarded URL');
       }
-      window.location.assign(toNavigationUrl(localUrl));
+      serverRegistry.register({ id: hostId, label: hostLabel, baseUrl: localUrl });
+      setStartupSshModal({ open: false, hostId: null, hostLabel: '', error: null, connecting: false });
       return true;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -1255,7 +1300,7 @@ export function DesktopHostSwitcherButton({ headerIconButtonClass }: DesktopHost
         const cfg = await desktopHostsGet();
         const local = buildLocalHost();
         const all = [local, ...(cfg.hosts || [])];
-        const current = resolveCurrentHost(all);
+        const current = resolveCurrentHost(all, currentSessionId);
 
         if (
           !attemptedDefaultSshConnectRef.current &&
@@ -1267,9 +1312,7 @@ export function DesktopHostSwitcherButton({ headerIconButtonClass }: DesktopHost
           const defaultSsh = sshCfg.instances.find((instance) => instance.id === cfg.defaultHostId);
           if (defaultSsh) {
             attemptedDefaultSshConnectRef.current = true;
-            const hostLabel = redactSensitiveUrl(
-              defaultSsh.nickname?.trim() || defaultSsh.sshParsed?.destination || defaultSsh.id,
-            );
+            const hostLabel = redactSensitiveUrl(resolveInstanceLabel(defaultSsh));
             const connected = await connectDefaultSshInstance(cfg.defaultHostId, hostLabel);
             if (connected || cancelled) {
               return;
@@ -1307,7 +1350,7 @@ export function DesktopHostSwitcherButton({ headerIconButtonClass }: DesktopHost
       cancelled = true;
       window.clearInterval(interval);
     };
-  }, [connectDefaultSshInstance, t]);
+  }, [connectDefaultSshInstance, currentSessionId, t]);
 
   if (!isDesktopShell()) {
     return null;

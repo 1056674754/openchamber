@@ -40,6 +40,7 @@ interface ProjectsStore {
   activeProjectId: string | null;
 
   addProject: (path: string, options?: { label?: string; id?: string }) => ProjectEntry | null;
+  ensureRemoteProject: (path: string, serverId: string, label?: string) => ProjectEntry | null;
   removeProject: (id: string) => void;
   setActiveProject: (id: string) => void;
   setActiveProjectIdOnly: (id: string) => void;
@@ -49,9 +50,11 @@ interface ProjectsStore {
   removeProjectIcon: (id: string) => Promise<{ ok: boolean; error?: string }>;
   discoverProjectIcon: (id: string, options?: { force?: boolean }) => Promise<{ ok: boolean; skipped?: boolean; reason?: string; error?: string }>;
   reorderProjects: (fromIndex: number, toIndex: number) => void;
+  toggleProjectPin: (id: string) => void;
   validateProjectPath: (path: string) => ProjectPathValidationResult;
   synchronizeFromSettings: (settings: DesktopSettings) => void;
   getActiveProject: () => ProjectEntry | null;
+  markProjectAvailability: (id: string, available: boolean) => void;
 }
 
 const safeStorage = getSafeStorage();
@@ -174,7 +177,7 @@ const sanitizeProjects = (value: unknown): ProjectEntry[] => {
 
   const result: ProjectEntry[] = [];
   const seenIds = new Set<string>();
-  const seenPaths = new Set<string>();
+  const seenKeys = new Set<string>();
 
   for (const entry of value) {
     if (!entry || typeof entry !== 'object') continue;
@@ -186,12 +189,18 @@ const sanitizeProjects = (value: unknown): ProjectEntry[] => {
     const normalizedPath = normalizeProjectPath(rawPath);
     if (!normalizedPath) continue;
 
-    const id = createProjectIdFromPath(normalizedPath);
+    const hasServerId = typeof candidate.serverId === 'string' && candidate.serverId.trim().length > 0;
+    const serverId = hasServerId ? (candidate.serverId as string).trim() : undefined;
+
+    const id = serverId
+      ? createProjectIdFromPath(`${serverId}:${normalizedPath}`)
+      : createProjectIdFromPath(normalizedPath);
     if (!id) continue;
 
-    if (seenIds.has(id) || seenPaths.has(normalizedPath)) continue;
+    const dedupKey = `${serverId ?? ''}:${normalizedPath}`;
+    if (seenIds.has(id) || seenKeys.has(dedupKey)) continue;
     seenIds.add(id);
-    seenPaths.add(normalizedPath);
+    seenKeys.add(dedupKey);
 
     const project: ProjectEntry = {
       id,
@@ -231,6 +240,15 @@ const sanitizeProjects = (value: unknown): ProjectEntry[] => {
     }
     if (typeof candidate.sidebarCollapsed === 'boolean') {
       project.sidebarCollapsed = candidate.sidebarCollapsed;
+    }
+    if (candidate.pinned === true) {
+      project.pinned = true;
+    }
+    if (typeof candidate.serverId === 'string' && candidate.serverId.trim().length > 0) {
+      project.serverId = candidate.serverId.trim();
+    }
+    if (candidate.unavailable === true) {
+      project.unavailable = true;
     }
     result.push(project);
   }
@@ -328,9 +346,17 @@ const getVSCodeWorkspaceProject = (): { projects: ProjectEntry[]; activeProjectI
 const vscodeWorkspace = getVSCodeWorkspaceProject();
 const effectiveInitialProjects = vscodeWorkspace?.projects ?? initialProjects;
 const persistedInitialActiveProjectId = vscodeWorkspace?.activeProjectId ?? readPersistedActiveProjectId();
-const initialActiveProjectId = effectiveInitialProjects.some((project) => project.id === persistedInitialActiveProjectId)
-  ? persistedInitialActiveProjectId
-  : effectiveInitialProjects[0]?.id ?? null;
+let initialActiveProjectId: string | null = null;
+if (persistedInitialActiveProjectId) {
+  if (effectiveInitialProjects.some((project) => project.id === persistedInitialActiveProjectId)) {
+    initialActiveProjectId = persistedInitialActiveProjectId;
+  } else {
+    initialActiveProjectId = effectiveInitialProjects[0]?.id ?? null;
+  }
+}
+if (!initialActiveProjectId) {
+  initialActiveProjectId = effectiveInitialProjects[0]?.id ?? null;
+}
 
 if (vscodeWorkspace) {
   cacheProjects(effectiveInitialProjects, initialActiveProjectId);
@@ -395,6 +421,31 @@ export const useProjectsStore = create<ProjectsStore>()(
       return entry;
     },
 
+    ensureRemoteProject: (path: string, serverId: string, label?: string) => {
+      const normalizedPath = path.replace(/\\/g, '/').replace(/\/+$/, '') || '/';
+      const id = createProjectIdFromPath(`${serverId}:${normalizedPath}`);
+      if (!id) return null;
+
+      const existing = get().projects.find((p) => p.id === id);
+      if (existing) return existing;
+
+      const entry: ProjectEntry = {
+        id,
+        path: normalizedPath,
+        label: label?.trim() || deriveProjectLabel(normalizedPath),
+        color: pickAutoColor(get().projects),
+        addedAt: Date.now(),
+        lastOpenedAt: Date.now(),
+        serverId,
+      };
+
+      const currentActiveProjectId = get().activeProjectId;
+      const nextProjects = [...get().projects, entry];
+      set({ projects: nextProjects });
+      persistProjects(nextProjects, currentActiveProjectId);
+      return entry;
+    },
+
     removeProject: (id: string) => {
       if (vscodeWorkspace) {
         return;
@@ -430,6 +481,20 @@ export const useProjectsStore = create<ProjectsStore>()(
       } else {
         void useDirectoryStore.getState().goHome();
       }
+    },
+
+    markProjectAvailability: (id: string, available: boolean) => {
+      const current = get();
+      const project = current.projects.find((p) => p.id === id);
+      if (!project || !project.serverId) return;
+      if (available && !project.unavailable) return;
+      if (!available && project.unavailable) return;
+
+      const nextProjects = current.projects.map((p) =>
+        p.id === id ? { ...p, unavailable: available ? undefined : true as const } : p,
+      );
+      set({ projects: nextProjects });
+      cacheProjects(nextProjects, current.activeProjectId);
     },
 
     setActiveProject: (id: string) => {
@@ -657,6 +722,15 @@ export const useProjectsStore = create<ProjectsStore>()(
       persistProjects(nextProjects, activeProjectId);
     },
 
+    toggleProjectPin: (id: string) => {
+      const { projects, activeProjectId } = get();
+      const nextProjects = projects.map((p) =>
+        p.id === id ? { ...p, pinned: !p.pinned } : p,
+      );
+      set({ projects: nextProjects });
+      persistProjects(nextProjects, activeProjectId);
+    },
+
     synchronizeFromSettings: (settings: DesktopSettings) => {
       if (vscodeWorkspace) {
         return;
@@ -686,18 +760,39 @@ export const useProjectsStore = create<ProjectsStore>()(
         return;
       }
 
-      const projectsChanged = JSON.stringify(current.projects) !== JSON.stringify(incomingProjects);
+      const currentRemoteProjectIds = new Set(
+        current.projects
+          .filter((p) => typeof p.serverId === 'string' && p.serverId.trim().length > 0)
+          .map((p) => p.id),
+      );
+      const incomingIds = new Set(incomingProjects.map((p) => p.id));
+      const missingRemoteProjects = current.projects.filter(
+        (p) => currentRemoteProjectIds.has(p.id) && !incomingIds.has(p.id),
+      );
+      const mergedProjects = missingRemoteProjects.length > 0
+        ? [...incomingProjects, ...missingRemoteProjects]
+        : incomingProjects;
+
+      const projectsChanged = JSON.stringify(current.projects) !== JSON.stringify(mergedProjects);
       const activeChanged = current.activeProjectId !== incomingActive;
 
       if (!projectsChanged && !activeChanged) {
         return;
       }
 
-      set({ projects: incomingProjects, activeProjectId: incomingActive });
-      cacheProjects(incomingProjects, incomingActive);
+      set({ projects: mergedProjects, activeProjectId: incomingActive });
+      cacheProjects(mergedProjects, incomingActive);
 
-      if (incomingActive) {
-        const activeProject = incomingProjects.find((project) => project.id === incomingActive);
+      const resolvedActive = incomingActive && mergedProjects.some((p) => p.id === incomingActive)
+        ? incomingActive
+        : mergedProjects[0]?.id ?? null;
+      if (resolvedActive !== incomingActive) {
+        set({ activeProjectId: resolvedActive });
+        cacheProjects(mergedProjects, resolvedActive);
+      }
+
+      if (resolvedActive) {
+        const activeProject = mergedProjects.find((project) => project.id === resolvedActive);
         if (activeProject) {
           opencodeClient.setDirectory(activeProject.path);
           useDirectoryStore.getState().setDirectory(activeProject.path, { showOverlay: false });

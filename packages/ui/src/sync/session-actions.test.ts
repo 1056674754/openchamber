@@ -48,6 +48,16 @@ mock.module("@/lib/opencode/client", () => ({
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     getScopedSdkClient: (_: string) => mockScopedClient,
     getDirectory: () => "/test/project",
+    setDirectory: () => {},
+  },
+}))
+
+// Mock projects store so session-actions does not load directory-store during tests
+mock.module("@/stores/useProjectsStore", () => ({
+  useProjectsStore: {
+    getState: () => ({
+      projects: [],
+    }),
   },
 }))
 
@@ -157,18 +167,21 @@ describe("respondToPermission passes directory", () => {
     expect(replyCalls[0].params.directory).toBe("/other/project")
   })
 
-  test("passes directory from current directory as last resort", async () => {
+  test("fails instead of using current directory as last resort", async () => {
     const childStores = createChildStores([])
 
     const { setActionRefs, respondToPermission } = await import("./session-actions")
     setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/fallback/dir")
 
-    await respondToPermission("unknown-session", "perm-3", "reject")
-
-    expect(replyCalls.length).toBe(1)
-    expect(replyCalls[0].params.requestID).toBe("perm-3")
-    expect(replyCalls[0].params.reply).toBe("reject")
-    expect(replyCalls[0].params.directory).toBe("/fallback/dir")
+    let error: unknown = null
+    try {
+      await respondToPermission("unknown-session", "perm-3", "reject")
+    } catch (err) {
+      error = err
+    }
+    expect(error instanceof Error).toBe(true)
+    expect((error as Error).message).toBe("permission reply target directory for request perm-3 is not available")
+    expect(replyCalls.length).toBe(0)
   })
 })
 

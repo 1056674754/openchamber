@@ -14,6 +14,8 @@ type ProjectItem = {
   color?: string;
   iconImage?: { mime: string; updatedAt: number; source: 'custom' | 'auto' };
   iconBackground?: string;
+  serverId?: string;
+  unavailable?: boolean;
 };
 
 type ProjectSection = {

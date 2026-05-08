@@ -31,18 +31,42 @@ function renderFromAsChild(asChild: boolean | undefined, children: React.ReactNo
   return { children };
 }
 
+type DropdownMenuProps = React.ComponentProps<typeof BaseMenu.Root>;
+
 function DropdownMenu({
+  open: openProp,
+  defaultOpen,
+  onOpenChange,
   ...props
-}: React.ComponentProps<typeof BaseMenu.Root>) {
+}: DropdownMenuProps) {
   const [portalContainer, setPortalContainer] = React.useState<HTMLElement | null>(null);
   const portalContextValue = React.useMemo<DropdownPortalContextValue>(() => ({
     portalContainer,
     setPortalContainer,
   }), [portalContainer]);
 
+  const isControlled = openProp !== undefined;
+  const [internalOpen, setInternalOpen] = React.useState(defaultOpen ?? false);
+  const open = isControlled ? openProp : internalOpen;
+
+  const handleOpenChange: NonNullable<DropdownMenuProps['onOpenChange']> = React.useCallback((nextOpen, eventDetails) => {
+    if (!nextOpen && eventDetails.reason === 'trigger-hover') {
+      return;
+    }
+    if (!isControlled) {
+      setInternalOpen(nextOpen);
+    }
+    onOpenChange?.(nextOpen, eventDetails);
+  }, [isControlled, onOpenChange]);
+
   return (
     <DropdownPortalContext.Provider value={portalContextValue}>
-      <BaseMenu.Root {...props} />
+      <BaseMenu.Root
+        modal={false}
+        open={open}
+        onOpenChange={handleOpenChange}
+        {...props}
+      />
     </DropdownPortalContext.Provider>
   )
 }

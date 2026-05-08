@@ -883,6 +883,14 @@ html:not(.dark) .chat-scroll {
   color: var(--surface-foreground) !important;
 }
 
+.markdown-content.markdown-reasoning [data-openchamber-file-link="true"][data-openchamber-file-status="missing"],
+.markdown-content.markdown-reasoning [data-openchamber-file-link="true"][data-openchamber-file-status="missing"]:hover {
+  color: var(--surface-muted-foreground) !important;
+  cursor: default !important;
+  text-decoration: line-through !important;
+  text-decoration-color: var(--surface-muted-foreground) !important;
+}
+
 .markdown-content.markdown-reasoning strong,
 .markdown-content.markdown-reasoning b,
 .markdown-content.markdown-reasoning [data-markdown="strong"],
@@ -982,6 +990,27 @@ html:not(.dark) .chat-scroll {
 
 .markdown-content [data-openchamber-file-link="true"]:hover {
   color: var(--markdown-link-hover, var(--primary));
+}
+
+.markdown-content [data-openchamber-file-link="true"][data-openchamber-file-status="missing"] {
+  color: var(--muted-foreground);
+  cursor: default;
+  text-decoration: line-through;
+  text-decoration-color: var(--muted-foreground);
+}
+
+.markdown-content [data-openchamber-file-link="true"][data-openchamber-file-status="missing"]:hover {
+  color: var(--muted-foreground);
+}
+
+.oc-file-missing-badge {
+  display: inline;
+  margin-left: 1px;
+  font-size: 0.65em;
+  color: var(--destructive);
+  vertical-align: super;
+  cursor: default;
+  user-select: none;
 }
 
 /* Markdown blockquote - use theme colors */
@@ -1452,4 +1481,31 @@ input[aria-label="Terminal input"] {
 /* Settings dialog: hide the overlay scrollbar; wheel/keyboard scroll still works. */
 [data-settings-view="true"] .overlay-scrollbar {
   display: none;
+}
+
+@keyframes slot-fade-in {
+  0%, 40% { opacity: 1; }
+  50%, 90% { opacity: 0; }
+  100% { opacity: 1; }
+}
+
+@keyframes slot-fade-out {
+  0%, 40% { opacity: 0; }
+  50%, 90% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+.animate-slot-fade-in {
+  animation: slot-fade-in 2.4s ease-in-out infinite;
+}
+
+.animate-slot-fade-out {
+  animation: slot-fade-out 2.4s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-slot-fade-in,
+  .animate-slot-fade-out {
+    animation: none;
+  }
 }

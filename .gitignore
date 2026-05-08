@@ -28,6 +28,7 @@ local-dev*
 *.sw?
 .opencode/plans/*
 .hive
+.sisyphus
 docs/personal/*
 
 # Build outputs

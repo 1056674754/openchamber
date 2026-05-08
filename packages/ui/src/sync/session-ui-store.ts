@@ -21,6 +21,7 @@ import { useConfigStore } from "@/stores/useConfigStore"
 import { useProjectsStore } from "@/stores/useProjectsStore"
 import { useDirectoryStore } from "@/stores/useDirectoryStore"
 import { useSessionFoldersStore } from "@/stores/useSessionFoldersStore"
+import { resolveGlobalSessionDirectory, useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
 import { useCommandsStore } from "@/stores/useCommandsStore"
 import { getSafeStorage } from "@/stores/utils/safeStorage"
 import { markPendingUserSendAnimation } from "@/lib/userSendAnimation"
@@ -35,6 +36,9 @@ import {
   getSyncMessages,
   getSyncParts,
   getDirectoryState,
+  registerSessionDirectory,
+  getSessionDirectoryFromRoutingIndex,
+  getSyncChildStores,
 } from "./sync-refs"
 import { markSessionViewed } from "./notification-store"
 import { setActiveSession } from "./sync-context"
@@ -46,6 +50,8 @@ import {
   shareSession as shareSessionAction,
   unshareSession as unshareSessionAction,
   optimisticSend,
+  resolveSdkForDirectory,
+  resolveBaseUrlForSession,
 } from "./session-actions"
 import { useInputStore, type SyntheticContextPart } from "./input-store"
 import { useSelectionStore } from "./selection-store"
@@ -70,12 +76,16 @@ function routeMessage(params: {
   files?: Array<{ type: "file"; mime: string; url: string; filename: string }>
   additionalParts?: Array<{ text: string; synthetic?: boolean; files?: Array<{ type: "file"; mime: string; url: string; filename: string }> }>
 }): Promise<void> {
+  const sessionDirectory = useSessionUIStore.getState().getDirectoryForSession(params.sessionId)
+  if (!sessionDirectory) {
+    throw new Error(`Cannot send message: directory for session ${params.sessionId} is not available`)
+  }
+
   if (params.inputMode === "shell") {
-    const sdk = opencodeClient.getSdkClient()
-    const dir = opencodeClient.getDirectory() || undefined
-    return sdk.session.shell({
+    const client = resolveSdkForDirectory(sessionDirectory)
+    return client.session.shell({
       sessionID: params.sessionId,
-      directory: dir,
+      directory: sessionDirectory,
       agent: params.agent,
       model: { providerID: params.providerID, modelID: params.modelID },
       command: params.content,
@@ -102,7 +112,7 @@ function routeMessage(params: {
         modelID: params.modelID,
         agent: params.agent,
         files: params.files,
-        send: (messageID) => opencodeClient.sendCommand({
+        send: (messageID) => opencodeClient.withDirectory(sessionDirectory, () => opencodeClient.sendCommand({
           id: params.sessionId,
           providerID: params.providerID,
           modelID: params.modelID,
@@ -112,7 +122,7 @@ function routeMessage(params: {
           variant: params.variant,
           files: params.files,
           messageId: messageID,
-        }).then(() => {}),
+        })).then(() => {}),
       })
     }
   }
@@ -125,7 +135,7 @@ function routeMessage(params: {
     modelID: params.modelID,
     agent: params.agent,
     files: params.files,
-    send: (messageID) => opencodeClient.sendMessage({
+    send: (messageID) => opencodeClient.withDirectory(sessionDirectory, () => opencodeClient.sendMessage({
       id: params.sessionId,
       providerID: params.providerID,
       modelID: params.modelID,
@@ -135,12 +145,14 @@ function routeMessage(params: {
       files: params.files,
       additionalParts: params.additionalParts,
       messageId: messageID,
-    }).then(() => {}),
+    })).then(() => {}),
   })
 }
 
-function notifyMessageSent(sessionId: string): void {
-  fetch(`/api/sessions/${sessionId}/message-sent`, { method: "POST" })
+function notifyMessageSent(sessionId: string, directory?: string | null): void {
+  const baseUrl = resolveBaseUrlForSession(sessionId, directory)
+  const url = baseUrl ? `${baseUrl.replace(/\/+$/, '')}/session/${sessionId}/message-sent` : `/api/sessions/${sessionId}/message-sent`
+  fetch(url, { method: "POST" })
     .catch(() => { /* ignore */ })
 }
 
@@ -154,6 +166,7 @@ export type { VoiceStatus, VoiceMode } from "./voice-store"
 
 export type NewSessionDraftState = {
   open: boolean
+  submitting?: boolean
   selectedProjectId?: string | null
   directoryOverride: string | null
   pendingWorktreeRequestId?: string | null
@@ -205,6 +218,9 @@ export type SessionUIState = {
 
   // Actions — UI state management
   setCurrentSession: (id: string | null, directoryHint?: string | null) => void
+  _pendingNavigationSessionId: string | null
+  navigateToSession: (sessionId: string, directory: string, projectId: string) => void
+  consumeNavigationIntent: () => string | null
   openNewSessionDraft: (options?: Partial<NewSessionDraftState>) => void
   closeNewSessionDraft: () => void
   setNewSessionDraftTarget: (target: { projectId?: string | null; selectedProjectId?: string | null; directoryOverride?: string | null }, options?: { force?: boolean }) => void
@@ -371,6 +387,15 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
 
     const previousSessionId = get().currentSessionId
 
+    // Pin the new session's child store to prevent eviction while active.
+    // Unpin the previous session's directory when switching away.
+    try {
+      if (previousSessionId && previousSessionId !== id) {
+        const prevDir = get().getDirectoryForSession(previousSessionId)
+        if (prevDir) getSyncChildStores().unpin(prevDir)
+      }
+    } catch { /* child stores may not be initialized yet */ }
+
     // Set currentSessionId immediately so the skeleton renders without delay.
     set({ currentSessionId: id })
 
@@ -380,14 +405,15 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       id,
       (sid) => get().worktreeMetadata.get(sid),
     )
-    const fallbackDir = opencodeClient.getDirectory() ?? directoryState.currentDirectory ?? null
-    const resolvedDir = (directoryHint ? normalizePath(directoryHint) : null) ?? sessionDir ?? fallbackDir
+    const resolvedDir = (directoryHint ? normalizePath(directoryHint) : null) ?? sessionDir
 
     try {
       if (resolvedDir && directoryState.currentDirectory !== resolvedDir) {
         directoryState.setDirectory(resolvedDir, { showOverlay: false })
       }
-      opencodeClient.setDirectory(resolvedDir ?? undefined)
+      if (resolvedDir) {
+        opencodeClient.setDirectory(resolvedDir)
+      }
     } catch (e) {
       console.warn("Failed to set OpenCode directory for session switch:", e)
     }
@@ -410,8 +436,28 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     // Mark session viewed in notification store + update active session ref
     if (id) {
       markSessionViewed(id)
-      setActiveSession(resolvedDir ?? "", id)
+      if (resolvedDir) {
+        setActiveSession(resolvedDir, id)
+        try { getSyncChildStores().pin(resolvedDir) } catch { /* not initialized */ }
+      }
     }
+  },
+
+  // ---------------------------------------------------------------------------
+  // navigateToSession — atomic project + directory + session switch
+  // ---------------------------------------------------------------------------
+  _pendingNavigationSessionId: null as string | null,
+  navigateToSession: (sessionId, directory, projectId) => {
+    get()._pendingNavigationSessionId = sessionId
+    useProjectsStore.getState().setActiveProjectIdOnly(projectId)
+    get().setCurrentSession(sessionId, directory)
+  },
+  consumeNavigationIntent: () => {
+    const id = get()._pendingNavigationSessionId
+    if (id) {
+      get()._pendingNavigationSessionId = null
+    }
+    return id
   },
 
   // ---------------------------------------------------------------------------
@@ -445,7 +491,10 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     const persistedProjectByDir = resolveDraftProjectForDirectory(projects, availableWorktreesByProject, persistedTarget?.directory ?? null)
     const currentDirProject = resolveDraftProjectForDirectory(projects, availableWorktreesByProject, currentDirectory)
 
+    const isTempSession = options?.preserveDirectoryOverride === false
+
     const selectedProject = (() => {
+      if (isTempSession) return null
       if (explicitProject || explicitDirectory !== null) {
         return explicitProject ?? inferredProjectFromDir ?? fallbackProject
       }
@@ -453,15 +502,19 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       return persistedProjectByDir ?? persistedProjectById ?? fallbackProject
     })()
 
-    const directory = (() => {
-      if (explicitDirectory !== null) return explicitDirectory
-      if (explicitProject) return normalizePath(explicitProject.path ?? null)
-      if (currentDirectory) return currentDirectory
-      if (persistedTarget?.directory) return persistedTarget.directory
-      return normalizePath(selectedProject?.path ?? null)
-    })()
+    const directory = isTempSession
+      ? null
+      : (() => {
+          if (explicitDirectory !== null) return explicitDirectory
+          if (explicitProject) return normalizePath(explicitProject.path ?? null)
+          if (currentDirectory) return currentDirectory
+          if (persistedTarget?.directory) return persistedTarget.directory
+          return normalizePath(selectedProject?.path ?? null)
+        })()
 
-    persistDraftTarget({ projectId: selectedProject?.id ?? null, directory })
+    if (!isTempSession) {
+      persistDraftTarget({ projectId: selectedProject?.id ?? null, directory })
+    }
 
     set({
       newSessionDraft: {
@@ -470,7 +523,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         directoryOverride: directory,
         pendingWorktreeRequestId: options?.pendingWorktreeRequestId ?? null,
         bootstrapPendingDirectory: normalizePath(options?.bootstrapPendingDirectory ?? null),
-        preserveDirectoryOverride: options?.preserveDirectoryOverride === true,
+        preserveDirectoryOverride: options?.preserveDirectoryOverride,
         parentID: options?.parentID ?? null,
         title: options?.title,
         initialPrompt: options?.initialPrompt,
@@ -485,7 +538,9 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       useInputStore.getState().setPendingInputText(options.initialPrompt)
     }
 
-    void activateConfigForDirectory(directory)
+    if (directory) {
+      void activateConfigForDirectory(directory)
+    }
   },
 
   // ---------------------------------------------------------------------------
@@ -652,7 +707,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
           directoryOverride: normalizePath(directory),
           pendingWorktreeRequestId: null,
           bootstrapPendingDirectory: normalizePath((options as Record<string, unknown> | undefined)?.bootstrapPendingDirectory as string ?? s.newSessionDraft.bootstrapPendingDirectory ?? null),
-          preserveDirectoryOverride: ((options as Record<string, unknown> | undefined)?.preserveDirectoryOverride ?? true) as boolean,
+          preserveDirectoryOverride: ((options as Record<string, unknown> | undefined)?.preserveDirectoryOverride ?? s.newSessionDraft.preserveDirectoryOverride) as boolean | undefined,
         },
       }
     }),
@@ -711,19 +766,113 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       const draftTargetFolderId = draft.targetFolderId
       let draftDirectoryOverride = draft.bootstrapPendingDirectory ?? draft.directoryOverride ?? null
       const draftProjectId = draft.selectedProjectId ?? null
+      const isTempDraft = draft.preserveDirectoryOverride === false
+      const draftSnap = { ...draft }
 
+      if (isTempDraft) {
+        set({ newSessionDraft: { ...get().newSessionDraft, submitting: true } })
+      }
+
+      try {
       if (draft.pendingWorktreeRequestId) {
         draftDirectoryOverride = await waitForPendingDraftWorktreeRequest(draft.pendingWorktreeRequestId)
         get().resolvePendingDraftWorktreeTarget(draft.pendingWorktreeRequestId, draftDirectoryOverride)
       }
 
-      const created = await get().createSession(draft.title, draftDirectoryOverride, draft.parentID ?? null)
+      // For temp sessions: use zen API to generate topic, create directory + OpenCode session
+      if (isTempDraft) {
+        try {
+          const text = content.trim()
+          let topic = `untitled-${Date.now()}`
+          if (text) {
+            try {
+              const summarizeResponse = await fetch("/api/text/summarize", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ text, mode: "topic", maxLength: 50, threshold: 0 }),
+              })
+              if (summarizeResponse.ok) {
+                const data = await summarizeResponse.json()
+                if (data?.summary) topic = data.summary
+              }
+            } catch { /* topic summarization is best-effort */ }
+          }
+          const { createTempSessionWithOpenCodeSession } = await import("@/lib/tempSessions")
+          const result = await createTempSessionWithOpenCodeSession(topic, { title: draft.title, parentID: draft.parentID ?? undefined })
+          draftDirectoryOverride = result.path
+
+          if (result.session?.id) {
+            const serverSession = result.session as unknown as Session
+            const sessionDirectory = (serverSession as { directory?: string }).directory ?? result.path ?? null
+            if (sessionDirectory) {
+              registerSessionDirectory(serverSession.id, sessionDirectory)
+            }
+            useGlobalSessionsStore.getState().upsertSession(serverSession)
+            const createdDirectory = normalizePath(sessionDirectory)
+
+            const configState = useConfigStore.getState()
+            if (configState.currentProviderId && configState.currentModelId) {
+              useSelectionStore.getState().saveSessionModelSelection(serverSession.id, configState.currentProviderId, configState.currentModelId)
+            }
+            const draftAgentName = configState.currentAgentName
+            const effectiveDraftAgent = trimmedAgent ?? draftAgentName
+            if (effectiveDraftAgent) {
+              useSelectionStore.getState().saveSessionAgentSelection(serverSession.id, effectiveDraftAgent)
+              if (configState.currentProviderId && configState.currentModelId) {
+                useSelectionStore.getState().saveAgentModelForSession(serverSession.id, effectiveDraftAgent, configState.currentProviderId, configState.currentModelId)
+                useSelectionStore.getState().saveAgentModelVariantForSession(serverSession.id, effectiveDraftAgent, configState.currentProviderId, configState.currentModelId, variant)
+              }
+            }
+            get().initializeNewOpenChamberSession(serverSession.id, configState.agents ?? [])
+            get().markSessionAsOpenChamberCreated(serverSession.id)
+            get().closeNewSessionDraft()
+            get().setCurrentSession(serverSession.id, createdDirectory)
+            await activateConfigForDirectory(createdDirectory)
+
+            notifyMessageSent(serverSession.id, createdDirectory)
+            markPendingUserSendAnimation(serverSession.id)
+
+            const files = attachments?.map((a) => ({
+              type: "file" as const,
+              mime: a.mimeType,
+              url: a.dataUrl,
+              filename: a.filename,
+            }))
+            await routeMessage({
+              sessionId: serverSession.id,
+              content,
+              providerID,
+              modelID,
+              agent: effectiveDraftAgent,
+              variant,
+              inputMode,
+              files,
+              additionalParts: draft.syntheticParts?.length
+                ? [...(additionalParts || []), ...draft.syntheticParts]
+                : additionalParts,
+            })
+            return
+          }
+        } catch (err) {
+          console.warn("[TempSession] Failed to create temp session:", err)
+          throw new Error("Failed to create temp session directory")
+        }
+      }
+
+      let created: Session | null = null
+      for (let attempt = 0; attempt < 3; attempt++) {
+        created = await get().createSession(draft.title, draftDirectoryOverride, draft.parentID ?? null)
+        if (created?.id) break
+        if (attempt < 2) await new Promise((r) => setTimeout(r, 500 * (attempt + 1)))
+      }
       if (!created?.id) throw new Error("Failed to create session")
 
-      persistDraftTarget({
-        projectId: draftProjectId,
-        directory: normalizePath(draftDirectoryOverride ?? created.directory ?? null),
-      })
+      if (!isTempDraft) {
+        persistDraftTarget({
+          projectId: draftProjectId,
+          directory: normalizePath(draftDirectoryOverride ?? created.directory ?? null),
+        })
+      }
 
       const draftSyntheticParts = draft.syntheticParts
       await activateConfigForDirectory(draftDirectoryOverride ?? created.directory ?? null)
@@ -766,7 +915,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         await waitForWorktreeBootstrap(createdDirectory)
       }
 
-      notifyMessageSent(created.id)
+      notifyMessageSent(created.id, createdDirectory)
 
       markPendingUserSendAnimation(created.id)
 
@@ -798,6 +947,14 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         })),
       })
       return
+    } catch (error) {
+      if (isTempDraft) {
+        set({ newSessionDraft: { ...draftSnap, open: true, submitting: false } })
+      } else {
+        set({ newSessionDraft: { ...draftSnap, open: true } })
+      }
+      throw error
+    }
     }
 
     // ---- Existing session ----
@@ -833,17 +990,16 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     const currentSessionDirectory = currentSessionId
       ? normalizePath(get().getDirectoryForSession(currentSessionId))
       : null
+    if (!currentSessionId || !currentSessionDirectory) {
+      throw new Error("Cannot send message: current session directory is not available")
+    }
     if (currentSessionDirectory) {
       await waitForWorktreeBootstrap(currentSessionDirectory)
     }
 
-    if (currentSessionId) {
-      notifyMessageSent(currentSessionId)
-    }
+    notifyMessageSent(currentSessionId, currentSessionDirectory)
 
-    if (currentSessionId) {
-      markPendingUserSendAnimation(currentSessionId)
-    }
+    markPendingUserSendAnimation(currentSessionId)
 
     const files = attachments?.map((a) => ({
       type: "file" as const,
@@ -853,7 +1009,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     }))
 
     await routeMessage({
-      sessionId: currentSessionId || "",
+      sessionId: currentSessionId,
       content,
       providerID,
       modelID,
@@ -880,7 +1036,6 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
   createSession: async (title, directoryOverride, parentID) => {
     const draft = get().newSessionDraft
     const targetFolderId = draft.targetFolderId
-    get().closeNewSessionDraft()
 
     try {
       const dir = directoryOverride ?? opencodeClient.getDirectory()
@@ -1108,10 +1263,24 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
   getDirectoryForSession: (sessionId) => {
     const attachmentDirectory = getAttachedSessionDirectory(getAttachmentForSession(sessionId))
     if (attachmentDirectory) return attachmentDirectory
+
+    const metaPath = get().worktreeMetadata.get(sessionId)?.path
+    if (typeof metaPath === "string" && metaPath.trim().length > 0) return normalizePath(metaPath)
+
     const sessions = getAllSyncSessions()
     const session = sessions.find((s) => s.id === sessionId)
-    if (!session) return null
-    return resolveDirectoryKey(session)
+    if (session) return resolveDirectoryKey(session)
+
+    const globalState = useGlobalSessionsStore.getState()
+    const globalSession =
+      globalState.activeSessions.find((s) => s.id === sessionId) ??
+      globalState.archivedSessions.find((s) => s.id === sessionId)
+    if (globalSession) return resolveGlobalSessionDirectory(globalSession)
+
+    const routingDir = getSessionDirectoryFromRoutingIndex(sessionId)
+    if (routingDir) return normalizePath(routingDir)
+
+    return null
   },
 
   getLastUserChoice: (sessionId) => {

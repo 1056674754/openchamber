@@ -1,6 +1,6 @@
 /* eslint-disable react-refresh/only-export-components */
 import React, { createContext, useContext, useEffect, useRef, useCallback, useMemo } from "react"
-import type { Event, Message, Part } from "@opencode-ai/sdk/v2/client"
+import type { Event, Message, Part, SessionStatus } from "@opencode-ai/sdk/v2/client"
 import type { Session } from "@opencode-ai/sdk/v2"
 import type { StoreApi } from "zustand"
 import { useStore } from "zustand"
@@ -20,19 +20,23 @@ import {
 import { bootstrapGlobal, bootstrapDirectory } from "./bootstrap"
 import { retry } from "./retry"
 import { updateStreamingState } from "./streaming"
-import { setActionRefs } from "./session-actions"
+import { setActionRefs, resolveSdkForDirectory } from "./session-actions"
 import { setSyncRefs } from "./sync-refs"
 import { stripMessageDiffSnapshots, stripSessionDiffSnapshots } from "./sanitize"
 import { syncDebug } from "./debug"
 import { getReconnectCandidateSessionIds } from "./reconnect-recovery"
+import { STUCK_SESSION_TIMEOUT_MS } from "@/stores/types/sessionTypes"
 import { opencodeClient } from "@/lib/opencode/client"
+import { DEFAULT_SERVER_ID, serverRegistry } from "@/lib/opencode/server-registry"
+import { registerSyncStores, getSyncStoresForServer } from "./multi-server-registry"
+import { useProjectsStore } from "@/stores/useProjectsStore"
 import { usePermissionStore } from "@/stores/permissionStore"
 import { useConfigStore } from "@/stores/useConfigStore"
 import { useTodosPersistStore } from "@/stores/useTodosPersistStore"
+import { useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
 import { toast } from "@/components/ui"
 import { appendNotification } from "./notification-store"
 import type { State } from "./types"
-import type { SessionStatus } from "@opencode-ai/sdk/v2/client"
 import type { PermissionRequest } from "@/types/permission"
 import type { QuestionRequest } from "@/types/question"
 import * as sessionActions from "./session-actions"
@@ -46,6 +50,7 @@ type SyncSystem = {
   childStores: ChildStoreManager
   sdk: OpencodeClient
   directory: string
+  serverId: string
 }
 
 const SYNC_CONTEXT_GLOBAL_KEY = "__openchamber_sync_context__"
@@ -57,7 +62,7 @@ const syncGlobal = globalThis as SyncGlobal
 const SyncContext = syncGlobal[SYNC_CONTEXT_GLOBAL_KEY] ?? createContext<SyncSystem | null>(null)
 syncGlobal[SYNC_CONTEXT_GLOBAL_KEY] = SyncContext
 
-function useSyncSystem() {
+export function useSyncSystem() {
   const ctx = useContext(SyncContext)
   if (!ctx) throw new Error("useSyncSystem must be used within <SyncProvider>")
   return ctx
@@ -98,9 +103,15 @@ function useLiveSyncSelector<T>(selector: (states: State[]) => T, isEqual: (left
 
 /** Read status for a session across all directories */
 export function useGlobalSessionStatus(sessionId: string): SessionStatus | undefined {
-  return useLiveSyncSelector(
+  const globalStatus = useGlobalSessionsStore(
+    useCallback((state) => state.sessionStatuses.get(sessionId), [sessionId]),
+  )
+
+  const liveStatus = useLiveSyncSelector(
     useCallback((states) => findLiveSessionStatus(states, sessionId), [sessionId]),
   )
+
+  return globalStatus ?? liveStatus
 }
 
 /** Read all session statuses (for sidebar) */
@@ -188,9 +199,13 @@ async function materializeSessionFromServer(
   sessionID: string,
   store: StoreApi<DirectoryStore>,
 ) {
-  const scopedClient = opencodeClient.getScopedSdkClient(directory)
+  const projects = useProjectsStore.getState().projects
+  const project = projects.find((p) => p.path === directory && p.serverId && p.serverId !== DEFAULT_SERVER_ID)
+  const sdkClient = project?.serverId
+    ? serverRegistry.get(project.serverId)?.client ?? resolveSdkForDirectory(directory)
+    : resolveSdkForDirectory(directory)
   const result = await retry(() =>
-    scopedClient.session.messages({ sessionID, limit: SESSION_MATERIALIZATION_MESSAGE_LIMIT }),
+    sdkClient.session.messages({ sessionID, limit: SESSION_MATERIALIZATION_MESSAGE_LIMIT }),
   )
   const records = (result.data ?? []).filter((record: { info?: { id?: string } }) => !!record?.info?.id)
   if (records.length === 0) return
@@ -277,6 +292,70 @@ function toSessionStatus(status: Awaited<ReturnType<typeof opencodeClient.getSes
     }
   }
   return undefined
+}
+
+async function getSessionStatusForServer(
+  directory: string,
+  serverId: string,
+): Promise<Record<string, Awaited<ReturnType<typeof opencodeClient.getSessionStatus>>[string]>> {
+  if (serverId === DEFAULT_SERVER_ID) {
+    return opencodeClient.getSessionStatusForDirectory(directory)
+  }
+
+  const connection = serverRegistry.get(serverId)
+  if (!connection) return {}
+
+  try {
+    const base = connection.config.baseUrl.replace(/\/+$/, "")
+    const url = new URL(`${base}/session/status`)
+    const trimmedDirectory = directory.trim()
+    if (trimmedDirectory.length > 0) {
+      url.searchParams.set("directory", trimmedDirectory)
+    }
+    const headers: Record<string, string> = { Accept: "application/json" }
+    if (connection.config.authToken) {
+      headers.Authorization = `Bearer ${connection.config.authToken}`
+    }
+    const response = await fetch(url.toString(), { headers })
+    if (!response.ok) return {}
+    const data = await response.json().catch(() => null)
+    if (!data || typeof data !== "object") return {}
+    return data as Record<string, Awaited<ReturnType<typeof opencodeClient.getSessionStatus>>[string]>
+  } catch {
+    return {}
+  }
+}
+
+async function listPendingQuestionsForServer(
+  directory: string,
+  serverId: string,
+  sdk?: OpencodeClient,
+): Promise<QuestionRequest[]> {
+  if (serverId === DEFAULT_SERVER_ID) {
+    return opencodeClient.listPendingQuestions({ directories: [directory] })
+  }
+
+  const client = serverRegistry.get(serverId)?.client ?? sdk
+  if (!client) return []
+
+  const result = await client.question.list({ directory })
+  return (result.data ?? []) as unknown as QuestionRequest[]
+}
+
+async function listPendingPermissionsForServer(
+  directory: string,
+  serverId: string,
+  sdk?: OpencodeClient,
+): Promise<PermissionRequest[]> {
+  if (serverId === DEFAULT_SERVER_ID) {
+    return opencodeClient.listPendingPermissions({ directories: [directory] })
+  }
+
+  const client = serverRegistry.get(serverId)?.client ?? sdk
+  if (!client) return []
+
+  const result = await client.permission.list({ directory })
+  return (result.data ?? []) as unknown as PermissionRequest[]
 }
 
 type EventRoutingIndex = {
@@ -634,6 +713,7 @@ const updateRoutingIndexFromEvent = (
   routingIndex: EventRoutingIndex,
   directory: string,
   payload: Event,
+  serverId: string,
 ) => {
   if (!directory || directory === "global") {
     return
@@ -650,6 +730,7 @@ const updateRoutingIndexFromEvent = (
       const info = (payload.properties as { info?: Session }).info
       if (info?.id) {
         setIndexedSessionDirectory(routingIndex, info.id, directory)
+        serverRegistry.indexSession(info.id, serverId)
       }
       return
     }
@@ -658,6 +739,7 @@ const updateRoutingIndexFromEvent = (
       const deletedSessionID = (payload.properties as { sessionID?: string }).sessionID
       if (deletedSessionID) {
         removeIndexedSession(routingIndex, deletedSessionID)
+        serverRegistry.forgetSession(deletedSessionID)
       }
       return
     }
@@ -704,7 +786,9 @@ export async function resyncBlockingRequestsForDirectory(
   directory: string,
   store: StoreApi<DirectoryStore>,
   candidateSessionIds?: string[],
+  options?: { serverId?: string; sdk?: OpencodeClient },
 ) {
+  const serverId = options?.serverId ?? DEFAULT_SERVER_ID
   const before = store.getState()
   const knownSessionIds = new Set<string>([
     ...before.session.map((session) => session.id),
@@ -722,7 +806,7 @@ export async function resyncBlockingRequestsForDirectory(
     const beforeSignatures = new Map(
       candidates.map((sessionId) => [sessionId, requestSignature(before.question[sessionId])]),
     )
-    const pendingQuestions = await opencodeClient.listPendingQuestions({ directories: [directory] })
+    const pendingQuestions = await listPendingQuestionsForServer(directory, serverId, options?.sdk)
     const grouped: Record<string, QuestionRequest[]> = {}
     for (const q of pendingQuestions) {
       if (!q?.id || !q.sessionID) continue
@@ -781,7 +865,7 @@ export async function resyncBlockingRequestsForDirectory(
     const beforeSignatures = new Map(
       candidates.map((sessionId) => [sessionId, requestSignature(before.permission[sessionId])]),
     )
-    const pendingPermissions = await opencodeClient.listPendingPermissions({ directories: [directory] })
+    const pendingPermissions = await listPendingPermissionsForServer(directory, serverId, options?.sdk)
     const grouped: Record<string, PermissionRequest[]> = {}
     for (const permission of pendingPermissions) {
       if (!permission?.id || !permission.sessionID) continue
@@ -857,6 +941,8 @@ async function resyncDirectoryAfterReconnect(
   directory: string,
   store: StoreApi<DirectoryStore>,
   routingIndex: EventRoutingIndex,
+  serverId: string,
+  sdk: OpencodeClient,
 ) {
   const current = store.getState()
   const candidateSessionIds = getReconnectCandidateSessionIds(current, {
@@ -865,14 +951,16 @@ async function resyncDirectoryAfterReconnect(
   })
   if (candidateSessionIds.length === 0) return
 
-  const nextStatuses = await opencodeClient.getSessionStatusForDirectory(directory)
+  const nextStatuses = await getSessionStatusForServer(directory, serverId)
   const relevantStatuses: Record<string, SessionStatus> = {}
 
   for (const sessionId of candidateSessionIds) {
     const nextStatus = toSessionStatus(nextStatuses[sessionId])
-    if (nextStatus) {
-      relevantStatuses[sessionId] = nextStatus
-    }
+    // Force idle when the server returns no status for a candidate session.
+    // This covers the case where OpenCode restarted and lost its in-memory
+    // session state — the server won't know about previously busy sessions,
+    // so we reset them to idle instead of leaving stale "busy" indefinitely.
+    relevantStatuses[sessionId] = nextStatus ?? { type: "idle" }
   }
 
   if (Object.keys(relevantStatuses).length > 0) {
@@ -895,11 +983,19 @@ async function resyncDirectoryAfterReconnect(
     })
   }
 
-  const scopedClient = opencodeClient.getScopedSdkClient(directory)
+  const scopedClient = serverId !== DEFAULT_SERVER_ID
+    ? serverRegistry.get(serverId)?.client ?? sdk
+    : resolveSdkForDirectory(directory)
   await Promise.all(candidateSessionIds.map(async (sessionId) => {
     const [sessionResponse, messageResponse] = await Promise.all([
-      scopedClient.session.get({ sessionID: sessionId }).catch(() => null),
-      scopedClient.session.messages({ sessionID: sessionId, limit: RECONNECT_MESSAGE_LIMIT }).catch(() => null),
+      scopedClient.session.get({ sessionID: sessionId }).catch((e: unknown) => {
+        console.warn(`[resync] session.get failed for ${sessionId} on ${directory}`, e instanceof Error ? e.message : e)
+        return null
+      }),
+      scopedClient.session.messages({ sessionID: sessionId, limit: RECONNECT_MESSAGE_LIMIT }).catch((e: unknown) => {
+        console.warn(`[resync] session.messages failed for ${sessionId} on ${directory}`, e instanceof Error ? e.message : e)
+        return null
+      }),
     ])
     const session = sessionResponse?.data
     const records = messageResponse?.data
@@ -955,9 +1051,10 @@ async function resyncDirectoryAfterReconnect(
 
     setIndexedSessionDirectory(routingIndex, nextSession.id, directory)
     setIndexedSessionMessages(routingIndex, sessionId, directory, nextMessages)
+    serverRegistry.indexSession(nextSession.id, serverId)
   }))
 
-  await resyncBlockingRequestsForDirectory(directory, store, candidateSessionIds)
+  await resyncBlockingRequestsForDirectory(directory, store, candidateSessionIds, { serverId, sdk })
 
   ingestDirectoryStateIntoRoutingIndex(routingIndex, directory, store.getState())
 }
@@ -967,8 +1064,22 @@ function handleEvent(
   payload: Event,
   childStores: ChildStoreManager,
   routingIndex: EventRoutingIndex,
+  serverId: string,
 ) {
   const directory = resolveDirectoryFromRoutingIndex(routingIndex, rawDirectory, payload, childStores)
+
+  if (directory && directory !== "global") {
+    if (
+      (payload.type === "session.created" || payload.type === "session.updated")
+      && !childStores.getChild(directory)
+    ) {
+      const info = (payload.properties as { info?: Session }).info
+      if (info?.id) {
+        setIndexedSessionDirectory(routingIndex, info.id, directory)
+        childStores.ensureChild(directory)
+      }
+    }
+  }
 
   // Global events
   if (directory === "global" || !directory) {
@@ -1041,7 +1152,7 @@ function handleEvent(
     const permission = payload.properties as PermissionRequest
     const permissionStore = usePermissionStore.getState()
     if (permissionStore.isSessionAutoAccepting(permission.sessionID)) {
-      updateRoutingIndexFromEvent(routingIndex, resolvedDirectory, payload)
+      updateRoutingIndexFromEvent(routingIndex, resolvedDirectory, payload, serverId)
       void sessionActions.respondToPermission(permission.sessionID, permission.id, "once").catch(() => undefined)
       return
     }
@@ -1214,7 +1325,24 @@ function handleEvent(
     const messageID = getMessageIdFromPayload(payload) ?? undefined
     syncDebug.dispatch.eventApplied(payload.type, sessionID, messageID)
 
-    // Snapshot materialization on message.updated: if the message was inserted or
+    // [sscity-mod] Global sessions store sync — keep our multi-server session status dispatch.
+    if (payload.type === "session.status") {
+      const statusProps = payload.properties as { sessionID: string; status: SessionStatus }
+      if (statusProps.sessionID && statusProps.status) {
+        useGlobalSessionsStore.getState().upsertStatus(statusProps.sessionID, statusProps.status)
+      }
+    } else if (payload.type === "session.idle" || payload.type === "session.error") {
+      if (sessionID) {
+        useGlobalSessionsStore.getState().upsertStatus(sessionID, { type: "idle" })
+      }
+    } else if (payload.type === "session.updated") {
+      const info = (payload.properties as { info?: Session }).info
+      if (info?.id) {
+        useGlobalSessionsStore.getState().upsertSession(info)
+      }
+    }
+
+    // Parts-gap recovery on message.updated: if the message was inserted or
     // replaced but draft.part[messageID] is empty, the parts were lost or
     // never arrived. Recover the session so the UI doesn't render a blank bubble.
     if (sessionID && messageID && payload.type === "message.updated") {
@@ -1240,7 +1368,7 @@ function handleEvent(
     }
   }
 
-  updateRoutingIndexFromEvent(routingIndex, resolvedDirectory, payload)
+  updateRoutingIndexFromEvent(routingIndex, resolvedDirectory, payload, serverId)
 }
 
 // ---------------------------------------------------------------------------
@@ -1250,8 +1378,12 @@ function handleEvent(
 export function SyncProvider(props: {
   sdk: OpencodeClient
   directory: string
+  serverId?: string
+  baseUrl?: string
+  remoteDirectories?: string[]
   children: React.ReactNode
 }) {
+  const serverId = props.serverId ?? DEFAULT_SERVER_ID
   const messageStreamTransport = useConfigStore((state) => state.settingsMessageStreamTransport)
   const childStoresRef = useRef<ChildStoreManager | null>(null)
   if (!childStoresRef.current) childStoresRef.current = new ChildStoreManager()
@@ -1265,9 +1397,19 @@ export function SyncProvider(props: {
       childStores,
       sdk: props.sdk,
       directory: props.directory,
+      serverId,
     }),
-    [childStores, props.sdk, props.directory],
+    [childStores, props.sdk, props.directory, serverId],
   )
+
+  useEffect(() => {
+    const unregister = registerSyncStores(
+      serverId,
+      childStores,
+      () => {},
+    )
+    return unregister
+  }, [serverId, childStores])
 
   // Configure child store manager
   useEffect(() => {
@@ -1334,6 +1476,9 @@ export function SyncProvider(props: {
                 return
               }
               store.setState({ session: sessions, sessionTotal: sessions.length, limit: Math.max(sessions.length, 50) })
+              for (const s of sessions) {
+                if (s.id) serverRegistry.indexSession(s.id, serverId)
+              }
               ingestDirectoryStateIntoRoutingIndex(routingIndex, directory, store.getState())
             }),
           })
@@ -1341,17 +1486,29 @@ export function SyncProvider(props: {
           // VS Code race: if sessions are still empty after bootstrap, OpenCode
           // wasn't ready yet (bridge returned 503). Retry a few times.
           const state = store.getState()
-          if (state.session.length === 0 && attempt < 5) {
+          const sessionCount = Array.isArray(state.session) ? state.session.length : 0
+          if (sessionCount === 0 && attempt < 5) {
             console.warn(`[bootstrap] sessions empty for ${directory} after attempt ${attempt + 1}; retrying in 2s`)
             await new Promise((r) => setTimeout(r, 2000))
             store.setState({ status: "loading" as const })
             await runBootstrap(attempt + 1)
-          } else if (state.session.length === 0) {
+          } else if (sessionCount === 0) {
             console.warn(`[bootstrap] sessions empty for ${directory} after ${attempt + 1} attempts; giving up`)
+            store.setState({ status: "complete" as const })
           }
         }
 
-        runBootstrap(0).finally(() => {
+        runBootstrap(0).then(() => {
+          // Post-bootstrap status refresh: if SSE is already connected when
+          // bootstrap finishes, the session_status from Phase 1 may be stale
+          // (SSE could have delivered session.idle while bootstrap was in-flight
+          // but the child store didn't exist yet). Trigger a recovery resync to
+          // pick up the authoritative live status from the server.
+          const { isConnected } = useConfigStore.getState()
+          if (isConnected && store.getState().status === "complete") {
+            void resyncDirectoryAfterReconnect(directory, store, routingIndex, serverId, props.sdk).catch(() => {})
+          }
+        }).finally(() => {
           bootingDirs.delete(directory)
         })
       },
@@ -1361,11 +1518,12 @@ export function SyncProvider(props: {
       isBooting: (directory) => bootingDirs.has(directory),
       isLoadingSessions: () => false,
     })
-  }, [childStores, props.sdk, routingIndex])
+  }, [childStores, props.sdk, routingIndex, serverId])
 
   // Bootstrap global state — set bootingRoot/bootedAt to suppress
   // redundant refresh events during startup
   useEffect(() => {
+    if (serverId !== DEFAULT_SERVER_ID) return
     bootingRoot = true
     const globalActions = useGlobalSyncStore.getState().actions
     bootstrapGlobal(props.sdk, globalActions.set)
@@ -1375,36 +1533,37 @@ export function SyncProvider(props: {
       .finally(() => {
         bootingRoot = false
       })
-  }, [props.sdk])
+  }, [props.sdk, serverId])
 
   // Event pipeline — created once per mount. No class, no start/stop.
   // Abort controller owned by the pipeline closure. Cleanup aborts + flushes.
   useEffect(() => {
-    const reconnectMaterializing = new Set<string>()
+    const reconnectResyncing = new Set<string>()
     const triggerReconnectMaterialization = (directory: string) => {
       const store = childStores.children.get(directory)
       if (!store) return
-      if (reconnectMaterializing.has(directory)) return
+      if (reconnectResyncing.has(directory)) return
 
-      reconnectMaterializing.add(directory)
-      void resyncDirectoryAfterReconnect(directory, store, routingIndex)
+      reconnectResyncing.add(directory)
+      void resyncDirectoryAfterReconnect(directory, store, routingIndex, serverId, props.sdk)
         .catch(() => {
           // Transient failure during materialization — next SSE event, transport switch,
           // or reconnect will catch up.
         })
         .finally(() => {
-          reconnectMaterializing.delete(directory)
+          reconnectResyncing.delete(directory)
         })
     }
 
     const { cleanup } = createEventPipeline({
       sdk: props.sdk,
+      baseUrl: props.baseUrl,
       transport: messageStreamTransport,
       routeDirectory: (directory, payload) => {
         return resolveDirectoryFromRoutingIndex(routingIndex, directory, payload, childStores)
       },
       onEvent: (directory, payload) => {
-        handleEvent(directory, payload, childStores, routingIndex)
+        handleEvent(directory, payload, childStores, routingIndex, serverId)
       },
       onReconnect: () => {
         useConfigStore.setState({
@@ -1439,7 +1598,7 @@ export function SyncProvider(props: {
       },
     })
     return cleanup
-  }, [props.sdk, childStores, routingIndex, messageStreamTransport])
+  }, [props.sdk, props.baseUrl, childStores, routingIndex, messageStreamTransport, serverId])
 
   // Ensure current directory's child store exists
   useEffect(() => {
@@ -1449,11 +1608,22 @@ export function SyncProvider(props: {
     }
   }, [props.directory, childStores, routingIndex])
 
+  useEffect(() => {
+    if (serverId === DEFAULT_SERVER_ID) return
+    const dirs = props.remoteDirectories
+    if (!dirs?.length) return
+
+    for (const dir of dirs) {
+      const store = childStores.ensureChild(dir)
+      ingestDirectoryStateIntoRoutingIndex(routingIndex, dir, store.getState())
+    }
+  }, [serverId, props.remoteDirectories, childStores, routingIndex])
+
   // Set refs so non-React code (session-actions, session-ui-store) can access sync state
   useEffect(() => {
     setSyncRefs(props.sdk, childStores, props.directory, (sessionID, dir) => {
       setIndexedSessionDirectory(routingIndex, sessionID, dir)
-    })
+    }, (sessionID) => routingIndex.sessionDirectoryById.get(sessionID))
     setActionRefs(
       props.sdk,
       childStores,
@@ -1471,6 +1641,118 @@ export function SyncProvider(props: {
     })
     return unsubscribe
   }, [props.directory, childStores])
+
+
+  // Stuck-session timeout: periodically scan child stores for sessions stuck
+  // in busy/retry longer than STUCK_SESSION_TIMEOUT_MS with no SSE events.
+  // This is the last-resort safety net — reconnect recovery handles the
+  // common case, but this catches sessions that slip through (e.g. SSE
+  // reconnect recovery returned empty, or OpenCode crashed mid-stream).
+  useEffect(() => {
+    const stuckCheckInterval = setInterval(() => {
+      const { isConnected } = useConfigStore.getState()
+      // Only enforce when SSE is connected — during disconnection the
+      // reconnect recovery handles correction on reconnect.
+      if (!isConnected) return
+
+      const now = Date.now()
+      for (const [, store] of childStores.children) {
+        const state = store.getState()
+        const statuses = state.session_status
+        if (!statuses) continue
+
+        let needsUpdate = false
+        const nextStatuses: Record<string, SessionStatus> = { ...statuses }
+
+        for (const [sessionId, status] of Object.entries(statuses)) {
+          if (!status || status.type === "idle") continue
+
+          // Check if the session has received any recent activity.
+          // If messages exist, use the latest assistant message's creation time.
+          // If no messages, use a heuristic based on session existence.
+          const messages = state.message[sessionId]
+          let lastActivityAt = 0
+          if (messages && messages.length > 0) {
+            for (let i = messages.length - 1; i >= 0; i--) {
+              const msg = messages[i]
+              if (msg.role === "assistant") {
+                const created = typeof (msg as { time?: { created?: number } }).time?.created === "number"
+                  ? (msg as { time?: { created?: number } }).time!.created!
+                  : 0
+                const completed = typeof (msg as { time?: { completed?: number } }).time?.completed === "number"
+                  ? (msg as { time?: { completed?: number } }).time!.completed!
+                  : 0
+                lastActivityAt = Math.max(created, completed)
+                break
+              }
+            }
+          }
+
+          // If the last activity was longer than the timeout ago, force idle.
+          if (lastActivityAt > 0 && now - lastActivityAt > STUCK_SESSION_TIMEOUT_MS) {
+            nextStatuses[sessionId] = { type: "idle" }
+            needsUpdate = true
+          } else if (lastActivityAt === 0) {
+            // No messages for this session but status is busy — if the session
+            // metadata exists, check its updated time.
+            const session = state.session.find((s) => s.id === sessionId)
+            const sessionUpdated = session?.time?.updated ?? 0
+            if (sessionUpdated > 0 && now - sessionUpdated > STUCK_SESSION_TIMEOUT_MS) {
+              nextStatuses[sessionId] = { type: "idle" }
+              needsUpdate = true
+            }
+          }
+        }
+
+        if (needsUpdate) {
+          store.setState({ session_status: nextStatuses })
+        }
+      }
+    }, STUCK_SESSION_TIMEOUT_MS / 2) // Check at half the timeout for reasonable resolution
+
+    return () => clearInterval(stuckCheckInterval)
+  }, [childStores])
+
+  // Re-fetch pending questions/permissions on session-switch.
+  // PR #909 only re-fetches on SSE reconnect, leaving an event-drop gap when
+  // switching sessions within the same socket — the question.asked event may
+  // have arrived while a different session was active and the directory store
+  // was evicted, or the user may navigate back to a directory whose store was
+  // rebuilt after eviction. A 250ms debounce coalesces rapid switches.
+  useEffect(() => {
+    let cancelled = false
+    let timer: ReturnType<typeof setTimeout> | null = null
+    let lastSessionId: string | null = null
+    let unsub: (() => void) | undefined
+    void import("./session-ui-store")
+      .then(({ useSessionUIStore }) => {
+        if (cancelled) return
+        lastSessionId = useSessionUIStore.getState().currentSessionId
+        unsub = useSessionUIStore.subscribe((state) => {
+          const nextSessionId = state.currentSessionId
+          if (nextSessionId === lastSessionId) return
+          lastSessionId = nextSessionId
+          if (!nextSessionId) return
+          const sessionDirectory = state.getDirectoryForSession(nextSessionId)
+            ?? opencodeClient.getDirectory()
+            ?? props.directory
+          if (!sessionDirectory) return
+          if (timer) clearTimeout(timer)
+          timer = setTimeout(() => {
+            const currentStore = childStores.getChild(sessionDirectory)
+            if (!currentStore) return
+            void resyncBlockingRequestsForDirectory(sessionDirectory, currentStore, undefined, { serverId, sdk: props.sdk })
+              .catch(() => undefined)
+          }, 250)
+        })
+      })
+      .catch(() => undefined)
+    return () => {
+      cancelled = true
+      if (timer) clearTimeout(timer)
+      unsub?.()
+    }
+  }, [props.directory, childStores, serverId, props.sdk])
 
   return <SyncContext.Provider value={system}>{props.children}</SyncContext.Provider>
 }
@@ -1493,6 +1775,18 @@ export function useGlobalSyncSelector<T>(selector: (state: GlobalSyncStore) => T
 export function useDirectoryStore(directory?: string): StoreApi<DirectoryStore> {
   const system = useSyncSystem()
   const dir = directory ?? system.directory
+
+  if (dir) {
+    const projects = useProjectsStore.getState().projects
+    const project = projects.find((p) => p.path === dir && p.serverId && p.serverId !== DEFAULT_SERVER_ID)
+    if (project?.serverId) {
+      const remoteStores = getSyncStoresForServer(project.serverId)
+      if (remoteStores) {
+        return remoteStores.ensureChild(dir)
+      }
+    }
+  }
+
   return system.childStores.ensureChild(dir)
 }
 
