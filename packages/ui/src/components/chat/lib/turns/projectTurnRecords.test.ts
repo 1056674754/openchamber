@@ -54,7 +54,7 @@ describe('projectTurnRecords', () => {
         expect(projection.ungroupedMessageIds.size).toBe(0);
     });
 
-    test('does not render assistant replies while their parent user turn is missing', () => {
+    test('keeps assistant replies visible while their parent user turn is missing', () => {
         const user1 = createMessageEntry({ id: 'u1', role: 'user', createdAt: 1 });
         const assistant1 = createMessageEntry({ id: 'a1', role: 'assistant', parentID: 'u1', createdAt: 2 });
         const assistant2 = createMessageEntry({ id: 'a2', role: 'assistant', parentID: 'u2', createdAt: 4 });
@@ -64,17 +64,17 @@ describe('projectTurnRecords', () => {
         expect(projection.turns).toHaveLength(1);
         expect(projection.turns[0]?.turnId).toBe('u1');
         expect(projection.turns[0]?.assistantMessageIds).toEqual(['a1']);
-        expect(projection.ungroupedMessageIds.has('a2')).toBe(false);
+        expect(projection.ungroupedMessageIds.has('a2')).toBe(true);
         expect(projection.indexes.messageToTurnId.has('a2')).toBe(false);
     });
 
-    test('does not render orphan assistant messages as standalone ungrouped entries', () => {
+    test('renders orphan assistant messages as standalone ungrouped entries', () => {
         const assistant = createMessageEntry({ id: 'a1', role: 'assistant', parentID: 'missing-user', createdAt: 1 });
 
         const projection = projectTurnRecords([assistant]);
 
         expect(projection.turns).toHaveLength(0);
-        expect(projection.ungroupedMessageIds.has('a1')).toBe(false);
+        expect(projection.ungroupedMessageIds.has('a1')).toBe(true);
         expect(projection.indexes.messageToTurnId.has('a1')).toBe(false);
     });
 

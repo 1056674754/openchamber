@@ -35,8 +35,6 @@ import { SyncProvider, useSessions } from '@/sync/sync-context';
 import { MultiServerSyncLayer } from '@/sync/MultiServerSyncLayer';
 import { RemoteProjectDiscovery } from '@/sync/RemoteProjectDiscovery';
 import { useDesktopSshStore } from '@/stores/useDesktopSshStore';
-import { useSync } from '@/sync/use-sync';
-import { setOptimisticRefs } from '@/sync/session-actions';
 import { BootstrapDebug } from '@/components/debug/BootstrapDebug';
 import { ConfigUpdateOverlay } from '@/components/ui/ConfigUpdateOverlay';
 import { AboutDialog } from '@/components/ui/AboutDialog';

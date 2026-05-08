@@ -294,9 +294,6 @@ export const projectTurnRecords = (
     const projection = projectTurnIndexes(turns);
     const ungroupedMessageIds = new Set<string>();
     messages.forEach((message) => {
-        if (resolveMessageRole(message) === 'assistant') {
-            return;
-        }
         if (!groupedMessageIds.has(message.info.id)) {
             ungroupedMessageIds.add(message.info.id);
         }

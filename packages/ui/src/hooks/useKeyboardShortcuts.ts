@@ -77,18 +77,7 @@ export const useKeyboardShortcuts = () => {
         }
         e.preventDefault();
         e.stopPropagation();
-        toggleBottomTerminal();
-        return;
-      }
-
-      if (eventMatchesShortcut(e, combo('toggle_terminal_expanded'))) {
-        const { isMobile, isBottomTerminalExpanded } = useUIStore.getState();
-        if (isMobile) {
-          return;
-        }
-        e.preventDefault();
-        e.stopPropagation();
-        setBottomTerminalExpanded(!isBottomTerminalExpanded);
+        openContextTerminal(effectiveDirectory);
         return;
       }
     };

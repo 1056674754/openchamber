@@ -1168,6 +1168,7 @@ export const dict: Record<I18nKey, string> = {
   'diffView.summary.changedFilesPlural': 'Zmieniono {count} plików',
   'diffView.summary.changedFilesSingle': 'Zmieniono {count} plik',
   'directoryExplorerDialog.actions.addProject': 'Dodaj projekt',
+  'directoryExplorerDialog.actions.cancel': 'Anuluj',
   'directoryExplorerDialog.actions.addLocalProject': 'Dodaj projekt lokalny',
   'directoryExplorerDialog.actions.adding': 'Dodawanie...',
   'directoryExplorerDialog.actions.alreadyAdded': 'Już dodano',

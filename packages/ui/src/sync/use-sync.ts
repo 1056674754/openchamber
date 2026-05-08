@@ -8,7 +8,7 @@ import {
   mergeOptimisticPage,
   type OptimisticItem,
 } from "./optimistic"
-import { useDirectoryStore, useSyncSDK, useSyncDirectory, useChildStoreManager } from "./sync-context"
+import { useDirectoryStore, useSyncDirectory, useChildStoreManager } from "./sync-context"
 import { resolveSdkForDirectory } from "./session-actions"
 import { useSessionUIStore } from "./session-ui-store"
 import { dropSessionCaches, getProtectedSessionCacheIds } from "./session-cache"

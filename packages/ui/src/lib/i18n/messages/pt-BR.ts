@@ -1108,6 +1108,7 @@ export const dict: Record<I18nKey, string> = {
   "directoryExplorerDialog.actions.openInFinder": "Abrir no Finder",
   "directoryExplorerDialog.actions.adding": "Adicionando...",
   "directoryExplorerDialog.actions.addProject": "Adicionar projeto",
+  "directoryExplorerDialog.actions.cancel": "Cancelar",
   "directoryExplorerDialog.actions.addLocalProject": "Adicionar projeto local",
   "directoryExplorerDialog.actions.cloneRepository": "Clonar repositório",
   "directoryExplorerDialog.actions.cloneAndAdd": "Clonar e adicionar",

@@ -406,7 +406,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       id,
       (sid) => get().worktreeMetadata.get(sid),
     )
-    const resolvedDir = (directoryHint ? normalizePath(directoryHint) : null) ?? sessionDir
+    const resolvedDir = sessionDir ?? (directoryHint ? normalizePath(directoryHint) : null)
 
     try {
       if (resolvedDir && directoryState.currentDirectory !== resolvedDir) {
