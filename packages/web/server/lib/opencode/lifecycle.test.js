@@ -11,9 +11,17 @@ vi.mock('node:child_process', () => ({
 const { createOpenCodeLifecycleRuntime } = await import('./lifecycle.js');
 
 const originalOpencodeBinary = process.env.OPENCODE_BINARY;
+const originalOpenChamberRuntime = process.env.OPENCHAMBER_RUNTIME;
+const originalFetch = globalThis.fetch;
 
 afterEach(() => {
   spawnMock.mockReset();
+  globalThis.fetch = originalFetch;
+  if (typeof originalOpenChamberRuntime === 'string') {
+    process.env.OPENCHAMBER_RUNTIME = originalOpenChamberRuntime;
+  } else {
+    delete process.env.OPENCHAMBER_RUNTIME;
+  }
   if (typeof originalOpencodeBinary === 'string') {
     process.env.OPENCODE_BINARY = originalOpencodeBinary;
     return;
@@ -28,6 +36,7 @@ const createMockChild = () => {
   child.exitCode = null;
   child.signalCode = null;
   child.pid = 12345;
+  child.unref = vi.fn();
   child.kill = vi.fn(() => {
     child.signalCode = 'SIGTERM';
     queueMicrotask(() => child.emit('close', null, 'SIGTERM'));
@@ -95,6 +104,8 @@ const createRuntime = (overrides = {}) => {
       SHELL_ONLY: 'yes',
       OPENCODE_SERVER_PASSWORD: 'shell-password',
     })),
+    persistManagedOpenCodeAuth: vi.fn(),
+    restoreManagedOpenCodeAuth: vi.fn(() => false),
     ...overrides,
   });
 };
@@ -121,6 +132,61 @@ describe('OpenCode lifecycle', () => {
     expect(options.env.OPENCODE_SERVER_PASSWORD).toBe('password');
 
     await server.close();
+  });
+
+  it('detaches and persists auth for desktop managed OpenCode', async () => {
+    process.env.OPENCHAMBER_RUNTIME = 'desktop';
+    delete process.env.OPENCODE_BINARY;
+    const persistManagedOpenCodeAuth = vi.fn();
+    const child = createMockChild();
+    spawnMock.mockImplementationOnce(() => {
+      queueMicrotask(() => {
+        child.stdout.emit('data', 'opencode server listening on http://127.0.0.1:45678\n');
+      });
+      return child;
+    });
+
+    const runtime = createRuntime({ persistManagedOpenCodeAuth });
+    const server = await runtime.startOpenCode();
+    const [, , options] = spawnMock.mock.calls[0];
+
+    expect(options.detached).toBe(true);
+    expect(child.unref).toHaveBeenCalled();
+    expect(persistManagedOpenCodeAuth).toHaveBeenCalledWith('password');
+
+    await server.close();
+  });
+
+  it('restores persisted auth before reconnecting to the previous managed port', async () => {
+    delete process.env.OPENCODE_BINARY;
+    const restoreManagedOpenCodeAuth = vi.fn(() => true);
+    globalThis.fetch = vi.fn(async (url) => {
+      const text = String(url);
+      if (text.includes(':4096/global/health')) {
+        return { ok: false, json: async () => ({ healthy: false }) };
+      }
+      if (text.includes(':56789/global/health')) {
+        return { ok: true, json: async () => ({ healthy: true }) };
+      }
+      return { ok: true, json: async () => ({}) };
+    });
+
+    const runtime = createRuntime({
+      env: {
+        ENV_CONFIGURED_OPENCODE_PORT: null,
+        ENV_CONFIGURED_OPENCODE_HOST: null,
+        ENV_EFFECTIVE_PORT: null,
+        ENV_CONFIGURED_OPENCODE_HOSTNAME: '127.0.0.1',
+        ENV_SKIP_OPENCODE_START: false,
+      },
+      restoreManagedOpenCodeAuth,
+      readPersistedOpenCodePort: vi.fn(() => 56789),
+    });
+
+    await runtime.bootstrapOpenCodeAtStartup();
+
+    expect(restoreManagedOpenCodeAuth).toHaveBeenCalled();
+    expect(spawnMock).not.toHaveBeenCalled();
   });
 
   it('falls back to buildAugmentedPath when buildManagedOpenCodePath is not provided', async () => {

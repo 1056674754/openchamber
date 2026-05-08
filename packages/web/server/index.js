@@ -269,6 +269,7 @@ const CLOUDFLARE_LEGACY_NAMED_TUNNELS_FILE_PATH = path.join(OPENCHAMBER_DATA_DIR
 const CLOUDFLARE_MANAGED_REMOTE_TUNNELS_VERSION = 1;
 
 const LAST_OPENCODE_PORT_FILE = path.join(OPENCHAMBER_DATA_DIR, 'last-opencode-port');
+const MANAGED_OPENCODE_AUTH_FILE = path.join(OPENCHAMBER_DATA_DIR, 'managed-opencode-auth.json');
 
 const persistOpenCodePort = (port) => {
   try {
@@ -285,6 +286,52 @@ const readPersistedOpenCodePort = () => {
     return Number.isFinite(port) && port > 0 && port <= 65535 ? port : null;
   } catch {
     return null;
+  }
+};
+
+const persistManagedOpenCodeAuth = (password) => {
+  if (typeof password !== 'string' || password.trim().length === 0) return;
+  try {
+    fs.mkdirSync(OPENCHAMBER_DATA_DIR, { recursive: true });
+    fs.writeFileSync(
+      MANAGED_OPENCODE_AUTH_FILE,
+      JSON.stringify({ password: password.trim() }, null, 2),
+      { encoding: 'utf8', mode: 0o600 },
+    );
+    fs.chmodSync(MANAGED_OPENCODE_AUTH_FILE, 0o600);
+  } catch {
+  }
+};
+
+const restoreManagedOpenCodeAuth = () => {
+  try {
+    if (userProvidedOpenCodePassword) return false;
+    if (!fs.existsSync(MANAGED_OPENCODE_AUTH_FILE)) return false;
+    const raw = fs.readFileSync(MANAGED_OPENCODE_AUTH_FILE, 'utf8');
+    const parsed = JSON.parse(raw);
+    const password = typeof parsed?.password === 'string' ? parsed.password.trim() : '';
+    if (!password) return false;
+    openCodeAuthPassword = password;
+    openCodeAuthSource = 'persisted-managed';
+    process.env.OPENCODE_SERVER_PASSWORD = password;
+    syncToHmrState();
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const isDesktopManagedOpenCodePreserveRuntime = () =>
+  process.env.OPENCHAMBER_RUNTIME === 'desktop' || process.env.OPENCHAMBER_ELECTRON_DEV === '1';
+
+const shouldPreserveManagedOpenCodeOnImplicitShutdown = () => {
+  if (!isDesktopManagedOpenCodePreserveRuntime()) return false;
+  try {
+    const raw = fs.readFileSync(SETTINGS_FILE_PATH, 'utf8');
+    const parsed = JSON.parse(raw);
+    return parsed?.desktopKeepManagedOpenCodeAliveOnQuit !== false;
+  } catch {
+    return true;
   }
 };
 
@@ -951,6 +998,8 @@ const openCodeLifecycleRuntime = createOpenCodeLifecycleRuntime({
   getActiveSessionCount,
   persistOpenCodePort,
   readPersistedOpenCodePort,
+  persistManagedOpenCodeAuth,
+  restoreManagedOpenCodeAuth,
 });
 
 const restartOpenCode = (...args) => openCodeLifecycleRuntime.restartOpenCode(...args);
@@ -1041,7 +1090,12 @@ const gracefulShutdownRuntime = createGracefulShutdownRuntime({
   setMessageStreamRuntime: (value) => {
     messageStreamRuntime = value;
   },
-  shouldSkipOpenCodeStop: () => ENV_SKIP_OPENCODE_START || isExternalOpenCode,
+  shouldSkipOpenCodeStop: (shutdownOptions = {}) => {
+    if (ENV_SKIP_OPENCODE_START || isExternalOpenCode) return true;
+    if (shutdownOptions.stopOpenCode === false) return true;
+    if (shutdownOptions.stopOpenCode === true) return false;
+    return shouldPreserveManagedOpenCodeOnImplicitShutdown();
+  },
   getOpenCodePort: () => openCodePort,
   getOpenCodeProcess: () => openCodeProcess,
   setOpenCodeProcess: (value) => {
@@ -1346,7 +1400,10 @@ async function main(options = {}) {
     isReady: () => isOpenCodeReady,
     restartOpenCode: () => restartOpenCode(),
     stop: (shutdownOptions = {}) =>
-      gracefulShutdown({ exitProcess: shutdownOptions.exitProcess ?? false })
+      gracefulShutdown({
+        exitProcess: shutdownOptions.exitProcess ?? false,
+        stopOpenCode: shutdownOptions.stopOpenCode,
+      })
   };
 }
 

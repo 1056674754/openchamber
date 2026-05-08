@@ -263,6 +263,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.menu.openInSidePanel': '사이드 패널에서 열기',
   'sessions.sidebar.session.menu.betaBadge': '베타',
   'sessions.sidebar.session.menu.label': '세션 메뉴',
+  'sessions.sidebar.session.menu.delete': '삭제',
   'sessions.sidebar.session.untitled': '제목 없는 세션',
   'sessions.sidebar.session.export.nothingToExport': '내보낼 내용 없음',
   'sessions.sidebar.session.export.success': '세션을 내보냈습니다',

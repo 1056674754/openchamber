@@ -262,6 +262,7 @@ export const dict = {
   'sessions.sidebar.session.menu.openInSidePanel': 'Open in Side Panel',
   'sessions.sidebar.session.menu.betaBadge': 'beta',
   'sessions.sidebar.session.menu.label': 'Session menu',
+  'sessions.sidebar.session.menu.delete': 'Delete',
   'sessions.sidebar.session.untitled': 'Untitled Session',
   'sessions.sidebar.session.export.nothingToExport': 'Nothing to export',
   'sessions.sidebar.session.export.success': 'Session exported',

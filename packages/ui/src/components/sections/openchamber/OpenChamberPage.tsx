@@ -11,6 +11,7 @@ import { VoiceSettings } from './VoiceSettings';
 import { TunnelSettings } from './TunnelSettings';
 import { OpenCodeCliSettings } from './OpenCodeCliSettings';
 import { DesktopNetworkSettings } from './DesktopNetworkSettings';
+import { DesktopOpenCodeSettings } from './DesktopOpenCodeSettings';
 import { KeyboardShortcutsSettings } from './KeyboardShortcutsSettings';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { useDeviceInfo } from '@/lib/device';
@@ -48,6 +49,11 @@ export const OpenChamberPage: React.FC<OpenChamberPageProps> = ({ section }) => 
                     {showDesktopNetworkSettings && (
                         <div className="border-t border-border/40 pt-6">
                             <DesktopNetworkSettings />
+                        </div>
+                    )}
+                    {showDesktopNetworkSettings && (
+                        <div className="border-t border-border/40 pt-6">
+                            <DesktopOpenCodeSettings />
                         </div>
                     )}
                     <div className="border-t border-border/40 pt-6">
@@ -147,6 +153,11 @@ const SessionsSectionContent: React.FC = () => {
             {showDesktopNetworkSettings && (
                 <div className="border-t border-border/40 pt-6">
                     <DesktopNetworkSettings />
+                </div>
+            )}
+            {showDesktopNetworkSettings && (
+                <div className="border-t border-border/40 pt-6">
+                    <DesktopOpenCodeSettings />
                 </div>
             )}
             <div className="border-t border-border/40 pt-6">

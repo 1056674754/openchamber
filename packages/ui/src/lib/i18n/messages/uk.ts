@@ -263,6 +263,7 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.session.menu.openInSidePanel": "Відкрити в бічній панелі",
   "sessions.sidebar.session.menu.betaBadge": "бета",
   "sessions.sidebar.session.menu.label": "Меню сесії",
+  "sessions.sidebar.session.menu.delete": "Видалити",
   "sessions.sidebar.session.untitled": "Сесія без назви",
   "sessions.sidebar.session.export.nothingToExport": "Нічого експортувати",
   "sessions.sidebar.session.export.success": "Сесію експортовано",

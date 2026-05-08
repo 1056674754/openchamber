@@ -10,6 +10,7 @@ type ScrollOptions = {
     instant?: boolean;
     followBottom?: boolean; // Dynamically track bottom during streaming
     persistFollow?: boolean;
+    force?: boolean;
 };
 
 type ScrollEngineResult = {
@@ -40,7 +41,14 @@ const LERP_FACTOR = 0.14;
 
 // When the remaining distance is below this, snap exactly to bottom.
 const SNAP_EPSILON = 0.5;
+const FOLLOW_SNAP_DISTANCE = 4;
 const FOLLOW_STABLE_FRAME_LIMIT = 8;
+const SCROLL_TRACE_PREFIX = '[chat-scroll-trace]';
+
+const traceScrollWrite = (source: string, data: Record<string, unknown>) => {
+    if (typeof window === 'undefined') return;
+    console.log(SCROLL_TRACE_PREFIX, source, data);
+};
 
 export const useScrollEngine = ({
     containerRef,
@@ -118,10 +126,18 @@ export const useScrollEngine = ({
             const current = c.scrollTop;
             const delta = target - current;
 
-            if (Math.abs(delta) <= SNAP_EPSILON) {
+            if (Math.abs(delta) <= FOLLOW_SNAP_DISTANCE) {
+                traceScrollWrite('engine:follow-snap', {
+                    from: c.scrollTop,
+                    to: target,
+                    scrollHeight: c.scrollHeight,
+                    clientHeight: c.clientHeight,
+                    stack: new Error().stack,
+                });
                 c.scrollTop = target;
+                const actual = c.scrollTop;
                 stableFrames += 1;
-                if (stableFrames >= FOLLOW_STABLE_FRAME_LIMIT) {
+                if (stableFrames >= FOLLOW_STABLE_FRAME_LIMIT || Math.abs(target - actual) > SNAP_EPSILON) {
                     followActiveRef.current = false;
                     followRafRef.current = null;
                     if (!followPersistRef.current) {
@@ -134,7 +150,23 @@ export const useScrollEngine = ({
             }
 
             stableFrames = 0;
-            c.scrollTop = current + delta * LERP_FACTOR;
+            const nextTop = current + delta * LERP_FACTOR;
+            traceScrollWrite('engine:follow-lerp', {
+                from: current,
+                to: nextTop,
+                target,
+                delta,
+                stack: new Error().stack,
+            });
+            c.scrollTop = nextTop;
+            if (Math.abs(c.scrollTop - current) <= SNAP_EPSILON) {
+                followActiveRef.current = false;
+                followRafRef.current = null;
+                if (!followPersistRef.current) {
+                    setIsFollowingBottom(false);
+                }
+                return;
+            }
             followRafRef.current = window.requestAnimationFrame(tick);
         };
 
@@ -186,12 +218,26 @@ export const useScrollEngine = ({
             const preferInstant = options?.instant ?? false;
             const followBottom = options?.followBottom ?? false;
             const persistFollow = options?.persistFollow ?? false;
+            const force = options?.force ?? false;
+
+            if (manualOverrideRef.current && !force) {
+                return;
+            }
 
             manualOverrideRef.current = false;
 
             // Instant scroll (session switch, etc.)
             if (typeof window === 'undefined' || preferInstant) {
                 cancelAll();
+                traceScrollWrite('engine:instant', {
+                    from: container.scrollTop,
+                    to: target,
+                    options,
+                    manualOverride: manualOverrideRef.current,
+                    scrollHeight: container.scrollHeight,
+                    clientHeight: container.clientHeight,
+                    stack: new Error().stack,
+                });
                 container.scrollTop = target;
 
                 if (followBottom && typeof window !== 'undefined') {
@@ -218,6 +264,12 @@ export const useScrollEngine = ({
 
             const distance = Math.abs(target - container.scrollTop);
             if (distance <= SNAP_EPSILON) {
+                traceScrollWrite('engine:snap', {
+                    from: container.scrollTop,
+                    to: target,
+                    options,
+                    stack: new Error().stack,
+                });
                 container.scrollTop = target;
                 const atTop = target <= 1;
                 if (atTopRef.current !== atTop) {
@@ -230,6 +282,11 @@ export const useScrollEngine = ({
             scrollAnimRef.current = animate(container.scrollTop, target, {
                 ...FAST_SPRING,
                 onUpdate: (v) => {
+                    traceScrollWrite('engine:spring', {
+                        from: container.scrollTop,
+                        to: v,
+                        target,
+                    });
                     container.scrollTop = v;
                 },
                 onComplete: () => {
@@ -246,8 +303,8 @@ export const useScrollEngine = ({
 
     const markManualOverride = React.useCallback(() => {
         manualOverrideRef.current = true;
-        cancelFollow();
-    }, [cancelFollow]);
+        cancelAll();
+    }, [cancelAll]);
 
     const isManualOverrideActive = React.useCallback(() => {
         return manualOverrideRef.current;
@@ -277,6 +334,11 @@ export const useScrollEngine = ({
         if (atTopRef.current !== atTop) {
             atTopRef.current = atTop;
             setIsAtTop(atTop);
+        }
+
+        const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+        if (distanceFromBottom <= 1) {
+            manualOverrideRef.current = false;
         }
     }, [cancelSpring, containerRef]);
 

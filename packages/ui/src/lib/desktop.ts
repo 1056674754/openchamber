@@ -52,6 +52,7 @@ export type DesktopSettings = {
   // Optional absolute path to `opencode` binary.
   opencodeBinary?: string;
   desktopLanAccessEnabled?: boolean;
+  desktopKeepManagedOpenCodeAliveOnQuit?: boolean;
   projects?: ProjectEntry[];
   activeProjectId?: string;
   approvedDirectories?: string[];

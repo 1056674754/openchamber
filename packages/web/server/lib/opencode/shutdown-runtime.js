@@ -66,7 +66,8 @@ export const createGracefulShutdownRuntime = (dependencies) => {
       }
     }
 
-    if (!shouldSkipOpenCodeStop()) {
+    const skipOpenCodeStop = shouldSkipOpenCodeStop(options);
+    if (!skipOpenCodeStop) {
       const portToKill = getOpenCodePort();
       const openCodeProcess = getOpenCodeProcess();
 
@@ -85,7 +86,11 @@ export const createGracefulShutdownRuntime = (dependencies) => {
         console.warn(`Timed out waiting for OpenCode port ${portToKill} to be released during shutdown`);
       }
     } else {
-      console.log('Skipping OpenCode shutdown (external server)');
+      console.log('Skipping OpenCode shutdown (external server or preserved managed server)');
+      const openCodeProcess = getOpenCodeProcess();
+      if (openCodeProcess) {
+        setOpenCodeProcess(null);
+      }
     }
 
     const server = getServer();

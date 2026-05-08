@@ -2241,6 +2241,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.menu.pinGlobal': 'Pin Globally',
   'sessions.sidebar.session.menu.pinToProject': 'Pin to Project',
   'sessions.sidebar.session.menu.unpinGlobal': 'Unpin Globally',
+  'sessions.sidebar.session.menu.delete': 'Usuń',
   'sessions.sidebar.session.status.pinnedGlobal': 'Globally pinned session',
   'sessions.sidebar.session.status.remoteInstance': 'Remote instance: {status}',
   'sessions.sidebar.session.status.remoteProjectDir': 'Project dir:',

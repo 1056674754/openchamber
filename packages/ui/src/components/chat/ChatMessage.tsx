@@ -189,7 +189,7 @@ const SystemDirectiveBanner: React.FC<{
                     <span
                         className="text-[10px] font-bold px-1 py-0.5 rounded"
                         style={{
-                            backgroundColor: 'var(--surface-mutedForeground)',
+                            backgroundColor: 'var(--status-info)',
                             color: 'var(--surface-background)',
                         }}
                     >
@@ -207,13 +207,15 @@ const SystemDirectiveBanner: React.FC<{
                         {statusInfo}
                     </span>
                 )}
-                {!isMessageCompleted && (
-                    <span className="text-xs animate-pulse ml-auto" style={{ color: 'var(--status-info)' }}>
-                        ●
+                <span className="flex items-center gap-1.5 ml-auto">
+                    {!isMessageCompleted && (
+                        <span className="text-xs animate-pulse" style={{ color: 'var(--status-info)' }}>
+                            ●
+                        </span>
+                    )}
+                    <span className="text-xs" style={{ color: 'var(--surface-mutedForeground)' }}>
+                        {isExpanded ? '▲' : '▼'}
                     </span>
-                )}
-                <span className="text-xs ml-auto" style={{ color: 'var(--surface-mutedForeground)' }}>
-                    {isExpanded ? '▲' : '▼'}
                 </span>
             </button>
             {!isExpanded && remainingTasks.length > 0 && (

@@ -28,6 +28,8 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     getActiveSessionCount = () => 0,
     persistOpenCodePort = () => {},
     readPersistedOpenCodePort = () => null,
+    persistManagedOpenCodeAuth = () => {},
+    restoreManagedOpenCodeAuth = () => false,
   } = deps;
 
   const killProcessOnPort = (port) => {
@@ -250,10 +252,14 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
 
     const child = spawn(binary, args, {
       cwd,
+      detached: process.env.OPENCHAMBER_RUNTIME === 'desktop',
       env: processEnv,
       windowsHide: true,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
+    if (process.env.OPENCHAMBER_RUNTIME === 'desktop' && typeof child.unref === 'function') {
+      child.unref();
+    }
 
     const url = await new Promise((resolve, reject) => {
       let stdout = '';
@@ -468,6 +474,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       if (await waitForReady(serverInstance.url, 10000)) {
         setOpenCodePort(port);
         persistOpenCodePort(port);
+        persistManagedOpenCodeAuth(openCodePassword);
         setDetectedOpenCodeApiPrefix(prefix);
 
         state.isOpenCodeReady = true;
@@ -748,56 +755,59 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       syncFromHmrState();
       if (await isOpenCodeProcessHealthy()) {
         console.log(`[HMR] Reusing existing OpenCode process on port ${state.openCodePort}`);
-      } else if (env.ENV_SKIP_OPENCODE_START && env.ENV_EFFECTIVE_PORT) {
-        const label = env.ENV_CONFIGURED_OPENCODE_HOST ? env.ENV_CONFIGURED_OPENCODE_HOST.origin : `http://localhost:${env.ENV_EFFECTIVE_PORT}`;
-        console.log(`Using external OpenCode server at ${label} (skip-start mode)`);
-        state.openCodeBaseUrl = env.ENV_CONFIGURED_OPENCODE_HOST?.origin ?? null;
-        setOpenCodePort(env.ENV_EFFECTIVE_PORT);
-        state.isOpenCodeReady = true;
-        state.isExternalOpenCode = true;
-        state.lastOpenCodeError = null;
-        state.openCodeNotReadySince = 0;
-        syncToHmrState();
-      } else if (env.ENV_EFFECTIVE_PORT && await probeExternalOpenCode(env.ENV_EFFECTIVE_PORT, env.ENV_CONFIGURED_OPENCODE_HOST?.origin)) {
-        const label = env.ENV_CONFIGURED_OPENCODE_HOST ? env.ENV_CONFIGURED_OPENCODE_HOST.origin : `http://localhost:${env.ENV_EFFECTIVE_PORT}`;
-        console.log(`Auto-detected existing OpenCode server at ${label}`);
-        state.openCodeBaseUrl = env.ENV_CONFIGURED_OPENCODE_HOST?.origin ?? null;
-        setOpenCodePort(env.ENV_EFFECTIVE_PORT);
-        state.isOpenCodeReady = true;
-        state.isExternalOpenCode = true;
-        state.lastOpenCodeError = null;
-        state.openCodeNotReadySince = 0;
-        syncToHmrState();
-      } else if (!env.ENV_EFFECTIVE_PORT && await probeExternalOpenCode(4096)) {
-        console.log('Auto-detected existing OpenCode server on default port 4096');
-        setOpenCodePort(4096);
-        state.isOpenCodeReady = true;
-        state.isExternalOpenCode = true;
-        state.lastOpenCodeError = null;
-        state.openCodeNotReadySince = 0;
-        syncToHmrState();
       } else {
-        const lastPort = readPersistedOpenCodePort();
-        if (lastPort && lastPort !== 4096 && await probeExternalOpenCode(lastPort)) {
-          console.log(`Reconnected to previous OpenCode server on port ${lastPort}`);
-          setOpenCodePort(lastPort);
+        restoreManagedOpenCodeAuth();
+        if (env.ENV_SKIP_OPENCODE_START && env.ENV_EFFECTIVE_PORT) {
+          const label = env.ENV_CONFIGURED_OPENCODE_HOST ? env.ENV_CONFIGURED_OPENCODE_HOST.origin : `http://localhost:${env.ENV_EFFECTIVE_PORT}`;
+          console.log(`Using external OpenCode server at ${label} (skip-start mode)`);
+          state.openCodeBaseUrl = env.ENV_CONFIGURED_OPENCODE_HOST?.origin ?? null;
+          setOpenCodePort(env.ENV_EFFECTIVE_PORT);
+          state.isOpenCodeReady = true;
+          state.isExternalOpenCode = true;
+          state.lastOpenCodeError = null;
+          state.openCodeNotReadySince = 0;
+          syncToHmrState();
+        } else if (env.ENV_EFFECTIVE_PORT && await probeExternalOpenCode(env.ENV_EFFECTIVE_PORT, env.ENV_CONFIGURED_OPENCODE_HOST?.origin)) {
+          const label = env.ENV_CONFIGURED_OPENCODE_HOST ? env.ENV_CONFIGURED_OPENCODE_HOST.origin : `http://localhost:${env.ENV_EFFECTIVE_PORT}`;
+          console.log(`Auto-detected existing OpenCode server at ${label}`);
+          state.openCodeBaseUrl = env.ENV_CONFIGURED_OPENCODE_HOST?.origin ?? null;
+          setOpenCodePort(env.ENV_EFFECTIVE_PORT);
+          state.isOpenCodeReady = true;
+          state.isExternalOpenCode = true;
+          state.lastOpenCodeError = null;
+          state.openCodeNotReadySince = 0;
+          syncToHmrState();
+        } else if (!env.ENV_EFFECTIVE_PORT && await probeExternalOpenCode(4096)) {
+          console.log('Auto-detected existing OpenCode server on default port 4096');
+          setOpenCodePort(4096);
           state.isOpenCodeReady = true;
           state.isExternalOpenCode = true;
           state.lastOpenCodeError = null;
           state.openCodeNotReadySince = 0;
           syncToHmrState();
         } else {
-          if (env.ENV_EFFECTIVE_PORT) {
-            console.log(`Using OpenCode port from environment: ${env.ENV_EFFECTIVE_PORT}`);
-            setOpenCodePort(env.ENV_EFFECTIVE_PORT);
+          const lastPort = readPersistedOpenCodePort();
+          if (lastPort && lastPort !== 4096 && await probeExternalOpenCode(lastPort)) {
+            console.log(`Reconnected to previous OpenCode server on port ${lastPort}`);
+            setOpenCodePort(lastPort);
+            state.isOpenCodeReady = true;
+            state.isExternalOpenCode = true;
+            state.lastOpenCodeError = null;
+            state.openCodeNotReadySince = 0;
+            syncToHmrState();
           } else {
-            state.openCodePort = null;
+            if (env.ENV_EFFECTIVE_PORT) {
+              console.log(`Using OpenCode port from environment: ${env.ENV_EFFECTIVE_PORT}`);
+              setOpenCodePort(env.ENV_EFFECTIVE_PORT);
+            } else {
+              state.openCodePort = null;
+              syncToHmrState();
+            }
+
+            state.lastOpenCodeError = null;
+            state.openCodeProcess = await startOpenCode();
             syncToHmrState();
           }
-
-          state.lastOpenCodeError = null;
-          state.openCodeProcess = await startOpenCode();
-          syncToHmrState();
         }
       }
       await waitForOpenCodePort();
