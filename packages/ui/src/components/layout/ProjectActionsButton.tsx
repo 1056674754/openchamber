@@ -191,8 +191,7 @@ export const ProjectActionsButton = ({
   const activeServerId = useActiveServerId();
   const activeServerBaseUrl = useActiveServerBaseUrl();
 
-  const setBottomTerminalOpen = useUIStore((state) => state.setBottomTerminalOpen);
-  const setActiveMainTab = useUIStore((state) => state.setActiveMainTab);
+  const openContextTerminal = useUIStore((state) => state.openContextTerminal);
   const setSettingsPage = useUIStore((state) => state.setSettingsPage);
   const setSettingsDialogOpen = useUIStore((state) => state.setSettingsDialogOpen);
   const setSettingsProjectsSelectedId = useUIStore((state) => state.setSettingsProjectsSelectedId);
@@ -441,8 +440,7 @@ export const ProjectActionsButton = ({
     setTabIconKey(normalizedDirectory, tabId, action.icon || 'play', activeServerId);
     if (options.revealTerminal !== false) {
       setActiveTab(normalizedDirectory, tabId, activeServerId);
-      setBottomTerminalOpen(true);
-      setActiveMainTab('terminal');
+      openContextTerminal(normalizedDirectory);
     }
 
     const stateAfterTab = useTerminalStore.getState().getDirectoryState(normalizedDirectory, activeServerId);
@@ -456,9 +454,8 @@ export const ProjectActionsButton = ({
     activeServerId,
     ensureDirectory,
     normalizedDirectory,
-    setActiveMainTab,
     setActiveTab,
-    setBottomTerminalOpen,
+    openContextTerminal,
     setTabIconKey,
     setTabLabel,
     t,

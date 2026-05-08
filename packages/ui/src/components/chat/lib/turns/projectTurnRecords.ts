@@ -1,3 +1,5 @@
+import { isSystemDirectiveMessage } from '@/lib/messages/system-directive';
+
 import { projectTurnActivity } from './projectTurnActivity';
 import { projectTurnIndexes } from './projectTurnIndexes';
 import { projectTurnDiffStats, projectTurnSummary } from './projectTurnSummary';
@@ -107,6 +109,18 @@ export const projectTurnRecords = (
     messages.forEach((message, index) => {
         const role = resolveMessageRole(message);
         if (role === 'user') {
+            if (isSystemDirectiveMessage(message.parts)) {
+                if (!currentTurn) {
+                    return;
+                }
+
+                currentTurn.assistantMessages.push(message);
+                currentTurn.assistantMessageIds.push(message.info.id);
+                currentTurn.messages.push(createTurnMessageRecord(message, index));
+                groupedMessageIds.add(message.info.id);
+                return;
+            }
+
             const turnId = message.info.id;
             const turn: TurnRecord = {
                 turnId,

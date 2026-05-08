@@ -320,7 +320,6 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
 
   const homeDirectory = useDirectoryStore((state) => state.homeDirectory);
   const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
-  const setDirectory = useDirectoryStore((state) => state.setDirectory);
 
   const projects = useProjectsStore((state) => state.projects);
   const activeProjectId = useProjectsStore((state) => state.activeProjectId);
@@ -915,7 +914,6 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
     confirmDeleteSession,
   } = useSessionActions({
     activeProjectId,
-    currentDirectory,
     currentSessionId,
     mobileVariant,
     allowReselect,
@@ -924,11 +922,8 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
     sessionSearchQuery,
     setSessionSearchQuery,
     setIsSessionSearchOpen,
-    setActiveProjectIdOnly,
-    setDirectory,
     setActiveMainTab,
     setSessionSwitcherOpen,
-    setCurrentSession,
     updateSessionTitle,
     shareSession,
     unshareSession,
@@ -1182,7 +1177,6 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
     activeSessionByProject,
     setActiveSessionByProject,
     currentSessionId,
-    handleSessionSelect,
     newSessionDraftOpen,
     mobileVariant,
     openNewSessionDraft,

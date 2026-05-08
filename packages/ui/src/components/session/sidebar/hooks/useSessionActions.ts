@@ -3,6 +3,7 @@ import type { Session } from '@opencode-ai/sdk/v2';
 import { toast } from '@/components/ui';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { useI18n } from '@/lib/i18n';
+import { useSessionUIStore } from '@/sync/session-ui-store';
 
 type DeleteSessionConfirmSetter = React.Dispatch<React.SetStateAction<{
   session: Session;
@@ -12,7 +13,6 @@ type DeleteSessionConfirmSetter = React.Dispatch<React.SetStateAction<{
 
 type Args = {
   activeProjectId: string | null;
-  currentDirectory: string | null;
   currentSessionId: string | null;
   mobileVariant: boolean;
   allowReselect: boolean;
@@ -21,11 +21,8 @@ type Args = {
   sessionSearchQuery: string;
   setSessionSearchQuery: (value: string) => void;
   setIsSessionSearchOpen: (open: boolean) => void;
-  setActiveProjectIdOnly: (id: string) => void;
-  setDirectory: (directory: string, options?: { showOverlay?: boolean }) => void;
   setActiveMainTab: (tab: 'chat' | 'plan' | 'git' | 'diff' | 'terminal' | 'files') => void;
   setSessionSwitcherOpen: (open: boolean) => void;
-  setCurrentSession: (sessionId: string | null, directoryHint?: string | null) => void;
   updateSessionTitle: (id: string, title: string) => Promise<void>;
   shareSession: (id: string) => Promise<Session | null>;
   unshareSession: (id: string) => Promise<Session | null>;
@@ -70,14 +67,6 @@ export const useSessionActions = (args: Args) => {
         args.setIsSessionSearchOpen(false);
       };
 
-      if (projectId && projectId !== args.activeProjectId) {
-        args.setActiveProjectIdOnly(projectId);
-      }
-
-      if (sessionDirectory && sessionDirectory !== args.currentDirectory) {
-        args.setDirectory(sessionDirectory, { showOverlay: false });
-      }
-
       if (args.mobileVariant) {
         args.setActiveMainTab('chat');
         args.setSessionSwitcherOpen(false);
@@ -95,7 +84,12 @@ export const useSessionActions = (args: Args) => {
         resetSessionSearch();
         return;
       }
-      args.setCurrentSession(sessionId, sessionDirectory ?? null);
+
+      if (sessionDirectory && projectId) {
+        useSessionUIStore.getState().navigateToSession(sessionId, sessionDirectory, projectId);
+      } else {
+        useSessionUIStore.getState().setCurrentSession(sessionId, sessionDirectory ?? null);
+      }
       args.onSessionSelected?.(sessionId);
       resetSessionSearch();
     },

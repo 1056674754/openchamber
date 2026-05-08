@@ -2,6 +2,7 @@ import React from 'react';
 import type { Session } from '@opencode-ai/sdk/v2';
 import type { SessionGroup, SessionNode } from '../types';
 import { normalizePath } from '../utils';
+import { useSessionUIStore } from '@/sync/session-ui-store';
 
 type ProjectSection = {
   project: { id: string; normalizedPath: string };
@@ -14,7 +15,6 @@ type Args = {
   activeSessionByProject: Map<string, string>;
   setActiveSessionByProject: React.Dispatch<React.SetStateAction<Map<string, string>>>;
   currentSessionId: string | null;
-  handleSessionSelect: (sessionId: string, sessionDirectory: string | null, isMissingDirectory: boolean, projectId?: string | null) => void;
   newSessionDraftOpen: boolean;
   mobileVariant: boolean;
   openNewSessionDraft: (options?: { directoryOverride?: string | null }) => void;
@@ -31,7 +31,6 @@ export const useProjectSessionSelection = (args: Args): { currentSessionDirector
     activeSessionByProject,
     setActiveSessionByProject,
     currentSessionId,
-    handleSessionSelect,
     newSessionDraftOpen,
     mobileVariant,
     openNewSessionDraft,
@@ -100,6 +99,18 @@ export const useProjectSessionSelection = (args: Args): { currentSessionDirector
       return;
     }
     previousActiveProjectRef.current = activeProjectId;
+
+    const explicitTarget = useSessionUIStore.getState().consumeNavigationIntent();
+    if (explicitTarget) {
+      setActiveSessionByProject((prev) => {
+        if (prev.get(activeProjectId) === explicitTarget) return prev;
+        const next = new Map(prev);
+        next.set(activeProjectId, explicitTarget);
+        return next;
+      });
+      return;
+    }
+
     const projectMap = projectSessionMeta.metaByProject.get(activeProjectId);
 
     if (currentSessionId && projectMap && projectMap.has(currentSessionId)) {
@@ -133,12 +144,13 @@ export const useProjectSessionSelection = (args: Args): { currentSessionDirector
       return;
     }
     const targetDirectory = projectMap.get(targetSessionId)?.directory ?? null;
-    handleSessionSelect(targetSessionId, targetDirectory, false, activeProjectId);
+    if (targetDirectory) {
+      useSessionUIStore.getState().navigateToSession(targetSessionId, targetDirectory, activeProjectId);
+    }
   }, [
     activeProjectId,
     activeSessionByProject,
     currentSessionId,
-    handleSessionSelect,
     newSessionDraftOpen,
     mobileVariant,
     openNewSessionDraft,

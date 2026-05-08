@@ -1482,3 +1482,30 @@ input[aria-label="Terminal input"] {
 [data-settings-view="true"] .overlay-scrollbar {
   display: none;
 }
+
+@keyframes slot-fade-in {
+  0%, 40% { opacity: 1; }
+  50%, 90% { opacity: 0; }
+  100% { opacity: 1; }
+}
+
+@keyframes slot-fade-out {
+  0%, 40% { opacity: 0; }
+  50%, 90% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+.animate-slot-fade-in {
+  animation: slot-fade-in 2.4s ease-in-out infinite;
+}
+
+.animate-slot-fade-out {
+  animation: slot-fade-out 2.4s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-slot-fade-in,
+  .animate-slot-fade-out {
+    animation: none;
+  }
+}

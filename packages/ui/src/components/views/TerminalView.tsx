@@ -1,5 +1,5 @@
 import React from 'react';
-import { RiAddLine, RiArrowDownLine, RiArrowGoBackLine, RiArrowLeftLine, RiArrowRightLine, RiArrowUpLine, RiCloseLine, RiCommandLine, RiFullscreenExitLine, RiFullscreenLine, RiGlobalLine, RiTerminalLine } from '@remixicon/react';
+import { RiAddLine, RiArrowDownLine, RiArrowGoBackLine, RiArrowLeftLine, RiArrowRightLine, RiArrowUpLine, RiCommandLine, RiGlobalLine, RiTerminalLine } from '@remixicon/react';
 
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useTerminalStore } from '@/stores/useTerminalStore';
@@ -92,8 +92,6 @@ export const TerminalView: React.FC = () => {
     const { currentTheme } = useThemeSystem();
     const { monoFont } = useFontPreferences();
     const terminalFontSize = useUIStore(state => state.terminalFontSize);
-    const bottomTerminalHeight = useUIStore((state) => state.bottomTerminalHeight);
-    const isBottomTerminalExpanded = useUIStore((state) => state.isBottomTerminalExpanded);
     const { isMobile, isTablet, hasTouchOnlyPointer } = useDeviceInfo();
     const isTouchTerminal = isMobile || isTablet;
     const useTouchTerminalInput = (isTouchTerminal || hasTouchOnlyPointer) && runtime.platform === 'web';
@@ -178,7 +176,6 @@ export const TerminalView: React.FC = () => {
     const [isReconnectPending, setIsReconnectPending] = React.useState(false);
     const [activeModifier, setActiveModifier] = React.useState<Modifier | null>(null);
     const [isRestarting, setIsRestarting] = React.useState(false);
-    const [viewportLayoutVersion, setViewportLayoutVersion] = React.useState(0);
 
     const streamCleanupRef = React.useRef<(() => void) | null>(null);
     const activeTerminalIdRef = React.useRef<string | null>(null);
@@ -231,11 +228,16 @@ export const TerminalView: React.FC = () => {
     }, [terminalHydrated]);
 
     const activeMainTab = useUIStore((state) => state.activeMainTab);
-    const isBottomTerminalOpen = useUIStore((state) => state.isBottomTerminalOpen);
-    const setBottomTerminalOpen = useUIStore((state) => state.setBottomTerminalOpen);
-    const setBottomTerminalExpanded = useUIStore((state) => state.setBottomTerminalExpanded);
-    const isTerminalActive = activeMainTab === 'terminal';
-    const isTerminalVisible = isTerminalActive || isBottomTerminalOpen;
+    const contextPanelByDirectory = useUIStore((state) => state.contextPanelByDirectory);
+    const isTerminalMainTab = activeMainTab === 'terminal';
+    const isTerminalInContextPanel = React.useMemo(() => {
+        if (!effectiveDirectory) return false;
+        const panelState = contextPanelByDirectory[effectiveDirectory];
+        if (!panelState?.isOpen || !panelState.activeTabId) return false;
+        const activeTab = panelState.tabs.find(t => t.id === panelState.activeTabId);
+        return activeTab?.mode === 'terminal';
+    }, [contextPanelByDirectory, effectiveDirectory]);
+    const isTerminalVisible = isTerminalMainTab || isTerminalInContextPanel;
     const [hasOpenedTerminalViewport, setHasOpenedTerminalViewport] = React.useState(isTerminalVisible);
 
     React.useEffect(() => {
@@ -864,29 +866,6 @@ export const TerminalView: React.FC = () => {
         return `${serverPart}${directoryPart}::${tabPart}::${terminalPart}`;
     }, [activeServerId, effectiveDirectory, activeTabId, terminalSessionId]);
 
-    const viewportSessionKey = React.useMemo(() => {
-        return `${terminalViewportKey}::layout-${viewportLayoutVersion}`;
-    }, [terminalViewportKey, viewportLayoutVersion]);
-
-    React.useEffect(() => {
-        if (useTouchTerminalInput || !isBottomTerminalOpen || !isTerminalVisible) {
-            return;
-        }
-
-        if (typeof window === 'undefined') {
-            setViewportLayoutVersion((value) => value + 1);
-            return;
-        }
-
-        const timeoutId = window.setTimeout(() => {
-            setViewportLayoutVersion((value) => value + 1);
-        }, 140);
-
-        return () => {
-            window.clearTimeout(timeoutId);
-        };
-    }, [bottomTerminalHeight, isBottomTerminalExpanded, isBottomTerminalOpen, isTerminalVisible, useTouchTerminalInput]);
-
     React.useEffect(() => {
         if (!isTerminalVisible || useTouchTerminalInput) {
             return;
@@ -912,34 +891,6 @@ export const TerminalView: React.FC = () => {
         fitOnce();
     }, [focusTerminalWhenWindowActive, isTerminalVisible, useTouchTerminalInput, terminalViewportKey, terminalSessionId]);
 
-    React.useEffect(() => {
-        if (useTouchTerminalInput || !isTerminalVisible || !isBottomTerminalOpen) {
-            return;
-        }
-
-        const controller = terminalControllerRef.current;
-        if (!controller) {
-            return;
-        }
-
-        const fitOnce = () => {
-            controller.fit();
-        };
-
-        if (typeof window !== 'undefined') {
-            const rafId = window.requestAnimationFrame(() => {
-                fitOnce();
-            });
-            const timeoutIds = [0, 80, 180, 320].map((delay) => window.setTimeout(fitOnce, delay));
-            return () => {
-                window.cancelAnimationFrame(rafId);
-                timeoutIds.forEach((id) => window.clearTimeout(id));
-            };
-        }
-
-        fitOnce();
-    }, [bottomTerminalHeight, isBottomTerminalExpanded, isBottomTerminalOpen, isTerminalVisible, useTouchTerminalInput]);
-
     if (!hasActiveContext) {
         return (
             <div className="flex h-full items-center justify-center p-4 text-center text-sm text-muted-foreground">
@@ -964,7 +915,6 @@ export const TerminalView: React.FC = () => {
 
     const quickKeysDisabled = !terminalSessionId || isConnecting || isRestarting || isReconnectPending;
     const shouldRenderViewport = hasOpenedTerminalViewport;
-    const showBottomDockControls = !isTouchTerminal && isBottomTerminalOpen && !isTerminalActive;
     const quickKeysControls = (
         <>
             <Button
@@ -1115,32 +1065,6 @@ export const TerminalView: React.FC = () => {
                                     <span className="whitespace-nowrap">{t('terminalView.preview.open')}</span>
                                 </Button>
                             ) : null}
-                            {showBottomDockControls ? (
-                                <>
-                                    <Button
-                                        type="button"
-                                        size="xs"
-                                        variant="ghost"
-                                        onClick={() => setBottomTerminalExpanded(!isBottomTerminalExpanded)}
-                                        className={cn('shrink-0 p-0', isMobile ? 'h-8 w-8' : 'h-7 w-7')}
-                                        title={isBottomTerminalExpanded ? t('terminalView.bottomDock.restoreTitle') : t('terminalView.bottomDock.expandTitle')}
-                                        aria-label={isBottomTerminalExpanded ? t('terminalView.bottomDock.restoreAria') : t('terminalView.bottomDock.expandAria')}
-                                    >
-                                        {isBottomTerminalExpanded ? <RiFullscreenExitLine className="h-4 w-4" /> : <RiFullscreenLine className="h-4 w-4" />}
-                                    </Button>
-                                    <Button
-                                        type="button"
-                                        size="xs"
-                                        variant="ghost"
-                                        onClick={() => setBottomTerminalOpen(false)}
-                                        className={cn('shrink-0 p-0', isMobile ? 'h-8 w-8' : 'h-7 w-7')}
-                                        title={t('terminalView.bottomDock.closeTitle')}
-                                        aria-label={t('terminalView.bottomDock.closeAria')}
-                                    >
-                                        <RiCloseLine className="h-4 w-4" />
-                                    </Button>
-                                </>
-                            ) : null}
                         </div>
                     </div>
                 ) : null}
@@ -1168,7 +1092,7 @@ export const TerminalView: React.FC = () => {
                             ref={(controller) => {
                                 terminalControllerRef.current = controller;
                             }}
-                            sessionKey={viewportSessionKey}
+                            sessionKey={terminalViewportKey}
                             chunks={bufferChunks}
                             onInput={handleViewportInput}
                             onResize={handleViewportResize}

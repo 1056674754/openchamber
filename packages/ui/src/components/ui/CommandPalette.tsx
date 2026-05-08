@@ -82,7 +82,7 @@ export const CommandPalette: React.FC = () => {
   const setSessionSwitcherOpen = useUIStore((s) => s.setSessionSwitcherOpen);
   const toggleSidebar = useUIStore((s) => s.toggleSidebar);
   const toggleRightSidebar = useUIStore((s) => s.toggleRightSidebar);
-  const toggleBottomTerminal = useUIStore((s) => s.toggleBottomTerminal);
+  const openContextTerminal = useUIStore((s) => s.openContextTerminal);
   const openContextOverview = useUIStore((s) => s.openContextOverview);
   const openContextFile = useUIStore((s) => s.openContextFile);
   const shortcutOverrides = useUIStore((s) => s.shortcutOverrides);
@@ -201,7 +201,7 @@ export const CommandPalette: React.FC = () => {
         icon: <RiTerminalBoxLine className="mr-2 h-4 w-4" />,
         shortcutId: 'toggle_terminal',
         searchText: t('commandPalette.item.toggleTerminal'),
-        onSelect: run(() => toggleBottomTerminal()),
+        onSelect: run(() => openContextTerminal(effectiveDirectory ?? '')),
       },
       {
         id: 'context-usage',
@@ -231,7 +231,8 @@ export const CommandPalette: React.FC = () => {
     openNewSessionDraft,
     toggleSidebar,
     toggleRightSidebar,
-    toggleBottomTerminal,
+    openContextTerminal,
+    effectiveDirectory,
     currentDirectory,
     openContextOverview,
     setSettingsDialogOpen,

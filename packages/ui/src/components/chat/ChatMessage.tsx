@@ -26,6 +26,13 @@ import { extractTextContent, filterVisibleParts, normalizeParts } from './messag
 import { normalizeUserDisplayParts } from './message/normalizeUserDisplayParts';
 import { flattenAssistantTextParts } from '@/lib/messages/messageText';
 import { isFullySyntheticMessage } from '@/lib/messages/synthetic';
+import {
+    extractDirectiveType,
+    extractRemainingTasks,
+    extractStatusInfo,
+    hasOMOMarker,
+    isSystemDirectiveMessage,
+} from '@/lib/messages/system-directive';
 import { isLikelyProviderAuthFailure, PROVIDER_AUTH_FAILURE_MESSAGE } from '@/lib/messages/providerAuthError';
 import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
 import type { TurnGroupingContext } from './lib/turns/types';
@@ -139,6 +146,125 @@ interface ChatMessageProps {
     onUserAnimationConsumed?: (messageId: string) => void;
 }
 
+const SystemDirectiveBanner: React.FC<{
+    message: { info: Message; parts: Part[] };
+    displayParts: Part[];
+    directiveType: string | null;
+    isMessageCompleted: boolean;
+    messageFinish: string | undefined;
+    syntaxTheme: { [key: string]: React.CSSProperties };
+    isMobile: boolean;
+    copiedCode: string | null;
+    onCopyCode: (code: string) => void;
+    expandedTools: Set<string>;
+    onToggleTool: (toolId: string) => void;
+    onShowPopup: (content: ToolPopupContent) => void;
+    streamPhase: StreamPhase;
+    allowAnimation: boolean;
+    onContentChange?: (reason?: ContentChangeReason, messageId?: string) => void;
+}> = ({ message, displayParts, directiveType, isMessageCompleted, messageFinish, syntaxTheme, isMobile, copiedCode, onCopyCode, expandedTools, onToggleTool, onShowPopup, streamPhase, allowAnimation, onContentChange }) => {
+    const [isExpanded, setIsExpanded] = React.useState(false);
+    const statusInfo = extractStatusInfo(message.parts);
+    const remainingTasks = extractRemainingTasks(message.parts);
+    const hasOMO = hasOMOMarker(message.parts);
+    const title = directiveType ?? 'System';
+
+    return (
+        <div
+            className="w-full rounded-lg border px-3 py-2 text-sm"
+            style={{
+                backgroundColor: 'var(--surface-elevated)',
+                borderColor: 'var(--status-info)',
+                borderLeftWidth: '3px',
+                color: 'var(--surface-mutedForeground)',
+                opacity: isMessageCompleted ? 0.7 : 1,
+            }}
+            >
+                <button
+                type="button"
+                onClick={() => setIsExpanded((v) => !v)}
+                className="flex items-center gap-2 w-full text-left cursor-pointer"
+            >
+                {hasOMO && (
+                    <span
+                        className="text-[10px] font-bold px-1 py-0.5 rounded"
+                        style={{
+                            backgroundColor: 'var(--surface-mutedForeground)',
+                            color: 'var(--surface-background)',
+                        }}
+                    >
+                        OMO
+                    </span>
+                )}
+                <span
+                    className="text-xs font-medium px-1.5 py-0.5 rounded"
+                    style={{ backgroundColor: 'var(--status-info)', color: 'var(--surface-background)' }}
+                >
+                    {title}
+                </span>
+                {statusInfo && (
+                    <span className="text-xs truncate" style={{ color: 'var(--surface-mutedForeground)' }}>
+                        {statusInfo}
+                    </span>
+                )}
+                {!isMessageCompleted && (
+                    <span className="text-xs animate-pulse ml-auto" style={{ color: 'var(--status-info)' }}>
+                        ●
+                    </span>
+                )}
+                <span className="text-xs ml-auto" style={{ color: 'var(--surface-mutedForeground)' }}>
+                    {isExpanded ? '▲' : '▼'}
+                </span>
+            </button>
+            {!isExpanded && remainingTasks.length > 0 && (
+                <div className="mt-1.5 space-y-0.5">
+                    {remainingTasks.slice(0, 3).map((task, i) => (
+                        <div key={i} className="flex items-center gap-1.5 text-xs">
+                            <span
+                                className="text-[10px] px-1 rounded"
+                                style={{
+                                    backgroundColor: 'var(--interactive-hover)',
+                                    color: 'var(--surface-mutedForeground)',
+                                }}
+                            >
+                                {task.status}
+                            </span>
+                            <span className="truncate">{task.content}</span>
+                        </div>
+                    ))}
+                    {remainingTasks.length > 3 && (
+                        <div className="text-xs" style={{ color: 'var(--surface-mutedForeground)' }}>
+                            +{remainingTasks.length - 3} more
+                        </div>
+                    )}
+                </div>
+            )}
+            {isExpanded && (
+                <div className="mt-2">
+                    <MessageBody
+                        sessionId={message.info.sessionID}
+                        messageId={message.info.id}
+                        parts={displayParts}
+                        isUser={false}
+                        isMessageCompleted={isMessageCompleted}
+                        messageFinish={messageFinish}
+                        syntaxTheme={syntaxTheme}
+                        isMobile={isMobile}
+                        copiedCode={copiedCode}
+                        onCopyCode={onCopyCode}
+                        expandedTools={expandedTools}
+                        onToggleTool={onToggleTool}
+                        onShowPopup={onShowPopup}
+                        streamPhase={streamPhase}
+                        allowAnimation={allowAnimation}
+                        onContentChange={onContentChange}
+                    />
+                </div>
+            )}
+        </div>
+    );
+};
+
 const ChatMessage: React.FC<ChatMessageProps> = ({
     message,
     previousMessage,
@@ -206,14 +332,23 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
 
 
     const messageRole = React.useMemo(() => deriveMessageRole(message.info), [message.info]);
+    const isSystemDirective = React.useMemo(() => {
+        if (!messageRole.isUser) return false;
+        return isSystemDirectiveMessage(message.parts);
+    }, [message.parts, messageRole.isUser]);
+    const directiveType = React.useMemo(
+        () => isSystemDirective ? extractDirectiveType(message.parts) : null,
+        [isSystemDirective, message.parts],
+    );
     const shouldRenderAsAssistant = React.useMemo(() => {
         if (!messageRole.isUser) return false;
         const parts = Array.isArray(message.parts) ? message.parts : [];
+        if (isSystemDirective) return true;
         if (parts.some((p) => p?.type === 'subtask')) return true;
         if (isFullySyntheticMessage(parts)) return true;
         if (parts.filter((p) => p?.type === 'text').some((p) => extractTextContent(p).includes('<system-reminder>'))) return true;
         return false;
-    }, [message.parts, messageRole.isUser]);
+    }, [message.parts, messageRole.isUser, isSystemDirective]);
     const isUser = messageRole.isUser && !shouldRenderAsAssistant;
     const useExternalUserActionsRow = isUser && (isMobile || !stickyUserHeader);
     const showStickyInlineHoverRow = isUser && !isMobile && stickyUserHeader && !useExternalUserActionsRow;
@@ -1011,15 +1146,33 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
             <div
                 className={cn(
                     'group w-full',
-                    isUser ? (isMobile ? 'pt-2' : 'pt-6') : assistantTopPaddingClass,
-                    isUser ? 'pb-0' : isFollowedByAssistant ? 'pb-0' : 'pb-8'
+                    isSystemDirective ? 'pt-1 pb-0' : isUser ? (isMobile ? 'pt-2' : 'pt-6') : assistantTopPaddingClass,
+                    isSystemDirective ? '' : isUser ? 'pb-0' : isFollowedByAssistant ? 'pb-0' : 'pb-8'
                 )}
                 id={`message-${message.info.id}`}
                 data-message-id={message.info.id}
                 ref={messageContainerRef}
             >
                 <div className="chat-message-column relative">
-                    {isUser ? (
+                    {isSystemDirective ? (
+                        <SystemDirectiveBanner
+                            message={message}
+                            displayParts={displayParts}
+                            directiveType={directiveType}
+                            isMessageCompleted={isMessageCompleted}
+                            messageFinish={messageFinish}
+                            syntaxTheme={syntaxTheme}
+                            isMobile={isMobile}
+                            copiedCode={copiedCode}
+                            onCopyCode={handleCopyCode}
+                            expandedTools={expandedTools}
+                            onToggleTool={handleToggleTool}
+                            onShowPopup={handleShowPopup}
+                            streamPhase={streamPhase}
+                            allowAnimation={allowAnimation}
+                            onContentChange={onContentChange}
+                        />
+                    ) : isUser ? (
                         displayParts.length === 0 ? null : (
                             <FadeInOnReveal
                                 forceAnimation

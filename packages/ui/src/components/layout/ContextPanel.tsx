@@ -8,6 +8,7 @@ import { DiffView } from '@/components/views/DiffView';
 import { FilesView } from '@/components/views/FilesView';
 import { PlanView } from '@/components/views/PlanView';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
+import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
 import { openExternalUrl } from '@/lib/url';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
@@ -21,11 +22,17 @@ import { useInputStore } from '@/sync/input-store';
 import { ContextPanelContent } from './ContextSidebarTab';
 import { toast } from '@/components/ui';
 
+const TerminalView = lazyWithChunkRecovery(() => import('@/components/views/TerminalView').then(m => ({ default: m.TerminalView })));
+
 const CONTEXT_PANEL_MIN_WIDTH = 360;
 const CONTEXT_PANEL_MAX_WIDTH = 1400;
 const CONTEXT_PANEL_DEFAULT_WIDTH = 600;
 const CONTEXT_TAB_LABEL_MAX_CHARS = 24;
+const CONTEXT_PANEL_SPLIT_HANDLE_HEIGHT = 3;
 type TranslateFn = ReturnType<typeof useI18n>['t'];
+type ContextPanelTabMode = 'diff' | 'file' | 'context' | 'plan' | 'chat' | 'preview' | 'terminal';
+type ContextPanelTabLike = { id: string; mode: ContextPanelTabMode; targetPath: string | null; dedupeKey: string; label: string | null };
+type SplitDropZone = 'top' | 'bottom' | 'middle';
 
 type PreviewConsoleEvent = {
   id: number;
@@ -230,7 +237,7 @@ const getRelativePathLabel = (filePath: string | null, directory: string): strin
 };
 
 const getModeLabel = (
-  mode: 'diff' | 'file' | 'context' | 'plan' | 'chat' | 'preview',
+  mode: ContextPanelTabMode,
   t: TranslateFn
 ): string => {
   if (mode === 'chat') return t('contextPanel.mode.chat');
@@ -238,6 +245,7 @@ const getModeLabel = (
   if (mode === 'diff') return t('contextPanel.mode.diff');
   if (mode === 'plan') return t('contextPanel.mode.plan');
   if (mode === 'preview') return t('contextPanel.mode.preview');
+  if (mode === 'terminal') return t('contextPanel.mode.terminal');
   return t('contextPanel.mode.context');
 };
 
@@ -260,7 +268,7 @@ const getFileNameFromPath = (path: string | null): string | null => {
 };
 
 const getTabLabel = (
-  tab: { mode: 'diff' | 'file' | 'context' | 'plan' | 'chat' | 'preview'; label: string | null; targetPath: string | null },
+  tab: { mode: ContextPanelTabMode; label: string | null; targetPath: string | null },
   t: TranslateFn
 ): string => {
   if (tab.label) {
@@ -287,7 +295,7 @@ const getTabLabel = (
   return getModeLabel(tab.mode, t);
 };
 
-const getTabIcon = (tab: { mode: 'diff' | 'file' | 'context' | 'plan' | 'chat' | 'preview'; targetPath: string | null }): React.ReactNode | undefined => {
+const getTabIcon = (tab: { mode: ContextPanelTabMode; targetPath: string | null }): React.ReactNode | undefined => {
   if (tab.mode === 'file') {
     return tab.targetPath
       ? <FileTypeIcon filePath={tab.targetPath} className="h-3.5 w-3.5" />
@@ -312,6 +320,10 @@ const getTabIcon = (tab: { mode: 'diff' | 'file' | 'context' | 'plan' | 'chat' |
 
   if (tab.mode === 'preview') {
     return <RiGlobalLine className="h-3.5 w-3.5 text-[var(--status-info)]" />;
+  }
+
+  if (tab.mode === 'terminal') {
+    return <RiTerminalBoxLine className="h-3.5 w-3.5" />;
   }
 
   return undefined;
@@ -1094,6 +1106,85 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({ rawUrl, onNavigate }) => {
   );
 };
 
+const ContextPanelTabContent: React.FC<{
+  tab: ContextPanelTabLike;
+  active: boolean;
+  directory: string;
+  effectiveDirectory: string;
+  isFileTabActive: boolean;
+  postEmbeddedVisibilityToChats: () => void;
+  postThemeSyncToEmbeddedChat: () => void;
+  setChatFrameRef: (tabID: string, node: HTMLIFrameElement | null) => void;
+}> = ({
+  tab,
+  active,
+  directory,
+  effectiveDirectory,
+  isFileTabActive,
+  postEmbeddedVisibilityToChats,
+  postThemeSyncToEmbeddedChat,
+  setChatFrameRef,
+}) => {
+  const { t } = useI18n();
+
+  if (tab.mode === 'file') {
+    return isFileTabActive ? <FilesView mode="editor-only" /> : null;
+  }
+
+  if (tab.mode === 'chat') {
+    const sessionID = getSessionIDFromDedupeKey(tab.dedupeKey);
+    const src = sessionID ? buildEmbeddedSessionChatURL(sessionID, directory || null) : '';
+    if (!sessionID || !src) {
+      return null;
+    }
+
+    return (
+      <iframe
+        ref={(node) => setChatFrameRef(tab.id, node)}
+        src={src}
+        title={t('contextPanel.iframe.sessionChatTitle', { sessionID })}
+        className={cn('h-full w-full border-0 bg-background', active ? 'block' : 'hidden')}
+        onLoad={() => {
+          postThemeSyncToEmbeddedChat();
+          postEmbeddedVisibilityToChats();
+        }}
+      />
+    );
+  }
+
+  if (tab.mode === 'diff') {
+    return <DiffView hideStackedFileSidebar stackedDefaultCollapsedAll hideFileSelector pinSelectedFileHeaderToTopOnNavigate showOpenInEditorAction />;
+  }
+
+  if (tab.mode === 'context') {
+    return <ContextPanelContent />;
+  }
+
+  if (tab.mode === 'plan') {
+    return <PlanView targetPath={tab.targetPath} />;
+  }
+
+  if (tab.mode === 'preview') {
+    return <PreviewPane rawUrl={tab.targetPath ?? ''} onNavigate={(url) => useUIStore.getState().openContextPreview(effectiveDirectory, url)} />;
+  }
+
+  if (tab.mode === 'terminal') {
+    return (
+      <React.Suspense fallback={null}>
+        <TerminalView />
+      </React.Suspense>
+    );
+  }
+
+  return (
+    <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
+      <RiGlobalLine className="h-12 w-12 text-muted-foreground/50" />
+      <div className="typography-ui-header text-foreground">{t('contextPanel.preview.title')}</div>
+      <div className="max-w-sm typography-micro text-muted-foreground">{t('contextPanel.preview.description')}</div>
+    </div>
+  );
+};
+
 export const ContextPanel: React.FC = () => {
   const { t } = useI18n();
   const effectiveDirectory = useEffectiveDirectory() ?? '';
@@ -1106,13 +1197,17 @@ export const ContextPanel: React.FC = () => {
   const setContextPanelWidth = useUIStore((state) => state.setContextPanelWidth);
   const setActiveContextPanelTab = useUIStore((state) => state.setActiveContextPanelTab);
   const reorderContextPanelTabs = useUIStore((state) => state.reorderContextPanelTabs);
+  const setContextPanelSplit = useUIStore((state) => state.setContextPanelSplit);
+  const setContextPanelSplitRatio = useUIStore((state) => state.setContextPanelSplitRatio);
   const setPendingDiffFile = useUIStore((state) => state.setPendingDiffFile);
   const setSelectedFilePath = useFilesViewTabsStore((state) => state.setSelectedPath);
-  const openContextPreview = useUIStore((state) => state.openContextPreview);
   const { themeMode, lightThemeId, darkThemeId, currentTheme } = useThemeSystem();
 
   const tabs = React.useMemo(() => panelState?.tabs ?? [], [panelState?.tabs]);
   const activeTab = tabs.find((tab) => tab.id === panelState?.activeTabId) ?? tabs[tabs.length - 1] ?? null;
+  const splitTab = panelState?.splitTabId ? (tabs.find((tab) => tab.id === panelState.splitTabId) ?? null) : null;
+  const splitRatio = panelState?.splitRatio ?? 0.5;
+  const hasSplit = Boolean(splitTab && activeTab && splitTab.id !== activeTab.id);
   const isOpen = Boolean(panelState?.isOpen && activeTab);
   const isExpanded = Boolean(isOpen && panelState?.expanded);
   const width = clampWidth(panelState?.width ?? CONTEXT_PANEL_DEFAULT_WIDTH);
@@ -1123,6 +1218,15 @@ export const ContextPanel: React.FC = () => {
   const resizingWidthRef = React.useRef<number | null>(null);
   const activeResizePointerIDRef = React.useRef<number | null>(null);
   const panelRef = React.useRef<HTMLElement | null>(null);
+  const contentAreaRef = React.useRef<HTMLDivElement | null>(null);
+  const splitOverlayRef = React.useRef<HTMLDivElement | null>(null);
+  const splitOverlayLabelRef = React.useRef<HTMLDivElement | null>(null);
+  const draggedTabIDRef = React.useRef<string | null>(null);
+  const splitDropZoneRef = React.useRef<SplitDropZone | null>(null);
+  const isSplitResizingRef = React.useRef(false);
+  const splitResizeStartYRef = React.useRef(0);
+  const splitResizeStartRatioRef = React.useRef(splitRatio);
+  const splitResizeHeightRef = React.useRef(0);
   const chatFrameRefs = React.useRef<Map<string, HTMLIFrameElement>>(new Map());
   const wasOpenRef = React.useRef(false);
 
@@ -1208,6 +1312,66 @@ export const ContextPanel: React.FC = () => {
     }
   }, [isResizing]);
 
+  React.useEffect(() => {
+    if (!directoryKey || !panelState?.splitTabId) {
+      return;
+    }
+
+    if (!tabs.some((tab) => tab.id === panelState.splitTabId) || panelState.splitTabId === activeTab?.id) {
+      setContextPanelSplit(directoryKey, null);
+    }
+  }, [activeTab?.id, directoryKey, panelState?.splitTabId, setContextPanelSplit, tabs]);
+
+  const hideSplitOverlay = React.useCallback(() => {
+    const overlay = splitOverlayRef.current;
+    if (overlay) {
+      overlay.classList.add('hidden');
+    }
+    splitDropZoneRef.current = null;
+  }, []);
+
+  const showSplitOverlay = React.useCallback((zone: SplitDropZone) => {
+    const overlay = splitOverlayRef.current;
+    const label = splitOverlayLabelRef.current;
+    if (!overlay || !label) {
+      return;
+    }
+
+    const top = zone === 'bottom' ? '60%' : '0%';
+    const height = zone === 'middle' ? '100%' : '40%';
+    overlay.style.top = top;
+    overlay.style.height = height;
+    label.textContent = zone === 'top'
+      ? t('contextPanel.split.dropTopHint')
+      : zone === 'bottom'
+        ? t('contextPanel.split.dropBottomHint')
+        : '';
+    overlay.classList.toggle('items-start', zone === 'top');
+    overlay.classList.toggle('items-end', zone === 'bottom');
+    overlay.classList.toggle('items-center', zone === 'middle');
+    overlay.classList.toggle('hidden', zone === 'middle');
+  }, [t]);
+
+  const updateSplitDropZone = React.useCallback((clientY: number) => {
+    const area = contentAreaRef.current;
+    const draggedTabID = draggedTabIDRef.current;
+    if (!area || !draggedTabID) {
+      hideSplitOverlay();
+      return;
+    }
+
+    const rect = area.getBoundingClientRect();
+    if (rect.height <= 0 || clientY < rect.top || clientY > rect.bottom) {
+      hideSplitOverlay();
+      return;
+    }
+
+    const ratio = (clientY - rect.top) / rect.height;
+    const zone: SplitDropZone = ratio < 0.4 ? 'top' : ratio > 0.6 ? 'bottom' : 'middle';
+    splitDropZoneRef.current = zone;
+    showSplitOverlay(zone);
+  }, [hideSplitOverlay, showSplitOverlay]);
+
   const handleClose = React.useCallback(() => {
     if (!directoryKey) {
       return;
@@ -1232,6 +1396,112 @@ export const ContextPanel: React.FC = () => {
     handleClose();
   }, [handleClose]);
 
+  const handleContextTabDragStart = React.useCallback((tabID: string) => {
+    draggedTabIDRef.current = tabID;
+    splitDropZoneRef.current = null;
+  }, []);
+
+  const handleContextTabDragMove = React.useCallback((tabID: string, event: { activatorEvent: Event; delta: { x: number; y: number } }) => {
+    draggedTabIDRef.current = tabID;
+    const activator = event.activatorEvent;
+    if (!(activator instanceof PointerEvent)) {
+      hideSplitOverlay();
+      return;
+    }
+    updateSplitDropZone(activator.clientY + event.delta.y);
+  }, [hideSplitOverlay, updateSplitDropZone]);
+
+  const handleContextTabDragCancel = React.useCallback(() => {
+    draggedTabIDRef.current = null;
+    hideSplitOverlay();
+  }, [hideSplitOverlay]);
+
+  const handleContextTabDragEnd = React.useCallback((tabID: string) => {
+    const zone = splitDropZoneRef.current;
+    draggedTabIDRef.current = null;
+    hideSplitOverlay();
+
+    if (!directoryKey || !zone || zone === 'middle') {
+      return;
+    }
+
+    if (zone === 'top') {
+      if (tabID === splitTab?.id) {
+        setContextPanelSplit(directoryKey, null);
+      }
+      setActiveContextPanelTab(directoryKey, tabID);
+      return;
+    }
+
+    if (tabID === activeTab?.id) {
+      return;
+    }
+
+    setContextPanelSplit(directoryKey, tabID);
+  }, [activeTab?.id, directoryKey, hideSplitOverlay, setActiveContextPanelTab, setContextPanelSplit, splitTab?.id]);
+
+  const handleSplitResizeStart = React.useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (!directoryKey || !hasSplit) {
+      return;
+    }
+
+    const area = contentAreaRef.current;
+    const height = area?.getBoundingClientRect().height ?? 0;
+    if (height <= CONTEXT_PANEL_SPLIT_HANDLE_HEIGHT) {
+      return;
+    }
+
+    isSplitResizingRef.current = true;
+    splitResizeStartYRef.current = event.clientY;
+    splitResizeStartRatioRef.current = splitRatio;
+    splitResizeHeightRef.current = height;
+    try {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    } catch {
+      // ignore
+    }
+    event.preventDefault();
+  }, [directoryKey, hasSplit, splitRatio]);
+
+  const handleSplitResizeMove = React.useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (!directoryKey || !isSplitResizingRef.current) {
+      return;
+    }
+
+    const availableHeight = Math.max(1, splitResizeHeightRef.current - CONTEXT_PANEL_SPLIT_HANDLE_HEIGHT);
+    const delta = event.clientY - splitResizeStartYRef.current;
+    const nextRatio = splitResizeStartRatioRef.current + (delta / availableHeight);
+    setContextPanelSplitRatio(directoryKey, nextRatio);
+  }, [directoryKey, setContextPanelSplitRatio]);
+
+  const handleSplitResizeEnd = React.useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (!isSplitResizingRef.current) {
+      return;
+    }
+
+    try {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    } catch {
+      // ignore
+    }
+    isSplitResizingRef.current = false;
+  }, []);
+
+  const setChatFrameRef = React.useCallback((tabID: string, node: HTMLIFrameElement | null) => {
+    if (!node) {
+      chatFrameRefs.current.delete(tabID);
+      return;
+    }
+    chatFrameRefs.current.set(tabID, node);
+  }, []);
+
+  const handleCloseSplit = React.useCallback(() => {
+    if (!directoryKey) {
+      return;
+    }
+    setContextPanelSplit(directoryKey, null);
+  }, [directoryKey, setContextPanelSplit]);
+
   React.useEffect(() => {
     if (!directoryKey || !activeTab) {
       return;
@@ -1248,6 +1518,7 @@ export const ContextPanel: React.FC = () => {
   }, [activeTab, directoryKey, setPendingDiffFile, setSelectedFilePath]);
 
   const activeChatTabID = activeTab?.mode === 'chat' ? activeTab.id : null;
+  const splitChatTabID = hasSplit && splitTab?.mode === 'chat' ? splitTab.id : null;
 
   const postThemeSyncToEmbeddedChat = React.useCallback(() => {
     if (typeof window === 'undefined') {
@@ -1301,7 +1572,7 @@ export const ContextPanel: React.FC = () => {
         continue;
       }
 
-      const payload = { visible: activeChatTabID === tabID };
+      const payload = { visible: activeChatTabID === tabID || splitChatTabID === tabID };
       const directVisibilitySync = (frameWindow as unknown as {
         __openchamberSetEmbeddedVisibility?: (visibilityPayload: typeof payload) => void;
       }).__openchamberSetEmbeddedVisibility;
@@ -1323,7 +1594,7 @@ export const ContextPanel: React.FC = () => {
         window.location.origin,
       );
     }
-  }, [activeChatTabID]);
+  }, [activeChatTabID, splitChatTabID]);
 
   React.useLayoutEffect(() => {
     const hasAnyChatTab = tabs.some((tab) => tab.mode === 'chat');
@@ -1334,6 +1605,19 @@ export const ContextPanel: React.FC = () => {
     postThemeSyncToEmbeddedChat();
     postEmbeddedVisibilityToChats();
   }, [darkThemeId, lightThemeId, postEmbeddedVisibilityToChats, postThemeSyncToEmbeddedChat, tabs, themeMode]);
+
+  const renderTabPaneContent = React.useCallback((tab: ContextPanelTabLike, active: boolean) => (
+    <ContextPanelTabContent
+      tab={tab}
+      active={active}
+      directory={directoryKey}
+      effectiveDirectory={effectiveDirectory}
+      isFileTabActive={tab.mode === 'file'}
+      postEmbeddedVisibilityToChats={postEmbeddedVisibilityToChats}
+      postThemeSyncToEmbeddedChat={postThemeSyncToEmbeddedChat}
+      setChatFrameRef={setChatFrameRef}
+    />
+  ), [directoryKey, effectiveDirectory, postEmbeddedVisibilityToChats, postThemeSyncToEmbeddedChat, setChatFrameRef]);
 
   const tabItems = React.useMemo(() => tabs.map((tab) => {
     const rawLabel = getTabLabel(tab, t);
@@ -1347,22 +1631,6 @@ export const ContextPanel: React.FC = () => {
       closeLabel: t('contextPanel.tab.closeTabAria', { label }),
     };
   }), [effectiveDirectory, t, tabs]);
-
-  const activeNonChatContent = activeTab?.mode === 'diff'
-    ? <DiffView hideStackedFileSidebar stackedDefaultCollapsedAll hideFileSelector pinSelectedFileHeaderToTopOnNavigate showOpenInEditorAction />
-    : activeTab?.mode === 'context'
-        ? <ContextPanelContent />
-        : activeTab?.mode === 'plan'
-            ? <PlanView targetPath={activeTab.targetPath} />
-            : activeTab?.mode === 'preview'
-                ? <PreviewPane rawUrl={activeTab.targetPath ?? ''} onNavigate={(url) => openContextPreview(effectiveDirectory, url)} />
-                : (
-                  <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
-                    <RiGlobalLine className="h-12 w-12 text-muted-foreground/50" />
-                    <div className="typography-ui-header text-foreground">{t('contextPanel.preview.title')}</div>
-                    <div className="max-w-sm typography-micro text-muted-foreground">{t('contextPanel.preview.description')}</div>
-                  </div>
-                );
 
   const chatTabs = React.useMemo(
     () => tabs.filter((tab) => tab.mode === 'chat'),
@@ -1390,6 +1658,9 @@ export const ContextPanel: React.FC = () => {
           if (!directoryKey) {
             return;
           }
+          if (tabID === panelState?.splitTabId) {
+            setContextPanelSplit(directoryKey, null);
+          }
           closeContextPanelTab(directoryKey, tabID);
         }}
         onReorder={(activeTabID, overTabID) => {
@@ -1400,6 +1671,10 @@ export const ContextPanel: React.FC = () => {
         }}
         layoutMode="scrollable"
         variant="default"
+        onDragStart={handleContextTabDragStart}
+        onDragMove={handleContextTabDragMove}
+        onDragCancel={handleContextTabDragCancel}
+        onDragEnd={handleContextTabDragEnd}
       />
       <div className="flex items-center gap-1 px-1.5">
         <Button
@@ -1478,47 +1753,65 @@ export const ContextPanel: React.FC = () => {
         />
       )}
       {header}
-      <div className={cn('relative min-h-0 flex-1 overflow-hidden', isResizing && 'pointer-events-none')}>
-        {hasFileTabs ? (
-          <div className={cn('absolute inset-0', isFileTabActive ? 'block' : 'hidden')}>
-            <FilesView mode="editor-only" />
+      <div ref={contentAreaRef} className={cn('relative min-h-0 flex-1 overflow-hidden', isResizing && 'pointer-events-none')}>
+        {hasSplit && activeTab && splitTab ? (
+          <div className="absolute inset-0 flex min-h-0 flex-col">
+            <div className="relative min-h-0 overflow-hidden" style={{ height: `calc((100% - ${CONTEXT_PANEL_SPLIT_HANDLE_HEIGHT}px) * ${splitRatio})` }}>
+              <div className="absolute inset-0">{renderTabPaneContent(activeTab, true)}</div>
+            </div>
+            <div
+              className="flex h-[3px] shrink-0 cursor-row-resize items-center justify-end bg-[var(--interactive-border)]/60 transition-colors hover:bg-[var(--interactive-border)]"
+              onPointerDown={handleSplitResizeStart}
+              onPointerMove={handleSplitResizeMove}
+              onPointerUp={handleSplitResizeEnd}
+              onPointerCancel={handleSplitResizeEnd}
+              role="separator"
+              aria-orientation="horizontal"
+              aria-label={t('contextPanel.split.resizeAria')}
+            >
+              <Button
+                type="button"
+                variant="ghost"
+                size="xs"
+                className="mr-1 h-5 w-5 p-0"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  handleCloseSplit();
+                }}
+                title={t('contextPanel.split.closeSplitAria')}
+                aria-label={t('contextPanel.split.closeSplitAria')}
+              >
+                <RiCloseLine className="h-3 w-3" />
+              </Button>
+            </div>
+            <div className="relative min-h-0 flex-1 overflow-hidden">
+              <div className="absolute inset-0">{renderTabPaneContent(splitTab, true)}</div>
+            </div>
           </div>
-        ) : null}
-        {chatTabs.map((tab) => {
-          const sessionID = getSessionIDFromDedupeKey(tab.dedupeKey);
-          if (!sessionID) {
-            return null;
-          }
-
-          const src = buildEmbeddedSessionChatURL(sessionID, directoryKey || null);
-          if (!src) {
-            return null;
-          }
-
-          return (
-            <iframe
-              key={tab.id}
-              ref={(node) => {
-                if (!node) {
-                  chatFrameRefs.current.delete(tab.id);
-                  return;
-                }
-                chatFrameRefs.current.set(tab.id, node);
-              }}
-              src={src}
-              title={t('contextPanel.iframe.sessionChatTitle', { sessionID })}
-              className={cn(
-                'absolute inset-0 h-full w-full border-0 bg-background',
-                activeChatTabID === tab.id ? 'block' : 'hidden'
-              )}
-              onLoad={() => {
-                postThemeSyncToEmbeddedChat();
-                postEmbeddedVisibilityToChats();
-              }}
-            />
-          );
-        })}
-        {activeTab?.mode !== 'chat' && !isFileTabActive ? activeNonChatContent : null}
+        ) : (
+          <>
+            {hasFileTabs ? (
+              <div className={cn('absolute inset-0', isFileTabActive ? 'block' : 'hidden')}>
+                <FilesView mode="editor-only" />
+              </div>
+            ) : null}
+            {chatTabs.map((tab) => (
+              <div key={tab.id} className={cn('absolute inset-0', activeChatTabID === tab.id ? 'block' : 'hidden')}>
+                {renderTabPaneContent(tab, activeChatTabID === tab.id)}
+              </div>
+            ))}
+            {activeTab?.mode !== 'chat' && !isFileTabActive ? (
+              <div className="absolute inset-0">{renderTabPaneContent(activeTab, true)}</div>
+            ) : null}
+          </>
+        )}
+        <div
+          ref={splitOverlayRef}
+          className="pointer-events-none absolute inset-x-0 z-30 hidden justify-center border-y border-[var(--interactive-focus-ring)] bg-[var(--interactive-focus-ring)]/25 p-3 text-[var(--surface-foreground)] shadow-[inset_0_0_0_1px_var(--interactive-focus-ring)]"
+          aria-hidden
+        >
+          <div ref={splitOverlayLabelRef} className="rounded-md bg-[var(--surface-elevated)] px-2 py-1 typography-micro shadow" />
+        </div>
       </div>
     </aside>
   );

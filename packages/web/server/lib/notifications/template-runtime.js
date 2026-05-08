@@ -370,12 +370,53 @@ export const createNotificationTemplateRuntime = (deps) => {
       worktreeDir = infoPath.cwd;
     }
 
+    if (!worktreeDir && sessionId) {
+      if (!sessionInfo) {
+        sessionInfo = await fetchSessionInfo(sessionId);
+      }
+      const sessionDir = sessionInfo && typeof sessionInfo.directory === 'string' && sessionInfo.directory.trim().length > 0
+        ? sessionInfo.directory.trim()
+        : (typeof sessionInfo?.path === 'string' && sessionInfo.path.trim().length > 0 ? sessionInfo.path.trim() : null);
+      if (sessionDir) {
+        worktreeDir = sessionDir;
+      }
+    }
+
+    console.log('[Notification:DEBUG:buildTemplateVariables]', JSON.stringify({
+      hasInfoPath: !!infoPath,
+      infoPathRoot: infoPath?.root ?? undefined,
+      infoPathCwd: infoPath?.cwd ?? undefined,
+      worktreeDir: worktreeDir || '(empty)',
+      hasSessionInfo: !!sessionInfo,
+      sessionDirectory: sessionInfo?.directory ?? undefined,
+      sessionPath: sessionInfo?.path ?? undefined,
+    }));
+
+    // When info.path is absent (common for message.updated events), fall back to
+    // the session's directory from the OpenCode session API.  The fetch may have
+    // already happened for sessionTitle — reuse it to avoid a duplicate request.
+    if (!worktreeDir && sessionId) {
+      if (!sessionInfo) {
+        sessionInfo = await fetchSessionInfo(sessionId);
+      }
+      const sessionDir = sessionInfo && typeof sessionInfo.directory === 'string' && sessionInfo.directory.trim().length > 0
+        ? sessionInfo.directory.trim()
+        : null;
+      if (sessionDir) {
+        worktreeDir = sessionDir;
+      }
+    }
+
     try {
       const settings = await readSettingsFromDisk();
       const projects = Array.isArray(settings.projects) ? settings.projects : [];
 
       if (worktreeDir) {
         const normalizedDir = worktreeDir.replace(/\/+$/, '');
+        console.log('[Notification:DEBUG:projectMatch]', JSON.stringify({
+          normalizedDir,
+          projectPaths: projects.map((p) => p.path?.replace(/\/+$/, '')),
+        }));
         const matchedProject = projects.find((project) => {
           if (!project || typeof project.path !== 'string') return false;
           return project.path.replace(/\/+$/, '') === normalizedDir;

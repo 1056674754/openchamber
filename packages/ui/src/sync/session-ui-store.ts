@@ -218,6 +218,9 @@ export type SessionUIState = {
 
   // Actions — UI state management
   setCurrentSession: (id: string | null, directoryHint?: string | null) => void
+  _pendingNavigationSessionId: string | null
+  navigateToSession: (sessionId: string, directory: string, projectId: string) => void
+  consumeNavigationIntent: () => string | null
   openNewSessionDraft: (options?: Partial<NewSessionDraftState>) => void
   closeNewSessionDraft: () => void
   setNewSessionDraftTarget: (target: { projectId?: string | null; selectedProjectId?: string | null; directoryOverride?: string | null }, options?: { force?: boolean }) => void
@@ -438,6 +441,23 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         try { getSyncChildStores().pin(resolvedDir) } catch { /* not initialized */ }
       }
     }
+  },
+
+  // ---------------------------------------------------------------------------
+  // navigateToSession — atomic project + directory + session switch
+  // ---------------------------------------------------------------------------
+  _pendingNavigationSessionId: null as string | null,
+  navigateToSession: (sessionId, directory, projectId) => {
+    get()._pendingNavigationSessionId = sessionId
+    useProjectsStore.getState().setActiveProjectIdOnly(projectId)
+    get().setCurrentSession(sessionId, directory)
+  },
+  consumeNavigationIntent: () => {
+    const id = get()._pendingNavigationSessionId
+    if (id) {
+      get()._pendingNavigationSessionId = null
+    }
+    return id
   },
 
   // ---------------------------------------------------------------------------
