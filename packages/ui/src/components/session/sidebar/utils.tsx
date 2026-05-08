@@ -1,6 +1,7 @@
 import React from 'react';
 import type { Session } from '@opencode-ai/sdk/v2';
 import type { SessionSummaryMeta } from './types';
+import type { SessionSortMode } from '@/stores/useUIStore';
 
 const formatDateLabel = (value: string | number) => {
   const targetDate = new Date(value);
@@ -119,6 +120,7 @@ export const compareSessionsByPinnedAndTime = (
   a: Session,
   b: Session,
   pinnedSessionIds: Set<string>,
+  pinnedOrder?: string[],
 ): number => {
   const aPinned = pinnedSessionIds.has(a.id);
   const bPinned = pinnedSessionIds.has(b.id);
@@ -127,6 +129,13 @@ export const compareSessionsByPinnedAndTime = (
   }
 
   if (aPinned && bPinned) {
+    if (pinnedOrder && pinnedOrder.length > 0) {
+      const aIdx = pinnedOrder.indexOf(a.id);
+      const bIdx = pinnedOrder.indexOf(b.id);
+      if (aIdx !== -1 && bIdx !== -1 && aIdx !== bIdx) return aIdx - bIdx;
+      if (aIdx !== -1 && bIdx === -1) return -1;
+      if (aIdx === -1 && bIdx !== -1) return 1;
+    }
     return getSessionCreatedAt(b) - getSessionCreatedAt(a);
   }
 
@@ -137,6 +146,7 @@ export const compareSessionsByPinnedAndCreated = (
   a: Session,
   b: Session,
   pinnedSessionIds: Set<string>,
+  pinnedOrder?: string[],
 ): number => {
   const aPinned = pinnedSessionIds.has(a.id);
   const bPinned = pinnedSessionIds.has(b.id);
@@ -144,7 +154,28 @@ export const compareSessionsByPinnedAndCreated = (
     return aPinned ? -1 : 1;
   }
 
+  if (aPinned && bPinned && pinnedOrder && pinnedOrder.length > 0) {
+    const aIdx = pinnedOrder.indexOf(a.id);
+    const bIdx = pinnedOrder.indexOf(b.id);
+    if (aIdx !== -1 && bIdx !== -1 && aIdx !== bIdx) return aIdx - bIdx;
+    if (aIdx !== -1 && bIdx === -1) return -1;
+    if (aIdx === -1 && bIdx !== -1) return 1;
+  }
+
   return getSessionCreatedAt(b) - getSessionCreatedAt(a);
+};
+
+export const compareSessions = (
+  a: Session,
+  b: Session,
+  pinnedSessionIds: Set<string>,
+  sortMode: SessionSortMode,
+  pinnedOrder?: string[],
+): number => {
+  if (sortMode === 'created-desc') {
+    return compareSessionsByPinnedAndCreated(a, b, pinnedSessionIds, pinnedOrder);
+  }
+  return compareSessionsByPinnedAndTime(a, b, pinnedSessionIds, pinnedOrder);
 };
 
 export const dedupeSessionsById = (sessions: Session[]): Session[] => {

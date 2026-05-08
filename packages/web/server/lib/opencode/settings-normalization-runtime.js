@@ -162,6 +162,10 @@ export const createSettingsNormalizationRuntime = (dependencies) => {
         project.sidebarCollapsed = candidate.sidebarCollapsed;
       }
 
+      if (typeof candidate.serverId === 'string' && candidate.serverId.trim()) {
+        project.serverId = candidate.serverId.trim();
+      }
+
       result.push(project);
     }
 

@@ -1837,6 +1837,45 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       return null;
     }
 
+    case 'desktop_ssh_open_terminal': {
+      const sshDestination = typeof args.sshDestination === 'string' ? args.sshDestination.trim() : '';
+      const sshArgsRaw = Array.isArray(args.sshArgs) ? args.sshArgs : [];
+      const sshArgs = sshArgsRaw.filter((a) => typeof a === 'string').map((a) => a.trim()).filter(Boolean);
+      const remotePath = typeof args.remotePath === 'string' ? args.remotePath.trim() : '';
+      const appName = typeof args.appName === 'string' ? args.appName.trim() : 'Terminal';
+      if (!sshDestination || !remotePath) {
+        throw new Error('SSH destination and remote path are required');
+      }
+
+      const sshCmd = ['ssh', ...sshArgs, sshDestination, '-t', `cd ${remotePath} && exec $SHELL`];
+      const sshLine = sshCmd.map((a) => /[\s"']/.test(a) ? `'${a.replace(/'/g, "'\\''")}'` : a).join(' ');
+
+      let script;
+      if (appName.toLowerCase() === 'iterm2' || appName.toLowerCase() === 'iterm') {
+        script = `tell application "iTerm"
+  activate
+  tell current window
+    create tab with default profile
+    tell current session
+      write text ${JSON.stringify(sshLine)}
+    end tell
+  end tell
+end tell`;
+      } else {
+        script = `tell application "${appName}"
+  activate
+  do script ${JSON.stringify(sshLine)}
+end tell`;
+      }
+
+      const result = spawnSync('osascript', ['-e', script], { stdio: 'pipe', timeout: 10000 });
+      if (result.error || result.status !== 0) {
+        const stderr = result.stderr?.toString().trim() || '';
+        throw new Error(`Failed to open SSH terminal: ${stderr || result.error?.message || 'unknown error'}`);
+      }
+      return null;
+    }
+
     case 'desktop_filter_installed_apps': {
       if (process.platform !== 'darwin') {
         throw new Error('desktop_filter_installed_apps is only supported on macOS');
@@ -2199,6 +2238,8 @@ const buildMacMenu = () => {
         { label: 'Toggle Session Sidebar', accelerator: 'Cmd+L', click: () => dispatchAction('toggle-sidebar') },
         { label: 'Toggle Memory Debug', accelerator: 'Cmd+Shift+D', click: () => dispatchAction('toggle-memory-debug') },
         { type: 'separator' },
+        { label: 'Developer Tools', accelerator: 'Cmd+Option+I', click: () => { BrowserWindow.getFocusedWindow()?.webContents.openDevTools(); } },
+        { type: 'separator' },
         { role: 'togglefullscreen' },
       ],
     },
@@ -2399,6 +2440,21 @@ app.whenReady().then(async () => {
 
   const { initialUrl, localOrigin, bootOutcome } = await resolveInitialUrl();
   await activateMainWindow(initialUrl, localOrigin, bootOutcome);
+
+  // Auto-connect all configured SSH instances in parallel.
+  try {
+    const sshInstances = sshManager.readInstances();
+    if (sshInstances.instances.length > 0) {
+      log.info('[electron] auto-connecting SSH instances', { count: sshInstances.instances.length });
+      for (const instance of sshInstances.instances) {
+        sshManager.connect(instance.id).catch((err) => {
+          log.warn('[electron] auto-connect SSH failed', { id: instance.id, error: String(err) });
+        });
+      }
+    }
+  } catch (err) {
+    log.warn('[electron] SSH auto-connect setup failed:', err);
+  }
 
   // Notify renderer on OS wake-from-sleep so the SSE event pipeline can
   // reconnect immediately instead of waiting for the heartbeat watchdog.

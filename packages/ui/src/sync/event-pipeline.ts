@@ -35,6 +35,7 @@ const ABSOLUTE_URL_PATTERN = /^[a-zA-Z][a-zA-Z\d+\-.]*:\/\//
 
 export type EventPipelineInput = {
   sdk: OpencodeClient
+  baseUrl?: string
   onEvent: (directory: string, payload: Event) => void
   routeDirectory?: (directory: string, payload: Event) => string
   /** Called after stream reconnects (visibility restore or heartbeat timeout). */
@@ -135,16 +136,7 @@ function toWebSocketUrl(candidate: string): string {
   return url.toString()
 }
 
-function buildGlobalEventWsUrl(lastEventId?: string): string {
-  let baseUrl = "/api"
-  try {
-    const client = opencodeClient as { getBaseUrl?: () => string }
-    if (typeof client.getBaseUrl === "function") {
-      baseUrl = client.getBaseUrl()
-    }
-  } catch {
-    baseUrl = "/api"
-  }
+function buildGlobalEventWsUrl(baseUrl: string, lastEventId?: string): string {
   const normalizedBase = baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`
   const httpUrl = new URL("global/event/ws", resolveAbsoluteUrl(normalizedBase))
   if (lastEventId && lastEventId.length > 0) {
@@ -172,6 +164,7 @@ type AttemptAbortReason =
 export function createEventPipeline(input: EventPipelineInput) {
   const {
     sdk,
+    baseUrl: inputBaseUrl,
     onEvent,
     onReconnect,
     onDisconnect,
@@ -182,6 +175,7 @@ export function createEventPipeline(input: EventPipelineInput) {
     reconnectDelayMs = DEFAULT_RECONNECT_DELAY_MS,
     wsReadyTimeoutMs = DEFAULT_WS_READY_TIMEOUT_MS,
   } = input
+  const baseUrl = inputBaseUrl ?? opencodeClient.getBaseUrl()
   const abort = new AbortController()
   let disconnected = false
   let lastEventId: string | undefined
@@ -384,7 +378,7 @@ export function createEventPipeline(input: EventPipelineInput) {
       let settled = false
       let opened = false
       let readyAt = 0
-      const socket = new WebSocket(buildGlobalEventWsUrl(lastEventId))
+      const socket = new WebSocket(buildGlobalEventWsUrl(baseUrl, lastEventId))
       const setFallbackCode = (error: Error, force = false) => {
         if ((force || !opened) && transport === "auto") {
           wsFallbackUntil = Date.now() + WS_FALLBACK_WINDOW_MS

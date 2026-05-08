@@ -183,8 +183,15 @@ export function createGlobalMessageStreamWsBridge({
     clients.add(socket);
     clientLastEventIds.set(socket, requestedLastEventId);
     globalHub.start();
+
+    // Send ready frame immediately — prevents client-side wsReadyTimeoutMs.
+    // Event replay is deferred to when the upstream connects (via status subscriber).
+    sendMessageStreamWsFrame(socket, { type: 'ready', scope: 'global' });
+    wsClients.add(socket);
+
     if (globalHub.isConnected()) {
-      markReady(socket, requestedLastEventId);
+      readyClients.add(socket);
+      replayEvents(socket, requestedLastEventId);
     }
   };
 

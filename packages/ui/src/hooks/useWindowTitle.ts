@@ -3,6 +3,8 @@ import { useProjectsStore } from '@/stores/useProjectsStore';
 import { isDesktopShell, isTauriShell } from '@/lib/desktop';
 import { desktopHostsGet, locationMatchesHost, redactSensitiveUrl } from '@/lib/desktopHosts';
 import { setDesktopWindowTitle } from '@/lib/desktopNative';
+import { useActiveServerId } from '@/hooks/useActiveServerId';
+import { serverRegistry, DEFAULT_SERVER_ID } from '@/lib/opencode/server-registry';
 
 const APP_TITLE = 'OpenChamber';
 
@@ -29,6 +31,8 @@ export const useWindowTitle = () => {
     return state.projects.find((project) => project.id === state.activeProjectId) ?? null;
   });
 
+  const activeServerId = useActiveServerId();
+
   const projectLabel = React.useMemo(() => {
     if (!activeProject) {
       return null;
@@ -53,6 +57,14 @@ export const useWindowTitle = () => {
     if (typeof window === 'undefined' || !isDesktopShell()) {
       setInstanceLabel(null);
       return;
+    }
+
+    if (activeServerId !== DEFAULT_SERVER_ID) {
+      const connection = serverRegistry.get(activeServerId);
+      if (connection) {
+        setInstanceLabel(connection.config.label || 'Instance');
+        return;
+      }
     }
 
     let cancelled = false;
@@ -93,7 +105,7 @@ export const useWindowTitle = () => {
       cancelled = true;
       window.removeEventListener('focus', handleFocus);
     };
-  }, []);
+  }, [activeServerId]);
 
   const title = React.useMemo(() => buildWindowTitle(projectLabel, instanceLabel), [projectLabel, instanceLabel]);
 

@@ -1,3 +1,5 @@
+import { isSystemDirectiveMessage } from '@/lib/messages/system-directive';
+
 import { projectTurnActivity } from './projectTurnActivity';
 import { projectTurnIndexes } from './projectTurnIndexes';
 import { projectTurnDiffStats, projectTurnSummary } from './projectTurnSummary';
@@ -105,7 +107,48 @@ export const projectTurnRecords = (
 
     messages.forEach((message, index) => {
         const role = resolveMessageRole(message);
-        if (role !== 'user') {
+        // [sscity-mod] We intentionally do NOT use the upstream v1.10.2 simplification
+        // (if role !== 'user' return). Our version keeps the explicit user-role branch with
+        // isSystemDirectiveMessage handling, which routes system directive messages into the
+        // current turn's assistant messages — critical for our SystemDirectiveBanner feature.
+        if (role === 'user') {
+            if (isSystemDirectiveMessage(message.parts)) {
+                if (!currentTurn) {
+                    return;
+                }
+
+                currentTurn.assistantMessages.push(message);
+                currentTurn.assistantMessageIds.push(message.info.id);
+                currentTurn.messages.push(createTurnMessageRecord(message, index));
+                groupedMessageIds.add(message.info.id);
+                return;
+            }
+
+            const turnId = message.info.id;
+            const turn: TurnRecord = {
+                turnId,
+                userMessageId: message.info.id,
+                userMessage: message,
+                headerMessageId: undefined,
+                messages: [createTurnMessageRecord(message, index)],
+                assistantMessageIds: [],
+                assistantMessages: [],
+                activityParts: [],
+                activitySegments: [],
+                summary: {},
+                summaryText: undefined,
+                hasTools: false,
+                hasReasoning: false,
+                diffStats: undefined,
+                stream: {
+                    isStreaming: false,
+                    isRetrying: false,
+                },
+            };
+            turns.push(turn);
+            turnByUserId.set(turn.userMessageId, turn);
+            groupedMessageIds.add(message.info.id);
+            currentTurn = turn;
             return;
         }
 

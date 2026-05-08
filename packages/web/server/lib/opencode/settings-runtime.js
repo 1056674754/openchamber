@@ -466,6 +466,12 @@ export const createSettingsRuntime = (deps) => {
         console.error('[validateProjectEntries] Invalid project entry: missing or empty path', project);
         return null;
       }
+      // Remote projects (with serverId) reference paths on a different
+      // machine — skip local filesystem validation so they survive
+      // settings persistence round-trips.
+      if (typeof project.serverId === 'string' && project.serverId.trim().length > 0) {
+        return project;
+      }
       try {
         const stats = await fsPromises.stat(project.path);
         if (!stats.isDirectory()) {

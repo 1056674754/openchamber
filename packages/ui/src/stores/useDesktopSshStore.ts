@@ -8,10 +8,12 @@ import {
   desktopSshInstancesSet,
   desktopSshStatus,
   listenDesktopSshStatus,
+  resolveInstanceLabel,
   type DesktopSshImportCandidate,
   type DesktopSshInstance,
   type DesktopSshInstanceStatus,
 } from '@/lib/desktopSsh';
+import { serverRegistry } from '@/lib/opencode/server-registry';
 
 type DesktopSshState = {
   instances: DesktopSshInstance[];
@@ -64,12 +66,35 @@ export const useDesktopSshStore = create<DesktopSshState>((set, get) => ({
 
       if (!get().listenerReady) {
         await listenDesktopSshStatus((status) => {
-          set((state) => ({
-            statusesById: {
-              ...state.statusesById,
-              [status.id]: status,
-            },
-          }));
+          const current = get().statusesById[status.id];
+          const changed = !current
+            || current.phase !== status.phase
+            || current.localUrl !== status.localUrl
+            || current.detail !== status.detail
+            || current.updatedAtMs !== status.updatedAtMs;
+
+          if (changed) {
+            set((state) => ({
+              statusesById: {
+                ...state.statusesById,
+                [status.id]: status,
+              },
+            }));
+          }
+
+          const instance = get().instances.find((i) => i.id === status.id);
+          const label = instance ? resolveInstanceLabel(instance) : status.id;
+          if (status.phase === 'ready' && status.localUrl) {
+            const url = status.localUrl.replace(/\/+$/, '');
+            serverRegistry.register({
+              id: status.id,
+              label,
+              baseUrl: url + '/api',
+              sseUrl: url,
+            });
+          } else if (status.phase === 'error' || status.phase === 'idle') {
+            serverRegistry.unregister(status.id);
+          }
         });
       }
 
@@ -80,6 +105,20 @@ export const useDesktopSshStore = create<DesktopSshState>((set, get) => ({
         initialized: true,
         listenerReady: true,
       });
+
+      for (const instance of config.instances) {
+        const status = statusMap[instance.id];
+        const label = resolveInstanceLabel(instance);
+        if (status?.phase === 'ready' && status.localUrl) {
+          const url = status.localUrl.replace(/\/+$/, '');
+          serverRegistry.register({
+            id: instance.id,
+            label,
+            baseUrl: url + '/api',
+            sseUrl: url,
+          });
+        }
+      }
     } catch (error) {
       set({
         isLoading: false,
@@ -105,10 +144,21 @@ export const useDesktopSshStore = create<DesktopSshState>((set, get) => ({
   refreshStatuses: async () => {
     try {
       const statuses = await desktopSshStatus();
+      const prev = get().statusesById;
       const statusMap: Record<string, DesktopSshInstanceStatus> = {};
+      let changed = false;
       for (const status of statuses.sort(byUpdatedAt)) {
         statusMap[status.id] = status;
+        const p = prev[status.id];
+        if (!changed && (!p
+          || p.phase !== status.phase
+          || p.localUrl !== status.localUrl
+          || p.detail !== status.detail
+          || p.updatedAtMs !== status.updatedAtMs)) {
+          changed = true;
+        }
       }
+      if (!changed && Object.keys(prev).length === Object.keys(statusMap).length) return;
       set({ statusesById: statusMap });
     } catch (error) {
       set({ error: error instanceof Error ? error.message : String(error) });

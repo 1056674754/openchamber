@@ -10,6 +10,7 @@ import {
 import { getSafeStorage } from "./utils/safeStorage";
 
 import { opencodeClient } from '@/lib/opencode/client';
+import { resolveApiUrl } from "@/lib/api/serverUrl";
 
 const getCurrentDirectory = (): string | null => {
   const opencodeDirectory = opencodeClient.getDirectory();
@@ -142,9 +143,9 @@ interface SkillsStore {
   getSkillByName: (name: string) => DiscoveredSkill | undefined;
   
   // Supporting files
-  readSupportingFile: (skillName: string, filePath: string) => Promise<string | null>;
-  writeSupportingFile: (skillName: string, filePath: string, content: string) => Promise<boolean>;
-  deleteSupportingFile: (skillName: string, filePath: string) => Promise<boolean>;
+  readSupportingFile: (skillName: string, filePath: string, serverBaseUrl?: string) => Promise<string | null>;
+  writeSupportingFile: (skillName: string, filePath: string, content: string, serverBaseUrl?: string) => Promise<boolean>;
+  deleteSupportingFile: (skillName: string, filePath: string, serverBaseUrl?: string) => Promise<boolean>;
 }
 
 declare global {
@@ -187,7 +188,7 @@ export const useSkillsStore = create<SkillsStore>()(
           set({ skillDraft: draft });
         },
 
-        loadSkills: async () => {
+        loadSkills: async (serverBaseUrl?: string) => {
           const currentDirectory = getCurrentDirectory();
           const cacheKey = getSkillsCacheKey(currentDirectory);
           const now = Date.now();
@@ -212,7 +213,7 @@ export const useSkillsStore = create<SkillsStore>()(
               try {
                 const queryParams = currentDirectory ? `?directory=${encodeURIComponent(currentDirectory)}` : '';
 
-                const response = await fetch(`/api/config/skills${queryParams}`);
+                const response = await fetch(resolveApiUrl(`/api/config/skills${queryParams}`, serverBaseUrl));
                 if (!response.ok) {
                   throw new Error(`Failed to list skills: ${response.status}`);
                 }
@@ -251,12 +252,12 @@ export const useSkillsStore = create<SkillsStore>()(
           }
         },
 
-        getSkillDetail: async (name: string) => {
+        getSkillDetail: async (name: string, serverBaseUrl?: string) => {
           try {
             const currentDirectory = getCurrentDirectory();
             const queryParams = currentDirectory ? `?directory=${encodeURIComponent(currentDirectory)}` : '';
             
-            const response = await fetch(`/api/config/skills/${encodeURIComponent(name)}${queryParams}`);
+            const response = await fetch(resolveApiUrl(`/api/config/skills/${encodeURIComponent(name)}${queryParams}`, serverBaseUrl));
             if (!response.ok) {
               return null;
             }
@@ -267,7 +268,7 @@ export const useSkillsStore = create<SkillsStore>()(
           }
         },
 
-        createSkill: async (config: SkillConfig) => {
+        createSkill: async (config: SkillConfig, serverBaseUrl?: string) => {
           startConfigUpdate("Creating skill...");
           let requiresReload = false;
           try {
@@ -284,7 +285,7 @@ export const useSkillsStore = create<SkillsStore>()(
             const currentDirectory = getCurrentDirectory();
             const queryParams = currentDirectory ? `?directory=${encodeURIComponent(currentDirectory)}` : '';
 
-            const response = await fetch(`/api/config/skills/${encodeURIComponent(config.name)}${queryParams}`, {
+            const response = await fetch(resolveApiUrl(`/api/config/skills/${encodeURIComponent(config.name)}${queryParams}`, serverBaseUrl), {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify(skillConfig)
@@ -320,7 +321,7 @@ export const useSkillsStore = create<SkillsStore>()(
           }
         },
 
-        updateSkill: async (name: string, config: Partial<SkillConfig>) => {
+        updateSkill: async (name: string, config: Partial<SkillConfig>, serverBaseUrl?: string) => {
           startConfigUpdate("Updating skill...");
           let requiresReload = false;
           try {
@@ -333,7 +334,7 @@ export const useSkillsStore = create<SkillsStore>()(
             const currentDirectory = getCurrentDirectory();
             const queryParams = currentDirectory ? `?directory=${encodeURIComponent(currentDirectory)}` : '';
 
-            const response = await fetch(`/api/config/skills/${encodeURIComponent(name)}${queryParams}`, {
+            const response = await fetch(resolveApiUrl(`/api/config/skills/${encodeURIComponent(name)}${queryParams}`, serverBaseUrl), {
               method: 'PATCH',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify(skillConfig)
@@ -369,14 +370,14 @@ export const useSkillsStore = create<SkillsStore>()(
           }
         },
 
-        deleteSkill: async (name: string) => {
+        deleteSkill: async (name: string, serverBaseUrl?: string) => {
           startConfigUpdate("Deleting skill...");
           let requiresReload = false;
           try {
             const currentDirectory = getCurrentDirectory();
             const queryParams = currentDirectory ? `?directory=${encodeURIComponent(currentDirectory)}` : '';
 
-            const response = await fetch(`/api/config/skills/${encodeURIComponent(name)}${queryParams}`, {
+            const response = await fetch(resolveApiUrl(`/api/config/skills/${encodeURIComponent(name)}${queryParams}`, serverBaseUrl), {
               method: 'DELETE'
             });
 
@@ -420,13 +421,13 @@ export const useSkillsStore = create<SkillsStore>()(
           return skills.find((s) => s.name === name);
         },
 
-        readSupportingFile: async (skillName: string, filePath: string) => {
+        readSupportingFile: async (skillName: string, filePath: string, serverBaseUrl?: string) => {
           try {
             const currentDirectory = getCurrentDirectory();
             const queryParams = currentDirectory ? `&directory=${encodeURIComponent(currentDirectory)}` : '';
             
             const response = await fetch(
-              `/api/config/skills/${encodeURIComponent(skillName)}/files/${encodeURIComponent(filePath)}?${queryParams.slice(1)}`
+              resolveApiUrl(`/api/config/skills/${encodeURIComponent(skillName)}/files/${encodeURIComponent(filePath)}?${queryParams.slice(1)}`, serverBaseUrl)
             );
             if (!response.ok) {
               return null;
@@ -439,13 +440,13 @@ export const useSkillsStore = create<SkillsStore>()(
           }
         },
 
-        writeSupportingFile: async (skillName: string, filePath: string, content: string) => {
+        writeSupportingFile: async (skillName: string, filePath: string, content: string, serverBaseUrl?: string) => {
           try {
             const currentDirectory = getCurrentDirectory();
             const queryParams = currentDirectory ? `?directory=${encodeURIComponent(currentDirectory)}` : '';
             
             const response = await fetch(
-              `/api/config/skills/${encodeURIComponent(skillName)}/files/${encodeURIComponent(filePath)}${queryParams}`,
+              resolveApiUrl(`/api/config/skills/${encodeURIComponent(skillName)}/files/${encodeURIComponent(filePath)}${queryParams}`, serverBaseUrl),
               {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
@@ -459,13 +460,13 @@ export const useSkillsStore = create<SkillsStore>()(
           }
         },
 
-        deleteSupportingFile: async (skillName: string, filePath: string) => {
+        deleteSupportingFile: async (skillName: string, filePath: string, serverBaseUrl?: string) => {
           try {
             const currentDirectory = getCurrentDirectory();
             const queryParams = currentDirectory ? `?directory=${encodeURIComponent(currentDirectory)}` : '';
             
             const response = await fetch(
-              `/api/config/skills/${encodeURIComponent(skillName)}/files/${encodeURIComponent(filePath)}${queryParams}`,
+              resolveApiUrl(`/api/config/skills/${encodeURIComponent(skillName)}/files/${encodeURIComponent(filePath)}${queryParams}`, serverBaseUrl),
               { method: 'DELETE' }
             );
             

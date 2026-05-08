@@ -38,11 +38,15 @@ const getArchivedSessionsForProject = (
       .filter((value): value is string => Boolean(value)),
   ]);
 
+  const isSubtaskSession = (session: Session): boolean => {
+    return Boolean((session as Session & { parentID?: string | null }).parentID);
+  };
+
   const collect = (input: Session[]): Session[] => input.filter((session) =>
     isSessionRelatedToProject(session, project.normalizedPath, validDirectories),
   );
 
-  const archived = collect(params.archivedSessions);
+  const archived = collect(params.archivedSessions).filter((session) => !isSubtaskSession(session));
   const unassignedLive = params.sessions.filter((session) => {
     if (session.time?.archived) {
       return false;

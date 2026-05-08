@@ -10,6 +10,7 @@ import { useConfigStore } from '@/stores/useConfigStore';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { showOpenCodeStatus } from '@/lib/openCodeStatus';
 import { eventMatchesShortcut, getEffectiveShortcutCombo } from '@/lib/shortcuts';
+import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 
 export const useKeyboardShortcuts = () => {
   const openNewSessionDraft = useSessionUIStore((s) => s.openNewSessionDraft);
@@ -23,8 +24,8 @@ export const useKeyboardShortcuts = () => {
   const toggleRightSidebar = useUIStore((s) => s.toggleRightSidebar);
   const setRightSidebarOpen = useUIStore((s) => s.setRightSidebarOpen);
   const setRightSidebarTab = useUIStore((s) => s.setRightSidebarTab);
-  const toggleBottomTerminal = useUIStore((s) => s.toggleBottomTerminal);
-  const setBottomTerminalExpanded = useUIStore((s) => s.setBottomTerminalExpanded);
+  const openContextTerminal = useUIStore((s) => s.openContextTerminal);
+  const effectiveDirectory = useEffectiveDirectory() ?? '';
   const isMobile = useUIStore((s) => s.isMobile);
   const setSessionSwitcherOpen = useUIStore((s) => s.setSessionSwitcherOpen);
   const setActiveMainTab = useUIStore((s) => s.setActiveMainTab);
@@ -239,17 +240,7 @@ export const useKeyboardShortcuts = () => {
           return;
         }
         e.preventDefault();
-        toggleBottomTerminal();
-        return;
-      }
-
-      if (eventMatchesShortcut(e, combo('toggle_terminal_expanded'))) {
-        const { isMobile, isBottomTerminalExpanded } = useUIStore.getState();
-        if (isMobile) {
-          return;
-        }
-        e.preventDefault();
-        setBottomTerminalExpanded(!isBottomTerminalExpanded);
+        openContextTerminal(effectiveDirectory);
         return;
       }
 
@@ -473,8 +464,8 @@ export const useKeyboardShortcuts = () => {
     toggleRightSidebar,
     setRightSidebarOpen,
     setRightSidebarTab,
-    toggleBottomTerminal,
-    setBottomTerminalExpanded,
+    openContextTerminal,
+    effectiveDirectory,
     isMobile,
     setSessionSwitcherOpen,
     setActiveMainTab,

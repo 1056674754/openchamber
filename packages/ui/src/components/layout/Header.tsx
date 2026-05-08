@@ -16,14 +16,17 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { SortableTabsStrip, type SortableTabsStripItem } from '@/components/ui/sortable-tabs-strip';
 
-import { RiArrowLeftSLine, RiChat4Line, RiChatNewLine, RiCheckLine, RiCloseLine, RiCommandLine, RiFileTextLine, RiFolder6Line, RiGitBranchLine, RiGithubFill, RiLayoutLeftLine, RiLayoutRightLine, RiPlayListAddLine, RiRefreshLine, RiServerLine, RiStackLine, RiTerminalBoxLine, RiTimerLine, RiAlertLine, type RemixiconComponentType } from '@remixicon/react';
+import { RiArrowLeftSLine, RiChat4Line, RiChatNewLine, RiCheckLine, RiCloseLine, RiCommandLine, RiDonutChartLine, RiFileTextLine, RiFolder6Line, RiGitBranchLine, RiGithubFill, RiLayoutLeftLine, RiLayoutRightLine, RiPlayListAddLine, RiRefreshLine, RiServerLine, RiStackLine, RiTerminalBoxLine, RiTimerLine, RiAlertLine, type RemixiconComponentType } from '@remixicon/react';
 import { DiffIcon } from '@/components/icons/DiffIcon';
 import { useUIStore, type MainTab } from '@/stores/useUIStore';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useActiveServerId } from '@/hooks/useActiveServerId';
+import { serverRegistry, DEFAULT_SERVER_ID } from '@/lib/opencode/server-registry';
 import { useSessionWorktreeStore } from '@/sync/session-worktree-store';
 import { formatSessionWorktreeBadge } from '@/sync/session-worktree-contract';
-import { useAllLiveSessions, useSession, useSessionMessagesResolved } from '@/sync/sync-context';
+import { useSession, useSessionMessagesResolved } from '@/sync/sync-context';
+import { useAllServersLiveSessions } from '@/sync/multi-server-hooks';
 import { getAllSyncSessions } from '@/sync/sync-refs';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useQuotaAutoRefresh, useQuotaStore } from '@/stores/useQuotaStore';
@@ -35,6 +38,7 @@ import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { ContextUsageDisplay } from '@/components/ui/ContextUsageDisplay';
 import { useDeviceInfo, useTabletStandalonePwaRuntime } from '@/lib/device';
+import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { cn, hasModifier } from '@/lib/utils';
 import { McpDropdownContent } from '@/components/mcp/McpDropdown';
 import { McpIcon } from '@/components/icons/McpIcon';
@@ -58,7 +62,7 @@ import {
 } from '@/components/ui/collapsible';
 import { RiArrowDownSLine, RiArrowRightSLine } from '@remixicon/react';
 import type { UsageWindow } from '@/types';
-import type { GitHubAuthStatus } from '@/lib/api/types';
+import type { GitHubAuthStatus, ProjectEntry } from '@/lib/api/types';
 import type { SessionContextUsage } from '@/stores/types/sessionTypes';
 import { DesktopHostSwitcherDialog } from '@/components/desktop/DesktopHostSwitcher';
 import { OpenInAppButton } from '@/components/desktop/OpenInAppButton';
@@ -607,11 +611,48 @@ const normalize = (value: string): string => {
   return replaced === '/' ? '/' : replaced.replace(/\/+$/, '');
 };
 
+const getProjectLabel = (project: Pick<ProjectEntry, 'path' | 'label'> | null | undefined): string | null => {
+  if (!project) return null;
+  const trimmedLabel = project.label?.trim();
+  if (trimmedLabel) {
+    return trimmedLabel;
+  }
+  const pathSegments = project.path.split(/[\\/]/).filter(Boolean);
+  return pathSegments[pathSegments.length - 1] ?? null;
+};
+
+const directoryBelongsToProject = (directory: string, projectPath: string): boolean => {
+  const normalizedDirectory = normalize(directory);
+  const normalizedProjectPath = normalize(projectPath);
+  if (!normalizedDirectory || !normalizedProjectPath) return false;
+  return normalizedDirectory === normalizedProjectPath || normalizedDirectory.startsWith(`${normalizedProjectPath}/`);
+};
+
+const resolveProjectForDirectory = (
+  projects: ProjectEntry[],
+  directory: string,
+  serverId: string,
+): ProjectEntry | null => {
+  const normalizedDirectory = normalize(directory);
+  if (!normalizedDirectory) return null;
+
+  const candidates = projects.filter((project) => directoryBelongsToProject(normalizedDirectory, project.path));
+  if (candidates.length === 0) return null;
+
+  const serverScoped = candidates.filter((project) => (project.serverId || DEFAULT_SERVER_ID) === serverId);
+  const scopedCandidates = serverScoped.length > 0 ? serverScoped : candidates;
+
+  return scopedCandidates.reduce<ProjectEntry | null>((best, project) => {
+    if (!best) return project;
+    return normalize(project.path).length > normalize(best.path).length ? project : best;
+  }, null);
+};
+
 const getActiveContextMode = (panelState: {
   isOpen: boolean;
   activeTabId: string | null;
-  tabs: Array<{ id: string; mode: 'diff' | 'file' | 'context' | 'plan' | 'chat' | 'preview' }>;
-} | undefined): 'diff' | 'file' | 'context' | 'plan' | 'chat' | 'preview' | null => {
+  tabs: Array<{ id: string; mode: 'diff' | 'file' | 'context' | 'plan' | 'chat' | 'preview' | 'terminal' }>;
+} | undefined): 'diff' | 'file' | 'context' | 'plan' | 'chat' | 'preview' | 'terminal' | null => {
   if (!panelState?.isOpen || !Array.isArray(panelState.tabs) || panelState.tabs.length === 0) {
     return null;
   }
@@ -660,7 +701,7 @@ export const Header: React.FC<HeaderProps> = ({
   const toggleSidebar = useUIStore((state) => state.toggleSidebar);
   const isSidebarOpen = useUIStore((state) => state.isSidebarOpen);
   const isRightSidebarOpen = useUIStore((state) => state.isRightSidebarOpen);
-  const toggleBottomTerminal = useUIStore((state) => state.toggleBottomTerminal);
+  const openContextTerminal = useUIStore((state) => state.openContextTerminal);
   const toggleRightSidebar = useUIStore((state) => state.toggleRightSidebar);
   const openContextOverview = useUIStore((state) => state.openContextOverview);
   const openContextPlan = useUIStore((state) => state.openContextPlan);
@@ -681,7 +722,8 @@ export const Header: React.FC<HeaderProps> = ({
   const currentSessionMessagesResolved = useSessionMessagesResolved(currentSessionId ?? '');
   const currentSyncedSession = useSession(currentSessionId ?? null);
   const globalActiveSessions = useGlobalSessionsStore((state) => state.activeSessions);
-  const liveSessions = useAllLiveSessions();
+  const liveSessions = useAllServersLiveSessions();
+  const projects = useProjectsStore((state) => state.projects);
   const activeProject = useProjectsStore((state) => {
     if (!state.activeProjectId) {
       return null;
@@ -689,17 +731,7 @@ export const Header: React.FC<HeaderProps> = ({
     return state.projects.find((project) => project.id === state.activeProjectId) ?? null;
   });
   const activeProjectLabel = React.useMemo(() => {
-    if (!activeProject) {
-      return null;
-    }
-
-    const trimmedLabel = activeProject.label?.trim();
-    if (trimmedLabel) {
-      return trimmedLabel;
-    }
-
-    const pathSegments = activeProject.path.split(/[\\/]/).filter(Boolean);
-    return pathSegments[pathSegments.length - 1] ?? null;
+    return getProjectLabel(activeProject);
   }, [activeProject]);
   const quotaResults = useQuotaStore((state) => state.results);
   const fetchAllQuotas = useQuotaStore((state) => state.fetchAllQuotas);
@@ -711,6 +743,7 @@ export const Header: React.FC<HeaderProps> = ({
   const setQuotaDisplayMode = useQuotaStore((state) => state.setDisplayMode);
 
   const { isMobile } = useDeviceInfo();
+  const effectiveDirectory = useEffectiveDirectory() ?? '';
   const githubAuthStatus = useGitHubAuthStore((state) => state.status);
   const setGitHubAuthStatus = useGitHubAuthStore((state) => state.setStatus);
 
@@ -826,6 +859,13 @@ export const Header: React.FC<HeaderProps> = ({
     ? Math.min(999, (stableDesktopContextUsage.totalTokens / stableDesktopContextUsage.contextLimit) * 100)
     : 0;
 
+  const activeServerId = useActiveServerId();
+
+  const activeServerLabel = React.useMemo(() => {
+    if (activeServerId === DEFAULT_SERVER_ID) return null;
+    return serverRegistry.get(activeServerId)?.config.label || null;
+  }, [activeServerId]);
+
   const refreshCurrentInstanceLabel = React.useCallback(async () => {
     if (typeof window === 'undefined' || !isDesktopApp) {
       return;
@@ -857,8 +897,12 @@ export const Header: React.FC<HeaderProps> = ({
   }, [isDesktopApp]);
 
   useEffect(() => {
+    if (activeServerLabel) {
+      setCurrentInstanceLabel(activeServerLabel);
+      return;
+    }
     void refreshCurrentInstanceLabel();
-  }, [refreshCurrentInstanceLabel]);
+  }, [activeServerLabel, refreshCurrentInstanceLabel]);
   useQuotaAutoRefresh();
   const selectedModels = useQuotaStore((state) => state.selectedModels);
   const expandedFamilies = useQuotaStore((state) => state.expandedFamilies);
@@ -1094,6 +1138,8 @@ export const Header: React.FC<HeaderProps> = ({
     return normalize(raw || '');
   }, [currentSession?.directory]);
 
+  const isTempSessionDirectory = sessionDirectory.includes('/temp-sessions/');
+
   const draftDirectory = useSessionUIStore((state) => {
     if (!state.newSessionDraft?.open) {
       return '';
@@ -1104,6 +1150,17 @@ export const Header: React.FC<HeaderProps> = ({
   const openDirectory = React.useMemo(() => {
     return worktreeDirectory || sessionDirectory || draftDirectory;
   }, [draftDirectory, sessionDirectory, worktreeDirectory]);
+
+  const headerProject = React.useMemo(() => {
+    if (!openDirectory) {
+      return activeProject;
+    }
+    return resolveProjectForDirectory(projects, openDirectory, activeServerId) ?? activeProject;
+  }, [activeProject, activeServerId, openDirectory, projects]);
+
+  const headerProjectLabel = React.useMemo(() => {
+    return getProjectLabel(headerProject);
+  }, [headerProject]);
 
   const catalogWorktreeBranch = useSessionUIStore((state) => {
     const candidateDirectory = normalize(worktreeDirectory || sessionDirectory || '');
@@ -1127,11 +1184,11 @@ export const Header: React.FC<HeaderProps> = ({
 
   const currentSessionTitle = React.useMemo(() => {
     if (!currentSessionId) {
-      return activeProjectLabel ?? 'OpenChamber';
+      return headerProjectLabel ?? activeProjectLabel ?? 'OpenChamber';
     }
     const trimmedTitle = currentSession?.title?.trim();
     return trimmedTitle && trimmedTitle.length > 0 ? trimmedTitle : 'Untitled Session';
-  }, [activeProjectLabel, currentSession?.title, currentSessionId]);
+  }, [activeProjectLabel, currentSession?.title, currentSessionId, headerProjectLabel]);
 
   const currentSessionDiffStats = React.useMemo(() => {
     return resolveSessionDiffStats(currentSession?.summary as Parameters<typeof resolveSessionDiffStats>[0]);
@@ -1146,15 +1203,16 @@ export const Header: React.FC<HeaderProps> = ({
   const hasNonZeroSessionChanges = currentSessionChanges.additions > 0 || currentSessionChanges.deletions > 0;
 
   const actionDirectory = React.useMemo(() => {
-    return normalize(openDirectory || activeProject?.path || '');
-  }, [activeProject?.path, openDirectory]);
+    return normalize(openDirectory || headerProject?.path || activeProject?.path || '');
+  }, [activeProject?.path, headerProject?.path, openDirectory]);
 
   const activeProjectRef = React.useMemo(() => {
-    if (!activeProject) {
+    const project = headerProject ?? activeProject;
+    if (!project) {
       return null;
     }
-    return { id: activeProject.id, path: activeProject.path };
-  }, [activeProject]);
+    return { id: project.id, path: project.path };
+  }, [activeProject, headerProject]);
 
   const lastProjectActionsContextRef = React.useRef<{
     projectRef: { id: string; path: string };
@@ -1318,6 +1376,21 @@ export const Header: React.FC<HeaderProps> = ({
     openContextPlan(directory);
   }, [closeContextPanel, contextPanelByDirectory, openContextPlan, openDirectory]);
 
+  const handleToggleContextPanel = React.useCallback(() => {
+    const directory = normalize(openDirectory || '');
+    if (!directory) {
+      return;
+    }
+
+    const panelState = contextPanelByDirectory[directory];
+    if (panelState?.isOpen && panelState.tabs.length > 0) {
+      closeContextPanel(directory);
+      return;
+    }
+
+    openContextOverview(directory);
+  }, [closeContextPanel, contextPanelByDirectory, openContextOverview, openDirectory]);
+
   const isContextPlanActive = React.useMemo(() => {
     const directory = normalize(openDirectory || '');
     if (!directory) {
@@ -1325,6 +1398,15 @@ export const Header: React.FC<HeaderProps> = ({
     }
     const panelState = contextPanelByDirectory[directory];
     return getActiveContextMode(panelState) === 'plan';
+  }, [contextPanelByDirectory, openDirectory]);
+
+  const isContextPanelOpen = React.useMemo(() => {
+    const directory = normalize(openDirectory || '');
+    if (!directory) {
+      return false;
+    }
+    const panelState = contextPanelByDirectory[directory];
+    return panelState?.isOpen === true && panelState.tabs.length > 0;
   }, [contextPanelByDirectory, openDirectory]);
 
   const desktopHeaderIconButtonClass = DESKTOP_HEADER_ICON_BUTTON_CLASS;
@@ -1730,6 +1812,13 @@ export const Header: React.FC<HeaderProps> = ({
 
   const desktopSidebarActions = (
     <>
+      <HeaderIconActionButton
+        title={t('header.actions.toggleContextPanelAria')}
+        ariaLabel={t('header.actions.toggleContextPanelAria')}
+        onClick={handleToggleContextPanel}
+        Icon={RiDonutChartLine}
+        className={cn(desktopHeaderIconButtonClass, isContextPanelOpen && 'bg-[var(--interactive-hover)]')}
+      />
       {showPlanTab && (
         <Tooltip>
           <TooltipTrigger asChild>
@@ -1779,7 +1868,7 @@ export const Header: React.FC<HeaderProps> = ({
       <HeaderIconActionButton
         title={t('header.actions.terminalPanelWithShortcut', { shortcut: shortcutLabel('toggle_terminal') })}
         ariaLabel={t('header.actions.toggleTerminalPanelAria')}
-        onClick={toggleBottomTerminal}
+        onClick={() => openContextTerminal(effectiveDirectory)}
         Icon={RiTerminalBoxLine}
       />
       <HeaderIconActionButton
@@ -1853,9 +1942,9 @@ export const Header: React.FC<HeaderProps> = ({
             <div className="truncate pl-1 typography-ui-label text-[14px] font-normal leading-tight text-foreground">
               {currentSessionTitle}
             </div>
-            {(activeProjectLabel || currentBranchLabel || hasNonZeroSessionChanges) ? (
+            {((!isTempSessionDirectory && headerProjectLabel) || currentBranchLabel || hasNonZeroSessionChanges) ? (
               <div className="flex min-w-0 items-center gap-1.5 truncate pl-1 typography-micro text-[10.5px] font-normal leading-tight text-muted-foreground/75">
-                {activeProjectLabel ? <span className="truncate">{activeProjectLabel}</span> : null}
+                {(!isTempSessionDirectory && headerProjectLabel) ? <span className="truncate">{headerProjectLabel}</span> : null}
                 {currentBranchLabel ? (
                   <span className="inline-flex min-w-0 items-center gap-0.5">
                     <RiGitBranchLine className="h-3 w-3 flex-shrink-0 text-muted-foreground/70" />

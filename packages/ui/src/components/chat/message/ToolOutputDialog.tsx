@@ -27,6 +27,7 @@ import { DiffViewToggle } from './DiffViewToggle';
 import { VirtualizedCodeBlock, type CodeLine } from './parts/VirtualizedCodeBlock';
 import { JsonTreeView } from '@/components/ui/JsonTreeView';
 import { useI18n } from '@/lib/i18n';
+import { useActiveServerBaseUrl } from '@/hooks/useActiveServerId';
 
 interface ToolOutputDialogProps {
     popup: ToolPopupContent;
@@ -639,6 +640,7 @@ const MermaidPreviewDialog: React.FC<{
     isMobile: boolean;
 }> = ({ popup, onOpenChange, isMobile }) => {
     const { t } = useI18n();
+    const serverBaseUrl = useActiveServerBaseUrl();
     const [source, setSource] = React.useState<string>(popup.mermaid?.source || '');
     const [status, setStatus] = React.useState<'idle' | 'loading' | 'ready' | 'error'>(popup.mermaid?.source ? 'ready' : 'idle');
     const [errorMessage, setErrorMessage] = React.useState<string>('');
@@ -739,7 +741,10 @@ const MermaidPreviewDialog: React.FC<{
             if (!normalizedPath) {
                 sourcePromise = Promise.reject(new Error('Invalid local file path for Mermaid preview.'));
             } else {
-                sourcePromise = fetch(`/api/fs/raw?path=${encodeURIComponent(normalizedPath)}`)
+                sourcePromise = fetch(`${serverBaseUrl}/api/fs/raw?${new URLSearchParams({
+                    path: normalizedPath,
+                    allowOutsideWorkspace: 'true',
+                }).toString()}`)
                     .then((response) => {
                         if (!response.ok) {
                             return Promise.reject(new Error(`Failed to read diagram file (${response.status})`));
@@ -782,7 +787,7 @@ const MermaidPreviewDialog: React.FC<{
                 setStatus('error');
                 setErrorMessage(error instanceof Error ? error.message : t('chat.toolOutputDialog.mermaid.loadFailed'));
             });
-    }, [decodeDataUrl, normalizeFilePath, popup.mermaid, t]);
+    }, [decodeDataUrl, normalizeFilePath, popup.mermaid, serverBaseUrl, t]);
 
     React.useEffect(() => {
         if (!popup.open || !popup.mermaid) {

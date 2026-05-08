@@ -226,6 +226,12 @@ const sanitizeProjects = (value: unknown): DesktopSettings['projects'] | undefin
     if (typeof candidate.sidebarCollapsed === 'boolean') {
       (project as unknown as Record<string, unknown>).sidebarCollapsed = candidate.sidebarCollapsed;
     }
+    if (candidate.pinned === true) {
+      (project as unknown as Record<string, unknown>).pinned = true;
+    }
+    if (typeof candidate.serverId === 'string' && candidate.serverId.trim().length > 0) {
+      (project as unknown as Record<string, unknown>).serverId = candidate.serverId.trim();
+    }
     result.push(project);
   }
 
@@ -414,6 +420,26 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
       store.setActivityRenderMode(settings.activityRenderMode);
     }
   }
+  if (typeof settings.sessionSortMode === 'string'
+    && (settings.sessionSortMode === 'updated-desc' || settings.sessionSortMode === 'created-desc')) {
+    if (settings.sessionSortMode !== store.sessionSortMode) {
+      store.setSessionSortMode(settings.sessionSortMode);
+    }
+  }
+  if (typeof settings.sessionGroupMinVisible === 'number'
+    && Number.isFinite(settings.sessionGroupMinVisible)
+    && settings.sessionGroupMinVisible >= 1) {
+    if (settings.sessionGroupMinVisible !== store.sessionGroupMinVisible) {
+      store.setSessionGroupMinVisible(settings.sessionGroupMinVisible);
+    }
+  }
+  if (typeof settings.sessionGroupRecentHours === 'number'
+    && Number.isFinite(settings.sessionGroupRecentHours)
+    && settings.sessionGroupRecentHours >= 1) {
+    if (settings.sessionGroupRecentHours !== store.sessionGroupRecentHours) {
+      store.setSessionGroupRecentHours(settings.sessionGroupRecentHours);
+    }
+  }
   if (typeof settings.mermaidRenderingMode === 'string'
     && (settings.mermaidRenderingMode === 'svg' || settings.mermaidRenderingMode === 'ascii')) {
     if (settings.mermaidRenderingMode !== store.mermaidRenderingMode) {
@@ -446,6 +472,9 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
   }
   if (typeof settings.reportUsage === 'boolean' && settings.reportUsage !== store.reportUsage) {
     store.setReportUsage(settings.reportUsage);
+  }
+  if (typeof settings.multiRunEnabled === 'boolean' && settings.multiRunEnabled !== store.multiRunEnabled) {
+    store.setMultiRunEnabled(settings.multiRunEnabled);
   }
   if (typeof settings.fontSize === 'number' && Number.isFinite(settings.fontSize) && settings.fontSize !== store.fontSize) {
     store.setFontSize(settings.fontSize);
@@ -861,6 +890,20 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
     && (candidate.activityRenderMode === 'collapsed' || candidate.activityRenderMode === 'summary')) {
     result.activityRenderMode = candidate.activityRenderMode;
   }
+  if (typeof candidate.sessionSortMode === 'string'
+    && (candidate.sessionSortMode === 'updated-desc' || candidate.sessionSortMode === 'created-desc')) {
+    result.sessionSortMode = candidate.sessionSortMode;
+  }
+  if (typeof candidate.sessionGroupMinVisible === 'number'
+    && Number.isFinite(candidate.sessionGroupMinVisible)
+    && candidate.sessionGroupMinVisible >= 1) {
+    result.sessionGroupMinVisible = candidate.sessionGroupMinVisible;
+  }
+  if (typeof candidate.sessionGroupRecentHours === 'number'
+    && Number.isFinite(candidate.sessionGroupRecentHours)
+    && candidate.sessionGroupRecentHours >= 1) {
+    result.sessionGroupRecentHours = candidate.sessionGroupRecentHours;
+  }
   if (typeof candidate.mermaidRenderingMode === 'string'
     && (candidate.mermaidRenderingMode === 'svg' || candidate.mermaidRenderingMode === 'ascii')) {
     result.mermaidRenderingMode = candidate.mermaidRenderingMode;
@@ -956,6 +999,10 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
 
   if (typeof candidate.reportUsage === 'boolean') {
     result.reportUsage = candidate.reportUsage;
+  }
+
+  if (typeof candidate.multiRunEnabled === 'boolean') {
+    result.multiRunEnabled = candidate.multiRunEnabled;
   }
 
   if (typeof candidate.globalBehaviorPrompt === 'string') {

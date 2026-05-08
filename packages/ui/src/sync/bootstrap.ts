@@ -150,18 +150,18 @@ export async function bootstrapDirectory(input: {
   const phase1Results = await Promise.allSettled([
     seededProject
       ? Promise.resolve()
-      : retry(() => sdk.project.current().then((x) => set({ project: unwrap(x, "project.current").id }))),
-    retry(() => sdk.provider.list().then((x) => set({ provider: unwrap(x, "provider.list") }))),
-    retry(() => sdk.config.get().then((x) => set({ config: unwrap(x, "config.get") }))),
+      : retry(() => sdk.project.current({ directory }).then((x) => set({ project: unwrap(x, "project.current").id }))),
+    retry(() => sdk.provider.list({ directory }).then((x) => set({ provider: unwrap(x, "provider.list") }))),
+    retry(() => sdk.config.get({ directory }).then((x) => set({ config: unwrap(x, "config.get") }))),
     retry(() =>
-      sdk.path.get().then((x) => {
+      sdk.path.get({ directory }).then((x) => {
         const data = unwrap(x, "path.get")
         set({ path: data })
         const next = projectID(data?.directory ?? directory, g.projects)
         if (next) set({ project: next })
       }),
     ),
-    retry(() => sdk.session.status().then((x) => set({ session_status: unwrap(x, "session.status") }))),
+    retry(() => sdk.session.status({ directory }).then((x) => set({ session_status: unwrap(x, "session.status") }))),
   ])
 
   const phase1Errors = phase1Results
@@ -187,12 +187,12 @@ export async function bootstrapDirectory(input: {
   // These enrich the UI but aren't required for basic functionality.
   // ---------------------------------------------------------------------------
   void Promise.allSettled([
-    retry(() => sdk.app.agents().then((x) => set({ agent: unwrap(x, "app.agents") }))),
-    retry(() => sdk.command.list().then((x) => set({ command: unwrap(x, "command.list") }))),
-    retry(() => sdk.mcp.status().then((x) => set({ mcp: unwrap(x, "mcp.status") }))),
-    retry(() => sdk.lsp.status().then((x) => set({ lsp: unwrap(x, "lsp.status") }))),
+    retry(() => sdk.app.agents({ directory }).then((x) => set({ agent: unwrap(x, "app.agents") }))),
+    retry(() => sdk.command.list({ directory }).then((x) => set({ command: unwrap(x, "command.list") }))),
+    retry(() => sdk.mcp.status({ directory }).then((x) => set({ mcp: unwrap(x, "mcp.status") }))),
+    retry(() => sdk.lsp.status({ directory }).then((x) => set({ lsp: unwrap(x, "lsp.status") }))),
     retry(() =>
-      sdk.vcs.get().then((x) => {
+      sdk.vcs.get({ directory }).then((x) => {
         const current = getState()
         if (x.error) {
           throw new Error(`vcs.get failed: ${String(x.error)}`)

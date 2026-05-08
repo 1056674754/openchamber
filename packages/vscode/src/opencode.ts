@@ -1022,9 +1022,12 @@ export function createOpenCodeManager(_context: vscode.ExtensionContext): OpenCo
   }
 
   async function setWorkingDirectory(newPath: string): Promise<{ success: boolean; restarted: boolean; path: string }> {
-    void newPath;
-    const workspacePath = workspaceDirectory();
-    const nextDirectory = workspacePath;
+    const trimmedPath = typeof newPath === 'string' ? newPath.trim() : '';
+    const nextDirectory = normalizeWindowsDriveLetter(trimmedPath || workspaceDirectory());
+    const stats = await fs.promises.stat(nextDirectory);
+    if (!stats.isDirectory()) {
+      throw new Error(`Working directory is not a directory: ${nextDirectory}`);
+    }
 
     if (workingDirectory === nextDirectory) {
       return { success: true, restarted: false, path: nextDirectory };

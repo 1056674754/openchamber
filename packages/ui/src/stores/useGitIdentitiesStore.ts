@@ -12,6 +12,7 @@ import {
 } from "@/lib/gitApi";
 import { updateDesktopSettings } from "@/lib/persistence";
 import { getRegisteredRuntimeAPIs } from "@/contexts/runtimeAPIRegistry";
+import { resolveApiUrl } from "@/lib/api/serverUrl";
 
 export type GitIdentityAuthType = 'ssh' | 'token';
 
@@ -45,7 +46,7 @@ interface GitIdentitiesStore {
   loadProfiles: () => Promise<boolean>;
   loadGlobalIdentity: () => Promise<boolean>;
   loadDiscoveredCredentials: () => Promise<boolean>;
-  loadDefaultGitIdentityId: () => Promise<boolean>;
+  loadDefaultGitIdentityId: (serverBaseUrl?: string) => Promise<boolean>;
   setDefaultGitIdentityId: (id: string | null) => Promise<boolean>;
 
   createProfile: (profile: Omit<GitIdentityProfile, 'id'> & { id?: string }) => Promise<boolean>;
@@ -132,7 +133,7 @@ export const useGitIdentitiesStore = create<GitIdentitiesStore>()(
           }
         },
 
-        loadDefaultGitIdentityId: async () => {
+        loadDefaultGitIdentityId: async (serverBaseUrl?: string) => {
           const normalize = (value: unknown): string | null => {
             if (typeof value !== 'string') {
               return null;
@@ -159,7 +160,7 @@ export const useGitIdentitiesStore = create<GitIdentitiesStore>()(
 
             if (defaultId === null) {
               try {
-                const response = await fetch('/api/config/settings', {
+                const response = await fetch(resolveApiUrl('/api/config/settings', serverBaseUrl), {
                   method: 'GET',
                   headers: { Accept: 'application/json' },
                 });

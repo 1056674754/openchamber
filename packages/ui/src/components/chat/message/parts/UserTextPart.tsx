@@ -4,7 +4,31 @@ import type { Part } from '@opencode-ai/sdk/v2';
 import type { AgentMentionInfo } from '../types';
 import { SimpleMarkdownRenderer } from '../../MarkdownRenderer';
 import { useUIStore } from '@/stores/useUIStore';
-import { RiArrowUpSLine } from '@remixicon/react';
+import { RiArrowUpSLine, RiArrowDownSLine, RiArrowRightSLine } from '@remixicon/react';
+
+const OMA_SEPARATOR = '\n\n---\n\n';
+
+interface OmaSplitResult {
+    omaBlocks: string;
+    userContent: string;
+    modeNames: string[];
+}
+
+function splitOmaContent(text: string): OmaSplitResult {
+    const idx = text.lastIndexOf(OMA_SEPARATOR);
+    if (idx <= 0) {
+        return { omaBlocks: '', userContent: text, modeNames: [] };
+    }
+
+    const omaBlocks = text.slice(0, idx);
+    const userContent = text.slice(idx + OMA_SEPARATOR.length);
+    const modeNames: string[] = [];
+    if (omaBlocks.includes('[search-mode]')) modeNames.push('Search');
+    if (omaBlocks.includes('[analyze-mode]')) modeNames.push('Analyze');
+    if (omaBlocks.includes('<ultrawork-mode>')) modeNames.push('Ultrawork');
+
+    return { omaBlocks, userContent, modeNames };
+}
 
 type PartWithText = Part & { text?: string; content?: string; value?: string };
 
@@ -37,6 +61,13 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMenti
     const partWithText = part as PartWithText;
     const rawText = partWithText.text;
     const textContent = typeof rawText === 'string' ? rawText : partWithText.content || partWithText.value || '';
+
+    const { omaBlocks, userContent: displayContent, modeNames } = React.useMemo(
+        () => splitOmaContent(textContent),
+        [textContent]
+    );
+    const hasOma = modeNames.length > 0;
+    const [isOmaExpanded, setIsOmaExpanded] = React.useState(false);
 
     const [isExpanded, setIsExpanded] = React.useState(false);
     const [isTruncated, setIsTruncated] = React.useState(false);
@@ -74,7 +105,7 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMenti
         resizeObserver.observe(el);
 
         return () => resizeObserver.disconnect();
-    }, [textContent, isExpanded]);
+    }, [displayContent, isExpanded]);
 
     const handleClick = React.useCallback(() => {
         const element = textRef.current;
@@ -97,7 +128,7 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMenti
     }, []);
 
     const processedMarkdownContent = React.useMemo(() => {
-        let content = textContent;
+        let content = displayContent;
 
         // Step 1: First escape HTML to protect against XSS and ensure HTML tags display as text
         content = escapeHtml(content);
@@ -109,16 +140,16 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMenti
         }
 
         return content;
-    }, [agentMention, textContent]);
+    }, [agentMention, displayContent]);
 
     const plainTextContent = React.useMemo(() => {
-        if (!agentMention?.token || !textContent.includes(agentMention.token)) {
-            return textContent;
+        if (!agentMention?.token || !displayContent.includes(agentMention.token)) {
+            return displayContent;
         }
 
-        const idx = textContent.indexOf(agentMention.token);
-        const before = textContent.slice(0, idx);
-        const after = textContent.slice(idx + agentMention.token.length);
+        const idx = displayContent.indexOf(agentMention.token);
+        const before = displayContent.slice(0, idx);
+        const after = displayContent.slice(idx + agentMention.token.length);
         return (
             <>
                 {before}
@@ -134,14 +165,39 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMenti
                 {after}
             </>
         );
-    }, [agentMention, textContent]);
+    }, [agentMention, displayContent]);
 
-    if (!textContent || textContent.trim().length === 0) {
+    if (!displayContent || displayContent.trim().length === 0) {
         return null;
     }
 
     return (
         <div className="relative" key={part.id || `${messageId}-user-text`}>
+            {hasOma && (
+                <div className="mb-2">
+                    <button
+                        type="button"
+                        className="flex items-center gap-1.5 py-1 cursor-pointer text-muted-foreground hover:text-foreground transition-colors w-full text-left"
+                        onClick={() => setIsOmaExpanded((v) => !v)}
+                    >
+                        {isOmaExpanded ? (
+                            <RiArrowDownSLine className="h-3 w-3 flex-shrink-0" />
+                        ) : (
+                            <RiArrowRightSLine className="h-3 w-3 flex-shrink-0" />
+                        )}
+                        <span className="typography-micro font-medium">
+                            {modeNames.join(' · ')}
+                        </span>
+                    </button>
+                    {isOmaExpanded && (
+                        <div className="pl-4 border-l border-border/40 mt-1">
+                            <pre className="typography-micro text-muted-foreground whitespace-pre-wrap break-words max-h-56 overflow-y-auto scrollbar-none">
+                                {omaBlocks}
+                            </pre>
+                        </div>
+                    )}
+                </div>
+            )}
             {isExpanded && (
                 <button
                     type="button"

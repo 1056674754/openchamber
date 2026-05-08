@@ -9,9 +9,12 @@ import {
 import { toast } from '@/components/ui';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { cn } from '@/lib/utils';
-import { isDesktopLocalOriginActive, isTauriShell, openDesktopPath, openDesktopProjectInApp } from '@/lib/desktop';
+import { isDesktopLocalOriginActive, isTauriShell, openDesktopPath, openDesktopProjectInApp, openSshTerminalAtPath } from '@/lib/desktop';
 import { DEFAULT_OPEN_IN_APP_ID, OPEN_IN_APPS } from '@/lib/openInApps';
 import { useOpenInAppsStore, type OpenInAppOption } from '@/stores/useOpenInAppsStore';
+import { useActiveServerId } from '@/hooks/useActiveServerId';
+import { useProjectsStore } from '@/stores/useProjectsStore';
+import { useDesktopSshStore } from '@/stores/useDesktopSshStore';
 import { RiArrowDownSLine, RiCheckLine, RiFileCopyLine, RiRefreshLine } from '@remixicon/react';
 import { useI18n } from '@/lib/i18n';
 
@@ -76,18 +79,37 @@ type OpenInAppButtonProps = {
 export const OpenInAppButton = ({ directory, className }: OpenInAppButtonProps) => {
   const { t } = useI18n();
   const selectedAppId = useOpenInAppsStore((state) => state.selectedAppId);
-  const availableApps = useOpenInAppsStore((state) => state.availableApps);
+  const availableAppsRaw = useOpenInAppsStore((state) => state.availableApps);
   const isCacheStale = useOpenInAppsStore((state) => state.isCacheStale);
   const isScanning = useOpenInAppsStore((state) => state.isScanning);
   const initialize = useOpenInAppsStore((state) => state.initialize);
   const loadInstalledApps = useOpenInAppsStore((state) => state.loadInstalledApps);
   const selectApp = useOpenInAppsStore((state) => state.selectApp);
+  const activeServerId = useActiveServerId();
+  const projects = useProjectsStore((s) => s.projects);
+  const sshInstances = useDesktopSshStore((s) => s.instances);
 
   React.useEffect(() => {
     initialize();
   }, [initialize]);
 
   const isDesktopLocal = isTauriShell() && isDesktopLocalOriginActive();
+  const isRemoteDirectory = activeServerId !== 'default';
+
+  // Resolve SSH instance for remote directories
+  const sshInstance = React.useMemo(() => {
+    if (!isRemoteDirectory) return null;
+    const project = projects.find((p) => p.path === directory && p.serverId === activeServerId);
+    if (!project?.serverId) return null;
+    return sshInstances.find((instance) => instance.id === project.serverId) ?? null;
+  }, [isRemoteDirectory, projects, directory, activeServerId, sshInstances]);
+
+  // For remote: only show terminal apps (Terminal, iTerm2, Ghostty)
+  const availableApps = React.useMemo(() => {
+    if (!isRemoteDirectory) return availableAppsRaw;
+    const terminalIds = new Set(['terminal', 'iterm2', 'ghostty']);
+    return availableAppsRaw.filter((app) => terminalIds.has(app.id));
+  }, [isRemoteDirectory, availableAppsRaw]);
 
   const selectedApp = React.useMemo(() => {
     const known = availableApps.find((app) => app.id === selectedAppId)
@@ -104,11 +126,31 @@ export const OpenInAppButton = ({ directory, className }: OpenInAppButtonProps) 
     return null;
   }
 
+  // Remote without SSH instance: hide
+  if (isRemoteDirectory && !sshInstance?.sshParsed?.destination) {
+    return null;
+  }
+
+  // Remote with non-terminal apps only: hide
+  if (isRemoteDirectory && availableApps.length === 0) {
+    return null;
+  }
+
   if (availableApps.length === 0) {
     return null;
   }
 
   const handleOpen = async (app: OpenInAppOption) => {
+    if (isRemoteDirectory && sshInstance?.sshParsed) {
+      const { destination, args: sshArgs } = sshInstance.sshParsed;
+      await openSshTerminalAtPath(
+        destination,
+        sshArgs ?? [],
+        directory,
+        app.appName,
+      );
+      return;
+    }
     const opened = await openDesktopProjectInApp(directory, app.id, app.appName);
     if (!opened) {
       await openDesktopPath(directory, app.appName);

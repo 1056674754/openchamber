@@ -9,6 +9,8 @@ import {
   type OptimisticItem,
 } from "./optimistic"
 import { useDirectoryStore, useSyncSDK, useSyncDirectory, useChildStoreManager } from "./sync-context"
+import { resolveSdkForDirectory } from "./session-actions"
+import { useSessionUIStore } from "./session-ui-store"
 import { dropSessionCaches, getProtectedSessionCacheIds } from "./session-cache"
 import { stripMessageDiffSnapshots } from "./sanitize"
 import {
@@ -34,7 +36,6 @@ function sortParts(parts: Part[]) {
 // ---------------------------------------------------------------------------
 
 export function useSync() {
-  const sdk = useSyncSDK()
   const directory = useSyncDirectory()
   const store = useDirectoryStore()
   const childStores = useChildStoreManager()
@@ -188,8 +189,9 @@ export function useSync() {
   // Fetch messages from API
   const fetchMessages = useCallback(
     async (sessionID: string, limit: number, before?: string) => {
+      const client = resolveSdkForDirectory(directory)
       const result = await retry(() =>
-        sdk.session.messages({ sessionID, limit, before }),
+        client.session.messages({ sessionID, limit, before }),
       )
       const items = (result.data ?? []).filter((x: { info?: { id?: string } }) => !!x?.info?.id)
       const session = items
@@ -202,7 +204,7 @@ export function useSync() {
       const cursor = result.response?.headers?.get?.("x-next-cursor") ?? undefined
       return { session, part, cursor, complete: !cursor }
     },
-    [sdk],
+    [directory],
   )
 
   // Load messages for a session
@@ -286,7 +288,9 @@ export function useSync() {
         // Fetch session info if needed
         if (!hasSession || force) {
           try {
-            const result = await retry(() => sdk.session.get({ sessionID }))
+            const sessionDir = useSessionUIStore.getState().getDirectoryForSession(sessionID) || directory
+            const client = resolveSdkForDirectory(sessionDir)
+            const result = await retry(() => client.session.get({ sessionID }))
             if (result.data) {
               const s = store.getState()
               const sessions = [...s.session]
@@ -313,7 +317,7 @@ export function useSync() {
       promise.finally(() => inflight.current.delete(key))
       return promise
     },
-    [store, sdk, keyFor, touch, getMetaFor, loadMessages, directory],
+    [store, keyFor, touch, getMetaFor, loadMessages, directory],
   )
 
   // Load more (pagination)

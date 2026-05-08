@@ -7,6 +7,7 @@ import { isVSCodeRuntime } from '@/lib/desktop';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { getDefaultModels } from '@/lib/quota/model-families';
 import { updateDesktopSettings } from '@/lib/persistence';
+import { resolveApiUrl } from "@/lib/api/serverUrl";
 
 const DEFAULT_REFRESH_INTERVAL_MS = 60000;
 
@@ -27,9 +28,9 @@ interface QuotaStore extends QuotaSettingsState {
   lastUpdated: number | null;
   error: string | null;
 
-  loadSettings: () => Promise<void>;
-  fetchAllQuotas: () => Promise<void>;
-  fetchProviderQuota: (providerId: QuotaProviderId) => Promise<void>;
+  loadSettings: (serverBaseUrl?: string) => Promise<void>;
+  fetchAllQuotas: (serverBaseUrl?: string) => Promise<void>;
+  fetchProviderQuota: (providerId: QuotaProviderId, serverBaseUrl?: string) => Promise<void>;
   setSelectedProvider: (providerId: QuotaProviderId | null) => void;
   setAutoRefresh: (enabled: boolean) => void;
   setRefreshInterval: (intervalMs: number) => void;
@@ -94,7 +95,7 @@ const parseSettings = (data: Record<string, unknown> | null): QuotaSettingsState
   };
 };
 
-const loadSettingsFromRuntime = async (): Promise<QuotaSettingsState> => {
+const loadSettingsFromRuntime = async (serverBaseUrl?: string): Promise<QuotaSettingsState> => {
   const runtimeSettings = getRegisteredRuntimeAPIs()?.settings;
   if (runtimeSettings) {
     try {
@@ -107,7 +108,7 @@ const loadSettingsFromRuntime = async (): Promise<QuotaSettingsState> => {
   }
 
   if (!isVSCodeRuntime()) {
-    const response = await fetch('/api/config/settings', {
+    const response = await fetch(resolveApiUrl('/api/config/settings', serverBaseUrl), {
       method: 'GET',
       headers: { Accept: 'application/json' }
     });
@@ -143,21 +144,21 @@ export const useQuotaStore = create<QuotaStore>()(
       selectedModels: {},
       expandedFamilies: {},
 
-      loadSettings: async () => {
+      loadSettings: async (serverBaseUrl?: string) => {
         try {
-          const settings = await loadSettingsFromRuntime();
+          const settings = await loadSettingsFromRuntime(serverBaseUrl);
           set(settings);
         } catch (error) {
           console.warn('Failed to load usage settings:', error);
         }
       },
 
-      fetchAllQuotas: async () => {
+      fetchAllQuotas: async (serverBaseUrl?: string) => {
         set({ isLoading: true, error: null });
         const providerIds = QUOTA_PROVIDERS.map((provider) => provider.id);
         try {
           await Promise.all(
-            providerIds.map((providerId) => get().fetchProviderQuota(providerId))
+            providerIds.map((providerId) => get().fetchProviderQuota(providerId, serverBaseUrl))
           );
           set({
             isLoading: false,
@@ -169,12 +170,12 @@ export const useQuotaStore = create<QuotaStore>()(
         }
       },
 
-      fetchProviderQuota: async (providerId) => {
+      fetchProviderQuota: async (providerId, serverBaseUrl?: string) => {
         set((state) => ({
           isFetchingProvider: { ...state.isFetchingProvider, [providerId]: true }
         }));
         try {
-          const response = await fetch(`/api/quota/${encodeURIComponent(providerId)}`);
+          const response = await fetch(resolveApiUrl(`/api/quota/${encodeURIComponent(providerId)}`, serverBaseUrl));
           const payload = await response.json().catch(() => null);
           if (!response.ok) {
             throw new Error(payload?.error || 'Failed to fetch quota');

@@ -67,7 +67,14 @@ export const useProjectSessionLists = (args: Args) => {
   const getArchivedSessionsForProject = React.useCallback(
     (project: { normalizedPath: string }) => {
       if (isVSCode) {
+        const isSubtaskSession = (session: Session): boolean => {
+          return Boolean((session as Session & { parentID?: string | null }).parentID);
+        };
+
         const archived = archivedSessions.filter((session) => {
+          if (isSubtaskSession(session)) {
+            return false;
+          }
           const sessionDirectory = normalizePath((session as Session & { directory?: string | null }).directory ?? null);
           const projectWorktree = normalizePath((session as Session & { project?: { worktree?: string | null } | null }).project?.worktree ?? null);
 
@@ -101,11 +108,15 @@ export const useProjectSessionLists = (args: Args) => {
           .filter((value): value is string => Boolean(value)),
       ]);
 
+      const isSubtaskSession = (session: Session): boolean => {
+        return Boolean((session as Session & { parentID?: string | null }).parentID);
+      };
+
       const collect = (input: Session[]): Session[] => input.filter((session) =>
         isSessionRelatedToProject(session, project.normalizedPath, validDirectories),
       );
 
-      const archived = collect(archivedSessions);
+      const archived = collect(archivedSessions).filter((session) => !isSubtaskSession(session));
       const unassignedLive = sessions.filter((session) => {
         if (session.time?.archived) {
           return false;
