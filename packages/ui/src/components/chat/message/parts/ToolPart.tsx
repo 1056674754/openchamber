@@ -1066,9 +1066,15 @@ const TaskToolSummary: React.FC<{
 
     const handleOpenSession = (event: React.MouseEvent) => {
         event.stopPropagation();
-        if (sessionId) {
-            setCurrentSession(sessionId);
-        }
+        if (!sessionId) return;
+        // [sscity-mod] Subagents inherit the parent session's directory. Without
+        // passing it as a hint, setCurrentSession falls back to resolveSessionDirectory
+        // which needs the child session to already be loaded in a sync store —
+        // often not yet true when the user clicks 'Open session' mid-stream.
+        // Result: currentSessionId switches but currentDirectory doesn't, so the
+        // chat reads messages from the old directory's store and renders blank.
+        const parentDirectory = useDirectoryStore.getState().currentDirectory || null;
+        setCurrentSession(sessionId, parentDirectory);
     };
 
     const agentType = typeof input?.subagent_type === 'string'
