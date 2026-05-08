@@ -25,11 +25,11 @@ import {
   RiFileCopyLine,
   RiFolderLine,
   RiLinkUnlinkM,
-  RiMore2Line,
   RiPencilAiLine,
   RiPushpinLine,
   RiShare2Line,
   RiShieldLine,
+  RiComputerLine,
   RiUnpinLine,
   RiGitBranchLine,
   RiWindowLine,
@@ -41,22 +41,94 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { buildExportFilename, downloadAsMarkdown, formatSessionAsMarkdown, getExportRevealLabelKey, revealExportedMarkdown, saveAsMarkdownDesktop } from '@/lib/exportSession';
 import type { ChildSessionExport } from '@/lib/exportSession';
-import { buildSessionMessageRecordsSnapshot, useDirectoryStore, useGlobalSessionStatus, useSession, useSessionPermissions } from '@/sync/sync-context';
+import { buildSessionMessageRecordsSnapshot, useAllSessionStatuses, useDirectoryStore, useGlobalSessionStatus, useSession, useSessionPermissions } from '@/sync/sync-context';
 import { useSync } from '@/sync/use-sync';
 import { useViewportStore } from '@/sync/viewport-store';
 import { DraggableSessionRow } from './sessionFolderDnd';
+import { SidebarSpinner } from './SidebarSpinner';
 import type { SessionNode, SessionSummaryMeta } from './types';
 import { formatSessionCompactDateLabel, formatSessionDateLabel, normalizePath, renderHighlightedText, resolveSessionDiffStats } from './utils';
+import { resolveGlobalSessionDirectory, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { useSessionUnseenCount } from '@/sync/notification-store';
 import { useSessionMultiSelectStore } from '@/stores/useSessionMultiSelectStore';
+import { useProjectsStore } from '@/stores/useProjectsStore';
+import { useDesktopSshStore } from '@/stores/useDesktopSshStore';
+import { resolveInstanceLabel } from '@/lib/desktopSsh';
+import { serverRegistry, DEFAULT_SERVER_ID } from '@/lib/opencode/server-registry';
+import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useI18n } from '@/lib/i18n';
 
 type Folder = { id: string; name: string; sessionIds: string[] };
 
+const GLOBAL_PINNED_CHILD_INDENT = 20;
+
 type SecondaryMeta = {
   projectLabel?: string | null;
   branchLabel?: string | null;
+};
+
+type SessionRowKind = 'pinned' | 'normal' | 'subtask';
+
+type LeadingStatusKind = 'none' | 'spinner' | 'unread' | 'spinner-unread';
+
+type LeadingStructureKind = 'none' | 'pin' | 'chevron' | 'pin-chevron';
+
+type LeadingSlotValue = LeadingStatusKind | LeadingStructureKind;
+
+type LeadingStatusInput = {
+  rowKind: SessionRowKind;
+  hasChildren: boolean;
+  hasSpinner: boolean;
+  hasUnread: boolean;
+};
+
+type LeadingState = {
+  slot1: LeadingSlotValue;
+  slot2: LeadingSlotValue;
+};
+
+const resolveSessionRowKind = (input: { isPinned: boolean; isSubtask: boolean }): SessionRowKind => {
+  if (input.isSubtask) return 'subtask';
+  if (input.isPinned) return 'pinned';
+  return 'normal';
+};
+
+const resolveStatusSlot = (input: { hasSpinner: boolean; hasUnread: boolean }): LeadingStatusKind => {
+  if (input.hasSpinner && input.hasUnread) return 'spinner-unread';
+  if (input.hasSpinner) return 'spinner';
+  if (input.hasUnread) return 'unread';
+  return 'none';
+};
+
+const resolveLeadingState = (input: LeadingStatusInput): LeadingState => {
+  const status = resolveStatusSlot(input);
+
+  if (input.rowKind === 'pinned') {
+    return {
+      slot1: status,
+      slot2: input.hasChildren ? 'pin-chevron' : 'pin',
+    };
+  }
+
+  if (input.hasChildren) {
+    return {
+      slot1: status,
+      slot2: 'chevron',
+    };
+  }
+
+  return {
+    slot1: input.hasUnread ? 'unread' : 'none',
+    slot2: input.hasSpinner ? 'spinner' : 'none',
+  };
+};
+
+const resolveGlobalPinnedLeadingState = (input: { hasChildren: boolean; hasSpinner: boolean }): LeadingState => {
+  return {
+    slot1: input.hasChildren ? 'pin-chevron' : 'pin',
+    slot2: input.hasSpinner ? 'spinner' : 'none',
+  };
 };
 
 type Props = {
@@ -68,7 +140,6 @@ type Props = {
   directoryStatus: Map<string, 'unknown' | 'exists' | 'missing'>;
   currentSessionId: string | null;
   pinnedSessionIds: Set<string>;
-  pinnedSessionIdsByProject: Map<string, Set<string>>;
   expandedParents: Set<string>;
   hasSessionSearchQuery: boolean;
   normalizedSessionSearchQuery: string;
@@ -83,6 +154,7 @@ type Props = {
   handleSessionSelect: (sessionId: string, sessionDirectory: string | null, isMissingDirectory: boolean, projectId?: string | null) => void;
   handleSessionDoubleClick: () => void;
   togglePinnedSession: (sessionId: string, scope: 'global' | string) => void;
+  pinnedSessionIdsByProject: Map<string, Set<string>>;
   handleShareSession: (session: Session) => void;
   copiedSessionId: string | null;
   handleCopyShareUrl: (url: string, sessionId: string) => void;
@@ -110,8 +182,39 @@ const getNodeChildSignature = (node: SessionNode): string => {
   }
 
   return node.children
-    .map((child) => `${child.session.id}:${child.children.length}`)
+    .map((child) => `${child.session.id}:${getNodeChildSignature(child)}`)
     .join('|');
+};
+
+const treeContainsExpandedStateChange = (
+  prevNode: SessionNode,
+  nextNode: SessionNode,
+  prevExpandedParents: Set<string>,
+  nextExpandedParents: Set<string>,
+): boolean => {
+  if (prevExpandedParents.has(prevNode.session.id) !== nextExpandedParents.has(nextNode.session.id)) {
+    return true;
+  }
+
+  const nextChildrenById = new Map(nextNode.children.map((child) => [child.session.id, child]));
+  for (const prevChild of prevNode.children) {
+    const nextChild = nextChildrenById.get(prevChild.session.id);
+    if (!nextChild) {
+      return true;
+    }
+    if (treeContainsExpandedStateChange(prevChild, nextChild, prevExpandedParents, nextExpandedParents)) {
+      return true;
+    }
+  }
+
+  return false;
+};
+
+const directoryBelongsToProject = (directory: string | null | undefined, projectPath: string): boolean => {
+  const normalizedDirectory = normalizePath(directory ?? null);
+  const normalizedProjectPath = normalizePath(projectPath);
+  if (!normalizedDirectory || !normalizedProjectPath) return false;
+  return normalizedDirectory === normalizedProjectPath || normalizedDirectory.startsWith(`${normalizedProjectPath}/`);
 };
 
 const treeContainsSessionId = (node: SessionNode, sessionId: string | null): boolean => {
@@ -181,7 +284,7 @@ const areEqual = (prev: Props, next: Props): boolean => {
   const nextIsPinned = next.pinnedSessionIds.has(nextSessionId)
     || Boolean(next.groupDirectory && next.pinnedSessionIdsByProject.get(next.groupDirectory)?.has(nextSessionId));
   if (prevIsPinned !== nextIsPinned) return false;
-  if (prev.expandedParents.has(prevSessionId) !== next.expandedParents.has(nextSessionId)) return false;
+  if (treeContainsExpandedStateChange(prev.node, next.node, prev.expandedParents, next.expandedParents)) return false;
   if (prev.hasSessionSearchQuery !== next.hasSessionSearchQuery) return false;
   if (prev.normalizedSessionSearchQuery !== next.normalizedSessionSearchQuery) return false;
   if (prev.notifyOnSubtasks !== next.notifyOnSubtasks) return false;
@@ -205,9 +308,9 @@ const areEqual = (prev: Props, next: Props): boolean => {
   const nextMenuInTree = treeContainsMenuKey(next.node, next.openSidebarMenuKey, next.renderContext ?? 'project', next.archivedBucket ?? false);
   if (prevMenuInTree !== nextMenuInTree) return false;
 
-  const prevDirectory = normalizePath((prevSession as Session & { directory?: string | null }).directory ?? null)
+  const prevDirectory = resolveGlobalSessionDirectory(prevSession)
     ?? normalizePath(prev.groupDirectory ?? null);
-  const nextDirectory = normalizePath((nextSession as Session & { directory?: string | null }).directory ?? null)
+  const nextDirectory = resolveGlobalSessionDirectory(nextSession)
     ?? normalizePath(next.groupDirectory ?? null);
   if (prevDirectory !== nextDirectory) return false;
   if ((prevDirectory ? prev.directoryStatus.get(prevDirectory) : null) !== (nextDirectory ? next.directoryStatus.get(nextDirectory) : null)) return false;
@@ -218,6 +321,7 @@ const areEqual = (prev: Props, next: Props): boolean => {
   if (prev.alwaysShowActions !== next.alwaysShowActions) return false;
   if ((prev.renderContext ?? 'project') !== (next.renderContext ?? 'project')) return false;
   if (prev.renamingFolderId !== next.renamingFolderId) return false;
+  if (prev.renderSessionNode !== next.renderSessionNode) return false;
 
   return true;
 };
@@ -268,9 +372,6 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
     secondaryMeta,
     renderContext = 'project',
   } = props;
-  const hasSecondaryProjectLabel = Boolean(secondaryMeta?.projectLabel);
-  const hasSecondaryBranchLabel = Boolean(secondaryMeta?.branchLabel);
-
   const displayMode = useSessionDisplayStore((state) => state.displayMode);
   const isMinimalMode = displayMode === 'minimal';
   const isVSCode = React.useMemo(() => isVSCodeRuntime(), []);
@@ -281,25 +382,95 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
   const hideOnHoverClass = isVSCode
     ? 'group-hover:opacity-0'
     : 'group-hover:opacity-0 group-focus-within:opacity-0';
-  const showQuickArchiveAction = !archivedBucket && !mobileVariant;
-  const revealPaddingClass = isMinimalMode
-    ? (isVSCode
-        ? 'group-hover:pr-2'
-        : 'group-hover:pr-2 group-focus-within:pr-2')
-    : (isVSCode
-        ? (showQuickArchiveAction ? 'group-hover:pr-12' : 'group-hover:pr-5')
-        : (showQuickArchiveAction ? 'group-hover:pr-12 group-focus-within:pr-12' : 'group-hover:pr-5 group-focus-within:pr-5'));
-  const alwaysActionPaddingClass = showQuickArchiveAction ? 'pr-13' : 'pr-7';
   const suppressNextSelectRef = React.useRef(false);
   const [isTouchPressed, setIsTouchPressed] = React.useState(false);
 
   const session = node.session;
   const liveSession = useSession(session.id);
   const resolvedSession = liveSession ?? session;
+  const isGlobalPinnedContext = renderContext === 'global-pinned';
+  const isGlobalPinnedRootRow = isGlobalPinnedContext && depth === 0;
 
   const sessionDirectory =
-    normalizePath((session as Session & { directory?: string | null }).directory ?? null)
+    resolveGlobalSessionDirectory(session)
     ?? normalizePath(groupDirectory ?? null);
+
+  const hasSecondaryProjectLabel = Boolean(secondaryMeta?.projectLabel);
+  const hasSecondaryBranchLabel = Boolean(secondaryMeta?.branchLabel);
+
+  const projectsStore = useProjectsStore((state) => state.projects);
+  const { currentTheme } = useThemeSystem();
+  const remoteProject = React.useMemo(() => {
+    const indexedServerId = serverRegistry.getServerForSession(session.id);
+    const serverScopedProjects = indexedServerId && indexedServerId !== DEFAULT_SERVER_ID
+      ? projectsStore.filter((project) => project.serverId === indexedServerId)
+      : [];
+
+    const candidates = serverScopedProjects.length > 0
+      ? serverScopedProjects
+      : projectsStore.filter((project) => project.serverId);
+
+    const projectById = projectId
+      ? candidates.find((project) => project.id === projectId && project.serverId)
+      : null;
+    if (projectById) return projectById;
+
+    const directory = sessionDirectory ?? groupDirectory ?? null;
+    return candidates
+      .filter((project) => project.serverId && directoryBelongsToProject(directory, project.path))
+      .sort((a, b) => normalizePath(b.path)!.length - normalizePath(a.path)!.length)[0] ?? null;
+  }, [groupDirectory, projectId, projectsStore, session.id, sessionDirectory]);
+  const remoteIndicatorProject = isGlobalPinnedContext ? remoteProject : null;
+  const sshInstance = useDesktopSshStore((state) =>
+    remoteIndicatorProject?.serverId ? state.instances.find((entry) => entry.id === remoteIndicatorProject.serverId) : undefined,
+  );
+  const sshStatus = useDesktopSshStore((state) =>
+    remoteIndicatorProject?.serverId ? state.statusesById[remoteIndicatorProject.serverId] : undefined,
+  );
+  const remoteStatusLabel = sshStatus?.phase === 'ready'
+    ? t('sessions.sidebar.remote.connected')
+    : sshStatus?.phase === 'error'
+      ? t('sessions.sidebar.remote.error')
+      : sshStatus && sshStatus.phase !== 'idle'
+        ? t('sessions.sidebar.remote.connecting')
+        : t('sessions.sidebar.remote.disconnected');
+  const remoteInstanceLabel = remoteIndicatorProject?.serverId
+    ? (sshInstance ? resolveInstanceLabel(sshInstance) : remoteIndicatorProject.serverId)
+    : null;
+  const remoteProjectDirectory = remoteIndicatorProject?.path ?? sessionDirectory ?? null;
+  const remoteStatusColor = React.useMemo(() => {
+    if (!sshStatus || sshStatus.phase === 'idle') return currentTheme.colors.surface.subtle;
+    if (sshStatus.phase === 'ready') return currentTheme.colors.status.success;
+    if (sshStatus.phase === 'error') return currentTheme.colors.status.error;
+    return currentTheme.colors.status.warning;
+  }, [sshStatus, currentTheme.colors.surface.subtle, currentTheme.colors.status]);
+  const remoteIndicator = remoteIndicatorProject ? (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span
+          className="flex-shrink-0 inline-flex items-center"
+          aria-label={t('sessions.sidebar.session.status.remoteInstance', { status: remoteStatusLabel })}
+        >
+          <RiComputerLine className="h-3.5 w-3.5" style={{ color: remoteStatusColor, transition: 'color 0.2s' }} />
+        </span>
+      </TooltipTrigger>
+      <TooltipContent side="right" sideOffset={8} className="max-w-xs text-left">
+        <div className="flex flex-col gap-1 text-xs">
+          <div className="flex items-center gap-2">
+            <RiComputerLine className="h-3.5 w-3.5 flex-shrink-0" style={{ color: remoteStatusColor }} />
+            <span className="font-medium text-foreground">{remoteInstanceLabel}</span>
+            <span className="text-muted-foreground">({remoteStatusLabel})</span>
+          </div>
+          {remoteProjectDirectory ? (
+            <div className="min-w-0 text-muted-foreground">
+              <span className="font-medium text-foreground">{t('sessions.sidebar.session.status.remoteProjectDir')}</span>
+              <span className="ml-1 break-all">{remoteProjectDirectory}</span>
+            </div>
+          ) : null}
+        </div>
+      </TooltipContent>
+    </Tooltip>
+  ) : null;
   const directoryStore = useDirectoryStore(sessionDirectory ?? undefined);
   const sync = useSync();
 
@@ -349,15 +520,41 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
   const sessionUpdatedLabel = formatSessionDateLabel(sessionTimestamp);
   const sessionCompactUpdatedLabel = formatSessionCompactDateLabel(sessionTimestamp);
   const isMenuOpen = openSidebarMenuKey === menuInstanceKey;
+  const [menuPosition, setMenuPosition] = React.useState<{ x: number; y: number } | null>(null);
+  const [archiveConfirming, setArchiveConfirming] = React.useState(false);
 
-  const descendantCount = React.useMemo(() => collectNodeDescendantIds(node).length, [collectNodeDescendantIds, node]);
+  React.useEffect(() => {
+    if (!archiveConfirming) return;
+    const timer = setTimeout(() => setArchiveConfirming(false), 3000);
+    return () => clearTimeout(timer);
+  }, [archiveConfirming]);
+
+  const descendantIds = React.useMemo(() => collectNodeDescendantIds(node), [collectNodeDescendantIds, node]);
+  const descendantCount = descendantIds.length;
+  const liveSessionStatuses = useAllSessionStatuses();
+  const descendantStatusSignature = useGlobalSessionsStore(
+    React.useCallback(
+      (state) => descendantIds.map((id) => `${id}:${state.sessionStatuses.get(id)?.type ?? ''}`).join('|'),
+      [descendantIds],
+    ),
+  );
+  const hasRunningChildSession = React.useMemo(() => {
+    if (descendantIds.length === 0) return false;
+    if (descendantStatusSignature.includes(':busy') || descendantStatusSignature.includes(':retry')) {
+      return true;
+    }
+    return descendantIds.some((id) => {
+      const status = liveSessionStatuses[id];
+      return status?.type === 'busy' || status?.type === 'retry';
+    });
+  }, [descendantIds, descendantStatusSignature, liveSessionStatuses]);
 
   const collectChildExports = React.useCallback(async (children: SessionNode[]): Promise<{ children: ChildSessionExport[]; skipped: number }> => {
     const results: ChildSessionExport[] = [];
     let skipped = 0;
     for (const child of children) {
       try {
-        await sync.ensureSessionRenderable(child.session.id);
+        await sync.syncSession(child.session.id);
         const childRecords = buildSessionMessageRecordsSnapshot(directoryStore.getState(), child.session.id).list;
         const childTitle = child.session.title || t('sessions.sidebar.session.export.untitledSubagent');
         const childAgent = (child.session as Session & { agent?: string }).agent;
@@ -389,7 +586,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
       return;
     }
 
-    await sync.ensureSessionRenderable(session.id);
+    await sync.syncSession(session.id);
 
     const records = buildSessionMessageRecordsSnapshot(directoryStore.getState(), session.id).list;
     if (records.length === 0) {
@@ -503,60 +700,148 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
   const statusType = sessionStatus?.type ?? 'idle';
   const isStreaming = statusType === 'busy' || statusType === 'retry';
   const pendingPermissionCount = sessionPermissions.length;
-  const showUnreadStatus = !isStreaming && needsAttention && !isActive;
-  const showStatusMarker = isStreaming || showUnreadStatus;
-  const statusMarkerContent = isStreaming
-    ? (
-        <span
-          className="h-1.5 w-1.5 rounded-full bg-primary animate-busy-pulse"
-          aria-label={t('sessions.sidebar.session.status.active')}
-          title={t('sessions.sidebar.session.status.active')}
-        />
-      )
-    : (
-        <span
-          className="h-1.5 w-1.5 rounded-full bg-[var(--status-info)]"
-          aria-label={t('sessions.sidebar.session.status.unread')}
-          title={t('sessions.sidebar.session.status.unread')}
-        />
-      );
-  const leadingIndicators = showStatusMarker || isPinnedSession ? (
+  const showUnreadStatus = needsAttention && !isActive;
+
+  const spinnerState = (() => {
+    if (isStreaming && isSubtaskSession) return 'subagent' as const;
+    if (isStreaming) return 'streaming' as const;
+    if (hasRunningChildSession) return 'subagent' as const;
+    return 'hidden' as const;
+  })();
+
+  const shouldShowSpinner = spinnerState !== 'hidden';
+
+  const hasChildrenChevron = hasChildren;
+
+  const renderUnreadDot = () => (
     <span
-      className={cn(
-        'pointer-events-none absolute inline-flex h-3.5 items-center justify-center gap-0.5 transition-opacity',
-        isMinimalMode ? 'top-1/2 -translate-y-1/2' : 'top-[14.5px] -translate-y-1/2',
-        showStatusMarker && isPinnedSession ? 'left-[-32px] w-6' : 'left-[-24px] w-3.5',
-      )}
-    >
-      {showStatusMarker ? statusMarkerContent : null}
-      {isPinnedSession ? <RiPushpinLine className="h-3 w-3 flex-shrink-0 text-primary" aria-label={t('sessions.sidebar.session.status.pinned')} /> : null}
+      className="h-1.5 w-1.5 rounded-full bg-[var(--status-info)]"
+      aria-label={t('sessions.sidebar.session.status.unread')}
+      title={t('sessions.sidebar.session.status.unread')}
+    />
+  );
+
+  const renderSpinner = () => (
+    <SidebarSpinner state={spinnerState} aria-label={t('sessions.sidebar.session.status.active')} />
+  );
+
+  const renderAlternating = () => (
+    <span className="relative inline-flex h-4 w-4 items-center justify-center">
+      <span className="animate-slot-fade-in">{renderSpinner()}</span>
+      <span className="absolute animate-slot-fade-out">{renderUnreadDot()}</span>
     </span>
-  ) : null;
-  const subsessionChevron = hasChildren ? (
+  );
+
+  const rowKind = resolveSessionRowKind({ isPinned: isPinnedSession, isSubtask: isSubtaskSession });
+  const leadingState = isGlobalPinnedRootRow
+    ? resolveGlobalPinnedLeadingState({
+      hasChildren: hasChildrenChevron,
+      hasSpinner: shouldShowSpinner,
+    })
+    : resolveLeadingState({
+      rowKind,
+      hasChildren: hasChildrenChevron,
+      hasSpinner: shouldShowSpinner,
+      hasUnread: showUnreadStatus,
+    });
+
+  const renderChevron = (mode: 'normal' | 'overlay') => (
     <span
       role="button"
       tabIndex={0}
-      onClick={(event) => {
-        event.stopPropagation();
+      onPointerDown={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+      }}
+      onMouseDown={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+      }}
+      onClick={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
         toggleParent(session.id);
       }}
-      onKeyDown={(event) => {
-        if (event.key === 'Enter' || event.key === ' ') {
-          event.preventDefault();
-          event.stopPropagation();
-          toggleParent(session.id);
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault(); e.stopPropagation(); toggleParent(session.id);
         }
       }}
       className={cn(
-        'absolute left-[-10px] inline-flex h-3.5 w-3.5 items-center justify-center rounded-md text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 transition-opacity',
-        isMinimalMode ? 'top-1/2 -translate-y-1/2' : 'top-[14.5px] -translate-y-1/2',
+        mode === 'overlay'
+          ? 'absolute inset-0 inline-flex h-4 w-3.5 items-center justify-center rounded-md text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 opacity-0 group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto'
+          : 'pointer-events-auto inline-flex h-4 w-3.5 flex-shrink-0 items-center justify-center rounded-md text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50',
       )}
-      aria-label={isExpanded
-        ? t('sessions.sidebar.session.subsessions.collapse')
-        : t('sessions.sidebar.session.subsessions.expand')}
+      aria-label={isExpanded ? t('sessions.sidebar.session.subsessions.collapse') : t('sessions.sidebar.session.subsessions.expand')}
     >
       {isExpanded ? <RiArrowDownSLine className="h-3 w-3" /> : <RiArrowRightSLine className="h-3 w-3" />}
     </span>
+  );
+
+  const renderPin = () => (
+    <RiPushpinLine
+      className={cn('h-3.5 w-3.5 flex-shrink-0', isStreaming ? 'text-primary animate-busy-pulse' : showUnreadStatus ? 'text-[var(--status-info)]' : 'text-foreground')}
+      aria-label={isGloballyPinned ? t('sessions.sidebar.session.status.pinnedGlobal') : t('sessions.sidebar.session.status.pinned')}
+    />
+  );
+
+  const renderLeadingSlot = (slot: LeadingSlotValue) => {
+    if (slot === 'none') return null;
+    if (slot === 'spinner') return renderSpinner();
+    if (slot === 'unread') return renderUnreadDot();
+    if (slot === 'spinner-unread') return renderAlternating();
+    if (slot === 'pin') return renderPin();
+    if (slot === 'chevron') return renderChevron('normal');
+    return (
+      <span className="relative inline-flex h-4 w-3.5 flex-shrink-0 items-center justify-center group-hover:[&>*:first-child]:opacity-0 group-focus-within:[&>*:first-child]:opacity-0">
+        {renderPin()}
+        {renderChevron('overlay')}
+      </span>
+    );
+  };
+
+  const slot1Content = renderLeadingSlot(leadingState.slot1);
+  const slot2Content = renderLeadingSlot(leadingState.slot2);
+  const rowIndentPx = depth > 0
+    ? (isGlobalPinnedContext ? depth * 16 + GLOBAL_PINNED_CHILD_INDENT : depth * 16 + 4)
+    : 0;
+  const nestedLeadingSlotsStyle = depth > 0
+    ? { left: `${rowIndentPx - 34}px` }
+    : undefined;
+
+  const projectLeadingStatusSlots = slot1Content || slot2Content ? (
+    <div className="pointer-events-none absolute -left-7 top-1/2 z-10 flex -translate-y-1/2 items-center gap-0.5" style={nestedLeadingSlotsStyle}>
+      <span className="inline-flex h-4 w-4 flex-shrink-0 items-center justify-center">
+        {slot1Content}
+      </span>
+      <span className="inline-flex h-4 w-3.5 flex-shrink-0 items-center justify-center">
+        {slot2Content}
+      </span>
+    </div>
+  ) : null;
+
+  const globalPinnedChildLeadingSlots = isGlobalPinnedContext && !isGlobalPinnedRootRow && (slot1Content || slot2Content) ? (
+    <div className="pointer-events-none absolute left-0 top-1/2 z-10 flex -translate-y-1/2 items-center gap-0.5" style={nestedLeadingSlotsStyle}>
+      <span className="inline-flex h-4 w-4 flex-shrink-0 items-center justify-center">
+        {slot1Content}
+      </span>
+      <span className="inline-flex h-4 w-3.5 flex-shrink-0 items-center justify-center">
+        {slot2Content}
+      </span>
+    </div>
+  ) : null;
+
+  const globalPinnedLeadingSlots = isGlobalPinnedContext && isGlobalPinnedRootRow ? (
+    <div className="pointer-events-none flex flex-shrink-0 items-center gap-1.5">
+      <span className="inline-flex h-3.5 w-3.5 flex-shrink-0 items-center justify-center">
+        {slot1Content}
+      </span>
+      {slot2Content ? (
+        <span className="inline-flex h-4 w-4 flex-shrink-0 items-center justify-center">
+          {slot2Content}
+        </span>
+      ) : null}
+    </div>
   ) : null;
 
   const streamingIndicator = isZombie
@@ -565,39 +850,6 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
 
   const handleMenuOpenChange = (open: boolean) => {
     setOpenSidebarMenuKey(open ? menuInstanceKey : null);
-  };
-
-  const handleMenuTriggerClick = (event: React.MouseEvent<HTMLButtonElement>) => {
-    event.preventDefault();
-    event.stopPropagation();
-    setOpenSidebarMenuKey(isMenuOpen ? null : menuInstanceKey);
-  };
-
-  const handleMenuTriggerPointerDown = (event: React.PointerEvent<HTMLButtonElement>) => {
-    event.preventDefault();
-    event.stopPropagation();
-  };
-
-  const handleMenuTriggerMouseDown = (event: React.MouseEvent<HTMLButtonElement>) => {
-    event.preventDefault();
-    event.stopPropagation();
-  };
-
-  const handleQuickArchivePointerDown = (event: React.PointerEvent<HTMLButtonElement>) => {
-    event.preventDefault();
-    event.stopPropagation();
-  };
-
-  const handleQuickArchiveMouseDown = (event: React.MouseEvent<HTMLButtonElement>) => {
-    event.preventDefault();
-    event.stopPropagation();
-  };
-
-  const handleQuickArchiveClick = (event: React.MouseEvent<HTMLButtonElement>) => {
-    event.preventDefault();
-    event.stopPropagation();
-    setOpenSidebarMenuKey(null);
-    handleDeleteSession(session, { archivedBucket });
   };
 
   const handleRowSelect = (event?: React.MouseEvent<HTMLButtonElement>) => {
@@ -768,11 +1020,19 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
         </DropdownMenuItem>
       ) : null}
 
-      <DropdownMenuSeparator />
-      <DropdownMenuItem className="text-destructive focus:text-destructive [&>svg]:mr-1" onClick={() => handleDeleteSession(session, { archivedBucket })}>
-        <RiDeleteBinLine className="mr-1 h-4 w-4" />
-        {archivedBucket ? t('sessions.sidebar.bulkActions.delete') : t('sessions.sidebar.bulkActions.archive')}
-      </DropdownMenuItem>
+      {!archivedBucket ? (
+        <>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            onClick={() => { handleDeleteSession(session, { archivedBucket: true }); }}
+            className="[&>svg]:mr-1 text-destructive focus:text-destructive"
+          >
+            <RiDeleteBinLine className="mr-1 h-4 w-4" />
+            {t('sessions.sidebar.session.menu.delete')}
+          </DropdownMenuItem>
+        </>
+      ) : null}
+
     </DropdownMenuContent>
   );
 
@@ -784,40 +1044,49 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
           data-session-scope={sessionDirectory ?? ''}
           data-session-archived={archivedBucket ? '1' : '0'}
           className={cn(
-            'group relative my-0.5 flex items-center rounded-sm px-1.5 py-1',
+            'group relative my-0.5 flex items-center rounded-sm py-1',
+            isGlobalPinnedRootRow ? 'px-0.5' : 'px-1.5',
+            isGlobalPinnedRootRow && 'gap-1.5',
             isMissingDirectory ? 'opacity-75' : '',
-            depth > 0 && 'pl-[20px]',
             isRowSelected && 'bg-primary/15',
           )}
+          style={depth > 0 ? { paddingLeft: `${rowIndentPx}px` } : undefined}
+          onContextMenu={!mobileVariant ? (e) => {
+            e.preventDefault();
+            setMenuPosition({ x: e.clientX, y: e.clientY });
+            setOpenSidebarMenuKey(menuInstanceKey);
+          } : undefined}
         >
-          {leadingIndicators}
-          {subsessionChevron}
+          {isGlobalPinnedRootRow ? globalPinnedLeadingSlots : globalPinnedChildLeadingSlots ?? projectLeadingStatusSlots}
           <div className="flex min-w-0 flex-1 items-center">
             {isMinimalMode ? (
               <Tooltip>
                 <TooltipTrigger asChild>
                   <button
                     type="button"
-	                    disabled={isMissingDirectory}
-	                    onPointerDown={handleRowPointerDown}
-	                    onPointerUp={handleRowPointerEnd}
-	                    onPointerCancel={handleRowPointerEnd}
-	                    onMouseDown={handleRowMouseDown}
-	                    onClick={(event) => handleRowSelect(event)}
+                    disabled={isMissingDirectory}
+                    onPointerDown={handleRowPointerDown}
+                    onPointerUp={handleRowPointerEnd}
+                    onPointerCancel={handleRowPointerEnd}
+                    onMouseDown={handleRowMouseDown}
+                    onClick={(event) => handleRowSelect(event)}
                     onDoubleClick={(e) => {
                       e.stopPropagation();
                       handleSessionDoubleClick();
                     }}
                     className={cn(
-	                      'flex min-w-0 flex-1 cursor-pointer flex-col gap-0 overflow-hidden rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 text-foreground select-none disabled:cursor-not-allowed transition-[padding]',
-	                      isTouchPressed && 'bg-interactive-hover/70',
-                      alwaysShowActions
-                        ? (isVSCode ? revealPaddingClass : alwaysActionPaddingClass)
-                        : revealPaddingClass,
+                      'flex min-w-0 flex-1 cursor-pointer flex-col gap-0 overflow-hidden rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 text-foreground select-none disabled:cursor-not-allowed',
+                      isTouchPressed && 'bg-interactive-hover/70',
+                      alwaysShowActions ? 'pr-7' : null,
                     )}
-                  >
-                    <div className={cn('flex w-full items-center min-w-0 flex-1 overflow-hidden', isMinimalMode ? 'gap-1' : 'gap-1')}>
-                      <div className={cn('block min-w-0 flex-1 truncate typography-ui-label font-normal', isActive ? 'text-primary' : 'text-foreground')}>{renderHighlightedText(sessionTitle, normalizedSessionSearchQuery)}</div>
+                    >
+                    <div className={cn('flex w-full items-center min-w-0 flex-1 overflow-hidden', isGlobalPinnedContext ? 'gap-1.5' : 'gap-0.5')}>
+                      <div
+                        className={cn('block min-w-0 flex-1 truncate typography-ui-label font-normal', isActive ? 'text-primary' : 'text-foreground')}
+                      >
+                        {renderHighlightedText(sessionTitle, normalizedSessionSearchQuery)}
+                      </div>
+                      {remoteIndicator}
                       {alwaysShowActions ? <span className="ml-2 flex-shrink-0 text-[0.72rem] text-muted-foreground/75">{sessionCompactUpdatedLabel}</span> : null}
                       {!alwaysShowActions ? (
                         <div className="relative ml-1 flex h-4 min-w-4 flex-shrink-0 items-center justify-end">
@@ -862,34 +1131,37 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
             ) : (
               <button
                 type="button"
-	                disabled={isMissingDirectory}
-	                onPointerDown={handleRowPointerDown}
-	                onPointerUp={handleRowPointerEnd}
-	                onPointerCancel={handleRowPointerEnd}
-	                onMouseDown={handleRowMouseDown}
-	                onClick={(event) => handleRowSelect(event)}
+                disabled={isMissingDirectory}
+                onPointerDown={handleRowPointerDown}
+                onPointerUp={handleRowPointerEnd}
+                onPointerCancel={handleRowPointerEnd}
+                onMouseDown={handleRowMouseDown}
+                onClick={(event) => handleRowSelect(event)}
                 onDoubleClick={(e) => {
                   e.stopPropagation();
                   handleSessionDoubleClick();
                 }}
                 className={cn(
-	                  'flex min-w-0 flex-1 cursor-pointer flex-col gap-0 overflow-hidden rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 text-foreground select-none disabled:cursor-not-allowed transition-[padding]',
-	                  isTouchPressed && 'bg-interactive-hover/70',
-                  alwaysShowActions
-                    ? (isVSCode ? revealPaddingClass : alwaysActionPaddingClass)
-                    : revealPaddingClass
+                  'flex min-w-0 flex-1 cursor-pointer flex-col gap-0 overflow-hidden rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 text-foreground select-none disabled:cursor-not-allowed',
+                  isTouchPressed && 'bg-interactive-hover/70',
+                  alwaysShowActions ? 'pr-7' : null,
                 )}
               >
-                <div className={cn('flex w-full items-center min-w-0 flex-1 overflow-hidden', isMinimalMode ? 'gap-1' : 'gap-1')}>
-                    <div className={cn('block min-w-0 flex-1 truncate typography-ui-label font-normal', isActive ? 'text-primary' : 'text-foreground')}>{renderHighlightedText(sessionTitle, normalizedSessionSearchQuery)}</div>
-                    {pendingPermissionCount > 0 ? (
-                      <span className="inline-flex items-center gap-1 rounded bg-destructive/10 px-1 py-0.5 text-[0.7rem] text-destructive flex-shrink-0" title={t('sessions.sidebar.session.status.permissionRequired')} aria-label={t('sessions.sidebar.session.status.permissionRequired')}>
-                        <RiShieldLine className="h-3 w-3" />
-                        <span className="leading-none">{pendingPermissionCount}</span>
-                      </span>
-                    ) : null}
+                  <div className={cn('flex w-full items-center min-w-0 flex-1 overflow-hidden', isGlobalPinnedContext ? 'gap-1.5' : 'gap-0.5')}>
+                  <div
+                    className={cn('block min-w-0 flex-1 truncate typography-ui-label font-normal', isActive ? 'text-primary' : 'text-foreground')}
+                  >
+                    {renderHighlightedText(sessionTitle, normalizedSessionSearchQuery)}
                   </div>
- 
+                  {remoteIndicator}
+                  {pendingPermissionCount > 0 ? (
+                    <span className="inline-flex items-center gap-1 rounded bg-destructive/10 px-1 py-0.5 text-[0.7rem] text-destructive flex-shrink-0" title={t('sessions.sidebar.session.status.permissionRequired')} aria-label={t('sessions.sidebar.session.status.permissionRequired')}>
+                      <RiShieldLine className="h-3 w-3" />
+                      <span className="leading-none">{pendingPermissionCount}</span>
+                    </span>
+                  ) : null}
+                </div>
+
                 {!isMinimalMode ? (
                   <div className="flex items-center justify-between gap-3 text-muted-foreground/60 min-w-0 overflow-hidden leading-tight" style={{ fontSize: 'calc(var(--text-ui-label) * 0.85)' }}>
                     <div className="flex min-w-0 items-center gap-1.5 overflow-hidden">
@@ -912,59 +1184,52 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
 
           <div className={cn(
             'absolute right-0 top-1/2 z-10 flex -translate-y-1/2 items-center gap-0.5 transition-opacity',
-            isMenuOpen
+            isMenuOpen || archiveConfirming
               ? 'opacity-100'
               : (alwaysShowActions && !isVSCode)
                 ? 'opacity-100'
                 : cn('opacity-0', revealOnHoverClass),
           )}>
-            {showQuickArchiveAction ? (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    type="button"
-                    className={cn(
-                      'inline-flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 transition-opacity',
-                      isMinimalMode && !alwaysShowActions ? 'h-4 w-4' : 'h-6 w-6',
-                    )}
-                    aria-label={t('sessions.sidebar.bulkActions.archive')}
-                    onPointerDown={handleQuickArchivePointerDown}
-                    onMouseDown={handleQuickArchiveMouseDown}
-                    onClick={handleQuickArchiveClick}
-                    onKeyDown={(event) => event.stopPropagation()}
-                  >
-                    <RiArchiveLine className={cn(isMinimalMode && !alwaysShowActions ? 'h-2.5 w-2.5' : 'h-3.5 w-3.5')} />
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent side="left" sideOffset={8}>
-                  {t('sessions.sidebar.bulkActions.archive')}
-                </TooltipContent>
-              </Tooltip>
-            ) : null}
-            <DropdownMenu open={isMenuOpen} onOpenChange={handleMenuOpenChange}>
-              <DropdownMenuTrigger asChild>
-                <button
-                  type="button"
-                  className={cn(
-                    'inline-flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 transition-opacity',
-                    isMinimalMode && !alwaysShowActions
-                      ? (isMenuOpen
-                          ? 'h-4 w-4 opacity-100'
-                          : cn('h-4 w-4 opacity-0', revealOnHoverClass))
-                      : 'h-6 w-6 opacity-100',
-                  )}
-                  aria-label={t('sessions.sidebar.session.menu.label')}
-                  onPointerDown={handleMenuTriggerPointerDown}
-                  onMouseDown={handleMenuTriggerMouseDown}
-                  onClick={handleMenuTriggerClick}
-                  onKeyDown={(event) => event.stopPropagation()}
-                >
-                   <RiMore2Line className={cn(isMinimalMode && !alwaysShowActions ? 'h-2.5 w-2.5' : 'h-3.5 w-3.5')} />
-                </button>
-              </DropdownMenuTrigger>
-              {sessionMenuContent}
-            </DropdownMenu>
+            {/* Context menu uses hidden positioned trigger only — no visible "..." button (removed per project convention, do not re-add) */}
+            <button
+              type="button"
+              className={cn(
+                'inline-flex h-5 w-5 items-center justify-center rounded-sm',
+                archiveConfirming
+                  ? 'text-white bg-[var(--status-error)] hover:bg-[var(--status-error)]/80'
+                  : 'text-muted-foreground hover:text-[var(--status-error)]',
+              )}
+              aria-label={archiveConfirming
+                ? (archivedBucket ? t('sessions.sidebar.bulkActions.deleteConfirm') : t('sessions.sidebar.bulkActions.archiveConfirm'))
+                : (archivedBucket ? t('sessions.sidebar.bulkActions.delete') : t('sessions.sidebar.bulkActions.archive'))}
+              onClick={(e) => {
+                e.stopPropagation();
+                if (archiveConfirming) {
+                  handleDeleteSession(session, { archivedBucket });
+                  setArchiveConfirming(false);
+                } else {
+                  setArchiveConfirming(true);
+                }
+              }}
+            >
+              {archivedBucket ? (
+                <RiDeleteBinLine className="h-3.5 w-3.5" />
+              ) : (
+                <RiArchiveLine className="h-3.5 w-3.5" />
+              )}
+            </button>
           </div>
+
+          <DropdownMenu open={isMenuOpen} onOpenChange={handleMenuOpenChange}>
+            <DropdownMenuTrigger asChild>
+              <div
+                className="fixed w-0 h-0 overflow-hidden"
+                style={menuPosition ? { left: menuPosition.x, top: menuPosition.y } : undefined}
+                aria-hidden="true"
+              />
+            </DropdownMenuTrigger>
+            {sessionMenuContent}
+          </DropdownMenu>
         </div>
       </DraggableSessionRow>
       {hasChildren && isExpanded
