@@ -58,16 +58,16 @@ const requestChatForceScrollBottom = (sessionId: string) => {
   }));
 };
 
-export async function checkIsGitRepository(directory: string, baseUrl?: string): Promise<boolean> {
+export async function checkIsGitRepository(directory: string): Promise<boolean> {
   const runtime = getRuntimeGit();
   if (runtime) return runtime.checkIsGitRepository(directory);
-  return gitHttp.checkIsGitRepository(directory, baseUrl);
+  return gitHttp.checkIsGitRepository(directory);
 }
 
-export async function getGitStatus(directory: string, options?: { mode?: 'light' }, baseUrl?: string): Promise<import('./api/types').GitStatus> {
+export async function getGitStatus(directory: string, options?: { mode?: 'light' }): Promise<import('./api/types').GitStatus> {
   const runtime = getRuntimeGit();
-  if (runtime) return runtime.getGitStatus(directory);
-  return gitHttp.getGitStatus(directory, options, baseUrl);
+  if (runtime) return runtime.getGitStatus(directory, options);
+  return gitHttp.getGitStatus(directory, options);
 }
 
 export async function getGitDiff(directory: string, options: import('./api/types').GetGitDiffOptions): Promise<import('./api/types').GitDiffResponse> {
@@ -97,10 +97,10 @@ export async function isLinkedWorktree(directory: string): Promise<boolean> {
   return gitHttp.isLinkedWorktree(directory);
 }
 
-export async function getGitBranches(directory: string, baseUrl?: string): Promise<import('./api/types').GitBranch> {
+export async function getGitBranches(directory: string): Promise<import('./api/types').GitBranch> {
   const runtime = getRuntimeGit();
   if (runtime) return runtime.getGitBranches(directory);
-  return gitHttp.getGitBranches(directory, baseUrl);
+  return gitHttp.getGitBranches(directory);
 }
 
 export async function deleteGitBranch(directory: string, payload: import('./api/types').GitDeleteBranchPayload): Promise<{ success: boolean }> {
@@ -422,13 +422,13 @@ const runStructuredGenerationInActiveSession = async ({
   return structuredOutput as Record<string, unknown>;
 };
 
-export async function listGitWorktrees(directory: string, baseUrl?: string): Promise<import('./api/types').GitWorktreeInfo[]> {
+export async function listGitWorktrees(directory: string): Promise<import('./api/types').GitWorktreeInfo[]> {
   const runtime = getRuntimeGit();
   if (runtime?.worktree?.list) {
     return runtime.worktree.list(directory);
   }
   if (runtime) return runtime.listGitWorktrees(directory);
-  return gitHttp.listGitWorktrees(directory, baseUrl);
+  return gitHttp.listGitWorktrees(directory);
 }
 
 export async function validateGitWorktree(

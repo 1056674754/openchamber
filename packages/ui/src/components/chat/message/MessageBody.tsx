@@ -5,8 +5,6 @@ import UserTextPart from './parts/UserTextPart';
 import ToolPart from './parts/ToolPart';
 import AssistantTextPart from './parts/AssistantTextPart';
 import ReasoningPart from './parts/ReasoningPart';
-import BackgroundTaskPart from './parts/BackgroundTaskPart';
-import { isBackgroundTaskPart } from './partUtils';
 import { MessageFilesDisplay } from '../FileAttachment';
 import { TurnChangedFilesDropdown } from '../TurnChangedFilesDropdown';
 import type { ToolPart as ToolPartType } from '@opencode-ai/sdk/v2';
@@ -20,7 +18,7 @@ import { SaveProjectPlanDialog } from '@/components/session/SaveProjectPlanDialo
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { RiCheckLine, RiFileCopyLine, RiChatNewLine, RiArrowGoBackLine, RiGitBranchLine, RiHourglassLine, RiTimeLine, RiVolumeUpLine, RiStopLine, RiImageDownloadLine, RiLoader4Line, RiErrorWarningLine, RiBookletLine, RiGlobalLine, RiInformationLine } from '@remixicon/react';
 import { ArrowsMerge } from '@/components/icons/ArrowsMerge';
-import type { ContentChangeReason } from '@/hooks/useChatScrollManager';
+import type { ContentChangeReason } from '@/hooks/useChatAutoFollow';
 
 import { SimpleMarkdownRenderer } from '../MarkdownRenderer';
 import { useSessionUIStore } from '@/sync/session-ui-store';
@@ -32,15 +30,14 @@ import { useConfigStore } from '@/stores/useConfigStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { TextSelectionMenu } from './TextSelectionMenu';
 import { copyTextToClipboard } from '@/lib/clipboard';
+import { useChatSurfaceMode } from '@/components/chat/useChatSurfaceMode';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { toPng } from 'html-to-image';
 import { toast } from '@/components/ui';
 import { formatTimestampForDisplay } from './timeFormat';
 import { ToolRevealOnMount } from './parts/ToolRevealOnMount';
 import { StaticToolRow } from './parts/ProgressiveGroup';
-import { ToolCallGroup } from './parts/ToolCallGroup';
-import type { ToolCallGroupActivity } from './parts/ToolCallGroup';
-import { isExpandableTool, isStandaloneTool, isStaticTool } from './parts/toolRenderUtils';
+import { isExpandableTool, isStandaloneTool } from './parts/toolRenderUtils';
 import TurnActivity from '../components/TurnActivity';
 import { createProjectPlanFile } from '@/lib/openchamberConfig';
 import { resolveProjectForSessionDirectory } from '@/lib/projectResolution';
@@ -305,8 +302,6 @@ interface MessageBodyProps {
     showReasoningTraces?: boolean;
     agentMention?: AgentMentionInfo;
     turnGroupingContext?: TurnGroupingContext;
-    absorbedToolPartIds?: Set<string>;
-    extraTrailingTools?: ToolPartType[];
     onRevert?: () => void;
     onFork?: () => void;
     errorMessage?: string;
@@ -350,6 +345,7 @@ const UserMessageBody = React.memo(({ messageId, parts, isMobile, alwaysShowActi
     stickyUserHeaderEnabled?: boolean;
 }) => {
     const { t } = useI18n();
+    const chatSurfaceMode = useChatSurfaceMode();
     const [copyHintVisible, setCopyHintVisible] = React.useState(false);
     const copyHintTimeoutRef = React.useRef<number | null>(null);
 
@@ -423,7 +419,8 @@ const UserMessageBody = React.memo(({ messageId, parts, isMobile, alwaysShowActi
         [hasCopyableText, isTouchContext, onCopyMessage, revealCopyHint]
     );
 
-    const actionsBlock = ((canCopyMessage && hasCopyableText) || onRevert || onFork) && showUserActions ? (
+    const effectiveOnFork = chatSurfaceMode === 'mini-chat' ? undefined : onFork;
+    const actionsBlock = ((canCopyMessage && hasCopyableText) || onRevert || effectiveOnFork) && showUserActions ? (
         <div className={cn(
             'group/user-actions',
             isMobile
@@ -472,7 +469,7 @@ const UserMessageBody = React.memo(({ messageId, parts, isMobile, alwaysShowActi
                         <TooltipContent sideOffset={6}>{t('chat.messageBody.actions.revert')}</TooltipContent>
                     </Tooltip>
                 )}
-                {onFork && (
+                {effectiveOnFork && (
                     <Tooltip>
                         <TooltipTrigger asChild>
                             <Button
@@ -484,7 +481,7 @@ const UserMessageBody = React.memo(({ messageId, parts, isMobile, alwaysShowActi
                                 onPointerDown={(event) => event.stopPropagation()}
                                 onClick={(event) => {
                                     event.stopPropagation();
-                                    onFork();
+                                    effectiveOnFork();
                                 }}
                             >
                                 <RiGitBranchLine className="h-3 w-3" />
@@ -604,6 +601,7 @@ const AssistantMessageActionButtons = React.memo(({
     ttsText,
 }: AssistantMessageActionButtonsProps) => {
     const { t } = useI18n();
+    const chatSurfaceMode = useChatSurfaceMode();
     const { isPlaying: isTTSPlaying, play: playTTS, stop: stopTTS } = useMessageTTS();
     const showMessageTTSButtons = useConfigStore((state) => state.showMessageTTSButtons);
     const voiceProvider = useConfigStore((state) => state.voiceProvider);
@@ -781,7 +779,7 @@ const AssistantMessageActionButtons = React.memo(({
                     <TooltipContent sideOffset={6}>{t('chat.messageBody.actions.copyAnswer')}</TooltipContent>
                 </Tooltip>
             )}
-            <Tooltip>
+            {chatSurfaceMode !== 'mini-chat' ? <Tooltip>
                 <TooltipTrigger asChild>
                     <Button
                         type="button"
@@ -805,8 +803,8 @@ const AssistantMessageActionButtons = React.memo(({
                     </Button>
                 </TooltipTrigger>
                 <TooltipContent sideOffset={6}>{isSharing ? t('chat.messageBody.actions.savingImage') : t('chat.messageBody.actions.saveAsImage')}</TooltipContent>
-            </Tooltip>
-            {showMessageTTSButtons && hasCopyableText && (
+            </Tooltip> : null}
+            {chatSurfaceMode !== 'mini-chat' && showMessageTTSButtons && hasCopyableText && (
                 <Tooltip>
                     <TooltipTrigger asChild>
                         <Button
@@ -859,30 +857,16 @@ const AssistantMessageBody = React.memo(({
     onAuxiliaryContentComplete,
     showReasoningTraces = false,
     turnGroupingContext,
-    absorbedToolPartIds,
-    extraTrailingTools,
     errorMessage,
     errorVariant = 'error',
 }: Omit<MessageBodyProps, 'isUser'>) => {
     const { t } = useI18n();
+    const chatSurfaceMode = useChatSurfaceMode();
     const streamPhase = _streamPhase;
     void _allowAnimation;
     const messageContentRef = React.useRef<HTMLDivElement>(null);
     const messageTextContentRef = React.useRef<HTMLDivElement>(null);
     const toolRevealReadyRef = React.useRef(false);
-
-    const [expandedToolGroups, setExpandedToolGroups] = React.useState<Set<string>>(new Set());
-    const toggleToolGroup = React.useCallback((groupId: string) => {
-        setExpandedToolGroups((prev) => {
-            const next = new Set(prev);
-            if (next.has(groupId)) {
-                next.delete(groupId);
-            } else {
-                next.add(groupId);
-            }
-            return next;
-        });
-    }, []);
 
     React.useEffect(() => {
         toolRevealReadyRef.current = true;
@@ -1021,7 +1005,6 @@ const AssistantMessageBody = React.memo(({
     const createSessionFromAssistantMessage = useSessionUIStore((state) => state.createSessionFromAssistantMessage);
     const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
     const openMultiRunLauncherWithPrompt = useUIStore((state) => state.openMultiRunLauncherWithPrompt);
-    const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
     const projects = useProjectsStore((state) => state.projects);
     const effectiveDirectory = useEffectiveDirectory();
     const sessions = useSessions();
@@ -1030,6 +1013,7 @@ const AssistantMessageBody = React.memo(({
     const chatRenderMode = useUIStore((state) => state.chatRenderMode);
     const showSplitAssistantMessageActions = useUIStore((state) => state.showSplitAssistantMessageActions);
     const isSortedRenderMode = chatRenderMode === 'sorted';
+    const isMiniChatSurface = chatSurfaceMode === 'mini-chat';
     const collapsedPreviewCount = 7;
     const isLastAssistantInTurn = turnGroupingContext?.isLastAssistantInTurn ?? false;
     const hasStopFinish = messageFinish === 'stop';
@@ -1537,16 +1521,6 @@ const AssistantMessageBody = React.memo(({
                     i += 1;
                     continue;
                 }
-                if (isBackgroundTaskPart(part)) {
-                    rendered.push(
-                        <BackgroundTaskPart
-                            key={`background-task-${messageId}-${i}`}
-                            part={part}
-                        />
-                    );
-                    i++;
-                    continue;
-                }
                 rendered.push(
                     <div key={`assistant-text-${messageId}-${i}`} ref={messageTextContentRef} data-message-text-export-source="true">
                         <AssistantTextPart
@@ -1607,14 +1581,6 @@ const AssistantMessageBody = React.memo(({
                 continue;
             }
 
-            if (isSubtaskPart(part)) {
-                rendered.push(
-                    <UserSubtaskPart key={`subtask-${messageId}-${i}`} part={part} />
-                );
-                i++;
-                continue;
-            }
-
             if (part.type === 'tool') {
                 const toolPart = part as ToolPartType;
                 const toolName = toolPart.tool?.toLowerCase() ?? '';
@@ -1631,12 +1597,6 @@ const AssistantMessageBody = React.memo(({
                 }
 
                 if (!shouldShowTool(toolPart)) {
-                    i++;
-                    continue;
-                }
-
-                const tcgAbsorbed = turnGroupingContext?.absorbedToolPartIds;
-                if (absorbedToolPartIds?.has(toolPart.id) || tcgAbsorbed?.has(toolPart.id)) {
                     i++;
                     continue;
                 }
@@ -1664,64 +1624,7 @@ const AssistantMessageBody = React.memo(({
                     continue;
                 }
 
-                // Static tools: group consecutive adjacent static tools
-                {
-                    const group: ToolPartType[] = [toolPart];
-                    let j = i + 1;
-                    while (j < visibleParts.length) {
-                        const nextPart = visibleParts[j];
-                        if (nextPart.type !== 'tool') break;
-                        const nextTool = nextPart as ToolPartType;
-                        const nextName = nextTool.tool?.toLowerCase() ?? '';
-                        if (!isStaticTool(nextName)) break;
-                        if (!shouldShowTool(nextTool)) break;
-                        group.push(nextTool);
-                        j++;
-                    }
-
-                    const tcgExtra = (turnGroupingContext?.extraTrailingTools ?? []) as ToolPartType[];
-                    const allExtraTrailing: ToolPartType[] = [
-                        ...(extraTrailingTools ?? []),
-                        ...tcgExtra,
-                    ];
-                    if (j >= visibleParts.length && allExtraTrailing.length > 0) {
-                        for (const extra of allExtraTrailing) {
-                            const extraName = extra.tool?.toLowerCase() ?? '';
-                            if (!isStaticTool(extraName)) break;
-                            group.push(extra);
-                        }
-                    }
-
-                    if (group.length >= 2) {
-                        const groupKey = toolPart.id;
-                        const groupActivities: ToolCallGroupActivity[] = group.map((tp, idx) => ({
-                            id: tp.id,
-                            turnId: '',
-                            messageId,
-                            partIndex: i + idx,
-                            part: tp,
-                            kind: 'tool' as const,
-                        }));
-                        const isGroupExpanded = expandedToolGroups.has(groupKey);
-                        const hasAnyAnimatedTool = group.some((tp) => animatedToolIdsLookup.has(tp.id));
-                        rendered.push(
-                            <FadeInOnReveal key={`tool-group-${groupKey}`}>
-                                <ToolRevealOnMount animate={hasAnyAnimatedTool} wipe>
-                                    <ToolCallGroup
-                                        tools={group}
-                                        messageParts={groupActivities}
-                                        isExpanded={isGroupExpanded}
-                                        onToggle={() => toggleToolGroup(groupKey)}
-                                        animateTailText={hasAnyAnimatedTool}
-                                    />
-                                </ToolRevealOnMount>
-                            </FadeInOnReveal>
-                        );
-                        i = j;
-                        continue;
-                    }
-                }
-
+                // Static tools: one row per tool call (no grouping)
                 rendered.push(
                     <FadeInOnReveal key={`static-tools-${toolPart.id}`}>
                         <ToolRevealOnMount animate={animatedToolIdsLookup.has(toolPart.id)} wipe>
@@ -1779,11 +1682,7 @@ const AssistantMessageBody = React.memo(({
         shouldDeferSortedInlineText,
         syntaxTheme,
         toggleActivityGroup,
-        toggleToolGroup,
-        expandedToolGroups,
         turnGroupingContext,
-        absorbedToolPartIds,
-        extraTrailingTools,
         visibleParts,
     ]);
 
@@ -1807,7 +1706,7 @@ const AssistantMessageBody = React.memo(({
 
     const footerTimestampClassName = 'text-sm text-muted-foreground/60 tabular-nums flex items-center gap-1';
     const isVSCode = isVSCodeRuntime();
-    const canOpenMessagePreview = !isMobile && !isVSCode;
+    const canOpenMessagePreview = !isMiniChatSurface && !isMobile && !isVSCode;
 
     const finalTurnActionButtons = (
         <>
@@ -1836,7 +1735,7 @@ const AssistantMessageBody = React.memo(({
                     <TooltipContent sideOffset={6}>{t('chat.messageBody.actions.openPreview')}</TooltipContent>
                 </Tooltip>
             ) : null}
-            {!isVSCode ? (
+            {!isMiniChatSurface && !isVSCode ? (
                 <Tooltip>
                     <TooltipTrigger asChild>
                         <Button
@@ -1857,7 +1756,7 @@ const AssistantMessageBody = React.memo(({
                     <TooltipContent sideOffset={6}>{t('chat.messageBody.actions.saveAsPlan')}</TooltipContent>
                 </Tooltip>
             ) : null}
-            <Tooltip>
+            {!isMiniChatSurface ? <Tooltip>
                 <TooltipTrigger asChild>
                     <Button
                         type="button"
@@ -1871,8 +1770,8 @@ const AssistantMessageBody = React.memo(({
                     </Button>
                 </TooltipTrigger>
                 <TooltipContent sideOffset={6}>{t('chat.messageBody.actions.startNewSession')}</TooltipContent>
-            </Tooltip>
-            {!isVSCode && multiRunEnabled ? (
+            </Tooltip> : null}
+            {!isMiniChatSurface && !isVSCode ? (
                 <Tooltip>
                     <TooltipTrigger asChild>
                         <Button
@@ -1984,7 +1883,7 @@ const AssistantMessageBody = React.memo(({
                                     <TooltipContent>{footerTimestamp}</TooltipContent>
                                 </Tooltip>
                             ) : null}
-                            {isLastAssistantInTurn && hasStopFinish ? (
+                            {!isMiniChatSurface && isLastAssistantInTurn && hasStopFinish ? (
                                 <TurnChangedFilesDropdown activityParts={turnGroupingContext?.activityParts} />
                             ) : null}
                         </div>

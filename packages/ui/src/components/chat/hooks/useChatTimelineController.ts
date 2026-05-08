@@ -13,15 +13,8 @@ import {
 } from '../lib/turns/windowTurns';
 import type { TurnHistorySignals } from '../lib/turns/historySignals';
 import { getMemoryLimits, type SessionHistoryMeta } from '@/stores/types/sessionTypes';
-import { useViewportStore, type SessionMemoryState } from '@/sync/viewport-store';
 
 type ViewportAnchor = { messageId: string; offsetTop: number };
-const SCROLL_TRACE_PREFIX = '[chat-scroll-trace]';
-
-const traceScrollWrite = (source: string, data: Record<string, unknown>) => {
-    if (typeof window === 'undefined') return;
-    console.log(SCROLL_TRACE_PREFIX, source, data);
-};
 
 type PendingScrollRequest = {
     sessionId: string;
@@ -39,10 +32,10 @@ interface UseChatTimelineControllerOptions {
     scrollRef: React.RefObject<HTMLDivElement | null>;
     messageListRef: React.RefObject<MessageListHandle | null>;
     loadMoreMessages: (sessionId: string, direction: 'up' | 'down') => Promise<void>;
-    prepareForBottomResume: (options?: { instant?: boolean; force?: boolean }) => void;
-    scrollToBottom: (options?: { instant?: boolean; force?: boolean; followBottom?: boolean }) => void;
+    goToBottom: (mode?: 'instant' | 'smooth') => void;
+    releaseAutoFollow: () => void;
     isPinned: boolean;
-    isOverflowing: boolean;
+    showScrollButton: boolean;
 }
 
 export interface UseChatTimelineControllerResult {
@@ -58,8 +51,7 @@ export interface UseChatTimelineControllerResult {
     loadEarlier: () => Promise<void>;
     revealBufferedTurns: () => Promise<boolean>;
     resumeToBottom: () => void;
-    resumeToBottomInstant: () => void;
-    restoreSavedScrollPosition: (savedPos: NonNullable<SessionMemoryState['scrollPosition']>) => Promise<void>;
+    resumeToBottomInstant: () => Promise<void>;
     scrollToTurn: (turnId: string, options?: { behavior?: ScrollBehavior }) => Promise<boolean>;
     scrollToMessage: (messageId: string, options?: { behavior?: ScrollBehavior }) => Promise<boolean>;
     captureViewportAnchor: () => ViewportAnchor | null;
@@ -74,10 +66,10 @@ export const useChatTimelineController = ({
     scrollRef,
     messageListRef,
     loadMoreMessages,
-    prepareForBottomResume,
-    scrollToBottom,
+    goToBottom,
+    releaseAutoFollow,
     isPinned,
-    isOverflowing,
+    showScrollButton,
 }: UseChatTimelineControllerOptions): UseChatTimelineControllerResult => {
     const previousTurnWindowModelRef = React.useRef<TurnWindowModel | null>(null);
     const previousMessagesRef = React.useRef<ChatMessageEntry[] | null>(null);
@@ -269,14 +261,6 @@ export const useChatTimelineController = ({
             if (anchorEl) {
                 const containerRect = container.getBoundingClientRect();
                 const anchorTop = anchorEl.getBoundingClientRect().top - containerRect.top;
-                traceScrollWrite('timeline:prepend-anchor-compensation', {
-                    from: container.scrollTop,
-                    to: container.scrollTop + anchorTop - snap.anchor.offsetTop,
-                    anchorMessageId: snap.anchor.messageId,
-                    anchorTop,
-                    anchorOffsetTop: snap.anchor.offsetTop,
-                    stack: new Error().stack,
-                });
                 container.scrollTop += anchorTop - snap.anchor.offsetTop;
                 return;
             }
@@ -285,14 +269,6 @@ export const useChatTimelineController = ({
         // Fallback: height-delta compensation
         const delta = container.scrollHeight - snap.height;
         if (delta > 0) {
-            traceScrollWrite('timeline:prepend-height-compensation', {
-                from: container.scrollTop,
-                to: snap.top + delta,
-                delta,
-                previousHeight: snap.height,
-                nextHeight: container.scrollHeight,
-                stack: new Error().stack,
-            });
             container.scrollTop = snap.top + delta;
         }
     }, [renderedMessages, scrollRef]);
@@ -398,6 +374,7 @@ export const useChatTimelineController = ({
             return false;
         }
 
+        releaseAutoFollow();
         setPendingRevealWork(true);
 
         try {
@@ -434,7 +411,7 @@ export const useChatTimelineController = ({
         } finally {
             setPendingRevealWork(false);
         }
-    }, [attemptPendingScrollRequest, sessionId]);
+    }, [attemptPendingScrollRequest, releaseAutoFollow, sessionId]);
 
     const scrollToMessage = React.useCallback(async (
         messageId: string,
@@ -444,6 +421,7 @@ export const useChatTimelineController = ({
             return false;
         }
 
+        releaseAutoFollow();
         setPendingRevealWork(true);
 
         try {
@@ -482,13 +460,12 @@ export const useChatTimelineController = ({
         } finally {
             setPendingRevealWork(false);
         }
-    }, [attemptPendingScrollRequest, sessionId]);
+    }, [attemptPendingScrollRequest, releaseAutoFollow, sessionId]);
 
     const resumeToBottom = React.useCallback(async () => {
         const nextStart = getInitialTurnStart(turnModelRef.current.turnCount);
         setPendingRevealWork(false);
         setIsLoadingOlder(false);
-        prepareForBottomResume({ force: true });
 
         const shouldWaitForRender = nextStart !== turnStartRef.current;
         if (shouldWaitForRender) {
@@ -496,14 +473,13 @@ export const useChatTimelineController = ({
             await waitForNextRenderCommit();
         }
 
-        scrollToBottom({ force: true });
-    }, [prepareForBottomResume, scrollToBottom, waitForNextRenderCommit]);
+        goToBottom('smooth');
+    }, [goToBottom, waitForNextRenderCommit]);
 
     const resumeToBottomInstant = React.useCallback(async () => {
         const nextStart = getInitialTurnStart(turnModelRef.current.turnCount);
         setPendingRevealWork(false);
         setIsLoadingOlder(false);
-        prepareForBottomResume({ instant: true, force: true });
 
         const shouldWaitForRender = nextStart !== turnStartRef.current;
         if (shouldWaitForRender) {
@@ -511,58 +487,8 @@ export const useChatTimelineController = ({
             await waitForNextRenderCommit();
         }
 
-        scrollToBottom({ instant: true, force: true, followBottom: true });
-    }, [prepareForBottomResume, scrollToBottom, waitForNextRenderCommit]);
-
-    // Restore scroll position from a saved pixel snapshot using ratio mapping.
-    // Separate from resumeToBottomInstant to preserve "always go to bottom" semantics.
-    const restoreSavedScrollPosition = React.useCallback(async (savedPos: NonNullable<SessionMemoryState['scrollPosition']>) => {
-        const nextStart = getInitialTurnStart(turnModelRef.current.turnCount);
-        setPendingRevealWork(false);
-        setIsLoadingOlder(false);
-
-        const shouldWaitForRender = nextStart !== turnStartRef.current;
-        if (shouldWaitForRender) {
-            setTurnStart(nextStart);
-            await waitForNextRenderCommit();
-        }
-
-        const container = scrollRef.current;
-        if (!container) return;
-
-        const savedMaxScroll = Math.max(0, savedPos.scrollHeight - savedPos.clientHeight);
-        if (savedMaxScroll <= 0) return;
-
-        const ratio = savedPos.scrollTop / savedMaxScroll;
-        const currentMaxScroll = Math.max(0, container.scrollHeight - container.clientHeight);
-        const restoredTop = Math.round(ratio * currentMaxScroll);
-        if (Math.abs(container.scrollTop - restoredTop) <= 0.5) {
-            return;
-        }
-        traceScrollWrite('timeline:restore-saved-position', {
-            from: container.scrollTop,
-            to: restoredTop,
-            savedPos,
-            savedMaxScroll,
-            currentMaxScroll,
-            stack: new Error().stack,
-        });
-        container.scrollTop = restoredTop;
-
-        // Re-persist the restored position so intermediate scroll events
-        // during the transition don't leave stale data for the next switch.
-        const sid = sessionIdRef.current;
-        if (sid) {
-            const memState = useViewportStore.getState().sessionMemoryState.get(sid);
-            if (memState) {
-                useViewportStore.getState().updateViewportAnchor(sid, memState.viewportAnchor, {
-                    scrollTop: restoredTop,
-                    scrollHeight: container.scrollHeight,
-                    clientHeight: container.clientHeight,
-                });
-            }
-        }
-    }, [scrollRef, waitForNextRenderCommit]);
+        goToBottom('instant');
+    }, [goToBottom, waitForNextRenderCommit]);
 
     const handleActiveTurnChange = React.useCallback((turnId: string | null) => {
         setActiveTurnId(turnId);
@@ -576,13 +502,12 @@ export const useChatTimelineController = ({
         isLoadingOlder,
         pendingRevealWork,
         activeTurnId,
-        showScrollToBottom: isOverflowing && !isPinned && !pendingRevealWork,
+        showScrollToBottom: showScrollButton && !pendingRevealWork,
         turnWindowModel,
         loadEarlier,
         revealBufferedTurns,
         resumeToBottom,
         resumeToBottomInstant,
-        restoreSavedScrollPosition,
         scrollToTurn,
         scrollToMessage,
         captureViewportAnchor,
