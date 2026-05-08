@@ -11,6 +11,7 @@ import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip
 import {
   RiAddLine,
   RiCloseLine,
+  RiChatNewLine,
   RiErrorWarningLine,
   RiFolderLine,
   RiFolderOpenLine,
@@ -328,7 +329,7 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
                           ? t('sessions.sidebar.project.actions.newDraftSession')
                           : t('sessions.sidebar.project.actions.newSession')}
                       >
-                        <RiAddLine className="h-3.5 w-3.5" />
+                        <RiChatNewLine className="h-3.5 w-3.5" />
                       </button>
                     </TooltipTrigger>
                     <TooltipContent side="bottom" sideOffset={4}>
