@@ -273,9 +273,10 @@ export const useChatScrollManager = ({
         }
 
         if (distanceFromBottom > getAutoFollowThreshold()) {
-            scrollPinnedToBottom(distanceFromBottom);
+            setFollowMode('none');
+            updatePinnedState(false);
         }
-    }, [getAutoFollowThreshold, getDistanceFromBottom, scrollPinnedToBottom, sessionIsWorking, setFollowMode, updateScrollButtonVisibility]);
+    }, [getAutoFollowThreshold, getDistanceFromBottom, scrollPinnedToBottom, sessionIsWorking, setFollowMode, updatePinnedState, updateScrollButtonVisibility]);
 
     const schedulePinnedStateAndIndicators = React.useCallback(() => {
         if (typeof window === 'undefined') {
@@ -395,9 +396,11 @@ export const useChatScrollManager = ({
 
         schedulePinnedStateAndIndicators();
 
+        const distanceFromBottom = getDistanceFromBottom();
+
         // Handle pin/unpin logic
         if (event?.isTrusted && !isProgrammatic) {
-            if (scrollingUp && isPinnedRef.current) {
+            if (isPinnedRef.current && (scrollingUp || distanceFromBottom > getPinThreshold())) {
                 setFollowMode('none');
                 updatePinnedState(false);
             }
@@ -405,7 +408,6 @@ export const useChatScrollManager = ({
 
         // Re-pin at bottom should always work (even momentum scroll)
         if (!isPinnedRef.current) {
-            const distanceFromBottom = getDistanceFromBottom();
             if (distanceFromBottom <= getPinThreshold()) {
                 setFollowMode(sessionIsWorking ? 'smooth' : 'none');
                 updatePinnedState(true);

@@ -1144,6 +1144,7 @@ export const dict: Record<I18nKey, string> = {
   'directoryExplorerDialog.actions.openInFinder': 'Finder에서 열기',
   'directoryExplorerDialog.actions.adding': '추가 중…',
   'directoryExplorerDialog.actions.addProject': '프로젝트 추가',
+  'directoryExplorerDialog.actions.cancel': '취소',
   'directoryExplorerDialog.actions.addLocalProject': '로컬 프로젝트 추가',
   'directoryExplorerDialog.actions.cloneRepository': '저장소 복제',
   'directoryExplorerDialog.actions.cloneAndAdd': '복제하고 추가',

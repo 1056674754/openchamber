@@ -452,6 +452,8 @@ type RenderEntry =
         message: ChatMessageEntry;
         previousMessage?: ChatMessageEntry;
         nextMessage?: ChatMessageEntry;
+        assistantHeaderMessageId?: string;
+        turnGroupingContext?: TurnGroupingContext;
     }
     | { kind: 'turn'; key: string; turn: TurnRecord; isLastTurn: boolean };
 
@@ -891,6 +893,8 @@ interface UngroupedMessageRowProps {
     message: ChatMessageEntry;
     previousMessage?: ChatMessageEntry;
     nextMessage?: ChatMessageEntry;
+    assistantHeaderMessageId?: string;
+    turnGroupingContext?: TurnGroupingContext;
     onMessageContentChange: (reason?: ContentChangeReason) => void;
     getAnimationHandlers: (messageId: string) => AnimationHandlers;
     scrollToBottom?: (options?: { instant?: boolean; force?: boolean }) => void;
@@ -904,6 +908,8 @@ const UngroupedMessageRow = React.memo(({
     message,
     previousMessage,
     nextMessage,
+    assistantHeaderMessageId,
+    turnGroupingContext,
     onMessageContentChange,
     getAnimationHandlers,
     scrollToBottom,
@@ -917,6 +923,8 @@ const UngroupedMessageRow = React.memo(({
             message={message}
             previousMessage={previousMessage}
             nextMessage={nextMessage}
+            assistantHeaderMessageId={assistantHeaderMessageId}
+            turnGroupingContext={turnGroupingContext}
             animateUserOnMount={shouldAnimateUserMessage(message)}
             onUserAnimationConsumed={onUserAnimationConsumed}
             onContentChange={onMessageContentChange}
@@ -981,6 +989,8 @@ const MessageListEntry = React.memo(({
                 message={entry.message}
                 previousMessage={entry.previousMessage}
                 nextMessage={entry.nextMessage}
+                assistantHeaderMessageId={entry.assistantHeaderMessageId}
+                turnGroupingContext={entry.turnGroupingContext}
                 onMessageContentChange={onMessageContentChange}
                 getAnimationHandlers={getAnimationHandlers}
                 scrollToBottom={scrollToBottom}
@@ -1298,7 +1308,65 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
             turnEntryByUserMessageId.set(entry.turn.userMessage.info.id, entry);
         });
 
+        const trailingUngroupedMessageId = !streamingTurn
+            ? displayMessages[displayMessages.length - 1]?.info.id
+            : undefined;
         const orderedEntries: RenderEntry[] = [];
+
+        const buildUngroupedEntry = (message: ChatMessageEntry, index: number): RenderEntry => {
+            if (resolveMessageRole(message) !== 'assistant') {
+                return {
+                    kind: 'ungrouped',
+                    key: `msg:${message.info.id}`,
+                    message,
+                    previousMessage: index > 0 ? displayMessages[index - 1] : undefined,
+                    nextMessage: index < displayMessages.length - 1 ? displayMessages[index + 1] : undefined,
+                };
+            }
+
+            let chainStartIndex = index;
+            while (chainStartIndex > 0) {
+                const previous = displayMessages[chainStartIndex - 1];
+                if (!previous || resolveMessageRole(previous) !== 'assistant' || !projection.ungroupedMessageIds.has(previous.info.id)) {
+                    break;
+                }
+                chainStartIndex -= 1;
+            }
+
+            let chainEndIndex = index;
+            while (chainEndIndex < displayMessages.length - 1) {
+                const next = displayMessages[chainEndIndex + 1];
+                if (!next || resolveMessageRole(next) !== 'assistant' || !projection.ungroupedMessageIds.has(next.info.id)) {
+                    break;
+                }
+                chainEndIndex += 1;
+            }
+
+            const headerMessage = displayMessages[chainStartIndex] ?? message;
+            const headerMessageId = headerMessage.info.id;
+            const turnId = `ungrouped-assistant:${getMessageParentId(headerMessage) ?? headerMessageId}`;
+            const turnGroupingContext = {
+                turnId,
+                activityOwnerMessageId: headerMessageId,
+                isFirstAssistantInTurn: index === chainStartIndex,
+                isLastAssistantInTurn: index === chainEndIndex,
+                isWorking: false,
+                hasTools: message.parts.some((part) => part?.type === 'tool'),
+                hasReasoning: message.parts.some((part) => part?.type === 'reasoning'),
+                headerMessageId,
+            } satisfies TurnGroupingContext;
+
+            return {
+                kind: 'ungrouped',
+                key: `msg:${message.info.id}`,
+                message,
+                previousMessage: index > 0 ? displayMessages[index - 1] : undefined,
+                nextMessage: index < displayMessages.length - 1 ? displayMessages[index + 1] : undefined,
+                assistantHeaderMessageId: headerMessageId,
+                turnGroupingContext,
+            };
+        };
+
         displayMessages.forEach((message, index) => {
             const turnEntry = turnEntryByUserMessageId.get(message.info.id);
             if (turnEntry) {
@@ -1310,17 +1378,15 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
                 return;
             }
 
-            orderedEntries.push({
-                kind: 'ungrouped',
-                key: `msg:${message.info.id}`,
-                message,
-                previousMessage: index > 0 ? displayMessages[index - 1] : undefined,
-                nextMessage: index < displayMessages.length - 1 ? displayMessages[index + 1] : undefined,
-            });
+            if (message.info.id === trailingUngroupedMessageId) {
+                return;
+            }
+
+            orderedEntries.push(buildUngroupedEntry(message, index));
         });
 
         return orderedEntries;
-    }), [displayMessages, projection.lastTurnId, projection.ungroupedMessageIds, staticTurns]);
+    }), [displayMessages, projection.lastTurnId, projection.ungroupedMessageIds, staticTurns, streamingTurn]);
 
     const trailingStreamingEntry = React.useMemo<RenderEntry | undefined>(() => {
         if (streamingTurn) {
@@ -1339,6 +1405,39 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         const lastMessage = displayMessages[displayMessages.length - 1];
         if (!lastMessage || !projection.ungroupedMessageIds.has(lastMessage.info.id)) {
             return undefined;
+        }
+
+        if (resolveMessageRole(lastMessage) === 'assistant') {
+            const index = displayMessages.length - 1;
+            let chainStartIndex = index;
+            while (chainStartIndex > 0) {
+                const previous = displayMessages[chainStartIndex - 1];
+                if (!previous || resolveMessageRole(previous) !== 'assistant' || !projection.ungroupedMessageIds.has(previous.info.id)) {
+                    break;
+                }
+                chainStartIndex -= 1;
+            }
+
+            const headerMessage = displayMessages[chainStartIndex] ?? lastMessage;
+            const headerMessageId = headerMessage.info.id;
+            return {
+                kind: 'ungrouped',
+                key: `msg:${lastMessage.info.id}`,
+                message: lastMessage,
+                previousMessage: displayMessages.length > 1 ? displayMessages[displayMessages.length - 2] : undefined,
+                nextMessage: undefined,
+                assistantHeaderMessageId: headerMessageId,
+                turnGroupingContext: {
+                    turnId: `ungrouped-assistant:${getMessageParentId(headerMessage) ?? headerMessageId}`,
+                    activityOwnerMessageId: headerMessageId,
+                    isFirstAssistantInTurn: index === chainStartIndex,
+                    isLastAssistantInTurn: true,
+                    isWorking: false,
+                    hasTools: lastMessage.parts.some((part) => part?.type === 'tool'),
+                    hasReasoning: lastMessage.parts.some((part) => part?.type === 'reasoning'),
+                    headerMessageId,
+                },
+            } satisfies RenderEntry;
         }
 
         return {

@@ -1142,6 +1142,7 @@ export const dict = {
   'directoryExplorerDialog.actions.openInFinder': 'Open in Finder',
   'directoryExplorerDialog.actions.adding': 'Adding...',
   'directoryExplorerDialog.actions.addProject': 'Add project',
+  'directoryExplorerDialog.actions.cancel': 'Cancel',
   'directoryExplorerDialog.actions.addLocalProject': 'Add local project',
   'directoryExplorerDialog.actions.cloneRepository': 'Clone repository',
   'directoryExplorerDialog.actions.cloneAndAdd': 'Clone & add',
