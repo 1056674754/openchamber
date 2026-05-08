@@ -855,7 +855,7 @@ const connectTerminalStreamViaSse = (
       return;
     }
 
-    eventSource = new EventSource(`/api/terminal/${sessionId}/stream`);
+    eventSource = new EventSource(`${baseUrl ?? ''}/api/terminal/${sessionId}/stream`);
     let opened = false;
 
     connectionTimeoutId = setTimeout(() => {
