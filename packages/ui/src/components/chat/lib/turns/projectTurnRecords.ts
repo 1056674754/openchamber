@@ -104,52 +104,10 @@ export const projectTurnRecords = (
     const turns: TurnRecord[] = [];
     const turnByUserId = new Map<string, TurnRecord>();
     const groupedMessageIds = new Set<string>();
-
-    messages.forEach((message, index) => {
-        const role = resolveMessageRole(message);
-        // [sscity-mod] Upstream v1.10.2 refactored to a two-pass approach:
-        // Pass 1 creates turns for user messages only; Pass 2 (below) assigns
-        // assistant messages to turns via parentId. We must skip non-user messages
-        // here, EXCEPT for system directive messages which we route into the latest
-        // turn's assistant messages (needed by SystemDirectiveBanner).
-        if (role !== 'user') {
-            if (isSystemDirectiveMessage(message.parts)) {
-                const latestTurn = turns.length > 0 ? turns[turns.length - 1] : undefined;
-                if (latestTurn) {
-                    latestTurn.assistantMessages.push(message);
-                    latestTurn.assistantMessageIds.push(message.info.id);
-                    latestTurn.messages.push(createTurnMessageRecord(message, index));
-                    groupedMessageIds.add(message.info.id);
-                }
-            }
-            return;
-        }
-
-        const turnId = message.info.id;
-        const turn: TurnRecord = {
-            turnId,
-            userMessageId: message.info.id,
-            userMessage: message,
-            headerMessageId: undefined,
-            messages: [createTurnMessageRecord(message, index)],
-            assistantMessageIds: [],
-            assistantMessages: [],
-            activityParts: [],
-            activitySegments: [],
-            summary: {},
-            summaryText: undefined,
-            hasTools: false,
-            hasReasoning: false,
-            diffStats: undefined,
-            stream: {
-                isStreaming: false,
-                isRetrying: false,
-            },
-        };
-        turns.push(turn);
-        turnByUserId.set(turn.userMessageId, turn);
-        groupedMessageIds.add(message.info.id);
-    });
+    // [sscity-mod] Track latest user turn so orphan assistant messages (e.g. subagent
+    // bridge messages whose parentID points at a child-session user) still get
+    // attached. Upstream v1.10.2 dropped these — making subagent activity invisible.
+    let currentTurn: TurnRecord | undefined;
 
     messages.forEach((message, index) => {
         const role = resolveMessageRole(message);
@@ -158,7 +116,13 @@ export const projectTurnRecords = (
         }
 
         const parentId = getMessageParentId(message);
-        const targetTurn = parentId ? turnByUserId.get(parentId) : undefined;
+        // [sscity-mod] Fallback to currentTurn when parentID lookup fails. Upstream
+        // v1.10.2's "enforce parented assistant turns" drops orphan assistants, but
+        // subagent bridge messages often have parentID pointing at a child-session
+        // user message not in turnByUserId — dropping them hides the entire subagent
+        // activity. currentTurn attaches them to the most recent user turn.
+        const parentTurn = parentId ? turnByUserId.get(parentId) : undefined;
+        const targetTurn = parentTurn ?? currentTurn;
         if (!targetTurn) {
             return;
         }
