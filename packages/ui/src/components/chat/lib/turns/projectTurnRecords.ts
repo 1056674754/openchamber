@@ -113,13 +113,14 @@ export const projectTurnRecords = (
         // current turn's assistant messages — critical for our SystemDirectiveBanner feature.
         if (role === 'user') {
             if (isSystemDirectiveMessage(message.parts)) {
-                if (!currentTurn) {
+                const latestTurn = turns.length > 0 ? turns[turns.length - 1] : undefined;
+                if (!latestTurn) {
                     return;
                 }
 
-                currentTurn.assistantMessages.push(message);
-                currentTurn.assistantMessageIds.push(message.info.id);
-                currentTurn.messages.push(createTurnMessageRecord(message, index));
+                latestTurn.assistantMessages.push(message);
+                latestTurn.assistantMessageIds.push(message.info.id);
+                latestTurn.messages.push(createTurnMessageRecord(message, index));
                 groupedMessageIds.add(message.info.id);
                 return;
             }
@@ -148,7 +149,6 @@ export const projectTurnRecords = (
             turns.push(turn);
             turnByUserId.set(turn.userMessageId, turn);
             groupedMessageIds.add(message.info.id);
-            currentTurn = turn;
             return;
         }
 
