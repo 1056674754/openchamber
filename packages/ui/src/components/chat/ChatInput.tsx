@@ -3003,9 +3003,12 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 
     const footerGapClass = 'gap-x-1.5 gap-y-0';
     const isVSCode = isVSCodeRuntime();
-    const showDraftTargetSelectors = newSessionDraftOpen && !isVSCode;
+    const showDraftTargetSelectors = newSessionDraftOpen && !isVSCode && newSessionDraft?.preserveDirectoryOverride !== false;
 
     const selectedDraftProject = React.useMemo(() => {
+        if (newSessionDraft?.preserveDirectoryOverride === false) {
+            return null;
+        }
         const explicit = newSessionDraft?.selectedProjectId
             ? projects.find((project) => project.id === newSessionDraft.selectedProjectId) ?? null
             : null;
@@ -3021,7 +3024,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         }
 
         return projects[0] ?? null;
-    }, [activeProjectId, newSessionDraft?.selectedProjectId, projects]);
+    }, [activeProjectId, newSessionDraft?.preserveDirectoryOverride, newSessionDraft?.selectedProjectId, projects]);
 
     const selectedDraftProjectPath = React.useMemo(
         () => normalizePath(selectedDraftProject?.path ?? null),

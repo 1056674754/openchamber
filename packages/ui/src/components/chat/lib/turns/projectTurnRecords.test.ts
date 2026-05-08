@@ -8,11 +8,13 @@ function createMessageEntry({
     role,
     parentID,
     createdAt,
+    parts,
 }: {
     id: string;
     role: 'user' | 'assistant' | 'system';
     parentID?: string;
     createdAt: number;
+    parts?: Part[];
 }): ChatMessageEntry {
     return {
         info: {
@@ -21,8 +23,15 @@ function createMessageEntry({
             ...(parentID ? { parentID } : {}),
             time: { created: createdAt },
         } as Message,
-        parts: [] as Part[],
+        parts: parts ?? ([] as Part[]),
     };
+}
+
+function createDirectivePart(): Part {
+    return {
+        type: 'text',
+        text: '[SYSTEM DIRECTIVE: OH-MY-OPENCODE - TODO CONTINUATION]\nplease continue',
+    } as Part;
 }
 
 describe('projectTurnRecords', () => {
@@ -35,6 +44,7 @@ describe('projectTurnRecords', () => {
         expect(projection.turns).toHaveLength(1);
         expect(projection.turns[0]?.turnId).toBe('u1');
         expect(projection.turns[0]?.assistantMessageIds).toEqual(['a1']);
+        expect(projection.turns[0]?.isDirectiveTurn).toBe(false);
         expect(projection.ungroupedMessageIds.size).toBe(0);
     });
 
@@ -85,5 +95,59 @@ describe('projectTurnRecords', () => {
 
         expect(projection.turns).toHaveLength(0);
         expect(projection.ungroupedMessageIds.has('s1')).toBe(true);
+    });
+
+    test('directive creates its own turn marked isDirectiveTurn with grouped assistant', () => {
+        const user1 = createMessageEntry({ id: 'u1', role: 'user', createdAt: 1 });
+        const assistant1 = createMessageEntry({ id: 'a1', role: 'assistant', parentID: 'u1', createdAt: 2 });
+        const directive = createMessageEntry({
+            id: 'd1',
+            role: 'user',
+            createdAt: 3,
+            parts: [createDirectivePart()],
+        });
+        const assistantToDirective = createMessageEntry({
+            id: 'a2',
+            role: 'assistant',
+            parentID: 'd1',
+            createdAt: 4,
+        });
+
+        const projection = projectTurnRecords([user1, assistant1, directive, assistantToDirective]);
+
+        expect(projection.turns).toHaveLength(2);
+
+        // Turn 1: real user
+        expect(projection.turns[0]?.turnId).toBe('u1');
+        expect(projection.turns[0]?.isDirectiveTurn).toBe(false);
+        expect(projection.turns[0]?.assistantMessageIds).toEqual(['a1']);
+
+        // Turn 2: directive — has its own turn so a2 groups correctly
+        expect(projection.turns[1]?.turnId).toBe('d1');
+        expect(projection.turns[1]?.isDirectiveTurn).toBe(true);
+        expect(projection.turns[1]?.assistantMessageIds).toEqual(['a2']);
+
+        // All messages grouped, none ungrouped
+        expect(projection.ungroupedMessageIds.size).toBe(0);
+    });
+
+    test('multiple directives each get their own turn with correct assistant pairing', () => {
+        const user1 = createMessageEntry({ id: 'u1', role: 'user', createdAt: 1 });
+        const a1 = createMessageEntry({ id: 'a1', role: 'assistant', parentID: 'u1', createdAt: 2 });
+        const d1 = createMessageEntry({ id: 'd1', role: 'user', createdAt: 3, parts: [createDirectivePart()] });
+        const d2 = createMessageEntry({ id: 'd2', role: 'user', createdAt: 4, parts: [createDirectivePart()] });
+        const ad1 = createMessageEntry({ id: 'ad1', role: 'assistant', parentID: 'd1', createdAt: 5 });
+        const ad2 = createMessageEntry({ id: 'ad2', role: 'assistant', parentID: 'd2', createdAt: 6 });
+
+        const projection = projectTurnRecords([user1, a1, d1, d2, ad1, ad2]);
+
+        expect(projection.turns).toHaveLength(3);
+        expect(projection.turns.map((t) => t.turnId)).toEqual(['u1', 'd1', 'd2']);
+        expect(projection.turns[0]?.isDirectiveTurn).toBe(false);
+        expect(projection.turns[1]?.isDirectiveTurn).toBe(true);
+        expect(projection.turns[2]?.isDirectiveTurn).toBe(true);
+        expect(projection.turns[1]?.assistantMessageIds).toEqual(['ad1']);
+        expect(projection.turns[2]?.assistantMessageIds).toEqual(['ad2']);
+        expect(projection.ungroupedMessageIds.size).toBe(0);
     });
 });

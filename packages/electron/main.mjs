@@ -173,7 +173,7 @@ const quitConfirmationMessage = () => {
   return `OpenChamber detected ${reasons.join(', ')}. Quitting now will stop sidecar/background processes and may interrupt pending work.`;
 };
 
-const prepareForQuit = ({ installingUpdate = false, stopManagedOpenCode } = {}) => {
+const prepareForQuit = async ({ installingUpdate = false, stopManagedOpenCode } = {}) => {
   state.quitRequested = true;
   state.quitConfirmed = true;
   state.stopManagedOpenCodeOnQuit = typeof stopManagedOpenCode === 'boolean'
@@ -191,16 +191,16 @@ const prepareForQuit = ({ installingUpdate = false, stopManagedOpenCode } = {}) 
 
   if (!installingUpdate) {
     try {
-      killSidecar({ stopOpenCode: state.stopManagedOpenCodeOnQuit });
+      await killSidecar({ stopOpenCode: state.stopManagedOpenCodeOnQuit });
     } catch {
     }
     void sshManager.shutdownAll().catch(() => {});
   }
 };
 
-const performConfirmedQuit = ({ stopManagedOpenCode } = {}) => {
+const performConfirmedQuit = async ({ stopManagedOpenCode } = {}) => {
   if (state.quitConfirmed) return;
-  prepareForQuit({ stopManagedOpenCode });
+  await prepareForQuit({ stopManagedOpenCode });
 
   // Safety net: force-exit if normal quit sequence stalls (e.g. background
   // handles in electron-updater / fetch refs) after a short grace period.
@@ -252,7 +252,7 @@ const requestQuitWithConfirmation = async () => {
       ? result.response === 1
       : result.response === 0;
     if (result.response === 0 || result.response === 1) {
-      performConfirmedQuit({ stopManagedOpenCode });
+      void performConfirmedQuit({ stopManagedOpenCode });
     }
   } catch (error) {
     state.quitConfirmationPending = false;
@@ -809,12 +809,12 @@ const spawnLocalServer = async () => {
   return url;
 };
 
-const killSidecar = ({ stopOpenCode = !shouldKeepManagedOpenCodeAliveByDefault() } = {}) => {
+const killSidecar = async ({ stopOpenCode = !shouldKeepManagedOpenCodeAliveByDefault() } = {}) => {
   if (state.serverHandle) {
     try {
       const result = state.serverHandle.stop({ exitProcess: false, stopOpenCode });
       if (result && typeof result.then === 'function') {
-        result.catch(() => {});
+        await result;
       }
     } catch {
     }
@@ -1247,14 +1247,14 @@ const createBrowserWindow = ({ label, restoreGeometry, url }) => {
 
     debounceWindowStatePersist(browserWindow, true);
   });
-  browserWindow.on('closed', () => {
+  browserWindow.on('closed', async () => {
     state.focusedWindowIds.delete(browserWindow.id);
     if (state.mainWindow && browserWindow.id === state.mainWindow.id) {
       state.mainWindow = null;
     }
     if (BrowserWindow.getAllWindows().length === 0) {
       if (!state.installingUpdate) {
-        killSidecar();
+        await killSidecar();
       }
       if (process.platform !== 'darwin') {
         app.quit();
@@ -2611,13 +2611,13 @@ ipcMain.handle('openchamber:dialog:open', async (event, options) => {
   return result.filePaths[0] || null;
 });
 
-app.on('window-all-closed', () => {
+app.on('window-all-closed', async () => {
   if (process.platform === 'darwin' && !state.quitRequested) {
     return;
   }
 
   if (!state.installingUpdate) {
-    killSidecar();
+    await killSidecar();
     void sshManager.shutdownAll();
   }
   if (process.platform !== 'darwin') {

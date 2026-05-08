@@ -224,25 +224,6 @@ export const clampTurnStart = (turnStart: number, turnCount: number): number => 
     return Math.min(turnStart, turnCount - 1);
 };
 
-export const getTurnWindowSliceStart = (
-    model: Pick<TurnWindowModel, 'turnMessageStartIndexes'>,
-    turnStart: number,
-): number => {
-    if (turnStart <= 0) {
-        return 0;
-    }
-    const from = model.turnMessageStartIndexes[turnStart];
-    return typeof from === 'number' ? from : 0;
-};
-
-export const windowMessagesByTurn = (
-    messages: ChatMessageEntry[],
-    model: Pick<TurnWindowModel, 'turnMessageStartIndexes'>,
-    turnStart: number,
-): ChatMessageEntry[] => {
-    const sliceStart = getTurnWindowSliceStart(model, turnStart);
-    if (sliceStart <= 0) {
-        return messages;
-    }
-    return messages.slice(sliceStart);
-};
+// [sscity-mod] windowMessagesByTurn and getTurnWindowSliceStart removed.
+// Windowing is now performed at the turn-group level in MessageList's
+// staticRenderEntries, not at the raw-message level.
