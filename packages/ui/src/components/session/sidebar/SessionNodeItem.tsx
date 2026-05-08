@@ -525,7 +525,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
       className={cn(
         'pointer-events-none absolute inline-flex h-3.5 items-center justify-center gap-0.5 transition-opacity',
         isMinimalMode ? 'top-1/2 -translate-y-1/2' : 'top-[14.5px] -translate-y-1/2',
-        showStatusMarker && isPinnedSession ? 'left-[-18px] w-6' : 'left-[-10px] w-3.5',
+        showStatusMarker && isPinnedSession ? 'left-[-32px] w-6' : 'left-[-24px] w-3.5',
       )}
     >
       {showStatusMarker ? statusMarkerContent : null}
@@ -548,7 +548,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
         }
       }}
       className={cn(
-        'absolute left-[-24px] inline-flex h-3.5 w-3.5 items-center justify-center rounded-md text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 transition-opacity',
+        'absolute left-[-10px] inline-flex h-3.5 w-3.5 items-center justify-center rounded-md text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 transition-opacity',
         isMinimalMode ? 'top-1/2 -translate-y-1/2' : 'top-[14.5px] -translate-y-1/2',
       )}
       aria-label={isExpanded
