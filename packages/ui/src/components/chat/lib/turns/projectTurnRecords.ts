@@ -243,7 +243,8 @@ export const projectTurnRecords = (
         (effectiveOptions.previousProjection?.turns ?? []).map((turn) => [turn.turnId, turn]),
     );
 
-    turns.forEach((turn) => {
+    for (let i = 0; i < turns.length; i += 1) {
+        const turn = turns[i];
         const previousTurn = previousTurnsById.get(turn.turnId);
         const canReuseComputed = (() => {
             if (!previousTurn) return false;
@@ -259,18 +260,13 @@ export const projectTurnRecords = (
         })();
 
         if (canReuseComputed && previousTurn) {
-            turn.summary = previousTurn.summary;
-            turn.summaryText = previousTurn.summaryText;
-            turn.diffStats = previousTurn.diffStats;
-            turn.activityParts = previousTurn.activityParts;
-            turn.activitySegments = previousTurn.activitySegments;
-            turn.hasTools = previousTurn.hasTools;
-            turn.hasReasoning = previousTurn.hasReasoning;
-            turn.stream = previousTurn.stream;
-            turn.startedAt = previousTurn.startedAt;
-            turn.completedAt = previousTurn.completedAt;
-            turn.durationMs = previousTurn.durationMs;
-            return;
+            // [sscity-mod] Reuse previous turn identity wholesale. Without this,
+            // every projection produces new turn objects, defeating React.memo
+            // bailouts in MessageList/TurnItem and forcing the virtualizer to
+            // re-measure all rows on every streaming chunk (~60Hz jitter).
+            turns[i] = previousTurn;
+            turnByUserId.set(previousTurn.userMessageId, previousTurn);
+            continue;
         }
 
         turn.summary = projectTurnSummary(turn.assistantMessages);
@@ -293,7 +289,7 @@ export const projectTurnRecords = (
         turn.startedAt = turn.stream.startedAt;
         turn.completedAt = turn.stream.completedAt;
         turn.durationMs = turn.stream.durationMs;
-    });
+    }
 
     const projection = projectTurnIndexes(turns);
     const ungroupedMessageIds = new Set<string>();
