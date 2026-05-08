@@ -93,6 +93,10 @@ export const registerOpenCodeProxy = (app, deps) => {
   app.set('opencodeProxyConfigured', true);
 
   const isAbortError = (error) => error?.name === 'AbortError';
+  const isClientClosedStreamError = (error) => {
+    const message = typeof error?.message === 'string' ? error.message : '';
+    return message.includes('socket connection was closed') || message.includes('Socket connection was closed');
+  };
   const FALLBACK_PROXY_TARGET = 'http://127.0.0.1:3902';
 
   const normalizeProxyTarget = (candidate) => {
@@ -238,7 +242,7 @@ export const registerOpenCodeProxy = (app, deps) => {
 
       res.end();
     } catch (error) {
-      if (isAbortError(error)) {
+      if (isAbortError(error) || abortController.signal.aborted || res.writableEnded || res.destroyed || isClientClosedStreamError(error)) {
         return;
       }
       console.error('[proxy] OpenCode SSE proxy error:', error?.message ?? error);
