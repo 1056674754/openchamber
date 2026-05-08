@@ -151,7 +151,8 @@ export function useQueuedMessageAutoSend(enabledOrOptions?: boolean | { enabled?
           payload.agentMentionName,
           payload.additionalParts,
           resolved.variant,
-          'normal'
+          'normal',
+          sessionId
         );
 
         const removeFromQueue = useMessageQueueStore.getState().removeFromQueue;
