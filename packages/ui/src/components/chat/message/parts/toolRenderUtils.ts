@@ -1,5 +1,5 @@
 const EXPANDABLE_TOOL_NAMES = new Set<string>([
-    'edit', 'multiedit', 'apply_patch', 'str_replace', 'str_replace_based_edit_tool',
+    'edit', 'multiedit', 'apply_patch', 'applypatch', 'str_replace', 'str_replace_based_edit_tool',
     'bash', 'shell', 'cmd', 'terminal',
     'write', 'create', 'file_write',
     'question', 'task',
@@ -7,9 +7,16 @@ const EXPANDABLE_TOOL_NAMES = new Set<string>([
 
 const STANDALONE_TOOL_NAMES = new Set<string>(['task']);
 
-const SEARCH_TOOL_NAMES = new Set<string>(['grep', 'search', 'find', 'ripgrep', 'glob']);
+const SEARCH_TOOL_NAMES = new Set<string>(['grep', 'rg', 'search', 'find', 'ripgrep', 'glob']);
+const READ_TOOL_NAMES = new Set<string>(['read', 'readfile', 'read_file', 'view', 'file_read', 'cat']);
+const LIST_TOOL_NAMES = new Set<string>(['list', 'ls', 'dir', 'list_files', 'glob']);
+const FETCH_TOOL_NAMES = new Set<string>(['webfetch', 'fetch', 'curl', 'wget']);
+const WEB_SEARCH_TOOL_NAMES = new Set<string>([
+    'web-search', 'websearch', 'search_web', 'codesearch',
+    'google', 'bing', 'duckduckgo', 'perplexity',
+]);
 
-const normalizeToolName = (toolName: unknown): string => {
+export const normalizeToolName = (toolName: unknown): string => {
     if (typeof toolName !== 'string') return '';
     const trimmed = toolName.trim().toLowerCase();
     if (!trimmed) return '';
@@ -40,16 +47,20 @@ export const getStaticGroupToolName = (toolName: string): string => {
     if (SEARCH_TOOL_NAMES.has(normalized)) {
         return 'grep';
     }
+    if (READ_TOOL_NAMES.has(normalized)) {
+        return 'read';
+    }
+    if (LIST_TOOL_NAMES.has(normalized)) {
+        return 'list';
+    }
+    if (FETCH_TOOL_NAMES.has(normalized)) {
+        return 'webfetch';
+    }
+    if (WEB_SEARCH_TOOL_NAMES.has(normalized)) {
+        return 'websearch';
+    }
     return normalized;
 };
-
-const READ_TOOL_NAMES = new Set<string>(['read', 'view', 'file_read', 'cat']);
-const LIST_TOOL_NAMES = new Set<string>(['list', 'ls', 'dir', 'list_files']);
-const FETCH_TOOL_NAMES = new Set<string>(['webfetch', 'fetch', 'curl', 'wget']);
-const WEB_SEARCH_TOOL_NAMES = new Set<string>([
-    'web-search', 'websearch', 'search_web', 'codesearch',
-    'google', 'bing', 'duckduckgo', 'perplexity',
-]);
 
 export type ToolCallCategory = 'read' | 'search' | 'list' | 'fetch' | 'websearch' | 'other';
 

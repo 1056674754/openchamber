@@ -1,9 +1,9 @@
 import React from 'react';
-import { RiArrowDownSLine, RiArrowRightSLine } from '@remixicon/react';
+import { RiArrowDownSLine, RiArrowRightSLine, RiLoader4Line } from '@remixicon/react';
 import { cn } from '@/lib/utils';
 import type { ToolPart as ToolPartType } from '@opencode-ai/sdk/v2';
+import type { TurnActivityRecord } from '../../lib/turns/types';
 import { getToolIcon } from './toolPresentation';
-import { StaticToolRow } from './ProgressiveGroup';
 import { MinDurationShineText } from './MinDurationShineText';
 import { ToolRevealOnMount } from './ToolRevealOnMount';
 import {
@@ -30,31 +30,27 @@ const isToolRunning = (part: ToolPartType): boolean => {
     return status === 'running' || status === 'pending' || status === 'started';
 };
 
-export interface ToolCallGroupActivity {
-    id: string;
-    turnId: string;
-    messageId: string;
-    partIndex: number;
-    part: ToolPartType;
-    kind: 'tool';
-}
-
 interface ToolCallGroupProps {
-    tools: ToolPartType[];
-    messageParts: ToolCallGroupActivity[];
+    activities: TurnActivityRecord[];
     isExpanded: boolean;
     onToggle: () => void;
     animateTailText: boolean;
+    renderActivity: (activity: TurnActivityRecord, animateTailText: boolean) => React.ReactNode;
 }
 
 const ToolCallGroupInner: React.FC<ToolCallGroupProps> = ({
-    tools,
-    messageParts,
+    activities,
     isExpanded,
     onToggle,
     animateTailText,
+    renderActivity,
 }) => {
-    const hasRunning = React.useMemo(() => tools.some(isToolRunning), [tools]);
+    const tools = React.useMemo(
+        () => activities.map((activity) => activity.part as ToolPartType),
+        [activities]
+    );
+    const runningCount = React.useMemo(() => tools.reduce((count, tool) => count + (isToolRunning(tool) ? 1 : 0), 0), [tools]);
+    const hasRunning = runningCount > 0;
 
     const summaryText = React.useMemo(() => {
         const toolNames = tools.map((t) => t.tool ?? '');
@@ -72,6 +68,8 @@ const ToolCallGroupInner: React.FC<ToolCallGroupProps> = ({
         <div className="flex flex-col">
             <button
                 type="button"
+                aria-expanded={isExpanded}
+                aria-label={`${isExpanded ? 'Collapse' : 'Expand'} ${summaryText}`}
                 onClick={(event) => {
                     event.preventDefault();
                     onToggle();
@@ -79,7 +77,7 @@ const ToolCallGroupInner: React.FC<ToolCallGroupProps> = ({
                 className={cn(
                     'flex w-full items-center gap-x-1.5 pr-2 pl-px py-1.5 rounded-xl min-w-0',
                     'cursor-pointer select-none',
-                    'transition-colors duration-100',
+                    'transition-colors duration-100 hover:bg-[var(--interactive-hover)]',
                 )}
                 style={{ color: 'var(--tools-title)' }}
             >
@@ -94,25 +92,27 @@ const ToolCallGroupInner: React.FC<ToolCallGroupProps> = ({
                 >
                     {summaryText}
                 </MinDurationShineText>
-                <div className="inline-flex h-5 items-center flex-shrink-0 ml-auto opacity-50">
+                <div className="ml-auto inline-flex h-5 items-center gap-1.5 flex-shrink-0">
+                    {hasRunning ? (
+                        <span className="inline-flex items-center gap-1 typography-meta leading-5" style={{ color: 'var(--tools-description)' }}>
+                            <RiLoader4Line className="h-3.5 w-3.5 animate-spin" />
+                            {runningCount > 1 ? `${runningCount} running` : 'running'}
+                        </span>
+                    ) : null}
+                    <span className="inline-flex h-5 items-center opacity-50">
                     {isExpanded
                         ? <RiArrowDownSLine className="h-3.5 w-3.5" />
                         : <RiArrowRightSLine className="h-3.5 w-3.5" />
                     }
+                    </span>
                 </div>
             </button>
             {isExpanded && (
-                <div className="flex flex-col ml-2 pl-2" style={{ borderLeft: '1px solid var(--tools-description)', opacity: 0.7 }}>
-                    {messageParts.map((activity) => {
-                        const toolPart = activity.part as ToolPartType;
-                        const toolName = toolPart.tool?.toLowerCase() ?? '';
+                <div className="flex flex-col ml-2 pl-2" style={{ borderLeft: '1px solid var(--tools-border)' }}>
+                    {activities.map((activity) => {
                         return (
                             <ToolRevealOnMount key={activity.id} animate={animateTailText} wipe>
-                                <StaticToolRow
-                                    toolName={toolName}
-                                    activities={[activity]}
-                                    animateTailText={animateTailText}
-                                />
+                                {renderActivity(activity, animateTailText)}
                             </ToolRevealOnMount>
                         );
                     })}
@@ -126,15 +126,14 @@ export const ToolCallGroup = React.memo(ToolCallGroupInner, (prev, next) => {
     if (prev.isExpanded !== next.isExpanded) return false;
     if (prev.onToggle !== next.onToggle) return false;
     if (prev.animateTailText !== next.animateTailText) return false;
-    if (prev.tools.length !== next.tools.length) return false;
-    for (let i = 0; i < prev.tools.length; i++) {
-        if (prev.tools[i].id !== next.tools[i].id) return false;
-        if (prev.tools[i] !== next.tools[i]) return false;
-    }
-    if (prev.messageParts.length !== next.messageParts.length) return false;
-    for (let i = 0; i < prev.messageParts.length; i++) {
-        if (prev.messageParts[i].id !== next.messageParts[i].id) return false;
-        if (prev.messageParts[i].part !== next.messageParts[i].part) return false;
+    if (prev.renderActivity !== next.renderActivity) return false;
+    if (prev.activities.length !== next.activities.length) return false;
+    for (let i = 0; i < prev.activities.length; i++) {
+        const prevActivity = prev.activities[i]!;
+        const nextActivity = next.activities[i]!;
+        if (prevActivity.id !== nextActivity.id) return false;
+        if (prevActivity.endedAt !== nextActivity.endedAt) return false;
+        if (prevActivity.part !== nextActivity.part) return false;
     }
     return true;
 });

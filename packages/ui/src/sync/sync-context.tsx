@@ -422,6 +422,8 @@ const getSessionIdFromPayload = (event: Event): string | null => {
   if (
     event.type === "message.removed"
     || event.type === "session.status"
+    || event.type === "session.idle"
+    || event.type === "session.error"
     || event.type === "todo.updated"
     || event.type === "permission.asked"
     || event.type === "permission.replied"
@@ -1282,6 +1284,24 @@ function handleEvent(
   // type will mutate. This preserves reference identity for untouched slices
   // so Zustand selectors skip re-renders for unrelated subscribers.
   const current = store.getState()
+
+  // Abort suppression: skip streaming events for sessions with a pending abort.
+  // This prevents new content from appearing in the chat after the user presses stop.
+  // Status events (session.idle, session.error) are always allowed through so they
+  // can clear the suppression state.
+  if (payload.type === "message.part.delta" || payload.type === "message.part.updated" || payload.type === "message.updated") {
+    const eventSessionId = getSessionIdFromPayload(payload)
+    if (eventSessionId && sessionActions.isSessionAbortSuppressed(eventSessionId)) {
+      return
+    }
+  }
+  if (payload.type === "session.idle" || payload.type === "session.error") {
+    const eventSessionId = getSessionIdFromPayload(payload)
+    if (eventSessionId) {
+      sessionActions.clearAbortSuppression(eventSessionId)
+    }
+  }
+
   const draft: State = { ...current }
 
   switch (payload.type) {
@@ -1380,6 +1400,19 @@ function handleEvent(
     const messageID = getMessageIdFromPayload(payload) ?? undefined
     syncDebug.dispatch.eventNoChange(payload.type, sessionID, messageID)
 
+    // Global store status sync must happen even when the child store didn't change —
+    // batchLoadStatuses may have set a stale "busy" in the global store while the
+    // child store was already idle, causing the reducer to no-op.
+    if (payload.type === "session.status") {
+      const statusProps = payload.properties as { sessionID: string; status: SessionStatus }
+      if (statusProps.sessionID && statusProps.status) {
+        useGlobalSessionsStore.getState().upsertStatus(statusProps.sessionID, statusProps.status)
+      }
+    } else if (payload.type === "session.idle" || payload.type === "session.error") {
+      if (sessionID) {
+        useGlobalSessionsStore.getState().upsertStatus(sessionID, { type: "idle" })
+      }
+    }
   }
 
   // Snapshot materialization is driven by typed reducer outcomes, not by

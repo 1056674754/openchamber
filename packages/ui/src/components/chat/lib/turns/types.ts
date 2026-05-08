@@ -63,6 +63,12 @@ export interface TurnRecord {
     messages: TurnMessageRecord[];
     assistantMessageIds: string[];
     assistantMessages: ChatMessageEntry[];
+    // [sscity-mod] True when the "user" message that created this turn is
+    // actually a system directive (OMO TODO continuation, atlas <system-reminder>,
+    // etc.) rather than a real human-authored message. Directive turns keep
+    // their assistant responses grouped correctly via parentID, but do NOT
+    // render a sticky user header — the directive is shown as an inline banner.
+    isDirectiveTurn: boolean;
     activityParts: TurnActivityRecord[];
     activitySegments: TurnActivityGroup[];
     summary: TurnSummaryRecord;
@@ -101,7 +107,7 @@ export interface TurnProjectionResult {
     ungroupedMessageIds: Set<string>;
 }
 
-export type Turn = Pick<TurnRecord, 'turnId' | 'userMessage' | 'assistantMessages'>;
+export type Turn = Pick<TurnRecord, 'turnId' | 'userMessage' | 'assistantMessages' | 'isDirectiveTurn'>;
 
 export interface TurnGroupingContext {
     turnId: string;

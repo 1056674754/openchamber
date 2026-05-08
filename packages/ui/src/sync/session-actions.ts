@@ -648,13 +648,68 @@ export async function optimisticSend(input: {
 // Abort
 // ---------------------------------------------------------------------------
 
-export async function abortCurrentOperation(sessionId: string): Promise<void> {
-  try {
-    const sessionDirectory = requireSessionDirectory(sessionId, "abortCurrentOperation")
-    await sdkForSession(sessionId).session.abort({ sessionID: sessionId, directory: sessionDirectory })
-  } catch (error) {
-    console.error("[session-actions] abort failed", error)
+// Sessions with pending abort — events for these sessions are suppressed in the
+// event pipeline until session.idle arrives or the suppression window expires.
+const _abortSuppressedSessions = new Map<string, number>()
+const ABORT_SUPPRESS_WINDOW_MS = 8_000
+
+export function isSessionAbortSuppressed(sessionId: string): boolean {
+  const expiresAt = _abortSuppressedSessions.get(sessionId)
+  if (!expiresAt) return false
+  if (Date.now() > expiresAt) {
+    _abortSuppressedSessions.delete(sessionId)
+    return false
   }
+  return true
+}
+
+export function clearAbortSuppression(sessionId: string): void {
+  _abortSuppressedSessions.delete(sessionId)
+}
+
+export async function abortCurrentOperation(sessionId: string): Promise<void> {
+  let sessionDirectory: string | undefined
+  try {
+    sessionDirectory = requireSessionDirectory(sessionId, "abortCurrentOperation")
+  } catch (error) {
+    console.error("[session-actions] abort: cannot resolve directory", error)
+  }
+
+  // Mark session as abort-suppressed so streaming events are ignored in the UI
+  _abortSuppressedSessions.set(sessionId, Date.now() + ABORT_SUPPRESS_WINDOW_MS)
+
+  if (sessionDirectory) {
+    const client = sdkForSession(sessionId)
+    const doAbort = () => client.session.abort({ sessionID: sessionId, directory: sessionDirectory! })
+
+    try {
+      await doAbort()
+    } catch (error) {
+      console.error("[session-actions] abort call failed", error)
+    }
+
+    // Retry abort with escalating delays — OpenCode may not stop on the first
+    // attempt when mid-tool-execution or with queued tool calls.
+    const retryDelays = [600, 1500, 3500]
+    for (const delay of retryDelays) {
+      setTimeout(() => {
+        try {
+          const store = storeForSession(sessionId)
+          const current = store.getState()
+          if (current.session_status[sessionId]?.type !== "idle") {
+            void doAbort().catch(() => {})
+          }
+        } catch {
+          void doAbort().catch(() => {})
+        }
+      }, delay)
+    }
+  }
+
+  // Update global store optimistically so sidebar stops showing the spinner.
+  // Do NOT update child store — keep the stop button visible in case OpenCode
+  // doesn't actually stop and the user needs to press stop again.
+  useGlobalSessionsStore.getState().upsertStatus(sessionId, { type: "idle" })
 }
 
 // ---------------------------------------------------------------------------

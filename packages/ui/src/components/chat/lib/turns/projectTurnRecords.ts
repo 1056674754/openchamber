@@ -171,26 +171,19 @@ export const projectTurnRecords = (
     const turnByUserId = new Map<string, TurnRecord>();
     const groupedMessageIds = new Set<string>();
 
+    // Pass 1: Create turns for every role:user message, including directives.
+    // [sscity-mod] Directives arrive with role:user but are not real human
+    // messages. They still need their own turn so that the agent's assistant
+    // response (which has parentID → directive id) gets grouped correctly.
+    // We mark them `isDirectiveTurn: true` so the UI can skip the sticky
+    // header and render a banner card instead.
     messages.forEach((message, index) => {
         const role = resolveMessageRole(message);
-        // [sscity-mod] Upstream v1.10.2 refactored to a two-pass approach:
-        // Pass 1 creates turns for user messages only; Pass 2 (below) assigns
-        // assistant messages to turns via parentId. We must skip non-user messages
-        // here, EXCEPT for system directive messages which we route into the latest
-        // turn's assistant messages (needed by SystemDirectiveBanner).
         if (role !== 'user') {
-            if (isSystemDirectiveMessage(message.parts)) {
-                const latestTurn = turns.length > 0 ? turns[turns.length - 1] : undefined;
-                if (latestTurn) {
-                    latestTurn.assistantMessages.push(message);
-                    latestTurn.assistantMessageIds.push(message.info.id);
-                    latestTurn.messages.push(createTurnMessageRecord(message, index));
-                    groupedMessageIds.add(message.info.id);
-                }
-            }
             return;
         }
 
+        const isDirective = isSystemDirectiveMessage(message.parts);
         const turnId = message.info.id;
         const turn: TurnRecord = {
             turnId,
@@ -200,6 +193,7 @@ export const projectTurnRecords = (
             messages: [createTurnMessageRecord(message, index)],
             assistantMessageIds: [],
             assistantMessages: [],
+            isDirectiveTurn: isDirective,
             activityParts: [],
             activitySegments: [],
             summary: {},
@@ -217,6 +211,7 @@ export const projectTurnRecords = (
         groupedMessageIds.add(message.info.id);
     });
 
+    // Pass 2: Assign assistant messages to their parent turn via parentID.
     messages.forEach((message, index) => {
         const role = resolveMessageRole(message);
         if (role !== 'assistant') {

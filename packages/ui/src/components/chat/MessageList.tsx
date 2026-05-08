@@ -426,7 +426,16 @@ type RenderEntry =
         assistantHeaderMessageId?: string;
         turnGroupingContext?: TurnGroupingContext;
     }
-    | { kind: 'turn'; key: string; turn: TurnRecord; isLastTurn: boolean };
+    | {
+        kind: 'turn';
+        key: string;
+        turn: TurnRecord;
+        isLastTurn: boolean;
+        // [sscity-mod] Directive turns that immediately follow this real user
+        // turn. They render inside the same <section> so that the real user's
+        // sticky header stays active while scrolling through directive content.
+        directiveTurns?: TurnRecord[];
+    };
 
 type TurnUiState = { isExpanded: boolean };
 
@@ -519,6 +528,7 @@ interface TurnBlockProps {
     onUserAnimationConsumed: (messageId: string) => void;
     activeStreamingMessageId?: string | null;
     activeStreamingPhase?: StreamPhase | null;
+    directiveTurns?: TurnRecord[];
 }
 
 const TurnBlock = React.memo(({
@@ -537,6 +547,7 @@ const TurnBlock = React.memo(({
     onUserAnimationConsumed,
     activeStreamingMessageId,
     activeStreamingPhase,
+    directiveTurns,
 }: TurnBlockProps) => {
     const turnUiState = turnUiStates.get(turn.turnId) ?? { isExpanded: defaultActivityExpanded };
     const handleToggleTurnGroup = React.useCallback(() => {
@@ -785,6 +796,7 @@ const TurnBlock = React.memo(({
         ]
     );
 
+
     const renderableTurn = React.useMemo(() => {
         if (visibleAssistantMessages === turn.assistantMessages) {
             return turn;
@@ -796,7 +808,12 @@ const TurnBlock = React.memo(({
     }, [turn, visibleAssistantMessages]);
 
     return (
-        <TurnItem turn={renderableTurn} stickyUserHeader={stickyUserHeader} renderMessage={renderMessage} />
+        <TurnItem
+            turn={renderableTurn}
+            stickyUserHeader={stickyUserHeader}
+            renderMessage={renderMessage}
+            directiveTurns={directiveTurns}
+        />
     );
 });
 
@@ -932,6 +949,7 @@ const MessageListEntry = React.memo(({
             getAnimationHandlers={getAnimationHandlers}
             scrollToBottom={scrollToBottom}
             stickyUserHeader={stickyUserHeader}
+            directiveTurns={entry.kind === 'turn' ? entry.directiveTurns : undefined}
         />
     );
 });
@@ -1256,20 +1274,77 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
     }, [displayMessages, projection.ungroupedMessageIds]);
 
     const staticRenderEntries = React.useMemo<RenderEntry[]>(() => streamPerfMeasure('ui.message_list.render_entries_ms', () => {
-        const turnEntries = staticTurns.map((turn) => ({
-            kind: 'turn' as const,
-            key: `turn:${turn.turnId}`,
-            turn,
-            isLastTurn: turn.turnId === projection.lastTurnId,
-        }));
+        // [sscity-mod] Group directive turns under the preceding real user turn
+        // so they share a single <section> and the real user's sticky header
+        // stays active while scrolling through directive content.
+        const groupedTurnEntries: RenderEntry[] = [];
+        let pendingRealEntry: (RenderEntry & { kind: 'turn' }) | null = null;
+
+        for (const turn of staticTurns) {
+            if (turn.isDirectiveTurn) {
+                if (pendingRealEntry) {
+                    const directives = pendingRealEntry.directiveTurns ?? [];
+                    directives.push(turn);
+                    pendingRealEntry.directiveTurns = directives;
+                } else {
+                    // Directive without a preceding real user turn — render standalone
+                    groupedTurnEntries.push({
+                        kind: 'turn',
+                        key: `turn:${turn.turnId}`,
+                        turn,
+                        isLastTurn: turn.turnId === projection.lastTurnId,
+                    });
+                }
+            } else {
+                if (pendingRealEntry) {
+                    groupedTurnEntries.push(pendingRealEntry);
+                }
+                pendingRealEntry = {
+                    kind: 'turn',
+                    key: `turn:${turn.turnId}`,
+                    turn,
+                    isLastTurn: turn.turnId === projection.lastTurnId,
+                };
+            }
+        }
+        if (pendingRealEntry) {
+            groupedTurnEntries.push(pendingRealEntry);
+        }
+
+        // [sscity-mod] Apply group-level windowing. turnStart is the number of
+        // real-user-groups to skip from the top. Only count real-user groups
+        // (non-directive standalone entries also count as a group).
+        let windowedEntries: RenderEntry[];
+        if (turnStart > 0) {
+            let realGroupsSeen = 0;
+            let sliceIndex = 0;
+            for (let i = 0; i < groupedTurnEntries.length; i++) {
+                const entry = groupedTurnEntries[i];
+                if (entry.kind === 'turn' && !entry.turn.isDirectiveTurn) {
+                    realGroupsSeen += 1;
+                    if (realGroupsSeen > turnStart) {
+                        sliceIndex = i;
+                        break;
+                    }
+                }
+            }
+            if (realGroupsSeen <= turnStart) {
+                sliceIndex = groupedTurnEntries.length;
+            }
+            windowedEntries = groupedTurnEntries.slice(sliceIndex);
+        } else {
+            windowedEntries = groupedTurnEntries;
+        }
 
         if (projection.ungroupedMessageIds.size === 0) {
-            return turnEntries;
+            return windowedEntries;
         }
 
         const turnEntryByUserMessageId = new Map<string, RenderEntry>();
-        turnEntries.forEach((entry) => {
-            turnEntryByUserMessageId.set(entry.turn.userMessage.info.id, entry);
+        windowedEntries.forEach((entry) => {
+            if (entry.kind === 'turn') {
+                turnEntryByUserMessageId.set(entry.turn.userMessage.info.id, entry);
+            }
         });
 
         const orderedEntries: RenderEntry[] = [];
@@ -1288,7 +1363,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         });
 
         return orderedEntries;
-    }), [buildUngroupedEntry, displayMessages, projection.lastTurnId, projection.ungroupedMessageIds, staticTurns]);
+    }), [buildUngroupedEntry, displayMessages, projection.lastTurnId, projection.ungroupedMessageIds, staticTurns, turnStart]);
 
     const trailingStreamingEntry = React.useMemo<RenderEntry | undefined>(() => {
         if (streamingTurn) {

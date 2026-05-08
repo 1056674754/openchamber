@@ -14,13 +14,14 @@ import { Text } from '@/components/ui/text';
 import { FadeInOnReveal } from '../FadeInOnReveal';
 import { getToolIcon } from './toolPresentation';
 import { getToolMetadata } from '@/lib/toolHelpers';
-import { isExpandableTool, isStandaloneTool, isStaticTool } from './toolRenderUtils';
+import { getStaticGroupToolName, isExpandableTool, isStandaloneTool, isStaticTool } from './toolRenderUtils';
 import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useUIStore } from '@/stores/useUIStore';
 import ReasoningPart from './ReasoningPart';
 import JustificationBlock from './JustificationBlock';
 import { areRenderRelevantPartsEqual } from '../renderCompare';
+import { ToolCallGroup } from './ToolCallGroup';
 
 interface ProgressiveGroupProps {
     parts: TurnActivityPart[];
@@ -379,6 +380,7 @@ const getToolShortDescription = (activity: TurnActivityPart): string | null => {
 type AggregatedRow =
     | { type: 'tool-expandable'; activity: TurnActivityPart }
     | { type: 'tool-static-group'; toolName: string; activities: TurnActivityPart[] }
+    | { type: 'tool-call-group'; id: string; activities: TurnActivityPart[] }
     | { type: 'reasoning'; activity: TurnActivityPart }
     | { type: 'justification'; activity: TurnActivityPart }
     | { type: 'tool-fallback'; activity: TurnActivityPart };
@@ -492,6 +494,22 @@ const MemoStaticGroupedToolRow = React.memo(StaticGroupedToolRow, (prev, next) =
         && areActivityListsEqual(prev.activities, next.activities);
 });
 
+const getToolGroupId = (activities: TurnActivityPart[]): string => {
+    const first = activities[0]?.id ?? 'start';
+    const last = activities[activities.length - 1]?.id ?? 'end';
+    return `tool-group:${first}:${last}:${activities.length}`;
+};
+
+const isInvisibleReasoningActivity = (activity: TurnActivityPart): boolean => {
+    if (activity.kind !== 'reasoning') {
+        return false;
+    }
+
+    const text = (activity.part as { text?: unknown; content?: unknown }).text
+        ?? (activity.part as { content?: unknown }).content;
+    return typeof text !== 'string' || text.trim().length === 0;
+};
+
 const aggregateRows = (parts: TurnActivityPart[]): AggregatedRow[] => {
     const rows: AggregatedRow[] = [];
 
@@ -500,6 +518,10 @@ const aggregateRows = (parts: TurnActivityPart[]): AggregatedRow[] => {
         const activity = parts[i];
 
         if (activity.kind === 'reasoning') {
+            if (isInvisibleReasoningActivity(activity)) {
+                i++;
+                continue;
+            }
             rows.push({ type: 'reasoning', activity });
             i++;
             continue;
@@ -532,13 +554,21 @@ const aggregateRows = (parts: TurnActivityPart[]): AggregatedRow[] => {
             let j = i + 1;
             while (j < parts.length) {
                 const nextActivity = parts[j];
+                if (isInvisibleReasoningActivity(nextActivity)) {
+                    j++;
+                    continue;
+                }
                 if (nextActivity.kind !== 'tool') break;
                 const nextTool = (nextActivity.part as ToolPartType).tool?.toLowerCase() ?? '';
                 if (!isStaticTool(nextTool)) break;
                 group.push(nextActivity);
                 j++;
             }
-            rows.push({ type: 'tool-static-group', toolName, activities: group });
+            if (group.length > 1) {
+                rows.push({ type: 'tool-call-group', id: getToolGroupId(group), activities: group });
+            } else {
+                rows.push({ type: 'tool-static-group', toolName: getStaticGroupToolName(toolName), activities: group });
+            }
             i = j;
             continue;
         }
@@ -825,6 +855,18 @@ const ProgressiveGroup: React.FC<ProgressiveGroupProps> = ({
         return rows.slice(-previewCount);
     }, [isExpanded, previewCount, rows]);
 
+    const renderStaticToolActivity = React.useCallback((activity: TurnActivityPart, shouldAnimateTailText: boolean) => {
+        const toolPart = activity.part as ToolPartType;
+        const staticToolName = getStaticGroupToolName(toolPart.tool ?? '');
+        return (
+            <StaticToolRow
+                toolName={staticToolName}
+                activities={[activity]}
+                animateTailText={shouldAnimateTailText}
+            />
+        );
+    }, []);
+
     if (shouldRenderRows && rows.length === 0) {
         return null;
     }
@@ -887,6 +929,18 @@ const ProgressiveGroup: React.FC<ProgressiveGroupProps> = ({
                         animateTailText={row.activities.some((activity) => animatedToolIds?.has(activity.id))}
                         animateRows={animateRows}
                     />
+                );
+
+            case 'tool-call-group':
+                return wrapRow(
+                    row.id,
+                        <ToolCallGroup
+                            activities={row.activities}
+                            isExpanded={expandedTools.has(row.id)}
+                            onToggle={() => onToggleTool(row.id)}
+                            animateTailText={row.activities.some((activity) => animatedToolIds?.has(activity.id))}
+                            renderActivity={renderStaticToolActivity}
+                        />
                 );
 
             case 'tool-fallback':
