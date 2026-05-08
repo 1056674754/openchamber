@@ -263,6 +263,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.menu.openInSidePanel': '在侧边面板中打开',
   'sessions.sidebar.session.menu.betaBadge': 'beta',
   'sessions.sidebar.session.menu.label': '会话菜单',
+  'sessions.sidebar.session.menu.delete': '删除',
   'sessions.sidebar.session.untitled': '未命名会话',
   'sessions.sidebar.session.export.nothingToExport': '没有可导出的内容',
   'sessions.sidebar.session.export.success': '会话已导出',

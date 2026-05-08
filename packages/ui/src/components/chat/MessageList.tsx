@@ -23,6 +23,12 @@ import { extractTextContent, normalizeParts } from './message/partUtils';
 
 const MESSAGE_LIST_VIRTUALIZE_THRESHOLD = Number.POSITIVE_INFINITY;
 const MESSAGE_LIST_OVERSCAN = 6;
+const SCROLL_TRACE_PREFIX = '[chat-scroll-trace]';
+
+const traceScrollWrite = (source: string, data: Record<string, unknown>) => {
+    if (typeof window === 'undefined') return;
+    console.log(SCROLL_TRACE_PREFIX, source, data);
+};
 
 const estimateHistoryEntryHeight = (entry: RenderEntry | undefined): number => {
     if (!entry) {
@@ -1656,6 +1662,13 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         const messageRect = messageElement.getBoundingClientRect();
         const offset = 50;
         const top = messageRect.top - containerRect.top + container.scrollTop - offset;
+        traceScrollWrite('message-list:scroll-message-into-view', {
+            messageId,
+            from: container.scrollTop,
+            to: top,
+            behavior,
+            stack: new Error().stack,
+        });
         container.scrollTo({ top, behavior });
         return true;
     }, [findMessageElement, resolveScrollContainer]);
@@ -1762,6 +1775,15 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
                     const targetTop = element.getBoundingClientRect().top - containerRect.top;
                     const delta = targetTop - anchor.offsetTop;
                     if (delta !== 0) {
+                        traceScrollWrite('message-list:restore-viewport-anchor', {
+                            messageId: anchor.messageId,
+                            from: container.scrollTop,
+                            to: container.scrollTop + delta,
+                            delta,
+                            targetTop,
+                            anchorOffsetTop: anchor.offsetTop,
+                            stack: new Error().stack,
+                        });
                         container.scrollTop += delta;
                     }
                     return true;

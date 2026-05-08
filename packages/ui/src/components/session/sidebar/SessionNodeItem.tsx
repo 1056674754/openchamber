@@ -123,11 +123,10 @@ const resolveLeadingState = (input: LeadingStatusInput): LeadingState => {
   };
 };
 
-const resolveGlobalPinnedLeadingState = (input: { hasChildren: boolean; hasSpinner: boolean; hasUnread: boolean }): LeadingState => {
-  const status = resolveStatusSlot({ hasSpinner: input.hasSpinner, hasUnread: input.hasUnread });
+const resolveGlobalPinnedLeadingState = (input: { hasChildren: boolean; hasSpinner: boolean }): LeadingState => {
   return {
     slot1: input.hasChildren ? 'pin-chevron' : 'pin',
-    slot2: status,
+    slot2: input.hasSpinner ? 'spinner' : 'none',
   };
 };
 
@@ -701,7 +700,6 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
     ? resolveGlobalPinnedLeadingState({
       hasChildren: hasChildrenChevron,
       hasSpinner: shouldShowSpinner,
-      hasUnread: showUnreadStatus,
     })
     : resolveLeadingState({
       rowKind,
@@ -746,7 +744,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
     if (slot === 'pin') return renderPin();
     if (slot === 'chevron') return renderChevron('normal');
     return (
-      <span className="relative inline-flex h-4 w-3.5 flex-shrink-0 items-center justify-center">
+      <span className="relative inline-flex h-4 w-3.5 flex-shrink-0 items-center justify-center group-hover:[&>*:first-child]:opacity-0 group-focus-within:[&>*:first-child]:opacity-0">
         {renderPin()}
         {renderChevron('overlay')}
       </span>
@@ -954,6 +952,19 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
           <span className="truncate">{t('sessions.sidebar.session.menu.openInSidePanel')}</span>
           <span className="shrink-0 typography-micro px-1 rounded leading-none pb-px text-[var(--status-warning)] bg-[var(--status-warning)]/10">{t('sessions.sidebar.session.menu.betaBadge')}</span>
         </DropdownMenuItem>
+      ) : null}
+
+      {!archivedBucket ? (
+        <>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            onClick={() => { handleDeleteSession(session, { archivedBucket: true }); }}
+            className="[&>svg]:mr-1 text-destructive focus:text-destructive"
+          >
+            <RiDeleteBinLine className="mr-1 h-4 w-4" />
+            {t('sessions.sidebar.session.menu.delete')}
+          </DropdownMenuItem>
+        </>
       ) : null}
 
     </DropdownMenuContent>

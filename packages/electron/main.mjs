@@ -127,6 +127,7 @@ const state = {
   quitRequested: false,
   quitConfirmed: false,
   quitConfirmationPending: false,
+  stopManagedOpenCodeOnQuit: false,
   installingUpdate: false,
   pendingUpdate: null,
   unreachableHosts: new Set(),
@@ -145,10 +146,10 @@ const quitRisk = {
   enabledScheduledTasksCount: 0,
 };
 
-const shouldRequireQuitConfirmation = () =>
-  quitRisk.hasActiveTunnel
-  || quitRisk.hasRunningScheduledTasks
-  || quitRisk.hasEnabledScheduledTasks;
+const shouldKeepManagedOpenCodeAliveByDefault = () => {
+  const settings = readSettingsRoot();
+  return settings.desktopKeepManagedOpenCodeAliveOnQuit !== false;
+};
 
 const quitConfirmationMessage = () => {
   const reasons = [];
@@ -167,9 +168,12 @@ const quitConfirmationMessage = () => {
   return `OpenChamber detected ${reasons.join(', ')}. Quitting now will stop sidecar/background processes and may interrupt pending work.`;
 };
 
-const prepareForQuit = ({ installingUpdate = false } = {}) => {
+const prepareForQuit = ({ installingUpdate = false, stopManagedOpenCode } = {}) => {
   state.quitRequested = true;
   state.quitConfirmed = true;
+  state.stopManagedOpenCodeOnQuit = typeof stopManagedOpenCode === 'boolean'
+    ? stopManagedOpenCode
+    : !shouldKeepManagedOpenCodeAliveByDefault();
   state.installingUpdate = installingUpdate;
   state.quitConfirmationPending = false;
 
@@ -182,16 +186,16 @@ const prepareForQuit = ({ installingUpdate = false } = {}) => {
 
   if (!installingUpdate) {
     try {
-      killSidecar();
+      killSidecar({ stopOpenCode: state.stopManagedOpenCodeOnQuit });
     } catch {
     }
     void sshManager.shutdownAll().catch(() => {});
   }
 };
 
-const performConfirmedQuit = () => {
+const performConfirmedQuit = ({ stopManagedOpenCode } = {}) => {
   if (state.quitConfirmed) return;
-  prepareForQuit();
+  prepareForQuit({ stopManagedOpenCode });
 
   // Safety net: force-exit if normal quit sequence stalls (e.g. background
   // handles in electron-updater / fetch refs) after a short grace period.
@@ -205,11 +209,6 @@ const performConfirmedQuit = () => {
 
 const requestQuitWithConfirmation = async () => {
   await refreshQuitRiskFlags();
-
-  if (!shouldRequireQuitConfirmation()) {
-    performConfirmedQuit();
-    return;
-  }
 
   if (state.quitConfirmationPending) {
     return;
@@ -227,18 +226,28 @@ const requestQuitWithConfirmation = async () => {
   }
 
   try {
+    const keepManagedOpenCode = shouldKeepManagedOpenCodeAliveByDefault();
+    const buttons = keepManagedOpenCode
+      ? ['Quit, Keep OpenCode Running', 'Quit and Stop OpenCode', 'Cancel']
+      : ['Quit and Stop OpenCode', 'Quit, Keep OpenCode Running', 'Cancel'];
     const result = await dialog.showMessageBox({
       type: 'warning',
       title: 'Quit OpenChamber?',
       message: 'Quit OpenChamber?',
-      detail: quitConfirmationMessage(),
-      buttons: ['Quit', 'Cancel'],
-      defaultId: 1,
-      cancelId: 1,
+      detail: `${quitConfirmationMessage()}\n\nOpenCode can keep running in the background so OpenChamber can reuse the same server after restart.`,
+      buttons,
+      defaultId: 0,
+      cancelId: 2,
     });
     state.quitConfirmationPending = false;
-    if (result.response === 0) {
-      performConfirmedQuit();
+    if (result.response === 2) {
+      return;
+    }
+    const stopManagedOpenCode = keepManagedOpenCode
+      ? result.response === 1
+      : result.response === 0;
+    if (result.response === 0 || result.response === 1) {
+      performConfirmedQuit({ stopManagedOpenCode });
     }
   } catch (error) {
     state.quitConfirmationPending = false;
@@ -795,10 +804,10 @@ const spawnLocalServer = async () => {
   return url;
 };
 
-const killSidecar = () => {
+const killSidecar = ({ stopOpenCode = !shouldKeepManagedOpenCodeAliveByDefault() } = {}) => {
   if (state.serverHandle) {
     try {
-      const result = state.serverHandle.stop({ exitProcess: false });
+      const result = state.serverHandle.stop({ exitProcess: false, stopOpenCode });
       if (result && typeof result.then === 'function') {
         result.catch(() => {});
       }

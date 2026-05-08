@@ -16,6 +16,12 @@ import { getMemoryLimits, type SessionHistoryMeta } from '@/stores/types/session
 import { useViewportStore, type SessionMemoryState } from '@/sync/viewport-store';
 
 type ViewportAnchor = { messageId: string; offsetTop: number };
+const SCROLL_TRACE_PREFIX = '[chat-scroll-trace]';
+
+const traceScrollWrite = (source: string, data: Record<string, unknown>) => {
+    if (typeof window === 'undefined') return;
+    console.log(SCROLL_TRACE_PREFIX, source, data);
+};
 
 type PendingScrollRequest = {
     sessionId: string;
@@ -263,6 +269,14 @@ export const useChatTimelineController = ({
             if (anchorEl) {
                 const containerRect = container.getBoundingClientRect();
                 const anchorTop = anchorEl.getBoundingClientRect().top - containerRect.top;
+                traceScrollWrite('timeline:prepend-anchor-compensation', {
+                    from: container.scrollTop,
+                    to: container.scrollTop + anchorTop - snap.anchor.offsetTop,
+                    anchorMessageId: snap.anchor.messageId,
+                    anchorTop,
+                    anchorOffsetTop: snap.anchor.offsetTop,
+                    stack: new Error().stack,
+                });
                 container.scrollTop += anchorTop - snap.anchor.offsetTop;
                 return;
             }
@@ -271,6 +285,14 @@ export const useChatTimelineController = ({
         // Fallback: height-delta compensation
         const delta = container.scrollHeight - snap.height;
         if (delta > 0) {
+            traceScrollWrite('timeline:prepend-height-compensation', {
+                from: container.scrollTop,
+                to: snap.top + delta,
+                delta,
+                previousHeight: snap.height,
+                nextHeight: container.scrollHeight,
+                stack: new Error().stack,
+            });
             container.scrollTop = snap.top + delta;
         }
     }, [renderedMessages, scrollRef]);
@@ -514,6 +536,17 @@ export const useChatTimelineController = ({
         const ratio = savedPos.scrollTop / savedMaxScroll;
         const currentMaxScroll = Math.max(0, container.scrollHeight - container.clientHeight);
         const restoredTop = Math.round(ratio * currentMaxScroll);
+        if (Math.abs(container.scrollTop - restoredTop) <= 0.5) {
+            return;
+        }
+        traceScrollWrite('timeline:restore-saved-position', {
+            from: container.scrollTop,
+            to: restoredTop,
+            savedPos,
+            savedMaxScroll,
+            currentMaxScroll,
+            stack: new Error().stack,
+        });
         container.scrollTop = restoredTop;
 
         // Re-persist the restored position so intermediate scroll events

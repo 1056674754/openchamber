@@ -582,6 +582,11 @@ export const ChatContainer: React.FC = () => {
         isOverflowing,
     });
     const { loadEarlier, resumeToBottomInstant, restoreSavedScrollPosition } = timelineController;
+    const restoredSavedPositionSignatureRef = React.useRef<string | null>(null);
+
+    React.useEffect(() => {
+        restoredSavedPositionSignatureRef.current = null;
+    }, [currentSessionId]);
 
     const runLatestInstantResume = React.useCallback(async (options?: { force?: boolean }) => {
         if (!currentSessionId) {
@@ -596,7 +601,7 @@ export const ChatContainer: React.FC = () => {
         }
 
         // Check if this session has a saved non-bottom scroll position.
-        const savedMemState = sessionMemoryStateMap.get(currentSessionId);
+        const savedMemState = useViewportStore.getState().sessionMemoryState.get(currentSessionId);
         const savedPos = savedMemState?.scrollPosition;
         if (savedPos && !sessionIsWorking) {
             const savedMaxScroll = Math.max(0, savedPos.scrollHeight - savedPos.clientHeight);
@@ -604,6 +609,17 @@ export const ChatContainer: React.FC = () => {
             const threshold = Math.max(24, Math.min(200, savedPos.clientHeight * 0.10));
             const distanceFromSavedBottom = savedMaxScroll - savedPos.scrollTop;
             if (savedMaxScroll > 0 && distanceFromSavedBottom > threshold) {
+                const restoreSignature = [
+                    currentSessionId,
+                    savedPos.scrollTop,
+                    savedPos.scrollHeight,
+                    savedPos.clientHeight,
+                ].join(':');
+                if (restoredSavedPositionSignatureRef.current === restoreSignature) {
+                    clearRestoreInProgress(currentSessionId);
+                    return;
+                }
+                restoredSavedPositionSignatureRef.current = restoreSignature;
                 await restoreSavedScrollPosition(savedPos);
                 clearRestoreInProgress(currentSessionId);
                 return;
@@ -612,7 +628,7 @@ export const ChatContainer: React.FC = () => {
 
         await resumeToBottomInstant();
         clearRestoreInProgress(currentSessionId);
-    }, [clearRestoreInProgress, currentSessionId, restoreSavedScrollPosition, resumeToBottomInstant, scrollToBottom, sessionIsWorking, sessionMemoryStateMap]);
+    }, [clearRestoreInProgress, currentSessionId, restoreSavedScrollPosition, resumeToBottomInstant, scrollToBottom, sessionIsWorking]);
 
     const resumeToLatestInstant = React.useCallback((options?: { force?: boolean }) => {
         void runLatestInstantResume(options);

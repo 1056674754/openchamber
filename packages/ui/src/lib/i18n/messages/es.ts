@@ -263,6 +263,7 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.session.menu.openInSidePanel": "Abrir en panel lateral",
   "sessions.sidebar.session.menu.betaBadge": "beta",
   "sessions.sidebar.session.menu.label": "Menú de sesión",
+  "sessions.sidebar.session.menu.delete": "Eliminar",
   "sessions.sidebar.session.untitled": "Sesión sin título",
   "sessions.sidebar.session.export.nothingToExport": "Nada que exportar",
   "sessions.sidebar.session.export.success": "Sesión exportada",
