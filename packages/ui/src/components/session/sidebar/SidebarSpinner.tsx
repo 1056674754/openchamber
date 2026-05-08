@@ -1,8 +1,8 @@
 import React from 'react';
 
-const DOT_SIZE = 3;
-const DOT_STEP = 4;
-const BOX_SIZE = 16;
+const DOT_SIZE = 2;
+const DOT_STEP = 3;
+const BOX_SIZE = 11;
 
 const CORNERS = new Set([0, 3, 12, 15]);
 const OUTER_RING = new Set([1, 2, 4, 7, 8, 11, 13, 14]);
@@ -25,7 +25,7 @@ interface SidebarSpinnerProps {
 export function SidebarSpinner({ state, 'aria-label': ariaLabel }: SidebarSpinnerProps) {
   if (state === 'hidden') return null;
 
-  const dotColor = state === 'streaming' ? 'var(--primary)' : state === 'subagent' ? 'var(--status-warning)' : 'var(--foreground)';
+  const dotColor = state === 'streaming' ? 'var(--status-info)' : state === 'subagent' ? 'var(--status-warning)' : 'var(--foreground)';
 
   return (
     <span

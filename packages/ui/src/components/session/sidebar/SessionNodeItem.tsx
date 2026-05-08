@@ -60,9 +60,75 @@ import { useI18n } from '@/lib/i18n';
 
 type Folder = { id: string; name: string; sessionIds: string[] };
 
+const GLOBAL_PINNED_CHILD_INDENT = 20;
+
 type SecondaryMeta = {
   projectLabel?: string | null;
   branchLabel?: string | null;
+};
+
+type SessionRowKind = 'pinned' | 'normal' | 'subtask';
+
+type LeadingStatusKind = 'none' | 'spinner' | 'unread' | 'spinner-unread';
+
+type LeadingStructureKind = 'none' | 'pin' | 'chevron' | 'pin-chevron';
+
+type LeadingSlotValue = LeadingStatusKind | LeadingStructureKind;
+
+type LeadingStatusInput = {
+  rowKind: SessionRowKind;
+  hasChildren: boolean;
+  hasSpinner: boolean;
+  hasUnread: boolean;
+};
+
+type LeadingState = {
+  slot1: LeadingSlotValue;
+  slot2: LeadingSlotValue;
+};
+
+const resolveSessionRowKind = (input: { isPinned: boolean; isSubtask: boolean }): SessionRowKind => {
+  if (input.isSubtask) return 'subtask';
+  if (input.isPinned) return 'pinned';
+  return 'normal';
+};
+
+const resolveStatusSlot = (input: { hasSpinner: boolean; hasUnread: boolean }): LeadingStatusKind => {
+  if (input.hasSpinner && input.hasUnread) return 'spinner-unread';
+  if (input.hasSpinner) return 'spinner';
+  if (input.hasUnread) return 'unread';
+  return 'none';
+};
+
+const resolveLeadingState = (input: LeadingStatusInput): LeadingState => {
+  const status = resolveStatusSlot(input);
+
+  if (input.rowKind === 'pinned') {
+    return {
+      slot1: status,
+      slot2: input.hasChildren ? 'pin-chevron' : 'pin',
+    };
+  }
+
+  if (input.hasChildren) {
+    return {
+      slot1: status,
+      slot2: 'chevron',
+    };
+  }
+
+  return {
+    slot1: input.hasUnread ? 'unread' : 'none',
+    slot2: input.hasSpinner ? 'spinner' : 'none',
+  };
+};
+
+const resolveGlobalPinnedLeadingState = (input: { hasChildren: boolean; hasSpinner: boolean; hasUnread: boolean }): LeadingState => {
+  const status = resolveStatusSlot({ hasSpinner: input.hasSpinner, hasUnread: input.hasUnread });
+  return {
+    slot1: input.hasChildren ? 'pin-chevron' : 'pin',
+    slot2: status,
+  };
 };
 
 type Props = {
@@ -298,7 +364,8 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
   const liveSession = useSession(session.id);
   const resolvedSession = liveSession ?? session;
   const isGlobalPinnedContext = renderContext === 'global-pinned';
-  const globalPinnedTitleOffsetStyle = isGlobalPinnedContext ? { paddingLeft: 1.5 } : undefined;
+  const isGlobalPinnedRootRow = isGlobalPinnedContext && depth === 0;
+  
 
   const sessionDirectory =
     resolveGlobalSessionDirectory(session)
@@ -597,19 +664,10 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
   const statusType = sessionStatus?.type ?? 'idle';
   const isStreaming = statusType === 'busy' || statusType === 'retry';
   const pendingPermissionCount = sessionPermissions.length;
-  const showUnreadStatus = !isStreaming && needsAttention && !isActive;
-
-  const pinMarker = isPinnedSession ? (
-    <RiPushpinLine
-      className={cn(
-        'h-3.5 w-3.5 flex-shrink-0',
-        isStreaming ? 'text-primary animate-busy-pulse' : showUnreadStatus ? 'text-[var(--status-info)]' : 'text-foreground',
-      )}
-      aria-label={isGloballyPinned ? t('sessions.sidebar.session.status.pinnedGlobal') : t('sessions.sidebar.session.status.pinned')}
-    />
-  ) : null;
+  const showUnreadStatus = needsAttention && !isActive;
 
   const spinnerState = (() => {
+    if (isStreaming && isSubtaskSession) return 'subagent' as const;
     if (isStreaming) return 'streaming' as const;
     if (hasRunningChildSession) return 'subagent' as const;
     return 'hidden' as const;
@@ -617,64 +675,120 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
 
   const shouldShowSpinner = spinnerState !== 'hidden';
 
-  const statusMarkerContent = !isPinnedSession && showUnreadStatus ? (
+  const hasChildrenChevron = hasChildren;
+
+  const renderUnreadDot = () => (
     <span
       className="h-1.5 w-1.5 rounded-full bg-[var(--status-info)]"
       aria-label={t('sessions.sidebar.session.status.unread')}
       title={t('sessions.sidebar.session.status.unread')}
     />
-  ) : null;
+  );
 
-  const leadingIndicators = (pinMarker || statusMarkerContent || shouldShowSpinner) ? (
-    <span
-      className={cn(
-        'pointer-events-none absolute inline-flex h-3.5 items-center justify-center gap-0.5',
-        isMinimalMode ? 'top-1/2 -translate-y-1/2' : 'top-[14.5px] -translate-y-1/2',
-        isGlobalPinnedContext && isPinnedSession ? 'left-[2.25px]' : null,
-        !isGlobalPinnedContext && (isPinnedSession || statusMarkerContent || shouldShowSpinner) ? 'left-[-9px]' : null,
-        !isGlobalPinnedContext && !isPinnedSession && !statusMarkerContent && !shouldShowSpinner ? 'left-[-5px]' : null,
-      )}
-    >
-      {pinMarker}
-      {statusMarkerContent}
-      {shouldShowSpinner && (
-        <SidebarSpinner
-          state={spinnerState}
-          aria-label={spinnerState === 'streaming'
-            ? t('sessions.sidebar.session.status.active')
-            : t('sessions.sidebar.session.status.active')}
-        />
-      )}
+  const renderSpinner = () => (
+    <SidebarSpinner state={spinnerState} aria-label={t('sessions.sidebar.session.status.active')} />
+  );
+
+  const renderAlternating = () => (
+    <span className="relative inline-flex h-4 w-4 items-center justify-center">
+      <span className="animate-slot-fade-in">{renderSpinner()}</span>
+      <span className="absolute animate-slot-fade-out">{renderUnreadDot()}</span>
     </span>
-  ) : null;
+  );
 
-  const subsessionChevron = hasChildren ? (
+  const rowKind = resolveSessionRowKind({ isPinned: isPinnedSession, isSubtask: isSubtaskSession });
+  const leadingState = isGlobalPinnedRootRow
+    ? resolveGlobalPinnedLeadingState({
+      hasChildren: hasChildrenChevron,
+      hasSpinner: shouldShowSpinner,
+      hasUnread: showUnreadStatus,
+    })
+    : resolveLeadingState({
+      rowKind,
+      hasChildren: hasChildrenChevron,
+      hasSpinner: shouldShowSpinner,
+      hasUnread: showUnreadStatus,
+    });
+
+  const renderChevron = (mode: 'normal' | 'overlay') => (
     <span
       role="button"
       tabIndex={0}
-      onClick={(event) => {
-        event.stopPropagation();
-        toggleParent(session.id);
-      }}
-      onKeyDown={(event) => {
-        if (event.key === 'Enter' || event.key === ' ') {
-          event.preventDefault();
-          event.stopPropagation();
-          toggleParent(session.id);
+      onClick={(e) => { e.stopPropagation(); toggleParent(session.id); }}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault(); e.stopPropagation(); toggleParent(session.id);
         }
       }}
       className={cn(
-        'absolute inline-flex h-3.5 w-3.5 items-center justify-center rounded-md text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50',
-        isMinimalMode ? 'top-1/2 -translate-y-1/2' : 'top-[14.5px] -translate-y-1/2',
-        !alwaysShowActions && shouldShowSpinner ? 'opacity-0 group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto' : '',
+        mode === 'overlay'
+          ? 'absolute inset-0 inline-flex h-4 w-3.5 items-center justify-center rounded-md text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 opacity-0 group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto'
+          : 'pointer-events-auto inline-flex h-4 w-3.5 flex-shrink-0 items-center justify-center rounded-md text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50',
       )}
-      style={{ left: isPinnedSession ? '-18px' : '-10px' }}
-      aria-label={isExpanded
-        ? t('sessions.sidebar.session.subsessions.collapse')
-        : t('sessions.sidebar.session.subsessions.expand')}
+      aria-label={isExpanded ? t('sessions.sidebar.session.subsessions.collapse') : t('sessions.sidebar.session.subsessions.expand')}
     >
       {isExpanded ? <RiArrowDownSLine className="h-3 w-3" /> : <RiArrowRightSLine className="h-3 w-3" />}
     </span>
+  );
+
+  const renderPin = () => (
+    <RiPushpinLine
+      className={cn('h-3.5 w-3.5 flex-shrink-0', isStreaming ? 'text-primary animate-busy-pulse' : showUnreadStatus ? 'text-[var(--status-info)]' : 'text-foreground')}
+      aria-label={isGloballyPinned ? t('sessions.sidebar.session.status.pinnedGlobal') : t('sessions.sidebar.session.status.pinned')}
+    />
+  );
+
+  const renderLeadingSlot = (slot: LeadingSlotValue) => {
+    if (slot === 'none') return null;
+    if (slot === 'spinner') return renderSpinner();
+    if (slot === 'unread') return renderUnreadDot();
+    if (slot === 'spinner-unread') return renderAlternating();
+    if (slot === 'pin') return renderPin();
+    if (slot === 'chevron') return renderChevron('normal');
+    return (
+      <span className="relative inline-flex h-4 w-3.5 flex-shrink-0 items-center justify-center">
+        {renderPin()}
+        {renderChevron('overlay')}
+      </span>
+    );
+  };
+
+  const slot1Content = renderLeadingSlot(leadingState.slot1);
+  const slot2Content = renderLeadingSlot(leadingState.slot2);
+
+  const projectLeadingStatusSlots = slot1Content || slot2Content ? (
+    <div className="pointer-events-none absolute -left-7 top-1/2 z-10 flex -translate-y-1/2 items-center gap-0.5">
+      <span className="inline-flex h-4 w-4 flex-shrink-0 items-center justify-center">
+        {slot1Content}
+      </span>
+      <span className="inline-flex h-4 w-3.5 flex-shrink-0 items-center justify-center">
+        {slot2Content}
+      </span>
+    </div>
+  ) : null;
+
+  const globalPinnedChildLeadingSlots = isGlobalPinnedContext && !isGlobalPinnedRootRow && (slot1Content || slot2Content) ? (
+    <div className="pointer-events-none absolute left-0 top-1/2 z-10 flex -translate-y-1/2 items-center gap-0.5">
+      <span className="inline-flex h-4 w-4 flex-shrink-0 items-center justify-center">
+        {slot1Content}
+      </span>
+      <span className="inline-flex h-4 w-3.5 flex-shrink-0 items-center justify-center">
+        {slot2Content}
+      </span>
+    </div>
+  ) : null;
+
+  const globalPinnedLeadingSlots = isGlobalPinnedContext && isGlobalPinnedRootRow ? (
+    <div className="pointer-events-none flex flex-shrink-0 items-center gap-1.5">
+      <span className="inline-flex h-3.5 w-3.5 flex-shrink-0 items-center justify-center">
+        {slot1Content}
+      </span>
+      {slot2Content ? (
+        <span className="inline-flex h-4 w-4 flex-shrink-0 items-center justify-center">
+          {slot2Content}
+        </span>
+      ) : null}
+    </div>
   ) : null;
 
   const streamingIndicator = isZombie
@@ -854,19 +968,19 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
           data-session-archived={archivedBucket ? '1' : '0'}
           className={cn(
             'group relative my-0.5 flex items-center rounded-sm py-1',
-            isGlobalPinnedContext ? 'px-0.5 pl-5' : 'px-1.5',
+            isGlobalPinnedRootRow ? 'px-0.5' : 'px-1.5',
+            isGlobalPinnedRootRow && 'gap-1.5',
             isMissingDirectory ? 'opacity-75' : '',
             isRowSelected && 'bg-primary/15',
           )}
-          style={depth > 0 ? { paddingLeft: `${depth * 16 + 4}px` } : undefined}
+          style={depth > 0 ? { paddingLeft: `${isGlobalPinnedContext ? depth * 16 + GLOBAL_PINNED_CHILD_INDENT : depth * 16 + 4}px` } : undefined}
           onContextMenu={!mobileVariant ? (e) => {
             e.preventDefault();
             setMenuPosition({ x: e.clientX, y: e.clientY });
             setOpenSidebarMenuKey(menuInstanceKey);
           } : undefined}
         >
-          {leadingIndicators}
-          {subsessionChevron}
+          {isGlobalPinnedRootRow ? globalPinnedLeadingSlots : globalPinnedChildLeadingSlots ?? projectLeadingStatusSlots}
           <div className="flex min-w-0 flex-1 items-center">
             {isMinimalMode ? (
               <Tooltip>
@@ -888,11 +1002,10 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
                       isTouchPressed && 'bg-interactive-hover/70',
                       alwaysShowActions ? 'pr-7' : null,
                     )}
-                  >
-                    <div className={cn('flex w-full items-center min-w-0 flex-1 overflow-hidden', isMinimalMode ? 'gap-1' : 'gap-1')}>
+                    >
+                    <div className={cn('flex w-full items-center min-w-0 flex-1 overflow-hidden', isGlobalPinnedContext ? 'gap-1.5' : 'gap-0.5')}>
                       <div
                         className={cn('block min-w-0 flex-1 truncate typography-ui-label font-normal', isActive ? 'text-primary' : 'text-foreground')}
-                        style={globalPinnedTitleOffsetStyle}
                       >
                         {renderHighlightedText(sessionTitle, normalizedSessionSearchQuery)}
                       </div>
@@ -957,10 +1070,9 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
                   alwaysShowActions ? 'pr-7' : null,
                 )}
               >
-                <div className={cn('flex w-full items-center min-w-0 flex-1 overflow-hidden', isMinimalMode ? 'gap-1' : 'gap-1')}>
+                  <div className={cn('flex w-full items-center min-w-0 flex-1 overflow-hidden', isGlobalPinnedContext ? 'gap-1.5' : 'gap-0.5')}>
                   <div
                     className={cn('block min-w-0 flex-1 truncate typography-ui-label font-normal', isActive ? 'text-primary' : 'text-foreground')}
-                    style={globalPinnedTitleOffsetStyle}
                   >
                     {renderHighlightedText(sessionTitle, normalizedSessionSearchQuery)}
                   </div>
