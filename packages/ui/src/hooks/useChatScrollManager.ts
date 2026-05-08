@@ -73,6 +73,11 @@ const PROGRAMMATIC_SCROLL_SUPPRESS_MS = 200;
 // Threshold for re-pinning: 10% of container height (matches bottom spacer)
 const PIN_THRESHOLD_RATIO = 0.10;
 const VIEWPORT_ANCHOR_MIN_UPDATE_MS = 150;
+// [sscity-mod] Cooldown after user manually scrolls up — during this window, suppress
+// auto re-pin and pinned-to-bottom enforcement so streaming content can't snap the
+// user back. Without this, content reshaping during streaming repeatedly fights
+// the user's scroll-up gesture.
+const USER_SCROLL_INTENT_COOLDOWN_MS = 1500;
 
 export const useChatScrollManager = ({
     currentSessionId,
@@ -127,6 +132,12 @@ export const useChatScrollManager = ({
     const pendingViewportAnchorRef = React.useRef<{ sessionId: string; anchor: number; scrollPosition?: { scrollTop: number; scrollHeight: number; clientHeight: number } } | null>(null);
     const lastViewportAnchorRef = React.useRef<{ sessionId: string; anchor: number; scrollTop: number } | null>(null);
     const lastViewportAnchorWriteAtRef = React.useRef<number>(0);
+    // [sscity-mod] Timestamp of user's last upward scroll intent. Used to suppress
+    // auto re-pin and pinned-to-bottom snap during the cooldown window.
+    const userScrollIntentAtRef = React.useRef<number>(0);
+    const isInUserScrollCooldown = React.useCallback(() => {
+        return Date.now() - userScrollIntentAtRef.current < USER_SCROLL_INTENT_COOLDOWN_MS;
+    }, []);
     // Guard: suppress scroll-position saving during session transition window.
     // Without this, scroll events from content reshaping after session switch
     // overwrite the saved position before restoreSavedScrollPosition reads it.
@@ -255,6 +266,13 @@ export const useChatScrollManager = ({
             return;
         }
 
+        // [sscity-mod] During user-scroll cooldown, never force scroll to bottom —
+        // even if pinned. Streaming chunks fire ~60/sec; without this guard each
+        // chunk re-asserts the pinned position, fighting the user's scroll-up.
+        if (isInUserScrollCooldown()) {
+            return;
+        }
+
         const distanceFromBottom = getDistanceFromBottom();
         if (sessionIsWorking) {
             if (distanceFromBottom <= getAutoFollowThreshold()) {
@@ -275,7 +293,7 @@ export const useChatScrollManager = ({
         if (distanceFromBottom > getAutoFollowThreshold()) {
             scrollPinnedToBottom(distanceFromBottom);
         }
-    }, [getAutoFollowThreshold, getDistanceFromBottom, scrollPinnedToBottom, sessionIsWorking, setFollowMode, updateScrollButtonVisibility]);
+    }, [getAutoFollowThreshold, getDistanceFromBottom, isInUserScrollCooldown, scrollPinnedToBottom, sessionIsWorking, setFollowMode, updateScrollButtonVisibility]);
 
     const schedulePinnedStateAndIndicators = React.useCallback(() => {
         if (typeof window === 'undefined') {
@@ -401,10 +419,18 @@ export const useChatScrollManager = ({
                 setFollowMode('none');
                 updatePinnedState(false);
             }
+            // [sscity-mod] Mark user scroll intent on any trusted upward scroll —
+            // even if already unpinned — so streaming content reshapes can't re-pin
+            // immediately after the user scrolls up.
+            if (scrollingUp) {
+                userScrollIntentAtRef.current = Date.now();
+            }
         }
 
         // Re-pin at bottom should always work (even momentum scroll)
-        if (!isPinnedRef.current) {
+        // [sscity-mod] EXCEPT during user-scroll cooldown — prevents streaming content
+        // from snapping the user back to bottom right after they scroll up.
+        if (!isPinnedRef.current && !isInUserScrollCooldown()) {
             const distanceFromBottom = getDistanceFromBottom();
             if (distanceFromBottom <= getPinThreshold()) {
                 setFollowMode(sessionIsWorking ? 'smooth' : 'none');
@@ -452,6 +478,11 @@ export const useChatScrollManager = ({
             scrollEngine.cancelFollow();
             setFollowMode('none');
             updatePinnedState(false);
+            // [sscity-mod] Record user scroll intent so streaming can't re-pin.
+            userScrollIntentAtRef.current = Date.now();
+        } else if (delta < 0) {
+            // [sscity-mod] Wheel up while already unpinned still counts as user intent.
+            userScrollIntentAtRef.current = Date.now();
         }
     }, [scrollEngine, setFollowMode, updatePinnedState]);
 
