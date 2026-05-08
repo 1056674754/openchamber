@@ -1,5 +1,5 @@
 import React from 'react';
-import { RiFolderLine, RiArchiveLine } from '@remixicon/react';
+import { RiFolderLine, RiArchiveLine, RiChatNewLine } from '@remixicon/react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -61,16 +61,16 @@ export function TempSessionsSection(props: Props): React.ReactNode {
   }
 
   return (
-    <div className="px-2.5 py-1">
+    <div className="py-1 pl-2.5 pr-2">
       <button
         type="button"
         onClick={onToggleCollapse}
-        className="flex w-full items-center justify-between rounded-md px-0.5 py-0.5 transition-colors hover:bg-interactive-hover"
+        className="relative flex w-full items-center rounded-md px-0.5 py-0.5 pr-8 transition-colors hover:bg-interactive-hover"
       >
         <div className="flex items-center gap-1.5">
           <span className="text-[14px] font-normal text-foreground/95">{t('sessions.sidebar.tempSession.title')}</span>
         </div>
-        <div className="flex items-center gap-1">
+        <div className="absolute right-0.5 top-1/2 z-10 flex -translate-y-1/2 items-center">
           <button
             type="button"
             onClick={(e) => {
@@ -80,7 +80,7 @@ export function TempSessionsSection(props: Props): React.ReactNode {
             className="inline-flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:text-foreground"
             aria-label={t('sessions.sidebar.tempSession.createNew')}
           >
-            <span className="text-xs">+</span>
+            <RiChatNewLine className="h-3.5 w-3.5" />
           </button>
         </div>
       </button>
@@ -107,7 +107,7 @@ export function TempSessionsSection(props: Props): React.ReactNode {
                   setContextMenu({ path: session.path, x: event.clientX, y: event.clientY });
                 }}
                 className={cn(
-                  'group relative flex items-center justify-between rounded-sm px-0.5 py-1 transition-colors',
+                  'group relative -mx-1 flex items-center justify-between rounded-sm px-1.5 py-1 transition-colors',
                   isActive
                     ? 'bg-interactive-hover text-foreground'
                     : 'text-foreground hover:bg-interactive-hover',
