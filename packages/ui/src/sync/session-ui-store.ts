@@ -251,6 +251,7 @@ export type SessionUIState = {
     additionalParts?: Array<{ text: string; attachments?: AttachedFile[]; synthetic?: boolean }>,
     variant?: string,
     inputMode?: "normal" | "shell",
+    targetSessionId?: string,
   ) => Promise<void>
 
   createSession: (title?: string, directoryOverride?: string | null, parentID?: string | null) => Promise<Session | null>
@@ -749,9 +750,10 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     additionalParts?: Array<{ text: string; attachments?: AttachedFile[]; synthetic?: boolean }>,
     variant?: string,
     inputMode?: "normal" | "shell",
+    targetSessionId?: string,
   ) => {
     // Clear non-Git changed-files bar on new user message for current session
-    const sid = get().currentSessionId;
+    const sid = targetSessionId ?? get().currentSessionId;
     if (sid) {
       const map = new Map(get().pendingChangesBarDismissed);
       map.delete(sid);
@@ -958,7 +960,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     }
 
     // ---- Existing session ----
-    const currentSessionId = get().currentSessionId
+    const currentSessionId = targetSessionId ?? get().currentSessionId
     const sessionAgentSelection = currentSessionId
       ? useSelectionStore.getState().getSessionAgentSelection(currentSessionId)
       : null
