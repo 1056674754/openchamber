@@ -1,5 +1,11 @@
 import React from 'react';
 import { RiFolderLine, RiArchiveLine } from '@remixicon/react';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 
@@ -37,6 +43,7 @@ export function TempSessionsSection(props: Props): React.ReactNode {
   } = props;
 
   const [confirmingArchive, setConfirmingArchive] = React.useState<string | null>(null);
+  const [contextMenu, setContextMenu] = React.useState<{ path: string; x: number; y: number } | null>(null);
 
   if (tempSessions.length === 0 && !isSubmitting) {
     return (
@@ -58,10 +65,10 @@ export function TempSessionsSection(props: Props): React.ReactNode {
       <button
         type="button"
         onClick={onToggleCollapse}
-        className="flex w-full items-center justify-between rounded-md px-2 py-1 transition-colors hover:bg-interactive-hover"
+        className="flex w-full items-center justify-between rounded-md px-0.5 py-0.5 transition-colors hover:bg-interactive-hover"
       >
         <div className="flex items-center gap-1.5">
-          <span className="text-[14px] font-normal">{t('sessions.sidebar.tempSession.title')}</span>
+          <span className="text-[14px] font-normal text-foreground/95">{t('sessions.sidebar.tempSession.title')}</span>
         </div>
         <div className="flex items-center gap-1">
           <button
@@ -95,6 +102,10 @@ export function TempSessionsSection(props: Props): React.ReactNode {
             return (
               <div
                 key={session.path}
+                onContextMenu={(event) => {
+                  event.preventDefault();
+                  setContextMenu({ path: session.path, x: event.clientX, y: event.clientY });
+                }}
                 className={cn(
                   'group relative flex items-center justify-between rounded-sm px-0.5 py-1 transition-colors',
                   isActive
@@ -143,6 +154,28 @@ export function TempSessionsSection(props: Props): React.ReactNode {
           })}
         </div>
       )}
+      <DropdownMenu open={Boolean(contextMenu)} onOpenChange={(open) => { if (!open) setContextMenu(null); }}>
+        <DropdownMenuTrigger asChild>
+          <div
+            className="fixed h-0 w-0 overflow-hidden"
+            style={contextMenu ? { left: contextMenu.x, top: contextMenu.y } : undefined}
+            aria-hidden="true"
+          />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start" className="min-w-[160px]">
+          <DropdownMenuItem
+            className="[&>svg]:mr-1 text-destructive focus:text-destructive"
+            onClick={() => {
+              if (!contextMenu) return;
+              onArchiveTempSession(contextMenu.path);
+              setContextMenu(null);
+            }}
+          >
+            <RiArchiveLine className="mr-1 h-4 w-4" />
+            {t('sessions.sidebar.tempSession.archive')}
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
     </div>
   );
 }

@@ -113,8 +113,8 @@ const MiniChatBootstrap: React.FC<{ config: MiniChatConfig }> = ({ config }) => 
     if (config.mode !== 'session' || !config.sessionId) return;
     if (currentSessionId === config.sessionId) return;
     const session = sessions.find((entry) => entry.id === config.sessionId);
-    if (!session) return;
-    const directory = (session as { directory?: string | null }).directory ?? config.directory;
+    const directory = (session as { directory?: string | null } | undefined)?.directory ?? config.directory;
+    if (!directory) return;
     setCurrentSession(config.sessionId, directory);
   }, [config, currentSessionId, sessions, setCurrentSession]);
 
