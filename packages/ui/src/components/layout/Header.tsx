@@ -16,17 +16,14 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { SortableTabsStrip, type SortableTabsStripItem } from '@/components/ui/sortable-tabs-strip';
 
-import { RiArrowLeftSLine, RiChat4Line, RiChatNewLine, RiCheckLine, RiCloseLine, RiCommandLine, RiDonutChartLine, RiFileTextLine, RiFolder6Line, RiGitBranchLine, RiGithubFill, RiLayoutLeftLine, RiLayoutRightLine, RiPlayListAddLine, RiRefreshLine, RiServerLine, RiStackLine, RiTerminalBoxLine, RiTimerLine, RiAlertLine, type RemixiconComponentType } from '@remixicon/react';
+import { RiArrowLeftSLine, RiChat4Line, RiChatNewLine, RiCheckLine, RiCloseLine, RiCommandLine, RiFileTextLine, RiFolder6Line, RiGitBranchLine, RiGithubFill, RiLayoutLeftLine, RiLayoutRightLine, RiPictureInPicture2Line, RiPlayListAddLine, RiRefreshLine, RiServerLine, RiStackLine, RiTerminalBoxLine, RiTimerLine, RiAlertLine, RiWindowLine, type RemixiconComponentType } from '@remixicon/react';
 import { DiffIcon } from '@/components/icons/DiffIcon';
 import { useUIStore, type MainTab } from '@/stores/useUIStore';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
-import { useActiveServerId } from '@/hooks/useActiveServerId';
-import { serverRegistry, DEFAULT_SERVER_ID } from '@/lib/opencode/server-registry';
 import { useSessionWorktreeStore } from '@/sync/session-worktree-store';
 import { formatSessionWorktreeBadge } from '@/sync/session-worktree-contract';
-import { useSession, useSessionMessagesResolved } from '@/sync/sync-context';
-import { useAllServersLiveSessions } from '@/sync/multi-server-hooks';
+import { useAllLiveSessions, useSession, useSessionMessagesResolved } from '@/sync/sync-context';
 import { getAllSyncSessions } from '@/sync/sync-refs';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useQuotaAutoRefresh, useQuotaStore } from '@/stores/useQuotaStore';
@@ -38,7 +35,6 @@ import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { ContextUsageDisplay } from '@/components/ui/ContextUsageDisplay';
 import { useDeviceInfo, useTabletStandalonePwaRuntime } from '@/lib/device';
-import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { cn, hasModifier } from '@/lib/utils';
 import { McpDropdownContent } from '@/components/mcp/McpDropdown';
 import { McpIcon } from '@/components/icons/McpIcon';
@@ -62,14 +58,14 @@ import {
 } from '@/components/ui/collapsible';
 import { RiArrowDownSLine, RiArrowRightSLine } from '@remixicon/react';
 import type { UsageWindow } from '@/types';
-import type { GitHubAuthStatus, ProjectEntry } from '@/lib/api/types';
+import type { GitHubAuthStatus } from '@/lib/api/types';
 import type { SessionContextUsage } from '@/stores/types/sessionTypes';
 import { DesktopHostSwitcherDialog } from '@/components/desktop/DesktopHostSwitcher';
 import { OpenInAppButton } from '@/components/desktop/OpenInAppButton';
 import { forceKillTerminal } from '@/lib/terminalApi';
 import { useTerminalStore } from '@/stores/useTerminalStore';
 import { ProjectActionsButton } from '@/components/layout/ProjectActionsButton';
-import { isDesktopShell, isVSCodeRuntime, startDesktopWindowDrag } from '@/lib/desktop';
+import { canUseElectronDesktopIPC, invokeDesktop, isDesktopShell, isVSCodeRuntime, startDesktopWindowDrag } from '@/lib/desktop';
 import { desktopHostsGet, locationMatchesHost, redactSensitiveUrl } from '@/lib/desktopHosts';
 import { resolveSessionDiffStats } from '@/components/session/sidebar/utils';
 import { useI18n } from '@/lib/i18n';
@@ -611,43 +607,6 @@ const normalize = (value: string): string => {
   return replaced === '/' ? '/' : replaced.replace(/\/+$/, '');
 };
 
-const getProjectLabel = (project: Pick<ProjectEntry, 'path' | 'label'> | null | undefined): string | null => {
-  if (!project) return null;
-  const trimmedLabel = project.label?.trim();
-  if (trimmedLabel) {
-    return trimmedLabel;
-  }
-  const pathSegments = project.path.split(/[\\/]/).filter(Boolean);
-  return pathSegments[pathSegments.length - 1] ?? null;
-};
-
-const directoryBelongsToProject = (directory: string, projectPath: string): boolean => {
-  const normalizedDirectory = normalize(directory);
-  const normalizedProjectPath = normalize(projectPath);
-  if (!normalizedDirectory || !normalizedProjectPath) return false;
-  return normalizedDirectory === normalizedProjectPath || normalizedDirectory.startsWith(`${normalizedProjectPath}/`);
-};
-
-const resolveProjectForDirectory = (
-  projects: ProjectEntry[],
-  directory: string,
-  serverId: string,
-): ProjectEntry | null => {
-  const normalizedDirectory = normalize(directory);
-  if (!normalizedDirectory) return null;
-
-  const candidates = projects.filter((project) => directoryBelongsToProject(normalizedDirectory, project.path));
-  if (candidates.length === 0) return null;
-
-  const serverScoped = candidates.filter((project) => (project.serverId || DEFAULT_SERVER_ID) === serverId);
-  const scopedCandidates = serverScoped.length > 0 ? serverScoped : candidates;
-
-  return scopedCandidates.reduce<ProjectEntry | null>((best, project) => {
-    if (!best) return project;
-    return normalize(project.path).length > normalize(best.path).length ? project : best;
-  }, null);
-};
-
 const getActiveContextMode = (panelState: {
   isOpen: boolean;
   activeTabId: string | null;
@@ -722,8 +681,7 @@ export const Header: React.FC<HeaderProps> = ({
   const currentSessionMessagesResolved = useSessionMessagesResolved(currentSessionId ?? '');
   const currentSyncedSession = useSession(currentSessionId ?? null);
   const globalActiveSessions = useGlobalSessionsStore((state) => state.activeSessions);
-  const liveSessions = useAllServersLiveSessions();
-  const projects = useProjectsStore((state) => state.projects);
+  const liveSessions = useAllLiveSessions();
   const activeProject = useProjectsStore((state) => {
     if (!state.activeProjectId) {
       return null;
@@ -731,7 +689,17 @@ export const Header: React.FC<HeaderProps> = ({
     return state.projects.find((project) => project.id === state.activeProjectId) ?? null;
   });
   const activeProjectLabel = React.useMemo(() => {
-    return getProjectLabel(activeProject);
+    if (!activeProject) {
+      return null;
+    }
+
+    const trimmedLabel = activeProject.label?.trim();
+    if (trimmedLabel) {
+      return trimmedLabel;
+    }
+
+    const pathSegments = activeProject.path.split(/[\\/]/).filter(Boolean);
+    return pathSegments[pathSegments.length - 1] ?? null;
   }, [activeProject]);
   const quotaResults = useQuotaStore((state) => state.results);
   const fetchAllQuotas = useQuotaStore((state) => state.fetchAllQuotas);
@@ -743,7 +711,6 @@ export const Header: React.FC<HeaderProps> = ({
   const setQuotaDisplayMode = useQuotaStore((state) => state.setDisplayMode);
 
   const { isMobile } = useDeviceInfo();
-  const effectiveDirectory = useEffectiveDirectory() ?? '';
   const githubAuthStatus = useGitHubAuthStore((state) => state.status);
   const setGitHubAuthStatus = useGitHubAuthStore((state) => state.setStatus);
 
@@ -755,6 +722,7 @@ export const Header: React.FC<HeaderProps> = ({
     }
     return isDesktopShell();
   });
+  const hasElectronDesktopIPC = React.useMemo(() => canUseElectronDesktopIPC(), []);
   const isTabletStandalonePwa = useTabletStandalonePwaRuntime();
   const [isDesktopWindowFullscreen, setIsDesktopWindowFullscreen] = React.useState(false);
 
@@ -859,13 +827,6 @@ export const Header: React.FC<HeaderProps> = ({
     ? Math.min(999, (stableDesktopContextUsage.totalTokens / stableDesktopContextUsage.contextLimit) * 100)
     : 0;
 
-  const activeServerId = useActiveServerId();
-
-  const activeServerLabel = React.useMemo(() => {
-    if (activeServerId === DEFAULT_SERVER_ID) return null;
-    return serverRegistry.get(activeServerId)?.config.label || null;
-  }, [activeServerId]);
-
   const refreshCurrentInstanceLabel = React.useCallback(async () => {
     if (typeof window === 'undefined' || !isDesktopApp) {
       return;
@@ -897,12 +858,8 @@ export const Header: React.FC<HeaderProps> = ({
   }, [isDesktopApp]);
 
   useEffect(() => {
-    if (activeServerLabel) {
-      setCurrentInstanceLabel(activeServerLabel);
-      return;
-    }
     void refreshCurrentInstanceLabel();
-  }, [activeServerLabel, refreshCurrentInstanceLabel]);
+  }, [refreshCurrentInstanceLabel]);
   useQuotaAutoRefresh();
   const selectedModels = useQuotaStore((state) => state.selectedModels);
   const expandedFamilies = useQuotaStore((state) => state.expandedFamilies);
@@ -1138,8 +1095,6 @@ export const Header: React.FC<HeaderProps> = ({
     return normalize(raw || '');
   }, [currentSession?.directory]);
 
-  const isTempSessionDirectory = sessionDirectory.includes('/temp-sessions/');
-
   const draftDirectory = useSessionUIStore((state) => {
     if (!state.newSessionDraft?.open) {
       return '';
@@ -1150,17 +1105,6 @@ export const Header: React.FC<HeaderProps> = ({
   const openDirectory = React.useMemo(() => {
     return worktreeDirectory || sessionDirectory || draftDirectory;
   }, [draftDirectory, sessionDirectory, worktreeDirectory]);
-
-  const headerProject = React.useMemo(() => {
-    if (!openDirectory) {
-      return activeProject;
-    }
-    return resolveProjectForDirectory(projects, openDirectory, activeServerId) ?? activeProject;
-  }, [activeProject, activeServerId, openDirectory, projects]);
-
-  const headerProjectLabel = React.useMemo(() => {
-    return getProjectLabel(headerProject);
-  }, [headerProject]);
 
   const catalogWorktreeBranch = useSessionUIStore((state) => {
     const candidateDirectory = normalize(worktreeDirectory || sessionDirectory || '');
@@ -1184,11 +1128,11 @@ export const Header: React.FC<HeaderProps> = ({
 
   const currentSessionTitle = React.useMemo(() => {
     if (!currentSessionId) {
-      return headerProjectLabel ?? activeProjectLabel ?? 'OpenChamber';
+      return activeProjectLabel ?? 'OpenChamber';
     }
     const trimmedTitle = currentSession?.title?.trim();
     return trimmedTitle && trimmedTitle.length > 0 ? trimmedTitle : 'Untitled Session';
-  }, [activeProjectLabel, currentSession?.title, currentSessionId, headerProjectLabel]);
+  }, [activeProjectLabel, currentSession?.title, currentSessionId]);
 
   const currentSessionDiffStats = React.useMemo(() => {
     return resolveSessionDiffStats(currentSession?.summary as Parameters<typeof resolveSessionDiffStats>[0]);
@@ -1203,16 +1147,15 @@ export const Header: React.FC<HeaderProps> = ({
   const hasNonZeroSessionChanges = currentSessionChanges.additions > 0 || currentSessionChanges.deletions > 0;
 
   const actionDirectory = React.useMemo(() => {
-    return normalize(openDirectory || headerProject?.path || activeProject?.path || '');
-  }, [activeProject?.path, headerProject?.path, openDirectory]);
+    return normalize(openDirectory || activeProject?.path || '');
+  }, [activeProject?.path, openDirectory]);
 
   const activeProjectRef = React.useMemo(() => {
-    const project = headerProject ?? activeProject;
-    if (!project) {
+    if (!activeProject) {
       return null;
     }
-    return { id: project.id, path: project.path };
-  }, [activeProject, headerProject]);
+    return { id: activeProject.id, path: activeProject.path };
+  }, [activeProject]);
 
   const lastProjectActionsContextRef = React.useRef<{
     projectRef: { id: string; path: string };
@@ -1337,6 +1280,27 @@ export const Header: React.FC<HeaderProps> = ({
     openNewSessionDraft();
   }, [openNewSessionDraft, setActiveMainTab, setSessionSwitcherOpen]);
 
+  const handleOpenDraftMiniChat = React.useCallback(() => {
+    void invokeDesktop('desktop_open_draft_mini_chat_window', {
+      directory: normalize(openDirectory || activeProject?.path || ''),
+      projectId: activeProject?.id ?? null,
+    }).catch((error) => {
+      console.warn('[header] failed to open draft mini chat window', error);
+    });
+  }, [activeProject?.id, activeProject?.path, openDirectory]);
+
+  const handleOpenCurrentSessionMiniChat = React.useCallback(() => {
+    if (!currentSessionId) {
+      return;
+    }
+    void invokeDesktop('desktop_open_session_mini_chat_window', {
+      sessionId: currentSessionId,
+      directory: normalize(openDirectory || activeProject?.path || ''),
+    }).catch((error) => {
+      console.warn('[header] failed to open session mini chat window', error);
+    });
+  }, [activeProject?.path, currentSessionId, openDirectory]);
+
   const handleOpenContextPanel = React.useCallback(() => {
     const directory = normalize(openDirectory || '');
     if (!directory) {
@@ -1376,21 +1340,6 @@ export const Header: React.FC<HeaderProps> = ({
     openContextPlan(directory);
   }, [closeContextPanel, contextPanelByDirectory, openContextPlan, openDirectory]);
 
-  const handleToggleContextPanel = React.useCallback(() => {
-    const directory = normalize(openDirectory || '');
-    if (!directory) {
-      return;
-    }
-
-    const panelState = contextPanelByDirectory[directory];
-    if (panelState?.isOpen && panelState.tabs.length > 0) {
-      closeContextPanel(directory);
-      return;
-    }
-
-    openContextOverview(directory);
-  }, [closeContextPanel, contextPanelByDirectory, openContextOverview, openDirectory]);
-
   const isContextPlanActive = React.useMemo(() => {
     const directory = normalize(openDirectory || '');
     if (!directory) {
@@ -1398,15 +1347,6 @@ export const Header: React.FC<HeaderProps> = ({
     }
     const panelState = contextPanelByDirectory[directory];
     return getActiveContextMode(panelState) === 'plan';
-  }, [contextPanelByDirectory, openDirectory]);
-
-  const isContextPanelOpen = React.useMemo(() => {
-    const directory = normalize(openDirectory || '');
-    if (!directory) {
-      return false;
-    }
-    const panelState = contextPanelByDirectory[directory];
-    return panelState?.isOpen === true && panelState.tabs.length > 0;
   }, [contextPanelByDirectory, openDirectory]);
 
   const desktopHeaderIconButtonClass = DESKTOP_HEADER_ICON_BUTTON_CLASS;
@@ -1812,13 +1752,6 @@ export const Header: React.FC<HeaderProps> = ({
 
   const desktopSidebarActions = (
     <>
-      <HeaderIconActionButton
-        title={t('header.actions.toggleContextPanelAria')}
-        ariaLabel={t('header.actions.toggleContextPanelAria')}
-        onClick={handleToggleContextPanel}
-        Icon={RiDonutChartLine}
-        className={cn(desktopHeaderIconButtonClass, isContextPanelOpen && 'bg-[var(--interactive-hover)]')}
-      />
       {showPlanTab && (
         <Tooltip>
           <TooltipTrigger asChild>
@@ -1868,7 +1801,7 @@ export const Header: React.FC<HeaderProps> = ({
       <HeaderIconActionButton
         title={t('header.actions.terminalPanelWithShortcut', { shortcut: shortcutLabel('toggle_terminal') })}
         ariaLabel={t('header.actions.toggleTerminalPanelAria')}
-        onClick={() => openContextTerminal(effectiveDirectory)}
+        onClick={() => openContextTerminal(actionDirectory)}
         Icon={RiTerminalBoxLine}
       />
       <HeaderIconActionButton
@@ -1930,6 +1863,23 @@ export const Header: React.FC<HeaderProps> = ({
             </TooltipContent>
           </Tooltip>
         ) : null}
+        {hasElectronDesktopIPC && !isLeftSidebarOpen ? (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                aria-label={t('header.actions.newMiniChatAria')}
+                onClick={handleOpenDraftMiniChat}
+                className={cn(desktopHeaderIconButtonClass, 'mr-6 shrink-0')}
+              >
+                <RiWindowLine className="h-[18px] w-[18px]" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p>{t('header.actions.newMiniChat')}</p>
+            </TooltipContent>
+          </Tooltip>
+        ) : null}
         {projectActionsContext && (
           <ProjectActionsButton
             projectRef={projectActionsContext.projectRef}
@@ -1942,9 +1892,9 @@ export const Header: React.FC<HeaderProps> = ({
             <div className="truncate pl-1 typography-ui-label text-[14px] font-normal leading-tight text-foreground">
               {currentSessionTitle}
             </div>
-            {((!isTempSessionDirectory && headerProjectLabel) || currentBranchLabel || hasNonZeroSessionChanges) ? (
+            {(activeProjectLabel || currentBranchLabel || hasNonZeroSessionChanges) ? (
               <div className="flex min-w-0 items-center gap-1.5 truncate pl-1 typography-micro text-[10.5px] font-normal leading-tight text-muted-foreground/75">
-                {(!isTempSessionDirectory && headerProjectLabel) ? <span className="truncate">{headerProjectLabel}</span> : null}
+                {activeProjectLabel ? <span className="truncate">{activeProjectLabel}</span> : null}
                 {currentBranchLabel ? (
                   <span className="inline-flex min-w-0 items-center gap-0.5">
                     <RiGitBranchLine className="h-3 w-3 flex-shrink-0 text-muted-foreground/70" />
@@ -1981,6 +1931,14 @@ export const Header: React.FC<HeaderProps> = ({
         <div className="flex-1" />
 
         <div className="flex shrink-0 items-center gap-1">
+          <HeaderIconActionButton
+            visible={hasElectronDesktopIPC && !isNewSessionDraftOpen && Boolean(currentSessionId)}
+            title={t('header.actions.openSessionMiniChat')}
+            ariaLabel={t('header.actions.openSessionMiniChatAria')}
+            onClick={handleOpenCurrentSessionMiniChat}
+            className={`${desktopHeaderIconButtonClass} mr-1`}
+            Icon={RiPictureInPicture2Line}
+          />
           {showDesktopHeaderContextUsage && stableDesktopContextUsage ? (
             <ContextUsageDisplay
               totalTokens={stableDesktopContextUsage.totalTokens}

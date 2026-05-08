@@ -650,6 +650,8 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   const [childrenByDir, setChildrenByDir] = React.useState<Record<string, FileNode[]>>({});
   const loadedDirsRef = React.useRef<Set<string>>(new Set());
   const inFlightDirsRef = React.useRef<Set<string>>(new Set());
+  const activeDirectoryLoadIdsRef = React.useRef<Map<string, number>>(new Map());
+  const nextDirectoryLoadIdRef = React.useRef(0);
 
   const [searchResults, setSearchResults] = React.useState<FileNode[]>([]);
   const [searching, setSearching] = React.useState(false);
@@ -902,6 +904,12 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
 
     inFlightDirsRef.current = new Set(inFlightDirsRef.current);
     inFlightDirsRef.current.add(normalizedDir);
+    const requestId = nextDirectoryLoadIdRef.current + 1;
+    nextDirectoryLoadIdRef.current = requestId;
+    activeDirectoryLoadIdsRef.current = new Map(activeDirectoryLoadIdsRef.current);
+    activeDirectoryLoadIdsRef.current.set(normalizedDir, requestId);
+
+    const isCurrentRequest = () => activeDirectoryLoadIdsRef.current.get(normalizedDir) === requestId;
 
     const respectGitignore = !showGitignored;
     let listPromise: Promise<Array<{ name: string; path: string; isDirectory: boolean }>>;
@@ -933,6 +941,10 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
 
     await listPromise
       .then((entries) => {
+        if (!isCurrentRequest()) {
+          return;
+        }
+
         const mapped = mapDirectoryEntries(normalizedDir, entries);
 
         loadedDirsRef.current = new Set(loadedDirsRef.current);
@@ -940,12 +952,22 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
         setChildrenByDir((prev) => ({ ...prev, [normalizedDir]: mapped }));
       })
       .catch(() => {
+        if (!isCurrentRequest()) {
+          return;
+        }
+
         setChildrenByDir((prev) => ({
           ...prev,
           [normalizedDir]: prev[normalizedDir] ?? [],
         }));
       })
       .finally(() => {
+        if (!isCurrentRequest()) {
+          return;
+        }
+
+        activeDirectoryLoadIdsRef.current = new Map(activeDirectoryLoadIdsRef.current);
+        activeDirectoryLoadIdsRef.current.delete(normalizedDir);
         inFlightDirsRef.current = new Set(inFlightDirsRef.current);
         inFlightDirsRef.current.delete(normalizedDir);
       });
@@ -958,6 +980,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
 
     loadedDirsRef.current = new Set();
     inFlightDirsRef.current = new Set();
+    activeDirectoryLoadIdsRef.current = new Map();
     setChildrenByDir((prev) => (Object.keys(prev).length === 0 ? prev : {}));
 
     await loadDirectory(root);
@@ -1013,6 +1036,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
       lastFilesViewTreeKeyRef.current = treeKey;
       loadedDirsRef.current = new Set();
       inFlightDirsRef.current = new Set();
+      activeDirectoryLoadIdsRef.current = new Map();
       setChildrenByDir((prev) => (Object.keys(prev).length === 0 ? prev : {}));
       void loadDirectory(root);
     }
