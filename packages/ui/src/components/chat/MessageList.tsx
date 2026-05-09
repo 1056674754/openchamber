@@ -1274,41 +1274,81 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
     }, [displayMessages, projection.ungroupedMessageIds]);
 
     const staticRenderEntries = React.useMemo<RenderEntry[]>(() => streamPerfMeasure('ui.message_list.render_entries_ms', () => {
-        // [sscity-mod] Group directive turns under the preceding real user turn
+        // [sscity-mod] Group directive turns under their parent real user turn
         // so they share a single <section> and the real user's sticky header
         // stays active while scrolling through directive content.
+        // We use parentID to find the correct parent turn rather than relying
+        // on positional adjacency, because other real user turns may appear
+        // between the parent and its directive children in the message array.
+        const realUserEntryByTurnId = new Map<string, RenderEntry & { kind: 'turn' }>();
         const groupedTurnEntries: RenderEntry[] = [];
-        let pendingRealEntry: (RenderEntry & { kind: 'turn' }) | null = null;
 
+        // First pass: create entries for all turns, collecting real user entries
         for (const turn of staticTurns) {
-            if (turn.isDirectiveTurn) {
-                if (pendingRealEntry) {
-                    const directives = pendingRealEntry.directiveTurns ?? [];
-                    directives.push(turn);
-                    pendingRealEntry.directiveTurns = directives;
-                } else {
-                    // Directive without a preceding real user turn — render standalone
-                    groupedTurnEntries.push({
-                        kind: 'turn',
-                        key: `turn:${turn.turnId}`,
-                        turn,
-                        isLastTurn: turn.turnId === projection.lastTurnId,
-                    });
-                }
-            } else {
-                if (pendingRealEntry) {
-                    groupedTurnEntries.push(pendingRealEntry);
-                }
-                pendingRealEntry = {
+            if (!turn.isDirectiveTurn) {
+                const entry: RenderEntry & { kind: 'turn' } = {
                     kind: 'turn',
                     key: `turn:${turn.turnId}`,
                     turn,
                     isLastTurn: turn.turnId === projection.lastTurnId,
                 };
+                realUserEntryByTurnId.set(turn.turnId, entry);
+                groupedTurnEntries.push(entry);
             }
         }
-        if (pendingRealEntry) {
-            groupedTurnEntries.push(pendingRealEntry);
+
+        // Second pass: attach directive turns to their parent real user turn
+        // via the directive's userMessage parentID, falling back to positional
+        let lastSeenRealEntry: (RenderEntry & { kind: 'turn' }) | null = null;
+        for (const turn of staticTurns) {
+            if (!turn.isDirectiveTurn) {
+                lastSeenRealEntry = realUserEntryByTurnId.get(turn.turnId) ?? null;
+                continue;
+            }
+
+            // Find parent via parentID on the directive's user message
+            const directiveParentId = (turn.userMessage.info as { parentID?: string }).parentID;
+            let parentEntry = directiveParentId
+                ? realUserEntryByTurnId.get(directiveParentId)
+                : undefined;
+
+            // If parentID doesn't directly point to a real user turn, check if
+            // it points to an assistant message whose turn is a real user turn.
+            // Assistant messages have the same turnId as their parent user message.
+            if (!parentEntry && directiveParentId) {
+                // Walk through real user entries to see if any of their assistant
+                // messages match the directive's parentID
+                for (const [, entry] of realUserEntryByTurnId) {
+                    if (entry.turn.assistantMessageIds.includes(directiveParentId)) {
+                        parentEntry = entry;
+                        break;
+                    }
+                }
+            }
+
+            // Fallback: attach to the immediately preceding real user turn
+            if (!parentEntry) {
+                parentEntry = lastSeenRealEntry ?? undefined;
+            }
+
+            if (parentEntry) {
+                const directives = parentEntry.directiveTurns ?? [];
+                directives.push(turn);
+                parentEntry.directiveTurns = directives;
+                // Propagate isLastTurn: if a directive is the session's last
+                // turn, mark its parent entry so streaming indicators work.
+                if (turn.turnId === projection.lastTurnId) {
+                    parentEntry.isLastTurn = true;
+                }
+            } else {
+                // Directive without any real user turn — render standalone
+                groupedTurnEntries.push({
+                    kind: 'turn',
+                    key: `turn:${turn.turnId}`,
+                    turn,
+                    isLastTurn: turn.turnId === projection.lastTurnId,
+                });
+            }
         }
 
         // [sscity-mod] Apply group-level windowing. turnStart is the number of

@@ -48,9 +48,22 @@ export const useTurnRecords = (
     }, [messages, options.showTextJustificationActivity]);
 
     const staticTurns = React.useMemo(() => {
-        const nextStatic = projection.turns.length <= 1
-            ? []
-            : projection.turns.slice(0, -1);
+        if (projection.turns.length === 0) {
+            staticTurnsRef.current = [];
+            return [];
+        }
+
+        const lastTurn = projection.turns[projection.turns.length - 1];
+
+        // When the last turn is a directive, include ALL turns in staticTurns
+        // so the grouping logic in MessageList can correctly attach it to its
+        // parent real user turn for two-layer sticky rendering.
+        const nextStatic = lastTurn.isDirectiveTurn
+            ? projection.turns
+            : projection.turns.length <= 1
+                ? []
+                : projection.turns.slice(0, -1);
+
         const previousStatic = staticTurnsRef.current;
 
         if (previousStatic.length === nextStatic.length) {
@@ -71,9 +84,17 @@ export const useTurnRecords = (
     }, [projection.turns]);
 
     const streamingTurn = React.useMemo(() => {
-        const nextStreamingTurn = projection.turns.length === 0
-            ? undefined
-            : projection.turns[projection.turns.length - 1];
+        if (projection.turns.length === 0) {
+            streamingTurnRef.current = undefined;
+            return undefined;
+        }
+
+        const lastTurn = projection.turns[projection.turns.length - 1];
+
+        // Directive turns must stay in staticTurns for grouping — they are
+        // never the streaming turn.
+        const nextStreamingTurn = lastTurn.isDirectiveTurn ? undefined : lastTurn;
+
         if (streamingTurnRef.current === nextStreamingTurn) {
             return streamingTurnRef.current;
         }

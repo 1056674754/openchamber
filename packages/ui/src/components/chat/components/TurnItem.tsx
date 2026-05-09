@@ -90,6 +90,19 @@ const TurnItem: React.FC<TurnItemProps> = ({
                 renderMessage(turn.userMessage)
             )}
 
+            {/* Fade shadow below P1 — sits outside P1's z-20 stacking context.
+                Uses z-[5] so it's above regular content (z-0) but below P2 (z-10).
+                When P2 becomes sticky it naturally covers this gradient. */}
+            {stickyUserHeader && hasDirectives && (
+                <div
+                    aria-hidden="true"
+                    className="sticky z-[5] pointer-events-none h-0 [overflow-anchor:none]"
+                    style={{ top: 'var(--oc-user-sticky-h, 0px)' }}
+                >
+                    <div className="h-4 bg-gradient-to-b from-[var(--surface-background)] to-transparent sm:h-8" />
+                </div>
+            )}
+
             <div className="relative z-0">
                 {turn.assistantMessages.map((message) => renderMessage(message))}
             </div>
