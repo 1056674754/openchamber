@@ -20,6 +20,8 @@ export const DEFAULT_SERVER_ID = "default";
 export class ServerRegistry {
   private connections: Map<string, ServerConnection> = new Map();
   private sessionServerIndex: Map<string, string> = new Map();
+  private healthPollTimer: ReturnType<typeof setInterval> | null = null;
+  private healthListeners: Map<string, Set<(status: ServerConnection["healthStatus"]) => void>> = new Map();
 
   register(config: ServerConfig): ServerConnection {
     const existing = this.connections.get(config.id);
@@ -129,6 +131,53 @@ export class ServerRegistry {
 
   getServerLabel(serverId: string): string {
     return this.connections.get(serverId)?.config.label ?? serverId;
+  }
+
+  onHealthChange(serverId: string, callback: (status: ServerConnection["healthStatus"]) => void): () => void {
+    let listeners = this.healthListeners.get(serverId);
+    if (!listeners) {
+      listeners = new Set();
+      this.healthListeners.set(serverId, listeners);
+    }
+    listeners.add(callback);
+    return () => {
+      listeners?.delete(callback);
+      if (listeners && listeners.size === 0) {
+        this.healthListeners.delete(serverId);
+      }
+    };
+  }
+
+  private notifyHealthListeners(serverId: string): void {
+    const connection = this.connections.get(serverId);
+    const listeners = this.healthListeners.get(serverId);
+    if (listeners && connection) {
+      for (const cb of listeners) {
+        cb(connection.healthStatus);
+      }
+    }
+  }
+
+  startHealthPolling(intervalMs = 30_000): void {
+    if (this.healthPollTimer) return;
+    const poll = () => {
+      const ids = Array.from(this.connections.keys());
+      for (const id of ids) {
+        void this.probeHealth(id).then((healthy) => {
+          this.notifyHealthListeners(id);
+          return healthy;
+        });
+      }
+    };
+    poll();
+    this.healthPollTimer = setInterval(poll, intervalMs);
+  }
+
+  stopHealthPolling(): void {
+    if (this.healthPollTimer) {
+      clearInterval(this.healthPollTimer);
+      this.healthPollTimer = null;
+    }
   }
 }
 

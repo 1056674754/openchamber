@@ -249,6 +249,10 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const directoryShowHidden = useDirectoryShowHidden();
     const showReasoningTraces = useUIStore(state => state.showReasoningTraces);
     const setShowReasoningTraces = useUIStore(state => state.setShowReasoningTraces);
+    const autoCollapseThinking = useUIStore(state => state.autoCollapseThinking);
+    const setAutoCollapseThinking = useUIStore(state => state.setAutoCollapseThinking);
+    const autoCollapseThinkingThreshold = useUIStore(state => state.autoCollapseThinkingThreshold);
+    const setAutoCollapseThinkingThreshold = useUIStore(state => state.setAutoCollapseThinkingThreshold);
 
     const mermaidRenderingMode = useUIStore(state => state.mermaidRenderingMode);
     const setMermaidRenderingMode = useUIStore(state => state.setMermaidRenderingMode);
@@ -1564,6 +1568,49 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                 ariaLabel={t('settings.openchamber.visual.field.showReasoningTracesAria')}
                                             />
                                             <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.showReasoningTraces')}</span>
+                                        </div>
+                                    )}
+
+                                    {shouldShow('reasoning') && (
+                                        <div
+                                            className="group flex cursor-pointer items-center gap-2 py-0.5"
+                                            role="button"
+                                            tabIndex={0}
+                                            aria-pressed={autoCollapseThinking}
+                                            onClick={() => setAutoCollapseThinking(!autoCollapseThinking)}
+                                            onKeyDown={(event) => {
+                                                if (event.key === ' ' || event.key === 'Enter') {
+                                                    event.preventDefault();
+                                                    setAutoCollapseThinking(!autoCollapseThinking);
+                                                }
+                                            }}
+                                        >
+                                            <Checkbox
+                                                checked={autoCollapseThinking}
+                                                onChange={setAutoCollapseThinking}
+                                                ariaLabel={t('settings.openchamber.visual.field.autoCollapseThinkingAria')}
+                                            />
+                                            <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.autoCollapseThinking')}</span>
+                                        </div>
+                                    )}
+                                    {shouldShow('reasoning') && autoCollapseThinking && (
+                                        <div className="flex items-center gap-2 py-0.5 pl-6">
+                                            <span className="typography-micro text-muted-foreground whitespace-nowrap">{t('settings.openchamber.visual.field.autoCollapseThinkingThresholdLabel')}</span>
+                                            <input
+                                                type="number"
+                                                min={50}
+                                                max={5000}
+                                                step={50}
+                                                value={autoCollapseThinkingThreshold}
+                                                onChange={(e) => {
+                                                    const val = Number.parseInt(e.target.value, 10);
+                                                    if (!Number.isNaN(val)) {
+                                                        setAutoCollapseThinkingThreshold(val);
+                                                    }
+                                                }}
+                                                className="w-20 rounded-md border border-border/60 bg-transparent px-2 py-0.5 typography-micro text-foreground text-center focus:outline-none focus:ring-1 focus:ring-ring"
+                                            />
+                                            <span className="typography-micro text-muted-foreground">{t('settings.openchamber.visual.field.autoCollapseThinkingThresholdUnit')}</span>
                                         </div>
                                     )}
 
