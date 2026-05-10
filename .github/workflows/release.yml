@@ -102,11 +102,11 @@ jobs:
         run: bun run --cwd packages/web build
 
       - name: Compile Linux server binary
+        timeout-minutes: 30
         run: |
           mkdir -p artifacts
           bun build --compile packages/web/server/index.js --outfile artifacts/openchamber-linux --target bun-linux-x64
           chmod +x artifacts/openchamber-linux
-          ./artifacts/openchamber-linux --version
 
       - name: Verify binary
         run: |
