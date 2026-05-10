@@ -2711,9 +2711,10 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                     <DropdownMenu open={isReady && agentMenuOpen} onOpenChange={isReady ? handleModelMenuOpenChange : undefined}>
                         <TooltipTrigger asChild>
                             <DropdownMenuTrigger asChild>
-                                <div
+                                <button
+                                    type="button"
                                     className={cn(
-                                        'model-controls__model-trigger flex items-center gap-1.5 cursor-pointer hover:bg-transparent hover:opacity-70 min-w-0',
+                                        'model-controls__model-trigger flex items-center gap-1.5 cursor-pointer hover:bg-transparent hover:opacity-70 min-w-0 bg-transparent border-none p-0 text-left font-inherit',
                                         buttonHeight
                                     )}
                                 >
@@ -2755,7 +2756,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                             </span>
                                         </span>
                                     )}
-                                </div>
+                                </button>
                             </DropdownMenuTrigger>
                         </TooltipTrigger>
                         <DropdownMenuContent className="w-[min(380px,calc(100vw-2rem))] p-0 flex flex-col" align="end" alignOffset={-40}>
