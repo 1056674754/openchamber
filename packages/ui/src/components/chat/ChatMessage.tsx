@@ -32,6 +32,7 @@ import {
     extractStatusInfo,
     hasOMOMarker,
     isSystemDirectiveMessage,
+    DIRECTIVE_TYPE_CONTINUATION,
 } from '@/lib/messages/system-directive';
 import { isLikelyProviderAuthFailure, PROVIDER_AUTH_FAILURE_MESSAGE } from '@/lib/messages/providerAuthError';
 import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
@@ -167,14 +168,16 @@ const SystemDirectiveBanner: React.FC<{
     const statusInfo = extractStatusInfo(message.parts);
     const remainingTasks = extractRemainingTasks(message.parts);
     const hasOMO = hasOMOMarker(message.parts);
-    const title = directiveType ?? 'System';
+    const isContinuation = directiveType === DIRECTIVE_TYPE_CONTINUATION;
+    const title = isContinuation ? 'Loop' : (directiveType ?? 'System');
+    const accentColor = isContinuation ? 'var(--status-warning)' : 'var(--status-info)';
 
     return (
         <div
             className="w-full rounded-lg border px-3 py-2 text-sm"
             style={{
                 backgroundColor: 'var(--surface-elevated)',
-                borderColor: 'var(--status-info)',
+                borderColor: accentColor,
                 borderLeftWidth: '3px',
                 color: 'var(--surface-mutedForeground)',
                 opacity: isMessageCompleted ? 0.7 : 1,
@@ -189,7 +192,7 @@ const SystemDirectiveBanner: React.FC<{
                     <span
                         className="text-[10px] font-bold px-1 py-0.5 rounded"
                         style={{
-                            backgroundColor: 'var(--status-info)',
+                            backgroundColor: accentColor,
                             color: 'var(--surface-background)',
                         }}
                     >
@@ -198,7 +201,7 @@ const SystemDirectiveBanner: React.FC<{
                 )}
                 <span
                     className="text-xs font-medium px-1.5 py-0.5 rounded"
-                    style={{ backgroundColor: 'var(--status-info)', color: 'var(--surface-background)' }}
+                    style={{ backgroundColor: accentColor, color: 'var(--surface-background)' }}
                 >
                     {title}
                 </span>
@@ -209,7 +212,7 @@ const SystemDirectiveBanner: React.FC<{
                 )}
                 <span className="flex items-center gap-1.5 ml-auto">
                     {!isMessageCompleted && (
-                        <span className="text-xs animate-pulse" style={{ color: 'var(--status-info)' }}>
+                        <span className="text-xs animate-pulse" style={{ color: accentColor }}>
                             ●
                         </span>
                     )}
