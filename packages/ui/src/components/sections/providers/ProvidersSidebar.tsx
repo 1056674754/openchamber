@@ -8,6 +8,8 @@ import { RiAddLine, RiStackLine } from '@remixicon/react';
 import { cn } from '@/lib/utils';
 import { SettingsProjectSelector } from '@/components/sections/shared/SettingsProjectSelector';
 import { opencodeClient } from '@/lib/opencode/client';
+import { resolveApiUrl } from '@/lib/api/serverUrl';
+import { useSettingsServerBaseUrl } from '@/hooks/useSettingsServerBaseUrl';
 import { useI18n } from '@/lib/i18n';
 
 const ADD_PROVIDER_ID = '__add_provider__';
@@ -43,6 +45,7 @@ export const ProvidersSidebar: React.FC<ProvidersSidebarProps> = ({ onItemSelect
   const setSelectedProvider = useConfigStore((state) => state.setSelectedProvider);
   const activeProjectId = useProjectsStore((s) => s.activeProjectId);
   const [sourcesByProvider, setSourcesByProvider] = React.useState<Record<string, ProviderSources>>({});
+  const serverBaseUrl = useSettingsServerBaseUrl();
   const directory = React.useMemo(() => {
     // tie refresh to active project changes (directory is stored in the client)
     void activeProjectId;
@@ -61,7 +64,7 @@ export const ProvidersSidebar: React.FC<ProvidersSidebarProps> = ({ onItemSelect
       const tasks = providers.map(async (provider) => {
         try {
           const query = directory ? `?directory=${encodeURIComponent(directory)}` : '';
-          const response = await fetch(`/api/provider/${encodeURIComponent(provider.id)}/source${query}`, {
+          const response = await fetch(resolveApiUrl(`/api/provider/${encodeURIComponent(provider.id)}/source${query}`, serverBaseUrl), {
             method: 'GET',
             headers: { Accept: 'application/json' },
           });
@@ -93,7 +96,7 @@ export const ProvidersSidebar: React.FC<ProvidersSidebarProps> = ({ onItemSelect
     return () => {
       cancelled = true;
     };
-  }, [directory, providers]);
+  }, [directory, providers, serverBaseUrl]);
 
   const bgClass = 'bg-background';
 

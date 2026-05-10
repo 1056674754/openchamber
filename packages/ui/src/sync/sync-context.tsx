@@ -1077,6 +1077,14 @@ async function resyncDirectoryAfterReconnect(
     setIndexedSessionDirectory(routingIndex, nextSession.id, directory)
     setIndexedSessionMessages(routingIndex, sessionId, directory, nextMessages)
     serverRegistry.indexSession(nextSession.id, serverId)
+
+    const todoResult = await scopedClient.session.todo({ sessionID: sessionId }).catch(() => null)
+    if (todoResult?.data) {
+      store.setState((state: DirectoryStore) => ({
+        todo: { ...state.todo, [sessionId]: todoResult.data },
+      }))
+      useTodosPersistStore.getState().setSessionTodos(sessionId, todoResult.data)
+    }
   }))
 
   await resyncBlockingRequestsForDirectory(directory, store, candidateSessionIds, { serverId, sdk })

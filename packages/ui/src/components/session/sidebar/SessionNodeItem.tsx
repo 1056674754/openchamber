@@ -27,6 +27,7 @@ import {
   RiLinkUnlinkM,
   RiPencilAiLine,
   RiPushpinLine,
+  RiRefreshLine,
   RiShare2Line,
   RiShieldLine,
   RiComputerLine,
@@ -308,10 +309,12 @@ const areEqual = (prev: Props, next: Props): boolean => {
   const nextMenuInTree = treeContainsMenuKey(next.node, next.openSidebarMenuKey, next.renderContext ?? 'project', next.archivedBucket ?? false);
   if (prevMenuInTree !== nextMenuInTree) return false;
 
+  const prevIsGlobalPinned = (prev.renderContext ?? 'project') === 'global-pinned';
+  const nextIsGlobalPinned = (next.renderContext ?? 'project') === 'global-pinned';
   const prevDirectory = resolveGlobalSessionDirectory(prevSession)
-    ?? normalizePath(prev.groupDirectory ?? null);
+    ?? (prevIsGlobalPinned ? null : normalizePath(prev.groupDirectory ?? null));
   const nextDirectory = resolveGlobalSessionDirectory(nextSession)
-    ?? normalizePath(next.groupDirectory ?? null);
+    ?? (nextIsGlobalPinned ? null : normalizePath(next.groupDirectory ?? null));
   if (prevDirectory !== nextDirectory) return false;
   if ((prevDirectory ? prev.directoryStatus.get(prevDirectory) : null) !== (nextDirectory ? next.directoryStatus.get(nextDirectory) : null)) return false;
 
@@ -393,7 +396,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
 
   const sessionDirectory =
     resolveGlobalSessionDirectory(session)
-    ?? normalizePath(groupDirectory ?? null);
+    ?? (isGlobalPinnedContext ? null : normalizePath(groupDirectory ?? null));
 
   const hasSecondaryProjectLabel = Boolean(secondaryMeta?.projectLabel);
   const hasSecondaryBranchLabel = Boolean(secondaryMeta?.branchLabel);
@@ -952,6 +955,13 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
       <DropdownMenuItem onClick={() => { void handleExportSession(); }} className="[&>svg]:mr-1">
         <RiDownloadLine className="mr-1 h-4 w-4" />
         {t('sessions.sidebar.session.menu.exportMarkdown')}
+      </DropdownMenuItem>
+      <DropdownMenuItem
+        onClick={() => { void sync.syncSession(session.id, true); }}
+        className="[&>svg]:mr-1"
+      >
+        <RiRefreshLine className="mr-1 h-4 w-4" />
+        {t('sessions.sidebar.session.menu.refresh')}
       </DropdownMenuItem>
 
       {sessionDirectory && !archivedBucket ? (() => {

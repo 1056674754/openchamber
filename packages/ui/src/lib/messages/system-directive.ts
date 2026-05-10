@@ -3,6 +3,8 @@ import type { Part } from "@opencode-ai/sdk/v2"
 // Cross-repo markers from oh-my-openagent — see oh-my-openagent/src/shared/internal-initiator-marker.ts
 // and oh-my-openagent/src/shared/system-directive.ts
 const OMO_INTERNAL_INITIATOR = "<!-- OMO_INTERNAL_INITIATOR -->"
+const OPENCODE_CONTINUATION_TEXT = "Continue if you have next steps, or stop and ask for clarification if you are unsure how to proceed."
+export const DIRECTIVE_TYPE_CONTINUATION = "CONTINUATION"
 const SYSTEM_REMINDER_OPEN = "<system-reminder>"
 const SYSTEM_DIRECTIVE_PREFIX = "[SYSTEM DIRECTIVE: OH-MY-OPENCODE"
 
@@ -25,7 +27,21 @@ const textPartHasDirectiveMarker = (part: Part): boolean => {
 
 export const isSystemDirectiveMessage = (parts: Part[] | undefined): boolean => {
   if (!Array.isArray(parts) || parts.length === 0) return false
-  return parts.some(textPartHasDirectiveMarker)
+  if (parts.some(textPartHasDirectiveMarker)) return true
+  // OpenCode compaction continuation: all parts synthetic + metadata or text match
+  if (isCompactionContinuation(parts)) return true
+  return false
+}
+
+const isCompactionContinuation = (parts: Part[]): boolean => {
+  if (!parts.every((p) => Boolean((p as { synthetic?: boolean }).synthetic))) return false
+  return parts.some((part) => {
+    if (part.type !== "text") return false
+    const meta = (part as { metadata?: Record<string, unknown> }).metadata
+    if (meta && meta.compaction_continue === true) return true
+    const text = (part as { text?: unknown }).text
+    return typeof text === "string" && text.includes(OPENCODE_CONTINUATION_TEXT)
+  })
 }
 
 // "[SYSTEM DIRECTIVE: OH-MY-OPENCODE - TODO CONTINUATION]" → "TODO CONTINUATION"
@@ -33,6 +49,7 @@ const DIRECTIVE_TYPE_RE = /\[SYSTEM DIRECTIVE: OH-MY-OPENCODE - ([^\]]+)\]/
 
 export const extractDirectiveType = (parts: Part[] | undefined): string | null => {
   if (!Array.isArray(parts)) return null
+  if (isCompactionContinuation(parts)) return DIRECTIVE_TYPE_CONTINUATION
   for (const part of parts) {
     if (part.type !== "text") continue
     const text = (part as { text?: unknown }).text
