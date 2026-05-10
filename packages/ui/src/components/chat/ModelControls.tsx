@@ -578,9 +578,11 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
 
     // Handle agent selector close behavior
     const [agentSearchQuery, setAgentSearchQuery] = React.useState('');
+    const [hoveredAgentName, setHoveredAgentName] = React.useState<string | null>(null);
     React.useEffect(() => {
         if (!isAgentSelectorOpen) {
             setAgentSearchQuery('');
+            setHoveredAgentName(null);
             if (!isCompact) {
                 requestAnimationFrame(() => {
                     const textarea = document.querySelector<HTMLTextAreaElement>('textarea[data-chat-input="true"]');
@@ -2173,7 +2175,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                         <RiCheckLine className="h-4 w-4 text-primary ml-auto flex-shrink-0" />
                                     )}
                                 </div>
-                                {agent.description && (
+                                {isSelected && agent.description && (
                                     <span className="typography-meta text-muted-foreground pl-4.5">
                                         {agent.description}
                                     </span>
@@ -3284,7 +3286,15 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                     </div>
                                 </DropdownMenuTrigger>
                             </TooltipTrigger>
-                            <DropdownMenuContent align="end" alignOffset={-40} className="w-[min(280px,calc(100vw-2rem))] p-0 flex flex-col">
+                            <DropdownMenuContent align="end" alignOffset={-40} className="w-[220px] p-0 flex flex-col relative overflow-visible">
+                                {(() => {
+                                    const hovered = hoveredAgentName ? sortedAndFilteredAgents.find(a => a.name === hoveredAgentName) : undefined;
+                                    return hovered && hovered.description ? (
+                                        <div className="absolute right-full top-0 mr-2 w-[300px] rounded-xl border border-border/60 bg-muted p-3 shadow-md pointer-events-none">
+                                            <p className="typography-meta text-muted-foreground">{hovered.description}</p>
+                                        </div>
+                                    ) : null;
+                                })()}
                                 <div className="p-2 border-b border-border/40">
                                     <div className="relative">
                                         <RiSearchLine className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
@@ -3322,28 +3332,29 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                                 No agents found
                                             </div>
                                         ) : (
-                                            sortedAndFilteredAgents.map((agent) => (
-                                                <DropdownMenuItem
-                                                    key={agent.name}
-                                                    className="typography-meta"
-                                                    onSelect={() => handleAgentChange(agent.name)}
-                                                >
-                                                    <div className="flex flex-col gap-0.5">
-                                                        <div className="flex items-center gap-1.5">
-                                                            <div className={cn(
-                                                                'h-1 w-1 rounded-full agent-dot',
-                                                                getAgentColor(agent.name).class
-                                                            )} />
-                                                            <span className="font-medium">{capitalizeAgentName(agent.name)}</span>
+                                            sortedAndFilteredAgents.map((agent) => {
+                                                const isSelected = agent.name === uiAgentName;
+                                                return (
+                                                    <DropdownMenuItem
+                                                        key={agent.name}
+                                                        className="typography-meta"
+                                                        onSelect={() => handleAgentChange(agent.name)}
+                                                        onMouseEnter={() => setHoveredAgentName(agent.name)}
+                                                        onFocus={() => setHoveredAgentName(agent.name)}
+                                                    >
+                                                        <div className="flex items-center justify-between gap-2 w-full min-w-0">
+                                                            <div className="flex items-center gap-1.5 min-w-0">
+                                                                <div className={cn(
+                                                                    'h-1.5 w-1.5 rounded-full flex-shrink-0 agent-dot',
+                                                                    getAgentColor(agent.name).class
+                                                                )} />
+                                                                <span className="font-medium truncate">{capitalizeAgentName(agent.name)}</span>
+                                                            </div>
+                                                            {isSelected && <RiCheckLine className="h-4 w-4 text-primary flex-shrink-0" />}
                                                         </div>
-                                                        {agent.description && (
-                                                            <span className="typography-meta text-muted-foreground max-w-[200px] ml-2.5 break-words">
-                                                                {agent.description}
-                                                            </span>
-                                                        )}
-                                                    </div>
-                                                </DropdownMenuItem>
-                                            ))
+                                                    </DropdownMenuItem>
+                                                );
+                                            })
                                         )}
                                     </div>
                                 </ScrollableOverlay>
