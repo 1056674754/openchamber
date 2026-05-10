@@ -78,6 +78,49 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+  build-linux-server:
+    needs: create-release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build web UI
+        run: bun run --cwd packages/ui build
+
+      - name: Build web server dist
+        run: bun run --cwd packages/web build
+
+      - name: Compile Linux server binary
+        run: |
+          mkdir -p artifacts
+          bun build --compile packages/web/server/index.js --outfile artifacts/openchamber-linux --target bun-linux-x64
+          chmod +x artifacts/openchamber-linux
+          ./artifacts/openchamber-linux --version
+
+      - name: Verify binary
+        run: |
+          file artifacts/openchamber-linux
+          ls -lh artifacts/
+
+      - name: Upload to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ needs.create-release.outputs.version }}
+          files: artifacts/openchamber-linux
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   build-desktop-macos:
     needs: create-release
     runs-on: macos-26
@@ -657,7 +700,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   finalize-release:
-    needs: [create-release, build-desktop-macos, build-desktop-electron-macos, publish-npm, combine-manifests, combine-electron-manifests]
+    needs: [create-release, build-linux-server, build-desktop-macos, build-desktop-electron-macos, publish-npm, combine-manifests, combine-electron-manifests]
     runs-on: ubuntu-latest
     env:
       DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
