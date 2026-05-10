@@ -648,62 +648,70 @@ export async function optimisticSend(input: {
 // Abort
 // ---------------------------------------------------------------------------
 
-// Sessions with pending abort — events for these sessions are suppressed in the
-// event pipeline until session.idle arrives or the suppression window expires.
-const _abortSuppressedSessions = new Map<string, number>()
-const ABORT_SUPPRESS_WINDOW_MS = 8_000
-
-export function isSessionAbortSuppressed(sessionId: string): boolean {
-  const expiresAt = _abortSuppressedSessions.get(sessionId)
-  if (!expiresAt) return false
-  if (Date.now() > expiresAt) {
-    _abortSuppressedSessions.delete(sessionId)
-    return false
-  }
-  return true
-}
-
-export function clearAbortSuppression(sessionId: string): void {
-  _abortSuppressedSessions.delete(sessionId)
-}
-
 export async function abortCurrentOperation(sessionId: string): Promise<void> {
+  // Resolve all possible directory candidates.
+  // OpenCode's InstanceState is keyed by resolved directory — if abort sends a
+  // different string than what the prompt used, the server finds no runner and
+  // silently no-ops. We collect both the "live" directory (same source as prompt)
+  // and the session-mapped directory to cover mismatches.
+  const liveDirectory = _getDirectory() || undefined
   let sessionDirectory: string | undefined
   try {
     sessionDirectory = requireSessionDirectory(sessionId, "abortCurrentOperation")
-  } catch (error) {
-    console.error("[session-actions] abort: cannot resolve directory", error)
+  } catch {
+    // ignore — liveDirectory is the primary source
   }
 
-  // Mark session as abort-suppressed so streaming events are ignored in the UI
-  _abortSuppressedSessions.set(sessionId, Date.now() + ABORT_SUPPRESS_WINDOW_MS)
+  // Deduplicate: if both resolve to the same string, only send once.
+  const directories = new Set<string>()
+  if (liveDirectory) directories.add(liveDirectory)
+  if (sessionDirectory) directories.add(sessionDirectory)
 
-  if (sessionDirectory) {
-    const client = sdkForSession(sessionId)
-    const doAbort = () => client.session.abort({ sessionID: sessionId, directory: sessionDirectory! })
+  if (directories.size === 0) {
+    console.error("[session-actions] abort: no directory available at all")
+    useGlobalSessionsStore.getState().upsertStatus(sessionId, { type: "idle" })
+    return
+  }
 
-    try {
-      await doAbort()
-    } catch (error) {
-      console.error("[session-actions] abort call failed", error)
-    }
+  const client = sdkForSession(sessionId)
 
-    // Retry abort with escalating delays — OpenCode may not stop on the first
-    // attempt when mid-tool-execution or with queued tool calls.
-    const retryDelays = [600, 1500, 3500]
-    for (const delay of retryDelays) {
-      setTimeout(() => {
-        try {
-          const store = storeForSession(sessionId)
-          const current = store.getState()
-          if (current.session_status[sessionId]?.type !== "idle") {
-            void doAbort().catch(() => {})
+  const sendAbort = (directory: string) =>
+    client.session.abort({ sessionID: sessionId, directory })
+
+  console.info("[session-actions] abort sending", {
+    sessionId,
+    directories: [...directories],
+  })
+
+  // Send abort for each unique directory candidate to ensure we hit the
+  // correct InstanceState entry regardless of path normalization differences.
+  const abortPromises = [...directories].map((dir) =>
+    sendAbort(dir).catch((error) => {
+      console.error("[session-actions] abort call failed", { directory: dir, error })
+    }),
+  )
+  await Promise.all(abortPromises)
+
+  // Retry abort with escalating delays — OpenCode may not stop on the first
+  // attempt when mid-tool-execution or with queued tool calls.
+  const retryDelays = [600, 1500, 3500]
+  for (const delay of retryDelays) {
+    setTimeout(() => {
+      try {
+        const store = storeForSession(sessionId)
+        const current = store.getState()
+        if (current.session_status[sessionId]?.type !== "idle") {
+          console.info("[session-actions] abort retry", { sessionId, delay })
+          for (const dir of directories) {
+            void sendAbort(dir).catch(() => {})
           }
-        } catch {
-          void doAbort().catch(() => {})
         }
-      }, delay)
-    }
+      } catch {
+        for (const dir of directories) {
+          void sendAbort(dir).catch(() => {})
+        }
+      }
+    }, delay)
   }
 
   // Update global store optimistically so sidebar stops showing the spinner.

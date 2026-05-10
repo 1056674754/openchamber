@@ -57,6 +57,26 @@ const hasCompactionPart = (message: ChatMessageEntry): boolean => {
     });
 };
 
+const isCompactionTurn = (turn: TurnRecord): boolean => {
+    const msg = turn.userMessage;
+    if (hasCompactionPart(msg)) {
+        return true;
+    }
+    return msg.parts.length > 0
+        && msg.parts.every((part) => {
+            if (part.type !== 'text') { return false; }
+            return getPartText(part).trim() === '/compact';
+        });
+};
+
+const isCompactionComplete = (turn: TurnRecord): boolean => {
+    if (turn.assistantMessages.length === 0) {
+        return false;
+    }
+    const last = turn.assistantMessages[turn.assistantMessages.length - 1];
+    return isAssistantMessageCompleted(last);
+};
+
 const getPartText = (part: Part): string => {
     const text = (part as { text?: unknown }).text;
     if (typeof text === 'string') {
@@ -868,6 +888,41 @@ const UngroupedMessageRow = React.memo(({
 
 UngroupedMessageRow.displayName = 'UngroupedMessageRow';
 
+const CompactionDivider = React.memo(({ turn }: { turn: TurnRecord }) => {
+    const [expanded, setExpanded] = React.useState(false);
+    const completed = isCompactionComplete(turn);
+    const label = completed ? 'Compacted' : 'Compacting…';
+
+    return (
+        <div className="py-2">
+            <div
+                className="flex items-center gap-2 cursor-pointer select-none group"
+                onClick={() => setExpanded((v) => !v)}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setExpanded((v) => !v); } }}
+            >
+                <div className="flex-1 h-px bg-border/60" />
+                <span className="typography-ui-label text-xs text-foreground/50 group-hover:text-foreground/70 transition-colors whitespace-nowrap">
+                    {label}
+                </span>
+                <div className="flex-1 h-px bg-border/60" />
+            </div>
+            {expanded && turn.assistantMessages.length > 0 && (
+                <div className="mt-2 rounded-lg border border-border/40 bg-muted/10 p-3 text-xs text-foreground/70 whitespace-pre-wrap max-h-48 overflow-y-auto">
+                    {turn.assistantMessages.map((msg) =>
+                        msg.parts
+                            .filter((p) => p.type === 'text')
+                            .map((p, i) => <span key={`${msg.info.id}-${i}`}>{getPartText(p)}</span>)
+                    )}
+                </div>
+            )}
+        </div>
+    );
+});
+
+CompactionDivider.displayName = 'CompactionDivider';
+
 interface MessageListEntryProps {
     entry: RenderEntry;
     onMessageContentChange: (reason?: ContentChangeReason) => void;
@@ -930,6 +985,10 @@ const MessageListEntry = React.memo(({
                 activeStreamingPhase={activeStreamingPhase}
             />
         );
+    }
+
+    if (isCompactionTurn(entry.turn)) {
+        return <CompactionDivider turn={entry.turn} />;
     }
 
     return (
