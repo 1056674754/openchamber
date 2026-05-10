@@ -60,13 +60,14 @@ import { RiArrowDownSLine, RiArrowRightSLine } from '@remixicon/react';
 import type { UsageWindow } from '@/types';
 import type { GitHubAuthStatus } from '@/lib/api/types';
 import type { SessionContextUsage } from '@/stores/types/sessionTypes';
-import { DesktopHostSwitcherDialog } from '@/components/desktop/DesktopHostSwitcher';
+import { InstanceInfoPanel } from '@/components/desktop/InstanceInfoPanel';
+import { useActiveServerId } from '@/hooks/useActiveServerId';
+import { serverRegistry } from '@/lib/opencode/server-registry';
 import { OpenInAppButton } from '@/components/desktop/OpenInAppButton';
 import { forceKillTerminal } from '@/lib/terminalApi';
 import { useTerminalStore } from '@/stores/useTerminalStore';
 import { ProjectActionsButton } from '@/components/layout/ProjectActionsButton';
 import { canUseElectronDesktopIPC, invokeDesktop, isDesktopShell, isVSCodeRuntime, startDesktopWindowDrag } from '@/lib/desktop';
-import { desktopHostsGet, locationMatchesHost, redactSensitiveUrl } from '@/lib/desktopHosts';
 import { resolveSessionDiffStats } from '@/components/session/sidebar/utils';
 import { useI18n } from '@/lib/i18n';
 import type { Session } from '@opencode-ai/sdk/v2/client';
@@ -243,7 +244,6 @@ type DesktopServicesMenuProps = {
   compactCurrentInstanceLabel: string;
   isDesktopServicesOpen: boolean;
   setIsDesktopServicesOpen: React.Dispatch<React.SetStateAction<boolean>>;
-  refreshCurrentInstanceLabel: () => Promise<void>;
   desktopServicesTab: 'instance' | 'usage' | 'mcp';
   setDesktopServicesTab: React.Dispatch<React.SetStateAction<'instance' | 'usage' | 'mcp'>>;
   quotaResultsLength: number;
@@ -272,7 +272,6 @@ const DesktopServicesMenu = React.memo(function DesktopServicesMenu({
   compactCurrentInstanceLabel,
   isDesktopServicesOpen,
   setIsDesktopServicesOpen,
-  refreshCurrentInstanceLabel,
   desktopServicesTab,
   setDesktopServicesTab,
   quotaResultsLength,
@@ -295,13 +294,13 @@ const DesktopServicesMenu = React.memo(function DesktopServicesMenu({
   onDevShutdown,
 }: DesktopServicesMenuProps) {
   const { t } = useI18n();
+  const activeServerId = useActiveServerId();
   return (
     <DropdownMenu
       open={isDesktopServicesOpen}
       onOpenChange={(open) => {
         setIsDesktopServicesOpen(open);
         if (open) {
-          void refreshCurrentInstanceLabel();
           if (desktopServicesTab === 'usage' && quotaResultsLength === 0) {
             void fetchAllQuotas();
           }
@@ -369,12 +368,7 @@ const DesktopServicesMenu = React.memo(function DesktopServicesMenu({
         </div>
 
         {isDesktopApp && desktopServicesTab === 'instance' ? (
-          <DesktopHostSwitcherDialog
-            embedded
-            open={isDesktopServicesOpen && desktopServicesTab === 'instance'}
-            onOpenChange={() => {}}
-            onHostSwitched={() => setIsDesktopServicesOpen(false)}
-          />
+          <InstanceInfoPanel serverId={activeServerId} />
         ) : null}
 
         {desktopServicesTab === 'mcp' ? (
@@ -800,7 +794,11 @@ export const Header: React.FC<HeaderProps> = ({
   const [isMobileRateLimitsOpen, setIsMobileRateLimitsOpen] = React.useState(false);
   const [isDesktopServicesOpen, setIsDesktopServicesOpen] = React.useState(false);
   const [isUsageRefreshSpinning, setIsUsageRefreshSpinning] = React.useState(false);
-  const [currentInstanceLabel, setCurrentInstanceLabel] = React.useState('Local');
+  const activeServerId = useActiveServerId();
+  const currentInstanceLabel = React.useMemo(() => {
+    if (!isDesktopApp) return 'Local';
+    return serverRegistry.getServerLabel(activeServerId);
+  }, [isDesktopApp, activeServerId]);
   const compactCurrentInstanceLabel = React.useMemo(() => formatCompactHeaderLabel(currentInstanceLabel), [currentInstanceLabel]);
   const [desktopServicesTab, setDesktopServicesTab] = React.useState<'instance' | 'usage' | 'mcp'>(
     isDesktopApp ? 'instance' : 'usage'
@@ -827,39 +825,6 @@ export const Header: React.FC<HeaderProps> = ({
     ? Math.min(999, (stableDesktopContextUsage.totalTokens / stableDesktopContextUsage.contextLimit) * 100)
     : 0;
 
-  const refreshCurrentInstanceLabel = React.useCallback(async () => {
-    if (typeof window === 'undefined' || !isDesktopApp) {
-      return;
-    }
-
-    try {
-      const cfg = await desktopHostsGet();
-      const currentHref = window.location.href;
-      const localOrigin = window.__OPENCHAMBER_LOCAL_ORIGIN__ || window.location.origin;
-
-      if (locationMatchesHost(currentHref, localOrigin)) {
-        setCurrentInstanceLabel('Local');
-        return;
-      }
-
-      const match = cfg.hosts.find((host) => {
-        return locationMatchesHost(currentHref, host.url);
-      });
-
-      if (match?.label?.trim()) {
-        setCurrentInstanceLabel(redactSensitiveUrl(match.label.trim()));
-        return;
-      }
-
-      setCurrentInstanceLabel('Instance');
-    } catch {
-      setCurrentInstanceLabel('Local');
-    }
-  }, [isDesktopApp]);
-
-  useEffect(() => {
-    void refreshCurrentInstanceLabel();
-  }, [refreshCurrentInstanceLabel]);
   useQuotaAutoRefresh();
   const selectedModels = useQuotaStore((state) => state.selectedModels);
   const expandedFamilies = useQuotaStore((state) => state.expandedFamilies);
@@ -1657,7 +1622,6 @@ export const Header: React.FC<HeaderProps> = ({
           setIsDesktopServicesOpen(false);
         } else {
           setIsDesktopServicesOpen(true);
-          void refreshCurrentInstanceLabel();
           if (desktopServicesTab === 'usage' && quotaResults.length === 0) {
             void fetchAllQuotas();
           }
@@ -1679,7 +1643,6 @@ export const Header: React.FC<HeaderProps> = ({
         const nextTab = tabValues[nextIndex];
         setDesktopServicesTab(nextTab);
         setIsDesktopServicesOpen(true);
-        void refreshCurrentInstanceLabel();
         if (nextTab === 'usage' && quotaResults.length === 0) {
           void fetchAllQuotas();
         }
@@ -1702,7 +1665,6 @@ export const Header: React.FC<HeaderProps> = ({
     servicesTabs,
     quotaResults.length,
     fetchAllQuotas,
-    refreshCurrentInstanceLabel,
     handleOpenContextPlan,
   ]);
 
@@ -1781,7 +1743,6 @@ export const Header: React.FC<HeaderProps> = ({
         compactCurrentInstanceLabel={compactCurrentInstanceLabel}
         isDesktopServicesOpen={isDesktopServicesOpen}
         setIsDesktopServicesOpen={setIsDesktopServicesOpen}
-        refreshCurrentInstanceLabel={refreshCurrentInstanceLabel}
         desktopServicesTab={desktopServicesTab}
         setDesktopServicesTab={setDesktopServicesTab}
         quotaResultsLength={quotaResults.length}

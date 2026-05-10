@@ -16,6 +16,7 @@ import type { UsageWindows, QuotaProviderId } from '@/types';
 import { getAllModelFamilies, getDisplayModelName, sortModelFamilies, groupModelsByFamilyWithGetter } from '@/lib/quota/model-families';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/lib/i18n';
+import { useSettingsServerBaseUrl } from '@/hooks/useSettingsServerBaseUrl';
 
 const formatTime = (timestamp: number | null) => {
   if (!timestamp) return '-';
@@ -50,12 +51,14 @@ export const UsagePage: React.FC = () => {
   const toggleModelSelected = useQuotaStore((state) => state.toggleModelSelected);
   const applyDefaultSelections = useQuotaStore((state) => state.applyDefaultSelections);
 
+  const serverBaseUrl = useSettingsServerBaseUrl();
+
   useQuotaAutoRefresh();
 
   React.useEffect(() => {
-    void loadSettings();
-    void fetchAllQuotas();
-  }, [loadSettings, fetchAllQuotas]);
+    void loadSettings(serverBaseUrl);
+    void fetchAllQuotas(serverBaseUrl);
+  }, [loadSettings, fetchAllQuotas, serverBaseUrl]);
 
 
   React.useEffect(() => {

@@ -1,5 +1,5 @@
 import { useCallback, useRef, useMemo } from "react"
-import type { Message, Part } from "@opencode-ai/sdk/v2/client"
+import type { Message, Part, Todo } from "@opencode-ai/sdk/v2/client"
 import { Binary } from "./binary"
 import { retry } from "./retry"
 import { SESSION_CACHE_LIMIT } from "./types"
@@ -20,6 +20,7 @@ import {
   clearSessionPrefetch,
 } from "./session-prefetch-cache"
 import { getSessionMaterializationStatus, materializeSessionSnapshots } from "./materialization"
+import { useTodosPersistStore } from "@/stores/useTodosPersistStore"
 
 const SKIP_PARTS = new Set(["patch", "step-start", "step-finish"])
 const MESSAGE_PAGE_SIZE = 200
@@ -296,7 +297,6 @@ export function useSync() {
       }
 
       const promise = (async () => {
-        // Fetch session info if needed
         if (!hasSession || force) {
           try {
             const sessionDir = useSessionUIStore.getState().getDirectoryForSession(sessionID) || directory
@@ -318,9 +318,29 @@ export function useSync() {
           }
         }
 
-        // Load messages if needed
         if (!cached || force) {
           await loadMessages(sessionID)
+        }
+
+        if (force) {
+          const sessionDir = useSessionUIStore.getState().getDirectoryForSession(sessionID) || directory
+          const client = resolveSdkForDirectory(sessionDir)
+          await Promise.all([
+            client.session.status({}).then((res) => {
+              if (!res.data) return
+              const status = res.data[sessionID] ?? { type: "idle" as const }
+              store.setState((s) => ({
+                session_status: { ...s.session_status, [sessionID]: status },
+              }))
+            }).catch(() => {}),
+            client.session.todo({ sessionID }).then((res) => {
+              const todos: Todo[] | undefined = res.data && res.data.length > 0 ? res.data : undefined
+              store.setState((s) => ({
+                todo: { ...s.todo, [sessionID]: todos ?? [] },
+              }))
+              useTodosPersistStore.getState().setSessionTodos(sessionID, todos)
+            }).catch(() => {}),
+          ])
         }
       })()
 
