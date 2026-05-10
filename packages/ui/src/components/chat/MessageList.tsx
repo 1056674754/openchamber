@@ -1390,6 +1390,14 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
                 parentEntry = lastSeenRealEntry ?? undefined;
             }
 
+            // Don't attach directives to compaction turns — CompactionDivider
+            // replaces TurnBlock entirely and doesn't render directive children,
+            // which would swallow the directive's assistant messages (e.g. the
+            // full agent continuation after a /compact). Render standalone instead.
+            if (parentEntry && isCompactionTurn(parentEntry.turn)) {
+                parentEntry = undefined;
+            }
+
             if (parentEntry) {
                 const directives = parentEntry.directiveTurns ?? [];
                 directives.push(turn);

@@ -1013,6 +1013,8 @@ const AssistantMessageBody = React.memo(({
     const [isSavingPlan, setIsSavingPlan] = React.useState(false);
     const chatRenderMode = useUIStore((state) => state.chatRenderMode);
     const showSplitAssistantMessageActions = useUIStore((state) => state.showSplitAssistantMessageActions);
+    const autoCollapseThinking = useUIStore((state) => state.autoCollapseThinking);
+    const autoCollapseThinkingThreshold = useUIStore((state) => state.autoCollapseThinkingThreshold);
     const isSortedRenderMode = chatRenderMode === 'sorted';
     const isMiniChatSurface = chatSurfaceMode === 'mini-chat';
     const collapsedPreviewCount = 7;
@@ -1587,15 +1589,37 @@ const AssistantMessageBody = React.memo(({
                     continue;
                 }
                 if (showReasoningTraces) {
-                    rendered.push(
-                        <ReasoningPart
-                            key={`reasoning-${messageId}-${i}`}
-                            part={part}
-                            messageId={messageId}
-                            onContentChange={onContentChange}
-                            alwaysShowActions={alwaysShowMessageActions}
-                        />
-                    );
+                    const partText = (part as { text?: string; content?: string }).text
+                        ?? (part as { text?: string; content?: string }).content ?? '';
+                    const partTime = (part as { time?: { end?: number } }).time;
+                    const isReasoningComplete = typeof partTime?.end === 'number';
+                    const useCollapseUI = autoCollapseThinking
+                        && isReasoningComplete
+                        && partText.length > autoCollapseThinkingThreshold;
+
+                    if (useCollapseUI || isSortedRenderMode) {
+                        rendered.push(
+                            <ReasoningPart
+                                key={`reasoning-${messageId}-${i}`}
+                                part={part}
+                                messageId={messageId}
+                                onContentChange={onContentChange}
+                                alwaysShowActions={alwaysShowMessageActions}
+                            />
+                        );
+                    } else {
+                        rendered.push(
+                            <AssistantTextPart
+                                key={`reasoning-${messageId}-${i}`}
+                                part={part}
+                                sessionId={sessionId}
+                                messageId={messageId}
+                                streamPhase={streamPhase}
+                                chatRenderMode={chatRenderMode}
+                                onContentChange={onContentChange}
+                            />
+                        );
+                    }
                 }
                 i++;
                 continue;
@@ -1746,6 +1770,8 @@ const AssistantMessageBody = React.memo(({
         shouldSkipPartWithinStaticToolRun,
         streamPhase,
         showReasoningTraces,
+        autoCollapseThinking,
+        autoCollapseThinkingThreshold,
         shouldDeferSortedInlineText,
         syntaxTheme,
         toggleActivityGroup,

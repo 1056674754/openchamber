@@ -7,6 +7,7 @@ import type { OpencodeClient, Session, Message, Part } from "@opencode-ai/sdk/v2
 import { Binary } from "./binary"
 import { useSessionUIStore } from "./session-ui-store"
 import { useInputStore } from "./input-store"
+import type { AttachedFile } from "@/stores/types/sessionTypes"
 import type { ChildStoreManager } from "./child-store"
 import { useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
 import { useConfigStore } from "@/stores/useConfigStore"
@@ -583,6 +584,18 @@ export async function optimisticSend(input: {
   await waitForConnectionOrThrow()
 
   const store = storeForSession(input.sessionId)
+
+  // Abort if session is already busy (e.g. running in another window like mini chat).
+  // This prevents message loss by stopping the current operation before sending a new one.
+  const currentStatus = store.getState().session_status[input.sessionId]
+  if (currentStatus && currentStatus.type !== "idle") {
+    try {
+      const sessionDirectory = requireSessionDirectory(input.sessionId, "optimisticSend")
+      await sdkForSession(input.sessionId).session.abort({ sessionID: input.sessionId, directory: sessionDirectory })
+    } catch {
+      // ignore abort errors — proceed with send regardless
+    }
+  }
   const messageID = ascendingId("msg")
   const textPartId = ascendingId("prt")
 
@@ -798,13 +811,77 @@ export async function rejectQuestion(
 // ---------------------------------------------------------------------------
 
 /**
+ * Extract text content from a user message's non-synthetic text parts.
+ * Synthetic parts (system-added context) are filtered out.
+ */
+function extractUserMessageText(parts: Part[]): string {
+  const textParts = parts.filter((p) => p.type === "text" && !isSyntheticPart(p))
+  return textParts
+    .map((p) => ((p as Record<string, unknown>).text as string) || ((p as Record<string, unknown>).content as string) || "")
+    .join("\n")
+    .trim()
+}
+
+/**
+ * Convert file parts from a stored message into AttachedFile entries
+ * suitable for the input store, so the user can re-send after revert/fork.
+ *
+ * Only data URLs (base64) and file:// URLs are supported for reconstruction;
+ * http(s) URLs produce a zero-byte placeholder File that still carries the
+ * original URL for submission via the server path.
+ */
+async function extractAttachedFilesFromParts(parts: Part[]): Promise<AttachedFile[]> {
+  const fileParts = parts.filter((p) => p.type === "file" && !isSyntheticPart(p))
+  const results: AttachedFile[] = []
+  for (const raw of fileParts) {
+    const part = raw as Part & { mime?: string; filename?: string; url?: string }
+    const url = part.url ?? ""
+    const mime = part.mime ?? "application/octet-stream"
+    const filename = part.filename ?? "file"
+    if (!url) continue
+
+    const id = `revert-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    let file: File
+    let size = 0
+    try {
+      if (url.startsWith("data:") || url.startsWith("blob:") || url.startsWith("http:") || url.startsWith("https:")) {
+        const response = await fetch(url)
+        const blob = await response.blob()
+        file = new File([blob], filename, { type: mime })
+        size = blob.size
+      } else {
+        // file://, server:// or other — keep as a lightweight placeholder; submission uses the URL
+        file = new File([], filename, { type: mime })
+        size = 0
+      }
+    } catch {
+      // Reconstruction failed — fall back to placeholder so user still sees the attachment
+      file = new File([], filename, { type: mime })
+      size = 0
+    }
+
+    results.push({
+      id,
+      file,
+      dataUrl: url,
+      mimeType: mime,
+      filename,
+      size,
+      source: "local",
+    })
+  }
+  return results
+}
+
+/**
  * Revert to a specific user message.
  *
  * 1. Abort if session is busy
- * 2. Extract text from the target message for prompt restoration
+ * 2. Extract text + file attachments from the target message for input restoration
  * 3. Optimistically set revert marker so messages hide immediately
  * 4. Call SDK session.revert() and merge returned session
- * 5. Set pendingInputText so the reverted message text appears in the input
+ * 5. Populate pendingInputText and attachedFiles so the reverted message's
+ *    text and images reappear in the input and can be re-sent
  */
 export async function revertToMessage(sessionId: string, messageId: string): Promise<void> {
   const sessionDirectory = requireSessionDirectory(sessionId, "revertToMessage")
@@ -821,19 +898,17 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
     }
   }
 
-  // Extract message text for prompt restoration (only non-synthetic text parts —
-  // the server adds file content as synthetic text parts that should not be restored)
+  // Extract text + file attachments from the target user message before it is hidden.
   const messages = state.message[sessionId] ?? []
   const targetMsg = messages.find((m) => m.id === messageId)
-  let messageText = ""
-  if (targetMsg && targetMsg.role === "user") {
-    const parts = state.part[messageId] ?? []
-    const textParts = parts.filter((p) => p.type === "text" && !isSyntheticPart(p))
-    messageText = textParts
-      .map((p: Record<string, unknown>) => (p as { text?: string }).text || (p as { content?: string }).content || "")
-      .join("\n")
-      .trim()
-  }
+  const targetParts = targetMsg && targetMsg.role === "user"
+    ? (state.part[messageId] ?? [])
+    : []
+  const messageText = extractUserMessageText(targetParts)
+  console.log('[revertToMessage] messageId=', messageId, 'targetMsg.role=', targetMsg?.role, 'targetParts.length=', targetParts.length, 'messageText=', JSON.stringify(messageText))
+  console.log('[revertToMessage] messages.length=', messages.length, 'all message ids=', messages.map(m => m.id))
+  console.log('[revertToMessage] all part keys=', Object.keys(state.part))
+  console.log('[revertToMessage] state.part[messageId]=', state.part[messageId])
 
   // Optimistically remove reverted messages + set marker
   const prevRevert = (() => {
@@ -863,13 +938,35 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
   }
 
   if (messageText) {
+    console.log('[revertToMessage] setting pendingInputText=', JSON.stringify(messageText))
     useInputStore.setState({
       pendingInputText: messageText,
       pendingInputMode: "replace" as const,
     })
+  } else if (targetParts.length > 0) {
+    console.log('[revertToMessage] attachments only, clearing pendingInputText')
+    // Reverted message had attachments but no text — clear any stale pending
+    // text so it doesn't leak from a prior operation into the restored input.
+    useInputStore.setState({
+      pendingInputText: "",
+      pendingInputMode: "replace" as const,
+    })
+  } else {
+    console.log('[revertToMessage] no text and no attachments — not touching pendingInputText')
   }
 
   store.setState(patch)
+  console.log('[revertToMessage] after store.setState, pendingInputText is now=', useInputStore.getState().pendingInputText)
+
+  // Restore file attachments (e.g., images) so the user sees and can re-send them.
+  // This runs async — images hit the input after text but before/during the SDK call.
+  if (targetParts.length > 0) {
+    void extractAttachedFilesFromParts(targetParts).then((files) => {
+      if (files.length > 0) {
+        useInputStore.getState().setAttachedFiles(files)
+      }
+    })
+  }
 
   // Call SDK and merge authoritative result into store
   try {
@@ -934,25 +1031,18 @@ export async function unrevertSession(sessionId: string): Promise<void> {
 /**
  * Fork from a user message.
  *
- * 1. Extract text from the message for input restoration
+ * 1. Extract text + file attachments from the message for input restoration
  * 2. Call SDK session.fork()
  * 3. Insert the new session into the child store (so sidebar updates immediately)
- * 4. Switch to new session and set pending input text
+ * 4. Switch to new session and populate pending input text + attachedFiles
  */
 export async function forkFromMessage(sessionId: string, messageId: string): Promise<void> {
   const sessionDirectory = requireSessionDirectory(sessionId, "forkFromMessage")
   const store = storeForSession(sessionId)
   const state = store.getState()
 
-  // Extract message text for input restoration (only non-synthetic text parts —
-  // the server adds file content as synthetic text parts that should not be restored)
   const parts = state.part[messageId] ?? []
-  let messageText = ""
-  const textParts = parts.filter((p) => p.type === "text" && !isSyntheticPart(p))
-  messageText = textParts
-    .map((p: Part) => ((p as Record<string, unknown>).text as string) || ((p as Record<string, unknown>).content as string) || "")
-    .join("\n")
-    .trim()
+  const messageText = extractUserMessageText(parts)
 
   const result = await sdkForSession(sessionId).session.fork({ sessionID: sessionId, directory: sessionDirectory, messageID: messageId })
   if (!result.data) return
@@ -968,14 +1058,19 @@ export async function forkFromMessage(sessionId: string, messageId: string): Pro
     store.setState({ session: sessions })
   }
 
-  // Switch to new session
   useSessionUIStore.getState().setCurrentSession(forkedSession.id)
 
-  // Restore forked message text to input
   if (messageText) {
     useInputStore.setState({
       pendingInputText: messageText,
       pendingInputMode: "replace" as const,
     })
+  }
+
+  if (parts.length > 0) {
+    const files = await extractAttachedFilesFromParts(parts)
+    if (files.length > 0) {
+      useInputStore.getState().setAttachedFiles(files)
+    }
   }
 }
