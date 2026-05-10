@@ -1587,29 +1587,15 @@ const AssistantMessageBody = React.memo(({
                     continue;
                 }
                 if (showReasoningTraces) {
-                    if (isSortedRenderMode) {
-                        rendered.push(
-                            <ReasoningPart
-                                key={`reasoning-${messageId}-${i}`}
-                                part={part}
-                                messageId={messageId}
-                                onContentChange={onContentChange}
-                                alwaysShowActions={alwaysShowMessageActions}
-                            />
-                        );
-                    } else {
-                        rendered.push(
-                            <AssistantTextPart
-                                key={`reasoning-${messageId}-${i}`}
-                                part={part}
-                                sessionId={sessionId}
-                                messageId={messageId}
-                                streamPhase={streamPhase}
-                                chatRenderMode={chatRenderMode}
-                                onContentChange={onContentChange}
-                            />
-                        );
-                    }
+                    rendered.push(
+                        <ReasoningPart
+                            key={`reasoning-${messageId}-${i}`}
+                            part={part}
+                            messageId={messageId}
+                            onContentChange={onContentChange}
+                            alwaysShowActions={alwaysShowMessageActions}
+                        />
+                    );
                 }
                 i++;
                 continue;

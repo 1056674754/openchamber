@@ -207,7 +207,7 @@ export function useSync() {
     [directory],
   )
 
-  // Load messages for a session
+  // Load messages for a session — fetches all pages until complete.
   const loadMessages = useCallback(
     async (sessionID: string, options?: { before?: string; mode?: "replace" | "prepend" }) => {
       const m = getMetaFor(sessionID)
@@ -216,11 +216,22 @@ export function useSync() {
 
       try {
         const limit = m.limit
-        const page = await fetchMessages(sessionID, limit, options?.before)
+        let allMessages: Message[] = []
+        let allParts: Array<{ id: string; part: Part[] }> = []
+        let cursor: string | undefined = options?.before
+        let complete = false
+
+        while (!complete) {
+          const page = await fetchMessages(sessionID, limit, cursor)
+          allMessages = [...allMessages, ...page.session]
+          allParts = [...allParts, ...page.part]
+          cursor = page.cursor
+          complete = page.complete
+        }
 
         // Merge optimistic items
         const items = getOptimistic(sessionID)
-        const merged = mergeOptimisticPage(page, items)
+        const merged = mergeOptimisticPage({ session: allMessages, part: allParts, cursor: undefined, complete: true }, items)
         for (const messageID of merged.confirmed) {
           clearOptimistic(sessionID, messageID)
         }
@@ -239,16 +250,16 @@ export function useSync() {
         store.setState({ message: materialized.message, part: materialized.part })
         setMetaFor(sessionID, {
           limit: materialized.messages.length,
-          cursor: merged.cursor,
-          complete: merged.complete,
+          cursor: undefined,
+          complete: true,
           loading: false,
         })
         setSessionPrefetch({
           directory,
           sessionID,
           limit: materialized.messages.length,
-          cursor: merged.cursor,
-          complete: merged.complete,
+          cursor: undefined,
+          complete: true,
         })
       } catch {
         setMetaFor(sessionID, { loading: false })

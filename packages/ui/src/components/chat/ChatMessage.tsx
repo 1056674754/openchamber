@@ -1149,7 +1149,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                 className={cn(
                     'group w-full',
                     isSystemDirective ? 'pt-1 pb-0' : isUser ? (isMobile ? 'pt-1.5' : 'pt-4') : assistantTopPaddingClass,
-                    isSystemDirective ? '' : isUser ? 'pb-0' : isFollowedByAssistant ? 'pb-0' : 'pb-8'
+                    'pb-0'
                 )}
                 id={`message-${message.info.id}`}
                 data-message-id={message.info.id}

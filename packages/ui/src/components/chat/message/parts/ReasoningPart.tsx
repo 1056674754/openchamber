@@ -96,7 +96,25 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
     actions,
     alwaysShowActions = false,
 }) => {
+    const autoCollapseThinking = useUIStore((s) => s.autoCollapseThinking);
+    const thresholdChars = useUIStore((s) => s.autoCollapseThinkingThreshold);
+
+    const isComplete = typeof time?.end === 'number';
+    const shouldAutoCollapse = autoCollapseThinking && isComplete && text.length > thresholdChars;
+
+    const [userToggled, setUserToggled] = React.useState(false);
     const [isExpanded, setIsExpanded] = React.useState(false);
+
+    const effectiveExpanded = userToggled
+        ? isExpanded
+        : autoCollapseThinking
+            ? (isStreaming ? true : !shouldAutoCollapse)
+            : isExpanded;
+
+    const handleToggle = React.useCallback(() => {
+        setUserToggled(true);
+        setIsExpanded(!effectiveExpanded);
+    }, [effectiveExpanded]);
 
     const summary = React.useMemo(() => getReasoningSummary(text), [text]);
     const { label, Icon } = variantConfig[variant];
@@ -120,15 +138,15 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
                 className={cn(
                     'group/tool flex items-center gap-2 pr-2 pl-px py-1.5 rounded-xl cursor-pointer'
                 )}
-                onClick={() => setIsExpanded((prev) => !prev)}
+                onClick={handleToggle}
             >
                 <div className="flex items-center gap-2 flex-shrink-0">
                     <div className="relative h-3.5 w-3.5 flex-shrink-0">
                         <div
                             className={cn(
                                 'absolute inset-0 transition-opacity',
-                                isExpanded && 'opacity-0',
-                                !isExpanded && (alwaysShowActions ? 'opacity-0' : 'group-hover/tool:opacity-0')
+                                effectiveExpanded && 'opacity-0',
+                                !effectiveExpanded && (alwaysShowActions ? 'opacity-0' : 'group-hover/tool:opacity-0')
                             )}
                         >
                             <Icon className="h-3.5 w-3.5" />
@@ -136,11 +154,11 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
                         <div
                             className={cn(
                                 'absolute inset-0 transition-opacity flex items-center justify-center',
-                                isExpanded && 'opacity-100',
-                                !isExpanded && (alwaysShowActions ? 'opacity-100' : 'opacity-0 group-hover/tool:opacity-100')
+                                effectiveExpanded && 'opacity-100',
+                                !effectiveExpanded && (alwaysShowActions ? 'opacity-100' : 'opacity-0 group-hover/tool:opacity-100')
                             )}
                         >
-                            {isExpanded ? <RiArrowDownSLine className="h-3.5 w-3.5" /> : <RiArrowRightSLine className="h-3.5 w-3.5" />}
+                            {effectiveExpanded ? <RiArrowDownSLine className="h-3.5 w-3.5" /> : <RiArrowRightSLine className="h-3.5 w-3.5" />}
                         </div>
                     </div>
                     <span className="typography-meta font-medium">{label}</span>
@@ -164,7 +182,7 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
                 ) : null}
             </div>
 
-            {isExpanded && (
+            {effectiveExpanded && (
                 <div
                     className={cn(
                         'relative pr-2 pb-2 pt-2 pl-4'

@@ -1284,24 +1284,6 @@ function handleEvent(
   // type will mutate. This preserves reference identity for untouched slices
   // so Zustand selectors skip re-renders for unrelated subscribers.
   const current = store.getState()
-
-  // Abort suppression: skip streaming events for sessions with a pending abort.
-  // This prevents new content from appearing in the chat after the user presses stop.
-  // Status events (session.idle, session.error) are always allowed through so they
-  // can clear the suppression state.
-  if (payload.type === "message.part.delta" || payload.type === "message.part.updated" || payload.type === "message.updated") {
-    const eventSessionId = getSessionIdFromPayload(payload)
-    if (eventSessionId && sessionActions.isSessionAbortSuppressed(eventSessionId)) {
-      return
-    }
-  }
-  if (payload.type === "session.idle" || payload.type === "session.error") {
-    const eventSessionId = getSessionIdFromPayload(payload)
-    if (eventSessionId) {
-      sessionActions.clearAbortSuppression(eventSessionId)
-    }
-  }
-
   const draft: State = { ...current }
 
   switch (payload.type) {
