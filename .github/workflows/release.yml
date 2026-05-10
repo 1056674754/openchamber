@@ -101,11 +101,14 @@ jobs:
       - name: Build web server dist
         run: bun run --cwd packages/web build
 
+      - name: Embed web assets
+        run: bun run scripts/embed-assets.mjs
+
       - name: Compile Linux server binary
         timeout-minutes: 30
         run: |
           mkdir -p artifacts
-          bun build --compile packages/web/server/index.js --outfile artifacts/openchamber-linux --target bun-linux-x64
+          bun build --compile packages/web/bin/cli-standalone.mjs --outfile artifacts/openchamber-linux --target bun-linux-x64
           chmod +x artifacts/openchamber-linux
 
       - name: Verify binary
