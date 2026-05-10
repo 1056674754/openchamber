@@ -507,7 +507,9 @@ type ComposerActionButtonsProps = {
     newSessionDraftOpen: boolean;
     onPrimaryAction: () => void;
     onQueueMessage: () => void;
+    onSendNow: () => void;
     onAbort: () => void;
+    queueModeEnabled: boolean;
 };
 
 const ComposerActionButtons = React.memo(function ComposerActionButtons(props: ComposerActionButtonsProps) {
@@ -523,9 +525,52 @@ const ComposerActionButtons = React.memo(function ComposerActionButtons(props: C
         newSessionDraftOpen,
         onPrimaryAction,
         onQueueMessage,
+        onSendNow,
         onAbort,
+        queueModeEnabled,
     } = props;
     const { t } = useI18n();
+    const [isCtrlHeld, setIsCtrlHeld] = React.useState(false);
+
+    React.useEffect(() => {
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if (e.key === 'Control' || e.key === 'Meta') setIsCtrlHeld(true);
+        };
+        const handleKeyUp = (e: KeyboardEvent) => {
+            if ((e.key === 'Control' || e.key === 'Meta') && !e.ctrlKey && !e.metaKey) {
+                setIsCtrlHeld(false);
+            }
+        };
+        const handleBlur = () => setIsCtrlHeld(false);
+
+        window.addEventListener('keydown', handleKeyDown);
+        window.addEventListener('keyup', handleKeyUp);
+        window.addEventListener('blur', handleBlur);
+
+        return () => {
+            window.removeEventListener('keydown', handleKeyDown);
+            window.removeEventListener('keyup', handleKeyUp);
+            window.removeEventListener('blur', handleBlur);
+        };
+    }, []);
+
+    const ctrlKeyLabel = isMacOS() ? '⌘' : 'Ctrl';
+
+    const defaultAction = queueModeEnabled
+        ? t('chat.chatInput.actions.queueButton.queue')
+        : t('chat.chatInput.actions.queueButton.send');
+
+    const alternateAction = queueModeEnabled
+        ? t('chat.chatInput.actions.queueButton.send')
+        : t('chat.chatInput.actions.queueButton.queue');
+
+    const tooltipText = isCtrlHeld
+        ? t('chat.chatInput.actions.queueButton.ctrlEnter', { ctrlKey: ctrlKeyLabel, action: alternateAction })
+        : t('chat.chatInput.actions.queueButton.enter', { action: defaultAction });
+
+    const ariaLabel = isCtrlHeld
+        ? t('chat.chatInput.actions.queueButton.ctrlEnter', { ctrlKey: ctrlKeyLabel, action: alternateAction })
+        : t('chat.chatInput.actions.queueButton.enter', { action: defaultAction });
 
     const sendButton = (
         <button
@@ -558,24 +603,40 @@ const ComposerActionButtons = React.memo(function ComposerActionButtons(props: C
     return (
         <div className="relative">
             {hasContent ? (
-                <button
-                    type="button"
-                    disabled={!currentSessionId}
-                    onClick={(event) => {
-                        if (isMobile) {
-                            event.preventDefault();
-                        }
-                        onQueueMessage();
-                    }}
-                    className={cn(
-                        footerIconButtonClass,
-                        'absolute z-20 bottom-full left-1/2 -translate-x-1/2 mb-1',
-                        currentSessionId ? 'text-primary hover:text-primary' : 'opacity-30'
-                    )}
-                    aria-label={t('chat.chatInput.actions.queueMessageAria')}
-                >
-                    <RiSendPlane2Line className={cn(sendIconSizeClass, '-rotate-90')} />
-                </button>
+                <Tooltip>
+                    <TooltipTrigger asChild>
+                        <button
+                            type="button"
+                            disabled={!currentSessionId}
+                            onClick={(event) => {
+                                if (isMobile) {
+                                    event.preventDefault();
+                                }
+                                const isCtrlClick = event.ctrlKey || event.metaKey;
+                                if (isCtrlClick) {
+                                    if (queueModeEnabled) {
+                                        onSendNow();
+                                    } else {
+                                        onQueueMessage();
+                                    }
+                                } else {
+                                    onPrimaryAction();
+                                }
+                            }}
+                            className={cn(
+                                footerIconButtonClass,
+                                'absolute z-20 bottom-full left-1/2 -translate-x-1/2 mb-1',
+                                currentSessionId ? 'text-primary hover:text-primary' : 'opacity-30'
+                            )}
+                            aria-label={ariaLabel}
+                        >
+                            <RiSendPlane2Line className={cn(sendIconSizeClass, '-rotate-45')} />
+                        </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="top" sideOffset={8}>
+                        {tooltipText}
+                    </TooltipContent>
+                </Tooltip>
             ) : null}
             <button
                 type="button"
@@ -600,6 +661,7 @@ const ComposerActionButtons = React.memo(function ComposerActionButtons(props: C
     && prev.hasContent === next.hasContent
     && prev.currentSessionId === next.currentSessionId
     && prev.newSessionDraftOpen === next.newSessionDraftOpen
+    && prev.queueModeEnabled === next.queueModeEnabled
     && prev.onPrimaryAction === next.onPrimaryAction
     && prev.onQueueMessage === next.onQueueMessage
     && prev.onAbort === next.onAbort
@@ -714,12 +776,23 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         // Read per-session draft at mount time using the current session from the store
         const sessionId = useSessionUIStore.getState().currentSessionId;
         initialSessionIdRef.current = sessionId;
+
+        const pending = useInputStore.getState().pendingInputText;
+        console.log('[ChatInput useState init] sessionId=', sessionId, 'pendingInputText=', pending);
+        if (pending !== null && pending.length > 0) {
+            useInputStore.getState().consumePendingInputText();
+            console.log('[ChatInput useState init] consumed pending:', pending);
+            return pending;
+        }
+
         const draft = getStoredDraft(sessionId);
+        console.log('[ChatInput useState init] fallback to draft:', draft);
         if (draft) {
             initialDraftRef.current = draft;
         }
         return draft;
     });
+    console.log('[ChatInput render] message=', JSON.stringify(message));
     // Restore confirmed mentions from localStorage on mount
     const confirmedMentionsRef = React.useRef<Set<string>>(loadConfirmedMentions(initialSessionIdRef.current));
     // Helper: check if a mention path looks like a file/folder (has path separators, extension, or was explicitly confirmed)
@@ -1229,8 +1302,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 
     // Consume pending input text (e.g., from revert action)
     React.useEffect(() => {
+        console.log('[ChatInput useEffect pendingInputText] pendingInputText=', pendingInputText);
         if (pendingInputText !== null) {
             const pending = consumePendingInputText();
+            console.log('[ChatInput useEffect pendingInputText] consumed:', pending);
             if (pending?.text) {
                 if (pending.mode === 'append') {
                     setMessage((prev) => {
@@ -1683,6 +1758,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             void handleSubmitRef.current();
         }
     }, [inputMode, getCurrentInputSnapshot, currentSessionId, sessionPhase, queueModeEnabled, handleQueueMessage]);
+
+    const handleSendNow = React.useCallback(() => {
+        void handleSubmitRef.current();
+    }, []);
 
     const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
         // Early return during IME composition to prevent interference with autocomplete.
@@ -3856,7 +3935,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                                 newSessionDraftOpen={newSessionDraftOpen}
                                                 onPrimaryAction={handlePrimaryAction}
                                                 onQueueMessage={handleQueueMessage}
+                                                onSendNow={handleSendNow}
                                                 onAbort={handleAbort}
+                                                queueModeEnabled={queueModeEnabled}
                                             />
                                         </div>
                                     </div>
@@ -3911,10 +3992,12 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                         hasContent={!!hasContent}
                                         currentSessionId={currentSessionId}
                                         newSessionDraftOpen={newSessionDraftOpen}
-                                        onPrimaryAction={handlePrimaryAction}
-                                        onQueueMessage={handleQueueMessage}
-                                        onAbort={handleAbort}
-                                    />
+                                                onPrimaryAction={handlePrimaryAction}
+                                                onQueueMessage={handleQueueMessage}
+                                                onSendNow={handleSendNow}
+                                                onAbort={handleAbort}
+                                                queueModeEnabled={queueModeEnabled}
+                                            />
                                 </div>
                             </>
                         )}
