@@ -1702,6 +1702,7 @@ serverRegistry.register({
   label: "Local",
   baseUrl: opencodeClient.getBaseUrl(),
 });
+serverRegistry.startHealthPolling(30_000);
 
 // Exported types
 export type { Session, Message, Part, Provider, Config, Model };

@@ -13,6 +13,7 @@ import { OpenCodeCliSettings } from './OpenCodeCliSettings';
 import { DesktopNetworkSettings } from './DesktopNetworkSettings';
 import { DesktopOpenCodeSettings } from './DesktopOpenCodeSettings';
 import { KeyboardShortcutsSettings } from './KeyboardShortcutsSettings';
+import { OpenCodeServerInfoSettings } from './OpenCodeServerInfoSettings';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { useDeviceInfo } from '@/lib/device';
 import { isDesktopLocalOriginActive, isDesktopShell, isVSCodeRuntime, isWebRuntime } from '@/lib/desktop';
@@ -67,6 +68,9 @@ export const OpenChamberPage: React.FC<OpenChamberPageProps> = ({ section }) => 
                             <AboutSettings />
                         </div>
                     )}
+                    <div className="border-t border-border/40 pt-6">
+                        <OpenCodeServerInfoSettings />
+                    </div>
                 </div>
             </ScrollableOverlay>
         );
@@ -165,6 +169,9 @@ const SessionsSectionContent: React.FC = () => {
             </div>
             <div className="border-t border-border/40 pt-6">
                 <PasskeySettings />
+            </div>
+            <div className="border-t border-border/40 pt-6">
+                <OpenCodeServerInfoSettings />
             </div>
         </div>
     );

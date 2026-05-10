@@ -54,6 +54,7 @@ import { UsagePage } from '@/components/sections/usage/UsagePage';
 import { MagicPromptsSidebar } from '@/components/sections/magic-prompts/MagicPromptsSidebar';
 import { MagicPromptsPage } from '@/components/sections/magic-prompts/MagicPromptsPage';
 import { GitPage } from '@/components/sections/git-identities/GitPage';
+import { SettingsServerSelector } from '@/components/sections/shared/SettingsServerSelector';
 import type { OpenChamberSection } from '@/components/sections/openchamber/types';
 import { OpenChamberPage } from '@/components/sections/openchamber/OpenChamberPage';
 import { McpIcon } from '@/components/icons/McpIcon';
@@ -110,6 +111,16 @@ const pageOrder: SettingsPageSlug[] = [
   'voice',
   'tunnel',
 ];
+
+const SERVER_AWARE_PAGES: Set<SettingsPageSlug> = new Set([
+  'providers',
+  'agents',
+  'commands',
+  'mcp',
+  'skills.installed',
+  'skills.catalog',
+  'usage',
+]);
 
 function buildRuntimeContext(isDesktop: boolean): SettingsRuntimeContext {
   const isVSCode = isVSCodeRuntime();
@@ -759,6 +770,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
               : (activePageMeta ? getPageTitle(activePageMeta.slug) : t('settings.view.home.title'))}
           </div>
 
+          {mobileStage !== 'nav' && SERVER_AWARE_PAGES.has(settingsSlug) && (
+            <SettingsServerSelector />
+          )}
+
           {mobileStage === 'page-content' && activePageMeta?.kind === 'split' && (
             <button
               type="button"
@@ -799,15 +814,20 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
 
       {onClose && (
         <div className={cn('absolute right-0.5 z-50', isWindowed ? 'top-0.5' : 'top-1')}>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label={t('settings.view.actions.closeSettings')}
-            title={t('settings.view.actions.closeSettingsWithShortcut', { shortcut: shortcutKey })}
-            className="inline-flex h-7 w-7 items-center justify-center rounded-md p-0.5 text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-          >
-            <RiCloseLine className="h-5 w-5" />
-          </button>
+          <div className="flex items-center gap-1">
+            {SERVER_AWARE_PAGES.has(settingsSlug) && (
+              <SettingsServerSelector />
+            )}
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label={t('settings.view.actions.closeSettings')}
+              title={t('settings.view.actions.closeSettingsWithShortcut', { shortcut: shortcutKey })}
+              className="inline-flex h-7 w-7 items-center justify-center rounded-md p-0.5 text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            >
+              <RiCloseLine className="h-5 w-5" />
+            </button>
+          </div>
         </div>
       )}
         </>

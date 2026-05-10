@@ -28,10 +28,7 @@ import {
   RiServerLine,
   RiSettings3Line,
   RiShieldKeyholeLine,
-  RiStarFill,
-  RiStarLine,
   RiDeleteBinLine,
-  RiWindowLine,
 } from '@remixicon/react';
 import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui';
@@ -44,7 +41,6 @@ import {
   desktopHostProbe,
   desktopHostsGet,
   desktopHostsSet,
-  desktopOpenNewWindowAtUrl,
   locationMatchesHost,
   normalizeHostUrl,
   redactSensitiveUrl,
@@ -660,22 +656,6 @@ export function DesktopHostSwitcherDialog({
     await persist(nextHosts, nextDefault);
   }, [configHosts, defaultHostId, persist]);
 
-  const setDefault = React.useCallback(async (id: string) => {
-    const next = id === LOCAL_HOST_ID ? LOCAL_HOST_ID : id;
-    await persist(configHosts, next);
-  }, [configHosts, persist]);
-
-  const openInNewWindow = React.useCallback((host: DesktopHost) => {
-    const origin = host.id === LOCAL_HOST_ID ? getLocalOrigin() : (normalizeHostUrl(host.url) || '');
-    if (!origin) return;
-    const target = toNavigationUrl(origin);
-    desktopOpenNewWindowAtUrl(target).catch((err: unknown) => {
-      toast.error(t('desktopHostSwitcher.error.failedToOpenNewWindow'), {
-        description: err instanceof Error ? err.message : String(err),
-      });
-    });
-  }, [t]);
-
   const switchToLocal = React.useCallback(() => {
     sshSwitchTokenRef.current += 1;
     setSwitchingHostId(null);
@@ -841,7 +821,6 @@ export function DesktopHostSwitcherDialog({
                 const isLocal = host.id === LOCAL_HOST_ID;
                 const isSsh = Boolean(sshHostIds[host.id]);
                 const isActive = host.id === current.id;
-                const isDefault = (defaultHostId || LOCAL_HOST_ID) === host.id;
                 const status = statusById[host.id] || null;
                 const sshStatus = sshStatusesById[host.id] || null;
                 const statusKind = isSsh ? sshPhaseToHostStatus(sshStatus?.phase) : (status?.status ?? null);
@@ -971,54 +950,6 @@ export function DesktopHostSwitcherDialog({
                         )
                       )}
 
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <button
-                            type="button"
-                            className={cn(
-                              'h-8 w-8 rounded-md inline-flex items-center justify-center hover:bg-interactive-hover transition-colors',
-                              isDefault
-                                ? 'text-primary hover:text-primary/80'
-                                : 'text-muted-foreground/60 hover:text-primary/80',
-                            )}
-                            onClick={() => void setDefault(host.id)}
-                            aria-label={isDefault ? t('desktopHostSwitcher.actions.defaultInstanceAria') : t('desktopHostSwitcher.actions.setAsDefaultAria')}
-                            disabled={isSaving || (!isDefault && (statusKind === 'unreachable' || statusKind === 'wrong-service'))}
-                          >
-                            {isDefault ? <RiStarFill className="h-4 w-4" /> : <RiStarLine className="h-4 w-4" />}
-                          </button>
-                        </TooltipTrigger>
-                        <TooltipContent sideOffset={6}>
-                          {isDefault ? t('desktopHostSwitcher.header.default') : t('desktopHostSwitcher.actions.setAsDefault')}
-                        </TooltipContent>
-                      </Tooltip>
-
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <button
-                            type="button"
-                              className={cn(
-                                'h-8 w-8 rounded-md inline-flex items-center justify-center hover:bg-interactive-hover transition-colors',
-                                statusKind === 'unreachable' || statusKind === 'wrong-service'
-                                  ? 'text-muted-foreground/30 cursor-not-allowed'
-                                  : 'text-muted-foreground/60 hover:text-foreground',
-                              )}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              openInNewWindow(host);
-                            }}
-                            disabled={statusKind === 'unreachable' || statusKind === 'wrong-service'}
-                            aria-label={t('desktopHostSwitcher.actions.openInNewWindowAria')}
-                          >
-                            <RiWindowLine className="h-4 w-4" />
-                          </button>
-                        </TooltipTrigger>
-                        <TooltipContent sideOffset={6}>
-                          {(statusKind === 'unreachable' || statusKind === 'wrong-service')
-                            ? t('desktopHostSwitcher.state.instanceUnreachable')
-                            : t('desktopHostSwitcher.actions.openInNewWindow')}
-                        </TooltipContent>
-                      </Tooltip>
                     </div>
                   </div>
                 );
