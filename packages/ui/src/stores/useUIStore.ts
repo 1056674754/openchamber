@@ -516,9 +516,12 @@ interface UIStore {
   settingsHasOpenedOnce: boolean;
   settingsProjectsSelectedId: string | null;
   settingsRemoteInstancesSelectedId: string | null;
+  settingsSelectedServerId: string | null;
   eventStreamStatus: EventStreamStatus;
   eventStreamHint: string | null;
   showReasoningTraces: boolean;
+  autoCollapseThinking: boolean;
+  autoCollapseThinkingThreshold: number;
   chatRenderMode: ChatRenderMode;
   activityRenderMode: ActivityRenderMode;
   sessionSortMode: SessionSortMode;
@@ -645,9 +648,12 @@ interface UIStore {
   setSidebarSection: (section: SidebarSection) => void;
   setSettingsPage: (slug: string) => void;
   setSettingsProjectsSelectedId: (projectId: string | null) => void;
-  setSettingsRemoteInstancesSelectedId: (instanceId: string | null) => void;
+setSettingsRemoteInstancesSelectedId: (instanceId: string | null) => void;
+  setSettingsSelectedServerId: (serverId: string | null) => void;
   setEventStreamStatus: (status: EventStreamStatus, hint?: string | null) => void;
   setShowReasoningTraces: (value: boolean) => void;
+  setAutoCollapseThinking: (value: boolean) => void;
+  setAutoCollapseThinkingThreshold: (value: number) => void;
   setChatRenderMode: (value: ChatRenderMode) => void;
   setActivityRenderMode: (value: ActivityRenderMode) => void;
   setSessionSortMode: (value: SessionSortMode) => void;
@@ -773,9 +779,12 @@ export const useUIStore = create<UIStore>()(
         settingsHasOpenedOnce: false,
         settingsProjectsSelectedId: null,
         settingsRemoteInstancesSelectedId: null,
+  settingsSelectedServerId: null,
         eventStreamStatus: 'idle',
         eventStreamHint: null,
         showReasoningTraces: true,
+        autoCollapseThinking: true,
+        autoCollapseThinkingThreshold: 200,
         chatRenderMode: 'live',
         activityRenderMode: 'summary',
         sessionSortMode: 'created-desc',
@@ -1369,6 +1378,10 @@ export const useUIStore = create<UIStore>()(
           set({ settingsRemoteInstancesSelectedId: instanceId });
         },
 
+        setSettingsSelectedServerId: (serverId: string | null) => {
+          set({ settingsSelectedServerId: serverId });
+        },
+
         setEventStreamStatus: (status, hint) => {
           set({
             eventStreamStatus: status,
@@ -1378,6 +1391,14 @@ export const useUIStore = create<UIStore>()(
 
         setShowReasoningTraces: (value) => {
           set({ showReasoningTraces: value });
+        },
+
+        setAutoCollapseThinking: (value) => {
+          set({ autoCollapseThinking: value });
+        },
+
+        setAutoCollapseThinkingThreshold: (value) => {
+          set({ autoCollapseThinkingThreshold: Math.max(50, Math.min(5000, value)) });
         },
 
         setChatRenderMode: (value) => {
@@ -2004,9 +2025,12 @@ export const useUIStore = create<UIStore>()(
           settingsHasOpenedOnce: state.settingsHasOpenedOnce,
           settingsProjectsSelectedId: state.settingsProjectsSelectedId,
           settingsRemoteInstancesSelectedId: state.settingsRemoteInstancesSelectedId,
+          settingsSelectedServerId: state.settingsSelectedServerId,
           isSessionCreateDialogOpen: state.isSessionCreateDialogOpen,
           // Note: isSettingsDialogOpen intentionally NOT persisted
           showReasoningTraces: state.showReasoningTraces,
+          autoCollapseThinking: state.autoCollapseThinking,
+          autoCollapseThinkingThreshold: state.autoCollapseThinkingThreshold,
           chatRenderMode: state.chatRenderMode,
           activityRenderMode: state.activityRenderMode,
           sessionSortMode: state.sessionSortMode,
