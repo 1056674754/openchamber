@@ -574,7 +574,7 @@ export function SessionGroupSection(props: Props): React.ReactNode {
         <div
           ref={dragHandleProps?.setActivatorNodeRef}
           className={cn(
-            'min-w-0 flex flex-1 items-start gap-1 overflow-hidden pl-0.5 transition-[padding] cursor-grab active:cursor-grabbing',
+            'min-w-0 flex flex-1 items-start gap-1 overflow-hidden pl-0.5 transition-[padding] cursor-pointer',
             groupHeaderRightPadding,
           )}
           {...(dragHandleProps?.listeners ?? {})}
@@ -644,15 +644,9 @@ export function SessionGroupSection(props: Props): React.ReactNode {
               ) : group.isArchivedBucket ? (
                 <span className="inline-flex min-w-0 max-w-full items-center gap-1">
                   <span className="inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center">
-                    <RiArchiveLine className={cn('h-3.5 w-3.5 shrink-0 text-muted-foreground', alwaysShowActions ? 'hidden' : 'group-hover/gh:hidden')} />
-                    <span className={cn(
-                      'text-muted-foreground h-3.5 w-3.5 items-center justify-center',
-                      alwaysShowActions ? 'inline-flex' : 'hidden group-hover/gh:inline-flex',
-                    )}>
-                      {isCollapsed ? <RiArrowRightSLine className="h-3.5 w-3.5" /> : <RiArrowDownSLine className="h-3.5 w-3.5" />}
-                    </span>
+                    <RiArchiveLine className={cn('h-3.5 w-3.5 shrink-0', isCollapsed ? 'text-muted-foreground' : 'text-foreground/92')} />
                   </span>
-                  <span className="min-w-0 flex-1 truncate">{renderHighlightedText(group.label, normalizedSessionSearchQuery)}</span>
+                  <span className={cn('min-w-0 flex-1 truncate', isCollapsed ? 'text-muted-foreground' : 'text-foreground/92')}>{renderHighlightedText(group.label, normalizedSessionSearchQuery)}</span>
                 </span>
               ) : (!group.isMain || group.worktree) ? (
                 <span className="inline-flex min-w-0 max-w-full items-center gap-1">
