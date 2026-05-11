@@ -42,7 +42,15 @@ interface ProjectsStore {
   addProject: (path: string, options?: { label?: string; id?: string }) => ProjectEntry | null;
   ensureRemoteProject: (path: string, serverId: string, label?: string) => ProjectEntry | null;
   removeProject: (id: string) => void;
-  setActiveProject: (id: string) => void;
+  /**
+   * Switch the active project. By default also writes the project's path to
+   * the global SDK directory and `useDirectoryStore.currentDirectory`. Pass
+   * `{ syncDirectory: false }` when the caller is just updating the sidebar's
+   * "active project" highlight without intending to change the working
+   * directory — for example, when the active session lives in a worktree
+   * whose directory should remain the authoritative working directory.
+   */
+  setActiveProject: (id: string, options?: { syncDirectory?: boolean }) => void;
   setActiveProjectIdOnly: (id: string) => void;
   renameProject: (id: string, label: string) => void;
   updateProjectMeta: (id: string, meta: { label?: string; icon?: string | null; color?: string | null; iconBackground?: string | null }) => void;
@@ -497,7 +505,7 @@ export const useProjectsStore = create<ProjectsStore>()(
       cacheProjects(nextProjects, current.activeProjectId);
     },
 
-    setActiveProject: (id: string) => {
+    setActiveProject: (id: string, options?: { syncDirectory?: boolean }) => {
       if (vscodeWorkspace) {
         return;
       }
@@ -518,8 +526,10 @@ export const useProjectsStore = create<ProjectsStore>()(
       set({ projects: nextProjects, activeProjectId: id });
       persistProjects(nextProjects, id);
 
-      opencodeClient.setDirectory(target.path);
-      useDirectoryStore.getState().setDirectory(target.path, { showOverlay: false });
+      if (options?.syncDirectory !== false) {
+        opencodeClient.setDirectory(target.path);
+        useDirectoryStore.getState().setDirectory(target.path, { showOverlay: false });
+      }
     },
 
     setActiveProjectIdOnly: (id: string) => {
