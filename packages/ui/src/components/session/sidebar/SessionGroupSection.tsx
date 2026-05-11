@@ -53,7 +53,6 @@ type Props = {
   renderSessionNode: (node: SessionNode, depth?: number, groupDirectory?: string | null, projectId?: string | null, archivedBucket?: boolean, secondaryMeta?: { projectLabel?: string | null; branchLabel?: string | null } | null) => React.ReactNode;
   currentSessionDirectory: string | null;
   projectRepoStatus: Map<string, boolean | null>;
-  lastRepoStatus: boolean;
   toggleGroupSessionLimit: (groupKey: string) => void;
   mobileVariant: boolean;
   alwaysShowActions: boolean;
@@ -120,7 +119,6 @@ export function SessionGroupSection(props: Props): React.ReactNode {
     setDeleteFolderConfirm,
     renderSessionNode,
     projectRepoStatus,
-    lastRepoStatus,
     toggleGroupSessionLimit,
     mobileVariant,
     alwaysShowActions,
@@ -322,9 +320,7 @@ export function SessionGroupSection(props: Props): React.ReactNode {
   };
 
   const allGroupSessions = collectGroupSessions(sourceGroupNodes);
-  const isGitProject = projectId && projectRepoStatus.has(projectId)
-    ? Boolean(projectRepoStatus.get(projectId))
-    : lastRepoStatus;
+  const isGitProject = projectId ? projectRepoStatus.get(projectId) === true : false;
   const groupDirectoryKey = normalizePath(group.directory ?? null);
   const groupBranchKey = group.branch?.trim() ?? null;
   const prIndicator = groupDirectoryKey && groupBranchKey

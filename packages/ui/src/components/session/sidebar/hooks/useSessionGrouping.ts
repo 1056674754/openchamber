@@ -130,8 +130,8 @@ export const useSessionGrouping = (args: Args) => {
 
       const worktreeByPath = new Map<string, WorktreeMetadata>();
       availableWorktrees.forEach((meta) => {
-        if (meta.path) {
-          const normalized = normalizePath(meta.path) ?? meta.path;
+        const normalized = normalizePath(meta.path);
+        if (normalized) {
           worktreeByPath.set(normalized, meta);
         }
       });
@@ -205,7 +205,10 @@ export const useSessionGrouping = (args: Args) => {
       // Calculate activity info for each worktree to determine sorting priority
       const worktreeActivityInfo = new Map<string, { hasActiveSession: boolean; lastUpdatedAt: number }>();
       availableWorktrees.forEach((meta) => {
-        const directory = normalizePath(meta.path) ?? meta.path;
+        const directory = normalizePath(meta.path);
+        if (!directory) {
+          return;
+        }
         const sessionsInWorktree = groupedNodes.get(directory) ?? [];
         const hasActiveSession = sessionsInWorktree.length > 0;
         // Calculate the latest update time among all sessions in this worktree
@@ -222,8 +225,8 @@ export const useSessionGrouping = (args: Args) => {
 
       // Sort worktrees: active first (by last updated desc), then inactive (by label asc)
       const sortedWorktrees = [...availableWorktrees].sort((a, b) => {
-        const aDir = normalizePath(a.path) ?? a.path;
-        const bDir = normalizePath(b.path) ?? b.path;
+        const aDir = normalizePath(a.path) ?? '';
+        const bDir = normalizePath(b.path) ?? '';
         const aInfo = worktreeActivityInfo.get(aDir) ?? { hasActiveSession: false, lastUpdatedAt: 0 };
         const bInfo = worktreeActivityInfo.get(bDir) ?? { hasActiveSession: false, lastUpdatedAt: 0 };
 
@@ -244,7 +247,10 @@ export const useSessionGrouping = (args: Args) => {
       });
 
       sortedWorktrees.forEach((meta) => {
-        const directory = normalizePath(meta.path) ?? meta.path;
+        const directory = normalizePath(meta.path);
+        if (!directory) {
+          return;
+        }
         const currentBranch = args.gitBranches.get(directory)?.trim() || null;
         const metadataBranch = meta.branch?.trim() || null;
         const shouldSyncLabelWithBranch = Boolean(

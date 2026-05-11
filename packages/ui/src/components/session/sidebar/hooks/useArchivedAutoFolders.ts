@@ -34,7 +34,7 @@ const getArchivedSessionsForProject = (
   const validDirectories = new Set<string>([
     project.normalizedPath,
     ...worktreesForProject
-      .map((meta) => normalizePath(meta.path) ?? meta.path)
+      .map((meta) => normalizePath(meta.path))
       .filter((value): value is string => Boolean(value)),
   ]);
 

@@ -36,6 +36,14 @@ export const useSessionFolderCleanup = (args: Args): void => {
       return;
     }
 
+    // Data-loss guard: if projects haven't loaded yet but folder scopes exist
+    // in storage, we'd call cleanupSessions(scopeKey, new Set()) for every
+    // archived scope and wipe valid folder contents. Wait until projects
+    // are populated before reconciling.
+    if (normalizedProjects.length === 0) {
+      return;
+    }
+
     const idsByScope = new Map<string, Set<string>>();
     sessions.forEach((session) => {
       const directory = normalizePath((session as Session & { directory?: string | null }).directory ?? null);
@@ -56,7 +64,7 @@ export const useSessionFolderCleanup = (args: Args): void => {
       const validDirectories = new Set<string>([
         project.normalizedPath,
         ...worktreesForProject
-          .map((meta) => normalizePath(meta.path) ?? meta.path)
+          .map((meta) => normalizePath(meta.path))
           .filter((value): value is string => Boolean(value)),
       ]);
 
