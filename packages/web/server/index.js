@@ -63,6 +63,7 @@ import { createSettingsRuntime } from './lib/opencode/settings-runtime.js';
 import { createOpenCodeResolutionRuntime } from './lib/opencode/opencode-resolution-runtime.js';
 import { createBootstrapRuntime } from './lib/opencode/bootstrap-runtime.js';
 import { createSessionRuntime } from './lib/opencode/session-runtime.js';
+import { createSessionUnreadStore } from './lib/opencode/session-unread-store.js';
 import { createOpenCodeWatcherRuntime } from './lib/opencode/watcher.js';
 import { createScheduledTasksRuntime } from './lib/scheduled-tasks/runtime.js';
 import { createServerStartupRuntime } from './lib/opencode/server-startup-runtime.js';
@@ -465,10 +466,14 @@ const broadcastGlobalUiEvent = createGlobalUiEventBroadcaster({
 });
 const broadcastUiNotification = (...args) => notificationEmitterRuntime.broadcastUiNotification(...args);
 
+const unreadStore = createSessionUnreadStore({ fs, path, dataDir: OPENCHAMBER_DATA_DIR });
+unreadStore.load();
+
 const sessionRuntime = createSessionRuntime({
   writeSseEvent,
   getNotificationClients: () => uiNotificationClients,
   broadcastEvent: broadcastGlobalUiEvent,
+  unreadStore,
 });
 
 const getActiveSessionCount = () => {
@@ -1272,6 +1277,7 @@ async function main(options = {}) {
     fetchFreeZenModels,
     getCachedZenModels,
     setAutoAcceptSession,
+    unreadStore,
   });
   uiAuthController = bootstrapResult.uiAuthController;
 

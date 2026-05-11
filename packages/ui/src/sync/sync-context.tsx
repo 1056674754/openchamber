@@ -35,7 +35,7 @@ import { useConfigStore } from "@/stores/useConfigStore"
 import { useTodosPersistStore } from "@/stores/useTodosPersistStore"
 import { useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
 import { toast } from "@/components/ui"
-import { appendNotification } from "./notification-store"
+import { appendNotification, fetchAndHydrateUnreadState } from "./notification-store"
 import type { State } from "./types"
 import type { PermissionRequest } from "@/types/permission"
 import type { QuestionRequest } from "@/types/question"
@@ -1133,6 +1133,7 @@ function handleEvent(
     // On server.connected / global.disposed, re-bootstrap all directories
     // but only if not during recent boot
     if (payload.type === "server.connected" || payload.type === "global.disposed") {
+      fetchAndHydrateUnreadState()
       if (!recent) {
         for (const dir of childStores.children.keys()) {
           const store = childStores.getChild(dir)
