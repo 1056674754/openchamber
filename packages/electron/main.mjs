@@ -1512,8 +1512,10 @@ const resolveInitialUrl = async () => {
     ? 'http://127.0.0.1:3901'
     : await spawnLocalServer();
 
-  const localUiUrl = isDev && await waitForHealth('http://127.0.0.1:5173', 8_000, 100)
-    ? 'http://127.0.0.1:5173'
+  const hmrUiPort = process.env.OPENCHAMBER_HMR_UI_PORT || '5173';
+  const hmrUiOrigin = `http://127.0.0.1:${hmrUiPort}`;
+  const localUiUrl = isDev && await waitForHealth(hmrUiOrigin, 8_000, 100)
+    ? hmrUiOrigin
     : localUrl;
 
   state.sidecarUrl = localUrl;

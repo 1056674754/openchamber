@@ -79,7 +79,7 @@ export default defineConfig({
     include: ['@opencode-ai/sdk/v2'],
   },
   server: {
-    port: 5173,
+    port: 45173,
     proxy: {
       '/auth': {
         target: `http://127.0.0.1:${process.env.OPENCHAMBER_PORT || 3001}`,
