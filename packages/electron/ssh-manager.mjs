@@ -862,6 +862,86 @@ export class ElectronSshManager {
     }
   }
 
+  async remoteOpenCodeExists(parsed, controlPath) {
+    try {
+      // opencode may be installed to various locations depending on the method used:
+      //   ~/.opencode/bin/opencode  (official install script)
+      //   ~/.local/bin/opencode     (npm/bun)
+      //   /usr/local/bin/opencode   (brew, manual)
+      const output = await runRemoteCommand(parsed, controlPath, 'PATH=$HOME/.opencode/bin:$HOME/.local/bin:$PATH command -v opencode >/dev/null 2>&1 && opencode --version 2>/dev/null || echo "NOT_FOUND"');
+      const trimmed = output.trim();
+      if (trimmed === 'NOT_FOUND' || !trimmed) return null;
+      return parseVersionToken(output);
+    } catch {
+      return null;
+    }
+  }
+
+  async installOpenCodeManaged(parsed, controlPath) {
+    const hasNpm = await this.remoteCommandExists(parsed, controlPath, 'npm');
+    const hasBun = await this.remoteCommandExists(parsed, controlPath, 'bun');
+    const hasBrew = await this.remoteCommandExists(parsed, controlPath, 'brew');
+    const hasCurl = await this.remoteCommandExists(parsed, controlPath, 'curl');
+    const hasWget = await this.remoteCommandExists(parsed, controlPath, 'wget');
+
+    // Install opencode on the remote host. Try methods in order of reliability:
+    //   1. npm/bun (fastest, most universal on Linux servers)
+    //   2. brew (works if Homebrew is already installed)
+    //   3. curl/wget the official install script (catch-all)
+    const commands = [];
+
+    if (hasBun) commands.push('bun add -g opencode-ai@latest');
+    if (hasNpm) commands.push('npm install -g opencode-ai@latest');
+    if (hasBrew) commands.push('brew install anomalyco/tap/opencode 2>/dev/null || brew install opencode');
+
+    if (commands.length === 0 && (hasCurl || hasWget)) {
+      // Fall back to the official install script.
+      // The script is served from opencode.ai (not github.com directly),
+      // so it tends to work even in regions where GitHub is slow or blocked.
+      if (hasCurl) {
+        commands.push('curl -fsSL https://opencode.ai/install | bash');
+      } else {
+        commands.push('wget -qO- https://opencode.ai/install | bash');
+      }
+    }
+
+    if (commands.length === 0) {
+      throw new Error('Remote host has none of: npm, bun, brew, curl, wget. Cannot install opencode automatically.');
+    }
+
+    let lastError = null;
+    for (const command of commands) {
+      try {
+        await runRemoteCommand(parsed, controlPath, command, 120);
+        // The official install script puts the binary in ~/.opencode/bin/
+        // which may not be on the PATH that openchamber uses when spawning opencode.
+        // Create a symlink in /usr/local/bin (system-wide) or ~/.local/bin as fallback
+        // so that openchamber can find the opencode binary without sourcing .bashrc.
+        const ensureSymlink = [
+          'OPENCODE_BIN="$(PATH=$HOME/.opencode/bin:$HOME/.local/bin:$PATH command -v opencode 2>/dev/null || true)"',
+          'if [ -n "$OPENCODE_BIN" ] && [ "$OPENCODE_BIN" != "/usr/local/bin/opencode" ] && [ "$OPENCODE_BIN" != "$HOME/.local/bin/opencode" ]; then',
+          '  mkdir -p $HOME/.local/bin',
+          '  ln -sf "$OPENCODE_BIN" $HOME/.local/bin/opencode',
+          '  echo "Symlinked $OPENCODE_BIN -> $HOME/.local/bin/opencode"',
+          'fi',
+        ].join(' ');
+        await runRemoteCommand(parsed, controlPath, ensureSymlink, 10);
+
+        // Verify installation succeeded
+        const version = await this.remoteOpenCodeExists(parsed, controlPath);
+        if (version) {
+          this.appendLogWithLevel(null, 'INFO', `Installed opencode ${version} on remote host via: ${command}`);
+          return;
+        }
+      } catch (error) {
+        lastError = error;
+      }
+    }
+
+    if (lastError) throw lastError;
+    throw new Error('All opencode installation methods failed on remote host');
+  }
+
   async installOpenChamberManaged(parsed, controlPath, version, remoteOpenchamber) {
     const preferred = remoteOpenchamber.installMethod;
 
@@ -964,7 +1044,7 @@ export class ElectronSshManager {
     if (secret) {
       envPrefix += ` OPENCHAMBER_UI_PASSWORD=${shellQuote(secret)}`;
     }
-    const cmd = `PATH=$HOME/.local/bin:$PATH nohup env ${envPrefix} openchamber --port ${desiredPort} > /dev/null 2>&1 &`;
+    const cmd = `PATH=$HOME/.opencode/bin:$HOME/.local/bin:$PATH nohup env ${envPrefix} openchamber --port ${desiredPort} > /dev/null 2>&1 &`;
     await runRemoteCommand(parsed, controlPath, cmd);
 
     // Poll until server is reachable (up to ~15s)
@@ -1041,6 +1121,15 @@ export class ElectronSshManager {
     } else if (installedVersion !== this.appVersion) {
       this.setStatus(instance.id, 'updating', `Updating remote OpenChamber from ${installedVersion} to ${this.appVersion}`);
       await this.installOpenChamberManaged(parsed, controlPath, this.appVersion, instance.remoteOpenchamber);
+    }
+
+    this.setStatus(instance.id, 'installing_opencode', 'Checking OpenCode CLI on remote host');
+    const openCodeVersion = await this.remoteOpenCodeExists(parsed, controlPath);
+    if (!openCodeVersion) {
+      this.setStatus(instance.id, 'installing_opencode', 'Installing OpenCode CLI on remote host');
+      await this.installOpenCodeManaged(parsed, controlPath);
+    } else {
+      this.appendLogWithLevel(instance.id, 'INFO', `OpenCode ${openCodeVersion} already installed on remote host`);
     }
 
     this.setStatus(instance.id, 'server_detecting', 'Detecting managed OpenChamber server');
