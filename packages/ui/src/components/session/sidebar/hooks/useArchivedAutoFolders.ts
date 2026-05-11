@@ -1,9 +1,9 @@
 import React from 'react';
 import type { Session } from '@opencode-ai/sdk/v2';
-import type { WorktreeMetadata } from '@/types/worktree';
-import { dedupeSessionsById, getArchivedScopeKey, isSessionRelatedToProject, normalizePath, resolveArchivedFolderName } from '../utils';
+import { getArchivedScopeKey, resolveArchivedFolderName } from '../utils';
 
 export type ProjectForArchivedFolders = {
+  id: string;
   normalizedPath: string;
 };
 
@@ -15,61 +15,20 @@ type FolderEntry = {
 
 type Args = {
   normalizedProjects: ProjectForArchivedFolders[];
-  sessions: Session[];
-  archivedSessions: Session[];
-  availableWorktreesByProject: Map<string, WorktreeMetadata[]>;
-  isVSCode: boolean;
   isSessionsLoading: boolean;
   foldersMap: Record<string, FolderEntry[]>;
+  getArchivedSessionsForProject: (project: { id: string }) => Session[];
   createFolder: (scopeKey: string, name: string, parentId?: string | null) => FolderEntry;
   addSessionToFolder: (scopeKey: string, folderId: string, sessionId: string) => void;
   cleanupSessions: (scopeKey: string, existingSessionIds: Set<string>) => void;
 };
 
-const getArchivedSessionsForProject = (
-  project: ProjectForArchivedFolders,
-  params: Pick<Args, 'sessions' | 'archivedSessions' | 'availableWorktreesByProject' | 'isVSCode'>,
-): Session[] => {
-  const worktreesForProject = params.isVSCode ? [] : (params.availableWorktreesByProject.get(project.normalizedPath) ?? []);
-  const validDirectories = new Set<string>([
-    project.normalizedPath,
-    ...worktreesForProject
-      .map((meta) => normalizePath(meta.path))
-      .filter((value): value is string => Boolean(value)),
-  ]);
-
-  const isSubtaskSession = (session: Session): boolean => {
-    return Boolean((session as Session & { parentID?: string | null }).parentID);
-  };
-
-  const collect = (input: Session[]): Session[] => input.filter((session) =>
-    isSessionRelatedToProject(session, project.normalizedPath, validDirectories),
-  );
-
-  const archived = collect(params.archivedSessions).filter((session) => !isSubtaskSession(session));
-  const unassignedLive = params.sessions.filter((session) => {
-    if (session.time?.archived) {
-      return false;
-    }
-    const sessionDirectory = normalizePath((session as Session & { directory?: string | null }).directory ?? null);
-    if (sessionDirectory) {
-      return false;
-    }
-    return isSessionRelatedToProject(session, project.normalizedPath, validDirectories);
-  });
-
-  return dedupeSessionsById([...archived, ...unassignedLive]);
-};
-
 export const useArchivedAutoFolders = (args: Args): void => {
   const {
     normalizedProjects,
-    sessions,
-    archivedSessions,
-    availableWorktreesByProject,
-    isVSCode,
     isSessionsLoading,
     foldersMap,
+    getArchivedSessionsForProject,
     createFolder,
     addSessionToFolder,
     cleanupSessions,
@@ -82,12 +41,7 @@ export const useArchivedAutoFolders = (args: Args): void => {
 
     normalizedProjects.forEach((project) => {
       const scopeKey = getArchivedScopeKey(project.normalizedPath);
-      const projectArchivedSessions = getArchivedSessionsForProject(project, {
-        sessions,
-        archivedSessions,
-        availableWorktreesByProject,
-        isVSCode,
-      });
+      const projectArchivedSessions = getArchivedSessionsForProject(project);
       const sessionIds = new Set(projectArchivedSessions.map((session) => session.id));
 
       const existingFolders = foldersMap[scopeKey] ?? [];
@@ -111,12 +65,9 @@ export const useArchivedAutoFolders = (args: Args): void => {
     });
   }, [
     normalizedProjects,
-    sessions,
-    archivedSessions,
-    availableWorktreesByProject,
-    isVSCode,
     isSessionsLoading,
     foldersMap,
+    getArchivedSessionsForProject,
     createFolder,
     addSessionToFolder,
     cleanupSessions,

@@ -16,6 +16,8 @@ import { isSyntheticPart } from "@/lib/messages/synthetic"
 import { serverRegistry, DEFAULT_SERVER_ID } from "@/lib/opencode/server-registry"
 import { getSyncStoresForServer } from "./multi-server-registry"
 import { useProjectsStore } from "@/stores/useProjectsStore"
+import { useSessionProjectStore } from "@/stores/useSessionProjectStore"
+import { resolveProjectIdViaPathPrefix } from "@/lib/sessionOwnership"
 
 // Reference set by SyncProvider — allows actions to access SDK and stores
 let _sdk: OpencodeClient | null = null
@@ -380,6 +382,19 @@ export async function createSession(
       )
       if (project?.serverId) {
         serverRegistry.indexSession(session.id, project.serverId)
+      }
+
+      const projectsState = useProjectsStore.getState().projects
+      const normalizedProjects = projectsState
+        .map((p) => ({
+          id: p.id,
+          normalizedPath: (p.path.replace(/\\/g, '/').replace(/\/+$/, '') || '/'),
+          serverId: p.serverId,
+        }))
+      const worktreesByProject = useSessionUIStore.getState().availableWorktreesByProject
+      const ownerProjectId = resolveProjectIdViaPathPrefix(session, normalizedProjects, worktreesByProject)
+      if (ownerProjectId) {
+        useSessionProjectStore.getState().bind(session.id, ownerProjectId)
       }
 
       useSessionUIStore.getState().setCurrentSession(session.id, sessionDirectory)

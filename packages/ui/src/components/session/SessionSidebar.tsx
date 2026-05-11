@@ -78,6 +78,8 @@ import {
   normalizePath,
 } from './sidebar/utils';
 import { refreshGlobalSessions, resolveGlobalSessionDirectory, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
+import { useSessionProjectStore } from '@/stores/useSessionProjectStore';
+import { hydrateSessionProjectBindings } from '@/lib/sessionOwnership';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
 import { subscribeOpenchamberEvents } from '@/lib/openchamberEvents';
@@ -1108,31 +1110,55 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
   });
 
   const isSessionsLoading = useSessionUIStore((state) => state.isLoading);
-  useSessionFolderCleanup({
-    isSessionsLoading,
-    sessions,
-    archivedSessions,
-    normalizedProjects,
-    isVSCode,
-    availableWorktreesByProject,
-    cleanupSessions,
-  });
+  const sessionProjectBindings = useSessionProjectStore((state) => state.bindings);
+
+  React.useEffect(() => {
+    if (!hasLoadedGlobalSessions || normalizedProjects.length === 0) {
+      return;
+    }
+    const ownershipProjects = normalizedProjects.map((p) => ({
+      id: p.id,
+      normalizedPath: p.normalizedPath,
+      serverId: p.serverId,
+    }));
+    hydrateSessionProjectBindings(
+      [...sessions, ...archivedSessions],
+      ownershipProjects,
+      availableWorktreesByProject,
+    );
+  }, [archivedSessions, availableWorktreesByProject, hasLoadedGlobalSessions, normalizedProjects, sessions]);
+
+  const ownershipProjects = React.useMemo(
+    () => normalizedProjects.map((p) => ({
+      id: p.id,
+      normalizedPath: p.normalizedPath,
+      serverId: p.serverId,
+    })),
+    [normalizedProjects],
+  );
 
   const { getSessionsForProject, getArchivedSessionsForProject } = useProjectSessionLists({
     isVSCode,
     sessions,
     archivedSessions,
     availableWorktreesByProject,
+    normalizedProjects: ownershipProjects,
+    bindings: sessionProjectBindings,
+  });
+
+  useSessionFolderCleanup({
+    isSessionsLoading,
+    sessions,
+    normalizedProjects,
+    getArchivedSessionsForProject,
+    cleanupSessions,
   });
 
   useArchivedAutoFolders({
     normalizedProjects,
-    sessions,
-    archivedSessions,
-    availableWorktreesByProject,
-    isVSCode,
     isSessionsLoading,
     foldersMap,
+    getArchivedSessionsForProject,
     createFolder,
     addSessionToFolder,
     cleanupSessions,

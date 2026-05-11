@@ -1,14 +1,24 @@
 import React from 'react';
 import type { Session } from '@opencode-ai/sdk/v2';
-import { dedupeSessionsById, isSessionRelatedToProject, normalizePath } from '../utils';
-
-type WorktreeMeta = { path: string };
+import { dedupeSessionsById, normalizePath } from '../utils';
+import { getProjectIdForSession, type ProjectForOwnership } from '@/lib/sessionOwnership';
+import type { WorktreeMetadata } from '@/types/worktree';
 
 type Args = {
   isVSCode: boolean;
   sessions: Session[];
   archivedSessions: Session[];
-  availableWorktreesByProject: Map<string, WorktreeMeta[]>;
+  availableWorktreesByProject: Map<string, WorktreeMetadata[]>;
+  normalizedProjects: ProjectForOwnership[];
+  bindings: Map<string, string>;
+};
+
+const isSubtaskSession = (session: Session): boolean => {
+  return Boolean((session as Session & { parentID?: string | null }).parentID);
+};
+
+const hasOwnDirectory = (session: Session): boolean => {
+  return Boolean(normalizePath((session as Session & { directory?: string | null }).directory ?? null));
 };
 
 export const useProjectSessionLists = (args: Args) => {
@@ -17,125 +27,56 @@ export const useProjectSessionLists = (args: Args) => {
     sessions,
     archivedSessions,
     availableWorktreesByProject,
+    normalizedProjects,
+    bindings,
   } = args;
 
-  const sessionsByDirectory = React.useMemo(() => {
-    const next = new Map<string, Session[]>();
+  const liveByProjectId = React.useMemo(() => {
+    const result = new Map<string, Session[]>();
     sessions.forEach((session) => {
-      const directory = normalizePath((session as Session & { directory?: string | null }).directory ?? null)
-        ?? normalizePath((session as Session & { project?: { worktree?: string | null } | null }).project?.worktree ?? null);
-      if (!directory) {
-        return;
-      }
-
-      const collection = next.get(directory) ?? [];
-      collection.push(session);
-      next.set(directory, collection);
+      if (!hasOwnDirectory(session)) return;
+      const projectId = getProjectIdForSession(session, normalizedProjects, availableWorktreesByProject, bindings);
+      if (!projectId) return;
+      const list = result.get(projectId) ?? [];
+      list.push(session);
+      result.set(projectId, list);
     });
-    return next;
-  }, [sessions]);
+    return result;
+  }, [sessions, normalizedProjects, availableWorktreesByProject, bindings]);
+
+  const archivedByProjectId = React.useMemo(() => {
+    const result = new Map<string, Session[]>();
+    const visit = (session: Session, includeUnassignedLive: boolean) => {
+      if (isSubtaskSession(session) && !includeUnassignedLive) return;
+      const projectId = getProjectIdForSession(session, normalizedProjects, availableWorktreesByProject, bindings);
+      if (!projectId) return;
+      const list = result.get(projectId) ?? [];
+      list.push(session);
+      result.set(projectId, list);
+    };
+    archivedSessions.forEach((session) => visit(session, false));
+    sessions.forEach((session) => {
+      if (session.time?.archived) return;
+      if (hasOwnDirectory(session)) return;
+      visit(session, true);
+    });
+    result.forEach((list, key) => {
+      result.set(key, dedupeSessionsById(list));
+    });
+    return result;
+  }, [sessions, archivedSessions, normalizedProjects, availableWorktreesByProject, bindings]);
 
   const getSessionsForProject = React.useCallback(
-    (project: { normalizedPath: string }) => {
-      const worktreesForProject = isVSCode ? [] : (availableWorktreesByProject.get(project.normalizedPath) ?? []);
-      const directories = [
-        project.normalizedPath,
-        ...worktreesForProject
-          .map((meta) => normalizePath(meta.path))
-          .filter((value): value is string => Boolean(value)),
-      ];
-
-      const seen = new Set<string>();
-      const collected: Session[] = [];
-
-      directories.forEach((directory) => {
-        const sessionsForDirectory = sessionsByDirectory.get(directory) ?? [];
-        sessionsForDirectory.forEach((session) => {
-          if (seen.has(session.id)) {
-            return;
-          }
-          seen.add(session.id);
-          collected.push(session);
-        });
-      });
-
-      return collected;
-    },
-    [availableWorktreesByProject, isVSCode, sessionsByDirectory],
+    (project: { id: string }) => liveByProjectId.get(project.id) ?? [],
+    [liveByProjectId],
   );
 
   const getArchivedSessionsForProject = React.useCallback(
-    (project: { normalizedPath: string }) => {
-      if (isVSCode) {
-        const isSubtaskSession = (session: Session): boolean => {
-          return Boolean((session as Session & { parentID?: string | null }).parentID);
-        };
-
-        const archived = archivedSessions.filter((session) => {
-          if (isSubtaskSession(session)) {
-            return false;
-          }
-          const sessionDirectory = normalizePath((session as Session & { directory?: string | null }).directory ?? null);
-          const projectWorktree = normalizePath((session as Session & { project?: { worktree?: string | null } | null }).project?.worktree ?? null);
-
-          if (sessionDirectory) {
-            return sessionDirectory === project.normalizedPath;
-          }
-
-          return projectWorktree === project.normalizedPath;
-        });
-
-        const unassignedLive = sessions.filter((session) => {
-          if (session.time?.archived) {
-            return false;
-          }
-          const sessionDirectory = normalizePath((session as Session & { directory?: string | null }).directory ?? null);
-          if (sessionDirectory) {
-            return false;
-          }
-          const projectWorktree = normalizePath((session as Session & { project?: { worktree?: string | null } | null }).project?.worktree ?? null);
-          return projectWorktree === project.normalizedPath;
-        });
-
-        return dedupeSessionsById([...archived, ...unassignedLive]);
-      }
-
-      const worktreesForProject = isVSCode ? [] : (availableWorktreesByProject.get(project.normalizedPath) ?? []);
-      const validDirectories = new Set<string>([
-        project.normalizedPath,
-        ...worktreesForProject
-          .map((meta) => normalizePath(meta.path))
-          .filter((value): value is string => Boolean(value)),
-      ]);
-
-      const isSubtaskSession = (session: Session): boolean => {
-        return Boolean((session as Session & { parentID?: string | null }).parentID);
-      };
-
-      const collect = (input: Session[]): Session[] => input.filter((session) =>
-        isSessionRelatedToProject(session, project.normalizedPath, validDirectories),
-      );
-
-      const archived = collect(archivedSessions).filter((session) => !isSubtaskSession(session));
-      const unassignedLive = sessions.filter((session) => {
-        if (session.time?.archived) {
-          return false;
-        }
-        const sessionDirectory = normalizePath((session as Session & { directory?: string | null }).directory ?? null);
-        if (sessionDirectory) {
-          return false;
-        }
-        const projectWorktree = normalizePath((session as Session & { project?: { worktree?: string | null } | null }).project?.worktree ?? null);
-        if (!projectWorktree) {
-          return false;
-        }
-        return projectWorktree === project.normalizedPath || projectWorktree.startsWith(`${project.normalizedPath}/`);
-      });
-
-      return dedupeSessionsById([...archived, ...unassignedLive]);
-    },
-    [archivedSessions, availableWorktreesByProject, isVSCode, sessions],
+    (project: { id: string }) => archivedByProjectId.get(project.id) ?? [],
+    [archivedByProjectId],
   );
+
+  void isVSCode;
 
   return {
     getSessionsForProject,

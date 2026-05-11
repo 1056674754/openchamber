@@ -10,6 +10,7 @@ import { useDirectoryStore } from './useDirectoryStore';
 import { streamDebugEnabled } from '@/stores/utils/streamDebug';
 import { PROJECT_COLORS } from '@/lib/projectMeta';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useSessionProjectStore } from './useSessionProjectStore';
 
 /** Pick a color key that's least used among existing projects */
 const pickAutoColor = (projects: ProjectEntry[]): string => {
@@ -479,6 +480,8 @@ export const useProjectsStore = create<ProjectsStore>()(
           return { availableWorktreesByProject: next };
         });
       }
+
+      useSessionProjectStore.getState().clearForProject(id);
 
       if (nextActiveId) {
         const nextActive = nextProjects.find((project) => project.id === nextActiveId);

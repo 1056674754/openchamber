@@ -25,8 +25,8 @@ type ProjectSection = {
 
 type Args = {
   normalizedProjects: ProjectItem[];
-  getSessionsForProject: (project: { normalizedPath: string }) => Session[];
-  getArchivedSessionsForProject: (project: { normalizedPath: string }) => Session[];
+  getSessionsForProject: (project: { id: string }) => Session[];
+  getArchivedSessionsForProject: (project: { id: string }) => Session[];
   availableWorktreesByProject: Map<string, WorktreeMetadata[]>;
   projectRepoStatus: Map<string, boolean | null>;
   projectRootBranches: Map<string, string | null>;
