@@ -6,6 +6,9 @@ import type { ContentChangeReason } from '@/hooks/useChatAutoFollow';
 import { useStreamingTextThrottle } from '../../hooks/useStreamingTextThrottle';
 import { resolveAssistantDisplayText, shouldRenderAssistantText } from './assistantTextVisibility';
 import { streamPerfCount, streamPerfObserve } from '@/stores/utils/streamDebug';
+import { parseThinkingSegments, hasThinkingTags } from '@/lib/thinkingTagParser';
+import type { ThinkingSegment } from '@/lib/thinkingTagParser';
+import { ReasoningTimelineBlock } from './ReasoningPart';
 
 type PartWithText = Part & { text?: string; content?: string; value?: string; time?: { start?: number; end?: number } };
 
@@ -23,6 +26,7 @@ const AssistantTextPart: React.FC<AssistantTextPartProps> = ({
     messageId,
     streamPhase,
     chatRenderMode = 'live',
+    onContentChange,
 }) => {
     // Use part directly from props — parent provides the latest version from the store.
     // No store subscription here to avoid re-render cascade from unrelated delta events.
@@ -59,6 +63,14 @@ const AssistantTextPart: React.FC<AssistantTextPartProps> = ({
     const time = partWithText.time;
     const isFinalized = Boolean(time && typeof time.end !== 'undefined');
 
+    // Hooks must be called unconditionally (before early returns).
+    const thinkingSegments: ThinkingSegment[] | null = React.useMemo(() => {
+        if (part.type !== 'text' || !hasThinkingTags(displayTextContent)) {
+            return null;
+        }
+        return parseThinkingSegments(displayTextContent);
+    }, [part.type, displayTextContent]);
+
     const isRenderableTextPart = part.type === 'text' || part.type === 'reasoning';
     if (!isRenderableTextPart) {
         return null;
@@ -71,21 +83,59 @@ const AssistantTextPart: React.FC<AssistantTextPartProps> = ({
         return null;
     }
 
+    if (part.type === 'reasoning' || !thinkingSegments || thinkingSegments.length === 0 || (thinkingSegments.length === 1 && thinkingSegments[0].type === 'text')) {
+        return (
+            <div
+                className={`group/assistant-text relative break-words ${chatRenderMode === 'live' ? 'my-1' : ''}`}
+                key={part.id || `${messageId}-text`}
+            >
+                <MarkdownRenderer
+                    content={displayTextContent}
+                    part={part}
+                    messageId={messageId}
+                    isAnimated={false}
+                    isStreaming={isStreaming}
+                    disableStreamAnimation={chatRenderMode === 'sorted'}
+                    variant={part.type === 'reasoning' ? 'reasoning' : 'assistant'}
+                    enableFileReferences={isFinalized}
+                />
+            </div>
+        );
+    }
+
     return (
         <div
             className={`group/assistant-text relative break-words ${chatRenderMode === 'live' ? 'my-1' : ''}`}
             key={part.id || `${messageId}-text`}
         >
-            <MarkdownRenderer
-                content={displayTextContent}
-                part={part}
-                messageId={messageId}
-                isAnimated={false}
-                isStreaming={isStreaming}
-                disableStreamAnimation={chatRenderMode === 'sorted'}
-                variant={part.type === 'reasoning' ? 'reasoning' : 'assistant'}
-                enableFileReferences={isFinalized}
-            />
+            {thinkingSegments.map((segment, index) => {
+                if (segment.type === 'thinking') {
+                    return (
+                        <ReasoningTimelineBlock
+                            key={`${messageId}-thinking-${index}`}
+                            variant="thinking"
+                            text={segment.content}
+                            blockId={`${messageId}-thinking-${index}`}
+                            time={partWithText.time}
+                            isStreaming={isStreaming}
+                            onContentChange={onContentChange}
+                        />
+                    );
+                }
+                return (
+                    <MarkdownRenderer
+                        key={`${messageId}-text-${index}`}
+                        content={segment.content}
+                        part={part}
+                        messageId={messageId}
+                        isAnimated={false}
+                        isStreaming={isStreaming}
+                        disableStreamAnimation={chatRenderMode === 'sorted'}
+                        variant="assistant"
+                        enableFileReferences={isFinalized}
+                    />
+                );
+            })}
         </div>
     );
 };
