@@ -1342,41 +1342,34 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         const realUserEntryByTurnId = new Map<string, RenderEntry & { kind: 'turn' }>();
         const groupedTurnEntries: RenderEntry[] = [];
 
-        // First pass: create entries for all turns, collecting real user entries
+        // First pass: create entries for ALL turns in order
         for (const turn of staticTurns) {
+            const entry: RenderEntry & { kind: 'turn' } = {
+                kind: 'turn',
+                key: `turn:${turn.turnId}`,
+                turn,
+                isLastTurn: turn.turnId === projection.lastTurnId,
+            };
             if (!turn.isDirectiveTurn) {
-                const entry: RenderEntry & { kind: 'turn' } = {
-                    kind: 'turn',
-                    key: `turn:${turn.turnId}`,
-                    turn,
-                    isLastTurn: turn.turnId === projection.lastTurnId,
-                };
                 realUserEntryByTurnId.set(turn.turnId, entry);
-                groupedTurnEntries.push(entry);
             }
+            groupedTurnEntries.push(entry);
         }
 
-        // Second pass: attach directive turns to their parent real user turn
-        // via the directive's userMessage parentID, falling back to positional
-        let lastSeenRealEntry: (RenderEntry & { kind: 'turn' }) | null = null;
+        // Second pass: attach directive turns that have a valid parentID
+        // to their parent real user turn, removing them from the flat list.
+        const attachedDirectiveIds = new Set<string>();
         for (const turn of staticTurns) {
             if (!turn.isDirectiveTurn) {
-                lastSeenRealEntry = realUserEntryByTurnId.get(turn.turnId) ?? null;
                 continue;
             }
 
-            // Find parent via parentID on the directive's user message
             const directiveParentId = (turn.userMessage.info as { parentID?: string }).parentID;
             let parentEntry = directiveParentId
                 ? realUserEntryByTurnId.get(directiveParentId)
                 : undefined;
 
-            // If parentID doesn't directly point to a real user turn, check if
-            // it points to an assistant message whose turn is a real user turn.
-            // Assistant messages have the same turnId as their parent user message.
             if (!parentEntry && directiveParentId) {
-                // Walk through real user entries to see if any of their assistant
-                // messages match the directive's parentID
                 for (const [, entry] of realUserEntryByTurnId) {
                     if (entry.turn.assistantMessageIds.includes(directiveParentId)) {
                         parentEntry = entry;
@@ -1385,15 +1378,6 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
                 }
             }
 
-            // Fallback: attach to the immediately preceding real user turn
-            if (!parentEntry) {
-                parentEntry = lastSeenRealEntry ?? undefined;
-            }
-
-            // Don't attach directives to compaction turns — CompactionDivider
-            // replaces TurnBlock entirely and doesn't render directive children,
-            // which would swallow the directive's assistant messages (e.g. the
-            // full agent continuation after a /compact). Render standalone instead.
             if (parentEntry && isCompactionTurn(parentEntry.turn)) {
                 parentEntry = undefined;
             }
@@ -1402,21 +1386,19 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
                 const directives = parentEntry.directiveTurns ?? [];
                 directives.push(turn);
                 parentEntry.directiveTurns = directives;
+                attachedDirectiveIds.add(turn.turnId);
                 // Propagate isLastTurn: if a directive is the session's last
                 // turn, mark its parent entry so streaming indicators work.
                 if (turn.turnId === projection.lastTurnId) {
                     parentEntry.isLastTurn = true;
                 }
-            } else {
-                // Directive without any real user turn — render standalone
-                groupedTurnEntries.push({
-                    kind: 'turn',
-                    key: `turn:${turn.turnId}`,
-                    turn,
-                    isLastTurn: turn.turnId === projection.lastTurnId,
-                });
             }
         }
+
+        // Remove attached directives from the flat list (they render under their parent)
+        const finalEntries = groupedTurnEntries.filter((entry) =>
+            !(entry.kind === 'turn' && entry.turn.isDirectiveTurn && attachedDirectiveIds.has(entry.turn.turnId))
+        );
 
         // [sscity-mod] Apply group-level windowing. turnStart is the number of
         // real-user-groups to skip from the top. Only count real-user groups
@@ -1425,8 +1407,8 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         if (turnStart > 0) {
             let realGroupsSeen = 0;
             let sliceIndex = 0;
-            for (let i = 0; i < groupedTurnEntries.length; i++) {
-                const entry = groupedTurnEntries[i];
+            for (let i = 0; i < finalEntries.length; i++) {
+                const entry = finalEntries[i];
                 if (entry.kind === 'turn' && !entry.turn.isDirectiveTurn) {
                     realGroupsSeen += 1;
                     if (realGroupsSeen > turnStart) {
@@ -1436,11 +1418,11 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
                 }
             }
             if (realGroupsSeen <= turnStart) {
-                sliceIndex = groupedTurnEntries.length;
+                sliceIndex = finalEntries.length;
             }
-            windowedEntries = groupedTurnEntries.slice(sliceIndex);
+            windowedEntries = finalEntries.slice(sliceIndex);
         } else {
-            windowedEntries = groupedTurnEntries;
+            windowedEntries = finalEntries;
         }
 
         if (projection.ungroupedMessageIds.size === 0) {
