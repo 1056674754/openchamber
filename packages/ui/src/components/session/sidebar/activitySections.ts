@@ -67,13 +67,14 @@ export const persistActiveNowEntries = (storage: Storage, entries: ActiveNowEntr
 export const pruneActiveNowEntries = (
   entries: ActiveNowEntry[],
   sessionsById: Map<string, Session>,
-  now = Date.now(),
+  options: { hasLoadedSessions: boolean; now?: number } = { hasLoadedSessions: false },
 ): ActiveNowEntry[] => {
+  const now = options.now ?? Date.now();
   const minUpdatedAt = now - ACTIVE_NOW_MAX_AGE_MS;
   return entries.filter((entry) => {
     const session = sessionsById.get(entry.sessionId);
     if (!session) {
-      return true;
+      return !options.hasLoadedSessions;
     }
     if (isArchivedSession(session)) {
       return false;

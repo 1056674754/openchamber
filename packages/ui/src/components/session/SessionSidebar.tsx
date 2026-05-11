@@ -444,7 +444,10 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
     }
 
     return tempSessions.map((entry) => {
-      const normalizedPath = normalizePath(entry.path) ?? entry.path;
+      const normalizedPath = normalizePath(entry.path);
+      if (!normalizedPath) {
+        return entry;
+      }
       const session = sessionsByDirectory.get(normalizedPath);
       return session
         ? { ...entry, sessionId: session.id, sessionDirectory: normalizedPath }
@@ -1135,12 +1138,6 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
     cleanupSessions,
   });
 
-  // Keep last-known repo status to avoid UI jiggling during project switch
-  const lastRepoStatusRef = React.useRef(false);
-  if (activeProjectId && projectRepoStatus.has(activeProjectId)) {
-    lastRepoStatusRef.current = Boolean(projectRepoStatus.get(activeProjectId));
-  }
-
   const {
     projectSections,
     groupSearchDataByGroup,
@@ -1153,7 +1150,6 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
     availableWorktreesByProject,
     projectRepoStatus,
     projectRootBranches,
-    lastRepoStatus: lastRepoStatusRef.current,
     buildGroupedSessions,
     hasSessionSearchQuery,
     normalizedSessionSearchQuery,
@@ -1282,7 +1278,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
       || project.normalizedPath,
     );
     const worktree = (availableWorktreesByProject.get(project.normalizedPath) ?? [])
-      .find((meta) => (normalizePath(meta.path) ?? meta.path) === sessionDirectory);
+      .find((meta) => normalizePath(meta.path) === sessionDirectory);
     const branch = gitBranches.get(sessionDirectory)?.trim()
       || worktree?.branch?.trim()
       || (sessionDirectory === project.normalizedPath ? projectRootBranches.get(project.id)?.trim() ?? null : null);
@@ -1341,14 +1337,16 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
       allKnownSessionsById.set(session.id, session);
     });
 
-    const pruned = pruneActiveNowEntries(activeNowEntries, allKnownSessionsById);
+    const pruned = pruneActiveNowEntries(activeNowEntries, allKnownSessionsById, {
+      hasLoadedSessions: hasLoadedGlobalSessions,
+    });
     if (pruned.length === activeNowEntries.length && pruned.every((entry, index) => entry.sessionId === activeNowEntries[index]?.sessionId)) {
       return;
     }
 
     setActiveNowEntries(pruned);
     persistActiveNowEntries(safeStorage, pruned);
-  }, [activeNowEntries, archivedSessions, safeStorage, sessions, showRecentSection]);
+  }, [activeNowEntries, archivedSessions, hasLoadedGlobalSessions, safeStorage, sessions, showRecentSection]);
 
   const globalPinnedSessions = React.useMemo(() => {
     const pinned = sessions.filter((s) => pinnedSessionIds.has(s.id));
@@ -1721,7 +1719,6 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
         renderSessionNode={renderSessionNode}
         currentSessionDirectory={currentSessionDirectory}
         projectRepoStatus={projectRepoStatus}
-        lastRepoStatus={lastRepoStatusRef.current}
         toggleGroupSessionLimit={toggleGroupSessionLimit}
         mobileVariant={mobileVariant}
         alwaysShowActions={alwaysShowSidebarActions}

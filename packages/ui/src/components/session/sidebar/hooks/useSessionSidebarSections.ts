@@ -30,7 +30,6 @@ type Args = {
   availableWorktreesByProject: Map<string, WorktreeMetadata[]>;
   projectRepoStatus: Map<string, boolean | null>;
   projectRootBranches: Map<string, string | null>;
-  lastRepoStatus: boolean;
   buildGroupedSessions: (
     sessions: Session[],
     projectRoot: string,
@@ -53,7 +52,6 @@ export const useSessionSidebarSections = (args: Args) => {
     availableWorktreesByProject,
     projectRepoStatus,
     projectRootBranches,
-    lastRepoStatus,
     buildGroupedSessions,
     hasSessionSearchQuery,
     normalizedSessionSearchQuery,
@@ -69,9 +67,7 @@ export const useSessionSidebarSections = (args: Args) => {
         ...getArchivedSessionsForProject(project),
       ]);
       const worktreesForProject = availableWorktreesByProject.get(project.normalizedPath) ?? [];
-      const isRepo = projectRepoStatus.has(project.id)
-        ? Boolean(projectRepoStatus.get(project.id))
-        : lastRepoStatus;
+      const isRepo = projectRepoStatus.get(project.id) === true;
       const groups = buildGroupedSessions(
         projectSessions,
         project.normalizedPath,
@@ -87,7 +83,6 @@ export const useSessionSidebarSections = (args: Args) => {
     getArchivedSessionsForProject,
     availableWorktreesByProject,
     projectRepoStatus,
-    lastRepoStatus,
     buildGroupedSessions,
     projectRootBranches,
   ]);
