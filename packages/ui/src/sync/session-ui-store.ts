@@ -217,7 +217,18 @@ export type SessionUIState = {
   dismissPendingChangesBar: (sessionId: string, signature: string | null) => void
 
   // Actions — UI state management
-  setCurrentSession: (id: string | null, directoryHint?: string | null) => void
+  /**
+   * Switch the displayed session. By default also writes the session's
+   * directory to `useDirectoryStore.currentDirectory` and the global SDK
+   * directory. Pass `{ syncDirectory: false }` for inspection-only switches
+   * (e.g. brief mini-chat focus, programmatic preloads) where the global
+   * directory should remain pinned to its current value.
+   */
+  setCurrentSession: (
+    id: string | null,
+    directoryHint?: string | null,
+    options?: { syncDirectory?: boolean },
+  ) => void
   _pendingNavigationSessionId: string | null
   navigateToSession: (sessionId: string, directory: string, projectId: string) => void
   consumeNavigationIntent: () => string | null
@@ -381,7 +392,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
   // ---------------------------------------------------------------------------
   // setCurrentSession
   // ---------------------------------------------------------------------------
-  setCurrentSession: (id, directoryHint?: string | null) => {
+  setCurrentSession: (id, directoryHint?: string | null, options?: { syncDirectory?: boolean }) => {
     if (id) {
       get().closeNewSessionDraft()
     }
@@ -408,11 +419,13 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     )
     const resolvedDir = sessionDir ?? (directoryHint ? normalizePath(directoryHint) : null)
 
+    const shouldSyncDirectory = options?.syncDirectory !== false
+
     try {
-      if (resolvedDir && directoryState.currentDirectory !== resolvedDir) {
+      if (shouldSyncDirectory && resolvedDir && directoryState.currentDirectory !== resolvedDir) {
         directoryState.setDirectory(resolvedDir, { showOverlay: false })
       }
-      if (resolvedDir) {
+      if (shouldSyncDirectory && resolvedDir) {
         opencodeClient.setDirectory(resolvedDir)
       }
     } catch (e) {
