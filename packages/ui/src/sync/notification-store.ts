@@ -92,6 +92,7 @@ interface NotificationStore {
   append: (notification: Notification) => void
   markSessionViewed: (sessionId: string) => void
   markProjectViewed: (directory: string) => void
+  hydrateFromServer: (data: Record<string, { unread: boolean; hasError: boolean }>) => void
 
   // Selectors
   sessionUnseenCount: (sessionId: string) => number
@@ -122,6 +123,7 @@ export const useNotificationStore = create<NotificationStore>((set, get) => ({
       n.session === sessionId && !n.viewed ? { ...n, viewed: true } : n,
     )
     set({ list: next, index: buildIndex(next) })
+    fetch(`/api/openchamber/sessions/${encodeURIComponent(sessionId)}/read`, { method: 'POST' }).catch(() => {})
   },
 
   markProjectViewed: (directory) => {
@@ -139,6 +141,24 @@ export const useNotificationStore = create<NotificationStore>((set, get) => ({
   sessionHasError: (sessionId) => get().index.session.unseenHasError[sessionId] ?? false,
   projectUnseenCount: (directory) => get().index.project.unseenCount[directory] ?? 0,
   projectHasError: (directory) => get().index.project.unseenHasError[directory] ?? false,
+
+  hydrateFromServer: (data) => {
+    const sessionUnseen: Record<string, number> = {}
+    const sessionErrors: Record<string, boolean> = {}
+    for (const [id, state] of Object.entries(data)) {
+      if (state.unread) {
+        sessionUnseen[id] = 1
+        if (state.hasError) sessionErrors[id] = true
+      }
+    }
+    set({
+      list: [],
+      index: {
+        session: { unseenCount: sessionUnseen, unseenHasError: sessionErrors },
+        project: { unseenCount: {}, unseenHasError: {} },
+      },
+    })
+  },
 }))
 
 // ---------------------------------------------------------------------------
@@ -167,4 +187,38 @@ export function useSessionHasError(sessionId: string): boolean {
 
 export function useProjectUnseenCount(directory: string): number {
   return useNotificationStore((s) => s.index.project.unseenCount[directory] ?? 0)
+}
+
+// ---------------------------------------------------------------------------
+// Server-backed hydration
+// ---------------------------------------------------------------------------
+
+export async function fetchAndHydrateUnreadState() {
+  try {
+    const res = await fetch('/api/openchamber/sessions/unread')
+    if (!res.ok) return
+    const data = await res.json()
+    if (data && typeof data.sessions === 'object') {
+      useNotificationStore.getState().hydrateFromServer(data.sessions)
+    }
+  } catch { /* network failure is non-fatal */ }
+}
+
+export function updateSessionUnread(sessionId: string, unread: boolean, hasError: boolean) {
+  const store = useNotificationStore.getState()
+  const newCount = { ...store.index.session.unseenCount }
+  const newErrors = { ...store.index.session.unseenHasError }
+  if (unread) {
+    newCount[sessionId] = 1
+    if (hasError) newErrors[sessionId] = true
+  } else {
+    delete newCount[sessionId]
+    delete newErrors[sessionId]
+  }
+  useNotificationStore.setState({
+    index: {
+      ...store.index,
+      session: { unseenCount: newCount, unseenHasError: newErrors },
+    },
+  })
 }

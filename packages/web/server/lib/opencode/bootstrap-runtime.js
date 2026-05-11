@@ -38,6 +38,8 @@ export const createBootstrapRuntime = (dependencies) => {
       writeSseEvent,
       sessionRuntime,
       setPushInitialized,
+      setAutoAcceptSession,
+      unreadStore,
       fs,
       os,
       path,
@@ -48,7 +50,6 @@ export const createBootstrapRuntime = (dependencies) => {
       modelsMetadataCacheTtl,
       fetchFreeZenModels,
       getCachedZenModels,
-      setAutoAcceptSession,
     } = options;
 
     registerServerStatusRoutes(app, {
@@ -119,6 +120,7 @@ export const createBootstrapRuntime = (dependencies) => {
       readSettingsFromDiskMigrated,
       fetchFreeZenModels,
       getCachedZenModels,
+      unreadStore,
     });
 
     return {

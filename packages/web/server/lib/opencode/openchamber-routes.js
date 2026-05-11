@@ -12,6 +12,7 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
     readSettingsFromDiskMigrated,
     fetchFreeZenModels,
     getCachedZenModels,
+    unreadStore,
   } = dependencies;
 
   let cachedModelsMetadata = null;
@@ -309,5 +310,19 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
         res.status(statusCode).json({ error: 'Failed to retrieve zen models' });
       }
     }
+  });
+
+  app.get('/api/openchamber/sessions/unread', (_req, res) => {
+    if (!unreadStore) return res.json({ sessions: {} });
+    res.json({ sessions: unreadStore.getUnreadSessions() });
+  });
+
+  app.post('/api/openchamber/sessions/:sessionId/read', (req, res) => {
+    const sessionId = req.params.sessionId;
+    if (!sessionId || typeof sessionId !== 'string') {
+      return res.status(400).json({ error: 'Missing sessionId' });
+    }
+    if (unreadStore) unreadStore.markRead(sessionId);
+    res.json({ ok: true });
   });
 };

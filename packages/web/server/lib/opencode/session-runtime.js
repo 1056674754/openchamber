@@ -52,7 +52,7 @@ const deriveSessionActivityTransitions = (payload) => {
   return [];
 };
 
-export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, broadcastEvent }) => {
+export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, broadcastEvent, unreadStore }) => {
   const sessionActivityPhases = new Map();
   const sessionActivityCooldowns = new Map();
   const sessionStates = new Map();
@@ -162,6 +162,7 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
           timestamp: state.lastUpdateAt,
           metadata: state.metadata,
           needsAttention: attentionState?.needsAttention ?? false,
+          unread: unreadStore ? unreadStore.getUnreadState(sessionId) : undefined,
         },
       };
 
@@ -207,6 +208,8 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
     const wasNeedsAttention = state.needsAttention;
     state.viewedByClients.add(clientId);
 
+    if (unreadStore) unreadStore.markRead(sessionId);
+
     if (wasNeedsAttention) {
       state.needsAttention = false;
 
@@ -218,6 +221,7 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
           timestamp: Date.now(),
           metadata: {},
           needsAttention: false,
+          unread: unreadStore ? unreadStore.getUnreadState(sessionId) : undefined,
         },
       };
 
@@ -325,6 +329,17 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
           message: update.message,
           next: update.next,
         });
+        if (update.type === 'idle' && unreadStore) {
+          unreadStore.recordActivity(update.sessionId, { hasError: false });
+        }
+      }
+    }
+
+    if (payload && payload.type === 'session.error' && unreadStore) {
+      const props = payload.properties && typeof payload.properties === 'object' ? payload.properties : {};
+      const sessionId = typeof props.sessionID === 'string' ? props.sessionID.trim() : '';
+      if (sessionId) {
+        unreadStore.recordActivity(sessionId, { hasError: true });
       }
     }
   };
@@ -335,6 +350,10 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
       clearTimeout(timer);
     }
     sessionActivityCooldowns.clear();
+    if (unreadStore) {
+      unreadStore.flush();
+      unreadStore.dispose();
+    }
   };
 
   return {
