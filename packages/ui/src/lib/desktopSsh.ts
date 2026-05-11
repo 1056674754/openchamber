@@ -93,6 +93,7 @@ export type DesktopSshPhase =
   | 'master_connecting'
   | 'remote_probe'
   | 'installing'
+  | 'installing_opencode'
   | 'updating'
   | 'server_detecting'
   | 'server_starting'
@@ -293,6 +294,7 @@ const parsePhase = (value: unknown): DesktopSshPhase => {
     case 'master_connecting':
     case 'remote_probe':
     case 'installing':
+    case 'installing_opencode':
     case 'updating':
     case 'server_detecting':
     case 'server_starting':

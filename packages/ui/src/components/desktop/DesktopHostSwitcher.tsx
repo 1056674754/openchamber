@@ -134,6 +134,7 @@ const sshPhaseLabelKey = (phase: DesktopSshInstanceStatus['phase'] | undefined):
   | 'desktopHostSwitcher.sshPhase.connectingSsh'
   | 'desktopHostSwitcher.sshPhase.probingRemote'
   | 'desktopHostSwitcher.sshPhase.installing'
+  | 'desktopHostSwitcher.sshPhase.installingOpenCode'
   | 'desktopHostSwitcher.sshPhase.updating'
   | 'desktopHostSwitcher.sshPhase.detectingServer'
   | 'desktopHostSwitcher.sshPhase.startingServer'
@@ -156,6 +157,8 @@ const sshPhaseLabelKey = (phase: DesktopSshInstanceStatus['phase'] | undefined):
       return 'desktopHostSwitcher.sshPhase.probingRemote';
     case 'installing':
       return 'desktopHostSwitcher.sshPhase.installing';
+    case 'installing_opencode':
+      return 'desktopHostSwitcher.sshPhase.installingOpenCode';
     case 'updating':
       return 'desktopHostSwitcher.sshPhase.updating';
     case 'server_detecting':

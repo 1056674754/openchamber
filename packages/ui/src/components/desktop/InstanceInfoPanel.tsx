@@ -67,6 +67,7 @@ const sshPhaseLabelKey = (phase: string | undefined):
   | 'instanceInfoPanel.sshPhase.connectingSsh'
   | 'instanceInfoPanel.sshPhase.probingRemote'
   | 'instanceInfoPanel.sshPhase.installing'
+  | 'instanceInfoPanel.sshPhase.installingOpenCode'
   | 'instanceInfoPanel.sshPhase.updating'
   | 'instanceInfoPanel.sshPhase.detectingServer'
   | 'instanceInfoPanel.sshPhase.startingServer'
@@ -89,6 +90,8 @@ const sshPhaseLabelKey = (phase: string | undefined):
       return 'instanceInfoPanel.sshPhase.probingRemote';
     case 'installing':
       return 'instanceInfoPanel.sshPhase.installing';
+    case 'installing_opencode':
+      return 'instanceInfoPanel.sshPhase.installingOpenCode';
     case 'updating':
       return 'instanceInfoPanel.sshPhase.updating';
     case 'server_detecting':
