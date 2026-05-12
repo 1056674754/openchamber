@@ -45,6 +45,7 @@ export const ScrollShadow = React.forwardRef<HTMLElement, ScrollShadowProps>(
   ) => {
     const internalRef = React.useRef<HTMLElement>(null);
     const visibleRef = React.useRef<"both" | "none" | "top" | "bottom" | "left" | "right">("none");
+    const progressRef = React.useRef<number>(0);
 
     const dataScrollShadow = (rest as Record<string, unknown>)["data-scroll-shadow"];
     delete (rest as Record<string, unknown>)["data-scroll-shadow"];
@@ -54,6 +55,7 @@ export const ScrollShadow = React.forwardRef<HTMLElement, ScrollShadowProps>(
         ...(style as React.CSSProperties),
       };
       (next as Record<string, string>)["--scroll-shadow-size"] = `${size}px`;
+      (next as Record<string, string>)["--scroll-progress"] = String(progressRef.current);
       return next;
     }, [size, style]);
 
@@ -114,6 +116,15 @@ export const ScrollShadow = React.forwardRef<HTMLElement, ScrollShadowProps>(
       if (next !== visibleRef.current) {
         visibleRef.current = next;
         onVisibilityChange?.(next);
+      }
+
+      if (orientation === "vertical") {
+        const scrollable = el.scrollHeight - el.clientHeight;
+        const progress = scrollable > 0 ? Math.min(1, Math.max(0, el.scrollTop / scrollable)) : 0;
+        if (progress !== progressRef.current) {
+          progressRef.current = progress;
+          el.style.setProperty("--scroll-progress", String(progress));
+        }
       }
     }, [clearAttributes, hideTopShadow, hideBottomShadow, isEnabled, offset, onVisibilityChange, orientation, setAttributes]);
 

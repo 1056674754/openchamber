@@ -239,6 +239,7 @@ textarea[data-chat-input="true"]:focus-visible {
 /* Scroll shadow (HeroUI) fallback styling to ensure visible gradients without the Tailwind plugin */
 [data-scroll-shadow="true"] {
   --scroll-shadow-size: var(--scroll-shadow-size, 48px);
+  --dynamic-shadow-size: calc(var(--scroll-shadow-size) * (1 - var(--scroll-progress, 0)));
 }
 
 [data-scroll-shadow="true"][data-orientation="vertical"] {
@@ -253,15 +254,15 @@ textarea[data-chat-input="true"]:focus-visible {
   mask-image: linear-gradient(
     to bottom,
     transparent 0%,
-    #000 var(--scroll-shadow-size),
-    #000 calc(100% - var(--scroll-shadow-size)),
+    #000 var(--dynamic-shadow-size),
+    #000 calc(100% - var(--dynamic-shadow-size)),
     transparent 100%
   );
   -webkit-mask-image: linear-gradient(
     to bottom,
     transparent 0%,
-    #000 var(--scroll-shadow-size),
-    #000 calc(100% - var(--scroll-shadow-size)),
+    #000 var(--dynamic-shadow-size),
+    #000 calc(100% - var(--dynamic-shadow-size)),
     transparent 100%
   );
 }
@@ -270,13 +271,13 @@ textarea[data-chat-input="true"]:focus-visible {
   mask-image: linear-gradient(
     to bottom,
     transparent 0%,
-    #000 var(--scroll-shadow-size),
+    #000 var(--dynamic-shadow-size),
     #000 100%
   );
   -webkit-mask-image: linear-gradient(
     to bottom,
     transparent 0%,
-    #000 var(--scroll-shadow-size),
+    #000 var(--dynamic-shadow-size),
     #000 100%
   );
 }
@@ -285,13 +286,13 @@ textarea[data-chat-input="true"]:focus-visible {
   mask-image: linear-gradient(
     to bottom,
     #000 0%,
-    #000 calc(100% - var(--scroll-shadow-size)),
+    #000 calc(100% - var(--dynamic-shadow-size)),
     transparent 100%
   );
   -webkit-mask-image: linear-gradient(
     to bottom,
     #000 0%,
-    #000 calc(100% - var(--scroll-shadow-size)),
+    #000 calc(100% - var(--dynamic-shadow-size)),
     transparent 100%
   );
 }
