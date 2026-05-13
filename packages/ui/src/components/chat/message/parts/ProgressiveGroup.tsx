@@ -204,6 +204,23 @@ const getToolReadOffset = (activity: TurnActivityPart): number | undefined => {
     return Math.floor(rawOffset);
 };
 
+const getToolReadLimit = (activity: TurnActivityPart): number | undefined => {
+    const part = activity.part as ToolPartType;
+    const state = part.state as { input?: Record<string, unknown>; metadata?: Record<string, unknown> } | undefined;
+    const input = state?.input;
+    const metadata = state?.metadata;
+
+    const rawLimit =
+        (typeof input?.limit === 'number' && Number.isFinite(input.limit) ? input.limit : undefined)
+        ?? (typeof metadata?.limit === 'number' && Number.isFinite(metadata.limit) ? metadata.limit : undefined);
+
+    if (typeof rawLimit !== 'number' || rawLimit <= 0) {
+        return undefined;
+    }
+
+    return Math.floor(rawLimit);
+};
+
 const normalizePathValue = (value: string): string => {
     const trimmed = value.trim();
     if (!trimmed) {
@@ -639,17 +656,18 @@ const StaticToolRowInner: React.FC<{
     }, [activities]);
 
     const readFileEntries = React.useMemo(() => {
-        if (!isReadGroup) return [] as Array<{ path: string; displayPath: string; offset?: number }>;
+        if (!isReadGroup) return [] as Array<{ path: string; displayPath: string; offset?: number; limit?: number }>;
 
-        const entries: Array<{ path: string; displayPath: string; offset?: number }> = [];
+        const entries: Array<{ path: string; displayPath: string; offset?: number; limit?: number }> = [];
         for (const activity of activities) {
             const filePath = getToolFilePath(activity);
             const offset = getToolReadOffset(activity);
+            const limit = getToolReadLimit(activity);
             if (!filePath) continue;
             if (entries.some((entry) => entry.path === filePath)) continue;
             const displayPath = getRelativePathFromDirectory(filePath, currentDirectory);
             if (!displayPath) continue;
-            entries.push({ path: filePath, displayPath, offset });
+            entries.push({ path: filePath, displayPath, offset, limit });
         }
         return entries;
     }, [activities, currentDirectory, isReadGroup]);
@@ -701,23 +719,39 @@ const StaticToolRowInner: React.FC<{
                 {displayName}
             </MinDurationShineText>
             {isReadGroup && readFileEntries.length > 0
-                ? readFileEntries.map((entry) => (
-                    <button
-                        key={entry.path}
-                        type="button"
-                        onClick={(event) => {
-                            event.preventDefault();
-                            event.stopPropagation();
-                            handleReadFileClick(entry.path, entry.offset);
-                        }}
-                        className="inline-flex items-center justify-start gap-1 min-w-0 flex-1 text-left typography-meta leading-5 hover:opacity-90"
-                        style={{ color: 'var(--tools-description)' }}
-                        title={entry.offset ? `${entry.displayPath}:${entry.offset}` : entry.displayPath}
-                    >
-                        {showToolFileIcons ? <FileTypeIcon filePath={entry.path} className="h-3.5 w-3.5" /> : null}
-                        {renderReadFilePath(entry.displayPath)}
-                    </button>
-                ))
+                ? readFileEntries.map((entry) => {
+                    const hasMeta = entry.offset != null || entry.limit != null;
+                    const titleParts = [entry.displayPath];
+                    if (entry.offset != null) titleParts.push(`offset: ${entry.offset}`);
+                    if (entry.limit != null) titleParts.push(`limit: ${entry.limit}`);
+                    return (
+                        <button
+                            key={entry.path}
+                            type="button"
+                            onClick={(event) => {
+                                event.preventDefault();
+                                event.stopPropagation();
+                                handleReadFileClick(entry.path, entry.offset);
+                            }}
+                            className="inline-flex items-center justify-start gap-1 min-w-0 flex-1 text-left typography-meta leading-5 hover:opacity-90"
+                            style={{ color: 'var(--tools-description)' }}
+                            title={titleParts.join(' · ')}
+                        >
+                            {showToolFileIcons ? <FileTypeIcon filePath={entry.path} className="h-3.5 w-3.5" /> : null}
+                            {renderReadFilePath(entry.displayPath)}
+                            <span className="flex-shrink-0 opacity-70" style={{ whiteSpace: 'nowrap' }}>
+                                {entry.offset != null && entry.limit != null
+                                    ? <span>L{entry.offset}-{entry.offset + entry.limit - 1}</span>
+                                    : entry.offset != null
+                                        ? <span>L{entry.offset}+</span>
+                                        : entry.limit != null
+                                            ? <span>L1-{entry.limit}</span>
+                                            : <span>L1+</span>
+                                }
+                            </span>
+                        </button>
+                    );
+                })
                 : null}
             {isSearchGroup && descriptions.length > 0
                 ? descriptions.map((desc, index) => (
