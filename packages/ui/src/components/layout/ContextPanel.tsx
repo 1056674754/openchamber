@@ -1544,6 +1544,9 @@ const DesktopBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dir
           </div>
         ) : null}
       </div>
+    </div>
+  );
+};
 
 
 const ContextPanelTabContent: React.FC<{

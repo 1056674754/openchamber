@@ -12,11 +12,13 @@ interface OmaSplitResult {
     omaBlocks: string;
     userContent: string;
     modeNames: string[];
+}
 
 function splitOmaContent(text: string): OmaSplitResult {
     const idx = text.lastIndexOf(OMA_SEPARATOR);
     if (idx <= 0) {
         return { omaBlocks: '', userContent: text, modeNames: [] };
+    }
 
     const omaBlocks = text.slice(0, idx);
     const userContent = text.slice(idx + OMA_SEPARATOR.length);
@@ -26,6 +28,7 @@ function splitOmaContent(text: string): OmaSplitResult {
     if (omaBlocks.includes('<ultrawork-mode>')) modeNames.push('Ultrawork');
 
     return { omaBlocks, userContent, modeNames };
+}
 
 type PartWithText = Part & { text?: string; content?: string; value?: string };
 
