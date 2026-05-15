@@ -1006,6 +1006,13 @@ async function resyncDirectoryAfterReconnect(
         session_status: { ...state.session_status, ...relevantStatuses },
       }
     })
+
+    // Mirror reconnected statuses to the global store so that
+    // useGlobalSessionStatus (globalStatus ?? liveStatus) reflects the
+    // corrected server state, not a stale pre-reconnect value.
+    for (const [sessionId, status] of Object.entries(relevantStatuses)) {
+      useGlobalSessionsStore.getState().upsertStatus(sessionId, status)
+    }
   }
 
   const scopedClient = serverId !== DEFAULT_SERVER_ID
@@ -1753,6 +1760,17 @@ export function SyncProvider(props: {
 
         if (needsUpdate) {
           store.setState({ session_status: nextStatuses })
+
+          // Sync forced-idle corrections to the global sessions store.
+          // The stuck-session checker only updates the per-directory child
+          // store, but useGlobalSessionStatus reads globalStatus ?? liveStatus.
+          // Without this sync, a stale "busy" in the global store shadows the
+          // corrected "idle" in the child store, keeping the sidebar stuck.
+          for (const [sessionId, status] of Object.entries(nextStatuses)) {
+            if (status.type === "idle" && statuses[sessionId]?.type !== "idle") {
+              useGlobalSessionsStore.getState().upsertStatus(sessionId, status)
+            }
+          }
         }
       }
     }, STUCK_SESSION_TIMEOUT_MS / 2) // Check at half the timeout for reasonable resolution
@@ -1898,6 +1916,18 @@ export function useSessionParts(messageID: string, directory?: string) {
 export function useSessionStatus(sessionID: string, directory?: string) {
   return useDirectorySync(
     useCallback((state: State) => state.session_status?.[sessionID], [sessionID]),
+    directory,
+  )
+}
+
+/**
+ * Timestamp (ms) of the last part event for a session. Cleared on
+ * `session.idle` / `session.error`. Consumed by `useSessionActivity` to
+ * keep Stop available when the server flips idle mid-stream.
+ */
+export function useSessionActivityTimestamp(sessionID: string, directory?: string) {
+  return useDirectorySync(
+    useCallback((state: State) => state.session_activity?.[sessionID], [sessionID]),
     directory,
   )
 }

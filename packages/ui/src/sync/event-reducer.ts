@@ -235,12 +235,16 @@ export function applyDirectoryEvent(
         return false
       }
       draft.session_status[props.sessionID] = props.status
+      if (props.status.type === "idle") {
+        delete draft.session_activity[props.sessionID]
+      }
       return true
     }
 
     case "session.idle": {
       const props = event.properties as { sessionID: string }
       const status = { type: "idle" } as const
+      delete draft.session_activity[props.sessionID]
       if (areSessionStatusesEqual(draft.session_status[props.sessionID], status)) {
         return false
       }
@@ -251,6 +255,7 @@ export function applyDirectoryEvent(
     case "session.error": {
       const props = event.properties as { sessionID: string }
       const status = { type: "idle" } as const
+      delete draft.session_activity[props.sessionID]
       if (areSessionStatusesEqual(draft.session_status[props.sessionID], status)) {
         return false
       }
@@ -310,6 +315,9 @@ export function applyDirectoryEvent(
       }
       const messageID = (part as { messageID: string }).messageID
       const sessionID = (part as { sessionID?: string }).sessionID
+      if (sessionID) {
+        draft.session_activity[sessionID] = Date.now()
+      }
       const missingOwningMessage = !hasMessage(draft, sessionID, messageID)
       const parts = draft.part[messageID]
       if (!parts) {
@@ -402,6 +410,10 @@ export function applyDirectoryEvent(
       const existingValue = existing[props.field] as string | undefined
       const dedupeFields = (existing as DedupeMetadata).__dedupeNextDeltaFields ?? []
       const shouldDedupe = dedupeFields.includes(props.field)
+      const sessionID = (existing as { sessionID?: string }).sessionID
+      if (sessionID) {
+        draft.session_activity[sessionID] = Date.now()
+      }
       // Create new Part object + new array so React detects the change
       const next = [...parts]
       next[result.index] = {

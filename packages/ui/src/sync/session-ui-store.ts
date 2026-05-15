@@ -1053,8 +1053,11 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     const targetFolderId = draft.targetFolderId
 
     try {
-      const dir = directoryOverride ?? opencodeClient.getDirectory()
-      const session = await createSessionAction(title, dir, parentID ?? null)
+      if (!directoryOverride) {
+        console.error("[session-ui-store] createSession: directoryOverride is required (no global-directory fallback)")
+        return null
+      }
+      const session = await createSessionAction(title, directoryOverride, parentID ?? null)
       if (!session) return null
 
       if (targetFolderId) {
@@ -1246,7 +1249,15 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       (sid) => get().worktreeMetadata.get(sid),
     )
 
-    const session = await get().createSession(undefined, directory ?? null, null)
+    if (!directory) {
+      console.error(
+        "[session-ui-store] createSessionFromAssistantMessage: source session directory unknown",
+        { sourceSessionId, sourceMessageId },
+      )
+      return
+    }
+
+    const session = await get().createSession(undefined, directory, null)
     if (!session) return
 
     const { currentProviderId, currentModelId, currentAgentName } = useConfigStore.getState()

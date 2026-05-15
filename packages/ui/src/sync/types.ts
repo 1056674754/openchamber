@@ -52,6 +52,14 @@ export type State = {
   session: Session[]
   sessionTotal: number
   session_status: Record<string, SessionStatus>
+  /**
+   * Wall-clock ms of the last `message.part.updated` / `message.part.delta`
+   * we saw per session. Used as a recency gate by `useSessionActivity`: if the
+   * server reports idle but parts are still streaming, the UI treats it as
+   * busy so the Stop button stays available during provider-side desync
+   * (premature session.idle, subagent boundary races, etc.).
+   */
+  session_activity: Record<string, number>
   session_diff: Record<string, FileDiff[]>
   todo: Record<string, Todo[]>
   permission: Record<string, PermissionRequest[]>
@@ -128,6 +136,7 @@ export const INITIAL_STATE: State = {
   session: [],
   sessionTotal: 0,
   session_status: {},
+  session_activity: {},
   session_diff: {},
   todo: {},
   permission: {},

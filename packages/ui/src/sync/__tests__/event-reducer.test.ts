@@ -206,4 +206,86 @@ describe("applyDirectoryEvent", () => {
     expect(draft.question.ses_1).not.toBe(afterReply)
     expect(draft.question.ses_1).toEqual([])
   })
+
+  test("stamps session_activity when part.updated arrives", () => {
+    const draft = state()
+    const before = Date.now()
+
+    applyDirectoryEvent(draft, partUpdatedEvent())
+
+    const stamp = draft.session_activity.ses_1
+    expect(typeof stamp === "number").toBe(true)
+    expect((stamp ?? 0) >= before).toBe(true)
+  })
+
+  test("stamps session_activity when part.delta updates an existing part", () => {
+    const draft = state({
+      part: {
+        msg_1: [
+          { id: "prt_1", messageID: "msg_1", sessionID: "ses_1", type: "text", text: "" } as Part,
+        ],
+      },
+    })
+    const before = Date.now()
+
+    applyDirectoryEvent(draft, deltaEvent())
+
+    const stamp = draft.session_activity.ses_1
+    expect(typeof stamp === "number").toBe(true)
+    expect((stamp ?? 0) >= before).toBe(true)
+  })
+
+  test("clears session_activity on session.idle", () => {
+    const draft = state({ session_activity: { ses_1: Date.now() - 1_000 } })
+
+    applyDirectoryEvent(draft, {
+      type: "session.idle",
+      properties: { sessionID: "ses_1" },
+    } as Event)
+
+    expect(draft.session_activity.ses_1 === undefined).toBe(true)
+  })
+
+  test("clears session_activity on session.error", () => {
+    const draft = state({ session_activity: { ses_1: Date.now() - 1_000 } })
+
+    applyDirectoryEvent(draft, {
+      type: "session.error",
+      properties: { sessionID: "ses_1" },
+    } as Event)
+
+    expect(draft.session_activity.ses_1 === undefined).toBe(true)
+  })
+
+  test("clears session_activity when session.status flips to idle", () => {
+    const draft = state({
+      session_status: { ses_1: { type: "busy" } as SessionStatus },
+      session_activity: { ses_1: Date.now() - 1_000 },
+    })
+
+    applyDirectoryEvent(draft, {
+      type: "session.status",
+      properties: { sessionID: "ses_1", status: { type: "idle" } as SessionStatus },
+    } as Event)
+
+    expect(draft.session_activity.ses_1 === undefined).toBe(true)
+  })
+
+  test("keeps session_activity when session.status stays non-idle", () => {
+    const stamp = Date.now() - 1_000
+    const draft = state({
+      session_status: { ses_1: { type: "busy" } as SessionStatus },
+      session_activity: { ses_1: stamp },
+    })
+
+    applyDirectoryEvent(draft, {
+      type: "session.status",
+      properties: {
+        sessionID: "ses_1",
+        status: { type: "retry", attempt: 1, message: "x", next: 10 } as SessionStatus,
+      },
+    } as Event)
+
+    expect(draft.session_activity.ses_1).toBe(stamp)
+  })
 })

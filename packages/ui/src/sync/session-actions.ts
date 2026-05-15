@@ -56,10 +56,6 @@ function dirStore() {
   return _childStores.ensureChild(d)
 }
 
-function dir() {
-  return _getDirectory() || undefined
-}
-
 const normalizeDirectoryKey = (directory: string): string =>
   directory.replace(/\\/g, "/").replace(/\/+$/, "") || "/"
 
@@ -354,15 +350,15 @@ export async function createSession(
   parentID?: string | null,
 ): Promise<Session | null> {
   try {
-    const fallbackDir = directoryOverride ?? dir()
-    if (!fallbackDir) {
-      console.error("[session-actions] createSession: no directory available")
+    if (!directoryOverride) {
+      console.error("[session-actions] createSession: directoryOverride is required (no global-directory fallback)")
       return null
     }
+    const targetDir = directoryOverride
 
-    const client = resolveSdkForDirectory(fallbackDir)
+    const client = resolveSdkForDirectory(targetDir)
     const result = await client.session.create({
-      directory: fallbackDir,
+      directory: targetDir,
       title,
       parentID: parentID ?? undefined,
     })
@@ -376,7 +372,7 @@ export async function createSession(
         registerSessionDirectory(session.id, sessionDirectory)
       }
 
-      const normalizedDir = fallbackDir.replace(/\\/g, '/').replace(/\/+$/, '') || '/'
+      const normalizedDir = targetDir.replace(/\\/g, '/').replace(/\/+$/, '') || '/'
       const project = useProjectsStore.getState().projects.find(
         (p) => p.path === normalizedDir && p.serverId && p.serverId !== DEFAULT_SERVER_ID,
       )
@@ -677,74 +673,77 @@ export async function optimisticSend(input: {
 // ---------------------------------------------------------------------------
 
 export async function abortCurrentOperation(sessionId: string): Promise<void> {
-  // Resolve all possible directory candidates.
-  // OpenCode's InstanceState is keyed by resolved directory — if abort sends a
-  // different string than what the prompt used, the server finds no runner and
-  // silently no-ops. We collect both the "live" directory (same source as prompt)
-  // and the session-mapped directory to cover mismatches.
+  console.info("[session-actions] abort: start", { sessionId })
+
   const liveDirectory = _getDirectory() || undefined
   let sessionDirectory: string | undefined
+  let sessionDirectoryError: string | undefined
   try {
     sessionDirectory = requireSessionDirectory(sessionId, "abortCurrentOperation")
-  } catch {
-    // ignore — liveDirectory is the primary source
+  } catch (err) {
+    sessionDirectoryError = String(err)
   }
 
-  // Deduplicate: if both resolve to the same string, only send once.
   const directories = new Set<string>()
   if (liveDirectory) directories.add(liveDirectory)
   if (sessionDirectory) directories.add(sessionDirectory)
 
+  console.info("[session-actions] abort: directories resolved", {
+    sessionId,
+    liveDirectory: liveDirectory || null,
+    sessionDirectory: sessionDirectory || null,
+    sessionDirectoryError: sessionDirectoryError || null,
+    candidates: [...directories],
+    count: directories.size,
+  })
+
   if (directories.size === 0) {
-    console.error("[session-actions] abort: no directory available at all")
+    console.error("[session-actions] abort: FAILED — no directory", { sessionId })
     useGlobalSessionsStore.getState().upsertStatus(sessionId, { type: "idle" })
     return
   }
 
   const client = sdkForSession(sessionId)
 
-  const sendAbort = (directory: string) =>
-    client.session.abort({ sessionID: sessionId, directory })
-
-  console.info("[session-actions] abort sending", {
-    sessionId,
-    directories: [...directories],
+  const t0 = Date.now()
+  const results: Array<{ directory: string; ok: boolean; error?: string; ms: number }> = []
+  const abortPromises = [...directories].map(async (dir) => {
+    const callStart = Date.now()
+    try {
+      await client.session.abort({ sessionID: sessionId, directory: dir })
+      results.push({ directory: dir, ok: true, ms: Date.now() - callStart })
+    } catch (error) {
+      results.push({ directory: dir, ok: false, error: String(error), ms: Date.now() - callStart })
+    }
   })
-
-  // Send abort for each unique directory candidate to ensure we hit the
-  // correct InstanceState entry regardless of path normalization differences.
-  const abortPromises = [...directories].map((dir) =>
-    sendAbort(dir).catch((error) => {
-      console.error("[session-actions] abort call failed", { directory: dir, error })
-    }),
-  )
   await Promise.all(abortPromises)
 
-  // Retry abort with escalating delays — OpenCode may not stop on the first
-  // attempt when mid-tool-execution or with queued tool calls.
-  const retryDelays = [600, 1500, 3500]
-  for (const delay of retryDelays) {
-    setTimeout(() => {
-      try {
-        const store = storeForSession(sessionId)
-        const current = store.getState()
-        if (current.session_status[sessionId]?.type !== "idle") {
-          console.info("[session-actions] abort retry", { sessionId, delay })
-          for (const dir of directories) {
-            void sendAbort(dir).catch(() => {})
-          }
-        }
-      } catch {
-        for (const dir of directories) {
-          void sendAbort(dir).catch(() => {})
-        }
-      }
-    }, delay)
+  const elapsed = Date.now() - t0
+  for (const r of results) {
+    if (r.ok) {
+      console.info("[session-actions] abort: sent ok", {
+        sessionId,
+        directory: r.directory,
+        ms: r.ms,
+      })
+    } else {
+      console.error("[session-actions] abort: FAILED", {
+        sessionId,
+        directory: r.directory,
+        error: r.error,
+        ms: r.ms,
+      })
+    }
   }
 
-  // Update global store optimistically so sidebar stops showing the spinner.
-  // Do NOT update child store — keep the stop button visible in case OpenCode
-  // doesn't actually stop and the user needs to press stop again.
+  console.info("[session-actions] abort: done", {
+    sessionId,
+    totalMs: elapsed,
+    sent: results.filter(r => r.ok).length,
+    failed: results.filter(r => !r.ok).length,
+    directories: results.map(r => r.directory),
+  })
+
   useGlobalSessionsStore.getState().upsertStatus(sessionId, { type: "idle" })
 }
 

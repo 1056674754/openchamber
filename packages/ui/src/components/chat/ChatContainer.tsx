@@ -42,6 +42,7 @@ import { getSessionMaterializationStatus } from '@/sync/materialization';
 import { usePlanDetection } from '@/hooks/usePlanDetection';
 import { getAllSyncSessions } from '@/sync/sync-refs';
 import { useI18n } from '@/lib/i18n';
+import { useCurrentSessionActivity } from '@/hooks/useSessionActivity';
 
 const EMPTY_MESSAGES: Array<{ info: Message; parts: Part[] }> = [];
 const EMPTY_PERMISSIONS: PermissionRequest[] = [];
@@ -419,23 +420,14 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
         if (scopedSessionIds.length === 0) return EMPTY_QUESTIONS;
         return flattenBlockingRequests(questionsMap, scopedSessionIds);
     }, [questionsMap, scopedSessionIds]);
+    const { isWorking: sessionActivityWorking } = useCurrentSessionActivity();
     const sessionIsWorking = React.useMemo(() => {
         if (!currentSessionId || sessionPermissions.length > 0 || sessionQuestions.length > 0) {
             return false;
         }
 
-        const statusType = sessionStatusForCurrent.type ?? 'idle';
-        if (statusType === 'busy' || statusType === 'retry') {
-            return true;
-        }
-
-        const lastMessage = sessionMessages[sessionMessages.length - 1]?.info as Message | undefined;
-        return Boolean(
-            lastMessage
-            && lastMessage.role === 'assistant'
-            && typeof (lastMessage as { time?: { completed?: number } }).time?.completed !== 'number',
-        );
-    }, [currentSessionId, sessionMessages, sessionPermissions.length, sessionQuestions.length, sessionStatusForCurrent.type]);
+        return sessionActivityWorking;
+    }, [currentSessionId, sessionPermissions.length, sessionQuestions.length, sessionActivityWorking]);
     const activeRetryStatus = React.useMemo(() => {
         if (!currentSessionId || sessionStatusForCurrent.type !== 'retry') {
             return null;

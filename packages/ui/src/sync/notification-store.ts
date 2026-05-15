@@ -109,9 +109,25 @@ export const useNotificationStore = create<NotificationStore>((set, get) => ({
   },
 
   append: (notification) => {
-    const current = get().list
-    const next = pruneNotifications([...current, notification])
-    set({ list: next, index: buildIndex(next) })
+    const current = get()
+    const next = pruneNotifications([...current.list, notification])
+    const newIndex = buildIndex(next)
+    // Merge with existing hydrated index (server-sourced entries not in list)
+    const mergedSessionCount = { ...current.index.session.unseenCount }
+    const mergedSessionErrors = { ...current.index.session.unseenHasError }
+    for (const [id, count] of Object.entries(newIndex.session.unseenCount)) {
+      mergedSessionCount[id] = count
+    }
+    for (const [id, val] of Object.entries(newIndex.session.unseenHasError)) {
+      mergedSessionErrors[id] = val
+    }
+    set({
+      list: next,
+      index: {
+        session: { unseenCount: mergedSessionCount, unseenHasError: mergedSessionErrors },
+        project: newIndex.project,
+      },
+    })
   },
 
   markSessionViewed: (sessionId) => {
@@ -122,7 +138,17 @@ export const useNotificationStore = create<NotificationStore>((set, get) => ({
     const next = current.list.map((n) =>
       n.session === sessionId && !n.viewed ? { ...n, viewed: true } : n,
     )
-    set({ list: next, index: buildIndex(next) })
+    const newUnseenCount = { ...current.index.session.unseenCount }
+    const newUnseenHasError = { ...current.index.session.unseenHasError }
+    delete newUnseenCount[sessionId]
+    delete newUnseenHasError[sessionId]
+    set({
+      list: next,
+      index: {
+        ...current.index,
+        session: { unseenCount: newUnseenCount, unseenHasError: newUnseenHasError },
+      },
+    })
     fetch(`/api/openchamber/sessions/${encodeURIComponent(sessionId)}/read`, { method: 'POST' }).catch(() => {})
   },
 
