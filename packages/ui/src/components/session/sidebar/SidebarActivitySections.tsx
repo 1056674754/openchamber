@@ -9,10 +9,10 @@ import {
 } from '@dnd-kit/core';
 import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { RiArrowDownSLine, RiArrowRightSLine } from '@remixicon/react';
 import { cn } from '@/lib/utils';
 import type { SessionNode } from './types';
 import { useI18n } from '@/lib/i18n';
+import { Icon } from "@/components/icon/Icon";
 
 export type ActivityItem = {
   node: SessionNode;
@@ -153,7 +153,7 @@ export function SidebarActivitySections({ sections, renderSessionNode, onReorder
               aria-expanded={!isCollapsed}
             >
               <span className="inline-flex h-4 w-4 items-center justify-center text-muted-foreground">
-                {isCollapsed ? <RiArrowRightSLine className="h-3.5 w-3.5" /> : <RiArrowDownSLine className="h-3.5 w-3.5" />}
+                {isCollapsed ? <Icon name="arrow-right-s" className="h-3.5 w-3.5" /> : <Icon name="arrow-down-s" className="h-3.5 w-3.5" />}
               </span>
               <span className="text-[14px] font-normal text-foreground/95">{section.title}</span>
             </button>

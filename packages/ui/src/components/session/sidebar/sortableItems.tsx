@@ -8,6 +8,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
+import { Icon } from "@/components/icon/Icon";
 import {
   RiAddLine,
   RiCloseLine,
@@ -19,7 +20,6 @@ import {
   RiPencilAiLine,
   RiPushpinLine,
   RiRefreshLine,
-} from '@remixicon/react';
 import { cn } from '@/lib/utils';
 import { PROJECT_COLOR_MAP, PROJECT_ICON_MAP, getProjectIconImageUrl } from '@/lib/projectMeta';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
@@ -141,7 +141,7 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
     setImageFailed(false);
   }, [id, projectIconImage?.updatedAt]);
 
-  const ProjectIcon = projectIcon ? PROJECT_ICON_MAP[projectIcon] : null;
+  const projectIconName = projectIcon ? PROJECT_ICON_MAP[projectIcon] : null;
   const iconColor = projectColor ? (PROJECT_COLOR_MAP[projectColor] ?? null) : null;
   const imageUrl = !imageFailed
     ? getProjectIconImageUrl({ id, iconImage: projectIconImage }, {
@@ -233,9 +233,9 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
                         />
                       ) : (
                         isCollapsed ? (
-                          <RiFolderLine className="h-3.5 w-3.5 text-muted-foreground/40" />
+                          <Icon name="folder" className="h-3.5 w-3.5 text-muted-foreground/40"  />
                         ) : (
-                          <RiFolderOpenLine className="h-3.5 w-3.5 text-muted-foreground/80" />
+                          <Icon name="folder-open" className="h-3.5 w-3.5 text-muted-foreground/80"  />
                         )
                       )}
                     </span>
@@ -249,7 +249,7 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
                     {serverId && (
                       <span className="inline-flex items-center gap-1 flex-shrink-0">
                         {unavailable ? (
-                          <RiErrorWarningLine className="h-2.5 w-2.5 flex-shrink-0" style={{ color: currentTheme.colors.status.warning }} />
+                          <Icon name="error-warning" className="h-2.5 w-2.5 flex-shrink-0" style={{ color: currentTheme.colors.status.warning }}  />
                         ) : (
                           <span
                             className="h-1.5 w-1.5 rounded-full flex-shrink-0"
@@ -284,23 +284,23 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
                 <DropdownMenuContent align="end" className="min-w-[180px]">
                   {showCreateButtons && !isRepo && !hideDirectoryControls && onNewSession && (
                   <DropdownMenuItem onClick={onNewSession}>
-                    <RiAddLine className="mr-1.5 h-4 w-4" />
+                    <Icon name="add" className="mr-1.5 h-4 w-4"  />
                     {t('sessions.sidebar.project.actions.newSession')}
                   </DropdownMenuItem>
                 )}
                 <DropdownMenuItem onClick={onRenameStart}>
-                  <RiPencilAiLine className="mr-1.5 h-4 w-4" />
+                  <Icon name="pencil-ai" className="mr-1.5 h-4 w-4"  />
                   {t('sessions.sidebar.session.menu.rename')}
                 </DropdownMenuItem>
                 {onTogglePin ? (
                   <DropdownMenuItem onClick={onTogglePin}>
-                    <RiPushpinLine className="mr-1.5 h-4 w-4" />
+                    <Icon name="pushpin" className="mr-1.5 h-4 w-4"  />
                     {isPinned ? t('directoryTree.actions.unpinDirectory') : t('directoryTree.actions.pinDirectory')}
                   </DropdownMenuItem>
                 ) : null}
                 {onRefresh ? (
                   <DropdownMenuItem onClick={onRefresh}>
-                    <RiRefreshLine className="mr-1.5 h-4 w-4" />
+                    <Icon name="refresh" className="mr-1.5 h-4 w-4"  />
                     {t('sessions.sidebar.project.actions.refresh')}
                   </DropdownMenuItem>
                 ) : null}
@@ -308,7 +308,7 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
                   onClick={onClose}
                   className="text-destructive focus:text-destructive"
                 >
-                  <RiCloseLine className="mr-1.5 h-4 w-4" />
+                  <Icon name="close" className="mr-1.5 h-4 w-4"  />
                   {t('sessions.sidebar.project.actions.closeProject')}
                 </DropdownMenuItem>
                 </DropdownMenuContent>
@@ -329,7 +329,7 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
                           ? t('sessions.sidebar.project.actions.newDraftSession')
                           : t('sessions.sidebar.project.actions.newSession')}
                       >
-                        <RiChatNewLine className="h-3.5 w-3.5" />
+                        <Icon name="chat-new" className="h-3.5 w-3.5"  />
                       </button>
                     </TooltipTrigger>
                     <TooltipContent side="bottom" sideOffset={4}>
@@ -352,7 +352,7 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
                         className="inline-flex h-5 w-5 items-center justify-center rounded-sm text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 hover:text-foreground"
                         aria-label={t('sessions.sidebar.project.actions.newWorktree')}
                       >
-                        <RiNodeTree className="h-3.5 w-3.5" />
+                        <Icon name="node-tree" className="h-3.5 w-3.5"  />
                       </button>
                     </TooltipTrigger>
                     <TooltipContent side="bottom" sideOffset={4}>
