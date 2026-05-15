@@ -7,6 +7,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { Icon } from "@/components/icon/Icon";
 import {
   RiCheckLine,
   RiCheckboxMultipleLine,
@@ -22,186 +23,6 @@ import {
   RiExpandUpDownLine,
   RiCalendarScheduleLine,
   RiFolderLine,
-} from '@remixicon/react';
-import { cn } from '@/lib/utils';
-import { ArrowsMerge } from '@/components/icons/ArrowsMerge';
-import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
-import { useI18n } from '@/lib/i18n';
-import { sessionEvents } from '@/lib/sessionEvents';
-
-type Props = {
-  hideDirectoryControls: boolean;
-  handleOpenDirectoryDialog: () => void;
-  handleNewSession: () => void;
-  handleNewTempSession?: () => void;
-  canOpenMultiRun: boolean;
-  openMultiRunLauncher: () => void;
-  headerActionIconClass: string;
-  reserveHeaderActionsSpace: boolean;
-  headerActionButtonClass: string;
-  isSessionSearchOpen: boolean;
-  setIsSessionSearchOpen: (open: boolean | ((prev: boolean) => boolean)) => void;
-  sessionSearchInputRef: React.RefObject<HTMLInputElement | null>;
-  sessionSearchQuery: string;
-  setSessionSearchQuery: (value: string) => void;
-  hasSessionSearchQuery: boolean;
-  searchMatchCount: number;
-  collapseAllProjects: () => void;
-  expandAllProjects: () => void;
-  openScheduledTasksDialog: () => void;
-  selectionModeEnabled: boolean;
-  onToggleSelectionMode: () => void;
-  onRefresh?: () => void;
-  showSidebarToggle?: boolean;
-  onToggleSidebar?: () => void;
-  avoidWindowControlsOverlay?: boolean;
-};
-
-export function SidebarHeader(props: Props): React.ReactNode {
-  const { t } = useI18n();
-  const {
-    hideDirectoryControls,
-    handleOpenDirectoryDialog,
-    handleNewSession,
-    handleNewTempSession,
-    canOpenMultiRun,
-    openMultiRunLauncher,
-    headerActionIconClass,
-    reserveHeaderActionsSpace,
-    headerActionButtonClass,
-    isSessionSearchOpen,
-    setIsSessionSearchOpen,
-    sessionSearchInputRef,
-    sessionSearchQuery,
-    setSessionSearchQuery,
-    hasSessionSearchQuery,
-    searchMatchCount,
-    collapseAllProjects,
-    expandAllProjects,
-    openScheduledTasksDialog,
-    selectionModeEnabled,
-    onToggleSelectionMode,
-    onRefresh,
-    showSidebarToggle = false,
-    onToggleSidebar,
-    avoidWindowControlsOverlay = false,
-  } = props;
-
-  const displayMode = useSessionDisplayStore((state) => state.displayMode);
-  const showRecentSection = useSessionDisplayStore((state) => state.showRecentSection);
-  const setDisplayMode = useSessionDisplayStore((state) => state.setDisplayMode);
-  const toggleRecentSection = useSessionDisplayStore((state) => state.toggleRecentSection);
-
-  if (hideDirectoryControls) {
-    return null;
-  }
-
-  return (
-    <div
-      className={cn(
-        'select-none flex-shrink-0',
-        showSidebarToggle ? (avoidWindowControlsOverlay ? 'pl-[5.5rem] pr-3' : 'pl-3 pr-3') : 'px-2.5 py-1',
-      )}
-      style={showSidebarToggle && avoidWindowControlsOverlay ? { paddingTop: 'var(--oc-safe-area-top, 0px)' } : undefined}
-    >
-      {reserveHeaderActionsSpace ? (
-        <div
-          className={cn(
-            'flex h-auto flex-col gap-1',
-            showSidebarToggle
-              ? avoidWindowControlsOverlay
-                ? 'min-h-[calc(var(--oc-header-height,56px)-var(--oc-safe-area-top,0px))] justify-center'
-                : 'min-h-[var(--oc-header-height,56px)] justify-center'
-              : 'min-h-8',
-          )}
-        >
-          <div className="flex h-8 items-center justify-between gap-2">
-            <div className="flex items-center gap-1.5">
-              {showSidebarToggle && onToggleSidebar ? (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <button
-                      type="button"
-                      onClick={onToggleSidebar}
-                      className="inline-flex h-8 w-8 items-center justify-center rounded-md typography-ui-label font-medium text-foreground transition-colors hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:pointer-events-none disabled:opacity-50"
-                      aria-label={t('sessions.sidebar.header.actions.closeSessions')}
-                    >
-                      <RiLayoutLeftLine className="h-[18px] w-[18px]" />
-                    </button>
-                  </TooltipTrigger>
-                  <TooltipContent side="bottom" sideOffset={4}><p>{t('sessions.sidebar.header.actions.closeSessions')}</p></TooltipContent>
-                </Tooltip>
-              ) : null}
-              <DropdownMenu>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <DropdownMenuTrigger asChild>
-                      <button
-                        type="button"
-                        className={headerActionButtonClass}
-                        aria-label={t('sessions.sidebar.header.actions.addProject')}
-                      >
-                        <RiFolderAddLine className={headerActionIconClass} />
-                      </button>
-                    </DropdownMenuTrigger>
-                  </TooltipTrigger>
-                  <TooltipContent side="bottom" sideOffset={4}><p>{t('sessions.sidebar.header.actions.addProject')}</p></TooltipContent>
-                </Tooltip>
-                <DropdownMenuContent align="start" className="min-w-[180px]">
-                  <DropdownMenuItem onClick={handleOpenDirectoryDialog} className="flex items-center gap-2">
-                    <RiFolderLine className="h-4 w-4" />
-                    {t('sessions.sidebar.header.actions.addLocalProject')}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => sessionEvents.requestRemoteDirectoryDialog()} className="flex items-center gap-2">
-                    <RiGlobeLine className="h-4 w-4" />
-                    {t('sessions.sidebar.header.actions.addRemoteProject')}
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-              <DropdownMenu>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <DropdownMenuTrigger asChild>
-                      <button
-                        type="button"
-                        className={headerActionButtonClass}
-                        aria-label={t('sessions.sidebar.header.actions.newSession')}
-                      >
-                        <RiChatNewLine className={headerActionIconClass} />
-                      </button>
-                    </DropdownMenuTrigger>
-                  </TooltipTrigger>
-                  <TooltipContent side="bottom" sideOffset={4}><p>{t('sessions.sidebar.header.actions.newSession')}</p></TooltipContent>
-                </Tooltip>
-                <DropdownMenuContent align="start" className="min-w-[180px]">
-                  <DropdownMenuItem onClick={handleNewSession} className="flex items-center gap-2">
-                    <RiChatNewLine className="h-4 w-4" />
-                    {t('sessions.sidebar.header.actions.newSession')}
-                  </DropdownMenuItem>
-                  {handleNewTempSession ? (
-                    <DropdownMenuItem onClick={handleNewTempSession} className="flex items-center gap-2">
-                      <RiFolderLine className="h-4 w-4" />
-                      {t('sessions.sidebar.header.actions.newTempSession')}
-                    </DropdownMenuItem>
-                  ) : null}
-                </DropdownMenuContent>
-              </DropdownMenu>
-
-              {onRefresh ? (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <button
-                      type="button"
-                      onClick={onRefresh}
-                      className={headerActionButtonClass}
-                      aria-label={t('sessions.sidebar.header.actions.refresh')}
-                    >
-                      <RiRefreshLine className={headerActionIconClass} />
-                    </button>
-                  </TooltipTrigger>
-                  <TooltipContent side="bottom" sideOffset={4}><p>{t('sessions.sidebar.header.actions.refresh')}</p></TooltipContent>
-                </Tooltip>
-              ) : null}
 
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -228,7 +49,7 @@ export function SidebarHeader(props: Props): React.ReactNode {
                     className={headerActionButtonClass}
                     aria-label={t('sessions.sidebar.header.actions.scheduledTasks')}
                   >
-                    <RiCalendarScheduleLine className={headerActionIconClass} />
+                    <Icon name="calendar-schedule" className={headerActionIconClass} />
                   </button>
                 </TooltipTrigger>
                 <TooltipContent side="bottom" sideOffset={4}><p>{t('sessions.sidebar.header.actions.scheduledTasks')}</p></TooltipContent>
@@ -243,7 +64,7 @@ export function SidebarHeader(props: Props): React.ReactNode {
                     aria-label={t('sessions.sidebar.header.actions.searchSessions')}
                     aria-expanded={isSessionSearchOpen}
                   >
-                    <RiSearchLine className={headerActionIconClass} />
+                    <Icon name="search" className={headerActionIconClass} />
                   </button>
                 </TooltipTrigger>
                 <TooltipContent side="bottom" sideOffset={4}><p>{t('sessions.sidebar.header.actions.searchSessions')}</p></TooltipContent>
@@ -260,7 +81,7 @@ export function SidebarHeader(props: Props): React.ReactNode {
                       : t('sessions.sidebar.header.actions.selectSessions')}
                     aria-pressed={selectionModeEnabled}
                   >
-                    <RiCheckboxMultipleLine className={headerActionIconClass} />
+                    <Icon name="checkbox-multiple" className={headerActionIconClass} />
                   </button>
                 </TooltipTrigger>
                 <TooltipContent side="bottom" sideOffset={4}>
@@ -279,7 +100,7 @@ export function SidebarHeader(props: Props): React.ReactNode {
                         className={headerActionButtonClass}
                         aria-label={t('sessions.sidebar.header.actions.sessionDisplayMode')}
                       >
-                        <RiEqualizer2Line className={headerActionIconClass} />
+                        <Icon name="equalizer-2" className={headerActionIconClass} />
                       </button>
                     </DropdownMenuTrigger>
                   </TooltipTrigger>
@@ -291,14 +112,14 @@ export function SidebarHeader(props: Props): React.ReactNode {
                     className="flex items-center justify-between"
                   >
                     <span>{t('sessions.sidebar.header.displayMode.default')}</span>
-                    {displayMode === 'default' ? <RiCheckLine className="h-4 w-4 text-primary" /> : null}
+                    {displayMode === 'default' ? <Icon name="check" className="h-4 w-4 text-primary" /> : null}
                   </DropdownMenuItem>
                   <DropdownMenuItem
                     onClick={() => setDisplayMode('minimal')}
                     className="flex items-center justify-between"
                   >
                     <span>{t('sessions.sidebar.header.displayMode.minimal')}</span>
-                    {displayMode === 'minimal' ? <RiCheckLine className="h-4 w-4 text-primary" /> : null}
+                    {displayMode === 'minimal' ? <Icon name="check" className="h-4 w-4 text-primary" /> : null}
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem
@@ -306,15 +127,15 @@ export function SidebarHeader(props: Props): React.ReactNode {
                     className="flex items-center justify-between"
                   >
                     <span>{t('sessions.sidebar.header.displayMode.showRecent')}</span>
-                    {showRecentSection ? <RiCheckLine className="h-4 w-4 text-primary" /> : null}
+                    {showRecentSection ? <Icon name="check" className="h-4 w-4 text-primary" /> : null}
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem onClick={collapseAllProjects} className="flex items-center gap-2">
-                    <RiContractUpDownLine className="h-4 w-4" />
+                    <Icon name="contract-up-down" className="h-4 w-4" />
                     <span>{t('sessions.sidebar.header.displayMode.collapseAll')}</span>
                   </DropdownMenuItem>
                   <DropdownMenuItem onClick={expandAllProjects} className="flex items-center gap-2">
-                    <RiExpandUpDownLine className="h-4 w-4" />
+                    <Icon name="expand-up-down" className="h-4 w-4" />
                     <span>{t('sessions.sidebar.header.displayMode.expandAll')}</span>
                   </DropdownMenuItem>
                 </DropdownMenuContent>
@@ -333,7 +154,7 @@ export function SidebarHeader(props: Props): React.ReactNode {
                 <span>{t('sessions.sidebar.header.search.escapeHint')}</span>
               </div>
               <div className="relative">
-                <RiSearchLine className="pointer-events-none absolute left-2 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Icon name="search" className="pointer-events-none absolute left-2 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <input
                   ref={sessionSearchInputRef}
                   value={sessionSearchQuery}
@@ -358,7 +179,7 @@ export function SidebarHeader(props: Props): React.ReactNode {
                     className="absolute right-1 top-1/2 inline-flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground hover:bg-interactive-hover/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
                     aria-label={t('sessions.sidebar.header.search.clear')}
                   >
-                    <RiCloseLine className="h-3.5 w-3.5" />
+                    <Icon name="close" className="h-3.5 w-3.5" />
                   </button>
                 ) : null}
               </div>

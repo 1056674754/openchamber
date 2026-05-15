@@ -4,7 +4,7 @@ import type { Part } from '@opencode-ai/sdk/v2';
 import type { AgentMentionInfo } from '../types';
 import { SimpleMarkdownRenderer } from '../../MarkdownRenderer';
 import { useUIStore } from '@/stores/useUIStore';
-import { RiArrowUpSLine, RiArrowDownSLine, RiArrowRightSLine } from '@remixicon/react';
+import { Icon } from "@/components/icon/Icon";
 
 const OMA_SEPARATOR = '\n\n---\n\n';
 
@@ -12,13 +12,11 @@ interface OmaSplitResult {
     omaBlocks: string;
     userContent: string;
     modeNames: string[];
-}
 
 function splitOmaContent(text: string): OmaSplitResult {
     const idx = text.lastIndexOf(OMA_SEPARATOR);
     if (idx <= 0) {
         return { omaBlocks: '', userContent: text, modeNames: [] };
-    }
 
     const omaBlocks = text.slice(0, idx);
     const userContent = text.slice(idx + OMA_SEPARATOR.length);
@@ -28,7 +26,6 @@ function splitOmaContent(text: string): OmaSplitResult {
     if (omaBlocks.includes('<ultrawork-mode>')) modeNames.push('Ultrawork');
 
     return { omaBlocks, userContent, modeNames };
-}
 
 type PartWithText = Part & { text?: string; content?: string; value?: string };
 
@@ -181,9 +178,9 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMenti
                         onClick={() => setIsOmaExpanded((v) => !v)}
                     >
                         {isOmaExpanded ? (
-                            <RiArrowDownSLine className="h-3 w-3 flex-shrink-0" />
+                            <Icon name="arrow-down-s" className="h-3 w-3 flex-shrink-0"  />
                         ) : (
-                            <RiArrowRightSLine className="h-3 w-3 flex-shrink-0" />
+                            <Icon name="arrow-right-s" className="h-3 w-3 flex-shrink-0"  />
                         )}
                         <span className="typography-micro font-medium">
                             {modeNames.join(' · ')}
@@ -205,7 +202,7 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMenti
                     className="absolute top-0 right-0 z-10 flex items-center justify-center rounded-sm bg-[var(--surface-elevated)] p-0.5 text-[var(--surface-mutedForeground)] hover:text-[var(--surface-foreground)] hover:bg-[var(--interactive-hover)] transition-colors"
                     aria-label="Collapse"
                 >
-                    <RiArrowUpSLine className="h-3.5 w-3.5" />
+                    <Icon name="arrow-up-s" className="h-3.5 w-3.5" />
                 </button>
             )}
             <div

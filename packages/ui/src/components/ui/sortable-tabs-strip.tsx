@@ -18,12 +18,12 @@ import {
   useSortable,
 } from '@dnd-kit/sortable';
 import { CSS as DndCSS } from '@dnd-kit/utilities';
-import { RiCloseLine } from '@remixicon/react';
 
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { useUIStore } from '@/stores/useUIStore';
 import { useDeviceInfo } from '@/lib/device';
+import { Icon } from "@/components/icon/Icon";
 
 export type SortableTabsStripItem = {
   id: string;
@@ -133,7 +133,6 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
   const tabRefs = React.useRef<Map<string, HTMLElement>>(new Map());
   const activeDragIDRef = React.useRef<string | null>(null);
   const [pillRect, setPillRect] = React.useState<{ left: number; top: number; width: number; height: number } | null>(null);
-
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
@@ -267,8 +266,6 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
   React.useLayoutEffect(() => {
     updateActivePillRect();
   });
-
-
 
   React.useEffect(() => {
     if (!isScrollable || !activeId) {
@@ -492,7 +489,7 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
                               aria-label={item.closeLabel ?? `Close ${item.label} tab`}
                               title={item.closeLabel ?? `Close ${item.label} tab`}
                             >
-                              <RiCloseLine className="h-3.5 w-3.5" />
+                              <Icon name="close" className="h-3.5 w-3.5" />
                             </span>
                           ) : null}
                         </span>
@@ -524,7 +521,7 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
                               aria-label={item.closeLabel ?? `Close ${item.label} tab`}
                               title={item.closeLabel ?? `Close ${item.label} tab`}
                             >
-                              <RiCloseLine className="h-3.5 w-3.5" />
+                              <Icon name="close" className="h-3.5 w-3.5" />
                             </span>
                           ) : null}
                         </span>
@@ -559,7 +556,7 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
                     aria-label={item.closeLabel ?? `Close ${item.label} tab`}
                     title={item.closeLabel ?? `Close ${item.label} tab`}
                   >
-                    <RiCloseLine className="h-3 w-3" />
+                    <Icon name="close" className="h-3 w-3" />
                   </button>
                 ) : null}
               </div>
