@@ -240,23 +240,25 @@ export const MainLayout: React.FC = () => {
 
         let timeoutId: number | undefined;
 
-        const handleResponsivePanels = () => {
-            const state = useUIStore.getState();
-            const width = window.innerWidth;
+         const handleResponsivePanels = () => {
+             const state = useUIStore.getState();
+             const width = window.innerWidth;
 
-            const shouldCloseRightSidebar = width < RIGHT_SIDEBAR_AUTO_CLOSE_WIDTH;
-            const canAutoOpenRightSidebar = width >= RIGHT_SIDEBAR_AUTO_OPEN_WIDTH;
+             if (!isMobile) {
+                 const shouldCloseRightSidebar = width < RIGHT_SIDEBAR_AUTO_CLOSE_WIDTH;
+                 const canAutoOpenRightSidebar = width >= RIGHT_SIDEBAR_AUTO_OPEN_WIDTH;
 
-            if (shouldCloseRightSidebar) {
-                if (state.isRightSidebarOpen) {
-                    setRightSidebarOpen(false);
-                    rightSidebarAutoClosedRef.current = true;
-                }
-            } else if (canAutoOpenRightSidebar && rightSidebarAutoClosedRef.current) {
-                setRightSidebarOpen(true);
-                rightSidebarAutoClosedRef.current = false;
-            }
-        };
+                 if (shouldCloseRightSidebar) {
+                     if (state.isRightSidebarOpen) {
+                         setRightSidebarOpen(false);
+                         rightSidebarAutoClosedRef.current = true;
+                     }
+                 } else if (canAutoOpenRightSidebar && rightSidebarAutoClosedRef.current) {
+                     setRightSidebarOpen(true);
+                     rightSidebarAutoClosedRef.current = false;
+                 }
+             }
+         };
 
         const handleResize = () => {
             if (timeoutId !== undefined) {
