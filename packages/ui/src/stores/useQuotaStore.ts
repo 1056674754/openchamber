@@ -180,6 +180,9 @@ export const useQuotaStore = create<QuotaStore>()(
           if (!response.ok) {
             throw new Error(payload?.error || 'Failed to fetch quota');
           }
+          if (!payload || typeof payload !== 'object' || typeof payload.providerId !== 'string') {
+            throw new Error('Invalid quota response');
+          }
 
           const result = payload as ProviderResult;
           set((state) => {
