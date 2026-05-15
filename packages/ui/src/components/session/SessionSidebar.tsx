@@ -21,6 +21,7 @@ import { useGitStore, useGitAllBranches, useGitRepoStatusMap } from '@/stores/us
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { NewWorktreeDialog } from './NewWorktreeDialog';
 import { ScheduledTasksDialog } from './ScheduledTasksDialog';
+import { RegenerateTitleDialog } from './RegenerateTitleDialog';
 import { useSessionFoldersStore } from '@/stores/useSessionFoldersStore';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { useArchivedAutoFolders } from './sidebar/hooks/useArchivedAutoFolders';
@@ -198,6 +199,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   const [deleteSessionConfirm, setDeleteSessionConfirm] = React.useState<DeleteSessionConfirmState>(null);
   const [deleteFolderConfirm, setDeleteFolderConfirm] = React.useState<DeleteFolderConfirmState>(null);
   const [bulkDeleteConfirm, setBulkDeleteConfirm] = React.useState<BulkDeleteSessionsConfirmState>(null);
+  const [regenerateTitleSession, setRegenerateTitleSession] = React.useState<{ id: string; title: string } | null>(null);
   const [pinnedSessionIds, setPinnedSessionIds] = React.useState<Set<string>>(() => {
     try {
       const raw = getSafeStorage().getItem(SESSION_PINNED_STORAGE_KEY);
@@ -1647,6 +1649,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
         createFolderAndStartRename={createFolderAndStartRename}
         openContextPanelTab={openContextPanelTab}
         handleDeleteSession={handleDeleteSession}
+        onRegenerateTitle={(sessionId, sessionTitle) => setRegenerateTitleSession({ id: sessionId, title: sessionTitle })}
         mobileVariant={mobileVariant}
         alwaysShowActions={alwaysShowSidebarActions}
         renderSessionNode={renderSessionNode}
@@ -1687,6 +1690,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
       createFolderAndStartRename,
       openContextPanelTab,
       handleDeleteSession,
+      setRegenerateTitleSession,
       mobileVariant,
       alwaysShowSidebarActions,
     ],
@@ -2244,6 +2248,14 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
         showDeletionDialog={showDeletionDialog}
         setShowDeletionDialog={setShowDeletionDialog}
         onConfirm={confirmBulkDelete}
+      />
+
+      <RegenerateTitleDialog
+        open={regenerateTitleSession !== null}
+        onOpenChange={(open) => { if (!open) setRegenerateTitleSession(null); }}
+        sessionId={regenerateTitleSession?.id ?? ''}
+        sessionTitle={regenerateTitleSession?.title ?? ''}
+        onApply={updateSessionTitle}
       />
     </div>
   );

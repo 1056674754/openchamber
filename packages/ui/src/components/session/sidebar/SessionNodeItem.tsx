@@ -34,6 +34,7 @@ import {
   RiUnpinLine,
   RiGitBranchLine,
   RiWindowLine,
+  RiSparklingLine,
 } from '@remixicon/react';
 import { cn } from '@/lib/utils';
 import { canUseElectronDesktopIPC, invokeDesktop, isVSCodeRuntime } from '@/lib/desktop';
@@ -125,10 +126,11 @@ const resolveLeadingState = (input: LeadingStatusInput): LeadingState => {
   };
 };
 
-const resolveGlobalPinnedLeadingState = (input: { hasChildren: boolean; hasSpinner: boolean }): LeadingState => {
+const resolveGlobalPinnedLeadingState = (input: { hasChildren: boolean; hasSpinner: boolean; hasUnread: boolean }): LeadingState => {
+  const status = resolveStatusSlot({ hasSpinner: input.hasSpinner, hasUnread: input.hasUnread });
   return {
     slot1: input.hasChildren ? 'pin-chevron' : 'pin',
-    slot2: input.hasSpinner ? 'spinner' : 'none',
+    slot2: status,
   };
 };
 
@@ -170,6 +172,7 @@ type Props = {
   createFolderAndStartRename: (scopeKey: string, parentId?: string | null) => { id: string } | null;
   openContextPanelTab: (directory: string, options: { mode: 'chat'; dedupeKey: string; label: string }) => void;
   handleDeleteSession: (session: Session, source?: { archivedBucket?: boolean }) => void;
+  onRegenerateTitle?: (sessionId: string, sessionTitle: string) => void;
   mobileVariant: boolean;
   alwaysShowActions: boolean;
   renderSessionNode: (node: SessionNode, depth?: number, groupDirectory?: string | null, projectId?: string | null, archivedBucket?: boolean, secondaryMeta?: SecondaryMeta | null, renderContext?: 'project' | 'recent' | 'global-pinned') => React.ReactNode;
@@ -325,6 +328,7 @@ const areEqual = (prev: Props, next: Props): boolean => {
   if ((prev.renderContext ?? 'project') !== (next.renderContext ?? 'project')) return false;
   if (prev.renamingFolderId !== next.renamingFolderId) return false;
   if (prev.renderSessionNode !== next.renderSessionNode) return false;
+  if (prev.onRegenerateTitle !== next.onRegenerateTitle) return false;
 
   return true;
 };
@@ -369,6 +373,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
     createFolderAndStartRename,
     openContextPanelTab,
     handleDeleteSession,
+    onRegenerateTitle,
     mobileVariant,
     alwaysShowActions,
     renderSessionNode,
@@ -740,6 +745,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
     ? resolveGlobalPinnedLeadingState({
       hasChildren: hasChildrenChevron,
       hasSpinner: shouldShowSpinner,
+      hasUnread: showUnreadStatus,
     })
     : resolveLeadingState({
       rowKind,
@@ -910,6 +916,18 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
         <RiPencilAiLine className="mr-1 h-4 w-4" />
         {t('sessions.sidebar.session.menu.rename')}
       </DropdownMenuItem>
+      {onRegenerateTitle ? (
+        <DropdownMenuItem
+          onClick={() => {
+            setOpenSidebarMenuKey(null);
+            onRegenerateTitle(session.id, sessionTitle);
+          }}
+          className="[&>svg]:mr-1"
+        >
+          <RiSparklingLine className="mr-1 h-4 w-4" />
+          {t('sessions.sidebar.session.menu.regenerateTitle')}
+        </DropdownMenuItem>
+      ) : null}
       {isGloballyPinned ? (
         <DropdownMenuItem onClick={() => togglePinnedSession(session.id, 'global')} className="[&>svg]:mr-1">
           <RiUnpinLine className="mr-1 h-4 w-4" />
