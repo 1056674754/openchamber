@@ -1472,6 +1472,10 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   }, [isSaving, saveDraft]);
 
   const loadSelectedFile = React.useCallback(async (node: FileNode) => {
+    if (!root && !files.readFile) {
+      return;
+    }
+
     const loadId = activeFileLoadIdRef.current + 1;
     activeFileLoadIdRef.current = loadId;
     const isCurrentLoad = () => {
@@ -1575,7 +1579,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
           setFileLoading(false);
         }
       });
-  }, [expandPaths, isMobile, loadDirectory, mode, readFile, readFileStat, root, runtime.isDesktop, searchQuery, setSelectedPath, t]);
+  }, [expandPaths, files.readFile, isMobile, loadDirectory, mode, readFile, readFileStat, root, runtime.isDesktop, searchQuery, setSelectedPath, t]);
 
   const ensurePathVisible = React.useCallback(async (targetPath: string, includeTarget: boolean) => {
     if (!root) {
