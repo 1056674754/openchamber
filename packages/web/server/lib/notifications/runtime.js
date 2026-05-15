@@ -16,6 +16,14 @@ export const createNotificationTriggerRuntime = (deps) => {
     getOpenCodeAuthHeaders,
   } = deps;
 
+  let getIsWindowFocused = typeof deps.getIsWindowFocused === 'function'
+    ? deps.getIsWindowFocused
+    : null;
+
+  const setGetIsWindowFocused = (cb) => {
+    getIsWindowFocused = typeof cb === 'function' ? cb : null;
+  };
+
   const PUSH_READY_COOLDOWN_MS = 5000;
   const PUSH_QUESTION_DEBOUNCE_MS = 500;
   const PUSH_PERMISSION_DEBOUNCE_MS = 500;
@@ -312,11 +320,156 @@ export const createNotificationTriggerRuntime = (deps) => {
         }
 
         pendingCompletionPayloads.set(sessionId, payload);
+
+        if (settings.notificationMode !== 'always' && getIsWindowFocused?.()) {
+          return;
+        }
+
+        const now = Date.now();
+        const lastAt = lastReadyNotificationAt.get(sessionId) ?? 0;
+        if (now - lastAt < PUSH_READY_COOLDOWN_MS) {
+          return;
+        }
+        lastReadyNotificationAt.set(sessionId, now);
+
+        let title = `${formatMode(info?.mode)} agent is ready`;
+        let body = `${formatModelId(info?.modelID)} completed the task`;
+
+        try {
+          const templates = settings.notificationTemplates || {};
+          const isSubtask = await fetchSessionParentId(sessionId);
+          const completionTemplate = isSubtask && settings.notifyOnSubtasks !== false
+            ? (templates.subtask || templates.completion || { title: '{agent_name} is ready', message: '{model_name} completed the task' })
+            : (templates.completion || { title: '{agent_name} is ready', message: '{model_name} completed the task' });
+
+          const variables = await buildTemplateVariables(payload, sessionId);
+
+          const messageId = info?.id;
+          let lastMessage = extractLastMessageText(payload);
+          if (!lastMessage) {
+            lastMessage = await fetchLastAssistantMessageText(sessionId, messageId);
+          }
+
+          const notifZenModel = await resolveZenModel(settings?.zenModel);
+          variables.last_message = await prepareNotificationLastMessage({
+            message: lastMessage,
+            settings,
+            summarize: (text, len) => summarizeText(text, len, notifZenModel),
+          });
+
+          const resolvedTitle = resolveNotificationTemplate(completionTemplate.title, variables);
+          const resolvedBody = resolveNotificationTemplate(completionTemplate.message, variables);
+          if (resolvedTitle) title = resolvedTitle;
+          if (shouldApplyResolvedTemplateMessage(completionTemplate.message, resolvedBody, variables)) body = resolvedBody;
+        } catch (error) {
+          console.warn('[Notification] Template resolution failed, using defaults:', error?.message || error);
+        }
+
+        if (settings.nativeNotificationsEnabled) {
+          const notificationPayload = {
+            title,
+            body,
+            tag: `ready-${sessionId}`,
+            kind: 'ready',
+            sessionId,
+            requireHidden: settings.notificationMode !== 'always',
+          };
+
+          emitDesktopNotification(notificationPayload);
+          broadcastUiNotification(notificationPayload);
+        }
+
+        await sendPushToAllUiSessions(
+          {
+            title,
+            body,
+            tag: `ready-${sessionId}`,
+            data: {
+              url: buildSessionDeepLinkUrl(sessionId),
+              sessionId,
+              type: 'ready',
+            },
+          },
+          { requireNoSse: true },
+        );
+      }
+
+        const now = Date.now();
+        const lastAt = lastReadyNotificationAt.get(sessionId) ?? 0;
+        if (now - lastAt < PUSH_READY_COOLDOWN_MS) {
+          return;
+        }
+        lastReadyNotificationAt.set(sessionId, now);
+
+        let title = `${formatMode(info?.mode)} agent is ready`;
+        let body = `${formatModelId(info?.modelID)} completed the task`;
+
+        try {
+          const templates = settings.notificationTemplates || {};
+          const isSubtask = await fetchSessionParentId(sessionId);
+          const completionTemplate = isSubtask && settings.notifyOnSubtasks !== false
+            ? (templates.subtask || templates.completion || { title: '{agent_name} is ready', message: '{model_name} completed the task' })
+            : (templates.completion || { title: '{agent_name} is ready', message: '{model_name} completed the task' });
+
+          const variables = await buildTemplateVariables(payload, sessionId);
+
+          const messageId = info?.id;
+          let lastMessage = extractLastMessageText(payload);
+          if (!lastMessage) {
+            lastMessage = await fetchLastAssistantMessageText(sessionId, messageId);
+          }
+
+          const notifZenModel = await resolveZenModel(settings?.zenModel);
+          variables.last_message = await prepareNotificationLastMessage({
+            message: lastMessage,
+            settings,
+            summarize: (text, len) => summarizeText(text, len, notifZenModel),
+          });
+
+          const resolvedTitle = resolveNotificationTemplate(completionTemplate.title, variables);
+          const resolvedBody = resolveNotificationTemplate(completionTemplate.message, variables);
+          if (resolvedTitle) title = resolvedTitle;
+          if (shouldApplyResolvedTemplateMessage(completionTemplate.message, resolvedBody, variables)) body = resolvedBody;
+        } catch (error) {
+          console.warn('[Notification] Template resolution failed, using defaults:', error?.message || error);
+        }
+
+        if (settings.nativeNotificationsEnabled) {
+          const notificationPayload = {
+            title,
+            body,
+            tag: `ready-${sessionId}`,
+            kind: 'ready',
+            sessionId,
+            requireHidden: settings.notificationMode !== 'always',
+          };
+          emitDesktopNotification(notificationPayload);
+          broadcastUiNotification(notificationPayload);
+        }
+
+        await sendPushToAllUiSessions(
+          {
+            title,
+            body,
+            tag: `ready-${sessionId}`,
+            data: {
+              url: buildSessionDeepLinkUrl(sessionId),
+              sessionId,
+              type: 'ready',
+            },
+          },
+          { requireNoSse: true },
+        );
+>>>>>>> b615cb1e (fix: check window focus before summarization to avoid wasted Zen API calls)
       }
 
       if (info?.role === 'assistant' && info?.finish === 'error' && sessionId) {
         const settings = await readSettingsFromDisk();
         if (settings.notifyOnError === false) return;
+
+        if (settings.notificationMode !== 'always' && getIsWindowFocused?.()) {
+          return;
+        }
 
         let title = 'Tool error';
         let body = 'An error occurred';
@@ -387,6 +540,10 @@ export const createNotificationTriggerRuntime = (deps) => {
 
         const settings = await readSettingsFromDisk();
         if (settings.notifyOnQuestion === false) {
+          return;
+        }
+
+        if (settings.notificationMode !== 'always' && getIsWindowFocused?.()) {
           return;
         }
 
@@ -508,6 +665,10 @@ export const createNotificationTriggerRuntime = (deps) => {
           return;
         }
 
+        if (settings.notificationMode !== 'always' && getIsWindowFocused?.()) {
+          return;
+        }
+
         const sessionTitle = payload.properties?.sessionTitle;
         const permissionText = typeof permission === 'string' && permission.length > 0 ? permission : '';
         const fallbackMessage = typeof sessionTitle === 'string' && sessionTitle.trim().length > 0
@@ -578,5 +739,6 @@ export const createNotificationTriggerRuntime = (deps) => {
   return {
     maybeSendPushForTrigger,
     setAutoAcceptSession,
+    setGetIsWindowFocused,
   };
 };
