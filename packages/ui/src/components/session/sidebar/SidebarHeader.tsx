@@ -33,7 +33,7 @@ import {
                     aria-label={t('sessions.sidebar.header.actions.newMultiRun')}
                     disabled={!canOpenMultiRun}
                   >
-                    <ArrowsMerge className={headerActionIconClass} />
+                    <Icon name="arrows-merge" className={headerActionIconClass} />
                   </button>
                 </TooltipTrigger>
                 <TooltipContent side="bottom" sideOffset={4}><p>{t('sessions.sidebar.header.actions.newMultiRun')}</p></TooltipContent>
