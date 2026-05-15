@@ -788,10 +788,13 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
         } else {
           const lastPort = readPersistedOpenCodePort();
           if (lastPort && lastPort !== 4096 && await probeExternalOpenCode(lastPort)) {
-            console.log(`Reconnected to previous OpenCode server on port ${lastPort}`);
+            console.log(`Reconnected to previous managed OpenCode server on port ${lastPort}`);
             setOpenCodePort(lastPort);
             state.isOpenCodeReady = true;
-            state.isExternalOpenCode = true;
+            // Do NOT set isExternalOpenCode here — this port was persisted by
+            // OpenChamber itself, meaning it was a managed server. Marking it
+            // external would cause shouldSkipOpenCodeStop to refuse killing the
+            // process when the user chooses "Quit and Stop OpenCode".
             state.lastOpenCodeError = null;
             state.openCodeNotReadySince = 0;
             syncToHmrState();

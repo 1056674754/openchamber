@@ -1143,6 +1143,8 @@ export const createOpenCodeEnvRuntime = (deps) => {
 
   const clearResolvedOpenCodeBinary = () => {
     state.resolvedOpencodeBinary = null;
+    state.resolvedOpencodeBinarySource = null;
+    delete process.env.OPENCODE_BINARY;
   };
 
   return {

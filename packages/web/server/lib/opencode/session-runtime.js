@@ -141,12 +141,21 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
       return;
     }
 
+    const prevStatus = existing?.status;
+
     sessionStates.set(sessionId, {
       status,
       lastUpdateAt: now,
       lastEventId: eventId || `server-${now}`,
       metadata: { ...existing?.metadata, ...metadata },
     });
+
+    // Record unread only on genuine transition to idle/error (not on startup reports)
+    if (unreadStore && prevStatus && prevStatus !== status) {
+      if (status === 'idle' && (prevStatus === 'busy' || prevStatus === 'retry')) {
+        unreadStore.recordActivity(sessionId, { hasError: false });
+      }
+    }
 
     updateSessionAttentionStatus(sessionId, status);
     const attentionState = sessionAttentionStates.get(sessionId);
@@ -329,9 +338,6 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
           message: update.message,
           next: update.next,
         });
-        if (update.type === 'idle' && unreadStore) {
-          unreadStore.recordActivity(update.sessionId, { hasError: false });
-        }
       }
     }
 
