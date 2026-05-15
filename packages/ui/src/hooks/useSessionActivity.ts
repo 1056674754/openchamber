@@ -1,8 +1,12 @@
 import React from 'react';
 import { useSessionUIStore } from '@/sync/session-ui-store';
-import { useSessionStatus, useSessionMessages, useSessionPermissions } from '@/sync/sync-context';
+import {
+  useSessionStatus,
+  useSessionMessages,
+  useSessionPermissions,
+  useSessionActivityTimestamp,
+} from '@/sync/sync-context';
 
-// Mirrors OpenCode SessionStatus: busy|retry|idle.
 export type SessionActivityPhase = 'idle' | 'busy' | 'retry';
 
 export interface SessionActivityResult {
@@ -20,26 +24,61 @@ const IDLE_RESULT: SessionActivityResult = {
 };
 
 /**
+ * How recent a `message.part.*` event must be for the UI to override a
+ * server-reported `idle` status and treat the session as still streaming.
+ *
+ * This fallback only activates when the server has **never** reported a status
+ * for this session (no `session.status` / `session.idle` event received). When
+ * the server has explicitly reported `idle`, the activity timestamp is ignored
+ * entirely — the server is the authoritative source.
+ *
+ * Calibration:
+ *  - Long enough to cover brief SSE reconnection gaps (typical: 1–3s).
+ *  - Short enough that a stale activity timestamp from a dead session doesn't
+ *    keep the UI stuck in "busy" for an unreasonable time.
+ */
+const STREAM_DESYNC_WINDOW_MS = 5_000;
+
+/**
+ * Grace period after the server reports `idle` during which a trailing
+ * assistant message without `time.completed` is still treated as "working".
+ *
+ * This covers the race where `session.idle` arrives before the final
+ * `message.updated` (with `time.completed`). Once the grace period expires,
+ * the server's `idle` status takes absolute precedence.
+ */
+const IDLE_GRACE_PERIOD_MS = 3_000;
+
+/**
  * Determines if a session is actively working.
- * Checks session_status and, only when status is missing, falls back to the
- * trailing assistant message when its completion update has not landed yet.
- * Returns idle when permissions are pending (permission indicator takes priority).
+ *
+ * Priority chain (first match wins):
+ *
+ *  1. **Permissions pending** → idle (permission indicator takes priority).
+ *  2. **Server status busy/retry** → working (authoritative).
+ *  3. **Server status explicitly idle** → check grace period:
+ *     a. Within grace period AND trailing assistant has no `time.completed`
+ *        → still working (race protection).
+ *     b. Grace period expired → idle (server is authoritative).
+ *  4. **No server status received** (no `session.status` event yet):
+ *     a. Trailing assistant without `time.completed` → working.
+ *     b. Recent `message.part.*` activity (within STREAM_DESYNC_WINDOW_MS)
+ *        → working.
+ *     c. Otherwise → idle.
  */
 export function useSessionActivity(sessionId: string | null | undefined, directory?: string): SessionActivityResult {
   const status = useSessionStatus(sessionId ?? '', directory);
   const messages = useSessionMessages(sessionId ?? '', directory);
   const permissions = useSessionPermissions(sessionId ?? '', directory);
+  const lastActivityAt = useSessionActivityTimestamp(sessionId ?? '', directory);
 
   return React.useMemo<SessionActivityResult>(() => {
     if (!sessionId) return IDLE_RESULT;
 
-    // Permissions pending → idle (permission indicator takes priority)
     if (permissions.length > 0) return IDLE_RESULT;
 
     const phase: SessionActivityPhase = (status?.type ?? 'idle') as SessionActivityPhase;
 
-    // Only trust the trailing assistant message as a transient fallback while
-    // waiting for session.status/message.updated to settle.
     const lastMessage = messages[messages.length - 1];
     const hasPendingAssistant = Boolean(
       lastMessage
@@ -49,19 +88,50 @@ export function useSessionActivity(sessionId: string | null | undefined, directo
 
     const hasAuthoritativeStatus = status !== undefined;
     const statusWorking = hasAuthoritativeStatus && phase !== 'idle';
-    const isWorking = statusWorking || hasPendingAssistant;
 
-    if (hasAuthoritativeStatus && !statusWorking) return IDLE_RESULT;
+    // Server says busy/retry → working, no questions asked.
+    if (statusWorking) {
+      return {
+        phase,
+        isWorking: true,
+        isBusy: phase === 'busy',
+        isCooldown: false,
+      };
+    }
 
-    if (!isWorking) return IDLE_RESULT;
+    // --- Server says idle (or we have an explicit status that is idle) ---
+
+    if (hasAuthoritativeStatus) {
+      // Server explicitly reported idle. Only keep "working" if we're in the
+      // grace period AND the trailing assistant message hasn't been marked
+      // complete yet (race: session.idle arrived before message.updated).
+      if (hasPendingAssistant && lastActivityAt && Date.now() - lastActivityAt < IDLE_GRACE_PERIOD_MS) {
+        return {
+          phase: 'busy',
+          isWorking: true,
+          isBusy: true,
+          isCooldown: false,
+        };
+      }
+      // Grace period expired or message already completed → server wins.
+      return IDLE_RESULT;
+    }
+
+    // --- No authoritative status received (no session.status event yet) ---
+
+    const hasRecentStreamActivity = Boolean(
+      lastActivityAt && Date.now() - lastActivityAt < STREAM_DESYNC_WINDOW_MS,
+    );
+
+    if (!hasPendingAssistant && !hasRecentStreamActivity) return IDLE_RESULT;
 
     return {
-      phase: statusWorking ? phase : 'busy',
+      phase: 'busy',
       isWorking: true,
-      isBusy: phase === 'busy' || (!statusWorking && hasPendingAssistant),
+      isBusy: true,
       isCooldown: false,
     };
-  }, [sessionId, status, messages, permissions]);
+  }, [sessionId, status, messages, permissions, lastActivityAt]);
 }
 
 export function useCurrentSessionActivity(): SessionActivityResult {

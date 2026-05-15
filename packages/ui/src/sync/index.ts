@@ -63,6 +63,7 @@ export {
   useSessionMessagesResolved,
   useSessionParts,
   useSessionStatus,
+  useSessionActivityTimestamp,
   useSessionPermissions,
   useSessionQuestions,
   useSessions,
