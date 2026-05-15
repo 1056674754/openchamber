@@ -2080,28 +2080,8 @@ export const ContextPanel: React.FC = () => {
     };
   }), [effectiveDirectory, t, tabs]);
 
-  const activeNonChatContent = activeTab?.mode === 'diff'
-    ? <DiffView hideStackedFileSidebar stackedDefaultCollapsedAll hideFileSelector pinSelectedFileHeaderToTopOnNavigate showOpenInEditorAction />
-    : activeTab?.mode === 'context'
-        ? <ContextPanelContent />
-        : activeTab?.mode === 'plan'
-            ? <PlanView targetPath={activeTab.targetPath} />
-            : activeTab?.mode === 'preview'
-                ? <PreviewPane rawUrl={activeTab.targetPath ?? ''} onNavigate={(url) => openContextPreview(effectiveDirectory, url)} />
-                : (
-                  <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
-                    <Icon name="global" className="h-12 w-12 text-muted-foreground/50" />
-                    <div className="typography-ui-header text-foreground">{t('contextPanel.preview.title')}</div>
-                    <div className="max-w-sm typography-micro text-muted-foreground">{t('contextPanel.preview.description')}</div>
-                  </div>
-                );
-
   const chatTabs = React.useMemo(
     () => tabs.filter((tab) => tab.mode === 'chat'),
-    [tabs],
-  );
-  const browserTabs = React.useMemo(
-    () => tabs.filter((tab) => tab.mode === 'browser'),
     [tabs],
   );
   const hasFileTabs = React.useMemo(

@@ -273,6 +273,7 @@ const SystemDirectiveBanner: React.FC<{
 const ChatMessage: React.FC<ChatMessageProps> = ({
     message,
     previousMessage,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     nextMessage,
     onContentChange,
     animationHandlers,
@@ -719,23 +720,6 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
     }, [message.info, currentSessionId, isUser]);
 
     const [hasStartedStreamingHeader, setHasStartedStreamingHeader] = React.useState(false);
-
-    const nextRole = React.useMemo(() => {
-        if (!nextMessage) return null;
-        return deriveMessageRole(nextMessage.info);
-    }, [nextMessage]);
-
-    const hasTurnGrouping = Boolean(turnGroupingContext);
-    const isLastAssistantInTurn = turnGroupingContext?.isLastAssistantInTurn ?? false;
-
-    const isFollowedByAssistant = React.useMemo(() => {
-        if (isUser) return false;
-        if (hasTurnGrouping) {
-            return !isLastAssistantInTurn;
-        }
-        if (!nextRole) return false;
-        return !nextRole.isUser && nextRole.role === 'assistant';
-    }, [hasTurnGrouping, isLastAssistantInTurn, isUser, nextRole]);
 
     const streamPhase: StreamPhase = React.useMemo(() => {
         if (isMessageCompleted) {

@@ -720,7 +720,6 @@ const StaticToolRowInner: React.FC<{
             </MinDurationShineText>
             {isReadGroup && readFileEntries.length > 0
                 ? readFileEntries.map((entry) => {
-                    const hasMeta = entry.offset != null || entry.limit != null;
                     const titleParts = [entry.displayPath];
                     if (entry.offset != null) titleParts.push(`offset: ${entry.offset}`);
                     if (entry.limit != null) titleParts.push(`limit: ${entry.limit}`);
