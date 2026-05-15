@@ -9,17 +9,6 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { Icon } from "@/components/icon/Icon";
-import {
-  RiAddLine,
-  RiCloseLine,
-  RiChatNewLine,
-  RiErrorWarningLine,
-  RiFolderLine,
-  RiFolderOpenLine,
-  RiNodeTree,
-  RiPencilAiLine,
-  RiPushpinLine,
-  RiRefreshLine,
 import { cn } from '@/lib/utils';
 import { PROJECT_COLOR_MAP, PROJECT_ICON_MAP, getProjectIconImageUrl } from '@/lib/projectMeta';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
