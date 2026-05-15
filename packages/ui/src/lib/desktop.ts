@@ -171,6 +171,13 @@ export type DesktopSettings = {
   responseStylePreset?: 'concise' | 'detailed' | 'mentor' | 'pushback' | 'noFiller' | 'matchEnergy' | 'warmPeer' | 'custom';
   responseStyleCustomInstructions?: string;
   multiRunEnabled?: boolean;
+  sttProvider?: 'browser' | 'server';
+  sttServerUrl?: string;
+  sttModel?: string;
+  sttLanguage?: string;
+  sttSilenceThresholdDb?: number;
+  sttSilenceHoldMs?: number;
+  sttTranscribeOnStop?: boolean;
 };
 
 type TauriGlobal = {
