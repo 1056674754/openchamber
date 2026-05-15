@@ -1058,21 +1058,6 @@ class OpencodeService {
     }
   }
 
-  // Permissions
-  async replyToPermission(
-    requestId: string,
-    reply: 'once' | 'always' | 'reject',
-    options?: { message?: string }
-  ): Promise<boolean> {
-    const result = await this.client.permission.reply({
-      requestID: requestId,
-      ...(this.currentDirectory ? { directory: this.currentDirectory } : {}),
-      reply,
-      ...(options?.message ? { message: options.message } : {}),
-    });
-    return result.data || false;
-  }
-
   async listPendingPermissions(options?: { directories?: Array<string | null | undefined> }): Promise<PermissionRequest[]> {
     const fetches: Array<Promise<PermissionRequest[]>> = [];
 
@@ -1117,34 +1102,6 @@ class OpencodeService {
     }
 
     return merged;
-  }
-
-  // Questions ("ask" tool)
-  async replyToQuestion(requestId: string, answers: string[] | string[][]): Promise<boolean> {
-    const normalizedAnswers: string[][] = (() => {
-      if (!Array.isArray(answers) || answers.length === 0) {
-        return [];
-      }
-      if (Array.isArray(answers[0])) {
-        return answers as string[][];
-      }
-      return [answers as string[]];
-    })();
-
-    const result = await this.client.question.reply({
-      requestID: requestId,
-      ...(this.currentDirectory ? { directory: this.currentDirectory } : {}),
-      answers: normalizedAnswers,
-    });
-    return result.data || false;
-  }
-
-  async rejectQuestion(requestId: string): Promise<boolean> {
-    const result = await this.client.question.reject({
-      requestID: requestId,
-      ...(this.currentDirectory ? { directory: this.currentDirectory } : {}),
-    });
-    return result.data || false;
   }
 
   async listPendingQuestions(options?: { directories?: Array<string | null | undefined> }): Promise<QuestionRequest[]> {
