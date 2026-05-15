@@ -1,6 +1,6 @@
 import express from 'express';
 import { normalizeCustomOpenAIBaseURL } from './base-url.js';
-import { summarizeText, sanitizeForTTS, sanitizeForNote, sanitizeForNotification } from '../text/summarization.js';
+import { summarizeText, sanitizeForTTS, sanitizeForNote, sanitizeForNotification, generateSessionTitleCandidates } from '../text/summarization.js';
 
 export function registerTtsRoutes(app, { resolveZenModel, sayTTSCapability }) {
   let ttsModulePromise = null;
@@ -160,6 +160,33 @@ export function registerTtsRoutes(app, { resolveZenModel, sayTTSCapability }) {
         ? sanitizeForNote(req.body?.text || '')
         : sanitizeForTTS(req.body?.text || '');
       return res.json({ summary: sanitized, summarized: false, reason: error.message });
+    }
+  });
+
+  app.post('/api/text/session-title-candidates', async (req, res) => {
+    try {
+      const { text, count, maxLength } = req.body || {};
+
+      if (!text || typeof text !== 'string' || !text.trim()) {
+        return res.status(400).json({ error: 'Text is required' });
+      }
+
+      const sumZenModel = await resolveZenModel(typeof req.body?.zenModel === 'string' ? req.body.zenModel : undefined);
+      const result = await generateSessionTitleCandidates({
+        text,
+        count,
+        maxLength,
+        zenModel: sumZenModel,
+      });
+
+      return res.json(result);
+    } catch (error) {
+      console.error('[SessionTitle] Error:', error);
+      return res.status(500).json({
+        candidates: [],
+        generated: false,
+        reason: error instanceof Error ? error.message : 'Unknown error',
+      });
     }
   });
 

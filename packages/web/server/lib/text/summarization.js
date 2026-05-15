@@ -6,6 +6,10 @@
  * - notification: concise notification text
  * - note: distilled project note
  * - topic: short directory-name-friendly topic
+ *
+ * Helpers:
+ * - generateSessionTitleCandidates: produces 3 human-readable session title
+ *   candidates via the same zen API, without touching any OpenCode session.
  */
 
 function buildSummarizationPrompt(maxLength, mode = 'tts') {
@@ -306,6 +310,170 @@ export async function summarizeText({ text, threshold = 200, maxLength = 500, ze
     return {
       summary: fallbackByMode(text, maxLength, mode),
       summarized: false,
+      reason: error.message,
+    };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+const DEFAULT_SESSION_TITLE_COUNT = 3;
+const DEFAULT_SESSION_TITLE_MAX_LENGTH = 60;
+
+function buildSessionTitleCandidatesPrompt(count, maxLength) {
+  return `You are generating ${count} concise alternative titles for a chat session. You will receive an excerpt of the conversation.
+
+Rules:
+1. Output ONLY a JSON array of exactly ${count} strings. No prose. No markdown. No code fences.
+2. Each title must be at most ${maxLength} characters.
+3. Each title must be human-readable and natural-language (NOT kebab-case, NOT a filename).
+4. Match the dominant language of the conversation (Chinese stays Chinese, English stays English, etc.).
+5. Focus on the most recent or dominant topic of the conversation, not stale earlier threads.
+6. Titles should be specific and descriptive. Avoid generic words like "conversation", "chat", "help", "discussion".
+7. Do NOT wrap titles in quotes.
+8. Give three distinct angles: e.g. one focused on the primary action, one on the subject matter, one on the outcome.
+
+Output format example (array of strings):
+["First title", "Second title", "Third title"]`;
+}
+
+function sanitizeSessionTitleCandidate(raw, maxLength) {
+  if (typeof raw !== 'string') return '';
+  let value = raw.trim();
+  value = value.replace(/^["'`\u201c\u201d\u2018\u2019\u00ab\u00bb\s]+/, '');
+  value = value.replace(/["'`\u201c\u201d\u2018\u2019\u00ab\u00bb\s]+$/, '');
+  value = value.replace(/\s+/g, ' ');
+  value = value.replace(/^\s*[-*\u2022\u2023\u25cb]\s*/, '');
+  value = value.replace(/^\s*\d+[.)]\s*/, '');
+  if (value.length > maxLength) {
+    value = value.slice(0, maxLength).trim();
+  }
+  return value;
+}
+
+function extractCandidatesFromOutput(rawOutput, count, maxLength) {
+  if (typeof rawOutput !== 'string') return [];
+  const trimmed = rawOutput.trim();
+  if (!trimmed) return [];
+
+  const withoutFence = trimmed
+    .replace(/^```(?:json|JSON)?\s*/, '')
+    .replace(/```$/, '')
+    .trim();
+
+  const jsonStart = withoutFence.indexOf('[');
+  const jsonEnd = withoutFence.lastIndexOf(']');
+  if (jsonStart >= 0 && jsonEnd > jsonStart) {
+    const jsonSlice = withoutFence.slice(jsonStart, jsonEnd + 1);
+    try {
+      const parsed = JSON.parse(jsonSlice);
+      if (Array.isArray(parsed)) {
+        const cleaned = parsed
+          .map((item) => sanitizeSessionTitleCandidate(item, maxLength))
+          .filter((item) => item.length > 0);
+        if (cleaned.length > 0) {
+          return cleaned.slice(0, count);
+        }
+      }
+    } catch (_error) {
+      void _error;
+    }
+  }
+
+  const lines = withoutFence
+    .split(/\r?\n/)
+    .map((line) => sanitizeSessionTitleCandidate(line, maxLength))
+    .filter((line) => line.length > 0);
+  if (lines.length > 0) {
+    return lines.slice(0, count);
+  }
+
+  return [];
+}
+
+export async function generateSessionTitleCandidates({
+  text,
+  count = DEFAULT_SESSION_TITLE_COUNT,
+  maxLength = DEFAULT_SESSION_TITLE_MAX_LENGTH,
+  zenModel,
+}) {
+  const safeCount = Math.max(1, Math.min(5, Number.isFinite(count) ? Number(count) : DEFAULT_SESSION_TITLE_COUNT));
+  const safeMaxLength = Math.max(10, Math.min(120, Number.isFinite(maxLength) ? Number(maxLength) : DEFAULT_SESSION_TITLE_MAX_LENGTH));
+
+  if (!text || typeof text !== 'string' || !text.trim()) {
+    return {
+      candidates: [],
+      generated: false,
+      reason: 'No text provided',
+    };
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), SUMMARIZE_TIMEOUT_MS);
+
+  try {
+    const prompt = buildSessionTitleCandidatesPrompt(safeCount, safeMaxLength);
+    const model = zenModel || 'gpt-5-nano';
+    const endpoint = getZenCompletionEndpoint(model);
+    const response = await fetch(`https://opencode.ai/zen/v1/${endpoint}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(endpoint === 'responses'
+        ? {
+            model,
+            input: [{ role: 'user', content: `${prompt}\n\nConversation excerpt:\n${text}` }],
+            stream: false,
+            reasoning: { effort: 'low' },
+          }
+        : {
+            model,
+            messages: [{ role: 'user', content: `${prompt}\n\nConversation excerpt:\n${text}` }],
+            stream: false,
+          }),
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      const errorBody = await response.json().catch(() => ({}));
+      console.error('[SessionTitle] zen API error:', response.status, errorBody);
+      return {
+        candidates: [],
+        generated: false,
+        reason: `zen API returned ${response.status}`,
+      };
+    }
+
+    const data = await response.json();
+    const rawOutput = endpoint === 'responses'
+      ? extractZenOutputText(data)
+      : extractZenChatCompletionText(data);
+
+    const candidates = extractCandidatesFromOutput(rawOutput || '', safeCount, safeMaxLength);
+    if (candidates.length === 0) {
+      return {
+        candidates: [],
+        generated: false,
+        reason: 'No valid candidates parsed from model output',
+      };
+    }
+
+    return {
+      candidates,
+      generated: true,
+    };
+  } catch (error) {
+    if (error.name === 'AbortError') {
+      console.error('[SessionTitle] Request timed out');
+      return {
+        candidates: [],
+        generated: false,
+        reason: 'Request timed out',
+      };
+    }
+    console.error('[SessionTitle] Error:', error);
+    return {
+      candidates: [],
+      generated: false,
       reason: error.message,
     };
   } finally {
