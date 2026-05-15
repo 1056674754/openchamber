@@ -2,9 +2,15 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { summarizeText, generateSessionTitleCandidates } from './summarization.js';
 
+const originalFetch = globalThis.fetch;
+
+function stubFetch(fetchMock) {
+  globalThis.fetch = fetchMock;
+}
+
 describe('text summarization zen requests', () => {
   afterEach(() => {
-    vi.unstubAllGlobals();
+    globalThis.fetch = originalFetch;
   });
 
   it('uses responses endpoint for gpt models', async () => {
@@ -17,7 +23,7 @@ describe('text summarization zen requests', () => {
         }],
       }),
     }));
-    vi.stubGlobal('fetch', fetchMock);
+    stubFetch(fetchMock);
 
     const result = await summarizeText({
       text: 'Long text '.repeat(30),
@@ -43,7 +49,7 @@ describe('text summarization zen requests', () => {
         choices: [{ message: { content: 'Chat summary' } }],
       }),
     }));
-    vi.stubGlobal('fetch', fetchMock);
+    stubFetch(fetchMock);
 
     const result = await summarizeText({
       text: 'Long text '.repeat(30),
@@ -61,11 +67,58 @@ describe('text summarization zen requests', () => {
     );
     expect(result.summary).toBe('Chat summary');
   });
+
+  it('clamps successful model summaries to the requested max length', async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        output: [{
+          type: 'message',
+          content: [{ type: 'output_text', text: 'This response is too long' }],
+        }],
+      }),
+    }));
+    stubFetch(fetchMock);
+
+    const result = await summarizeText({
+      text: 'Long text '.repeat(30),
+      threshold: 0,
+      maxLength: 12,
+      zenModel: 'gpt-5-nano',
+      mode: 'notification',
+    });
+
+    expect(result.summary).toBe('This respon');
+    expect(result.summary.length).toBeLessThanOrEqual(12);
+  });
+
+  it('returns full text when max length is non-finite', async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        output: [{
+          type: 'message',
+          content: [{ type: 'output_text', text: 'A'.repeat(100) }],
+        }],
+      }),
+    }));
+    stubFetch(fetchMock);
+
+    const result = await summarizeText({
+      text: 'Long text '.repeat(30),
+      threshold: 0,
+      maxLength: Infinity,
+      zenModel: 'gpt-5-nano',
+      mode: 'notification',
+    });
+
+    expect(result.summary).toBe('A'.repeat(100));
+  });
 });
 
 describe('generateSessionTitleCandidates', () => {
   afterEach(() => {
-    vi.unstubAllGlobals();
+    globalThis.fetch = originalFetch;
   });
 
   it('parses a clean JSON array from zen responses endpoint', async () => {
@@ -81,7 +134,7 @@ describe('generateSessionTitleCandidates', () => {
         }],
       }),
     }));
-    vi.stubGlobal('fetch', fetchMock);
+    stubFetch(fetchMock);
 
     const result = await generateSessionTitleCandidates({
       text: 'User discussed OAuth token refresh issues.',
@@ -109,7 +162,7 @@ describe('generateSessionTitleCandidates', () => {
         }],
       }),
     }));
-    vi.stubGlobal('fetch', fetchMock);
+    stubFetch(fetchMock);
 
     const result = await generateSessionTitleCandidates({
       text: 'Conversation text here.',
@@ -132,7 +185,7 @@ describe('generateSessionTitleCandidates', () => {
         }],
       }),
     }));
-    vi.stubGlobal('fetch', fetchMock);
+    stubFetch(fetchMock);
 
     const result = await generateSessionTitleCandidates({
       text: 'Conversation text here.',
@@ -155,7 +208,7 @@ describe('generateSessionTitleCandidates', () => {
         }],
       }),
     }));
-    vi.stubGlobal('fetch', fetchMock);
+    stubFetch(fetchMock);
 
     const result = await generateSessionTitleCandidates({
       text: 'Conversation text here.',
@@ -179,7 +232,7 @@ describe('generateSessionTitleCandidates', () => {
         }],
       }),
     }));
-    vi.stubGlobal('fetch', fetchMock);
+    stubFetch(fetchMock);
 
     const result = await generateSessionTitleCandidates({
       text: 'x',
@@ -203,7 +256,7 @@ describe('generateSessionTitleCandidates', () => {
         }],
       }),
     }));
-    vi.stubGlobal('fetch', fetchMock);
+    stubFetch(fetchMock);
 
     const result = await generateSessionTitleCandidates({
       text: 'x',
@@ -231,7 +284,7 @@ describe('generateSessionTitleCandidates', () => {
       status: 500,
       json: async () => ({ error: 'server error' }),
     }));
-    vi.stubGlobal('fetch', fetchMock);
+    stubFetch(fetchMock);
 
     const result = await generateSessionTitleCandidates({
       text: 'x',
@@ -254,7 +307,7 @@ describe('generateSessionTitleCandidates', () => {
         }],
       }),
     }));
-    vi.stubGlobal('fetch', fetchMock);
+    stubFetch(fetchMock);
 
     const result = await generateSessionTitleCandidates({
       text: 'x',
