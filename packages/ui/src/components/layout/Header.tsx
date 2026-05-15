@@ -1775,7 +1775,7 @@ export const Header: React.FC<HeaderProps> = ({
         title={t('header.actions.terminalPanelWithShortcut', { shortcut: shortcutLabel('toggle_terminal') })}
         ariaLabel={t('header.actions.toggleTerminalPanelAria')}
         onClick={() => openContextTerminal(actionDirectory)}
-        Icon={RiTerminalBoxLine}
+        Icon={'terminal-box'}
       />
       {hasElectronDesktopIPC ? (
         <HeaderIconActionButton

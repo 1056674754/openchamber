@@ -1,6 +1,19 @@
 import React from 'react';
 import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
+import { useDesktopSshStore } from '@/stores/useDesktopSshStore';
+import { useUIStore } from '@/stores/useUIStore';
+import { useShallow } from 'zustand/react/shallow';
+import {
+  phaseDotClass,
+  resolveInstanceLabel,
+  type DesktopSshInstance,
+} from '@/lib/desktopSsh';
+import { SettingsSidebarLayout } from '@/components/sections/shared/SettingsSidebarLayout';
+import { SettingsSidebarItem } from '@/components/sections/shared/SettingsSidebarItem';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { toast } from '@/components/ui';
 
 type RemoteInstancesSidebarProps = {
   onItemSelect?: () => void;

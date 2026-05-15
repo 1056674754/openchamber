@@ -3325,7 +3325,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                                                 )} />
                                                                 <span className="font-medium truncate">{capitalizeAgentName(agent.name)}</span>
                                                             </div>
-                                                            {isSelected && <RiCheckLine className="h-4 w-4 text-primary flex-shrink-0" />}
+                                                            {isSelected && <Icon name="check" className="h-4 w-4 text-primary flex-shrink-0" />}
                                                         </div>
                                                     </DropdownMenuItem>
                                                 );
