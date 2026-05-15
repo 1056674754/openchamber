@@ -12,6 +12,7 @@ const { createOpenCodeLifecycleRuntime } = await import('./lifecycle.js');
 
 const originalOpencodeBinary = process.env.OPENCODE_BINARY;
 const originalOpenChamberRuntime = process.env.OPENCHAMBER_RUNTIME;
+const originalPath = process.env.PATH;
 const originalFetch = globalThis.fetch;
 
 afterEach(() => {
@@ -24,9 +25,15 @@ afterEach(() => {
   }
   if (typeof originalOpencodeBinary === 'string') {
     process.env.OPENCODE_BINARY = originalOpencodeBinary;
-    return;
+  } else {
+    delete process.env.OPENCODE_BINARY;
   }
-  delete process.env.OPENCODE_BINARY;
+
+  if (typeof originalPath === 'string') {
+    process.env.PATH = originalPath;
+  } else {
+    delete process.env.PATH;
+  }
 });
 
 const createMockChild = () => {
@@ -213,7 +220,6 @@ describe('OpenCode lifecycle', () => {
 
   it('falls back to process.env.PATH when neither build function is provided', async () => {
     delete process.env.OPENCODE_BINARY;
-    const originalPath = process.env.PATH;
     process.env.PATH = '/usr/bin:/bin';
     const child = createMockChild();
     spawnMock.mockImplementationOnce(() => {
@@ -231,7 +237,6 @@ describe('OpenCode lifecycle', () => {
     const [, , options] = spawnMock.mock.calls[0];
 
     expect(options.env.PATH).toBe('/usr/bin:/bin');
-    process.env.PATH = originalPath;
 
     await server.close();
   });
