@@ -9,6 +9,8 @@ import { streamPerfCount, streamPerfObserve } from '@/stores/utils/streamDebug';
 import { parseThinkingSegments, hasThinkingTags } from '@/lib/thinkingTagParser';
 import type { ThinkingSegment } from '@/lib/thinkingTagParser';
 import { ReasoningTimelineBlock } from './ReasoningPart';
+import { GeneratedJsonResultCard } from './GeneratedJsonResultCard';
+import { parseGeneratedJsonResult } from './generatedJsonResult';
 
 type PartWithText = Part & { text?: string; content?: string; value?: string; time?: { start?: number; end?: number } };
 
@@ -81,6 +83,18 @@ const AssistantTextPart: React.FC<AssistantTextPartProps> = ({
         isFinalized,
     })) {
         return null;
+    }
+
+    const generatedResult = !isStreaming && isFinalized ? parseGeneratedJsonResult(displayTextContent) : null;
+    if (generatedResult) {
+        return (
+            <div
+                className={`group/assistant-text relative break-words ${chatRenderMode === 'live' ? 'my-1' : ''}`}
+                key={part.id || `${messageId}-text`}
+            >
+                <GeneratedJsonResultCard result={generatedResult} />
+            </div>
+        );
     }
 
     if (part.type === 'reasoning' || !thinkingSegments || thinkingSegments.length === 0 || (thinkingSegments.length === 1 && thinkingSegments[0].type === 'text')) {
