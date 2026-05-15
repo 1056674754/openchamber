@@ -10,7 +10,7 @@ import {
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { Icon } from "@/components/icon/Icon";
 import { cn } from '@/lib/utils';
-import { PROJECT_COLOR_MAP, getProjectIconImageUrl } from '@/lib/projectMeta';
+import { PROJECT_COLOR_MAP, PROJECT_ICON_MAP, getProjectIconImageUrl } from '@/lib/projectMeta';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useI18n } from '@/lib/i18n';
 import { useDesktopSshStore } from '@/stores/useDesktopSshStore';
@@ -60,6 +60,7 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
   id,
   projectLabel,
   projectDescription,
+  projectIcon,
   projectColor,
   projectIconImage,
   projectIconBackground,
@@ -129,6 +130,7 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
     setImageFailed(false);
   }, [id, projectIconImage?.updatedAt]);
 
+  const projectIconName = projectIcon ? PROJECT_ICON_MAP[projectIcon] : null;
   const iconColor = projectColor ? (PROJECT_COLOR_MAP[projectColor] ?? null) : null;
   const imageUrl = !imageFailed
     ? getProjectIconImageUrl({ id, iconImage: projectIconImage }, {
@@ -213,8 +215,9 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
                             onError={() => setImageFailed(true)}
                           />
                         </span>
-                      ) : ProjectIcon ? (
-                        <ProjectIcon
+                      ) : projectIconName ? (
+                        <Icon
+                          name={projectIconName}
                           className={cn('h-3.5 w-3.5', isCollapsed && 'text-muted-foreground/40')}
                           style={(!isCollapsed && iconColor) ? { color: iconColor } : undefined}
                         />

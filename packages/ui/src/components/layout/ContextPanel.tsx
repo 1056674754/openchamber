@@ -32,7 +32,7 @@ const CONTEXT_PANEL_DEFAULT_WIDTH = 600;
 const CONTEXT_TAB_LABEL_MAX_CHARS = 24;
 const CONTEXT_PANEL_SPLIT_HANDLE_HEIGHT = 3;
 type TranslateFn = ReturnType<typeof useI18n>['t'];
-type ContextPanelTabMode = 'diff' | 'file' | 'context' | 'plan' | 'chat' | 'preview' | 'terminal';
+type ContextPanelTabMode = 'diff' | 'file' | 'context' | 'plan' | 'chat' | 'preview' | 'terminal' | 'browser';
 type ContextPanelTabLike = { id: string; mode: ContextPanelTabMode; targetPath: string | null; dedupeKey: string; label: string | null };
 type SplitDropZone = 'top' | 'bottom' | 'middle';
 
