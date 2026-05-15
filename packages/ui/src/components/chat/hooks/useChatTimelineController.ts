@@ -325,32 +325,6 @@ export const useChatTimelineController = ({
         anchor: ViewportAnchor | null;
     } | null>(null);
 
-    React.useLayoutEffect(() => {
-        const snap = prePrependScrollRef.current;
-        const container = scrollRef.current;
-        if (!snap || !container) return;
-        prePrependScrollRef.current = null;
-
-        // Try anchor-based restoration first (pixel-perfect)
-        if (snap.anchor) {
-            const anchorEl = container.querySelector<HTMLElement>(
-                `[data-message-id="${snap.anchor.messageId}"]`,
-            );
-            if (anchorEl) {
-                const containerRect = container.getBoundingClientRect();
-                const anchorTop = anchorEl.getBoundingClientRect().top - containerRect.top;
-                container.scrollTop += anchorTop - snap.anchor.offsetTop;
-                return;
-            }
-        }
-
-        // Fallback: height-delta compensation
-        const delta = container.scrollHeight - snap.height;
-        if (delta > 0) {
-            container.scrollTop = snap.top + delta;
-        }
-    }, [renderedMessages, scrollRef]);
-
     const captureViewportAnchor = React.useCallback((): ViewportAnchor | null => {
         return messageListRef.current?.captureViewportAnchor() ?? null;
     }, [messageListRef]);
@@ -358,6 +332,22 @@ export const useChatTimelineController = ({
     const restoreViewportAnchor = React.useCallback((anchor: ViewportAnchor): boolean => {
         return messageListRef.current?.restoreViewportAnchor(anchor) ?? false;
     }, [messageListRef]);
+
+    React.useLayoutEffect(() => {
+        const snap = prePrependScrollRef.current;
+        const container = scrollRef.current;
+        if (!snap || !container) return;
+        prePrependScrollRef.current = null;
+
+        if (snap.anchor && restoreViewportAnchor(snap.anchor)) {
+            return;
+        }
+
+        const delta = container.scrollHeight - snap.height;
+        if (delta > 0) {
+            container.scrollTop = snap.top + delta;
+        }
+    }, [renderedMessages, scrollRef, restoreViewportAnchor]);
 
     const revealBufferedTurns = React.useCallback(async (): Promise<boolean> => {
         if (turnStartRef.current <= 0 || pendingRevealWorkRef.current) {
