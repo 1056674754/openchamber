@@ -200,6 +200,16 @@ const prepareForQuit = async ({ installingUpdate = false, stopManagedOpenCode } 
 
 const performConfirmedQuit = async ({ stopManagedOpenCode } = {}) => {
   if (state.quitConfirmed) return;
+
+  // Hide all windows immediately so the user sees instant feedback after
+  // confirming quit — the async shutdown below can take several seconds
+  // (OpenCode SIGTERM/SIGKILL, port release, HTTP server drain).
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (!win.isDestroyed()) {
+      win.hide();
+    }
+  }
+
   await prepareForQuit({ stopManagedOpenCode });
 
   // Safety net: force-exit if normal quit sequence stalls (e.g. background
