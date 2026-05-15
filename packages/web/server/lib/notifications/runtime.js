@@ -460,7 +460,6 @@ export const createNotificationTriggerRuntime = (deps) => {
           },
           { requireNoSse: true },
         );
->>>>>>> b615cb1e (fix: check window focus before summarization to avoid wasted Zen API calls)
       }
 
       if (info?.role === 'assistant' && info?.finish === 'error' && sessionId) {
