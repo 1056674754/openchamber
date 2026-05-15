@@ -171,9 +171,10 @@ export type DesktopSettings = {
   responseStylePreset?: 'concise' | 'detailed' | 'mentor' | 'pushback' | 'noFiller' | 'matchEnergy' | 'warmPeer' | 'custom';
   responseStyleCustomInstructions?: string;
   multiRunEnabled?: boolean;
-  sttProvider?: 'browser' | 'server';
+  sttProvider?: 'browser' | 'server' | 'wasm';
   sttServerUrl?: string;
   sttModel?: string;
+  wasmSttModel?: string;
   sttLanguage?: string;
   sttSilenceThresholdDb?: number;
   sttSilenceHoldMs?: number;

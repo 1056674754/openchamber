@@ -52,8 +52,9 @@ interface OpenChamberDefaults {
     defaultFileViewerPreview?: boolean;
     zenModel?: string;
     messageStreamTransport?: 'auto' | 'ws' | 'sse';
-    sttProvider?: 'browser' | 'server';
+    sttProvider?: 'browser' | 'server' | 'wasm';
     sttServerUrl?: string;
+    wasmSttModel?: string;
     sttModel?: string;
     sttLanguage?: string;
     sttSilenceThresholdDb?: number;
@@ -63,6 +64,7 @@ interface OpenChamberDefaults {
 const fetchOpenChamberDefaults = async (serverBaseUrl?: string): Promise<OpenChamberDefaults> => {
     const buildFromApi = (data: Record<string, unknown> | null): Partial<OpenChamberDefaults> => {
         if (!data) return {};
+
         const defaultModel = typeof data?.defaultModel === 'string' ? data.defaultModel.trim() : '';
         const defaultVariant = typeof data?.defaultVariant === 'string' ? data.defaultVariant.trim() : '';
         const defaultAgent = typeof data?.defaultAgent === 'string' ? data.defaultAgent.trim() : '';
@@ -73,7 +75,7 @@ const fetchOpenChamberDefaults = async (serverBaseUrl?: string): Promise<OpenCha
             data?.messageStreamTransport === 'ws' || data?.messageStreamTransport === 'sse' || data?.messageStreamTransport === 'auto'
                 ? data.messageStreamTransport
                 : undefined;
-        const sttProvider = data?.sttProvider === 'browser' || data?.sttProvider === 'server' ? data.sttProvider : undefined;
+        const sttProvider = data?.sttProvider === 'browser' || data?.sttProvider === 'server' || data?.sttProvider === 'wasm' ? data.sttProvider : undefined;
         const sttServerUrl = typeof data?.sttServerUrl === 'string' ? data.sttServerUrl.trim() : undefined;
         const sttModel = typeof data?.sttModel === 'string' ? data.sttModel.trim() : undefined;
         const sttLanguage = typeof data?.sttLanguage === 'string' ? data.sttLanguage.trim() : undefined;
@@ -520,9 +522,10 @@ interface ConfigStore {
     openaiCompatibleVoice: string;
     openaiCompatibleTtsModel: string;
     // STT (speech-to-text) settings
-    sttProvider: 'browser' | 'server';
+    sttProvider: 'browser' | 'server' | 'wasm';
     sttServerUrl: string;
     sttModel: string;
+    wasmSttModel: string;
     sttLanguage: string;
     sttSilenceThresholdDb: number;
     sttSilenceHoldMs: number;
@@ -544,9 +547,10 @@ interface ConfigStore {
     setOpenaiCompatibleUrl: (url: string) => void;
     setOpenaiCompatibleVoice: (voice: string) => void;
     setOpenaiCompatibleTtsModel: (model: string) => void;
-    setSttProvider: (provider: 'browser' | 'server') => void;
+    setSttProvider: (provider: 'browser' | 'server' | 'wasm') => void;
     setSttServerUrl: (url: string) => void;
     setSttModel: (model: string) => void;
+    setWasmSttModel: (model: string) => void;
     setSttLanguage: (lang: string) => void;
     setSttSilenceThresholdDb: (db: number) => void;
     setSttSilenceHoldMs: (ms: number) => void;
@@ -729,11 +733,15 @@ export const useConfigStore = create<ConfigStore>()(
                     }
                     return 'kokoro';
                 })(),
-                // STT provider: 'browser' (Web Speech API) or 'server' (OpenAI-compat)
+                // STT provider: 'browser' (Web Speech API), 'server' (OpenAI-compat), 'wasm' (local Whisper)
                 sttProvider: (() => {
                     if (typeof window !== 'undefined') {
                         const saved = localStorage.getItem('sttProvider');
-                        if (saved === 'browser' || saved === 'server') return saved;
+                        if (saved === 'browser' || saved === 'server' || saved === 'wasm') return saved;
+                        // Electron/Chromium's Web Speech API requires Google API keys
+                        // not available in Electron, so default to WASM local Whisper.
+                        const electron = (window as unknown as { __OPENCHAMBER_ELECTRON__?: { runtime?: string } }).__OPENCHAMBER_ELECTRON__;
+                        if (electron?.runtime === 'electron') return 'wasm' as const;
                     }
                     return 'browser' as const;
                 })(),
@@ -750,6 +758,13 @@ export const useConfigStore = create<ConfigStore>()(
                         if (saved) return saved;
                     }
                     return 'deepdml/faster-whisper-large-v3-turbo-ct2';
+                })(),
+                wasmSttModel: (() => {
+                    if (typeof window !== 'undefined') {
+                        const saved = localStorage.getItem('wasmSttModel');
+                        if (saved) return saved;
+                    }
+                    return 'Xenova/whisper-base.en';
                 })(),
                 sttLanguage: (() => {
                     if (typeof window !== 'undefined') {
@@ -1880,7 +1895,7 @@ export const useConfigStore = create<ConfigStore>()(
                     }
                 },
 
-                setSttProvider: (provider: 'browser' | 'server') => {
+                setSttProvider: (provider: 'browser' | 'server' | 'wasm') => {
                     set({ sttProvider: provider });
                     if (typeof window !== 'undefined') {
                         localStorage.setItem('sttProvider', provider);
@@ -1902,6 +1917,14 @@ export const useConfigStore = create<ConfigStore>()(
                         localStorage.setItem('sttModel', model);
                     }
                     updateDesktopSettings({ sttModel: model }).catch(() => {});
+                },
+
+                setWasmSttModel: (model: string) => {
+                    set({ wasmSttModel: model });
+                    if (typeof window !== 'undefined') {
+                        localStorage.setItem('wasmSttModel', model);
+                    }
+                    updateDesktopSettings({ wasmSttModel: model }).catch(() => {});
                 },
 
                 setSttLanguage: (lang: string) => {

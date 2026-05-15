@@ -607,7 +607,7 @@ export const createSettingsHelpers = (dependencies) => {
 
     if (typeof candidate.sttProvider === 'string') {
       const provider = candidate.sttProvider.trim();
-      if (provider === 'browser' || provider === 'server') {
+      if (provider === 'browser' || provider === 'server' || provider === 'wasm') {
         result.sttProvider = provider;
       }
     }
@@ -621,6 +621,12 @@ export const createSettingsHelpers = (dependencies) => {
       const trimmed = candidate.sttModel.trim();
       if (trimmed.length <= STT_MODEL_MAX_LENGTH) {
         result.sttModel = trimmed;
+      }
+    }
+    if (typeof candidate.wasmSttModel === 'string') {
+      const trimmed = candidate.wasmSttModel.trim();
+      if (trimmed.length <= 256) {
+        result.wasmSttModel = trimmed;
       }
     }
     if (typeof candidate.sttLanguage === 'string') {
