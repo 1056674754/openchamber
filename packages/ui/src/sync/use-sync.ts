@@ -192,7 +192,7 @@ export function useSync() {
     async (sessionID: string, limit: number, before?: string) => {
       const client = resolveSdkForDirectory(directory)
       const result = await retry(() =>
-        client.session.messages({ sessionID, limit, before }),
+        client.session.messages({ sessionID, directory, limit, before }),
       )
       const items = (result.data ?? []).filter((x: { info?: { id?: string } }) => !!x?.info?.id)
       const session = items
@@ -301,7 +301,7 @@ export function useSync() {
           try {
             const sessionDir = useSessionUIStore.getState().getDirectoryForSession(sessionID) || directory
             const client = resolveSdkForDirectory(sessionDir)
-            const result = await retry(() => client.session.get({ sessionID }))
+            const result = await retry(() => client.session.get({ sessionID, directory }))
             if (result.data) {
               const s = store.getState()
               const sessions = [...s.session]
