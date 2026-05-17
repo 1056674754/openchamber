@@ -42,6 +42,15 @@ import {
   type DesktopSshInstanceStatus,
 } from '@/lib/desktopSsh';
 
+function clearStaleSessionOnServerSwitch() {
+  try {
+    const store = useSessionUIStore.getState();
+    if (store.currentSessionId) {
+      store.setCurrentSession(null);
+    }
+  } catch { /* non-fatal */ }
+}
+
 const LOCAL_HOST_ID = 'local';
 const SSH_CONNECT_TIMEOUT_MS = 90_000;
 const SSH_CONNECT_CANCELLED_ERROR = 'SSH connection cancelled';
@@ -485,6 +494,7 @@ export function DesktopHostSwitcherDialog({
       const existingUrl = normalizeHostUrl(existingStatus?.localUrl || host.url || '');
       if (existingStatus?.phase === 'ready' && existingUrl) {
         serverRegistry.register({ id: host.id, label: host.label, baseUrl: existingUrl });
+        clearStaleSessionOnServerSwitch();
         onHostSwitched?.();
         onOpenChange(false);
         return;
@@ -525,6 +535,7 @@ export function DesktopHostSwitcherDialog({
 
         const targetOrigin = normalizeHostUrl(readyStatus.localUrl || '') || origin;
         serverRegistry.register({ id: host.id, label: host.label, baseUrl: targetOrigin });
+        clearStaleSessionOnServerSwitch();
         setSshSwitchModal((prev) => ({ ...prev, open: false }));
         onHostSwitched?.();
         onOpenChange(false);
@@ -572,6 +583,7 @@ export function DesktopHostSwitcherDialog({
     const target = toNavigationUrl(origin);
     if (host.id !== LOCAL_HOST_ID) {
       serverRegistry.register({ id: host.id, label: host.label, baseUrl: origin });
+      clearStaleSessionOnServerSwitch();
       onHostSwitched?.();
       onOpenChange(false);
       return;
@@ -1172,6 +1184,7 @@ export function DesktopHostSwitcherButton({ headerIconButtonClass }: DesktopHost
         throw new Error('Connected but missing forwarded URL');
       }
       serverRegistry.register({ id: hostId, label: hostLabel, baseUrl: localUrl });
+      clearStaleSessionOnServerSwitch();
       setStartupSshModal({ open: false, hostId: null, hostLabel: '', error: null, connecting: false });
       return true;
     } catch (error) {
