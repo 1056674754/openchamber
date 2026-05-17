@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import type { Session } from "@opencode-ai/sdk/v2";
 import type { SessionStatus } from "@opencode-ai/sdk/v2/client";
 import { getAllSyncStores, subscribeSyncStoresRegistry } from "./multi-server-registry";
@@ -17,6 +17,10 @@ function collectExtraSessions(): Session[] {
     }
   }
   return sessions;
+}
+
+function sessionsStableSignature(sessions: Session[]): string {
+  return sessions.map((s) => s.id + ':' + (s.time?.updated ?? s.time?.created ?? 0)).join('|');
 }
 
 function collectExtraStatuses(): Record<string, SessionStatus> {
@@ -41,8 +45,24 @@ export function useAllServersLiveSessions(): Session[] {
   const [defaultSessions, setDefaultSessions] = useState<Session[]>(getDefaultSessions);
   const [extraSessions, setExtraSessions] = useState<Session[]>([]);
 
+  const defaultSigRef = useRef(sessionsStableSignature(defaultSessions));
+  const extraSigRef = useRef('');
+  const inflightRef = useRef(false);
+
   useEffect(() => {
-    const updateDefault = () => setDefaultSessions(getDefaultSessions());
+    const updateDefault = () => {
+      if (inflightRef.current) return;
+      inflightRef.current = true;
+      queueMicrotask(() => {
+        const next = getDefaultSessions();
+        const sig = sessionsStableSignature(next);
+        if (sig !== defaultSigRef.current) {
+          defaultSigRef.current = sig;
+          setDefaultSessions(next);
+        }
+        inflightRef.current = false;
+      });
+    };
     const unsubs: (() => void)[] = [];
     for (const store of childStores.children.values()) {
       unsubs.push(store.subscribe(updateDefault));
@@ -63,7 +83,14 @@ export function useAllServersLiveSessions(): Session[] {
   }, [childStores, getDefaultSessions]);
 
   useEffect(() => {
-    const updateExtra = () => setExtraSessions(collectExtraSessions());
+    const updateExtra = () => {
+      const next = collectExtraSessions();
+      const sig = sessionsStableSignature(next);
+      if (sig !== extraSigRef.current) {
+        extraSigRef.current = sig;
+        setExtraSessions(next);
+      }
+    };
 
     updateExtra();
     const unsubRegistry = subscribeSyncStoresRegistry(updateExtra);
