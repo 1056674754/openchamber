@@ -55,10 +55,32 @@ const LOCAL_HOST_ID = 'local';
 const SSH_CONNECT_TIMEOUT_MS = 90_000;
 const SSH_CONNECT_CANCELLED_ERROR = 'SSH connection cancelled';
 
+function clearStaleSessionOnServerSwitch() {
+  try {
+    const store = useSessionUIStore.getState();
+    if (store.currentSessionId) {
+      store.setCurrentSession(null);
+    }
+  } catch {
+    /* non-fatal — stale session cleanup must not block server switch */
+  }
+}
+
 type HostStatus = {
   status: HostProbeResult['status'];
   latencyMs: number;
 };
+
+function clearStaleSessionOnServerSwitch() {
+  try {
+    const store = useSessionUIStore.getState();
+    if (store.currentSessionId) {
+      store.setCurrentSession(null);
+    }
+  } catch {
+    /* non-fatal */
+  }
+}
 
 const toNavigationUrl = (rawUrl: string): string => {
   const normalized = normalizeHostUrl(rawUrl);
