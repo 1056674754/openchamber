@@ -9,7 +9,7 @@ import { MessageFilesDisplay } from '../FileAttachment';
 import { TurnChangedFilesDropdown } from '../TurnChangedFilesDropdown';
 import type { ToolPart as ToolPartType } from '@opencode-ai/sdk/v2';
 import type { StreamPhase, ToolPopupContent, AgentMentionInfo } from './types';
-import type { TurnActivityRecord, TurnGroupingContext } from '../lib/turns/types';
+import type { TurnGroupingContext } from '../lib/turns/types';
 import { cn } from '@/lib/utils';
 import { isEmptyTextPart, extractTextContent } from './partUtils';
 import { FadeInOnReveal } from './FadeInOnReveal';
@@ -37,8 +37,7 @@ import { Icon } from "@/components/icon/Icon";
 import { formatTimestampForDisplay } from './timeFormat';
 import { ToolRevealOnMount } from './parts/ToolRevealOnMount';
 import { StaticToolRow } from './parts/ProgressiveGroup';
-import { getStaticGroupToolName, isExpandableTool, isStandaloneTool, isStaticTool } from './parts/toolRenderUtils';
-import { ToolCallGroup } from './parts/ToolCallGroup';
+import { isExpandableTool, isStandaloneTool } from './parts/toolRenderUtils';
 import TurnActivity from '../components/TurnActivity';
 import { createProjectPlanFile } from '@/lib/openchamberConfig';
 import { resolveProjectForSessionDirectory } from '@/lib/projectResolution';
@@ -92,7 +91,8 @@ const normalizeSubtaskModel = (model: SubtaskPartLike['model']): string | null =
 
 const UserSubtaskPart: React.FC<{ part: SubtaskPartLike }> = ({ part }) => {
     const [expanded, setExpanded] = React.useState(false);
-    const setCurrentSession = useSessionUIStore((state) => state.setCurrentSession);
+    const effectiveDirectory = useEffectiveDirectory();
+    const openContextPanelTab = useUIStore((state) => state.openContextPanelTab);
     const { t } = useI18n();
 
     const description = typeof part.description === 'string' ? part.description.trim() : '';
@@ -152,7 +152,13 @@ const UserSubtaskPart: React.FC<{ part: SubtaskPartLike }> = ({ part }) => {
                         type="button"
                         className="typography-meta text-muted-foreground hover:text-foreground transition-colors underline underline-offset-2"
                         onClick={() => {
-                            void setCurrentSession(taskSessionID);
+                            if (!effectiveDirectory) return;
+                            openContextPanelTab(effectiveDirectory, {
+                                mode: 'chat',
+                                dedupeKey: `session:${taskSessionID}`,
+                                label: description || agent || t('contextPanel.mode.chat'),
+                                readOnly: true,
+                            });
                         }}
                     >
                         {t('chat.messageBody.subtask.openSession')}
@@ -1010,8 +1016,6 @@ const AssistantMessageBody = React.memo(({
     const [isSavingPlan, setIsSavingPlan] = React.useState(false);
     const chatRenderMode = useUIStore((state) => state.chatRenderMode);
     const showSplitAssistantMessageActions = useUIStore((state) => state.showSplitAssistantMessageActions);
-    const autoCollapseThinking = useUIStore((state) => state.autoCollapseThinking);
-    const autoCollapseThinkingThreshold = useUIStore((state) => state.autoCollapseThinkingThreshold);
     const isSortedRenderMode = chatRenderMode === 'sorted';
     const isMiniChatSurface = chatSurfaceMode === 'mini-chat';
     const collapsedPreviewCount = 7;
@@ -1461,39 +1465,6 @@ const AssistantMessageBody = React.memo(({
         return lastIndex;
     }, [activityByPart, shouldDeferSortedInlineText, shouldShowStandaloneMessageActions, visibleParts]);
 
-    const createFlatToolActivity = React.useCallback((toolPart: ToolPartType, partIndex: number): TurnActivityRecord => {
-        const endTime = (toolPart.state as { time?: { end?: unknown } } | undefined)?.time?.end;
-        return {
-            id: toolPart.id,
-            turnId: turnGroupingContext?.turnId ?? `message:${messageId}`,
-            messageId,
-            partIndex,
-            part: toolPart,
-            kind: 'tool',
-            endedAt: typeof endTime === 'number' ? endTime : undefined,
-        };
-    }, [messageId, turnGroupingContext?.turnId]);
-
-    const renderStaticToolActivity = React.useCallback((activity: TurnActivityRecord, shouldAnimateTailText: boolean) => {
-        const toolPart = activity.part as ToolPartType;
-        const staticToolName = getStaticGroupToolName(toolPart.tool ?? '');
-        return (
-            <StaticToolRow
-                toolName={staticToolName}
-                activities={[activity]}
-                animateTailText={shouldAnimateTailText}
-            />
-        );
-    }, []);
-
-    const shouldSkipPartWithinStaticToolRun = React.useCallback((part: Part): boolean => {
-        if (part.type === 'reasoning' && !showReasoningTraces) {
-            return true;
-        }
-        const activity = activityByPart.get(part);
-        return activity?.kind === 'reasoning' || activity?.kind === 'justification';
-    }, [activityByPart, showReasoningTraces]);
-
     const shouldRenderStandaloneActionsAfterContent = shouldShowStandaloneMessageActions && lastRenderableTextPartIndex < 0;
 
     const renderedParts = React.useMemo(() => {
@@ -1582,15 +1553,7 @@ const AssistantMessageBody = React.memo(({
                     continue;
                 }
                 if (showReasoningTraces) {
-                    const partText = (part as { text?: string; content?: string }).text
-                        ?? (part as { text?: string; content?: string }).content ?? '';
-                    const partTime = (part as { time?: { end?: number } }).time;
-                    const isReasoningComplete = typeof partTime?.end === 'number';
-                    const useCollapseUI = autoCollapseThinking
-                        && isReasoningComplete
-                        && partText.length > autoCollapseThinkingThreshold;
-
-                    if (useCollapseUI || isSortedRenderMode) {
+                    if (isSortedRenderMode) {
                         rendered.push(
                             <ReasoningPart
                                 key={`reasoning-${messageId}-${i}`}
@@ -1661,72 +1624,28 @@ const AssistantMessageBody = React.memo(({
                     continue;
                 }
 
-                const staticActivities: TurnActivityRecord[] = [
-                    activity?.kind === 'tool' ? activity : createFlatToolActivity(toolPart, i),
-                ];
-                let j = i + 1;
-                while (j < visibleParts.length) {
-                    const nextPart = visibleParts[j];
-                    if (!nextPart) {
-                        break;
-                    }
-                    if (nextPart.type !== 'tool') {
-                        if (shouldSkipPartWithinStaticToolRun(nextPart)) {
-                            j += 1;
-                            continue;
-                        }
-                        break;
-                    }
-                    const nextToolPart = nextPart as ToolPartType;
-                    const nextToolName = nextToolPart.tool?.toLowerCase() ?? '';
-                    if (isExpandableTool(nextToolName) || !isStaticTool(nextToolName)) {
-                        break;
-                    }
-                    const nextActivity = activityByPart.get(nextPart);
-                    if (nextActivity?.kind === 'tool' && (shouldRenderActivityGroup || !isStandaloneTool(nextToolName))) {
-                        break;
-                    }
-                    if (!shouldShowTool(nextToolPart)) {
-                        break;
-                    }
-                    staticActivities.push(nextActivity?.kind === 'tool' ? nextActivity : createFlatToolActivity(nextToolPart, j));
-                    j += 1;
-                }
-
-                if (staticActivities.length > 1) {
-                    const firstActivity = staticActivities[0]!;
-                    const lastActivity = staticActivities[staticActivities.length - 1]!;
-                    const groupId = `tool-group:${firstActivity.id}:${lastActivity.id}:${staticActivities.length}`;
-                    rendered.push(
-                        <FadeInOnReveal key={groupId}>
-                            <ToolRevealOnMount animate={staticActivities.some((item) => animatedToolIdsLookup.has(item.id))} wipe>
-                                <ToolCallGroup
-                                    activities={staticActivities}
-                                    isExpanded={expandedTools.has(groupId)}
-                                    onToggle={() => onToggleTool(groupId)}
-                                    animateTailText={staticActivities.some((item) => animatedToolIdsLookup.has(item.id))}
-                                    renderActivity={renderStaticToolActivity}
-                                />
-                            </ToolRevealOnMount>
-                        </FadeInOnReveal>
-                    );
-                    i = j;
-                    continue;
-                }
-
-                // Static tools with no adjacent static calls stay as the existing compact one-row display.
+                // Static tools: one row per tool call (no grouping)
                 rendered.push(
                     <FadeInOnReveal key={`static-tools-${toolPart.id}`}>
                         <ToolRevealOnMount animate={animatedToolIdsLookup.has(toolPart.id)} wipe>
                             <StaticToolRow
-                                toolName={getStaticGroupToolName(toolName)}
-                                activities={staticActivities}
+                                toolName={toolName}
+                                activities={[
+                                    {
+                                        id: toolPart.id,
+                                        turnId: '',
+                                        messageId,
+                                        partIndex: 0,
+                                        part: toolPart,
+                                        kind: 'tool' as const,
+                                    },
+                                ]}
                                 animateTailText={animatedToolIdsLookup.has(toolPart.id)}
                             />
                         </ToolRevealOnMount>
                     </FadeInOnReveal>
                 );
-                i = j;
+                i++;
                 continue;
             }
 
@@ -1743,7 +1662,6 @@ const AssistantMessageBody = React.memo(({
         animateActivityRows,
         chatRenderMode,
         collapsedPreviewCount,
-        createFlatToolActivity,
         expandedTools,
         isMobile,
         isActivityOwnerMessage,
@@ -1756,15 +1674,11 @@ const AssistantMessageBody = React.memo(({
         onContentChange,
         onShowPopup,
         onToggleTool,
-        renderStaticToolActivity,
         shouldRenderActivityGroup,
         shouldShowStandaloneMessageActions,
         shouldShowTool,
-        shouldSkipPartWithinStaticToolRun,
         streamPhase,
         showReasoningTraces,
-        autoCollapseThinking,
-        autoCollapseThinkingThreshold,
         shouldDeferSortedInlineText,
         syntaxTheme,
         toggleActivityGroup,

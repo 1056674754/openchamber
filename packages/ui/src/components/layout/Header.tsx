@@ -38,7 +38,7 @@ import { cn, hasModifier } from '@/lib/utils';
 import { McpDropdownContent } from '@/components/mcp/McpDropdown';
 import { McpIcon } from '@/components/icons/McpIcon';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
-import { formatQuotaValueLabel, formatWindowLabel, QUOTA_PROVIDERS, calculatePace, calculateExpectedUsagePercent } from '@/lib/quota';
+import { formatQuotaValueLabel, formatQuotaResetLabel, formatWindowLabel, QUOTA_PROVIDERS, calculatePace, calculateExpectedUsagePercent } from '@/lib/quota';
 import { UsageProgressBar } from '@/components/sections/usage/UsageProgressBar';
 import { PaceIndicator } from '@/components/sections/usage/PaceIndicator';
 import { updateDesktopSettings } from '@/lib/persistence';
@@ -58,14 +58,14 @@ import {
 import type { UsageWindow } from '@/types';
 import type { GitHubAuthStatus } from '@/lib/api/types';
 import type { SessionContextUsage } from '@/stores/types/sessionTypes';
-import { InstanceInfoPanel } from '@/components/desktop/InstanceInfoPanel';
-import { useActiveServerId } from '@/hooks/useActiveServerId';
-import { serverRegistry } from '@/lib/opencode/server-registry';
+import { DesktopHostSwitcherDialog } from '@/components/desktop/DesktopHostSwitcher';
 import { OpenInAppButton } from '@/components/desktop/OpenInAppButton';
 import { forceKillTerminal } from '@/lib/terminalApi';
 import { useTerminalStore } from '@/stores/useTerminalStore';
 import { ProjectActionsButton } from '@/components/layout/ProjectActionsButton';
+import { SessionSwitcherDropdown } from '@/components/session/SessionSwitcherDropdown';
 import { canUseElectronDesktopIPC, invokeDesktop, isDesktopShell, isVSCodeRuntime, startDesktopWindowDrag } from '@/lib/desktop';
+import { desktopHostsGet, locationMatchesHost, redactSensitiveUrl } from '@/lib/desktopHosts';
 import { resolveSessionDiffStats } from '@/components/session/sidebar/utils';
 import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
@@ -244,6 +244,7 @@ type DesktopServicesMenuProps = {
   compactCurrentInstanceLabel: string;
   isDesktopServicesOpen: boolean;
   setIsDesktopServicesOpen: React.Dispatch<React.SetStateAction<boolean>>;
+  refreshCurrentInstanceLabel: () => Promise<void>;
   desktopServicesTab: 'instance' | 'usage' | 'mcp';
   setDesktopServicesTab: React.Dispatch<React.SetStateAction<'instance' | 'usage' | 'mcp'>>;
   quotaResultsLength: number;
@@ -272,6 +273,7 @@ const DesktopServicesMenu = React.memo(function DesktopServicesMenu({
   compactCurrentInstanceLabel,
   isDesktopServicesOpen,
   setIsDesktopServicesOpen,
+  refreshCurrentInstanceLabel,
   desktopServicesTab,
   setDesktopServicesTab,
   quotaResultsLength,
@@ -294,13 +296,13 @@ const DesktopServicesMenu = React.memo(function DesktopServicesMenu({
   onDevShutdown,
 }: DesktopServicesMenuProps) {
   const { t } = useI18n();
-  const activeServerId = useActiveServerId();
   return (
     <DropdownMenu
       open={isDesktopServicesOpen}
       onOpenChange={(open) => {
         setIsDesktopServicesOpen(open);
         if (open) {
+          void refreshCurrentInstanceLabel();
           if (desktopServicesTab === 'usage' && quotaResultsLength === 0) {
             void fetchAllQuotas();
           }
@@ -368,7 +370,12 @@ const DesktopServicesMenu = React.memo(function DesktopServicesMenu({
         </div>
 
         {isDesktopApp && desktopServicesTab === 'instance' ? (
-          <InstanceInfoPanel serverId={activeServerId} />
+          <DesktopHostSwitcherDialog
+            embedded
+            open={isDesktopServicesOpen && desktopServicesTab === 'instance'}
+            onOpenChange={() => {}}
+            onHostSwitched={() => setIsDesktopServicesOpen(false)}
+          />
         ) : null}
 
         {desktopServicesTab === 'mcp' ? (
@@ -441,14 +448,15 @@ const DesktopServicesMenu = React.memo(function DesktopServicesMenu({
                                 : calculateExpectedUsagePercent(paceInfo.elapsedRatio))
                             : null;
                           const metricLabel = formatQuotaValueLabel(window.valueLabel, displayPercent);
+                          const resetLabel = formatQuotaResetLabel(window.resetAt, window.resetAfterFormatted ?? window.resetAtFormatted);
                           return (
                             <div key={`${group.providerId}-${label}`} className="flex flex-col gap-1.5">
                               <div className="flex min-w-0 items-center justify-between gap-3">
                                 <div className="min-w-0 flex items-center gap-2">
                                   <span className="truncate typography-ui-label text-foreground">{formatWindowLabel(label)}</span>
-                                  {window.resetAfterFormatted ?? window.resetAtFormatted ? (
+                                  {resetLabel ? (
                                     <span className="truncate typography-micro text-muted-foreground">
-                                      {window.resetAfterFormatted ?? window.resetAtFormatted}
+                                      {resetLabel}
                                     </span>
                                   ) : null}
                                 </div>
@@ -653,7 +661,7 @@ export const Header: React.FC<HeaderProps> = ({
   const toggleSidebar = useUIStore((state) => state.toggleSidebar);
   const isSidebarOpen = useUIStore((state) => state.isSidebarOpen);
   const isRightSidebarOpen = useUIStore((state) => state.isRightSidebarOpen);
-  const openContextTerminal = useUIStore((state) => state.openContextTerminal);
+  const toggleBottomTerminal = useUIStore((state) => state.toggleBottomTerminal);
   const toggleRightSidebar = useUIStore((state) => state.toggleRightSidebar);
   const openContextOverview = useUIStore((state) => state.openContextOverview);
   const openContextPlan = useUIStore((state) => state.openContextPlan);
@@ -794,11 +802,7 @@ export const Header: React.FC<HeaderProps> = ({
   const [isMobileRateLimitsOpen, setIsMobileRateLimitsOpen] = React.useState(false);
   const [isDesktopServicesOpen, setIsDesktopServicesOpen] = React.useState(false);
   const [isUsageRefreshSpinning, setIsUsageRefreshSpinning] = React.useState(false);
-  const activeServerId = useActiveServerId();
-  const currentInstanceLabel = React.useMemo(() => {
-    if (!isDesktopApp) return 'Local';
-    return serverRegistry.getServerLabel(activeServerId);
-  }, [isDesktopApp, activeServerId]);
+  const [currentInstanceLabel, setCurrentInstanceLabel] = React.useState('Local');
   const compactCurrentInstanceLabel = React.useMemo(() => formatCompactHeaderLabel(currentInstanceLabel), [currentInstanceLabel]);
   const [desktopServicesTab, setDesktopServicesTab] = React.useState<'instance' | 'usage' | 'mcp'>(
     isDesktopApp ? 'instance' : 'usage'
@@ -825,6 +829,39 @@ export const Header: React.FC<HeaderProps> = ({
     ? Math.min(999, (stableDesktopContextUsage.totalTokens / stableDesktopContextUsage.contextLimit) * 100)
     : 0;
 
+  const refreshCurrentInstanceLabel = React.useCallback(async () => {
+    if (typeof window === 'undefined' || !isDesktopApp) {
+      return;
+    }
+
+    try {
+      const cfg = await desktopHostsGet();
+      const currentHref = window.location.href;
+      const localOrigin = window.__OPENCHAMBER_LOCAL_ORIGIN__ || window.location.origin;
+
+      if (locationMatchesHost(currentHref, localOrigin)) {
+        setCurrentInstanceLabel('Local');
+        return;
+      }
+
+      const match = cfg.hosts.find((host) => {
+        return locationMatchesHost(currentHref, host.url);
+      });
+
+      if (match?.label?.trim()) {
+        setCurrentInstanceLabel(redactSensitiveUrl(match.label.trim()));
+        return;
+      }
+
+      setCurrentInstanceLabel('Instance');
+    } catch {
+      setCurrentInstanceLabel('Local');
+    }
+  }, [isDesktopApp]);
+
+  useEffect(() => {
+    void refreshCurrentInstanceLabel();
+  }, [refreshCurrentInstanceLabel]);
   useQuotaAutoRefresh();
   const selectedModels = useQuotaStore((state) => state.selectedModels);
   const expandedFamilies = useQuotaStore((state) => state.expandedFamilies);
@@ -837,7 +874,7 @@ export const Header: React.FC<HeaderProps> = ({
       if (!dropdownProviderIds.includes(provider.id)) {
         continue;
       }
-      const result = quotaResults.find((entry) => entry && entry.providerId === provider.id);
+      const result = quotaResults.find((entry) => entry.providerId === provider.id);
       const windows = (result?.usage?.windows ?? {}) as Record<string, UsageWindow>;
       const models = result?.usage?.models;
       const entries = Object.entries(windows);
@@ -1629,6 +1666,7 @@ export const Header: React.FC<HeaderProps> = ({
           setIsDesktopServicesOpen(false);
         } else {
           setIsDesktopServicesOpen(true);
+          void refreshCurrentInstanceLabel();
           if (desktopServicesTab === 'usage' && quotaResults.length === 0) {
             void fetchAllQuotas();
           }
@@ -1650,6 +1688,7 @@ export const Header: React.FC<HeaderProps> = ({
         const nextTab = tabValues[nextIndex];
         setDesktopServicesTab(nextTab);
         setIsDesktopServicesOpen(true);
+        void refreshCurrentInstanceLabel();
         if (nextTab === 'usage' && quotaResults.length === 0) {
           void fetchAllQuotas();
         }
@@ -1672,6 +1711,7 @@ export const Header: React.FC<HeaderProps> = ({
     servicesTabs,
     quotaResults.length,
     fetchAllQuotas,
+    refreshCurrentInstanceLabel,
     handleOpenContextPlan,
   ]);
 
@@ -1750,6 +1790,7 @@ export const Header: React.FC<HeaderProps> = ({
         compactCurrentInstanceLabel={compactCurrentInstanceLabel}
         isDesktopServicesOpen={isDesktopServicesOpen}
         setIsDesktopServicesOpen={setIsDesktopServicesOpen}
+        refreshCurrentInstanceLabel={refreshCurrentInstanceLabel}
         desktopServicesTab={desktopServicesTab}
         setDesktopServicesTab={setDesktopServicesTab}
         quotaResultsLength={quotaResults.length}
@@ -1774,7 +1815,7 @@ export const Header: React.FC<HeaderProps> = ({
       <HeaderIconActionButton
         title={t('header.actions.terminalPanelWithShortcut', { shortcut: shortcutLabel('toggle_terminal') })}
         ariaLabel={t('header.actions.toggleTerminalPanelAria')}
-        onClick={() => openContextTerminal(actionDirectory)}
+        onClick={toggleBottomTerminal}
         Icon={'terminal-box'}
       />
       {hasElectronDesktopIPC ? (
@@ -1852,13 +1893,17 @@ export const Header: React.FC<HeaderProps> = ({
             className="mr-2"
           />
         )}
-        {!isNewSessionDraftOpen ? (
-          <div className="mr-3 min-w-0">
-            <div className="truncate pl-1 typography-ui-label text-[14px] font-normal leading-tight text-foreground">
-              {currentSessionTitle}
-            </div>
-            {(activeProjectLabel || currentBranchLabel || hasNonZeroSessionChanges) ? (
-              <div className="flex min-w-0 items-center gap-1.5 truncate pl-1 typography-micro text-[10.5px] font-normal leading-tight text-muted-foreground/75">
+        <SessionSwitcherDropdown>
+          <button
+            type="button"
+            aria-label={t('sessions.switcher.openAria')}
+            className="app-region-no-drag mr-3 flex min-w-0 flex-col items-start rounded-md px-1 py-0.5 -my-0.5 text-left transition-colors hover:bg-interactive-hover/60 focus-visible:outline-none focus-visible:bg-interactive-hover/60"
+          >
+            <span className="truncate typography-ui-label text-[14px] font-normal leading-tight text-foreground max-w-full">
+              {isNewSessionDraftOpen ? t('sessions.switcher.draftTitle') : currentSessionTitle}
+            </span>
+            {(activeProjectLabel || currentBranchLabel || (!isNewSessionDraftOpen && (hasNonZeroSessionChanges || worktreeBadgeKind))) ? (
+              <span className="flex min-w-0 max-w-full items-center gap-1.5 truncate typography-micro text-[10.5px] font-normal leading-tight text-muted-foreground/75">
                 {activeProjectLabel ? <span className="truncate">{activeProjectLabel}</span> : null}
                 {currentBranchLabel ? (
                   <span className="inline-flex min-w-0 items-center gap-0.5">
@@ -1866,14 +1911,14 @@ export const Header: React.FC<HeaderProps> = ({
                     <span className="truncate">{currentBranchLabel}</span>
                   </span>
                 ) : null}
-                {hasNonZeroSessionChanges ? (
+                {!isNewSessionDraftOpen && hasNonZeroSessionChanges ? (
                   <span className="inline-flex flex-shrink-0 items-center gap-0 text-[0.92em]">
                     <span className="text-status-success/80">+{currentSessionChanges.additions}</span>
                     <span className="text-muted-foreground/60">/</span>
                     <span className="text-status-error/65">-{currentSessionChanges.deletions}</span>
                   </span>
                 ) : null}
-                {worktreeBadgeKind ? (
+                {!isNewSessionDraftOpen && worktreeBadgeKind ? (
                   <span className={cn(
                     "inline-flex min-w-0 items-center gap-0.5",
                     worktreeBadgeKind === 'attention' || worktreeBadgeKind === 'invalid' || worktreeBadgeKind === 'missing' ? 'text-status-warning' : 'text-muted-foreground/60'
@@ -1882,10 +1927,10 @@ export const Header: React.FC<HeaderProps> = ({
                     <span className="truncate">{worktreeBadge}</span>
                   </span>
                 ) : null}
-              </div>
+              </span>
             ) : null}
-          </div>
-        ) : null}
+          </button>
+        </SessionSwitcherDropdown>
 
         {tabs.length > 0 && (
           <div className="flex items-center gap-1 rounded-lg bg-[var(--surface-muted)]/50 p-1">
@@ -2209,14 +2254,15 @@ export const Header: React.FC<HeaderProps> = ({
                                         : calculateExpectedUsagePercent(paceInfo.elapsedRatio))
                                     : null;
                                   const metricLabel = formatQuotaValueLabel(window.valueLabel, displayPercent);
+                                  const resetLabel = formatQuotaResetLabel(window.resetAt, window.resetAfterFormatted ?? window.resetAtFormatted);
                                   return (
                                     <div key={`${group.providerId}-${label}`} className="flex flex-col gap-1.5">
                                       <div className="flex min-w-0 items-center justify-between gap-3">
                                         <div className="min-w-0 flex items-center gap-2">
                                           <span className="truncate typography-ui-label text-foreground">{formatWindowLabel(label)}</span>
-                                          {(window.resetAfterFormatted ?? window.resetAtFormatted) ? (
+                                          {resetLabel ? (
                                             <span className="truncate typography-micro text-muted-foreground">
-                                              {window.resetAfterFormatted ?? window.resetAtFormatted}
+                                              {resetLabel}
                                             </span>
                                           ) : null}
                                         </div>

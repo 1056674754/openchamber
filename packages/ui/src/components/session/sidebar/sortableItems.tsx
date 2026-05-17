@@ -13,8 +13,6 @@ import { cn } from '@/lib/utils';
 import { PROJECT_COLOR_MAP, PROJECT_ICON_MAP, getProjectIconImageUrl } from '@/lib/projectMeta';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useI18n } from '@/lib/i18n';
-import { useDesktopSshStore } from '@/stores/useDesktopSshStore';
-import { resolveInstanceLabel } from '@/lib/desktopSsh';
 
 export interface SortableProjectItemProps {
   id: string;
@@ -43,12 +41,6 @@ export interface SortableProjectItemProps {
   hideHeader?: boolean;
   openSidebarMenuKey: string | null;
   setOpenSidebarMenuKey: (key: string | null) => void;
-  isPinned?: boolean;
-  onTogglePin?: () => void;
-  onRefresh?: () => void;
-  serverId?: string;
-  serverHealthStatus?: 'healthy' | 'unhealthy' | 'connecting' | null;
-  unavailable?: boolean;
 }
 
 export type SortableDragHandleProps = {
@@ -70,6 +62,7 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
   isDesktopShell,
   isStuck,
   hideDirectoryControls,
+  alwaysShowActions,
   onToggle,
   onNewSession,
   onNewWorktreeSession,
@@ -79,38 +72,11 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
   children,
   showCreateButtons = true,
   hideHeader = false,
-  mobileVariant,
   openSidebarMenuKey,
   setOpenSidebarMenuKey,
-    isPinned,
-    onTogglePin,
-    onRefresh,
-    serverId,
-  serverHealthStatus,
-  unavailable,
 }) => {
   const { t } = useI18n();
   const { currentTheme } = useThemeSystem();
-  const sshInstance = useDesktopSshStore((state) => serverId ? state.instances.find((entry) => entry.id === serverId) : undefined);
-  const sshStatus = useDesktopSshStore((state) => serverId ? state.statusesById[serverId] : undefined);
-  const serverLabel = serverId
-    ? (sshInstance ? resolveInstanceLabel(sshInstance) : serverId)
-    : undefined;
-  const effectiveServerHealthStatus = serverHealthStatus
-    || (sshStatus?.phase === 'ready'
-      ? 'healthy'
-      : sshStatus?.phase === 'error'
-        ? 'unhealthy'
-        : sshStatus && sshStatus.phase !== 'idle'
-          ? 'connecting'
-          : null);
-  const dotColor = effectiveServerHealthStatus === 'healthy'
-    ? currentTheme.colors.status.success
-    : effectiveServerHealthStatus === 'unhealthy'
-      ? currentTheme.colors.status.error
-      : effectiveServerHealthStatus === 'connecting'
-        ? currentTheme.colors.status.warning
-        : currentTheme.colors.surface.subtle;
   const {
     attributes,
     listeners,
@@ -124,7 +90,6 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
   const suppressNextToggleRef = React.useRef(false);
   const menuInstanceKey = `project:${id}`;
   const isMenuOpen = openSidebarMenuKey === menuInstanceKey;
-  const [menuPosition, setMenuPosition] = React.useState<{ x: number; y: number } | null>(null);
 
   React.useEffect(() => {
     setImageFailed(false);
@@ -142,6 +107,18 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
   const handleMenuOpenChange = React.useCallback((open: boolean) => {
     setOpenSidebarMenuKey(open ? menuInstanceKey : null);
   }, [menuInstanceKey, setOpenSidebarMenuKey]);
+
+  const handleMenuTriggerClick = React.useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation();
+  }, []);
+
+  const handleMenuTriggerPointerDown = React.useCallback((event: React.PointerEvent<HTMLButtonElement>) => {
+    event.stopPropagation();
+  }, []);
+
+  const handleMenuTriggerMouseDown = React.useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation();
+  }, []);
 
   const handleToggleMouseDown = React.useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
     if (event.button === 2 || (event.button === 0 && event.ctrlKey)) {
@@ -179,13 +156,8 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
               'w-full text-left group/project select-none',
             )}
             style={{ backgroundColor: isDesktopShell && isStuck ? 'transparent' : undefined }}
-            onContextMenu={!mobileVariant ? (e) => {
-              e.preventDefault();
-              setMenuPosition({ x: e.clientX, y: e.clientY });
-              setOpenSidebarMenuKey(menuInstanceKey);
-            } : undefined}
           >
-            <div className="relative flex items-center gap-1 px-0.5 py-px" {...attributes}>
+            <div className="relative flex items-center gap-1 px-0.5 py-0.5" {...attributes}>
               <Tooltip>
                 <TooltipTrigger asChild>
                     <button
@@ -195,15 +167,23 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
                       {...listeners}
                       className={cn(
                         'flex-1 min-w-0 flex items-center gap-1.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 rounded-md cursor-grab active:cursor-grabbing transition-[padding]',
-                        isRepo && !hideDirectoryControls && showCreateButtons && Boolean(onNewWorktreeSession) ? 'pr-12' : (showCreateButtons ? 'pr-8' : ''),
+                        isRepo && !hideDirectoryControls
+                          ? (alwaysShowActions ? 'pr-20' : 'pr-7 group-hover/project:pr-20 group-focus-within/project:pr-20')
+                          : (alwaysShowActions ? 'pr-14' : 'pr-7 group-hover/project:pr-14 group-focus-within/project:pr-14'),
                       )}
                     >
                     <span className="inline-flex h-3.5 w-3.5 flex-shrink-0 items-center justify-center">
+                      <span className={cn(
+                        'h-3.5 w-3.5 items-center justify-center text-muted-foreground',
+                        alwaysShowActions ? 'inline-flex' : 'hidden group-hover/project:inline-flex group-focus-within/project:inline-flex',
+                      )}>
+                        {isCollapsed ? <Icon name="arrow-right-s" className="h-3.5 w-3.5" /> : <Icon name="arrow-down-s" className="h-3.5 w-3.5" />}
+                      </span>
                       {imageUrl ? (
                         <span
                           className={cn(
-                            'h-3.5 w-3.5 inline-flex items-center justify-center overflow-hidden rounded-[3px]',
-                            isCollapsed && 'opacity-40 grayscale',
+                            'h-3.5 w-3.5 items-center justify-center overflow-hidden rounded-[3px]',
+                            alwaysShowActions ? 'hidden' : 'inline-flex group-hover/project:hidden group-focus-within/project:hidden',
                           )}
                           style={projectIconBackground ? { backgroundColor: projectIconBackground } : undefined}
                         >
@@ -216,43 +196,17 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
                           />
                         </span>
                       ) : projectIconName ? (
-                        <Icon
-                          name={projectIconName}
-                          className={cn('h-3.5 w-3.5', isCollapsed && 'text-muted-foreground/40')}
-                          style={(!isCollapsed && iconColor) ? { color: iconColor } : undefined}
-                        />
+                        <Icon name={projectIconName} className={cn('h-3.5 w-3.5', alwaysShowActions ? 'hidden' : 'group-hover/project:hidden group-focus-within/project:hidden')} style={iconColor ? { color: iconColor } : undefined} />
                       ) : (
-                        isCollapsed ? (
-                          <Icon name="folder" className="h-3.5 w-3.5 text-muted-foreground/40"  />
-                        ) : (
-                          <Icon name="folder-open" className="h-3.5 w-3.5 text-muted-foreground/80"  />
-                        )
+                        <Icon name="folder" className={cn('h-3.5 w-3.5 text-muted-foreground/80', alwaysShowActions ? 'hidden' : 'group-hover/project:hidden group-focus-within/project:hidden')} style={iconColor ? { color: iconColor } : undefined} />
                       )}
                     </span>
                     <span className={cn(
                       'text-[14px] font-normal truncate lowercase',
-                      isActiveProject && isCollapsed ? 'text-[var(--status-warning)]' : isCollapsed ? 'text-muted-foreground' : isActiveProject ? 'text-foreground' : 'text-foreground group-hover/project:text-foreground',
-                      unavailable && 'opacity-50',
+                      isActiveProject ? 'text-foreground' : 'text-foreground group-hover/project:text-foreground',
                     )}>
                       {projectLabel}
                     </span>
-                    {serverId && (
-                      <span className="inline-flex items-center gap-1 flex-shrink-0">
-                        {unavailable ? (
-                          <Icon name="error-warning" className="h-2.5 w-2.5 flex-shrink-0" style={{ color: currentTheme.colors.status.warning }}  />
-                        ) : (
-                          <span
-                            className="h-1.5 w-1.5 rounded-full flex-shrink-0"
-                            style={{ backgroundColor: dotColor, transition: 'background-color 0.2s' }}
-                          />
-                        )}
-                        {serverId !== 'default' && (
-                          <span className="text-[10px] leading-none text-muted-foreground max-w-[80px] truncate">
-                            {serverLabel}
-                          </span>
-                        )}
-                      </span>
-                    )}
                   </button>
                 </TooltipTrigger>
                 <TooltipContent side="right" sideOffset={8}>
@@ -260,76 +214,10 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
                 </TooltipContent>
               </Tooltip>
 
-              <DropdownMenu
-                open={isMenuOpen}
-                onOpenChange={handleMenuOpenChange}
-              >
-                <DropdownMenuTrigger asChild>
-                  <div
-                    className="fixed w-0 h-0 overflow-hidden"
-                    style={menuPosition ? { left: menuPosition.x, top: menuPosition.y } : undefined}
-                    aria-hidden="true"
-                  />
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="min-w-[180px]">
-                  {showCreateButtons && !isRepo && !hideDirectoryControls && onNewSession && (
-                  <DropdownMenuItem onClick={onNewSession}>
-                    <Icon name="add" className="mr-1.5 h-4 w-4"  />
-                    {t('sessions.sidebar.project.actions.newSession')}
-                  </DropdownMenuItem>
-                )}
-                <DropdownMenuItem onClick={onRenameStart}>
-                  <Icon name="pencil-ai" className="mr-1.5 h-4 w-4"  />
-                  {t('sessions.sidebar.session.menu.rename')}
-                </DropdownMenuItem>
-                {onTogglePin ? (
-                  <DropdownMenuItem onClick={onTogglePin}>
-                    <Icon name="pushpin" className="mr-1.5 h-4 w-4"  />
-                    {isPinned ? t('directoryTree.actions.unpinDirectory') : t('directoryTree.actions.pinDirectory')}
-                  </DropdownMenuItem>
-                ) : null}
-                {onRefresh ? (
-                  <DropdownMenuItem onClick={onRefresh}>
-                    <Icon name="refresh" className="mr-1.5 h-4 w-4"  />
-                    {t('sessions.sidebar.project.actions.refresh')}
-                  </DropdownMenuItem>
-                ) : null}
-                <DropdownMenuItem
-                  onClick={onClose}
-                  className="text-destructive focus:text-destructive"
-                >
-                  <Icon name="close" className="mr-1.5 h-4 w-4"  />
-                  {t('sessions.sidebar.project.actions.closeProject')}
-                </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-
-              <div className="absolute right-0.5 top-1/2 z-10 flex flex-row-reverse -translate-y-1/2 items-center gap-0.5">
-                {showCreateButtons && onNewSession ? (
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onNewSession();
-                        }}
-                        className="inline-flex h-5 w-5 items-center justify-center rounded-sm text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
-                        aria-label={isRepo
-                          ? t('sessions.sidebar.project.actions.newDraftSession')
-                          : t('sessions.sidebar.project.actions.newSession')}
-                      >
-                        <Icon name="chat-new" className="h-3.5 w-3.5"  />
-                      </button>
-                    </TooltipTrigger>
-                    <TooltipContent side="bottom" sideOffset={4}>
-                      <p>{isRepo
-                        ? t('sessions.sidebar.project.actions.newDraftSession')
-                        : t('sessions.sidebar.project.actions.newSession')}</p>
-                    </TooltipContent>
-                  </Tooltip>
-                ) : null}
-
+              <div className={cn(
+                'absolute top-1/2 z-10 flex -translate-y-1/2 items-center gap-1',
+                showCreateButtons ? 'right-7' : 'right-0.5',
+              )}>
                 {showCreateButtons && isRepo && !hideDirectoryControls && onNewWorktreeSession ? (
                   <Tooltip>
                     <TooltipTrigger asChild>
@@ -339,10 +227,13 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
                           e.stopPropagation();
                           onNewWorktreeSession();
                         }}
-                        className="inline-flex h-5 w-5 items-center justify-center rounded-sm text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 hover:text-foreground"
+                        className={cn(
+                        'inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 hover:text-foreground transition-opacity',
+                          alwaysShowActions ? 'opacity-100' : 'opacity-0 pointer-events-none group-hover/project:opacity-100 group-hover/project:pointer-events-auto group-focus-within/project:opacity-100 group-focus-within/project:pointer-events-auto',
+                        )}
                         aria-label={t('sessions.sidebar.project.actions.newWorktree')}
                       >
-                        <Icon name="node-tree" className="h-3.5 w-3.5"  />
+                        <Icon name="node-tree" className="h-4 w-4" />
                       </button>
                     </TooltipTrigger>
                     <TooltipContent side="bottom" sideOffset={4}>
@@ -350,7 +241,81 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
                     </TooltipContent>
                   </Tooltip>
                 ) : null}
+
+                <DropdownMenu
+                  open={isMenuOpen}
+                  onOpenChange={handleMenuOpenChange}
+                >
+                    <DropdownMenuTrigger asChild>
+                      <button
+                        type="button"
+                        className={cn(
+                          'inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground transition-opacity focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 hover:text-foreground',
+                          isMenuOpen
+                            ? 'opacity-100 pointer-events-auto'
+                            : alwaysShowActions
+                              ? 'opacity-100'
+                              : 'opacity-0 pointer-events-none group-hover/project:opacity-100 group-hover/project:pointer-events-auto group-focus-within/project:opacity-100 group-focus-within/project:pointer-events-auto',
+                        )}
+                        aria-label={t('sessions.sidebar.project.actions.projectMenu')}
+                        onPointerDown={handleMenuTriggerPointerDown}
+                        onMouseDown={handleMenuTriggerMouseDown}
+                        onClick={handleMenuTriggerClick}
+                      >
+                        <Icon name="more-2" className="h-3.5 w-3.5" />
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="min-w-[180px]">
+                      {showCreateButtons && !isRepo && !hideDirectoryControls && onNewSession && (
+                      <DropdownMenuItem onClick={onNewSession}>
+                        <Icon name="add" className="mr-1.5 h-4 w-4" />
+                        {t('sessions.sidebar.project.actions.newSession')}
+                      </DropdownMenuItem>
+                    )}
+                    <DropdownMenuItem onClick={onRenameStart}>
+                      <Icon name="pencil-ai" className="mr-1.5 h-4 w-4" />
+                      {t('sessions.sidebar.session.menu.rename')}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onClick={onClose}
+                      className="text-destructive focus:text-destructive"
+                    >
+                      <Icon name="close" className="mr-1.5 h-4 w-4" />
+                      {t('sessions.sidebar.project.actions.closeProject')}
+                    </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
               </div>
+
+              {showCreateButtons && onNewSession ? (
+                <div className="absolute right-0.5 top-1/2 z-10 -translate-y-1/2">
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onNewSession();
+                        }}
+                        className={cn(
+                          'inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 transition-opacity',
+                          alwaysShowActions ? 'opacity-100' : 'opacity-0 pointer-events-none group-hover/project:opacity-100 group-hover/project:pointer-events-auto group-focus-within/project:opacity-100 group-focus-within/project:pointer-events-auto',
+                        )}
+                        aria-label={isRepo
+                          ? t('sessions.sidebar.project.actions.newDraftSession')
+                          : t('sessions.sidebar.project.actions.newSession')}
+                      >
+                        <Icon name="add" className="h-4 w-4" />
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom" sideOffset={4}>
+                      <p>{isRepo
+                        ? t('sessions.sidebar.project.actions.newDraftSession')
+                        : t('sessions.sidebar.project.actions.newSession')}</p>
+                    </TooltipContent>
+                  </Tooltip>
+                </div>
+              ) : null}
             </div>
           </div>
         </>
@@ -398,32 +363,3 @@ const SortableGroupItemBase: React.FC<{
 };
 
 export const SortableGroupItem = React.memo(SortableGroupItemBase);
-
-export const SortableSessionItem: React.FC<{
-  id: string;
-  children: React.ReactNode;
-}> = ({ id, children }) => {
-  const {
-    attributes,
-    listeners,
-    setNodeRef,
-    transform,
-    transition,
-    isDragging,
-  } = useSortable({ id });
-
-  return (
-    <div
-      ref={setNodeRef}
-      style={{
-        transform: CSS.Transform.toString(transform),
-        transition,
-      }}
-      className={cn(isDragging && 'opacity-30')}
-      {...attributes}
-      {...listeners}
-    >
-      {children}
-    </div>
-  );
-};

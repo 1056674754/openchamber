@@ -1,6 +1,7 @@
 import React, { useRef, useEffect } from 'react';
 import { motion, useMotionValue, animate } from 'motion/react';
 import { Header } from './Header';
+import { BottomTerminalDock } from './BottomTerminalDock';
 import { Sidebar, SIDEBAR_CONTENT_WIDTH } from './Sidebar';
 import { RightSidebar, RIGHT_SIDEBAR_CONTENT_WIDTH } from './RightSidebar';
 import { RightSidebarTabs } from './RightSidebarTabs';
@@ -66,9 +67,13 @@ export const MainLayout: React.FC = () => {
     const { t } = useI18n();
     const RIGHT_SIDEBAR_AUTO_CLOSE_WIDTH = 1140;
     const RIGHT_SIDEBAR_AUTO_OPEN_WIDTH = 1220;
+    const BOTTOM_TERMINAL_AUTO_CLOSE_HEIGHT = 640;
+    const BOTTOM_TERMINAL_AUTO_OPEN_HEIGHT = 700;
     const isSidebarOpen = useUIStore((state) => state.isSidebarOpen);
     const isRightSidebarOpen = useUIStore((state) => state.isRightSidebarOpen);
+    const isBottomTerminalOpen = useUIStore((state) => state.isBottomTerminalOpen);
     const setRightSidebarOpen = useUIStore((state) => state.setRightSidebarOpen);
+    const setBottomTerminalOpen = useUIStore((state) => state.setBottomTerminalOpen);
     const activeMainTab = useUIStore((state) => state.activeMainTab);
     const setIsMobile = useUIStore((state) => state.setIsMobile);
     const isSessionSwitcherOpen = useUIStore((state) => state.isSessionSwitcherOpen);
@@ -77,9 +82,8 @@ export const MainLayout: React.FC = () => {
     const isMultiRunLauncherOpen = useUIStore((state) => state.isMultiRunLauncherOpen);
     const setMultiRunLauncherOpen = useUIStore((state) => state.setMultiRunLauncherOpen);
     const multiRunLauncherPrefillPrompt = useUIStore((state) => state.multiRunLauncherPrefillPrompt);
-    const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
 
-    const { isMobile } = useDeviceInfo();
+    const { isMobile, isTablet } = useDeviceInfo();
     const isDesktopShellRuntime = React.useMemo(() => isDesktopShell(), []);
     const sidebarWidth = useUIStore((state) => state.sidebarWidth);
     const rightSidebarWidth = useUIStore((state) => state.rightSidebarWidth);
@@ -97,6 +101,7 @@ export const MainLayout: React.FC = () => {
     });
     const setSidebarOpen = useUIStore((state) => state.setSidebarOpen);
     const rightSidebarAutoClosedRef = React.useRef(false);
+    const bottomTerminalAutoClosedRef = React.useRef(false);
     const leftSidebarAutoClosedByContextRef = React.useRef(false);
 
     // Mobile drawer state
@@ -217,10 +222,36 @@ export const MainLayout: React.FC = () => {
     }, [isMobile, setIsMobile]);
 
     React.useEffect(() => {
+        if (typeof window === 'undefined') {
+            return;
+        }
+
+        let timeoutId: number | undefined;
+
+        const handleResize = () => {
+            if (timeoutId !== undefined) {
+                window.clearTimeout(timeoutId);
+            }
+
+            timeoutId = window.setTimeout(() => {
+                useUIStore.getState().updateProportionalSidebarWidths();
+            }, 150);
+        };
+
+        window.addEventListener('resize', handleResize);
+
+        return () => {
+            window.removeEventListener('resize', handleResize);
+            if (timeoutId !== undefined) {
+                window.clearTimeout(timeoutId);
+            }
+        };
+    }, []);
+
+    React.useEffect(() => {
         if (isContextPanelOpen) {
             const currentlyOpen = useUIStore.getState().isSidebarOpen;
-            const autoCollapseEnabled = useUIStore.getState().autoCollapseSidebarOnContextPanel;
-            if (currentlyOpen && autoCollapseEnabled) {
+            if (currentlyOpen) {
                 setSidebarOpen(false);
                 leftSidebarAutoClosedByContextRef.current = true;
             }
@@ -240,25 +271,44 @@ export const MainLayout: React.FC = () => {
 
         let timeoutId: number | undefined;
 
-         const handleResponsivePanels = () => {
-             const state = useUIStore.getState();
-             const width = window.innerWidth;
+        const handleResponsivePanels = () => {
+            const state = useUIStore.getState();
+            const width = window.innerWidth;
+            const height = window.innerHeight;
 
-             if (!isMobile) {
-                 const shouldCloseRightSidebar = width < RIGHT_SIDEBAR_AUTO_CLOSE_WIDTH;
-                 const canAutoOpenRightSidebar = width >= RIGHT_SIDEBAR_AUTO_OPEN_WIDTH;
+            // Touch devices frequently resize when the on-screen keyboard opens.
+            // Treat panel auto-collapse/restore as desktop-only so keyboard
+            // viewport changes do not churn drawer or terminal layout state.
+            if (!isMobile && !isTablet) {
+                const shouldCloseRightSidebar = width < RIGHT_SIDEBAR_AUTO_CLOSE_WIDTH;
+                const canAutoOpenRightSidebar = width >= RIGHT_SIDEBAR_AUTO_OPEN_WIDTH;
 
-                 if (shouldCloseRightSidebar) {
-                     if (state.isRightSidebarOpen) {
-                         setRightSidebarOpen(false);
-                         rightSidebarAutoClosedRef.current = true;
-                     }
-                 } else if (canAutoOpenRightSidebar && rightSidebarAutoClosedRef.current) {
-                     setRightSidebarOpen(true);
-                     rightSidebarAutoClosedRef.current = false;
-                 }
-             }
-         };
+                if (shouldCloseRightSidebar) {
+                    if (state.isRightSidebarOpen) {
+                        setRightSidebarOpen(false);
+                        rightSidebarAutoClosedRef.current = true;
+                    }
+                } else if (canAutoOpenRightSidebar && rightSidebarAutoClosedRef.current) {
+                    setRightSidebarOpen(true);
+                    rightSidebarAutoClosedRef.current = false;
+                }
+
+                const shouldCloseBottomTerminal =
+                    height < BOTTOM_TERMINAL_AUTO_CLOSE_HEIGHT;
+                const canAutoOpenBottomTerminal =
+                    height >= BOTTOM_TERMINAL_AUTO_OPEN_HEIGHT;
+
+                if (shouldCloseBottomTerminal) {
+                    if (state.isBottomTerminalOpen) {
+                        setBottomTerminalOpen(false);
+                        bottomTerminalAutoClosedRef.current = true;
+                    }
+                } else if (canAutoOpenBottomTerminal && bottomTerminalAutoClosedRef.current) {
+                    setBottomTerminalOpen(true);
+                    bottomTerminalAutoClosedRef.current = false;
+                }
+            }
+        };
 
         const handleResize = () => {
             if (timeoutId !== undefined) {
@@ -279,7 +329,7 @@ export const MainLayout: React.FC = () => {
                 window.clearTimeout(timeoutId);
             }
         };
-    }, [setRightSidebarOpen]);
+    }, [isMobile, isTablet, setBottomTerminalOpen, setRightSidebarOpen]);
 
     React.useEffect(() => {
         if (typeof window === 'undefined') {
@@ -288,18 +338,25 @@ export const MainLayout: React.FC = () => {
 
         const unsubscribe = useUIStore.subscribe((state, prevState) => {
             const width = window.innerWidth;
+            const height = window.innerHeight;
 
             const rightCanAutoOpen = width >= RIGHT_SIDEBAR_AUTO_OPEN_WIDTH;
+            const bottomCanAutoOpen =
+                height >= BOTTOM_TERMINAL_AUTO_OPEN_HEIGHT;
 
             if (state.isRightSidebarOpen !== prevState.isRightSidebarOpen && rightCanAutoOpen) {
                 rightSidebarAutoClosedRef.current = false;
+            }
+
+            if (state.isBottomTerminalOpen !== prevState.isBottomTerminalOpen && bottomCanAutoOpen) {
+                bottomTerminalAutoClosedRef.current = false;
             }
         });
 
         return () => {
             unsubscribe();
         };
-    }, []);
+    }, [isMobile, isTablet, setBottomTerminalOpen, setRightSidebarOpen]);
 
     const secondaryView = React.useMemo(() => {
         switch (activeMainTab) {
@@ -515,7 +572,7 @@ export const MainLayout: React.FC = () => {
                                     <ErrorBoundary>{secondaryView}</ErrorBoundary>
                                 </div>
                             )}
-                            {multiRunEnabled && isMultiRunLauncherOpen && (
+                            {isMultiRunLauncherOpen && (
                                 <div className="absolute inset-0 z-10 bg-background">
                                     <ErrorBoundary>
                                         <MultiRunLauncher
@@ -648,6 +705,15 @@ export const MainLayout: React.FC = () => {
                                         <ContextPanel />
                                     </div>
                                 </div>
+                                <BottomTerminalDock isOpen={isBottomTerminalOpen} isMobile={isMobile}>
+                                    {isBottomTerminalOpen ? (
+                                        <ErrorBoundary>
+                                            <React.Suspense fallback={null}>
+                                                <TerminalView />
+                                            </React.Suspense>
+                                        </ErrorBoundary>
+                                    ) : null}
+                                </BottomTerminalDock>
                             </div>
                             <RightSidebar
                                 isOpen={isRightSidebarOpen}
@@ -667,15 +733,13 @@ export const MainLayout: React.FC = () => {
                             onOpenChange={setSettingsDialogOpen}
                         />
                     </React.Suspense>
-                    {multiRunEnabled && (
-                        <React.Suspense fallback={null}>
-                            <MultiRunWindow
-                                open={isMultiRunLauncherOpen}
-                                onOpenChange={setMultiRunLauncherOpen}
-                                initialPrompt={multiRunLauncherPrefillPrompt}
-                            />
-                        </React.Suspense>
-                    )}
+                    <React.Suspense fallback={null}>
+                        <MultiRunWindow
+                            open={isMultiRunLauncherOpen}
+                            onOpenChange={setMultiRunLauncherOpen}
+                            initialPrompt={multiRunLauncherPrefillPrompt}
+                        />
+                    </React.Suspense>
                 </>
             )}
 

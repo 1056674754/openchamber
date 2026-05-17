@@ -9,10 +9,10 @@ import { createWorktreeSession } from '@/lib/worktreeSessionCreator';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { canUseElectronDesktopIPC, invokeDesktop, isVSCodeRuntime } from '@/lib/desktop';
 import { showOpenCodeStatus } from '@/lib/openCodeStatus';
-import { eventMatchesShortcut, getEffectiveShortcutCombo } from '@/lib/shortcuts';
+import { eventMatchesShortcut, getEffectiveShortcutCombo, normalizeCombo } from '@/lib/shortcuts';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
-import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
+import { getCycledPrimaryAgentName } from '@/components/chat/mobileControlsUtils';
 
 export const useKeyboardShortcuts = () => {
   const openNewSessionDraft = useSessionUIStore((s) => s.openNewSessionDraft);
@@ -26,8 +26,8 @@ export const useKeyboardShortcuts = () => {
   const toggleRightSidebar = useUIStore((s) => s.toggleRightSidebar);
   const setRightSidebarOpen = useUIStore((s) => s.setRightSidebarOpen);
   const setRightSidebarTab = useUIStore((s) => s.setRightSidebarTab);
-  const openContextTerminal = useUIStore((s) => s.openContextTerminal);
-  const effectiveDirectory = useEffectiveDirectory() ?? '';
+  const toggleBottomTerminal = useUIStore((s) => s.toggleBottomTerminal);
+  const setBottomTerminalExpanded = useUIStore((s) => s.setBottomTerminalExpanded);
   const isMobile = useUIStore((s) => s.isMobile);
   const setSessionSwitcherOpen = useUIStore((s) => s.setSessionSwitcherOpen);
   const setActiveMainTab = useUIStore((s) => s.setActiveMainTab);
@@ -81,7 +81,18 @@ export const useKeyboardShortcuts = () => {
         }
         e.preventDefault();
         e.stopPropagation();
-        openContextTerminal(effectiveDirectory);
+        toggleBottomTerminal();
+        return;
+      }
+
+      if (eventMatchesShortcut(e, combo('toggle_terminal_expanded'))) {
+        const { isMobile, isBottomTerminalExpanded } = useUIStore.getState();
+        if (isMobile) {
+          return;
+        }
+        e.preventDefault();
+        e.stopPropagation();
+        setBottomTerminalExpanded(!isBottomTerminalExpanded);
         return;
       }
     };
@@ -90,6 +101,10 @@ export const useKeyboardShortcuts = () => {
       if (isTerminalEventTarget(e.target)) {
         return;
       }
+
+      const isChatInputTarget = (target: EventTarget | null) => {
+        return target instanceof HTMLTextAreaElement && target.getAttribute('data-chat-input') === 'true';
+      };
 
       if (eventMatchesShortcut(e, combo('open_command_palette'))) {
         e.preventDefault();
@@ -190,6 +205,53 @@ export const useKeyboardShortcuts = () => {
         return;
       }
 
+      const cycleAgentCombo = combo('cycle_agent');
+      const cycleAgentBackwardCombo = cycleAgentCombo && !cycleAgentCombo.includes('shift')
+        ? normalizeCombo(`shift+${cycleAgentCombo}`)
+        : '';
+      const cycleAgentDirection = cycleAgentBackwardCombo && eventMatchesShortcut(e, cycleAgentBackwardCombo)
+        ? -1
+        : eventMatchesShortcut(e, cycleAgentCombo)
+          ? 1
+          : 0;
+
+      if (cycleAgentDirection !== 0) {
+        const {
+          isSettingsDialogOpen,
+          isCommandPaletteOpen,
+          isHelpDialogOpen,
+          isSessionSwitcherOpen,
+          isAboutDialogOpen,
+          activeMainTab,
+        } = useUIStore.getState();
+
+        const hasOverlay = isSettingsDialogOpen || isCommandPaletteOpen || isHelpDialogOpen || isSessionSwitcherOpen || isAboutDialogOpen;
+        if (hasOverlay || activeMainTab !== 'chat' || !isChatInputTarget(e.target)) {
+          return;
+        }
+
+        const configState = useConfigStore.getState();
+        const nextAgentName = getCycledPrimaryAgentName(
+          configState.getVisibleAgents(),
+          configState.currentAgentName,
+          cycleAgentDirection,
+        );
+
+        if (!nextAgentName) {
+          return;
+        }
+
+        e.preventDefault();
+        configState.setAgent(nextAgentName);
+        useUIStore.getState().addRecentAgent(nextAgentName);
+
+        const sessionId = useSessionUIStore.getState().currentSessionId;
+        if (sessionId) {
+          useSelectionStore.getState().saveSessionAgentSelection(sessionId, nextAgentName);
+        }
+        return;
+      }
+
       if (eventMatchesShortcut(e, combo('toggle_right_sidebar'))) {
         const { isMobile } = useUIStore.getState();
         if (isMobile) {
@@ -244,7 +306,17 @@ export const useKeyboardShortcuts = () => {
           return;
         }
         e.preventDefault();
-        openContextTerminal(effectiveDirectory);
+        toggleBottomTerminal();
+        return;
+      }
+
+      if (eventMatchesShortcut(e, combo('toggle_terminal_expanded'))) {
+        const { isMobile, isBottomTerminalExpanded } = useUIStore.getState();
+        if (isMobile) {
+          return;
+        }
+        e.preventDefault();
+        setBottomTerminalExpanded(!isBottomTerminalExpanded);
         return;
       }
 
@@ -473,8 +545,8 @@ export const useKeyboardShortcuts = () => {
     toggleRightSidebar,
     setRightSidebarOpen,
     setRightSidebarTab,
-    openContextTerminal,
-    effectiveDirectory,
+    toggleBottomTerminal,
+    setBottomTerminalExpanded,
     isMobile,
     setSessionSwitcherOpen,
     setActiveMainTab,

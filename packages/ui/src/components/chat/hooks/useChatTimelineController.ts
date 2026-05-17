@@ -8,11 +8,11 @@ import {
     clampTurnStart,
     getInitialTurnStart,
     updateTurnWindowModelIncremental,
+    windowMessagesByTurn,
     type TurnWindowModel,
 } from '../lib/turns/windowTurns';
 import type { TurnHistorySignals } from '../lib/turns/historySignals';
 import { getMemoryLimits, type SessionHistoryMeta } from '@/stores/types/sessionTypes';
-import { isSystemDirectiveMessage } from '@/lib/messages/system-directive';
 
 type ViewportAnchor = { messageId: string; offsetTop: number };
 
@@ -59,8 +59,8 @@ export interface UseChatTimelineControllerResult {
     handleActiveTurnChange: (turnId: string | null) => void;
 }
 
-const TURN_MODEL_CACHE_MAX = 30;
-const turnModelCache = new Map<string, { messages: ChatMessageEntry[]; model: TurnWindowModel }>();
+const TURN_MODEL_CACHE_MAX = 30
+const turnModelCache = new Map<string, { messages: ChatMessageEntry[]; model: TurnWindowModel }>()
 
 export const useChatTimelineController = ({
     sessionId,
@@ -77,12 +77,12 @@ export const useChatTimelineController = ({
     const previousTurnWindowModelRef = React.useRef<TurnWindowModel | null>(null);
     const previousMessagesRef = React.useRef<ChatMessageEntry[] | null>(null);
     const turnWindowModel = React.useMemo(() => {
-        const key = sessionId ?? '';
-        const cached = key ? turnModelCache.get(key) : undefined;
+        const key = sessionId ?? ""
+        const cached = key ? turnModelCache.get(key) : undefined
         if (cached && cached.messages === messages) {
-            previousTurnWindowModelRef.current = cached.model;
-            previousMessagesRef.current = messages;
-            return cached.model;
+            previousTurnWindowModelRef.current = cached.model
+            previousMessagesRef.current = messages
+            return cached.model
         }
 
         const incrementalModel = updateTurnWindowModelIncremental(
@@ -97,63 +97,16 @@ export const useChatTimelineController = ({
         if (key && messages.length > 0) {
             // LRU-like eviction: delete oldest when at capacity
             if (turnModelCache.size >= TURN_MODEL_CACHE_MAX) {
-                const oldest = turnModelCache.keys().next().value;
-                if (oldest !== undefined) turnModelCache.delete(oldest);
+                const oldest = turnModelCache.keys().next().value
+                if (oldest !== undefined) turnModelCache.delete(oldest)
             }
-            turnModelCache.set(key, { messages, model: nextModel });
+            turnModelCache.set(key, { messages, model: nextModel })
         }
 
         return nextModel;
     }, [messages, sessionId]);
 
-    // [sscity-mod] Count only real user turns (non-directive) for windowing.
-    // Directives inflate turnCount but should not affect the window threshold.
-    const realUserGroupCount = React.useMemo(() => {
-        let count = 0;
-        for (const message of messages) {
-            const role = (message.info as { clientRole?: string | null; role?: string | null }).clientRole ?? message.info.role;
-            if (role === 'user' && !isSystemDirectiveMessage(message.parts)) {
-                count += 1;
-            }
-        }
-        return count;
-    }, [messages]);
-
-    // Map from any turnId/messageId → the real-user-group index that contains it.
-    // Directive turns map to the same group index as their preceding real user turn.
-    const turnIdToGroupIndex = React.useMemo(() => {
-        const map = new Map<string, number>();
-        let groupIndex = -1;
-        for (const message of messages) {
-            const role = (message.info as { clientRole?: string | null; role?: string | null }).clientRole ?? message.info.role;
-            if (role === 'user') {
-                if (!isSystemDirectiveMessage(message.parts)) {
-                    groupIndex += 1;
-                }
-                map.set(message.info.id, Math.max(groupIndex, 0));
-            }
-        }
-        // Also map assistant messages to their parent's group index
-        for (const [turnId, turnIndex] of turnWindowModel.turnIndexById) {
-            if (!map.has(turnId)) {
-                // Find the nearest group index at or before this raw turn index
-                const rawTurnIds = turnWindowModel.turnIds;
-                for (let i = turnIndex; i >= 0; i--) {
-                    const gIdx = map.get(rawTurnIds[i]!);
-                    if (typeof gIdx === 'number') {
-                        map.set(turnId, gIdx);
-                        break;
-                    }
-                }
-            }
-        }
-        return map;
-    }, [messages, turnWindowModel.turnIds, turnWindowModel.turnIndexById]);
-
-    const turnIdToGroupIndexRef = React.useRef(turnIdToGroupIndex);
-    turnIdToGroupIndexRef.current = turnIdToGroupIndex;
-
-    const [turnStart, setTurnStart] = React.useState(() => getInitialTurnStart(realUserGroupCount));
+    const [turnStart, setTurnStart] = React.useState(() => getInitialTurnStart(turnWindowModel.turnCount));
     const [isLoadingOlder, setIsLoadingOlder] = React.useState(false);
     const [pendingRevealWork, setPendingRevealWork] = React.useState(false);
     const [activeTurnId, setActiveTurnId] = React.useState<string | null>(null);
@@ -166,7 +119,7 @@ export const useChatTimelineController = ({
     const sessionIdRef = React.useRef<string | null>(sessionId);
     const messagesRef = React.useRef(messages);
     const historyMetaRef = React.useRef<SessionHistoryMeta | null>(historyMeta);
-    const previousTurnCountRef = React.useRef(realUserGroupCount);
+    const previousTurnCountRef = React.useRef(turnWindowModel.turnCount);
     const initializedSessionRef = React.useRef<string | null>(null);
     const pendingRenderResolversRef = React.useRef<Array<() => void>>([]);
     const pendingScrollRequestRef = React.useRef<PendingScrollRequest | null>(null);
@@ -178,16 +131,13 @@ export const useChatTimelineController = ({
             ? !historyMeta.complete
             : messages.length >= defaultLimit;
         const historyLoading = Boolean(historyMeta?.loading);
-        // [sscity-mod] Guard: if realUserGroupCount fits within the initial
-        // window, there's nothing to load/reveal regardless of historyMeta timing.
-        const effectiveHasMore = hasMoreAboveTurns && realUserGroupCount > TURN_WINDOW_DEFAULTS.initialTurns;
         return {
             hasBufferedTurns,
-            hasMoreAboveTurns: effectiveHasMore,
+            hasMoreAboveTurns,
             historyLoading,
-            canLoadEarlier: hasBufferedTurns || effectiveHasMore,
+            canLoadEarlier: hasBufferedTurns || hasMoreAboveTurns,
         };
-    }, [historyMeta, messages.length, realUserGroupCount, turnStart]);
+    }, [historyMeta, messages.length, turnStart]);
 
     const historySignalsRef = React.useRef(historySignals);
 
@@ -206,20 +156,20 @@ export const useChatTimelineController = ({
             return;
         }
         initializedSessionRef.current = sessionId;
-        setTurnStart(getInitialTurnStart(realUserGroupCount));
+        setTurnStart(getInitialTurnStart(turnWindowModel.turnCount));
         setIsLoadingOlder(false);
         setPendingRevealWork(false);
         setActiveTurnId(null);
-        previousTurnCountRef.current = realUserGroupCount;
-    }, [sessionId, realUserGroupCount]);
+        previousTurnCountRef.current = turnWindowModel.turnCount;
+    }, [sessionId, turnWindowModel.turnCount]);
 
     React.useLayoutEffect(() => {
-        setTurnStart((current) => clampTurnStart(current, realUserGroupCount));
-    }, [realUserGroupCount]);
+        setTurnStart((current) => clampTurnStart(current, turnWindowModel.turnCount));
+    }, [turnWindowModel.turnCount]);
 
     React.useLayoutEffect(() => {
         const previousTurnCount = previousTurnCountRef.current;
-        const nextTurnCount = realUserGroupCount;
+        const nextTurnCount = turnWindowModel.turnCount;
         if (previousTurnCount === nextTurnCount) {
             return;
         }
@@ -234,7 +184,7 @@ export const useChatTimelineController = ({
         });
 
         previousTurnCountRef.current = nextTurnCount;
-    }, [realUserGroupCount]);
+    }, [turnWindowModel.turnCount]);
 
     const resolvePendingRenderWaiters = React.useCallback(() => {
         const resolvers = pendingRenderResolversRef.current;
@@ -283,14 +233,11 @@ export const useChatTimelineController = ({
             return;
         }
 
-        const targetGroupIndex = pending.kind === 'turn'
-            ? turnIdToGroupIndexRef.current.get(pending.id)
-            : ((): number | undefined => {
-                const tId = turnModelRef.current.messageToTurnId.get(pending.id);
-                return tId ? turnIdToGroupIndexRef.current.get(tId) : undefined;
-            })();
+        const targetIndex = pending.kind === 'turn'
+            ? turnModelRef.current.turnIndexById.get(pending.id)
+            : turnModelRef.current.messageToTurnIndex.get(pending.id);
 
-        if (typeof targetGroupIndex === 'number' && targetGroupIndex >= turnStartRef.current) {
+        if (typeof targetIndex === 'number' && targetIndex >= turnStartRef.current) {
             resolvePendingScrollRequest(false);
         }
     }, [messageListRef, resolvePendingScrollRequest]);
@@ -303,12 +250,8 @@ export const useChatTimelineController = ({
     }, [resolvePendingRenderWaiters, resolvePendingScrollRequest]);
 
     const renderedMessages = React.useMemo(() => {
-        // [sscity-mod] Pass full messages to MessageList. Turn windowing now
-        // happens at the grouped-turn-entry level inside MessageList, not at
-        // the raw-message level. This ensures the complete turn tree is always
-        // available so directive turns never lose their parent real-user turn.
-        return messages;
-    }, [messages]);
+        return windowMessagesByTurn(messages, turnWindowModel, turnStart);
+    }, [messages, turnStart, turnWindowModel]);
 
     React.useLayoutEffect(() => {
         resolvePendingRenderWaiters();
@@ -339,10 +282,14 @@ export const useChatTimelineController = ({
         if (!snap || !container) return;
         prePrependScrollRef.current = null;
 
+        // When a viewport anchor is available, delegate to MessageList
+        // restoreViewportAnchor which falls back to virtualizer-aware
+        // scrollHistoryIndexIntoView when the element is not in the DOM.
         if (snap.anchor && restoreViewportAnchor(snap.anchor)) {
             return;
         }
 
+        // Fallback: height-delta compensation
         const delta = container.scrollHeight - snap.height;
         if (delta > 0) {
             container.scrollTop = snap.top + delta;
@@ -450,7 +397,7 @@ export const useChatTimelineController = ({
                 return false;
             }
 
-            const turnIndex = turnIdToGroupIndexRef.current.get(turnId);
+            const turnIndex = turnModelRef.current.turnIndexById.get(turnId);
             if (typeof turnIndex !== 'number') {
                 return false;
             }
@@ -498,14 +445,14 @@ export const useChatTimelineController = ({
             }
 
             const turnId = turnModelRef.current.messageToTurnId.get(messageId);
-            const groupIndex = turnId ? turnIdToGroupIndexRef.current.get(turnId) : undefined;
+            const turnIndex = turnModelRef.current.messageToTurnIndex.get(messageId);
 
-            if (typeof groupIndex !== 'number') {
+            if (typeof turnIndex !== 'number') {
                 return false;
             }
 
-            if (groupIndex < turnStartRef.current) {
-                setTurnStart(groupIndex);
+            if (turnIndex < turnStartRef.current) {
+                setTurnStart(turnIndex);
             }
 
             const result = await new Promise<boolean>((resolve) => {
@@ -531,7 +478,7 @@ export const useChatTimelineController = ({
     }, [attemptPendingScrollRequest, releaseAutoFollow, sessionId]);
 
     const resumeToBottom = React.useCallback(async () => {
-        const nextStart = getInitialTurnStart(realUserGroupCount);
+        const nextStart = getInitialTurnStart(turnModelRef.current.turnCount);
         setPendingRevealWork(false);
         setIsLoadingOlder(false);
 
@@ -542,10 +489,10 @@ export const useChatTimelineController = ({
         }
 
         goToBottom('smooth');
-    }, [goToBottom, realUserGroupCount, waitForNextRenderCommit]);
+    }, [goToBottom, waitForNextRenderCommit]);
 
     const resumeToBottomInstant = React.useCallback(async () => {
-        const nextStart = getInitialTurnStart(realUserGroupCount);
+        const nextStart = getInitialTurnStart(turnModelRef.current.turnCount);
         setPendingRevealWork(false);
         setIsLoadingOlder(false);
 
@@ -556,7 +503,7 @@ export const useChatTimelineController = ({
         }
 
         goToBottom('instant');
-    }, [goToBottom, realUserGroupCount, waitForNextRenderCommit]);
+    }, [goToBottom, waitForNextRenderCommit]);
 
     const handleActiveTurnChange = React.useCallback((turnId: string | null) => {
         setActiveTurnId(turnId);

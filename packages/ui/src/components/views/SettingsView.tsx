@@ -29,7 +29,6 @@ import { UsagePage } from '@/components/sections/usage/UsagePage';
 import { MagicPromptsSidebar } from '@/components/sections/magic-prompts/MagicPromptsSidebar';
 import { MagicPromptsPage } from '@/components/sections/magic-prompts/MagicPromptsPage';
 import { GitPage } from '@/components/sections/git-identities/GitPage';
-import { SettingsServerSelector } from '@/components/sections/shared/SettingsServerSelector';
 import type { OpenChamberSection } from '@/components/sections/openchamber/types';
 import { OpenChamberPage } from '@/components/sections/openchamber/OpenChamberPage';
 import { useDeviceInfo } from '@/lib/device';
@@ -88,20 +87,10 @@ const pageOrder: SettingsPageSlug[] = [
   'tunnel',
 ];
 
-const SERVER_AWARE_PAGES: Set<SettingsPageSlug> = new Set([
-  'providers',
-  'agents',
-  'commands',
-  'mcp',
-  'skills.installed',
-  'skills.catalog',
-  'usage',
-]);
-
 function buildRuntimeContext(isDesktop: boolean): SettingsRuntimeContext {
   const isVSCode = isVSCodeRuntime();
   const isWeb = !isDesktop && isWebRuntime();
-  return { isVSCode, isWeb, isDesktop, isDesktopServer: isDesktop };
+  return { isVSCode, isWeb, isDesktop };
 }
 
 function isPageAvailable(page: SettingsPageMeta, ctx: SettingsRuntimeContext): boolean {
@@ -263,25 +252,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
     return isDesktopShell();
   }, []);
 
-  const [runtimeCtx, setRuntimeCtx] = React.useState<SettingsRuntimeContext>(
-    () => buildRuntimeContext(isDesktopApp),
-  );
+  // keep platform check available for future window chrome tweaks
 
-  React.useEffect(() => {
-    if (isDesktopApp) return;
-    const controller = new AbortController();
-    fetch('/api/system/info', { signal: controller.signal })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data) => {
-        if (controller.signal.aborted) return;
-        const serverRuntime = typeof data?.runtime === 'string' ? data.runtime : null;
-        if (serverRuntime === 'desktop') {
-          setRuntimeCtx((prev) => (prev.isDesktopServer ? prev : { ...prev, isDesktopServer: true }));
-        }
-      })
-      .catch(() => {});
-    return () => controller.abort();
-  }, [isDesktopApp]);
+  const runtimeCtx = React.useMemo(() => buildRuntimeContext(isDesktopApp), [isDesktopApp]);
 
   const visiblePages = React.useMemo(() => {
     return SETTINGS_PAGE_METADATA
@@ -746,10 +719,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
               : (activePageMeta ? getPageTitle(activePageMeta.slug) : t('settings.view.home.title'))}
           </div>
 
-          {mobileStage !== 'nav' && SERVER_AWARE_PAGES.has(settingsSlug) && (
-            <SettingsServerSelector />
-          )}
-
           {mobileStage === 'page-content' && activePageMeta?.kind === 'split' && (
             <button
               type="button"
@@ -790,20 +759,15 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
 
       {onClose && (
         <div className={cn('absolute right-0.5 z-50', isWindowed ? 'top-0.5' : 'top-1')}>
-          <div className="flex items-center gap-1">
-            {SERVER_AWARE_PAGES.has(settingsSlug) && (
-              <SettingsServerSelector />
-            )}
-            <button
-              type="button"
-              onClick={onClose}
-              aria-label={t('settings.view.actions.closeSettings')}
-              title={t('settings.view.actions.closeSettingsWithShortcut', { shortcut: shortcutKey })}
-              className="inline-flex h-7 w-7 items-center justify-center rounded-md p-0.5 text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-            >
-              <Icon name="close" className="h-5 w-5"  />
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label={t('settings.view.actions.closeSettings')}
+            title={t('settings.view.actions.closeSettingsWithShortcut', { shortcut: shortcutKey })}
+            className="inline-flex h-7 w-7 items-center justify-center rounded-md p-0.5 text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          >
+            <Icon name="close" className="h-5 w-5" />
+          </button>
         </div>
       )}
         </>

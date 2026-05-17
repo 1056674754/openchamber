@@ -12,10 +12,10 @@ import { useOptionalThemeSystem } from '@/contexts/useThemeSystem';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useDirectorySync, useSessionMessageRecords, useEnsureSessionMessages } from '@/sync/sync-context';
-import { resolveSdkForDirectory } from '@/sync/session-actions';
 import { getSyncChildStores } from '@/sync/sync-refs';
 import { useUIStore } from '@/stores/useUIStore';
 import { useSessionActivity } from '@/hooks/useSessionActivity';
+import { opencodeClient } from '@/lib/opencode/client';
 import { sessionEvents } from '@/lib/sessionEvents';
 import { ScrollShadow } from '@/components/ui/ScrollShadow';
 import { Text } from '@/components/ui/text';
@@ -1080,7 +1080,8 @@ const TaskToolSummary: React.FC<{
     isActive?: boolean;
 }> = ({ entries, isExpanded, isMobile, output, sessionId, onShowPopup, input, animateTailText = true, isActive = false }) => {
     const { t } = useI18n();
-    const setCurrentSession = useSessionUIStore((state) => state.setCurrentSession);
+    const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
+    const openContextPanelTab = useUIStore((state) => state.openContextPanelTab);
     const showToolFileIcons = useUIStore((state) => state.showToolFileIcons);
     const displayEntries = entries;
 
@@ -1092,15 +1093,14 @@ const TaskToolSummary: React.FC<{
 
     const handleOpenSession = (event: React.MouseEvent) => {
         event.stopPropagation();
-        if (!sessionId) return;
-        // [sscity-mod] Subagents inherit the parent session's directory. Without
-        // passing it as a hint, setCurrentSession falls back to resolveSessionDirectory
-        // which needs the child session to already be loaded in a sync store —
-        // often not yet true when the user clicks 'Open session' mid-stream.
-        // Result: currentSessionId switches but currentDirectory doesn't, so the
-        // chat reads messages from the old directory's store and renders blank.
-        const parentDirectory = useDirectoryStore.getState().currentDirectory || null;
-        setCurrentSession(sessionId, parentDirectory);
+        if (sessionId && currentDirectory) {
+            openContextPanelTab(currentDirectory, {
+                mode: 'chat',
+                dedupeKey: `session:${sessionId}`,
+                label: agentType.charAt(0).toUpperCase() + agentType.slice(1),
+                readOnly: true,
+            });
+        }
     };
 
     const agentType = typeof input?.subagent_type === 'string'
@@ -1359,20 +1359,20 @@ const renderPathLikeGitChanges = (path: string, grow = true) => {
     );
 };
 
-const renderAnimatedPathWithIcon = (path: string, _animate = true, grow = true, showFileIcons = true) => {
-    void _animate;
+const renderAnimatedPathWithIcon = (path: string, animate = true, grow = true, showFileIcons = true) => {
     const lastSlash = path.lastIndexOf('/');
 
     if (lastSlash === -1) {
         return (
             <span className={cn('min-w-0 inline-flex items-center gap-1 overflow-hidden', grow && 'flex-1')} title={path}>
                 {showFileIcons ? <FileTypeIcon filePath={path} className="h-3.5 w-3.5 flex-shrink-0" /> : null}
-                <span
+                <Text
+                    variant={animate ? 'generate-effect' : 'static'}
                     className={cn('min-w-0 truncate whitespace-nowrap typography-meta', grow && 'flex-1')}
                     style={{ color: 'var(--tools-title)' }}
                 >
                     {path}
-                </span>
+                </Text>
             </span>
         );
     }
@@ -1399,9 +1399,13 @@ const renderAnimatedPathWithIcon = (path: string, _animate = true, grow = true, 
                     {displayDir}
                 </span>
                 <span className="flex-shrink-0" style={{ color: 'var(--tools-description)' }}>/</span>
-                <span className="flex-shrink-0" style={{ color: 'var(--tools-title)' }}>
+                <Text
+                    variant={animate ? 'generate-effect' : 'static'}
+                    className="flex-shrink-0"
+                    style={{ color: 'var(--tools-title)' }}
+                >
                     {name}
-                </span>
+                </Text>
             </span>
         </span>
     );
@@ -2225,7 +2229,7 @@ const ToolPart: React.FC<ToolPartProps> = ({
 
         const runFinalFetch = async () => {
             try {
-                const scopedClient = resolveSdkForDirectory(currentDirectory);
+                const scopedClient = opencodeClient.getScopedSdkClient(currentDirectory);
                 const response = await scopedClient.session.messages({
                     sessionID: capturedSessionId,
                     limit: TASK_TOOL_INITIAL_FETCH_LIMIT,
@@ -2365,7 +2369,7 @@ const ToolPart: React.FC<ToolPartProps> = ({
 
         const fetchSessionMessages = async (isInitialFetch: boolean) => {
             try {
-                const scopedClient = resolveSdkForDirectory(currentDirectory);
+                const scopedClient = opencodeClient.getScopedSdkClient(currentDirectory);
                 const response = await scopedClient.session.messages({
                     sessionID: taskSessionId,
                     limit: resolveFetchLimit(isInitialFetch),

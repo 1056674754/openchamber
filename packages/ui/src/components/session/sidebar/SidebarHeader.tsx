@@ -8,16 +8,15 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
+import { ArrowsMerge } from '@/components/icons/ArrowsMerge';
+import { Icon } from "@/components/icon/Icon";
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { useI18n } from '@/lib/i18n';
-import { sessionEvents } from '@/lib/sessionEvents';
-import { Icon } from "@/components/icon/Icon";
 
 type Props = {
   hideDirectoryControls: boolean;
   handleOpenDirectoryDialog: () => void;
   handleNewSession: () => void;
-  handleNewTempSession?: () => void;
   canOpenMultiRun: boolean;
   openMultiRunLauncher: () => void;
   headerActionIconClass: string;
@@ -35,7 +34,6 @@ type Props = {
   openScheduledTasksDialog: () => void;
   selectionModeEnabled: boolean;
   onToggleSelectionMode: () => void;
-  onRefresh?: () => void;
   showSidebarToggle?: boolean;
   onToggleSidebar?: () => void;
   avoidWindowControlsOverlay?: boolean;
@@ -47,7 +45,6 @@ export function SidebarHeader(props: Props): React.ReactNode {
     hideDirectoryControls,
     handleOpenDirectoryDialog,
     handleNewSession,
-    handleNewTempSession,
     canOpenMultiRun,
     openMultiRunLauncher,
     headerActionIconClass,
@@ -65,7 +62,6 @@ export function SidebarHeader(props: Props): React.ReactNode {
     openScheduledTasksDialog,
     selectionModeEnabled,
     onToggleSelectionMode,
-    onRefresh,
     showSidebarToggle = false,
     onToggleSidebar,
     avoidWindowControlsOverlay = false,
@@ -110,82 +106,38 @@ export function SidebarHeader(props: Props): React.ReactNode {
                       className="inline-flex h-8 w-8 items-center justify-center rounded-md typography-ui-label font-medium text-foreground transition-colors hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:pointer-events-none disabled:opacity-50"
                       aria-label={t('sessions.sidebar.header.actions.closeSessions')}
                     >
-                      <Icon name="layout-left" className="h-[18px] w-[18px]"  />
+                      <Icon name="layout-left" className="h-[18px] w-[18px]" />
                     </button>
                   </TooltipTrigger>
                   <TooltipContent side="bottom" sideOffset={4}><p>{t('sessions.sidebar.header.actions.closeSessions')}</p></TooltipContent>
                 </Tooltip>
               ) : null}
-              <DropdownMenu>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <DropdownMenuTrigger asChild>
-                      <button
-                        type="button"
-                        className={headerActionButtonClass}
-                        aria-label={t('sessions.sidebar.header.actions.addProject')}
-                      >
-                        <Icon name="folder-add" className={headerActionIconClass}  />
-                      </button>
-                    </DropdownMenuTrigger>
-                  </TooltipTrigger>
-                  <TooltipContent side="bottom" sideOffset={4}><p>{t('sessions.sidebar.header.actions.addProject')}</p></TooltipContent>
-                </Tooltip>
-                <DropdownMenuContent align="start" className="min-w-[180px]">
-                  <DropdownMenuItem onClick={handleOpenDirectoryDialog} className="flex items-center gap-2">
-                    <Icon name="folder" className="h-4 w-4"  />
-                    {t('sessions.sidebar.header.actions.addLocalProject')}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => sessionEvents.requestRemoteDirectoryDialog()} className="flex items-center gap-2">
-                    <Icon name="globe" className="h-4 w-4"  />
-                    {t('sessions.sidebar.header.actions.addRemoteProject')}
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-              <DropdownMenu>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <DropdownMenuTrigger asChild>
-                      <button
-                        type="button"
-                        className={headerActionButtonClass}
-                        aria-label={t('sessions.sidebar.header.actions.newSession')}
-                      >
-                        <Icon name="chat-new" className={headerActionIconClass}  />
-                      </button>
-                    </DropdownMenuTrigger>
-                  </TooltipTrigger>
-                  <TooltipContent side="bottom" sideOffset={4}><p>{t('sessions.sidebar.header.actions.newSession')}</p></TooltipContent>
-                </Tooltip>
-                <DropdownMenuContent align="start" className="min-w-[180px]">
-                  <DropdownMenuItem onClick={handleNewSession} className="flex items-center gap-2">
-                    <Icon name="chat-new" className="h-4 w-4"  />
-                    {t('sessions.sidebar.header.actions.newSession')}
-                  </DropdownMenuItem>
-                  {handleNewTempSession ? (
-                    <DropdownMenuItem onClick={handleNewTempSession} className="flex items-center gap-2">
-                      <Icon name="folder" className="h-4 w-4"  />
-                      {t('sessions.sidebar.header.actions.newTempSession')}
-                    </DropdownMenuItem>
-                  ) : null}
-                </DropdownMenuContent>
-              </DropdownMenu>
-
-              {onRefresh ? (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <button
-                      type="button"
-                      onClick={onRefresh}
-                      className={headerActionButtonClass}
-                      aria-label={t('sessions.sidebar.header.actions.refresh')}
-                    >
-                      <Icon name="refresh" className={headerActionIconClass}  />
-                    </button>
-                  </TooltipTrigger>
-                  <TooltipContent side="bottom" sideOffset={4}><p>{t('sessions.sidebar.header.actions.refresh')}</p></TooltipContent>
-                </Tooltip>
-              ) : null}
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    onClick={handleOpenDirectoryDialog}
+                    className={headerActionButtonClass}
+                    aria-label={t('sessions.sidebar.header.actions.addProject')}
+                  >
+                    <Icon name="folder-add" className={headerActionIconClass} />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" sideOffset={4}><p>{t('sessions.sidebar.header.actions.addProject')}</p></TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    onClick={handleNewSession}
+                    className={headerActionButtonClass}
+                    aria-label={t('sessions.sidebar.header.actions.newSession')}
+                  >
+                    <Icon name="chat-new" className={headerActionIconClass} />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" sideOffset={4}><p>{t('sessions.sidebar.header.actions.newSession')}</p></TooltipContent>
+              </Tooltip>
 
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -196,7 +148,7 @@ export function SidebarHeader(props: Props): React.ReactNode {
                     aria-label={t('sessions.sidebar.header.actions.newMultiRun')}
                     disabled={!canOpenMultiRun}
                   >
-                    <Icon name="arrows-merge" className={headerActionIconClass} />
+                    <ArrowsMerge className={headerActionIconClass} />
                   </button>
                 </TooltipTrigger>
                 <TooltipContent side="bottom" sideOffset={4}><p>{t('sessions.sidebar.header.actions.newMultiRun')}</p></TooltipContent>
@@ -212,7 +164,7 @@ export function SidebarHeader(props: Props): React.ReactNode {
                     className={headerActionButtonClass}
                     aria-label={t('sessions.sidebar.header.actions.scheduledTasks')}
                   >
-                    <Icon name="calendar-schedule" className={headerActionIconClass}  />
+                    <Icon name="calendar-schedule" className={headerActionIconClass} />
                   </button>
                 </TooltipTrigger>
                 <TooltipContent side="bottom" sideOffset={4}><p>{t('sessions.sidebar.header.actions.scheduledTasks')}</p></TooltipContent>
@@ -227,7 +179,7 @@ export function SidebarHeader(props: Props): React.ReactNode {
                     aria-label={t('sessions.sidebar.header.actions.searchSessions')}
                     aria-expanded={isSessionSearchOpen}
                   >
-                    <Icon name="search" className={headerActionIconClass}  />
+                    <Icon name="search" className={headerActionIconClass} />
                   </button>
                 </TooltipTrigger>
                 <TooltipContent side="bottom" sideOffset={4}><p>{t('sessions.sidebar.header.actions.searchSessions')}</p></TooltipContent>
@@ -244,7 +196,7 @@ export function SidebarHeader(props: Props): React.ReactNode {
                       : t('sessions.sidebar.header.actions.selectSessions')}
                     aria-pressed={selectionModeEnabled}
                   >
-                    <Icon name="checkbox-multiple" className={headerActionIconClass}  />
+                    <Icon name="checkbox-multiple" className={headerActionIconClass} />
                   </button>
                 </TooltipTrigger>
                 <TooltipContent side="bottom" sideOffset={4}>
@@ -263,7 +215,7 @@ export function SidebarHeader(props: Props): React.ReactNode {
                         className={headerActionButtonClass}
                         aria-label={t('sessions.sidebar.header.actions.sessionDisplayMode')}
                       >
-                        <Icon name="equalizer2" className={headerActionIconClass}  />
+                        <Icon name="equalizer-2" className={headerActionIconClass} />
                       </button>
                     </DropdownMenuTrigger>
                   </TooltipTrigger>
@@ -275,14 +227,14 @@ export function SidebarHeader(props: Props): React.ReactNode {
                     className="flex items-center justify-between"
                   >
                     <span>{t('sessions.sidebar.header.displayMode.default')}</span>
-                    {displayMode === 'default' ? <Icon name="check" className="h-4 w-4 text-primary"  /> : null}
+                    {displayMode === 'default' ? <Icon name="check" className="h-4 w-4 text-primary" /> : null}
                   </DropdownMenuItem>
                   <DropdownMenuItem
                     onClick={() => setDisplayMode('minimal')}
                     className="flex items-center justify-between"
                   >
                     <span>{t('sessions.sidebar.header.displayMode.minimal')}</span>
-                    {displayMode === 'minimal' ? <Icon name="check" className="h-4 w-4 text-primary"  /> : null}
+                    {displayMode === 'minimal' ? <Icon name="check" className="h-4 w-4 text-primary" /> : null}
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem
@@ -290,15 +242,15 @@ export function SidebarHeader(props: Props): React.ReactNode {
                     className="flex items-center justify-between"
                   >
                     <span>{t('sessions.sidebar.header.displayMode.showRecent')}</span>
-                    {showRecentSection ? <Icon name="check" className="h-4 w-4 text-primary"  /> : null}
+                    {showRecentSection ? <Icon name="check" className="h-4 w-4 text-primary" /> : null}
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem onClick={collapseAllProjects} className="flex items-center gap-2">
-                    <Icon name="contract-up-down" className="h-4 w-4"  />
+                    <Icon name="contract-up-down" className="h-4 w-4" />
                     <span>{t('sessions.sidebar.header.displayMode.collapseAll')}</span>
                   </DropdownMenuItem>
                   <DropdownMenuItem onClick={expandAllProjects} className="flex items-center gap-2">
-                    <Icon name="expand-up-down" className="h-4 w-4"  />
+                    <Icon name="expand-up-down" className="h-4 w-4" />
                     <span>{t('sessions.sidebar.header.displayMode.expandAll')}</span>
                   </DropdownMenuItem>
                 </DropdownMenuContent>
@@ -317,7 +269,7 @@ export function SidebarHeader(props: Props): React.ReactNode {
                 <span>{t('sessions.sidebar.header.search.escapeHint')}</span>
               </div>
               <div className="relative">
-                <Icon name="search" className="pointer-events-none absolute left-2 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"  />
+                <Icon name="search" className="pointer-events-none absolute left-2 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <input
                   ref={sessionSearchInputRef}
                   value={sessionSearchQuery}
@@ -342,7 +294,7 @@ export function SidebarHeader(props: Props): React.ReactNode {
                     className="absolute right-1 top-1/2 inline-flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground hover:bg-interactive-hover/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
                     aria-label={t('sessions.sidebar.header.search.clear')}
                   >
-                    <Icon name="close" className="h-3.5 w-3.5"  />
+                    <Icon name="close" className="h-3.5 w-3.5" />
                   </button>
                 ) : null}
               </div>

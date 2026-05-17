@@ -5,7 +5,6 @@ import { Icon } from "@/components/icon/Icon";
 import { cn } from '@/lib/utils';
 import { sessionEvents } from '@/lib/sessionEvents';
 import type { MainTab } from '@/stores/useUIStore';
-import { useUIStore } from '@/stores/useUIStore';
 import { SessionFolderItem } from '../SessionFolderItem';
 import { DroppableFolderWrapper, SessionFolderDndScope } from './sessionFolderDnd';
 import type { SortableDragHandleProps } from './sortableItems';
@@ -45,6 +44,7 @@ type Props = {
   renderSessionNode: (node: SessionNode, depth?: number, groupDirectory?: string | null, projectId?: string | null, archivedBucket?: boolean, secondaryMeta?: { projectLabel?: string | null; branchLabel?: string | null } | null) => React.ReactNode;
   currentSessionDirectory: string | null;
   projectRepoStatus: Map<string, boolean | null>;
+  lastRepoStatus: boolean;
   toggleGroupSessionLimit: (groupKey: string) => void;
   mobileVariant: boolean;
   alwaysShowActions: boolean;
@@ -60,7 +60,6 @@ type Props = {
   setRenameFolderDraft: React.Dispatch<React.SetStateAction<string>>;
   setRenamingFolderId: React.Dispatch<React.SetStateAction<string | null>>;
   pinnedSessionIds: Set<string>;
-  projectPinnedSessionIds: Set<string>;
   sessionOrderIndex: Map<string, number>;
   prVisualStateByDirectoryBranch: Map<string, {
     visualState: 'draft' | 'open' | 'blocked' | 'merged' | 'closed';
@@ -111,6 +110,7 @@ export function SessionGroupSection(props: Props): React.ReactNode {
     setDeleteFolderConfirm,
     renderSessionNode,
     projectRepoStatus,
+    lastRepoStatus,
     toggleGroupSessionLimit,
     mobileVariant,
     alwaysShowActions,
@@ -125,9 +125,8 @@ export function SessionGroupSection(props: Props): React.ReactNode {
     renameFolderDraft,
     setRenameFolderDraft,
     setRenamingFolderId,
-  pinnedSessionIds,
-  projectPinnedSessionIds,
-  sessionOrderIndex,
+    pinnedSessionIds,
+    sessionOrderIndex,
     prVisualStateByDirectoryBranch,
     onToggleCollapsedGroup,
     dragHandleProps,
@@ -135,17 +134,6 @@ export function SessionGroupSection(props: Props): React.ReactNode {
   } = props;
 
   const compareSessionNodes = React.useCallback((a: SessionNode, b: SessionNode) => {
-    const aPinned = pinnedSessionIds.has(a.session.id) || projectPinnedSessionIds.has(a.session.id);
-    const bPinned = pinnedSessionIds.has(b.session.id) || projectPinnedSessionIds.has(b.session.id);
-
-    if (aPinned !== bPinned) {
-      return aPinned ? -1 : 1;
-    }
-
-    if (aPinned && bPinned) {
-      return 0;
-    }
-
     const aIndex = sessionOrderIndex.get(a.session.id);
     const bIndex = sessionOrderIndex.get(b.session.id);
     if (aIndex !== undefined || bIndex !== undefined) {
@@ -154,7 +142,7 @@ export function SessionGroupSection(props: Props): React.ReactNode {
       if (aIndex !== bIndex) return aIndex - bIndex;
     }
     return compareSessionsByPinnedAndTime(a.session, b.session, pinnedSessionIds);
-  }, [pinnedSessionIds, projectPinnedSessionIds, sessionOrderIndex]);
+  }, [pinnedSessionIds, sessionOrderIndex]);
 
   const searchData = hasSessionSearchQuery ? groupSearchDataByGroup.get(group) : null;
   const displayMode = useSessionDisplayStore((state) => state.displayMode);
@@ -162,6 +150,7 @@ export function SessionGroupSection(props: Props): React.ReactNode {
   const isMinimalMode = displayMode === 'minimal';
   const isExpanded = expandedSessionGroups.has(groupKey);
   const isCollapsed = hasSessionSearchQuery ? false : collapsedGroups.has(groupKey);
+  const maxVisible = hideDirectoryControls ? 10 : 5;
   const groupMatchesSearch = hasSessionSearchQuery ? searchData?.groupMatches === true : false;
   const shouldFilterGroupContents = hasSessionSearchQuery;
   const sourceGroupNodes = React.useMemo(
@@ -253,25 +242,9 @@ export function SessionGroupSection(props: Props): React.ReactNode {
   const ungroupedSessions = React.useMemo(() => sourceGroupNodes.filter((node) => !sessionIdsInFolders.has(node.session.id)), [sourceGroupNodes, sessionIdsInFolders]);
   const rootFolders = React.useMemo(() => allFoldersForGroup.filter(({ folder }) => !folder.parentId), [allFoldersForGroup]);
 
-  const sessionGroupMinVisible = useUIStore((state) => state.sessionGroupMinVisible);
-  const sessionGroupRecentHours = useUIStore((state) => state.sessionGroupRecentHours);
-
-  const maxVisible = React.useMemo(() => {
-    if (hideDirectoryControls) return 10;
-    const minVisible = typeof sessionGroupMinVisible === 'number' && sessionGroupMinVisible >= 1
-      ? sessionGroupMinVisible : 7;
-    const recentHoursMs = (typeof sessionGroupRecentHours === 'number' && sessionGroupRecentHours >= 1
-      ? sessionGroupRecentHours : 48) * 60 * 60 * 1000;
-    const cutoff = Date.now() - recentHoursMs;
-    let recentCount = 0;
-    for (const node of ungroupedSessions) {
-      const t = node.session.time;
-      const updated = (typeof t?.updated === 'number' && t.updated > 0) ? t.updated
-        : (typeof t?.created === 'number' && t.created > 0) ? t.created : 0;
-      if (updated > cutoff) recentCount++;
-    }
-    return Math.max(minVisible, recentCount);
-  }, [hideDirectoryControls, ungroupedSessions, sessionGroupMinVisible, sessionGroupRecentHours]);
+  if (hasSessionSearchQuery && !groupMatchesSearch && rootFolders.length === 0 && ungroupedSessions.length === 0) {
+    return null;
+  }
 
   const totalSessions = ungroupedSessions.length;
   const visibleSessions = group.isArchivedBucket
@@ -280,24 +253,6 @@ export function SessionGroupSection(props: Props): React.ReactNode {
       ? ungroupedSessions
       : (isExpanded ? ungroupedSessions : ungroupedSessions.slice(0, maxVisible));
   const remainingCount = totalSessions - visibleSessions.length;
-
-  const { pinnedNodes, unpinnedNodes } = React.useMemo(() => {
-    const allPinned = new Set([...pinnedSessionIds, ...projectPinnedSessionIds]);
-    const pinned: typeof visibleSessions = [];
-    const unpinned: typeof visibleSessions = [];
-    for (const node of visibleSessions) {
-      if (allPinned.has(node.session.id)) {
-        pinned.push(node);
-      } else {
-        unpinned.push(node);
-      }
-    }
-    return { pinnedNodes: pinned, unpinnedNodes: unpinned };
-  }, [visibleSessions, pinnedSessionIds, projectPinnedSessionIds]);
-
-  if (hasSessionSearchQuery && !groupMatchesSearch && rootFolders.length === 0 && ungroupedSessions.length === 0) {
-    return null;
-  }
 
   const collectGroupSessions = (nodes: SessionNode[]): Session[] => {
     const collected: Session[] = [];
@@ -312,7 +267,9 @@ export function SessionGroupSection(props: Props): React.ReactNode {
   };
 
   const allGroupSessions = collectGroupSessions(sourceGroupNodes);
-  const isGitProject = projectId ? projectRepoStatus.get(projectId) === true : false;
+  const isGitProject = projectId && projectRepoStatus.has(projectId)
+    ? Boolean(projectRepoStatus.get(projectId))
+    : lastRepoStatus;
   const groupDirectoryKey = normalizePath(group.directory ?? null);
   const groupBranchKey = group.branch?.trim() ?? null;
   const prIndicator = groupDirectoryKey && groupBranchKey
@@ -465,7 +422,7 @@ export function SessionGroupSection(props: Props): React.ReactNode {
               if (projectId && projectId !== activeProjectId) setActiveProjectIdOnly(projectId);
               setActiveMainTab('chat');
               if (mobileVariant) setSessionSwitcherOpen(false);
-              openNewSessionDraft({ selectedProjectId: projectId, directoryOverride: group.directory, targetFolderId: folder.id });
+              openNewSessionDraft({ directoryOverride: group.directory, targetFolderId: folder.id });
             }}
             onNewSubFolder={depth === 0 ? () => {
               if (!folderScopeKey) return;
@@ -500,11 +457,7 @@ export function SessionGroupSection(props: Props): React.ReactNode {
       }}
     >
       {renderFolderItems()}
-      {pinnedNodes.map((node) => renderSessionNode(node, 0, group.directory, projectId, group.isArchivedBucket === true))}
-      {pinnedNodes.length > 0 && unpinnedNodes.length > 0 ? (
-        <div className="mx-0.5 my-0.5 h-px bg-[var(--surface-subtle)]" />
-      ) : null}
-      {unpinnedNodes.map((node) => renderSessionNode(node, 0, group.directory, projectId, group.isArchivedBucket === true))}
+      {visibleSessions.map((node) => renderSessionNode(node, 0, group.directory, projectId, group.isArchivedBucket === true))}
       {totalSessions === 0 && allFoldersForGroup.length === 0 ? (
         <div className="py-1 text-left typography-micro text-muted-foreground">
           {group.isArchivedBucket
@@ -562,7 +515,7 @@ export function SessionGroupSection(props: Props): React.ReactNode {
         <div
           ref={dragHandleProps?.setActivatorNodeRef}
           className={cn(
-            'min-w-0 flex flex-1 items-start gap-1 overflow-hidden pl-0.5 transition-[padding] cursor-pointer',
+            'min-w-0 flex flex-1 items-start gap-1 overflow-hidden pl-0.5 transition-[padding] cursor-grab active:cursor-grabbing',
             groupHeaderRightPadding,
           )}
           {...(dragHandleProps?.listeners ?? {})}
@@ -632,9 +585,15 @@ export function SessionGroupSection(props: Props): React.ReactNode {
               ) : group.isArchivedBucket ? (
                 <span className="inline-flex min-w-0 max-w-full items-center gap-1">
                   <span className="inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center">
-                    <Icon name="archive" className={cn('h-3.5 w-3.5 shrink-0', isCollapsed ? 'text-muted-foreground' : 'text-foreground/92')}  />
+                    <Icon name="archive" className={cn('h-3.5 w-3.5 shrink-0 text-muted-foreground', alwaysShowActions ? 'hidden' : 'group-hover/gh:hidden')} />
+                    <span className={cn(
+                      'text-muted-foreground h-3.5 w-3.5 items-center justify-center',
+                      alwaysShowActions ? 'inline-flex' : 'hidden group-hover/gh:inline-flex',
+                    )}>
+                      {isCollapsed ? <Icon name="arrow-right-s" className="h-3.5 w-3.5" /> : <Icon name="arrow-down-s" className="h-3.5 w-3.5" />}
+                    </span>
                   </span>
-                  <span className={cn('min-w-0 flex-1 truncate', isCollapsed ? 'text-muted-foreground' : 'text-foreground/92')}>{renderHighlightedText(group.label, normalizedSessionSearchQuery)}</span>
+                  <span className="min-w-0 flex-1 truncate">{renderHighlightedText(group.label, normalizedSessionSearchQuery)}</span>
                 </span>
               ) : (!group.isMain || group.worktree) ? (
                 <span className="inline-flex min-w-0 max-w-full items-center gap-1">
@@ -771,7 +730,7 @@ export function SessionGroupSection(props: Props): React.ReactNode {
                     if (projectId && projectId !== activeProjectId) setActiveProjectIdOnly(projectId);
                     setActiveMainTab('chat');
                     if (mobileVariant) setSessionSwitcherOpen(false);
-                    openNewSessionDraft({ selectedProjectId: projectId, directoryOverride: group.directory });
+                    openNewSessionDraft({ directoryOverride: group.directory });
                   }}
                   className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
                   aria-label={t('sessions.sidebar.group.actions.newDraftInGroupAria', { label: group.label })}

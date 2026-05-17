@@ -891,7 +891,7 @@ export function DesktopHostSwitcherDialog({
                               disabled={isSaving}
                               onClick={(e) => e.stopPropagation()}
                             >
-                              <Icon name="more2" className="h-4 w-4"  />
+                              <Icon name="more-2" className="h-4 w-4" />
                             </button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end" className="w-fit min-w-28">

@@ -57,26 +57,6 @@ const hasCompactionPart = (message: ChatMessageEntry): boolean => {
     });
 };
 
-const isCompactionTurn = (turn: TurnRecord): boolean => {
-    const msg = turn.userMessage;
-    if (hasCompactionPart(msg)) {
-        return true;
-    }
-    return msg.parts.length > 0
-        && msg.parts.every((part) => {
-            if (part.type !== 'text') { return false; }
-            return getPartText(part).trim() === '/compact';
-        });
-};
-
-const isCompactionComplete = (turn: TurnRecord): boolean => {
-    if (turn.assistantMessages.length === 0) {
-        return false;
-    }
-    const last = turn.assistantMessages[turn.assistantMessages.length - 1];
-    return isAssistantMessageCompleted(last);
-};
-
 const getPartText = (part: Part): string => {
     const text = (part as { text?: unknown }).text;
     if (typeof text === 'string') {
@@ -444,19 +424,8 @@ type RenderEntry =
         message: ChatMessageEntry;
         previousMessage?: ChatMessageEntry;
         nextMessage?: ChatMessageEntry;
-        assistantHeaderMessageId?: string;
-        turnGroupingContext?: TurnGroupingContext;
     }
-    | {
-        kind: 'turn';
-        key: string;
-        turn: TurnRecord;
-        isLastTurn: boolean;
-        // [sscity-mod] Directive turns that immediately follow this real user
-        // turn. They render inside the same <section> so that the real user's
-        // sticky header stays active while scrolling through directive content.
-        directiveTurns?: TurnRecord[];
-    };
+    | { kind: 'turn'; key: string; turn: TurnRecord; isLastTurn: boolean };
 
 type TurnUiState = { isExpanded: boolean };
 
@@ -549,7 +518,6 @@ interface TurnBlockProps {
     onUserAnimationConsumed: (messageId: string) => void;
     activeStreamingMessageId?: string | null;
     activeStreamingPhase?: StreamPhase | null;
-    directiveTurns?: TurnRecord[];
 }
 
 const TurnBlock = React.memo(({
@@ -568,7 +536,6 @@ const TurnBlock = React.memo(({
     onUserAnimationConsumed,
     activeStreamingMessageId,
     activeStreamingPhase,
-    directiveTurns,
 }: TurnBlockProps) => {
     const turnUiState = turnUiStates.get(turn.turnId) ?? { isExpanded: defaultActivityExpanded };
     const handleToggleTurnGroup = React.useCallback(() => {
@@ -733,6 +700,7 @@ const TurnBlock = React.memo(({
             const isFirstAssistant = assistantIndex === 0;
             const isLastAssistant = assistantIndex === visibleAssistantMessages.length - 1;
             const isActivityOwner = Boolean(activityOwnerMessageId) && message.info.id === activityOwnerMessageId;
+            const hasAnchoredActivitySegment = visibleActivitySegments.some((segment) => segment.anchorMessageId === message.info.id);
             const shouldAttachFullTurnContext = chatRenderMode === 'sorted'
                 ? isAssistantMessage
                 : (isActivityOwner || isFirstAssistant || isLastAssistant);
@@ -755,7 +723,11 @@ const TurnBlock = React.memo(({
                     activityOwnerMessageId,
                     isFirstAssistantInTurn: isFirstAssistant,
                     isLastAssistantInTurn: isLastAssistant,
-                    isWorking: isLastTurn && sessionIsWorking && message.info.id === streamingAssistantMessageId,
+                    isWorking: isLastTurn && sessionIsWorking && (
+                        chatRenderMode === 'sorted'
+                            ? hasAnchoredActivitySegment
+                            : message.info.id === streamingAssistantMessageId
+                    ),
                     hasTools: turn.hasTools,
                     hasReasoning: turn.hasReasoning,
                     ...(shouldAttachFullTurnContext ? {
@@ -810,13 +782,13 @@ const TurnBlock = React.memo(({
             activeStreamingPhase,
             visibleAssistantMessages,
             visibleAssistantIds,
+            visibleActivitySegments,
             activityOwnerMessageId,
             shouldAnimateUserMessage,
             onUserAnimationConsumed,
             handleToggleTurnGroup,
         ]
     );
-
 
     const renderableTurn = React.useMemo(() => {
         if (visibleAssistantMessages === turn.assistantMessages) {
@@ -829,12 +801,7 @@ const TurnBlock = React.memo(({
     }, [turn, visibleAssistantMessages]);
 
     return (
-        <TurnItem
-            turn={renderableTurn}
-            stickyUserHeader={stickyUserHeader}
-            renderMessage={renderMessage}
-            directiveTurns={directiveTurns}
-        />
+        <TurnItem turn={renderableTurn} stickyUserHeader={stickyUserHeader} renderMessage={renderMessage} />
     );
 });
 
@@ -844,8 +811,6 @@ interface UngroupedMessageRowProps {
     message: ChatMessageEntry;
     previousMessage?: ChatMessageEntry;
     nextMessage?: ChatMessageEntry;
-    turnGroupingContext?: TurnGroupingContext;
-    assistantHeaderMessageId?: string;
     onMessageContentChange: (reason?: ContentChangeReason) => void;
     getAnimationHandlers: (messageId: string) => AnimationHandlers;
     scrollToBottom?: () => void;
@@ -859,8 +824,6 @@ const UngroupedMessageRow = React.memo(({
     message,
     previousMessage,
     nextMessage,
-    turnGroupingContext,
-    assistantHeaderMessageId,
     onMessageContentChange,
     getAnimationHandlers,
     scrollToBottom,
@@ -874,8 +837,6 @@ const UngroupedMessageRow = React.memo(({
             message={message}
             previousMessage={previousMessage}
             nextMessage={nextMessage}
-            turnGroupingContext={turnGroupingContext}
-            assistantHeaderMessageId={assistantHeaderMessageId}
             animateUserOnMount={shouldAnimateUserMessage(message)}
             onUserAnimationConsumed={onUserAnimationConsumed}
             onContentChange={onMessageContentChange}
@@ -888,41 +849,6 @@ const UngroupedMessageRow = React.memo(({
 });
 
 UngroupedMessageRow.displayName = 'UngroupedMessageRow';
-
-const CompactionDivider = React.memo(({ turn }: { turn: TurnRecord }) => {
-    const [expanded, setExpanded] = React.useState(false);
-    const completed = isCompactionComplete(turn);
-    const label = completed ? 'Compacted' : 'Compacting…';
-
-    return (
-        <div className="py-2">
-            <div
-                className="flex items-center gap-2 cursor-pointer select-none group"
-                onClick={() => setExpanded((v) => !v)}
-                role="button"
-                tabIndex={0}
-                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setExpanded((v) => !v); } }}
-            >
-                <div className="flex-1 h-px bg-border/60" />
-                <span className="typography-ui-label text-xs text-foreground/50 group-hover:text-foreground/70 transition-colors whitespace-nowrap">
-                    {label}
-                </span>
-                <div className="flex-1 h-px bg-border/60" />
-            </div>
-            {expanded && turn.assistantMessages.length > 0 && (
-                <div className="mt-2 rounded-lg border border-border/40 bg-muted/10 p-3 text-xs text-foreground/70 whitespace-pre-wrap max-h-48 overflow-y-auto">
-                    {turn.assistantMessages.map((msg) =>
-                        msg.parts
-                            .filter((p) => p.type === 'text')
-                            .map((p, i) => <span key={`${msg.info.id}-${i}`}>{getPartText(p)}</span>)
-                    )}
-                </div>
-            )}
-        </div>
-    );
-});
-
-CompactionDivider.displayName = 'CompactionDivider';
 
 interface MessageListEntryProps {
     entry: RenderEntry;
@@ -975,8 +901,6 @@ const MessageListEntry = React.memo(({
                 message={entry.message}
                 previousMessage={entry.previousMessage}
                 nextMessage={entry.nextMessage}
-                turnGroupingContext={entry.turnGroupingContext}
-                assistantHeaderMessageId={entry.assistantHeaderMessageId}
                 onMessageContentChange={onMessageContentChange}
                 getAnimationHandlers={getAnimationHandlers}
                 scrollToBottom={scrollToBottom}
@@ -986,10 +910,6 @@ const MessageListEntry = React.memo(({
                 activeStreamingPhase={activeStreamingPhase}
             />
         );
-    }
-
-    if (isCompactionTurn(entry.turn)) {
-        return <CompactionDivider turn={entry.turn} />;
     }
 
     return (
@@ -1009,7 +929,6 @@ const MessageListEntry = React.memo(({
             getAnimationHandlers={getAnimationHandlers}
             scrollToBottom={scrollToBottom}
             stickyUserHeader={stickyUserHeader}
-            directiveTurns={entry.kind === 'turn' ? entry.directiveTurns : undefined}
         />
     );
 });
@@ -1282,159 +1201,21 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         sessionKey,
         showTextJustificationActivity: chatRenderMode === 'sorted',
     });
-
-    const buildUngroupedEntry = React.useCallback((message: ChatMessageEntry, index: number, nextMessage?: ChatMessageEntry): RenderEntry => {
-        const role = resolveMessageRole(message);
-        let assistantHeaderMessageId: string | undefined;
-        let turnGroupingContext: TurnGroupingContext | undefined;
-
-        if (role === 'assistant') {
-            let chainStartIndex = index;
-            while (chainStartIndex > 0) {
-                const previous = displayMessages[chainStartIndex - 1];
-                if (!previous || resolveMessageRole(previous) !== 'assistant' || !projection.ungroupedMessageIds.has(previous.info.id)) {
-                    break;
-                }
-                chainStartIndex -= 1;
-            }
-
-            let chainEndIndex = index;
-            while (chainEndIndex < displayMessages.length - 1) {
-                const next = displayMessages[chainEndIndex + 1];
-                if (!next || resolveMessageRole(next) !== 'assistant' || !projection.ungroupedMessageIds.has(next.info.id)) {
-                    break;
-                }
-                chainEndIndex += 1;
-            }
-
-            const headerMessage = displayMessages[chainStartIndex] ?? message;
-            const headerMessageId = headerMessage.info.id;
-            assistantHeaderMessageId = headerMessageId;
-            turnGroupingContext = {
-                turnId: `ungrouped-assistant:${getMessageParentId(headerMessage) ?? headerMessageId}`,
-                activityOwnerMessageId: headerMessageId,
-                isFirstAssistantInTurn: index === chainStartIndex,
-                isLastAssistantInTurn: index === chainEndIndex,
-                isWorking: false,
-                hasTools: false,
-                hasReasoning: false,
-                headerMessageId,
-            } satisfies TurnGroupingContext;
-        }
-
-        return {
-            kind: 'ungrouped',
-            key: `msg:${message.info.id}`,
-            message,
-            previousMessage: index > 0 ? displayMessages[index - 1] : undefined,
-            nextMessage: nextMessage ?? (index < displayMessages.length - 1 ? displayMessages[index + 1] : undefined),
-            assistantHeaderMessageId,
-            turnGroupingContext,
-        };
-    }, [displayMessages, projection.ungroupedMessageIds]);
-
     const staticRenderEntries = React.useMemo<RenderEntry[]>(() => streamPerfMeasure('ui.message_list.render_entries_ms', () => {
-        // [sscity-mod] Group directive turns under their parent real user turn
-        // so they share a single <section> and the real user's sticky header
-        // stays active while scrolling through directive content.
-        // We use parentID to find the correct parent turn rather than relying
-        // on positional adjacency, because other real user turns may appear
-        // between the parent and its directive children in the message array.
-        const realUserEntryByTurnId = new Map<string, RenderEntry & { kind: 'turn' }>();
-        const groupedTurnEntries: RenderEntry[] = [];
-
-        // First pass: create entries for ALL turns in order
-        for (const turn of staticTurns) {
-            const entry: RenderEntry & { kind: 'turn' } = {
-                kind: 'turn',
-                key: `turn:${turn.turnId}`,
-                turn,
-                isLastTurn: turn.turnId === projection.lastTurnId,
-            };
-            if (!turn.isDirectiveTurn) {
-                realUserEntryByTurnId.set(turn.turnId, entry);
-            }
-            groupedTurnEntries.push(entry);
-        }
-
-        // Second pass: attach directive turns that have a valid parentID
-        // to their parent real user turn, removing them from the flat list.
-        const attachedDirectiveIds = new Set<string>();
-        for (const turn of staticTurns) {
-            if (!turn.isDirectiveTurn) {
-                continue;
-            }
-
-            const directiveParentId = (turn.userMessage.info as { parentID?: string }).parentID;
-            let parentEntry = directiveParentId
-                ? realUserEntryByTurnId.get(directiveParentId)
-                : undefined;
-
-            if (!parentEntry && directiveParentId) {
-                for (const [, entry] of realUserEntryByTurnId) {
-                    if (entry.turn.assistantMessageIds.includes(directiveParentId)) {
-                        parentEntry = entry;
-                        break;
-                    }
-                }
-            }
-
-            if (parentEntry && isCompactionTurn(parentEntry.turn)) {
-                parentEntry = undefined;
-            }
-
-            if (parentEntry) {
-                const directives = parentEntry.directiveTurns ?? [];
-                directives.push(turn);
-                parentEntry.directiveTurns = directives;
-                attachedDirectiveIds.add(turn.turnId);
-                // Propagate isLastTurn: if a directive is the session's last
-                // turn, mark its parent entry so streaming indicators work.
-                if (turn.turnId === projection.lastTurnId) {
-                    parentEntry.isLastTurn = true;
-                }
-            }
-        }
-
-        // Remove attached directives from the flat list (they render under their parent)
-        const finalEntries = groupedTurnEntries.filter((entry) =>
-            !(entry.kind === 'turn' && entry.turn.isDirectiveTurn && attachedDirectiveIds.has(entry.turn.turnId))
-        );
-
-        // [sscity-mod] Apply group-level windowing. turnStart is the number of
-        // real-user-groups to skip from the top. Only count real-user groups
-        // (non-directive standalone entries also count as a group).
-        let windowedEntries: RenderEntry[];
-        if (turnStart > 0) {
-            let realGroupsSeen = 0;
-            let sliceIndex = 0;
-            for (let i = 0; i < finalEntries.length; i++) {
-                const entry = finalEntries[i];
-                if (entry.kind === 'turn' && !entry.turn.isDirectiveTurn) {
-                    realGroupsSeen += 1;
-                    if (realGroupsSeen > turnStart) {
-                        sliceIndex = i;
-                        break;
-                    }
-                }
-            }
-            if (realGroupsSeen <= turnStart) {
-                sliceIndex = finalEntries.length;
-            }
-            windowedEntries = finalEntries.slice(sliceIndex);
-        } else {
-            windowedEntries = finalEntries;
-        }
+        const turnEntries = staticTurns.map((turn) => ({
+            kind: 'turn' as const,
+            key: `turn:${turn.turnId}`,
+            turn,
+            isLastTurn: turn.turnId === projection.lastTurnId,
+        }));
 
         if (projection.ungroupedMessageIds.size === 0) {
-            return windowedEntries;
+            return turnEntries;
         }
 
         const turnEntryByUserMessageId = new Map<string, RenderEntry>();
-        windowedEntries.forEach((entry) => {
-            if (entry.kind === 'turn') {
-                turnEntryByUserMessageId.set(entry.turn.userMessage.info.id, entry);
-            }
+        turnEntries.forEach((entry) => {
+            turnEntryByUserMessageId.set(entry.turn.userMessage.info.id, entry);
         });
 
         const orderedEntries: RenderEntry[] = [];
@@ -1449,11 +1230,17 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
                 return;
             }
 
-            orderedEntries.push(buildUngroupedEntry(message, index));
+            orderedEntries.push({
+                kind: 'ungrouped',
+                key: `msg:${message.info.id}`,
+                message,
+                previousMessage: index > 0 ? displayMessages[index - 1] : undefined,
+                nextMessage: index < displayMessages.length - 1 ? displayMessages[index + 1] : undefined,
+            });
         });
 
         return orderedEntries;
-    }), [buildUngroupedEntry, displayMessages, projection.lastTurnId, projection.ungroupedMessageIds, staticTurns, turnStart]);
+    }), [displayMessages, projection.lastTurnId, projection.ungroupedMessageIds, staticTurns]);
 
     const trailingStreamingEntry = React.useMemo<RenderEntry | undefined>(() => {
         if (streamingTurn) {
@@ -1474,8 +1261,14 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
             return undefined;
         }
 
-        return buildUngroupedEntry(lastMessage, displayMessages.length - 1, undefined);
-    }, [buildUngroupedEntry, displayMessages, projection.lastTurnId, projection.ungroupedMessageIds, streamingTurn]);
+        return {
+            kind: 'ungrouped',
+            key: `msg:${lastMessage.info.id}`,
+            message: lastMessage,
+            previousMessage: displayMessages.length > 1 ? displayMessages[displayMessages.length - 2] : undefined,
+            nextMessage: undefined,
+        } satisfies RenderEntry;
+    }, [displayMessages, projection.lastTurnId, projection.ungroupedMessageIds, streamingTurn]);
 
     if (trailingStreamingEntry) {
         streamPerfCount('ui.message_list.render.streaming');
@@ -1483,6 +1276,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
 
     const historyEntries = staticRenderEntries;
     const shouldVirtualizeHistory = historyEntries.length >= MESSAGE_LIST_VIRTUALIZE_THRESHOLD;
+
     const previousHistoryLenRef = React.useRef(historyEntries.length);
     const previousFirstEntryKeyRef = React.useRef(historyEntries[0]?.key);
 
@@ -1507,6 +1301,10 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
             return;
         }
 
+        // Prepend detected: new entries added at the beginning of the list.
+        // The virtualizer renders based on the current scroll offset which
+        // now maps to different items. Compensate so the user sees the
+        // prepended content (scroll to top) or stays on the same content.
         let prependedHeight = 0;
         for (let i = 0; i < prependedCount; i++) {
             prependedHeight += estimateHistoryEntryHeight(historyEntries[i]);
@@ -1552,8 +1350,36 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         if (!shouldVirtualizeHistory) {
             return;
         }
+        const scrollEl = resolveScrollContainer();
+        const prevTotal = historyVirtualizer.getTotalSize();
+        const nearBottom = scrollEl && prevTotal > 0
+            ? scrollEl.scrollTop + scrollEl.clientHeight >= prevTotal - 10
+            : false
+
         historyVirtualizer.measure();
-    }, [historyVirtualizer, shouldVirtualizeHistory]);
+
+        // measure() defers via useAnimationFrameWithResizeObserver.
+        // Wait two frames then, if we were near the estimated bottom, scroll
+        // to the real bottom after measurements settle.
+        let frame2: number | null = null;
+        const frame1 = requestAnimationFrame(() => {
+            frame2 = requestAnimationFrame(() => {
+                if (!nearBottom) return
+                const el = resolveScrollContainer()
+                if (!el) return
+                const target = Math.max(0, el.scrollHeight - el.clientHeight)
+                if (target > 0 && Math.abs(el.scrollTop - target) > 5) {
+                    el.scrollTop = target
+                }
+            })
+        })
+        return () => {
+            cancelAnimationFrame(frame1)
+            if (frame2 !== null) {
+                cancelAnimationFrame(frame2)
+            }
+        }
+    }, [historyVirtualizer, resolveScrollContainer, shouldVirtualizeHistory]);
 
     const scheduleVirtualMeasure = React.useCallback(() => {
         if (!shouldVirtualizeHistory) {
@@ -1831,9 +1657,8 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
                     return;
                 }
                 const container = resolveScrollContainer();
-                if (container) {
-                    container.scrollTop = container.scrollHeight - container.clientHeight;
-                }
+                if (!container) return;
+                container.scrollTop = container.scrollHeight;
             },
         };
 
@@ -1849,7 +1674,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         return () => {
             objectRef.current = null;
         };
-    }, [findMessageElement, historyEntries.length, messageIndexMap, resolveScrollContainer, scrollHistoryIndexIntoView, scrollMessageElementIntoView, trailingStreamingEntry, turnIndexMap, ref]);
+    }, [findMessageElement, historyEntries.length, historyVirtualizer, messageIndexMap, resolveScrollContainer, scrollHistoryIndexIntoView, scrollMessageElementIntoView, shouldVirtualizeHistory, trailingStreamingEntry, turnIndexMap, ref]);
 
     const disableFadeIn = false;
 

@@ -1,0 +1,61 @@
+# syntax=docker/dockerfile:1
+# Minimal pre-built image: no opencode-ai (install at runtime or mount)
+FROM oven/bun:1 AS deps
+WORKDIR /app
+COPY package.json bun.lock ./
+COPY packages/ui/package.json ./packages/ui/
+COPY packages/web/package.json ./packages/web/
+COPY packages/desktop/package.json ./packages/desktop/
+COPY packages/vscode/package.json ./packages/vscode/
+RUN bun install --ignore-scripts
+
+FROM oven/bun:1 AS runtime
+WORKDIR /home/openchamber
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+  bash \
+  ca-certificates \
+  curl \
+  git \
+  less \
+  nodejs \
+  npm \
+  openssh-client \
+  python3 \
+  && rm -rf /var/lib/apt/lists/*
+
+RUN userdel bun \
+  && groupadd -g 1000 openchamber \
+  && useradd -u 1000 -g 1000 -m -s /bin/bash openchamber \
+  && chown -R openchamber:openchamber /home/openchamber
+
+USER openchamber
+
+ENV NPM_CONFIG_PREFIX=/home/openchamber/.npm-global
+ENV PATH=${NPM_CONFIG_PREFIX}/bin:${PATH}
+
+RUN npm config set prefix /home/openchamber/.npm-global \
+  && mkdir -p /home/openchamber/.npm-global \
+  && mkdir -p /home/openchamber/.local /home/openchamber/.config /home/openchamber/.ssh
+
+# Install opencode-ai with retry
+RUN for i in 1 2 3; do npm install -g opencode-ai && break || sleep 5; done
+
+# cloudflared
+COPY --from=cloudflare/cloudflared@sha256:6b599ca3e974349ead3286d178da61d291961182ec3fe9c505e1dd02c8ac31b0 /usr/local/bin/cloudflared /usr/local/bin/cloudflared
+
+ENV NODE_ENV=production
+
+COPY scripts/docker-entrypoint.sh /home/openchamber/openchamber-entrypoint.sh
+
+COPY --from=deps /app/node_modules ./node_modules
+COPY --from=deps /app/packages/web/node_modules ./packages/web/node_modules
+COPY package.json ./package.json
+COPY packages/web/package.json ./packages/web/package.json
+COPY packages/web/bin ./packages/web/bin
+COPY packages/web/server ./packages/web/server
+COPY --chmod=644 dist-staging/ ./packages/web/dist/
+
+EXPOSE 3000
+
+ENTRYPOINT ["sh", "/home/openchamber/openchamber-entrypoint.sh"]

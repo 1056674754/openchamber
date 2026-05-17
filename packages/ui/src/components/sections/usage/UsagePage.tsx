@@ -16,7 +16,6 @@ import { getAllModelFamilies, getDisplayModelName, sortModelFamilies, groupModel
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
-import { useSettingsServerBaseUrl } from '@/hooks/useSettingsServerBaseUrl';
 
 const formatTime = (timestamp: number | null) => {
   if (!timestamp) return '-';
@@ -51,14 +50,12 @@ export const UsagePage: React.FC = () => {
   const toggleModelSelected = useQuotaStore((state) => state.toggleModelSelected);
   const applyDefaultSelections = useQuotaStore((state) => state.applyDefaultSelections);
 
-  const serverBaseUrl = useSettingsServerBaseUrl();
-
   useQuotaAutoRefresh();
 
   React.useEffect(() => {
-    void loadSettings(serverBaseUrl);
-    void fetchAllQuotas(serverBaseUrl);
-  }, [loadSettings, fetchAllQuotas, serverBaseUrl]);
+    void loadSettings();
+    void fetchAllQuotas();
+  }, [loadSettings, fetchAllQuotas]);
 
   React.useEffect(() => {
     if (selectedProviderId) {

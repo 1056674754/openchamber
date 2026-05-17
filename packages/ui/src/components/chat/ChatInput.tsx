@@ -62,6 +62,7 @@ import { useI18n } from '@/lib/i18n';
 import { fetchResponseStyleInstruction } from '@/lib/responseStyle';
 import { wrapSystemReminder } from '@/lib/systemReminder';
 import { getSyncMessages } from '@/sync/sync-refs';
+import { eventMatchesShortcut, getEffectiveShortcutCombo, normalizeCombo } from '@/lib/shortcuts';
 
 const MAX_VISIBLE_TEXTAREA_LINES = 8;
 const EMPTY_QUEUE: QueuedMessage[] = [];
@@ -493,9 +494,7 @@ type ComposerActionButtonsProps = {
     newSessionDraftOpen: boolean;
     onPrimaryAction: () => void;
     onQueueMessage: () => void;
-    onSendNow: () => void;
     onAbort: () => void;
-    queueModeEnabled: boolean;
 };
 
 const ComposerActionButtons = React.memo(function ComposerActionButtons(props: ComposerActionButtonsProps) {
@@ -511,52 +510,9 @@ const ComposerActionButtons = React.memo(function ComposerActionButtons(props: C
         newSessionDraftOpen,
         onPrimaryAction,
         onQueueMessage,
-        onSendNow,
         onAbort,
-        queueModeEnabled,
     } = props;
     const { t } = useI18n();
-    const [isCtrlHeld, setIsCtrlHeld] = React.useState(false);
-
-    React.useEffect(() => {
-        const handleKeyDown = (e: KeyboardEvent) => {
-            if (e.key === 'Control' || e.key === 'Meta') setIsCtrlHeld(true);
-        };
-        const handleKeyUp = (e: KeyboardEvent) => {
-            if ((e.key === 'Control' || e.key === 'Meta') && !e.ctrlKey && !e.metaKey) {
-                setIsCtrlHeld(false);
-            }
-        };
-        const handleBlur = () => setIsCtrlHeld(false);
-
-        window.addEventListener('keydown', handleKeyDown);
-        window.addEventListener('keyup', handleKeyUp);
-        window.addEventListener('blur', handleBlur);
-
-        return () => {
-            window.removeEventListener('keydown', handleKeyDown);
-            window.removeEventListener('keyup', handleKeyUp);
-            window.removeEventListener('blur', handleBlur);
-        };
-    }, []);
-
-    const ctrlKeyLabel = isMacOS() ? '⌘' : 'Ctrl';
-
-    const defaultAction = queueModeEnabled
-        ? t('chat.chatInput.actions.queueButton.queue')
-        : t('chat.chatInput.actions.queueButton.send');
-
-    const alternateAction = queueModeEnabled
-        ? t('chat.chatInput.actions.queueButton.send')
-        : t('chat.chatInput.actions.queueButton.queue');
-
-    const tooltipText = isCtrlHeld
-        ? t('chat.chatInput.actions.queueButton.ctrlEnter', { ctrlKey: ctrlKeyLabel, action: alternateAction })
-        : t('chat.chatInput.actions.queueButton.enter', { action: defaultAction });
-
-    const ariaLabel = isCtrlHeld
-        ? t('chat.chatInput.actions.queueButton.ctrlEnter', { ctrlKey: ctrlKeyLabel, action: alternateAction })
-        : t('chat.chatInput.actions.queueButton.enter', { action: defaultAction });
 
     const sendButton = (
         <button
@@ -589,40 +545,24 @@ const ComposerActionButtons = React.memo(function ComposerActionButtons(props: C
     return (
         <div className="relative">
             {hasContent ? (
-                <Tooltip>
-                    <TooltipTrigger asChild>
-                        <button
-                            type="button"
-                            disabled={!currentSessionId}
-                            onClick={(event) => {
-                                if (isMobile) {
-                                    event.preventDefault();
-                                }
-                                const isCtrlClick = event.ctrlKey || event.metaKey;
-                                if (isCtrlClick) {
-                                    if (queueModeEnabled) {
-                                        onSendNow();
-                                    } else {
-                                        onQueueMessage();
-                                    }
-                                } else {
-                                    onPrimaryAction();
-                                }
-                            }}
-                            className={cn(
-                                footerIconButtonClass,
-                                'absolute z-20 bottom-full left-1/2 -translate-x-1/2 mb-1',
-                                currentSessionId ? 'text-primary hover:text-primary' : 'opacity-30'
-                            )}
-                            aria-label={ariaLabel}
-                        >
-                            <Icon name="send-plane-2" className={cn(sendIconSizeClass, '-rotate-45')} />
-                        </button>
-                    </TooltipTrigger>
-                    <TooltipContent side="top" sideOffset={8}>
-                        {tooltipText}
-                    </TooltipContent>
-                </Tooltip>
+                <button
+                    type="button"
+                    disabled={!currentSessionId}
+                    onClick={(event) => {
+                        if (isMobile) {
+                            event.preventDefault();
+                        }
+                        onQueueMessage();
+                    }}
+                    className={cn(
+                        footerIconButtonClass,
+                        'absolute z-20 bottom-full left-1/2 -translate-x-1/2 mb-1',
+                        currentSessionId ? 'text-primary hover:text-primary' : 'opacity-30'
+                    )}
+                    aria-label={t('chat.chatInput.actions.queueMessageAria')}
+                >
+                    <Icon name="send-plane-2" className={cn(sendIconSizeClass, '-rotate-90')} />
+                </button>
             ) : null}
             <button
                 type="button"
@@ -647,7 +587,6 @@ const ComposerActionButtons = React.memo(function ComposerActionButtons(props: C
     && prev.hasContent === next.hasContent
     && prev.currentSessionId === next.currentSessionId
     && prev.newSessionDraftOpen === next.newSessionDraftOpen
-    && prev.queueModeEnabled === next.queueModeEnabled
     && prev.onPrimaryAction === next.onPrimaryAction
     && prev.onQueueMessage === next.onQueueMessage
     && prev.onAbort === next.onAbort
@@ -762,23 +701,12 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         // Read per-session draft at mount time using the current session from the store
         const sessionId = useSessionUIStore.getState().currentSessionId;
         initialSessionIdRef.current = sessionId;
-
-        const pending = useInputStore.getState().pendingInputText;
-        console.log('[ChatInput useState init] sessionId=', sessionId, 'pendingInputText=', pending);
-        if (pending !== null && pending.length > 0) {
-            useInputStore.getState().consumePendingInputText();
-            console.log('[ChatInput useState init] consumed pending:', pending);
-            return pending;
-        }
-
         const draft = getStoredDraft(sessionId);
-        console.log('[ChatInput useState init] fallback to draft:', draft);
         if (draft) {
             initialDraftRef.current = draft;
         }
         return draft;
     });
-    console.log('[ChatInput render] message=', JSON.stringify(message));
     // Restore confirmed mentions from localStorage on mount
     const confirmedMentionsRef = React.useRef<Set<string>>(loadConfirmedMentions(initialSessionIdRef.current));
     // Helper: check if a mention path looks like a file/folder (has path separators, extension, or was explicitly confirmed)
@@ -864,6 +792,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const isExpandedInput = useUIStore((state) => state.isExpandedInput);
     const setExpandedInput = useUIStore((state) => state.setExpandedInput);
     const setTimelineDialogOpen = useUIStore((state) => state.setTimelineDialogOpen);
+    const cycleAgentShortcutOverride = useUIStore((state) => state.shortcutOverrides.cycle_agent);
+    const cycleAgentShortcut = React.useMemo(() => (
+        getEffectiveShortcutCombo('cycle_agent', cycleAgentShortcutOverride ? { cycle_agent: cycleAgentShortcutOverride } : undefined)
+    ), [cycleAgentShortcutOverride]);
     const { git: runtimeGit } = useRuntimeAPIs();
     const { currentTheme } = useThemeSystem();
     const chatSearchDirectory = useChatSearchDirectory();
@@ -1288,10 +1220,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 
     // Consume pending input text (e.g., from revert action)
     React.useEffect(() => {
-        console.log('[ChatInput useEffect pendingInputText] pendingInputText=', pendingInputText);
         if (pendingInputText !== null) {
             const pending = consumePendingInputText();
-            console.log('[ChatInput useEffect pendingInputText] consumed:', pending);
             if (pending?.text) {
                 if (pending.mode === 'append') {
                     setMessage((prev) => {
@@ -1745,10 +1675,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         }
     }, [inputMode, getCurrentInputSnapshot, currentSessionId, sessionPhase, queueModeEnabled, handleQueueMessage]);
 
-    const handleSendNow = React.useCallback(() => {
-        void handleSubmitRef.current();
-    }, []);
-
     const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
         // Early return during IME composition to prevent interference with autocomplete.
         // Uses keyCode === 229 fallback for WebKit where compositionend fires before keydown.
@@ -1841,9 +1767,19 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             return;
         }
 
-        if (e.key === 'Tab' && !showCommandAutocomplete && !showSkillAutocomplete && !showFileMention) {
+        const cycleAgentBackwardShortcut = cycleAgentShortcut && !cycleAgentShortcut.includes('shift')
+            ? normalizeCombo(`shift+${cycleAgentShortcut}`)
+            : '';
+        const cycleAgentDirection = cycleAgentBackwardShortcut && eventMatchesShortcut(e, cycleAgentBackwardShortcut)
+            ? -1
+            : eventMatchesShortcut(e, cycleAgentShortcut)
+                ? 1
+                : 0;
+
+        if (cycleAgentDirection !== 0 && !showCommandAutocomplete && !showSkillAutocomplete && !showFileMention) {
             e.preventDefault();
-            handleCycleAgent();
+            e.stopPropagation();
+            handleCycleAgent(cycleAgentDirection);
             return;
         }
 
@@ -2067,8 +2003,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         void abortCurrentOperation(currentSessionId || undefined);
     }, [abortCurrentOperation, clearAbortPrompt, currentSessionId, startAbortIndicator]);
 
-    const handleCycleAgent = React.useCallback(() => {
-        const nextAgentName = getCycledPrimaryAgentName(agents, currentAgentName);
+    const handleCycleAgent = React.useCallback((direction: 1 | -1 = 1) => {
+        const nextAgentName = getCycledPrimaryAgentName(agents, currentAgentName, direction);
         if (!nextAgentName) return;
 
         setAgent(nextAgentName);
@@ -3068,12 +3004,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 
     const footerGapClass = 'gap-x-1.5 gap-y-0';
     const isVSCode = isVSCodeRuntime();
-    const showDraftTargetSelectors = newSessionDraftOpen && !isVSCode && newSessionDraft?.preserveDirectoryOverride !== false;
+    const showDraftTargetSelectors = newSessionDraftOpen && !isVSCode;
 
     const selectedDraftProject = React.useMemo(() => {
-        if (newSessionDraft?.preserveDirectoryOverride === false) {
-            return null;
-        }
         const explicit = newSessionDraft?.selectedProjectId
             ? projects.find((project) => project.id === newSessionDraft.selectedProjectId) ?? null
             : null;
@@ -3089,7 +3022,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         }
 
         return projects[0] ?? null;
-    }, [activeProjectId, newSessionDraft?.preserveDirectoryOverride, newSessionDraft?.selectedProjectId, projects]);
+    }, [activeProjectId, newSessionDraft?.selectedProjectId, projects]);
 
     const selectedDraftProjectPath = React.useMemo(
         () => normalizePath(selectedDraftProject?.path ?? null),
@@ -3097,11 +3030,21 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     );
 
     const selectedDraftProjectBranches = useGitBranches(selectedDraftProjectPath);
+    const selectedDraftProjectIsGitRepo = useIsGitRepo(selectedDraftProjectPath);
+    const fetchGitStatus = useGitStore((state) => state.fetchStatus);
     const fetchBranches = useGitStore((state) => state.fetchBranches);
     const [isDiscoveringDraftBranches, setIsDiscoveringDraftBranches] = React.useState(false);
 
     React.useEffect(() => {
-        if (!showDraftTargetSelectors || !selectedDraftProjectPath || !selectedDraftProject || !runtimeGit) {
+        if (!showDraftTargetSelectors || !selectedDraftProjectPath || !runtimeGit || selectedDraftProjectIsGitRepo !== null) {
+            return;
+        }
+
+        void fetchGitStatus(selectedDraftProjectPath, runtimeGit, { silent: true });
+    }, [fetchGitStatus, runtimeGit, selectedDraftProjectIsGitRepo, selectedDraftProjectPath, showDraftTargetSelectors]);
+
+    React.useEffect(() => {
+        if (!showDraftTargetSelectors || !selectedDraftProjectPath || !selectedDraftProject || !runtimeGit || selectedDraftProjectIsGitRepo !== true) {
             setIsDiscoveringDraftBranches(false);
             return;
         }
@@ -3124,7 +3067,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         return () => {
             cancelled = true;
         };
-    }, [fetchBranches, runtimeGit, selectedDraftProject, selectedDraftProjectBranches?.all, selectedDraftProjectPath, showDraftTargetSelectors]);
+    }, [fetchBranches, runtimeGit, selectedDraftProject, selectedDraftProjectBranches?.all, selectedDraftProjectIsGitRepo, selectedDraftProjectPath, showDraftTargetSelectors]);
 
     const selectedDraftProjectCurrentBranch = selectedDraftProjectBranches?.current?.trim() ?? '';
 
@@ -3248,6 +3191,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     }, [newSessionDraft?.open, newSessionDraft?.preserveDirectoryOverride, selectedDraftBranchIsKnown, selectedDraftDirectory]);
 
     const shouldShowDraftBranchSelector = React.useMemo(() => {
+        if (selectedDraftProjectIsGitRepo !== true) {
+            return false;
+        }
         if (isDiscoveringDraftBranches) {
             return false;
         }
@@ -3255,7 +3201,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             return true;
         }
         return worktreeBranchOptions.length > 0;
-    }, [isDiscoveringDraftBranches, projectRootBranchOption, worktreeBranchOptions.length]);
+    }, [isDiscoveringDraftBranches, projectRootBranchOption, selectedDraftProjectIsGitRepo, worktreeBranchOptions.length]);
 
     const handleDraftProjectChange = React.useCallback((projectId: string) => {
         const draft = useSessionUIStore.getState().newSessionDraft;
@@ -3921,9 +3867,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                                 newSessionDraftOpen={newSessionDraftOpen}
                                                 onPrimaryAction={handlePrimaryAction}
                                                 onQueueMessage={handleQueueMessage}
-                                                onSendNow={handleSendNow}
                                                 onAbort={handleAbort}
-                                                queueModeEnabled={queueModeEnabled}
                                             />
                                         </div>
                                     </div>
@@ -3978,12 +3922,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                         hasContent={!!hasContent}
                                         currentSessionId={currentSessionId}
                                         newSessionDraftOpen={newSessionDraftOpen}
-                                                onPrimaryAction={handlePrimaryAction}
-                                                onQueueMessage={handleQueueMessage}
-                                                onSendNow={handleSendNow}
-                                                onAbort={handleAbort}
-                                                queueModeEnabled={queueModeEnabled}
-                                            />
+                                        onPrimaryAction={handlePrimaryAction}
+                                        onQueueMessage={handleQueueMessage}
+                                        onAbort={handleAbort}
+                                    />
                                 </div>
                             </>
                         )}

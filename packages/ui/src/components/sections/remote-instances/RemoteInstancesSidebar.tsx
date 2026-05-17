@@ -1,19 +1,13 @@
 import React from 'react';
-import { Icon } from "@/components/icon/Icon";
-import { useI18n } from '@/lib/i18n';
-import { useDesktopSshStore } from '@/stores/useDesktopSshStore';
-import { useUIStore } from '@/stores/useUIStore';
-import { useShallow } from 'zustand/react/shallow';
-import {
-  phaseDotClass,
-  resolveInstanceLabel,
-  type DesktopSshInstance,
-} from '@/lib/desktopSsh';
+import { Button } from '@/components/ui/button';
 import { SettingsSidebarLayout } from '@/components/sections/shared/SettingsSidebarLayout';
 import { SettingsSidebarItem } from '@/components/sections/shared/SettingsSidebarItem';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
+import { useDesktopSshStore } from '@/stores/useDesktopSshStore';
+import { useUIStore } from '@/stores/useUIStore';
 import { toast } from '@/components/ui';
+import { Icon } from "@/components/icon/Icon";
+import type { DesktopSshInstance } from '@/lib/desktopSsh';
+import { useI18n } from '@/lib/i18n';
 
 type RemoteInstancesSidebarProps = {
   onItemSelect?: () => void;
@@ -61,7 +55,7 @@ const phaseLabelKey = (phase?: string) => {
 export const RemoteInstancesSidebar: React.FC<RemoteInstancesSidebarProps> = ({ onItemSelect }) => {
   const { t } = useI18n();
   const instances = useDesktopSshStore((state) => state.instances);
-  const statusesById = useDesktopSshStore(useShallow((state) => state.statusesById));
+  const statusesById = useDesktopSshStore((state) => state.statusesById);
   const isLoading = useDesktopSshStore((state) => state.isLoading);
   const load = useDesktopSshStore((state) => state.load);
   const loadImports = useDesktopSshStore((state) => state.loadImports);
@@ -93,18 +87,6 @@ export const RemoteInstancesSidebar: React.FC<RemoteInstancesSidebarProps> = ({ 
     }
     setSelectedId(instances[0].id);
   }, [instances, isLoading, selectedId, setSelectedId]);
-
-  const [searchQuery, setSearchQuery] = React.useState('');
-
-  const filteredInstances = React.useMemo(() => {
-    if (!searchQuery.trim()) return instances;
-    const q = searchQuery.toLowerCase().trim();
-    return instances.filter(
-      (i) =>
-        resolveInstanceLabel(i).toLowerCase().includes(q) ||
-        i.sshCommand.toLowerCase().includes(q),
-    );
-  }, [instances, searchQuery]);
 
   const handleAdd = React.useCallback(async () => {
     const id = makeId();
@@ -166,24 +148,13 @@ export const RemoteInstancesSidebar: React.FC<RemoteInstancesSidebarProps> = ({ 
               <Icon name="add" className="size-4" />
             </Button>
           </div>
-          {instances.length > 5 && (
-            <div className="mt-2 relative">
-              <Icon name="search" className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground/50"  />
-              <Input
-                className="h-7 pl-7"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder={t('settings.remoteInstances.sidebar.searchPlaceholder')}
-              />
-            </div>
-          )}
         </div>
       }
     >
-      {filteredInstances.map((instance) => {
+      {instances.map((instance) => {
         const status = statusesById[instance.id];
         const selected = instance.id === selectedId;
-        const title = resolveInstanceLabel(instance);
+        const title = instance.nickname?.trim() || instance.sshParsed?.destination || instance.id;
         const metadata = `${t(phaseLabelKey(status?.phase))}${status?.localUrl ? ` · ${status.localUrl}` : ''}`;
         const isReady = status?.phase === 'ready';
         const canRetry = status?.phase === 'error' || status?.phase === 'degraded';
@@ -194,7 +165,6 @@ export const RemoteInstancesSidebar: React.FC<RemoteInstancesSidebarProps> = ({ 
             title={title}
             metadata={metadata}
             selected={selected}
-            icon={<span className={`h-2 w-2 rounded-full shrink-0 ${phaseDotClass(status?.phase)}`} />}
             onSelect={() => {
               setSelectedId(instance.id);
               onItemSelect?.();

@@ -14,14 +14,13 @@ import { Icon } from "@/components/icon/Icon";
 import { FadeInOnReveal } from '../FadeInOnReveal';
 import { getToolIcon } from './toolPresentation';
 import { getToolMetadata } from '@/lib/toolHelpers';
-import { getStaticGroupToolName, isExpandableTool, isStandaloneTool, isStaticTool } from './toolRenderUtils';
+import { isExpandableTool, isStandaloneTool, isStaticTool } from './toolRenderUtils';
 import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useUIStore } from '@/stores/useUIStore';
 import ReasoningPart from './ReasoningPart';
 import JustificationBlock from './JustificationBlock';
 import { areRenderRelevantPartsEqual } from '../renderCompare';
-import { ToolCallGroup } from './ToolCallGroup';
 
 interface ProgressiveGroupProps {
     parts: TurnActivityPart[];
@@ -204,23 +203,6 @@ const getToolReadOffset = (activity: TurnActivityPart): number | undefined => {
     return Math.floor(rawOffset);
 };
 
-const getToolReadLimit = (activity: TurnActivityPart): number | undefined => {
-    const part = activity.part as ToolPartType;
-    const state = part.state as { input?: Record<string, unknown>; metadata?: Record<string, unknown> } | undefined;
-    const input = state?.input;
-    const metadata = state?.metadata;
-
-    const rawLimit =
-        (typeof input?.limit === 'number' && Number.isFinite(input.limit) ? input.limit : undefined)
-        ?? (typeof metadata?.limit === 'number' && Number.isFinite(metadata.limit) ? metadata.limit : undefined);
-
-    if (typeof rawLimit !== 'number' || rawLimit <= 0) {
-        return undefined;
-    }
-
-    return Math.floor(rawLimit);
-};
-
 const normalizePathValue = (value: string): string => {
     const trimmed = value.trim();
     if (!trimmed) {
@@ -260,18 +242,19 @@ const getRelativePathFromDirectory = (filePath: string, currentDirectory: string
     return normalizedPath;
 };
 
-const renderReadFilePath = (displayPath: string) => {
+const renderReadFilePath = (displayPath: string, animate = true) => {
     const lastSlash = displayPath.lastIndexOf('/');
 
     if (lastSlash === -1) {
         return (
-            <span
+            <Text
+                variant={animate ? 'generate-effect' : 'static'}
                 className="min-w-0 flex-1 truncate whitespace-nowrap typography-meta leading-5"
                 style={{ color: 'var(--tools-title)' }}
                 title={displayPath}
             >
                 {displayPath}
-            </span>
+            </Text>
         );
     }
 
@@ -295,7 +278,13 @@ const renderReadFilePath = (displayPath: string) => {
                 {displayDir}
             </span>
             <span className="flex-shrink-0" style={{ color: 'var(--tools-description)' }}>/</span>
-            <span className="flex-shrink-0" style={{ color: 'var(--tools-title)' }}>{name}</span>
+            <Text
+                variant={animate ? 'generate-effect' : 'static'}
+                className="flex-shrink-0"
+                style={{ color: 'var(--tools-title)' }}
+            >
+                {name}
+            </Text>
         </span>
     );
 };
@@ -397,7 +386,6 @@ const getToolShortDescription = (activity: TurnActivityPart): string | null => {
 type AggregatedRow =
     | { type: 'tool-expandable'; activity: TurnActivityPart }
     | { type: 'tool-static-group'; toolName: string; activities: TurnActivityPart[] }
-    | { type: 'tool-call-group'; id: string; activities: TurnActivityPart[] }
     | { type: 'reasoning'; activity: TurnActivityPart }
     | { type: 'justification'; activity: TurnActivityPart }
     | { type: 'tool-fallback'; activity: TurnActivityPart };
@@ -511,22 +499,13 @@ const MemoStaticGroupedToolRow = React.memo(StaticGroupedToolRow, (prev, next) =
         && areActivityListsEqual(prev.activities, next.activities);
 });
 
-const getToolGroupId = (activities: TurnActivityPart[]): string => {
-    const first = activities[0]?.id ?? 'start';
-    const last = activities[activities.length - 1]?.id ?? 'end';
-    return `tool-group:${first}:${last}:${activities.length}`;
-};
-
-const isInvisibleReasoningActivity = (activity: TurnActivityPart): boolean => {
-    if (activity.kind !== 'reasoning') {
-        return false;
-    }
-
-    const text = (activity.part as { text?: unknown; content?: unknown }).text
-        ?? (activity.part as { content?: unknown }).content;
-    return typeof text !== 'string' || text.trim().length === 0;
-};
-
+/**
+ * Aggregate sorted activity parts into display rows.
+ * Static tools are rendered as one row per call.
+ * Reasoning/justification become inline text.
+ * Expandable tools (edit, bash, write, question) stay as individual rows.
+ * Unknown tools stay as individual expandable rows (fallback).
+ */
 const aggregateRows = (parts: TurnActivityPart[]): AggregatedRow[] => {
     const rows: AggregatedRow[] = [];
 
@@ -535,10 +514,6 @@ const aggregateRows = (parts: TurnActivityPart[]): AggregatedRow[] => {
         const activity = parts[i];
 
         if (activity.kind === 'reasoning') {
-            if (isInvisibleReasoningActivity(activity)) {
-                i++;
-                continue;
-            }
             rows.push({ type: 'reasoning', activity });
             i++;
             continue;
@@ -567,26 +542,8 @@ const aggregateRows = (parts: TurnActivityPart[]): AggregatedRow[] => {
         }
 
         if (isStaticTool(toolName)) {
-            const group: TurnActivityPart[] = [activity];
-            let j = i + 1;
-            while (j < parts.length) {
-                const nextActivity = parts[j];
-                if (isInvisibleReasoningActivity(nextActivity)) {
-                    j++;
-                    continue;
-                }
-                if (nextActivity.kind !== 'tool') break;
-                const nextTool = (nextActivity.part as ToolPartType).tool?.toLowerCase() ?? '';
-                if (!isStaticTool(nextTool)) break;
-                group.push(nextActivity);
-                j++;
-            }
-            if (group.length > 1) {
-                rows.push({ type: 'tool-call-group', id: getToolGroupId(group), activities: group });
-            } else {
-                rows.push({ type: 'tool-static-group', toolName: getStaticGroupToolName(toolName), activities: group });
-            }
-            i = j;
+            rows.push({ type: 'tool-static-group', toolName, activities: [activity] });
+            i++;
             continue;
         }
 
@@ -656,18 +613,17 @@ const StaticToolRowInner: React.FC<{
     }, [activities]);
 
     const readFileEntries = React.useMemo(() => {
-        if (!isReadGroup) return [] as Array<{ path: string; displayPath: string; offset?: number; limit?: number }>;
+        if (!isReadGroup) return [] as Array<{ path: string; displayPath: string; offset?: number }>;
 
-        const entries: Array<{ path: string; displayPath: string; offset?: number; limit?: number }> = [];
+        const entries: Array<{ path: string; displayPath: string; offset?: number }> = [];
         for (const activity of activities) {
             const filePath = getToolFilePath(activity);
             const offset = getToolReadOffset(activity);
-            const limit = getToolReadLimit(activity);
             if (!filePath) continue;
             if (entries.some((entry) => entry.path === filePath)) continue;
             const displayPath = getRelativePathFromDirectory(filePath, currentDirectory);
             if (!displayPath) continue;
-            entries.push({ path: filePath, displayPath, offset, limit });
+            entries.push({ path: filePath, displayPath, offset });
         }
         return entries;
     }, [activities, currentDirectory, isReadGroup]);
@@ -719,38 +675,23 @@ const StaticToolRowInner: React.FC<{
                 {displayName}
             </MinDurationShineText>
             {isReadGroup && readFileEntries.length > 0
-                ? readFileEntries.map((entry) => {
-                    const titleParts = [entry.displayPath];
-                    if (entry.offset != null) titleParts.push(`offset: ${entry.offset}`);
-                    if (entry.limit != null) titleParts.push(`limit: ${entry.limit}`);
-                    return (
-                        <button
-                            key={entry.path}
-                            type="button"
-                            onClick={(event) => {
-                                event.preventDefault();
-                                event.stopPropagation();
-                                handleReadFileClick(entry.path, entry.offset);
-                            }}
-                            className="inline-flex items-center justify-start gap-1 min-w-0 flex-1 text-left typography-meta leading-5 hover:opacity-90"
-                            style={{ color: 'var(--tools-description)' }}
-                            title={titleParts.join(' · ')}
-                        >
-                            {showToolFileIcons ? <FileTypeIcon filePath={entry.path} className="h-3.5 w-3.5" /> : null}
-                            {renderReadFilePath(entry.displayPath)}
-                            <span className="flex-shrink-0 opacity-70" style={{ whiteSpace: 'nowrap' }}>
-                                {entry.offset != null && entry.limit != null
-                                    ? <span>L{entry.offset}-{entry.offset + entry.limit - 1}</span>
-                                    : entry.offset != null
-                                        ? <span>L{entry.offset}+</span>
-                                        : entry.limit != null
-                                            ? <span>L1-{entry.limit}</span>
-                                            : <span>L1+</span>
-                                }
-                            </span>
-                        </button>
-                    );
-                })
+                ? readFileEntries.map((entry) => (
+                    <button
+                        key={entry.path}
+                        type="button"
+                        onClick={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            handleReadFileClick(entry.path, entry.offset);
+                        }}
+                        className="inline-flex items-center justify-start gap-1 min-w-0 flex-1 text-left typography-meta leading-5 hover:opacity-90"
+                        style={{ color: 'var(--tools-description)' }}
+                        title={entry.offset ? `${entry.displayPath}:${entry.offset}` : entry.displayPath}
+                    >
+                        {showToolFileIcons ? <FileTypeIcon filePath={entry.path} className="h-3.5 w-3.5" /> : null}
+                        {renderReadFilePath(entry.displayPath, animateTailText)}
+                    </button>
+                ))
                 : null}
             {isSearchGroup && descriptions.length > 0
                 ? descriptions.map((desc, index) => (
@@ -888,18 +829,6 @@ const ProgressiveGroup: React.FC<ProgressiveGroupProps> = ({
         return rows.slice(-previewCount);
     }, [isExpanded, previewCount, rows]);
 
-    const renderStaticToolActivity = React.useCallback((activity: TurnActivityPart, shouldAnimateTailText: boolean) => {
-        const toolPart = activity.part as ToolPartType;
-        const staticToolName = getStaticGroupToolName(toolPart.tool ?? '');
-        return (
-            <StaticToolRow
-                toolName={staticToolName}
-                activities={[activity]}
-                animateTailText={shouldAnimateTailText}
-            />
-        );
-    }, []);
-
     if (shouldRenderRows && rows.length === 0) {
         return null;
     }
@@ -962,18 +891,6 @@ const ProgressiveGroup: React.FC<ProgressiveGroupProps> = ({
                         animateTailText={row.activities.some((activity) => animatedToolIds?.has(activity.id))}
                         animateRows={animateRows}
                     />
-                );
-
-            case 'tool-call-group':
-                return wrapRow(
-                    row.id,
-                        <ToolCallGroup
-                            activities={row.activities}
-                            isExpanded={expandedTools.has(row.id)}
-                            onToggle={() => onToggleTool(row.id)}
-                            animateTailText={row.activities.some((activity) => animatedToolIds?.has(activity.id))}
-                            renderActivity={renderStaticToolActivity}
-                        />
                 );
 
             case 'tool-fallback':
