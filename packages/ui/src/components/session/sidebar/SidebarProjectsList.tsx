@@ -16,9 +16,6 @@ import type { SortableDragHandleProps } from './sortableItems';
 import { SortableGroupItem, SortableProjectItem } from './sortableItems';
 import { formatProjectLabel } from './utils';
 import { useI18n } from '@/lib/i18n';
-import { serverRegistry } from '@/lib/opencode/server-registry';
-import { useDesktopSshStore } from '@/stores/useDesktopSshStore';
-import { resolveInstanceLabel } from '@/lib/desktopSsh';
 
 type ProjectSection = {
   project: {
@@ -29,9 +26,6 @@ type ProjectSection = {
     color?: string;
     iconImage?: { mime: string; updatedAt: number; source: 'custom' | 'auto' };
     iconBackground?: string;
-    serverId?: string;
-    unavailable?: boolean;
-    pinned?: boolean;
   };
   groups: SessionGroup[];
 };
@@ -64,18 +58,15 @@ type Props = {
   removeProject: (id: string) => void;
   projectHeaderSentinelRefs: React.MutableRefObject<Map<string, HTMLDivElement | null>>;
   reorderProjects: (fromIndex: number, toIndex: number) => void;
-  toggleProjectPin: (id: string) => void;
   getOrderedGroups: (projectId: string, groups: SessionGroup[]) => SessionGroup[];
   setGroupOrderByProject: React.Dispatch<React.SetStateAction<Map<string, string[]>>>;
   openSidebarMenuKey: string | null;
   setOpenSidebarMenuKey: (key: string | null) => void;
-  onRefreshProject?: () => void;
   isInlineEditing: boolean;
 };
 
 export function SidebarProjectsList(props: Props): React.ReactNode {
   const { t } = useI18n();
-  const sshInstances = useDesktopSshStore((state) => state.instances);
   const projectSensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
@@ -143,22 +134,13 @@ export function SidebarProjectsList(props: Props): React.ReactNode {
             }}
           >
             <SortableContext items={props.sectionsForRender.map((section) => section.project.id)} strategy={verticalListSortingStrategy}>
-              {(() => {
-                const sorted = [...props.sectionsForRender].sort((a, b) => {
-                  if (a.project.pinned && !b.project.pinned) return -1;
-                  if (!a.project.pinned && b.project.pinned) return 1;
-                  return 0;
-                });
-                return sorted.map((section) => {
+              {props.sectionsForRender.map((section) => {
                 const project = section.project;
                 const projectKey = project.id;
-                const rawProjectLabel = project.label?.trim();
-                const sshInst = project.serverId ? sshInstances.find((i) => i.id === project.serverId) : undefined;
-                const serverLabel = sshInst ? resolveInstanceLabel(sshInst) : (project.serverId || '');
                 const projectLabel = formatProjectLabel(
-                  rawProjectLabel && rawProjectLabel !== serverLabel
-                    ? rawProjectLabel
-                    : formatDirectoryName(project.normalizedPath, props.homeDirectory) || project.normalizedPath,
+                  project.label?.trim()
+                  || formatDirectoryName(project.normalizedPath, props.homeDirectory)
+                  || project.normalizedPath,
                 );
                 const projectDescription = formatPathForDisplay(project.normalizedPath, props.homeDirectory);
                 const isCollapsed = props.collapsedProjects.has(projectKey);
@@ -188,15 +170,12 @@ export function SidebarProjectsList(props: Props): React.ReactNode {
                     hideDirectoryControls={props.hideDirectoryControls}
                     mobileVariant={props.mobileVariant}
                     alwaysShowActions={props.alwaysShowActions}
-                    serverId={project.serverId}
-                    serverHealthStatus={project.serverId ? serverRegistry.get(project.serverId)?.healthStatus ?? null : undefined}
-                    unavailable={project.unavailable}
                     onToggle={() => props.toggleProject(projectKey)}
                     onNewSession={() => {
                       if (projectKey !== props.activeProjectId) props.setActiveProjectIdOnly(projectKey);
                       props.setActiveMainTab('chat');
                       if (props.mobileVariant) props.setSessionSwitcherOpen(false);
-                      props.openNewSessionDraft({ selectedProjectId: projectKey, directoryOverride: project.normalizedPath });
+                      props.openNewSessionDraft({ directoryOverride: project.normalizedPath });
                     }}
                     onNewWorktreeSession={() => {
                       if (projectKey !== props.activeProjectId) props.setActiveProjectIdOnly(projectKey);
@@ -210,9 +189,6 @@ export function SidebarProjectsList(props: Props): React.ReactNode {
                     showCreateButtons
                     openSidebarMenuKey={props.openSidebarMenuKey}
                     setOpenSidebarMenuKey={props.setOpenSidebarMenuKey}
-                    isPinned={project.pinned}
-                    onTogglePin={() => props.toggleProjectPin(projectKey)}
-                    onRefresh={props.onRefreshProject}
                   >
                     {!isCollapsed ? (
                       <div className="space-y-0 pt-0 pb-0.5 pl-3">
@@ -256,7 +232,7 @@ export function SidebarProjectsList(props: Props): React.ReactNode {
                     ) : null}
                   </SortableProjectItem>
                 );
-              })})()}
+              })}
             </SortableContext>
             <DragOverlay dropAnimation={null} />
           </DndContext>
