@@ -1,6 +1,6 @@
 import React from 'react';
 import { Icon } from "@/components/icon/Icon";
-
+import { toast } from '@/components/ui';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useTerminalStore } from '@/stores/useTerminalStore';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
@@ -521,14 +521,14 @@ export const TerminalView: React.FC = () => {
                     terminalId = session.sessionId;
                 } catch (error) {
                     if (!cancelled) {
-                        setConnectionError(
-                            error instanceof Error
-                                ? error.message
-                                : t('terminalView.error.startSessionFailed')
-                        );
+                        const msg = error instanceof Error
+                            ? error.message
+                            : t('terminalView.error.startSessionFailed');
+                        setConnectionError(msg);
                         setIsFatalError(true);
                         setIsReconnectPending(false);
                         setConnecting(directory, tabId, false, sId);
+                        toast.error(msg);
                     }
                     return;
                 }

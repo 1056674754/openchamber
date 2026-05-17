@@ -196,7 +196,7 @@ export function SidebarProjectsList(props: Props): React.ReactNode {
                       if (projectKey !== props.activeProjectId) props.setActiveProjectIdOnly(projectKey);
                       props.setActiveMainTab('chat');
                       if (props.mobileVariant) props.setSessionSwitcherOpen(false);
-                      props.openNewSessionDraft({ directoryOverride: project.normalizedPath });
+                      props.openNewSessionDraft({ selectedProjectId: projectKey, directoryOverride: project.normalizedPath });
                     }}
                     onNewWorktreeSession={() => {
                       if (projectKey !== props.activeProjectId) props.setActiveProjectIdOnly(projectKey);

@@ -465,7 +465,7 @@ export function SessionGroupSection(props: Props): React.ReactNode {
               if (projectId && projectId !== activeProjectId) setActiveProjectIdOnly(projectId);
               setActiveMainTab('chat');
               if (mobileVariant) setSessionSwitcherOpen(false);
-              openNewSessionDraft({ directoryOverride: group.directory, targetFolderId: folder.id });
+              openNewSessionDraft({ selectedProjectId: projectId, directoryOverride: group.directory, targetFolderId: folder.id });
             }}
             onNewSubFolder={depth === 0 ? () => {
               if (!folderScopeKey) return;
@@ -771,7 +771,7 @@ export function SessionGroupSection(props: Props): React.ReactNode {
                     if (projectId && projectId !== activeProjectId) setActiveProjectIdOnly(projectId);
                     setActiveMainTab('chat');
                     if (mobileVariant) setSessionSwitcherOpen(false);
-                    openNewSessionDraft({ directoryOverride: group.directory });
+                    openNewSessionDraft({ selectedProjectId: projectId, directoryOverride: group.directory });
                   }}
                   className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
                   aria-label={t('sessions.sidebar.group.actions.newDraftInGroupAria', { label: group.label })}
