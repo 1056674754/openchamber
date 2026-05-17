@@ -389,6 +389,21 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
 
       if (cancelled) return;
 
+      const prev = useSessionUIStore.getState();
+      const prevByProject = prev.availableWorktreesByProject;
+      let byProjectUnchanged = prevByProject.size === worktreesByProject.size;
+      if (byProjectUnchanged) {
+        for (const [key, wt] of worktreesByProject) {
+          const prevWt = prevByProject.get(key);
+          if (!prevWt || prevWt.length !== wt.length) { byProjectUnchanged = false; break; }
+          for (let i = 0; i < wt.length; i++) {
+            if (wt[i].path !== prevWt[i].path || wt[i].branch !== prevWt[i].branch) { byProjectUnchanged = false; break; }
+          }
+          if (!byProjectUnchanged) break;
+        }
+      }
+      if (byProjectUnchanged && prev.availableWorktrees.length === allWorktrees.length) return;
+
       useSessionUIStore.setState({
         availableWorktrees: allWorktrees,
         availableWorktreesByProject: worktreesByProject,
