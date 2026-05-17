@@ -5,6 +5,7 @@ import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useAgentsStore } from '@/stores/useAgentsStore';
 import { useCommandsStore } from '@/stores/useCommandsStore';
 import { useMcpConfigStore } from '@/stores/useMcpConfigStore';
+import { useSettingsServerBaseUrl } from '@/hooks/useSettingsServerBaseUrl';
 import { useSkillsStore } from '@/stores/useSkillsStore';
 import { useSkillsCatalogStore } from '@/stores/useSkillsCatalogStore';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -362,6 +363,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
     setHasManuallyResized(true);
   };
 
+  const serverBaseUrl = useSettingsServerBaseUrl();
+
   // Load stores when project changes or when a page becomes active.
   React.useEffect(() => {
     if (!isSettingsDialogOpen && !runtimeCtx.isVSCode) {
@@ -377,14 +380,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
       return;
     }
     if (settingsSlug === 'mcp') {
-      void useMcpConfigStore.getState().loadMcpConfigs();
+      void useMcpConfigStore.getState().loadMcpConfigs({ serverBaseUrl });
       return;
     }
     if (settingsSlug === 'skills.installed' || settingsSlug === 'skills.catalog') {
       void useSkillsStore.getState().loadSkills();
       void useSkillsCatalogStore.getState().loadCatalog();
     }
-  }, [activeProjectId, isSettingsDialogOpen, runtimeCtx.isVSCode, settingsSlug]);
+  }, [activeProjectId, isSettingsDialogOpen, runtimeCtx.isVSCode, settingsSlug, serverBaseUrl]);
 
   const openPage = React.useCallback((slug: SettingsPageSlug) => {
     setSettingsPage(slug);

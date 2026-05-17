@@ -13,6 +13,7 @@ import {
   type McpDraft,
   type McpScope,
 } from '@/stores/useMcpConfigStore';
+import { useSettingsServerBaseUrl } from '@/hooks/useSettingsServerBaseUrl';
 import { useShallow } from 'zustand/react/shallow';
 import {
   parseImportedMcpSnippet,
@@ -585,6 +586,7 @@ export const McpPage: React.FC = () => {
     (key: string, params?: Record<string, unknown>) => t(key as never, params as never),
     [t]
   );
+  const serverBaseUrl = useSettingsServerBaseUrl();
   const {
     selectedMcpName,
     mcpServers,
@@ -906,7 +908,7 @@ export const McpPage: React.FC = () => {
     };
     setIsSaving(true);
     try {
-      const result = isNewServer ? await createMcp(draft) : await updateMcp(name, draft);
+      const result = isNewServer ? await createMcp(draft, serverBaseUrl) : await updateMcp(name, draft, serverBaseUrl);
       if (result.ok) {
         await clearPendingMcpAuthContext(authStateKey);
         resetTransientAuthState();
@@ -936,7 +938,7 @@ export const McpPage: React.FC = () => {
   const handleDelete = async () => {
     if (!selectedMcpName) return;
     setIsDeleting(true);
-    const result = await deleteMcp(selectedMcpName);
+    const result = await deleteMcp(selectedMcpName, serverBaseUrl);
     if (result.ok) {
       await clearPendingMcpAuthContext(authStateKey);
       resetTransientAuthState();
@@ -1040,7 +1042,7 @@ export const McpPage: React.FC = () => {
           oauthClientSecret,
           oauthScope,
           oauthRedirectUri: redirectUri,
-        });
+        }, serverBaseUrl);
 
         if (!saved.ok) {
           throw new Error(t('settings.mcp.page.toast.oauthBrowserCallbackSaveFailed'));
@@ -1104,7 +1106,7 @@ export const McpPage: React.FC = () => {
         setIsAuthorizing(false);
       }
     }
-  }, [currentDirectory, isVSCodeAuthRuntime, mcpType, oauthClientId, oauthClientSecret, oauthEnabled, oauthRedirectUri, oauthScope, requireSavedConfig, runtimeActionKey, selectedMcpName, startAuthMcp, t, tUnsafe, updateMcp]);
+  }, [currentDirectory, isVSCodeAuthRuntime, mcpType, oauthClientId, oauthClientSecret, oauthEnabled, oauthRedirectUri, oauthScope, requireSavedConfig, runtimeActionKey, selectedMcpName, serverBaseUrl, startAuthMcp, t, tUnsafe, updateMcp]);
 
   const handleClearAuthorization = React.useCallback(async () => {
     if (!selectedMcpName || !requireSavedConfig()) return;

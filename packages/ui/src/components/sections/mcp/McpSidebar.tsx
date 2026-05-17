@@ -17,6 +17,7 @@ import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { SettingsProjectSelector } from '@/components/sections/shared/SettingsProjectSelector';
+import { useSettingsServerBaseUrl } from '@/hooks/useSettingsServerBaseUrl';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -62,6 +63,7 @@ const StatusDot: React.FC<{ tone: StatusTone; enabled: boolean }> = ({ tone, ena
 export const McpSidebar: React.FC<McpSidebarProps> = ({ onItemSelect }) => {
   const { t } = useI18n();
   const bgClass = 'bg-background';
+  const serverBaseUrl = useSettingsServerBaseUrl();
 
   const { mcpServers, selectedMcpName, setSelectedMcp, setMcpDraft, loadMcpConfigs, deleteMcp } =
     useMcpConfigStore(useShallow((s) => ({
@@ -93,8 +95,8 @@ export const McpSidebar: React.FC<McpSidebarProps> = ({ onItemSelect }) => {
   );
 
   React.useEffect(() => {
-    void loadMcpConfigs();
-  }, [loadMcpConfigs]);
+    void loadMcpConfigs({ serverBaseUrl });
+  }, [loadMcpConfigs, serverBaseUrl]);
 
   const handleRefresh = React.useCallback(() => {
     if (isRefreshingStatus) return;
@@ -148,7 +150,7 @@ export const McpSidebar: React.FC<McpSidebarProps> = ({ onItemSelect }) => {
   const handleDelete = async () => {
     if (!deleteTarget) return;
     setIsDeleting(true);
-    const result = await deleteMcp(deleteTarget.name);
+    const result = await deleteMcp(deleteTarget.name, serverBaseUrl);
     if (result.ok) {
       if (result.reloadFailed) {
         toast.warning(result.message || `MCP server "${deleteTarget.name}" deleted, but OpenCode reload failed`, {
