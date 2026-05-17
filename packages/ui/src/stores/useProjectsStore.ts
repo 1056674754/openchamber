@@ -265,30 +265,6 @@ const sanitizeProjects = (value: unknown): ProjectEntry[] => {
   return result;
 };
 
-const readPersistedProjects = (): ProjectEntry[] => {
-  try {
-    const raw = safeStorage.getItem(PROJECTS_STORAGE_KEY);
-    if (!raw) {
-      return [];
-    }
-    return sanitizeProjects(JSON.parse(raw));
-  } catch {
-    return [];
-  }
-};
-
-const readPersistedActiveProjectId = (): string | null => {
-  try {
-    const raw = safeStorage.getItem(ACTIVE_PROJECT_STORAGE_KEY);
-    if (typeof raw === 'string' && raw.trim().length > 0) {
-      return raw.trim();
-    }
-  } catch {
-    return null;
-  }
-  return null;
-};
-
 const cacheProjects = (projects: ProjectEntry[], activeProjectId: string | null) => {
   try {
     safeStorage.setItem(PROJECTS_STORAGE_KEY, JSON.stringify(projects));
@@ -312,7 +288,7 @@ const persistProjects = (projects: ProjectEntry[], activeProjectId: string | nul
   void updateDesktopSettings({ projects, activeProjectId: activeProjectId ?? undefined });
 };
 
-const initialProjects = readPersistedProjects();
+const initialProjects: ProjectEntry[] = [];
 const getVSCodeWorkspaceProject = (): { projects: ProjectEntry[]; activeProjectId: string | null } | null => {
   if (typeof window === 'undefined') {
     return null;
@@ -354,7 +330,7 @@ const getVSCodeWorkspaceProject = (): { projects: ProjectEntry[]; activeProjectI
 // Always prefer the workspace project over any persisted multi-project registry.
 const vscodeWorkspace = getVSCodeWorkspaceProject();
 const effectiveInitialProjects = vscodeWorkspace?.projects ?? initialProjects;
-const persistedInitialActiveProjectId = vscodeWorkspace?.activeProjectId ?? readPersistedActiveProjectId();
+const persistedInitialActiveProjectId = vscodeWorkspace?.activeProjectId ?? null;
 let initialActiveProjectId: string | null = null;
 if (persistedInitialActiveProjectId) {
   if (effectiveInitialProjects.some((project) => project.id === persistedInitialActiveProjectId)) {
@@ -773,39 +749,26 @@ export const useProjectsStore = create<ProjectsStore>()(
         return;
       }
 
-      const currentRemoteProjectIds = new Set(
-        current.projects
-          .filter((p) => typeof p.serverId === 'string' && p.serverId.trim().length > 0)
-          .map((p) => p.id),
-      );
-      const incomingIds = new Set(incomingProjects.map((p) => p.id));
-      const missingRemoteProjects = current.projects.filter(
-        (p) => currentRemoteProjectIds.has(p.id) && !incomingIds.has(p.id),
-      );
-      const mergedProjects = missingRemoteProjects.length > 0
-        ? [...incomingProjects, ...missingRemoteProjects]
-        : incomingProjects;
-
-      const projectsChanged = JSON.stringify(current.projects) !== JSON.stringify(mergedProjects);
+      const projectsChanged = JSON.stringify(current.projects) !== JSON.stringify(incomingProjects);
       const activeChanged = current.activeProjectId !== incomingActive;
 
       if (!projectsChanged && !activeChanged) {
         return;
       }
 
-      set({ projects: mergedProjects, activeProjectId: incomingActive });
-      cacheProjects(mergedProjects, incomingActive);
+      set({ projects: incomingProjects, activeProjectId: incomingActive });
+      cacheProjects(incomingProjects, incomingActive);
 
-      const resolvedActive = incomingActive && mergedProjects.some((p) => p.id === incomingActive)
+      const resolvedActive = incomingActive && incomingProjects.some((p) => p.id === incomingActive)
         ? incomingActive
-        : mergedProjects[0]?.id ?? null;
+        : incomingProjects[0]?.id ?? null;
       if (resolvedActive !== incomingActive) {
         set({ activeProjectId: resolvedActive });
-        cacheProjects(mergedProjects, resolvedActive);
+        cacheProjects(incomingProjects, resolvedActive);
       }
 
       if (resolvedActive) {
-        const activeProject = mergedProjects.find((project) => project.id === resolvedActive);
+        const activeProject = incomingProjects.find((project) => project.id === resolvedActive);
         if (activeProject) {
           opencodeClient.setDirectory(activeProject.path);
           useDirectoryStore.getState().setDirectory(activeProject.path, { showOverlay: false });
