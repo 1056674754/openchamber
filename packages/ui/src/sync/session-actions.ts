@@ -121,8 +121,15 @@ export function resolveSdkForDirectory(directory: string, sessionID?: string): O
 
   // [OPENCHAMBER-FORK] 2025-05-18 v1.11.1-dev-merge
   // Authoritative source: serverRegistry session index. No path matching.
+  // CRITICAL: when session is indexed to DEFAULT, return default client immediately.
+  // Without this, a local session + remote directory would fallthrough to
+  // child-store matching and route the local session to a remote server.
   if (sessionID) {
     const sessionServerId = serverRegistry.getServerForSession(sessionID)
+    if (sessionServerId === DEFAULT_SERVER_ID) {
+      const defaultConn = serverRegistry.get(DEFAULT_SERVER_ID)
+      if (defaultConn) return defaultConn.client
+    }
     if (sessionServerId && sessionServerId !== DEFAULT_SERVER_ID) {
       const conn = serverRegistry.get(sessionServerId)
       if (conn) {
