@@ -1271,7 +1271,17 @@ class OpencodeService {
   async listFiles(directory?: string): Promise<Record<string, unknown>[]> {
     try {
       const targetDir = directory || this.currentDirectory || '/';
-      const response = await fetch(`${this.baseUrl}/files/list`, {
+      let fsBaseUrl: string = this.baseUrl;
+      if (targetDir) {
+        for (const e of getAllSyncStores()) {
+          if (e.serverId === DEFAULT_SERVER_ID) continue;
+          if (e.childStores.children.has(targetDir)) {
+            const conn = serverRegistry.get(e.serverId);
+            if (conn) { fsBaseUrl = conn.config.baseUrl; break; }
+          }
+        }
+      }
+      const response = await fetch(`${fsBaseUrl}/files/list`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -1404,7 +1414,15 @@ class OpencodeService {
       ...(options?.allowOutsideWorkspace ? { allowOutsideWorkspace: true } : {}),
     };
 
-    const response = await fetch(`${this.baseUrl}/fs/mkdir`, {
+    let fsBaseUrl: string = this.baseUrl;
+    for (const e of getAllSyncStores()) {
+      if (e.serverId === DEFAULT_SERVER_ID) continue;
+      if (e.childStores.children.has(dirPath)) {
+        const conn = serverRegistry.get(e.serverId);
+        if (conn) { fsBaseUrl = conn.config.baseUrl; break; }
+      }
+    }
+    const response = await fetch(`${fsBaseUrl}/fs/mkdir`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -1488,7 +1506,19 @@ class OpencodeService {
         params.set('respectGitignore', 'true');
       }
       const query = params.toString();
-      const response = await fetch(`${this.baseUrl}/fs/list${query ? `?${query}` : ''}`);
+      // [OPENCHAMBER-FORK] 2025-05-18 v1.11.1-dev-merge
+      // Resolve baseUrl by checking remote SyncProviders at runtime — no path matching.
+      let fsBaseUrl: string = this.baseUrl;
+      if (directoryPath) {
+        for (const e of getAllSyncStores()) {
+          if (e.serverId === DEFAULT_SERVER_ID) continue;
+          if (e.childStores.children.has(directoryPath)) {
+            const conn = serverRegistry.get(e.serverId);
+            if (conn) { fsBaseUrl = conn.config.baseUrl; break; }
+          }
+        }
+      }
+      const response = await fetch(`${fsBaseUrl}/fs/list${query ? `?${query}` : ''}`);
       if (!response.ok) {
         const error = await response.json().catch(() => ({}));
         const message = typeof error.error === 'string' ? error.error : 'Failed to list directory';
@@ -1652,6 +1682,7 @@ class OpencodeService {
 export const opencodeClient = new OpencodeService();
 
 import { serverRegistry, DEFAULT_SERVER_ID } from "./server-registry";
+import { getAllSyncStores } from "@/sync/multi-server-registry";
 serverRegistry.register({
   id: DEFAULT_SERVER_ID,
   label: "Local",
