@@ -181,7 +181,7 @@ const resolvePrWorktreeConfig = (pr: GitHubPullRequestSummary, localBranches: st
 interface NewWorktreeDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onWorktreeCreated?: (worktreePath: string, options?: { sessionId?: string }) => void;
+  onWorktreeCreated?: (worktreePath: string, options?: { sessionId?: string; projectPath?: string }) => void;
 }
 
 const buildIssueContextText = (args: {
@@ -928,7 +928,7 @@ export function NewWorktreeDialog({
       onOpenChange(false);
 
       if (createdSessionId) {
-        onWorktreeCreated?.(metadata.path, { sessionId: createdSessionId });
+        onWorktreeCreated?.(metadata.path, { sessionId: createdSessionId, projectPath: metadata.projectDirectory });
         void sendLinkedContextMessage({
           sessionId: createdSessionId,
           issue: linkedIssue,
@@ -939,7 +939,7 @@ export function NewWorktreeDialog({
           toast.error(t('session.newWorktree.error.sendGitHubContextFailed'), { description: message });
         });
       } else {
-        onWorktreeCreated?.(metadata.path);
+        onWorktreeCreated?.(metadata.path, { projectPath: metadata.projectDirectory });
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : t('session.newWorktree.error.createWorktreeFailed');

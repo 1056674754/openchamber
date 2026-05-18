@@ -35,6 +35,9 @@ import { resolveInstanceLabel } from '@/lib/desktopSsh';
 import { serverRegistry, DEFAULT_SERVER_ID } from '@/lib/opencode/server-registry';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useI18n } from '@/lib/i18n';
+import { parseMultiRunSessionTitle } from '@/lib/multirun/title';
+import { MultiRunFusionDialog } from '@/components/multirun/MultiRunFusionDialog';
+import { FusionIcon } from '@/components/icons/FusionIcon';
 import { Icon } from "@/components/icon/Icon";
 
 type Folder = { id: string; name: string; sessionIds: string[] };
@@ -146,7 +149,7 @@ type Props = {
   removeSessionFromFolder: (scopeKey: string, sessionId: string) => void;
   addSessionToFolder: (scopeKey: string, folderId: string, sessionId: string) => void;
   createFolderAndStartRename: (scopeKey: string, parentId?: string | null) => { id: string } | null;
-  openContextPanelTab: (directory: string, options: { mode: 'chat'; dedupeKey: string; label: string }) => void;
+  openContextPanelTab: (directory: string, options: { mode: 'chat'; dedupeKey: string; label: string; readOnly?: boolean }) => void;
   handleDeleteSession: (session: Session, source?: { archivedBucket?: boolean }) => void;
   onRegenerateTitle?: (sessionId: string, sessionTitle: string) => void;
   mobileVariant: boolean;
@@ -455,7 +458,10 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
       </TooltipContent>
     </Tooltip>
   ) : null;
-  const directoryStore = useDirectoryStore(sessionDirectory ?? undefined);
+  // [OPENCHAMBER-FORK] 2025-05-18 v1.11.1-dev-merge
+  // Resolve serverId from the session index instead of path matching
+  const sessionServerId = session.id ? serverRegistry.getServerForSession(session.id) : undefined;
+  const directoryStore = useDirectoryStore(sessionDirectory ?? undefined, sessionServerId);
   const sync = useSync();
 
   const selectionModeEnabled = useSessionMultiSelectStore((state) => state.enabled);
@@ -504,6 +510,8 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
   const sessionUpdatedLabel = formatSessionDateLabel(sessionTimestamp);
   const sessionCompactUpdatedLabel = formatSessionCompactDateLabel(sessionTimestamp);
   const isMenuOpen = openSidebarMenuKey === menuInstanceKey;
+  const isMultiRunLikeSession = React.useMemo(() => parseMultiRunSessionTitle(resolvedSession.title) !== null, [resolvedSession.title]);
+  const [fusionDialogOpen, setFusionDialogOpen] = React.useState(false);
   const [menuPosition, setMenuPosition] = React.useState<{ x: number; y: number } | null>(null);
   const [archiveConfirming, setArchiveConfirming] = React.useState(false);
 
@@ -965,6 +973,12 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
         <Icon name="download" className="mr-1 h-4 w-4"  />
         {t('sessions.sidebar.session.menu.exportMarkdown')}
       </DropdownMenuItem>
+      {isMultiRunLikeSession ? (
+        <DropdownMenuItem onClick={() => setFusionDialogOpen(true)} className="[&>svg]:mr-1">
+          <FusionIcon className="mr-1 h-4 w-4" />
+          {t('sessions.sidebar.session.menu.runFusion')}
+        </DropdownMenuItem>
+      ) : null}
       <DropdownMenuItem
         onClick={() => { void sync.syncSession(session.id, true); }}
         className="[&>svg]:mr-1"
@@ -1295,6 +1309,13 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      {isMultiRunLikeSession ? (
+        <MultiRunFusionDialog
+          session={resolvedSession}
+          open={fusionDialogOpen}
+          onOpenChange={setFusionDialogOpen}
+        />
+      ) : null}
     </React.Fragment>
   );
 }

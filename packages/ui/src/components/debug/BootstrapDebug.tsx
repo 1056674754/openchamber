@@ -1,12 +1,14 @@
 import React from "react";
 import { serverRegistry, DEFAULT_SERVER_ID } from "@/lib/opencode/server-registry";
 import { useProjectsStore } from "@/stores/useProjectsStore";
+import { useSessionUIStore } from "@/sync/session-ui-store";
 import { getAllSyncStores } from "@/sync/multi-server-registry";
 import { useActiveServerId } from "@/hooks/useActiveServerId";
 
 export function BootstrapDebug() {
   const [visible, setVisible] = React.useState(true);
   const activeServerId = useActiveServerId();
+  const currentSessionId = useSessionUIStore((s) => s.currentSessionId);
   const projects = useProjectsStore((s) => s.projects);
 
   const [, forceUpdate] = React.useState(0);
@@ -46,6 +48,7 @@ export function BootstrapDebug() {
         <button onClick={() => setVisible(false)} style={{ color: "#f00", cursor: "pointer", background: "none", border: "none", fontSize: 14 }}>✕</button>
       </div>
       <div>activeServerId: {activeServerId}</div>
+      <div>currentSessionId: {currentSessionId ?? "(none)"}</div>
       <div>serverRegistry: {servers.length} [{servers.map((s) => `${s.config.id.slice(0,12)} url=${s.config.baseUrl.slice(-25)}`).join(" | ")}]</div>
       <div>syncStores: {syncStores.length} [{syncStores.map((e) => `${e.serverId} (stores=${e.childStores.children.size})`).join(", ")}]</div>
       <div>remoteProjects (with serverId): {remoteProjects.length}</div>
@@ -57,8 +60,10 @@ export function BootstrapDebug() {
           --- {entry.serverId} ---
           {Array.from(entry.childStores.children.entries()).map(([dir, store]) => {
             const s = store.getState();
+            const activeSession = currentSessionId ? s.session.find((ss: { id?: string }) => ss.id === currentSessionId) : undefined;
+            const activeStatus = currentSessionId ? s.session_status?.[currentSessionId] : undefined;
             return (
-              <div key={dir}>  dir="{dir}" status={s.status} sessions={s.session.length} messages={Object.keys(s.message || {}).length}</div>
+              <div key={dir}>  dir="{dir}" status={s.status} sessions={s.session.length} messages={Object.keys(s.message || {}).length}{activeSession ? ` [active: status=${JSON.stringify(activeStatus)}]` : ""}</div>
             );
           })}
         </div>

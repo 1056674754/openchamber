@@ -14,7 +14,7 @@ import { useConfigStore } from "@/stores/useConfigStore"
 import { registerSessionDirectory } from "./sync-refs"
 import { isSyntheticPart } from "@/lib/messages/synthetic"
 import { serverRegistry, DEFAULT_SERVER_ID } from "@/lib/opencode/server-registry"
-import { getSyncStoresForServer } from "./multi-server-registry"
+import { getSyncStoresForServer, getAllSyncStores } from "./multi-server-registry"
 import { useProjectsStore } from "@/stores/useProjectsStore"
 import { useSessionProjectStore } from "@/stores/useSessionProjectStore"
 import { resolveProjectIdViaPathPrefix } from "@/lib/sessionOwnership"
@@ -104,9 +104,30 @@ function sdkForSession(sessionId?: string | null): OpencodeClient {
   return sdk()
 }
 
+// [OPENCHAMBER-FORK] 2025-05-18 v1.11.1-dev-merge
+// Module-level cache: directory → serverId. Populated by discoverWorktreeDirectories
+// before the deferred ensureRemoteProject. Avoids the timing gap where
+// resolveSdkForDirectory is called before the project is registered.
+const _directoryServerCache = new Map<string, string>();
+
+export function setDirectoryServerId(directory: string, serverId: string): void {
+  _directoryServerCache.set(normalizeDirectoryKey(directory), serverId);
+}
+
 /** Resolve the correct SDK client for a directory by looking up its project's serverId. */
 export function resolveSdkForDirectory(directory: string): OpencodeClient {
   const normalizedDir = normalizeDirectoryKey(directory)
+
+  // Check module-level cache first — populated synchronously by discoverWorktreeDirectories
+  const cachedServerId = _directoryServerCache.get(normalizedDir)
+  if (cachedServerId && cachedServerId !== DEFAULT_SERVER_ID) {
+    const conn = serverRegistry.get(cachedServerId)
+    if (conn) {
+      console.log(`[resolveSdk] dir="${normalizedDir}" → CACHED server=${cachedServerId} url=${conn.config.baseUrl}`)
+      return conn.client
+    }
+  }
+
   const project = findProjectForDirectory(normalizedDir)
   if (project?.serverId && project.serverId !== DEFAULT_SERVER_ID) {
     const conn = serverRegistry.get(project.serverId)
@@ -116,6 +137,22 @@ export function resolveSdkForDirectory(directory: string): OpencodeClient {
     }
     throw new Error(`Remote server "${project.serverId}" is not available for ${normalizedDir}`)
   }
+
+  // [OPENCHAMBER-FORK] 2025-05-18 v1.11.1-dev-merge
+  // Check if any remote SyncProvider already has a child store for this directory
+  // (created by handleEvent via ensureChild on SSE events). Zero path matching.
+  const allEntries = getAllSyncStores()
+  for (const e of allEntries) {
+    if (e.serverId === DEFAULT_SERVER_ID) continue
+    if (e.childStores.children.has(normalizedDir)) {
+      const conn = serverRegistry.get(e.serverId)
+      if (conn) {
+        console.log(`[resolveSdk] dir="${normalizedDir}" → IN_REMOTE_STORE server=${e.serverId} url=${conn.config.baseUrl}`)
+        return conn.client
+      }
+    }
+  }
+
   console.log(`[resolveSdk] dir="${normalizedDir}" → FALLBACK to default. matchedProject:`, project?.id, project?.serverId, project?.path)
   const defaultConn = serverRegistry.get(DEFAULT_SERVER_ID)
   if (defaultConn) return defaultConn.client

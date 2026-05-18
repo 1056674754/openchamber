@@ -4,6 +4,7 @@ import type { AssistantMessage, Message, Part, ReasoningPart, TextPart, ToolPart
 import type { MessageStreamPhase } from '@/stores/types/sessionTypes';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useDirectorySync, useSessionPermissions, useSessionQuestions, useSessionStatus } from '@/sync/sync-context';
+import { serverRegistry } from '@/lib/opencode/server-registry';
 import { isFullySyntheticMessage } from '@/lib/messages/synthetic';
 import { useCurrentSessionActivity } from './useSessionActivity';
 
@@ -130,7 +131,9 @@ export function useAssistantStatus(): AssistantStatusSnapshot {
                 return EMPTY_MESSAGES;
             }
             return state.message[currentSessionId] ?? EMPTY_MESSAGES;
-        }, [currentSessionId])
+        }, [currentSessionId]),
+        undefined,
+        currentSessionId ? serverRegistry.getServerForSession(currentSessionId) : undefined
     );
 
     // Only subscribe to parts for the last assistant message — avoids re-render
@@ -146,7 +149,9 @@ export function useAssistantStatus(): AssistantStatusSnapshot {
         React.useCallback((state) => {
             if (!lastAssistantId) return EMPTY_PARTS;
             return state.part[lastAssistantId] ?? EMPTY_PARTS;
-        }, [lastAssistantId])
+        }, [lastAssistantId]),
+        undefined,
+        currentSessionId ? serverRegistry.getServerForSession(currentSessionId) : undefined
     );
 
     const sessionMessages = React.useMemo<SessionMessageRecord[]>(

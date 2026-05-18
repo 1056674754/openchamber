@@ -28,7 +28,7 @@ import { getReconnectCandidateSessionIds } from "./reconnect-recovery"
 import { STUCK_SESSION_TIMEOUT_MS } from "@/stores/types/sessionTypes"
 import { opencodeClient } from "@/lib/opencode/client"
 import { DEFAULT_SERVER_ID, serverRegistry } from "@/lib/opencode/server-registry"
-import { registerSyncStores, getSyncStoresForServer } from "./multi-server-registry"
+import { registerSyncStores, getSyncStoresForServer, getAllSyncStores } from "./multi-server-registry"
 import { useProjectsStore } from "@/stores/useProjectsStore"
 import { usePermissionStore } from "@/stores/permissionStore"
 import { useConfigStore } from "@/stores/useConfigStore"
@@ -169,7 +169,10 @@ const pendingSessionMaterializations = new Map<string, PendingSessionMaterializa
 
 const materializationKey = (directory: string, sessionID: string) => `${directory}:${sessionID}`
 
-function enqueueSessionMaterialization(directory: string, sessionID: string, childStores: ChildStoreManager) {
+// [OPENCHAMBER-FORK] 2025-05-18 v1.11.1-dev-merge
+// Added serverId parameter — materialization must use the correct remote SDK client
+// instead of resolving via project store (which may not have worktree directories registered).
+function enqueueSessionMaterialization(directory: string, sessionID: string, childStores: ChildStoreManager, serverId?: string) {
   if (!directory || directory === "global" || !sessionID) return
   const k = materializationKey(directory, sessionID)
   const existing = pendingSessionMaterializations.get(k)
@@ -185,7 +188,7 @@ function enqueueSessionMaterialization(directory: string, sessionID: string, chi
       return
     }
     try {
-      await materializeSessionFromServer(directory, sessionID, store)
+      await materializeSessionFromServer(directory, sessionID, store, serverId)
     } catch {
       // Transient failure — next SSE event or reconnect will catch up.
     } finally {
@@ -198,12 +201,22 @@ async function materializeSessionFromServer(
   directory: string,
   sessionID: string,
   store: StoreApi<DirectoryStore>,
+  serverId?: string,
 ) {
-  const projects = useProjectsStore.getState().projects
-  const project = projects.find((p) => p.path === directory && p.serverId && p.serverId !== DEFAULT_SERVER_ID)
-  const sdkClient = project?.serverId
-    ? serverRegistry.get(project.serverId)?.client ?? resolveSdkForDirectory(directory)
-    : resolveSdkForDirectory(directory)
+  // [OPENCHAMBER-FORK] 2025-05-18 v1.11.1-dev-merge
+  // Use explicit serverId when available (e.g. from SSE event pipeline) instead of
+  // reverse-resolving through project store, which misses unregistered worktree dirs.
+  let sdkClient: OpencodeClient
+  if (serverId && serverId !== DEFAULT_SERVER_ID) {
+    const conn = serverRegistry.get(serverId)
+    sdkClient = conn?.client ?? resolveSdkForDirectory(directory)
+  } else {
+    const projects = useProjectsStore.getState().projects
+    const project = projects.find((p) => p.path === directory && p.serverId && p.serverId !== DEFAULT_SERVER_ID)
+    sdkClient = project?.serverId
+      ? serverRegistry.get(project.serverId)?.client ?? resolveSdkForDirectory(directory)
+      : resolveSdkForDirectory(directory)
+  }
   const result = await retry(() =>
     sdkClient.session.messages({ sessionID, limit: SESSION_MATERIALIZATION_MESSAGE_LIMIT }),
   )
@@ -1115,6 +1128,19 @@ function handleEvent(
     ) {
       const info = (payload.properties as { info?: Session }).info
       if (info?.id) {
+        // [OPENCHAMBER-FORK] 2025-05-18 v1.11.1-dev-merge
+        // Don't create child stores for remote directories in the default SyncProvider.
+        // Check if any remote SyncProvider already owns this directory — no path matching needed.
+        if (serverId === DEFAULT_SERVER_ID) {
+          const allEntries = getAllSyncStores()
+          const existsInRemote = allEntries.some(
+            (e) => e.serverId !== DEFAULT_SERVER_ID && e.childStores.children.has(directory)
+          )
+          if (existsInRemote) {
+            setIndexedSessionDirectory(routingIndex, info.id, directory)
+            return
+          }
+        }
         setIndexedSessionDirectory(routingIndex, info.id, directory)
         childStores.ensureChild(directory)
       }
@@ -1171,6 +1197,19 @@ function handleEvent(
         resolvedDirectory = fallbackDir
       }
     }
+  }
+
+  // [OPENCHAMBER-FORK] 2025-05-18 v1.11.1-dev-merge
+  // Auto-create child store for remote servers only. When the SSE event pipeline
+  // delivers events for an unregistered remote directory (e.g. worktree paths not
+  // in the projects store), create a child store on-the-fly so events aren't dropped.
+  // Also register the directory as a remote project so remoteDirectories picks it up
+  // on next render, enabling bootstrap and correct routing.
+  // Guard: only for remote SyncProviders — the default SyncProvider can receive
+  // events for remote paths when currentDirectory changes, and must not auto-create.
+  if (!store && resolvedDirectory && resolvedDirectory !== "global" && serverId !== DEFAULT_SERVER_ID) {
+    store = childStores.ensureChild(resolvedDirectory)
+    useProjectsStore.getState().ensureRemoteProject(resolvedDirectory, serverId) // [OPENCHAMBER-FORK]
   }
 
   if (!store) {
@@ -1291,7 +1330,7 @@ function handleEvent(
         ? (idleSession as Session & { parentID?: string | null }).parentID
         : null
       if (parentID) {
-        enqueueSessionMaterialization(resolvedDirectory, parentID, childStores)
+        enqueueSessionMaterialization(resolvedDirectory, parentID, childStores, serverId)
       }
     }
   }
@@ -1390,7 +1429,7 @@ function handleEvent(
       const after = store.getState()
       const info = (payload.properties as { info: Message }).info
       if (info.role === "assistant" && (!after.part[messageID] || after.part[messageID].length === 0)) {
-        enqueueSessionMaterialization(resolvedDirectory, sessionID, childStores)
+        enqueueSessionMaterialization(resolvedDirectory, sessionID, childStores, serverId)
       }
     }
   } else {
@@ -1418,7 +1457,7 @@ function handleEvent(
   if (materializationResult) {
     const materializationSessionID = materializationResult.sessionID ?? getSessionIdFromPayload(payload) ?? undefined
     if (materializationSessionID) {
-      enqueueSessionMaterialization(resolvedDirectory, materializationSessionID, childStores)
+      enqueueSessionMaterialization(resolvedDirectory, materializationSessionID, childStores, serverId)
     }
   }
 
@@ -1668,8 +1707,16 @@ export function SyncProvider(props: {
   }, [props.sdk, props.baseUrl, childStores, routingIndex, messageStreamTransport, serverId])
 
   // Ensure current directory's child store exists
+  // [OPENCHAMBER-FORK] 2025-05-18 v1.11.1-dev-merge
+  // Guard: default SyncProvider must not create child stores for remote paths.
+  // Active project carries serverId set by the sidebar on project click — zero path matching.
   useEffect(() => {
     if (props.directory) {
+      if (serverId === DEFAULT_SERVER_ID) {
+        const { projects, activeProjectId } = useProjectsStore.getState()
+        const activeProject = activeProjectId ? projects.find((p) => p.id === activeProjectId) : null
+        if (activeProject?.serverId && activeProject.serverId !== DEFAULT_SERVER_ID) return
+      }
       const store = childStores.ensureChild(props.directory)
       ingestDirectoryStateIntoRoutingIndex(routingIndex, props.directory, store.getState())
     }
@@ -1850,18 +1897,24 @@ export function useGlobalSyncSelector<T>(selector: (state: GlobalSyncStore) => T
 }
 
 /** Get the child store for a directory (defaults to current) */
-export function useDirectoryStore(directory?: string): StoreApi<DirectoryStore> {
+// [OPENCHAMBER-FORK] 2025-05-18 v1.11.1-dev-merge
+// Accept optional serverId and sessionID. When a remote session's directory is
+// unknown, search the remote SyncProvider's child stores for the session.
+export function useDirectoryStore(directory?: string, serverId?: string, sessionID?: string): StoreApi<DirectoryStore> {
   const system = useSyncSystem()
   const dir = directory ?? system.directory
 
-  if (dir) {
-    const projects = useProjectsStore.getState().projects
-    const project = projects.find((p) => p.path === dir && p.serverId && p.serverId !== DEFAULT_SERVER_ID)
-    if (project?.serverId) {
-      const remoteStores = getSyncStoresForServer(project.serverId)
-      if (remoteStores) {
-        return remoteStores.ensureChild(dir)
+  if (serverId && serverId !== DEFAULT_SERVER_ID) {
+    const remoteStores = getSyncStoresForServer(serverId)
+    if (remoteStores) {
+      if (!directory && sessionID) {
+        for (const store of remoteStores.children.values()) {
+          if (store.getState().session.some((s: { id?: string }) => s.id === sessionID)) {
+            return store
+          }
+        }
       }
+      return remoteStores.ensureChild(dir)
     }
   }
 
@@ -1869,9 +1922,16 @@ export function useDirectoryStore(directory?: string): StoreApi<DirectoryStore> 
 }
 
 /** Select from the current directory's store */
-export function useDirectorySync<T>(selector: (state: State) => T, directory?: string): T {
-  const store = useDirectoryStore(directory)
+export function useDirectorySync<T>(selector: (state: State) => T, directory?: string, serverId?: string, sessionID?: string): T {
+  const store = useDirectoryStore(directory, serverId, sessionID)
   return useStore(store, selector)
+}
+
+// [OPENCHAMBER-FORK] 2025-05-18 v1.11.1-dev-merge
+// Resolve serverId for a session from the registry. Used by session-scoped hooks
+// to route to the correct remote store without any path matching.
+function useServerIdForSession(sessionID: string | undefined): string | undefined {
+  return sessionID ? serverRegistry.getServerForSession(sessionID) : undefined
 }
 
 /** Get the revert messageID for a session (if reverted) */
@@ -1882,6 +1942,8 @@ export function useSessionRevertMessageID(sessionID: string, directory?: string)
       return (session as { revert?: { messageID?: string } } | undefined)?.revert?.messageID
     }, [sessionID]),
     directory,
+    useServerIdForSession(sessionID),
+    sessionID,
   )
 }
 
@@ -1890,6 +1952,8 @@ export function useSessionMessages(sessionID: string, directory?: string) {
   return useDirectorySync(
     useCallback((state: State) => state.message[sessionID] ?? EMPTY_MESSAGES, [sessionID]),
     directory,
+    useServerIdForSession(sessionID),
+    sessionID,
   )
 }
 
@@ -1914,6 +1978,8 @@ export function useSessionMessagesResolved(sessionID: string, directory?: string
       return Object.prototype.hasOwnProperty.call(state.message, sessionID)
     }, [sessionID]),
     directory,
+    useServerIdForSession(sessionID),
+    sessionID,
   )
 }
 
@@ -1930,6 +1996,8 @@ export function useSessionStatus(sessionID: string, directory?: string) {
   return useDirectorySync(
     useCallback((state: State) => state.session_status?.[sessionID], [sessionID]),
     directory,
+    useServerIdForSession(sessionID),
+    sessionID,
   )
 }
 
@@ -1942,6 +2010,8 @@ export function useSessionActivityTimestamp(sessionID: string, directory?: strin
   return useDirectorySync(
     useCallback((state: State) => state.session_activity?.[sessionID], [sessionID]),
     directory,
+    useServerIdForSession(sessionID),
+    sessionID,
   )
 }
 
@@ -1950,6 +2020,8 @@ export function useSessionPermissions(sessionID: string, directory?: string) {
   return useDirectorySync(
     useCallback((state: State) => state.permission[sessionID] ?? EMPTY_PERMISSION_REQUESTS, [sessionID]),
     directory,
+    useServerIdForSession(sessionID),
+    sessionID,
   )
 }
 
@@ -1958,6 +2030,8 @@ export function useSessionQuestions(sessionID: string, directory?: string) {
   return useDirectorySync(
     useCallback((state: State) => state.question[sessionID] ?? EMPTY_QUESTION_REQUESTS, [sessionID]),
     directory,
+    useServerIdForSession(sessionID),
+    sessionID,
   )
 }
 
@@ -2280,7 +2354,7 @@ export function useSessionMessageRecords(
   directory?: string,
   options?: { suspendPartUpdates?: boolean },
 ) {
-  const store = useDirectoryStore(directory)
+  const store = useDirectoryStore(directory, useServerIdForSession(sessionID), sessionID)
   const snapshotRef = useRef<SessionMessageRecordsSnapshot>({
     sessionID,
     sourceMessages: EMPTY_MESSAGES,
@@ -2320,7 +2394,7 @@ export function useSessionMessageRecords(
 const _ensureMessagesLoading = new Set<string>()
 
 export function useEnsureSessionMessages(sessionID: string, directory?: string) {
-  const store = useDirectoryStore(directory)
+  const store = useDirectoryStore(directory, useServerIdForSession(sessionID), sessionID)
 
   React.useEffect(() => {
     if (!sessionID) return

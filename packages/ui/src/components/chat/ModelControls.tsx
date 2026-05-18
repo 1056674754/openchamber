@@ -45,6 +45,7 @@ import { useModelLists } from '@/hooks/useModelLists';
 import { useIsTextTruncated } from '@/hooks/useIsTextTruncated';
 import { formatEffortLabel, getCycledPrimaryAgentName, type MobileControlsPanel } from './mobileControlsUtils';
 import { useI18n } from '@/lib/i18n';
+import { eventMatchesShortcut, formatShortcutForDisplay, getEffectiveShortcutCombo, normalizeCombo } from '@/lib/shortcuts';
 import { useOpenCodeReadiness } from '@/hooks/useOpenCodeReadiness';
 import { useActiveServerId } from '@/hooks/useActiveServerId';
 import { DEFAULT_SERVER_ID, serverRegistry } from '@/lib/opencode/server-registry';
@@ -193,19 +194,19 @@ const getModalityIcons = (metadata: ModelMetadata | undefined, direction: 'input
 
     const uniqueValues = Array.from(new Set(modalityList.map((item) => normalizeModality(item))));
 
-    return uniqueValues
-        .map((modality) => {
-            const definition = MODALITY_ICON_MAP[modality];
-            if (!definition) {
-                return null;
-            }
-            return {
-                key: modality,
-                icon: definition.icon,
-                label: definition.label,
-            } satisfies ModalityIcon;
-        })
-        .filter((entry): entry is ModalityIcon => Boolean(entry));
+    const result: ModalityIcon[] = [];
+    for (const modality of uniqueValues) {
+        const definition = MODALITY_ICON_MAP[modality];
+        if (!definition) {
+            continue;
+        }
+        result.push({
+            key: modality,
+            icon: definition.icon,
+            label: definition.label,
+        });
+    }
+    return result;
 };
 
 const COMPACT_NUMBER_FORMATTER = new Intl.NumberFormat('en-US', {
@@ -222,7 +223,44 @@ const CURRENCY_FORMATTER = new Intl.NumberFormat('en-US', {
     minimumFractionDigits: 2,
 });
 
+const KNOWLEDGE_DATE_FORMATTER = new Intl.DateTimeFormat('en-US', { month: 'short', year: 'numeric' });
+
+const DATE_FORMATTER = new Intl.DateTimeFormat('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+});
+
 const ADD_PROVIDER_ID = '__add_provider__';
+
+const IconBadge: React.FC<{ iconName: IconComponent; label: string }> = ({ iconName, label }) => (
+    <span
+        className="flex size-5 items-center justify-center rounded-xl bg-muted/60 text-muted-foreground"
+        title={label}
+        aria-label={label}
+        role="img"
+    >
+        <Icon name={iconName} className="size-3.5" />
+    </span>
+);
+
+const EditModeIcon: React.FC<{ mode: EditPermissionMode; className?: string }> = ({ mode, className }) => {
+    const combinedClassName = cn(className, 'flex-shrink-0');
+    const modeColors = getEditModeColors(mode);
+    const iconColor = modeColors ? modeColors.text : 'var(--foreground)';
+    const iconStyle = { color: iconColor };
+
+    if (mode === 'full') {
+        return <Icon name="pencil-ai" className={combinedClassName} style={iconStyle} />;
+    }
+    if (mode === 'allow') {
+        return <Icon name="checkbox-circle" className={combinedClassName} style={iconStyle} />;
+    }
+    if (mode === 'deny') {
+        return <Icon name="close-circle" className={combinedClassName} style={iconStyle} />;
+    }
+    return <Icon name="question" className={combinedClassName} style={iconStyle} />;
+};
 
 const formatTokens = (value?: number | null) => {
     if (typeof value !== 'number' || Number.isNaN(value)) {
@@ -268,11 +306,13 @@ const formatCompactPrice = (metadata?: ModelMetadata): string | null => {
 };
 
 const getCapabilityIcons = (metadata?: ModelMetadata) => {
-    return CAPABILITY_DEFINITIONS.filter((definition) => definition.isActive(metadata)).map((definition) => ({
-        key: definition.key,
-        icon: definition.icon,
-        label: definition.label,
-    }));
+    const result: { key: string; icon: IconComponent; label: string }[] = [];
+    for (const definition of CAPABILITY_DEFINITIONS) {
+        if (definition.isActive(metadata)) {
+            result.push({ key: definition.key, icon: definition.icon, label: definition.label });
+        }
+    }
+    return result;
 };
 
 const formatKnowledge = (knowledge?: string) => {
@@ -286,7 +326,7 @@ const formatKnowledge = (knowledge?: string) => {
         const monthIndex = Number.parseInt(match[2], 10) - 1;
         const knowledgeDate = new Date(Date.UTC(year, monthIndex, 1));
         if (!Number.isNaN(knowledgeDate.getTime())) {
-            return new Intl.DateTimeFormat('en-US', { month: 'short', year: 'numeric' }).format(knowledgeDate);
+            return KNOWLEDGE_DATE_FORMATTER.format(knowledgeDate);
         }
     }
 
@@ -303,11 +343,7 @@ const formatDate = (value?: string) => {
         return value;
     }
 
-    return new Intl.DateTimeFormat('en-US', {
-        month: 'short',
-        day: 'numeric',
-        year: 'numeric',
-    }).format(parsedDate);
+    return DATE_FORMATTER.format(parsedDate);
 };
 
 interface ModelControlsProps {
@@ -442,10 +478,21 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     const setSettingsDialogOpen = useUIStore((state) => state.setSettingsDialogOpen);
     const setSettingsPage = useUIStore((state) => state.setSettingsPage);
     const hiddenModels = useUIStore((state) => state.hiddenModels);
-    const collapsedProviderSet = React.useMemo(
-        () => new Set(collapsedModelProviders.map((providerId) => providerId.trim()).filter(Boolean)),
-        [collapsedModelProviders]
-    );
+    const cycleAgentShortcutOverride = useUIStore((state) => state.shortcutOverrides.cycle_agent);
+    const cycleAgentShortcut = React.useMemo(() => (
+        getEffectiveShortcutCombo('cycle_agent', cycleAgentShortcutOverride ? { cycle_agent: cycleAgentShortcutOverride } : undefined)
+    ), [cycleAgentShortcutOverride]);
+    const cycleAgentShortcutLabel = React.useMemo(() => formatShortcutForDisplay(cycleAgentShortcut), [cycleAgentShortcut]);
+    const collapsedProviderSet = React.useMemo(() => {
+        const result = new Set<string>();
+        for (const providerId of collapsedModelProviders) {
+            const trimmed = providerId.trim();
+            if (trimmed) {
+                result.add(trimmed);
+            }
+        }
+        return result;
+    }, [collapsedModelProviders]);
 
     // Separate state for agent selector to avoid conflict with model selector
     const [isAgentSelectorOpen, setIsAgentSelectorOpen] = React.useState(false);
@@ -602,27 +649,9 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
 
     const sizeVariant: 'mobile' | 'vscode' | 'default' = isMobile ? 'mobile' : isVSCodeRuntime ? 'vscode' : 'default';
     const buttonHeight = sizeVariant === 'mobile' ? 'h-9' : sizeVariant === 'vscode' ? 'h-6' : 'h-8';
-    const editToggleIconClass = sizeVariant === 'mobile' ? 'h-5 w-5' : sizeVariant === 'vscode' ? 'h-4 w-4' : 'h-4 w-4';
     const controlIconSize = sizeVariant === 'mobile' ? 'h-5 w-5' : sizeVariant === 'vscode' ? 'h-4 w-4' : 'h-4 w-4';
     const controlTextSize = isCompact ? 'typography-micro' : 'typography-meta';
     const inlineGapClass = sizeVariant === 'mobile' ? 'gap-x-1' : sizeVariant === 'vscode' ? 'gap-x-2' : 'gap-x-3';
-    const renderEditModeIcon = React.useCallback((mode: EditPermissionMode, iconClass = editToggleIconClass) => {
-        const combinedClassName = cn(iconClass, 'flex-shrink-0');
-        const modeColors = getEditModeColors(mode);
-        const iconColor = modeColors ? modeColors.text : 'var(--foreground)';
-        const iconStyle = { color: iconColor };
-
-        if (mode === 'full') {
-            return <Icon name="pencil-ai" className={combinedClassName} style={iconStyle} />;
-        }
-        if (mode === 'allow') {
-            return <Icon name="checkbox-circle" className={combinedClassName} style={iconStyle} />;
-        }
-        if (mode === 'deny') {
-            return <Icon name="close-circle" className={combinedClassName} style={iconStyle} />;
-        }
-        return <Icon name="question" className={combinedClassName} style={iconStyle} />;
-    }, [editToggleIconClass]);
 
     const currentProvider = getCurrentProvider();
     const models = Array.isArray(currentProvider?.models) ? currentProvider.models : [];
@@ -1311,6 +1340,22 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         handleAgentChange(nextAgentName, { closeModelSelector: false });
     }, [agents, currentAgentName, handleAgentChange]);
 
+    const getCycleAgentDirectionFromEvent = React.useCallback((event: KeyboardEvent | React.KeyboardEvent): 1 | -1 | null => {
+        const cycleAgentBackwardShortcut = cycleAgentShortcut && !cycleAgentShortcut.includes('shift')
+            ? normalizeCombo(`shift+${cycleAgentShortcut}`)
+            : '';
+
+        if (cycleAgentBackwardShortcut && eventMatchesShortcut(event, cycleAgentBackwardShortcut)) {
+            return -1;
+        }
+
+        if (eventMatchesShortcut(event, cycleAgentShortcut)) {
+            return 1;
+        }
+
+        return null;
+    }, [cycleAgentShortcut]);
+
     const handleProviderAndModelChange = (
         providerId: string,
         modelId: string,
@@ -1385,18 +1430,6 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         return name.charAt(0).toUpperCase() + name.slice(1);
     };
 
-    const renderIconBadge = (iconName: IconComponent, label: string, key: string) => (
-        <span
-            key={key}
-            className="flex h-5 w-5 items-center justify-center rounded-xl bg-muted/60 text-muted-foreground"
-            title={label}
-            aria-label={label}
-            role="img"
-        >
-            <Icon name={iconName} className="h-3.5 w-3.5" />
-        </span>
-    );
-
     const toggleMobileProviderExpansion = React.useCallback((providerId: string) => {
         setExpandedMobileProviders((prev) => {
             const next = new Set(prev);
@@ -1455,7 +1488,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                             <div className="flex flex-wrap gap-1.5">
                                 {currentCapabilityIcons.map(({ key, icon, label }) => (
                                     <div key={key} className="flex items-center gap-1.5">
-                                        {renderIconBadge(icon, label, `cap-${key}`)}
+                                        <IconBadge key={`cap-${key}`} iconName={icon} label={label} />
                                         <span className="typography-meta text-foreground">{label}</span>
                                     </div>
                                 ))}
@@ -1472,7 +1505,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                     <div className="flex items-center gap-2">
                                         <span className="typography-meta text-muted-foreground/80 w-12">{t('chat.modelControls.input')}</span>
                                         <div className="flex gap-1">
-                                            {inputModalityIcons.map(({ key, icon, label }) => renderIconBadge(icon, `${label} input`, `input-${key}`))}
+                                            {inputModalityIcons.map(({ key, icon, label }) => <IconBadge key={`input-${key}`} iconName={icon} label={`${label} input`} />)}
                                         </div>
                                     </div>
                                 )}
@@ -1480,7 +1513,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                     <div className="flex items-center gap-2">
                                         <span className="typography-meta text-muted-foreground/80 w-12">{t('chat.modelControls.output')}</span>
                                         <div className="flex gap-1">
-                                            {outputModalityIcons.map(({ key, icon, label }) => renderIconBadge(icon, `${label} output`, `output-${key}`))}
+                                            {outputModalityIcons.map(({ key, icon, label }) => <IconBadge key={`output-${key}`} iconName={icon} label={`${label} output`} />)}
                                         </div>
                                     </div>
                                 )}
@@ -1610,7 +1643,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                             <div className="flex items-center justify-between">
                                 <span className="typography-meta text-muted-foreground/80">{t('chat.modelControls.edit')}</span>
                                 <div className="flex items-center gap-1.5">
-                                    {renderEditModeIcon(editPermissionSummary.mode, 'h-3.5 w-3.5')}
+                                    <EditModeIcon mode={editPermissionSummary.mode} className="size-3.5" />
                                     <span className="typography-meta font-medium text-foreground">
                                         {editPermissionSummary.label}
                                     </span>
@@ -1619,7 +1652,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                             <div className="flex items-center justify-between">
                                 <span className="typography-meta text-muted-foreground/80">{t('chat.modelControls.bash')}</span>
                                 <div className="flex items-center gap-1.5">
-                                    {renderEditModeIcon(bashPermissionSummary.mode, 'h-3.5 w-3.5')}
+                                    <EditModeIcon mode={bashPermissionSummary.mode} className="size-3.5" />
                                     <span className="typography-meta font-medium text-foreground">
                                         {bashPermissionSummary.label}
                                     </span>
@@ -1628,7 +1661,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                             <div className="flex items-center justify-between">
                                 <span className="typography-meta text-muted-foreground/80">{t('chat.modelControls.webFetch')}</span>
                                 <div className="flex items-center gap-1.5">
-                                    {renderEditModeIcon(webfetchPermissionSummary.mode, 'h-3.5 w-3.5')}
+                                    <EditModeIcon mode={webfetchPermissionSummary.mode} className="size-3.5" />
                                     <span className="typography-meta font-medium text-foreground">
                                         {webfetchPermissionSummary.label}
                                     </span>
@@ -2178,7 +2211,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                         <div className="flex flex-wrap items-center gap-1.5">
                             {currentCapabilityIcons.length > 0 ? (
                                 currentCapabilityIcons.map(({ key, icon, label }) =>
-                                    renderIconBadge(icon, label, `cap-${key}`)
+                                    <IconBadge key={`cap-${key}`} iconName={icon} label={label} />
                                 )
                             ) : (
                                 <span className="typography-meta text-muted-foreground">{t('chat.modelControls.modeValue.none')}</span>
@@ -2193,7 +2226,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                 <div className="flex items-center gap-1.5">
                                     {inputModalityIcons.length > 0
                                         ? inputModalityIcons.map(({ key, icon, label }) =>
-                                              renderIconBadge(icon, `${label} input`, `input-${key}`)
+                                              <IconBadge key={`input-${key}`} iconName={icon} label={`${label} input`} />
                                           )
                                         : <span className="typography-meta text-muted-foreground">—</span>}
                                 </div>
@@ -2203,7 +2236,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                 <div className="flex items-center gap-1.5">
                                     {outputModalityIcons.length > 0
                                         ? outputModalityIcons.map(({ key, icon, label }) =>
-                                              renderIconBadge(icon, `${label} output`, `output-${key}`)
+                                              <IconBadge key={`output-${key}`} iconName={icon} label={`${label} output`} />
                                           )
                                         : <span className="typography-meta text-muted-foreground">—</span>}
                                 </div>
@@ -2570,9 +2603,10 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             e.stopPropagation();
             keyboardOwnsModelSelectionRef.current = true;
 
-            if (e.key === 'Tab') {
+            const cycleAgentDirection = getCycleAgentDirectionFromEvent(e);
+            if (cycleAgentDirection) {
                 e.preventDefault();
-                handleCycleAgentFromModelPicker(e.shiftKey ? -1 : 1);
+                handleCycleAgentFromModelPicker(cycleAgentDirection);
             } else if (e.key === 'ArrowDown') {
                 e.preventDefault();
                 setModelSelectedIndex((prev) => (prev + 1) % Math.max(1, totalItems));
@@ -2643,6 +2677,18 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                 e.preventDefault();
                 setAgentMenuOpen(false);
             }
+        };
+
+        const handleModelShortcutKeyDownCapture = (e: React.KeyboardEvent) => {
+            const cycleAgentDirection = getCycleAgentDirectionFromEvent(e);
+            if (!cycleAgentDirection) {
+                return;
+            }
+
+            e.preventDefault();
+            e.stopPropagation();
+            keyboardOwnsModelSelectionRef.current = true;
+            handleCycleAgentFromModelPicker(cycleAgentDirection);
         };
 
         const handleFavoriteDragEnd = (event: DragEndEvent) => {
@@ -2734,7 +2780,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                 </button>
                             </DropdownMenuTrigger>
                         </TooltipTrigger>
-                        <DropdownMenuContent className="w-[min(380px,calc(100vw-2rem))] p-0 flex flex-col" align="end" alignOffset={-40}>
+                        <DropdownMenuContent className="w-[min(380px,calc(100vw-2rem))] p-0 flex flex-col" align="end" alignOffset={-40} onKeyDownCapture={handleModelShortcutKeyDownCapture}>
                             {/* Search Input */}
                             <div className="p-2 border-b border-border/40">
                                 <div className="relative">
@@ -2925,7 +2971,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                             <div className="px-3 pt-1 pb-1.5 border-t border-border/40 typography-micro text-muted-foreground">
                                 <div className="flex items-center gap-x-2 whitespace-nowrap overflow-hidden">
                                     <span>{t('chat.modelControls.keyboardHintNavigate')}</span>
-                                    <span>{t('chat.modelControls.keyboardHintSwitchAgent')}</span>
+                                    <span>{t('chat.modelControls.keyboardHintSwitchAgent', { shortcut: cycleAgentShortcutLabel })}</span>
                                     <span className={cn(!highlightedSupportsThinking && 'invisible')}>
                                         {t('chat.modelControls.keyboardHintThinking')}
                                     </span>
@@ -3074,7 +3120,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                         <div className="flex items-center gap-3">
                             <span className="typography-meta text-muted-foreground/80 w-16">{t('chat.modelControls.edit')}</span>
                             <div className="flex items-center gap-1.5">
-                                {renderEditModeIcon(editPermissionSummary.mode, 'h-3.5 w-3.5')}
+                                <EditModeIcon mode={editPermissionSummary.mode} className="size-3.5" />
                                 <span className="typography-meta font-medium text-foreground w-12">
                                     {editPermissionSummary.label}
                                 </span>
@@ -3083,7 +3129,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                         <div className="flex items-center gap-3">
                             <span className="typography-meta text-muted-foreground/80 w-16">{t('chat.modelControls.bash')}</span>
                             <div className="flex items-center gap-1.5">
-                                {renderEditModeIcon(bashPermissionSummary.mode, 'h-3.5 w-3.5')}
+                                <EditModeIcon mode={bashPermissionSummary.mode} className="size-3.5" />
                                 <span className="typography-meta font-medium text-foreground w-12">
                                     {bashPermissionSummary.label}
                                 </span>
@@ -3092,7 +3138,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                         <div className="flex items-center gap-3">
                             <span className="typography-meta text-muted-foreground/80 w-16">{t('chat.modelControls.webFetch')}</span>
                             <div className="flex items-center gap-1.5">
-                                {renderEditModeIcon(webfetchPermissionSummary.mode, 'h-3.5 w-3.5')}
+                                <EditModeIcon mode={webfetchPermissionSummary.mode} className="size-3.5" />
                                 <span className="typography-meta font-medium text-foreground w-12">
                                     {webfetchPermissionSummary.label}
                                 </span>

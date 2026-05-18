@@ -234,7 +234,7 @@ export interface SessionStore {
     setDraftPreserveDirectoryOverride: (value: boolean) => void;
     closeNewSessionDraft: () => void;
 
-    createSession: (title?: string, directoryOverride?: string | null, parentID?: string | null) => Promise<Session | null>;
+    createSession: (title?: string, directoryOverride?: string | null, parentID?: string | null, serverId?: string | null) => Promise<Session | null>;
     createSessionFromAssistantMessage: (sourceMessageId: string) => Promise<void>;
 
     deleteSession: (id: string, options?: { archiveWorktree?: boolean; deleteRemoteBranch?: boolean; deleteLocalBranch?: boolean; remoteName?: string }) => Promise<boolean>;

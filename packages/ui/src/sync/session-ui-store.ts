@@ -518,6 +518,8 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       return persistedProjectByDir ?? persistedProjectById ?? fallbackProject
     })()
 
+    console.log("[openNewSessionDraft] explicitDir:", explicitDirectory, "inferredProject:", inferredProjectFromDir?.id, inferredProjectFromDir?.serverId, "selectedProject:", selectedProject?.id, selectedProject?.serverId, "selectedProject.path:", selectedProject?.path)
+
     const directory = isTempSession
       ? null
       : (() => {
@@ -1061,7 +1063,11 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         console.error("[session-ui-store] createSession: directoryOverride is required (no global-directory fallback)")
         return null
       }
-      const session = await createSessionAction(title, directoryOverride, parentID ?? null)
+      const project = draft.selectedProjectId
+        ? useProjectsStore.getState().projects.find((p) => p.id === draft.selectedProjectId)
+        : null
+      const serverId = project?.serverId ?? null
+      const session = await createSessionAction(title, directoryOverride, parentID ?? null, serverId)
       if (!session) return null
 
       if (targetFolderId) {

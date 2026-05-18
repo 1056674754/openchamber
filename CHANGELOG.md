@@ -4,6 +4,22 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.11.1-dev-merge] - 2026-05-18
+
+Upstream v1.11.1 merge into fork. Changes applied:
+
+- Multi-Run: added fusion for multi-run sessions, combining parallel results into a single follow-up answer with a customizable Fusion magic prompt.
+- Multi-Run: added optional isolation and support for non-Git projects, so parallel runs are available in more workspaces without branch setup.
+- Chat/Subagents: opened subagent sessions read-only in the context panel and made subagent chats read-only.
+- Chat/Shortcuts: made the agent-switching shortcut configurable and usable from the chat input/model picker.
+- Desktop/Mini Chat: added session switching and new-session shortcut to Mini Chat.
+- Preview: improved embedded preview proxying for absolute same-origin requests and WebSocket URLs.
+- Updates/Usage: added setting to disable OpenCode update notifications; quota reset times now display in local timezone.
+- Chat/UI: animated sorted-mode tool paths; guarded tooltip rendering defensively.
+- Git: large change lists display reliably; branch selection hidden for non-Git draft sessions.
+- Settings/Skills: skills catalog keeps selected source label visible when switching sources.
+- Session Switcher: added header session switcher dropdown (deferred — pending multi-instance compatibility review).
+
 ## [1.10.4] - 2026-05-09
 
 - Desktop/Mini Chat: improved Mini Chat session controls with current context usage in the compact header and a single header action that opens either the active session or current draft in Mini Chat.

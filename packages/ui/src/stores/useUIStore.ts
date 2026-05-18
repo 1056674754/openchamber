@@ -30,6 +30,7 @@ type ContextPanelTab = {
   targetPath: string | null;
   dedupeKey: string;
   label: string | null;
+  readOnly: boolean;
   touchedAt: number;
 };
 
@@ -38,6 +39,7 @@ type ContextPanelTabDescriptor = {
   targetPath?: string | null;
   dedupeKey?: string | null;
   label?: string | null;
+  readOnly?: boolean;
 };
 
 type ContextPanelDirectoryState = {
@@ -209,6 +211,7 @@ const createContextPanelTab = (descriptor: ContextPanelTabDescriptor): ContextPa
     targetPath: normalizedTargetPath,
     dedupeKey,
     label: normalizeContextTabLabel(descriptor.label),
+    readOnly: descriptor.readOnly === true,
     touchedAt: Date.now(),
   };
 };
@@ -247,6 +250,7 @@ const sanitizeContextPanelTabs = (tabs: unknown): ContextPanelTab[] => {
       targetPath?: unknown;
       dedupeKey?: unknown;
       label?: unknown;
+      readOnly?: unknown;
       touchedAt?: unknown;
     };
 
@@ -272,6 +276,7 @@ const sanitizeContextPanelTabs = (tabs: unknown): ContextPanelTab[] => {
       targetPath,
       dedupeKey,
       label: normalizeContextTabLabel(typeof candidate.label === 'string' ? candidate.label : null),
+      readOnly: candidate.readOnly === true,
       touchedAt: typeof candidate.touchedAt === 'number' && Number.isFinite(candidate.touchedAt)
         ? candidate.touchedAt
         : Date.now(),
@@ -504,6 +509,7 @@ interface UIStore {
   rightSidebarTab: RightSidebarTab;
   contextPanelByDirectory: Record<string, ContextPanelDirectoryState>;
   isSessionSwitcherOpen: boolean;
+  isSessionDropdownOpen: boolean;
   activeMainTab: MainTab;
   mainTabGuard: MainTabGuard | null;
   sidebarOpenBeforeFullscreenTab: boolean | null;
@@ -592,6 +598,7 @@ interface UIStore {
 
   showTerminalQuickKeysOnDesktop: boolean;
   persistChatDraft: boolean;
+  showOpenCodeUpdateNotifications: boolean;
   inputSpellcheckEnabled: boolean;
   wideChatLayoutEnabled: boolean;
   showToolFileIcons: boolean;
@@ -638,6 +645,7 @@ interface UIStore {
   setContextPanelSplit: (directory: string, splitTabId: string | null) => void;
   setContextPanelSplitRatio: (directory: string, ratio: number) => void;
   setSessionSwitcherOpen: (open: boolean) => void;
+  setSessionDropdownOpen: (open: boolean) => void;
   setActiveMainTab: (tab: MainTab) => void;
   setMainTabGuard: (guard: MainTabGuard | null) => void;
   setPendingDiffFile: (filePath: string | null) => void;
@@ -726,6 +734,7 @@ setSettingsRemoteInstancesSelectedId: (instanceId: string | null) => void;
   setSummaryLength: (value: number) => void;
   setMaxLastMessageLength: (value: number) => void;
   setPersistChatDraft: (value: boolean) => void;
+  setShowOpenCodeUpdateNotifications: (value: boolean) => void;
   setInputSpellcheckEnabled: (value: boolean) => void;
   setWideChatLayoutEnabled: (value: boolean) => void;
   setShowToolFileIcons: (value: boolean) => void;
@@ -771,6 +780,7 @@ export const useUIStore = create<UIStore>()(
         rightSidebarTab: 'git',
         contextPanelByDirectory: {},
         isSessionSwitcherOpen: false,
+        isSessionDropdownOpen: false,
         activeMainTab: 'chat',
         mainTabGuard: null,
         sidebarOpenBeforeFullscreenTab: null,
@@ -853,6 +863,7 @@ export const useUIStore = create<UIStore>()(
 
         showTerminalQuickKeysOnDesktop: false,
         persistChatDraft: true,
+        showOpenCodeUpdateNotifications: true,
         inputSpellcheckEnabled: false,
         wideChatLayoutEnabled: false,
         showToolFileIcons: true,
@@ -1301,6 +1312,10 @@ export const useUIStore = create<UIStore>()(
 
         setSessionSwitcherOpen: (open) => {
           set({ isSessionSwitcherOpen: open });
+        },
+
+        setSessionDropdownOpen: (open) => {
+          set({ isSessionDropdownOpen: open });
         },
 
         setMainTabGuard: (guard) => {
@@ -1876,6 +1891,9 @@ export const useUIStore = create<UIStore>()(
         setPersistChatDraft: (value) => {
           set({ persistChatDraft: value });
         },
+        setShowOpenCodeUpdateNotifications: (value) => {
+          set({ showOpenCodeUpdateNotifications: value });
+        },
         setInputSpellcheckEnabled: (value) => {
           set({ inputSpellcheckEnabled: value });
         },
@@ -2059,6 +2077,7 @@ export const useUIStore = create<UIStore>()(
           rightSidebarTab: state.rightSidebarTab,
           contextPanelByDirectory: state.contextPanelByDirectory,
           isSessionSwitcherOpen: state.isSessionSwitcherOpen,
+          isSessionDropdownOpen: state.isSessionDropdownOpen,
           activeMainTab: state.activeMainTab,
           sidebarSection: state.sidebarSection,
           settingsPage: state.settingsPage,
@@ -2111,6 +2130,7 @@ export const useUIStore = create<UIStore>()(
           summaryLength: state.summaryLength,
           maxLastMessageLength: state.maxLastMessageLength,
           persistChatDraft: state.persistChatDraft,
+          showOpenCodeUpdateNotifications: state.showOpenCodeUpdateNotifications,
           inputSpellcheckEnabled: state.inputSpellcheckEnabled,
           wideChatLayoutEnabled: state.wideChatLayoutEnabled,
           showToolFileIcons: state.showToolFileIcons,

@@ -65,14 +65,10 @@ import { useSessionMultiSelectStore } from '@/stores/useSessionMultiSelectStore'
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { type SessionGroup, type SessionNode } from './sidebar/types';
 import {
-  type ActiveNowEntry,
-  addActiveNowSession,
   deriveActiveNowSessions,
   deriveLiveActiveNowSessions,
-  persistActiveNowEntries,
-  pruneActiveNowEntries,
-  readActiveNowEntries,
 } from './sidebar/activitySections';
+import { useActiveNowStore } from '@/stores/useActiveNowStore';
 import {
   compareSessions,
   formatProjectLabel,
@@ -186,7 +182,9 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     () => new Map(),
   );
   const safeStorage = React.useMemo(() => getSafeStorage(), []);
-  const [activeNowEntries, setActiveNowEntries] = React.useState<ActiveNowEntry[]>(() => readActiveNowEntries(safeStorage));
+  const activeNowEntries = useActiveNowStore((state) => state.entries);
+  const addActiveNowSessionToStore = useActiveNowStore((state) => state.addSession);
+  const pruneActiveNowEntriesInStore = useActiveNowStore((state) => state.prune);
   const [collapsedProjects, setCollapsedProjects] = React.useState<Set<string>>(new Set());
 
   const [projectRepoStatus, setProjectRepoStatus] = React.useState<Map<string, boolean | null>>(new Map());
@@ -1262,9 +1260,10 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
         || section.project.normalizedPath,
       );
       section.groups.forEach((group) => {
-        const secondaryMeta = group.branch && group.branch !== projectLabel
-          ? { projectLabel, branchLabel: group.branch }
-          : { projectLabel, branchLabel: null };
+        const branchCandidate = group.branch && group.branch !== 'HEAD' && group.branch !== projectLabel
+          ? group.branch
+          : null;
+        const secondaryMeta = { projectLabel, branchLabel: branchCandidate };
 
         const visit = (nodes: SessionNode[]) => {
           nodes.forEach((node) => {
@@ -1360,15 +1359,8 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
       return;
     }
 
-    setActiveNowEntries((prev) => {
-      const next = liveActiveSessions.reduce((entries, session) => addActiveNowSession(entries, session.id), prev);
-      if (next === prev) {
-        return prev;
-      }
-      persistActiveNowEntries(safeStorage, next);
-      return next;
-    });
-  }, [liveActiveSessions, safeStorage, showRecentSection]);
+    liveActiveSessions.forEach((session) => addActiveNowSessionToStore(session.id));
+  }, [addActiveNowSessionToStore, liveActiveSessions, showRecentSection]);
 
   React.useEffect(() => {
     if (!showRecentSection) {
@@ -1380,16 +1372,8 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
       allKnownSessionsById.set(session.id, session);
     });
 
-    const pruned = pruneActiveNowEntries(activeNowEntries, allKnownSessionsById, {
-      hasLoadedSessions: hasLoadedGlobalSessions,
-    });
-    if (pruned.length === activeNowEntries.length && pruned.every((entry, index) => entry.sessionId === activeNowEntries[index]?.sessionId)) {
-      return;
-    }
-
-    setActiveNowEntries(pruned);
-    persistActiveNowEntries(safeStorage, pruned);
-  }, [activeNowEntries, archivedSessions, hasLoadedGlobalSessions, safeStorage, sessions, showRecentSection]);
+    pruneActiveNowEntriesInStore(allKnownSessionsById);
+  }, [archivedSessions, pruneActiveNowEntriesInStore, sessions, showRecentSection]);
 
   const globalPinnedSessions = React.useMemo(() => {
     const pinned = sessions.filter((s) => pinnedSessionIds.has(s.id));
@@ -2237,7 +2221,15 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
             setCurrentSession(options.sessionId);
             return;
           }
-          openNewSessionDraft({ directoryOverride: worktreePath });
+          let projectId: string | null = null;
+          if (options?.projectPath) {
+            const normalizedProjectPath = options.projectPath.replace(/\\/g, '/').replace(/\/+$/, '') || '/';
+            const project = useProjectsStore.getState().projects.find(
+              (p) => (p.path.replace(/\\/g, '/').replace(/\/+$/, '') || '/') === normalizedProjectPath,
+            );
+            projectId = project?.id ?? null;
+          }
+          openNewSessionDraft({ directoryOverride: worktreePath, selectedProjectId: projectId });
         }}
       />
 

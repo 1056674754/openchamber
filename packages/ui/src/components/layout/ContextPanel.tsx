@@ -33,7 +33,7 @@ const CONTEXT_TAB_LABEL_MAX_CHARS = 24;
 const CONTEXT_PANEL_SPLIT_HANDLE_HEIGHT = 3;
 type TranslateFn = ReturnType<typeof useI18n>['t'];
 type ContextPanelTabMode = 'diff' | 'file' | 'context' | 'plan' | 'chat' | 'preview' | 'terminal' | 'browser';
-type ContextPanelTabLike = { id: string; mode: ContextPanelTabMode; targetPath: string | null; dedupeKey: string; label: string | null };
+type ContextPanelTabLike = { id: string; mode: ContextPanelTabMode; targetPath: string | null; dedupeKey: string; label: string | null; readOnly: boolean };
 type SplitDropZone = 'top' | 'bottom' | 'middle';
 
 type PreviewConsoleEvent = {
@@ -497,7 +497,7 @@ const desktopAnnotationToFile = async (
   }
 };
 
-const buildEmbeddedSessionChatURL = (sessionID: string, directory: string | null): string => {
+const buildEmbeddedSessionChatURL = (sessionID: string, directory: string | null, readOnly: boolean): string => {
   if (typeof window === 'undefined') {
     return '';
   }
@@ -505,6 +505,11 @@ const buildEmbeddedSessionChatURL = (sessionID: string, directory: string | null
   const url = new URL(window.location.pathname, window.location.origin);
   url.searchParams.set('ocPanel', 'session-chat');
   url.searchParams.set('sessionId', sessionID);
+  if (readOnly) {
+    url.searchParams.set('readOnly', '1');
+  } else {
+    url.searchParams.delete('readOnly');
+  }
   if (directory && directory.trim().length > 0) {
     url.searchParams.set('directory', directory);
   } else {
@@ -1576,7 +1581,7 @@ const ContextPanelTabContent: React.FC<{
 
   if (tab.mode === 'chat') {
     const sessionID = getSessionIDFromDedupeKey(tab.dedupeKey);
-    const src = sessionID ? buildEmbeddedSessionChatURL(sessionID, directory || null) : '';
+    const src = sessionID ? buildEmbeddedSessionChatURL(sessionID, directory || null, tab.readOnly) : '';
     if (!sessionID || !src) {
       return null;
     }

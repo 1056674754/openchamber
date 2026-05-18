@@ -52,7 +52,7 @@ type Props = {
   setActiveProjectIdOnly: (id: string) => void;
   setActiveMainTab: (tab: MainTab) => void;
   setSessionSwitcherOpen: (open: boolean) => void;
-  openNewSessionDraft: (options?: { directoryOverride?: string | null; targetFolderId?: string }) => void;
+  openNewSessionDraft: (options?: { directoryOverride?: string | null; targetFolderId?: string; selectedProjectId?: string | null }) => void;
   addSessionToFolder: (scopeKey: string, folderId: string, sessionId: string) => void;
   createFolderAndStartRename: (scopeKey: string, parentId?: string | null) => { id: string } | null;
   renamingFolderId: string | null;
@@ -465,7 +465,7 @@ export function SessionGroupSection(props: Props): React.ReactNode {
               if (projectId && projectId !== activeProjectId) setActiveProjectIdOnly(projectId);
               setActiveMainTab('chat');
               if (mobileVariant) setSessionSwitcherOpen(false);
-              openNewSessionDraft({ selectedProjectId: projectId, directoryOverride: group.directory, targetFolderId: folder.id });
+              openNewSessionDraft({ directoryOverride: group.directory, targetFolderId: folder.id, selectedProjectId: projectId });
             }}
             onNewSubFolder={depth === 0 ? () => {
               if (!folderScopeKey) return;
@@ -771,7 +771,7 @@ export function SessionGroupSection(props: Props): React.ReactNode {
                     if (projectId && projectId !== activeProjectId) setActiveProjectIdOnly(projectId);
                     setActiveMainTab('chat');
                     if (mobileVariant) setSessionSwitcherOpen(false);
-                    openNewSessionDraft({ selectedProjectId: projectId, directoryOverride: group.directory });
+                    openNewSessionDraft({ directoryOverride: group.directory, selectedProjectId: projectId });
                   }}
                   className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
                   aria-label={t('sessions.sidebar.group.actions.newDraftInGroupAria', { label: group.label })}

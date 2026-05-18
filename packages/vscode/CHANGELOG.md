@@ -1,3 +1,11 @@
+## [1.11.1-dev-merge] - 2026-05-18
+
+- Chat/Sessions: added a session switcher to the chat header, making it faster to jump between recent chats.
+- Chat/Subagents: opened subagent sessions read-only in the context panel and made subagent chats read-only.
+- Chat/UI: animated sorted-mode tool paths more consistently and guarded tooltip crashes more defensively.
+- Usage: quota reset times now display in your local timezone.
+- Skills: the skills catalog now keeps the selected source label visible when switching sources.
+
 ## [1.10.4] - 2026-05-09
 
 - Chat/Input: collapsed model, variant, and agent labels more gracefully on narrow widths, keeping prompt controls usable in compact editor panels.

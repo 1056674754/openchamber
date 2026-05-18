@@ -146,10 +146,17 @@ const MiniChatBootstrap: React.FC<{ config: MiniChatConfig }> = ({ config }) => 
     };
   }, [isInitialized]);
 
+  const directoryBootstrappedRef = React.useRef(false);
   React.useEffect(() => {
+    if (directoryBootstrappedRef.current) return;
     if (config.mode !== 'session') return;
-    if (!config.directory || currentDirectory === config.directory) return;
+    if (!config.directory) return;
+    if (currentDirectory === config.directory) {
+      directoryBootstrappedRef.current = true;
+      return;
+    }
     setDirectory(config.directory, { showOverlay: false });
+    directoryBootstrappedRef.current = true;
   }, [config.directory, config.mode, currentDirectory, setDirectory]);
 
   React.useEffect(() => {
@@ -165,14 +172,25 @@ const MiniChatBootstrap: React.FC<{ config: MiniChatConfig }> = ({ config }) => 
     if (agentsCount === 0) void loadAgents();
   }, [agentsCount, isConnected, loadAgents, loadProviders, providersCount, targetDirectoryServerReady]);
 
+  const sessionBootstrappedRef = React.useRef(false);
   React.useEffect(() => {
+    if (sessionBootstrappedRef.current) return;
     if (config.mode !== 'session' || !config.sessionId) return;
     if (!isInitialized || !targetDirectoryServerReady) return;
-    if (currentSessionId === config.sessionId) return;
+    if (currentSessionId === config.sessionId) {
+      sessionBootstrappedRef.current = true;
+      return;
+    }
+    if (currentSessionId) {
+      // User already has a different session selected (e.g. from a prior switch); don't override.
+      sessionBootstrappedRef.current = true;
+      return;
+    }
     const session = sessions.find((entry) => entry.id === config.sessionId);
     const directory = (session as { directory?: string | null } | undefined)?.directory ?? config.directory;
     if (!directory) return;
     setCurrentSession(config.sessionId, directory);
+    sessionBootstrappedRef.current = true;
   }, [config, currentSessionId, isInitialized, sessions, setCurrentSession, targetDirectoryServerReady]);
 
   React.useEffect(() => {

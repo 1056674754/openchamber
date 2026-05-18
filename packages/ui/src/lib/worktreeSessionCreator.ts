@@ -25,8 +25,21 @@ import {
   rejectPendingDraftWorktreeRequest,
   resolvePendingDraftWorktreeRequest,
 } from '@/lib/worktrees/pendingDraftWorktree';
+import { DEFAULT_SERVER_ID } from '@/lib/opencode/server-registry';
 
 const normalizePath = (value: string): string => value.replace(/\\/g, '/').replace(/\/+$/, '') || value;
+
+// [OPENCHAMBER-FORK] 2025-05-18 v1.11.1-dev-merge
+// Ensure a worktree directory is registered as a project when the parent project
+// belongs to a remote server. Without this, the remote SyncProvider never creates
+// a child store for the worktree path, so SSE events are dropped and sessions are
+// invisible on startup.
+const ensureWorktreeProject = (worktreePath: string, projectRef: ProjectRef) => {
+  const project = useProjectsStore.getState().projects.find((p) => p.id === projectRef.id);
+  const serverId = project?.serverId;
+  if (!serverId || serverId === DEFAULT_SERVER_ID) return;
+  useProjectsStore.getState().ensureRemoteProject(worktreePath, serverId);
+};
 
 const resolveProjectRef = (directory: string): ProjectRef | null => {
   const normalized = normalizePath(directory);
@@ -236,6 +249,7 @@ const createInstantWorktreeDraft = async (options?: {
     });
 
     resolvePendingDraftWorktreeRequest(pendingRequestId, metadata.path);
+    ensureWorktreeProject(metadata.path, projectRef); // [OPENCHAMBER-FORK]
     useSessionUIStore.getState().overrideNewSessionDraftTarget({
       projectId: projectRef.id,
       directoryOverride: metadata.path,
@@ -327,6 +341,7 @@ export async function createWorktreeOnly(): Promise<string | null> {
       setupCommands,
     });
 
+    ensureWorktreeProject(metadata.path, projectRef); // [OPENCHAMBER-FORK]
 
     return metadata.path;
   } catch (error) {
@@ -412,6 +427,8 @@ export async function createWorktreeSessionForBranch(
       createdFromBranch: options?.createdFromBranch || rootBranch,
       kind,
     };
+
+    ensureWorktreeProject(metadata.path, projectRef); // [OPENCHAMBER-FORK]
 
     // Create the session
     const sessionStore = useSessionUIStore.getState();
@@ -513,6 +530,8 @@ export async function createWorktreeSessionForNewBranch(
         createdFromBranch: options?.createdFromBranch || rootBranch || start,
         kind,
       };
+
+      ensureWorktreeProject(metadata.path, projectRef); // [OPENCHAMBER-FORK]
 
       const sessionStore = useSessionUIStore.getState();
       const session = await sessionStore.createSession(undefined, metadata.path);
