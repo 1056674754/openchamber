@@ -62,6 +62,7 @@ const normalizeDirectoryKey = (directory: string): string =>
 function findProjectForDirectory(directory: string) {
   const normalizedDir = normalizeDirectoryKey(directory)
   const projects = useProjectsStore.getState().projects
+
   let best: typeof projects[number] | null = null
   for (const project of projects) {
     const projectPath = normalizeDirectoryKey(project.path)
@@ -72,7 +73,19 @@ function findProjectForDirectory(directory: string) {
       best = project
     }
   }
-  return best
+  if (best) return best
+
+  const worktreesByProject = useSessionUIStore.getState().availableWorktreesByProject
+  for (const [projectPath, worktrees] of worktreesByProject.entries()) {
+    for (const wt of worktrees) {
+      const wp = normalizeDirectoryKey(wt.path)
+      if (wp && (normalizedDir === wp || normalizedDir.startsWith(`${wp}/`))) {
+        const match = projects.find((p) => normalizeDirectoryKey(p.path) === normalizeDirectoryKey(projectPath))
+        if (match) return match
+      }
+    }
+  }
+  return null
 }
 
 /** Get the SDK client for a session's server. Falls back to default server. */
@@ -103,8 +116,7 @@ export function resolveSdkForDirectory(directory: string): OpencodeClient {
     }
     throw new Error(`Remote server "${project.serverId}" is not available for ${normalizedDir}`)
   }
-  // Fallback: use the DEFAULT server's client from the registry, NOT the module-level
-  // _sdk which may have been overwritten by a remote SyncProvider's setActionRefs.
+  console.log(`[resolveSdk] dir="${normalizedDir}" → FALLBACK to default. matchedProject:`, project?.id, project?.serverId, project?.path)
   const defaultConn = serverRegistry.get(DEFAULT_SERVER_ID)
   if (defaultConn) return defaultConn.client
   return sdk()
@@ -348,6 +360,7 @@ export async function createSession(
   title?: string,
   directoryOverride?: string | null,
   parentID?: string | null,
+  serverId?: string | null,
 ): Promise<Session | null> {
   try {
     if (!directoryOverride) {
@@ -356,7 +369,23 @@ export async function createSession(
     }
     const targetDir = directoryOverride
 
-    const client = resolveSdkForDirectory(targetDir)
+    let client: OpencodeClient
+    if (serverId && serverId !== DEFAULT_SERVER_ID) {
+      const conn = serverRegistry.get(serverId)
+      if (conn) {
+        client = conn.client
+      } else {
+        throw new Error(`Remote server "${serverId}" is not available for ${targetDir}`)
+      }
+    } else {
+      const defaultConn = serverRegistry.get(DEFAULT_SERVER_ID)
+      if (defaultConn) {
+        client = defaultConn.client
+      } else {
+        client = sdk()
+      }
+    }
+
     const result = await client.session.create({
       directory: targetDir,
       title,
@@ -366,31 +395,12 @@ export async function createSession(
     if (!session) return null
 
       const sessionDirectory = (session as { directory?: string }).directory ?? directoryOverride ?? null
-      // Pre-populate routing index so SSE events arriving before session.created
-      // can be routed to the correct child store
       if (sessionDirectory) {
         registerSessionDirectory(session.id, sessionDirectory)
       }
 
-      const normalizedDir = targetDir.replace(/\\/g, '/').replace(/\/+$/, '') || '/'
-      const project = useProjectsStore.getState().projects.find(
-        (p) => p.path === normalizedDir && p.serverId && p.serverId !== DEFAULT_SERVER_ID,
-      )
-      if (project?.serverId) {
-        serverRegistry.indexSession(session.id, project.serverId)
-      }
-
-      const projectsState = useProjectsStore.getState().projects
-      const normalizedProjects = projectsState
-        .map((p) => ({
-          id: p.id,
-          normalizedPath: (p.path.replace(/\\/g, '/').replace(/\/+$/, '') || '/'),
-          serverId: p.serverId,
-        }))
-      const worktreesByProject = useSessionUIStore.getState().availableWorktreesByProject
-      const ownerProjectId = resolveProjectIdViaPathPrefix(session, normalizedProjects, worktreesByProject)
-      if (ownerProjectId) {
-        useSessionProjectStore.getState().bind(session.id, ownerProjectId)
+      if (serverId && serverId !== DEFAULT_SERVER_ID) {
+        serverRegistry.indexSession(session.id, serverId)
       }
 
       useSessionUIStore.getState().setCurrentSession(session.id, sessionDirectory)

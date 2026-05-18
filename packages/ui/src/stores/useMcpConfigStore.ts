@@ -9,6 +9,7 @@ import { refreshAfterOpenCodeRestart } from '@/stores/useAgentsStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { opencodeClient } from '@/lib/opencode/client';
 import { resolveApiUrl } from "@/lib/api/serverUrl";
+import { resolveBaseUrl } from "@/sync/session-actions";
 
 export type McpScope = 'user' | 'project';
 
@@ -108,10 +109,21 @@ const DEFAULT_MCP_CACHE_KEY = '__default__';
 const mcpLastLoadedAt = new Map<string, number>();
 const mcpLoadInFlight = new Map<string, Promise<boolean>>();
 
-const getMcpCacheKey = (directory: string | null, serverBaseUrl?: string): string => {
+const getMcpCacheKey = (directory: string | null, baseUrl?: string): string => {
   const dir = directory?.trim() || DEFAULT_MCP_CACHE_KEY;
-  if (serverBaseUrl) return `${serverBaseUrl}::${dir}`;
+  if (baseUrl) return `${baseUrl}::${dir}`;
   return dir;
+};
+
+const resolveMcpBaseUrl = (directory: string | null, explicitBaseUrl?: string): string | undefined => {
+  if (explicitBaseUrl) return explicitBaseUrl.replace(/\/api\/?$/, '');
+  if (!directory) return undefined;
+  try {
+    const url = resolveBaseUrl(directory);
+    return url ? url.replace(/\/api\/?$/, '') : undefined;
+  } catch {
+    return undefined;
+  }
 };
 
 // ============== STORE ==============
@@ -150,7 +162,8 @@ export const useMcpConfigStore = create<McpConfigStore>()(
 
         loadMcpConfigs: async (options) => {
           const configDirectory = getConfigDirectory();
-          const cacheKey = getMcpCacheKey(configDirectory, options?.serverBaseUrl);
+          const baseUrl = resolveMcpBaseUrl(configDirectory, options?.serverBaseUrl);
+          const cacheKey = getMcpCacheKey(configDirectory, baseUrl);
           const now = Date.now();
           const loadedAt = mcpLastLoadedAt.get(cacheKey) ?? 0;
           const hasCachedConfigs = get().mcpServers.length > 0;
@@ -168,7 +181,7 @@ export const useMcpConfigStore = create<McpConfigStore>()(
             set({ isLoading: true });
             try {
               const queryParams = configDirectory ? `?directory=${encodeURIComponent(configDirectory)}` : '';
-              const response = await fetch(resolveApiUrl(`/api/config/mcp${queryParams}`, options?.serverBaseUrl), {
+              const response = await fetch(resolveApiUrl(`/api/config/mcp${queryParams}`, baseUrl), {
                 headers: configDirectory ? { 'x-opencode-directory': configDirectory } : undefined,
               });
               if (!response.ok) {
@@ -199,8 +212,9 @@ export const useMcpConfigStore = create<McpConfigStore>()(
           try {
             const body = buildMcpBody(config);
             const configDirectory = getConfigDirectory();
+            const baseUrl = resolveMcpBaseUrl(configDirectory, serverBaseUrl);
             const queryParams = configDirectory ? `?directory=${encodeURIComponent(configDirectory)}` : '';
-            const response = await fetch(resolveApiUrl(`/api/config/mcp/${encodeURIComponent(config.name)}${queryParams}`, serverBaseUrl), {
+            const response = await fetch(resolveApiUrl(`/api/config/mcp/${encodeURIComponent(config.name)}${queryParams}`, baseUrl), {
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',
@@ -214,7 +228,7 @@ export const useMcpConfigStore = create<McpConfigStore>()(
               throw new Error(payload?.error || 'Failed to create MCP server');
             }
 
-            invalidateMcpCache(configDirectory, serverBaseUrl);
+            invalidateMcpCache(configDirectory, baseUrl);
 
             if (payload?.requiresReload) {
               requiresReload = true;
@@ -223,7 +237,7 @@ export const useMcpConfigStore = create<McpConfigStore>()(
                 delayMs: payload.reloadDelayMs ?? CLIENT_RELOAD_DELAY_MS,
                 scopes: ['all'],
               });
-              await get().loadMcpConfigs({ force: true, serverBaseUrl });
+              await get().loadMcpConfigs({ force: true, serverBaseUrl: baseUrl });
               return {
                 ok: true,
                 reloadFailed: payload?.reloadFailed === true,
@@ -232,7 +246,7 @@ export const useMcpConfigStore = create<McpConfigStore>()(
               };
             }
 
-            await get().loadMcpConfigs({ force: true, serverBaseUrl });
+            await get().loadMcpConfigs({ force: true, serverBaseUrl: baseUrl });
             return {
               ok: true,
               reloadFailed: payload?.reloadFailed === true,
@@ -253,8 +267,9 @@ export const useMcpConfigStore = create<McpConfigStore>()(
           try {
             const body = buildMcpBody(config);
             const configDirectory = getConfigDirectory();
+            const baseUrl = resolveMcpBaseUrl(configDirectory, serverBaseUrl);
             const queryParams = configDirectory ? `?directory=${encodeURIComponent(configDirectory)}` : '';
-            const response = await fetch(resolveApiUrl(`/api/config/mcp/${encodeURIComponent(name)}${queryParams}`, serverBaseUrl), {
+            const response = await fetch(resolveApiUrl(`/api/config/mcp/${encodeURIComponent(name)}${queryParams}`, baseUrl), {
               method: 'PATCH',
               headers: {
                 'Content-Type': 'application/json',
@@ -268,7 +283,7 @@ export const useMcpConfigStore = create<McpConfigStore>()(
               throw new Error(payload?.error || 'Failed to update MCP server');
             }
 
-            invalidateMcpCache(configDirectory, serverBaseUrl);
+            invalidateMcpCache(configDirectory, baseUrl);
 
             if (payload?.requiresReload) {
               requiresReload = true;
@@ -277,7 +292,7 @@ export const useMcpConfigStore = create<McpConfigStore>()(
                 delayMs: payload.reloadDelayMs ?? CLIENT_RELOAD_DELAY_MS,
                 scopes: ['all'],
               });
-              await get().loadMcpConfigs({ force: true, serverBaseUrl });
+              await get().loadMcpConfigs({ force: true, serverBaseUrl: baseUrl });
               return {
                 ok: true,
                 reloadFailed: payload?.reloadFailed === true,
@@ -286,7 +301,7 @@ export const useMcpConfigStore = create<McpConfigStore>()(
               };
             }
 
-            await get().loadMcpConfigs({ force: true, serverBaseUrl });
+            await get().loadMcpConfigs({ force: true, serverBaseUrl: baseUrl });
             return {
               ok: true,
               reloadFailed: payload?.reloadFailed === true,
@@ -306,8 +321,9 @@ export const useMcpConfigStore = create<McpConfigStore>()(
           let requiresReload = false;
           try {
             const configDirectory = getConfigDirectory();
+            const baseUrl = resolveMcpBaseUrl(configDirectory, serverBaseUrl);
             const queryParams = configDirectory ? `?directory=${encodeURIComponent(configDirectory)}` : '';
-            const response = await fetch(resolveApiUrl(`/api/config/mcp/${encodeURIComponent(name)}${queryParams}`, serverBaseUrl), {
+            const response = await fetch(resolveApiUrl(`/api/config/mcp/${encodeURIComponent(name)}${queryParams}`, baseUrl), {
               method: 'DELETE',
               headers: configDirectory ? { 'x-opencode-directory': configDirectory } : undefined,
             });
@@ -317,7 +333,7 @@ export const useMcpConfigStore = create<McpConfigStore>()(
               throw new Error(payload?.error || 'Failed to delete MCP server');
             }
 
-            invalidateMcpCache(configDirectory, serverBaseUrl);
+            invalidateMcpCache(configDirectory, baseUrl);
 
             if (payload?.requiresReload) {
               requiresReload = true;
@@ -331,7 +347,7 @@ export const useMcpConfigStore = create<McpConfigStore>()(
             if (get().selectedMcpName === name) {
               set({ selectedMcpName: null });
             }
-            await get().loadMcpConfigs({ force: true, serverBaseUrl });
+            await get().loadMcpConfigs({ force: true, serverBaseUrl: baseUrl });
             return {
               ok: true,
               reloadFailed: payload?.reloadFailed === true,

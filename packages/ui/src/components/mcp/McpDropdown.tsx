@@ -21,7 +21,6 @@ import { computeMcpHealth, useMcpStore } from '@/stores/useMcpStore';
 import { McpIcon } from '@/components/icons/McpIcon';
 import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
-import { useSettingsServerBaseUrl } from '@/hooks/useSettingsServerBaseUrl';
 
 const statusTooltip = (
   status: McpStatus | undefined,
@@ -69,7 +68,6 @@ export const McpDropdownContent: React.FC<McpDropdownContentProps> = ({ active, 
   const { t } = useI18n();
   const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
   const directory = currentDirectory ?? null;
-  const serverBaseUrl = useSettingsServerBaseUrl();
   const status = useMcpStore((state) => state.getStatusForDirectory(directory));
   const refresh = useMcpStore((state) => state.refresh);
   const connect = useMcpStore((state) => state.connect);
@@ -84,16 +82,16 @@ export const McpDropdownContent: React.FC<McpDropdownContentProps> = ({ active, 
   }, [refresh, directory]);
 
   React.useEffect(() => {
-    void loadMcpConfigs({ force: true, serverBaseUrl });
-  }, [loadMcpConfigs, serverBaseUrl]);
+    void loadMcpConfigs({ force: true });
+  }, [loadMcpConfigs]);
 
   React.useEffect(() => {
     if (!active) return;
     void Promise.all([
       refresh({ directory, silent: true }),
-      loadMcpConfigs({ force: true, serverBaseUrl }),
+      loadMcpConfigs({ force: true }),
     ]);
-  }, [active, refresh, directory, loadMcpConfigs, serverBaseUrl]);
+  }, [active, refresh, directory, loadMcpConfigs]);
 
   const sortedNames = React.useMemo(() => {
     const names = new Set<string>(Object.keys(status));
@@ -242,22 +240,20 @@ export const McpDropdown: React.FC<McpDropdownProps> = ({ headerIconButtonClass 
 
   const [busyName, setBusyName] = React.useState<string | null>(null);
 
-  const serverBaseUrl = useSettingsServerBaseUrl();
-
   // Fetch on mount and when directory changes
   React.useEffect(() => {
     void refresh({ directory, silent: true });
-    void loadMcpConfigs({ force: true, serverBaseUrl });
-  }, [refresh, directory, loadMcpConfigs, serverBaseUrl]);
+    void loadMcpConfigs({ force: true });
+  }, [refresh, directory, loadMcpConfigs]);
 
   // Refresh when dropdown opens
   React.useEffect(() => {
     if (!open) return;
     void Promise.all([
       refresh({ directory, silent: true }),
-      loadMcpConfigs({ force: true, serverBaseUrl }),
+      loadMcpConfigs({ force: true }),
     ]);
-  }, [open, refresh, directory, loadMcpConfigs, serverBaseUrl]);
+  }, [open, refresh, directory, loadMcpConfigs]);
 
   const health = React.useMemo(() => computeMcpHealth(status), [status]);
 
