@@ -1440,7 +1440,15 @@ class OpencodeService {
   }
 
   async cloneRepository(input: { remoteUrl: string; destinationPath: string; gitIdentityId?: string | null }): Promise<{ success: boolean; path: string; output?: string }> {
-    const response = await fetch(`${this.baseUrl}/fs/clone`, {
+    let fsBaseUrl: string = this.baseUrl;
+    for (const e of getAllSyncStores()) {
+      if (e.serverId === DEFAULT_SERVER_ID) continue;
+      if (e.childStores.children.has(input.destinationPath)) {
+        const conn = serverRegistry.get(e.serverId);
+        if (conn) { fsBaseUrl = conn.config.baseUrl; break; }
+      }
+    }
+    const response = await fetch(`${fsBaseUrl}/fs/clone`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
