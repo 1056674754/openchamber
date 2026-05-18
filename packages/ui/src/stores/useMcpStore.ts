@@ -3,6 +3,8 @@ import { devtools } from 'zustand/middleware';
 import type { McpStatus } from '@opencode-ai/sdk/v2';
 import { opencodeClient } from '@/lib/opencode/client';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
+import { resolveSdkForDirectory } from '@/sync/session-actions';
+import { serverRegistry, DEFAULT_SERVER_ID } from '@/lib/opencode/server-registry';
 
 export type McpStatusMap = Record<string, McpStatus>;
 export type McpRuntimeDiagnostic = {
@@ -31,12 +33,19 @@ const normalizeDirectory = (directory: string | null | undefined): string | null
 
 const toKey = (directory: string | null | undefined): string => normalizeDirectory(directory) ?? '__global__';
 
+/**
+ * Get the SDK client for a directory's owning server.
+ * Uses resolveSdkForDirectory which maps directory → project → serverId → server's client.
+ * Falls back to default server when directory is unresolvable.
+ */
 const getMcpApiClient = (directory: string | null | undefined) => {
   const normalized = normalizeDirectory(directory);
   if (!normalized) {
+    const defaultConn = serverRegistry.get(DEFAULT_SERVER_ID);
+    if (defaultConn) return defaultConn.client;
     return opencodeClient.getApiClient();
   }
-  return opencodeClient.getScopedApiClient(normalized);
+  return resolveSdkForDirectory(normalized);
 };
 
 export const computeMcpHealth = (status: McpStatusMap | null | undefined): McpHealth => {
