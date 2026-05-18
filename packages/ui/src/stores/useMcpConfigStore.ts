@@ -108,8 +108,10 @@ const DEFAULT_MCP_CACHE_KEY = '__default__';
 const mcpLastLoadedAt = new Map<string, number>();
 const mcpLoadInFlight = new Map<string, Promise<boolean>>();
 
-const getMcpCacheKey = (directory: string | null): string => {
-  return directory?.trim() || DEFAULT_MCP_CACHE_KEY;
+const getMcpCacheKey = (directory: string | null, serverBaseUrl?: string): string => {
+  const dir = directory?.trim() || DEFAULT_MCP_CACHE_KEY;
+  if (serverBaseUrl) return `${serverBaseUrl}::${dir}`;
+  return dir;
 };
 
 // ============== STORE ==============
@@ -129,8 +131,8 @@ interface McpConfigStore {
   getMcpByName: (name: string) => McpServerWithScope | undefined;
 }
 
-const invalidateMcpCache = (directory: string | null) => {
-  mcpLastLoadedAt.delete(getMcpCacheKey(directory));
+const invalidateMcpCache = (directory: string | null, serverBaseUrl?: string) => {
+  mcpLastLoadedAt.delete(getMcpCacheKey(directory, serverBaseUrl));
 };
 
 export const useMcpConfigStore = create<McpConfigStore>()(
@@ -148,7 +150,7 @@ export const useMcpConfigStore = create<McpConfigStore>()(
 
         loadMcpConfigs: async (options) => {
           const configDirectory = getConfigDirectory();
-          const cacheKey = getMcpCacheKey(configDirectory);
+          const cacheKey = getMcpCacheKey(configDirectory, options?.serverBaseUrl);
           const now = Date.now();
           const loadedAt = mcpLastLoadedAt.get(cacheKey) ?? 0;
           const hasCachedConfigs = get().mcpServers.length > 0;
@@ -212,7 +214,7 @@ export const useMcpConfigStore = create<McpConfigStore>()(
               throw new Error(payload?.error || 'Failed to create MCP server');
             }
 
-            invalidateMcpCache(configDirectory);
+            invalidateMcpCache(configDirectory, serverBaseUrl);
 
             if (payload?.requiresReload) {
               requiresReload = true;
@@ -221,7 +223,7 @@ export const useMcpConfigStore = create<McpConfigStore>()(
                 delayMs: payload.reloadDelayMs ?? CLIENT_RELOAD_DELAY_MS,
                 scopes: ['all'],
               });
-              await get().loadMcpConfigs({ force: true });
+              await get().loadMcpConfigs({ force: true, serverBaseUrl });
               return {
                 ok: true,
                 reloadFailed: payload?.reloadFailed === true,
@@ -230,7 +232,7 @@ export const useMcpConfigStore = create<McpConfigStore>()(
               };
             }
 
-            await get().loadMcpConfigs({ force: true });
+            await get().loadMcpConfigs({ force: true, serverBaseUrl });
             return {
               ok: true,
               reloadFailed: payload?.reloadFailed === true,
@@ -266,7 +268,7 @@ export const useMcpConfigStore = create<McpConfigStore>()(
               throw new Error(payload?.error || 'Failed to update MCP server');
             }
 
-            invalidateMcpCache(configDirectory);
+            invalidateMcpCache(configDirectory, serverBaseUrl);
 
             if (payload?.requiresReload) {
               requiresReload = true;
@@ -275,7 +277,7 @@ export const useMcpConfigStore = create<McpConfigStore>()(
                 delayMs: payload.reloadDelayMs ?? CLIENT_RELOAD_DELAY_MS,
                 scopes: ['all'],
               });
-              await get().loadMcpConfigs({ force: true });
+              await get().loadMcpConfigs({ force: true, serverBaseUrl });
               return {
                 ok: true,
                 reloadFailed: payload?.reloadFailed === true,
@@ -284,7 +286,7 @@ export const useMcpConfigStore = create<McpConfigStore>()(
               };
             }
 
-            await get().loadMcpConfigs({ force: true });
+            await get().loadMcpConfigs({ force: true, serverBaseUrl });
             return {
               ok: true,
               reloadFailed: payload?.reloadFailed === true,
@@ -315,7 +317,7 @@ export const useMcpConfigStore = create<McpConfigStore>()(
               throw new Error(payload?.error || 'Failed to delete MCP server');
             }
 
-            invalidateMcpCache(configDirectory);
+            invalidateMcpCache(configDirectory, serverBaseUrl);
 
             if (payload?.requiresReload) {
               requiresReload = true;
@@ -329,7 +331,7 @@ export const useMcpConfigStore = create<McpConfigStore>()(
             if (get().selectedMcpName === name) {
               set({ selectedMcpName: null });
             }
-            await get().loadMcpConfigs({ force: true });
+            await get().loadMcpConfigs({ force: true, serverBaseUrl });
             return {
               ok: true,
               reloadFailed: payload?.reloadFailed === true,
