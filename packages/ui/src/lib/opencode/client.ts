@@ -303,7 +303,7 @@ class OpencodeService {
     return this.currentDirectory;
   }
 
-  async withDirectory<T>(directory: string | undefined | null, fn: () => Promise<T>): Promise<T> {
+  async withDirectory<T>(directory: string | undefined | null, fn: () => Promise<T>, sessionID?: string): Promise<T> {
     const runWithContext = async (): Promise<T> => {
       if (directory === undefined || directory === null) {
         return fn();
@@ -313,10 +313,8 @@ class OpencodeService {
       const previousClient = this.client;
       this.currentDirectory = this.normalizeCandidatePath(directory) ?? directory;
       try {
-        // When the directory belongs to a remote server, swap the SDK client
-        // so all wrapper methods (listAgents, createSession, sendMessage, etc.)
-        // route to the correct server's baseUrl.
-        const remoteClient = resolveSdkForDirectory(this.currentDirectory)
+        // [OPENCHAMBER-FORK] Pass sessionID for authoritative server lookup
+        const remoteClient = resolveSdkForDirectory(this.currentDirectory, sessionID)
         if (remoteClient) {
           this.client = remoteClient
         }

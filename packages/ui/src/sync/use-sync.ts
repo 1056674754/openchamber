@@ -190,7 +190,7 @@ export function useSync() {
   // Fetch messages from API
   const fetchMessages = useCallback(
     async (sessionID: string, limit: number, before?: string) => {
-      const client = resolveSdkForDirectory(directory)
+      const client = resolveSdkForDirectory(directory, sessionID)
       const result = await retry(() =>
         client.session.messages({ sessionID, directory, limit, before }),
       )
@@ -300,7 +300,7 @@ export function useSync() {
         if (!hasSession || force) {
           try {
             const sessionDir = useSessionUIStore.getState().getDirectoryForSession(sessionID) || directory
-            const client = resolveSdkForDirectory(sessionDir)
+            const client = resolveSdkForDirectory(sessionDir, sessionID)
             const result = await retry(() => client.session.get({ sessionID, directory }))
             if (result.data) {
               const s = store.getState()
@@ -324,7 +324,7 @@ export function useSync() {
 
         if (force) {
           const sessionDir = useSessionUIStore.getState().getDirectoryForSession(sessionID) || directory
-          const client = resolveSdkForDirectory(sessionDir)
+          const client = resolveSdkForDirectory(sessionDir, sessionID)
           await Promise.all([
             client.session.status({}).then((res) => {
               if (!res.data) return

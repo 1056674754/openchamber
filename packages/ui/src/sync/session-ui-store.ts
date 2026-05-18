@@ -83,7 +83,7 @@ function routeMessage(params: {
   }
 
   if (params.inputMode === "shell") {
-    const client = resolveSdkForDirectory(sessionDirectory)
+    const client = resolveSdkForDirectory(sessionDirectory, params.sessionId)
     return client.session.shell({
       sessionID: params.sessionId,
       directory: sessionDirectory,
@@ -123,7 +123,7 @@ function routeMessage(params: {
           variant: params.variant,
           files: params.files,
           messageId: messageID,
-        })).then(() => {}),
+        }), params.sessionId).then(() => {}),
       })
     }
   }
@@ -147,7 +147,7 @@ function routeMessage(params: {
       files: params.files,
       additionalParts: params.additionalParts,
       messageId: messageID,
-    })).then(() => {}),
+    }), params.sessionId).then(() => {}),
   })
 }
 

@@ -114,9 +114,23 @@ export function setDirectoryServerId(directory: string, serverId: string): void 
   _directoryServerCache.set(normalizeDirectoryKey(directory), serverId);
 }
 
-/** Resolve the correct SDK client for a directory by looking up its project's serverId. */
-export function resolveSdkForDirectory(directory: string): OpencodeClient {
+/** Resolve the correct SDK client for a directory by looking up its project's serverId.
+ *  When sessionID is provided, uses the authoritative serverRegistry session index. */
+export function resolveSdkForDirectory(directory: string, sessionID?: string): OpencodeClient {
   const normalizedDir = normalizeDirectoryKey(directory)
+
+  // [OPENCHAMBER-FORK] 2025-05-18 v1.11.1-dev-merge
+  // Authoritative source: serverRegistry session index. No path matching.
+  if (sessionID) {
+    const sessionServerId = serverRegistry.getServerForSession(sessionID)
+    if (sessionServerId && sessionServerId !== DEFAULT_SERVER_ID) {
+      const conn = serverRegistry.get(sessionServerId)
+      if (conn) {
+        console.log(`[resolveSdk] session=${sessionID} → server=${sessionServerId} url=${conn.config.baseUrl}`)
+        return conn.client
+      }
+    }
+  }
 
   // Check module-level cache first — populated synchronously by discoverWorktreeDirectories
   const cachedServerId = _directoryServerCache.get(normalizedDir)
@@ -317,7 +331,7 @@ function getSessionReplyClient(sessionId?: string): OpencodeClient {
     ? useSessionUIStore.getState().getDirectoryForSession(sessionId)
     : null
   if (directory) {
-    return resolveSdkForDirectory(directory)
+    return resolveSdkForDirectory(directory, sessionId)
   }
   throw new Error(`Reply target directory for session ${sessionId ?? "(unknown)"} is not available`)
 }
@@ -372,7 +386,7 @@ function getRequestReplyClient(
   if (conn) return conn.client
   const requestDirectory = resolveDirectoryForBlockingRequest(type, sessionId, requestId)
   if (requestDirectory) {
-    return resolveSdkForDirectory(requestDirectory)
+    return resolveSdkForDirectory(requestDirectory, sessionId)
   }
   return getSessionReplyClient(sessionId)
 }
