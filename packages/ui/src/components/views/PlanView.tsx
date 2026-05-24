@@ -109,9 +109,9 @@ const toDisplayPath = (resolvedPath: string, options: { currentDirectory: string
 
 const resolveProjectRefForDirectory = (
   directory: string,
-  projects: Array<{ id: string; path: string }>,
+  projects: Array<{ id: string; path: string; serverId?: string; label?: string }>,
   activeProjectId: string | null,
-): { id: string; path: string } | null => {
+): { id: string; path: string; serverId?: string; label?: string } | null => {
   const normalized = normalize(directory.trim());
   if (!normalized) {
     return null;
@@ -124,7 +124,12 @@ const resolveProjectRefForDirectory = (
   if (activeProject?.path) {
     const activePath = normalize(activeProject.path);
     if (normalized === activePath || normalized.startsWith(`${activePath}/`)) {
-      return { id: activeProject.id, path: activeProject.path };
+      return {
+        id: activeProject.id,
+        path: activeProject.path,
+        serverId: activeProject.serverId,
+        label: activeProject.label,
+      };
     }
   }
 
@@ -135,7 +140,12 @@ const resolveProjectRefForDirectory = (
     })
     .sort((left, right) => normalize(right.path).length - normalize(left.path).length)[0];
 
-  return match ? { id: match.id, path: match.path } : null;
+  return match ? {
+    id: match.id,
+    path: match.path,
+    serverId: match.serverId,
+    label: match.label,
+  } : null;
 };
 
 type SelectedLineRange = {

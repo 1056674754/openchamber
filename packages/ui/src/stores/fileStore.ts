@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { devtools, persist, createJSONStorage } from "zustand/middleware";
 import type { AttachedFile } from "./types/sessionTypes";
 import { getSafeStorage } from "./utils/safeStorage";
+import { resolveApiUrl } from "@/lib/api/serverUrl";
 
 interface FileState {
     attachedFiles: AttachedFile[];
@@ -103,7 +104,7 @@ const toFileUrl = (inputPath: string): string => {
 };
 
 const readRawFileAsDataUrl = async (absolutePath: string, baseUrl: string = ''): Promise<string> => {
-    const response = await fetch(`${baseUrl}/api/fs/raw?${new URLSearchParams({
+    const response = await fetch(`${resolveApiUrl('/api/fs/raw', baseUrl)}?${new URLSearchParams({
         path: absolutePath,
         allowOutsideWorkspace: 'true',
     }).toString()}`);

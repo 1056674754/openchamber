@@ -15,6 +15,7 @@ import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useI18n } from '@/lib/i18n';
 import { useDesktopSshStore } from '@/stores/useDesktopSshStore';
 import { resolveInstanceLabel } from '@/lib/desktopSsh';
+import { serverRegistry, type ServerConnection } from '@/lib/opencode/server-registry';
 
 export interface SortableProjectItemProps {
   id: string;
@@ -56,6 +57,34 @@ export type SortableDragHandleProps = {
   setActivatorNodeRef: ReturnType<typeof useSortable>['setActivatorNodeRef'];
 };
 
+function readServerRegistrySnapshot(serverId?: string): {
+  label?: string;
+  healthStatus: ServerConnection['healthStatus'];
+} {
+  if (!serverId) {
+    return { healthStatus: null };
+  }
+  const connection = serverRegistry.get(serverId);
+  return {
+    label: connection?.config.label,
+    healthStatus: connection?.healthStatus ?? null,
+  };
+}
+
+function useServerRegistrySnapshot(serverId?: string) {
+  const [snapshot, setSnapshot] = React.useState(() => readServerRegistrySnapshot(serverId));
+
+  React.useEffect(() => {
+    setSnapshot(readServerRegistrySnapshot(serverId));
+    if (!serverId) return;
+    return serverRegistry.onHealthChange(serverId, () => {
+      setSnapshot(readServerRegistrySnapshot(serverId));
+    });
+  }, [serverId]);
+
+  return snapshot;
+}
+
 export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
   id,
   projectLabel,
@@ -91,12 +120,14 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
 }) => {
   const { t } = useI18n();
   const { currentTheme } = useThemeSystem();
+  const registrySnapshot = useServerRegistrySnapshot(serverId);
   const sshInstance = useDesktopSshStore((state) => serverId ? state.instances.find((entry) => entry.id === serverId) : undefined);
   const sshStatus = useDesktopSshStore((state) => serverId ? state.statusesById[serverId] : undefined);
   const serverLabel = serverId
-    ? (sshInstance ? resolveInstanceLabel(sshInstance) : serverId)
+    ? (sshInstance ? resolveInstanceLabel(sshInstance) : registrySnapshot.label ?? serverId)
     : undefined;
-  const effectiveServerHealthStatus = serverHealthStatus
+  const effectiveServerHealthStatus = registrySnapshot.healthStatus
+    || serverHealthStatus
     || (sshStatus?.phase === 'ready'
       ? 'healthy'
       : sshStatus?.phase === 'error'
@@ -264,7 +295,7 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
                 open={isMenuOpen}
                 onOpenChange={handleMenuOpenChange}
               >
-                <DropdownMenuTrigger asChild>
+                <DropdownMenuTrigger asChild nativeButton={false}>
                   <div
                     className="fixed w-0 h-0 overflow-hidden"
                     style={menuPosition ? { left: menuPosition.x, top: menuPosition.y } : undefined}

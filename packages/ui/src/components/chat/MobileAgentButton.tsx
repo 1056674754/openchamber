@@ -26,7 +26,8 @@ export const MobileAgentButton: React.FC<MobileAgentButtonProps> = ({ onCycleAge
     const agents = getVisibleAgents();
     const uiAgentName = currentSessionId ? (sessionAgentName || currentAgentName) : currentAgentName;
     const agentLabel = getAgentDisplayName(agents, uiAgentName);
-    const agentColor = getAgentColor(uiAgentName);
+    const currentAgent = uiAgentName ? agents.find((agent) => agent.name === uiAgentName) : undefined;
+    const agentColor = getAgentColor(currentAgent ?? uiAgentName);
 
     const longPressTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
     const isLongPressRef = React.useRef(false);
@@ -84,7 +85,7 @@ export const MobileAgentButton: React.FC<MobileAgentButtonProps> = ({ onCycleAge
                 height: '26px',
                 maxHeight: '26px',
                 minHeight: '26px',
-                color: `var(${agentColor.var})`,
+                color: agentColor.value,
             }}
             title={agentLabel}
         >

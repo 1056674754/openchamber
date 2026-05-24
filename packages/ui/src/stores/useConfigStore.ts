@@ -101,7 +101,7 @@ const fetchOpenChamberDefaults = async (serverBaseUrl?: string): Promise<OpenCha
     };
 
     try {
-        const runtimeSettings = getRegisteredRuntimeAPIs()?.settings;
+        const runtimeSettings = serverBaseUrl ? null : getRegisteredRuntimeAPIs()?.settings;
         if (runtimeSettings) {
             try {
                 const result = await runtimeSettings.load();

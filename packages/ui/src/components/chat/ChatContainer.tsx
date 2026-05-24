@@ -33,12 +33,12 @@ import { useStreamingStore } from '@/sync/streaming';
 import {
     useSessionMessageCount,
     useSessionMessageRecords,
+    useSessionMessagesRenderable,
     useSessions,
     useDirectorySync,
     useSessionStatus,
 } from '@/sync/sync-context';
 import { useSync } from '@/sync/use-sync';
-import { getSessionMaterializationStatus } from '@/sync/materialization';
 import { usePlanDetection } from '@/hooks/usePlanDetection';
 import { getAllSyncSessions } from '@/sync/sync-refs';
 import { useI18n } from '@/lib/i18n';
@@ -376,12 +376,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
         ),
     );
     const sessionMessageCount = useSessionMessageCount(currentSessionId ?? '');
-    const hasRenderableSessionSnapshot = useDirectorySync(
-        React.useCallback(
-            (state) => (currentSessionId ? getSessionMaterializationStatus(state, currentSessionId).renderable : false),
-            [currentSessionId],
-        ),
-    );
+    const hasRenderableSessionSnapshot = useSessionMessagesRenderable(currentSessionId ?? '');
     // Messages from sync system
     const sessionMessageRecords = useSessionMessageRecords(currentSessionId ?? '');
     const sessionMessages = currentSessionId ? sessionMessageRecords : EMPTY_MESSAGES;

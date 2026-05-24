@@ -5,6 +5,7 @@ import {
   deleteRemoteBranch,
   git,
 } from '@/lib/gitApi';
+import * as gitHttp from '@/lib/gitApiHttp';
 import {
   clearWorktreeBootstrapState,
   markWorktreeBootstrapPending,
@@ -14,6 +15,8 @@ import type {
   GitWorktreeValidationResult,
 } from '@/lib/api/types';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { DEFAULT_SERVER_ID, serverRegistry } from '@/lib/opencode/server-registry';
+import { getProjectWorktreeKey, getWorktreesForProject } from '@/lib/worktrees/worktreeKeys';
 
 type WorktreeListEntry = {
   path?: string;
@@ -44,7 +47,7 @@ const deriveCanonicalWorktreeFields = (
   };
 };
 
-export type ProjectRef = { id: string; path: string };
+export type ProjectRef = { id: string; path: string; serverId?: string; label?: string };
 
 const normalizePath = (value: string): string => {
   const replaced = value.replace(/\\/g, '/');
@@ -87,10 +90,18 @@ const derivePrimaryWorktreeRootFromGitDir = (gitDir: string): string | null => {
   return null;
 };
 
-const resolvePrimaryWorktreeDirectory = async (directory: string): Promise<string> => {
+const getProjectBaseUrl = (project: ProjectRef): string | undefined => {
+  const serverId = project.serverId?.trim();
+  if (!serverId || serverId === DEFAULT_SERVER_ID) {
+    return undefined;
+  }
+  return serverRegistry.get(serverId)?.config.baseUrl ?? `/api/remote/${encodeURIComponent(serverId)}`;
+};
+
+const resolvePrimaryWorktreeDirectory = async (directory: string, baseUrl?: string): Promise<string> => {
   const normalizedDirectory = normalizePath(directory);
 
-  const absoluteGitDirResult = await execCommand('git rev-parse --absolute-git-dir', normalizedDirectory);
+  const absoluteGitDirResult = await execCommand('git rev-parse --absolute-git-dir', normalizedDirectory, { baseUrl });
   const absoluteGitDir = normalizePath((absoluteGitDirResult.stdout || '').trim());
   if (absoluteGitDirResult.success && absoluteGitDir) {
     const rootFromAbsoluteGitDir = derivePrimaryWorktreeRootFromGitDir(absoluteGitDir);
@@ -99,7 +110,7 @@ const resolvePrimaryWorktreeDirectory = async (directory: string): Promise<strin
     }
   }
 
-  const commonDirResult = await execCommand('git rev-parse --git-common-dir', normalizedDirectory);
+  const commonDirResult = await execCommand('git rev-parse --git-common-dir', normalizedDirectory, { baseUrl });
   const rawCommonDir = normalizePath((commonDirResult.stdout || '').trim());
   if (!commonDirResult.success || !rawCommonDir) {
     return normalizedDirectory;
@@ -214,22 +225,28 @@ const WORKTREE_LIST_CACHE_TTL = 30_000; // 30 seconds
 
 export async function listProjectWorktrees(project: ProjectRef): Promise<WorktreeMetadata[]> {
   const projectDirectory = normalizePath(project.path);
+  const baseUrl = getProjectBaseUrl(project);
+  const cacheKey = getProjectWorktreeKey(projectDirectory, project.serverId);
 
   // Return cached if fresh
-  const cached = _worktreeListCache.get(projectDirectory);
+  const cached = _worktreeListCache.get(cacheKey);
   if (cached && Date.now() - cached.at < WORKTREE_LIST_CACHE_TTL) {
     return cached.value;
   }
 
   // Dedup in-flight requests
-  const inflight = _worktreeListInflight.get(projectDirectory);
+  const inflight = _worktreeListInflight.get(cacheKey);
   if (inflight) return inflight;
 
   const promise = (async (): Promise<WorktreeMetadata[]> => {
-    const metadataProjectDirectory = await resolvePrimaryWorktreeDirectory(projectDirectory).catch(() => projectDirectory);
+    const metadataProjectDirectory = await resolvePrimaryWorktreeDirectory(projectDirectory, baseUrl).catch(() => projectDirectory);
     const normalizedProjectDirectory = normalizePath(projectDirectory);
+    const serverId = project.serverId && project.serverId !== DEFAULT_SERVER_ID ? project.serverId : undefined;
 
-    const worktrees = await git.worktree.list(projectDirectory).catch(() => []);
+    const worktrees = await (baseUrl
+      ? gitHttp.listGitWorktrees(projectDirectory, baseUrl)
+      : git.worktree.list(projectDirectory)
+    ).catch(() => []);
     const results: WorktreeMetadata[] = worktrees
       .filter((entry) => typeof entry.path === 'string' && entry.path.trim().length > 0)
       .map((entry) => {
@@ -245,6 +262,7 @@ export async function listProjectWorktrees(project: ProjectRef): Promise<Worktre
           name: name || deriveSdkWorktreeNameFromDirectory(worktreePath),
           path: worktreePath,
           projectDirectory: metadataProjectDirectory,
+          ...(serverId ? { serverId } : {}),
           branch: branch,
           label: branch || name || deriveSdkWorktreeNameFromDirectory(worktreePath),
           worktreeRoot: canonical.worktreeRoot,
@@ -261,13 +279,13 @@ export async function listProjectWorktrees(project: ProjectRef): Promise<Worktre
       return aLabel.localeCompare(bLabel);
     });
 
-    _worktreeListCache.set(projectDirectory, { value: sorted, at: Date.now() });
+    _worktreeListCache.set(cacheKey, { value: sorted, at: Date.now() });
     return sorted;
   })().finally(() => {
-    _worktreeListInflight.delete(projectDirectory);
+    _worktreeListInflight.delete(cacheKey);
   });
 
-  _worktreeListInflight.set(projectDirectory, promise);
+  _worktreeListInflight.set(cacheKey, promise);
   return promise;
 }
 
@@ -288,10 +306,13 @@ export type CreateWorktreeArgs = {
 
 export async function createWorktree(project: ProjectRef, args: CreateWorktreeArgs): Promise<WorktreeMetadata> {
   const projectDirectory = normalizePath(project.path);
-  const metadataProjectDirectory = await resolvePrimaryWorktreeDirectory(projectDirectory).catch(() => projectDirectory);
+  const baseUrl = getProjectBaseUrl(project);
+  const metadataProjectDirectory = await resolvePrimaryWorktreeDirectory(projectDirectory, baseUrl).catch(() => projectDirectory);
   const payload = toCreatePayload(args, projectDirectory);
 
-  const created = await git.worktree.create(projectDirectory, payload);
+  const created = baseUrl
+    ? await gitHttp.createGitWorktree(projectDirectory, payload, baseUrl)
+    : await git.worktree.create(projectDirectory, payload);
   const returnedName = typeof created?.name === 'string' ? created.name : '';
   const returnedBranch = typeof created?.branch === 'string' ? created.branch : '';
   const returnedPath = typeof created?.path === 'string' ? created.path : '';
@@ -305,6 +326,7 @@ export async function createWorktree(project: ProjectRef, args: CreateWorktreeAr
     name: returnedName,
     path: normalizePath(returnedPath),
     projectDirectory: metadataProjectDirectory,
+    ...(project.serverId && project.serverId !== DEFAULT_SERVER_ID ? { serverId: project.serverId } : {}),
     branch: returnedBranch,
     label: returnedBranch || returnedName,
     worktreeRoot: normalizePath(returnedPath),
@@ -315,13 +337,13 @@ export async function createWorktree(project: ProjectRef, args: CreateWorktreeAr
 
   markWorktreeBootstrapPending(metadata.path);
 
-  _worktreeListCache.delete(projectDirectory);
+  _worktreeListCache.delete(getProjectWorktreeKey(projectDirectory, project.serverId));
 
   // Update sidebar store so new worktree appears immediately
-  const sidebarProjectKey = projectDirectory;
+  const sidebarProjectKey = getProjectWorktreeKey(projectDirectory, project.serverId);
   const currentByProject = useSessionUIStore.getState().availableWorktreesByProject;
   const updatedByProject = new Map(currentByProject);
-  const existing = updatedByProject.get(sidebarProjectKey) ?? [];
+  const existing = getWorktreesForProject(updatedByProject, projectDirectory, project.serverId);
   updatedByProject.set(sidebarProjectKey, [...existing, metadata]);
   useSessionUIStore.setState({
     availableWorktreesByProject: updatedByProject,
@@ -334,7 +356,10 @@ export async function createWorktree(project: ProjectRef, args: CreateWorktreeAr
 export async function validateWorktreeCreate(project: ProjectRef, args: CreateWorktreeArgs): Promise<GitWorktreeValidationResult> {
   const projectDirectory = project.path;
   const payload = toCreatePayload(args, projectDirectory);
-  return git.worktree.validate(projectDirectory, payload);
+  const baseUrl = getProjectBaseUrl(project);
+  return baseUrl
+    ? gitHttp.validateGitWorktree(projectDirectory, payload, baseUrl)
+    : git.worktree.validate(projectDirectory, payload);
 }
 
 export async function removeProjectWorktree(project: ProjectRef, worktree: WorktreeMetadata, options?: {
@@ -343,28 +368,34 @@ export async function removeProjectWorktree(project: ProjectRef, worktree: Workt
   remoteName?: string;
 }): Promise<void> {
   const projectDirectory = normalizePath(project.path);
+  const baseUrl = getProjectBaseUrl(project);
 
   const deleteRemote = Boolean(options?.deleteRemoteBranch);
   const deleteLocalBranch = options?.deleteLocalBranch === true;
   const remoteName = options?.remoteName;
-  const raw = await git.worktree.remove(projectDirectory, {
-    directory: worktree.path,
-    deleteLocalBranch,
-  });
+  const raw = baseUrl
+    ? await gitHttp.deleteGitWorktree(projectDirectory, {
+      directory: worktree.path,
+      deleteLocalBranch,
+    }, baseUrl)
+    : await git.worktree.remove(projectDirectory, {
+      directory: worktree.path,
+      deleteLocalBranch,
+    });
   if (!raw?.success) {
     throw new Error('Worktree removal failed');
   }
 
   clearWorktreeBootstrapState(worktree.path);
 
-  _worktreeListCache.delete(normalizePath(project.path));
+  _worktreeListCache.delete(getProjectWorktreeKey(project.path, project.serverId));
 
   // Update sidebar store so removed worktree disappears immediately
   const normalizedWorktreePath = normalizePath(worktree.path);
-  const sidebarProjectKey = projectDirectory;
+  const sidebarProjectKey = getProjectWorktreeKey(projectDirectory, project.serverId);
   const currentByProject = useSessionUIStore.getState().availableWorktreesByProject;
   const updatedByProject = new Map(currentByProject);
-  const projectWorktrees = updatedByProject.get(sidebarProjectKey) ?? [];
+  const projectWorktrees = getWorktreesForProject(updatedByProject, projectDirectory, project.serverId);
   updatedByProject.set(
     sidebarProjectKey,
     projectWorktrees.filter((w) => normalizePath(w.path) !== normalizedWorktreePath),
@@ -389,6 +420,10 @@ export async function removeProjectWorktree(project: ProjectRef, worktree: Workt
 
   const branchName = (worktree.branch || '').replace(/^refs\/heads\//, '').trim();
   if (deleteRemote && branchName) {
-    await deleteRemoteBranch(projectDirectory, { branch: branchName, remote: remoteName }).catch(() => undefined);
+    if (baseUrl) {
+      await gitHttp.deleteRemoteBranch(projectDirectory, { branch: branchName, remote: remoteName }, baseUrl).catch(() => undefined);
+    } else {
+      await deleteRemoteBranch(projectDirectory, { branch: branchName, remote: remoteName }).catch(() => undefined);
+    }
   }
 }

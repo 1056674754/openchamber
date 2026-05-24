@@ -36,6 +36,7 @@ import { Icon } from "@/components/icon/Icon";
 import { getContextFileOpenFailureMessage, validateContextFileOpen } from '@/lib/contextFileOpenGuard';
 import { useI18n } from '@/lib/i18n';
 import { useActiveServerBaseUrl } from '@/hooks/useActiveServerId';
+import { resolveApiUrl } from '@/lib/api/serverUrl';
 
 type FileNode = {
   name: string;
@@ -426,7 +427,7 @@ export const SidebarFilesTree: React.FC = () => {
         isDirectory: !!entry.isDirectory,
       })));
     } else {
-      listPromise = fetch(`${serverBaseUrl}/api/fs/list?path=${encodeURIComponent(normalizedDir)}&respectGitignore=${respectGitignore ? 'false' : 'true'}`)
+      listPromise = fetch(`${resolveApiUrl('/api/fs/list', serverBaseUrl)}?path=${encodeURIComponent(normalizedDir)}&respectGitignore=${respectGitignore ? 'false' : 'true'}`)
         .then((response) => {
           if (!response.ok) throw new Error(`Failed to list directory: ${response.status}`);
           return response.json() as Promise<{ entries: Array<{ name: string; path: string; isDirectory: boolean; isFile: boolean }> }>;

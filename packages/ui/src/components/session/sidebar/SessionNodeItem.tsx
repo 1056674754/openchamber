@@ -18,8 +18,9 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { buildExportFilename, downloadAsMarkdown, formatSessionAsMarkdown, getExportRevealLabelKey, revealExportedMarkdown, saveAsMarkdownDesktop } from '@/lib/exportSession';
 import type { ChildSessionExport } from '@/lib/exportSession';
-import { buildSessionMessageRecordsSnapshot, useAllSessionStatuses, useDirectoryStore, useGlobalSessionStatus, useSession, useSessionPermissions } from '@/sync/sync-context';
+import { buildSessionMessageRecordsSnapshot, useAllSessionStatuses, useChildStoreManager, useGlobalSessionStatus, useSession, useSessionPermissions } from '@/sync/sync-context';
 import { useSync } from '@/sync/use-sync';
+import { getSyncStoresForServer } from '@/sync/multi-server-registry';
 import { useViewportStore } from '@/sync/viewport-store';
 import { DraggableSessionRow } from './sessionFolderDnd';
 import { SidebarSpinner } from './SidebarSpinner';
@@ -461,7 +462,30 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
   // [OPENCHAMBER-FORK] 2025-05-18 v1.11.1-dev-merge
   // Resolve serverId from the session index instead of path matching
   const sessionServerId = session.id ? serverRegistry.getServerForSession(session.id) : undefined;
-  const directoryStore = useDirectoryStore(sessionDirectory ?? undefined, sessionServerId);
+  const permissionDirectory = sessionDirectory ?? remoteProjectDirectory ?? groupDirectory ?? undefined;
+  const childStores = useChildStoreManager();
+  const resolveDirectoryStore = React.useCallback((targetSessionId: string, targetDirectory?: string | null) => {
+    const targetServerId = serverRegistry.getServerForSession(targetSessionId) ?? sessionServerId;
+    const stores = targetServerId && targetServerId !== DEFAULT_SERVER_ID
+      ? getSyncStoresForServer(targetServerId)
+      : childStores;
+    if (!stores) {
+      return null;
+    }
+
+    const normalizedDirectory = normalizePath(targetDirectory ?? null);
+    if (normalizedDirectory) {
+      return stores.ensureChild(normalizedDirectory);
+    }
+
+    for (const store of stores.children.values()) {
+      if (store.getState().session.some((candidate) => candidate.id === targetSessionId)) {
+        return store;
+      }
+    }
+
+    return null;
+  }, [childStores, sessionServerId]);
   const sync = useSync();
 
   const selectionModeEnabled = useSessionMultiSelectStore((state) => state.enabled);
@@ -491,7 +515,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
     React.useCallback((state) => Boolean(state.sessionMemoryState.get(session.id)?.isZombie), [session.id]),
   );
   const sessionStatus = useGlobalSessionStatus(session.id);
-  const sessionPermissions = useSessionPermissions(session.id, sessionDirectory ?? undefined);
+  const sessionPermissions = useSessionPermissions(session.id, permissionDirectory);
   const directoryState = sessionDirectory ? directoryStatus.get(sessionDirectory) : null;
   const isMissingDirectory = directoryState === 'missing';
   const isActive = currentSessionId === session.id;
@@ -547,7 +571,12 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
     for (const child of children) {
       try {
         await sync.syncSession(child.session.id);
-        const childRecords = buildSessionMessageRecordsSnapshot(directoryStore.getState(), child.session.id).list;
+        const childDirectory = resolveGlobalSessionDirectory(child.session) ?? sessionDirectory ?? groupDirectory ?? null;
+        const childStore = resolveDirectoryStore(child.session.id, childDirectory);
+        if (!childStore) {
+          throw new Error('Session store unavailable');
+        }
+        const childRecords = buildSessionMessageRecordsSnapshot(childStore.getState(), child.session.id).list;
         const childTitle = child.session.title || t('sessions.sidebar.session.export.untitledSubagent');
         const childAgent = (child.session as Session & { agent?: string }).agent;
         const grandChildren = await collectChildExports(child.children);
@@ -563,7 +592,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
       }
     }
     return { children: results, skipped };
-  }, [collectNodeDescendantIds, directoryStore, sync, t]);
+  }, [collectNodeDescendantIds, groupDirectory, resolveDirectoryStore, sessionDirectory, sync, t]);
 
   const showSkippedSubtasksWarning = React.useCallback((count: number) => {
     if (count <= 0) return;
@@ -579,6 +608,12 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
     }
 
     await sync.syncSession(session.id);
+
+    const directoryStore = resolveDirectoryStore(session.id, sessionDirectory);
+    if (!directoryStore) {
+      toast.error(t('sessions.sidebar.session.export.nothingToExport'));
+      return;
+    }
 
     const records = buildSessionMessageRecordsSnapshot(directoryStore.getState(), session.id).list;
     if (records.length === 0) {
@@ -618,7 +653,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
     downloadAsMarkdown(markdown, filename);
     toast.success(t('sessions.sidebar.session.export.success'));
     showSkippedSubtasksWarning(skippedSubtaskCount);
-  }, [collectChildExports, directoryStore, node.children, resolvedSession.title, session.id, sessionDirectory, showSkippedSubtasksWarning, sync, t]);
+  }, [collectChildExports, node.children, resolveDirectoryStore, resolvedSession.title, session.id, sessionDirectory, showSkippedSubtasksWarning, sync, t]);
   const handleExportSession = React.useCallback(async () => {
     if (node.children.length > 0) {
       setExportIncludeSubtasks(true);
@@ -1254,7 +1289,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
           </div>
 
           <DropdownMenu open={isMenuOpen} onOpenChange={handleMenuOpenChange}>
-            <DropdownMenuTrigger asChild>
+            <DropdownMenuTrigger asChild nativeButton={false}>
               <div
                 className="fixed w-0 h-0 overflow-hidden"
                 style={menuPosition ? { left: menuPosition.x, top: menuPosition.y } : undefined}

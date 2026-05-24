@@ -154,6 +154,19 @@ const mergeParams = (entry: PrStatusEntry, next: PrRuntimeParams): PrStatusEntry
   };
 };
 
+const paramsEquivalent = (left: PrRuntimeParams | null, right: PrRuntimeParams, remoteName: string | null): boolean => {
+  if (!left) {
+    return false;
+  }
+  return left.directory === right.directory
+    && left.branch === right.branch
+    && (left.remoteName ?? null) === remoteName
+    && left.canShow === right.canShow
+    && left.github === right.github
+    && left.githubAuthChecked === right.githubAuthChecked
+    && left.githubConnected === right.githubConnected;
+};
+
 const getFetchableParams = (entry: PrStatusEntry | null | undefined): PrRuntimeParams | null => {
   if (!entry?.params?.canShow || !entry.params.github?.prStatus) {
     return null;
@@ -241,6 +254,16 @@ export const useGitHubPrStatusStore = create<GitHubPrStatusStore>()(
       setParams: (key, params) => {
         set((state) => {
           const current = state.entries[key] ?? createEntry();
+          const remoteName = params.remoteName ?? current.params?.remoteName ?? current.resolvedRemoteName ?? current.identity?.remoteName ?? null;
+          if (
+            state.entries[key]
+            && paramsEquivalent(current.params, params, remoteName)
+            && current.identity?.directory === params.directory
+            && current.identity?.branch === params.branch
+            && (current.identity.remoteName ?? null) === remoteName
+          ) {
+            return state;
+          }
           return {
             entries: {
               ...state.entries,

@@ -22,12 +22,14 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
 import { useDesktopSshStore } from '@/stores/useDesktopSshStore';
+import { useRemoteInstancesStore } from '@/stores/useRemoteInstancesStore';
 import { useShallow } from 'zustand/react/shallow';
 import { useUIStore } from '@/stores/useUIStore';
 import { toast } from '@/components/ui';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { openExternalUrl } from '@/lib/url';
 import { useI18n, type I18nKey } from '@/lib/i18n';
+import { isTauriShell } from '@/lib/desktop';
 import {
   desktopSshLogsClear,
   desktopSshLogs,
@@ -38,6 +40,8 @@ import {
   type DesktopSshPortForward,
   type DesktopSshPortForwardType,
 } from '@/lib/desktopSsh';
+import type { RemoteInstance, RemoteInstanceAuth, RemoteInstancePhase } from '@/lib/remote-instances/types';
+import { resolveRemoteLabel } from '@/lib/remote-instances/types';
 
 const randomPort = (): number => {
   return Math.floor(20000 + Math.random() * 30000);
@@ -188,6 +192,344 @@ const navigateToUrl = (rawUrl: string): void => {
   }
 };
 
+type WebPageProps = {
+  instances: RemoteInstance[];
+  statuses: Record<string, import('@/lib/remote-instances/types').RemoteInstanceStatus>;
+  loading: boolean;
+  error: string | null;
+  selectedId: string | null;
+  setSelectedId: (id: string | null) => void;
+  webDraft: RemoteInstance | null;
+  setWebDraft: React.Dispatch<React.SetStateAction<RemoteInstance | null>>;
+  webLoad: () => Promise<void>;
+  webSaveInstances: (instances: RemoteInstance[]) => Promise<void>;
+  webConnect: (id: string) => Promise<void>;
+  webDisconnect: (id: string) => Promise<void>;
+  t: ReturnType<typeof useI18n>['t'];
+};
+
+const WebRemoteInstancesPage: React.FC<WebPageProps> = ({
+  instances,
+  statuses,
+  loading,
+  error,
+  selectedId,
+  setSelectedId,
+  webDraft,
+  setWebDraft,
+  webLoad,
+  webSaveInstances,
+  webConnect,
+  webDisconnect,
+  t,
+}) => {
+  const [isActionPending, setIsActionPending] = React.useState(false);
+
+  React.useEffect(() => {
+    if (loading) return;
+    if (instances.length === 0) {
+      if (selectedId !== null) setSelectedId(null);
+      return;
+    }
+    if (selectedId && instances.some((i) => i.id === selectedId)) return;
+    setSelectedId(instances[0].id);
+  }, [instances, loading, selectedId, setSelectedId]);
+
+  React.useEffect(() => {
+    void webLoad();
+  }, [webLoad]);
+
+  const webStatus = selectedId ? statuses[selectedId] : undefined;
+  const isReady = webStatus?.phase === 'connected';
+
+  const updateWebDraft = React.useCallback((updater: (current: RemoteInstance) => RemoteInstance) => {
+    setWebDraft((current) => (current ? updater(current) : current));
+  }, [setWebDraft]);
+
+  const hasWebChanges = React.useMemo(() => {
+    if (!webDraft || !selectedId) return false;
+    const original = instances.find((i) => i.id === selectedId);
+    if (!original) return true;
+    return JSON.stringify(webDraft) !== JSON.stringify(original);
+  }, [webDraft, selectedId, instances]);
+
+  const handleWebSave = React.useCallback(async () => {
+    if (!webDraft) return;
+    if (!webDraft.url?.trim()) {
+      toast.error(t('settings.remoteInstances.page.toast.sshCommandRequired'));
+      return;
+    }
+    try {
+      const next = instances.map((i) => i.id === webDraft.id ? webDraft : i);
+      await webSaveInstances(next);
+      toast.success(t('settings.remoteInstances.page.toast.instanceSaved'));
+    } catch (err) {
+      toast.error(t('settings.remoteInstances.page.toast.saveFailed'), {
+        description: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }, [webDraft, instances, webSaveInstances, t]);
+
+  const handleWebPrimaryAction = React.useCallback(() => {
+    if (!webDraft) return;
+    setIsActionPending(true);
+    const op = isReady ? webDisconnect(webDraft.id) : webConnect(webDraft.id);
+    void op
+      .catch((err) => {
+        toast.error(
+          isReady ? t('settings.remoteInstances.sidebar.toast.disconnectFailed') : t('settings.remoteInstances.sidebar.toast.connectFailed'),
+          { description: err instanceof Error ? err.message : String(err) },
+        );
+      })
+      .finally(() => setIsActionPending(false));
+  }, [webDraft, isReady, webDisconnect, webConnect, t]);
+
+  const handleWebRemove = React.useCallback(async () => {
+    if (!webDraft) return;
+    const ok = window.confirm(t('settings.remoteInstances.page.confirm.removeInstance'));
+    if (!ok) return;
+    try {
+      const next = instances.filter((i) => i.id !== webDraft.id);
+      await webSaveInstances(next);
+      setSelectedId(null);
+      toast.success(t('settings.remoteInstances.page.toast.instanceRemoved'));
+    } catch (err) {
+      toast.error(t('settings.remoteInstances.page.toast.removeInstanceFailed'), {
+        description: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }, [webDraft, instances, webSaveInstances, setSelectedId, t]);
+
+  const handleAddWeb = React.useCallback(async () => {
+    const id = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : `web-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    const newInstance: RemoteInstance = {
+      id,
+      label: t('settings.remoteInstances.sidebar.newSshInstanceName'),
+      enabled: true,
+      url: '',
+    };
+    try {
+      await webSaveInstances([...instances, newInstance]);
+      setSelectedId(id);
+    } catch (err) {
+      toast.error(t('settings.remoteInstances.sidebar.toast.createFailed'), {
+        description: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }, [instances, webSaveInstances, setSelectedId, t]);
+
+  if (!webDraft) {
+    return (
+      <SettingsPageLayout>
+        <div className="mb-8">
+          <div className="mb-1 px-1 space-y-0.5">
+            <h3 className="typography-ui-header font-medium text-foreground">{t('settings.remoteInstances.page.title')}</h3>
+            <p className="typography-meta text-muted-foreground">{t('settings.remoteInstances.page.description')}</p>
+          </div>
+          <section className="px-2 pb-2 pt-0 space-y-3">
+            {loading ? (
+              <p className="typography-meta text-muted-foreground">{t('settings.remoteInstances.page.import.loading')}</p>
+            ) : instances.length === 0 ? (
+              <div className="space-y-2">
+                <p className="typography-meta text-muted-foreground">{t('settings.remoteInstances.page.empty.selectInstance')}</p>
+                <Button type="button" variant="outline" size="xs" className="!font-normal" onClick={() => void handleAddWeb()}>
+                  <Icon name="add" className="h-3.5 w-3.5" />
+                  {t('settings.remoteInstances.page.actions.create')}
+                </Button>
+              </div>
+            ) : (
+              <p className="typography-meta text-muted-foreground">{t('settings.remoteInstances.page.empty.selectInstance')}</p>
+            )}
+          </section>
+        </div>
+        {error ? <div className="typography-meta text-[var(--status-error)]">{error}</div> : null}
+      </SettingsPageLayout>
+    );
+  }
+
+  const instanceTitle = resolveRemoteLabel(webDraft);
+  const phase = webStatus?.phase;
+
+  return (
+    <SettingsPageLayout>
+      <div className="mb-6 px-1">
+        <h2 className="typography-ui-header font-semibold text-foreground truncate">{instanceTitle}</h2>
+        <div className="mt-1 flex flex-wrap items-center gap-2 typography-meta text-muted-foreground">
+          <span className={`h-2.5 w-2.5 rounded-full ${webPhaseDotClass(phase)}`} />
+          <span>{t(webPhaseLabelKey(phase))}</span>
+          {webDraft.url ? <span className="font-mono text-foreground/80">{webDraft.url}</span> : null}
+        </div>
+      </div>
+
+      <div className="mb-8">
+        <div className="mb-1 px-1 space-y-0.5">
+          <h3 className="typography-ui-header font-medium text-foreground">{t('settings.remoteInstances.page.section.actions')}</h3>
+          <p className="typography-meta text-muted-foreground">{t('settings.remoteInstances.page.section.actionsDescription')}</p>
+        </div>
+        <section className="px-2 pb-2 pt-0 space-y-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              type="button"
+              variant={isReady ? 'outline' : 'default'}
+              size="xs"
+              className="!font-normal"
+              onClick={handleWebPrimaryAction}
+              disabled={isActionPending}
+            >
+              {isReady ? <Icon name="stop" className="h-3.5 w-3.5" /> : <Icon name="plug2" className="h-3.5 w-3.5" />}
+              {isReady ? t('settings.remoteInstances.sidebar.actions.disconnect') : t('settings.remoteInstances.sidebar.actions.connect')}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="xs"
+              className="!font-normal text-[var(--status-error)] border-[var(--status-error)]/30 hover:text-[var(--status-error)]"
+              onClick={() => void handleWebRemove()}
+            >
+              <Icon name="delete-bin" className="h-3.5 w-3.5" />
+              {t('settings.remoteInstances.sidebar.actions.remove')}
+            </Button>
+          </div>
+        </section>
+      </div>
+
+      <div className="mb-8">
+        <div className="mb-1 px-1 space-y-0.5">
+          <h3 className="typography-ui-header font-medium text-foreground">{t('settings.remoteInstances.page.section.instance')}</h3>
+          <p className="typography-meta text-muted-foreground">{t('settings.remoteInstances.page.section.instanceDescription')}</p>
+        </div>
+        <section className="px-2 pb-2 pt-0 space-y-3">
+          <div className="flex flex-col gap-1.5 py-1.5 md:flex-row md:items-center md:gap-8">
+            <span className="typography-ui-label text-foreground w-56 shrink-0">URL</span>
+            <Input
+              className="h-7 md:max-w-xl"
+              value={webDraft.url || ''}
+              onChange={(event) =>
+                updateWebDraft((current) => ({
+                  ...current,
+                  url: event.target.value,
+                }))
+              }
+              placeholder="https://remote-host.example.com:4096"
+            />
+          </div>
+          <div className="flex flex-col gap-1.5 py-1.5 md:flex-row md:items-center md:gap-8">
+            <span className="typography-ui-label text-foreground w-56 shrink-0">{t('settings.remoteInstances.page.field.nickname')}</span>
+            <Input
+              className="h-7 md:max-w-sm"
+              value={webDraft.label || ''}
+              onChange={(event) =>
+                updateWebDraft((current) => ({
+                  ...current,
+                  label: event.target.value,
+                }))
+              }
+              placeholder={t('settings.remoteInstances.page.field.nicknamePlaceholder')}
+            />
+          </div>
+          <div className="flex flex-col gap-1.5 py-1.5 md:flex-row md:items-center md:gap-8">
+            <span className="typography-ui-label text-foreground w-56 shrink-0">{t('settings.remoteInstances.page.field.connectionTimeoutSeconds')}</span>
+            <NumberInput
+              containerClassName="w-fit"
+              min={5}
+              max={240}
+              step={1}
+              className="w-16 tabular-nums"
+              value={webDraft.connectionTimeoutSec}
+              onValueChange={(next) => {
+                updateWebDraft((current) => ({
+                  ...current,
+                  connectionTimeoutSec: Number.isFinite(next) ? next : current.connectionTimeoutSec,
+                }));
+              }}
+            />
+          </div>
+          <div className="flex flex-col gap-1.5 py-1.5 md:flex-row md:items-center md:gap-8">
+            <span className="typography-ui-label text-foreground w-56 shrink-0">{t('settings.remoteInstances.page.field.mode')}</span>
+            <div className="flex w-full items-center gap-2 md:max-w-xs">
+              <Switch
+                checked={webDraft.enabled}
+                onCheckedChange={(checked) =>
+                  updateWebDraft((current) => ({
+                    ...current,
+                    enabled: checked,
+                  }))
+                }
+              />
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <div className="mb-8 border-t border-[var(--surface-subtle)] pt-8">
+        <div className="mb-1 px-1 space-y-0.5">
+          <h3 className="typography-ui-header font-medium text-foreground">{t('settings.remoteInstances.page.section.authentication')}</h3>
+          <p className="typography-meta text-muted-foreground">{t('settings.remoteInstances.page.section.authenticationDescription')}</p>
+        </div>
+        <section className="px-2 pb-2 pt-0 space-y-3">
+          <div className="flex flex-col gap-1.5 py-1.5 md:flex-row md:items-center md:gap-8">
+            <span className="typography-ui-label text-foreground w-56 shrink-0">{t('settings.remoteInstances.page.field.mode')}</span>
+            <Select
+              value={webDraft.auth?.type || 'none'}
+              onValueChange={(value) =>
+                updateWebDraft((current) => ({
+                  ...current,
+                  auth: {
+                    ...(current.auth || { type: 'none' }),
+                    type: value as RemoteInstanceAuth['type'],
+                  },
+                }))
+              }
+            >
+              <SelectTrigger className="h-7 w-fit min-w-[140px]">
+                <SelectValue placeholder="None" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">None</SelectItem>
+                <SelectItem value="password">Password</SelectItem>
+                <SelectItem value="bearer">Bearer Token</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          {webDraft.auth?.type && webDraft.auth.type !== 'none' ? (
+            <div className="flex flex-col gap-1.5 py-1.5 md:flex-row md:items-center md:gap-8">
+              <span className="typography-ui-label text-foreground w-56 shrink-0">
+                {webDraft.auth.type === 'password' ? 'Password' : 'Token'}
+              </span>
+              <Input
+                className="h-7 md:max-w-sm"
+                type="password"
+                value={webDraft.auth?.value || ''}
+                onChange={(event) =>
+                  updateWebDraft((current) => ({
+                    ...current,
+                    auth: {
+                      ...(current.auth || { type: 'password' }),
+                      value: event.target.value,
+                    },
+                  }))
+                }
+                placeholder={webDraft.auth.type === 'password' ? 'Enter password' : 'Enter bearer token'}
+              />
+            </div>
+          ) : null}
+        </section>
+      </div>
+
+      <div className="sticky bottom-0 z-10 -mx-3 sm:-mx-6 bg-[var(--surface-background)] border-t border-[var(--interactive-border)] px-3 sm:px-6 py-3">
+        <div className="flex items-center gap-2">
+          <Button type="button" size="xs" className="!font-normal" onClick={() => void handleWebSave()} disabled={!hasWebChanges}>
+            {t('settings.common.actions.saveChanges')}
+          </Button>
+          {error ? <div className="ml-auto typography-meta text-[var(--status-error)]">{error}</div> : null}
+        </div>
+      </div>
+    </SettingsPageLayout>
+  );
+};
+
 const normalizeForSave = (instance: DesktopSshInstance): DesktopSshInstance => {
   const trimmedCommand = instance.sshCommand.trim();
   const nickname = instance.nickname?.trim();
@@ -230,8 +572,41 @@ const normalizeForSave = (instance: DesktopSshInstance): DesktopSshInstance => {
   };
 };
 
+const webPhaseDotClass = (phase?: RemoteInstancePhase) => {
+  if (phase === 'connected') return 'bg-[var(--status-success)]';
+  if (phase === 'error') return 'bg-[var(--status-error)] animate-pulse';
+  if (phase === 'connecting') return 'bg-[var(--status-warning)] animate-pulse';
+  return 'bg-muted-foreground/40';
+};
+
+const webPhaseLabelKey = (phase?: RemoteInstancePhase): I18nKey => {
+  switch (phase) {
+    case 'connected':
+      return 'settings.remoteInstances.sidebar.phase.ready';
+    case 'error':
+      return 'settings.remoteInstances.sidebar.phase.error';
+    case 'connecting':
+      return 'settings.remoteInstances.sidebar.phase.connecting';
+    case 'disconnected':
+      return 'settings.remoteInstances.sidebar.phase.idle';
+    default:
+      return 'settings.remoteInstances.sidebar.phase.idle';
+  }
+};
+
 export const RemoteInstancesPage: React.FC = () => {
   const { t } = useI18n();
+  const isDesktop = isTauriShell();
+
+  const webInstances = useRemoteInstancesStore(useShallow((state) => state.instances));
+  const webStatuses = useRemoteInstancesStore(useShallow((state) => state.statuses));
+  const webLoading = useRemoteInstancesStore((state) => state.loading);
+  const webError = useRemoteInstancesStore((state) => state.error);
+  const webLoad = useRemoteInstancesStore((state) => state.loadInstances);
+  const webSaveInstances = useRemoteInstancesStore((state) => state.saveInstances);
+  const webConnect = useRemoteInstancesStore((state) => state.connect);
+  const webDisconnect = useRemoteInstancesStore((state) => state.disconnect);
+
   const instances = useDesktopSshStore((state) => state.instances);
   const statusesById = useDesktopSshStore(useShallow((state) => state.statusesById));
   const importCandidates = useDesktopSshStore((state) => state.importCandidates);
@@ -251,12 +626,16 @@ export const RemoteInstancesPage: React.FC = () => {
   const selectedId = useUIStore((state) => state.settingsRemoteInstancesSelectedId);
   const setSelectedId = useUIStore((state) => state.setSettingsRemoteInstancesSelectedId);
 
-  const selectedInstance = React.useMemo(() => {
+  const selectedInstance = React.useMemo((): DesktopSshInstance | RemoteInstance | null => {
     if (!selectedId) return null;
+    if (!isDesktop) {
+      return webInstances.find((instance) => instance.id === selectedId) || null;
+    }
     return instances.find((instance) => instance.id === selectedId) || null;
-  }, [instances, selectedId]);
+  }, [isDesktop, instances, webInstances, selectedId]);
 
   const [draft, setDraft] = React.useState<DesktopSshInstance | null>(null);
+  const [webDraft, setWebDraft] = React.useState<RemoteInstance | null>(null);
   const [logDialogOpen, setLogDialogOpen] = React.useState(false);
   const [logDialogLoading, setLogDialogLoading] = React.useState(false);
   const [logDialogError, setLogDialogError] = React.useState<string | null>(null);
@@ -269,16 +648,23 @@ export const RemoteInstancesPage: React.FC = () => {
   const [isRetryPending, setIsRetryPending] = React.useState(false);
   const [isTesting, setIsTesting] = React.useState(false);
   const [clockMs, setClockMs] = React.useState(() => Date.now());
-  const connectedAtMsRef = React.useRef<number | null>(null);
 
   React.useEffect(() => {
-    void load();
-    void loadImports();
-  }, [load, loadImports]);
+    if (isDesktop) {
+      void load();
+      void loadImports();
+    } else {
+      void webLoad();
+    }
+  }, [isDesktop, load, loadImports, webLoad]);
 
   React.useEffect(() => {
-    setDraft(selectedInstance);
-  }, [selectedInstance]);
+    if (!isDesktop) {
+      setWebDraft(selectedInstance as RemoteInstance | null);
+    } else {
+      setDraft(selectedInstance as DesktopSshInstance | null);
+    }
+  }, [isDesktop, selectedInstance]);
 
   React.useEffect(() => {
     if (!selectedId) {
@@ -334,6 +720,7 @@ export const RemoteInstancesPage: React.FC = () => {
       }
     };
   }, []);
+
   const status = selectedId ? statusesById[selectedId] : null;
   const statusPhase = status?.phase;
   const isReady = statusPhase === 'ready';
@@ -343,16 +730,6 @@ export const RemoteInstancesPage: React.FC = () => {
   const canDisconnect = isReady || isBusy;
   const statusAgeMs = status ? Math.max(0, clockMs - status.updatedAtMs) : 0;
   const reconnectAppearsStuck = isReconnecting && statusAgeMs > 12_000;
-
-  React.useEffect(() => {
-    if (statusPhase === 'ready') {
-      if (connectedAtMsRef.current === null) {
-        connectedAtMsRef.current = Date.now();
-      }
-    } else {
-      connectedAtMsRef.current = null;
-    }
-  }, [statusPhase]);
 
   const hasChanges = React.useMemo(() => {
     if (!draft || !selectedInstance) return false;
@@ -492,9 +869,9 @@ export const RemoteInstancesPage: React.FC = () => {
       }
 
       const nextInstance: DesktopSshInstance = {
-        ...selectedInstance,
+        ...(selectedInstance as DesktopSshInstance),
         localForward: {
-          ...selectedInstance.localForward,
+          ...(selectedInstance as DesktopSshInstance).localForward,
           preferredLocalPort: randomPort(),
         },
       };
@@ -723,6 +1100,26 @@ export const RemoteInstancesPage: React.FC = () => {
       ? t('settings.remoteInstances.page.actions.cancel')
       : t('settings.remoteInstances.sidebar.actions.connect');
 
+  if (!isDesktop) {
+    return (
+      <WebRemoteInstancesPage
+        instances={webInstances}
+        statuses={webStatuses}
+        loading={webLoading}
+        error={webError}
+        selectedId={selectedId}
+        setSelectedId={setSelectedId}
+        webDraft={webDraft}
+        setWebDraft={setWebDraft}
+        webLoad={webLoad}
+        webSaveInstances={webSaveInstances}
+        webConnect={webConnect}
+        webDisconnect={webDisconnect}
+        t={t}
+      />
+    );
+  }
+
   if (!draft) {
     return (
       <SettingsPageLayout>
@@ -827,8 +1224,8 @@ export const RemoteInstancesPage: React.FC = () => {
           <span>{t(phaseLabelKey(statusPhase))}</span>
           {status?.localUrl ? <span className="font-mono text-foreground/80">{status.localUrl}</span> : null}
           {reconnectAppearsStuck ? <span>{t('settings.remoteInstances.page.status.reconnectStale')}</span> : null}
-          {statusPhase === 'ready' && connectedAtMsRef.current ? (() => {
-            const elapsed = Math.floor((clockMs - connectedAtMsRef.current) / 1000);
+          {statusPhase === 'ready' && status ? (() => {
+            const elapsed = Math.floor(statusAgeMs / 1000);
             const minutes = Math.floor(elapsed / 60);
             const seconds = elapsed % 60;
             const duration = minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;

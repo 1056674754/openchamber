@@ -1121,11 +1121,16 @@ export const Header: React.FC<HeaderProps> = ({
     if (!activeProject) {
       return null;
     }
-    return { id: activeProject.id, path: activeProject.path };
+    return {
+      id: activeProject.id,
+      path: activeProject.path,
+      serverId: activeProject.serverId,
+      label: activeProject.label,
+    };
   }, [activeProject]);
 
   const lastProjectActionsContextRef = React.useRef<{
-    projectRef: { id: string; path: string };
+    projectRef: { id: string; path: string; serverId?: string; label?: string };
     directory: string;
   } | null>(null);
 

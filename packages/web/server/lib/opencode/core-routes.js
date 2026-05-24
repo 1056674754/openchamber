@@ -480,7 +480,8 @@ export const registerCommonRequestMiddleware = (app, dependencies) => {
       req.path.startsWith('/api/text') ||
       req.path.startsWith('/api/voice') ||
       req.path.startsWith('/api/tts') ||
-      req.path.startsWith('/api/openchamber/tunnel')
+      req.path.startsWith('/api/openchamber/tunnel') ||
+      req.path.startsWith('/api/remote-instances')
     ) {
       express.json({ limit: '50mb' })(req, res, next);
     } else if (req.path.startsWith('/api')) {

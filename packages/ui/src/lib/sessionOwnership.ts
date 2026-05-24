@@ -2,11 +2,33 @@ import type { Session } from '@opencode-ai/sdk/v2';
 import type { WorktreeMetadata } from '@/types/worktree';
 import { useSessionProjectStore } from '@/stores/useSessionProjectStore';
 import { normalizePath } from '@/components/session/sidebar/utils';
+import { DEFAULT_SERVER_ID, serverRegistry } from '@/lib/opencode/server-registry';
+import { getWorktreesForProject } from '@/lib/worktrees/worktreeKeys';
 
 export type ProjectForOwnership = {
   id: string;
   normalizedPath: string;
   serverId?: string;
+};
+
+type OwnershipMatch = {
+  id: string;
+  matchLength: number;
+  source: 'project' | 'worktree';
+};
+
+const chooseBetterOwnershipMatch = (
+  current: OwnershipMatch | null,
+  next: OwnershipMatch,
+): OwnershipMatch => {
+  if (
+    !current
+    || next.matchLength > current.matchLength
+    || (next.matchLength === current.matchLength && next.source === 'worktree' && current.source === 'project')
+  ) {
+    return next;
+  }
+  return current;
 };
 
 const sessionDirectoryOf = (session: Session): string | null => {
@@ -25,15 +47,20 @@ const projectMatchesDirectory = (project: ProjectForOwnership, directory: string
 const collectWorktreeDirectories = (
   worktreesByProject: Map<string, WorktreeMetadata[]>,
   projectPath: string,
+  serverId?: string,
 ): string[] => {
-  const worktrees = worktreesByProject.get(projectPath) ?? [];
+  const worktrees = getWorktreesForProject(worktreesByProject, projectPath, serverId);
   const directories: string[] = [];
   for (const meta of worktrees) {
+    if (meta.serverId && meta.serverId !== serverId) continue;
     const normalized = normalizePath(meta.path);
     if (normalized) directories.push(normalized);
   }
   return directories;
 };
+
+const normalizeServerId = (serverId?: string | null): string =>
+  serverId && serverId !== DEFAULT_SERVER_ID ? serverId : DEFAULT_SERVER_ID;
 
 /**
  * Pure path-prefix derivation. Returns the longest-matching project's id,
@@ -52,28 +79,31 @@ export const resolveProjectIdViaPathPrefix = (
   const directory = sessionDirectoryOf(session);
   if (!directory) return null;
 
-  let bestMatch: { id: string; matchLength: number } | null = null;
+  const indexedServerId = serverRegistry.getServerForSession(session.id);
+  let bestMatch: OwnershipMatch | null = null;
 
   for (const project of projects) {
     if (!project.normalizedPath) continue;
+    if (indexedServerId && normalizeServerId(project.serverId) !== indexedServerId) continue;
 
-    if (projectMatchesDirectory(project, directory)) {
-      const len = project.normalizedPath.length;
-      if (!bestMatch || len > bestMatch.matchLength) {
-        bestMatch = { id: project.id, matchLength: len };
-      }
-      continue;
-    }
-
-    const worktreeDirectories = collectWorktreeDirectories(worktreesByProject, project.normalizedPath);
+    const worktreeDirectories = collectWorktreeDirectories(worktreesByProject, project.normalizedPath, project.serverId);
     for (const worktreeDir of worktreeDirectories) {
       if (directory === worktreeDir || directory.startsWith(`${worktreeDir}/`)) {
-        const len = worktreeDir.length;
-        if (!bestMatch || len > bestMatch.matchLength) {
-          bestMatch = { id: project.id, matchLength: len };
-        }
+        bestMatch = chooseBetterOwnershipMatch(bestMatch, {
+          id: project.id,
+          matchLength: worktreeDir.length,
+          source: 'worktree',
+        });
         break;
       }
+    }
+
+    if (projectMatchesDirectory(project, directory)) {
+      bestMatch = chooseBetterOwnershipMatch(bestMatch, {
+        id: project.id,
+        matchLength: project.normalizedPath.length,
+        source: 'project',
+      });
     }
   }
 
@@ -98,10 +128,14 @@ export const getProjectIdForSession = (
 ): string | null => {
   const bindingMap = bindings ?? useSessionProjectStore.getState().bindings;
   const explicit = bindingMap.get(session.id);
+  const derived = resolveProjectIdViaPathPrefix(session, projects, worktreesByProject);
   if (explicit && projects.some((project) => project.id === explicit)) {
+    if (derived && derived !== explicit) {
+      return derived;
+    }
     return explicit;
   }
-  return resolveProjectIdViaPathPrefix(session, projects, worktreesByProject);
+  return derived;
 };
 
 /**
@@ -120,9 +154,8 @@ export const hydrateSessionProjectBindings = (
   const toBind: Array<readonly [string, string]> = [];
 
   for (const session of sessions) {
-    if (existing.has(session.id)) continue;
     const projectId = resolveProjectIdViaPathPrefix(session, projects, worktreesByProject);
-    if (projectId) toBind.push([session.id, projectId]);
+    if (projectId && existing.get(session.id) !== projectId) toBind.push([session.id, projectId]);
   }
 
   if (toBind.length > 0) store.bindMany(toBind);

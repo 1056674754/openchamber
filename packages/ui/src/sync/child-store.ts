@@ -104,7 +104,8 @@ export class ChildStoreManager {
     this.mark(directory)
 
     const shouldBootstrap = options?.bootstrap ?? true
-    if (shouldBootstrap && store.getState().status === "loading") {
+    const status = store.getState().status
+    if (shouldBootstrap && (status === "loading" || status === "partial")) {
       this.onBootstrap?.(directory)
     }
 

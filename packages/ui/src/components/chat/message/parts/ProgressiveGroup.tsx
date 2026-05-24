@@ -24,6 +24,7 @@ import { areRenderRelevantPartsEqual } from '../renderCompare';
 import { ToolCallGroup } from './ToolCallGroup';
 
 interface ProgressiveGroupProps {
+    sessionId?: string;
     parts: TurnActivityPart[];
     isExpanded: boolean;
     collapsedPreviewCount?: number;
@@ -813,13 +814,15 @@ export const StaticToolRow = React.memo(StaticToolRowInner, (prev, next) => {
 /**
  * Inline reasoning text block — rendered as dimmed italic markdown.
  */
-const InlineReasoningBlock = React.memo(({ activity, onContentChange }: {
+const InlineReasoningBlock = React.memo(({ activity, sessionId, onContentChange }: {
     activity: TurnActivityPart;
+    sessionId?: string;
     onContentChange?: (reason?: ContentChangeReason) => void;
 }) => {
     return (
         <ReasoningPart
             part={activity.part}
+            sessionId={sessionId}
             messageId={activity.messageId}
             onContentChange={onContentChange}
         />
@@ -829,14 +832,16 @@ const InlineReasoningBlock = React.memo(({ activity, onContentChange }: {
 /**
  * Inline justification text block — rendered as normal assistant text between tools.
  */
-const InlineJustificationBlock = React.memo(({ activity, onContentChange, actions }: {
+const InlineJustificationBlock = React.memo(({ activity, sessionId, onContentChange, actions }: {
     activity: TurnActivityPart;
+    sessionId?: string;
     onContentChange?: (reason?: ContentChangeReason) => void;
     actions?: React.ReactNode;
 }) => {
     return (
         <JustificationBlock
             part={activity.part}
+            sessionId={sessionId}
             messageId={activity.messageId}
             onContentChange={onContentChange}
             actions={actions}
@@ -845,6 +850,7 @@ const InlineJustificationBlock = React.memo(({ activity, onContentChange, action
 });
 
 const ProgressiveGroup: React.FC<ProgressiveGroupProps> = ({
+    sessionId,
     parts,
     isExpanded,
     collapsedPreviewCount = 0,
@@ -927,6 +933,7 @@ const ProgressiveGroup: React.FC<ProgressiveGroupProps> = ({
                     <>
                         <InlineReasoningBlock
                             activity={row.activity}
+                            sessionId={sessionId}
                             onContentChange={onContentChange}
                         />
                     </>
@@ -938,6 +945,7 @@ const ProgressiveGroup: React.FC<ProgressiveGroupProps> = ({
                     <>
                         <InlineJustificationBlock
                             activity={row.activity}
+                            sessionId={sessionId}
                             onContentChange={onContentChange}
                             actions={renderJustificationActions?.(row.activity)}
                         />

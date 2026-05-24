@@ -16,6 +16,7 @@ import type { PermissionRequest } from "@/types/permission";
 import type { QuestionRequest } from "@/types/question";
 import { waitForWorktreeBootstrap } from "@/lib/worktrees/worktreeBootstrap";
 import { resolveSdkForDirectory, resolveBaseUrlForSession } from "@/sync/session-actions";
+import { resolveApiUrl } from "@/lib/api/serverUrl";
 import {
   assertProviderCircuitClosed,
   recordProviderSuccess,
@@ -96,6 +97,26 @@ const ensureAbsoluteBaseUrl = (candidate: string): string => {
     console.warn("Failed to normalize OpenCode base URL:", error);
     return normalized;
   }
+};
+
+const buildApiFetchUrl = (
+  baseUrl: string,
+  path: string,
+  query?: Record<string, string | undefined>,
+): string => {
+  const normalizedBase = baseUrl.replace(/\/+$/, "");
+  const url = resolveApiUrl(path, normalizedBase);
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(query ?? {})) {
+    if (value !== undefined) {
+      params.set(key, value);
+    }
+  }
+  const queryString = params.toString();
+  if (!queryString) {
+    return url;
+  }
+  return `${url}${url.includes("?") ? "&" : "?"}${queryString}`;
 };
 
 const resolveDesktopBaseUrl = (): string | null => {
@@ -754,24 +775,11 @@ class OpencodeService {
     // This avoids 504s from proxy timeouts on long-running turns.
     const remoteBaseUrl = resolveBaseUrlForSession(params.id, this.currentDirectory)
     const effectiveBase = remoteBaseUrl ?? this.baseUrl
-    const base = effectiveBase.replace(/\/+$/, '');
-    let url: URL;
-    try {
-      url = new URL(`${base}/session/${encodeURIComponent(params.id)}/prompt_async`);
-      if (this.currentDirectory) {
-        url.searchParams.set('directory', this.currentDirectory);
-      }
-    } catch (error) {
-      console.error('[git-generation][browser] failed to build prompt_async URL', {
-        baseUrl: this.baseUrl,
-        normalizedBase: base,
-        sessionId: params.id,
-        directory: this.currentDirectory,
-        message: error instanceof Error ? error.message : String(error),
-        error,
-      });
-      throw error;
-    }
+    const url = buildApiFetchUrl(
+      effectiveBase,
+      `/session/${encodeURIComponent(params.id)}/prompt_async`,
+      { directory: this.currentDirectory },
+    );
 
     if (params.format) {
       console.info('[git-generation][browser] send structured message', {
@@ -792,7 +800,7 @@ class OpencodeService {
 
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
-        response = await fetch(url.toString(), {
+        response = await fetch(url, {
           method: 'POST',
           headers: {
             'content-type': 'application/json',
@@ -876,11 +884,11 @@ class OpencodeService {
 
     const remoteBaseUrl = resolveBaseUrlForSession(params.id, this.currentDirectory)
     const effectiveBase = remoteBaseUrl ?? this.baseUrl
-    const base = effectiveBase.replace(/\/+$/, '');
-    const url = new URL(`${base}/session/${encodeURIComponent(params.id)}/command`);
-    if (this.currentDirectory) {
-      url.searchParams.set('directory', this.currentDirectory);
-    }
+    const url = buildApiFetchUrl(
+      effectiveBase,
+      `/session/${encodeURIComponent(params.id)}/command`,
+      { directory: this.currentDirectory },
+    );
 
     const payload: Record<string, unknown> = {
       command: params.command,
@@ -892,7 +900,7 @@ class OpencodeService {
       messageID: tempMessageId,
     };
 
-    const response = await fetch(url.toString(), {
+    const response = await fetch(url, {
       method: 'POST',
       headers: {
         'content-type': 'application/json',

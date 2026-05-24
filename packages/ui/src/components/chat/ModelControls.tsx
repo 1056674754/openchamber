@@ -37,9 +37,8 @@ import { useContextStore } from '@/stores/contextStore';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
-import { useDirectorySync, useSessionMessages } from '@/sync/sync-context';
+import { useSessionMessages, useSessionMessagesResolved } from '@/sync/sync-context';
 import { useSync } from '@/sync/use-sync';
-import { getSessionMaterializationStatus } from '@/sync/materialization';
 import { useUIStore } from '@/stores/useUIStore';
 import { useModelLists } from '@/hooks/useModelLists';
 import { useIsTextTruncated } from '@/hooks/useIsTextTruncated';
@@ -67,6 +66,21 @@ type MobileVariantTarget = { providerId: string; modelId: string };
 
 const buildModelRefKey = (providerID: string, modelID: string) => `${providerID}:${modelID}`;
 const MAX_INLINE_MOBILE_VARIANT_OPTIONS = 6;
+
+const providerHasModel = (
+    providers: Array<{ id?: string; models?: ProviderModel[] }>,
+    providerId: string | undefined,
+    modelId: string | undefined,
+) => {
+    if (!providerId || !modelId) {
+        return false;
+    }
+    const provider = providers.find((entry) => entry.id === providerId);
+    return Boolean(provider?.models?.some((model) => model.id === modelId));
+};
+
+const agentColorVarsStyle = (color: ReturnType<typeof getAgentColor>): React.CSSProperties | undefined =>
+    color.cssVars as React.CSSProperties | undefined;
 
 const SortableFavoriteModelRow: React.FC<{
     id: string;
@@ -232,6 +246,9 @@ const DATE_FORMATTER = new Intl.DateTimeFormat('en-US', {
 });
 
 const ADD_PROVIDER_ID = '__add_provider__';
+const CONTROL_SKELETON_STYLE: React.CSSProperties = {
+    backgroundColor: 'color-mix(in srgb, var(--surface-foreground) 18%, transparent)',
+};
 
 const IconBadge: React.FC<{ iconName: IconComponent; label: string }> = ({ iconName, label }) => (
     <span
@@ -242,6 +259,40 @@ const IconBadge: React.FC<{ iconName: IconComponent; label: string }> = ({ iconN
     >
         <Icon name={iconName} className="size-3.5" />
     </span>
+);
+
+const ControlSkeleton: React.FC<{
+    iconClassName: string;
+    textClassName: string;
+    heightClassName: string;
+    label: string;
+    mobile?: boolean;
+    textWidthClassName?: string;
+}> = ({ iconClassName, textClassName, heightClassName, label, mobile = false, textWidthClassName }) => (
+    <div
+        className={cn(
+            'flex items-center gap-1.5 min-w-0',
+            heightClassName,
+        )}
+        aria-busy="true"
+        aria-label={label}
+    >
+        <span
+            className={cn(
+                iconClassName,
+                'flex-shrink-0 rounded-full bg-[var(--surface-muted)] animate-pulse',
+            )}
+            style={CONTROL_SKELETON_STYLE}
+        />
+        <span
+            className={cn(
+                textClassName,
+                'block h-3 rounded bg-[var(--surface-muted)] animate-pulse',
+                textWidthClassName ?? (mobile ? 'w-14' : 'w-24'),
+            )}
+            style={CONTROL_SKELETON_STYLE}
+        />
+    </div>
 );
 
 const EditModeIcon: React.FC<{ mode: EditPermissionMode; className?: string }> = ({ mode, className }) => {
@@ -824,11 +875,8 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     const latestLoadedUserChoiceRestoreRef = React.useRef<string | null>(null);
 
     const currentSessionDirectory = currentSessionId ? getDirectoryForSession(currentSessionId) : undefined;
-    const hasRenderableCurrentSessionSnapshot = useDirectorySync(
-        React.useCallback(
-            (state) => (currentSessionId ? getSessionMaterializationStatus(state, currentSessionId).renderable : false),
-            [currentSessionId],
-        ),
+    const hasCurrentSessionMessagesResolved = useSessionMessagesResolved(
+        currentSessionId ?? '',
         currentSessionDirectory ?? undefined,
     );
     const currentSessionMessagesFromSync = useSessionMessages(currentSessionId ?? '', currentSessionDirectory ?? undefined);
@@ -998,7 +1046,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             return;
         }
 
-        if (!contextHydrated || providers.length === 0 || !hasRenderableCurrentSessionSnapshot || !latestLoadedUserChoice?.providerID || !latestLoadedUserChoice.modelID) {
+        if (!contextHydrated || providers.length === 0 || !hasCurrentSessionMessagesResolved || !latestLoadedUserChoice?.providerID || !latestLoadedUserChoice.modelID) {
             return;
         }
 
@@ -1046,7 +1094,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         currentAgentName,
         contextHydrated,
         providers,
-        hasRenderableCurrentSessionSnapshot,
+        hasCurrentSessionMessagesResolved,
         latestLoadedUserChoice,
         setAgent,
         tryApplyModelSelection,
@@ -1169,7 +1217,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             return;
         }
 
-        if (!hasRenderableCurrentSessionSnapshot) {
+        if (!hasCurrentSessionMessagesResolved) {
             if (!sync.isLoading(currentSessionId)) {
                 void sync.ensureSessionRenderable(currentSessionId);
             }
@@ -1183,7 +1231,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         applyFallbackAgent();
     }, [
         currentSessionId,
-        hasRenderableCurrentSessionSnapshot,
+        hasCurrentSessionMessagesResolved,
         latestLoadedUserChoice,
         agents,
         primaryAgents,
@@ -1415,6 +1463,65 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     const currentModelDisplayName = getCurrentModelDisplayName();
     const modelLabelRef = React.useRef<HTMLSpanElement>(null);
     const isModelLabelTruncated = useIsTextTruncated(modelLabelRef, [currentModelDisplayName, isCompact]);
+    const savedSessionModelSelection = currentSessionId ? getSessionModelSelection(currentSessionId) : null;
+    const savedAgentModelSelection = currentSessionId && sessionSavedAgentName
+        ? getAgentModelForSession(currentSessionId, sessionSavedAgentName)
+        : null;
+    const savedModelSelection = savedAgentModelSelection ?? savedSessionModelSelection;
+    const savedModelSelectionAvailable = savedModelSelection
+        ? providerHasModel(providers, savedModelSelection.providerId, savedModelSelection.modelId)
+        : false;
+    const latestChoiceModelAvailable = latestLoadedUserChoice?.providerID && latestLoadedUserChoice.modelID
+        ? providerHasModel(providers, latestLoadedUserChoice.providerID, latestLoadedUserChoice.modelID)
+        : false;
+    const latestChoiceAgentAvailable = !latestLoadedUserChoice?.agent
+        || agents.some((agent) => agent.name === latestLoadedUserChoice.agent);
+    const shouldWaitForLatestChoice = Boolean(
+        currentSessionId
+        && hasCurrentSessionMessagesResolved
+        && latestLoadedUserChoice
+        && latestChoiceModelAvailable
+        && latestChoiceAgentAvailable,
+    );
+    const latestChoiceApplied = Boolean(
+        latestLoadedUserChoice
+        && currentProviderId === latestLoadedUserChoice.providerID
+        && currentModelId === latestLoadedUserChoice.modelID
+        && (!latestLoadedUserChoice.agent || uiAgentName === latestLoadedUserChoice.agent),
+    );
+    const shouldWaitForSavedChoice = Boolean(
+        currentSessionId
+        && hasCurrentSessionMessagesResolved
+        && !shouldWaitForLatestChoice
+        && savedModelSelection
+        && savedModelSelectionAvailable,
+    );
+    const savedChoiceApplied = Boolean(
+        savedModelSelection
+        && currentProviderId === savedModelSelection.providerId
+        && currentModelId === savedModelSelection.modelId
+        && (!sessionSavedAgentName || uiAgentName === sessionSavedAgentName),
+    );
+    const currentSelectionHasModel = providerHasModel(providers, currentProviderId, currentModelId);
+    const currentSelectionHasAgent = Boolean(
+        uiAgentName && agents.some((agent) => agent.name === uiAgentName),
+    );
+    const hasRequiredControlData =
+        providers.length > 0
+        && agents.length > 0
+        && contextHydrated
+        && (activeServerId === DEFAULT_SERVER_ID || remoteProviders !== null);
+    const controlsSelectionReady = Boolean(
+        isReady
+        && hasRequiredControlData
+        && currentSelectionHasModel
+        && currentSelectionHasAgent
+        && (!currentSessionId || hasCurrentSessionMessagesResolved)
+        && (!shouldWaitForLatestChoice || latestChoiceApplied)
+        && (!shouldWaitForSavedChoice || savedChoiceApplied),
+    );
+    const controlsReady = isReady && controlsSelectionReady;
+    const selectedAgentColor = getAgentColor(currentAgent ?? uiAgentName);
 
     const getAgentDisplayName = () => {
         if (!uiAgentName) {
@@ -2155,7 +2262,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                 <div className="flex flex-col gap-2">
                     {selectableDesktopAgents.map((agent) => {
                         const isSelected = agent.name === uiAgentName;
-                        const agentColor = getAgentColor(agent.name);
+                        const agentColor = getAgentColor(agent);
                         return (
                             <button
                                 key={agent.name}
@@ -2172,10 +2279,13 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                 onClick={() => handleAgentChange(agent.name)}
                             >
                                 <div className="flex items-center gap-2">
-                                    <div className={cn('h-2.5 w-2.5 rounded-full flex-shrink-0', agentColor.class)} />
+                                    <div
+                                        className={cn('h-2.5 w-2.5 rounded-full flex-shrink-0 agent-dot', agentColor.class)}
+                                        style={agentColorVarsStyle(agentColor)}
+                                    />
                                     <span
                                         className="typography-ui-label font-semibold"
-                                        style={isSelected ? { color: `var(${agentColor.var})` } : undefined}
+                                        style={isSelected ? { color: agentColor.value } : undefined}
                                     >
                                         {capitalizeAgentName(agent.name)}
                                     </span>
@@ -2729,27 +2839,25 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         return (
             <Tooltip delayDuration={600}>
                 {!isCompact ? (
-                    <DropdownMenu open={isReady && agentMenuOpen} onOpenChange={isReady ? handleModelMenuOpenChange : undefined}>
+                    <DropdownMenu open={controlsReady && agentMenuOpen} onOpenChange={controlsReady ? handleModelMenuOpenChange : undefined}>
                         <TooltipTrigger asChild>
                             <DropdownMenuTrigger asChild>
                                 <button
                                     type="button"
+                                    disabled={!controlsReady}
                                     className={cn(
-                                        'model-controls__model-trigger flex items-center gap-1.5 cursor-pointer hover:bg-transparent hover:opacity-70 min-w-0 bg-transparent border-none p-0 text-left font-inherit',
+                                        'model-controls__model-trigger flex items-center gap-1.5 hover:bg-transparent min-w-0 bg-transparent border-none p-0 text-left font-inherit',
+                                        controlsReady ? 'cursor-pointer hover:opacity-70' : 'cursor-default',
                                         buttonHeight
                                     )}
                                 >
-                                    {!isReady ? (
-                                        <>
-                                            <Icon name="loader-4" className={cn(controlIconSize, 'animate-spin text-muted-foreground flex-shrink-0')} />
-                                            <span className={cn(
-                                                'model-controls__model-label',
-                                                controlTextSize,
-                                                'font-medium whitespace-nowrap text-muted-foreground min-w-0'
-                                            )}>
-                                                {readinessLabel}
-                                            </span>
-                                        </>
+                                    {!controlsReady ? (
+                                        <ControlSkeleton
+                                            iconClassName={controlIconSize}
+                                            textClassName={controlTextSize}
+                                            heightClassName={buttonHeight}
+                                            label={readinessLabel}
+                                        />
                                     ) : currentProviderId ? (
                                         <>
                                             <ProviderLogo
@@ -2761,7 +2869,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                     ) : (
                                         <Icon name="pencil-ai" className={cn(controlIconSize, 'text-muted-foreground')} />
                                     )}
-                                    {isReady && (
+                                    {controlsReady && (
                                         <span
                                             ref={modelLabelRef}
                                             key={`${currentProviderId}-${currentModelId}`}
@@ -2982,24 +3090,25 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                 ) : (
                     <button
                         type="button"
-                        onClick={isReady ? () => setActiveMobilePanel('model') : undefined}
-                        onTouchStart={isReady ? () => handleLongPressStart('model') : undefined}
-                        onTouchEnd={isReady ? handleLongPressEnd : undefined}
-                        onTouchCancel={isReady ? handleLongPressEnd : undefined}
-                        disabled={!isReady}
+                        onClick={controlsReady ? () => setActiveMobilePanel('model') : undefined}
+                        onTouchStart={controlsReady ? () => handleLongPressStart('model') : undefined}
+                        onTouchEnd={controlsReady ? handleLongPressEnd : undefined}
+                        onTouchCancel={controlsReady ? handleLongPressEnd : undefined}
+                        disabled={!controlsReady}
                         className={cn(
                             'model-controls__model-trigger flex items-center gap-1.5 min-w-0 focus:outline-none',
-                            isReady ? 'cursor-pointer hover:bg-transparent hover:opacity-70' : 'opacity-60 cursor-not-allowed',
+                            controlsReady ? 'cursor-pointer hover:bg-transparent hover:opacity-70' : 'opacity-60 cursor-not-allowed',
                             buttonHeight
                         )}
                     >
-                        {!isReady ? (
-                            <>
-                                <Icon name="loader-4" className={cn(controlIconSize, 'animate-spin text-muted-foreground flex-shrink-0')} />
-                                <span className="typography-micro font-medium text-muted-foreground min-w-0">
-                                    {readinessLabel}
-                                </span>
-                            </>
+                        {!controlsReady ? (
+                            <ControlSkeleton
+                                iconClassName={controlIconSize}
+                                textClassName="typography-micro"
+                                heightClassName={buttonHeight}
+                                label={readinessLabel}
+                                mobile={isMobile}
+                            />
                         ) : (
                             <>
                                 {currentProviderId ? (
@@ -3158,7 +3267,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     };
 
     const renderVariantSelector = () => {
-        if (!isReady || !hasVariants) {
+        if (!controlsReady || !hasVariants) {
             return null;
         }
 
@@ -3256,31 +3365,21 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             return (
                 <div className="flex items-center gap-2 min-w-0">
                     <Tooltip delayDuration={600}>
-                        <DropdownMenu open={isReady && isAgentSelectorOpen} onOpenChange={isReady ? setIsAgentSelectorOpen : undefined}>
+                        <DropdownMenu open={controlsReady && isAgentSelectorOpen} onOpenChange={controlsReady ? setIsAgentSelectorOpen : undefined}>
                             <TooltipTrigger asChild>
                                 <DropdownMenuTrigger asChild>
                                     <div className={cn(
-                                        'flex items-center gap-1.5 transition-colors cursor-pointer hover:bg-transparent hover:opacity-70 min-w-0',
+                                        'flex items-center gap-1.5 transition-colors hover:bg-transparent min-w-0',
+                                        controlsReady ? 'cursor-pointer hover:opacity-70' : 'cursor-default',
                                         buttonHeight
-                                    )}>
-                                        {!isReady ? (
-                                            <>
-                                                <Icon name="loader-4"
-                                                    className={cn(
-                                                        controlIconSize,
-                                                        'flex-shrink-0 animate-spin text-muted-foreground'
-                                                    )}
-                                                />
-                                                <span
-                                                    className={cn(
-                                                        'model-controls__agent-label',
-                                                        controlTextSize,
-                                                        'font-medium min-w-0 truncate text-muted-foreground'
-                                                    )}
-                                                >
-                                                    {readinessLabel}
-                                                </span>
-                                            </>
+                                    )} aria-disabled={!controlsReady}>
+                                        {!controlsReady ? (
+                                            <ControlSkeleton
+                                                iconClassName={controlIconSize}
+                                                textClassName={controlTextSize}
+                                                heightClassName={buttonHeight}
+                                                label={readinessLabel}
+                                            />
                                         ) : (
                                             <>
                                                 <Icon name="ai-agent"
@@ -3289,7 +3388,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                                         'flex-shrink-0',
                                                         uiAgentName ? '' : 'text-muted-foreground'
                                                     )}
-                                                    style={uiAgentName ? { color: `var(${getAgentColor(uiAgentName).var})` } : undefined}
+                                                    style={uiAgentName ? { color: selectedAgentColor.value } : undefined}
                                                 />
                                                 <span
                                                     className={cn(
@@ -3298,7 +3397,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                                         'font-medium min-w-0 truncate',
                                                         isDesktop ? 'max-w-[220px]' : undefined
                                                     )}
-                                                    style={uiAgentName ? { color: `var(${getAgentColor(uiAgentName).var})` } : undefined}
+                                                    style={uiAgentName ? { color: selectedAgentColor.value } : undefined}
                                                 >
                                                     {getAgentDisplayName()}
                                                 </span>
@@ -3355,6 +3454,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                         ) : (
                                             sortedAndFilteredAgents.map((agent) => {
                                                 const isSelected = agent.name === uiAgentName;
+                                                const agentColor = getAgentColor(agent);
                                                 return (
                                                     <DropdownMenuItem
                                                         key={agent.name}
@@ -3367,8 +3467,8 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                                             <div className="flex items-center gap-1.5 min-w-0">
                                                                 <div className={cn(
                                                                     'h-1.5 w-1.5 rounded-full flex-shrink-0 agent-dot',
-                                                                    getAgentColor(agent.name).class
-                                                                )} />
+                                                                    agentColor.class
+                                                                )} style={agentColorVarsStyle(agentColor)} />
                                                                 <span className="font-medium truncate">{capitalizeAgentName(agent.name)}</span>
                                                             </div>
                                                             {isSelected && <Icon name="check" className="h-4 w-4 text-primary flex-shrink-0" />}
@@ -3390,35 +3490,25 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         return (
             <button
                 type="button"
-                onClick={isReady ? () => setActiveMobilePanel('agent') : undefined}
-                onTouchStart={isReady ? () => handleLongPressStart('agent') : undefined}
-                onTouchEnd={isReady ? handleLongPressEnd : undefined}
-                onTouchCancel={isReady ? handleLongPressEnd : undefined}
-                disabled={!isReady}
+                onClick={controlsReady ? () => setActiveMobilePanel('agent') : undefined}
+                onTouchStart={controlsReady ? () => handleLongPressStart('agent') : undefined}
+                onTouchEnd={controlsReady ? handleLongPressEnd : undefined}
+                onTouchCancel={controlsReady ? handleLongPressEnd : undefined}
+                disabled={!controlsReady}
                 className={cn(
                     'model-controls__agent-trigger flex items-center gap-1.5 transition-colors min-w-0 focus:outline-none',
                     buttonHeight,
-                    isReady ? 'cursor-pointer hover:bg-transparent hover:opacity-70' : 'opacity-60 cursor-not-allowed',
+                    controlsReady ? 'cursor-pointer hover:bg-transparent hover:opacity-70' : 'opacity-60 cursor-not-allowed',
                 )}
             >
-                {!isReady ? (
-                    <>
-                        <Icon name="loader-4"
-                            className={cn(
-                                controlIconSize,
-                                'flex-shrink-0 animate-spin text-muted-foreground'
-                            )}
-                        />
-                        <span
-                            className={cn(
-                                'model-controls__agent-label',
-                                controlTextSize,
-                                'font-medium truncate min-w-0 text-muted-foreground'
-                            )}
-                        >
-                            {readinessLabel}
-                        </span>
-                    </>
+                {!controlsReady ? (
+                    <ControlSkeleton
+                        iconClassName={controlIconSize}
+                        textClassName={controlTextSize}
+                        heightClassName={buttonHeight}
+                        label={readinessLabel}
+                        mobile={isMobile}
+                    />
                 ) : (
                     <>
                         <Icon name="ai-agent"
@@ -3427,7 +3517,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                 'flex-shrink-0',
                                 uiAgentName ? '' : 'text-muted-foreground'
                             )}
-                            style={uiAgentName ? { color: `var(${getAgentColor(uiAgentName).var})` } : undefined}
+                            style={uiAgentName ? { color: selectedAgentColor.value } : undefined}
                         />
                         <span
                             className={cn(
@@ -3436,7 +3526,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                 'font-medium truncate min-w-0',
                                 isMobile && 'max-w-[60px]'
                             )}
-                            style={uiAgentName ? { color: `var(${getAgentColor(uiAgentName).var})` } : undefined}
+                            style={uiAgentName ? { color: selectedAgentColor.value } : undefined}
                         >
                             {getAgentDisplayName()}
                         </span>
@@ -3453,20 +3543,42 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         isMobile && 'w-full',
         className,
     );
+    const controlsContentClassName = cn(
+        'flex items-center min-w-0 flex-1 justify-end',
+        inlineGapClass,
+        isMobile && 'overflow-hidden',
+    );
 
     return (
         <>
             <div className={inlineClassName}>
-                <div
-                    className={cn(
-                        'flex items-center min-w-0 flex-1 justify-end',
-                        inlineGapClass,
-                        isMobile && 'overflow-hidden'
+                <div className={controlsContentClassName}>
+                    {!controlsReady ? (
+                        <>
+                            <ControlSkeleton
+                                iconClassName={controlIconSize}
+                                textClassName={controlTextSize}
+                                textWidthClassName={isMobile ? 'w-16' : 'w-28'}
+                                heightClassName={buttonHeight}
+                                label={readinessLabel}
+                                mobile={isMobile}
+                            />
+                            <ControlSkeleton
+                                iconClassName={controlIconSize}
+                                textClassName={controlTextSize}
+                                textWidthClassName={isMobile ? 'w-12' : 'w-24'}
+                                heightClassName={buttonHeight}
+                                label={readinessLabel}
+                                mobile={isMobile}
+                            />
+                        </>
+                    ) : (
+                        <>
+                            {renderVariantSelector()}
+                            {renderModelSelector()}
+                            {renderAgentSelector()}
+                        </>
                     )}
-                >
-                    {renderVariantSelector()}
-                    {renderModelSelector()}
-                    {renderAgentSelector()}
                 </div>
             </div>
 

@@ -58,6 +58,7 @@ import { useOpenInAppsStore } from '@/stores/useOpenInAppsStore';
 import { eventMatchesShortcut, getEffectiveShortcutCombo } from '@/lib/shortcuts';
 import { useI18n } from '@/lib/i18n';
 import { useActiveServerBaseUrl } from '@/hooks/useActiveServerId';
+import { resolveApiUrl } from '@/lib/api/serverUrl';
 
 type FileNode = {
   name: string;
@@ -898,7 +899,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
         isDirectory: !!entry.isDirectory,
       })));
     } else {
-      listPromise = fetch(`${serverBaseUrl}/api/fs/list?path=${encodeURIComponent(normalizedDir)}&respectGitignore=${respectGitignore ? 'false' : 'true'}`)
+      listPromise = fetch(`${resolveApiUrl('/api/fs/list', serverBaseUrl)}?path=${encodeURIComponent(normalizedDir)}&respectGitignore=${respectGitignore ? 'false' : 'true'}`)
         .then((response) => {
           if (!response.ok) throw new Error(`Failed to list directory: ${response.status}`);
           return response.json() as Promise<{ entries: Array<{ name: string; path: string; isDirectory: boolean; isFile: boolean }> }>;
@@ -1268,7 +1269,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     if (options?.optional) {
       params.set('optional', 'true');
     }
-    const response = await fetch(`${serverBaseUrl}/api/fs/read?${params.toString()}`, {
+    const response = await fetch(`${resolveApiUrl('/api/fs/read', serverBaseUrl)}?${params.toString()}`, {
       // Avoid conditional requests (304 + empty body).
       cache: options?.optional ? 'no-store' : 'default',
     });
@@ -2405,7 +2406,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
         : desktopImageSrc)
       : (isSelectedSvg
         ? `data:${getImageMimeType(selectedFile.path)};utf8,${encodeURIComponent(fileContent)}`
-        : `${serverBaseUrl}/api/fs/raw?${new URLSearchParams({
+        : `${resolveApiUrl('/api/fs/raw', serverBaseUrl)}?${new URLSearchParams({
           path: selectedFile.path,
           ...(selectedFileReadOptions.allowOutsideWorkspace ? { allowOutsideWorkspace: 'true' } : {}),
           ...(!selectedFileReadOptions.allowOutsideWorkspace && currentDirectory ? { directory: currentDirectory } : {}),

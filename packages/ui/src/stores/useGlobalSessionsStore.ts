@@ -2,8 +2,11 @@ import { create } from 'zustand';
 import type { Session } from '@opencode-ai/sdk/v2';
 import type { SessionStatus } from '@opencode-ai/sdk/v2/client';
 import { opencodeClient } from '@/lib/opencode/client';
+import { DEFAULT_SERVER_ID, serverRegistry } from '@/lib/opencode/server-registry';
+import { registerRemoteInstanceProxy } from '@/lib/remote-instances/registry';
 import { listGlobalSessionPages } from '@/stores/globalSessions';
 import { retry } from '@/sync/retry';
+import { useProjectsStore } from './useProjectsStore';
 
 type GlobalSessionsStatus = 'idle' | 'loading' | 'ready' | 'error';
 
@@ -47,6 +50,43 @@ const normalizePath = (value?: string | null): string | null => {
     return '/';
   }
   return replaced.length > 1 ? replaced.replace(/\/+$/, '') : replaced;
+};
+
+const resolveStatusClientForDirectory = (directory: string) => {
+  const normalized = normalizePath(directory);
+  if (!normalized) {
+    return opencodeClient.getSdkClient();
+  }
+
+  const projects = useProjectsStore.getState().projects;
+  let bestProject: typeof projects[number] | null = null;
+  for (const project of projects) {
+    const projectPath = normalizePath(project.path);
+    if (!projectPath || projectPath === '/') {
+      continue;
+    }
+    if (normalized !== projectPath && !normalized.startsWith(`${projectPath}/`)) {
+      continue;
+    }
+    if (!bestProject || projectPath.length > (normalizePath(bestProject.path)?.length ?? 0)) {
+      bestProject = project;
+    }
+  }
+
+  if (bestProject?.serverId && bestProject.serverId !== DEFAULT_SERVER_ID) {
+    const conn = serverRegistry.get(bestProject.serverId)
+      ?? registerRemoteInstanceProxy({
+        id: bestProject.serverId,
+        label: bestProject.label || bestProject.serverId,
+        healthStatus: 'connecting',
+      });
+    if (conn.healthStatus !== 'healthy') {
+      return null;
+    }
+    return conn.client;
+  }
+
+  return serverRegistry.getDefault()?.client ?? opencodeClient.getSdkClient();
 };
 
 export const resolveGlobalSessionDirectory = (session: Session): string | null => {
@@ -101,6 +141,16 @@ const sameSessionList = (prev: Session[], next: Session[]): boolean => {
     }
   }
   return true;
+};
+
+const sameStatus = (prev: SessionStatus | undefined, next: SessionStatus | undefined): boolean => {
+  if (prev === next) {
+    return true;
+  }
+  return prev?.type === next?.type
+    && (prev as { message?: unknown } | undefined)?.message === (next as { message?: unknown } | undefined)?.message
+    && (prev as { attempt?: unknown } | undefined)?.attempt === (next as { attempt?: unknown } | undefined)?.attempt
+    && (prev as { next?: unknown } | undefined)?.next === (next as { next?: unknown } | undefined)?.next;
 };
 
 const upsertSessionIntoList = (sessions: Session[], session: Session): Session[] => {
@@ -366,7 +416,7 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
   upsertStatus: (sessionId, status) => {
     set((state) => {
       const current = state.sessionStatuses.get(sessionId);
-      if (current && current.type === status.type) {
+      if (sameStatus(current, status)) {
         return state;
       }
       const next = new Map(state.sessionStatuses);
@@ -397,19 +447,29 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
       return;
     }
 
-    const sdk = opencodeClient.getSdkClient();
     const results = await Promise.allSettled(
-      directories.map((directory) =>
-        retry(() => sdk.session.status({ directory }), { attempts: 2, delay: 300, retryIf: () => true })
-      )
+      directories.map((directory) => {
+        try {
+          const sdk = resolveStatusClientForDirectory(directory);
+          if (!sdk) return Promise.resolve(null);
+          return retry(() => sdk.session.status({ directory }), { attempts: 2, delay: 300, retryIf: () => true });
+        } catch (error) {
+          return Promise.reject(error);
+        }
+      })
     );
 
-    const next = new Map(get().sessionStatuses);
+    const currentStatuses = get().sessionStatuses;
+    const next = new Map(currentStatuses);
+    let changed = false;
     for (const result of results) {
       if (result.status !== 'fulfilled') {
         continue;
       }
       const response = result.value;
+      if (!response) {
+        continue;
+      }
       const payload = Array.isArray(response?.data)
         ? undefined
         : response?.data as Record<string, SessionStatus> | undefined;
@@ -418,12 +478,18 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
       }
       for (const [sessionId, status] of Object.entries(payload)) {
         if (status && typeof status.type === 'string') {
+          if (sameStatus(next.get(sessionId), status)) {
+            continue;
+          }
           next.set(sessionId, status);
+          changed = true;
         }
       }
     }
 
-    set({ sessionStatuses: next });
+    if (changed) {
+      set({ sessionStatuses: next });
+    }
   },
 }));
 

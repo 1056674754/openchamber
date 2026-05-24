@@ -24,8 +24,13 @@ export const useStickyProjectHeaders = (args: Args): Set<string> => {
           }
 
           setStuckProjectHeaders((prev) => {
+            const nextIsStuck = !entry.isIntersecting;
+            if (prev.has(projectId) === nextIsStuck) {
+              return prev;
+            }
+
             const next = new Set(prev);
-            if (!entry.isIntersecting) {
+            if (nextIsStuck) {
               next.add(projectId);
             } else {
               next.delete(projectId);

@@ -824,6 +824,19 @@ export const useGitBranchLabel = (directory: string | null) => {
 
 const allBranchesCacheRef = { current: new Map<string, string | null>() };
 
+const uniqueDirectories = (directories: string[]): string[] => {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const directory of directories) {
+    if (!directory || seen.has(directory)) {
+      continue;
+    }
+    seen.add(directory);
+    result.push(directory);
+  }
+  return result;
+};
+
 export const useGitAllBranches = () => {
   return useGitStore((state) => {
     const prev = allBranchesCacheRef.current;
@@ -846,16 +859,17 @@ export const useGitAllBranches = () => {
 export const useGitBranchMap = (directories: string[]) => {
   const cacheRef = React.useRef<Map<string, string | null>>(new Map());
   return useGitStore((state) => {
+    const keys = uniqueDirectories(directories);
     const prev = cacheRef.current;
-    let same = prev.size === directories.length;
+    let same = prev.size === keys.length;
     if (same) {
-      for (const dir of directories) {
+      for (const dir of keys) {
         if (prev.get(dir) !== (state.directories.get(dir)?.status?.current ?? null)) { same = false; break; }
       }
     }
     if (same) return prev;
     const result = new Map<string, string | null>();
-    for (const dir of directories) {
+    for (const dir of keys) {
       result.set(dir, state.directories.get(dir)?.status?.current ?? null);
     }
     cacheRef.current = result;
@@ -866,10 +880,11 @@ export const useGitBranchMap = (directories: string[]) => {
 export const useGitRepoStatusMap = (directories: string[]) => {
   const cacheRef = React.useRef<Map<string, { isGitRepo: boolean | null; branch: string | null }>>(new Map());
   return useGitStore((state) => {
+    const keys = uniqueDirectories(directories);
     const prev = cacheRef.current;
-    let same = prev.size === directories.length;
+    let same = prev.size === keys.length;
     if (same) {
-      for (const dir of directories) {
+      for (const dir of keys) {
         const d = state.directories.get(dir);
         const pv = prev.get(dir);
         if (!pv || (d?.isGitRepo ?? null) !== pv.isGitRepo || (d?.status?.current ?? null) !== pv.branch) { same = false; break; }
@@ -877,7 +892,7 @@ export const useGitRepoStatusMap = (directories: string[]) => {
     }
     if (same) return prev;
     const result = new Map<string, { isGitRepo: boolean | null; branch: string | null }>();
-    for (const dir of directories) {
+    for (const dir of keys) {
       const d = state.directories.get(dir);
       result.set(dir, { isGitRepo: d?.isGitRepo ?? null, branch: d?.status?.current ?? null });
     }

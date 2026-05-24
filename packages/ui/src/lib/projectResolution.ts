@@ -1,5 +1,6 @@
 import type { ProjectEntry } from "@/lib/api/types";
 import type { WorktreeMetadata } from "@/types/worktree";
+import { getWorktreesForProject } from "@/lib/worktrees/worktreeKeys";
 
 export const normalizeProjectPath = (value?: string | null): string | null => {
   if (typeof value !== "string") return null;
@@ -34,30 +35,30 @@ export const resolveProjectFromWorktreeDirectory = (
   const nd = normalizeProjectPath(directory);
   if (!nd) return null;
   let matchedWorktree: WorktreeMetadata | null = null;
-  let matchedProjectPath: string | null = null;
+  let matchedProject: ProjectEntry | null = null;
   let bestLen = -1;
-  for (const [projectPath, worktrees] of availableWorktreesByProject.entries()) {
+  for (const project of projects) {
+    const worktrees = getWorktreesForProject(availableWorktreesByProject, project.path, project.serverId);
     for (const wt of worktrees) {
+      if (wt.serverId && wt.serverId !== project.serverId) continue;
       const wp = normalizeProjectPath(wt.path);
       if (!wp) continue;
       if (nd !== wp && !nd.startsWith(`${wp}/`)) continue;
       if (wp.length > bestLen) {
         bestLen = wp.length;
         matchedWorktree = wt;
-        matchedProjectPath = normalizeProjectPath(projectPath);
+        matchedProject = project;
       }
     }
   }
   if (!matchedWorktree) return null;
-  const candidates = [normalizeProjectPath(matchedWorktree.projectDirectory), matchedProjectPath]
-    .filter((v): v is string => Boolean(v));
-  for (const c of candidates) {
-    const exact = projects.find((p) => normalizeProjectPath(p.path) === c) ?? null;
-    if (exact) return exact;
-    const nested = resolveProjectForDirectory(projects, c);
-    if (nested) return nested;
-  }
-  return null;
+  if (matchedProject) return matchedProject;
+
+  const projectDirectory = normalizeProjectPath(matchedWorktree.projectDirectory);
+  if (!projectDirectory) return null;
+
+  return projects.find((p) => normalizeProjectPath(p.path) === projectDirectory) ??
+    resolveProjectForDirectory(projects, projectDirectory);
 };
 
 export const resolveProjectForSessionDirectory = (

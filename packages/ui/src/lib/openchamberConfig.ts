@@ -5,11 +5,22 @@
  */
 
 import type { FilesAPI, RuntimeAPIs } from './api/types';
+import { resolveApiUrl as resolveServerApiUrl } from './api/serverUrl';
 import { getDesktopHomeDirectory } from './desktop';
 import { isVSCodeRuntime } from './desktop';
+import { DEFAULT_SERVER_ID, serverRegistry } from './opencode/server-registry';
+import { registerRemoteInstanceProxy } from './remote-instances/registry';
 import { createProjectIdFromPath } from './projectId';
+import { useProjectsStore } from '@/stores/useProjectsStore';
+import { resolveBaseUrl as resolveDirectoryBaseUrl } from '@/sync/session-actions';
 
-type ProjectRef = { id: string; path: string };
+export type ProjectRef = { id: string; path: string; serverId?: string };
+
+type FileRequestContext = {
+  baseUrl?: string;
+  directory?: string;
+  remoteUnavailable?: boolean;
+};
 
 const CONFIG_FILENAME = 'openchamber.json';
 // LEGACY_PROJECT_CONFIG: legacy per-project config root inside repo.
@@ -114,12 +125,60 @@ const getLegacyConfigPath = (projectDirectory: string): string => {
   return joinPath(joinPath(projectDirectory, LEGACY_CONFIG_DIR), CONFIG_FILENAME);
 };
 
-const getBaseUrl = (): string => {
-  const defaultBaseUrl = import.meta.env.VITE_OPENCODE_URL || '/api';
-  if (defaultBaseUrl.startsWith('/')) {
-    return defaultBaseUrl;
+const resolveProjectFileContext = (project: ProjectRef): FileRequestContext => {
+  const projectDirectory = typeof project?.path === 'string' ? normalize(project.path.trim()) : '';
+  const knownProject = useProjectsStore.getState().projects.find((entry) => {
+    if (project.id && entry.id === project.id) {
+      return true;
+    }
+    return projectDirectory && normalize(entry.path) === projectDirectory;
+  });
+  const serverId = project.serverId ?? knownProject?.serverId;
+  let baseUrl: string | undefined;
+  let remoteUnavailable = false;
+
+  if (serverId && serverId !== DEFAULT_SERVER_ID) {
+    const conn = serverRegistry.get(serverId)
+      ?? registerRemoteInstanceProxy({
+        id: serverId,
+        label: knownProject?.label || serverId,
+        healthStatus: 'connecting',
+      });
+    if (conn.healthStatus === 'unhealthy') {
+      remoteUnavailable = true;
+    } else {
+      baseUrl = conn.config.baseUrl;
+    }
+  } else if (projectDirectory) {
+    try {
+      baseUrl = resolveDirectoryBaseUrl(projectDirectory);
+    } catch {
+      remoteUnavailable = true;
+    }
   }
-  return defaultBaseUrl;
+  return {
+    ...(baseUrl ? { baseUrl } : {}),
+    ...(projectDirectory ? { directory: projectDirectory } : {}),
+    ...(remoteUnavailable ? { remoteUnavailable } : {}),
+  };
+};
+
+const getApiUrl = (path: string, context?: FileRequestContext): string => {
+  const envBaseUrl = import.meta.env.VITE_OPENCODE_URL || undefined;
+  return resolveServerApiUrl(path, context?.baseUrl ?? envBaseUrl);
+};
+
+const appendDirectoryContext = <T extends Record<string, unknown>>(
+  body: T,
+  context?: FileRequestContext
+): T & { directory?: string } => {
+  if (!context?.directory) {
+    return body;
+  }
+  return {
+    ...body,
+    directory: context.directory,
+  };
 };
 
 const postJson = async <T>(url: string, body: unknown): Promise<{ ok: boolean; data: T | null }> => {
@@ -139,9 +198,12 @@ const postJson = async <T>(url: string, body: unknown): Promise<{ ok: boolean; d
   }
 };
 
-const mkdirp = async (path: string): Promise<boolean> => {
+const mkdirp = async (path: string, context?: FileRequestContext): Promise<boolean> => {
+  if (context?.remoteUnavailable) {
+    return false;
+  }
   const runtimeFiles = getRuntimeFilesAPI();
-  if (runtimeFiles?.createDirectory) {
+  if (!context?.baseUrl && runtimeFiles?.createDirectory) {
     try {
       const result = await runtimeFiles.createDirectory(path);
       if (result?.success) {
@@ -152,13 +214,19 @@ const mkdirp = async (path: string): Promise<boolean> => {
     }
   }
 
-  const res = await postJson<{ success?: boolean }>(`${getBaseUrl()}/fs/mkdir`, { path });
+  const res = await postJson<{ success?: boolean }>(
+    getApiUrl('/api/fs/mkdir', context),
+    appendDirectoryContext({ path }, context)
+  );
   return Boolean(res.ok);
 };
 
-const readTextFile = async (path: string): Promise<string | null> => {
+const readTextFile = async (path: string, context?: FileRequestContext): Promise<string | null> => {
+  if (context?.remoteUnavailable) {
+    return null;
+  }
   const runtimeFiles = getRuntimeFilesAPI();
-  if (runtimeFiles?.readFile) {
+  if (!context?.baseUrl && runtimeFiles?.readFile) {
     try {
       const result = await runtimeFiles.readFile(path);
       const content = typeof result?.content === 'string' ? result.content : '';
@@ -169,12 +237,14 @@ const readTextFile = async (path: string): Promise<string | null> => {
   }
 
   try {
-    const response = await fetch(`${getBaseUrl()}/fs/read?path=${encodeURIComponent(path)}`,
-      {
-        // Avoid conditional requests (304 + empty body).
-        cache: 'no-store',
-      }
-    );
+    const params = new URLSearchParams({ path });
+    if (context?.directory) {
+      params.set('directory', context.directory);
+    }
+    const response = await fetch(`${getApiUrl('/api/fs/read', context)}?${params.toString()}`, {
+      // Avoid conditional requests (304 + empty body).
+      cache: 'no-store',
+    });
     if (!response.ok) {
       return null;
     }
@@ -184,9 +254,12 @@ const readTextFile = async (path: string): Promise<string | null> => {
   }
 };
 
-const writeTextFile = async (path: string, content: string): Promise<boolean> => {
+const writeTextFile = async (path: string, content: string, context?: FileRequestContext): Promise<boolean> => {
+  if (context?.remoteUnavailable) {
+    return false;
+  }
   const runtimeFiles = getRuntimeFilesAPI();
-  if (runtimeFiles?.writeFile) {
+  if (!context?.baseUrl && runtimeFiles?.writeFile) {
     try {
       const result = await runtimeFiles.writeFile(path, content);
       if (result?.success) {
@@ -197,16 +270,22 @@ const writeTextFile = async (path: string, content: string): Promise<boolean> =>
     }
   }
 
-  const res = await postJson<{ success?: boolean }>(`${getBaseUrl()}/fs/write`, { path, content });
+  const res = await postJson<{ success?: boolean }>(
+    getApiUrl('/api/fs/write', context),
+    appendDirectoryContext({ path, content }, context)
+  );
   return Boolean(res.ok);
 };
 
-const resolveHomeDirectory = async (): Promise<string | null> => {
+const resolveHomeDirectory = async (context?: FileRequestContext): Promise<string | null> => {
+  if (context?.remoteUnavailable) {
+    return null;
+  }
   // Use server-reported home as the source of truth for user config paths.
   // In some runtimes, window.__OPENCHAMBER_HOME__ can be workspace/project-root
   // scoped, which would incorrectly route writes into the project directory.
   try {
-    const response = await fetch(`${getBaseUrl()}/fs/home`, {
+    const response = await fetch(getApiUrl('/api/fs/home', context), {
       // Avoid conditional requests (304 + empty body).
       cache: 'no-store',
     });
@@ -222,6 +301,10 @@ const resolveHomeDirectory = async (): Promise<string | null> => {
     // fall through
   }
 
+  if (context?.baseUrl) {
+    return null;
+  }
+
   // Fallback for environments where /api/fs/home is unavailable.
   // VSCode intentionally avoids this because embedded home equals workspace path.
   if (!isVSCodeRuntime()) {
@@ -233,8 +316,8 @@ const resolveHomeDirectory = async (): Promise<string | null> => {
   return null;
 };
 
-const getUserProjectsDirectory = async (): Promise<string | null> => {
-  const home = await resolveHomeDirectory();
+const getUserProjectsDirectory = async (context?: FileRequestContext): Promise<string | null> => {
+  const home = await resolveHomeDirectory(context);
   if (!home) {
     return null;
   }
@@ -248,8 +331,8 @@ const resolveConfigProjectId = (project: ProjectRef): string | null => {
   return createProjectIdFromPath(normalizedProject) || null;
 };
 
-const getUserConfigPath = async (project: ProjectRef): Promise<string | null> => {
-  const base = await getUserProjectsDirectory();
+const getUserConfigPath = async (project: ProjectRef, context?: FileRequestContext): Promise<string | null> => {
+  const base = await getUserProjectsDirectory(context);
   if (!base) {
     return null;
   }
@@ -499,8 +582,11 @@ const createProjectPlanId = (): string => {
   return `plan_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 };
 
-const getProjectStorageDirectory = async (project: ProjectRef): Promise<string | null> => {
-  const base = await getUserProjectsDirectory();
+const getProjectStorageDirectory = async (
+  project: ProjectRef,
+  context?: FileRequestContext
+): Promise<string | null> => {
+  const base = await getUserProjectsDirectory(context);
   const safeId = resolveConfigProjectId(project);
   if (!base || !safeId) {
     return null;
@@ -508,8 +594,11 @@ const getProjectStorageDirectory = async (project: ProjectRef): Promise<string |
   return joinPath(base, safeId);
 };
 
-const getProjectPlansDirectory = async (project: ProjectRef): Promise<string | null> => {
-  const projectDirectory = await getProjectStorageDirectory(project);
+const getProjectPlansDirectory = async (
+  project: ProjectRef,
+  context?: FileRequestContext
+): Promise<string | null> => {
+  const projectDirectory = await getProjectStorageDirectory(project, context);
   if (!projectDirectory) {
     return null;
   }
@@ -554,11 +643,12 @@ export async function readOpenChamberConfig(project: ProjectRef): Promise<OpenCh
     return null;
   }
 
-  const configPath = await getUserConfigPath(project);
+  const fileContext = resolveProjectFileContext(project);
+  const configPath = await getUserConfigPath(project, fileContext);
 
   const readText = async (path: string): Promise<string | null> => {
     // Keep behavior consistent with other helpers.
-    const text = await readTextFile(path);
+    const text = await readTextFile(path, fileContext);
     if (text === null) {
       return null;
     }
@@ -604,7 +694,7 @@ export async function readOpenChamberConfig(project: ProjectRef): Promise<OpenCh
   try {
     const wrote = await writeOpenChamberConfig(project, legacyConfig);
     if (wrote) {
-      await deleteLegacyOpenChamberConfig(projectDirectory);
+      await deleteLegacyOpenChamberConfig(projectDirectory, fileContext);
     }
   } catch {
     // Ignore migration failures; still return legacy content.
@@ -629,19 +719,20 @@ export async function writeOpenChamberConfig(
     return false;
   }
 
-  const configDir = await getUserProjectsDirectory();
-  const configPath = await getUserConfigPath(project);
+  const fileContext = resolveProjectFileContext(project);
+  const configDir = await getUserProjectsDirectory(fileContext);
+  const configPath = await getUserConfigPath(project, fileContext);
   if (!configDir || !configPath) {
     return false;
   }
 
   try {
-    const okDir = await mkdirp(configDir);
+    const okDir = await mkdirp(configDir, fileContext);
     if (!okDir) {
       return false;
     }
 
-    const existingRaw = await readTextFile(configPath);
+    const existingRaw = await readTextFile(configPath, fileContext);
     let existing: Record<string, unknown> = {};
     if (typeof existingRaw === 'string' && existingRaw.trim()) {
       try {
@@ -664,7 +755,7 @@ export async function writeOpenChamberConfig(
       ...serverOwned,
       projectPath: normalize(projectDirectory),
     }, null, 2);
-    return await writeTextFile(configPath, content);
+    return await writeTextFile(configPath, content, fileContext);
   } catch (error) {
     console.error('Failed to write openchamber config:', error);
     return false;
@@ -743,13 +834,16 @@ export async function saveProjectPlanFiles(
   });
 }
 
-export async function readProjectPlanFile(path: string): Promise<OpenChamberProjectPlanFile | null> {
+export async function readProjectPlanFile(
+  path: string,
+  project?: ProjectRef
+): Promise<OpenChamberProjectPlanFile | null> {
   const trimmedPath = typeof path === 'string' ? path.trim() : '';
   if (!trimmedPath) {
     return null;
   }
 
-  const raw = await readTextFile(trimmedPath);
+  const raw = await readTextFile(trimmedPath, project ? resolveProjectFileContext(project) : undefined);
   if (raw === null) {
     return null;
   }
@@ -763,9 +857,12 @@ export async function readProjectPlanFile(path: string): Promise<OpenChamberProj
   };
 }
 
-const deleteFile = async (path: string): Promise<boolean> => {
+const deleteFile = async (path: string, context?: FileRequestContext): Promise<boolean> => {
+  if (context?.remoteUnavailable) {
+    return false;
+  }
   const runtimeFiles = getRuntimeFilesAPI();
-  if (runtimeFiles?.delete) {
+  if (!context?.baseUrl && runtimeFiles?.delete) {
     try {
       const result = await runtimeFiles.delete(path);
       if (result?.success !== false) {
@@ -776,7 +873,10 @@ const deleteFile = async (path: string): Promise<boolean> => {
     }
   }
 
-  const res = await postJson<{ success?: boolean }>(`${getBaseUrl()}/fs/delete`, { path });
+  const res = await postJson<{ success?: boolean }>(
+    getApiUrl('/api/fs/delete', context),
+    appendDirectoryContext({ path }, context)
+  );
   return Boolean(res.ok);
 };
 
@@ -788,6 +888,7 @@ export async function deleteProjectPlanFile(
   if (!trimmedId) {
     return false;
   }
+  const fileContext = resolveProjectFileContext(project);
 
   const existing = await getProjectPlanFiles(project);
   const target = existing.find((entry) => entry.id === trimmedId);
@@ -802,7 +903,7 @@ export async function deleteProjectPlanFile(
   }
 
   // Best-effort: remove underlying markdown file, ignore failure.
-  await deleteFile(target.path).catch(() => false);
+  await deleteFile(target.path, fileContext).catch(() => false);
   return true;
 }
 
@@ -825,7 +926,8 @@ export async function createProjectPlanFile(
   project: ProjectRef,
   value: { title: string; body: string }
 ): Promise<OpenChamberProjectPlanFileLink | null> {
-  const plansDirectory = await getProjectPlansDirectory(project);
+  const fileContext = resolveProjectFileContext(project);
+  const plansDirectory = await getProjectPlansDirectory(project, fileContext);
   if (!plansDirectory) {
     return null;
   }
@@ -835,18 +937,18 @@ export async function createProjectPlanFile(
   const id = createProjectPlanId();
   const filePath = joinPath(plansDirectory, `${createdAt}-${slugifyPlanTitle(title)}.md`);
 
-  const projectDirectory = await getProjectStorageDirectory(project);
+  const projectDirectory = await getProjectStorageDirectory(project, fileContext);
   if (!projectDirectory) {
     return null;
   }
 
-  const createdProjectDir = await mkdirp(projectDirectory);
-  const createdPlansDir = createdProjectDir ? await mkdirp(plansDirectory) : false;
+  const createdProjectDir = await mkdirp(projectDirectory, fileContext);
+  const createdPlansDir = createdProjectDir ? await mkdirp(plansDirectory, fileContext) : false;
   if (!createdProjectDir || !createdPlansDir) {
     return null;
   }
 
-  const wrote = await writeTextFile(filePath, formatProjectPlanMarkdown(title, value.body));
+  const wrote = await writeTextFile(filePath, formatProjectPlanMarkdown(title, value.body), fileContext);
   if (!wrote) {
     return null;
   }
@@ -903,11 +1005,17 @@ export function substituteCommandVariables(
     .replace(/\$\{ROOT_WORKTREE_PATH\}/g, variables.rootWorktreePath);
 }
 
-async function deleteLegacyOpenChamberConfig(projectDirectory: string): Promise<void> {
+async function deleteLegacyOpenChamberConfig(
+  projectDirectory: string,
+  context?: FileRequestContext
+): Promise<void> {
+  if (context?.remoteUnavailable) {
+    return;
+  }
   const legacyPath = getLegacyConfigPath(projectDirectory);
   const runtimeFiles = getRuntimeFilesAPI();
 
-  if (runtimeFiles?.delete) {
+  if (!context?.baseUrl && runtimeFiles?.delete) {
     try {
       await runtimeFiles.delete(legacyPath);
       return;
@@ -917,10 +1025,11 @@ async function deleteLegacyOpenChamberConfig(projectDirectory: string): Promise<
   }
 
   try {
-    await postJson(`${getBaseUrl()}/fs/delete`, { path: legacyPath });
+    await postJson(
+      getApiUrl('/api/fs/delete', context),
+      appendDirectoryContext({ path: legacyPath }, context)
+    );
   } catch {
     // ignored
   }
 }
-
-export type { ProjectRef };

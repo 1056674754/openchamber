@@ -1,9 +1,8 @@
 import { create } from 'zustand';
-import { opencodeClient } from '@/lib/opencode/client';
 import { listProjectWorktrees, removeProjectWorktree, type ProjectRef } from '@/lib/worktrees/worktreeManager';
 import { useDirectoryStore } from './useDirectoryStore';
 import { useProjectsStore } from './useProjectsStore';
-import { deleteSessionInDirectory } from '@/sync/session-actions';
+import { deleteSessionInDirectory, resolveSdkForDirectory } from '@/sync/session-actions';
 import { retry } from '@/sync/retry';
 import type { WorktreeMetadata } from '@/types/worktree';
 import type { Session } from '@opencode-ai/sdk/v2';
@@ -80,13 +79,14 @@ export function parseSessionTitle(title: string | undefined): {
 // resolveProjectRef
 // ---------------------------------------------------------------------------
 
-function resolveProjectRef(): { id: string; path: string } | null {
+function resolveProjectRef(): ProjectRef | null {
   const currentDirectory = useDirectoryStore.getState().currentDirectory;
   const projectsState = useProjectsStore.getState();
   const activeProjectId = projectsState.activeProjectId;
-  const activeProjectPath = activeProjectId
-    ? projectsState.projects.find((p) => p.id === activeProjectId)?.path
+  const activeProject = activeProjectId
+    ? projectsState.projects.find((p) => p.id === activeProjectId)
     : undefined;
+  const activeProjectPath = activeProject?.path;
 
   const raw = (typeof activeProjectPath === 'string' && activeProjectPath.trim().length > 0)
     ? activeProjectPath
@@ -97,15 +97,28 @@ function resolveProjectRef(): { id: string; path: string } | null {
   if (!path) return null;
 
   const entry = projectsState.projects.find((p) => normalize(p.path) === path);
-  return { id: entry?.id ?? `path:${path}`, path };
+  return {
+    id: entry?.id ?? `path:${path}`,
+    path,
+    serverId: entry?.serverId ?? activeProject?.serverId,
+    label: entry?.label ?? activeProject?.label,
+  };
 }
 
 function resolveProjectRefForWorktree(session: AgentGroupSession): ProjectRef | null {
   const projectsState = useProjectsStore.getState();
   const projectPath = normalize(session.worktreeMetadata?.projectDirectory ?? '');
   if (projectPath) {
-    const project = projectsState.projects.find((entry) => normalize(entry.path) === projectPath);
-    return { id: project?.id ?? `path:${projectPath}`, path: projectPath };
+    const worktreeServerId = session.worktreeMetadata?.serverId;
+    const project = projectsState.projects.find((entry) =>
+      normalize(entry.path) === projectPath && (!worktreeServerId || entry.serverId === worktreeServerId),
+    );
+    return {
+      id: project?.id ?? `path:${worktreeServerId ?? 'default'}:${projectPath}`,
+      path: projectPath,
+      serverId: project?.serverId ?? worktreeServerId,
+      label: project?.label,
+    };
   }
   return resolveProjectRef();
 }
@@ -225,12 +238,12 @@ export const useAgentGroupsStore = create<Store>()(
         }
 
         // 2. Fetch sessions for each worktree directory (parallel, max 5)
-        const api = opencodeClient.getApiClient();
         const allSessions: Session[] = [];
         const failedDirectories = new Set<string>();
 
         const fetchDir = async (dir: string) => {
           try {
+            const api = resolveSdkForDirectory(dir);
             const res = await retry(async () => {
               const result = await api.session.list({ directory: dir });
               if ((result as { error?: unknown }).error) {

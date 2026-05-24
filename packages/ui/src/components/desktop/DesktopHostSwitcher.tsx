@@ -18,11 +18,16 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui';
-import { isTauriShell, isDesktopShell } from '@/lib/desktop';
+import { isTauriShell, isDesktopShell, isWebRuntime } from '@/lib/desktop';
 import { serverRegistry, DEFAULT_SERVER_ID } from '@/lib/opencode/server-registry';
 import { useUIStore } from '@/stores/useUIStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useI18n } from '@/lib/i18n';
+import { useRemoteInstancesStore } from '@/stores/useRemoteInstancesStore';
+import type { RemoteInstance } from '@/lib/remote-instances/types';
+import { resolveRemoteLabel } from '@/lib/remote-instances/types';
+import { registerRemoteInstanceProxy } from '@/lib/remote-instances/registry';
+import { useShallow } from 'zustand/react/shallow';
 import {
   desktopHostProbe,
   desktopHostsGet,
@@ -315,14 +320,37 @@ export function DesktopHostSwitcherDialog({
   const [isAddFormOpen, setIsAddFormOpen] = React.useState(!embedded);
   const sshSwitchTokenRef = React.useRef(0);
 
+  const webInstances = useRemoteInstancesStore(useShallow((state) => state.instances));
+  const webStatuses = useRemoteInstancesStore(useShallow((state) => state.statuses));
+  const webLoading = useRemoteInstancesStore((state) => state.loading);
+  const webLoad = useRemoteInstancesStore((state) => state.loadInstances);
+
+  const webHosts = React.useMemo(() => {
+    if (isTauriShell()) return [];
+    return webInstances
+      .filter((inst) => inst.url)
+      .map((inst) => ({
+        id: inst.id,
+        label: resolveRemoteLabel(inst),
+        url: inst.url!,
+      }));
+  }, [webInstances]);
+
   const allHosts = React.useMemo(() => {
     const local = buildLocalHost();
     const normalizedRemote = configHosts.map((h) => ({
       ...h,
       url: normalizeHostUrl(h.url) || h.url,
     }));
-    return [local, ...normalizedRemote];
-  }, [configHosts]);
+    if (isTauriShell()) {
+      return [local, ...normalizedRemote];
+    }
+    const normalizedWeb = webHosts.map((h) => ({
+      ...h,
+      url: normalizeHostUrl(h.url) || h.url,
+    }));
+    return [local, ...normalizedWeb, ...normalizedRemote];
+  }, [configHosts, webHosts]);
 
   const currentSessionId = useSessionUIStore((s) => s.currentSessionId);
 
@@ -344,7 +372,11 @@ export function DesktopHostSwitcherDialog({
       for (const host of remote) {
         const url = normalizeHostUrl(host.url);
         if (url) {
-          serverRegistry.register({ id: host.id, label: host.label, baseUrl: url });
+          if (sshHostIds[host.id]) {
+            registerRemoteInstanceProxy({ id: host.id, label: host.label, healthStatus: 'healthy' });
+          } else {
+            serverRegistry.register({ id: host.id, label: host.label, baseUrl: url });
+          }
         }
       }
       const registeredIds = new Set(remote.map((h) => h.id));
@@ -358,7 +390,7 @@ export function DesktopHostSwitcherDialog({
     } finally {
       setIsSaving(false);
     }
-  }, [t]);
+  }, [sshHostIds, t]);
 
   const openRemoteInstancesSettings = React.useCallback(() => {
     setSettingsPage('remote-instances');
@@ -367,6 +399,18 @@ export function DesktopHostSwitcherDialog({
   }, [onOpenChange, setSettingsDialogOpen, setSettingsPage]);
 
   const refresh = React.useCallback(async () => {
+    if (isWebRuntime() && !isTauriShell()) {
+      setIsLoading(true);
+      setError('');
+      try {
+        await webLoad();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : t('desktopHostSwitcher.error.failedToLoad'));
+      } finally {
+        setIsLoading(false);
+      }
+      return;
+    }
     if (!isTauriShell()) return;
     setIsLoading(true);
     setError('');
@@ -387,7 +431,11 @@ export function DesktopHostSwitcherDialog({
       for (const host of cfg.hosts || []) {
         const url = normalizeHostUrl(host.url);
         if (url) {
-          serverRegistry.register({ id: host.id, label: host.label, baseUrl: url });
+          if (nextSshHostIds[host.id]) {
+            registerRemoteInstanceProxy({ id: host.id, label: host.label, healthStatus: 'healthy' });
+          } else {
+            serverRegistry.register({ id: host.id, label: host.label, baseUrl: url });
+          }
         }
       }
     } catch (err) {
@@ -399,7 +447,7 @@ export function DesktopHostSwitcherDialog({
     } finally {
       setIsLoading(false);
     }
-  }, [t]);
+  }, [t, webLoad]);
 
   const probeAll = React.useCallback(async (hosts: DesktopHost[]) => {
     if (!isTauriShell()) return;
@@ -474,11 +522,11 @@ export function DesktopHostSwitcherDialog({
 
   const handleSwitch = React.useCallback(async (host: DesktopHost) => {
     const origin = host.id === LOCAL_HOST_ID ? getLocalOrigin() : (normalizeHostUrl(host.url) || '');
-    if (!origin) return;
-
     const isSshHost = Boolean(sshHostIds[host.id]);
+    const canConnectSshHost = host.id !== LOCAL_HOST_ID && isSshHost && isTauriShell();
+    if (!origin && !canConnectSshHost) return;
 
-    if (host.id !== LOCAL_HOST_ID && isSshHost && isTauriShell()) {
+    if (canConnectSshHost) {
       let existingStatus = sshStatusesById[host.id];
       const latestStatus = await desktopSshStatus(host.id)
         .then((items) => items.find((item) => item.id === host.id) || null)
@@ -493,7 +541,7 @@ export function DesktopHostSwitcherDialog({
 
       const existingUrl = normalizeHostUrl(existingStatus?.localUrl || host.url || '');
       if (existingStatus?.phase === 'ready' && existingUrl) {
-        serverRegistry.register({ id: host.id, label: host.label, baseUrl: existingUrl });
+        registerRemoteInstanceProxy({ id: host.id, label: host.label, healthStatus: 'healthy' });
         clearStaleSessionOnServerSwitch();
         onHostSwitched?.();
         onOpenChange(false);
@@ -517,7 +565,7 @@ export function DesktopHostSwitcherDialog({
           return;
         }
 
-        const readyStatus = await waitForSshReady(host.id, SSH_CONNECT_TIMEOUT_MS, (status) => {
+        await waitForSshReady(host.id, SSH_CONNECT_TIMEOUT_MS, (status) => {
           setSshStatusesById((prev) => ({
             ...prev,
             [status.id]: status,
@@ -533,8 +581,7 @@ export function DesktopHostSwitcherDialog({
           return;
         }
 
-        const targetOrigin = normalizeHostUrl(readyStatus.localUrl || '') || origin;
-        serverRegistry.register({ id: host.id, label: host.label, baseUrl: targetOrigin });
+        registerRemoteInstanceProxy({ id: host.id, label: host.label, healthStatus: 'healthy' });
         clearStaleSessionOnServerSwitch();
         setSshSwitchModal((prev) => ({ ...prev, open: false }));
         onHostSwitched?.();
@@ -578,6 +625,30 @@ export function DesktopHostSwitcherDialog({
         setSwitchingHostId(null);
         return;
       }
+    }
+
+    if (isWebRuntime() && host.id !== LOCAL_HOST_ID) {
+      setSwitchingHostId(host.id);
+      try {
+        const store = useRemoteInstancesStore.getState();
+        const instance = store.instances.find((i: RemoteInstance) => i.id === host.id);
+        if (instance) {
+          await store.connect(instance.id);
+        } else {
+          registerRemoteInstanceProxy({ id: host.id, label: host.label, healthStatus: 'connecting' });
+        }
+        clearStaleSessionOnServerSwitch();
+        onHostSwitched?.();
+        onOpenChange(false);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        toast.error(t('desktopHostSwitcher.toast.instanceUnreachable', { host: redactSensitiveUrl(host.label) }), {
+          description: message,
+        });
+      } finally {
+        setSwitchingHostId(null);
+      }
+      return;
     }
 
     const target = toNavigationUrl(origin);
@@ -713,6 +784,7 @@ export function DesktopHostSwitcherDialog({
         }));
       });
       if (readyStatus.phase === 'ready') {
+        registerRemoteInstanceProxy({ id: host.id, label: host.label, healthStatus: 'healthy' });
         toast.success(t('desktopHostSwitcher.toast.sshConnected', { host: redactSensitiveUrl(host.label) }));
       }
     } catch (err) {
@@ -727,7 +799,7 @@ export function DesktopHostSwitcherDialog({
     }
   }, [t]);
 
-  if (!isDesktopShell()) {
+  if (!isDesktopShell() && !isWebRuntime()) {
     return null;
   }
 
@@ -805,7 +877,17 @@ export function DesktopHostSwitcherDialog({
           </div>
         )}
 
-        {!tauriAvailable && (
+        {!tauriAvailable && isWebRuntime() && (
+          <div className="flex-shrink-0 flex items-center justify-between gap-2 px-2.5 py-1.5">
+            <span className="typography-micro text-muted-foreground">{t('desktopHostSwitcher.ssh.needInstancesHint')}</span>
+            <Button type="button" variant="ghost" size="sm" onClick={openRemoteInstancesSettings}>
+              <Icon name="settings3" className="h-4 w-4"  />
+              {t('desktopHostSwitcher.actions.remoteSsh')}
+            </Button>
+          </div>
+        )}
+
+        {!tauriAvailable && !isWebRuntime() && (
           <div className="flex-shrink-0 rounded-lg border border-border/50 bg-muted/20 p-3">
             <div className="typography-meta text-muted-foreground">
               {t('desktopHostSwitcher.state.limitedOnPage')}
@@ -815,16 +897,22 @@ export function DesktopHostSwitcherDialog({
 
         <div className="flex-1 min-h-0 overflow-y-auto">
           <div className="space-y-1">
-            {isLoading ? (
+            {(isLoading || webLoading) ? (
               <div className="px-2 py-2 text-muted-foreground text-sm">{t('desktopHostSwitcher.state.loading')}</div>
             ) : (
               allHosts.map((host) => {
                 const isLocal = host.id === LOCAL_HOST_ID;
                 const isSsh = Boolean(sshHostIds[host.id]);
+                const isWebRemote = !isTauriShell() && !isLocal && webInstances.some((wi) => wi.id === host.id);
                 const isActive = host.id === current.id;
                 const status = statusById[host.id] || null;
                 const sshStatus = sshStatusesById[host.id] || null;
-                const statusKind = isSsh ? sshPhaseToHostStatus(sshStatus?.phase) : (status?.status ?? null);
+                const webStatus = isWebRemote ? webStatuses[host.id] : null;
+                const statusKind = isWebRemote
+                  ? (webStatus?.phase === 'connected' ? 'ok' : webStatus?.phase === 'error' ? 'unreachable' : null)
+                  : isSsh
+                    ? sshPhaseToHostStatus(sshStatus?.phase)
+                    : (status?.status ?? null);
                 const isEditing = editingId === host.id;
                 const effectiveUrl = isLocal ? getLocalOrigin() : (normalizeHostUrl(host.url) || host.url);
                 const displayLabel = host.id === LOCAL_HOST_ID
@@ -867,8 +955,16 @@ export function DesktopHostSwitcherDialog({
                           <span className="inline-flex items-center gap-1 typography-micro text-muted-foreground">
                             {statusIcon(statusKind)}
                             <span>
-                              {isSsh ? t(sshPhaseLabelKey(sshStatus?.phase)) : t(statusLabelKey(status?.status ?? null))}
-                              {!isSsh && status?.status === 'ok' && typeof status.latencyMs === 'number'
+                              {isWebRemote
+                                ? (webStatus?.phase === 'connected'
+                                  ? t('desktopHostSwitcher.status.connected')
+                                  : webStatus?.phase === 'error'
+                                    ? t('desktopHostSwitcher.status.unreachable')
+                                    : t('desktopHostSwitcher.status.unknown'))
+                                : isSsh
+                                  ? t(sshPhaseLabelKey(sshStatus?.phase))
+                                  : t(statusLabelKey(status?.status ?? null))}
+                              {!isSsh && !isWebRemote && status?.status === 'ok' && typeof status.latencyMs === 'number'
                                 ? t('desktopHostSwitcher.status.ping', { ms: Math.max(0, Math.round(status.latencyMs)) })
                                 : ''}
                             </span>
@@ -1183,7 +1279,7 @@ export function DesktopHostSwitcherButton({ headerIconButtonClass }: DesktopHost
       if (!localUrl) {
         throw new Error('Connected but missing forwarded URL');
       }
-      serverRegistry.register({ id: hostId, label: hostLabel, baseUrl: localUrl });
+      registerRemoteInstanceProxy({ id: hostId, label: hostLabel, healthStatus: 'healthy' });
       clearStaleSessionOnServerSwitch();
       setStartupSshModal({ open: false, hostId: null, hostLabel: '', error: null, connecting: false });
       return true;
@@ -1285,7 +1381,63 @@ export function DesktopHostSwitcherButton({ headerIconButtonClass }: DesktopHost
     };
   }, [connectDefaultSshInstance, currentSessionId, t]);
 
-  if (!isDesktopShell()) {
+  React.useEffect(() => {
+    if (!isWebRuntime() || isTauriShell()) return;
+
+    let cancelled = false;
+    const run = async () => {
+      try {
+        const store = useRemoteInstancesStore.getState();
+        if (!store.initialized) {
+          await store.loadInstances();
+        }
+        if (cancelled) return;
+
+        const instances = store.instances;
+        const currentSessionServerId = currentSessionId
+          ? serverRegistry.getServerForSession(currentSessionId)
+          : undefined;
+
+        if (currentSessionServerId && currentSessionServerId !== DEFAULT_SERVER_ID) {
+          const active = instances.find((i) => i.id === currentSessionServerId);
+          if (active) {
+            setLabel(resolveRemoteLabel(active));
+            const s = store.statuses[active.id];
+            setStatus(s?.phase === 'connected' ? 'ok' : s?.phase === 'error' ? 'unreachable' : null);
+            return;
+          }
+        }
+
+        const local = buildLocalHost();
+        if (instances.length > 0) {
+          const first = instances[0];
+          setLabel(resolveRemoteLabel(first));
+          const s = store.statuses[first.id];
+          setStatus(s?.phase === 'connected' ? 'ok' : s?.phase === 'error' ? 'unreachable' : null);
+        } else {
+          setLabel(redactSensitiveUrl(local.label));
+          setStatus(null);
+        }
+      } catch {
+        if (!cancelled) {
+          setLabel(t('desktopHostSwitcher.instance.fallback'));
+          setStatus(null);
+        }
+      }
+    };
+
+    void run();
+    const interval = window.setInterval(() => {
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
+      void run();
+    }, 10_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [currentSessionId, t]);
+
+  if (!isDesktopShell() && !isWebRuntime()) {
     return null;
   }
 

@@ -10,6 +10,8 @@ export interface WorktreeMetadata {
 
   projectDirectory: string;
 
+  serverId?: string;
+
   branch: string;
 
   label: string;

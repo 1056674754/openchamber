@@ -333,7 +333,8 @@ const writeRevealedToolIds = (messageId: string, value: Set<string>): void => {
     revealedToolIdsByMessage.set(messageId, new Set(value));
 };
 
-const UserMessageBody = React.memo(({ messageId, parts, isMobile, alwaysShowActions = isMobile, hasTouchInput, hasTextContent, onCopyMessage, copiedMessage, onShowPopup, agentMention, onRevert, onFork, userActionsMode = 'inline', stickyUserHeaderEnabled = true }: {
+const UserMessageBody = React.memo(({ sessionId, messageId, parts, isMobile, alwaysShowActions = isMobile, hasTouchInput, hasTextContent, onCopyMessage, copiedMessage, onShowPopup, agentMention, onRevert, onFork, userActionsMode = 'inline', stickyUserHeaderEnabled = true }: {
+    sessionId?: string;
     messageId: string;
     parts: Part[];
     isMobile: boolean;
@@ -576,6 +577,7 @@ const UserMessageBody = React.memo(({ messageId, parts, isMobile, alwaysShowActi
                         <React.Fragment key={part.id ?? `user-text-${index}`}>
                             <UserTextPart
                                 part={part}
+                                sessionId={sessionId}
                                 messageId={messageId}
                                 isMobile={isMobile}
                                 agentMention={mentionForPart}
@@ -1517,6 +1519,7 @@ const AssistantMessageBody = React.memo(({
                 rendered.push(
                     <div key={`progressive-group-${segment.id}`} className="mb-3">
                         <TurnActivity
+                            sessionId={sessionId}
                             parts={visibleSegmentParts}
                             isExpanded={turnGroupingContext.isGroupExpanded === true}
                             collapsedPreviewCount={collapsedPreviewCount}
@@ -1602,6 +1605,7 @@ const AssistantMessageBody = React.memo(({
                             <ReasoningPart
                                 key={`reasoning-${messageId}-${i}`}
                                 part={part}
+                                sessionId={sessionId}
                                 messageId={messageId}
                                 onContentChange={onContentChange}
                                 alwaysShowActions={alwaysShowMessageActions}
@@ -1924,6 +1928,7 @@ const AssistantMessageBody = React.memo(({
                                     <div className="min-w-0 flex-1 break-words">
                                         <SimpleMarkdownRenderer
                                             content={errorMessage ?? ''}
+                                            sessionId={sessionId}
                                             onShowPopup={onShowPopup}
                                             className="[&_.markdown-content>*:first-child]:mt-0 [&_.markdown-content>*:last-child]:mb-0"
                                         />
@@ -1993,6 +1998,7 @@ const MessageBody = React.memo(({ isUser, ...props }: MessageBodyProps) => {
     if (isUser) {
         return (
             <UserMessageBody
+                sessionId={props.sessionId}
                 messageId={props.messageId}
                 parts={props.parts}
                 isMobile={props.isMobile}

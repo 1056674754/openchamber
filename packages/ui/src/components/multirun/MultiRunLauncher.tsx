@@ -194,7 +194,11 @@ export const MultiRunLauncher: React.FC<MultiRunLauncherProps> = ({
 
   const projectRef = React.useMemo<ProjectRef | null>(() => {
     if (selectedProject?.path) {
-      return { id: selectedProject.id, path: selectedProject.path };
+      return {
+        id: selectedProject.id,
+        path: selectedProject.path,
+        serverId: selectedProject.serverId,
+      };
     }
 
     const base = currentDirectory ?? vscodeWorkspaceFolder;

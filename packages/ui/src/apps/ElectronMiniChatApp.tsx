@@ -24,6 +24,8 @@ import { SyncRuntimeEffects } from './AppEffects';
 import { useAppFontEffects } from './useAppFontEffects';
 import { useMiniChatKeyboardShortcuts } from '@/hooks/useMiniChatKeyboardShortcuts';
 import { listProjectWorktrees } from '@/lib/worktrees/worktreeManager';
+import { getProjectWorktreeKey } from '@/lib/worktrees/worktreeKeys';
+import { checkIsGitRepository, isLinkedWorktree } from '@/lib/gitApi';
 import type { WorktreeMetadata } from '@/types/worktree';
 
 const MINI_CHAT_PRESENCE_CHANNEL = 'openchamber:mini-chat-presence';
@@ -214,12 +216,21 @@ const MiniChatBootstrap: React.FC<{ config: MiniChatConfig }> = ({ config }) => 
         const projectPath = project.path.replace(/\\/g, '/').replace(/\/+$/, '');
         if (!projectPath) return;
         try {
-          const cachedIsGitRepo = useGitStore.getState().directories.get(projectPath)?.isGitRepo;
-          const isGitRepo = cachedIsGitRepo ?? await import('@/lib/gitApi').then((m) => m.checkIsGitRepository(projectPath));
+          const serverId = project.serverId && project.serverId !== DEFAULT_SERVER_ID ? project.serverId : null;
+          const cachedIsGitRepo = serverId ? undefined : useGitStore.getState().directories.get(projectPath)?.isGitRepo;
+          const isGitRepo = cachedIsGitRepo === false && !serverId
+            ? false
+            : cachedIsGitRepo === true || await checkIsGitRepository(projectPath);
           if (!isGitRepo) return;
-          const worktrees = await listProjectWorktrees({ id: project.id, path: projectPath });
+          if (await isLinkedWorktree(projectPath).catch(() => false)) return;
+          const worktrees = await listProjectWorktrees({
+            id: project.id,
+            path: projectPath,
+            serverId: project.serverId,
+            label: project.label,
+          });
           if (cancelled || worktrees.length === 0) return;
-          worktreesByProject.set(projectPath, worktrees);
+          worktreesByProject.set(getProjectWorktreeKey(projectPath, project.serverId), worktrees);
           allWorktrees.push(...worktrees);
         } catch {
           // Worktree discovery is best-effort; draft selector falls back to the project root.

@@ -1,3 +1,5 @@
+import { resolveApiUrl } from './api/serverUrl';
+
 export interface TerminalWebSocketDescriptor {
   path: string;
   v?: number;
@@ -102,6 +104,9 @@ const normalizeWebSocketPath = (pathValue: string): string => {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   return `${protocol}//${window.location.host}${normalizedPath}`;
 };
+
+const terminalApiUrl = (path: string, baseUrl?: string): string =>
+  resolveApiUrl(path, baseUrl);
 
 const encodeControlFrame = (payload: TerminalControlMessage): Uint8Array => {
   const jsonBytes = textEncoder.encode(JSON.stringify(payload));
@@ -727,10 +732,7 @@ const applyTerminalTransportCapabilities = (capabilities: TerminalSession['capab
     return;
   }
 
-  let wsPath = getPreferredTerminalWsPath(globalState);
-  if (baseUrl) {
-    wsPath = baseUrl + wsPath;
-  }
+  const wsPath = terminalApiUrl(getPreferredTerminalWsPath(globalState), baseUrl);
   const socketUrl = normalizeWebSocketPath(wsPath);
   if (!socketUrl) {
     return;
@@ -741,8 +743,7 @@ const applyTerminalTransportCapabilities = (capabilities: TerminalSession['capab
 };
 
 const sendTerminalInputHttp = async (sessionId: string, data: string, baseUrl?: string): Promise<void> => {
-  const prefix = baseUrl ?? '';
-  const response = await fetch(`${prefix}/api/terminal/${sessionId}/input`, {
+  const response = await fetch(terminalApiUrl(`/api/terminal/${sessionId}/input`, baseUrl), {
     method: 'POST',
     headers: { 'Content-Type': 'text/plain' },
     body: data,
@@ -755,8 +756,7 @@ const sendTerminalInputHttp = async (sessionId: string, data: string, baseUrl?: 
 };
 
 export async function createTerminalSession(options: CreateTerminalOptions, baseUrl?: string): Promise<TerminalSession> {
-  const prefix = baseUrl ?? '';
-  const response = await fetch(`${prefix}/api/terminal/create`, {
+  const response = await fetch(terminalApiUrl('/api/terminal/create', baseUrl), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -855,7 +855,7 @@ const connectTerminalStreamViaSse = (
       return;
     }
 
-    eventSource = new EventSource(`${baseUrl ?? ''}/api/terminal/${sessionId}/stream`);
+    eventSource = new EventSource(terminalApiUrl(`/api/terminal/${sessionId}/stream`, baseUrl));
     let opened = false;
 
     connectionTimeoutId = setTimeout(() => {
@@ -920,10 +920,7 @@ export function connectTerminalStream(
     return connectTerminalStreamViaSse(sessionId, onEvent, onError, options, baseUrl);
   }
 
-  let wsPath = getPreferredTerminalWsPath(globalState);
-  if (baseUrl) {
-    wsPath = baseUrl + wsPath;
-  }
+  const wsPath = terminalApiUrl(getPreferredTerminalWsPath(globalState), baseUrl);
   const socketUrl = normalizeWebSocketPath(wsPath);
   if (!socketUrl) {
     return connectTerminalStreamViaSse(sessionId, onEvent, onError, options, baseUrl);
@@ -953,8 +950,7 @@ export async function resizeTerminal(
   rows: number,
   baseUrl?: string
 ): Promise<void> {
-  const prefix = baseUrl ?? '';
-  const response = await fetch(`${prefix}/api/terminal/${sessionId}/resize`, {
+  const response = await fetch(terminalApiUrl(`/api/terminal/${sessionId}/resize`, baseUrl), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ cols, rows }),
@@ -969,8 +965,7 @@ export async function resizeTerminal(
 export async function closeTerminal(sessionId: string, baseUrl?: string): Promise<void> {
   getTerminalTransportGlobalState().manager?.unbindSession(sessionId);
 
-  const prefix = baseUrl ?? '';
-  const response = await fetch(`${prefix}/api/terminal/${sessionId}`, {
+  const response = await fetch(terminalApiUrl(`/api/terminal/${sessionId}`, baseUrl), {
     method: 'DELETE',
   });
 
@@ -987,8 +982,7 @@ export async function restartTerminalSession(
 ): Promise<TerminalSession> {
   getTerminalTransportGlobalState().manager?.unbindSession(currentSessionId);
 
-  const prefix = baseUrl ?? '';
-  const response = await fetch(`${prefix}/api/terminal/${currentSessionId}/restart`, {
+  const response = await fetch(terminalApiUrl(`/api/terminal/${currentSessionId}/restart`, baseUrl), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -1012,8 +1006,7 @@ export async function forceKillTerminal(options: {
   sessionId?: string;
   cwd?: string;
 }, baseUrl?: string): Promise<void> {
-  const prefix = baseUrl ?? '';
-  const response = await fetch(`${prefix}/api/terminal/force-kill`, {
+  const response = await fetch(terminalApiUrl('/api/terminal/force-kill', baseUrl), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(options),
@@ -1048,10 +1041,7 @@ export function primeTerminalInputTransport(baseUrl?: string): void {
     return;
   }
 
-  let wsPath = getPreferredTerminalWsPath(globalState) || DEFAULT_TERMINAL_WS_PATH;
-  if (baseUrl) {
-    wsPath = baseUrl + wsPath;
-  }
+  const wsPath = terminalApiUrl(getPreferredTerminalWsPath(globalState) || DEFAULT_TERMINAL_WS_PATH, baseUrl);
   const socketUrl = normalizeWebSocketPath(wsPath);
   if (!socketUrl) {
     return;

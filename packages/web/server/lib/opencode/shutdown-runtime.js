@@ -27,6 +27,7 @@ export const createGracefulShutdownRuntime = (dependencies) => {
     getActiveTunnelController,
     setActiveTunnelController,
     tunnelAuthController,
+    getRemoteInstancesRuntime,
   } = dependencies;
 
   const gracefulShutdown = async (options = {}) => {
@@ -40,6 +41,13 @@ export const createGracefulShutdownRuntime = (dependencies) => {
     openCodeWatcherRuntime.stop();
     sessionRuntime.dispose();
     scheduledTasksRuntime?.stop?.();
+
+    const remoteInstancesRuntime = getRemoteInstancesRuntime?.();
+    if (remoteInstancesRuntime) {
+      try {
+        remoteInstancesRuntime.shutdown();
+      } catch {}
+    }
 
     const healthCheckInterval = getHealthCheckInterval();
     if (healthCheckInterval) {

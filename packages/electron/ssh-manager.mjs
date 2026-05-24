@@ -418,6 +418,7 @@ export class ElectronSshManager {
     this.settingsFilePath = options.settingsFilePath;
     this.appVersion = options.appVersion;
     this.emit = options.emit;
+    this.onStatusChanged = typeof options.onStatusChanged === 'function' ? options.onStatusChanged : null;
     this.logs = new Map();
     this.statuses = new Map();
     this.sessions = new Map();
@@ -485,6 +486,15 @@ export class ElectronSshManager {
     };
     this.statuses.set(id, status);
     this.emit(SSH_STATUS_EVENT, status);
+    if (this.onStatusChanged) {
+      Promise.resolve(this.onStatusChanged(status)).catch((error) => {
+        this.appendLogWithLevel(
+          id,
+          'WARN',
+          `status callback failed: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      });
+    }
   }
 
   clearRetryAttempt(id) {

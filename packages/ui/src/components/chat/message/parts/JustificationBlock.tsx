@@ -21,6 +21,7 @@ const cleanJustificationText = (text: string): string => {
 
 interface JustificationBlockProps {
     part: Part;
+    sessionId?: string;
     messageId: string;
     onContentChange?: (reason?: ContentChangeReason) => void;
     actions?: React.ReactNode;
@@ -28,6 +29,7 @@ interface JustificationBlockProps {
 
 const JustificationBlock: React.FC<JustificationBlockProps> = ({
     part,
+    sessionId,
     messageId,
     onContentChange,
     actions,
@@ -46,6 +48,7 @@ const JustificationBlock: React.FC<JustificationBlockProps> = ({
     return (
         <ReasoningTimelineBlock
             text={textContent}
+            sessionId={sessionId}
             variant="justification"
             onContentChange={onContentChange}
             blockId={part.id || `${messageId}-justification`}

@@ -46,6 +46,7 @@ import { Icon } from "@/components/icon/Icon";
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useNotificationStore } from '@/sync/notification-store';
 import { useI18n } from '@/lib/i18n';
+import { getWorktreesForProject } from '@/lib/worktrees/worktreeKeys';
 
 interface MobileSessionStatusBarProps {
   onSessionSwitch?: (sessionId: string) => void;
@@ -205,7 +206,7 @@ function useProjectStatus(
   const getSessionsByDirectory = useSessionUIStore((state) => state.getSessionsByDirectory);
   const notifUnseenCounts = useNotificationStore((s) => s.index.session.unseenCount);
 
-  const projectStatusMap = React.useCallback((projectPath: string): { hasRunning: boolean; hasUnread: boolean } => {
+  const projectStatusMap = React.useCallback((projectPath: string, serverId?: string): { hasRunning: boolean; hasUnread: boolean } => {
     const getStatusType = (sessionId: string): 'busy' | 'retry' | 'idle' => {
       const status = sessionStatus?.[sessionId];
       if (status?.type === 'busy' || status?.type === 'retry') return status.type;
@@ -218,7 +219,7 @@ function useProjectStatus(
     }
 
     const dirs: string[] = [projectRoot];
-    const worktrees = availableWorktreesByProject.get(projectRoot) ?? [];
+    const worktrees = getWorktreesForProject(availableWorktreesByProject, projectRoot, serverId);
     for (const meta of worktrees) {
       const p = (meta && typeof meta === 'object' && 'path' in meta) ? (meta as { path?: unknown }).path : null;
       if (typeof p === 'string' && p.trim()) {
@@ -931,7 +932,7 @@ function ProjectButton({
 interface ProjectBarProps {
   projects: ProjectEntry[];
   activeProjectId: string | null;
-  getProjectStatus: (path: string) => { hasRunning: boolean; hasUnread: boolean };
+  getProjectStatus: (path: string, serverId?: string) => { hasRunning: boolean; hasUnread: boolean };
   onProjectSwitch: (projectId: string) => void;
   onAddProject: () => void;
   onRemoveProject?: (projectId: string) => void;
@@ -1060,7 +1061,7 @@ function ProjectBar({
       >
         {projects.map((project) => {
           const isActive = project.id === activeProjectId;
-          const status = getProjectStatus(project.path);
+          const status = getProjectStatus(project.path, project.serverId);
           const projectColorVar = project.color ? (PROJECT_COLOR_MAP[project.color] ?? null) : null;
 
           return (
@@ -1270,7 +1271,7 @@ function ExpandedView({
   contextUsage: SessionContextUsage | null;
   projects: ProjectEntry[];
   activeProjectId: string | null;
-  getProjectStatus: (path: string) => { hasRunning: boolean; hasUnread: boolean };
+  getProjectStatus: (path: string, serverId?: string) => { hasRunning: boolean; hasUnread: boolean };
   homeDirectory: string | null;
   childIndicators?: Array<{ session: Session; isRunning: boolean }>;
 }) {
@@ -1299,7 +1300,7 @@ function ExpandedView({
     const projectDirs = new Set<string>([projectRoot]);
     
     // Add worktrees
-    const worktrees = availableWorktreesByProject.get(projectRoot) ?? [];
+    const worktrees = getWorktreesForProject(availableWorktreesByProject, projectRoot, activeProject.serverId);
     for (const meta of worktrees) {
       const p = (meta && typeof meta === 'object' && 'path' in meta) ? (meta as { path?: unknown }).path : null;
       if (typeof p === 'string' && p.trim()) {

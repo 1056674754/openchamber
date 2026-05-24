@@ -52,7 +52,12 @@ const resolveProjectRef = (directory: string): ProjectRef | null => {
   if (activeProject?.path) {
     const activePath = normalizePath(activeProject.path);
     if (normalized === activePath || normalized.startsWith(`${activePath}/`)) {
-      return { id: activeProject.id, path: activeProject.path };
+      return {
+        id: activeProject.id,
+        path: activeProject.path,
+        serverId: activeProject.serverId,
+        label: activeProject.label,
+      };
     }
   }
 
@@ -63,7 +68,12 @@ const resolveProjectRef = (directory: string): ProjectRef | null => {
 
   const match = matches.sort((a, b) => normalizePath(b.path).length - normalizePath(a.path).length)[0];
 
-  return match ? { id: match.id, path: match.path } : null;
+  return match ? {
+    id: match.id,
+    path: match.path,
+    serverId: match.serverId,
+    label: match.label,
+  } : null;
 };
 
 // Track if a worktree creation flow is already running
@@ -191,7 +201,12 @@ const createInstantWorktreeDraft = async (options?: {
   isCreatingWorktreeSession = true;
 
   try {
-    const projectRef: ProjectRef = { id: activeProject.id, path: projectDirectory };
+    const projectRef: ProjectRef = {
+      id: activeProject.id,
+      path: projectDirectory,
+      serverId: activeProject.serverId,
+      label: activeProject.label,
+    };
     const pendingRequestId = createPendingDraftWorktreeRequest();
 
     // Lock the draft immediately so no React effect can reset it to the project
@@ -330,7 +345,12 @@ export async function createWorktreeOnly(): Promise<string | null> {
   isCreatingWorktreeSession = true;
 
   try {
-    const projectRef: ProjectRef = { id: activeProject.id, path: projectDirectory };
+    const projectRef: ProjectRef = {
+      id: activeProject.id,
+      path: projectDirectory,
+      serverId: activeProject.serverId,
+      label: activeProject.label,
+    };
     const preferredName = generateBranchName();
     const setupCommands = await getWorktreeSetupCommands(projectRef);
     const metadata = await createWorktreeWithDefaults(projectRef, {

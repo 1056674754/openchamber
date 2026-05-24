@@ -10,6 +10,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { cn, formatPathForDisplay } from '@/lib/utils';
 import { opencodeClient } from '@/lib/opencode/client';
+import { resolveSdkForDirectory } from '@/sync/session-actions';
 import { useDeviceInfo } from '@/lib/device';
 import type { DesktopSettings } from '@/lib/desktop';
 import { updateDesktopSettings } from '@/lib/persistence';
@@ -443,7 +444,7 @@ export const DirectoryTree: React.FC<DirectoryTreeProps> = ({
     } catch {
       try {
 
-        const tempClient = opencodeClient.getApiClient();
+        const tempClient = resolveSdkForDirectory(path);
         const response = await tempClient.file.list({
           path: '.',
           directory: path

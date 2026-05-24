@@ -1,5 +1,7 @@
 import type { OpenChamberProjectAction } from './openchamberConfig';
+import { resolveApiUrl } from './api/serverUrl';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
+import { resolveBaseUrl } from '@/sync/session-actions';
 
 type DevServerInfo = {
   command: string;
@@ -177,11 +179,17 @@ async function readOptionalTextFile(path: string, directory?: string): Promise<s
   }
 
   try {
-    const params = new URLSearchParams({ path, optional: 'true' });
+    const baseUrl = directory ? resolveBaseUrl(directory) : undefined;
+    const url = new URL(
+      resolveApiUrl('/api/fs/read', baseUrl),
+      typeof window === 'undefined' ? 'http://localhost' : window.location.origin,
+    );
+    url.searchParams.set('path', path);
+    url.searchParams.set('optional', 'true');
     if (directory) {
-      params.set('directory', directory);
+      url.searchParams.set('directory', directory);
     }
-    const response = await fetch(`/api/fs/read?${params.toString()}`, {
+    const response = await fetch(url.toString(), {
       cache: 'no-store',
     });
     if (!response.ok) return null;

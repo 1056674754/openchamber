@@ -5,6 +5,8 @@ export interface ServerConfig {
   label: string;
   baseUrl: string;
   sseUrl?: string;
+  healthUrl?: string;
+  healthMethod?: "GET" | "POST";
   authToken?: string;
 }
 
@@ -27,6 +29,9 @@ export class ServerRegistry {
     const existing = this.connections.get(config.id);
     if (existing && existing.config.baseUrl === config.baseUrl) {
       existing.config.label = config.label;
+      existing.config.sseUrl = config.sseUrl;
+      existing.config.healthUrl = config.healthUrl;
+      existing.config.healthMethod = config.healthMethod;
       if (config.authToken !== undefined) {
         existing.config.authToken = config.authToken;
       }
@@ -82,6 +87,19 @@ export class ServerRegistry {
     return this.connections.get(serverId);
   }
 
+  setHealthStatus(serverId: string, status: ServerConnection["healthStatus"]): void {
+    const connection = this.connections.get(serverId);
+    if (!connection) return;
+    const previous = connection.healthStatus;
+    connection.healthStatus = status;
+    if (status === "healthy") {
+      connection.lastHealthCheckAt = Date.now();
+    }
+    if (previous !== status) {
+      this.notifyHealthListeners(serverId);
+    }
+  }
+
   forgetSession(sessionId: string): void {
     this.sessionServerIndex.delete(sessionId);
   }
@@ -90,16 +108,18 @@ export class ServerRegistry {
     const connection = this.connections.get(serverId);
     if (!connection) return false;
 
-    connection.healthStatus = "connecting";
+    if (connection.healthStatus !== "healthy") {
+      this.setHealthStatus(serverId, "connecting");
+    }
 
     try {
       const baseUrl = connection.config.baseUrl.replace(/\/+$/, "");
-      let healthUrl: string;
-      if (baseUrl === "/api") {
+      let healthUrl = connection.config.healthUrl?.trim() || "";
+      if (!healthUrl && baseUrl === "/api") {
         healthUrl = "/health";
-      } else if (baseUrl.endsWith("/api")) {
+      } else if (!healthUrl && baseUrl.endsWith("/api")) {
         healthUrl = `${baseUrl.slice(0, -4)}/health`;
-      } else {
+      } else if (!healthUrl) {
         healthUrl = `${baseUrl}/health`;
       }
 
@@ -108,23 +128,25 @@ export class ServerRegistry {
         headers["Authorization"] = `Bearer ${connection.config.authToken}`;
       }
 
-      const response = await fetch(healthUrl, { headers });
+      const response = await fetch(healthUrl, {
+        method: connection.config.healthMethod ?? "GET",
+        headers,
+      });
       if (!response.ok) {
-        connection.healthStatus = "unhealthy";
+        this.setHealthStatus(serverId, "unhealthy");
         return false;
       }
 
       const data = await response.json();
-      if (data?.isOpenCodeReady === false) {
-        connection.healthStatus = "unhealthy";
+      if (data?.isOpenCodeReady === false || data?.healthy === false || data?.connected === false) {
+        this.setHealthStatus(serverId, "unhealthy");
         return false;
       }
 
-      connection.healthStatus = "healthy";
-      connection.lastHealthCheckAt = Date.now();
+      this.setHealthStatus(serverId, "healthy");
       return true;
     } catch {
-      connection.healthStatus = "unhealthy";
+      this.setHealthStatus(serverId, "unhealthy");
       return false;
     }
   }
@@ -163,10 +185,7 @@ export class ServerRegistry {
     const poll = () => {
       const ids = Array.from(this.connections.keys());
       for (const id of ids) {
-        void this.probeHealth(id).then((healthy) => {
-          this.notifyHealthListeners(id);
-          return healthy;
-        });
+        void this.probeHealth(id);
       }
     };
     poll();

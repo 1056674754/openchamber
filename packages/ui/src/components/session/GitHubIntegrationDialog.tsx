@@ -60,7 +60,12 @@ export function GitHubIntegrationDialog({
   const projectDirectory = activeProject?.path ?? null;
   const projectRef: ProjectRef | null = React.useMemo(() => {
     if (projectDirectory && activeProject) {
-      return { id: activeProject.id, path: projectDirectory };
+      return {
+        id: activeProject.id,
+        path: projectDirectory,
+        serverId: activeProject.serverId,
+        label: activeProject.label,
+      };
     }
     return null;
   }, [activeProject, projectDirectory]);

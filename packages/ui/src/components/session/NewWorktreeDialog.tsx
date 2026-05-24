@@ -34,6 +34,7 @@ import { useConfigStore } from '@/stores/useConfigStore';
 import { useContextStore } from '@/stores/contextStore';
 import { validateWorktreeCreate, createWorktree } from '@/lib/worktrees/worktreeManager';
 import { withWorktreeUpstreamDefaults } from '@/lib/worktrees/worktreeCreate';
+import { getWorktreesForProject } from '@/lib/worktrees/worktreeKeys';
 import { getWorktreeSetupCommands } from '@/lib/openchamberConfig';
 import { getRootBranch } from '@/lib/worktrees/worktreeStatus';
 import { generateBranchSlug } from '@/lib/git/branchNameGenerator';
@@ -216,7 +217,12 @@ export function NewWorktreeDialog({
   const projectDirectory = activeProject?.path ?? null;
   const projectRef: ProjectRef | null = React.useMemo(() => {
     if (projectDirectory && activeProject) {
-      return { id: activeProject.id, path: projectDirectory };
+      return {
+        id: activeProject.id,
+        path: projectDirectory,
+        serverId: activeProject.serverId,
+        label: activeProject.label,
+      };
     }
     return null;
   }, [activeProject, projectDirectory]);
@@ -265,9 +271,13 @@ export function NewWorktreeDialog({
   const availableWorktreesByProject = useSessionUIStore((state) => state.availableWorktreesByProject);
   const existingWorktreeNames = React.useMemo(() => {
     if (!projectDirectory) return new Set<string>();
-    const worktrees = availableWorktreesByProject.get(projectDirectory) ?? [];
+    const worktrees = getWorktreesForProject(
+      availableWorktreesByProject,
+      projectDirectory,
+      activeProject?.serverId,
+    );
     return new Set(worktrees.map(wt => wt.name));
-  }, [availableWorktreesByProject, projectDirectory]);
+  }, [activeProject?.serverId, availableWorktreesByProject, projectDirectory]);
   
   // Generate a unique slug that doesn't conflict with existing worktrees
   const generateUniqueSlug = React.useCallback((maxAttempts = 10): string => {

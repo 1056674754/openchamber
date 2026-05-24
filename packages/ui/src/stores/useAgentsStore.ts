@@ -106,6 +106,7 @@ export interface AgentConfig {
 export type AgentWithExtras = Agent & {
   native?: boolean;
   hidden?: boolean;
+  color?: string | null;
   options?: { hidden?: boolean };
   scope?: AgentScope;
   /** Subfolder name parsed from file path, e.g. "business", "development" */

@@ -11,6 +11,7 @@ import { streamDebugEnabled } from '@/stores/utils/streamDebug';
 import { PROJECT_COLORS } from '@/lib/projectMeta';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSessionProjectStore } from './useSessionProjectStore';
+import { getProjectWorktreeKey } from '@/lib/worktrees/worktreeKeys';
 
 /** Pick a color key that's least used among existing projects */
 const pickAutoColor = (projects: ProjectEntry[]): string => {
@@ -126,6 +127,10 @@ const deriveProjectLabel = (path: string): string => {
   return raw.replace(/[-_]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 };
 
+const isUnsupportedRemoteProjectPath = (path: string): boolean => {
+  return path === '/';
+};
+
 const sanitizeProjectIconImage = (value: unknown): ProjectEntry['iconImage'] | undefined => {
   if (!value || typeof value !== 'object') {
     return undefined;
@@ -200,6 +205,7 @@ const sanitizeProjects = (value: unknown): ProjectEntry[] => {
 
     const hasServerId = typeof candidate.serverId === 'string' && candidate.serverId.trim().length > 0;
     const serverId = hasServerId ? (candidate.serverId as string).trim() : undefined;
+    if (serverId && isUnsupportedRemoteProjectPath(normalizedPath)) continue;
 
     const id = serverId
       ? createProjectIdFromPath(`${serverId}:${normalizedPath}`)
@@ -408,6 +414,7 @@ export const useProjectsStore = create<ProjectsStore>()(
 
     ensureRemoteProject: (path: string, serverId: string, label?: string) => {
       const normalizedPath = path.replace(/\\/g, '/').replace(/\/+$/, '') || '/';
+      if (isUnsupportedRemoteProjectPath(normalizedPath)) return null;
       const id = createProjectIdFromPath(`${serverId}:${normalizedPath}`);
       if (!id) return null;
 
@@ -452,6 +459,7 @@ export const useProjectsStore = create<ProjectsStore>()(
         const normalizedPath = project.path.replace(/\\/g, '/').replace(/\/+$/, '') || '/';
         useSessionUIStore.setState((s) => {
           const next = new Map(s.availableWorktreesByProject);
+          next.delete(getProjectWorktreeKey(normalizedPath, project.serverId));
           next.delete(normalizedPath);
           return { availableWorktreesByProject: next };
         });

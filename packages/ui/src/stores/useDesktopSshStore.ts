@@ -14,6 +14,7 @@ import {
   type DesktopSshInstanceStatus,
 } from '@/lib/desktopSsh';
 import { serverRegistry } from '@/lib/opencode/server-registry';
+import { registerRemoteInstanceProxy } from '@/lib/remote-instances/registry';
 
 type DesktopSshState = {
   instances: DesktopSshInstance[];
@@ -85,12 +86,10 @@ export const useDesktopSshStore = create<DesktopSshState>((set, get) => ({
           const instance = get().instances.find((i) => i.id === status.id);
           const label = instance ? resolveInstanceLabel(instance) : status.id;
           if (status.phase === 'ready' && status.localUrl) {
-            const url = status.localUrl.replace(/\/+$/, '');
-            serverRegistry.register({
+            registerRemoteInstanceProxy({
               id: status.id,
               label,
-              baseUrl: url + '/api',
-              sseUrl: url,
+              healthStatus: 'healthy',
             });
           } else if (status.phase === 'error' || status.phase === 'idle') {
             serverRegistry.unregister(status.id);
@@ -110,12 +109,10 @@ export const useDesktopSshStore = create<DesktopSshState>((set, get) => ({
         const status = statusMap[instance.id];
         const label = resolveInstanceLabel(instance);
         if (status?.phase === 'ready' && status.localUrl) {
-          const url = status.localUrl.replace(/\/+$/, '');
-          serverRegistry.register({
+          registerRemoteInstanceProxy({
             id: instance.id,
             label,
-            baseUrl: url + '/api',
-            sseUrl: url,
+            healthStatus: 'healthy',
           });
         }
       }
@@ -149,6 +146,17 @@ export const useDesktopSshStore = create<DesktopSshState>((set, get) => ({
       let changed = false;
       for (const status of statuses.sort(byUpdatedAt)) {
         statusMap[status.id] = status;
+        const instance = get().instances.find((item) => item.id === status.id);
+        const label = instance ? resolveInstanceLabel(instance) : status.id;
+        if (status.phase === 'ready' && status.localUrl) {
+          registerRemoteInstanceProxy({
+            id: status.id,
+            label,
+            healthStatus: 'healthy',
+          });
+        } else if (status.phase === 'error' || status.phase === 'idle') {
+          serverRegistry.unregister(status.id);
+        }
         const p = prev[status.id];
         if (!changed && (!p
           || p.phase !== status.phase

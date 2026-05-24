@@ -61,6 +61,7 @@ export {
   useSessionMessages,
   useSessionMessageCount,
   useSessionMessagesResolved,
+  useSessionMessagesRenderable,
   useSessionParts,
   useSessionStatus,
   useSessionActivityTimestamp,

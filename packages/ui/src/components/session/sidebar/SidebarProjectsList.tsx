@@ -17,6 +17,7 @@ import { SortableGroupItem, SortableProjectItem } from './sortableItems';
 import { formatProjectLabel } from './utils';
 import { useI18n } from '@/lib/i18n';
 import { serverRegistry } from '@/lib/opencode/server-registry';
+import { getSyncStoresForServer, subscribeSyncStoresRegistry } from '@/sync/multi-server-registry';
 import { useDesktopSshStore } from '@/stores/useDesktopSshStore';
 import { resolveInstanceLabel } from '@/lib/desktopSsh';
 
@@ -73,9 +74,127 @@ type Props = {
   isInlineEditing: boolean;
 };
 
+type RemoteProjectLoadState = {
+  phase: 'pending' | 'loading' | 'complete';
+};
+
+type RemoteProjectRef = {
+  id: string;
+  normalizedPath: string;
+  serverId?: string;
+};
+
+const getRemoteProjectSignature = (projects: RemoteProjectRef[]): string =>
+  projects
+    .map((project) => `${project.id}:${project.serverId ?? ''}:${project.normalizedPath}`)
+    .sort()
+    .join('|');
+
+const remoteProjectLoadStatesEqual = (
+  left: Map<string, RemoteProjectLoadState>,
+  right: Map<string, RemoteProjectLoadState>,
+): boolean => {
+  if (left === right) return true;
+  if (left.size !== right.size) return false;
+
+  for (const [projectId, state] of left) {
+    if (right.get(projectId)?.phase !== state.phase) {
+      return false;
+    }
+  }
+
+  return true;
+};
+
+const getRemoteProjectLoadStates = (
+  projects: RemoteProjectRef[],
+): Map<string, RemoteProjectLoadState> => {
+  const result = new Map<string, RemoteProjectLoadState>();
+
+  for (const project of projects) {
+    if (!project.serverId || project.serverId === 'default') continue;
+
+    const stores = getSyncStoresForServer(project.serverId);
+    const store = stores?.getChild(project.normalizedPath);
+    const storeStatus = store?.getState().status;
+
+    result.set(project.id, {
+      phase: !store ? 'pending' : storeStatus === 'complete' ? 'complete' : 'loading',
+    });
+  }
+
+  return result;
+};
+
+const useRemoteProjectLoadStates = (
+  projects: RemoteProjectRef[],
+): Map<string, RemoteProjectLoadState> => {
+  const signature = React.useMemo(
+    () => getRemoteProjectSignature(projects),
+    [projects],
+  );
+  const projectsRef = React.useRef(projects);
+  const [states, setStates] = React.useState(() => getRemoteProjectLoadStates(projects));
+
+  React.useEffect(() => {
+    projectsRef.current = projects;
+  }, [projects, signature]);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    const update = () => {
+      if (!cancelled) {
+        const next = getRemoteProjectLoadStates(projectsRef.current);
+        setStates((prev) => remoteProjectLoadStatesEqual(prev, next) ? prev : next);
+      }
+    };
+
+    update();
+    const unsubRegistry = subscribeSyncStoresRegistry(update);
+    const healthUnsubs = Array.from(new Set(projectsRef.current.map((project) => project.serverId).filter((id): id is string => Boolean(id && id !== 'default'))))
+      .map((serverId) => serverRegistry.onHealthChange(serverId, update));
+    const interval = window.setInterval(update, 1500);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+      unsubRegistry();
+      for (const unsubscribe of healthUnsubs) unsubscribe();
+    };
+  }, [signature]);
+
+  return states;
+};
+
+const hasAnySessions = (section: ProjectSection): boolean =>
+  section.groups.some((group) => group.sessions.length > 0);
+
+const RemoteProjectSessionSkeleton = () => (
+  <div className="space-y-1 py-1" aria-hidden="true">
+    {[0, 1, 2].map((index) => (
+      <div key={index} className="flex items-center gap-2 rounded-md px-1.5 py-1">
+        <span className="h-3 w-3 shrink-0 rounded-[3px] bg-[var(--surface-subtle)] animate-pulse" />
+        <span
+          className="h-3 rounded-full bg-[var(--surface-subtle)] animate-pulse"
+          style={{ width: index === 0 ? '72%' : index === 1 ? '58%' : '66%' }}
+        />
+      </div>
+    ))}
+  </div>
+);
+
 export function SidebarProjectsList(props: Props): React.ReactNode {
   const { t } = useI18n();
   const sshInstances = useDesktopSshStore((state) => state.instances);
+  const remoteProjectRefs = React.useMemo(
+    () => props.sectionsForRender.map((section) => ({
+      id: section.project.id,
+      normalizedPath: section.project.normalizedPath,
+      serverId: section.project.serverId,
+    })),
+    [props.sectionsForRender],
+  );
+  const remoteProjectLoadStates = useRemoteProjectLoadStates(remoteProjectRefs);
   const projectSensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
@@ -101,6 +220,10 @@ export function SidebarProjectsList(props: Props): React.ReactNode {
             const activeSection = props.sectionsForRender.find((section) => section.project.id === props.activeProjectId) ?? props.sectionsForRender[0];
             if (!activeSection) {
               return props.hasSessionSearchQuery ? props.searchEmptyState : props.emptyState;
+            }
+            const activeRemoteLoadState = remoteProjectLoadStates.get(activeSection.project.id);
+            if (activeRemoteLoadState && activeRemoteLoadState.phase !== 'complete' && !hasAnySessions(activeSection)) {
+              return <RemoteProjectSessionSkeleton />;
             }
             const primaryGroup =
               activeSection.groups.find((candidate) => candidate.isMain && candidate.sessions.length > 0)
@@ -169,6 +292,10 @@ export function SidebarProjectsList(props: Props): React.ReactNode {
                 const nestedGroups = rootGroup
                   ? orderedGroups.filter((group) => group.id !== rootGroup.id)
                   : orderedGroups;
+                const remoteLoadState = remoteProjectLoadStates.get(projectKey);
+                const showRemoteSkeleton = Boolean(
+                  remoteLoadState && remoteLoadState.phase !== 'complete' && !hasAnySessions(section),
+                );
 
                 return (
                   <SortableProjectItem
@@ -216,7 +343,9 @@ export function SidebarProjectsList(props: Props): React.ReactNode {
                   >
                     {!isCollapsed ? (
                       <div className="space-y-0 pt-0 pb-0.5 pl-3">
-                        {section.groups.length > 0 ? (
+                        {showRemoteSkeleton ? (
+                          <RemoteProjectSessionSkeleton />
+                        ) : section.groups.length > 0 ? (
                           <DndContext
                             sensors={groupSensors}
                             collisionDetection={closestCenter}

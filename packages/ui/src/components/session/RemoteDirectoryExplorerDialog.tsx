@@ -1,6 +1,7 @@
 import React from 'react';
 import { serverRegistry } from '@/lib/opencode/server-registry';
 import { resolveInstanceLabel } from '@/lib/desktopSsh';
+import { registerRemoteInstanceProxy } from '@/lib/remote-instances/registry';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useDesktopSshStore } from '@/stores/useDesktopSshStore';
 import { useShallow } from 'zustand/react/shallow';
@@ -11,6 +12,7 @@ import { toast } from '@/components/ui';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { RiFolderLine, RiArrowUpSLine, RiServerLine, RiWifiLine, RiWifiOffLine, RiLoader4Line } from '@remixicon/react';
+import { resolveApiUrl } from '@/lib/api/serverUrl';
 
 interface RemoteDirectoryExplorerDialogProps {
   open: boolean;
@@ -174,7 +176,7 @@ export const RemoteDirectoryExplorerDialog: React.FC<RemoteDirectoryExplorerDial
     let cancelled = false;
     setIsLoading(true);
 
-    fetch(`${selectedFetchBaseUrl}/api/fs/list?path=${encodeURIComponent(absPath)}`)
+    fetch(`${resolveApiUrl('/api/fs/list', selectedFetchBaseUrl)}?path=${encodeURIComponent(absPath)}`)
       .then(async (res) => {
         if (!res.ok) {
           const body = await res.text().catch(() => '');
@@ -289,7 +291,7 @@ export const RemoteDirectoryExplorerDialog: React.FC<RemoteDirectoryExplorerDial
 
     setIsLoading(true);
     let cancelled = false;
-    fetch(`${status.localUrl}/api/fs/home`)
+    fetch(resolveApiUrl('/api/fs/home', status.localUrl))
       .then(async (res) => {
         if (!res.ok) {
           const body = await res.text().catch(() => '');
@@ -412,7 +414,7 @@ export const RemoteDirectoryExplorerDialog: React.FC<RemoteDirectoryExplorerDial
                           onClick={() => {
                             setSelectedServerId(instance.id);
                             if (isReady && status?.localUrl) {
-                              serverRegistry.register({ id: instance.id, label, baseUrl: status.localUrl });
+                              registerRemoteInstanceProxy({ id: instance.id, label, healthStatus: 'healthy' });
                             }
                           }}
                           className={cn(

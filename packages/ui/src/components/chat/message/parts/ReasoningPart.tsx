@@ -72,6 +72,7 @@ const LiveDuration: React.FC<{ start: number; end?: number; active: boolean }> =
 
 type ReasoningTimelineBlockProps = {
     text: string;
+    sessionId?: string;
     variant: ReasoningVariant;
     onContentChange?: (reason?: ContentChangeReason) => void;
     blockId: string;
@@ -84,6 +85,7 @@ type ReasoningTimelineBlockProps = {
 
 export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
     text,
+    sessionId,
     variant,
     onContentChange,
     blockId,
@@ -193,6 +195,7 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
                         <div data-message-text-export-source="true">
                             <MarkdownRenderer
                                 content={text}
+                                sessionId={sessionId}
                                 messageId={blockId}
                                 isAnimated={false}
                                 isStreaming={isStreaming}
@@ -215,6 +218,7 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
 
 type ReasoningPartProps = {
     part: Part;
+    sessionId?: string;
     onContentChange?: (reason?: ContentChangeReason) => void;
     messageId: string;
     alwaysShowActions?: boolean;
@@ -222,6 +226,7 @@ type ReasoningPartProps = {
 
 const ReasoningPart = React.memo(({
     part,
+    sessionId,
     onContentChange,
     messageId,
     alwaysShowActions = false,
@@ -247,6 +252,7 @@ const ReasoningPart = React.memo(({
     return (
         <ReasoningTimelineBlock
             text={throttledText}
+            sessionId={sessionId}
             variant="thinking"
             onContentChange={onContentChange}
             blockId={part.id || `${messageId}-reasoning`}

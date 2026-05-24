@@ -56,8 +56,9 @@ type ProjectPlanListItem = OpenChamberProjectPlanFileLink & {
 const toPlanListItem = async (
   plan: OpenChamberProjectPlanFileLink,
   fallbackTitle: string,
+  project?: ProjectRef,
 ): Promise<ProjectPlanListItem> => {
-  const file = await readProjectPlanFile(plan.path);
+  const file = await readProjectPlanFile(plan.path, project);
   return {
     ...plan,
     title: file?.title || plan.path.split('/').pop() || fallbackTitle,
@@ -137,7 +138,7 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
       try {
         const data = await getProjectContextData(projectRef);
         const nextPlans = await Promise.all(
-          data.plans.map((plan) => toPlanListItem(plan, t('rightSidebar.contextNotesTodo.plan.defaultTitle')))
+          data.plans.map((plan) => toPlanListItem(plan, t('rightSidebar.contextNotesTodo.plan.defaultTitle'), projectRef))
         );
         if (cancelled) {
           return;

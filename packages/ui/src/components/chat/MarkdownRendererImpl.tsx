@@ -27,6 +27,9 @@ import { useDeviceInfo } from '@/lib/device';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import type { EditorAPI } from '@/lib/api/types';
+import { DEFAULT_SERVER_ID, serverRegistry } from '@/lib/opencode/server-registry';
+import { resolveApiUrl } from '@/lib/api/serverUrl';
+import { useProjectsStore } from '@/stores/useProjectsStore';
 
 const useCurrentMermaidTheme = () => {
   const themeSystem = useOptionalThemeSystem();
@@ -983,6 +986,7 @@ MarkdownBlockView.displayName = 'MarkdownBlockView';
 
 interface MarkdownRendererProps {
   content: string;
+  sessionId?: string;
   part?: Part;
   messageId: string;
   isAnimated?: boolean;
@@ -1040,6 +1044,52 @@ const normalizePath = (value: string): string => {
   }
 
   return normalized;
+};
+
+const resolveRemoteServerIdForDirectory = (directory: string): string | undefined => {
+  const normalizedDirectory = normalizePath(directory);
+  if (!normalizedDirectory) {
+    return undefined;
+  }
+
+  let best: { serverId: string; length: number } | null = null;
+  const projects = useProjectsStore.getState().projects;
+  for (const project of projects) {
+    const serverId = typeof project.serverId === 'string' ? project.serverId.trim() : '';
+    if (!serverId || serverId === DEFAULT_SERVER_ID) {
+      continue;
+    }
+
+    const projectPath = normalizePath(project.path);
+    if (!projectPath) {
+      continue;
+    }
+
+    if (normalizedDirectory !== projectPath && !normalizedDirectory.startsWith(`${projectPath}/`)) {
+      continue;
+    }
+
+    if (!best || projectPath.length > best.length) {
+      best = { serverId, length: projectPath.length };
+    }
+  }
+
+  return best?.serverId;
+};
+
+const resolveFileReferenceBaseUrl = (sessionId?: string | null, directory?: string): string => {
+  const sessionServerId = sessionId ? serverRegistry.getServerForSession(sessionId) : undefined;
+  const serverId = sessionServerId && sessionServerId !== DEFAULT_SERVER_ID
+    ? sessionServerId
+    : directory
+      ? resolveRemoteServerIdForDirectory(directory)
+      : undefined;
+
+  if (!serverId || serverId === DEFAULT_SERVER_ID) {
+    return '';
+  }
+
+  return serverRegistry.get(serverId)?.config.baseUrl ?? `/api/remote/${encodeURIComponent(serverId)}`;
 };
 
 const isAbsolutePath = (value: string): boolean => {
@@ -1277,12 +1327,14 @@ const getContextDirectory = (effectiveDirectory: string, resolvedPath: string): 
 const useFileReferenceInteractions = ({
   containerRef,
   effectiveDirectory,
+  fileReferenceBaseUrl,
   editor,
   preferRuntimeEditor,
   enabled,
 }: {
   containerRef: React.RefObject<HTMLDivElement | null>;
   effectiveDirectory: string;
+  fileReferenceBaseUrl?: string;
   editor?: EditorAPI;
   preferRuntimeEditor?: boolean;
   enabled: boolean;
@@ -1292,12 +1344,19 @@ const useFileReferenceInteractions = ({
   tRef.current = t;
   const annotationDebounceRef = React.useRef<number | null>(null);
   const validatedPathsRef = React.useRef<Set<string>>(new Set());
+  const validationContextRef = React.useRef('');
   const validateDebounceRef = React.useRef<number | null>(null);
 
   React.useEffect(() => {
     const container = containerRef.current;
     if (!container) {
       return;
+    }
+
+    const validationContext = `${fileReferenceBaseUrl ?? ''}|${effectiveDirectory}`;
+    if (validationContextRef.current !== validationContext) {
+      validatedPathsRef.current.clear();
+      validationContextRef.current = validationContext;
     }
 
     const clearFileLinkAttributes = (candidate: HTMLElement) => {
@@ -1365,7 +1424,11 @@ const useFileReferenceInteractions = ({
       const results = await Promise.allSettled(
         Array.from(pathsToCheck.keys()).map(async (path) => {
           try {
-            const res = await fetch(`/api/fs/stat?path=${encodeURIComponent(path)}&allowOutsideWorkspace=true`);
+            const params = new URLSearchParams({
+              path,
+              allowOutsideWorkspace: 'true',
+            });
+            const res = await fetch(`${resolveApiUrl('/api/fs/stat', fileReferenceBaseUrl)}?${params.toString()}`);
             return { path, ok: res.ok };
           } catch {
             return { path, ok: null };
@@ -1535,7 +1598,7 @@ const useFileReferenceInteractions = ({
       container.removeEventListener('click', handleClick);
       container.removeEventListener('keydown', handleKeyDown);
     };
-  }, [containerRef, editor, effectiveDirectory, preferRuntimeEditor, enabled]);
+  }, [containerRef, editor, effectiveDirectory, fileReferenceBaseUrl, preferRuntimeEditor, enabled]);
 };
 
 const useMermaidInlineInteractions = ({
@@ -1633,6 +1696,7 @@ const useMermaidInlineInteractions = ({
 
 const MarkdownRendererImpl: React.FC<MarkdownRendererProps> = ({
   content,
+  sessionId,
   part,
   messageId,
   isAnimated = true,
@@ -1648,11 +1712,16 @@ const MarkdownRendererImpl: React.FC<MarkdownRendererProps> = ({
   const { editor, runtime } = useRuntimeAPIs();
   const containerRef = React.useRef<HTMLDivElement>(null);
   const effectiveDirectory = useEffectiveDirectory() ?? '';
+  const fileReferenceBaseUrl = React.useMemo(
+    () => resolveFileReferenceBaseUrl(sessionId, effectiveDirectory),
+    [effectiveDirectory, sessionId],
+  );
   const mermaidBlocks = React.useMemo(() => extractMermaidBlocks(content), [content]);
   useMermaidInlineInteractions({ containerRef, mermaidBlocks, onShowPopup });
   useFileReferenceInteractions({
     containerRef,
     effectiveDirectory,
+    fileReferenceBaseUrl,
     editor,
     preferRuntimeEditor: runtime.isVSCode,
     enabled: enableFileReferences && !isStreaming,
@@ -1714,8 +1783,10 @@ export const MarkdownRenderer = React.memo(MarkdownRendererImpl, (prev, next) =>
     && prev.isAnimated === next.isAnimated
     && prev.skipFadeIn === next.skipFadeIn
     && prev.className === next.className
+    && prev.sessionId === next.sessionId
     && prev.messageId === next.messageId
     && prev.onShowPopup === next.onShowPopup
+    && prev.enableFileReferences === next.enableFileReferences
     && prev.part?.id === next.part?.id;
 });
 
@@ -1729,8 +1800,10 @@ const SimpleMarkdownRendererImpl: React.FC<{
   mermaidControls?: MermaidControlOptions;
   allowMermaidWheelZoom?: boolean;
   enableFileReferences?: boolean;
+  sessionId?: string;
 }> = ({
   content,
+  sessionId,
   className,
   variant = 'assistant',
   disableLinkSafety,
@@ -1747,6 +1820,10 @@ const SimpleMarkdownRendererImpl: React.FC<{
   const currentTheme = useCurrentMermaidTheme();
   const containerRef = React.useRef<HTMLDivElement>(null);
   const effectiveDirectory = useEffectiveDirectory() ?? '';
+  const fileReferenceBaseUrl = React.useMemo(
+    () => resolveFileReferenceBaseUrl(sessionId, effectiveDirectory),
+    [effectiveDirectory, sessionId],
+  );
   const mermaidBlocks = React.useMemo(() => extractMermaidBlocks(renderedContent), [renderedContent]);
   useMermaidInlineInteractions({
     containerRef,
@@ -1757,6 +1834,7 @@ const SimpleMarkdownRendererImpl: React.FC<{
   useFileReferenceInteractions({
     containerRef,
     effectiveDirectory,
+    fileReferenceBaseUrl,
     editor,
     preferRuntimeEditor: runtime.isVSCode,
     enabled: enableFileReferences,
@@ -1789,6 +1867,7 @@ export const SimpleMarkdownRenderer = React.memo(SimpleMarkdownRendererImpl, (pr
     && prev.className === next.className
     && prev.disableLinkSafety === next.disableLinkSafety
     && prev.stripFrontmatter === next.stripFrontmatter
+    && prev.sessionId === next.sessionId
     && prev.onShowPopup === next.onShowPopup
     && prev.allowMermaidWheelZoom === next.allowMermaidWheelZoom
     && prev.enableFileReferences === next.enableFileReferences;

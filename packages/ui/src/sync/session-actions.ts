@@ -14,10 +14,10 @@ import { useConfigStore } from "@/stores/useConfigStore"
 import { registerSessionDirectory } from "./sync-refs"
 import { isSyntheticPart } from "@/lib/messages/synthetic"
 import { serverRegistry, DEFAULT_SERVER_ID } from "@/lib/opencode/server-registry"
+import { registerRemoteInstanceProxy } from "@/lib/remote-instances/registry"
 import { getSyncStoresForServer, getAllSyncStores } from "./multi-server-registry"
 import { useProjectsStore } from "@/stores/useProjectsStore"
-import { useSessionProjectStore } from "@/stores/useSessionProjectStore"
-import { resolveProjectIdViaPathPrefix } from "@/lib/sessionOwnership"
+import { getWorktreesForProject } from "@/lib/worktrees/worktreeKeys"
 
 // Reference set by SyncProvider — allows actions to access SDK and stores
 let _sdk: OpencodeClient | null = null
@@ -62,30 +62,51 @@ const normalizeDirectoryKey = (directory: string): string =>
 function findProjectForDirectory(directory: string) {
   const normalizedDir = normalizeDirectoryKey(directory)
   const projects = useProjectsStore.getState().projects
+  const worktreesByProject = useSessionUIStore.getState().availableWorktreesByProject
+
+  let bestWorktreeOwner: { project: typeof projects[number]; matchLength: number } | null = null
+  for (const project of projects) {
+    const projectPath = normalizeDirectoryKey(project.path)
+    const worktrees = getWorktreesForProject(worktreesByProject, projectPath, project.serverId)
+    for (const wt of worktrees) {
+      if (wt.serverId && wt.serverId !== project.serverId) continue
+      const worktreePath = normalizeDirectoryKey(wt.path)
+      if (!worktreePath || (normalizedDir !== worktreePath && !normalizedDir.startsWith(`${worktreePath}/`))) {
+        continue
+      }
+      if (!bestWorktreeOwner || worktreePath.length > bestWorktreeOwner.matchLength) {
+        bestWorktreeOwner = { project, matchLength: worktreePath.length }
+      }
+    }
+  }
+  if (bestWorktreeOwner) return bestWorktreeOwner.project
 
   let best: typeof projects[number] | null = null
   for (const project of projects) {
     const projectPath = normalizeDirectoryKey(project.path)
-    if (normalizedDir !== projectPath && !normalizedDir.startsWith(`${projectPath}/`)) {
-      continue
-    }
+    if (normalizedDir !== projectPath && !normalizedDir.startsWith(`${projectPath}/`)) continue
     if (!best || projectPath.length > normalizeDirectoryKey(best.path).length) {
       best = project
     }
   }
-  if (best) return best
+  return best
+}
 
-  const worktreesByProject = useSessionUIStore.getState().availableWorktreesByProject
-  for (const [projectPath, worktrees] of worktreesByProject.entries()) {
-    for (const wt of worktrees) {
-      const wp = normalizeDirectoryKey(wt.path)
-      if (wp && (normalizedDir === wp || normalizedDir.startsWith(`${wp}/`))) {
-        const match = projects.find((p) => normalizeDirectoryKey(p.path) === normalizeDirectoryKey(projectPath))
-        if (match) return match
-      }
+function getOrRegisterRemoteConnection(serverId: string, label?: string) {
+  const existing = serverRegistry.get(serverId)
+  if (existing) {
+    if (existing.healthStatus !== "healthy") {
+      void serverRegistry.probeHealth(serverId)
     }
+    return existing
   }
-  return null
+  const connection = registerRemoteInstanceProxy({
+    id: serverId,
+    label: label?.trim() || serverId,
+    healthStatus: "connecting",
+  })
+  void serverRegistry.probeHealth(serverId)
+  return connection
 }
 
 /** Get the SDK client for a session's server. Falls back to default server. */
@@ -114,60 +135,64 @@ export function setDirectoryServerId(directory: string, serverId: string): void 
   _directoryServerCache.set(normalizeDirectoryKey(directory), serverId);
 }
 
+function getCachedServerIdForDirectory(directory: string): string | null {
+  let best: { serverId: string; length: number } | null = null;
+  for (const [cachedDirectory, serverId] of _directoryServerCache) {
+    if (directory !== cachedDirectory && !directory.startsWith(`${cachedDirectory}/`)) {
+      continue;
+    }
+    if (!best || cachedDirectory.length > best.length) {
+      best = { serverId, length: cachedDirectory.length };
+    }
+  }
+  return best?.serverId ?? null;
+}
+
 /** Resolve the correct SDK client for a directory by looking up its project's serverId.
- *  When sessionID is provided, uses the authoritative serverRegistry session index. */
-export function resolveSdkForDirectory(directory: string, sessionID?: string): OpencodeClient {
+ *  When sessionID or explicitServerId is provided, uses the authoritative serverRegistry session index. */
+export function resolveSdkForDirectory(directory: string, sessionID?: string, explicitServerId?: string): OpencodeClient {
   const normalizedDir = normalizeDirectoryKey(directory)
 
   // [OPENCHAMBER-FORK] 2025-05-18 v1.11.1-dev-merge
+  // Authoritative source: explicitServerId overrides everything.
+  if (explicitServerId && explicitServerId !== DEFAULT_SERVER_ID) {
+    return getOrRegisterRemoteConnection(explicitServerId).client
+  }
+
   // Authoritative source: serverRegistry session index. No path matching.
   if (sessionID) {
     const sessionServerId = serverRegistry.getServerForSession(sessionID)
     if (sessionServerId && sessionServerId !== DEFAULT_SERVER_ID) {
-      const conn = serverRegistry.get(sessionServerId)
-      if (conn) {
-        console.log(`[resolveSdk] session=${sessionID} → server=${sessionServerId} url=${conn.config.baseUrl}`)
-        return conn.client
-      }
+      return getOrRegisterRemoteConnection(sessionServerId).client
+    }
+    // Session is known but has no server mapping (local). Fall through to directory-based lookup only for local.
+    if (sessionServerId === DEFAULT_SERVER_ID) {
+      const defaultConn = serverRegistry.get(DEFAULT_SERVER_ID)
+      if (defaultConn) return defaultConn.client
+      return sdk()
     }
   }
 
   // Check module-level cache first — populated synchronously by discoverWorktreeDirectories
-  const cachedServerId = _directoryServerCache.get(normalizedDir)
+  const cachedServerId = getCachedServerIdForDirectory(normalizedDir)
   if (cachedServerId && cachedServerId !== DEFAULT_SERVER_ID) {
-    const conn = serverRegistry.get(cachedServerId)
-    if (conn) {
-      console.log(`[resolveSdk] dir="${normalizedDir}" → CACHED server=${cachedServerId} url=${conn.config.baseUrl}`)
-      return conn.client
-    }
+    return getOrRegisterRemoteConnection(cachedServerId).client
   }
 
   const project = findProjectForDirectory(normalizedDir)
   if (project?.serverId && project.serverId !== DEFAULT_SERVER_ID) {
-    const conn = serverRegistry.get(project.serverId)
-    if (conn) {
-      console.log(`[resolveSdk] dir="${normalizedDir}" → server=${project.serverId} url=${conn.config.baseUrl}`)
-      return conn.client
-    }
-    throw new Error(`Remote server "${project.serverId}" is not available for ${normalizedDir}`)
+    return getOrRegisterRemoteConnection(project.serverId, project.label).client
   }
 
-  // [OPENCHAMBER-FORK] 2025-05-18 v1.11.1-dev-merge
   // Check if any remote SyncProvider already has a child store for this directory
-  // (created by handleEvent via ensureChild on SSE events). Zero path matching.
   const allEntries = getAllSyncStores()
   for (const e of allEntries) {
     if (e.serverId === DEFAULT_SERVER_ID) continue
     if (e.childStores.children.has(normalizedDir)) {
-      const conn = serverRegistry.get(e.serverId)
-      if (conn) {
-        console.log(`[resolveSdk] dir="${normalizedDir}" → IN_REMOTE_STORE server=${e.serverId} url=${conn.config.baseUrl}`)
-        return conn.client
-      }
+      return getOrRegisterRemoteConnection(e.serverId).client
     }
   }
 
-  console.log(`[resolveSdk] dir="${normalizedDir}" → FALLBACK to default. matchedProject:`, project?.id, project?.serverId, project?.path)
   const defaultConn = serverRegistry.get(DEFAULT_SERVER_ID)
   if (defaultConn) return defaultConn.client
   return sdk()
@@ -177,39 +202,56 @@ export function resolveSdkForDirectory(directory: string, sessionID?: string): O
  *  Returns undefined if the directory belongs to the local default server. */
 export function resolveBaseUrl(directory: string): string | undefined {
   const normalizedDir = normalizeDirectoryKey(directory)
+
+  // Tier 1: directory→server cache (populated by discoverWorktreeDirectories, non-string-based)
+  const cachedServerId = _directoryServerCache.get(normalizedDir)
+  if (cachedServerId && cachedServerId !== DEFAULT_SERVER_ID) {
+    return getOrRegisterRemoteConnection(cachedServerId).config.baseUrl
+  }
+
+  // Tier 2: string-based project path matching (fallback)
   const project = findProjectForDirectory(normalizedDir)
   if (!project?.serverId || project.serverId === DEFAULT_SERVER_ID) return undefined
-  const conn = serverRegistry.get(project.serverId)
-  if (!conn) throw new Error(`Remote server "${project.serverId}" is not available for ${normalizedDir}`)
-  return conn.config.baseUrl
+  return getOrRegisterRemoteConnection(project.serverId, project.label).config.baseUrl
 }
 
-export function resolveBaseUrlForSession(sessionId: string | null | undefined, directory?: string | null): string | undefined {
+export function resolveBaseUrlForSession(sessionId: string | null | undefined, directory?: string | null, explicitServerId?: string): string | undefined {
+  if (explicitServerId && explicitServerId !== DEFAULT_SERVER_ID) {
+    return getOrRegisterRemoteConnection(explicitServerId).config.baseUrl
+  }
+  if (explicitServerId === DEFAULT_SERVER_ID) return undefined
+
   if (sessionId) {
     const serverId = serverRegistry.getServerForSession(sessionId)
     if (serverId) {
       if (serverId === DEFAULT_SERVER_ID) return undefined
-      const conn = serverRegistry.get(serverId)
-      if (!conn) throw new Error(`Remote server "${serverId}" is not available for session ${sessionId}`)
-      return conn.config.baseUrl
+      return getOrRegisterRemoteConnection(serverId).config.baseUrl
     }
   }
   return directory ? resolveBaseUrl(directory) : undefined
 }
 
-/** Resolve the base API URL (raw origin, no /api suffix) for a directory's server. */
+function getServerIdForBaseUrl(baseUrl: string | undefined): string | null {
+  if (!baseUrl) return null
+  const normalized = baseUrl.replace(/\/+$/, "")
+  const connection = serverRegistry.getAll().find((entry) => entry.config.baseUrl.replace(/\/+$/, "") === normalized)
+  return connection?.config.id ?? null
+}
+
+/** Resolve the registered server base URL for a directory. */
 export function resolveApiUrl(directory: string): string | undefined {
   const normalizedDir = normalizeDirectoryKey(directory)
+
+  // Tier 1: directory→server cache (populated by discoverWorktreeDirectories)
+  const cachedServerId = _directoryServerCache.get(normalizedDir)
+  if (cachedServerId && cachedServerId !== DEFAULT_SERVER_ID) {
+    return getOrRegisterRemoteConnection(cachedServerId).config.baseUrl
+  }
+
+  // Tier 2: string-based project path matching (fallback)
   const project = findProjectForDirectory(normalizedDir)
   if (!project?.serverId || project.serverId === DEFAULT_SERVER_ID) return undefined
-  const conn = serverRegistry.get(project.serverId)
-  if (!conn) throw new Error(`Remote server "${project.serverId}" is not available for ${normalizedDir}`)
-  // Extract raw origin from the baseUrl (which includes /api suffix)
-  try {
-    return new URL(conn.config.baseUrl).origin
-  } catch {
-    return undefined
-  }
+  return getOrRegisterRemoteConnection(project.serverId, project.label).config.baseUrl
 }
 
 /** Get the child store manager for a session's server. Falls back to default. */
@@ -421,20 +463,19 @@ export async function createSession(
     const targetDir = directoryOverride
 
     let client: OpencodeClient
+    let resolvedServerId = serverId ?? null
     if (serverId && serverId !== DEFAULT_SERVER_ID) {
-      const conn = serverRegistry.get(serverId)
-      if (conn) {
-        client = conn.client
-      } else {
-        throw new Error(`Remote server "${serverId}" is not available for ${targetDir}`)
-      }
-    } else {
+      client = getOrRegisterRemoteConnection(serverId).client
+    } else if (serverId === DEFAULT_SERVER_ID) {
       const defaultConn = serverRegistry.get(DEFAULT_SERVER_ID)
       if (defaultConn) {
         client = defaultConn.client
       } else {
         client = sdk()
       }
+    } else {
+      client = resolveSdkForDirectory(targetDir)
+      resolvedServerId = getServerIdForBaseUrl(resolveBaseUrl(targetDir)) ?? DEFAULT_SERVER_ID
     }
 
     const result = await client.session.create({
@@ -450,11 +491,15 @@ export async function createSession(
         registerSessionDirectory(session.id, sessionDirectory)
       }
 
-      if (serverId && serverId !== DEFAULT_SERVER_ID) {
-        serverRegistry.indexSession(session.id, serverId)
+      if (resolvedServerId && resolvedServerId !== DEFAULT_SERVER_ID) {
+        serverRegistry.indexSession(session.id, resolvedServerId)
       }
 
-      useSessionUIStore.getState().setCurrentSession(session.id, sessionDirectory)
+      useSessionUIStore.getState().setCurrentSession(
+        session.id,
+        sessionDirectory,
+        resolvedServerId ? { serverId: resolvedServerId } : undefined,
+      )
       useSessionUIStore.getState().markSessionAsOpenChamberCreated(session.id)
       useGlobalSessionsStore.getState().upsertSession(session)
       return session

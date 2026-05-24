@@ -78,6 +78,10 @@ import { createNotificationTemplateRuntime } from './lib/notifications/template-
 import { createGracefulShutdownRuntime } from './lib/opencode/shutdown-runtime.js';
 import { createProjectConfigRuntime } from './lib/projects/project-config.js';
 import { createPreviewProxyRuntime } from './lib/preview/proxy-runtime.js';
+import { createRemoteInstancesRuntime } from './lib/remote-instances/config.js';
+import { registerRemoteInstanceRoutes } from './lib/remote-instances/routes.js';
+import { registerRemoteProxy } from './lib/remote-instances/proxy.js';
+import { registerRemoteSseRelay } from './lib/remote-instances/sse-relay.js';
 import { createProxyMiddleware, responseInterceptor } from 'http-proxy-middleware';
 import webPush from 'web-push';
 
@@ -148,6 +152,10 @@ function shouldSkipCompression(req, res) {
     if (pathname === prefix) {
       return true;
     }
+  }
+
+  if (pathname.startsWith('/api/remote/') && (pathname.endsWith('/global/event') || pathname.endsWith('/event'))) {
+    return true;
   }
 
   return headerIncludesEventStream(res.getHeader('Content-Type'));
@@ -531,6 +539,7 @@ let runtimeManagedRemoteTunnelToken = '';
 let runtimeManagedRemoteTunnelHostname = '';
 let terminalRuntime = null;
 let messageStreamRuntime = null;
+let remoteInstancesRuntimeRef = null;
 const userProvidedOpenCodePassword = hmrStateRuntime.getUserProvidedOpenCodePassword(hmrState);
 const initialOpenCodeAuthState = hmrStateRuntime.resolveOpenCodeAuthFromState({
   hmrState,
@@ -1119,6 +1128,7 @@ const gracefulShutdownRuntime = createGracefulShutdownRuntime({
   },
   tunnelAuthController,
   scheduledTasksRuntime,
+  getRemoteInstancesRuntime: () => remoteInstancesRuntimeRef,
 });
 
 const gracefulShutdown = (...args) => gracefulShutdownRuntime.gracefulShutdown(...args);
@@ -1337,6 +1347,18 @@ async function main(options = {}) {
     rejectWebSocketUpgrade,
   });
 
+  const remoteInstancesRuntime = createRemoteInstancesRuntime({
+    readSettingsFromDisk,
+    writeSettingsToDisk,
+    readSettingsFromDiskMigrated,
+    persistSettings,
+  });
+  remoteInstancesRuntimeRef = remoteInstancesRuntime;
+  registerRemoteInstanceRoutes(app, remoteInstancesRuntime);
+  registerRemoteSseRelay(app, remoteInstancesRuntime);
+  registerRemoteProxy(app, remoteInstancesRuntime);
+  remoteInstancesRuntime.startHealthMonitoring();
+
   const startupPipelineResult = await startupPipelineRuntime.run({
     app,
     server,
@@ -1384,6 +1406,7 @@ async function main(options = {}) {
     onTunnelReady,
     tunnelRuntimeContext,
     attachSignals,
+    remoteInstancesRuntime,
   });
   terminalRuntime = startupPipelineResult.terminalRuntime;
   messageStreamRuntime = startupPipelineResult.messageStreamRuntime;
@@ -1412,7 +1435,8 @@ async function main(options = {}) {
       gracefulShutdown({
         exitProcess: shutdownOptions.exitProcess ?? false,
         stopOpenCode: shutdownOptions.stopOpenCode,
-      })
+      }),
+    remoteInstances: remoteInstancesRuntime,
   };
 }
 

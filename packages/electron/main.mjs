@@ -332,6 +332,25 @@ const sshManager = new ElectronSshManager({
   settingsFilePath: settingsFilePath(),
   appVersion: APP_VERSION,
   emit: (event, detail) => emitToAllWindows(event, detail),
+  onStatusChanged: async (status) => {
+    const remoteRuntime = state.serverHandle?.remoteInstances;
+    if (!remoteRuntime || !status?.id) return;
+
+    if (status.phase === 'ready' && status.localUrl) {
+      await remoteRuntime.refreshCache();
+      const instance = await remoteRuntime.getInstance(status.id);
+      if (instance) {
+        await remoteRuntime.probeHealth(instance);
+      }
+      return;
+    }
+
+    remoteRuntime.setHealthStatus(status.id, {
+      healthy: false,
+      latencyMs: 0,
+      error: status.detail || `SSH status: ${status.phase}`,
+    });
+  },
 });
 
 const readJsonFile = (filePath) => {
@@ -2429,6 +2448,7 @@ end tell`;
 
     case 'desktop_ssh_instances_set':
       await sshManager.setInstances(args.config || {});
+      await state.serverHandle?.remoteInstances?.refreshCache?.();
       return null;
 
     case 'desktop_ssh_import_hosts':
@@ -2443,6 +2463,11 @@ end tell`;
     case 'desktop_ssh_disconnect': {
       const id = String(args.id || '').trim();
       await sshManager.disconnect(id);
+      state.serverHandle?.remoteInstances?.setHealthStatus?.(id, {
+        healthy: false,
+        latencyMs: 0,
+        error: 'Disconnected by user',
+      });
       return null;
     }
 

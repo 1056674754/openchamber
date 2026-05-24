@@ -28,6 +28,7 @@ import { JsonTreeView } from '@/components/ui/JsonTreeView';
 import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
 import { useActiveServerBaseUrl } from '@/hooks/useActiveServerId';
+import { resolveApiUrl } from '@/lib/api/serverUrl';
 
 interface ToolOutputDialogProps {
     popup: ToolPopupContent;
@@ -741,7 +742,7 @@ const MermaidPreviewDialog: React.FC<{
             if (!normalizedPath) {
                 sourcePromise = Promise.reject(new Error('Invalid local file path for Mermaid preview.'));
             } else {
-                sourcePromise = fetch(`${serverBaseUrl}/api/fs/raw?${new URLSearchParams({
+                sourcePromise = fetch(`${resolveApiUrl('/api/fs/raw', serverBaseUrl)}?${new URLSearchParams({
                     path: normalizedPath,
                     allowOutsideWorkspace: 'true',
                 }).toString()}`)

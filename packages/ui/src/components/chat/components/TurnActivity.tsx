@@ -13,6 +13,7 @@ interface DiffStats {
 }
 
 interface TurnActivityProps {
+    sessionId?: string;
     parts: TurnActivityRecord[];
     isExpanded: boolean;
     collapsedPreviewCount?: number;

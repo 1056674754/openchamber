@@ -1180,6 +1180,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                                             className="px-4 py-2.5 shadow-none border border-primary/5"
                                         >
                                             <MessageBody
+                                                sessionId={message.info.sessionID}
                                                 messageId={message.info.id}
                                                 parts={displayParts}
                                                 isUser={isUser}
@@ -1214,6 +1215,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                                         </div>
                                         {useExternalUserActionsRow ? (
                                             <MessageBody
+                                                sessionId={message.info.sessionID}
                                                 messageId={message.info.id}
                                                 parts={displayParts}
                                                 isUser={isUser}

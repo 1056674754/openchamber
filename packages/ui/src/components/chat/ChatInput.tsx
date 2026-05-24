@@ -56,6 +56,7 @@ import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { createWorktreeDraft } from '@/lib/worktreeSessionCreator';
 import { buildSessionTargetOptions } from '@/sync/session-worktree-contract';
+import { getWorktreesForProject } from '@/lib/worktrees/worktreeKeys';
 import { usePermissionStore } from '@/stores/permissionStore';
 import { extractGitChangedFiles } from './changedFiles';
 import { useI18n } from '@/lib/i18n';
@@ -3175,14 +3176,13 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             return [];
         }
 
-        const worktrees = (() => {
-            if (!selectedDraftProjectPath) {
-                return [];
-            }
-            return availableWorktreesByProject.get(selectedDraftProjectPath)
-                ?? availableWorktreesByProject.get(selectedDraftProject.path)
-                ?? [];
-        })();
+        const worktrees = selectedDraftProjectPath
+            ? getWorktreesForProject(
+                availableWorktreesByProject,
+                selectedDraftProjectPath,
+                selectedDraftProject.serverId,
+            )
+            : [];
 
         return buildSessionTargetOptions({
             projectRoot: normalizePath(selectedDraftProject.path) ?? '',

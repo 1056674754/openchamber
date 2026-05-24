@@ -61,6 +61,63 @@ type SyncGlobal = typeof globalThis & {
 const syncGlobal = globalThis as SyncGlobal
 const SyncContext = syncGlobal[SYNC_CONTEXT_GLOBAL_KEY] ?? createContext<SyncSystem | null>(null)
 syncGlobal[SYNC_CONTEXT_GLOBAL_KEY] = SyncContext
+const emptyDirectoryStoreManager = new ChildStoreManager()
+const emptyDirectoryStore = emptyDirectoryStoreManager.ensureChild("__openchamber_empty__", { bootstrap: false })
+const REMOTE_SESSION_LIST_TIMEOUT_MS = 8_000
+const REMOTE_BOOTSTRAP_MAX_CONCURRENCY = 1
+const REMOTE_BOOTSTRAP_STAGGER_MS = 350
+const REMOTE_BOOTSTRAP_MAX_STAGGER_MS = 3_500
+
+async function listSessionsForBootstrap(
+  sdkClient: OpencodeClient,
+  serverId: string,
+  directory: string,
+): Promise<Session[]> {
+  const connection = serverId !== DEFAULT_SERVER_ID ? serverRegistry.get(serverId) : undefined
+  if (connection) {
+    const baseUrl = connection.config.baseUrl.replace(/\/+$/, "")
+    const params = new URLSearchParams({
+      directory,
+      roots: "true",
+      limit: "50",
+    })
+    const headers: Record<string, string> = { Accept: "application/json" }
+    if (connection.config.authToken) {
+      headers.Authorization = `Bearer ${connection.config.authToken}`
+    }
+    const response = await fetch(`${baseUrl}/session?${params.toString()}`, {
+      headers,
+      signal: AbortSignal.timeout(REMOTE_SESSION_LIST_TIMEOUT_MS),
+    })
+    if (!response.ok) {
+      const err = new Error(`session.list failed (${response.status})`)
+      ;(err as Error & { status?: number }).status = response.status
+      throw err
+    }
+    const data = await response.json()
+    return Array.isArray(data) ? (data.filter((item): item is Session => Boolean(item?.id)) as Session[]) : []
+  }
+
+  const result = await sdkClient.session.list({
+    directory,
+    roots: true,
+    limit: 50,
+  })
+  const rawError = (result as { error?: unknown }).error
+  if (rawError) {
+    const response = (result as { response?: { status?: number } }).response
+    const status = response?.status
+    const message = typeof rawError === "object" && rawError !== null && "message" in rawError
+      ? String((rawError as { message?: unknown }).message)
+      : String(rawError)
+    const wrapped = new Error(`session.list failed${status ? ` (${status})` : ""}: ${message}`)
+    if (status !== undefined) {
+      ;(wrapped as Error & { status?: number }).status = status
+    }
+    throw wrapped
+  }
+  return (result.data ?? []).filter((item): item is Session => Boolean(item?.id))
+}
 
 export function useSyncSystem() {
   const ctx = useContext(SyncContext)
@@ -413,6 +470,25 @@ const normalizeEventDirectory = (rawDirectory: string): string => {
   const normalized = rawDirectory.replace(/\\/g, "/").replace(/^([a-z]):/, (_, l: string) => l.toUpperCase() + ":")
   // Strip trailing slashes to match child store keys (normalizeDirectoryPath in useDirectoryStore)
   return normalized.length > 1 ? normalized.replace(/\/+$/, "") : normalized
+}
+
+const normalizeDirectoryForOwnership = (directory: string): string =>
+  directory.replace(/\\/g, "/").replace(/^([a-z]):/, (_, l: string) => l.toUpperCase() + ":").replace(/\/+$/, "") || "/"
+
+const directoryBelongsToRemoteProject = (
+  directory: string,
+  projects: ReadonlyArray<{ path: string; serverId?: string }>,
+): boolean => {
+  if (!directory || directory === "global") return false
+  const normalizedDirectory = normalizeDirectoryForOwnership(directory)
+  for (const project of projects) {
+    if (!project.serverId || project.serverId === DEFAULT_SERVER_ID) continue
+    const projectPath = normalizeDirectoryForOwnership(project.path)
+    if (normalizedDirectory === projectPath || normalizedDirectory.startsWith(`${projectPath}/`)) {
+      return true
+    }
+  }
+  return false
 }
 
 const getSessionIdFromPayload = (event: Event): string | null => {
@@ -1483,9 +1559,11 @@ export function SyncProvider(props: {
 }) {
   const serverId = props.serverId ?? DEFAULT_SERVER_ID
   const messageStreamTransport = useConfigStore((state) => state.settingsMessageStreamTransport)
+  const projects = useProjectsStore((state) => state.projects)
   const childStoresRef = useRef<ChildStoreManager | null>(null)
   if (!childStoresRef.current) childStoresRef.current = new ChildStoreManager()
   const childStores = childStoresRef.current
+  const emptyRemoteSessionRetryDirsRef = useRef(new Set<string>())
   const routingIndexRef = useRef<EventRoutingIndex | null>(null)
   if (!routingIndexRef.current) routingIndexRef.current = createEventRoutingIndex()
   const routingIndex = routingIndexRef.current
@@ -1512,111 +1590,196 @@ export function SyncProvider(props: {
   // Configure child store manager
   useEffect(() => {
     const bootingDirs = new Set<string>()
+    const scheduledRemoteDirs = new Set<string>()
+    const queuedRemoteDirs = new Set<string>()
+    const remoteBootstrapQueue: string[] = []
+    const loadingSessionDirs = new Set<string>()
+    let activeRemoteBootstraps = 0
+    let nextRemoteBootstrapDelayMs = 0
+
+    const drainRemoteBootstrapQueue = () => {
+      if (activeRemoteBootstraps >= REMOTE_BOOTSTRAP_MAX_CONCURRENCY) return
+      const next = remoteBootstrapQueue.shift()
+      if (!next) {
+        nextRemoteBootstrapDelayMs = 0
+        return
+      }
+
+      queuedRemoteDirs.delete(next)
+      if (!childStores.getChild(next) || bootingDirs.has(next)) {
+        drainRemoteBootstrapQueue()
+        return
+      }
+
+      activeRemoteBootstraps += 1
+      startBootstrap(next, () => {
+        activeRemoteBootstraps = Math.max(0, activeRemoteBootstraps - 1)
+        drainRemoteBootstrapQueue()
+      })
+    }
+
+    const enqueueRemoteBootstrap = (directory: string) => {
+      if (queuedRemoteDirs.has(directory) || bootingDirs.has(directory)) return
+      queuedRemoteDirs.add(directory)
+      remoteBootstrapQueue.push(directory)
+      drainRemoteBootstrapQueue()
+    }
+
+    const scheduleRemoteBootstrap = (directory: string) => {
+      if (scheduledRemoteDirs.has(directory) || queuedRemoteDirs.has(directory) || bootingDirs.has(directory)) return
+      scheduledRemoteDirs.add(directory)
+      const delayMs = nextRemoteBootstrapDelayMs
+      nextRemoteBootstrapDelayMs = Math.min(
+        nextRemoteBootstrapDelayMs + REMOTE_BOOTSTRAP_STAGGER_MS,
+        REMOTE_BOOTSTRAP_MAX_STAGGER_MS,
+      )
+      window.setTimeout(() => {
+        scheduledRemoteDirs.delete(directory)
+        if (!childStores.getChild(directory) || bootingDirs.has(directory)) return
+        enqueueRemoteBootstrap(directory)
+      }, delayMs)
+    }
+
+    const startBootstrap = (directory: string, onDone?: () => void) => {
+      bootingDirs.add(directory)
+
+      const store = childStores.getChild(directory)
+      if (!store) {
+        bootingDirs.delete(directory)
+        onDone?.()
+        return
+      }
+
+      const runBootstrap = async (attempt: number) => {
+        const globalState = useGlobalSyncStore.getState()
+        const bootstrapped = await bootstrapDirectory({
+          directory,
+          sdk: props.sdk,
+          getState: () => store.getState(),
+          set: (patch) => {
+            store.setState(patch)
+            if (patch.session || patch.message) {
+              ingestDirectoryStateIntoRoutingIndex(routingIndex, directory, store.getState())
+            }
+          },
+          global: {
+            config: globalState.config,
+            projects: globalState.projects,
+            providers: globalState.providers,
+          },
+          loadSessions: async (dir) => {
+            loadingSessionDirs.add(dir)
+            try {
+              const maxEmptyRetries = 0
+              let emptyRetries = 0
+              while (true) {
+                const sessionCount = await retry(async () => {
+                  const sessions = (await listSessionsForBootstrap(props.sdk, serverId, dir))
+                    .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+                  // Race guard: if the list came back empty but event pipeline
+                  // already populated the store, don't clobber. OpenCode can
+                  // answer HTTP with empty sessions while WS delivers session
+                  // events for the same data (disk warmup race on app launch).
+                  const currentSessions = store.getState().session
+                  if (sessions.length === 0 && currentSessions.length > 0) {
+                    console.warn(
+                      `[bootstrap] session.list returned empty for ${dir}; preserving ${currentSessions.length} existing sessions`,
+                    )
+                    return currentSessions.length
+                  }
+                  store.setState({ session: sessions, sessionTotal: sessions.length, limit: Math.max(sessions.length, 50) })
+                  for (const s of sessions) {
+                    if (s.id) serverRegistry.indexSession(s.id, serverId)
+                  }
+                  ingestDirectoryStateIntoRoutingIndex(routingIndex, dir, store.getState())
+                  return sessions.length
+                })
+
+                if (sessionCount > 0 || emptyRetries >= maxEmptyRetries) {
+                  return
+                }
+
+                emptyRetries += 1
+                console.warn(`[bootstrap] sessions empty for ${dir}; retrying session list in 2s`)
+                await new Promise((r) => setTimeout(r, 2000))
+              }
+            } finally {
+              loadingSessionDirs.delete(dir)
+            }
+          },
+          loadMetadata: serverId === DEFAULT_SERVER_ID,
+        })
+
+        if (!bootstrapped) {
+          if (attempt < 5) {
+            console.warn(`[bootstrap] bootstrap failed for ${directory} after attempt ${attempt + 1}; retrying in 2s`)
+            await new Promise((r) => setTimeout(r, 2000))
+            await runBootstrap(attempt + 1)
+          }
+          return
+        }
+
+        // VS Code race: if sessions are still empty after bootstrap, OpenCode
+        // wasn't ready yet (bridge returned 503). Retry a few times.
+        const state = store.getState()
+        const sessionCount = Array.isArray(state.session) ? state.session.length : 0
+        const shouldRetryEmptySessionList = serverId === DEFAULT_SERVER_ID
+        if (shouldRetryEmptySessionList && sessionCount === 0 && attempt < 5) {
+          console.warn(`[bootstrap] sessions empty for ${directory} after attempt ${attempt + 1}; retrying in 2s`)
+          await new Promise((r) => setTimeout(r, 2000))
+          store.setState({ status: "loading" as const })
+          await runBootstrap(attempt + 1)
+        } else if (sessionCount === 0) {
+          console.warn(`[bootstrap] sessions empty for ${directory} after ${attempt + 1} attempts; giving up`)
+          store.setState({ status: "complete" as const })
+        }
+      }
+
+      runBootstrap(0).then(() => {
+        // Post-bootstrap status refresh: if SSE is already connected when
+        // bootstrap finishes, the session_status from Phase 1 may be stale
+        // (SSE could have delivered session.idle while bootstrap was in-flight
+        // but the child store didn't exist yet). Trigger a recovery resync to
+        // pick up the authoritative live status from the server.
+        const { isConnected } = useConfigStore.getState()
+        if (isConnected && store.getState().status === "complete") {
+          void resyncDirectoryAfterReconnect(directory, store, routingIndex, serverId, props.sdk).catch(() => {})
+        }
+      }).finally(() => {
+        bootingDirs.delete(directory)
+        onDone?.()
+      })
+    }
 
     childStores.configure({
       onBootstrap: (directory) => {
-        if (bootingDirs.has(directory)) return
-        bootingDirs.add(directory)
-
-        const store = childStores.getChild(directory)
-        if (!store) return
-
-        const runBootstrap = async (attempt: number) => {
-          const globalState = useGlobalSyncStore.getState()
-          await bootstrapDirectory({
-            directory,
-            sdk: props.sdk,
-            getState: () => store.getState(),
-            set: (patch) => {
-              store.setState(patch)
-              if (patch.session || patch.message) {
-                ingestDirectoryStateIntoRoutingIndex(routingIndex, directory, store.getState())
-              }
-            },
-            global: {
-              config: globalState.config,
-              projects: globalState.projects,
-              providers: globalState.providers,
-            },
-            loadSessions: (dir) => retry(async () => {
-              const result = await props.sdk.session.list({
-                directory: dir,
-                roots: true,
-                limit: 50,
-              })
-              // SDK returns { error } instead of { data } on non-ok responses (503).
-              // Preserve HTTP status so retry()'s transient detection works.
-              const rawError = (result as { error?: unknown }).error
-              if (rawError) {
-                const response = (result as { response?: { status?: number } }).response
-                const status = response?.status
-                const message = typeof rawError === "object" && rawError !== null && "message" in rawError
-                  ? String((rawError as { message?: unknown }).message)
-                  : String(rawError)
-                const wrapped = new Error(`session.list failed${status ? ` (${status})` : ""}: ${message}`)
-                if (status !== undefined) {
-                  ;(wrapped as Error & { status?: number }).status = status
-                }
-                throw wrapped
-              }
-              const sessions = (result.data ?? [])
-                .filter((s) => !!s?.id)
-                .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
-              // Race guard: if the list came back empty but event pipeline
-              // already populated the store, don't clobber. OpenCode can
-              // answer HTTP with empty sessions while WS delivers session
-              // events for the same data (disk warmup race on app launch).
-              const currentSessions = store.getState().session
-              if (sessions.length === 0 && currentSessions.length > 0) {
-                console.warn(
-                  `[bootstrap] session.list returned empty for ${dir}; preserving ${currentSessions.length} existing sessions`,
-                )
-                return
-              }
-              store.setState({ session: sessions, sessionTotal: sessions.length, limit: Math.max(sessions.length, 50) })
-              for (const s of sessions) {
-                if (s.id) serverRegistry.indexSession(s.id, serverId)
-              }
-              ingestDirectoryStateIntoRoutingIndex(routingIndex, directory, store.getState())
-            }),
-          })
-
-          // VS Code race: if sessions are still empty after bootstrap, OpenCode
-          // wasn't ready yet (bridge returned 503). Retry a few times.
-          const state = store.getState()
-          const sessionCount = Array.isArray(state.session) ? state.session.length : 0
-          if (sessionCount === 0 && attempt < 5) {
-            console.warn(`[bootstrap] sessions empty for ${directory} after attempt ${attempt + 1}; retrying in 2s`)
-            await new Promise((r) => setTimeout(r, 2000))
-            store.setState({ status: "loading" as const })
-            await runBootstrap(attempt + 1)
-          } else if (sessionCount === 0) {
-            console.warn(`[bootstrap] sessions empty for ${directory} after ${attempt + 1} attempts; giving up`)
-            store.setState({ status: "complete" as const })
-          }
+        if (serverId === DEFAULT_SERVER_ID && directoryBelongsToRemoteProject(directory, projects)) {
+          childStores.disposeDirectory(directory)
+          return
         }
 
-        runBootstrap(0).then(() => {
-          // Post-bootstrap status refresh: if SSE is already connected when
-          // bootstrap finishes, the session_status from Phase 1 may be stale
-          // (SSE could have delivered session.idle while bootstrap was in-flight
-          // but the child store didn't exist yet). Trigger a recovery resync to
-          // pick up the authoritative live status from the server.
-          const { isConnected } = useConfigStore.getState()
-          if (isConnected && store.getState().status === "complete") {
-            void resyncDirectoryAfterReconnect(directory, store, routingIndex, serverId, props.sdk).catch(() => {})
-          }
-        }).finally(() => {
-          bootingDirs.delete(directory)
-        })
+        if (bootingDirs.has(directory)) return
+
+        if (serverId !== DEFAULT_SERVER_ID) {
+          scheduleRemoteBootstrap(directory)
+          return
+        }
+
+        startBootstrap(directory)
       },
       onDispose: (directory) => {
         bootingDirs.delete(directory)
+        scheduledRemoteDirs.delete(directory)
+        queuedRemoteDirs.delete(directory)
+        loadingSessionDirs.delete(directory)
+        const queueIndex = remoteBootstrapQueue.indexOf(directory)
+        if (queueIndex >= 0) remoteBootstrapQueue.splice(queueIndex, 1)
+        emptyRemoteSessionRetryDirsRef.current.delete(directory)
       },
-      isBooting: (directory) => bootingDirs.has(directory),
-      isLoadingSessions: () => false,
+      isBooting: (directory) => bootingDirs.has(directory) || scheduledRemoteDirs.has(directory) || queuedRemoteDirs.has(directory),
+      isLoadingSessions: (directory) => loadingSessionDirs.has(directory),
     })
-  }, [childStores, props.sdk, routingIndex, serverId])
+  }, [childStores, props.sdk, routingIndex, serverId, projects])
 
   // Bootstrap global state — set bootingRoot/bootedAt to suppress
   // redundant refresh events during startup
@@ -1656,7 +1819,7 @@ export function SyncProvider(props: {
     const { cleanup } = createEventPipeline({
       sdk: props.sdk,
       baseUrl: props.baseUrl,
-      transport: messageStreamTransport,
+      transport: serverId === DEFAULT_SERVER_ID ? messageStreamTransport : "ws",
       routeDirectory: (directory, payload) => {
         return resolveDirectoryFromRoutingIndex(routingIndex, directory, payload, childStores)
       },
@@ -1713,14 +1876,15 @@ export function SyncProvider(props: {
   useEffect(() => {
     if (props.directory) {
       if (serverId === DEFAULT_SERVER_ID) {
-        const { projects, activeProjectId } = useProjectsStore.getState()
-        const activeProject = activeProjectId ? projects.find((p) => p.id === activeProjectId) : null
-        if (activeProject?.serverId && activeProject.serverId !== DEFAULT_SERVER_ID) return
+        if (directoryBelongsToRemoteProject(props.directory, projects)) {
+          childStores.disposeDirectory(props.directory)
+          return
+        }
       }
       const store = childStores.ensureChild(props.directory)
       ingestDirectoryStateIntoRoutingIndex(routingIndex, props.directory, store.getState())
     }
-  }, [props.directory, childStores, routingIndex])
+  }, [props.directory, childStores, routingIndex, serverId, projects])
 
   useEffect(() => {
     if (serverId === DEFAULT_SERVER_ID) return
@@ -1729,6 +1893,16 @@ export function SyncProvider(props: {
 
     for (const dir of dirs) {
       const store = childStores.ensureChild(dir)
+      const state = store.getState()
+      if (
+        state.status === "complete"
+        && state.session.length === 0
+        && !emptyRemoteSessionRetryDirsRef.current.has(dir)
+      ) {
+        emptyRemoteSessionRetryDirsRef.current.add(dir)
+        store.setState({ status: "loading" as const })
+        childStores.ensureChild(dir)
+      }
       ingestDirectoryStateIntoRoutingIndex(routingIndex, dir, store.getState())
     }
   }, [serverId, props.remoteDirectories, childStores, routingIndex])
@@ -1914,7 +2088,10 @@ export function useDirectoryStore(directory?: string, serverId?: string, session
           }
         }
       }
-      return remoteStores.ensureChild(dir)
+      if (!directory) {
+        return emptyDirectoryStore
+      }
+      return remoteStores.ensureChild(directory)
     }
   }
 
@@ -1976,6 +2153,19 @@ export function useSessionMessagesResolved(sessionID: string, directory?: string
     useCallback((state: State) => {
       if (!sessionID) return false
       return Object.prototype.hasOwnProperty.call(state.message, sessionID)
+    }, [sessionID]),
+    directory,
+    useServerIdForSession(sessionID),
+    sessionID,
+  )
+}
+
+/** Check whether the message list has enough materialized data to render. */
+export function useSessionMessagesRenderable(sessionID: string, directory?: string): boolean {
+  return useDirectorySync(
+    useCallback((state: State) => {
+      if (!sessionID) return false
+      return getSessionMaterializationStatus(state, sessionID).renderable
     }, [sessionID]),
     directory,
     useServerIdForSession(sessionID),
@@ -2309,6 +2499,8 @@ export function useSessionMessageCount(sessionID: string, directory?: string): n
       return state.message[sessionID]?.length ?? 0
     }, [sessionID]),
     directory,
+    useServerIdForSession(sessionID),
+    sessionID,
   )
 }
 

@@ -91,8 +91,16 @@ export const SessionDialogs: React.FC = () => {
     const getProjectRefForWorktree = React.useCallback((worktree: WorktreeMetadata) => {
         const normalized = normalizeProjectDirectory(worktree.projectDirectory);
         const fallbackPath = normalized || projectDirectory;
-        const match = projects.find((project) => normalizeProjectDirectory(project.path) === fallbackPath) ?? null;
-        return { id: match?.id ?? `path:${fallbackPath}`, path: fallbackPath };
+        const match = projects.find((project) => {
+            if (normalizeProjectDirectory(project.path) !== fallbackPath) return false;
+            return !worktree.serverId || project.serverId === worktree.serverId;
+        }) ?? null;
+        return {
+            id: match?.id ?? `path:${worktree.serverId ?? 'default'}:${fallbackPath}`,
+            path: fallbackPath,
+            serverId: match?.serverId ?? worktree.serverId,
+            label: match?.label,
+        };
     }, [projectDirectory, projects]);
 
     const hasDirtyWorktrees = hasCompletedDirtyCheck && dirtyWorktreePaths.size > 0;

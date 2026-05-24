@@ -67,7 +67,12 @@ export const ProjectsPage: React.FC = () => {
     if (!selectedProject) {
       return null;
     }
-    return { id: selectedProject.id, path: selectedProject.path };
+    return {
+      id: selectedProject.id,
+      path: selectedProject.path,
+      serverId: selectedProject.serverId,
+      label: selectedProject.label,
+    };
   }, [selectedProject]);
 
   React.useEffect(() => {

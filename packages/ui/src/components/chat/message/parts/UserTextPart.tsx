@@ -34,6 +34,7 @@ type PartWithText = Part & { text?: string; content?: string; value?: string };
 
 type UserTextPartProps = {
     part: Part;
+    sessionId?: string;
     messageId: string;
     isMobile: boolean;
     agentMention?: AgentMentionInfo;
@@ -57,7 +58,7 @@ const normalizeUserMessageRenderingMode = (mode: unknown): 'markdown' | 'plain' 
     return mode === 'markdown' ? 'markdown' : 'plain';
 };
 
-const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMention }) => {
+const UserTextPart: React.FC<UserTextPartProps> = ({ part, sessionId, messageId, agentMention }) => {
     const partWithText = part as PartWithText;
     const rawText = partWithText.text;
     const textContent = typeof rawText === 'string' ? rawText : partWithText.content || partWithText.value || '';
@@ -222,6 +223,7 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMenti
                 {normalizedRenderingMode === 'markdown' ? (
                     <SimpleMarkdownRenderer 
                         content={processedMarkdownContent} 
+                        sessionId={sessionId}
                         disableLinkSafety 
                     />
                 ) : (

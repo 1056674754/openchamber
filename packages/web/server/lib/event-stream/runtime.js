@@ -1,6 +1,7 @@
 import { WebSocketServer } from 'ws';
 
 import { parseRequestPathname } from '../terminal/index.js';
+import { parseRemoteWsPath, pipeRemoteWs } from '../remote-instances/sse-relay.js';
 import {
   MESSAGE_STREAM_DIRECTORY_WS_PATH,
   MESSAGE_STREAM_GLOBAL_WS_PATH,
@@ -65,6 +66,7 @@ export function createMessageStreamWsRuntime({
   upstreamReconnectDelayMs = DEFAULT_UPSTREAM_RECONNECT_DELAY_MS,
   fetchImpl = fetch,
   globalEventHub = null,
+  remoteInstancesRuntime = null,
 }) {
   const wsServer = new WebSocketServer({
     noServer: true,
@@ -121,7 +123,13 @@ export function createMessageStreamWsRuntime({
 
   const upgradeHandler = (req, socket, head) => {
     const pathname = parseRequestPathname(req.url);
-    if (pathname !== MESSAGE_STREAM_GLOBAL_WS_PATH && pathname !== MESSAGE_STREAM_DIRECTORY_WS_PATH) {
+    const remoteWsInfo = parseRemoteWsPath(pathname);
+
+    if (
+      !remoteWsInfo &&
+      pathname !== MESSAGE_STREAM_GLOBAL_WS_PATH &&
+      pathname !== MESSAGE_STREAM_DIRECTORY_WS_PATH
+    ) {
       return;
     }
 
@@ -142,7 +150,11 @@ export function createMessageStreamWsRuntime({
         }
 
         wsServer.handleUpgrade(req, socket, head, (ws) => {
-          wsServer.emit('connection', ws, req);
+          if (remoteWsInfo) {
+            handleRemoteInstanceWsConnection(ws, req, remoteWsInfo);
+          } else {
+            wsServer.emit('connection', ws, req);
+          }
         });
       } catch {
         rejectWebSocketUpgrade(socket, 500, 'Upgrade failed');
@@ -150,6 +162,18 @@ export function createMessageStreamWsRuntime({
     };
 
     void handleUpgrade();
+  };
+
+  const handleRemoteInstanceWsConnection = (ws, req, { instanceId, isGlobal }) => {
+    const instance = remoteInstancesRuntime?.getInstanceSync(instanceId);
+    if (!instance || !instance.enabled) {
+      try { ws.close(4503, 'Remote instance not available'); } catch {}
+      return;
+    }
+
+    const rawUrl = typeof req?.url === 'string' ? req.url : '';
+    const queryString = rawUrl.includes('?') ? rawUrl.slice(rawUrl.indexOf('?')) : '';
+    pipeRemoteWs(ws, instance, isGlobal, queryString);
   };
 
   server.on('upgrade', upgradeHandler);

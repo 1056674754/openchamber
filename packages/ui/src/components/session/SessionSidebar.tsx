@@ -69,6 +69,7 @@ import {
   deriveLiveActiveNowSessions,
 } from './sidebar/activitySections';
 import { useActiveNowStore } from '@/stores/useActiveNowStore';
+import { checkIsGitRepository, isLinkedWorktree } from '@/lib/gitApi';
 import {
   compareSessions,
   formatProjectLabel,
@@ -81,6 +82,7 @@ import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
 import { subscribeOpenchamberEvents } from '@/lib/openchamberEvents';
 import { DEFAULT_SERVER_ID, serverRegistry } from '@/lib/opencode/server-registry';
+import { getProjectWorktreeKey, getWorktreesForProject } from '@/lib/worktrees/worktreeKeys';
 
 const PROJECT_COLLAPSE_STORAGE_KEY = 'oc.sessions.projectCollapse';
 const GROUP_ORDER_STORAGE_KEY = 'oc.sessions.groupOrder';
@@ -466,6 +468,33 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
       .join('|'),
     [liveSessions],
   );
+  const projectsStructureSignature = React.useMemo(
+    () => projects
+      .map((project) => [
+        project.id,
+        project.serverId ?? DEFAULT_SERVER_ID,
+        normalizePath(project.path) ?? '',
+        project.unavailable ? 1 : 0,
+      ].join(':'))
+      .join('|'),
+    [projects],
+  );
+  const [remoteHealthRevision, setRemoteHealthRevision] = React.useState(0);
+
+  React.useEffect(() => {
+    const serverIds = Array.from(new Set(projects
+      .map((project) => project.serverId)
+      .filter((serverId): serverId is string => Boolean(serverId && serverId !== DEFAULT_SERVER_ID))));
+    if (serverIds.length === 0) return;
+    const unsubs = serverIds.map((serverId) =>
+      serverRegistry.onHealthChange(serverId, () => {
+        setRemoteHealthRevision((value) => value + 1);
+      }),
+    );
+    return () => {
+      for (const unsubscribe of unsubs) unsubscribe();
+    };
+  }, [projectsStructureSignature, projects]);
 
   const syncSessionsSnapshotRef = React.useRef<Session[]>(liveSessions);
   React.useEffect(() => {
@@ -476,7 +505,15 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
     let cancelled = false;
 
     const discoverWorktrees = async () => {
-      const projectEntries = useProjectsStore.getState().projects;
+      const projectEntries = useProjectsStore.getState().projects
+        .filter((project) => {
+          if (project.unavailable) return false;
+          const projectPath = normalizePath(project.path);
+          if (!projectPath || (project.serverId && projectPath === '/')) return false;
+          const serverId = project.serverId && project.serverId !== DEFAULT_SERVER_ID ? project.serverId : null;
+          if (!serverId) return true;
+          return serverRegistry.get(serverId)?.healthStatus === 'healthy';
+        });
       if (projectEntries.length === 0) return;
 
       const worktreesByProject = new Map<string, WorktreeMetadata[]>();
@@ -488,12 +525,24 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
           if (!projectPath) return;
           try {
             // Use store-cached isGitRepo when available; fall back to direct check for initial worktree discovery
-            const cachedIsGitRepo = useGitStore.getState().directories.get(projectPath)?.isGitRepo;
-            const isGitRepo = cachedIsGitRepo ?? await import('@/lib/gitApi').then(m => m.checkIsGitRepository(projectPath));
+            const serverId = project.serverId && project.serverId !== DEFAULT_SERVER_ID ? project.serverId : null;
+            const cachedIsGitRepo = serverId ? undefined : useGitStore.getState().directories.get(projectPath)?.isGitRepo;
+            const repoStatus = projectRepoStatus.get(project.id);
+            const isGitRepo = (cachedIsGitRepo === true || repoStatus === true)
+              ? true
+              : (cachedIsGitRepo === false && !serverId)
+                ? false
+                : await checkIsGitRepository(projectPath);
             if (!isGitRepo) return;
-            const worktrees = await listProjectWorktrees({ id: project.id, path: projectPath });
+            if (await isLinkedWorktree(projectPath).catch(() => false)) return;
+            const worktrees = await listProjectWorktrees({
+              id: project.id,
+              path: projectPath,
+              serverId: project.serverId,
+              label: project.label,
+            });
             if (cancelled || worktrees.length === 0) return;
-            worktreesByProject.set(projectPath, worktrees);
+            worktreesByProject.set(getProjectWorktreeKey(projectPath, project.serverId), worktrees);
             allWorktrees.push(...worktrees);
           } catch {
             // ignore discovery errors
@@ -530,7 +579,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
     return () => {
       cancelled = true;
     };
-  }, [currentDirectory, syncSessionStructureSignature, projects]);
+  }, [currentDirectory, syncSessionStructureSignature, projectsStructureSignature, projectRepoStatus, remoteHealthRevision]);
 
   React.useEffect(() => {
     let refreshTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -1090,7 +1139,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
         ...project,
         normalizedPath: normalizePath(project.path),
       }))
-      .filter((project) => Boolean(project.normalizedPath)) as Array<{
+      .filter((project) => Boolean(project.normalizedPath) && !(project.serverId && project.normalizedPath === '/')) as Array<{
         id: string;
         path: string;
         label?: string;
@@ -1319,7 +1368,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
       || formatDirectoryName(project.normalizedPath, homeDirectory)
       || project.normalizedPath,
     );
-    const worktree = (availableWorktreesByProject.get(project.normalizedPath) ?? [])
+    const worktree = getWorktreesForProject(availableWorktreesByProject, project.normalizedPath, project.serverId)
       .find((meta) => normalizePath(meta.path) === sessionDirectory);
     const branch = gitBranches.get(sessionDirectory)?.trim()
       || worktree?.branch?.trim()
@@ -1611,6 +1660,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
       renderContext: 'project' | 'recent' | 'global-pinned' = 'project',
     ): React.ReactNode => (
       <SessionNodeItem
+        key={`${renderContext}:${projectId ?? 'none'}:${groupDirectory ?? 'none'}:${node.session.id}`}
         node={node}
         depth={depth}
         groupDirectory={groupDirectory}

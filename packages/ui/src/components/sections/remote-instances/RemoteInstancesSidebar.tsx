@@ -1,7 +1,9 @@
 import React from 'react';
 import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
+import { isTauriShell } from '@/lib/desktop';
 import { useDesktopSshStore } from '@/stores/useDesktopSshStore';
+import { useRemoteInstancesStore } from '@/stores/useRemoteInstancesStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useShallow } from 'zustand/react/shallow';
 import {
@@ -9,6 +11,7 @@ import {
   resolveInstanceLabel,
   type DesktopSshInstance,
 } from '@/lib/desktopSsh';
+import { resolveRemoteLabel, type RemoteInstance, type RemoteInstancePhase } from '@/lib/remote-instances/types';
 import { SettingsSidebarLayout } from '@/components/sections/shared/SettingsSidebarLayout';
 import { SettingsSidebarItem } from '@/components/sections/shared/SettingsSidebarItem';
 import { Button } from '@/components/ui/button';
@@ -58,27 +61,66 @@ const phaseLabelKey = (phase?: string) => {
   }
 };
 
+const remotePhaseLabelKey = (phase?: RemoteInstancePhase) => {
+  switch (phase) {
+    case 'connected':
+      return 'settings.remoteInstances.sidebar.phase.ready';
+    case 'error':
+      return 'settings.remoteInstances.sidebar.phase.error';
+    case 'connecting':
+      return 'settings.remoteInstances.sidebar.phase.connecting';
+    case 'disconnected':
+      return 'settings.remoteInstances.sidebar.phase.idle';
+    default:
+      return 'settings.remoteInstances.sidebar.phase.idle';
+  }
+};
+
+const remotePhaseDotClass = (phase?: RemoteInstancePhase) => {
+  if (phase === 'connected') return 'bg-[var(--status-success)] animate-pulse';
+  if (phase === 'error') return 'bg-[var(--status-error)] animate-pulse';
+  if (phase === 'connecting') return 'bg-[var(--status-warning)] animate-pulse';
+  return 'bg-muted-foreground/40';
+};
+
 export const RemoteInstancesSidebar: React.FC<RemoteInstancesSidebarProps> = ({ onItemSelect }) => {
   const { t } = useI18n();
-  const instances = useDesktopSshStore((state) => state.instances);
-  const statusesById = useDesktopSshStore(useShallow((state) => state.statusesById));
-  const isLoading = useDesktopSshStore((state) => state.isLoading);
-  const load = useDesktopSshStore((state) => state.load);
-  const loadImports = useDesktopSshStore((state) => state.loadImports);
-  const createFromCommand = useDesktopSshStore((state) => state.createFromCommand);
-  const connect = useDesktopSshStore((state) => state.connect);
-  const disconnect = useDesktopSshStore((state) => state.disconnect);
-  const retry = useDesktopSshStore((state) => state.retry);
-  const removeInstance = useDesktopSshStore((state) => state.removeInstance);
-  const upsertInstance = useDesktopSshStore((state) => state.upsertInstance);
+  const isDesktop = isTauriShell();
+
+  const desktopInstances = useDesktopSshStore((state) => state.instances);
+  const desktopStatusesById = useDesktopSshStore(useShallow((state) => state.statusesById));
+  const desktopIsLoading = useDesktopSshStore((state) => state.isLoading);
+  const desktopLoad = useDesktopSshStore((state) => state.load);
+  const desktopLoadImports = useDesktopSshStore((state) => state.loadImports);
+  const desktopCreateFromCommand = useDesktopSshStore((state) => state.createFromCommand);
+  const desktopConnect = useDesktopSshStore((state) => state.connect);
+  const desktopDisconnect = useDesktopSshStore((state) => state.disconnect);
+  const desktopRetry = useDesktopSshStore((state) => state.retry);
+  const desktopRemoveInstance = useDesktopSshStore((state) => state.removeInstance);
+  const desktopUpsertInstance = useDesktopSshStore((state) => state.upsertInstance);
+
+  const webInstances = useRemoteInstancesStore(useShallow((state) => state.instances));
+  const webStatuses = useRemoteInstancesStore(useShallow((state) => state.statuses));
+  const webLoading = useRemoteInstancesStore((state) => state.loading);
+  const webLoad = useRemoteInstancesStore((state) => state.loadInstances);
+  const webConnect = useRemoteInstancesStore((state) => state.connect);
+  const webDisconnect = useRemoteInstancesStore((state) => state.disconnect);
 
   const selectedId = useUIStore((state) => state.settingsRemoteInstancesSelectedId);
   const setSelectedId = useUIStore((state) => state.setSettingsRemoteInstancesSelectedId);
 
   React.useEffect(() => {
-    void load();
-    void loadImports();
-  }, [load, loadImports]);
+    if (isDesktop) {
+      void desktopLoad();
+      void desktopLoadImports();
+    } else {
+      void webLoad();
+    }
+  }, [isDesktop, desktopLoad, desktopLoadImports, webLoad]);
+
+  const isLoading = isDesktop ? desktopIsLoading : webLoading;
+
+  const instances = isDesktop ? desktopInstances : webInstances;
 
   React.useEffect(() => {
     if (isLoading) return;
@@ -99,17 +141,35 @@ export const RemoteInstancesSidebar: React.FC<RemoteInstancesSidebarProps> = ({ 
   const filteredInstances = React.useMemo(() => {
     if (!searchQuery.trim()) return instances;
     const q = searchQuery.toLowerCase().trim();
-    return instances.filter(
+    if (isDesktop) {
+      return (instances as DesktopSshInstance[]).filter(
+        (i) =>
+          resolveInstanceLabel(i).toLowerCase().includes(q) ||
+          i.sshCommand.toLowerCase().includes(q),
+      );
+    }
+    return (instances as RemoteInstance[]).filter(
       (i) =>
-        resolveInstanceLabel(i).toLowerCase().includes(q) ||
-        i.sshCommand.toLowerCase().includes(q),
+        resolveRemoteLabel(i).toLowerCase().includes(q) ||
+        (i.url || '').toLowerCase().includes(q),
     );
-  }, [instances, searchQuery]);
+  }, [instances, searchQuery, isDesktop]);
 
   const handleAdd = React.useCallback(async () => {
     const id = makeId();
     try {
-      await createFromCommand(id, 'ssh user@example.com', t('settings.remoteInstances.sidebar.newSshInstanceName'));
+      if (isDesktop) {
+        await desktopCreateFromCommand(id, 'ssh user@example.com', t('settings.remoteInstances.sidebar.newSshInstanceName'));
+      } else {
+        const newInstance: RemoteInstance = {
+          id,
+          label: t('settings.remoteInstances.sidebar.newSshInstanceName'),
+          enabled: true,
+          url: '',
+        };
+        const current = useRemoteInstancesStore.getState().instances;
+        await useRemoteInstancesStore.getState().saveInstances([...current, newInstance]);
+      }
       setSelectedId(id);
       onItemSelect?.();
     } catch (error) {
@@ -117,11 +177,11 @@ export const RemoteInstancesSidebar: React.FC<RemoteInstancesSidebarProps> = ({ 
         description: error instanceof Error ? error.message : String(error),
       });
     }
-  }, [createFromCommand, onItemSelect, setSelectedId, t]);
+  }, [isDesktop, desktopCreateFromCommand, onItemSelect, setSelectedId, t]);
 
   const connectWithPortRecovery = React.useCallback(async (instance: DesktopSshInstance) => {
     try {
-      await connect(instance.id);
+      await desktopConnect(instance.id);
       return;
     } catch (error) {
       if (!isPortInUseError(error)) {
@@ -141,11 +201,11 @@ export const RemoteInstancesSidebar: React.FC<RemoteInstancesSidebarProps> = ({ 
         },
       };
 
-      await upsertInstance(nextInstance);
-      await connect(nextInstance.id);
+      await desktopUpsertInstance(nextInstance);
+      await desktopConnect(nextInstance.id);
       toast.success(t('settings.remoteInstances.sidebar.toast.retriedWithRandomPort'));
     }
-  }, [connect, t, upsertInstance]);
+  }, [desktopConnect, t, desktopUpsertInstance]);
 
   return (
     <SettingsSidebarLayout
@@ -181,22 +241,94 @@ export const RemoteInstancesSidebar: React.FC<RemoteInstancesSidebarProps> = ({ 
       }
     >
       {filteredInstances.map((instance) => {
-        const status = statusesById[instance.id];
-        const selected = instance.id === selectedId;
-        const title = resolveInstanceLabel(instance);
-        const metadata = `${t(phaseLabelKey(status?.phase))}${status?.localUrl ? ` · ${status.localUrl}` : ''}`;
-        const isReady = status?.phase === 'ready';
-        const canRetry = status?.phase === 'error' || status?.phase === 'degraded';
+        if (isDesktop) {
+          const sshInstance = instance as DesktopSshInstance;
+          const status = desktopStatusesById[sshInstance.id];
+          const selected = sshInstance.id === selectedId;
+          const title = resolveInstanceLabel(sshInstance);
+          const metadata = `${t(phaseLabelKey(status?.phase))}${status?.localUrl ? ` · ${status.localUrl}` : ''}`;
+          const isReady = status?.phase === 'ready';
+          const canRetry = status?.phase === 'error' || status?.phase === 'degraded';
+
+          return (
+            <SettingsSidebarItem
+              key={sshInstance.id}
+              title={title}
+              metadata={metadata}
+              selected={selected}
+              icon={<span className={`h-2 w-2 rounded-full shrink-0 ${phaseDotClass(status?.phase)}`} />}
+              onSelect={() => {
+                setSelectedId(sshInstance.id);
+                onItemSelect?.();
+              }}
+              actions={[
+                {
+                  label: isReady ? t('settings.remoteInstances.sidebar.actions.disconnect') : t('settings.remoteInstances.sidebar.actions.connect'),
+                  icon: isReady ? 'stop' : 'plug-2',
+                  onClick: () => {
+                    const op = isReady ? desktopDisconnect(sshInstance.id) : connectWithPortRecovery(sshInstance);
+                    void op.catch((error) => {
+                      toast.error(
+                        isReady
+                          ? t('settings.remoteInstances.sidebar.toast.disconnectFailed')
+                          : t('settings.remoteInstances.sidebar.toast.connectFailed'),
+                        {
+                        description: error instanceof Error ? error.message : String(error),
+                        }
+                      );
+                    });
+                  },
+                },
+                {
+                  label: t('settings.remoteInstances.sidebar.actions.retry'),
+                  icon: "refresh",
+                  onClick: () => {
+                    if (!canRetry) return;
+                    void desktopRetry(sshInstance.id).catch((error) => {
+                      toast.error(t('settings.remoteInstances.sidebar.toast.retryFailed'), {
+                        description: error instanceof Error ? error.message : String(error),
+                      });
+                    });
+                  },
+                },
+                {
+                  label: t('settings.remoteInstances.sidebar.actions.remove'),
+                  icon: "delete-bin",
+                  destructive: true,
+                  onClick: () => {
+                    void desktopRemoveInstance(sshInstance.id).then(() => {
+                      if (selectedId === sshInstance.id) {
+                        const next = instances.find((item) => item.id !== sshInstance.id);
+                        setSelectedId(next?.id || null);
+                      }
+                    }).catch((error) => {
+                      toast.error(t('settings.remoteInstances.sidebar.toast.removeFailed'), {
+                        description: error instanceof Error ? error.message : String(error),
+                      });
+                    });
+                  },
+                },
+              ]}
+            />
+          );
+        }
+
+        const webInstance = instance as RemoteInstance;
+        const webStatus = webStatuses[webInstance.id];
+        const selected = webInstance.id === selectedId;
+        const title = resolveRemoteLabel(webInstance);
+        const phase = webStatus?.phase;
+        const isReady = phase === 'connected';
 
         return (
           <SettingsSidebarItem
-            key={instance.id}
+            key={webInstance.id}
             title={title}
-            metadata={metadata}
+            metadata={`${t(remotePhaseLabelKey(phase))}${webInstance.url ? ` · ${webInstance.url}` : ''}`}
             selected={selected}
-            icon={<span className={`h-2 w-2 rounded-full shrink-0 ${phaseDotClass(status?.phase)}`} />}
+            icon={<span className={`h-2 w-2 rounded-full shrink-0 ${remotePhaseDotClass(phase)}`} />}
             onSelect={() => {
-              setSelectedId(instance.id);
+              setSelectedId(webInstance.id);
               onItemSelect?.();
             }}
             actions={[
@@ -204,28 +336,16 @@ export const RemoteInstancesSidebar: React.FC<RemoteInstancesSidebarProps> = ({ 
                 label: isReady ? t('settings.remoteInstances.sidebar.actions.disconnect') : t('settings.remoteInstances.sidebar.actions.connect'),
                 icon: isReady ? 'stop' : 'plug-2',
                 onClick: () => {
-                  const op = isReady ? disconnect(instance.id) : connectWithPortRecovery(instance);
+                  const op = isReady ? webDisconnect(webInstance.id) : webConnect(webInstance.id);
                   void op.catch((error) => {
                     toast.error(
                       isReady
                         ? t('settings.remoteInstances.sidebar.toast.disconnectFailed')
                         : t('settings.remoteInstances.sidebar.toast.connectFailed'),
                       {
-                      description: error instanceof Error ? error.message : String(error),
+                        description: error instanceof Error ? error.message : String(error),
                       }
                     );
-                  });
-                },
-              },
-              {
-                label: t('settings.remoteInstances.sidebar.actions.retry'),
-                icon: "refresh",
-                onClick: () => {
-                  if (!canRetry) return;
-                  void retry(instance.id).catch((error) => {
-                    toast.error(t('settings.remoteInstances.sidebar.toast.retryFailed'), {
-                      description: error instanceof Error ? error.message : String(error),
-                    });
                   });
                 },
               },
@@ -234,10 +354,12 @@ export const RemoteInstancesSidebar: React.FC<RemoteInstancesSidebarProps> = ({ 
                 icon: "delete-bin",
                 destructive: true,
                 onClick: () => {
-                  void removeInstance(instance.id).then(() => {
-                    if (selectedId === instance.id) {
-                      const next = instances.find((item) => item.id !== instance.id);
-                      setSelectedId(next?.id || null);
+                  const current = useRemoteInstancesStore.getState().instances;
+                  const next = current.filter((i) => i.id !== webInstance.id);
+                  void useRemoteInstancesStore.getState().saveInstances(next).then(() => {
+                    if (selectedId === webInstance.id) {
+                      const nextItem = next[0];
+                      setSelectedId(nextItem?.id || null);
                     }
                   }).catch((error) => {
                     toast.error(t('settings.remoteInstances.sidebar.toast.removeFailed'), {

@@ -30,7 +30,8 @@ import type {
   DiscoveredGitCredential,
   MergeConflictDetails,
 } from './api/types';
-import { resolveApiUrl } from '@/sync/session-actions';
+import { resolveApiUrl } from '@/lib/api/serverUrl';
+import { resolveBaseUrl } from '@/sync/session-actions';
 
 declare global {
   interface Window {
@@ -54,9 +55,9 @@ const resolveBaseOrigin = (): string => {
   return window.location.origin;
 };
 
-const resolveBaseOriginForDirectory = (directory: string | null | undefined): string | undefined => {
+const resolveServerBaseForDirectory = (directory: string | null | undefined): string | undefined => {
   if (!directory) return undefined;
-  return resolveApiUrl(directory);
+  return resolveBaseUrl(directory);
 };
 
 const API_BASE = '/api/git';
@@ -76,8 +77,8 @@ function buildUrl(
   params?: Record<string, string | number | boolean | undefined>,
   baseUrl?: string,
 ): string {
-  const resolvedBase = baseUrl || resolveBaseOriginForDirectory(directory) || resolveBaseOrigin();
-  const url = new URL(path, resolvedBase);
+  const serverBaseUrl = baseUrl || resolveServerBaseForDirectory(directory);
+  const url = new URL(resolveApiUrl(path, serverBaseUrl), resolveBaseOrigin());
   if (directory) {
     url.searchParams.set('directory', directory);
   }
@@ -266,12 +267,12 @@ export async function deleteGitBranch(directory: string, payload: GitDeleteBranc
   return response.json();
 }
 
-export async function deleteRemoteBranch(directory: string, payload: GitDeleteRemoteBranchPayload): Promise<{ success: boolean }> {
+export async function deleteRemoteBranch(directory: string, payload: GitDeleteRemoteBranchPayload, baseUrl?: string): Promise<{ success: boolean }> {
   if (!payload?.branch) {
     throw new Error('branch is required to delete remote branch');
   }
 
-  const response = await fetch(buildUrl(`${API_BASE}/remote-branches`, directory), {
+  const response = await fetch(buildUrl(`${API_BASE}/remote-branches`, directory, undefined, baseUrl), {
     method: 'DELETE',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
@@ -421,8 +422,8 @@ export async function listGitWorktrees(directory: string, baseUrl?: string): Pro
   return response.json();
 }
 
-export async function validateGitWorktree(directory: string, payload: CreateGitWorktreePayload): Promise<GitWorktreeValidationResult> {
-  const response = await fetch(buildUrl(`${API_BASE}/worktrees/validate`, directory), {
+export async function validateGitWorktree(directory: string, payload: CreateGitWorktreePayload, baseUrl?: string): Promise<GitWorktreeValidationResult> {
+  const response = await fetch(buildUrl(`${API_BASE}/worktrees/validate`, directory, undefined, baseUrl), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload ?? {}),
@@ -445,8 +446,8 @@ export async function getGitWorktreeBootstrapStatus(directory: string): Promise<
   return response.json();
 }
 
-export async function previewGitWorktree(directory: string, payload: CreateGitWorktreePayload): Promise<GitWorktreeCreateResult> {
-  const response = await fetch(buildUrl(`${API_BASE}/worktrees/preview`, directory), {
+export async function previewGitWorktree(directory: string, payload: CreateGitWorktreePayload, baseUrl?: string): Promise<GitWorktreeCreateResult> {
+  const response = await fetch(buildUrl(`${API_BASE}/worktrees/preview`, directory, undefined, baseUrl), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload ?? {}),
@@ -460,8 +461,8 @@ export async function previewGitWorktree(directory: string, payload: CreateGitWo
   return response.json();
 }
 
-export async function createGitWorktree(directory: string, payload: CreateGitWorktreePayload): Promise<GitWorktreeCreateResult> {
-  const response = await fetch(buildUrl(`${API_BASE}/worktrees`, directory), {
+export async function createGitWorktree(directory: string, payload: CreateGitWorktreePayload, baseUrl?: string): Promise<GitWorktreeCreateResult> {
+  const response = await fetch(buildUrl(`${API_BASE}/worktrees`, directory, undefined, baseUrl), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload ?? {}),
@@ -475,8 +476,8 @@ export async function createGitWorktree(directory: string, payload: CreateGitWor
   return response.json();
 }
 
-export async function deleteGitWorktree(directory: string, payload: RemoveGitWorktreePayload): Promise<{ success: boolean }> {
-  const response = await fetch(buildUrl(`${API_BASE}/worktrees`, directory), {
+export async function deleteGitWorktree(directory: string, payload: RemoveGitWorktreePayload, baseUrl?: string): Promise<{ success: boolean }> {
+  const response = await fetch(buildUrl(`${API_BASE}/worktrees`, directory, undefined, baseUrl), {
     method: 'DELETE',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload ?? {}),

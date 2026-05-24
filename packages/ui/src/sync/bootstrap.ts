@@ -3,6 +3,26 @@ import { retry } from "./retry"
 import type { GlobalState, State } from "./types"
 
 const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0)
+const BOOTSTRAP_REQUEST_TIMEOUT_MS = 8_000
+
+async function withTimeout<T>(promise: Promise<T>, label: string): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined
+  const timeout = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => {
+      const err = new Error(`${label} timed out`)
+      ;(err as Error & { status?: number }).status = 503
+      reject(err)
+    }, BOOTSTRAP_REQUEST_TIMEOUT_MS)
+  })
+
+  try {
+    return await Promise.race([promise, timeout])
+  } finally {
+    if (timeoutId !== undefined) {
+      clearTimeout(timeoutId)
+    }
+  }
+}
 
 /**
  * SDK returns `{ data, error, response }` without throwing on non-2xx.
@@ -126,8 +146,9 @@ export async function bootstrapDirectory(input: {
     projects: Project[]
     providers: { all: unknown[]; connected: unknown[]; default: Record<string, unknown> }
   }
-  loadSessions: (directory: string) => Promise<void> | void
-}) {
+  loadSessions: (directory: string) => Promise<unknown> | unknown
+  loadMetadata?: boolean
+}): Promise<boolean> {
   const { directory, sdk, getState, set, global: g } = input
   const state = getState()
   const loading = state.status !== "complete"
@@ -143,50 +164,76 @@ export async function bootstrapDirectory(input: {
   }
   if (loading) set({ status: "partial" })
 
+  const sessionLoad = Promise.resolve(input.loadSessions(directory)).catch((err) => {
+    console.error(`[bootstrap] session load failed for ${directory}`, err)
+    throw err
+  })
+
   // ---------------------------------------------------------------------------
-  // Phase 1: Critical path — block until these resolve so the UI can render.
-  // These are the minimum data needed to show a functional chat interface.
+  // Phase 1: Critical path — only wait for the small, directory-authoritative
+  // calls and session list. Heavy provider/config payloads are deferred so
+  // remote sidebars can show sessions without waiting on large settings data.
   // ---------------------------------------------------------------------------
+  const shouldLoadMetadata = input.loadMetadata !== false
+  const metadataLoads = shouldLoadMetadata
+    ? [
+        retry(() =>
+          withTimeout(sdk.path.get({ directory }), "path.get").then((x) => {
+            const data = unwrap(x, "path.get")
+            set({ path: data })
+            const next = projectID(data?.directory ?? directory, g.projects)
+            if (next) set({ project: next })
+          }),
+        ),
+        retry(() =>
+          withTimeout(sdk.session.status({ directory }), "session.status").then((x) =>
+            set({ session_status: unwrap(x, "session.status") })
+          ),
+        ),
+      ]
+    : []
+
   const phase1Results = await Promise.allSettled([
-    seededProject
-      ? Promise.resolve()
-      : retry(() => sdk.project.current({ directory }).then((x) => set({ project: unwrap(x, "project.current").id }))),
-    retry(() => sdk.provider.list({ directory }).then((x) => set({ provider: unwrap(x, "provider.list") }))),
-    retry(() => sdk.config.get({ directory }).then((x) => set({ config: unwrap(x, "config.get") }))),
-    retry(() =>
-      sdk.path.get({ directory }).then((x) => {
-        const data = unwrap(x, "path.get")
-        set({ path: data })
-        const next = projectID(data?.directory ?? directory, g.projects)
-        if (next) set({ project: next })
-      }),
-    ),
-    retry(() => sdk.session.status({ directory }).then((x) => set({ session_status: unwrap(x, "session.status") }))),
+    ...metadataLoads,
+    sessionLoad,
   ])
 
   const phase1Errors = phase1Results
     .filter((r): r is PromiseRejectedResult => r.status === "rejected")
     .map((r) => r.reason)
 
-  // path.get and session.status have no global-state fallback.
-  // If either fails, the UI cannot safely advance to "complete".
-  const [, , , pathResult, sessionStatusResult] = phase1Results
-  const criticalPhase1Failed =
-    pathResult.status === "rejected" || sessionStatusResult.status === "rejected"
+  // Session list is the UI-critical payload. Path/status enrich the directory,
+  // but they must not keep a remote sidebar stuck in "partial" when sessions are available.
+  const sessionLoadResult = phase1Results[phase1Results.length - 1]
+  const criticalPhase1Failed = sessionLoadResult.status === "rejected"
 
   if (phase1Errors.length === phase1Results.length || criticalPhase1Failed) {
     console.error(`[bootstrap] directory bootstrap failed for ${directory}`, phase1Errors[0])
-    return
+    if (loading) set({ status: "loading" })
+    return false
+  }
+
+  if (phase1Errors.length) {
+    console.warn(`[bootstrap] directory metadata partially failed for ${directory}`, phase1Errors[0])
   }
 
   // Mark ready after critical data arrives so the UI can paint.
   if (loading) set({ status: "complete" })
+
+  if (input.loadMetadata === false) {
+    return true
+  }
 
   // ---------------------------------------------------------------------------
   // Phase 2: Deferrable — fetch after first paint without blocking.
   // These enrich the UI but aren't required for basic functionality.
   // ---------------------------------------------------------------------------
   void Promise.allSettled([
+    seededProject
+      ? Promise.resolve()
+      : retry(() => sdk.project.current({ directory }).then((x) => set({ project: unwrap(x, "project.current").id }))),
+    retry(() => sdk.provider.list({ directory }).then((x) => set({ provider: unwrap(x, "provider.list") }))),
+    retry(() => sdk.config.get({ directory }).then((x) => set({ config: unwrap(x, "config.get") }))),
     retry(() => sdk.app.agents({ directory }).then((x) => set({ agent: unwrap(x, "app.agents") }))),
     retry(() => sdk.command.list({ directory }).then((x) => set({ command: unwrap(x, "command.list") }))),
     retry(() => sdk.mcp.status({ directory }).then((x) => set({ mcp: unwrap(x, "mcp.status") }))),
@@ -271,10 +318,5 @@ export async function bootstrapDirectory(input: {
     }
   })
 
-  // ---------------------------------------------------------------------------
-  // Phase 3: Lazy — session list can be large; don't block on it.
-  // ---------------------------------------------------------------------------
-  void Promise.resolve(input.loadSessions(directory)).catch((err) => {
-    console.error(`[bootstrap] session load failed for ${directory}`, err)
-  })
+  return true
 }

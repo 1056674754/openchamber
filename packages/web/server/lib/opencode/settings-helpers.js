@@ -645,6 +645,28 @@ export const createSettingsHelpers = (dependencies) => {
       result.sttTranscribeOnStop = candidate.sttTranscribeOnStop;
     }
 
+    if (Array.isArray(candidate.remoteInstances)) {
+      const instances = candidate.remoteInstances
+        .filter((inst) => inst && typeof inst.id === 'string' && inst.id.length > 0
+                          && typeof inst.url === 'string' && inst.url.length > 0)
+        .map((inst) => ({
+          id: inst.id.trim().slice(0, 128),
+          label: typeof inst.label === 'string' ? inst.label.trim().slice(0, 256) : inst.id,
+          url: inst.url.trim().replace(/\/+$/, ''),
+          auth: {
+            type: ['none', 'password', 'bearer'].includes(inst?.auth?.type) ? inst.auth.type : 'none',
+            value: typeof inst?.auth?.value === 'string' ? inst.auth.value : undefined,
+          },
+          connectionTimeoutSec: typeof inst.connectionTimeoutSec === 'number' && Number.isFinite(inst.connectionTimeoutSec)
+            ? Math.max(5, Math.min(300, Math.round(inst.connectionTimeoutSec))) : 30,
+          enabled: typeof inst.enabled === 'boolean' ? inst.enabled : true,
+        }))
+        .filter((inst) => {
+          try { new URL(inst.url); return true; } catch { return false; }
+        });
+      result.remoteInstances = instances;
+    }
+
     return result;
   };
 

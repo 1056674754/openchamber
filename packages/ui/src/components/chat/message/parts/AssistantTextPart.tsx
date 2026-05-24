@@ -25,6 +25,7 @@ interface AssistantTextPartProps {
 
 const AssistantTextPart: React.FC<AssistantTextPartProps> = ({
     part,
+    sessionId,
     messageId,
     streamPhase,
     chatRenderMode = 'live',
@@ -105,6 +106,7 @@ const AssistantTextPart: React.FC<AssistantTextPartProps> = ({
             >
                 <MarkdownRenderer
                     content={displayTextContent}
+                    sessionId={sessionId}
                     part={part}
                     messageId={messageId}
                     isAnimated={false}
@@ -129,6 +131,7 @@ const AssistantTextPart: React.FC<AssistantTextPartProps> = ({
                             key={`${messageId}-thinking-${index}`}
                             variant="thinking"
                             text={segment.content}
+                            sessionId={sessionId}
                             blockId={`${messageId}-thinking-${index}`}
                             time={partWithText.time}
                             isStreaming={isStreaming}
@@ -140,6 +143,7 @@ const AssistantTextPart: React.FC<AssistantTextPartProps> = ({
                     <MarkdownRenderer
                         key={`${messageId}-text-${index}`}
                         content={segment.content}
+                        sessionId={sessionId}
                         part={part}
                         messageId={messageId}
                         isAnimated={false}

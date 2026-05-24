@@ -17,7 +17,7 @@ import { formatPathForDisplay, cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 
 export interface WorktreeSectionContentProps {
-  projectRef?: { id: string; path: string } | null;
+  projectRef?: { id: string; path: string; serverId?: string; label?: string } | null;
 }
 
 export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ projectRef: projectRefProp = null }) => {
@@ -40,13 +40,32 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
 
   const projectRef = React.useMemo(() => {
     if (projectRefProp?.id && projectRefProp?.path) {
-      return { id: projectRefProp.id, path: projectRefProp.path };
+      return {
+        id: projectRefProp.id,
+        path: projectRefProp.path,
+        serverId: projectRefProp.serverId,
+        label: projectRefProp.label,
+      };
     }
     if (!activeProject?.id || !projectPath) {
       return null;
     }
-    return { id: activeProject.id, path: projectPath };
-  }, [activeProject?.id, projectPath, projectRefProp?.id, projectRefProp?.path]);
+    return {
+      id: activeProject.id,
+      path: projectPath,
+      serverId: activeProject.serverId,
+      label: activeProject.label,
+    };
+  }, [
+    activeProject?.id,
+    activeProject?.label,
+    activeProject?.serverId,
+    projectPath,
+    projectRefProp?.id,
+    projectRefProp?.label,
+    projectRefProp?.path,
+    projectRefProp?.serverId,
+  ]);
 
   const refreshWorktrees = React.useCallback(async () => {
     if (!projectRef || isGitRepoLocal === false) return;

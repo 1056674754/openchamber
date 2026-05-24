@@ -51,6 +51,7 @@ export const createStartupPipelineRuntime = (dependencies) => {
       onTunnelReady,
       tunnelRuntimeContext,
       attachSignals,
+      remoteInstancesRuntime,
     } = options;
 
     const terminalRuntime = createTerminalRuntime({
@@ -82,6 +83,7 @@ export const createStartupPipelineRuntime = (dependencies) => {
       wsClients: messageStreamWsClients,
       triggerHealthCheck,
       upstreamStallTimeoutMs,
+      remoteInstancesRuntime,
     });
 
     setupProxy(app);

@@ -1,5 +1,6 @@
 import type { CommandExecResult, FilesAPI, RuntimeAPIs } from '@/lib/api/types';
-import { resolveApiUrl } from '@/sync/session-actions';
+import { resolveApiUrl } from '@/lib/api/serverUrl';
+import { resolveBaseUrl } from '@/sync/session-actions';
 
 type ExecResult = { success: boolean; results: CommandExecResult[] };
 
@@ -21,16 +22,18 @@ function getRuntimeFilesAPI(): FilesAPI | null {
   return null;
 }
 
-export async function execCommands(commands: string[], cwd: string): Promise<ExecResult> {
+export async function execCommands(commands: string[], cwd: string, options?: { baseUrl?: string }): Promise<ExecResult> {
   const runtimeFiles = getRuntimeFilesAPI();
-  if (runtimeFiles?.execCommands) {
+  if (!options?.baseUrl && runtimeFiles?.execCommands) {
     return runtimeFiles.execCommands(commands, cwd);
   }
 
-  const remoteOrigin = resolveApiUrl(cwd)
-  const baseUrl = remoteOrigin ? `${remoteOrigin}/api` : getBaseUrl()
+  const serverBaseUrl = options?.baseUrl ?? resolveBaseUrl(cwd);
+  const execUrl = serverBaseUrl
+    ? resolveApiUrl('/api/fs/exec', serverBaseUrl)
+    : `${getBaseUrl()}/fs/exec`;
 
-  const response = await fetch(`${baseUrl}/fs/exec`, {
+  const response = await fetch(execUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ commands, cwd, background: false }),
@@ -51,8 +54,8 @@ export async function execCommands(commands: string[], cwd: string): Promise<Exe
   };
 }
 
-export async function execCommand(command: string, cwd: string): Promise<CommandExecResult> {
-  const result = await execCommands([command], cwd);
+export async function execCommand(command: string, cwd: string, options?: { baseUrl?: string }): Promise<CommandExecResult> {
+  const result = await execCommands([command], cwd, options);
   const first = result.results[0];
   if (!first) {
     return { command, success: result.success };
