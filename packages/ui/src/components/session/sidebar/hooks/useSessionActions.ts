@@ -8,6 +8,7 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 type DeleteSessionConfirmSetter = React.Dispatch<React.SetStateAction<{
   session: Session;
   descendantCount: number;
+  descendantIds: string[];
   archivedBucket: boolean;
 } | null>>;
 
@@ -33,7 +34,7 @@ type Args = {
   childrenMap: Map<string, Session[]>;
   showDeletionDialog: boolean;
   setDeleteSessionConfirm: DeleteSessionConfirmSetter;
-  deleteSessionConfirm: { session: Session; descendantCount: number; archivedBucket: boolean } | null;
+  deleteSessionConfirm: { session: Session; descendantCount: number; descendantIds: string[]; archivedBucket: boolean } | null;
   setEditingId: (id: string | null) => void;
   setEditTitle: (value: string) => void;
   editingId: string | null;
@@ -162,11 +163,21 @@ export const useSessionActions = (args: Args) => {
     return collected;
   }, [args.childrenMap]);
 
+  const filterDescendantsForAction = React.useCallback((descendants: Session[], shouldHardDelete: boolean): Session[] => {
+    if (shouldHardDelete) return descendants;
+    return descendants.filter((session) => !session.time?.archived);
+  }, []);
+
   const executeDeleteSession = React.useCallback(
-    async (session: Session, source?: { archivedBucket?: boolean }) => {
-      const descendants = collectDescendants(session.id);
+    async (
+      session: Session,
+      source?: { archivedBucket?: boolean },
+      precomputed?: { descendantIds: string[] },
+    ) => {
       const shouldHardDelete = source?.archivedBucket === true;
-      if (descendants.length === 0) {
+      const descendantIds = precomputed?.descendantIds
+        ?? filterDescendantsForAction(collectDescendants(session.id), shouldHardDelete).map((descendant) => descendant.id);
+      if (descendantIds.length === 0) {
         const success = shouldHardDelete
           ? await args.deleteSession(session.id)
           : await args.archiveSession(session.id);
@@ -182,7 +193,7 @@ export const useSessionActions = (args: Args) => {
         return;
       }
 
-      const ids = [session.id, ...descendants.map((s) => s.id)];
+      const ids = [session.id, ...descendantIds];
       if (shouldHardDelete) {
         const { deletedIds, failedIds } = await args.deleteSessions(ids);
         if (deletedIds.length > 0) {
@@ -210,26 +221,35 @@ export const useSessionActions = (args: Args) => {
           : t('sessions.sidebar.bulkActions.failedArchivePlural', { count: failedIds.length }));
       }
     },
-    [args, collectDescendants, t],
+    [args, collectDescendants, filterDescendantsForAction, t],
   );
 
   const handleDeleteSession = React.useCallback(
     (session: Session, source?: { archivedBucket?: boolean }) => {
-      const descendants = collectDescendants(session.id);
+      const shouldHardDelete = source?.archivedBucket === true;
+      const descendantIds = filterDescendantsForAction(
+        collectDescendants(session.id),
+        shouldHardDelete,
+      ).map((descendant) => descendant.id);
       if (!args.showDeletionDialog) {
-        void executeDeleteSession(session, source);
+        void executeDeleteSession(session, source, { descendantIds });
         return;
       }
-      args.setDeleteSessionConfirm({ session, descendantCount: descendants.length, archivedBucket: source?.archivedBucket === true });
+      args.setDeleteSessionConfirm({
+        session,
+        descendantCount: descendantIds.length,
+        descendantIds,
+        archivedBucket: shouldHardDelete,
+      });
     },
-    [args, collectDescendants, executeDeleteSession],
+    [args, collectDescendants, executeDeleteSession, filterDescendantsForAction],
   );
 
   const confirmDeleteSession = React.useCallback(async () => {
     if (!args.deleteSessionConfirm) return;
-    const { session, archivedBucket } = args.deleteSessionConfirm;
+    const { session, archivedBucket, descendantIds } = args.deleteSessionConfirm;
     args.setDeleteSessionConfirm(null);
-    await executeDeleteSession(session, { archivedBucket });
+    await executeDeleteSession(session, { archivedBucket }, { descendantIds });
   }, [args, executeDeleteSession]);
 
   return {

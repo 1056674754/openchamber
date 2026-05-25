@@ -378,7 +378,7 @@ const WebRemoteInstancesPage: React.FC<WebPageProps> = ({
               onClick={handleWebPrimaryAction}
               disabled={isActionPending}
             >
-              {isReady ? <Icon name="stop" className="h-3.5 w-3.5" /> : <Icon name="plug2" className="h-3.5 w-3.5" />}
+              {isReady ? <Icon name="stop" className="h-3.5 w-3.5" /> : <Icon name="plug-2" className="h-3.5 w-3.5" />}
               {isReady ? t('settings.remoteInstances.sidebar.actions.disconnect') : t('settings.remoteInstances.sidebar.actions.connect')}
             </Button>
             <Button
@@ -1249,7 +1249,7 @@ export const RemoteInstancesPage: React.FC = () => {
               onClick={handlePrimaryConnectionAction}
               disabled={isPrimaryActionPending || isRetryPending}
             >
-              {canDisconnect ? <Icon name="stop" className="h-3.5 w-3.5"  /> : <Icon name="plug2" className="h-3.5 w-3.5"  />}
+              {canDisconnect ? <Icon name="stop" className="h-3.5 w-3.5"  /> : <Icon name="plug-2" className="h-3.5 w-3.5"  />}
               {primaryButtonLabel}
             </Button>
             <Button

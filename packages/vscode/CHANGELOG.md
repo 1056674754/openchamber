@@ -1,3 +1,12 @@
+## [1.11.4] - 2026-05-22
+
+- Sessions: switching between chat sessions now keeps less inactive message history in the webview, especially after opening large conversations.
+- Sessions: opening a session now fetches a smaller initial message page, while still expanding enough to show the latest user turn when needed.
+- Chat: task tool results use final task summaries when available instead of repeatedly loading child-session messages.
+- Chat: task tool polling in the extension now uses smaller message fetches while subtasks are active or idle.
+- Chat: markdown file links now cap path checks in the extension, reducing stalls in messages with many inline paths.
+- Chat: the extension header reads only the active session title and latest usage data instead of reacting to the full session list.
+
 ## [1.11.1-dev-merge] - 2026-05-18
 
 - Chat/Sessions: added a session switcher to the chat header, making it faster to jump between recent chats.

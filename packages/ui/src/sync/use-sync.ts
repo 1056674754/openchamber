@@ -2,19 +2,20 @@ import { useCallback, useRef, useMemo } from "react"
 import type { Message, Part, Todo } from "@opencode-ai/sdk/v2/client"
 import { Binary } from "./binary"
 import { retry } from "./retry"
-import { SESSION_CACHE_LIMIT } from "./types"
+import { SESSION_CACHE_LIMIT, type State } from "./types"
 import { pickSessionCacheEvictions } from "./session-cache"
 import {
   mergeOptimisticPage,
   type OptimisticItem,
 } from "./optimistic"
-import { useDirectoryStore, useSyncDirectory, useChildStoreManager } from "./sync-context"
+import { dropCachedSessionMessageRecordsSnapshots, useDirectoryStore, useSyncDirectory, useChildStoreManager } from "./sync-context"
 import { resolveSdkForDirectory } from "./session-actions"
 import { useSessionUIStore } from "./session-ui-store"
 import { getSyncStoresForServer } from "./multi-server-registry"
 import { DEFAULT_SERVER_ID, serverRegistry } from "@/lib/opencode/server-registry"
 import { dropSessionCaches, getProtectedSessionCacheIds } from "./session-cache"
 import { stripMessageDiffSnapshots } from "./sanitize"
+import { isVSCodeRuntime } from "@/lib/desktop"
 import {
   shouldSkipSessionPrefetch,
   getSessionPrefetch,
@@ -25,12 +26,58 @@ import { getSessionMaterializationStatus, materializeSessionSnapshots } from "./
 import { useTodosPersistStore } from "@/stores/useTodosPersistStore"
 
 const SKIP_PARTS = new Set(["patch", "step-start", "step-finish"])
-const MESSAGE_PAGE_SIZE = 200
+const MESSAGE_PAGE_SIZE = 150
+const VSCODE_MESSAGE_PAGE_SIZE = 30
+const VSCODE_INITIAL_PAGE_EXPANSION_LIMITS = [50, 80, 120] as const
 const MAX_SEEN_DIRS = 30
+const VSCODE_SESSION_CACHE_LIMIT = 4
 const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0)
+
+// Shared across useSync() instances so cache eviction is based on app-level
+// session recency, not whichever component happened to call sync first.
+const seenByDirectory = new Map<string, Set<string>>()
+
+type SyncMeta = {
+  limit: number
+  cursor: string | undefined
+  complete: boolean
+  loading: boolean
+}
+
+const getEffectiveSessionCacheLimit = () => isVSCodeRuntime() ? VSCODE_SESSION_CACHE_LIMIT : SESSION_CACHE_LIMIT
+const getEffectiveMessagePageSize = () => isVSCodeRuntime() ? VSCODE_MESSAGE_PAGE_SIZE : MESSAGE_PAGE_SIZE
+const getVSCodeInitialPageExpansionMax = () => VSCODE_INITIAL_PAGE_EXPANSION_LIMITS[VSCODE_INITIAL_PAGE_EXPANSION_LIMITS.length - 1]
+const getDefaultMeta = (): SyncMeta => ({ limit: getEffectiveMessagePageSize(), cursor: undefined, complete: false, loading: false })
+
+function getPrefetchMeta(directory: string, sessionID: string): SyncMeta | undefined {
+  const info = getSessionPrefetch(directory, sessionID)
+  if (!info) return undefined
+  return {
+    limit: info.limit,
+    cursor: info.cursor,
+    complete: info.complete,
+    loading: false,
+  }
+}
 
 function sortParts(parts: Part[]) {
   return parts.filter((p) => !!p?.id).sort((a, b) => cmp(a.id, b.id))
+}
+
+function isHeavyVSCodeSessionCache(state: Pick<State, "message" | "part">, sessionID: string): boolean {
+  const messages = state.message[sessionID]
+  if (!messages || messages.length === 0) return false
+  return messages.length > VSCODE_MESSAGE_PAGE_SIZE
+}
+
+function isUserMessage(message: Message): boolean {
+  const info = message as Message & { clientRole?: unknown; role?: unknown }
+  const role = typeof info.clientRole === "string" ? info.clientRole : info.role
+  return role === "user"
+}
+
+function hasUserMessage(messages: Message[] | undefined): boolean {
+  return Boolean(messages?.some(isUserMessage))
 }
 
 // ---------------------------------------------------------------------------
@@ -46,13 +93,7 @@ export function useSync() {
   // Refs for mutable tracking (no re-renders)
   const inflight = useRef(new Map<string, Promise<void>>())
   const optimistic = useRef(new Map<string, Map<string, OptimisticItem>>())
-  const seen = useRef(new Map<string, Set<string>>())
-  const meta = useRef(new Map<string, {
-    limit: number
-    cursor: string | undefined
-    complete: boolean
-    loading: boolean
-  }>())
+  const meta = useRef(new Map<string, SyncMeta>())
 
   const resolveSessionTarget = useCallback(
     (sessionID: string) => {
@@ -100,15 +141,15 @@ export function useSync() {
   const getMetaFor = useCallback(
     (sessionID: string, targetDirectory = directory) => {
       const key = keyFor(sessionID, targetDirectory)
-      return meta.current.get(key) ?? { limit: MESSAGE_PAGE_SIZE, cursor: undefined, complete: false, loading: false }
+      return meta.current.get(key) ?? getPrefetchMeta(targetDirectory, sessionID) ?? getDefaultMeta()
     },
     [directory, keyFor],
   )
 
   const setMetaFor = useCallback(
-    (sessionID: string, patch: Partial<{ limit: number; cursor: string | undefined; complete: boolean; loading: boolean }>, targetDirectory = directory) => {
+    (sessionID: string, patch: Partial<SyncMeta>, targetDirectory = directory) => {
       const key = keyFor(sessionID, targetDirectory)
-      const current = meta.current.get(key) ?? { limit: MESSAGE_PAGE_SIZE, cursor: undefined, complete: false, loading: false }
+      const current = meta.current.get(key) ?? getPrefetchMeta(targetDirectory, sessionID) ?? getDefaultMeta()
       meta.current.set(key, { ...current, ...patch })
     },
     [directory, keyFor],
@@ -135,6 +176,7 @@ export function useSync() {
         question: { ...current.question },
       }
       dropSessionCaches(draft, sessionIDs)
+      dropCachedSessionMessageRecordsSnapshots(dirStore, sessionIDs)
       dirStore.setState(draft)
 
       // Clear meta + optimistic + prefetch cache for evicted sessions
@@ -151,22 +193,22 @@ export function useSync() {
   // When seen directories exceed MAX_SEEN_DIRS, evict the oldest directory's caches.
   // LRU reorder on access. Evicts oldest directory when exceeding MAX_SEEN_DIRS.
   const seenFor = useCallback(() => {
-    const existing = seen.current.get(directory)
+    const existing = seenByDirectory.get(directory)
     if (existing) {
       // LRU reorder: delete + re-insert moves to end (most recent)
-      seen.current.delete(directory)
-      seen.current.set(directory, existing)
+      seenByDirectory.delete(directory)
+      seenByDirectory.set(directory, existing)
       return existing
     }
     const created = new Set<string>()
-    seen.current.set(directory, created)
+    seenByDirectory.set(directory, created)
 
     // Evict oldest directories if over limit
-    while (seen.current.size > MAX_SEEN_DIRS) {
-      const first = seen.current.keys().next().value
+    while (seenByDirectory.size > MAX_SEEN_DIRS) {
+      const first = seenByDirectory.keys().next().value
       if (!first) break
-      const staleSessionIds = [...(seen.current.get(first) ?? [])]
-      seen.current.delete(first)
+      const staleSessionIds = [...(seenByDirectory.get(first) ?? [])]
+      seenByDirectory.delete(first)
       evict(first, staleSessionIds)
     }
 
@@ -178,13 +220,31 @@ export function useSync() {
     (sessionID: string) => {
       const s = seenFor()
       const protectedIds = getProtectedSessionCacheIds(store.getState())
+      const cacheLimit = getEffectiveSessionCacheLimit()
       const stale = pickSessionCacheEvictions({
         seen: s,
         keep: sessionID,
-        limit: SESSION_CACHE_LIMIT,
+        limit: cacheLimit,
         preserve: protectedIds,
       })
       evict(directory, stale)
+
+      if (isVSCodeRuntime()) {
+        const state = store.getState()
+        const keep = new Set([sessionID, ...s, ...protectedIds])
+        const prefetched = Object.keys(state.message).filter((id) => !keep.has(id))
+        evict(directory, prefetched)
+
+        const afterPrefetchEviction = prefetched.length > 0 ? store.getState() : state
+        const heavyInactive = Object.keys(afterPrefetchEviction.message).filter((id) => {
+          if (id === sessionID || protectedIds.has(id)) return false
+          return isHeavyVSCodeSessionCache(afterPrefetchEviction, id)
+        })
+        if (heavyInactive.length > 0) {
+          for (const id of heavyInactive) s.delete(id)
+          evict(directory, heavyInactive)
+        }
+      }
     },
     [directory, seenFor, evict, store],
   )
@@ -213,8 +273,8 @@ export function useSync() {
   )
 
   const clearOptimistic = useCallback(
-    (sessionID: string, messageID?: string) => {
-      const key = `${directory}\n${sessionID}`
+    (sessionID: string, messageID?: string, targetDirectory = directory) => {
+      const key = `${targetDirectory}\n${sessionID}`
       if (!messageID) {
         optimistic.current.delete(key)
         return
@@ -248,7 +308,7 @@ export function useSync() {
     [directory],
   )
 
-  // Load messages for a session — fetches all pages until complete.
+  // Load messages for a session.
   const loadMessages = useCallback(
     async (sessionID: string, options?: {
       before?: string
@@ -263,25 +323,26 @@ export function useSync() {
       setMetaFor(sessionID, { loading: true }, targetDirectory)
 
       try {
-        const limit = m.limit
-        let allMessages: Message[] = []
-        let allParts: Array<{ id: string; part: Part[] }> = []
-        let cursor: string | undefined = options?.before
-        let complete = false
+        const limit = options?.before ? getEffectiveMessagePageSize() : m.limit
+        let page = await fetchMessages(sessionID, limit, options?.before, targetDirectory)
 
-        while (!complete) {
-          const page = await fetchMessages(sessionID, limit, cursor, targetDirectory)
-          allMessages = [...allMessages, ...page.session]
-          allParts = [...allParts, ...page.part]
-          cursor = page.cursor
-          complete = page.complete
+        // VS Code keeps the initial page small for switch performance. Some
+        // sessions have a very large final turn, so the latest 30 records can
+        // contain only assistant/tool records and no user boundary. Expand only
+        // this initial tail fetch, with a hard cap.
+        if (!options?.before && isVSCodeRuntime() && !page.complete && !hasUserMessage(page.session)) {
+          for (const nextLimit of VSCODE_INITIAL_PAGE_EXPANSION_LIMITS) {
+            if (nextLimit <= limit) continue
+            page = await fetchMessages(sessionID, nextLimit, undefined, targetDirectory)
+            if (page.complete || hasUserMessage(page.session)) break
+          }
         }
 
         // Merge optimistic items
         const items = getOptimistic(sessionID, targetDirectory)
-        const merged = mergeOptimisticPage({ session: allMessages, part: allParts, cursor: undefined, complete: true }, items)
+        const merged = mergeOptimisticPage(page, items)
         for (const messageID of merged.confirmed) {
-          clearOptimistic(sessionID, messageID)
+          clearOptimistic(sessionID, messageID, targetDirectory)
         }
 
         const current = writeStore.getState()
@@ -298,19 +359,19 @@ export function useSync() {
         const message = Object.prototype.hasOwnProperty.call(materialized.message, sessionID)
           ? materialized.message
           : { ...materialized.message, [sessionID]: materialized.messages }
-        writeStore.setState({ message, part: materialized.part })
         setMetaFor(sessionID, {
           limit: materialized.messages.length,
-          cursor: undefined,
-          complete: true,
+          cursor: merged.cursor,
+          complete: merged.complete,
           loading: false,
         }, targetDirectory)
+        writeStore.setState({ message, part: materialized.part })
         setSessionPrefetch({
           directory: targetDirectory,
           sessionID,
           limit: materialized.messages.length,
-          cursor: undefined,
-          complete: true,
+          cursor: merged.cursor,
+          complete: merged.complete,
         })
       } catch {
         setMetaFor(sessionID, { loading: false }, targetDirectory)
@@ -336,16 +397,32 @@ export function useSync() {
       const m = getMetaFor(sessionID, target.directory)
       const materialization = getSessionMaterializationStatus(current, sessionID)
       const cached = materialization.hasMessages && materialization.renderable && m.limit > 0
+      const prefetchInfo = !force ? getSessionPrefetch(target.directory, sessionID) : undefined
+      const knownCachedLimit = Math.max(m.limit, prefetchInfo?.limit ?? 0)
+      const needsVSCodeInitialTurnBoundary = isVSCodeRuntime()
+        && cached
+        && !hasUserMessage(current.message[sessionID])
+        && knownCachedLimit < getVSCodeInitialPageExpansionMax()
+        && !m.complete
+        && prefetchInfo?.complete !== true
+        && Boolean(m.cursor ?? prefetchInfo?.cursor)
+      if (needsVSCodeInitialTurnBoundary && prefetchInfo && prefetchInfo.limit > m.limit) {
+        setMetaFor(sessionID, {
+          limit: prefetchInfo.limit,
+          cursor: prefetchInfo.cursor,
+          complete: prefetchInfo.complete,
+        }, target.directory)
+      }
+      const cachedReady = cached && !needsVSCodeInitialTurnBoundary
       const hasSession = Binary.search(current.session, sessionID, (s) => s.id).found
-      if (cached && hasSession && !force) return
+      if (cachedReady && hasSession && !force) return
 
       // Skip if recently fetched (TTL)
-      if (!force) {
-        const prefetchInfo = getSessionPrefetch(target.directory, sessionID)
+      if (!force && !needsVSCodeInitialTurnBoundary) {
         if (shouldSkipSessionPrefetch({
-          hasMessages: cached,
+          hasMessages: cachedReady,
           info: prefetchInfo,
-          pageSize: MESSAGE_PAGE_SIZE,
+          pageSize: getEffectiveMessagePageSize(),
         })) return
       }
 
@@ -371,7 +448,7 @@ export function useSync() {
           }
         }
 
-        if (!cached || force) {
+        if (!cachedReady || force) {
           await loadMessages(sessionID, {
             targetDirectory: target.directory,
             targetStore: target.store,
@@ -389,7 +466,7 @@ export function useSync() {
                 session_status: { ...s.session_status, [sessionID]: status },
               }))
             }).catch(() => {}),
-            client.session.todo({ sessionID }).then((res) => {
+            client.session.todo({ sessionID, directory: sessionDir }).then((res) => {
               const todos: Todo[] | undefined = res.data && res.data.length > 0 ? res.data : undefined
               target.store.setState((s) => ({
                 todo: { ...s.todo, [sessionID]: todos ?? [] },
@@ -404,7 +481,7 @@ export function useSync() {
       promise.finally(() => inflight.current.delete(key))
       return promise
     },
-    [keyFor, touch, getMetaFor, loadMessages, resolveSessionTarget],
+    [keyFor, touch, getMetaFor, setMetaFor, loadMessages, resolveSessionTarget],
   )
 
   // Load more (pagination)

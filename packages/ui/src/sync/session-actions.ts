@@ -7,7 +7,6 @@ import type { OpencodeClient, Session, Message, Part } from "@opencode-ai/sdk/v2
 import { Binary } from "./binary"
 import { useSessionUIStore } from "./session-ui-store"
 import { useInputStore } from "./input-store"
-import type { AttachedFile } from "@/stores/types/sessionTypes"
 import type { ChildStoreManager } from "./child-store"
 import { useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
 import { useConfigStore } from "@/stores/useConfigStore"
@@ -18,6 +17,14 @@ import { registerRemoteInstanceProxy } from "@/lib/remote-instances/registry"
 import { getSyncStoresForServer, getAllSyncStores } from "./multi-server-registry"
 import { useProjectsStore } from "@/stores/useProjectsStore"
 import { getWorktreesForProject } from "@/lib/worktrees/worktreeKeys"
+import { materializeSessionSnapshots } from "./materialization"
+import { stripMessageDiffSnapshots } from "./sanitize"
+import { sessionEvents } from "@/lib/sessionEvents"
+
+const MESSAGE_REFETCH_LIMIT = 200
+const MESSAGE_REFETCH_SKIP_PARTS = new Set(["patch", "step-start", "step-finish"])
+const UNREVERT_REFETCH_ATTEMPTS = 3
+const UNREVERT_REFETCH_RETRY_MS = 150
 
 // Reference set by SyncProvider — allows actions to access SDK and stores
 let _sdk: OpencodeClient | null = null
@@ -25,6 +32,8 @@ let _childStores: ChildStoreManager | null = null
 let _getDirectory: () => string = () => ""
 let _optimisticAdd: ((input: { sessionID: string; message: Message; parts: Part[] }) => void) | null = null
 let _optimisticRemove: ((input: { sessionID: string; messageID: string }) => void) | null = null
+
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
 export function setActionRefs(
   sdk: OpencodeClient,
@@ -59,6 +68,21 @@ function dirStore() {
 const normalizeDirectoryKey = (directory: string): string =>
   directory.replace(/\\/g, "/").replace(/\/+$/, "") || "/"
 
+function usesDefaultConnection(project: { serverId?: string | null }): boolean {
+  return !project.serverId || project.serverId === DEFAULT_SERVER_ID
+}
+
+function shouldPreferProjectMatch<T extends { serverId?: string | null }>(
+  candidate: T,
+  candidateLength: number,
+  current: T | null,
+  currentLength: number,
+): boolean {
+  if (!current) return true
+  if (candidateLength !== currentLength) return candidateLength > currentLength
+  return usesDefaultConnection(candidate) && !usesDefaultConnection(current)
+}
+
 function findProjectForDirectory(directory: string) {
   const normalizedDir = normalizeDirectoryKey(directory)
   const projects = useProjectsStore.getState().projects
@@ -74,7 +98,7 @@ function findProjectForDirectory(directory: string) {
       if (!worktreePath || (normalizedDir !== worktreePath && !normalizedDir.startsWith(`${worktreePath}/`))) {
         continue
       }
-      if (!bestWorktreeOwner || worktreePath.length > bestWorktreeOwner.matchLength) {
+      if (shouldPreferProjectMatch(project, worktreePath.length, bestWorktreeOwner?.project ?? null, bestWorktreeOwner?.matchLength ?? -1)) {
         bestWorktreeOwner = { project, matchLength: worktreePath.length }
       }
     }
@@ -85,7 +109,7 @@ function findProjectForDirectory(directory: string) {
   for (const project of projects) {
     const projectPath = normalizeDirectoryKey(project.path)
     if (normalizedDir !== projectPath && !normalizedDir.startsWith(`${projectPath}/`)) continue
-    if (!best || projectPath.length > normalizeDirectoryKey(best.path).length) {
+    if (shouldPreferProjectMatch(project, projectPath.length, best, best ? normalizeDirectoryKey(best.path).length : -1)) {
       best = project
     }
   }
@@ -158,6 +182,11 @@ export function resolveSdkForDirectory(directory: string, sessionID?: string, ex
   if (explicitServerId && explicitServerId !== DEFAULT_SERVER_ID) {
     return getOrRegisterRemoteConnection(explicitServerId).client
   }
+  if (explicitServerId === DEFAULT_SERVER_ID) {
+    const defaultConn = serverRegistry.get(DEFAULT_SERVER_ID)
+    if (defaultConn) return defaultConn.client
+    return sdk()
+  }
 
   // Authoritative source: serverRegistry session index. No path matching.
   if (sessionID) {
@@ -173,15 +202,22 @@ export function resolveSdkForDirectory(directory: string, sessionID?: string, ex
     }
   }
 
-  // Check module-level cache first — populated synchronously by discoverWorktreeDirectories
-  const cachedServerId = getCachedServerIdForDirectory(normalizedDir)
-  if (cachedServerId && cachedServerId !== DEFAULT_SERVER_ID) {
-    return getOrRegisterRemoteConnection(cachedServerId).client
-  }
-
+  // Project ownership is stronger than stale remote child stores/cache. If a
+  // user has explicitly added a project on the default connection slot, do not
+  // let an old remote store for the same path hijack new turns.
   const project = findProjectForDirectory(normalizedDir)
   if (project?.serverId && project.serverId !== DEFAULT_SERVER_ID) {
     return getOrRegisterRemoteConnection(project.serverId, project.label).client
+  }
+  if (project) {
+    const defaultConn = serverRegistry.get(DEFAULT_SERVER_ID)
+    if (defaultConn) return defaultConn.client
+    return sdk()
+  }
+
+  const cachedServerId = getCachedServerIdForDirectory(normalizedDir)
+  if (cachedServerId && cachedServerId !== DEFAULT_SERVER_ID) {
+    return getOrRegisterRemoteConnection(cachedServerId).client
   }
 
   // Check if any remote SyncProvider already has a child store for this directory
@@ -198,21 +234,25 @@ export function resolveSdkForDirectory(directory: string, sessionID?: string, ex
   return sdk()
 }
 
-/** Resolve the base URL (including /api suffix) for a directory's server.
- *  Returns undefined if the directory belongs to the local default server. */
+/** Resolve the base URL (including /api suffix) for a directory's remote server.
+ *  Returns undefined if the directory belongs to the default connection slot. */
 export function resolveBaseUrl(directory: string): string | undefined {
   const normalizedDir = normalizeDirectoryKey(directory)
 
-  // Tier 1: directory→server cache (populated by discoverWorktreeDirectories, non-string-based)
+  // Tier 1: explicit project ownership.
+  const project = findProjectForDirectory(normalizedDir)
+  if (project) {
+    if (!project.serverId || project.serverId === DEFAULT_SERVER_ID) return undefined
+    return getOrRegisterRemoteConnection(project.serverId, project.label).config.baseUrl
+  }
+
+  // Tier 2: directory→server cache (populated by discoverWorktreeDirectories)
   const cachedServerId = _directoryServerCache.get(normalizedDir)
   if (cachedServerId && cachedServerId !== DEFAULT_SERVER_ID) {
     return getOrRegisterRemoteConnection(cachedServerId).config.baseUrl
   }
 
-  // Tier 2: string-based project path matching (fallback)
-  const project = findProjectForDirectory(normalizedDir)
-  if (!project?.serverId || project.serverId === DEFAULT_SERVER_ID) return undefined
-  return getOrRegisterRemoteConnection(project.serverId, project.label).config.baseUrl
+  return undefined
 }
 
 export function resolveBaseUrlForSession(sessionId: string | null | undefined, directory?: string | null, explicitServerId?: string): string | undefined {
@@ -242,16 +282,20 @@ function getServerIdForBaseUrl(baseUrl: string | undefined): string | null {
 export function resolveApiUrl(directory: string): string | undefined {
   const normalizedDir = normalizeDirectoryKey(directory)
 
-  // Tier 1: directory→server cache (populated by discoverWorktreeDirectories)
+  // Tier 1: explicit project ownership.
+  const project = findProjectForDirectory(normalizedDir)
+  if (project) {
+    if (!project.serverId || project.serverId === DEFAULT_SERVER_ID) return undefined
+    return getOrRegisterRemoteConnection(project.serverId, project.label).config.baseUrl
+  }
+
+  // Tier 2: directory→server cache (populated by discoverWorktreeDirectories)
   const cachedServerId = _directoryServerCache.get(normalizedDir)
   if (cachedServerId && cachedServerId !== DEFAULT_SERVER_ID) {
     return getOrRegisterRemoteConnection(cachedServerId).config.baseUrl
   }
 
-  // Tier 2: string-based project path matching (fallback)
-  const project = findProjectForDirectory(normalizedDir)
-  if (!project?.serverId || project.serverId === DEFAULT_SERVER_ID) return undefined
-  return getOrRegisterRemoteConnection(project.serverId, project.label).config.baseUrl
+  return undefined
 }
 
 /** Get the child store manager for a session's server. Falls back to default. */
@@ -268,6 +312,21 @@ function storesForSession(sessionId?: string | null): ChildStoreManager {
   return _childStores
 }
 
+function upsertSessionSnapshot(
+  store: ReturnType<ChildStoreManager["ensureChild"]>,
+  session: Session,
+) {
+  const current = store.getState()
+  const sessions = [...current.session]
+  const searchResult = Binary.search(sessions, session.id, (s) => s.id)
+  if (searchResult.found) {
+    sessions[searchResult.index] = session
+  } else {
+    sessions.splice(searchResult.index, 0, session)
+  }
+  store.setState({ session: sessions })
+}
+
 /** Get the directory store for a session. Uses the remote server's child stores
     (keyed by "" since MultiServerSyncLayer mounts with directory="") for remote sessions,
     or the current directory's store for local sessions. Falls back to dirStore(). */
@@ -278,9 +337,10 @@ function storeForSession(sessionId: string | null | undefined): ReturnType<Child
     if (serverId && serverId !== DEFAULT_SERVER_ID) {
       const remoteStores = getSyncStoresForServer(serverId)
       if (remoteStores) {
-        const store = sessionDirectory
-          ? remoteStores.getChild(sessionDirectory)
-          : remoteStores.getChild("")
+        if (sessionDirectory) {
+          return remoteStores.ensureChild(sessionDirectory)
+        }
+        const store = remoteStores.getChild("")
         if (store) return store
       }
     }
@@ -331,6 +391,25 @@ function getSessionDirectory(sessionId: string): string | undefined {
   const uiDirectory = useSessionUIStore.getState().getDirectoryForSession(sessionId)
   if (uiDirectory) return uiDirectory
 
+  const serverId = serverRegistry.getServerForSession(sessionId)
+  if (serverId && serverId !== DEFAULT_SERVER_ID) {
+    const remoteStores = getSyncStoresForServer(serverId)
+    if (remoteStores) {
+      for (const [directory, store] of remoteStores.children) {
+        const state = store.getState()
+        if (
+          state.session.some((session) => session.id === sessionId)
+          || Object.prototype.hasOwnProperty.call(state.message, sessionId)
+          || Object.prototype.hasOwnProperty.call(state.session_status ?? {}, sessionId)
+          || Object.prototype.hasOwnProperty.call(state.permission ?? {}, sessionId)
+          || Object.prototype.hasOwnProperty.call(state.question ?? {}, sessionId)
+        ) {
+          return directory
+        }
+      }
+    }
+  }
+
   if (_childStores) {
     for (const [directory, store] of _childStores.children) {
       const state = store.getState()
@@ -378,14 +457,19 @@ function getSessionReplyClient(sessionId?: string): OpencodeClient {
   throw new Error(`Reply target directory for session ${sessionId ?? "(unknown)"} is not available`)
 }
 
-function resolveDirectoryForBlockingRequest(
+function findBlockingRequestDirectoryInStores(
+  stores: ChildStoreManager,
   type: "permission" | "question",
   sessionId: string,
   requestId: string,
 ): string | null {
-  const stores = _childStores
-  if (!stores || !requestId) {
-    return null
+  for (const [directory, store] of stores.children) {
+    const state = store.getState()
+    const requestMap = type === "permission" ? state.permission : state.question
+    const sessionRequests = requestMap[sessionId]
+    if (sessionRequests?.some((request) => request.id === requestId)) {
+      return directory
+    }
   }
 
   for (const [directory, store] of stores.children) {
@@ -398,9 +482,46 @@ function resolveDirectoryForBlockingRequest(
     }
   }
 
-  const sessionDirectory = useSessionUIStore.getState().getDirectoryForSession(sessionId)
+  return null
+}
+
+function resolveDirectoryForBlockingRequest(
+  type: "permission" | "question",
+  sessionId: string,
+  requestId: string,
+): string | null {
+  if (!requestId) {
+    return null
+  }
+
+  const serverId = serverRegistry.getServerForSession(sessionId)
+  if (serverId && serverId !== DEFAULT_SERVER_ID) {
+    const remoteStores = getSyncStoresForServer(serverId)
+    const remoteDirectory = remoteStores
+      ? findBlockingRequestDirectoryInStores(remoteStores, type, sessionId, requestId)
+      : null
+    if (remoteDirectory) return remoteDirectory
+  }
+
+  const stores = _childStores
+  const localDirectory = stores
+    ? findBlockingRequestDirectoryInStores(stores, type, sessionId, requestId)
+    : null
+  if (localDirectory) return localDirectory
+
+  for (const entry of getAllSyncStores()) {
+    if (entry.serverId === DEFAULT_SERVER_ID || entry.serverId === serverId) continue
+    const directory = findBlockingRequestDirectoryInStores(entry.childStores, type, sessionId, requestId)
+    if (directory) return directory
+  }
+
+  const sessionDirectory = getSessionDirectory(sessionId)
   if (sessionDirectory) {
     return sessionDirectory
+  }
+
+  if (!stores) {
+    return null
   }
 
   for (const [directory, store] of stores.children) {
@@ -491,8 +612,19 @@ export async function createSession(
         registerSessionDirectory(session.id, sessionDirectory)
       }
 
-      if (resolvedServerId && resolvedServerId !== DEFAULT_SERVER_ID) {
+      if (resolvedServerId) {
         serverRegistry.indexSession(session.id, resolvedServerId)
+      }
+
+      if (sessionDirectory) {
+        if (resolvedServerId && resolvedServerId !== DEFAULT_SERVER_ID) {
+          const remoteStores = getSyncStoresForServer(resolvedServerId)
+          if (remoteStores) {
+            upsertSessionSnapshot(remoteStores.ensureChild(sessionDirectory), session)
+          }
+        } else if (_childStores) {
+          upsertSessionSnapshot(_childStores.ensureChild(sessionDirectory), session)
+        }
       }
 
       useSessionUIStore.getState().setCurrentSession(
@@ -942,55 +1074,16 @@ function extractUserMessageText(parts: Part[]): string {
     .trim()
 }
 
-/**
- * Convert file parts from a stored message into AttachedFile entries
- * suitable for the input store, so the user can re-send after revert/fork.
- *
- * Only data URLs (base64) and file:// URLs are supported for reconstruction;
- * http(s) URLs produce a zero-byte placeholder File that still carries the
- * original URL for submission via the server path.
- */
-async function extractAttachedFilesFromParts(parts: Part[]): Promise<AttachedFile[]> {
-  const fileParts = parts.filter((p) => p.type === "file" && !isSyntheticPart(p))
-  const results: AttachedFile[] = []
-  for (const raw of fileParts) {
-    const part = raw as Part & { mime?: string; filename?: string; url?: string }
-    const url = part.url ?? ""
-    const mime = part.mime ?? "application/octet-stream"
-    const filename = part.filename ?? "file"
-    if (!url) continue
-
-    const id = `revert-${Date.now()}-${Math.random().toString(36).slice(2)}`
-    let file: File
-    let size = 0
-    try {
-      if (url.startsWith("data:") || url.startsWith("blob:") || url.startsWith("http:") || url.startsWith("https:")) {
-        const response = await fetch(url)
-        const blob = await response.blob()
-        file = new File([blob], filename, { type: mime })
-        size = blob.size
-      } else {
-        // file://, server:// or other — keep as a lightweight placeholder; submission uses the URL
-        file = new File([], filename, { type: mime })
-        size = 0
-      }
-    } catch {
-      // Reconstruction failed — fall back to placeholder so user still sees the attachment
-      file = new File([], filename, { type: mime })
-      size = 0
+function restoreFilePartsToInput(fileParts: Array<Record<string, unknown>>): void {
+  useInputStore.getState().clearAttachedFiles()
+  for (const filePart of fileParts) {
+    const url = typeof filePart.url === "string" ? filePart.url : ""
+    const mime = typeof filePart.mime === "string" ? filePart.mime : "application/octet-stream"
+    const filename = typeof filePart.filename === "string" ? filePart.filename : "attachment"
+    if (url) {
+      useInputStore.getState().addRestoredAttachment({ url, mimeType: mime, filename })
     }
-
-    results.push({
-      id,
-      file,
-      dataUrl: url,
-      mimeType: mime,
-      filename,
-      size,
-      source: "local",
-    })
   }
-  return results
 }
 
 /**
@@ -998,7 +1091,7 @@ async function extractAttachedFilesFromParts(parts: Part[]): Promise<AttachedFil
  *
  * 1. Abort if session is busy
  * 2. Extract text + file attachments from the target message for input restoration
- * 3. Optimistically set revert marker so messages hide immediately
+ * 3. Optimistically set revert marker; keep messages/parts for restore UI
  * 4. Call SDK session.revert() and merge returned session
  * 5. Populate pendingInputText and attachedFiles so the reverted message's
  *    text and images reappear in the input and can be re-sent
@@ -1025,12 +1118,10 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
     ? (state.part[messageId] ?? [])
     : []
   const messageText = extractUserMessageText(targetParts)
-  console.log('[revertToMessage] messageId=', messageId, 'targetMsg.role=', targetMsg?.role, 'targetParts.length=', targetParts.length, 'messageText=', JSON.stringify(messageText))
-  console.log('[revertToMessage] messages.length=', messages.length, 'all message ids=', messages.map(m => m.id))
-  console.log('[revertToMessage] all part keys=', Object.keys(state.part))
-  console.log('[revertToMessage] state.part[messageId]=', state.part[messageId])
+  const submittedFileParts = targetParts.filter((p) => p.type === "file" && !isSyntheticPart(p)) as Array<Record<string, unknown>>
 
-  // Optimistically remove reverted messages + set marker
+  // Optimistically set only the marker. The visible timeline is derived from
+  // session.revert so the full message range remains available for restore/fork.
   const prevRevert = (() => {
     const s = state.session.find((s) => s.id === sessionId)
     return (s as Session & { revert?: unknown })?.revert
@@ -1038,55 +1129,32 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
   const sessions = [...state.session]
   const sessionIdx = sessions.findIndex((s) => s.id === sessionId)
 
-  // Remove messages at and after the revert point from the store
-  const prevMessages = state.message[sessionId] ?? []
-  const prevPart = { ...state.part }
-  const keptMessages = prevMessages.filter((m) => m.id < messageId)
-  const removedMessages = prevMessages.filter((m) => m.id >= messageId)
-  for (const m of removedMessages) {
-    delete prevPart[m.id]
-  }
-
-  const patch: Record<string, unknown> = {
-    message: { ...state.message, [sessionId]: keptMessages },
-    part: prevPart,
-  }
+  const patch: Record<string, unknown> = {}
 
   if (sessionIdx >= 0) {
     sessions[sessionIdx] = { ...sessions[sessionIdx], revert: { messageID: messageId } } as Session
     patch.session = sessions
   }
 
+  const prevInputAttachments = [...useInputStore.getState().attachedFiles]
+  const prevInputText = useInputStore.getState().pendingInputText
+  const prevInputMode = useInputStore.getState().pendingInputMode
+
+  store.setState(patch)
+
   if (messageText) {
-    console.log('[revertToMessage] setting pendingInputText=', JSON.stringify(messageText))
     useInputStore.setState({
       pendingInputText: messageText,
       pendingInputMode: "replace" as const,
     })
   } else if (targetParts.length > 0) {
-    console.log('[revertToMessage] attachments only, clearing pendingInputText')
-    // Reverted message had attachments but no text — clear any stale pending
-    // text so it doesn't leak from a prior operation into the restored input.
     useInputStore.setState({
       pendingInputText: "",
       pendingInputMode: "replace" as const,
     })
-  } else {
-    console.log('[revertToMessage] no text and no attachments — not touching pendingInputText')
   }
 
-  store.setState(patch)
-  console.log('[revertToMessage] after store.setState, pendingInputText is now=', useInputStore.getState().pendingInputText)
-
-  // Restore file attachments (e.g., images) so the user sees and can re-send them.
-  // This runs async — images hit the input after text but before/during the SDK call.
-  if (targetParts.length > 0) {
-    void extractAttachedFilesFromParts(targetParts).then((files) => {
-      if (files.length > 0) {
-        useInputStore.getState().setAttachedFiles(files)
-      }
-    })
-  }
+  restoreFilePartsToInput(submittedFileParts)
 
   // Call SDK and merge authoritative result into store
   try {
@@ -1100,21 +1168,48 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
         store.setState({ session: updated })
       }
     }
+    sessionEvents.requestGitRefresh({ directory: sessionDirectory })
   } catch (err) {
-    // Rollback: restore removed messages + revert marker
+    // Rollback marker and input state.
     const current = store.getState()
     const rollback = [...current.session]
     const idx = rollback.findIndex((s) => s.id === sessionId)
     if (idx >= 0) {
       rollback[idx] = { ...rollback[idx], revert: prevRevert } as Session
     }
-    store.setState({
-      session: rollback,
-      message: { ...current.message, [sessionId]: prevMessages },
-      part: { ...current.part, ...Object.fromEntries(removedMessages.map((m) => [m.id, state.part[m.id] ?? []])) },
+    store.setState({ session: rollback })
+    useInputStore.setState({
+      pendingInputText: prevInputText,
+      pendingInputMode: prevInputMode,
+      attachedFiles: prevInputAttachments,
     })
     throw err
   }
+}
+
+export async function refetchSessionMessages(sessionId: string): Promise<void> {
+  const sessionDirectory = requireSessionDirectory(sessionId, "refetchSessionMessages")
+  const store = storeForSession(sessionId)
+  const result = await sdkForSession(sessionId).session.messages({
+    sessionID: sessionId,
+    directory: sessionDirectory,
+    limit: MESSAGE_REFETCH_LIMIT,
+  })
+  const records = (result.data ?? []).filter((record: { info?: { id?: string } }) => !!record?.info?.id)
+  if (records.length === 0) return
+
+  store.setState((state) => {
+    const materialized = materializeSessionSnapshots(
+      state,
+      sessionId,
+      records.map((record: { info: Message; parts?: Part[] }) => ({
+        info: stripMessageDiffSnapshots(record.info),
+        parts: record.parts ?? [],
+      })),
+      { skipPartTypes: MESSAGE_REFETCH_SKIP_PARTS },
+    )
+    return { message: materialized.message, part: materialized.part }
+  })
 }
 
 /**
@@ -1125,6 +1220,7 @@ export async function unrevertSession(sessionId: string): Promise<void> {
   const sessionDirectory = requireSessionDirectory(sessionId, "unrevertSession")
   const store = storeForSession(sessionId)
   const state = store.getState()
+  const previousMessageCount = state.message[sessionId]?.length ?? 0
 
   // Abort if busy
   const status = state.session_status[sessionId]
@@ -1146,6 +1242,12 @@ export async function unrevertSession(sessionId: string): Promise<void> {
       store.setState({ session: sessions })
     }
   }
+  for (let attempt = 0; attempt < UNREVERT_REFETCH_ATTEMPTS; attempt += 1) {
+    if (attempt > 0) await wait(UNREVERT_REFETCH_RETRY_MS)
+    await refetchSessionMessages(sessionId)
+    const nextMessageCount = store.getState().message[sessionId]?.length ?? 0
+    if (nextMessageCount > previousMessageCount) return
+  }
 }
 
 /**
@@ -1163,6 +1265,7 @@ export async function forkFromMessage(sessionId: string, messageId: string): Pro
 
   const parts = state.part[messageId] ?? []
   const messageText = extractUserMessageText(parts)
+  const fileParts = parts.filter((p) => p.type === "file" && !isSyntheticPart(p)) as Array<Record<string, unknown>>
 
   const result = await sdkForSession(sessionId).session.fork({ sessionID: sessionId, directory: sessionDirectory, messageID: messageId })
   if (!result.data) return
@@ -1187,10 +1290,5 @@ export async function forkFromMessage(sessionId: string, messageId: string): Pro
     })
   }
 
-  if (parts.length > 0) {
-    const files = await extractAttachedFilesFromParts(parts)
-    if (files.length > 0) {
-      useInputStore.getState().setAttachedFiles(files)
-    }
-  }
+  restoreFilePartsToInput(fileParts)
 }

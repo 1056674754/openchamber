@@ -125,6 +125,12 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       createMcpConfig,
       updateMcpConfig,
       deleteMcpConfig,
+      listSnippets,
+      getSnippet,
+      createSnippet,
+      updateSnippet,
+      deleteSnippet,
+      expandSnippets,
     } = await import('./index.js');
 
     registerConfigEntityRoutes(app, {
@@ -146,6 +152,12 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       createMcpConfig,
       updateMcpConfig,
       deleteMcpConfig,
+      listSnippets,
+      getSnippet,
+      createSnippet,
+      updateSnippet,
+      deleteSnippet,
+      expandSnippets,
     });
 
     const {

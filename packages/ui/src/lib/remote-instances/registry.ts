@@ -2,7 +2,7 @@ import { serverRegistry, type ServerConnection } from '@/lib/opencode/server-reg
 
 type RemoteHealthStatus = ServerConnection['healthStatus'];
 
-const remoteProxyBaseUrl = (id: string): string => `/api/remote/${encodeURIComponent(id)}`;
+export const getRemoteInstanceProxyBaseUrl = (id: string): string => `/api/remote/${encodeURIComponent(id)}`;
 const remoteHealthUrl = (id: string): string => `/api/remote-instances/${encodeURIComponent(id)}/health`;
 
 export function registerRemoteInstanceProxy(
@@ -15,8 +15,8 @@ export function registerRemoteInstanceProxy(
   const connection = serverRegistry.register({
     id: input.id,
     label: input.label,
-    baseUrl: remoteProxyBaseUrl(input.id),
-    sseUrl: remoteProxyBaseUrl(input.id),
+    baseUrl: getRemoteInstanceProxyBaseUrl(input.id),
+    sseUrl: getRemoteInstanceProxyBaseUrl(input.id),
     healthUrl: remoteHealthUrl(input.id),
     healthMethod: 'POST',
   });
@@ -27,4 +27,3 @@ export function registerRemoteInstanceProxy(
 
   return connection;
 }
-

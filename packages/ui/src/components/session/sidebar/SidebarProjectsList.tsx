@@ -64,7 +64,7 @@ type Props = {
   openProjectEditDialog: (id: string) => void;
   removeProject: (id: string) => void;
   projectHeaderSentinelRefs: React.MutableRefObject<Map<string, HTMLDivElement | null>>;
-  reorderProjects: (fromIndex: number, toIndex: number) => void;
+  reorderProjectsById: (activeProjectId: string, overProjectId: string) => void;
   toggleProjectPin: (id: string) => void;
   getOrderedGroups: (projectId: string, groups: SessionGroup[]) => SessionGroup[];
   setGroupOrderByProject: React.Dispatch<React.SetStateAction<Map<string, string[]>>>;
@@ -195,6 +195,13 @@ export function SidebarProjectsList(props: Props): React.ReactNode {
     [props.sectionsForRender],
   );
   const remoteProjectLoadStates = useRemoteProjectLoadStates(remoteProjectRefs);
+  const orderedSectionsForRender = React.useMemo(() => {
+    return [...props.sectionsForRender].sort((a, b) => {
+      if (a.project.pinned && !b.project.pinned) return -1;
+      if (!a.project.pinned && b.project.pinned) return 1;
+      return 0;
+    });
+  }, [props.sectionsForRender]);
   const projectSensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
@@ -259,20 +266,17 @@ export function SidebarProjectsList(props: Props): React.ReactNode {
               if (props.isInlineEditing) return;
               const { active, over } = event;
               if (!over || active.id === over.id) return;
-              const oldIndex = props.sectionsForRender.findIndex((section) => section.project.id === active.id);
-              const newIndex = props.sectionsForRender.findIndex((section) => section.project.id === over.id);
-              if (oldIndex === -1 || newIndex === -1 || oldIndex === newIndex) return;
-              props.reorderProjects(oldIndex, newIndex);
+              const activeProjectId = String(active.id);
+              const overProjectId = String(over.id);
+              const activeSection = orderedSectionsForRender.find((section) => section.project.id === activeProjectId);
+              const overSection = orderedSectionsForRender.find((section) => section.project.id === overProjectId);
+              if (!activeSection || !overSection) return;
+              props.reorderProjectsById(activeProjectId, overProjectId);
             }}
           >
-            <SortableContext items={props.sectionsForRender.map((section) => section.project.id)} strategy={verticalListSortingStrategy}>
+            <SortableContext items={orderedSectionsForRender.map((section) => section.project.id)} strategy={verticalListSortingStrategy}>
               {(() => {
-                const sorted = [...props.sectionsForRender].sort((a, b) => {
-                  if (a.project.pinned && !b.project.pinned) return -1;
-                  if (!a.project.pinned && b.project.pinned) return 1;
-                  return 0;
-                });
-                return sorted.map((section) => {
+                return orderedSectionsForRender.map((section) => {
                 const project = section.project;
                 const projectKey = project.id;
                 const rawProjectLabel = project.label?.trim();

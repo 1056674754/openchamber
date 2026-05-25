@@ -8,9 +8,11 @@ import type { ProjectRef } from '@/lib/worktrees/worktreeManager';
 import { createWorktreeWithDefaults, resolveRootTrackingRemote } from '@/lib/worktrees/worktreeCreate';
 import { getRootBranch } from '@/lib/worktrees/worktreeStatus';
 import { checkIsGitRepository } from '@/lib/gitApi';
+import { getMultiRunSessionTitle } from '@/lib/multirun/title';
 // sessionStore removed — sync bootstrap handles session loading
 import { useDirectoryStore } from './useDirectoryStore';
 import { useProjectsStore } from './useProjectsStore';
+import { useSnippetsStore } from './useSnippetsStore';
 
 /**
  * Generate a git-safe slug from a string.
@@ -49,7 +51,7 @@ const resolveActiveProject = (): ProjectRef | null => {
 
   const project = projectsState.projects.find((entry) => entry.id === activeProjectId);
   if (project?.path) {
-    return { id: project.id, path: project.path };
+    return { id: project.id, path: project.path, serverId: project.serverId };
   }
 
   // Fall back to current directory only when active project is missing.
@@ -83,27 +85,31 @@ export const useMultiRunStore = create<MultiRunStore>()(
 
       createMultiRun: async (params: CreateMultiRunParams) => {
         const groupName = params.name.trim();
-        const prompt = params.prompt.trim();
-        const { models, agent, files, setupCommands } = params;
+        const { groups, agent, files, setupCommands } = params;
 
         if (!groupName) {
           set({ error: 'Group name is required' });
           return null;
         }
 
-        if (!prompt) {
-          set({ error: 'Prompt is required' });
+        if (!groups || groups.length === 0) {
+          set({ error: 'At least one run group is required' });
           return null;
         }
 
-        if (models.length < 1) {
-          set({ error: 'Select at least 1 model' });
-          return null;
-        }
-
-        if (models.length > 5) {
-          set({ error: 'Maximum 5 models allowed' });
-          return null;
+        for (let gi = 0; gi < groups.length; gi++) {
+          if (!groups[gi].prompt.trim()) {
+            set({ error: `Group ${gi + 1}: prompt is required` });
+            return null;
+          }
+          if (groups[gi].models.length < 1) {
+            set({ error: `Group ${gi + 1}: select at least 1 model` });
+            return null;
+          }
+          if (groups[gi].models.length > 5) {
+            set({ error: `Group ${gi + 1}: maximum 5 models allowed` });
+            return null;
+          }
         }
 
         set({ isLoading: true, error: null });
@@ -130,88 +136,105 @@ export const useMultiRunStore = create<MultiRunStore>()(
             providerID: string;
             modelID: string;
             variant?: string;
+            prompt: string;
           }> = [];
 
           const commandsToRun = setupCommands?.filter((cmd) => cmd.trim().length > 0) ?? [];
 
-          // Count occurrences of each model to handle duplicates
-          const modelCounts = new Map<string, number>();
-          for (const model of models) {
-            const key = `${model.providerID}:${model.modelID}`;
-            modelCounts.set(key, (modelCounts.get(key) || 0) + 1);
-          }
+          for (let gi = 0; gi < groups.length; gi++) {
+            const group = groups[gi];
+            const prompt = group.prompt;
 
-          // Track current index per model during iteration
-          const modelIndexes = new Map<string, number>();
+            // Count occurrences of each model to handle duplicates inside this group.
+            const modelCounts = new Map<string, number>();
+            for (const model of group.models) {
+              const key = `${model.providerID}:${model.modelID}`;
+              modelCounts.set(key, (modelCounts.get(key) || 0) + 1);
+            }
 
-          // 1) Create isolated worktrees for Git projects, or same-directory sessions otherwise.
-          for (const model of models) {
-            const key = `${model.providerID}:${model.modelID}`;
-            const count = modelCounts.get(key) || 1;
-            const index = (modelIndexes.get(key) || 0) + 1;
-            modelIndexes.set(key, index);
+            // Track current index per model during iteration.
+            const modelIndexes = new Map<string, number>();
 
-            const modelSlug = toModelSlug(model.providerID, model.modelID);
-            // Append index only when same model is selected multiple times
-            const preferredName = count > 1
-              ? generateWorktreeNameSeed(groupSlug, `${modelSlug}/${index}`)
-              : generateWorktreeNameSeed(groupSlug, modelSlug);
-            try {
-              const sessionTitle = count > 1
-                ? `${groupSlug}/${model.providerID}/${model.modelID}/${index}`
-                : `${groupSlug}/${model.providerID}/${model.modelID}`;
+            // 1) Create isolated worktrees for Git projects, or same-directory sessions otherwise.
+            for (const model of group.models) {
+              const key = `${model.providerID}:${model.modelID}`;
+              const count = modelCounts.get(key) || 1;
+              const index = (modelIndexes.get(key) || 0) + 1;
+              modelIndexes.set(key, index);
 
-              if (!shouldIsolateRuns) {
+              const modelSlug = toModelSlug(model.providerID, model.modelID);
+              const runGroup = groups.length > 1 ? `g${gi + 1}` : undefined;
+              // Append index only when same model is selected multiple times.
+              const modelPart = count > 1
+                ? generateWorktreeNameSeed(groupSlug, `${modelSlug}/${index}`)
+                : generateWorktreeNameSeed(groupSlug, modelSlug);
+              const preferredName = runGroup
+                ? `${runGroup}/${modelPart}`
+                : modelPart;
+
+              try {
+                const sessionTitle = getMultiRunSessionTitle({
+                  groupSlug,
+                  runGroup,
+                  providerID: model.providerID,
+                  modelID: model.modelID,
+                  index: count > 1 ? index : undefined,
+                });
+
+                if (!shouldIsolateRuns) {
+                  const session = await opencodeClient.withDirectory(
+                    directory,
+                    () => opencodeClient.createSession({ title: sessionTitle })
+                  );
+
+                  createdRuns.push({
+                    sessionId: session.id,
+                    worktreePath: directory,
+                    providerID: model.providerID,
+                    modelID: model.modelID,
+                    variant: model.variant,
+                    prompt,
+                  });
+                  continue;
+                }
+
+                const worktreeMetadata = await createWorktreeWithDefaults(project, {
+                  preferredName,
+                  mode: 'new',
+                  branchName: preferredName,
+                  worktreeName: preferredName,
+                  startRef: params.worktreeBaseBranch || 'HEAD',
+                  setupCommands: commandsToRun,
+                }, {
+                  resolvedRootTrackingRemote: rootTrackingRemote,
+                });
+
+                const enrichedMetadata = {
+                  ...worktreeMetadata,
+                  createdFromBranch: rootBranch,
+                  kind: 'standard' as const,
+                };
+
                 const session = await opencodeClient.withDirectory(
-                  directory,
+                  worktreeMetadata.path,
                   () => opencodeClient.createSession({ title: sessionTitle })
                 );
 
+                useSessionUIStore.getState().setWorktreeMetadata(session.id, enrichedMetadata);
+
                 createdRuns.push({
                   sessionId: session.id,
-                  worktreePath: directory,
+                  worktreePath: worktreeMetadata.path,
                   providerID: model.providerID,
                   modelID: model.modelID,
                   variant: model.variant,
+                  prompt,
                 });
-                continue;
+
+              } catch (error) {
+                // Best-effort: allow partial success
+                console.warn('[MultiRun] Failed to create session:', error);
               }
-
-              const worktreeMetadata = await createWorktreeWithDefaults(project, {
-                preferredName,
-                mode: 'new',
-                branchName: preferredName,
-                worktreeName: preferredName,
-                startRef: params.worktreeBaseBranch || 'HEAD',
-                setupCommands: commandsToRun,
-              }, {
-                resolvedRootTrackingRemote: rootTrackingRemote,
-              });
-
-              const enrichedMetadata = {
-                ...worktreeMetadata,
-                createdFromBranch: rootBranch,
-                kind: 'standard' as const,
-              };
-
-              const session = await opencodeClient.withDirectory(
-                worktreeMetadata.path,
-                () => opencodeClient.createSession({ title: sessionTitle })
-              );
-
-              useSessionUIStore.getState().setWorktreeMetadata(session.id, enrichedMetadata);
-
-              createdRuns.push({
-                sessionId: session.id,
-                worktreePath: worktreeMetadata.path,
-                providerID: model.providerID,
-                modelID: model.modelID,
-                variant: model.variant,
-              });
-
-            } catch (error) {
-              // Best-effort: allow partial success
-              console.warn('[MultiRun] Failed to create session:', error);
             }
           }
 
@@ -231,7 +254,7 @@ export const useMultiRunStore = create<MultiRunStore>()(
             return null;
           }
 
-          // 2) Start all runs with the same prompt.
+          // 2) Start all runs with their group prompt.
           // IMPORTANT: do not await model/agent execution here; only worktree + session creation.
           // Convert files to the format expected by sendMessage
           const filesForMessage = files?.map((f) => ({
@@ -247,20 +270,22 @@ export const useMultiRunStore = create<MultiRunStore>()(
 
           void (async () => {
             try {
+              const expandText = useSnippetsStore.getState().expandText;
               await Promise.allSettled(
                 createdRuns.map(async (run) => {
                   try {
-                      await opencodeClient.withDirectory(run.worktreePath, () =>
-                       opencodeClient.sendMessage({
-                         id: run.sessionId,
-                         providerID: run.providerID,
-                         modelID: run.modelID,
-                         variant: run.variant,
-                         text: prompt,
-                         agent,
-                         files: filesForMessage,
-                       })
-                     );
+                    const text = await expandText(run.prompt, { directory: run.worktreePath }).catch(() => run.prompt);
+                    await opencodeClient.withDirectory(run.worktreePath, () =>
+                      opencodeClient.sendMessage({
+                        id: run.sessionId,
+                        providerID: run.providerID,
+                        modelID: run.modelID,
+                        variant: run.variant,
+                        text,
+                        agent,
+                        files: filesForMessage,
+                      })
+                    );
                   } catch (error) {
                     console.warn('[MultiRun] Failed to start run:', error);
                   }

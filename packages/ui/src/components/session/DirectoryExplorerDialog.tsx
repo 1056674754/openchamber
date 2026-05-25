@@ -20,6 +20,7 @@ import { useDeviceInfo } from '@/lib/device';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { Icon } from "@/components/icon/Icon";
 import { opencodeClient } from '@/lib/opencode/client';
+import { DEFAULT_SERVER_ID } from '@/lib/opencode/server-registry';
 import {
   setDirectoryShowHidden,
   useDirectoryShowHidden,
@@ -37,8 +38,8 @@ type BrowseEntry = {
 };
 
 type BrowseRow =
-  | { type: 'up'; value: 'browse:up'; name: string; path: string | null; disabled?: false }
-  | { type: 'directory'; value: string; name: string; path: string; disabled: boolean };
+  | { type: 'up'; value: 'browse:up'; name: string; path: string | null }
+  | { type: 'directory'; value: string; name: string; path: string; isAdded: boolean };
 
 const isRootPath = (value: string): boolean => value === '/';
 
@@ -174,6 +175,7 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
 
   const addedProjectPaths = React.useMemo(() => new Set(
     projects
+      .filter((project) => !project.serverId || project.serverId === DEFAULT_SERVER_ID)
       .map((project) => normalizeDirectoryPath(project.path))
       .filter((path): path is string => Boolean(path))
   ), [projects]);
@@ -306,7 +308,7 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
         value: `browse:${entry.path}`,
         name: entry.name,
         path: entry.path,
-        disabled: Boolean(normalized && addedProjectPaths.has(normalized)),
+        isAdded: Boolean(normalized && addedProjectPaths.has(normalized)),
       });
     }
     return nextRows;
@@ -337,9 +339,7 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
   const canAddProject = !isConfirming && !isOpeningFinder && !isAlreadyAdded && Boolean(targetPath);
   const canSubmitClone = canAddProject && cloneRemoteUrl.trim().length > 0;
   const highlightedRow = rows[highlightedIndex] ?? null;
-  const hasHighlightedBrowseItem = Boolean(
-    highlightedRow && (highlightedRow.type === 'up' || (highlightedRow.type === 'directory' && !highlightedRow.disabled))
-  );
+  const hasHighlightedBrowseItem = Boolean(highlightedRow);
   const submitModifierLabel = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform)
     ? '⌘'
     : 'Ctrl';
@@ -444,7 +444,6 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
       if (row.path) browseToDisplayPath(row.path);
       return;
     }
-    if (row.disabled) return;
     browseToEntry(row);
   }, [browseToDisplayPath, browseToEntry]);
 
@@ -605,7 +604,6 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
                     }
                   }}
                   type="button"
-                  disabled={row.type === 'directory' && row.disabled}
                   onMouseEnter={() => setHighlightedIndex(index)}
                   onMouseDown={(event) => event.preventDefault()}
                   onClick={() => executeRow(row)}
@@ -613,7 +611,6 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
                     'flex w-full cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50',
                     isActive && 'bg-interactive-selection text-interactive-selection-foreground',
                     !isActive && 'hover:bg-interactive-hover/50',
-                    row.type === 'directory' && row.disabled && 'cursor-not-allowed opacity-45 hover:bg-transparent'
                   )}
                 >
                   {row.type === 'up' ? (
@@ -624,7 +621,7 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
                   <span className="flex min-w-0 flex-1 items-center gap-1.5">
                     <span className="truncate typography-ui-label text-foreground">{row.name}</span>
                   </span>
-                  {row.type === 'directory' && row.disabled ? (
+                  {row.type === 'directory' && row.isAdded ? (
                     <span className="rounded-full border border-border/60 px-2 py-0.5 typography-meta text-muted-foreground">
                       {t('directoryExplorerDialog.browse.addedBadge')}
                     </span>
@@ -707,7 +704,7 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         className="flex w-full max-w-xl flex-col gap-0 overflow-hidden p-0 sm:max-h-[80vh]"
-        onOpenAutoFocus={(event) => event.preventDefault()}
+        initialFocus={false}
       >
         <DialogHeader className="px-5 pb-2 pt-5">
           <div className="flex items-start justify-between gap-4">

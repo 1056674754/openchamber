@@ -267,7 +267,9 @@ export const usePermissionStore = create<PermissionStore>()(
 
                     const directoryList = Array.from(directories);
                     const pendingFromStores = collectPendingFromSyncStores();
-                    const pendingFromApi = await opencodeClient.listPendingPermissions({ directories: Array.from(directories) });
+                    const pendingFromApi = await opencodeClient
+                        .listPendingPermissions({ directories: Array.from(directories) })
+                        .catch(() => []);
                     const mergedPending = new Map<string, { id: string; sessionID: string }>();
 
                     for (const permission of pendingFromStores) {

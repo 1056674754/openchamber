@@ -761,6 +761,12 @@ html:not(.dark) .chat-scroll {
   }
 }
 
+@container commit-actions (max-width: 22rem) {
+  .commit-actions__label--push {
+    display: none;
+  }
+}
+
 @container commit-actions (max-width: 19rem) {
   .commit-actions__label {
     display: none;
@@ -857,7 +863,7 @@ html:not(.dark) .chat-scroll {
 
 /* Reasoning markdown renders at meta size, dimmed. */
 .markdown-content.markdown-reasoning {
-  font-size: var(--text-meta);
+  font-size: var(--text-markdown);
   color: var(--surface-muted-foreground);
   --markdown-heading1: inherit;
   --markdown-heading2: inherit;

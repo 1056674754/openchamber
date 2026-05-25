@@ -10,8 +10,9 @@ import { useSelectionStore } from '@/sync/selection-store';
 import { useInputStore } from '@/sync/input-store';
 import type { AttachedFile } from '@/stores/types/sessionTypes';
 import * as sessionActions from '@/sync/session-actions';
-import { useUserMessageHistory } from '@/sync/sync-context';
+import { useDirectorySync, useSessionMessages, useSessionRevertMessageID, useUserMessageHistory } from '@/sync/sync-context';
 import { useInlineCommentDraftStore, type InlineCommentDraft } from '@/stores/useInlineCommentDraftStore';
+import { useSnippetsStore } from '@/stores/useSnippetsStore';
 import { appendInlineComments } from '@/lib/messages/inlineComments';
 import { renderMagicPrompt } from '@/lib/magicPrompts';
 import { AttachedFilesList, AttachedVSCodeFileChips, ActiveEditorFileSuggestion } from './FileAttachment';
@@ -19,6 +20,7 @@ import { QueuedMessageChips } from './QueuedMessageChips';
 import { FileMentionAutocomplete, type FileMentionHandle } from './FileMentionAutocomplete';
 import { CommandAutocomplete, type CommandAutocompleteHandle, type CommandInfo } from './CommandAutocomplete';
 import { SkillAutocomplete, type SkillAutocompleteHandle } from './SkillAutocomplete';
+import { SnippetAutocomplete, type SnippetAutocompleteHandle } from './SnippetAutocomplete';
 import { cn, formatDirectoryName, isMacOS } from '@/lib/utils';
 import { ModelControls } from './ModelControls';
 import { parseAgentMentions } from '@/lib/messages/agentMentions';
@@ -30,6 +32,7 @@ import { MobileModelButton } from './MobileModelButton';
 import { MobileSessionStatusBar } from './MobileSessionStatusBar';
 import { useCurrentSessionActivity } from '@/hooks/useSessionActivity';
 import { toast } from '@/components/ui';
+import { Button } from '@/components/ui/button';
 // useMessageStore removed — messages now come from sync system
 import { isTauriShell, isVSCodeRuntime } from '@/lib/desktop';
 import { isIMECompositionEvent } from '@/lib/ime';
@@ -53,10 +56,12 @@ import { useProjectsStore } from '@/stores/useProjectsStore';
 import { PROJECT_COLOR_MAP, PROJECT_ICON_MAP, getProjectIconImageUrl } from '@/lib/projectMeta';
 import { useGitBranches, useGitStore, useIsGitRepo } from '@/stores/useGitStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
+import { useSkillsStore } from '@/stores/useSkillsStore';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { createWorktreeDraft } from '@/lib/worktreeSessionCreator';
 import { buildSessionTargetOptions } from '@/sync/session-worktree-contract';
 import { getWorktreesForProject } from '@/lib/worktrees/worktreeKeys';
+import { resolveProjectForSessionDirectory } from '@/lib/projectResolution';
 import { usePermissionStore } from '@/stores/permissionStore';
 import { extractGitChangedFiles } from './changedFiles';
 import { useI18n } from '@/lib/i18n';
@@ -64,11 +69,16 @@ import { fetchResponseStyleInstruction } from '@/lib/responseStyle';
 import { wrapSystemReminder } from '@/lib/systemReminder';
 import { eventMatchesShortcut, getEffectiveShortcutCombo, normalizeCombo } from '@/lib/shortcuts';
 import { getSyncMessages } from '@/sync/sync-refs';
+import { isSyntheticPart } from '@/lib/messages/synthetic';
+import { serverRegistry } from '@/lib/opencode/server-registry';
+import type { Message, Part } from '@opencode-ai/sdk/v2/client';
 
 const MAX_VISIBLE_TEXTAREA_LINES = 8;
 const EMPTY_QUEUE: QueuedMessage[] = [];
 const FILE_MENTION_TOKEN = /^@[^\s]+$/;
+const INLINE_SKILL_TOKEN_PATTERN = /(^|\s)\/([a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?)/g;
 const CHAT_DRAFT_PERSIST_DEBOUNCE_MS = 500;
+const COMPACT_CHAT_PLACEHOLDER_MAX_WIDTH = 560;
 const VS_CODE_DROP_DATA_TYPES = [
     'CodeFiles',
     'codefiles',
@@ -78,8 +88,48 @@ const VS_CODE_DROP_DATA_TYPES = [
     'text/plain',
 ];
 
+const collectInlineSkillMentions = (text: string, skillNames: Set<string>): string[] => {
+    const mentions: string[] = [];
+    INLINE_SKILL_TOKEN_PATTERN.lastIndex = 0;
+    let match: RegExpExecArray | null;
+    while ((match = INLINE_SKILL_TOKEN_PATTERN.exec(text)) !== null) {
+        const name = match[2] || '';
+        if (!skillNames.has(name) || mentions.includes(name)) {
+            continue;
+        }
+        mentions.push(name);
+    }
+    return mentions;
+};
+
+const buildSkillMentionInstruction = (skillNames: string[]): string | null => {
+    if (skillNames.length === 0) return null;
+    const formatted = skillNames.map((name) => `/${name}`).join(', ');
+    return `The user explicitly mentioned these skills in their message: ${formatted}. Use the corresponding skill tool when it is relevant to accomplishing the user's request.`;
+};
+
 const hasUserMessages = (sessionId: string, directory?: string) => {
     return getSyncMessages(sessionId, directory).some((message) => message.role === 'user');
+};
+
+const getRevertedPreview = (parts: Part[], fallback: string): string => {
+    const text = parts
+        .filter((part) => part.type === 'text' && !isSyntheticPart(part))
+        .map((part) => {
+            const record = part as Record<string, unknown>;
+            return typeof record.text === 'string'
+                ? record.text
+                : typeof record.content === 'string'
+                    ? record.content
+                    : '';
+        })
+        .join('\n')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+    if (text) return text;
+    const filePart = parts.find((part) => part.type === 'file') as (Part & { filename?: string }) | undefined;
+    return filePart?.filename ? `[${filePart.filename}]` : fallback;
 };
 
 const FILE_URI_PREFIX = 'file://';
@@ -228,6 +278,140 @@ const MemoBrowserVoiceButton = React.memo(BrowserVoiceButton);
 const MemoMobileAgentButton = React.memo(MobileAgentButton);
 const MemoMobileModelButton = React.memo(MobileModelButton);
 const MemoStatusRow = React.memo(StatusRow);
+
+type RevertedMessageDockProps = {
+    sessionId: string | null;
+    directory?: string;
+};
+
+const RevertedMessageDock: React.FC<RevertedMessageDockProps> = React.memo(({ sessionId, directory }) => {
+    const { t } = useI18n();
+    const revertToMessage = useSessionUIStore((s) => s.revertToMessage);
+    const forkFromMessage = useSessionUIStore((s) => s.forkFromMessage);
+    const handleSlashRedo = useSessionUIStore((s) => s.handleSlashRedo);
+    const [restoringId, setRestoringId] = React.useState<string | null>(null);
+    const [forkingId, setForkingId] = React.useState<string | null>(null);
+    const [collapsed, setCollapsed] = React.useState(true);
+    const serverId = sessionId ? serverRegistry.getServerForSession(sessionId) ?? undefined : undefined;
+    const revertMessageID = useSessionRevertMessageID(sessionId ?? '', directory);
+    const sessionMessages = useSessionMessages(sessionId ?? '', directory);
+    const partsByMessage = useDirectorySync(
+        React.useCallback((state) => state.part, []),
+        directory,
+        serverId,
+        sessionId ?? undefined,
+    );
+
+    const userMessages = React.useMemo(
+        () => sessionMessages.filter((message): message is Message & { role: 'user' } => message.role === 'user'),
+        [sessionMessages],
+    );
+    const noTextContent = t('chat.revertPopover.noTextContent');
+    const items = React.useMemo(() => {
+        if (!revertMessageID) return [];
+        return userMessages
+            .filter((message) => message.id >= revertMessageID)
+            .map((message) => ({
+                id: message.id,
+                text: getRevertedPreview(partsByMessage[message.id] ?? [], noTextContent),
+            }));
+    }, [noTextContent, partsByMessage, revertMessageID, userMessages]);
+    const firstRevertedMessageId = items[0]?.id;
+
+    React.useEffect(() => {
+        setCollapsed(true);
+    }, [revertMessageID, firstRevertedMessageId]);
+
+    const handleRestore = React.useCallback(async (messageId: string) => {
+        if (!sessionId || restoringId) return;
+        setRestoringId(messageId);
+        try {
+            const nextMessage = userMessages.find((message) => message.id > messageId);
+            if (nextMessage) {
+                await revertToMessage(sessionId, nextMessage.id, { skipRedoPush: true });
+            } else {
+                await handleSlashRedo(sessionId, { fullUnrevert: true });
+            }
+        } finally {
+            setRestoringId(null);
+        }
+    }, [handleSlashRedo, restoringId, revertToMessage, sessionId, userMessages]);
+
+    const handleFork = React.useCallback(async (messageId: string) => {
+        if (!sessionId || forkingId) return;
+        setForkingId(messageId);
+        try {
+            await forkFromMessage(sessionId, messageId);
+        } finally {
+            setForkingId(null);
+        }
+    }, [forkFromMessage, forkingId, sessionId]);
+
+    if (!sessionId || items.length === 0) return null;
+
+    return (
+        <div className="pb-2 w-full px-1">
+            <div className="rounded-xl border border-border/60 bg-[var(--surface-elevated)] text-[var(--surface-elevated-foreground)] shadow-sm overflow-hidden">
+                <button
+                    type="button"
+                    className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-[var(--interactive-hover)] transition-colors"
+                    onClick={() => setCollapsed((value) => !value)}
+                    aria-expanded={!collapsed}
+                >
+                    <span className="typography-ui-label font-medium text-foreground flex-shrink-0">
+                        {t('chat.revertPopover.title')} ({items.length})
+                    </span>
+                    <Icon
+                        name="arrow-down-s"
+                        className={cn('ml-auto h-4 w-4 text-muted-foreground transition-transform', !collapsed && 'rotate-180')}
+                        aria-hidden="true"
+                    />
+                </button>
+                {!collapsed && (
+                    <div className="px-3 pb-3 flex flex-col gap-1.5 max-h-[10.5rem] overflow-y-auto">
+                        {items.map((item) => (
+                            <div key={item.id} className="flex min-w-0 items-center gap-2 py-1">
+                                <span className="min-w-0 flex-1 truncate typography-ui-label text-foreground">
+                                    {item.text}
+                                </span>
+                                <Button
+                                    type="button"
+                                    variant="secondary"
+                                    size="xs"
+                                    disabled={Boolean(restoringId || forkingId)}
+                                    onClick={() => { void handleFork(item.id); }}
+                                >
+                                    {forkingId === item.id ? (
+                                        <Icon name="loader-4" className="h-3 w-3 animate-spin" aria-hidden="true" />
+                                    ) : (
+                                        <Icon name="git-branch" className="h-3 w-3" aria-hidden="true" />
+                                    )}
+                                    {t('chat.revertPopover.fork')}
+                                </Button>
+                                <Button
+                                    type="button"
+                                    variant="secondary"
+                                    size="xs"
+                                    disabled={Boolean(restoringId || forkingId)}
+                                    onClick={() => { void handleRestore(item.id); }}
+                                >
+                                    {restoringId === item.id ? (
+                                        <Icon name="loader-4" className="h-3 w-3 animate-spin" aria-hidden="true" />
+                                    ) : (
+                                        <Icon name="arrow-go-forward" className="h-3 w-3" aria-hidden="true" />
+                                    )}
+                                    {t('chat.revertPopover.restore')}
+                                </Button>
+                            </div>
+                        ))}
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+});
+
+RevertedMessageDock.displayName = 'RevertedMessageDock';
 
 type ComposerAttachmentControlsProps = {
     isMobile: boolean;
@@ -796,6 +980,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const [autocompleteTab, setAutocompleteTab] = React.useState<'commands' | 'agents' | 'files'>('commands');
     const [showSkillAutocomplete, setShowSkillAutocomplete] = React.useState(false);
     const [skillQuery, setSkillQuery] = React.useState('');
+    const [showSnippetAutocomplete, setShowSnippetAutocomplete] = React.useState(false);
+    const [snippetQuery, setSnippetQuery] = React.useState('');
     const [textareaSize, setTextareaSize] = React.useState<{ height: number; maxHeight: number } | null>(null);
     const [mobileControlsPanel, setMobileControlsPanel] = React.useState<MobileControlsPanel>(null);
     // Message history navigation state (up/down arrow to recall previous messages)
@@ -814,6 +1000,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const mentionRef = React.useRef<FileMentionHandle>(null);
     const commandRef = React.useRef<CommandAutocompleteHandle>(null);
     const skillRef = React.useRef<SkillAutocompleteHandle>(null);
+    const snippetRef = React.useRef<SnippetAutocompleteHandle>(null);
     // Ref to track current message value without triggering re-renders in effects
     const messageRef = React.useRef(message);
     const draftPersistTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -828,6 +1015,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     ).current;
     const currentSessionId = useSessionUIStore((s) => s.currentSessionId);
     const currentDirectory = useDirectoryStore((s) => s.currentDirectory);
+    const currentSessionDirectoryForSync = useSessionUIStore(
+        React.useCallback((s) => currentSessionId ? s.getDirectoryForSession(currentSessionId) : null, [currentSessionId]),
+    );
     const newSessionDraft = useSessionUIStore((s) => s.newSessionDraft);
     const newSessionDraftOpen = Boolean(newSessionDraft?.open);
     const setNewSessionDraftTarget = useSessionUIStore((s) => s.setNewSessionDraftTarget);
@@ -880,9 +1070,35 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const [showAbortStatus, setShowAbortStatus] = React.useState(false);
     const setSessionAutoAccept = usePermissionStore((state) => state.setSessionAutoAccept);
     const composerHighlightRef = React.useRef<HTMLDivElement | null>(null);
+    const [isNarrowComposer, setIsNarrowComposer] = React.useState(false);
 
     const isDesktopExpanded = isExpandedInput && !isMobile;
     const chatInputRadius = 'var(--radius-xl)';
+    const useCompactChatPlaceholder = isMobile || isNarrowComposer;
+
+    React.useEffect(() => {
+        const element = dropZoneRef.current;
+        if (!element) return;
+
+        const updateWidth = (width: number) => {
+            const next = width > 0 && width < COMPACT_CHAT_PLACEHOLDER_MAX_WIDTH;
+            setIsNarrowComposer((prev) => (prev === next ? prev : next));
+        };
+
+        updateWidth(element.clientWidth);
+
+        if (typeof ResizeObserver === 'undefined') {
+            const handleResize = () => updateWidth(element.clientWidth);
+            window.addEventListener('resize', handleResize);
+            return () => window.removeEventListener('resize', handleResize);
+        }
+
+        const observer = new ResizeObserver((entries) => {
+            updateWidth(entries[0]?.contentRect.width ?? element.clientWidth);
+        });
+        observer.observe(element);
+        return () => observer.disconnect();
+    }, []);
 
     const sendableAttachedFiles = attachedFiles;
 
@@ -1419,6 +1635,13 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         let primaryAttachments: AttachedFile[] = [];
         let agentMentionName: string | undefined;
         const additionalParts: Array<{ text: string; attachments?: AttachedFile[]; synthetic?: boolean }> = [];
+        const availableSkillNames = new Set(useSkillsStore.getState().skills.map((skill) => skill.name));
+        const mentionedSkillNames: string[] = [];
+        const addMentionedSkills = (text: string) => {
+            for (const name of collectInlineSkillMentions(text, availableSkillNames)) {
+                if (!mentionedSkillNames.includes(name)) mentionedSkillNames.push(name);
+            }
+        };
 
         // Consume any pending synthetic parts (from conflict resolution, etc.)
         const syntheticParts = consumePendingSyntheticParts();
@@ -1428,6 +1651,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             const queuedMsg = queuedMessages[i];
             const { sanitizedText, mention } = parseAgentMentions(queuedMsg.content, agents);
             const { sanitizedText: queuedText, attachments: mentionAttachments } = extractInlineFileMentions(sanitizedText);
+            addMentionedSkills(queuedText);
 
             // Use agent mention from first message that has one
             if (!agentMentionName && mention?.name) {
@@ -1457,6 +1681,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             const { sanitizedText, mention } = parseAgentMentions(messageToSend, agents);
             const { sanitizedText: messageText, attachments: mentionAttachments } = extractInlineFileMentions(sanitizedText);
             const attachmentsToSend = sanitizeAttachmentsForSend(sendableAttachedFiles);
+            addMentionedSkills(messageText);
 
             if (!agentMentionName && mention?.name) {
                 agentMentionName = mention.name;
@@ -1522,7 +1747,15 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             });
         }
 
-        if (!primaryText && additionalParts.length === 0) return;
+        const skillMentionInstruction = buildSkillMentionInstruction(mentionedSkillNames);
+        if (skillMentionInstruction) {
+            additionalParts.push({
+                text: skillMentionInstruction,
+                synthetic: true,
+            });
+        }
+
+        if (!primaryText && primaryAttachments.length === 0 && additionalParts.length === 0) return;
 
         // Clear queue and input
         if (currentSessionId && hasQueuedMessages) {
@@ -1652,6 +1885,18 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                     synthetic: true,
                 });
             }
+        }
+
+        try {
+            const expandText = useSnippetsStore.getState().expandText;
+            primaryText = await expandText(primaryText, { directory: currentSessionDirectory });
+            for (const part of additionalParts) {
+                if (!part.synthetic) {
+                    part.text = await expandText(part.text, { directory: currentSessionDirectory });
+                }
+            }
+        } catch (error) {
+            console.warn('[ChatInput] Failed to expand snippets, sending original text:', error);
         }
 
         // Collect all attachments for error recovery
@@ -1833,6 +2078,14 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             }
         }
 
+        if (showSnippetAutocomplete && snippetRef.current) {
+            if (e.key === 'Enter' || e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'Escape' || e.key === 'Tab') {
+                e.preventDefault();
+                snippetRef.current.handleKeyDown(e.key);
+                return;
+            }
+        }
+
         if (showFileMention && mentionRef.current) {
             if (e.key === 'Enter' || e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'Escape' || e.key === 'Tab') {
                 e.preventDefault();
@@ -1856,7 +2109,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                 ? 1
                 : 0;
 
-        if (cycleAgentDirection !== 0 && !showCommandAutocomplete && !showSkillAutocomplete && !showFileMention) {
+        if (cycleAgentDirection !== 0 && !showCommandAutocomplete && !showSkillAutocomplete && !showSnippetAutocomplete && !showFileMention) {
             e.preventDefault();
             e.stopPropagation();
             handleCycleAgent(cycleAgentDirection);
@@ -1866,7 +2119,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         // Handle ArrowUp/ArrowDown for message history navigation
         // ArrowUp: only when cursor at start (position 0) or input is empty
         // ArrowDown: also works when cursor at end (to cycle forward through history)
-        const isAnyAutocompleteOpen = showCommandAutocomplete || showSkillAutocomplete || showFileMention;
+        const isAnyAutocompleteOpen = showCommandAutocomplete || showSkillAutocomplete || showSnippetAutocomplete || showFileMention;
         const cursorAtStart = textareaRef.current?.selectionStart === 0 && textareaRef.current?.selectionEnd === 0;
         const cursorAtEnd = textareaRef.current?.selectionStart === message.length && textareaRef.current?.selectionEnd === message.length;
         const canNavigateHistoryUp = !isAnyAutocompleteOpen && (message.length === 0 || cursorAtStart);
@@ -1994,7 +2247,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             return;
         }
 
-        if (!showCommandAutocomplete && !showSkillAutocomplete && !showFileMention) {
+        if (!showCommandAutocomplete && !showSkillAutocomplete && !showSnippetAutocomplete && !showFileMention) {
             setAutocompleteOverlayPosition(null);
             return;
         }
@@ -2019,7 +2272,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         const spaceBelow = containerRect.height - caretY - popupMargin;
         const place: 'above' | 'below' = spaceBelow >= estimatedPopupHeight || spaceBelow >= spaceAbove ? 'below' : 'above';
 
-        const desiredWidth = showFileMention ? 520 : showCommandAutocomplete ? 450 : 360;
+        const desiredWidth = showFileMention ? 520 : (showCommandAutocomplete || showSnippetAutocomplete) ? 450 : 360;
         const clampedLeft = Math.max(
             popupMargin,
             Math.min(caretX - 24, containerRect.width - desiredWidth - popupMargin)
@@ -2039,6 +2292,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         message.length,
         showCommandAutocomplete,
         showFileMention,
+        showSnippetAutocomplete,
         showSkillAutocomplete,
     ]);
 
@@ -2049,6 +2303,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         message,
         showCommandAutocomplete,
         showSkillAutocomplete,
+        showSnippetAutocomplete,
         showFileMention,
         isDesktopExpanded,
     ]);
@@ -2156,6 +2411,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             setShowCommandAutocomplete(false);
             setShowFileMention(false);
             setShowSkillAutocomplete(false);
+            setShowSnippetAutocomplete(false);
             return;
         }
 
@@ -2174,6 +2430,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                 setShowCommandAutocomplete(true);
                 setShowFileMention(false);
                 setShowSkillAutocomplete(false);
+                setShowSnippetAutocomplete(false);
                 return;
             }
         }
@@ -2193,12 +2450,29 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                 setSkillQuery(textAfterSlash);
                 setShowSkillAutocomplete(true);
                 setShowFileMention(false);
+                setShowSnippetAutocomplete(false);
                 return;
             }
         }
 
         setShowSkillAutocomplete(false);
         setSkillQuery('');
+
+        const lastHashSymbol = textBeforeCursor.lastIndexOf('#');
+        if (lastHashSymbol !== -1) {
+            const charBefore = lastHashSymbol > 0 ? textBeforeCursor[lastHashSymbol - 1] : null;
+            const textAfterHash = textBeforeCursor.substring(lastHashSymbol + 1);
+            const isWordBoundary = !charBefore || /\s/.test(charBefore);
+            if (isWordBoundary && !textAfterHash.includes(' ') && !textAfterHash.includes('\n')) {
+                setSnippetQuery(textAfterHash);
+                setShowSnippetAutocomplete(true);
+                setShowFileMention(false);
+                return;
+            }
+        }
+
+        setShowSnippetAutocomplete(false);
+        setSnippetQuery('');
 
         const lastAtSymbol = textBeforeCursor.lastIndexOf('@');
         if (lastAtSymbol !== -1) {
@@ -2272,6 +2546,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             applyAutocompletePrefix('@');
         }
         setShowSkillAutocomplete(false);
+        setShowSnippetAutocomplete(false);
         setShowCommandAutocomplete(tab === 'commands');
         setShowFileMention(tab === 'agents' || tab === 'files');
     }, [applyAutocompletePrefix, isMobile, message, setAutocompleteTab, setCommandQuery, setMentionQuery, setShowCommandAutocomplete, setShowFileMention, setShowSkillAutocomplete]);
@@ -2300,6 +2575,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         setShowCommandAutocomplete(true);
         setShowFileMention(false);
         setShowSkillAutocomplete(false);
+        setShowSnippetAutocomplete(false);
     }, [applyAutocompletePrefix, isMobile, setAutocompleteTab, setCommandQuery, setShowCommandAutocomplete, setShowFileMention, setShowSkillAutocomplete]);
 
     const insertTextAtSelection = React.useCallback((text: string) => {
@@ -2388,6 +2664,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             adjustTextareaHeight();
             setShowCommandAutocomplete(false);
             setShowSkillAutocomplete(false);
+            setShowSnippetAutocomplete(false);
             setShowFileMention(false);
             requestAnimationFrame(() => {
                 if (textareaRef.current) {
@@ -2499,6 +2776,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 
         setShowFileMention(false);
         setMentionQuery('');
+        setShowSnippetAutocomplete(false);
+        setSnippetQuery('');
 
         textareaRef.current?.focus();
     };
@@ -2545,6 +2824,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 
         setShowFileMention(false);
         setMentionQuery('');
+        setShowSnippetAutocomplete(false);
+        setSnippetQuery('');
 
         textareaRef.current?.focus();
     };
@@ -2575,6 +2856,36 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 
         setShowSkillAutocomplete(false);
         setSkillQuery('');
+        setShowSnippetAutocomplete(false);
+        setSnippetQuery('');
+
+        textareaRef.current?.focus();
+    };
+
+    const handleSnippetSelect = (_snippet: unknown, trigger: string) => {
+        const textarea = textareaRef.current;
+        const cursorPosition = textarea?.selectionStart ?? message.length;
+        const textBeforeCursor = message.substring(0, cursorPosition);
+        const lastHashSymbol = textBeforeCursor.lastIndexOf('#');
+        const startIndex = lastHashSymbol !== -1 ? lastHashSymbol : cursorPosition;
+        const newMessage =
+            message.substring(0, startIndex) +
+            `#${trigger} ` +
+            message.substring(cursorPosition);
+        const nextCursor = startIndex + trigger.length + 2;
+
+        setMessage(newMessage);
+        setShowSnippetAutocomplete(false);
+        setSnippetQuery('');
+
+        requestAnimationFrame(() => {
+            if (textareaRef.current) {
+                textareaRef.current.selectionStart = nextCursor;
+                textareaRef.current.selectionEnd = nextCursor;
+            }
+            adjustTextareaHeight();
+            updateAutocompleteState(newMessage, nextCursor);
+        });
 
         textareaRef.current?.focus();
     };
@@ -2590,6 +2901,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 
         setShowCommandAutocomplete(false);
         setCommandQuery('');
+        setShowSnippetAutocomplete(false);
+        setSnippetQuery('');
 
         const refocus = () => {
             if (textareaRef.current) {
@@ -3097,6 +3410,13 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             return explicit;
         }
 
+        const draftDirectory = normalizePath(newSessionDraft?.bootstrapPendingDirectory ?? null)
+            ?? normalizePath(newSessionDraft?.directoryOverride ?? null);
+        const inferred = resolveProjectForSessionDirectory(projects, availableWorktreesByProject, draftDirectory);
+        if (inferred) {
+            return inferred;
+        }
+
         const active = activeProjectId
             ? projects.find((project) => project.id === activeProjectId) ?? null
             : null;
@@ -3105,7 +3425,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         }
 
         return projects[0] ?? null;
-    }, [activeProjectId, newSessionDraft?.preserveDirectoryOverride, newSessionDraft?.selectedProjectId, projects]);
+    }, [activeProjectId, availableWorktreesByProject, newSessionDraft?.bootstrapPendingDirectory, newSessionDraft?.directoryOverride, newSessionDraft?.preserveDirectoryOverride, newSessionDraft?.selectedProjectId, projects]);
 
     const selectedDraftProjectPath = React.useMemo(
         () => normalizePath(selectedDraftProject?.path ?? null),
@@ -3605,6 +3925,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                         </div>
                     </div>
                 )}
+                <RevertedMessageDock
+                    sessionId={currentSessionId}
+                    directory={currentSessionDirectoryForSync ?? currentDirectory}
+                />
                 <MemoStatusRow
                     showAbortStatus={showAbortStatus}
                     showAssistantStatus={false}
@@ -3770,6 +4094,25 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                         />
                     )}
 
+                    {showSnippetAutocomplete && (
+                        <SnippetAutocomplete
+                            ref={snippetRef}
+                            searchQuery={snippetQuery}
+                            onSnippetSelect={handleSnippetSelect}
+                            onClose={() => setShowSnippetAutocomplete(false)}
+                            style={isDesktopExpanded && autocompleteOverlayPosition
+                                ? {
+                                    left: `${autocompleteOverlayPosition.left}px`,
+                                    top: `${autocompleteOverlayPosition.top}px`,
+                                    bottom: 'auto',
+                                    width: `min(450px, calc(100% - ${autocompleteOverlayPosition.left + 8}px))`,
+                                    maxHeight: `${autocompleteOverlayPosition.maxHeight}px`,
+                                    transform: autocompleteOverlayPosition.place === 'above' ? 'translateY(-100%)' : undefined,
+                                }
+                                : undefined}
+                        />
+                    )}
+
                     {showFileMention && (
 
                         <FileMentionAutocomplete
@@ -3860,7 +4203,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                 placeholder={currentSessionId || newSessionDraftOpen
                                     ? inputMode === 'shell'
                                         ? t('chat.chatInput.placeholder.shell')
-                                        : t('chat.chatInput.placeholder.chat')
+                                        : t(useCompactChatPlaceholder ? 'chat.chatInput.placeholder.chatCompact' : 'chat.chatInput.placeholder.chat')
                                     : t('chat.chatInput.placeholder.selectSession')}
                                 disabled={!currentSessionId && !newSessionDraftOpen}
                                 autoCorrect={isMobile ? "on" : "off"}

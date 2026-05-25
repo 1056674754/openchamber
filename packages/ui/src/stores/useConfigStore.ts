@@ -16,6 +16,7 @@ import { streamDebugEnabled } from "@/stores/utils/streamDebug";
 import { parseModelIdentifier } from "@/lib/modelIdentifier";
 import { resolveApiUrl } from "@/lib/api/serverUrl";
 import { resolveSdkForDirectory, resolveApiUrl as resolveRemoteApiOrigin } from "@/sync/session-actions";
+import { DEFAULT_SERVER_ID, serverRegistry } from "@/lib/opencode/server-registry";
 
 const MODELS_DEV_API_URL = "https://models.dev/api.json";
 const MODELS_DEV_PROXY_URL = "/api/openchamber/models-metadata";
@@ -448,13 +449,79 @@ const probeOpenCodeHealth = async (timeoutMs = CONNECTION_PROBE_TIMEOUT_MS): Pro
 };
 
 const DIRECTORY_KEY_GLOBAL = "__global__";
+const DIRECTORY_SCOPE_PREFIX = "__server__";
+const DIRECTORY_SCOPE_SEPARATOR = "::";
 
-const toDirectoryKey = (directory: string | null | undefined): string => {
-    const trimmed = typeof directory === 'string' ? directory.trim() : '';
-    return trimmed.length > 0 ? trimmed : DIRECTORY_KEY_GLOBAL;
+const normalizeConfigServerId = (serverId: string | null | undefined): string => {
+    const trimmed = typeof serverId === 'string' ? serverId.trim() : '';
+    return trimmed.length > 0 ? trimmed : DEFAULT_SERVER_ID;
 };
 
-const fromDirectoryKey = (key: string): string | null => (key === DIRECTORY_KEY_GLOBAL ? null : key);
+const toDirectoryKey = (directory: string | null | undefined, serverId?: string | null): string => {
+    const trimmed = typeof directory === 'string' ? directory.trim() : '';
+    const directoryPart = trimmed.length > 0 ? trimmed : DIRECTORY_KEY_GLOBAL;
+    const normalizedServerId = normalizeConfigServerId(serverId);
+    if (normalizedServerId === DEFAULT_SERVER_ID) {
+        return directoryPart;
+    }
+    return `${DIRECTORY_SCOPE_PREFIX}${encodeURIComponent(normalizedServerId)}${DIRECTORY_SCOPE_SEPARATOR}${encodeURIComponent(directoryPart)}`;
+};
+
+const parseDirectoryKey = (key: string): { directory: string | null; serverId: string } => {
+    if (!key.startsWith(DIRECTORY_SCOPE_PREFIX)) {
+        return {
+            directory: key === DIRECTORY_KEY_GLOBAL ? null : key,
+            serverId: DEFAULT_SERVER_ID,
+        };
+    }
+
+    const scopedKey = key.slice(DIRECTORY_SCOPE_PREFIX.length);
+    const separatorIndex = scopedKey.indexOf(DIRECTORY_SCOPE_SEPARATOR);
+    if (separatorIndex < 0) {
+        return {
+            directory: key === DIRECTORY_KEY_GLOBAL ? null : key,
+            serverId: DEFAULT_SERVER_ID,
+        };
+    }
+
+    const rawServerId = scopedKey.slice(0, separatorIndex);
+    const rawDirectory = scopedKey.slice(separatorIndex + DIRECTORY_SCOPE_SEPARATOR.length);
+    const directoryPart = decodeURIComponent(rawDirectory);
+    return {
+        directory: directoryPart === DIRECTORY_KEY_GLOBAL ? null : directoryPart,
+        serverId: normalizeConfigServerId(decodeURIComponent(rawServerId)),
+    };
+};
+
+const fromDirectoryKey = (key: string): string | null => parseDirectoryKey(key).directory;
+const serverIdFromDirectoryKey = (key: string): string => parseDirectoryKey(key).serverId;
+
+const resolveConfigServerId = (
+    directory: string | null | undefined,
+    explicitServerId: string | null | undefined,
+    activeDirectoryKey: string,
+): string => {
+    if (explicitServerId) {
+        return normalizeConfigServerId(explicitServerId);
+    }
+
+    const activeScope = parseDirectoryKey(activeDirectoryKey);
+    const normalizedDirectory = typeof directory === 'string' && directory.trim().length > 0
+        ? directory.trim()
+        : null;
+    if (activeScope.directory === normalizedDirectory) {
+        return activeScope.serverId;
+    }
+
+    return DEFAULT_SERVER_ID;
+};
+
+const resolveConfigServerBaseUrl = (directory: string | null, serverId: string): string | undefined => {
+    if (serverId !== DEFAULT_SERVER_ID) {
+        return serverRegistry.get(serverId)?.config.baseUrl ?? (directory ? resolveRemoteApiOrigin(directory) : undefined);
+    }
+    return directory ? resolveRemoteApiOrigin(directory) : undefined;
+};
 
 const resolveInitialDirectoryKey = (): string => {
     if (typeof window === 'undefined') {
@@ -562,10 +629,10 @@ interface ConfigStore {
     setSummarizeCharacterThreshold: (threshold: number) => void;
     setSummarizeMaxLength: (maxLength: number) => void;
 
-    activateDirectory: (directory: string | null | undefined) => Promise<void>;
+    activateDirectory: (directory: string | null | undefined, options?: { serverId?: string | null }) => Promise<void>;
 
-    loadProviders: (options?: { directory?: string | null }) => Promise<void>;
-    loadAgents: (options?: { directory?: string | null; serverBaseUrl?: string }) => Promise<boolean>;
+    loadProviders: (options?: { directory?: string | null; serverId?: string | null }) => Promise<void>;
+    loadAgents: (options?: { directory?: string | null; serverBaseUrl?: string; serverId?: string | null }) => Promise<boolean>;
     invalidateModelMetadataCache: () => void;
     setProvider: (providerId: string) => void;
     setModel: (modelId: string) => void;
@@ -851,8 +918,9 @@ export const useConfigStore = create<ConfigStore>()(
                     }
                     return 500;
                 })(),
-                activateDirectory: async (directory) => {
-                    const directoryKey = toDirectoryKey(directory);
+                activateDirectory: async (directory, options) => {
+                    const serverId = normalizeConfigServerId(options?.serverId);
+                    const directoryKey = toDirectoryKey(directory, serverId);
 
                     set((state) => {
                         const snapshot = state.directoryScoped[directoryKey];
@@ -888,14 +956,16 @@ export const useConfigStore = create<ConfigStore>()(
                         return;
                     }
 
-                    await get().loadProviders({ directory: fromDirectoryKey(directoryKey) });
+                    await get().loadProviders({ directory: fromDirectoryKey(directoryKey), serverId });
                     const dir = fromDirectoryKey(directoryKey)
-                    const remoteBaseUrl = dir ? resolveRemoteApiOrigin(dir) : undefined
-                    await get().loadAgents({ directory: dir, serverBaseUrl: remoteBaseUrl });
+                    const remoteBaseUrl = resolveConfigServerBaseUrl(dir, serverId)
+                    await get().loadAgents({ directory: dir, serverBaseUrl: remoteBaseUrl, serverId });
                 },
 
                 loadProviders: async (options) => {
-                    const directoryKey = toDirectoryKey(options?.directory ?? fromDirectoryKey(get().activeDirectoryKey));
+                    const targetDirectory = options?.directory ?? fromDirectoryKey(get().activeDirectoryKey);
+                    const serverId = resolveConfigServerId(targetDirectory, options?.serverId, get().activeDirectoryKey);
+                    const directoryKey = toDirectoryKey(targetDirectory, serverId);
 
                     // Dedup: if a load is already in-flight for this directory, reuse it
                     const existing = _inFlightProviders.get(directoryKey);
@@ -914,7 +984,7 @@ export const useConfigStore = create<ConfigStore>()(
                                 (metadata) => set({ modelsMetadata: metadata }),
                             );
                             const targetDir = fromDirectoryKey(directoryKey)
-                            const targetSdk = resolveSdkForDirectory(targetDir ?? "")
+                            const targetSdk = resolveSdkForDirectory(targetDir ?? "", undefined, serverId)
                             const rawResult = await targetSdk.config.providers(
                                 targetDir ? { directory: targetDir } : undefined,
                             )
@@ -1266,7 +1336,9 @@ export const useConfigStore = create<ConfigStore>()(
                 },
 
                 loadAgents: async (options) => {
-                    const directoryKey = toDirectoryKey(options?.directory ?? fromDirectoryKey(get().activeDirectoryKey));
+                    const targetDirectory = options?.directory ?? fromDirectoryKey(get().activeDirectoryKey);
+                    const serverId = resolveConfigServerId(targetDirectory, options?.serverId, get().activeDirectoryKey);
+                    const directoryKey = toDirectoryKey(targetDirectory, serverId);
 
                     // Dedup: if a load is already in-flight for this directory, reuse it
                     const existing = _inFlightAgents.get(directoryKey);
@@ -1281,17 +1353,20 @@ export const useConfigStore = create<ConfigStore>()(
                         try {
                             // Fetch agents and OpenChamber settings in parallel
                             const targetDir = fromDirectoryKey(directoryKey)
-                            const targetSdk = resolveSdkForDirectory(targetDir ?? "")
+                            const targetSdk = resolveSdkForDirectory(targetDir ?? "", undefined, serverId)
+                            const serverBaseUrl = options?.serverBaseUrl ?? resolveConfigServerBaseUrl(targetDir, serverId)
                             const [rawAgents, openChamberDefaults] = await Promise.all([
                                 targetSdk.app.agents(
                                     targetDir ? { directory: targetDir } : undefined,
                                 ).then(r => r.data ?? []),
-                                fetchOpenChamberDefaults(options?.serverBaseUrl),
+                                fetchOpenChamberDefaults(serverBaseUrl),
                             ]);
 
                             if (!openChamberDefaults.defaultModel || !openChamberDefaults.defaultAgent) {
                                 try {
-                                    const configResult = await targetSdk.config.get();
+                                    const configResult = await targetSdk.config.get(
+                                        targetDir ? { directory: targetDir } : undefined,
+                                    );
                                     const config = configResult.data;
                                     if (config) {
                                         if (!openChamberDefaults.defaultModel && config.model) {
@@ -2244,12 +2319,16 @@ let unsubscribeConfigStoreDirectoryChanges: (() => void) | null = null;
 
 if (typeof window !== "undefined" && !unsubscribeConfigStoreDirectoryChanges) {
     unsubscribeConfigStoreDirectoryChanges = useDirectoryStore.subscribe((state, prevState) => {
-        const nextKey = toDirectoryKey(state.currentDirectory);
-        const prevKey = toDirectoryKey(prevState.currentDirectory);
+        const currentSessionId = useSessionUIStore.getState().currentSessionId;
+        const serverId = currentSessionId
+            ? serverRegistry.getServerForSession(currentSessionId)
+            : serverIdFromDirectoryKey(useConfigStore.getState().activeDirectoryKey);
+        const nextKey = toDirectoryKey(state.currentDirectory, serverId);
+        const prevKey = toDirectoryKey(prevState.currentDirectory, serverId);
         if (nextKey === prevKey) {
             return;
         }
 
-        void useConfigStore.getState().activateDirectory(state.currentDirectory);
+        void useConfigStore.getState().activateDirectory(state.currentDirectory, { serverId });
     });
 }

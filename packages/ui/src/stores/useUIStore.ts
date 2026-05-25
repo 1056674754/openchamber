@@ -104,13 +104,13 @@ const isLegacyDefaultTemplates = (value: unknown): boolean => {
   );
 };
 
-const CONTEXT_PANEL_DEFAULT_WIDTH = 600;
-const CONTEXT_PANEL_MIN_WIDTH = 360;
+const CONTEXT_PANEL_DEFAULT_WIDTH = 380;
+const CONTEXT_PANEL_MIN_WIDTH = 380;
 const CONTEXT_PANEL_MAX_WIDTH = 1400;
 const CONTEXT_PANEL_MAX_TABS = 12;
 const CONTEXT_PANEL_MAX_LABEL_LENGTH = 120;
-const LEFT_SIDEBAR_MIN_WIDTH = 300;
-const RIGHT_SIDEBAR_MIN_WIDTH = 400;
+const LEFT_SIDEBAR_MIN_WIDTH = 280;
+const RIGHT_SIDEBAR_MIN_WIDTH = 360;
 
 const normalizeDirectoryPath = (value: string): string => {
   if (!value) return '';
@@ -508,6 +508,8 @@ interface UIStore {
   hasManuallyResizedRightSidebar: boolean;
   rightSidebarTab: RightSidebarTab;
   contextPanelByDirectory: Record<string, ContextPanelDirectoryState>;
+  notesPanelHeight: number;
+  todoPanelHeight: number;
   isSessionSwitcherOpen: boolean;
   isSessionDropdownOpen: boolean;
   activeMainTab: MainTab;
@@ -537,6 +539,8 @@ interface UIStore {
   eventStreamStatus: EventStreamStatus;
   eventStreamHint: string | null;
   showReasoningTraces: boolean;
+  collapsibleThinkingBlocks: boolean;
+  groupReasoningBlocks: boolean;
   autoCollapseThinking: boolean;
   autoCollapseThinkingThreshold: number;
   chatRenderMode: ChatRenderMode;
@@ -616,7 +620,6 @@ interface UIStore {
   reportUsage: boolean;
   multiRunEnabled: boolean;
   shortcutOverrides: Record<string, ShortcutCombo>;
-  autoCollapseSidebarOnContextPanel: boolean;
 
   setTheme: (theme: 'light' | 'dark' | 'system') => void;
   toggleSidebar: () => void;
@@ -644,6 +647,8 @@ interface UIStore {
   setContextPanelWidth: (directory: string, width: number) => void;
   setContextPanelSplit: (directory: string, splitTabId: string | null) => void;
   setContextPanelSplitRatio: (directory: string, ratio: number) => void;
+  setNotesPanelHeight: (height: number) => void;
+  setTodoPanelHeight: (height: number) => void;
   setSessionSwitcherOpen: (open: boolean) => void;
   setSessionDropdownOpen: (open: boolean) => void;
   setActiveMainTab: (tab: MainTab) => void;
@@ -673,6 +678,7 @@ setSettingsRemoteInstancesSelectedId: (instanceId: string | null) => void;
   setSettingsSelectedServerId: (serverId: string | null) => void;
   setEventStreamStatus: (status: EventStreamStatus, hint?: string | null) => void;
   setShowReasoningTraces: (value: boolean) => void;
+  setCollapsibleThinkingBlocks: (value: boolean) => void;
   setAutoCollapseThinking: (value: boolean) => void;
   setAutoCollapseThinkingThreshold: (value: number) => void;
   setChatRenderMode: (value: ChatRenderMode) => void;
@@ -756,7 +762,6 @@ setSettingsRemoteInstancesSelectedId: (instanceId: string | null) => void;
   openMultiRunLauncherWithPrompt: (prompt: string) => void;
   setReportUsage: (value: boolean) => void;
   setMultiRunEnabled: (value: boolean) => void;
-  setAutoCollapseSidebarOnContextPanel: (value: boolean) => void;
   setShortcutOverride: (actionId: string, combo: ShortcutCombo) => void;
   clearShortcutOverride: (actionId: string) => void;
   resetAllShortcutOverrides: () => void;
@@ -779,6 +784,8 @@ export const useUIStore = create<UIStore>()(
         hasManuallyResizedRightSidebar: false,
         rightSidebarTab: 'git',
         contextPanelByDirectory: {},
+        notesPanelHeight: 112,
+        todoPanelHeight: 259,
         isSessionSwitcherOpen: false,
         isSessionDropdownOpen: false,
         activeMainTab: 'chat',
@@ -806,6 +813,8 @@ export const useUIStore = create<UIStore>()(
         eventStreamStatus: 'idle',
         eventStreamHint: null,
         showReasoningTraces: true,
+        collapsibleThinkingBlocks: true,
+        groupReasoningBlocks: true,
         autoCollapseThinking: true,
         autoCollapseThinkingThreshold: 200,
         chatRenderMode: 'live',
@@ -881,7 +890,6 @@ export const useUIStore = create<UIStore>()(
         reportUsage: true,
         multiRunEnabled: true,
         shortcutOverrides: {},
-        autoCollapseSidebarOnContextPanel: false,
 
         setTheme: (theme) => {
           set({ theme });
@@ -1310,11 +1318,25 @@ export const useUIStore = create<UIStore>()(
           });
         },
 
+        setNotesPanelHeight: (height) => {
+          set({ notesPanelHeight: height });
+        },
+
+        setTodoPanelHeight: (height) => {
+          set({ todoPanelHeight: height });
+        },
+
         setSessionSwitcherOpen: (open) => {
+          if (get().isSessionSwitcherOpen === open) {
+            return;
+          }
           set({ isSessionSwitcherOpen: open });
         },
 
         setSessionDropdownOpen: (open) => {
+          if (get().isSessionDropdownOpen === open) {
+            return;
+          }
           set({ isSessionDropdownOpen: open });
         },
 
@@ -1446,6 +1468,10 @@ export const useUIStore = create<UIStore>()(
 
         setShowReasoningTraces: (value) => {
           set({ showReasoningTraces: value });
+        },
+
+        setCollapsibleThinkingBlocks: (value) => {
+          set({ collapsibleThinkingBlocks: value });
         },
 
         setAutoCollapseThinking: (value) => {
@@ -1941,9 +1967,6 @@ export const useUIStore = create<UIStore>()(
         setMultiRunEnabled: (value) => {
           set({ multiRunEnabled: value });
         },
-        setAutoCollapseSidebarOnContextPanel: (value: boolean) => {
-          set({ autoCollapseSidebarOnContextPanel: value });
-        },
         viewPagerPage: 'center',
         setViewPagerPage: (page: 'left' | 'center' | 'right') => {
           set({ viewPagerPage: page });
@@ -1988,12 +2011,22 @@ export const useUIStore = create<UIStore>()(
       {
         name: 'ui-store',
         storage: createJSONStorage(() => getSafeStorage()),
-        version: 8,
+        version: 9,
         migrate: (persistedState, version) => {
           if (!persistedState || typeof persistedState !== 'object') {
             return persistedState;
           }
           const state = persistedState as Record<string, unknown>;
+
+          // v8 -> v9: initialize notes/todo panel height fields.
+          if (version < 9) {
+            if (typeof state.notesPanelHeight !== 'number' || !Number.isFinite(state.notesPanelHeight)) {
+              state.notesPanelHeight = 112;
+            }
+            if (typeof state.todoPanelHeight !== 'number' || !Number.isFinite(state.todoPanelHeight)) {
+              state.todoPanelHeight = 259;
+            }
+          }
 
           // v0 -> v1: reset legacy notification templates
           if (version < 1) {
@@ -2076,6 +2109,8 @@ export const useUIStore = create<UIStore>()(
           rightSidebarWidth: state.rightSidebarWidth,
           rightSidebarTab: state.rightSidebarTab,
           contextPanelByDirectory: state.contextPanelByDirectory,
+          notesPanelHeight: state.notesPanelHeight,
+          todoPanelHeight: state.todoPanelHeight,
           isSessionSwitcherOpen: state.isSessionSwitcherOpen,
           isSessionDropdownOpen: state.isSessionDropdownOpen,
           activeMainTab: state.activeMainTab,
@@ -2088,6 +2123,7 @@ export const useUIStore = create<UIStore>()(
           isSessionCreateDialogOpen: state.isSessionCreateDialogOpen,
           // Note: isSettingsDialogOpen intentionally NOT persisted
           showReasoningTraces: state.showReasoningTraces,
+          collapsibleThinkingBlocks: state.collapsibleThinkingBlocks,
           autoCollapseThinking: state.autoCollapseThinking,
           autoCollapseThinkingThreshold: state.autoCollapseThinkingThreshold,
           chatRenderMode: state.chatRenderMode,

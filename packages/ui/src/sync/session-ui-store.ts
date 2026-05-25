@@ -16,6 +16,7 @@ import { create } from "zustand"
 import type { Session, Part, Message, TextPart } from "@opencode-ai/sdk/v2/client"
 import type { AttachedFile, SessionContextUsage, SessionWorktreeAttachment } from "@/stores/types/sessionTypes"
 import type { WorktreeMetadata } from "@/types/worktree"
+import type { ProjectEntry } from "@/lib/api/types"
 import { opencodeClient } from "@/lib/opencode/client"
 import { useConfigStore } from "@/stores/useConfigStore"
 import { useProjectsStore } from "@/stores/useProjectsStore"
@@ -51,6 +52,7 @@ import {
   unshareSession as unshareSessionAction,
   optimisticSend,
   resolveSdkForDirectory,
+  refetchSessionMessages,
 } from "./session-actions"
 import { serverRegistry, DEFAULT_SERVER_ID } from "@/lib/opencode/server-registry"
 import { getSyncStoresForServer } from "./multi-server-registry"
@@ -99,7 +101,7 @@ function routeMessage(params: {
     const [head, ...tail] = params.content.split(" ")
     const cmdName = head.slice(1)
 
-    const dirState = getDirectoryState()
+    const dirState = getDirectoryState(sessionDirectory)
     const syncCommands = dirState?.command ?? []
     const storeCommands = useCommandsStore.getState().commands
 
@@ -275,10 +277,10 @@ export type SessionUIState = {
   updateSessionTitle: (sessionId: string, title: string) => Promise<void>
   shareSession: (sessionId: string) => Promise<Session | null>
   unshareSession: (sessionId: string) => Promise<Session | null>
-  revertToMessage: (sessionId: string, messageId: string) => Promise<void>
+  revertToMessage: (sessionId: string, messageId: string, options?: { skipRedoPush?: boolean }) => Promise<void>
   forkFromMessage: (sessionId: string, messageId: string) => Promise<void>
   handleSlashUndo: (sessionId: string) => Promise<void>
-  handleSlashRedo: (sessionId: string) => Promise<void>
+  handleSlashRedo: (sessionId: string, options?: { fullUnrevert?: boolean }) => Promise<void>
   createSessionFromAssistantMessage: (sourceMessageId: string) => Promise<void>
 
   // Data access helpers (read from sync)
@@ -340,6 +342,18 @@ const persistDraftTarget = (target: PersistedDraftTarget): void => {
 
 const resolveDraftProjectForDirectory = resolveProjectForSessionDirectory
 
+const normalizeProjectServerId = (serverId?: string | null): string =>
+  serverId && serverId !== DEFAULT_SERVER_ID ? serverId : DEFAULT_SERVER_ID
+
+const projectOwnsDirectory = (
+  project: ProjectEntry | null | undefined,
+  availableWorktreesByProject: Map<string, WorktreeMetadata[]>,
+  directory: string | null | undefined,
+): boolean => {
+  if (!project || !directory) return false
+  return resolveProjectForSessionDirectory([project], availableWorktreesByProject, directory)?.id === project.id
+}
+
 const getAttachmentForSession = (sessionId: string | null | undefined): SessionWorktreeAttachment | undefined => {
   if (!sessionId) return undefined
   return useSessionWorktreeStore.getState().getAttachment(sessionId)
@@ -378,8 +392,11 @@ const resolveSessionDirectory = (
   return resolveDirectoryKey(target)
 }
 
-const activateConfigForDirectory = async (directory: string | null | undefined): Promise<void> => {
-  await useConfigStore.getState().activateDirectory(normalizePath(directory))
+const activateConfigForDirectory = async (
+  directory: string | null | undefined,
+  serverId?: string | null,
+): Promise<void> => {
+  await useConfigStore.getState().activateDirectory(normalizePath(directory), { serverId })
 }
 
 const DEFAULT_DRAFT: NewSessionDraftState = {
@@ -440,10 +457,11 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
 
     const directoryState = useDirectoryStore.getState()
 
+    const resolvedServerId = options?.serverId ?? (id ? serverRegistry.getServerForSession(id) : undefined)
     const sessionDir = resolveSessionDirectory(
       id,
       (sid) => get().worktreeMetadata.get(sid),
-      options?.serverId,
+      resolvedServerId,
     )
     const resolvedDir = sessionDir ?? (directoryHint ? normalizePath(directoryHint) : null)
 
@@ -455,6 +473,9 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       }
       if (shouldSyncDirectory && resolvedDir) {
         opencodeClient.setDirectory(resolvedDir)
+      }
+      if (resolvedDir) {
+        void activateConfigForDirectory(resolvedDir, resolvedServerId)
       }
     } catch (e) {
       console.warn("Failed to set OpenCode directory for session switch:", e)
@@ -541,14 +562,11 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
 
     const selectedProject = (() => {
       if (isTempSession) return null
-      if (explicitProject || explicitDirectory !== null) {
-        return explicitProject ?? inferredProjectFromDir ?? fallbackProject
-      }
+      if (explicitProject) return explicitProject
+      if (explicitDirectory !== null) return inferredProjectFromDir
       if (currentDirectory) return currentDirProject ?? fallbackProject
       return persistedProjectByDir ?? persistedProjectById ?? fallbackProject
     })()
-
-    console.log("[openNewSessionDraft] explicitDir:", explicitDirectory, "inferredProject:", inferredProjectFromDir?.id, inferredProjectFromDir?.serverId, "selectedProject:", selectedProject?.id, selectedProject?.serverId, "selectedProject.path:", selectedProject?.path)
 
     const directory = isTempSession
       ? null
@@ -582,12 +600,16 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       error: null,
     })
 
+    // Clear composer attachments when opening a new session draft.
+    // Attachments restored by revert/fork must not bleed into the new draft.
+    useInputStore.getState().clearAttachedFiles()
+
     if (options?.initialPrompt) {
       useInputStore.getState().setPendingInputText(options.initialPrompt)
     }
 
     if (directory) {
-      void activateConfigForDirectory(directory)
+      void activateConfigForDirectory(directory, selectedProject?.serverId)
     }
   },
 
@@ -614,17 +636,22 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
 
   setNewSessionDraftTarget: (target) => {
     let nextDirectory: string | null = null
+    let nextServerId: string | null | undefined
     set((s) => {
       nextDirectory = normalizePath(target.directoryOverride ?? s.newSessionDraft.directoryOverride)
+      const nextProjectId = target.projectId ?? target.selectedProjectId ?? s.newSessionDraft.selectedProjectId
+      nextServerId = nextProjectId
+        ? useProjectsStore.getState().projects.find((project) => project.id === nextProjectId)?.serverId
+        : undefined
       return {
         newSessionDraft: {
           ...s.newSessionDraft,
-          selectedProjectId: target.projectId ?? target.selectedProjectId ?? s.newSessionDraft.selectedProjectId,
+          selectedProjectId: nextProjectId,
           directoryOverride: target.directoryOverride ?? s.newSessionDraft.directoryOverride,
         },
       }
     })
-    void activateConfigForDirectory(nextDirectory)
+    void activateConfigForDirectory(nextDirectory, nextServerId)
   },
 
   setDraftPreserveDirectoryOverride: (value) =>
@@ -735,14 +762,18 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
 
   overrideNewSessionDraftTarget: (options) => {
     let nextDirectory: string | null = null
+    let nextServerId: string | null | undefined
     set((s) => {
       const nextDraft = { ...s.newSessionDraft, ...options }
       nextDirectory = normalizePath(
         typeof nextDraft.directoryOverride === "string" ? nextDraft.directoryOverride : null,
       )
+      nextServerId = typeof nextDraft.selectedProjectId === "string"
+        ? useProjectsStore.getState().projects.find((project) => project.id === nextDraft.selectedProjectId)?.serverId
+        : undefined
       return { newSessionDraft: nextDraft }
     })
-    void activateConfigForDirectory(nextDirectory)
+    void activateConfigForDirectory(nextDirectory, nextServerId)
   },
 
   resolvePendingDraftWorktreeTarget: (requestId, directory, options) =>
@@ -807,7 +838,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       set({ pendingChangesBarDismissed: map });
     }
 
-    const draft = get().newSessionDraft
+    const draft = targetSessionId ? null : get().newSessionDraft
     const trimmedAgent = typeof agent === "string" && agent.trim().length > 0 ? agent.trim() : undefined
 
     // ---- New session from draft ----
@@ -875,8 +906,9 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
             get().initializeNewOpenChamberSession(serverSession.id, configState.agents ?? [])
             get().markSessionAsOpenChamberCreated(serverSession.id)
             get().closeNewSessionDraft()
-            get().setCurrentSession(serverSession.id, createdDirectory)
-            await activateConfigForDirectory(createdDirectory)
+            const createdServerId = serverRegistry.getServerForSession(serverSession.id)
+            get().setCurrentSession(serverSession.id, createdDirectory, { serverId: createdServerId })
+            await activateConfigForDirectory(createdDirectory, createdServerId)
 
             notifyMessageSent(serverSession.id, createdDirectory)
             markPendingUserSendAnimation(serverSession.id)
@@ -924,7 +956,8 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       }
 
       const draftSyntheticParts = draft.syntheticParts
-      await activateConfigForDirectory(created.directory ?? draftDirectoryOverride ?? null)
+      const createdServerId = serverRegistry.getServerForSession(created.id)
+      await activateConfigForDirectory(created.directory ?? draftDirectoryOverride ?? null, createdServerId)
 
       const configState = useConfigStore.getState()
       const draftAgentName = configState.currentAgentName
@@ -947,7 +980,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       const createdDirectory = normalizePath(created.directory ?? draftDirectoryOverride ?? null)
 
       get().closeNewSessionDraft()
-      get().setCurrentSession(created.id, createdDirectory)
+      get().setCurrentSession(created.id, createdDirectory, { serverId: createdServerId })
 
       if (draftTargetFolderId) {
         const scopeKey = created.directory || draftDirectoryOverride || null
@@ -1094,6 +1127,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         return null
       }
       const projects = useProjectsStore.getState().projects
+      const projectsState = useProjectsStore.getState()
       const directoryProject = resolveProjectForSessionDirectory(
         projects,
         get().availableWorktreesByProject,
@@ -1102,7 +1136,17 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       const selectedProject = draft.selectedProjectId
         ? projects.find((p) => p.id === draft.selectedProjectId)
         : null
-      const serverId = directoryProject?.serverId ?? selectedProject?.serverId ?? null
+      const activeProject = projectsState.activeProjectId
+        ? projects.find((p) => p.id === projectsState.activeProjectId)
+        : null
+      const activeDirectoryProject = projectOwnsDirectory(activeProject, get().availableWorktreesByProject, directoryOverride)
+        ? activeProject
+        : null
+      const selectedDirectoryProject = projectOwnsDirectory(selectedProject, get().availableWorktreesByProject, directoryOverride)
+        ? selectedProject
+        : null
+      const routingProject = activeDirectoryProject ?? selectedDirectoryProject ?? directoryProject ?? selectedProject ?? null
+      const serverId = normalizeProjectServerId(routingProject?.serverId)
       const session = await createSessionAction(title, directoryOverride, parentID ?? null, serverId)
       if (!session) return null
 
@@ -1168,6 +1212,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
   // revertToMessage — delegates to session-actions (single implementation)
   // ---------------------------------------------------------------------------
   revertToMessage: async (sessionId, messageId) => {
+    await refetchSessionMessages(sessionId)
     const { revertToMessage: revert } = await import("./session-actions")
     await revert(sessionId, messageId)
   },
@@ -1186,8 +1231,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     const revertToId = currentSession?.revert?.messageID
     let targetMessage: typeof messages[number] | undefined
     if (revertToId) {
-      const revertIndex = userMessages.findIndex((m) => m.id === revertToId)
-      targetMessage = userMessages[revertIndex + 1]
+      targetMessage = [...userMessages].reverse().find((m) => m.id < revertToId)
     } else {
       targetMessage = userMessages[userMessages.length - 1]
     }
@@ -1203,42 +1247,50 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     await get().revertToMessage(sessionId, targetMessage.id)
 
     const { toast } = await import("sonner")
-    toast.success(`Undid to: ${preview}`)
+    const { useI18nStore, formatMessage } = await import("@/lib/i18n/store")
+    const { dictionary } = useI18nStore.getState()
+    toast.success(formatMessage(dictionary, "chat.revert.toast.undo", { preview }))
   },
 
   // ---------------------------------------------------------------------------
   // handleSlashRedo — reads from sync
   // ---------------------------------------------------------------------------
-  handleSlashRedo: async (sessionId) => {
+  handleSlashRedo: async (sessionId, options) => {
+    if (options?.fullUnrevert) {
+      const { unrevertSession } = await import("./session-actions")
+      await unrevertSession(sessionId)
+      const { toast } = await import("sonner")
+      const { useI18nStore, formatMessage } = await import("@/lib/i18n/store")
+      const { dictionary } = useI18nStore.getState()
+      toast.success(formatMessage(dictionary, "chat.revert.toast.restored"))
+      return
+    }
+
     const sessions = getSyncSessions()
     const currentSession = sessions.find((s) => s.id === sessionId)
     const revertToId = currentSession?.revert?.messageID
     if (!revertToId) return
 
+    await refetchSessionMessages(sessionId)
     const messages = getSyncMessages(sessionId)
     const userMessages = messages.filter((m) => m.role === "user")
-    const revertIndex = userMessages.findIndex((m) => m.id === revertToId)
-    const targetMessage = userMessages[revertIndex - 1]
+    const targetMessage = userMessages.find((m) => m.id > revertToId)
 
     if (targetMessage) {
-      const targetParts = getSyncParts(targetMessage.id)
-      const textPart = targetParts.find((p: Part) => p.type === "text") as TextPart | undefined
-      const preview = textPart?.text
-        ? String(textPart.text).slice(0, 50) + (textPart.text.length > 50 ? "..." : "")
-        : "[No text]"
-
       await get().revertToMessage(sessionId, targetMessage.id)
-
       const { toast } = await import("sonner")
-      toast.success(`Redid to: ${preview}`)
-    } else {
-      // Full unrevert
-      const { unrevertSession } = await import("./session-actions")
-      await unrevertSession(sessionId)
-
-      const { toast } = await import("sonner")
-      toast.success("Restored all messages")
+      const { useI18nStore, formatMessage } = await import("@/lib/i18n/store")
+      const { dictionary } = useI18nStore.getState()
+      toast.success(formatMessage(dictionary, "chat.revert.toast.redo"))
+      return
     }
+
+    const { unrevertSession } = await import("./session-actions")
+    await unrevertSession(sessionId)
+    const { toast } = await import("sonner")
+    const { useI18nStore, formatMessage } = await import("@/lib/i18n/store")
+    const { dictionary } = useI18nStore.getState()
+    toast.success(formatMessage(dictionary, "chat.revert.toast.restored"))
   },
 
   // ---------------------------------------------------------------------------
@@ -1420,6 +1472,9 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
   // ---------------------------------------------------------------------------
   markSessionPlanAvailable: (sessionId) => {
     set((state) => {
+      if (state.sessionPlanAvailable.get(sessionId) === true) {
+        return state
+      }
       const next = new Map(state.sessionPlanAvailable)
       next.set(sessionId, true)
       return { sessionPlanAvailable: next }

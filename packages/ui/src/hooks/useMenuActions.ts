@@ -4,6 +4,8 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useUIStore } from '@/stores/useUIStore';
 import { useUpdateStore } from '@/stores/useUpdateStore';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
+import { useDirectoryStore } from '@/stores/useDirectoryStore';
+import { useProjectsStore } from '@/stores/useProjectsStore';
 import { sessionEvents } from '@/lib/sessionEvents';
 import { createWorktreeSession } from '@/lib/worktreeSessionCreator';
 import { showOpenCodeStatus } from '@/lib/openCodeStatus';
@@ -72,10 +74,11 @@ type MenuAction =
   | 'new-session'
   | 'new-worktree-session'
   | 'change-workspace'
-  | 'open-git-tab'
-  | 'open-diff-tab'
-  | 'open-files-tab'
-  | 'open-terminal-tab'
+  | 'toggle-right-sidebar'
+  | 'open-right-sidebar-git'
+  | 'open-right-sidebar-files'
+  | 'toggle-terminal'
+  | 'toggle-terminal-expanded'
   | 'copy'
   | 'theme-light'
   | 'theme-dark'
@@ -84,6 +87,53 @@ type MenuAction =
   | 'toggle-memory-debug'
   | 'help-dialog'
   | 'download-logs';
+
+const normalizeMenuDirectory = (value?: string | null): string => {
+  if (typeof value !== 'string') {
+    return '';
+  }
+
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return '';
+  }
+
+  const normalized = trimmed.replace(/\\/g, '/');
+  if (normalized === '/') {
+    return '/';
+  }
+
+  return normalized.replace(/\/+$/, '') || normalized;
+};
+
+const resolveMenuActionDirectory = (): string => {
+  const sessionState = useSessionUIStore.getState();
+  const currentSessionId = sessionState.currentSessionId;
+
+  if (currentSessionId) {
+    return normalizeMenuDirectory(sessionState.getDirectoryForSession(currentSessionId));
+  }
+
+  const draft = sessionState.newSessionDraft;
+  if (draft?.open) {
+    const draftDirectory = normalizeMenuDirectory(draft.bootstrapPendingDirectory || draft.directoryOverride);
+    if (draftDirectory) {
+      return draftDirectory;
+    }
+
+    const projectsState = useProjectsStore.getState();
+    const draftProjectId = draft.selectedProjectId || projectsState.activeProjectId;
+    const draftProject = draftProjectId
+      ? projectsState.projects.find((project) => project.id === draftProjectId)
+      : null;
+    const draftProjectPath = normalizeMenuDirectory(draftProject?.path);
+    if (draftProjectPath) {
+      return draftProjectPath;
+    }
+  }
+
+  return normalizeMenuDirectory(useDirectoryStore.getState().currentDirectory);
+};
 
 export const useMenuActions = (
   onToggleMemoryDebug?: () => void
@@ -97,6 +147,10 @@ export const useMenuActions = (
   const setActiveMainTab = useUIStore((s) => s.setActiveMainTab);
   const setSettingsDialogOpen = useUIStore((s) => s.setSettingsDialogOpen);
   const setAboutDialogOpen = useUIStore((s) => s.setAboutDialogOpen);
+  const toggleRightSidebar = useUIStore((s) => s.toggleRightSidebar);
+  const setRightSidebarOpen = useUIStore((s) => s.setRightSidebarOpen);
+  const setRightSidebarTab = useUIStore((s) => s.setRightSidebarTab);
+  const openContextTerminal = useUIStore((s) => s.openContextTerminal);
   const checkForUpdates = useUpdateStore((state) => state.checkForUpdates);
   const { setThemeMode } = useThemeSystem();
   const checkUpdatesInFlightRef = React.useRef(false);
@@ -165,25 +219,25 @@ export const useMenuActions = (
           handleChangeWorkspace();
           break;
 
-        case 'open-git-tab': {
-          const { activeMainTab } = useUIStore.getState();
-          setActiveMainTab(activeMainTab === 'git' ? 'chat' : 'git');
+        case 'toggle-right-sidebar':
+          toggleRightSidebar();
           break;
-        }
 
-        case 'open-diff-tab': {
-          const { activeMainTab } = useUIStore.getState();
-          setActiveMainTab(activeMainTab === 'diff' ? 'chat' : 'diff');
+        case 'open-right-sidebar-git':
+          setRightSidebarOpen(true);
+          setRightSidebarTab('git');
           break;
-        }
 
-        case 'open-files-tab': {
-          const { activeMainTab } = useUIStore.getState();
-          setActiveMainTab(activeMainTab === 'files' ? 'chat' : 'files');
+        case 'open-right-sidebar-files':
+          setRightSidebarOpen(true);
+          setRightSidebarTab('files');
           break;
-        }
 
-        case 'open-terminal-tab': {
+        case 'toggle-terminal':
+          openContextTerminal(resolveMenuActionDirectory());
+          break;
+
+        case 'toggle-terminal-expanded': {
           const { activeMainTab } = useUIStore.getState();
           setActiveMainTab(activeMainTab === 'terminal' ? 'chat' : 'terminal');
           break;
@@ -233,15 +287,19 @@ export const useMenuActions = (
     [
       handleChangeWorkspace,
       onToggleMemoryDebug,
+      openContextTerminal,
       openNewSessionDraft,
       setAboutDialogOpen,
       setActiveMainTab,
       setSessionSwitcherOpen,
       setCommandPaletteOpen,
+      setRightSidebarOpen,
+      setRightSidebarTab,
       setSettingsDialogOpen,
       setThemeMode,
       toggleCommandPalette,
       toggleHelpDialog,
+      toggleRightSidebar,
       toggleSidebar,
     ]
   );

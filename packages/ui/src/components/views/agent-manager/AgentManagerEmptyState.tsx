@@ -99,7 +99,7 @@ export const AgentManagerEmptyState: React.FC<AgentManagerEmptyStateProps> = ({
     if (activeProjectId) {
       const project = projects.find((p) => p.id === activeProjectId);
       if (project?.path) {
-        return { id: project.id, path: project.path };
+        return { id: project.id, path: project.path, serverId: project.serverId };
       }
     }
 
@@ -347,8 +347,7 @@ export const AgentManagerEmptyState: React.FC<AgentManagerEmptyStateProps> = ({
 
       await onCreateGroup?.({
         name: groupName.trim(),
-        prompt: prompt.trim(),
-        models,
+        groups: [{ prompt: prompt.trim(), models }],
         agent: selectedAgent || undefined,
         worktreeBaseBranch: baseBranch,
         files,

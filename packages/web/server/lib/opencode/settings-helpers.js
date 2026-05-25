@@ -46,16 +46,17 @@ export const createSettingsHelpers = (dependencies) => {
     return fallback;
   };
 
-  const normalizeMobileKeyboardMode = (value, fallback = 'native') => {
+  function normalizeMobileKeyboardMode(value, fallback) {
+    const fallbackValue = arguments.length >= 2 ? fallback : 'native';
     if (typeof value !== 'string') {
-      return fallback;
+      return fallbackValue;
     }
     const normalized = value.trim();
     if (MOBILE_KEYBOARD_MODE_VALUES.has(normalized)) {
       return normalized;
     }
-    return fallback;
-  };
+    return fallbackValue;
+  }
 
   const sanitizeSettingsUpdate = (payload) => {
     if (!payload || typeof payload !== 'object') {
@@ -170,6 +171,9 @@ export const createSettingsHelpers = (dependencies) => {
     }
     if (typeof candidate.showReasoningTraces === 'boolean') {
       result.showReasoningTraces = candidate.showReasoningTraces;
+    }
+    if (typeof candidate.collapsibleThinkingBlocks === 'boolean') {
+      result.collapsibleThinkingBlocks = candidate.collapsibleThinkingBlocks;
     }
     if (typeof candidate.showTextJustificationActivity === 'boolean') {
       result.showTextJustificationActivity = candidate.showTextJustificationActivity;
@@ -753,7 +757,13 @@ export const createSettingsHelpers = (dependencies) => {
           ? settings.showReasoningTraces
           : typeof sanitized.showReasoningTraces === 'boolean'
             ? sanitized.showReasoningTraces
-            : false
+            : false,
+      collapsibleThinkingBlocks:
+        typeof settings.collapsibleThinkingBlocks === 'boolean'
+          ? settings.collapsibleThinkingBlocks
+          : typeof sanitized.collapsibleThinkingBlocks === 'boolean'
+            ? sanitized.collapsibleThinkingBlocks
+            : true,
     };
   };
 

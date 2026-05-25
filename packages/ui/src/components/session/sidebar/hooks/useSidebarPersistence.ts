@@ -6,16 +6,27 @@ import { useProjectsStore } from '@/stores/useProjectsStore';
 type SafeStorageLike = {
   getItem: (key: string) => string | null;
   setItem: (key: string, value: string) => void;
+  removeItem?: (key: string) => void;
 };
 
 type Keys = {
   sessionExpanded: string;
+  sessionExpandedLegacy: string;
   projectCollapse: string;
   sessionPinned: string;
   groupOrder: string;
   projectActiveSession: string;
   groupCollapse: string;
 };
+
+const LEGACY_EXPANSION_CONTEXT_PREFIXES = [
+  'project:active:',
+  'project:archived:',
+  'recent:active:',
+  'recent:archived:',
+  'global-pinned:active:',
+  'global-pinned:archived:',
+];
 
 type Args = {
   isVSCode: boolean;
@@ -102,6 +113,35 @@ export const useSidebarPersistence = (args: Args) => {
         if (Array.isArray(parsed)) {
           setExpandedParents(new Set(parsed.filter((item) => typeof item === 'string')));
         }
+      } else {
+        const legacyParents = safeStorage.getItem(keys.sessionExpandedLegacy);
+        if (legacyParents) {
+          try {
+            const parsedLegacy = JSON.parse(legacyParents);
+            if (Array.isArray(parsedLegacy)) {
+              const migrated = new Set<string>();
+              parsedLegacy.forEach((item) => {
+                if (typeof item !== 'string' || item.length === 0) return;
+                LEGACY_EXPANSION_CONTEXT_PREFIXES.forEach((prefix) => migrated.add(`${prefix}${item}`));
+              });
+              if (migrated.size > 0) {
+                setExpandedParents(migrated);
+                try {
+                  safeStorage.setItem(keys.sessionExpanded, JSON.stringify(Array.from(migrated)));
+                } catch {
+                  // ignored
+                }
+              }
+            }
+          } catch {
+            // ignored
+          }
+          try {
+            safeStorage.removeItem?.(keys.sessionExpandedLegacy);
+          } catch {
+            // ignored
+          }
+        }
       }
       const storedProjects = safeStorage.getItem(keys.projectCollapse);
       if (storedProjects) {
@@ -113,7 +153,7 @@ export const useSidebarPersistence = (args: Args) => {
     } catch {
       // ignored
     }
-  }, [keys.projectCollapse, keys.sessionExpanded, safeStorage, setCollapsedProjects, setExpandedParents]);
+  }, [keys.projectCollapse, keys.sessionExpanded, keys.sessionExpandedLegacy, safeStorage, setCollapsedProjects, setExpandedParents]);
 
   React.useEffect(() => {
     if (!hasLoadedGlobalSessions) {

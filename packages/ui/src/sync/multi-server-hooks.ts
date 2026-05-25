@@ -1,7 +1,10 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef, useSyncExternalStore } from "react";
 import type { Session } from "@opencode-ai/sdk/v2";
 import type { SessionStatus } from "@opencode-ai/sdk/v2/client";
+import type { PermissionRequest } from "@/types/permission";
+import type { QuestionRequest } from "@/types/question";
 import { getAllSyncStores, subscribeSyncStoresRegistry } from "./multi-server-registry";
+import type { ChildStoreManager } from "./child-store";
 import { useSyncSystem } from "./sync-context";
 import { DEFAULT_SERVER_ID } from "@/lib/opencode/server-registry";
 import {
@@ -42,6 +45,122 @@ function collectExtraStatuses(): Record<string, SessionStatus> {
     }
   }
   return statuses;
+}
+
+type BlockingRequestKind = "permission" | "question";
+type BlockingRequest = PermissionRequest | QuestionRequest;
+
+function collectChildStoreManagers(defaultChildStores: ChildStoreManager): ChildStoreManager[] {
+  const managers: ChildStoreManager[] = [];
+  const seen = new Set<ChildStoreManager>();
+  const push = (manager: ChildStoreManager) => {
+    if (seen.has(manager)) return;
+    seen.add(manager);
+    managers.push(manager);
+  };
+
+  push(defaultChildStores);
+  for (const entry of getAllSyncStores()) {
+    push(entry.childStores);
+  }
+  return managers;
+}
+
+function collectBlockingRequests<T extends BlockingRequest>(
+  kind: BlockingRequestKind,
+  defaultChildStores: ChildStoreManager,
+  sessionIds: readonly string[],
+): T[] {
+  const requestedSessionIds = sessionIds.filter(Boolean);
+  if (requestedSessionIds.length === 0) return [];
+
+  const seen = new Set<string>();
+  const result: T[] = [];
+  for (const manager of collectChildStoreManagers(defaultChildStores)) {
+    for (const store of manager.children.values()) {
+      const state = store.getState();
+      const requestMap = kind === "permission" ? state.permission : state.question;
+      for (const sessionId of requestedSessionIds) {
+        const requests = requestMap[sessionId] as T[] | undefined;
+        if (!requests || requests.length === 0) continue;
+        for (const request of requests) {
+          if (!request?.id) continue;
+          const key = `${request.sessionID}:${request.id}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          result.push(request);
+        }
+      }
+    }
+  }
+  return result;
+}
+
+function blockingRequestSignature(requests: readonly BlockingRequest[]): string {
+  if (requests.length === 0) return "";
+  return requests
+    .map((request) => `${request.sessionID}:${request.id}`)
+    .sort()
+    .join("|");
+}
+
+function useAllServersBlockingRequests<T extends BlockingRequest>(
+  kind: BlockingRequestKind,
+  sessionIds: readonly string[],
+): T[] {
+  const { childStores } = useSyncSystem();
+  const cacheRef = useRef<{ signature: string; value: T[] } | null>(null);
+
+  const getSnapshot = useCallback(() => {
+    const value = collectBlockingRequests<T>(kind, childStores, sessionIds);
+    const signature = blockingRequestSignature(value);
+    if (cacheRef.current?.signature === signature) {
+      return cacheRef.current.value;
+    }
+    cacheRef.current = { signature, value };
+    return value;
+  }, [childStores, kind, sessionIds]);
+
+  const subscribe = useCallback((notify: () => void) => {
+    let storeUnsubs: (() => void)[] = [];
+
+    const syncStoreSubscriptions = () => {
+      for (const unsubscribe of storeUnsubs) unsubscribe();
+      storeUnsubs = [];
+      for (const manager of collectChildStoreManagers(childStores)) {
+        for (const store of manager.children.values()) {
+          storeUnsubs.push(store.subscribe(notify));
+        }
+      }
+    };
+
+    syncStoreSubscriptions();
+    const unsubscribeDefaultRegistry = childStores.subscribeRegistry(() => {
+      syncStoreSubscriptions();
+      notify();
+    });
+    const unsubscribeRemoteRegistry = subscribeSyncStoresRegistry(() => {
+      syncStoreSubscriptions();
+      notify();
+    });
+
+    return () => {
+      unsubscribeDefaultRegistry();
+      unsubscribeRemoteRegistry();
+      for (const unsubscribe of storeUnsubs) unsubscribe();
+      storeUnsubs = [];
+    };
+  }, [childStores]);
+
+  return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+}
+
+export function useAllServersSessionPermissions(sessionIds: readonly string[]): PermissionRequest[] {
+  return useAllServersBlockingRequests<PermissionRequest>("permission", sessionIds);
+}
+
+export function useAllServersSessionQuestions(sessionIds: readonly string[]): QuestionRequest[] {
+  return useAllServersBlockingRequests<QuestionRequest>("question", sessionIds);
 }
 
 export function useAllServersLiveSessions(): Session[] {

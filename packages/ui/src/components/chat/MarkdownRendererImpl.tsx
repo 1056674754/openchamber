@@ -17,7 +17,7 @@ import { Icon } from "@/components/icon/Icon";
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { useI18n } from '@/lib/i18n';
 
-import { isExternalHttpUrl, isLoopbackHttpUrl, openExternalUrl } from '@/lib/url';
+import { getExternalFaviconUrl, isExternalHttpUrl, isLoopbackHttpUrl, openExternalUrl } from '@/lib/url';
 import { useOptionalThemeSystem } from '@/contexts/useThemeSystem';
 import { getDefaultTheme } from '@/lib/theme/themes';
 import { generateSyntaxTheme } from '@/lib/theme/syntaxThemeGenerator';
@@ -30,6 +30,7 @@ import type { EditorAPI } from '@/lib/api/types';
 import { DEFAULT_SERVER_ID, serverRegistry } from '@/lib/opencode/server-registry';
 import { resolveApiUrl } from '@/lib/api/serverUrl';
 import { useProjectsStore } from '@/stores/useProjectsStore';
+import { isVSCodeRuntime } from '@/lib/desktop';
 
 const useCurrentMermaidTheme = () => {
   const themeSystem = useOptionalThemeSystem();
@@ -93,6 +94,29 @@ const useExternalLinkInteractions = ({
       container.removeEventListener('click', handleClick);
     };
   }, [containerRef, enabled]);
+};
+
+const ExternalLinkFavicon: React.FC<{ href: string }> = ({ href }) => {
+  const [failed, setFailed] = React.useState(false);
+  const faviconUrl = React.useMemo(() => getExternalFaviconUrl(href), [href]);
+
+  if (!faviconUrl || failed) {
+    return null;
+  }
+
+  return (
+    <span className="mr-1 inline-flex size-[18px] items-center justify-center rounded border border-[var(--border)] bg-[var(--interactive-hover)] align-middle">
+      <img
+        src={faviconUrl}
+        alt=""
+        aria-hidden="true"
+        loading="lazy"
+        decoding="async"
+        className="size-3.5 rounded-sm"
+        onError={() => setFailed(true)}
+      />
+    </span>
+  );
 };
 
 // Table utility functions
@@ -694,6 +718,8 @@ const normalizeCodeBlockText = (code: string, language: string): string => {
 };
 
 const CODE_HIGHLIGHT_SETTLE_MS = 300;
+const CODE_HIGHLIGHT_LINE_LIMIT = 1200;
+const VSCODE_CODE_HIGHLIGHT_LINE_LIMIT = 200;
 const CODE_SHARED_STYLE: React.CSSProperties = {
   margin: 0,
   background: 'transparent',
@@ -701,6 +727,23 @@ const CODE_SHARED_STYLE: React.CSSProperties = {
   fontSize: 'var(--text-code)',
   lineHeight: 'var(--markdown-code-block-line-height)',
 };
+
+const exceedsLineLimit = (value: string, limit: number): boolean => {
+  let lineCount = 1;
+  for (let index = 0; index < value.length; index += 1) {
+    if (value.charCodeAt(index) === 10) {
+      lineCount += 1;
+      if (lineCount > limit) {
+        return true;
+      }
+    }
+  }
+  return false;
+};
+
+const getCodeHighlightLineLimit = (): number => (
+  isVSCodeRuntime() ? VSCODE_CODE_HIGHLIGHT_LINE_LIMIT : CODE_HIGHLIGHT_LINE_LIMIT
+);
 
 const downloadTextFile = (content: string, filename: string, mimeType: string) => {
   if (typeof window === 'undefined') {
@@ -733,6 +776,7 @@ const MarkdownCodeBlock: React.FC<{
   const prevCodeRef = React.useRef<string>(code);
   const timerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const { isMobile, isTablet } = useDeviceInfo();
+  const skipHighlight = exceedsLineLimit(code, getCodeHighlightLineLimit());
 
   const canPreview = language === 'html' || language === 'htm';
 
@@ -832,7 +876,7 @@ const MarkdownCodeBlock: React.FC<{
         </div>
       ) : (
         <div className="px-3 py-2.5">
-          {highlight ? (
+          {highlight && !skipHighlight ? (
             <SyntaxHighlighter
               language={language}
               style={syntaxTheme}
@@ -938,15 +982,17 @@ const buildMarkdownComponents = ({
   },
   a({ href, children, ...props }) {
     const targetHref = href ?? '';
+    const isExternal = isExternalHttpUrl(targetHref);
     const isLoopback = onPreviewLoopback ? isLoopbackHttpUrl(targetHref) : false;
     return (
       <>
         <a
           {...props}
           href={href}
-          target={isExternalHttpUrl(targetHref) ? '_blank' : undefined}
-          rel={isExternalHttpUrl(targetHref) ? 'noopener noreferrer' : undefined}
+          target={isExternal ? '_blank' : undefined}
+          rel={isExternal ? 'noopener noreferrer' : undefined}
         >
+          {isExternal ? <ExternalLinkFavicon href={targetHref} /> : null}
           {children}
         </a>
         {isLoopback && onPreviewLoopback ? (
@@ -1001,6 +1047,19 @@ interface MarkdownRendererProps {
 
 const MERMAID_BLOCK_SELECTOR = '[data-markdown="mermaid-block"]';
 const FILE_LINK_SELECTOR = '[data-openchamber-file-link="true"]';
+const FILE_REFERENCE_STAT_CACHE_MAX = 1000;
+const VSCODE_FILE_REFERENCE_STAT_CACHE_MAX = 200;
+const FILE_REFERENCE_LINK_LIMIT = 200;
+const VSCODE_FILE_REFERENCE_LINK_LIMIT = 40;
+const FILE_REFERENCE_STAT_CACHE = new Map<string, Promise<boolean | null>>();
+
+const getFileReferenceStatCacheMax = (): number => (
+  isVSCodeRuntime() ? VSCODE_FILE_REFERENCE_STAT_CACHE_MAX : FILE_REFERENCE_STAT_CACHE_MAX
+);
+
+const getFileReferenceLinkLimit = (): number => (
+  isVSCodeRuntime() ? VSCODE_FILE_REFERENCE_LINK_LIMIT : FILE_REFERENCE_LINK_LIMIT
+);
 
 type ParsedFileReference = {
   path: string;
@@ -1324,6 +1383,45 @@ const getContextDirectory = (effectiveDirectory: string, resolvedPath: string): 
   return parent || normalizedPath;
 };
 
+const fileReferenceExists = (path: string, fileReferenceBaseUrl?: string): Promise<boolean | null> => {
+  const normalizedPath = normalizePath(path);
+  if (!normalizedPath) {
+    return Promise.resolve(false);
+  }
+
+  const cacheKey = `${fileReferenceBaseUrl ?? ''}\n${normalizedPath}`;
+  const cached = FILE_REFERENCE_STAT_CACHE.get(cacheKey);
+  if (cached) {
+    FILE_REFERENCE_STAT_CACHE.delete(cacheKey);
+    FILE_REFERENCE_STAT_CACHE.set(cacheKey, cached);
+    return cached;
+  }
+
+  const request = (async () => {
+    try {
+      const params = new URLSearchParams({
+        path: normalizedPath,
+        allowOutsideWorkspace: 'true',
+      });
+      const res = await fetch(`${resolveApiUrl('/api/fs/stat', fileReferenceBaseUrl)}?${params.toString()}`);
+      return res.ok;
+    } catch {
+      return null;
+    }
+  })();
+
+  const maxCacheEntries = getFileReferenceStatCacheMax();
+  while (FILE_REFERENCE_STAT_CACHE.size >= maxCacheEntries) {
+    const oldest = FILE_REFERENCE_STAT_CACHE.keys().next().value;
+    if (typeof oldest !== 'string') {
+      break;
+    }
+    FILE_REFERENCE_STAT_CACHE.delete(oldest);
+  }
+  FILE_REFERENCE_STAT_CACHE.set(cacheKey, request);
+  return request;
+};
+
 const useFileReferenceInteractions = ({
   containerRef,
   effectiveDirectory,
@@ -1352,12 +1450,20 @@ const useFileReferenceInteractions = ({
     if (!container) {
       return;
     }
+    const fileReferenceLinkLimit = getFileReferenceLinkLimit();
 
     const validationContext = `${fileReferenceBaseUrl ?? ''}|${effectiveDirectory}`;
     if (validationContextRef.current !== validationContext) {
       validatedPathsRef.current.clear();
       validationContextRef.current = validationContext;
     }
+
+    const removeMissingBadge = (candidate: HTMLElement) => {
+      const nextSibling = candidate.nextElementSibling;
+      if (nextSibling?.classList.contains('oc-file-missing-badge')) {
+        nextSibling.remove();
+      }
+    };
 
     const clearFileLinkAttributes = (candidate: HTMLElement) => {
       candidate.removeAttribute('data-openchamber-file-link');
@@ -1373,8 +1479,22 @@ const useFileReferenceInteractions = ({
       }
     };
 
+    const clearAnnotatedFileLinks = () => {
+      const annotated = container.querySelectorAll<HTMLElement>(FILE_LINK_SELECTOR);
+      for (const candidate of Array.from(annotated)) {
+        clearFileLinkAttributes(candidate);
+        removeMissingBadge(candidate);
+      }
+    };
+
+    if (!enabled) {
+      clearAnnotatedFileLinks();
+      return;
+    }
+
     const annotateFileLinks = () => {
       const candidates = container.querySelectorAll<HTMLElement>('[data-markdown="inline-code"], a');
+      let linkedCount = 0;
 
       for (const candidate of Array.from(candidates)) {
         const rawCandidate = extractPathCandidateFromElement(candidate);
@@ -1382,14 +1502,17 @@ const useFileReferenceInteractions = ({
         candidate.removeAttribute('data-openchamber-file-status');
         clearFileLinkAttributes(candidate);
 
-        if (!enabled || !resolved) {
-          const nextSibling = candidate.nextElementSibling;
-          if (nextSibling?.classList.contains('oc-file-missing-badge')) {
-            nextSibling.remove();
-          }
+        if (!resolved) {
+          removeMissingBadge(candidate);
           continue;
         }
 
+        if (linkedCount >= fileReferenceLinkLimit) {
+          removeMissingBadge(candidate);
+          continue;
+        }
+
+        linkedCount += 1;
         candidate.setAttribute('data-openchamber-file-link', 'true');
         candidate.setAttribute('data-openchamber-file-ref', rawCandidate);
         candidate.setAttribute('data-openchamber-file-path', resolved.resolvedPath);
@@ -1423,16 +1546,8 @@ const useFileReferenceInteractions = ({
       const note = tRef.current('chat.file.notFound');
       const results = await Promise.allSettled(
         Array.from(pathsToCheck.keys()).map(async (path) => {
-          try {
-            const params = new URLSearchParams({
-              path,
-              allowOutsideWorkspace: 'true',
-            });
-            const res = await fetch(`${resolveApiUrl('/api/fs/stat', fileReferenceBaseUrl)}?${params.toString()}`);
-            return { path, ok: res.ok };
-          } catch {
-            return { path, ok: null };
-          }
+          const ok = await fileReferenceExists(path, fileReferenceBaseUrl);
+          return { path, ok };
         })
       );
 
@@ -1452,10 +1567,7 @@ const useFileReferenceInteractions = ({
           if (!el.isConnected) continue;
           if (ok) {
             el.setAttribute('data-openchamber-file-status', 'valid');
-            const nextSibling = el.nextElementSibling;
-            if (nextSibling?.classList.contains('oc-file-missing-badge')) {
-              nextSibling.remove();
-            }
+            removeMissingBadge(el);
           } else {
             el.setAttribute('data-openchamber-file-status', 'missing');
             el.setAttribute('title', note);

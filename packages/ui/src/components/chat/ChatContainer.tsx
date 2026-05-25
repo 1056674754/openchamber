@@ -24,7 +24,6 @@ import type { QuestionRequest } from '@/types/question';
 import { cn } from '@/lib/utils';
 import {
     collectVisibleSessionIdsForBlockingRequests,
-    flattenBlockingRequests,
 } from './lib/blockingRequests';
 
 // New sync system imports
@@ -35,18 +34,22 @@ import {
     useSessionMessageRecords,
     useSessionMessagesRenderable,
     useSessions,
-    useDirectorySync,
+    useSyncDirectory,
     useSessionStatus,
 } from '@/sync/sync-context';
+import {
+    useAllServersLiveSessions,
+    useAllServersSessionPermissions,
+    useAllServersSessionQuestions,
+} from '@/sync/multi-server-hooks';
 import { useSync } from '@/sync/use-sync';
+import { getSessionPrefetch, subscribeSessionPrefetch } from '@/sync/session-prefetch-cache';
 import { usePlanDetection } from '@/hooks/usePlanDetection';
 import { getAllSyncSessions } from '@/sync/sync-refs';
 import { useI18n } from '@/lib/i18n';
 import { useCurrentSessionActivity } from '@/hooks/useSessionActivity';
 
 const EMPTY_MESSAGES: Array<{ info: Message; parts: Part[] }> = [];
-const EMPTY_PERMISSIONS: PermissionRequest[] = [];
-const EMPTY_QUESTIONS: QuestionRequest[] = [];
 const IDLE_SESSION_STATUS = { type: 'idle' as const };
 const CHAT_FORCE_SCROLL_BOTTOM_EVENT = 'openchamber:chat-force-scroll-bottom';
 const DEFAULT_RETRY_MESSAGE = 'Quota limit reached. Retrying automatically.';
@@ -343,6 +346,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
 
     // Sync actions
     const sync = useSync();
+    const syncDirectory = useSyncDirectory();
     const ensureSessionRenderable = React.useCallback(
         (sessionId: string) => sync.ensureSessionRenderable(sessionId),
         [sync],
@@ -380,36 +384,33 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
     // Messages from sync system
     const sessionMessageRecords = useSessionMessageRecords(currentSessionId ?? '');
     const sessionMessages = currentSessionId ? sessionMessageRecords : EMPTY_MESSAGES;
+    const sessionPrefetchDirectory = React.useMemo(() => {
+        if (!currentSessionId) return syncDirectory;
+        return useSessionUIStore.getState().getDirectoryForSession(currentSessionId) ?? syncDirectory;
+    }, [currentSessionId, syncDirectory]);
+    const sessionPrefetchInfo = React.useSyncExternalStore(
+        React.useCallback(
+            (notify) => currentSessionId
+                ? subscribeSessionPrefetch(sessionPrefetchDirectory, currentSessionId, notify)
+                : () => undefined,
+            [currentSessionId, sessionPrefetchDirectory],
+        ),
+        React.useCallback(
+            () => currentSessionId ? getSessionPrefetch(sessionPrefetchDirectory, currentSessionId) : undefined,
+            [currentSessionId, sessionPrefetchDirectory],
+        ),
+        React.useCallback(() => undefined, []),
+    );
 
     // Sessions from sync system
-    const sessions = useSessions();
+    const directorySessions = useSessions();
+    const sessions = useAllServersLiveSessions();
 
     // Plan detection - watches messages for plan creation and signals store
-    usePlanDetection(currentSessionId ?? '');
+    usePlanDetection(currentSessionId ?? '', sessionMessages);
 
     // Session status from sync system
     const sessionStatusForCurrent = useSessionStatus(currentSessionId ?? '') ?? IDLE_SESSION_STATUS;
-
-    // Permissions & questions from sync system
-    const allPermissions = useDirectorySync(
-        React.useCallback((s) => s.permission ?? {}, []),
-    );
-    const allQuestions = useDirectorySync(
-        React.useCallback((s) => s.question ?? {}, []),
-    );
-
-    // Convert Record → Map for blockingRequests helpers
-    const permissionsMap = React.useMemo(() => {
-        const m = new Map<string, PermissionRequest[]>();
-        for (const [k, v] of Object.entries(allPermissions)) m.set(k, v as PermissionRequest[]);
-        return m;
-    }, [allPermissions]);
-
-    const questionsMap = React.useMemo(() => {
-        const m = new Map<string, QuestionRequest[]>();
-        for (const [k, v] of Object.entries(allQuestions)) m.set(k, v as QuestionRequest[]);
-        return m;
-    }, [allQuestions]);
 
     const scopedSessionIds = React.useMemo(
         () => collectVisibleSessionIdsForBlockingRequests(
@@ -419,15 +420,8 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
         [sessions, currentSessionId],
     );
 
-    const sessionPermissions = React.useMemo(() => {
-        if (scopedSessionIds.length === 0) return EMPTY_PERMISSIONS;
-        return flattenBlockingRequests(permissionsMap, scopedSessionIds);
-    }, [permissionsMap, scopedSessionIds]);
-
-    const sessionQuestions = React.useMemo(() => {
-        if (scopedSessionIds.length === 0) return EMPTY_QUESTIONS;
-        return flattenBlockingRequests(questionsMap, scopedSessionIds);
-    }, [questionsMap, scopedSessionIds]);
+    const sessionPermissions = useAllServersSessionPermissions(scopedSessionIds);
+    const sessionQuestions = useAllServersSessionQuestions(scopedSessionIds);
     const { isWorking: sessionActivityWorking } = useCurrentSessionActivity();
     const sessionIsWorking = React.useMemo(() => {
         if (!currentSessionId || sessionPermissions.length > 0 || sessionQuestions.length > 0) {
@@ -481,12 +475,13 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
     // History metadata — use sync's hasMore/isLoading
     const historyMeta = React.useMemo(() => {
         if (!currentSessionId) return null;
+        const prefetchHasMore = Boolean(sessionPrefetchInfo?.cursor) && sessionPrefetchInfo?.complete !== true;
         return {
             limit: sessionMessages.length,
-            complete: !sync.hasMore(currentSessionId),
+            complete: !(sync.hasMore(currentSessionId) || prefetchHasMore),
             loading: sync.isLoading(currentSessionId),
         };
-    }, [currentSessionId, sessionMessages.length, sync]);
+    }, [currentSessionId, sessionMessages.length, sessionPrefetchInfo, sync]);
 
     const { isMobile } = useDeviceInfo();
     const draftOpen = Boolean(newSessionDraft?.open);
@@ -495,13 +490,15 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
 
     const parentSession = React.useMemo(() => {
         if (!currentSessionId) return null;
-        const current = sessions.find((session) => session.id === currentSessionId);
+        const current = directorySessions.find((session) => session.id === currentSessionId)
+            ?? sessions.find((session) => session.id === currentSessionId);
         const parentID = current?.parentID;
         if (!parentID) return null;
-        return sessions.find((session) => session.id === parentID)
+        return directorySessions.find((session) => session.id === parentID)
+            ?? sessions.find((session) => session.id === parentID)
             ?? getAllSyncSessions().find((session) => session.id === parentID)
             ?? null;
-    }, [currentSessionId, sessions]);
+    }, [currentSessionId, directorySessions, sessions]);
 
     const handleReturnToParentSession = React.useCallback(() => {
         if (!parentSession) return;
@@ -855,6 +852,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
 		<div className="relative flex flex-col h-full bg-background">
 			{returnToParentButton}
 			<ChatViewport
+				key={currentSessionId}
 				currentSessionId={currentSessionId}
                 isDesktopExpandedInput={isDesktopExpandedInput}
                 isMobile={isMobile}

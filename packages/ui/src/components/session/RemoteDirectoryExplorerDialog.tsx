@@ -1,7 +1,7 @@
 import React from 'react';
 import { serverRegistry } from '@/lib/opencode/server-registry';
 import { resolveInstanceLabel } from '@/lib/desktopSsh';
-import { registerRemoteInstanceProxy } from '@/lib/remote-instances/registry';
+import { getRemoteInstanceProxyBaseUrl, registerRemoteInstanceProxy } from '@/lib/remote-instances/registry';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useDesktopSshStore } from '@/stores/useDesktopSshStore';
 import { useShallow } from 'zustand/react/shallow';
@@ -25,8 +25,8 @@ type BrowseEntry = {
 };
 
 type BrowseRow =
-  | { type: 'up'; value: 'browse:up'; name: string; path: string | null; disabled?: false }
-  | { type: 'directory'; value: string; name: string; path: string; disabled: boolean };
+  | { type: 'up'; value: 'browse:up'; name: string; path: string | null }
+  | { type: 'directory'; value: string; name: string; path: string; isAdded: boolean };
 
 const isRootPath = (value: string): boolean => value === '/';
 
@@ -146,9 +146,19 @@ export const RemoteDirectoryExplorerDialog: React.FC<RemoteDirectoryExplorerDial
     () => (selectedServerId ? serverRegistry.get(selectedServerId) ?? null : null),
     [selectedServerId]
   );
+  const selectedInstance = React.useMemo(
+    () => (selectedServerId ? sshInstances.find((instance) => instance.id === selectedServerId) ?? null : null),
+    [selectedServerId, sshInstances]
+  );
+  const selectedServerLabel = React.useMemo(() => {
+    if (selectedInstance) return resolveInstanceLabel(selectedInstance);
+    return selectedServer?.config.label ?? selectedServerId ?? '';
+  }, [selectedInstance, selectedServer, selectedServerId]);
 
   const selectedStatus = selectedServerId ? sshStatuses[selectedServerId] : undefined;
-  const selectedFetchBaseUrl = selectedStatus?.phase === 'ready' ? selectedStatus.localUrl || '' : '';
+  const selectedFetchBaseUrl = selectedServerId && selectedStatus?.phase === 'ready' && selectedStatus.localUrl
+    ? getRemoteInstanceProxyBaseUrl(selectedServerId)
+    : '';
 
   const selectedInstanceReady = React.useMemo(() => {
     if (!selectedServerId) return false;
@@ -162,7 +172,12 @@ export const RemoteDirectoryExplorerDialog: React.FC<RemoteDirectoryExplorerDial
   );
 
   React.useEffect(() => {
-    if (!open || !selectedServer || !selectedFetchBaseUrl || !browseDirectoryDisplayPath) {
+    if (!open || !selectedServerId || !selectedFetchBaseUrl || !browseDirectoryDisplayPath) {
+      setEntries([]);
+      return;
+    }
+
+    if (browseDirectoryDisplayPath.startsWith('~/') && !remoteHome) {
       setEntries([]);
       return;
     }
@@ -202,7 +217,7 @@ export const RemoteDirectoryExplorerDialog: React.FC<RemoteDirectoryExplorerDial
           toast.error(
             t('remoteDirectoryExplorer.errorFetchListDetail', {
               path: absPath,
-              host: selectedServer.config.label,
+              host: selectedServerLabel,
               detail,
             }),
             { duration: 8000 },
@@ -216,7 +231,7 @@ export const RemoteDirectoryExplorerDialog: React.FC<RemoteDirectoryExplorerDial
     return () => {
       cancelled = true;
     };
-  }, [open, selectedServer, selectedFetchBaseUrl, browseDirectoryDisplayPath, remoteHome, t]);
+  }, [open, selectedServerId, selectedFetchBaseUrl, browseDirectoryDisplayPath, remoteHome, selectedServerLabel, t]);
 
   const filteredEntries = React.useMemo(() => {
     const lowerFilter = browseFilterQuery.toLowerCase();
@@ -235,7 +250,7 @@ export const RemoteDirectoryExplorerDialog: React.FC<RemoteDirectoryExplorerDial
         value: `browse:${entry.path}`,
         name: entry.name,
         path: entry.path,
-        disabled: Boolean(normalized && addedProjectPaths.has(normalized)),
+        isAdded: Boolean(normalized && addedProjectPaths.has(normalized)),
       });
     }
     return nextRows;
@@ -282,16 +297,11 @@ export const RemoteDirectoryExplorerDialog: React.FC<RemoteDirectoryExplorerDial
   }, [targetPath, selectedServerId, isConfirming, addedProjectPaths, ensureRemoteProject, t, handleClose]);
 
   React.useEffect(() => {
-    if (!open || !selectedServerId) return;
-    const status = sshStatuses[selectedServerId];
-    if (status?.phase !== 'ready' || !status.localUrl) return;
-
-    const server = serverRegistry.get(selectedServerId);
-    if (!server) return;
+    if (!open || !selectedServerId || !selectedFetchBaseUrl) return;
 
     setIsLoading(true);
     let cancelled = false;
-    fetch(resolveApiUrl('/api/fs/home', status.localUrl))
+    fetch(resolveApiUrl('/api/fs/home', selectedFetchBaseUrl))
       .then(async (res) => {
         if (!res.ok) {
           const body = await res.text().catch(() => '');
@@ -307,10 +317,10 @@ export const RemoteDirectoryExplorerDialog: React.FC<RemoteDirectoryExplorerDial
       })
       .catch((err: unknown) => {
         if (!cancelled) {
-          const detail = err instanceof Error ? `${err.message} (${status.localUrl})` : `${String(err)} (${status.localUrl})`;
+          const detail = err instanceof Error ? `${err.message} (${selectedFetchBaseUrl})` : `${String(err)} (${selectedFetchBaseUrl})`;
           toast.error(
             t('remoteDirectoryExplorer.errorFetchHomeDetail', {
-              host: server.config.label,
+              host: selectedServerLabel,
               detail,
             }),
             { duration: 8000 },
@@ -322,7 +332,7 @@ export const RemoteDirectoryExplorerDialog: React.FC<RemoteDirectoryExplorerDial
       });
 
     return () => { cancelled = true; };
-  }, [open, selectedServerId, sshStatuses, t]);
+  }, [open, selectedServerId, selectedFetchBaseUrl, selectedServerLabel, t]);
 
   const handleQueryChange = React.useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const value = normalizeSeparators(e.target.value);
@@ -334,7 +344,6 @@ export const RemoteDirectoryExplorerDialog: React.FC<RemoteDirectoryExplorerDial
   }, []);
 
   const handleRowClick = React.useCallback((row: BrowseRow) => {
-    if (row.type === 'directory' && row.disabled) return;
     if (row.type === 'up') {
       if (row.path) browseToDisplayPath(row.path);
       return;
@@ -360,7 +369,7 @@ export const RemoteDirectoryExplorerDialog: React.FC<RemoteDirectoryExplorerDial
         return;
       }
       const highlightedRow = rows[highlightedIndex];
-      if (highlightedRow && (highlightedRow.type === 'up' || (highlightedRow.type === 'directory' && !highlightedRow.disabled))) {
+      if (highlightedRow) {
         handleRowClick(highlightedRow);
       }
       return;
@@ -379,7 +388,7 @@ export const RemoteDirectoryExplorerDialog: React.FC<RemoteDirectoryExplorerDial
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         className="flex w-full max-w-xl flex-col gap-0 overflow-hidden p-0 sm:max-h-[80vh]"
-        onOpenAutoFocus={(event) => event.preventDefault()}
+        initialFocus={false}
       >
         <DialogHeader className="px-5 pb-2 pt-5">
           <DialogTitle>{t('remoteDirectoryExplorer.title')}</DialogTitle>
@@ -501,7 +510,6 @@ export const RemoteDirectoryExplorerDialog: React.FC<RemoteDirectoryExplorerDial
                           <button
                             key={row.value}
                             type="button"
-                            disabled={row.type === 'directory' && row.disabled}
                             onMouseEnter={() => setHighlightedIndex(index)}
                             onMouseDown={(event) => event.preventDefault()}
                             onClick={() => handleRowClick(row)}
@@ -509,7 +517,6 @@ export const RemoteDirectoryExplorerDialog: React.FC<RemoteDirectoryExplorerDial
                               'flex w-full cursor-pointer items-center gap-1.5 rounded-md px-2 py-[1px] text-left text-[13px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50',
                               isActive && 'bg-[var(--interactive-selection)] text-[var(--interactive-selection-foreground)]',
                               !isActive && 'hover:bg-[var(--interactive-hover)]',
-                              row.type === 'directory' && row.disabled && 'cursor-not-allowed opacity-45 hover:bg-transparent'
                             )}
                           >
                             {row.type === 'up' ? (
@@ -520,7 +527,7 @@ export const RemoteDirectoryExplorerDialog: React.FC<RemoteDirectoryExplorerDial
                             <span className="flex min-w-0 flex-1 items-center gap-1.5">
                               <span className="truncate text-[var(--surface-foreground)]">{row.name}</span>
                             </span>
-                            {row.type === 'directory' && row.disabled ? (
+                            {row.type === 'directory' && row.isAdded ? (
                               <span className="rounded-full border border-[var(--interactive-border)] px-1.5 py-px text-[11px] text-[var(--surface-mutedForeground)]">
                                 {t('remoteDirectoryExplorer.alreadyAdded')}
                               </span>

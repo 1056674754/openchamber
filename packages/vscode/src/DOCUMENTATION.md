@@ -48,9 +48,10 @@ Keep `bridge.ts` as a thin orchestration layer that delegates message handling t
   - Settings read/write and OpenCode skills discovery via API for bridge consumers.
 
 - `bridge-system-runtime.ts`
-  - System/editor/provider/quota/notification/update-check message handlers.
+  - System/editor/provider/quota/update-check message handlers.
   - Includes session activity snapshot bridge handler used by webview parity routes (`/api/session-activity`).
-  - Includes Zen utility model parity handler used by shared notification settings (`/api/zen/models`).
+  - Includes notification auto-accept parity handler (`/api/notifications/auto-accept`).
+  - Includes Zen utility model parity handler (`/api/zen/models`) retained as an empty-list compatibility stub.
 
 ## Extension guideline
 

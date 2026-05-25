@@ -28,6 +28,20 @@ import {
 // Use relative path by default (works with both dev and nginx proxy server)
 // Can be overridden with VITE_OPENCODE_URL for absolute URLs in special deployments
 const DEFAULT_BASE_URL = import.meta.env.VITE_OPENCODE_URL || "/api";
+
+function formatSdkError(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (typeof error === "string") return error;
+  if (error && typeof error === "object" && "message" in error && typeof (error as { message: unknown }).message === "string") {
+    return (error as { message: string }).message;
+  }
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
+}
+
 const ABSOLUTE_URL_PATTERN = /^[a-zA-Z][a-zA-Z\d+\-.]*:\/\//;
 const ID_RANDOM_CHARS = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 const ID_RANDOM_LENGTH = 14;
@@ -971,12 +985,12 @@ class OpencodeService {
   async getSessionStatus(): Promise<
     Record<string, { type: "idle" | "busy" | "retry"; attempt?: number; message?: string; next?: number }>
   > {
-    return this.getSessionStatusForDirectory(this.currentDirectory ?? null);
+    return (await this.getSessionStatusForDirectory(this.currentDirectory ?? null)) ?? {};
   }
 
   async getSessionStatusForDirectory(
     directory: string | null | undefined
-  ): Promise<Record<string, { type: "idle" | "busy" | "retry"; attempt?: number; message?: string; next?: number }>> {
+  ): Promise<Record<string, { type: "idle" | "busy" | "retry"; attempt?: number; message?: string; next?: number }> | null> {
     try {
       const base = this.baseUrl.replace(/\/$/, "");
       const url = new URL(`${base}/session/status`);
@@ -994,12 +1008,12 @@ class OpencodeService {
       });
 
       if (!response.ok) {
-        return {};
+        return null;
       }
 
       const data = await response.json().catch(() => null);
       if (!data || typeof data !== "object") {
-        return {};
+        return null;
       }
 
       return data as Record<
@@ -1007,14 +1021,14 @@ class OpencodeService {
         { type: "idle" | "busy" | "retry"; attempt?: number; message?: string; next?: number }
       >;
     } catch {
-      return {};
+      return null;
     }
   }
 
   async getGlobalSessionStatus(): Promise<
     Record<string, { type: "idle" | "busy" | "retry"; attempt?: number; message?: string; next?: number }>
   > {
-    return this.getSessionStatusForDirectory(null);
+    return (await this.getSessionStatusForDirectory(null)) ?? {};
   }
 
   /**
@@ -1068,13 +1082,13 @@ class OpencodeService {
     const fetches: Array<Promise<PermissionRequest[]>> = [];
 
     const fetchForDirectory = async (directory?: string | null): Promise<PermissionRequest[]> => {
-      try {
-        const trimmed = typeof directory === 'string' ? directory.trim() : '';
-        const result = await this.client.permission.list(trimmed ? { directory: trimmed } : undefined);
-        return (result.data || []) as unknown as PermissionRequest[];
-      } catch {
-        return [];
+      const trimmed = typeof directory === 'string' ? directory.trim() : '';
+      const result = await this.client.permission.list(trimmed ? { directory: trimmed } : undefined);
+      const rawError = (result as { error?: unknown }).error;
+      if (rawError) {
+        throw new Error(`permission.list failed: ${formatSdkError(rawError)}`);
       }
+      return (result.data || []) as unknown as PermissionRequest[];
     };
 
     // Try unscoped first (server may return global pending items).
@@ -1114,13 +1128,13 @@ class OpencodeService {
     const fetches: Array<Promise<QuestionRequest[]>> = [];
 
     const fetchForDirectory = async (directory?: string | null): Promise<QuestionRequest[]> => {
-      try {
-        const trimmed = typeof directory === 'string' ? directory.trim() : '';
-        const result = await this.client.question.list(trimmed ? { directory: trimmed } : undefined);
-        return (result.data || []) as unknown as QuestionRequest[];
-      } catch {
-        return [];
+      const trimmed = typeof directory === 'string' ? directory.trim() : '';
+      const result = await this.client.question.list(trimmed ? { directory: trimmed } : undefined);
+      const rawError = (result as { error?: unknown }).error;
+      if (rawError) {
+        throw new Error(`question.list failed: ${formatSdkError(rawError)}`);
       }
+      return (result.data || []) as unknown as QuestionRequest[];
     };
 
     // Try unscoped first (server may return global pending items).
@@ -1235,14 +1249,14 @@ class OpencodeService {
 
   // Agent Management
   async listAgents(): Promise<Agent[]> {
-    try {
-      const response = await this.client.app.agents(
-        this.currentDirectory ? { directory: this.currentDirectory } : undefined
-      );
-      return response.data || [];
-    } catch {
-      return [];
+    const response = await this.client.app.agents(
+      this.currentDirectory ? { directory: this.currentDirectory } : undefined
+    );
+    const rawError = (response as { error?: unknown }).error;
+    if (rawError) {
+      throw new Error(`app.agents failed: ${formatSdkError(rawError)}`);
     }
+    return response.data || [];
   }
 
   // SSE infrastructure removed — EventPipeline in sync/event-pipeline.ts handles
@@ -1310,7 +1324,7 @@ class OpencodeService {
   }
 
   // Command Management
-  async listCommands(): Promise<Array<{ name: string; description?: string; agent?: string; model?: string }>> {
+  async listCommands(): Promise<Array<{ name: string; description?: string; agent?: string; model?: string; source?: string }>> {
     try {
       const response = await this.client.command.list(
         this.currentDirectory ? { directory: this.currentDirectory } : undefined
@@ -1320,7 +1334,8 @@ class OpencodeService {
         name: cmd.name as string,
         description: cmd.description as string | undefined,
         agent: cmd.agent as string | undefined,
-        model: cmd.model as string | undefined
+        model: cmd.model as string | undefined,
+        source: cmd.source as string | undefined,
         // Intentionally excluding template to keep memory usage low
       }));
     } catch {
@@ -1328,7 +1343,7 @@ class OpencodeService {
     }
   }
 
-  async listCommandsWithDetails(): Promise<Array<{ name: string; description?: string; agent?: string; model?: string; template?: string }>> {
+  async listCommandsWithDetails(): Promise<Array<{ name: string; description?: string; agent?: string; model?: string; source?: string; template?: string }>> {
     try {
       const response = await this.client.command.list(
         this.currentDirectory ? { directory: this.currentDirectory } : undefined
@@ -1339,8 +1354,37 @@ class OpencodeService {
         description: cmd.description as string | undefined,
         agent: cmd.agent as string | undefined,
         model: cmd.model as string | undefined,
+        source: cmd.source as string | undefined,
         template: cmd.template as string | undefined,
       }));
+    } catch {
+      return [];
+    }
+  }
+
+  async listSkillsWithDetails(): Promise<Array<{ name: string; description?: string; location: string; content?: string }>> {
+    try {
+      const response = await this.client.app.skills(
+        this.currentDirectory ? { directory: this.currentDirectory } : undefined,
+      );
+      const data = response.data;
+      if (!Array.isArray(data)) {
+        return [];
+      }
+
+      const skills: Array<{ name: string; description?: string; location: string; content?: string }> = [];
+      for (const item of data as Array<Record<string, unknown>>) {
+        const name = typeof item.name === 'string' ? item.name.trim() : '';
+        const location = typeof item.location === 'string' ? item.location : '';
+        if (!name || !location || location === '<built-in>') {
+          continue;
+        }
+        const skill: { name: string; description?: string; location: string; content?: string } = { name, location };
+        if (typeof item.description === 'string') skill.description = item.description;
+        if (typeof item.content === 'string') skill.content = item.content;
+        skills.push(skill);
+      }
+      return skills;
     } catch {
       return [];
     }

@@ -13,7 +13,7 @@ and each has its own auto-update channel:
 
 | Shell    | Manifest          | Update format       | Secret used to sign |
 |----------|-------------------|---------------------|---------------------|
-| Tauri    | `latest.json`     | `.tar.gz` + `.sig`  | `TAURI_SIGNING_PRIVATE_KEY` (minisign) |
+| Tauri    | `latest.json`     | `.tar.gz` + `.sig`  | `TAURI_SIGNING_PRIVATE_KEY` (Tauri signer / minisign format) |
 | Electron | `latest-mac.yml`  | `.zip` + `blockmap` | Developer ID codesign (APPLE_* secrets) |
 
 Existing Tauri installs keep their own auto-update path (`latest.json`).
@@ -32,10 +32,15 @@ verifies the minisign signature, unpacks the contents **over** the existing
 just replaces files.
 
 So: produce a `.tar.gz` of the Electron `.app`, sign it with the existing
-Tauri minisign key, point `latest.json` at it. Tauri users receive the update,
+Tauri signing key, point `latest.json` at it. Tauri users receive the update,
 their `OpenChamber.app` becomes the Electron bundle in-place, and next launch
 starts Electron. Subsequent updates go through `latest-mac.yml`
 (electron-updater). One-way migration, one-shot workflow change.
+
+Note: `actions/upload-artifact` can download a `.app` directory artifact as its
+inner `Contents/` folder instead of `OpenChamber.app/Contents`. The repackage
+job handles both shapes and wraps `Contents/` back into `OpenChamber.app` before
+creating the tarball.
 
 ## Prerequisites before running the cutover
 
@@ -69,8 +74,8 @@ Check all of these before making any release:
    `TAURI_SIGNING_PRIVATE_KEY`, `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`. A
    workflow_dispatch dry-run should succeed before the real tag.
 
-5. **`minisign` CLI is available on the macOS runner** (or installable via
-   brew). Used to sign the Electron tarball with the Tauri key.
+5. **Tauri's signer is available through `packages/desktop`** after dependency
+   install. Used to sign the Electron tarball with the Tauri key.
 
 ## Release workflow changes
 
@@ -132,13 +137,10 @@ repackage-electron-as-tauri-update:
         name: electron-app-${{ matrix.arch }}
         path: staged
 
-    - name: Install minisign
-      run: brew install minisign
-
     - name: Tar and sign Electron .app as Tauri update payload
       env:
-        TAURI_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-        TAURI_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         VERSION: ${{ needs.create-release.outputs.version }}
       run: |
         set -euo pipefail
@@ -149,16 +151,13 @@ repackage-electron-as-tauri-update:
         TARBALL="OpenChamber.app.tar.gz"
         tar -czf "$TARBALL" OpenChamber.app
 
-        # minisign needs the private key written to a file and a non-interactive
-        # password via -W (or env). The key in the secret is a minisign secret
-        # key block (base64-ish multi-line blob). Write to a file verbatim.
-        echo "$TAURI_KEY" > ../tauri-signing.key
-        echo "$TAURI_KEY_PASSWORD" | minisign -S -s ../tauri-signing.key \
-          -m "$TARBALL" -W
+        # Use Tauri's signer instead of minisign directly. The CI secret is in
+        # the format consumed by TAURI_SIGNING_PRIVATE_KEY.
+        bun run --cwd ../packages/desktop tauri signer sign "$PWD/$TARBALL"
 
         # Rename per platform so the release has distinct names for arm64/x64.
         mv "$TARBALL" "OpenChamber-${VERSION}-${{ matrix.platform }}.app.tar.gz"
-        mv "${TARBALL}.minisig" "OpenChamber-${VERSION}-${{ matrix.platform }}.app.tar.gz.sig"
+        mv "${TARBALL}.sig" "OpenChamber-${VERSION}-${{ matrix.platform }}.app.tar.gz.sig"
 
     - name: Generate Tauri latest-<platform>.json
       env:
@@ -253,6 +252,11 @@ Do this in a separate PR. Keep the transition release workflow intact until
 the cleanup lands; rolling the cleanup into the transition release itself
 makes debugging much harder if the migration misbehaves for a user.
 
+When rerunning the same release version with `workflow_dispatch`, use
+`dry_run=true` if npm and marketplace packages are already published. In that
+mode the workflow still rebuilds release assets, but skips publishing to npm and
+skips re-uploading the npm tarball asset.
+
 ## Validation before tagging the transition release
 
 You must manually validate with a real Tauri install. Do NOT skip this.
@@ -345,5 +349,5 @@ back to a Tauri build, they must manually download. We don't support this.
 Default to a dry-run (test tag like `vX.Y.Z-migration-test` on a workflow_dispatch
 run) before the real tag. Surface only business-level decisions —
 "cutover this release, or hold one more cycle?" — and make technical calls
-(minisign invocation flags, YAML layout, job dependency order) yourself,
+(Tauri signer invocation flags, YAML layout, job dependency order) yourself,
 documenting each one in the PR description.

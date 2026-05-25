@@ -18,10 +18,12 @@ import { getStaticGroupToolName, isExpandableTool, isStandaloneTool, isStaticToo
 import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useUIStore } from '@/stores/useUIStore';
+import { useSkillsStore } from '@/stores/useSkillsStore';
 import ReasoningPart from './ReasoningPart';
 import JustificationBlock from './JustificationBlock';
 import { areRenderRelevantPartsEqual } from '../renderCompare';
 import { ToolCallGroup } from './ToolCallGroup';
+import { getExternalFaviconUrl } from '@/lib/url';
 
 interface ProgressiveGroupProps {
     sessionId?: string;
@@ -41,6 +43,29 @@ interface ProgressiveGroupProps {
     animatedToolIds?: Set<string>;
     renderJustificationActions?: (activity: TurnActivityPart) => React.ReactNode;
 }
+
+const ExternalLinkFavicon: React.FC<{ href: string }> = ({ href }) => {
+    const [failed, setFailed] = React.useState(false);
+    const faviconUrl = React.useMemo(() => getExternalFaviconUrl(href), [href]);
+
+    if (!faviconUrl || failed) {
+        return null;
+    }
+
+    return (
+        <span className="inline-flex size-[18px] flex-shrink-0 items-center justify-center rounded border border-[var(--border)] bg-[var(--interactive-hover)]">
+            <img
+                src={faviconUrl}
+                alt=""
+                aria-hidden="true"
+                loading="lazy"
+                decoding="async"
+                className="size-3.5 rounded-sm"
+                onError={() => setFailed(true)}
+            />
+        </span>
+    );
+};
 
 const isActivityRunning = (activity: TurnActivityPart): boolean => {
     if (activity.kind !== 'tool') return false;
@@ -650,7 +675,9 @@ const StaticToolRowInner: React.FC<{
     const isReadGroup = toolName.toLowerCase() === 'read';
     const runtime = React.useContext(RuntimeAPIContext);
     const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
+    const skills = useSkillsStore((state) => state.skills);
     const hasRunningActivity = React.useMemo(() => activities.some((activity) => isActivityRunning(activity)), [activities]);
+    const skillByName = React.useMemo(() => new Map(skills.map((skill) => [skill.name, skill])), [skills]);
 
     const descriptions = React.useMemo(() => {
         const descs: string[] = [];
@@ -700,6 +727,15 @@ const StaticToolRowInner: React.FC<{
         uiStore.openContextFile(contextDirectory, absolutePath);
     }, [currentDirectory, runtime]);
 
+    const handleSkillClick = React.useCallback((skillName: string) => {
+        const skill = skillByName.get(skillName);
+        if (!skill?.path) {
+            return;
+        }
+        const uiStore = useUIStore.getState();
+        uiStore.openContextFile(currentDirectory || getContextDirectoryForPath('', skill.path), skill.path);
+    }, [currentDirectory, skillByName]);
+
     const normalizedToolName = toolName.toLowerCase();
     const isSearchGroup = normalizedToolName === 'grep'
         || normalizedToolName === 'search'
@@ -707,6 +743,7 @@ const StaticToolRowInner: React.FC<{
         || normalizedToolName === 'ripgrep'
         || normalizedToolName === 'glob';
     const isFetchGroup = normalizedToolName === 'webfetch' || normalizedToolName === 'fetch' || normalizedToolName === 'curl' || normalizedToolName === 'wget';
+    const isSkillGroup = normalizedToolName === 'skill';
 
     return (
         <div
@@ -782,17 +819,36 @@ const StaticToolRowInner: React.FC<{
                         target="_blank"
                         rel="noopener noreferrer"
                         className={cn(
-                            'min-w-0 flex-1 underline decoration-[color:var(--status-info)] underline-offset-2 hover:opacity-90',
+                            'min-w-0 flex-1 inline-flex items-center gap-1.5 underline decoration-[color:var(--status-info)] underline-offset-2 hover:opacity-90',
                             'truncate whitespace-nowrap typography-meta'
                         )}
                         style={{ color: 'var(--status-info)' }}
                         title={url}
                     >
-                        {url}
+                        <ExternalLinkFavicon href={url} />
+                        <span className="min-w-0 truncate">{url}</span>
                     </a>
                 ))
                 : null}
-            {!isReadGroup && !isSearchGroup && !isFetchGroup && descriptions.length > 0 ? (
+            {isSkillGroup && descriptions.length > 0
+                ? descriptions.map((skillName, index) => (
+                    <button
+                        key={`${skillName}-${index}`}
+                        type="button"
+                        onClick={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            handleSkillClick(skillName);
+                        }}
+                        className="min-w-0 flex-1 truncate whitespace-nowrap typography-meta leading-5 text-left hover:opacity-90"
+                        style={{ color: 'var(--tools-description)' }}
+                        title={skillName}
+                    >
+                        {skillName}
+                    </button>
+                ))
+                : null}
+            {!isReadGroup && !isSearchGroup && !isFetchGroup && !isSkillGroup && descriptions.length > 0 ? (
                 <Text
                     variant={animateTailText ? 'generate-effect' : 'static'}
                     className="min-w-0 flex-1 truncate whitespace-nowrap typography-meta leading-5"
@@ -814,9 +870,10 @@ export const StaticToolRow = React.memo(StaticToolRowInner, (prev, next) => {
 /**
  * Inline reasoning text block — rendered as dimmed italic markdown.
  */
-const InlineReasoningBlock = React.memo(({ activity, sessionId, onContentChange }: {
+const InlineReasoningBlock = React.memo(({ activity, sessionId, streamPhase, onContentChange }: {
     activity: TurnActivityPart;
     sessionId?: string;
+    streamPhase: StreamPhase;
     onContentChange?: (reason?: ContentChangeReason) => void;
 }) => {
     return (
@@ -824,6 +881,7 @@ const InlineReasoningBlock = React.memo(({ activity, sessionId, onContentChange 
             part={activity.part}
             sessionId={sessionId}
             messageId={activity.messageId}
+            streamPhase={streamPhase}
             onContentChange={onContentChange}
         />
     );
@@ -861,13 +919,12 @@ const ProgressiveGroup: React.FC<ProgressiveGroupProps> = ({
     onToggleTool,
     onShowPopup,
     onContentChange,
-    streamPhase: _streamPhase,
+    streamPhase,
     showHeader,
     animateRows = true,
     animatedToolIds,
     renderJustificationActions,
 }) => {
-    void _streamPhase;
     const previewCount = showHeader && !isExpanded
         ? Math.max(0, Math.floor(collapsedPreviewCount))
         : 0;
@@ -934,6 +991,7 @@ const ProgressiveGroup: React.FC<ProgressiveGroupProps> = ({
                         <InlineReasoningBlock
                             activity={row.activity}
                             sessionId={sessionId}
+                            streamPhase={streamPhase}
                             onContentChange={onContentChange}
                         />
                     </>

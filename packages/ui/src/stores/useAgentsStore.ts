@@ -609,6 +609,11 @@ async function performConfigRefresh(options: {
         ...projects.map((project) => project.path).filter(Boolean),
       ]),
     );
+    const projectServerIdByDirectory = new Map(
+      projects
+        .filter((project) => typeof project.path === "string" && project.path.length > 0)
+        .map((project) => [project.path, project.serverId] as const),
+    );
 
     if (scopes.includes("all") && mode === "projects") {
       useConfigStore.setState({ directoryScoped: {} });
@@ -620,11 +625,12 @@ async function performConfigRefresh(options: {
 
     const sdkRefreshTasks: Promise<void>[] = [];
     for (const directory of directoriesToRefresh) {
+      const serverId = projectServerIdByDirectory.get(directory);
       if (refreshProviders) {
-        sdkRefreshTasks.push(configStore.loadProviders({ directory }).then(() => undefined));
+        sdkRefreshTasks.push(configStore.loadProviders({ directory, serverId }).then(() => undefined));
       }
       if (refreshSdkAgents) {
-        sdkRefreshTasks.push(configStore.loadAgents({ directory, serverBaseUrl: resolveApiUrl(directory) }).then(() => undefined));
+        sdkRefreshTasks.push(configStore.loadAgents({ directory, serverBaseUrl: resolveApiUrl(directory), serverId }).then(() => undefined));
       }
     }
 

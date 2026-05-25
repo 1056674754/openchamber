@@ -13,7 +13,6 @@
  */
 
 import type { Event, OpencodeClient } from "@opencode-ai/sdk/v2/client"
-import { opencodeClient } from "@/lib/opencode/client"
 import { syncDebug } from "./debug"
 
 export type QueuedEvent = {
@@ -31,6 +30,10 @@ const DEFAULT_RECONNECT_DELAY_MS = 250
 const DEFAULT_HEARTBEAT_TIMEOUT_MS = 30_000
 const WS_FALLBACK_WINDOW_MS = 60_000
 const DEFAULT_WS_READY_TIMEOUT_MS = 2_000
+const RETRY_BACKOFF_BASE_MS = 250
+const RETRY_BACKOFF_CAP_VISIBLE_MS = 5_000
+const RETRY_BACKOFF_CAP_HIDDEN_OR_OFFLINE_MS = 60_000
+const RETRY_BACKOFF_MAX_EXPONENT = 8
 const ABSOLUTE_URL_PATTERN = /^[a-zA-Z][a-zA-Z\d+\-.]*:\/\//
 
 export type EventPipelineInput = {
@@ -175,7 +178,7 @@ export function createEventPipeline(input: EventPipelineInput) {
     reconnectDelayMs = DEFAULT_RECONNECT_DELAY_MS,
     wsReadyTimeoutMs = DEFAULT_WS_READY_TIMEOUT_MS,
   } = input
-  const baseUrl = inputBaseUrl ?? opencodeClient.getBaseUrl()
+  const baseUrl = inputBaseUrl ?? "/api"
   const abort = new AbortController()
   let disconnected = false
   let lastEventId: string | undefined
@@ -254,6 +257,75 @@ export function createEventPipeline(input: EventPipelineInput) {
   const isAbortError = (error: unknown): boolean =>
     error instanceof DOMException && error.name === "AbortError" ||
     (typeof error === "object" && error !== null && (error as { name?: string }).name === "AbortError")
+
+  const isOffline = (): boolean =>
+    typeof navigator === "object" && navigator !== null && navigator.onLine === false
+
+  const isHidden = (): boolean =>
+    typeof document !== "undefined" && document.visibilityState !== "visible"
+
+  const extractStatus = (error: unknown): number | undefined => {
+    if (!error || typeof error !== "object") return undefined
+    const direct = (error as { status?: unknown }).status
+    if (typeof direct === "number") return direct
+    const fromResponse = (error as { response?: { status?: unknown } }).response?.status
+    if (typeof fromResponse === "number") return fromResponse
+    return undefined
+  }
+
+  const isPermanentHttpStatus = (status: number): boolean => {
+    if (status < 400 || status >= 500) return false
+    if (status === 408 || status === 429) return false
+    return true
+  }
+
+  const waitForRetry = (ms: number) => new Promise<void>((resolve) => {
+    if (ms <= 0 || abort.signal.aborted) {
+      resolve()
+      return
+    }
+
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const cleanup = () => {
+      if (timer !== undefined) {
+        clearTimeout(timer)
+        timer = undefined
+      }
+      if (typeof globalThis.window !== "undefined") {
+        globalThis.window.removeEventListener("online", onInterrupt)
+      }
+      if (typeof document !== "undefined") {
+        document.removeEventListener("visibilitychange", onVisibilityInterrupt)
+      }
+      abort.signal.removeEventListener("abort", onInterrupt)
+    }
+    const onInterrupt = () => {
+      cleanup()
+      resolve()
+    }
+    const onVisibilityInterrupt = () => {
+      if (typeof document !== "undefined" && document.visibilityState === "visible") {
+        onInterrupt()
+      }
+    }
+
+    timer = setTimeout(onInterrupt, ms)
+    if (typeof globalThis.window !== "undefined") {
+      globalThis.window.addEventListener("online", onInterrupt, { once: true })
+    }
+    if (typeof document !== "undefined") {
+      document.addEventListener("visibilitychange", onVisibilityInterrupt)
+    }
+    abort.signal.addEventListener("abort", onInterrupt, { once: true })
+  })
+
+  const computeRetryDelay = (failures: number): number => {
+    if (failures <= 0) return 0
+    if (isOffline()) return RETRY_BACKOFF_CAP_HIDDEN_OR_OFFLINE_MS
+    const cap = isHidden() ? RETRY_BACKOFF_CAP_HIDDEN_OR_OFFLINE_MS : RETRY_BACKOFF_CAP_VISIBLE_MS
+    const exponent = Math.min(failures - 1, RETRY_BACKOFF_MAX_EXPONENT)
+    return Math.min(cap, RETRY_BACKOFF_BASE_MS * 2 ** exponent)
+  }
 
   let streamErrorLogged = false
   let attempt: AbortController | undefined
@@ -594,9 +666,12 @@ export function createEventPipeline(input: EventPipelineInput) {
               : `${currentTransport}_error:unknown`
           notifyDisconnected(reason)
 
-          // Backoff so a hard-down server doesn't spin the browser event loop.
-          // Cap at 5s; reset occurs in markConnected().
-          retryDelayMs = Math.min(5_000, Math.max(retryDelayMs, 250) * (consecutiveFailures <= 1 ? 1 : 2))
+          const status = extractStatus(error)
+          if (status !== undefined && isPermanentHttpStatus(status)) {
+            retryDelayMs = RETRY_BACKOFF_CAP_HIDDEN_OR_OFFLINE_MS
+          } else {
+            retryDelayMs = computeRetryDelay(consecutiveFailures)
+          }
         }
       } finally {
         abort.signal.removeEventListener("abort", onAbort)
@@ -611,7 +686,7 @@ export function createEventPipeline(input: EventPipelineInput) {
         attemptAbortReason = null
       }
       if (retryDelayMs > 0) {
-        await wait(retryDelayMs)
+        await waitForRetry(retryDelayMs)
       }
     }
   })().finally(flushAll)
@@ -636,6 +711,15 @@ export function createEventPipeline(input: EventPipelineInput) {
     attempt?.abort()
   }
 
+  const onOnline = () => {
+    if (!disconnected) return
+    attempt?.abort()
+  }
+
+  const onOffline = () => {
+    attempt?.abort()
+  }
+
   if (typeof document !== "undefined") {
     document.addEventListener("visibilitychange", onVisibility)
     window.addEventListener("pageshow", onPageShow)
@@ -645,6 +729,8 @@ export function createEventPipeline(input: EventPipelineInput) {
   // test environments can replace globalThis.window with a stub.
   if (typeof globalThis.window !== "undefined") {
     globalThis.window.addEventListener("openchamber:system-resume", onSystemResume)
+    globalThis.window.addEventListener("online", onOnline)
+    globalThis.window.addEventListener("offline", onOffline)
   }
 
   const cleanup = () => {
@@ -654,6 +740,8 @@ export function createEventPipeline(input: EventPipelineInput) {
     }
     if (typeof globalThis.window !== "undefined") {
       globalThis.window.removeEventListener("openchamber:system-resume", onSystemResume)
+      globalThis.window.removeEventListener("online", onOnline)
+      globalThis.window.removeEventListener("offline", onOffline)
     }
     abort.abort()
     flushAll()

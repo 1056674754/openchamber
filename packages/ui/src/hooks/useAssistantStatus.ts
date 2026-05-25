@@ -203,28 +203,29 @@ export function useAssistantStatus(): AssistantStatusSnapshot {
             return { activePartType: undefined, activeToolName: undefined, statusText: 'working', isGenericStatus: true };
         }
 
-        const assistantMessages = sessionMessages
-            .filter(
-                (msg): msg is AssistantSessionMessageRecord =>
-                    isAssistantMessage(msg.info) && !isFullySyntheticMessage(msg.parts)
-            );
-
-        if (assistantMessages.length === 0) {
-            return { activePartType: undefined, activeToolName: undefined, statusText: 'working', isGenericStatus: true };
-        }
-
-        const sortedAssistantMessages = [...assistantMessages].sort((a, b) => {
+        const isLater = (a: AssistantSessionMessageRecord, b: AssistantSessionMessageRecord) => {
             const aCreated = typeof a.info.time?.created === 'number' ? a.info.time.created : null;
             const bCreated = typeof b.info.time?.created === 'number' ? b.info.time.created : null;
-
             if (aCreated !== null && bCreated !== null && aCreated !== bCreated) {
-                return aCreated - bCreated;
+                return aCreated > bCreated;
             }
+            return a.info.id.localeCompare(b.info.id) > 0;
+        };
 
-            return a.info.id.localeCompare(b.info.id);
-        });
+        let lastAssistant: AssistantSessionMessageRecord | null = null;
+        for (const candidate of sessionMessages) {
+            if (!isAssistantMessage(candidate.info) || isFullySyntheticMessage(candidate.parts)) {
+                continue;
+            }
+            const typed = candidate as AssistantSessionMessageRecord;
+            if (lastAssistant === null || isLater(typed, lastAssistant)) {
+                lastAssistant = typed;
+            }
+        }
 
-        const lastAssistant = sortedAssistantMessages[sortedAssistantMessages.length - 1];
+        if (!lastAssistant) {
+            return { activePartType: undefined, activeToolName: undefined, statusText: 'working', isGenericStatus: true };
+        }
 
         let activePartType: 'text' | 'tool' | 'reasoning' | 'editing' | undefined = undefined;
         let activeToolName: string | undefined = undefined;

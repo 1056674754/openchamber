@@ -210,6 +210,24 @@ All scripts are in `package.json`.
 - Prefer per-item results, rollback paths, or resumable cleanup over all-or-nothing assumptions.
 - Never leave optimistic state or local caches stranded after failure.
 
+### Distinguish fetch failure from empty success
+
+Client API methods that feed authoritative state (bootstrap, reconnect resync, retry loops) must signal fetch failure distinctly from a successful-but-empty server response. A method that swallows errors and returns `[]` or `{}` lets the caller delete legitimate state on a transient network blip.
+
+- If callers use the result to delete, clear, or replace sync state, either throw on failure or return `T | null` where `null` only means "fetch failed".
+- Do not return the same value shape for failure and success. SDK `{ data, error }` responses must be checked explicitly when the result is authoritative.
+- Retry loops must see a failure signal; a retry around a method that swallows to `[]` will run once and incorrectly treat the empty result as success.
+- Verify the consumer preserves state on failure and only runs "delete missing" logic after a known-successful fetch.
+
+### Reconnect-loop pacing
+
+The SSE/WebSocket reconnect loop in `packages/ui/src/sync/event-pipeline.ts` retries indefinitely, so it must respect browser/network signals:
+
+- Use a long backoff cap when `navigator.onLine` is false or `document.visibilityState` is hidden.
+- Let `online`, visibility becoming visible, and pipeline abort interrupt the current sleep so recovery is prompt.
+- Treat permanent 4xx errors (except 408 and 429) as long-cap retries; blind fast retries do not fix stale paths or auth failures.
+- Use real exponential growth for consecutive failures, clamped to the visible or hidden/offline cap.
+
 ## CLI Parity and Safety Policy (MANDATORY)
 
 ### Principle: policy-first, UX-second

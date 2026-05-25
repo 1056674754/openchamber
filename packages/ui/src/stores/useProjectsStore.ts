@@ -12,6 +12,8 @@ import { PROJECT_COLORS } from '@/lib/projectMeta';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSessionProjectStore } from './useSessionProjectStore';
 import { getProjectWorktreeKey } from '@/lib/worktrees/worktreeKeys';
+import { DEFAULT_SERVER_ID } from '@/lib/opencode/server-registry';
+import { reorderProjectList, reorderProjectListById } from './projectOrdering';
 
 /** Pick a color key that's least used among existing projects */
 const pickAutoColor = (projects: ProjectEntry[]): string => {
@@ -60,6 +62,7 @@ interface ProjectsStore {
   removeProjectIcon: (id: string) => Promise<{ ok: boolean; error?: string }>;
   discoverProjectIcon: (id: string, options?: { force?: boolean }) => Promise<{ ok: boolean; skipped?: boolean; reason?: string; error?: string }>;
   reorderProjects: (fromIndex: number, toIndex: number) => void;
+  reorderProjectsById: (activeProjectId: string, overProjectId: string) => void;
   toggleProjectPin: (id: string) => void;
   validateProjectPath: (path: string) => ProjectPathValidationResult;
   synchronizeFromSettings: (settings: DesktopSettings) => void;
@@ -129,6 +132,10 @@ const deriveProjectLabel = (path: string): string => {
 
 const isUnsupportedRemoteProjectPath = (path: string): boolean => {
   return path === '/';
+};
+
+const usesDefaultConnection = (project: ProjectEntry): boolean => {
+  return !project.serverId || project.serverId === DEFAULT_SERVER_ID;
 };
 
 const sanitizeProjectIconImage = (value: unknown): ProjectEntry['iconImage'] | undefined => {
@@ -382,7 +389,9 @@ export const useProjectsStore = create<ProjectsStore>()(
       }
 
       const normalizedPath = validation.normalizedPath;
-      const existing = get().projects.find((project) => project.path === normalizedPath);
+      const existing = get().projects.find((project) => (
+        project.path === normalizedPath && usesDefaultConnection(project)
+      ));
       if (existing) {
         get().setActiveProject(existing.id);
         return existing;
@@ -701,22 +710,27 @@ export const useProjectsStore = create<ProjectsStore>()(
         return;
       }
       const { projects, activeProjectId } = get();
-      if (
-        fromIndex < 0 ||
-        fromIndex >= projects.length ||
-        toIndex < 0 ||
-        toIndex >= projects.length ||
-        fromIndex === toIndex
-      ) {
+      const nextProjects = reorderProjectList(projects, fromIndex, toIndex);
+      if (!nextProjects) {
         return;
       }
 
-      const nextProjects = [...projects];
-      const [moved] = nextProjects.splice(fromIndex, 1);
-      nextProjects.splice(toIndex, 0, moved);
-
       set({ projects: nextProjects });
       persistProjects(nextProjects, activeProjectId);
+    },
+
+    reorderProjectsById: (activeProjectId: string, overProjectId: string) => {
+      if (vscodeWorkspace) {
+        return;
+      }
+      const { projects, activeProjectId: currentActiveProjectId } = get();
+      const nextProjects = reorderProjectListById(projects, activeProjectId, overProjectId);
+      if (!nextProjects) {
+        return;
+      }
+
+      set({ projects: nextProjects });
+      persistProjects(nextProjects, currentActiveProjectId);
     },
 
     toggleProjectPin: (id: string) => {

@@ -1,4 +1,5 @@
 import React from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import type { Session } from '@opencode-ai/sdk/v2';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Icon } from "@/components/icon/Icon";
@@ -16,6 +17,9 @@ import { useSessionFoldersStore } from '@/stores/useSessionFoldersStore';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { openExternalUrl } from '@/lib/url';
 import { useI18n } from '@/lib/i18n';
+
+const ARCHIVED_VIRTUALIZE_THRESHOLD = 50;
+const ARCHIVED_ROW_ESTIMATE_PX = 28;
 
 type DeleteFolderConfirm = {
   scopeKey: string;
@@ -295,6 +299,72 @@ export function SessionGroupSection(props: Props): React.ReactNode {
     return { pinnedNodes: pinned, unpinnedNodes: unpinned };
   }, [visibleSessions, pinnedSessionIds, projectPinnedSessionIds]);
 
+  const shouldVirtualizeArchived = group.isArchivedBucket === true
+    && !hasSessionSearchQuery
+    && unpinnedNodes.length >= ARCHIVED_VIRTUALIZE_THRESHOLD;
+
+  const archivedVirtualContainerRef = React.useRef<HTMLDivElement | null>(null);
+  const [archivedScrollEl, setArchivedScrollEl] = React.useState<HTMLElement | null>(null);
+  const [archivedScrollMargin, setArchivedScrollMargin] = React.useState(0);
+
+  const archivedVirtualizer = useVirtualizer({
+    count: unpinnedNodes.length,
+    getScrollElement: () => archivedScrollEl,
+    estimateSize: () => ARCHIVED_ROW_ESTIMATE_PX,
+    overscan: 8,
+    enabled: shouldVirtualizeArchived && archivedScrollEl !== null,
+    scrollMargin: archivedScrollMargin,
+  });
+
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  React.useLayoutEffect(() => {
+    if (!shouldVirtualizeArchived) {
+      if (archivedScrollEl !== null) setArchivedScrollEl(null);
+      if (archivedScrollMargin !== 0) setArchivedScrollMargin(0);
+      return;
+    }
+    if (typeof window === 'undefined') return;
+    const container = archivedVirtualContainerRef.current;
+    if (!container) return;
+
+    let scrollEl: HTMLElement | null = archivedScrollEl;
+    if (!scrollEl || !scrollEl.contains(container)) {
+      let element: HTMLElement | null = container.parentElement;
+      while (element) {
+        const style = window.getComputedStyle(element);
+        if (style.overflowY === 'auto' || style.overflowY === 'scroll') {
+          scrollEl = element;
+          break;
+        }
+        element = element.parentElement;
+      }
+      if (scrollEl !== archivedScrollEl) {
+        setArchivedScrollEl(scrollEl);
+        return;
+      }
+    }
+    if (!scrollEl) return;
+
+    const offset = container.getBoundingClientRect().top
+      - scrollEl.getBoundingClientRect().top
+      + scrollEl.scrollTop;
+    setArchivedScrollMargin((prev) => (Math.abs(prev - offset) < 1 ? prev : offset));
+  });
+
+  React.useEffect(() => {
+    if (!shouldVirtualizeArchived || !archivedScrollEl || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(() => {
+      archivedVirtualizer.measure();
+    });
+    observer.observe(archivedScrollEl);
+    return () => observer.disconnect();
+  }, [shouldVirtualizeArchived, archivedScrollEl, archivedVirtualizer]);
+
+  const archivedTotalSize = archivedVirtualizer.getTotalSize();
+  const archivedVirtualRows = shouldVirtualizeArchived && archivedScrollEl !== null
+    ? archivedVirtualizer.getVirtualItems()
+    : [];
+
   if (hasSessionSearchQuery && !groupMatchesSearch && rootFolders.length === 0 && ungroupedSessions.length === 0) {
     return null;
   }
@@ -504,7 +574,39 @@ export function SessionGroupSection(props: Props): React.ReactNode {
       {pinnedNodes.length > 0 && unpinnedNodes.length > 0 ? (
         <div className="mx-0.5 my-0.5 h-px bg-[var(--surface-subtle)]" />
       ) : null}
-      {unpinnedNodes.map((node) => renderSessionNode(node, 0, group.directory, projectId, group.isArchivedBucket === true))}
+      {shouldVirtualizeArchived ? (
+        <div
+          ref={archivedVirtualContainerRef}
+          style={{
+            position: 'relative',
+            height: archivedTotalSize > 0 ? archivedTotalSize : undefined,
+            width: '100%',
+          }}
+        >
+          {archivedVirtualRows.map((virtualRow) => {
+            const node = unpinnedNodes[virtualRow.index];
+            if (!node) return null;
+            return (
+              <div
+                key={virtualRow.key}
+                data-index={virtualRow.index}
+                ref={archivedVirtualizer.measureElement}
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  width: '100%',
+                  transform: `translateY(${virtualRow.start - archivedScrollMargin}px)`,
+                }}
+              >
+                {renderSessionNode(node, 0, group.directory, projectId, true)}
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        unpinnedNodes.map((node) => renderSessionNode(node, 0, group.directory, projectId, group.isArchivedBucket === true))
+      )}
       {totalSessions === 0 && allFoldersForGroup.length === 0 ? (
         <div className="py-1 text-left typography-micro text-muted-foreground">
           {group.isArchivedBucket

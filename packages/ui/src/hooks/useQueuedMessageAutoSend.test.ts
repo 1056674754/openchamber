@@ -1,20 +1,9 @@
-import { beforeEach, describe, expect, mock, test } from 'bun:test';
+import { beforeEach, describe, expect, test } from 'bun:test';
 import type { Agent } from '@opencode-ai/sdk/v2';
 import type { QueuedMessage } from '../stores/messageQueueStore';
+import { buildQueuedAutoSendPayload } from './queuedMessageAutoSendPayload';
 
 let visibleAgents: Agent[] = [];
-
-const getVisibleAgentsMock = mock(() => visibleAgents);
-
-mock.module('@/stores/useConfigStore', () => ({
-  useConfigStore: {
-    getState: () => ({
-      getVisibleAgents: getVisibleAgentsMock,
-    }),
-  },
-}));
-
-import { buildQueuedAutoSendPayload } from './useQueuedMessageAutoSend';
 
 describe('buildQueuedAutoSendPayload', () => {
   beforeEach(() => {
@@ -61,7 +50,7 @@ describe('buildQueuedAutoSendPayload', () => {
       },
     ];
 
-    const payload = buildQueuedAutoSendPayload(queue);
+    const payload = buildQueuedAutoSendPayload(queue, visibleAgents);
 
     expect(payload).not.toBeNull();
     expect(payload?.agentMentionName).toBe('Builder');

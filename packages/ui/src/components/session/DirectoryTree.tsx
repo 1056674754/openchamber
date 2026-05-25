@@ -816,13 +816,12 @@ export const DirectoryTree: React.FC<DirectoryTreeProps> = ({
                     value={newDirName}
                     onChange={(e) => setNewDirName(e.target.value)}
                     onKeyDown={(e) => {
+                      e.stopPropagation();
                       if (e.key === 'Enter') {
                         e.preventDefault();
-                        e.stopPropagation();
                         createDirectory();
                       } else if (e.key === 'Escape') {
                         e.preventDefault();
-                        e.stopPropagation();
                         cancelCreatingDirectory();
                       }
                     }}
@@ -905,13 +904,12 @@ export const DirectoryTree: React.FC<DirectoryTreeProps> = ({
                   value={newDirName}
                   onChange={(e) => setNewDirName(e.target.value)}
                   onKeyDown={(e) => {
+                    e.stopPropagation();
                     if (e.key === 'Enter') {
                       e.preventDefault();
-                      e.stopPropagation();
                       createDirectory();
                     } else if (e.key === 'Escape') {
                       e.preventDefault();
-                      e.stopPropagation();
                       cancelCreatingDirectory();
                     }
                   }}

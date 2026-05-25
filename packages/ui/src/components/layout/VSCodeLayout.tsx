@@ -5,7 +5,7 @@ import { SessionDialogs } from '@/components/session/SessionDialogs';
 import { ChatView } from '@/components/views/ChatView';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useViewportStore } from '@/sync/viewport-store';
-import { useSessions, useDirectorySync, useSessionMessages, useSessionMessagesResolved } from '@/sync/sync-context';
+import { useDirectorySync, useSessionMessages, useSessionMessagesResolved } from '@/sync/sync-context';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { ContextUsageDisplay } from '@/components/ui/ContextUsageDisplay';
 import { McpDropdown } from '@/components/mcp/McpDropdown';
@@ -31,6 +31,7 @@ import { useQuotaAutoRefresh, useQuotaStore } from '@/stores/useQuotaStore';
 import { useUpdateStore } from '@/stores/useUpdateStore';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
+import { serverRegistry } from '@/lib/opencode/server-registry';
 import type { UsageWindow } from '@/types';
 import type { SessionContextUsage } from '@/stores/types/sessionTypes';
 
@@ -136,15 +137,38 @@ export const VSCodeLayout: React.FC = () => {
   const expandedSidebarResizeStartWidthRef = React.useRef(SESSIONS_SIDEBAR_WIDTH);
   const expandedSidebarResizePointerIdRef = React.useRef<number | null>(null);
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
-  const sessions = useSessions();
-
-  const activeSessionTitle = React.useMemo(() => {
-    if (!currentSessionId) {
-      return null;
-    }
-    return sessions.find((session) => session.id === currentSessionId)?.title || t('vscodeLayout.title.sessionFallback');
-  }, [currentSessionId, sessions, t]);
   const newSessionDraftOpen = useSessionUIStore((state) => Boolean(state.newSessionDraft?.open));
+  const currentSessionServerId = currentSessionId ? serverRegistry.getServerForSession(currentSessionId) : undefined;
+  const initialSessionServerId = initialSessionId ? serverRegistry.getServerForSession(initialSessionId) : undefined;
+  const activeSessionTitleValue = useDirectorySync(
+    React.useCallback((state) => {
+      if (!currentSessionId) {
+        return null;
+      }
+      return state.session.find((session) => session.id === currentSessionId)?.title || null;
+    }, [currentSessionId]),
+    undefined,
+    currentSessionServerId,
+    currentSessionId ?? undefined,
+  );
+  const initialSessionExists = useDirectorySync(
+    React.useCallback((state) => {
+      if (!initialSessionId) {
+        return false;
+      }
+      return state.session.some((session) => session.id === initialSessionId);
+    }, [initialSessionId]),
+    undefined,
+    initialSessionServerId,
+    initialSessionId ?? undefined,
+  );
+
+  const activeSessionTitle = currentSessionId
+    ? activeSessionTitleValue || t('vscodeLayout.title.sessionFallback')
+    : null;
+  const chatTitle = newSessionDraftOpen && !currentSessionId
+    ? t('vscodeLayout.title.newSession')
+    : activeSessionTitle || t('vscodeLayout.title.chat');
   const isSyncingMessages = useViewportStore((state) => state.isSyncing);
   const hasActiveSessionWork = useDirectorySync((state) => {
     const statuses = state.session_status;
@@ -186,6 +210,19 @@ export const VSCodeLayout: React.FC = () => {
 
     void vscodeApi.executeCommand('openchamber.setActiveSession', currentSessionId, activeSessionTitle);
   }, [activeSessionTitle, currentSessionId, runtimeApis.vscode]);
+
+  React.useEffect(() => {
+    if (viewMode !== 'editor' || !currentSessionId || !activeSessionTitle) {
+      return;
+    }
+
+    const vscodeApi = runtimeApis.vscode;
+    if (!vscodeApi) {
+      return;
+    }
+
+    void vscodeApi.executeCommand('openchamber.updateSessionEditorTitle', currentSessionId, activeSessionTitle);
+  }, [activeSessionTitle, currentSessionId, runtimeApis.vscode, viewMode]);
 
   // If the active session disappears (e.g., deleted), go back to sessions list
   React.useEffect(() => {
@@ -338,13 +375,13 @@ export const VSCodeLayout: React.FC = () => {
       return;
     }
 
-    if (!sessions.some((session) => session.id === initialSessionId)) {
+    if (!initialSessionExists) {
       return;
     }
 
     hasAppliedInitialSession.current = true;
     void useSessionUIStore.getState().setCurrentSession(initialSessionId);
-  }, [connectionStatus, hasInitializedOnce, initialSessionId, openNewSessionDraft, sessions, viewMode]);
+  }, [connectionStatus, hasInitializedOnce, initialSessionExists, initialSessionId, openNewSessionDraft, viewMode]);
 
   // Track container width for responsive settings layout
   React.useEffect(() => {
@@ -420,7 +457,7 @@ export const VSCodeLayout: React.FC = () => {
         // Editor mode: just chat, no sidebar
         <div className="flex flex-col h-full">
           <VSCodeHeader
-            title={sessions.find((session) => session.id === currentSessionId)?.title || t('vscodeLayout.title.chat')}
+            title={activeSessionTitle || t('vscodeLayout.title.chat')}
             showMcp
             showContextUsage
             showRateLimits
@@ -471,9 +508,7 @@ export const VSCodeLayout: React.FC = () => {
           {/* Chat content */}
           <div className="flex-1 flex flex-col min-w-0">
             <VSCodeHeader
-              title={newSessionDraftOpen && !currentSessionId
-                ? t('vscodeLayout.title.newSession')
-                : sessions.find((session) => session.id === currentSessionId)?.title || t('vscodeLayout.title.chat')}
+              title={chatTitle}
               showMcp
               showContextUsage
               showRateLimits
@@ -490,26 +525,26 @@ export const VSCodeLayout: React.FC = () => {
         // Compact layout: drill-down between sessions list and chat
         <>
           {/* Sessions list view */}
-          <div className={cn('flex flex-col h-full', currentView !== 'sessions' && 'hidden')}>
-            <VSCodeHeader
-              title={t('vscodeLayout.title.sessions')}
-            />
-            <div className="flex-1 overflow-hidden">
-              <SessionSidebar
-                mobileVariant
-                allowReselect
-                onSessionSelected={() => setCurrentView('chat')}
-                hideDirectoryControls
-                showOnlyMainWorkspace
+          {currentView === 'sessions' ? (
+            <div className="flex flex-col h-full">
+              <VSCodeHeader
+                title={t('vscodeLayout.title.sessions')}
               />
+              <div className="flex-1 overflow-hidden">
+                <SessionSidebar
+                  mobileVariant
+                  allowReselect
+                  onSessionSelected={() => setCurrentView('chat')}
+                  hideDirectoryControls
+                  showOnlyMainWorkspace
+                />
+              </div>
             </div>
-          </div>
+          ) : null}
           {/* Chat view */}
           <div className={cn('flex flex-col h-full', currentView !== 'chat' && 'hidden')}>
             <VSCodeHeader
-              title={newSessionDraftOpen && !currentSessionId
-                ? t('vscodeLayout.title.newSession')
-                : sessions.find((session) => session.id === currentSessionId)?.title || t('vscodeLayout.title.chat')}
+              title={chatTitle}
               showBack
               onBack={handleBackToSessions}
               showMcp
@@ -567,17 +602,39 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
   }, [loadQuotaSettings]);
 
   const currentModel = getCurrentModel();
-  const latestAssistantModel = React.useMemo(() => {
+  const headerMessageSummary = React.useMemo(() => {
+    type AssistantTokens = { input: number; output: number; reasoning: number; cache: { read: number; write: number } };
+    let latestAssistantModel: ReturnType<typeof getCurrentModel> | undefined;
+    let lastTokens: AssistantTokens | undefined;
+    let lastMessageId: string | undefined;
+
     for (let i = currentSessionMessages.length - 1; i >= 0; i -= 1) {
-      const message = currentSessionMessages[i] as { role?: unknown; providerID?: unknown; modelID?: unknown };
-      if (message.role !== 'assistant') continue;
-      if (typeof message.providerID !== 'string' || typeof message.modelID !== 'string') continue;
-      const provider = providers.find((entry) => entry.id === message.providerID);
-      const model = provider?.models.find((entry) => entry.id === message.modelID);
-      if (model) return model;
+      const message = currentSessionMessages[i] as { role?: unknown; providerID?: unknown; modelID?: unknown; tokens?: AssistantTokens };
+      if (message.role !== 'assistant') {
+        continue;
+      }
+
+      if (!latestAssistantModel && typeof message.providerID === 'string' && typeof message.modelID === 'string') {
+        const provider = providers.find((entry) => entry.id === message.providerID);
+        latestAssistantModel = provider?.models.find((entry) => entry.id === message.modelID);
+      }
+
+      if (!lastTokens && message.tokens) {
+        const total = message.tokens.input + message.tokens.output + message.tokens.reasoning + (message.tokens.cache?.read ?? 0) + (message.tokens.cache?.write ?? 0);
+        if (total > 0) {
+          lastTokens = message.tokens;
+          lastMessageId = (currentSessionMessages[i] as { id?: string }).id;
+        }
+      }
+
+      if (latestAssistantModel && lastTokens) {
+        break;
+      }
     }
-    return undefined;
+
+    return { latestAssistantModel, lastTokens, lastMessageId };
   }, [currentSessionMessages, providers]);
+  const latestAssistantModel = headerMessageSummary.latestAssistantModel;
   const modelForLimits = currentModel?.limit ? currentModel : latestAssistantModel;
   const limit = modelForLimits && typeof modelForLimits.limit === 'object' && modelForLimits.limit !== null
     ? (modelForLimits.limit as Record<string, unknown>)
@@ -586,31 +643,11 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
   const outputLimit = limit && typeof limit.output === 'number' ? limit.output : 0;
 
   const contextUsage = React.useMemo<SessionContextUsage | null>(() => {
-    if (!currentSessionId || currentSessionMessages.length === 0) {
+    if (!currentSessionId || !headerMessageSummary.lastTokens) {
       return null;
     }
 
-    type AssistantTokens = { input: number; output: number; reasoning: number; cache: { read: number; write: number } };
-    let lastTokens: AssistantTokens | undefined;
-    let lastMessageId: string | undefined;
-
-    for (let i = currentSessionMessages.length - 1; i >= 0; i -= 1) {
-      const message = currentSessionMessages[i];
-      if (message.role !== 'assistant') continue;
-      const tokens = (message as { tokens?: AssistantTokens }).tokens;
-      if (!tokens) continue;
-      const total = tokens.input + tokens.output + tokens.reasoning + (tokens.cache?.read ?? 0) + (tokens.cache?.write ?? 0);
-      if (total > 0) {
-        lastTokens = tokens;
-        lastMessageId = message.id;
-        break;
-      }
-    }
-
-    if (!lastTokens) {
-      return null;
-    }
-
+    const lastTokens = headerMessageSummary.lastTokens;
     const totalTokens = lastTokens.input + lastTokens.output + lastTokens.reasoning + (lastTokens.cache?.read ?? 0) + (lastTokens.cache?.write ?? 0);
     const thresholdLimit = contextLimit > 0 ? contextLimit : 200000;
     const percentage = contextLimit > 0 ? Math.round((totalTokens / contextLimit) * 100) : 0;
@@ -623,9 +660,9 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
       outputLimit: outputLimit || undefined,
       normalizedOutput,
       thresholdLimit,
-      lastMessageId,
+      lastMessageId: headerMessageSummary.lastMessageId,
     };
-  }, [contextLimit, currentSessionId, currentSessionMessages, outputLimit]);
+  }, [contextLimit, currentSessionId, headerMessageSummary.lastMessageId, headerMessageSummary.lastTokens, outputLimit]);
   const [stableContextUsage, setStableContextUsage] = React.useState<SessionContextUsage | null>(null);
   const isContextUsageResolvedForSession = !currentSessionId || currentSessionMessagesResolved;
 
@@ -709,7 +746,7 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
           <button
             type="button"
             aria-label={t('sessions.switcher.openAria')}
-            className="flex min-w-0 flex-1 items-center rounded-md px-1 py-0.5 -my-0.5 text-left transition-colors hover:bg-interactive-hover/60 focus-visible:outline-none focus-visible:bg-interactive-hover/60"
+            className="inline-flex min-w-0 max-w-full items-center rounded-md px-1 py-0.5 -my-0.5 text-left transition-colors hover:bg-interactive-hover/60 focus-visible:outline-none focus-visible:bg-interactive-hover/60"
           >
             <span className="text-sm font-medium truncate" title={title}>{title}</span>
           </button>
@@ -717,6 +754,7 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
       ) : (
         <h1 className="text-sm font-medium truncate flex-1" title={title}>{title}</h1>
       )}
+      <div className="min-w-0 flex-1" />
       {onNewSession && (
         <button
           onClick={onNewSession}

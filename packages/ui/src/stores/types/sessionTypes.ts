@@ -244,9 +244,9 @@ export interface SessionStore {
     updateSessionTitle: (id: string, title: string) => Promise<void>;
     shareSession: (id: string) => Promise<Session | null>;
     unshareSession: (id: string) => Promise<Session | null>;
-    setCurrentSession: (id: string | null) => void;
+    setCurrentSession: (id: string | null, directoryHint?: string | null, options?: { syncDirectory?: boolean; serverId?: string }) => void;
     loadMessages: (sessionId: string, limit?: number) => Promise<void>;
-    sendMessage: (content: string, providerID: string, modelID: string, agent?: string, attachments?: AttachedFile[], agentMentionName?: string, additionalParts?: Array<{ text: string; attachments?: AttachedFile[]; synthetic?: boolean }>, variant?: string, inputMode?: 'normal' | 'shell') => Promise<void>;
+    sendMessage: (content: string, providerID: string, modelID: string, agent?: string, attachments?: AttachedFile[], agentMentionName?: string, additionalParts?: Array<{ text: string; attachments?: AttachedFile[]; synthetic?: boolean }>, variant?: string, inputMode?: 'normal' | 'shell', targetSessionId?: string) => Promise<void>;
     abortCurrentOperation: (sessionIdOverride?: string) => Promise<void>;
     acknowledgeSessionAbort: (sessionId: string) => void;
     armAbortPrompt: (durationMs?: number) => number | null;

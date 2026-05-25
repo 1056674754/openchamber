@@ -7,6 +7,7 @@ import { useI18n } from '@/lib/i18n';
 export type DeleteSessionConfirmState = {
   session: Session;
   descendantCount: number;
+  descendantIds: string[];
   archivedBucket: boolean;
 } | null;
 

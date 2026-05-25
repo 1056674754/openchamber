@@ -1,118 +1,50 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { summarizeText, generateSessionTitleCandidates } from './summarization.js';
+import { sanitizeForTTS, summarizeText, generateSessionTitleCandidates } from './summarization.js';
 
 const originalFetch = globalThis.fetch;
 
-function stubFetch(fetchMock) {
-  globalThis.fetch = fetchMock;
-}
-
-describe('text summarization zen requests', () => {
+describe('text summarization stubs', () => {
   afterEach(() => {
     globalThis.fetch = originalFetch;
   });
 
-  it('uses responses endpoint for gpt models', async () => {
-    const fetchMock = vi.fn(async () => ({
-      ok: true,
-      json: async () => ({
-        output: [{
-          type: 'message',
-          content: [{ type: 'output_text', text: 'Short summary' }],
-        }],
-      }),
-    }));
-    stubFetch(fetchMock);
+  it('removes code from TTS text before stripping markdown punctuation', () => {
+    expect(sanitizeForTTS('Read `const value = 1` aloud')).toBe('Read aloud');
+    expect(sanitizeForTTS('Before\n```js\nconst value = 1\n```\nAfter')).toBe('Before After');
+  });
+
+  it('does not call the retired zen provider', async () => {
+    const fetchMock = vi.fn();
+    globalThis.fetch = fetchMock;
 
     const result = await summarizeText({
-      text: 'Long text '.repeat(30),
+      text: 'The implementation now correctly loads notification templates before dispatching the notification. It also fetches the latest assistant message when the event payload does not include message parts. This should make completion notifications match user settings.',
+      threshold: 0,
+      maxLength: 80,
+      zenModel: 'gpt-5-nano',
+      mode: 'notification',
+    });
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(result.summarized).toBe(false);
+    expect(result.reason).toBe('Model summarization provider unavailable');
+    expect(result.summary).toBe('The implementation now correctly loads notification templates before dispatchin…');
+  });
+
+  it('returns local note fallback while provider is unavailable', async () => {
+    const result = await summarizeText({
+      text: 'First sentence. Second sentence with the useful insight.',
       threshold: 0,
       maxLength: 100,
-      zenModel: 'gpt-5-nano',
-      mode: 'notification',
+      mode: 'note',
     });
 
-    expect(fetchMock).toHaveBeenCalledWith(
-      'https://opencode.ai/zen/v1/responses',
-      expect.objectContaining({
-        body: expect.stringContaining('"input"'),
-      }),
-    );
-    expect(result.summary).toBe('Short summary');
-  });
-
-  it('uses chat completions endpoint for openai-compatible zen models', async () => {
-    const fetchMock = vi.fn(async () => ({
-      ok: true,
-      json: async () => ({
-        choices: [{ message: { content: 'Chat summary' } }],
-      }),
-    }));
-    stubFetch(fetchMock);
-
-    const result = await summarizeText({
-      text: 'Long text '.repeat(30),
-      threshold: 0,
-      maxLength: 100,
-      zenModel: 'big-pickle',
-      mode: 'notification',
+    expect(result).toMatchObject({
+      summary: 'First sentence.',
+      summarized: false,
+      reason: 'Model summarization provider unavailable',
     });
-
-    expect(fetchMock).toHaveBeenCalledWith(
-      'https://opencode.ai/zen/v1/chat/completions',
-      expect.objectContaining({
-        body: expect.stringContaining('"messages"'),
-      }),
-    );
-    expect(result.summary).toBe('Chat summary');
-  });
-
-  it('clamps successful model summaries to the requested max length', async () => {
-    const fetchMock = vi.fn(async () => ({
-      ok: true,
-      json: async () => ({
-        output: [{
-          type: 'message',
-          content: [{ type: 'output_text', text: 'This response is too long' }],
-        }],
-      }),
-    }));
-    stubFetch(fetchMock);
-
-    const result = await summarizeText({
-      text: 'Long text '.repeat(30),
-      threshold: 0,
-      maxLength: 12,
-      zenModel: 'gpt-5-nano',
-      mode: 'notification',
-    });
-
-    expect(result.summary).toBe('This respon');
-    expect(result.summary.length).toBeLessThanOrEqual(12);
-  });
-
-  it('returns full text when max length is non-finite', async () => {
-    const fetchMock = vi.fn(async () => ({
-      ok: true,
-      json: async () => ({
-        output: [{
-          type: 'message',
-          content: [{ type: 'output_text', text: 'A'.repeat(100) }],
-        }],
-      }),
-    }));
-    stubFetch(fetchMock);
-
-    const result = await summarizeText({
-      text: 'Long text '.repeat(30),
-      threshold: 0,
-      maxLength: Infinity,
-      zenModel: 'gpt-5-nano',
-      mode: 'notification',
-    });
-
-    expect(result.summary).toBe('A'.repeat(100));
   });
 });
 
@@ -121,150 +53,34 @@ describe('generateSessionTitleCandidates', () => {
     globalThis.fetch = originalFetch;
   });
 
-  it('parses a clean JSON array from zen responses endpoint', async () => {
-    const fetchMock = vi.fn(async () => ({
-      ok: true,
-      json: async () => ({
-        output: [{
-          type: 'message',
-          content: [{
-            type: 'output_text',
-            text: '["Fix OAuth token refresh", "Refactor auth callback loop", "Token lifecycle audit"]',
-          }],
-        }],
-      }),
-    }));
-    stubFetch(fetchMock);
+  it('returns local fallback candidates without calling zen', async () => {
+    const fetchMock = vi.fn();
+    globalThis.fetch = fetchMock;
 
     const result = await generateSessionTitleCandidates({
-      text: 'User discussed OAuth token refresh issues.',
+      text: 'OAuth token refresh failed. Token lifecycle audit is needed.',
       count: 3,
+      maxLength: 60,
       zenModel: 'gpt-5-nano',
     });
 
-    expect(result.generated).toBe(true);
-    expect(result.candidates).toHaveLength(3);
-    expect(result.candidates[0]).toBe('Fix OAuth token refresh');
-    expect(result.candidates[1]).toBe('Refactor auth callback loop');
-    expect(result.candidates[2]).toBe('Token lifecycle audit');
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(result.generated).toBe(false);
+    expect(result.reason).toBe('Model summarization provider unavailable');
+    expect(result.candidates).toContain('OAuth token refresh failed.');
+    expect(result.candidates).toContain('Token lifecycle audit is needed.');
   });
 
-  it('strips markdown code fences around JSON', async () => {
-    const fetchMock = vi.fn(async () => ({
-      ok: true,
-      json: async () => ({
-        output: [{
-          type: 'message',
-          content: [{
-            type: 'output_text',
-            text: '```json\n["Alpha", "Beta", "Gamma"]\n```',
-          }],
-        }],
-      }),
-    }));
-    stubFetch(fetchMock);
-
+  it('truncates local candidates exceeding maxLength', async () => {
     const result = await generateSessionTitleCandidates({
-      text: 'Conversation text here.',
-      count: 3,
-      zenModel: 'gpt-5-nano',
-    });
-
-    expect(result.generated).toBe(true);
-    expect(result.candidates).toEqual(['Alpha', 'Beta', 'Gamma']);
-  });
-
-  it('falls back to newline parsing when model returns numbered list', async () => {
-    const fetchMock = vi.fn(async () => ({
-      ok: true,
-      json: async () => ({
-        choices: [{
-          message: {
-            content: '1. First title\n2. Second title\n3. Third title',
-          },
-        }],
-      }),
-    }));
-    stubFetch(fetchMock);
-
-    const result = await generateSessionTitleCandidates({
-      text: 'Conversation text here.',
-      count: 3,
-      zenModel: 'big-pickle',
-    });
-
-    expect(result.generated).toBe(true);
-    expect(result.candidates).toEqual(['First title', 'Second title', 'Third title']);
-  });
-
-  it('strips leading bullets from newline fallback', async () => {
-    const fetchMock = vi.fn(async () => ({
-      ok: true,
-      json: async () => ({
-        choices: [{
-          message: {
-            content: '- One title\n- Two title\n- Three title',
-          },
-        }],
-      }),
-    }));
-    stubFetch(fetchMock);
-
-    const result = await generateSessionTitleCandidates({
-      text: 'Conversation text here.',
-      count: 3,
-      zenModel: 'big-pickle',
-    });
-
-    expect(result.candidates).toEqual(['One title', 'Two title', 'Three title']);
-  });
-
-  it('strips wrapping quotes from candidates', async () => {
-    const fetchMock = vi.fn(async () => ({
-      ok: true,
-      json: async () => ({
-        output: [{
-          type: 'message',
-          content: [{
-            type: 'output_text',
-            text: '["\\"Quoted title\\"", "Another one", "Third"]',
-          }],
-        }],
-      }),
-    }));
-    stubFetch(fetchMock);
-
-    const result = await generateSessionTitleCandidates({
-      text: 'x',
-      count: 3,
-      zenModel: 'gpt-5-nano',
-    });
-
-    expect(result.candidates[0]).toBe('Quoted title');
-  });
-
-  it('truncates candidates exceeding maxLength', async () => {
-    const fetchMock = vi.fn(async () => ({
-      ok: true,
-      json: async () => ({
-        output: [{
-          type: 'message',
-          content: [{
-            type: 'output_text',
-            text: '["This is an extremely long title that goes on and on and on way past the limit"]',
-          }],
-        }],
-      }),
-    }));
-    stubFetch(fetchMock);
-
-    const result = await generateSessionTitleCandidates({
-      text: 'x',
+      text: 'This is an extremely long title that goes on and on and on way past the limit.',
       count: 1,
       maxLength: 20,
       zenModel: 'gpt-5-nano',
     });
 
+    expect(result.generated).toBe(false);
+    expect(result.candidates).toHaveLength(1);
     expect(result.candidates[0].length).toBeLessThanOrEqual(20);
   });
 
@@ -276,46 +92,5 @@ describe('generateSessionTitleCandidates', () => {
     expect(result.generated).toBe(false);
     expect(result.candidates).toEqual([]);
     expect(result.reason).toBe('No text provided');
-  });
-
-  it('returns generated=false when zen API fails', async () => {
-    const fetchMock = vi.fn(async () => ({
-      ok: false,
-      status: 500,
-      json: async () => ({ error: 'server error' }),
-    }));
-    stubFetch(fetchMock);
-
-    const result = await generateSessionTitleCandidates({
-      text: 'x',
-      count: 3,
-      zenModel: 'gpt-5-nano',
-    });
-
-    expect(result.generated).toBe(false);
-    expect(result.candidates).toEqual([]);
-    expect(result.reason).toContain('500');
-  });
-
-  it('returns generated=false when output is unparseable', async () => {
-    const fetchMock = vi.fn(async () => ({
-      ok: true,
-      json: async () => ({
-        output: [{
-          type: 'message',
-          content: [{ type: 'output_text', text: '' }],
-        }],
-      }),
-    }));
-    stubFetch(fetchMock);
-
-    const result = await generateSessionTitleCandidates({
-      text: 'x',
-      count: 3,
-      zenModel: 'gpt-5-nano',
-    });
-
-    expect(result.generated).toBe(false);
-    expect(result.candidates).toEqual([]);
   });
 });

@@ -1,11 +1,9 @@
 import React from 'react';
 import type { Session } from '@opencode-ai/sdk/v2';
 import { toast } from '@/components/ui';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/lib/i18n';
-import { useDeviceInfo, useTabletStandalonePwaRuntime } from '@/lib/device';
+import { useDeviceInfo } from '@/lib/device';
 import { isDesktopShell } from '@/lib/desktop';
-import { isDesktopWindowFullscreen as getDesktopWindowFullscreen, onDesktopWindowResized, startDesktopWindowDrag } from '@/lib/desktopNative';
 import { sessionEvents } from '@/lib/sessionEvents';
 import { formatDirectoryName, cn } from '@/lib/utils';
 import { useSessionUIStore } from '@/sync/session-ui-store';
@@ -38,7 +36,6 @@ import { useStickyProjectHeaders } from './sidebar/hooks/useStickyProjectHeaders
 import { getGitHubPrStatusKey, usePrVisualSummaryByKeys, useGitHubPrStatusStore } from '@/stores/useGitHubPrStatusStore';
 import { ProjectEditDialog } from '@/components/layout/ProjectEditDialog';
 import { UpdateDialog } from '@/components/ui/UpdateDialog';
-import { Icon } from "@/components/icon/Icon";
 import { SessionGroupSection } from './sidebar/SessionGroupSection';
 import { SidebarHeader } from './sidebar/SidebarHeader';
 import { SidebarActivitySections, type ActivitySection } from './sidebar/SidebarActivitySections';
@@ -88,7 +85,10 @@ const PROJECT_COLLAPSE_STORAGE_KEY = 'oc.sessions.projectCollapse';
 const GROUP_ORDER_STORAGE_KEY = 'oc.sessions.groupOrder';
 const GROUP_COLLAPSE_STORAGE_KEY = 'oc.sessions.groupCollapse';
 const PROJECT_ACTIVE_SESSION_STORAGE_KEY = 'oc.sessions.activeSessionByProject';
-const SESSION_EXPANDED_STORAGE_KEY = 'oc.sessions.expandedParents';
+// v2 stores composite `${renderContext}:${active|archived}:${sessionId}` entries so
+// duplicate session rows in different contexts keep independent expand state.
+const SESSION_EXPANDED_STORAGE_KEY = 'oc.sessions.expandedParents.v2';
+const LEGACY_SESSION_EXPANDED_STORAGE_KEY = 'oc.sessions.expandedParents';
 const SESSION_PINNED_STORAGE_KEY = 'oc.sessions.pinned';
 const SESSION_PINNED_PER_PROJECT_STORAGE_KEY = 'oc.sessions.pinnedByProject';
 const SESSION_PINNED_ORDER_STORAGE_KEY = 'oc.sessions.pinnedOrder';
@@ -330,7 +330,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   const removeProject = useProjectsStore((state) => state.removeProject);
   const setActiveProjectIdOnly = useProjectsStore((state) => state.setActiveProjectIdOnly);
   const updateProjectMeta = useProjectsStore((state) => state.updateProjectMeta);
-  const reorderProjects = useProjectsStore((state) => state.reorderProjects);
+  const reorderProjectsById = useProjectsStore((state) => state.reorderProjectsById);
   const toggleProjectPin = useProjectsStore((state) => state.toggleProjectPin);
   const setActiveMainTab = useUIStore((state) => state.setActiveMainTab);
   const openContextPanelTab = useUIStore((state) => state.openContextPanelTab);
@@ -339,7 +339,6 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   const setAboutDialogOpen = useUIStore((state) => state.setAboutDialogOpen);
   const setSessionSwitcherOpen = useUIStore((state) => state.setSessionSwitcherOpen);
   const setScheduledTasksDialogOpen = useUIStore((state) => state.setScheduledTasksDialogOpen);
-  const toggleSidebar = useUIStore((state) => state.toggleSidebar);
   const openMultiRunLauncher = useUIStore((state) => state.openMultiRunLauncher);
 const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
   const notifyOnSubtasks = useUIStore((state) => state.notifyOnSubtasks);
@@ -603,8 +602,6 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
   }, []);
 
   const isDesktopShellRuntime = React.useMemo(() => isDesktopShell(), []);
-  const isTabletStandalonePwa = useTabletStandalonePwaRuntime();
-  const [isDesktopWindowFullscreen, setIsDesktopWindowFullscreen] = React.useState(false);
 
   React.useEffect(() => {
     const loadTempSessions = async () => {
@@ -628,77 +625,6 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
   const isVSCode = React.useMemo(() => isVSCodeRuntime(), []);
   const { isTablet } = useDeviceInfo();
   const alwaysShowSidebarActions = mobileVariant || isTablet;
-  const isMacPlatform = React.useMemo(() => {
-    if (typeof navigator === 'undefined') {
-      return false;
-    }
-    return /Macintosh|Mac OS X/.test(navigator.userAgent || '');
-  }, []);
-  const isWebRuntime = !mobileVariant && !isVSCode && !isDesktopShellRuntime;
-  const showDesktopSidebarChrome = !mobileVariant && !isVSCode && !isWebRuntime;
-  const desktopSidebarTopPaddingClass = (isDesktopShellRuntime && isMacPlatform && !isDesktopWindowFullscreen) || isTabletStandalonePwa ? 'pl-[5.5rem]' : 'pl-3';
-  const desktopSidebarToggleButtonClass = 'app-region-no-drag inline-flex h-8 w-8 items-center justify-center rounded-md typography-ui-label font-medium text-foreground transition-colors hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:pointer-events-none disabled:opacity-50';
-
-  React.useEffect(() => {
-    if (!isDesktopShellRuntime || !isMacPlatform) {
-      setIsDesktopWindowFullscreen(false);
-      return;
-    }
-
-    let disposed = false;
-    let unlistenResize: (() => void) | null = null;
-
-    const syncFullscreenState = async () => {
-      try {
-        const fullscreen = await getDesktopWindowFullscreen();
-        if (!disposed) {
-          setIsDesktopWindowFullscreen(fullscreen);
-        }
-      } catch {
-        if (!disposed) {
-          setIsDesktopWindowFullscreen(false);
-        }
-      }
-    };
-
-    const attach = async () => {
-      try {
-        unlistenResize = onDesktopWindowResized(() => {
-          void syncFullscreenState();
-        });
-      } catch {
-        // Ignore listener setup failures; fallback state remains false.
-      }
-    };
-
-    void syncFullscreenState();
-    void attach();
-
-    return () => {
-      disposed = true;
-      if (unlistenResize) {
-        unlistenResize();
-      }
-    };
-  }, [isDesktopShellRuntime, isMacPlatform]);
-
-  const handleDesktopSidebarDragStart = React.useCallback(async (event: React.MouseEvent) => {
-    const target = event.target as HTMLElement;
-    if (target.closest('.app-region-no-drag')) {
-      return;
-    }
-    if (target.closest('button, a, input, select, textarea')) {
-      return;
-    }
-    if (event.button !== 0) {
-      return;
-    }
-    if (!isDesktopShellRuntime) {
-      return;
-    }
-
-    await startDesktopWindowDrag();
-  }, [isDesktopShellRuntime]);
 
   // Global pins only - project-scoped pins are resolved in useSessionGrouping per project section.
   const effectivePinnedSessionIds = pinnedSessionIds;
@@ -724,6 +650,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
     safeStorage,
     keys: {
       sessionExpanded: SESSION_EXPANDED_STORAGE_KEY,
+      sessionExpandedLegacy: LEGACY_SESSION_EXPANDED_STORAGE_KEY,
       projectCollapse: PROJECT_COLLAPSE_STORAGE_KEY,
       sessionPinned: SESSION_PINNED_STORAGE_KEY,
       groupOrder: GROUP_ORDER_STORAGE_KEY,
@@ -1021,16 +948,26 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
     sessionEvents.requestDirectoryDialog();
   }, []);
 
-  // Auto-expand parent session when navigating to a subagent (child) session
+  // Auto-expand parent session when navigating to a subagent (child) session.
+  // The parent may be visible in multiple render contexts, so expand each common
+  // context without coupling future manual toggles across those contexts.
   React.useEffect(() => {
     if (!currentSessionId) return;
     const current = sessions.find((s) => s.id === currentSessionId);
     const parentID = (current as Session & { parentID?: string | null })?.parentID;
     if (!parentID) return;
+    const keysToAdd = [
+      `project:active:${parentID}`,
+      `project:archived:${parentID}`,
+      `recent:active:${parentID}`,
+      `recent:archived:${parentID}`,
+      `global-pinned:active:${parentID}`,
+      `global-pinned:archived:${parentID}`,
+    ];
     setExpandedParents((prev) => {
-      if (prev.has(parentID)) return prev;
+      if (keysToAdd.every((key) => prev.has(key))) return prev;
       const next = new Set(prev);
-      next.add(parentID);
+      keysToAdd.forEach((key) => next.add(key));
       try {
         safeStorage.setItem(SESSION_EXPANDED_STORAGE_KEY, JSON.stringify(Array.from(next)));
       } catch { /* ignored */ }
@@ -1038,13 +975,13 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
     });
   }, [currentSessionId, sessions, safeStorage]);
 
-  const toggleParent = React.useCallback((sessionId: string) => {
+  const toggleParent = React.useCallback((expansionKey: string) => {
     setExpandedParents((prev) => {
       const next = new Set(prev);
-      if (next.has(sessionId)) {
-        next.delete(sessionId);
+      if (next.has(expansionKey)) {
+        next.delete(expansionKey);
       } else {
-        next.add(sessionId);
+        next.add(expansionKey);
       }
       try {
         safeStorage.setItem(SESSION_EXPANDED_STORAGE_KEY, JSON.stringify(Array.from(next)));
@@ -1254,8 +1191,6 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
       <p className="typography-meta mt-1">{t('sessions.sidebar.empty.noMatches.description')}</p>
     </div>
   );
-
-  const reserveHeaderActionsSpace = true;
 
   const { currentSessionDirectory } = useProjectSessionSelection({
     projectSections,
@@ -1642,7 +1577,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
   const mobileHeaderActionButtonClass =
     'inline-flex h-6 w-6 cursor-pointer items-center justify-center rounded-md leading-none text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 disabled:cursor-not-allowed';
   const headerActionButtonClass = mobileVariant ? mobileHeaderActionButtonClass : desktopHeaderActionButtonClass;
-  const headerActionIconClass = 'h-4 w-4';
+  const headerActionIconClass = 'h-4.5 w-4.5';
   const stuckProjectHeaders = useStickyProjectHeaders({
     isDesktopShellRuntime,
     projectSections,
@@ -2037,14 +1972,6 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
     window.addEventListener('keydown', listener);
     return () => window.removeEventListener('keydown', listener);
   }, [handleBulkDelete, isInlineEditing, multiSelectStoreApi, selectionModeEnabled]);
-  const handleSidebarNewSession = React.useCallback(() => {
-    setActiveMainTab('chat');
-    if (mobileVariant) {
-      setSessionSwitcherOpen(false);
-    }
-    openNewSessionDraft();
-  }, [mobileVariant, openNewSessionDraft, setActiveMainTab, setSessionSwitcherOpen]);
-
   const handleOpenMultiRunFromHeader = React.useCallback(() => {
     setActiveMainTab('chat');
     if (mobileVariant) {
@@ -2073,41 +2000,12 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
         mobileVariant ? '' : 'bg-transparent',
       )}
     >
-      {showDesktopSidebarChrome ? (
-        <div
-          onMouseDown={handleDesktopSidebarDragStart}
-          className={cn(
-            'app-region-drag flex h-[var(--oc-header-height,56px)] flex-shrink-0 items-center pr-3',
-            desktopSidebarTopPaddingClass,
-          )}
-        >
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                type="button"
-                onClick={toggleSidebar}
-                className={desktopSidebarToggleButtonClass}
-                aria-label={t('sessions.sidebar.header.actions.closeSessions')}
-              >
-                <Icon name="layout-left" className="h-[18px] w-[18px]" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent>
-              <p>{t('sessions.sidebar.header.actions.closeSessions')}</p>
-            </TooltipContent>
-          </Tooltip>
-        </div>
-      ) : null}
-
       <SidebarHeader
         hideDirectoryControls={hideDirectoryControls}
         handleOpenDirectoryDialog={handleOpenDirectoryDialog}
-        handleNewSession={handleSidebarNewSession}
-        handleNewTempSession={handleNewTempSession}
         canOpenMultiRun={multiRunEnabled && projects.length > 0}
         openMultiRunLauncher={handleOpenMultiRunFromHeader}
         headerActionIconClass={headerActionIconClass}
-        reserveHeaderActionsSpace={reserveHeaderActionsSpace}
         headerActionButtonClass={headerActionButtonClass}
         isSessionSearchOpen={isSessionSearchOpen}
         setIsSessionSearchOpen={setIsSessionSearchOpen}
@@ -2121,9 +2019,6 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
         openScheduledTasksDialog={() => setScheduledTasksDialogOpen(true)}
         selectionModeEnabled={selectionModeEnabled}
         onToggleSelectionMode={handleToggleSelectionMode}
-        showSidebarToggle={isWebRuntime}
-        onToggleSidebar={toggleSidebar}
-        avoidWindowControlsOverlay={isTabletStandalonePwa}
         onRefresh={() => { void refreshGlobalSessions(syncSessionsSnapshotRef.current); }}
       />
 
@@ -2154,7 +2049,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
         openProjectEditDialog={setEditingProjectDialogId}
         removeProject={removeProject}
         projectHeaderSentinelRefs={projectHeaderSentinelRefs}
-        reorderProjects={reorderProjects}
+        reorderProjectsById={reorderProjectsById}
         toggleProjectPin={toggleProjectPin}
         getOrderedGroups={getOrderedGroups}
         setGroupOrderByProject={setGroupOrderByProject}

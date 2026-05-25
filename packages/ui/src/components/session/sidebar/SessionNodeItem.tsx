@@ -35,6 +35,7 @@ import { useDesktopSshStore } from '@/stores/useDesktopSshStore';
 import { resolveInstanceLabel } from '@/lib/desktopSsh';
 import { serverRegistry, DEFAULT_SERVER_ID } from '@/lib/opencode/server-registry';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
+import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
 import { useI18n } from '@/lib/i18n';
 import { parseMultiRunSessionTitle } from '@/lib/multirun/title';
 import { MultiRunFusionDialog } from '@/components/multirun/MultiRunFusionDialog';
@@ -133,7 +134,7 @@ type Props = {
   setEditTitle: (value: string) => void;
   handleSaveEdit: () => void;
   handleCancelEdit: () => void;
-  toggleParent: (sessionId: string) => void;
+  toggleParent: (expansionKey: string) => void;
   handleSessionSelect: (sessionId: string, sessionDirectory: string | null, isMissingDirectory: boolean, projectId?: string | null) => void;
   handleSessionDoubleClick: () => void;
   togglePinnedSession: (sessionId: string, scope: 'global' | string) => void;
@@ -175,8 +176,14 @@ const treeContainsExpandedStateChange = (
   nextNode: SessionNode,
   prevExpandedParents: Set<string>,
   nextExpandedParents: Set<string>,
+  prevRenderContext: 'project' | 'recent' | 'global-pinned',
+  nextRenderContext: 'project' | 'recent' | 'global-pinned',
+  prevArchivedBucket: boolean,
+  nextArchivedBucket: boolean,
 ): boolean => {
-  if (prevExpandedParents.has(prevNode.session.id) !== nextExpandedParents.has(nextNode.session.id)) {
+  const prevExpansionKey = `${prevRenderContext}:${prevArchivedBucket ? 'archived' : 'active'}:${prevNode.session.id}`;
+  const nextExpansionKey = `${nextRenderContext}:${nextArchivedBucket ? 'archived' : 'active'}:${nextNode.session.id}`;
+  if (prevExpandedParents.has(prevExpansionKey) !== nextExpandedParents.has(nextExpansionKey)) {
     return true;
   }
 
@@ -186,7 +193,18 @@ const treeContainsExpandedStateChange = (
     if (!nextChild) {
       return true;
     }
-    if (treeContainsExpandedStateChange(prevChild, nextChild, prevExpandedParents, nextExpandedParents)) {
+    if (
+      treeContainsExpandedStateChange(
+        prevChild,
+        nextChild,
+        prevExpandedParents,
+        nextExpandedParents,
+        prevRenderContext,
+        nextRenderContext,
+        prevArchivedBucket,
+        nextArchivedBucket,
+      )
+    ) {
       return true;
     }
   }
@@ -268,7 +286,18 @@ const areEqual = (prev: Props, next: Props): boolean => {
   const nextIsPinned = next.pinnedSessionIds.has(nextSessionId)
     || Boolean(next.groupDirectory && next.pinnedSessionIdsByProject.get(next.groupDirectory)?.has(nextSessionId));
   if (prevIsPinned !== nextIsPinned) return false;
-  if (treeContainsExpandedStateChange(prev.node, next.node, prev.expandedParents, next.expandedParents)) return false;
+  if (
+    treeContainsExpandedStateChange(
+      prev.node,
+      next.node,
+      prev.expandedParents,
+      next.expandedParents,
+      prev.renderContext ?? 'project',
+      next.renderContext ?? 'project',
+      prev.archivedBucket ?? false,
+      next.archivedBucket ?? false,
+    )
+  ) return false;
   if (prev.hasSessionSearchQuery !== next.hasSessionSearchQuery) return false;
   if (prev.normalizedSessionSearchQuery !== next.normalizedSessionSearchQuery) return false;
   if (prev.notifyOnSubtasks !== next.notifyOnSubtasks) return false;
@@ -364,12 +393,14 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
   const isMinimalMode = displayMode === 'minimal';
   const isVSCode = React.useMemo(() => isVSCodeRuntime(), []);
   const isElectron = React.useMemo(() => canUseElectronDesktopIPC(), []);
+  const runtimeApis = React.useContext(RuntimeAPIContext);
   const revealOnHoverClass = isVSCode
     ? 'group-hover:opacity-100 group-hover:pointer-events-auto'
     : 'group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto';
   const hideOnHoverClass = isVSCode
     ? 'group-hover:opacity-0'
     : 'group-hover:opacity-0 group-focus-within:opacity-0';
+  const showOpenInEditorAction = isVSCode;
   const suppressNextSelectRef = React.useRef(false);
   const [isTouchPressed, setIsTouchPressed] = React.useState(false);
 
@@ -524,7 +555,8 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
   const isPinnedSession = pinnedSessionIds.has(session.id)
     || Boolean(groupDirectory && pinnedSessionIdsByProject.get(groupDirectory)?.has(session.id));
   const isGloballyPinned = pinnedSessionIds.has(session.id);
-  const isExpanded = hasSessionSearchQuery ? true : expandedParents.has(session.id);
+  const expansionKey = menuInstanceKey;
+  const isExpanded = hasSessionSearchQuery ? true : expandedParents.has(expansionKey);
   const isSubtaskSession = Boolean((resolvedSession as Session & { parentID?: string | null }).parentID);
   const unseenCount = useSessionUnseenCount(session.id);
   const needsAttention = unseenCount > 0 && (!isSubtaskSession || notifyOnSubtasks);
@@ -803,11 +835,11 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
       onClick={(e) => {
         e.preventDefault();
         e.stopPropagation();
-        toggleParent(session.id);
+        toggleParent(expansionKey);
       }}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault(); e.stopPropagation(); toggleParent(session.id);
+          e.preventDefault(); e.stopPropagation(); toggleParent(expansionKey);
         }
       }}
       className={cn(
@@ -938,6 +970,12 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
     }
   };
 
+  const handleOpenInEditorClick = (event: React.MouseEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    void runtimeApis?.vscode?.executeCommand('openchamber.openSessionInEditor', session.id, sessionTitle);
+  };
+
   const sessionMenuContent = (
     <DropdownMenuContent align="end" className="min-w-[180px]" onCloseAutoFocus={(event) => { if (renamingFolderId) event.preventDefault(); }}>
       <DropdownMenuItem
@@ -988,7 +1026,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
       )}
       {!resolvedSession.share ? (
         <DropdownMenuItem onClick={() => handleShareSession(resolvedSession)} className="[&>svg]:mr-1">
-          <Icon name="share2" className="mr-1 h-4 w-4"  />
+          <Icon name="share-2" className="mr-1 h-4 w-4"  />
           {t('sessions.sidebar.session.menu.share')}
         </DropdownMenuItem>
       ) : (
@@ -1071,7 +1109,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
           }}
           className="[&>svg]:mr-1"
         >
-          <Icon name="chat4" className="mr-1 h-4 w-4"  />
+          <Icon name="chat-4" className="mr-1 h-4 w-4"  />
           <span className="truncate">{t('sessions.sidebar.session.menu.openInSidePanel')}</span>
           <span className="shrink-0 typography-micro px-1 rounded leading-none pb-px text-[var(--status-warning)] bg-[var(--status-warning)]/10">{t('sessions.sidebar.session.menu.betaBadge')}</span>
         </DropdownMenuItem>
@@ -1145,7 +1183,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
                     className={cn(
                       'flex min-w-0 flex-1 cursor-pointer flex-col gap-0 overflow-hidden rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 text-foreground select-none disabled:cursor-not-allowed',
                       isTouchPressed && 'bg-interactive-hover/70',
-                      alwaysShowActions ? 'pr-7' : null,
+                      alwaysShowActions ? 'pr-7' : (showOpenInEditorAction ? 'transition-[padding] group-hover:pr-12 group-focus-within:pr-12' : null),
                     )}
                     >
                     <div className={cn('flex w-full items-center min-w-0 flex-1 overflow-hidden', isGlobalPinnedContext ? 'gap-1.5' : 'gap-0.5')}>
@@ -1212,7 +1250,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
                 className={cn(
                   'flex min-w-0 flex-1 cursor-pointer flex-col gap-0 overflow-hidden rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 text-foreground select-none disabled:cursor-not-allowed',
                   isTouchPressed && 'bg-interactive-hover/70',
-                  alwaysShowActions ? 'pr-7' : null,
+                  alwaysShowActions ? 'pr-7' : (showOpenInEditorAction ? 'transition-[padding] group-hover:pr-12 group-focus-within:pr-12' : null),
                 )}
               >
                   <div className={cn('flex w-full items-center min-w-0 flex-1 overflow-hidden', isGlobalPinnedContext ? 'gap-1.5' : 'gap-0.5')}>
@@ -1259,6 +1297,32 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
                 : cn('opacity-0', revealOnHoverClass),
           )}>
             {/* Context menu uses hidden positioned trigger only — no visible "..." button (removed per project convention, do not re-add) */}
+            {showOpenInEditorAction ? (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    className="inline-flex h-5 w-5 items-center justify-center rounded-sm text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+                    aria-label={t('sessions.sidebar.session.actions.openInEditor')}
+                    onPointerDown={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                    }}
+                    onMouseDown={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                    }}
+                    onClick={handleOpenInEditorClick}
+                    onKeyDown={(event) => event.stopPropagation()}
+                  >
+                    <Icon name="external-link" className="h-3.5 w-3.5" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="left" sideOffset={8}>
+                  {t('sessions.sidebar.session.actions.openInEditor')}
+                </TooltipContent>
+              </Tooltip>
+            ) : null}
             <button
               type="button"
               className={cn(

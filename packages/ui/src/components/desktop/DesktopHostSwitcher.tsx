@@ -871,7 +871,7 @@ export function DesktopHostSwitcherDialog({
           <div className="flex-shrink-0 flex items-center justify-between gap-2 px-2.5 py-1.5">
             <span className="typography-micro text-muted-foreground">{t('desktopHostSwitcher.ssh.needInstancesHint')}</span>
             <Button type="button" variant="ghost" size="sm" onClick={openRemoteInstancesSettings}>
-              <Icon name="settings3" className="h-4 w-4"  />
+              <Icon name="settings-3" className="h-4 w-4"  />
               {t('desktopHostSwitcher.actions.remoteSsh')}
             </Button>
           </div>
@@ -881,7 +881,7 @@ export function DesktopHostSwitcherDialog({
           <div className="flex-shrink-0 flex items-center justify-between gap-2 px-2.5 py-1.5">
             <span className="typography-micro text-muted-foreground">{t('desktopHostSwitcher.ssh.needInstancesHint')}</span>
             <Button type="button" variant="ghost" size="sm" onClick={openRemoteInstancesSettings}>
-              <Icon name="settings3" className="h-4 w-4"  />
+              <Icon name="settings-3" className="h-4 w-4"  />
               {t('desktopHostSwitcher.actions.remoteSsh')}
             </Button>
           </div>
@@ -987,7 +987,7 @@ export function DesktopHostSwitcherDialog({
                               disabled={isSaving}
                               onClick={(e) => e.stopPropagation()}
                             >
-                              <Icon name="more2" className="h-4 w-4"  />
+                              <Icon name="more-2" className="h-4 w-4"  />
                             </button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end" className="w-fit min-w-28">
@@ -1036,7 +1036,7 @@ export function DesktopHostSwitcherDialog({
                               void connectSshHostInPlace(host);
                             }}
                           >
-                            {switchingHostId === host.id ? <Icon name="loader4" className="h-3.5 w-3.5 animate-spin"  /> : <Icon name="plug2" className="h-3.5 w-3.5"  />}
+                            {switchingHostId === host.id ? <Icon name="loader-4" className="h-3.5 w-3.5 animate-spin"  /> : <Icon name="plug-2" className="h-3.5 w-3.5"  />}
                             {t('desktopHostSwitcher.actions.connect')}
                           </Button>
                         ) : (
@@ -1064,7 +1064,7 @@ export function DesktopHostSwitcherDialog({
                   {t('desktopHostSwitcher.actions.cancel')}
                 </Button>
                 <Button type="button" size="sm" onClick={() => void commitEdit()} disabled={isSaving}>
-                  {isSaving ? <Icon name="loader4" className="h-4 w-4 animate-spin"  /> : null}
+                  {isSaving ? <Icon name="loader-4" className="h-4 w-4 animate-spin"  /> : null}
                   {t('desktopHostSwitcher.actions.save')}
                 </Button>
               </div>
@@ -1127,7 +1127,7 @@ export function DesktopHostSwitcherDialog({
                   onClick={() => void addHost()}
                   disabled={!tauriAvailable || isSaving || !newUrl.trim()}
                 >
-                  {isSaving ? <Icon name="loader4" className="h-4 w-4 animate-spin"  /> : null}
+                  {isSaving ? <Icon name="loader-4" className="h-4 w-4 animate-spin"  /> : null}
                   {t('desktopHostSwitcher.actions.add')}
                 </Button>
               </div>
@@ -1175,7 +1175,7 @@ export function DesktopHostSwitcherDialog({
       <DialogContent className="w-[min(28rem,calc(100vw-2rem))] max-w-none">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Icon name="loader4" className={cn('h-4 w-4', !sshSwitchModal.error && 'animate-spin')}  />
+            <Icon name="loader-4" className={cn('h-4 w-4', !sshSwitchModal.error && 'animate-spin')}  />
             {t('desktopHostSwitcher.ssh.connectingTo', { host: sshSwitchModal.hostLabel || t('desktopHostSwitcher.ssh.instanceFallback') })}
           </DialogTitle>
           <DialogDescription>
@@ -1525,7 +1525,7 @@ export function DesktopHostSwitcherButton({ headerIconButtonClass }: DesktopHost
               onClick={retryStartupSsh}
               disabled={startupSshModal.connecting || !startupSshModal.hostId}
             >
-              {startupSshModal.connecting ? <Icon name="loader4" className="h-4 w-4 animate-spin"  /> : null}
+              {startupSshModal.connecting ? <Icon name="loader-4" className="h-4 w-4 animate-spin"  /> : null}
               {t('desktopHostSwitcher.actions.retry')}
             </Button>
           </div>

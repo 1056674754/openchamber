@@ -1,5 +1,4 @@
 import React, { useEffect } from 'react';
-import { createPortal } from 'react-dom';
 import {
   Tooltip,
   TooltipContent,
@@ -36,7 +35,6 @@ import { ContextUsageDisplay } from '@/components/ui/ContextUsageDisplay';
 import { useDeviceInfo, useTabletStandalonePwaRuntime } from '@/lib/device';
 import { cn, hasModifier } from '@/lib/utils';
 import { McpDropdownContent } from '@/components/mcp/McpDropdown';
-import { McpIcon } from '@/components/icons/McpIcon';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { formatQuotaValueLabel, formatQuotaResetLabel, formatWindowLabel, QUOTA_PROVIDERS, calculatePace, calculateExpectedUsagePercent } from '@/lib/quota';
 import { UsageProgressBar } from '@/components/sections/usage/UsageProgressBar';
@@ -640,7 +638,6 @@ interface HeaderProps {
   onToggleRightDrawer?: () => void;
   leftDrawerOpen?: boolean;
   rightDrawerOpen?: boolean;
-  desktopRightSidebarActionsHost?: HTMLElement | null;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -648,13 +645,10 @@ export const Header: React.FC<HeaderProps> = ({
   onToggleRightDrawer,
   leftDrawerOpen,
   rightDrawerOpen,
-  desktopRightSidebarActionsHost = null,
 }) => {
   const { t } = useI18n();
   const setSessionSwitcherOpen = useUIStore((state) => state.setSessionSwitcherOpen);
   const toggleSidebar = useUIStore((state) => state.toggleSidebar);
-  const isSidebarOpen = useUIStore((state) => state.isSidebarOpen);
-  const isRightSidebarOpen = useUIStore((state) => state.isRightSidebarOpen);
   const openContextTerminal = useUIStore((state) => state.openContextTerminal);
   const toggleRightSidebar = useUIStore((state) => state.toggleRightSidebar);
   const openContextOverview = useUIStore((state) => state.openContextOverview);
@@ -671,7 +665,6 @@ export const Header: React.FC<HeaderProps> = ({
   const [isDevShutdownInFlight, setIsDevShutdownInFlight] = React.useState(false);
 
   const getContextUsage = useSessionUIStore((state) => state.getContextUsage);
-  const openNewSessionDraft = useSessionUIStore((state) => state.openNewSessionDraft);
   const isNewSessionDraftOpen = useSessionUIStore((state) => Boolean(state.newSessionDraft?.open));
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
   const currentSessionMessagesResolved = useSessionMessagesResolved(currentSessionId ?? '');
@@ -813,15 +806,6 @@ export const Header: React.FC<HeaderProps> = ({
   }, [desktopServicesTab, isDesktopApp]);
 
   const isVSCode = React.useMemo(() => isVSCodeRuntime(), []);
-  const isLeftSidebarOpen = React.useMemo(() => {
-    if (!isMobile) {
-      return isSidebarOpen;
-    }
-    if (typeof onToggleLeftDrawer === 'function') {
-      return Boolean(leftDrawerOpen);
-    }
-    return isSessionSwitcherOpen;
-  }, [isMobile, isSessionSwitcherOpen, isSidebarOpen, leftDrawerOpen, onToggleLeftDrawer]);
   const showDesktopHeaderContextUsage = !isVSCode && activeMainTab === 'chat' && !!stableDesktopContextUsage && stableDesktopContextUsage.totalTokens > 0;
   const desktopHeaderDisplayPercentage = stableDesktopContextUsage && stableDesktopContextUsage.contextLimit > 0
     ? Math.min(999, (stableDesktopContextUsage.totalTokens / stableDesktopContextUsage.contextLimit) * 100)
@@ -1245,12 +1229,6 @@ export const Header: React.FC<HeaderProps> = ({
     toggleSidebar();
   }, [blurActiveElement, isMobile, isSessionSwitcherOpen, setSessionSwitcherOpen, toggleSidebar]);
 
-  const handleHeaderNewSession = React.useCallback(() => {
-    setActiveMainTab('chat');
-    setSessionSwitcherOpen(false);
-    openNewSessionDraft();
-  }, [openNewSessionDraft, setActiveMainTab, setSessionSwitcherOpen]);
-
   const handleOpenDraftMiniChat = React.useCallback(() => {
     void invokeDesktop('desktop_open_draft_mini_chat_window', {
       directory: normalize(openDirectory || activeProject?.path || ''),
@@ -1337,11 +1315,11 @@ export const Header: React.FC<HeaderProps> = ({
   const mobileHeaderIconButtonClass = MOBILE_HEADER_ICON_BUTTON_CLASS;
 
   const desktopPaddingClass = React.useMemo(() => {
-    if (!isSidebarOpen && ((isDesktopApp && isMacPlatform && !isDesktopWindowFullscreen) || isTabletStandalonePwa)) {
+    if ((isDesktopApp && isMacPlatform && !isDesktopWindowFullscreen) || isTabletStandalonePwa) {
       return 'pl-[5.5rem]';
     }
     return 'pl-3';
-  }, [isDesktopApp, isDesktopWindowFullscreen, isMacPlatform, isSidebarOpen, isTabletStandalonePwa]);
+  }, [isDesktopApp, isDesktopWindowFullscreen, isMacPlatform, isTabletStandalonePwa]);
 
   useEffect(() => {
     if (!isDesktopApp || !isMacPlatform) {
@@ -1409,14 +1387,14 @@ export const Header: React.FC<HeaderProps> = ({
     }
 
     return {
-      paddingLeft: isTabletStandalonePwa && !isSidebarOpen
+      paddingLeft: isTabletStandalonePwa
         ? 'max(calc(0.75rem + var(--oc-wco-left-inset, 0px)), 5.5rem)'
         : 'calc(0.75rem + var(--oc-wco-left-inset, 0px))',
       paddingRight: 'calc(0.75rem + var(--oc-wco-right-inset, 0px))',
       minHeight: 'max(3rem, var(--oc-wco-titlebar-height, 0px))',
       height: 'max(3rem, var(--oc-wco-titlebar-height, 0px))',
     };
-  }, [isDesktopApp, isSidebarOpen, isTabletStandalonePwa, isVSCode]);
+  }, [isDesktopApp, isTabletStandalonePwa, isVSCode]);
 
   const updateHeaderHeight = React.useCallback(() => {
     if (typeof document === 'undefined') {
@@ -1524,7 +1502,7 @@ export const Header: React.FC<HeaderProps> = ({
     }
     base.push(
       { value: 'usage', label: t('layout.services.usage'), icon: "timer" },
-      { value: 'mcp', label: 'MCP', icon: McpIcon as unknown as IconName }
+      { value: 'mcp', label: 'MCP', icon: "plug-2" }
     );
     return base;
   }, [isDesktopApp, t]);
@@ -1810,7 +1788,6 @@ export const Header: React.FC<HeaderProps> = ({
     </>
   );
 
-  const desktopSidebarActionsInline = !isRightSidebarOpen || !desktopRightSidebarActionsHost;
   const showMiniChatHeaderAction = hasElectronDesktopIPC && (isNewSessionDraftOpen || Boolean(currentSessionId));
 
   const renderDesktop = () => (
@@ -1826,7 +1803,6 @@ export const Header: React.FC<HeaderProps> = ({
       aria-label={t('header.navigation.mainAria')}
     >
       <HeaderIconActionButton
-        visible={!isSidebarOpen}
         title={t('header.actions.openSessionsWithShortcut', { shortcut: shortcutLabel('toggle_sidebar') })}
         ariaLabel={t('header.actions.openSessionsAria')}
         onClick={handleOpenSessionSwitcher}
@@ -1834,24 +1810,7 @@ export const Header: React.FC<HeaderProps> = ({
         Icon={'layout-left'}
       />
 
-      <div className={cn('flex min-w-0 flex-1 items-center', !isSidebarOpen && 'pl-3')}>
-        {!isLeftSidebarOpen ? (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                type="button"
-                aria-label={t('header.actions.newSessionAria')}
-                onClick={handleHeaderNewSession}
-                className={cn(desktopHeaderIconButtonClass, 'mr-6 shrink-0')}
-              >
-                <Icon name="chat-new" className="h-[18px] w-[18px]" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent>
-              <p>{t('header.actions.newSessionWithShortcut', { shortcut: shortcutLabel('new_chat') })}</p>
-            </TooltipContent>
-          </Tooltip>
-        ) : null}
+      <div className="flex min-w-0 flex-1 items-center pl-3">
         {projectActionsContext && (
           <ProjectActionsButton
             projectRef={projectActionsContext.projectRef}
@@ -1919,7 +1878,7 @@ export const Header: React.FC<HeaderProps> = ({
               showPercentIcon
               onClick={handleOpenContextPanel}
               pressed={isContextPanelActive}
-              className={desktopSidebarActionsInline && !showMiniChatHeaderAction ? 'mr-3.5' : ''}
+              className={!showMiniChatHeaderAction ? 'mr-3.5' : ''}
               valueClassName="typography-ui-label font-medium leading-none text-foreground"
               percentIconClassName="h-5 w-5"
             />
@@ -1929,13 +1888,10 @@ export const Header: React.FC<HeaderProps> = ({
             title={isNewSessionDraftOpen ? t('header.actions.newMiniChat') : t('header.actions.openSessionMiniChat')}
             ariaLabel={isNewSessionDraftOpen ? t('header.actions.newMiniChatAria') : t('header.actions.openSessionMiniChatAria')}
             onClick={handleOpenCurrentMiniChat}
-            className={cn(desktopHeaderIconButtonClass, desktopSidebarActionsInline && showDesktopHeaderContextUsage ? 'mr-3.5' : 'mr-1')}
+            className={cn(desktopHeaderIconButtonClass, showDesktopHeaderContextUsage ? 'mr-3.5' : 'mr-1')}
             Icon={'picture-in-picture-2'}
           />
-          {desktopSidebarActionsInline ? desktopSidebarActions : null}
-          {!desktopSidebarActionsInline && desktopRightSidebarActionsHost
-            ? createPortal(desktopSidebarActions, desktopRightSidebarActionsHost)
-            : null}
+          {desktopSidebarActions}
         </div>
       </div>
     </div>
@@ -2352,8 +2308,7 @@ export const Header: React.FC<HeaderProps> = ({
 
   const headerClassName = cn(
     'header-safe-area relative z-10',
-    isMobile && 'border-b border-border/50',
-    'bg-background'
+    isMobile ? 'border-b border-border/50 bg-background' : 'bg-sidebar'
   );
 
   return (

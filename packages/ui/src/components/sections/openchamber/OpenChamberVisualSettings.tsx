@@ -249,6 +249,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const directoryShowHidden = useDirectoryShowHidden();
     const showReasoningTraces = useUIStore(state => state.showReasoningTraces);
     const setShowReasoningTraces = useUIStore(state => state.setShowReasoningTraces);
+    const collapsibleThinkingBlocks = useUIStore(state => state.collapsibleThinkingBlocks);
+    const setCollapsibleThinkingBlocks = useUIStore(state => state.setCollapsibleThinkingBlocks);
     const autoCollapseThinking = useUIStore(state => state.autoCollapseThinking);
     const setAutoCollapseThinking = useUIStore(state => state.setAutoCollapseThinking);
     const autoCollapseThinkingThreshold = useUIStore(state => state.autoCollapseThinkingThreshold);
@@ -1569,7 +1571,30 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                         </div>
                                     )}
 
-                                    {shouldShow('reasoning') && (
+                                    {shouldShow('reasoning') && showReasoningTraces && (
+                                        <div
+                                            className="group flex cursor-pointer items-center gap-2 py-0.5"
+                                            role="button"
+                                            tabIndex={0}
+                                            aria-pressed={collapsibleThinkingBlocks}
+                                            onClick={() => setCollapsibleThinkingBlocks(!collapsibleThinkingBlocks)}
+                                            onKeyDown={(event) => {
+                                                if (event.key === ' ' || event.key === 'Enter') {
+                                                    event.preventDefault();
+                                                    setCollapsibleThinkingBlocks(!collapsibleThinkingBlocks);
+                                                }
+                                            }}
+                                        >
+                                            <Checkbox
+                                                checked={collapsibleThinkingBlocks}
+                                                onChange={setCollapsibleThinkingBlocks}
+                                                ariaLabel={t('settings.openchamber.visual.field.collapsibleThinkingBlocksAria')}
+                                            />
+                                            <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.collapsibleThinkingBlocks')}</span>
+                                        </div>
+                                    )}
+
+                                    {shouldShow('reasoning') && showReasoningTraces && collapsibleThinkingBlocks && (
                                         <div
                                             className="group flex cursor-pointer items-center gap-2 py-0.5"
                                             role="button"
@@ -1591,7 +1616,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                             <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.autoCollapseThinking')}</span>
                                         </div>
                                     )}
-                                    {shouldShow('reasoning') && autoCollapseThinking && (
+                                    {shouldShow('reasoning') && showReasoningTraces && collapsibleThinkingBlocks && autoCollapseThinking && (
                                         <div className="flex items-center gap-2 py-0.5 pl-6">
                                             <span className="typography-micro text-muted-foreground whitespace-nowrap">{t('settings.openchamber.visual.field.autoCollapseThinkingThresholdLabel')}</span>
                                             <input

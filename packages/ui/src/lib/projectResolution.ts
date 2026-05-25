@@ -1,6 +1,7 @@
 import type { ProjectEntry } from "@/lib/api/types";
 import type { WorktreeMetadata } from "@/types/worktree";
 import { getWorktreesForProject } from "@/lib/worktrees/worktreeKeys";
+import { DEFAULT_SERVER_ID } from "@/lib/opencode/server-registry";
 
 export const normalizeProjectPath = (value?: string | null): string | null => {
   if (typeof value !== "string") return null;
@@ -9,6 +10,20 @@ export const normalizeProjectPath = (value?: string | null): string | null => {
   const replaced = trimmed.replace(/\\/g, "/");
   if (replaced === "/") return "/";
   return replaced.length > 1 ? replaced.replace(/\/+$/, "") : replaced;
+};
+
+const usesDefaultConnection = (project: ProjectEntry): boolean =>
+  !project.serverId || project.serverId === DEFAULT_SERVER_ID;
+
+const shouldPreferProjectMatch = (
+  candidate: ProjectEntry,
+  candidateLength: number,
+  current: ProjectEntry | null,
+  currentLength: number,
+): boolean => {
+  if (!current) return true;
+  if (candidateLength !== currentLength) return candidateLength > currentLength;
+  return usesDefaultConnection(candidate) && !usesDefaultConnection(current);
 };
 
 export const resolveProjectForDirectory = (
@@ -22,7 +37,7 @@ export const resolveProjectForDirectory = (
     const pp = normalizeProjectPath(p.path);
     if (!pp) continue;
     if (nd !== pp && !nd.startsWith(`${pp}/`)) continue;
-    if (!best || pp.length > (normalizeProjectPath(best.path)?.length ?? 0)) best = p;
+    if (shouldPreferProjectMatch(p, pp.length, best, normalizeProjectPath(best?.path)?.length ?? 0)) best = p;
   }
   return best;
 };
@@ -44,7 +59,7 @@ export const resolveProjectFromWorktreeDirectory = (
       const wp = normalizeProjectPath(wt.path);
       if (!wp) continue;
       if (nd !== wp && !nd.startsWith(`${wp}/`)) continue;
-      if (wp.length > bestLen) {
+      if (shouldPreferProjectMatch(project, wp.length, matchedProject, bestLen)) {
         bestLen = wp.length;
         matchedWorktree = wt;
         matchedProject = project;

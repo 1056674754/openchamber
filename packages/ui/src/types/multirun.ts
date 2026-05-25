@@ -21,13 +21,18 @@ export interface MultiRunFileAttachment {
   url: string;
 }
 
+export interface MultiRunGroup {
+  /** Prompt sent to this group of sessions */
+  prompt: string;
+  /** Models to run against for this group */
+  models: MultiRunModelSelection[];
+}
+
 export interface CreateMultiRunParams {
   /** Group name used for worktree directory and branch naming */
   name: string;
-  /** Prompt sent to all sessions */
-  prompt: string;
-  /** Models to run against (must have at least 2) */
-  models: MultiRunModelSelection[];
+  /** Prompt/model groups to run */
+  groups: MultiRunGroup[];
   /** Optional agent to use for all runs */
   agent?: string;
   /** Base branch for new branches (defaults to `HEAD`). */
