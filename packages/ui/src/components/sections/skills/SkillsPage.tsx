@@ -65,6 +65,7 @@ const SkillsInstalledPage: React.FC = () => {
   const selectedSkill = selectedSkillName ? getSkillByName(selectedSkillName) : null;
   const isNewSkill = Boolean(skillDraft && skillDraft.name === selectedSkillName && !selectedSkill);
   const hasStaleSelection = Boolean(selectedSkillName && !selectedSkill && !skillDraft);
+  const isReadOnlySkill = selectedSkill?.path === '<built-in>';
 
   React.useEffect(() => {
     if (!hasStaleSelection) {
@@ -473,6 +474,7 @@ const SkillsInstalledPage: React.FC = () => {
                   placeholder={t('settings.skills.page.field.descriptionPlaceholder')}
                   rows={2}
                   className="w-full resize-none min-h-[60px] max-h-32 bg-transparent"
+                  disabled={isReadOnlySkill}
                 />
               </div>
             </div>
@@ -494,6 +496,7 @@ const SkillsInstalledPage: React.FC = () => {
               onChange={(e) => setInstructions(e.target.value)}
               placeholder={t('settings.skills.page.field.instructionsPlaceholder')}
               className="min-h-[220px] max-h-[60vh] font-mono typography-meta"
+              disabled={isReadOnlySkill}
             />
           </section>
         </div>
@@ -504,7 +507,7 @@ const SkillsInstalledPage: React.FC = () => {
             <h3 className="typography-ui-header font-medium text-foreground">
               {t('settings.skills.page.section.supportingFiles')}
             </h3>
-            <Button variant="outline" size="xs" className="!font-normal gap-1" onClick={handleAddFile}>
+            <Button variant="outline" size="xs" className="!font-normal gap-1" onClick={handleAddFile} disabled={isReadOnlySkill}>
               <Icon name="add" className="h-3.5 w-3.5" /> {t('settings.skills.page.actions.addFile')}
             </Button>
           </div>
@@ -536,16 +539,18 @@ const SkillsInstalledPage: React.FC = () => {
                           {t('settings.skills.page.badge.pending')}
                         </span>
                       )}
-                      <Button size="sm"
-                        variant="ghost"
-                        className="h-5 w-5 px-0 flex-shrink-0 text-muted-foreground hover:text-[var(--status-error)] opacity-0 group-hover:opacity-100 transition-opacity"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleDeleteFile(file.path);
-                        }}
-                      >
-                        <Icon name="delete-bin" className="h-3 w-3" />
-                      </Button>
+                      {!isReadOnlySkill && (
+                        <Button size="sm"
+                          variant="ghost"
+                          className="h-5 w-5 px-0 flex-shrink-0 text-muted-foreground hover:text-[var(--status-error)] opacity-0 group-hover:opacity-100 transition-opacity"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDeleteFile(file.path);
+                          }}
+                        >
+                          <Icon name="delete-bin" className="h-3 w-3" />
+                        </Button>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -558,7 +563,7 @@ const SkillsInstalledPage: React.FC = () => {
         <div className="px-2 py-1">
           <Button
             onClick={handleSave}
-            disabled={isSaving || !hasSkillChanges}
+            disabled={isReadOnlySkill || isSaving || !hasSkillChanges}
             size="xs"
             className="!font-normal"
           >

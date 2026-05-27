@@ -586,11 +586,13 @@ interface ConfigStore {
     openaiVoice: string;
     openaiApiKey: string;
     openaiCompatibleUrl: string;
+    openaiCompatibleApiKey: string;
     openaiCompatibleVoice: string;
     openaiCompatibleTtsModel: string;
     // STT (speech-to-text) settings
     sttProvider: 'browser' | 'server' | 'wasm';
     sttServerUrl: string;
+    sttApiKey: string;
     sttModel: string;
     wasmSttModel: string;
     sttLanguage: string;
@@ -612,10 +614,12 @@ interface ConfigStore {
     setOpenaiVoice: (voice: string) => void;
     setOpenaiApiKey: (apiKey: string) => void;
     setOpenaiCompatibleUrl: (url: string) => void;
+    setOpenaiCompatibleApiKey: (apiKey: string) => void;
     setOpenaiCompatibleVoice: (voice: string) => void;
     setOpenaiCompatibleTtsModel: (model: string) => void;
     setSttProvider: (provider: 'browser' | 'server' | 'wasm') => void;
     setSttServerUrl: (url: string) => void;
+    setSttApiKey: (apiKey: string) => void;
     setSttModel: (model: string) => void;
     setWasmSttModel: (model: string) => void;
     setSttLanguage: (lang: string) => void;
@@ -784,6 +788,14 @@ export const useConfigStore = create<ConfigStore>()(
                     }
                     return '';
                 })(),
+                // OpenAI-compatible custom server API key
+                openaiCompatibleApiKey: (() => {
+                    if (typeof window !== 'undefined') {
+                        const saved = localStorage.getItem('openaiCompatibleApiKey');
+                        if (saved) return saved;
+                    }
+                    return '';
+                })(),
                 // OpenAI-compatible custom server voice
                 openaiCompatibleVoice: (() => {
                     if (typeof window !== 'undefined') {
@@ -818,6 +830,13 @@ export const useConfigStore = create<ConfigStore>()(
                         if (saved) return saved;
                     }
                     return 'http://localhost:8001/v1';
+                })(),
+                sttApiKey: (() => {
+                    if (typeof window !== 'undefined') {
+                        const saved = localStorage.getItem('sttApiKey');
+                        if (saved) return saved;
+                    }
+                    return '';
                 })(),
                 sttModel: (() => {
                     if (typeof window !== 'undefined') {
@@ -1956,6 +1975,13 @@ export const useConfigStore = create<ConfigStore>()(
                     }
                 },
 
+                setOpenaiCompatibleApiKey: (apiKey: string) => {
+                    set({ openaiCompatibleApiKey: apiKey });
+                    if (typeof window !== 'undefined') {
+                        localStorage.setItem('openaiCompatibleApiKey', apiKey);
+                    }
+                },
+
                 setOpenaiCompatibleVoice: (voice: string) => {
                     set({ openaiCompatibleVoice: voice });
                     if (typeof window !== 'undefined') {
@@ -1984,6 +2010,13 @@ export const useConfigStore = create<ConfigStore>()(
                         localStorage.setItem('sttServerUrl', url);
                     }
                     updateDesktopSettings({ sttServerUrl: url }).catch(() => {});
+                },
+
+                setSttApiKey: (apiKey: string) => {
+                    set({ sttApiKey: apiKey });
+                    if (typeof window !== 'undefined') {
+                        localStorage.setItem('sttApiKey', apiKey);
+                    }
                 },
 
                 setSttModel: (model: string) => {

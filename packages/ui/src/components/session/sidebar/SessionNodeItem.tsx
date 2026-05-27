@@ -136,7 +136,7 @@ type Props = {
   handleCancelEdit: () => void;
   toggleParent: (expansionKey: string) => void;
   handleSessionSelect: (sessionId: string, sessionDirectory: string | null, isMissingDirectory: boolean, projectId?: string | null) => void;
-  handleSessionDoubleClick: () => void;
+  handleSessionDoubleClick: (sessionId: string, sessionTitle: string) => void;
   togglePinnedSession: (sessionId: string, scope: 'global' | string) => void;
   pinnedSessionIdsByProject: Map<string, Set<string>>;
   handleShareSession: (session: Session) => void;
@@ -402,6 +402,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
     : 'group-hover:opacity-0 group-focus-within:opacity-0';
   const showOpenInEditorAction = isVSCode;
   const suppressNextSelectRef = React.useRef(false);
+  const editCancelledRef = React.useRef(false);
   const [isTouchPressed, setIsTouchPressed] = React.useState(false);
 
   const session = node.session;
@@ -729,12 +730,20 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
               onKeyDown={(event) => {
                 if (event.key === 'Escape') {
                   event.stopPropagation();
+                  editCancelledRef.current = true;
                   handleCancelEdit();
                   return;
                 }
                 if (event.key === ' ' || event.key === 'Enter') {
                   event.stopPropagation();
                 }
+              }}
+              onBlur={() => {
+                if (editCancelledRef.current) {
+                  editCancelledRef.current = false;
+                  return;
+                }
+                handleSaveEdit();
               }}
             />
             <button
@@ -1178,7 +1187,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
                     onClick={(event) => handleRowSelect(event)}
                     onDoubleClick={(e) => {
                       e.stopPropagation();
-                      handleSessionDoubleClick();
+                      handleSessionDoubleClick(session.id, sessionTitle);
                     }}
                     className={cn(
                       'flex min-w-0 flex-1 cursor-pointer flex-col gap-0 overflow-hidden rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 text-foreground select-none disabled:cursor-not-allowed',
@@ -1245,7 +1254,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
                 onClick={(event) => handleRowSelect(event)}
                 onDoubleClick={(e) => {
                   e.stopPropagation();
-                  handleSessionDoubleClick();
+                  handleSessionDoubleClick(session.id, sessionTitle);
                 }}
                 className={cn(
                   'flex min-w-0 flex-1 cursor-pointer flex-col gap-0 overflow-hidden rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 text-foreground select-none disabled:cursor-not-allowed',

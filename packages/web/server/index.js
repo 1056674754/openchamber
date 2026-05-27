@@ -207,6 +207,7 @@ const settingsNormalizationRuntime = createSettingsNormalizationRuntime({
   os,
   path,
   processLike: process,
+  realpathSync: fs.realpathSync,
   tunnelBootstrapTtlDefaultMs: TUNNEL_BOOTSTRAP_TTL_DEFAULT_MS,
   tunnelBootstrapTtlMinMs: TUNNEL_BOOTSTRAP_TTL_MIN_MS,
   tunnelBootstrapTtlMaxMs: TUNNEL_BOOTSTRAP_TTL_MAX_MS,
@@ -810,7 +811,7 @@ const processForwardedEventPayload = (payload, emitSyntheticEvent) => {
   emitSyntheticEvent({
     type: 'openchamber:session-status',
     properties: {
-      sessionId,
+      sessionID: sessionId,
       status,
       timestamp: Date.now(),
       metadata: {

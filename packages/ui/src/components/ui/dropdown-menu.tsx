@@ -118,6 +118,7 @@ type ContentProps = {
   side?: "top" | "right" | "bottom" | "left";
   alignOffset?: number;
   portalToBody?: boolean;
+  positionerClassName?: string;
   style?: React.CSSProperties;
   className?: string;
   children?: React.ReactNode;
@@ -131,6 +132,7 @@ function DropdownMenuContent({
   side,
   alignOffset,
   portalToBody = false,
+  positionerClassName,
   style,
   children,
   onCloseAutoFocus,
@@ -146,7 +148,7 @@ function DropdownMenuContent({
         align={align}
         side={side}
         alignOffset={alignOffset}
-        className="z-50"
+        className={cn("z-50", positionerClassName)}
       >
         <BaseMenu.Popup
           data-slot="dropdown-menu-content"

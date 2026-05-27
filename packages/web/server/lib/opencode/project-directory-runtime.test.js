@@ -48,6 +48,7 @@ describe('project directory runtime', () => {
 
   it('still allows legacy project directory fallback for display/browse callers', async () => {
     const fallbackDirectory = await makeTempDir();
+    const fallbackRealDirectory = await fs.realpath(fallbackDirectory);
     const runtime = createRuntime({
       lastDirectory: fallbackDirectory,
       projects: [{ id: 'fallback', path: fallbackDirectory }],
@@ -55,7 +56,7 @@ describe('project directory runtime', () => {
     });
 
     await expect(runtime.resolveProjectDirectory(makeRequest())).resolves.toEqual({
-      directory: path.resolve(fallbackDirectory),
+      directory: fallbackRealDirectory,
       error: null,
     });
   });
@@ -64,18 +65,21 @@ describe('project directory runtime', () => {
     const headerDirectory = await makeTempDir();
     const queryDirectory = await makeTempDir();
     const bodyDirectory = await makeTempDir();
+    const headerRealDirectory = await fs.realpath(headerDirectory);
+    const queryRealDirectory = await fs.realpath(queryDirectory);
+    const bodyRealDirectory = await fs.realpath(bodyDirectory);
     const runtime = createRuntime();
 
     await expect(runtime.resolveRequiredExplicitProjectDirectory(makeRequest({ headerDirectory }))).resolves.toEqual({
-      directory: path.resolve(headerDirectory),
+      directory: headerRealDirectory,
       error: null,
     });
     await expect(runtime.resolveRequiredExplicitProjectDirectory(makeRequest({ queryDirectory }))).resolves.toEqual({
-      directory: path.resolve(queryDirectory),
+      directory: queryRealDirectory,
       error: null,
     });
     await expect(runtime.resolveRequiredExplicitProjectDirectory(makeRequest({ bodyDirectory }))).resolves.toEqual({
-      directory: path.resolve(bodyDirectory),
+      directory: bodyRealDirectory,
       error: null,
     });
   });

@@ -1907,16 +1907,15 @@ export function SyncProvider(props: {
         })
       },
       onTransportSwitch: () => {
-        // Transport switched (e.g. WS timeout → SSE fallback) without a full
-        // disconnect. If the active session missed the transition into a busy
-        // turn, force a targeted resync for the viewed directory.
+        // Transport switches can lose or buffer events in real networks. Refresh
+        // every mounted directory from HTTP instead of only the active one.
         useConfigStore.setState({
           isConnected: true,
           hasEverConnected: true,
           connectionPhase: "connected",
         })
-        if (_activeDirectory) {
-          triggerReconnectMaterialization(_activeDirectory)
+        for (const dir of childStores.children.keys()) {
+          triggerReconnectMaterialization(dir)
         }
       },
     })

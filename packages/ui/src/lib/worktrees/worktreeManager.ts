@@ -10,6 +10,7 @@ import {
   clearWorktreeBootstrapState,
   markWorktreeBootstrapPending,
 } from '@/lib/worktrees/worktreeBootstrap';
+import { invalidateResolvedProjectRootCache } from '@/lib/worktrees/worktreeStatus';
 import type {
   CreateGitWorktreePayload,
   GitWorktreeValidationResult,
@@ -338,6 +339,7 @@ export async function createWorktree(project: ProjectRef, args: CreateWorktreeAr
   markWorktreeBootstrapPending(metadata.path);
 
   _worktreeListCache.delete(getProjectWorktreeKey(projectDirectory, project.serverId));
+  invalidateResolvedProjectRootCache();
 
   // Update sidebar store so new worktree appears immediately
   const sidebarProjectKey = getProjectWorktreeKey(projectDirectory, project.serverId);
@@ -389,6 +391,7 @@ export async function removeProjectWorktree(project: ProjectRef, worktree: Workt
   clearWorktreeBootstrapState(worktree.path);
 
   _worktreeListCache.delete(getProjectWorktreeKey(project.path, project.serverId));
+  invalidateResolvedProjectRootCache();
 
   // Update sidebar store so removed worktree disappears immediately
   const normalizedWorktreePath = normalizePath(worktree.path);

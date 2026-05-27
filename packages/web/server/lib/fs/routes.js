@@ -1,3 +1,5 @@
+import { createRealpathCache } from '../path-realpath-cache.js';
+
 const EXEC_JOB_TTL_MS = 30 * 60 * 1000;
 
 const createCommandTimeoutMs = () => {
@@ -5,6 +7,26 @@ const createCommandTimeoutMs = () => {
   if (Number.isFinite(raw) && raw > 0) return raw;
   return 5 * 60 * 1000;
 };
+
+const createGitReadCacheTtlMs = () => {
+  const raw = Number(process.env.OPENCHAMBER_GIT_READ_CACHE_TTL_MS);
+  if (Number.isFinite(raw) && raw >= 0) return raw;
+  return 30 * 1000;
+};
+
+const normalizeCommand = (command) =>
+  typeof command === 'string' ? command.trim().replace(/\s+/g, ' ') : '';
+
+const isCacheableGitReadCommand = (command) => {
+  const normalized = normalizeCommand(command);
+  return /^git rev-parse(?: --(?:absolute-git-dir|git-common-dir|show-toplevel)){1,3}$/.test(normalized);
+};
+
+const GIT_READ_CACHE_MAX_ENTRIES = 500;
+const GIT_READ_CACHE_MAX_BYTES = 1024 * 1024;
+
+const gitReadEntryBytes = (key, result) =>
+  key.length + (result?.stdout?.length || 0) + (result?.stderr?.length || 0);
 
 const isPathWithinRoot = (resolvedPath, rootPath, path, os) => {
   const resolvedRoot = path.resolve(rootPath || os.homedir());
@@ -15,7 +37,31 @@ const isPathWithinRoot = (resolvedPath, rootPath, path, os) => {
   return true;
 };
 
-const resolveWorkspacePath = ({ targetPath, baseDirectory, path, os, normalizeDirectoryPath, openchamberUserConfigRoot }) => {
+const resolveRealWorkspacePath = async ({ resolvedPath, path, realpathCache }) => {
+  const parts = [];
+  let current = resolvedPath;
+
+  while (true) {
+    try {
+      const realCurrent = await realpathCache.resolve(current);
+      return parts.length > 0 ? path.join(realCurrent, ...parts.reverse()) : realCurrent;
+    } catch (error) {
+      const err = error;
+      if (!err || typeof err !== 'object' || err.code !== 'ENOENT') {
+        return path.resolve(resolvedPath);
+      }
+    }
+
+    const parent = path.dirname(current);
+    if (parent === current) {
+      return path.resolve(resolvedPath);
+    }
+    parts.push(path.basename(current));
+    current = parent;
+  }
+};
+
+const resolveWorkspacePath = async ({ targetPath, baseDirectory, path, os, normalizeDirectoryPath, openchamberUserConfigRoot, realpathCache }) => {
   const normalized = normalizeDirectoryPath(targetPath);
   if (!normalized || typeof normalized !== 'string') {
     return { ok: false, error: 'Path is required' };
@@ -23,25 +69,32 @@ const resolveWorkspacePath = ({ targetPath, baseDirectory, path, os, normalizeDi
 
   const resolved = path.resolve(normalized);
   const resolvedBase = path.resolve(baseDirectory || os.homedir());
+  const canonicalBase = await realpathCache.resolve(resolvedBase).catch(() => resolvedBase);
+  const canonicalResolved = await resolveRealWorkspacePath({ resolvedPath: resolved, path, realpathCache });
 
-  if (isPathWithinRoot(resolved, resolvedBase, path, os)) {
-    return { ok: true, base: resolvedBase, resolved };
+  if (isPathWithinRoot(canonicalResolved, canonicalBase, path, os)) {
+    return { ok: true, base: canonicalBase, resolved: canonicalResolved };
   }
 
-  if (isPathWithinRoot(resolved, openchamberUserConfigRoot, path, os)) {
-    return { ok: true, base: path.resolve(openchamberUserConfigRoot), resolved };
+  if (openchamberUserConfigRoot) {
+    const configRoot = path.resolve(openchamberUserConfigRoot);
+    const canonicalConfigRoot = await realpathCache.resolve(configRoot).catch(() => configRoot);
+    if (isPathWithinRoot(canonicalResolved, canonicalConfigRoot, path, os)) {
+      return { ok: true, base: canonicalConfigRoot, resolved: canonicalResolved };
+    }
   }
 
   return { ok: false, error: 'Path is outside of active workspace' };
 };
 
-const resolveWorkspacePathFromWorktrees = async ({ targetPath, baseDirectory, path, os, normalizeDirectoryPath }) => {
+const resolveWorkspacePathFromWorktrees = async ({ targetPath, baseDirectory, path, os, normalizeDirectoryPath, realpathCache }) => {
   const normalized = normalizeDirectoryPath(targetPath);
   if (!normalized || typeof normalized !== 'string') {
     return { ok: false, error: 'Path is required' };
   }
 
   const resolved = path.resolve(normalized);
+  const canonicalResolved = await resolveRealWorkspacePath({ resolvedPath: resolved, path, realpathCache });
   const resolvedBase = path.resolve(baseDirectory || os.homedir());
 
   try {
@@ -57,8 +110,9 @@ const resolveWorkspacePathFromWorktrees = async ({ targetPath, baseDirectory, pa
         continue;
       }
       const candidateResolved = path.resolve(candidate);
-      if (isPathWithinRoot(resolved, candidateResolved, path, os)) {
-        return { ok: true, base: candidateResolved, resolved };
+      const canonicalCandidate = await realpathCache.resolve(candidateResolved).catch(() => candidateResolved);
+      if (isPathWithinRoot(canonicalResolved, canonicalCandidate, path, os)) {
+        return { ok: true, base: canonicalCandidate, resolved: canonicalResolved };
       }
     }
   } catch (error) {
@@ -68,19 +122,20 @@ const resolveWorkspacePathFromWorktrees = async ({ targetPath, baseDirectory, pa
   return { ok: false, error: 'Path is outside of active workspace' };
 };
 
-const resolveWorkspacePathFromContext = async ({ req, targetPath, resolveRequiredExplicitProjectDirectory, path, os, normalizeDirectoryPath, openchamberUserConfigRoot }) => {
+const resolveWorkspacePathFromContext = async ({ req, targetPath, resolveRequiredExplicitProjectDirectory, path, os, normalizeDirectoryPath, openchamberUserConfigRoot, realpathCache }) => {
   const resolvedProject = await resolveRequiredExplicitProjectDirectory(req);
   if (!resolvedProject.directory) {
     return { ok: false, error: resolvedProject.error || 'Active workspace is required' };
   }
 
-  const resolved = resolveWorkspacePath({
+  const resolved = await resolveWorkspacePath({
     targetPath,
     baseDirectory: resolvedProject.directory,
     path,
     os,
     normalizeDirectoryPath,
     openchamberUserConfigRoot,
+    realpathCache,
   });
   if (resolved.ok || resolved.error !== 'Path is outside of active workspace') {
     return resolved;
@@ -92,6 +147,7 @@ const resolveWorkspacePathFromContext = async ({ req, targetPath, resolveRequire
     path,
     os,
     normalizeDirectoryPath,
+    realpathCache,
   });
 };
 
@@ -137,7 +193,7 @@ const escapeCloneSshKeyPath = (sshKeyPath) => {
   return `'${normalized.replace(/'/g, "'\\''")}'`;
 };
 
-const resolveReadPathFromContext = async ({ req, targetPath, resolveRequiredExplicitProjectDirectory, path, os, normalizeDirectoryPath, openchamberUserConfigRoot }) => {
+const resolveReadPathFromContext = async ({ req, targetPath, resolveRequiredExplicitProjectDirectory, path, os, normalizeDirectoryPath, openchamberUserConfigRoot, realpathCache }) => {
   if (req.query?.allowOutsideWorkspace === 'true') {
     const normalized = normalizeDirectoryPath(targetPath);
     if (!normalized || typeof normalized !== 'string') {
@@ -155,6 +211,7 @@ const resolveReadPathFromContext = async ({ req, targetPath, resolveRequiredExpl
     os,
     normalizeDirectoryPath,
     openchamberUserConfigRoot,
+    realpathCache,
   });
 };
 
@@ -240,9 +297,15 @@ export const registerFsRoutes = (app, dependencies) => {
     resolveGitBinaryForSpawn,
     openchamberUserConfigRoot,
   } = dependencies;
+  const realpathCache = createRealpathCache({
+    realpath: fsPromises.realpath.bind(fsPromises),
+  });
 
   const execJobs = new Map();
   const commandTimeoutMs = createCommandTimeoutMs();
+  const gitReadCacheTtlMs = createGitReadCacheTtlMs();
+  const gitReadCache = new Map();
+  const inFlightGitReadCache = new Map();
 
   const pruneExecJobs = () => {
     const now = Date.now();
@@ -258,6 +321,88 @@ export const registerFsRoutes = (app, dependencies) => {
     }
   };
 
+  const pruneGitReadCache = () => {
+    if (gitReadCacheTtlMs <= 0) {
+      return;
+    }
+    const now = Date.now();
+    for (const [key, entry] of gitReadCache.entries()) {
+      if (!entry || now - entry.at > gitReadCacheTtlMs) {
+        gitReadCache.delete(key);
+      }
+    }
+  };
+
+  const setGitReadCacheEntry = (key, result) => {
+    gitReadCache.delete(key);
+    gitReadCache.set(key, { result, at: Date.now() });
+
+    let totalBytes = 0;
+    for (const [entryKey, entry] of gitReadCache) {
+      totalBytes += gitReadEntryBytes(entryKey, entry.result);
+    }
+
+    while (
+      gitReadCache.size > GIT_READ_CACHE_MAX_ENTRIES ||
+      (totalBytes > GIT_READ_CACHE_MAX_BYTES && gitReadCache.size > 1)
+    ) {
+      const oldest = gitReadCache.entries().next().value;
+      if (!oldest) {
+        break;
+      }
+      totalBytes -= gitReadEntryBytes(oldest[0], oldest[1].result);
+      gitReadCache.delete(oldest[0]);
+    }
+  };
+
+  const runCommandWithGitReadCache = async ({ shell, shellFlag, command, resolvedCwd }) => {
+    const cacheable = gitReadCacheTtlMs > 0 && isCacheableGitReadCommand(command);
+    const cacheKey = cacheable ? `${resolvedCwd}\0${normalizeCommand(command)}` : null;
+
+    if (cacheKey) {
+      const cached = gitReadCache.get(cacheKey);
+      if (cached && Date.now() - cached.at < gitReadCacheTtlMs) {
+        gitReadCache.delete(cacheKey);
+        gitReadCache.set(cacheKey, cached);
+        return { ...cached.result, command };
+      }
+      if (cached) {
+        gitReadCache.delete(cacheKey);
+      }
+
+      const inFlight = inFlightGitReadCache.get(cacheKey);
+      if (inFlight) {
+        const result = await inFlight;
+        return { ...result, command };
+      }
+    }
+
+    const runPromise = runCommandInDirectory({
+      shell,
+      shellFlag,
+      command,
+      resolvedCwd,
+      spawn,
+      buildAugmentedPath,
+      commandTimeoutMs,
+    }).then((result) => {
+      if (cacheKey && result && result.success) {
+        setGitReadCacheEntry(cacheKey, result);
+      }
+      return result;
+    }).finally(() => {
+      if (cacheKey && inFlightGitReadCache.get(cacheKey) === runPromise) {
+        inFlightGitReadCache.delete(cacheKey);
+      }
+    });
+
+    if (cacheKey) {
+      inFlightGitReadCache.set(cacheKey, runPromise);
+    }
+
+    return runPromise;
+  };
+
   const runExecJob = async (job) => {
     job.status = 'running';
     job.updatedAt = Date.now();
@@ -270,14 +415,11 @@ export const registerFsRoutes = (app, dependencies) => {
       }
 
       try {
-        const result = await runCommandInDirectory({
+        const result = await runCommandWithGitReadCache({
           shell: job.shell,
           shellFlag: job.shellFlag,
           command,
           resolvedCwd: job.resolvedCwd,
-          spawn,
-          buildAugmentedPath,
-          commandTimeoutMs,
         });
         results.push(result);
       } catch (error) {
@@ -331,6 +473,7 @@ export const registerFsRoutes = (app, dependencies) => {
           os,
           normalizeDirectoryPath,
           openchamberUserConfigRoot,
+          realpathCache,
         });
         if (!resolved.ok) {
           return res.status(400).json({ error: resolved.error });
@@ -470,6 +613,7 @@ export const registerFsRoutes = (app, dependencies) => {
         os,
         normalizeDirectoryPath,
         openchamberUserConfigRoot,
+        realpathCache,
       });
       if (!resolved.ok) {
         return res.status(400).json({ error: resolved.error });
@@ -519,6 +663,7 @@ export const registerFsRoutes = (app, dependencies) => {
         os,
         normalizeDirectoryPath,
         openchamberUserConfigRoot,
+        realpathCache,
       });
       if (!resolved.ok) {
         return res.status(400).json({ error: resolved.error });
@@ -571,6 +716,7 @@ export const registerFsRoutes = (app, dependencies) => {
         os,
         normalizeDirectoryPath,
         openchamberUserConfigRoot,
+        realpathCache,
       });
       if (!resolved.ok) {
         return res.status(400).json({ error: resolved.error });
@@ -644,6 +790,7 @@ export const registerFsRoutes = (app, dependencies) => {
         os,
         normalizeDirectoryPath,
         openchamberUserConfigRoot,
+        realpathCache,
       });
       if (!resolved.ok) {
         return res.status(400).json({ error: resolved.error });
@@ -651,7 +798,7 @@ export const registerFsRoutes = (app, dependencies) => {
 
       await fsPromises.mkdir(path.dirname(resolved.resolved), { recursive: true });
       await fsPromises.writeFile(resolved.resolved, content, 'utf8');
-      return res.json({ success: true, path: resolved.resolved });
+      return res.json({ success: true, path: path.resolve(normalizeDirectoryPath(filePath)) });
     } catch (error) {
       const err = error;
       if (err && typeof err === 'object' && err.code === 'EACCES') {
@@ -677,6 +824,7 @@ export const registerFsRoutes = (app, dependencies) => {
         os,
         normalizeDirectoryPath,
         openchamberUserConfigRoot,
+        realpathCache,
       });
       if (!resolved.ok) {
         return res.status(400).json({ error: resolved.error });
@@ -715,6 +863,7 @@ export const registerFsRoutes = (app, dependencies) => {
         os,
         normalizeDirectoryPath,
         openchamberUserConfigRoot,
+        realpathCache,
       });
       if (!resolvedOld.ok) {
         return res.status(400).json({ error: resolvedOld.error });
@@ -728,6 +877,7 @@ export const registerFsRoutes = (app, dependencies) => {
         os,
         normalizeDirectoryPath,
         openchamberUserConfigRoot,
+        realpathCache,
       });
       if (!resolvedNew.ok) {
         return res.status(400).json({ error: resolvedNew.error });
@@ -816,6 +966,7 @@ export const registerFsRoutes = (app, dependencies) => {
     }
 
     pruneExecJobs();
+    pruneGitReadCache();
 
     try {
       const resolvedCwd = path.resolve(normalizeDirectoryPath(cwd));
@@ -914,7 +1065,7 @@ export const registerFsRoutes = (app, dependencies) => {
     };
 
     try {
-      resolvedPath = path.resolve(normalizeDirectoryPath(rawPath));
+      resolvedPath = await realpathCache.resolve(path.resolve(normalizeDirectoryPath(rawPath)));
 
       const stats = await fsPromises.stat(resolvedPath);
       if (!stats.isDirectory()) {

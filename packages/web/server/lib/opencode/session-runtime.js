@@ -167,7 +167,7 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
       const syntheticPayload = {
         type: 'openchamber:session-status',
         properties: {
-          sessionId,
+          sessionID: sessionId,
           status: state.status,
           timestamp: state.lastUpdateAt,
           metadata: state.metadata,
@@ -228,7 +228,7 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
       const syntheticPayload = {
         type: 'openchamber:session-status',
         properties: {
-          sessionId,
+          sessionID: sessionId,
           status: state.status,
           timestamp: Date.now(),
           metadata: {},

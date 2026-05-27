@@ -3,7 +3,7 @@ import { motion, useMotionValue, animate } from 'motion/react';
 import { Header } from './Header';
 import { Sidebar, SIDEBAR_CONTENT_WIDTH } from './Sidebar';
 import { RightSidebar, RIGHT_SIDEBAR_CONTENT_WIDTH } from './RightSidebar';
-import { RightSidebarTabs } from './RightSidebarTabs';
+import { ProjectContextPanel, RightSidebarTabs } from './RightSidebarTabs';
 import { ContextPanel } from './ContextPanel';
 import { ErrorBoundary } from '../ui/ErrorBoundary';
 import { CommandPalette } from '../ui/CommandPalette';
@@ -36,7 +36,7 @@ const SettingsWindow = lazyWithChunkRecovery(() => import('@/components/views/Se
 const MultiRunWindow = lazyWithChunkRecovery(() => import('@/components/views/MultiRunWindow').then(m => ({ default: m.MultiRunWindow })));
 
 // Mobile drawer width as screen percentage
-const MOBILE_DRAWER_WIDTH_PERCENT = 85;
+const MOBILE_DRAWER_WIDTH_PERCENT = 100;
 const DESKTOP_SIDEBAR_MIN_WIDTH = 280;
 const DESKTOP_SIDEBAR_MAX_WIDTH = 500;
 const DESKTOP_RIGHT_SIDEBAR_MIN_WIDTH = 360;
@@ -68,20 +68,21 @@ export const MainLayout: React.FC = () => {
     // Mobile drawer state
     const [mobileLeftDrawerOpen, setMobileLeftDrawerOpen] = React.useState(false);
     const mobileRightDrawerOpenRef = React.useRef(false);
+    const initialDrawerWidthRef = React.useRef(typeof window === 'undefined' ? 0 : window.innerWidth);
 
     // Left drawer motion value
-    const leftDrawerX = useMotionValue(0);
+    const leftDrawerX = useMotionValue(-initialDrawerWidthRef.current);
     const leftDrawerWidth = useRef(0);
 
     // Right drawer motion value
-    const rightDrawerX = useMotionValue(0);
+    const rightDrawerX = useMotionValue(initialDrawerWidthRef.current);
     const rightDrawerWidth = useRef(0);
 
     // Compute drawer width
     useEffect(() => {
         if (isMobile) {
-            leftDrawerWidth.current = window.innerWidth * (MOBILE_DRAWER_WIDTH_PERCENT / 100);
-            rightDrawerWidth.current = window.innerWidth * (MOBILE_DRAWER_WIDTH_PERCENT / 100);
+            leftDrawerWidth.current = window.innerWidth;
+            rightDrawerWidth.current = window.innerWidth;
         }
     }, [isMobile]);
 
@@ -262,6 +263,8 @@ export const MainLayout: React.FC = () => {
                 return <React.Suspense fallback={null}><TerminalView /></React.Suspense>;
             case 'files':
                 return <React.Suspense fallback={null}><FilesView /></React.Suspense>;
+            case 'context':
+                return <ProjectContextPanel />;
             default:
                 return null;
         }
@@ -355,13 +358,13 @@ export const MainLayout: React.FC = () => {
                         drag="x"
                         dragElastic={0.08}
                         dragMomentum={false}
-                        dragConstraints={{ left: -(leftDrawerWidth.current || window.innerWidth * 0.85), right: 0 }}
+                        dragConstraints={{ left: -(leftDrawerWidth.current || window.innerWidth), right: 0 }}
                         style={{
                             width: `${MOBILE_DRAWER_WIDTH_PERCENT}%`,
                             x: leftDrawerX,
                         }}
                         onDragEnd={(_, info) => {
-                            const drawerWidthPx = leftDrawerWidth.current || window.innerWidth * 0.85;
+                            const drawerWidthPx = leftDrawerWidth.current || window.innerWidth;
                             const threshold = drawerWidthPx * 0.3;
                             const velocityThreshold = 500;
                             const currentX = leftDrawerX.get();
@@ -407,13 +410,13 @@ export const MainLayout: React.FC = () => {
                         drag="x"
                         dragElastic={0.08}
                         dragMomentum={false}
-                        dragConstraints={{ left: 0, right: rightDrawerWidth.current || window.innerWidth * 0.85 }}
+                        dragConstraints={{ left: 0, right: rightDrawerWidth.current || window.innerWidth }}
                         style={{
                             width: `${MOBILE_DRAWER_WIDTH_PERCENT}%`,
                             x: rightDrawerX,
                         }}
                         onDragEnd={(_, info) => {
-                            const drawerWidthPx = rightDrawerWidth.current || window.innerWidth * 0.85;
+                            const drawerWidthPx = rightDrawerWidth.current || window.innerWidth;
                             const threshold = drawerWidthPx * 0.3;
                             const velocityThreshold = 500;
                             const currentX = rightDrawerX.get();

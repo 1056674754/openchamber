@@ -20,6 +20,7 @@ import { useUIStore } from '@/stores/useUIStore';
 import { useI18n } from '@/lib/i18n';
 
 interface ChangesSectionProps {
+  title?: string;
   changeEntries: GitStatus['files'];
   selectedPaths: Set<string>;
   diffStats: Record<string, { insertions: number; deletions: number }> | undefined;
@@ -171,6 +172,7 @@ const getDirectorySelectionState = (
 };
 
 export const ChangesSection: React.FC<ChangesSectionProps> = ({
+  title,
   changeEntries,
   selectedPaths,
   diffStats,
@@ -446,7 +448,9 @@ export const ChangesSection: React.FC<ChangesSectionProps> = ({
       <section className={containerClassName}>
         <header className={headerClassName}>
           <div className="flex min-w-0 items-center gap-2">
-            <h3 className="typography-ui-header font-semibold text-foreground">{t('gitView.changes.title')}</h3>
+            <h3 className="typography-ui-header font-semibold text-foreground">
+              {title ?? t('gitView.changes.title')}
+            </h3>
             {totalCount > 0 ? (
               <div
                 className={cn(

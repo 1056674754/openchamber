@@ -12,7 +12,7 @@
  * Abort controller created once at init, cleaned up via returned cleanup fn.
  */
 
-import type { Event, OpencodeClient } from "@opencode-ai/sdk/v2/client"
+import type { Event, OpencodeClient, SessionStatus } from "@opencode-ai/sdk/v2/client"
 import { syncDebug } from "./debug"
 
 export type QueuedEvent = {
@@ -53,6 +53,11 @@ export type EventPipelineInput = {
   wsReadyTimeoutMs?: number
 }
 
+export type EventPipeline = {
+  cleanup: () => void
+  reconnect: (reason?: string) => void
+}
+
 type MessageStreamWsFrame = {
   type: "ready" | "event" | "error" | "backpressure"
   payload?: unknown
@@ -62,7 +67,70 @@ type MessageStreamWsFrame = {
   scope?: "global" | "directory"
 }
 
+const normalizeOpenChamberSessionStatus = (payload: Event): Event | null => {
+  const record = payload as unknown as {
+    id?: unknown
+    type?: unknown
+    properties?: {
+      sessionID?: unknown
+      sessionId?: unknown
+      status?: unknown
+      metadata?: {
+        attempt?: unknown
+        message?: unknown
+        next?: unknown
+      }
+    }
+  }
+
+  if (record.type !== "openchamber:session-status") return null
+
+  const sessionID = typeof record.properties?.sessionID === "string" && record.properties.sessionID.length > 0
+    ? record.properties.sessionID
+    : typeof record.properties?.sessionId === "string" && record.properties.sessionId.length > 0
+      ? record.properties.sessionId
+      : ""
+  const rawStatus = typeof record.properties?.status === "string" ? record.properties.status : ""
+  if (!sessionID || !rawStatus) return null
+
+  let status: SessionStatus | null = null
+  if (rawStatus === "idle" || rawStatus === "busy") {
+    status = { type: rawStatus }
+  } else if (rawStatus === "retry") {
+    const metadata = record.properties?.metadata
+    if (
+      typeof metadata?.attempt === "number"
+      && typeof metadata.message === "string"
+      && typeof metadata.next === "number"
+    ) {
+      status = {
+        type: "retry",
+        attempt: metadata.attempt,
+        message: metadata.message,
+        next: metadata.next,
+      }
+    }
+  }
+  if (!status) return null
+
+  return {
+    id: typeof record.id === "string" && record.id.length > 0
+      ? record.id
+      : `openchamber-status-${sessionID}-${Date.now()}`,
+    type: "session.status",
+    properties: {
+      sessionID,
+      status,
+    },
+  } as Event
+}
+
 const normalizeEventType = (payload: Event): Event => {
+  const normalizedOpenChamberStatus = normalizeOpenChamberSessionStatus(payload)
+  if (normalizedOpenChamberStatus) {
+    return normalizedOpenChamberStatus
+  }
+
   const type = (payload as { type?: unknown }).type
   if (typeof type !== "string") {
     return payload
@@ -158,13 +226,10 @@ type DirectoryQueue = {
 
 type AttemptAbortReason =
   | "pipeline_stopped"
-  | "ws_heartbeat_timeout"
-  | "sse_heartbeat_timeout"
-  | "ws_system_resume"
-  | "sse_system_resume"
+  | `${"ws" | "sse"}_${string}`
   | null
 
-export function createEventPipeline(input: EventPipelineInput) {
+export function createEventPipeline(input: EventPipelineInput): EventPipeline {
   const {
     sdk,
     baseUrl: inputBaseUrl,
@@ -212,7 +277,50 @@ export function createEventPipeline(input: EventPipelineInput) {
       const props = payload.properties as { messageID: string; partID: string; field: string }
       return `message.part.delta:${props.messageID}:${props.partID}:${props.field}`
     }
+    if (payload.type === "message.part.updated") {
+      const props = payload.properties as { part?: { id?: string; messageID?: string } }
+      const messageID = props.part?.messageID
+      const partID = props.part?.id
+      if (messageID && partID) {
+        return `message.part.updated:${messageID}:${partID}`
+      }
+    }
     return undefined
+  }
+
+  const updatedPartIdentity = (payload: Event): { messageID: string; partID: string } | null => {
+    if (payload.type !== "message.part.updated") return null
+    const props = payload.properties as { part?: { id?: unknown; messageID?: unknown } }
+    const messageID = typeof props.part?.messageID === "string" ? props.part.messageID : ""
+    const partID = typeof props.part?.id === "string" ? props.part.id : ""
+    return messageID && partID ? { messageID, partID } : null
+  }
+
+  const updatedPartHasField = (payload: Event, field: string): boolean => {
+    if (payload.type !== "message.part.updated") return false
+    const props = payload.properties as { part?: Record<string, unknown> }
+    return Object.prototype.hasOwnProperty.call(props.part || {}, field)
+  }
+
+  const hasInterveningDeltaForUpdatedPart = (d: DirectoryQueue, fromIndex: number, payload: Event): boolean => {
+    const identity = updatedPartIdentity(payload)
+    if (!identity) return false
+
+    for (let index = fromIndex + 1; index < d.queue.length; index++) {
+      const queued = d.queue[index]
+      if (queued?.type !== "message.part.delta") continue
+      const props = queued.properties as { messageID?: string; partID?: string; field?: string }
+      if (
+        props.messageID === identity.messageID &&
+        props.partID === identity.partID &&
+        typeof props.field === "string" &&
+        updatedPartHasField(payload, props.field)
+      ) {
+        return true
+      }
+    }
+
+    return false
   }
 
   const flushDir = (directory: string) => {
@@ -363,6 +471,12 @@ export function createEventPipeline(input: EventPipelineInput) {
     if (k) {
       const i = d.coalesced.get(k)
       if (i !== undefined) {
+        if (normalizedPayload.type === "message.part.updated" && hasInterveningDeltaForUpdatedPart(d, i, normalizedPayload)) {
+          d.coalesced.set(k, d.queue.length)
+          d.queue.push(normalizedPayload)
+          scheduleDir(routedDirectory)
+          return
+        }
         if (normalizedPayload.type === "message.part.delta") {
           const prev = d.queue[i] as unknown as { properties: { delta: string } }
           const inc = normalizedPayload.properties as { delta: string }
@@ -637,11 +751,8 @@ export function createEventPipeline(input: EventPipelineInput) {
         const code = typeof error === "object" && error !== null ? (error as { code?: unknown }).code : undefined
         if (currentTransport === "ws" && code === "WS_FALLBACK") {
           retryDelayMs = 0
-          // Transport switch (WS → SSE fallback), not a real disconnection.
-          // No events were lost — the next attempt will use SSE and carry
-          // lastEventId for gapless replay. Notify consumer so it can set
-          // isConnected, but do NOT treat this as a disconnection requiring
-          // a full directory resync.
+          // Transport switches are gap-prone in real networks. Notify the
+          // consumer so it can refresh authoritative HTTP state.
           onTransportSwitch?.()
         } else if (!isAbortError(error)) {
           consecutiveFailures += 1
@@ -720,6 +831,11 @@ export function createEventPipeline(input: EventPipelineInput) {
     attempt?.abort()
   }
 
+  const reconnect = (reason = "manual") => {
+    attemptAbortReason = `${activeTransport}_${reason}`
+    attempt?.abort()
+  }
+
   if (typeof document !== "undefined") {
     document.addEventListener("visibilitychange", onVisibility)
     window.addEventListener("pageshow", onPageShow)
@@ -747,5 +863,5 @@ export function createEventPipeline(input: EventPipelineInput) {
     flushAll()
   }
 
-  return { cleanup }
+  return { cleanup, reconnect }
 }

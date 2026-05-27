@@ -171,15 +171,10 @@ const hasAnySessions = (section: ProjectSection): boolean =>
 
 const RemoteProjectSessionSkeleton = () => (
   <div className="space-y-1 py-1" aria-hidden="true">
-    {[0, 1, 2].map((index) => (
-      <div key={index} className="flex items-center gap-2 rounded-md px-1.5 py-1">
-        <span className="h-3 w-3 shrink-0 rounded-[3px] bg-[var(--surface-subtle)] animate-pulse" />
-        <span
-          className="h-3 rounded-full bg-[var(--surface-subtle)] animate-pulse"
-          style={{ width: index === 0 ? '72%' : index === 1 ? '58%' : '66%' }}
-        />
-      </div>
-    ))}
+    <div className="flex items-center gap-2 rounded-md px-1.5 py-1">
+      <span className="h-3 w-3 shrink-0 rounded-[3px] bg-[var(--surface-subtle)] animate-pulse" />
+      <span className="h-3 w-[66%] rounded-full bg-[var(--surface-subtle)] animate-pulse" />
+    </div>
   </div>
 );
 

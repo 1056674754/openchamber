@@ -96,6 +96,47 @@ const SESSION_PINNED_ORDER_BY_PROJECT_STORAGE_KEY = 'oc.sessions.pinnedOrderByPr
 
 type PrVisualState = 'draft' | 'open' | 'blocked' | 'merged' | 'closed';
 
+type ProjectCollapseSource = {
+  id?: string;
+  sidebarCollapsed?: boolean;
+};
+
+const readInitialCollapsedProjects = (
+  safeStorage: { getItem: (key: string) => string | null },
+  projects: readonly ProjectCollapseSource[],
+): Set<string> => {
+  const collapsed = new Set<string>();
+
+  try {
+    const storedProjects = safeStorage.getItem(PROJECT_COLLAPSE_STORAGE_KEY);
+    if (storedProjects) {
+      const parsed = JSON.parse(storedProjects);
+      if (Array.isArray(parsed)) {
+        parsed.forEach((item) => {
+          if (typeof item === 'string') {
+            collapsed.add(item);
+          }
+        });
+      }
+    }
+  } catch {
+    // ignored
+  }
+
+  for (const project of projects) {
+    if (typeof project.id !== 'string') {
+      continue;
+    }
+    if (project.sidebarCollapsed === true) {
+      collapsed.add(project.id);
+    } else if (project.sidebarCollapsed === false) {
+      collapsed.delete(project.id);
+    }
+  }
+
+  return collapsed;
+};
+
 type PrIndicator = {
   visualState: PrVisualState;
   number: number;
@@ -187,7 +228,9 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   const activeNowEntries = useActiveNowStore((state) => state.entries);
   const addActiveNowSessionToStore = useActiveNowStore((state) => state.addSession);
   const pruneActiveNowEntriesInStore = useActiveNowStore((state) => state.prune);
-  const [collapsedProjects, setCollapsedProjects] = React.useState<Set<string>>(new Set());
+  const [collapsedProjects, setCollapsedProjects] = React.useState<Set<string>>(
+    () => readInitialCollapsedProjects(safeStorage, useProjectsStore.getState().projects),
+  );
 
   const [projectRepoStatus, setProjectRepoStatus] = React.useState<Map<string, boolean | null>>(new Map());
   const [expandedSessionGroups, setExpandedSessionGroups] = React.useState<Set<string>>(new Set());

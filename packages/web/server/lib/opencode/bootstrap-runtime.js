@@ -72,6 +72,7 @@ export const createBootstrapRuntime = (dependencies) => {
     }
 
     registerAuthAndAccessRoutes(app, {
+      express,
       tunnelAuthController,
       uiAuthController,
       readSettingsFromDiskMigrated,

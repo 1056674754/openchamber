@@ -31,7 +31,7 @@ describe('ReasoningTimelineBlock', () => {
     expect(markup).toContain('role="button"');
     expect(markup).toContain('aria-expanded="false"');
     expect(markup).toContain('aria-label="Expand reasoning trace"');
-    expect(markup).toContain('aria-hidden="true"');
+    expect(markup).not.toContain('data-message-text-export-source');
     expect(markup).toContain('First thought');
   });
 

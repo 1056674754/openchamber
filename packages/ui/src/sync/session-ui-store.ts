@@ -511,18 +511,18 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
   // ---------------------------------------------------------------------------
   _pendingNavigationSessionId: null as string | null,
   navigateToSession: (sessionId, directory, projectId) => {
-    get()._pendingNavigationSessionId = sessionId
-    useProjectsStore.getState().setActiveProjectIdOnly(projectId)
     const project = projectId
       ? useProjectsStore.getState().projects.find((p) => p.id === projectId)
       : null
     const serverId = project?.serverId ?? DEFAULT_SERVER_ID
+    set({ _pendingNavigationSessionId: sessionId })
     get().setCurrentSession(sessionId, directory, { serverId })
+    useProjectsStore.getState().setActiveProjectIdOnly(projectId)
   },
   consumeNavigationIntent: () => {
     const id = get()._pendingNavigationSessionId
     if (id) {
-      get()._pendingNavigationSessionId = null
+      set({ _pendingNavigationSessionId: null })
     }
     return id
   },

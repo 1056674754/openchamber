@@ -61,6 +61,11 @@ export const useSidebarPersistence = (args: Args) => {
 
   const persistCollapsedProjectsTimer = React.useRef<number | null>(null);
   const pendingCollapsedProjects = React.useRef<Set<string> | null>(null);
+  const projectCollapseSignature = useProjectsStore((state) =>
+    state.projects
+      .map((project) => `${project.id}:${project.sidebarCollapsed === true ? '1' : project.sidebarCollapsed === false ? '0' : '-'}`)
+      .join('|'),
+  );
 
   const flushCollapsedProjectsPersist = React.useCallback(() => {
     if (isVSCode) {
@@ -154,6 +159,32 @@ export const useSidebarPersistence = (args: Args) => {
       // ignored
     }
   }, [keys.projectCollapse, keys.sessionExpanded, keys.sessionExpandedLegacy, safeStorage, setCollapsedProjects, setExpandedParents]);
+
+  React.useEffect(() => {
+    const { projects } = useProjectsStore.getState();
+    if (!projects.some((project) => typeof project.sidebarCollapsed === 'boolean')) {
+      return;
+    }
+
+    setCollapsedProjects((prev) => {
+      let changed = false;
+      const next = new Set(prev);
+
+      projects.forEach((project) => {
+        if (project.sidebarCollapsed === true) {
+          if (!next.has(project.id)) {
+            next.add(project.id);
+            changed = true;
+          }
+        } else if (project.sidebarCollapsed === false && next.has(project.id)) {
+          next.delete(project.id);
+          changed = true;
+        }
+      });
+
+      return changed ? next : prev;
+    });
+  }, [projectCollapseSignature, setCollapsedProjects]);
 
   React.useEffect(() => {
     if (!hasLoadedGlobalSessions) {

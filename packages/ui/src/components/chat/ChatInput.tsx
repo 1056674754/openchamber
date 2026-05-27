@@ -57,6 +57,7 @@ import { PROJECT_COLOR_MAP, PROJECT_ICON_MAP, getProjectIconImageUrl } from '@/l
 import { useGitBranches, useGitStore, useIsGitRepo } from '@/stores/useGitStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useSkillsStore } from '@/stores/useSkillsStore';
+import { useCommandsStore } from '@/stores/useCommandsStore';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { createWorktreeDraft } from '@/lib/worktreeSessionCreator';
 import { buildSessionTargetOptions } from '@/sync/session-worktree-contract';
@@ -71,11 +72,25 @@ import { eventMatchesShortcut, getEffectiveShortcutCombo, normalizeCombo } from 
 import { getSyncMessages } from '@/sync/sync-refs';
 import { isSyntheticPart } from '@/lib/messages/synthetic';
 import { serverRegistry } from '@/lib/opencode/server-registry';
+import {
+    buildHighlightParts,
+    mentionRangesToHighlightRanges,
+    tokenizeMarkdown,
+    type HighlightRange,
+    type MentionRange,
+} from './composerHighlight';
+import { highlightFencedCode } from './composerCodeHighlight';
+import {
+    assignImageAttachmentFilenames,
+    buildAttachmentCitationText,
+    findAttachmentCitationRanges,
+} from './attachmentCitations';
 import type { Message, Part } from '@opencode-ai/sdk/v2/client';
 
 const MAX_VISIBLE_TEXTAREA_LINES = 8;
 const EMPTY_QUEUE: QueuedMessage[] = [];
 const FILE_MENTION_TOKEN = /^@[^\s]+$/;
+const PASTE_LINK_URL_PATTERN = /^(https?:\/\/|mailto:)\S+$/i;
 const INLINE_SKILL_TOKEN_PATTERN = /(^|\s)\/([a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?)/g;
 const CHAT_DRAFT_PERSIST_DEBOUNCE_MS = 500;
 const COMPACT_CHAT_PLACEHOLDER_MAX_WIDTH = 560;
@@ -87,6 +102,41 @@ const VS_CODE_DROP_DATA_TYPES = [
     'text/uri-list',
     'text/plain',
 ];
+
+const renameFileForAttachmentCitation = (file: File, filename: string): File => {
+    if (file.name === filename) {
+        return file;
+    }
+
+    return new File([file], filename, {
+        type: file.type,
+        lastModified: file.lastModified,
+    });
+};
+
+const buildImagePasteInsertion = (pastedText: string, citationText: string): string => {
+    if (!pastedText) {
+        return citationText;
+    }
+    return `${pastedText}${/\s$/.test(pastedText) ? '' : ' '}${citationText}`;
+};
+
+const withInlineInsertionBoundaries = (content: string, before: string, after: string): string => {
+    if (!content) {
+        return content;
+    }
+
+    const needsLeadingSpace = before.length > 0
+        && !/\s$/.test(before)
+        && !/^\s/.test(content)
+        && !/[([{]$/.test(before);
+    const needsTrailingSpace = after.length > 0
+        && !/\s$/.test(content)
+        && !/^\s/.test(after)
+        && !/^[\])}.,;:!?]/.test(after);
+
+    return `${needsLeadingSpace ? ' ' : ''}${content}${needsTrailingSpace ? ' ' : ''}`;
+};
 
 const collectInlineSkillMentions = (text: string, skillNames: Set<string>): string[] => {
     const mentions: string[] = [];
@@ -1007,6 +1057,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const skipNextDraftPersistRef = React.useRef(false);
     const lastPersistedDraftRef = React.useRef<Map<string, string>>(new Map());
     const currentSessionIdForDraftRef = React.useRef<string | null>(null);
+    const pendingPastedAttachmentFilenamesRef = React.useRef<Set<string>>(new Set());
 
     // TODO: port sendMessage to session-actions (complex — creates sessions, handles attachments, etc.)
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1109,42 +1160,77 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const knownAgentNamesRef = React.useRef(knownAgentNames);
     knownAgentNamesRef.current = knownAgentNames;
 
-    const hasInlineMentionForHighlight = React.useMemo(() => {
+    const availableCommands = useCommandsStore((s) => s.commands);
+    const availableSkills = useSkillsStore((s) => s.skills);
+    const knownSlashNames = React.useMemo(() => {
+        const names = new Set<string>([
+            'init',
+            'review',
+            'undo',
+            'redo',
+            'timeline',
+            'compact',
+            'summary',
+            'workspace-review',
+        ]);
+        for (const command of availableCommands) names.add(command.name.toLowerCase());
+        for (const skill of availableSkills) names.add(skill.name.toLowerCase());
+        return names;
+    }, [availableCommands, availableSkills]);
+
+    const composerCommandRanges = React.useMemo<HighlightRange[]>(() => {
+        if (!message || !message.includes('/') || inputMode === 'shell' || knownSlashNames.size === 0) {
+            return [];
+        }
+        const ranges: HighlightRange[] = [];
+        const slashRegex = /(^|\s)\/([A-Za-z0-9][A-Za-z0-9_-]*)/g;
+        let match: RegExpExecArray | null;
+        while ((match = slashRegex.exec(message)) !== null) {
+            const name = match[2];
+            if (!knownSlashNames.has(name.toLowerCase())) {
+                continue;
+            }
+            const slashStart = match.index + match[1].length;
+            ranges.push({ start: slashStart, end: slashStart + 1 + name.length, style: 'mentionCommand' });
+        }
+        return ranges;
+    }, [inputMode, knownSlashNames, message]);
+
+    const availableSnippets = useSnippetsStore((s) => s.snippets);
+    const knownSnippetTriggers = React.useMemo(() => {
+        const triggers = new Set<string>();
+        for (const snippet of availableSnippets) {
+            triggers.add(snippet.name.toLowerCase());
+            for (const alias of snippet.aliases ?? []) triggers.add(alias.toLowerCase());
+        }
+        return triggers;
+    }, [availableSnippets]);
+
+    const composerSnippetRanges = React.useMemo<HighlightRange[]>(() => {
+        if (!message || !message.includes('#') || inputMode === 'shell' || knownSnippetTriggers.size === 0) {
+            return [];
+        }
+        const ranges: HighlightRange[] = [];
+        const snippetRegex = /(^|\s)#([A-Za-z0-9][A-Za-z0-9_-]*)/g;
+        let match: RegExpExecArray | null;
+        while ((match = snippetRegex.exec(message)) !== null) {
+            const trigger = match[2];
+            if (!knownSnippetTriggers.has(trigger.toLowerCase())) {
+                continue;
+            }
+            const hashStart = match.index + match[1].length;
+            ranges.push({ start: hashStart, end: hashStart + 1 + trigger.length, style: 'mentionSnippet' });
+        }
+        return ranges;
+    }, [inputMode, knownSnippetTriggers, message]);
+
+    const composerMentionRanges = React.useMemo<MentionRange[]>(() => {
         if (!message || !message.includes('@') || inputMode === 'shell') {
-            return false;
+            return [];
         }
+        const ranges: MentionRange[] = [];
         const mentionRegex = /@([^\s]+)/g;
         let match: RegExpExecArray | null;
-        while ((match = mentionRegex.exec(message)) !== null) {
-            const offset = match.index;
-            const charBefore = offset > 0 ? message[offset - 1] : null;
-            if (charBefore && !/(\s|\(|\)|\[|\]|\{|\}|"|'|`|,|\.|;|:)/.test(charBefore)) {
-                continue;
-            }
-            const mentionPath = String(match[1] || '').trim().replace(/[),.;:!?`"'>]+$/g, '');
-            if (!mentionPath) {
-                continue;
-            }
-            if (knownAgentNames.has(mentionPath.toLowerCase())) {
-                return true;
-            }
-            if (isConfirmedFilePath(mentionPath)) {
-                return true;
-            }
-        }
-        return false;
-    }, [inputMode, message, knownAgentNames]);
-
-    const highlightedComposerContent = React.useMemo(() => {
-        if (!hasInlineMentionForHighlight) {
-            return null;
-        }
-
-        const parts: Array<{ text: string; mentionKind: 'none' | 'file' | 'agent' }> = [];
-        const mentionRegex = /@([^\s]+)/g;
-        let lastIndex = 0;
-        let match: RegExpExecArray | null;
-
         while ((match = mentionRegex.exec(message)) !== null) {
             const full = match[0];
             const mention = String(match[1] || '').trim().replace(/[),.;:!?`"'>]+$/g, '');
@@ -1152,28 +1238,46 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             const end = start + full.length;
             const charBefore = start > 0 ? message[start - 1] : null;
             const isBoundary = !charBefore || /(\s|\(|\)|\[|\]|\{|\}|"|'|`|,|\.|;|:)/.test(charBefore);
-            const isAgentMention = isBoundary && mention.length > 0 && knownAgentNames.has(mention.toLowerCase());
-            const isFileMention = isBoundary
-                && mention.length > 0
-                && !knownAgentNames.has(mention.toLowerCase())
-                && isConfirmedFilePath(mention);
-
-            if (start > lastIndex) {
-                parts.push({ text: message.slice(lastIndex, start), mentionKind: 'none' });
+            if (!isBoundary || mention.length === 0) {
+                continue;
             }
-            parts.push({
-                text: full,
-                mentionKind: isFileMention ? 'file' : isAgentMention ? 'agent' : 'none',
-            });
-            lastIndex = end;
+            if (knownAgentNames.has(mention.toLowerCase())) {
+                ranges.push({ start, end, kind: 'agent' });
+            } else if (isConfirmedFilePath(mention)) {
+                ranges.push({ start, end, kind: 'file' });
+            }
+        }
+        return ranges;
+    }, [inputMode, message, knownAgentNames]);
+
+    const attachmentCitationRanges = React.useMemo<HighlightRange[]>(() => {
+        if (!message || !message.includes('[') || inputMode === 'shell' || sendableAttachedFiles.length === 0) {
+            return [];
         }
 
-        if (lastIndex < message.length) {
-            parts.push({ text: message.slice(lastIndex), mentionKind: 'none' });
-        }
+        return findAttachmentCitationRanges(
+            message,
+            sendableAttachedFiles.map((file) => file.filename),
+        ).map((range) => ({
+            ...range,
+            style: 'mentionFile' as const,
+        }));
+    }, [inputMode, message, sendableAttachedFiles]);
 
-        return parts;
-    }, [hasInlineMentionForHighlight, message, knownAgentNames]);
+    const highlightedComposerContent = React.useMemo(() => {
+        if (!message || inputMode === 'shell') {
+            return null;
+        }
+        const ranges = [
+            ...tokenizeMarkdown(message),
+            ...highlightFencedCode(message),
+            ...mentionRangesToHighlightRanges(composerMentionRanges),
+            ...composerCommandRanges,
+            ...composerSnippetRanges,
+            ...attachmentCitationRanges,
+        ];
+        return buildHighlightParts(message, ranges);
+    }, [attachmentCitationRanges, composerCommandRanges, composerSnippetRanges, composerMentionRanges, inputMode, message]);
 
     const sanitizeAttachmentsForSend = React.useCallback(
         (files: AttachedFile[] | undefined): AttachedFile[] => (files ?? [])
@@ -2125,6 +2229,58 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         const canNavigateHistoryUp = !isAnyAutocompleteOpen && (message.length === 0 || cursorAtStart);
         const canNavigateHistoryDown = !isAnyAutocompleteOpen && (message.length === 0 || cursorAtEnd);
 
+        if (inputMode === 'normal' && !isAnyAutocompleteOpen && !e.metaKey && !e.ctrlKey && !e.altKey) {
+            const textarea = textareaRef.current;
+            const selectionStart = textarea?.selectionStart ?? -1;
+            const selectionEnd = textarea?.selectionEnd ?? -1;
+
+            if (textarea && selectionStart >= 0) {
+                const applyEdit = (next: string, caretStart: number, caretEnd: number) => {
+                    e.preventDefault();
+                    setMessage(next);
+                    requestAnimationFrame(() => {
+                        const current = textareaRef.current;
+                        if (current) {
+                            current.selectionStart = caretStart;
+                            current.selectionEnd = caretEnd;
+                        }
+                        adjustTextareaHeight();
+                    });
+                    updateAutocompleteState(next, caretEnd);
+                };
+
+                const wrapPairs: Record<string, [string, string]> = {
+                    '`': ['`', '`'],
+                    '*': ['*', '*'],
+                    '_': ['_', '_'],
+                    '~': ['~', '~'],
+                    '(': ['(', ')'],
+                    '[': ['[', ']'],
+                    '{': ['{', '}'],
+                    '"': ['"', '"'],
+                    "'": ["'", "'"],
+                };
+                if (selectionEnd > selectionStart && wrapPairs[e.key]) {
+                    const [open, close] = wrapPairs[e.key];
+                    const selected = message.slice(selectionStart, selectionEnd);
+                    const next = `${message.slice(0, selectionStart)}${open}${selected}${close}${message.slice(selectionEnd)}`;
+                    applyEdit(next, selectionStart + open.length, selectionEnd + open.length);
+                    return;
+                }
+
+                if (e.key === '`' && selectionStart === selectionEnd) {
+                    const before = message.slice(0, selectionStart);
+                    if (/(^|\n)``$/.test(before)) {
+                        const after = message.slice(selectionEnd);
+                        const next = `${before}\`\n\n\`\`\`${after}`;
+                        const caret = before.length + 2;
+                        applyEdit(next, caret, caret);
+                        return;
+                    }
+                }
+            }
+        }
+
         if (e.key === 'ArrowUp' && canNavigateHistoryUp && userMessageHistory.length > 0) {
             e.preventDefault();
             if (historyIndex === -1) {
@@ -2687,6 +2843,38 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     }, [clearDropTextSuppression]);
 
     const handlePaste = React.useCallback(async (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+        if (inputMode === 'normal' && (currentSessionId || newSessionDraftOpen)) {
+            const textarea = textareaRef.current;
+            const selectionStart = textarea?.selectionStart ?? -1;
+            const selectionEnd = textarea?.selectionEnd ?? -1;
+            if (textarea && selectionEnd > selectionStart) {
+                const clipboardText = e.clipboardData.getData('text');
+                const url = clipboardText.trim();
+                const selected = message.slice(selectionStart, selectionEnd);
+                if (
+                    PASTE_LINK_URL_PATTERN.test(url)
+                    && !/\s/.test(url)
+                    && selected.trim().length > 0
+                    && !selected.includes('](')
+                ) {
+                    e.preventDefault();
+                    const next = `${message.slice(0, selectionStart)}[${selected}](${url})${message.slice(selectionEnd)}`;
+                    const caret = selectionStart + 1 + selected.length + 2 + url.length + 1;
+                    setMessage(next);
+                    requestAnimationFrame(() => {
+                        const current = textareaRef.current;
+                        if (current) {
+                            current.selectionStart = caret;
+                            current.selectionEnd = caret;
+                        }
+                        adjustTextareaHeight();
+                    });
+                    updateAutocompleteState(next, caret);
+                    return;
+                }
+            }
+        }
+
         const fileMap = new Map<string, File>();
 
         Array.from(e.clipboardData.files || []).forEach(file => {
@@ -2716,19 +2904,39 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         e.preventDefault();
 
         const pastedText = e.clipboardData.getData('text');
-        if (pastedText) {
-            insertTextAtSelection(pastedText);
-        }
+        const assignedFilenames = assignImageAttachmentFilenames(
+            imageFiles,
+            [
+                ...attachedFiles.map((file) => file.filename),
+                ...pendingPastedAttachmentFilenamesRef.current,
+            ],
+        );
+        const citationText = buildAttachmentCitationText(assignedFilenames);
+        const textarea = textareaRef.current;
+        const selectionStart = textarea?.selectionStart ?? message.length;
+        const selectionEnd = textarea?.selectionEnd ?? message.length;
+        const insertionText = withInlineInsertionBoundaries(
+            buildImagePasteInsertion(pastedText, citationText),
+            message.slice(0, selectionStart),
+            message.slice(selectionEnd),
+        );
 
-        for (const file of imageFiles) {
+        insertTextAtSelection(insertionText);
+
+        for (let index = 0; index < imageFiles.length; index += 1) {
+            const filename = assignedFilenames[index];
+            const file = renameFileForAttachmentCitation(imageFiles[index], filename);
+            pendingPastedAttachmentFilenamesRef.current.add(filename);
             try {
                 await addAttachedFile(file);
             } catch (error) {
                 console.error('Clipboard image attach failed', error);
                 toast.error(error instanceof Error ? error.message : t('chat.chatInput.toast.clipboardAttachFailed'));
+            } finally {
+                pendingPastedAttachmentFilenamesRef.current.delete(filename);
             }
         }
-    }, [addAttachedFile, currentSessionId, newSessionDraftOpen, insertTextAtSelection, t]);
+    }, [addAttachedFile, attachedFiles, adjustTextareaHeight, currentSessionId, inputMode, message, newSessionDraftOpen, insertTextAtSelection, setMessage, t, updateAutocompleteState]);
 
     const handleFileSelect = (file: { name: string; path: string; relativePath?: string }) => {
 
@@ -4159,13 +4367,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                     {highlightedComposerContent.map((part, index) => (
                                         <span
                                             key={`${index}-${part.text.length}`}
-                                            className={
-                                                part.mentionKind === 'file'
-                                                    ? 'text-[var(--status-info)]'
-                                                    : part.mentionKind === 'agent'
-                                                        ? 'text-[var(--status-success)]'
-                                                        : 'text-foreground'
-                                            }
+                                            className={part.className}
                                         >
                                             {part.text}
                                         </span>

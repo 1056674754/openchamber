@@ -5,6 +5,31 @@ import {
   collectForwardProxyHeaders,
   shouldForwardProxyResponseHeader,
 } from '../../proxy-headers.js';
+import { createRealpathCache } from '../path-realpath-cache.js';
+
+export const createDirectoryQueryCanonicalizer = ({ realpath, ...cacheOptions } = {}) => {
+  const realpathCache = createRealpathCache({ fallbackOnError: true, realpath, ...cacheOptions });
+
+  return async (requestUrl) => {
+    if (typeof requestUrl !== 'string' || !requestUrl.includes('directory=')) {
+      return requestUrl;
+    }
+
+    const url = new URL(requestUrl, 'http://localhost');
+    const directory = url.searchParams.get('directory');
+    if (!directory) {
+      return requestUrl;
+    }
+
+    const canonicalDirectory = await realpathCache.resolve(directory);
+    if (!canonicalDirectory || canonicalDirectory === directory) {
+      return requestUrl;
+    }
+
+    url.searchParams.set('directory', canonicalDirectory);
+    return `${url.pathname}${url.search}`;
+  };
+};
 
 export const waitForSseDrain = (res, signal) => new Promise((resolve) => {
   if (signal?.aborted || res.writableEnded || res.destroyed) {
@@ -98,6 +123,9 @@ export const registerOpenCodeProxy = (app, deps) => {
     return message.includes('socket connection was closed') || message.includes('Socket connection was closed');
   };
   const FALLBACK_PROXY_TARGET = 'http://127.0.0.1:3902';
+  const canonicalizeDirectoryQuery = createDirectoryQueryCanonicalizer({
+    realpath: fs?.promises?.realpath?.bind(fs.promises),
+  });
 
   const normalizeProxyTarget = (candidate) => {
     if (typeof candidate !== 'string') {
@@ -418,6 +446,17 @@ export const registerOpenCodeProxy = (app, deps) => {
         }
       },
     },
+  });
+
+  app.use('/api', async (req, _res, next) => {
+    try {
+      const rewrittenUrl = await canonicalizeDirectoryQuery(req.url);
+      if (rewrittenUrl !== req.url) {
+        req.url = rewrittenUrl;
+      }
+    } catch {
+    }
+    next();
   });
 
   app.use('/api', apiProxy);
