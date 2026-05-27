@@ -1,7 +1,6 @@
 export const registerOpenChamberRoutes = (app, dependencies) => {
   const {
     fs,
-    os,
     path,
     process,
     server,
@@ -105,14 +104,15 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
       }
 
       const currentPort = server.address()?.port || 3000;
-      const tmpDir = os.tmpdir();
-      const instanceFilePath = path.join(tmpDir, `openchamber-${currentPort}.json`);
+      const instanceFilePath = path.join(openchamberDataDir, 'run', `openchamber-${currentPort}.json`);
       let storedOptions = { port: currentPort, daemon: true };
       try {
         const content = await fs.promises.readFile(instanceFilePath, 'utf8');
         storedOptions = JSON.parse(content);
       } catch {
       }
+      const launchMode = storedOptions.launchMode === 'foreground' ? 'foreground' : 'daemon';
+      const isForegroundService = launchMode === 'foreground';
 
       const isWindows = process.platform === 'win32';
       const quotePosix = (value) => `'${String(value).replace(/'/g, "'\\''")}'`;
@@ -153,7 +153,7 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
           restartCmdFallback += ` --ui-password '${escapedPw}'`;
         }
       }
-      const restartCmd = `(${restartCmdPrimary}) || (${restartCmdFallback})`;
+      const restartCmd = isForegroundService ? '' : `(${restartCmdPrimary}) || (${restartCmdFallback})`;
       const updateLogPath = path.join(openchamberDataDir, 'update-install.log');
       const logPreamble = [
         '',
@@ -166,8 +166,9 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
         `packagePath=${pmDetails.packagePath || 'unknown'}`,
         `globalNodeModulesRoot=${pmDetails.globalNodeModulesRoot || 'unknown'}`,
         `mode=${isContainer ? 'container' : 'restart'}`,
+        `launchMode=${launchMode}`,
         `updateCommand=${updateCmd}`,
-        `restartCommand=${restartCmd}`,
+        `restartCommand=${restartCmd || 'service-manager'}`,
         `logPath=${updateLogPath}`,
       ].join('\n');
 
@@ -177,6 +178,7 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
         version: updateInfo.version,
         packageManager: pm,
         autoRestart: true,
+        restartManager: isForegroundService ? 'service' : 'cli',
       });
 
         setTimeout(() => {
@@ -193,19 +195,19 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
             ${updateCmd}
             if %ERRORLEVEL% EQU 0 (
               echo Update successful, restarting OpenChamber...
-              ${restartCmd}
+              ${restartCmd || 'echo Service manager will restart OpenChamber.'}
             ) else (
               echo Update failed
               exit /b 1
             )
             `
           : `
-            printf '%s\n' ${quotePosix(logPreamble)}
+            printf '%s\\n' ${quotePosix(logPreamble)}
             sleep 2
             ${updateCmd}
             if [ $? -eq 0 ]; then
               echo "Update successful, restarting OpenChamber..."
-              ${restartCmd}
+              ${restartCmd || 'echo "Service manager will restart OpenChamber."'}
             else
               echo "Update failed"
               exit 1

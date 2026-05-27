@@ -4,6 +4,39 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.11.7] - 2026-05-28
+
+Manual merge of upstream community commits v1.11.5..v1.11.7 (31 commits). All changes adapted to preserve multi-server/serverId/sessionId/directory context architecture.
+
+### New Features
+
+- **Plugin System**: Server-side plugin management (install, uninstall, enable, disable, list) with npm registry integration, plugin spec validation, and a full Settings UI section with enable/disable toggles and install/uninstall actions.
+- **Git Graph**: Visual branch topology in the Git History panel with lane-based SVG rendering, commit parent tracking, and multi-branch `--all` log support.
+- **Agent→Model Auto-Switch**: When switching agents, the model now falls back through provider defaults → OpenCode default → first available, preventing "no model selected" states.
+- **Ngrok Tunnel Provider**: New ngrok tunnel provider alongside Cloudflare, with provider selector in Tunnel Settings.
+- **Launch at Startup (Electron)**: `openchamber --startup` CLI flag and Desktop Network Settings toggle for OS login item registration.
+- **Traditional Chinese (zh-TW) Locale**: Full Traditional Chinese translation for all UI strings.
+
+### Improvements
+
+- **VS Code Git Deduplication**: Bridge filesystem runtime now caches git reads and deduplicates in-flight requests, reducing redundant IPC.
+- **Electron Dev Isolation**: Dev-mode instances use separate data directories and window state, preventing conflicts with production installs.
+- **Mobile New Session**: Sidebar header mobile variant with dedicated "new session draft" action for touch-friendly session creation.
+- **Context Panel Overflow**: Panel width is now clamped to available viewport space, preventing off-screen overflow.
+- **Todo Sort**: Completed todos sort to the bottom of the Project Notes Todo panel.
+- **Session Rename Focus**: Rename input uses mousedown instead of blur for commit timing, preventing focus competition with the sidebar.
+- **Usage Prediction Toggle**: Setting to show/hide predicted usage values in the quota display.
+- **Browser/Webview State**: Context panel preserves DOM and webview state across panel switches, preventing reload flicker.
+- **Tool Diff Resilience**: Diff rendering extracted into a utility module with Error Boundary, preventing crashes from malformed diff content.
+- **Tool Animation**: Expanded content transition duration set to 0 for instant tool output display.
+- **VS Code Live Streaming**: SSE proxy now respects `navigator.onLine` and `visibilityState` for reconnection pacing, with proper 4xx error classification.
+
+### Merge Notes
+
+- All session/permission/git/file/terminal/plugin/tunnel/settings changes were reviewed to ensure no misuse of global active project or current directory.
+- Git and plugin operations use explicit `directory` parameters respecting per-session directory context.
+- Multi-server model and serverId routing preserved throughout.
+
 ## [1.11.5] - 2026-05-25
 
 - Chat/Input: pending image attachments now show previews, sent image attachments can be cited from assistant messages, and markdown source mode highlights formatting while you type.

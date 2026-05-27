@@ -31,12 +31,15 @@ function renderFromAsChild(asChild: boolean | undefined, children: React.ReactNo
   return { children };
 }
 
-type DropdownMenuProps = React.ComponentProps<typeof BaseMenu.Root>;
+type DropdownMenuProps = React.ComponentProps<typeof BaseMenu.Root> & {
+  onOpenChangeComplete?: (open: boolean) => void;
+};
 
 function DropdownMenu({
   open: openProp,
   defaultOpen,
   onOpenChange,
+  onOpenChangeComplete,
   ...props
 }: DropdownMenuProps) {
   const [portalContainer, setPortalContainer] = React.useState<HTMLElement | null>(null);
@@ -65,6 +68,7 @@ function DropdownMenu({
         modal={false}
         open={open}
         onOpenChange={handleOpenChange}
+        onOpenChangeComplete={onOpenChangeComplete}
         {...props}
       />
     </DropdownPortalContext.Provider>
@@ -123,6 +127,7 @@ type ContentProps = {
   className?: string;
   children?: React.ReactNode;
   onCloseAutoFocus?: (event: Event) => void;
+  finalFocus?: boolean | React.RefObject<HTMLElement | null> | ((closeType: string) => boolean | HTMLElement | null | void);
 } & Omit<React.ComponentProps<typeof BaseMenu.Popup>, "style" | "className" | "children">
 
 function DropdownMenuContent({
@@ -136,10 +141,12 @@ function DropdownMenuContent({
   style,
   children,
   onCloseAutoFocus,
+  finalFocus,
   ...props
 }: ContentProps) {
   const portalContext = React.useContext(DropdownPortalContext);
   void onCloseAutoFocus
+  void finalFocus
 
   return (
     <BaseMenu.Portal container={portalToBody ? undefined : portalContext?.portalContainer || undefined}>
@@ -152,6 +159,7 @@ function DropdownMenuContent({
       >
         <BaseMenu.Popup
           data-slot="dropdown-menu-content"
+          finalFocus={finalFocus}
           style={{
             backgroundColor: 'var(--surface-elevated)',
             color: 'var(--surface-elevated-foreground)',

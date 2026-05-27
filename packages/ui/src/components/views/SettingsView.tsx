@@ -17,6 +17,8 @@ import { CommandsSidebar } from '@/components/sections/commands/CommandsSidebar'
 import { CommandsPage } from '@/components/sections/commands/CommandsPage';
 import { McpSidebar } from '@/components/sections/mcp/McpSidebar';
 import { McpPage } from '@/components/sections/mcp/McpPage';
+import { PluginsSidebar, PluginsPage } from '@/components/sections/plugins';
+import { usePluginsStore } from '@/stores/usePluginsStore';
 import { SkillsSidebar } from '@/components/sections/skills/SkillsSidebar';
 import { SkillsPage } from '@/components/sections/skills/SkillsPage';
 import { ProjectsSidebar } from '@/components/sections/projects/ProjectsSidebar';
@@ -84,6 +86,7 @@ const pageOrder: SettingsPageSlug[] = [
   'behavior',
   'commands',
   'mcp',
+  'plugins',
   'providers',
   'usage',
   'skills.installed',
@@ -97,6 +100,7 @@ const SERVER_AWARE_PAGES: Set<SettingsPageSlug> = new Set([
   'agents',
   'commands',
   'mcp',
+  'plugins',
   'snippets',
   'skills.installed',
   'skills.catalog',
@@ -148,6 +152,8 @@ export function getSettingsNavIcon(slug: SettingsPageSlug): IconName | null {
       return 'slash-commands-2';
     case 'mcp':
       return 'plug-2';
+    case 'plugins':
+      return 'code-box';
 
     case 'skills.installed':
       return 'book-open';
@@ -227,6 +233,18 @@ const SettingsHome: React.FC<{ onOpen: (slug: SettingsPageSlug) => void }> = ({ 
           >
             <div className="typography-ui-label text-foreground">{t('settings.view.home.cards.mcp.title')}</div>
             <div className="typography-micro text-muted-foreground/70">{t('settings.view.home.cards.mcp.description')}</div>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => onOpen('plugins')}
+            className={cn(
+              'rounded-lg border border-border bg-[var(--surface-elevated)] p-4 text-left',
+              'hover:bg-[var(--interactive-hover)] transition-colors'
+            )}
+          >
+            <div className="typography-ui-label text-foreground">{t('settings.view.home.cards.plugins.title')}</div>
+            <div className="typography-micro text-muted-foreground/70">{t('settings.view.home.cards.plugins.description')}</div>
           </button>
 
           <button
@@ -387,6 +405,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
       void useMcpConfigStore.getState().loadMcpConfigs();
       return;
     }
+    if (settingsSlug === 'plugins') {
+      void usePluginsStore.getState().loadPlugins();
+      return;
+    }
     if (settingsSlug === 'skills.installed' || settingsSlug === 'skills.catalog') {
       void useSkillsStore.getState().loadSkills();
       void useSkillsCatalogStore.getState().loadCatalog();
@@ -444,6 +466,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
         return t('settings.page.commands.title');
       case 'mcp':
         return t('settings.page.mcp.title');
+      case 'plugins':
+        return t('settings.page.plugins.title');
       case 'skills.installed':
         return t('settings.page.skills.title');
       case 'skills.catalog':
@@ -497,6 +521,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
         return <CommandsSidebar onItemSelect={opts.onItemSelect} />;
       case 'mcp':
         return <McpSidebar onItemSelect={opts.onItemSelect} />;
+      case 'plugins':
+        return <PluginsSidebar onItemSelect={opts.onItemSelect} />;
       case 'skills.installed':
         return <SkillsSidebar onItemSelect={opts.onItemSelect} />;
       case 'providers':
@@ -533,6 +559,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
         return <CommandsPage />;
       case 'mcp':
         return <McpPage />;
+      case 'plugins':
+        return <PluginsPage />;
       case 'skills.installed':
         return <SkillsPage view="installed" />;
       case 'skills.catalog':

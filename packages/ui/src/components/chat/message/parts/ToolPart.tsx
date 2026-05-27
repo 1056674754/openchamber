@@ -1,6 +1,6 @@
 
 import React from 'react';
-import { animate, type AnimationPlaybackControls } from 'motion';
+import type { AnimationPlaybackControls } from 'motion';
 import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
 import { PatchDiff } from '@pierre/diffs/react';
 import { cn } from '@/lib/utils';
@@ -47,6 +47,11 @@ import { useDurationTickerNow } from './useDurationTicker';
 import { resolveFallbackTaskSessionId } from './resolveFallbackTaskSessionId';
 import { areRenderRelevantPartsEqual } from '../renderCompare';
 import { useI18n } from '@/lib/i18n';
+import { getDiffPatchEntries, getPatchText } from './toolDiffUtils';
+
+const TOOL_ROW_TEXT_CLASS = '!text-[length:var(--text-meta)] !leading-4 sm:!leading-6 tracking-normal';
+const TOOL_ROW_TITLE_CLASS = cn('typography-meta font-medium', TOOL_ROW_TEXT_CLASS);
+const TOOL_ROW_DESCRIPTION_CLASS = cn('typography-meta', TOOL_ROW_TEXT_CLASS);
 
 type ToolStateWithMetadata = ToolStateUnion & { metadata?: Record<string, unknown>; input?: Record<string, unknown>; output?: string; error?: string; time?: { start: number; end?: number } };
 
@@ -195,8 +200,7 @@ const LiveDuration: React.FC<{ start: number; end?: number; active: boolean }> =
     return <>{formatDuration(start, end, now)}</>;
 };
 
-const EXPANDED_CONTENT_TRANSITION_MS = 350;
-const EXPANDED_CONTENT_SPRING = { type: 'spring' as const, visualDuration: 0.35, bounce: 0 };
+const EXPANDED_CONTENT_TRANSITION_MS = 0;
 
 const useAnimatedExpandedContent = (isExpanded: boolean) => {
     const [shouldRender, setShouldRender] = React.useState(isExpanded);
@@ -305,21 +309,6 @@ const extractFirstChangedLineFromDiff = (diffText: string): number | undefined =
     }
 
     return firstHunkStart;
-};
-
-const getPatchText = (value: unknown): string | undefined => {
-    if (typeof value === 'string') {
-        return /\S/.test(value) ? value : undefined;
-    }
-
-    if (value && typeof value === 'object') {
-        const patch = (value as { patch?: unknown }).patch;
-        if (typeof patch === 'string') {
-            return /\S/.test(patch) ? patch : undefined;
-        }
-    }
-
-    return undefined;
 };
 
 const buildWritePreviewPatch = (filePath: string | undefined, content: string): string | undefined => {
@@ -1310,69 +1299,48 @@ const TOOL_NORMAL_ICON_STYLE: React.CSSProperties = { color: 'var(--tools-icon)'
 const TOOL_ERROR_TITLE_STYLE: React.CSSProperties = { color: 'var(--status-error)' };
 const TOOL_NORMAL_TITLE_STYLE: React.CSSProperties = { color: 'var(--tools-title)' };
 
-type DiffPatchEntry = {
-    id: string;
-    title: string;
-    patch: string;
-};
+const PlainDiffFallback: React.FC<{ diff: string }> = ({ diff }) => (
+    <pre
+        className="m-0 overflow-auto whitespace-pre-wrap break-words rounded-lg p-2 typography-code"
+        style={{
+            backgroundColor: 'var(--syntax-base-background)',
+            color: 'var(--syntax-base-foreground)',
+        }}
+    >
+        {diff}
+    </pre>
+);
 
-const hasUnifiedDiffHunk = (patch: string): boolean => /^@@\s+-\d+(?:,\d+)?\s+\+\d+(?:,\d+)?\s+@@/m.test(patch);
+class DiffPreviewErrorBoundary extends React.Component<{
+    resetKey: string;
+    fallback: React.ReactNode;
+    children: React.ReactNode;
+}, { hasError: boolean }> {
+    state = { hasError: false };
 
-const isUnifiedFileHeaderPair = (minusLine: string, plusLine: string): boolean => {
-    if (!minusLine.startsWith('--- ') || !plusLine.startsWith('+++ ')) {
-        return false;
+    static getDerivedStateFromError(): { hasError: boolean } {
+        return { hasError: true };
     }
 
-    const oldPath = minusLine.slice(4).trim();
-    const newPath = plusLine.slice(4).trim();
-    return oldPath.length > 0 && newPath.length > 0;
-};
-
-const getUnifiedDiffPath = (patch: string, fallbackTitle: string): string => {
-    const plusHeader = patch.match(/^\+\+\+\s+(?:[ab]\/(.+)|(.+))$/m);
-    const rawPath = plusHeader?.[1] ?? plusHeader?.[2];
-    if (!rawPath || rawPath === '/dev/null') {
-        return fallbackTitle;
-    }
-    return rawPath;
-};
-
-const splitUnifiedDiffPatch = (patch: string): DiffPatchEntry[] => {
-    const normalized = patch.replace(/\r\n/g, '\n').trim();
-    if (!normalized) {
-        return [];
-    }
-
-    const lines = normalized.split('\n');
-    const starts: number[] = [];
-
-    for (let index = 0; index < lines.length; index += 1) {
-        const line = lines[index] ?? '';
-        const nextLine = lines[index + 1] ?? '';
-        if (line.startsWith('diff --git ') || line.startsWith('Index: ') || isUnifiedFileHeaderPair(line, nextLine)) {
-            starts.push(index);
+    componentDidUpdate(prevProps: { resetKey: string }) {
+        if (prevProps.resetKey !== this.props.resetKey && this.state.hasError) {
+            this.setState({ hasError: false });
         }
     }
 
-    const chunks = starts.length > 0
-        ? starts.map((start, index) => lines.slice(start, starts[index + 1] ?? lines.length).join('\n').trim())
-        : [normalized];
+    componentDidCatch(error: Error) {
+        if (process.env.NODE_ENV === 'development') {
+            console.warn('Tool diff preview failed; rendering raw patch instead.', error);
+        }
+    }
 
-    return chunks
-        .map((chunk, index) => {
-            if (!hasUnifiedDiffHunk(chunk)) {
-                return null;
-            }
-
-            const title = getUnifiedDiffPath(chunk, `Diff ${index + 1}`);
-            return {
-                id: `${title}-${index}`,
-                title,
-                patch: chunk,
-            } satisfies DiffPatchEntry;
-        })
-        .filter((entry): entry is DiffPatchEntry => entry !== null);
-};
+    render() {
+        if (this.state.hasError) {
+            return this.props.fallback;
+        }
+        return this.props.children;
+    }
+}
 
 const renderPathLikeGitChanges = (path: string, grow = true) => {
     const lastSlash = path.lastIndexOf('/');
@@ -1459,61 +1427,6 @@ const renderAnimatedPathWithIcon = (path: string, animate = true, grow = true, s
     );
 };
 
-const getDiffPatchEntries = (
-    metadata: Record<string, unknown> | undefined,
-    fallbackDiff: string,
-    currentDirectory: string,
-): DiffPatchEntry[] => {
-    const files = Array.isArray(metadata?.files) ? metadata.files : [];
-
-    const entries = files
-        .map((file, index) => {
-            if (!file || typeof file !== 'object') {
-                return null;
-            }
-
-            const record = file as { relativePath?: unknown; filePath?: unknown; patch?: unknown; diff?: unknown };
-            const patch = getPatchText(record.patch) ?? getPatchText(record.diff) ?? '';
-            const splitPatchEntries = splitUnifiedDiffPatch(patch);
-            if (!patch || splitPatchEntries.length === 0) {
-                return null;
-            }
-
-            const rawPath = typeof record.relativePath === 'string'
-                ? record.relativePath
-                : typeof record.filePath === 'string'
-                    ? record.filePath
-                    : `File ${index + 1}`;
-
-            const title = typeof rawPath === 'string'
-                ? getRelativePath(rawPath, currentDirectory)
-                : `File ${index + 1}`;
-
-            return splitPatchEntries.map((entry, splitIndex) => ({
-                id: `${title}-${index}-${splitIndex}`,
-                title: splitPatchEntries.length === 1 ? title : getRelativePath(entry.title, currentDirectory),
-                patch: entry.patch,
-            } satisfies DiffPatchEntry));
-        })
-        .flat()
-        .filter((entry): entry is DiffPatchEntry => entry !== null);
-
-    if (entries.length > 0) {
-        return entries;
-    }
-
-    const splitEntries = splitUnifiedDiffPatch(fallbackDiff).map((entry) => ({
-        ...entry,
-        title: getRelativePath(entry.title, currentDirectory),
-    }));
-
-    if (splitEntries.length > 0) {
-        return splitEntries;
-    }
-
-    return [];
-};
-
 const DiffPreview: React.FC<DiffPreviewProps> = React.memo(({ diff, pierreTheme, pierreThemeType, diffViewMode }) => {
     const options = React.useMemo(
         () => ({
@@ -1532,14 +1445,18 @@ const DiffPreview: React.FC<DiffPreviewProps> = React.memo(({ diff, pierreTheme,
         [diffViewMode, pierreTheme, pierreThemeType]
     );
 
+    const fallback = <PlainDiffFallback diff={diff} />;
+
     return (
         <div className="typography-code px-1 pb-1 pt-0">
-            <PatchDiff
-                patch={diff}
-                metrics={TOOL_DIFF_METRICS}
-                options={options}
-                className="block w-full"
-            />
+            <DiffPreviewErrorBoundary resetKey={diff} fallback={fallback}>
+                <PatchDiff
+                    patch={diff}
+                    metrics={TOOL_DIFF_METRICS}
+                    options={options}
+                    className="block w-full"
+                />
+            </DiffPreviewErrorBoundary>
         </div>
     );
 });
@@ -1571,13 +1488,17 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
     const hasStringOutput = typeof rawOutput === 'string' && rawOutput.length > 0;
     const outputString = typeof rawOutput === 'string' ? rawOutput : '';
 
+    const fileDiff = isRecord(metadata?.filediff) ? metadata.filediff : undefined;
     const diffContent = getPatchText((metadata as { patch?: unknown } | undefined)?.patch)
         ?? getPatchText(metadata?.diff)
+        ?? getPatchText(fileDiff?.patch)
+        ?? getPatchText(fileDiff?.diff)
         ?? null;
     const diffEntries = React.useMemo(
-        () => (diffContent ? getDiffPatchEntries(metadata, diffContent, currentDirectory) : []),
+        () => getDiffPatchEntries(metadata, diffContent ?? undefined, (path) => getRelativePath(path, currentDirectory)),
         [currentDirectory, diffContent, metadata]
     );
+    const hasVisualDiffEntry = diffEntries.some((entry) => entry.renderMode === 'diff');
     const hideToolInputPreview = part.tool === 'apply_patch'
         || part.tool === 'edit'
         || part.tool === 'multiedit';
@@ -1764,12 +1685,16 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                                     {renderPathLikeGitChanges(entry.title)}
                                 </div>
                             ) : null}
-                            <DiffPreview
-                                diff={entry.patch}
-                                pierreTheme={pierreTheme}
-                                pierreThemeType={pierreThemeType}
-                                diffViewMode={diffViewMode}
-                            />
+                            {entry.renderMode === 'diff' ? (
+                                <DiffPreview
+                                    diff={entry.patch}
+                                    pierreTheme={pierreTheme}
+                                    pierreThemeType={pierreThemeType}
+                                    diffViewMode={diffViewMode}
+                                />
+                            ) : (
+                                <PlainDiffFallback diff={entry.patch} />
+                            )}
                         </div>
                     ))}
                     {renderDiagnosticsSection()}
@@ -1852,7 +1777,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
 
                     {state.status === 'completed' && 'output' in state && (
                         <div>
-                            {(part.tool === 'edit' || part.tool === 'multiedit' || part.tool === 'apply_patch' || part.tool === 'write') && diffContent ? (
+                            {(part.tool === 'edit' || part.tool === 'multiedit' || part.tool === 'apply_patch' || part.tool === 'write') && hasVisualDiffEntry ? (
                                 <div className="mb-1 flex items-center justify-end gap-2">
                                     <DiffViewToggle
                                         mode={diffViewMode}
@@ -1885,7 +1810,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
 
 ToolExpandedContent.displayName = 'ToolExpandedContent';
 
-const ToolPart: React.FC<ToolPartProps> = ({
+const ToolPartContent: React.FC<ToolPartProps> = ({
     part,
     isExpanded,
     onToggle,
@@ -1962,55 +1887,15 @@ const ToolPart: React.FC<ToolPartProps> = ({
             return;
         }
 
+        expandedContentMountedRef.current = true;
         expandedContentAnimationRef.current?.stop();
+        expandedContentAnimationRef.current = null;
+        element.style.height = isExpanded ? 'auto' : '0px';
+        element.style.overflow = isExpanded ? 'visible' : 'hidden';
 
-        if (!expandedContentMountedRef.current) {
-            expandedContentMountedRef.current = true;
-            element.style.height = isExpanded ? 'auto' : '0px';
-            element.style.opacity = isExpanded ? '1' : '0';
-            element.style.overflow = isExpanded ? 'visible' : 'hidden';
-            return;
+        if (shouldNotifyStructuralChange) {
+            onContentChangeRef.current?.('structural');
         }
-
-        element.style.overflow = 'hidden';
-
-        if (isExpanded) {
-            element.style.height = '0px';
-            element.style.opacity = '0';
-        } else {
-            element.style.height = `${element.scrollHeight}px`;
-            element.style.opacity = '1';
-        }
-
-        const animation = animate(
-            element,
-            { height: isExpanded ? 'auto' : '0px', opacity: isExpanded ? 1 : 0 },
-            EXPANDED_CONTENT_SPRING,
-        );
-        expandedContentAnimationRef.current = animation;
-
-        void animation.finished.then(() => {
-            if (expandedContentAnimationRef.current !== animation) {
-                return;
-            }
-            expandedContentAnimationRef.current = null;
-            if (isExpanded) {
-                element.style.overflow = 'visible';
-                element.style.height = 'auto';
-            } else {
-                element.style.overflow = 'hidden';
-            }
-            if (shouldNotifyStructuralChange) {
-                onContentChangeRef.current?.('structural');
-            }
-        }).catch(() => undefined);
-
-        return () => {
-            animation.stop();
-            if (expandedContentAnimationRef.current === animation) {
-                expandedContentAnimationRef.current = null;
-            }
-        };
     }, [isExpanded, isTaskTool, shouldNotifyStructuralChange]);
 
     React.useEffect(() => {
@@ -2816,7 +2701,6 @@ const ToolPart: React.FC<ToolPartProps> = ({
                     aria-hidden={!isExpanded}
                     style={{
                         height: isExpanded ? 'auto' : '0px',
-                        opacity: isExpanded ? 1 : 0,
                         overflow: isExpanded ? 'visible' : 'hidden',
                         overflowAnchor: 'none',
                     }}
@@ -2840,6 +2724,72 @@ const ToolPart: React.FC<ToolPartProps> = ({
                 </div>
             ) : null}
         </div>
+    );
+};
+
+class ToolPartErrorBoundary extends React.Component<{
+    children: React.ReactNode;
+    displayName: string;
+    errorLabel: string;
+    resetKey: unknown;
+    toolName: string;
+}, { hasError: boolean; error?: Error }> {
+    state: { hasError: boolean; error?: Error } = { hasError: false };
+
+    static getDerivedStateFromError(error: Error): { hasError: boolean; error: Error } {
+        return { hasError: true, error };
+    }
+
+    componentDidUpdate(prevProps: { resetKey: unknown }) {
+        if (prevProps.resetKey !== this.props.resetKey && this.state.hasError) {
+            this.setState({ hasError: false, error: undefined });
+        }
+    }
+
+    componentDidCatch(error: Error) {
+        if (process.env.NODE_ENV === 'development') {
+            console.warn('Tool part failed to render; showing safe fallback.', error);
+        }
+    }
+
+    render() {
+        if (!this.state.hasError) {
+            return this.props.children;
+        }
+
+        const message = this.state.error?.message;
+        return (
+            <div className="flex items-center gap-1.5 pr-2 pl-px py-1.5 rounded-xl min-w-0">
+                <div className="h-3.5 w-3.5 flex-shrink-0" style={TOOL_ERROR_ICON_STYLE}>
+                    {getToolIcon(this.props.toolName)}
+                </div>
+                <span className={cn(TOOL_ROW_TITLE_CLASS, 'flex-shrink-0')} style={TOOL_ERROR_TITLE_STYLE}>
+                    {this.props.displayName}
+                </span>
+                {message ? (
+                    <span className={cn(TOOL_ROW_DESCRIPTION_CLASS, 'min-w-0 truncate')} style={{ color: 'var(--tools-description)' }} title={message}>
+                        {this.props.errorLabel}: {message}
+                    </span>
+                ) : null}
+            </div>
+        );
+    }
+}
+
+const ToolPart: React.FC<ToolPartProps> = (props) => {
+    const { t } = useI18n();
+    const toolName = normalizeToolName(props.part.tool) || 'tool';
+    const displayName = getToolMetadata(toolName).displayName;
+
+    return (
+        <ToolPartErrorBoundary
+            displayName={displayName}
+            errorLabel={t('chat.toolPart.error')}
+            resetKey={props.part}
+            toolName={toolName}
+        >
+            <ToolPartContent {...props} />
+        </ToolPartErrorBoundary>
     );
 };
 

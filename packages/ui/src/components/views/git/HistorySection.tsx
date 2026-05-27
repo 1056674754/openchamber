@@ -16,6 +16,7 @@ import { Icon } from "@/components/icon/Icon";
 import { HistoryCommitRow } from './HistoryCommitRow';
 import type { GitLogEntry, CommitFileEntry } from '@/lib/api/types';
 import { useI18n } from '@/lib/i18n';
+import { assignLanes, type LanedCommit } from './gitGraph';
 
 const LOG_SIZE_OPTIONS = [
   { labelKey: 'gitView.history.logSize25', value: 25 },
@@ -41,6 +42,17 @@ interface HistorySectionProps {
     branchName: string;
     direction: 'up' | 'down';
   } | null;
+  /** 'history' for flat list, 'graph' for lane visualization */
+  mode?: 'history' | 'graph';
+  /** Callbacks for graph mode commit actions */
+  onConflict?: (files: string[]) => void;
+  onActionSuccess?: () => void;
+  /** Total commit count for load-more logic */
+  totalCommits?: number;
+  /** Loading more commits indicator */
+  isLoadingMore?: boolean;
+  /** Load more commits callback */
+  onLoadMore?: () => void;
 }
 
 export const HistorySection: React.FC<HistorySectionProps> = ({
@@ -57,9 +69,26 @@ export const HistorySection: React.FC<HistorySectionProps> = ({
   showHeader = true,
   contentMaxHeightClassName = 'max-h-[50vh]',
   branchDivider = null,
+  mode = 'history',
+  onConflict,
+  onActionSuccess,
+  totalCommits,
+  isLoadingMore = false,
+  onLoadMore,
 }) => {
   const { t } = useI18n();
   const [isOpen, setIsOpen] = React.useState(true);
+
+  // Compute lane assignments for graph mode
+  const lanedCommits: LanedCommit[] = React.useMemo(() => {
+    if (mode !== 'graph' || !log?.all) return [];
+    return assignLanes(log.all);
+  }, [mode, log?.all]);
+
+  const totalLanes = React.useMemo(() => {
+    if (lanedCommits.length === 0) return 0;
+    return Math.max(...lanedCommits.map((lc) => lc.lane)) + 1;
+  }, [lanedCommits]);
 
   if (!log) {
     return null;
@@ -83,20 +112,30 @@ export const HistorySection: React.FC<HistorySectionProps> = ({
     ? <Icon name="arrow-down-s" className="size-3.5" />
     : <Icon name="arrow-up" className="size-3.5" />;
 
-  const renderCommitList = (entries: GitLogEntry[]) => (
+  const canLoadMore = mode === 'graph' && onLoadMore && totalCommits !== undefined && log.all.length < totalCommits;
+
+  const renderCommitList = (entries: GitLogEntry[], laned?: LanedCommit[]) => (
     <ul className="divide-y divide-border/60">
-      {entries.map((entry) => (
-        <HistoryCommitRow
-          key={entry.hash}
-          entry={entry}
-          isExpanded={expandedCommitHashes.has(entry.hash)}
-          onToggle={() => onToggleCommit(entry.hash)}
-          files={commitFilesMap.get(entry.hash) ?? []}
-          isLoadingFiles={loadingCommitHashes.has(entry.hash)}
-          onCopyHash={onCopyHash}
-          directory={directory}
-        />
-      ))}
+      {entries.map((entry, index) => {
+        const lanedCommit = laned?.[index];
+        return (
+          <HistoryCommitRow
+            key={entry.hash}
+            entry={entry}
+            isExpanded={expandedCommitHashes.has(entry.hash)}
+            onToggle={() => onToggleCommit(entry.hash)}
+            files={commitFilesMap.get(entry.hash) ?? []}
+            isLoadingFiles={loadingCommitHashes.has(entry.hash)}
+            onCopyHash={onCopyHash}
+            directory={directory}
+            mode={mode}
+            lanedCommit={lanedCommit}
+            totalLanes={totalLanes}
+            onConflict={onConflict}
+            onActionSuccess={onActionSuccess}
+          />
+        );
+      })}
     </ul>
   );
 
@@ -108,7 +147,7 @@ export const HistorySection: React.FC<HistorySectionProps> = ({
             {t('gitView.history.noCommits')}
           </p>
         </div>
-      ) : hasSplitHistory && branchDivider ? (
+      ) : hasSplitHistory && branchDivider && mode === 'history' ? (
         <div className="flex flex-col gap-0">
           {topEntries.length > 0 ? (
             <div className="rounded-xl border border-border/60 bg-background/70 overflow-hidden">
@@ -132,13 +171,27 @@ export const HistorySection: React.FC<HistorySectionProps> = ({
           ) : null}
         </div>
       ) : (
-        renderCommitList(log.all)
+        <>
+          {renderCommitList(log.all, lanedCommits.length > 0 ? lanedCommits : undefined)}
+          {canLoadMore && (
+            <div className="flex justify-center py-2">
+              <button
+                type="button"
+                className="typography-micro text-primary hover:underline disabled:opacity-50"
+                onClick={onLoadMore}
+                disabled={isLoadingMore}
+              >
+                {isLoadingMore ? t('gitView.history.loadingMore') : t('gitView.history.loadMore')}
+              </button>
+            </div>
+          )}
+        </>
       )}
     </ScrollableOverlay>
   );
 
   if (!showHeader) {
-    if (hasSplitHistory) {
+    if (hasSplitHistory && mode === 'history') {
       return <section className="h-full min-h-0">{content}</section>;
     }
     return (
@@ -155,7 +208,9 @@ export const HistorySection: React.FC<HistorySectionProps> = ({
       className="rounded-xl border border-border/60 bg-background/70 overflow-hidden"
     >
       <CollapsibleTrigger className="flex w-full items-center justify-between px-3 h-10 hover:bg-transparent">
-        <h3 className="typography-ui-header font-semibold text-foreground">{t('gitView.history.title')}</h3>
+        <h3 className="typography-ui-header font-semibold text-foreground">
+          {mode === 'graph' ? t('gitView.graph.title') : t('gitView.history.title')}
+        </h3>
         <div className="flex items-center gap-2">
           {isOpen && (
             <div

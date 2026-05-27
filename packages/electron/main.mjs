@@ -20,6 +20,24 @@ const isDev = process.env.OPENCHAMBER_ELECTRON_DEV === '1' || !app.isPackaged;
 
 const DEEP_LINK_PROTOCOL = 'openchamber';
 const APP_USER_MODEL_ID = 'dev.openchamber.desktop';
+const BACKGROUND_START_ARG = '--background';
+
+const readLoginItemSettings = () => {
+  if (process.platform !== 'darwin') return null;
+  try {
+    return app.getLoginItemSettings();
+  } catch {
+    return null;
+  }
+};
+
+const shouldStartInBackground = (loginItemSettings = readLoginItemSettings()) => {
+  return (
+    process.argv.includes(BACKGROUND_START_ARG) ||
+    loginItemSettings?.wasOpenedAtLogin === true ||
+    loginItemSettings?.wasOpenedAsHidden === true
+  );
+};
 
 if (!app.requestSingleInstanceLock()) {
   app.exit(0);
@@ -29,6 +47,9 @@ if (!app.requestSingleInstanceLock()) {
 // Set the product name early so electron-log derives its log directory as
 // ~/Library/Logs/OpenChamber/ (not ~/Library/Logs/@openchamber/electron/).
 app.setName('OpenChamber');
+if (isDev) {
+  app.setPath('userData', path.join(app.getPath('appData'), 'OpenChamber Dev'));
+}
 app.setAppUserModelId(APP_USER_MODEL_ID);
 app.commandLine.appendSwitch('proxy-bypass-list', '<-loopback>');
 
@@ -473,6 +494,7 @@ const writeWindowState = async (browserWindow) => {
 
   const bounds = browserWindow.getBounds();
   await mutateSettingsRoot((root) => {
+    if (!browserWindow || browserWindow.isDestroyed()) return root;
     root.desktopWindowState = {
       x: bounds.x,
       y: bounds.y,
@@ -1216,7 +1238,7 @@ const createBrowserWindow = ({ label, restoreGeometry, url }) => {
         `--openchamber-boot-outcome=${JSON.stringify(state.bootOutcome || null)}`,
       ],
       preload: isDev ? path.join(__dirname, 'preload.mjs') : path.join(app.getAppPath(), 'preload.mjs'),
-      backgroundThrottling: true,
+      backgroundThrottling: false,
       contextIsolation: true,
       nodeIntegration: false,
       webviewTag: true,
@@ -1409,6 +1431,21 @@ const activateMainWindow = async (url, localOrigin, bootOutcome) => {
   return state.mainWindow;
 };
 
+const openMainWindow = async () => {
+  if (!state.localOrigin) {
+    const { initialUrl, localOrigin, bootOutcome } = await resolveInitialUrl();
+    return activateMainWindow(initialUrl, localOrigin, bootOutcome);
+  }
+
+  const config = readDesktopHostsConfig();
+  const localUiUrl = state.sidecarUrl || state.localOrigin;
+  const host = config.defaultHostId && config.defaultHostId !== LOCAL_HOST_ID
+    ? config.hosts.find((entry) => entry.id === config.defaultHostId)
+    : null;
+  const targetUrl = host?.url && !state.unreachableHosts.has(host.url) ? host.url : localUiUrl;
+  return activateMainWindow(targetUrl, state.localOrigin, state.bootOutcome);
+};
+
 const createAdditionalWindow = async (url) => {
   if (!state.localOrigin) {
     return null;
@@ -1467,7 +1504,7 @@ const createMiniChatWindow = async ({ mode, sessionId = '', directory = '', proj
         `--openchamber-macos-major=${desktopMacosMajor}`,
       ],
       preload: isDev ? path.join(__dirname, 'preload.mjs') : path.join(app.getAppPath(), 'preload.mjs'),
-      backgroundThrottling: true,
+      backgroundThrottling: false,
       contextIsolation: true,
       nodeIntegration: false,
       webviewTag: true,
@@ -1901,6 +1938,24 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
 
     case 'desktop_get_app_version':
       return APP_VERSION;
+
+    case 'desktop_get_launch_at_login': {
+      if (process.platform !== 'darwin') return { supported: false, enabled: false };
+      const settings = app.getLoginItemSettings();
+      return { supported: true, enabled: settings.openAtLogin === true };
+    }
+
+    case 'desktop_set_launch_at_login': {
+      if (process.platform !== 'darwin') return { supported: false, enabled: false };
+      const enabled = args.enabled === true;
+      app.setLoginItemSettings({
+        openAtLogin: enabled,
+        openAsHidden: enabled,
+        args: enabled ? [BACKGROUND_START_ARG] : [],
+      });
+      const settings = app.getLoginItemSettings();
+      return { supported: true, enabled: settings.openAtLogin === true };
+    }
 
     case 'desktop_browser_capture_page': {
       const wcId = Number.isFinite(args.webContentsId) ? Math.trunc(args.webContentsId) : null;
@@ -2716,12 +2771,19 @@ app.on('second-instance', (_event, argv) => {
     ? argv.filter((arg) => typeof arg === 'string' && arg.startsWith(`${DEEP_LINK_PROTOCOL}://`))
     : [];
   if (urls.length > 0) handleDeepLinks(urls);
-  focusForegroundWindow();
+  if (BrowserWindow.getAllWindows().length > 0) {
+    focusForegroundWindow();
+  } else {
+    void openMainWindow();
+  }
 });
 
 app.on('open-url', (event, url) => {
   event.preventDefault();
   handleDeepLinks([url]);
+  if (BrowserWindow.getAllWindows().length === 0) {
+    void openMainWindow();
+  }
 });
 
 app.on('activate', async () => {
@@ -2735,29 +2797,44 @@ app.on('activate', async () => {
     return;
   }
 
-  if (state.localOrigin) {
-    const config = readDesktopHostsConfig();
-    const localUiUrl = state.sidecarUrl || state.localOrigin;
-    const host = config.defaultHostId && config.defaultHostId !== LOCAL_HOST_ID
-      ? config.hosts.find((entry) => entry.id === config.defaultHostId)
-      : null;
-    const targetUrl = host?.url && !state.unreachableHosts.has(host.url) ? host.url : localUiUrl;
-    await createAdditionalWindow(targetUrl);
-  }
+  await openMainWindow();
 });
 
 app.whenReady().then(async () => {
+  const loginItemSettings = readLoginItemSettings();
+  const isBackgroundStart = shouldStartInBackground(loginItemSettings);
   log.info('[electron] app starting', {
     version: APP_VERSION,
     packaged: app.isPackaged,
     platform: process.platform,
     arch: process.arch,
+    argv: process.argv,
+    isBackgroundStart,
+    loginItemSettings,
   });
   nativeTheme.themeSource = readThemeSource();
   setupAutoUpdater();
 
   if (process.platform === 'darwin') {
     Menu.setApplicationMenu(buildMacMenu());
+  }
+
+  if (process.platform === 'darwin' && app.isPackaged) {
+    const openAtLogin = loginItemSettings?.openAtLogin === true;
+    app.setLoginItemSettings({
+      openAtLogin,
+      openAsHidden: openAtLogin,
+      args: openAtLogin ? [BACKGROUND_START_ARG] : [],
+    });
+  }
+
+  if (isBackgroundStart) {
+    const { localOrigin, bootOutcome } = await resolveInitialUrl();
+    state.localOrigin = localOrigin;
+    state.bootOutcome = bootOutcome ?? null;
+    state.initScript = buildInitScript(localOrigin, state.bootOutcome);
+    log.info('[electron] started in background without window');
+    return;
   }
 
   state.mainWindow = createBrowserWindow({

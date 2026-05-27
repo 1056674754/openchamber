@@ -82,6 +82,7 @@ type HeaderIconActionButtonProps = {
   className?: string;
   Icon: IconName;
   iconClassName?: string;
+  pressed?: boolean;
 };
 
 const HeaderIconActionButton = React.memo(function HeaderIconActionButton({
@@ -92,6 +93,7 @@ const HeaderIconActionButton = React.memo(function HeaderIconActionButton({
   className,
   Icon: iconName,
   iconClassName,
+  pressed = false,
 }: HeaderIconActionButtonProps) {
   if (!visible) {
     return null;
@@ -104,7 +106,11 @@ const HeaderIconActionButton = React.memo(function HeaderIconActionButton({
           type="button"
           onClick={onClick}
           aria-label={ariaLabel}
-          className={className ?? DESKTOP_HEADER_ICON_BUTTON_CLASS}
+          aria-pressed={pressed}
+          className={cn(
+            className ?? DESKTOP_HEADER_ICON_BUTTON_CLASS,
+            pressed && 'bg-interactive-selection text-interactive-selection-foreground'
+          )}
         >
           <Icon name={iconName} className={iconClassName ?? 'h-[18px] w-[18px]'} />
         </button>
@@ -263,6 +269,7 @@ type DesktopServicesMenuProps = {
   showDevShutdown: boolean;
   isDevShutdownInFlight: boolean;
   onDevShutdown: () => Promise<void>;
+  showPredValues: boolean;
 };
 
 const DesktopServicesMenu = React.memo(function DesktopServicesMenu({
@@ -291,6 +298,7 @@ const DesktopServicesMenu = React.memo(function DesktopServicesMenu({
   showDevShutdown,
   isDevShutdownInFlight,
   onDevShutdown,
+  showPredValues,
 }: DesktopServicesMenuProps) {
   const { t } = useI18n();
   const activeServerId = useActiveServerId();
@@ -462,7 +470,7 @@ const DesktopServicesMenu = React.memo(function DesktopServicesMenu({
                                 className="h-1.5"
                                 expectedMarkerPercent={expectedMarker}
                               />
-                              {paceInfo ? <PaceIndicator paceInfo={paceInfo} compact /> : null}
+                              {paceInfo && showPredValues ? <PaceIndicator paceInfo={paceInfo} compact /> : null}
                             </div>
                           );
                         })}
@@ -506,7 +514,7 @@ const DesktopServicesMenu = React.memo(function DesktopServicesMenu({
                                               className="h-1.5"
                                               expectedMarkerPercent={expectedMarker}
                                             />
-                                            {paceInfo ? <PaceIndicator paceInfo={paceInfo} compact /> : null}
+                                            {paceInfo && showPredValues ? <PaceIndicator paceInfo={paceInfo} compact /> : null}
                                           </div>
                                         );
                                       })}
@@ -695,6 +703,7 @@ export const Header: React.FC<HeaderProps> = ({
   const isQuotaLoading = useQuotaStore((state) => state.isLoading);
   const quotaLastUpdated = useQuotaStore((state) => state.lastUpdated);
   const quotaDisplayMode = useQuotaStore((state) => state.displayMode);
+  const showPredValues = useQuotaStore((state) => state.showPredValues);
   const dropdownProviderIds = useQuotaStore((state) => state.dropdownProviderIds);
   const loadQuotaSettings = useQuotaStore((state) => state.loadSettings);
   const setQuotaDisplayMode = useQuotaStore((state) => state.setDisplayMode);
@@ -1299,8 +1308,15 @@ export const Header: React.FC<HeaderProps> = ({
     if (!directory) {
       return;
     }
+
+    const panelState = contextPanelByDirectory[directory];
+    if (getActiveContextMode(panelState) === 'browser') {
+      closeContextPanel(directory);
+      return;
+    }
+
     openContextBrowser(directory);
-  }, [openContextBrowser, openDirectory]);
+  }, [closeContextPanel, contextPanelByDirectory, openContextBrowser, openDirectory]);
 
   const isContextPlanActive = React.useMemo(() => {
     const directory = normalize(openDirectory || '');
@@ -1309,6 +1325,15 @@ export const Header: React.FC<HeaderProps> = ({
     }
     const panelState = contextPanelByDirectory[directory];
     return getActiveContextMode(panelState) === 'plan';
+  }, [contextPanelByDirectory, openDirectory]);
+
+  const isContextBrowserActive = React.useMemo(() => {
+    const directory = normalize(openDirectory || '');
+    if (!directory) {
+      return false;
+    }
+    const panelState = contextPanelByDirectory[directory];
+    return getActiveContextMode(panelState) === 'browser';
   }, [contextPanelByDirectory, openDirectory]);
 
   const desktopHeaderIconButtonClass = DESKTOP_HEADER_ICON_BUTTON_CLASS;
@@ -1799,6 +1824,7 @@ export const Header: React.FC<HeaderProps> = ({
         showDevShutdown={showDevShutdown}
         isDevShutdownInFlight={isDevShutdownInFlight}
         onDevShutdown={handleDevShutdown}
+        showPredValues={showPredValues}
       />
       <HeaderIconActionButton
         title={t('header.actions.terminalPanelWithShortcut', { shortcut: shortcutLabel('toggle_terminal') })}
@@ -1811,6 +1837,7 @@ export const Header: React.FC<HeaderProps> = ({
           title={t('contextPanel.browser.open')}
           ariaLabel={t('contextPanel.browser.open')}
           onClick={handleOpenContextBrowser}
+          pressed={isContextBrowserActive}
           Icon={'global'}
         />
       ) : null}
@@ -2255,7 +2282,7 @@ export const Header: React.FC<HeaderProps> = ({
                                         className="h-1.5"
                                         expectedMarkerPercent={expectedMarker}
                                       />
-                                      {paceInfo ? (
+                                      {paceInfo && showPredValues ? (
                                         <PaceIndicator paceInfo={paceInfo} compact />
                                       ) : null}
                                     </div>
@@ -2312,7 +2339,7 @@ export const Header: React.FC<HeaderProps> = ({
                                                       className="h-1.5"
                                                       expectedMarkerPercent={expectedMarker}
                                                     />
-                                                    {paceInfo ? (
+                                                    {paceInfo && showPredValues ? (
                                                       <PaceIndicator paceInfo={paceInfo} compact />
                                                     ) : null}
                                                   </div>

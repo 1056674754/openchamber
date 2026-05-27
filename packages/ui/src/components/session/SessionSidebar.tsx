@@ -2019,6 +2019,14 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
     openMultiRunLauncher();
   }, [mobileVariant, openMultiRunLauncher, setActiveMainTab, setSessionSwitcherOpen]);
 
+  const handleOpenNewSessionDraftFromHeader = React.useCallback(() => {
+    setActiveMainTab('chat');
+    if (mobileVariant) {
+      setSessionSwitcherOpen(false);
+    }
+    openNewSessionDraft();
+  }, [mobileVariant, openNewSessionDraft, setActiveMainTab, setSessionSwitcherOpen]);
+
   const handleNewTempSession = React.useCallback(() => {
     setActiveMainTab('chat');
     if (mobileVariant) {
@@ -2041,7 +2049,9 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
     >
       <SidebarHeader
         hideDirectoryControls={hideDirectoryControls}
+        mobileVariant={mobileVariant}
         handleOpenDirectoryDialog={handleOpenDirectoryDialog}
+        openNewSessionDraft={handleOpenNewSessionDraftFromHeader}
         canOpenMultiRun={multiRunEnabled && projects.length > 0}
         openMultiRunLauncher={handleOpenMultiRunFromHeader}
         headerActionIconClass={headerActionIconClass}

@@ -287,6 +287,7 @@ export interface GitLogEntry {
   filesChanged: number;
   insertions: number;
   deletions: number;
+  parents: string[];
 }
 
 export interface GitLogResponse {
@@ -400,6 +401,43 @@ export interface GitLogOptions {
   from?: string;
   to?: string;
   file?: string;
+  all?: boolean;
+}
+
+export interface CheckoutCommitResponse {
+  success: boolean;
+  hash: string;
+  detached: boolean;
+}
+
+export interface CherryPickRequest {
+  hash: string;
+}
+
+export interface CherryPickResponse {
+  success: boolean;
+  conflict?: boolean;
+  conflictFiles?: string[];
+}
+
+export interface RevertCommitRequest {
+  hash: string;
+}
+
+export interface RevertCommitResponse {
+  success: boolean;
+  conflict?: boolean;
+  conflictFiles?: string[];
+}
+
+export interface ResetToCommitRequest {
+  hash: string;
+  mode: 'soft' | 'mixed' | 'hard';
+  force?: boolean;
+}
+
+export interface ResetToCommitResponse {
+  success: boolean;
 }
 
 export interface GeneratedCommitMessage {
@@ -463,6 +501,10 @@ export interface GitAPI {
   getGitLog(directory: string, options?: GitLogOptions): Promise<GitLogResponse>;
   getCommitFiles(directory: string, hash: string): Promise<GitCommitFilesResponse>;
   getCommitFileDiff?(directory: string, hash: string, filePath: string, isBinary: boolean): Promise<CommitFileDiffResponse>;
+  checkoutCommit?(directory: string, hash: string): Promise<CheckoutCommitResponse>;
+  cherryPick?(directory: string, hash: string): Promise<CherryPickResponse>;
+  revertCommit?(directory: string, hash: string): Promise<RevertCommitResponse>;
+  resetToCommit?(directory: string, hash: string, mode: 'soft' | 'mixed' | 'hard', force?: boolean): Promise<ResetToCommitResponse>;
   getCurrentGitIdentity(directory: string): Promise<GitIdentitySummary | null>;
   hasLocalIdentity?(directory: string): Promise<boolean>;
   setGitIdentity(directory: string, profileId: string): Promise<{ success: boolean; profile: GitIdentityProfile }>;

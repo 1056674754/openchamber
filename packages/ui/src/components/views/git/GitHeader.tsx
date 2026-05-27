@@ -38,6 +38,7 @@ interface GitHeaderProps {
   isApplyingIdentity: boolean;
   isWorktreeMode: boolean;
   onOpenHistory?: () => void;
+  onOpenGraph?: () => void;
   actionTabItems?: SortableTabsStripItem[];
   activeActionTab?: string;
   onSelectActionTab?: (tabID: string) => void;
@@ -197,6 +198,7 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
   isApplyingIdentity,
   isWorktreeMode,
   onOpenHistory,
+  onOpenGraph,
   actionTabItems,
   activeActionTab,
   onSelectActionTab,
@@ -208,20 +210,37 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
 
   const managementButtons = (
     <div className="flex items-center gap-1 shrink-0">
-      {onOpenHistory ? (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-8 w-8 px-0"
-              onClick={onOpenHistory}
-            >
-              <Icon name="history" className="size-4" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent sideOffset={8}>{t('gitView.history.title')}</TooltipContent>
-        </Tooltip>
+      {(onOpenHistory || onOpenGraph) ? (
+        <DropdownMenu>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 w-8 px-0"
+                >
+                  <Icon name="history" className="size-4" />
+                </Button>
+              </DropdownMenuTrigger>
+            </TooltipTrigger>
+            <TooltipContent sideOffset={8}>{t('gitView.header.repositoryViews')}</TooltipContent>
+          </Tooltip>
+          <DropdownMenuContent align="end" className="w-48">
+            {onOpenHistory ? (
+              <DropdownMenuItem onSelect={onOpenHistory}>
+                <Icon name="time" className="size-4 mr-2" />
+                <span className="typography-ui-label">{t('gitView.history.title')}</span>
+              </DropdownMenuItem>
+            ) : null}
+            {onOpenGraph ? (
+              <DropdownMenuItem onSelect={onOpenGraph}>
+                <Icon name="git-branch" className="size-4 mr-2" />
+                <span className="typography-ui-label">{t('gitView.graph.title')}</span>
+              </DropdownMenuItem>
+            ) : null}
+          </DropdownMenuContent>
+        </DropdownMenu>
       ) : null}
     </div>
   );

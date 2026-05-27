@@ -74,3 +74,35 @@ export {
   deleteSnippet,
   expandSnippets,
 } from './snippets.js';
+
+export {
+  listPluginEntries,
+  getPluginEntry,
+  createPluginEntry,
+  updatePluginEntry,
+  deletePluginEntry,
+  listPluginDirFiles,
+  readPluginDirFile,
+  writePluginDirFile,
+  deletePluginDirFile,
+  encodePluginId,
+  decodePluginId,
+  parsePluginRaw,
+  serializePluginEntry,
+} from './plugins.js';
+
+export {
+  parseNpmSpec,
+  isExactSemver,
+  isPathSpec,
+  parsePathSpec,
+} from './plugin-spec.js';
+
+export {
+  getNpmInfo,
+  lookupNpmPackage,
+  clearCache,
+  NPM_CACHE_TTL_MS,
+  NPM_FETCH_TIMEOUT_MS,
+  NPM_REGISTRY_BASE,
+} from './npm-registry.js';

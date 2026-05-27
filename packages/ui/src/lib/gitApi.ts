@@ -853,3 +853,41 @@ export async function canonicalizeWorktreeState(
   }
   return gitHttp.canonicalizeWorktreeState(directory);
 }
+
+export async function checkoutCommit(
+  directory: string,
+  hash: string
+): Promise<import('./api/types').CheckoutCommitResponse> {
+  const runtime = getRuntimeGit();
+  if (runtime?.checkoutCommit) return runtime.checkoutCommit(directory, hash);
+  return gitHttp.checkoutCommit(directory, hash);
+}
+
+export async function cherryPick(
+  directory: string,
+  hash: string
+): Promise<import('./api/types').CherryPickResponse> {
+  const runtime = getRuntimeGit();
+  if (runtime?.cherryPick) return runtime.cherryPick(directory, hash);
+  return gitHttp.cherryPick(directory, hash);
+}
+
+export async function revertCommit(
+  directory: string,
+  hash: string
+): Promise<import('./api/types').RevertCommitResponse> {
+  const runtime = getRuntimeGit();
+  if (runtime?.revertCommit) return runtime.revertCommit(directory, hash);
+  return gitHttp.revertCommit(directory, hash);
+}
+
+export async function resetToCommit(
+  directory: string,
+  hash: string,
+  mode: 'soft' | 'mixed' | 'hard',
+  force?: boolean
+): Promise<import('./api/types').ResetToCommitResponse> {
+  const runtime = getRuntimeGit();
+  if (runtime?.resetToCommit) return runtime.resetToCommit(directory, hash, mode, force);
+  return gitHttp.resetToCommit(directory, hash, mode, force);
+}

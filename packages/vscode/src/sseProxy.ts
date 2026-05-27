@@ -1,13 +1,5 @@
-import { createOpencodeClient } from '@opencode-ai/sdk/v2';
 import type { OpenCodeManager } from './opencode';
 import { waitForApiUrl } from './opencode-ready';
-
-type StreamEvent<TData = unknown> = {
-  data: TData;
-  event?: string;
-  id?: string;
-  retry?: number;
-};
 
 type OpenSseProxyOptions = {
   manager: OpenCodeManager;
@@ -15,6 +7,8 @@ type OpenSseProxyOptions = {
   headers?: Record<string, string>;
   signal: AbortSignal;
   onChunk: (chunk: string) => void;
+  /** Optional signal to interrupt reconnect sleep for prompt recovery (e.g., on visibility/network change). */
+  wakeSignal?: AbortSignal;
 };
 
 type OpenSseProxyResult = {
@@ -30,90 +24,235 @@ const SSE_RESPONSE_HEADERS = {
 // SSE reconnect configuration
 const MAX_RECONNECTS = 3;
 const BASE_RECONNECT_DELAY = 1000; // 1 second
+const VISIBLE_BACKOFF_CAP = 10_000; // 10 seconds normal cap
+const LONG_BACKOFF_CAP = 30_000; // 30 seconds for offline/hidden/permanent errors
 
-const sleep = (ms: number, signal: AbortSignal) => new Promise<void>((resolve) => {
-  if (signal.aborted) {
-    resolve();
-    return;
-  }
+const sleep = (ms: number, signal: AbortSignal, wakeSignal?: AbortSignal): Promise<void> =>
+  new Promise<void>((resolve) => {
+    if (signal.aborted) {
+      resolve();
+      return;
+    }
 
-  const timeout = setTimeout(() => {
-    signal.removeEventListener('abort', handleAbort);
-    resolve();
-  }, ms);
-  const handleAbort = () => {
-    clearTimeout(timeout);
-    resolve();
-  };
-  signal.addEventListener('abort', handleAbort, { once: true });
-});
+    // Wake signal already fired — resolve immediately for prompt recovery
+    if (wakeSignal?.aborted) {
+      resolve();
+      return;
+    }
 
-const getAbortReason = (signal: AbortSignal) => signal.reason ?? new DOMException('Aborted', 'AbortError');
+    const cleanup = () => {
+      clearTimeout(timeout);
+      signal.removeEventListener('abort', onAbort);
+      if (wakeSignal) wakeSignal.removeEventListener('abort', onWake);
+      resolve();
+    };
 
-const serializeSseEventBlock = (event: StreamEvent<unknown>): string => {
-  const lines: string[] = [];
-  if (typeof event.id === 'string' && event.id.length > 0) {
-    lines.push(`id: ${event.id}`);
-  }
-  if (typeof event.event === 'string' && event.event.length > 0) {
-    lines.push(`event: ${event.event}`);
-  }
-  if (typeof event.retry === 'number' && Number.isFinite(event.retry)) {
-    lines.push(`retry: ${event.retry}`);
-  }
-  lines.push(`data: ${JSON.stringify(event.data)}`);
-  return lines.join('\n');
+    const timeout = setTimeout(cleanup, ms);
+    const onAbort = () => cleanup();
+    const onWake = () => cleanup();
+
+    signal.addEventListener('abort', onAbort, { once: true });
+    if (wakeSignal) {
+      wakeSignal.addEventListener('abort', onWake, { once: true });
+    }
+  });
+
+const getAbortReason = (signal: AbortSignal) =>
+  signal.reason ?? new DOMException('Aborted', 'AbortError');
+
+// ---------------------------------------------------------------------------
+// Reconnect-loop pacing helpers (AGENTS.md "Reconnect-loop pacing" rules)
+// ---------------------------------------------------------------------------
+
+/** Detect network-level errors that indicate the host is unreachable/offline. */
+const isNetworkOffline = (error: unknown): boolean => {
+  const cause = (error as { cause?: { code?: string } } | null)?.cause;
+  if (!cause?.code) return false;
+  const offlineCodes = [
+    'ECONNREFUSED',
+    'ENOTFOUND',
+    'EAI_AGAIN',
+    'UND_ERR_CONNECT_TIMEOUT',
+    'ECONNRESET',
+  ];
+  return offlineCodes.includes(cause.code);
 };
 
-const normalizeSsePath = (path: string): { pathname: '/event' | '/global/event'; directory: string | null } => {
+const getErrorStatus = (error: unknown): number | undefined => {
+  return (error as { status?: number } | null)?.status;
+};
+
+/**
+ * Permanent 4xx errors (except 408 Request Timeout and 429 Too Many Requests)
+ * indicate a client-side problem that blind fast retries will not fix.
+ */
+const isPermanentClientError = (error: unknown): boolean => {
+  const status = getErrorStatus(error);
+  if (typeof status !== 'number' || status < 400 || status >= 500) return false;
+  return status !== 408 && status !== 429;
+};
+
+/**
+ * Compute backoff delay with real exponential growth clamped to the appropriate cap.
+ * Offline / permanent-client-error conditions use the long cap.
+ */
+const computeBackoffDelay = (attempt: number, error: unknown): number => {
+  const exponential = BASE_RECONNECT_DELAY * Math.pow(2, attempt - 1);
+
+  if (isNetworkOffline(error) || isPermanentClientError(error)) {
+    return Math.min(exponential, LONG_BACKOFF_CAP);
+  }
+
+  return Math.min(exponential, VISIBLE_BACKOFF_CAP);
+};
+
+const describeBackoffReason = (error: unknown): string => {
+  if (isNetworkOffline(error)) return 'network offline';
+  if (isPermanentClientError(error)) return `permanent client error (${getErrorStatus(error)})`;
+  return 'connection failed';
+};
+
+// ---------------------------------------------------------------------------
+// SSE path / URL / header helpers
+// ---------------------------------------------------------------------------
+
+const normalizeSsePath = (path: string): {
+  pathname: '/event' | '/global/event';
+  searchParams: URLSearchParams;
+  directory: string | null;
+} => {
   const parsed = new URL(path, 'https://openchamber.invalid');
   const pathname = parsed.pathname === '/global/event' ? '/global/event' : '/event';
   const directory = parsed.searchParams.get('directory');
   return {
     pathname,
+    searchParams: new URLSearchParams(parsed.searchParams),
     directory: typeof directory === 'string' && directory.trim().length > 0 ? directory.trim() : null,
   };
 };
 
-const resolveDefaultDirectory = (manager: OpenCodeManager): string => {
-  return manager.getWorkingDirectory() || 'global';
+const resolveDefaultDirectory = (manager: OpenCodeManager): string =>
+  manager.getWorkingDirectory() || 'global';
+
+const createSseUrl = (
+  baseUrl: string,
+  pathname: '/event' | '/global/event',
+  searchParams: URLSearchParams,
+  directory: string,
+): URL => {
+  const base = `${baseUrl.replace(/\/+$/, '')}/`;
+  const url = new URL(pathname.replace(/^\/+/, ''), base);
+  for (const [key, value] of searchParams) {
+    url.searchParams.append(key, value);
+  }
+  if (pathname === '/event' && !url.searchParams.has('directory')) {
+    url.searchParams.set('directory', directory);
+  }
+  return url;
 };
 
-const createAuthedClient = async (manager: OpenCodeManager, headers?: Record<string, string>) => {
+const createSseHeaders = (
+  manager: OpenCodeManager,
+  headers?: Record<string, string>,
+): Record<string, string> => ({
+  Accept: 'text/event-stream',
+  'Cache-Control': 'no-cache',
+  Connection: 'keep-alive',
+  ...(headers || {}),
+  ...manager.getOpenCodeAuthHeaders(),
+});
+
+const createSseResponseHeaders = (response: Response): Record<string, string> => ({
+  'content-type': response.headers.get('content-type') || SSE_RESPONSE_HEADERS['content-type'],
+  'cache-control': response.headers.get('cache-control') || SSE_RESPONSE_HEADERS['cache-control'],
+});
+
+// ---------------------------------------------------------------------------
+// Fetch + stream pipe
+// ---------------------------------------------------------------------------
+
+const fetchSseResponse = async (
+  manager: OpenCodeManager,
+  path: string,
+  headers: Record<string, string> | undefined,
+  signal: AbortSignal,
+): Promise<Response> => {
   const baseUrl = await waitForApiUrl(manager);
   if (!baseUrl) {
     throw new Error('OpenCode API URL not available');
   }
 
-  return createOpencodeClient({
-    baseUrl,
-    headers: {
-      ...(headers || {}),
-      ...manager.getOpenCodeAuthHeaders(),
-    },
+  const { pathname, searchParams, directory } = normalizeSsePath(path);
+  const resolvedDirectory = directory || resolveDefaultDirectory(manager);
+  const targetUrl = createSseUrl(baseUrl, pathname, searchParams, resolvedDirectory);
+
+  const response = await fetch(targetUrl.toString(), {
+    method: 'GET',
+    headers: createSseHeaders(manager, headers),
+    signal,
   });
+
+  if (!response.ok) {
+    await response.body?.cancel().catch(() => {});
+    const error = new Error(`OpenCode SSE request failed (${response.status})`);
+    (error as Error & { status?: number }).status = response.status;
+    throw error;
+  }
+
+  if (!response.body) {
+    throw new Error('OpenCode SSE response missing body');
+  }
+
+  return response;
 };
 
-const getSseOptions = (
+const pipeSseResponse = async (
+  response: Response,
   signal: AbortSignal,
   onChunk: (chunk: string) => void,
-  wrapDirectory?: string,
-) => ({
-  signal,
-  sseMaxRetryAttempts: 0,
-  onSseEvent: (event: StreamEvent<unknown>) => {
-    const nextEvent = wrapDirectory
-      ? {
-          ...event,
-          data: {
-            directory: wrapDirectory,
-            payload: event.data,
-          },
+): Promise<void> => {
+  if (!response.body) {
+    throw new Error('OpenCode SSE response missing body');
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+
+  try {
+    while (!signal.aborted) {
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+      if (value && value.length > 0) {
+        const chunk = decoder.decode(value, { stream: true });
+        if (chunk.length > 0) {
+          onChunk(chunk);
         }
-      : event;
-    onChunk(`${serializeSseEventBlock(nextEvent)}\n\n`);
-  },
-});
+      }
+    }
+
+    const remaining = decoder.decode();
+    if (!signal.aborted && remaining.length > 0) {
+      onChunk(remaining);
+    }
+  } finally {
+    try {
+      await reader.cancel();
+    } catch {
+      // ignore cancel failures during stream shutdown
+    }
+    try {
+      reader.releaseLock();
+    } catch {
+      // ignore release failures after reader shutdown
+    }
+  }
+};
+
+// ---------------------------------------------------------------------------
+// Main export
+// ---------------------------------------------------------------------------
 
 export const openSseProxy = async ({
   manager,
@@ -121,58 +260,36 @@ export const openSseProxy = async ({
   headers,
   signal,
   onChunk,
+  wakeSignal,
 }: OpenSseProxyOptions): Promise<OpenSseProxyResult> => {
-  const client = await createAuthedClient(manager, headers);
-  const { pathname, directory } = normalizeSsePath(path);
-  const resolvedDirectory = directory || resolveDefaultDirectory(manager);
-
   // Reconnect logic with exponential backoff
   let reconnectAttempts = 0;
 
-  const connect = async (): Promise<{ stream: AsyncIterable<unknown> }> => {
+  const connect = async (): Promise<Response> => {
     try {
+      const { pathname } = normalizeSsePath(path);
       console.log(`[SSE] Connecting to ${pathname} (attempt ${reconnectAttempts + 1}/${MAX_RECONNECTS + 1})`);
 
-      if (pathname === '/global/event') {
-        try {
-          const result = await client.global.event(getSseOptions(signal, onChunk));
-          // Reset reconnect counter on successful connection
-          reconnectAttempts = 0;
-          return result;
-        } catch (error) {
-          if ((error as Error)?.name === 'AbortError' || signal.aborted) {
-            throw error;
-          }
-          // Fallback to directory event on error
-          console.warn('[SSE] Global event failed, falling back to directory event', error);
-          const result = client.event.subscribe(
-            { directory: resolvedDirectory },
-            getSseOptions(signal, onChunk, resolvedDirectory),
-          );
-          reconnectAttempts = 0;
-          return result;
-        }
-      }
-
-      const result = client.event.subscribe(
-        { directory: resolvedDirectory },
-        getSseOptions(signal, onChunk),
-      );
+      const result = await fetchSseResponse(manager, path, headers, signal);
       reconnectAttempts = 0;
       return result;
     } catch (error) {
-      // Implement reconnect logic
+      if ((error as Error)?.name === 'AbortError' || signal.aborted) {
+        throw error;
+      }
+
+      // Implement reconnect logic with paced backoff
       if (!signal.aborted && reconnectAttempts < MAX_RECONNECTS) {
         reconnectAttempts++;
-        const delay = BASE_RECONNECT_DELAY * Math.pow(2, reconnectAttempts - 1); // Exponential backoff
+        const delay = computeBackoffDelay(reconnectAttempts, error);
+        const reason = describeBackoffReason(error);
 
         console.warn(
-          `[SSE] Connection failed (attempt ${reconnectAttempts}/${MAX_RECONNECTS}), ` +
-          `retrying in ${delay}ms...`,
-          error
+          `[SSE] ${reason} (attempt ${reconnectAttempts}/${MAX_RECONNECTS}), retrying in ${delay}ms...`,
+          error,
         );
 
-        await sleep(delay, signal);
+        await sleep(delay, signal, wakeSignal);
         if (signal.aborted) {
           throw getAbortReason(signal);
         }
@@ -184,16 +301,12 @@ export const openSseProxy = async ({
     }
   };
 
-  const result = await connect();
+  const response = await connect();
 
   const run = (async () => {
+    let activeResponse = response;
     try {
-      for await (const _ of result.stream) {
-        void _;
-        if (signal.aborted) {
-          break;
-        }
-      }
+      await pipeSseResponse(activeResponse, signal, onChunk);
     } catch (error: unknown) {
       const cause = (error as { cause?: { code?: string } } | null)?.cause;
 
@@ -204,19 +317,16 @@ export const openSseProxy = async ({
 
           if (reconnectAttempts < MAX_RECONNECTS) {
             reconnectAttempts++;
-            const delay = BASE_RECONNECT_DELAY * Math.pow(2, reconnectAttempts - 1);
-            await sleep(delay, signal);
+            const delay = computeBackoffDelay(reconnectAttempts, error);
+            await sleep(delay, signal, wakeSignal);
             if (signal.aborted) {
               return;
             }
 
             // Attempt to reconnect
             try {
-              const newResult = await connect();
-              for await (const _ of newResult.stream) {
-                void _;
-                if (signal.aborted) break;
-              }
+              activeResponse = await connect();
+              await pipeSseResponse(activeResponse, signal, onChunk);
               return; // Successfully reconnected
             } catch (reconnectError) {
               console.error('[SSE] Reconnect failed', reconnectError);
@@ -231,7 +341,7 @@ export const openSseProxy = async ({
   })();
 
   return {
-    headers: { ...SSE_RESPONSE_HEADERS },
+    headers: createSseResponseHeaders(response),
     run,
   };
 };
