@@ -3,11 +3,15 @@ import type { Session } from '@opencode-ai/sdk/v2';
 import type { SessionGroup, SessionNode } from '../types';
 import { normalizePath } from '../utils';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { DEFAULT_SERVER_ID, serverRegistry } from '@/lib/opencode/server-registry';
 
 type ProjectSection = {
-  project: { id: string; normalizedPath: string };
+  project: { id: string; normalizedPath: string; serverId?: string };
   groups: SessionGroup[];
 };
+
+const normalizeServerId = (serverId?: string | null): string =>
+  serverId && serverId !== DEFAULT_SERVER_ID ? serverId : DEFAULT_SERVER_ID;
 
 type Args = {
   projectSections: ProjectSection[];
@@ -17,6 +21,7 @@ type Args = {
   currentSessionId: string | null;
   newSessionDraftOpen: boolean;
   mobileVariant: boolean;
+  setActiveProjectIdOnly: (id: string) => void;
   openNewSessionDraft: (options?: { directoryOverride?: string | null; selectedProjectId?: string | null }) => void;
   setActiveMainTab: (tab: 'chat' | 'plan' | 'git' | 'diff' | 'terminal' | 'files') => void;
   setSessionSwitcherOpen: (open: boolean) => void;
@@ -33,6 +38,7 @@ export const useProjectSessionSelection = (args: Args): { currentSessionDirector
     currentSessionId,
     newSessionDraftOpen,
     mobileVariant,
+    setActiveProjectIdOnly,
     openNewSessionDraft,
     setActiveMainTab,
     setSessionSwitcherOpen,
@@ -80,6 +86,75 @@ export const useProjectSessionSelection = (args: Args): { currentSessionDirector
     return { metaByProject, firstSessionByProject };
   }, [projectSections]);
 
+  const currentSessionProject = React.useMemo(() => {
+    if (!currentSessionId) {
+      return null;
+    }
+
+    for (const [projectId, projectMap] of projectSessionMeta.metaByProject) {
+      const match = projectMap.get(currentSessionId);
+      if (match) {
+        return { projectId, directory: match.directory };
+      }
+    }
+
+    const metadataPath = worktreeMetadata.get(currentSessionId)?.path;
+    const activeSession = sessions.find((session) => session.id === currentSessionId);
+    const sessionDirectory = normalizePath(
+      metadataPath
+      ?? (activeSession as (Session & { directory?: string | null }) | undefined)?.directory
+      ?? null,
+    );
+    if (!sessionDirectory) {
+      return null;
+    }
+
+    const indexedServerId = serverRegistry.getServerForSession(currentSessionId);
+    let best: { projectId: string; directory: string | null; pathLength: number } | null = null;
+
+    for (const section of projectSections) {
+      if (indexedServerId && normalizeServerId(section.project.serverId) !== indexedServerId) {
+        continue;
+      }
+
+      const projectPath = normalizePath(section.project.normalizedPath);
+      if (!projectPath) {
+        continue;
+      }
+      if (sessionDirectory !== projectPath && !sessionDirectory.startsWith(`${projectPath}/`)) {
+        continue;
+      }
+      if (!best || projectPath.length > best.pathLength) {
+        best = {
+          projectId: section.project.id,
+          directory: sessionDirectory,
+          pathLength: projectPath.length,
+        };
+      }
+    }
+
+    return best ? { projectId: best.projectId, directory: best.directory } : null;
+  }, [currentSessionId, projectSections, projectSessionMeta, sessions, worktreeMetadata]);
+
+  const currentSessionHasDeferredOwner = React.useMemo(() => {
+    if (!currentSessionId || currentSessionProject) {
+      return false;
+    }
+
+    const indexedServerId = serverRegistry.getServerForSession(currentSessionId);
+    if (indexedServerId && indexedServerId !== DEFAULT_SERVER_ID) {
+      return true;
+    }
+
+    const metadataPath = worktreeMetadata.get(currentSessionId)?.path;
+    const activeSession = sessions.find((session) => session.id === currentSessionId);
+    return Boolean(normalizePath(
+      metadataPath
+      ?? (activeSession as (Session & { directory?: string | null }) | undefined)?.directory
+      ?? null,
+    ));
+  }, [currentSessionId, currentSessionProject, sessions, worktreeMetadata]);
+
   const previousActiveProjectRef = React.useRef<string | null>(null);
 
   React.useLayoutEffect(() => {
@@ -91,7 +166,29 @@ export const useProjectSessionSelection = (args: Args): { currentSessionDirector
       return;
     }
 
-    if (previousActiveProjectRef.current === activeProjectId) {
+    const previousActiveProjectId = previousActiveProjectRef.current;
+    const projectChangedAfterInit = previousActiveProjectId !== null && previousActiveProjectId !== activeProjectId;
+
+    const selectedSessionId = currentSessionId;
+    if (!projectChangedAfterInit && selectedSessionId && currentSessionProject && currentSessionProject.projectId !== activeProjectId) {
+      previousActiveProjectRef.current = currentSessionProject.projectId;
+      setActiveSessionByProject((prev) => {
+        if (prev.get(currentSessionProject.projectId) === selectedSessionId) {
+          return prev;
+        }
+        const next = new Map(prev);
+        next.set(currentSessionProject.projectId, selectedSessionId);
+        return next;
+      });
+      setActiveProjectIdOnly(currentSessionProject.projectId);
+      return;
+    }
+
+    if (!projectChangedAfterInit && currentSessionHasDeferredOwner) {
+      return;
+    }
+
+    if (previousActiveProjectId === activeProjectId) {
       return;
     }
     const section = projectSections.find((item) => item.project.id === activeProjectId);
@@ -151,6 +248,8 @@ export const useProjectSessionSelection = (args: Args): { currentSessionDirector
     activeProjectId,
     activeSessionByProject,
     currentSessionId,
+    currentSessionProject,
+    currentSessionHasDeferredOwner,
     newSessionDraftOpen,
     mobileVariant,
     openNewSessionDraft,
@@ -159,6 +258,7 @@ export const useProjectSessionSelection = (args: Args): { currentSessionDirector
     setActiveMainTab,
     setSessionSwitcherOpen,
     setActiveSessionByProject,
+    setActiveProjectIdOnly,
   ]);
 
   React.useEffect(() => {

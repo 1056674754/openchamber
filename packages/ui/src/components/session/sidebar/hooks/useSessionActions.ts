@@ -4,6 +4,9 @@ import { toast } from '@/components/ui';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { useI18n } from '@/lib/i18n';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { DEFAULT_SERVER_ID, serverRegistry } from '@/lib/opencode/server-registry';
+import { useProjectsStore } from '@/stores/useProjectsStore';
+import { normalizePath } from '../utils';
 
 type DeleteSessionConfirmSetter = React.Dispatch<React.SetStateAction<{
   session: Session;
@@ -39,6 +42,46 @@ type Args = {
   setEditTitle: (value: string) => void;
   editingId: string | null;
   editTitle: string;
+};
+
+const normalizeServerId = (serverId?: string | null): string =>
+  serverId && serverId !== DEFAULT_SERVER_ID ? serverId : DEFAULT_SERVER_ID;
+
+const resolveProjectIdForSessionSelection = (
+  sessionId: string,
+  sessionDirectory?: string | null,
+  explicitProjectId?: string | null,
+): string | null => {
+  if (explicitProjectId) {
+    return explicitProjectId;
+  }
+
+  const directory = normalizePath(sessionDirectory ?? null);
+  if (!directory) {
+    return null;
+  }
+
+  const indexedServerId = serverRegistry.getServerForSession(sessionId);
+  let best: { id: string; pathLength: number } | null = null;
+
+  for (const project of useProjectsStore.getState().projects) {
+    if (indexedServerId && normalizeServerId(project.serverId) !== indexedServerId) {
+      continue;
+    }
+
+    const projectPath = normalizePath(project.path);
+    if (!projectPath) {
+      continue;
+    }
+    if (directory !== projectPath && !directory.startsWith(`${projectPath}/`)) {
+      continue;
+    }
+    if (!best || projectPath.length > best.pathLength) {
+      best = { id: project.id, pathLength: projectPath.length };
+    }
+  }
+
+  return best?.id ?? null;
 };
 
 export const useSessionActions = (args: Args) => {
@@ -81,10 +124,16 @@ export const useSessionActions = (args: Args) => {
         return;
       }
 
-      if (sessionDirectory && projectId) {
-        useSessionUIStore.getState().navigateToSession(sessionId, sessionDirectory, projectId);
+      const resolvedProjectId = resolveProjectIdForSessionSelection(sessionId, sessionDirectory, projectId);
+      if (sessionDirectory && resolvedProjectId) {
+        useSessionUIStore.getState().navigateToSession(sessionId, sessionDirectory, resolvedProjectId);
       } else {
-        useSessionUIStore.getState().setCurrentSession(sessionId, sessionDirectory ?? null);
+        const indexedServerId = serverRegistry.getServerForSession(sessionId);
+        useSessionUIStore.getState().setCurrentSession(
+          sessionId,
+          sessionDirectory ?? null,
+          indexedServerId ? { serverId: indexedServerId } : undefined,
+        );
       }
       args.onSessionSelected?.(sessionId);
       resetSessionSearch();

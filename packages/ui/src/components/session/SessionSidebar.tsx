@@ -1243,6 +1243,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
     currentSessionId,
     newSessionDraftOpen,
     mobileVariant,
+    setActiveProjectIdOnly,
     openNewSessionDraft,
     setActiveMainTab,
     setSessionSwitcherOpen,
