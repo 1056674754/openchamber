@@ -752,13 +752,18 @@ export const useProjectsStore = create<ProjectsStore>()(
         : null;
 
       const current = get();
+      const sessionState = useSessionUIStore.getState();
+      const preserveActiveProject = Boolean(sessionState.currentSessionId || sessionState.newSessionDraft.open);
+      const nextActive = preserveActiveProject && current.activeProjectId && incomingProjects.some((project) => project.id === current.activeProjectId)
+        ? current.activeProjectId
+        : incomingActive;
 
       // Race guard: settings load can return empty projects during app
       // rebuild/reinstall or an incomplete settings read. Don't clobber
       // a populated cache with empty — the sidebar would go blank and
       // localStorage would be overwritten, losing the list entirely.
       if (incomingProjects.length === 0 && current.projects.length > 0) {
-        if (incomingActive !== current.activeProjectId) {
+        if (!preserveActiveProject && incomingActive !== current.activeProjectId) {
           // Active project may still be valid within the cached list.
           const activeExists = incomingActive
             ? current.projects.some((project) => project.id === incomingActive)
@@ -772,24 +777,27 @@ export const useProjectsStore = create<ProjectsStore>()(
       }
 
       const projectsChanged = JSON.stringify(current.projects) !== JSON.stringify(incomingProjects);
-      const activeChanged = current.activeProjectId !== incomingActive;
+      const activeChanged = current.activeProjectId !== nextActive;
 
       if (!projectsChanged && !activeChanged) {
         return;
       }
 
-      set({ projects: incomingProjects, activeProjectId: incomingActive });
-      cacheProjects(incomingProjects, incomingActive);
+      set({ projects: incomingProjects, activeProjectId: nextActive });
+      cacheProjects(incomingProjects, nextActive);
 
-      const resolvedActive = incomingActive && incomingProjects.some((p) => p.id === incomingActive)
-        ? incomingActive
+      const resolvedActive = nextActive && incomingProjects.some((p) => p.id === nextActive)
+        ? nextActive
         : incomingProjects[0]?.id ?? null;
-      if (resolvedActive !== incomingActive) {
+      if (resolvedActive !== nextActive) {
         set({ activeProjectId: resolvedActive });
         cacheProjects(incomingProjects, resolvedActive);
       }
 
       if (resolvedActive) {
+        if (preserveActiveProject) {
+          return;
+        }
         const activeProject = incomingProjects.find((project) => project.id === resolvedActive);
         if (activeProject) {
           opencodeClient.setDirectory(activeProject.path);

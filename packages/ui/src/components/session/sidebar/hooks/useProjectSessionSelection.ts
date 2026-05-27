@@ -16,15 +16,8 @@ const normalizeServerId = (serverId?: string | null): string =>
 type Args = {
   projectSections: ProjectSection[];
   activeProjectId: string | null;
-  activeSessionByProject: Map<string, string>;
   setActiveSessionByProject: React.Dispatch<React.SetStateAction<Map<string, string>>>;
   currentSessionId: string | null;
-  newSessionDraftOpen: boolean;
-  mobileVariant: boolean;
-  setActiveProjectIdOnly: (id: string) => void;
-  openNewSessionDraft: (options?: { directoryOverride?: string | null; selectedProjectId?: string | null }) => void;
-  setActiveMainTab: (tab: 'chat' | 'plan' | 'git' | 'diff' | 'terminal' | 'files') => void;
-  setSessionSwitcherOpen: (open: boolean) => void;
   sessions: Session[];
   worktreeMetadata: Map<string, { path?: string | null }>;
 };
@@ -33,22 +26,14 @@ export const useProjectSessionSelection = (args: Args): { currentSessionDirector
   const {
     projectSections,
     activeProjectId,
-    activeSessionByProject,
     setActiveSessionByProject,
     currentSessionId,
-    newSessionDraftOpen,
-    mobileVariant,
-    setActiveProjectIdOnly,
-    openNewSessionDraft,
-    setActiveMainTab,
-    setSessionSwitcherOpen,
     sessions,
     worktreeMetadata,
   } = args;
 
   const projectSessionMeta = React.useMemo(() => {
     const metaByProject = new Map<string, Map<string, { directory: string | null }>>();
-    const firstSessionByProject = new Map<string, { id: string; directory: string | null }>();
 
     const visitNodes = (
       projectId: string,
@@ -68,9 +53,6 @@ export const useProjectSessionSelection = (args: Args): { currentSessionDirector
           ?? projectRoot,
         );
         projectMap.set(node.session.id, { directory: sessionDirectory });
-        if (!firstSessionByProject.has(projectId)) {
-          firstSessionByProject.set(projectId, { id: node.session.id, directory: sessionDirectory });
-        }
         if (node.children.length > 0) {
           visitNodes(projectId, projectRoot, sessionDirectory, node.children);
         }
@@ -83,7 +65,7 @@ export const useProjectSessionSelection = (args: Args): { currentSessionDirector
       });
     });
 
-    return { metaByProject, firstSessionByProject };
+    return { metaByProject };
   }, [projectSections]);
 
   const currentSessionProject = React.useMemo(() => {
@@ -136,67 +118,12 @@ export const useProjectSessionSelection = (args: Args): { currentSessionDirector
     return best ? { projectId: best.projectId, directory: best.directory } : null;
   }, [currentSessionId, projectSections, projectSessionMeta, sessions, worktreeMetadata]);
 
-  const currentSessionHasDeferredOwner = React.useMemo(() => {
-    if (!currentSessionId || currentSessionProject) {
-      return false;
-    }
-
-    const indexedServerId = serverRegistry.getServerForSession(currentSessionId);
-    if (indexedServerId && indexedServerId !== DEFAULT_SERVER_ID) {
-      return true;
-    }
-
-    const metadataPath = worktreeMetadata.get(currentSessionId)?.path;
-    const activeSession = sessions.find((session) => session.id === currentSessionId);
-    return Boolean(normalizePath(
-      metadataPath
-      ?? (activeSession as (Session & { directory?: string | null }) | undefined)?.directory
-      ?? null,
-    ));
-  }, [currentSessionId, currentSessionProject, sessions, worktreeMetadata]);
-
-  const previousActiveProjectRef = React.useRef<string | null>(null);
-
-  React.useLayoutEffect(() => {
+  // Keep this hook passive. Project/sidebar state may lag while sync data
+  // loads, so it must not switch sessions or open drafts as a fallback.
+  React.useEffect(() => {
     if (!activeProjectId) {
       return;
     }
-
-    if (newSessionDraftOpen) {
-      return;
-    }
-
-    const previousActiveProjectId = previousActiveProjectRef.current;
-    const projectChangedAfterInit = previousActiveProjectId !== null && previousActiveProjectId !== activeProjectId;
-
-    const selectedSessionId = currentSessionId;
-    if (!projectChangedAfterInit && selectedSessionId && currentSessionProject && currentSessionProject.projectId !== activeProjectId) {
-      previousActiveProjectRef.current = currentSessionProject.projectId;
-      setActiveSessionByProject((prev) => {
-        if (prev.get(currentSessionProject.projectId) === selectedSessionId) {
-          return prev;
-        }
-        const next = new Map(prev);
-        next.set(currentSessionProject.projectId, selectedSessionId);
-        return next;
-      });
-      setActiveProjectIdOnly(currentSessionProject.projectId);
-      return;
-    }
-
-    if (!projectChangedAfterInit && currentSessionHasDeferredOwner) {
-      return;
-    }
-
-    if (previousActiveProjectId === activeProjectId) {
-      return;
-    }
-    const section = projectSections.find((item) => item.project.id === activeProjectId);
-    if (!section) {
-      return;
-    }
-    previousActiveProjectRef.current = activeProjectId;
-
     const explicitTarget = useSessionUIStore.getState().consumeNavigationIntent();
     if (explicitTarget) {
       setActiveSessionByProject((prev) => {
@@ -207,59 +134,21 @@ export const useProjectSessionSelection = (args: Args): { currentSessionDirector
       });
       return;
     }
+  }, [activeProjectId, currentSessionId, setActiveSessionByProject]);
 
-    const projectMap = projectSessionMeta.metaByProject.get(activeProjectId);
-
-    if (currentSessionId && projectMap && projectMap.has(currentSessionId)) {
-      setActiveSessionByProject((prev) => {
-        if (prev.get(activeProjectId) === currentSessionId) {
-          return prev;
-        }
-        const next = new Map(prev);
-        next.set(activeProjectId, currentSessionId);
-        return next;
-      });
+  React.useEffect(() => {
+    if (!currentSessionId || !currentSessionProject) {
       return;
     }
-
-    if (!projectMap || projectMap.size === 0) {
-      setActiveMainTab('chat');
-      if (mobileVariant) {
-        setSessionSwitcherOpen(false);
+    setActiveSessionByProject((prev) => {
+      if (prev.get(currentSessionProject.projectId) === currentSessionId) {
+        return prev;
       }
-      openNewSessionDraft({ directoryOverride: section.project.normalizedPath, selectedProjectId: section.project.id });
-      return;
-    }
-
-    const rememberedSessionId = activeSessionByProject.get(activeProjectId);
-    const remembered = rememberedSessionId && projectMap.has(rememberedSessionId)
-      ? rememberedSessionId
-      : null;
-    const fallback = projectSessionMeta.firstSessionByProject.get(activeProjectId)?.id ?? null;
-    const targetSessionId = remembered ?? fallback;
-    if (!targetSessionId || targetSessionId === currentSessionId) {
-      return;
-    }
-    const targetDirectory = projectMap.get(targetSessionId)?.directory ?? null;
-    if (targetDirectory) {
-      useSessionUIStore.getState().navigateToSession(targetSessionId, targetDirectory, activeProjectId);
-    }
-  }, [
-    activeProjectId,
-    activeSessionByProject,
-    currentSessionId,
-    currentSessionProject,
-    currentSessionHasDeferredOwner,
-    newSessionDraftOpen,
-    mobileVariant,
-    openNewSessionDraft,
-    projectSections,
-    projectSessionMeta,
-    setActiveMainTab,
-    setSessionSwitcherOpen,
-    setActiveSessionByProject,
-    setActiveProjectIdOnly,
-  ]);
+      const next = new Map(prev);
+      next.set(currentSessionProject.projectId, currentSessionId);
+      return next;
+    });
+  }, [currentSessionId, currentSessionProject, setActiveSessionByProject]);
 
   React.useEffect(() => {
     if (!activeProjectId || !currentSessionId) {

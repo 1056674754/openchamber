@@ -61,11 +61,17 @@ export const useSidebarPersistence = (args: Args) => {
 
   const persistCollapsedProjectsTimer = React.useRef<number | null>(null);
   const pendingCollapsedProjects = React.useRef<Set<string> | null>(null);
-  const projectCollapseSignature = useProjectsStore((state) =>
+  const hasHydratedProjectCollapseRef = React.useRef(false);
+  const projectCollapseUserTouchedRef = React.useRef(false);
+  const projectCollapseHydrationSignature = useProjectsStore((state) =>
     state.projects
       .map((project) => `${project.id}:${project.sidebarCollapsed === true ? '1' : project.sidebarCollapsed === false ? '0' : '-'}`)
       .join('|'),
   );
+
+  const markProjectCollapseUserTouched = React.useCallback(() => {
+    projectCollapseUserTouchedRef.current = true;
+  }, []);
 
   const flushCollapsedProjectsPersist = React.useCallback(() => {
     if (isVSCode) {
@@ -148,27 +154,57 @@ export const useSidebarPersistence = (args: Args) => {
           }
         }
       }
+    } catch {
+      // ignored
+    }
+  }, [keys.sessionExpanded, keys.sessionExpandedLegacy, safeStorage, setExpandedParents]);
+
+  React.useEffect(() => {
+    if (hasHydratedProjectCollapseRef.current || projectCollapseUserTouchedRef.current) {
+      return;
+    }
+
+    const { projects } = useProjectsStore.getState();
+    if (projects.length === 0) {
+      return;
+    }
+
+    let storedCollapsed: Set<string> | null = null;
+    try {
       const storedProjects = safeStorage.getItem(keys.projectCollapse);
       if (storedProjects) {
         const parsed = JSON.parse(storedProjects);
         if (Array.isArray(parsed)) {
-          setCollapsedProjects(new Set(parsed.filter((item) => typeof item === 'string')));
+          storedCollapsed = new Set(parsed.filter((item): item is string => typeof item === 'string'));
         }
       }
     } catch {
       // ignored
     }
-  }, [keys.projectCollapse, keys.sessionExpanded, keys.sessionExpandedLegacy, safeStorage, setCollapsedProjects, setExpandedParents]);
 
-  React.useEffect(() => {
-    const { projects } = useProjectsStore.getState();
-    if (!projects.some((project) => typeof project.sidebarCollapsed === 'boolean')) {
+    const hasProjectCollapseState = projects.some((project) => typeof project.sidebarCollapsed === 'boolean');
+    if (!storedCollapsed && !hasProjectCollapseState) {
+      hasHydratedProjectCollapseRef.current = true;
       return;
     }
 
+    hasHydratedProjectCollapseRef.current = true;
     setCollapsedProjects((prev) => {
       let changed = false;
-      const next = new Set(prev);
+      const next = new Set(storedCollapsed ?? prev);
+
+      if (storedCollapsed) {
+        if (storedCollapsed.size !== prev.size) {
+          changed = true;
+        } else {
+          for (const id of storedCollapsed) {
+            if (!prev.has(id)) {
+              changed = true;
+              break;
+            }
+          }
+        }
+      }
 
       projects.forEach((project) => {
         if (project.sidebarCollapsed === true) {
@@ -184,7 +220,7 @@ export const useSidebarPersistence = (args: Args) => {
 
       return changed ? next : prev;
     });
-  }, [projectCollapseSignature, setCollapsedProjects]);
+  }, [keys.projectCollapse, projectCollapseHydrationSignature, safeStorage, setCollapsedProjects]);
 
   React.useEffect(() => {
     if (!hasLoadedGlobalSessions) {
@@ -240,5 +276,5 @@ export const useSidebarPersistence = (args: Args) => {
     }
   }, [collapsedGroups, keys.groupCollapse, safeStorage]);
 
-  return { scheduleCollapsedProjectsPersist };
+  return { scheduleCollapsedProjectsPersist, markProjectCollapseUserTouched };
 };

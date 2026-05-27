@@ -428,7 +428,6 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
   const globalActiveSessions = useGlobalSessionsStore((state) => state.activeSessions);
   const archivedSessions = useGlobalSessionsStore((state) => state.archivedSessions);
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
-  const newSessionDraftOpen = useSessionUIStore((state) => Boolean(state.newSessionDraft?.open));
   const tempDraftSubmitting = useSessionUIStore((state) => Boolean(state.newSessionDraft?.open && state.newSessionDraft?.preserveDirectoryOverride === false && state.newSessionDraft?.submitting));
   const setCurrentSession = useSessionUIStore((state) => state.setCurrentSession);
   const updateSessionTitle = useSessionUIStore((state) => state.updateSessionTitle);
@@ -687,7 +686,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
     isVSCode,
   });
 
-  const { scheduleCollapsedProjectsPersist } = useSidebarPersistence({
+  const { scheduleCollapsedProjectsPersist, markProjectCollapseUserTouched } = useSidebarPersistence({
     isVSCode,
     hasLoadedGlobalSessions,
     safeStorage,
@@ -1065,6 +1064,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
 
   const collapseAllProjects = React.useCallback(() => {
     ignoreIntersectionUntil.current = Date.now() + 150;
+    markProjectCollapseUserTouched();
     setCollapsedProjects(() => {
       const allIds = new Set(projects.map((p) => p.id));
       try {
@@ -1075,10 +1075,11 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
       }
       return allIds;
     });
-  }, [projects, isVSCode, safeStorage, scheduleCollapsedProjectsPersist]);
+  }, [projects, isVSCode, safeStorage, scheduleCollapsedProjectsPersist, markProjectCollapseUserTouched]);
 
   const expandAllProjects = React.useCallback(() => {
     ignoreIntersectionUntil.current = Date.now() + 150;
+    markProjectCollapseUserTouched();
     setCollapsedProjects(() => {
       const empty = new Set<string>();
       try {
@@ -1089,11 +1090,12 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
       }
       return empty;
     });
-  }, [isVSCode, safeStorage, scheduleCollapsedProjectsPersist]);
+  }, [isVSCode, safeStorage, scheduleCollapsedProjectsPersist, markProjectCollapseUserTouched]);
 
   const toggleProject = React.useCallback((projectId: string) => {
     // Ignore intersection events for a short period after toggling
     ignoreIntersectionUntil.current = Date.now() + 150;
+    markProjectCollapseUserTouched();
     setCollapsedProjects((prev) => {
       const next = new Set(prev);
       if (next.has(projectId)) {
@@ -1111,7 +1113,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
       }
       return next;
     });
-  }, [isVSCode, safeStorage, scheduleCollapsedProjectsPersist]);
+  }, [isVSCode, safeStorage, scheduleCollapsedProjectsPersist, markProjectCollapseUserTouched]);
 
   const normalizedProjects = React.useMemo(() => {
     return projects
@@ -1238,15 +1240,8 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
   const { currentSessionDirectory } = useProjectSessionSelection({
     projectSections,
     activeProjectId,
-    activeSessionByProject,
     setActiveSessionByProject,
     currentSessionId,
-    newSessionDraftOpen,
-    mobileVariant,
-    setActiveProjectIdOnly,
-    openNewSessionDraft,
-    setActiveMainTab,
-    setSessionSwitcherOpen,
     sessions,
     worktreeMetadata,
   });
