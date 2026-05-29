@@ -36,6 +36,17 @@ type ContextPanelTabMode = 'diff' | 'file' | 'context' | 'plan' | 'chat' | 'prev
 type ContextPanelTabLike = { id: string; mode: ContextPanelTabMode; targetPath: string | null; dedupeKey: string; label: string | null; readOnly: boolean };
 type SplitDropZone = 'top' | 'bottom' | 'middle';
 
+const CONTEXT_PANEL_TAB_MODES = new Set<ContextPanelTabMode>([
+  'diff',
+  'file',
+  'context',
+  'plan',
+  'chat',
+  'preview',
+  'terminal',
+  'browser',
+]);
+
 type PreviewConsoleEvent = {
   id: number;
   level: 'log' | 'info' | 'warn' | 'error' | 'debug' | 'resource' | 'runtime';
@@ -353,6 +364,59 @@ const getTabIcon = (tab: { mode: ContextPanelMode; targetPath: string | null }):
   }
 
   return undefined;
+};
+
+const coerceContextPanelTabForRender = (value: unknown): ContextPanelTabLike | null => {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+
+  const tab = value as {
+    id?: unknown;
+    mode?: unknown;
+    targetPath?: unknown;
+    dedupeKey?: unknown;
+    label?: unknown;
+    readOnly?: unknown;
+  };
+  const id = typeof tab.id === 'string' ? tab.id.trim() : '';
+  const mode = tab.mode;
+  if (!id || !CONTEXT_PANEL_TAB_MODES.has(mode as ContextPanelTabMode)) {
+    return null;
+  }
+
+  return {
+    id,
+    mode: mode as ContextPanelTabMode,
+    targetPath: typeof tab.targetPath === 'string' && tab.targetPath.trim().length > 0
+      ? tab.targetPath
+      : null,
+    dedupeKey: typeof tab.dedupeKey === 'string' && tab.dedupeKey.trim().length > 0
+      ? tab.dedupeKey
+      : id,
+    label: typeof tab.label === 'string' && tab.label.trim().length > 0
+      ? tab.label
+      : null,
+    readOnly: tab.readOnly === true,
+  };
+};
+
+const normalizeContextPanelTabsForRender = (value: unknown): ContextPanelTabLike[] => {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const result: ContextPanelTabLike[] = [];
+  const seen = new Set<string>();
+  for (const entry of value) {
+    const tab = coerceContextPanelTabForRender(entry);
+    if (!tab || seen.has(tab.id)) {
+      continue;
+    }
+    seen.add(tab.id);
+    result.push(tab);
+  }
+  return result;
 };
 
 const getSessionIDFromDedupeKey = (dedupeKey: string | undefined): string | null => {
@@ -1675,7 +1739,7 @@ export const ContextPanel: React.FC = () => {
   const setSelectedFilePath = useFilesViewTabsStore((state) => state.setSelectedPath);
   const { themeMode, lightThemeId, darkThemeId, currentTheme } = useThemeSystem();
 
-  const tabs = React.useMemo(() => panelState?.tabs ?? [], [panelState?.tabs]);
+  const tabs = React.useMemo(() => normalizeContextPanelTabsForRender(panelState?.tabs), [panelState?.tabs]);
   const activeTab = tabs.find((tab) => tab.id === panelState?.activeTabId) ?? tabs[tabs.length - 1] ?? null;
   const splitTab = panelState?.splitTabId ? (tabs.find((tab) => tab.id === panelState.splitTabId) ?? null) : null;
   const splitRatio = panelState?.splitRatio ?? 0.5;
@@ -2318,7 +2382,7 @@ export const ContextPanel: React.FC = () => {
                 {renderTabPaneContent(tab, activeChatTabID === tab.id)}
               </div>
             ))}
-            {activeTab?.mode !== 'chat' && !isFileTabActive ? (
+            {activeTab && activeTab.mode !== 'chat' && !isFileTabActive ? (
               <div className="absolute inset-0">{renderTabPaneContent(activeTab, true)}</div>
             ) : null}
           </>
