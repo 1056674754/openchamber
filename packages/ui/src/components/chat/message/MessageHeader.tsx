@@ -1,6 +1,6 @@
 import React from 'react';
 import { cn } from '@/lib/utils';
-import { getAgentColor } from '@/lib/agentColors';
+import { getAgentColor, type AgentColorSource } from '@/lib/agentColors';
 import { useProviderLogo } from '@/hooks/useProviderLogo';
 import { Icon } from "@/components/icon/Icon";
 
@@ -8,13 +8,18 @@ interface MessageHeaderProps {
     isUser: boolean;
     providerID: string | null;
     agentName: string | undefined;
+    agentColorSource?: AgentColorSource;
     modelName: string | undefined;
     variant?: string;
     isDarkTheme: boolean;
 }
 
-const MessageHeader: React.FC<MessageHeaderProps> = ({ isUser, providerID, agentName, modelName, variant, isDarkTheme }) => {
+const agentColorVarsStyle = (color: ReturnType<typeof getAgentColor>): React.CSSProperties | undefined =>
+    color.cssVars as React.CSSProperties | undefined;
+
+const MessageHeader: React.FC<MessageHeaderProps> = ({ isUser, providerID, agentName, agentColorSource, modelName, variant, isDarkTheme }) => {
     const { src: logoSrc, onError: handleLogoError, hasLogo } = useProviderLogo(providerID);
+    const agentColor = React.useMemo(() => getAgentColor(agentColorSource ?? agentName), [agentColorSource, agentName]);
 
     return (
         <div className={cn('mb-2')}>
@@ -40,7 +45,7 @@ const MessageHeader: React.FC<MessageHeaderProps> = ({ isUser, providerID, agent
                                 ) : (
                                     <Icon name="brain-ai-3" className="h-4 w-4"
                                         
-                                        style={{ color: `var(${getAgentColor(agentName).var})` }}/>
+                                        style={{ color: agentColor.value }}/>
                                 )}
                             </div>
                         )}
@@ -60,8 +65,9 @@ const MessageHeader: React.FC<MessageHeaderProps> = ({ isUser, providerID, agent
                                     'flex items-center gap-1 px-1.5 py-0 rounded cursor-default',
                                     'agent-badge typography-meta',
                                     'hover:bg-[rgb(from_var(--agent-color-bg)_r_g_b_/_0.1)] hover:border-[rgb(from_var(--agent-color)_r_g_b_/_0.2)]',
-                                    getAgentColor(agentName).class
+                                    agentColor.class
                                 )}
+                                style={agentColorVarsStyle(agentColor)}
                             >
                                 <Icon name="ai-agent" className="h-3 w-3 flex-shrink-0" />
                                 <span className="font-medium">{agentName}</span>

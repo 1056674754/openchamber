@@ -45,6 +45,7 @@ const PERMISSION_JSON_CUSTOM_STYLE: React.CSSProperties = {
 interface PermissionCardProps {
   permission: PermissionRequest;
   onResponse?: (response: 'once' | 'always' | 'reject') => void;
+  inline?: boolean;
 }
 
 const getToolIcon = (toolName: string) => {
@@ -91,7 +92,8 @@ const getToolDisplayName = (toolName: string): string => {
 
 export const PermissionCard: React.FC<PermissionCardProps> = ({
   permission,
-  onResponse
+  onResponse,
+  inline = false,
 }) => {
   const { t } = useI18n();
   const [isResponding, setIsResponding] = React.useState(false);
@@ -317,10 +319,8 @@ export const PermissionCard: React.FC<PermissionCardProps> = ({
     );
   };
 
-  return (
-    <div className="group w-full pt-0 pb-2">
-      <div className="chat-column">
-        <div className="-mt-1 border border-border/30 rounded-xl bg-muted/10">
+  const card = (
+    <div className="-mt-1 border border-border/30 rounded-xl bg-muted/10">
           {}
           <div className="px-2 py-1.5 border-b border-border/20 bg-muted/5">
             <div className="flex items-center justify-between">
@@ -465,8 +465,12 @@ export const PermissionCard: React.FC<PermissionCardProps> = ({
               </div>
             )}
           </div>
-        </div>
-      </div>
+    </div>
+  );
+
+  return (
+    <div className="group w-full pt-0 pb-2">
+      {inline ? card : <div className="chat-column">{card}</div>}
     </div>
   );
 };

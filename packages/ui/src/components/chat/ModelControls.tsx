@@ -770,6 +770,19 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         }
         return null;
     }, [currentSessionMessagesFromSync]);
+    const latestLoadedUserChoiceKey = React.useMemo(() => {
+        if (!currentSessionId || !latestLoadedUserChoice) {
+            return null;
+        }
+        return [
+            currentSessionId,
+            latestLoadedUserChoice.id,
+            latestLoadedUserChoice.agent ?? '',
+            latestLoadedUserChoice.providerID,
+            latestLoadedUserChoice.modelID,
+            latestLoadedUserChoice.variant ?? '',
+        ].join('|');
+    }, [currentSessionId, latestLoadedUserChoice]);
 
     const tryApplyModelSelection = React.useCallback(
         (providerId: string, modelId: string, agentName?: string): ModelApplyResult => {
@@ -909,14 +922,10 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             return;
         }
 
-        const restoreKey = [
-            currentSessionId,
-            latestLoadedUserChoice.id,
-            latestLoadedUserChoice.agent ?? '',
-            latestLoadedUserChoice.providerID,
-            latestLoadedUserChoice.modelID,
-            latestLoadedUserChoice.variant ?? '',
-        ].join('|');
+        const restoreKey = latestLoadedUserChoiceKey;
+        if (!restoreKey) {
+            return;
+        }
 
         if (latestLoadedUserChoiceRestoreRef.current === restoreKey) {
             return;
@@ -960,6 +969,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         hasCurrentSessionMessagesResolved,
         isKnownAgentName,
         latestLoadedUserChoice,
+        latestLoadedUserChoiceKey,
         setAgent,
         tryApplyModelSelection,
         saveSessionAgentSelection,
@@ -1373,7 +1383,8 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         && hasCurrentSessionMessagesResolved
         && latestLoadedUserChoice
         && latestChoiceModelAvailable
-        && latestChoiceAgentAvailable,
+        && latestChoiceAgentAvailable
+        && latestLoadedUserChoiceRestoreRef.current !== latestLoadedUserChoiceKey
     );
     const latestChoiceApplied = Boolean(
         latestLoadedUserChoice
@@ -2160,7 +2171,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                 <div className="flex flex-col gap-2">
                     {selectableDesktopAgents.map((agent) => {
                         const isSelected = agent.name === uiAgentName;
-                        const agentColor = getAgentColor(agent.name);
+                        const agentColor = getAgentColor(agent);
                         return (
                             <button
                                 key={agent.name}
@@ -2177,10 +2188,13 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                 onClick={() => handleAgentChange(agent.name)}
                             >
                                 <div className="flex items-center gap-2">
-                                    <div className={cn('size-2.5 rounded-full flex-shrink-0', agentColor.class)} />
+                                    <div
+                                        className={cn('size-2.5 rounded-full flex-shrink-0 agent-dot', agentColor.class)}
+                                        style={agentColorVarsStyle(agentColor)}
+                                    />
                                     <span
                                         className="typography-ui-label font-semibold"
-                                        style={isSelected ? { color: `var(${agentColor.var})` } : undefined}
+                                        style={isSelected ? { color: agentColor.value } : undefined}
                                     >
                                         {capitalizeAgentName(agent.name)}
                                     </span>

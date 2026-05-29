@@ -24,7 +24,7 @@ import { generateSyntaxTheme } from '@/lib/theme/syntaxThemeGenerator';
 import type { ToolPopupContent } from './message/types';
 import { useUIStore } from '@/stores/useUIStore';
 import { useDeviceInfo } from '@/lib/device';
-import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
+import { useMessageDirectory } from '@/hooks/useMessageDirectory';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import type { EditorAPI } from '@/lib/api/types';
 import { DEFAULT_SERVER_ID, serverRegistry } from '@/lib/opencode/server-registry';
@@ -1823,7 +1823,7 @@ const MarkdownRendererImpl: React.FC<MarkdownRendererProps> = ({
   const currentTheme = useCurrentMermaidTheme();
   const { editor, runtime } = useRuntimeAPIs();
   const containerRef = React.useRef<HTMLDivElement>(null);
-  const effectiveDirectory = useEffectiveDirectory() ?? '';
+  const effectiveDirectory = useMessageDirectory(sessionId);
   const fileReferenceBaseUrl = React.useMemo(
     () => resolveFileReferenceBaseUrl(sessionId, effectiveDirectory),
     [effectiveDirectory, sessionId],
@@ -1931,7 +1931,7 @@ const SimpleMarkdownRendererImpl: React.FC<{
   );
   const currentTheme = useCurrentMermaidTheme();
   const containerRef = React.useRef<HTMLDivElement>(null);
-  const effectiveDirectory = useEffectiveDirectory() ?? '';
+  const effectiveDirectory = useMessageDirectory(sessionId);
   const fileReferenceBaseUrl = React.useMemo(
     () => resolveFileReferenceBaseUrl(sessionId, effectiveDirectory),
     [effectiveDirectory, sessionId],

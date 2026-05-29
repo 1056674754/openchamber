@@ -6,7 +6,7 @@ import { SimpleMarkdownRenderer } from '../../MarkdownRenderer';
 import { useUIStore } from '@/stores/useUIStore';
 import { useSkillsStore } from '@/stores/useSkillsStore';
 import { Icon } from "@/components/icon/Icon";
-import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
+import { useMessageDirectory } from '@/hooks/useMessageDirectory';
 
 const OMA_SEPARATOR = '\n\n---\n\n';
 
@@ -91,7 +91,7 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, sessionId, messageId,
     const userMessageRenderingMode = useUIStore((state) => state.userMessageRenderingMode);
     const skills = useSkillsStore((state) => state.skills);
     const openContextFile = useUIStore((state) => state.openContextFile);
-    const effectiveDirectory = useEffectiveDirectory();
+    const effectiveDirectory = useMessageDirectory(sessionId);
     const normalizedRenderingMode = normalizeUserMessageRenderingMode(userMessageRenderingMode);
     const textRef = React.useRef<HTMLDivElement>(null);
     const skillByName = React.useMemo(() => new Map(skills.map((skill) => [skill.name, skill])), [skills]);

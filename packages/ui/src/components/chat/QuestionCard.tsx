@@ -17,12 +17,13 @@ import { serializeQuestionAsJson, serializeQuestionAsMarkdown } from './question
 
 interface QuestionCardProps {
   question: QuestionRequest;
+  inline?: boolean;
 }
 
 type TabKey = string;
 const SUMMARY_TAB = 'summary';
 
-export const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
+export const QuestionCard: React.FC<QuestionCardProps> = ({ question, inline = false }) => {
   const { t } = useI18n();
   const respondToQuestion = sessionActions.respondToQuestion;
     const rejectQuestion = sessionActions.rejectQuestion;;
@@ -231,10 +232,8 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
     return null;
   }
 
-  return (
-    <div className="group w-full pt-0 pb-2">
-      <div className="chat-column">
-        <div className="-mt-1 border border-border/30 rounded-xl bg-muted/10">
+  const card = (
+    <div className="-mt-1 border border-border/30 rounded-xl bg-muted/10">
           {/* Header */}
           <div className="px-2 py-1.5 border-b border-border/20">
             <div className="flex items-center gap-2">
@@ -492,8 +491,12 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
               </div>
             ) : null}
           </div>
-        </div>
-      </div>
+    </div>
+  );
+
+  return (
+    <div className="group w-full pt-0 pb-2">
+      {inline ? card : <div className="chat-column">{card}</div>}
     </div>
   );
 };

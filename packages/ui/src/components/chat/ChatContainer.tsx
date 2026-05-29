@@ -24,7 +24,10 @@ import type { QuestionRequest } from '@/types/question';
 import { cn } from '@/lib/utils';
 import {
     collectVisibleSessionIdsForBlockingRequests,
+    collectVisibleToolRequestKeys,
+    splitBlockingRequestsByVisibleTool,
 } from './lib/blockingRequests';
+import { InlineBlockingRequestsContext } from './InlineBlockingRequestsContext';
 
 // New sync system imports
 import { useSessionUIStore } from '@/sync/session-ui-store';
@@ -158,6 +161,7 @@ type ChatViewportProps = {
     scrollToBottom: () => void;
     sessionQuestions: QuestionRequest[];
     sessionPermissions: PermissionRequest[];
+    inlineBlockingRequestsByTool: ReturnType<typeof splitBlockingRequestsByVisibleTool>['inlineByTool'];
     isProgrammaticFollowActive: boolean;
 };
 
@@ -183,6 +187,7 @@ const ChatViewport = React.memo(({
     scrollToBottom,
     sessionQuestions,
     sessionPermissions,
+    inlineBlockingRequestsByTool,
     isProgrammaticFollowActive,
 }: ChatViewportProps) => {
     const focusScrollContainer = React.useCallback((event: React.MouseEvent<HTMLElement>) => {
@@ -220,24 +225,26 @@ const ChatViewport = React.memo(({
                     data-scrollbar="chat"
                 >
                     <div className="relative z-0 min-h-full">
-                        <MessageList
-                            ref={messageListRef}
-                            sessionKey={currentSessionId}
-                            turnStart={turnStart}
-                            disableStaging={pendingRevealWork}
-                            messages={renderedMessages}
-                            sessionIsWorking={sessionIsWorking}
-                            activeStreamingMessageId={streamingMessageId}
-                            activeStreamingPhase={activeStreamingPhase}
-                            retryOverlay={retryOverlay}
-                            onMessageContentChange={handleMessageContentChange}
-                            getAnimationHandlers={getAnimationHandlers}
-                            hasMoreAbove={hasMoreAboveTurns}
-                            isLoadingOlder={isLoadingOlder}
-                            onLoadOlder={handleLoadOlder}
-                            scrollToBottom={scrollToBottom}
-                            scrollRef={scrollRef}
-                        />
+                        <InlineBlockingRequestsContext.Provider value={inlineBlockingRequestsByTool}>
+                            <MessageList
+                                ref={messageListRef}
+                                sessionKey={currentSessionId}
+                                turnStart={turnStart}
+                                disableStaging={pendingRevealWork}
+                                messages={renderedMessages}
+                                sessionIsWorking={sessionIsWorking}
+                                activeStreamingMessageId={streamingMessageId}
+                                activeStreamingPhase={activeStreamingPhase}
+                                retryOverlay={retryOverlay}
+                                onMessageContentChange={handleMessageContentChange}
+                                getAnimationHandlers={getAnimationHandlers}
+                                hasMoreAbove={hasMoreAboveTurns}
+                                isLoadingOlder={isLoadingOlder}
+                                onLoadOlder={handleLoadOlder}
+                                scrollToBottom={scrollToBottom}
+                                scrollRef={scrollRef}
+                            />
+                        </InlineBlockingRequestsContext.Provider>
                         {(sessionQuestions.length > 0 || sessionPermissions.length > 0) && (
                             <div>
                                 {sessionQuestions.map((question) => (
@@ -282,6 +289,7 @@ const ChatViewport = React.memo(({
         && prev.scrollToBottom === next.scrollToBottom
         && prev.sessionQuestions === next.sessionQuestions
         && prev.sessionPermissions === next.sessionPermissions
+        && prev.inlineBlockingRequestsByTool === next.inlineBlockingRequestsByTool
         && prev.isProgrammaticFollowActive === next.isProgrammaticFollowActive;
 });
 
@@ -569,6 +577,19 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
     });
     const { loadEarlier } = timelineController;
 
+    const visibleToolRequestKeys = React.useMemo(
+        () => collectVisibleToolRequestKeys(timelineController.renderedMessages),
+        [timelineController.renderedMessages],
+    );
+    const {
+        inlineByTool: inlineBlockingRequestsByTool,
+        trailingQuestions,
+        trailingPermissions,
+    } = React.useMemo(
+        () => splitBlockingRequestsByVisibleTool(sessionQuestions, sessionPermissions, visibleToolRequestKeys),
+        [sessionPermissions, sessionQuestions, visibleToolRequestKeys],
+    );
+
     const resumeToLatestInstant = React.useCallback(() => {
         goToBottom('instant');
     }, [goToBottom]);
@@ -581,8 +602,12 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
         if (sessionPermissions.length === 0 && sessionQuestions.length === 0) {
             return;
         }
+        if (inlineBlockingRequestsByTool.size > 0) {
+            releaseAutoFollow();
+            return;
+        }
         handleMessageContentChange('permission');
-    }, [handleMessageContentChange, sessionPermissions, sessionQuestions]);
+    }, [handleMessageContentChange, inlineBlockingRequestsByTool, releaseAutoFollow, sessionPermissions, sessionQuestions]);
 
     const handleLoadOlder = React.useCallback(() => {
         void loadEarlier();
@@ -872,8 +897,9 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
                 getAnimationHandlers={getAnimationHandlers}
                 handleLoadOlder={handleLoadOlder}
                 scrollToBottom={resumeToLatestInstant}
-                sessionQuestions={sessionQuestions}
-                sessionPermissions={sessionPermissions}
+                sessionQuestions={trailingQuestions}
+                sessionPermissions={trailingPermissions}
+                inlineBlockingRequestsByTool={inlineBlockingRequestsByTool}
                 isProgrammaticFollowActive={isFollowingProgrammatically}
             />
 

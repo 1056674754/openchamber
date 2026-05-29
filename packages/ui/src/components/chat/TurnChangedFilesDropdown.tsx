@@ -1,10 +1,10 @@
 import React from 'react';
 import type { ToolPart } from '@opencode-ai/sdk/v2';
 import { Popover } from '@base-ui/react/popover';
-import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useIsGitRepo } from '@/stores/useGitStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
+import { useMessageDirectory } from '@/hooks/useMessageDirectory';
 import {
     type ChangedFile,
     type ChangedFileEntry,
@@ -20,14 +20,15 @@ import { Icon } from "@/components/icon/Icon";
 import type { TurnActivityRecord } from './lib/turns/types';
 
 interface TurnChangedFilesDropdownProps {
+    sessionId?: string;
     activityParts: TurnActivityRecord[] | undefined;
 }
 
-export const TurnChangedFilesDropdown: React.FC<TurnChangedFilesDropdownProps> = React.memo(({ activityParts }) => {
+export const TurnChangedFilesDropdown: React.FC<TurnChangedFilesDropdownProps> = React.memo(({ sessionId, activityParts }) => {
     const [isExpanded, setIsExpanded] = React.useState(false);
     const [portalContainer, setPortalContainer] = React.useState<HTMLElement | null>(null);
     const triggerButtonRef = React.useRef<HTMLButtonElement | null>(null);
-    const currentDirectory = useDirectoryStore((s) => s.currentDirectory);
+    const currentDirectory = useMessageDirectory(sessionId);
     const runtime = React.useContext(RuntimeAPIContext);
     const isGitRepo = useIsGitRepo(currentDirectory);
 

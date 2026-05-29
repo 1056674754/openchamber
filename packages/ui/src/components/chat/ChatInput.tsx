@@ -1000,21 +1000,17 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         initialSessionIdRef.current = sessionId;
 
         const pending = useInputStore.getState().pendingInputText;
-        console.log('[ChatInput useState init] sessionId=', sessionId, 'pendingInputText=', pending);
         if (pending !== null && pending.length > 0) {
             useInputStore.getState().consumePendingInputText();
-            console.log('[ChatInput useState init] consumed pending:', pending);
             return pending;
         }
 
         const draft = getStoredDraft(sessionId);
-        console.log('[ChatInput useState init] fallback to draft:', draft);
         if (draft) {
             initialDraftRef.current = draft;
         }
         return draft;
     });
-    console.log('[ChatInput render] message=', JSON.stringify(message));
     // Restore confirmed mentions from localStorage on mount
     const confirmedMentionsRef = React.useRef<Set<string>>(loadConfirmedMentions(initialSessionIdRef.current));
     // Helper: check if a mention path looks like a file/folder (has path separators, extension, or was explicitly confirmed)
@@ -1614,10 +1610,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 
     // Consume pending input text (e.g., from revert action)
     React.useEffect(() => {
-        console.log('[ChatInput useEffect pendingInputText] pendingInputText=', pendingInputText);
         if (pendingInputText !== null) {
             const pending = consumePendingInputText();
-            console.log('[ChatInput useEffect pendingInputText] consumed:', pending);
             if (pending?.text) {
                 if (pending.mode === 'append') {
                     setMessage((prev) => {

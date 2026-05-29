@@ -10,7 +10,6 @@ import type { ToolPart as ToolPartType, ToolState as ToolStateUnion } from '@ope
 import { toolDisplayStyles } from '@/lib/typography';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { useOptionalThemeSystem } from '@/contexts/useThemeSystem';
-import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useDirectorySync, useSessionMessageRecords, useEnsureSessionMessages } from '@/sync/sync-context';
@@ -25,6 +24,7 @@ import { sessionEvents } from '@/lib/sessionEvents';
 import { ScrollShadow } from '@/components/ui/ScrollShadow';
 import { Text } from '@/components/ui/text';
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
+import { useMessageDirectory } from '@/hooks/useMessageDirectory';
 import type { ContentChangeReason } from '@/hooks/useChatAutoFollow';
 import type { ToolPopupContent } from '../types';
 import { ensurePierreThemeRegistered } from '@/lib/shiki/appThemeRegistry';
@@ -39,6 +39,9 @@ import {
 } from '../toolRenderers';
 import { JsonTreeViewer } from '@/components/ui/JsonTreeViewer';
 import { Icon } from "@/components/icon/Icon";
+import { PermissionCard } from '../../PermissionCard';
+import { QuestionCard } from '../../QuestionCard';
+import { useInlineBlockingRequestsForTool } from '../../InlineBlockingRequestsContext';
 import { DiffViewToggle, type DiffViewMode } from '../DiffViewToggle';
 import { MinDurationShineText } from './MinDurationShineText';
 import { ToolRevealOnMount } from './ToolRevealOnMount';
@@ -57,6 +60,8 @@ type ToolStateWithMetadata = ToolStateUnion & { metadata?: Record<string, unknow
 
 interface ToolPartProps {
     part: ToolPartType;
+    sessionId?: string;
+    messageId?: string;
     isExpanded: boolean;
     onToggle: (toolId: string) => void;
     syntaxTheme: { [key: string]: React.CSSProperties };
@@ -434,6 +439,32 @@ const getRelativePath = (absolutePath: string, currentDirectory: string): string
     }
 
     return normalizedAbsolutePath;
+};
+
+const isPathWithinDirectory = (absolutePath: string, directory: string): boolean => {
+    const normalizedAbsolutePath = normalizeDisplayPath(absolutePath);
+    const normalizedDirectory = normalizeDisplayPath(directory);
+
+    if (!normalizedAbsolutePath || !normalizedDirectory) {
+        return false;
+    }
+
+    return normalizedAbsolutePath === normalizedDirectory || normalizedAbsolutePath.startsWith(`${normalizedDirectory}/`);
+};
+
+const getContextDirectoryForPath = (currentDirectory: string, absolutePath: string): string => {
+    const normalizedDirectory = normalizeDisplayPath(currentDirectory);
+    if (normalizedDirectory && isPathWithinDirectory(absolutePath, normalizedDirectory)) {
+        return normalizedDirectory;
+    }
+
+    const normalizedPath = normalizeDisplayPath(absolutePath);
+    if (!normalizedPath) {
+        return '';
+    }
+
+    const parent = normalizedPath.replace(/\/[^/]*$/, '');
+    return parent || normalizedPath;
 };
 
 type ToolDiagnostic = {
@@ -1083,13 +1114,14 @@ const TaskToolSummary: React.FC<{
     isMobile: boolean;
     output?: string;
     sessionId?: string;
+    directorySessionId?: string;
     onShowPopup?: (content: ToolPopupContent) => void;
     input?: Record<string, unknown>;
     animateTailText?: boolean;
     isActive?: boolean;
-}> = ({ entries, isExpanded, isMobile, output, sessionId, onShowPopup, input, animateTailText = true, isActive = false }) => {
+}> = ({ entries, isExpanded, isMobile, output, sessionId, directorySessionId, onShowPopup, input, animateTailText = true, isActive = false }) => {
     const { t } = useI18n();
-    const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
+    const currentDirectory = useMessageDirectory(directorySessionId ?? sessionId);
     const setCurrentSession = useSessionUIStore((state) => state.setCurrentSession);
     const openContextPanelTab = useUIStore((state) => state.openContextPanelTab);
     const showToolFileIcons = useUIStore((state) => state.showToolFileIcons);
@@ -1812,6 +1844,8 @@ ToolExpandedContent.displayName = 'ToolExpandedContent';
 
 const ToolPartContent: React.FC<ToolPartProps> = ({
     part,
+    sessionId,
+    messageId,
     isExpanded,
     onToggle,
     syntaxTheme,
@@ -1823,8 +1857,16 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
 }) => {
     const state = part.state;
     const showToolFileIcons = useUIStore((s) => s.showToolFileIcons);
-    const currentDirectory = useDirectoryStore((s) => s.currentDirectory);
     const currentSessionId = useSessionUIStore((s) => s.currentSessionId);
+    const messageSessionId = sessionId ?? currentSessionId ?? undefined;
+    const currentDirectory = useMessageDirectory(messageSessionId);
+    const partMessageId = React.useMemo(() => {
+        if (messageId) return messageId;
+        const candidate = (part as { messageID?: unknown }).messageID;
+        return typeof candidate === 'string' && candidate.length > 0 ? candidate : undefined;
+    }, [messageId, part]);
+    const inlineBlockingRequests = useInlineBlockingRequestsForTool(partMessageId, part.id);
+    const hasInlineBlockingRequests = inlineBlockingRequests.questions.length > 0 || inlineBlockingRequests.permissions.length > 0;
 
     const normalizedPartTool = normalizeToolName(part.tool);
     const isTaskTool = normalizedPartTool === 'task';
@@ -2530,12 +2572,23 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
             if (!filePath.startsWith('/')) {
                 absolutePath = currentDirectory.endsWith('/') ? currentDirectory + filePath : currentDirectory + '/' + filePath;
             }
-            if (runtime.runtime.isVSCode && toolDiff && (part.tool === 'edit' || part.tool === 'multiedit' || part.tool === 'apply_patch')) {
+            if (runtime.runtime.isVSCode && runtime.editor && toolDiff && (part.tool === 'edit' || part.tool === 'multiedit' || part.tool === 'apply_patch')) {
                 const label = `${getRelativePath(absolutePath, currentDirectory)} (changes)`;
                 void runtime.editor.openDiff('', absolutePath, label, { line: targetLine, patch: toolDiff });
                 return;
             }
-            runtime.editor.openFile(absolutePath, targetLine);
+            if (runtime.editor) {
+                void runtime.editor.openFile(absolutePath, targetLine);
+                return;
+            }
+
+            const uiStore = useUIStore.getState();
+            const contextDirectory = getContextDirectoryForPath(currentDirectory, absolutePath);
+            if (targetLine && Number.isFinite(targetLine)) {
+                uiStore.openContextFileAtLine(contextDirectory, absolutePath, Math.max(1, Math.trunc(targetLine)), 1);
+                return;
+            }
+            uiStore.openContextFile(contextDirectory, absolutePath);
         } else {
             onToggle(part.id);
         }
@@ -2688,6 +2741,7 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
                     isMobile={isMobile}
                     output={taskOutputString}
                     sessionId={taskSessionId}
+                    directorySessionId={taskSessionId ?? messageSessionId}
                     onShowPopup={onShowPopup}
                     input={input}
                     animateTailText={animateTailText}
@@ -2721,6 +2775,17 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
                             />
                         </div>
                     ) : null}
+                </div>
+            ) : null}
+
+            {hasInlineBlockingRequests ? (
+                <div className="mt-1 [overflow-anchor:none]">
+                    {inlineBlockingRequests.questions.map((question) => (
+                        <QuestionCard key={question.id} question={question} inline />
+                    ))}
+                    {inlineBlockingRequests.permissions.map((permission) => (
+                        <PermissionCard key={permission.id} permission={permission} inline />
+                    ))}
                 </div>
             ) : null}
         </div>
@@ -2795,6 +2860,8 @@ const ToolPart: React.FC<ToolPartProps> = (props) => {
 
 export default React.memo(ToolPart, (prev, next) => {
     return areRenderRelevantPartsEqual([prev.part], [next.part])
+        && prev.sessionId === next.sessionId
+        && prev.messageId === next.messageId
         && prev.isExpanded === next.isExpanded
         && prev.syntaxTheme === next.syntaxTheme
         && prev.isMobile === next.isMobile

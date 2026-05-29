@@ -14,6 +14,8 @@ import { useDeviceInfo } from '@/lib/device';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { generateSyntaxTheme } from '@/lib/theme/syntaxThemeGenerator';
 import { cn } from '@/lib/utils';
+import type { AgentColorSource } from '@/lib/agentColors';
+import { serverRegistry } from '@/lib/opencode/server-registry';
 
 import type { AnimationHandlers, ContentChangeReason } from '@/hooks/useChatAutoFollow';
 import MessageHeader from './message/MessageHeader';
@@ -287,8 +289,14 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
     const alwaysShowMessageActions = isMobile || isTablet;
     const { currentTheme } = useThemeSystem();
     const messageContainerRef = React.useRef<HTMLDivElement | null>(null);
+    const sessionId = message.info.sessionID;
 
     const currentSessionId = useSessionUIStore((s) => s.currentSessionId);
+    const selectMessageSessionDirectory = React.useCallback(
+        (state: ReturnType<typeof useSessionUIStore.getState>) => sessionId ? state.getDirectoryForSession(sessionId) : null,
+        [sessionId],
+    );
+    const messageSessionDirectory = useSessionUIStore(selectMessageSessionDirectory);
 
     const getAgentModelForSession = useSelectionStore((s) => s.getAgentModelForSession);
     const getSessionModelSelection = useSelectionStore((s) => s.getSessionModelSelection);
@@ -358,7 +366,6 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
     const useExternalUserActionsRow = isUser && (isMobile || !stickyUserHeader);
     const showStickyInlineHoverRow = isUser && !isMobile && stickyUserHeader && !useExternalUserActionsRow;
 
-    const sessionId = message.info.sessionID;
     const planModeEnabled = useFeatureFlagsStore((state) => state.planModeEnabled);
 
     // Keep non-active-turn rows detached from context-store churn.
@@ -466,6 +473,14 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
 
         return savedSessionAgentSelection ?? undefined;
     }, [isUser, message.info, previousIsModeSwitchMessage, previousUserMetadata, sessionId, currentContextAgent, savedSessionAgentSelection]);
+    const messageSessionServerId = sessionId ? serverRegistry.getServerForSession(sessionId) : undefined;
+    const agentColorSource = useConfigStore(
+        React.useCallback((state): AgentColorSource => {
+            if (!agentName) return undefined;
+            return state.getAgentsForDirectory(messageSessionDirectory, messageSessionServerId)
+                .find((agent) => agent.name === agentName) ?? agentName;
+        }, [agentName, messageSessionDirectory, messageSessionServerId])
+    );
 
     const messageProviderID = !isUser ? getMessageInfoProp(message.info, 'providerID') : null;
     const messageModelID = !isUser ? getMessageInfoProp(message.info, 'modelID') : null;
@@ -545,10 +560,12 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
     }, [isUser, modelID, providerID, providers]);
 
     const displayAgentName = useStickyDisplayValue<string>(agentName);
+    const displayAgentColorSource = useStickyDisplayValue(agentColorSource);
     const displayProviderIDValue = useStickyDisplayValue<string>(providerID ?? undefined);
     const displayModelName = useStickyDisplayValue<string>(modelName);
 
     const headerAgentName = displayAgentName ?? undefined;
+    const headerAgentColorSource = displayAgentColorSource ?? headerAgentName;
     const headerProviderID = displayProviderIDValue ?? null;
     const headerModelName = displayModelName ?? undefined;
 
@@ -1258,6 +1275,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                                     isUser={isUser}
                                     providerID={headerProviderID}
                                     agentName={headerAgentName}
+                                    agentColorSource={headerAgentColorSource}
                                     modelName={headerModelName}
                                     variant={headerVariant}
                                     isDarkTheme={isDarkTheme}

@@ -1518,9 +1518,10 @@ const AssistantMessageBody = React.memo(({
                 toolName={staticToolName}
                 activities={[activity]}
                 animateTailText={shouldAnimateTailText}
+                sessionId={sessionId}
             />
         );
-    }, []);
+    }, [sessionId]);
 
     const shouldSkipPartWithinStaticToolRun = React.useCallback((part: Part): boolean => {
         if (part.type === 'reasoning' && !showReasoningTraces) {
@@ -1699,6 +1700,8 @@ const AssistantMessageBody = React.memo(({
                             <ToolRevealOnMount animate={animatedToolIdsLookup.has(toolPart.id)} wipe>
                                 <ToolPart
                                     part={toolPart}
+                                    sessionId={sessionId}
+                                    messageId={messageId}
                                     isExpanded={expandedTools.has(toolPart.id)}
                                     onToggle={onToggleTool}
                                     syntaxTheme={syntaxTheme}
@@ -1776,6 +1779,7 @@ const AssistantMessageBody = React.memo(({
                                 toolName={getStaticGroupToolName(toolName)}
                                 activities={staticActivities}
                                 animateTailText={animatedToolIdsLookup.has(toolPart.id)}
+                                sessionId={sessionId}
                             />
                         </ToolRevealOnMount>
                     </FadeInOnReveal>
@@ -2026,7 +2030,7 @@ const AssistantMessageBody = React.memo(({
                                 </Tooltip>
                             ) : null}
                             {!isMiniChatSurface && isLastAssistantInTurn && hasStopFinish ? (
-                                <TurnChangedFilesDropdown activityParts={turnGroupingContext?.activityParts} />
+                                <TurnChangedFilesDropdown sessionId={sessionId} activityParts={turnGroupingContext?.activityParts} />
                             ) : null}
                         </div>
                     </div>
