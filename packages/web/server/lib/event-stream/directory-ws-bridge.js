@@ -51,8 +51,10 @@ export function acceptDirectoryMessageStreamWsConnection({
     }
   }, heartbeatIntervalMs);
 
+  // Heartbeat fires unconditionally — client heartbeat timer must stay alive
+  // even when the upstream SSE reader is reconnecting.
   const heartbeatInterval = setInterval(() => {
-    if (!upstreamConnected) {
+    if (socket.readyState !== 1) {
       return;
     }
 

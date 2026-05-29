@@ -232,7 +232,7 @@ export const registerOpenCodeProxy = (app, deps) => {
             scheduleHeartbeat();
             return;
           }
-          const canContinue = await enqueueSseWrite(':heartbeat\n\n');
+          const canContinue = await enqueueSseWrite('data: {"heartbeat":true}\n\n');
           if (canContinue) {
             scheduleHeartbeat();
           }

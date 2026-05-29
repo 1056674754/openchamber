@@ -161,8 +161,13 @@ export function createGlobalMessageStreamWsBridge({
       }
     }, heartbeatIntervalMs);
 
+    // Heartbeat must fire unconditionally so the client's heartbeat timer
+    // stays alive even when the upstream SSE reader is reconnecting.  If the
+    // hub is disconnected the client would otherwise time out after 30 s,
+    // causing a visible "Connection lost" toast even though the bridge will
+    // resume forwarding events once the upstream reconnects.
     const heartbeatInterval = setInterval(() => {
-      if (!globalHub.isConnected()) {
+      if (socket.readyState !== 1) {
         return;
       }
 
