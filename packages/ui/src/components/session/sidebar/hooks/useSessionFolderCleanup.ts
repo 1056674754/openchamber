@@ -55,6 +55,11 @@ export const useSessionFolderCleanup = (args: Args): void => {
     normalizedProjects.forEach((project) => {
       const scopeKey = getArchivedScopeKey(project.normalizedPath);
       const archivedForProject = getArchivedSessionsForProject(project);
+      const existing = idsByScope.get(scopeKey);
+      if (existing) {
+        archivedForProject.forEach((session) => existing.add(session.id));
+        return;
+      }
       idsByScope.set(scopeKey, new Set(archivedForProject.map((session) => session.id)));
     });
 

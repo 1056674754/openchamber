@@ -11,7 +11,7 @@ const AGENT_COLOR_PALETTE = [
   { var: '--syntax-variable', class: 'agent-variable' },
 ];
 
-type AgentColorSource = string | {
+export type AgentColorSource = string | {
   name?: string;
   color?: string | null;
 } | undefined;

@@ -124,6 +124,7 @@ const getToolDisplayName = (part: ToolPart): string => {
 
 export function useAssistantStatus(): AssistantStatusSnapshot {
     const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
+    const currentSessionServerId = currentSessionId ? serverRegistry.getServerForSession(currentSessionId) : undefined;
 
     const rawSessionMessages = useDirectorySync(
         React.useCallback((state) => {
@@ -133,7 +134,8 @@ export function useAssistantStatus(): AssistantStatusSnapshot {
             return state.message[currentSessionId] ?? EMPTY_MESSAGES;
         }, [currentSessionId]),
         undefined,
-        currentSessionId ? serverRegistry.getServerForSession(currentSessionId) : undefined
+        currentSessionServerId,
+        currentSessionId ?? undefined
     );
 
     // Only subscribe to parts for the last assistant message — avoids re-render
@@ -151,7 +153,8 @@ export function useAssistantStatus(): AssistantStatusSnapshot {
             return state.part[lastAssistantId] ?? EMPTY_PARTS;
         }, [lastAssistantId]),
         undefined,
-        currentSessionId ? serverRegistry.getServerForSession(currentSessionId) : undefined
+        currentSessionServerId,
+        currentSessionId ?? undefined
     );
 
     const sessionMessages = React.useMemo<SessionMessageRecord[]>(

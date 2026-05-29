@@ -161,6 +161,19 @@ type PrIndicator = {
   } | null;
 };
 
+type KnownSessionDirectoryScope = {
+  pathLower: string;
+  serverId: string;
+};
+
+const normalizeServerScopeId = (serverId?: string | null): string =>
+  serverId && serverId !== DEFAULT_SERVER_ID ? serverId : DEFAULT_SERVER_ID;
+
+const getSessionParentId = (session: Session): string | null => {
+  const parentID = (session as Session & { parentID?: string | null }).parentID;
+  return typeof parentID === 'string' && parentID.trim().length > 0 ? parentID : null;
+};
+
 const directoryBelongsToProject = (directory: string | null | undefined, projectPath: string): boolean => {
   const normalizedDirectory = normalizePath(directory ?? null);
   const normalizedProjectPath = normalizePath(projectPath);
@@ -168,30 +181,52 @@ const directoryBelongsToProject = (directory: string | null | undefined, project
   return normalizedDirectory === normalizedProjectPath || normalizedDirectory.startsWith(`${normalizedProjectPath}/`);
 };
 
-const buildKnownSessionDirectories = (
-  projects: Array<{ path: string }>,
+const buildKnownSessionDirectoryScopes = (
+  projects: Array<{ path: string; serverId?: string }>,
   availableWorktreesByProject: Map<string, WorktreeMetadata[]>,
-): Set<string> => {
-  const directories = new Set<string>();
+): KnownSessionDirectoryScope[] => {
+  const scopes: KnownSessionDirectoryScope[] = [];
+  const seen = new Set<string>();
+  const addScope = (path: string | null | undefined, serverId?: string | null) => {
+    const normalized = normalizePath(path ?? null)?.toLowerCase();
+    if (!normalized) return;
+    const normalizedServerId = normalizeServerScopeId(serverId);
+    const key = `${normalizedServerId}:${normalized}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    scopes.push({ pathLower: normalized, serverId: normalizedServerId });
+  };
+
   for (const project of projects) {
-    const normalized = normalizePath(project.path)?.toLowerCase();
-    if (normalized) directories.add(normalized);
-  }
-  for (const worktrees of availableWorktreesByProject.values()) {
+    const projectPath = normalizePath(project.path);
+    if (!projectPath) continue;
+    if (project.serverId && projectPath === '/') continue;
+    addScope(projectPath, project.serverId);
+    const worktrees = getWorktreesForProject(
+      availableWorktreesByProject,
+      projectPath,
+      project.serverId,
+    );
     for (const worktree of worktrees) {
-      const normalized = normalizePath(worktree.path)?.toLowerCase();
-      if (normalized) directories.add(normalized);
+      addScope(worktree.path, worktree.serverId ?? project.serverId);
     }
   }
-  return directories;
+  return scopes;
 };
 
-const isKnownActiveSessionDirectory = (session: Session, knownDirectories: Set<string>): boolean => {
+const isKnownActiveSessionDirectory = (session: Session, knownScopes: KnownSessionDirectoryScope[]): boolean => {
   if (session.time?.archived) return true;
   const directory = normalizePath(resolveGlobalSessionDirectory(session))?.toLowerCase();
   if (!directory) return true;
-  if (knownDirectories.size === 0) return true;
-  return knownDirectories.has(directory);
+  if (knownScopes.length === 0) return true;
+
+  const indexedServerId = serverRegistry.getServerForSession(session.id);
+  const scopedServerId = indexedServerId ? normalizeServerScopeId(indexedServerId) : null;
+  return knownScopes.some((scope) => {
+    if (scopedServerId && scope.serverId !== scopedServerId) return false;
+    if (scope.pathLower === '/') return directory.startsWith('/');
+    return directory === scope.pathLower || directory.startsWith(`${scope.pathLower}/`);
+  });
 };
 
 const SIDEBAR_PR_NO_PR_RETRY_MS = 5 * 60_000;
@@ -450,8 +485,8 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
     restartToUpdate: s.restartToUpdate,
   })));
 
-  const knownSessionDirectories = React.useMemo(
-    () => buildKnownSessionDirectories(projects, availableWorktreesByProject),
+  const knownSessionDirectoryScopes = React.useMemo(
+    () => buildKnownSessionDirectoryScopes(projects, availableWorktreesByProject),
     [availableWorktreesByProject, projects],
   );
 
@@ -467,8 +502,33 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
       merged.push(session);
     });
 
-    return merged.filter((session) => isKnownActiveSessionDirectory(session, knownSessionDirectories));
-  }, [globalActiveSessions, knownSessionDirectories, liveSessions]);
+    const mergedById = new Map(merged.map((session) => [session.id, session]));
+    const visibilityCache = new Map<string, boolean>();
+    const isVisible = (session: Session, visiting = new Set<string>()): boolean => {
+      const cached = visibilityCache.get(session.id);
+      if (cached !== undefined) return cached;
+
+      if (visiting.has(session.id)) {
+        const visible = isKnownActiveSessionDirectory(session, knownSessionDirectoryScopes);
+        visibilityCache.set(session.id, visible);
+        return visible;
+      }
+
+      visiting.add(session.id);
+      let visible = isKnownActiveSessionDirectory(session, knownSessionDirectoryScopes);
+      if (!visible) {
+        const parentID = getSessionParentId(session);
+        const parentSession = parentID ? mergedById.get(parentID) : undefined;
+        visible = parentSession ? isVisible(parentSession, visiting) : false;
+      }
+      visiting.delete(session.id);
+
+      visibilityCache.set(session.id, visible);
+      return visible;
+    };
+
+    return merged.filter((session) => isVisible(session));
+  }, [globalActiveSessions, knownSessionDirectoryScopes, liveSessions]);
 
   const tempSessionsWithSession = React.useMemo<TempSessionEntry[]>(() => {
     const sessionsByDirectory = new Map<string, Session>();
