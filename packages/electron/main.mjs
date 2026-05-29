@@ -1718,15 +1718,45 @@ const parseRelevantChangelogNotes = async (fromVersion, toVersion) => {
 
 const buildInstalledAppsCachePath = () => path.join(path.dirname(settingsFilePath()), INSTALLED_APPS_CACHE_FILE);
 
-// Async variants. sips + mdfind via spawnSync blocked the Electron main event
-// loop for 2-3s on boot (22 OPEN_IN_APPS × ~200 ms each). Use execFile promises
-// so each child-process wait yields to the loop and the UI stays responsive.
+// Async variants keep child-process waits off the Electron main event loop.
+// Avoid broad filesystem searches here: macOS may treat probes under
+// ~/Library as "other app data" access and repeatedly show a TCC prompt.
 const pathExists = async (candidate) => {
   try {
     await fsp.access(candidate);
     return true;
   } catch {
     return false;
+  }
+};
+
+const normalizeAppBundlePath = (candidate) => {
+  const normalized = String(candidate || '').trim().replace(/\/+$/, '');
+  return normalized.toLowerCase().endsWith('.app') ? normalized : null;
+};
+
+const isUserLibraryPath = (candidate) => {
+  const home = String(os.homedir() || '').replace(/\\/g, '/').replace(/\/+$/, '');
+  if (!home) return false;
+  const normalized = String(candidate || '').replace(/\\/g, '/');
+  return normalized === `${home}/Library` || normalized.startsWith(`${home}/Library/`);
+};
+
+const resolveExistingAppBundlePath = async (candidate) => {
+  const normalized = normalizeAppBundlePath(candidate);
+  if (!normalized || isUserLibraryPath(normalized)) return null;
+  return (await pathExists(normalized)) ? normalized : null;
+};
+
+const resolveAppBundlePathFromLaunchServices = async (appName) => {
+  const lookupName = String(appName || '').trim().replace(/\.app$/i, '');
+  if (!lookupName) return null;
+  try {
+    const script = `POSIX path of (path to application ${JSON.stringify(lookupName)})`;
+    const { stdout } = await execFileAsync('osascript', ['-e', script], { encoding: 'utf8' });
+    return resolveExistingAppBundlePath(stdout);
+  } catch {
+    return null;
   }
 };
 
@@ -1737,18 +1767,14 @@ const resolveAppBundlePath = async (appName) => {
     `/Applications/${bundleName}`,
     `/System/Applications/${bundleName}`,
     `/System/Applications/Utilities/${bundleName}`,
+    `/System/Library/CoreServices/${bundleName}`,
     path.join(os.homedir(), 'Applications', bundleName),
   ];
   for (const candidate of candidates) {
-    if (await pathExists(candidate)) return candidate;
+    const resolved = await resolveExistingAppBundlePath(candidate);
+    if (resolved) return resolved;
   }
-  try {
-    const { stdout } = await execFileAsync('mdfind', ['-name', bundleName], { encoding: 'utf8' });
-    const first = (stdout || '').split('\n').map((line) => line.trim()).find(Boolean);
-    return first || null;
-  } catch {
-    return null;
-  }
+  return resolveAppBundlePathFromLaunchServices(appName);
 };
 
 const isAppBundleInstalled = async (appName) => Boolean(await resolveAppBundlePath(appName));
