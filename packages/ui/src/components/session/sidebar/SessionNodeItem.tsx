@@ -1079,7 +1079,13 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
         </DropdownMenuItem>
       ) : null}
       <DropdownMenuItem
-        onClick={() => { void sync.syncSession(session.id, true); }}
+        onClick={() => {
+          void sync.forceRefreshSession(session.id).then((result) => {
+            if (!result.ok) {
+              toast.error(result.error ?? 'Refresh failed');
+            }
+          });
+        }}
         className="[&>svg]:mr-1"
       >
         <Icon name="refresh" className="mr-1 h-4 w-4"  />

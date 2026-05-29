@@ -11,7 +11,7 @@ import {
 import { dropCachedSessionMessageRecordsSnapshots, useDirectoryStore, useSyncDirectory, useChildStoreManager } from "./sync-context"
 import { resolveSdkForDirectory } from "./session-actions"
 import { useSessionUIStore } from "./session-ui-store"
-import { getSyncStoresForServer } from "./multi-server-registry"
+import { getAllSyncStores, getSyncStoresForServer } from "./multi-server-registry"
 import { DEFAULT_SERVER_ID, serverRegistry } from "@/lib/opencode/server-registry"
 import { dropSessionCaches, getProtectedSessionCacheIds } from "./session-cache"
 import { stripMessageDiffSnapshots } from "./sanitize"
@@ -24,6 +24,7 @@ import {
 } from "./session-prefetch-cache"
 import { getSessionMaterializationStatus, materializeSessionSnapshots } from "./materialization"
 import { useTodosPersistStore } from "@/stores/useTodosPersistStore"
+import { useConfigStore } from "@/stores/useConfigStore"
 
 const SKIP_PARTS = new Set(["patch", "step-start", "step-finish"])
 const MESSAGE_PAGE_SIZE = 150
@@ -80,6 +81,30 @@ function hasUserMessage(messages: Message[] | undefined): boolean {
   return Boolean(messages?.some(isUserMessage))
 }
 
+function unwrapMessageRecords<T>(
+  result: { data?: T[]; error?: unknown; response?: { status?: number } },
+  name: string,
+): T[] {
+  if (result.error) {
+    const status = result.response?.status
+    const rawError = result.error
+    const message = typeof rawError === "object" && rawError !== null && "message" in rawError
+      ? String((rawError as { message?: unknown }).message)
+      : String(rawError)
+    const error = new Error(`${name} failed${status ? ` (${status})` : ""}: ${message}`)
+    if (status !== undefined) {
+      ;(error as Error & { status?: number }).status = status
+    }
+    throw error
+  }
+  if (result.data === undefined) {
+    const error = new Error(`${name} returned no data`)
+    ;(error as Error & { status?: number }).status = 503
+    throw error
+  }
+  return result.data
+}
+
 // ---------------------------------------------------------------------------
 // useSync — message loading, pagination, optimistic updates
 // Message loading, pagination, optimistic updates
@@ -124,13 +149,32 @@ export function useSync() {
         }
       }
 
+      if (!serverId && sessionDir) {
+        for (const entry of getAllSyncStores()) {
+          if (entry.serverId === DEFAULT_SERVER_ID) continue
+          const remoteStore = entry.childStores.getChild(sessionDir)
+          if (remoteStore?.getState().session.some((session) => session.id === sessionID)) {
+            return {
+              directory: sessionDir,
+              store: remoteStore,
+              serverId: entry.serverId,
+            }
+          }
+        }
+      }
+
+      const targetDirectory = sessionDir || directory
+      const targetStore = targetDirectory === directory
+        ? store
+        : childStores.ensureChild(targetDirectory)
+
       return {
-        directory,
-        store,
+        directory: targetDirectory,
+        store: targetStore,
         serverId: DEFAULT_SERVER_ID,
       }
     },
-    [directory, store],
+    [childStores, directory, store],
   )
 
   const keyFor = useCallback(
@@ -294,7 +338,8 @@ export function useSync() {
       const result = await retry(() =>
         client.session.messages({ sessionID, directory: targetDirectory, limit, before }),
       )
-      const items = (result.data ?? []).filter((x: { info?: { id?: string } }) => !!x?.info?.id)
+      const items = unwrapMessageRecords(result, "session.messages")
+        .filter((x: { info?: { id?: string } }) => !!x?.info?.id)
       const session = items
         .map((x: { info: Message }) => stripMessageDiffSnapshots(x.info))
         .sort((a: Message, b: Message) => cmp(a.id, b.id))
@@ -484,6 +529,80 @@ export function useSync() {
     [keyFor, touch, getMetaFor, setMetaFor, loadMessages, resolveSessionTarget],
   )
 
+  const forceRefreshSession = useCallback(
+    async (sessionID: string): Promise<{ ok: boolean; error?: string }> => {
+      const target = resolveSessionTarget(sessionID)
+      const sessionDir = target.directory
+
+      // 1. Clear stale loading state so loadMessages won't short-circuit.
+      setMetaFor(sessionID, { loading: false }, sessionDir)
+
+      // 2. Connection health check (local server only).
+      if (target.serverId === DEFAULT_SERVER_ID) {
+        const connected = await useConfigStore.getState().checkConnection()
+        if (!connected) {
+          return { ok: false, error: "Connection to OpenCode server failed" }
+        }
+      }
+
+      // 3. Fetch session metadata.
+      const client = resolveSdkForDirectory(sessionDir, sessionID)
+      try {
+        const result = await retry(() => client.session.get({ sessionID, directory: sessionDir }))
+        if (result.data) {
+          const s = target.store.getState()
+          const sessions = [...s.session]
+          const idx = Binary.search(sessions, sessionID, (s) => s.id)
+          if (idx.found) {
+            sessions[idx.index] = result.data
+          } else {
+            sessions.splice(idx.index, 0, result.data)
+          }
+          target.store.setState({ session: sessions })
+        }
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e)
+        return { ok: false, error: `Failed to fetch session: ${msg}` }
+      }
+
+      // 4. Load messages + parts.
+      try {
+        await loadMessages(sessionID, {
+          targetDirectory: sessionDir,
+          targetStore: target.store,
+        })
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e)
+        return { ok: false, error: `Failed to load messages: ${msg}` }
+      }
+
+      // 5. Fetch status, todos, and sub-agents in parallel.
+      try {
+        await Promise.all([
+          client.session.status({ directory: sessionDir }).then((res) => {
+            if (!res.data) return
+            const status = res.data[sessionID] ?? { type: "idle" as const }
+            target.store.setState((s) => ({
+              session_status: { ...s.session_status, [sessionID]: status },
+            }))
+          }),
+          client.session.todo({ sessionID, directory: sessionDir }).then((res) => {
+            const todos: Todo[] | undefined = res.data && res.data.length > 0 ? res.data : undefined
+            target.store.setState((s) => ({
+              todo: { ...s.todo, [sessionID]: todos ?? [] },
+            }))
+            useTodosPersistStore.getState().setSessionTodos(sessionID, todos)
+          }),
+        ])
+      } catch {
+        // Status/todo failures are non-critical for the refresh.
+      }
+
+      return { ok: true }
+    },
+    [resolveSessionTarget, setMetaFor, loadMessages],
+  )
+
   // Load more (pagination)
   const loadMore = useCallback(
     async (sessionID: string) => {
@@ -570,6 +689,7 @@ export function useSync() {
     () => ({
       ensureSessionRenderable: syncSession,
       syncSession,
+      forceRefreshSession,
       loadMore,
       hasMore,
       isLoading,
@@ -578,6 +698,6 @@ export function useSync() {
         remove: optimisticRemove,
       },
     }),
-    [syncSession, loadMore, hasMore, isLoading, optimisticAdd, optimisticRemove],
+    [syncSession, forceRefreshSession, loadMore, hasMore, isLoading, optimisticAdd, optimisticRemove],
   )
 }

@@ -111,13 +111,17 @@ export function applyOptimisticRemove(draft: OptimisticStore, input: OptimisticR
 }
 
 /** Merge two sorted message arrays by id, deduplicating.
- *  Preserves references from `a` for items that already exist — avoids
- *  unnecessary React re-renders when prepending older history. */
+ *  Items from `b` replace matching items from `a` (same id, different
+ *  reference) so that server-side updates propagate on refresh. */
 export function mergeMessages<T extends { id: string }>(a: readonly T[], b: readonly T[]) {
   const existing = new Map(a.map((item) => [item.id, item] as const))
   let changed = false
   for (const item of b) {
-    if (!existing.has(item.id)) {
+    const prev = existing.get(item.id)
+    if (!prev) {
+      existing.set(item.id, item)
+      changed = true
+    } else if (prev !== item) {
       existing.set(item.id, item)
       changed = true
     }
