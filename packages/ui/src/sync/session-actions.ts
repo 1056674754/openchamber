@@ -327,6 +327,30 @@ function upsertSessionSnapshot(
   store.setState({ session: sessions })
 }
 
+function unwrapMessageRecords<T>(
+  result: { data?: T[]; error?: unknown; response?: { status?: number } },
+  name: string,
+): T[] {
+  if (result.error) {
+    const status = result.response?.status
+    const rawError = result.error
+    const message = typeof rawError === "object" && rawError !== null && "message" in rawError
+      ? String((rawError as { message?: unknown }).message)
+      : String(rawError)
+    const error = new Error(`${name} failed${status ? ` (${status})` : ""}: ${message}`)
+    if (status !== undefined) {
+      ;(error as Error & { status?: number }).status = status
+    }
+    throw error
+  }
+  if (result.data === undefined) {
+    const error = new Error(`${name} returned no data`)
+    ;(error as Error & { status?: number }).status = 503
+    throw error
+  }
+  return result.data
+}
+
 /** Get the directory store for a session. Uses the remote server's child stores
     (keyed by "" since MultiServerSyncLayer mounts with directory="") for remote sessions,
     or the current directory's store for local sessions. Falls back to dirStore(). */
@@ -369,17 +393,15 @@ function connectionLostError(): Error {
 // Wait briefly for the pipeline to re-establish connection before failing a
 // send. Transient reconnects (heartbeat race, WS→SSE fallback, brief network
 // blip) otherwise surface as a hard "Connection lost" toast even though the
-// pipeline recovers within a second. While waiting, run bounded health probes
-// inside the same grace window so stale disconnected state can recover quickly.
+// pipeline recovers within a second. Do NOT run independent health probes
+// here — the pipeline already reconnects autonomously and health probes race
+// it through the same potentially slow OpenCode process.
 const CONNECTION_GRACE_MS = 2000
 export async function waitForConnectionOrThrow(): Promise<void> {
   const deadline = Date.now() + CONNECTION_GRACE_MS
   while (Date.now() < deadline) {
     if (useConfigStore.getState().isConnected) return
-    const remainingMs = deadline - Date.now()
-    if (remainingMs <= 0) break
-    if (await useConfigStore.getState().probeConnection({ timeoutMs: Math.min(500, remainingMs) })) return
-    const sleepMs = Math.min(100, deadline - Date.now())
+    const sleepMs = Math.min(50, deadline - Date.now())
     if (sleepMs > 0) {
       await new Promise((resolve) => setTimeout(resolve, sleepMs))
     }
@@ -564,6 +586,25 @@ function requireBlockingRequestDirectory(
     throw new Error(`${type} reply target directory for request ${requestId} is not available`)
   }
   return directory
+}
+
+function hasSuccessfulSdkResult(result: unknown): boolean {
+  if (!result || typeof result !== "object") {
+    return false
+  }
+  return Boolean((result as { data?: unknown }).data)
+}
+
+function getSdkResultStatus(result: unknown): number | undefined {
+  if (!result || typeof result !== "object") {
+    return undefined
+  }
+  const response = (result as { response?: unknown }).response
+  if (!response || typeof response !== "object") {
+    return undefined
+  }
+  const status = (response as { status?: unknown }).status
+  return typeof status === "number" ? status : undefined
 }
 
 // ---------------------------------------------------------------------------
@@ -996,14 +1037,7 @@ export async function respondToPermission(
 ): Promise<void> {
   await waitForConnectionOrThrow()
   const directory = requireBlockingRequestDirectory("permission", sessionId, requestId)
-  const result = await getRequestReplyClient("permission", sessionId, requestId).permission.reply({
-    requestID: requestId,
-    reply: response,
-    ...(directory ? { directory } : {}),
-  })
-  if (!result.data) {
-    throw new Error("Permission reply failed")
-  }
+  await sendPermissionResponse(sessionId, requestId, response, directory, "Permission reply failed")
 }
 
 export async function dismissPermission(
@@ -1012,14 +1046,43 @@ export async function dismissPermission(
 ): Promise<void> {
   await waitForConnectionOrThrow()
   const directory = requireBlockingRequestDirectory("permission", sessionId, requestId)
-  const result = await getRequestReplyClient("permission", sessionId, requestId).permission.reply({
-    requestID: requestId,
-    reply: "reject",
-    ...(directory ? { directory } : {}),
+  await sendPermissionResponse(sessionId, requestId, "reject", directory, "Permission dismissal failed")
+}
+
+async function sendPermissionResponse(
+  sessionId: string,
+  requestId: string,
+  response: "once" | "always" | "reject",
+  directory: string,
+  failureMessage: string,
+): Promise<void> {
+  const client = getRequestReplyClient("permission", sessionId, requestId)
+  const directoryParam = directory ? { directory } : {}
+
+  // Some OpenCode servers still expose only the session-scoped permission
+  // response route. Prefer it when we have the authoritative session ID.
+  const sessionScopedResult = await client.permission.respond({
+    sessionID: sessionId,
+    permissionID: requestId,
+    response,
+    ...directoryParam,
   })
-  if (!result.data) {
-    throw new Error("Permission dismissal failed")
+  if (hasSuccessfulSdkResult(sessionScopedResult)) {
+    return
   }
+
+  if (getSdkResultStatus(sessionScopedResult) === 404) {
+    const requestScopedResult = await client.permission.reply({
+      requestID: requestId,
+      reply: response,
+      ...directoryParam,
+    })
+    if (hasSuccessfulSdkResult(requestScopedResult)) {
+      return
+    }
+  }
+
+  throw new Error(failureMessage)
 }
 
 // ---------------------------------------------------------------------------
@@ -1195,7 +1258,8 @@ export async function refetchSessionMessages(sessionId: string): Promise<void> {
     directory: sessionDirectory,
     limit: MESSAGE_REFETCH_LIMIT,
   })
-  const records = (result.data ?? []).filter((record: { info?: { id?: string } }) => !!record?.info?.id)
+  const records = unwrapMessageRecords(result, "session.messages")
+    .filter((record: { info?: { id?: string } }) => !!record?.info?.id)
   if (records.length === 0) return
 
   store.setState((state) => {

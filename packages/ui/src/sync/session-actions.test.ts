@@ -1,14 +1,26 @@
 import { describe, expect, test, beforeEach, mock } from "bun:test"
 import type { PermissionRequest } from "@/types/permission"
 
-// Mock SDK client that records permission.reply / question.reply calls
+type MockSdkResult = {
+  data?: unknown
+  error?: unknown
+  response?: { status?: number }
+}
+
+// Mock SDK client that records permission / question reply calls
 const replyCalls: Array<{ method: string; params: Record<string, unknown> }> = []
+let permissionReplyResult: MockSdkResult = { data: true }
+let permissionRespondResult: MockSdkResult = { data: true }
 
 const mockScopedClient = {
   permission: {
     reply: mock((params: Record<string, unknown>) => {
       replyCalls.push({ method: "permission.reply", params })
-      return Promise.resolve({ data: true })
+      return Promise.resolve(permissionReplyResult)
+    }),
+    respond: mock((params: Record<string, unknown>) => {
+      replyCalls.push({ method: "permission.respond", params })
+      return Promise.resolve(permissionRespondResult)
     }),
   },
   question: {
@@ -27,7 +39,11 @@ const mockSdk = {
   permission: {
     reply: mock((params: Record<string, unknown>) => {
       replyCalls.push({ method: "permission.reply", params })
-      return Promise.resolve({ data: true })
+      return Promise.resolve(permissionReplyResult)
+    }),
+    respond: mock((params: Record<string, unknown>) => {
+      replyCalls.push({ method: "permission.respond", params })
+      return Promise.resolve(permissionRespondResult)
     }),
   },
   question: {
@@ -127,6 +143,8 @@ function createChildStores(entries: Array<[string, StoreApi<DirectoryStore>]>) {
 describe("respondToPermission passes directory", () => {
   beforeEach(() => {
     replyCalls.length = 0
+    permissionReplyResult = { data: true }
+    permissionRespondResult = { data: true }
   })
 
   test("passes directory from child store when permission is found", async () => {
@@ -148,8 +166,10 @@ describe("respondToPermission passes directory", () => {
     await respondToPermission("session-a", "perm-1", "once")
 
     expect(replyCalls.length).toBe(1)
-    expect(replyCalls[0].params.requestID).toBe("perm-1")
-    expect(replyCalls[0].params.reply).toBe("once")
+    expect(replyCalls[0].method).toBe("permission.respond")
+    expect(replyCalls[0].params.sessionID).toBe("session-a")
+    expect(replyCalls[0].params.permissionID).toBe("perm-1")
+    expect(replyCalls[0].params.response).toBe("once")
     expect(replyCalls[0].params.directory).toBe("/test/project")
   })
 
@@ -162,9 +182,38 @@ describe("respondToPermission passes directory", () => {
     await respondToPermission("session-b", "perm-2", "always")
 
     expect(replyCalls.length).toBe(1)
-    expect(replyCalls[0].params.requestID).toBe("perm-2")
-    expect(replyCalls[0].params.reply).toBe("always")
+    expect(replyCalls[0].method).toBe("permission.respond")
+    expect(replyCalls[0].params.sessionID).toBe("session-b")
+    expect(replyCalls[0].params.permissionID).toBe("perm-2")
+    expect(replyCalls[0].params.response).toBe("always")
     expect(replyCalls[0].params.directory).toBe("/other/project")
+  })
+
+  test("falls back to request-scoped reply when session-scoped route is missing", async () => {
+    permissionRespondResult = { error: { name: "NotFoundError" }, response: { status: 404 } }
+    const permission: PermissionRequest = {
+      id: "perm-4",
+      sessionID: "session-a",
+      permission: "bash",
+      patterns: [],
+      metadata: {},
+      always: [],
+    }
+
+    const store = createStore({ "session-a": [permission] })
+    const childStores = createChildStores([["/test/project", store]])
+
+    const { setActionRefs, respondToPermission } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/test/project")
+
+    await respondToPermission("session-a", "perm-4", "once")
+
+    expect(replyCalls.length).toBe(2)
+    expect(replyCalls[0].method).toBe("permission.respond")
+    expect(replyCalls[1].method).toBe("permission.reply")
+    expect(replyCalls[1].params.requestID).toBe("perm-4")
+    expect(replyCalls[1].params.reply).toBe("once")
+    expect(replyCalls[1].params.directory).toBe("/test/project")
   })
 
   test("fails instead of using current directory as last resort", async () => {
@@ -188,9 +237,11 @@ describe("respondToPermission passes directory", () => {
 describe("dismissPermission passes directory", () => {
   beforeEach(() => {
     replyCalls.length = 0
+    permissionReplyResult = { data: true }
+    permissionRespondResult = { data: true }
   })
 
-  test("passes directory and reply=reject", async () => {
+  test("passes directory and response=reject", async () => {
     const permission: PermissionRequest = {
       id: "perm-10",
       sessionID: "session-a",
@@ -209,8 +260,10 @@ describe("dismissPermission passes directory", () => {
     await dismissPermission("session-a", "perm-10")
 
     expect(replyCalls.length).toBe(1)
-    expect(replyCalls[0].params.requestID).toBe("perm-10")
-    expect(replyCalls[0].params.reply).toBe("reject")
+    expect(replyCalls[0].method).toBe("permission.respond")
+    expect(replyCalls[0].params.sessionID).toBe("session-a")
+    expect(replyCalls[0].params.permissionID).toBe("perm-10")
+    expect(replyCalls[0].params.response).toBe("reject")
     expect(replyCalls[0].params.directory).toBe("/test/project")
   })
 })
