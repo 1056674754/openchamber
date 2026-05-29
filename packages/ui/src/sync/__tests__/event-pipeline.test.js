@@ -48,9 +48,9 @@ class FakeWebSocket {
     this.onmessage?.({ data: JSON.stringify(payload) });
   }
 
-  emitClose() {
+  emitClose(event = {}) {
     this.readyState = 3;
-    this.onclose?.();
+    this.onclose?.(event);
   }
 }
 
@@ -758,6 +758,82 @@ describe('createEventPipeline', () => {
       expect(received.some((entry) => entry.payload.type === 'server.connected')).toBe(true);
     } finally {
       console.error = originalConsoleError;
+    }
+  });
+
+  it('falls back to SSE after an abnormal websocket close outside the quick-drop window', async () => {
+    installDomStubs();
+    globalThis.WebSocket = FakeWebSocket;
+    const originalDateNow = Date.now;
+    let now = 1_000_000;
+    Date.now = () => now;
+
+    let releaseStream;
+    const hold = new Promise((resolve) => {
+      releaseStream = resolve;
+    });
+
+    const received = [];
+    const eventOptions = [];
+    const sdk = {
+      global: {
+        event: async (options) => {
+          eventOptions.push(options);
+          return {
+            stream: (async function* () {
+              yield {
+                payload: {
+                  type: 'server.connected',
+                  properties: {},
+                },
+              };
+              await hold;
+            })(),
+          };
+        },
+      },
+    };
+
+    let cleanup;
+    const delivered = new Promise((resolve) => {
+      const pipeline = createEventPipeline({
+        sdk,
+        transport: 'auto',
+        reconnectDelayMs: 0,
+        wsReadyTimeoutMs: 20,
+        onEvent: (directory, payload) => {
+          received.push({ directory, payload });
+          resolve();
+        },
+      });
+      cleanup = pipeline.cleanup;
+    });
+
+    try {
+      await Promise.resolve();
+
+      const socket = FakeWebSocket.instances[0];
+      socket.emitOpen();
+      socket.emitMessage({ type: 'ready', scope: 'global' });
+      now += 5_000;
+      socket.emitClose({ code: 1006 });
+
+      await withTimeout(delivered, 500, 'timed out waiting for abnormal-close SSE fallback');
+
+      expect(eventOptions.length).toBe(1);
+      expect(received).toEqual([
+        {
+          directory: 'global',
+          payload: {
+            type: 'server.connected',
+            properties: {},
+          },
+        },
+      ]);
+    } finally {
+      cleanup?.();
+      releaseStream();
+      Date.now = originalDateNow;
     }
   });
 

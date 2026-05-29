@@ -694,7 +694,24 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     const sessionId = get().currentSessionId
     if (!sessionId) return null
 
-    const messages = getSyncMessages(sessionId)
+    const sessionServerId = serverRegistry.getServerForSession(sessionId)
+    const directory = get().getDirectoryForSession(sessionId) ?? undefined
+    const messages = (() => {
+      if (sessionServerId && sessionServerId !== DEFAULT_SERVER_ID) {
+        const remoteStores = getSyncStoresForServer(sessionServerId)
+        if (!remoteStores) return []
+        const directoryMessages = directory
+          ? remoteStores.children.get(directory)?.getState().message[sessionId]
+          : undefined
+        if (directoryMessages) return directoryMessages
+        for (const store of remoteStores.children.values()) {
+          const sessionMessages = store.getState().message[sessionId]
+          if (sessionMessages) return sessionMessages
+        }
+        return []
+      }
+      return getSyncMessages(sessionId, directory)
+    })()
     if (messages.length === 0) return null
 
     type AssistantTokens = { input: number; output: number; reasoning: number; cache: { read: number; write: number } }

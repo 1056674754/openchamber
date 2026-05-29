@@ -21,7 +21,7 @@ import {
 import { bootstrapGlobal, bootstrapDirectory } from "./bootstrap"
 import { retry } from "./retry"
 import { updateStreamingState } from "./streaming"
-import { setActionRefs, resolveSdkForDirectory } from "./session-actions"
+import { setActionRefs, resolveBaseUrl, resolveSdkForDirectory } from "./session-actions"
 import { setSyncRefs } from "./sync-refs"
 import { stripMessageDiffSnapshots, stripSessionDiffSnapshots } from "./sanitize"
 import { syncDebug } from "./debug"
@@ -35,6 +35,7 @@ import { usePermissionStore } from "@/stores/permissionStore"
 import { useConfigStore } from "@/stores/useConfigStore"
 import { useTodosPersistStore } from "@/stores/useTodosPersistStore"
 import { useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
+import { resolveApiUrl as resolveServerApiUrl } from "@/lib/api/serverUrl"
 import { toast } from "@/components/ui"
 import { appendNotification, fetchAndHydrateUnreadState } from "./notification-store"
 import type { State } from "./types"
@@ -43,6 +44,7 @@ import type { QuestionRequest } from "@/types/question"
 import * as sessionActions from "./session-actions"
 import { getSessionMaterializationStatus, materializeSessionSnapshots } from "./materialization"
 import { setSessionPrefetch } from "./session-prefetch-cache"
+import { listSessionsForBootstrap } from "./session-list-bootstrap"
 
 // ---------------------------------------------------------------------------
 // Context
@@ -65,60 +67,32 @@ const SyncContext = syncGlobal[SYNC_CONTEXT_GLOBAL_KEY] ?? createContext<SyncSys
 syncGlobal[SYNC_CONTEXT_GLOBAL_KEY] = SyncContext
 const emptyDirectoryStoreManager = new ChildStoreManager()
 const emptyDirectoryStore = emptyDirectoryStoreManager.ensureChild("__openchamber_empty__", { bootstrap: false })
-const REMOTE_SESSION_LIST_TIMEOUT_MS = 8_000
 const REMOTE_BOOTSTRAP_MAX_CONCURRENCY = 1
 const REMOTE_BOOTSTRAP_STAGGER_MS = 350
 const REMOTE_BOOTSTRAP_MAX_STAGGER_MS = 3_500
 
-async function listSessionsForBootstrap(
-  sdkClient: OpencodeClient,
-  serverId: string,
-  directory: string,
-): Promise<Session[]> {
-  const connection = serverId !== DEFAULT_SERVER_ID ? serverRegistry.get(serverId) : undefined
-  if (connection) {
-    const baseUrl = connection.config.baseUrl.replace(/\/+$/, "")
-    const params = new URLSearchParams({
-      directory,
-      roots: "true",
-      limit: "50",
-    })
-    const headers: Record<string, string> = { Accept: "application/json" }
-    if (connection.config.authToken) {
-      headers.Authorization = `Bearer ${connection.config.authToken}`
-    }
-    const response = await fetch(`${baseUrl}/session?${params.toString()}`, {
-      headers,
-      signal: AbortSignal.timeout(REMOTE_SESSION_LIST_TIMEOUT_MS),
-    })
-    if (!response.ok) {
-      const err = new Error(`session.list failed (${response.status})`)
-      ;(err as Error & { status?: number }).status = response.status
-      throw err
-    }
-    const data = await response.json()
-    return Array.isArray(data) ? (data.filter((item): item is Session => Boolean(item?.id)) as Session[]) : []
-  }
-
-  const result = await sdkClient.session.list({
-    directory,
-    roots: true,
-    limit: 50,
-  })
-  const rawError = (result as { error?: unknown }).error
-  if (rawError) {
-    const response = (result as { response?: { status?: number } }).response
-    const status = response?.status
+function unwrapSdkArrayResult<T>(
+  result: { data?: T[]; error?: unknown; response?: { status?: number } },
+  name: string,
+): T[] {
+  if (result.error) {
+    const status = result.response?.status
+    const rawError = result.error
     const message = typeof rawError === "object" && rawError !== null && "message" in rawError
       ? String((rawError as { message?: unknown }).message)
       : String(rawError)
-    const wrapped = new Error(`session.list failed${status ? ` (${status})` : ""}: ${message}`)
+    const wrapped = new Error(`${name} failed${status ? ` (${status})` : ""}: ${message}`)
     if (status !== undefined) {
       ;(wrapped as Error & { status?: number }).status = status
     }
     throw wrapped
   }
-  return (result.data ?? []).filter((item): item is Session => Boolean(item?.id))
+  if (result.data === undefined) {
+    const wrapped = new Error(`${name} returned no data`)
+    ;(wrapped as Error & { status?: number }).status = 503
+    throw wrapped
+  }
+  return result.data
 }
 
 export function useSyncSystem() {
@@ -279,7 +253,8 @@ async function materializeSessionFromServer(
   const result = await retry(() =>
     sdkClient.session.messages({ sessionID, directory, limit: SESSION_MATERIALIZATION_MESSAGE_LIMIT }),
   )
-  const records = (result.data ?? []).filter((record: { info?: { id?: string } }) => !!record?.info?.id)
+  const records = unwrapSdkArrayResult(result, "session.messages")
+    .filter((record: { info?: { id?: string } }) => !!record?.info?.id)
   if (records.length === 0) return
   const cursor = result.response?.headers?.get?.("x-next-cursor") ?? undefined
   setSessionPrefetch({
@@ -424,17 +399,19 @@ async function getSessionStatusForServer(
   if (!connection) return null
 
   try {
-    const base = connection.config.baseUrl.replace(/\/+$/, "")
-    const url = new URL(`${base}/session/status`)
+    const url = resolveServerApiUrl("/session/status", connection.config.baseUrl)
+    const params = new URLSearchParams()
     const trimmedDirectory = directory.trim()
     if (trimmedDirectory.length > 0) {
-      url.searchParams.set("directory", trimmedDirectory)
+      params.set("directory", trimmedDirectory)
     }
+    const query = params.toString()
+    const requestUrl = query.length > 0 ? `${url}?${query}` : url
     const headers: Record<string, string> = { Accept: "application/json" }
     if (connection.config.authToken) {
       headers.Authorization = `Bearer ${connection.config.authToken}`
     }
-    const response = await fetch(url.toString(), { headers })
+    const response = await fetch(requestUrl, { headers })
     if (!response.ok) return null
     const data = await response.json().catch(() => null)
     if (!data || typeof data !== "object") return null
@@ -531,6 +508,24 @@ const directoryBelongsToRemoteProject = (
     }
   }
   return false
+}
+
+const remoteStoreOwnsDirectory = (directory: string): boolean => {
+  if (!directory || directory === "global") return false
+  const normalizedDirectory = normalizeDirectoryForOwnership(directory)
+  return getAllSyncStores().some((entry) =>
+    entry.serverId !== DEFAULT_SERVER_ID && entry.childStores.children.has(normalizedDirectory)
+  )
+}
+
+const shouldDefaultProviderSkipDirectory = (
+  directory: string,
+  projects: ReadonlyArray<{ path: string; serverId?: string }>,
+): boolean => {
+  if (!directory || directory === "global") return false
+  return directoryBelongsToRemoteProject(directory, projects)
+    || remoteStoreOwnsDirectory(directory)
+    || resolveBaseUrl(directory) !== undefined
 }
 
 const getSessionIdFromPayload = (event: Event): string | null => {
@@ -777,6 +772,28 @@ const findSessionInChildStores = (
   return null
 }
 
+const storeHasSessionState = (
+  store: StoreApi<DirectoryStore>,
+  sessionID: string,
+): boolean => {
+  const state = store.getState()
+  return state.session.some((session) => session.id === sessionID)
+    || Object.prototype.hasOwnProperty.call(state.message, sessionID)
+    || Object.prototype.hasOwnProperty.call(state.session_status ?? {}, sessionID)
+}
+
+const findChildStoreForSession = (
+  childStores: ChildStoreManager,
+  sessionID: string,
+): StoreApi<DirectoryStore> | null => {
+  for (const store of childStores.children.values()) {
+    if (storeHasSessionState(store, sessionID)) {
+      return store
+    }
+  }
+  return null
+}
+
 const childStoreHasSessionState = (
   childStores: ChildStoreManager,
   directory: string,
@@ -784,10 +801,7 @@ const childStoreHasSessionState = (
 ): boolean => {
   const store = childStores.getChild(directory)
   if (!store) return false
-  const state = store.getState()
-  return state.session.some((session) => session.id === sessionID)
-    || Object.prototype.hasOwnProperty.call(state.message, sessionID)
-    || Object.prototype.hasOwnProperty.call(state.session_status ?? {}, sessionID)
+  return storeHasSessionState(store, sessionID)
 }
 
 const childStoreHasMessagePartState = (
@@ -1806,7 +1820,7 @@ export function SyncProvider(props: {
 
     childStores.configure({
       onBootstrap: (directory) => {
-        if (serverId === DEFAULT_SERVER_ID && directoryBelongsToRemoteProject(directory, projects)) {
+        if (serverId === DEFAULT_SERVER_ID && shouldDefaultProviderSkipDirectory(directory, projects)) {
           childStores.disposeDirectory(directory)
           return
         }
@@ -1872,7 +1886,7 @@ export function SyncProvider(props: {
     const { cleanup } = createEventPipeline({
       sdk: props.sdk,
       baseUrl: props.baseUrl,
-      transport: serverId === DEFAULT_SERVER_ID ? messageStreamTransport : "ws",
+      transport: messageStreamTransport,
       routeDirectory: (directory, payload) => {
         return resolveDirectoryFromRoutingIndex(routingIndex, directory, payload, childStores)
       },
@@ -1929,7 +1943,7 @@ export function SyncProvider(props: {
   useEffect(() => {
     if (props.directory) {
       if (serverId === DEFAULT_SERVER_ID) {
-        if (directoryBelongsToRemoteProject(props.directory, projects)) {
+        if (shouldDefaultProviderSkipDirectory(props.directory, projects)) {
           childStores.disposeDirectory(props.directory)
           return
         }
@@ -2135,17 +2149,19 @@ export function useDirectoryStore(directory?: string, serverId?: string, session
     const remoteStores = getSyncStoresForServer(serverId)
     if (remoteStores) {
       if (!directory && sessionID) {
-        for (const store of remoteStores.children.values()) {
-          if (store.getState().session.some((s: { id?: string }) => s.id === sessionID)) {
-            return store
-          }
-        }
+        const remoteStore = findChildStoreForSession(remoteStores, sessionID)
+        if (remoteStore) return remoteStore
       }
       if (!directory) {
         return emptyDirectoryStore
       }
       return remoteStores.ensureChild(directory)
     }
+  }
+
+  if (!directory && sessionID) {
+    const sessionStore = findChildStoreForSession(system.childStores, sessionID)
+    if (sessionStore) return sessionStore
   }
 
   return system.childStores.ensureChild(dir)
@@ -2419,27 +2435,113 @@ export function useSidebarSessions(directory?: string): Session[] {
 /** Get one session by id for a directory */
 export function useSession(sessionID?: string | null, directory?: string) {
   const { childStores } = useSyncSystem()
+  const serverId = useServerIdForSession(sessionID ?? undefined)
   const getSnapshot = useCallback(() => {
+    if (!sessionID) {
+      return undefined
+    }
+
+    if (serverId && serverId !== DEFAULT_SERVER_ID) {
+      const remoteStores = getSyncStoresForServer(serverId)
+      if (!remoteStores) {
+        return undefined
+      }
+      if (directory) {
+        return remoteStores.getChild(directory)?.getState().session.find((session) => session.id === sessionID)
+      }
+      for (const store of remoteStores.children.values()) {
+        const session = store.getState().session.find((candidate) => candidate.id === sessionID)
+        if (session) {
+          return session
+        }
+      }
+      return undefined
+    }
+
     if (directory) {
       return childStores.getChild(directory)?.getState().session.find((session) => session.id === sessionID)
     }
+
     return findLiveSession(getLiveStates(childStores), sessionID)
-  }, [childStores, directory, sessionID])
+  }, [childStores, directory, serverId, sessionID])
 
   const subscribe = useCallback((notify: () => void) => {
+    if (serverId && serverId !== DEFAULT_SERVER_ID) {
+      const remoteStores = getSyncStoresForServer(serverId)
+      if (!remoteStores) {
+        return () => undefined
+      }
+      if (directory) {
+        return remoteStores.ensureChild(directory).subscribe(notify)
+      }
+      return remoteStores.subscribeAll(notify)
+    }
+
     if (directory) {
       return childStores.ensureChild(directory).subscribe(notify)
     }
+
     return childStores.subscribeAll(notify)
-  }, [childStores, directory])
+  }, [childStores, directory, serverId])
 
   return React.useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
 }
 
+const readSessionDirectory = (session: Session | undefined): string | undefined => {
+  const record = session as (Session & {
+    directory?: string | null
+    project?: { worktree?: string | null } | null
+  }) | undefined
+  if (typeof record?.directory === "string" && record.directory.trim().length > 0) {
+    return normalizeEventDirectory(record.directory)
+  }
+  if (typeof record?.project?.worktree === "string" && record.project.worktree.trim().length > 0) {
+    return normalizeEventDirectory(record.project.worktree)
+  }
+  return undefined
+}
+
 /** Get one session directory by id for a directory */
 export function useSessionDirectory(sessionID?: string | null, directory?: string): string | undefined {
+  const { childStores } = useSyncSystem()
+  const serverId = useServerIdForSession(sessionID ?? undefined)
   const session = useSession(sessionID, directory)
-  return (session as (typeof session & { directory?: string | null }) | undefined)?.directory ?? undefined
+  const directDirectory = readSessionDirectory(session)
+  if (directDirectory) {
+    return directDirectory
+  }
+
+  if (!sessionID) {
+    return undefined
+  }
+
+  if (serverId && serverId !== DEFAULT_SERVER_ID) {
+    const remoteStores = getSyncStoresForServer(serverId)
+    if (!remoteStores) {
+      return undefined
+    }
+    if (directory) {
+      return normalizeEventDirectory(directory)
+    }
+    for (const [candidateDirectory, store] of remoteStores.children.entries()) {
+      if (store.getState().session.some((candidate) => candidate.id === sessionID)) {
+        return normalizeEventDirectory(candidateDirectory)
+      }
+    }
+    return undefined
+  }
+
+  if (directory) {
+    return normalizeEventDirectory(directory)
+  }
+
+  for (const [candidateDirectory, store] of childStores.children.entries()) {
+    if (store.getState().session.some((candidate) => candidate.id === sessionID)) {
+      return normalizeEventDirectory(candidateDirectory)
+    }
+  }
+
+  return undefined
 }
 
 /** Get the SDK client */

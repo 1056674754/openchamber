@@ -705,10 +705,13 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
           : "ws_closed_before_ready"
 
         // If the WS stream connects (ready) but then drops quickly, prefer SSE for a while.
-        // This avoids tight reconnect loops with repeated console spam.
+        // Abnormal closes get the same treatment; a proxy or remote host that
+        // keeps dropping WS should not leave the UI on a stale live-state path.
         const livedMs = readyAt > 0 ? Date.now() - readyAt : 0
         const unstableAfterReady = opened && livedMs > 0 && livedMs < 2_000
-        setFallbackCode(error, unstableAfterReady)
+        const closeCode = typeof event?.code === "number" ? event.code : undefined
+        const abnormalClose = opened && closeCode !== 1000 && closeCode !== 1001
+        setFallbackCode(error, unstableAfterReady || abnormalClose)
         settleReject(error)
       }
     })
