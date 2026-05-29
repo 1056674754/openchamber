@@ -111,6 +111,31 @@ const normalizeWebSocketPath = (pathValue: string): string => {
 const terminalApiUrl = (path: string, baseUrl?: string): string =>
   resolveApiUrl(path, baseUrl);
 
+export const isRemoteTerminalProxyBaseUrl = (baseUrl?: string): boolean => {
+  const candidate = typeof baseUrl === 'string' ? baseUrl.trim() : '';
+  if (!candidate) {
+    return false;
+  }
+
+  let pathname = candidate;
+  try {
+    pathname = new URL(candidate, 'http://openchamber.local').pathname;
+  } catch {
+    pathname = candidate;
+  }
+
+  const normalizedPathname = pathname.replace(/\/+$/, '');
+  return /(?:^|\/)api\/remote\/[^/]+$/.test(normalizedPathname);
+};
+
+const resetTerminalTransportCapabilities = (): void => {
+  const globalState = getTerminalTransportGlobalState();
+  globalState.manager?.close();
+  globalState.manager = null;
+  globalState.inputCapability = null;
+  globalState.streamCapability = null;
+};
+
 const encodeControlFrame = (payload: TerminalControlMessage): Uint8Array => {
   const jsonBytes = textEncoder.encode(JSON.stringify(payload));
   const bytes = new Uint8Array(jsonBytes.length + 1);
@@ -750,6 +775,13 @@ const ensureTerminalTransportManager = (): TerminalTransportManager => {
 };
 
 const applyTerminalTransportCapabilities = (capabilities: TerminalSession['capabilities'] | undefined, baseUrl?: string): void => {
+  if (isRemoteTerminalProxyBaseUrl(baseUrl)) {
+    // Remote proxy terminals use the stable HTTP/SSE fallback instead of
+    // tunneling the shared full-duplex WebSocket through another server.
+    resetTerminalTransportCapabilities();
+    return;
+  }
+
   const globalState = getTerminalTransportGlobalState();
   globalState.inputCapability = capabilities?.input ?? null;
   globalState.streamCapability = capabilities?.stream ?? null;
@@ -943,6 +975,11 @@ export function connectTerminalStream(
   options: ConnectStreamOptions = {},
   baseUrl?: string
 ): () => void {
+  if (isRemoteTerminalProxyBaseUrl(baseUrl)) {
+    resetTerminalTransportCapabilities();
+    return connectTerminalStreamViaSse(sessionId, onEvent, onError, options, baseUrl);
+  }
+
   const globalState = getTerminalTransportGlobalState();
   if (!isWsTransportSupported(globalState.streamCapability)) {
     return connectTerminalStreamViaSse(sessionId, onEvent, onError, options, baseUrl);
@@ -964,6 +1001,11 @@ export async function sendTerminalInput(
   data: string,
   baseUrl?: string
 ): Promise<void> {
+  if (isRemoteTerminalProxyBaseUrl(baseUrl)) {
+    await sendTerminalInputHttp(sessionId, data, baseUrl);
+    return;
+  }
+
   const globalState = getTerminalTransportGlobalState();
   if (globalState.manager && await globalState.manager.sendInput(sessionId, data)) {
     return;
@@ -1051,14 +1093,15 @@ export async function forceKillTerminal(options: {
 }
 
 export function disposeTerminalInputTransport(): void {
-  const globalState = getTerminalTransportGlobalState();
-  globalState.manager?.close();
-  globalState.manager = null;
-  globalState.inputCapability = null;
-  globalState.streamCapability = null;
+  resetTerminalTransportCapabilities();
 }
 
 export function primeTerminalInputTransport(baseUrl?: string): void {
+  if (isRemoteTerminalProxyBaseUrl(baseUrl)) {
+    resetTerminalTransportCapabilities();
+    return;
+  }
+
   const globalState = getTerminalTransportGlobalState();
   if (
     globalState.inputCapability &&

@@ -665,6 +665,7 @@ interface ConfigStore {
     getModelMetadata: (providerId: string, modelId: string) => ModelMetadata | undefined;
     // Returns only visible agents (excludes hidden internal agents like title, compaction, summary)
     getVisibleAgents: () => Agent[];
+    getAgentsForDirectory: (directory?: string | null, serverId?: string | null) => Agent[];
 }
 
 declare global {
@@ -2290,6 +2291,18 @@ export const useConfigStore = create<ConfigStore>()(
                 getVisibleAgents: () => {
                     const { agents } = get();
                     return filterVisibleAgents(agents);
+                },
+                getAgentsForDirectory: (directory, serverId) => {
+                    const state = get();
+                    if (!directory && !serverId) {
+                        return state.agents;
+                    }
+
+                    const directoryKey = toDirectoryKey(directory, serverId);
+                    if (state.activeDirectoryKey === directoryKey) {
+                        return state.agents;
+                    }
+                    return state.directoryScoped[directoryKey]?.agents ?? [];
                 },
             }),
             {

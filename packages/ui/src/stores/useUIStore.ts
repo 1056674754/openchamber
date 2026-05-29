@@ -152,6 +152,40 @@ const normalizeContextTargetPath = (value: string | null | undefined): string | 
   return trimmed.replace(/\\/g, '/');
 };
 
+const isAbsoluteContextTargetPath = (value: string): boolean => {
+  return value.startsWith('/') || /^[A-Za-z]:\//.test(value);
+};
+
+const toComparableContextPath = (value: string): string => {
+  return /^[A-Za-z]:\//.test(value) ? value.toLowerCase() : value;
+};
+
+const isContextTargetWithinDirectory = (targetPath: string, directory: string): boolean => {
+  const normalizedTargetPath = normalizeContextTargetPath(targetPath);
+  const normalizedDirectory = normalizeDirectoryPath(directory);
+  if (!normalizedTargetPath || !normalizedDirectory) {
+    return false;
+  }
+
+  const comparableTargetPath = toComparableContextPath(normalizedTargetPath);
+  const comparableDirectory = toComparableContextPath(normalizedDirectory);
+  return comparableTargetPath === comparableDirectory || comparableTargetPath.startsWith(`${comparableDirectory}/`);
+};
+
+const resolveContextDirectoryForFileTarget = (directory: string, targetPath: string): string => {
+  const normalizedDirectory = normalizeDirectoryPath(directory);
+  if (!isAbsoluteContextTargetPath(targetPath)) {
+    return normalizedDirectory;
+  }
+
+  if (isContextTargetWithinDirectory(targetPath, normalizedDirectory)) {
+    return normalizedDirectory;
+  }
+
+  const parent = normalizeDirectoryPath(targetPath.replace(/\/[^/]*$/, ''));
+  return parent || normalizedDirectory;
+};
+
 const normalizeContextTabLabel = (value: string | null | undefined): string | null => {
   if (typeof value !== 'string') {
     return null;
@@ -1014,8 +1048,10 @@ export const useUIStore = create<UIStore>()(
         },
 
         openContextFile: (directory, filePath) => {
-          const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
           const normalizedFilePath = normalizeContextTargetPath(filePath);
+          const normalizedDirectory = normalizedFilePath
+            ? resolveContextDirectoryForFileTarget((directory || '').trim(), normalizedFilePath)
+            : '';
           if (!normalizedDirectory || !normalizedFilePath) {
             return;
           }
@@ -1026,8 +1062,10 @@ export const useUIStore = create<UIStore>()(
         },
 
         openContextFileAtLine: (directory, filePath, line, column) => {
-          const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
           const normalizedFilePath = normalizeContextTargetPath(filePath);
+          const normalizedDirectory = normalizedFilePath
+            ? resolveContextDirectoryForFileTarget((directory || '').trim(), normalizedFilePath)
+            : '';
           const normalizedLine = Number.isFinite(line) ? Math.max(1, Math.trunc(line)) : 1;
           const normalizedColumn = Number.isFinite(column) ? Math.max(1, Math.trunc(column as number)) : 1;
           if (!normalizedDirectory || !normalizedFilePath) {
@@ -1102,8 +1140,9 @@ export const useUIStore = create<UIStore>()(
           const normalizedTabID = (tabID || '').trim();
           if (!normalizedDirectory || !normalizedTabID) return;
           set((state) => {
-            const current = state.contextPanelByDirectory[normalizedDirectory];
-            if (!current) return state;
+            const prev = state.contextPanelByDirectory[normalizedDirectory];
+            if (!prev) return state;
+            const current = touchContextPanelState(prev);
             return {
               contextPanelByDirectory: {
                 ...state.contextPanelByDirectory,
@@ -1284,11 +1323,14 @@ export const useUIStore = create<UIStore>()(
           set((state) => {
             const prev = state.contextPanelByDirectory[normalizedDirectory];
             const current = touchContextPanelState(prev);
+            const nextSplitTabId = typeof splitTabId === 'string' && current.tabs.some((tab) => tab.id === splitTabId)
+              ? splitTabId
+              : null;
             const byDirectory = {
               ...state.contextPanelByDirectory,
               [normalizedDirectory]: {
                 ...current,
-                splitTabId,
+                splitTabId: nextSplitTabId,
               },
             };
 
@@ -2011,7 +2053,7 @@ export const useUIStore = create<UIStore>()(
       {
         name: 'ui-store',
         storage: createJSONStorage(() => getSafeStorage()),
-        version: 9,
+        version: 10,
         migrate: (persistedState, version) => {
           if (!persistedState || typeof persistedState !== 'object') {
             return persistedState;
@@ -2068,6 +2110,8 @@ export const useUIStore = create<UIStore>()(
             state.rightSidebarTab = 'git';
           }
 
+          // v9 -> v10: re-sanitize context panel state after a bad tab array
+          // could be persisted with null entries and crash startup render.
           state.contextPanelByDirectory = sanitizeContextPanelByDirectory(state.contextPanelByDirectory);
 
           if (version < 5) {

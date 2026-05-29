@@ -60,6 +60,37 @@ export const isMissingGlobalSessionsEndpointError = (error: unknown): boolean =>
     return status === 404;
 };
 
+const unwrapGlobalSessionList = (
+    response: { data?: unknown; error?: unknown; response?: { status?: number } },
+): GlobalSessionRecord[] => {
+    if (response.error) {
+        const status = response.response?.status;
+        const rawError = response.error;
+        const message = typeof rawError === "object" && rawError !== null && "message" in rawError
+            ? String((rawError as { message?: unknown }).message)
+            : String(rawError);
+        const error = new Error(`global session list failed${status ? ` (${status})` : ""}: ${message}`);
+        if (status !== undefined) {
+            (error as Error & { status?: number }).status = status;
+        }
+        throw error;
+    }
+
+    if (response.data === undefined) {
+        const error = new Error("global session list returned no data");
+        (error as Error & { status?: number }).status = 503;
+        throw error;
+    }
+
+    if (!Array.isArray(response.data)) {
+        const error = new Error("global session list returned invalid data");
+        (error as Error & { status?: number }).status = 503;
+        throw error;
+    }
+
+    return response.data as GlobalSessionRecord[];
+};
+
 export async function listGlobalSessionPages(
     apiClient: OpencodeClient,
     options: {
@@ -83,7 +114,7 @@ export async function listGlobalSessionPages(
             { attempts: 3, delay: 500, retryIf: () => true },
         );
 
-        const payload = Array.isArray(response.data) ? (response.data as GlobalSessionRecord[]) : [];
+        const payload = unwrapGlobalSessionList(response);
         if (payload.length === 0) break;
 
         let appended = 0;

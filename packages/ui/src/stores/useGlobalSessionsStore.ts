@@ -117,12 +117,14 @@ const buildSessionsByDirectory = (sessions: Session[]): Map<string, Session[]> =
 };
 
 const getSessionSignature = (session: Session): string => {
+  const parentID = (session as Session & { parentID?: string | null }).parentID ?? '';
   return [
     session.id,
     session.title ?? '',
     session.time?.created ?? 0,
     session.time?.updated ?? 0,
     session.time?.archived ?? 0,
+    parentID,
     session.share?.url ?? '',
     resolveGlobalSessionDirectory(session) ?? '',
   ].join(':');
@@ -206,6 +208,14 @@ const mergeSessionLists = (existing: Session[], incoming?: Session[]): Session[]
   return ordered;
 };
 
+const indexDefaultServerSessions = (sessions: Session[]): void => {
+  for (const session of sessions) {
+    if (session.id) {
+      serverRegistry.indexSession(session.id, DEFAULT_SERVER_ID);
+    }
+  }
+};
+
 const applySnapshot = (
   state: GlobalSessionsState,
   activeSessions: Session[],
@@ -283,6 +293,13 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
         }
         if (archivedResult.status === 'rejected') {
           console.warn('[GlobalSessions] Failed to load archived sessions, preserving current snapshot:', archivedResult.reason);
+        }
+
+        if (activeResult.status === 'fulfilled') {
+          indexDefaultServerSessions(activeResult.value);
+        }
+        if (archivedResult.status === 'fulfilled') {
+          indexDefaultServerSessions(archivedResult.value);
         }
 
         set((state) => applySnapshot(state, nextActiveSessions, nextArchivedSessions, 'ready'));
