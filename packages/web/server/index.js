@@ -189,6 +189,12 @@ const isEnvFlagDisabled = (value) => {
   return normalized === '0' || normalized === 'false';
 };
 
+const resolveBoundedIntegerEnv = (value, fallback, min, max) => {
+  const parsed = Number.parseInt(String(value ?? '').trim(), 10);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(min, Math.min(max, parsed));
+};
+
 const shouldSkipApiCompression = () => {
   if (isEnvFlagEnabled(process.env.OPENCHAMBER_SKIP_API_COMPRESSION)) return true;
   if (isEnvFlagEnabled(process.env.OPENCHAMBER_COMPRESS_API)) return false;
@@ -197,6 +203,18 @@ const shouldSkipApiCompression = () => {
 };
 
 const OPENCHAMBER_VERBOSE_REQUEST_LOGS = isEnvFlagEnabled(process.env.OPENCHAMBER_VERBOSE_REQUEST_LOGS);
+const OPENCHAMBER_HTTP_LISTEN_BACKLOG = resolveBoundedIntegerEnv(
+  process.env.OPENCHAMBER_HTTP_LISTEN_BACKLOG,
+  2048,
+  128,
+  65535,
+);
+const OPENCHAMBER_HTTP_KEEP_ALIVE_TIMEOUT_MS = resolveBoundedIntegerEnv(
+  process.env.OPENCHAMBER_HTTP_KEEP_ALIVE_TIMEOUT_MS,
+  60_000,
+  5_000,
+  300_000,
+);
 
 const PLAN_MODE_EXPERIMENT_ENABLED =
   isEnvFlagEnabled(process.env.OPENCODE_EXPERIMENTAL_PLAN_MODE)
@@ -1217,6 +1235,8 @@ async function main(options = {}) {
   }));
   expressApp = app;
   server = http.createServer(app);
+  server.keepAliveTimeout = OPENCHAMBER_HTTP_KEEP_ALIVE_TIMEOUT_MS;
+  server.headersTimeout = Math.max(server.headersTimeout || 0, OPENCHAMBER_HTTP_KEEP_ALIVE_TIMEOUT_MS + 5_000);
 
   const uiPassword = typeof options.uiPassword === 'string' ? options.uiPassword : null;
   const bootstrapResult = bootstrapRuntime.setupBaseRoutes(app, {
@@ -1406,6 +1426,7 @@ async function main(options = {}) {
     tunnelRuntimeContext,
     attachSignals,
     remoteInstancesRuntime,
+    listenBacklog: OPENCHAMBER_HTTP_LISTEN_BACKLOG,
   });
   terminalRuntime = startupPipelineResult.terminalRuntime;
   messageStreamRuntime = startupPipelineResult.messageStreamRuntime;

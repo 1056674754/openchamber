@@ -281,8 +281,9 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
         ]);
 
         const fallbackSnapshot = mergeSessionLists(current.activeSessions, fallbackActive);
+        // Preserve live sessions on success — server list may lag behind newly created sessions.
         const nextActiveSessions = activeResult.status === 'fulfilled'
-          ? activeResult.value
+          ? mergeSessionLists(activeResult.value, fallbackActive)
           : fallbackSnapshot;
         const nextArchivedSessions = archivedResult.status === 'fulfilled'
           ? archivedResult.value

@@ -100,6 +100,7 @@ export {
 // Session UI state
 export {
   useSessionUIStore,
+  routeMessage,
   type SessionUIState,
   type AttachedFile,
   type NewSessionDraftState,

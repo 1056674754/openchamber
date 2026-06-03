@@ -1892,7 +1892,7 @@ const buildOpenProjectSpecs = ({ projectPath, appId, appName }) => {
     return [{ program: 'open', args: [projectPath] }];
   }
 
-  if (appId === 'terminal' || appId === 'iterm2' || appId === 'ghostty') {
+  if (appId === 'terminal' || appId === 'iterm2' || appId === 'ghostty' || appId === 'warp') {
     return [{ program: 'open', args: ['-a', appName, projectPath] }];
   }
 
@@ -1917,7 +1917,7 @@ const buildOpenFileSpecs = ({ filePath, appId, appName }) => {
   }
 
   const parentDir = path.dirname(filePath);
-  if (appId === 'terminal' || appId === 'iterm2' || appId === 'ghostty') {
+  if (appId === 'terminal' || appId === 'iterm2' || appId === 'ghostty' || appId === 'warp') {
     return [{ program: 'open', args: ['-a', appName, parentDir] }];
   }
 
@@ -2209,6 +2209,21 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
     end tell
   end tell
 end tell`;
+      } else if (appName.toLowerCase() === 'warp') {
+        // Warp has no AppleScript dictionary — use launch configuration + URL scheme
+        const lcName = `openchamber-ssh-${Date.now()}`;
+        const lcDir = path.join(os.homedir(), '.warp', 'launch_configurations');
+        const lcPath = path.join(lcDir, `${lcName}.yaml`);
+        const yamlContent = `---\nname: ${lcName}\nwindows:\n  - tabs:\n      - layout:\n          cwd: "$HOME"\n          commands:\n            - exec: ${sshLine}\n`;
+        fs.mkdirSync(lcDir, { recursive: true });
+        fs.writeFileSync(lcPath, yamlContent, 'utf8');
+        const openResult = spawnSync('open', [`warp://launch/${lcName}`], { stdio: 'ignore' });
+        // Clean up the launch config after Warp has had time to read it
+        setTimeout(() => { try { fs.unlinkSync(lcPath); } catch {} }, 5000);
+        if (openResult.error) {
+          throw new Error(`Failed to open Warp: ${openResult.error.message}`);
+        }
+        return null;
       } else {
         script = `tell application "${appName}"
   activate

@@ -1,3 +1,138 @@
+const GIT_READ_STATUS_CACHE_TTL_MS = 1_500;
+const GIT_READ_REPO_CHECK_CACHE_TTL_MS = 5_000;
+const GIT_READ_WORKTREE_TYPE_CACHE_TTL_MS = 60_000;
+
+const resolveBoundedIntegerEnv = (value, fallback, min, max) => {
+  const parsed = Number.parseInt(String(value ?? '').trim(), 10);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(min, Math.min(max, parsed));
+};
+
+const GIT_READ_CONCURRENCY = resolveBoundedIntegerEnv(
+  process.env.OPENCHAMBER_GIT_READ_CONCURRENCY,
+  4,
+  1,
+  32,
+);
+const GIT_READ_CACHE_MAX_ENTRIES = resolveBoundedIntegerEnv(
+  process.env.OPENCHAMBER_GIT_READ_CACHE_MAX_ENTRIES,
+  200,
+  20,
+  1000,
+);
+const GIT_READ_CACHE_MAX_BYTES = resolveBoundedIntegerEnv(
+  process.env.OPENCHAMBER_GIT_READ_CACHE_MAX_BYTES,
+  4 * 1024 * 1024,
+  256 * 1024,
+  64 * 1024 * 1024,
+);
+
+const createLimiter = (limit) => {
+  let active = 0;
+  const queue = [];
+
+  const drain = () => {
+    if (active >= limit) return;
+    const next = queue.shift();
+    if (!next) return;
+
+    active += 1;
+    Promise.resolve()
+      .then(next.task)
+      .then(next.resolve, next.reject)
+      .finally(() => {
+        active = Math.max(0, active - 1);
+        drain();
+      });
+  };
+
+  return (task) => new Promise((resolve, reject) => {
+    queue.push({ task, resolve, reject });
+    drain();
+  });
+};
+
+const gitReadLimiter = createLimiter(GIT_READ_CONCURRENCY);
+const gitReadCache = new Map();
+const gitReadInFlight = new Map();
+let gitReadCacheBytes = 0;
+let gitReadCacheGeneration = 0;
+
+const estimateCacheBytes = (value) => {
+  try {
+    return Buffer.byteLength(JSON.stringify(value), 'utf8');
+  } catch {
+    return 0;
+  }
+};
+
+const setGitReadCache = (key, value, ttlMs) => {
+  const bytes = estimateCacheBytes(value);
+  const existing = gitReadCache.get(key);
+  if (existing) {
+    gitReadCacheBytes -= existing.bytes;
+    gitReadCache.delete(key);
+  }
+
+  gitReadCache.set(key, {
+    value,
+    bytes,
+    expiresAt: Date.now() + ttlMs,
+  });
+  gitReadCacheBytes += bytes;
+
+  while (
+    gitReadCache.size > GIT_READ_CACHE_MAX_ENTRIES ||
+    (gitReadCacheBytes > GIT_READ_CACHE_MAX_BYTES && gitReadCache.size > 1)
+  ) {
+    const oldest = gitReadCache.entries().next().value;
+    if (!oldest) break;
+    gitReadCache.delete(oldest[0]);
+    gitReadCacheBytes -= oldest[1].bytes;
+  }
+};
+
+const clearGitReadCache = () => {
+  gitReadCacheGeneration += 1;
+  gitReadCache.clear();
+  gitReadInFlight.clear();
+  gitReadCacheBytes = 0;
+};
+
+const runCachedGitRead = async (key, ttlMs, task) => {
+  const now = Date.now();
+  const cached = gitReadCache.get(key);
+  if (cached && cached.expiresAt > now) {
+    gitReadCache.delete(key);
+    gitReadCache.set(key, cached);
+    return cached.value;
+  }
+  if (cached) {
+    gitReadCache.delete(key);
+    gitReadCacheBytes -= cached.bytes;
+  }
+
+  const inFlight = gitReadInFlight.get(key);
+  if (inFlight) return inFlight;
+
+  const generation = gitReadCacheGeneration;
+  const promise = gitReadLimiter(task)
+    .then((value) => {
+      if (generation === gitReadCacheGeneration) {
+        setGitReadCache(key, value, ttlMs);
+      }
+      return value;
+    })
+    .finally(() => {
+      if (gitReadInFlight.get(key) === promise) {
+        gitReadInFlight.delete(key);
+      }
+    });
+
+  gitReadInFlight.set(key, promise);
+  return promise;
+};
+
 export function registerGitRoutes(app) {
   let gitLibraries = null;
   const getGitLibraries = async () => {
@@ -6,6 +141,13 @@ export function registerGitRoutes(app) {
     }
     return gitLibraries;
   };
+
+  app.use('/api/git', (req, res, next) => {
+    if (req.method !== 'GET' && req.method !== 'HEAD') {
+      res.once('finish', clearGitReadCache);
+    }
+    next();
+  });
 
   app.get('/api/git/identities', async (req, res) => {
     const { getProfiles } = await getGitLibraries();
@@ -84,7 +226,11 @@ export function registerGitRoutes(app) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
 
-      const isRepo = await isGitRepository(directory);
+      const isRepo = await runCachedGitRead(
+        `check:${directory}`,
+        GIT_READ_REPO_CHECK_CACHE_TTL_MS,
+        () => isGitRepository(directory),
+      );
       res.json({ isGitRepository: isRepo });
     } catch (error) {
       console.error('Failed to check git repository:', error);
@@ -204,13 +350,19 @@ export function registerGitRoutes(app) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
 
-      const isRepo = await isGitRepository(directory);
-      if (!isRepo) {
-        return res.json({ isGitRepository: false, files: [], branch: null, ahead: 0, behind: 0 });
-      }
+      const mode = req.query.mode === 'light' ? 'light' : 'full';
+      const status = await runCachedGitRead(
+        `status:${mode}:${directory}`,
+        GIT_READ_STATUS_CACHE_TTL_MS,
+        async () => {
+          const isRepo = await isGitRepository(directory);
+          if (!isRepo) {
+            return { isGitRepository: false, files: [], branch: null, ahead: 0, behind: 0 };
+          }
 
-      const mode = req.query.mode === 'light' ? 'light' : undefined;
-      const status = await getStatus(directory, { mode });
+          return getStatus(directory, { mode: mode === 'light' ? 'light' : undefined });
+        },
+      );
       res.json(status);
     } catch (error) {
       const errorText = extractGitErrorText(error);
@@ -979,7 +1131,11 @@ export function registerGitRoutes(app) {
       if (!directory || typeof directory !== 'string') {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
-      const linked = await isLinkedWorktree(directory);
+      const linked = await runCachedGitRead(
+        `worktree-type:${directory}`,
+        GIT_READ_WORKTREE_TYPE_CACHE_TTL_MS,
+        () => isLinkedWorktree(directory),
+      );
       res.json({ linked });
     } catch (error) {
       console.error('Failed to determine worktree type:', error);

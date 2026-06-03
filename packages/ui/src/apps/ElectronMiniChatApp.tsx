@@ -27,8 +27,10 @@ import { listProjectWorktrees } from '@/lib/worktrees/worktreeManager';
 import { getProjectWorktreeKey } from '@/lib/worktrees/worktreeKeys';
 import { checkIsGitRepository, isLinkedWorktree } from '@/lib/gitApi';
 import type { WorktreeMetadata } from '@/types/worktree';
+import { mapWithConcurrency } from '@/lib/concurrency';
 
 const MINI_CHAT_PRESENCE_CHANNEL = 'openchamber:mini-chat-presence';
+const WORKTREE_DISCOVERY_CONCURRENCY = 3;
 
 type MiniChatMode = 'session' | 'draft';
 
@@ -212,7 +214,7 @@ const MiniChatBootstrap: React.FC<{ config: MiniChatConfig }> = ({ config }) => 
       const worktreesByProject = new Map<string, WorktreeMetadata[]>();
       const allWorktrees: WorktreeMetadata[] = [];
 
-      await Promise.all(projects.map(async (project) => {
+      await mapWithConcurrency(projects, WORKTREE_DISCOVERY_CONCURRENCY, async (project) => {
         const projectPath = project.path.replace(/\\/g, '/').replace(/\/+$/, '');
         if (!projectPath) return;
         try {
@@ -235,7 +237,7 @@ const MiniChatBootstrap: React.FC<{ config: MiniChatConfig }> = ({ config }) => 
         } catch {
           // Worktree discovery is best-effort; draft selector falls back to the project root.
         }
-      }));
+      });
 
       if (cancelled) return;
       useSessionUIStore.setState({

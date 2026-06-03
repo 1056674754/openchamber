@@ -107,7 +107,7 @@ export const OpenInAppButton = ({ directory, className }: OpenInAppButtonProps) 
   // For remote: only show terminal apps (Terminal, iTerm2, Ghostty)
   const availableApps = React.useMemo(() => {
     if (!isRemoteDirectory) return availableAppsRaw;
-    const terminalIds = new Set(['terminal', 'iterm2', 'ghostty']);
+    const terminalIds = new Set(['terminal', 'iterm2', 'ghostty', 'warp']);
     return availableAppsRaw.filter((app) => terminalIds.has(app.id));
   }, [isRemoteDirectory, availableAppsRaw]);
 

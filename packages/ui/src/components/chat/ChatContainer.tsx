@@ -784,7 +784,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
         return null;
     }
 
-	if (isSessionHydrating && sessionMessages.length === 0 && !sessionIsWorking) {
+	if (isSessionHydrating && sessionMessages.length === 0) {
 		return (
 			<div className="relative flex flex-col h-full bg-background">
 				{returnToParentButton}
@@ -840,7 +840,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
         );
     }
 
-	if (sessionMessages.length === 0 && !sessionIsWorking) {
+	if (sessionMessages.length === 0) {
 		return (
 			<div className="relative flex flex-col h-full bg-background transform-gpu">
 				{returnToParentButton}

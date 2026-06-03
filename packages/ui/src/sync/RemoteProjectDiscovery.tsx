@@ -3,7 +3,10 @@ import { getAllSyncStores, subscribeSyncStoresRegistry } from "./multi-server-re
 import { useProjectsStore } from "@/stores/useProjectsStore";
 import { serverRegistry, DEFAULT_SERVER_ID } from "@/lib/opencode/server-registry";
 import { setDirectoryServerId } from "./session-actions";
+import { useSessionUIStore } from "./session-ui-store";
 import { resolveApiUrl } from "@/lib/api/serverUrl";
+import { getProjectWorktreeKey, getWorktreesForProject } from "@/lib/worktrees/worktreeKeys";
+import type { WorktreeMetadata } from "@/types/worktree";
 
 const AVAILABLE_PROJECT_PROBE_TTL_MS = 30_000;
 const UNAVAILABLE_PROJECT_RETRY_MS = 5_000;
@@ -236,30 +239,65 @@ async function discoverWorktreeDirectories(
     const result = await client.project.list();
     const data = (result as { data?: unknown[] }).data;
     if (!Array.isArray(data)) return;
+
     const toRegister: Array<{ path: string; serverId: string }> = [];
+    const worktreesByProject = new Map<string, WorktreeMetadata[]>();
+    const currentByProject = useSessionUIStore.getState().availableWorktreesByProject;
+
     for (const p of data) {
       if (typeof p !== "object" || p === null) continue;
       if ((p as { id?: string }).id === "global") continue;
-      // Check BOTH worktree (main path) and sandboxes (worktree paths)
-      const dirs = [
-        (p as { worktree?: string }).worktree,
-        ...((p as { sandboxes?: string[] }).sandboxes ?? []),
-      ].filter((directory): directory is string => Boolean(directory) && !shouldSkipRemoteProjectPath(directory as string));
-      for (const d of dirs) {
-        if (knownPaths.has(d)) continue;
-        // [OPENCHAMBER-FORK] Cache immediately — resolveSdkForDirectory may be called
-        // before the deferred ensureRemoteProject registers this as a project
-        setDirectoryServerId(d, serverId);
-        toRegister.push({ path: d, serverId });
-        knownPaths.add(d);
+
+      const mainWorktree = (p as { worktree?: string }).worktree;
+      const sandboxes = ((p as { sandboxes?: string[] }).sandboxes ?? [])
+        .filter((d): d is string => Boolean(d) && !shouldSkipRemoteProjectPath(d));
+
+      // Register main project path (parent) as a project — existing behaviour.
+      if (mainWorktree && !shouldSkipRemoteProjectPath(mainWorktree) && !knownPaths.has(mainWorktree)) {
+        setDirectoryServerId(mainWorktree, serverId);
+        toRegister.push({ path: mainWorktree, serverId });
+        knownPaths.add(mainWorktree);
+      }
+
+      // Populate worktree metadata directly for sandbox paths — do NOT register
+      // them as independent projects. This eliminates the flash where worktrees
+      // temporarily appear as top-level folders before discoverWorktrees completes.
+      for (const sandboxPath of sandboxes) {
+        if (knownPaths.has(sandboxPath)) continue;
+        setDirectoryServerId(sandboxPath, serverId);
+        knownPaths.add(sandboxPath);
+
+        const key = mainWorktree
+          ? getProjectWorktreeKey(mainWorktree, serverId)
+          : getProjectWorktreeKey(sandboxPath, serverId);
+        const existingWT = getWorktreesForProject(currentByProject, mainWorktree ?? sandboxPath, serverId);
+        const wtMeta: WorktreeMetadata = {
+          path: sandboxPath,
+          projectDirectory: mainWorktree ?? sandboxPath,
+          serverId,
+          branch: '',
+          label: sandboxPath.split('/').pop() || sandboxPath,
+        };
+        worktreesByProject.set(key, [...existingWT, wtMeta]);
       }
     }
+
     // Mark probed only on SUCCESS — failure must retry
     probedServers.current?.add(serverId);
-    // Defer project registration to avoid triggering
-    // useGitRepoStatusMap / useSyncExternalStore snapshot instability in SessionSidebar
+
+    // Register main-project entries deferred (existing behaviour).
     for (const entry of toRegister) {
       setTimeout(() => { ensureRemoteProject(entry.path, entry.serverId); }, 0);
+    }
+
+    // Write worktree metadata directly to the store so sidebar grouping uses it
+    // immediately — no waiting for the separate discoverWorktrees effect.
+    if (worktreesByProject.size > 0) {
+      const merged = new Map(currentByProject);
+      for (const [key, wts] of worktreesByProject) {
+        merged.set(key, wts);
+      }
+      useSessionUIStore.setState({ availableWorktreesByProject: merged });
     }
   } catch {
     // Transient — retry on next discover cycle

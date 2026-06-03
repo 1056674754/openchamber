@@ -80,6 +80,7 @@ import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
 import { subscribeOpenchamberEvents } from '@/lib/openchamberEvents';
 import { DEFAULT_SERVER_ID, serverRegistry } from '@/lib/opencode/server-registry';
 import { getProjectWorktreeKey, getWorktreesForProject } from '@/lib/worktrees/worktreeKeys';
+import { mapWithConcurrency } from '@/lib/concurrency';
 
 const PROJECT_COLLAPSE_STORAGE_KEY = 'oc.sessions.projectCollapse';
 const GROUP_ORDER_STORAGE_KEY = 'oc.sessions.groupOrder';
@@ -93,6 +94,7 @@ const SESSION_PINNED_STORAGE_KEY = 'oc.sessions.pinned';
 const SESSION_PINNED_PER_PROJECT_STORAGE_KEY = 'oc.sessions.pinnedByProject';
 const SESSION_PINNED_ORDER_STORAGE_KEY = 'oc.sessions.pinnedOrder';
 const SESSION_PINNED_ORDER_BY_PROJECT_STORAGE_KEY = 'oc.sessions.pinnedOrderByProject';
+const WORKTREE_DISCOVERY_CONCURRENCY = 3;
 
 type PrVisualState = 'draft' | 'open' | 'blocked' | 'merged' | 'closed';
 
@@ -620,8 +622,10 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
       const worktreesByProject = new Map<string, WorktreeMetadata[]>();
       const allWorktrees: WorktreeMetadata[] = [];
 
-      await Promise.all(
-        projectEntries.map(async (project) => {
+      await mapWithConcurrency(
+        projectEntries,
+        WORKTREE_DISCOVERY_CONCURRENCY,
+        async (project) => {
           const projectPath = normalizePath(project.path);
           if (!projectPath) return;
           try {
@@ -648,7 +652,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
           } catch {
             // ignore discovery errors
           }
-        }),
+        },
       );
 
       if (cancelled) return;

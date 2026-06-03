@@ -52,6 +52,7 @@ export const createStartupPipelineRuntime = (dependencies) => {
       tunnelRuntimeContext,
       attachSignals,
       remoteInstancesRuntime,
+      listenBacklog,
     } = options;
 
     const terminalRuntime = createTerminalRuntime({
@@ -115,6 +116,7 @@ export const createStartupPipelineRuntime = (dependencies) => {
       bindHost,
       startupTunnelRequest,
       onTunnelReady,
+      listenBacklog,
     });
     tunnelRuntimeContext.setActivePort(startupResult.activePort);
 

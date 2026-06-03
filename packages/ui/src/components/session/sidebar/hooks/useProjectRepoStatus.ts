@@ -20,6 +20,8 @@ type Args = {
   setProjectRootBranches: React.Dispatch<React.SetStateAction<Map<string, string>>>;
 };
 
+const PROJECT_STATUS_PROBE_CONCURRENCY = 3;
+
 const projectRepoStatusEqual = (
   left: Map<string, boolean | null>,
   right: Map<string, boolean | null>,
@@ -115,10 +117,17 @@ export const useProjectRepoStatus = (args: Args): void => {
       return;
     }
 
-    // Trigger ensureStatus for each project to populate store
-    probeProjects.forEach((project) => {
-      void ensureStatus(project.normalizedPath, git);
+    let cancelled = false;
+    void mapWithConcurrency(probeProjects, PROJECT_STATUS_PROBE_CONCURRENCY, async (project) => {
+      if (cancelled) return;
+      await ensureStatus(project.normalizedPath, git).catch(() => undefined);
+    }).catch(() => {
+      // Individual status fetches update the store with their own failure state.
     });
+
+    return () => {
+      cancelled = true;
+    };
   }, [normalizedProjects.length, probeProjects, git, ensureStatus, setProjectRepoStatus]);
 
   // Read isGitRepo from the store-populated state

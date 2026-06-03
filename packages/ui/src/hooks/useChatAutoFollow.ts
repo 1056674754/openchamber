@@ -196,6 +196,11 @@ export const useChatAutoFollow = ({
         const current = container.scrollTop;
         const delta = target - current;
 
+        if (delta < -SETTLE_EPSILON) {
+            stopFollowLoop();
+            return;
+        }
+
         if (Math.abs(delta) <= SETTLE_EPSILON) {
             if (current !== target) {
                 markProgrammaticWrite();
@@ -238,6 +243,20 @@ export const useChatAutoFollow = ({
         lastScrollTopRef.current = container.scrollTop;
     }, [markProgrammaticWrite]);
 
+    const stickToBottomIfFollowing = React.useCallback(() => {
+        const container = scrollRef.current;
+        if (!container || stateRef.current !== 'following') {
+            return;
+        }
+
+        const target = Math.max(0, container.scrollHeight - container.clientHeight);
+        if (target <= container.scrollTop + SETTLE_EPSILON) {
+            return;
+        }
+
+        writeScrollTopInstant(target);
+    }, [writeScrollTopInstant]);
+
     const stopSettleBurst = React.useCallback(() => {
         if (settleBurstRafRef.current !== null && typeof window !== 'undefined') {
             window.cancelAnimationFrame(settleBurstRafRef.current);
@@ -255,7 +274,7 @@ export const useChatAutoFollow = ({
             const c = scrollRef.current;
             if (!c) return;
             const target = Math.max(0, c.scrollHeight - c.clientHeight);
-            if (Math.abs(c.scrollTop - target) > SETTLE_EPSILON) {
+            if (target > c.scrollTop + SETTLE_EPSILON) {
                 markProgrammaticWrite();
                 c.scrollTop = target;
                 lastScrollTopRef.current = target;
@@ -406,9 +425,10 @@ export const useChatAutoFollow = ({
 
     React.useEffect(() => {
         if (sessionIsWorking && stateRef.current === 'following') {
-            startFollowLoop();
+            stickToBottomIfFollowing();
+            startSettleBurst();
         }
-    }, [sessionIsWorking, startFollowLoop]);
+    }, [sessionIsWorking, startSettleBurst, stickToBottomIfFollowing]);
 
     // Replay a deferred restoreSnapshot once ChatViewport mounts.
     React.useEffect(() => {
@@ -553,7 +573,8 @@ export const useChatAutoFollow = ({
         const observer = new ResizeObserver(() => {
             updateOverflowAndButton();
             if (stateRef.current === 'following') {
-                startFollowLoop();
+                stickToBottomIfFollowing();
+                startSettleBurst();
             }
         });
         observer.observe(container);
@@ -562,7 +583,7 @@ export const useChatAutoFollow = ({
             observer.observe(inner);
         }
         return () => observer.disconnect();
-    }, [containerEl, startFollowLoop, updateOverflowAndButton]);
+    }, [containerEl, startSettleBurst, stickToBottomIfFollowing, updateOverflowAndButton]);
 
     React.useEffect(() => {
         updateOverflowAndButton();
@@ -572,9 +593,10 @@ export const useChatAutoFollow = ({
         void _reason;
         updateOverflowAndButton();
         if (stateRef.current === 'following') {
-            startFollowLoop();
+            stickToBottomIfFollowing();
+            startSettleBurst();
         }
-    }, [startFollowLoop, updateOverflowAndButton]);
+    }, [startSettleBurst, stickToBottomIfFollowing, updateOverflowAndButton]);
 
     const animationHandlersRef = React.useRef<Map<string, AnimationHandlers>>(new Map());
 
@@ -584,7 +606,8 @@ export const useChatAutoFollow = ({
 
         const kick = () => {
             if (stateRef.current === 'following') {
-                startFollowLoop();
+                stickToBottomIfFollowing();
+                startSettleBurst();
             }
         };
 
@@ -601,7 +624,7 @@ export const useChatAutoFollow = ({
         };
         animationHandlersRef.current.set(messageId, handlers);
         return handlers;
-    }, [startFollowLoop, updateOverflowAndButton]);
+    }, [startSettleBurst, stickToBottomIfFollowing, updateOverflowAndButton]);
 
     React.useEffect(() => {
         return () => {

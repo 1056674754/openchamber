@@ -64,6 +64,11 @@ OPENCODE_HOST=https://myhost:4096 OPENCODE_SKIP_START=true openchamber
 | `OPENCHAMBER_VERBOSE_REQUEST_LOGS` | Set to `true` to log every HTTP request; disabled by default to keep user logs small |
 | `OPENCHAMBER_SKIP_API_COMPRESSION` | Set to `true` to disable gzip compression for `/api/*` responses |
 | `OPENCHAMBER_COMPRESS_API` | Set to `true` to force `/api/*` compression, or `false` to disable it. Desktop runtime disables API compression by default to reduce local sidecar CPU use |
+| `OPENCHAMBER_HTTP_LISTEN_BACKLOG` | Pending TCP accept queue for the OpenChamber web server (default: `2048`) |
+| `OPENCHAMBER_HTTP_KEEP_ALIVE_TIMEOUT_MS` | HTTP keep-alive timeout for the OpenChamber web server (default: `60000`) |
+| `OPENCHAMBER_GIT_READ_CONCURRENCY` | Maximum concurrent read-only Git route operations such as status and worktree checks (default: `4`) |
+| `OPENCHAMBER_GIT_READ_CACHE_MAX_ENTRIES` | Maximum entries in the short-lived read-only Git route cache (default: `200`) |
+| `OPENCHAMBER_GIT_READ_CACHE_MAX_BYTES` | Approximate byte cap for the short-lived read-only Git route cache (default: `4194304`) |
 
 </details>
 

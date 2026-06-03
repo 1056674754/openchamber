@@ -1,5 +1,8 @@
 import { createOpencodeClient, type OpencodeClient } from "@opencode-ai/sdk/v2";
 
+const DEFAULT_HEALTH_PROBE_TTL_MS = 5_000;
+const DEFAULT_HEALTH_PROBE_TIMEOUT_MS = 8_000;
+
 export interface ServerConfig {
   id: string;
   label: string;
@@ -17,6 +20,11 @@ export interface ServerConnection {
   lastHealthCheckAt: number | null;
 }
 
+type ProbeHealthOptions = {
+  force?: boolean;
+  timeoutMs?: number;
+};
+
 export const DEFAULT_SERVER_ID = "default";
 
 export class ServerRegistry {
@@ -24,6 +32,8 @@ export class ServerRegistry {
   private sessionServerIndex: Map<string, string> = new Map();
   private healthPollTimer: ReturnType<typeof setInterval> | null = null;
   private healthListeners: Map<string, Set<(status: ServerConnection["healthStatus"]) => void>> = new Map();
+  private healthProbeInFlight: Map<string, Promise<boolean>> = new Map();
+  private lastHealthProbeAt: Map<string, number> = new Map();
 
   register(config: ServerConfig): ServerConnection {
     const existing = this.connections.get(config.id);
@@ -54,7 +64,13 @@ export class ServerRegistry {
 
   unregister(serverId: string): boolean {
     if (serverId === DEFAULT_SERVER_ID) return false;
-    return this.connections.delete(serverId);
+    const deleted = this.connections.delete(serverId);
+    if (deleted) {
+      this.healthProbeInFlight.delete(serverId);
+      this.lastHealthProbeAt.delete(serverId);
+      this.healthListeners.delete(serverId);
+    }
+    return deleted;
   }
 
   get(serverId: string): ServerConnection | undefined {
@@ -104,12 +120,31 @@ export class ServerRegistry {
     this.sessionServerIndex.delete(sessionId);
   }
 
-  async probeHealth(serverId: string): Promise<boolean> {
+  async probeHealth(serverId: string, options: ProbeHealthOptions = {}): Promise<boolean> {
     const connection = this.connections.get(serverId);
     if (!connection) return false;
 
+    const inFlight = this.healthProbeInFlight.get(serverId);
+    if (inFlight) return inFlight;
+
+    const lastProbeAt = this.lastHealthProbeAt.get(serverId) ?? 0;
+    if (!options.force && lastProbeAt > 0 && Date.now() - lastProbeAt < DEFAULT_HEALTH_PROBE_TTL_MS) {
+      return connection.healthStatus === "healthy";
+    }
+
+    const probe = this.runHealthProbe(connection, options).finally(() => {
+      this.healthProbeInFlight.delete(serverId);
+    });
+    this.healthProbeInFlight.set(serverId, probe);
+    return probe;
+  }
+
+  private async runHealthProbe(connection: ServerConnection, options: ProbeHealthOptions): Promise<boolean> {
+    const serverId = connection.config.id;
+    this.lastHealthProbeAt.set(serverId, Date.now());
+
     if (connection.healthStatus !== "healthy") {
-      this.setHealthStatus(serverId, "connecting");
+      this.setHealthStatus(connection.config.id, "connecting");
     }
 
     try {
@@ -128,9 +163,22 @@ export class ServerRegistry {
         headers["Authorization"] = `Bearer ${connection.config.authToken}`;
       }
 
-      const response = await fetch(healthUrl, {
-        method: connection.config.healthMethod ?? "GET",
+      const method = connection.config.healthMethod ?? "GET";
+      const timeoutMs = Number.isFinite(options.timeoutMs)
+        ? Math.max(1_000, Math.round(options.timeoutMs ?? DEFAULT_HEALTH_PROBE_TIMEOUT_MS))
+        : DEFAULT_HEALTH_PROBE_TIMEOUT_MS;
+      const requestInit: RequestInit = {
+        method,
         headers,
+        signal: AbortSignal.timeout(timeoutMs),
+      };
+      if (method === "POST") {
+        headers["Content-Type"] = "application/json";
+        requestInit.body = JSON.stringify({ timeoutSec: Math.max(1, Math.ceil(timeoutMs / 1000)) });
+      }
+
+      const response = await fetch(healthUrl, {
+        ...requestInit,
       });
       if (!response.ok) {
         this.setHealthStatus(serverId, "unhealthy");
@@ -185,7 +233,7 @@ export class ServerRegistry {
     const poll = () => {
       const ids = Array.from(this.connections.keys());
       for (const id of ids) {
-        void this.probeHealth(id);
+        void this.probeHealth(id, { force: true });
       }
     };
     poll();

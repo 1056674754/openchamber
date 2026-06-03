@@ -247,7 +247,7 @@ export const useSessionActions = (args: Args) => {
         return;
       }
 
-      const ids = [session.id, ...descendantIds];
+      const ids = [...descendantIds, session.id];
       if (shouldHardDelete) {
         const { deletedIds, failedIds } = await args.deleteSessions(ids);
         if (deletedIds.length > 0) {

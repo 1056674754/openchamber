@@ -64,11 +64,14 @@ const resolveServerBaseForDirectory = (directory: string | null | undefined): st
 const API_BASE = '/api/git';
 const GIT_STATUS_CACHE_TTL_MS = 1200;
 const GIT_REPO_CHECK_CACHE_TTL_MS = 5000;
+const GIT_WORKTREE_TYPE_CACHE_TTL_MS = 60_000;
 
 const gitStatusCache = new Map<string, { value: GitStatus; expiresAt: number }>();
 const gitStatusInFlight = new Map<string, Promise<GitStatus>>();
 const gitRepoCache = new Map<string, { value: boolean; expiresAt: number }>();
 const gitRepoInFlight = new Map<string, Promise<boolean>>();
+const gitWorktreeTypeCache = new Map<string, { value: boolean; expiresAt: number }>();
+const gitWorktreeTypeInFlight = new Map<string, Promise<boolean>>();
 
 const normalizeDirectoryKey = (directory: string): string => directory.trim();
 
@@ -95,7 +98,8 @@ function buildUrl(
 }
 
 export async function checkIsGitRepository(directory: string, baseUrl?: string): Promise<boolean> {
-  const key = baseUrl ? `${normalizeDirectoryKey(directory)}::${baseUrl}` : normalizeDirectoryKey(directory);
+  const resolvedBaseUrl = baseUrl || resolveServerBaseForDirectory(directory);
+  const key = resolvedBaseUrl ? `${normalizeDirectoryKey(directory)}::${resolvedBaseUrl}` : normalizeDirectoryKey(directory);
   const now = Date.now();
   const cached = gitRepoCache.get(key);
   if (cached && cached.expiresAt > now) {
@@ -108,7 +112,7 @@ export async function checkIsGitRepository(directory: string, baseUrl?: string):
   }
 
   const task = (async () => {
-    const response = await fetch(buildUrl(`${API_BASE}/check`, directory, undefined, baseUrl));
+    const response = await fetch(buildUrl(`${API_BASE}/check`, directory, undefined, resolvedBaseUrl));
     if (!response.ok) {
       throw new Error(`Failed to check git repository: ${response.statusText}`);
     }
@@ -133,7 +137,8 @@ export async function checkIsGitRepository(directory: string, baseUrl?: string):
 
 export async function getGitStatus(directory: string, options?: { mode?: 'light' }, baseUrl?: string): Promise<GitStatus> {
   const mode = options?.mode;
-  const baseKey = baseUrl ? `${normalizeDirectoryKey(directory)}::${baseUrl}` : normalizeDirectoryKey(directory);
+  const resolvedBaseUrl = baseUrl || resolveServerBaseForDirectory(directory);
+  const baseKey = resolvedBaseUrl ? `${normalizeDirectoryKey(directory)}::${resolvedBaseUrl}` : normalizeDirectoryKey(directory);
   const key = mode === 'light' ? `${baseKey}::light` : baseKey;
   const now = Date.now();
   const cached = gitStatusCache.get(key);
@@ -147,7 +152,7 @@ export async function getGitStatus(directory: string, options?: { mode?: 'light'
   }
 
   const task = (async () => {
-    const response = await fetch(buildUrl(`${API_BASE}/status`, directory, mode ? { mode } : undefined, baseUrl));
+    const response = await fetch(buildUrl(`${API_BASE}/status`, directory, mode ? { mode } : undefined, resolvedBaseUrl));
     if (!response.ok) {
       throw new Error(`Failed to get git status: ${response.statusText}`);
     }
@@ -277,12 +282,41 @@ export async function isLinkedWorktree(directory: string): Promise<boolean> {
   if (!directory) {
     return false;
   }
-  const response = await fetch(buildUrl(`${API_BASE}/worktree-type`, directory));
-  if (!response.ok) {
-    throw new Error(`Failed to detect worktree type: ${response.statusText}`);
+  const baseUrl = resolveServerBaseForDirectory(directory);
+  const key = baseUrl ? `${normalizeDirectoryKey(directory)}::${baseUrl}` : normalizeDirectoryKey(directory);
+  const now = Date.now();
+  const cached = gitWorktreeTypeCache.get(key);
+  if (cached && cached.expiresAt > now) {
+    return cached.value;
   }
-  const data = await response.json();
-  return Boolean(data.linked);
+
+  const inFlight = gitWorktreeTypeInFlight.get(key);
+  if (inFlight) {
+    return inFlight;
+  }
+
+  const task = (async () => {
+    const response = await fetch(buildUrl(`${API_BASE}/worktree-type`, directory, undefined, baseUrl));
+    if (!response.ok) {
+      throw new Error(`Failed to detect worktree type: ${response.statusText}`);
+    }
+    const data = await response.json();
+    const linked = Boolean(data.linked);
+    gitWorktreeTypeCache.set(key, {
+      value: linked,
+      expiresAt: Date.now() + GIT_WORKTREE_TYPE_CACHE_TTL_MS,
+    });
+    return linked;
+  })();
+
+  gitWorktreeTypeInFlight.set(key, task);
+  try {
+    return await task;
+  } finally {
+    if (gitWorktreeTypeInFlight.get(key) === task) {
+      gitWorktreeTypeInFlight.delete(key);
+    }
+  }
 }
 
 export async function getGitBranches(directory: string, baseUrl?: string): Promise<GitBranch> {

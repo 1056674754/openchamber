@@ -27,6 +27,7 @@ export const createServerStartupRuntime = (dependencies) => {
     bindHost,
     startupTunnelRequest,
     onTunnelReady,
+    listenBacklog,
   }) => {
     let activePort = port;
 
@@ -120,7 +121,11 @@ export const createServerStartupRuntime = (dependencies) => {
         }
       };
 
-      server.listen(port, bindHost, onListening);
+      if (Number.isFinite(listenBacklog) && listenBacklog > 0) {
+        server.listen(port, bindHost, listenBacklog, onListening);
+      } else {
+        server.listen(port, bindHost, onListening);
+      }
     });
 
     return { activePort };

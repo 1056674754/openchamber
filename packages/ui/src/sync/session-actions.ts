@@ -1227,7 +1227,7 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
       const updated = [...current.session]
       const idx = updated.findIndex((s) => s.id === sessionId)
       if (idx >= 0) {
-        updated[idx] = result.data
+        updated[idx] = { ...result.data, revert: { messageID: messageId } } as Session
         store.setState({ session: updated })
       }
     }

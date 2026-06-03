@@ -158,7 +158,7 @@ export const useSessionGrouping = (args: Args) => {
         const parentID = (session as Session & { parentID?: string | null }).parentID;
         if (!parentID) return true;
         const parentSession = sessionMap.get(parentID);
-        if (!parentSession) return true;
+        if (!parentSession) return false;
         if (isArchivedSession(parentSession)) return false;
         return isArchivedSession(parentSession) !== isArchivedSession(session);
       });

@@ -28,6 +28,7 @@ import { syncDebug } from "./debug"
 import { getReconnectCandidateSessionIds } from "./reconnect-recovery"
 import { STUCK_SESSION_TIMEOUT_MS } from "@/stores/types/sessionTypes"
 import { opencodeClient } from "@/lib/opencode/client"
+import { recoverPendingMessages } from "./pending-message"
 import { DEFAULT_SERVER_ID, serverRegistry } from "@/lib/opencode/server-registry"
 import { registerSyncStores, getSyncStoresForServer, getAllSyncStores } from "./multi-server-registry"
 import { useProjectsStore } from "@/stores/useProjectsStore"
@@ -1631,6 +1632,7 @@ export function SyncProvider(props: {
   if (!childStoresRef.current) childStoresRef.current = new ChildStoreManager()
   const childStores = childStoresRef.current
   const emptyRemoteSessionRetryDirsRef = useRef(new Set<string>())
+  const pendingMessagesRecoveredRef = useRef(false)
   const routingIndexRef = useRef<EventRoutingIndex | null>(null)
   if (!routingIndexRef.current) routingIndexRef.current = createEventRoutingIndex()
   const routingIndex = routingIndexRef.current
@@ -1743,10 +1745,7 @@ export function SyncProvider(props: {
                 const sessionCount = await retry(async () => {
                   const sessions = (await listSessionsForBootstrap(props.sdk, serverId, dir))
                     .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
-                  // Race guard: if the list came back empty but event pipeline
-                  // already populated the store, don't clobber. OpenCode can
-                  // answer HTTP with empty sessions while WS delivers session
-                  // events for the same data (disk warmup race on app launch).
+                  // Merge: server data wins on overlap; store-only sessions are preserved.
                   const currentSessions = store.getState().session
                   if (sessions.length === 0 && currentSessions.length > 0) {
                     console.warn(
@@ -1754,7 +1753,12 @@ export function SyncProvider(props: {
                     )
                     return currentSessions.length
                   }
-                  store.setState({ session: sessions, sessionTotal: sessions.length, limit: Math.max(sessions.length, 50) })
+                  const serverIds = new Set(sessions.map((s: { id: string }) => s.id))
+                  const preserved = currentSessions.filter((s: { id: string }) => !serverIds.has(s.id))
+                  const merged = preserved.length > 0
+                    ? [...sessions, ...preserved].sort((a: { id: string }, b: { id: string }) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+                    : sessions
+                  store.setState({ session: merged, sessionTotal: merged.length, limit: Math.max(merged.length, 50) })
                   for (const s of sessions) {
                     if (s.id) serverRegistry.indexSession(s.id, serverId)
                   }
@@ -1910,6 +1914,11 @@ export function SyncProvider(props: {
         })
         for (const dir of childStores.children.keys()) {
           triggerReconnectMaterialization(dir)
+        }
+        // One-time pending message recovery after first SSE connection
+        if (!pendingMessagesRecoveredRef.current) {
+          pendingMessagesRecoveredRef.current = true
+          void recoverPendingMessages()
         }
       },
       onDisconnect: (reason) => {

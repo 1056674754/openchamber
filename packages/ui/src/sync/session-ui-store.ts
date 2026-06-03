@@ -61,6 +61,7 @@ import { useSelectionStore } from "./selection-store"
 import { useViewportStore } from "./viewport-store"
 import { useSessionWorktreeStore } from "./session-worktree-store"
 import { getAttachedSessionDirectory } from "./session-worktree-contract"
+import { savePendingMessage, deletePendingMessage } from "./pending-message"
 
 export type { AttachedFile }
 
@@ -68,7 +69,7 @@ export type { AttachedFile }
 // Send routing — shell mode, slash commands, or normal prompt
 // ---------------------------------------------------------------------------
 
-function routeMessage(params: {
+export function routeMessage(params: {
   sessionId: string
   content: string
   providerID: string
@@ -936,6 +937,20 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
               url: a.dataUrl,
               filename: a.filename,
             }))
+            const additionalPartsForSend = draft.syntheticParts?.length
+              ? [...(additionalParts || []), ...draft.syntheticParts]
+              : additionalParts
+            await savePendingMessage({
+              sessionId: serverSession.id,
+              content,
+              providerID,
+              modelID,
+              agent: effectiveDraftAgent,
+              variant,
+              inputMode,
+              files,
+              additionalParts: additionalPartsForSend,
+            })
             await routeMessage({
               sessionId: serverSession.id,
               content,
@@ -945,10 +960,9 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
               variant,
               inputMode,
               files,
-              additionalParts: draft.syntheticParts?.length
-                ? [...(additionalParts || []), ...draft.syntheticParts]
-                : additionalParts,
+              additionalParts: additionalPartsForSend,
             })
+            await deletePendingMessage(serverSession.id)
             return
           }
         } catch (err) {
@@ -1025,6 +1039,28 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         filename: a.filename,
       }))
 
+      const routeAdditionalParts = mergedAdditionalParts?.map((p) => ({
+        text: p.text,
+        synthetic: p.synthetic,
+        files: p.attachments?.map((a: AttachedFile) => ({
+          type: "file" as const,
+          mime: a.mimeType,
+          url: a.dataUrl,
+          filename: a.filename,
+        })),
+      }))
+
+      await savePendingMessage({
+        sessionId: created.id,
+        content,
+        providerID,
+        modelID,
+        agent: effectiveDraftAgent,
+        variant,
+        inputMode,
+        files,
+        additionalParts: routeAdditionalParts,
+      })
       await routeMessage({
         sessionId: created.id,
         content,
@@ -1035,17 +1071,9 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         variant,
         inputMode,
         files,
-        additionalParts: mergedAdditionalParts?.map((p) => ({
-          text: p.text,
-          synthetic: p.synthetic,
-          files: p.attachments?.map((a: AttachedFile) => ({
-            type: "file" as const,
-            mime: a.mimeType,
-            url: a.dataUrl,
-            filename: a.filename,
-          })),
-        })),
+        additionalParts: routeAdditionalParts,
       })
+      await deletePendingMessage(created.id)
       return
     } catch (error) {
       if (isTempDraft) {

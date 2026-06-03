@@ -815,7 +815,7 @@ fn desktop_open_in_app(
             return run_open_command_chain(&specs);
         }
 
-        if matches!(trimmed_app_id.as_str(), "terminal" | "iterm2" | "ghostty") {
+        if matches!(trimmed_app_id.as_str(), "terminal" | "iterm2" | "ghostty" | "warp") {
             specs.push(OpenCommandSpec {
                 program: "open",
                 args: vec!["-a".to_string(), app_name_owned.clone(), project.clone()],

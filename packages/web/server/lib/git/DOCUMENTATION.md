@@ -11,6 +11,12 @@ This module provides Git repository operations for the web server runtime, inclu
   - `credentials.js`: Git credentials management.
   - `identity-storage.js`: Git identity (user.name, user.email) storage.
 
+## Route Runtime Behavior
+- Read-only route operations that can fan out across many projects (`/api/git/check`, `/api/git/status`, `/api/git/worktree-type`) are deduped, short-cacheable, and run through a bounded in-process limiter.
+- The limiter is controlled by `OPENCHAMBER_GIT_READ_CONCURRENCY` (default `4`, range `1..32`).
+- The short-lived route cache is capped by `OPENCHAMBER_GIT_READ_CACHE_MAX_ENTRIES` (default `200`) and `OPENCHAMBER_GIT_READ_CACHE_MAX_BYTES` (default `4194304`).
+- Non-GET `/api/git/*` routes invalidate this read cache after the response finishes; in-flight stale reads cannot repopulate it after invalidation.
+
 ## Public API
 
 The following functions are exported and used by the web server:
