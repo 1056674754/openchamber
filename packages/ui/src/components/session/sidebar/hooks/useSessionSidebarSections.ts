@@ -4,7 +4,7 @@ import type { SessionGroup, SessionNode, GroupSearchData } from '../types';
 import { dedupeSessionsById, normalizePath } from '../utils';
 import type { WorktreeMetadata } from '@/types/worktree';
 import type { SessionFoldersMap } from '@/stores/useSessionFoldersStore';
-import { getProjectWorktreeKey, getWorktreesForProject } from '@/lib/worktrees/worktreeKeys';
+import { dedupeWorktreesByPath, getProjectWorktreeKey, getWorktreesForProject } from '@/lib/worktrees/worktreeKeys';
 
 type ProjectItem = {
   id: string;
@@ -64,9 +64,12 @@ export const useSessionSidebarSections = (args: Args) => {
   const projectSections = React.useMemo<ProjectSection[]>(() => {
     const projectKeysBackedByWorktrees = new Set<string>();
     for (const project of normalizedProjects) {
-      const worktrees = getWorktreesForProject(
-        availableWorktreesByProject,
-        project.normalizedPath,
+      const worktrees = dedupeWorktreesByPath(
+        getWorktreesForProject(
+          availableWorktreesByProject,
+          project.normalizedPath,
+          project.serverId,
+        ),
         project.serverId,
       );
       for (const worktree of worktrees) {
@@ -89,9 +92,12 @@ export const useSessionSidebarSections = (args: Args) => {
         ...getSessionsForProject(project),
         ...getArchivedSessionsForProject(project),
       ]);
-      const worktreesForProject = getWorktreesForProject(
-        availableWorktreesByProject,
-        project.normalizedPath,
+      const worktreesForProject = dedupeWorktreesByPath(
+        getWorktreesForProject(
+          availableWorktreesByProject,
+          project.normalizedPath,
+          project.serverId,
+        ),
         project.serverId,
       );
       const isRepo = projectRepoStatus.get(project.id) === true;

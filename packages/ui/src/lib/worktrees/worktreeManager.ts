@@ -17,7 +17,7 @@ import type {
 } from '@/lib/api/types';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { DEFAULT_SERVER_ID, serverRegistry } from '@/lib/opencode/server-registry';
-import { getProjectWorktreeKey, getWorktreesForProject } from '@/lib/worktrees/worktreeKeys';
+import { dedupeWorktreesByPath, getProjectWorktreeKey, getWorktreesForProject } from '@/lib/worktrees/worktreeKeys';
 
 type WorktreeListEntry = {
   path?: string;
@@ -274,7 +274,7 @@ export async function listProjectWorktrees(project: ProjectRef): Promise<Worktre
       })
       .filter((entry) => normalizePath(entry.path) !== normalizedProjectDirectory);
 
-    const sorted = results.sort((a, b) => {
+    const sorted = dedupeWorktreesByPath(results, project.serverId).sort((a, b) => {
       const aLabel = (a.label || a.branch || a.path).toLowerCase();
       const bLabel = (b.label || b.branch || b.path).toLowerCase();
       return aLabel.localeCompare(bLabel);

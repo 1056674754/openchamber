@@ -5,7 +5,7 @@ import { serverRegistry, DEFAULT_SERVER_ID } from "@/lib/opencode/server-registr
 import { setDirectoryServerId } from "./session-actions";
 import { useSessionUIStore } from "./session-ui-store";
 import { resolveApiUrl } from "@/lib/api/serverUrl";
-import { getProjectWorktreeKey, getWorktreesForProject } from "@/lib/worktrees/worktreeKeys";
+import { dedupeWorktreesByPath, getProjectWorktreeKey, getWorktreesForProject } from "@/lib/worktrees/worktreeKeys";
 import type { WorktreeMetadata } from "@/types/worktree";
 
 const AVAILABLE_PROJECT_PROBE_TTL_MS = 30_000;
@@ -270,7 +270,8 @@ async function discoverWorktreeDirectories(
         const key = mainWorktree
           ? getProjectWorktreeKey(mainWorktree, serverId)
           : getProjectWorktreeKey(sandboxPath, serverId);
-        const existingWT = getWorktreesForProject(currentByProject, mainWorktree ?? sandboxPath, serverId);
+        const existingWT = worktreesByProject.get(key)
+          ?? getWorktreesForProject(currentByProject, mainWorktree ?? sandboxPath, serverId);
         const wtMeta: WorktreeMetadata = {
           path: sandboxPath,
           projectDirectory: mainWorktree ?? sandboxPath,
@@ -278,7 +279,7 @@ async function discoverWorktreeDirectories(
           branch: '',
           label: sandboxPath.split('/').pop() || sandboxPath,
         };
-        worktreesByProject.set(key, [...existingWT, wtMeta]);
+        worktreesByProject.set(key, dedupeWorktreesByPath([...existingWT, wtMeta], serverId));
       }
     }
 
@@ -295,7 +296,7 @@ async function discoverWorktreeDirectories(
     if (worktreesByProject.size > 0) {
       const merged = new Map(currentByProject);
       for (const [key, wts] of worktreesByProject) {
-        merged.set(key, wts);
+        merged.set(key, dedupeWorktreesByPath(wts, serverId));
       }
       useSessionUIStore.setState({ availableWorktreesByProject: merged });
     }

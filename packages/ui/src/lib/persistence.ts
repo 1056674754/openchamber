@@ -6,6 +6,7 @@ import { useMessageQueueStore } from '@/stores/messageQueueStore';
 import { setDirectoryShowHidden } from '@/lib/directoryShowHidden';
 import { setFilesViewShowGitignored } from '@/lib/filesViewShowGitignored';
 import { loadAppearancePreferences, applyAppearancePreferences } from '@/lib/appearancePersistence';
+import { sanitizeStarterRefs } from '@/lib/draftStarters';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { normalizeMobileKeyboardMode, setStoredMobileKeyboardMode } from '@/lib/mobileKeyboardMode';
 
@@ -513,6 +514,12 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
   if (typeof settings.fontSize === 'number' && Number.isFinite(settings.fontSize) && settings.fontSize !== store.fontSize) {
     store.setFontSize(settings.fontSize);
   }
+  if (Array.isArray(settings.draftStarters)) {
+    const nextStarters = sanitizeStarterRefs(settings.draftStarters);
+    if (JSON.stringify(store.globalDraftStarters) !== JSON.stringify(nextStarters)) {
+      store.setGlobalDraftStarters(nextStarters);
+    }
+  }
   if (typeof settings.terminalFontSize === 'number' && Number.isFinite(settings.terminalFontSize) && settings.terminalFontSize !== store.terminalFontSize) {
     store.setTerminalFontSize(settings.terminalFontSize);
   }
@@ -677,6 +684,9 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   }
   if (typeof candidate.showReasoningTraces === 'boolean') {
     result.showReasoningTraces = candidate.showReasoningTraces;
+  }
+  if (Array.isArray(candidate.draftStarters)) {
+    result.draftStarters = sanitizeStarterRefs(candidate.draftStarters);
   }
   if (typeof candidate.collapsibleThinkingBlocks === 'boolean') {
     result.collapsibleThinkingBlocks = candidate.collapsibleThinkingBlocks;

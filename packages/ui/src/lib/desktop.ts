@@ -1,5 +1,6 @@
 import type { ProjectEntry } from '@/lib/api/types';
 import type { MobileKeyboardMode } from '@/lib/mobileKeyboardMode';
+import type { DraftStarterRef } from '@/lib/draftStarters';
 
 export type AssistantNotificationPayload = {
   title?: string;
@@ -57,9 +58,10 @@ export type DesktopSettings = {
   activeProjectId?: string;
   approvedDirectories?: string[];
   securityScopedBookmarks?: string[];
-  pinnedDirectories?: string[];
-  showReasoningTraces?: boolean;
-  collapsibleThinkingBlocks?: boolean;
+   pinnedDirectories?: string[];
+   showReasoningTraces?: boolean;
+   draftStarters?: DraftStarterRef[];
+   collapsibleThinkingBlocks?: boolean;
   showDeletionDialog?: boolean;
   nativeNotificationsEnabled?: boolean;
   notificationMode?: 'always' | 'hidden-only';

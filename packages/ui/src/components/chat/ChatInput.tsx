@@ -1649,6 +1649,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     // Keep a ref to handleSubmit so callbacks don't depend on it.
     type SubmitOptions = {
         queuedOnly?: boolean;
+        queuedMessageId?: string;
     };
     const handleSubmitRef = React.useRef<(options?: SubmitOptions) => Promise<void>>(async () => {});
 
@@ -1697,6 +1698,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         }, 0);
     }, []);
 
+    const handleQueuedMessageSend = React.useCallback((messageId: string) => {
+        void handleSubmitRef.current({ queuedOnly: true, queuedMessageId: messageId });
+    }, []);
+
     const handleOpenAgentPanel = React.useCallback(() => {
         setMobileControlsPanel('agent');
     }, []);
@@ -1715,6 +1720,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 
     const handleSubmit = async (options?: SubmitOptions) => {
         const queuedOnly = options?.queuedOnly ?? false;
+        const queuedMessageId = options?.queuedMessageId;
         const inputSnapshot = getCurrentInputSnapshot();
 
         if (queuedOnly) {
@@ -1745,8 +1751,11 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         const syntheticParts = consumePendingSyntheticParts();
 
         // Process queued messages first
-        for (let i = 0; i < queuedMessages.length; i++) {
-            const queuedMsg = queuedMessages[i];
+        const queuedMessagesToSend = queuedMessageId
+            ? queuedMessages.filter((message) => message.id === queuedMessageId)
+            : queuedMessages;
+        for (let i = 0; i < queuedMessagesToSend.length; i++) {
+            const queuedMsg = queuedMessagesToSend[i];
             const { sanitizedText, mention } = parseAgentMentions(queuedMsg.content, agents);
             const { sanitizedText: queuedText, attachments: mentionAttachments } = extractInlineFileMentions(sanitizedText);
             addMentionedSkills(queuedText);
@@ -3963,6 +3972,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                 <AttachedFilesList />
                 <QueuedMessageChips
                     onEditMessage={handleQueuedMessageEdit}
+                    onSendMessage={handleQueuedMessageSend}
                 />
                 {hasDrafts && (
                     <div className="flex flex-wrap items-center gap-2 pb-2">

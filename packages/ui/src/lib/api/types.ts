@@ -748,6 +748,7 @@ export interface VSCodeAPI {
   executeCommand(command: string, ...args: unknown[]): Promise<unknown>;
   openAgentManager(): Promise<void>;
   openExternalUrl(url: string): Promise<void>;
+  saveImage?(payload: { fileName: string; dataUrl: string }): Promise<{ saved?: boolean; canceled?: boolean; error?: string }>;
 }
 
 export interface PushSubscribePayload {

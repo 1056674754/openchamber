@@ -88,11 +88,14 @@ export type InputState = {
   pendingInputText: string | null
   pendingInputMode: "replace" | "append" | "append-inline"
   pendingSyntheticParts: SyntheticContextPart[] | null
+  pendingPresetSubmit: string | null
   attachedFiles: AttachedFile[]
   activeEditorFile: VSCodeActiveEditorFile | null
 
   setPendingInputText: (text: string | null, mode?: "replace" | "append" | "append-inline") => void
   consumePendingInputText: () => { text: string; mode: "replace" | "append" | "append-inline" } | null
+  requestPresetSubmit: (text: string) => void
+  consumePendingPresetSubmit: () => string | null
   setPendingSyntheticParts: (parts: SyntheticContextPart[] | null) => void
   consumePendingSyntheticParts: () => SyntheticContextPart[] | null
   addAttachedFile: (file: File) => Promise<void>
@@ -109,6 +112,7 @@ export const useInputStore = create<InputState>()((set, get) => ({
   pendingInputText: null,
   pendingInputMode: "replace",
   pendingSyntheticParts: null,
+  pendingPresetSubmit: null,
   attachedFiles: [],
   activeEditorFile: null,
 
@@ -120,6 +124,15 @@ export const useInputStore = create<InputState>()((set, get) => ({
     if (pendingInputText === null) return null
     set({ pendingInputText: null, pendingInputMode: "replace" })
     return { text: pendingInputText, mode: pendingInputMode }
+  },
+
+  requestPresetSubmit: (text) => set({ pendingPresetSubmit: text }),
+
+  consumePendingPresetSubmit: () => {
+    const { pendingPresetSubmit } = get()
+    if (pendingPresetSubmit === null) return null
+    set({ pendingPresetSubmit: null })
+    return pendingPresetSubmit
   },
 
   setPendingSyntheticParts: (parts) => set({ pendingSyntheticParts: parts }),

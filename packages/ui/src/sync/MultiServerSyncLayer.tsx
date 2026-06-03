@@ -3,8 +3,10 @@ import type { OpencodeClient } from "@opencode-ai/sdk/v2/client";
 import { SyncProvider } from "./sync-context";
 import { serverRegistry, DEFAULT_SERVER_ID } from "@/lib/opencode/server-registry";
 import { useProjectsStore } from "@/stores/useProjectsStore";
+import { useSessionUIStore } from "./session-ui-store";
 import { useRemoteInstancesStore } from "@/stores/useRemoteInstancesStore";
 import { isTauriShell, isWebRuntime } from "@/lib/desktop";
+import { buildRemoteBootstrapDirectoryMap } from "./remote-bootstrap-directories";
 
 type AdditionalServer = {
   id: string;
@@ -12,18 +14,10 @@ type AdditionalServer = {
   baseUrl: string;
 };
 
-const normalizeDirectory = (value: string): string => {
-  const normalized = value.replace(/\\/g, "/").replace(/\/+$/, "");
-  return normalized || "/";
-};
-
-const isRemoteBootstrapDirectory = (value: string): boolean => {
-  return normalizeDirectory(value) !== "/";
-};
-
 export function MultiServerSyncLayer() {
   const servers = useServerList();
   const projects = useProjectsStore((s) => s.projects);
+  const availableWorktreesByProject = useSessionUIStore((s) => s.availableWorktreesByProject);
   const remoteInstancesInitialized = useRemoteInstancesStore((s) => s.initialized);
   const remoteInstancesLoading = useRemoteInstancesStore((s) => s.loading);
   const loadRemoteInstances = useRemoteInstancesStore((s) => s.loadInstances);
@@ -36,25 +30,10 @@ export function MultiServerSyncLayer() {
 
   const healthyServerIds = React.useMemo(() => new Set(servers.map((server) => server.id)), [servers]);
 
-  const serverDirMap = React.useMemo(() => {
-    const map = new Map<string, string[]>();
-    for (const p of projects) {
-      if (
-        p.serverId
-        && p.serverId !== DEFAULT_SERVER_ID
-        && healthyServerIds.has(p.serverId)
-        && isRemoteBootstrapDirectory(p.path)
-      ) {
-        const dirs = map.get(p.serverId) || [];
-        const normalizedPath = normalizeDirectory(p.path);
-        if (!dirs.includes(normalizedPath)) {
-          dirs.push(normalizedPath);
-        }
-        map.set(p.serverId, dirs);
-      }
-    }
-    return map;
-  }, [healthyServerIds, projects]);
+  const serverDirMap = React.useMemo(
+    () => buildRemoteBootstrapDirectoryMap(projects, availableWorktreesByProject, healthyServerIds),
+    [availableWorktreesByProject, healthyServerIds, projects],
+  );
 
   if (servers.length === 0) return null;
 

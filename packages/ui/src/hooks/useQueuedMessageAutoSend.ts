@@ -61,6 +61,14 @@ const resolveSessionSendConfig = (sessionId: string) => {
   };
 };
 
+export const shouldDispatchQueuedAutoSend = (
+  previousStatusType: SessionStatusType | undefined,
+  currentStatusType: SessionStatusType,
+): boolean => {
+  return (previousStatusType === 'busy' || previousStatusType === 'retry')
+    && currentStatusType === 'idle';
+};
+
 export function useQueuedMessageAutoSend(enabledOrOptions?: boolean | { enabled?: boolean }) {
   const enabled = typeof enabledOrOptions === 'boolean' ? enabledOrOptions : (enabledOrOptions?.enabled ?? true);
   const queuedMessages = useMessageQueueStore((state) => state.queuedMessages);
@@ -158,12 +166,8 @@ export function useQueuedMessageAutoSend(enabledOrOptions?: boolean | { enabled?
         return;
       }
       const previousStatusType = previousStatusRef.current.get(sessionId);
-      const becameIdle =
-        (previousStatusType === 'busy' || previousStatusType === 'retry')
-        && currentStatusType === 'idle';
-      const firstSeenIdle = previousStatusType === undefined && currentStatusType === 'idle';
 
-      if (queue.length > 0 && (becameIdle || firstSeenIdle)) {
+      if (queue.length > 0 && shouldDispatchQueuedAutoSend(previousStatusType, currentStatusType)) {
         void dispatchSessionQueue(sessionId, queue);
       }
 
