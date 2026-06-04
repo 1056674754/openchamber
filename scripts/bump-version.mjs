@@ -10,14 +10,9 @@ const PACKAGES = [
   'package.json',
   'packages/ui/package.json',
   'packages/web/package.json',
-  'packages/desktop/package.json',
   'packages/electron/package.json',
   'packages/vscode/package.json',
 ];
-
-const TAURI_CONF = 'packages/desktop/src-tauri/tauri.conf.json';
-const CARGO_TOML = 'packages/desktop/src-tauri/Cargo.toml';
-const CARGO_LOCK = 'packages/desktop/src-tauri/Cargo.lock';
 
 const newVersion = process.argv[2];
 if (!newVersion || !/^\d+\.\d+\.\d+(-[\w.]+)?$/.test(newVersion)) {
