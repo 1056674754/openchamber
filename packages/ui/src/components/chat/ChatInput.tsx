@@ -988,6 +988,70 @@ const loadConfirmedMentions = (sessionId: string | null): Set<string> => {
     return new Set();
 };
 
+const mergeFailedDraftText = (currentDraft: string, failedDraft: string): string => {
+    if (!failedDraft.trim()) {
+        return currentDraft;
+    }
+    if (!currentDraft.trim()) {
+        return failedDraft;
+    }
+    if (currentDraft.includes(failedDraft)) {
+        return currentDraft;
+    }
+    const separator = failedDraft.endsWith('\n') ? '\n' : '\n\n';
+    return `${failedDraft}${separator}${currentDraft}`;
+};
+
+const restoreQueuedMessages = (sessionId: string, snapshot: QueuedMessage[]): void => {
+    if (snapshot.length === 0) {
+        return;
+    }
+
+    useMessageQueueStore.setState((state) => {
+        const currentQueue = state.queuedMessages[sessionId] ?? [];
+        const currentIds = new Set(currentQueue.map((message) => message.id));
+        const missingMessages = snapshot.filter((message) => !currentIds.has(message.id));
+        if (missingMessages.length === 0) {
+            return state;
+        }
+
+        const restoredQueue = [...currentQueue, ...missingMessages]
+            .sort((a, b) => a.createdAt - b.createdAt);
+
+        return {
+            queuedMessages: {
+                ...state.queuedMessages,
+                [sessionId]: restoredQueue,
+            },
+        };
+    });
+};
+
+const restoreInlineDrafts = (sessionKey: string, drafts: InlineCommentDraft[]): void => {
+    if (drafts.length === 0) {
+        return;
+    }
+
+    useInlineCommentDraftStore.setState((state) => {
+        const currentDrafts = state.drafts[sessionKey] ?? [];
+        const currentIds = new Set(currentDrafts.map((draft) => draft.id));
+        const missingDrafts = drafts.filter((draft) => !currentIds.has(draft.id));
+        if (missingDrafts.length === 0) {
+            return state;
+        }
+
+        const restoredDrafts = [...currentDrafts, ...missingDrafts]
+            .sort((a, b) => a.createdAt - b.createdAt);
+
+        return {
+            drafts: {
+                ...state.drafts,
+                [sessionKey]: restoredDrafts,
+            },
+        };
+    });
+};
+
 const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBottom }) => {
     const { t } = useI18n();
     // Track if we restored a draft on mount (for text selection)
@@ -1401,6 +1465,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         )
     );
     const addToQueue = useMessageQueueStore((state) => state.addToQueue);
+    const removeFromQueue = useMessageQueueStore((state) => state.removeFromQueue);
     const clearQueue = useMessageQueueStore((state) => state.clearQueue);
 
     // Inline comment drafts
@@ -1682,6 +1747,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         // are processed later in handleSubmit which reads the ref via extractInlineFileMentions.
         // The ref is cleared in handleSubmit after all queued messages are sent.
         setMessage('');
+        messageRef.current = '';
         if (attachmentsToQueue.length > 0) {
             clearAttachedFiles();
         }
@@ -1722,6 +1788,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         const queuedOnly = options?.queuedOnly ?? false;
         const queuedMessageId = options?.queuedMessageId;
         const inputSnapshot = getCurrentInputSnapshot();
+        const submittedSessionId = currentSessionId;
+        const submittedDraftText = !queuedOnly ? inputSnapshot.message : '';
+        const confirmedMentionsSnapshot = new Set(confirmedMentionsRef.current);
 
         if (queuedOnly) {
             if (!hasQueuedMessages || !currentSessionId) return;
@@ -1737,6 +1806,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         // Build the primary message (first part) and additional parts
         let primaryText = '';
         let primaryAttachments: AttachedFile[] = [];
+        let composerAttachmentsSnapshot: AttachedFile[] = [];
         let agentMentionName: string | undefined;
         const additionalParts: Array<{ text: string; attachments?: AttachedFile[]; synthetic?: boolean }> = [];
         const availableSkillNames = new Set(useSkillsStore.getState().skills.map((skill) => skill.name));
@@ -1749,11 +1819,16 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 
         // Consume any pending synthetic parts (from conflict resolution, etc.)
         const syntheticParts = consumePendingSyntheticParts();
+        const consumedSyntheticPartsSnapshot = syntheticParts ? [...syntheticParts] : null;
 
         // Process queued messages first
         const queuedMessagesToSend = queuedMessageId
             ? queuedMessages.filter((message) => message.id === queuedMessageId)
             : queuedMessages;
+        const queuedMessagesSnapshot = currentSessionId && queuedMessagesToSend.length > 0
+            ? [...queuedMessages]
+            : [];
+        const queueSessionId = currentSessionId;
         for (let i = 0; i < queuedMessagesToSend.length; i++) {
             const queuedMsg = queuedMessagesToSend[i];
             const { sanitizedText, mention } = parseAgentMentions(queuedMsg.content, agents);
@@ -1788,6 +1863,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             const { sanitizedText, mention } = parseAgentMentions(messageToSend, agents);
             const { sanitizedText: messageText, attachments: mentionAttachments } = extractInlineFileMentions(sanitizedText);
             const attachmentsToSend = sanitizeAttachmentsForSend(sendableAttachedFiles);
+            composerAttachmentsSnapshot = attachmentsToSend;
             addMentionedSkills(messageText);
 
             if (!agentMentionName && mention?.name) {
@@ -1809,8 +1885,12 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 
         const sessionKey = currentSessionId ?? (newSessionDraftOpen ? 'draft' : null);
         let drafts: InlineCommentDraft[] = [];
+        let consumedDraftSessionKey: string | null = null;
+        let consumedDraftsSnapshot: InlineCommentDraft[] = [];
         if (!queuedOnly && sessionKey) {
+            consumedDraftSessionKey = sessionKey;
             drafts = consumeDrafts(sessionKey);
+            consumedDraftsSnapshot = drafts;
         }
 
         if (drafts.length > 0) {
@@ -1864,12 +1944,18 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 
         if (!primaryText && primaryAttachments.length === 0 && additionalParts.length === 0) return;
 
-        // Clear queue and input
-        if (currentSessionId && hasQueuedMessages) {
-            clearQueue(currentSessionId);
+        // Clear queue and input optimistically. Failure recovery below restores
+        // these snapshots so a disconnected WS/SSE stream cannot swallow input.
+        if (currentSessionId && queuedMessagesToSend.length > 0) {
+            if (queuedMessageId) {
+                removeFromQueue(currentSessionId, queuedMessageId);
+            } else {
+                clearQueue(currentSessionId);
+            }
         }
         if (!queuedOnly) {
             setMessage('');
+            messageRef.current = '';
             confirmedMentionsRef.current.clear();
             // Clear per-session draft on submit
             saveStoredDraft(currentSessionId, '');
@@ -2006,12 +2092,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             console.warn('[ChatInput] Failed to expand snippets, sending original text:', error);
         }
 
-        // Collect all attachments for error recovery
-        const allAttachments = [
-            ...primaryAttachments,
-            ...additionalParts.flatMap(p => p.attachments ?? []),
-        ];
-
         const sendPromise = sendMessage(
             primaryText,
             currentProviderId,
@@ -2051,6 +2131,30 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 
             console.error('Message send failed:', rawMessage || error);
 
+            if (queueSessionId && queuedMessagesSnapshot.length > 0) {
+                restoreQueuedMessages(queueSessionId, queuedMessagesSnapshot);
+            }
+            if (consumedDraftSessionKey && consumedDraftsSnapshot.length > 0) {
+                restoreInlineDrafts(consumedDraftSessionKey, consumedDraftsSnapshot);
+            }
+            if (consumedSyntheticPartsSnapshot) {
+                useInputStore.getState().setPendingSyntheticParts(consumedSyntheticPartsSnapshot);
+            }
+            if (!queuedOnly) {
+                confirmedMentionsRef.current = new Set(confirmedMentionsSnapshot);
+                saveConfirmedMentions(submittedSessionId, confirmedMentionsRef.current);
+
+                const restoredDraft = mergeFailedDraftText(messageRef.current, submittedDraftText);
+                if (restoredDraft !== messageRef.current) {
+                    messageRef.current = restoredDraft;
+                    setMessage(restoredDraft);
+                    persistDraftImmediately(submittedSessionId, restoredDraft);
+                }
+                if (composerAttachmentsSnapshot.length > 0) {
+                    useInputStore.getState().setAttachedFiles(composerAttachmentsSnapshot);
+                }
+            }
+
             const isSoftNetworkError =
                 normalized.includes('timeout') ||
                 normalized.includes('timed out') ||
@@ -2064,23 +2168,16 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 
             if (normalized.includes('payload too large') || normalized.includes('413') || normalized.includes('entity too large')) {
                 toast.error(t('chat.chatInput.toast.attachmentsTooLarge'));
-                if (allAttachments.length > 0) {
-                    useInputStore.getState().setAttachedFiles(allAttachments);
-                }
                 return;
             }
 
             if (isSoftNetworkError) {
-                if (allAttachments.length > 0) {
-                    useInputStore.getState().setAttachedFiles(allAttachments);
+                if (composerAttachmentsSnapshot.length > 0) {
                     toast.error(t('chat.chatInput.toast.sendAttachmentsFailed'));
                 }
                 return;
             }
 
-            if (allAttachments.length > 0) {
-                useInputStore.getState().setAttachedFiles(allAttachments);
-            }
             toast.error(rawMessage || t('chat.chatInput.toast.messageSendFailed'));
         });
 
