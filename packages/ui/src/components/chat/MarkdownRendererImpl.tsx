@@ -902,11 +902,16 @@ const buildMarkdownComponents = ({
   onPreviewLoopback,
   previewLabel,
   previewTitle,
+  localImageContext,
 }: {
   syntaxTheme: { [key: string]: React.CSSProperties };
   onPreviewLoopback?: (url: string) => void;
   previewLabel?: string;
   previewTitle?: string;
+  localImageContext?: {
+    effectiveDirectory: string;
+    fileReferenceBaseUrl?: string;
+  };
 }): Components => ({
   table({ children, ...props }) {
     return <TableWrapper className={props.className}>{children}</TableWrapper>;
@@ -978,6 +983,46 @@ const buildMarkdownComponents = ({
       >
         {children}
       </code>
+    );
+  },
+  img({ src, alt, ...props }) {
+    const rawSrc = typeof src === 'string' ? src : '';
+    const localImage = localImageContext
+      ? resolveMarkdownImageReference(rawSrc, localImageContext.effectiveDirectory, localImageContext.fileReferenceBaseUrl)
+      : null;
+    const title = typeof props.title === 'string' && props.title.trim()
+      ? `${props.title.trim()} - Open image in context panel`
+      : 'Open image in context panel';
+    const accessibleName = typeof alt === 'string' && alt.trim()
+      ? `Open image: ${alt.trim()}`
+      : 'Open image in context panel';
+    const localImageProps = localImage
+      ? {
+          role: 'button' as const,
+          tabIndex: 0,
+          title,
+          'aria-label': accessibleName,
+          'data-openchamber-file-link': 'true',
+          'data-openchamber-file-ref': localImage.source,
+          'data-openchamber-file-path': localImage.resolvedPath,
+          'data-openchamber-file-status': 'pending',
+        }
+      : {};
+
+    return (
+      <img
+        {...props}
+        {...localImageProps}
+        src={localImage?.rawUrl ?? rawSrc}
+        alt={alt ?? ''}
+        loading={props.loading ?? 'lazy'}
+        decoding={props.decoding ?? 'async'}
+        className={cn(
+          'my-2 max-h-[42rem] max-w-full rounded-md border border-border/40 bg-[var(--surface-elevated)] object-contain',
+          localImage && 'cursor-zoom-in transition-[border-color] hover:border-[var(--interactive-border)]',
+          props.className,
+        )}
+      />
     );
   },
   a({ href, children, ...props }) {
@@ -1069,6 +1114,19 @@ type ParsedFileReference = {
 
 const WINDOWS_DRIVE_PATH_PATTERN = /^[A-Za-z]:[\\/]/;
 const WINDOWS_UNC_PATH_PATTERN = /^\\\\[^\\]+\\[^\\]+/;
+const IMAGE_FILE_EXTENSIONS = new Set([
+  'avif',
+  'bmp',
+  'gif',
+  'heic',
+  'heif',
+  'ico',
+  'jpeg',
+  'jpg',
+  'png',
+  'svg',
+  'webp',
+]);
 const KNOWN_FILE_BASENAMES = new Set([
   'dockerfile',
   'makefile',
@@ -1372,6 +1430,113 @@ const getResolvedReference = (rawValue: string, effectiveDirectory: string): (Pa
   };
 };
 
+const decodeUriPathComponent = (value: string): string => {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+};
+
+const normalizeMarkdownImageSource = (value: string): string => {
+  const raw = (value || '').trim();
+  if (!raw) {
+    return '';
+  }
+
+  if (raw.toLowerCase().startsWith('file://')) {
+    try {
+      const parsed = new URL(raw);
+      const pathname = decodeUriPathComponent(parsed.pathname || '');
+      if (parsed.hostname && parsed.hostname !== 'localhost') {
+        return normalizePath(`//${parsed.hostname}${pathname}`);
+      }
+      if (/^\/[A-Za-z]:\//.test(pathname)) {
+        return normalizePath(pathname.slice(1));
+      }
+      return normalizePath(pathname);
+    } catch {
+      return raw;
+    }
+  }
+
+  return decodeUriPathComponent(raw);
+};
+
+const getLowerFileExtension = (path: string): string => {
+  const base = normalizePath(path).split('/').filter(Boolean).pop() ?? '';
+  const dotIndex = base.lastIndexOf('.');
+  if (dotIndex < 0 || dotIndex === base.length - 1) {
+    return '';
+  }
+  return base.slice(dotIndex + 1).toLowerCase();
+};
+
+const isLikelyImageFilePath = (path: string): boolean => {
+  return IMAGE_FILE_EXTENSIONS.has(getLowerFileExtension(path));
+};
+
+const toComparableReferencePath = (value: string): string => {
+  return /^[A-Za-z]:\//.test(value) ? value.toLowerCase() : value;
+};
+
+const isResolvedPathWithinDirectory = (resolvedPath: string, directory: string): boolean => {
+  const normalizedPath = normalizePath(resolvedPath);
+  const normalizedDirectory = normalizePath(directory);
+  if (!normalizedPath || !normalizedDirectory) {
+    return false;
+  }
+
+  const comparablePath = toComparableReferencePath(normalizedPath);
+  const comparableDirectory = toComparableReferencePath(normalizedDirectory);
+  return comparablePath === comparableDirectory || comparablePath.startsWith(`${comparableDirectory}/`);
+};
+
+const buildFileRawUrl = (resolvedPath: string, effectiveDirectory: string, fileReferenceBaseUrl?: string): string => {
+  const normalizedDirectory = normalizePath(effectiveDirectory);
+  const params = new URLSearchParams({ path: resolvedPath });
+  if (normalizedDirectory && isResolvedPathWithinDirectory(resolvedPath, normalizedDirectory)) {
+    params.set('directory', normalizedDirectory);
+  } else {
+    params.set('allowOutsideWorkspace', 'true');
+  }
+  return `${resolveApiUrl('/api/fs/raw', fileReferenceBaseUrl)}?${params.toString()}`;
+};
+
+const resolveMarkdownImageReference = (
+  rawSrc: string,
+  effectiveDirectory: string,
+  fileReferenceBaseUrl?: string,
+): { source: string; resolvedPath: string; rawUrl: string } | null => {
+  const source = normalizeMarkdownImageSource(rawSrc);
+  if (!source || isExternalHttpUrl(source) || source.startsWith('data:') || source.startsWith('blob:')) {
+    return null;
+  }
+
+  const parsed = parseFileReference(source);
+  if (!parsed || !isLikelyFilePathValue(parsed.path) || !isLikelyImageFilePath(parsed.path)) {
+    return null;
+  }
+
+  const normalizedDirectory = normalizePath(effectiveDirectory);
+  if (!isAbsolutePath(parsed.path) && !normalizedDirectory) {
+    return null;
+  }
+
+  const resolvedPath = isAbsolutePath(parsed.path)
+    ? normalizePath(parsed.path)
+    : toAbsolutePath(normalizedDirectory, parsed.path);
+  if (!resolvedPath || !isAbsolutePath(resolvedPath)) {
+    return null;
+  }
+
+  return {
+    source,
+    resolvedPath,
+    rawUrl: buildFileRawUrl(resolvedPath, normalizedDirectory, fileReferenceBaseUrl),
+  };
+};
+
 const getContextDirectory = (effectiveDirectory: string, resolvedPath: string): string => {
   const normalizedDirectory = normalizePath(effectiveDirectory);
   if (normalizedDirectory) {
@@ -1607,16 +1772,19 @@ const useFileReferenceInteractions = ({
 
       const uiStore = useUIStore.getState();
       if (Number.isFinite(resolved.line ?? Number.NaN)) {
-        uiStore.openContextFileAtLine(
-          contextDirectory,
-          resolved.resolvedPath,
-          Math.max(1, Math.trunc(resolved.line as number)),
-          Number.isFinite(resolved.column ?? Number.NaN)
+        uiStore.openContextPanelTab(contextDirectory, { mode: 'file', targetPath: resolved.resolvedPath });
+        uiStore.setPendingFileFocusPath(null);
+        uiStore.setPendingFileNavigation({
+          path: resolved.resolvedPath,
+          line: Math.max(1, Math.trunc(resolved.line as number)),
+          column: Number.isFinite(resolved.column ?? Number.NaN)
             ? Math.max(1, Math.trunc(resolved.column as number))
             : 1,
-        );
+        });
       } else {
-        uiStore.openContextFile(contextDirectory, resolved.resolvedPath);
+        uiStore.openContextPanelTab(contextDirectory, { mode: 'file', targetPath: resolved.resolvedPath });
+        uiStore.setPendingFileFocusPath(resolved.resolvedPath);
+        uiStore.setPendingFileNavigation(null);
       }
     };
 
@@ -1830,13 +1998,14 @@ const MarkdownRendererImpl: React.FC<MarkdownRendererProps> = ({
   );
   const mermaidBlocks = React.useMemo(() => extractMermaidBlocks(content), [content]);
   useMermaidInlineInteractions({ containerRef, mermaidBlocks, onShowPopup });
+  const fileReferencesEnabled = enableFileReferences && !isStreaming;
   useFileReferenceInteractions({
     containerRef,
     effectiveDirectory,
     fileReferenceBaseUrl,
     editor,
     preferRuntimeEditor: runtime.isVSCode,
-    enabled: enableFileReferences && !isStreaming,
+    enabled: fileReferencesEnabled,
   });
   useExternalLinkInteractions({ containerRef });
   const openContextPreview = useUIStore((state) => state.openContextPreview);
@@ -1854,8 +2023,14 @@ const MarkdownRendererImpl: React.FC<MarkdownRendererProps> = ({
       onPreviewLoopback: effectiveDirectory ? handlePreviewLoopback : undefined,
       previewLabel,
       previewTitle,
+      localImageContext: fileReferencesEnabled
+        ? {
+            effectiveDirectory,
+            fileReferenceBaseUrl,
+          }
+        : undefined,
     }),
-    [syntaxTheme, effectiveDirectory, handlePreviewLoopback, previewLabel, previewTitle],
+    [syntaxTheme, effectiveDirectory, fileReferenceBaseUrl, fileReferencesEnabled, handlePreviewLoopback, previewLabel, previewTitle],
   );
   const componentKey = `markdown-${part?.id ? `part-${part.id}` : `message-${messageId}`}`;
   const markdownBlocks = useStableMarkdownBlocks(content, isStreaming && !disableStreamAnimation, componentKey);
@@ -1953,7 +2128,18 @@ const SimpleMarkdownRendererImpl: React.FC<{
   });
   useExternalLinkInteractions({ containerRef, enabled: !disableLinkSafety });
   const syntaxTheme = React.useMemo(() => generateSyntaxTheme(currentTheme), [currentTheme]);
-  const markdownComponents = React.useMemo(() => buildMarkdownComponents({ syntaxTheme }), [syntaxTheme]);
+  const markdownComponents = React.useMemo(
+    () => buildMarkdownComponents({
+      syntaxTheme,
+      localImageContext: enableFileReferences
+        ? {
+            effectiveDirectory,
+            fileReferenceBaseUrl,
+          }
+        : undefined,
+    }),
+    [effectiveDirectory, enableFileReferences, fileReferenceBaseUrl, syntaxTheme],
+  );
   const markdownBlocks = useStableMarkdownBlocks(renderedContent, false, `simple:${variant}`);
 
   const markdownClassName = variant === 'tool'
