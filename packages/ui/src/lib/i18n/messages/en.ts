@@ -1656,6 +1656,7 @@ export const dict = {
   'chat.messageBody.activity.process': 'Process',
   'chat.messageBody.activity.processing': 'Processing',
   'chat.messageBody.activity.processed': 'Processed',
+  'chat.messageBody.activity.collapse': 'Collapse',
   'chat.generatedResult.actions.copy': 'Copy',
   'chat.generatedResult.actions.copied': 'Copied',
   'chat.generatedResult.commit.title': 'Generated commit message',

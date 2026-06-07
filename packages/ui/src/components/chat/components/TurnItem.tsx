@@ -7,6 +7,7 @@ import { useI18n } from '@/lib/i18n';
 
 interface RenderMessageOptions {
     hideAssistantBody?: boolean;
+    assistantHeaderAddon?: React.ReactNode;
 }
 
 interface TurnItemProps {
@@ -15,6 +16,7 @@ interface TurnItemProps {
     renderMessage: (message: ChatMessageEntry, options?: RenderMessageOptions) => React.ReactNode;
     directiveTurns?: TurnRecord[];
     processExpanded?: boolean;
+    processFoldEnabled?: boolean;
     onToggleProcess?: () => void;
 }
 
@@ -72,14 +74,11 @@ const getTurnDurationText = (turn: TurnRecord): string | undefined => {
 const ProcessToggle: React.FC<{
     expanded: boolean;
     onToggle: () => void;
-    processed: boolean;
+    label: string;
     durationText?: string;
-}> = ({ expanded, onToggle, processed, durationText }) => {
-    const { t } = useI18n();
-    const label = t(processed ? 'chat.messageBody.activity.processed' : 'chat.messageBody.activity.process');
-
-    return (
-        <div className="chat-message-column">
+    wrapColumn?: boolean;
+}> = ({ expanded, onToggle, label, durationText, wrapColumn = true }) => {
+    const button = (
             <button
                 type="button"
                 className="group/process-toggle flex items-center gap-1.5 py-1.5 pl-px pr-2 text-left text-muted-foreground/60 transition-colors hover:text-muted-foreground/80"
@@ -91,7 +90,14 @@ const ProcessToggle: React.FC<{
                 </span>
                 <Icon name={expanded ? 'arrow-up-s' : 'arrow-down-s'} className="h-3.5 w-3.5" />
             </button>
+    );
+
+    return wrapColumn ? (
+        <div className="chat-message-column">
+            {button}
         </div>
+    ) : (
+        button
     );
 };
 
@@ -101,8 +107,10 @@ const TurnItem: React.FC<TurnItemProps> = ({
     renderMessage,
     directiveTurns,
     processExpanded = false,
+    processFoldEnabled = true,
     onToggleProcess,
 }) => {
+    const { t } = useI18n();
     const sectionRef = React.useRef<HTMLElement | null>(null);
     const userRef = React.useRef<HTMLDivElement | null>(null);
 
@@ -114,35 +122,63 @@ const TurnItem: React.FC<TurnItemProps> = ({
             return summaryMessage ? renderMessage(summaryMessage) : null;
         }
 
-        const toggle = onToggleProcess ? (
-            <ProcessToggle
-                key="process-toggle"
-                expanded={processExpanded}
-                onToggle={onToggleProcess}
-                processed={Boolean(summaryMessage)}
-                durationText={getTurnDurationText(assistantTurn)}
-            />
-        ) : null;
-
-        if (!processExpanded) {
-            const firstProcessMessage = processMessages[0];
+        const foldEnabled = processFoldEnabled && Boolean(onToggleProcess);
+        if (!foldEnabled || !onToggleProcess) {
             return (
                 <>
-                    {firstProcessMessage ? renderMessage(firstProcessMessage, { hideAssistantBody: true }) : null}
-                    {toggle}
+                    {processMessages.map((message) => renderMessage(message))}
                     {summaryMessage ? renderMessage(summaryMessage) : null}
                 </>
             );
         }
 
+        const durationText = getTurnDurationText(assistantTurn);
+        const processLabel = t(summaryMessage ? 'chat.messageBody.activity.processed' : 'chat.messageBody.activity.process');
+        const headerToggle = (
+            <ProcessToggle
+                expanded={processExpanded}
+                onToggle={onToggleProcess}
+                label={processLabel}
+                durationText={durationText}
+                wrapColumn={false}
+            />
+        );
+
+        const collapseToggle = (
+            <ProcessToggle
+                key="process-collapse-toggle"
+                expanded
+                onToggle={onToggleProcess}
+                label={t('chat.messageBody.activity.collapse')}
+            />
+        );
+
+        if (!processExpanded) {
+            const firstProcessMessage = processMessages[0];
+            return (
+                <>
+                    {firstProcessMessage ? renderMessage(firstProcessMessage, {
+                        hideAssistantBody: true,
+                        assistantHeaderAddon: headerToggle,
+                    }) : null}
+                    {summaryMessage ? renderMessage(summaryMessage) : null}
+                </>
+            );
+        }
+
+        const firstProcessMessage = processMessages[0];
+        const remainingProcessMessages = processMessages.slice(1);
         return (
             <>
-                {processMessages.map((message) => renderMessage(message))}
-                {toggle}
+                {firstProcessMessage ? renderMessage(firstProcessMessage, {
+                    assistantHeaderAddon: headerToggle,
+                }) : null}
+                {remainingProcessMessages.map((message) => renderMessage(message))}
+                {collapseToggle}
                 {summaryMessage ? renderMessage(summaryMessage) : null}
             </>
         );
-    }, [onToggleProcess, processExpanded, renderMessage]);
+    }, [onToggleProcess, processExpanded, processFoldEnabled, renderMessage, t]);
 
     React.useLayoutEffect(() => {
         if (!stickyUserHeader || !hasDirectives) return;

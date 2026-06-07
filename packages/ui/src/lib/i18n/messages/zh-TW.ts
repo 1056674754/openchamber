@@ -1520,6 +1520,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.messageBody.activity.process': '處理過程',
   'chat.messageBody.activity.processing': '處理中',
   'chat.messageBody.activity.processed': '已處理',
+  'chat.messageBody.activity.collapse': '折疊',
   'chat.generatedResult.actions.copy': '複製',
   'chat.generatedResult.actions.copied': '已複製',
   'chat.generatedResult.commit.title': '生成的提交訊息',

@@ -1657,6 +1657,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.messageBody.activity.process': '처리 과정',
   'chat.messageBody.activity.processing': '처리 중',
   'chat.messageBody.activity.processed': '처리됨',
+  'chat.messageBody.activity.collapse': '접기',
   'chat.generatedResult.actions.copy': '복사',
   'chat.generatedResult.actions.copied': '복사됨',
   'chat.generatedResult.commit.title': '생성된 커밋 메시지',

@@ -147,6 +147,7 @@ interface ChatMessageProps {
     animateUserOnMount?: boolean;
     onUserAnimationConsumed?: (messageId: string) => void;
     hideAssistantBody?: boolean;
+    assistantHeaderAddon?: React.ReactNode;
 }
 
 const SystemDirectiveBanner: React.FC<{
@@ -286,6 +287,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
     animateUserOnMount = false,
     onUserAnimationConsumed,
     hideAssistantBody = false,
+    assistantHeaderAddon,
 }) => {
     const { isMobile, isTablet, hasTouchInput } = useDeviceInfo();
     const alwaysShowMessageActions = isMobile || isTablet;
@@ -1284,6 +1286,8 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                                 />
                             )}
 
+                            {assistantHeaderAddon}
+
                             {!hideAssistantBody ? (
                                 <MessageBody
                                     sessionId={message.info.sessionID}
@@ -1383,6 +1387,7 @@ export default React.memo(ChatMessage, (prev, next) => {
         && prev.activeStreamingPhase === next.activeStreamingPhase
         && prev.assistantHeaderMessageId === next.assistantHeaderMessageId
         && prev.hideAssistantBody === next.hideAssistantBody
+        && prev.assistantHeaderAddon === next.assistantHeaderAddon
         && prev.animateUserOnMount === next.animateUserOnMount
         && prev.onUserAnimationConsumed === next.onUserAnimationConsumed
         && areRelevantTurnGroupingContextsEqual(

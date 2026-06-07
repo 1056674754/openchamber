@@ -1622,6 +1622,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.messageBody.activity.process": "Процес",
   "chat.messageBody.activity.processing": "Обробка",
   "chat.messageBody.activity.processed": "Оброблено",
+  "chat.messageBody.activity.collapse": "Згорнути",
   "chat.generatedResult.actions.copy": "Копіювати",
   "chat.generatedResult.actions.copied": "Скопійовано",
   "chat.generatedResult.commit.title": "Згенероване повідомлення коміту",

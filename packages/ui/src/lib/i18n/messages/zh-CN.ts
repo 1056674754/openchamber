@@ -1623,6 +1623,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.messageBody.activity.process': '处理过程',
   'chat.messageBody.activity.processing': '处理中',
   'chat.messageBody.activity.processed': '已处理',
+  'chat.messageBody.activity.collapse': '折叠',
   'chat.generatedResult.actions.copy': '复制',
   'chat.generatedResult.actions.copied': '已复制',
   'chat.generatedResult.commit.title': '生成的提交消息',
