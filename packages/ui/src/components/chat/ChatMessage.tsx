@@ -146,6 +146,7 @@ interface ChatMessageProps {
     activeStreamingPhase?: StreamPhase | null;
     animateUserOnMount?: boolean;
     onUserAnimationConsumed?: (messageId: string) => void;
+    hideAssistantBody?: boolean;
 }
 
 const SystemDirectiveBanner: React.FC<{
@@ -284,6 +285,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
     activeStreamingPhase = null,
     animateUserOnMount = false,
     onUserAnimationConsumed,
+    hideAssistantBody = false,
 }) => {
     const { isMobile, isTablet, hasTouchInput } = useDeviceInfo();
     const alwaysShowMessageActions = isMobile || isTablet;
@@ -1282,38 +1284,40 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                                 />
                             )}
 
-                            <MessageBody
-                                sessionId={message.info.sessionID}
-                                messageId={message.info.id}
-                                parts={visibleParts}
-                                isUser={isUser}
-                                isMessageCompleted={isMessageCompleted}
-                                messageFinish={messageFinish}
-                                messageCompletedAt={messageCompletedAt ?? undefined}
-                                messageCreatedAt={messageCreatedAt ?? undefined}
-                                syntaxTheme={syntaxTheme}
-                                 isMobile={isMobile}
-                                 alwaysShowActions={alwaysShowMessageActions}
-                                 hasTouchInput={hasTouchInput}
-                                copiedCode={copiedCode}
-                                onCopyCode={handleCopyCode}
-                                expandedTools={effectiveExpandedTools}
-                                onToggleTool={handleToggleTool}
-                                onShowPopup={handleShowPopup}
-                                streamPhase={streamPhase}
-                                allowAnimation={allowAnimation}
-                                onContentChange={onContentChange}
-                                shouldShowHeader={shouldShowHeader}
-                                hasTextContent={hasTextContent}
-                                onCopyMessage={handleCopyMessage}
-                                copiedMessage={copiedMessage}
-                                onAuxiliaryContentComplete={handleAuxiliaryContentComplete}
-                                showReasoningTraces={showReasoningTraces}
-                                agentMention={agentMention}
-                                turnGroupingContext={turnGroupingContext}
-                                errorMessage={assistantErrorText}
-                                errorVariant={assistantErrorVariant}
-                            />
+                            {!hideAssistantBody ? (
+                                <MessageBody
+                                    sessionId={message.info.sessionID}
+                                    messageId={message.info.id}
+                                    parts={visibleParts}
+                                    isUser={isUser}
+                                    isMessageCompleted={isMessageCompleted}
+                                    messageFinish={messageFinish}
+                                    messageCompletedAt={messageCompletedAt ?? undefined}
+                                    messageCreatedAt={messageCreatedAt ?? undefined}
+                                    syntaxTheme={syntaxTheme}
+                                     isMobile={isMobile}
+                                     alwaysShowActions={alwaysShowMessageActions}
+                                     hasTouchInput={hasTouchInput}
+                                    copiedCode={copiedCode}
+                                    onCopyCode={handleCopyCode}
+                                    expandedTools={effectiveExpandedTools}
+                                    onToggleTool={handleToggleTool}
+                                    onShowPopup={handleShowPopup}
+                                    streamPhase={streamPhase}
+                                    allowAnimation={allowAnimation}
+                                    onContentChange={onContentChange}
+                                    shouldShowHeader={shouldShowHeader}
+                                    hasTextContent={hasTextContent}
+                                    onCopyMessage={handleCopyMessage}
+                                    copiedMessage={copiedMessage}
+                                    onAuxiliaryContentComplete={handleAuxiliaryContentComplete}
+                                    showReasoningTraces={showReasoningTraces}
+                                    agentMention={agentMention}
+                                    turnGroupingContext={turnGroupingContext}
+                                    errorMessage={assistantErrorText}
+                                    errorVariant={assistantErrorVariant}
+                                />
+                            ) : null}
 
                         </div>
                     )}
@@ -1378,6 +1382,7 @@ export default React.memo(ChatMessage, (prev, next) => {
         && prev.isInActiveTurn === next.isInActiveTurn
         && prev.activeStreamingPhase === next.activeStreamingPhase
         && prev.assistantHeaderMessageId === next.assistantHeaderMessageId
+        && prev.hideAssistantBody === next.hideAssistantBody
         && prev.animateUserOnMount === next.animateUserOnMount
         && prev.onUserAnimationConsumed === next.onUserAnimationConsumed
         && areRelevantTurnGroupingContextsEqual(

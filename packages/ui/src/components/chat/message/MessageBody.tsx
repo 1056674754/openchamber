@@ -7,6 +7,7 @@ import AssistantTextPart from './parts/AssistantTextPart';
 import ReasoningPart, { MergedReasoningPart } from './parts/ReasoningPart';
 import { MessageFilesDisplay } from '../FileAttachment';
 import { TurnChangedFilesDropdown } from '../TurnChangedFilesDropdown';
+import TurnActivity from '../components/TurnActivity';
 import type { ToolPart as ToolPartType } from '@opencode-ai/sdk/v2';
 import type { StreamPhase, ToolPopupContent, AgentMentionInfo } from './types';
 import type { TurnActivityRecord, TurnGroupingContext } from '../lib/turns/types';
@@ -41,7 +42,6 @@ import { ToolRevealOnMount } from './parts/ToolRevealOnMount';
 import { StaticToolRow } from './parts/ProgressiveGroup';
 import { getStaticGroupToolName, isExpandableTool, isStandaloneTool, isStaticTool } from './parts/toolRenderUtils';
 import { ToolCallGroup } from './parts/ToolCallGroup';
-import TurnActivity from '../components/TurnActivity';
 import { createProjectPlanFile } from '@/lib/openchamberConfig';
 import { resolveProjectForSessionDirectory } from '@/lib/projectResolution';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
@@ -604,6 +604,7 @@ const UserMessageBody = React.memo(({ sessionId, messageId, parts, isMobile, alw
                                 messageId={messageId}
                                 isMobile={isMobile}
                                 agentMention={mentionForPart}
+                                onShowPopup={onShowPopup}
                             />
                         </React.Fragment>
                     );
@@ -1432,12 +1433,12 @@ const AssistantMessageBody = React.memo(({
         };
     }, [activityPartsForTurn]);
 
-    const toggleActivityGroup = turnGroupingContext?.toggleGroup;
     const isActivityOwnerMessage = !isSortedRenderMode
         || !turnGroupingContext?.activityOwnerMessageId
         || turnGroupingContext.activityOwnerMessageId === messageId
         || hasAnchoredActivitySegments;
 
+    const toggleActivityGroup = turnGroupingContext?.toggleGroup;
     const shouldRenderActivityGroup = isSortedRenderMode
         && isActivityOwnerMessage
         && hasAnchoredActivitySegments
@@ -1547,6 +1548,14 @@ const AssistantMessageBody = React.memo(({
 
     const shouldRenderStandaloneActionsAfterContent = shouldShowStandaloneMessageActions && lastRenderableTextPartIndex < 0;
 
+    const turnDurationText = React.useMemo(() => {
+        if (!isLastAssistantInTurn || !hasStopFinish) return undefined;
+        const userCreatedAt = turnGroupingContext?.userMessageCreatedAt;
+        if (typeof userCreatedAt !== 'number' || typeof messageCompletedAt !== 'number') return undefined;
+        if (messageCompletedAt <= userCreatedAt) return undefined;
+        return formatTurnDuration(messageCompletedAt - userCreatedAt);
+    }, [isLastAssistantInTurn, hasStopFinish, turnGroupingContext?.userMessageCreatedAt, messageCompletedAt]);
+
     const renderedParts = React.useMemo(() => {
         const rendered: React.ReactNode[] = [];
 
@@ -1619,6 +1628,7 @@ const AssistantMessageBody = React.memo(({
                             streamPhase={effectiveStreamPhase}
                             chatRenderMode={chatRenderMode}
                             onContentChange={onContentChange}
+                            onShowPopup={onShowPopup}
                         />
                     </div>
                 );
@@ -1652,6 +1662,7 @@ const AssistantMessageBody = React.memo(({
                                 streamPhase={effectiveStreamPhase}
                                 chatRenderMode={chatRenderMode}
                                 onContentChange={onContentChange}
+                                onShowPopup={onShowPopup}
                             />
                         );
                     } else if (groupReasoningBlocks) {
@@ -1843,14 +1854,6 @@ const AssistantMessageBody = React.memo(({
         turnGroupingContext,
         visibleParts,
     ]);
-
-    const turnDurationText = React.useMemo(() => {
-        if (!isLastAssistantInTurn || !hasStopFinish) return undefined;
-        const userCreatedAt = turnGroupingContext?.userMessageCreatedAt;
-        if (typeof userCreatedAt !== 'number' || typeof messageCompletedAt !== 'number') return undefined;
-        if (messageCompletedAt <= userCreatedAt) return undefined;
-        return formatTurnDuration(messageCompletedAt - userCreatedAt);
-    }, [isLastAssistantInTurn, hasStopFinish, turnGroupingContext?.userMessageCreatedAt, messageCompletedAt]);
 
     const footerTimestamp = React.useMemo(() => {
         const timestamp = typeof messageCompletedAt === 'number' && messageCompletedAt > 0

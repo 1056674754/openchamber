@@ -17,7 +17,7 @@ import { streamPerfCount, streamPerfMeasure } from '@/stores/utils/streamDebug';
 import type { StreamPhase } from './message/types';
 import { normalizeParts } from './message/partUtils';
 
-const MESSAGE_LIST_VIRTUALIZE_THRESHOLD = 5;
+const MESSAGE_LIST_VIRTUALIZE_THRESHOLD = 40;
 const MESSAGE_LIST_OVERSCAN = 6;
 
 const estimateHistoryEntryHeight = (entry: RenderEntry | undefined): number => {
@@ -179,6 +179,27 @@ const getMessageId = (message: ChatMessageEntry | undefined): string | null => {
 const getMessageParentId = (message: ChatMessageEntry): string | null => {
     const parentID = (message.info as unknown as { parentID?: unknown }).parentID;
     return typeof parentID === 'string' && parentID.trim().length > 0 ? parentID : null;
+};
+
+const isInsideStuckStickyWrapper = (node: HTMLElement, containerRect: DOMRect): boolean => {
+    if (typeof window === 'undefined') {
+        return false;
+    }
+
+    const stickyWrapper = node.closest<HTMLElement>('[data-sticky-message-wrapper="true"]');
+    if (!stickyWrapper) {
+        return false;
+    }
+
+    const computed = window.getComputedStyle(stickyWrapper);
+    if (computed.position !== 'sticky') {
+        return false;
+    }
+
+    const rect = stickyWrapper.getBoundingClientRect();
+    const stickyTop = Number.parseFloat(computed.top);
+    const stuckTop = containerRect.top + (Number.isFinite(stickyTop) ? stickyTop : 0);
+    return rect.top <= stuckTop + 1;
 };
 
 const isUserShellMarkerMessage = (message: ChatMessageEntry | undefined): boolean => {
@@ -460,6 +481,10 @@ type RenderEntry =
 
 type TurnUiState = { isExpanded: boolean };
 
+interface RenderMessageOptions {
+    hideAssistantBody?: boolean;
+}
+
 
 
 interface MessageRowProps {
@@ -475,6 +500,7 @@ interface MessageRowProps {
     onContentChange: (reason?: ContentChangeReason) => void;
     animationHandlers: AnimationHandlers;
     scrollToBottom?: () => void;
+    hideAssistantBody?: boolean;
 }
 
 const MessageRow = React.memo<MessageRowProps>(({ 
@@ -490,6 +516,7 @@ const MessageRow = React.memo<MessageRowProps>(({
     onContentChange,
     animationHandlers,
     scrollToBottom,
+    hideAssistantBody,
 }) => {
     return (
         <ChatMessage
@@ -505,6 +532,7 @@ const MessageRow = React.memo<MessageRowProps>(({
             assistantHeaderMessageId={assistantHeaderMessageId}
             isInActiveTurn={isInActiveTurn}
             activeStreamingPhase={activeStreamingPhase}
+            hideAssistantBody={hideAssistantBody}
         />
     );
 }, (prev, next) => {
@@ -522,6 +550,7 @@ const MessageRow = React.memo<MessageRowProps>(({
         && prev.assistantHeaderMessageId === next.assistantHeaderMessageId
         && prev.isInActiveTurn === next.isInActiveTurn
         && prev.activeStreamingPhase === next.activeStreamingPhase
+        && prev.hideAssistantBody === next.hideAssistantBody
         && prev.animationHandlers?.onChunk === next.animationHandlers?.onChunk
         && prev.animationHandlers?.onComplete === next.animationHandlers?.onComplete
         && prev.animationHandlers?.onStreamingCandidate === next.animationHandlers?.onStreamingCandidate
@@ -724,7 +753,7 @@ const TurnBlock = React.memo(({
     }, [turn.diffStats, turn.hasReasoning, turn.hasTools, turn.headerMessageId, turn.summaryText, turn.turnId, turn.userMessage.info, visibleActivityParts, visibleActivitySegments]);
 
     const renderMessage = React.useCallback(
-        (message: ChatMessageEntry) => {
+        (message: ChatMessageEntry, options?: RenderMessageOptions) => {
             const messageRole = resolveMessageRole(message);
             const isUserMessage = messageRole === 'user';
             const messageIndex = messageOrder.lookup.get(message.info.id);
@@ -732,11 +761,8 @@ const TurnBlock = React.memo(({
             const isAssistantMessage = assistantIndex >= 0;
             const isFirstAssistant = assistantIndex === 0;
             const isLastAssistant = assistantIndex === visibleAssistantMessages.length - 1;
-            const isActivityOwner = Boolean(activityOwnerMessageId) && message.info.id === activityOwnerMessageId;
             const hasAnchoredActivitySegment = visibleActivitySegments.some((segment) => segment.anchorMessageId === message.info.id);
-            const shouldAttachFullTurnContext = chatRenderMode === 'sorted'
-                ? isAssistantMessage
-                : (isActivityOwner || isFirstAssistant || isLastAssistant);
+            const shouldAttachFullTurnContext = isAssistantMessage;
             const assistantHeaderMessageId = visibleAssistantMessages[0]?.info.id ?? turn.headerMessageId;
 
             const previousMessage = isUserMessage
@@ -792,6 +818,7 @@ const TurnBlock = React.memo(({
                     onContentChange={onMessageContentChange}
                     animationHandlers={getAnimationHandlers(message.info.id)}
                     scrollToBottom={scrollToBottom}
+                    hideAssistantBody={options?.hideAssistantBody}
                 />
             );
         },
@@ -840,6 +867,8 @@ const TurnBlock = React.memo(({
             stickyUserHeader={stickyUserHeader}
             renderMessage={renderMessage}
             directiveTurns={directiveTurns}
+            processExpanded={turnUiState.isExpanded}
+            onToggleProcess={handleToggleTurnGroup}
         />
     );
 });
@@ -1028,6 +1057,7 @@ const StaticHistoryList: React.FC<{
     shouldVirtualize: boolean;
     virtualRows: VirtualItem[];
     totalSize: number;
+    scrollMargin: number;
     measureElement: (element: HTMLDivElement | null) => void;
     contentRef: React.RefObject<HTMLDivElement | null>;
     onMessageContentChange: (reason?: ContentChangeReason) => void;
@@ -1041,7 +1071,7 @@ const StaticHistoryList: React.FC<{
     shouldAnimateUserMessage: (message: ChatMessageEntry) => boolean;
     onUserAnimationConsumed: (messageId: string) => void;
     activeStreamingPhase?: StreamPhase | null;
-}> = ({ entries, shouldVirtualize, virtualRows, totalSize, measureElement, contentRef, onMessageContentChange, getAnimationHandlers, scrollToBottom, stickyUserHeader, defaultActivityExpanded, turnUiStates, onToggleTurnGroup, chatRenderMode, shouldAnimateUserMessage, onUserAnimationConsumed, activeStreamingPhase }) => {
+}> = ({ entries, shouldVirtualize, virtualRows, totalSize, scrollMargin, measureElement, contentRef, onMessageContentChange, getAnimationHandlers, scrollToBottom, stickyUserHeader, defaultActivityExpanded, turnUiStates, onToggleTurnGroup, chatRenderMode, shouldAnimateUserMessage, onUserAnimationConsumed, activeStreamingPhase }) => {
     const renderEntry = React.useCallback((entry: RenderEntry) => {
         return (
             <MessageListEntry
@@ -1065,10 +1095,10 @@ const StaticHistoryList: React.FC<{
     }, [activeStreamingPhase, chatRenderMode, defaultActivityExpanded, getAnimationHandlers, onMessageContentChange, onToggleTurnGroup, onUserAnimationConsumed, scrollToBottom, shouldAnimateUserMessage, stickyUserHeader, turnUiStates]);
 
     const paddingTop = shouldVirtualize && virtualRows.length > 0
-        ? virtualRows[0]?.start ?? 0
+        ? Math.max(0, (virtualRows[0]?.start ?? 0) - scrollMargin)
         : 0;
     const paddingBottom = shouldVirtualize && virtualRows.length > 0
-        ? Math.max(0, totalSize - (virtualRows[virtualRows.length - 1]?.end ?? 0))
+        ? Math.max(0, totalSize - ((virtualRows[virtualRows.length - 1]?.end ?? 0) - scrollMargin))
         : 0;
 
     if (!shouldVirtualize) {
@@ -1209,7 +1239,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
     const stickyUserHeader = useUIStore(state => state.stickyUserHeader);
     const chatRenderMode = useUIStore((state) => state.chatRenderMode);
     const activityRenderMode = useUIStore((state) => state.activityRenderMode);
-    const defaultActivityExpanded = activityRenderMode === 'summary';
+    const defaultActivityExpanded = false;
     const [turnUiStates, setTurnUiStates] = React.useState<Map<string, TurnUiState>>(() => new Map());
     const userAnimationRef = React.useRef<{
         sessionKey: string | undefined;
@@ -1224,7 +1254,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
 
     React.useEffect(() => {
         setTurnUiStates(new Map());
-    }, [activityRenderMode]);
+    }, [activityRenderMode, chatRenderMode]);
 
     const toggleTurnGroup = React.useCallback((turnId: string) => {
         setTurnUiStates((previous) => {
@@ -1307,7 +1337,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
 
     const { projection, staticTurns, streamingTurn } = useTurnRecords(displayMessages, {
         sessionKey,
-        showTextJustificationActivity: chatRenderMode === 'sorted',
+        showTextJustificationActivity: true,
     });
 
     const buildUngroupedEntry = React.useCallback((message: ChatMessageEntry, index: number, nextMessage?: ChatMessageEntry): RenderEntry => {
@@ -1509,9 +1539,12 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
     }
 
     const historyEntries = staticRenderEntries;
-    const shouldVirtualizeHistory = historyEntries.length >= MESSAGE_LIST_VIRTUALIZE_THRESHOLD;
+    // The "load older" turn window is intentionally small; virtualizing it makes
+    // estimate/measure lag visible as spacer gaps while prepending history.
+    const shouldVirtualizeHistory = historyEntries.length >= MESSAGE_LIST_VIRTUALIZE_THRESHOLD && turnStart <= 0;
     const previousHistoryLenRef = React.useRef(historyEntries.length);
     const previousFirstEntryKeyRef = React.useRef(historyEntries[0]?.key);
+    const [historyScrollMargin, setHistoryScrollMargin] = React.useState(0);
 
     React.useLayoutEffect(() => {
         const previousLen = previousHistoryLenRef.current;
@@ -1553,8 +1586,32 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         measureElement: measureVirtualElement,
         useAnimationFrameWithResizeObserver: true,
         overscan: MESSAGE_LIST_OVERSCAN,
+        scrollMargin: historyScrollMargin,
         enabled: shouldVirtualizeHistory,
     });
+
+    React.useLayoutEffect(() => {
+        if (!shouldVirtualizeHistory) {
+            setHistoryScrollMargin((previous) => (previous === 0 ? previous : 0));
+            return;
+        }
+
+        const historyContent = historyContentRef.current;
+        const scrollEl = resolveScrollContainer();
+        if (!historyContent || !scrollEl) {
+            return;
+        }
+
+        const nextMargin = Math.max(
+            0,
+            historyContent.getBoundingClientRect().top
+                - scrollEl.getBoundingClientRect().top
+                + scrollEl.scrollTop,
+        );
+        setHistoryScrollMargin((previous) => (
+            Math.abs(previous - nextMargin) < 1 ? previous : nextMargin
+        ));
+    }, [hasMoreAbove, historyEntries.length, isLoadingOlder, resolveScrollContainer, shouldVirtualizeHistory, turnStart]);
 
     React.useLayoutEffect(() => {
         const historyContent = historyContentRef.current;
@@ -1580,7 +1637,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
             return;
         }
         historyVirtualizer.measure();
-    }, [historyVirtualizer, shouldVirtualizeHistory]);
+    }, [historyEntries.length, historyVirtualizer, shouldVirtualizeHistory]);
 
     const scheduleVirtualMeasure = React.useCallback(() => {
         if (!shouldVirtualizeHistory) {
@@ -1607,9 +1664,10 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         };
     }, []);
 
+    const historyTotalSize = historyVirtualizer.getTotalSize();
     const historyVirtualRows = React.useMemo(
-        () => (shouldVirtualizeHistory ? historyVirtualizer.getVirtualItems() : []),
-        [historyVirtualizer, shouldVirtualizeHistory],
+        () => (shouldVirtualizeHistory && historyTotalSize >= 0 ? historyVirtualizer.getVirtualItems() : []),
+        [historyTotalSize, historyVirtualizer, shouldVirtualizeHistory],
     );
 
     const allEntries = React.useMemo(() => {
@@ -1789,20 +1847,26 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
 
                 const containerRect = container.getBoundingClientRect();
                 const nodes: HTMLElement[] = Array.from(container.querySelectorAll<HTMLElement>('[data-message-id]'));
-                const firstVisible = nodes.find((node) => {
+                const isVisibleAnchorCandidate = (node: HTMLElement, allowStuckSticky: boolean): boolean => {
                     const rect = node.getBoundingClientRect();
                     if (rect.bottom <= containerRect.top + 1) {
                         return false;
                     }
+                    if (rect.top >= containerRect.bottom - 1) {
+                        return false;
+                    }
 
-                    if (typeof window === 'undefined') {
+                    if (allowStuckSticky || typeof window === 'undefined') {
                         return true;
                     }
 
                     const computed = window.getComputedStyle(node);
                     const isStuckSticky = computed.position === 'sticky' && rect.top <= containerRect.top + 1;
-                    return !isStuckSticky;
-                }) ?? nodes.find((node) => node.getBoundingClientRect().bottom > containerRect.top + 1);
+                    return !isStuckSticky && !isInsideStuckStickyWrapper(node, containerRect);
+                };
+
+                const firstVisible = nodes.find((node) => isVisibleAnchorCandidate(node, false))
+                    ?? nodes.find((node) => isVisibleAnchorCandidate(node, true));
                 if (!firstVisible) {
                     return null;
                 }
@@ -1876,7 +1940,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         return () => {
             objectRef.current = null;
         };
-    }, [findMessageElement, historyEntries.length, messageIndexMap, resolveScrollContainer, scrollHistoryIndexIntoView, scrollMessageElementIntoView, trailingStreamingEntry, turnIndexMap, ref]);
+    }, [findMessageElement, historyEntries.length, historyVirtualizer, messageIndexMap, resolveScrollContainer, scrollHistoryIndexIntoView, scrollMessageElementIntoView, shouldVirtualizeHistory, trailingStreamingEntry, turnIndexMap, ref]);
 
     const disableFadeIn = false;
 
@@ -1906,7 +1970,8 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
                             entries={historyEntries}
                             shouldVirtualize={shouldVirtualizeHistory}
                             virtualRows={historyVirtualRows}
-                            totalSize={historyVirtualizer.getTotalSize()}
+                            totalSize={historyTotalSize}
+                            scrollMargin={historyScrollMargin}
                             measureElement={historyVirtualizer.measureElement}
                             contentRef={historyContentRef}
                             onMessageContentChange={stableHistoryContentChange}
