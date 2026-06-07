@@ -1,7 +1,8 @@
 import React from 'react';
 
 import { Icon } from '@/components/icon/Icon';
-import type { ChatMessageEntry, Turn, TurnRecord } from '../lib/turns/types';
+import type { ChatMessageEntry, TurnRecord } from '../lib/turns/types';
+import { formatTurnDuration } from '../lib/turns/duration';
 import { useI18n } from '@/lib/i18n';
 
 interface RenderMessageOptions {
@@ -9,7 +10,7 @@ interface RenderMessageOptions {
 }
 
 interface TurnItemProps {
-    turn: Turn;
+    turn: TurnRecord;
     stickyUserHeader?: boolean;
     renderMessage: (message: ChatMessageEntry, options?: RenderMessageOptions) => React.ReactNode;
     directiveTurns?: TurnRecord[];
@@ -56,11 +57,26 @@ const splitProcessMessages = (messages: ChatMessageEntry[]) => {
     };
 };
 
+const getTurnDurationText = (turn: TurnRecord): string | undefined => {
+    const durationMs = turn.durationMs ?? (
+        typeof turn.startedAt === 'number' && typeof turn.completedAt === 'number' && turn.completedAt >= turn.startedAt
+            ? turn.completedAt - turn.startedAt
+            : undefined
+    );
+    if (typeof durationMs !== 'number' || !Number.isFinite(durationMs) || durationMs < 0) {
+        return undefined;
+    }
+    return formatTurnDuration(durationMs);
+};
+
 const ProcessToggle: React.FC<{
     expanded: boolean;
     onToggle: () => void;
-}> = ({ expanded, onToggle }) => {
+    processed: boolean;
+    durationText?: string;
+}> = ({ expanded, onToggle, processed, durationText }) => {
     const { t } = useI18n();
+    const label = t(processed ? 'chat.messageBody.activity.processed' : 'chat.messageBody.activity.process');
 
     return (
         <div className="chat-message-column">
@@ -71,7 +87,7 @@ const ProcessToggle: React.FC<{
                 onClick={onToggle}
             >
                 <span className="typography-ui-label font-semibold">
-                    {t('chat.messageBody.activity.process')}
+                    {durationText ? `${label} ${durationText}` : label}
                 </span>
                 <Icon name={expanded ? 'arrow-up-s' : 'arrow-down-s'} className="h-3.5 w-3.5" />
             </button>
@@ -91,7 +107,8 @@ const TurnItem: React.FC<TurnItemProps> = ({
     const userRef = React.useRef<HTMLDivElement | null>(null);
 
     const hasDirectives = directiveTurns && directiveTurns.length > 0;
-    const renderAssistantMessages = React.useCallback((assistantMessages: ChatMessageEntry[]) => {
+    const renderAssistantMessages = React.useCallback((assistantTurn: TurnRecord) => {
+        const assistantMessages = assistantTurn.assistantMessages;
         const { processMessages, summaryMessage } = splitProcessMessages(assistantMessages);
         if (processMessages.length === 0) {
             return summaryMessage ? renderMessage(summaryMessage) : null;
@@ -102,6 +119,8 @@ const TurnItem: React.FC<TurnItemProps> = ({
                 key="process-toggle"
                 expanded={processExpanded}
                 onToggle={onToggleProcess}
+                processed={Boolean(summaryMessage)}
+                durationText={getTurnDurationText(assistantTurn)}
             />
         ) : null;
 
@@ -191,7 +210,7 @@ const TurnItem: React.FC<TurnItemProps> = ({
             )}
 
             <div className="relative z-0">
-                {renderAssistantMessages(turn.assistantMessages)}
+                {renderAssistantMessages(turn)}
             </div>
 
             {hasDirectives && directiveTurns.map((dTurn) => (
@@ -208,7 +227,7 @@ const TurnItem: React.FC<TurnItemProps> = ({
                         renderMessage(dTurn.userMessage)
                     )}
                     <div className="relative z-0">
-                        {renderAssistantMessages(dTurn.assistantMessages)}
+                        {renderAssistantMessages(dTurn)}
                     </div>
                 </div>
             ))}

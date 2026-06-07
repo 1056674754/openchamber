@@ -11,6 +11,7 @@ import TurnActivity from '../components/TurnActivity';
 import type { ToolPart as ToolPartType } from '@opencode-ai/sdk/v2';
 import type { StreamPhase, ToolPopupContent, AgentMentionInfo } from './types';
 import type { TurnActivityRecord, TurnGroupingContext } from '../lib/turns/types';
+import { formatTurnDuration } from '../lib/turns/duration';
 import { cn } from '@/lib/utils';
 import { isEmptyTextPart, extractTextContent } from './partUtils';
 import { FadeInOnReveal } from './FadeInOnReveal';
@@ -286,16 +287,6 @@ const UserShellActionPart: React.FC<{ part: ShellActionPartLike }> = ({ part }) 
             ) : null}
         </div>
     );
-};
-
-const formatTurnDuration = (durationMs: number): string => {
-    const totalSeconds = durationMs / 1000;
-    if (totalSeconds < 60) {
-        return `${totalSeconds.toFixed(1)}s`;
-    }
-    const minutes = Math.floor(totalSeconds / 60);
-    const seconds = Math.round(totalSeconds % 60);
-    return `${minutes}m ${seconds}s`;
 };
 
 interface MessageBodyProps {
