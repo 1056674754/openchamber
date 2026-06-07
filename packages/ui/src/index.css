@@ -40,6 +40,26 @@ button,
   animation: none !important;
 }
 
+@media (prefers-reduced-motion: no-preference) {
+  [data-process-fold-region="true"] {
+    isolation: isolate;
+    overflow-anchor: none;
+  }
+
+  [data-process-fold-content="body"] {
+    overflow-anchor: none;
+  }
+
+  [data-process-fold-region="true"][data-process-fold-expanded="false"] > [data-process-fold-content="body"] [data-process-fold-content="primary"],
+  [data-process-fold-region="true"][data-process-fold-expanded="false"] > [data-process-fold-content="body"] > [data-process-fold-content="tail"] {
+    height: 0;
+    overflow: clip;
+    opacity: 0;
+    pointer-events: none;
+  }
+
+}
+
 /* Suppress WebKit-specific hover/focus adornments on the chat textarea */
 textarea[data-chat-input="true"] {
   -webkit-appearance: none;

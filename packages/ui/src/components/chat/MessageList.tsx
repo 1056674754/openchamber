@@ -483,6 +483,7 @@ type RenderEntry =
         key: string;
         turn: TurnRecord;
         isLastTurn: boolean;
+        lastTurnId: string | null;
         // [sscity-mod] Directive turns that immediately follow this real user
         // turn. They render inside the same <section> so that the real user's
         // sticky header stays active while scrolling through directive content.
@@ -494,6 +495,8 @@ type TurnUiState = { isExpanded: boolean };
 interface RenderMessageOptions {
     hideAssistantBody?: boolean;
     assistantHeaderAddon?: React.ReactNode;
+    assistantBodyProcessFoldContent?: boolean;
+    assistantBodyProcessFoldCollapsed?: boolean;
 }
 
 
@@ -513,6 +516,8 @@ interface MessageRowProps {
     scrollToBottom?: () => void;
     hideAssistantBody?: boolean;
     assistantHeaderAddon?: React.ReactNode;
+    assistantBodyProcessFoldContent?: boolean;
+    assistantBodyProcessFoldCollapsed?: boolean;
 }
 
 const MessageRow = React.memo<MessageRowProps>(({ 
@@ -530,6 +535,8 @@ const MessageRow = React.memo<MessageRowProps>(({
     scrollToBottom,
     hideAssistantBody,
     assistantHeaderAddon,
+    assistantBodyProcessFoldContent,
+    assistantBodyProcessFoldCollapsed,
 }) => {
     return (
         <ChatMessage
@@ -547,6 +554,8 @@ const MessageRow = React.memo<MessageRowProps>(({
             activeStreamingPhase={activeStreamingPhase}
             hideAssistantBody={hideAssistantBody}
             assistantHeaderAddon={assistantHeaderAddon}
+            assistantBodyProcessFoldContent={assistantBodyProcessFoldContent}
+            assistantBodyProcessFoldCollapsed={assistantBodyProcessFoldCollapsed}
         />
     );
 }, (prev, next) => {
@@ -566,6 +575,8 @@ const MessageRow = React.memo<MessageRowProps>(({
         && prev.activeStreamingPhase === next.activeStreamingPhase
         && prev.hideAssistantBody === next.hideAssistantBody
         && prev.assistantHeaderAddon === next.assistantHeaderAddon
+        && prev.assistantBodyProcessFoldContent === next.assistantBodyProcessFoldContent
+        && prev.assistantBodyProcessFoldCollapsed === next.assistantBodyProcessFoldCollapsed
         && prev.animationHandlers?.onChunk === next.animationHandlers?.onChunk
         && prev.animationHandlers?.onComplete === next.animationHandlers?.onComplete
         && prev.animationHandlers?.onStreamingCandidate === next.animationHandlers?.onStreamingCandidate
@@ -580,6 +591,7 @@ MessageRow.displayName = 'MessageRow';
 interface TurnBlockProps {
     turn: TurnRecord;
     isLastTurn: boolean;
+    lastTurnId: string | null;
     sessionIsWorking: boolean;
     defaultActivityExpanded: boolean;
     autoExpandedTurnIds: Set<string>;
@@ -600,6 +612,7 @@ interface TurnBlockProps {
 const TurnBlock = React.memo(({
     turn,
     isLastTurn,
+    lastTurnId,
     sessionIsWorking,
     defaultActivityExpanded,
     autoExpandedTurnIds,
@@ -616,13 +629,20 @@ const TurnBlock = React.memo(({
     activeStreamingPhase,
     directiveTurns,
 }: TurnBlockProps) => {
-    const isLiveIncompleteTurn = isLastTurn
-        && sessionIsWorking
-        && !turnHasStopSummary(turn);
-    const isAutoExpandedIncompleteTurn = autoExpandedTurnIds.has(turn.turnId) && !turnHasStopSummary(turn);
-    const shouldRenderProcessFold = !isLiveIncompleteTurn && !isAutoExpandedIncompleteTurn;
-    const defaultTurnExpanded = defaultActivityExpanded || isAutoExpandedIncompleteTurn || isLiveIncompleteTurn;
-    const isTurnExpanded = turnUiStates.get(turn.turnId)?.isExpanded ?? defaultTurnExpanded;
+    const getProcessFoldState = React.useCallback((targetTurn: TurnRecord) => {
+        const hasStopSummary = turnHasStopSummary(targetTurn);
+        const isLiveIncompleteTurn = targetTurn.turnId === lastTurnId
+            && sessionIsWorking
+            && !hasStopSummary;
+        const isAutoExpandedIncompleteTurn = autoExpandedTurnIds.has(targetTurn.turnId) && !hasStopSummary;
+        const defaultTurnExpanded = defaultActivityExpanded || isAutoExpandedIncompleteTurn || isLiveIncompleteTurn;
+        return {
+            expanded: defaultTurnExpanded,
+            enabled: !isLiveIncompleteTurn && !isAutoExpandedIncompleteTurn,
+        };
+    }, [autoExpandedTurnIds, defaultActivityExpanded, lastTurnId, sessionIsWorking]);
+
+    const isTurnExpanded = turnUiStates.get(turn.turnId)?.isExpanded ?? defaultActivityExpanded;
     const handleToggleTurnGroup = React.useCallback(() => {
         onToggleTurnGroup(turn.turnId, isTurnExpanded);
     }, [isTurnExpanded, onToggleTurnGroup, turn.turnId]);
@@ -843,6 +863,8 @@ const TurnBlock = React.memo(({
                     scrollToBottom={scrollToBottom}
                     hideAssistantBody={options?.hideAssistantBody}
                     assistantHeaderAddon={options?.assistantHeaderAddon}
+                    assistantBodyProcessFoldContent={options?.assistantBodyProcessFoldContent}
+                    assistantBodyProcessFoldCollapsed={options?.assistantBodyProcessFoldCollapsed}
                 />
             );
         },
@@ -891,9 +913,7 @@ const TurnBlock = React.memo(({
             stickyUserHeader={stickyUserHeader}
             renderMessage={renderMessage}
             directiveTurns={directiveTurns}
-            processExpanded={shouldRenderProcessFold ? isTurnExpanded : true}
-            processFoldEnabled={shouldRenderProcessFold}
-            onToggleProcess={shouldRenderProcessFold ? handleToggleTurnGroup : undefined}
+            getProcessFoldState={getProcessFoldState}
         />
     );
 });
@@ -1058,6 +1078,7 @@ const MessageListEntry = React.memo(({
         <TurnBlock
             turn={entry.turn}
             isLastTurn={entry.isLastTurn}
+            lastTurnId={entry.lastTurnId}
             sessionIsWorking={sessionIsWorking}
             defaultActivityExpanded={defaultActivityExpanded}
             autoExpandedTurnIds={autoExpandedTurnIds}
@@ -1092,6 +1113,7 @@ const StaticHistoryList: React.FC<{
     getAnimationHandlers: (messageId: string) => AnimationHandlers;
     scrollToBottom?: () => void;
     stickyUserHeader: boolean;
+    sessionIsWorking: boolean;
     defaultActivityExpanded: boolean;
     autoExpandedTurnIds: Set<string>;
     turnUiStates: Map<string, TurnUiState>;
@@ -1100,7 +1122,7 @@ const StaticHistoryList: React.FC<{
     shouldAnimateUserMessage: (message: ChatMessageEntry) => boolean;
     onUserAnimationConsumed: (messageId: string) => void;
     activeStreamingPhase?: StreamPhase | null;
-}> = ({ entries, shouldVirtualize, virtualRows, totalSize, scrollMargin, measureElement, contentRef, onMessageContentChange, getAnimationHandlers, scrollToBottom, stickyUserHeader, defaultActivityExpanded, autoExpandedTurnIds, turnUiStates, onToggleTurnGroup, chatRenderMode, shouldAnimateUserMessage, onUserAnimationConsumed, activeStreamingPhase }) => {
+}> = ({ entries, shouldVirtualize, virtualRows, totalSize, scrollMargin, measureElement, contentRef, onMessageContentChange, getAnimationHandlers, scrollToBottom, stickyUserHeader, sessionIsWorking, defaultActivityExpanded, autoExpandedTurnIds, turnUiStates, onToggleTurnGroup, chatRenderMode, shouldAnimateUserMessage, onUserAnimationConsumed, activeStreamingPhase }) => {
     const renderEntry = React.useCallback((entry: RenderEntry) => {
         return (
             <MessageListEntry
@@ -1110,7 +1132,7 @@ const StaticHistoryList: React.FC<{
                 getAnimationHandlers={getAnimationHandlers}
                 scrollToBottom={scrollToBottom}
                 stickyUserHeader={stickyUserHeader}
-                sessionIsWorking={false}
+                sessionIsWorking={sessionIsWorking}
                 defaultActivityExpanded={defaultActivityExpanded}
                 autoExpandedTurnIds={autoExpandedTurnIds}
                 turnUiStates={turnUiStates}
@@ -1122,7 +1144,7 @@ const StaticHistoryList: React.FC<{
                 activeStreamingPhase={activeStreamingPhase}
             />
         );
-    }, [activeStreamingPhase, autoExpandedTurnIds, chatRenderMode, defaultActivityExpanded, getAnimationHandlers, onMessageContentChange, onToggleTurnGroup, onUserAnimationConsumed, scrollToBottom, shouldAnimateUserMessage, stickyUserHeader, turnUiStates]);
+    }, [activeStreamingPhase, autoExpandedTurnIds, chatRenderMode, defaultActivityExpanded, getAnimationHandlers, onMessageContentChange, onToggleTurnGroup, onUserAnimationConsumed, scrollToBottom, sessionIsWorking, shouldAnimateUserMessage, stickyUserHeader, turnUiStates]);
 
     const paddingTop = shouldVirtualize && virtualRows.length > 0
         ? Math.max(0, (virtualRows[0]?.start ?? 0) - scrollMargin)
@@ -1441,6 +1463,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
                 key: `turn:${turn.turnId}`,
                 turn,
                 isLastTurn: turn.turnId === projection.lastTurnId,
+                lastTurnId: projection.lastTurnId,
             };
             if (!turn.isDirectiveTurn) {
                 realUserEntryByTurnId.set(turn.turnId, entry);
@@ -1553,6 +1576,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
                 key: `turn:${streamingTurn.turnId}`,
                 turn: streamingTurn,
                 isLastTurn: streamingTurn.turnId === projection.lastTurnId,
+                lastTurnId: projection.lastTurnId,
             } satisfies RenderEntry;
         }
 
@@ -1699,6 +1723,13 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         }
         historyVirtualizer.measure();
     }, [historyEntries.length, historyVirtualizer, shouldVirtualizeHistory]);
+
+    React.useLayoutEffect(() => {
+        if (!shouldVirtualizeHistory) {
+            return;
+        }
+        historyVirtualizer.measure();
+    }, [autoExpandedTurnIds, historyVirtualizer, shouldVirtualizeHistory, turnUiStates]);
 
     const scheduleVirtualMeasure = React.useCallback(() => {
         if (!shouldVirtualizeHistory) {
@@ -2039,6 +2070,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
                             getAnimationHandlers={stableGetAnimationHandlers}
                             scrollToBottom={stableScrollToBottom}
                             stickyUserHeader={stickyUserHeader}
+                            sessionIsWorking={sessionIsWorking}
                             defaultActivityExpanded={defaultActivityExpanded}
                             autoExpandedTurnIds={autoExpandedTurnIds}
                             turnUiStates={turnUiStates}

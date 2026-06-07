@@ -148,6 +148,8 @@ interface ChatMessageProps {
     onUserAnimationConsumed?: (messageId: string) => void;
     hideAssistantBody?: boolean;
     assistantHeaderAddon?: React.ReactNode;
+    assistantBodyProcessFoldContent?: boolean;
+    assistantBodyProcessFoldCollapsed?: boolean;
 }
 
 const SystemDirectiveBanner: React.FC<{
@@ -288,6 +290,8 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
     onUserAnimationConsumed,
     hideAssistantBody = false,
     assistantHeaderAddon,
+    assistantBodyProcessFoldContent = false,
+    assistantBodyProcessFoldCollapsed = false,
 }) => {
     const { isMobile, isTablet, hasTouchInput } = useDeviceInfo();
     const alwaysShowMessageActions = isMobile || isTablet;
@@ -1149,6 +1153,40 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
         ? (stickyUserHeader ? (isMobile ? 'pt-4' : 'pt-6') : 'pt-0')
         : 'pt-0';
     const userMessageRadius = 'var(--radius-xl)';
+    const assistantBodyElement = !isUser ? (
+        <MessageBody
+            sessionId={message.info.sessionID}
+            messageId={message.info.id}
+            parts={visibleParts}
+            isUser={isUser}
+            isMessageCompleted={isMessageCompleted}
+            messageFinish={messageFinish}
+            messageCompletedAt={messageCompletedAt ?? undefined}
+            messageCreatedAt={messageCreatedAt ?? undefined}
+            syntaxTheme={syntaxTheme}
+            isMobile={isMobile}
+            alwaysShowActions={alwaysShowMessageActions}
+            hasTouchInput={hasTouchInput}
+            copiedCode={copiedCode}
+            onCopyCode={handleCopyCode}
+            expandedTools={effectiveExpandedTools}
+            onToggleTool={handleToggleTool}
+            onShowPopup={handleShowPopup}
+            streamPhase={streamPhase}
+            allowAnimation={allowAnimation}
+            onContentChange={onContentChange}
+            shouldShowHeader={shouldShowHeader}
+            hasTextContent={hasTextContent}
+            onCopyMessage={handleCopyMessage}
+            copiedMessage={copiedMessage}
+            onAuxiliaryContentComplete={handleAuxiliaryContentComplete}
+            showReasoningTraces={showReasoningTraces}
+            agentMention={agentMention}
+            turnGroupingContext={turnGroupingContext}
+            errorMessage={assistantErrorText}
+            errorVariant={assistantErrorVariant}
+        />
+    ) : null;
 
     return (
         <>
@@ -1289,38 +1327,14 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                             {assistantHeaderAddon}
 
                             {!hideAssistantBody ? (
-                                <MessageBody
-                                    sessionId={message.info.sessionID}
-                                    messageId={message.info.id}
-                                    parts={visibleParts}
-                                    isUser={isUser}
-                                    isMessageCompleted={isMessageCompleted}
-                                    messageFinish={messageFinish}
-                                    messageCompletedAt={messageCompletedAt ?? undefined}
-                                    messageCreatedAt={messageCreatedAt ?? undefined}
-                                    syntaxTheme={syntaxTheme}
-                                     isMobile={isMobile}
-                                     alwaysShowActions={alwaysShowMessageActions}
-                                     hasTouchInput={hasTouchInput}
-                                    copiedCode={copiedCode}
-                                    onCopyCode={handleCopyCode}
-                                    expandedTools={effectiveExpandedTools}
-                                    onToggleTool={handleToggleTool}
-                                    onShowPopup={handleShowPopup}
-                                    streamPhase={streamPhase}
-                                    allowAnimation={allowAnimation}
-                                    onContentChange={onContentChange}
-                                    shouldShowHeader={shouldShowHeader}
-                                    hasTextContent={hasTextContent}
-                                    onCopyMessage={handleCopyMessage}
-                                    copiedMessage={copiedMessage}
-                                    onAuxiliaryContentComplete={handleAuxiliaryContentComplete}
-                                    showReasoningTraces={showReasoningTraces}
-                                    agentMention={agentMention}
-                                    turnGroupingContext={turnGroupingContext}
-                                    errorMessage={assistantErrorText}
-                                    errorVariant={assistantErrorVariant}
-                                />
+                                assistantBodyProcessFoldContent ? (
+                                    <div
+                                        data-process-fold-content="primary"
+                                        aria-hidden={assistantBodyProcessFoldCollapsed ? 'true' : undefined}
+                                    >
+                                        {assistantBodyElement}
+                                    </div>
+                                ) : assistantBodyElement
                             ) : null}
 
                         </div>
@@ -1388,6 +1402,8 @@ export default React.memo(ChatMessage, (prev, next) => {
         && prev.assistantHeaderMessageId === next.assistantHeaderMessageId
         && prev.hideAssistantBody === next.hideAssistantBody
         && prev.assistantHeaderAddon === next.assistantHeaderAddon
+        && prev.assistantBodyProcessFoldContent === next.assistantBodyProcessFoldContent
+        && prev.assistantBodyProcessFoldCollapsed === next.assistantBodyProcessFoldCollapsed
         && prev.animateUserOnMount === next.animateUserOnMount
         && prev.onUserAnimationConsumed === next.onUserAnimationConsumed
         && areRelevantTurnGroupingContextsEqual(
