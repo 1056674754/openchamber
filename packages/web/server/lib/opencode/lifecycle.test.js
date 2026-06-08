@@ -94,8 +94,6 @@ const createRuntime = (overrides = {}) => {
     applyOpencodeBinaryFromSettings: vi.fn(async () => null),
     ensureOpencodeCliEnv: vi.fn(),
     ensureLocalOpenCodeServerPassword: vi.fn(async () => 'password'),
-    buildWslExecArgs: vi.fn((args) => args),
-    resolveWslExecutablePath: vi.fn(),
     resolveManagedOpenCodeLaunchSpec: vi.fn((binary) => ({ binary, args: [], wrapperType: null })),
     setOpenCodePort: vi.fn((port) => {
       state.openCodePort = port;

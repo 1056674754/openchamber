@@ -631,15 +631,6 @@ const ENV_DESKTOP_NOTIFY = (() => {
   const argv1 = typeof process.argv?.[1] === 'string' ? process.argv[1] : '';
   return /openchamber-server/i.test(argv0) || /openchamber-server/i.test(argv1);
 })();
-const ENV_CONFIGURED_OPENCODE_WSL_DISTRO =
-  typeof process.env.OPENCODE_WSL_DISTRO === 'string' && process.env.OPENCODE_WSL_DISTRO.trim().length > 0
-    ? process.env.OPENCODE_WSL_DISTRO.trim()
-    : (
-      typeof process.env.OPENCHAMBER_OPENCODE_WSL_DISTRO === 'string' &&
-      process.env.OPENCHAMBER_OPENCODE_WSL_DISTRO.trim().length > 0
-        ? process.env.OPENCHAMBER_OPENCODE_WSL_DISTRO.trim()
-        : null
-    );
 
 const openCodeAuthStateRuntime = createOpenCodeAuthStateRuntime({
   crypto,
@@ -718,7 +709,6 @@ const openCodeEnvRuntime = createOpenCodeEnvRuntime({
   state: openCodeEnvState,
   normalizeDirectoryPath,
   readSettingsFromDiskMigrated,
-  ENV_CONFIGURED_OPENCODE_WSL_DISTRO,
 });
 
 const applyLoginShellEnvSnapshot = (...args) => openCodeEnvRuntime.applyLoginShellEnvSnapshot(...args);
@@ -729,8 +719,6 @@ const resolveOpencodeCliPath = (...args) => openCodeEnvRuntime.resolveOpencodeCl
 const isExecutable = (...args) => openCodeEnvRuntime.isExecutable(...args);
 const searchPathFor = (...args) => openCodeEnvRuntime.searchPathFor(...args);
 const resolveGitBinaryForSpawn = (...args) => openCodeEnvRuntime.resolveGitBinaryForSpawn(...args);
-const resolveWslExecutablePath = (...args) => openCodeEnvRuntime.resolveWslExecutablePath(...args);
-const buildWslExecArgs = (...args) => openCodeEnvRuntime.buildWslExecArgs(...args);
 const resolveManagedOpenCodeLaunchSpec = (...args) => openCodeEnvRuntime.resolveManagedOpenCodeLaunchSpec(...args);
 const clearResolvedOpenCodeBinary = (...args) => openCodeEnvRuntime.clearResolvedOpenCodeBinary(...args);
 const openCodeResolutionRuntime = createOpenCodeResolutionRuntime({
@@ -1015,8 +1003,6 @@ const openCodeLifecycleRuntime = createOpenCodeLifecycleRuntime({
   applyOpencodeBinaryFromSettings,
   ensureOpencodeCliEnv,
   ensureLocalOpenCodeServerPassword,
-  buildWslExecArgs,
-  resolveWslExecutablePath,
   resolveManagedOpenCodeLaunchSpec,
   setOpenCodePort,
   setDetectedOpenCodeApiPrefix,

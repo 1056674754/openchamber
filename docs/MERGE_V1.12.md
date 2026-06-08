@@ -212,13 +212,13 @@
 
 | Batch | 当前状态 | 说明 |
 |---|---|---|
-| 4.1 / 4.5 | 🔴 待移植 | WSL 检测/排除和 `env-runtime.js` 简化尚未确认落地 |
+| 4.1 / 4.5 | ✅ 已落地 | `env-runtime.js` 已禁用 WSL 自动检测/WSL settings 启动，保留 Windows 原生 `opencode.cmd`/`.exe` 解析；composition root/lifecycle 不再注入 WSL helper |
 | 4.2 | ✅ 已落地 | 与 3.3 合并处理：health URL 和返回值判断已切到 server health route |
 | 4.3 | ✅ 已落地 | `SidebarFilesTree.tsx` 已移植目录加载错误状态、根/子目录重试 UI，并按官方移除 lazy list 的 `respectGitignore` 参数；保留本 fork 的 desktop/local/remote 三分支 |
 | 4.4 / 4.6 | 🔴 待移植 | startup readiness / `lifecycle.js` 简化需单独服务端 batch |
 | 4.7 / 4.8 | 🟡 待语义复核 | `server-utils-runtime.js`、`fs/routes.js` 有局部改动，需继续对照官方语义 |
 | 4.9 / 4.10 | 🟡 待语义复核 | VS Code bridge / opencode 检测已有部分改动，仍需 Windows/WSL 语义审查 |
-| 4.11 / 4.12 / 4.13 | 🔴 待移植 | WSL onboarding UI、i18n、SSH docs 尚未作为完整 batch 移植 |
+| 4.11 / 4.12 / 4.13 | 🟡 部分落地 | Windows onboarding 已移除 WSL 推荐/WSL docs 链接；`en`/`zh-CN` 文案已更新。其余 locale 与 SSH docs 仍待单独 batch |
 
 ### 核心改动
 

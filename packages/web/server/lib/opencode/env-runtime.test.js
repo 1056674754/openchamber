@@ -37,7 +37,7 @@ afterEach(() => {
   delete process.env.OPENCODE_BINARY;
 });
 
-const createRuntime = (settings) => {
+const createRuntime = (settings, options = {}) => {
   const state = {
     cachedLoginShellEnvSnapshot: null,
     resolvedOpencodeBinary: null,
@@ -55,7 +55,7 @@ const createRuntime = (settings) => {
     state,
     normalizeDirectoryPath: (value) => value,
     readSettingsFromDiskMigrated: async () => settings,
-    ENV_CONFIGURED_OPENCODE_WSL_DISTRO: null,
+    spawnSync: options.spawnSync,
   });
 
   return { runtime, state };
@@ -103,14 +103,45 @@ describe('OpenCode env runtime', () => {
     });
   });
 
-  it('does not classify failed WSL resolution as an invalid configured binary in strict mode', async () => {
+  it('rejects WSL settings in strict mode', async () => {
     setPlatform('win32');
     const { runtime } = createRuntime({ opencodeBinary: 'wsl:/usr/local/bin/opencode' });
 
-    const rejection = runtime.applyOpencodeBinaryFromSettings({ strict: true });
+    await expect(runtime.applyOpencodeBinaryFromSettings({ strict: true })).rejects.toMatchObject({
+      message: expect.stringContaining('uses WSL'),
+    });
+  });
 
-    await expect(rejection).rejects.toThrow('uses WSL');
-    const error = await rejection.catch((caught) => caught);
-    expect(error.code).toBeUndefined();
+  it('does not auto-detect OpenCode from WSL fallback paths', () => {
+    setPlatform('win32');
+    const dir = createTempDir('openchamber-wsl-opencode-');
+    const wslBinary = path.join(dir, 'wsl.exe');
+    fs.writeFileSync(wslBinary, '');
+    process.env.PATH = dir;
+    process.env.SystemRoot = dir;
+    process.env.WSL_BINARY = wslBinary;
+    delete process.env.OPENCODE_BINARY;
+
+    const calls = [];
+    const spawnSyncMock = (command, args) => {
+      calls.push({ command, args });
+      if (command === 'where') {
+        return { status: 1, stdout: '', stderr: '' };
+      }
+      if (command === wslBinary) {
+        return { status: 0, stdout: '/home/alice/.opencode/bin/opencode\n', stderr: '' };
+      }
+      return { status: 1, stdout: '', stderr: '' };
+    };
+    const { runtime, state } = createRuntime({}, { spawnSync: spawnSyncMock });
+
+    expect(runtime.resolveOpencodeCliPath()).toBeNull();
+    expect(state.useWslForOpencode).toBe(false);
+    expect(state.resolvedWslBinary).toBeNull();
+    expect(state.resolvedWslOpencodePath).toBeNull();
+    expect(state.resolvedOpencodeBinarySource).toBeNull();
+
+    const wslCall = calls.find((call) => call.command === wslBinary);
+    expect(wslCall).toBeUndefined();
   });
 });
