@@ -17,6 +17,7 @@ function deltaEvent(): Event {
   return {
     type: "message.part.delta",
     properties: {
+      sessionID: "ses_1",
       messageID: "msg_1",
       partID: "prt_1",
       field: "text",
@@ -29,10 +30,10 @@ function partUpdatedEvent(): Event {
   return {
     type: "message.part.updated",
     properties: {
+      sessionID: "ses_1",
       part: {
         id: "prt_1",
         messageID: "msg_1",
-        sessionID: "ses_1",
         type: "text",
         text: "hello",
       },
@@ -46,7 +47,7 @@ describe("applyDirectoryEvent", () => {
 
     expect(result).toEqual({
       changed: false,
-      materialization: { type: "incomplete-session-snapshot", messageID: "msg_1", partID: "prt_1" },
+      materialization: { type: "incomplete-session-snapshot", sessionID: "ses_1", messageID: "msg_1", partID: "prt_1" },
     })
   })
 
@@ -58,7 +59,7 @@ describe("applyDirectoryEvent", () => {
 
     expect(result).toEqual({
       changed: false,
-      materialization: { type: "incomplete-session-snapshot", messageID: "msg_1", partID: "prt_1" },
+      materialization: { type: "incomplete-session-snapshot", sessionID: "ses_1", messageID: "msg_1", partID: "prt_1" },
     })
   })
 
@@ -72,6 +73,56 @@ describe("applyDirectoryEvent", () => {
       materialization: {
         type: "incomplete-session-snapshot",
         sessionID: "ses_1",
+        messageID: "msg_1",
+        partID: "prt_1",
+      },
+    })
+  })
+
+  test("uses event sessionID for part update materialization when part omits it", () => {
+    const draft = state()
+    const result = applyDirectoryEvent(draft, {
+      type: "message.part.updated",
+      properties: {
+        sessionID: "ses_from_event",
+        part: {
+          id: "prt_1",
+          messageID: "msg_1",
+          type: "text",
+          text: "hello",
+        },
+      },
+    } as Event)
+
+    expect(typeof draft.session_activity.ses_from_event).toBe("number")
+    expect(result).toEqual({
+      changed: true,
+      materialization: {
+        type: "incomplete-session-snapshot",
+        sessionID: "ses_from_event",
+        messageID: "msg_1",
+        partID: "prt_1",
+      },
+    })
+  })
+
+  test("uses event sessionID for delta materialization when parts are missing", () => {
+    const result = applyDirectoryEvent(state(), {
+      type: "message.part.delta",
+      properties: {
+        sessionID: "ses_from_event",
+        messageID: "msg_1",
+        partID: "prt_1",
+        field: "text",
+        delta: "hello",
+      },
+    } as Event)
+
+    expect(result).toEqual({
+      changed: false,
+      materialization: {
+        type: "incomplete-session-snapshot",
+        sessionID: "ses_from_event",
         messageID: "msg_1",
         partID: "prt_1",
       },

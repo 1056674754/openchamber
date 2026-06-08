@@ -138,6 +138,7 @@ import { create, type StoreApi } from "zustand"
 import { INITIAL_STATE } from "./types"
 import type { DirectoryStore } from "./child-store"
 import type { OpencodeClient } from "@opencode-ai/sdk/v2/client"
+import { DEFAULT_SERVER_ID, serverRegistry } from "@/lib/opencode/server-registry"
 
 beforeEach(() => {
   configState = {
@@ -145,6 +146,12 @@ beforeEach(() => {
     hasEverConnected: true,
     lastDisconnectReason: null,
   }
+  serverRegistry.register({ id: DEFAULT_SERVER_ID, label: "Default", baseUrl: "/api" })
+  const defaultConnection = serverRegistry.get(DEFAULT_SERVER_ID)
+  if (defaultConnection) {
+    ;(defaultConnection as { client: OpencodeClient }).client = mockSdk as unknown as OpencodeClient
+  }
+  serverRegistry.clearSessionServerIndexDebugEntries()
 })
 
 function createStore(permissions: Record<string, PermissionRequest[]>): StoreApi<DirectoryStore> {

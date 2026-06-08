@@ -344,13 +344,15 @@ export function applyDirectoryEvent(
     }
 
     case "message.part.updated": {
-      const part = (event.properties as { part: Part }).part
+      const props = event.properties as { sessionID?: string; part: Part }
+      const part = props.part
       if (SKIP_PARTS.has(part.type)) {
         syncDebug.reducer.partSkipped((part as { messageID: string }).messageID, part.id, part.type)
         return false
       }
-      const messageID = (part as { messageID: string }).messageID
-      const sessionID = (part as { sessionID?: string }).sessionID
+      const messageID = (part as { messageID?: string }).messageID
+      const sessionID = props.sessionID ?? (part as { sessionID?: string }).sessionID
+      if (!messageID) return false
       if (sessionID) {
         draft.session_activity[sessionID] = Date.now()
       }
@@ -421,6 +423,7 @@ export function applyDirectoryEvent(
 
     case "message.part.delta": {
       const props = event.properties as {
+        sessionID?: string
         messageID: string
         partID: string
         field: string
@@ -431,7 +434,7 @@ export function applyDirectoryEvent(
         syncDebug.reducer.partDeltaNoParts(props.messageID, props.partID)
         return {
           changed: false,
-          materialization: { type: "incomplete-session-snapshot", messageID: props.messageID, partID: props.partID },
+          materialization: { type: "incomplete-session-snapshot", sessionID: props.sessionID, messageID: props.messageID, partID: props.partID },
         }
       }
       const result = Binary.search(parts, props.partID, (p) => p.id)
@@ -439,14 +442,14 @@ export function applyDirectoryEvent(
         syncDebug.reducer.partDeltaNotFound(props.messageID, props.partID)
         return {
           changed: false,
-          materialization: { type: "incomplete-session-snapshot", messageID: props.messageID, partID: props.partID },
+          materialization: { type: "incomplete-session-snapshot", sessionID: props.sessionID, messageID: props.messageID, partID: props.partID },
         }
       }
       const existing = parts[result.index] as Record<string, unknown>
       const existingValue = existing[props.field] as string | undefined
       const dedupeFields = (existing as DedupeMetadata).__dedupeNextDeltaFields ?? []
       const shouldDedupe = dedupeFields.includes(props.field)
-      const sessionID = (existing as { sessionID?: string }).sessionID
+      const sessionID = props.sessionID ?? (existing as { sessionID?: string }).sessionID
       if (sessionID) {
         draft.session_activity[sessionID] = Date.now()
       }

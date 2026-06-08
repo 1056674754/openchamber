@@ -643,11 +643,21 @@ const getSessionIdFromPayload = (event: Event): string | null => {
   }
 
   if (event.type === "message.part.updated") {
+    const sessionID = props.sessionID
+    if (typeof sessionID === "string" && sessionID.length > 0) {
+      return sessionID
+    }
+
     const part = props.part
     if (!part || typeof part !== "object") {
       return null
     }
-    const sessionID = (part as { sessionID?: unknown }).sessionID
+    const partSessionID = (part as { sessionID?: unknown }).sessionID
+    return typeof partSessionID === "string" && partSessionID.length > 0 ? partSessionID : null
+  }
+
+  if (event.type === "message.part.delta" || event.type === "message.part.removed") {
+    const sessionID = props.sessionID
     return typeof sessionID === "string" && sessionID.length > 0 ? sessionID : null
   }
 

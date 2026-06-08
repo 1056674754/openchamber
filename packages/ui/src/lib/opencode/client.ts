@@ -17,6 +17,7 @@ import type { QuestionRequest } from "@/types/question";
 import { waitForWorktreeBootstrap } from "@/lib/worktrees/worktreeBootstrap";
 import { resolveSdkForDirectory, resolveBaseUrlForSession } from "@/sync/session-routing";
 import { resolveApiUrl } from "@/lib/api/serverUrl";
+import { buildOpenCodeHealthUrl } from "./health-url";
 import {
   assertProviderCircuitClosed,
   recordProviderSuccess,
@@ -1421,20 +1422,10 @@ class OpencodeService {
     }
   }
 
-  // Health Check - using /health endpoint for detailed status
+  // Lightweight readiness check. Full diagnostics still live at /health.
   async checkHealth(): Promise<boolean> {
     try {
-      // Health endpoint is at root, not under /api
-      let healthUrl: string;
-      const normalizedBase = this.baseUrl.endsWith('/') ? this.baseUrl.replace(/\/+$/, '') : this.baseUrl;
-      if (normalizedBase === '/api') {
-        healthUrl = '/health';
-      } else if (normalizedBase.endsWith('/api')) {
-        // Desktop: http://127.0.0.1:PORT/api -> http://127.0.0.1:PORT/health
-        healthUrl = `${normalizedBase.slice(0, -4)}/health`;
-      } else {
-        healthUrl = `${normalizedBase}/health`;
-      }
+      const healthUrl = buildOpenCodeHealthUrl(this.baseUrl);
       const response = await fetch(healthUrl);
       if (!response.ok) {
         return false;
@@ -1442,12 +1433,7 @@ class OpencodeService {
 
       const healthData = await response.json();
 
-      // Check if the upstream API is ready (not just OpenChamber server)
-      if (healthData.isOpenCodeReady === false) {
-        return false;
-      }
-
-      return true;
+      return healthData?.healthy === true;
     } catch {
       return false;
     }

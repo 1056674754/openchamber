@@ -126,10 +126,25 @@
 
 ---
 
-## v1.12.2 — 未移植功能
+## v1.12.2 — 移植状态
 
 **上游 tag**: `a4c04ba7`
 **范围**: v1.12.1 (`b7cf5afd`) → v1.12.2 (`a4c04ba7`), 16 commits, ~90 files, +2500/-700
+
+### 状态校准 (2026-06-08)
+
+| Batch | 当前状态 | 说明 |
+|---|---|---|
+| 3.1 | ✅ 已落地 | `startupTrace.ts` 已存在；后续仍需确认所有官方调用点是否都已接入 |
+| 3.2 | 🟡 待语义复核 | `device.ts`、`useUIStore.ts` 已有改动，但需逐段对照官方 diff 确认 resize/no-op 语义 |
+| 3.3 / 4.2 | ✅ 已落地 | `checkHealth()` 已改为 `/api/opencode/health`，并新增 `health-url.ts` / `client-health.test.ts` 覆盖 `/api`、desktop absolute URL、remote route |
+| 3.4 | 🔴 待移植 | `useConfigStore.ts` 与本 fork 的 provider/model/directory 逻辑冲突最大，需单独 batch |
+| 3.5 | ✅ 已落地 | `sync-context.tsx` 已从 event `properties.sessionID` 提取 `message.part.updated/delta/removed` 的 sessionID，保留本 fork 的 serverId routing |
+| 3.6 | ✅ 已落地 | `event-reducer.ts` 已从 event `properties.sessionID` 提取 part session，delta materialization 携带 sessionID，并保留 messageID guard |
+| 3.7 | ✅ 已强于上游 | `optimisticSend` 已携带 `directory` + `serverId`，测试改为按 `serverRegistry` 的真实 reply client 路由 |
+| 3.8 / 3.9 | 🟡 待语义复核 | 文件已有局部改动，但还未逐项确认官方 startup trace / resize no-op 调用点 |
+| 3.10 | ✅ 已落地 | `path-utils.ts` + test 已存在 |
+| 3.S* | 🟡 部分落地 | `executable-search.js` 已存在；`install-help.js` 仍缺，tunnels/provider/server-utils 需继续逐模块合并 |
 
 ### 核心改动
 
@@ -187,10 +202,22 @@
 
 ---
 
-## v1.12.3 — 未移植功能
+## v1.12.3 — 移植状态
 
 **上游 tag**: `cafbff47`
 **范围**: v1.12.2 (`a4c04ba7`) → v1.12.3 (`cafbff47`), 5 commits, ~40 files, +640/-310
+
+### 状态校准 (2026-06-08)
+
+| Batch | 当前状态 | 说明 |
+|---|---|---|
+| 4.1 / 4.5 | 🔴 待移植 | WSL 检测/排除和 `env-runtime.js` 简化尚未确认落地 |
+| 4.2 | ✅ 已落地 | 与 3.3 合并处理：health URL 和返回值判断已切到 server health route |
+| 4.3 | 🟡 待语义复核 | `SidebarFilesTree.tsx` 已有隐藏文件/加载相关改动，但需对照官方文件树可靠性 diff |
+| 4.4 / 4.6 | 🔴 待移植 | startup readiness / `lifecycle.js` 简化需单独服务端 batch |
+| 4.7 / 4.8 | 🟡 待语义复核 | `server-utils-runtime.js`、`fs/routes.js` 有局部改动，需继续对照官方语义 |
+| 4.9 / 4.10 | 🟡 待语义复核 | VS Code bridge / opencode 检测已有部分改动，仍需 Windows/WSL 语义审查 |
+| 4.11 / 4.12 / 4.13 | 🔴 待移植 | WSL onboarding UI、i18n、SSH docs 尚未作为完整 batch 移植 |
 
 ### 核心改动
 
@@ -272,14 +299,15 @@ Batch 3.6 (按需)
 
 ---
 
-## 当前状态 & 已知问题 (v1.12.1 合并后)
+## 当前状态 & 已知问题 (2026-06-08 Batch A 后)
 
 | 项目 | 状态 |
 |---|---|
 | `bun run type-check` | ✅ 0 errors |
-| `bun run lint` | ✅ 0 errors, 3 pre-existing warnings |
+| `bun run lint` | ✅ 0 errors, 1 pre-existing warning (`MainLayout.tsx` hook dependency) |
+| Targeted sync/client tests | ✅ 77 pass (`event-reducer`, `event-pipeline`, `session-routing`, `session-actions`, `session-switch-resync`, `reconnect-recovery`, `session-list-bootstrap`, `streaming`, `client-health`) |
 | Electron | ✅ 正常，不会多开窗口 |
 | 聊天区域 | ✅ 正常 |
 | 远程实例侧边栏 | ✅ 已修复（还原 sync-context.tsx + session-list-bootstrap.ts） |
 | `ENOENT` 项目清理日志 | ⚠️ 非新功能 — 服务端 `validateProjectEntries` 原有项目校验逻辑，与 v1.12 移植无关 |
-| 上游版本差距 | ⚠️ v1.12.2 + v1.12.3 未移植（121 files, +3460/-1017） |
+| 上游版本差距 | ⚠️ v1.12.2 + v1.12.3 部分落地；下一批优先 `useConfigStore` startup/并行加载与服务端 tunnels/lifecycle |
