@@ -145,7 +145,7 @@
 | 3.8 | ✅ 已落地 | `App.tsx` 已接 `App:mounted` trace，startup recovery 调用带 `source: 'startupRecovery'` |
 | 3.9 | ⚪ 不适用 | 官方改动只作用于 `updateProportionalSidebarWidths` / `bottomTerminalHeight`；本 fork 当前 `useUIStore.ts` 无对应 bottom-terminal resize action，已确认没有可手工套用的同名状态路径 |
 | 3.10 | ✅ 已落地 | `path-utils.ts` + test 已存在 |
-| 3.S* | 🟡 部分落地 | `executable-search.js` 已存在；`install-help.js` 仍缺，tunnels/provider/server-utils 需继续逐模块合并 |
+| 3.S* | 🟡 部分落地 | `executable-search.js`、`install-help.js`、tunnel `types` / `index` / `routes` 安全修复已落地；底层 `ngrok-tunnel.js` / `cloudflare-tunnel.js` 大改仍需独立深查 |
 
 ### 核心改动
 
@@ -191,14 +191,14 @@
 
 | Batch | 功能 | 文件数 | 说明 |
 |---|---|---|---|
-| 3.S1 | tunnels 模块拆分 | 4 (新建) | `executable-search.js` + test — 跨平台可执行文件搜索（Windows `where`、macOS `which`）；`install-help.js` + test — tunnel 安装帮助信息 |
-| 3.S2 | tunnels types 重构 | 2 | `types.js` + test — provider status/配置类型增强 |
+| 3.S1 | tunnels 模块拆分 | 4 (新建) | ✅ 已移植：`executable-search.js` + test、`install-help.js` + test；补 Windows app alias 和平台化安装提示 |
+| 3.S2 | tunnels types 重构 | 2 | ✅ 已移植：`types.js` + test；Windows home path 校验改为平台 path API，避免大小写/兄弟目录误判 |
 | 3.S3 | ngrok 重写 | 2 | `ngrok-tunnel.js` + test — +278/-50 大幅重写，更好的错误处理和重连 |
-| 3.S4 | cloudflare 简化 | 1 | `cloudflare-tunnel.js` — -50 行清理 |
-| 3.S5 | server-utils 增强 | 2 | `server-utils-runtime.js` + test — +68 行服务端工具函数 |
-| 3.S6 | routes / index | 3 | `tunnels/routes.js`、`tunnels/index.js` + test — 路由和管理接口更新 |
-| 3.S7 | env-runtime + lifecycle 简化 | 3 | `env-runtime.js` (-200 行简化)、`lifecycle.js` (-30 行)、`routes.js` (+45 行 health route) |
-| 3.S8 | fs routes | 1 | `fs/routes.js` — 文件服务路由修复 |
+| 3.S4 | cloudflare 简化 | 1 | `cloudflare-tunnel.js` — -50 行清理（待深查） |
+| 3.S5 | server-utils 增强 | 2 | ✅ 已移植：`server-utils-runtime.js` + test；Windows managed PATH 补原生工具链目录 |
+| 3.S6 | routes / index | 3 | ✅ 已移植：`tunnels/routes.js`、`tunnels/index.js` + test；provider 切换替换 active tunnel、startup error 包装、check route 返回 install metadata |
+| 3.S7 | env-runtime + lifecycle 简化 | 3 | ✅ 已移植核心：Windows native OpenCode policy、server health route、lifecycle readiness `/global/health`；保留 Electron detach/auth persistence |
+| 3.S8 | fs routes | 1 | ✅ 已移植：`git check-ignore` 超时保护 |
 | 3.S9 | server index 清理 | 1 | `server/index.js` — -15 行移除旧逻辑 |
 
 ---
