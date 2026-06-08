@@ -124,9 +124,16 @@ export function useQueuedMessageAutoSend(enabledOrOptions?: boolean | { enabled?
         return;
       }
 
+      const queuedMessage = queueSnapshot.find((message) => message.id === payload.queuedMessageId);
+      if (!queuedMessage) {
+        return;
+      }
+
       inFlightSessionsRef.current.add(sessionId);
 
       try {
+        useMessageQueueStore.getState().removeFromQueue(sessionId, payload.queuedMessageId);
+
         await useSessionUIStore.getState().sendMessage(
           payload.primaryText,
           resolved.providerID,
@@ -139,10 +146,8 @@ export function useQueuedMessageAutoSend(enabledOrOptions?: boolean | { enabled?
           'normal',
           sessionId
         );
-
-        const removeFromQueue = useMessageQueueStore.getState().removeFromQueue;
-        removeFromQueue(sessionId, payload.queuedMessageId);
       } catch (error) {
+        useMessageQueueStore.getState().restoreMessages(sessionId, [queuedMessage]);
         console.warn('[queue] queued auto-send failed:', error);
       } finally {
         inFlightSessionsRef.current.delete(sessionId);

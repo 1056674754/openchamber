@@ -1003,28 +1003,7 @@ const mergeFailedDraftText = (currentDraft: string, failedDraft: string): string
 };
 
 const restoreQueuedMessages = (sessionId: string, snapshot: QueuedMessage[]): void => {
-    if (snapshot.length === 0) {
-        return;
-    }
-
-    useMessageQueueStore.setState((state) => {
-        const currentQueue = state.queuedMessages[sessionId] ?? [];
-        const currentIds = new Set(currentQueue.map((message) => message.id));
-        const missingMessages = snapshot.filter((message) => !currentIds.has(message.id));
-        if (missingMessages.length === 0) {
-            return state;
-        }
-
-        const restoredQueue = [...currentQueue, ...missingMessages]
-            .sort((a, b) => a.createdAt - b.createdAt);
-
-        return {
-            queuedMessages: {
-                ...state.queuedMessages,
-                [sessionId]: restoredQueue,
-            },
-        };
-    });
+    useMessageQueueStore.getState().restoreMessages(sessionId, snapshot);
 };
 
 const restoreInlineDrafts = (sessionKey: string, drafts: InlineCommentDraft[]): void => {
