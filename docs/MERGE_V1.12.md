@@ -216,8 +216,8 @@
 | 4.2 | ✅ 已落地 | 与 3.3 合并处理：health URL 和返回值判断已切到 server health route |
 | 4.3 | ✅ 已落地 | `SidebarFilesTree.tsx` 已移植目录加载错误状态、根/子目录重试 UI，并按官方移除 lazy list 的 `respectGitignore` 参数；保留本 fork 的 desktop/local/remote 三分支 |
 | 4.4 / 4.6 | 🔴 待移植 | startup readiness / `lifecycle.js` 简化需单独服务端 batch |
-| 4.7 / 4.8 | 🟡 待语义复核 | `server-utils-runtime.js`、`fs/routes.js` 有局部改动，需继续对照官方语义 |
-| 4.9 / 4.10 | 🟡 待语义复核 | VS Code bridge / opencode 检测已有部分改动，仍需 Windows/WSL 语义审查 |
+| 4.7 / 4.8 | ✅ 已落地 | `server-utils-runtime.js` 已补 Windows managed PATH；`fs/routes.js` 已给 `git check-ignore` 加 2500ms 默认超时并支持 env 覆盖 |
+| 4.9 / 4.10 | ✅ 已落地 | VS Code bridge 已补 `git check-ignore` 超时与 `api:opencode/version`；`opencode.ts` 已补 `PATHEXT` / npm shim / debug CLI 重新探测 |
 | 4.11 / 4.12 / 4.13 | 🟡 部分落地 | Windows onboarding 已移除 WSL 推荐/WSL docs 链接；`en`/`zh-CN` 文案已更新。其余 locale 与 SSH docs 仍待单独 batch |
 
 ### 核心改动
@@ -235,10 +235,10 @@
 |---|---|---|---|
 | 4.5 | env-runtime 简化 | `env-runtime.js` | -178 行大幅简化 opencode 二进制查找逻辑 |
 | 4.6 | lifecycle 简化 | `lifecycle.js` | -29 行移除冗余启动流程 |
-| 4.7 | server-utils 增强 | `server-utils-runtime.js` + test | +68 行 |
-| 4.8 | fs routes 修复 | `fs/routes.js` | 文件服务路由修复 |
-| 4.9 | VS Code bridge 增强 | 3 | `bridge-fs-helpers-runtime.ts`、`bridge-fs-runtime.ts`、`bridge-system-runtime.ts` |
-| 4.10 | VS Code opencode 检测 | 1 | `opencode.ts` — 路径解析增强 |
+| 4.7 | server-utils 增强 | `server-utils-runtime.js` + test | ✅ 已移植：Windows managed PATH 补充 npm/node/pnpm/bun/volta/yarn/scoop/chocolatey 等原生工具链目录 |
+| 4.8 | fs routes 修复 | `fs/routes.js` | ✅ 已移植：`git check-ignore` 默认 2500ms 超时，超时回退为不过滤，避免文件列表卡死 |
+| 4.9 | VS Code bridge 增强 | 3 | ✅ 已移植：FS helpers/runtime 加 `git check-ignore` 超时；system bridge 新增 `api:opencode/version` |
+| 4.10 | VS Code opencode 检测 | 1 | ✅ 已移植：Windows `PATHEXT`、npm global shim、debug CLI availability/path 重新探测 |
 | 4.11 | onboarding WSL UI | 2 | `ChooserScreen.tsx`、`LocalSetupScreen.tsx` — WSL 检测 UI |
 | 4.12 | i18n | 8 | `ssh.*` key × 8 locale |
 | 4.13 | SSH 文档 | 7 | `ssh-hosts-proxying.mdx` × 7 语言 |

@@ -1,5 +1,8 @@
-import { beforeEach, describe, expect, it, mock } from 'bun:test';
+import { afterAll, beforeEach, describe, expect, it, mock } from 'bun:test';
 import { promisify } from 'node:util';
+
+const originalGitCheckIgnoreTimeout = process.env.OPENCHAMBER_GIT_CHECK_IGNORE_TIMEOUT_MS;
+process.env.OPENCHAMBER_GIT_CHECK_IGNORE_TIMEOUT_MS = '1';
 
 const execCalls = [];
 const execMock = mock(() => {
@@ -34,6 +37,14 @@ mock.module('vscode', () => ({
 }));
 
 const { clearGitReadCacheForTests, handleFsBridgeMessage } = await import('./bridge-fs-runtime');
+
+afterAll(() => {
+  if (originalGitCheckIgnoreTimeout === undefined) {
+    delete process.env.OPENCHAMBER_GIT_CHECK_IGNORE_TIMEOUT_MS;
+  } else {
+    process.env.OPENCHAMBER_GIT_CHECK_IGNORE_TIMEOUT_MS = originalGitCheckIgnoreTimeout;
+  }
+});
 
 const deps = {
   resolveUserPath: (value) => value,
@@ -84,5 +95,30 @@ describe('bridge fs exec git read cache', () => {
     await handleFsBridgeMessage({ id: '2', type: 'api:fs:exec', payload: { commands: [command], cwd } }, deps);
 
     expect(execCalls).toHaveLength(2);
+  });
+
+  it('returns unfiltered directory entries when git check-ignore times out', async () => {
+    const entries = [
+      { name: 'src', path: '/repo/src', isDirectory: true },
+      { name: 'dist', path: '/repo/dist', isDirectory: true },
+    ];
+    const localDeps = {
+      ...deps,
+      listDirectoryEntries: mock(async () => entries),
+      execGit: mock(async () => new Promise(() => {})),
+    };
+
+    const result = await handleFsBridgeMessage(
+      { id: '3', type: 'api:fs:list', payload: { path: '/repo', respectGitignore: true } },
+      localDeps,
+    );
+
+    expect(result).toMatchObject({
+      id: '3',
+      type: 'api:fs:list',
+      success: true,
+      data: { entries, directory: '/repo', path: '/repo' },
+    });
+    expect(localDeps.execGit).toHaveBeenCalledTimes(1);
   });
 });
