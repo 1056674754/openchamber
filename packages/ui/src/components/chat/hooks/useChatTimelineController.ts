@@ -10,9 +10,9 @@ import {
     updateTurnWindowModelIncremental,
     type TurnWindowModel,
 } from '../lib/turns/windowTurns';
-import type { TurnHistorySignals } from '../lib/turns/historySignals';
+import { deriveTimelineHistorySignals, type TurnHistorySignals } from '../lib/turns/historySignals';
 import { getMemoryLimits, type SessionHistoryMeta } from '@/stores/types/sessionTypes';
-import { isSystemDirectiveMessage } from '@/lib/messages/system-directive';
+import { hasRealUserMessageParts } from '@/lib/messages/real-user';
 import { isVSCodeRuntime } from '@/lib/desktop';
 
 type ViewportAnchor = { messageId: string; offsetTop: number };
@@ -131,7 +131,7 @@ export const useChatTimelineController = ({
         let count = 0;
         for (const message of messages) {
             const role = (message.info as { clientRole?: string | null; role?: string | null }).clientRole ?? message.info.role;
-            if (role === 'user' && !isSystemDirectiveMessage(message.parts)) {
+            if (role === 'user' && hasRealUserMessageParts(message.parts)) {
                 count += 1;
             }
         }
@@ -146,7 +146,7 @@ export const useChatTimelineController = ({
         for (const message of messages) {
             const role = (message.info as { clientRole?: string | null; role?: string | null }).clientRole ?? message.info.role;
             if (role === 'user') {
-                if (!isSystemDirectiveMessage(message.parts)) {
+                if (hasRealUserMessageParts(message.parts)) {
                     groupIndex += 1;
                 }
                 map.set(message.info.id, Math.max(groupIndex, 0));
@@ -192,20 +192,14 @@ export const useChatTimelineController = ({
 
     const historySignals = React.useMemo(() => {
         const defaultLimit = getMemoryLimits().HISTORICAL_MESSAGES;
-        const hasBufferedTurns = turnStart > 0;
-        const hasMoreAboveTurns = historyMeta
-            ? !historyMeta.complete
-            : messages.length >= defaultLimit;
-        const historyLoading = Boolean(historyMeta?.loading);
-        // [sscity-mod] Guard: if realUserGroupCount fits within the initial
-        // window, there's nothing to load/reveal regardless of historyMeta timing.
-        const effectiveHasMore = hasMoreAboveTurns && realUserGroupCount > TURN_WINDOW_DEFAULTS.initialTurns;
-        return {
-            hasBufferedTurns,
-            hasMoreAboveTurns: effectiveHasMore,
-            historyLoading,
-            canLoadEarlier: hasBufferedTurns || effectiveHasMore,
-        };
+        return deriveTimelineHistorySignals({
+            historyMeta,
+            loadedMessageCount: messages.length,
+            loadedRealUserGroupCount: realUserGroupCount,
+            turnStart,
+            defaultHistoryLimit: defaultLimit,
+            initialTurns: TURN_WINDOW_DEFAULTS.initialTurns,
+        });
     }, [historyMeta, messages.length, realUserGroupCount, turnStart]);
 
     const historySignalsRef = React.useRef(historySignals);

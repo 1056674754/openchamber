@@ -25,6 +25,7 @@ import {
 import { getSessionMaterializationStatus, materializeSessionSnapshots } from "./materialization"
 import { useTodosPersistStore } from "@/stores/useTodosPersistStore"
 import { useConfigStore } from "@/stores/useConfigStore"
+import { fetchMessagePageToUserBoundary, type MessagePage } from "./message-page-boundary"
 
 const SKIP_PARTS = new Set(["patch", "step-start", "step-finish"])
 const MESSAGE_PAGE_SIZE = 150
@@ -333,8 +334,8 @@ export function useSync() {
 
   // Fetch messages from API
   const fetchMessages = useCallback(
-    async (sessionID: string, limit: number, before?: string, targetDirectory = directory) => {
-      const client = resolveSdkForDirectory(targetDirectory, sessionID)
+    async (sessionID: string, limit: number, before?: string, targetDirectory = directory, targetServerId?: string): Promise<MessagePage> => {
+      const client = resolveSdkForDirectory(targetDirectory, sessionID, targetServerId)
       const result = await retry(() =>
         client.session.messages({ sessionID, directory: targetDirectory, limit, before }),
       )
@@ -353,6 +354,34 @@ export function useSync() {
     [directory],
   )
 
+  const fetchMessagesToUserBoundary = useCallback(
+    async (
+      sessionID: string,
+      limit: number,
+      before?: string,
+      targetDirectory = directory,
+      targetServerId?: string,
+    ): Promise<MessagePage> => {
+      const result = await fetchMessagePageToUserBoundary({
+        page: await fetchMessages(sessionID, limit, before, targetDirectory, targetServerId),
+        fetchOlder: (cursor) => fetchMessages(sessionID, limit, cursor, targetDirectory, targetServerId),
+      })
+
+      if (result.stoppedBeforeBoundary) {
+        console.warn("[sync] session.messages stopped before reaching a user boundary", {
+          sessionID,
+          targetDirectory,
+          loadedMessageCount: result.page.session.length,
+          extraPages: result.extraPages,
+          hasCursor: Boolean(result.page.cursor),
+        })
+      }
+
+      return result.page
+    },
+    [directory, fetchMessages],
+  )
+
   // Load messages for a session.
   const loadMessages = useCallback(
     async (sessionID: string, options?: {
@@ -360,6 +389,7 @@ export function useSync() {
       mode?: "replace" | "prepend"
       targetDirectory?: string
       targetStore?: typeof store
+      targetServerId?: string
     }) => {
       const writeStore = options?.targetStore ?? store
       const targetDirectory = options?.targetDirectory ?? directory
@@ -369,7 +399,7 @@ export function useSync() {
 
       try {
         const limit = options?.before ? getEffectiveMessagePageSize() : m.limit
-        let page = await fetchMessages(sessionID, limit, options?.before, targetDirectory)
+        let page = await fetchMessagesToUserBoundary(sessionID, limit, options?.before, targetDirectory, options?.targetServerId)
 
         // VS Code keeps the initial page small for switch performance. Some
         // sessions have a very large final turn, so the latest 30 records can
@@ -378,7 +408,7 @@ export function useSync() {
         if (!options?.before && isVSCodeRuntime() && !page.complete && !hasUserMessage(page.session)) {
           for (const nextLimit of VSCODE_INITIAL_PAGE_EXPANSION_LIMITS) {
             if (nextLimit <= limit) continue
-            page = await fetchMessages(sessionID, nextLimit, undefined, targetDirectory)
+            page = await fetchMessagesToUserBoundary(sessionID, nextLimit, undefined, targetDirectory, options?.targetServerId)
             if (page.complete || hasUserMessage(page.session)) break
           }
         }
@@ -422,7 +452,7 @@ export function useSync() {
         setMetaFor(sessionID, { loading: false }, targetDirectory)
       }
     },
-    [store, fetchMessages, getMetaFor, setMetaFor, getOptimistic, clearOptimistic, directory],
+    [store, fetchMessagesToUserBoundary, getMetaFor, setMetaFor, getOptimistic, clearOptimistic, directory],
   )
 
   // Sync a session (load if not cached)
@@ -475,7 +505,7 @@ export function useSync() {
         if (!hasSession || force) {
           try {
             const sessionDir = target.directory
-            const client = resolveSdkForDirectory(sessionDir, sessionID)
+            const client = resolveSdkForDirectory(sessionDir, sessionID, target.serverId)
             const result = await retry(() => client.session.get({ sessionID, directory: sessionDir }))
             if (result.data) {
               const s = target.store.getState()
@@ -497,12 +527,13 @@ export function useSync() {
           await loadMessages(sessionID, {
             targetDirectory: target.directory,
             targetStore: target.store,
+            targetServerId: target.serverId,
           })
         }
 
         if (force) {
           const sessionDir = target.directory
-          const client = resolveSdkForDirectory(sessionDir, sessionID)
+          const client = resolveSdkForDirectory(sessionDir, sessionID, target.serverId)
           await Promise.all([
             client.session.status({ directory: sessionDir }).then((res) => {
               if (!res.data) return
@@ -546,7 +577,7 @@ export function useSync() {
       }
 
       // 3. Fetch session metadata.
-      const client = resolveSdkForDirectory(sessionDir, sessionID)
+      const client = resolveSdkForDirectory(sessionDir, sessionID, target.serverId)
       try {
         const result = await retry(() => client.session.get({ sessionID, directory: sessionDir }))
         if (result.data) {
@@ -570,6 +601,7 @@ export function useSync() {
         await loadMessages(sessionID, {
           targetDirectory: sessionDir,
           targetStore: target.store,
+          targetServerId: target.serverId,
         })
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e)
@@ -617,6 +649,7 @@ export function useSync() {
         mode: "prepend",
         targetDirectory: target.directory,
         targetStore: target.store,
+        targetServerId: target.serverId,
       })
     },
     [touch, getMetaFor, loadMessages, resolveSessionTarget],

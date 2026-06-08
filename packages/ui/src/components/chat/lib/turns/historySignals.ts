@@ -15,6 +15,18 @@ export interface TurnHistorySignals {
     canLoadEarlier: boolean;
 }
 
+export interface TimelineHistorySignalsInput {
+    historyMeta: {
+        complete: boolean;
+        loading?: boolean;
+    } | null;
+    loadedMessageCount: number;
+    loadedRealUserGroupCount: number;
+    turnStart: number;
+    defaultHistoryLimit: number;
+    initialTurns: number;
+}
+
 const deriveHasMoreAbove = (
     memoryState: SessionMemoryState | null,
     loadedMessageCount: number,
@@ -57,6 +69,28 @@ export const deriveTurnHistorySignals = (
         input.defaultHistoryLimit,
     );
     const historyLoading = Boolean(input.memoryState?.historyLoading);
+
+    return {
+        hasBufferedTurns,
+        hasMoreAboveTurns,
+        historyLoading,
+        canLoadEarlier: hasBufferedTurns || hasMoreAboveTurns,
+    };
+};
+
+export const deriveTimelineHistorySignals = (
+    input: TimelineHistorySignalsInput,
+): TurnHistorySignals => {
+    const hasBufferedTurns = input.turnStart > 0;
+    const loadedTurnWindowIsFull = input.loadedRealUserGroupCount >= input.initialTurns;
+    const explicitHistoryHasMore = input.historyMeta
+        ? !input.historyMeta.complete && loadedTurnWindowIsFull
+        : false;
+    const fallbackHistoryHasMore = !input.historyMeta
+        && input.loadedMessageCount >= input.defaultHistoryLimit
+        && input.loadedRealUserGroupCount > input.initialTurns;
+    const hasMoreAboveTurns = explicitHistoryHasMore || fallbackHistoryHasMore;
+    const historyLoading = Boolean(input.historyMeta?.loading);
 
     return {
         hasBufferedTurns,
