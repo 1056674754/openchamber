@@ -218,7 +218,7 @@
 | 4.4 / 4.6 | ✅ 已落地 | `lifecycle.js` readiness 已统一到 `/global/health`，并移除 WSL helper 依赖；保留本 fork 的 Electron detach / managed auth 持久化逻辑 |
 | 4.7 / 4.8 | ✅ 已落地 | `server-utils-runtime.js` 已补 Windows managed PATH；`fs/routes.js` 已给 `git check-ignore` 加 2500ms 默认超时并支持 env 覆盖 |
 | 4.9 / 4.10 | ✅ 已落地 | VS Code bridge 已补 `git check-ignore` 超时与 `api:opencode/version`；`opencode.ts` 已补 `PATHEXT` / npm shim / debug CLI 重新探测 |
-| 4.11 / 4.12 / 4.13 | 🟡 部分落地 | Windows onboarding 已移除 WSL 推荐/WSL docs 链接；`en`/`zh-CN` 文案已更新。其余 locale 与 SSH docs 仍待单独 batch |
+| 4.11 / 4.12 / 4.13 | ✅ 已落地 / ⚪ 4.13 无本地差异 | Windows onboarding 已按官方改为原生 Windows 安装文案，8 个 locale 已同步；settings about/tunnel locale key 已补齐。当前 `v1.12.2..v1.12.3` 的 docs diff 不含本仓库可移植 SSH 文档变更 |
 
 ### 核心改动
 
@@ -240,8 +240,8 @@
 | 4.9 | VS Code bridge 增强 | 3 | ✅ 已移植：FS helpers/runtime 加 `git check-ignore` 超时；system bridge 新增 `api:opencode/version` |
 | 4.10 | VS Code opencode 检测 | 1 | ✅ 已移植：Windows `PATHEXT`、npm global shim、debug CLI availability/path 重新探测 |
 | 4.11 | onboarding WSL UI | 2 | `ChooserScreen.tsx`、`LocalSetupScreen.tsx` — WSL 检测 UI |
-| 4.12 | i18n | 8 | `ssh.*` key × 8 locale |
-| 4.13 | SSH 文档 | 7 | `ssh-hosts-proxying.mdx` × 7 语言 |
+| 4.12 | i18n | 8 | ✅ 已移植：Windows onboarding locale 已去掉 WSL 推荐；settings about/tunnel 3 个新 key × 8 locale 已补齐 |
+| 4.13 | SSH 文档 | 7 | ⚪ 当前 `v1.12.2..v1.12.3` 的 docs diff 无本仓库可移植 SSH 文档变更 |
 | 4.14 | 版本号 | 3 | `package.json` × 3 → v1.12.3 |
 | 4.15 | CHANGELOG | 2 | `CHANGELOG.md`、`packages/vscode/CHANGELOG.md` |
 
