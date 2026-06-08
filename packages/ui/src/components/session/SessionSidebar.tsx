@@ -72,6 +72,7 @@ import {
   formatProjectLabel,
   normalizePath,
 } from './sidebar/utils';
+import { buildSidebarSessionPrefetchOrder } from './sidebar/prefetchOrder';
 import { refreshGlobalSessions, resolveGlobalSessionDirectory, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useSessionProjectStore } from '@/stores/useSessionProjectStore';
 import { hydrateSessionProjectBindings } from '@/lib/sessionOwnership';
@@ -425,6 +426,8 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
   const showDeletionDialog = useUIStore((state) => state.showDeletionDialog);
   const setShowDeletionDialog = useUIStore((state) => state.setShowDeletionDialog);
   const sessionSortMode = useUIStore((state) => state.sessionSortMode);
+  const sessionGroupMinVisible = useUIStore((state) => state.sessionGroupMinVisible);
+  const sessionGroupRecentHours = useUIStore((state) => state.sessionGroupRecentHours);
 
   const debouncedSessionSearchQuery = useDebouncedValue(sessionSearchQuery, 120);
   const normalizedSessionSearchQuery = React.useMemo(
@@ -1533,13 +1536,6 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
 
   const recentSessionIdsList = React.useMemo(() => [...recentSessionIds], [recentSessionIds]);
 
-  useSessionPrefetch({
-    currentSessionId,
-    sortedSessions,
-    recentSessionIds: recentSessionIdsList,
-    ensureSessionRenderable: sync.ensureSessionRenderable,
-  });
-
   const sectionsForSidebarRender = React.useMemo(() => {
     if (!isVSCode || hasSessionSearchQuery || recentSessionIds.size === 0) {
       return sectionsForRender;
@@ -1573,6 +1569,68 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
       })),
     }));
   }, [isVSCode, hasSessionSearchQuery, recentSessionIds, sectionsForRender]);
+
+  const sidebarActivitySections = React.useMemo(() => {
+    if (hasSessionSearchQuery) {
+      return [];
+    }
+    return [
+      ...(globalPinnedSection ? [globalPinnedSection] : []),
+      ...(showRecentSection ? activitySections : []),
+    ];
+  }, [activitySections, globalPinnedSection, hasSessionSearchQuery, showRecentSection]);
+
+  const sidebarPrefetchSessionIds = React.useMemo(() => buildSidebarSessionPrefetchOrder({
+    activitySections: sidebarActivitySections,
+    sectionsForRender: sectionsForSidebarRender,
+    activeProjectId,
+    showOnlyMainWorkspace,
+    hasSessionSearchQuery,
+    normalizedSessionSearchQuery,
+    groupSearchDataByGroup,
+    collapsedProjects,
+    collapsedGroups,
+    expandedSessionGroups,
+    expandedParents,
+    collapsedFolderIds,
+    foldersMap,
+    pinnedSessionIds,
+    pinnedSessionIdsByProject,
+    sessionOrderIndex,
+    getOrderedGroups,
+    hideDirectoryControls,
+    sessionGroupMinVisible,
+    sessionGroupRecentHours,
+  }), [
+    activeProjectId,
+    collapsedFolderIds,
+    collapsedGroups,
+    collapsedProjects,
+    expandedParents,
+    expandedSessionGroups,
+    foldersMap,
+    getOrderedGroups,
+    groupSearchDataByGroup,
+    hasSessionSearchQuery,
+    hideDirectoryControls,
+    normalizedSessionSearchQuery,
+    pinnedSessionIds,
+    pinnedSessionIdsByProject,
+    sectionsForSidebarRender,
+    sessionGroupMinVisible,
+    sessionGroupRecentHours,
+    sessionOrderIndex,
+    showOnlyMainWorkspace,
+    sidebarActivitySections,
+  ]);
+
+  useSessionPrefetch({
+    currentSessionId,
+    sortedSessions,
+    recentSessionIds: recentSessionIdsList,
+    sidebarSessionIds: sidebarPrefetchSessionIds,
+    ensureSessionRenderable: sync.ensureSessionRenderable,
+  });
 
   const prLookupKeys = React.useMemo(() => {
     const keys = new Set<string>();

@@ -1,6 +1,6 @@
 import React from 'react';
 import { useProjectsStore } from '@/stores/useProjectsStore';
-import { isDesktopShell, isTauriShell } from '@/lib/desktop';
+import { hasDesktopInvoke, isDesktopShell } from '@/lib/desktop';
 import { desktopHostsGet, locationMatchesHost, redactSensitiveUrl } from '@/lib/desktopHosts';
 import { setDesktopWindowTitle } from '@/lib/desktopNative';
 import { useActiveServerId } from '@/hooks/useActiveServerId';
@@ -114,7 +114,7 @@ export const useWindowTitle = () => {
       document.title = title;
     }
 
-    if (!isTauriShell()) {
+    if (!hasDesktopInvoke()) {
       return;
     }
 

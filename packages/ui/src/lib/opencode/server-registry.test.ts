@@ -74,4 +74,62 @@ describe("ServerRegistry health probes", () => {
     expect(await registry.probeHealth("remote-3", { timeoutMs: 2500 })).toBe(true);
     expect(bodies).toEqual([{ timeoutSec: 3 }]);
   });
+
+  test("keeps health listeners across unregister and re-register", () => {
+    const registry = new ServerRegistry();
+    const statuses: Array<"healthy" | "unhealthy" | "connecting" | null> = [];
+
+    registry.register({ id: "remote-4", label: "Remote", baseUrl: "/api/remote/remote-4" });
+    const unsubscribe = registry.onHealthChange("remote-4", (status) => {
+      statuses.push(status);
+    });
+
+    registry.setHealthStatus("remote-4", "unhealthy");
+    registry.unregister("remote-4");
+    registry.register({ id: "remote-4", label: "Remote", baseUrl: "/api/remote/remote-4" });
+    registry.setHealthStatus("remote-4", "healthy");
+    unsubscribe();
+    registry.setHealthStatus("remote-4", "unhealthy");
+
+    expect(statuses).toEqual(["unhealthy", null, "healthy"]);
+  });
+});
+
+describe("ServerRegistry session index", () => {
+  test("notifies only when a session server mapping changes", () => {
+    const registry = new ServerRegistry();
+    let calls = 0;
+    const unsubscribe = registry.onSessionServerChange("ses_1", () => {
+      calls += 1;
+    });
+
+    registry.indexSession("ses_1", "remote-a");
+    registry.indexSession("ses_1", "remote-a");
+    registry.indexSession("ses_2", "remote-a");
+    registry.indexSession("ses_1", "remote-b");
+    registry.forgetSession("ses_1");
+    unsubscribe();
+    registry.indexSession("ses_1", "remote-c");
+
+    expect(calls).toBe(3);
+  });
+
+  test("records session server index changes for diagnostics", () => {
+    const registry = new ServerRegistry();
+
+    registry.indexSession("ses_trace", "remote-a");
+    registry.indexSession("ses_trace", "remote-a");
+    registry.indexSession("ses_trace", "remote-b");
+    registry.forgetSession("ses_trace");
+
+    const entries = registry.getSessionServerIndexDebugEntries({ sessionId: "ses_trace" });
+    expect(entries.length).toBe(3);
+    expect(entries[0].previous).toBe(undefined);
+    expect(entries[0].next).toBe("remote-a");
+    expect(entries[1].previous).toBe("remote-a");
+    expect(entries[1].next).toBe("remote-b");
+    expect(entries[2].previous).toBe("remote-b");
+    expect(entries[2].next).toBe(undefined);
+    expect(registry.getSessionServerIndexSnapshot()).toEqual([]);
+  });
 });

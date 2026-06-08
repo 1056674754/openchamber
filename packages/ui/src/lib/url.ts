@@ -1,12 +1,12 @@
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 
 /**
- * Utility for opening external URLs with Tauri shell support.
- * In desktop runtime, uses tauri.shell.open() for proper system browser handling.
+ * Utility for opening external URLs through the active runtime.
+ * In desktop runtime, uses Electron preload IPC for system browser handling.
  * Falls back to window.open() for web runtime.
  */
 
-type TauriShell = {
+type DesktopShell = {
   shell?: {
     open?: (url: string) => Promise<unknown>;
   };
@@ -90,7 +90,7 @@ export const extractLoopbackUrls = (text: string): string[] => {
 
 /**
  * Opens an external URL in the system browser.
- * In Tauri desktop runtime, uses tauri.shell.open() for proper handling.
+ * In desktop runtime, uses preload IPC for proper handling.
  * Falls back to window.open() for web runtime.
  *
  * @param url - The URL to open
@@ -127,10 +127,10 @@ export const openExternalUrl = async (url: string): Promise<boolean> => {
     }
   }
 
-  const tauri = (window as unknown as { __TAURI__?: TauriShell }).__TAURI__;
-  if (tauri?.shell?.open) {
+  const desktop = (window as unknown as { __OPENCHAMBER_DESKTOP__?: DesktopShell }).__OPENCHAMBER_DESKTOP__;
+  if (desktop?.shell?.open) {
     try {
-      await tauri.shell.open(normalizedTarget);
+      await desktop.shell.open(normalizedTarget);
       return true;
     } catch {
       // Fall through to window.open

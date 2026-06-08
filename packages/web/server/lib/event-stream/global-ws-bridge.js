@@ -19,10 +19,12 @@ export function createGlobalMessageStreamWsBridge({
   processForwardedEventPayload,
   triggerHealthCheck,
   heartbeatIntervalMs,
+  remoteGlobalEventFanout = null,
 }) {
   const clients = new Set();
   const clientLastEventIds = new Map();
   const readyClients = new Set();
+  let unsubscribeRemoteGlobalEventFanout = null;
 
   const removeClient = (socket) => {
     clients.delete(socket);
@@ -67,6 +69,37 @@ export function createGlobalMessageStreamWsBridge({
     if (ownsGlobalHub && clients.size === 0) {
       globalHub.stop();
     }
+    if (clients.size === 0 && unsubscribeRemoteGlobalEventFanout) {
+      unsubscribeRemoteGlobalEventFanout();
+      unsubscribeRemoteGlobalEventFanout = null;
+    }
+  };
+
+  const startRemoteGlobalEventFanout = () => {
+    if (!remoteGlobalEventFanout || unsubscribeRemoteGlobalEventFanout) {
+      return;
+    }
+
+    unsubscribeRemoteGlobalEventFanout = remoteGlobalEventFanout.subscribe((event) => {
+      if (!event?.serverId || !event.payload) {
+        return;
+      }
+
+      for (const socket of Array.from(clients)) {
+        if (!wsClients.has(socket)) {
+          continue;
+        }
+        const sent = sendMessageStreamWsEvent(socket, event.payload, {
+          directory: event.directory,
+          eventId: event.eventId,
+          serverId: event.serverId,
+        });
+        if (!sent) {
+          removeClient(socket);
+        }
+      }
+      stopHubIfUnused();
+    });
   };
 
   const closeClientsWithInitialError = ({ message, closeReason = message, triggerHealthCheckFor = null }) => {
@@ -77,6 +110,11 @@ export function createGlobalMessageStreamWsBridge({
       } catch {
       }
       removeClient(socket);
+    }
+
+    if (unsubscribeRemoteGlobalEventFanout) {
+      unsubscribeRemoteGlobalEventFanout();
+      unsubscribeRemoteGlobalEventFanout = null;
     }
 
     if (triggerHealthCheckFor === true || (triggerHealthCheckFor && shouldTriggerUpstreamHealthCheck(triggerHealthCheckFor))) {
@@ -193,6 +231,7 @@ export function createGlobalMessageStreamWsBridge({
     // Event replay is deferred to when the upstream connects (via status subscriber).
     sendMessageStreamWsFrame(socket, { type: 'ready', scope: 'global' });
     wsClients.add(socket);
+    startRemoteGlobalEventFanout();
 
     if (globalHub.isConnected()) {
       readyClients.add(socket);
@@ -203,6 +242,11 @@ export function createGlobalMessageStreamWsBridge({
   const close = () => {
     unsubscribeEvent();
     unsubscribeStatus();
+    if (unsubscribeRemoteGlobalEventFanout) {
+      unsubscribeRemoteGlobalEventFanout();
+      unsubscribeRemoteGlobalEventFanout = null;
+    }
+    remoteGlobalEventFanout?.close?.();
     if (ownsGlobalHub) {
       globalHub.stop();
     }

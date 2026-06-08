@@ -728,6 +728,8 @@ export const PullRequestSection: React.FC<{
         { text: payloadText, synthetic: true },
       ],
       target.currentVariant ?? undefined,
+      undefined,
+      target.sessionId,
     ).catch((e) => {
       const message = e instanceof Error ? e.message : String(e);
       toast.error(t('gitView.pr.toast.sendMessageFailed'), { description: message });

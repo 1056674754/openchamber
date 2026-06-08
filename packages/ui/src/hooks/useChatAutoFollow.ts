@@ -2,7 +2,9 @@ import React from 'react';
 
 import { MessageFreshnessDetector } from '@/lib/messageFreshness';
 import { createScrollSpy } from '@/components/chat/lib/scroll/scrollSpy';
+import { normalizeWheelDelta } from '@/components/chat/lib/scroll/scrollIntent';
 import { useViewportStore, type SessionMemoryState } from '@/sync/viewport-store';
+import { CHAT_BOTTOM_ZONE_DESKTOP_PX, CHAT_BOTTOM_ZONE_MOBILE_PX } from '@/components/chat/lib/scroll/bottomSpacing';
 
 export type AutoFollowState = 'following' | 'released';
 
@@ -41,8 +43,6 @@ export interface UseChatAutoFollowResult {
     restoreSnapshot: () => Promise<boolean>;
 }
 
-const BOTTOM_SPACER_DESKTOP_VH = 0.10;
-const BOTTOM_SPACER_MOBILE_PX = 40;
 const PROGRAMMATIC_WRITE_WINDOW_MS = 200;
 const SAVE_DEBOUNCE_MS = 150;
 const LERP = 0.18;
@@ -51,16 +51,13 @@ const SETTLE_FRAMES = 4;
 const TOUCH_FINGER_DOWN_THRESHOLD = 2;
 const SETTLE_BURST_DURATION_MS = 280;
 const REPIN_GRACE_AFTER_RELEASE_MS = 1200;
+const WHEEL_RELEASE_THRESHOLD_PX = 2;
+const PROCESS_FOLD_TRANSITION_CLASS = 'openchamber-process-fold-transition';
 
-// The bottom of the chat has an empty spacer (10vh on desktop, 40px on mobile)
-// — its height is exactly how far above scrollHeight the user can be while still
-// looking at "empty" space. We use that same value as the threshold for both
-// re-pinning auto-follow and showing the scroll-to-bottom button.
-const computeBottomZoneThreshold = (isMobile: boolean, container?: HTMLElement | null): number => {
-    if (isMobile) return BOTTOM_SPACER_MOBILE_PX;
-    const height = container?.clientHeight ?? 0;
-    if (height <= 0) return 96;
-    return Math.max(48, height * BOTTOM_SPACER_DESKTOP_VH);
+// Keep this aligned with the small visual gutter rendered below the live
+// assistant status row, so "near bottom" matches what the user sees.
+const computeBottomZoneThreshold = (isMobile: boolean): number => {
+    return isMobile ? CHAT_BOTTOM_ZONE_MOBILE_PX : CHAT_BOTTOM_ZONE_DESKTOP_PX;
 };
 
 const distanceFromBottom = (el: HTMLElement): number => {
@@ -68,8 +65,13 @@ const distanceFromBottom = (el: HTMLElement): number => {
 };
 
 const isNearBottom = (el: HTMLElement, isMobile: boolean): boolean => {
-    return distanceFromBottom(el) <= computeBottomZoneThreshold(isMobile, el);
+    return distanceFromBottom(el) <= computeBottomZoneThreshold(isMobile);
 };
+
+const isProcessFoldViewTransitionActive = (): boolean => (
+    typeof document !== 'undefined'
+    && document.documentElement.classList.contains(PROCESS_FOLD_TRANSITION_CLASS)
+);
 
 const isReleaseKey = (event: KeyboardEvent): boolean => {
     if (event.altKey || event.ctrlKey || event.metaKey) {
@@ -101,7 +103,7 @@ const nestedScrollableCanConsumeUp = (root: HTMLElement, target: EventTarget | n
 const isAtBottomSnapshot = (snapshot: NonNullable<SessionMemoryState['scrollPosition']>, isMobile: boolean): boolean => {
     const max = Math.max(0, snapshot.scrollHeight - snapshot.clientHeight);
     if (max <= 0) return true;
-    const threshold = computeBottomZoneThreshold(isMobile, null);
+    const threshold = computeBottomZoneThreshold(isMobile);
     return max - snapshot.scrollTop <= threshold;
 };
 
@@ -191,6 +193,10 @@ export const useChatAutoFollow = ({
             stopFollowLoop();
             return;
         }
+        if (isProcessFoldViewTransitionActive()) {
+            stopFollowLoop();
+            return;
+        }
 
         const target = Math.max(0, container.scrollHeight - container.clientHeight);
         const current = container.scrollTop;
@@ -248,6 +254,9 @@ export const useChatAutoFollow = ({
         if (!container || stateRef.current !== 'following') {
             return;
         }
+        if (isProcessFoldViewTransitionActive()) {
+            return;
+        }
 
         const target = Math.max(0, container.scrollHeight - container.clientHeight);
         if (target <= container.scrollTop + SETTLE_EPSILON) {
@@ -266,11 +275,13 @@ export const useChatAutoFollow = ({
 
     const startSettleBurst = React.useCallback(() => {
         if (typeof window === 'undefined') return;
+        if (isProcessFoldViewTransitionActive()) return;
         stopSettleBurst();
         const until = (typeof performance !== 'undefined' ? performance.now() : Date.now()) + SETTLE_BURST_DURATION_MS;
         const tick = () => {
             settleBurstRafRef.current = null;
             if (stateRef.current !== 'following') return;
+            if (isProcessFoldViewTransitionActive()) return;
             const c = scrollRef.current;
             if (!c) return;
             const target = Math.max(0, c.scrollHeight - c.clientHeight);
@@ -424,7 +435,7 @@ export const useChatAutoFollow = ({
     }, [currentSessionId, flushSave, markProgrammaticWrite, stopFollowLoop, stopSettleBurst]);
 
     React.useEffect(() => {
-        if (sessionIsWorking && stateRef.current === 'following') {
+        if (sessionIsWorking && stateRef.current === 'following' && !isProcessFoldViewTransitionActive()) {
             stickToBottomIfFollowing();
             startSettleBurst();
         }
@@ -461,20 +472,12 @@ export const useChatAutoFollow = ({
 
         const programmatic = isInProgrammaticWindow();
         const currentTop = container.scrollTop;
-        const previousTop = lastScrollTopRef.current;
         lastScrollTopRef.current = currentTop;
 
         updateOverflowAndButton();
 
         if (programmatic) {
             return;
-        }
-
-        if (currentTop < previousTop && stateRef.current === 'following') {
-            stopFollowLoop();
-            stopSettleBurst();
-            lastUserReleaseAtRef.current = typeof performance !== 'undefined' ? performance.now() : Date.now();
-            setStateValue('released');
         }
 
         const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
@@ -491,8 +494,6 @@ export const useChatAutoFollow = ({
         queueSave,
         setStateValue,
         startFollowLoop,
-        stopFollowLoop,
-        stopSettleBurst,
         updateOverflowAndButton,
     ]);
 
@@ -501,7 +502,12 @@ export const useChatAutoFollow = ({
         if (!container) return;
 
         const handleWheel = (event: WheelEvent) => {
-            if (event.deltaY >= 0) return;
+            const delta = normalizeWheelDelta({
+                deltaY: event.deltaY,
+                deltaMode: event.deltaMode,
+                rootHeight: container.clientHeight,
+            });
+            if (delta >= -WHEEL_RELEASE_THRESHOLD_PX) return;
             if (nestedScrollableCanConsumeUp(container, event.target)) return;
             releaseFromUserIntent();
         };
@@ -572,7 +578,7 @@ export const useChatAutoFollow = ({
 
         const observer = new ResizeObserver(() => {
             updateOverflowAndButton();
-            if (stateRef.current === 'following') {
+            if (stateRef.current === 'following' && !isProcessFoldViewTransitionActive()) {
                 stickToBottomIfFollowing();
                 startSettleBurst();
             }
@@ -592,7 +598,7 @@ export const useChatAutoFollow = ({
     const notifyContentChange = React.useCallback((_reason?: ContentChangeReason) => {
         void _reason;
         updateOverflowAndButton();
-        if (stateRef.current === 'following') {
+        if (stateRef.current === 'following' && !isProcessFoldViewTransitionActive()) {
             stickToBottomIfFollowing();
             startSettleBurst();
         }
@@ -605,7 +611,7 @@ export const useChatAutoFollow = ({
         if (cached) return cached;
 
         const kick = () => {
-            if (stateRef.current === 'following') {
+            if (stateRef.current === 'following' && !isProcessFoldViewTransitionActive()) {
                 stickToBottomIfFollowing();
                 startSettleBurst();
             }

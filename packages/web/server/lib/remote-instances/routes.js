@@ -19,7 +19,8 @@ export const registerRemoteInstanceRoutes = (app, runtime) => {
       res.json({ instances });
     } catch (error) {
       console.error('[remote-instances] Failed to set instances:', error?.message || error);
-      res.status(500).json({ error: 'Failed to set remote instances' });
+      const status = Number.isInteger(error?.statusCode) ? error.statusCode : 500;
+      res.status(status).json({ error: status === 400 ? (error?.message || 'Invalid remote instances') : 'Failed to set remote instances' });
     }
   });
 
@@ -33,7 +34,7 @@ export const registerRemoteInstanceRoutes = (app, runtime) => {
       }
       const options = {};
       if (req.body && typeof req.body.timeoutSec === 'number' && Number.isFinite(req.body.timeoutSec)) {
-        options.timeoutSec = Math.max(1, Math.min(300, Math.round(req.body.timeoutSec)));
+        options.timeoutSec = Math.max(1, Math.min(5, Math.round(req.body.timeoutSec)));
       }
       const status = await runtime.probeHealth(instance, options);
       res.json({ instanceId: id, ...status });

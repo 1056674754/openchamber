@@ -168,7 +168,7 @@ describe('event stream protocol helpers', () => {
     const sent = sendMessageStreamWsEvent(
       socket,
       { type: 'openchamber:heartbeat', timestamp: 1 },
-      { eventId: 'evt-2', directory: '/tmp/project' }
+      { eventId: 'evt-2', directory: '/tmp/project', serverId: 'remote-a' }
     );
 
     expect(sent).toBe(true);
@@ -176,6 +176,7 @@ describe('event stream protocol helpers', () => {
       type: 'event',
       payload: { type: 'openchamber:heartbeat', timestamp: 1 },
       eventId: 'evt-2',
+      serverId: 'remote-a',
       directory: '/tmp/project',
     });
   });

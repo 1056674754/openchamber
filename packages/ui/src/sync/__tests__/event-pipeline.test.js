@@ -20,6 +20,8 @@ function installDomStubs() {
     addEventListener() {},
     removeEventListener() {},
   };
+
+  globalThis.WebSocket = undefined;
 }
 
 class FakeWebSocket {
@@ -80,6 +82,18 @@ function withTimeout(promise, ms, message) {
     timeoutId = setTimeout(() => reject(new Error(message)), ms);
   });
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timeoutId));
+}
+
+async function waitForValue(read, message, timeoutMs = 700) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const value = read();
+    if (value) {
+      return value;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error(message);
 }
 
 // Helper to create an SDK that yields multiple events in sequence, then holds.
@@ -582,32 +596,35 @@ describe('createEventPipeline', () => {
     ]);
   });
 
-  it('falls back to SSE when websocket closes before ready in auto mode', async () => {
+  it('retries websocket when it closes before ready in auto mode', async () => {
     installDomStubs();
     globalThis.WebSocket = FakeWebSocket;
 
-    let releaseStream;
-    const hold = new Promise((resolve) => {
-      releaseStream = resolve;
-    });
-
-    const received = [];
-    const sdk = createSdkWithSingleEvent({
-      payload: {
-        type: 'server.connected',
-        properties: {},
+    const disconnectReasons = [];
+    let reconnectCount = 0;
+    const sdk = {
+      global: {
+        event: async () => {
+          throw new Error('SSE should not be used in auto websocket mode');
+        },
       },
-    }, hold);
+    };
 
-    const delivered = new Promise((resolve) => {
+    const recovered = new Promise((resolve) => {
       const { cleanup } = createEventPipeline({
         sdk,
         transport: 'auto',
-        onEvent: (directory, payload) => {
-          received.push({ directory, payload });
-          cleanup();
-          releaseStream();
-          resolve();
+        reconnectDelayMs: 0,
+        onEvent: () => {},
+        onDisconnect: (reason) => {
+          disconnectReasons.push(reason);
+        },
+        onReconnect: () => {
+          reconnectCount += 1;
+          if (reconnectCount === 1) {
+            cleanup();
+            resolve();
+          }
         },
       });
     });
@@ -616,44 +633,40 @@ describe('createEventPipeline', () => {
     const socket = FakeWebSocket.instances[0];
     socket.emitClose();
 
-    await delivered;
+    const nextSocket = await waitForValue(
+      () => FakeWebSocket.instances[1],
+      'timed out waiting for websocket retry after close before ready',
+    );
+    nextSocket.emitOpen();
+    nextSocket.emitMessage({ type: 'ready', scope: 'global' });
 
-    expect(received).toEqual([
-      {
-        directory: 'global',
-        payload: {
-          type: 'server.connected',
-          properties: {},
-        },
-      },
-    ]);
+    await recovered;
+
+    expect(disconnectReasons).toEqual(['ws_closed_before_ready']);
   });
 
-  it('falls back to SSE when websocket does not become ready in auto mode', async () => {
+  it('retries websocket when it does not become ready in auto mode', async () => {
     installDomStubs();
     globalThis.WebSocket = FakeWebSocket;
 
-    let releaseStream;
-    const hold = new Promise((resolve) => {
-      releaseStream = resolve;
-    });
-
-    const received = [];
-    const sdk = createSdkWithSingleEvent({
-      payload: {
-        type: 'server.connected',
-        properties: {},
+    const sdk = {
+      global: {
+        event: async () => {
+          throw new Error('SSE should not be used in auto websocket mode');
+        },
       },
-    }, hold);
+    };
 
     let cleanup;
-    const delivered = new Promise((resolve) => {
+    const recovered = new Promise((resolve) => {
       const pipeline = createEventPipeline({
         sdk,
         transport: 'auto',
+        reconnectDelayMs: 0,
         wsReadyTimeoutMs: 20,
-        onEvent: (directory, payload) => {
-          received.push({ directory, payload });
+        onEvent: () => {},
+        onReconnect: () => {
+          cleanup?.();
           resolve();
         },
       });
@@ -665,71 +678,47 @@ describe('createEventPipeline', () => {
     socket.emitOpen();
 
     try {
-      await withTimeout(delivered, 500, 'timed out waiting for websocket-ready SSE fallback');
+      await new Promise((resolve) => setTimeout(resolve, 40));
+      const nextSocket = await waitForValue(
+        () => FakeWebSocket.instances[1],
+        'timed out waiting for websocket retry after ready timeout',
+      );
+      nextSocket.emitOpen();
+      nextSocket.emitMessage({ type: 'ready', scope: 'global' });
+      await withTimeout(recovered, 500, 'timed out waiting for websocket retry after ready timeout');
     } finally {
       cleanup?.();
-      releaseStream();
     }
-
-    expect(received).toEqual([
-      {
-        directory: 'global',
-        payload: {
-          type: 'server.connected',
-          properties: {},
-        },
-      },
-    ]);
   });
 
-  it('passes the last websocket event id when falling back to SSE', async () => {
+  it('passes the last websocket event id when reconnecting websocket', async () => {
     installDomStubs();
     globalThis.WebSocket = FakeWebSocket;
     const originalConsoleError = console.error;
     console.error = () => {};
 
-    let releaseStream;
-    const hold = new Promise((resolve) => {
-      releaseStream = resolve;
-    });
-
-    const eventOptions = [];
     const received = [];
     const sdk = {
       global: {
-        event: async (options) => {
-          eventOptions.push(options);
-          return {
-            stream: (async function* () {
-              yield {
-                payload: {
-                  type: 'server.connected',
-                  properties: {},
-                },
-              };
-              await hold;
-            })(),
-          };
+        event: async () => {
+          throw new Error('SSE should not be used in auto websocket mode');
         },
       },
     };
+    let cleanup;
 
     const delivered = new Promise((resolve) => {
-      const { cleanup } = createEventPipeline({
+      const pipeline = createEventPipeline({
         sdk,
         transport: 'auto',
         reconnectDelayMs: 0,
         wsReadyTimeoutMs: 20,
         onEvent: (directory, payload) => {
           received.push({ directory, payload });
-          if (payload.type !== 'server.connected') {
-            return;
-          }
-          cleanup();
-          releaseStream();
           resolve();
         },
       });
+      cleanup = pipeline.cleanup;
     });
 
     try {
@@ -751,59 +740,123 @@ describe('createEventPipeline', () => {
       });
       firstSocket.emitClose();
 
-      await new Promise((resolve) => setTimeout(resolve, 40));
       await delivered;
+      const secondSocket = await waitForValue(
+        () => FakeWebSocket.instances[1],
+        'timed out waiting for websocket reconnect with last event id',
+      );
+      expect(secondSocket?.url).toContain('lastEventId=evt-1');
 
-      expect(eventOptions[0]?.headers?.['Last-Event-ID']).toBe('evt-1');
-      expect(received.some((entry) => entry.payload.type === 'server.connected')).toBe(true);
+      expect(received.some((entry) => entry.payload.type === 'session.status')).toBe(true);
     } finally {
+      cleanup?.();
       console.error = originalConsoleError;
     }
   });
 
-  it('falls back to SSE after an abnormal websocket close outside the quick-drop window', async () => {
+  it('passes websocket server id metadata without applying local directory routing', async () => {
+    installDomStubs();
+    globalThis.WebSocket = FakeWebSocket;
+
+    const received = [];
+    let routeDirectoryCalls = 0;
+    let cleanup;
+
+    const delivered = new Promise((resolve) => {
+      const pipeline = createEventPipeline({
+        sdk: {
+          global: {
+            event: async () => {
+              throw new Error('SSE should not be used for websocket metadata test');
+            },
+          },
+        },
+        transport: 'ws',
+        onEvent: (directory, payload, meta) => {
+          received.push({ directory, payload, meta });
+          resolve();
+        },
+        routeDirectory: () => {
+          routeDirectoryCalls += 1;
+          return '/local-reroute';
+        },
+      });
+      cleanup = pipeline.cleanup;
+    });
+
+    try {
+      await Promise.resolve();
+      const socket = FakeWebSocket.instances[0];
+      socket.emitOpen();
+      socket.emitMessage({ type: 'ready', scope: 'global' });
+      socket.emitMessage({
+        type: 'event',
+        serverId: 'remote-a',
+        directory: '/remote/project',
+        payload: {
+          type: 'session.status',
+          properties: {
+            sessionID: 'remote-session',
+            status: { type: 'busy' },
+          },
+        },
+      });
+
+      await delivered;
+      cleanup?.();
+
+      expect(routeDirectoryCalls).toBe(0);
+      expect(received).toEqual([
+        {
+          directory: '/remote/project',
+          payload: {
+            type: 'session.status',
+            properties: {
+              sessionID: 'remote-session',
+              status: { type: 'busy' },
+            },
+          },
+          meta: { serverId: 'remote-a' },
+        },
+      ]);
+    } finally {
+      cleanup?.();
+    }
+  });
+
+  it('retries websocket after an abnormal websocket close outside the quick-drop window', async () => {
     installDomStubs();
     globalThis.WebSocket = FakeWebSocket;
     const originalDateNow = Date.now;
     let now = 1_000_000;
     Date.now = () => now;
 
-    let releaseStream;
-    const hold = new Promise((resolve) => {
-      releaseStream = resolve;
-    });
-
-    const received = [];
-    const eventOptions = [];
+    const disconnectReasons = [];
+    let reconnectCount = 0;
     const sdk = {
       global: {
-        event: async (options) => {
-          eventOptions.push(options);
-          return {
-            stream: (async function* () {
-              yield {
-                payload: {
-                  type: 'server.connected',
-                  properties: {},
-                },
-              };
-              await hold;
-            })(),
-          };
+        event: async () => {
+          throw new Error('SSE should not be used in auto websocket mode');
         },
       },
     };
 
     let cleanup;
-    const delivered = new Promise((resolve) => {
+    const recovered = new Promise((resolve) => {
       const pipeline = createEventPipeline({
         sdk,
         transport: 'auto',
         reconnectDelayMs: 0,
         wsReadyTimeoutMs: 20,
-        onEvent: (directory, payload) => {
-          received.push({ directory, payload });
-          resolve();
+        onEvent: () => {},
+        onDisconnect: (reason) => {
+          disconnectReasons.push(reason);
+        },
+        onReconnect: () => {
+          reconnectCount += 1;
+          if (reconnectCount === 2) {
+            resolve();
+          }
         },
       });
       cleanup = pipeline.cleanup;
@@ -818,21 +871,18 @@ describe('createEventPipeline', () => {
       now += 5_000;
       socket.emitClose({ code: 1006 });
 
-      await withTimeout(delivered, 500, 'timed out waiting for abnormal-close SSE fallback');
+      const nextSocket = await waitForValue(
+        () => FakeWebSocket.instances[1],
+        'timed out waiting for websocket retry after abnormal close',
+      );
+      nextSocket.emitOpen();
+      nextSocket.emitMessage({ type: 'ready', scope: 'global' });
 
-      expect(eventOptions.length).toBe(1);
-      expect(received).toEqual([
-        {
-          directory: 'global',
-          payload: {
-            type: 'server.connected',
-            properties: {},
-          },
-        },
-      ]);
+      await withTimeout(recovered, 500, 'timed out waiting for abnormal-close websocket retry');
+
+      expect(disconnectReasons).toEqual(['ws_unstable_close:code=1006']);
     } finally {
       cleanup?.();
-      releaseStream();
       Date.now = originalDateNow;
     }
   });

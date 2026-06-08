@@ -10,7 +10,7 @@ import { toast } from '@/components/ui';
 import { Icon } from "@/components/icon/Icon";
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { cn } from '@/lib/utils';
-import { isDesktopLocalOriginActive, isTauriShell, openDesktopPath, openDesktopProjectInApp, openSshTerminalAtPath } from '@/lib/desktop';
+import { canUseDesktopNativeApi, openDesktopPath, openDesktopProjectInApp, openSshTerminalAtPath } from '@/lib/desktop';
 import { DEFAULT_OPEN_IN_APP_ID, OPEN_IN_APPS } from '@/lib/openInApps';
 import { useOpenInAppsStore, type OpenInAppOption } from '@/stores/useOpenInAppsStore';
 import { useActiveServerId } from '@/hooks/useActiveServerId';
@@ -93,7 +93,7 @@ export const OpenInAppButton = ({ directory, className }: OpenInAppButtonProps) 
     initialize();
   }, [initialize]);
 
-  const isDesktopLocal = isTauriShell() && isDesktopLocalOriginActive();
+  const isDesktopLocal = canUseDesktopNativeApi();
   const isRemoteDirectory = activeServerId !== 'default';
 
   // Resolve SSH instance for remote directories

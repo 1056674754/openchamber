@@ -8,7 +8,6 @@ import {
   restartToApplyUpdate,
   isDesktopLocalOriginActive,
   isElectronShell,
-  isTauriShell,
   isVSCodeRuntime,
   isWebRuntime,
 } from '@/lib/desktop';
@@ -82,7 +81,7 @@ function mapRuntimeParams(runtime: ClientRuntime): URLSearchParams {
   params.set('arch', detectArch());
   params.set('platform', detectPlatform());
   if (runtime === 'desktop') {
-    params.set('appType', isElectronShell() ? 'desktop-electron' : 'desktop-tauri');
+    params.set('appType', 'desktop-electron');
     params.set('instanceMode', isDesktopLocalOriginActive() ? 'local' : 'remote');
     return params;
   }
@@ -135,8 +134,8 @@ async function checkForWebUpdates(runtime: ClientRuntime, currentVersion?: strin
 }
 
 function detectRuntimeType(): 'desktop' | 'web' | 'vscode' | null {
-  if (isTauriShell()) {
-    // Only use Tauri updater when we're on the local instance.
+  if (isElectronShell()) {
+    // Only use the desktop updater when we're on the local instance.
     // When viewing a remote host inside the desktop shell, treat update as web update.
     return isDesktopLocalOriginActive() ? 'desktop' : 'web';
   }

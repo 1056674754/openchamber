@@ -452,6 +452,8 @@ export function useBrowserVoice(): UseBrowserVoiceReturn {
         undefined,
         undefined,
         currentVariant ?? undefined,
+        undefined,
+        sessionId,
       );
       
       // Wait for AI response and speak it

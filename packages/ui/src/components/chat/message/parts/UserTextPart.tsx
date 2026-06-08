@@ -1,7 +1,7 @@
 import React from 'react';
 import { cn } from '@/lib/utils';
 import type { Part } from '@opencode-ai/sdk/v2';
-import type { AgentMentionInfo } from '../types';
+import type { AgentMentionInfo, ToolPopupContent } from '../types';
 import { SimpleMarkdownRenderer } from '../../MarkdownRenderer';
 import { useUIStore } from '@/stores/useUIStore';
 import { useSkillsStore } from '@/stores/useSkillsStore';
@@ -40,6 +40,7 @@ type UserTextPartProps = {
     messageId: string;
     isMobile: boolean;
     agentMention?: AgentMentionInfo;
+    onShowPopup?: (content: ToolPopupContent) => void;
 };
 
 const buildMentionUrl = (name: string): string => {
@@ -84,7 +85,7 @@ const applyHardLineBreaks = (markdown: string): string => {
         .join('');
 };
 
-const UserTextPart: React.FC<UserTextPartProps> = ({ part, sessionId, messageId, agentMention }) => {
+const UserTextPart: React.FC<UserTextPartProps> = ({ part, sessionId, messageId, agentMention, onShowPopup }) => {
     const partWithText = part as PartWithText;
     const rawText = partWithText.text;
     const textContent = typeof rawText === 'string' ? rawText : partWithText.content || partWithText.value || '';
@@ -313,6 +314,7 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, sessionId, messageId,
                     <SimpleMarkdownRenderer
                         content={processedMarkdownContent}
                         sessionId={sessionId}
+                        onShowPopup={onShowPopup}
                         className="[&_.markdown-content>*:first-child]:mt-0 [&_.markdown-content>*:last-child]:mb-0"
                         disableLinkSafety
                     />

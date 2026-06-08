@@ -44,8 +44,10 @@ export function parseSseEventEnvelope(block) {
       typeof parsed.payload === 'object' &&
       parsed.payload !== null
     ) {
+      const serverId = typeof parsed.serverId === 'string' && parsed.serverId.length > 0 ? parsed.serverId : null;
       return {
         eventId,
+        ...(serverId ? { serverId } : {}),
         directory: typeof parsed.directory === 'string' && parsed.directory.length > 0 ? parsed.directory : null,
         payload: parsed.payload,
       };
@@ -58,8 +60,10 @@ export function parseSseEventEnvelope(block) {
           ? parsed.properties.directory
           : null;
 
+    const serverId = typeof parsed?.serverId === 'string' && parsed.serverId.length > 0 ? parsed.serverId : null;
     return {
       eventId,
+      ...(serverId ? { serverId } : {}),
       directory,
       payload: parsed,
     };
@@ -126,6 +130,7 @@ export function sendMessageStreamWsEvent(socket, payload, options = {}) {
     type: 'event',
     payload,
     ...(typeof options.eventId === 'string' && options.eventId.length > 0 ? { eventId: options.eventId } : {}),
+    ...(typeof options.serverId === 'string' && options.serverId.length > 0 ? { serverId: options.serverId } : {}),
     ...(typeof options.directory === 'string' && options.directory.length > 0 ? { directory: options.directory } : {}),
   });
 }

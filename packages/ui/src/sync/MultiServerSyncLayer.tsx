@@ -5,7 +5,7 @@ import { serverRegistry, DEFAULT_SERVER_ID } from "@/lib/opencode/server-registr
 import { useProjectsStore } from "@/stores/useProjectsStore";
 import { useSessionUIStore } from "./session-ui-store";
 import { useRemoteInstancesStore } from "@/stores/useRemoteInstancesStore";
-import { isTauriShell, isWebRuntime } from "@/lib/desktop";
+import { hasDesktopInvoke, isWebRuntime } from "@/lib/desktop";
 import { buildRemoteBootstrapDirectoryMap } from "./remote-bootstrap-directories";
 
 type AdditionalServer = {
@@ -13,6 +13,29 @@ type AdditionalServer = {
   sdk: OpencodeClient;
   baseUrl: string;
 };
+
+function areServerListsEquivalent(left: AdditionalServer[], right: AdditionalServer[]): boolean {
+  if (left.length !== right.length) return false;
+  for (let i = 0; i < left.length; i++) {
+    if (
+      left[i]?.id !== right[i]?.id
+      || left[i]?.sdk !== right[i]?.sdk
+      || left[i]?.baseUrl !== right[i]?.baseUrl
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function setServersIfChanged(
+  setServers: React.Dispatch<React.SetStateAction<AdditionalServer[]>>,
+) {
+  setServers((current) => {
+    const next = loadAdditionalServers();
+    return areServerListsEquivalent(current, next) ? current : next;
+  });
+}
 
 export function MultiServerSyncLayer() {
   const servers = useServerList();
@@ -23,7 +46,7 @@ export function MultiServerSyncLayer() {
   const loadRemoteInstances = useRemoteInstancesStore((s) => s.loadInstances);
 
   React.useEffect(() => {
-    if (!isWebRuntime() && !isTauriShell()) return;
+    if (!isWebRuntime() && !hasDesktopInvoke()) return;
     if (remoteInstancesInitialized || remoteInstancesLoading) return;
     void loadRemoteInstances();
   }, [loadRemoteInstances, remoteInstancesInitialized, remoteInstancesLoading]);
@@ -48,6 +71,7 @@ export function MultiServerSyncLayer() {
             directory=""
             serverId={s.id}
             baseUrl={s.baseUrl}
+            eventSource="bus"
             remoteDirectories={remoteDirectories}
           >
             <React.Fragment />
@@ -68,12 +92,12 @@ function useServerList() {
   ));
 
   React.useEffect(() => {
-    const id = setInterval(() => setServers(loadAdditionalServers()), 5000);
+    const id = setInterval(() => setServersIfChanged(setServers), 5000);
     return () => clearInterval(id);
   }, []);
 
   React.useEffect(() => {
-    const update = () => setServers(loadAdditionalServers());
+    const update = () => setServersIfChanged(setServers);
     update();
     const unsubs = serverRegistry
       .getAll()

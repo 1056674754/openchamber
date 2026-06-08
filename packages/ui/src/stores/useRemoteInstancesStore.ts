@@ -9,7 +9,7 @@ import {
   type DesktopSshInstance,
   type DesktopSshInstanceStatus,
 } from '@/lib/desktopSsh';
-import { isTauriShell } from '@/lib/desktop';
+import { hasDesktopInvoke } from '@/lib/desktop';
 import { serverRegistry } from '@/lib/opencode/server-registry';
 import type {
   RemoteInstance,
@@ -47,7 +47,7 @@ interface RemoteInstancesState {
   clearError: () => void;
 }
 
-const isDesktop = isTauriShell();
+const isDesktop = hasDesktopInvoke();
 const webHealthProbeInFlight = new Set<string>();
 let desktopHealthPollTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -181,6 +181,55 @@ function syncRegistryForInstances(instances: RemoteInstance[], statuses: Record<
   for (const inst of instances) {
     syncRegistryForInstance(inst, statuses[inst.id]);
   }
+}
+
+export function markRemoteInstanceTransportStatus(
+  id: string,
+  connected: boolean,
+  detail?: string,
+): void {
+  const state = useRemoteInstancesStore.getState();
+  const previous = state.statuses[id];
+  if (!previous) return;
+
+  const now = Date.now();
+  const error = connected ? undefined : (detail || 'Remote event stream unavailable');
+  const next: RemoteInstanceStatus = connected
+    ? {
+        ...previous,
+        phase: 'connected',
+        healthy: true,
+        detail: previous.detail === previous.error ? undefined : previous.detail,
+        error: undefined,
+        updatedAtMs: now,
+      }
+    : {
+        ...previous,
+        phase: 'error',
+        healthy: false,
+        detail: error,
+        error,
+        updatedAtMs: now,
+      };
+
+  if (
+    previous.phase === next.phase
+    && previous.healthy === next.healthy
+    && previous.detail === next.detail
+    && previous.error === next.error
+  ) {
+    return;
+  }
+
+  useRemoteInstancesStore.setState({
+    statuses: {
+      ...state.statuses,
+      [id]: next,
+    },
+  });
+
+  const instance = state.instances.find((item) => item.id === id);
+  syncRegistryForStatus(next, instance ? resolveRemoteLabel(instance) : id);
 }
 
 function statusPhaseFromHealth(health: RemoteInstanceApiEntry['health']): RemoteInstancePhase {

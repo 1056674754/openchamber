@@ -16,5 +16,6 @@ export const buildQueuedAutoSendPayload = (queue: QueuedMessage[], agents: Agent
     primaryAttachments: queued.attachments ?? [],
     agentMentionName: mention?.name,
     sendConfig: queued.sendConfig,
+    sendTarget: queued.sendTarget,
   };
 };

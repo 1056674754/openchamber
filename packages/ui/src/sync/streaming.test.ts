@@ -3,9 +3,10 @@ import type { Message, SessionStatus } from "@opencode-ai/sdk/v2/client"
 import { INITIAL_STATE, type State } from "./types"
 import { updateStreamingState, useStreamingStore } from "./streaming"
 
-const message = (id: string, role: "user" | "assistant"): Message => ({
+const message = (id: string, role: "user" | "assistant", overrides: Partial<Message> = {}): Message => ({
   id,
   role,
+  ...overrides,
 } as unknown as Message)
 
 const stateWithMessages = (messages: Message[], status: SessionStatus = { type: "busy" } as SessionStatus): State => ({
@@ -76,6 +77,32 @@ describe("updateStreamingState", () => {
       message("msg_user_1", "user"),
       message("msg_assistant_1", "assistant"),
     ], { type: "idle" } as SessionStatus))
+
+    expect(useStreamingStore.getState().streamingMessageIds.get("ses_1")).toBeNull()
+    expect(useStreamingStore.getState().messageStreamStates.get("msg_assistant_1")?.phase).toBe("completed")
+  })
+
+  test("does not mark a terminal assistant message as streaming while status is still busy", () => {
+    updateStreamingState(stateWithMessages([
+      message("msg_user_1", "user"),
+      message("msg_assistant_1", "assistant", { finish: "stop" } as Partial<Message>),
+    ]))
+
+    expect(useStreamingStore.getState().streamingMessageIds.get("ses_1")).toBe(undefined)
+    expect(useStreamingStore.getState().messageStreamStates.has("msg_assistant_1")).toBe(false)
+  })
+
+  test("clears a previous streaming message when its terminal update arrives before idle status", () => {
+    updateStreamingState(stateWithMessages([
+      message("msg_user_1", "user"),
+      message("msg_assistant_1", "assistant"),
+    ]))
+    expect(useStreamingStore.getState().streamingMessageIds.get("ses_1")).toBe("msg_assistant_1")
+
+    updateStreamingState(stateWithMessages([
+      message("msg_user_1", "user"),
+      message("msg_assistant_1", "assistant", { finish: "stop" } as Partial<Message>),
+    ]))
 
     expect(useStreamingStore.getState().streamingMessageIds.get("ses_1")).toBeNull()
     expect(useStreamingStore.getState().messageStreamStates.get("msg_assistant_1")?.phase).toBe("completed")

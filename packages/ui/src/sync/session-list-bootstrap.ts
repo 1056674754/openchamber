@@ -2,8 +2,10 @@ import type { Session } from "@opencode-ai/sdk/v2"
 import type { OpencodeClient } from "@opencode-ai/sdk/v2/client"
 import { DEFAULT_SERVER_ID, serverRegistry } from "@/lib/opencode/server-registry"
 
-export const REMOTE_SESSION_LIST_TIMEOUT_MS = 8_000
-export const REMOTE_SESSION_LIST_LIMIT = 200
+export const SESSION_LIST_BOOTSTRAP_TIMEOUT_MS = 8_000
+export const SESSION_LIST_BOOTSTRAP_LIMIT = 200
+export const REMOTE_SESSION_LIST_TIMEOUT_MS = SESSION_LIST_BOOTSTRAP_TIMEOUT_MS
+export const REMOTE_SESSION_LIST_LIMIT = SESSION_LIST_BOOTSTRAP_LIMIT
 
 export const buildRemoteSessionListUrl = (baseUrl: string, directory: string): string => {
   const normalizedBaseUrl = baseUrl.replace(/\/+$/, "")
@@ -28,7 +30,7 @@ export async function listSessionsForBootstrap(
     }
     const response = await fetch(buildRemoteSessionListUrl(connection.config.baseUrl, directory), {
       headers,
-      signal: AbortSignal.timeout(REMOTE_SESSION_LIST_TIMEOUT_MS),
+      signal: AbortSignal.timeout(SESSION_LIST_BOOTSTRAP_TIMEOUT_MS),
     })
     if (!response.ok) {
       const err = new Error(`session.list failed (${response.status})`)
@@ -46,8 +48,8 @@ export async function listSessionsForBootstrap(
 
   const result = await sdkClient.session.list({
     directory,
-    roots: true,
-    limit: 50,
+    roots: false,
+    limit: SESSION_LIST_BOOTSTRAP_LIMIT,
   })
   const rawError = (result as { error?: unknown }).error
   if (rawError) {

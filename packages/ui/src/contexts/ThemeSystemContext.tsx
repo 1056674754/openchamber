@@ -7,7 +7,7 @@ import React, {
 import { flushSync } from 'react-dom';
 import type { Theme, ThemeMode } from '@/types/theme';
 import type { DesktopSettings } from '@/lib/desktop';
-import { isDesktopLocalOriginActive, isTauriShell, isVSCodeRuntime } from '@/lib/desktop';
+import { isDesktopLocalOriginActive, isDesktopShell, isVSCodeRuntime } from '@/lib/desktop';
 import { setDesktopWindowTheme } from '@/lib/desktopNative';
 import { CSSVariableGenerator } from '@/lib/theme/cssGenerator';
 import { updateDesktopSettings } from '@/lib/persistence';
@@ -219,7 +219,7 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
   });
   const isVSCode = useMemo(() => isVSCodeRuntime(), []);
   const isLocalDesktopOrigin = useMemo(() => isDesktopLocalOriginActive(), []);
-  const isDesktopShell = useMemo(() => isTauriShell(), []);
+  const isDesktop = useMemo(() => isDesktopShell(), []);
 
   const availableThemes = useMemo(() => {
     const merged: Theme[] = [];
@@ -576,14 +576,14 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
   }, [currentTheme.metadata.id, currentTheme.metadata.variant, ensureThemeById, preferences.themeMode, preferences.lightThemeId, preferences.darkThemeId]);
 
   useEffect(() => {
-    if (!isDesktopShell) {
+    if (!isDesktop) {
       return;
     }
 
     void (async () => {
       await setDesktopWindowTheme(preferences.themeMode, currentTheme.metadata.variant);
     })();
-  }, [currentTheme.metadata.variant, isDesktopShell, preferences.themeMode]);
+  }, [currentTheme.metadata.variant, isDesktop, preferences.themeMode]);
 
   useEffect(() => {
     if (typeof window === 'undefined') {

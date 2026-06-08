@@ -15,6 +15,7 @@ export type RemoteInstancePhase =
 export type RemoteInstanceAuth = {
   type: 'none' | 'password' | 'bearer';
   value?: string;
+  hasValue?: boolean;
 };
 
 export type RemoteInstance = {

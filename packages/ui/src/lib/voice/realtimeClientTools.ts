@@ -43,7 +43,18 @@ export const realtimeClientTools = {
             console.log("[Voice] Sending message to session:", sessionId);
             await useSessionUIStore
                 .getState()
-                .sendMessage(parsed.data.message, currentProviderId, currentModelId, currentAgentName ?? undefined);
+                .sendMessage(
+                    parsed.data.message,
+                    currentProviderId,
+                    currentModelId,
+                    currentAgentName ?? undefined,
+                    undefined,
+                    undefined,
+                    undefined,
+                    undefined,
+                    undefined,
+                    sessionId,
+                );
             return "sent";
         } catch (error) {
             console.error("[Voice] Failed to send message:", error);

@@ -677,6 +677,58 @@ export const createSettingsHelpers = (dependencies) => {
     return result;
   };
 
+  const redactRemoteInstancesForResponse = (instances) => {
+    if (!Array.isArray(instances)) {
+      return instances;
+    }
+
+    return instances.map((inst) => {
+      const authType = ['none', 'password', 'bearer'].includes(inst?.auth?.type)
+        ? inst.auth.type
+        : 'none';
+      const redacted = {
+        ...inst,
+        auth: { type: authType },
+      };
+      if (authType !== 'none' && typeof inst?.auth?.value === 'string' && inst.auth.value.length > 0) {
+        redacted.auth.hasValue = true;
+      }
+      return redacted;
+    });
+  };
+
+  const preserveRemoteInstanceAuthValues = (currentInstances, nextInstances) => {
+    if (!Array.isArray(nextInstances)) {
+      return nextInstances;
+    }
+
+    const currentById = new Map(
+      (Array.isArray(currentInstances) ? currentInstances : [])
+        .filter((inst) => inst && typeof inst.id === 'string')
+        .map((inst) => [inst.id, inst]),
+    );
+
+    return nextInstances.map((inst) => {
+      const authType = ['password', 'bearer'].includes(inst?.auth?.type) ? inst.auth.type : 'none';
+      if (authType === 'none' || inst?.auth?.value) {
+        return inst;
+      }
+
+      const current = currentById.get(inst.id);
+      if (current?.auth?.type !== authType || !current.auth.value) {
+        return inst;
+      }
+
+      return {
+        ...inst,
+        auth: {
+          ...inst.auth,
+          value: current.auth.value,
+        },
+      };
+    });
+  };
+
   const mergePersistedSettings = (current, changes) => {
     const baseApproved = Array.isArray(changes.approvedDirectories)
       ? changes.approvedDirectories
@@ -732,12 +784,17 @@ export const createSettingsHelpers = (dependencies) => {
       typographySizes: nextTypographySizes
     };
 
+    if (Array.isArray(changes.remoteInstances)) {
+      next.remoteInstances = preserveRemoteInstanceAuthValues(current.remoteInstances, changes.remoteInstances);
+    }
+
     return next;
   };
 
   const formatSettingsResponse = (settings) => {
     const sanitized = sanitizeSettingsUpdate(settings);
     delete sanitized.managedRemoteTunnelToken;
+    const remoteInstances = redactRemoteInstancesForResponse(sanitized.remoteInstances);
     const approved = normalizeStringArray(settings.approvedDirectories);
     const bookmarks = normalizeStringArray(settings.securityScopedBookmarks);
     const hasManagedRemoteTunnelToken = typeof settings?.managedRemoteTunnelToken === 'string' && settings.managedRemoteTunnelToken.trim().length > 0;
@@ -747,6 +804,7 @@ export const createSettingsHelpers = (dependencies) => {
 
     return {
       ...sanitized,
+      ...(Array.isArray(remoteInstances) ? { remoteInstances } : {}),
       hasManagedRemoteTunnelToken,
       ...(pwaAppName ? { pwaAppName } : {}),
       pwaOrientation,

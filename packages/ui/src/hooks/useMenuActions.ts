@@ -9,6 +9,7 @@ import { useProjectsStore } from '@/stores/useProjectsStore';
 import { sessionEvents } from '@/lib/sessionEvents';
 import { createWorktreeSession } from '@/lib/worktreeSessionCreator';
 import { showOpenCodeStatus } from '@/lib/openCodeStatus';
+import { listenDesktopEvent } from '@/lib/desktop';
 
 const getActiveElementSelectedText = (): string => {
   if (typeof document === 'undefined') {
@@ -54,17 +55,6 @@ const copyCurrentSelectionFallback = async (): Promise<boolean> => {
 
 const MENU_ACTION_EVENT = 'openchamber:menu-action';
 const CHECK_FOR_UPDATES_EVENT = 'openchamber:check-for-updates';
-
-type TauriEventApi = {
-  listen?: (
-    event: string,
-    handler: (evt: { payload?: unknown }) => void
-  ) => Promise<() => void>;
-};
-
-type TauriGlobal = {
-  event?: TauriEventApi;
-};
 
 type MenuAction =
   | 'about'
@@ -325,14 +315,11 @@ export const useMenuActions = (
 
   React.useEffect(() => {
     if (typeof window === 'undefined') return;
-    const tauri = (window as unknown as { __TAURI__?: TauriGlobal }).__TAURI__;
-    const listen = tauri?.event?.listen;
-    if (typeof listen !== 'function') return;
 
     let unlistenMenu: null | (() => void | Promise<void>) = null;
     let unlistenUpdate: null | (() => void | Promise<void>) = null;
 
-    listen('openchamber:menu-action', (evt) => {
+    listenDesktopEvent('openchamber:menu-action', (evt) => {
       const action = evt?.payload;
       if (typeof action !== 'string') return;
       handleAction(action as MenuAction);
@@ -344,7 +331,7 @@ export const useMenuActions = (
         // ignore
       });
 
-    listen('openchamber:check-for-updates', () => {
+    listenDesktopEvent('openchamber:check-for-updates', () => {
       window.dispatchEvent(new Event(CHECK_FOR_UPDATES_EVENT));
     })
       .then((fn) => {

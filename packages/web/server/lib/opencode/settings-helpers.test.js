@@ -106,4 +106,53 @@ describe('settings helpers', () => {
     const response = helpers.formatSettingsResponse({});
     expect(response.collapsibleThinkingBlocks).toBe(true);
   });
+
+  it('redacts remote instance auth values in formatSettingsResponse', () => {
+    const helpers = createTestHelpers();
+
+    const response = helpers.formatSettingsResponse({
+      remoteInstances: [
+        {
+          id: 'remote-a',
+          label: 'Remote A',
+          url: 'http://remote-a.example',
+          auth: { type: 'bearer', value: 'secret-token' },
+          enabled: true,
+        },
+      ],
+    });
+
+    expect(response.remoteInstances[0].auth).toEqual({ type: 'bearer', hasValue: true });
+  });
+
+  it('preserves remote instance auth values when merging redacted settings changes', () => {
+    const helpers = createTestHelpers();
+
+    const merged = helpers.mergePersistedSettings(
+      {
+        remoteInstances: [
+          {
+            id: 'remote-a',
+            label: 'Remote A',
+            url: 'http://remote-a.example',
+            auth: { type: 'password', value: 'open-sesame' },
+            enabled: true,
+          },
+        ],
+      },
+      {
+        remoteInstances: [
+          {
+            id: 'remote-a',
+            label: 'Remote A Updated',
+            url: 'http://remote-a-updated.example',
+            auth: { type: 'password' },
+            enabled: true,
+          },
+        ],
+      },
+    );
+
+    expect(merged.remoteInstances[0].auth).toEqual({ type: 'password', value: 'open-sesame' });
+  });
 });

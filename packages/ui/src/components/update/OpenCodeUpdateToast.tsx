@@ -11,6 +11,11 @@ import {
   shouldShowOpenCodeUpdateToast,
   type OpenCodeUpgradeStatusLike,
 } from './openCodeUpdateDedup';
+import {
+  formatOpenCodeUpgradeCopyText,
+  isOpenCodeUpgradeResponseLike,
+  resolveOpenCodeUpgradeError,
+} from '@/lib/opencode/upgradeDiagnostics';
 
 const UPDATE_TOAST_ID = 'opencode-update-available';
 const UPGRADE_TOAST_ID = 'opencode-upgrade-progress';
@@ -59,9 +64,21 @@ export const OpenCodeUpdateToast: React.FC = () => {
         },
         body: JSON.stringify({}),
       });
-      const payload = await response.json().catch(() => null) as null | { success?: boolean; version?: string; error?: string };
+      const rawPayload = await response.json().catch(() => null);
+      const payload = isOpenCodeUpgradeResponseLike(rawPayload) ? rawPayload : null;
       if (!response.ok || payload?.success === false) {
-        throw new Error(payload?.error || response.statusText || t('opencodeUpdate.toast.failed.description'));
+        const fallbackError = response.statusText || t('opencodeUpdate.toast.failed.description');
+        const description = resolveOpenCodeUpgradeError(payload, fallbackError);
+        toast.error(t('opencodeUpdate.toast.failed.title'), {
+          id: UPGRADE_TOAST_ID,
+          description,
+          copyText: formatOpenCodeUpgradeCopyText(payload, description, {
+            httpStatus: response.ok ? null : response.status,
+            httpStatusText: response.ok ? null : response.statusText,
+          }),
+          duration: Infinity,
+        });
+        return;
       }
 
       toast.success(t('opencodeUpdate.toast.updated.title'), {
@@ -77,9 +94,11 @@ export const OpenCodeUpdateToast: React.FC = () => {
         },
       });
     } catch (error) {
+      const description = error instanceof Error ? error.message : t('opencodeUpdate.toast.failed.description');
       toast.error(t('opencodeUpdate.toast.failed.title'), {
         id: UPGRADE_TOAST_ID,
-        description: error instanceof Error ? error.message : t('opencodeUpdate.toast.failed.description'),
+        description,
+        copyText: formatOpenCodeUpgradeCopyText(null, description),
         duration: Infinity,
       });
     } finally {

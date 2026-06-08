@@ -91,18 +91,18 @@ const notifyWithWebAPI = async (payload?: NotificationPayload): Promise<boolean>
   }
 };
 
-const notifyWithTauri = async (payload?: NotificationPayload): Promise<boolean> => {
+const notifyWithDesktop = async (payload?: NotificationPayload): Promise<boolean> => {
   if (typeof window === 'undefined') {
     return false;
   }
 
-  const tauri = (window as unknown as { __TAURI__?: TauriGlobal }).__TAURI__;
-  if (!tauri?.core?.invoke) {
+  const desktop = (window as unknown as { __OPENCHAMBER_DESKTOP__?: DesktopBridge }).__OPENCHAMBER_DESKTOP__;
+  if (!desktop?.core?.invoke) {
     return false;
   }
 
   try {
-    await tauri.core.invoke('desktop_notify', {
+    await desktop.core.invoke('desktop_notify', {
       payload: {
         title: payload?.title,
         body: payload?.body,
@@ -111,26 +111,26 @@ const notifyWithTauri = async (payload?: NotificationPayload): Promise<boolean> 
     });
     return true;
   } catch (error) {
-    console.warn('Failed to send native notification (tauri)', error);
+    console.warn('Failed to send native notification', error);
     return false;
   }
 };
 
 export const createWebNotificationsAPI = (): NotificationsAPI => ({
   async notifyAgentCompletion(payload?: NotificationPayload): Promise<boolean> {
-    return (await notifyWithTauri(payload)) || (await notifyWithWebAPI(payload));
+    return (await notifyWithDesktop(payload)) || (await notifyWithWebAPI(payload));
   },
   canNotify: () => {
     if (typeof window !== 'undefined') {
-      const tauri = (window as unknown as { __TAURI__?: TauriGlobal }).__TAURI__;
-      if (tauri?.core?.invoke) {
+      const desktop = (window as unknown as { __OPENCHAMBER_DESKTOP__?: DesktopBridge }).__OPENCHAMBER_DESKTOP__;
+      if (desktop?.core?.invoke) {
         return true;
       }
     }
     return typeof Notification !== 'undefined' ? Notification.permission === 'granted' : false;
   },
 });
-type TauriGlobal = {
+type DesktopBridge = {
   core?: {
     invoke?: (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
   };

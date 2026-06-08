@@ -144,7 +144,11 @@ export function useQueuedMessageAutoSend(enabledOrOptions?: boolean | { enabled?
           undefined,
           resolved.variant,
           'normal',
-          sessionId
+          {
+            sessionId,
+            directory: payload.sendTarget?.directory,
+            serverId: payload.sendTarget?.serverId,
+          }
         );
       } catch (error) {
         useMessageQueueStore.getState().restoreMessages(sessionId, [queuedMessage]);

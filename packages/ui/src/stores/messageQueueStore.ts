@@ -9,6 +9,11 @@ export interface QueuedMessage {
     content: string;
     attachments?: AttachedFile[];
     createdAt: number;
+    /** Authoritative routing captured at queue time. */
+    sendTarget?: {
+        directory?: string;
+        serverId?: string;
+    };
     /** Send config captured at queue time — used as-is when auto-sending */
     sendConfig?: {
         providerID: string;
@@ -50,6 +55,7 @@ export const useMessageQueueStore = create<MessageQueueStore>()(
                         content: message.content,
                         attachments: message.attachments,
                         createdAt: Date.now(),
+                        sendTarget: message.sendTarget,
                         sendConfig: message.sendConfig,
                     };
 

@@ -63,8 +63,17 @@ export interface UseChatTimelineControllerResult {
 const TURN_MODEL_CACHE_MAX = 30;
 const VSCODE_TURN_MODEL_CACHE_MAX = 4;
 const VSCODE_TURN_MODEL_CACHE_MAX_MESSAGES = 30;
+const PREPEND_ANCHOR_STABILIZE_MS = 900;
 const turnModelCache = new Map<string, { messages: ChatMessageEntry[]; model: TurnWindowModel }>();
 const getTurnModelCacheMax = () => isVSCodeRuntime() ? VSCODE_TURN_MODEL_CACHE_MAX : TURN_MODEL_CACHE_MAX;
+
+type ActivePrependAnchor = {
+    anchor: ViewportAnchor;
+    until: number;
+    frame: number | null;
+};
+
+const getNow = (): number => (typeof performance !== 'undefined' ? performance.now() : Date.now());
 
 const shouldCacheTurnModelMessages = (messages: ChatMessageEntry[]): boolean => {
     if (!isVSCodeRuntime()) return true;
@@ -346,6 +355,64 @@ export const useChatTimelineController = ({
         return messageListRef.current?.restoreViewportAnchor(anchor) ?? false;
     }, [messageListRef]);
 
+    const activePrependAnchorRef = React.useRef<ActivePrependAnchor | null>(null);
+
+    const stopPrependAnchorStabilization = React.useCallback(() => {
+        const active = activePrependAnchorRef.current;
+        if (active && active.frame !== null && typeof window !== 'undefined') {
+            window.cancelAnimationFrame(active.frame);
+        }
+        activePrependAnchorRef.current = null;
+    }, []);
+
+    const startPrependAnchorStabilization = React.useCallback((anchor: ViewportAnchor) => {
+        const active = activePrependAnchorRef.current;
+        if (active && active.frame !== null && typeof window !== 'undefined') {
+            window.cancelAnimationFrame(active.frame);
+        }
+        activePrependAnchorRef.current = {
+            anchor,
+            until: getNow() + PREPEND_ANCHOR_STABILIZE_MS,
+            frame: null,
+        };
+    }, []);
+
+    const schedulePrependAnchorRestore = React.useCallback(() => {
+        const active = activePrependAnchorRef.current;
+        if (!active) {
+            return;
+        }
+
+        if (getNow() > active.until) {
+            stopPrependAnchorStabilization();
+            return;
+        }
+
+        if (typeof window === 'undefined') {
+            restoreViewportAnchor(active.anchor);
+            return;
+        }
+
+        if (active.frame !== null) {
+            return;
+        }
+
+        active.frame = window.requestAnimationFrame(() => {
+            const current = activePrependAnchorRef.current;
+            if (!current) {
+                return;
+            }
+
+            current.frame = null;
+            if (getNow() > current.until) {
+                activePrependAnchorRef.current = null;
+                return;
+            }
+
+            restoreViewportAnchor(current.anchor);
+        });
+    }, [restoreViewportAnchor, stopPrependAnchorStabilization]);
+
     React.useLayoutEffect(() => {
         const snap = prePrependScrollRef.current;
         const container = scrollRef.current;
@@ -353,6 +420,8 @@ export const useChatTimelineController = ({
         prePrependScrollRef.current = null;
 
         if (snap.anchor && restoreViewportAnchor(snap.anchor)) {
+            startPrependAnchorStabilization(snap.anchor);
+            schedulePrependAnchorRestore();
             return;
         }
 
@@ -360,7 +429,49 @@ export const useChatTimelineController = ({
         if (delta > 0) {
             container.scrollTop = snap.top + delta;
         }
-    }, [renderedMessages, scrollRef, restoreViewportAnchor]);
+    }, [renderedMessages, schedulePrependAnchorRestore, scrollRef, restoreViewportAnchor, startPrependAnchorStabilization]);
+
+    React.useEffect(() => {
+        const container = scrollRef.current;
+        if (!container || typeof ResizeObserver === 'undefined') {
+            return;
+        }
+
+        const observer = new ResizeObserver(() => {
+            schedulePrependAnchorRestore();
+        });
+        observer.observe(container);
+        const content = container.firstElementChild;
+        if (content instanceof Element) {
+            observer.observe(content);
+        }
+
+        return () => {
+            observer.disconnect();
+        };
+    }, [schedulePrependAnchorRestore, scrollRef, sessionId]);
+
+    React.useEffect(() => {
+        const container = scrollRef.current;
+        if (!container) {
+            return;
+        }
+
+        container.addEventListener('wheel', stopPrependAnchorStabilization, { passive: true });
+        container.addEventListener('touchstart', stopPrependAnchorStabilization, { passive: true });
+        container.addEventListener('keydown', stopPrependAnchorStabilization);
+        return () => {
+            container.removeEventListener('wheel', stopPrependAnchorStabilization);
+            container.removeEventListener('touchstart', stopPrependAnchorStabilization);
+            container.removeEventListener('keydown', stopPrependAnchorStabilization);
+        };
+    }, [scrollRef, sessionId, stopPrependAnchorStabilization]);
+
+    React.useEffect(() => {
+        return () => {
+            stopPrependAnchorStabilization();
+        };
+    }, [stopPrependAnchorStabilization]);
 
     const revealBufferedTurns = React.useCallback(async (): Promise<boolean> => {
         if (turnStartRef.current <= 0 || pendingRevealWorkRef.current) {
@@ -440,12 +551,14 @@ export const useChatTimelineController = ({
     }, [captureViewportAnchor, loadMoreMessages, scrollRef]);
 
     const loadEarlier = React.useCallback(async () => {
+        releaseAutoFollow();
+
         if (await revealBufferedTurns()) {
             return;
         }
 
         void (await fetchOlderHistory({ preserveViewport: true }));
-    }, [fetchOlderHistory, revealBufferedTurns]);
+    }, [fetchOlderHistory, releaseAutoFollow, revealBufferedTurns]);
 
     const scrollToTurn = React.useCallback(async (
         turnId: string,

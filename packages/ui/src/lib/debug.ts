@@ -221,7 +221,7 @@ export const debugUtils = {
     const runtimeApis = typeof window !== 'undefined'
       ? (window as any).__OPENCHAMBER_RUNTIME_APIS__
       : null;
-    const isTauriShell = typeof window !== 'undefined' && Boolean((window as any).__TAURI__);
+    const hasDesktopBridge = typeof window !== 'undefined' && Boolean((window as any).__OPENCHAMBER_DESKTOP__);
 
     const safeJson = async (resp: Response) => {
       try {
@@ -319,7 +319,7 @@ export const debugUtils = {
     const report = {
       runtime: {
         platform: runtimeApis?.runtime?.platform ?? null,
-        isDesktop: isTauriShell,
+        isDesktop: hasDesktopBridge,
         isVSCode: Boolean(runtimeApis?.runtime?.isVSCode),
         hasRuntimeApis: Boolean(runtimeApis),
         desktopServerOrigin: null,

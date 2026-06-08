@@ -903,6 +903,7 @@ const buildMarkdownComponents = ({
   previewLabel,
   previewTitle,
   localImageContext,
+  onShowPopup,
 }: {
   syntaxTheme: { [key: string]: React.CSSProperties };
   onPreviewLoopback?: (url: string) => void;
@@ -912,6 +913,7 @@ const buildMarkdownComponents = ({
     effectiveDirectory: string;
     fileReferenceBaseUrl?: string;
   };
+  onShowPopup?: (content: ToolPopupContent) => void;
 }): Components => ({
   table({ children, ...props }) {
     return <TableWrapper className={props.className}>{children}</TableWrapper>;
@@ -990,12 +992,17 @@ const buildMarkdownComponents = ({
     const localImage = localImageContext
       ? resolveMarkdownImageReference(rawSrc, localImageContext.effectiveDirectory, localImageContext.fileReferenceBaseUrl)
       : null;
+    const hasLocalImagePreview = Boolean(localImage && onShowPopup);
+    const imageFilename = localImage
+      ? getFileNameFromPath(localImage.resolvedPath) || (typeof alt === 'string' && alt.trim() ? alt.trim() : 'Image')
+      : '';
+    const imageActionLabel = hasLocalImagePreview ? 'Preview image' : 'Open image file';
     const title = typeof props.title === 'string' && props.title.trim()
-      ? `${props.title.trim()} - Open image in context panel`
-      : 'Open image in context panel';
+      ? `${props.title.trim()} - ${imageActionLabel}`
+      : imageActionLabel;
     const accessibleName = typeof alt === 'string' && alt.trim()
-      ? `Open image: ${alt.trim()}`
-      : 'Open image in context panel';
+      ? `${imageActionLabel}: ${alt.trim()}`
+      : imageActionLabel;
     const localImageProps = localImage
       ? {
           role: 'button' as const,
@@ -1006,23 +1013,35 @@ const buildMarkdownComponents = ({
           'data-openchamber-file-ref': localImage.source,
           'data-openchamber-file-path': localImage.resolvedPath,
           'data-openchamber-file-status': 'pending',
+          ...(hasLocalImagePreview
+            ? {
+                'data-openchamber-image-preview': 'true',
+                'data-openchamber-image-url': localImage.rawUrl,
+                'data-openchamber-image-filename': imageFilename,
+                'data-openchamber-image-directory': getContextDirectory(localImageContext?.effectiveDirectory ?? '', localImage.resolvedPath),
+              }
+            : {}),
         }
       : {};
 
     return (
-      <img
-        {...props}
-        {...localImageProps}
-        src={localImage?.rawUrl ?? rawSrc}
-        alt={alt ?? ''}
-        loading={props.loading ?? 'lazy'}
-        decoding={props.decoding ?? 'async'}
-        className={cn(
-          'my-2 max-h-[42rem] max-w-full rounded-md border border-border/40 bg-[var(--surface-elevated)] object-contain',
-          localImage && 'cursor-zoom-in transition-[border-color] hover:border-[var(--interactive-border)]',
-          props.className,
-        )}
-      />
+      <span data-openchamber-markdown-image-frame="true">
+        <img
+          {...props}
+          {...localImageProps}
+          src={localImage?.rawUrl ?? rawSrc}
+          alt={alt ?? ''}
+          loading={props.loading ?? 'lazy'}
+          decoding={props.decoding ?? 'async'}
+          data-openchamber-markdown-image="true"
+          className={cn(
+            'box-border h-auto w-auto rounded-md border border-border/40 bg-[var(--surface-elevated)] object-contain',
+            localImage && 'transition-[border-color] hover:border-[var(--interactive-border)]',
+            localImage && (hasLocalImagePreview ? 'cursor-zoom-in' : 'cursor-pointer'),
+            props.className,
+          )}
+        />
+      </span>
     );
   },
   a({ href, children, ...props }) {
@@ -1092,6 +1111,9 @@ interface MarkdownRendererProps {
 
 const MERMAID_BLOCK_SELECTOR = '[data-markdown="mermaid-block"]';
 const FILE_LINK_SELECTOR = '[data-openchamber-file-link="true"]';
+const FILE_REFERENCE_SELECTOR = '[data-openchamber-file-link="true"], [data-openchamber-file-status], [data-openchamber-original-href]';
+const IMAGE_PREVIEW_SELECTOR = '[data-openchamber-image-preview="true"]';
+const ORIGINAL_HREF_ATTRIBUTE = 'data-openchamber-original-href';
 const FILE_REFERENCE_STAT_CACHE_MAX = 1000;
 const VSCODE_FILE_REFERENCE_STAT_CACHE_MAX = 200;
 const FILE_REFERENCE_LINK_LIMIT = 200;
@@ -1402,6 +1424,11 @@ const isLikelyFilePath = (value: string): boolean => {
 
 const extractPathCandidateFromElement = (element: HTMLElement): string => {
   if (element.tagName.toLowerCase() === 'a') {
+    const originalHref = element.getAttribute(ORIGINAL_HREF_ATTRIBUTE)?.trim();
+    if (originalHref && isLikelyFilePath(originalHref)) {
+      return originalHref;
+    }
+
     const href = element.getAttribute('href')?.trim();
     if (href && isLikelyFilePath(href)) {
       return href;
@@ -1470,6 +1497,10 @@ const getLowerFileExtension = (path: string): string => {
     return '';
   }
   return base.slice(dotIndex + 1).toLowerCase();
+};
+
+const getFileNameFromPath = (path: string): string => {
+  return normalizePath(path).split('/').filter(Boolean).pop() ?? '';
 };
 
 const isLikelyImageFilePath = (path: string): boolean => {
@@ -1594,6 +1625,7 @@ const useFileReferenceInteractions = ({
   editor,
   preferRuntimeEditor,
   enabled,
+  onShowPopup,
 }: {
   containerRef: React.RefObject<HTMLDivElement | null>;
   effectiveDirectory: string;
@@ -1601,12 +1633,13 @@ const useFileReferenceInteractions = ({
   editor?: EditorAPI;
   preferRuntimeEditor?: boolean;
   enabled: boolean;
+  onShowPopup?: (content: ToolPopupContent) => void;
 }) => {
   const { t } = useI18n();
   const tRef = React.useRef(t);
   tRef.current = t;
   const annotationDebounceRef = React.useRef<number | null>(null);
-  const validatedPathsRef = React.useRef<Set<string>>(new Set());
+  const validationResultsRef = React.useRef<Map<string, boolean>>(new Map());
   const validationContextRef = React.useRef('');
   const validateDebounceRef = React.useRef<number | null>(null);
 
@@ -1619,7 +1652,7 @@ const useFileReferenceInteractions = ({
 
     const validationContext = `${fileReferenceBaseUrl ?? ''}|${effectiveDirectory}`;
     if (validationContextRef.current !== validationContext) {
-      validatedPathsRef.current.clear();
+      validationResultsRef.current.clear();
       validationContextRef.current = validationContext;
     }
 
@@ -1631,21 +1664,138 @@ const useFileReferenceInteractions = ({
     };
 
     const clearFileLinkAttributes = (candidate: HTMLElement) => {
+      const originalHref = candidate.getAttribute(ORIGINAL_HREF_ATTRIBUTE);
+      if (candidate instanceof HTMLAnchorElement && originalHref !== null) {
+        candidate.setAttribute('href', originalHref);
+      }
+      candidate.removeAttribute(ORIGINAL_HREF_ATTRIBUTE);
       candidate.removeAttribute('data-openchamber-file-link');
       candidate.removeAttribute('data-openchamber-file-ref');
       candidate.removeAttribute('data-openchamber-file-path');
       candidate.removeAttribute('data-openchamber-file-status');
+      candidate.removeAttribute('data-openchamber-image-preview');
+      candidate.removeAttribute('data-openchamber-image-url');
+      candidate.removeAttribute('data-openchamber-image-filename');
+      candidate.removeAttribute('data-openchamber-image-directory');
+      candidate.removeAttribute('aria-disabled');
       if (candidate.getAttribute('title') === 'Open file') {
         candidate.removeAttribute('title');
       }
-      if (candidate.tagName.toLowerCase() !== 'a') {
+      candidate.removeAttribute('role');
+      candidate.removeAttribute('tabindex');
+    };
+
+    const disableAnchorNavigation = (candidate: HTMLElement) => {
+      if (!(candidate instanceof HTMLAnchorElement)) {
+        return;
+      }
+
+      const href = candidate.getAttribute('href');
+      if (href !== null && candidate.getAttribute(ORIGINAL_HREF_ATTRIBUTE) === null) {
+        candidate.setAttribute(ORIGINAL_HREF_ATTRIBUTE, href);
+      }
+      candidate.removeAttribute('href');
+      candidate.setAttribute('aria-disabled', 'true');
+    };
+
+    const ensureMissingBadge = (candidate: HTMLElement, note: string) => {
+      const nextSibling = candidate.nextElementSibling;
+      if (nextSibling?.classList.contains('oc-file-missing-badge')) {
+        return;
+      }
+
+      const badge = document.createElement('span');
+      badge.className = 'oc-file-missing-badge';
+      badge.setAttribute('aria-label', note);
+      badge.textContent = '✗';
+      candidate.insertAdjacentElement('afterend', badge);
+    };
+
+    const demoteMissingFileReference = (candidate: HTMLElement, rawCandidate: string, resolvedPath: string, note: string) => {
+      const alreadyDemoted = candidate.getAttribute('data-openchamber-file-status') === 'missing'
+        && candidate.getAttribute('data-openchamber-file-link') !== 'true'
+        && candidate.getAttribute('data-openchamber-file-ref') === rawCandidate
+        && candidate.getAttribute('data-openchamber-file-path') === resolvedPath;
+
+      if (!alreadyDemoted) {
+        candidate.removeAttribute('data-openchamber-file-link');
+        candidate.setAttribute('data-openchamber-file-ref', rawCandidate);
+        candidate.setAttribute('data-openchamber-file-path', resolvedPath);
+        candidate.setAttribute('data-openchamber-file-status', 'missing');
+        candidate.removeAttribute('data-openchamber-image-preview');
+        candidate.removeAttribute('data-openchamber-image-url');
+        candidate.removeAttribute('data-openchamber-image-filename');
+        candidate.removeAttribute('data-openchamber-image-directory');
+        if (candidate.getAttribute('title') === 'Open file') {
+          candidate.removeAttribute('title');
+        }
         candidate.removeAttribute('role');
         candidate.removeAttribute('tabindex');
+        disableAnchorNavigation(candidate);
       }
+      ensureMissingBadge(candidate, note);
+    };
+
+    const openImagePreview = (sourceElement: HTMLElement): boolean => {
+      if (!onShowPopup || sourceElement.getAttribute('data-openchamber-image-preview') !== 'true') {
+        return false;
+      }
+
+      const imageUrl = sourceElement.getAttribute('data-openchamber-image-url');
+      const filePath = sourceElement.getAttribute('data-openchamber-file-path');
+      if (!imageUrl || !filePath) {
+        return false;
+      }
+
+      const galleryElements = Array
+        .from(container.querySelectorAll<HTMLElement>(`${FILE_LINK_SELECTOR}${IMAGE_PREVIEW_SELECTOR}`))
+        .filter((element) => element.getAttribute('data-openchamber-file-status') !== 'missing');
+      const gallery = galleryElements.flatMap((element) => {
+        const url = element.getAttribute('data-openchamber-image-url');
+        const path = element.getAttribute('data-openchamber-file-path');
+        if (!url || !path) {
+          return [];
+        }
+
+        const directory = element.getAttribute('data-openchamber-image-directory')
+          || getContextDirectory(effectiveDirectory, path);
+        return [{
+          url,
+          filename: element.getAttribute('data-openchamber-image-filename') || getFileNameFromPath(path) || 'Image',
+          filePath: path,
+          directory,
+        }];
+      });
+      const sourceIndex = galleryElements.indexOf(sourceElement);
+      const galleryIndex = sourceIndex >= 0 ? sourceIndex : 0;
+      const filename = sourceElement.getAttribute('data-openchamber-image-filename') || getFileNameFromPath(filePath) || 'Image';
+      const directory = sourceElement.getAttribute('data-openchamber-image-directory')
+        || getContextDirectory(effectiveDirectory, filePath);
+
+      onShowPopup({
+        open: true,
+        title: filename,
+        content: '',
+        metadata: {
+          tool: 'image-preview',
+          filename,
+          filePath,
+          directory,
+        },
+        image: {
+          url: imageUrl,
+          filename,
+          filePath,
+          directory,
+          gallery,
+          index: galleryIndex,
+        },
+      });
+      return true;
     };
 
     const clearAnnotatedFileLinks = () => {
-      const annotated = container.querySelectorAll<HTMLElement>(FILE_LINK_SELECTOR);
+      const annotated = container.querySelectorAll<HTMLElement>(FILE_REFERENCE_SELECTOR);
       for (const candidate of Array.from(annotated)) {
         clearFileLinkAttributes(candidate);
         removeMissingBadge(candidate);
@@ -1660,15 +1810,34 @@ const useFileReferenceInteractions = ({
     const annotateFileLinks = () => {
       const candidates = container.querySelectorAll<HTMLElement>('[data-markdown="inline-code"], a');
       let linkedCount = 0;
+      const note = tRef.current('chat.file.notFound');
 
       for (const candidate of Array.from(candidates)) {
         const rawCandidate = extractPathCandidateFromElement(candidate);
         const resolved = getResolvedReference(rawCandidate, effectiveDirectory);
+        const knownValidation = resolved
+          ? validationResultsRef.current.get(resolved.resolvedPath)
+          : undefined;
+        if (
+          resolved
+          && knownValidation === false
+          && candidate.getAttribute('data-openchamber-file-status') === 'missing'
+          && candidate.getAttribute('data-openchamber-file-link') !== 'true'
+        ) {
+          ensureMissingBadge(candidate, note);
+          continue;
+        }
+
         candidate.removeAttribute('data-openchamber-file-status');
         clearFileLinkAttributes(candidate);
 
         if (!resolved) {
           removeMissingBadge(candidate);
+          continue;
+        }
+
+        if (knownValidation === false) {
+          demoteMissingFileReference(candidate, rawCandidate, resolved.resolvedPath, note);
           continue;
         }
 
@@ -1681,7 +1850,7 @@ const useFileReferenceInteractions = ({
         candidate.setAttribute('data-openchamber-file-link', 'true');
         candidate.setAttribute('data-openchamber-file-ref', rawCandidate);
         candidate.setAttribute('data-openchamber-file-path', resolved.resolvedPath);
-        candidate.setAttribute('data-openchamber-file-status', 'pending');
+        candidate.setAttribute('data-openchamber-file-status', knownValidation === true ? 'valid' : 'pending');
         candidate.setAttribute('title', 'Open file');
         if (candidate.tagName.toLowerCase() !== 'a') {
           candidate.setAttribute('role', 'button');
@@ -1698,17 +1867,32 @@ const useFileReferenceInteractions = ({
       if (pending.length === 0) return;
 
       const pathsToCheck = new Map<string, HTMLElement[]>();
+      const note = tRef.current('chat.file.notFound');
       for (const el of pending) {
         if (!el.isConnected) continue;
         const path = el.getAttribute('data-openchamber-file-path');
-        if (!path || validatedPathsRef.current.has(path)) continue;
+        if (!path) continue;
+        const knownValidation = validationResultsRef.current.get(path);
+        if (knownValidation === true) {
+          el.setAttribute('data-openchamber-file-status', 'valid');
+          removeMissingBadge(el);
+          continue;
+        }
+        if (knownValidation === false) {
+          demoteMissingFileReference(
+            el,
+            el.getAttribute('data-openchamber-file-ref') || extractPathCandidateFromElement(el),
+            path,
+            note,
+          );
+          continue;
+        }
         if (!pathsToCheck.has(path)) pathsToCheck.set(path, []);
         pathsToCheck.get(path)!.push(el);
       }
 
       if (pathsToCheck.size === 0) return;
 
-      const note = tRef.current('chat.file.notFound');
       const results = await Promise.allSettled(
         Array.from(pathsToCheck.keys()).map(async (path) => {
           const ok = await fileReferenceExists(path, fileReferenceBaseUrl);
@@ -1721,12 +1905,11 @@ const useFileReferenceInteractions = ({
         const { path, ok } = result.value;
 
         if (ok === null) {
-          validatedPathsRef.current.add(path);
           continue;
         }
 
         const elements = pathsToCheck.get(path) || [];
-        validatedPathsRef.current.add(path);
+        validationResultsRef.current.set(path, ok);
 
         for (const el of elements) {
           if (!el.isConnected) continue;
@@ -1734,16 +1917,12 @@ const useFileReferenceInteractions = ({
             el.setAttribute('data-openchamber-file-status', 'valid');
             removeMissingBadge(el);
           } else {
-            el.setAttribute('data-openchamber-file-status', 'missing');
-            el.setAttribute('title', note);
-            const nextSibling = el.nextElementSibling;
-            if (!nextSibling?.classList.contains('oc-file-missing-badge')) {
-              const badge = document.createElement('span');
-              badge.className = 'oc-file-missing-badge';
-              badge.setAttribute('aria-label', note);
-              badge.textContent = '✗';
-              el.insertAdjacentElement('afterend', badge);
-            }
+            demoteMissingFileReference(
+              el,
+              el.getAttribute('data-openchamber-file-ref') || extractPathCandidateFromElement(el),
+              path,
+              note,
+            );
           }
         }
       }
@@ -1800,11 +1979,17 @@ const useFileReferenceInteractions = ({
       }
 
       if (fileRefElement.getAttribute('data-openchamber-file-status') === 'missing') {
+        event.preventDefault();
+        event.stopPropagation();
         return;
       }
 
       event.preventDefault();
       event.stopPropagation();
+
+      if (openImagePreview(fileRefElement)) {
+        return;
+      }
 
       openFileReference(fileRefElement);
     };
@@ -1819,8 +2004,18 @@ const useFileReferenceInteractions = ({
         return;
       }
 
+      if (target.getAttribute('data-openchamber-file-status') === 'missing') {
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+
       event.preventDefault();
       event.stopPropagation();
+
+      if (openImagePreview(target)) {
+        return;
+      }
 
       openFileReference(target);
     };
@@ -1878,7 +2073,7 @@ const useFileReferenceInteractions = ({
       container.removeEventListener('click', handleClick);
       container.removeEventListener('keydown', handleKeyDown);
     };
-  }, [containerRef, editor, effectiveDirectory, fileReferenceBaseUrl, preferRuntimeEditor, enabled]);
+  }, [containerRef, editor, effectiveDirectory, fileReferenceBaseUrl, onShowPopup, preferRuntimeEditor, enabled]);
 };
 
 const useMermaidInlineInteractions = ({
@@ -2006,6 +2201,7 @@ const MarkdownRendererImpl: React.FC<MarkdownRendererProps> = ({
     editor,
     preferRuntimeEditor: runtime.isVSCode,
     enabled: fileReferencesEnabled,
+    onShowPopup,
   });
   useExternalLinkInteractions({ containerRef });
   const openContextPreview = useUIStore((state) => state.openContextPreview);
@@ -2029,8 +2225,9 @@ const MarkdownRendererImpl: React.FC<MarkdownRendererProps> = ({
             fileReferenceBaseUrl,
           }
         : undefined,
+      onShowPopup,
     }),
-    [syntaxTheme, effectiveDirectory, fileReferenceBaseUrl, fileReferencesEnabled, handlePreviewLoopback, previewLabel, previewTitle],
+    [syntaxTheme, effectiveDirectory, fileReferenceBaseUrl, fileReferencesEnabled, handlePreviewLoopback, onShowPopup, previewLabel, previewTitle],
   );
   const componentKey = `markdown-${part?.id ? `part-${part.id}` : `message-${messageId}`}`;
   const markdownBlocks = useStableMarkdownBlocks(content, isStreaming && !disableStreamAnimation, componentKey);
@@ -2071,9 +2268,9 @@ export const MarkdownRenderer = React.memo(MarkdownRendererImpl, (prev, next) =>
     && prev.skipFadeIn === next.skipFadeIn
     && prev.className === next.className
     && prev.sessionId === next.sessionId
-    && prev.messageId === next.messageId
-    && prev.onShowPopup === next.onShowPopup
-    && prev.enableFileReferences === next.enableFileReferences
+	    && prev.messageId === next.messageId
+	    && prev.onShowPopup === next.onShowPopup
+	    && prev.enableFileReferences === next.enableFileReferences
     && prev.part?.id === next.part?.id;
 });
 
@@ -2125,6 +2322,7 @@ const SimpleMarkdownRendererImpl: React.FC<{
     editor,
     preferRuntimeEditor: runtime.isVSCode,
     enabled: enableFileReferences,
+    onShowPopup,
   });
   useExternalLinkInteractions({ containerRef, enabled: !disableLinkSafety });
   const syntaxTheme = React.useMemo(() => generateSyntaxTheme(currentTheme), [currentTheme]);
@@ -2137,8 +2335,9 @@ const SimpleMarkdownRendererImpl: React.FC<{
             fileReferenceBaseUrl,
           }
         : undefined,
+      onShowPopup,
     }),
-    [effectiveDirectory, enableFileReferences, fileReferenceBaseUrl, syntaxTheme],
+    [effectiveDirectory, enableFileReferences, fileReferenceBaseUrl, onShowPopup, syntaxTheme],
   );
   const markdownBlocks = useStableMarkdownBlocks(renderedContent, false, `simple:${variant}`);
 

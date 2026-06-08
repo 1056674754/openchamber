@@ -385,7 +385,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
   };
 
   const isOpenCodeProcessHealthy = async () => {
-    if (!state.openCodeProcess || !state.openCodePort) {
+    if (!state.openCodePort || (!state.openCodeProcess && state.isExternalOpenCode)) {
       return false;
     }
 
@@ -921,14 +921,14 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
   };
 
   const runHealthCheckCycle = async (source) => {
-    if (!state.openCodeProcess || state.isShuttingDown || state.isRestartingOpenCode) return;
+    if (!state.openCodePort || state.isExternalOpenCode || state.isShuttingDown || state.isRestartingOpenCode) return;
     if (healthCheckCyclePromise) return healthCheckCyclePromise;
 
     healthCheckCyclePromise = (async () => {
       const healthy = await probeOpenCodeHealth();
       if (!healthy) {
-        if (!isManagedOpenCodeProcessAlive()) {
-          console.log(`[lifecycle] ${source} health check: OpenCode process exited, restarting...`);
+        if (!state.openCodeProcess || !isManagedOpenCodeProcessAlive()) {
+          console.log(`[lifecycle] ${source} health check: OpenCode process unavailable, restarting...`);
           consecutiveHealthFailures = 0;
           lastHealthProbeResult = null;
           await restartOpenCode();

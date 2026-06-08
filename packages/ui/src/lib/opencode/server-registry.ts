@@ -1,7 +1,9 @@
+import "@/lib/remote-instances/rpcFetch";
 import { createOpencodeClient, type OpencodeClient } from "@opencode-ai/sdk/v2";
 
 const DEFAULT_HEALTH_PROBE_TTL_MS = 5_000;
-const DEFAULT_HEALTH_PROBE_TIMEOUT_MS = 8_000;
+const DEFAULT_HEALTH_PROBE_TIMEOUT_MS = 3_000;
+const SESSION_SERVER_INDEX_DEBUG_LIMIT = 500;
 
 export interface ServerConfig {
   id: string;
@@ -20,6 +22,14 @@ export interface ServerConnection {
   lastHealthCheckAt: number | null;
 }
 
+export interface SessionServerIndexDebugEntry {
+  at: string;
+  sessionId: string;
+  previous?: string;
+  next?: string;
+  stack?: string;
+}
+
 type ProbeHealthOptions = {
   force?: boolean;
   timeoutMs?: number;
@@ -32,8 +42,10 @@ export class ServerRegistry {
   private sessionServerIndex: Map<string, string> = new Map();
   private healthPollTimer: ReturnType<typeof setInterval> | null = null;
   private healthListeners: Map<string, Set<(status: ServerConnection["healthStatus"]) => void>> = new Map();
+  private sessionServerListeners: Map<string, Set<() => void>> = new Map();
   private healthProbeInFlight: Map<string, Promise<boolean>> = new Map();
   private lastHealthProbeAt: Map<string, number> = new Map();
+  private sessionServerIndexDebugEntries: SessionServerIndexDebugEntry[] = [];
 
   register(config: ServerConfig): ServerConnection {
     const existing = this.connections.get(config.id);
@@ -68,7 +80,7 @@ export class ServerRegistry {
     if (deleted) {
       this.healthProbeInFlight.delete(serverId);
       this.lastHealthProbeAt.delete(serverId);
-      this.healthListeners.delete(serverId);
+      this.notifyHealthListeners(serverId);
     }
     return deleted;
   }
@@ -90,11 +102,34 @@ export class ServerRegistry {
   }
 
   indexSession(sessionId: string, serverId: string): void {
+    const previous = this.sessionServerIndex.get(sessionId);
+    if (previous === serverId) {
+      return;
+    }
+    this.recordSessionServerIndexDebug(sessionId, previous, serverId);
     this.sessionServerIndex.set(sessionId, serverId);
+    this.notifySessionServerListeners(sessionId);
   }
 
   getServerForSession(sessionId: string): string | undefined {
     return this.sessionServerIndex.get(sessionId);
+  }
+
+  getSessionServerIndexSnapshot(): Array<{ sessionId: string; serverId: string }> {
+    return Array.from(this.sessionServerIndex.entries(), ([sessionId, serverId]) => ({ sessionId, serverId }));
+  }
+
+  getSessionServerIndexDebugEntries(options?: { sessionId?: string; limit?: number }): SessionServerIndexDebugEntry[] {
+    const sessionId = options?.sessionId;
+    const limit = Math.max(1, Math.min(options?.limit ?? SESSION_SERVER_INDEX_DEBUG_LIMIT, SESSION_SERVER_INDEX_DEBUG_LIMIT));
+    const entries = sessionId
+      ? this.sessionServerIndexDebugEntries.filter((entry) => entry.sessionId === sessionId)
+      : this.sessionServerIndexDebugEntries;
+    return entries.slice(-limit);
+  }
+
+  clearSessionServerIndexDebugEntries(): void {
+    this.sessionServerIndexDebugEntries = [];
   }
 
   getClientForSession(sessionId: string): ServerConnection | undefined {
@@ -117,7 +152,27 @@ export class ServerRegistry {
   }
 
   forgetSession(sessionId: string): void {
-    this.sessionServerIndex.delete(sessionId);
+    const previous = this.sessionServerIndex.get(sessionId);
+    const deleted = this.sessionServerIndex.delete(sessionId);
+    if (deleted) {
+      this.recordSessionServerIndexDebug(sessionId, previous, undefined);
+      this.notifySessionServerListeners(sessionId);
+    }
+  }
+
+  onSessionServerChange(sessionId: string, callback: () => void): () => void {
+    let listeners = this.sessionServerListeners.get(sessionId);
+    if (!listeners) {
+      listeners = new Set();
+      this.sessionServerListeners.set(sessionId, listeners);
+    }
+    listeners.add(callback);
+    return () => {
+      listeners?.delete(callback);
+      if (listeners && listeners.size === 0) {
+        this.sessionServerListeners.delete(sessionId);
+      }
+    };
   }
 
   async probeHealth(serverId: string, options: ProbeHealthOptions = {}): Promise<boolean> {
@@ -221,9 +276,38 @@ export class ServerRegistry {
   private notifyHealthListeners(serverId: string): void {
     const connection = this.connections.get(serverId);
     const listeners = this.healthListeners.get(serverId);
-    if (listeners && connection) {
+    if (listeners) {
       for (const cb of listeners) {
-        cb(connection.healthStatus);
+        cb(connection?.healthStatus ?? null);
+      }
+    }
+  }
+
+  private notifySessionServerListeners(sessionId: string): void {
+    const listeners = this.sessionServerListeners.get(sessionId);
+    if (!listeners) return;
+    for (const cb of Array.from(listeners)) {
+      cb();
+    }
+  }
+
+  private recordSessionServerIndexDebug(sessionId: string, previous: string | undefined, next: string | undefined): void {
+    const entry: SessionServerIndexDebugEntry = {
+      at: new Date().toISOString(),
+      sessionId,
+      previous,
+      next,
+      stack: new Error("serverRegistry.indexSession trace").stack,
+    };
+    this.sessionServerIndexDebugEntries.push(entry);
+    if (this.sessionServerIndexDebugEntries.length > SESSION_SERVER_INDEX_DEBUG_LIMIT) {
+      this.sessionServerIndexDebugEntries.splice(0, this.sessionServerIndexDebugEntries.length - SESSION_SERVER_INDEX_DEBUG_LIMIT);
+    }
+
+    if (typeof window !== "undefined") {
+      const enabled = window.localStorage?.getItem?.("openchamber_server_registry_debug") === "1";
+      if (enabled) {
+        console.debug("[openchamber:server-registry]", entry);
       }
     }
   }
@@ -249,3 +333,20 @@ export class ServerRegistry {
 }
 
 export const serverRegistry = new ServerRegistry();
+
+if (typeof window !== "undefined") {
+  window.__openchamberServerRegistryDebug = {
+    enable: () => {
+      window.localStorage.setItem("openchamber_server_registry_debug", "1");
+    },
+    disable: () => {
+      window.localStorage.removeItem("openchamber_server_registry_debug");
+    },
+    enabled: () => window.localStorage.getItem("openchamber_server_registry_debug") === "1",
+    clear: () => serverRegistry.clearSessionServerIndexDebugEntries(),
+    index: () => serverRegistry.getSessionServerIndexSnapshot(),
+    lookup: (sessionId: string) => serverRegistry.getServerForSession(sessionId),
+    trace: (sessionId?: string, limit?: number) =>
+      serverRegistry.getSessionServerIndexDebugEntries({ sessionId, limit }),
+  };
+}

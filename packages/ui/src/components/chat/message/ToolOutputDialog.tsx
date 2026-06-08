@@ -29,6 +29,7 @@ import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
 import { useActiveServerBaseUrl } from '@/hooks/useActiveServerId';
 import { resolveApiUrl } from '@/lib/api/serverUrl';
+import { useUIStore } from '@/stores/useUIStore';
 
 interface ToolOutputDialogProps {
     popup: ToolPopupContent;
@@ -310,11 +311,14 @@ const ImagePreviewDialog: React.FC<{
     isMobile: boolean;
 }> = ({ popup, onOpenChange, isMobile }) => {
     const { t } = useI18n();
+    const openContextPanelTab = useUIStore((state) => state.openContextPanelTab);
+    const setPendingFileFocusPath = useUIStore((state) => state.setPendingFileFocusPath);
+    const setPendingFileNavigation = useUIStore((state) => state.setPendingFileNavigation);
     const gallery = React.useMemo(() => {
         const baseImage = popup.image;
-        if (!baseImage) return [] as Array<{ url: string; mimeType?: string; filename?: string; size?: number }>;
+        if (!baseImage) return [] as Array<{ url: string; mimeType?: string; filename?: string; size?: number; filePath?: string; directory?: string }>;
         const fromPopup = Array.isArray(baseImage.gallery)
-            ? baseImage.gallery.filter((item): item is { url: string; mimeType?: string; filename?: string; size?: number } => Boolean(item?.url))
+            ? baseImage.gallery.filter((item): item is { url: string; mimeType?: string; filename?: string; size?: number; filePath?: string; directory?: string } => Boolean(item?.url))
             : [];
 
         if (fromPopup.length > 0) {
@@ -326,6 +330,8 @@ const ImagePreviewDialog: React.FC<{
             mimeType: baseImage.mimeType,
             filename: baseImage.filename,
             size: baseImage.size,
+            filePath: baseImage.filePath,
+            directory: baseImage.directory,
         }];
     }, [popup.image]);
 
@@ -354,6 +360,27 @@ const ImagePreviewDialog: React.FC<{
     const currentImage = gallery[currentIndex] ?? gallery[0] ?? popup.image;
     const imageTitle = currentImage?.filename || popup.title || 'Image preview';
     const hasMultipleImages = gallery.length > 1;
+    const filePanelTarget = React.useMemo(() => {
+        let filePath = '';
+        if (typeof currentImage?.filePath === 'string' && currentImage.filePath.trim()) {
+            filePath = currentImage.filePath.trim();
+        } else if (typeof popup.metadata?.filePath === 'string' && popup.metadata.filePath.trim()) {
+            filePath = popup.metadata.filePath.trim();
+        }
+
+        if (!filePath) {
+            return null;
+        }
+
+        let directory = filePath.replace(/\/[^/]*$/, '') || filePath;
+        if (typeof currentImage?.directory === 'string' && currentImage.directory.trim()) {
+            directory = currentImage.directory.trim();
+        } else if (typeof popup.metadata?.directory === 'string' && popup.metadata.directory.trim()) {
+            directory = popup.metadata.directory.trim();
+        }
+
+        return { filePath, directory };
+    }, [currentImage?.directory, currentImage?.filePath, popup.metadata]);
 
     const showPrevious = React.useCallback(() => {
         if (gallery.length <= 1) return;
@@ -364,6 +391,17 @@ const ImagePreviewDialog: React.FC<{
         if (gallery.length <= 1) return;
         setCurrentIndex((prev) => (prev + 1) % gallery.length);
     }, [gallery.length]);
+
+    const openImageInFilePanel = React.useCallback(() => {
+        if (!filePanelTarget) {
+            return;
+        }
+
+        openContextPanelTab(filePanelTarget.directory, { mode: 'file', targetPath: filePanelTarget.filePath });
+        setPendingFileFocusPath(filePanelTarget.filePath);
+        setPendingFileNavigation(null);
+        onOpenChange(false);
+    }, [filePanelTarget, onOpenChange, openContextPanelTab, setPendingFileFocusPath, setPendingFileNavigation]);
 
     React.useEffect(() => {
         if (!popup.open) {
@@ -476,6 +514,17 @@ const ImagePreviewDialog: React.FC<{
                         <div className="min-w-0 flex-1 text-foreground typography-ui-header font-semibold truncate" title={imageTitle}>
                             {imageTitle}
                         </div>
+                        {filePanelTarget ? (
+                            <button
+                                type="button"
+                                className="h-8 w-8 flex items-center justify-center rounded-lg text-muted-foreground/80 hover:text-foreground focus:outline-none focus:ring-2 focus:ring-primary/60"
+                                onClick={openImageInFilePanel}
+                                aria-label={t('chat.toolOutputDialog.image.openFilePanelAria')}
+                                title={t('chat.toolOutputDialog.image.openFilePanelAria')}
+                            >
+                                <Icon name="file-search" className="h-4 w-4" />
+                            </button>
+                        ) : null}
                         <button
                             type="button"
                             className="h-8 w-8 flex items-center justify-center rounded-lg text-muted-foreground/80 hover:text-foreground focus:outline-none focus:ring-2 focus:ring-primary/60"

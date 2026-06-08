@@ -1,6 +1,48 @@
 const VALID_AUTH_TYPES = new Set(['none', 'password', 'bearer']);
 
 const DEFAULT_HEALTH_CHECK_INTERVAL_MS = 60_000;
+export const DEFAULT_HEALTH_PROBE_TIMEOUT_SEC = 3;
+export const MAX_HEALTH_PROBE_TIMEOUT_SEC = 5;
+const DEFAULT_REQUEST_LANE_LIMITS = {
+  health: { maxActive: 1, maxQueue: 0, queueTimeoutMs: 0 },
+  normal: { maxActive: 4, maxQueue: 8, queueTimeoutMs: 1_000 },
+  stream: { maxActive: 3, maxQueue: 0, queueTimeoutMs: 0 },
+};
+const REQUEST_CIRCUIT_FAILURE_THRESHOLD = 3;
+const REQUEST_CIRCUIT_COOLDOWN_MS = 15_000;
+
+export const normalizeHealthProbeTimeoutSec = (...values) => {
+  for (const value of values) {
+    if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
+      return Math.max(1, Math.min(MAX_HEALTH_PROBE_TIMEOUT_SEC, Math.round(value)));
+    }
+  }
+  return DEFAULT_HEALTH_PROBE_TIMEOUT_SEC;
+};
+
+const isTimeoutError = (error) => (
+  error?.name === 'AbortError'
+  || error?.name === 'TimeoutError'
+  || error?.code === 'ABORT_ERR'
+  || error?.code === 'ETIMEDOUT'
+);
+
+export class RemoteInstanceRequestRejectedError extends Error {
+  constructor(message, statusCode = 503, code = 'REMOTE_REQUEST_REJECTED') {
+    super(message);
+    this.name = 'RemoteInstanceRequestRejectedError';
+    this.statusCode = statusCode;
+    this.code = code;
+  }
+}
+
+class RemoteInstancesValidationError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'RemoteInstancesValidationError';
+    this.statusCode = 400;
+  }
+}
 
 const validateInstance = (inst) => {
   if (!inst || typeof inst !== 'object') {
@@ -27,7 +69,9 @@ const validateInstance = (inst) => {
   }
 
   const authType = VALID_AUTH_TYPES.has(inst?.auth?.type) ? inst.auth.type : 'none';
-  const authValue = authType !== 'none' && typeof inst?.auth?.value === 'string' ? inst.auth.value : undefined;
+  const authValue = authType !== 'none' && typeof inst?.auth?.value === 'string' && inst.auth.value.length > 0
+    ? inst.auth.value
+    : undefined;
 
   return {
     id,
@@ -45,23 +89,77 @@ const validateInstance = (inst) => {
   };
 };
 
-const sanitizeInstances = (input) => {
-  if (!Array.isArray(input)) {
-    return [];
+const redactInstanceForApi = (inst) => {
+  const authType = VALID_AUTH_TYPES.has(inst?.auth?.type) ? inst.auth.type : 'none';
+  const redacted = {
+    ...inst,
+    auth: {
+      type: authType,
+    },
+  };
+
+  if (authType !== 'none' && Boolean(inst?.auth?.value)) {
+    redacted.auth.hasValue = true;
   }
 
+  return redacted;
+};
+
+const buildRemoteAuthHeaders = (instance) => {
+  const headers = { Accept: 'application/json' };
+  if (instance.auth?.type === 'password' && instance.auth.value) {
+    headers.Authorization = `Basic ${Buffer.from(`user:${instance.auth.value}`).toString('base64')}`;
+  } else if (instance.auth?.type === 'bearer' && instance.auth.value) {
+    headers.Authorization = `Bearer ${instance.auth.value}`;
+  }
+  return headers;
+};
+
+const readJsonOrNull = async (response) => {
+  try {
+    return await response.json();
+  } catch {
+    return null;
+  }
+};
+
+const describeHealthResponseError = (response, body, fallback) => {
+  if (body && typeof body.error === 'string' && body.error.trim()) {
+    return body.error.trim();
+  }
+  return `${fallback} HTTP ${response.status}`;
+};
+
+const sanitizeInstancesOrThrow = (input, existingInstances = []) => {
+  if (!Array.isArray(input)) {
+    throw new RemoteInstancesValidationError('Remote instances must be an array');
+  }
+
+  const existingById = new Map(existingInstances.map((inst) => [inst.id, inst]));
   const seen = new Set();
   const result = [];
 
   for (const item of input) {
     const validated = validateInstance(item);
     if (!validated) {
-      continue;
+      const id = typeof item?.id === 'string' && item.id.trim() ? item.id.trim() : '<unknown>';
+      throw new RemoteInstancesValidationError(`Invalid remote instance configuration: ${id}`);
     }
     if (seen.has(validated.id)) {
-      continue;
+      throw new RemoteInstancesValidationError(`Duplicate remote instance id: ${validated.id}`);
     }
     seen.add(validated.id);
+
+    const existing = existingById.get(validated.id);
+    if (
+      validated.auth.type !== 'none'
+      && !validated.auth.value
+      && existing?.auth?.type === validated.auth.type
+      && existing.auth.value
+    ) {
+      validated.auth.value = existing.auth.value;
+    }
+
     result.push(validated);
   }
 
@@ -78,8 +176,219 @@ export const createRemoteInstancesRuntime = (deps) => {
 
   const healthStatusMap = new Map();
   const healthProbeInFlight = new Map();
+  const requestPressureMap = new Map();
   let healthMonitoringInterval = null;
   let cachedInstances = [];
+
+  const normalizeRequestLane = (lane) => (
+    lane === 'health' || lane === 'stream' ? lane : 'normal'
+  );
+
+  const getRequestPressureState = (id) => {
+    let state = requestPressureMap.get(id);
+    if (state) {
+      return state;
+    }
+
+    state = {
+      active: { health: 0, normal: 0, stream: 0 },
+      queues: { health: [], normal: [], stream: [] },
+      consecutiveFailures: 0,
+      circuitOpenUntil: 0,
+    };
+    requestPressureMap.set(id, state);
+    return state;
+  };
+
+  const isRequestCircuitOpen = (id) => {
+    const state = requestPressureMap.get(id);
+    return Boolean(state && state.circuitOpenUntil > Date.now());
+  };
+
+  const releaseRequestLane = (id, lane) => {
+    const state = requestPressureMap.get(id);
+    if (!state) {
+      return;
+    }
+
+    const normalizedLane = normalizeRequestLane(lane);
+    state.active[normalizedLane] = Math.max(0, state.active[normalizedLane] - 1);
+    drainRequestLane(id, normalizedLane);
+  };
+
+  const acquireRequestLane = (id, lane) => {
+    const normalizedLane = normalizeRequestLane(lane);
+    const state = getRequestPressureState(id);
+    state.active[normalizedLane] += 1;
+    let released = false;
+    return () => {
+      if (released) {
+        return;
+      }
+      released = true;
+      releaseRequestLane(id, normalizedLane);
+    };
+  };
+
+  const rejectQueuedLane = (item, error) => {
+    if (item.timeout) {
+      clearTimeout(item.timeout);
+      item.timeout = null;
+    }
+    item.reject(error);
+  };
+
+  const drainRequestLane = (id, lane) => {
+    const normalizedLane = normalizeRequestLane(lane);
+    const limits = DEFAULT_REQUEST_LANE_LIMITS[normalizedLane];
+    const state = requestPressureMap.get(id);
+    if (!state) {
+      return;
+    }
+
+    const queue = state.queues[normalizedLane];
+    while (state.active[normalizedLane] < limits.maxActive && queue.length > 0) {
+      const item = queue.shift();
+      if (!item) {
+        continue;
+      }
+
+      if (normalizedLane !== 'health' && isRequestCircuitOpen(id)) {
+        rejectQueuedLane(
+          item,
+          new RemoteInstanceRequestRejectedError(
+            'Remote instance is temporarily unavailable',
+            503,
+            'REMOTE_CIRCUIT_OPEN',
+          ),
+        );
+        continue;
+      }
+
+      if (item.timeout) {
+        clearTimeout(item.timeout);
+        item.timeout = null;
+      }
+      item.resolve(acquireRequestLane(id, normalizedLane));
+    }
+  };
+
+  const enterRequestLane = async (id, lane = 'normal', options = {}) => {
+    if (typeof id !== 'string' || id.length === 0) {
+      throw new RemoteInstanceRequestRejectedError('Remote instance id is required', 400);
+    }
+
+    const normalizedLane = normalizeRequestLane(lane);
+    const limits = DEFAULT_REQUEST_LANE_LIMITS[normalizedLane];
+    const state = getRequestPressureState(id);
+
+    if (normalizedLane !== 'health' && isRequestCircuitOpen(id)) {
+      throw new RemoteInstanceRequestRejectedError(
+        'Remote instance is temporarily unavailable',
+        503,
+        'REMOTE_CIRCUIT_OPEN',
+      );
+    }
+
+    if (state.active[normalizedLane] < limits.maxActive) {
+      return acquireRequestLane(id, normalizedLane);
+    }
+
+    if (limits.maxQueue <= 0 || state.queues[normalizedLane].length >= limits.maxQueue) {
+      throw new RemoteInstanceRequestRejectedError(
+        'Remote instance request lane is busy',
+        429,
+        'REMOTE_LANE_BUSY',
+      );
+    }
+
+    const queueTimeoutMs = Number.isFinite(options.queueTimeoutMs)
+      ? Math.max(0, Math.round(options.queueTimeoutMs))
+      : limits.queueTimeoutMs;
+
+    return new Promise((resolve, reject) => {
+      const item = { resolve, reject, timeout: null };
+      if (queueTimeoutMs > 0) {
+        item.timeout = setTimeout(() => {
+          const queue = state.queues[normalizedLane];
+          const index = queue.indexOf(item);
+          if (index >= 0) {
+            queue.splice(index, 1);
+          }
+          reject(new RemoteInstanceRequestRejectedError(
+            'Remote instance request lane timed out',
+            503,
+            'REMOTE_LANE_QUEUE_TIMEOUT',
+          ));
+        }, queueTimeoutMs);
+      }
+
+      state.queues[normalizedLane].push(item);
+    });
+  };
+
+  const recordRemoteRequestSuccess = (id) => {
+    if (typeof id !== 'string' || id.length === 0) {
+      return;
+    }
+    const state = getRequestPressureState(id);
+    state.consecutiveFailures = 0;
+    state.circuitOpenUntil = 0;
+  };
+
+  const recordRemoteRequestFailure = (id, errorOrStatus = null) => {
+    if (typeof id !== 'string' || id.length === 0) {
+      return;
+    }
+
+    let status;
+    if (typeof errorOrStatus === 'number') {
+      status = errorOrStatus;
+    } else if (Number.isInteger(errorOrStatus?.statusCode)) {
+      status = errorOrStatus.statusCode;
+    } else if (Number.isInteger(errorOrStatus?.status)) {
+      status = errorOrStatus.status;
+    }
+
+    if (typeof status === 'number' && status > 0 && status < 500) {
+      return;
+    }
+
+    const state = getRequestPressureState(id);
+    state.consecutiveFailures += 1;
+    if (state.consecutiveFailures < REQUEST_CIRCUIT_FAILURE_THRESHOLD) {
+      return;
+    }
+
+    state.circuitOpenUntil = Date.now() + REQUEST_CIRCUIT_COOLDOWN_MS;
+    for (const lane of ['normal', 'stream']) {
+      const queue = state.queues[lane];
+      while (queue.length > 0) {
+        const item = queue.shift();
+        rejectQueuedLane(
+          item,
+          new RemoteInstanceRequestRejectedError(
+            'Remote instance is temporarily unavailable',
+            503,
+            'REMOTE_CIRCUIT_OPEN',
+          ),
+        );
+      }
+    }
+  };
+
+  const getRequestPressure = (id) => {
+    const state = getRequestPressureState(id);
+    return {
+      active: { ...state.active },
+      queued: {
+        health: state.queues.health.length,
+        normal: state.queues.normal.length,
+        stream: state.queues.stream.length,
+      },
+      circuitOpenUntil: state.circuitOpenUntil,
+    };
+  };
 
   const mergeWithSshInstances = (explicitInstances, settings) => {
     const result = [...explicitInstances];
@@ -131,7 +440,7 @@ export const createRemoteInstancesRuntime = (deps) => {
   const getInstances = async () => {
     const instances = await readCurrentInstances();
     return instances.map((inst) => ({
-      ...inst,
+      ...redactInstanceForApi(inst),
       health: healthStatusMap.get(inst.id) || null,
     }));
   };
@@ -140,7 +449,7 @@ export const createRemoteInstancesRuntime = (deps) => {
     if (typeof id !== 'string' || id.length === 0) {
       return null;
     }
-    const instances = await getInstances();
+    const instances = await readCurrentInstances();
     return instances.find((i) => i.id === id) || null;
   };
 
@@ -153,7 +462,9 @@ export const createRemoteInstancesRuntime = (deps) => {
 
   const setInstances = async (instances) => {
     const explicit = instances.filter((i) => i.source !== 'ssh');
-    const sanitized = sanitizeInstances(explicit);
+    const currentSettings = await readSettingsFromDiskMigrated();
+    const existingExplicit = Array.isArray(currentSettings.remoteInstances) ? currentSettings.remoteInstances : [];
+    const sanitized = sanitizeInstancesOrThrow(explicit, existingExplicit);
     await persistSettings({ remoteInstances: sanitized });
     await refreshCache();
     return getInstances();
@@ -214,6 +525,7 @@ export const createRemoteInstancesRuntime = (deps) => {
     await persistSettings({ remoteInstances: filtered });
     cachedInstances = filtered;
     healthStatusMap.delete(id);
+    requestPressureMap.delete(id);
     return true;
   };
 
@@ -231,58 +543,107 @@ export const createRemoteInstancesRuntime = (deps) => {
     });
   };
 
+  const getHealthStatus = (id) => healthStatusMap.get(id) || null;
+
+  const isHealthProbeInFlight = (id) => healthProbeInFlight.has(id);
+
+  const finishHealthProbe = (id, status) => {
+    setHealthStatus(id, status);
+    if (status.healthy) {
+      recordRemoteRequestSuccess(id);
+    } else {
+      recordRemoteRequestFailure(id, { status: 0 });
+    }
+    return status;
+  };
+
   const probeHealth = async (instance, options = {}) => {
-    const timeoutSec = options.timeoutSec || instance.connectionTimeoutSec || 30;
+    const timeoutSec = normalizeHealthProbeTimeoutSec(options.timeoutSec, instance.connectionTimeoutSec);
     const startMs = Date.now();
+    const deadlineMs = startMs + timeoutSec * 1000;
+    const createRemainingTimeoutSignal = () => {
+      const remainingMs = Math.ceil(deadlineMs - Date.now());
+      if (remainingMs <= 0) {
+        const error = new Error('Connection timed out');
+        error.name = 'TimeoutError';
+        throw error;
+      }
+      return AbortSignal.timeout(Math.max(1, remainingMs));
+    };
 
     try {
-      const headers = {};
-      if (instance.auth?.type === 'password' && instance.auth.value) {
-        headers.Authorization = `Basic ${Buffer.from(`user:${instance.auth.value}`).toString('base64')}`;
-      } else if (instance.auth?.type === 'bearer' && instance.auth.value) {
-        headers.Authorization = `Bearer ${instance.auth.value}`;
-      }
+      const headers = buildRemoteAuthHeaders(instance);
 
       const response = await fetch(`${instance.url}/health`, {
         method: 'GET',
         headers,
-        signal: AbortSignal.timeout(timeoutSec * 1000),
+        signal: createRemainingTimeoutSignal(),
       });
 
       const latencyMs = Date.now() - startMs;
 
       if (!response.ok) {
         const status = { healthy: false, latencyMs, error: `HTTP ${response.status}` };
-        setHealthStatus(instance.id, status);
-        return status;
+        return finishHealthProbe(instance.id, status);
       }
 
-      let data;
-      try {
-        data = await response.json();
-      } catch {
+      const data = await readJsonOrNull(response);
+      if (!data) {
         const status = { healthy: false, latencyMs, error: 'Invalid health response' };
-        setHealthStatus(instance.id, status);
-        return status;
+        return finishHealthProbe(instance.id, status);
       }
 
-      const openCodeReady = data?.isOpenCodeReady !== false && data?.openCodeRunning !== false;
-      const healthy = data && data.status === 'ok' && openCodeReady;
+      const remoteServerHealthy = data.status === 'ok';
+      if (!remoteServerHealthy) {
+        const status = {
+          healthy: false,
+          latencyMs,
+          error: data?.lastOpenCodeError || 'Remote health check failed',
+        };
+        return finishHealthProbe(instance.id, status);
+      }
+
+      const reportedOpenCodeReady = data?.isOpenCodeReady !== false && data?.openCodeRunning !== false;
+      if (!reportedOpenCodeReady) {
+        const status = {
+          healthy: false,
+          latencyMs,
+          error: data?.lastOpenCodeError || 'OpenCode API is not ready',
+        };
+        return finishHealthProbe(instance.id, status);
+      }
+
+      const openCodeResponse = await fetch(`${instance.url}/api/global/health`, {
+        method: 'GET',
+        headers,
+        signal: createRemainingTimeoutSignal(),
+      });
+      const finalLatencyMs = Date.now() - startMs;
+      const openCodeData = await readJsonOrNull(openCodeResponse);
+
+      if (!openCodeResponse.ok) {
+        const status = {
+          healthy: false,
+          latencyMs: finalLatencyMs,
+          error: describeHealthResponseError(openCodeResponse, openCodeData, 'OpenCode API'),
+        };
+        return finishHealthProbe(instance.id, status);
+      }
+
+      const healthy = openCodeData?.healthy === true;
       const error = healthy
         ? undefined
-        : data?.lastOpenCodeError || (openCodeReady ? 'Remote health check failed' : 'OpenCode API is not ready');
-      const status = { healthy, latencyMs, error };
-      setHealthStatus(instance.id, status);
-      return status;
+        : openCodeData?.error || 'OpenCode API is not healthy';
+      const status = { healthy, latencyMs: finalLatencyMs, error };
+      return finishHealthProbe(instance.id, status);
     } catch (error) {
       const latencyMs = Date.now() - startMs;
       const status = {
         healthy: false,
         latencyMs,
-        error: error?.name === 'AbortError' ? 'Connection timed out' : (error?.message || 'Connection failed'),
+        error: isTimeoutError(error) ? 'Connection timed out' : (error?.message || 'Connection failed'),
       };
-      setHealthStatus(instance.id, status);
-      return status;
+      return finishHealthProbe(instance.id, status);
     }
   };
 
@@ -304,7 +665,7 @@ export const createRemoteInstancesRuntime = (deps) => {
 
     const probe = probeHealth(instance, {
       ...options,
-      timeoutSec: Math.min(options.timeoutSec || instance.connectionTimeoutSec || 30, 5),
+      timeoutSec: normalizeHealthProbeTimeoutSec(options.timeoutSec, instance.connectionTimeoutSec),
     }).finally(() => {
       healthProbeInFlight.delete(id);
     });
@@ -339,6 +700,7 @@ export const createRemoteInstancesRuntime = (deps) => {
     stopHealthMonitoring();
     healthStatusMap.clear();
     healthProbeInFlight.clear();
+    requestPressureMap.clear();
   };
 
   void refreshCache();
@@ -352,9 +714,16 @@ export const createRemoteInstancesRuntime = (deps) => {
     updateInstance,
     removeInstance,
     isHealthy,
+    getHealthStatus,
+    isHealthProbeInFlight,
     ensureHealthy,
     setHealthStatus,
     probeHealth,
+    enterRequestLane,
+    getRequestPressure,
+    isRequestCircuitOpen,
+    recordRemoteRequestSuccess,
+    recordRemoteRequestFailure,
     startHealthMonitoring,
     stopHealthMonitoring,
     shutdown,

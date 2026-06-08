@@ -15,7 +15,7 @@ import type {
 import type { PermissionRequest } from "@/types/permission";
 import type { QuestionRequest } from "@/types/question";
 import { waitForWorktreeBootstrap } from "@/lib/worktrees/worktreeBootstrap";
-import { resolveSdkForDirectory, resolveBaseUrlForSession } from "@/sync/session-actions";
+import { resolveSdkForDirectory, resolveBaseUrlForSession } from "@/sync/session-routing";
 import { resolveApiUrl } from "@/lib/api/serverUrl";
 import {
   assertProviderCircuitClosed,
@@ -349,7 +349,7 @@ class OpencodeService {
       this.currentDirectory = this.normalizeCandidatePath(directory) ?? directory;
       try {
         // [OPENCHAMBER-FORK] Pass sessionID for authoritative server lookup
-        const remoteClient = resolveSdkForDirectory(this.currentDirectory, sessionID)
+        const remoteClient = resolveSdkForDirectory(this.currentDirectory, sessionID, undefined, this.client)
         if (remoteClient) {
           this.client = remoteClient
         }
@@ -706,6 +706,8 @@ class OpencodeService {
       files?: Array<FileInputLite>;
     }>;
     messageId?: string;
+    directory?: string | null;
+    serverId?: string | null;
     agentMentions?: Array<{ name: string; source?: { value: string; start: number; end: number } }>;
     format?: {
       type: 'json_schema';
@@ -780,19 +782,21 @@ class OpencodeService {
       throw new Error('Message must have at least one part (text or file)');
     }
 
-    if (this.currentDirectory) {
-      await waitForWorktreeBootstrap(this.currentDirectory);
+    const requestDirectory = this.normalizeCandidatePath(params.directory) ?? this.currentDirectory;
+
+    if (requestDirectory) {
+      await waitForWorktreeBootstrap(requestDirectory);
     }
 
     // Use async prompt endpoint so the client doesn't block waiting
     // for model work (SSE will deliver output/status).
     // This avoids 504s from proxy timeouts on long-running turns.
-    const remoteBaseUrl = resolveBaseUrlForSession(params.id, this.currentDirectory)
+    const remoteBaseUrl = resolveBaseUrlForSession(params.id, requestDirectory, params.serverId ?? undefined)
     const effectiveBase = remoteBaseUrl ?? this.baseUrl
     const url = buildApiFetchUrl(
       effectiveBase,
       `/session/${encodeURIComponent(params.id)}/prompt_async`,
-      { directory: this.currentDirectory },
+      { directory: requestDirectory },
     );
 
     if (params.format) {
@@ -802,7 +806,7 @@ class OpencodeService {
         modelID: params.modelID,
         agent: params.agent,
         variant: params.variant,
-        directory: this.currentDirectory,
+        directory: requestDirectory,
         baseUrl: this.baseUrl,
         formatType: params.format.type,
       });
@@ -886,6 +890,8 @@ class OpencodeService {
     variant?: string;
     files?: Array<FileInputLite>;
     messageId?: string;
+    directory?: string | null;
+    serverId?: string | null;
   }): Promise<string> {
     const tempMessageId = params.messageId ?? ascendingId("msg");
 
@@ -896,12 +902,13 @@ class OpencodeService {
       }
     }
 
-    const remoteBaseUrl = resolveBaseUrlForSession(params.id, this.currentDirectory)
+    const requestDirectory = this.normalizeCandidatePath(params.directory) ?? this.currentDirectory;
+    const remoteBaseUrl = resolveBaseUrlForSession(params.id, requestDirectory, params.serverId ?? undefined)
     const effectiveBase = remoteBaseUrl ?? this.baseUrl
     const url = buildApiFetchUrl(
       effectiveBase,
       `/session/${encodeURIComponent(params.id)}/command`,
-      { directory: this.currentDirectory },
+      { directory: requestDirectory },
     );
 
     const payload: Record<string, unknown> = {

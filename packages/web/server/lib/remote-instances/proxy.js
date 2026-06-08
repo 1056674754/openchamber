@@ -5,6 +5,12 @@ import {
 } from '../../proxy-headers.js';
 
 const remoteProxyPathPrefix = '/api/remote/';
+const REMOTE_PROXY_FAST_TIMEOUT_MS = 3_000;
+const REMOTE_PROXY_DEFAULT_TIMEOUT_MS = 5_000;
+const REMOTE_PROXY_LONG_MUTATION_TIMEOUT_MS = 15_000;
+const REMOTE_PROXY_UPGRADE_TIMEOUT_MS = 10 * 60_000;
+const REMOTE_PROXY_MAX_TIMEOUT_MS = REMOTE_PROXY_UPGRADE_TIMEOUT_MS;
+const REMOTE_PROXY_QUEUE_TIMEOUT_MS = 1_000;
 
 const rejectUpgrade = (socket, statusCode, reason, rejectWebSocketUpgrade) => {
   if (typeof rejectWebSocketUpgrade === 'function') {
@@ -63,15 +69,63 @@ const parseRemoteProxyPath = (rawUrl) => {
   };
 };
 
-const setRemoteAuthHeaders = (proxyReq, req) => {
-  const instance = req.remoteInstance;
+const isRemoteEventWsProxyPath = (remotePath) => {
+  let parsed;
+  try {
+    parsed = new URL(remotePath || '', 'http://localhost');
+  } catch {
+    return false;
+  }
+
+  return parsed.pathname === '/api/global/event/ws' || parsed.pathname === '/api/event/ws';
+};
+
+export const getRemoteProxyRequestTimeoutMs = (remotePath, method = 'GET') => {
+  let parsed;
+  try {
+    parsed = new URL(remotePath || '', 'http://localhost');
+  } catch {
+    return REMOTE_PROXY_DEFAULT_TIMEOUT_MS;
+  }
+
+  const pathname = parsed.pathname;
+  const normalizedMethod = String(method || 'GET').toUpperCase();
+
+  if (
+    pathname === '/api/session'
+    || pathname === '/api/project'
+    || pathname === '/api/global/health'
+    || pathname === '/api/session/status'
+    || pathname === '/api/fs/list'
+  ) {
+    return REMOTE_PROXY_FAST_TIMEOUT_MS;
+  }
+
+  if (normalizedMethod === 'POST' && /\/api\/session\/[^/]+\/prompt_async$/.test(pathname)) {
+    return REMOTE_PROXY_LONG_MUTATION_TIMEOUT_MS;
+  }
+
+  if (normalizedMethod === 'POST' && pathname === '/api/opencode/upgrade') {
+    return REMOTE_PROXY_UPGRADE_TIMEOUT_MS;
+  }
+
+  return REMOTE_PROXY_DEFAULT_TIMEOUT_MS;
+};
+
+export const buildRemoteProxyAuthHeaders = (instance) => {
+  const headers = {};
   if (instance?.auth?.type === 'password' && instance.auth.value) {
-    proxyReq.setHeader(
-      'Authorization',
-      `Basic ${Buffer.from(`user:${instance.auth.value}`).toString('base64')}`,
-    );
+    headers.Authorization = `Basic ${Buffer.from(`user:${instance.auth.value}`).toString('base64')}`;
   } else if (instance?.auth?.type === 'bearer' && instance.auth.value) {
-    proxyReq.setHeader('Authorization', `Bearer ${instance.auth.value}`);
+    headers.Authorization = `Bearer ${instance.auth.value}`;
+  }
+  return headers;
+};
+
+const setRemoteAuthHeaders = (proxyReq, req) => {
+  const headers = buildRemoteProxyAuthHeaders(req.remoteInstance);
+  for (const [key, value] of Object.entries(headers)) {
+    proxyReq.setHeader(key, value);
   }
 };
 
@@ -86,7 +140,26 @@ const setRemoteWsHeaders = (proxyReq, req) => {
   }
 };
 
-const resolveHealthyInstance = async (runtime, instanceId) => {
+export const beginRemoteBackgroundHealthProbe = (runtime, instanceId) => {
+  if (typeof runtime.ensureHealthy !== 'function') {
+    return;
+  }
+  if (typeof runtime.isHealthProbeInFlight === 'function' && runtime.isHealthProbeInFlight(instanceId)) {
+    return;
+  }
+  void runtime.ensureHealthy(instanceId, { timeoutSec: 2 }).catch(() => {});
+};
+
+export const markRemoteProxyUnavailable = (runtime, instanceId, error) => {
+  const message = error?.message || 'Remote instance unavailable';
+  runtime.setHealthStatus?.(instanceId, {
+    healthy: false,
+    latencyMs: 0,
+    error: message,
+  });
+};
+
+export const resolveHealthyRemoteInstance = async (runtime, instanceId, options = {}) => {
   const instance = runtime.getInstanceSync(instanceId);
   if (!instance) {
     return { ok: false, status: 404, error: 'Remote instance not found' };
@@ -96,14 +169,49 @@ const resolveHealthyInstance = async (runtime, instanceId) => {
     return { ok: false, status: 503, error: 'Remote instance not available' };
   }
 
-  const healthy = runtime.isHealthy(instanceId)
-    || (typeof runtime.ensureHealthy === 'function' && await runtime.ensureHealthy(instanceId));
+  const healthy = runtime.isHealthy(instanceId);
 
   if (!healthy) {
+    if (options.waitForHealth === true && typeof runtime.ensureHealthy === 'function') {
+      const becameHealthy = await runtime.ensureHealthy(instanceId, { timeoutSec: options.timeoutSec || 2 });
+      if (becameHealthy) {
+        return { ok: true, instance };
+      }
+    } else {
+      beginRemoteBackgroundHealthProbe(runtime, instanceId);
+    }
     return { ok: false, status: 503, error: 'Remote instance not available' };
   }
 
   return { ok: true, instance };
+};
+
+export const formatRemoteGateError = (error, instanceId) => ({
+  status: Number.isInteger(error?.statusCode) ? error.statusCode : 503,
+  body: {
+    error: error?.message || 'Remote instance unavailable',
+    code: error?.code || 'REMOTE_REQUEST_REJECTED',
+    instanceId,
+  },
+});
+
+const releaseRemoteLaneOnResponseEnd = (res, release) => {
+  if (typeof release !== 'function') {
+    return;
+  }
+
+  let released = false;
+  const releaseOnce = () => {
+    if (released) {
+      return;
+    }
+    released = true;
+    release();
+  };
+
+  res.once('finish', releaseOnce);
+  res.once('close', releaseOnce);
+  res.once('error', releaseOnce);
 };
 
 export const registerRemoteProxy = (app, runtime, options = {}) => {
@@ -118,6 +226,8 @@ export const registerRemoteProxy = (app, runtime, options = {}) => {
     target: 'http://127.0.0.1',
     changeOrigin: true,
     ws: true,
+    proxyTimeout: REMOTE_PROXY_MAX_TIMEOUT_MS,
+    timeout: REMOTE_PROXY_MAX_TIMEOUT_MS,
     pathFilter: (pathname, req) => {
       const target = req?.originalUrl || pathname || req?.url || '';
       return target.startsWith(remoteProxyPathPrefix);
@@ -128,20 +238,39 @@ export const registerRemoteProxy = (app, runtime, options = {}) => {
       proxyReq: (proxyReq, req) => {
         setRemoteAuthHeaders(proxyReq, req);
         proxyReq.setHeader('accept-encoding', 'identity');
+        const timeoutMs = getRemoteProxyRequestTimeoutMs(req.remoteProxyPath || req.url, req.method);
+        proxyReq.setTimeout(timeoutMs, () => {
+          const error = new Error(`Remote proxy request timed out after ${timeoutMs}ms`);
+          error.code = 'ETIMEDOUT';
+          proxyReq.destroy(error);
+        });
       },
       proxyReqWs: setRemoteWsHeaders,
-      proxyRes: (proxyRes) => {
+      proxyRes: (proxyRes, req) => {
         for (const key of Object.keys(proxyRes.headers || {})) {
           if (!shouldForwardProxyResponseHeader(key)) {
             delete proxyRes.headers[key];
           }
         }
+        const instanceId = req?._remoteInstanceId;
+        const statusCode = proxyRes.statusCode || 0;
+        if (instanceId && statusCode >= 500) {
+          runtime.recordRemoteRequestFailure?.(instanceId, { status: statusCode });
+          if (statusCode >= 502) {
+            markRemoteProxyUnavailable(runtime, instanceId, new Error(`Remote API returned ${statusCode}`));
+          }
+        } else if (instanceId && statusCode > 0) {
+          runtime.recordRemoteRequestSuccess?.(instanceId);
+        }
       },
       error: (err, req, res) => {
         const instanceId = req?.params?.instanceId || req?.remoteInstance?.id || 'unknown';
+        runtime.recordRemoteRequestFailure?.(instanceId, err);
+        markRemoteProxyUnavailable(runtime, instanceId, err);
         console.error(`[remote-proxy] Proxy error for instance "${instanceId}":`, err.message);
         if (res && !res.headersSent && typeof res.status === 'function') {
-          res.status(503).json({ error: 'Remote instance unavailable', instanceId });
+          const status = err?.code === 'ECONNRESET' || err?.code === 'ETIMEDOUT' ? 504 : 503;
+          res.status(status).json({ error: 'Remote instance unavailable', instanceId });
         }
       },
     },
@@ -150,14 +279,27 @@ export const registerRemoteProxy = (app, runtime, options = {}) => {
   app.use('/api/remote/:instanceId', async (req, res, next) => {
     const { instanceId } = req.params;
 
-    const resolved = await resolveHealthyInstance(runtime, instanceId);
+    const resolved = await resolveHealthyRemoteInstance(runtime, instanceId);
     if (!resolved.ok) {
       return res.status(resolved.status).json({ error: resolved.error, instanceId });
+    }
+
+    let releaseLane = null;
+    try {
+      releaseLane = await runtime.enterRequestLane?.(instanceId, 'normal', {
+        queueTimeoutMs: REMOTE_PROXY_QUEUE_TIMEOUT_MS,
+      });
+    } catch (error) {
+      const formatted = formatRemoteGateError(error, instanceId);
+      return res.status(formatted.status).json(formatted.body);
     }
 
     const remotePath = '/api' + req.url;
     req.remoteInstance = resolved.instance;
     req.remoteProxyPath = remotePath;
+    req._remoteInstanceId = instanceId;
+
+    releaseRemoteLaneOnResponseEnd(res, releaseLane);
 
     proxy(req, res, next);
   });
@@ -165,7 +307,7 @@ export const registerRemoteProxy = (app, runtime, options = {}) => {
   if (server && typeof server.on === 'function') {
     server.on('upgrade', (req, socket, head) => {
       const parsed = parseRemoteProxyPath(req.url);
-      if (!parsed) {
+      if (!parsed || isRemoteEventWsProxyPath(parsed.remotePath)) {
         return;
       }
 
@@ -187,14 +329,37 @@ export const registerRemoteProxy = (app, runtime, options = {}) => {
             }
           }
 
-          const resolved = await resolveHealthyInstance(runtime, parsed.instanceId);
+          const resolved = await resolveHealthyRemoteInstance(runtime, parsed.instanceId);
           if (!resolved.ok) {
             rejectUpgrade(socket, resolved.status, resolved.error, rejectWebSocketUpgrade);
             return;
           }
 
+          let releaseLane = null;
+          try {
+            releaseLane = await runtime.enterRequestLane?.(parsed.instanceId, 'stream');
+          } catch (error) {
+            const formatted = formatRemoteGateError(error, parsed.instanceId);
+            rejectUpgrade(socket, formatted.status, formatted.body.error, rejectWebSocketUpgrade);
+            return;
+          }
+
+          if (typeof releaseLane === 'function') {
+            let released = false;
+            const releaseOnce = () => {
+              if (released) {
+                return;
+              }
+              released = true;
+              releaseLane();
+            };
+            socket.once('close', releaseOnce);
+            socket.once('error', releaseOnce);
+          }
+
           req.remoteInstance = resolved.instance;
           req.remoteProxyPath = parsed.remotePath;
+          req._remoteInstanceId = parsed.instanceId;
           req.originalUrl = req.url;
           req.url = parsed.remotePath;
           proxy.upgrade(req, socket, head);

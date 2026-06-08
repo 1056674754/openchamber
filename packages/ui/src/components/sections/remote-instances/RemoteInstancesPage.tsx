@@ -29,7 +29,7 @@ import { toast } from '@/components/ui';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { openExternalUrl } from '@/lib/url';
 import { useI18n, type I18nKey } from '@/lib/i18n';
-import { isTauriShell } from '@/lib/desktop';
+import { hasDesktopInvoke } from '@/lib/desktop';
 import {
   desktopSshLogsClear,
   desktopSshLogs,
@@ -42,6 +42,11 @@ import {
 } from '@/lib/desktopSsh';
 import type { RemoteInstance, RemoteInstanceAuth, RemoteInstancePhase } from '@/lib/remote-instances/types';
 import { resolveRemoteLabel } from '@/lib/remote-instances/types';
+import {
+  createWebRemoteDraft,
+  makeWebRemoteDraftSelectionId,
+  parseWebRemoteDraftSelectionId,
+} from './webRemoteDraft';
 
 const randomPort = (): number => {
   return Math.floor(20000 + Math.random() * 30000);
@@ -227,6 +232,7 @@ const WebRemoteInstancesPage: React.FC<WebPageProps> = ({
 
   React.useEffect(() => {
     if (loading) return;
+    if (parseWebRemoteDraftSelectionId(selectedId)) return;
     if (instances.length === 0) {
       if (selectedId !== null) setSelectedId(null);
       return;
@@ -239,7 +245,7 @@ const WebRemoteInstancesPage: React.FC<WebPageProps> = ({
     void webLoad();
   }, [webLoad]);
 
-  const webStatus = selectedId ? statuses[selectedId] : undefined;
+  const webStatus = webDraft ? statuses[webDraft.id] : undefined;
   const isReady = webStatus?.phase === 'connected';
 
   const updateWebDraft = React.useCallback((updater: (current: RemoteInstance) => RemoteInstance) => {
@@ -248,7 +254,7 @@ const WebRemoteInstancesPage: React.FC<WebPageProps> = ({
 
   const hasWebChanges = React.useMemo(() => {
     if (!webDraft || !selectedId) return false;
-    const original = instances.find((i) => i.id === selectedId);
+    const original = instances.find((i) => i.id === webDraft.id);
     if (!original) return true;
     return JSON.stringify(webDraft) !== JSON.stringify(original);
   }, [webDraft, selectedId, instances]);
@@ -260,18 +266,23 @@ const WebRemoteInstancesPage: React.FC<WebPageProps> = ({
       return;
     }
     try {
-      const next = instances.map((i) => i.id === webDraft.id ? webDraft : i);
+      const original = instances.find((i) => i.id === webDraft.id);
+      const next = original
+        ? instances.map((i) => i.id === webDraft.id ? webDraft : i)
+        : [...instances, webDraft];
       await webSaveInstances(next);
+      setSelectedId(webDraft.id);
       toast.success(t('settings.remoteInstances.page.toast.instanceSaved'));
     } catch (err) {
       toast.error(t('settings.remoteInstances.page.toast.saveFailed'), {
         description: err instanceof Error ? err.message : String(err),
       });
     }
-  }, [webDraft, instances, webSaveInstances, t]);
+  }, [webDraft, instances, webSaveInstances, setSelectedId, t]);
 
   const handleWebPrimaryAction = React.useCallback(() => {
     if (!webDraft) return;
+    if (!instances.some((instance) => instance.id === webDraft.id)) return;
     setIsActionPending(true);
     const op = isReady ? webDisconnect(webDraft.id) : webConnect(webDraft.id);
     void op
@@ -282,12 +293,17 @@ const WebRemoteInstancesPage: React.FC<WebPageProps> = ({
         );
       })
       .finally(() => setIsActionPending(false));
-  }, [webDraft, isReady, webDisconnect, webConnect, t]);
+  }, [webDraft, instances, isReady, webDisconnect, webConnect, t]);
 
   const handleWebRemove = React.useCallback(async () => {
     if (!webDraft) return;
     const ok = window.confirm(t('settings.remoteInstances.page.confirm.removeInstance'));
     if (!ok) return;
+    if (!instances.some((i) => i.id === webDraft.id)) {
+      setWebDraft(null);
+      setSelectedId(null);
+      return;
+    }
     try {
       const next = instances.filter((i) => i.id !== webDraft.id);
       await webSaveInstances(next);
@@ -298,27 +314,15 @@ const WebRemoteInstancesPage: React.FC<WebPageProps> = ({
         description: err instanceof Error ? err.message : String(err),
       });
     }
-  }, [webDraft, instances, webSaveInstances, setSelectedId, t]);
+  }, [webDraft, instances, webSaveInstances, setSelectedId, setWebDraft, t]);
 
   const handleAddWeb = React.useCallback(async () => {
     const id = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
       ? crypto.randomUUID()
       : `web-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-    const newInstance: RemoteInstance = {
-      id,
-      label: t('settings.remoteInstances.sidebar.newSshInstanceName'),
-      enabled: true,
-      url: '',
-    };
-    try {
-      await webSaveInstances([...instances, newInstance]);
-      setSelectedId(id);
-    } catch (err) {
-      toast.error(t('settings.remoteInstances.sidebar.toast.createFailed'), {
-        description: err instanceof Error ? err.message : String(err),
-      });
-    }
-  }, [instances, webSaveInstances, setSelectedId, t]);
+    setWebDraft(createWebRemoteDraft(id, t('settings.remoteInstances.sidebar.newSshInstanceName')));
+    setSelectedId(makeWebRemoteDraftSelectionId(id));
+  }, [setSelectedId, setWebDraft, t]);
 
   if (!webDraft) {
     return (
@@ -376,7 +380,7 @@ const WebRemoteInstancesPage: React.FC<WebPageProps> = ({
               size="xs"
               className="!font-normal"
               onClick={handleWebPrimaryAction}
-              disabled={isActionPending}
+              disabled={isActionPending || !instances.some((instance) => instance.id === webDraft.id)}
             >
               {isReady ? <Icon name="stop" className="h-3.5 w-3.5" /> : <Icon name="plug-2" className="h-3.5 w-3.5" />}
               {isReady ? t('settings.remoteInstances.sidebar.actions.disconnect') : t('settings.remoteInstances.sidebar.actions.connect')}
@@ -474,13 +478,17 @@ const WebRemoteInstancesPage: React.FC<WebPageProps> = ({
             <Select
               value={webDraft.auth?.type || 'none'}
               onValueChange={(value) =>
-                updateWebDraft((current) => ({
-                  ...current,
-                  auth: {
-                    ...(current.auth || { type: 'none' }),
-                    type: value as RemoteInstanceAuth['type'],
-                  },
-                }))
+                updateWebDraft((current) => {
+                  const nextType = value as RemoteInstanceAuth['type'];
+                  return {
+                    ...current,
+                    auth: nextType === 'none'
+                      ? { type: 'none' }
+                      : current.auth?.type === nextType
+                        ? current.auth
+                        : { type: nextType },
+                  };
+                })
               }
             >
               <SelectTrigger className="h-7 w-fit min-w-[140px]">
@@ -596,7 +604,7 @@ const webPhaseLabelKey = (phase?: RemoteInstancePhase): I18nKey => {
 
 export const RemoteInstancesPage: React.FC = () => {
   const { t } = useI18n();
-  const isDesktop = isTauriShell();
+  const isDesktop = hasDesktopInvoke();
 
   const webInstances = useRemoteInstancesStore(useShallow((state) => state.instances));
   const webStatuses = useRemoteInstancesStore(useShallow((state) => state.statuses));
@@ -660,11 +668,20 @@ export const RemoteInstancesPage: React.FC = () => {
 
   React.useEffect(() => {
     if (!isDesktop) {
+      const draftId = parseWebRemoteDraftSelectionId(selectedId);
+      if (draftId) {
+        setWebDraft((current) => (
+          current?.id === draftId
+            ? current
+            : createWebRemoteDraft(draftId, t('settings.remoteInstances.sidebar.newSshInstanceName'))
+        ));
+        return;
+      }
       setWebDraft(selectedInstance as RemoteInstance | null);
     } else {
       setDraft(selectedInstance as DesktopSshInstance | null);
     }
-  }, [isDesktop, selectedInstance]);
+  }, [isDesktop, selectedId, selectedInstance, t]);
 
   React.useEffect(() => {
     if (!selectedId) {
@@ -722,7 +739,16 @@ export const RemoteInstancesPage: React.FC = () => {
   }, []);
 
   const status = selectedId ? statusesById[selectedId] : null;
+  const remoteServiceStatus = selectedId ? webStatuses[selectedId] : undefined;
+  const remoteServiceUnavailable = remoteServiceStatus?.healthy === false;
   const statusPhase = status?.phase;
+  const displayStatusPhase = remoteServiceUnavailable ? 'error' : statusPhase;
+  const displayStatusLabel = remoteServiceUnavailable
+    ? t(webPhaseLabelKey('error'))
+    : t(phaseLabelKey(statusPhase));
+  const displayStatusDetail = remoteServiceUnavailable
+    ? (remoteServiceStatus.error || remoteServiceStatus.detail || status?.localUrl || '')
+    : (status?.localUrl || '');
   const isReady = statusPhase === 'ready';
   const isReconnecting = statusPhase === 'degraded';
   const isConnecting = isConnectingPhase(statusPhase);
@@ -1220,11 +1246,11 @@ export const RemoteInstancesPage: React.FC = () => {
       <div className="mb-6 px-1">
         <h2 className="typography-ui-header font-semibold text-foreground truncate">{instanceTitle}</h2>
         <div className="mt-1 flex flex-wrap items-center gap-2 typography-meta text-muted-foreground">
-          <span className={`h-2.5 w-2.5 rounded-full ${phaseDotClass(statusPhase)}`} />
-          <span>{t(phaseLabelKey(statusPhase))}</span>
-          {status?.localUrl ? <span className="font-mono text-foreground/80">{status.localUrl}</span> : null}
+          <span className={`h-2.5 w-2.5 rounded-full ${phaseDotClass(displayStatusPhase)}`} />
+          <span>{displayStatusLabel}</span>
+          {displayStatusDetail ? <span className="font-mono text-foreground/80">{displayStatusDetail}</span> : null}
           {reconnectAppearsStuck ? <span>{t('settings.remoteInstances.page.status.reconnectStale')}</span> : null}
-          {statusPhase === 'ready' && status ? (() => {
+          {!remoteServiceUnavailable && statusPhase === 'ready' && status ? (() => {
             const elapsed = Math.floor(statusAgeMs / 1000);
             const minutes = Math.floor(elapsed / 60);
             const seconds = elapsed % 60;

@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Session } from '@opencode-ai/sdk/v2';
+import type { OpencodeClient, Session } from '@opencode-ai/sdk/v2';
 import type { SessionStatus } from '@opencode-ai/sdk/v2/client';
 import { opencodeClient } from '@/lib/opencode/client';
 import { DEFAULT_SERVER_ID, serverRegistry } from '@/lib/opencode/server-registry';
@@ -24,6 +24,7 @@ type GlobalSessionsState = {
   /** Session running status across all directories — single source of truth for sidebar indicators */
   sessionStatuses: Map<string, SessionStatus>;
   loadSessions: (fallbackActive?: Session[]) => Promise<LoadResult>;
+  refreshSessionsForDirectories: (directories: Iterable<string>, fallbackActive?: Session[]) => Promise<LoadResult>;
   applySnapshot: (activeSessions: Session[], archivedSessions: Session[], status?: GlobalSessionsStatus) => void;
   upsertSession: (session: Session) => void;
   removeSessions: (ids: Iterable<string>) => void;
@@ -34,8 +35,12 @@ type GlobalSessionsState = {
 };
 
 const PAGE_SIZE = 200;
+const STATUS_BATCH_TTL_MS = 15_000;
+const STATUS_BATCH_MAX_CONCURRENCY = 6;
 
 let inflightLoad: Promise<LoadResult> | null = null;
+const statusLoadedAtByDirectory = new Map<string, number>();
+const inflightStatusLoadsByDirectory = new Map<string, Promise<unknown>>();
 
 const normalizePath = (value?: string | null): string | null => {
   if (typeof value !== 'string') {
@@ -99,6 +104,48 @@ export const resolveGlobalSessionDirectory = (session: Session): string | null =
     ?? normalizePath(record.project?.worktree ?? null);
 };
 
+export const mergeSessionDirectoryMetadata = (incoming: Session, existing?: Session | null): Session => {
+  if (!existing) {
+    return incoming;
+  }
+
+  const incomingRecord = incoming as Session & {
+    directory?: string | null;
+    project?: ({ worktree?: string | null } & Record<string, unknown>) | null;
+  };
+  const existingRecord = existing as Session & {
+    directory?: string | null;
+    project?: ({ worktree?: string | null } & Record<string, unknown>) | null;
+  };
+
+  const incomingDirectory = normalizePath(incomingRecord.directory ?? null);
+  const incomingWorktree = normalizePath(incomingRecord.project?.worktree ?? null);
+  const existingDirectory = normalizePath(existingRecord.directory ?? null);
+  const existingWorktree = normalizePath(existingRecord.project?.worktree ?? null);
+
+  let changed = false;
+  const next: typeof incomingRecord = { ...incomingRecord };
+
+  if (!incomingDirectory && existingDirectory) {
+    next.directory = existingRecord.directory;
+    changed = true;
+  }
+
+  if (!incomingWorktree && existingWorktree) {
+    next.project = {
+      ...(existingRecord.project ?? {}),
+      ...(incomingRecord.project ?? {}),
+      worktree: existingRecord.project?.worktree,
+    };
+    changed = true;
+  } else if (!incomingRecord.project && existingRecord.project) {
+    next.project = existingRecord.project;
+    changed = true;
+  }
+
+  return changed ? next : incoming;
+};
+
 const buildSessionsByDirectory = (sessions: Session[]): Map<string, Session[]> => {
   const next = new Map<string, Session[]>();
   for (const session of sessions) {
@@ -155,16 +202,150 @@ const sameStatus = (prev: SessionStatus | undefined, next: SessionStatus | undef
     && (prev as { next?: unknown } | undefined)?.next === (next as { next?: unknown } | undefined)?.next;
 };
 
+const getSessionUpdatedAt = (session: Session): number => {
+  const updatedAt = session.time?.updated;
+  if (typeof updatedAt === 'number' && Number.isFinite(updatedAt)) {
+    return updatedAt;
+  }
+  const createdAt = session.time?.created;
+  return typeof createdAt === 'number' && Number.isFinite(createdAt) ? createdAt : 0;
+};
+
+const sortSessionsByUpdated = (sessions: Session[]): Session[] => {
+  return [...sessions].sort((left, right) => {
+    const timeDelta = getSessionUpdatedAt(right) - getSessionUpdatedAt(left);
+    if (timeDelta !== 0) return timeDelta;
+    return right.id.localeCompare(left.id);
+  });
+};
+
+const normalizeDirectorySet = (directories: Iterable<string>): Set<string> => {
+  const next = new Set<string>();
+  for (const directory of directories) {
+    const normalized = normalizePath(directory);
+    if (normalized) next.add(normalized);
+  }
+  return next;
+};
+
+const replaceSessionsForDirectories = (
+  existing: Session[],
+  incoming: Session[],
+  directories: Set<string>,
+): Session[] => {
+  if (directories.size === 0) {
+    return existing;
+  }
+
+  const existingById = new Map(existing.map((session) => [session.id, session]));
+  const incomingById = new Map<string, Session>();
+
+  for (const session of incoming) {
+    if (!session?.id) continue;
+    incomingById.set(session.id, mergeSessionDirectoryMetadata(session, existingById.get(session.id)));
+  }
+
+  const kept = existing.filter((session) => {
+    if (incomingById.has(session.id)) return false;
+    const directory = resolveGlobalSessionDirectory(session);
+    return !directory || !directories.has(directory);
+  });
+
+  return sortSessionsByUpdated([...incomingById.values(), ...kept]);
+};
+
+type DirectoryPageResult = {
+  directories: Set<string>;
+  sessions: Session[];
+  errors: unknown[];
+};
+
+const fetchDirectoryPages = async (
+  sdk: OpencodeClient,
+  directories: Set<string>,
+  archived: boolean,
+): Promise<DirectoryPageResult> => {
+  const results = await Promise.allSettled(
+    [...directories].map(async (directory) => ({
+      directory,
+      sessions: await listGlobalSessionPages(sdk, { directory, archived, pageSize: PAGE_SIZE }),
+    })),
+  );
+
+  const fulfilledDirectories = new Set<string>();
+  const sessions: Session[] = [];
+  const errors: unknown[] = [];
+
+  for (const result of results) {
+    if (result.status === 'fulfilled') {
+      fulfilledDirectories.add(result.value.directory);
+      sessions.push(...result.value.sessions);
+    } else {
+      errors.push(result.reason);
+    }
+  }
+
+  return { directories: fulfilledDirectories, sessions, errors };
+};
+
+type StatusLoadResult = {
+  directory: string;
+  response: unknown;
+};
+
+const loadStatusForDirectory = (directory: string): Promise<unknown> => {
+  const existing = inflightStatusLoadsByDirectory.get(directory);
+  if (existing) {
+    return existing;
+  }
+
+  const promise = (async () => {
+    const sdk = resolveStatusClientForDirectory(directory);
+    if (!sdk) return null;
+    return retry(() => sdk.session.status({ directory }), { attempts: 2, delay: 300, retryIf: () => true });
+  })().finally(() => {
+    inflightStatusLoadsByDirectory.delete(directory);
+  });
+
+  inflightStatusLoadsByDirectory.set(directory, promise);
+  return promise;
+};
+
+const loadStatusesWithLimit = async (directories: string[]): Promise<Array<PromiseSettledResult<StatusLoadResult>>> => {
+  const results: Array<PromiseSettledResult<StatusLoadResult>> = [];
+  let nextIndex = 0;
+
+  const worker = async () => {
+    while (nextIndex < directories.length) {
+      const directory = directories[nextIndex];
+      nextIndex += 1;
+      if (!directory) continue;
+      try {
+        const response = await loadStatusForDirectory(directory);
+        statusLoadedAtByDirectory.set(directory, Date.now());
+        results.push({ status: 'fulfilled', value: { directory, response } });
+      } catch (reason) {
+        results.push({ status: 'rejected', reason });
+      }
+    }
+  };
+
+  const workerCount = Math.min(STATUS_BATCH_MAX_CONCURRENCY, directories.length);
+  await Promise.all(Array.from({ length: workerCount }, () => worker()));
+  return results;
+};
+
 const upsertSessionIntoList = (sessions: Session[], session: Session): Session[] => {
   const index = sessions.findIndex((candidate) => candidate.id === session.id);
   if (index === -1) {
     return [session, ...sessions];
   }
-  if (getSessionSignature(sessions[index]) === getSessionSignature(session)) {
+  const mergedSession = mergeSessionDirectoryMetadata(session, sessions[index]);
+  if (getSessionSignature(sessions[index]) === getSessionSignature(mergedSession)) {
     return sessions;
   }
   const next = [...sessions];
-  next[index] = session;
+  next[index] = mergedSession;
   return next;
 };
 
@@ -179,7 +360,7 @@ const mergeSessionLists = (existing: Session[], incoming?: Session[]): Session[]
 
   const byId = new Map(existing.map((session) => [session.id, session]));
   incoming.forEach((session) => {
-    byId.set(session.id, session);
+    byId.set(session.id, mergeSessionDirectoryMetadata(session, byId.get(session.id)));
   });
 
   const ordered: Session[] = [];
@@ -333,14 +514,73 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
     return inflightLoad;
   },
 
+  refreshSessionsForDirectories: async (directories, fallbackActive) => {
+    const directorySet = normalizeDirectorySet(directories);
+    if (directorySet.size === 0) {
+      const state = get();
+      return { activeSessions: state.activeSessions, archivedSessions: state.archivedSessions };
+    }
+
+    const sdk = opencodeClient.getSdkClient();
+    const [active, archived] = await Promise.all([
+      fetchDirectoryPages(sdk, directorySet, false),
+      fetchDirectoryPages(sdk, directorySet, true),
+    ]);
+
+    if (active.errors.length > 0) {
+      console.warn('[GlobalSessions] Failed to refresh active sessions for some directories:', active.errors[0]);
+    }
+    if (archived.errors.length > 0) {
+      console.warn('[GlobalSessions] Failed to refresh archived sessions for some directories:', archived.errors[0]);
+    }
+
+    set((state) => {
+      let nextActiveSessions = replaceSessionsForDirectories(state.activeSessions, active.sessions, active.directories);
+      nextActiveSessions = mergeSessionLists(nextActiveSessions, fallbackActive);
+      if (sameSessionList(state.activeSessions, nextActiveSessions)) {
+        nextActiveSessions = state.activeSessions;
+      }
+
+      let nextArchivedSessions = replaceSessionsForDirectories(state.archivedSessions, archived.sessions, archived.directories);
+      if (sameSessionList(state.archivedSessions, nextArchivedSessions)) {
+        nextArchivedSessions = state.archivedSessions;
+      }
+
+      const nextSessionsByDirectory = nextActiveSessions === state.activeSessions
+        ? state.sessionsByDirectory
+        : buildSessionsByDirectory(nextActiveSessions);
+
+      if (
+        nextActiveSessions === state.activeSessions
+        && nextArchivedSessions === state.archivedSessions
+        && nextSessionsByDirectory === state.sessionsByDirectory
+      ) {
+        return state;
+      }
+
+      return {
+        activeSessions: nextActiveSessions,
+        archivedSessions: nextArchivedSessions,
+        sessionsByDirectory: nextSessionsByDirectory,
+      };
+    });
+
+    const state = get();
+    return { activeSessions: state.activeSessions, archivedSessions: state.archivedSessions };
+  },
+
   upsertSession: (session) => {
     set((state) => {
-      const isArchived = Boolean(session.time?.archived);
+      const existingSession = state.activeSessions.find((candidate) => candidate.id === session.id)
+        ?? state.archivedSessions.find((candidate) => candidate.id === session.id)
+        ?? null;
+      const sessionWithMetadata = mergeSessionDirectoryMetadata(session, existingSession);
+      const isArchived = Boolean(sessionWithMetadata.time?.archived);
       const nextActiveSessions = isArchived
         ? state.activeSessions.filter((candidate) => candidate.id !== session.id)
-        : upsertSessionIntoList(state.activeSessions, session);
+        : upsertSessionIntoList(state.activeSessions, sessionWithMetadata);
       const nextArchivedSessions = isArchived
-        ? upsertSessionIntoList(state.archivedSessions, session)
+        ? upsertSessionIntoList(state.archivedSessions, sessionWithMetadata)
         : state.archivedSessions.filter((candidate) => candidate.id !== session.id);
 
       if (
@@ -465,17 +705,27 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
       return;
     }
 
-    const results = await Promise.allSettled(
-      directories.map((directory) => {
-        try {
-          const sdk = resolveStatusClientForDirectory(directory);
-          if (!sdk) return Promise.resolve(null);
-          return retry(() => sdk.session.status({ directory }), { attempts: 2, delay: 300, retryIf: () => true });
-        } catch (error) {
-          return Promise.reject(error);
-        }
-      })
-    );
+    const now = Date.now();
+    const targetDirectories: string[] = [];
+    const seenDirectories = new Set<string>();
+    for (const directory of directories) {
+      const normalized = normalizePath(directory);
+      if (!normalized || seenDirectories.has(normalized)) {
+        continue;
+      }
+      seenDirectories.add(normalized);
+      const lastLoadedAt = statusLoadedAtByDirectory.get(normalized) ?? 0;
+      if (now - lastLoadedAt < STATUS_BATCH_TTL_MS) {
+        continue;
+      }
+      targetDirectories.push(normalized);
+    }
+
+    if (targetDirectories.length === 0) {
+      return;
+    }
+
+    const results = await loadStatusesWithLimit(targetDirectories);
 
     const currentStatuses = get().sessionStatuses;
     const next = new Map(currentStatuses);
@@ -484,13 +734,14 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
       if (result.status !== 'fulfilled') {
         continue;
       }
-      const response = result.value;
+      const response = result.value.response;
       if (!response) {
         continue;
       }
-      const payload = Array.isArray(response?.data)
+      const responseRecord = response as { data?: unknown };
+      const payload = Array.isArray(responseRecord.data)
         ? undefined
-        : response?.data as Record<string, SessionStatus> | undefined;
+        : responseRecord.data as Record<string, SessionStatus> | undefined;
       if (!payload || typeof payload !== 'object') {
         continue;
       }
@@ -524,4 +775,11 @@ export const ensureGlobalSessionsLoaded = async (fallbackActive?: Session[]): Pr
 
 export const refreshGlobalSessions = async (fallbackActive?: Session[]): Promise<LoadResult> => {
   return useGlobalSessionsStore.getState().loadSessions(fallbackActive);
+};
+
+export const refreshGlobalSessionsForDirectories = async (
+  directories: Iterable<string>,
+  fallbackActive?: Session[],
+): Promise<LoadResult> => {
+  return useGlobalSessionsStore.getState().refreshSessionsForDirectories(directories, fallbackActive);
 };

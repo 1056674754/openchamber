@@ -185,21 +185,6 @@ export type DesktopSettings = {
   sttTranscribeOnStop?: boolean;
 };
 
-type TauriGlobal = {
-  core?: {
-    invoke?: (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
-  };
-  dialog?: {
-    open?: (options: Record<string, unknown>) => Promise<unknown>;
-  };
-  event?: {
-    listen?: (
-      event: string,
-      handler: (evt: { payload?: unknown }) => void,
-    ) => Promise<() => void>;
-  };
-};
-
 type ElectronRuntimeGlobal = {
   runtime?: string;
 };
@@ -209,27 +194,42 @@ const getElectronRuntime = (): ElectronRuntimeGlobal | null => {
   return (window as unknown as { __OPENCHAMBER_ELECTRON__?: ElectronRuntimeGlobal }).__OPENCHAMBER_ELECTRON__ ?? null;
 };
 
-export const isTauriShell = (): boolean => {
-  if (typeof window === 'undefined') return false;
-  const tauri = (window as unknown as { __TAURI__?: TauriGlobal }).__TAURI__;
-  return typeof tauri?.core?.invoke === 'function';
+const getDesktopBridge = (): OpenChamberDesktopBridge | null => {
+  if (typeof window === 'undefined') return null;
+  return window.__OPENCHAMBER_DESKTOP__ ?? null;
 };
 
 export const isElectronShell = (): boolean => getElectronRuntime()?.runtime === 'electron';
 
 export const hasDesktopInvoke = (): boolean => {
-  if (typeof window === 'undefined') return false;
-  const tauri = (window as unknown as { __TAURI__?: TauriGlobal }).__TAURI__;
-  return typeof tauri?.core?.invoke === 'function';
+  return typeof getDesktopBridge()?.core?.invoke === 'function';
 };
 
 export const canUseElectronDesktopIPC = (): boolean => isElectronShell() && hasDesktopInvoke();
 
 export const invokeDesktop = async <T = unknown>(command: string, args?: Record<string, unknown>): Promise<T | null> => {
-  if (typeof window === 'undefined') return null;
-  const tauri = (window as unknown as { __TAURI__?: TauriGlobal }).__TAURI__;
-  if (typeof tauri?.core?.invoke !== 'function') return null;
-  return tauri.core.invoke(command, args ?? {}) as Promise<T>;
+  const invoke = getDesktopBridge()?.core?.invoke;
+  if (typeof invoke !== 'function') return null;
+  return invoke(command, args ?? {}) as Promise<T>;
+};
+
+export const listenDesktopEvent = async (
+  event: string,
+  handler: (evt: { payload?: unknown }) => void,
+): Promise<(() => void) | null> => {
+  const listen = getDesktopBridge()?.event?.listen;
+  if (typeof listen !== 'function') return null;
+  return listen(event, handler);
+};
+
+export const canUseDesktopNativeApi = (): boolean => hasDesktopInvoke() && isDesktopLocalOriginActive();
+
+const openDesktopDialog = async (options: Record<string, unknown>): Promise<unknown> => {
+  const open = getDesktopBridge()?.dialog?.open;
+  if (typeof open !== 'function') {
+    return null;
+  }
+  return open(options);
 };
 
 type LaunchAtLoginStatus = {
@@ -341,16 +341,15 @@ export const isDesktopLocalOriginActive = (): boolean => {
 
 export const isDesktopShell = (): boolean => {
   if (typeof window === 'undefined') return false;
-  return isTauriShell() || isElectronShell();
+  return isElectronShell();
 };
 
 export const startDesktopWindowDrag = async (): Promise<boolean> => {
-  if (!isDesktopShell() || !isTauriShell()) {
+  if (!isDesktopShell() || !hasDesktopInvoke()) {
     return false;
   }
   try {
-    const tauri = (window as unknown as { __TAURI__?: TauriGlobal }).__TAURI__;
-    await tauri?.core?.invoke?.('desktop_start_window_drag');
+    await invokeDesktop('desktop_start_window_drag');
     return true;
   } catch {
     return false;
@@ -363,9 +362,11 @@ export const openSshTerminalAtPath = async (
   remotePath: string,
   appName: string,
 ): Promise<boolean> => {
+  if (!hasDesktopInvoke()) {
+    return false;
+  }
   try {
-    const tauri = (window as unknown as { __TAURI__?: TauriGlobal }).__TAURI__;
-    await tauri?.core?.invoke?.('desktop_ssh_open_terminal', {
+    await invokeDesktop('desktop_ssh_open_terminal', {
       sshDestination,
       sshArgs,
       remotePath,
@@ -413,10 +414,9 @@ export const requestDirectoryAccess = async (
   directoryPath: string
 ): Promise<{ success: boolean; path?: string; projectId?: string; error?: string }> => {
   // Desktop shell on local instance: use native folder picker.
-  if (isTauriShell() && isDesktopLocalOriginActive()) {
+  if (canUseDesktopNativeApi()) {
     try {
-      const tauri = (window as unknown as { __TAURI__?: TauriGlobal }).__TAURI__;
-      const selected = await tauri?.dialog?.open?.({
+      const selected = await openDesktopDialog({
         directory: true,
         multiple: false,
         title: 'Select Working Directory',
@@ -426,7 +426,7 @@ export const requestDirectoryAccess = async (
       }
       return { success: true, path: selected };
     } catch (error) {
-      console.warn('Failed to request directory access (tauri)', error);
+      console.warn('Failed to request directory access', error);
       return { success: false, error: error instanceof Error ? error.message : String(error) };
     }
   }
@@ -437,10 +437,9 @@ export const requestDirectoryAccess = async (
 export const requestFileAccess = async (
   options?: { filters?: Array<{ name: string; extensions: string[] }>; defaultPath?: string }
 ): Promise<{ success: boolean; path?: string; error?: string }> => {
-  if (isTauriShell() && isDesktopLocalOriginActive()) {
+  if (canUseDesktopNativeApi()) {
     try {
-      const tauri = (window as unknown as { __TAURI__?: TauriGlobal }).__TAURI__;
-      const selected = await tauri?.dialog?.open?.({
+      const selected = await openDesktopDialog({
         directory: false,
         multiple: false,
         title: 'Select File',
@@ -452,7 +451,7 @@ export const requestFileAccess = async (
       }
       return { success: true, path: selected };
     } catch (error) {
-      console.warn('Failed to request file access (tauri)', error);
+      console.warn('Failed to request file access', error);
       return { success: false, error: error instanceof Error ? error.message : String(error) };
     }
   }
@@ -477,10 +476,9 @@ export const stopAccessingDirectory = async (
 export const sendAssistantCompletionNotification = async (
   payload?: AssistantNotificationPayload
 ): Promise<boolean> => {
-  if (isTauriShell()) {
+  if (hasDesktopInvoke()) {
     try {
-      const tauri = (window as unknown as { __TAURI__?: TauriGlobal }).__TAURI__;
-      await tauri?.core?.invoke?.('desktop_notify', {
+      await invokeDesktop('desktop_notify', {
         payload: {
           title: payload?.title,
           body: payload?.body,
@@ -489,7 +487,7 @@ export const sendAssistantCompletionNotification = async (
       });
       return true;
     } catch (error) {
-      console.warn('Failed to send assistant completion notification (tauri)', error);
+      console.warn('Failed to send assistant completion notification', error);
       return false;
     }
   }
@@ -498,16 +496,15 @@ export const sendAssistantCompletionNotification = async (
 };
 
 export const checkForDesktopUpdates = async (): Promise<UpdateInfo | null> => {
-  if (!isTauriShell() || !isDesktopLocalOriginActive()) {
+  if (!canUseDesktopNativeApi()) {
     return null;
   }
 
   try {
-    const tauri = (window as unknown as { __TAURI__?: TauriGlobal }).__TAURI__;
-    const info = await tauri?.core?.invoke?.('desktop_check_for_updates');
+    const info = await invokeDesktop('desktop_check_for_updates');
     return info as UpdateInfo;
   } catch (error) {
-    console.warn('Failed to check for updates (tauri)', error);
+    console.warn('Failed to check for updates', error);
     return null;
   }
 };
@@ -515,18 +512,17 @@ export const checkForDesktopUpdates = async (): Promise<UpdateInfo | null> => {
 export const downloadDesktopUpdate = async (
   onProgress?: (progress: UpdateProgress) => void
 ): Promise<boolean> => {
-  if (!isTauriShell() || !isDesktopLocalOriginActive()) {
+  if (!canUseDesktopNativeApi()) {
     return false;
   }
 
-  const tauri = (window as unknown as { __TAURI__?: TauriGlobal }).__TAURI__;
   let unlisten: null | (() => void | Promise<void>) = null;
   let downloaded = 0;
   let total: number | undefined;
 
   try {
-    if (typeof onProgress === 'function' && tauri?.event?.listen) {
-      unlisten = await tauri.event.listen('openchamber:update-progress', (evt) => {
+    if (typeof onProgress === 'function') {
+      unlisten = await listenDesktopEvent('openchamber:update-progress', (evt) => {
         const payload = evt?.payload;
         if (!payload || typeof payload !== 'object') return;
         const data = payload as { event?: unknown; data?: unknown };
@@ -555,10 +551,10 @@ export const downloadDesktopUpdate = async (
       });
     }
 
-    await tauri?.core?.invoke?.('desktop_download_and_install_update');
+    await invokeDesktop('desktop_download_and_install_update');
     return true;
   } catch (error) {
-    console.warn('Failed to download update (tauri)', error);
+    console.warn('Failed to download update', error);
     return false;
   } finally {
     if (unlisten) {
@@ -575,7 +571,7 @@ export const downloadDesktopUpdate = async (
 };
 
 export const restartToApplyUpdate = async (): Promise<boolean> => {
-  if (!isTauriShell() || !isDesktopLocalOriginActive()) {
+  if (!canUseDesktopNativeApi()) {
     return false;
   }
 
@@ -583,37 +579,35 @@ export const restartToApplyUpdate = async (): Promise<boolean> => {
 };
 
 export const restartDesktopApp = async (): Promise<boolean> => {
-  if (!isTauriShell()) {
+  if (!hasDesktopInvoke()) {
     return false;
   }
 
   try {
-    const tauri = (window as unknown as { __TAURI__?: TauriGlobal }).__TAURI__;
-    await tauri?.core?.invoke?.('desktop_restart');
+    await invokeDesktop('desktop_restart');
     return true;
   } catch (error) {
-    console.warn('Failed to restart desktop app (tauri)', error);
+    console.warn('Failed to restart desktop app', error);
     return false;
   }
 };
 
 export const getDesktopLanAddress = async (): Promise<string | null> => {
-  if (!isTauriShell() || !isDesktopLocalOriginActive()) {
+  if (!canUseDesktopNativeApi()) {
     return null;
   }
 
   try {
-    const tauri = (window as unknown as { __TAURI__?: TauriGlobal }).__TAURI__;
-    const result = await tauri?.core?.invoke?.('desktop_get_lan_address');
+    const result = await invokeDesktop('desktop_get_lan_address');
     return typeof result === 'string' && result.trim().length > 0 ? result.trim() : null;
   } catch (error) {
-    console.warn('Failed to get desktop LAN address (tauri)', error);
+    console.warn('Failed to get desktop LAN address', error);
     return null;
   }
 };
 
 export const openDesktopPath = async (path: string, app?: string | null): Promise<boolean> => {
-  if (!isTauriShell() || !isDesktopLocalOriginActive()) {
+  if (!canUseDesktopNativeApi()) {
     return false;
   }
 
@@ -623,20 +617,19 @@ export const openDesktopPath = async (path: string, app?: string | null): Promis
   }
 
   try {
-    const tauri = (window as unknown as { __TAURI__?: TauriGlobal }).__TAURI__;
-    await tauri?.core?.invoke?.('desktop_open_path', {
+    await invokeDesktop('desktop_open_path', {
       path: trimmed,
       app: typeof app === 'string' && app.trim().length > 0 ? app.trim() : undefined,
     });
     return true;
   } catch (error) {
-    console.warn('Failed to open path (tauri)', error);
+    console.warn('Failed to open path', error);
     return false;
   }
 };
 
 export const revealDesktopPath = async (path: string): Promise<boolean> => {
-  if (!isTauriShell() || !isDesktopLocalOriginActive()) {
+  if (!canUseDesktopNativeApi()) {
     return false;
   }
 
@@ -646,8 +639,7 @@ export const revealDesktopPath = async (path: string): Promise<boolean> => {
   }
 
   try {
-    const tauri = (window as unknown as { __TAURI__?: TauriGlobal }).__TAURI__;
-    await tauri?.core?.invoke?.('desktop_reveal_path', {
+    await invokeDesktop('desktop_reveal_path', {
       path: trimmed,
     });
     return true;
@@ -660,7 +652,7 @@ export const saveDesktopMarkdownFile = async (
   defaultFileName: string,
   content: string,
 ): Promise<string | null> => {
-  if (!isTauriShell() || !isDesktopLocalOriginActive()) {
+  if (!canUseDesktopNativeApi()) {
     return null;
   }
 
@@ -670,14 +662,13 @@ export const saveDesktopMarkdownFile = async (
   }
 
   try {
-    const tauri = (window as unknown as { __TAURI__?: TauriGlobal }).__TAURI__;
-    const result = await tauri?.core?.invoke?.('desktop_save_markdown_file', {
+    const result = await invokeDesktop('desktop_save_markdown_file', {
       defaultFileName: trimmedFileName,
       content,
     });
     return typeof result === 'string' && result.trim().length > 0 ? result : null;
   } catch (error) {
-    console.warn('Failed to save markdown file (tauri)', error);
+    console.warn('Failed to save markdown file', error);
     return null;
   }
 };
@@ -687,7 +678,7 @@ export const openDesktopProjectInApp = async (
   appId: string,
   appName: string,
 ): Promise<boolean> => {
-  if (!isTauriShell() || !isDesktopLocalOriginActive()) {
+  if (!canUseDesktopNativeApi()) {
     return false;
   }
 
@@ -700,8 +691,7 @@ export const openDesktopProjectInApp = async (
   }
 
   try {
-    const tauri = (window as unknown as { __TAURI__?: TauriGlobal }).__TAURI__;
-    await tauri?.core?.invoke?.('desktop_open_in_app', {
+    await invokeDesktop('desktop_open_in_app', {
       projectPath: trimmedProjectPath,
       appId: trimmedAppId,
       appName: trimmedAppName,
@@ -718,7 +708,7 @@ export const openDesktopFileInApp = async (
   appId: string,
   appName: string,
 ): Promise<boolean> => {
-  if (!isTauriShell() || !isDesktopLocalOriginActive()) {
+  if (!canUseDesktopNativeApi()) {
     return false;
   }
 
@@ -731,8 +721,7 @@ export const openDesktopFileInApp = async (
   }
 
   try {
-    const tauri = (window as unknown as { __TAURI__?: TauriGlobal }).__TAURI__;
-    await tauri?.core?.invoke?.('desktop_open_file_in_app', {
+    await invokeDesktop('desktop_open_file_in_app', {
       filePath: trimmedFilePath,
       appId: trimmedAppId,
       appName: trimmedAppName,
@@ -745,7 +734,7 @@ export const openDesktopFileInApp = async (
 };
 
 export const filterInstalledDesktopApps = async (apps: string[]): Promise<string[]> => {
-  if (!isTauriShell() || !isDesktopLocalOriginActive()) {
+  if (!canUseDesktopNativeApi()) {
     return [];
   }
 
@@ -755,19 +744,18 @@ export const filterInstalledDesktopApps = async (apps: string[]): Promise<string
   }
 
   try {
-    const tauri = (window as unknown as { __TAURI__?: TauriGlobal }).__TAURI__;
-    const result = await tauri?.core?.invoke?.('desktop_filter_installed_apps', {
+    const result = await invokeDesktop('desktop_filter_installed_apps', {
       apps: candidate,
     });
     return Array.isArray(result) ? result.filter((value) => typeof value === 'string') : [];
   } catch (error) {
-    console.warn('Failed to check installed apps (tauri)', error);
+    console.warn('Failed to check installed apps', error);
     return [];
   }
 };
 
 export const fetchDesktopAppIcons = async (apps: string[]): Promise<Record<string, string>> => {
-  if (!isTauriShell() || !isDesktopLocalOriginActive()) {
+  if (!canUseDesktopNativeApi()) {
     return {};
   }
 
@@ -777,8 +765,7 @@ export const fetchDesktopAppIcons = async (apps: string[]): Promise<Record<strin
   }
 
   try {
-    const tauri = (window as unknown as { __TAURI__?: TauriGlobal }).__TAURI__;
-    const result = await tauri?.core?.invoke?.('desktop_fetch_app_icons', {
+    const result = await invokeDesktop('desktop_fetch_app_icons', {
       apps: candidate,
     });
     if (!Array.isArray(result)) {
@@ -793,7 +780,7 @@ export const fetchDesktopAppIcons = async (apps: string[]): Promise<Record<strin
     }
     return map;
   } catch (error) {
-    console.warn('Failed to fetch installed app icons (tauri)', error);
+    console.warn('Failed to fetch installed app icons', error);
     return {};
   }
 };
@@ -814,7 +801,7 @@ export const fetchDesktopInstalledApps = async (
   apps: string[],
   force?: boolean
 ): Promise<FetchDesktopInstalledAppsResult> => {
-  if (!isTauriShell() || !isDesktopLocalOriginActive()) {
+  if (!canUseDesktopNativeApi()) {
     return { apps: [], success: false, hasCache: false, isCacheStale: false };
   }
 
@@ -824,8 +811,7 @@ export const fetchDesktopInstalledApps = async (
   }
 
   try {
-    const tauri = (window as unknown as { __TAURI__?: TauriGlobal }).__TAURI__;
-    const result = await tauri?.core?.invoke?.('desktop_get_installed_apps', {
+    const result = await invokeDesktop('desktop_get_installed_apps', {
       apps: candidate,
       force: force === true ? true : undefined,
     });
@@ -853,19 +839,18 @@ export const fetchDesktopInstalledApps = async (
       isCacheStale: payload.isCacheStale === true,
     };
   } catch (error) {
-    console.warn('Failed to fetch installed apps (tauri)', error);
+    console.warn('Failed to fetch installed apps', error);
     return { apps: [], success: false, hasCache: false, isCacheStale: false };
   }
 };
 
 export const clearDesktopCache = async (): Promise<boolean> => {
-  if (!isTauriShell() || !isDesktopLocalOriginActive()) {
+  if (!canUseDesktopNativeApi()) {
     return false;
   }
 
   try {
-    const tauri = (window as unknown as { __TAURI__?: TauriGlobal }).__TAURI__;
-    await tauri?.core?.invoke?.('desktop_clear_cache');
+    await invokeDesktop('desktop_clear_cache');
     return true;
   } catch (error) {
     console.warn('Failed to clear cache', error);

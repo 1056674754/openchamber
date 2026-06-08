@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
 import {
   Select,
@@ -21,6 +22,13 @@ import { useActiveServerId } from '@/hooks/useActiveServerId';
 import { serverRegistry, DEFAULT_SERVER_ID } from '@/lib/opencode/server-registry';
 import { useI18n } from '@/lib/i18n';
 import { toast } from '@/components/ui';
+import { copyTextToClipboard } from '@/lib/clipboard';
+import {
+  formatOpenCodeUpgradeCopyText,
+  isOpenCodeUpgradeResponseLike,
+  resolveOpenCodeUpgradeError,
+  type OpenCodeUpgradeResponseLike,
+} from '@/lib/opencode/upgradeDiagnostics';
 
 type OpenCodeVersionState = {
   version: string | null;
@@ -31,7 +39,7 @@ type OpenCodeVersionState = {
 type UpgradeState = {
   upgrading: boolean;
   target: string | null;
-  result: { success: boolean; version?: string; error?: string } | null;
+  result: { success: boolean; version?: string; error?: string; copyText?: string } | null;
 };
 
 type AvailableVersion = {
@@ -150,37 +158,72 @@ export const OpenCodeServerInfoSettings: React.FC = () => {
       const response = await client.global.upgrade({
         target: selectedTarget,
       });
-      const data = response.data;
+      const data: OpenCodeUpgradeResponseLike | null = isOpenCodeUpgradeResponseLike(response.data)
+        ? response.data
+        : null;
       if (data && typeof data === 'object' && 'success' in data) {
         if (data.success) {
           setUpgradeState({
             upgrading: false,
             target: selectedTarget,
-            result: { success: true, version: (data as { version?: string }).version },
+            result: { success: true, version: typeof data.version === 'string' ? data.version : undefined },
           });
           toast.success(
             t('settings.openchamber.opencodeServer.upgrade.success', {
-              version: (data as { version?: string }).version || selectedTarget,
+              version: typeof data.version === 'string' ? data.version : selectedTarget,
             })
           );
           lastVersionFetchAt = 0;
           void fetchVersion();
         } else {
+          const error = resolveOpenCodeUpgradeError(data, 'Upgrade failed');
           setUpgradeState({
             upgrading: false,
             target: selectedTarget,
-            result: { success: false, error: (data as { error?: string }).error || 'Upgrade failed' },
+            result: {
+              success: false,
+              error,
+              copyText: formatOpenCodeUpgradeCopyText(data, error, { target: selectedTarget }),
+            },
           });
         }
+      } else {
+        const error = 'Upgrade failed';
+        setUpgradeState({
+          upgrading: false,
+          target: selectedTarget,
+          result: {
+            success: false,
+            error,
+            copyText: formatOpenCodeUpgradeCopyText(data, error, { target: selectedTarget }),
+          },
+        });
       }
     } catch (err) {
+      const error = err instanceof Error ? err.message : 'Upgrade failed';
       setUpgradeState({
         upgrading: false,
         target: selectedTarget,
-        result: { success: false, error: err instanceof Error ? err.message : 'Upgrade failed' },
+        result: {
+          success: false,
+          error,
+          copyText: formatOpenCodeUpgradeCopyText(null, error, { target: selectedTarget }),
+        },
       });
     }
   }, [connection, selectedTarget, fetchVersion, t]);
+
+  const handleCopyUpgradeFailure = React.useCallback(async () => {
+    const result = upgradeState.result;
+    if (!result || result.success) return;
+    const copyText = result.copyText || result.error || t('settings.openchamber.opencodeServer.upgrade.failed');
+    const copyResult = await copyTextToClipboard(copyText);
+    if (copyResult.ok) {
+      toast.success(t('settings.openchamber.tunnel.actions.copied'));
+    } else {
+      toast.error(t('settings.openchamber.tunnel.toast.copyUrlFailed'));
+    }
+  }, [t, upgradeState.result]);
 
   if (!connection) {
     return (
@@ -302,7 +345,7 @@ export const OpenCodeServerInfoSettings: React.FC = () => {
                 <RiErrorWarningLine className="h-4 w-4 text-[var(--status-error)]" />
               )}
               <span className={cn(
-                'typography-meta',
+                'typography-meta flex-1 min-w-0',
                 upgradeState.result.success ? 'text-[var(--status-success)]' : 'text-[var(--status-error)]',
               )}>
                 {upgradeState.result.success
@@ -310,6 +353,18 @@ export const OpenCodeServerInfoSettings: React.FC = () => {
                   : upgradeState.result.error || t('settings.openchamber.opencodeServer.upgrade.failed')
                 }
               </span>
+              {!upgradeState.result.success && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="xs"
+                  onClick={handleCopyUpgradeFailure}
+                  aria-label={t('settings.common.actions.copyAll')}
+                >
+                  <Icon name="file-copy" className="h-3.5 w-3.5" />
+                  {t('settings.providers.page.actions.copy')}
+                </Button>
+              )}
             </div>
           </div>
         )}

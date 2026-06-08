@@ -5,7 +5,7 @@ import { BrowserVoiceButton } from '@/components/voice';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useMessageQueueStore, type QueuedMessage } from '@/stores/messageQueueStore';
-import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useSessionUIStore, type SendMessageTarget } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
 import { useInputStore } from '@/sync/input-store';
 import type { AttachedFile } from '@/stores/types/sessionTypes';
@@ -34,7 +34,7 @@ import { useCurrentSessionActivity } from '@/hooks/useSessionActivity';
 import { toast } from '@/components/ui';
 import { Button } from '@/components/ui/button';
 // useMessageStore removed — messages now come from sync system
-import { isTauriShell, isVSCodeRuntime } from '@/lib/desktop';
+import { isVSCodeRuntime } from '@/lib/desktop';
 import { isIMECompositionEvent } from '@/lib/ime';
 import { StopIcon } from '@/components/icons/StopIcon';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -724,6 +724,7 @@ type ComposerActionButtonsProps = {
     stopIconSizeClass: string;
     canSend: boolean;
     canAbort: boolean;
+    abortFeedbackActive: boolean;
     hasContent: boolean;
     currentSessionId: string | null;
     newSessionDraftOpen: boolean;
@@ -742,6 +743,7 @@ const ComposerActionButtons = React.memo(function ComposerActionButtons(props: C
         stopIconSizeClass,
         canSend,
         canAbort,
+        abortFeedbackActive,
         hasContent,
         currentSessionId,
         newSessionDraftOpen,
@@ -865,7 +867,10 @@ const ComposerActionButtons = React.memo(function ComposerActionButtons(props: C
                 onClick={onAbort}
                 className={cn(
                     footerIconButtonClass,
-                    'text-[var(--status-error)] hover:text-[var(--status-error)]'
+                    'rounded-full',
+                    abortFeedbackActive
+                        ? 'bg-[var(--status-error)] text-[var(--status-error-foreground)] hover:bg-[var(--status-error)] hover:text-[var(--status-error-foreground)]'
+                        : 'text-[var(--status-error)] hover:bg-[var(--status-error)]/10 hover:text-[var(--status-error)]'
                 )}
                 aria-label={t('chat.chatInput.actions.stopGeneratingAria')}
             >
@@ -880,6 +885,7 @@ const ComposerActionButtons = React.memo(function ComposerActionButtons(props: C
     && prev.stopIconSizeClass === next.stopIconSizeClass
     && prev.canSend === next.canSend
     && prev.canAbort === next.canAbort
+    && prev.abortFeedbackActive === next.abortFeedbackActive
     && prev.hasContent === next.hasContent
     && prev.currentSessionId === next.currentSessionId
     && prev.newSessionDraftOpen === next.newSessionDraftOpen
@@ -1084,8 +1090,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const suppressNextFileDropTextInsertRef = React.useRef(false);
     const suppressNextFileDropTextInsertTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
     const pendingDroppedAbsolutePathsRef = React.useRef<string[]>([]);
-    const canAcceptDropRef = React.useRef(false);
-    const nativeDragInsideDropZoneRef = React.useRef(false);
+    const presetSubmitTextRef = React.useRef<string | null>(null);
     const mentionRef = React.useRef<FileMentionHandle>(null);
     const commandRef = React.useRef<CommandAutocompleteHandle>(null);
     const skillRef = React.useRef<SkillAutocompleteHandle>(null);
@@ -1121,8 +1126,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const consumePendingInputText = useInputStore((s) => s.consumePendingInputText);
     const setPendingInputText = useInputStore((s) => s.setPendingInputText);
     const pendingInputText = useInputStore((s) => s.pendingInputText);
+    const pendingPresetSubmit = useInputStore((s) => s.pendingPresetSubmit);
+    const consumePendingPresetSubmit = useInputStore((s) => s.consumePendingPresetSubmit);
     const consumePendingSyntheticParts = useInputStore((s) => s.consumePendingSyntheticParts);
-    const acknowledgeSessionAbort = useSessionUIStore((s) => s.acknowledgeSessionAbort);
     const abortCurrentOperation = React.useCallback(
         (sessionIdOverride?: string) => sessionActions.abortCurrentOperation(sessionIdOverride ?? currentSessionId ?? ''),
         [currentSessionId],
@@ -1157,7 +1163,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const currentGitStatus = useGitStore((state) =>
         currentDirectory ? state.directories.get(currentDirectory)?.status ?? null : null,
     );
-    const [showAbortStatus, setShowAbortStatus] = React.useState(false);
+    const [abortFeedbackActive, setAbortFeedbackActive] = React.useState(false);
     const setSessionAutoAccept = usePermissionStore((state) => state.setSessionAutoAccept);
     const composerHighlightRef = React.useRef<HTMLDivElement | null>(null);
     const [isNarrowComposer, setIsNarrowComposer] = React.useState(false);
@@ -1407,8 +1413,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         };
     }, [chatSearchDirectory]);
     const [autocompleteOverlayPosition, setAutocompleteOverlayPosition] = React.useState<AutocompleteOverlayPosition | null>(null);
-    const abortTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
-    const prevWasAbortedRef = React.useRef(false);
+    const abortFeedbackTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
     // Issue linking state
     const [issuePickerOpen, setIssuePickerOpen] = React.useState(false);
@@ -1676,6 +1681,30 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         }
     }, [pendingInputText, consumePendingInputText]);
 
+    React.useEffect(() => {
+        if (pendingPresetSubmit === null) {
+            return;
+        }
+
+        const preset = consumePendingPresetSubmit();
+        if (!preset?.trim()) {
+            return;
+        }
+
+        presetSubmitTextRef.current = preset;
+        messageRef.current = preset;
+        setMessage(preset);
+
+        const submit = () => {
+            void handleSubmitRef.current();
+        };
+        if (typeof window === 'undefined') {
+            submit();
+        } else {
+            window.requestAnimationFrame(submit);
+        }
+    }, [pendingPresetSubmit, consumePendingPresetSubmit]);
+
     const hasContent = message.trim().length > 0 || sendableAttachedFiles.length > 0 || hasDrafts;
     const hasQueuedMessages = queuedMessages.length > 0;
     const canSend = hasContent || hasQueuedMessages;
@@ -1683,7 +1712,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const canAbort = sessionPhase !== 'idle';
 
     const getCurrentInputSnapshot = React.useCallback(() => {
-        const currentMessage = textareaRef.current?.value ?? message;
+        const currentMessage = presetSubmitTextRef.current ?? textareaRef.current?.value ?? message;
         return {
             message: currentMessage,
             hasContent: currentMessage.trim().length > 0 || sendableAttachedFiles.length > 0 || hasDrafts,
@@ -1709,10 +1738,25 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             messageToQueue = appendInlineComments(messageToQueue, drafts);
         }
         const attachmentsToQueue = sanitizeAttachmentsForSend(sendableAttachedFiles);
+        const queueDirectory = normalizePath(
+            useSessionUIStore.getState().getDirectoryForSession(currentSessionId)
+            ?? currentSessionDirectoryForSync
+            ?? currentDirectory,
+        );
+        const queueProject = queueDirectory
+            ? resolveProjectForSessionDirectory(projects, availableWorktreesByProject, queueDirectory)
+            : null;
+        const queueServerId = serverRegistry.getServerForSession(currentSessionId)
+            ?? queueProject?.serverId
+            ?? undefined;
 
         addToQueue(currentSessionId, {
             content: messageToQueue,
             attachments: attachmentsToQueue.length > 0 ? attachmentsToQueue : undefined,
+            sendTarget: queueDirectory || queueServerId ? {
+                directory: queueDirectory ?? undefined,
+                serverId: queueServerId,
+            } : undefined,
             sendConfig: currentProviderId && currentModelId ? {
                 providerID: currentProviderId,
                 modelID: currentModelId,
@@ -1734,7 +1778,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         if (!isMobile) {
             textareaRef.current?.focus();
         }
-    }, [getCurrentInputSnapshot, currentSessionId, sendableAttachedFiles, sanitizeAttachmentsForSend, addToQueue, clearAttachedFiles, isMobile, consumeDrafts, currentProviderId, currentModelId, currentAgentName, currentVariant]);
+    }, [getCurrentInputSnapshot, currentSessionId, currentSessionDirectoryForSync, currentDirectory, projects, availableWorktreesByProject, sendableAttachedFiles, sanitizeAttachmentsForSend, addToQueue, clearAttachedFiles, isMobile, consumeDrafts, currentProviderId, currentModelId, currentAgentName, currentVariant]);
 
     const handleQueuedMessageEdit = React.useCallback((content: string) => {
         setMessage(content);
@@ -1767,7 +1811,36 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         const queuedOnly = options?.queuedOnly ?? false;
         const queuedMessageId = options?.queuedMessageId;
         const inputSnapshot = getCurrentInputSnapshot();
+        presetSubmitTextRef.current = null;
         const submittedSessionId = currentSessionId;
+        const submittedNewSessionDraftOpen = newSessionDraftOpen;
+        const submittedDraftSnapshot = submittedNewSessionDraftOpen ? { ...newSessionDraft } : null;
+        const submittedDirectory = submittedSessionId
+            ? normalizePath(
+                useSessionUIStore.getState().getDirectoryForSession(submittedSessionId)
+                ?? currentSessionDirectoryForSync
+                ?? currentDirectory,
+            )
+            : normalizePath(
+                submittedDraftSnapshot?.bootstrapPendingDirectory
+                ?? submittedDraftSnapshot?.directoryOverride
+                ?? currentDirectory,
+            );
+        const submittedProject = submittedDirectory
+            ? resolveProjectForSessionDirectory(projects, availableWorktreesByProject, submittedDirectory)
+            : null;
+        const submittedDraftProject = submittedDraftSnapshot?.selectedProjectId
+            ? projects.find((project) => project.id === submittedDraftSnapshot.selectedProjectId)
+            : null;
+        const submittedServerId = submittedSessionId
+            ? (serverRegistry.getServerForSession(submittedSessionId) ?? submittedProject?.serverId)
+            : (submittedDraftProject?.serverId ?? submittedProject?.serverId);
+        const submittedSendTarget: SendMessageTarget = {
+            sessionId: submittedSessionId,
+            directory: submittedDirectory,
+            serverId: submittedServerId,
+            draft: submittedDraftSnapshot,
+        };
         const submittedDraftText = !queuedOnly ? inputSnapshot.message : '';
         const confirmedMentionsSnapshot = new Set(confirmedMentionsRef.current);
 
@@ -1937,8 +2010,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             messageRef.current = '';
             confirmedMentionsRef.current.clear();
             // Clear per-session draft on submit
-            saveStoredDraft(currentSessionId, '');
-            saveConfirmedMentions(currentSessionId, confirmedMentionsRef.current);
+            saveStoredDraft(submittedSessionId, '');
+            saveConfirmedMentions(submittedSessionId, confirmedMentionsRef.current);
             // Reset message history navigation state
             setHistoryIndex(-1);
             setDraftMessage('');
@@ -1962,28 +2035,28 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                 .split(/\s+/)[0]
                 ?.toLowerCase();
 
-            if (commandName === 'undo' && currentSessionId) {
-                await useSessionUIStore.getState().handleSlashUndo(currentSessionId);
+            if (commandName === 'undo' && submittedSessionId) {
+                await useSessionUIStore.getState().handleSlashUndo(submittedSessionId);
                 scrollToBottom?.();
                 return;
             }
-            else if (commandName === 'redo' && currentSessionId) {
-                await useSessionUIStore.getState().handleSlashRedo(currentSessionId);
+            else if (commandName === 'redo' && submittedSessionId) {
+                await useSessionUIStore.getState().handleSlashRedo(submittedSessionId);
                 scrollToBottom?.();
                 return;
             }
-            else if (commandName === 'timeline' && currentSessionId) {
+            else if (commandName === 'timeline' && submittedSessionId) {
                 setTimelineDialogOpen(true);
                 return;
             }
-            else if (commandName === 'compact' && currentSessionId) {
+            else if (commandName === 'compact' && submittedSessionId) {
                 try {
                     await sessionActions.waitForConnectionOrThrow();
                     const { opencodeClient } = await import('@/lib/opencode/client');
                     const sdk = opencodeClient.getSdkClient();
                     const configState = useConfigStore.getState();
                     await sdk.session.summarize({
-                        sessionID: currentSessionId,
+                        sessionID: submittedSessionId,
                         modelID: configState.currentModelId || '',
                         providerID: configState.currentProviderId || '',
                     });
@@ -1992,7 +2065,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                 }
                 return;
             }
-            else if (commandName === 'summary' && currentSessionId) {
+            else if (commandName === 'summary' && submittedSessionId) {
                 try {
                     await sessionActions.waitForConnectionOrThrow();
                     // Everything after `/summary ` is an optional topic hint
@@ -2014,6 +2087,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                         [{ text: instructionsText, synthetic: true }],
                         currentVariant,
                         inputMode,
+                        submittedSendTarget,
                     );
                     scrollToBottom?.();
                 } catch (error) {
@@ -2021,7 +2095,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                 }
                 return;
             }
-            else if (commandName === 'workspace-review' && (currentSessionId || newSessionDraftOpen)) {
+            else if (commandName === 'workspace-review' && (submittedSessionId || submittedNewSessionDraftOpen)) {
                 try {
                     await sessionActions.waitForConnectionOrThrow();
                     const visibleText = await renderMagicPrompt('session.review.visible');
@@ -2036,6 +2110,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                         [{ text: instructionsText, synthetic: true }],
                         currentVariant,
                         inputMode,
+                        submittedSendTarget,
                     );
                     scrollToBottom?.();
                 } catch (error) {
@@ -2045,10 +2120,12 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             }
         }
 
-        const currentSessionDirectory = currentSessionId
-            ? useSessionUIStore.getState().getDirectoryForSession(currentSessionId) || currentDirectory
-            : currentDirectory;
-        const shouldAddResponseStyle = newSessionDraftOpen || (currentSessionId ? !hasUserMessages(currentSessionId, currentSessionDirectory) : false);
+        const currentSessionDirectory = submittedDirectory;
+        if (submittedSessionId && !currentSessionDirectory) {
+            throw new Error(`Cannot send message: directory for session ${submittedSessionId} is not available`);
+        }
+        const sendDirectory = currentSessionDirectory ?? undefined;
+        const shouldAddResponseStyle = submittedNewSessionDraftOpen || (submittedSessionId ? !hasUserMessages(submittedSessionId, sendDirectory) : false);
         if (shouldAddResponseStyle) {
             const responseStyleInstruction = await fetchResponseStyleInstruction().catch(() => null);
             if (responseStyleInstruction) {
@@ -2061,10 +2138,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 
         try {
             const expandText = useSnippetsStore.getState().expandText;
-            primaryText = await expandText(primaryText, { directory: currentSessionDirectory });
+            primaryText = await expandText(primaryText, { directory: sendDirectory });
             for (const part of additionalParts) {
                 if (!part.synthetic) {
-                    part.text = await expandText(part.text, { directory: currentSessionDirectory });
+                    part.text = await expandText(part.text, { directory: sendDirectory });
                 }
             }
         } catch (error) {
@@ -2080,7 +2157,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             agentMentionName,
             additionalParts.length > 0 ? additionalParts : undefined,
             currentVariant,
-            inputMode
+            inputMode,
+            submittedSendTarget,
         );
 
         if (typeof window === 'undefined') {
@@ -2120,16 +2198,32 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                 useInputStore.getState().setPendingSyntheticParts(consumedSyntheticPartsSnapshot);
             }
             if (!queuedOnly) {
-                confirmedMentionsRef.current = new Set(confirmedMentionsSnapshot);
-                saveConfirmedMentions(submittedSessionId, confirmedMentionsRef.current);
+                const liveSessionState = useSessionUIStore.getState();
+                const liveDraftDirectory = normalizePath(
+                    liveSessionState.newSessionDraft.bootstrapPendingDirectory
+                    ?? liveSessionState.newSessionDraft.directoryOverride,
+                );
+                const restoreIntoVisibleInput = submittedSessionId
+                    ? liveSessionState.currentSessionId === submittedSessionId
+                    : liveSessionState.currentSessionId === null
+                        && liveSessionState.newSessionDraft.open
+                        && liveDraftDirectory === submittedDirectory;
+                const restoredMentions = new Set(confirmedMentionsSnapshot);
+                if (restoreIntoVisibleInput) {
+                    confirmedMentionsRef.current = restoredMentions;
+                }
+                saveConfirmedMentions(submittedSessionId, restoredMentions);
 
-                const restoredDraft = mergeFailedDraftText(messageRef.current, submittedDraftText);
-                if (restoredDraft !== messageRef.current) {
+                const currentDraft = restoreIntoVisibleInput
+                    ? messageRef.current
+                    : getStoredDraft(submittedSessionId);
+                const restoredDraft = mergeFailedDraftText(currentDraft, submittedDraftText);
+                persistDraftImmediately(submittedSessionId, restoredDraft);
+                if (restoreIntoVisibleInput && restoredDraft !== messageRef.current) {
                     messageRef.current = restoredDraft;
                     setMessage(restoredDraft);
-                    persistDraftImmediately(submittedSessionId, restoredDraft);
                 }
-                if (composerAttachmentsSnapshot.length > 0) {
+                if (restoreIntoVisibleInput && composerAttachmentsSnapshot.length > 0) {
                     useInputStore.getState().setAttachedFiles(composerAttachmentsSnapshot);
                 }
             }
@@ -2552,26 +2646,33 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         };
     }, [isDesktopExpanded, updateAutocompleteOverlayPosition]);
 
-    const startAbortIndicator = React.useCallback(() => {
-        if (abortTimeoutRef.current) {
-            clearTimeout(abortTimeoutRef.current);
-            abortTimeoutRef.current = null;
+    const startAbortFeedback = React.useCallback(() => {
+        if (abortFeedbackTimeoutRef.current) {
+            clearTimeout(abortFeedbackTimeoutRef.current);
+            abortFeedbackTimeoutRef.current = null;
         }
 
-        setShowAbortStatus(true);
+        setAbortFeedbackActive(true);
 
-        abortTimeoutRef.current = setTimeout(() => {
-            setShowAbortStatus(false);
-            abortTimeoutRef.current = null;
-        }, 1800);
+        abortFeedbackTimeoutRef.current = setTimeout(() => {
+            setAbortFeedbackActive(false);
+            abortFeedbackTimeoutRef.current = null;
+        }, 900);
     }, []);
 
     const handleAbort = React.useCallback(() => {
         clearAbortPrompt();
-        startAbortIndicator();
+        const sessionId = currentSessionId;
+        if (!sessionId) return;
 
-        void abortCurrentOperation(currentSessionId || undefined);
-    }, [abortCurrentOperation, clearAbortPrompt, currentSessionId, startAbortIndicator]);
+        void abortCurrentOperation(sessionId).then((sent) => {
+            if (sent) {
+                startAbortFeedback();
+            }
+        }).catch((error) => {
+            console.error('[ChatInput] abort failed', error);
+        });
+    }, [abortCurrentOperation, clearAbortPrompt, currentSessionId, startAbortFeedback]);
 
     const handleCycleAgent = React.useCallback((direction: 1 | -1 = 1) => {
         const nextAgentName = getCycledPrimaryAgentName(agents, currentAgentName, direction);
@@ -3228,10 +3329,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         }
     }, [abortPromptSessionId, currentSessionId, clearAbortPrompt]);
 
-    React.useEffect(() => {
-        canAcceptDropRef.current = Boolean(currentSessionId || newSessionDraftOpen);
-    }, [currentSessionId, newSessionDraftOpen]);
-
     const hasDraggedFiles = React.useCallback((dataTransfer: DataTransfer | null | undefined): boolean => {
         if (!dataTransfer) return false;
         if (dataTransfer.files && dataTransfer.files.length > 0) return true;
@@ -3492,121 +3589,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             scheduleDropTextSuppressionExpiry();
         }
     };
-
-    // Tauri desktop: handle native file drops via onDragDropEvent
-    React.useEffect(() => {
-        if (!isTauriShell()) return;
-        let cancelled = false;
-        let unlisten: (() => void) | null = null;
-
-        void (async () => {
-            try {
-                const { getCurrentWebviewWindow } = await import('@tauri-apps/api/webviewWindow');
-                const webviewWindow = getCurrentWebviewWindow();
-                const removeListener = await webviewWindow.onDragDropEvent(async (event) => {
-                    if (!canAcceptDropRef.current) return;
-
-                    const payload = (event as { payload?: unknown }).payload;
-                    if (!payload || typeof payload !== 'object') return;
-
-                    const typed = payload as { type?: string; paths?: string[]; position?: { x?: number; y?: number } };
-                    const type = typed.type;
-                    const x = typed.position?.x;
-                    const y = typed.position?.y;
-
-                    // Check if drop is inside the chat input area
-                    const zone = dropZoneRef.current;
-                    let inZone: boolean | null = null;
-                    if (zone && typeof x === 'number' && typeof y === 'number') {
-                        const rect = zone.getBoundingClientRect();
-                        inZone = x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
-                        // Handle retina displays where Tauri might report physical pixels
-                        if (!inZone && window.devicePixelRatio > 1) {
-                            const sx = x / window.devicePixelRatio;
-                            const sy = y / window.devicePixelRatio;
-                            inZone = sx >= rect.left && sx <= rect.right && sy >= rect.top && sy <= rect.bottom;
-                        }
-                    }
-
-                    if (type === 'enter' || type === 'over') {
-                        if (inZone !== null) {
-                            nativeDragInsideDropZoneRef.current = inZone;
-                        }
-                        setIsDragging(nativeDragInsideDropZoneRef.current);
-                        return;
-                    }
-                    if (type === 'leave') {
-                        nativeDragInsideDropZoneRef.current = false;
-                        setIsDragging(false);
-                        return;
-                    }
-                    if (type === 'drop') {
-                        const shouldHandleDrop = inZone ?? nativeDragInsideDropZoneRef.current;
-                        nativeDragInsideDropZoneRef.current = false;
-                        setIsDragging(false);
-                        if (!shouldHandleDrop) return;
-
-                        const paths = Array.isArray(typed.paths)
-                            ? typed.paths.filter((p): p is string => typeof p === 'string')
-                            : [];
-                        if (paths.length === 0) return;
-
-                        for (const path of paths) {
-                            try {
-                                const normalizedPath = normalizeDroppedPath(path);
-                                const fileName = normalizedPath.split(/[\\/]/).pop() || normalizedPath;
-                                let file: File;
-
-                                // In Tauri shell, dropped paths are local machine paths.
-                                // Read bytes via native command to avoid workspace-bound /api/fs/raw restrictions.
-                                if (isTauriShell()) {
-                                    const { invoke } = await import('@tauri-apps/api/core');
-                                    const result = await invoke<{ mime: string; base64: string }>('desktop_read_file', { path: normalizedPath });
-                                    const byteCharacters = atob(result.base64);
-                                    const byteNumbers = new Array(byteCharacters.length);
-                                    for (let i = 0; i < byteCharacters.length; i++) {
-                                        byteNumbers[i] = byteCharacters.charCodeAt(i);
-                                    }
-                                    const byteArray = new Uint8Array(byteNumbers);
-                                    const blob = new Blob([byteArray], { type: result.mime || 'application/octet-stream' });
-                                    file = new File([blob], fileName, { type: result.mime || 'application/octet-stream' });
-                                } else {
-                                    const response = await fetch(`/api/fs/raw?path=${encodeURIComponent(normalizedPath)}`);
-                                    if (!response.ok) {
-                                        throw new Error(`Failed to read dropped file (${response.status})`);
-                                    }
-                                    const blob = await response.blob();
-                                    file = new File([blob], fileName, { type: blob.type || 'application/octet-stream' });
-                                }
-
-                                await addAttachedFile(file);
-                            } catch (error) {
-                                console.error('Failed to attach dropped file:', path, error);
-                                toast.error(t('chat.chatInput.toast.attachNamedFailed', {
-                                    name: path.split(/[\\/]/).pop() || t('chat.chatInput.fileFallback'),
-                                }));
-                            }
-                        }
-                    }
-                });
-
-                if (cancelled) {
-                    removeListener();
-                    return;
-                }
-                unlisten = removeListener;
-            } catch (error) {
-                if (!cancelled) {
-                    console.warn('Failed to register Tauri drag-drop listener:', error);
-                }
-            }
-        })();
-
-        return () => {
-            cancelled = true;
-            if (unlisten) unlisten();
-        };
-    }, [addAttachedFile, normalizeDroppedPath, t]);
 
     const fileInputRef = React.useRef<HTMLInputElement>(null);
 
@@ -4008,27 +3990,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     }, [permissionAutoAcceptEnabled, permissionScopeSessionId, setSessionAutoAccept, t]);
 
     React.useEffect(() => {
-        const pendingAbortBanner = Boolean(abortPromptSessionId) && abortPromptSessionId === currentSessionId;
-        if (!prevWasAbortedRef.current && pendingAbortBanner && !showAbortStatus) {
-            startAbortIndicator();
-            if (currentSessionId) {
-                acknowledgeSessionAbort(currentSessionId);
-            }
-        }
-        prevWasAbortedRef.current = pendingAbortBanner;
-    }, [
-        abortPromptSessionId,
-        acknowledgeSessionAbort,
-        currentSessionId,
-        showAbortStatus,
-        startAbortIndicator,
-    ]);
-
-    React.useEffect(() => {
         return () => {
-            if (abortTimeoutRef.current) {
-                clearTimeout(abortTimeoutRef.current);
-                abortTimeoutRef.current = null;
+            if (abortFeedbackTimeoutRef.current) {
+                clearTimeout(abortFeedbackTimeoutRef.current);
+                abortFeedbackTimeoutRef.current = null;
             }
         };
     }, []);
@@ -4218,7 +4183,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                     directory={currentSessionDirectoryForSync ?? currentDirectory}
                 />
                 <MemoStatusRow
-                    showAbortStatus={showAbortStatus}
                     showAssistantStatus={false}
                     showTodos
                     leftAccessory={newSessionDraftOpen || !hasPendingChanges ? null : <PendingChangesBar />}
@@ -4569,6 +4533,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                                 stopIconSizeClass={stopIconSizeClass}
                                                 canSend={canSend}
                                                 canAbort={canAbort}
+                                                abortFeedbackActive={abortFeedbackActive}
                                                 hasContent={!!hasContent}
                                                 currentSessionId={currentSessionId}
                                                 newSessionDraftOpen={newSessionDraftOpen}
@@ -4628,6 +4593,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                         stopIconSizeClass={stopIconSizeClass}
                                         canSend={canSend}
                                         canAbort={canAbort}
+                                        abortFeedbackActive={abortFeedbackActive}
                                         hasContent={!!hasContent}
                                         currentSessionId={currentSessionId}
                                         newSessionDraftOpen={newSessionDraftOpen}

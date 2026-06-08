@@ -11,6 +11,7 @@ This module contains the OpenChamber message-stream WebSocket protocol and runti
 - `packages/web/server/lib/event-stream/protocol.js`: path constants, SSE envelope parsing, and WebSocket frame serialization helpers.
 - `packages/web/server/lib/event-stream/upstream-reader.js`: reusable upstream SSE reader with event-id tracking, stall recovery, and reconnect handling.
 - `packages/web/server/lib/event-stream/runtime.js`: thin WebSocket server runtime for upgrade handling and path dispatch to the global/directory bridges.
+- `packages/web/server/lib/remote-instances/global-event-fanout.js`: optional remote-instance fan-in owner that keeps one upstream global event stream per healthy remote while global browser WS clients are connected.
 - `packages/web/server/lib/event-stream/protocol.test.js`: unit tests for protocol helpers.
 - `packages/web/server/lib/event-stream/upstream-reader.test.js`: unit tests for upstream SSE reader behavior.
 - `packages/web/server/lib/event-stream/runtime.test.js`: unit tests for runtime-side broadcaster behavior.
@@ -23,7 +24,7 @@ This module contains the OpenChamber message-stream WebSocket protocol and runti
 - `MESSAGE_STREAM_WS_HEARTBEAT_INTERVAL_MS`: heartbeat interval for browser-facing WS connections.
 - `parseSseEventEnvelope(block)`: parses an SSE block into `{ eventId, directory, payload }`.
 - `sendMessageStreamWsFrame(socket, payload)`: serializes and sends a JSON WS frame.
-- `sendMessageStreamWsEvent(socket, payload, options)`: sends an event frame with optional `eventId` and `directory`.
+- `sendMessageStreamWsEvent(socket, payload, options)`: sends an event frame with optional `eventId`, `directory`, and `serverId`.
 
 ### Runtime helpers
 - `createGlobalMessageStreamHub(...)`: creates a shared `/global/event` upstream SSE hub with event/status subscribers and bounded event-id replay.
@@ -39,6 +40,7 @@ This module contains the OpenChamber message-stream WebSocket protocol and runti
 - Browser clients connect to the WS endpoints above.
 - OpenChamber still fetches OpenCode upstream event streams over SSE.
 - The web server creates one shared global message-stream hub. OpenCode watcher side effects and global WS clients subscribe to that hub, so there is one upstream `/global/event` SSE reader for both server-side processing and browser fan-out.
+- When remote instances are configured, the global WS bridge also subscribes to a server-side remote fan-in. Remote events are sent over the same browser WS with `serverId` metadata, avoiding one browser global WS connection per remote instance.
 - The global hub keeps a bounded replay buffer keyed by SSE `eventId` so reconnecting browser clients can receive buffered events after their requested `Last-Event-ID`.
 - Directory WS clients still attach one upstream `/event?directory=...` SSE reader per connection because directory streams are scoped.
 - If an upstream SSE stream stalls after the browser WS is already ready, the reader aborts that upstream fetch and reconnects upstream with `Last-Event-ID`, keeping the browser WS alive when recovery is fast.

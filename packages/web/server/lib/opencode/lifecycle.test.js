@@ -196,6 +196,56 @@ describe('OpenCode lifecycle', () => {
     expect(spawnMock).not.toHaveBeenCalled();
   });
 
+  it('restarts a reconnected managed port when live health fails without a child handle', async () => {
+    delete process.env.OPENCODE_BINARY;
+    const restoreManagedOpenCodeAuth = vi.fn(() => true);
+    let previousManagedPortHealthy = true;
+    globalThis.fetch = vi.fn(async (url) => {
+      const text = String(url);
+      if (text.includes(':4096/global/health')) {
+        return { ok: false, json: async () => ({ healthy: false }) };
+      }
+      if (text.includes(':56789/global/health')) {
+        return {
+          ok: previousManagedPortHealthy,
+          json: async () => ({ healthy: previousManagedPortHealthy }),
+        };
+      }
+      if (text.includes('/global/health')) {
+        return { ok: false, json: async () => ({ healthy: false }) };
+      }
+      return { ok: true, json: async () => ({}) };
+    });
+
+    const child = createMockChild();
+    spawnMock.mockImplementationOnce(() => {
+      queueMicrotask(() => {
+        child.stdout.emit('data', 'opencode server listening on http://127.0.0.1:45678\n');
+      });
+      return child;
+    });
+
+    const runtime = createRuntime({
+      env: {
+        ENV_CONFIGURED_OPENCODE_PORT: null,
+        ENV_CONFIGURED_OPENCODE_HOST: null,
+        ENV_EFFECTIVE_PORT: null,
+        ENV_CONFIGURED_OPENCODE_HOSTNAME: '127.0.0.1',
+        ENV_SKIP_OPENCODE_START: false,
+      },
+      restoreManagedOpenCodeAuth,
+      readPersistedOpenCodePort: vi.fn(() => 56789),
+    });
+
+    await runtime.bootstrapOpenCodeAtStartup();
+    expect(spawnMock).not.toHaveBeenCalled();
+
+    previousManagedPortHealthy = false;
+    await runtime.triggerHealthCheck();
+
+    expect(spawnMock).toHaveBeenCalledTimes(1);
+  });
+
   it('falls back to buildAugmentedPath when buildManagedOpenCodePath is not provided', async () => {
     delete process.env.OPENCODE_BINARY;
     const child = createMockChild();

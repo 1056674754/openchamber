@@ -555,6 +555,8 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
           undefined,
           syntheticParts,
           execution.variant || undefined,
+          undefined,
+          sessionId,
         );
 
         toast.success(

@@ -46,8 +46,8 @@ export const createNotificationEmitterRuntime = (dependencies) => {
     }
 
     try {
-      // stdout IPC: Tauri shell spawns this process as a sidecar and parses
-      // its stdout for the one-line `${prefix}{json}` protocol.
+      // stdout IPC: desktop shells may parse this process' stdout for the
+      // one-line `${prefix}{json}` protocol.
       process.stdout.write(`${desktopNotifyPrefix}${JSON.stringify(payload)}\n`);
     } catch {
       // ignore
@@ -66,7 +66,7 @@ export const createNotificationEmitterRuntime = (dependencies) => {
         ...payload,
         // Tell the UI whether the sidecar stdout notification channel is active.
         // When true, the desktop UI should skip this SSE notification to avoid duplicates.
-        // When false (e.g. tauri dev), the UI must handle this SSE notification itself.
+        // When false, the UI must handle this SSE notification itself.
         desktopStdoutActive: desktopNotifyEnabled,
       },
     };

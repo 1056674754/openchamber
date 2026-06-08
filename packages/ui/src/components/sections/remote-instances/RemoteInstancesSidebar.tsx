@@ -1,7 +1,7 @@
 import React from 'react';
 import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
-import { isTauriShell } from '@/lib/desktop';
+import { hasDesktopInvoke } from '@/lib/desktop';
 import { useDesktopSshStore } from '@/stores/useDesktopSshStore';
 import { useRemoteInstancesStore } from '@/stores/useRemoteInstancesStore';
 import { useUIStore } from '@/stores/useUIStore';
@@ -17,6 +17,7 @@ import { SettingsSidebarItem } from '@/components/sections/shared/SettingsSideba
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { toast } from '@/components/ui';
+import { makeWebRemoteDraftSelectionId, parseWebRemoteDraftSelectionId } from './webRemoteDraft';
 
 type RemoteInstancesSidebarProps = {
   onItemSelect?: () => void;
@@ -85,7 +86,7 @@ const remotePhaseDotClass = (phase?: RemoteInstancePhase) => {
 
 export const RemoteInstancesSidebar: React.FC<RemoteInstancesSidebarProps> = ({ onItemSelect }) => {
   const { t } = useI18n();
-  const isDesktop = isTauriShell();
+  const isDesktop = hasDesktopInvoke();
 
   const desktopInstances = useDesktopSshStore((state) => state.instances);
   const desktopStatusesById = useDesktopSshStore(useShallow((state) => state.statusesById));
@@ -124,6 +125,7 @@ export const RemoteInstancesSidebar: React.FC<RemoteInstancesSidebarProps> = ({ 
 
   React.useEffect(() => {
     if (isLoading) return;
+    if (!isDesktop && parseWebRemoteDraftSelectionId(selectedId)) return;
     if (instances.length === 0) {
       if (selectedId !== null) {
         setSelectedId(null);
@@ -134,7 +136,7 @@ export const RemoteInstancesSidebar: React.FC<RemoteInstancesSidebarProps> = ({ 
       return;
     }
     setSelectedId(instances[0].id);
-  }, [instances, isLoading, selectedId, setSelectedId]);
+  }, [instances, isDesktop, isLoading, selectedId, setSelectedId]);
 
   const [searchQuery, setSearchQuery] = React.useState('');
 
@@ -161,14 +163,9 @@ export const RemoteInstancesSidebar: React.FC<RemoteInstancesSidebarProps> = ({ 
       if (isDesktop) {
         await desktopCreateFromCommand(id, 'ssh user@example.com', t('settings.remoteInstances.sidebar.newSshInstanceName'));
       } else {
-        const newInstance: RemoteInstance = {
-          id,
-          label: t('settings.remoteInstances.sidebar.newSshInstanceName'),
-          enabled: true,
-          url: '',
-        };
-        const current = useRemoteInstancesStore.getState().instances;
-        await useRemoteInstancesStore.getState().saveInstances([...current, newInstance]);
+        setSelectedId(makeWebRemoteDraftSelectionId(id));
+        onItemSelect?.();
+        return;
       }
       setSelectedId(id);
       onItemSelect?.();
@@ -244,9 +241,18 @@ export const RemoteInstancesSidebar: React.FC<RemoteInstancesSidebarProps> = ({ 
         if (isDesktop) {
           const sshInstance = instance as DesktopSshInstance;
           const status = desktopStatusesById[sshInstance.id];
+          const remoteStatus = webStatuses[sshInstance.id];
+          const remoteServiceUnavailable = remoteStatus?.healthy === false;
           const selected = sshInstance.id === selectedId;
           const title = resolveInstanceLabel(sshInstance);
-          const metadata = `${t(phaseLabelKey(status?.phase))}${status?.localUrl ? ` · ${status.localUrl}` : ''}`;
+          const effectivePhase = remoteServiceUnavailable ? 'error' : status?.phase;
+          const statusLabel = remoteServiceUnavailable
+            ? t(remotePhaseLabelKey('error'))
+            : t(phaseLabelKey(status?.phase));
+          const statusDetail = remoteServiceUnavailable
+            ? (remoteStatus.error || remoteStatus.detail || status?.localUrl || '')
+            : (status?.localUrl || '');
+          const metadata = `${statusLabel}${statusDetail ? ` · ${statusDetail}` : ''}`;
           const isReady = status?.phase === 'ready';
           const canRetry = status?.phase === 'error' || status?.phase === 'degraded';
 
@@ -256,7 +262,7 @@ export const RemoteInstancesSidebar: React.FC<RemoteInstancesSidebarProps> = ({ 
               title={title}
               metadata={metadata}
               selected={selected}
-              icon={<span className={`h-2 w-2 rounded-full shrink-0 ${phaseDotClass(status?.phase)}`} />}
+              icon={<span className={`h-2 w-2 rounded-full shrink-0 ${phaseDotClass(effectivePhase)}`} />}
               onSelect={() => {
                 setSelectedId(sshInstance.id);
                 onItemSelect?.();

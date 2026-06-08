@@ -1,3 +1,4 @@
+import React from 'react';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { serverRegistry, DEFAULT_SERVER_ID } from '@/lib/opencode/server-registry';
 import { useProjectsStore } from '@/stores/useProjectsStore';
@@ -7,10 +8,24 @@ export function useActiveServerId(): string {
   const draftProjectId = useSessionUIStore((s) => s.newSessionDraft?.selectedProjectId ?? null);
   const activeProjectId = useProjectsStore((s) => s.activeProjectId);
   const projects = useProjectsStore((s) => s.projects);
+  const currentSessionServerId = React.useSyncExternalStore(
+    React.useCallback(
+      (notify) => currentSessionId
+        ? serverRegistry.onSessionServerChange(currentSessionId, notify)
+        : () => undefined,
+      [currentSessionId],
+    ),
+    React.useCallback(
+      () => currentSessionId
+        ? serverRegistry.getServerForSession(currentSessionId) ?? DEFAULT_SERVER_ID
+        : DEFAULT_SERVER_ID,
+      [currentSessionId],
+    ),
+    () => DEFAULT_SERVER_ID,
+  );
 
   if (currentSessionId) {
-    const serverId = serverRegistry.getServerForSession(currentSessionId);
-    return serverId || DEFAULT_SERVER_ID;
+    return currentSessionServerId;
   }
 
   const projectId = draftProjectId || activeProjectId;

@@ -116,7 +116,15 @@ export const useSessionActions = (args: Args) => {
         args.setSessionSwitcherOpen(false);
       }
 
-      if (sessionId === args.currentSessionId) {
+      const indexedServerId = serverRegistry.getServerForSession(sessionId);
+      const currentDirectory = useSessionUIStore.getState().getDirectoryForSession(sessionId);
+      const nextDirectory = normalizePath(sessionDirectory ?? null);
+      const needsSelectionRefresh = sessionId === args.currentSessionId && (
+        Boolean(nextDirectory && currentDirectory !== nextDirectory)
+        || !indexedServerId
+      );
+
+      if (sessionId === args.currentSessionId && !needsSelectionRefresh) {
         if (args.allowReselect) {
           args.onSessionSelected?.(sessionId);
         }
@@ -128,7 +136,6 @@ export const useSessionActions = (args: Args) => {
       if (sessionDirectory && resolvedProjectId) {
         useSessionUIStore.getState().navigateToSession(sessionId, sessionDirectory, resolvedProjectId);
       } else {
-        const indexedServerId = serverRegistry.getServerForSession(sessionId);
         useSessionUIStore.getState().setCurrentSession(
           sessionId,
           sessionDirectory ?? null,

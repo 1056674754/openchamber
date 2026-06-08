@@ -90,4 +90,25 @@ describe('buildQueuedAutoSendPayload', () => {
     expect(payload?.primaryAttachments).toHaveLength(1);
     expect(payload?.primaryAttachments[0]?.filename).toBe('notes.txt');
   });
+
+  test('preserves queued routing target for auto-send', () => {
+    const queue: QueuedMessage[] = [
+      {
+        id: 'queued-target',
+        content: 'send later',
+        createdAt: 1,
+        sendTarget: {
+          directory: '/remote/project',
+          serverId: 'remote-1',
+        },
+      },
+    ];
+
+    const payload = buildQueuedAutoSendPayload(queue);
+
+    expect(payload?.sendTarget).toEqual({
+      directory: '/remote/project',
+      serverId: 'remote-1',
+    });
+  });
 });

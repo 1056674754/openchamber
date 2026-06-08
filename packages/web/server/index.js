@@ -83,6 +83,7 @@ import { createRemoteInstancesRuntime } from './lib/remote-instances/config.js';
 import { registerRemoteInstanceRoutes } from './lib/remote-instances/routes.js';
 import { registerRemoteProxy } from './lib/remote-instances/proxy.js';
 import { registerRemoteSseRelay } from './lib/remote-instances/sse-relay.js';
+import { registerRemoteRpcWebSocket } from './lib/remote-instances/rpc-ws.js';
 import { createProxyMiddleware, responseInterceptor } from 'http-proxy-middleware';
 import webPush from 'web-push';
 
@@ -1048,18 +1049,22 @@ const scheduledTasksRuntime = createScheduledTasksRuntime({
   getOpenCodeAuthHeaders,
   waitForOpenCodeReady,
   emitTaskRunEvent: (event) => {
+    const payload = {
+      type: 'openchamber:scheduled-task-ran',
+      properties: {
+        projectId: event.projectID,
+        taskId: event.taskID,
+        ranAt: event.ranAt,
+        status: event.status,
+        ...(event.sessionID ? { sessionId: event.sessionID } : {}),
+      },
+    };
+
+    broadcastGlobalUiEvent(payload);
+
     for (const client of uiOpenChamberEventClients) {
       try {
-        writeSseEvent(client, {
-          type: 'openchamber:scheduled-task-ran',
-          properties: {
-            projectId: event.projectID,
-            taskId: event.taskID,
-            ranAt: event.ranAt,
-            status: event.status,
-            ...(event.sessionID ? { sessionId: event.sessionID } : {}),
-          },
-        });
+        writeSseEvent(client, payload);
       } catch {
         uiOpenChamberEventClients.delete(client);
       }
@@ -1083,7 +1088,7 @@ const ensureGlobalWatcherStarted = async () => {
 const bootstrapOpenCodeAtStartup = async (...args) => {
   await openCodeLifecycleRuntime.bootstrapOpenCodeAtStartup(...args);
   scheduleOpenCodeApiDetection();
-  if (openCodeLifecycleState.openCodeProcess && !openCodeLifecycleState.isExternalOpenCode) {
+  if (openCodeLifecycleState.openCodePort && !openCodeLifecycleState.isExternalOpenCode) {
     startHealthMonitoring();
   }
   if (ENV_DESKTOP_NOTIFY) {
@@ -1370,6 +1375,13 @@ async function main(options = {}) {
   remoteInstancesRuntimeRef = remoteInstancesRuntime;
   registerRemoteInstanceRoutes(app, remoteInstancesRuntime);
   registerRemoteSseRelay(app, remoteInstancesRuntime);
+  registerRemoteRpcWebSocket({
+    server,
+    remoteInstancesRuntime,
+    uiAuthController,
+    isRequestOriginAllowed,
+    rejectWebSocketUpgrade,
+  });
   registerRemoteProxy(app, remoteInstancesRuntime, {
     server,
     uiAuthController,

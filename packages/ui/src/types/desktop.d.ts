@@ -1,11 +1,35 @@
 import type { DesktopBootOutcome } from '@/lib/desktopBoot';
 
 declare global {
+  type OpenChamberDesktopInvoke = (
+    command: string,
+    args?: Record<string, unknown>,
+  ) => Promise<unknown>;
+
+  interface OpenChamberDesktopBridge {
+    core?: {
+      invoke?: OpenChamberDesktopInvoke;
+    };
+    dialog?: {
+      open?: (options: Record<string, unknown>) => Promise<unknown>;
+    };
+    shell?: {
+      open?: (url: string) => Promise<unknown>;
+    };
+    event?: {
+      listen?: (
+        event: string,
+        handler: (evt: { payload?: unknown }) => void,
+      ) => Promise<() => void>;
+    };
+  }
+
   interface Window {
     __OPENCHAMBER_HOME__?: string;
     __OPENCHAMBER_MACOS_MAJOR__?: number;
     __OPENCHAMBER_LOCAL_ORIGIN__?: string;
     __OPENCHAMBER_ELECTRON__?: { runtime?: string };
+    __OPENCHAMBER_DESKTOP__?: OpenChamberDesktopBridge;
     __OPENCHAMBER_DESKTOP_BOOT_OUTCOME__?: DesktopBootOutcome;
   }
 

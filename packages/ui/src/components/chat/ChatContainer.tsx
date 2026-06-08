@@ -5,6 +5,7 @@ import { ChatInput } from './ChatInput';
 import { useUIStore } from '@/stores/useUIStore';
 import { Skeleton } from '@/components/ui/skeleton';
 import ChatEmptyState from './ChatEmptyState';
+import { DraftPresetChips } from './DraftPresetChips';
 import MessageList, { type MessageListHandle } from './MessageList';
 import { PermissionCard } from './PermissionCard';
 import { QuestionCard } from './QuestionCard';
@@ -35,6 +36,7 @@ import { useStreamingStore } from '@/sync/streaming';
 import {
     useSessionMessageCount,
     useSessionMessageRecords,
+    useSessionDirectory,
     useSessionMessagesRenderable,
     useSessions,
     useSyncDirectory,
@@ -46,11 +48,13 @@ import {
     useAllServersSessionQuestions,
 } from '@/sync/multi-server-hooks';
 import { useSync } from '@/sync/use-sync';
+import { useInputStore } from '@/sync/input-store';
 import { getSessionPrefetch, subscribeSessionPrefetch } from '@/sync/session-prefetch-cache';
 import { usePlanDetection } from '@/hooks/usePlanDetection';
 import { getAllSyncSessions } from '@/sync/sync-refs';
 import { useI18n } from '@/lib/i18n';
 import { useCurrentSessionActivity } from '@/hooks/useSessionActivity';
+import { CHAT_BOTTOM_SPACER_DESKTOP_PX, CHAT_BOTTOM_SPACER_MOBILE_PX } from './lib/scroll/bottomSpacing';
 
 const EMPTY_MESSAGES: Array<{ info: Message; parts: Part[] }> = [];
 const IDLE_SESSION_STATUS = { type: 'idle' as const };
@@ -256,11 +260,15 @@ const ChatViewport = React.memo(({
                             </div>
                         )}
 
-                        <div className="mb-3">
+                        <div className="mb-2">
                             <StatusRowContainer />
                         </div>
 
-                        <div className="flex-shrink-0" style={{ height: isMobile ? '40px' : '10vh' }} aria-hidden="true" />
+                        <div
+                            className="flex-shrink-0"
+                            style={{ height: `${isMobile ? CHAT_BOTTOM_SPACER_MOBILE_PX : CHAT_BOTTOM_SPACER_DESKTOP_PX}px` }}
+                            aria-hidden="true"
+                        />
                     </div>
                 </ScrollShadow>
                 <OverlayScrollbar containerRef={scrollRef} suppressVisibility={isProgrammaticFollowActive} userIntentOnly observeMutations={false} />
@@ -351,6 +359,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
     const openNewSessionDraft = useSessionUIStore((s) => s.openNewSessionDraft);
     const setCurrentSession = useSessionUIStore((s) => s.setCurrentSession);
     const newSessionDraft = useSessionUIStore((s) => s.newSessionDraft);
+    const requestPresetSubmit = useInputStore((s) => s.requestPresetSubmit);
 
     // Sync actions
     const sync = useSync();
@@ -387,15 +396,16 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
             [streamingMessageId],
         ),
     );
-    const sessionMessageCount = useSessionMessageCount(currentSessionId ?? '');
-    const hasRenderableSessionSnapshot = useSessionMessagesRenderable(currentSessionId ?? '');
+    const currentSessionDirectory = useSessionDirectory(currentSessionId ?? '');
+    const sessionMessageCount = useSessionMessageCount(currentSessionId ?? '', currentSessionDirectory);
+    const hasRenderableSessionSnapshot = useSessionMessagesRenderable(currentSessionId ?? '', currentSessionDirectory);
     // Messages from sync system
-    const sessionMessageRecords = useSessionMessageRecords(currentSessionId ?? '');
+    const sessionMessageRecords = useSessionMessageRecords(currentSessionId ?? '', currentSessionDirectory);
     const sessionMessages = currentSessionId ? sessionMessageRecords : EMPTY_MESSAGES;
     const sessionPrefetchDirectory = React.useMemo(() => {
         if (!currentSessionId) return syncDirectory;
-        return useSessionUIStore.getState().getDirectoryForSession(currentSessionId) ?? syncDirectory;
-    }, [currentSessionId, syncDirectory]);
+        return currentSessionDirectory ?? useSessionUIStore.getState().getDirectoryForSession(currentSessionId) ?? syncDirectory;
+    }, [currentSessionDirectory, currentSessionId, syncDirectory]);
     const sessionPrefetchInfo = React.useSyncExternalStore(
         React.useCallback(
             (notify) => currentSessionId
@@ -418,7 +428,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
     usePlanDetection(currentSessionId ?? '', sessionMessages);
 
     // Session status from sync system
-    const sessionStatusForCurrent = useSessionStatus(currentSessionId ?? '') ?? IDLE_SESSION_STATUS;
+    const sessionStatusForCurrent = useSessionStatus(currentSessionId ?? '', currentSessionDirectory) ?? IDLE_SESSION_STATUS;
 
     const scopedSessionIds = React.useMemo(
         () => collectVisibleSessionIdsForBlockingRequests(
@@ -594,6 +604,19 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
         goToBottom('instant');
     }, [goToBottom]);
 
+    const handleDraftStarterSubmit = React.useCallback((text: string) => {
+        requestPresetSubmit(text);
+    }, [requestPresetSubmit]);
+
+    const draftWelcome = React.useMemo(() => (
+        <ChatEmptyState isSubmitting={Boolean(newSessionDraft?.submitting)}>
+            <DraftPresetChips
+                onSubmit={handleDraftStarterSubmit}
+                className="mx-auto max-w-full"
+            />
+        </ChatEmptyState>
+    ), [handleDraftStarterSubmit, newSessionDraft?.submitting]);
+
     React.useEffect(() => {
         activeTurnChangeRef.current = timelineController.handleActiveTurnChange;
     }, [timelineController.handleActiveTurnChange]);
@@ -762,9 +785,9 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
 		return (
 			<div className="relative flex flex-col h-full bg-background transform-gpu">
 				{!isDesktopExpandedInput ? (
-				<div className="flex-1 flex items-center justify-center">
-					<ChatEmptyState />
-				</div>
+					<div className="flex-1 flex items-center justify-center">
+						{draftWelcome}
+					</div>
 				) : null}
                 <div
                     className={cn(
@@ -774,7 +797,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
 							: 'bg-background'
 					)}
 				>
-						{promptReadOnly ? <ReadOnlyPromptBanner /> : <ChatInput scrollToBottom={resumeToLatestInstant} />}
+					{promptReadOnly ? <ReadOnlyPromptBanner /> : <ChatInput scrollToBottom={resumeToLatestInstant} />}
 				</div>
 			</div>
         );
@@ -903,16 +926,16 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
                 isProgrammaticFollowActive={isFollowingProgrammatically}
             />
 
-            <div
-                className={cn(
-                    'relative z-10',
-                    isDesktopExpandedInput
-                        ? 'flex-1 min-h-0 bg-background'
-                        : 'bg-background'
-                )}
-            >
-                {!isDesktopExpandedInput && sessionMessages.length > 0 && (
-                    <ScrollToBottomButton
+                <div
+                    className={cn(
+                        'relative z-10',
+                        isDesktopExpandedInput
+                            ? 'flex-1 min-h-0 bg-background'
+                            : 'bg-background'
+                    )}
+                >
+                    {!isDesktopExpandedInput && sessionMessages.length > 0 && (
+                        <ScrollToBottomButton
                         visible={timelineController.showScrollToBottom}
                         onClick={navigation.resumeToLatest}
                     />

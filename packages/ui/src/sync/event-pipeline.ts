@@ -18,6 +18,7 @@ import { syncDebug } from "./debug"
 export type QueuedEvent = {
   directory: string
   payload: Event
+  serverId?: string
 }
 
 export type FlushHandler = (events: QueuedEvent[]) => void
@@ -28,7 +29,6 @@ const BACKPRESSURE_MODE_MS = 10_000
 const STREAM_YIELD_MS = 8
 const DEFAULT_RECONNECT_DELAY_MS = 250
 const DEFAULT_HEARTBEAT_TIMEOUT_MS = 30_000
-const WS_FALLBACK_WINDOW_MS = 60_000
 const DEFAULT_WS_READY_TIMEOUT_MS = 2_000
 const RETRY_BACKOFF_BASE_MS = 250
 const RETRY_BACKOFF_CAP_VISIBLE_MS = 5_000
@@ -39,14 +39,12 @@ const ABSOLUTE_URL_PATTERN = /^[a-zA-Z][a-zA-Z\d+\-.]*:\/\//
 export type EventPipelineInput = {
   sdk: OpencodeClient
   baseUrl?: string
-  onEvent: (directory: string, payload: Event) => void
+  onEvent: (directory: string, payload: Event, meta?: { serverId?: string }) => void
   routeDirectory?: (directory: string, payload: Event) => string
   /** Called after stream reconnects (visibility restore or heartbeat timeout). */
   onReconnect?: () => void
   /** Called when the stream disconnects (heartbeat timeout, network error, or transport failure). */
   onDisconnect?: (reason: string) => void
-  /** Called when transport switches (e.g. WS timeout → SSE fallback) without actual disconnection. */
-  onTransportSwitch?: () => void
   transport?: "auto" | "ws" | "sse"
   heartbeatTimeoutMs?: number
   reconnectDelayMs?: number
@@ -63,8 +61,32 @@ type MessageStreamWsFrame = {
   payload?: unknown
   eventId?: string
   directory?: string
+  serverId?: string
   message?: string
   scope?: "global" | "directory"
+}
+
+type ClosableWebSocket = WebSocket & {
+  addEventListener?: WebSocket["addEventListener"]
+}
+
+function closeWebSocketWithoutPreOpenWarning(socket: ClosableWebSocket) {
+  if (socket.readyState === WebSocket.CONNECTING && typeof socket.addEventListener === "function") {
+    socket.addEventListener("open", () => {
+      try {
+        socket.close()
+      } catch {
+        // ignore close failures after a deferred abort
+      }
+    }, { once: true })
+    return
+  }
+
+  try {
+    socket.close()
+  } catch {
+    // ignore close failures during reconnect/cleanup
+  }
 }
 
 const normalizeOpenChamberSessionStatus = (payload: Event): Event | null => {
@@ -217,8 +239,8 @@ function buildGlobalEventWsUrl(baseUrl: string, lastEventId?: string): string {
 }
 
 type DirectoryQueue = {
-  queue: Event[]
-  buffer: Event[]
+  queue: QueuedEvent[]
+  buffer: QueuedEvent[]
   coalesced: Map<string, number>
   timer: ReturnType<typeof setTimeout> | undefined
   last: number
@@ -236,7 +258,6 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
     onEvent,
     onReconnect,
     onDisconnect,
-    onTransportSwitch,
     routeDirectory,
     transport = "auto",
     heartbeatTimeoutMs = DEFAULT_HEARTBEAT_TIMEOUT_MS,
@@ -247,7 +268,6 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
   const abort = new AbortController()
   let disconnected = false
   let lastEventId: string | undefined
-  let wsFallbackUntil = 0
 
   const directories = new Map<string, DirectoryQueue>()
 
@@ -269,6 +289,10 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
     if (payload.type === "session.status") {
       const props = payload.properties as { sessionID: string }
       return `session.status:${props.sessionID}`
+    }
+    if (payload.type === "session.updated") {
+      const props = payload.properties as { info?: { id?: string } }
+      return props.info?.id ? `session.updated:${props.info.id}` : undefined
     }
     if (payload.type === "lsp.updated") {
       return "lsp.updated"
@@ -307,7 +331,7 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
     if (!identity) return false
 
     for (let index = fromIndex + 1; index < d.queue.length; index++) {
-      const queued = d.queue[index]
+      const queued = d.queue[index]?.payload
       if (queued?.type !== "message.part.delta") continue
       const props = queued.properties as { messageID?: string; partID?: string; field?: string }
       if (
@@ -340,8 +364,8 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
 
     d.last = Date.now()
     syncDebug.pipeline.flush(events.length)
-    for (const payload of events) {
-      onEvent(directory, payload)
+    for (const event of events) {
+      onEvent(event.directory, event.payload, event.serverId ? { serverId: event.serverId } : undefined)
     }
 
     d.buffer.length = 0
@@ -463,32 +487,40 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
     onReconnect?.()
   }
 
-  const enqueueEvent = (directory: string, payload: Event) => {
+  const enqueueEvent = (directory: string, payload: Event, serverId?: string) => {
     const normalizedPayload = normalizeEventType(payload)
-    const routedDirectory = routeDirectory?.(directory, normalizedPayload) || directory
+    const routedDirectory = serverId ? directory : (routeDirectory?.(directory, normalizedPayload) || directory)
     const d = getOrCreateDir(routedDirectory)
     const k = key(normalizedPayload)
+    const nextEvent: QueuedEvent = {
+      directory: routedDirectory,
+      payload: normalizedPayload,
+      ...(serverId ? { serverId } : {}),
+    }
     if (k) {
       const i = d.coalesced.get(k)
       if (i !== undefined) {
         if (normalizedPayload.type === "message.part.updated" && hasInterveningDeltaForUpdatedPart(d, i, normalizedPayload)) {
           d.coalesced.set(k, d.queue.length)
-          d.queue.push(normalizedPayload)
+          d.queue.push(nextEvent)
           scheduleDir(routedDirectory)
           return
         }
         if (normalizedPayload.type === "message.part.delta") {
-          const prev = d.queue[i] as unknown as { properties: { delta: string } }
+          const prev = d.queue[i]?.payload as unknown as { properties: { delta: string } } | undefined
           const inc = normalizedPayload.properties as { delta: string }
           d.queue[i] = {
-            ...normalizedPayload,
-            properties: {
-              ...(normalizedPayload.properties as object),
-              delta: prev.properties.delta + inc.delta,
-            },
-          } as unknown as Event
+            ...nextEvent,
+            payload: {
+              ...normalizedPayload,
+              properties: {
+                ...(normalizedPayload.properties as object),
+                delta: (prev?.properties.delta ?? "") + inc.delta,
+              },
+            } as unknown as Event,
+          }
         } else {
-          d.queue[i] = normalizedPayload
+          d.queue[i] = nextEvent
         }
         syncDebug.pipeline.coalesced(normalizedPayload.type, k)
         return
@@ -496,7 +528,7 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
       d.coalesced.set(k, d.queue.length)
     }
 
-    d.queue.push(normalizedPayload)
+    d.queue.push(nextEvent)
     scheduleDir(routedDirectory)
   }
 
@@ -560,24 +592,13 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
       let settled = false
       let opened = false
       let readyAt = 0
-      const socket = new WebSocket(buildGlobalEventWsUrl(baseUrl, lastEventId))
-      const setFallbackCode = (error: Error, force = false) => {
-        if ((force || !opened) && transport === "auto") {
-          wsFallbackUntil = Date.now() + WS_FALLBACK_WINDOW_MS
-          ;(error as Error & { code?: string }).code = "WS_FALLBACK"
-        }
-      }
+      const socket = new WebSocket(buildGlobalEventWsUrl(baseUrl, lastEventId)) as ClosableWebSocket
 
       let readyTimer: ReturnType<typeof setTimeout> | undefined = setTimeout(() => {
         readyTimer = undefined
         const error = new Error("Message stream WebSocket ready timeout")
-        setFallbackCode(error)
         settleReject(error)
-        try {
-          socket.close()
-        } catch {
-          // ignore
-        }
+        closeWebSocketWithoutPreOpenWarning(socket)
       }, wsReadyTimeoutMs)
 
       const cleanup = () => {
@@ -608,11 +629,7 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
       }
 
       const handleAbort = () => {
-        try {
-          socket.close()
-        } catch {
-          // ignore close failures during abort
-        }
+        closeWebSocketWithoutPreOpenWarning(socket)
         settleResolve()
       }
 
@@ -654,13 +671,8 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
         if (frame.type === "error") {
           const error = new Error(frame.message || "Message stream WebSocket error")
           ;(error as Error & { reason?: string }).reason = `ws_error_frame:${frame.message || "unknown"}`
-          setFallbackCode(error)
           settleReject(error)
-          try {
-            socket.close()
-          } catch {
-            // ignore
-          }
+          closeWebSocketWithoutPreOpenWarning(socket)
           return
         }
 
@@ -686,7 +698,10 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
           { directory: frame.directory, payload },
           payload,
         )
-        enqueueEvent(directory, payload)
+        const serverId = typeof frame.serverId === "string" && frame.serverId.length > 0
+          ? frame.serverId
+          : undefined
+        enqueueEvent(directory, payload, serverId)
       }
 
       socket.onerror = () => {
@@ -704,14 +719,13 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
           ? `ws_closed:code=${event?.code ?? "?"}`
           : "ws_closed_before_ready"
 
-        // If the WS stream connects (ready) but then drops quickly, prefer SSE for a while.
-        // Abnormal closes get the same treatment; a proxy or remote host that
-        // keeps dropping WS should not leave the UI on a stale live-state path.
         const livedMs = readyAt > 0 ? Date.now() - readyAt : 0
         const unstableAfterReady = opened && livedMs > 0 && livedMs < 2_000
         const closeCode = typeof event?.code === "number" ? event.code : undefined
         const abnormalClose = opened && closeCode !== 1000 && closeCode !== 1001
-        setFallbackCode(error, unstableAfterReady || abnormalClose)
+        if (unstableAfterReady || abnormalClose) {
+          ;(error as Error & { reason?: string }).reason = `ws_unstable_close:code=${closeCode ?? "?"}`
+        }
         settleReject(error)
       }
     })
@@ -727,7 +741,7 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
     if (transport === "sse") {
       return "sse"
     }
-    return wsFallbackUntil > Date.now() ? "sse" : "ws"
+    return "ws"
   }
 
   void (async () => {
@@ -751,13 +765,7 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
           await runSseAttempt(attempt.signal)
         }
       } catch (error) {
-        const code = typeof error === "object" && error !== null ? (error as { code?: unknown }).code : undefined
-        if (currentTransport === "ws" && code === "WS_FALLBACK") {
-          retryDelayMs = 0
-          // Transport switches are gap-prone in real networks. Notify the
-          // consumer so it can refresh authoritative HTTP state.
-          onTransportSwitch?.()
-        } else if (!isAbortError(error)) {
+        if (!isAbortError(error)) {
           consecutiveFailures += 1
           if (!streamErrorLogged) {
             streamErrorLogged = true

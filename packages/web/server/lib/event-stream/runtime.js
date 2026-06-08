@@ -2,6 +2,7 @@ import { WebSocketServer } from 'ws';
 
 import { parseRequestPathname } from '../terminal/index.js';
 import { parseRemoteWsPath, pipeRemoteWs } from '../remote-instances/sse-relay.js';
+import { createRemoteGlobalEventFanout } from '../remote-instances/global-event-fanout.js';
 import {
   MESSAGE_STREAM_DIRECTORY_WS_PATH,
   MESSAGE_STREAM_GLOBAL_WS_PATH,
@@ -42,6 +43,7 @@ export function createGlobalUiEventBroadcaster({
         const sent = sendMessageStreamWsEvent(socket, payload, {
           directory: typeof options.directory === 'string' && options.directory.length > 0 ? options.directory : 'global',
           eventId: typeof options.eventId === 'string' && options.eventId.length > 0 ? options.eventId : undefined,
+          serverId: typeof options.serverId === 'string' && options.serverId.length > 0 ? options.serverId : undefined,
         });
         if (!sent) {
           wsClients.delete(socket);
@@ -81,6 +83,15 @@ export function createMessageStreamWsRuntime({
     upstreamReconnectDelayMs,
   });
 
+  const remoteGlobalEventFanout = remoteInstancesRuntime
+    ? createRemoteGlobalEventFanout({
+      remoteInstancesRuntime,
+      fetchImpl,
+      upstreamStallTimeoutMs,
+      upstreamReconnectDelayMs,
+    })
+    : null;
+
   const globalBridge = createGlobalMessageStreamWsBridge({
     globalHub,
     ownsGlobalHub,
@@ -88,6 +99,7 @@ export function createMessageStreamWsRuntime({
     processForwardedEventPayload,
     triggerHealthCheck,
     heartbeatIntervalMs,
+    remoteGlobalEventFanout,
   });
 
   wsServer.on('connection', (socket, req) => {
@@ -135,6 +147,8 @@ export function createMessageStreamWsRuntime({
 
     const handleUpgrade = async () => {
       try {
+        let remoteInstance = null;
+
         if (uiAuthController?.enabled) {
           const sessionToken = await uiAuthController?.ensureSessionToken?.(req, null);
           if (!sessionToken) {
@@ -149,9 +163,18 @@ export function createMessageStreamWsRuntime({
           }
         }
 
+        if (remoteWsInfo) {
+          const resolved = await resolveRemoteWsInstance(remoteWsInfo.instanceId);
+          if (!resolved.ok) {
+            rejectWebSocketUpgrade(socket, resolved.status, resolved.error);
+            return;
+          }
+          remoteInstance = resolved.instance;
+        }
+
         wsServer.handleUpgrade(req, socket, head, (ws) => {
           if (remoteWsInfo) {
-            handleRemoteInstanceWsConnection(ws, req, remoteWsInfo);
+            handleRemoteInstanceWsConnection(ws, req, remoteWsInfo, remoteInstance);
           } else {
             wsServer.emit('connection', ws, req);
           }
@@ -164,13 +187,33 @@ export function createMessageStreamWsRuntime({
     void handleUpgrade();
   };
 
-  const handleRemoteInstanceWsConnection = (ws, req, { instanceId, isGlobal }) => {
+  const resolveRemoteWsInstance = async (instanceId) => {
     const instance = remoteInstancesRuntime?.getInstanceSync(instanceId);
-    if (!instance || !instance.enabled) {
-      try { ws.close(4503, 'Remote instance not available'); } catch {}
-      return;
+    if (!instance) {
+      return { ok: false, status: 404, error: 'Remote instance not found' };
+    }
+    if (!instance.enabled) {
+      return { ok: false, status: 503, error: 'Remote instance not available' };
     }
 
+    const healthy = remoteInstancesRuntime.isHealthy(instanceId);
+
+    if (!healthy) {
+      if (typeof remoteInstancesRuntime.ensureHealthy === 'function') {
+        if (
+          typeof remoteInstancesRuntime.isHealthProbeInFlight !== 'function'
+          || !remoteInstancesRuntime.isHealthProbeInFlight(instanceId)
+        ) {
+          void remoteInstancesRuntime.ensureHealthy(instanceId, { timeoutSec: 2 }).catch(() => {});
+        }
+      }
+      return { ok: false, status: 503, error: 'Remote instance not available' };
+    }
+
+    return { ok: true, instance };
+  };
+
+  const handleRemoteInstanceWsConnection = (ws, req, { isGlobal }, instance) => {
     const rawUrl = typeof req?.url === 'string' ? req.url : '';
     const queryString = rawUrl.includes('?') ? rawUrl.slice(rawUrl.indexOf('?')) : '';
     pipeRemoteWs(ws, instance, isGlobal, queryString);
@@ -183,6 +226,7 @@ export function createMessageStreamWsRuntime({
     async close() {
       server.off('upgrade', upgradeHandler);
       globalBridge.close();
+      remoteGlobalEventFanout?.close?.();
 
       try {
         for (const client of wsServer.clients) {

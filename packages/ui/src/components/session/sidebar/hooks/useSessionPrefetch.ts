@@ -13,10 +13,11 @@ type Args = {
   currentSessionId: string | null;
   sortedSessions: Session[];
   recentSessionIds?: string[];
+  sidebarSessionIds?: string[];
   ensureSessionRenderable: (sessionId: string) => Promise<unknown>;
 };
 
-export const useSessionPrefetch = ({ currentSessionId, sortedSessions, recentSessionIds = [], ensureSessionRenderable }: Args): void => {
+export const useSessionPrefetch = ({ currentSessionId, sortedSessions, recentSessionIds = [], sidebarSessionIds = [], ensureSessionRenderable }: Args): void => {
   const sessionPrefetchTimersRef = React.useRef<Map<string, number>>(new Map());
   const sessionPrefetchQueueRef = React.useRef<string[]>([]);
   const sessionPrefetchInFlightRef = React.useRef<Set<string>>(new Set());
@@ -53,26 +54,43 @@ export const useSessionPrefetch = ({ currentSessionId, sortedSessions, recentSes
     }
   }, [ensureSessionRenderable, prefetchDisabled]);
 
-  const scheduleSessionPrefetch = React.useCallback((sessionId: string | null | undefined) => {
+  const shouldPrefetchSession = React.useCallback((sessionId: string | null | undefined) => {
     if (prefetchDisabled || !sessionId || sessionId === currentSessionId || typeof window === 'undefined') {
-      return;
+      return false;
     }
 
-    // Already renderable in sync
     if (getSyncSessionMaterializationStatus(sessionId).renderable) {
-      return;
+      return false;
     }
 
     if (sessionPrefetchInFlightRef.current.has(sessionId)) {
-      return;
+      return false;
     }
 
     if (sessionPrefetchQueueRef.current.includes(sessionId)) {
+      return false;
+    }
+
+    return true;
+  }, [currentSessionId, prefetchDisabled]);
+
+  const enqueueSessionPrefetch = React.useCallback((sessionId: string | null | undefined, options?: { dropOldest?: boolean }) => {
+    if (!sessionId || !shouldPrefetchSession(sessionId)) {
       return;
     }
 
     if (sessionPrefetchQueueRef.current.length >= SESSION_PREFETCH_PENDING_LIMIT) {
+      if (!options?.dropOldest) return;
       sessionPrefetchQueueRef.current.shift();
+    }
+
+    sessionPrefetchQueueRef.current.push(sessionId);
+    pumpSessionPrefetchQueue();
+  }, [pumpSessionPrefetchQueue, shouldPrefetchSession]);
+
+  const scheduleSessionPrefetch = React.useCallback((sessionId: string | null | undefined) => {
+    if (prefetchDisabled || !sessionId || typeof window === 'undefined') {
+      return;
     }
 
     const existingTimer = sessionPrefetchTimersRef.current.get(sessionId);
@@ -82,11 +100,30 @@ export const useSessionPrefetch = ({ currentSessionId, sortedSessions, recentSes
 
     const timer = window.setTimeout(() => {
       sessionPrefetchTimersRef.current.delete(sessionId);
-      sessionPrefetchQueueRef.current.push(sessionId);
-      pumpSessionPrefetchQueue();
+      enqueueSessionPrefetch(sessionId, { dropOldest: true });
     }, SESSION_PREFETCH_HOVER_DELAY_MS);
     sessionPrefetchTimersRef.current.set(sessionId, timer);
-  }, [currentSessionId, prefetchDisabled, pumpSessionPrefetchQueue]);
+  }, [enqueueSessionPrefetch, prefetchDisabled]);
+
+  const queueSidebarPrefetchOrder = React.useCallback((sessionIds: string[]) => {
+    if (prefetchDisabled || typeof window === 'undefined') {
+      return;
+    }
+
+    const nextQueue: string[] = [];
+    const queued = new Set<string>();
+    sessionPrefetchQueueRef.current = [];
+    for (const sessionId of sessionIds) {
+      if (queued.has(sessionId)) continue;
+      if (!shouldPrefetchSession(sessionId)) continue;
+      nextQueue.push(sessionId);
+      queued.add(sessionId);
+      if (nextQueue.length >= SESSION_PREFETCH_PENDING_LIMIT) break;
+    }
+
+    sessionPrefetchQueueRef.current = nextQueue;
+    pumpSessionPrefetchQueue();
+  }, [prefetchDisabled, pumpSessionPrefetchQueue, shouldPrefetchSession]);
 
   // Wait for the active session to finish loading before prefetching neighbors.
   // On rapid session switches the timer resets, so only the final session triggers prefetch.
@@ -102,6 +139,20 @@ export const useSessionPrefetch = ({ currentSessionId, sortedSessions, recentSes
     }, SESSION_PREFETCH_SETTLE_MS);
     return () => window.clearTimeout(timer);
   }, [currentSessionId, prefetchDisabled, scheduleSessionPrefetch, sortedSessions]);
+
+  React.useEffect(() => {
+    if (prefetchDisabled) {
+      return;
+    }
+    if (sidebarSessionIds.length === 0) {
+      sessionPrefetchQueueRef.current = [];
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      queueSidebarPrefetchOrder(sidebarSessionIds);
+    }, SESSION_PREFETCH_SETTLE_MS);
+    return () => window.clearTimeout(timer);
+  }, [prefetchDisabled, queueSidebarPrefetchOrder, sidebarSessionIds]);
 
   React.useEffect(() => {
     if (prefetchDisabled || !currentSessionId || recentSessionIds.length === 0) {

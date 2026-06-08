@@ -1,18 +1,6 @@
-import { isTauriShell } from '@/lib/desktop';
+import { hasDesktopInvoke, invokeDesktop, listenDesktopEvent } from '@/lib/desktop';
 
-type TauriInvoke = (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
-
-type TauriGlobal = {
-  core?: {
-    invoke?: TauriInvoke;
-  };
-  event?: {
-    listen?: (
-      event: string,
-      handler: (evt: { payload?: unknown }) => void,
-    ) => Promise<() => void>;
-  };
-};
+type DesktopInvoke = (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
 
 export type DesktopSshRemoteMode = 'managed' | 'external';
 export type DesktopSshInstallMethod = 'npm' | 'bun' | 'download_release' | 'upload_bundle';
@@ -146,10 +134,9 @@ const asStringArray = (value: unknown): string[] => {
   return value.filter((item): item is string => typeof item === 'string');
 };
 
-const getInvoke = (): TauriInvoke | null => {
-  if (!isTauriShell()) return null;
-  const tauri = (window as unknown as { __TAURI__?: TauriGlobal }).__TAURI__;
-  return typeof tauri?.core?.invoke === 'function' ? tauri.core.invoke : null;
+const getInvoke = (): DesktopInvoke | null => {
+  if (!hasDesktopInvoke()) return null;
+  return async (command, args) => invokeDesktop(command, args);
 };
 
 const parseStoredSecret = (value: unknown): DesktopSshStoredSecret | undefined => {
@@ -457,21 +444,16 @@ export const desktopSshLogsClear = async (id: string): Promise<void> => {
 export const listenDesktopSshStatus = async (
   listener: (status: DesktopSshInstanceStatus) => void,
 ): Promise<() => Promise<void>> => {
-  if (!isTauriShell()) {
+  if (!hasDesktopInvoke()) {
     return async () => {};
   }
 
-  const tauri = (window as unknown as { __TAURI__?: TauriGlobal }).__TAURI__;
-  const listen = tauri?.event?.listen;
-  if (typeof listen !== 'function') {
-    return async () => {};
-  }
-
-  const unlisten = await listen('openchamber:ssh-instance-status', (event) => {
+  const unlisten = await listenDesktopEvent('openchamber:ssh-instance-status', (event) => {
     const status = parseStatus(event?.payload);
     if (!status) return;
     listener(status);
   });
+  if (!unlisten) return async () => {};
 
   return async () => {
     await unlisten();

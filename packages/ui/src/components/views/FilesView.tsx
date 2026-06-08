@@ -37,7 +37,6 @@ import { getLanguageFromExtension, getImageMimeType, isImageFile } from '@/lib/t
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { EditorView } from '@codemirror/view';
 import type { Extension } from '@codemirror/state';
-import { convertFileSrc } from '@tauri-apps/api/core';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useUIStore } from '@/stores/useUIStore';
 import { useFilesViewTabsStore } from '@/stores/useFilesViewTabsStore';
@@ -2597,7 +2596,11 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
 
       const srcPromise = files.readFileBinary
         ? files.readFileBinary(selectedFile.path, selectedFileReadOptions).then((result) => result.dataUrl)
-        : Promise.resolve(convertFileSrc(selectedFile.path, 'asset'));
+        : Promise.resolve(`${resolveApiUrl('/api/fs/raw', serverBaseUrl)}?${new URLSearchParams({
+          path: selectedFile.path,
+          ...(selectedFileReadOptions.allowOutsideWorkspace ? { allowOutsideWorkspace: 'true' } : {}),
+          ...(!selectedFileReadOptions.allowOutsideWorkspace && currentDirectory ? { directory: currentDirectory } : {}),
+        }).toString()}`);
 
       await srcPromise
         .then((src) => {
@@ -2625,7 +2628,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     return () => {
       cancelled = true;
     };
-  }, [files, isSelectedImage, isSelectedSvg, runtime.isDesktop, selectedFile?.path, selectedFileReadOptions, serverBaseUrl, t]);
+  }, [currentDirectory, files, isSelectedImage, isSelectedSvg, runtime.isDesktop, selectedFile?.path, selectedFileReadOptions, serverBaseUrl, t]);
 
   const blockWidgets = React.useMemo(() => {
     return buildCodeMirrorCommentWidgets({

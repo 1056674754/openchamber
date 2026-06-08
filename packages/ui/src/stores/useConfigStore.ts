@@ -545,6 +545,15 @@ interface DirectoryScopedConfig {
     defaultProviders: { [key: string]: string };
 }
 
+type ConfigConnectionPhase = "connecting" | "connected" | "reconnecting";
+
+export interface ConfigConnectionState {
+    isConnected: boolean;
+    hasEverConnected: boolean;
+    connectionPhase: ConfigConnectionPhase;
+    lastDisconnectReason: string | null;
+}
+
 interface ConfigStore {
 
     activeDirectoryKey: string;
@@ -561,8 +570,9 @@ interface ConfigStore {
     defaultProviders: { [key: string]: string };
     isConnected: boolean;
     hasEverConnected: boolean;
-    connectionPhase: "connecting" | "connected" | "reconnecting";
+    connectionPhase: ConfigConnectionPhase;
     lastDisconnectReason: string | null;
+    connectionByServerId: Record<string, ConfigConnectionState>;
     isInitialized: boolean;
     modelsMetadata: Map<string, ModelMetadata>;
     // OpenChamber settings-based defaults (take precedence over agent preferences)
@@ -659,6 +669,8 @@ interface ConfigStore {
     probeConnection: (options?: { timeoutMs?: number }) => Promise<boolean>;
     checkConnection: () => Promise<boolean>;
     initializeApp: () => Promise<void>;
+    getConnectionState: (serverId?: string | null) => ConfigConnectionState;
+    setConnectionState: (serverId: string | null | undefined, patch: Partial<ConfigConnectionState>) => void;
     getCurrentProvider: () => ProviderWithModelList | undefined;
     getCurrentModel: () => ProviderModel | undefined;
     getCurrentAgent: () => Agent | undefined;
@@ -678,6 +690,35 @@ declare global {
 const _inFlightProviders = new Map<string, Promise<void>>();
 const _inFlightAgents = new Map<string, Promise<boolean>>();
 let _initializeAppInFlight: Promise<void> | null = null;
+
+const disconnectedConnectionState: ConfigConnectionState = {
+    isConnected: false,
+    hasEverConnected: false,
+    connectionPhase: "connecting",
+    lastDisconnectReason: null,
+};
+
+const getConfigConnectionState = (
+    state: Pick<ConfigStore, "isConnected" | "hasEverConnected" | "connectionPhase" | "lastDisconnectReason" | "connectionByServerId">,
+    serverId?: string | null,
+): ConfigConnectionState => {
+    const normalizedServerId = normalizeConfigServerId(serverId);
+    if (normalizedServerId === DEFAULT_SERVER_ID) {
+        return {
+            isConnected: state.isConnected,
+            hasEverConnected: state.hasEverConnected,
+            connectionPhase: state.connectionPhase,
+            lastDisconnectReason: state.lastDisconnectReason,
+        };
+    }
+    return state.connectionByServerId[normalizedServerId] ?? disconnectedConnectionState;
+};
+
+const connectionStatesEqual = (a: ConfigConnectionState, b: ConfigConnectionState): boolean =>
+    a.isConnected === b.isConnected
+    && a.hasEverConnected === b.hasEverConnected
+    && a.connectionPhase === b.connectionPhase
+    && a.lastDisconnectReason === b.lastDisconnectReason;
 
 export const useConfigStore = create<ConfigStore>()(
     devtools(
@@ -700,6 +741,7 @@ export const useConfigStore = create<ConfigStore>()(
                 hasEverConnected: false,
                 connectionPhase: "connecting",
                 lastDisconnectReason: null,
+                connectionByServerId: {},
                 isInitialized: false,
                 modelsMetadata: new Map<string, ModelMetadata>(),
                 settingsDefaultModel: undefined,
@@ -709,7 +751,7 @@ export const useConfigStore = create<ConfigStore>()(
                 settingsGitmojiEnabled: false,
                 settingsDefaultFileViewerPreview: false,
                 settingsZenModel: undefined,
-                settingsMessageStreamTransport: 'auto',
+                settingsMessageStreamTransport: 'ws',
                 // Voice provider preference - load from localStorage or default to 'browser'
                 voiceProvider: (() => {
                     if (typeof window !== 'undefined') {
@@ -972,7 +1014,7 @@ export const useConfigStore = create<ConfigStore>()(
                         };
                     });
 
-                    if (!get().isConnected) {
+                    if (!get().getConnectionState(serverId).isConnected) {
                         return;
                     }
 
@@ -1451,7 +1493,7 @@ export const useConfigStore = create<ConfigStore>()(
                                     settingsGitmojiEnabled: openChamberDefaults.gitmojiEnabled ?? false,
                                     settingsDefaultFileViewerPreview: openChamberDefaults.defaultFileViewerPreview ?? false,
                                     settingsZenModel: resolvedZenModel,
-                                    settingsMessageStreamTransport: openChamberDefaults.messageStreamTransport ?? state.settingsMessageStreamTransport ?? 'auto',
+                                    settingsMessageStreamTransport: openChamberDefaults.messageStreamTransport ?? state.settingsMessageStreamTransport ?? 'ws',
                                     sttProvider: openChamberDefaults.sttProvider ?? state.sttProvider,
                                     sttServerUrl: openChamberDefaults.sttServerUrl ?? state.sttServerUrl,
                                     sttModel: openChamberDefaults.sttModel ?? state.sttModel,
@@ -2110,6 +2152,40 @@ export const useConfigStore = create<ConfigStore>()(
                     if (typeof window !== 'undefined') {
                         localStorage.setItem('summarizeMaxLength', String(clamped));
                     }
+                },
+
+                getConnectionState: (serverId?: string | null) => {
+                    return getConfigConnectionState(get(), serverId);
+                },
+
+                setConnectionState: (serverId, patch) => {
+                    const normalizedServerId = normalizeConfigServerId(serverId);
+                    set((state) => {
+                        const previous = getConfigConnectionState(state, normalizedServerId);
+                        const next: ConfigConnectionState = {
+                            ...previous,
+                            ...patch,
+                        };
+                        if (connectionStatesEqual(previous, next)) {
+                            return state;
+                        }
+
+                        if (normalizedServerId === DEFAULT_SERVER_ID) {
+                            return {
+                                isConnected: next.isConnected,
+                                hasEverConnected: next.hasEverConnected,
+                                connectionPhase: next.connectionPhase,
+                                lastDisconnectReason: next.lastDisconnectReason,
+                            };
+                        }
+
+                        return {
+                            connectionByServerId: {
+                                ...state.connectionByServerId,
+                                [normalizedServerId]: next,
+                            },
+                        };
+                    });
                 },
 
                 probeConnection: async (options?: { timeoutMs?: number }) => {

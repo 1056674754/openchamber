@@ -11,6 +11,11 @@ type MockSdkResult = {
 const replyCalls: Array<{ method: string; params: Record<string, unknown> }> = []
 let permissionReplyResult: MockSdkResult = { data: true }
 let permissionRespondResult: MockSdkResult = { data: true }
+let configState = {
+  isConnected: true,
+  hasEverConnected: true,
+  lastDisconnectReason: null as string | null,
+}
 
 const mockScopedClient = {
   permission: {
@@ -81,8 +86,13 @@ mock.module("@/stores/useProjectsStore", () => ({
 mock.module("@/stores/useConfigStore", () => ({
   useConfigStore: {
     getState: () => ({
-      isConnected: true,
-      hasEverConnected: true,
+      ...configState,
+      getConnectionState: () => ({
+        isConnected: configState.isConnected,
+        hasEverConnected: configState.hasEverConnected,
+        connectionPhase: configState.isConnected ? "connected" : "reconnecting",
+        lastDisconnectReason: configState.lastDisconnectReason,
+      }),
     }),
   },
 }))
@@ -113,12 +123,29 @@ mock.module("@/stores/useGlobalSessionsStore", () => ({
 // Mock sync-refs (imported but not used in permission functions)
 mock.module("./sync-refs", () => ({
   registerSessionDirectory: () => {},
+  setSyncRefs: () => {},
+  getSyncChildStores: () => ({
+    pin: () => undefined,
+    unpin: () => undefined,
+  }),
+  getAllSyncSessions: () => [],
+  getSyncSessions: () => [],
+  getSyncDirectory: () => "/test/project",
+  getSessionDirectoryFromRoutingIndex: () => undefined,
 }))
 
 import { create, type StoreApi } from "zustand"
 import { INITIAL_STATE } from "./types"
 import type { DirectoryStore } from "./child-store"
 import type { OpencodeClient } from "@opencode-ai/sdk/v2/client"
+
+beforeEach(() => {
+  configState = {
+    isConnected: true,
+    hasEverConnected: true,
+    lastDisconnectReason: null,
+  }
+})
 
 function createStore(permissions: Record<string, PermissionRequest[]>): StoreApi<DirectoryStore> {
   return create<DirectoryStore>()((set) => ({
@@ -130,10 +157,12 @@ function createStore(permissions: Record<string, PermissionRequest[]>): StoreApi
 }
 
 function createChildStores(entries: Array<[string, StoreApi<DirectoryStore>]>) {
+  const stores = new Map(entries)
   return {
-    children: new Map(entries),
+    children: stores,
+    getChild: (dir: string) => stores.get(dir),
     ensureChild: (dir: string) => {
-      const store = new Map(entries).get(dir)
+      const store = stores.get(dir)
       if (!store) throw new Error(`No store for ${dir}`)
       return store
     },
@@ -145,6 +174,11 @@ describe("respondToPermission passes directory", () => {
     replyCalls.length = 0
     permissionReplyResult = { data: true }
     permissionRespondResult = { data: true }
+    configState = {
+      isConnected: true,
+      hasEverConnected: true,
+      lastDisconnectReason: null,
+    }
   })
 
   test("passes directory from child store when permission is found", async () => {
@@ -231,6 +265,107 @@ describe("respondToPermission passes directory", () => {
     expect(error instanceof Error).toBe(true)
     expect((error as Error).message).toBe("permission reply target directory for request perm-3 is not available")
     expect(replyCalls.length).toBe(0)
+  })
+})
+
+describe("optimisticSend", () => {
+  beforeEach(() => {
+    configState = {
+      isConnected: true,
+      hasEverConnected: true,
+      lastDisconnectReason: null,
+    }
+  })
+
+  test("adds the optimistic user message before waiting for reconnection", async () => {
+    configState = {
+      isConnected: false,
+      hasEverConnected: true,
+      lastDisconnectReason: "ws_closed:code=1006",
+    }
+
+    const store = createStore({})
+    const childStores = createChildStores([["/test/project", store]])
+    const optimisticAdds: Array<{ sessionID: string; message: { id?: string; role?: string }; parts: Array<{ type?: string; text?: string }>; directory?: string | null; serverId?: string | null }> = []
+    const optimisticRemoves: Array<{ sessionID: string; messageID: string; directory?: string | null; serverId?: string | null }> = []
+    let sendCalled = false
+
+    const { setActionRefs, setOptimisticRefs, optimisticSend } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/test/project")
+    setOptimisticRefs(
+      (input) => {
+        optimisticAdds.push(input as (typeof optimisticAdds)[number])
+      },
+      (input) => {
+        optimisticRemoves.push(input)
+      },
+    )
+
+    const sendPromise = optimisticSend({
+      sessionId: "session-a",
+      content: "hello",
+      providerID: "anthropic",
+      modelID: "claude",
+      send: async () => {
+        sendCalled = true
+      },
+    })
+
+    expect(optimisticAdds).toHaveLength(1)
+    expect(optimisticAdds[0].sessionID).toBe("session-a")
+    expect(optimisticAdds[0].message.role).toBe("user")
+    expect(optimisticAdds[0].parts[0].text).toBe("hello")
+    expect(sendCalled).toBe(false)
+
+    configState = {
+      isConnected: true,
+      hasEverConnected: true,
+      lastDisconnectReason: null,
+    }
+
+    await sendPromise
+
+    expect(sendCalled).toBe(true)
+    expect(optimisticRemoves).toHaveLength(0)
+  })
+
+  test("uses explicit target directory for optimistic status and bridge refs", async () => {
+    const fallbackStore = createStore({})
+    const targetStore = createStore({})
+    const childStores = createChildStores([
+      ["/fallback/dir", fallbackStore],
+      ["/target/project", targetStore],
+    ])
+    const optimisticAdds: Array<{ sessionID: string; directory?: string | null; serverId?: string | null }> = []
+    const optimisticRemoves: Array<{ sessionID: string; messageID: string; directory?: string | null; serverId?: string | null }> = []
+
+    const { setActionRefs, setOptimisticRefs, optimisticSend } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/fallback/dir")
+    setOptimisticRefs(
+      (input) => {
+        optimisticAdds.push(input)
+      },
+      (input) => {
+        optimisticRemoves.push(input)
+      },
+    )
+
+    await optimisticSend({
+      sessionId: "session-new",
+      content: "hello target",
+      providerID: "anthropic",
+      modelID: "claude",
+      directory: "/target/project",
+      serverId: "default",
+      send: async () => {},
+    })
+
+    expect(optimisticAdds).toHaveLength(1)
+    expect(optimisticAdds[0].directory).toBe("/target/project")
+    expect(optimisticAdds[0].serverId).toBe("default")
+    expect(targetStore.getState().session_status["session-new"]?.type).toBe("busy")
+    expect(fallbackStore.getState().session_status["session-new"]).toBe(undefined)
+    expect(optimisticRemoves).toHaveLength(0)
   })
 })
 

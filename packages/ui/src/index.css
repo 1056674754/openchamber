@@ -928,10 +928,9 @@ html:not(.dark) .chat-scroll {
 
 .markdown-content.markdown-reasoning [data-openchamber-file-link="true"][data-openchamber-file-status="missing"],
 .markdown-content.markdown-reasoning [data-openchamber-file-link="true"][data-openchamber-file-status="missing"]:hover {
-  color: var(--surface-muted-foreground) !important;
+  color: inherit !important;
   cursor: default !important;
-  text-decoration: line-through !important;
-  text-decoration-color: var(--surface-muted-foreground) !important;
+  text-decoration: none !important;
 }
 
 .markdown-content.markdown-reasoning strong,
@@ -1036,14 +1035,27 @@ html:not(.dark) .chat-scroll {
 }
 
 .markdown-content [data-openchamber-file-link="true"][data-openchamber-file-status="missing"] {
-  color: var(--muted-foreground);
   cursor: default;
-  text-decoration: line-through;
-  text-decoration-color: var(--muted-foreground);
+  text-decoration: none;
 }
 
 .markdown-content [data-openchamber-file-link="true"][data-openchamber-file-status="missing"]:hover {
-  color: var(--muted-foreground);
+  color: inherit;
+  text-decoration: none;
+}
+
+.markdown-content [data-openchamber-file-status="missing"]:not([data-openchamber-file-link="true"]) {
+  cursor: default;
+  text-decoration: none !important;
+}
+
+.markdown-content a[data-openchamber-file-status="missing"] {
+  color: inherit;
+}
+
+.markdown-content code[data-markdown="inline-code"][data-openchamber-file-status="missing"],
+.markdown-content code[data-markdown="inline-code"][data-openchamber-file-status="missing"]:hover {
+  color: var(--markdown-inline-code, var(--foreground)) !important;
 }
 
 .oc-file-missing-badge {
@@ -1078,6 +1090,27 @@ html:not(.dark) .chat-scroll {
 
 .markdown-content del {
   color: var(--markdown-strikethrough, var(--muted-foreground));
+}
+
+.markdown-content [data-openchamber-markdown-image-frame="true"] {
+  display: block;
+  width: 100%;
+  max-width: min(400px, 50%);
+  margin: 0.5rem auto;
+  container-type: inline-size;
+}
+
+.markdown-content img[data-openchamber-markdown-image="true"] {
+  display: block;
+  margin-inline: auto;
+  max-width: 100%;
+  max-height: 400px;
+}
+
+@supports (max-height: 100cqi) {
+  .markdown-content img[data-openchamber-markdown-image="true"] {
+    max-height: min(400px, 100cqi);
+  }
 }
 
 /* Streamdown code blocks: ensure light/dark Shiki vars work even when Tailwind doesn't scan Streamdown's internal class names. */

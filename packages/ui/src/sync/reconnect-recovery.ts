@@ -39,8 +39,12 @@ export function getReconnectCandidateSessionIds(state: ReconnectMaterializationS
     }
   }
 
+  const candidateChildIds = new Set(ids)
   const parentIds = new Set<string>()
   for (const session of state.session) {
+    if (!candidateChildIds.has(session.id)) {
+      continue
+    }
     const parentId = (session as Session & { parentID?: string | null }).parentID
     if (parentId) {
       parentIds.add(parentId)

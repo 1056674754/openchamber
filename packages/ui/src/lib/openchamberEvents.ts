@@ -9,76 +9,27 @@ export type ScheduledTaskRanEvent = {
 
 type OpenChamberEvent = ScheduledTaskRanEvent;
 type Listener = (event: OpenChamberEvent) => void;
+type Envelope = { type?: unknown; properties?: unknown };
+type EnvelopeListener = (event: Envelope) => void;
 
-let eventSource: EventSource | null = null;
-let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-let heartbeatTimer: ReturnType<typeof setTimeout> | null = null;
-let reconnectAttempt = 0;
 const listeners = new Set<Listener>();
+const envelopeListeners = new Set<EnvelopeListener>();
 
-const MAX_RECONNECT_DELAY_MS = 30_000;
-const HEARTBEAT_TIMEOUT_MS = 45_000;
-
-const clearHeartbeatTimer = () => {
-  if (!heartbeatTimer) {
-    return;
-  }
-  clearTimeout(heartbeatTimer);
-  heartbeatTimer = null;
-};
-
-const scheduleReconnect = () => {
-  if (reconnectTimer || listeners.size === 0) {
-    return;
-  }
-  const delay = Math.min(1_000 * Math.pow(2, Math.min(reconnectAttempt, 5)), MAX_RECONNECT_DELAY_MS);
-  reconnectTimer = setTimeout(() => {
-    reconnectTimer = null;
-    reconnectAttempt += 1;
-    connect();
-  }, delay);
-};
-
-const cleanupSource = () => {
-  clearHeartbeatTimer();
-  if (eventSource) {
-    eventSource.close();
-  }
-  eventSource = null;
-};
-
-const resetHeartbeatTimer = () => {
-  clearHeartbeatTimer();
-  if (listeners.size === 0) {
-    return;
-  }
-  heartbeatTimer = setTimeout(() => {
-    cleanupSource();
-    scheduleReconnect();
-  }, HEARTBEAT_TIMEOUT_MS);
-};
-
-const parseEnvelope = (raw: string): { type: string; properties: unknown } | null => {
-  if (!raw || raw.trim().length === 0) {
+const normalizeEnvelope = (raw: Envelope): { type: string; properties: unknown } | null => {
+  if (!raw || typeof raw !== 'object') {
     return null;
   }
 
-  try {
-    const parsed = JSON.parse(raw);
-    const type = typeof parsed?.type === 'string' ? parsed.type : '';
-    const properties = parsed?.properties;
-    if (!type) {
-      return null;
-    }
-    return { type, properties };
-  } catch {
+  const type = typeof raw.type === 'string' ? raw.type : '';
+  if (!type) {
     return null;
   }
+
+  return { type, properties: raw.properties };
 };
 
 const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) => {
   if (envelope.type === 'openchamber:event-stream-ready') {
-    reconnectAttempt = 0;
     return;
   }
 
@@ -115,54 +66,29 @@ const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) =
   }
 };
 
-const connect = () => {
-  if (typeof window === 'undefined' || listeners.size === 0) {
-    return;
-  }
-  if (typeof EventSource !== 'function') {
-    return;
-  }
-
-  if (eventSource && eventSource.readyState !== EventSource.CLOSED) {
+export const dispatchOpenchamberEventEnvelope = (raw: Envelope) => {
+  const envelope = normalizeEnvelope(raw);
+  if (!envelope) {
     return;
   }
 
-  cleanupSource();
+  for (const listener of envelopeListeners) {
+    listener(envelope);
+  }
+  dispatchFromEnvelope(envelope);
+};
 
-  const source = new EventSource('/api/openchamber/events');
-  source.onopen = () => {
-    resetHeartbeatTimer();
+export const subscribeOpenchamberEventEnvelopes = (listener: EnvelopeListener): (() => void) => {
+  envelopeListeners.add(listener);
+  return () => {
+    envelopeListeners.delete(listener);
   };
-  source.onmessage = (event) => {
-    resetHeartbeatTimer();
-    const envelope = parseEnvelope(event.data);
-    if (!envelope) {
-      return;
-    }
-    dispatchFromEnvelope(envelope);
-  };
-
-  source.onerror = () => {
-    cleanupSource();
-    scheduleReconnect();
-  };
-
-  eventSource = source;
 };
 
 export const subscribeOpenchamberEvents = (listener: Listener): (() => void) => {
   listeners.add(listener);
-  connect();
 
   return () => {
     listeners.delete(listener);
-    if (listeners.size === 0) {
-      if (reconnectTimer) {
-        clearTimeout(reconnectTimer);
-        reconnectTimer = null;
-      }
-      reconnectAttempt = 0;
-      cleanupSource();
-    }
   };
 };

@@ -187,6 +187,27 @@ const areRelevantActivityPartsEqual = (
   }
 };
 
+const areActivityPartsEqual = (
+  left: TurnActivityRecord[] | undefined,
+  right: TurnActivityRecord[] | undefined,
+): boolean => {
+  if (!left || !right) {
+    return left === right;
+  }
+
+  if (left.length !== right.length) {
+    return false;
+  }
+
+  for (let index = 0; index < left.length; index += 1) {
+    if (!areTurnActivityRecordsEqual(left[index], right[index])) {
+      return false;
+    }
+  }
+
+  return true;
+};
+
 const areTurnActivityGroupsEqual = (left: TurnActivityGroup, right: TurnActivityGroup): boolean => {
   if (left.id !== right.id || left.anchorMessageId !== right.anchorMessageId || left.afterToolPartId !== right.afterToolPartId) {
     return false;
@@ -288,16 +309,22 @@ export const areRelevantTurnGroupingContextsEqual = (
 
   const segmentsRelevant = hasRelevantActivitySegments(left.activityGroupSegments, messageId)
     || hasRelevantActivitySegments(right.activityGroupSegments, messageId);
+  const finalMessageRelevant = left.isLastAssistantInTurn || right.isLastAssistantInTurn;
+  const groupControlRelevant = ownerRelevant || segmentsRelevant || finalMessageRelevant;
 
-  if ((ownerRelevant || segmentsRelevant) && left.isGroupExpanded !== right.isGroupExpanded) {
+  if (finalMessageRelevant && !areActivityPartsEqual(left.activityParts, right.activityParts)) {
     return false;
   }
 
-  if ((ownerRelevant || segmentsRelevant) && left.toggleGroup !== right.toggleGroup) {
+  if (groupControlRelevant && left.isGroupExpanded !== right.isGroupExpanded) {
     return false;
   }
 
-  if ((ownerRelevant || segmentsRelevant) && !areTurnDiffStatsEqual(left.diffStats, right.diffStats)) {
+  if (groupControlRelevant && left.toggleGroup !== right.toggleGroup) {
+    return false;
+  }
+
+  if (groupControlRelevant && !areTurnDiffStatsEqual(left.diffStats, right.diffStats)) {
     return false;
   }
 

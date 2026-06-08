@@ -9,6 +9,7 @@
 import { create } from "zustand"
 import type { Message, SessionStatus } from "@opencode-ai/sdk/v2/client"
 import type { State } from "./types"
+import { hasTerminalMessageSignal, type TerminalMessageSignalInfo } from "@/lib/messageCompletion"
 
 export type StreamPhase = "streaming" | "cooldown" | "completed"
 
@@ -82,7 +83,9 @@ export function updateStreamingState(state: State) {
         break
       }
       if (messages[i].role === "assistant") {
-        streamingMsg = messages[i]
+        if (!hasTerminalMessageSignal(messages[i] as TerminalMessageSignalInfo)) {
+          streamingMsg = messages[i]
+        }
         break
       }
     }

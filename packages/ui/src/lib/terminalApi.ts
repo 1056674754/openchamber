@@ -128,12 +128,20 @@ export const isRemoteTerminalProxyBaseUrl = (baseUrl?: string): boolean => {
   return /(?:^|\/)api\/remote\/[^/]+$/.test(normalizedPathname);
 };
 
-const resetTerminalTransportCapabilities = (): void => {
+const resetTerminalTransportCapabilities = (baseUrl?: string): void => {
   const globalState = getTerminalTransportGlobalState();
-  globalState.manager?.close();
-  globalState.manager = null;
-  globalState.inputCapability = null;
-  globalState.streamCapability = null;
+  if (baseUrl !== undefined) {
+    const key = normalizeTerminalTransportKey(baseUrl);
+    const entry = globalState.entries.get(key);
+    entry?.manager?.close();
+    globalState.entries.delete(key);
+    return;
+  }
+
+  for (const entry of globalState.entries.values()) {
+    entry.manager?.close();
+  }
+  globalState.entries.clear();
 };
 
 const encodeControlFrame = (payload: TerminalControlMessage): Uint8Array => {
@@ -151,7 +159,7 @@ const isWsTransportSupported = (capability: TerminalTransportCapability | null |
   return supportsTransport && typeof capability.ws?.path === 'string' && capability.ws.path.length > 0;
 };
 
-const getPreferredTerminalWsPath = (state: TerminalTransportGlobalState): string => (
+const getPreferredTerminalWsPath = (state: TerminalTransportEntry): string => (
   state.streamCapability?.ws?.path
   ?? state.inputCapability?.ws?.path
   ?? DEFAULT_TERMINAL_WS_PATH
@@ -745,9 +753,29 @@ class TerminalTransportManager {
 }
 
 type TerminalTransportGlobalState = {
+  entries: Map<string, TerminalTransportEntry>;
+};
+
+type TerminalTransportEntry = {
   inputCapability: TerminalTransportCapability | null;
   streamCapability: TerminalTransportCapability | null;
   manager: TerminalTransportManager | null;
+};
+
+const normalizeTerminalTransportKey = (baseUrl?: string): string => {
+  const candidate = typeof baseUrl === 'string' ? baseUrl.trim() : '';
+  if (!candidate) {
+    return '__default__';
+  }
+
+  try {
+    const url = new URL(candidate, typeof window !== 'undefined' ? window.location.href : 'http://openchamber.local');
+    url.hash = '';
+    url.search = '';
+    return url.toString().replace(/\/+$/, '');
+  } catch {
+    return candidate.replace(/\/+$/, '') || '__default__';
+  }
 };
 
 const getTerminalTransportGlobalState = (): TerminalTransportGlobalState => {
@@ -755,50 +783,61 @@ const getTerminalTransportGlobalState = (): TerminalTransportGlobalState => {
     [GLOBAL_TERMINAL_TRANSPORT_STATE_KEY]?: TerminalTransportGlobalState;
   };
 
-  if (!globalScope[GLOBAL_TERMINAL_TRANSPORT_STATE_KEY]) {
-    globalScope[GLOBAL_TERMINAL_TRANSPORT_STATE_KEY] = {
+  const existing = globalScope[GLOBAL_TERMINAL_TRANSPORT_STATE_KEY];
+  if (!existing || !(existing.entries instanceof Map)) {
+    const legacy = existing as (Partial<TerminalTransportEntry> & { manager?: TerminalTransportManager | null }) | undefined;
+    legacy?.manager?.close?.();
+    const nextState: TerminalTransportGlobalState = {
+      entries: new Map(),
+    };
+    globalScope[GLOBAL_TERMINAL_TRANSPORT_STATE_KEY] = nextState;
+    return nextState;
+  }
+
+  return existing;
+};
+
+const getTerminalTransportEntry = (baseUrl?: string): TerminalTransportEntry => {
+  const globalState = getTerminalTransportGlobalState();
+  const key = normalizeTerminalTransportKey(baseUrl);
+  let entry = globalState.entries.get(key);
+  if (!entry) {
+    entry = {
       inputCapability: null,
       streamCapability: null,
       manager: null,
     };
+    globalState.entries.set(key, entry);
   }
-
-  return globalScope[GLOBAL_TERMINAL_TRANSPORT_STATE_KEY];
+  return entry;
 };
 
-const ensureTerminalTransportManager = (): TerminalTransportManager => {
-  const globalState = getTerminalTransportGlobalState();
-  if (!globalState.manager) {
-    globalState.manager = new TerminalTransportManager();
+const ensureTerminalTransportManager = (baseUrl?: string): TerminalTransportManager => {
+  const entry = getTerminalTransportEntry(baseUrl);
+  if (!entry.manager) {
+    entry.manager = new TerminalTransportManager();
   }
-  return globalState.manager;
+  return entry.manager;
 };
 
 const applyTerminalTransportCapabilities = (capabilities: TerminalSession['capabilities'] | undefined, baseUrl?: string): void => {
-  if (isRemoteTerminalProxyBaseUrl(baseUrl)) {
-    // Remote proxy terminals use the stable HTTP/SSE fallback instead of
-    // tunneling the shared full-duplex WebSocket through another server.
-    resetTerminalTransportCapabilities();
+  const entry = getTerminalTransportEntry(baseUrl);
+  entry.inputCapability = capabilities?.input ?? null;
+  entry.streamCapability = capabilities?.stream ?? null;
+
+  if (!isWsTransportSupported(entry.inputCapability) && !isWsTransportSupported(entry.streamCapability)) {
+    entry.manager?.close();
+    entry.manager = null;
     return;
   }
 
-  const globalState = getTerminalTransportGlobalState();
-  globalState.inputCapability = capabilities?.input ?? null;
-  globalState.streamCapability = capabilities?.stream ?? null;
-
-  if (!isWsTransportSupported(globalState.inputCapability) && !isWsTransportSupported(globalState.streamCapability)) {
-    globalState.manager?.close();
-    globalState.manager = null;
-    return;
-  }
-
-  const wsPath = terminalApiUrl(getPreferredTerminalWsPath(globalState), baseUrl);
+  const wsPath = terminalApiUrl(getPreferredTerminalWsPath(entry), baseUrl);
   const socketUrl = normalizeWebSocketPath(wsPath);
   if (!socketUrl) {
     return;
   }
 
-  const manager = ensureTerminalTransportManager();
+  const manager = ensureTerminalTransportManager(baseUrl);
   manager.configure(socketUrl);
 };
 
@@ -941,7 +980,7 @@ const connectTerminalStreamViaSse = (
         const data = JSON.parse(event.data) as TerminalStreamEvent;
 
         if (data.type === 'exit') {
-          getTerminalTransportGlobalState().manager?.unbindSession(sessionId);
+          getTerminalTransportEntry(baseUrl).manager?.unbindSession(sessionId);
           terminalExited = true;
           cleanup();
         }
@@ -975,23 +1014,18 @@ export function connectTerminalStream(
   options: ConnectStreamOptions = {},
   baseUrl?: string
 ): () => void {
-  if (isRemoteTerminalProxyBaseUrl(baseUrl)) {
-    resetTerminalTransportCapabilities();
+  const entry = getTerminalTransportEntry(baseUrl);
+  if (!isWsTransportSupported(entry.streamCapability)) {
     return connectTerminalStreamViaSse(sessionId, onEvent, onError, options, baseUrl);
   }
 
-  const globalState = getTerminalTransportGlobalState();
-  if (!isWsTransportSupported(globalState.streamCapability)) {
-    return connectTerminalStreamViaSse(sessionId, onEvent, onError, options, baseUrl);
-  }
-
-  const wsPath = terminalApiUrl(getPreferredTerminalWsPath(globalState), baseUrl);
+  const wsPath = terminalApiUrl(getPreferredTerminalWsPath(entry), baseUrl);
   const socketUrl = normalizeWebSocketPath(wsPath);
   if (!socketUrl) {
     return connectTerminalStreamViaSse(sessionId, onEvent, onError, options, baseUrl);
   }
 
-  const manager = ensureTerminalTransportManager();
+  const manager = ensureTerminalTransportManager(baseUrl);
   manager.configure(socketUrl);
   return manager.subscribe(sessionId, onEvent, onError, options);
 }
@@ -1001,13 +1035,8 @@ export async function sendTerminalInput(
   data: string,
   baseUrl?: string
 ): Promise<void> {
-  if (isRemoteTerminalProxyBaseUrl(baseUrl)) {
-    await sendTerminalInputHttp(sessionId, data, baseUrl);
-    return;
-  }
-
-  const globalState = getTerminalTransportGlobalState();
-  if (globalState.manager && await globalState.manager.sendInput(sessionId, data)) {
+  const entry = getTerminalTransportEntry(baseUrl);
+  if (entry.manager && await entry.manager.sendInput(sessionId, data)) {
     return;
   }
 
@@ -1033,7 +1062,7 @@ export async function resizeTerminal(
 }
 
 export async function closeTerminal(sessionId: string, baseUrl?: string): Promise<void> {
-  getTerminalTransportGlobalState().manager?.unbindSession(sessionId);
+  getTerminalTransportEntry(baseUrl).manager?.unbindSession(sessionId);
 
   const response = await fetch(terminalApiUrl(`/api/terminal/${sessionId}`, baseUrl), {
     method: 'DELETE',
@@ -1050,7 +1079,7 @@ export async function restartTerminalSession(
   options: { cwd: string; cols?: number; rows?: number },
   baseUrl?: string
 ): Promise<TerminalSession> {
-  getTerminalTransportGlobalState().manager?.unbindSession(currentSessionId);
+  getTerminalTransportEntry(baseUrl).manager?.unbindSession(currentSessionId);
 
   const response = await fetch(terminalApiUrl(`/api/terminal/${currentSessionId}/restart`, baseUrl), {
     method: 'POST',
@@ -1088,7 +1117,7 @@ export async function forceKillTerminal(options: {
   }
 
   if (options.sessionId) {
-    getTerminalTransportGlobalState().manager?.unbindSession(options.sessionId);
+    getTerminalTransportEntry(baseUrl).manager?.unbindSession(options.sessionId);
   }
 }
 
@@ -1097,28 +1126,23 @@ export function disposeTerminalInputTransport(): void {
 }
 
 export function primeTerminalInputTransport(baseUrl?: string): void {
-  if (isRemoteTerminalProxyBaseUrl(baseUrl)) {
-    resetTerminalTransportCapabilities();
-    return;
-  }
-
-  const globalState = getTerminalTransportGlobalState();
+  const entry = getTerminalTransportEntry(baseUrl);
   if (
-    globalState.inputCapability &&
-    globalState.streamCapability &&
-    !isWsTransportSupported(globalState.inputCapability) &&
-    !isWsTransportSupported(globalState.streamCapability)
+    entry.inputCapability &&
+    entry.streamCapability &&
+    !isWsTransportSupported(entry.inputCapability) &&
+    !isWsTransportSupported(entry.streamCapability)
   ) {
     return;
   }
 
-  const wsPath = terminalApiUrl(getPreferredTerminalWsPath(globalState) || DEFAULT_TERMINAL_WS_PATH, baseUrl);
+  const wsPath = terminalApiUrl(getPreferredTerminalWsPath(entry) || DEFAULT_TERMINAL_WS_PATH, baseUrl);
   const socketUrl = normalizeWebSocketPath(wsPath);
   if (!socketUrl) {
     return;
   }
 
-  const manager = ensureTerminalTransportManager();
+  const manager = ensureTerminalTransportManager(baseUrl);
   if (manager.isConnectedOrConnecting(socketUrl)) {
     return;
   }

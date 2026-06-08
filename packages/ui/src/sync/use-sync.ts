@@ -11,7 +11,7 @@ import {
 import { dropCachedSessionMessageRecordsSnapshots, useDirectoryStore, useSyncDirectory, useChildStoreManager } from "./sync-context"
 import { resolveSdkForDirectory } from "./session-actions"
 import { useSessionUIStore } from "./session-ui-store"
-import { getAllSyncStores, getSyncStoresForServer } from "./multi-server-registry"
+import { getSyncStoresForServer } from "./multi-server-registry"
 import { DEFAULT_SERVER_ID, serverRegistry } from "@/lib/opencode/server-registry"
 import { dropSessionCaches, getProtectedSessionCacheIds } from "./session-cache"
 import { stripMessageDiffSnapshots } from "./sanitize"
@@ -145,20 +145,6 @@ export function useSync() {
               directory: resolvedDirectory,
               store: remoteStore,
               serverId,
-            }
-          }
-        }
-      }
-
-      if (!serverId && sessionDir) {
-        for (const entry of getAllSyncStores()) {
-          if (entry.serverId === DEFAULT_SERVER_ID) continue
-          const remoteStore = entry.childStores.getChild(sessionDir)
-          if (remoteStore?.getState().session.some((session) => session.id === sessionID)) {
-            return {
-              directory: sessionDir,
-              store: remoteStore,
-              serverId: entry.serverId,
             }
           }
         }
@@ -304,8 +290,8 @@ export function useSync() {
   )
 
   const setOptimistic = useCallback(
-    (sessionID: string, item: OptimisticItem) => {
-      const key = `${directory}\n${sessionID}`
+    (sessionID: string, item: OptimisticItem, targetDirectory = directory) => {
+      const key = `${targetDirectory}\n${sessionID}`
       const list = optimistic.current.get(key)
       const sorted: OptimisticItem = { message: item.message, parts: sortParts(item.parts) }
       if (list) {
@@ -672,11 +658,43 @@ export function useSync() {
     [getMetaFor, resolveSessionTarget],
   )
 
+  const resolveOptimisticTarget = useCallback(
+    (input: { sessionID: string; directory?: string | null; serverId?: string | null }) => {
+      const hintedDirectory = input.directory || undefined
+      const hintedServerId = input.serverId ?? serverRegistry.getServerForSession(input.sessionID)
+      if (hintedServerId && hintedServerId !== DEFAULT_SERVER_ID) {
+        const remoteStores = getSyncStoresForServer(hintedServerId)
+        if (remoteStores) {
+          const targetDirectory = hintedDirectory
+            ?? useSessionUIStore.getState().getDirectoryForSession(input.sessionID)
+            ?? directory
+          return {
+            directory: targetDirectory,
+            store: remoteStores.ensureChild(targetDirectory),
+          }
+        }
+      }
+
+      if (hintedDirectory) {
+        return {
+          directory: hintedDirectory,
+          store: childStores.ensureChild(hintedDirectory),
+        }
+      }
+
+      return resolveSessionTarget(input.sessionID)
+    },
+    [childStores, directory, resolveSessionTarget],
+  )
+
   // Optimistic add (for prompt submission)
   const optimisticAdd = useCallback(
-    (input: { sessionID: string; message: Message; parts: Part[] }) => {
-      setOptimistic(input.sessionID, { message: input.message, parts: input.parts })
-      const current = store.getState()
+    (input: { sessionID: string; message: Message; parts: Part[]; directory?: string | null; serverId?: string | null }) => {
+      const target = resolveOptimisticTarget(input)
+      const targetDirectory = target.directory
+      const targetStore = target.store
+      setOptimistic(input.sessionID, { message: input.message, parts: input.parts }, targetDirectory)
+      const current = targetStore.getState()
       const message = { ...current.message }
       const part = { ...current.part }
 
@@ -689,16 +707,19 @@ export function useSync() {
       // Insert parts
       part[input.message.id] = sortParts(input.parts)
 
-      store.setState({ message, part })
+      targetStore.setState({ message, part })
     },
-    [store, setOptimistic],
+    [resolveOptimisticTarget, setOptimistic],
   )
 
   // Optimistic remove (for rollback on error)
   const optimisticRemove = useCallback(
-    (input: { sessionID: string; messageID: string }) => {
-      clearOptimistic(input.sessionID, input.messageID)
-      const current = store.getState()
+    (input: { sessionID: string; messageID: string; directory?: string | null; serverId?: string | null }) => {
+      const target = resolveOptimisticTarget(input)
+      const targetDirectory = target.directory
+      const targetStore = target.store
+      clearOptimistic(input.sessionID, input.messageID, targetDirectory)
+      const current = targetStore.getState()
       const message = { ...current.message }
       const part = { ...current.part }
 
@@ -713,9 +734,9 @@ export function useSync() {
       }
       delete part[input.messageID]
 
-      store.setState({ message, part })
+      targetStore.setState({ message, part })
     },
-    [store, clearOptimistic],
+    [clearOptimistic, resolveOptimisticTarget],
   )
 
   return useMemo(

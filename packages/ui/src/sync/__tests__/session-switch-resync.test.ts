@@ -35,7 +35,16 @@ mock.module("@/stores/permissionStore", () => ({
 
 mock.module("@/stores/useConfigStore", () => ({
   useConfigStore: {
-    getState: () => ({ isConnected: true, hasEverConnected: true }),
+    getState: () => ({
+      isConnected: true,
+      hasEverConnected: true,
+      getConnectionState: () => ({
+        isConnected: true,
+        hasEverConnected: true,
+        connectionPhase: "connected",
+        lastDisconnectReason: null,
+      }),
+    }),
     setState: () => undefined,
   },
 }))

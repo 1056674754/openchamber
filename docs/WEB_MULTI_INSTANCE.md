@@ -241,8 +241,8 @@ serverRegistry.register({
 **现有文件**: `packages/ui/src/components/desktop/DesktopHostSwitcher.tsx`
 
 当前逻辑：
-- 非 Tauri（Web）：`window.location.assign()` 跳转到新 URL
-- Tauri（Electron）：IPC connect → navigate
+- Web：`window.location.assign()` 跳转到新 URL
+- Desktop bridge（Electron）：IPC connect → navigate
 
 Web 多实例模式下，不应该 `window.location.assign()` 跳转。
 应该在当前页面内：
@@ -262,7 +262,7 @@ Web 多实例模式下，不应该 `window.location.assign()` 跳转。
 - `packages/ui/src/components/sections/remote-instances/RemoteInstancesSidebar.tsx`
 - `packages/ui/src/components/sections/remote-instances/RemoteInstancesPage.tsx`
 
-当前这些组件硬编码使用 `desktopSshStore` (Tauri IPC)。
+当前这些组件硬编码使用 `desktopSshStore`（Electron preload IPC）。
 
 **改动**:
 

@@ -22,10 +22,10 @@ const macosMajor = Number.parseInt(macosMajorRaw, 10);
 //    Remote UIs still need it so isDesktopShell() returns true and the
 //    window renders with desktop affordances (DesktopHostSwitcher,
 //    title bar offsets, etc.). Expose unconditionally.
-//  - __TAURI__ is the IPC channel to the main process. Remote pages must
-//    not get it — otherwise any page loaded via DesktopHostSwitcher could
-//    read local files, open apps, relaunch, etc. Expose only on local
-//    pages (loopback / state.localOrigin / file:// for dev).
+//  - __OPENCHAMBER_DESKTOP__ is the IPC bridge to the main process.
+//    It is visible to every page loaded in this webContents because remote
+//    pages still need safe host-switch/window commands. Sensitive commands
+//    are rejected by the main-process sender-origin gate.
 // Everything driven by localOrigin (home dir, macOS hints) also stays
 // local-only since it leaks info about the Electron host machine.
 const currentOrigin = (() => {
@@ -126,11 +126,11 @@ ipcRenderer.on('openchamber:emit', (_evt, payload) => {
   dispatchNativeEvent(event, payload.detail);
 });
 
-// __TAURI__ is exposed on all pages; the main-process gate in
+// __OPENCHAMBER_DESKTOP__ is exposed on all pages; the main-process gate in
 // ipcMain.handle('openchamber:invoke') decides per-command what is safe
 // for non-local callers (window/host-switcher ops yes, file/shell ops
 // no). See COMMANDS_SAFE_FOR_REMOTE in main.mjs.
-contextBridge.exposeInMainWorld('__TAURI__', {
+contextBridge.exposeInMainWorld('__OPENCHAMBER_DESKTOP__', {
   core: {
     invoke: (cmd, args) => ipcRenderer.invoke('openchamber:invoke', cmd, args || {}),
   },

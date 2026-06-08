@@ -6,9 +6,10 @@ import { useI18n } from '@/lib/i18n';
 
 interface ChatEmptyStateProps {
     isSubmitting?: boolean;
+    children?: React.ReactNode;
 }
 
-const ChatEmptyState: React.FC<ChatEmptyStateProps> = ({ isSubmitting }) => {
+const ChatEmptyState: React.FC<ChatEmptyStateProps> = ({ isSubmitting, children }) => {
     const { t } = useI18n();
     const { currentTheme } = useThemeSystem();
     const initError = useGlobalSyncStore((s) => s.error);
@@ -38,6 +39,11 @@ const ChatEmptyState: React.FC<ChatEmptyStateProps> = ({ isSubmitting }) => {
                 <>
                     <OpenChamberLogo width={140} height={140} className="opacity-20" />
                     <span className="text-body-md" style={{ color: textColor }}>{t('chat.emptyState.startNewChat')}</span>
+                    {children ? (
+                        <div className="w-full max-w-3xl px-6">
+                            {children}
+                        </div>
+                    ) : null}
                 </>
             )}
         </div>

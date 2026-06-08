@@ -161,54 +161,48 @@ const renderPreviewScreenshot = async (
   iframe: HTMLIFrameElement,
   target: PreviewElementMetadata,
 ): Promise<File | null> => {
-  const tauri = typeof window !== 'undefined'
-    ? (window as unknown as { __TAURI__?: { core?: { invoke?: <T>(cmd: string, args?: Record<string, unknown>) => Promise<T> } } }).__TAURI__
-    : undefined;
-  if (typeof tauri?.core?.invoke === 'function') {
-    try {
-      const rect = iframe.getBoundingClientRect();
-      const capture = await tauri.core.invoke<{ mime: string; base64: string; width: number; height: number }>('desktop_capture_page_rect', {
-        x: rect.left,
-        y: rect.top,
-        width: rect.width,
-        height: rect.height,
-      });
-      const image = new Image();
-      await new Promise<void>((resolve, reject) => {
-        image.onload = () => resolve();
-        image.onerror = () => reject(new Error('Failed to load desktop preview screenshot'));
-        image.src = `data:${capture.mime};base64,${capture.base64}`;
-      });
+  try {
+    const rect = iframe.getBoundingClientRect();
+    const capture = await invokeDesktopCommand<{ mime: string; base64: string; width: number; height: number }>('desktop_capture_page_rect', {
+      x: rect.left,
+      y: rect.top,
+      width: rect.width,
+      height: rect.height,
+    });
+    const image = new Image();
+    await new Promise<void>((resolve, reject) => {
+      image.onload = () => resolve();
+      image.onerror = () => reject(new Error('Failed to load desktop preview screenshot'));
+      image.src = `data:${capture.mime};base64,${capture.base64}`;
+    });
 
-      const width = Math.max(1, image.naturalWidth || capture.width || Math.floor(rect.width));
-      const height = Math.max(1, image.naturalHeight || capture.height || Math.floor(rect.height));
-      const maxOutputWidth = 1200;
-      const outputScale = Math.min(1, maxOutputWidth / width);
-      const canvas = document.createElement('canvas');
-      canvas.width = Math.floor(width * outputScale);
-      canvas.height = Math.floor(height * outputScale);
-      const context = canvas.getContext('2d');
-      if (!context) return null;
+    const width = Math.max(1, image.naturalWidth || capture.width || Math.floor(rect.width));
+    const height = Math.max(1, image.naturalHeight || capture.height || Math.floor(rect.height));
+    const maxOutputWidth = 1200;
+    const outputScale = Math.min(1, maxOutputWidth / width);
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.floor(width * outputScale);
+    canvas.height = Math.floor(height * outputScale);
+    const context = canvas.getContext('2d');
+    if (!context) return null;
 
-      context.scale(outputScale, outputScale);
-      context.drawImage(image, 0, 0, width, height);
-      const xScale = width / Math.max(1, rect.width);
-      const yScale = height / Math.max(1, rect.height);
-      context.fillStyle = 'rgba(37, 99, 235, 0.28)';
-      context.strokeStyle = 'rgb(37, 99, 235)';
-      context.lineWidth = Math.max(2, 2 * xScale);
-      context.fillRect(target.bounds.x * xScale, target.bounds.y * yScale, target.bounds.width * xScale, target.bounds.height * yScale);
-      context.strokeRect(target.bounds.x * xScale, target.bounds.y * yScale, target.bounds.width * xScale, target.bounds.height * yScale);
+    context.scale(outputScale, outputScale);
+    context.drawImage(image, 0, 0, width, height);
+    const xScale = width / Math.max(1, rect.width);
+    const yScale = height / Math.max(1, rect.height);
+    context.fillStyle = 'rgba(37, 99, 235, 0.28)';
+    context.strokeStyle = 'rgb(37, 99, 235)';
+    context.lineWidth = Math.max(2, 2 * xScale);
+    context.fillRect(target.bounds.x * xScale, target.bounds.y * yScale, target.bounds.width * xScale, target.bounds.height * yScale);
+    context.strokeRect(target.bounds.x * xScale, target.bounds.y * yScale, target.bounds.width * xScale, target.bounds.height * yScale);
 
-      const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.82));
-      if (!blob) return null;
-      return new File([blob], `preview-annotation-${Date.now()}.jpg`, { type: 'image/jpeg' });
-    } catch (error) {
-      console.warn('[preview] failed to capture annotation screenshot:', error);
-      return null;
-    }
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.82));
+    if (!blob) return null;
+    return new File([blob], `preview-annotation-${Date.now()}.jpg`, { type: 'image/jpeg' });
+  } catch (error) {
+    console.warn('[preview] failed to capture annotation screenshot:', error);
+    return null;
   }
-  return null;
 };
 
 const normalizeDirectoryKey = (value: string): string => {

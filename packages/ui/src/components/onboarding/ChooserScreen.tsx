@@ -1,11 +1,10 @@
 import React from 'react';
-import { isDesktopShell, isTauriShell, startDesktopWindowDrag } from '@/lib/desktop';
+import { hasDesktopInvoke, isDesktopShell, requestFileAccess, restartDesktopApp, startDesktopWindowDrag } from '@/lib/desktop';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Icon } from "@/components/icon/Icon";
 import { updateDesktopSettings } from '@/lib/persistence';
 import { copyTextToClipboard } from '@/lib/clipboard';
-import { restartDesktopApp } from '@/lib/desktop';
 import { cn } from '@/lib/utils';
 import { RemoteConnectionForm } from './RemoteConnectionForm';
 import { desktopHostsGet, desktopHostsSet } from '@/lib/desktopHosts';
@@ -115,7 +114,7 @@ export function ChooserScreen({ onCliAvailable }: ChooserScreenProps) {
   }, []);
 
   const persistFirstChoice = React.useCallback(async (choice: 'local' | 'remote') => {
-    if (!isTauriShell()) return;
+    if (!hasDesktopInvoke()) return;
 
     const config = await desktopHostsGet();
     await desktopHostsSet({
@@ -126,7 +125,7 @@ export function ChooserScreen({ onCliAvailable }: ChooserScreenProps) {
   }, []);
 
   const announceAvailable = React.useCallback(async () => {
-    if (isTauriShell()) {
+    if (hasDesktopInvoke()) {
       await persistFirstChoice('local');
     }
     onCliAvailable?.();
@@ -178,30 +177,25 @@ export function ChooserScreen({ onCliAvailable }: ChooserScreenProps) {
 
   const handleBrowse = React.useCallback(async () => {
     if (typeof window === 'undefined') return;
-    if (!isDesktopApp || !isTauriShell()) return;
-
-    const tauri = (window as unknown as { __TAURI__?: { dialog?: { open?: (opts: Record<string, unknown>) => Promise<unknown> } } }).__TAURI__;
-    if (!tauri?.dialog?.open) return;
+    if (!isDesktopApp || !hasDesktopInvoke()) return;
 
     try {
-      const selected = await tauri.dialog.open({
-        title: t('onboarding.localSetup.dialog.selectOpencodeBinary'),
-        multiple: false,
-        directory: false,
+      const selected = await requestFileAccess({
+        defaultPath: opencodeBinary,
       });
-      if (typeof selected === 'string' && selected.trim().length > 0) {
-        setOpencodeBinary(selected.trim());
+      if (selected.success && typeof selected.path === 'string' && selected.path.trim().length > 0) {
+        setOpencodeBinary(selected.path.trim());
       }
     } catch {
       // ignore
     }
-  }, [isDesktopApp, t]);
+  }, [isDesktopApp, opencodeBinary]);
 
   const handleApplyPath = React.useCallback(async () => {
     setIsApplyingPath(true);
     try {
       await updateDesktopSettings({ opencodeBinary: opencodeBinary.trim() });
-      if (isTauriShell()) {
+      if (hasDesktopInvoke()) {
         await persistFirstChoice('local');
         await restartDesktopApp();
         return;
@@ -230,7 +224,8 @@ export function ChooserScreen({ onCliAvailable }: ChooserScreenProps) {
         ? '/home/you/.bun/bin/opencode'
         : '/Users/you/.bun/bin/opencode';
 
-  const showLocal = !isDesktopApp || !isTauriShell() || activeTab === 'local';
+  const hasDesktopBridge = hasDesktopInvoke();
+  const showLocal = !isDesktopApp || !hasDesktopBridge || activeTab === 'local';
 
   return (
     <div
@@ -247,7 +242,7 @@ export function ChooserScreen({ onCliAvailable }: ChooserScreenProps) {
           </p>
         </header>
 
-        {isDesktopApp && isTauriShell() && (
+        {isDesktopApp && hasDesktopBridge && (
           <div className="app-region-no-drag flex gap-1.5">
             <button
               type="button"
@@ -276,7 +271,7 @@ export function ChooserScreen({ onCliAvailable }: ChooserScreenProps) {
           </div>
         )}
 
-        {isDesktopApp && isTauriShell() && activeTab === 'remote' ? (
+        {isDesktopApp && hasDesktopBridge && activeTab === 'remote' ? (
           <div className="app-region-no-drag">
             <RemoteConnectionForm
               onBack={() => setActiveTab('local')}
@@ -393,7 +388,7 @@ export function ChooserScreen({ onCliAvailable }: ChooserScreenProps) {
                     variant="secondary"
                     size="sm"
                     onClick={handleBrowse}
-                    disabled={isApplyingPath || !isDesktopApp || !isTauriShell()}
+                    disabled={isApplyingPath || !isDesktopApp || !hasDesktopBridge}
                   >
                     {t('onboarding.localSetup.actions.browse')}
                   </Button>

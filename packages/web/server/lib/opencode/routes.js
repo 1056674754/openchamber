@@ -104,6 +104,53 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
     return versions.sort((left, right) => compareVersions(right, left))[0];
   };
 
+  const openCodeUpgradeDiagnosticFields = [
+    'copyText',
+    'message',
+    'manager',
+    'packageManager',
+    'command',
+    'exitCode',
+    'code',
+    'stderr',
+    'stdout',
+    'output',
+    'logs',
+    'detail',
+    'details',
+    'cause',
+  ];
+
+  const pickOpenCodeUpgradeDiagnostics = (payload) => {
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+      return {};
+    }
+
+    const diagnostics = {};
+    for (const key of openCodeUpgradeDiagnosticFields) {
+      if (Object.prototype.hasOwnProperty.call(payload, key) && payload[key] !== undefined) {
+        diagnostics[key] = payload[key];
+      }
+    }
+    return diagnostics;
+  };
+
+  const resolveOpenCodeUpgradeError = (payload, fallback) => {
+    if (typeof payload === 'string' && payload.trim()) {
+      return payload.trim();
+    }
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+      return fallback;
+    }
+    if (typeof payload.error === 'string' && payload.error.trim()) {
+      return payload.error.trim();
+    }
+    if (typeof payload.message === 'string' && payload.message.trim()) {
+      return payload.message.trim();
+    }
+    return fallback;
+  };
+
   const pruneExpiredPendingMcpAuthContexts = () => {
     const now = Date.now();
     for (const [state, entry] of pendingMcpAuthContextByState.entries()) {
@@ -152,7 +199,8 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
       if (!response.ok) {
         return res.status(response.status).json({
           success: false,
-          error: payload?.error || response.statusText || 'Failed to upgrade OpenCode',
+          error: resolveOpenCodeUpgradeError(payload, response.statusText || 'Failed to upgrade OpenCode'),
+          ...pickOpenCodeUpgradeDiagnostics(payload),
         });
       }
 

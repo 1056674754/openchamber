@@ -28,7 +28,7 @@ function createPart(id: string, messageID: string): Part {
 }
 
 describe("getReconnectCandidateSessionIds", () => {
-  test("includes non-idle, incomplete assistant, and parent sessions", () => {
+  test("includes non-idle, incomplete assistant, and parents of candidate child sessions", () => {
     const busyStatus = { type: "busy" } as SessionStatus
 
     expect(getReconnectCandidateSessionIds({
@@ -38,11 +38,30 @@ describe("getReconnectCandidateSessionIds", () => {
         createSession("parent"),
         createSession("incomplete"),
       ],
-      session_status: { busy: busyStatus },
+      session_status: { busy: busyStatus, child: busyStatus },
       message: {
         incomplete: [createAssistantMessage("m-1", "incomplete")],
       },
-    }).sort()).toEqual(["busy", "incomplete", "parent"])
+    }).sort()).toEqual(["busy", "child", "incomplete", "parent"])
+  })
+
+  test("does not include parents of fully idle, renderable child sessions", () => {
+    expect(getReconnectCandidateSessionIds({
+      session: [
+        createSession("child", { parentID: "parent" }),
+        createSession("parent"),
+      ],
+      session_status: {
+        child: { type: "idle" } as SessionStatus,
+        parent: { type: "idle" } as SessionStatus,
+      },
+      message: {
+        child: [createAssistantMessage("m-1", "child", 1)],
+      },
+      part: {
+        "m-1": [createPart("p-1", "m-1")],
+      },
+    })).toEqual([])
   })
 
   test("includes the currently viewed session even when it looks idle and complete", () => {

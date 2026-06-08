@@ -218,7 +218,7 @@ export type InitialLoadingState = {
 };
 
 export type DesktopBootFlowRestartInput = {
-  isTauriShell: boolean;
+  hasDesktopInvoke: boolean;
   isDesktopLocalOriginActive: boolean;
 };
 
@@ -250,16 +250,16 @@ export function canDismissInitialLoading(state: InitialLoadingState): boolean {
 }
 
 /**
- * Boot/recovery UI can render in the Tauri startup window before the local
+ * Boot/recovery UI can render in the desktop startup window before the local
  * desktop HTTP origin is active. In that state, same-origin reloads and
- * `/api/*` requests cannot recover the app, so callers must restart Tauri.
+ * `/api/*` requests cannot recover the app, so callers must restart desktop.
  */
 export function shouldRestartDesktopBootFlow(input: DesktopBootFlowRestartInput): boolean {
-  return input.isTauriShell && !input.isDesktopLocalOriginActive;
+  return input.hasDesktopInvoke && !input.isDesktopLocalOriginActive;
 }
 
 /**
- * Read the boot outcome injected by the Rust backend.
+ * Read the boot outcome injected by the desktop backend.
  * Returns `null` when not in desktop, when the outcome has not been set yet,
  * or when the injected payload is malformed.
  */

@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import type { Message, Part } from '@opencode-ai/sdk/v2';
-import { buildTurnWindowModel, updateTurnWindowModelIncremental } from './windowTurns';
+import { TURN_WINDOW_DEFAULTS } from './constants';
+import { buildTurnWindowModel, getInitialTurnStart, updateTurnWindowModelIncremental } from './windowTurns';
 import type { ChatMessageEntry } from './types';
 
 function message({ id, role, parentID }: { id: string; role: 'user' | 'assistant' | 'system'; parentID?: string }): ChatMessageEntry {
@@ -16,6 +17,11 @@ function message({ id, role, parentID }: { id: string; role: 'user' | 'assistant
 }
 
 describe('windowTurns', () => {
+    test('starts the local load-older window after the configured initial turn count', () => {
+        expect(getInitialTurnStart(TURN_WINDOW_DEFAULTS.initialTurns)).toBe(0);
+        expect(getInitialTurnStart(TURN_WINDOW_DEFAULTS.initialTurns + 1)).toBe(1);
+    });
+
     test('does not map assistant messages without a parent to the current turn', () => {
         const user = message({ id: 'u1', role: 'user' });
         const assistant = message({ id: 'a1', role: 'assistant' });

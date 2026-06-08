@@ -601,6 +601,8 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
           undefined,
           syntheticParts,
           execution.variant || undefined,
+          undefined,
+          sessionId,
         );
 
         setPendingPlanSend(null);

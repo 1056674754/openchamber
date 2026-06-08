@@ -20,11 +20,15 @@ export interface ToolPopupContent {
         mimeType?: string;
         filename?: string;
         size?: number;
+        filePath?: string;
+        directory?: string;
         gallery?: Array<{
             url: string;
             mimeType?: string;
             filename?: string;
             size?: number;
+            filePath?: string;
+            directory?: string;
         }>;
         index?: number;
     };

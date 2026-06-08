@@ -65,6 +65,7 @@ import { useTerminalStore } from '@/stores/useTerminalStore';
 import { ProjectActionsButton } from '@/components/layout/ProjectActionsButton';
 import { SessionSwitcherDropdown } from '@/components/session/SessionSwitcherDropdown';
 import { canUseElectronDesktopIPC, invokeDesktop, isDesktopShell, isVSCodeRuntime, startDesktopWindowDrag } from '@/lib/desktop';
+import { isDesktopWindowFullscreen as readDesktopWindowFullscreen, onDesktopWindowResized } from '@/lib/desktopNative';
 import { resolveSessionDiffStats } from '@/components/session/sidebar/utils';
 import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
@@ -1396,9 +1397,7 @@ export const Header: React.FC<HeaderProps> = ({
 
     const syncFullscreenState = async () => {
       try {
-        const { getCurrentWindow } = await import('@tauri-apps/api/window');
-        const currentWindow = getCurrentWindow();
-        const fullscreen = await currentWindow.isFullscreen();
+        const fullscreen = await readDesktopWindowFullscreen();
         if (!disposed) {
           setIsDesktopWindowFullscreen(fullscreen);
         }
@@ -1409,20 +1408,14 @@ export const Header: React.FC<HeaderProps> = ({
       }
     };
 
-    const attach = async () => {
-      try {
-        const { getCurrentWindow } = await import('@tauri-apps/api/window');
-        const currentWindow = getCurrentWindow();
-        unlistenResize = await currentWindow.onResized(() => {
-          void syncFullscreenState();
-        });
-      } catch {
-        // Ignore listener setup failures; fallback state remains false.
-      }
+    const attach = () => {
+      unlistenResize = onDesktopWindowResized(() => {
+        void syncFullscreenState();
+      });
     };
 
     void syncFullscreenState();
-    void attach();
+    attach();
 
     return () => {
       disposed = true;

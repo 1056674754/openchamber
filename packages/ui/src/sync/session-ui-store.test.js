@@ -1,6 +1,18 @@
-import { beforeEach, describe, expect, test } from 'bun:test';
-import { useSessionWorktreeStore } from './session-worktree-store';
-import { useSessionUIStore } from './session-ui-store';
+import { beforeEach, describe, expect, mock, test } from 'bun:test';
+
+mock.module('@/lib/opencode/client', () => ({
+  opencodeClient: {
+    setDirectory: () => {},
+    getDirectory: () => '/repo',
+    getSdkClient: () => ({}),
+    getScopedSdkClient: () => ({}),
+  },
+}));
+
+const { serverRegistry } = await import('@/lib/opencode/server-registry');
+const { useProjectsStore } = await import('@/stores/useProjectsStore');
+const { useSessionWorktreeStore } = await import('./session-worktree-store');
+const { useSessionUIStore } = await import('./session-ui-store');
 
 /**
  * Unit tests for session worktree routing through the authoritative store.
@@ -23,6 +35,7 @@ describe('session-worktree-store worktree routing', () => {
       store.clearAttachment(sessionId);
     }
     useSessionUIStore.setState({ currentSessionId: null, worktreeMetadata: new Map() });
+    useProjectsStore.setState({ projects: [], activeProjectId: null });
   });
 
   test('getDirectoryForSession prefers authoritative attachment cwd over sync fallback', () => {
@@ -98,6 +111,23 @@ describe('session-worktree-store worktree routing', () => {
     expect(attachment.degraded).toBe(true);
     // cwd should equal worktreeRoot when degraded (fallback)
     expect(attachment.cwd).toBe(attachment.worktreeRoot);
+  });
+
+  test('setCurrentSession indexes remote server from the selected directory project', () => {
+    serverRegistry.forgetSession('remote-session');
+    useProjectsStore.setState({
+      projects: [{
+        id: 'remote-project',
+        path: '/remote/project',
+        label: 'Remote Project',
+        serverId: 'remote-a',
+      }],
+      activeProjectId: 'remote-project',
+    });
+
+    useSessionUIStore.getState().setCurrentSession('remote-session', '/remote/project/src');
+
+    expect(serverRegistry.getServerForSession('remote-session')).toBe('remote-a');
   });
 
   test('isolated session initializes created-for-session attachment', () => {

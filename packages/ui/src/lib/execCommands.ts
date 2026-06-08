@@ -23,12 +23,12 @@ function getRuntimeFilesAPI(): FilesAPI | null {
 }
 
 export async function execCommands(commands: string[], cwd: string, options?: { baseUrl?: string }): Promise<ExecResult> {
+  const serverBaseUrl = options?.baseUrl ?? resolveBaseUrl(cwd);
   const runtimeFiles = getRuntimeFilesAPI();
-  if (!options?.baseUrl && runtimeFiles?.execCommands) {
+  if (!serverBaseUrl && runtimeFiles?.execCommands) {
     return runtimeFiles.execCommands(commands, cwd);
   }
 
-  const serverBaseUrl = options?.baseUrl ?? resolveBaseUrl(cwd);
   const execUrl = serverBaseUrl
     ? resolveApiUrl('/api/fs/exec', serverBaseUrl)
     : `${getBaseUrl()}/fs/exec`;

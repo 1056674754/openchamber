@@ -8,9 +8,10 @@ import {
 import { createUpstreamSseReader } from '../event-stream/upstream-reader.js';
 import {
   createSseBoundaryTracker,
-  waitForSseDrain,
   writeSseChunkWithBackpressure,
 } from '../opencode/proxy.js';
+
+const REMOTE_STREAM_CONNECT_TIMEOUT_MS = 8_000;
 
 const isAbortError = (error) => error?.name === 'AbortError';
 const isClientClosedStreamError = (error) => {
@@ -24,7 +25,7 @@ const isClientClosedStreamError = (error) => {
 /**
  * Build auth headers for a remote instance based on its auth config.
  */
-const buildAuthHeaders = (instance) => {
+export const buildRemoteEventAuthHeaders = (instance) => {
   const headers = {};
   if (instance.auth?.type === 'password' && instance.auth.value) {
     headers['Authorization'] = `Basic ${Buffer.from(`user:${instance.auth.value}`).toString('base64')}`;
@@ -42,6 +43,16 @@ const parseLastEventId = (searchParams) => {
   return new URLSearchParams(raw).get('lastEventId')?.trim() || '';
 };
 
+const beginBackgroundHealthProbe = (runtime, instanceId) => {
+  if (typeof runtime?.ensureHealthy !== 'function') {
+    return;
+  }
+  if (typeof runtime.isHealthProbeInFlight === 'function' && runtime.isHealthProbeInFlight(instanceId)) {
+    return;
+  }
+  void runtime.ensureHealthy(instanceId, { timeoutSec: 2 }).catch(() => {});
+};
+
 const pipeRemoteGlobalSseToWs = (clientWs, instance, searchParams) => {
   const remoteBase = instance.url.replace(/\/$/, '');
   const controller = new AbortController();
@@ -54,6 +65,7 @@ const pipeRemoteGlobalSseToWs = (clientWs, instance, searchParams) => {
   });
 
   const cleanup = () => {
+    clearTimeout(connectTimer);
     if (!controller.signal.aborted) {
       controller.abort();
     }
@@ -64,6 +76,14 @@ const pipeRemoteGlobalSseToWs = (clientWs, instance, searchParams) => {
     if (clientWs.readyState !== 1) return;
     try { clientWs.ping(); } catch {}
   }, MESSAGE_STREAM_WS_HEARTBEAT_INTERVAL_MS);
+
+  const connectTimer = setTimeout(() => {
+    if (upstreamConnected) {
+      return;
+    }
+    cleanup();
+    try { clientWs.close(1011, 'Remote event stream timeout'); } catch {}
+  }, REMOTE_STREAM_CONNECT_TIMEOUT_MS);
 
   const heartbeatInterval = setInterval(() => {
     if (!upstreamConnected) return;
@@ -90,9 +110,10 @@ const pipeRemoteGlobalSseToWs = (clientWs, instance, searchParams) => {
     initialLastEventId: parseLastEventId(searchParams),
     signal: controller.signal,
     buildUrl: () => new URL(`${remoteBase}/api/global/event`),
-    getHeaders: () => buildAuthHeaders(instance),
+    getHeaders: () => buildRemoteEventAuthHeaders(instance),
     onConnect() {
       upstreamConnected = true;
+      clearTimeout(connectTimer);
     },
     onDisconnect() {
       upstreamConnected = false;
@@ -136,7 +157,7 @@ export const pipeRemoteWs = (clientWs, instance, isGlobal, searchParams) => {
   const remotePath = isGlobal ? '/api/global/event/ws' : '/api/event/ws';
   const remoteWsUrl = remoteBase.replace(/^http/, 'ws') + remotePath + (searchParams || '');
 
-  const headers = buildAuthHeaders(instance);
+  const headers = buildRemoteEventAuthHeaders(instance);
 
   let remoteWs;
   try {
@@ -147,10 +168,24 @@ export const pipeRemoteWs = (clientWs, instance, isGlobal, searchParams) => {
     return;
   }
 
+  let remoteOpened = false;
+  const connectTimer = setTimeout(() => {
+    if (remoteOpened) {
+      return;
+    }
+    cleanup();
+  }, REMOTE_STREAM_CONNECT_TIMEOUT_MS);
+
   const cleanup = () => {
+    clearTimeout(connectTimer);
     try { remoteWs.close(); } catch {}
     try { clientWs.close(); } catch {}
   };
+
+  remoteWs.on('open', () => {
+    remoteOpened = true;
+    clearTimeout(connectTimer);
+  });
 
   remoteWs.on('message', (data) => {
     if (clientWs.readyState === 1) {
@@ -209,6 +244,27 @@ export const parseRemoteWsPath = (pathname) => {
   return { instanceId, isGlobal };
 };
 
+const resolveHealthyInstance = async (runtime, instanceId) => {
+  const instance = runtime.getInstanceSync(instanceId);
+
+  if (!instance) {
+    return { ok: false, status: 404, error: 'Remote instance not found' };
+  }
+
+  if (!instance.enabled) {
+    return { ok: false, status: 503, error: 'Remote instance not available' };
+  }
+
+  const healthy = runtime.isHealthy(instanceId);
+
+  if (!healthy) {
+    beginBackgroundHealthProbe(runtime, instanceId);
+    return { ok: false, status: 503, error: 'Remote instance not available' };
+  }
+
+  return { ok: true, instance };
+};
+
 /**
  * Forward an SSE request from the browser to a remote OpenChamber instance.
  *
@@ -216,13 +272,19 @@ export const parseRemoteWsPath = (pathname) => {
  * No hub or subscriber model needed — just proxy the upstream stream directly,
  * following the same pattern as `forwardSseRequest` in opencode/proxy.js.
  */
-const forwardRemoteSseRequest = async (req, res, { instance, upstreamPath }) => {
+const forwardRemoteSseRequest = async (req, res, { instance, upstreamPath, runtime, releaseLane }) => {
   const abortController = new AbortController();
-  const closeUpstream = () => abortController.abort();
+  let clientClosed = false;
+  const closeUpstream = () => {
+    clientClosed = true;
+    abortController.abort();
+  };
   let upstream = null;
   let reader = null;
   let heartbeatTimer = null;
   let writeQueue = Promise.resolve(true);
+  let connectTimer = null;
+  let connectTimedOut = false;
   const sseBoundary = createSseBoundaryTracker();
 
   req.on('close', closeUpstream);
@@ -231,20 +293,28 @@ const forwardRemoteSseRequest = async (req, res, { instance, upstreamPath }) => 
     const headers = {
       Accept: 'text/event-stream',
       'Cache-Control': 'no-cache',
-      ...buildAuthHeaders(instance),
+      ...buildRemoteEventAuthHeaders(instance),
     };
 
     if (req.headers['last-event-id']) {
       headers['Last-Event-ID'] = req.headers['last-event-id'];
     }
 
+    connectTimer = setTimeout(() => {
+      connectTimedOut = true;
+      abortController.abort();
+    }, REMOTE_STREAM_CONNECT_TIMEOUT_MS);
+
     upstream = await fetch(`${instance.url}${upstreamPath}`, {
       method: 'GET',
       headers,
       signal: abortController.signal,
     });
+    clearTimeout(connectTimer);
+    connectTimer = null;
 
     if (!upstream.ok) {
+      runtime?.recordRemoteRequestFailure?.(instance.id, { status: upstream.status });
       if (!res.headersSent) {
         res
           .status(upstream.status)
@@ -260,14 +330,18 @@ const forwardRemoteSseRequest = async (req, res, { instance, upstreamPath }) => 
       .includes('text/event-stream');
 
     if (!upstream.body) {
+      runtime?.recordRemoteRequestSuccess?.(instance.id);
       res.end(await upstream.text().catch(() => ''));
       return;
     }
 
     if (!isEventStream) {
+      runtime?.recordRemoteRequestSuccess?.(instance.id);
       res.end(await upstream.text());
       return;
     }
+
+    runtime?.recordRemoteRequestSuccess?.(instance.id);
 
     res.setHeader('Content-Type', contentType);
     res.setHeader('Cache-Control', 'no-cache');
@@ -340,12 +414,17 @@ const forwardRemoteSseRequest = async (req, res, { instance, upstreamPath }) => 
     res.end();
   } catch (error) {
     if (
-      isAbortError(error) ||
-      abortController.signal.aborted ||
+      (isAbortError(error) && clientClosed) ||
+      (abortController.signal.aborted && clientClosed) ||
       res.writableEnded ||
       res.destroyed ||
       isClientClosedStreamError(error)
     ) {
+      return;
+    }
+    runtime?.recordRemoteRequestFailure?.(instance.id, error);
+    if (connectTimedOut && !res.headersSent) {
+      res.status(504).json({ error: 'Remote SSE relay timed out' });
       return;
     }
     console.error(
@@ -358,6 +437,10 @@ const forwardRemoteSseRequest = async (req, res, { instance, upstreamPath }) => 
       res.end();
     }
   } finally {
+    if (connectTimer) {
+      clearTimeout(connectTimer);
+      connectTimer = null;
+    }
     if (heartbeatTimer) {
       clearTimeout(heartbeatTimer);
       heartbeatTimer = null;
@@ -372,6 +455,9 @@ const forwardRemoteSseRequest = async (req, res, { instance, upstreamPath }) => 
       }
     } catch {
       // Best-effort cleanup
+    }
+    if (typeof releaseLane === 'function') {
+      releaseLane();
     }
   }
 };
@@ -388,39 +474,51 @@ const forwardRemoteSseRequest = async (req, res, { instance, upstreamPath }) => 
  */
 export const registerRemoteSseRelay = (app, runtime) => {
   // Global SSE relay
-  app.get('/api/remote/:instanceId/global/event', (req, res) => {
+  app.get('/api/remote/:instanceId/global/event', async (req, res) => {
     const { instanceId } = req.params;
-    const instance = runtime.getInstanceSync(instanceId);
-
-    if (!instance) {
-      return res.status(404).json({ error: 'Remote instance not found' });
+    const resolved = await resolveHealthyInstance(runtime, instanceId);
+    if (!resolved.ok) {
+      return res.status(resolved.status).json({ error: resolved.error, instanceId });
     }
 
-    if (!instance.enabled || !runtime.isHealthy(instanceId)) {
-      return res
-        .status(503)
-        .json({ error: 'Remote instance not available', instanceId });
+    let releaseLane = null;
+    try {
+      releaseLane = await runtime.enterRequestLane?.(instanceId, 'stream');
+    } catch (error) {
+      const status = Number.isInteger(error?.statusCode) ? error.statusCode : 503;
+      return res.status(status).json({
+        error: error?.message || 'Remote instance unavailable',
+        code: error?.code || 'REMOTE_REQUEST_REJECTED',
+        instanceId,
+      });
     }
 
     void forwardRemoteSseRequest(req, res, {
-      instance,
+      instance: resolved.instance,
       upstreamPath: '/api/global/event',
+      runtime,
+      releaseLane,
     });
   });
 
   // Directory-scoped SSE relay
-  app.get('/api/remote/:instanceId/event', (req, res) => {
+  app.get('/api/remote/:instanceId/event', async (req, res) => {
     const { instanceId } = req.params;
-    const instance = runtime.getInstanceSync(instanceId);
-
-    if (!instance) {
-      return res.status(404).json({ error: 'Remote instance not found' });
+    const resolved = await resolveHealthyInstance(runtime, instanceId);
+    if (!resolved.ok) {
+      return res.status(resolved.status).json({ error: resolved.error, instanceId });
     }
 
-    if (!instance.enabled || !runtime.isHealthy(instanceId)) {
-      return res
-        .status(503)
-        .json({ error: 'Remote instance not available', instanceId });
+    let releaseLane = null;
+    try {
+      releaseLane = await runtime.enterRequestLane?.(instanceId, 'stream');
+    } catch (error) {
+      const status = Number.isInteger(error?.statusCode) ? error.statusCode : 503;
+      return res.status(status).json({
+        error: error?.message || 'Remote instance unavailable',
+        code: error?.code || 'REMOTE_REQUEST_REJECTED',
+        instanceId,
+      });
     }
 
     // Preserve query string (e.g. ?directory=...)
@@ -430,8 +528,10 @@ export const registerRemoteSseRelay = (app, runtime) => {
         : '';
 
     void forwardRemoteSseRequest(req, res, {
-      instance,
+      instance: resolved.instance,
       upstreamPath: `/api/event${queryString}`,
+      runtime,
+      releaseLane,
     });
   });
 };

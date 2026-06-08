@@ -643,6 +643,7 @@ interface UIStore {
   inputSpellcheckEnabled: boolean;
   wideChatLayoutEnabled: boolean;
   showToolFileIcons: boolean;
+  showTurnChangedFiles: boolean;
   showExpandedBashTools: boolean;
   showExpandedEditTools: boolean;
   timeFormatPreference: TimeFormatPreference;
@@ -782,6 +783,7 @@ setSettingsRemoteInstancesSelectedId: (instanceId: string | null) => void;
   setInputSpellcheckEnabled: (value: boolean) => void;
   setWideChatLayoutEnabled: (value: boolean) => void;
   setShowToolFileIcons: (value: boolean) => void;
+  setShowTurnChangedFiles: (value: boolean) => void;
   setShowExpandedBashTools: (value: boolean) => void;
   setShowExpandedEditTools: (value: boolean) => void;
   setTimeFormatPreference: (value: TimeFormatPreference) => void;
@@ -915,13 +917,14 @@ export const useUIStore = create<UIStore>()(
         inputSpellcheckEnabled: false,
         wideChatLayoutEnabled: false,
         showToolFileIcons: true,
+        showTurnChangedFiles: false,
         showExpandedBashTools: false,
         showExpandedEditTools: false,
         timeFormatPreference: 'auto',
         weekStartPreference: 'auto',
         mermaidRenderingMode: 'svg',
         userMessageRenderingMode: 'markdown',
-        stickyUserHeader: true,
+        stickyUserHeader: false,
         showSplitAssistantMessageActions: false,
         showMobileSessionStatusBar: true,
         isMobileSessionStatusBarCollapsed: false,
@@ -1980,6 +1983,9 @@ export const useUIStore = create<UIStore>()(
         setShowToolFileIcons: (value) => {
           set({ showToolFileIcons: value });
         },
+        setShowTurnChangedFiles: (value) => {
+          set({ showTurnChangedFiles: value });
+        },
         setShowExpandedBashTools: (value) => {
           set({ showExpandedBashTools: value });
         },
@@ -2224,6 +2230,7 @@ export const useUIStore = create<UIStore>()(
           inputSpellcheckEnabled: state.inputSpellcheckEnabled,
           wideChatLayoutEnabled: state.wideChatLayoutEnabled,
           showToolFileIcons: state.showToolFileIcons,
+          showTurnChangedFiles: state.showTurnChangedFiles,
           showExpandedBashTools: state.showExpandedBashTools,
           showExpandedEditTools: state.showExpandedEditTools,
           timeFormatPreference: state.timeFormatPreference,

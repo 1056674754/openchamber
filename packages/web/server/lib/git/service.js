@@ -3555,9 +3555,8 @@ export async function renameBranch(directory, oldName, newName) {
 }
 
 export async function getRemotes(directory) {
-  const { git } = await createRepositoryGitContext(directory);
-
   try {
+    const { git } = await createRepositoryGitContext(directory);
     const remotes = await git.getRemotes(true);
     
     return remotes.map((remote) => ({

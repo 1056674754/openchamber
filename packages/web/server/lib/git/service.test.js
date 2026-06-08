@@ -8,6 +8,7 @@ import simpleGit from 'simple-git';
 import {
   checkoutCommit,
   cherryPick,
+  getRemotes,
   getStatus,
   resetToCommit,
   resolveBaseRefForLog,
@@ -138,6 +139,19 @@ describe('getStatus', () => {
     runGit(repo, ['commit', '-m', 'Initial commit']);
 
     await expect(getStatus(repo)).resolves.toMatchObject({ current: 'main' });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// getRemotes
+// ---------------------------------------------------------------------------
+
+describe('getRemotes', () => {
+  it('returns an empty list for non-git directories', async () => {
+    if (!canRunGit()) return;
+
+    const dir = createTempDir();
+    await expect(getRemotes(dir)).resolves.toEqual([]);
   });
 });
 

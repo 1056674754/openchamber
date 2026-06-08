@@ -127,6 +127,107 @@ describe('event stream broadcaster', () => {
 });
 
 describe('message stream websocket runtime', () => {
+  it('rejects remote websocket upgrades when the instance is unavailable', async () => {
+    const server = new EventEmitter();
+    const wsClients = new Set();
+    const rejects = [];
+    let handleUpgradeCalls = 0;
+
+    const runtime = createMessageStreamWsRuntime({
+      server,
+      uiAuthController: null,
+      isRequestOriginAllowed: async () => true,
+      rejectWebSocketUpgrade(_socket, status, reason) {
+        rejects.push({ status, reason });
+      },
+      buildOpenCodeUrl: (path) => `http://127.0.0.1:4096${path}`,
+      getOpenCodeAuthHeaders: () => ({}),
+      processForwardedEventPayload() {},
+      wsClients,
+      remoteInstancesRuntime: {
+        getInstanceSync: () => ({
+          id: 'remote-a',
+          url: 'http://remote-a.example',
+          enabled: true,
+        }),
+        isHealthy: () => false,
+        ensureHealthy: async () => false,
+      },
+    });
+
+    runtime.wsServer.handleUpgrade = () => {
+      handleUpgradeCalls += 1;
+    };
+
+    server.emit(
+      'upgrade',
+      { url: '/api/remote/remote-a/global/event/ws' },
+      new FakeSocket(),
+      Buffer.alloc(0),
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 5));
+
+    expect(handleUpgradeCalls).toBe(0);
+    expect(rejects).toEqual([
+      { status: 503, reason: 'Remote instance not available' },
+    ]);
+
+    await runtime.close();
+  });
+
+  it('accepts remote websocket upgrades only when the instance is already healthy', async () => {
+    const server = new EventEmitter();
+    const wsClients = new Set();
+    const rejects = [];
+    let handleUpgradeCalls = 0;
+    let ensureHealthyCalls = 0;
+
+    const runtime = createMessageStreamWsRuntime({
+      server,
+      uiAuthController: null,
+      isRequestOriginAllowed: async () => true,
+      rejectWebSocketUpgrade(_socket, status, reason) {
+        rejects.push({ status, reason });
+      },
+      buildOpenCodeUrl: (path) => `http://127.0.0.1:4096${path}`,
+      getOpenCodeAuthHeaders: () => ({}),
+      processForwardedEventPayload() {},
+      wsClients,
+      remoteInstancesRuntime: {
+        getInstanceSync: () => ({
+          id: 'remote-a',
+          url: 'http://remote-a.example',
+          enabled: true,
+        }),
+        isHealthy: () => true,
+        ensureHealthy: async () => {
+          ensureHealthyCalls += 1;
+          return true;
+        },
+      },
+    });
+
+    runtime.wsServer.handleUpgrade = () => {
+      handleUpgradeCalls += 1;
+    };
+
+    server.emit(
+      'upgrade',
+      { url: '/api/remote/remote-a/event/ws?directory=/tmp/project' },
+      new FakeSocket(),
+      Buffer.alloc(0),
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 5));
+
+    expect(ensureHealthyCalls).toBe(0);
+    expect(handleUpgradeCalls).toBe(1);
+    expect(rejects).toEqual([]);
+
+    await runtime.close();
+  });
+
   it('shares one global upstream SSE reader across multiple websocket clients', async () => {
     const server = new EventEmitter();
     const wsClients = new Set();

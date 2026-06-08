@@ -18,6 +18,8 @@ export interface PendingMessagePayload {
   agent?: string
   variant?: string
   inputMode?: "normal" | "shell"
+  directory?: string | null
+  serverId?: string | null
   files?: Array<{ type: "file"; mime: string; url: string; filename: string }>
   additionalParts?: Array<{
     text: string
@@ -127,6 +129,8 @@ export async function recoverPendingMessages(): Promise<void> {
           agent: msg.agent,
           variant: msg.variant,
           inputMode: msg.inputMode,
+          directory: msg.directory,
+          serverId: msg.serverId,
           files: msg.files,
           additionalParts: msg.additionalParts,
         })
