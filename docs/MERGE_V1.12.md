@@ -214,7 +214,7 @@
 |---|---|---|
 | 4.1 / 4.5 | 🔴 待移植 | WSL 检测/排除和 `env-runtime.js` 简化尚未确认落地 |
 | 4.2 | ✅ 已落地 | 与 3.3 合并处理：health URL 和返回值判断已切到 server health route |
-| 4.3 | 🟡 待语义复核 | `SidebarFilesTree.tsx` 已有隐藏文件/加载相关改动，但需对照官方文件树可靠性 diff |
+| 4.3 | ✅ 已落地 | `SidebarFilesTree.tsx` 已移植目录加载错误状态、根/子目录重试 UI，并按官方移除 lazy list 的 `respectGitignore` 参数；保留本 fork 的 desktop/local/remote 三分支 |
 | 4.4 / 4.6 | 🔴 待移植 | startup readiness / `lifecycle.js` 简化需单独服务端 batch |
 | 4.7 / 4.8 | 🟡 待语义复核 | `server-utils-runtime.js`、`fs/routes.js` 有局部改动，需继续对照官方语义 |
 | 4.9 / 4.10 | 🟡 待语义复核 | VS Code bridge / opencode 检测已有部分改动，仍需 Windows/WSL 语义审查 |
