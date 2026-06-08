@@ -17,6 +17,7 @@ import { parseModelIdentifier } from "@/lib/modelIdentifier";
 import { resolveApiUrl } from "@/lib/api/serverUrl";
 import { resolveSdkForDirectory, resolveApiUrl as resolveRemoteApiOrigin } from "@/sync/session-actions";
 import { DEFAULT_SERVER_ID, serverRegistry } from "@/lib/opencode/server-registry";
+import { markStartupTrace, measureStartupTrace } from "@/lib/startupTrace";
 
 const MODELS_DEV_API_URL = "https://models.dev/api.json";
 const MODELS_DEV_PROXY_URL = "/api/openchamber/models-metadata";
@@ -63,6 +64,20 @@ interface OpenChamberDefaults {
 }
 
 const fetchOpenChamberDefaults = async (serverBaseUrl?: string): Promise<OpenChamberDefaults> => {
+    markStartupTrace('config.defaults:start', { scoped: Boolean(serverBaseUrl) });
+    const started = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    const finish = (source: string, result: OpenChamberDefaults) => {
+        const ended = typeof performance !== 'undefined' ? performance.now() : Date.now();
+        markStartupTrace('config.defaults:end', {
+            source,
+            scoped: Boolean(serverBaseUrl),
+            durationMs: Math.round(ended - started),
+            hasDefaultModel: Boolean(result.defaultModel),
+            hasDefaultAgent: Boolean(result.defaultAgent),
+        });
+        return result;
+    };
+
     const buildFromApi = (data: Record<string, unknown> | null): Partial<OpenChamberDefaults> => {
         if (!data) return {};
 
@@ -107,7 +122,7 @@ const fetchOpenChamberDefaults = async (serverBaseUrl?: string): Promise<OpenCha
             try {
                 const result = await runtimeSettings.load();
                 const data = result?.settings;
-                if (data) return buildFromApi(data) as OpenChamberDefaults;
+                if (data) return finish('runtime-settings', buildFromApi(data) as OpenChamberDefaults);
             } catch {
                 // ignore
             }
@@ -117,10 +132,17 @@ const fetchOpenChamberDefaults = async (serverBaseUrl?: string): Promise<OpenCha
             method: 'GET',
             headers: { Accept: 'application/json' },
         });
+        if (!response.ok) {
+            return finish('settings-route-not-ok', {});
+        }
         const apiData = response.ok ? await response.json() : null;
-        return buildFromApi(apiData) as OpenChamberDefaults;
-    } catch {
-        return {};
+        return finish('settings-route', buildFromApi(apiData) as OpenChamberDefaults);
+    } catch (error) {
+        markStartupTrace('config.defaults:error', {
+            scoped: Boolean(serverBaseUrl),
+            error: error instanceof Error ? error.message : String(error),
+        });
+        return finish('error', {});
     }
 };
 
@@ -425,9 +447,11 @@ const ensureModelsMetadataFetch = (
         return;
     }
 
-    modelsMetadataInFlight = fetchModelsDevMetadata()
+    markStartupTrace('modelsMetadata:queued');
+    modelsMetadataInFlight = measureStartupTrace('modelsMetadata', fetchModelsDevMetadata)
         .then((metadata) => {
             if (metadata.size > 0) {
+                markStartupTrace('modelsMetadata:set', { entries: metadata.size });
                 setModelsMetadata(metadata);
             }
             return metadata;
@@ -645,8 +669,8 @@ interface ConfigStore {
 
     activateDirectory: (directory: string | null | undefined, options?: { serverId?: string | null }) => Promise<void>;
 
-    loadProviders: (options?: { directory?: string | null; serverId?: string | null }) => Promise<void>;
-    loadAgents: (options?: { directory?: string | null; serverBaseUrl?: string; serverId?: string | null }) => Promise<boolean>;
+    loadProviders: (options?: { directory?: string | null; serverId?: string | null; source?: string }) => Promise<void>;
+    loadAgents: (options?: { directory?: string | null; serverBaseUrl?: string; serverId?: string | null; source?: string }) => Promise<boolean>;
     invalidateModelMetadataCache: () => void;
     setProvider: (providerId: string) => void;
     setModel: (modelId: string) => void;
@@ -983,10 +1007,14 @@ export const useConfigStore = create<ConfigStore>()(
                 activateDirectory: async (directory, options) => {
                     const serverId = normalizeConfigServerId(options?.serverId);
                     const directoryKey = toDirectoryKey(directory, serverId);
+                    let snapshotHadProviders = false;
+                    let snapshotHadAgents = false;
 
                     set((state) => {
                         const snapshot = state.directoryScoped[directoryKey];
                         if (snapshot) {
+                            snapshotHadProviders = snapshot.providers.length > 0;
+                            snapshotHadAgents = snapshot.agents.length > 0;
                             return {
                                 activeDirectoryKey: directoryKey,
                                 providers: snapshot.providers,
@@ -1018,22 +1046,39 @@ export const useConfigStore = create<ConfigStore>()(
                         return;
                     }
 
-                    await get().loadProviders({ directory: fromDirectoryKey(directoryKey), serverId });
                     const dir = fromDirectoryKey(directoryKey)
                     const remoteBaseUrl = resolveConfigServerBaseUrl(dir, serverId)
-                    await get().loadAgents({ directory: dir, serverBaseUrl: remoteBaseUrl, serverId });
+                    if (snapshotHadProviders) {
+                        markStartupTrace('activateDirectory:skipProviders', { directoryKey, serverId });
+                    } else {
+                        await get().loadProviders({ directory: dir, serverId, source: 'activateDirectory' });
+                    }
+
+                    if (snapshotHadAgents) {
+                        markStartupTrace('activateDirectory:skipAgents', { directoryKey, serverId });
+                    } else {
+                        await get().loadAgents({ directory: dir, serverBaseUrl: remoteBaseUrl, serverId, source: 'activateDirectory' });
+                    }
                 },
 
                 loadProviders: async (options) => {
                     const targetDirectory = options?.directory ?? fromDirectoryKey(get().activeDirectoryKey);
                     const serverId = resolveConfigServerId(targetDirectory, options?.serverId, get().activeDirectoryKey);
                     const directoryKey = toDirectoryKey(targetDirectory, serverId);
+                    const source = options?.source ?? 'unknown';
+                    const effectiveDirectory = targetDirectory ?? opencodeClient.getDirectory() ?? null;
+                    markStartupTrace('loadProviders:called', { directoryKey, serverId, source, requestedDirectory: targetDirectory, effectiveDirectory });
 
                     // Dedup: if a load is already in-flight for this directory, reuse it
                     const existing = _inFlightProviders.get(directoryKey);
-                    if (existing) return existing;
+                    if (existing) {
+                        markStartupTrace('loadProviders:deduped', { directoryKey, serverId, source, requestedDirectory: targetDirectory, effectiveDirectory });
+                        return existing;
+                    }
 
                     const promise = (async () => {
+                    const loaderStarted = typeof performance !== 'undefined' ? performance.now() : Date.now();
+                    markStartupTrace('loadProviders:start', { directoryKey, serverId, source, requestedDirectory: targetDirectory, effectiveDirectory });
                     const existingSnapshot = get().directoryScoped[directoryKey];
                     const previousProviders = existingSnapshot?.providers ?? (get().activeDirectoryKey === directoryKey ? get().providers : []);
                     const previousDefaults = existingSnapshot?.defaultProviders ?? (get().activeDirectoryKey === directoryKey ? get().defaultProviders : {});
@@ -1047,8 +1092,12 @@ export const useConfigStore = create<ConfigStore>()(
                             );
                             const targetDir = fromDirectoryKey(directoryKey)
                             const targetSdk = resolveSdkForDirectory(targetDir ?? "", undefined, serverId)
-                            const rawResult = await targetSdk.config.providers(
-                                targetDir ? { directory: targetDir } : undefined,
+                            const rawResult = await measureStartupTrace(
+                                'loadProviders:api',
+                                () => targetSdk.config.providers(
+                                    targetDir ? { directory: targetDir } : undefined,
+                                ),
+                                { directoryKey, serverId, source, requestedDirectory: targetDirectory, effectiveDirectory, attempt: attempt + 1 },
                             )
                             if (!rawResult.data) throw new Error('Failed to get providers')
                             const apiResult = rawResult.data;
@@ -1120,15 +1169,43 @@ export const useConfigStore = create<ConfigStore>()(
                                 return nextState;
                             });
 
+                            const loaderEnded = typeof performance !== 'undefined' ? performance.now() : Date.now();
+                            markStartupTrace('loadProviders:end', {
+                                directoryKey,
+                                serverId,
+                                source,
+                                requestedDirectory: targetDirectory,
+                                effectiveDirectory,
+                                durationMs: Math.round(loaderEnded - loaderStarted),
+                                providers: processedProviders.length,
+                                models: processedProviders.reduce((count, provider) => count + provider.models.length, 0),
+                            });
                             return;
                         } catch (error) {
                             lastError = error;
+                            markStartupTrace('loadProviders:attemptError', {
+                                directoryKey,
+                                serverId,
+                                source,
+                                requestedDirectory: targetDirectory,
+                                effectiveDirectory,
+                                attempt: attempt + 1,
+                                error: error instanceof Error ? error.message : String(error),
+                            });
                             const waitMs = 200 * (attempt + 1);
                             await new Promise((resolve) => setTimeout(resolve, waitMs));
                         }
                     }
 
                     console.error("Failed to load providers:", lastError);
+                    markStartupTrace('loadProviders:error', {
+                        directoryKey,
+                        serverId,
+                        source,
+                        requestedDirectory: targetDirectory,
+                        effectiveDirectory,
+                        error: lastError instanceof Error ? lastError.message : String(lastError),
+                    });
 
                     set((state) => {
                         const baseSnapshot: DirectoryScopedConfig = state.directoryScoped[directoryKey] ?? {
@@ -1401,12 +1478,20 @@ export const useConfigStore = create<ConfigStore>()(
                     const targetDirectory = options?.directory ?? fromDirectoryKey(get().activeDirectoryKey);
                     const serverId = resolveConfigServerId(targetDirectory, options?.serverId, get().activeDirectoryKey);
                     const directoryKey = toDirectoryKey(targetDirectory, serverId);
+                    const source = options?.source ?? 'unknown';
+                    const effectiveDirectory = targetDirectory ?? opencodeClient.getDirectory() ?? null;
+                    markStartupTrace('loadAgents:called', { directoryKey, serverId, source, requestedDirectory: targetDirectory, effectiveDirectory });
 
                     // Dedup: if a load is already in-flight for this directory, reuse it
                     const existing = _inFlightAgents.get(directoryKey);
-                    if (existing) return existing;
+                    if (existing) {
+                        markStartupTrace('loadAgents:deduped', { directoryKey, serverId, source, requestedDirectory: targetDirectory, effectiveDirectory });
+                        return existing;
+                    }
 
                     const promise = (async (): Promise<boolean> => {
+                    const loaderStarted = typeof performance !== 'undefined' ? performance.now() : Date.now();
+                    markStartupTrace('loadAgents:start', { directoryKey, serverId, source, requestedDirectory: targetDirectory, effectiveDirectory });
                     const existingSnapshot = get().directoryScoped[directoryKey];
                     const previousAgents = existingSnapshot?.agents ?? (get().activeDirectoryKey === directoryKey ? get().agents : []);
                     let lastError: unknown = null;
@@ -1418,9 +1503,13 @@ export const useConfigStore = create<ConfigStore>()(
                             const targetSdk = resolveSdkForDirectory(targetDir ?? "", undefined, serverId)
                             const serverBaseUrl = options?.serverBaseUrl ?? resolveConfigServerBaseUrl(targetDir, serverId)
                             const [rawAgents, openChamberDefaults] = await Promise.all([
-                                targetSdk.app.agents(
-                                    targetDir ? { directory: targetDir } : undefined,
-                                ).then(r => r.data ?? []),
+                                measureStartupTrace(
+                                    'loadAgents:api',
+                                    () => targetSdk.app.agents(
+                                        targetDir ? { directory: targetDir } : undefined,
+                                    ).then(r => r.data ?? []),
+                                    { directoryKey, serverId, source, requestedDirectory: targetDirectory, effectiveDirectory, attempt: attempt + 1 },
+                                ),
                                 fetchOpenChamberDefaults(serverBaseUrl),
                             ]);
 
@@ -1444,6 +1533,12 @@ export const useConfigStore = create<ConfigStore>()(
                             }
 
                             const safeAgents = Array.isArray(rawAgents) ? rawAgents as Agent[] : [];
+
+                            const providerLoad = _inFlightProviders.get(directoryKey);
+                            if (providerLoad) {
+                                markStartupTrace('loadAgents:awaitProviders', { directoryKey, serverId, source });
+                                await providerLoad;
+                            }
 
                             const providers = get().activeDirectoryKey === directoryKey
                                 ? get().providers
@@ -1562,6 +1657,16 @@ export const useConfigStore = create<ConfigStore>()(
                                     return nextState;
                                 });
 
+                                const loaderEnded = typeof performance !== 'undefined' ? performance.now() : Date.now();
+                                markStartupTrace('loadAgents:end', {
+                                    directoryKey,
+                                    serverId,
+                                    source,
+                                    requestedDirectory: targetDirectory,
+                                    effectiveDirectory,
+                                    durationMs: Math.round(loaderEnded - loaderStarted),
+                                    agents: safeAgents.length,
+                                });
                                 return true;
                             }
 
@@ -1702,15 +1807,42 @@ export const useConfigStore = create<ConfigStore>()(
                                 });
                             }
 
+                            const loaderEnded = typeof performance !== 'undefined' ? performance.now() : Date.now();
+                            markStartupTrace('loadAgents:end', {
+                                directoryKey,
+                                serverId,
+                                source,
+                                requestedDirectory: targetDirectory,
+                                effectiveDirectory,
+                                durationMs: Math.round(loaderEnded - loaderStarted),
+                                agents: safeAgents.length,
+                            });
                             return true;
                         } catch (error) {
                             lastError = error;
+                            markStartupTrace('loadAgents:attemptError', {
+                                directoryKey,
+                                serverId,
+                                source,
+                                requestedDirectory: targetDirectory,
+                                effectiveDirectory,
+                                attempt: attempt + 1,
+                                error: error instanceof Error ? error.message : String(error),
+                            });
                             const waitMs = 200 * (attempt + 1);
                             await new Promise((resolve) => setTimeout(resolve, waitMs));
                         }
                     }
 
                     console.error("Failed to load agents:", lastError);
+                    markStartupTrace('loadAgents:error', {
+                        directoryKey,
+                        serverId,
+                        source,
+                        requestedDirectory: targetDirectory,
+                        effectiveDirectory,
+                        error: lastError instanceof Error ? lastError.message : String(lastError),
+                    });
 
                     set((state) => {
                         const providers = state.activeDirectoryKey === directoryKey
@@ -2209,13 +2341,19 @@ export const useConfigStore = create<ConfigStore>()(
                 },
 
                 checkConnection: async () => {
+                    markStartupTrace('checkConnection:start');
                     const maxAttempts = 5;
                     let attempt = 0;
                     let lastError: unknown = null;
 
                     while (attempt < maxAttempts) {
                         try {
-                            const isHealthy = await opencodeClient.checkHealth();
+                            markStartupTrace('checkConnection:attempt', { attempt: attempt + 1 });
+                            const isHealthy = await measureStartupTrace(
+                                'checkConnection:health',
+                                () => opencodeClient.checkHealth(),
+                                { attempt: attempt + 1 },
+                            );
                             const hasEverConnected = get().hasEverConnected;
                             set(isHealthy
                                 ? { isConnected: true, hasEverConnected: true, connectionPhase: "connected" }
@@ -2224,6 +2362,7 @@ export const useConfigStore = create<ConfigStore>()(
                                     connectionPhase: hasEverConnected ? "reconnecting" : "connecting",
                                     lastDisconnectReason: 'health_check_unhealthy',
                                 });
+                            markStartupTrace('checkConnection:end', { healthy: isHealthy, attempts: attempt + 1 });
                             return isHealthy;
                         } catch (error) {
                             lastError = error;
@@ -2241,16 +2380,19 @@ export const useConfigStore = create<ConfigStore>()(
                         connectionPhase: get().hasEverConnected ? "reconnecting" : "connecting",
                         lastDisconnectReason: 'health_check_failed',
                     });
+                    markStartupTrace('checkConnection:end', { healthy: false, attempts: maxAttempts });
                     return false;
                 },
 
                 initializeApp: async () => {
                     if (_initializeAppInFlight) {
+                        markStartupTrace('initializeApp:deduped');
                         return _initializeAppInFlight;
                     }
 
                     const run = (async () => {
                         try {
+                            markStartupTrace('initializeApp:start');
                             const debug = streamDebugEnabled();
                             if (debug) console.log("Starting app initialization...");
 
@@ -2267,14 +2409,15 @@ export const useConfigStore = create<ConfigStore>()(
                                 return;
                             }
 
-                            if (debug) console.log("Initializing app...");
-                            await opencodeClient.initApp();
+                            if (debug) console.log("Skipping app init health probe...");
+                            markStartupTrace('initApp:skipped', { reason: 'checkConnection already verified health' });
 
                             if (debug) console.log("Loading providers...");
-                            await get().loadProviders();
-
                             if (debug) console.log("Loading agents...");
-                            await get().loadAgents();
+                            await Promise.all([
+                                get().loadProviders({ source: 'initializeApp' }),
+                                get().loadAgents({ source: 'initializeApp' }),
+                            ]);
 
                             const state = get();
                             if (!state.settingsDefaultModel || !state.settingsDefaultAgent) {
@@ -2304,9 +2447,14 @@ export const useConfigStore = create<ConfigStore>()(
                             }
 
                             set({ isInitialized: true, isConnected: true, hasEverConnected: true, connectionPhase: "connected" });
+                            markStartupTrace('initializeApp:end', {
+                                providers: get().providers.length,
+                                agents: get().agents.length,
+                            });
                             if (debug) console.log("App initialized successfully");
                         } catch (error) {
                             console.error("Failed to initialize app:", error);
+                            markStartupTrace('initializeApp:error', { error: error instanceof Error ? error.message : String(error) });
                             set({
                                 isInitialized: false,
                                 isConnected: false,
@@ -2423,12 +2571,12 @@ if (!unsubscribeConfigStoreChanges) {
 
         if (scopeMatches(event, "agents")) {
             const { loadAgents } = useConfigStore.getState();
-            tasks.push(loadAgents().then(() => {}));
+            tasks.push(loadAgents({ source: 'configChange:agents' }).then(() => {}));
         }
 
         if (scopeMatches(event, "providers")) {
             const { loadProviders } = useConfigStore.getState();
-            tasks.push(loadProviders());
+            tasks.push(loadProviders({ source: 'configChange:providers' }));
         }
 
         if (tasks.length > 0) {
@@ -2451,6 +2599,7 @@ if (typeof window !== "undefined" && !unsubscribeConfigStoreDirectoryChanges) {
             return;
         }
 
+        markStartupTrace('directoryStore:changed', { previous: prevKey, next: nextKey, serverId });
         void useConfigStore.getState().activateDirectory(state.currentDirectory, { serverId });
     });
 }

@@ -135,14 +135,15 @@
 
 | Batch | 当前状态 | 说明 |
 |---|---|---|
-| 3.1 | ✅ 已落地 | `startupTrace.ts` 已存在；后续仍需确认所有官方调用点是否都已接入 |
+| 3.1 | ✅ 已落地 | `startupTrace.ts` 已存在；`App.tsx`、`useConfigStore.ts` 的主要 startup trace 调用点已接入 |
 | 3.2 | 🟡 待语义复核 | `device.ts`、`useUIStore.ts` 已有改动，但需逐段对照官方 diff 确认 resize/no-op 语义 |
 | 3.3 / 4.2 | ✅ 已落地 | `checkHealth()` 已改为 `/api/opencode/health`，并新增 `health-url.ts` / `client-health.test.ts` 覆盖 `/api`、desktop absolute URL、remote route |
-| 3.4 | 🔴 待移植 | `useConfigStore.ts` 与本 fork 的 provider/model/directory 逻辑冲突最大，需单独 batch |
+| 3.4 | ✅ 已落地 | `useConfigStore.ts` 已接入 trace/source 参数、snapshot skip、`checkConnection` trace、跳过重复 `initApp()`、providers/agents 并行加载；保留本 fork 的 `serverId` / remote base URL 逻辑 |
 | 3.5 | ✅ 已落地 | `sync-context.tsx` 已从 event `properties.sessionID` 提取 `message.part.updated/delta/removed` 的 sessionID，保留本 fork 的 serverId routing |
 | 3.6 | ✅ 已落地 | `event-reducer.ts` 已从 event `properties.sessionID` 提取 part session，delta materialization 携带 sessionID，并保留 messageID guard |
 | 3.7 | ✅ 已强于上游 | `optimisticSend` 已携带 `directory` + `serverId`，测试改为按 `serverRegistry` 的真实 reply client 路由 |
-| 3.8 / 3.9 | 🟡 待语义复核 | 文件已有局部改动，但还未逐项确认官方 startup trace / resize no-op 调用点 |
+| 3.8 | ✅ 已落地 | `App.tsx` 已接 `App:mounted` trace，startup recovery 调用带 `source: 'startupRecovery'` |
+| 3.9 | 🟡 待语义复核 | `useUIStore.ts` 已有局部改动，但还未逐项确认官方 resize no-op 语义 |
 | 3.10 | ✅ 已落地 | `path-utils.ts` + test 已存在 |
 | 3.S* | 🟡 部分落地 | `executable-search.js` 已存在；`install-help.js` 仍缺，tunnels/provider/server-utils 需继续逐模块合并 |
 
