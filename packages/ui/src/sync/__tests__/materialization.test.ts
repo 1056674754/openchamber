@@ -14,6 +14,18 @@ function part(id: string, messageID: string, type = "text", text = id): Part {
   return { id, messageID, sessionID: "ses_1", type, text } as Part
 }
 
+function stepFinishPart(id: string, messageID: string, reason: string): Part {
+  return {
+    id,
+    messageID,
+    sessionID: "ses_1",
+    type: "step-finish",
+    reason,
+    cost: 0,
+    tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+  } as Part
+}
+
 describe("materializeSessionSnapshots", () => {
   test("materializes messages and parts together", () => {
     const result = materializeSessionSnapshots(
@@ -53,6 +65,18 @@ describe("materializeSessionSnapshots", () => {
       { skipPartTypes: new Set(["patch"]) },
     )
 
+    expect(result.part.msg_1.map((item) => item.id)).toEqual(["prt_text"])
+  })
+
+  test("promotes skipped step-finish reason onto assistant message info", () => {
+    const result = materializeSessionSnapshots(
+      { message: {}, part: {} },
+      "ses_1",
+      [{ info: message("msg_1"), parts: [part("prt_text", "msg_1"), stepFinishPart("prt_finish", "msg_1", "stop")] }],
+      { skipPartTypes: new Set(["step-finish"]) },
+    )
+
+    expect((result.messages[0] as { finish?: string }).finish).toBe("stop")
     expect(result.part.msg_1.map((item) => item.id)).toEqual(["prt_text"])
   })
 

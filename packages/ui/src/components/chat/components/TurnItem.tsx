@@ -5,6 +5,7 @@ import { Icon } from '@/components/icon/Icon';
 import type { ChatMessageEntry, TurnRecord } from '../lib/turns/types';
 import { formatTurnDuration } from '../lib/turns/duration';
 import { useI18n } from '@/lib/i18n';
+import { getMessageFinishReason } from '@/lib/messageCompletion';
 
 interface RenderMessageOptions {
     hideAssistantBody?: boolean;
@@ -87,7 +88,8 @@ const animateProcessDetailsHeight = (
     });
 
     void Promise.all(animations.map((animation) => animation.finished))
-        .then(onDone, onDone);
+        .then(onDone)
+        .catch(() => undefined);
     return animations;
 };
 
@@ -111,8 +113,7 @@ const animateProcessDetailsHeight = (
 // sub-scope enters — only one directive is visible in P2 at a time. The real
 // user message in P1 stays active for the entire section.
 const getAssistantFinish = (message: ChatMessageEntry): string | undefined => {
-    const finish = (message.info as unknown as { finish?: unknown }).finish;
-    return typeof finish === 'string' ? finish : undefined;
+    return getMessageFinishReason(message.info, message.parts);
 };
 
 const splitProcessMessages = (messages: ChatMessageEntry[]) => {
@@ -194,17 +195,46 @@ const ProcessMessages: React.FC<{
 }) => {
     const regionRef = React.useRef<HTMLDivElement | null>(null);
     const mountedRef = React.useRef(false);
+    const animationRunRef = React.useRef(0);
     const animationsRef = React.useRef<AnimationPlaybackControls[]>([]);
-    const [userExpanded, setUserExpanded] = React.useState<boolean | null>(null);
+    const initialExpanded = foldDefault.enabled ? foldDefault.expanded : true;
+    const foldDefaultKey = `${turn.turnId}:${foldDefault.enabled ? 'enabled' : 'open'}:${foldDefault.expanded ? 'expanded' : 'collapsed'}`;
+    const [userExpansion, setUserExpansion] = React.useState<{ key: string; value: boolean | null }>(() => ({
+        key: foldDefaultKey,
+        value: null,
+    }));
+    const [detailsRenderState, setDetailsRenderState] = React.useState<{ turnId: string; shouldRender: boolean }>(() => ({
+        turnId: turn.turnId,
+        shouldRender: initialExpanded,
+    }));
 
-    React.useEffect(() => {
-        setUserExpanded(null);
-    }, [turn.turnId, foldDefault.enabled, foldDefault.expanded]);
+    const userExpanded = userExpansion.key === foldDefaultKey ? userExpansion.value : null;
+    const shouldRenderDetails = detailsRenderState.turnId === turn.turnId
+        ? detailsRenderState.shouldRender
+        : initialExpanded;
 
     const expanded = foldDefault.enabled
         ? (userExpanded ?? foldDefault.expanded)
         : true;
     const detailsHidden = !expanded;
+    const isExternallyCollapsed = foldDefault.enabled && userExpanded === null && !foldDefault.expanded;
+    const renderDetails = isExternallyCollapsed ? false : (expanded || shouldRenderDetails);
+
+    const setDetailsShouldRender = React.useCallback((shouldRender: boolean) => {
+        setDetailsRenderState((previous) => {
+            if (previous.turnId === turn.turnId && previous.shouldRender === shouldRender) {
+                return previous;
+            }
+            return { turnId: turn.turnId, shouldRender };
+        });
+    }, [turn.turnId]);
+
+    const setExpandedOverride = React.useCallback((nextExpanded: boolean) => {
+        if (nextExpanded) {
+            setDetailsShouldRender(true);
+        }
+        setUserExpansion({ key: foldDefaultKey, value: nextExpanded });
+    }, [foldDefaultKey, setDetailsShouldRender]);
 
     React.useLayoutEffect(() => {
         const region = regionRef.current;
@@ -212,6 +242,8 @@ const ProcessMessages: React.FC<{
             return;
         }
 
+        animationRunRef.current += 1;
+        const runId = animationRunRef.current;
         animationsRef.current.forEach((animation) => animation.stop());
         animationsRef.current = [];
 
@@ -222,6 +254,9 @@ const ProcessMessages: React.FC<{
 
         if (prefersReducedMotion()) {
             clearLocks();
+            if (!expanded) {
+                setDetailsShouldRender(false);
+            }
             return;
         }
 
@@ -233,6 +268,9 @@ const ProcessMessages: React.FC<{
                 });
             } else {
                 clearLocks();
+            }
+            if (!expanded && detailElements.length === 0) {
+                setDetailsShouldRender(false);
             }
             return;
         }
@@ -248,18 +286,26 @@ const ProcessMessages: React.FC<{
         }).filter((lock) => Math.abs(lock.fromHeight - lock.toHeight) > 0.5);
 
         animationsRef.current = animateProcessDetailsHeight(locks, !expanded, () => {
+            if (animationRunRef.current !== runId) {
+                return;
+            }
             animationsRef.current = [];
             clearLocks();
+            if (!expanded) {
+                setDetailsShouldRender(false);
+            }
         });
 
         return () => {
+            animationRunRef.current += 1;
             animationsRef.current.forEach((animation) => animation.stop());
             animationsRef.current = [];
         };
-    }, [expanded]);
+    }, [expanded, renderDetails, setDetailsShouldRender, turn.turnId]);
 
     React.useEffect(() => {
         return () => {
+            animationRunRef.current += 1;
             animationsRef.current.forEach((animation) => animation.stop());
             animationsRef.current = [];
         };
@@ -270,7 +316,7 @@ const ProcessMessages: React.FC<{
     const headerToggle = foldDefault.enabled ? (
         <ProcessToggle
             expanded={expanded}
-            onToggle={() => setUserExpanded(!expanded)}
+            onToggle={() => setExpandedOverride(!expanded)}
             label={processedLabel}
             durationText={durationText}
             wrapColumn={false}
@@ -280,7 +326,7 @@ const ProcessMessages: React.FC<{
         <ProcessToggle
             key="process-collapse-toggle"
             expanded
-            onToggle={() => setUserExpanded(false)}
+            onToggle={() => setExpandedOverride(false)}
             label={collapseLabel}
         />
     ) : null;
@@ -294,16 +340,19 @@ const ProcessMessages: React.FC<{
             <div data-process-fold-content="body">
                 {firstProcessMessage ? renderMessage(firstProcessMessage, {
                     assistantHeaderAddon: headerToggle,
-                    assistantBodyProcessFoldContent: foldDefault.enabled,
+                    hideAssistantBody: !renderDetails,
+                    assistantBodyProcessFoldContent: foldDefault.enabled && renderDetails,
                     assistantBodyProcessFoldCollapsed: detailsHidden,
                 }) : null}
-                <div
-                    data-process-fold-content="tail"
-                    aria-hidden={detailsHidden ? 'true' : undefined}
-                >
-                    {remainingProcessMessages.map((message) => renderMessage(message))}
-                    {collapseToggle}
-                </div>
+                {renderDetails ? (
+                    <div
+                        data-process-fold-content="tail"
+                        aria-hidden={detailsHidden ? 'true' : undefined}
+                    >
+                        {remainingProcessMessages.map((message) => renderMessage(message))}
+                        {collapseToggle}
+                    </div>
+                ) : null}
             </div>
         </div>
     );

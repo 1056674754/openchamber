@@ -19,6 +19,72 @@ export interface MessageRecord {
     parts: Part[];
 }
 
+const TERMINAL_FINISH_REASONS = new Set(["stop", "error", "abort", "cancel"]);
+const TERMINAL_MESSAGE_STATUSES = new Set(["completed", "error", "aborted", "failed", "cancelled"]);
+
+export interface TerminalMessageSignalInfo {
+    finish?: unknown;
+    status?: unknown;
+    time?: {
+        created?: unknown;
+        completed?: unknown;
+    };
+}
+
+export function getStepFinishReason(parts: readonly Part[] | null | undefined): string | undefined {
+    if (!parts) {
+        return undefined;
+    }
+
+    for (let index = parts.length - 1; index >= 0; index -= 1) {
+        const part = parts[index] as { type?: unknown; reason?: unknown } | undefined;
+        if (part?.type !== "step-finish") {
+            continue;
+        }
+        return typeof part.reason === "string" ? part.reason : undefined;
+    }
+
+    return undefined;
+}
+
+export function getMessageFinishReason(
+    messageInfo: TerminalMessageSignalInfo | null | undefined,
+    parts?: readonly Part[] | null,
+): string | undefined {
+    if (!messageInfo) {
+        return getStepFinishReason(parts);
+    }
+
+    const finish = messageInfo.finish;
+    if (typeof finish === "string") {
+        return finish;
+    }
+
+    return getStepFinishReason(parts);
+}
+
+export function hasTerminalMessageSignal(
+    messageInfo: TerminalMessageSignalInfo | null | undefined,
+    parts?: readonly Part[] | null,
+): boolean {
+    if (!messageInfo && !parts) {
+        return false;
+    }
+
+    const finish = getMessageFinishReason(messageInfo, parts);
+    if (typeof finish === "string" && TERMINAL_FINISH_REASONS.has(finish)) {
+        return true;
+    }
+
+    const status = messageInfo?.status;
+    if (typeof status === "string" && TERMINAL_MESSAGE_STATUSES.has(status)) {
+        return true;
+    }
+
+    const completedAt = messageInfo?.time?.completed;
+    return typeof completedAt === "number" && completedAt > 0;
+}
+
 export function isMessageComplete(messageInfo: MessageInfo, parts: Part[] = []): boolean {
     if (isFullySyntheticMessage(parts)) {
         return true;
@@ -28,7 +94,7 @@ export function isMessageComplete(messageInfo: MessageInfo, parts: Part[] = []):
     const completedAt = typeof timeInfo?.completed === 'number' ? timeInfo.completed : undefined;
     const messageStatus = messageInfo?.status;
 
-    const hasStopFinish = messageInfo.finish === 'stop';
+    const hasStopFinish = getMessageFinishReason(messageInfo, parts) === 'stop';
 
     const hasCompletedFlag = (typeof completedAt === 'number' && completedAt > 0) || messageStatus === 'completed';
     if (!hasCompletedFlag || !hasStopFinish) {

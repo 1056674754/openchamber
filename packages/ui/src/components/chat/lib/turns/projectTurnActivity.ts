@@ -5,6 +5,7 @@ import type {
     TurnActivityRecord,
     TurnPartRecord,
 } from './types';
+import { getMessageFinishReason } from '@/lib/messageCompletion';
 
 const isStandaloneTool = (toolName: unknown): boolean => {
     return typeof toolName === 'string' && ACTIVITY_STANDALONE_TOOL_NAMES.has(toolName.toLowerCase());
@@ -32,8 +33,7 @@ const getPartText = (part: unknown): string | undefined => {
 };
 
 const getMessageFinish = (message: ChatMessageEntry): string | undefined => {
-    const finish = (message.info as { finish?: unknown }).finish;
-    return typeof finish === 'string' ? finish : undefined;
+    return getMessageFinishReason(message.info, message.parts);
 };
 
 const buildTurnPartRecord = (
@@ -147,10 +147,6 @@ export const projectTurnActivity = (input: ProjectActivityInput): ProjectActivit
                 kind,
             };
             activityParts.push(activity);
-
-            if (kind === 'tool' && standaloneTool) {
-                return;
-            }
 
             const list = partsByAfterTool.get(currentAfterToolPartId) ?? [];
             list.push(activity);

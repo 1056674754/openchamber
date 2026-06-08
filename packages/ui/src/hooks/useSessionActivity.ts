@@ -6,6 +6,7 @@ import {
   useSessionPermissions,
   useSessionActivityTimestamp,
 } from '@/sync/sync-context';
+import { hasTerminalMessageSignal, type TerminalMessageSignalInfo } from '@/lib/messageCompletion';
 
 export type SessionActivityPhase = 'idle' | 'busy' | 'retry';
 
@@ -80,10 +81,15 @@ export function useSessionActivity(sessionId: string | null | undefined, directo
     const phase: SessionActivityPhase = (status?.type ?? 'idle') as SessionActivityPhase;
 
     const lastMessage = messages[messages.length - 1];
+    const hasTerminalTrailingAssistant = Boolean(
+      lastMessage
+      && lastMessage.role === 'assistant'
+      && hasTerminalMessageSignal(lastMessage as TerminalMessageSignalInfo),
+    );
     const hasPendingAssistant = Boolean(
       lastMessage
       && lastMessage.role === 'assistant'
-      && typeof (lastMessage as { time?: { completed?: number } }).time?.completed !== 'number',
+      && !hasTerminalMessageSignal(lastMessage as TerminalMessageSignalInfo),
     );
 
     const hasAuthoritativeStatus = status !== undefined;
@@ -123,7 +129,9 @@ export function useSessionActivity(sessionId: string | null | undefined, directo
       lastActivityAt && Date.now() - lastActivityAt < STREAM_DESYNC_WINDOW_MS,
     );
 
-    if (!hasPendingAssistant && !hasRecentStreamActivity) return IDLE_RESULT;
+    if (!hasPendingAssistant && (!hasRecentStreamActivity || hasTerminalTrailingAssistant)) {
+      return IDLE_RESULT;
+    }
 
     return {
       phase: 'busy',

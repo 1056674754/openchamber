@@ -33,12 +33,16 @@ import { DEFAULT_SERVER_ID, serverRegistry } from "@/lib/opencode/server-registr
 import { registerSyncStores, getSyncStoresForServer, getAllSyncStores } from "./multi-server-registry"
 import { useProjectsStore } from "@/stores/useProjectsStore"
 import { usePermissionStore } from "@/stores/permissionStore"
-import { useConfigStore } from "@/stores/useConfigStore"
+import { useConfigStore, type ConfigConnectionState } from "@/stores/useConfigStore"
 import { useTodosPersistStore } from "@/stores/useTodosPersistStore"
 import { useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
+import { markRemoteInstanceTransportStatus } from "@/stores/useRemoteInstancesStore"
 import { resolveApiUrl as resolveServerApiUrl } from "@/lib/api/serverUrl"
+import { hasTerminalMessageSignal, type TerminalMessageSignalInfo } from "@/lib/messageCompletion"
+import { dispatchOpenchamberEventEnvelope } from "@/lib/openchamberEvents"
 import { toast } from "@/components/ui"
 import { appendNotification, fetchAndHydrateUnreadState } from "./notification-store"
+import { dispatchRemoteServerEvent, subscribeRemoteServerEvents } from "./remote-event-bus"
 import type { State } from "./types"
 import type { PermissionRequest } from "@/types/permission"
 import type { QuestionRequest } from "@/types/question"
@@ -46,6 +50,7 @@ import * as sessionActions from "./session-actions"
 import { getSessionMaterializationStatus, materializeSessionSnapshots } from "./materialization"
 import { setSessionPrefetch } from "./session-prefetch-cache"
 import { listSessionsForBootstrap } from "./session-list-bootstrap"
+import { fetchMessagePageToUserBoundary, getPageParts, type MessagePage } from "./message-page-boundary"
 
 // ---------------------------------------------------------------------------
 // Context
@@ -71,6 +76,27 @@ const emptyDirectoryStore = emptyDirectoryStoreManager.ensureChild("__openchambe
 const REMOTE_BOOTSTRAP_MAX_CONCURRENCY = 1
 const REMOTE_BOOTSTRAP_STAGGER_MS = 350
 const REMOTE_BOOTSTRAP_MAX_STAGGER_MS = 3_500
+const REMOTE_STATUS_REQUEST_TIMEOUT_MS = 5_000
+const REMOTE_RECONNECT_REQUEST_TIMEOUT_MS = 8_000
+
+async function withRemoteTimeout<T>(promise: Promise<T>, label: string, timeoutMs: number): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined
+  const timeout = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => {
+      const error = new Error(`${label} timed out`)
+      ;(error as Error & { status?: number }).status = 503
+      reject(error)
+    }, timeoutMs)
+  })
+
+  try {
+    return await Promise.race([promise, timeout])
+  } finally {
+    if (timeoutId !== undefined) {
+      clearTimeout(timeoutId)
+    }
+  }
+}
 
 function unwrapSdkArrayResult<T>(
   result: { data?: T[]; error?: unknown; response?: { status?: number } },
@@ -166,7 +192,11 @@ export function useAllLiveSessions(): Session[] {
 // Boot debounce — suppresses redundant refresh/re-bootstrap events during startup.
 let bootingRoot = false
 let bootedAt = 0
+let lastServerLifecycleRebootstrapAt = 0
 const BOOT_DEBOUNCE_MS = 1500
+const TRANSIENT_DISCONNECT_UI_DELAY_MS = 1500
+const RECONNECT_RESYNC_COOLDOWN_MS = 30_000
+const SERVER_LIFECYCLE_REBOOTSTRAP_COOLDOWN_MS = 30_000
 const RECONNECT_MESSAGE_LIMIT = 30
 const SESSION_MATERIALIZATION_MESSAGE_LIMIT = 30
 const RECONNECT_SKIP_PARTS = new Set(["patch", "step-start", "step-finish"])
@@ -184,6 +214,66 @@ const syncSnapshotSignature = (value: unknown): string => JSON.stringify(value)
 
 function haveEquivalentSyncSnapshots(left: unknown, right: unknown): boolean {
   return syncSnapshotSignature(left) === syncSnapshotSignature(right)
+}
+
+function pageRecords(page: MessagePage): Array<{ info: Message; parts: Part[] }> {
+  return page.session.map((info) => ({
+    info,
+    parts: getPageParts(page, info.id) ?? [],
+  }))
+}
+
+async function fetchSessionMessagesToUserBoundary(input: {
+  sdkClient: OpencodeClient
+  sessionID: string
+  directory: string
+  limit: number
+  requestTimeout?: <T>(promise: Promise<T>, label: string) => Promise<T>
+}): Promise<MessagePage> {
+  const fetchPage = async (before?: string): Promise<MessagePage> => {
+    const result = await retry(() => {
+      const request = input.sdkClient.session.messages({
+        sessionID: input.sessionID,
+        directory: input.directory,
+        limit: input.limit,
+        before,
+      })
+      return input.requestTimeout
+        ? input.requestTimeout(request, `session.messages ${input.sessionID}`)
+        : request
+    })
+    const records = unwrapSdkArrayResult<{ info: Message; parts?: Part[] }>(result, "session.messages")
+      .filter((record) => !!record?.info?.id)
+    const cursor = result.response?.headers?.get?.("x-next-cursor") ?? undefined
+    return {
+      session: records
+        .map((record) => stripMessageDiffSnapshots(record.info))
+        .sort((left, right) => cmp(left.id, right.id)),
+      part: records.map((record) => ({
+        id: record.info.id,
+        part: record.parts ?? [],
+      })),
+      cursor,
+      complete: !cursor,
+    }
+  }
+
+  const result = await fetchMessagePageToUserBoundary({
+    page: await fetchPage(),
+    fetchOlder: fetchPage,
+  })
+
+  if (result.stoppedBeforeBoundary) {
+    console.warn("[sync] session.messages stopped before reaching a user boundary", {
+      sessionID: input.sessionID,
+      directory: input.directory,
+      loadedMessageCount: result.page.session.length,
+      extraPages: result.extraPages,
+      hasCursor: Boolean(result.page.cursor),
+    })
+  }
+
+  return result.page
 }
 
 // ---------------------------------------------------------------------------
@@ -240,40 +330,27 @@ async function materializeSessionFromServer(
   // [OPENCHAMBER-FORK] 2025-05-18 v1.11.1-dev-merge
   // Use explicit serverId when available (e.g. from SSE event pipeline) instead of
   // reverse-resolving through project store, which misses unregistered worktree dirs.
-  let sdkClient: OpencodeClient
-  if (serverId && serverId !== DEFAULT_SERVER_ID) {
-    const conn = serverRegistry.get(serverId)
-    sdkClient = conn?.client ?? resolveSdkForDirectory(directory)
-  } else {
-    const projects = useProjectsStore.getState().projects
-    const project = projects.find((p) => p.path === directory && p.serverId && p.serverId !== DEFAULT_SERVER_ID)
-    sdkClient = project?.serverId
-      ? serverRegistry.get(project.serverId)?.client ?? resolveSdkForDirectory(directory)
-      : resolveSdkForDirectory(directory)
-  }
-  const result = await retry(() =>
-    sdkClient.session.messages({ sessionID, directory, limit: SESSION_MATERIALIZATION_MESSAGE_LIMIT }),
-  )
-  const records = unwrapSdkArrayResult(result, "session.messages")
-    .filter((record: { info?: { id?: string } }) => !!record?.info?.id)
-  if (records.length === 0) return
-  const cursor = result.response?.headers?.get?.("x-next-cursor") ?? undefined
+  const sdkClient = resolveSdkForDirectory(directory, sessionID, serverId)
+  const page = await fetchSessionMessagesToUserBoundary({
+    sdkClient,
+    sessionID,
+    directory,
+    limit: SESSION_MATERIALIZATION_MESSAGE_LIMIT,
+  })
+  if (page.session.length === 0) return
   setSessionPrefetch({
     directory,
     sessionID,
-    limit: records.length,
-    cursor,
-    complete: !cursor,
+    limit: page.session.length,
+    cursor: page.cursor,
+    complete: page.complete,
   })
 
   store.setState((state: DirectoryStore) => {
     const materialized = materializeSessionSnapshots(
       state,
       sessionID,
-      records.map((record: { info: Message; parts?: Part[] }) => ({
-        info: stripMessageDiffSnapshots(record.info),
-        parts: record.parts ?? [],
-      })),
+      pageRecords(page),
       { skipPartTypes: RECONNECT_SKIP_PARTS },
     )
     return { message: materialized.message, part: materialized.part }
@@ -412,7 +489,10 @@ async function getSessionStatusForServer(
     if (connection.config.authToken) {
       headers.Authorization = `Bearer ${connection.config.authToken}`
     }
-    const response = await fetch(requestUrl, { headers })
+    const response = await fetch(requestUrl, {
+      headers,
+      signal: AbortSignal.timeout(REMOTE_STATUS_REQUEST_TIMEOUT_MS),
+    })
     if (!response.ok) return null
     const data = await response.json().catch(() => null)
     if (!data || typeof data !== "object") return null
@@ -434,7 +514,11 @@ async function listPendingQuestionsForServer(
   const client = serverRegistry.get(serverId)?.client ?? sdk
   if (!client) throw new Error(`question.list failed: missing client for server ${serverId}`)
 
-  const result = await client.question.list({ directory })
+  const result = await withRemoteTimeout(
+    client.question.list({ directory }),
+    "question.list",
+    REMOTE_RECONNECT_REQUEST_TIMEOUT_MS,
+  )
   const rawError = (result as { error?: unknown }).error
   if (rawError) {
     throw new Error(`question.list failed: ${formatSdkError(rawError)}`)
@@ -454,7 +538,11 @@ async function listPendingPermissionsForServer(
   const client = serverRegistry.get(serverId)?.client ?? sdk
   if (!client) throw new Error(`permission.list failed: missing client for server ${serverId}`)
 
-  const result = await client.permission.list({ directory })
+  const result = await withRemoteTimeout(
+    client.permission.list({ directory }),
+    "permission.list",
+    REMOTE_RECONNECT_REQUEST_TIMEOUT_MS,
+  )
   const rawError = (result as { error?: unknown }).error
   if (rawError) {
     throw new Error(`permission.list failed: ${formatSdkError(rawError)}`)
@@ -511,21 +599,12 @@ const directoryBelongsToRemoteProject = (
   return false
 }
 
-const remoteStoreOwnsDirectory = (directory: string): boolean => {
-  if (!directory || directory === "global") return false
-  const normalizedDirectory = normalizeDirectoryForOwnership(directory)
-  return getAllSyncStores().some((entry) =>
-    entry.serverId !== DEFAULT_SERVER_ID && entry.childStores.children.has(normalizedDirectory)
-  )
-}
-
 const shouldDefaultProviderSkipDirectory = (
   directory: string,
   projects: ReadonlyArray<{ path: string; serverId?: string }>,
 ): boolean => {
   if (!directory || directory === "global") return false
   return directoryBelongsToRemoteProject(directory, projects)
-    || remoteStoreOwnsDirectory(directory)
     || resolveBaseUrl(directory) !== undefined
 }
 
@@ -1164,37 +1243,44 @@ async function resyncDirectoryAfterReconnect(
     }
   }
 
-  const scopedClient = serverId !== DEFAULT_SERVER_ID
-    ? serverRegistry.get(serverId)?.client ?? sdk
-    : resolveSdkForDirectory(directory)
+  const scopedClient = resolveSdkForDirectory(directory, undefined, serverId) ?? sdk
+  const withReconnectTimeout = <T,>(promise: Promise<T>, label: string): Promise<T> => (
+    serverId !== DEFAULT_SERVER_ID
+      ? withRemoteTimeout(promise, label, REMOTE_RECONNECT_REQUEST_TIMEOUT_MS)
+      : promise
+  )
   await Promise.all(candidateSessionIds.map(async (sessionId) => {
-    const [sessionResponse, messageResponse] = await Promise.all([
-      scopedClient.session.get({ sessionID: sessionId, directory }).catch((e: unknown) => {
+    const [sessionResponse, messagePage] = await Promise.all([
+      withReconnectTimeout(
+        scopedClient.session.get({ sessionID: sessionId, directory }),
+        `session.get ${sessionId}`,
+      ).catch((e: unknown) => {
         console.warn(`[resync] session.get failed for ${sessionId} on ${directory}`, e instanceof Error ? e.message : e)
         return null
       }),
-      scopedClient.session.messages({ sessionID: sessionId, directory, limit: RECONNECT_MESSAGE_LIMIT }).catch((e: unknown) => {
+      fetchSessionMessagesToUserBoundary({
+        sdkClient: scopedClient,
+        sessionID: sessionId,
+        directory,
+        limit: RECONNECT_MESSAGE_LIMIT,
+        requestTimeout: withReconnectTimeout,
+      }).catch((e: unknown) => {
         console.warn(`[resync] session.messages failed for ${sessionId} on ${directory}`, e instanceof Error ? e.message : e)
         return null
       }),
     ])
     const session = sessionResponse?.data
-    const records = messageResponse?.data
-    if (!session || !records) return
-    const cursor = messageResponse.response?.headers?.get?.("x-next-cursor") ?? undefined
+    if (!session || !messagePage) return
     setSessionPrefetch({
       directory,
       sessionID: sessionId,
-      limit: records.length,
-      cursor,
-      complete: !cursor,
+      limit: messagePage.session.length,
+      cursor: messagePage.cursor,
+      complete: messagePage.complete,
     })
 
     const nextSession = stripSessionDiffSnapshots(session)
-    const nextMessages = records
-      .filter((record) => !!record?.info?.id)
-      .map((record) => stripMessageDiffSnapshots(record.info))
-      .sort((a, b) => cmp(a.id, b.id))
+    const nextMessages = messagePage.session
 
     store.setState((state: DirectoryStore) => {
       const sessionIndex = state.session.findIndex((item) => item.id === nextSession.id)
@@ -1219,10 +1305,7 @@ async function resyncDirectoryAfterReconnect(
       const materialized = materializeSessionSnapshots(
         state,
         sessionId,
-        records.map((record) => ({
-          info: stripMessageDiffSnapshots(record.info),
-          parts: record.parts ?? [],
-        })),
+        pageRecords(messagePage),
         { skipPartTypes: RECONNECT_SKIP_PARTS },
       )
       const messagesChanged = materialized.messagesChanged
@@ -1311,7 +1394,13 @@ function handleEvent(
     // but only if not during recent boot
     if (payload.type === "server.connected" || payload.type === "global.disposed") {
       fetchAndHydrateUnreadState()
-      if (!recent) {
+      const now = Date.now()
+      const shouldRebootstrap =
+        !recent
+        && now - lastServerLifecycleRebootstrapAt >= SERVER_LIFECYCLE_REBOOTSTRAP_COOLDOWN_MS
+
+      if (shouldRebootstrap) {
+        lastServerLifecycleRebootstrapAt = now
         for (const dir of childStores.children.keys()) {
           const store = childStores.getChild(dir)
           if (store && store.getState().status !== "loading") {
@@ -1622,11 +1711,16 @@ export function SyncProvider(props: {
   directory: string
   serverId?: string
   baseUrl?: string
+  eventSource?: "pipeline" | "bus"
   remoteDirectories?: string[]
   children: React.ReactNode
 }) {
   const serverId = props.serverId ?? DEFAULT_SERVER_ID
-  const messageStreamTransport = useConfigStore((state) => state.settingsMessageStreamTransport)
+  const eventSource = props.eventSource ?? "pipeline"
+  const configuredMessageStreamTransport = useConfigStore((state) => state.settingsMessageStreamTransport)
+  const messageStreamTransport = configuredMessageStreamTransport === "sse"
+    ? "sse"
+    : "ws"
   const projects = useProjectsStore((state) => state.projects)
   const childStoresRef = useRef<ChildStoreManager | null>(null)
   if (!childStoresRef.current) childStoresRef.current = new ChildStoreManager()
@@ -1812,7 +1906,7 @@ export function SyncProvider(props: {
         // (SSE could have delivered session.idle while bootstrap was in-flight
         // but the child store didn't exist yet). Trigger a recovery resync to
         // pick up the authoritative live status from the server.
-        const { isConnected } = useConfigStore.getState()
+        const { isConnected } = useConfigStore.getState().getConnectionState(serverId)
         if (isConnected && store.getState().status === "complete") {
           void resyncDirectoryAfterReconnect(directory, store, routingIndex, serverId, props.sdk).catch(() => {})
         }
@@ -1871,11 +1965,34 @@ export function SyncProvider(props: {
   // Abort controller owned by the pipeline closure. Cleanup aborts + flushes.
   useEffect(() => {
     const reconnectResyncing = new Set<string>()
+    const reconnectResyncStartedAt = new Map<string, number>()
+    let streamDisconnected = false
+    let disconnectTimer: ReturnType<typeof setTimeout> | null = null
+    const setProviderConnectionState = (patch: Partial<ConfigConnectionState>) => {
+      useConfigStore.getState().setConnectionState(serverId, patch)
+    }
+    const getProviderConnectionState = () => useConfigStore.getState().getConnectionState(serverId)
+    const markRemoteTransportStatus = (connected: boolean, reason?: string) => {
+      if (serverId === DEFAULT_SERVER_ID) return
+      markRemoteInstanceTransportStatus(serverId, connected, reason)
+    }
+
+    const clearDisconnectTimer = () => {
+      if (!disconnectTimer) return
+      clearTimeout(disconnectTimer)
+      disconnectTimer = null
+    }
+
     const triggerReconnectMaterialization = (directory: string) => {
       const store = childStores.children.get(directory)
       if (!store) return
       if (reconnectResyncing.has(directory)) return
 
+      const now = Date.now()
+      const lastStartedAt = reconnectResyncStartedAt.get(directory) ?? 0
+      if (now - lastStartedAt < RECONNECT_RESYNC_COOLDOWN_MS) return
+
+      reconnectResyncStartedAt.set(directory, now)
       reconnectResyncing.add(directory)
       void resyncDirectoryAfterReconnect(directory, store, routingIndex, serverId, props.sdk)
         .catch(() => {
@@ -1887,6 +2004,53 @@ export function SyncProvider(props: {
         })
     }
 
+    const applyDisconnectedState = (reason: string) => {
+      const { hasEverConnected } = getProviderConnectionState()
+      setProviderConnectionState({
+        isConnected: false,
+        connectionPhase: hasEverConnected ? "reconnecting" : "connecting",
+        lastDisconnectReason: reason,
+      })
+      markRemoteTransportStatus(false, reason)
+    }
+
+    const applyIncomingEvent = (directory: string, payload: Event) => {
+      dispatchVSCodeRuntimeNotificationEvent(directory, payload, serverId)
+      dispatchOpenchamberEventEnvelope(payload as { type?: unknown; properties?: unknown })
+      if (payload.type === "installation.update-available") {
+        const version = typeof (payload.properties as { version?: unknown })?.version === "string"
+          ? (payload.properties as { version: string }).version
+          : ""
+        if (version) {
+          dispatchOpenCodeUpdateAvailable({ version })
+        }
+      }
+      handleEvent(directory, payload, childStores, routingIndex, serverId)
+    }
+
+    if (eventSource === "bus") {
+      setProviderConnectionState({
+        isConnected: true,
+        hasEverConnected: true,
+        connectionPhase: "connected",
+        lastDisconnectReason: null,
+      })
+      markRemoteTransportStatus(true)
+      for (const dir of childStores.children.keys()) {
+        triggerReconnectMaterialization(dir)
+      }
+
+      const unsubscribe = subscribeRemoteServerEvents(serverId, ({ directory, payload }) => {
+        const resolvedDirectory = resolveDirectoryFromRoutingIndex(routingIndex, directory, payload, childStores)
+        applyIncomingEvent(resolvedDirectory, payload)
+      })
+
+      return () => {
+        clearDisconnectTimer()
+        unsubscribe()
+      }
+    }
+
     const { cleanup } = createEventPipeline({
       sdk: props.sdk,
       baseUrl: props.baseUrl,
@@ -1894,24 +2058,28 @@ export function SyncProvider(props: {
       routeDirectory: (directory, payload) => {
         return resolveDirectoryFromRoutingIndex(routingIndex, directory, payload, childStores)
       },
-      onEvent: (directory, payload) => {
-        dispatchVSCodeRuntimeNotificationEvent(directory, payload, serverId)
-        if (payload.type === "installation.update-available") {
-          const version = typeof (payload.properties as { version?: unknown })?.version === "string"
-            ? (payload.properties as { version: string }).version
-            : ""
-          if (version) {
-            dispatchOpenCodeUpdateAvailable({ version })
-          }
+      onEvent: (directory, payload, meta) => {
+        const eventServerId = meta?.serverId
+        if (eventServerId && eventServerId !== serverId) {
+          dispatchRemoteServerEvent({
+            serverId: eventServerId,
+            directory,
+            payload,
+          })
+          return
         }
-        handleEvent(directory, payload, childStores, routingIndex, serverId)
+        applyIncomingEvent(directory, payload)
       },
       onReconnect: () => {
-        useConfigStore.setState({
+        streamDisconnected = false
+        clearDisconnectTimer()
+        setProviderConnectionState({
           isConnected: true,
           hasEverConnected: true,
           connectionPhase: "connected",
+          lastDisconnectReason: null,
         })
+        markRemoteTransportStatus(true)
         for (const dir of childStores.children.keys()) {
           triggerReconnectMaterialization(dir)
         }
@@ -1922,28 +2090,28 @@ export function SyncProvider(props: {
         }
       },
       onDisconnect: (reason) => {
-        const { hasEverConnected } = useConfigStore.getState()
-        useConfigStore.setState({
-          isConnected: false,
-          connectionPhase: hasEverConnected ? "reconnecting" : "connecting",
-          lastDisconnectReason: reason,
-        })
-      },
-      onTransportSwitch: () => {
-        // Transport switches can lose or buffer events in real networks. Refresh
-        // every mounted directory from HTTP instead of only the active one.
-        useConfigStore.setState({
-          isConnected: true,
-          hasEverConnected: true,
-          connectionPhase: "connected",
-        })
-        for (const dir of childStores.children.keys()) {
-          triggerReconnectMaterialization(dir)
+        streamDisconnected = true
+        clearDisconnectTimer()
+        setProviderConnectionState({ lastDisconnectReason: reason })
+
+        const { hasEverConnected } = getProviderConnectionState()
+        if (!hasEverConnected) {
+          applyDisconnectedState(reason)
+          return
         }
+
+        disconnectTimer = setTimeout(() => {
+          disconnectTimer = null
+          if (!streamDisconnected) return
+          applyDisconnectedState(reason)
+        }, TRANSIENT_DISCONNECT_UI_DELAY_MS)
       },
     })
-    return cleanup
-  }, [props.sdk, props.baseUrl, childStores, routingIndex, messageStreamTransport, serverId])
+    return () => {
+      clearDisconnectTimer()
+      cleanup()
+    }
+  }, [props.sdk, props.baseUrl, childStores, routingIndex, messageStreamTransport, serverId, eventSource])
 
   // Ensure current directory's child store exists
   // [OPENCHAMBER-FORK] 2025-05-18 v1.11.1-dev-merge
@@ -1985,6 +2153,9 @@ export function SyncProvider(props: {
 
   // Set refs so non-React code (session-actions, session-ui-store) can access sync state
   useEffect(() => {
+    if (serverId !== DEFAULT_SERVER_ID) {
+      return
+    }
     setSyncRefs(props.sdk, childStores, props.directory, (sessionID, dir) => {
       setIndexedSessionDirectory(routingIndex, sessionID, dir)
     }, (sessionID) => routingIndex.sessionDirectoryById.get(sessionID))
@@ -1993,7 +2164,7 @@ export function SyncProvider(props: {
       childStores,
       () => opencodeClient.getDirectory() || props.directory,
     )
-  }, [props.sdk, props.directory, childStores, routingIndex])
+  }, [serverId, props.sdk, props.directory, childStores, routingIndex])
 
   // Subscribe to child store for streaming state derivation
   useEffect(() => {
@@ -2014,7 +2185,7 @@ export function SyncProvider(props: {
   // reconnect recovery returned empty, or OpenCode crashed mid-stream).
   useEffect(() => {
     const stuckCheckInterval = setInterval(() => {
-      const { isConnected } = useConfigStore.getState()
+      const { isConnected } = useConfigStore.getState().getConnectionState(serverId)
       // Only enforce when SSE is connected — during disconnection the
       // reconnect recovery handles correction on reconnect.
       if (!isConnected) return
@@ -2086,7 +2257,7 @@ export function SyncProvider(props: {
     }, STUCK_SESSION_TIMEOUT_MS / 2) // Check at half the timeout for reasonable resolution
 
     return () => clearInterval(stuckCheckInterval)
-  }, [childStores])
+  }, [childStores, serverId])
 
   // Re-fetch pending questions/permissions on session-switch.
   // PR #909 only re-fetches on SSE reconnect, leaving an event-drop gap when
@@ -2186,7 +2357,19 @@ export function useDirectorySync<T>(selector: (state: State) => T, directory?: s
 // Resolve serverId for a session from the registry. Used by session-scoped hooks
 // to route to the correct remote store without any path matching.
 function useServerIdForSession(sessionID: string | undefined): string | undefined {
-  return sessionID ? serverRegistry.getServerForSession(sessionID) : undefined
+  return React.useSyncExternalStore(
+    useCallback(
+      (notify) => sessionID
+        ? serverRegistry.onSessionServerChange(sessionID, notify)
+        : () => undefined,
+      [sessionID],
+    ),
+    useCallback(
+      () => sessionID ? serverRegistry.getServerForSession(sessionID) : undefined,
+      [sessionID],
+    ),
+    () => undefined,
+  )
 }
 
 /** Get the revert messageID for a session (if reverted) */
@@ -2952,7 +3135,10 @@ export function useIsSessionWorking(sessionID: string, directory?: string): bool
     let hasPendingAssistant = false
     for (let i = messages.length - 1; i >= 0; i--) {
       const m = messages[i]
-      if (m.role === "assistant" && typeof (m as { time?: { completed?: number } }).time?.completed !== "number") {
+      if (m.role === "user") {
+        break
+      }
+      if (m.role === "assistant" && !hasTerminalMessageSignal(m as TerminalMessageSignalInfo)) {
         hasPendingAssistant = true
         break
       }

@@ -7,9 +7,16 @@ import { areOptionalRenderRelevantMessagesEqual, areRelevantTurnGroupingContexts
 import TurnItem from './components/TurnItem';
 import type { AnimationHandlers, ContentChangeReason } from '@/hooks/useChatAutoFollow';
 import { filterSyntheticParts } from '@/lib/messages/synthetic';
+import { hasSubtaskPart } from '@/lib/messages/real-user';
 import type { ChatMessageEntry, TurnRecord, TurnGroupingContext } from './lib/turns/types';
 import { useTurnRecords } from './hooks/useTurnRecords';
 import { applyRetryOverlay } from './lib/turns/applyRetryOverlay';
+import {
+    deriveAutoExpandedTurnIds,
+    deriveProcessFoldState,
+    turnContainsMessageId,
+    turnHasStopSummary,
+} from './lib/turns/processFold';
 import { useUIStore } from '@/stores/useUIStore';
 import { FadeInDisabledProvider } from './message/FadeInOnReveal';
 import { hasPendingUserSendAnimation, consumePendingUserSendAnimation } from '@/lib/userSendAnimation';
@@ -164,20 +171,10 @@ const isAssistantMessageCompleted = (message: ChatMessageEntry): boolean => {
     return true;
 };
 
-const getMessageFinish = (message: ChatMessageEntry | undefined): string | undefined => {
-    const finish = (message?.info as { finish?: unknown } | undefined)?.finish;
-    return typeof finish === 'string' ? finish : undefined;
-};
-
-const turnHasStopSummary = (turn: TurnRecord): boolean => {
-    const lastAssistant = turn.assistantMessages[turn.assistantMessages.length - 1];
-    return getMessageFinish(lastAssistant) === 'stop';
-};
-
 const isUserSubtaskMessage = (message: ChatMessageEntry | undefined): boolean => {
     if (!message) return false;
     if (resolveMessageRole(message) !== 'user') return false;
-    return message.parts.some((part) => part?.type === 'subtask');
+    return hasSubtaskPart(message.parts);
 };
 
 const getMessageId = (message: ChatMessageEntry | undefined): string | null => {
@@ -630,17 +627,17 @@ const TurnBlock = React.memo(({
     directiveTurns,
 }: TurnBlockProps) => {
     const getProcessFoldState = React.useCallback((targetTurn: TurnRecord) => {
-        const hasStopSummary = turnHasStopSummary(targetTurn);
-        const isLiveIncompleteTurn = targetTurn.turnId === lastTurnId
-            && sessionIsWorking
-            && !hasStopSummary;
-        const isAutoExpandedIncompleteTurn = autoExpandedTurnIds.has(targetTurn.turnId) && !hasStopSummary;
-        const defaultTurnExpanded = defaultActivityExpanded || isAutoExpandedIncompleteTurn || isLiveIncompleteTurn;
-        return {
-            expanded: defaultTurnExpanded,
-            enabled: !isLiveIncompleteTurn && !isAutoExpandedIncompleteTurn,
-        };
-    }, [autoExpandedTurnIds, defaultActivityExpanded, lastTurnId, sessionIsWorking]);
+        return deriveProcessFoldState({
+            turn: targetTurn,
+            sessionIsWorking,
+            defaultActivityExpanded,
+            autoExpandedTurnIds,
+            activeStreamingTurnId: turnContainsMessageId(targetTurn, activeStreamingMessageId)
+                ? targetTurn.turnId
+                : null,
+            lastTurnId,
+        });
+    }, [activeStreamingMessageId, autoExpandedTurnIds, defaultActivityExpanded, lastTurnId, sessionIsWorking]);
 
     const isTurnExpanded = turnUiStates.get(turn.turnId)?.isExpanded ?? defaultActivityExpanded;
     const handleToggleTurnGroup = React.useCallback(() => {
@@ -1022,18 +1019,6 @@ interface MessageListEntryProps {
     activeStreamingPhase?: StreamPhase | null;
 }
 
-const turnContainsMessageId = (turn: TurnRecord, messageId: string | null | undefined): boolean => {
-    if (!messageId) {
-        return false;
-    }
-
-    if (turn.userMessage.info.id === messageId) {
-        return true;
-    }
-
-    return turn.assistantMessages.some((assistant) => assistant.info.id === messageId);
-};
-
 const MessageListEntry = React.memo(({
     entry,
     onMessageContentChange,
@@ -1308,7 +1293,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         scrollToBottom?.();
     });
 
-    React.useEffect(() => {
+    React.useLayoutEffect(() => {
         setTurnUiStates(new Map());
         setAutoExpandedTurnIds(new Set());
     }, [activityRenderMode, chatRenderMode, sessionKey]);
@@ -1596,32 +1581,29 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         streamPerfCount('ui.message_list.render.streaming');
     }
 
-    const streamingTurnId = streamingTurn?.turnId;
-    const streamingTurnHasStop = streamingTurn ? turnHasStopSummary(streamingTurn) : false;
-    React.useEffect(() => {
-        if (!streamingTurnId) {
-            return;
+    const activeStreamingTurnId = React.useMemo(() => {
+        if (!activeStreamingMessageId) {
+            return null;
         }
-
+        return projection.indexes.messageToTurnId.get(activeStreamingMessageId) ?? null;
+    }, [activeStreamingMessageId, projection.indexes.messageToTurnId]);
+    const activeStreamingTurnHasStop = React.useMemo(() => {
+        if (!activeStreamingTurnId) {
+            return false;
+        }
+        const activeTurn = projection.indexes.turnById.get(activeStreamingTurnId);
+        return activeTurn ? turnHasStopSummary(activeTurn) : false;
+    }, [activeStreamingTurnId, projection.indexes.turnById]);
+    React.useLayoutEffect(() => {
         setAutoExpandedTurnIds((previous) => {
-            if (sessionIsWorking && !streamingTurnHasStop) {
-                if (previous.has(streamingTurnId)) {
-                    return previous;
-                }
-                const next = new Set(previous);
-                next.add(streamingTurnId);
-                return next;
-            }
-
-            if (streamingTurnHasStop && previous.has(streamingTurnId)) {
-                const next = new Set(previous);
-                next.delete(streamingTurnId);
-                return next;
-            }
-
-            return previous;
+            return deriveAutoExpandedTurnIds({
+                previous,
+                sessionIsWorking,
+                activeStreamingTurnId,
+                activeStreamingTurnHasStop,
+            });
         });
-    }, [sessionIsWorking, streamingTurnHasStop, streamingTurnId]);
+    }, [activeStreamingTurnHasStop, activeStreamingTurnId, sessionIsWorking]);
 
     const historyEntries = staticRenderEntries;
     // The "load older" turn window is intentionally small; virtualizing it makes
@@ -1630,6 +1612,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
     const previousHistoryLenRef = React.useRef(historyEntries.length);
     const previousFirstEntryKeyRef = React.useRef(historyEntries[0]?.key);
     const [historyScrollMargin, setHistoryScrollMargin] = React.useState(0);
+    const showLoadOlder = turnStart > 0 || hasMoreAbove;
 
     React.useLayoutEffect(() => {
         const previousLen = previousHistoryLenRef.current;
@@ -2038,7 +2021,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
 
     return (
         <div>
-                {(turnStart > 0 || hasMoreAbove) && (
+                {showLoadOlder && (
                     <div className="flex justify-center py-3">
                         {isLoadingOlder ? (
                             <span className="text-xs uppercase tracking-wide text-muted-foreground/80">

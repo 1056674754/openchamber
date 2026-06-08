@@ -36,6 +36,7 @@ import {
     DIRECTIVE_TYPE_CONTINUATION,
 } from '@/lib/messages/system-directive';
 import { isLikelyProviderAuthFailure, PROVIDER_AUTH_FAILURE_MESSAGE } from '@/lib/messages/providerAuthError';
+import { getMessageFinishReason } from '@/lib/messageCompletion';
 import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
 import type { TurnGroupingContext } from './lib/turns/types';
 import { copyTextToClipboard } from '@/lib/clipboard';
@@ -593,9 +594,8 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
     }, [isUser, messageCompletedAt]);
 
     const messageFinish = React.useMemo(() => {
-        const finish = (message.info as { finish?: string }).finish;
-        return typeof finish === 'string' ? finish : undefined;
-    }, [message.info]);
+        return getMessageFinishReason(message.info, message.parts);
+    }, [message.info, message.parts]);
 
     const visibleParts = React.useMemo(
         () =>

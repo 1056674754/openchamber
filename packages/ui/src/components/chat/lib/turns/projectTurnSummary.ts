@@ -1,4 +1,5 @@
 import type { ChatMessageEntry, TurnDiffStats, TurnSummaryRecord } from './types';
+import { getMessageFinishReason } from '@/lib/messageCompletion';
 
 interface SummaryDiff {
     additions?: number | null;
@@ -27,7 +28,7 @@ export const projectTurnSummary = (assistantMessages: ChatMessageEntry[]): TurnS
         const assistantMessage = assistantMessages[messageIndex];
         if (!assistantMessage) continue;
 
-        const finish = (assistantMessage.info as { finish?: string | null }).finish;
+        const finish = getMessageFinishReason(assistantMessage.info, assistantMessage.parts);
         if (finish !== 'stop') continue;
 
         for (let partIndex = assistantMessage.parts.length - 1; partIndex >= 0; partIndex -= 1) {

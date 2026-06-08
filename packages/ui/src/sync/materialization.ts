@@ -1,5 +1,6 @@
 import type { Message, Part } from "@opencode-ai/sdk/v2/client"
 import { mergeMessages } from "./optimistic"
+import { getMessageFinishReason } from "@/lib/messageCompletion"
 
 const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0)
 const STREAMING_PART_FIELDS = ["text", "output"] as const
@@ -37,6 +38,22 @@ function sortParts(parts: Part[], skipPartTypes: ReadonlySet<string>) {
   return parts
     .filter((part) => !!part?.id && !skipPartTypes.has(part.type))
     .sort((a, b) => cmp(a.id, b.id))
+}
+
+function normalizeMaterializedMessageInfo(info: Message, parts: Part[]): Message {
+  if (info.role !== "assistant" || typeof (info as { finish?: unknown }).finish === "string") {
+    return info
+  }
+
+  const finish = getMessageFinishReason(info, parts)
+  if (!finish) {
+    return info
+  }
+
+  return {
+    ...info,
+    finish,
+  } as Message
 }
 
 function haveEquivalentPartSnapshots(left: Part[] | undefined, right: Part[]): boolean {
@@ -137,6 +154,10 @@ export function materializeSessionSnapshots(
   const skipPartTypes = options.skipPartTypes ?? new Set<string>()
   const snapshots = records
     .filter((record) => !!record?.info?.id)
+    .map((record) => ({
+      ...record,
+      info: normalizeMaterializedMessageInfo(record.info, record.parts ?? []),
+    }))
     .sort((left, right) => cmp(left.info.id, right.info.id))
   const nextMessages = snapshots.map((record) => record.info)
   const currentMessages = state.message[sessionID] ?? []

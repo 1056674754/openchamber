@@ -3,6 +3,7 @@ import { isSystemDirectiveMessage } from '@/lib/messages/system-directive';
 import { projectTurnActivity } from './projectTurnActivity';
 import { projectTurnIndexes } from './projectTurnIndexes';
 import { projectTurnDiffStats, projectTurnSummary } from './projectTurnSummary';
+import { getMessageFinishReason } from '@/lib/messageCompletion';
 import type {
     ChatMessageEntry,
     TurnMessageRecord,
@@ -42,8 +43,7 @@ const getMessageCompletedAt = (message: ChatMessageEntry): number | undefined =>
 // this mechanism by accident; we keep both the two-pass parentID strictness
 // AND the per-turn reuse so streams render smoothly.
 const getMessageFinish = (message: ChatMessageEntry): string | undefined => {
-    const finish = (message.info as { finish?: unknown }).finish;
-    return typeof finish === 'string' ? finish : undefined;
+    return getMessageFinishReason(message.info, message.parts);
 };
 
 const getMessageStatus = (message: ChatMessageEntry): string | undefined => {
