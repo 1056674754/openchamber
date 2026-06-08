@@ -181,8 +181,8 @@
 | 3.12 | AboutSettings | `AboutSettings.tsx` (新建) | ✅ 已落地：About settings 展示 OpenCode version，并新增 web server `/api/opencode/version` route |
 | 3.13 | 文件树隐藏文件过滤 | `DirectoryExplorerDialog.tsx` | ✅ 已落地：默认隐藏 dot directory，搜索 `.` 或开启 show hidden 时展示 |
 | 3.14 | MarkdownRenderer / ProgressiveGroup 清理 | 2 | ✅ 已落地：复用 `path-utils.ts` 处理 Windows/UNC/相对路径；保留本 fork 的 remote/serverId 文件引用路由 |
-| 3.15 | Header / MainLayout 清理 | 2 | 删减冗余代码 |
-| 3.16 | 小修改集合 | ~10 | `AgentMentionAutocomplete`、`ModelControls`、`PendingChangesBar`、`TurnChangedFilesDropdown`、`changedFiles.ts`、`ForkSessionDialog`、`ScheduledTaskEditorDialog`、`TodoSendDialog`、`DiffView`、`AgentSelector`、`ChooserScreen`、`LocalSetupScreen`、`VSCodeLayout` 等 |
+| 3.15 | Header / MainLayout 清理 | 2 | ✅ 已落地 / ⚪ Header 无本地差异：MainLayout resize 改为 rAF 节流并修复 hook dependency；Header 中官方抽离的 inline Windows controls 本地已不存在 |
+| 3.16 | 小修改集合 | ~10 | ✅ 已落地：`AgentMentionAutocomplete`、`ModelControls` startup trace、changedFiles 路径处理、`ForkSessionDialog`/`TodoSendDialog`/`ScheduledTaskEditorDialog` source 参数、`DiffView` path-utils、`AgentSelector` load 去重、`VSCodeLayout` bootstrap source |
 | 3.17 | i18n 新 key | 9 | `en.ts` + 8 locale — `settings.about.*` + `ssh.*` key；`*.settings.ts` 3 个新 key |
 | 3.18 | 版本号 | 3 | `package.json` × 3 → v1.12.2 |
 | 3.19 | CI / Agent | 3 | `pr-review.yml` + `pr-review.md`（自动 PR review workflow）；`reproduce-issue.md` 更新 |

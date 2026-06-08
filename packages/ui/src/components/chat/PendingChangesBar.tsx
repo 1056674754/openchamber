@@ -85,9 +85,7 @@ export const PendingChangesBar: React.FC = React.memo(() => {
         if (!currentDirectory) return;
         if (!isGitFile(file)) return;
 
-        const absolutePath = file.path.startsWith('/')
-            ? file.path
-            : (currentDirectory.endsWith('/') ? currentDirectory : currentDirectory + '/') + file.path;
+        const absolutePath = file.path;
 
         const editor = runtime?.editor;
         if (editor) {

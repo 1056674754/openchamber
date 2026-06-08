@@ -188,7 +188,7 @@ export const MainLayout: React.FC = () => {
             return;
         }
 
-        let timeoutId: number | undefined;
+        let frameId: number | undefined;
 
          const handleResponsivePanels = () => {
              const state = useUIStore.getState();
@@ -211,13 +211,14 @@ export const MainLayout: React.FC = () => {
          };
 
         const handleResize = () => {
-            if (timeoutId !== undefined) {
-                window.clearTimeout(timeoutId);
+            if (frameId !== undefined) {
+                return;
             }
 
-            timeoutId = window.setTimeout(() => {
+            frameId = window.requestAnimationFrame(() => {
+                frameId = undefined;
                 handleResponsivePanels();
-            }, 100);
+            });
         };
 
         handleResponsivePanels();
@@ -225,11 +226,11 @@ export const MainLayout: React.FC = () => {
 
         return () => {
             window.removeEventListener('resize', handleResize);
-            if (timeoutId !== undefined) {
-                window.clearTimeout(timeoutId);
+            if (frameId !== undefined) {
+                window.cancelAnimationFrame(frameId);
             }
         };
-    }, [setRightSidebarOpen]);
+    }, [isMobile, setRightSidebarOpen]);
 
     React.useEffect(() => {
         if (typeof window === 'undefined') {
