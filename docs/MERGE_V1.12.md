@@ -100,7 +100,7 @@
 | **草稿启动页** | 新建会话时展示快捷命令 chips（拖拽排序、搜索添加），替代白屏。`DraftPresetChips` + `useDraftStarters` + `renderDraftTitle` | 🔴 高 |
 | **魔法命令** | `/explore` 探索代码库、`/catch-up` 快速总结、`/debug` 排查bug、`/weigh` 权衡方案、`/plan-feature` 功能规划、`/workspace-review` 代码审查 | 🔴 高 (与草稿启动页耦合) |
 | **消息改动文件标记** | 回复消息中显示本次改动涉及的文件列表 (TurnChangedFilePills)，含 `changedFiles` 字段 | 🟡 中 |
-| **时间格式偏好** | 集中化时间格式化（12/24小时制），`packages/ui/src/lib/timeFormat.ts` | 🟢 低 |
+| **时间格式偏好** | ✅ 已落地：新增 `packages/ui/src/lib/timeFormat.ts`，chat 消息 footer 与 Tunnel session 时间已接入 12/24 小时偏好 | 🟢 已完成 |
 | **滚动加载历史** | 聊天区域触底自动加载更早消息，替代 "Load older messages" 按钮 | 🟡 中 |
 
 ### 移动端（延后）
@@ -137,7 +137,7 @@
 |---|---|---|
 | 3.1 | ✅ 已落地 | `startupTrace.ts` 已存在；`App.tsx`、`useConfigStore.ts` 的主要 startup trace 调用点已接入 |
 | 3.2 | ✅ 已落地 | `device.ts` 已按官方 `useSyncExternalStore` + RAF 订阅式快照移植，保留本 fork 的 `isDesktopShell()` 设备判定 |
-| 3.3 / 4.2 | ✅ 已落地 | `checkHealth()` 已改为 `/api/opencode/health`，并新增 `health-url.ts` / `client-health.test.ts` 覆盖 `/api`、desktop absolute URL、remote route |
+| 3.3 / 4.2 | ✅ 已落地 | `checkHealth()` 已改为 `/api/opencode/health`，并新增 web server `/api/opencode/health` route；`health-url.ts` / `client-health.test.ts` 覆盖 `/api`、desktop absolute URL、remote route |
 | 3.4 | ✅ 已落地 | `useConfigStore.ts` 已接入 trace/source 参数、snapshot skip、`checkConnection` trace、跳过重复 `initApp()`、providers/agents 并行加载；保留本 fork 的 `serverId` / remote base URL 逻辑 |
 | 3.5 | ✅ 已落地 | `sync-context.tsx` 已从 event `properties.sessionID` 提取 `message.part.updated/delta/removed` 的 sessionID，保留本 fork 的 serverId routing |
 | 3.6 | ✅ 已落地 | `event-reducer.ts` 已从 event `properties.sessionID` 提取 part session，delta materialization 携带 sessionID，并保留 messageID guard |
@@ -177,8 +177,8 @@
 
 | Batch | 功能 | 文件 | 说明 |
 |---|---|---|---|
-| 3.11 | TunnelSettings 增强 | `TunnelSettings.tsx` | ngrok/cloudflare 配置 UI 改进，+135 行 |
-| 3.12 | AboutSettings | `AboutSettings.tsx` (新建) | 关于页面组件 |
+| 3.11 | TunnelSettings 增强 | `TunnelSettings.tsx` | ✅ 部分落地：服务端依赖检查结果驱动安装提示；session 时间遵守 12/24 小时偏好。未搬 `runtimeFetch`/`runtime-switch` 基础设施 |
+| 3.12 | AboutSettings | `AboutSettings.tsx` (新建) | ✅ 已落地：About settings 展示 OpenCode version，并新增 web server `/api/opencode/version` route |
 | 3.13 | 文件树隐藏文件过滤 | `DirectoryExplorerDialog.tsx` | 默认不显示隐藏文件 |
 | 3.14 | MarkdownRenderer / ProgressiveGroup 清理 | 2 | 代码清理，删减重复逻辑 |
 | 3.15 | Header / MainLayout 清理 | 2 | 删减冗余代码 |
