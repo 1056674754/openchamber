@@ -88,7 +88,7 @@ const createRuntime = (overrides = {}) => {
     syncToHmrState: vi.fn(),
     syncFromHmrState: vi.fn(),
     getOpenCodeAuthHeaders: () => ({}),
-    buildOpenCodeUrl: (route) => `http://127.0.0.1:45678${route}`,
+    buildOpenCodeUrl: (route) => `http://127.0.0.1:${state.openCodePort || 45678}${route}`,
     waitForReady: vi.fn(async () => true),
     normalizeApiPrefix: vi.fn(() => ''),
     applyOpencodeBinaryFromSettings: vi.fn(async () => null),
@@ -285,6 +285,37 @@ describe('OpenCode lifecycle', () => {
     const [, , options] = spawnMock.mock.calls[0];
 
     expect(options.env.PATH).toBe('/usr/bin:/bin');
+
+    await server.close();
+  });
+
+  it('uses global health for readiness checks', async () => {
+    delete process.env.OPENCODE_BINARY;
+    globalThis.fetch = vi.fn(async (url) => {
+      const text = String(url);
+      if (text.endsWith('/global/health')) {
+        return { ok: true, json: async () => ({ healthy: true }) };
+      }
+      return { ok: false, status: 404, json: async () => ({}) };
+    });
+
+    const child = createMockChild();
+    spawnMock.mockImplementationOnce(() => {
+      queueMicrotask(() => {
+        child.stdout.emit('data', 'opencode server listening on http://127.0.0.1:45678\n');
+      });
+      return child;
+    });
+
+    const runtime = createRuntime();
+    const server = await runtime.startOpenCode();
+
+    await runtime.waitForOpenCodeReady(50, 1);
+
+    const urls = globalThis.fetch.mock.calls.map(([url]) => String(url));
+    expect(urls).toContain('http://127.0.0.1:45678/global/health');
+    expect(urls).not.toContain('http://127.0.0.1:45678/config');
+    expect(urls).not.toContain('http://127.0.0.1:45678/agent');
 
     await server.close();
   });

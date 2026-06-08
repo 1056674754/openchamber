@@ -215,7 +215,7 @@
 | 4.1 / 4.5 | ✅ 已落地 | `env-runtime.js` 已禁用 WSL 自动检测/WSL settings 启动，保留 Windows 原生 `opencode.cmd`/`.exe` 解析；composition root/lifecycle 不再注入 WSL helper |
 | 4.2 | ✅ 已落地 | 与 3.3 合并处理：health URL 和返回值判断已切到 server health route |
 | 4.3 | ✅ 已落地 | `SidebarFilesTree.tsx` 已移植目录加载错误状态、根/子目录重试 UI，并按官方移除 lazy list 的 `respectGitignore` 参数；保留本 fork 的 desktop/local/remote 三分支 |
-| 4.4 / 4.6 | 🔴 待移植 | startup readiness / `lifecycle.js` 简化需单独服务端 batch |
+| 4.4 / 4.6 | ✅ 已落地 | `lifecycle.js` readiness 已统一到 `/global/health`，并移除 WSL helper 依赖；保留本 fork 的 Electron detach / managed auth 持久化逻辑 |
 | 4.7 / 4.8 | ✅ 已落地 | `server-utils-runtime.js` 已补 Windows managed PATH；`fs/routes.js` 已给 `git check-ignore` 加 2500ms 默认超时并支持 env 覆盖 |
 | 4.9 / 4.10 | ✅ 已落地 | VS Code bridge 已补 `git check-ignore` 超时与 `api:opencode/version`；`opencode.ts` 已补 `PATHEXT` / npm shim / debug CLI 重新探测 |
 | 4.11 / 4.12 / 4.13 | 🟡 部分落地 | Windows onboarding 已移除 WSL 推荐/WSL docs 链接；`en`/`zh-CN` 文案已更新。其余 locale 与 SSH docs 仍待单独 batch |
@@ -227,14 +227,14 @@
 | 4.1 | WSL 检测 + 排除 | 1 | `env-runtime.js` — `detectWslOpenCodeInstall()` 检测 WSL 路径并跳过；`findOpenCodeBinary` 简化为 `findLocalBinary` | ⭐ 低（Windows only，代码简化 -178 行） |
 | 4.2 | Health 兼容性修复 | 1 | `client.ts` — `checkHealth()` 修复 URL 构建，统一用 `/api/opencode/health`；返回 `healthData?.healthy === true`（原 `isOpenCodeReady !== false`） | ⭐⭐ 中 |
 | 4.3 | 文件树加载可靠性 | 1 | `SidebarFilesTree.tsx` — 修复懒加载/刷新时的空状态 | ⭐ 低 |
-| 4.4 | startup readiness 性能 | 1 | `lifecycle.js` — 简化启动就绪检测逻辑 | ⭐ 低 |
+| 4.4 | startup readiness 性能 | 1 | ✅ 已移植：`waitForOpenCodeReady()` 改用 `/global/health`，避免 `/config` + `/agent` 双请求 readiness |
 
 ### 零散改动
 
 | Batch | 功能 | 文件 | 说明 |
 |---|---|---|---|
 | 4.5 | env-runtime 简化 | `env-runtime.js` | -178 行大幅简化 opencode 二进制查找逻辑 |
-| 4.6 | lifecycle 简化 | `lifecycle.js` | -29 行移除冗余启动流程 |
+| 4.6 | lifecycle 简化 | `lifecycle.js` | ✅ 已移植：移除 WSL launch helper 依赖并统一 health path；Electron detach / auth persistence 为本 fork 保留 |
 | 4.7 | server-utils 增强 | `server-utils-runtime.js` + test | ✅ 已移植：Windows managed PATH 补充 npm/node/pnpm/bun/volta/yarn/scoop/chocolatey 等原生工具链目录 |
 | 4.8 | fs routes 修复 | `fs/routes.js` | ✅ 已移植：`git check-ignore` 默认 2500ms 超时，超时回退为不过滤，避免文件列表卡死 |
 | 4.9 | VS Code bridge 增强 | 3 | ✅ 已移植：FS helpers/runtime 加 `git check-ignore` 超时；system bridge 新增 `api:opencode/version` |
