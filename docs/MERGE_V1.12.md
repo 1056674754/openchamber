@@ -179,8 +179,8 @@
 |---|---|---|---|
 | 3.11 | TunnelSettings 增强 | `TunnelSettings.tsx` | ✅ 部分落地：服务端依赖检查结果驱动安装提示；session 时间遵守 12/24 小时偏好。未搬 `runtimeFetch`/`runtime-switch` 基础设施 |
 | 3.12 | AboutSettings | `AboutSettings.tsx` (新建) | ✅ 已落地：About settings 展示 OpenCode version，并新增 web server `/api/opencode/version` route |
-| 3.13 | 文件树隐藏文件过滤 | `DirectoryExplorerDialog.tsx` | 默认不显示隐藏文件 |
-| 3.14 | MarkdownRenderer / ProgressiveGroup 清理 | 2 | 代码清理，删减重复逻辑 |
+| 3.13 | 文件树隐藏文件过滤 | `DirectoryExplorerDialog.tsx` | ✅ 已落地：默认隐藏 dot directory，搜索 `.` 或开启 show hidden 时展示 |
+| 3.14 | MarkdownRenderer / ProgressiveGroup 清理 | 2 | ✅ 已落地：复用 `path-utils.ts` 处理 Windows/UNC/相对路径；保留本 fork 的 remote/serverId 文件引用路由 |
 | 3.15 | Header / MainLayout 清理 | 2 | 删减冗余代码 |
 | 3.16 | 小修改集合 | ~10 | `AgentMentionAutocomplete`、`ModelControls`、`PendingChangesBar`、`TurnChangedFilesDropdown`、`changedFiles.ts`、`ForkSessionDialog`、`ScheduledTaskEditorDialog`、`TodoSendDialog`、`DiffView`、`AgentSelector`、`ChooserScreen`、`LocalSetupScreen`、`VSCodeLayout` 等 |
 | 3.17 | i18n 新 key | 9 | `en.ts` + 8 locale — `settings.about.*` + `ssh.*` key；`*.settings.ts` 3 个新 key |
