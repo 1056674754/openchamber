@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, mock, test } from 'bun:test';
 import express from 'express';
 import request from 'supertest';
 import { registerOpenCodeRoutes } from './routes.js';
@@ -42,11 +42,11 @@ const useFetchMock = (fetchMock) => {
 describe('opencode routes', () => {
   afterEach(() => {
     globalThis.fetch = originalFetch;
-    vi.clearAllMocks();
+    mock.restore();
   });
 
-  it('proxies OpenCode health through /api/opencode/health', async () => {
-    const fetchMock = useFetchMock(vi.fn(async () => jsonResponse({ healthy: true })));
+  test('proxies OpenCode health through /api/opencode/health', async () => {
+    const fetchMock = useFetchMock(mock(async () => jsonResponse({ healthy: true })));
 
     const response = await request(createApp())
       .get('/api/opencode/health')
@@ -65,8 +65,8 @@ describe('opencode routes', () => {
     );
   });
 
-  it('returns the normalized OpenCode version from global health', async () => {
-    const fetchMock = useFetchMock(vi.fn(async () => jsonResponse({ version: 'v1.2.3' })));
+  test('returns the normalized OpenCode version from global health', async () => {
+    const fetchMock = useFetchMock(mock(async () => jsonResponse({ version: 'v1.2.3' })));
 
     const response = await request(createApp())
       .get('/api/opencode/version')
@@ -85,8 +85,8 @@ describe('opencode routes', () => {
     );
   });
 
-  it('preserves OpenCode version route failure status', async () => {
-    useFetchMock(vi.fn(async () => jsonResponse({ error: 'not ready' }, { status: 503 })));
+  test('preserves OpenCode version route failure status', async () => {
+    useFetchMock(mock(async () => jsonResponse({ error: 'not ready' }, { status: 503 })));
 
     const response = await request(createApp())
       .get('/api/opencode/version')
