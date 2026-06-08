@@ -184,8 +184,8 @@
 | 3.15 | Header / MainLayout 清理 | 2 | ✅ 已落地 / ⚪ Header 无本地差异：MainLayout resize 改为 rAF 节流并修复 hook dependency；Header 中官方抽离的 inline Windows controls 本地已不存在 |
 | 3.16 | 小修改集合 | ~10 | ✅ 已落地：`AgentMentionAutocomplete`、`ModelControls` startup trace、changedFiles 路径处理、`ForkSessionDialog`/`TodoSendDialog`/`ScheduledTaskEditorDialog` source 参数、`DiffView` path-utils、`AgentSelector` load 去重、`VSCodeLayout` bootstrap source |
 | 3.17 | i18n 新 key | 9 | `en.ts` + 8 locale — `settings.about.*` + `ssh.*` key；`*.settings.ts` 3 个新 key |
-| 3.18 | 版本号 | 3 | `package.json` × 3 → v1.12.2 |
-| 3.19 | CI / Agent | 3 | `pr-review.yml` + `pr-review.md`（自动 PR review workflow）；`reproduce-issue.md` 更新 |
+| 3.18 | 版本号 | 3 | ⚠️ 发布收尾再处理：功能缺口未完全关闭前不 bump package version |
+| 3.19 | CI / Agent | 3 | ⚠️ 单独审批：官方 `pull_request_target` 自动 review 与 reproduce agent push/force-push 权限会改变 fork automation 权限边界，未直接移植 |
 
 ### 服务端（tunnels 重构）
 
@@ -242,8 +242,8 @@
 | 4.11 | onboarding WSL UI | 2 | `ChooserScreen.tsx`、`LocalSetupScreen.tsx` — WSL 检测 UI |
 | 4.12 | i18n | 8 | ✅ 已移植：Windows onboarding locale 已去掉 WSL 推荐；settings about/tunnel 3 个新 key × 8 locale 已补齐 |
 | 4.13 | SSH 文档 | 7 | ⚪ 当前 `v1.12.2..v1.12.3` 的 docs diff 无本仓库可移植 SSH 文档变更 |
-| 4.14 | 版本号 | 3 | `package.json` × 3 → v1.12.3 |
-| 4.15 | CHANGELOG | 2 | `CHANGELOG.md`、`packages/vscode/CHANGELOG.md` |
+| 4.14 | 版本号 | 3 | ⚠️ 发布收尾再处理：待 high-risk chat/mobile 缺口决策后再 bump 到 v1.12.3 |
+| 4.15 | CHANGELOG | 2 | ⚠️ 发布收尾再处理：避免在未完成/未发布状态写成正式 v1.12.3 release |
 
 ---
 
