@@ -145,7 +145,7 @@
 | 3.8 | ✅ 已落地 | `App.tsx` 已接 `App:mounted` trace，startup recovery 调用带 `source: 'startupRecovery'` |
 | 3.9 | ⚪ 不适用 | 官方改动只作用于 `updateProportionalSidebarWidths` / `bottomTerminalHeight`；本 fork 当前 `useUIStore.ts` 无对应 bottom-terminal resize action，已确认没有可手工套用的同名状态路径 |
 | 3.10 | ✅ 已落地 | `path-utils.ts` + test 已存在 |
-| 3.S* | 🟡 部分落地 | `executable-search.js`、`install-help.js`、tunnel `types` / `index` / `routes` 安全修复已落地；底层 `ngrok-tunnel.js` / `cloudflare-tunnel.js` 大改仍需独立深查 |
+| 3.S* | ✅ 主要落地 | `executable-search.js`、`install-help.js`、tunnel `types` / `index` / `routes`、provider install metadata、`ngrok-tunnel.js` URL/error handling、`cloudflare-tunnel.js` executable-search 已手工移植；版本号/CHANGELOG 仍按最终发布另处理 |
 
 ### 核心改动
 
@@ -193,8 +193,8 @@
 |---|---|---|---|
 | 3.S1 | tunnels 模块拆分 | 4 (新建) | ✅ 已移植：`executable-search.js` + test、`install-help.js` + test；补 Windows app alias 和平台化安装提示 |
 | 3.S2 | tunnels types 重构 | 2 | ✅ 已移植：`types.js` + test；Windows home path 校验改为平台 path API，避免大小写/兄弟目录误判 |
-| 3.S3 | ngrok 重写 | 2 | `ngrok-tunnel.js` + test — +278/-50 大幅重写，更好的错误处理和重连 |
-| 3.S4 | cloudflare 简化 | 1 | `cloudflare-tunnel.js` — -50 行清理（待深查） |
+| 3.S3 | ngrok 重写 | 2 | ✅ 已移植：`ngrok-tunnel.js` 改用 shared executable search、stdout JSON/text URL 解析、最近输出错误摘要，并新增纯函数测试 |
+| 3.S4 | cloudflare 简化 | 1 | ✅ 已移植：`cloudflare-tunnel.js` 改用 shared executable-search/env，保留本 fork 现有 managed tunnel readiness |
 | 3.S5 | server-utils 增强 | 2 | ✅ 已移植：`server-utils-runtime.js` + test；Windows managed PATH 补原生工具链目录 |
 | 3.S6 | routes / index | 3 | ✅ 已移植：`tunnels/routes.js`、`tunnels/index.js` + test；provider 切换替换 active tunnel、startup error 包装、check route 返回 install metadata |
 | 3.S7 | env-runtime + lifecycle 简化 | 3 | ✅ 已移植核心：Windows native OpenCode policy、server health route、lifecycle readiness `/global/health`；保留 Electron detach/auth persistence |
