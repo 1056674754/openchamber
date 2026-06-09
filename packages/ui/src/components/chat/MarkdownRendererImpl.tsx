@@ -31,7 +31,20 @@ import { DEFAULT_SERVER_ID, serverRegistry } from '@/lib/opencode/server-registr
 import { resolveApiUrl } from '@/lib/api/serverUrl';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { isVSCodeRuntime } from '@/lib/desktop';
-import { getDirectoryForFilePath, isAbsoluteFilePath, normalizeFilePath, toAbsoluteFilePath } from '@/lib/path-utils';
+import { getDirectoryForFilePath } from '@/lib/path-utils';
+import { CODE_SHARED_STYLE, MARKDOWN_CODE_BODY_CLASSNAME } from './markdownCodeStyle';
+import {
+  getFileNameFromPath,
+  getResolvedReference,
+  isAbsolutePath,
+  isLikelyFilePath,
+  isLikelyFilePathValue,
+  isLikelyImageFilePath,
+  normalizeMarkdownImageSource,
+  normalizePath,
+  parseFileReference,
+  toAbsolutePath,
+} from './markdownFileReferences';
 
 const useCurrentMermaidTheme = () => {
   const themeSystem = useOptionalThemeSystem();
@@ -721,14 +734,6 @@ const normalizeCodeBlockText = (code: string, language: string): string => {
 const CODE_HIGHLIGHT_SETTLE_MS = 300;
 const CODE_HIGHLIGHT_LINE_LIMIT = 1200;
 const VSCODE_CODE_HIGHLIGHT_LINE_LIMIT = 200;
-const CODE_SHARED_STYLE: React.CSSProperties = {
-  margin: 0,
-  background: 'transparent',
-  padding: 0,
-  fontSize: 'var(--text-code)',
-  lineHeight: 'var(--markdown-code-block-line-height)',
-};
-
 const exceedsLineLimit = (value: string, limit: number): boolean => {
   let lineCount = 1;
   for (let index = 0; index < value.length; index += 1) {
@@ -876,7 +881,7 @@ const MarkdownCodeBlock: React.FC<{
           />
         </div>
       ) : (
-        <div className="px-3 py-2.5">
+        <div data-component="markdown-code-body" className={MARKDOWN_CODE_BODY_CLASSNAME}>
           {highlight && !skipHighlight ? (
             <SyntaxHighlighter
               language={language}
@@ -1129,42 +1134,6 @@ const getFileReferenceLinkLimit = (): number => (
   isVSCodeRuntime() ? VSCODE_FILE_REFERENCE_LINK_LIMIT : FILE_REFERENCE_LINK_LIMIT
 );
 
-type ParsedFileReference = {
-  path: string;
-  line?: number;
-  column?: number;
-};
-
-const IMAGE_FILE_EXTENSIONS = new Set([
-  'avif',
-  'bmp',
-  'gif',
-  'heic',
-  'heif',
-  'ico',
-  'jpeg',
-  'jpg',
-  'png',
-  'svg',
-  'webp',
-]);
-const KNOWN_FILE_BASENAMES = new Set([
-  'dockerfile',
-  'makefile',
-  'readme',
-  'license',
-  '.env',
-  '.gitignore',
-  '.npmrc',
-]);
-const KNOWN_BASENAME_PATTERN = Array.from(KNOWN_FILE_BASENAMES)
-  .map((name) => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
-  .join('|');
-
-const normalizePath = (value: string): string => {
-  return normalizeFilePath(value);
-};
-
 const resolveRemoteServerIdForDirectory = (directory: string): string | undefined => {
   const normalizedDirectory = normalizePath(directory);
   if (!normalizedDirectory) {
@@ -1211,157 +1180,6 @@ const resolveFileReferenceBaseUrl = (sessionId?: string | null, directory?: stri
   return serverRegistry.get(serverId)?.config.baseUrl ?? `/api/remote/${encodeURIComponent(serverId)}`;
 };
 
-const isAbsolutePath = (value: string): boolean => {
-  return isAbsoluteFilePath(value);
-};
-
-const toAbsolutePath = (basePath: string, targetPath: string): string => {
-  return toAbsoluteFilePath(basePath, targetPath);
-};
-
-const trimPathCandidate = (value: string): string => {
-  let next = (value || '').trim();
-  if (!next) {
-    return '';
-  }
-
-  if ((next.startsWith('`') && next.endsWith('`')) || (next.startsWith('"') && next.endsWith('"')) || (next.startsWith("'") && next.endsWith("'"))) {
-    next = next.slice(1, -1).trim();
-  }
-
-  next = next.replace(/[.,;!?]+$/g, '');
-
-  if (next.endsWith(')') && !next.includes('(')) {
-    next = next.slice(0, -1);
-  }
-  if (next.endsWith(']') && !next.includes('[')) {
-    next = next.slice(0, -1);
-  }
-
-  return next;
-};
-
-const stripTrailingReference = (value: string): string => {
-  let next = trimPathCandidate(value);
-  if (!next) {
-    return '';
-  }
-
-  const semicolonIndex = next.indexOf(';');
-  if (semicolonIndex >= 0) {
-    next = next.slice(0, semicolonIndex);
-  }
-
-  next = next.replace(/#.*$/, '');
-
-  const extensionSuffixMatch = next.match(/^(.*\.[A-Za-z0-9_-]{1,16}):.*$/);
-  if (extensionSuffixMatch) {
-    next = extensionSuffixMatch[1] ?? next;
-  }
-
-  const basenameSuffixMatch = KNOWN_BASENAME_PATTERN.length > 0
-    ? next.match(new RegExp(`^(.*(?:/|^)(${KNOWN_BASENAME_PATTERN})):.*$`, 'i'))
-    : null;
-  if (basenameSuffixMatch) {
-    next = basenameSuffixMatch[1] ?? next;
-  }
-
-  return trimPathCandidate(next);
-};
-
-const parseFileReference = (value: string): ParsedFileReference | null => {
-  const trimmed = trimPathCandidate(value);
-  if (!trimmed) {
-    return null;
-  }
-
-  const semicolonIndex = trimmed.indexOf(';');
-  const withoutSemicolonSuffix = semicolonIndex >= 0
-    ? trimPathCandidate(trimmed.slice(0, semicolonIndex))
-    : trimmed;
-  if (!withoutSemicolonSuffix) {
-    return null;
-  }
-
-  const hashMatch = withoutSemicolonSuffix.match(/^(.*)#L(\d+)(?:C(\d+))?$/i);
-  if (hashMatch) {
-    const path = stripTrailingReference(hashMatch[1] ?? '');
-    const line = Number.parseInt(hashMatch[2] ?? '', 10);
-    const column = hashMatch[3] ? Number.parseInt(hashMatch[3], 10) : undefined;
-    if (!path || !Number.isFinite(line)) {
-      return null;
-    }
-
-    return {
-      path,
-      line,
-      column: Number.isFinite(column ?? Number.NaN) ? column : undefined,
-    };
-  }
-
-  const colonMatch = withoutSemicolonSuffix.match(/^(.*):(\d+)(?::(\d+))?$/);
-  if (colonMatch) {
-    const path = stripTrailingReference(colonMatch[1] ?? '');
-    const line = Number.parseInt(colonMatch[2] ?? '', 10);
-    const column = colonMatch[3] ? Number.parseInt(colonMatch[3], 10) : undefined;
-    if (!path || !Number.isFinite(line)) {
-      return null;
-    }
-
-    return {
-      path,
-      line,
-      column: Number.isFinite(column ?? Number.NaN) ? column : undefined,
-    };
-  }
-
-  const pathOnly = stripTrailingReference(withoutSemicolonSuffix);
-  if (!pathOnly) {
-    return null;
-  }
-
-  return { path: pathOnly };
-};
-
-const hasFileExtension = (path: string): boolean => {
-  const base = path.split('/').filter(Boolean).pop() ?? '';
-  if (!base || base.endsWith('.')) {
-    return false;
-  }
-  return /\.[A-Za-z0-9_-]{1,16}$/.test(base);
-};
-
-const isLikelyFilePathValue = (path: string): boolean => {
-  if (!path || path.startsWith('--') || path.includes('://')) {
-    return false;
-  }
-
-  if (/[<>]/.test(path) || /\s{2,}/.test(path)) {
-    return false;
-  }
-
-  const normalized = normalizePath(path);
-  const baseName = normalized.split('/').filter(Boolean).pop() ?? normalized;
-  if (!baseName || baseName === '.' || baseName === '..') {
-    return false;
-  }
-
-  const base = baseName.toLowerCase();
-  if (KNOWN_FILE_BASENAMES.has(base) || (base.startsWith('.') && base.length > 1)) {
-    return true;
-  }
-
-  return hasFileExtension(normalized);
-};
-
-const isLikelyFilePath = (value: string): boolean => {
-  const parsed = parseFileReference(value);
-  if (!parsed) {
-    return false;
-  }
-  return isLikelyFilePathValue(parsed.path);
-};
-
 const extractPathCandidateFromElement = (element: HTMLElement): string => {
   if (element.tagName.toLowerCase() === 'a') {
     const originalHref = element.getAttribute(ORIGINAL_HREF_ATTRIBUTE)?.trim();
@@ -1376,75 +1194,6 @@ const extractPathCandidateFromElement = (element: HTMLElement): string => {
   }
 
   return (element.textContent || '').trim();
-};
-
-const getResolvedReference = (rawValue: string, effectiveDirectory: string): (ParsedFileReference & { resolvedPath: string }) | null => {
-  const parsed = parseFileReference(rawValue);
-  if (!parsed || !isLikelyFilePathValue(parsed.path)) {
-    return null;
-  }
-
-  const resolvedPath = isAbsolutePath(parsed.path)
-    ? normalizePath(parsed.path)
-    : toAbsolutePath(effectiveDirectory, parsed.path);
-  if (!resolvedPath) {
-    return null;
-  }
-
-  return {
-    ...parsed,
-    resolvedPath,
-  };
-};
-
-const decodeUriPathComponent = (value: string): string => {
-  try {
-    return decodeURIComponent(value);
-  } catch {
-    return value;
-  }
-};
-
-const normalizeMarkdownImageSource = (value: string): string => {
-  const raw = (value || '').trim();
-  if (!raw) {
-    return '';
-  }
-
-  if (raw.toLowerCase().startsWith('file://')) {
-    try {
-      const parsed = new URL(raw);
-      const pathname = decodeUriPathComponent(parsed.pathname || '');
-      if (parsed.hostname && parsed.hostname !== 'localhost') {
-        return normalizePath(`//${parsed.hostname}${pathname}`);
-      }
-      if (/^\/[A-Za-z]:\//.test(pathname)) {
-        return normalizePath(pathname.slice(1));
-      }
-      return normalizePath(pathname);
-    } catch {
-      return raw;
-    }
-  }
-
-  return decodeUriPathComponent(raw);
-};
-
-const getLowerFileExtension = (path: string): string => {
-  const base = normalizePath(path).split('/').filter(Boolean).pop() ?? '';
-  const dotIndex = base.lastIndexOf('.');
-  if (dotIndex < 0 || dotIndex === base.length - 1) {
-    return '';
-  }
-  return base.slice(dotIndex + 1).toLowerCase();
-};
-
-const getFileNameFromPath = (path: string): string => {
-  return normalizePath(path).split('/').filter(Boolean).pop() ?? '';
-};
-
-const isLikelyImageFilePath = (path: string): boolean => {
-  return IMAGE_FILE_EXTENSIONS.has(getLowerFileExtension(path));
 };
 
 const toComparableReferencePath = (value: string): string => {
