@@ -7,6 +7,7 @@ import { useSkillsStore } from '@/stores/useSkillsStore';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
+import { dedupeCommandAutocompleteEntries } from './commandAutocompleteDedupe';
 
 type CommandSource = 'openchamber' | 'opencode' | 'skill';
 
@@ -165,7 +166,7 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
         const allCommands = [...builtInCommands, ...customCommands, ...skillCommands];
 
         const allowInitCommand = !hasMessagesInCurrentSession;
-        const filtered = (searchQuery
+        const filtered = dedupeCommandAutocompleteEntries(searchQuery
           ? allCommands.filter(cmd =>
               fuzzyMatch(cmd.name, searchQuery) ||
               (cmd.description && fuzzyMatch(cmd.description, searchQuery))
