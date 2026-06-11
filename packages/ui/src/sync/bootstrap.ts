@@ -5,6 +5,21 @@ import type { GlobalState, State } from "./types"
 const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0)
 const BOOTSTRAP_REQUEST_TIMEOUT_MS = 8_000
 
+const readErrorStatus = (error: unknown): number | undefined => {
+  if (typeof error !== "object" || error === null || !("status" in error)) return undefined
+  return typeof error.status === "number" ? error.status : undefined
+}
+
+export const shouldLogBootstrapFailureAsInfo = (error: unknown): boolean => readErrorStatus(error) === 503
+
+const logBootstrapFailure = (message: string, error: unknown): void => {
+  if (shouldLogBootstrapFailureAsInfo(error)) {
+    console.info(message, error)
+    return
+  }
+  console.error(message, error)
+}
+
 async function withTimeout<T>(promise: Promise<T>, label: string): Promise<T> {
   let timeoutId: ReturnType<typeof setTimeout> | undefined
   const timeout = new Promise<never>((_, reject) => {
@@ -165,7 +180,7 @@ export async function bootstrapDirectory(input: {
   if (loading) set({ status: "partial" })
 
   const sessionLoad = Promise.resolve(input.loadSessions(directory)).catch((err) => {
-    console.error(`[bootstrap] session load failed for ${directory}`, err)
+    logBootstrapFailure(`[bootstrap] session load failed for ${directory}`, err)
     throw err
   })
 
@@ -208,7 +223,7 @@ export async function bootstrapDirectory(input: {
   const criticalPhase1Failed = sessionLoadResult.status === "rejected"
 
   if (phase1Errors.length === phase1Results.length || criticalPhase1Failed) {
-    console.error(`[bootstrap] directory bootstrap failed for ${directory}`, phase1Errors[0])
+    logBootstrapFailure(`[bootstrap] directory bootstrap failed for ${directory}`, phase1Errors[0])
     if (loading) set({ status: "loading" })
     return false
   }

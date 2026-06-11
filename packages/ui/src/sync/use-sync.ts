@@ -25,6 +25,7 @@ import {
 import { getSessionMaterializationStatus, materializeSessionSnapshots } from "./materialization"
 import { useTodosPersistStore } from "@/stores/useTodosPersistStore"
 import { useConfigStore } from "@/stores/useConfigStore"
+import { useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
 import { fetchMessagePageToUserBoundary, type MessagePage } from "./message-page-boundary"
 
 const SKIP_PARTS = new Set(["patch", "step-start", "step-finish"])
@@ -123,34 +124,36 @@ export function useSync() {
 
   const resolveSessionTarget = useCallback(
     (sessionID: string) => {
-      const sessionDir = useSessionUIStore.getState().getDirectoryForSession(sessionID) || directory
+      const knownSessionDir = useSessionUIStore.getState().getDirectoryForSession(sessionID)
       const serverId = serverRegistry.getServerForSession(sessionID)
 
       if (serverId && serverId !== DEFAULT_SERVER_ID) {
         const remoteStores = getSyncStoresForServer(serverId)
         if (remoteStores) {
-          let resolvedDirectory = sessionDir
-          let remoteStore = resolvedDirectory ? remoteStores.ensureChild(resolvedDirectory) : undefined
-          if (!remoteStore) {
-            for (const [candidateDirectory, candidate] of remoteStores.children) {
-              if (candidate.getState().session.some((session) => session.id === sessionID)) {
-                resolvedDirectory = candidateDirectory
-                remoteStore = candidate
-                break
+          for (const [candidateDirectory, candidate] of remoteStores.children) {
+            if (candidate.getState().session.some((session) => session.id === sessionID)) {
+              return {
+                directory: candidateDirectory,
+                store: candidate,
+                serverId,
               }
             }
           }
-          if (remoteStore) {
+
+          if (knownSessionDir) {
+            const remoteStore = remoteStores.ensureChild(knownSessionDir)
             return {
-              directory: resolvedDirectory,
+              directory: knownSessionDir,
               store: remoteStore,
               serverId,
             }
           }
         }
+
+        throw new Error(`Directory for remote session ${sessionID} on ${serverId} is not available`)
       }
 
-      const targetDirectory = sessionDir || directory
+      const targetDirectory = knownSessionDir || directory
       const targetStore = targetDirectory === directory
         ? store
         : childStores.ensureChild(targetDirectory)
@@ -201,6 +204,7 @@ export function useSync() {
         message: { ...current.message },
         part: { ...current.part },
         session_status: { ...current.session_status },
+        session_activity: { ...current.session_activity },
         session_diff: { ...current.session_diff },
         todo: { ...current.todo },
         permission: { ...current.permission },
@@ -527,6 +531,7 @@ export function useSync() {
               target.store.setState((s) => ({
                 session_status: { ...s.session_status, [sessionID]: status },
               }))
+              useGlobalSessionsStore.getState().upsertStatus(sessionID, status)
             }).catch(() => {}),
             client.session.todo({ sessionID, directory: sessionDir }).then((res) => {
               const todos: Todo[] | undefined = res.data && res.data.length > 0 ? res.data : undefined
@@ -603,6 +608,7 @@ export function useSync() {
             target.store.setState((s) => ({
               session_status: { ...s.session_status, [sessionID]: status },
             }))
+            useGlobalSessionsStore.getState().upsertStatus(sessionID, status)
           }),
           client.session.todo({ sessionID, directory: sessionDir }).then((res) => {
             const todos: Todo[] | undefined = res.data && res.data.length > 0 ? res.data : undefined

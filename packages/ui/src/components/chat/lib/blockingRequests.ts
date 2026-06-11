@@ -12,6 +12,12 @@ type MessageRecordWithParts = {
     parts: Part[];
 };
 
+type ToolPartRequestKeySource = {
+    id?: unknown;
+    callID?: unknown;
+    messageID?: unknown;
+};
+
 type ToolAnchoredBlockingRequest = {
     id: string;
     tool?: {
@@ -31,6 +37,23 @@ export const getToolRequestKey = (messageID: string, callID: string): string => 
     return `${messageID}${TOOL_KEY_SEPARATOR}${callID}`;
 };
 
+export const getToolPartRequestKey = (
+    fallbackMessageID: string,
+    part: ToolPartRequestKeySource,
+): string | null => {
+    const callID = typeof part.callID === 'string' && part.callID.length > 0
+        ? part.callID
+        : typeof part.id === 'string' && part.id.length > 0
+            ? part.id
+            : null;
+    if (!callID) return null;
+
+    const messageID = typeof part.messageID === 'string' && part.messageID.length > 0
+        ? part.messageID
+        : fallbackMessageID;
+    return getToolRequestKey(messageID, callID);
+};
+
 export const getBlockingRequestToolKey = (request: ToolAnchoredBlockingRequest): string | null => {
     const messageID = request.tool?.messageID;
     const callID = request.tool?.callID;
@@ -45,13 +68,8 @@ export const collectVisibleToolRequestKeys = (messages: readonly MessageRecordWi
         if (!fallbackMessageID) continue;
         for (const part of message.parts) {
             if (part.type !== 'tool') continue;
-            const partID = (part as { id?: unknown }).id;
-            if (typeof partID !== 'string' || partID.length === 0) continue;
-            const messageID = (part as { messageID?: unknown }).messageID;
-            keys.add(getToolRequestKey(
-                typeof messageID === 'string' && messageID.length > 0 ? messageID : fallbackMessageID,
-                partID,
-            ));
+            const key = getToolPartRequestKey(fallbackMessageID, part);
+            if (key) keys.add(key);
         }
     }
     return keys;

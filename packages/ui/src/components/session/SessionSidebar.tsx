@@ -73,7 +73,7 @@ import {
   normalizePath,
 } from './sidebar/utils';
 import { buildSidebarSessionPrefetchOrder } from './sidebar/prefetchOrder';
-import { refreshGlobalSessions, resolveGlobalSessionDirectory, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
+import { mergeSessionDirectoryMetadata, refreshGlobalSessions, resolveGlobalSessionDirectory, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useSessionProjectStore } from '@/stores/useSessionProjectStore';
 import { hydrateSessionProjectBindings } from '@/lib/sessionOwnership';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
@@ -171,6 +171,9 @@ type KnownSessionDirectoryScope = {
 
 const normalizeServerScopeId = (serverId?: string | null): string =>
   serverId && serverId !== DEFAULT_SERVER_ID ? serverId : DEFAULT_SERVER_ID;
+
+const isDefaultProjectConnection = (project: { serverId?: string | null }): boolean =>
+  normalizeServerScopeId(project.serverId) === DEFAULT_SERVER_ID;
 
 const getSessionParentId = (session: Session): string | null => {
   const parentID = (session as Session & { parentID?: string | null }).parentID;
@@ -497,7 +500,10 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
 
   const sessions = React.useMemo(() => {
     const liveById = new Map(liveSessions.map((session) => [session.id, session]));
-    const merged = globalActiveSessions.map((session) => liveById.get(session.id) ?? session);
+    const merged = globalActiveSessions.map((session) => {
+      const liveSession = liveById.get(session.id);
+      return liveSession ? mergeSessionDirectoryMetadata(liveSession, session) : session;
+    });
     const seenIds = new Set(merged.map((session) => session.id));
 
     liveSessions.forEach((session) => {
@@ -1389,15 +1395,20 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
       return null;
     }
 
-    const indexedServerId = serverRegistry.getServerForSession(session.id);
+    const indexedServerId = normalizeServerScopeId(serverRegistry.getServerForSession(session.id));
     const candidates = normalizedProjects
       .filter((project) => {
-        if (!indexedServerId) return true;
-        const projectServerId = project.serverId ?? DEFAULT_SERVER_ID;
-        return projectServerId === indexedServerId;
+        return normalizeServerScopeId(project.serverId) === indexedServerId;
       })
       .filter((project) => directoryBelongsToProject(sessionDirectory, project.normalizedPath))
-      .sort((a, b) => b.normalizedPath.length - a.normalizedPath.length);
+      .sort((a, b) => {
+        const lengthDiff = b.normalizedPath.length - a.normalizedPath.length;
+        if (lengthDiff !== 0) return lengthDiff;
+        const aDefault = isDefaultProjectConnection(a);
+        const bDefault = isDefaultProjectConnection(b);
+        if (aDefault !== bDefault) return aDefault ? -1 : 1;
+        return 0;
+      });
 
     const project = candidates[0] ?? null;
     if (!project) {

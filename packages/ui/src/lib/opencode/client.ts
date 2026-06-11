@@ -179,6 +179,11 @@ export type ProjectFileSearchHit = {
   extension?: string;
 };
 
+type MessageWithParts = {
+  info: Message;
+  parts: Part[];
+};
+
 type AgentPartInputLite = {
   type: 'agent';
   name: string;
@@ -943,6 +948,69 @@ class OpencodeService {
     }
 
     return tempMessageId;
+  }
+
+  async sendShell(params: {
+    id: string;
+    providerID: string;
+    modelID: string;
+    command: string;
+    agent: string;
+    messageId?: string;
+    directory?: string | null;
+    serverId?: string | null;
+  }): Promise<MessageWithParts> {
+    const messageId = params.messageId ?? ascendingId("msg");
+    const requestDirectory = this.normalizeCandidatePath(params.directory);
+
+    if (!requestDirectory) {
+      throw new Error(`Cannot run shell command: directory for session ${params.id} is not available`);
+    }
+
+    await waitForWorktreeBootstrap(requestDirectory);
+
+    const remoteBaseUrl = resolveBaseUrlForSession(params.id, requestDirectory, params.serverId ?? undefined);
+    const effectiveBase = remoteBaseUrl ?? this.baseUrl;
+    const url = buildApiFetchUrl(
+      effectiveBase,
+      `/session/${encodeURIComponent(params.id)}/shell`,
+      { directory: requestDirectory },
+    );
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        accept: 'application/json',
+      },
+      body: JSON.stringify({
+        messageID: messageId,
+        agent: params.agent,
+        model: {
+          providerID: params.providerID,
+          modelID: params.modelID,
+        },
+        command: params.command,
+      }),
+    });
+
+    if (!response.ok) {
+      let detail = '';
+      try {
+        detail = await response.text();
+      } catch {
+        // ignore
+      }
+      const suffix = detail && detail.trim().length > 0 ? `: ${detail.trim()}` : '';
+      throw new Error(`Failed to run shell command (${response.status})${suffix}`);
+    }
+
+    const data = await response.json().catch(() => null) as MessageWithParts | null;
+    if (!data?.info?.id || !Array.isArray(data.parts)) {
+      throw new Error('Failed to run shell command: invalid response');
+    }
+
+    return data;
   }
 
   async abortSession(id: string): Promise<boolean> {

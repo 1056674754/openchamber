@@ -25,7 +25,7 @@ import { useViewportStore } from '@/sync/viewport-store';
 import { DraggableSessionRow } from './sessionFolderDnd';
 import { SidebarSpinner } from './SidebarSpinner';
 import type { SessionNode, SessionSummaryMeta } from './types';
-import { formatSessionCompactDateLabel, formatSessionDateLabel, normalizePath, renderHighlightedText, resolveSessionDiffStats } from './utils';
+import { formatSessionCompactDateLabel, formatSessionDateLabel, normalizePath, renderHighlightedText, resolveRemoteIndicatorProject, resolveSessionDiffStats } from './utils';
 import { resolveGlobalSessionDirectory, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { useSessionUnseenCount } from '@/sync/notification-store';
@@ -210,13 +210,6 @@ const treeContainsExpandedStateChange = (
   }
 
   return false;
-};
-
-const directoryBelongsToProject = (directory: string | null | undefined, projectPath: string): boolean => {
-  const normalizedDirectory = normalizePath(directory ?? null);
-  const normalizedProjectPath = normalizePath(projectPath);
-  if (!normalizedDirectory || !normalizedProjectPath) return false;
-  return normalizedDirectory === normalizedProjectPath || normalizedDirectory.startsWith(`${normalizedProjectPath}/`);
 };
 
 const treeContainsSessionId = (node: SessionNode, sessionId: string | null): boolean => {
@@ -427,23 +420,13 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
   const { currentTheme } = useThemeSystem();
   const remoteProject = React.useMemo(() => {
     const indexedServerId = serverRegistry.getServerForSession(session.id);
-    const serverScopedProjects = indexedServerId && indexedServerId !== DEFAULT_SERVER_ID
-      ? projectsStore.filter((project) => project.serverId === indexedServerId)
-      : [];
-
-    const candidates = serverScopedProjects.length > 0
-      ? serverScopedProjects
-      : projectsStore.filter((project) => project.serverId);
-
-    const projectById = projectId
-      ? candidates.find((project) => project.id === projectId && project.serverId)
-      : null;
-    if (projectById) return projectById;
-
-    const directory = sessionDirectory ?? groupDirectory ?? null;
-    return candidates
-      .filter((project) => project.serverId && directoryBelongsToProject(directory, project.path))
-      .sort((a, b) => normalizePath(b.path)!.length - normalizePath(a.path)!.length)[0] ?? null;
+    return resolveRemoteIndicatorProject({
+      projects: projectsStore,
+      projectId,
+      directory: sessionDirectory,
+      groupDirectory,
+      indexedServerId,
+    });
   }, [groupDirectory, projectId, projectsStore, session.id, sessionDirectory]);
   const remoteIndicatorProject = isGlobalPinnedContext ? remoteProject : null;
   const sshInstance = useDesktopSshStore((state) =>

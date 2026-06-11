@@ -44,6 +44,7 @@ import { FadeInOnReveal } from './message/FadeInOnReveal';
 import { streamPerfCount } from '@/stores/utils/streamDebug';
 import { areOptionalRenderRelevantMessagesEqual, areRenderRelevantMessagesEqual, areRelevantTurnGroupingContextsEqual } from './message/renderCompare';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { toast } from '@/components/ui';
 import { useI18n } from '@/lib/i18n';
 
 const ToolOutputDialog = lazyWithChunkRecovery(() => import('./message/ToolOutputDialog'));
@@ -1370,7 +1371,10 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                             onClick={() => {
                                 setShowRevertConfirm(false);
                                 if (sessionId && message.info.id) {
-                                    revertToMessage(sessionId, message.info.id);
+                                    void revertToMessage(sessionId, message.info.id).catch((error) => {
+                                        const description = error instanceof Error ? error.message : undefined;
+                                        toast.error('Failed to revert message', { description });
+                                    });
                                 }
                             }}
                             className="inline-flex h-8 items-center justify-center rounded-md bg-destructive px-3 typography-ui-label text-destructive-foreground hover:bg-destructive/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive/50"

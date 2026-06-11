@@ -40,6 +40,13 @@ const MESSAGE_REFETCH_SKIP_PARTS = new Set(["patch", "step-start", "step-finish"
 const UNREVERT_REFETCH_ATTEMPTS = 3
 const UNREVERT_REFETCH_RETRY_MS = 150
 
+type BuildOptimisticPartsInput = {
+  messageID: string
+  createPartID: () => string
+}
+
+export type SendDeliveryMode = "normal" | "interrupt"
+
 // Reference set by SyncProvider — allows actions to access SDK and stores
 let _sdk: OpencodeClient | null = null
 let _childStores: ChildStoreManager | null = null
@@ -72,9 +79,19 @@ function sdk() {
   return _sdk
 }
 
-/** Get the SDK client for a session's server. Falls back to default server. */
+/** Get the SDK client for a session's indexed server. */
 function sdkForSession(sessionId?: string | null): OpencodeClient {
   if (sessionId) {
+    const serverId = serverRegistry.getServerForSession(sessionId)
+    if (serverId && serverId !== DEFAULT_SERVER_ID) {
+      return getOrRegisterRemoteConnection(serverId).client
+    }
+    if (serverId === DEFAULT_SERVER_ID) {
+      const defaultConn = serverRegistry.get(DEFAULT_SERVER_ID)
+      if (defaultConn) return defaultConn.client
+      return sdk()
+    }
+
     const conn = serverRegistry.getClientForSession(sessionId)
     if (conn && conn.config.id !== DEFAULT_SERVER_ID) {
       return conn.client
@@ -127,6 +144,13 @@ function unwrapMessageRecords<T>(
   result: { data?: T[]; error?: unknown; response?: { status?: number } },
   name: string,
 ): T[] {
+  return unwrapSdkData(result, name)
+}
+
+function unwrapSdkData<T>(
+  result: { data?: T; error?: unknown; response?: { status?: number } },
+  name: string,
+): T {
   if (result.error) {
     const status = result.response?.status
     const rawError = result.error
@@ -392,6 +416,13 @@ function requireBlockingRequestDirectory(
     throw new Error(`${type} reply target directory for request ${requestId} is not available`)
   }
   return directory
+}
+
+function resolveBlockingRequestServerId(sessionId: string, directoryHint?: string): string | undefined {
+  const indexedServerId = serverRegistry.getServerForSession(sessionId)
+  if (indexedServerId) return indexedServerId
+  if (!directoryHint) return undefined
+  return getServerIdForBaseUrl(resolveBaseUrlForSession(sessionId, directoryHint)) ?? undefined
 }
 
 function hasSuccessfulSdkResult(result: unknown): boolean {
@@ -675,6 +706,8 @@ export async function optimisticSend(input: {
   files?: Array<{ type: "file"; mime: string; url: string; filename: string }>
   directory?: string | null
   serverId?: string | null
+  deliveryMode?: SendDeliveryMode
+  buildOptimisticParts?: (input: BuildOptimisticPartsInput) => Part[]
   /** The actual API call — receives the optimistic messageID so the server can use the same ID */
   send: (messageID: string) => Promise<void>
 }): Promise<void> {
@@ -687,10 +720,15 @@ export async function optimisticSend(input: {
   const messageID = ascendingId("msg")
   const textPartId = ascendingId("prt")
 
-  const optimisticParts: Part[] = [
-    { id: textPartId, type: "text", text: input.content } as Part,
-  ]
-  if (input.files) {
+  const optimisticParts: Part[] = input.buildOptimisticParts
+    ? input.buildOptimisticParts({
+      messageID,
+      createPartID: () => ascendingId("prt"),
+    })
+    : [
+      { id: textPartId, type: "text", text: input.content } as Part,
+    ]
+  if (!input.buildOptimisticParts && input.files) {
     for (const f of input.files) {
       optimisticParts.push({ id: ascendingId("prt"), type: "file", mime: f.mime, url: f.url, filename: f.filename } as Part)
     }
@@ -731,9 +769,9 @@ export async function optimisticSend(input: {
   try {
     await waitForConnectionOrThrow(input.serverId ?? serverRegistry.getServerForSession(input.sessionId))
 
-    // Abort if session is already busy (e.g. running in another window like mini chat).
-    // This prevents message loss by stopping the current operation before sending a new one.
-    if (originalStatus && originalStatus.type !== "idle") {
+    // Interrupt is explicit. Normal sends are forwarded to OpenCode so the
+    // current turn can reach its own boundary before the new message is handled.
+    if (input.deliveryMode === "interrupt" && originalStatus && originalStatus.type !== "idle") {
       try {
         const sessionDirectory = requireSessionDirectory(input.sessionId, "optimisticSend")
         await sdkForSession(input.sessionId).session.abort({ sessionID: input.sessionId, directory: sessionDirectory })
@@ -759,6 +797,44 @@ export async function optimisticSend(input: {
       },
     })
     throw error
+  }
+}
+
+export function materializeReturnedMessage(input: {
+  sessionId: string
+  record: { info: Message; parts?: Part[] }
+  directory?: string | null
+  serverId?: string | null
+  setIdle?: boolean
+}): void {
+  const store = storeForSession(input.sessionId, input.directory, input.serverId)
+  const current = store.getState()
+  const materialized = materializeSessionSnapshots(
+    current,
+    input.sessionId,
+    [{
+      info: stripMessageDiffSnapshots(input.record.info),
+      parts: input.record.parts ?? [],
+    }],
+    { skipPartTypes: MESSAGE_REFETCH_SKIP_PARTS },
+  )
+
+  const patch: Partial<typeof current> = {}
+  if (materialized.messagesChanged) {
+    patch.message = materialized.message
+  }
+  if (materialized.partsChanged) {
+    patch.part = materialized.part
+  }
+  if (input.setIdle) {
+    patch.session_status = {
+      ...current.session_status,
+      [input.sessionId]: { type: "idle" as const },
+    }
+  }
+
+  if (Object.keys(patch).length > 0) {
+    store.setState(patch)
   }
 }
 
@@ -919,10 +995,15 @@ export async function respondToQuestion(
   sessionId: string,
   requestId: string,
   answers: string[] | string[][],
+  directoryHint?: string,
 ): Promise<void> {
-  await waitForConnectionOrThrow(serverRegistry.getServerForSession(sessionId))
-  const directory = requireBlockingRequestDirectory("question", sessionId, requestId)
-  const result = await getRequestReplyClient("question", sessionId, requestId).question.reply({
+  const serverId = resolveBlockingRequestServerId(sessionId, directoryHint)
+  await waitForConnectionOrThrow(serverId)
+  const directory = directoryHint ?? requireBlockingRequestDirectory("question", sessionId, requestId)
+  const client = directoryHint
+    ? resolveSdkForDirectory(directoryHint, sessionId, serverId)
+    : getRequestReplyClient("question", sessionId, requestId)
+  const result = await client.question.reply({
     requestID: requestId,
     answers: answers as Array<Array<string>>,
     ...(directory ? { directory } : {}),
@@ -935,10 +1016,15 @@ export async function respondToQuestion(
 export async function rejectQuestion(
   sessionId: string,
   requestId: string,
+  directoryHint?: string,
 ): Promise<void> {
-  await waitForConnectionOrThrow(serverRegistry.getServerForSession(sessionId))
-  const directory = requireBlockingRequestDirectory("question", sessionId, requestId)
-  const result = await getRequestReplyClient("question", sessionId, requestId).question.reject({
+  const serverId = resolveBlockingRequestServerId(sessionId, directoryHint)
+  await waitForConnectionOrThrow(serverId)
+  const directory = directoryHint ?? requireBlockingRequestDirectory("question", sessionId, requestId)
+  const client = directoryHint
+    ? resolveSdkForDirectory(directoryHint, sessionId, serverId)
+    : getRequestReplyClient("question", sessionId, requestId)
+  const result = await client.question.reject({
     requestID: requestId,
     ...(directory ? { directory } : {}),
   })
@@ -1048,14 +1134,14 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
   // Call SDK and merge authoritative result into store
   try {
     const result = await sdkForSession(sessionId).session.revert({ sessionID: sessionId, directory: sessionDirectory, messageID: messageId })
-    if (result.data) {
-      const current = store.getState()
-      const updated = [...current.session]
-      const idx = updated.findIndex((s) => s.id === sessionId)
-      if (idx >= 0) {
-        updated[idx] = { ...result.data, revert: { messageID: messageId } } as Session
-        store.setState({ session: updated })
-      }
+    const revertedSession = unwrapSdkData(result, "session.revert")
+    const current = store.getState()
+    const updated = [...current.session]
+    const idx = updated.findIndex((s) => s.id === sessionId)
+    if (idx >= 0) {
+      const returnedRevert = (revertedSession as Session & { revert?: Record<string, unknown> }).revert ?? {}
+      updated[idx] = { ...revertedSession, revert: { ...returnedRevert, messageID: messageId } } as Session
+      store.setState({ session: updated })
     }
     sessionEvents.requestGitRefresh({ directory: sessionDirectory })
   } catch (err) {
@@ -1123,14 +1209,13 @@ export async function unrevertSession(sessionId: string): Promise<void> {
   }
 
   const result = await sdkForSession(sessionId).session.unrevert({ sessionID: sessionId, directory: sessionDirectory })
-  if (result.data) {
-    const current = store.getState()
-    const sessions = [...current.session]
-    const idx = sessions.findIndex((s) => s.id === sessionId)
-    if (idx >= 0) {
-      sessions[idx] = result.data
-      store.setState({ session: sessions })
-    }
+  const restoredSession = unwrapSdkData(result, "session.unrevert")
+  const current = store.getState()
+  const sessions = [...current.session]
+  const idx = sessions.findIndex((s) => s.id === sessionId)
+  if (idx >= 0) {
+    sessions[idx] = restoredSession
+    store.setState({ session: sessions })
   }
   for (let attempt = 0; attempt < UNREVERT_REFETCH_ATTEMPTS; attempt += 1) {
     if (attempt > 0) await wait(UNREVERT_REFETCH_RETRY_MS)
@@ -1150,6 +1235,7 @@ export async function unrevertSession(sessionId: string): Promise<void> {
  */
 export async function forkFromMessage(sessionId: string, messageId: string): Promise<void> {
   const sessionDirectory = requireSessionDirectory(sessionId, "forkFromMessage")
+  const parentServerId = serverRegistry.getServerForSession(sessionId)
   const store = storeForSession(sessionId)
   const state = store.getState()
 
@@ -1161,6 +1247,10 @@ export async function forkFromMessage(sessionId: string, messageId: string): Pro
   if (!result.data) return
 
   const forkedSession = result.data
+  if (parentServerId) {
+    serverRegistry.indexSession(forkedSession.id, parentServerId)
+  }
+  registerSessionDirectory(forkedSession.id, sessionDirectory)
 
   // Insert new session into child store so sidebar updates immediately
   const current = store.getState()
@@ -1171,7 +1261,9 @@ export async function forkFromMessage(sessionId: string, messageId: string): Pro
     store.setState({ session: sessions })
   }
 
-  useSessionUIStore.getState().setCurrentSession(forkedSession.id)
+  useSessionUIStore.getState().setCurrentSession(forkedSession.id, sessionDirectory, {
+    serverId: parentServerId,
+  })
 
   if (messageText) {
     useInputStore.setState({

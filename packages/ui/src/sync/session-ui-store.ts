@@ -50,8 +50,9 @@ import {
   shareSession as shareSessionAction,
   unshareSession as unshareSessionAction,
   optimisticSend,
-  resolveSdkForDirectory,
+  materializeReturnedMessage,
   refetchSessionMessages,
+  type SendDeliveryMode,
 } from "./session-actions"
 import { setSessionRoutingContextGetters } from "./session-routing"
 import { serverRegistry, DEFAULT_SERVER_ID } from "@/lib/opencode/server-registry"
@@ -69,6 +70,8 @@ export type { AttachedFile }
 // Send routing — shell mode, slash commands, or normal prompt
 // ---------------------------------------------------------------------------
 
+const USER_SHELL_MARKER_TEXT = "The following tool was executed by the user"
+
 export function routeMessage(params: {
   sessionId: string
   content: string
@@ -82,6 +85,7 @@ export function routeMessage(params: {
   additionalParts?: Array<{ text: string; synthetic?: boolean; files?: Array<{ type: "file"; mime: string; url: string; filename: string }> }>
   directory?: string | null
   serverId?: string | null
+  deliveryMode?: SendDeliveryMode
 }): Promise<void> {
   const sessionDirectory = normalizePath(params.directory)
     ?? useSessionUIStore.getState().getDirectoryForSession(params.sessionId)
@@ -94,14 +98,50 @@ export function routeMessage(params: {
   }
 
   if (params.inputMode === "shell") {
-    const client = resolveSdkForDirectory(sessionDirectory, params.sessionId, targetServerId ?? undefined)
-    return client.session.shell({
-      sessionID: params.sessionId,
+    const shellAgent = typeof params.agent === "string" && params.agent.trim().length > 0
+      ? params.agent.trim()
+      : undefined
+    if (!shellAgent) {
+      throw new Error("Cannot run shell command: agent is not selected")
+    }
+    return optimisticSend({
+      sessionId: params.sessionId,
+      content: USER_SHELL_MARKER_TEXT,
+      providerID: params.providerID,
+      modelID: params.modelID,
+      agent: shellAgent,
       directory: sessionDirectory,
-      agent: params.agent,
-      model: { providerID: params.providerID, modelID: params.modelID },
-      command: params.content,
-    }).then(() => {})
+      serverId: targetServerId,
+      deliveryMode: params.deliveryMode,
+      buildOptimisticParts: ({ createPartID }) => [{
+        id: createPartID(),
+        type: "text",
+        text: "/shell",
+        shellAction: {
+          command: params.content,
+          status: "running",
+        },
+      } as unknown as Part],
+      send: async (messageID) => {
+        const result = await opencodeClient.sendShell({
+          id: params.sessionId,
+          providerID: params.providerID,
+          modelID: params.modelID,
+          command: params.content,
+          agent: shellAgent,
+          messageId: messageID,
+          directory: sessionDirectory,
+          serverId: targetServerId,
+        })
+        materializeReturnedMessage({
+          sessionId: params.sessionId,
+          record: result,
+          directory: sessionDirectory,
+          serverId: targetServerId,
+          setIdle: true,
+        })
+      },
+    })
   }
 
   // Slash commands — fire and forget, SSE delivers messages and status
@@ -126,6 +166,7 @@ export function routeMessage(params: {
         files: params.files,
         directory: sessionDirectory,
         serverId: targetServerId,
+        deliveryMode: params.deliveryMode,
         send: (messageID) => opencodeClient.sendCommand({
           id: params.sessionId,
           providerID: params.providerID,
@@ -153,6 +194,7 @@ export function routeMessage(params: {
     files: params.files,
     directory: sessionDirectory,
     serverId: targetServerId,
+    deliveryMode: params.deliveryMode,
     send: (messageID) => opencodeClient.sendMessage({
       id: params.sessionId,
       providerID: params.providerID,
@@ -290,6 +332,7 @@ export type SessionUIState = {
     variant?: string,
     inputMode?: "normal" | "shell",
     target?: string | SendMessageTarget,
+    deliveryMode?: SendDeliveryMode,
   ) => Promise<void>
 
   createSession: (
@@ -935,6 +978,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     variant?: string,
     inputMode?: "normal" | "shell",
     target?: string | SendMessageTarget,
+    deliveryMode: SendDeliveryMode = "normal",
   ) => {
     // Clear non-Git changed-files bar on new user message for current session
     const sendTarget = normalizeSendTarget(target)
@@ -1077,6 +1121,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
               serverId: createdServerId,
               files,
               additionalParts: additionalPartsForSend,
+              deliveryMode,
             })
             if (isLiveDraftStillTarget()) {
               get().closeNewSessionDraft()
@@ -1195,6 +1240,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         serverId: createdServerId,
         files,
         additionalParts: routeAdditionalParts,
+        deliveryMode,
       })
       if (isLiveDraftStillTarget()) {
         get().closeNewSessionDraft()
@@ -1275,6 +1321,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       files,
       directory: currentSessionDirectory,
       serverId: currentSessionServerId,
+      deliveryMode,
       additionalParts: additionalParts?.map((p) => ({
         text: p.text,
         synthetic: p.synthetic,

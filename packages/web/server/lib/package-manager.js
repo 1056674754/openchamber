@@ -664,9 +664,11 @@ function parseVersionForComparison(value) {
     return Number.isFinite(parsed) ? parsed : 0;
   });
 
+  const prerelease = prereleaseIndex >= 0 ? normalized.slice(prereleaseIndex + 1) : '';
+
   return {
     parts,
-    prerelease: prereleaseIndex >= 0,
+    prerelease: prereleaseIndex >= 0 && prerelease !== 'merging-dev',
   };
 }
 

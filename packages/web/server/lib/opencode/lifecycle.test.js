@@ -2,10 +2,22 @@ import { EventEmitter } from 'node:events';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const spawnMock = vi.fn();
+const finalizeInterruptedOpenCodeRunsMock = vi.fn(() => ({
+  dbPath: '/tmp/opencode.db',
+  skipped: false,
+  reason: null,
+  candidateParts: 0,
+  updatedParts: 0,
+  updatedMessages: 0,
+}));
 
 vi.mock('node:child_process', () => ({
   spawn: spawnMock,
   spawnSync: vi.fn(),
+}));
+
+vi.mock('./interrupted-runs.js', () => ({
+  finalizeInterruptedOpenCodeRuns: finalizeInterruptedOpenCodeRunsMock,
 }));
 
 const { createOpenCodeLifecycleRuntime } = await import('./lifecycle.js');
@@ -17,6 +29,7 @@ const originalFetch = globalThis.fetch;
 
 afterEach(() => {
   spawnMock.mockReset();
+  finalizeInterruptedOpenCodeRunsMock.mockClear();
   globalThis.fetch = originalFetch;
   if (typeof originalOpenChamberRuntime === 'string') {
     process.env.OPENCHAMBER_RUNTIME = originalOpenChamberRuntime;

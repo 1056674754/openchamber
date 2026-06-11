@@ -44,3 +44,27 @@ export function serializeQuestionAsJson(question: QuestionRequest): string {
 
   return JSON.stringify(payload, null, 2);
 }
+
+export function serializeQuestionAnswersAsMarkdown(question: QuestionRequest, answers: readonly (readonly string[])[]): string {
+  const lines: string[] = [
+    'I am answering the pending question that was shown earlier:',
+    '',
+  ];
+  const questions = question.questions ?? [];
+
+  questions.forEach((q, index) => {
+    const header = q.header?.trim();
+    const title = header && header.length > 0 ? header : `Question ${index + 1}`;
+    const selected = answers[index] ?? [];
+    const answer = selected.length > 0 ? selected.join(', ') : '(no answer)';
+
+    lines.push(`## ${title}`);
+    lines.push('');
+    lines.push(q.question);
+    lines.push('');
+    lines.push(`Answer: ${answer}`);
+    lines.push('');
+  });
+
+  return lines.join('\n').trimEnd();
+}

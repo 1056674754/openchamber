@@ -14,19 +14,39 @@ import { useSessions } from '@/sync/sync-context';
 import * as sessionActions from '@/sync/session-actions';
 import { useI18n } from '@/lib/i18n';
 import { serializeQuestionAsJson, serializeQuestionAsMarkdown } from './questionSerializers';
+import {
+  clearQuestionDraft,
+  isQuestionHandled,
+  loadQuestionDraft,
+  markQuestionHandled,
+  saveQuestionDraft,
+} from './lib/questionDraftPersistence';
 
 interface QuestionCardProps {
   question: QuestionRequest;
   inline?: boolean;
+  resolveRequestTarget?: () => Promise<QuestionRequestTarget>;
+  submitStaleQuestionAnswer?: (answers: string[][], directory?: string) => Promise<void>;
 }
+
+type QuestionRequestTarget =
+  | { kind?: 'pending'; requestId: string; directory?: string }
+  | { kind: 'stale'; directory?: string };
 
 type TabKey = string;
 const SUMMARY_TAB = 'summary';
 
-export const QuestionCard: React.FC<QuestionCardProps> = ({ question, inline = false }) => {
+const describeQuestionError = (error: unknown): string => {
+  if (error instanceof Error && error.message.trim().length > 0) {
+    return error.message;
+  }
+  return String(error);
+};
+
+export const QuestionCard: React.FC<QuestionCardProps> = ({ question, inline = false, resolveRequestTarget, submitStaleQuestionAnswer }) => {
   const { t } = useI18n();
   const respondToQuestion = sessionActions.respondToQuestion;
-    const rejectQuestion = sessionActions.rejectQuestion;;
+  const rejectQuestion = sessionActions.rejectQuestion;
   const isMobile = useUIStore((state) => state.isMobile);
   const sessions = useSessions();
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
@@ -42,6 +62,7 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({ question, inline = f
   const [selectedOptions, setSelectedOptions] = React.useState<Record<number, string[]>>({});
   const [customMode, setCustomMode] = React.useState<Record<number, boolean>>({});
   const [customText, setCustomText] = React.useState<Record<number, string>>({});
+  const skipNextDraftSaveRef = React.useRef<string | null>(null);
 
   const questions = React.useMemo(() => question.questions ?? [], [question.questions]);
   const isSummaryTab = activeTab === SUMMARY_TAB;
@@ -54,12 +75,29 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({ question, inline = f
   }, [activeQuestion?.header, isSummaryTab]);
 
   React.useEffect(() => {
-    setActiveTab('0');
-    setSelectedOptions({});
-    setCustomMode({});
-    setCustomText({});
-    setHasResponded(false);
+    const draft = loadQuestionDraft(question.id);
+    skipNextDraftSaveRef.current = question.id;
+    setActiveTab(draft?.activeTab ?? '0');
+    setSelectedOptions(draft?.selectedOptions ?? {});
+    setCustomMode(draft?.customMode ?? {});
+    setCustomText(draft?.customText ?? {});
+    setHasResponded(isQuestionHandled(question.id));
   }, [question.id]);
+
+  React.useEffect(() => {
+    if (hasResponded) return;
+    if (skipNextDraftSaveRef.current === question.id) {
+      skipNextDraftSaveRef.current = null;
+      return;
+    }
+
+    saveQuestionDraft(question.id, {
+      activeTab,
+      selectedOptions,
+      customMode,
+      customText,
+    });
+  }, [activeTab, customMode, customText, hasResponded, question.id, selectedOptions]);
 
   const tabs = React.useMemo(() => {
     const questionTabs = questions.map((q, index) => ({
@@ -143,6 +181,20 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({ question, inline = f
     return answers;
   }, [customMode, customText, questions.length, selectedOptions]);
 
+  const resolveEffectiveRequestTarget = React.useCallback(async (): Promise<QuestionRequestTarget> => {
+    if (!resolveRequestTarget) {
+      return { kind: 'pending', requestId: question.id };
+    }
+    const target = await resolveRequestTarget();
+    if (target.kind === 'stale') {
+      return target;
+    }
+    if (!target.requestId.trim()) {
+      throw new Error('Question reply target is not available');
+    }
+    return target;
+  }, [question.id, resolveRequestTarget]);
+
   const handleToggleOption = React.useCallback(
     (label: string) => {
       if (!activeQuestion) return;
@@ -173,14 +225,25 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({ question, inline = f
     setIsResponding(true);
     try {
       const answers = buildAnswersPayload();
-      await respondToQuestion(question.sessionID, question.id, answers);
+      const target = await resolveEffectiveRequestTarget();
+      if (target.kind === 'stale') {
+        if (!submitStaleQuestionAnswer) {
+          throw new Error('Question is no longer pending');
+        }
+        await submitStaleQuestionAnswer(answers, target.directory);
+      } else {
+        await respondToQuestion(question.sessionID, target.requestId, answers, target.directory);
+      }
+      markQuestionHandled(question.id);
       setHasResponded(true);
-    } catch {
-      // ignored
+    } catch (error) {
+      const description = describeQuestionError(error);
+      console.error('[QuestionCard] Failed to respond to question:', error);
+      toast.error(t('chat.questionCard.replyFailed'), { description, copyText: description });
     } finally {
       setIsResponding(false);
     }
-  }, [buildAnswersPayload, question.id, question.sessionID, requiredSatisfied, respondToQuestion]);
+  }, [buildAnswersPayload, question.id, question.sessionID, requiredSatisfied, resolveEffectiveRequestTarget, respondToQuestion, submitStaleQuestionAnswer, t]);
 
   const handleKeyDown = React.useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -201,14 +264,21 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({ question, inline = f
   const handleDismiss = React.useCallback(async () => {
     setIsResponding(true);
     try {
-      await rejectQuestion(question.sessionID, question.id);
+      const target = await resolveEffectiveRequestTarget();
+      if (target.kind !== 'stale') {
+        await rejectQuestion(question.sessionID, target.requestId, target.directory);
+      }
+      markQuestionHandled(question.id);
+      clearQuestionDraft(question.id);
       setHasResponded(true);
-    } catch {
-      // ignored
+    } catch (error) {
+      const description = describeQuestionError(error);
+      console.error('[QuestionCard] Failed to dismiss question:', error);
+      toast.error(t('chat.questionCard.dismissFailed'), { description, copyText: description });
     } finally {
       setIsResponding(false);
     }
-  }, [question.id, question.sessionID, rejectQuestion]);
+  }, [question.id, question.sessionID, rejectQuestion, resolveEffectiveRequestTarget, t]);
 
   const handleCopyMarkdown = React.useCallback(async () => {
     const result = await copyTextToClipboard(serializeQuestionAsMarkdown(question));

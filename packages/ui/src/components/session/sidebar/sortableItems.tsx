@@ -14,8 +14,10 @@ import { PROJECT_COLOR_MAP, PROJECT_ICON_MAP, getProjectIconImageUrl } from '@/l
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useI18n } from '@/lib/i18n';
 import { useDesktopSshStore } from '@/stores/useDesktopSshStore';
-import { resolveInstanceLabel } from '@/lib/desktopSsh';
+import { useRemoteInstancesStore } from '@/stores/useRemoteInstancesStore';
+import { resolveInstanceLabel, type DesktopSshInstanceStatus, type DesktopSshPhase } from '@/lib/desktopSsh';
 import { serverRegistry, type ServerConnection } from '@/lib/opencode/server-registry';
+import type { RemoteInstanceStatus } from '@/lib/remote-instances/types';
 
 export interface SortableProjectItemProps {
   id: string;
@@ -59,6 +61,7 @@ export type SortableDragHandleProps = {
 
 function readServerRegistrySnapshot(serverId?: string): {
   label?: string;
+  baseUrl?: string;
   healthStatus: ServerConnection['healthStatus'];
 } {
   if (!serverId) {
@@ -67,6 +70,7 @@ function readServerRegistrySnapshot(serverId?: string): {
   const connection = serverRegistry.get(serverId);
   return {
     label: connection?.config.label,
+    baseUrl: connection?.config.baseUrl,
     healthStatus: connection?.healthStatus ?? null,
   };
 }
@@ -83,6 +87,284 @@ function useServerRegistrySnapshot(serverId?: string) {
   }, [serverId]);
 
   return snapshot;
+}
+
+const formatHealthStatus = (
+  status: ServerConnection['healthStatus'],
+  unavailable: boolean | undefined,
+  t: ReturnType<typeof useI18n>['t'],
+): string => {
+  if (unavailable) return t('common.unavailable');
+  if (status === 'healthy') return t('instanceInfoPanel.status.healthy');
+  if (status === 'unhealthy') return t('instanceInfoPanel.status.unhealthy');
+  if (status === 'connecting') return t('instanceInfoPanel.status.connecting');
+  return t('instanceInfoPanel.status.unknown');
+};
+
+const sshPhaseLabelKey = (phase?: DesktopSshPhase) => {
+  switch (phase) {
+    case 'ready':
+      return 'instanceInfoPanel.sshPhase.ready';
+    case 'error':
+      return 'instanceInfoPanel.sshPhase.error';
+    case 'degraded':
+      return 'instanceInfoPanel.sshPhase.reconnecting';
+    case 'config_resolved':
+      return 'instanceInfoPanel.sshPhase.resolvingConfig';
+    case 'auth_check':
+      return 'instanceInfoPanel.sshPhase.checkingAuth';
+    case 'master_connecting':
+      return 'instanceInfoPanel.sshPhase.connectingSsh';
+    case 'remote_probe':
+      return 'instanceInfoPanel.sshPhase.probingRemote';
+    case 'installing':
+      return 'instanceInfoPanel.sshPhase.installing';
+    case 'installing_opencode':
+      return 'instanceInfoPanel.sshPhase.installingOpenCode';
+    case 'updating':
+      return 'instanceInfoPanel.sshPhase.updating';
+    case 'server_detecting':
+      return 'instanceInfoPanel.sshPhase.detectingServer';
+    case 'server_starting':
+      return 'instanceInfoPanel.sshPhase.startingServer';
+    case 'forwarding':
+      return 'instanceInfoPanel.sshPhase.forwardingPorts';
+    case 'idle':
+    default:
+      return 'instanceInfoPanel.sshPhase.idle';
+  }
+};
+
+function ProjectInfoRow({
+  label,
+  children,
+}: {
+  label: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="grid grid-cols-[96px_minmax(0,1fr)] items-start gap-3">
+      <span className="truncate typography-meta text-muted-foreground">{label}</span>
+      <div className="min-w-0 text-right typography-meta text-foreground">{children}</div>
+    </div>
+  );
+}
+
+type DiagnosticTone = 'ok' | 'warn' | 'error' | 'unknown';
+
+type DiagnosticRow = {
+  label: string;
+  value: string;
+  tone: DiagnosticTone;
+  detail?: string;
+};
+
+const diagnosticDotClass: Record<DiagnosticTone, string> = {
+  ok: 'bg-status-success',
+  warn: 'bg-status-warning',
+  error: 'bg-status-error',
+  unknown: 'bg-muted-foreground/40',
+};
+
+const isOpenCodeHealthError = (status?: RemoteInstanceStatus): boolean => {
+  const text = `${status?.error ?? ''} ${status?.detail ?? ''}`.toLowerCase();
+  return text.includes('opencode') || text.includes('open code');
+};
+
+const remotePhaseLabel = (
+  status: RemoteInstanceStatus | undefined,
+  healthStatus: ServerConnection['healthStatus'],
+  t: ReturnType<typeof useI18n>['t'],
+): string => {
+  if (status?.phase === 'connected' || healthStatus === 'healthy') return t('instanceInfoPanel.status.healthy');
+  if (status?.phase === 'error' || status?.healthy === false || healthStatus === 'unhealthy') {
+    return t('instanceInfoPanel.status.unhealthy');
+  }
+  if (status?.phase === 'connecting' || healthStatus === 'connecting') return t('instanceInfoPanel.status.connecting');
+  return t('instanceInfoPanel.status.unknown');
+};
+
+const buildProjectDiagnostics = ({
+  sshStatus,
+  remoteStatus,
+  healthStatus,
+  unavailable,
+  t,
+}: {
+  sshStatus?: DesktopSshInstanceStatus;
+  remoteStatus?: RemoteInstanceStatus;
+  healthStatus: ServerConnection['healthStatus'];
+  unavailable?: boolean;
+  t: ReturnType<typeof useI18n>['t'];
+}): DiagnosticRow[] => {
+  const rows: DiagnosticRow[] = [];
+  const sshReady = !sshStatus || sshStatus.phase === 'ready' || sshStatus.phase === 'degraded';
+  const openCodeError = isOpenCodeHealthError(remoteStatus);
+  const remoteStatusDetail = remoteStatus?.error || remoteStatus?.detail;
+
+  if (sshStatus) {
+    rows.push({
+      label: t('instanceInfoPanel.row.sshStatus'),
+      value: t(sshPhaseLabelKey(sshStatus.phase)),
+      tone: sshStatus.phase === 'ready'
+        ? 'ok'
+        : sshStatus.phase === 'error'
+          ? 'error'
+          : sshStatus.phase === 'idle'
+            ? 'unknown'
+            : 'warn',
+      detail: sshStatus.detail,
+    });
+  }
+
+  rows.push({
+    label: t('settings.remoteInstances.page.section.remoteServer'),
+    value: unavailable
+      ? t('common.unavailable')
+      : !sshReady
+        ? t('settings.remoteInstances.page.phase.establishingSsh')
+        : openCodeError
+          ? t('instanceInfoPanel.status.healthy')
+          : remotePhaseLabel(remoteStatus, healthStatus, t),
+    tone: unavailable
+      ? 'error'
+      : !sshReady
+        ? 'warn'
+        : openCodeError || remoteStatus?.healthy === true || healthStatus === 'healthy'
+          ? 'ok'
+          : remoteStatus?.healthy === false || healthStatus === 'unhealthy'
+            ? 'error'
+            : healthStatus === 'connecting'
+              ? 'warn'
+              : 'unknown',
+    detail: !openCodeError ? remoteStatusDetail : undefined,
+  });
+
+  rows.push({
+    label: t('settings.openchamber.opencodeServer.title'),
+    value: unavailable
+      ? t('common.unavailable')
+      : !sshReady
+        ? t('settings.remoteInstances.page.phase.establishingSsh')
+        : openCodeError
+          ? t('instanceInfoPanel.status.unhealthy')
+          : remoteStatus?.healthy === true || healthStatus === 'healthy'
+            ? t('instanceInfoPanel.status.healthy')
+            : healthStatus === 'connecting'
+              ? t('instanceInfoPanel.status.connecting')
+              : t('instanceInfoPanel.status.unknown'),
+    tone: unavailable
+      ? 'error'
+      : !sshReady
+        ? 'warn'
+        : openCodeError
+          ? 'error'
+          : remoteStatus?.healthy === true || healthStatus === 'healthy'
+            ? 'ok'
+            : healthStatus === 'connecting'
+              ? 'warn'
+              : 'unknown',
+    detail: openCodeError ? remoteStatusDetail : undefined,
+  });
+
+  return rows;
+};
+
+function ProjectDiagnosticRow({ row }: { row: DiagnosticRow }) {
+  return (
+    <ProjectInfoRow label={row.label}>
+      <div className="min-w-0">
+        <span className="inline-flex min-w-0 items-center justify-end gap-1.5">
+          <span className={cn('h-1.5 w-1.5 flex-shrink-0 rounded-full', diagnosticDotClass[row.tone])} />
+          <span className="truncate">{row.value}</span>
+        </span>
+        {row.detail ? (
+          <div className="truncate text-[11px] leading-snug text-muted-foreground">{row.detail}</div>
+        ) : null}
+      </div>
+    </ProjectInfoRow>
+  );
+}
+
+function ProjectInfoTooltip({
+  projectLabel,
+  projectDescription,
+  serverId,
+  serverLabel,
+  serverEndpoint,
+  healthStatus,
+  dotColor,
+  sshStatus,
+  remoteStatus,
+  unavailable,
+}: {
+  projectLabel: string;
+  projectDescription: string;
+  serverId?: string;
+  serverLabel?: string;
+  serverEndpoint?: string;
+  healthStatus: ServerConnection['healthStatus'];
+  dotColor: string;
+  sshStatus?: DesktopSshInstanceStatus;
+  remoteStatus?: RemoteInstanceStatus;
+  unavailable?: boolean;
+}) {
+  const { t } = useI18n();
+  const statusLabel = formatHealthStatus(healthStatus, unavailable, t);
+  const endpoint = remoteStatus?.url || sshStatus?.localUrl || serverEndpoint;
+  const diagnosticRows = serverId
+    ? buildProjectDiagnostics({
+        sshStatus,
+        remoteStatus,
+        healthStatus,
+        unavailable,
+        t,
+      })
+    : [];
+
+  return (
+    <div className="w-[min(320px,calc(100vw-2rem))] space-y-2.5 p-2.5 text-left">
+      <div className="min-w-0">
+        <div className="truncate typography-ui-label font-medium text-foreground">{projectLabel}</div>
+        <div className="mt-0.5 break-all font-mono text-[11px] leading-snug text-muted-foreground">
+          {projectDescription}
+        </div>
+      </div>
+
+      <div className="space-y-1.5 border-t border-border/60 pt-2">
+        <ProjectInfoRow label={t('instanceInfoPanel.row.status')}>
+          <span className="inline-flex min-w-0 items-center justify-end gap-1.5">
+            <span
+              className="h-1.5 w-1.5 flex-shrink-0 rounded-full"
+              style={{ backgroundColor: dotColor }}
+            />
+            <span className="truncate">{statusLabel}</span>
+          </span>
+        </ProjectInfoRow>
+
+        {serverId ? (
+          <ProjectInfoRow label={t('instanceInfoPanel.title')}>
+            <div className="min-w-0">
+              <div className="truncate">{serverLabel || serverId}</div>
+              {serverLabel && serverLabel !== serverId ? (
+                <div className="truncate font-mono text-[11px] leading-snug text-muted-foreground">{serverId}</div>
+              ) : null}
+            </div>
+          </ProjectInfoRow>
+        ) : null}
+
+        {diagnosticRows.length > 0 ? (
+          diagnosticRows.map((row) => <ProjectDiagnosticRow key={row.label} row={row} />)
+        ) : null}
+
+        {endpoint ? (
+          <ProjectInfoRow label={t('settings.remoteInstances.page.status.currentLocalUrl')}>
+            <span className="block truncate font-mono text-[11px] leading-snug">{endpoint}</span>
+          </ProjectInfoRow>
+        ) : null}
+      </div>
+    </div>
+  );
 }
 
 export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
@@ -111,10 +393,10 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
   mobileVariant,
   openSidebarMenuKey,
   setOpenSidebarMenuKey,
-    isPinned,
-    onTogglePin,
-    onRefresh,
-    serverId,
+  isPinned,
+  onTogglePin,
+  onRefresh,
+  serverId,
   serverHealthStatus,
   unavailable,
 }) => {
@@ -123,10 +405,17 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
   const registrySnapshot = useServerRegistrySnapshot(serverId);
   const sshInstance = useDesktopSshStore((state) => serverId ? state.instances.find((entry) => entry.id === serverId) : undefined);
   const sshStatus = useDesktopSshStore((state) => serverId ? state.statusesById[serverId] : undefined);
+  const remoteStatus = useRemoteInstancesStore((state) => serverId ? state.statuses[serverId] : undefined);
   const serverLabel = serverId
     ? (sshInstance ? resolveInstanceLabel(sshInstance) : registrySnapshot.label ?? serverId)
     : undefined;
-  const effectiveServerHealthStatus = registrySnapshot.healthStatus
+  const remoteHealthStatus = remoteStatus?.healthy === true
+    ? 'healthy'
+    : remoteStatus?.healthy === false
+      ? 'unhealthy'
+      : null;
+  const effectiveServerHealthStatus = remoteHealthStatus
+    || registrySnapshot.healthStatus
     || serverHealthStatus
     || (sshStatus?.phase === 'ready'
       ? 'healthy'
@@ -135,6 +424,7 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
         : sshStatus && sshStatus.phase !== 'idle'
           ? 'connecting'
           : null);
+  const serverEndpoint = remoteStatus?.url || sshStatus?.localUrl || registrySnapshot.baseUrl;
   const dotColor = effectiveServerHealthStatus === 'healthy'
     ? currentTheme.colors.status.success
     : effectiveServerHealthStatus === 'unhealthy'
@@ -286,8 +576,23 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
                     )}
                   </button>
                 </TooltipTrigger>
-                <TooltipContent side="right" sideOffset={8}>
-                  {projectDescription}
+                <TooltipContent
+                  side="right"
+                  sideOffset={8}
+                  align="start"
+                  className="rounded-lg border-border/70 bg-[var(--surface-elevated)] p-0 text-foreground shadow-xl"
+                >
+                  <ProjectInfoTooltip
+                    projectLabel={projectLabel}
+                    projectDescription={projectDescription}
+                    serverId={serverId}
+                    serverLabel={serverLabel}
+                    serverEndpoint={serverEndpoint}
+                    healthStatus={effectiveServerHealthStatus}
+                    dotColor={dotColor}
+                    sshStatus={sshStatus}
+                    unavailable={unavailable}
+                  />
                 </TooltipContent>
               </Tooltip>
 

@@ -18,6 +18,10 @@ export interface FontOptionDefinition<T extends string> {
     source?: FontFaceSource;
 }
 
+export const CJK_MONO_FONT_FACE_FAMILY = 'OpenChamber CJK Mono';
+export const CJK_MONO_FONT_URL = 'https://cdn.jsdelivr.net/npm/@monolex/codexmono@1.0.1/fonts/woff2/CodexMono-EA.woff2';
+export const CJK_MONO_FONT_FAMILIES = `"${CJK_MONO_FONT_FACE_FAMILY}", "Sarasa Mono SC", "Noto Sans Mono CJK SC", "Source Han Mono SC", "Source Han Mono", "Microsoft YaHei Mono", "NSimSun", "SimSun"`;
+
 export const UI_FONT_OPTIONS: FontOptionDefinition<UiFontOption>[] = [
     {
         id: 'ibm-plex-sans',

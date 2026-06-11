@@ -23,6 +23,7 @@ type DesktopSshState = {
   isLoading: boolean;
   isSaving: boolean;
   isImportsLoading: boolean;
+  isRestarting: boolean;
   initialized: boolean;
   listenerReady: boolean;
   error: string | null;
@@ -35,6 +36,7 @@ type DesktopSshState = {
   setInstances: (instances: DesktopSshInstance[]) => Promise<void>;
   connect: (id: string) => Promise<void>;
   disconnect: (id: string) => Promise<void>;
+  restart: (id: string) => Promise<void>;
   retry: (id: string) => Promise<void>;
   getStatus: (id: string) => DesktopSshInstanceStatus | null;
   clearError: () => void;
@@ -51,6 +53,7 @@ export const useDesktopSshStore = create<DesktopSshState>((set, get) => ({
   isLoading: false,
   isSaving: false,
   isImportsLoading: false,
+  isRestarting: false,
   initialized: false,
   listenerReady: false,
   error: null,
@@ -233,6 +236,19 @@ export const useDesktopSshStore = create<DesktopSshState>((set, get) => ({
       await get().refreshStatuses();
     } catch (error) {
       set({ error: error instanceof Error ? error.message : String(error) });
+      throw error;
+    }
+  },
+
+  restart: async (id) => {
+    set({ isRestarting: true });
+    try {
+      await get().disconnect(id).catch(() => undefined);
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      await get().connect(id);
+      set({ isRestarting: false });
+    } catch (error) {
+      set({ isRestarting: false });
       throw error;
     }
   },

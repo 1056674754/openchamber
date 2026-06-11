@@ -26,6 +26,10 @@
 
 @custom-variant dark (&:is(.dark *));
 
+:root {
+  --font-mono-cjk: "OpenChamber CJK Mono", "Sarasa Mono SC", "Noto Sans Mono CJK SC", "Source Han Mono SC", "Source Han Mono", "Microsoft YaHei Mono", "NSimSun", "SimSun", var(--font-mono);
+}
+
 /* Buttons should never look selectable. */
 button,
 [role="button"] {
@@ -985,6 +989,49 @@ html:not(.dark) .chat-scroll {
   font-size: var(--text-code);
 }
 
+.markdown-content pre,
+.markdown-content pre code,
+.markdown-content [data-markdown="code-block-body"],
+.markdown-content [data-markdown="code-block-body"] pre,
+.markdown-content [data-markdown="code-block-body"] code,
+.markdown-content [data-markdown="code-block-body"] span,
+.markdown-content [data-markdown="mermaid-ascii"] {
+  font-family: "OpenChamber CJK Mono", "Sarasa Mono SC", "Noto Sans Mono CJK SC", "Source Han Mono SC", "Source Han Mono", "Microsoft YaHei Mono", "NSimSun", "SimSun", var(--font-mono) !important;
+  font-variant-ligatures: none !important;
+  font-feature-settings: "liga" 0, "calt" 0 !important;
+}
+
+.markdown-content [data-openchamber-code-cell] {
+  display: inline-block;
+  inline-size: 1ch;
+  min-inline-size: 1ch;
+  max-inline-size: 1ch;
+  overflow: hidden;
+  white-space: pre;
+  text-align: left;
+  vertical-align: baseline;
+  background-color: color-mix(in srgb, var(--primary) 22%, transparent);
+}
+
+.markdown-content [data-openchamber-code-cell="0"] {
+  inline-size: 0;
+  min-inline-size: 0;
+  max-inline-size: 0;
+}
+
+.markdown-content [data-openchamber-code-cell="2"] {
+  inline-size: 2ch;
+  min-inline-size: 2ch;
+  max-inline-size: 2ch;
+  text-align: center;
+  background-color: color-mix(in srgb, var(--destructive) 24%, transparent);
+}
+
+.markdown-content [data-openchamber-code-wide-emoji="true"] {
+  font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", emoji;
+  font-variant-emoji: emoji;
+}
+
 /* Override Streamdown's hardcoded bg-muted for inline code - use theme colors instead */
 .markdown-content code[data-markdown="inline-code"] {
   background-color: var(--markdown-inline-code-bg, var(--surface-muted)) !important;
@@ -1296,7 +1343,7 @@ html:not(.dark) .chat-scroll {
   white-space: pre;
   width: max-content;
   min-width: 100%;
-  font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-family: var(--font-mono-cjk, var(--font-mono));
   color: var(--surface-foreground);
   background: transparent;
 }

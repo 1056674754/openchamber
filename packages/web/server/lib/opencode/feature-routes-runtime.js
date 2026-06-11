@@ -12,6 +12,7 @@ import { registerProjectIconRoutes } from './project-icon-routes.js';
 import { registerScheduledTaskRoutes } from '../scheduled-tasks/routes.js';
 import { registerSkillRoutes } from './skill-routes.js';
 import { registerPluginRoutes } from './plugin-routes.js';
+import { registerConfigRoutes } from './config-routes.js';
 import { registerOpenCodeRoutes } from './routes.js';
 
 export const createFeatureRoutesRuntime = (dependencies) => {
@@ -258,6 +259,13 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       deletePluginDirFile,
       encodePluginId,
       decodePluginId,
+    });
+
+    registerConfigRoutes(app, {
+      resolveProjectDirectory,
+      resolveOptionalProjectDirectory,
+      refreshOpenCodeAfterConfigChange,
+      clientReloadDelayMs,
     });
 
     registerQuotaRoutes(app, { getQuotaProviders });

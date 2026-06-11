@@ -15,19 +15,39 @@ type OwnershipMatch = {
   id: string;
   matchLength: number;
   source: 'project' | 'worktree';
+  serverId?: string;
 };
+
+const normalizeServerId = (serverId?: string | null): string =>
+  serverId && serverId !== DEFAULT_SERVER_ID ? serverId : DEFAULT_SERVER_ID;
+
+const usesDefaultConnection = (serverId?: string | null): boolean =>
+  normalizeServerId(serverId) === DEFAULT_SERVER_ID;
 
 const chooseBetterOwnershipMatch = (
   current: OwnershipMatch | null,
   next: OwnershipMatch,
 ): OwnershipMatch => {
-  if (
-    !current
-    || next.matchLength > current.matchLength
-    || (next.matchLength === current.matchLength && next.source === 'worktree' && current.source === 'project')
-  ) {
+  if (!current || next.matchLength > current.matchLength) {
     return next;
   }
+  if (next.matchLength < current.matchLength) {
+    return current;
+  }
+
+  const nextIsDefault = usesDefaultConnection(next.serverId);
+  const currentIsDefault = usesDefaultConnection(current.serverId);
+  if (nextIsDefault && !currentIsDefault) {
+    return next;
+  }
+  if (!nextIsDefault && currentIsDefault) {
+    return current;
+  }
+
+  if (next.source === 'worktree' && current.source === 'project') {
+    return next;
+  }
+
   return current;
 };
 
@@ -59,9 +79,6 @@ const collectWorktreeDirectories = (
   return directories;
 };
 
-const normalizeServerId = (serverId?: string | null): string =>
-  serverId && serverId !== DEFAULT_SERVER_ID ? serverId : DEFAULT_SERVER_ID;
-
 /**
  * Pure path-prefix derivation. Returns the longest-matching project's id,
  * or null when no project owns the session by path. This is the bootstrap
@@ -79,12 +96,12 @@ export const resolveProjectIdViaPathPrefix = (
   const directory = sessionDirectoryOf(session);
   if (!directory) return null;
 
-  const indexedServerId = serverRegistry.getServerForSession(session.id);
+  const indexedServerId = normalizeServerId(serverRegistry.getServerForSession(session.id));
   let bestMatch: OwnershipMatch | null = null;
 
   for (const project of projects) {
     if (!project.normalizedPath) continue;
-    if (indexedServerId && normalizeServerId(project.serverId) !== indexedServerId) continue;
+    if (normalizeServerId(project.serverId) !== indexedServerId) continue;
 
     const worktreeDirectories = collectWorktreeDirectories(worktreesByProject, project.normalizedPath, project.serverId);
     for (const worktreeDir of worktreeDirectories) {
@@ -93,6 +110,7 @@ export const resolveProjectIdViaPathPrefix = (
           id: project.id,
           matchLength: worktreeDir.length,
           source: 'worktree',
+          serverId: project.serverId,
         });
         break;
       }
@@ -103,6 +121,7 @@ export const resolveProjectIdViaPathPrefix = (
         id: project.id,
         matchLength: project.normalizedPath.length,
         source: 'project',
+        serverId: project.serverId,
       });
     }
   }
@@ -130,6 +149,11 @@ export const getProjectIdForSession = (
   const explicit = bindingMap.get(session.id);
   const derived = resolveProjectIdViaPathPrefix(session, projects, worktreesByProject);
   if (explicit && projects.some((project) => project.id === explicit)) {
+    const explicitProject = projects.find((project) => project.id === explicit);
+    const indexedServerId = normalizeServerId(serverRegistry.getServerForSession(session.id));
+    if (explicitProject && normalizeServerId(explicitProject.serverId) !== indexedServerId) {
+      return derived;
+    }
     if (derived && derived !== explicit) {
       return derived;
     }

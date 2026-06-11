@@ -174,6 +174,21 @@ describe('checkForUpdates', () => {
     expect(result.available).toBe(false);
   });
 
+  it('treats the merging-dev suffix as equivalent to the same release core', async () => {
+    fetchMock.when('api.openchamber.dev', {
+      ok: true,
+      json: async () => ({
+        latestVersion: '1.12.3',
+        updateAvailable: true,
+      }),
+    });
+
+    const result = await checkForUpdates({ currentVersion: '1.12.3-merging-dev' });
+
+    expect(result.available).toBe(false);
+    expect(result.version).toBe('1.12.3');
+  });
+
   // --- Scenario: API unreachable, npm fallback ---
 
   it('returns available=true from npm fallback when API is unreachable and npm has newer version', async () => {

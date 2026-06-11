@@ -1,11 +1,12 @@
 # Merge v1.12.x → merge/v1.11.0
 
-**Date**: 2026-06-04 ~ 2026-06-08
+**Date**: 2026-06-04 ~ 2026-06-11
 **Upstream**:
   - v1.11.7 (`5eccf83b`) → v1.12.0 (`996ffb08`), 56 commits, 347 files, +22816/-5022
   - v1.12.0 (`996ffb08`) → v1.12.1 (`b7cf5afd`), 173 files, +2421/-17345
   - v1.12.1 (`b7cf5afd`) → v1.12.2 (`a4c04ba7`), 16 commits, ~90 files, +2500/-700
   - v1.12.2 (`a4c04ba7`) → v1.12.3 (`cafbff47`), 5 commits, ~40 files, +640/-310
+  - v1.12.3 (`cafbff47`) → v1.12.4 (`4a263c1`), 2026-06-11 release-note feature inventory added; commit/file diff pending
 **Method**: 手工逐功能点移植，禁止 git merge/force
 
 ---
@@ -58,21 +59,26 @@
 
 ## v1.12.0 — 未移植 / 还原 / 延后
 
-### Batch 1.6 — Draft Welcome Starters + Chat 重构（已还原）
+### Batch 1.6 — Draft Welcome Starters + Chat 重构（✅ 已恢复核心功能）
 
 **涉及文件**: `ChatContainer.tsx`、`MessageList.tsx`、`useChatTimelineController.ts`、`session-prefetch-cache.ts` (+ 3 个新建文件: `draftStarters.ts`、`useDraftStarters.ts`、`DraftPresetChips.tsx`)
 
-**为何还原**：首次应用后导致严重 bug：
+**当前状态**：草稿启动页已在 `ChatContainer.tsx` 接入 `DraftPresetChips`，内置 starter、拖拽/增删、global/project persistence、i18n key、Magic Prompts 设置页等基础能力已存在。默认 chips 包含 `/explore`、`/catch-up`、`/weigh`、`/plan-feature`、`/debug`、`/workspace-review`，并已补齐对应 slash command handler。
+
+**曾经为何还原**：首次应用官方整批 chat diff 后导致严重 bug：
 - 聊天区域塌缩至 ~120×80px（`useCompactDraftLayout` / flex 布局变更）
 - 会话列表不显示对话，显示 "No sessions in this workspace yet."，远程分支大量重复
 - 运行时不稳（`handleHistoryScroll` 滚动检测效果引发测量死循环）
 
-**新建文件保留**：`draftStarters.ts`、`useDraftStarters.ts`、`DraftPresetChips.tsx` 及相关 i18n 键、store 字段、persistence 逻辑均已写入，仅核心渲染管线（4 个文件）被 git checkout 还原。
+**仍需单独处理**：
+- `handleHistoryScroll` 滚动自动加载历史仍未恢复，避免再次引入测量循环。
+- `MessageList` 的官方虚拟化优化和 `TurnChangedFilePills` / `changedFiles` 仍需单独批次验证。
+- 注意命令名是 `/explore`，不是 `/explorer`。
 
-**重新移植建议**：拆成更小的独立改动——
-1. 先移植 `handleHistoryScroll` 滚动加载逻辑（仅 `useChatTimelineController.ts`），测试无回归后再继续
-2. 再移植 `ChatContainer` 的 draft welcome 布局（`DraftPresetChips` + `renderDraftTitle`），需仔细验证 flex 布局与现有 `isDesktopExpandedInput` 分支的兼容性
-3. 最后移植 `MessageList` 的虚拟化优化，需验证与现有渲染逻辑不冲突
+**后续建议**：不要再整批套官方 chat diff。按以下顺序恢复剩余功能：
+1. `handleHistoryScroll` 滚动加载逻辑（仅 `useChatTimelineController.ts`），验证不出现测量循环/跳动。
+2. `TurnChangedFilePills` / `changedFiles`，先补类型和 grouping contract，再接 UI。
+3. `MessageList` 虚拟化优化，最后处理。
 
 ### Batch 1.10 — Mobile UI（延后）
 
@@ -97,8 +103,8 @@
 
 | 功能 | 说明 | 优先级 |
 |---|---|---|
-| **草稿启动页** | 新建会话时展示快捷命令 chips（拖拽排序、搜索添加），替代白屏。`DraftPresetChips` + `useDraftStarters` + `renderDraftTitle` | 🔴 高 |
-| **魔法命令** | `/explore` 探索代码库、`/catch-up` 快速总结、`/debug` 排查bug、`/weigh` 权衡方案、`/plan-feature` 功能规划、`/workspace-review` 代码审查 | 🔴 高 (与草稿启动页耦合) |
+| **草稿启动页** | ✅ 已落地：新建会话展示快捷命令 chips（拖拽排序、搜索添加），`DraftPresetChips` + `useDraftStarters` 已接入 `ChatContainer` | 🟢 已完成 |
+| **魔法命令** | ✅ 已落地：`/explore`、`/catch-up`、`/debug`、`/weigh`、`/plan-feature`、`/workspace-review` 均会展开为可见 prompt + hidden instructions，而不是裸发 slash command | 🟢 已完成 |
 | **消息改动文件标记** | 回复消息中显示本次改动涉及的文件列表 (TurnChangedFilePills)，含 `changedFiles` 字段 | 🟡 中 |
 | **时间格式偏好** | ✅ 已落地：新增 `packages/ui/src/lib/timeFormat.ts`，chat 消息 footer 与 Tunnel session 时间已接入 12/24 小时偏好 | 🟢 已完成 |
 | **滚动加载历史** | 聊天区域触底自动加载更早消息，替代 "Load older messages" 按钮 | 🟡 中 |
@@ -184,7 +190,7 @@
 | 3.15 | Header / MainLayout 清理 | 2 | ✅ 已落地 / ⚪ Header 无本地差异：MainLayout resize 改为 rAF 节流并修复 hook dependency；Header 中官方抽离的 inline Windows controls 本地已不存在 |
 | 3.16 | 小修改集合 | ~10 | ✅ 已落地：`AgentMentionAutocomplete`、`ModelControls` startup trace、changedFiles 路径处理、`ForkSessionDialog`/`TodoSendDialog`/`ScheduledTaskEditorDialog` source 参数、`DiffView` path-utils、`AgentSelector` load 去重、`VSCodeLayout` bootstrap source |
 | 3.17 | i18n 新 key | 9 | `en.ts` + 8 locale — `settings.about.*` + `ssh.*` key；`*.settings.ts` 3 个新 key |
-| 3.18 | 版本号 | 3 | ⚠️ 发布收尾再处理：功能缺口未完全关闭前不 bump package version |
+| 3.18 | 版本号 | 3 | ✅ 开发态已改为 `1.12.3-merging-dev`，用于压住 update 提示；正式发布前再决定 release version |
 | 3.19 | CI / Agent | 3 | ⚠️ 单独审批：官方 `pull_request_target` 自动 review 与 reproduce agent push/force-push 权限会改变 fork automation 权限边界，未直接移植 |
 
 ### 服务端（tunnels 重构）
@@ -242,8 +248,58 @@
 | 4.11 | onboarding WSL UI | 2 | `ChooserScreen.tsx`、`LocalSetupScreen.tsx` — WSL 检测 UI |
 | 4.12 | i18n | 8 | ✅ 已移植：Windows onboarding locale 已去掉 WSL 推荐；settings about/tunnel 3 个新 key × 8 locale 已补齐 |
 | 4.13 | SSH 文档 | 7 | ⚪ 当前 `v1.12.2..v1.12.3` 的 docs diff 无本仓库可移植 SSH 文档变更 |
-| 4.14 | 版本号 | 3 | ⚠️ 发布收尾再处理：待 high-risk chat/mobile 缺口决策后再 bump 到 v1.12.3 |
+| 4.14 | 版本号 | 3 | ✅ 开发态已改为 `1.12.3-merging-dev`，正式 v1.12.3 release version 仍待发布收尾 |
 | 4.15 | CHANGELOG | 2 | ⚠️ 发布收尾再处理：避免在未完成/未发布状态写成正式 v1.12.3 release |
+
+---
+
+## v1.12.4 — 新增功能盘点（待移植）
+
+**上游 release**: [OpenChamber v1.12.4](https://github.com/openchamber/openchamber/releases) / tag `v1.12.4` (`4a263c1`)
+**发布日期**: 2026-06-11
+**范围**: v1.12.3 (`cafbff47`) → v1.12.4 (`4a263c1`)
+**当前状态**: 只完成 release-note feature inventory + 本地 `rg` 初查；尚未逐 commit / file diff。后续仍需按官方实际提交逐项比对，不能整批套 patch。
+
+### 状态校准 (2026-06-11)
+
+| 类别 | Feature | 本 fork 初查状态 | 处理建议 |
+|---|---|---|---|
+| Chat | `/handoff-review` linked review session | 🟡 部分相近：本地已有 `/workspace-review` magic prompt，但只是当前 workspace review，没有 linked review session，也没有 feedback/reply 双向动作 | 高风险手工移植。需要先看官方会话关联数据结构，再映射到本 fork 的 multi-remote / serverId / directory context |
+| Chat/UI | Collapse long user messages setting | 🔴 未实现。现有 collapse 命中主要是 tool/activity/folder，不是长 user message 设置 | 可独立做，优先级中；注意不要让 MessageList/TurnItem 热路径多订阅大 store |
+| Chat | Rendered `@agent` mentions use primary accent | ✅ 基本覆盖：`UserTextPart` 已将 agent mention link 渲染为 `text-primary` | 低风险核对即可；后续可确认是否要改成更明确的 primary accent token |
+| Chat | Table copy action adds Markdown format | 🔴 未实现。Markdown table 目前有 copy/download 动作，但没有 Markdown format 选项 | 低风险 UX；可先做并加 i18n key |
+| Chat | Mermaid diagram dedicated editor | 🟡 部分较强：本地已有 Mermaid render/preview dialog/zoom/copy/source 相关逻辑，但未看到 dedicated editor | 需看官方 editor 的数据流；避免破坏现有 preview dialog |
+| Models | Hidden models stay hidden in multi-model controls | 🟡 部分：通用 `ModelPickerList` 支持 `hiddenModels`，chat/agents 已传入；`MultiRun` 的 `ModelMultiSelect` 未传 `hiddenModels` | 小修可先做；重点验证 Multi-Run/Fusion 两个入口 |
+| Worktrees | Single new worktree session opens immediately while setup continues | 🟡 部分：本地已有 pending draft worktree flow，但真实 session 仍在 worktree 创建后才完成 | 高风险。必须保留 `[OPENCHAMBER-FORK] ensureWorktreeProject` 和 remote project 注册 |
+| Multi-Run | Isolated runs open sessions immediately while setup continues | 🟡 部分：本地 waits worktree + session creation，只有 send message 阶段是 async fire-and-forget | 高风险。需重新设计 pending run/session 映射，不能丢 directory/serverId |
+| Sessions | Chat folder assignments persist after reload | ✅ 已覆盖：`useSessionFoldersStore` 同步 `oc.sessions.folders` / collapsed state，并有 server persistence | 只需用官方 diff 复核是否有边界修复 |
+| Sessions | Right-click menus for session/folder/project/worktree rows | 🟡 部分：session/temp session 已有 context menu；folder/project/worktree 覆盖面需逐文件对齐 | 中高风险，和 sidebar/tree 结构相关，需避免重复/错 server 操作 |
+| Settings | Search across settings pages | 🔴 未实现。`settings/metadata.ts` 有 keywords，但 `SettingsView` 没有全局 search UI | 中等 UX 功能，可独立做 |
+| Settings/Agents | Agent prompt and permission edits stay saved | ✅/🟡 看起来已覆盖：`useAgentsStore.updateAgent()` 会 PATCH `prompt`/`permission`，server `updateAgent()` 写 md/json/prompt file | 需要针对 md agent、json agent、builtin override 三类手动复测 |
+| Files | Editor Vim mode setting | 🔴 未实现。未看到 Vim mode / CodeMirror Vim keymap 设置 | 中等功能；确认依赖是否已在 lockfile 中，避免新增依赖 |
+| Files | Safer writes via temporary files | 🟡 部分：settings 写入已有 tmp + rename；`/api/fs/write` 仍直接 `writeFile` | 数据安全优先级高；应先改 server write path，再回归 rename/delete/read |
+| Git | Changed-file folders have revert action | 🔴 未实现。现有 git revert 只看到单文件 revert 和 commit revert | 中等风险；目录 revert 必须限制到 changed-file group，不可扩大删除范围 |
+| GitHub | Issue/PR pickers use server-side search | 🔴 未实现。UI 仍先分页拉取，再前端 query 过滤；server list route 未收 search query | 中等风险；保留 fork 的 repo network/fork detection |
+| Preview | Inline module scripts rewritten in proxied HTML | 🟡 部分：preview proxy 已重写 HTML attrs、CSS URL、JS import/from；未看到对 HTML 内联 `<script type="module">...</script>` body 的改写 | 需移植官方 parser/rewriter 或最小安全实现，并补测试 |
+| Voice | Plan/file preview markdown TTS buttons + selected/full setting | 🟡 部分：voice service/settings 已很完整；PlanView/File preview 上未看到 TTS button 和 selection/full-document setting | 中等 UX；不要把 TTS 控件接进高频 markdown render 热路径 |
+| Desktop/macOS | Menu bar tray with live session status, Mini Chat, provider usage submenu | 🔴 未实现。Mini Chat window 已有，但 Electron main 未见 Tray/menu-bar status item | macOS 独立批次；要考虑 remote/live session status source |
+| Desktop/macOS | Optional vibrancy for left sidebar | 🔴 未实现且当前强制禁用：`desktop_set_vibrancy` handler 会写 `desktopVibrancy=false` | 需重新评估 Electron 可行性；不能直接按旧 Tauri/SwiftUI 思路套 |
+| Desktop/macOS | Startup no longer opens unnecessary folder prompts | 🟡 待比对。本地 native open dialog 仍存在，但未确认是否由 startup 触发 | 需逐 commit 看官方修的是哪个启动路径 |
+| Mobile | Refreshed session controls/worktree deletion/MCP/update/usage layout | 🟡 延后/部分。本 fork 已有大量 mobile-specific UI，但此前 mobile 批次是延后策略 | 继续延后，除非用户明确优先移动端 |
+| Terminal/Mobile | Touch scrolling conflicts less with terminal input | 🟡 可能部分覆盖：`TerminalViewport` 已有 pointer/touch scroll 转 terminal scroll、tap threshold、passive false | 需真机/移动视口复测后决定是否还需官方 diff |
+| Usage | Cursor quota tracking | 🔴 未实现。quota providers 未见 Cursor provider | 中等功能；需确认 Cursor quota 数据源和 auth |
+| UI/Localization | French UI translations and French docs | 🔴 未实现。未见 `fr` locale files | 可低风险批量补，但应排在功能后 |
+| VSCode | Archive all sessions action | 🔴 未实现。未看到 extension action/command | VS Code 批次处理 |
+| VSCode | Multi-root workspace support + folder switching | 🔴 未实现。VS Code 多数路径仍取 `workspaceFolders[0]` | 高风险 VS Code 架构改动；需避免 web/desktop 假设污染 extension |
+
+### 建议制作顺序
+
+1. **先确认/补小 UI**：`@agent` accent 校准、table Markdown copy、隐藏模型传入 Multi-Run、长 user message collapse、Settings search。
+2. **再做数据安全和保存类**：`/api/fs/write` tmp-file 写入、Agents prompt/permission 三类复测、session folders persistence 对齐。
+3. **Chat 高价值功能**：`/handoff-review`、Mermaid editor、Plan/File TTS。这里开始必须逐 commit 看官方实现。
+4. **Worktree / Multi-Run / Session tree**：immediate open session、isolated runs、完整右键菜单。必须保护本 fork 的 multi-remote、serverId、directory routing、pending draft worktree 逻辑。
+5. **Git / GitHub / Preview 服务端功能**：changed folder revert、GitHub server-side search、inline module script rewrite。每项都要补 targeted tests。
+6. **Desktop / VS Code / Mobile / i18n**：tray、vibrancy、startup prompt、VS Code archive all/multi-root、mobile refresh、French locale/docs。平台面大，建议最后按平台分批。
 
 ---
 

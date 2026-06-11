@@ -245,12 +245,16 @@ export function applyDirectoryEvent(
     }
 
     case "session.deleted": {
-      const info = (event.properties as { info: Session }).info
+      const props = event.properties as { info?: Session; sessionID?: string }
+      const sessionID = props.info?.id ?? props.sessionID
+      if (!sessionID) return false
       const sessions = draft.session
-      const result = Binary.search(sessions, info.id, (s) => s.id)
+      const result = Binary.search(sessions, sessionID, (s) => s.id)
+      const existing = result.found ? sessions[result.index] : undefined
       if (result.found) sessions.splice(result.index, 1)
-      cleanupSessionCaches(draft, info.id, callbacks?.onSetSessionTodo)
-      if (!info.parentID) draft.sessionTotal = Math.max(0, draft.sessionTotal - 1)
+      cleanupSessionCaches(draft, sessionID, callbacks?.onSetSessionTodo)
+      const parentID = props.info?.parentID ?? (existing as Session & { parentID?: string | null } | undefined)?.parentID
+      if (result.found && !parentID) draft.sessionTotal = Math.max(0, draft.sessionTotal - 1)
       return true
     }
 
@@ -331,16 +335,21 @@ export function applyDirectoryEvent(
     case "message.removed": {
       const props = event.properties as { sessionID: string; messageID: string }
       const messages = draft.message[props.sessionID]
+      let changed = false
       if (messages) {
         const next = [...messages]
         const result = Binary.search(next, props.messageID, (m) => m.id)
         if (result.found) {
           next.splice(result.index, 1)
           draft.message[props.sessionID] = next
+          changed = true
         }
       }
-      delete draft.part[props.messageID]
-      return true
+      if (Object.prototype.hasOwnProperty.call(draft.part, props.messageID)) {
+        delete draft.part[props.messageID]
+        changed = true
+      }
+      return changed
     }
 
     case "message.part.updated": {

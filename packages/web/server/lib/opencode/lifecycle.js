@@ -1,5 +1,6 @@
 import { spawn, spawnSync } from 'node:child_process';
 import net from 'node:net';
+import { finalizeInterruptedOpenCodeRuns } from './interrupted-runs.js';
 
 const parsePositiveInt = (value, fallback) => {
   const parsed = Number.parseInt(String(value ?? ''), 10);
@@ -142,6 +143,24 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
 
       attempt();
     });
+  };
+
+  const finalizeInterruptedManagedOpenCodeRuns = (reason) => {
+    if (state.isExternalOpenCode) {
+      return;
+    }
+
+    try {
+      const result = finalizeInterruptedOpenCodeRuns({ reason });
+      if (result.updatedParts > 0 || result.updatedMessages > 0) {
+        console.warn(
+          `[OpenCode] Finalized ${result.updatedParts} interrupted tool part(s) and ${result.updatedMessages} message(s) after ${reason}`
+        );
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn(`[OpenCode] Failed to finalize interrupted runs after ${reason}: ${message}`);
+    }
   };
 
   const closeManagedOpenCodeChild = async (child) => {
@@ -587,6 +606,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       if (!(await waitForPortRelease(portToKill, 5000))) {
         console.warn(`Timed out waiting for OpenCode port ${portToKill} to be released`);
       }
+      finalizeInterruptedManagedOpenCodeRuns('managed OpenCode restart');
 
       if (env.ENV_CONFIGURED_OPENCODE_PORT) {
         console.log(`Using OpenCode port from environment: ${env.ENV_CONFIGURED_OPENCODE_PORT}`);
@@ -803,6 +823,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
             }
 
             state.lastOpenCodeError = null;
+            finalizeInterruptedManagedOpenCodeRuns('managed OpenCode startup');
             state.openCodeProcess = await startOpenCode();
             syncToHmrState();
           }

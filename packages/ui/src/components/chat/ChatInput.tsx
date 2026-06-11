@@ -10,11 +10,13 @@ import { useSelectionStore } from '@/sync/selection-store';
 import { useInputStore } from '@/sync/input-store';
 import type { AttachedFile } from '@/stores/types/sessionTypes';
 import * as sessionActions from '@/sync/session-actions';
+import type { SendDeliveryMode } from '@/sync/session-actions';
 import { useDirectorySync, useSessionMessages, useSessionRevertMessageID, useUserMessageHistory } from '@/sync/sync-context';
 import { useInlineCommentDraftStore, type InlineCommentDraft } from '@/stores/useInlineCommentDraftStore';
 import { useSnippetsStore } from '@/stores/useSnippetsStore';
 import { appendInlineComments } from '@/lib/messages/inlineComments';
-import { renderMagicPrompt } from '@/lib/magicPrompts';
+import { renderMagicPrompt, type MagicPromptId } from '@/lib/magicPrompts';
+import type { I18nKey } from '@/lib/i18n';
 import { AttachedFilesList, AttachedVSCodeFileChips, ActiveEditorFileSuggestion } from './FileAttachment';
 import { QueuedMessageChips } from './QueuedMessageChips';
 import { FileMentionAutocomplete, type FileMentionHandle } from './FileMentionAutocomplete';
@@ -102,6 +104,38 @@ const VS_CODE_DROP_DATA_TYPES = [
     'text/uri-list',
     'text/plain',
 ];
+
+const GUIDED_SESSION_COMMANDS: Record<string, {
+    visible: MagicPromptId;
+    instructions: MagicPromptId;
+    toastKey: I18nKey;
+}> = {
+    'plan-feature': {
+        visible: 'session.plan.visible',
+        instructions: 'session.plan.instructions',
+        toastKey: 'chat.chatInput.toast.planFeatureFailed',
+    },
+    'catch-up': {
+        visible: 'session.catchup.visible',
+        instructions: 'session.catchup.instructions',
+        toastKey: 'chat.chatInput.toast.catchUpFailed',
+    },
+    debug: {
+        visible: 'session.debug.visible',
+        instructions: 'session.debug.instructions',
+        toastKey: 'chat.chatInput.toast.debugFailed',
+    },
+    weigh: {
+        visible: 'session.weigh.visible',
+        instructions: 'session.weigh.instructions',
+        toastKey: 'chat.chatInput.toast.weighFailed',
+    },
+    explore: {
+        visible: 'session.explore.visible',
+        instructions: 'session.explore.instructions',
+        toastKey: 'chat.chatInput.toast.exploreFailed',
+    },
+};
 
 const renameFileForAttachmentCitation = (file: File, filename: string): File => {
     if (file.name === filename) {
@@ -720,6 +754,7 @@ const FocusModeButton = React.memo(function FocusModeButton(props: FocusModeButt
 type ComposerActionButtonsProps = {
     isMobile: boolean;
     footerIconButtonClass: string;
+    runningActionOffsetClass: string;
     sendIconSizeClass: string;
     stopIconSizeClass: string;
     canSend: boolean;
@@ -731,6 +766,7 @@ type ComposerActionButtonsProps = {
     onPrimaryAction: () => void;
     onQueueMessage: () => void;
     onSendNow: () => void;
+    onInterruptAndSend: () => void;
     onAbort: () => void;
     queueModeEnabled: boolean;
 };
@@ -739,6 +775,7 @@ const ComposerActionButtons = React.memo(function ComposerActionButtons(props: C
     const {
         isMobile,
         footerIconButtonClass,
+        runningActionOffsetClass,
         sendIconSizeClass,
         stopIconSizeClass,
         canSend,
@@ -750,6 +787,7 @@ const ComposerActionButtons = React.memo(function ComposerActionButtons(props: C
         onPrimaryAction,
         onQueueMessage,
         onSendNow,
+        onInterruptAndSend,
         onAbort,
         queueModeEnabled,
     } = props;
@@ -827,40 +865,70 @@ const ComposerActionButtons = React.memo(function ComposerActionButtons(props: C
     return (
         <div className="relative">
             {hasContent ? (
-                <Tooltip>
-                    <TooltipTrigger asChild>
-                        <button
-                            type="button"
-                            disabled={!currentSessionId}
-                            onClick={(event) => {
-                                if (isMobile) {
-                                    event.preventDefault();
-                                }
-                                const isCtrlClick = event.ctrlKey || event.metaKey;
-                                if (isCtrlClick) {
-                                    if (queueModeEnabled) {
-                                        onSendNow();
-                                    } else {
-                                        onQueueMessage();
+                <div className={cn(
+                    'absolute z-20 bottom-full left-1/2 mb-1 flex items-center gap-1',
+                    runningActionOffsetClass,
+                )}>
+                    <Tooltip>
+                        <TooltipTrigger asChild>
+                            <button
+                                type="button"
+                                disabled={!currentSessionId}
+                                onClick={(event) => {
+                                    if (isMobile) {
+                                        event.preventDefault();
                                     }
-                                } else {
-                                    onPrimaryAction();
-                                }
-                            }}
-                            className={cn(
-                                footerIconButtonClass,
-                                'absolute z-20 bottom-full left-1/2 -translate-x-1/2 mb-1',
-                                currentSessionId ? 'text-primary hover:text-primary' : 'opacity-30'
-                            )}
-                            aria-label={ariaLabel}
-                        >
-                            <Icon name="send-plane-2" className={cn(sendIconSizeClass, '-rotate-45')} />
-                        </button>
-                    </TooltipTrigger>
-                    <TooltipContent side="top" sideOffset={8}>
-                        {tooltipText}
-                    </TooltipContent>
-                </Tooltip>
+                                    const isCtrlClick = event.ctrlKey || event.metaKey;
+                                    if (isCtrlClick) {
+                                        if (queueModeEnabled) {
+                                            onSendNow();
+                                        } else {
+                                            onQueueMessage();
+                                        }
+                                    } else {
+                                        onPrimaryAction();
+                                    }
+                                }}
+                                className={cn(
+                                    footerIconButtonClass,
+                                    currentSessionId ? 'text-primary hover:text-primary' : 'opacity-30'
+                                )}
+                                aria-label={ariaLabel}
+                            >
+                                <Icon name="send-plane-2" className={cn(sendIconSizeClass, '-rotate-45')} />
+                            </button>
+                        </TooltipTrigger>
+                        <TooltipContent side="top" sideOffset={8}>
+                            {tooltipText}
+                        </TooltipContent>
+                    </Tooltip>
+                    <Tooltip>
+                        <TooltipTrigger asChild>
+                            <button
+                                type="button"
+                                disabled={!currentSessionId}
+                                onClick={(event) => {
+                                    if (isMobile) {
+                                        event.preventDefault();
+                                    }
+                                    onInterruptAndSend();
+                                }}
+                                className={cn(
+                                    footerIconButtonClass,
+                                    currentSessionId
+                                        ? 'text-[var(--status-warning)] hover:bg-[var(--status-warning)]/10 hover:text-[var(--status-warning)]'
+                                        : 'opacity-30'
+                                )}
+                                aria-label={t('chat.chatInput.actions.interruptAndSendAria')}
+                            >
+                                <Icon name="flashlight" className={cn(sendIconSizeClass)} />
+                            </button>
+                        </TooltipTrigger>
+                        <TooltipContent side="top" sideOffset={8}>
+                            {t('chat.chatInput.actions.interruptAndSendTooltip')}
+                        </TooltipContent>
+                    </Tooltip>
+                </div>
             ) : null}
             <button
                 type="button"
@@ -881,6 +949,7 @@ const ComposerActionButtons = React.memo(function ComposerActionButtons(props: C
 }, (prev, next) => (
     prev.isMobile === next.isMobile
     && prev.footerIconButtonClass === next.footerIconButtonClass
+    && prev.runningActionOffsetClass === next.runningActionOffsetClass
     && prev.sendIconSizeClass === next.sendIconSizeClass
     && prev.stopIconSizeClass === next.stopIconSizeClass
     && prev.canSend === next.canSend
@@ -892,6 +961,8 @@ const ComposerActionButtons = React.memo(function ComposerActionButtons(props: C
     && prev.queueModeEnabled === next.queueModeEnabled
     && prev.onPrimaryAction === next.onPrimaryAction
     && prev.onQueueMessage === next.onQueueMessage
+    && prev.onSendNow === next.onSendNow
+    && prev.onInterruptAndSend === next.onInterruptAndSend
     && prev.onAbort === next.onAbort
 ));
 
@@ -1217,6 +1288,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             'compact',
             'summary',
             'workspace-review',
+            ...Object.keys(GUIDED_SESSION_COMMANDS),
         ]);
         for (const command of availableCommands) names.add(command.name.toLowerCase());
         for (const skill of availableSkills) names.add(skill.name.toLowerCase());
@@ -1723,6 +1795,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     type SubmitOptions = {
         queuedOnly?: boolean;
         queuedMessageId?: string;
+        deliveryMode?: SendDeliveryMode;
     };
     const handleSubmitRef = React.useRef<(options?: SubmitOptions) => Promise<void>>(async () => {});
 
@@ -1810,6 +1883,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const handleSubmit = async (options?: SubmitOptions) => {
         const queuedOnly = options?.queuedOnly ?? false;
         const queuedMessageId = options?.queuedMessageId;
+        const deliveryMode = options?.deliveryMode ?? 'normal';
         const inputSnapshot = getCurrentInputSnapshot();
         presetSubmitTextRef.current = null;
         const submittedSessionId = currentSessionId;
@@ -2118,6 +2192,30 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                 }
                 return;
             }
+            else if (GUIDED_SESSION_COMMANDS[commandName] && (submittedSessionId || submittedNewSessionDraftOpen)) {
+                const command = GUIDED_SESSION_COMMANDS[commandName];
+                try {
+                    await sessionActions.waitForConnectionOrThrow();
+                    const visibleText = await renderMagicPrompt(command.visible);
+                    const instructionsText = await renderMagicPrompt(command.instructions);
+                    await sendMessage(
+                        visibleText,
+                        currentProviderId,
+                        currentModelId,
+                        currentAgentName,
+                        [],
+                        agentMentionName,
+                        [{ text: instructionsText, synthetic: true }],
+                        currentVariant,
+                        inputMode,
+                        submittedSendTarget,
+                    );
+                    scrollToBottom?.();
+                } catch (error) {
+                    toast.error(error instanceof Error ? error.message : t(command.toastKey));
+                }
+                return;
+            }
         }
 
         const currentSessionDirectory = submittedDirectory;
@@ -2159,6 +2257,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             currentVariant,
             inputMode,
             submittedSendTarget,
+            deliveryMode,
         );
 
         if (typeof window === 'undefined') {
@@ -2275,6 +2374,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 
     const handleSendNow = React.useCallback(() => {
         void handleSubmitRef.current();
+    }, []);
+
+    const handleInterruptAndSend = React.useCallback(() => {
+        void handleSubmitRef.current({ deliveryMode: 'interrupt' });
     }, []);
 
     const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -2596,12 +2699,12 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         const caretX = textareaRect.left - containerRect.left + (caret.left - textarea.scrollLeft);
 
         const popupMargin = 8;
-        const estimatedPopupHeight = 260;
+        const estimatedPopupHeight = showCommandAutocomplete ? 420 : 260;
         const spaceAbove = caretY - popupMargin;
         const spaceBelow = containerRect.height - caretY - popupMargin;
         const place: 'above' | 'below' = spaceBelow >= estimatedPopupHeight || spaceBelow >= spaceAbove ? 'below' : 'above';
 
-        const desiredWidth = showFileMention ? 520 : (showCommandAutocomplete || showSnippetAutocomplete) ? 450 : 360;
+        const desiredWidth = showFileMention ? 520 : showCommandAutocomplete ? 560 : showSnippetAutocomplete ? 450 : 360;
         const clampedLeft = Math.max(
             popupMargin,
             Math.min(caretX - 24, containerRect.width - desiredWidth - popupMargin)
@@ -3963,6 +4066,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 
     const footerPaddingClass = isMobile ? 'px-1.5 py-1.5' : (isVSCode ? 'px-1.5 py-1' : 'px-2.5 py-1.5');
     const buttonSizeClass = isMobile ? 'h-8 w-8' : (isVSCode ? 'h-5 w-5' : 'h-6 w-6');
+    const runningActionOffsetClass = isMobile
+        ? 'translate-x-[calc(-50%+1.125rem)]'
+        : (isVSCode ? 'translate-x-[calc(-50%+0.75rem)]' : 'translate-x-[calc(-50%+0.875rem)]');
     const sendIconSizeClass = isMobile ? 'h-4 w-4' : (isVSCode ? 'h-3.5 w-3.5' : 'h-4 w-4');
     const stopIconSizeClass = isMobile ? 'h-6 w-6' : (isVSCode ? 'h-4 w-4' : 'h-5 w-5');
     const iconSizeClass = isMobile ? 'h-[18px] w-[18px]' : (isVSCode ? 'h-4 w-4' : 'h-[18px] w-[18px]');
@@ -4319,7 +4425,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                     left: `${autocompleteOverlayPosition.left}px`,
                                     top: `${autocompleteOverlayPosition.top}px`,
                                     bottom: 'auto',
-                                    width: `min(450px, calc(100% - ${autocompleteOverlayPosition.left + 8}px))`,
+                                    width: `min(560px, calc(100% - ${autocompleteOverlayPosition.left + 8}px))`,
                                     maxHeight: `${autocompleteOverlayPosition.maxHeight}px`,
                                     transform: autocompleteOverlayPosition.place === 'above' ? 'translateY(-100%)' : undefined,
                                 }
@@ -4529,6 +4635,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                             <ComposerActionButtons
                                                 isMobile={isMobile}
                                                 footerIconButtonClass={footerIconButtonClass}
+                                                runningActionOffsetClass={runningActionOffsetClass}
                                                 sendIconSizeClass={sendIconSizeClass}
                                                 stopIconSizeClass={stopIconSizeClass}
                                                 canSend={canSend}
@@ -4540,6 +4647,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                                 onPrimaryAction={handlePrimaryAction}
                                                 onQueueMessage={handleQueueMessage}
                                                 onSendNow={handleSendNow}
+                                                onInterruptAndSend={handleInterruptAndSend}
                                                 onAbort={handleAbort}
                                                 queueModeEnabled={queueModeEnabled}
                                             />
@@ -4589,6 +4697,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                     <ComposerActionButtons
                                         isMobile={isMobile}
                                         footerIconButtonClass={footerIconButtonClass}
+                                        runningActionOffsetClass={runningActionOffsetClass}
                                         sendIconSizeClass={sendIconSizeClass}
                                         stopIconSizeClass={stopIconSizeClass}
                                         canSend={canSend}
@@ -4600,6 +4709,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                                 onPrimaryAction={handlePrimaryAction}
                                                 onQueueMessage={handleQueueMessage}
                                                 onSendNow={handleSendNow}
+                                                onInterruptAndSend={handleInterruptAndSend}
                                                 onAbort={handleAbort}
                                                 queueModeEnabled={queueModeEnabled}
                                             />

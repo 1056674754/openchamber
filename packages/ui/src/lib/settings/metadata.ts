@@ -4,6 +4,10 @@ export type SettingsPageSlug =
   | 'home'
   | 'projects'
   | 'remote-instances'
+  | 'remote-connection'
+  | 'remote-port-forwarding'
+  | 'remote-projects'
+  | 'config-sync'
   | 'providers'
   | 'usage'
   | 'agents'
@@ -11,6 +15,8 @@ export type SettingsPageSlug =
   | 'commands'
   | 'mcp'
   | 'plugins'
+  | 'permissions'
+  | 'config-presets'
   | 'skills.installed'
   | 'skills.catalog'
   | 'git'
@@ -29,10 +35,15 @@ export type SettingsPageGroup =
   | 'projects'
   | 'general'
   | 'opencode'
+  | 'instance'
   | 'git'
   | 'skills'
   | 'usage'
-  | 'advanced';
+  | 'sync'
+  | 'advanced'
+  | 'external';
+
+export type InstanceVisibility = 'default' | 'remote' | 'both';
 
 export interface SettingsRuntimeContext {
   isVSCode: boolean;
@@ -48,6 +59,8 @@ export interface SettingsPageMeta {
   title: string;
   group: SettingsPageGroup;
   kind: 'single' | 'split';
+  /** Which instance types display this page in the nav. Defaults to 'both'. */
+  showOn?: InstanceVisibility;
   description?: string;
   keywords?: string[];
   isAvailable?: (ctx: SettingsRuntimeContext) => boolean;
@@ -58,10 +71,13 @@ export const SETTINGS_GROUP_LABELS: Record<SettingsPageGroup, string> = {
   projects: 'Projects',
   general: 'General',
   opencode: 'OpenCode',
+  instance: 'Instance',
   git: 'Git',
   skills: 'Skills',
   usage: 'Usage',
+  sync: 'Sync',
   advanced: 'Advanced',
+  external: 'External',
 };
 
 export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
@@ -78,21 +94,48 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
     title: 'Projects',
     group: 'projects',
     kind: 'split',
+    showOn: 'default',
     keywords: ['project', 'projects', 'worktree', 'worktrees', 'repo', 'repository', 'directory'],
   },
   {
     slug: 'remote-instances',
     title: 'Remote Instances',
-    group: 'projects',
-    kind: 'split',
+    group: 'external',
+    kind: 'single',
+    showOn: 'default',
     keywords: ['ssh', 'remote', 'instances', 'tunnels', 'forwarding', 'connection'],
     isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
+    slug: 'remote-connection',
+    title: 'Connection',
+    group: 'instance',
+    kind: 'single',
+    showOn: 'remote',
+    keywords: ['ssh', 'connection', 'status', 'logs', 'connect', 'disconnect'],
+  },
+  {
+    slug: 'remote-port-forwarding',
+    title: 'Port Forwarding',
+    group: 'instance',
+    kind: 'single',
+    showOn: 'remote',
+    keywords: ['port', 'forwarding', 'tunnels', 'proxy'],
+  },
+  {
+    slug: 'remote-projects',
+    title: 'Remote Projects',
+    group: 'instance',
+    kind: 'single',
+    showOn: 'remote',
+    keywords: ['project', 'directory', 'remote', 'worktree'],
   },
   {
     slug: 'providers',
     title: 'Providers',
     group: 'opencode',
     kind: 'split',
+    showOn: 'both',
     keywords: ['provider', 'providers', 'models', 'model', 'api key', 'api keys', 'openai', 'anthropic', 'ollama', 'credentials'],
   },
   {
@@ -100,6 +143,7 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
     title: 'Usage',
     group: 'usage',
     kind: 'split',
+    showOn: 'both',
     keywords: ['quota', 'billing', 'tokens', 'usage', 'limits'],
   },
   {
@@ -107,6 +151,7 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
     title: 'Agents',
     group: 'opencode',
     kind: 'split',
+    showOn: 'both',
     keywords: ['agent', 'agents', 'prompts', 'tools', 'permissions'],
   },
   {
@@ -114,6 +159,7 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
     title: 'Behavior',
     group: 'opencode',
     kind: 'single',
+    showOn: 'both',
     keywords: ['behavior', 'agents.md', 'system prompt', 'global rules', 'instructions', 'override'],
   },
   {
@@ -121,6 +167,7 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
     title: 'Commands',
     group: 'opencode',
     kind: 'split',
+    showOn: 'both',
     keywords: ['command', 'commands', 'slash', 'macros', 'automation'],
   },
   {
@@ -128,6 +175,7 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
     title: 'MCP',
     group: 'opencode',
     kind: 'split',
+    showOn: 'both',
     keywords: ['mcp', 'model context protocol', 'servers', 'tools', 'remote', 'stdio'],
   },
   {
@@ -135,7 +183,32 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
     title: 'Plugins',
     group: 'opencode',
     kind: 'split',
+    showOn: 'both',
     keywords: ['plugin', 'plugins', 'extensions', 'addons', 'npm', 'opencode-wakatime'],
+  },
+  {
+    slug: 'permissions',
+    title: 'Permissions',
+    group: 'opencode',
+    kind: 'split',
+    showOn: 'both',
+    keywords: ['permission', 'permissions', 'tools', 'rules', 'ask', 'allow', 'deny'],
+  },
+  {
+    slug: 'config-presets',
+    title: 'Presets',
+    group: 'opencode',
+    kind: 'single',
+    showOn: 'both',
+    keywords: ['preset', 'presets', 'template', 'config', 'install', 'preferences'],
+  },
+  {
+    slug: 'config-sync',
+    title: 'Config Sync',
+    group: 'sync',
+    kind: 'single',
+    showOn: 'remote',
+    keywords: ['sync', 'config', 'diff', 'push', 'pull', 'distribute'],
   },
   {
     slug: 'skills.installed',

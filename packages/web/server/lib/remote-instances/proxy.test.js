@@ -10,10 +10,15 @@ describe('remote instance proxy timeouts', () => {
     expect(getRemoteProxyRequestTimeoutMs('/api/fs/list?path=/repo', 'GET')).toBe(3_000);
   });
 
-  it('keeps a longer timeout only for async prompt submission', () => {
+  it('keeps a longer timeout for session mutations', () => {
     expect(getRemoteProxyRequestTimeoutMs('/api/session/ses_123/prompt_async', 'POST')).toBe(15_000);
     expect(getRemoteProxyRequestTimeoutMs('/api/session/ses_123/abort', 'POST')).toBe(5_000);
     expect(getRemoteProxyRequestTimeoutMs('/api/session/ses_123/message', 'GET')).toBe(5_000);
+  });
+
+  it('lets shell execution wait longer than async prompt submission', () => {
+    expect(getRemoteProxyRequestTimeoutMs('/api/session/ses_123/shell', 'POST')).toBe(600_000);
+    expect(getRemoteProxyRequestTimeoutMs('/api/session/ses_123/shell', 'GET')).toBe(5_000);
   });
 
   it('allows OpenCode upgrades to wait for package manager commands', () => {

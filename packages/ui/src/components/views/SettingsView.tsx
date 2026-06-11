@@ -10,6 +10,13 @@ import { useSkillsStore } from '@/stores/useSkillsStore';
 import { useSkillsCatalogStore } from '@/stores/useSkillsCatalogStore';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { AgentsSidebar } from '@/components/sections/agents/AgentsSidebar';
 import { AgentsPage } from '@/components/sections/agents/AgentsPage';
 import { BehaviorPage } from '@/components/sections/behavior/BehaviorPage';
@@ -19,6 +26,16 @@ import { McpSidebar } from '@/components/sections/mcp/McpSidebar';
 import { McpPage } from '@/components/sections/mcp/McpPage';
 import { PluginsSidebar, PluginsPage } from '@/components/sections/plugins';
 import { usePluginsStore } from '@/stores/usePluginsStore';
+import { PermissionsSidebar } from '@/components/sections/permissions/PermissionsSidebar';
+import { PermissionsPage } from '@/components/sections/permissions/PermissionsPage';
+import { PresetsPage } from '@/components/sections/presets/PresetsPage';
+import { ConfigSyncPage } from '@/components/sections/config-sync/ConfigSyncPage';
+import { RemoteConnectionPage } from '@/components/sections/remote-instances/RemoteConnectionPage';
+import { RemotePortForwardingPage } from '@/components/sections/remote-instances/RemotePortForwardingPage';
+import { RemoteProjectsPage } from '@/components/sections/remote-instances/RemoteProjectsPage';
+import { usePermissionsStore } from '@/stores/usePermissionsStore';
+import { usePresetsStore } from '@/stores/usePresetsStore';
+import { useConfigSyncStore } from '@/stores/useConfigSyncStore';
 import { SkillsSidebar } from '@/components/sections/skills/SkillsSidebar';
 import { SkillsPage } from '@/components/sections/skills/SkillsPage';
 import { ProjectsSidebar } from '@/components/sections/projects/ProjectsSidebar';
@@ -43,6 +60,9 @@ import { useI18n } from '@/lib/i18n';
 import { Icon } from "@/components/icon/Icon";
 import type { IconName } from "@/components/icon/icons";
 import { reloadOpenCodeConfiguration } from '@/stores/useAgentsStore';
+import { useInstanceContextStore } from '@/stores/useInstanceContextStore';
+import { useDesktopSshStore } from '@/stores/useDesktopSshStore';
+import { resolveInstanceLabel } from '@/lib/desktopSsh';
 import {
   SETTINGS_PAGE_METADATA,
   getSettingsPageMeta,
@@ -50,6 +70,7 @@ import {
   type SettingsPageSlug,
   type SettingsRuntimeContext,
   type SettingsPageMeta,
+  type InstanceVisibility,
 } from '@/lib/settings/metadata';
 
 // Same constraints as main sidebar
@@ -82,11 +103,17 @@ const pageOrder: SettingsPageSlug[] = [
   'snippets',
   'projects',
   'remote-instances',
+  'remote-connection',
+  'remote-port-forwarding',
+  'remote-projects',
+  'config-sync',
   'agents',
   'behavior',
   'commands',
   'mcp',
   'plugins',
+  'permissions',
+  'config-presets',
   'providers',
   'usage',
   'skills.installed',
@@ -274,6 +301,25 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
   const setSettingsPage = useUIStore((state) => state.setSettingsPage);
   const settingsSlug = resolveSettingsSlug(settingsPageRaw);
 
+  const instanceStore = useInstanceContextStore();
+  const currentInstance = instanceStore.currentInstance;
+  const isRemote = instanceStore.isRemote;
+  const instances = instanceStore.instances;
+  const setCurrentInstance = instanceStore.setCurrentInstance;
+
+  const sshInstances = useDesktopSshStore((s) => s.instances);
+  React.useEffect(() => {
+    const deviceList = sshInstances.map((inst) => ({
+      id: inst.id,
+      type: 'remote' as const,
+      label: resolveInstanceLabel(inst),
+      directory: '',
+      sshCommand: inst.sshCommand,
+      instanceLabel: resolveInstanceLabel(inst),
+    }));
+    instanceStore.setInstances(deviceList);
+  }, [sshInstances, instanceStore]);
+
   const [mobileStage, setMobileStage] = React.useState<MobileStage>('nav');
   const autoNavSlugRef = React.useRef<string | null>(null);
 
@@ -309,11 +355,19 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
   }, [isDesktopApp]);
 
   const visiblePages = React.useMemo(() => {
+    const instanceType = useInstanceContextStore.getState().currentInstance?.type ?? 'default';
+    const visibility: InstanceVisibility = instanceType === 'remote' ? 'remote' : 'default';
+
     return SETTINGS_PAGE_METADATA
       .filter((page) => page.slug !== 'home')
       .filter((page) => isPageAvailable(page, runtimeCtx))
       .filter((page) => !(runtimeCtx.isVSCode && page.slug === 'projects'))
-      .filter((page) => !(isMobile && page.slug === 'shortcuts'));
+      .filter((page) => !(isMobile && page.slug === 'shortcuts'))
+      .filter((page) => {
+        const showOn = page.showOn ?? 'both';
+        if (showOn === 'both') return true;
+        return showOn === visibility;
+      });
   }, [runtimeCtx, isMobile]);
 
   const sortedFilteredPages = React.useMemo(() => {
@@ -409,6 +463,18 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
       void usePluginsStore.getState().loadPlugins();
       return;
     }
+    if (settingsSlug === 'permissions') {
+      void usePermissionsStore.getState().loadPermissions();
+      return;
+    }
+    if (settingsSlug === 'config-presets') {
+      usePresetsStore.getState().loadPresets();
+      return;
+    }
+    if (settingsSlug === 'config-sync') {
+      void useConfigSyncStore.getState().loadDiff('default', '');
+      return;
+    }
     if (settingsSlug === 'skills.installed' || settingsSlug === 'skills.catalog') {
       void useSkillsStore.getState().loadSkills();
       void useSkillsCatalogStore.getState().loadCatalog();
@@ -492,6 +558,18 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
         return t('settings.page.voice.title');
       case 'tunnel':
         return t('settings.page.tunnel.title');
+      case 'remote-connection':
+        return t('settings.page.remoteConnection.title');
+      case 'remote-port-forwarding':
+        return t('settings.page.remotePortForwarding.title');
+      case 'remote-projects':
+        return t('settings.page.remoteProjects.title');
+      case 'config-sync':
+        return t('settings.page.configSync.title');
+      case 'permissions':
+        return t('settings.page.permissions.title');
+      case 'config-presets':
+        return t('settings.page.configPresets.title');
       case 'home':
       default:
         return t('settings.view.home.title');
@@ -523,6 +601,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
         return <McpSidebar onItemSelect={opts.onItemSelect} />;
       case 'plugins':
         return <PluginsSidebar onItemSelect={opts.onItemSelect} />;
+      case 'permissions':
+        return <PermissionsSidebar onItemSelect={opts.onItemSelect} />;
       case 'skills.installed':
         return <SkillsSidebar onItemSelect={opts.onItemSelect} />;
       case 'providers':
@@ -561,6 +641,18 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
         return <McpPage />;
       case 'plugins':
         return <PluginsPage />;
+      case 'permissions':
+        return <PermissionsPage />;
+      case 'config-presets':
+        return <PresetsPage />;
+      case 'config-sync':
+        return <ConfigSyncPage />;
+      case 'remote-connection':
+        return <RemoteConnectionPage />;
+      case 'remote-port-forwarding':
+        return <RemotePortForwardingPage />;
+      case 'remote-projects':
+        return <RemoteProjectsPage />;
       case 'skills.installed':
         return <SkillsPage view="installed" />;
       case 'skills.catalog':
@@ -818,39 +910,91 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
           )}
         </div>
       ) : (
-        <>
-          {showBackButton && (
-            <div className={cn('absolute left-3 z-50', isWindowed ? 'top-2' : 'top-3')}>
+        <div
+          className="flex items-center justify-between h-9 px-3 shrink-0"
+          style={{ borderBottom: `1px solid var(--interactive-border)` }}
+        >
+          <div className="flex items-center gap-2 min-w-0">
+            {showBackButton && (
               <button
                 type="button"
                 onClick={handleBack}
                 aria-label={t('settings.view.actions.back')}
-                className="inline-flex h-9 w-9 items-center justify-center rounded-lg p-2 text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md p-0.5 text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
               >
                 <Icon name="arrow-left-s" className="h-5 w-5" />
               </button>
-            </div>
-          )}
+            )}
+            <Select
+              value={currentInstance?.id ?? 'default'}
+              onValueChange={(value) => {
+                if (value === '__add__') {
+                  openPage('remote-instances');
+                  return;
+                }
+                setCurrentInstance(value);
+              }}
+            >
+              <SelectTrigger className="h-7 min-w-[160px] gap-1.5 border border-[var(--interactive-border)] bg-[var(--surface-elevated)] px-2.5 hover:bg-[var(--interactive-hover)]">
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <span
+                    className="h-2 w-2 shrink-0 rounded-full"
+                    style={{
+                      backgroundColor: isRemote ? 'var(--status-warning)' : 'var(--status-success)',
+                    }}
+                  />
+                  <SelectValue placeholder={t('settings.instance.selector.label')} />
+                </div>
+              </SelectTrigger>
+              <SelectContent align="start" className="min-w-[240px]">
+                {instances.map((inst) => (
+                  <SelectItem key={inst.id} value={inst.id}>
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span
+                        className="h-2 w-2 shrink-0 rounded-full"
+                        style={{
+                          backgroundColor: inst.type === 'remote'
+                            ? 'var(--status-warning)'
+                            : 'var(--status-success)',
+                        }}
+                      />
+                      <span className="truncate">
+                        {inst.type === 'default' ? t('settings.instance.selector.defaultLabel') : inst.label}
+                      </span>
+                      {inst.type === 'remote' && (
+                        <span className="typography-micro text-muted-foreground shrink-0">SSH</span>
+                      )}
+                    </div>
+                  </SelectItem>
+                ))}
+                <div className="border-t border-[var(--interactive-border)] my-1" />
+                <SelectItem value="__add__">
+                  <div className="flex items-center gap-2 text-[var(--primary-base)]">
+                    <Icon name="add" className="h-4 w-4" />
+                    <span>{t('settings.instance.selector.addInstance')}</span>
+                  </div>
+                </SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
 
-      {onClose && (
-        <div className={cn('absolute right-0.5 z-50', isWindowed ? 'top-0.5' : 'top-1')}>
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1 shrink-0">
             {SERVER_AWARE_PAGES.has(settingsSlug) && (
               <SettingsServerSelector />
             )}
-            <button
-              type="button"
-              onClick={onClose}
-              aria-label={t('settings.view.actions.closeSettings')}
-              title={t('settings.view.actions.closeSettingsWithShortcut', { shortcut: shortcutKey })}
-              className="inline-flex h-7 w-7 items-center justify-center rounded-md p-0.5 text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-            >
-              <Icon name="close" className="h-5 w-5"  />
-            </button>
+            {onClose && (
+              <button
+                type="button"
+                onClick={onClose}
+                aria-label={t('settings.view.actions.closeSettings')}
+                title={t('settings.view.actions.closeSettingsWithShortcut', { shortcut: shortcutKey })}
+                className="inline-flex h-7 w-7 items-center justify-center rounded-md p-0.5 text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+              >
+                <Icon name="close" className="h-5 w-5" />
+              </button>
+            )}
           </div>
         </div>
-      )}
-        </>
       )}
 
       <div className="flex flex-1 min-h-0 overflow-hidden">

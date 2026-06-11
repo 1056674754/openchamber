@@ -201,6 +201,43 @@ describe("applyDirectoryEvent", () => {
     expect((draft.session_status.ses_1 as Extract<SessionStatus, { type: "retry" }>).attempt).toBe(2)
   })
 
+  test("deletes sessions from sessionID-only payloads", () => {
+    const draft = state({
+      session: [{ id: "ses_1", title: "Existing", time: { created: 1, updated: 1 } } as never],
+      sessionTotal: 1,
+      message: { ses_1: [{ id: "msg_1", sessionID: "ses_1", role: "user", time: { created: 1 } } as never] },
+      part: { msg_1: [{ id: "prt_1", messageID: "msg_1", type: "text", text: "hello" } as Part] },
+      session_status: { ses_1: { type: "busy" } as SessionStatus },
+      session_activity: { ses_1: 123 },
+    })
+
+    const result = applyDirectoryEvent(draft, {
+      type: "session.deleted",
+      properties: { sessionID: "ses_1" },
+    } as Event)
+
+    expect(result).toBe(true)
+    expect(draft.session).toEqual([])
+    expect(draft.sessionTotal).toBe(0)
+    expect(draft.message.ses_1).toBe(undefined)
+    expect(draft.part.msg_1).toBe(undefined)
+    expect(draft.session_status.ses_1).toBe(undefined)
+    expect(draft.session_activity.ses_1).toBe(undefined)
+  })
+
+  test("skips missing message removal events", () => {
+    const draft = state()
+
+    const result = applyDirectoryEvent(draft, {
+      type: "message.removed",
+      properties: { sessionID: "ses_1", messageID: "msg_missing" },
+    } as Event)
+
+    expect(result).toBe(false)
+    expect(draft.message).toEqual({})
+    expect(draft.part).toEqual({})
+  })
+
   test("updates permission request arrays immutably", () => {
     const initialPermissions = [
       { id: "perm_1", sessionID: "ses_1" } as PermissionRequest,

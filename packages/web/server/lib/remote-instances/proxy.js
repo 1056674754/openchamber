@@ -9,6 +9,7 @@ const REMOTE_PROXY_FAST_TIMEOUT_MS = 3_000;
 const REMOTE_PROXY_DEFAULT_TIMEOUT_MS = 5_000;
 const REMOTE_PROXY_LONG_MUTATION_TIMEOUT_MS = 15_000;
 const REMOTE_PROXY_UPGRADE_TIMEOUT_MS = 10 * 60_000;
+const REMOTE_PROXY_SHELL_TIMEOUT_MS = REMOTE_PROXY_UPGRADE_TIMEOUT_MS;
 const REMOTE_PROXY_MAX_TIMEOUT_MS = REMOTE_PROXY_UPGRADE_TIMEOUT_MS;
 const REMOTE_PROXY_QUEUE_TIMEOUT_MS = 1_000;
 
@@ -103,6 +104,10 @@ export const getRemoteProxyRequestTimeoutMs = (remotePath, method = 'GET') => {
 
   if (normalizedMethod === 'POST' && /\/api\/session\/[^/]+\/prompt_async$/.test(pathname)) {
     return REMOTE_PROXY_LONG_MUTATION_TIMEOUT_MS;
+  }
+
+  if (normalizedMethod === 'POST' && /\/api\/session\/[^/]+\/shell$/.test(pathname)) {
+    return REMOTE_PROXY_SHELL_TIMEOUT_MS;
   }
 
   if (normalizedMethod === 'POST' && pathname === '/api/opencode/upgrade') {

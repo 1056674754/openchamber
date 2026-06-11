@@ -28,6 +28,7 @@ export interface AttachedFile {
 }
 
 export type EditPermissionMode = 'allow' | 'ask' | 'deny' | 'full';
+export type SendDeliveryMode = 'normal' | 'interrupt';
 
 export type MessageStreamPhase = 'streaming' | 'cooldown' | 'completed';
 
@@ -246,7 +247,7 @@ export interface SessionStore {
     unshareSession: (id: string) => Promise<Session | null>;
     setCurrentSession: (id: string | null, directoryHint?: string | null, options?: { syncDirectory?: boolean; serverId?: string }) => void;
     loadMessages: (sessionId: string, limit?: number) => Promise<void>;
-    sendMessage: (content: string, providerID: string, modelID: string, agent?: string, attachments?: AttachedFile[], agentMentionName?: string, additionalParts?: Array<{ text: string; attachments?: AttachedFile[]; synthetic?: boolean }>, variant?: string, inputMode?: 'normal' | 'shell', targetSessionId?: string) => Promise<void>;
+    sendMessage: (content: string, providerID: string, modelID: string, agent?: string, attachments?: AttachedFile[], agentMentionName?: string, additionalParts?: Array<{ text: string; attachments?: AttachedFile[]; synthetic?: boolean }>, variant?: string, inputMode?: 'normal' | 'shell', targetSessionId?: string, deliveryMode?: SendDeliveryMode) => Promise<void>;
     abortCurrentOperation: (sessionIdOverride?: string) => Promise<void>;
     acknowledgeSessionAbort: (sessionId: string) => void;
     armAbortPrompt: (durationMs?: number) => number | null;

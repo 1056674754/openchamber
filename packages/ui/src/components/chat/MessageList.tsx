@@ -215,8 +215,11 @@ const isUserShellMarkerMessage = (message: ChatMessageEntry | undefined): boolea
 
     return message.parts.some((part) => {
         if (part?.type !== 'text') return false;
-        const text = (part as unknown as { text?: unknown }).text;
-        const synthetic = (part as unknown as { synthetic?: unknown }).synthetic;
+        const textPart = part as unknown as { text?: unknown; synthetic?: unknown; shellAction?: unknown };
+        const text = textPart.text;
+        const synthetic = textPart.synthetic;
+        const hasShellAction = typeof textPart.shellAction === 'object' && textPart.shellAction !== null;
+        if (hasShellAction && typeof text === 'string' && text.trim() === '/shell') return true;
         return synthetic === true && typeof text === 'string' && text.trim().startsWith(USER_SHELL_MARKER);
     });
 };
@@ -364,16 +367,33 @@ const withShellBridgeDetails = (message: ChatMessageEntry, details: ShellBridgeD
 
     for (const part of message.parts) {
         if (!injected && part?.type === 'text') {
-            const text = (part as unknown as { text?: unknown }).text;
-            const synthetic = (part as unknown as { synthetic?: unknown }).synthetic;
-            if (synthetic === true && typeof text === 'string' && text.trim().startsWith(USER_SHELL_MARKER)) {
+            const textPart = part as unknown as {
+                text?: unknown;
+                synthetic?: unknown;
+                shellAction?: {
+                    command?: unknown;
+                    output?: unknown;
+                    status?: unknown;
+                };
+            };
+            const text = textPart.text;
+            const synthetic = textPart.synthetic;
+            const trimmedText = typeof text === 'string' ? text.trim() : '';
+            const hasShellAction = typeof textPart.shellAction === 'object' && textPart.shellAction !== null;
+            if ((synthetic === true && trimmedText.startsWith(USER_SHELL_MARKER)) || (hasShellAction && trimmedText === '/shell')) {
+                const existingCommand = typeof textPart.shellAction?.command === 'string' ? textPart.shellAction.command.trim() : '';
+                const existingOutput = typeof textPart.shellAction?.output === 'string' ? textPart.shellAction.output : '';
+                const existingStatus = typeof textPart.shellAction?.status === 'string' ? textPart.shellAction.status.trim() : '';
+                const effectiveCommand = command || existingCommand;
+                const effectiveOutput = output || existingOutput;
+                const effectiveStatus = status || existingStatus;
                 nextParts.push({
                     type: 'text',
                     text: '/shell',
                     shellAction: {
-                        ...(command ? { command } : {}),
-                        ...(output ? { output } : {}),
-                        ...(status ? { status } : {}),
+                        ...(effectiveCommand ? { command: effectiveCommand } : {}),
+                        ...(effectiveOutput ? { output: effectiveOutput } : {}),
+                        ...(effectiveStatus ? { status: effectiveStatus } : {}),
                     },
                 } as unknown as Part);
                 injected = true;

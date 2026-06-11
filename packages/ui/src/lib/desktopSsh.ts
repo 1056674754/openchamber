@@ -412,6 +412,12 @@ export const desktopSshDisconnect = async (id: string): Promise<void> => {
   await invoke('desktop_ssh_disconnect', { id });
 };
 
+export const desktopSshRestart = async (id: string): Promise<void> => {
+  await desktopSshDisconnect(id);
+  await new Promise((resolve) => setTimeout(resolve, 1500));
+  await desktopSshConnect(id);
+};
+
 export const desktopSshStatus = async (id?: string): Promise<DesktopSshInstanceStatus[]> => {
   const invoke = getInvoke();
   if (!invoke) return [];

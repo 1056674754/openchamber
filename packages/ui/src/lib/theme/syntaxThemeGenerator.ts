@@ -1,4 +1,7 @@
 import type { Theme } from '@/types/theme';
+import { CJK_MONO_FONT_FAMILIES } from '@/lib/fontOptions';
+
+const CODE_BLOCK_FONT_FAMILY = `${CJK_MONO_FONT_FAMILIES}, var(--font-mono)`;
 
 export function generateSyntaxTheme(theme: Theme) {
   const syntax = theme.colors.syntax;
@@ -8,7 +11,7 @@ export function generateSyntaxTheme(theme: Theme) {
     'code[class*="language-"]': {
       color: syntax.base.foreground,
       background: 'transparent',
-      fontFamily: 'Consolas, Monaco, "Andale Mono", "Ubuntu Mono", monospace',
+      fontFamily: CODE_BLOCK_FONT_FAMILY,
       fontSize: '1em',
       textAlign: 'left' as const,
       whiteSpace: 'pre',
@@ -27,7 +30,7 @@ export function generateSyntaxTheme(theme: Theme) {
     'pre[class*="language-"]': {
       color: syntax.base.foreground,
       background: 'transparent',
-      fontFamily: 'Consolas, Monaco, "Andale Mono", "Ubuntu Mono", monospace',
+      fontFamily: CODE_BLOCK_FONT_FAMILY,
       fontSize: '1em',
       textAlign: 'left' as const,
       whiteSpace: 'pre',

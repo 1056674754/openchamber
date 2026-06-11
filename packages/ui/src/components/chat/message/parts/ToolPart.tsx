@@ -1,6 +1,7 @@
 
 import React from 'react';
 import type { AnimationPlaybackControls } from 'motion';
+import type { OpencodeClient } from '@opencode-ai/sdk/v2/client';
 import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
 import { PatchDiff } from '@pierre/diffs/react';
 import { cn } from '@/lib/utils';
@@ -11,7 +12,7 @@ import { toolDisplayStyles } from '@/lib/typography';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { useOptionalThemeSystem } from '@/contexts/useThemeSystem';
 import { useProjectsStore } from '@/stores/useProjectsStore';
-import { useSessionUIStore } from '@/sync/session-ui-store';
+import { routeMessage, useSessionUIStore } from '@/sync/session-ui-store';
 import { useDirectorySync, useSessionMessageRecords, useEnsureSessionMessages } from '@/sync/sync-context';
 import { resolveSdkForDirectory } from '@/sync/session-actions';
 import { getSyncChildStores } from '@/sync/sync-refs';
@@ -45,6 +46,8 @@ import { Icon } from "@/components/icon/Icon";
 import { PermissionCard } from '../../PermissionCard';
 import { QuestionCard } from '../../QuestionCard';
 import { useInlineBlockingRequestsForTool } from '../../InlineBlockingRequestsContext';
+import type { QuestionRequest } from '@/types/question';
+import { serializeQuestionAnswersAsMarkdown } from '../../questionSerializers';
 import { DiffViewToggle, type DiffViewMode } from '../DiffViewToggle';
 import { MinDurationShineText } from './MinDurationShineText';
 import { ToolRevealOnMount } from './ToolRevealOnMount';
@@ -54,6 +57,10 @@ import { resolveFallbackTaskSessionId } from './resolveFallbackTaskSessionId';
 import { areRenderRelevantPartsEqual } from '../renderCompare';
 import { useI18n } from '@/lib/i18n';
 import { getDiffPatchEntries, getPatchText } from './toolDiffUtils';
+import {
+    findPendingQuestionRequestForRecoveredTool,
+    recoverQuestionRequestFromToolPart,
+} from '../../lib/questionToolRecovery';
 
 const TOOL_ROW_TEXT_CLASS = '!text-[length:var(--text-meta)] !leading-4 sm:!leading-6 tracking-normal';
 const TOOL_ROW_TITLE_CLASS = cn('typography-meta font-medium', TOOL_ROW_TEXT_CLASS);
@@ -193,6 +200,52 @@ const GIT_REFRESH_MUTATING_TOOLS = new Set([
     'patch',
     'task',
 ]);
+
+const describeSdkError = (error: unknown): string => {
+    if (error instanceof Error && error.message.trim().length > 0) {
+        return error.message;
+    }
+    if (typeof error === 'string' && error.trim().length > 0) {
+        return error;
+    }
+    try {
+        return JSON.stringify(error);
+    } catch {
+        return String(error);
+    }
+};
+
+const listPendingQuestionsForRecovery = async (
+    client: OpencodeClient,
+    directory: string,
+): Promise<QuestionRequest[]> => {
+    const merged: QuestionRequest[] = [];
+    const seen = new Set<string>();
+    const trimmedDirectory = directory.trim();
+
+    const addRequests = (requests: readonly QuestionRequest[]) => {
+        for (const request of requests) {
+            if (!request.id || seen.has(request.id)) continue;
+            seen.add(request.id);
+            merged.push(request);
+        }
+    };
+
+    const listForDirectory = async (params?: { directory: string }): Promise<QuestionRequest[]> => {
+        const result = await client.question.list(params);
+        if (result.error) {
+            throw new Error(`question.list failed: ${describeSdkError(result.error)}`);
+        }
+        return result.data ?? [];
+    };
+
+    addRequests(await listForDirectory());
+    if (trimmedDirectory) {
+        addRequests(await listForDirectory({ directory: trimmedDirectory }));
+    }
+
+    return merged;
+};
 
 const formatDuration = (start: number, end?: number, now: number = Date.now()) => {
     const duration = Math.min(Math.max(0, (end ?? now) - start), MAX_DURATION_MS);
@@ -1977,8 +2030,7 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
         const candidate = (part as { messageID?: unknown }).messageID;
         return typeof candidate === 'string' && candidate.length > 0 ? candidate : undefined;
     }, [messageId, part]);
-    const inlineBlockingRequests = useInlineBlockingRequestsForTool(partMessageId, part.id);
-    const hasInlineBlockingRequests = inlineBlockingRequests.questions.length > 0 || inlineBlockingRequests.permissions.length > 0;
+    const inlineBlockingRequests = useInlineBlockingRequestsForTool(partMessageId, part.callID || part.id);
 
     const normalizedPartTool = normalizeToolName(part.tool);
     const isTaskTool = normalizedPartTool === 'task';
@@ -1986,6 +2038,73 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
     const status = state?.status as string | undefined;
     const isFinalized = status === 'completed' || status === 'error' || status === 'aborted' || status === 'failed' || status === 'timeout' || status === 'cancelled';
     const isError = status === 'error' || status === 'failed';
+    const recoveredQuestionRequest = React.useMemo(() => {
+        if (inlineBlockingRequests.questions.length > 0) {
+            return null;
+        }
+        return recoverQuestionRequestFromToolPart({
+            part,
+            messageID: partMessageId,
+            sessionID: messageSessionId,
+            normalizedToolName: normalizedPartTool,
+        });
+    }, [inlineBlockingRequests.questions.length, messageSessionId, normalizedPartTool, part, partMessageId]);
+    const resolveRecoveredQuestionRequestTarget = React.useCallback(async () => {
+        if (!recoveredQuestionRequest) {
+            throw new Error('Question reply target is not available');
+        }
+        const directory = currentDirectory.trim();
+        if (!directory) {
+            throw new Error('Question reply target directory is not available');
+        }
+        const serverId = messageSessionId ? serverRegistry.getServerForSession(messageSessionId) : undefined;
+        const client = resolveSdkForDirectory(directory, messageSessionId, serverId);
+        const pendingQuestions = await listPendingQuestionsForRecovery(client, directory);
+        const liveRequest = findPendingQuestionRequestForRecoveredTool(recoveredQuestionRequest, pendingQuestions);
+        if (!liveRequest) {
+            return {
+                kind: 'stale' as const,
+                directory,
+            };
+        }
+        return {
+            kind: 'pending' as const,
+            requestId: liveRequest.id,
+            directory,
+        };
+    }, [currentDirectory, messageSessionId, recoveredQuestionRequest]);
+    const submitRecoveredQuestionAsMessage = React.useCallback(async (answers: string[][], directoryHint?: string) => {
+        if (!recoveredQuestionRequest) {
+            throw new Error('Question reply target is not available');
+        }
+        if (!messageSessionId) {
+            throw new Error('Question reply target session is not available');
+        }
+        const directory = (directoryHint ?? currentDirectory).trim();
+        if (!directory) {
+            throw new Error('Question reply target directory is not available');
+        }
+
+        const choice = useSessionUIStore.getState().getLastUserChoice(messageSessionId);
+        if (!choice?.providerID || !choice.modelID) {
+            throw new Error('Question reply model is not available');
+        }
+
+        const serverId = serverRegistry.getServerForSession(messageSessionId);
+        await routeMessage({
+            sessionId: messageSessionId,
+            content: serializeQuestionAnswersAsMarkdown(recoveredQuestionRequest, answers),
+            providerID: choice.providerID,
+            modelID: choice.modelID,
+            agent: choice.agent,
+            variant: choice.variant,
+            directory,
+            serverId,
+        });
+    }, [currentDirectory, messageSessionId, recoveredQuestionRequest]);
+    const hasInlineBlockingRequests = inlineBlockingRequests.questions.length > 0
+        || inlineBlockingRequests.permissions.length > 0
+        || recoveredQuestionRequest !== null;
 
     const [activeLatched, setActiveLatched] = React.useState<boolean>(!isFinalized);
     const previousPartIdRef = React.useRef<string | undefined>(part.id);
@@ -2905,6 +3024,15 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
                     {inlineBlockingRequests.questions.map((question) => (
                         <QuestionCard key={question.id} question={question} inline />
                     ))}
+                    {recoveredQuestionRequest ? (
+                        <QuestionCard
+                            key={recoveredQuestionRequest.id}
+                            question={recoveredQuestionRequest}
+                            inline
+                            resolveRequestTarget={resolveRecoveredQuestionRequestTarget}
+                            submitStaleQuestionAnswer={submitRecoveredQuestionAsMessage}
+                        />
+                    ) : null}
                     {inlineBlockingRequests.permissions.map((permission) => (
                         <PermissionCard key={permission.id} permission={permission} inline />
                     ))}

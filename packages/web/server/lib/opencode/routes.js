@@ -2,6 +2,7 @@ import { createProjectIdFromPath } from '../projects/project-id.js';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { executeDirectOpenCodeUpgrade as defaultExecuteDirectOpenCodeUpgrade } from './opencode-upgrade-runtime.js';
 
 export const registerOpenCodeRoutes = (app, dependencies) => {
   const {
@@ -20,6 +21,7 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
     refreshOpenCodeAfterConfigChange,
     buildOpenCodeUrl,
     getOpenCodeAuthHeaders,
+    executeDirectOpenCodeUpgrade = defaultExecuteDirectOpenCodeUpgrade,
   } = dependencies;
 
   let authLibrary = null;
@@ -151,6 +153,60 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
     return fallback;
   };
 
+  const restartAfterOpenCodeUpgrade = async () => {
+    await refreshOpenCodeAfterConfigChange('OpenCode upgrade');
+  };
+
+  const runDirectOpenCodeUpgrade = async (upstream) => {
+    const result = await executeDirectOpenCodeUpgrade({
+      getOpenCodeResolutionSnapshot,
+      readSettingsFromDiskMigrated,
+    });
+
+    if (!result?.success) {
+      return {
+        status: 500,
+        body: {
+          ...(result || {}),
+          success: false,
+          upgradeSource: 'direct',
+          error: result?.error || 'Direct OpenCode upgrade failed',
+          upstream,
+        },
+      };
+    }
+
+    try {
+      await restartAfterOpenCodeUpgrade();
+    } catch (restartError) {
+      return {
+        status: 500,
+        body: {
+          ...result,
+          success: false,
+          upgraded: true,
+          upgradeSource: 'direct',
+          error: restartError instanceof Error
+            ? `OpenCode upgraded, but restart failed: ${restartError.message}`
+            : 'OpenCode upgraded, but restart failed',
+          upstream,
+        },
+      };
+    }
+
+    return {
+      status: 200,
+      body: {
+        success: true,
+        upgraded: true,
+        restarted: true,
+        upgradeSource: 'direct',
+        ...result,
+        upstream,
+      },
+    };
+  };
+
   const pruneExpiredPendingMcpAuthContexts = () => {
     const now = Date.now();
     for (const [state, entry] of pendingMcpAuthContextByState.entries()) {
@@ -182,10 +238,10 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
   });
 
   app.post('/api/opencode/upgrade', async (req, res) => {
+    const target = typeof req.body?.target === 'string' && req.body.target.trim().length > 0
+      ? req.body.target.trim()
+      : undefined;
     try {
-      const target = typeof req.body?.target === 'string' && req.body.target.trim().length > 0
-        ? req.body.target.trim()
-        : undefined;
       const response = await fetch(buildOpenCodeUrl('/global/upgrade', ''), {
         method: 'POST',
         headers: {
@@ -197,15 +253,25 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
       });
       const payload = await response.json().catch(() => null);
       if (!response.ok) {
-        return res.status(response.status).json({
+        const upstream = {
           success: false,
           error: resolveOpenCodeUpgradeError(payload, response.statusText || 'Failed to upgrade OpenCode'),
+          status: response.status,
+          ...pickOpenCodeUpgradeDiagnostics(payload),
+        };
+        if (!target) {
+          const fallback = await runDirectOpenCodeUpgrade(upstream);
+          return res.status(fallback.status).json(fallback.body);
+        }
+        return res.status(response.status).json({
+          success: false,
+          error: upstream.error,
           ...pickOpenCodeUpgradeDiagnostics(payload),
         });
       }
 
       try {
-        await refreshOpenCodeAfterConfigChange('OpenCode upgrade');
+        await restartAfterOpenCodeUpgrade();
       } catch (restartError) {
         return res.status(500).json({
           success: false,
@@ -218,6 +284,13 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
 
       return res.json({ ...(payload ?? { success: true }), restarted: true });
     } catch (error) {
+      if (!target) {
+        const fallback = await runDirectOpenCodeUpgrade({
+          success: false,
+          error: error instanceof Error ? error.message : 'Failed to upgrade OpenCode',
+        });
+        return res.status(fallback.status).json(fallback.body);
+      }
       console.error('Failed to upgrade OpenCode:', error);
       return res.status(500).json({
         success: false,

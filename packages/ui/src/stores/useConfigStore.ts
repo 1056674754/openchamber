@@ -15,6 +15,7 @@ import { useDirectoryStore } from "@/stores/useDirectoryStore";
 import { streamDebugEnabled } from "@/stores/utils/streamDebug";
 import { parseModelIdentifier } from "@/lib/modelIdentifier";
 import { resolveApiUrl } from "@/lib/api/serverUrl";
+import { normalizeConfigString, persistOpenChamberSettingsPatch, resolveConfiguredAgentName, type OpenChamberSettingsPatch } from "@/lib/configDefaults";
 import { resolveSdkForDirectory, resolveApiUrl as resolveRemoteApiOrigin } from "@/sync/session-actions";
 import { DEFAULT_SERVER_ID, serverRegistry } from "@/lib/opencode/server-registry";
 import { markStartupTrace, measureStartupTrace } from "@/lib/startupTrace";
@@ -81,9 +82,9 @@ const fetchOpenChamberDefaults = async (serverBaseUrl?: string): Promise<OpenCha
     const buildFromApi = (data: Record<string, unknown> | null): Partial<OpenChamberDefaults> => {
         if (!data) return {};
 
-        const defaultModel = typeof data?.defaultModel === 'string' ? data.defaultModel.trim() : '';
-        const defaultVariant = typeof data?.defaultVariant === 'string' ? data.defaultVariant.trim() : '';
-        const defaultAgent = typeof data?.defaultAgent === 'string' ? data.defaultAgent.trim() : '';
+        const defaultModel = normalizeConfigString(data?.defaultModel) ?? '';
+        const defaultVariant = normalizeConfigString(data?.defaultVariant) ?? '';
+        const defaultAgent = normalizeConfigString(data?.defaultAgent) ?? '';
         const gitmojiEnabled = typeof data?.gitmojiEnabled === 'boolean' ? data.gitmojiEnabled : undefined;
         const defaultFileViewerPreview = typeof data?.defaultFileViewerPreview === 'boolean' ? data.defaultFileViewerPreview : undefined;
         const zenModel = typeof data?.zenModel === 'string' ? data.zenModel.trim() : '';
@@ -160,11 +161,7 @@ type ProviderWithModelList = Omit<Provider, "models"> & { models: ProviderModel[
 type GitModelSelection = { providerId: string; modelId: string };
 
 const normalizeOptionalString = (value: unknown): string | undefined => {
-    if (typeof value !== "string") {
-        return undefined;
-    }
-    const trimmed = value.trim();
-    return trimmed.length > 0 ? trimmed : undefined;
+    return normalizeConfigString(value);
 };
 
 const hasProviderModel = (
@@ -1613,11 +1610,11 @@ export const useConfigStore = create<ConfigStore>()(
                                 resolvedZenModel !== defaultZenModel;
 
                             if (shouldPersistResolvedZenModel && resolvedZenModel) {
-                                updateDesktopSettings({
+                                persistOpenChamberSettingsPatch({
                                     zenModel: resolvedZenModel,
                                     gitProviderId: '',
                                     gitModelId: '',
-                                }).catch(() => {
+                                }, serverBaseUrl).catch(() => {
                                     // Ignore errors - best effort cleanup
                                 });
                             }
@@ -1685,18 +1682,18 @@ export const useConfigStore = create<ConfigStore>()(
 
                             let resolvedAgent: Agent = fallbackAgent;
 
-                            // Track invalid settings to clear
-                             const invalidSettings: { defaultModel?: string; defaultVariant?: string; defaultAgent?: string } = {};
+                            // Track invalid settings to clear and harmless corrections to persist.
+                             const settingsPatch: OpenChamberSettingsPatch = {};
 
                             // 1. Check OpenChamber settings for default agent
-                            if (openChamberDefaults.defaultAgent) {
-                                const settingsAgent = safeAgents.find((agent) => agent.name === openChamberDefaults.defaultAgent);
-                                if (settingsAgent) {
-                                    resolvedAgent = settingsAgent;
-                                } else {
-                                    // Agent no longer exists - mark for clearing
-                                    invalidSettings.defaultAgent = '';
-                                }
+                            const configuredAgent = resolveConfiguredAgentName(openChamberDefaults.defaultAgent, safeAgents);
+                            if (configuredAgent.name) {
+                                const settingsAgent = safeAgents.find((agent) => agent.name === configuredAgent.name);
+                                if (settingsAgent) resolvedAgent = settingsAgent;
+                                if (configuredAgent.correctedName) settingsPatch.defaultAgent = configuredAgent.correctedName;
+                            } else if (configuredAgent.invalid) {
+                                // Agent no longer exists - mark for clearing
+                                settingsPatch.defaultAgent = '';
                             }
 
                              // --- Model Selection ---
@@ -1719,12 +1716,12 @@ export const useConfigStore = create<ConfigStore>()(
                                          if (variants && Object.prototype.hasOwnProperty.call(variants, openChamberDefaults.defaultVariant)) {
                                              resolvedVariant = openChamberDefaults.defaultVariant;
                                          } else {
-                                             invalidSettings.defaultVariant = '';
+                                             settingsPatch.defaultVariant = '';
                                          }
                                      }
                                  } else {
                                      // Model no longer exists - mark for clearing
-                                     invalidSettings.defaultModel = '';
+                                     settingsPatch.defaultModel = '';
                                  }
                              }
 
@@ -1795,14 +1792,14 @@ export const useConfigStore = create<ConfigStore>()(
                             });
 
                             // Clear invalid settings from storage (best-effort cleanup)
-                            if (Object.keys(invalidSettings).length > 0) {
+                            if (Object.keys(settingsPatch).length > 0) {
                                 // Also clear from store state
                                  set({
-                                     settingsDefaultModel: invalidSettings.defaultModel !== undefined ? undefined : get().settingsDefaultModel,
-                                     settingsDefaultVariant: invalidSettings.defaultVariant !== undefined ? undefined : get().settingsDefaultVariant,
-                                     settingsDefaultAgent: invalidSettings.defaultAgent !== undefined ? undefined : get().settingsDefaultAgent,
+                                     settingsDefaultModel: settingsPatch.defaultModel === '' ? undefined : settingsPatch.defaultModel ?? get().settingsDefaultModel,
+                                     settingsDefaultVariant: settingsPatch.defaultVariant === '' ? undefined : settingsPatch.defaultVariant ?? get().settingsDefaultVariant,
+                                     settingsDefaultAgent: settingsPatch.defaultAgent === '' ? undefined : settingsPatch.defaultAgent ?? get().settingsDefaultAgent,
                                  });
-                                updateDesktopSettings(invalidSettings).catch(() => {
+                                persistOpenChamberSettingsPatch(settingsPatch, serverBaseUrl).catch(() => {
                                     // Ignore errors - best effort cleanup
                                 });
                             }

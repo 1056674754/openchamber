@@ -2,6 +2,7 @@ import React from 'react';
 import type { Session } from '@opencode-ai/sdk/v2';
 import type { SessionSummaryMeta } from './types';
 import type { SessionSortMode } from '@/stores/useUIStore';
+import { DEFAULT_SERVER_ID } from '@/lib/opencode/server-registry';
 
 const formatDateLabel = (value: string | number) => {
   const targetDate = new Date(value);
@@ -89,6 +90,45 @@ export const isPathWithinProject = (directory?: string | null, projectPath?: str
   if (normalizedDirectory === normalizedProjectPath) return true;
   if (normalizedProjectPath === '/') return normalizedDirectory.startsWith('/');
   return normalizedDirectory.startsWith(`${normalizedProjectPath}/`);
+};
+
+type RemoteIndicatorProject = {
+  id: string;
+  path: string;
+  serverId?: string | null;
+};
+
+const normalizeServerId = (serverId?: string | null): string =>
+  serverId && serverId !== DEFAULT_SERVER_ID ? serverId : DEFAULT_SERVER_ID;
+
+export const resolveRemoteIndicatorProject = <T extends RemoteIndicatorProject>({
+  projects,
+  projectId,
+  directory,
+  groupDirectory,
+  indexedServerId,
+}: {
+  projects: readonly T[];
+  projectId?: string | null;
+  directory?: string | null;
+  groupDirectory?: string | null;
+  indexedServerId?: string | null;
+}): T | null => {
+  const normalizedServerId = normalizeServerId(indexedServerId);
+  if (normalizedServerId === DEFAULT_SERVER_ID) {
+    return null;
+  }
+
+  const candidates = projects.filter((project) => normalizeServerId(project.serverId) === normalizedServerId);
+  const projectById = projectId
+    ? candidates.find((project) => project.id === projectId && project.serverId)
+    : null;
+  if (projectById) return projectById;
+
+  const targetDirectory = directory ?? groupDirectory ?? null;
+  return candidates
+    .filter((project) => project.serverId && isPathWithinProject(targetDirectory, project.path))
+    .sort((a, b) => (normalizePath(b.path)?.length ?? 0) - (normalizePath(a.path)?.length ?? 0))[0] ?? null;
 };
 
 export const normalizeForBranchComparison = (value: string): string => {

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import type { QuestionInfo, QuestionOption, QuestionRequest } from '@/types/question';
-import { serializeQuestionAsJson, serializeQuestionAsMarkdown } from '../questionSerializers';
+import { serializeQuestionAnswersAsMarkdown, serializeQuestionAsJson, serializeQuestionAsMarkdown } from '../questionSerializers';
 
 function makeOption(label: string, description = ''): QuestionOption {
   return { label, description };
@@ -164,5 +164,37 @@ describe('serializeQuestionAsJson', () => {
 
     expect(JSON.parse(json)).toEqual({ questions: [] });
     expect(json.includes('\n  "questions"')).toBe(true);
+  });
+});
+
+describe('serializeQuestionAnswersAsMarkdown', () => {
+  test('renders answers beside their original questions', () => {
+    const md = serializeQuestionAnswersAsMarkdown(
+      makeRequest([
+        makeQuestion({ header: 'Mode', question: 'Which mode?', options: [makeOption('A')] }),
+        makeQuestion({ question: 'Any notes?', options: [] }),
+      ]),
+      [['A'], ['Use the config page']],
+    );
+
+    expect(md.startsWith('I am answering the pending question')).toBe(true);
+    expect(md.includes('## Mode')).toBe(true);
+    expect(md.includes('Which mode?')).toBe(true);
+    expect(md.includes('Answer: A')).toBe(true);
+    expect(md.includes('## Question 2')).toBe(true);
+    expect(md.includes('Answer: Use the config page')).toBe(true);
+  });
+
+  test('renders multi-answer and missing-answer values deterministically', () => {
+    const md = serializeQuestionAnswersAsMarkdown(
+      makeRequest([
+        makeQuestion({ question: 'Tags?', multiple: true, options: [makeOption('A'), makeOption('B')] }),
+        makeQuestion({ question: 'Empty?', options: [] }),
+      ]),
+      [['A', 'B']],
+    );
+
+    expect(md.includes('Answer: A, B')).toBe(true);
+    expect(md.includes('Answer: (no answer)')).toBe(true);
   });
 });

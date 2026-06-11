@@ -26,6 +26,7 @@ import { useUIStore } from '@/stores/useUIStore';
 import { useDeviceInfo } from '@/lib/device';
 import { useMessageDirectory } from '@/hooks/useMessageDirectory';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
+import { loadCjkMonoFont } from '@/lib/fontLoader';
 import type { EditorAPI } from '@/lib/api/types';
 import { DEFAULT_SERVER_ID, serverRegistry } from '@/lib/opencode/server-registry';
 import { resolveApiUrl } from '@/lib/api/serverUrl';
@@ -266,13 +267,13 @@ const TableCopyButton: React.FC<{ tableRef: React.RefObject<HTMLDivElement | nul
     <div className="relative" ref={menuRef}>
       <button
         onClick={() => setShowMenu(!showMenu)}
-        className="p-1 rounded hover:bg-interactive-hover/60 text-muted-foreground hover:text-foreground transition-colors"
+        className="grid size-6 place-items-center rounded hover:bg-interactive-hover/60 text-muted-foreground hover:text-foreground transition-colors"
         title={t('markdownRenderer.table.actions.copyTitle')}
       >
         {copied ? <Icon name="check" className="size-3.5" /> : <Icon name="file-copy" className="size-3.5" />}
       </button>
       {showMenu && (
-        <div className="absolute top-full right-0 z-10 mt-1 min-w-[100px] overflow-hidden rounded-md border border-border bg-background shadow-none">
+        <div className="absolute top-full right-0 z-10 mt-1 min-w-[92px] overflow-hidden rounded-md border border-border bg-background shadow-none">
           <button
             className="w-full px-3 py-1.5 text-left text-sm transition-colors hover:bg-interactive-hover/40"
             onClick={() => handleCopy('csv')}
@@ -324,13 +325,13 @@ const TableDownloadButton: React.FC<{ tableRef: React.RefObject<HTMLDivElement |
     <div className="relative" ref={menuRef}>
       <button
         onClick={() => setShowMenu(!showMenu)}
-        className="p-1 rounded hover:bg-interactive-hover/60 text-muted-foreground hover:text-foreground transition-colors"
+        className="grid size-6 place-items-center rounded hover:bg-interactive-hover/60 text-muted-foreground hover:text-foreground transition-colors"
         title={t('markdownRenderer.table.actions.downloadTitle')}
       >
         <Icon name="download" className="size-3.5" />
       </button>
       {showMenu && (
-        <div className="absolute top-full right-0 z-10 mt-1 min-w-[100px] overflow-hidden rounded-md border border-border bg-background shadow-none">
+        <div className="absolute top-full right-0 z-10 mt-1 min-w-[92px] overflow-hidden rounded-md border border-border bg-background shadow-none">
           <button
             className="w-full px-3 py-1.5 text-left text-sm transition-colors hover:bg-interactive-hover/40"
             onClick={() => handleDownload('csv')}
@@ -356,15 +357,15 @@ const TableWrapper: React.FC<{ children?: React.ReactNode; className?: string }>
   const alwaysShowActions = isMobile || isTablet;
 
   return (
-    <div className="group my-4 flex flex-col space-y-2" data-markdown="table-wrapper" ref={tableRef}>
+    <div className="group my-3 flex flex-col gap-1" data-markdown="table-wrapper" ref={tableRef}>
       <div className={cn(
-        "flex items-center justify-end gap-1 transition-opacity",
+        "flex items-center justify-end gap-0.5 transition-opacity",
         alwaysShowActions ? "opacity-100" : "opacity-0 group-hover:opacity-100"
       )}>
         <TableCopyButton tableRef={tableRef} />
         <TableDownloadButton tableRef={tableRef} />
       </div>
-      <div className="overflow-x-auto rounded-lg border border-border/80 bg-[var(--surface-elevated)]">
+      <div className="overflow-x-auto rounded-lg border border-border/70 bg-[var(--surface-elevated)]">
         <table className={cn('w-full border-collapse text-sm', className)} data-markdown="table">
           {children}
         </table>
@@ -379,6 +380,12 @@ const MermaidBlock: React.FC<{ source: string; mode: 'svg' | 'ascii' }> = ({ sou
   const { isMobile, isTablet } = useDeviceInfo();
   const [copied, setCopied] = React.useState(false);
   const [downloaded, setDownloaded] = React.useState(false);
+
+  React.useEffect(() => {
+    if (mode === 'ascii') {
+      void loadCjkMonoFont();
+    }
+  }, [mode]);
 
   const svg = React.useMemo(() => {
     if (mode !== 'svg') return '';
@@ -734,6 +741,7 @@ const normalizeCodeBlockText = (code: string, language: string): string => {
 const CODE_HIGHLIGHT_SETTLE_MS = 300;
 const CODE_HIGHLIGHT_LINE_LIMIT = 1200;
 const VSCODE_CODE_HIGHLIGHT_LINE_LIMIT = 200;
+const MARKDOWN_RENDERER_VERSION = 'terminal-cells-debug-v2';
 const exceedsLineLimit = (value: string, limit: number): boolean => {
   let lineCount = 1;
   for (let index = 0; index < value.length; index += 1) {
@@ -749,6 +757,104 @@ const exceedsLineLimit = (value: string, limit: number): boolean => {
 
 const getCodeHighlightLineLimit = (): number => (
   isVSCodeRuntime() ? VSCODE_CODE_HIGHLIGHT_LINE_LIMIT : CODE_HIGHLIGHT_LINE_LIMIT
+);
+
+const BLOCK_CODE_MARKER_PATTERN = /```|~~~|<pre\b/i;
+
+const useCjkMonoFontForBlockCode = (content: string) => {
+  const hasBlockCode = React.useMemo(() => BLOCK_CODE_MARKER_PATTERN.test(content), [content]);
+
+  React.useEffect(() => {
+    if (!hasBlockCode) {
+      return;
+    }
+
+    void loadCjkMonoFont();
+  }, [hasBlockCode]);
+};
+
+const EMOJI_PRESENTATION_PATTERN = /\p{Emoji_Presentation}/u;
+const COMBINING_MARK_PATTERN = /^\p{Mark}+$/u;
+const TERMINAL_CELL_RENDER_LIMIT = 20000;
+
+type GraphemeSegmenter = {
+  segment(value: string): Iterable<{ segment: string }>;
+};
+
+const getGraphemeSegments = (value: string): string[] => {
+  const segmenterCtor = (Intl as typeof Intl & {
+    Segmenter?: new (locale: string | undefined, options: { granularity: 'grapheme' }) => GraphemeSegmenter;
+  }).Segmenter;
+
+  if (segmenterCtor) {
+    return Array.from(new segmenterCtor(undefined, { granularity: 'grapheme' }).segment(value), (part) => part.segment);
+  }
+
+  return Array.from(value);
+};
+
+const isWideEmojiSegment = (segment: string): boolean => EMOJI_PRESENTATION_PATTERN.test(segment);
+
+const isWideCodePoint = (codePoint: number): boolean => (
+  (codePoint >= 0x1100 && codePoint <= 0x115f) ||
+  codePoint === 0x2329 ||
+  codePoint === 0x232a ||
+  (codePoint >= 0x2460 && codePoint <= 0x24ff) ||
+  (codePoint >= 0x2e80 && codePoint <= 0xa4cf) ||
+  (codePoint >= 0xac00 && codePoint <= 0xd7a3) ||
+  (codePoint >= 0xf900 && codePoint <= 0xfaff) ||
+  (codePoint >= 0xfe10 && codePoint <= 0xfe19) ||
+  (codePoint >= 0xfe30 && codePoint <= 0xfe6f) ||
+  (codePoint >= 0xff00 && codePoint <= 0xff60) ||
+  (codePoint >= 0xffe0 && codePoint <= 0xffe6) ||
+  (codePoint >= 0x1f300 && codePoint <= 0x1faff)
+);
+
+const getTerminalCellWidth = (segment: string): 0 | 1 | 2 => {
+  if (!segment) return 0;
+  if (isWideEmojiSegment(segment)) return 2;
+  if (COMBINING_MARK_PATTERN.test(segment)) return 0;
+
+  const codePoint = segment.codePointAt(0);
+  if (codePoint === undefined) return 0;
+  if (codePoint === 0 || codePoint < 32 || (codePoint >= 0x7f && codePoint < 0xa0)) return 0;
+  return isWideCodePoint(codePoint) ? 2 : 1;
+};
+
+const renderMonospaceTextCode = (value: string): React.ReactNode[] => {
+  const segments = getGraphemeSegments(value);
+  if (segments.length > TERMINAL_CELL_RENDER_LIMIT) {
+    return [value];
+  }
+
+  const nodes: React.ReactNode[] = [];
+
+  segments.forEach((segment, index) => {
+    if (segment === '\n') {
+      nodes.push(segment);
+      return;
+    }
+
+    const width = getTerminalCellWidth(segment);
+    const emoji = isWideEmojiSegment(segment);
+    nodes.push(
+      <span
+        key={`cell-${index}`}
+        data-openchamber-code-cell={width}
+        data-openchamber-code-renderer="terminal-cell"
+      >
+        {emoji ? (
+          <span data-openchamber-code-wide-emoji="true">{segment}</span>
+        ) : segment}
+      </span>
+    );
+  });
+
+  return nodes;
+};
+
+const shouldRenderCodeAsPlainText = (language: string): boolean => (
+  language === 'text' || language === 'txt' || language === 'plain' || language === 'plaintext'
 );
 
 const downloadTextFile = (content: string, filename: string, mimeType: string) => {
@@ -785,6 +891,11 @@ const MarkdownCodeBlock: React.FC<{
   const skipHighlight = exceedsLineLimit(code, getCodeHighlightLineLimit());
 
   const canPreview = language === 'html' || language === 'htm';
+  const renderAsPlainText = shouldRenderCodeAsPlainText(language);
+
+  React.useEffect(() => {
+    void loadCjkMonoFont();
+  }, []);
 
   React.useEffect(() => {
     if (!canPreview && viewMode !== 'code') {
@@ -830,9 +941,9 @@ const MarkdownCodeBlock: React.FC<{
   }, [canPreview, code]);
 
   return (
-    <div data-component="markdown-code" className="my-4 group overflow-hidden rounded-2xl border border-border/80 bg-[var(--surface-elevated)]">
-      <div className="flex items-center justify-between border-b border-border/70 px-3 py-1.5">
-        <span className="font-mono text-[13px] text-muted-foreground">{language}</span>
+    <div data-component="markdown-code" className="my-3 group overflow-hidden rounded-lg border border-border/70 bg-[var(--surface-elevated)]">
+      <div className="flex items-center justify-between border-b border-border/60 px-2.5 py-1">
+        <span className="font-mono text-[12px] text-muted-foreground">{language}</span>
         <div className={cn(
           "flex items-center gap-1 transition-opacity",
           isMobile || isTablet ? "opacity-100" : "opacity-100 md:opacity-0 md:group-hover:opacity-100"
@@ -841,7 +952,7 @@ const MarkdownCodeBlock: React.FC<{
             <button
               type="button"
               onClick={() => setViewMode((mode) => (mode === 'preview' ? 'code' : 'preview'))}
-              className="p-1 rounded hover:bg-interactive-hover/60 text-muted-foreground hover:text-foreground transition-colors"
+              className="grid size-6 place-items-center rounded hover:bg-interactive-hover/60 text-muted-foreground hover:text-foreground transition-colors"
               title={viewMode === 'preview' ? 'Show code' : 'Preview'}
               aria-pressed={viewMode === 'preview'}
               aria-label={viewMode === 'preview' ? 'Show code' : 'Preview HTML'}
@@ -853,7 +964,7 @@ const MarkdownCodeBlock: React.FC<{
             <button
               type="button"
               onClick={handleDownload}
-              className="p-1 rounded hover:bg-interactive-hover/60 text-muted-foreground hover:text-foreground transition-colors"
+              className="grid size-6 place-items-center rounded hover:bg-interactive-hover/60 text-muted-foreground hover:text-foreground transition-colors"
               title="Download HTML"
               aria-label="Download HTML"
             >
@@ -863,7 +974,7 @@ const MarkdownCodeBlock: React.FC<{
           <button
             type="button"
             onClick={() => { void handleCopy(); }}
-            className="p-1 rounded hover:bg-interactive-hover/60 text-muted-foreground hover:text-foreground transition-colors"
+            className="grid size-6 place-items-center rounded hover:bg-interactive-hover/60 text-muted-foreground hover:text-foreground transition-colors"
             title={copied ? 'Copied' : 'Copy code'}
             aria-label={copied ? 'Copied' : 'Copy code'}
           >
@@ -882,7 +993,7 @@ const MarkdownCodeBlock: React.FC<{
         </div>
       ) : (
         <div data-component="markdown-code-body" className={MARKDOWN_CODE_BODY_CLASSNAME}>
-          {highlight && !skipHighlight ? (
+          {highlight && !skipHighlight && !renderAsPlainText ? (
             <SyntaxHighlighter
               language={language}
               style={syntaxTheme}
@@ -893,8 +1004,18 @@ const MarkdownCodeBlock: React.FC<{
               {code}
             </SyntaxHighlighter>
           ) : (
-            <pre style={CODE_SHARED_STYLE}>
-              <code style={CODE_SHARED_STYLE}>{code}</code>
+            <pre
+              style={CODE_SHARED_STYLE}
+              data-openchamber-code-renderer={renderAsPlainText ? 'terminal-cell' : 'plain'}
+              data-openchamber-code-language={language}
+            >
+              <code
+                style={CODE_SHARED_STYLE}
+                data-openchamber-code-renderer={renderAsPlainText ? 'terminal-cell' : 'plain'}
+                data-openchamber-code-language={language}
+              >
+                {renderAsPlainText ? renderMonospaceTextCode(code) : code}
+              </code>
             </pre>
           )}
         </div>
@@ -955,10 +1076,10 @@ const buildMarkdownComponents = ({
     return <tr {...props} className={cn('border-b border-border/60', props.className)}>{children}</tr>;
   },
   th({ children, ...props }) {
-    return <th {...props} className={cn('border-r border-border/60 px-4 py-2.5 text-left align-middle font-semibold text-foreground last:border-r-0', props.className)}>{children}</th>;
+    return <th {...props} className={cn('border-r border-border/60 px-3 py-2 text-left align-middle font-semibold text-foreground last:border-r-0', props.className)}>{children}</th>;
   },
   td({ children, ...props }) {
-    return <td {...props} className={cn('border-r border-border/60 px-4 py-2.5 align-middle text-foreground/90 last:border-r-0', props.className)}>{children}</td>;
+    return <td {...props} className={cn('border-r border-border/60 px-3 py-2 align-middle text-foreground/90 last:border-r-0', props.className)}>{children}</td>;
   },
   ul({ children, ...props }) {
     return <ul {...props} className={cn('typography-markdown-body my-2', props.className)}>{children}</ul>;
@@ -1868,6 +1989,7 @@ const MarkdownRendererImpl: React.FC<MarkdownRendererProps> = ({
   const currentTheme = useCurrentMermaidTheme();
   const { editor, runtime } = useRuntimeAPIs();
   const containerRef = React.useRef<HTMLDivElement>(null);
+  useCjkMonoFontForBlockCode(content);
   const effectiveDirectory = useMessageDirectory(sessionId);
   const fileReferenceBaseUrl = React.useMemo(
     () => resolveFileReferenceBaseUrl(sessionId, effectiveDirectory),
@@ -1911,7 +2033,7 @@ const MarkdownRendererImpl: React.FC<MarkdownRendererProps> = ({
     }),
     [syntaxTheme, effectiveDirectory, fileReferenceBaseUrl, fileReferencesEnabled, handlePreviewLoopback, onShowPopup, previewLabel, previewTitle],
   );
-  const componentKey = `markdown-${part?.id ? `part-${part.id}` : `message-${messageId}`}`;
+  const componentKey = `markdown-${MARKDOWN_RENDERER_VERSION}-${part?.id ? `part-${part.id}` : `message-${messageId}`}`;
   const markdownBlocks = useStableMarkdownBlocks(content, isStreaming && !disableStreamAnimation, componentKey);
 
   const markdownClassName = variant === 'tool'
@@ -1985,6 +2107,7 @@ const SimpleMarkdownRendererImpl: React.FC<{
   );
   const currentTheme = useCurrentMermaidTheme();
   const containerRef = React.useRef<HTMLDivElement>(null);
+  useCjkMonoFontForBlockCode(renderedContent);
   const effectiveDirectory = useMessageDirectory(sessionId);
   const fileReferenceBaseUrl = React.useMemo(
     () => resolveFileReferenceBaseUrl(sessionId, effectiveDirectory),
@@ -2021,7 +2144,7 @@ const SimpleMarkdownRendererImpl: React.FC<{
     }),
     [effectiveDirectory, enableFileReferences, fileReferenceBaseUrl, onShowPopup, syntaxTheme],
   );
-  const markdownBlocks = useStableMarkdownBlocks(renderedContent, false, `simple:${variant}`);
+  const markdownBlocks = useStableMarkdownBlocks(renderedContent, false, `simple:${MARKDOWN_RENDERER_VERSION}:${variant}`);
 
   const markdownClassName = variant === 'tool'
     ? 'markdown-content markdown-tool'

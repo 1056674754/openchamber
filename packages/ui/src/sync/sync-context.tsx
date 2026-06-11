@@ -171,7 +171,7 @@ export function useGlobalSessionStatus(sessionId: string): SessionStatus | undef
     useCallback((states) => findLiveSessionStatus(states, sessionId), [sessionId]),
   )
 
-  return globalStatus ?? liveStatus
+  return liveStatus ?? globalStatus
 }
 
 /** Read all session statuses (for sidebar) */
@@ -1589,7 +1589,12 @@ function handleEvent(
     case "session.updated":
     case "session.deleted":
       draft.session = [...current.session]
+      draft.message = { ...current.message }
+      draft.session_status = { ...(current.session_status ?? {}) }
+      draft.session_activity = { ...(current.session_activity ?? {}) }
+      draft.session_diff = { ...current.session_diff }
       draft.permission = { ...current.permission }
+      draft.question = { ...current.question }
       draft.todo = { ...current.todo }
       draft.part = { ...current.part }
       break
@@ -1600,6 +1605,7 @@ function handleEvent(
     case "session.idle":
     case "session.error":
       draft.session_status = { ...(current.session_status ?? {}) }
+      draft.session_activity = { ...(current.session_activity ?? {}) }
       break
     case "todo.updated":
       draft.todo = { ...current.todo }
@@ -1615,6 +1621,7 @@ function handleEvent(
     case "message.part.removed":
     case "message.part.delta":
       draft.part = { ...current.part }
+      draft.session_activity = { ...(current.session_activity ?? {}) }
       break
     case "vcs.branch.updated":
       break
@@ -1887,9 +1894,12 @@ export function SyncProvider(props: {
 
         if (!bootstrapped) {
           if (attempt < 5) {
-            console.warn(`[bootstrap] bootstrap failed for ${directory} after attempt ${attempt + 1}; retrying in 2s`)
+            const logRetry = attempt < 2 ? console.info : console.warn
+            logRetry(`[bootstrap] bootstrap failed for ${directory} after attempt ${attempt + 1}; retrying in 2s`)
             await new Promise((r) => setTimeout(r, 2000))
             await runBootstrap(attempt + 1)
+          } else {
+            console.error(`[bootstrap] bootstrap failed for ${directory} after ${attempt + 1} attempts; giving up`)
           }
           return
         }

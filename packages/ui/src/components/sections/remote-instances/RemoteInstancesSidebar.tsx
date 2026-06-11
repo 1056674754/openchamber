@@ -96,7 +96,6 @@ export const RemoteInstancesSidebar: React.FC<RemoteInstancesSidebarProps> = ({ 
   const desktopCreateFromCommand = useDesktopSshStore((state) => state.createFromCommand);
   const desktopConnect = useDesktopSshStore((state) => state.connect);
   const desktopDisconnect = useDesktopSshStore((state) => state.disconnect);
-  const desktopRetry = useDesktopSshStore((state) => state.retry);
   const desktopRemoveInstance = useDesktopSshStore((state) => state.removeInstance);
   const desktopUpsertInstance = useDesktopSshStore((state) => state.upsertInstance);
 
@@ -254,7 +253,6 @@ export const RemoteInstancesSidebar: React.FC<RemoteInstancesSidebarProps> = ({ 
             : (status?.localUrl || '');
           const metadata = `${statusLabel}${statusDetail ? ` · ${statusDetail}` : ''}`;
           const isReady = status?.phase === 'ready';
-          const canRetry = status?.phase === 'error' || status?.phase === 'degraded';
 
           return (
             <SettingsSidebarItem
@@ -282,18 +280,6 @@ export const RemoteInstancesSidebar: React.FC<RemoteInstancesSidebarProps> = ({ 
                         description: error instanceof Error ? error.message : String(error),
                         }
                       );
-                    });
-                  },
-                },
-                {
-                  label: t('settings.remoteInstances.sidebar.actions.retry'),
-                  icon: "refresh",
-                  onClick: () => {
-                    if (!canRetry) return;
-                    void desktopRetry(sshInstance.id).catch((error) => {
-                      toast.error(t('settings.remoteInstances.sidebar.toast.retryFailed'), {
-                        description: error instanceof Error ? error.message : String(error),
-                      });
                     });
                   },
                 },
