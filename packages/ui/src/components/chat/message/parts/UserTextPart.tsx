@@ -7,6 +7,7 @@ import { useUIStore } from '@/stores/useUIStore';
 import { useSkillsStore } from '@/stores/useSkillsStore';
 import { Icon } from "@/components/icon/Icon";
 import { useMessageDirectory } from '@/hooks/useMessageDirectory';
+import { useI18n } from '@/lib/i18n';
 
 const OMA_SEPARATOR = '\n\n---\n\n';
 
@@ -100,9 +101,11 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, sessionId, messageId,
     const [isExpanded, setIsExpanded] = React.useState(false);
     const [isTruncated, setIsTruncated] = React.useState(false);
     const userMessageRenderingMode = useUIStore((state) => state.userMessageRenderingMode);
+    const collapsibleUserMessages = useUIStore((state) => state.collapsibleUserMessages);
     const skills = useSkillsStore((state) => state.skills);
     const openContextFile = useUIStore((state) => state.openContextFile);
     const effectiveDirectory = useMessageDirectory(sessionId);
+    const { t } = useI18n();
     const normalizedRenderingMode = normalizeUserMessageRenderingMode(userMessageRenderingMode);
     const textRef = React.useRef<HTMLDivElement>(null);
     const skillByName = React.useMemo(() => new Map(skills.map((skill) => [skill.name, skill])), [skills]);
@@ -132,7 +135,7 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, sessionId, messageId,
         if (!el) return;
 
         const checkTruncation = () => {
-            if (!isExpanded) {
+            if (collapsibleUserMessages && !isExpanded) {
                 setIsTruncated(el.scrollHeight > el.clientHeight);
             }
         };
@@ -143,7 +146,14 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, sessionId, messageId,
         resizeObserver.observe(el);
 
         return () => resizeObserver.disconnect();
-    }, [displayContent, isExpanded]);
+    }, [collapsibleUserMessages, displayContent, isExpanded]);
+
+    React.useEffect(() => {
+        if (!collapsibleUserMessages) {
+            setIsExpanded(false);
+            setIsTruncated(false);
+        }
+    }, [collapsibleUserMessages]);
 
     const handleClick = React.useCallback((event: React.MouseEvent<HTMLDivElement>) => {
         const target = event.target as HTMLElement | null;
@@ -166,10 +176,10 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, sessionId, messageId,
             return;
         }
 
-        if (!isExpanded && isTruncated) {
+        if (collapsibleUserMessages && !isExpanded && isTruncated) {
             setIsExpanded(true);
         }
-    }, [hasActiveSelectionInElement, isExpanded, isTruncated, openSkill]);
+    }, [collapsibleUserMessages, hasActiveSelectionInElement, isExpanded, isTruncated, openSkill]);
 
     const handleCollapse = React.useCallback((event: React.MouseEvent) => {
         event.stopPropagation();
@@ -289,12 +299,12 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, sessionId, messageId,
                     )}
                 </div>
             )}
-            {isExpanded && (
+            {collapsibleUserMessages && isExpanded && (
                 <button
                     type="button"
                     onClick={handleCollapse}
                     className="absolute top-0 right-0 z-10 flex items-center justify-center rounded-sm bg-[var(--surface-elevated)] p-0.5 text-[var(--surface-mutedForeground)] hover:text-[var(--surface-foreground)] hover:bg-[var(--interactive-hover)] transition-colors"
-                    aria-label="Collapse"
+                    aria-label={t('chat.message.userText.collapseAria')}
                 >
                     <Icon name="arrow-up-s" className="h-3.5 w-3.5" />
                 </button>
@@ -304,8 +314,8 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, sessionId, messageId,
                     "break-words font-sans typography-markdown-body",
                     isExpanded && "pb-3",
                     normalizedRenderingMode === 'plain' && 'whitespace-pre-wrap',
-                    !isExpanded && "line-clamp-2",
-                    isTruncated && !isExpanded && "cursor-pointer"
+                    collapsibleUserMessages && !isExpanded && "line-clamp-2",
+                    collapsibleUserMessages && isTruncated && !isExpanded && "cursor-pointer"
                 )}
                 ref={textRef}
                 onClick={handleClick}

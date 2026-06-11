@@ -234,7 +234,7 @@ const normalizeUserMessageRenderingMode = (mode: unknown): 'markdown' | 'plain' 
     return mode === 'markdown' ? 'markdown' : 'plain';
 };
 
-export type VisibleSetting = 'theme' | 'pwaInstallName' | 'pwaOrientation' | 'mobileKeyboardMode' | 'timeFormat' | 'weekStart' | 'fontSize' | 'terminalFontSize' | 'spacing' | 'inputBarOffset' | 'mermaidRendering' | 'userMessageRendering' | 'chatRenderMode' | 'messageTransport' | 'activityRenderMode' | 'stickyUserHeader' | 'wideChatLayout' | 'splitAssistantMessageActions' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'reasoning' | 'showToolFileIcons' | 'expandedTools' | 'queueMode' | 'terminalQuickKeys' | 'persistDraft' | 'inputSpellcheck' | 'reportUsage' | 'multiRun';
+export type VisibleSetting = 'theme' | 'pwaInstallName' | 'pwaOrientation' | 'mobileKeyboardMode' | 'timeFormat' | 'weekStart' | 'fontSize' | 'terminalFontSize' | 'spacing' | 'inputBarOffset' | 'mermaidRendering' | 'userMessageRendering' | 'chatRenderMode' | 'messageTransport' | 'activityRenderMode' | 'collapsibleUserMessages' | 'stickyUserHeader' | 'wideChatLayout' | 'splitAssistantMessageActions' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'reasoning' | 'showToolFileIcons' | 'expandedTools' | 'queueMode' | 'terminalQuickKeys' | 'persistDraft' | 'inputSpellcheck' | 'reportUsage' | 'multiRun';
 
 interface OpenChamberVisualSettingsProps {
     /** Which settings to show. If undefined, shows all. */
@@ -260,6 +260,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const setMermaidRenderingMode = useUIStore(state => state.setMermaidRenderingMode);
     const userMessageRenderingMode = useUIStore(state => state.userMessageRenderingMode);
     const setUserMessageRenderingMode = useUIStore(state => state.setUserMessageRenderingMode);
+    const collapsibleUserMessages = useUIStore(state => state.collapsibleUserMessages);
+    const setCollapsibleUserMessages = useUIStore(state => state.setCollapsibleUserMessages);
     const stickyUserHeader = useUIStore(state => state.stickyUserHeader);
     const setStickyUserHeader = useUIStore(state => state.setStickyUserHeader);
     const wideChatLayoutEnabled = useUIStore(state => state.wideChatLayoutEnabled);
@@ -392,6 +394,11 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         setUserMessageRenderingMode(mode);
         void updateDesktopSettings({ userMessageRenderingMode: mode });
     }, [setUserMessageRenderingMode]);
+
+    const handleCollapsibleUserMessagesChange = React.useCallback((enabled: boolean) => {
+        setCollapsibleUserMessages(enabled);
+        void updateDesktopSettings({ collapsibleUserMessages: enabled });
+    }, [setCollapsibleUserMessages]);
 
     const handleStickyUserHeaderChange = React.useCallback((enabled: boolean) => {
         setStickyUserHeader(enabled);
@@ -1546,7 +1553,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                 </div>
                             )}
 
-                            {(shouldShow('stickyUserHeader') || shouldShow('wideChatLayout') || shouldShow('splitAssistantMessageActions') || (shouldShow('mobileStatusBar') && isMobile) || shouldShow('dotfiles') || shouldShow('queueMode') || shouldShow('persistDraft') || shouldShow('showToolFileIcons') || (!isMobile && shouldShow('inputSpellcheck')) || shouldShow('reasoning') || shouldShow('multiRun')) && (
+                            {(shouldShow('collapsibleUserMessages') || shouldShow('stickyUserHeader') || shouldShow('wideChatLayout') || shouldShow('splitAssistantMessageActions') || (shouldShow('mobileStatusBar') && isMobile) || shouldShow('dotfiles') || shouldShow('queueMode') || shouldShow('persistDraft') || shouldShow('showToolFileIcons') || (!isMobile && shouldShow('inputSpellcheck')) || shouldShow('reasoning') || shouldShow('multiRun')) && (
                                 <section className="p-2 space-y-0.5">
                                     {shouldShow('reasoning') && (
                                         <div
@@ -1634,6 +1641,29 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                 className="w-20 rounded-md border border-border/60 bg-transparent px-2 py-0.5 typography-micro text-foreground text-center focus:outline-none focus:ring-1 focus:ring-ring"
                                             />
                                             <span className="typography-micro text-muted-foreground">{t('settings.openchamber.visual.field.autoCollapseThinkingThresholdUnit')}</span>
+                                        </div>
+                                    )}
+
+                                    {shouldShow('collapsibleUserMessages') && (
+                                        <div
+                                            className="group flex cursor-pointer items-center gap-2 py-0.5"
+                                            role="button"
+                                            tabIndex={0}
+                                            aria-pressed={collapsibleUserMessages}
+                                            onClick={() => handleCollapsibleUserMessagesChange(!collapsibleUserMessages)}
+                                            onKeyDown={(event) => {
+                                                if (event.key === ' ' || event.key === 'Enter') {
+                                                    event.preventDefault();
+                                                    handleCollapsibleUserMessagesChange(!collapsibleUserMessages);
+                                                }
+                                            }}
+                                        >
+                                            <Checkbox
+                                                checked={collapsibleUserMessages}
+                                                onChange={handleCollapsibleUserMessagesChange}
+                                                ariaLabel={t('settings.openchamber.visual.field.collapsibleUserMessagesAria')}
+                                            />
+                                            <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.collapsibleUserMessages')}</span>
                                         </div>
                                     )}
 

@@ -142,6 +142,7 @@ export type DesktopSettings = {
   sessionGroupRecentHours?: number;
   mermaidRenderingMode?: 'svg' | 'ascii';
   userMessageRenderingMode?: 'markdown' | 'plain';
+  collapsibleUserMessages?: boolean;
   stickyUserHeader?: boolean;
   wideChatLayoutEnabled?: boolean;
   showSplitAssistantMessageActions?: boolean;

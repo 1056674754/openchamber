@@ -650,6 +650,7 @@ interface UIStore {
   weekStartPreference: WeekStartPreference;
   mermaidRenderingMode: MermaidRenderingMode;
   userMessageRenderingMode: UserMessageRenderingMode;
+  collapsibleUserMessages: boolean;
   stickyUserHeader: boolean;
   showSplitAssistantMessageActions: boolean;
   showMobileSessionStatusBar: boolean;
@@ -790,6 +791,7 @@ setSettingsRemoteInstancesSelectedId: (instanceId: string | null) => void;
   setWeekStartPreference: (value: WeekStartPreference) => void;
   setMermaidRenderingMode: (value: MermaidRenderingMode) => void;
   setUserMessageRenderingMode: (value: UserMessageRenderingMode) => void;
+  setCollapsibleUserMessages: (value: boolean) => void;
   setStickyUserHeader: (value: boolean) => void;
   setShowSplitAssistantMessageActions: (value: boolean) => void;
   setShowMobileSessionStatusBar: (value: boolean) => void;
@@ -924,6 +926,7 @@ export const useUIStore = create<UIStore>()(
         weekStartPreference: 'auto',
         mermaidRenderingMode: 'svg',
         userMessageRenderingMode: 'markdown',
+        collapsibleUserMessages: true,
         stickyUserHeader: false,
         showSplitAssistantMessageActions: false,
         showMobileSessionStatusBar: true,
@@ -2006,6 +2009,9 @@ export const useUIStore = create<UIStore>()(
         setUserMessageRenderingMode: (value) => {
           set({ userMessageRenderingMode: value });
         },
+        setCollapsibleUserMessages: (value) => {
+          set({ collapsibleUserMessages: value });
+        },
         setStickyUserHeader: (value) => {
           set({ stickyUserHeader: value });
         },
@@ -2237,6 +2243,7 @@ export const useUIStore = create<UIStore>()(
           weekStartPreference: state.weekStartPreference,
           mermaidRenderingMode: state.mermaidRenderingMode,
           userMessageRenderingMode: state.userMessageRenderingMode,
+          collapsibleUserMessages: state.collapsibleUserMessages,
           stickyUserHeader: state.stickyUserHeader,
           showSplitAssistantMessageActions: state.showSplitAssistantMessageActions,
           showMobileSessionStatusBar: state.showMobileSessionStatusBar,
