@@ -34,6 +34,7 @@ import { useProjectsStore } from '@/stores/useProjectsStore';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { getDirectoryForFilePath } from '@/lib/path-utils';
 import { CODE_SHARED_STYLE, MARKDOWN_CODE_BODY_CLASSNAME } from './markdownCodeStyle';
+import { getTableCopyContent, tableToCSV, tableToMarkdown, type TableCopyFormat, type TableData } from './markdownTableExport';
 import {
   getFileNameFromPath,
   getResolvedReference,
@@ -135,7 +136,7 @@ const ExternalLinkFavicon: React.FC<{ href: string }> = ({ href }) => {
 };
 
 // Table utility functions
-const extractTableData = (tableEl: HTMLTableElement): { headers: string[]; rows: string[][] } => {
+const extractTableData = (tableEl: HTMLTableElement): TableData => {
   const headers: string[] = [];
   const rows: string[][] = [];
   
@@ -157,52 +158,6 @@ const extractTableData = (tableEl: HTMLTableElement): { headers: string[]; rows:
   }
   
   return { headers, rows };
-};
-
-const tableToCSV = ({ headers, rows }: { headers: string[]; rows: string[][] }): string => {
-  const escapeCell = (cell: string): string => {
-    if (cell.includes(',') || cell.includes('"') || cell.includes('\n')) {
-      return `"${cell.replace(/"/g, '""')}"`;
-    }
-    return cell;
-  };
-  
-  const lines: string[] = [];
-  if (headers.length > 0) {
-    lines.push(headers.map(escapeCell).join(','));
-  }
-  rows.forEach(row => lines.push(row.map(escapeCell).join(',')));
-  return lines.join('\n');
-};
-
-const tableToTSV = ({ headers, rows }: { headers: string[]; rows: string[][] }): string => {
-  const escapeCell = (cell: string): string => {
-    return cell.replace(/\t/g, '\\t').replace(/\n/g, '\\n').replace(/\r/g, '\\r');
-  };
-  
-  const lines: string[] = [];
-  if (headers.length > 0) {
-    lines.push(headers.map(escapeCell).join('\t'));
-  }
-  rows.forEach(row => lines.push(row.map(escapeCell).join('\t')));
-  return lines.join('\n');
-};
-
-const tableToMarkdown = ({ headers, rows }: { headers: string[]; rows: string[][] }): string => {
-  if (headers.length === 0) return '';
-  
-  const escapeCell = (cell: string): string => {
-    return cell.replace(/\\/g, '\\\\').replace(/\|/g, '\\|');
-  };
-  
-  const lines: string[] = [];
-  lines.push(`| ${headers.map(escapeCell).join(' | ')} |`);
-  lines.push(`| ${headers.map(() => '---').join(' | ')} |`);
-  rows.forEach(row => {
-    const paddedRow = headers.map((_, i) => escapeCell(row[i] || ''));
-    lines.push(`| ${paddedRow.join(' | ')} |`);
-  });
-  return lines.join('\n');
 };
 
 const downloadFile = (filename: string, content: string, mimeType: string) => {
@@ -234,12 +189,12 @@ const TableCopyButton: React.FC<{ tableRef: React.RefObject<HTMLDivElement | nul
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const handleCopy = async (format: 'csv' | 'tsv') => {
+  const handleCopy = async (format: TableCopyFormat) => {
     const tableEl = tableRef.current?.querySelector('table');
     if (!tableEl) return;
     
     const data = extractTableData(tableEl);
-    const content = format === 'csv' ? tableToCSV(data) : tableToTSV(data);
+    const content = getTableCopyContent(data, format);
 
     try {
       await navigator.clipboard.write([
@@ -285,6 +240,12 @@ const TableCopyButton: React.FC<{ tableRef: React.RefObject<HTMLDivElement | nul
             onClick={() => handleCopy('tsv')}
           >
             TSV
+          </button>
+          <button
+            className="w-full px-3 py-1.5 text-left text-sm transition-colors hover:bg-interactive-hover/40"
+            onClick={() => handleCopy('markdown')}
+          >
+            Markdown
           </button>
         </div>
       )}
