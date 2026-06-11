@@ -258,7 +258,7 @@
 **上游 release**: [OpenChamber v1.12.4](https://github.com/openchamber/openchamber/releases) / tag `v1.12.4` (`4a263c1`)
 **发布日期**: 2026-06-11
 **范围**: v1.12.3 (`cafbff47`) → v1.12.4 (`4a263c1`)
-**当前状态**: 只完成 release-note feature inventory + 本地 `rg` 初查；尚未逐 commit / file diff。后续仍需按官方实际提交逐项比对，不能整批套 patch。
+**当前状态**: 已完成 release-note feature inventory + 本地 `rg` 初查；Multi-Run hidden models 和 table Markdown copy 已单独移植。其余项尚未逐 commit / file diff。后续仍需按官方实际提交逐项比对，不能整批套 patch。
 
 ### 状态校准 (2026-06-11)
 
@@ -267,9 +267,9 @@
 | Chat | `/handoff-review` linked review session | 🟡 部分相近：本地已有 `/workspace-review` magic prompt，但只是当前 workspace review，没有 linked review session，也没有 feedback/reply 双向动作 | 高风险手工移植。需要先看官方会话关联数据结构，再映射到本 fork 的 multi-remote / serverId / directory context |
 | Chat/UI | Collapse long user messages setting | 🔴 未实现。现有 collapse 命中主要是 tool/activity/folder，不是长 user message 设置 | 可独立做，优先级中；注意不要让 MessageList/TurnItem 热路径多订阅大 store |
 | Chat | Rendered `@agent` mentions use primary accent | ✅ 基本覆盖：`UserTextPart` 已将 agent mention link 渲染为 `text-primary` | 低风险核对即可；后续可确认是否要改成更明确的 primary accent token |
-| Chat | Table copy action adds Markdown format | 🔴 未实现。Markdown table 目前有 copy/download 动作，但没有 Markdown format 选项 | 低风险 UX；可先做并加 i18n key |
+| Chat | Table copy action adds Markdown format | ✅ 已落地：copy dropdown 新增 Markdown 选项；表格导出逻辑抽到 `markdownTableExport.ts` 并加测试 | 已完成，后续只需和官方实现复核文案/i18n 是否一致 |
 | Chat | Mermaid diagram dedicated editor | 🟡 部分较强：本地已有 Mermaid render/preview dialog/zoom/copy/source 相关逻辑，但未看到 dedicated editor | 需看官方 editor 的数据流；避免破坏现有 preview dialog |
-| Models | Hidden models stay hidden in multi-model controls | 🟡 部分：通用 `ModelPickerList` 支持 `hiddenModels`，chat/agents 已传入；`MultiRun` 的 `ModelMultiSelect` 未传 `hiddenModels` | 小修可先做；重点验证 Multi-Run/Fusion 两个入口 |
+| Models | Hidden models stay hidden in multi-model controls | ✅ 已落地：`useModelLists()` 暴露 `hiddenModels`，Multi-Run `ModelMultiSelect` 已传入 `ModelPickerList`，测试覆盖隐藏模型仍从 favorite/recent 排除 | 已完成，后续复核 Fusion/其它多模型入口即可 |
 | Worktrees | Single new worktree session opens immediately while setup continues | 🟡 部分：本地已有 pending draft worktree flow，但真实 session 仍在 worktree 创建后才完成 | 高风险。必须保留 `[OPENCHAMBER-FORK] ensureWorktreeProject` 和 remote project 注册 |
 | Multi-Run | Isolated runs open sessions immediately while setup continues | 🟡 部分：本地 waits worktree + session creation，只有 send message 阶段是 async fire-and-forget | 高风险。需重新设计 pending run/session 映射，不能丢 directory/serverId |
 | Sessions | Chat folder assignments persist after reload | ✅ 已覆盖：`useSessionFoldersStore` 同步 `oc.sessions.folders` / collapsed state，并有 server persistence | 只需用官方 diff 复核是否有边界修复 |
@@ -294,7 +294,7 @@
 
 ### 建议制作顺序
 
-1. **先确认/补小 UI**：`@agent` accent 校准、table Markdown copy、隐藏模型传入 Multi-Run、长 user message collapse、Settings search。
+1. **先确认/补小 UI**：`@agent` accent 校准、长 user message collapse、Settings search。
 2. **再做数据安全和保存类**：`/api/fs/write` tmp-file 写入、Agents prompt/permission 三类复测、session folders persistence 对齐。
 3. **Chat 高价值功能**：`/handoff-review`、Mermaid editor、Plan/File TTS。这里开始必须逐 commit 看官方实现。
 4. **Worktree / Multi-Run / Session tree**：immediate open session、isolated runs、完整右键菜单。必须保护本 fork 的 multi-remote、serverId、directory routing、pending draft worktree 逻辑。
