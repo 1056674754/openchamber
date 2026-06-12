@@ -97,6 +97,25 @@ describe('opencode routes', () => {
     expect(response.body).toEqual({ version: null, error: 'not ready' });
   });
 
+  test('does not restart managed OpenCode after an upstream upgrade succeeds', async () => {
+    const fetchMock = useFetchMock(mock(async () => jsonResponse({ success: true, version: '1.2.4' })));
+    const refreshOpenCodeAfterConfigChange = mock(async () => {});
+
+    const response = await request(createApp({ refreshOpenCodeAfterConfigChange }))
+      .post('/api/opencode/upgrade')
+      .send({})
+      .expect(200);
+
+    expect(response.body).toMatchObject({
+      success: true,
+      version: '1.2.4',
+      requiresReload: true,
+      restarted: false,
+    });
+    expect(fetchMock).toHaveBeenCalled();
+    expect(refreshOpenCodeAfterConfigChange).not.toHaveBeenCalled();
+  });
+
   test('falls back to direct OpenCode upgrade when upstream closes the connection', async () => {
     const fetchMock = useFetchMock(mock(async () => {
       throw new TypeError('fetch failed');
@@ -122,7 +141,8 @@ describe('opencode routes', () => {
     expect(response.body).toMatchObject({
       success: true,
       upgraded: true,
-      restarted: true,
+      requiresReload: true,
+      restarted: false,
       upgradeSource: 'direct',
       source: 'homebrew',
       command: 'brew upgrade opencode',
@@ -134,7 +154,7 @@ describe('opencode routes', () => {
     });
     expect(fetchMock).toHaveBeenCalled();
     expect(executeDirectOpenCodeUpgrade).toHaveBeenCalled();
-    expect(refreshOpenCodeAfterConfigChange).toHaveBeenCalledWith('OpenCode upgrade');
+    expect(refreshOpenCodeAfterConfigChange).not.toHaveBeenCalled();
   });
 
   test('returns direct upgrade diagnostics when the fallback command fails', async () => {

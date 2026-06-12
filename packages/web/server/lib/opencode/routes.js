@@ -153,10 +153,6 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
     return fallback;
   };
 
-  const restartAfterOpenCodeUpgrade = async () => {
-    await refreshOpenCodeAfterConfigChange('OpenCode upgrade');
-  };
-
   const runDirectOpenCodeUpgrade = async (upstream) => {
     const result = await executeDirectOpenCodeUpgrade({
       getOpenCodeResolutionSnapshot,
@@ -176,30 +172,13 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
       };
     }
 
-    try {
-      await restartAfterOpenCodeUpgrade();
-    } catch (restartError) {
-      return {
-        status: 500,
-        body: {
-          ...result,
-          success: false,
-          upgraded: true,
-          upgradeSource: 'direct',
-          error: restartError instanceof Error
-            ? `OpenCode upgraded, but restart failed: ${restartError.message}`
-            : 'OpenCode upgraded, but restart failed',
-          upstream,
-        },
-      };
-    }
-
     return {
       status: 200,
       body: {
         success: true,
         upgraded: true,
-        restarted: true,
+        requiresReload: true,
+        restarted: false,
         upgradeSource: 'direct',
         ...result,
         upstream,
@@ -270,19 +249,7 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
         });
       }
 
-      try {
-        await restartAfterOpenCodeUpgrade();
-      } catch (restartError) {
-        return res.status(500).json({
-          success: false,
-          upgraded: true,
-          error: restartError instanceof Error
-            ? `OpenCode upgraded, but restart failed: ${restartError.message}`
-            : 'OpenCode upgraded, but restart failed',
-        });
-      }
-
-      return res.json({ ...(payload ?? { success: true }), restarted: true });
+      return res.json({ ...(payload ?? { success: true }), requiresReload: true, restarted: false });
     } catch (error) {
       if (!target) {
         const fallback = await runDirectOpenCodeUpgrade({

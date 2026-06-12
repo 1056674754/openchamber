@@ -76,7 +76,7 @@ This module provides OpenCode server integration utilities for the web server ru
   - `GET /api/config/settings`
   - `PUT /api/config/settings`
   - `GET /api/config/opencode-resolution`
-  - `POST /api/opencode/upgrade` (proxies OpenCode upgrade, falls back to direct install-source upgrade when `/global/upgrade` fails without diagnostics, then restarts managed OpenCode so the new binary is active)
+  - `POST /api/opencode/upgrade` (proxies OpenCode upgrade, falls back to direct install-source upgrade when `/global/upgrade` fails without diagnostics, and returns `requiresReload` without restarting managed OpenCode)
   - `GET /api/opencode/upgrade-status`
   - `GET /api/opencode/health`
   - `GET /api/opencode/version`
