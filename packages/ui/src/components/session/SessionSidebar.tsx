@@ -2138,10 +2138,6 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
     const listener = (event: KeyboardEvent) => {
       if (event.key !== 'F2') return;
       if (isInlineEditing) return;
-      const target = event.target as HTMLElement | null;
-      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
-        return;
-      }
       if (!currentSessionId) return;
       event.preventDefault();
       setRenameSession({ id: currentSessionId, title: currentSessionTitleRef.current });
