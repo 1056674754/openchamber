@@ -20,9 +20,11 @@ import type { PluginInput } from "@opencode-ai/plugin"
 import { stat } from "node:fs/promises"
 import { basename, extname } from "node:path"
 import { log } from "../logger.js"
+import type { CacheDb } from "../cache/database.js"
 
 export type DescribeImageDeps = {
   client: PluginInput["client"]
+  cacheDb?: CacheDb
 }
 
 const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg", ".tiff", ".ico"])
@@ -122,6 +124,22 @@ export function createDescribeImageTool(deps: DescribeImageDeps) {
 
       const filename = basename(imagePath)
       const questionHint = question ? ` (Question: "${question}")` : ""
+
+      const hashFromFile = extname(filename) ? filename.slice(0, filename.lastIndexOf(".")) : filename
+      const priorAnalysis = deps.cacheDb?.getAnalysis(hashFromFile)?.result ?? null
+      if (priorAnalysis) {
+        log("[describe_image] cache hit — returning prior analysis", { hash: hashFromFile.slice(0, 16) })
+        return {
+          title: `describe_image: ${filename} (cached)`,
+          output: [
+            `Image: "${filename}" (${formatBytes(fileSize)})${questionHint}`,
+            ``,
+            `Cached analysis (from a previous session):`,
+            priorAnalysis,
+          ].join("\n"),
+          metadata: { path: imagePath, size: fileSize, hash: hashFromFile, cached: true },
+        }
+      }
 
       const visionTools = await getVisionTools()
 

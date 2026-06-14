@@ -12,6 +12,7 @@
 
 import type { ModelCapabilityChecker } from "./model-capability.js"
 import type { ImageStore, SavedImage } from "./image-store.js"
+import type { CacheDb } from "./cache/database.js"
 import { log } from "./logger.js"
 
 // -- Minimal Part shapes ----------------------------------------------------
@@ -67,19 +68,22 @@ function extractModelKey(info: MessageWithParts["info"]): { providerID: string; 
   return { providerID, modelID }
 }
 
-function buildReplacementText(saved: SavedImage, part: FileLikePart): string {
+function buildReplacementText(saved: SavedImage, part: FileLikePart, priorAnalysis?: string | null): string {
   const filename = saved.originalFilename ?? part.filename ?? "image"
   const mime = saved.mime
   const path = saved.filePath
   const hash = saved.hash.slice(0, 12)
+  const analysisHint = priorAnalysis
+    ? `\nA previous analysis of this image exists: ${priorAnalysis.slice(0, 200)}${priorAnalysis.length > 200 ? "..." : ""}\n`
+    : ""
   return [
     `[Image attachment: "${filename}" (${mime})]`,
     `The current model does not support direct image input.`,
     `The image has been saved to: ${path}`,
     `Content hash: ${hash}`,
-    ``,
+    analysisHint,
     `To analyze this image, call the describe_image tool with path="${path}".`,
-  ].join("\n")
+  ].filter(Boolean).join("\n")
 }
 
 function buildAlreadyOnDiskText(part: FileLikePart): string {
@@ -108,6 +112,7 @@ function isFileUrl(url: unknown): url is string {
 export type ImageTransformDeps = {
   modelSupportsImage: ModelCapabilityChecker
   imageStore: ImageStore
+  cacheDb?: CacheDb
 }
 
 export function createImageTransformHandler(deps: ImageTransformDeps) {
@@ -144,9 +149,12 @@ export function createImageTransformHandler(deps: ImageTransformDeps) {
           let replacementText: string
 
           if (isDataUrl(url)) {
-            // Decode + save to disk.
             const saved = await deps.imageStore.saveFromDataUrl(url, part.filename)
-            replacementText = buildReplacementText(saved, part)
+            const priorAnalysis = deps.cacheDb?.getAnalysis(saved.hash)?.result ?? null
+            if (priorAnalysis) {
+              log("[image-transform] dedup hit — prior analysis found", { hash: saved.hash.slice(0, 12) })
+            }
+            replacementText = buildReplacementText(saved, part, priorAnalysis)
           } else if (isFileUrl(url)) {
             // Already on disk (e.g. @-mention of a workspace file) — just reference it.
             replacementText = buildAlreadyOnDiskText(part)

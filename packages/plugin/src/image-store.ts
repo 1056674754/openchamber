@@ -21,6 +21,8 @@ import { homedir, platform } from "node:os"
 import { join } from "node:path"
 
 import { log } from "./logger.js"
+import { computePHash } from "./cache/phash.js"
+import type { CacheDb } from "./cache/database.js"
 
 const MIME_TO_EXT: Record<string, string> = {
   "image/png": "png",
@@ -45,13 +47,13 @@ export type SavedImage = {
 }
 
 export type ImageStore = {
-  /**
-   * Save an image from a data URL to disk.
-   * If the image already exists (same hash), returns the existing path without rewriting.
-   */
   saveFromDataUrl(dataUrl: string, filename?: string): Promise<SavedImage>
-  /** Get the absolute path to the image storage directory */
   getDirectory(): string
+}
+
+export type ImageStoreDeps = {
+  cacheDb?: CacheDb
+  sessionId?: string
 }
 
 function resolveImageDirectory(): string {
@@ -90,7 +92,7 @@ function mimeToExtension(mime: string): string {
  * Create an image store rooted at the platform-appropriate data directory.
  * The directory is created on first save, not at construction.
  */
-export function createImageStore(): ImageStore {
+export function createImageStore(deps?: ImageStoreDeps): ImageStore {
   const directory = resolveImageDirectory()
   let dirEnsured = false
 
@@ -117,23 +119,38 @@ export function createImageStore(): ImageStore {
 
       await ensureDirectory()
 
-      // Content-addressed: if the file already exists, skip the write.
-      // We don't check existence before writing because writing the same
-      // content is idempotent and avoids a stat round-trip.
       try {
         await writeFile(fullPath, buffer, { flag: "wx" })
         log("[image-store] saved", { hash, mime, bytes: buffer.length, path: fullPath })
       } catch (error: unknown) {
-        // EEXIST means the file already exists — that's fine, it's the same content.
         if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error
       }
 
-      return {
+      const saved: SavedImage = {
         filePath: fullPath,
         hash,
         originalFilename: filename,
         mime,
       }
+
+      if (deps?.cacheDb) {
+        const phash = computePHash()
+        deps.cacheDb.upsertImage({
+          sha256: hash,
+          phash,
+          file_path: fullPath,
+          original_filename: filename ?? null,
+          mime,
+          width: null,
+          height: null,
+          size_bytes: buffer.length,
+        })
+        if (deps.sessionId) {
+          deps.cacheDb.linkSession(hash, deps.sessionId)
+        }
+      }
+
+      return saved
     },
   }
 }

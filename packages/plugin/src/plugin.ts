@@ -12,33 +12,49 @@ import type { Plugin, PluginInput, Hooks } from "@opencode-ai/plugin"
 import { createImageTransformHandler } from "./image-transform.js"
 import { createSystemTransformHandler } from "./system-transform.js"
 import { createDescribeImageTool } from "./tools/describe-image.js"
+import { createSearchImagesTool } from "./tools/search-images.js"
 import { createModelCapabilityChecker } from "./model-capability.js"
 import { createImageStore } from "./image-store.js"
+import { openCacheDb, type CacheDb } from "./cache/database.js"
+import { log } from "./logger.js"
 
 export function createPlugin(input: PluginInput): Promise<Hooks> {
   const modelSupportsImage = createModelCapabilityChecker(input.client)
-  const imageStore = createImageStore()
+
+  let cacheDb: CacheDb | undefined
+  try {
+    cacheDb = openCacheDb()
+    log("[cache] opened openchamber.db")
+  } catch (error) {
+    log("[cache] failed to open, running without cache", { error: String(error) })
+  }
+
+  const imageStore = createImageStore({ cacheDb })
 
   const imageTransform = createImageTransformHandler({
     modelSupportsImage,
     imageStore,
+    cacheDb,
   })
 
   const systemTransform = createSystemTransformHandler()
 
-  const describeImage = createDescribeImageTool({ client: input.client })
+  const describeImage = createDescribeImageTool({ client: input.client, cacheDb })
+  const searchImages = createSearchImagesTool({ cacheDb })
 
   const hooks: Hooks = {
     "experimental.chat.messages.transform": imageTransform,
     "experimental.chat.system.transform": systemTransform,
     tool: {
       describe_image: describeImage,
+      search_images: searchImages,
     },
-    dispose: async () => {},
+    dispose: async () => {
+      cacheDb?.close()
+    },
   }
 
   return Promise.resolve(hooks)
 }
 
-// Re-export the Plugin type for external consumers.
 export type { Plugin, PluginInput }
