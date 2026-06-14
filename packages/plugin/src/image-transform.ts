@@ -68,20 +68,33 @@ function extractModelKey(info: MessageWithParts["info"]): { providerID: string; 
   return { providerID, modelID }
 }
 
-function buildReplacementText(saved: SavedImage, part: FileLikePart, priorAnalysis?: string | null): string {
+function buildReplacementText(
+  saved: SavedImage,
+  part: FileLikePart,
+  priorAnalyses?: Array<{ goal: string | null; result: string; backend: string }> | null,
+): string {
   const filename = saved.originalFilename ?? part.filename ?? "image"
   const mime = saved.mime
   const path = saved.filePath
   const hash = saved.hash.slice(0, 12)
-  const analysisHint = priorAnalysis
-    ? `\nA previous analysis of this image exists: ${priorAnalysis.slice(0, 200)}${priorAnalysis.length > 200 ? "..." : ""}\n`
+
+  const analysisSection = priorAnalyses && priorAnalyses.length > 0
+    ? [
+        ``,
+        `Prior analyses available for this image:`,
+        ...priorAnalyses.map((a, i) =>
+          `  ${i + 1}. ${a.goal ? `[${a.goal}]` : "[general]"}: ${a.result.slice(0, 300)}${a.result.length > 300 ? "..." : ""}`,
+        ),
+        ``,
+      ].join("\n")
     : ""
+
   return [
     `[Image attachment: "${filename}" (${mime})]`,
     `The current model does not support direct image input.`,
     `The image has been saved to: ${path}`,
     `Content hash: ${hash}`,
-    analysisHint,
+    analysisSection,
     `To analyze this image, call the describe_image tool with path="${path}".`,
   ].filter(Boolean).join("\n")
 }
@@ -150,11 +163,15 @@ export function createImageTransformHandler(deps: ImageTransformDeps) {
 
           if (isDataUrl(url)) {
             const saved = await deps.imageStore.saveFromDataUrl(url, part.filename)
-            const priorAnalysis = deps.cacheDb?.getAnalysis(saved.hash)?.result ?? null
-            if (priorAnalysis) {
-              log("[image-transform] dedup hit — prior analysis found", { hash: saved.hash.slice(0, 12) })
+            const priorAnalyses = deps.cacheDb?.getAnalyses(saved.hash) ?? []
+            if (priorAnalyses.length > 0) {
+              log("[image-transform] dedup hit", { hash: saved.hash.slice(0, 12), analyses: priorAnalyses.length })
             }
-            replacementText = buildReplacementText(saved, part, priorAnalysis)
+            replacementText = buildReplacementText(
+              saved,
+              part,
+              priorAnalyses.map((a) => ({ goal: a.goal, result: a.result, backend: a.backend })),
+            )
           } else if (isFileUrl(url)) {
             // Already on disk (e.g. @-mention of a workspace file) — just reference it.
             replacementText = buildAlreadyOnDiskText(part)

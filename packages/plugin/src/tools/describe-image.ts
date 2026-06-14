@@ -126,18 +126,37 @@ export function createDescribeImageTool(deps: DescribeImageDeps) {
       const questionHint = question ? ` (Question: "${question}")` : ""
 
       const hashFromFile = extname(filename) ? filename.slice(0, filename.lastIndexOf(".")) : filename
-      const priorAnalysis = deps.cacheDb?.getAnalysis(hashFromFile)?.result ?? null
-      if (priorAnalysis) {
-        log("[describe_image] cache hit — returning prior analysis", { hash: hashFromFile.slice(0, 16) })
+      const priorAnalyses = deps.cacheDb?.getAnalyses(hashFromFile) ?? []
+
+      if (priorAnalyses.length > 0) {
+        log("[describe_image] cache hit", { hash: hashFromFile.slice(0, 16), count: priorAnalyses.length })
+
+        const analysisLines = priorAnalyses.map((a, i) => {
+          const goalLabel = a.goal ? `[Goal: ${a.goal}]` : "[General analysis]"
+          const date = new Date(a.time_analyzed).toISOString().slice(0, 10)
+          const preview = a.result.slice(0, 500)
+          const truncated = a.result.length > 500 ? "..." : ""
+          return `${i + 1}. ${goalLabel} (${a.backend}, ${date}):\n   ${preview}${truncated}`
+        })
+
         return {
-          title: `describe_image: ${filename} (cached)`,
+          title: `describe_image: ${filename} (${priorAnalyses.length} cached)`,
           output: [
             `Image: "${filename}" (${formatBytes(fileSize)})${questionHint}`,
             ``,
-            `Cached analysis (from a previous session):`,
-            priorAnalysis,
+            `${priorAnalyses.length} prior analysis/analyses exist for this image:`,
+            ``,
+            analysisLines.join("\n\n"),
+            ``,
+            `If one of these already answers your current question, use it directly.`,
+            `If none of them are relevant, call look_at with file_path="${imagePath}" and a goal that reflects your specific question.`,
           ].join("\n"),
-          metadata: { path: imagePath, size: fileSize, hash: hashFromFile, cached: true },
+          metadata: {
+            path: imagePath,
+            size: fileSize,
+            hash: hashFromFile,
+            cachedCount: priorAnalyses.length,
+          },
         }
       }
 

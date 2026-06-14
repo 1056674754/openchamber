@@ -42,6 +42,15 @@ function extractFilePathsFromArgs(args: unknown): string[] {
   return paths
 }
 
+function extractGoalFromArgs(args: unknown): string | null {
+  if (!args || typeof args !== "object") return null
+  const a = args as Record<string, unknown>
+  if (typeof a.goal === "string" && a.goal.trim()) return a.goal.trim()
+  if (typeof a.question === "string" && a.question.trim()) return a.question.trim()
+  if (typeof a.prompt === "string" && a.prompt.trim()) return a.prompt.trim()
+  return null
+}
+
 export function createAnalysisCollectorHook(deps: AnalysisCollectorDeps) {
   return async (
     input: { tool: string; sessionID: string; callID: string; args: unknown },
@@ -54,6 +63,7 @@ export function createAnalysisCollectorHook(deps: AnalysisCollectorDeps) {
     if (!resultText || resultText.trim().length === 0) return
 
     const filePaths = extractFilePathsFromArgs(input.args)
+    const goal = extractGoalFromArgs(input.args)
     let saved = 0
 
     for (const fp of filePaths) {
@@ -63,14 +73,14 @@ export function createAnalysisCollectorHook(deps: AnalysisCollectorDeps) {
       deps.cacheDb.saveAnalysis({
         image_sha256: hash,
         backend: input.tool,
-        prompt_hash: null,
+        goal,
         result: resultText,
       })
       saved++
     }
 
     if (saved > 0) {
-      log("[analysis-collector] cached look_at results", { tool: input.tool, count: saved })
+      log("[analysis-collector] cached look_at results", { tool: input.tool, count: saved, goal })
     }
   }
 }
