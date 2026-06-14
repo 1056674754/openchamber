@@ -26,7 +26,7 @@ export function createPlugin(input: PluginInput): Promise<Hooks> {
 
   const systemTransform = createSystemTransformHandler()
 
-  const describeImage = createDescribeImageTool()
+  const describeImage = createDescribeImageTool({ client: input.client })
 
   const hooks: Hooks = {
     "experimental.chat.messages.transform": imageTransform,

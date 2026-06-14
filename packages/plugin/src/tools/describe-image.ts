@@ -1,32 +1,87 @@
 /**
- * describe_image tool.
+ * describe_image tool (Stage 1.5).
  *
- * Registered for every model so that non-vision models always have a way to
- * "see" images that were saved to disk by the image-transform hook.
+ * When called, discovers available vision-capable tools in the current OpenCode
+ * instance and either proxies to them or instructs the model how to call them.
  *
- * Stage 1 behavior: Returns file metadata and a note that no vision backend
- * is configured. This gives the model a deterministic, honest response rather
- * than a missing-tool error.
+ * Discovery order:
+ *   1. MCP tools with known vision names (vision_describe, analyze_image, ocr, etc.)
+ *   2. OMA's look_at tool (multimodal-looker agent)
+ *   3. Any tool whose description mentions image analysis
  *
- * Stage 1.5 (future): If a vision MCP server is connected, proxy the call
- * to its analyze/describe tool. The plugin will detect connected MCP tools
- * by name (vision_describe, describe_image, analyze_image, etc.) and call
- * the first match.
+ * If a vision tool is found, returns its name + instructions so the model can
+ * call it directly. This avoids cross-tool invocation complexity.
+ *
+ * If no vision tool is found, returns the Stage 1 placeholder.
  */
 
 import { tool, type ToolResult } from "@opencode-ai/plugin"
+import type { PluginInput } from "@opencode-ai/plugin"
 import { stat } from "node:fs/promises"
 import { basename, extname } from "node:path"
 import { log } from "../logger.js"
 
-const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg", ".tiff", ".ico"])
-
-function isLikelyImagePath(filePath: string): boolean {
-  const ext = extname(filePath).toLowerCase()
-  return IMAGE_EXTENSIONS.has(ext)
+export type DescribeImageDeps = {
+  client: PluginInput["client"]
 }
 
-export function createDescribeImageTool() {
+const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg", ".tiff", ".ico"])
+
+const VISION_TOOL_PATTERNS = [
+  "vision_describe",
+  "vision_ocr",
+  "vision_analyze",
+  "describe_image",
+  "analyze_image",
+  "ocr_image",
+  "read_image",
+  "image_ocr",
+  "look_at",
+]
+
+type ToolInfo = {
+  name: string
+  description?: string
+  source?: string
+}
+
+function isLikelyImagePath(filePath: string): boolean {
+  return IMAGE_EXTENSIONS.has(extname(filePath).toLowerCase())
+}
+
+async function discoverVisionTools(client: PluginInput["client"]): Promise<ToolInfo[]> {
+  const found: ToolInfo[] = []
+  try {
+    const response = await client.tool.ids()
+    const ids = (response.data as string[] | undefined) ?? []
+    for (const name of ids) {
+      if (typeof name !== "string") continue
+      const lower = name.toLowerCase()
+      if (VISION_TOOL_PATTERNS.some((p) => lower === p || lower.includes(p))) {
+        found.push({ name })
+      }
+    }
+  } catch {
+    // Tool ids endpoint might not be available in all versions
+  }
+  return found
+}
+
+export function createDescribeImageTool(deps: DescribeImageDeps) {
+  let visionToolsCache: ToolInfo[] | null = null
+  let cacheTime = 0
+  const CACHE_TTL_MS = 30_000
+
+  async function getVisionTools(): Promise<ToolInfo[]> {
+    const now = Date.now()
+    if (visionToolsCache !== null && now - cacheTime < CACHE_TTL_MS) {
+      return visionToolsCache
+    }
+    visionToolsCache = await discoverVisionTools(deps.client)
+    cacheTime = now
+    return visionToolsCache
+  }
+
   return tool({
     description: [
       "Analyze an image file and return a text description of its contents.",
@@ -66,29 +121,49 @@ export function createDescribeImageTool() {
       }
 
       const filename = basename(imagePath)
-
-      // Stage 1: No vision backend wired up yet.
-      // Return honest metadata + setup guidance.
       const questionHint = question ? ` (Question: "${question}")` : ""
-      const output = [
-        `Image file confirmed: "${filename}" (${formatBytes(fileSize)}) at ${imagePath}${questionHint}`,
-        ``,
-        `No vision analysis backend is currently configured in this OpenCode instance.`,
-        `The image exists on disk but cannot be visually analyzed without a vision MCP server.`,
-        ``,
-        `To enable image analysis, configure a vision MCP server such as:`,
-        `  - opencode-vision (PaddleOCR + Gemini, built for OpenCode)`,
-        `  - agent-vision-mcp (OpenAI-compatible vision proxy)`,
-        `  - vision-sidecar-mcp (local Ollama-based VLM)`,
-        ``,
-        `For now, if the user can describe what's in the image, that would help.`,
-      ].join("\n")
 
-      log("[describe_image] served stage-1 placeholder", { path: imagePath, size: fileSize })
+      const visionTools = await getVisionTools()
+
+      if (visionTools.length > 0) {
+        const primary = visionTools[0]!
+        const toolList = visionTools.map((t) => `- ${t.name}${t.description ? `: ${t.description.slice(0, 80)}` : ""}`).join("\n")
+        log("[describe_image] found vision tools, delegating", { tool: primary.name, path: imagePath })
+
+        return {
+          title: `describe_image → ${primary.name}`,
+          output: [
+            `Image confirmed: "${filename}" (${formatBytes(fileSize)})${questionHint}`,
+            ``,
+            `The following vision tool(s) are available in this session:`,
+            toolList,
+            ``,
+            `Call the tool "${primary.name}" with the file path "${imagePath}"${question ? ` and question "${question}"` : ""} to get a visual analysis.`,
+          ].join("\n"),
+          metadata: {
+            path: imagePath,
+            size: fileSize,
+            visionTools: visionTools.map((t) => t.name),
+            stage: "1.5-delegated",
+          },
+        }
+      }
+
+      log("[describe_image] no vision tools found, serving placeholder", { path: imagePath })
 
       return {
         title: `describe_image: ${filename}`,
-        output,
+        output: [
+          `Image file confirmed: "${filename}" (${formatBytes(fileSize)}) at ${imagePath}${questionHint}`,
+          ``,
+          `No vision analysis tool is currently available in this session.`,
+          `To enable image analysis, configure a vision MCP server such as:`,
+          `  - opencode-vision (PaddleOCR + Gemini, built for OpenCode)`,
+          `  - agent-vision-mcp (OpenAI-compatible vision proxy)`,
+          `  - vision-sidecar-mcp (local Ollama-based VLM)`,
+          ``,
+          `Alternatively, ask the user to describe the image contents.`,
+        ].join("\n"),
         metadata: {
           path: imagePath,
           size: fileSize,
