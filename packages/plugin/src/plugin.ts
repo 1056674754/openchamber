@@ -15,6 +15,7 @@ import { createDescribeImageTool } from "./tools/describe-image.js"
 import { createSearchImagesTool } from "./tools/search-images.js"
 import { createModelCapabilityChecker } from "./model-capability.js"
 import { createImageStore } from "./image-store.js"
+import { createAnalysisCollectorHook } from "./analysis-collector.js"
 import { openCacheDb, type CacheDb } from "./cache/database.js"
 import { log } from "./logger.js"
 
@@ -38,6 +39,10 @@ export function createPlugin(input: PluginInput): Promise<Hooks> {
   })
 
   const systemTransform = createSystemTransformHandler()
+  const analysisCollector = createAnalysisCollectorHook({
+    cacheDb,
+    imageDirectory: imageStore.getDirectory(),
+  })
 
   const describeImage = createDescribeImageTool({ client: input.client, cacheDb })
   const searchImages = createSearchImagesTool({ cacheDb })
@@ -45,6 +50,7 @@ export function createPlugin(input: PluginInput): Promise<Hooks> {
   const hooks: Hooks = {
     "experimental.chat.messages.transform": imageTransform,
     "experimental.chat.system.transform": systemTransform,
+    "tool.execute.after": analysisCollector,
     tool: {
       describe_image: describeImage,
       search_images: searchImages,
