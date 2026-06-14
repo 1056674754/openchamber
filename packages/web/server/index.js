@@ -58,7 +58,7 @@ import {
   registerServerStatusRoutes,
 } from './lib/opencode/core-routes.js';
 import { registerOpenChamberRoutes } from './lib/opencode/openchamber-routes.js';
-import { ensureOpenChamberPluginRegistered } from './lib/opencode/plugin-bootstrap.js';
+import { prepareOpenChamberConfig, cleanupOpenChamberPluginFromUserConfig } from './lib/opencode/plugin-bootstrap.js';
 import { createServerUtilsRuntime } from './lib/opencode/server-utils-runtime.js';
 import { createStaticRoutesRuntime } from './lib/opencode/static-routes-runtime.js';
 import { createSettingsRuntime } from './lib/opencode/settings-runtime.js';
@@ -1084,10 +1084,11 @@ const ensureGlobalWatcherStarted = async () => {
 };
 const bootstrapOpenCodeAtStartup = async (...args) => {
   try {
-    const workingDirectory = args[0]?.directory || process.cwd();
-    ensureOpenChamberPluginRegistered(workingDirectory);
+    cleanupOpenChamberPluginFromUserConfig();
+    const overlayPath = prepareOpenChamberConfig();
+    process.env.OPENCODE_CONFIG = overlayPath;
   } catch (error) {
-    console.warn('[openchamber] plugin registration skipped:', error?.message || error);
+    console.warn('[openchamber] config overlay skipped:', error?.message || error);
   }
   await openCodeLifecycleRuntime.bootstrapOpenCodeAtStartup(...args);
   scheduleOpenCodeApiDetection();
