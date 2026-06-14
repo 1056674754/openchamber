@@ -1968,6 +1968,16 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       }
       return null;
 
+    case 'desktop_set_dock_badge': {
+      if (process.platform !== 'darwin' || !app.dock) {
+        return { supported: false };
+      }
+      const count = Number.isFinite(args.count) ? Math.max(0, Math.trunc(args.count)) : 0;
+      const label = count > 999 ? '999+' : (count > 0 ? String(count) : '');
+      app.dock.setBadge(label);
+      return { supported: true, count };
+    }
+
     case 'desktop_get_app_version':
       return APP_VERSION;
 
