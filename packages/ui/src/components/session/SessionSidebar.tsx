@@ -7,6 +7,8 @@ import { isDesktopShell } from '@/lib/desktop';
 import { sessionEvents } from '@/lib/sessionEvents';
 import { formatDirectoryName, cn } from '@/lib/utils';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useDesktopDockUnreadBadge } from '@/sync/desktop-dock-badge';
+import { useNotificationStore } from '@/sync/notification-store';
 import { useAllServersLiveSessions, useAllServersSessionStatuses } from '@/sync/multi-server-hooks';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useSync } from '@/sync/use-sync';
@@ -269,6 +271,8 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   const activeNowEntries = useActiveNowStore((state) => state.entries);
   const addActiveNowSessionToStore = useActiveNowStore((state) => state.addSession);
   const pruneActiveNowEntriesInStore = useActiveNowStore((state) => state.prune);
+  const sessionUnreadCounts = useNotificationStore((state) => state.index.session.unseenCount);
+  const [visibleDockUnreadCount, setVisibleDockUnreadCount] = React.useState(0);
   const [collapsedProjects, setCollapsedProjects] = React.useState<Set<string>>(
     () => readInitialCollapsedProjects(safeStorage, useProjectsStore.getState().projects),
   );
@@ -1562,6 +1566,26 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
     ];
   }, [activitySections, globalPinnedSection, hasSessionSearchQuery, showRecentSection]);
 
+  React.useLayoutEffect(() => {
+    const root = sessionSearchContainerRef.current;
+    const nextCount = root?.querySelectorAll('[data-session-row][data-session-unread="1"]').length ?? 0;
+    setVisibleDockUnreadCount((previous) => (previous === nextCount ? previous : nextCount));
+  }, [
+    sessionUnreadCounts,
+    sidebarActivitySections,
+    sectionsForSidebarRender,
+    collapsedProjects,
+    collapsedGroups,
+    expandedSessionGroups,
+    expandedParents,
+    collapsedFolderIds,
+    hasSessionSearchQuery,
+    showOnlyMainWorkspace,
+    notifyOnSubtasks,
+  ]);
+
+  useDesktopDockUnreadBadge(visibleDockUnreadCount);
+
   const sidebarPrefetchSessionIds = React.useMemo(() => buildSidebarSessionPrefetchOrder({
     activitySections: sidebarActivitySections,
     sectionsForRender: sectionsForSidebarRender,
@@ -2103,6 +2127,29 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
     window.addEventListener('keydown', listener);
     return () => window.removeEventListener('keydown', listener);
   }, [handleBulkDelete, isInlineEditing, multiSelectStoreApi, selectionModeEnabled]);
+
+  const currentSessionTitleRef = React.useRef<string>('');
+  React.useEffect(() => {
+    const session = liveSessions.find((s) => s.id === currentSessionId);
+    currentSessionTitleRef.current = session?.title ?? '';
+  }, [currentSessionId, liveSessions]);
+
+  React.useEffect(() => {
+    const listener = (event: KeyboardEvent) => {
+      if (event.key !== 'F2') return;
+      if (isInlineEditing) return;
+      const target = event.target as HTMLElement | null;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
+        return;
+      }
+      if (!currentSessionId) return;
+      event.preventDefault();
+      setRenameSession({ id: currentSessionId, title: currentSessionTitleRef.current });
+    };
+    window.addEventListener('keydown', listener);
+    return () => window.removeEventListener('keydown', listener);
+  }, [currentSessionId, isInlineEditing, setRenameSession]);
+
   const handleOpenMultiRunFromHeader = React.useCallback(() => {
     setActiveMainTab('chat');
     if (mobileVariant) {
