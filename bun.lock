@@ -152,6 +152,7 @@
         "@lezer/highlight": "^1.2.3",
         "@opencode-ai/sdk": "^1.15.10",
         "@pierre/diffs": "1.1.0-beta.13",
+        "@replit/codemirror-vim": "^6.3.0",
         "@simplewebauthn/browser": "13.3.0",
         "@tanstack/react-virtual": "^3.13.18",
         "@types/react-syntax-highlighter": "^15.5.13",
@@ -1058,6 +1059,8 @@
     "@react-types/shared": ["@react-types/shared@3.33.0", "https://registry.npmmirror.com/@react-types/shared/-/shared-3.33.0.tgz", { "peerDependencies": { "react": "^16.8.0 || ^17.0.0-rc.1 || ^18.0.0 || ^19.0.0-rc.1" } }, "sha512-xuUpP6MyuPmJtzNOqF5pzFUIHH2YogyOQfUQHag54PRmWB7AbjuGWBUv0l1UDmz6+AbzAYGmDVAzcRDOu2PFpw=="],
 
     "@remixicon/react": ["@remixicon/react@4.9.0", "https://registry.npmmirror.com/@remixicon/react/-/react-4.9.0.tgz", { "peerDependencies": { "react": ">=18.2.0" } }, "sha512-5/jLDD4DtKxH2B4QVXTobvV1C2uL8ab9D5yAYNtFt+w80O0Ys1xFOrspqROL3fjrZi+7ElFUWE37hBfaAl6U+Q=="],
+
+    "@replit/codemirror-vim": ["@replit/codemirror-vim@6.3.0", "https://registry.npmmirror.com/@replit/codemirror-vim/-/codemirror-vim-6.3.0.tgz", { "peerDependencies": { "@codemirror/commands": "6.x.x", "@codemirror/language": "6.x.x", "@codemirror/search": "6.x.x", "@codemirror/state": "6.x.x", "@codemirror/view": "6.x.x" } }, "sha512-aTx931ULAMuJx6xLf7KQDOL7CxD+Sa05FktTDrtLaSy53uj01ll3Zf17JdKsriER248oS55GBzg0CfCTjEneAQ=="],
 
     "@rolldown/pluginutils": ["@rolldown/pluginutils@1.0.0-rc.3", "https://registry.npmmirror.com/@rolldown/pluginutils/-/pluginutils-1.0.0-rc.3.tgz", {}, "sha512-eybk3TjzzzV97Dlj5c+XrBFW57eTNhzod66y9HrBlzJ6NsCrWCp/2kaPS3K9wJmurBC0Tdw4yPjXKZqlznim3Q=="],
 
@@ -3367,7 +3370,11 @@
 
     "@openchamber/plugin/@opencode-ai/sdk": ["@opencode-ai/sdk@1.17.6", "https://registry.npmmirror.com/@opencode-ai/sdk/-/sdk-1.17.6.tgz", { "dependencies": { "cross-spawn": "7.0.6" } }, "sha512-kCzdd9Git2sjDjXSHj4mMWuU1RXZ38d7gFEcq2rzlVz7XV6PPwNw8pelWsk99La2CtDkpfoW5lfHnpCaK6/oBQ=="],
 
+    "@openchamber/ui/@opencode-ai/sdk": ["@opencode-ai/sdk@1.17.6", "https://registry.npmmirror.com/@opencode-ai/sdk/-/sdk-1.17.6.tgz", { "dependencies": { "cross-spawn": "7.0.6" } }, "sha512-kCzdd9Git2sjDjXSHj4mMWuU1RXZ38d7gFEcq2rzlVz7XV6PPwNw8pelWsk99La2CtDkpfoW5lfHnpCaK6/oBQ=="],
+
     "@openchamber/ui/ghostty-web": ["ghostty-web@0.4.0", "https://registry.npmmirror.com/ghostty-web/-/ghostty-web-0.4.0.tgz", {}, "sha512-0puDBik2qapbD/QQBW9o5ZHfXnZBqZWx/ctBiVtKZ6ZLds4NYb+wZuw1cRLXZk9zYovIQ908z3rvFhexAvc5Hg=="],
+
+    "@openchamber/ui/yaml": ["yaml@2.9.0", "https://registry.npmmirror.com/yaml/-/yaml-2.9.0.tgz", { "bin": { "yaml": "bin.mjs" } }, "sha512-2AvhNX3mb8zd6Zy7INTtSpl1F15HW6Wnqj0srWlkKLcpYl/gMIMJiyuGq2KeI2YFxUPjdlB+3Lc10seMLtL4cA=="],
 
     "@openchamber/web/@opencode-ai/sdk": ["@opencode-ai/sdk@1.17.6", "https://registry.npmmirror.com/@opencode-ai/sdk/-/sdk-1.17.6.tgz", { "dependencies": { "cross-spawn": "7.0.6" } }, "sha512-kCzdd9Git2sjDjXSHj4mMWuU1RXZ38d7gFEcq2rzlVz7XV6PPwNw8pelWsk99La2CtDkpfoW5lfHnpCaK6/oBQ=="],
 

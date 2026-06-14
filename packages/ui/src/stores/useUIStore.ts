@@ -18,6 +18,11 @@ export type ActivityRenderMode = 'collapsed' | 'summary';
 export type SessionRetentionAction = 'archive' | 'delete';
 export type TimeFormatPreference = 'auto' | '12h' | '24h';
 export type WeekStartPreference = 'auto' | 'sunday' | 'monday';
+export type FileEditorKeymap = 'default' | 'vim';
+
+function normalizeFileEditorKeymap(value: unknown): FileEditorKeymap {
+  return value === 'vim' ? 'vim' : 'default';
+}
 // [2026-05-04] Session sort mode — controls session list ordering.
 // [Custom] Added 2025-05: Session sort mode — controls whether sessions sort by
 // last-updated time (original behavior) or by creation time (stable ordering).
@@ -658,6 +663,7 @@ interface UIStore {
   reportUsage: boolean;
   multiRunEnabled: boolean;
   shortcutOverrides: Record<string, ShortcutCombo>;
+  fileEditorKeymap: FileEditorKeymap;
 
   setTheme: (theme: 'light' | 'dark' | 'system') => void;
   toggleSidebar: () => void;
@@ -805,6 +811,7 @@ interface UIStore {
   setShortcutOverride: (actionId: string, combo: ShortcutCombo) => void;
   clearShortcutOverride: (actionId: string) => void;
   resetAllShortcutOverrides: () => void;
+  setFileEditorKeymap: (value: FileEditorKeymap) => void;
 }
 
 
@@ -932,6 +939,7 @@ export const useUIStore = create<UIStore>()(
         reportUsage: true,
         multiRunEnabled: true,
         shortcutOverrides: {},
+        fileEditorKeymap: 'default',
 
         setTheme: (theme) => {
           set({ theme });
@@ -2056,6 +2064,10 @@ export const useUIStore = create<UIStore>()(
           set({ shortcutOverrides: {} });
         },
 
+        setFileEditorKeymap: (value) => {
+          set({ fileEditorKeymap: normalizeFileEditorKeymap(value) });
+        },
+
         toggleExpandedInput: () => {
           set((state) => ({ isExpandedInput: !state.isExpandedInput }));
         },
@@ -2157,6 +2169,8 @@ export const useUIStore = create<UIStore>()(
             }
           }
 
+          state.fileEditorKeymap = normalizeFileEditorKeymap(state.fileEditorKeymap);
+
           return state;
         },
         partialize: (state) => ({
@@ -2241,6 +2255,7 @@ export const useUIStore = create<UIStore>()(
           showMobileSessionStatusBar: state.showMobileSessionStatusBar,
           isMobileSessionStatusBarCollapsed: state.isMobileSessionStatusBarCollapsed,
           shortcutOverrides: state.shortcutOverrides,
+          fileEditorKeymap: state.fileEditorKeymap,
         })
       }
     ),

@@ -311,7 +311,18 @@
 | 10 | Agent prompt/permission 持久化 | `1c6e8ef6` + `4b6cecf3` | 9 | cache invalidation；signature 扩展；reload mode 修正；null prompt 清除；permission source/merge 层级修正；`AgentsPage` permission config 标准化 |
 | 11 | Chat folder reload 持久化 | `50d378f0` | 2 | `useSessionFolderCleanup` 增加 `hasLoadedGlobalSessions` guard |
 
-**Tier 1 总计**: 37 files changed, +1105/-90
+### Tier 2 移植批次 (2026-06-15)
+
+**范围**: v1.12.4 中等工程量功能
+**验证**: `bun run type-check` ✅ 0 errors / `bun run lint` ✅ 0 errors
+
+| # | 功能 | 上游 commit | 文件数 | 说明 |
+|---|---|---|---|---|
+| 1 | GitHub server-side search | `435001d4` | 16 | issue/PR picker 改用 GitHub Search API；debounced search；VS Code parity；8 locale i18n |
+| 2 | Vim mode (file editor) | `1c692d7e` | 12 | 新依赖 `@replit/codemirror-vim`；`vimModeExtension.ts` (新)；`CodeMirrorEditor` vim compartment；`fileEditorKeymap: 'default'\|'vim'` store + radio selector UI；8 locale settings i18n |
+| 3 | TTS Plan/Files | `f4de298a` | 20 | PlanView + FilesView markdown preview 新增 speaker 按钮；`ttsInputMode: 'sanitized'\|'raw'` config + VoiceSettings chip selector；`useMessageTTS` raw mode 支持；8 locale × 2 file i18n |
+
+**Tier 2 总计**: ~48 files changed (含 i18n overlap), +956/-159
 
 ### 建议制作顺序
 
