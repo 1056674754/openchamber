@@ -30,6 +30,7 @@ type ErrorNotification = NotificationBase & {
 export type Notification = TurnCompleteNotification | ErrorNotification
 
 type NotificationIndex = {
+  totalUnseenCount: number
   session: {
     unseenCount: Record<string, number>
     unseenHasError: Record<string, boolean>
@@ -38,6 +39,17 @@ type NotificationIndex = {
     unseenCount: Record<string, number>
     unseenHasError: Record<string, boolean>
   }
+}
+
+type SessionUnreadState = {
+  unread: boolean
+  hasError: boolean
+}
+
+type SessionUnreadResponse = {
+  sessions?: Record<string, SessionUnreadState>
+  state?: SessionUnreadState | null
+  sessionId?: string
 }
 
 // ---------------------------------------------------------------------------
@@ -60,6 +72,7 @@ function pruneNotifications(list: Notification[]): Notification[] {
 
 function buildIndex(list: Notification[]): NotificationIndex {
   const index: NotificationIndex = {
+    totalUnseenCount: 0,
     session: { unseenCount: {}, unseenHasError: {} },
     project: { unseenCount: {}, unseenHasError: {} },
   }
@@ -69,6 +82,7 @@ function buildIndex(list: Notification[]): NotificationIndex {
 
     if (n.session) {
       index.session.unseenCount[n.session] = (index.session.unseenCount[n.session] ?? 0) + 1
+      index.totalUnseenCount += 1
       if (n.type === "error") index.session.unseenHasError[n.session] = true
     }
     if (n.directory) {
@@ -78,6 +92,69 @@ function buildIndex(list: Notification[]): NotificationIndex {
   }
 
   return index
+}
+
+function countUnseenSessions(unseenCount: Record<string, number>): number {
+  return Object.values(unseenCount).reduce((total, count) => total + count, 0)
+}
+
+function buildSessionIndexFromServer(data: Record<string, SessionUnreadState>): Pick<NotificationIndex, "totalUnseenCount" | "session"> {
+  const unseenCount: Record<string, number> = {}
+  const unseenHasError: Record<string, boolean> = {}
+  for (const [id, state] of Object.entries(data)) {
+    if (state.unread) {
+      unseenCount[id] = 1
+      if (state.hasError) unseenHasError[id] = true
+    }
+  }
+  return {
+    totalUnseenCount: countUnseenSessions(unseenCount),
+    session: { unseenCount, unseenHasError },
+  }
+}
+
+function isSessionUnreadState(value: unknown): value is SessionUnreadState {
+  return Boolean(value)
+    && typeof value === "object"
+    && typeof (value as { unread?: unknown }).unread === "boolean"
+    && typeof (value as { hasError?: unknown }).hasError === "boolean"
+}
+
+function parseUnreadResponse(value: unknown): SessionUnreadResponse | null {
+  if (!value || typeof value !== "object") return null
+  const record = value as { sessions?: unknown; state?: unknown; sessionId?: unknown }
+  const result: SessionUnreadResponse = {}
+
+  if (record.sessions && typeof record.sessions === "object") {
+    const sessions: Record<string, SessionUnreadState> = {}
+    for (const [id, state] of Object.entries(record.sessions)) {
+      if (isSessionUnreadState(state)) {
+        sessions[id] = state
+      }
+    }
+    result.sessions = sessions
+  }
+
+  if (isSessionUnreadState(record.state)) {
+    result.state = record.state
+  } else if (record.state === null) {
+    result.state = null
+  }
+
+  if (typeof record.sessionId === "string" && record.sessionId.length > 0) {
+    result.sessionId = record.sessionId
+  }
+
+  return result
+}
+
+async function postSessionUnreadState(sessionId: string, unread: boolean): Promise<SessionUnreadResponse | null> {
+  const action = unread ? "unread" : "read"
+  const response = await fetch(`/api/openchamber/sessions/${encodeURIComponent(sessionId)}/${action}`, { method: "POST" })
+  if (!response.ok) {
+    return null
+  }
+  return parseUnreadResponse(await response.json())
 }
 
 // ---------------------------------------------------------------------------
@@ -104,6 +181,7 @@ interface NotificationStore {
 export const useNotificationStore = create<NotificationStore>((set, get) => ({
   list: [],
   index: {
+    totalUnseenCount: 0,
     session: { unseenCount: {}, unseenHasError: {} },
     project: { unseenCount: {}, unseenHasError: {} },
   },
@@ -121,9 +199,11 @@ export const useNotificationStore = create<NotificationStore>((set, get) => ({
     for (const [id, val] of Object.entries(newIndex.session.unseenHasError)) {
       mergedSessionErrors[id] = val
     }
+    const totalUnseenCount = countUnseenSessions(mergedSessionCount)
     set({
       list: next,
       index: {
+        totalUnseenCount,
         session: { unseenCount: mergedSessionCount, unseenHasError: mergedSessionErrors },
         project: newIndex.project,
       },
@@ -146,10 +226,15 @@ export const useNotificationStore = create<NotificationStore>((set, get) => ({
       list: next,
       index: {
         ...current.index,
+        totalUnseenCount: countUnseenSessions(newUnseenCount),
         session: { unseenCount: newUnseenCount, unseenHasError: newUnseenHasError },
       },
     })
-    fetch(`/api/openchamber/sessions/${encodeURIComponent(sessionId)}/read`, { method: 'POST' }).catch(() => {})
+    postSessionUnreadState(sessionId, false).then((response) => {
+      if (response) applyUnreadResponse(response)
+    }).catch(() => {
+      void fetchAndHydrateUnreadState()
+    })
   },
 
   markProjectViewed: (directory) => {
@@ -169,18 +254,12 @@ export const useNotificationStore = create<NotificationStore>((set, get) => ({
   projectHasError: (directory) => get().index.project.unseenHasError[directory] ?? false,
 
   hydrateFromServer: (data) => {
-    const sessionUnseen: Record<string, number> = {}
-    const sessionErrors: Record<string, boolean> = {}
-    for (const [id, state] of Object.entries(data)) {
-      if (state.unread) {
-        sessionUnseen[id] = 1
-        if (state.hasError) sessionErrors[id] = true
-      }
-    }
+    const sessionIndex = buildSessionIndexFromServer(data)
     set({
       list: [],
       index: {
-        session: { unseenCount: sessionUnseen, unseenHasError: sessionErrors },
+        totalUnseenCount: sessionIndex.totalUnseenCount,
+        session: sessionIndex.session,
         project: { unseenCount: {}, unseenHasError: {} },
       },
     })
@@ -199,6 +278,13 @@ export function markSessionViewed(sessionId: string) {
   useNotificationStore.getState().markSessionViewed(sessionId)
 }
 
+export async function markSessionUnread(sessionId: string): Promise<boolean> {
+  const response = await postSessionUnreadState(sessionId, true)
+  if (!response) return false
+  applyUnreadResponse(response)
+  return true
+}
+
 // ---------------------------------------------------------------------------
 // React hooks for fine-grained subscriptions
 // ---------------------------------------------------------------------------
@@ -215,19 +301,26 @@ export function useProjectUnseenCount(directory: string): number {
   return useNotificationStore((s) => s.index.project.unseenCount[directory] ?? 0)
 }
 
+export function useTotalUnseenCount(): number {
+  return useNotificationStore((s) => s.index.totalUnseenCount)
+}
+
 // ---------------------------------------------------------------------------
 // Server-backed hydration
 // ---------------------------------------------------------------------------
 
 export async function fetchAndHydrateUnreadState() {
   try {
-    const res = await fetch('/api/openchamber/sessions/unread')
+    const res = await fetch("/api/openchamber/sessions/unread")
     if (!res.ok) return
     const data = await res.json()
-    if (data && typeof data.sessions === 'object') {
-      useNotificationStore.getState().hydrateFromServer(data.sessions)
+    const parsed = parseUnreadResponse(data)
+    if (parsed?.sessions) {
+      useNotificationStore.getState().hydrateFromServer(parsed.sessions)
     }
-  } catch { /* network failure is non-fatal */ }
+  } catch {
+    return
+  }
 }
 
 export function updateSessionUnread(sessionId: string, unread: boolean, hasError: boolean) {
@@ -244,7 +337,25 @@ export function updateSessionUnread(sessionId: string, unread: boolean, hasError
   useNotificationStore.setState({
     index: {
       ...store.index,
+      totalUnseenCount: countUnseenSessions(newCount),
       session: { unseenCount: newCount, unseenHasError: newErrors },
     },
   })
+}
+
+export function applyUnreadResponse(response: SessionUnreadResponse): void {
+  if (response.sessions) {
+    useNotificationStore.getState().hydrateFromServer(response.sessions)
+    return
+  }
+  if (!response.sessionId || response.state === undefined) {
+    return
+  }
+  updateSessionUnread(response.sessionId, response.state?.unread === true, response.state?.hasError === true)
+}
+
+export function applyUnreadEventPayload(payload: unknown): void {
+  const parsed = parseUnreadResponse(payload)
+  if (!parsed) return
+  applyUnreadResponse(parsed)
 }

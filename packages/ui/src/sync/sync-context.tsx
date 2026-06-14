@@ -41,7 +41,7 @@ import { resolveApiUrl as resolveServerApiUrl } from "@/lib/api/serverUrl"
 import { hasTerminalMessageSignal, type TerminalMessageSignalInfo } from "@/lib/messageCompletion"
 import { dispatchOpenchamberEventEnvelope } from "@/lib/openchamberEvents"
 import { toast } from "@/components/ui"
-import { appendNotification, fetchAndHydrateUnreadState } from "./notification-store"
+import { appendNotification, applyUnreadEventPayload, fetchAndHydrateUnreadState } from "./notification-store"
 import { dispatchRemoteServerEvent, subscribeRemoteServerEvents } from "./remote-event-bus"
 import type { State } from "./types"
 import type { PermissionRequest } from "@/types/permission"
@@ -1386,6 +1386,15 @@ function handleEvent(
 
   // Global events
   if (directory === "global" || !directory) {
+    const globalPayload = payload as { type?: string; properties?: unknown }
+    if (globalPayload.type === "openchamber:session-unread") {
+      const properties = typeof globalPayload.properties === "object" && globalPayload.properties !== null
+        ? globalPayload.properties
+        : null
+      applyUnreadEventPayload(properties)
+      return
+    }
+
     const recent = isRecentBoot()
     const result = reduceGlobalEvent(payload)
     if (!result) return
