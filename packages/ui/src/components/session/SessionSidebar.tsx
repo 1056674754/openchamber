@@ -20,6 +20,7 @@ import { isVSCodeRuntime } from '@/lib/desktop';
 import { NewWorktreeDialog } from './NewWorktreeDialog';
 import { ScheduledTasksDialog } from './ScheduledTasksDialog';
 import { RegenerateTitleDialog } from './RegenerateTitleDialog';
+import { RenameSessionDialog } from './RenameSessionDialog';
 import { useSessionFoldersStore } from '@/stores/useSessionFoldersStore';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { useArchivedAutoFolders } from './sidebar/hooks/useArchivedAutoFolders';
@@ -258,8 +259,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   const sessionSearchContainerRef = React.useRef<HTMLDivElement | null>(null);
   const sessionSearchInputRef = React.useRef<HTMLInputElement | null>(null);
   const retriedNoPrStatusKeysRef = React.useRef<Set<string>>(new Set());
-  const [editingId, setEditingId] = React.useState<string | null>(null);
-  const [editTitle, setEditTitle] = React.useState('');
+  const [renameSession, setRenameSession] = React.useState<{ id: string; title: string } | null>(null);
   const [editingProjectDialogId, setEditingProjectDialogId] = React.useState<string | null>(null);
   const [expandedParents, setExpandedParents] = React.useState<Set<string>>(new Set());
   const [directoryStatus] = React.useState<Map<string, 'unknown' | 'exists' | 'missing'>>(
@@ -994,9 +994,6 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
   const {
     copiedSessionId,
     handleSessionSelect,
-    handleSessionDoubleClick,
-    handleSaveEdit,
-    handleCancelEdit,
     handleShareSession,
     handleCopyShareUrl,
     handleUnshareSession,
@@ -1014,7 +1011,6 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
     setIsSessionSearchOpen,
     setActiveMainTab,
     setSessionSwitcherOpen,
-    updateSessionTitle,
     shareSession,
     unshareSession,
     deleteSession,
@@ -1025,10 +1021,6 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
     showDeletionDialog,
     setDeleteSessionConfirm,
     deleteSessionConfirm,
-    setEditingId,
-    setEditTitle,
-    editingId,
-    editTitle,
   });
 
   const confirmDeleteFolder = React.useCallback(() => {
@@ -1760,15 +1752,9 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
         hasSessionSearchQuery={hasSessionSearchQuery}
         normalizedSessionSearchQuery={normalizedSessionSearchQuery}
         notifyOnSubtasks={notifyOnSubtasks}
-        editingId={editingId}
-        setEditingId={setEditingId}
-        editTitle={editTitle}
-        setEditTitle={setEditTitle}
-        handleSaveEdit={handleSaveEdit}
-        handleCancelEdit={handleCancelEdit}
         toggleParent={toggleParent}
         handleSessionSelect={handleSessionSelect}
-        handleSessionDoubleClick={handleSessionDoubleClick}
+        onRenameSession={(sessionId, sessionTitle) => setRenameSession({ id: sessionId, title: sessionTitle })}
         togglePinnedSession={togglePinnedSession}
         handleShareSession={handleShareSession}
         copiedSessionId={copiedSessionId}
@@ -1801,15 +1787,9 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
       hasSessionSearchQuery,
       normalizedSessionSearchQuery,
       notifyOnSubtasks,
-      editingId,
-      setEditingId,
-      editTitle,
-      setEditTitle,
-      handleSaveEdit,
-      handleCancelEdit,
       toggleParent,
       handleSessionSelect,
-      handleSessionDoubleClick,
+      setRenameSession,
       togglePinnedSession,
       handleShareSession,
       copiedSessionId,
@@ -1958,7 +1938,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
       ) : null}
     </>
   );
-  const isInlineEditing = Boolean(renamingFolderId || editingId || editingProjectDialogId);
+  const isInlineEditing = Boolean(renamingFolderId || editingProjectDialogId);
 
   const selectionModeEnabled = useSessionMultiSelectStore((state) => state.enabled);
   const selectedIds = useSessionMultiSelectStore((state) => state.selectedIds);
@@ -2368,6 +2348,14 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
         onOpenChange={(open) => { if (!open) setRegenerateTitleSession(null); }}
         sessionId={regenerateTitleSession?.id ?? ''}
         sessionTitle={regenerateTitleSession?.title ?? ''}
+        onApply={updateSessionTitle}
+      />
+
+      <RenameSessionDialog
+        open={renameSession !== null}
+        onOpenChange={(open) => { if (!open) setRenameSession(null); }}
+        sessionId={renameSession?.id ?? ''}
+        currentTitle={renameSession?.title ?? ''}
         onApply={updateSessionTitle}
       />
     </div>

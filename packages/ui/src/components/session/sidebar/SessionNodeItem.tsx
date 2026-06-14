@@ -128,15 +128,9 @@ type Props = {
   hasSessionSearchQuery: boolean;
   normalizedSessionSearchQuery: string;
   notifyOnSubtasks: boolean;
-  editingId: string | null;
-  setEditingId: (id: string | null) => void;
-  editTitle: string;
-  setEditTitle: (value: string) => void;
-  handleSaveEdit: () => void;
-  handleCancelEdit: () => void;
   toggleParent: (expansionKey: string) => void;
   handleSessionSelect: (sessionId: string, sessionDirectory: string | null, isMissingDirectory: boolean, projectId?: string | null) => void;
-  handleSessionDoubleClick: (sessionId: string, sessionTitle: string) => void;
+  onRenameSession: (sessionId: string, sessionTitle: string) => void;
   togglePinnedSession: (sessionId: string, scope: 'global' | string) => void;
   pinnedSessionIdsByProject: Map<string, Set<string>>;
   handleShareSession: (session: Session) => void;
@@ -294,20 +288,6 @@ const areEqual = (prev: Props, next: Props): boolean => {
   if (prev.hasSessionSearchQuery !== next.hasSessionSearchQuery) return false;
   if (prev.normalizedSessionSearchQuery !== next.normalizedSessionSearchQuery) return false;
   if (prev.notifyOnSubtasks !== next.notifyOnSubtasks) return false;
-  if (prev.editingId !== next.editingId) {
-    const prevEditingInTree = treeContainsSessionId(prev.node, prev.editingId);
-    const nextEditingInTree = treeContainsSessionId(next.node, next.editingId);
-    if (prevEditingInTree || nextEditingInTree) {
-      return false;
-    }
-  }
-  if (prev.editTitle !== next.editTitle) {
-    const prevEditingInTree = treeContainsSessionId(prev.node, prev.editingId);
-    const nextEditingInTree = treeContainsSessionId(next.node, next.editingId);
-    if (prevEditingInTree || nextEditingInTree) {
-      return false;
-    }
-  }
   if ((prev.copiedSessionId === prevSessionId) !== (next.copiedSessionId === nextSessionId)) return false;
 
   const prevMenuInTree = treeContainsMenuKey(prev.node, prev.openSidebarMenuKey, prev.renderContext ?? 'project', prev.archivedBucket ?? false);
@@ -331,6 +311,7 @@ const areEqual = (prev: Props, next: Props): boolean => {
   if (prev.renamingFolderId !== next.renamingFolderId) return false;
   if (prev.renderSessionNode !== next.renderSessionNode) return false;
   if (prev.onRegenerateTitle !== next.onRegenerateTitle) return false;
+  if (prev.onRenameSession !== next.onRenameSession) return false;
 
   return true;
 };
@@ -351,15 +332,9 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
     hasSessionSearchQuery,
     normalizedSessionSearchQuery,
     notifyOnSubtasks,
-    editingId,
-    setEditingId,
-    editTitle,
-    setEditTitle,
-    handleSaveEdit,
-    handleCancelEdit,
     toggleParent,
     handleSessionSelect,
-    handleSessionDoubleClick,
+    onRenameSession,
     togglePinnedSession,
     handleShareSession,
     copiedSessionId,
@@ -396,12 +371,6 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
   const showOpenInEditorAction = isVSCode;
   const suppressNextSelectRef = React.useRef(false);
   const [isTouchPressed, setIsTouchPressed] = React.useState(false);
-  const editingIdRef = React.useRef(editingId);
-  editingIdRef.current = editingId;
-  const pendingRenameRef = React.useRef<{ id: string; title: string } | null>(null);
-  const handleSaveEditRef = React.useRef(handleSaveEdit);
-  handleSaveEditRef.current = handleSaveEdit;
-  const formRef = React.useRef<HTMLFormElement>(null);
 
   const session = node.session;
   const liveSession = useSession(session.id);
@@ -694,84 +663,6 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
     });
   }, [session.id, sessionDirectory]);
 
-  // Capture outside-clicks to save edits — immune to focus-race with onBlur.
-  React.useEffect(() => {
-    if (editingId !== session.id) return;
-    const handleDocMouseDown = (e: MouseEvent) => {
-      if (formRef.current && !formRef.current.contains(e.target as Node)) {
-        handleSaveEditRef.current();
-      }
-    };
-    document.addEventListener('mousedown', handleDocMouseDown);
-    return () => document.removeEventListener('mousedown', handleDocMouseDown);
-  }, [editingId, session.id]);
-
-  if (editingId === session.id) {
-    return (
-      <div
-        key={session.id}
-        className={cn('group relative flex items-center rounded-sm px-1.5 py-1', depth > 0 && 'pl-[20px]')}
-      >
-        <div className="flex min-w-0 flex-1 flex-col gap-0">
-          <form
-            ref={formRef}
-            className="flex w-full items-center gap-2"
-            onSubmit={(event) => {
-              event.preventDefault();
-              handleSaveEdit();
-            }}
-          >
-            <input
-              value={editTitle}
-              onChange={(event) => setEditTitle(event.target.value)}
-              className="flex-1 min-w-0 bg-transparent typography-ui-label outline-none placeholder:text-muted-foreground"
-              autoFocus
-              placeholder={t('sessions.sidebar.session.menu.rename')}
-              onKeyDown={(event) => {
-                if (event.key === 'Escape') {
-                  event.stopPropagation();
-                  handleCancelEdit();
-                  return;
-                }
-                if (event.key === ' ' || event.key === 'Enter') {
-                  event.stopPropagation();
-                }
-              }}
-            />
-            <button
-              type="submit"
-              aria-label={t('sessions.sidebar.session.rename.save')}
-              title={t('sessions.sidebar.session.rename.save')}
-              className="shrink-0 text-muted-foreground hover:text-foreground"
-            >
-              <Icon name="check" className="size-4"  />
-            </button>
-            <button
-              type="button"
-              onClick={handleCancelEdit}
-              aria-label={t('sessions.sidebar.session.rename.cancel')}
-              title={t('sessions.sidebar.session.rename.cancel')}
-              className="shrink-0 text-muted-foreground hover:text-foreground"
-            >
-              <Icon name="close" className="size-4"  />
-            </button>
-          </form>
-          {!isMinimalMode ? (
-            <div className="flex items-center justify-between gap-3 text-muted-foreground/60 min-w-0 overflow-hidden leading-tight" style={{ fontSize: 'calc(var(--text-ui-label) * 0.85)' }}>
-              <div className="flex min-w-0 items-center gap-1.5 overflow-hidden">
-                {hasChildren ? <span className="inline-flex items-center justify-center flex-shrink-0">{isExpanded ? <Icon name="arrow-down-s" className="h-3 w-3"  /> : <Icon name="arrow-right-s" className="h-3 w-3"  />}</span> : null}
-                <span className="flex-shrink-0">{sessionUpdatedLabel}</span>
-                {sessionDiffStats ? <span className="flex flex-shrink-0 items-center gap-0 text-[0.92em]"><span className="text-status-success/80">+{sessionDiffStats.additions}</span><span className="text-status-error/65">/-{sessionDiffStats.deletions}</span></span> : null}
-                {hasSecondaryProjectLabel ? <span className="truncate">{secondaryMeta?.projectLabel}</span> : null}
-                {hasSecondaryBranchLabel ? <span className="inline-flex min-w-0 items-center gap-0.5"><Icon name="git-branch" className="h-3 w-3 flex-shrink-0 text-muted-foreground/70"  /><span className="truncate">{secondaryMeta?.branchLabel}</span></span> : null}
-              </div>
-            </div>
-          ) : null}
-        </div>
-      </div>
-    );
-  }
-
   const statusType = sessionStatus?.type ?? 'idle';
   const isStreaming = statusType === 'busy' || statusType === 'retry';
   const pendingPermissionCount = sessionPermissions.length;
@@ -928,15 +819,6 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
     setOpenSidebarMenuKey(open ? menuInstanceKey : null);
   };
 
-  const handleMenuOpenChangeComplete = (open: boolean) => {
-    if (!open && pendingRenameRef.current) {
-      const { id, title } = pendingRenameRef.current;
-      pendingRenameRef.current = null;
-      setEditingId(id);
-      setEditTitle(title);
-    }
-  };
-
   const handleRowSelect = (event?: React.MouseEvent<HTMLButtonElement>) => {
     if (suppressNextSelectRef.current) {
       suppressNextSelectRef.current = false;
@@ -987,10 +869,11 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
   };
 
   const sessionMenuContent = (
-    <DropdownMenuContent align="end" className="min-w-[180px]" finalFocus={() => (renamingFolderId || editingIdRef.current) ? false : true}>
+    <DropdownMenuContent align="end" className="min-w-[180px]" finalFocus={() => !renamingFolderId}>
       <DropdownMenuItem
         onClick={() => {
-          pendingRenameRef.current = { id: session.id, title: sessionTitle };
+          setOpenSidebarMenuKey(null);
+          onRenameSession(session.id, sessionTitle);
         }}
         className="[&>svg]:mr-1"
       >
@@ -1193,7 +1076,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
                     onClick={(event) => handleRowSelect(event)}
                     onDoubleClick={(e) => {
                       e.stopPropagation();
-                      handleSessionDoubleClick(session.id, sessionTitle);
+                      onRenameSession(session.id, sessionTitle);
                     }}
                     className={cn(
                       'flex min-w-0 flex-1 cursor-pointer flex-col gap-0 overflow-hidden rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 text-foreground select-none disabled:cursor-not-allowed',
@@ -1260,7 +1143,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
                 onClick={(event) => handleRowSelect(event)}
                 onDoubleClick={(e) => {
                   e.stopPropagation();
-                  handleSessionDoubleClick(session.id, sessionTitle);
+                  onRenameSession(session.id, sessionTitle);
                 }}
                 className={cn(
                   'flex min-w-0 flex-1 cursor-pointer flex-col gap-0 overflow-hidden rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 text-foreground select-none disabled:cursor-not-allowed',
@@ -1367,7 +1250,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
             </button>
           </div>
 
-          <DropdownMenu open={isMenuOpen} onOpenChange={handleMenuOpenChange} onOpenChangeComplete={handleMenuOpenChangeComplete}>
+          <DropdownMenu open={isMenuOpen} onOpenChange={handleMenuOpenChange}>
             <DropdownMenuTrigger asChild nativeButton={false}>
               <div
                 className="fixed w-0 h-0 overflow-hidden"

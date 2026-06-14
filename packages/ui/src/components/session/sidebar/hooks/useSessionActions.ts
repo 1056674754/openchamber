@@ -27,7 +27,6 @@ type Args = {
   setIsSessionSearchOpen: (open: boolean) => void;
   setActiveMainTab: (tab: 'chat' | 'plan' | 'git' | 'diff' | 'terminal' | 'files') => void;
   setSessionSwitcherOpen: (open: boolean) => void;
-  updateSessionTitle: (id: string, title: string) => Promise<void>;
   shareSession: (id: string) => Promise<Session | null>;
   unshareSession: (id: string) => Promise<Session | null>;
   deleteSession: (id: string) => Promise<boolean>;
@@ -38,10 +37,6 @@ type Args = {
   showDeletionDialog: boolean;
   setDeleteSessionConfirm: DeleteSessionConfirmSetter;
   deleteSessionConfirm: { session: Session; descendantCount: number; descendantIds: string[]; archivedBucket: boolean } | null;
-  setEditingId: (id: string | null) => void;
-  setEditTitle: (value: string) => void;
-  editingId: string | null;
-  editTitle: string;
 };
 
 const normalizeServerId = (serverId?: string | null): string =>
@@ -147,28 +142,6 @@ export const useSessionActions = (args: Args) => {
     },
     [args],
   );
-
-  const handleSessionDoubleClick = React.useCallback((sessionId: string, sessionTitle: string) => {
-    args.setEditingId(sessionId);
-    args.setEditTitle(sessionTitle);
-  }, [args]);
-
-  const handleSaveEdit = React.useCallback(async () => {
-    if (!args.editingId) {
-      return;
-    }
-    const trimmed = args.editTitle.trim();
-    if (trimmed) {
-      await args.updateSessionTitle(args.editingId, trimmed);
-    }
-    args.setEditingId(null);
-    args.setEditTitle('');
-  }, [args]);
-
-  const handleCancelEdit = React.useCallback(() => {
-    args.setEditingId(null);
-    args.setEditTitle('');
-  }, [args]);
 
   const handleShareSession = React.useCallback(async (session: Session) => {
     const result = await args.shareSession(session.id);
@@ -316,9 +289,6 @@ export const useSessionActions = (args: Args) => {
   return {
     copiedSessionId,
     handleSessionSelect,
-    handleSessionDoubleClick,
-    handleSaveEdit,
-    handleCancelEdit,
     handleShareSession,
     handleCopyShareUrl,
     handleUnshareSession,
