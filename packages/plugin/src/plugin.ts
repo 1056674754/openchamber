@@ -16,6 +16,7 @@ import { createSearchImagesTool } from "./tools/search-images.js"
 import { createModelCapabilityChecker } from "./model-capability.js"
 import { createImageStore } from "./image-store.js"
 import { createAnalysisCollectorHook } from "./analysis-collector.js"
+import { createSummarizer } from "./summarizer.js"
 import { openCacheDb, type CacheDb } from "./cache/database.js"
 import { log } from "./logger.js"
 
@@ -31,6 +32,7 @@ export function createPlugin(input: PluginInput): Promise<Hooks> {
   }
 
   const imageStore = createImageStore({ cacheDb })
+  const summarizer = createSummarizer(input.client, input.directory)
 
   const imageTransform = createImageTransformHandler({
     modelSupportsImage,
@@ -42,6 +44,7 @@ export function createPlugin(input: PluginInput): Promise<Hooks> {
   const analysisCollector = createAnalysisCollectorHook({
     cacheDb,
     imageDirectory: imageStore.getDirectory(),
+    summarizer,
   })
 
   const describeImage = createDescribeImageTool({ client: input.client, cacheDb })

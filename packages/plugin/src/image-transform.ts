@@ -71,7 +71,7 @@ function extractModelKey(info: MessageWithParts["info"]): { providerID: string; 
 function buildReplacementText(
   saved: SavedImage,
   part: FileLikePart,
-  priorAnalyses?: Array<{ goal: string | null; result: string; backend: string }> | null,
+  priorAnalyses?: Array<{ goal: string | null; result: string; summary: string | null; backend: string }> | null,
 ): string {
   const filename = saved.originalFilename ?? part.filename ?? "image"
   const mime = saved.mime
@@ -82,9 +82,11 @@ function buildReplacementText(
     ? [
         ``,
         `Prior analyses available for this image (call describe_image for full text):`,
-        ...priorAnalyses.map((a, i) =>
-          `  ${i + 1}. ${a.goal ? `[${a.goal}]` : "[general]"}: ${a.result.slice(0, 300)}${a.result.length > 300 ? "..." : ""}`,
-        ),
+        ...priorAnalyses.map((a, i) => {
+          const preview = a.summary ?? a.result.slice(0, 300)
+          const ellipsis = !a.summary && a.result.length > 300 ? "..." : ""
+          return `  ${i + 1}. ${a.goal ? `[${a.goal}]` : "[general]"}: ${preview}${ellipsis}`
+        }),
         ``,
       ].join("\n")
     : ""
@@ -170,7 +172,7 @@ export function createImageTransformHandler(deps: ImageTransformDeps) {
             replacementText = buildReplacementText(
               saved,
               part,
-              priorAnalyses.map((a) => ({ goal: a.goal, result: a.result, backend: a.backend })),
+              priorAnalyses.map((a) => ({ goal: a.goal, result: a.result, summary: a.summary, backend: a.backend })),
             )
           } else if (isFileUrl(url)) {
             // Already on disk (e.g. @-mention of a workspace file) — just reference it.

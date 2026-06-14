@@ -9,6 +9,7 @@
 
 import { basename, dirname, extname } from "node:path"
 import type { CacheDb } from "./cache/database.js"
+import type { Summarizer } from "./summarizer.js"
 import { log } from "./logger.js"
 
 const LOOK_AT_TOOL_NAMES = new Set(["look_at", "vision_describe", "describe_image", "analyze_image", "vision_analyze"])
@@ -17,6 +18,7 @@ const IMAGE_EXTS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".
 export type AnalysisCollectorDeps = {
   cacheDb?: CacheDb
   imageDirectory: string
+  summarizer: Summarizer
 }
 
 function extractImageHash(filePath: string, imageDirectory: string): string | null {
@@ -64,23 +66,26 @@ export function createAnalysisCollectorHook(deps: AnalysisCollectorDeps) {
 
     const filePaths = extractFilePathsFromArgs(input.args)
     const goal = extractGoalFromArgs(input.args)
-    let saved = 0
 
     for (const fp of filePaths) {
       const hash = extractImageHash(fp, deps.imageDirectory)
       if (!hash) continue
 
-      deps.cacheDb.saveAnalysis({
+      const rowId = deps.cacheDb.saveAnalysis({
         image_sha256: hash,
         backend: input.tool,
         goal,
         result: resultText,
       })
-      saved++
-    }
 
-    if (saved > 0) {
-      log("[analysis-collector] cached look_at results", { tool: input.tool, count: saved, goal })
+      deps.summarizer.summarize(resultText).then((summary) => {
+        if (summary && deps.cacheDb) {
+          deps.cacheDb.updateSummary(rowId, summary)
+          log("[analysis-collector] summary cached", { rowId, summary: summary.slice(0, 80) })
+        }
+      }).catch(() => {})
+
+      log("[analysis-collector] cached", { tool: input.tool, hash: hash.slice(0, 16), goal })
     }
   }
 }

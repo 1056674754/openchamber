@@ -26,6 +26,7 @@ export type ImageAnalysisRow = {
   backend: string
   goal: string | null
   result: string
+  summary: string | null
   time_analyzed: number
 }
 
@@ -35,7 +36,8 @@ export type CacheDb = {
   linkSession(sha256: string, sessionId: string): void
   getAnalysis(sha256: string, backend?: string): ImageAnalysisRow | null
   getAnalyses(sha256: string): ImageAnalysisRow[]
-  saveAnalysis(row: Omit<ImageAnalysisRow, "time_analyzed"> & { time_analyzed?: number }): void
+  saveAnalysis(row: Omit<ImageAnalysisRow, "time_analyzed" | "id" | "summary"> & { time_analyzed?: number }): number
+  updateSummary(id: number, summary: string): void
   searchImages(query: {
     filename?: string
     sessionId?: string
@@ -77,10 +79,12 @@ CREATE TABLE IF NOT EXISTS image_sessions (
 );
 
 CREATE TABLE IF NOT EXISTS image_analyses (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
   image_sha256 TEXT NOT NULL,
   backend TEXT NOT NULL,
   goal TEXT,
   result TEXT NOT NULL,
+  summary TEXT,
   time_analyzed INTEGER NOT NULL
 );
 
@@ -151,17 +155,23 @@ export function openCacheDb(dbPath?: string): CacheDb {
       ).all(sha256)
     },
 
-    saveAnalysis(row): void {
-      db.prepare(
-        `INSERT INTO image_analyses (image_sha256, backend, goal, result, time_analyzed)
-         VALUES (?, ?, ?, ?, ?)`,
+    saveAnalysis(row): number {
+      const info = db.prepare(
+        `INSERT INTO image_analyses (image_sha256, backend, goal, result, summary, time_analyzed)
+         VALUES (?, ?, ?, ?, ?, ?)`,
       ).run(
         row.image_sha256,
         row.backend,
         row.goal ?? null,
         row.result,
+        null,
         row.time_analyzed ?? Date.now(),
       )
+      return Number(info.lastInsertRowid)
+    },
+
+    updateSummary(id, summary): void {
+      db.prepare("UPDATE image_analyses SET summary = ? WHERE id = ?").run(summary, id)
     },
 
     searchImages(query): Array<ImageRow & { session_ids?: string }> {
