@@ -33,49 +33,26 @@ const createInMemoryStorage = (): Storage => {
     } as Storage;
 };
 
-const createSafeStorage = (): Storage => {
-    const baseStorage = getWindowStorage('localStorage');
-
-    if (!baseStorage) {
-        return createInMemoryStorage();
-    }
-
+const wrapSafeStorage = (baseStorage: Storage): Storage => {
     const fallback = createInMemoryStorage();
-    let storageAvailable = true;
-
-    const disableStorage = () => {
-        storageAvailable = false;
-    };
 
     const safeGet = (key: string): string | null => {
-        if (storageAvailable) {
-            try {
-                const value = baseStorage.getItem(key);
-                if (value !== null) {
-                    return value;
-                }
-            } catch {
-                disableStorage();
-            }
+        const fallbackValue = fallback.getItem(key);
+        if (fallbackValue !== null) return fallbackValue;
+        try {
+            return baseStorage.getItem(key);
+        } catch {
+            return null;
         }
-        return fallback.getItem(key);
     };
 
     const safeSet = (key: string, value: string) => {
-        if (storageAvailable) {
-            try {
-                baseStorage.setItem(key, value);
-                fallback.removeItem(key);
-                return;
-            } catch {
-                disableStorage();
-                // Prevent stale previous value from surviving when writes fail (e.g. quota).
-                try {
-                    baseStorage.removeItem(key);
-                } catch {
-                    // noop
-                }
-            }
+        try {
+            baseStorage.setItem(key, value);
+            fallback.removeItem(key);
+            return;
+        } catch {
+            // Preserve existing baseStorage value; keep new value in fallback only.
         }
         fallback.setItem(key, value);
     };
@@ -84,7 +61,7 @@ const createSafeStorage = (): Storage => {
         try {
             baseStorage.removeItem(key);
         } catch {
-            disableStorage();
+            // ignored
         }
         fallback.removeItem(key);
     };
@@ -93,20 +70,17 @@ const createSafeStorage = (): Storage => {
         try {
             baseStorage.clear();
         } catch {
-            disableStorage();
+            // ignored
         }
         fallback.clear();
     };
 
     const safeKey = (index: number): string | null => {
-        if (storageAvailable) {
-            try {
-                return baseStorage.key(index);
-            } catch {
-                disableStorage();
-            }
+        try {
+            return baseStorage.key(index);
+        } catch {
+            return fallback.key(index);
         }
-        return fallback.key(index);
     };
 
     return {
@@ -116,16 +90,19 @@ const createSafeStorage = (): Storage => {
         clear: safeClear,
         key: safeKey,
         get length() {
-            if (storageAvailable) {
-                try {
-                    return baseStorage.length + fallback.length;
-                } catch {
-                    disableStorage();
-                }
+            try {
+                return baseStorage.length + fallback.length;
+            } catch {
+                return fallback.length;
             }
-            return fallback.length;
         },
     } as Storage;
+};
+
+const createSafeStorage = (): Storage => {
+    const baseStorage = getWindowStorage('localStorage');
+    if (!baseStorage) return createInMemoryStorage();
+    return wrapSafeStorage(baseStorage);
 };
 
 export const getSafeStorage = (): Storage => {
@@ -137,97 +114,8 @@ export const getSafeStorage = (): Storage => {
 
 const createSafeSessionStorage = (): Storage => {
     const baseStorage = getWindowStorage('sessionStorage');
-
-    if (!baseStorage) {
-        return createInMemoryStorage();
-    }
-
-    const fallback = createInMemoryStorage();
-    let storageAvailable = true;
-
-    const disableStorage = () => {
-        storageAvailable = false;
-    };
-
-    const safeGet = (key: string): string | null => {
-        if (storageAvailable) {
-            try {
-                const value = baseStorage.getItem(key);
-                if (value !== null) {
-                    return value;
-                }
-            } catch {
-                disableStorage();
-            }
-        }
-        return fallback.getItem(key);
-    };
-
-    const safeSet = (key: string, value: string) => {
-        if (storageAvailable) {
-            try {
-                baseStorage.setItem(key, value);
-                fallback.removeItem(key);
-                return;
-            } catch {
-                disableStorage();
-                // Prevent stale previous value from surviving when writes fail (e.g. quota).
-                try {
-                    baseStorage.removeItem(key);
-                } catch {
-                    // noop
-                }
-            }
-        }
-        fallback.setItem(key, value);
-    };
-
-    const safeRemove = (key: string) => {
-        try {
-            baseStorage.removeItem(key);
-        } catch {
-            disableStorage();
-        }
-        fallback.removeItem(key);
-    };
-
-    const safeClear = () => {
-        try {
-            baseStorage.clear();
-        } catch {
-            disableStorage();
-        }
-        fallback.clear();
-    };
-
-    const safeKey = (index: number): string | null => {
-        if (storageAvailable) {
-            try {
-                return baseStorage.key(index);
-            } catch {
-                disableStorage();
-            }
-        }
-        return fallback.key(index);
-    };
-
-    return {
-        getItem: safeGet,
-        setItem: safeSet,
-        removeItem: safeRemove,
-        clear: safeClear,
-        key: safeKey,
-        get length() {
-            if (storageAvailable) {
-                try {
-                    return baseStorage.length + fallback.length;
-                } catch {
-                    disableStorage();
-                }
-            }
-            return fallback.length;
-        },
-    } as Storage;
+    if (!baseStorage) return createInMemoryStorage();
+    return wrapSafeStorage(baseStorage);
 };
 
 export const getSafeSessionStorage = (): Storage => {
