@@ -71,6 +71,24 @@ describe("message page user boundary", () => {
     expect(hasUserBoundary(current)).toBe(false)
   })
 
+  test("does not count skill instruction user messages as real user boundaries", () => {
+    const directive = message("msg_001", "user")
+    const current = page({
+      messages: [directive, message("msg_002", "assistant")],
+      parts: [{
+        id: "msg_001",
+        part: [textPart(
+          "prt_001",
+          "msg_001",
+          "<skill-instruction>\nBase directory for this skill: /tmp/skills/example/\n\nUse the example skill.\n</skill-instruction>\n\n<user-request>\nhello\n</user-request>",
+        )],
+      }],
+      cursor: "msg_001",
+    })
+
+    expect(hasUserBoundary(current)).toBe(false)
+  })
+
   test("does not count delegated subtask user messages as real user boundaries", () => {
     const subtask = message("msg_001", "user")
     const current = page({

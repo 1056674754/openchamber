@@ -22,6 +22,7 @@ import { buildSessionMessageRecordsSnapshot, useAllSessionStatuses, useChildStor
 import { useSync } from '@/sync/use-sync';
 import { getSyncStoresForServer } from '@/sync/multi-server-registry';
 import { useViewportStore } from '@/sync/viewport-store';
+import { useSessionUIStore } from '@/sync/session-ui-store';
 import { DraggableSessionRow } from './sessionFolderDnd';
 import { SessionUnreadMenuItem } from './SessionUnreadMenuItem';
 import { SidebarSpinner } from './SidebarSpinner';
@@ -376,6 +377,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
   const session = node.session;
   const liveSession = useSession(session.id);
   const resolvedSession = liveSession ?? session;
+  const isDeleting = useSessionUIStore((s) => s.deletingSessionIds.has(session.id));
   const isGlobalPinnedContext = renderContext === 'global-pinned';
   const isGlobalPinnedRootRow = isGlobalPinnedContext && depth === 0;
 
@@ -821,6 +823,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
   };
 
   const handleRowSelect = (event?: React.MouseEvent<HTMLButtonElement>) => {
+    if (isDeleting) return;
     if (suppressNextSelectRef.current) {
       suppressNextSelectRef.current = false;
       return;
@@ -1055,6 +1058,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
             isGlobalPinnedRootRow ? 'px-0.5' : 'px-1.5',
             isGlobalPinnedRootRow && 'gap-1.5',
             isMissingDirectory ? 'opacity-75' : '',
+            isDeleting && 'opacity-60',
             isRowSelected && 'bg-primary/15',
           )}
           style={depth > 0 ? { paddingLeft: `${rowIndentPx}px` } : undefined}
@@ -1071,7 +1075,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
                 <TooltipTrigger asChild>
                   <button
                     type="button"
-                    disabled={isMissingDirectory}
+                    disabled={isMissingDirectory || isDeleting}
                     onPointerDown={handleRowPointerDown}
                     onPointerUp={handleRowPointerEnd}
                     onPointerCancel={handleRowPointerEnd}
@@ -1089,7 +1093,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
                     >
                     <div className={cn('flex w-full items-center min-w-0 flex-1 overflow-hidden', isGlobalPinnedContext ? 'gap-1.5' : 'gap-0.5')}>
                       <div
-                        className={cn('block min-w-0 flex-1 truncate typography-ui-label font-normal', isActive ? 'text-primary' : 'text-foreground')}
+                        className={cn('block min-w-0 flex-1 truncate typography-ui-label font-normal', isDeleting ? 'text-status-error deleting-wave-text' : isActive ? 'text-primary' : 'text-foreground')}
                       >
                         {renderHighlightedText(sessionTitle, normalizedSessionSearchQuery)}
                       </div>
@@ -1138,7 +1142,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
             ) : (
               <button
                 type="button"
-                disabled={isMissingDirectory}
+                disabled={isMissingDirectory || isDeleting}
                 onPointerDown={handleRowPointerDown}
                 onPointerUp={handleRowPointerEnd}
                 onPointerCancel={handleRowPointerEnd}
@@ -1156,7 +1160,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
               >
                   <div className={cn('flex w-full items-center min-w-0 flex-1 overflow-hidden', isGlobalPinnedContext ? 'gap-1.5' : 'gap-0.5')}>
                   <div
-                    className={cn('block min-w-0 flex-1 truncate typography-ui-label font-normal', isActive ? 'text-primary' : 'text-foreground')}
+                    className={cn('block min-w-0 flex-1 truncate typography-ui-label font-normal', isDeleting ? 'text-status-error deleting-wave-text' : isActive ? 'text-primary' : 'text-foreground')}
                   >
                     {renderHighlightedText(sessionTitle, normalizedSessionSearchQuery)}
                   </div>

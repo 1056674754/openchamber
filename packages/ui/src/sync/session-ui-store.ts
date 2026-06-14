@@ -24,6 +24,7 @@ import { useDirectoryStore } from "@/stores/useDirectoryStore"
 import { useSessionFoldersStore } from "@/stores/useSessionFoldersStore"
 import { resolveGlobalSessionDirectory, useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
 import { useCommandsStore } from "@/stores/useCommandsStore"
+import { useSkillsStore } from "@/stores/useSkillsStore"
 import { getSafeStorage } from "@/stores/utils/safeStorage"
 import { markPendingUserSendAnimation } from "@/lib/userSendAnimation"
 import { flattenAssistantTextParts } from "@/lib/messages/messageText"
@@ -63,6 +64,7 @@ import { useViewportStore } from "./viewport-store"
 import { useSessionWorktreeStore } from "./session-worktree-store"
 import { getAttachedSessionDirectory } from "./session-worktree-contract"
 import { savePendingMessage, deletePendingMessage } from "./pending-message"
+import { resolveSlashRouteTarget } from "./slash-routing"
 
 export type { AttachedFile }
 
@@ -146,17 +148,13 @@ export function routeMessage(params: {
 
   // Slash commands — fire and forget, SSE delivers messages and status
   if (params.content.startsWith("/")) {
-    const [head, ...tail] = params.content.split(" ")
-    const cmdName = head.slice(1)
-
     const dirState = getDirectoryState(sessionDirectory)
     const syncCommands = dirState?.command ?? []
     const storeCommands = useCommandsStore.getState().commands
+    const storeSkills = useSkillsStore.getState().skills
+    const target = resolveSlashRouteTarget(params.content, [syncCommands, storeCommands, storeSkills])
 
-    const isCommand = syncCommands.find((c) => c.name === cmdName)
-      || storeCommands.find((c) => c.name === cmdName)
-
-    if (isCommand) {
+    if (target) {
       return optimisticSend({
         sessionId: params.sessionId,
         content: params.content,
@@ -171,8 +169,8 @@ export function routeMessage(params: {
           id: params.sessionId,
           providerID: params.providerID,
           modelID: params.modelID,
-          command: cmdName,
-          arguments: tail.join(" "),
+          command: target.name,
+          arguments: target.arguments,
           agent: params.agent,
           variant: params.variant,
           files: params.files,
@@ -272,6 +270,8 @@ export type SessionUIState = {
   availableWorktrees: WorktreeMetadata[]
   availableWorktreesByProject: Map<string, WorktreeMetadata[]>
   webUICreatedSessions: Set<string>
+  // Sessions mid-delete: stay in store with disabled row + red wave text
+  deletingSessionIds: Set<string>
   sessionAbortFlags: Map<string, { timestamp: number; acknowledged: boolean }>
   abortControllers: Map<string, AbortController>
   isLoading: boolean
@@ -311,6 +311,9 @@ export type SessionUIState = {
   clearError: () => void
   markSessionAsOpenChamberCreated: (sessionId: string) => void
   isOpenChamberCreatedSession: (sessionId: string) => boolean
+  markSessionDeleting: (sessionId: string) => void
+  unmarkSessionDeleting: (sessionId: string) => void
+  isSessionDeleting: (sessionId: string) => boolean
   getContextUsage: (contextLimit: number, outputLimit: number) => SessionContextUsage | null
   initializeNewOpenChamberSession: (sessionId: string, agents: unknown[]) => void
   setWorktreeMetadata: (sessionId: string, metadata: WorktreeMetadata | null) => void
@@ -544,7 +547,8 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
   worktreeMetadata: new Map(),
   availableWorktrees: [],
   availableWorktreesByProject: new Map(),
-  webUICreatedSessions: new Set(),
+    webUICreatedSessions: new Set(),
+    deletingSessionIds: new Set(),
   sessionAbortFlags: new Map(),
   abortControllers: new Map(),
   isLoading: false,
@@ -820,6 +824,24 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     }),
 
   isOpenChamberCreatedSession: (sessionId) => get().webUICreatedSessions.has(sessionId),
+
+  markSessionDeleting: (sessionId) =>
+    set((s) => {
+      if (s.deletingSessionIds.has(sessionId)) return s
+      const next = new Set(s.deletingSessionIds)
+      next.add(sessionId)
+      return { deletingSessionIds: next }
+    }),
+
+  unmarkSessionDeleting: (sessionId) =>
+    set((s) => {
+      if (!s.deletingSessionIds.has(sessionId)) return s
+      const next = new Set(s.deletingSessionIds)
+      next.delete(sessionId)
+      return { deletingSessionIds: next }
+    }),
+
+  isSessionDeleting: (sessionId) => get().deletingSessionIds.has(sessionId),
 
   getContextUsage: (contextLimit: number, outputLimit: number) => {
     if (get().newSessionDraft?.open) return null

@@ -3,7 +3,7 @@
  * Replaces the action methods from the old useSessionStore.
  */
 
-import type { OpencodeClient, Session, Message, Part } from "@opencode-ai/sdk/v2/client"
+import type { OpencodeClient, Session, Message, Part, SessionStatus } from "@opencode-ai/sdk/v2/client"
 import { Binary } from "./binary"
 import { useSessionUIStore } from "./session-ui-store"
 import { useInputStore } from "./input-store"
@@ -17,6 +17,7 @@ import { getSyncStoresForServer, getAllSyncStores } from "./multi-server-registr
 import { materializeSessionSnapshots } from "./materialization"
 import { stripMessageDiffSnapshots } from "./sanitize"
 import { sessionEvents } from "@/lib/sessionEvents"
+import { hasTerminalMessageSignal, type TerminalMessageSignalInfo } from "@/lib/messageCompletion"
 import {
   getOrRegisterRemoteConnection,
   getServerIdForBaseUrl,
@@ -39,6 +40,7 @@ const MESSAGE_REFETCH_LIMIT = 200
 const MESSAGE_REFETCH_SKIP_PARTS = new Set(["patch", "step-start", "step-finish"])
 const UNREVERT_REFETCH_ATTEMPTS = 3
 const UNREVERT_REFETCH_RETRY_MS = 150
+const SESSION_IDLE_GRACE_MS = 3_000
 
 type BuildOptimisticPartsInput = {
   messageID: string
@@ -46,6 +48,18 @@ type BuildOptimisticPartsInput = {
 }
 
 export type SendDeliveryMode = "normal" | "interrupt"
+
+export class SessionBusyError extends Error {
+  readonly sessionId: string
+  readonly deliveryMode: SendDeliveryMode
+
+  constructor(sessionId: string, deliveryMode: SendDeliveryMode, message?: string) {
+    super(message ?? `Session ${sessionId} is already running; queue the message or stop the current run before sending.`)
+    this.name = "SessionBusyError"
+    this.sessionId = sessionId
+    this.deliveryMode = deliveryMode
+  }
+}
 
 // Reference set by SyncProvider — allows actions to access SDK and stores
 let _sdk: OpencodeClient | null = null
@@ -55,6 +69,70 @@ let _optimisticAdd: ((input: { sessionID: string; message: Message; parts: Part[
 let _optimisticRemove: ((input: { sessionID: string; messageID: string; directory?: string | null; serverId?: string | null }) => void) | null = null
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+
+function isNonIdleStatus(status: SessionStatus | undefined): boolean {
+  return status !== undefined && status.type !== "idle"
+}
+
+function hasBlockingPendingAssistant(
+  state: ReturnType<ReturnType<ChildStoreManager["ensureChild"]>["getState"]>,
+  sessionId: string,
+  now: number,
+): boolean {
+  const status = state.session_status[sessionId]
+  const messages = state.message[sessionId] ?? []
+  let pendingAssistant = false
+
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index]
+    if (message.role === "user") break
+    if (message.role === "assistant") {
+      pendingAssistant = !hasTerminalMessageSignal(message as TerminalMessageSignalInfo)
+      break
+    }
+  }
+
+  if (!pendingAssistant) return false
+  if (status === undefined) return true
+  if (status.type !== "idle") return true
+
+  const lastActivityAt = state.session_activity[sessionId]
+  return typeof lastActivityAt === "number" && now - lastActivityAt < SESSION_IDLE_GRACE_MS
+}
+
+function isSessionBlockedForSend(
+  store: ReturnType<ChildStoreManager["ensureChild"]>,
+  sessionId: string,
+): boolean {
+  const state = store.getState()
+  return isNonIdleStatus(state.session_status[sessionId])
+    || hasBlockingPendingAssistant(state, sessionId, Date.now())
+}
+
+async function resolveBlockedSessionBeforeSend(
+  input: {
+    sessionId: string
+    deliveryMode?: SendDeliveryMode
+  },
+): Promise<void> {
+  if (input.deliveryMode !== "interrupt") {
+    throw new SessionBusyError(input.sessionId, input.deliveryMode ?? "normal")
+  }
+
+  const sessionDirectory = requireSessionDirectory(input.sessionId, "optimisticSend")
+  const result = await sdkForSession(input.sessionId).session.abort({
+    sessionID: input.sessionId,
+    directory: sessionDirectory,
+  })
+  const aborted = unwrapSdkData(result, "session.abort")
+  if (!aborted) {
+    throw new SessionBusyError(
+      input.sessionId,
+      "interrupt",
+      `Session ${input.sessionId} is still running; abort did not complete.`,
+    )
+  }
+}
 
 export function setActionRefs(
   sdk: OpencodeClient,
@@ -540,45 +618,36 @@ function optimisticRemoveSession(sessionId: string, directory?: string): Session
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 export async function deleteSession(sessionId: string, _options?: Record<string, unknown>): Promise<boolean> {
   const sessionDirectory = requireSessionDirectory(sessionId, "deleteSession")
-  // Remove from UI immediately, rollback on error
-  let snapshot = optimisticRemoveSession(sessionId, sessionDirectory)
-  let removedFromDir: string | null = snapshot ? (sessionDirectory ?? null) : null
-
-  // If the session wasn't in the resolved directory (e.g. archived session
-  // whose original child store was disposed), search all child stores.
-  if (!snapshot && _childStores) {
-    for (const [dir, store] of _childStores.children.entries()) {
-      const current = store.getState()
-      const sessions = [...current.session]
-      const result = Binary.search(sessions, sessionId, (s) => s.id)
-      if (result.found) {
-        snapshot = current.session
-        sessions.splice(result.index, 1)
-        store.setState({ session: sessions })
-        removedFromDir = dir
-        break
-      }
-    }
-  }
-
   const ui = useSessionUIStore.getState()
+  ui.markSessionDeleting(sessionId)
+
   if (ui.currentSessionId === sessionId) {
     ui.setCurrentSession(null)
   }
   try {
     await sdkForSession(sessionId).session.delete({ sessionID: sessionId, directory: sessionDirectory })
+    // Session was kept in the store during the network call so that
+    // session.updated SSE events update it in place instead of re-inserting
+    // it (which caused the disappear-then-reappear flicker). Remove now.
+    if (!optimisticRemoveSession(sessionId, sessionDirectory) && _childStores) {
+      for (const [, store] of _childStores.children.entries()) {
+        const current = store.getState()
+        const sessions = [...current.session]
+        const result = Binary.search(sessions, sessionId, (s) => s.id)
+        if (result.found) {
+          sessions.splice(result.index, 1)
+          store.setState({ session: sessions })
+          break
+        }
+      }
+    }
     useGlobalSessionsStore.getState().removeSessions([sessionId])
     return true
   } catch (error) {
     console.error("[session-actions] deleteSession failed", error)
-    if (snapshot && removedFromDir) {
-      try {
-        getDirectoryStore(removedFromDir).setState({ session: snapshot })
-      } catch {
-        // child store may have been disposed since — ignore rollback
-      }
-    }
     return false
+  } finally {
+    useSessionUIStore.getState().unmarkSessionDeleting(sessionId)
   }
 }
 
@@ -586,32 +655,32 @@ export async function deleteSession(sessionId: string, _options?: Record<string,
 export async function deleteSessionInDirectory(sessionId: string, directory: string): Promise<boolean> {
   if (!_childStores) return false
   const store = _childStores.ensureChild(directory)
-  const current = store.getState()
-  const sessions = [...current.session]
-  const result = Binary.search(sessions, sessionId, (s) => s.id)
-  let snapshot: Session[] | null = null
-  if (result.found) {
-    snapshot = current.session
-    sessions.splice(result.index, 1)
-    store.setState({ session: sessions })
-  }
   const ui = useSessionUIStore.getState()
+  ui.markSessionDeleting(sessionId)
   if (ui.currentSessionId === sessionId) ui.setCurrentSession(null)
   try {
     await sdkForSession(sessionId).session.delete({ sessionID: sessionId, directory })
+    const current = store.getState()
+    const sessions = [...current.session]
+    const result = Binary.search(sessions, sessionId, (s) => s.id)
+    if (result.found) {
+      sessions.splice(result.index, 1)
+      store.setState({ session: sessions })
+    }
     useGlobalSessionsStore.getState().removeSessions([sessionId])
     return true
   } catch (error) {
     console.error("[session-actions] deleteSessionInDirectory failed", error)
-    if (snapshot) store.setState({ session: snapshot })
     return false
+  } finally {
+    useSessionUIStore.getState().unmarkSessionDeleting(sessionId)
   }
 }
 
 export async function archiveSession(sessionId: string): Promise<boolean> {
   const sessionDirectory = requireSessionDirectory(sessionId, "archiveSession")
-  const snapshot = optimisticRemoveSession(sessionId, sessionDirectory)
   const ui = useSessionUIStore.getState()
+  ui.markSessionDeleting(sessionId)
   if (ui.currentSessionId === sessionId) {
     ui.setCurrentSession(null)
   }
@@ -619,11 +688,13 @@ export async function archiveSession(sessionId: string): Promise<boolean> {
     const archivedAt = Date.now()
     await sdkForSession(sessionId).session.update({ sessionID: sessionId, directory: sessionDirectory, time: { archived: archivedAt } })
     useGlobalSessionsStore.getState().archiveSessions([sessionId], archivedAt)
+    optimisticRemoveSession(sessionId, sessionDirectory)
     return true
   } catch (error) {
     console.error("[session-actions] archiveSession failed", error)
-    if (snapshot) getDirectoryStore(sessionDirectory).setState({ session: snapshot })
     return false
+  } finally {
+    useSessionUIStore.getState().unmarkSessionDeleting(sessionId)
   }
 }
 
@@ -716,7 +787,9 @@ export async function optimisticSend(input: {
   }
 
   const store = storeForSession(input.sessionId, input.directory, input.serverId)
-  const originalStatus = store.getState().session_status[input.sessionId]
+  if (isSessionBlockedForSend(store, input.sessionId)) {
+    await resolveBlockedSessionBeforeSend(input)
+  }
   const messageID = ascendingId("msg")
   const textPartId = ascendingId("prt")
 
@@ -768,17 +841,6 @@ export async function optimisticSend(input: {
 
   try {
     await waitForConnectionOrThrow(input.serverId ?? serverRegistry.getServerForSession(input.sessionId))
-
-    // Interrupt is explicit. Normal sends are forwarded to OpenCode so the
-    // current turn can reach its own boundary before the new message is handled.
-    if (input.deliveryMode === "interrupt" && originalStatus && originalStatus.type !== "idle") {
-      try {
-        const sessionDirectory = requireSessionDirectory(input.sessionId, "optimisticSend")
-        await sdkForSession(input.sessionId).session.abort({ sessionID: input.sessionId, directory: sessionDirectory })
-      } catch {
-        // ignore abort errors — proceed with send regardless
-      }
-    }
 
     await input.send(messageID)
   } catch (error) {
@@ -890,7 +952,12 @@ export async function abortCurrentOperation(sessionId: string): Promise<boolean>
   const abortPromises = [...directories].map(async (dir) => {
     const callStart = Date.now()
     try {
-      await client.session.abort({ sessionID: sessionId, directory: dir })
+      const result = await client.session.abort({ sessionID: sessionId, directory: dir })
+      const aborted = unwrapSdkData(result, "session.abort")
+      if (aborted !== true) {
+        results.push({ directory: dir, ok: false, error: "session.abort returned false", ms: Date.now() - callStart })
+        return
+      }
       results.push({ directory: dir, ok: true, ms: Date.now() - callStart })
     } catch (error) {
       results.push({ directory: dir, ok: false, error: String(error), ms: Date.now() - callStart })

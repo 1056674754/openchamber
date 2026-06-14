@@ -237,11 +237,12 @@ export function applyDirectoryEvent(
 
       if (result.found) {
         sessions[result.index] = info
-      } else {
-        sessions.splice(result.index, 0, info)
-        trimSessions(draft)
+        return true
       }
-      return true
+
+      // Don't re-insert: prevents deleted sessions from being restored by
+      // out-of-order SSE events (flicker bug).
+      return false
     }
 
     case "session.deleted": {

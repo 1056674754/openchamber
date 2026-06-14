@@ -472,6 +472,20 @@ svg.animate-spin {
   }
 }
 
+@keyframes deleting-text-wave {
+  0%,
+  100% {
+    opacity: 0.5;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.deleting-wave-text {
+  animation: deleting-text-wave 0.9s ease-in-out infinite;
+}
+
 .app-region-drag {
   -webkit-app-region: drag;
 }

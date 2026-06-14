@@ -7,11 +7,26 @@ type MockSdkResult = {
   response?: { status?: number }
 }
 
+async function expectRejectsWithMessage(promise: Promise<unknown>, message: string): Promise<void> {
+  let caught: unknown
+  try {
+    await promise
+  } catch (error) {
+    caught = error
+  }
+
+  if (!(caught instanceof Error)) {
+    throw new Error("Expected promise to reject with an Error")
+  }
+  expect(caught.message.includes(message)).toBe(true)
+}
+
 // Mock SDK client that records permission / question reply calls
 const replyCalls: Array<{ method: string; params: Record<string, unknown> }> = []
 const sessionCalls: Array<{ method: string; params: Record<string, unknown> }> = []
 let permissionReplyResult: MockSdkResult = { data: true }
 let permissionRespondResult: MockSdkResult = { data: true }
+let sessionAbortResult: MockSdkResult = { data: true }
 let sessionRevertResult: MockSdkResult = { data: null }
 let sessionUnrevertResult: MockSdkResult = { data: null }
 let configState = {
@@ -49,7 +64,7 @@ const mockScopedClient = {
   session: {
     abort: mock((params: Record<string, unknown>) => {
       sessionCalls.push({ method: "session.abort", params })
-      return Promise.resolve({ data: true })
+      return Promise.resolve(sessionAbortResult)
     }),
     revert: mock((params: Record<string, unknown>) => {
       sessionCalls.push({ method: "session.revert", params })
@@ -86,7 +101,7 @@ const mockSdk = {
   session: {
     abort: mock((params: Record<string, unknown>) => {
       sessionCalls.push({ method: "session.abort", params })
-      return Promise.resolve({ data: true })
+      return Promise.resolve(sessionAbortResult)
     }),
     revert: mock((params: Record<string, unknown>) => {
       sessionCalls.push({ method: "session.revert", params })
@@ -197,6 +212,7 @@ beforeEach(() => {
   sessionCalls.length = 0
   permissionReplyResult = { data: true }
   permissionRespondResult = { data: true }
+  sessionAbortResult = { data: true }
   sessionRevertResult = { data: null }
   sessionUnrevertResult = { data: null }
   inputStoreState = {
@@ -438,11 +454,55 @@ describe("optimisticSend", () => {
     expect(optimisticRemoves).toHaveLength(0)
   })
 
-  test("does not abort a busy session for normal sends", async () => {
+  test("rejects normal sends while a session is busy", async () => {
     const store = createStore({})
     store.setState({
       session_status: {
         "session-a": { type: "busy" },
+      },
+    })
+    const childStores = createChildStores([["/test/project", store]])
+    let sendCalled = false
+    const optimisticAdds: Array<unknown> = []
+    const optimisticRemoves: Array<unknown> = []
+
+    const { setActionRefs, setOptimisticRefs, optimisticSend } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/test/project")
+    setOptimisticRefs(
+      (input) => {
+        optimisticAdds.push(input)
+      },
+      (input) => {
+        optimisticRemoves.push(input)
+      },
+    )
+
+    await expectRejectsWithMessage(optimisticSend({
+      sessionId: "session-a",
+      content: "hello while busy",
+      providerID: "anthropic",
+      modelID: "claude",
+      send: async () => {
+        sendCalled = true
+      },
+    }), "already running")
+
+    expect(sendCalled).toBe(false)
+    expect(sessionCalls.filter((call) => call.method === "session.abort")).toHaveLength(0)
+    expect(optimisticAdds).toHaveLength(0)
+    expect(optimisticRemoves).toHaveLength(0)
+  })
+
+  test("rejects normal sends while the trailing assistant message is incomplete", async () => {
+    const store = createStore({})
+    store.setState({
+      message: {
+        "session-a": [{
+          id: "msg-assistant",
+          sessionID: "session-a",
+          role: "assistant",
+          time: { created: Date.now() },
+        } as unknown as Message],
       },
     })
     const childStores = createChildStores([["/test/project", store]])
@@ -452,18 +512,17 @@ describe("optimisticSend", () => {
     setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/test/project")
     setOptimisticRefs(() => {}, () => {})
 
-    await optimisticSend({
+    await expectRejectsWithMessage(optimisticSend({
       sessionId: "session-a",
-      content: "hello while busy",
+      content: "hello while assistant incomplete",
       providerID: "anthropic",
       modelID: "claude",
       send: async () => {
         sendCalled = true
       },
-    })
+    }), "already running")
 
-    expect(sendCalled).toBe(true)
-    expect(sessionCalls.filter((call) => call.method === "session.abort")).toHaveLength(0)
+    expect(sendCalled).toBe(false)
   })
 
   test("aborts a busy session only for interrupt delivery", async () => {
@@ -675,6 +734,36 @@ describe("rejectQuestion passes directory", () => {
     expect(replyCalls.length).toBe(1)
     expect(replyCalls[0].params.requestID).toBe("q-recovered")
     expect(replyCalls[0].params.directory).toBe("/recovered/project")
+  })
+})
+
+describe("abortCurrentOperation", () => {
+  test("returns false when SDK abort reports an error", async () => {
+    sessionAbortResult = { error: { name: "InternalError", message: "abort failed" }, response: { status: 500 } }
+    const store = createStore({})
+    const childStores = createChildStores([["/test/project", store]])
+
+    const { setActionRefs, abortCurrentOperation } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/test/project")
+
+    const aborted = await abortCurrentOperation("session-a")
+
+    expect(aborted).toBe(false)
+    expect(sessionCalls.filter((call) => call.method === "session.abort")).toHaveLength(1)
+  })
+
+  test("returns false when SDK abort returns false", async () => {
+    sessionAbortResult = { data: false }
+    const store = createStore({})
+    const childStores = createChildStores([["/test/project", store]])
+
+    const { setActionRefs, abortCurrentOperation } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/test/project")
+
+    const aborted = await abortCurrentOperation("session-a")
+
+    expect(aborted).toBe(false)
+    expect(sessionCalls.filter((call) => call.method === "session.abort")).toHaveLength(1)
   })
 })
 
