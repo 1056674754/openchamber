@@ -1,5 +1,4 @@
 import React from 'react';
-import type { Session } from '@opencode-ai/sdk/v2';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 
@@ -13,7 +12,6 @@ type Keys = {
   sessionExpanded: string;
   sessionExpandedLegacy: string;
   projectCollapse: string;
-  sessionPinned: string;
   groupOrder: string;
   projectActiveSession: string;
   groupCollapse: string;
@@ -30,12 +28,8 @@ const LEGACY_EXPANSION_CONTEXT_PREFIXES = [
 
 type Args = {
   isVSCode: boolean;
-  hasLoadedGlobalSessions: boolean;
   safeStorage: SafeStorageLike;
   keys: Keys;
-  sessions: Session[];
-  pinnedSessionIds: Set<string>;
-  setPinnedSessionIds: React.Dispatch<React.SetStateAction<Set<string>>>;
   groupOrderByProject: Map<string, string[]>;
   activeSessionByProject: Map<string, string>;
   collapsedGroups: Set<string>;
@@ -46,12 +40,8 @@ type Args = {
 export const useSidebarPersistence = (args: Args) => {
   const {
     isVSCode,
-    hasLoadedGlobalSessions,
     safeStorage,
     keys,
-    sessions,
-    pinnedSessionIds,
-    setPinnedSessionIds,
     groupOrderByProject,
     activeSessionByProject,
     collapsedGroups,
@@ -221,34 +211,6 @@ export const useSidebarPersistence = (args: Args) => {
       return changed ? next : prev;
     });
   }, [keys.projectCollapse, projectCollapseHydrationSignature, safeStorage, setCollapsedProjects]);
-
-  React.useEffect(() => {
-    if (!hasLoadedGlobalSessions) {
-      return;
-    }
-
-    const existingSessionIds = new Set(sessions.map((session) => session.id));
-    setPinnedSessionIds((prev) => {
-      let changed = false;
-      const next = new Set<string>();
-      prev.forEach((id) => {
-        if (existingSessionIds.has(id)) {
-          next.add(id);
-        } else {
-          changed = true;
-        }
-      });
-      return changed ? next : prev;
-    });
-  }, [hasLoadedGlobalSessions, sessions, setPinnedSessionIds]);
-
-  React.useEffect(() => {
-    try {
-      safeStorage.setItem(keys.sessionPinned, JSON.stringify(Array.from(pinnedSessionIds)));
-    } catch {
-      // ignored
-    }
-  }, [keys.sessionPinned, pinnedSessionIds, safeStorage]);
 
   React.useEffect(() => {
     try {

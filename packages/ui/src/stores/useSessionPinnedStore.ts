@@ -27,6 +27,7 @@ type SessionPinnedStore = {
   ids: Set<string>;
   setIds: (next: Set<string> | ((prev: Set<string>) => Set<string>)) => void;
   toggle: (sessionId: string) => void;
+  rehydrate: () => void;
 };
 
 const safeStorage = getSafeStorage();
@@ -51,4 +52,18 @@ export const useSessionPinnedStore = create<SessionPinnedStore>((set, get) => ({
     set({ ids: next });
     persistPinned(safeStorage, next);
   },
+  rehydrate: () => {
+    const next = readPinned(safeStorage);
+    const current = get().ids;
+    if (next.size === current.size && [...next].every((id) => current.has(id))) return;
+    set({ ids: next });
+  },
 }));
+
+// `storage` event fires only in OTHER tabs, so same-tab toggle() stays authoritative.
+if (typeof window !== 'undefined') {
+  window.addEventListener('storage', (event) => {
+    if (event.key !== SESSION_PINNED_STORAGE_KEY) return;
+    useSessionPinnedStore.getState().rehydrate();
+  });
+}

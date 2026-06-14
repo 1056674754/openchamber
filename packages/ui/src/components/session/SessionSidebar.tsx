@@ -14,6 +14,7 @@ import { useSessionPrefetch } from './sidebar/hooks/useSessionPrefetch';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { getSafeStorage } from '@/stores/utils/safeStorage';
+import { useSessionPinnedStore } from '@/stores/useSessionPinnedStore';
 import { useGitStore, useGitAllBranches, useGitRepoStatusMap } from '@/stores/useGitStore';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { NewWorktreeDialog } from './NewWorktreeDialog';
@@ -91,7 +92,6 @@ const PROJECT_ACTIVE_SESSION_STORAGE_KEY = 'oc.sessions.activeSessionByProject';
 // duplicate session rows in different contexts keep independent expand state.
 const SESSION_EXPANDED_STORAGE_KEY = 'oc.sessions.expandedParents.v2';
 const LEGACY_SESSION_EXPANDED_STORAGE_KEY = 'oc.sessions.expandedParents';
-const SESSION_PINNED_STORAGE_KEY = 'oc.sessions.pinned';
 const SESSION_PINNED_PER_PROJECT_STORAGE_KEY = 'oc.sessions.pinnedByProject';
 const SESSION_PINNED_ORDER_STORAGE_KEY = 'oc.sessions.pinnedOrder';
 const SESSION_PINNED_ORDER_BY_PROJECT_STORAGE_KEY = 'oc.sessions.pinnedOrderByProject';
@@ -284,18 +284,9 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   const [deleteFolderConfirm, setDeleteFolderConfirm] = React.useState<DeleteFolderConfirmState>(null);
   const [bulkDeleteConfirm, setBulkDeleteConfirm] = React.useState<BulkDeleteSessionsConfirmState>(null);
   const [regenerateTitleSession, setRegenerateTitleSession] = React.useState<{ id: string; title: string } | null>(null);
-  const [pinnedSessionIds, setPinnedSessionIds] = React.useState<Set<string>>(() => {
-    try {
-      const raw = getSafeStorage().getItem(SESSION_PINNED_STORAGE_KEY);
-      if (!raw) {
-        return new Set();
-      }
-      const parsed = JSON.parse(raw) as string[];
-      return new Set(Array.isArray(parsed) ? parsed.filter((item) => typeof item === 'string') : []);
-    } catch {
-      return new Set();
-    }
-  });
+  const pinnedSessionIds = useSessionPinnedStore((state) => state.ids);
+  const toggleGlobalPinnedSession = useSessionPinnedStore((state) => state.toggle);
+  const setGlobalPinnedIds = useSessionPinnedStore((state) => state.setIds);
   const [pinnedSessionIdsByProject, setPinnedSessionIdsByProject] = React.useState<Map<string, Set<string>>>(() => {
     try {
       const raw = getSafeStorage().getItem(SESSION_PINNED_PER_PROJECT_STORAGE_KEY);
@@ -761,20 +752,15 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
 
   const { scheduleCollapsedProjectsPersist, markProjectCollapseUserTouched } = useSidebarPersistence({
     isVSCode,
-    hasLoadedGlobalSessions,
     safeStorage,
     keys: {
       sessionExpanded: SESSION_EXPANDED_STORAGE_KEY,
       sessionExpandedLegacy: LEGACY_SESSION_EXPANDED_STORAGE_KEY,
       projectCollapse: PROJECT_COLLAPSE_STORAGE_KEY,
-      sessionPinned: SESSION_PINNED_STORAGE_KEY,
       groupOrder: GROUP_ORDER_STORAGE_KEY,
       projectActiveSession: PROJECT_ACTIVE_SESSION_STORAGE_KEY,
       groupCollapse: GROUP_COLLAPSE_STORAGE_KEY,
     },
-    sessions,
-    pinnedSessionIds,
-    setPinnedSessionIds,
     groupOrderByProject,
     activeSessionByProject,
     collapsedGroups,
@@ -881,18 +867,11 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
           return changed ? next : prev;
         });
       }
-      setPinnedSessionIds((prev) => {
-        const next = new Set(prev);
-        if (next.has(sessionId)) {
-          next.delete(sessionId);
-        } else {
-          next.add(sessionId);
-        }
-        return next;
-      });
+      toggleGlobalPinnedSession(sessionId);
     } else {
       if (pinnedSessionIds.has(sessionId)) {
-        setPinnedSessionIds((prev) => {
+        setGlobalPinnedIds((prev) => {
+          if (!prev.has(sessionId)) return prev;
           const next = new Set(prev);
           next.delete(sessionId);
           return next;
@@ -915,7 +894,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
         return next;
       });
     }
-  }, [pinnedSessionIds, pinnedSessionIdsByProject]);
+  }, [pinnedSessionIds, pinnedSessionIdsByProject, toggleGlobalPinnedSession, setGlobalPinnedIds]);
 
   const reorderGlobalPinned = React.useCallback((fromIndex: number, toIndex: number) => {
     setPinnedOrder((prev) => {
