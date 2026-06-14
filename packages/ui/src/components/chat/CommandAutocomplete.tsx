@@ -185,7 +185,7 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
   return (
     <div
       ref={containerRef}
-      className="absolute z-[100] min-w-0 w-full max-w-[560px] max-h-[min(420px,calc(100dvh-12rem))] bg-background border-2 border-border/60 rounded-xl shadow-none bottom-full mb-2 left-0 flex flex-col"
+      className="absolute z-[100] min-w-0 w-full max-w-none max-h-[min(420px,calc(100dvh-12rem))] bg-background border-2 border-border/60 rounded-xl shadow-none bottom-full mb-2 left-0 flex flex-col"
       style={style}
     >
       {showTabs ? (

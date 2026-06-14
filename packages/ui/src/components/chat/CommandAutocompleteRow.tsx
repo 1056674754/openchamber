@@ -100,7 +100,7 @@ const CommandAutocompleteRowComponent = ({
   const ignoreClickRef = React.useRef(false);
   const isSystem = command.isBuiltIn;
   const isOpenChamberBadge = command.isOpenChamber;
-  const showTypeBadge = !isDense || !command.isSkill;
+  const showTypeBadge = !isOpenChamberBadge && (!isDense || !command.isSkill);
 
   return (
     <div
@@ -109,7 +109,7 @@ const CommandAutocompleteRowComponent = ({
       aria-selected={isSelected}
       className={cn(
         'flex cursor-pointer gap-2 rounded-lg px-3',
-        isDense ? 'min-h-9 items-center py-1.5' : 'items-start py-2',
+        isDense ? 'min-h-8 items-center py-1.5' : 'items-start py-2',
         isSelected && 'bg-interactive-selection'
       )}
       onPointerDown={(event) => {
@@ -162,17 +162,22 @@ const CommandAutocompleteRowComponent = ({
       </div>
       <div className="min-w-0 flex-1">
         <div className={cn('flex min-w-0 items-center gap-2', isDense && 'gap-1.5')}>
-          <span className={cn('typography-ui-label min-w-0 truncate font-medium', isDense && 'basis-[42%] shrink-0')}>
+          <span className={cn('min-w-0 truncate font-medium', isDense ? 'typography-meta shrink-0' : 'typography-ui-label')}>
             <CommandName name={command.name} searchQuery={searchQuery} isDense={isDense} />
           </span>
-          <div className="flex shrink-0 items-center gap-1.5">
+          {isDense && command.description ? (
+            <span className="typography-meta min-w-0 flex-1 truncate text-muted-foreground">
+              {command.description}
+            </span>
+          ) : null}
+          <div className="ml-auto flex shrink-0 items-center justify-end gap-1.5">
             {showTypeBadge ? (
               <span className={TYPE_BADGE_CLASS}>
                 {command.isSkill ? labels.skill : labels.command}
               </span>
             ) : null}
             {isOpenChamberBadge ? (
-              <span className={NEUTRAL_BADGE_CLASS}>OpenChamber</span>
+              <span className={NEUTRAL_BADGE_CLASS}>OpenChamber魔术命令</span>
             ) : isSystem ? (
               <span className={NEUTRAL_BADGE_CLASS}>{labels.system}</span>
             ) : command.scope ? (
@@ -181,14 +186,12 @@ const CommandAutocompleteRowComponent = ({
               </span>
             ) : null}
             {command.agent ? (
-              <span className={NEUTRAL_BADGE_CLASS}>{command.agent}</span>
+              <span className={cn(NEUTRAL_BADGE_CLASS, 'inline-flex items-center gap-1')}>
+                <Icon name="ai-agent" className="h-3 w-3 shrink-0" />
+                {command.agent}
+              </span>
             ) : null}
           </div>
-          {isDense && command.description ? (
-            <span className="typography-meta min-w-0 flex-1 truncate text-muted-foreground">
-              {command.description}
-            </span>
-          ) : null}
         </div>
         {!isDense && command.description ? (
           <div className="typography-meta mt-0.5 truncate text-muted-foreground">
