@@ -16,6 +16,12 @@ describe('real user message parts', () => {
         ])).toBe(false);
     });
 
+    test('rejects skill instruction directives', () => {
+        expect(hasRealUserMessageParts([
+            textPart('<skill-instruction>\nBase directory for this skill: /tmp/skills/example/\n\nDo the thing.\n</skill-instruction>\n\n<user-request>\nhello\n</user-request>'),
+        ])).toBe(false);
+    });
+
     test('rejects delegated subtask parts', () => {
         const parts = [{ type: 'subtask' } as Part];
 

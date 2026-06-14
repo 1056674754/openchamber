@@ -5,8 +5,14 @@ import type { Part } from "@opencode-ai/sdk/v2"
 const OMO_INTERNAL_INITIATOR = "<!-- OMO_INTERNAL_INITIATOR -->"
 const OPENCODE_CONTINUATION_TEXT = "Continue if you have next steps, or stop and ask for clarification if you are unsure how to proceed."
 export const DIRECTIVE_TYPE_CONTINUATION = "CONTINUATION"
+const DIRECTIVE_TYPE_SKILL = "SKILL"
 const SYSTEM_REMINDER_OPEN = "<system-reminder>"
 const SYSTEM_DIRECTIVE_PREFIX = "[SYSTEM DIRECTIVE: OH-MY-OPENCODE"
+const SKILL_INSTRUCTION_RE = /<skill-instruction>[\s\S]*?Base directory for this skill:[\s\S]*?<\/skill-instruction>/
+
+const textHasSkillInstructionDirective = (text: string): boolean => {
+  return SKILL_INSTRUCTION_RE.test(text)
+}
 
 const textPartHasDirectiveMarker = (part: Part): boolean => {
   if (part.type !== "text") return false
@@ -18,6 +24,9 @@ const textPartHasDirectiveMarker = (part: Part): boolean => {
 
   // Atlas hooks wrap content in <system-reminder>...</system-reminder> pairs.
   if (text.includes(SYSTEM_REMINDER_OPEN) && text.includes("</system-reminder>")) return true
+
+  // oh-my-opencode slash skills wrap prompt templates in <skill-instruction>.
+  if (textHasSkillInstructionDirective(text)) return true
 
   // Directive prefix always appears at the START of the message.
   if (text.trimStart().startsWith(SYSTEM_DIRECTIVE_PREFIX)) return true
@@ -54,6 +63,7 @@ export const extractDirectiveType = (parts: Part[] | undefined): string | null =
     if (part.type !== "text") continue
     const text = (part as { text?: unknown }).text
     if (typeof text !== "string") continue
+    if (textHasSkillInstructionDirective(text)) return DIRECTIVE_TYPE_SKILL
     const match = text.match(DIRECTIVE_TYPE_RE)
     if (match) return match[1]
   }

@@ -34,6 +34,13 @@ function createDirectivePart(): Part {
     } as Part;
 }
 
+function createSkillDirectivePart(): Part {
+    return {
+        type: 'text',
+        text: '<skill-instruction>\nBase directory for this skill: /tmp/skills/example/\nFile references (@path) in this skill are relative to this directory.\n\nUse the example skill.\n</skill-instruction>\n\n<user-request>\nplease run it\n</user-request>',
+    } as Part;
+}
+
 describe('projectTurnRecords', () => {
     test('groups assistant replies under their parent user turn', () => {
         const user = createMessageEntry({ id: 'u1', role: 'user', createdAt: 1 });
@@ -128,6 +135,32 @@ describe('projectTurnRecords', () => {
         expect(projection.turns[1]?.assistantMessageIds).toEqual(['a2']);
 
         // All messages grouped, none ungrouped
+        expect(projection.ungroupedMessageIds.size).toBe(0);
+    });
+
+    test('skill instruction directive creates a directive turn with grouped assistant', () => {
+        const user1 = createMessageEntry({ id: 'u1', role: 'user', createdAt: 1 });
+        const skillDirective = createMessageEntry({
+            id: 'd1',
+            role: 'user',
+            parentID: 'u1',
+            createdAt: 2,
+            parts: [createSkillDirectivePart()],
+        });
+        const assistantToDirective = createMessageEntry({
+            id: 'a1',
+            role: 'assistant',
+            parentID: 'd1',
+            createdAt: 3,
+        });
+
+        const projection = projectTurnRecords([user1, skillDirective, assistantToDirective]);
+
+        expect(projection.turns).toHaveLength(2);
+        expect(projection.turns[0]?.isDirectiveTurn).toBe(false);
+        expect(projection.turns[1]?.turnId).toBe('d1');
+        expect(projection.turns[1]?.isDirectiveTurn).toBe(true);
+        expect(projection.turns[1]?.assistantMessageIds).toEqual(['a1']);
         expect(projection.ungroupedMessageIds.size).toBe(0);
     });
 
