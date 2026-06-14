@@ -188,8 +188,8 @@ const collectInlineSkillMentions = (text: string, skillNames: Set<string>): stri
 
 const buildSkillMentionInstruction = (skillNames: string[]): string | null => {
     if (skillNames.length === 0) return null;
-    const formatted = skillNames.map((name) => `/${name}`).join(', ');
-    return `The user explicitly mentioned these skills in their message: ${formatted}. Use the corresponding skill tool when it is relevant to accomplishing the user's request.`;
+    const formatted = skillNames.map((name) => `\`${name}\``).join(', ');
+    return `The user explicitly mentioned these skills using slash syntax. If a skill is relevant, call the skill tool with the exact skill name without the leading slash: ${formatted}.`;
 };
 
 const hasUserMessages = (sessionId: string, directory?: string) => {
@@ -1268,6 +1268,16 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     }, []);
 
     const sendableAttachedFiles = attachedFiles;
+
+    const getModelMetadata = useConfigStore((s) => s.getModelMetadata);
+    const currentModelMetadata = currentProviderId && currentModelId
+        ? getModelMetadata(currentProviderId, currentModelId)
+        : undefined;
+    const currentModelSupportsImages = currentModelMetadata?.modalities?.input?.includes('image')
+        ?? currentModelMetadata?.attachment
+        ?? true;
+    const hasImageAttachments = attachedFiles.some((f) => f.mimeType.startsWith('image/'));
+    const showImageFallbackNotice = hasImageAttachments && !currentModelSupportsImages;
 
     const knownAgentNames = React.useMemo(
         () => new Set(agents.map((agent) => agent.name.toLowerCase())),
@@ -4116,6 +4126,14 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             style={isMobile && inputBarOffset > 0 ? { marginBottom: `${inputBarOffset}px` } : undefined}
         >
             <div className={cn('chat-input-column relative overflow-visible', isDesktopExpanded && 'flex flex-1 min-h-0 flex-col')}>
+                {showImageFallbackNotice && (
+                    <div className="mb-2 flex items-center gap-2 rounded-lg border border-border bg-surface-elevated px-3 py-1.5">
+                        <Icon name="file-image" className="size-3.5 shrink-0 text-muted-foreground" />
+                        <span className="typography-meta text-muted-foreground">
+                            {t('chat.input.imageFallbackNotice')}
+                        </span>
+                    </div>
+                )}
                 <AttachedFilesList />
                 <QueuedMessageChips
                     onEditMessage={handleQueuedMessageEdit}
@@ -4422,10 +4440,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                             onClose={() => setShowCommandAutocomplete(false)}
                             style={isDesktopExpanded && autocompleteOverlayPosition
                                 ? {
-                                    left: `${autocompleteOverlayPosition.left}px`,
+                                    left: '0px',
                                     top: `${autocompleteOverlayPosition.top}px`,
                                     bottom: 'auto',
-                                    width: `min(560px, calc(100% - ${autocompleteOverlayPosition.left + 8}px))`,
+                                    width: '100%',
                                     maxHeight: `${autocompleteOverlayPosition.maxHeight}px`,
                                     transform: autocompleteOverlayPosition.place === 'above' ? 'translateY(-100%)' : undefined,
                                 }
@@ -4441,10 +4459,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                             onClose={() => setShowSkillAutocomplete(false)}
                             style={isDesktopExpanded && autocompleteOverlayPosition
                                 ? {
-                                    left: `${autocompleteOverlayPosition.left}px`,
+                                    left: '0px',
                                     top: `${autocompleteOverlayPosition.top}px`,
                                     bottom: 'auto',
-                                    width: `min(360px, calc(100% - ${autocompleteOverlayPosition.left + 8}px))`,
+                                    width: '100%',
                                     maxHeight: `${autocompleteOverlayPosition.maxHeight}px`,
                                     transform: autocompleteOverlayPosition.place === 'above' ? 'translateY(-100%)' : undefined,
                                 }

@@ -1,0 +1,24 @@
+{
+  "name": "@openchamber/plugin",
+  "version": "1.10.4",
+  "private": true,
+  "type": "module",
+  "description": "OpenChamber first-party OpenCode plugin — image fallback for non-vision models, cross-session image cache, and UI-enhancing hooks.",
+  "main": "src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts"
+    }
+  },
+  "scripts": {
+    "dev": "tsc --noEmit --watch",
+    "build": "tsc --noEmit",
+    "type-check": "tsc --noEmit",
+    "lint": "eslint \"./src/**/*.ts\" --config ../../eslint.config.js"
+  },
+  "dependencies": {
+    "@opencode-ai/plugin": "^1.14.0",
+    "@opencode-ai/sdk": "^1.4.41"
+  }
+}

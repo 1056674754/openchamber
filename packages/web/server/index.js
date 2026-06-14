@@ -58,6 +58,7 @@ import {
   registerServerStatusRoutes,
 } from './lib/opencode/core-routes.js';
 import { registerOpenChamberRoutes } from './lib/opencode/openchamber-routes.js';
+import { ensureOpenChamberPluginRegistered } from './lib/opencode/plugin-bootstrap.js';
 import { createServerUtilsRuntime } from './lib/opencode/server-utils-runtime.js';
 import { createStaticRoutesRuntime } from './lib/opencode/static-routes-runtime.js';
 import { createSettingsRuntime } from './lib/opencode/settings-runtime.js';
@@ -492,7 +493,17 @@ const broadcastGlobalUiEvent = createGlobalUiEventBroadcaster({
 });
 const broadcastUiNotification = (...args) => notificationEmitterRuntime.broadcastUiNotification(...args);
 
-const unreadStore = createSessionUnreadStore({ fs, path, dataDir: OPENCHAMBER_DATA_DIR });
+const unreadStore = createSessionUnreadStore({
+  fs,
+  path,
+  dataDir: OPENCHAMBER_DATA_DIR,
+  onChange: (change) => {
+    broadcastGlobalUiEvent({
+      type: 'openchamber:session-unread',
+      properties: change,
+    });
+  },
+});
 unreadStore.load();
 
 const sessionRuntime = createSessionRuntime({
@@ -1072,6 +1083,12 @@ const ensureGlobalWatcherStarted = async () => {
   return globalWatcherStartPromise;
 };
 const bootstrapOpenCodeAtStartup = async (...args) => {
+  try {
+    const workingDirectory = args[0]?.directory || process.cwd();
+    ensureOpenChamberPluginRegistered(workingDirectory);
+  } catch (error) {
+    console.warn('[openchamber] plugin registration skipped:', error?.message || error);
+  }
   await openCodeLifecycleRuntime.bootstrapOpenCodeAtStartup(...args);
   scheduleOpenCodeApiDetection();
   if (openCodeLifecycleState.openCodePort && !openCodeLifecycleState.isExternalOpenCode) {

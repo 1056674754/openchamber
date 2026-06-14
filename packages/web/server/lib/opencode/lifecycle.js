@@ -342,6 +342,10 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       child.on('error', onError);
     });
 
+    child.stderr?.on('data', (chunk) => {
+      process.stderr.write(chunk);
+    });
+
     return {
       url,
       async close() {
