@@ -447,6 +447,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
   const removeSessionFromFolder = useSessionFoldersStore((state) => state.removeSessionFromFolder);
   const removeSessionsFromFolders = useSessionFoldersStore((state) => state.removeSessionsFromFolders);
   const toggleFolderCollapse = useSessionFoldersStore((state) => state.toggleFolderCollapse);
+  const defaultCollapseArchivedFolders = useSessionFoldersStore((state) => state.defaultCollapseArchivedFolders);
   const cleanupSessions = useSessionFoldersStore((state) => state.cleanupSessions);
   const getSessionFolderId = useSessionFoldersStore((state) => state.getSessionFolderId);
 
@@ -1256,6 +1257,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
     createFolder,
     addSessionToFolder,
     cleanupSessions,
+    defaultCollapseArchivedFolders,
   });
 
   const {

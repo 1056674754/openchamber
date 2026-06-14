@@ -23,6 +23,7 @@ import { useSync } from '@/sync/use-sync';
 import { getSyncStoresForServer } from '@/sync/multi-server-registry';
 import { useViewportStore } from '@/sync/viewport-store';
 import { DraggableSessionRow } from './sessionFolderDnd';
+import { SessionUnreadMenuItem } from './SessionUnreadMenuItem';
 import { SidebarSpinner } from './SidebarSpinner';
 import type { SessionNode, SessionSummaryMeta } from './types';
 import { formatSessionCompactDateLabel, formatSessionDateLabel, normalizePath, renderHighlightedText, resolveRemoteIndicatorProject, resolveSessionDiffStats } from './utils';
@@ -666,7 +667,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
   const statusType = sessionStatus?.type ?? 'idle';
   const isStreaming = statusType === 'busy' || statusType === 'retry';
   const pendingPermissionCount = sessionPermissions.length;
-  const showUnreadStatus = needsAttention && !isActive;
+  const showUnreadStatus = needsAttention;
 
   const spinnerState = (() => {
     if (isStreaming && isSubtaskSession) return 'subagent' as const;
@@ -892,6 +893,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
           {t('sessions.sidebar.session.menu.regenerateTitle')}
         </DropdownMenuItem>
       ) : null}
+      <SessionUnreadMenuItem sessionId={session.id} isUnread={unseenCount > 0} />
       {isGloballyPinned ? (
         <DropdownMenuItem onClick={() => togglePinnedSession(session.id, 'global')} className="[&>svg]:mr-1">
           <Icon name="unpin" className="mr-1 h-4 w-4"  />
@@ -1045,6 +1047,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
       <DraggableSessionRow sessionId={session.id} sessionDirectory={sessionDirectory ?? null} sessionTitle={sessionTitle}>
         <div
           data-session-row={session.id}
+          data-session-unread={showUnreadStatus ? '1' : '0'}
           data-session-scope={sessionDirectory ?? ''}
           data-session-archived={archivedBucket ? '1' : '0'}
           className={cn(
