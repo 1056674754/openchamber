@@ -13,10 +13,9 @@ import { createImageTransformHandler } from "./image-transform.js"
 import { createSystemTransformHandler } from "./system-transform.js"
 import { createDescribeImageTool } from "./tools/describe-image.js"
 import { createSearchImagesTool } from "./tools/search-images.js"
+import { createSaveImageAnalysisTool } from "./tools/save-image-analysis.js"
 import { createModelCapabilityChecker } from "./model-capability.js"
 import { createImageStore } from "./image-store.js"
-import { createAnalysisCollectorHook } from "./analysis-collector.js"
-import { createSummarizer } from "./summarizer.js"
 import { openCacheDb, type CacheDb } from "./cache/database.js"
 import { log } from "./logger.js"
 
@@ -32,7 +31,6 @@ export function createPlugin(input: PluginInput): Promise<Hooks> {
   }
 
   const imageStore = createImageStore({ cacheDb })
-  const summarizer = createSummarizer(input.client, input.directory)
 
   const imageTransform = createImageTransformHandler({
     modelSupportsImage,
@@ -41,22 +39,20 @@ export function createPlugin(input: PluginInput): Promise<Hooks> {
   })
 
   const systemTransform = createSystemTransformHandler()
-  const analysisCollector = createAnalysisCollectorHook({
-    cacheDb,
-    imageDirectory: imageStore.getDirectory(),
-    summarizer,
-  })
-
   const describeImage = createDescribeImageTool({ client: input.client, cacheDb })
   const searchImages = createSearchImagesTool({ cacheDb })
+  const saveAnalysis = createSaveImageAnalysisTool({
+    cacheDb,
+    imageDirectory: imageStore.getDirectory(),
+  })
 
   const hooks: Hooks = {
     "experimental.chat.messages.transform": imageTransform,
     "experimental.chat.system.transform": systemTransform,
-    "tool.execute.after": analysisCollector,
     tool: {
       describe_image: describeImage,
       search_images: searchImages,
+      save_image_analysis: saveAnalysis,
     },
     dispose: async () => {
       cacheDb?.close()

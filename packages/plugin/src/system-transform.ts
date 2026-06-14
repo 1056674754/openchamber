@@ -20,10 +20,12 @@ type SystemTransformOutput = {
 
 const SYSTEM_PROMPT_ADDITION = [
   ``,
-  `## Image Analysis Tool`,
+  `## Image Analysis Tools`,
   `If a message references an image saved to disk (e.g. "[Image attachment: ... Saved to /path]"),`,
-  `you can analyze it by calling the describe_image tool with the file path.`,
-  `This is needed when the current model does not support direct image input.`,
+  `use these tools in order:`,
+  `1. describe_image — checks for cached analyses from prior sessions.`,
+  `2. If no cache, it will tell you to call look_at. After look_at returns,`,
+  `   call save_image_analysis to cache the result for future reuse.`,
 ].join("\n")
 
 export function createSystemTransformHandler() {
