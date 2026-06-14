@@ -1811,6 +1811,17 @@ serverRegistry.register({
 });
 serverRegistry.startHealthPolling(30_000);
 
+// HMR self-accept boundary: prevents re-eval of this singleton from
+// invalidating the ~35 consumer modules whose `opencodeClient` import binding
+// would otherwise enter TDZ and crash concurrent renders. Caveat: edits to
+// OpencodeService methods need a full reload to reach consumers.
+if (import.meta.hot) {
+  import.meta.hot.accept();
+  import.meta.hot.dispose(() => {
+    serverRegistry.stopHealthPolling();
+  });
+}
+
 // Exported types
 export type { Session, Message, Part, Provider, Config, Model };
 export type { App };
