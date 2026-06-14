@@ -97,6 +97,58 @@ describe('opencode routes', () => {
     expect(response.body).toEqual({ version: null, error: 'not ready' });
   });
 
+  test('reports no OpenCode upgrade for a custom build on the same upstream version', async () => {
+    useFetchMock(mock(async (url) => {
+      const requestUrl = String(url);
+      if (requestUrl === 'http://opencode.test/global/health') {
+        return jsonResponse({ version: '1.17.6-codex.session-fixes.20260614' });
+      }
+      if (requestUrl === 'https://registry.npmjs.org/opencode-ai/latest') {
+        return jsonResponse({ version: '1.17.6' });
+      }
+      if (requestUrl === 'https://api.github.com/repos/anomalyco/opencode/releases/latest') {
+        return jsonResponse({ tag_name: 'v1.17.6' });
+      }
+      throw new Error(`Unexpected fetch: ${requestUrl}`);
+    }));
+
+    const response = await request(createApp())
+      .get('/api/opencode/upgrade-status')
+      .expect(200);
+
+    expect(response.body).toEqual({
+      available: false,
+      currentVersion: '1.17.6-codex.session-fixes.20260614',
+      latestVersion: '1.17.6',
+    });
+  });
+
+  test('reports OpenCode upgrade for a release candidate behind the same stable version', async () => {
+    useFetchMock(mock(async (url) => {
+      const requestUrl = String(url);
+      if (requestUrl === 'http://opencode.test/global/health') {
+        return jsonResponse({ version: '1.17.6-rc.1' });
+      }
+      if (requestUrl === 'https://registry.npmjs.org/opencode-ai/latest') {
+        return jsonResponse({ version: '1.17.6' });
+      }
+      if (requestUrl === 'https://api.github.com/repos/anomalyco/opencode/releases/latest') {
+        return jsonResponse({ tag_name: 'v1.17.6' });
+      }
+      throw new Error(`Unexpected fetch: ${requestUrl}`);
+    }));
+
+    const response = await request(createApp())
+      .get('/api/opencode/upgrade-status')
+      .expect(200);
+
+    expect(response.body).toEqual({
+      available: true,
+      currentVersion: '1.17.6-rc.1',
+      latestVersion: '1.17.6',
+    });
+  });
+
   test('does not restart managed OpenCode after an upstream upgrade succeeds', async () => {
     const fetchMock = useFetchMock(mock(async () => jsonResponse({ success: true, version: '1.2.4' })));
     const refreshOpenCodeAfterConfigChange = mock(async () => {});

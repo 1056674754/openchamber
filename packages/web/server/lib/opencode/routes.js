@@ -44,17 +44,19 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
   };
 
   const parseVersionForComparison = (value) => {
-    const normalized = String(value || '').replace(/^v/, '').split('+')[0];
-    const prereleaseIndex = normalized.indexOf('-');
-    const core = prereleaseIndex >= 0 ? normalized.slice(0, prereleaseIndex) : normalized;
+    const normalized = String(value || '').replace(/^v/, '');
+    const withoutBuildMetadata = normalized.split('+')[0];
+    const prereleaseIndex = withoutBuildMetadata.indexOf('-');
+    const core = prereleaseIndex >= 0 ? withoutBuildMetadata.slice(0, prereleaseIndex) : withoutBuildMetadata;
+    const prerelease = prereleaseIndex >= 0 ? withoutBuildMetadata.slice(prereleaseIndex + 1) : '';
     const parts = core.split('.').map((part) => {
       const parsed = Number.parseInt(part || '0', 10);
       return Number.isFinite(parsed) ? parsed : 0;
     });
-    return { parts, prerelease: prereleaseIndex >= 0 };
+    return { parts, prerelease };
   };
 
-  const compareVersions = (left, right) => {
+  const compareVersionCore = (left, right) => {
     const a = parseVersionForComparison(left);
     const b = parseVersionForComparison(right);
     const length = Math.max(a.parts.length, b.parts.length);
@@ -62,8 +64,36 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
       const diff = (a.parts[index] || 0) - (b.parts[index] || 0);
       if (diff !== 0) return diff;
     }
-    if (a.prerelease !== b.prerelease) return a.prerelease ? -1 : 1;
     return 0;
+  };
+
+  const isKnownReleasePrerelease = (version) => {
+    const parsed = parseVersionForComparison(version);
+    const firstIdentifier = parsed.prerelease.split('.')[0]?.toLowerCase();
+    return ['alpha', 'beta', 'canary', 'dev', 'next', 'nightly', 'pre', 'preview', 'rc'].includes(firstIdentifier);
+  };
+
+  const compareVersions = (left, right) => {
+    const coreComparison = compareVersionCore(left, right);
+    if (coreComparison !== 0) return coreComparison;
+    const a = parseVersionForComparison(left);
+    const b = parseVersionForComparison(right);
+    if (a.prerelease !== b.prerelease) {
+      if (!a.prerelease) return 1;
+      if (!b.prerelease) return -1;
+    }
+    return 0;
+  };
+
+  const isOpenCodeUpgradeAvailable = (latestVersion, currentVersion) => {
+    const coreComparison = compareVersionCore(latestVersion, currentVersion);
+    if (coreComparison !== 0) return coreComparison > 0;
+    const current = parseVersionForComparison(currentVersion);
+    const latest = parseVersionForComparison(latestVersion);
+    if (!latest.prerelease && current.prerelease && !isKnownReleasePrerelease(currentVersion)) {
+      return false;
+    }
+    return compareVersions(latestVersion, currentVersion) > 0;
   };
 
   const fetchLatestOpenCodeVersionFromGithub = async () => {
@@ -286,7 +316,7 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
       if (!currentVersion || !latestVersion) {
         return res.json({ available: null, currentVersion, latestVersion: latestVersion || null });
       }
-      const available = compareVersions(latestVersion, currentVersion) > 0;
+      const available = isOpenCodeUpgradeAvailable(latestVersion, currentVersion);
       return res.json({
         available,
         currentVersion,
