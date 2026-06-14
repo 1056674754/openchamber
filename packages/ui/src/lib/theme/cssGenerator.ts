@@ -452,7 +452,7 @@ const sidebarBaseRgb = hexToRgb(theme.colors.surface.muted);
     vars.push(`  --tools-border: ${tools?.border || this.opacity(theme.colors.interactive.border, 0.3)};`);
     vars.push(`  --tools-header-hover: ${tools?.headerHover || this.opacity(theme.colors.surface.muted, 0.3)};`);
     vars.push(`  --tools-icon: ${tools?.icon || theme.colors.surface.mutedForeground};`);
-    vars.push(`  --tools-title: ${tools?.title || theme.colors.surface.foreground};`);
+    vars.push(`  --tools-title: ${tools?.title || theme.colors.surface.mutedForeground};`);
     vars.push(`  --tools-description: ${tools?.description || this.opacity(theme.colors.surface.mutedForeground, 0.6)};`);
 
     if (tools?.edit) {
@@ -483,7 +483,7 @@ const sidebarBaseRgb = hexToRgb(theme.colors.surface.muted);
     vars.push(`  --tools-border: ${this.opacity(theme.colors.interactive.border, 0.3)};`);
     vars.push(`  --tools-header-hover: ${this.opacity(theme.colors.surface.muted, 0.3)};`);
     vars.push(`  --tools-icon: ${theme.colors.surface.mutedForeground};`);
-    vars.push(`  --tools-title: ${theme.colors.surface.foreground};`);
+    vars.push(`  --tools-title: ${theme.colors.surface.mutedForeground};`);
     vars.push(`  --tools-description: ${this.opacity(theme.colors.surface.mutedForeground, 0.6)};`);
 
     vars.push(`  --tools-edit-added: ${theme.colors.status.success};`);
