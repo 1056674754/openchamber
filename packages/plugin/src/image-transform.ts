@@ -81,7 +81,7 @@ function buildReplacementText(
   const analysisSection = priorAnalyses && priorAnalyses.length > 0
     ? [
         ``,
-        `Prior analyses available for this image:`,
+        `Prior analyses available for this image (call describe_image for full text):`,
         ...priorAnalyses.map((a, i) =>
           `  ${i + 1}. ${a.goal ? `[${a.goal}]` : "[general]"}: ${a.result.slice(0, 300)}${a.result.length > 300 ? "..." : ""}`,
         ),

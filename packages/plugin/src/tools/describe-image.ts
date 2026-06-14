@@ -134,9 +134,7 @@ export function createDescribeImageTool(deps: DescribeImageDeps) {
         const analysisLines = priorAnalyses.map((a, i) => {
           const goalLabel = a.goal ? `[Goal: ${a.goal}]` : "[General analysis]"
           const date = new Date(a.time_analyzed).toISOString().slice(0, 10)
-          const preview = a.result.slice(0, 500)
-          const truncated = a.result.length > 500 ? "..." : ""
-          return `${i + 1}. ${goalLabel} (${a.backend}, ${date}):\n   ${preview}${truncated}`
+          return `${i + 1}. ${goalLabel} (${a.backend}, ${date}):\n   ${a.result}`
         })
 
         return {
