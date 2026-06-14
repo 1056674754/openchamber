@@ -1297,22 +1297,6 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
   });
 
   const { getOrderedGroups } = useGroupOrdering(groupOrderByProject);
-  const hasInitializedArchivedCollapseRef = React.useRef(false);
-
-  React.useEffect(() => {
-    if (hasInitializedArchivedCollapseRef.current || projectSections.length === 0) {
-      return;
-    }
-    const archivedGroupKeys = projectSections.flatMap((section) =>
-      section.groups
-        .filter((group) => group.isArchivedBucket)
-        .map((group) => `${section.project.id}:${group.id}`),
-    );
-    if (archivedGroupKeys.length > 0) {
-      setCollapsedGroups((prev) => new Set([...prev, ...archivedGroupKeys]));
-    }
-    hasInitializedArchivedCollapseRef.current = true;
-  }, [projectSections]);
 
   const sessionSidebarMetaById = React.useMemo(() => {
     const meta = new Map<string, {

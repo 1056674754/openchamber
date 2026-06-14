@@ -19,6 +19,8 @@ export type SessionFoldersMap = Record<string, SessionFolder[]>;
 interface SessionFoldersState {
   foldersMap: SessionFoldersMap;
   collapsedFolderIds: Set<string>;
+  /** Archived scope keys that have already been default-collapsed (one-time init) */
+  archivedAutoCollapsedScopes: Set<string>;
 }
 
 interface SessionFoldersActions {
@@ -31,6 +33,7 @@ interface SessionFoldersActions {
   removeSessionFromFolder: (scopeKey: string, sessionId: string) => void;
   removeSessionsFromFolders: (scopeKey: string, sessionIds: string[]) => void;
   toggleFolderCollapse: (folderId: string) => void;
+  defaultCollapseArchivedFolders: (scopeKey: string, folderIds: string[]) => void;
   cleanupSessions: (scopeKey: string, existingSessionIds: Set<string>) => void;
   getSessionFolderId: (scopeKey: string, sessionId: string) => string | null;
 }
@@ -41,6 +44,7 @@ type SessionFoldersStore = SessionFoldersState & SessionFoldersActions;
 
 const FOLDERS_STORAGE_KEY = 'oc.sessions.folders';
 const COLLAPSED_STORAGE_KEY = 'oc.sessions.folderCollapse';
+const ARCHIVED_AUTO_COLLAPSED_STORAGE_KEY = 'oc.sessions.archivedAutoCollapsedScopes';
 const SESSION_FOLDERS_API_PATH = '/api/session-folders';
 const DISK_WRITE_DEBOUNCE_MS = 250;
 const ARCHIVED_SCOPE_PREFIX = '__archived__:';
@@ -51,8 +55,10 @@ let diskHydrated = false;
 let diskHydrationInFlight = false;
 let persistFoldersTimer: ReturnType<typeof setTimeout> | undefined;
 let persistCollapsedTimer: ReturnType<typeof setTimeout> | undefined;
+let persistArchivedAutoCollapsedTimer: ReturnType<typeof setTimeout> | undefined;
 let pendingFoldersMap: SessionFoldersMap | null = null;
 let pendingCollapsedIds: Set<string> | null = null;
+let pendingArchivedAutoCollapsedScopes: Set<string> | null = null;
 
 const isVSCodeWebview = (): boolean => {
   if (typeof window === 'undefined') {
@@ -66,7 +72,7 @@ const isVSCodeWebview = (): boolean => {
   return (window as { __VSCODE_CONFIG__?: unknown }).__VSCODE_CONFIG__ !== undefined;
 };
 
-const schedulePersistToDisk = (foldersMap: SessionFoldersMap, collapsedFolderIds: Set<string>): void => {
+const schedulePersistToDisk = (foldersMap: SessionFoldersMap, collapsedFolderIds: Set<string>, archivedAutoCollapsedScopes: Set<string>): void => {
   if (typeof window === 'undefined') {
     return;
   }
@@ -81,6 +87,7 @@ const schedulePersistToDisk = (foldersMap: SessionFoldersMap, collapsedFolderIds
 
   const foldersSnapshot = JSON.parse(JSON.stringify(foldersMap)) as SessionFoldersMap;
   const collapsedSnapshot = Array.from(collapsedFolderIds);
+  const archivedAutoCollapsedSnapshot = Array.from(archivedAutoCollapsedScopes);
 
   diskWriteTimer = setTimeout(() => {
     diskWriteTimer = null;
@@ -88,6 +95,7 @@ const schedulePersistToDisk = (foldersMap: SessionFoldersMap, collapsedFolderIds
       version: 1,
       foldersMap: foldersSnapshot,
       collapsedFolderIds: collapsedSnapshot,
+      archivedAutoCollapsedScopes: archivedAutoCollapsedSnapshot,
       updatedAt: Date.now(),
     };
     void fetch(SESSION_FOLDERS_API_PATH, {
@@ -179,6 +187,35 @@ const persistCollapsed = (collapsedFolderIds: Set<string>): void => {
   }, 300);
 };
 
+const readPersistedArchivedAutoCollapsed = (): Set<string> => {
+  try {
+    const raw = safeStorage.getItem(ARCHIVED_AUTO_COLLAPSED_STORAGE_KEY);
+    if (!raw) {
+      return new Set();
+    }
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) {
+      return new Set();
+    }
+    return new Set(parsed.filter((v): v is string => typeof v === 'string'));
+  } catch {
+    return new Set();
+  }
+};
+
+const persistArchivedAutoCollapsed = (scopes: Set<string>): void => {
+  pendingArchivedAutoCollapsedScopes = scopes;
+  clearTimeout(persistArchivedAutoCollapsedTimer);
+  persistArchivedAutoCollapsedTimer = setTimeout(() => {
+    try {
+      safeStorage.setItem(ARCHIVED_AUTO_COLLAPSED_STORAGE_KEY, JSON.stringify(Array.from(scopes)));
+      pendingArchivedAutoCollapsedScopes = null;
+    } catch {
+      // ignored
+    }
+  }, 300);
+};
+
 if (typeof window !== 'undefined') {
   window.addEventListener('beforeunload', () => {
     if (pendingFoldersMap !== null) {
@@ -195,13 +232,21 @@ if (typeof window !== 'undefined') {
       } catch { /* ignored */ }
       pendingCollapsedIds = null;
     }
+    if (pendingArchivedAutoCollapsedScopes !== null) {
+      clearTimeout(persistArchivedAutoCollapsedTimer);
+      try {
+        safeStorage.setItem(ARCHIVED_AUTO_COLLAPSED_STORAGE_KEY, JSON.stringify(Array.from(pendingArchivedAutoCollapsedScopes)));
+      } catch { /* ignored */ }
+      pendingArchivedAutoCollapsedScopes = null;
+    }
   });
 }
 
-const persistState = (foldersMap: SessionFoldersMap, collapsedFolderIds: Set<string>): void => {
+const persistState = (foldersMap: SessionFoldersMap, collapsedFolderIds: Set<string>, archivedAutoCollapsedScopes: Set<string>): void => {
   persistFolders(foldersMap);
   persistCollapsed(collapsedFolderIds);
-  schedulePersistToDisk(foldersMap, collapsedFolderIds);
+  persistArchivedAutoCollapsed(archivedAutoCollapsedScopes);
+  schedulePersistToDisk(foldersMap, collapsedFolderIds, archivedAutoCollapsedScopes);
 };
 
 const createFolderId = (): string => {
@@ -246,6 +291,7 @@ export const useSessionFoldersStore = create<SessionFoldersStore>()(
     (set, get) => ({
       foldersMap: readPersistedFolders(),
       collapsedFolderIds: readPersistedCollapsed(),
+      archivedAutoCollapsedScopes: readPersistedArchivedAutoCollapsed(),
 
       getFoldersForScope: (scopeKey: string): SessionFolder[] => {
         if (!scopeKey) return [];
@@ -268,7 +314,7 @@ export const useSessionFoldersStore = create<SessionFoldersStore>()(
           [scopeKey]: [...scopeFolders, folder],
         };
         set({ foldersMap: nextMap });
-        persistState(nextMap, get().collapsedFolderIds);
+        persistState(nextMap, get().collapsedFolderIds, get().archivedAutoCollapsedScopes);
         return folder;
       },
 
@@ -283,7 +329,7 @@ export const useSessionFoldersStore = create<SessionFoldersStore>()(
         );
         const nextMap: SessionFoldersMap = { ...current, [scopeKey]: nextFolders };
         set({ foldersMap: nextMap });
-        persistState(nextMap, get().collapsedFolderIds);
+        persistState(nextMap, get().collapsedFolderIds, get().archivedAutoCollapsedScopes);
       },
 
       deleteFolder: (scopeKey: string, folderId: string): void => {
@@ -306,7 +352,7 @@ export const useSessionFoldersStore = create<SessionFoldersStore>()(
         const nextFolders = scopeFolders.filter((folder) => !idsToDelete.has(folder.id));
         const nextMap: SessionFoldersMap = { ...current, [scopeKey]: nextFolders };
         set({ foldersMap: nextMap });
-        persistState(nextMap, get().collapsedFolderIds);
+        persistState(nextMap, get().collapsedFolderIds, get().archivedAutoCollapsedScopes);
 
         // Clean up collapsed state for all deleted folders
         const collapsed = get().collapsedFolderIds;
@@ -315,7 +361,7 @@ export const useSessionFoldersStore = create<SessionFoldersStore>()(
           const nextCollapsed = new Set(collapsed);
           idsToDelete.forEach((id) => nextCollapsed.delete(id));
           set({ collapsedFolderIds: nextCollapsed });
-          persistState(nextMap, nextCollapsed);
+          persistState(nextMap, nextCollapsed, get().archivedAutoCollapsedScopes);
         }
       },
 
@@ -343,7 +389,7 @@ export const useSessionFoldersStore = create<SessionFoldersStore>()(
         set(nextCollapsed
           ? { foldersMap: nextMap, collapsedFolderIds: nextCollapsed }
           : { foldersMap: nextMap });
-        persistState(nextMap, nextCollapsed ?? get().collapsedFolderIds);
+        persistState(nextMap, nextCollapsed ?? get().collapsedFolderIds, get().archivedAutoCollapsedScopes);
       },
 
       addSessionsToFolder: (scopeKey: string, folderId: string, sessionIds: string[]): void => {
@@ -372,7 +418,7 @@ export const useSessionFoldersStore = create<SessionFoldersStore>()(
         set(nextCollapsed
           ? { foldersMap: nextMap, collapsedFolderIds: nextCollapsed }
           : { foldersMap: nextMap });
-        persistState(nextMap, nextCollapsed ?? get().collapsedFolderIds);
+        persistState(nextMap, nextCollapsed ?? get().collapsedFolderIds, get().archivedAutoCollapsedScopes);
       },
 
       removeSessionsFromFolders: (scopeKey: string, sessionIds: string[]): void => {
@@ -401,7 +447,7 @@ export const useSessionFoldersStore = create<SessionFoldersStore>()(
         set(nextCollapsed
           ? { foldersMap: nextMap, collapsedFolderIds: nextCollapsed }
           : { foldersMap: nextMap });
-        persistState(nextMap, nextCollapsed ?? get().collapsedFolderIds);
+        persistState(nextMap, nextCollapsed ?? get().collapsedFolderIds, get().archivedAutoCollapsedScopes);
       },
 
       removeSessionFromFolder: (scopeKey: string, sessionId: string): void => {
@@ -427,7 +473,7 @@ export const useSessionFoldersStore = create<SessionFoldersStore>()(
         set(nextCollapsed
           ? { foldersMap: nextMap, collapsedFolderIds: nextCollapsed }
           : { foldersMap: nextMap });
-        persistState(nextMap, nextCollapsed ?? get().collapsedFolderIds);
+        persistState(nextMap, nextCollapsed ?? get().collapsedFolderIds, get().archivedAutoCollapsedScopes);
       },
 
       toggleFolderCollapse: (folderId: string): void => {
@@ -439,7 +485,21 @@ export const useSessionFoldersStore = create<SessionFoldersStore>()(
           next.add(folderId);
         }
         set({ collapsedFolderIds: next });
-        persistState(get().foldersMap, next);
+        persistState(get().foldersMap, next, get().archivedAutoCollapsedScopes);
+      },
+
+      defaultCollapseArchivedFolders: (scopeKey: string, folderIds: string[]): void => {
+        if (!scopeKey || folderIds.length === 0) return;
+        const { collapsedFolderIds, archivedAutoCollapsedScopes } = get();
+        if (archivedAutoCollapsedScopes.has(scopeKey)) return;
+        const nextCollapsed = new Set(collapsedFolderIds);
+        for (const id of folderIds) {
+          nextCollapsed.add(id);
+        }
+        const nextScopes = new Set(archivedAutoCollapsedScopes);
+        nextScopes.add(scopeKey);
+        set({ collapsedFolderIds: nextCollapsed, archivedAutoCollapsedScopes: nextScopes });
+        persistState(get().foldersMap, nextCollapsed, nextScopes);
       },
 
       cleanupSessions: (scopeKey: string, existingSessionIds: Set<string>): void => {
@@ -470,7 +530,7 @@ export const useSessionFoldersStore = create<SessionFoldersStore>()(
         set(nextCollapsed
           ? { foldersMap: nextMap, collapsedFolderIds: nextCollapsed }
           : { foldersMap: nextMap });
-        persistState(nextMap, nextCollapsed ?? get().collapsedFolderIds);
+        persistState(nextMap, nextCollapsed ?? get().collapsedFolderIds, get().archivedAutoCollapsedScopes);
       },
 
       getSessionFolderId: (scopeKey: string, sessionId: string): string | null => {
@@ -510,6 +570,7 @@ const hydrateSessionFoldersFromDisk = async (): Promise<void> => {
     const parsed = await response.json().catch(() => null) as {
       foldersMap?: SessionFoldersMap;
       collapsedFolderIds?: string[];
+      archivedAutoCollapsedScopes?: string[];
     } | null;
 
     if (!parsed) {
@@ -522,8 +583,11 @@ const hydrateSessionFoldersFromDisk = async (): Promise<void> => {
     const diskCollapsed = Array.isArray(parsed.collapsedFolderIds)
       ? new Set(parsed.collapsedFolderIds.filter((value): value is string => typeof value === 'string'))
       : new Set<string>();
+    const diskArchivedAutoCollapsed = Array.isArray(parsed.archivedAutoCollapsedScopes)
+      ? new Set(parsed.archivedAutoCollapsedScopes.filter((value): value is string => typeof value === 'string'))
+      : new Set<string>();
 
-    const hasDiskData = Object.keys(diskFolders).length > 0 || diskCollapsed.size > 0;
+    const hasDiskData = Object.keys(diskFolders).length > 0 || diskCollapsed.size > 0 || diskArchivedAutoCollapsed.size > 0;
     if (!hasDiskData) {
       return;
     }
@@ -531,10 +595,12 @@ const hydrateSessionFoldersFromDisk = async (): Promise<void> => {
     useSessionFoldersStore.setState({
       foldersMap: diskFolders,
       collapsedFolderIds: diskCollapsed,
+      archivedAutoCollapsedScopes: diskArchivedAutoCollapsed,
     });
 
     persistFolders(diskFolders);
     persistCollapsed(diskCollapsed);
+    persistArchivedAutoCollapsed(diskArchivedAutoCollapsed);
   } catch {
     // ignored
   } finally {

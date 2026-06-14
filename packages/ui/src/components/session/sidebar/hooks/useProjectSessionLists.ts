@@ -97,6 +97,7 @@ export const useProjectSessionLists = (args: Args) => {
   const archivedByProjectId = React.useMemo(() => {
     const result = new Map<string, Session[]>();
     archivedSessions.forEach((session) => {
+      if (isSubtaskSession(session)) return;
       addSessionToProjectMap(result, projectIdBySessionId.get(session.id) ?? null, session);
     });
     sessions.forEach((session) => {

@@ -253,9 +253,17 @@ export function SessionGroupSection(props: Props): React.ReactNode {
     return allFoldersForGroupBase.filter(({ folder }) => shouldKeepFolder(folder.id));
   }, [allFoldersForGroupBase, group.isArchivedBucket, hasSessionSearchQuery, normalizedSessionSearchQuery]);
 
-  const sessionIdsInFolders = React.useMemo(() => new Set(allFoldersForGroup.flatMap((f) => f.folder.sessionIds)), [allFoldersForGroup]);
+  const isSingleWorktreeArchive = group.isArchivedBucket
+    && allFoldersForGroup.filter(({ folder }) => !folder.parentId).length === 1;
+
+  const sessionIdsInFolders = React.useMemo(
+    () => isSingleWorktreeArchive
+      ? new Set<string>()
+      : new Set(allFoldersForGroup.flatMap((f) => f.folder.sessionIds)),
+    [allFoldersForGroup, isSingleWorktreeArchive],
+  );
   const ungroupedSessions = React.useMemo(() => sourceGroupNodes.filter((node) => !sessionIdsInFolders.has(node.session.id)), [sourceGroupNodes, sessionIdsInFolders]);
-  const rootFolders = React.useMemo(() => allFoldersForGroup.filter(({ folder }) => !folder.parentId), [allFoldersForGroup]);
+  const rootFolders = React.useMemo(() => isSingleWorktreeArchive ? [] : allFoldersForGroup.filter(({ folder }) => !folder.parentId), [allFoldersForGroup, isSingleWorktreeArchive]);
 
   const sessionGroupMinVisible = useUIStore((state) => state.sessionGroupMinVisible);
   const sessionGroupRecentHours = useUIStore((state) => state.sessionGroupRecentHours);

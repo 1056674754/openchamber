@@ -20,13 +20,13 @@ export const registerSessionFoldersRoutes = (app, dependencies) => {
         throw error;
       });
       if (!raw) {
-        return res.json({ version: 1, foldersMap: {}, collapsedFolderIds: [], updatedAt: 0 });
+        return res.json({ version: 1, foldersMap: {}, collapsedFolderIds: [], archivedAutoCollapsedScopes: [], updatedAt: 0 });
       }
       try {
         const parsed = JSON.parse(raw);
         return res.json(parsed);
       } catch {
-        return res.json({ version: 1, foldersMap: {}, collapsedFolderIds: [], updatedAt: 0 });
+        return res.json({ version: 1, foldersMap: {}, collapsedFolderIds: [], archivedAutoCollapsedScopes: [], updatedAt: 0 });
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to read session folders';
