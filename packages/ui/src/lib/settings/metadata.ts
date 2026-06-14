@@ -59,11 +59,24 @@ export interface SettingsPageMeta {
   title: string;
   group: SettingsPageGroup;
   kind: 'single' | 'split';
-  /** Which instance types display this page in the nav. Defaults to 'both'. */
+  /** Which instance types display this page in the nav and content area. */
   showOn?: InstanceVisibility;
   description?: string;
   keywords?: string[];
   isAvailable?: (ctx: SettingsRuntimeContext) => boolean;
+}
+
+export type SettingsInstanceType = 'default' | 'remote';
+
+export function isSettingsPageVisibleForInstance(
+  page: SettingsPageMeta,
+  instanceType: SettingsInstanceType,
+): boolean {
+  const showOn = page.showOn ?? 'both';
+  if (showOn === 'both') {
+    return true;
+  }
+  return showOn === instanceType;
 }
 
 export const SETTINGS_GROUP_LABELS: Record<SettingsPageGroup, string> = {
@@ -101,7 +114,7 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
     slug: 'remote-instances',
     title: 'Remote Instances',
     group: 'external',
-    kind: 'single',
+    kind: 'split',
     showOn: 'default',
     keywords: ['ssh', 'remote', 'instances', 'tunnels', 'forwarding', 'connection'],
     isAvailable: (ctx) => !ctx.isVSCode,
@@ -113,6 +126,7 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
     kind: 'single',
     showOn: 'remote',
     keywords: ['ssh', 'connection', 'status', 'logs', 'connect', 'disconnect'],
+    isAvailable: () => false,
   },
   {
     slug: 'remote-port-forwarding',
@@ -121,6 +135,7 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
     kind: 'single',
     showOn: 'remote',
     keywords: ['port', 'forwarding', 'tunnels', 'proxy'],
+    isAvailable: () => false,
   },
   {
     slug: 'remote-projects',
@@ -209,12 +224,14 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
     kind: 'single',
     showOn: 'remote',
     keywords: ['sync', 'config', 'diff', 'push', 'pull', 'distribute'],
+    isAvailable: () => false,
   },
   {
     slug: 'skills.installed',
     title: 'Skills',
     group: 'skills',
     kind: 'split',
+    showOn: 'both',
     keywords: ['skill', 'skills', 'instructions', 'install', 'catalog'],
   },
   {
@@ -222,6 +239,7 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
     title: 'Skills Catalog',
     group: 'skills',
     kind: 'single',
+    showOn: 'both',
     keywords: ['install', 'catalog', 'external', 'repository', 'skills catalog'],
   },
   {
@@ -229,6 +247,7 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
     title: 'Git',
     group: 'git',
     kind: 'single',
+    showOn: 'both',
     keywords: ['git', 'github', 'identity', 'identities', 'ssh', 'profiles', 'credentials', 'keys', 'commit', 'gitmoji', 'oauth', 'prs', 'issues'],
     isAvailable: (ctx) => !ctx.isVSCode,
   },
@@ -237,6 +256,7 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
     title: 'Appearance',
     group: 'appearance',
     kind: 'single',
+    showOn: 'default',
     keywords: ['theme', 'font', 'spacing', 'padding', 'corner radius', 'radius', 'input bar', 'keyboard', 'viewport', 'mobile', 'terminal', 'pwa', 'install name', 'app shortcuts'],
   },
   {
@@ -244,6 +264,7 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
     title: 'Chat',
     group: 'general',
     kind: 'single',
+    showOn: 'default',
     keywords: ['tools', 'diff', 'reasoning', 'dotfiles', 'draft', 'queue', 'output', 'copy', 'image', 'split messages', 'message actions'],
   },
   {
@@ -251,6 +272,7 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
     title: 'Shortcuts',
     group: 'general',
     kind: 'single',
+    showOn: 'default',
     keywords: ['keyboard', 'hotkeys', 'shortcuts', 'bindings'],
     isAvailable: (ctx) => !ctx.isVSCode,
   },
@@ -259,6 +281,7 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
     title: 'Sessions',
     group: 'general',
     kind: 'single',
+    showOn: 'both',
     keywords: ['defaults', 'default agent', 'default model', 'retention', 'memory', 'limits', 'zen'],
   },
   {
@@ -266,6 +289,7 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
     title: 'Magic Prompts',
     group: 'general',
     kind: 'split',
+    showOn: 'both',
     keywords: ['prompts', 'templates', 'git', 'github', 'review', 'commit', 'pull request'],
     isAvailable: (ctx) => !ctx.isVSCode,
   },
@@ -274,12 +298,13 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
     title: 'Snippets',
     group: 'general',
     kind: 'split',
+    showOn: 'both',
     keywords: ['prompt', 'templates', 'multi-run', 'strategy', 'approach'],
   },
 
-  { slug: 'notifications', title: 'Notifications', group: 'general', kind: 'single', keywords: ['alerts', 'native', 'summary', 'summarization'], },
-  { slug: 'voice', title: 'Voice', group: 'advanced', kind: 'single', keywords: ['tts', 'speech', 'voice'], isAvailable: (ctx) => !ctx.isVSCode },
-  { slug: 'tunnel', title: 'Remote Tunnel', group: 'advanced', kind: 'single', keywords: ['tunnel', 'cloudflare', 'qr', 'remote', 'mobile', 'share'], isAvailable: (ctx) => !ctx.isVSCode },
+  { slug: 'notifications', title: 'Notifications', group: 'general', kind: 'single', showOn: 'default', keywords: ['alerts', 'native', 'summary', 'summarization'], },
+  { slug: 'voice', title: 'Voice', group: 'advanced', kind: 'single', showOn: 'default', keywords: ['tts', 'speech', 'voice'], isAvailable: (ctx) => !ctx.isVSCode },
+  { slug: 'tunnel', title: 'Remote Tunnel', group: 'advanced', kind: 'single', showOn: 'default', keywords: ['tunnel', 'cloudflare', 'qr', 'remote', 'mobile', 'share'], isAvailable: (ctx) => !ctx.isVSCode },
 ] as const;
 
 export const LEGACY_SIDEBAR_SECTION_TO_SETTINGS_SLUG: Record<SidebarSection, SettingsPageSlug> = {

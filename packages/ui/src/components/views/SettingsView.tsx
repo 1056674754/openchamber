@@ -1,4 +1,5 @@
 import React from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { cn, getModifierLabel } from '@/lib/utils';
 import { useUIStore } from '@/stores/useUIStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
@@ -33,6 +34,7 @@ import { ConfigSyncPage } from '@/components/sections/config-sync/ConfigSyncPage
 import { RemoteConnectionPage } from '@/components/sections/remote-instances/RemoteConnectionPage';
 import { RemotePortForwardingPage } from '@/components/sections/remote-instances/RemotePortForwardingPage';
 import { RemoteProjectsPage } from '@/components/sections/remote-instances/RemoteProjectsPage';
+import { makeWebRemoteDraftSelectionId } from '@/components/sections/remote-instances/webRemoteDraft';
 import { usePermissionsStore } from '@/stores/usePermissionsStore';
 import { usePresetsStore } from '@/stores/usePresetsStore';
 import { useConfigSyncStore } from '@/stores/useConfigSyncStore';
@@ -51,26 +53,28 @@ import { MagicPromptsPage } from '@/components/sections/magic-prompts/MagicPromp
 import { SnippetsSidebar } from '@/components/sections/snippets/SnippetsSidebar';
 import { SnippetsPage } from '@/components/sections/snippets/SnippetsPage';
 import { GitPage } from '@/components/sections/git-identities/GitPage';
-import { SettingsServerSelector } from '@/components/sections/shared/SettingsServerSelector';
 import type { OpenChamberSection } from '@/components/sections/openchamber/types';
 import { OpenChamberPage } from '@/components/sections/openchamber/OpenChamberPage';
 import { useDeviceInfo } from '@/lib/device';
-import { isDesktopShell, isVSCodeRuntime, isWebRuntime } from '@/lib/desktop';
+import { hasDesktopInvoke, isDesktopShell, isVSCodeRuntime, isWebRuntime } from '@/lib/desktop';
 import { useI18n } from '@/lib/i18n';
+import { toast } from '@/components/ui';
 import { Icon } from "@/components/icon/Icon";
 import type { IconName } from "@/components/icon/icons";
 import { reloadOpenCodeConfiguration } from '@/stores/useAgentsStore';
 import { useInstanceContextStore } from '@/stores/useInstanceContextStore';
 import { useDesktopSshStore } from '@/stores/useDesktopSshStore';
 import { resolveInstanceLabel } from '@/lib/desktopSsh';
+import { settingsInstanceStatusDotClass } from './settingsInstanceStatus';
 import {
   SETTINGS_PAGE_METADATA,
   getSettingsPageMeta,
+  isSettingsPageVisibleForInstance,
   resolveSettingsSlug,
   type SettingsPageSlug,
   type SettingsRuntimeContext,
   type SettingsPageMeta,
-  type InstanceVisibility,
+  type SettingsInstanceType,
 } from '@/lib/settings/metadata';
 
 // Same constraints as main sidebar
@@ -78,11 +82,25 @@ const SETTINGS_NAV_MIN_WIDTH = 176;
 const SETTINGS_NAV_MAX_WIDTH = 280;
 const SETTINGS_NAV_RESIZE_STEP = 8;
 
+const makeRemoteInstanceId = (): string => {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return `ssh-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+};
+
 function clampSettingsNavWidth(width: number): number {
   return Math.min(SETTINGS_NAV_MAX_WIDTH, Math.max(SETTINGS_NAV_MIN_WIDTH, width));
 }
 
 type MobileStage = 'nav' | 'page-sidebar' | 'page-content';
+
+function getMobileStageForSettingsPage(page: SettingsPageMeta | null): MobileStage {
+  if (!page || page.slug === 'home') {
+    return 'nav';
+  }
+  return page.kind === 'split' ? 'page-sidebar' : 'page-content';
+}
 
 interface SettingsViewProps {
   onClose?: () => void;
@@ -121,18 +139,6 @@ const pageOrder: SettingsPageSlug[] = [
   'voice',
   'tunnel',
 ];
-
-const SERVER_AWARE_PAGES: Set<SettingsPageSlug> = new Set([
-  'providers',
-  'agents',
-  'commands',
-  'mcp',
-  'plugins',
-  'snippets',
-  'skills.installed',
-  'skills.catalog',
-  'usage',
-]);
 
 function buildRuntimeContext(isDesktop: boolean): SettingsRuntimeContext {
   const isVSCode = isVSCodeRuntime();
@@ -300,14 +306,23 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
   const isSettingsDialogOpen = useUIStore((state) => state.isSettingsDialogOpen);
   const setSettingsPage = useUIStore((state) => state.setSettingsPage);
   const settingsSlug = resolveSettingsSlug(settingsPageRaw);
+  const setRemoteInstancesSelectedId = useUIStore((state) => state.setSettingsRemoteInstancesSelectedId);
 
-  const instanceStore = useInstanceContextStore();
-  const currentInstance = instanceStore.currentInstance;
-  const isRemote = instanceStore.isRemote;
-  const instances = instanceStore.instances;
-  const setCurrentInstance = instanceStore.setCurrentInstance;
+  const {
+    currentInstance,
+    instances,
+    setCurrentInstance,
+    setInstances,
+  } = useInstanceContextStore(useShallow((state) => ({
+    currentInstance: state.currentInstance,
+    instances: state.instances,
+    setCurrentInstance: state.setCurrentInstance,
+    setInstances: state.setInstances,
+  })));
 
   const sshInstances = useDesktopSshStore((s) => s.instances);
+  const sshStatusesById = useDesktopSshStore(useShallow((s) => s.statusesById));
+  const createSshInstanceFromCommand = useDesktopSshStore((s) => s.createFromCommand);
   React.useEffect(() => {
     const deviceList = sshInstances.map((inst) => ({
       id: inst.id,
@@ -317,8 +332,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
       sshCommand: inst.sshCommand,
       instanceLabel: resolveInstanceLabel(inst),
     }));
-    instanceStore.setInstances(deviceList);
-  }, [sshInstances, instanceStore]);
+    setInstances(deviceList);
+  }, [sshInstances, setInstances]);
 
   const [mobileStage, setMobileStage] = React.useState<MobileStage>('nav');
   const autoNavSlugRef = React.useRef<string | null>(null);
@@ -354,21 +369,29 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
     return () => controller.abort();
   }, [isDesktopApp]);
 
-  const visiblePages = React.useMemo(() => {
-    const instanceType = useInstanceContextStore.getState().currentInstance?.type ?? 'default';
-    const visibility: InstanceVisibility = instanceType === 'remote' ? 'remote' : 'default';
+  const currentInstanceType: SettingsInstanceType = currentInstance?.type === 'remote' ? 'remote' : 'default';
 
+  const isPageVisibleInCurrentContext = React.useCallback((page: SettingsPageMeta): boolean => {
+    if (page.slug === 'home') {
+      return currentInstanceType === 'default';
+    }
+    if (!isPageAvailable(page, runtimeCtx)) {
+      return false;
+    }
+    if (runtimeCtx.isVSCode && page.slug === 'projects') {
+      return false;
+    }
+    if (isMobile && page.slug === 'shortcuts') {
+      return false;
+    }
+    return isSettingsPageVisibleForInstance(page, currentInstanceType);
+  }, [currentInstanceType, isMobile, runtimeCtx]);
+
+  const visiblePages = React.useMemo(() => {
     return SETTINGS_PAGE_METADATA
       .filter((page) => page.slug !== 'home')
-      .filter((page) => isPageAvailable(page, runtimeCtx))
-      .filter((page) => !(runtimeCtx.isVSCode && page.slug === 'projects'))
-      .filter((page) => !(isMobile && page.slug === 'shortcuts'))
-      .filter((page) => {
-        const showOn = page.showOn ?? 'both';
-        if (showOn === 'both') return true;
-        return showOn === visibility;
-      });
-  }, [runtimeCtx, isMobile]);
+      .filter(isPageVisibleInCurrentContext);
+  }, [isPageVisibleInCurrentContext]);
 
   const sortedFilteredPages = React.useMemo(() => {
     const rank = new Map<SettingsPageSlug, number>(pageOrder.map((s, i) => [s, i]));
@@ -376,6 +399,19 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
       .slice()
       .sort((a, b) => (rank.get(a.slug) ?? 999) - (rank.get(b.slug) ?? 999));
   }, [visiblePages]);
+
+  const activePageMeta = React.useMemo(() => {
+    const meta = getSettingsPageMeta(settingsSlug);
+    if (!meta || !isPageVisibleInCurrentContext(meta)) {
+      return null;
+    }
+    return meta;
+  }, [isPageVisibleInCurrentContext, settingsSlug]);
+
+  const fallbackPageSlug = sortedFilteredPages[0]?.slug ?? 'home';
+  const fallbackPageMeta = React.useMemo(() => getSettingsPageMeta(fallbackPageSlug), [fallbackPageSlug]);
+  const effectiveSettingsSlug = activePageMeta?.slug ?? fallbackPageMeta?.slug ?? 'home';
+  const effectivePageMeta = activePageMeta ?? fallbackPageMeta;
 
   const activeProjectId = useProjectsStore((state) => state.activeProjectId);
 
@@ -447,60 +483,102 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
       return;
     }
 
-    if (settingsSlug === 'agents') {
+    if (effectiveSettingsSlug === 'agents') {
       void useAgentsStore.getState().loadAgents();
       return;
     }
-    if (settingsSlug === 'commands') {
+    if (effectiveSettingsSlug === 'commands') {
       void useCommandsStore.getState().loadCommands();
       return;
     }
-    if (settingsSlug === 'mcp') {
+    if (effectiveSettingsSlug === 'mcp') {
       void useMcpConfigStore.getState().loadMcpConfigs();
       return;
     }
-    if (settingsSlug === 'plugins') {
+    if (effectiveSettingsSlug === 'plugins') {
       void usePluginsStore.getState().loadPlugins();
       return;
     }
-    if (settingsSlug === 'permissions') {
+    if (effectiveSettingsSlug === 'permissions') {
       void usePermissionsStore.getState().loadPermissions();
       return;
     }
-    if (settingsSlug === 'config-presets') {
+    if (effectiveSettingsSlug === 'config-presets') {
       usePresetsStore.getState().loadPresets();
       return;
     }
-    if (settingsSlug === 'config-sync') {
+    if (effectiveSettingsSlug === 'config-sync') {
       void useConfigSyncStore.getState().loadDiff('default', '');
       return;
     }
-    if (settingsSlug === 'skills.installed' || settingsSlug === 'skills.catalog') {
+    if (effectiveSettingsSlug === 'skills.installed' || effectiveSettingsSlug === 'skills.catalog') {
       void useSkillsStore.getState().loadSkills();
       void useSkillsCatalogStore.getState().loadCatalog();
     }
-    if (settingsSlug === 'snippets') {
+    if (effectiveSettingsSlug === 'snippets') {
       void useSnippetsStore.getState().loadSnippets();
     }
-  }, [activeProjectId, isSettingsDialogOpen, isWindowed, runtimeCtx.isVSCode, settingsSlug]);
+  }, [activeProjectId, effectiveSettingsSlug, isSettingsDialogOpen, isWindowed, runtimeCtx.isVSCode]);
 
   const openPage = React.useCallback((slug: SettingsPageSlug) => {
-    setSettingsPage(slug);
-    autoNavSlugRef.current = slug;
+    const requested = getSettingsPageMeta(slug);
+    const targetSlug = requested && isPageVisibleInCurrentContext(requested)
+      ? requested.slug
+      : fallbackPageSlug;
+    const targetMeta = getSettingsPageMeta(targetSlug);
+
+    setSettingsPage(targetSlug);
+    autoNavSlugRef.current = targetSlug;
     if (!isMobile) {
       return;
     }
-    const def = getSettingsPageMeta(slug);
-    if (!def || def.slug === 'home') {
-      setMobileStage('nav');
+    setMobileStage(getMobileStageForSettingsPage(targetMeta));
+  }, [fallbackPageSlug, isMobile, isPageVisibleInCurrentContext, setSettingsPage]);
+
+  const openNewRemoteInstance = React.useCallback(() => {
+    const id = makeRemoteInstanceId();
+    setCurrentInstance('default');
+    setSettingsPage('remote-instances');
+    autoNavSlugRef.current = 'remote-instances';
+    if (isMobile) {
+      setMobileStage('page-sidebar');
+    }
+
+    if (!hasDesktopInvoke()) {
+      setRemoteInstancesSelectedId(makeWebRemoteDraftSelectionId(id));
       return;
     }
-    setMobileStage(def.kind === 'split' ? 'page-sidebar' : 'page-content');
-  }, [isMobile, setSettingsPage]);
 
-  const activePageMeta = React.useMemo(() => {
-    return getSettingsPageMeta(settingsSlug);
-  }, [settingsSlug]);
+    void createSshInstanceFromCommand(
+      id,
+      'ssh user@example.com',
+      t('settings.remoteInstances.sidebar.newSshInstanceName'),
+    ).then(() => {
+      setRemoteInstancesSelectedId(id);
+    }).catch((error) => {
+      toast.error(t('settings.remoteInstances.sidebar.toast.createFailed'), {
+        description: error instanceof Error ? error.message : String(error),
+      });
+    });
+  }, [createSshInstanceFromCommand, isMobile, setCurrentInstance, setRemoteInstancesSelectedId, setSettingsPage, t]);
+
+  React.useEffect(() => {
+    if (activePageMeta || settingsSlug === effectiveSettingsSlug) {
+      return;
+    }
+    setSettingsPage(effectiveSettingsSlug);
+    autoNavSlugRef.current = effectiveSettingsSlug;
+    if (isMobile) {
+      setMobileStage(getMobileStageForSettingsPage(effectivePageMeta));
+    }
+  }, [
+    activePageMeta,
+    effectivePageMeta,
+    effectiveSettingsSlug,
+    isMobile,
+    setSettingsPage,
+    settingsSlug,
+  ]);
 
   // Nav is always open (collapsed state removed)
 
@@ -620,7 +698,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
 
   const renderPageContent = React.useCallback((slug: SettingsPageSlug) => {
     const meta = getSettingsPageMeta(slug);
-    if (meta && !isPageAvailable(meta, runtimeCtx)) {
+    if (meta && !isPageVisibleInCurrentContext(meta)) {
       return renderUnavailable();
     }
 
@@ -680,7 +758,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
       default:
         return <SettingsHome onOpen={openPage} />;
     }
-  }, [openChamberSectionBySlug, openPage, renderUnavailable, runtimeCtx]);
+  }, [isPageVisibleInCurrentContext, openChamberSectionBySlug, openPage, renderUnavailable]);
 
   // Mobile: if opened via deep-link / palette to a non-home page, jump into it once.
   React.useEffect(() => {
@@ -690,19 +768,18 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
     if (mobileStage !== 'nav') {
       return;
     }
-    if (settingsSlug === 'home') {
+    if (effectiveSettingsSlug === 'home') {
       return;
     }
-    if (autoNavSlugRef.current === settingsSlug) {
+    if (autoNavSlugRef.current === effectiveSettingsSlug) {
       return;
     }
-    const def = getSettingsPageMeta(settingsSlug);
-    if (!def || def.slug === 'home') {
+    if (!effectivePageMeta || effectivePageMeta.slug === 'home') {
       return;
     }
-    autoNavSlugRef.current = settingsSlug;
-    setMobileStage(def.kind === 'split' ? 'page-sidebar' : 'page-content');
-  }, [isMobile, mobileStage, settingsSlug]);
+    autoNavSlugRef.current = effectiveSettingsSlug;
+    setMobileStage(getMobileStageForSettingsPage(effectivePageMeta));
+  }, [effectivePageMeta, effectiveSettingsSlug, isMobile, mobileStage]);
 
   const showBackButton = isMobile && mobileStage !== 'nav';
   const shortcutKey = getModifierLabel();
@@ -722,7 +799,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
         <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden">
           <div className="flex flex-col gap-0.5 pt-4 pb-2 px-2">
             {sortedFilteredPages.map((page) => {
-              const selected = settingsSlug === page.slug;
+              const selected = effectiveSettingsSlug === page.slug;
               const iconName = getSettingsNavIcon(page.slug);
               if (!iconName) return null;
 
@@ -799,14 +876,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
       );
     }
 
-    if (!activePageMeta) {
+    if (!effectivePageMeta) {
       return <div className="flex-1 bg-background" />;
     }
 
     if (mobileStage === 'page-sidebar') {
-      if (activePageMeta.kind !== 'split') {
+      if (effectivePageMeta.kind !== 'split') {
         // No sidebar available; fall back to direct content.
-        const fallback = renderPageContent(settingsSlug);
+        const fallback = renderPageContent(effectiveSettingsSlug);
         return (
           <div className="flex-1 min-h-0 overflow-hidden bg-background">
             <ErrorBoundary>{fallback}</ErrorBoundary>
@@ -816,14 +893,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
       return (
         <div className={cn('flex-1 min-h-0 overflow-hidden', runtimeCtx.isVSCode ? 'bg-background' : 'bg-sidebar')}>
           <ErrorBoundary>
-            {renderPageSidebar(settingsSlug, { onItemSelect: () => setMobileStage('page-content') })}
+            {renderPageSidebar(effectiveSettingsSlug, { onItemSelect: () => setMobileStage('page-content') })}
           </ErrorBoundary>
         </div>
       );
     }
 
     // page-content
-    const content = renderPageContent(settingsSlug);
+    const content = renderPageContent(effectiveSettingsSlug);
 
     return (
       <div className="flex-1 min-h-0 overflow-hidden bg-background">
@@ -833,18 +910,18 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
   };
 
   const renderDesktopContent = () => {
-    if (!activePageMeta || settingsSlug === 'home') {
+    if (!effectivePageMeta || effectiveSettingsSlug === 'home') {
       return <SettingsHome onOpen={openPage} />;
     }
 
-    if (activePageMeta.kind === 'split') {
+    if (effectivePageMeta.kind === 'split') {
       return (
         <div className="flex h-full min-h-0 overflow-hidden">
           <div className={cn('w-[264px] min-w-[264px] border-r', runtimeCtx.isVSCode ? 'bg-background' : 'bg-sidebar')} style={{ borderColor: 'var(--interactive-border)' }}>
-            <ErrorBoundary>{renderPageSidebar(settingsSlug, {})}</ErrorBoundary>
+            <ErrorBoundary>{renderPageSidebar(effectiveSettingsSlug, {})}</ErrorBoundary>
           </div>
           <div className="flex-1 min-h-0 overflow-hidden bg-background">
-            <ErrorBoundary>{renderPageContent(settingsSlug)}</ErrorBoundary>
+            <ErrorBoundary>{renderPageContent(effectiveSettingsSlug)}</ErrorBoundary>
           </div>
         </div>
       );
@@ -852,7 +929,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
 
     return (
       <div className="h-full min-h-0 overflow-hidden bg-background">
-        <ErrorBoundary>{renderPageContent(settingsSlug)}</ErrorBoundary>
+        <ErrorBoundary>{renderPageContent(effectiveSettingsSlug)}</ErrorBoundary>
       </div>
     );
   };
@@ -879,14 +956,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
           <div className="min-w-0 flex-1 typography-ui-label font-medium text-foreground truncate">
             {mobileStage === 'nav'
               ? t('settings.view.home.title')
-              : (activePageMeta ? getPageTitle(activePageMeta.slug) : t('settings.view.home.title'))}
+              : (effectivePageMeta ? getPageTitle(effectivePageMeta.slug) : t('settings.view.home.title'))}
           </div>
 
-          {mobileStage !== 'nav' && SERVER_AWARE_PAGES.has(settingsSlug) && (
-            <SettingsServerSelector />
-          )}
-
-          {mobileStage === 'page-content' && activePageMeta?.kind === 'split' && (
+          {mobileStage === 'page-content' && effectivePageMeta?.kind === 'split' && (
             <button
               type="button"
               onClick={handleOpenPageSidebar}
@@ -929,7 +1002,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
               value={currentInstance?.id ?? 'default'}
               onValueChange={(value) => {
                 if (value === '__add__') {
-                  openPage('remote-instances');
+                  openNewRemoteInstance();
                   return;
                 }
                 setCurrentInstance(value);
@@ -938,10 +1011,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
               <SelectTrigger className="h-7 min-w-[160px] gap-1.5 border border-[var(--interactive-border)] bg-[var(--surface-elevated)] px-2.5 hover:bg-[var(--interactive-hover)]">
                 <div className="flex items-center gap-1.5 min-w-0">
                   <span
-                    className="h-2 w-2 shrink-0 rounded-full"
-                    style={{
-                      backgroundColor: isRemote ? 'var(--status-warning)' : 'var(--status-success)',
-                    }}
+                    className={cn(
+                      'h-2 w-2 shrink-0 rounded-full',
+                      settingsInstanceStatusDotClass(
+                        currentInstance ?? { type: 'default' },
+                        currentInstance?.id ? sshStatusesById[currentInstance.id]?.phase : undefined,
+                      ),
+                    )}
                   />
                   <SelectValue placeholder={t('settings.instance.selector.label')} />
                 </div>
@@ -951,12 +1027,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
                   <SelectItem key={inst.id} value={inst.id}>
                     <div className="flex items-center gap-2 min-w-0">
                       <span
-                        className="h-2 w-2 shrink-0 rounded-full"
-                        style={{
-                          backgroundColor: inst.type === 'remote'
-                            ? 'var(--status-warning)'
-                            : 'var(--status-success)',
-                        }}
+                        className={cn(
+                          'h-2 w-2 shrink-0 rounded-full',
+                          settingsInstanceStatusDotClass(inst, sshStatusesById[inst.id]?.phase),
+                        )}
                       />
                       <span className="truncate">
                         {inst.type === 'default' ? t('settings.instance.selector.defaultLabel') : inst.label}
@@ -979,9 +1053,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
           </div>
 
           <div className="flex items-center gap-1 shrink-0">
-            {SERVER_AWARE_PAGES.has(settingsSlug) && (
-              <SettingsServerSelector />
-            )}
             {onClose && (
               <button
                 type="button"

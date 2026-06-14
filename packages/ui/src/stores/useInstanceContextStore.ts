@@ -6,8 +6,8 @@ import { create } from 'zustand';
  * - 'default': The local machine. Settings nav shows all pages (Appearance,
  *   Chat, OpenCode config, Projects, Remote Instances management).
  * - 'remote':  A remote machine connected via SSH. Settings nav replaces
- *   Projects/Remote Instances with Instance-specific pages (Connection, Port
- *   Forwarding, Remote Projects) and adds Config Sync.
+ *   Projects/Remote Instances with instance-specific pages such as Connection,
+ *   Port Forwarding, and Remote Projects.
  */
 export type InstanceType = 'default' | 'remote';
 
@@ -65,6 +65,38 @@ const DEFAULT_INSTANCE: InstanceDescriptor = {
   directory: '',
 };
 
+function sameInstanceDescriptor(
+  left: InstanceDescriptor | null,
+  right: InstanceDescriptor | null,
+): boolean {
+  if (left === right) {
+    return true;
+  }
+  if (!left || !right) {
+    return false;
+  }
+  return left.id === right.id
+    && left.type === right.type
+    && left.label === right.label
+    && left.directory === right.directory
+    && left.sshCommand === right.sshCommand
+    && left.instanceLabel === right.instanceLabel;
+}
+
+function sameInstanceList(left: InstanceDescriptor[], right: InstanceDescriptor[]): boolean {
+  if (left.length !== right.length) {
+    return false;
+  }
+  return left.every((instance, index) => sameInstanceDescriptor(instance, right[index] ?? null));
+}
+
+function ensureDefaultInstance(instances: InstanceDescriptor[]): InstanceDescriptor[] {
+  if (instances.some((instance) => instance.id === DEFAULT_INSTANCE.id)) {
+    return instances;
+  }
+  return [DEFAULT_INSTANCE, ...instances];
+}
+
 export const useInstanceContextStore = create<InstanceContextState>((set, get) => ({
   instances: [DEFAULT_INSTANCE],
   currentInstanceId: 'default',
@@ -82,13 +114,25 @@ export const useInstanceContextStore = create<InstanceContextState>((set, get) =
   },
 
   setInstances: (instances) => {
-    const hasDefault = instances.some((i) => i.id === 'default');
-    const list = hasDefault ? instances : [DEFAULT_INSTANCE, ...instances];
-    set({ instances: list });
-    const current = get().currentInstanceId;
-    if (!list.some((i) => i.id === current)) {
-      set({ currentInstanceId: 'default', isRemote: false, currentInstance: DEFAULT_INSTANCE });
+    const list = ensureDefaultInstance(instances);
+    const state = get();
+    const defaultInstance = list.find((instance) => instance.id === DEFAULT_INSTANCE.id) ?? DEFAULT_INSTANCE;
+    const nextCurrentInstance = list.find((instance) => instance.id === state.currentInstanceId) ?? defaultInstance;
+    const instancesChanged = !sameInstanceList(state.instances, list);
+    const currentChanged = state.currentInstanceId !== nextCurrentInstance.id
+      || state.isRemote !== (nextCurrentInstance.type === 'remote')
+      || !sameInstanceDescriptor(state.currentInstance, nextCurrentInstance);
+
+    if (!instancesChanged && !currentChanged) {
+      return;
     }
+
+    set({
+      instances: instancesChanged ? list : state.instances,
+      currentInstanceId: nextCurrentInstance.id,
+      isRemote: nextCurrentInstance.type === 'remote',
+      currentInstance: nextCurrentInstance,
+    });
   },
 
   setCurrentInstance: (id: string) => {

@@ -570,7 +570,6 @@ interface UIStore {
   settingsHasOpenedOnce: boolean;
   settingsProjectsSelectedId: string | null;
   settingsRemoteInstancesSelectedId: string | null;
-  settingsSelectedServerId: string | null;
   eventStreamStatus: EventStreamStatus;
   eventStreamHint: string | null;
   showReasoningTraces: boolean;
@@ -713,8 +712,7 @@ interface UIStore {
   setSidebarSection: (section: SidebarSection) => void;
   setSettingsPage: (slug: string) => void;
   setSettingsProjectsSelectedId: (projectId: string | null) => void;
-setSettingsRemoteInstancesSelectedId: (instanceId: string | null) => void;
-  setSettingsSelectedServerId: (serverId: string | null) => void;
+  setSettingsRemoteInstancesSelectedId: (instanceId: string | null) => void;
   setEventStreamStatus: (status: EventStreamStatus, hint?: string | null) => void;
   setShowReasoningTraces: (value: boolean) => void;
   setCollapsibleThinkingBlocks: (value: boolean) => void;
@@ -851,7 +849,6 @@ export const useUIStore = create<UIStore>()(
         settingsHasOpenedOnce: false,
         settingsProjectsSelectedId: null,
         settingsRemoteInstancesSelectedId: null,
-  settingsSelectedServerId: null,
         eventStreamStatus: 'idle',
         eventStreamHint: null,
         showReasoningTraces: true,
@@ -1506,10 +1503,6 @@ export const useUIStore = create<UIStore>()(
 
         setSettingsRemoteInstancesSelectedId: (instanceId) => {
           set({ settingsRemoteInstancesSelectedId: instanceId });
-        },
-
-        setSettingsSelectedServerId: (serverId: string | null) => {
-          set({ settingsSelectedServerId: serverId });
         },
 
         setEventStreamStatus: (status, hint) => {
@@ -2184,7 +2177,6 @@ export const useUIStore = create<UIStore>()(
           settingsHasOpenedOnce: state.settingsHasOpenedOnce,
           settingsProjectsSelectedId: state.settingsProjectsSelectedId,
           settingsRemoteInstancesSelectedId: state.settingsRemoteInstancesSelectedId,
-          settingsSelectedServerId: state.settingsSelectedServerId,
           isSessionCreateDialogOpen: state.isSessionCreateDialogOpen,
           // Note: isSettingsDialogOpen intentionally NOT persisted
           showReasoningTraces: state.showReasoningTraces,
