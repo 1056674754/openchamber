@@ -13,7 +13,7 @@ import type {
   SkillsCatalogSourceResponse,
 } from '@/lib/api/types';
 
-import { refreshSkillsAfterOpenCodeRestart, useSkillsStore } from '@/stores/useSkillsStore';
+import { invalidateSkillsLoadCache, refreshSkillsAfterOpenCodeRestart, useSkillsStore } from '@/stores/useSkillsStore';
 import { opencodeClient } from '@/lib/opencode/client';
 import { startConfigUpdate, finishConfigUpdate, updateConfigUpdateMessage } from '@/lib/configUpdate';
 
@@ -422,6 +422,7 @@ export const useSkillsCatalogStore = create<SkillsCatalogState>()(
             });
           } else {
             updateConfigUpdateMessage(payload.message || 'Refreshing skills…');
+            invalidateSkillsLoadCache(currentDirectory);
             void useSkillsStore.getState().loadSkills();
           }
 

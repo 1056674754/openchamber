@@ -1797,14 +1797,20 @@ export const GitView: React.FC = () => {
     [currentDirectory, refreshStatusAndBranches, git, t]
   );
 
-  const handleRevertAll = React.useCallback(
-    async (paths: string[]) => {
-      if (!currentDirectory || paths.length === 0 || isRevertingAll) {
+  const handleRevertPaths = React.useCallback(
+    async (paths: string[], setGlobalReverting: boolean, scope: 'all' | 'working' = 'all') => {
+      if (!currentDirectory || paths.length === 0) {
         return;
       }
 
       const uniquePaths = Array.from(new Set(paths));
-      setIsRevertingAll(true);
+      if (isRevertingAll || uniquePaths.some((path) => revertingPaths.has(path))) {
+        return;
+      }
+
+      if (setGlobalReverting) {
+        setIsRevertingAll(true);
+      }
       setRevertingPaths((previous) => {
         const next = new Set(previous);
         uniquePaths.forEach((path) => next.add(path));
@@ -1816,7 +1822,7 @@ export const GitView: React.FC = () => {
       try {
         await Promise.all(uniquePaths.map(async (filePath) => {
           try {
-            await git.revertGitFile(currentDirectory, filePath, { scope: 'working' });
+            await git.revertGitFile(currentDirectory, filePath, { scope });
           } catch (err) {
             failed.push({
               path: filePath,
@@ -1849,10 +1855,26 @@ export const GitView: React.FC = () => {
           uniquePaths.forEach((path) => next.delete(path));
           return next;
         });
-        setIsRevertingAll(false);
+        if (setGlobalReverting) {
+          setIsRevertingAll(false);
+        }
       }
     },
-    [currentDirectory, git, isRevertingAll, refreshStatusAndBranches, t]
+    [currentDirectory, git, isRevertingAll, refreshStatusAndBranches, revertingPaths, t]
+  );
+
+  const handleRevertAll = React.useCallback(
+    async (paths: string[]) => {
+      await handleRevertPaths(paths, true);
+    },
+    [handleRevertPaths]
+  );
+
+  const handleRevertDirectory = React.useCallback(
+    async (paths: string[]) => {
+      await handleRevertPaths(paths, false, 'working');
+    },
+    [handleRevertPaths]
   );
 
   const handleInsertHighlights = React.useCallback((sourceHighlights: string[]) => {
@@ -2407,6 +2429,7 @@ export const GitView: React.FC = () => {
                           onSelectAll={selectUnstagedChanges}
                           onClearSelection={clearUnstagedSelection}
                           onRevertAll={handleRevertAll}
+                          onRevertDirectory={handleRevertDirectory}
                           onViewDiff={(path) => {
                             if (currentDirectory && !isMobile) {
                               openContextDiff(currentDirectory, path);

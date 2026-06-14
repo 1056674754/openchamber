@@ -266,31 +266,52 @@
 |---|---|---|---|
 | Chat | `/handoff-review` linked review session | 🟡 部分相近：本地已有 `/workspace-review` magic prompt，但只是当前 workspace review，没有 linked review session，也没有 feedback/reply 双向动作 | 高风险手工移植。需要先看官方会话关联数据结构，再映射到本 fork 的 multi-remote / serverId / directory context |
 | Chat/UI | Collapse long user messages setting | ✅ 已落地：新增 `collapsibleUserMessages` UI preference，Settings > Chat 可开关，默认保持现有两行折叠行为；关闭后长用户消息完整显示 | 已完成；后续可和官方 Settings search 索引项一起复核搜索命中 |
-| Chat | Rendered `@agent` mentions use primary accent | ✅ 基本覆盖：`UserTextPart` 已将 agent mention link 渲染为 `text-primary` | 低风险核对即可；后续可确认是否要改成更明确的 primary accent token |
+| Chat | Rendered `@agent` mentions use primary accent | ✅ 已落地 (Tier1-1)：`inlineMessageLinks.ts` 抽取 link builder/parser；`UserTextPart` 改用 markdown 格式内部 href；`MarkdownRendererImpl` 解析 `#openchamber-agent:` / `#openchamber-skill:` href 并渲染为 `text-primary` + data attribute；CSS `[data-openchamber-agent-mention]` / `[data-skill-name]` 强制 primary 色 | 已完成 |
 | Chat | Table copy action adds Markdown format | ✅ 已落地：copy dropdown 新增 Markdown 选项；表格导出逻辑抽到 `markdownTableExport.ts` 并加测试 | 已完成，后续只需和官方实现复核文案/i18n 是否一致 |
 | Chat | Mermaid diagram dedicated editor | 🟡 部分较强：本地已有 Mermaid render/preview dialog/zoom/copy/source 相关逻辑，但未看到 dedicated editor | 需看官方 editor 的数据流；避免破坏现有 preview dialog |
 | Models | Hidden models stay hidden in multi-model controls | ✅ 已落地：`useModelLists()` 暴露 `hiddenModels`，Multi-Run `ModelMultiSelect` 已传入 `ModelPickerList`，测试覆盖隐藏模型仍从 favorite/recent 排除 | 已完成，后续复核 Fusion/其它多模型入口即可 |
 | Worktrees | Single new worktree session opens immediately while setup continues | 🟡 部分：本地已有 pending draft worktree flow，但真实 session 仍在 worktree 创建后才完成 | 高风险。必须保留 `[OPENCHAMBER-FORK] ensureWorktreeProject` 和 remote project 注册 |
 | Multi-Run | Isolated runs open sessions immediately while setup continues | 🟡 部分：本地 waits worktree + session creation，只有 send message 阶段是 async fire-and-forget | 高风险。需重新设计 pending run/session 映射，不能丢 directory/serverId |
-| Sessions | Chat folder assignments persist after reload | ✅ 已覆盖：`useSessionFoldersStore` 同步 `oc.sessions.folders` / collapsed state，并有 server persistence | 只需用官方 diff 复核是否有边界修复 |
+| Sessions | Chat folder assignments persist after reload | ✅ 已落地 (Tier1-11)：`useSessionFolderCleanup` 增加 `hasLoadedGlobalSessions` guard，防止 global sessions 未加载时过早清理 folder assignments | 已完成 |
 | Sessions | Right-click menus for session/folder/project/worktree rows | 🟡 部分：session/temp session 已有 context menu；folder/project/worktree 覆盖面需逐文件对齐 | 中高风险，和 sidebar/tree 结构相关，需避免重复/错 server 操作 |
 | Settings | Search across settings pages | 🔴 未实现。`settings/metadata.ts` 有 keywords，但 `SettingsView` 没有全局 search UI | 中等 UX 功能，可独立做 |
-| Settings/Agents | Agent prompt and permission edits stay saved | ✅/🟡 看起来已覆盖：`useAgentsStore.updateAgent()` 会 PATCH `prompt`/`permission`，server `updateAgent()` 写 md/json/prompt file | 需要针对 md agent、json agent、builtin override 三类手动复测 |
+| Settings/Agents | Agent prompt and permission edits stay saved | ✅ 已落地 (Tier1-10)：cache invalidation (`invalidateAgentsLoadCache`/`invalidateCommandsLoadCache`/`invalidateSkillsLoadCache`) 在每次 CRUD 前调用；`buildAgentsSignature` 扩展覆盖 mode/model/temp/topP/prompt/permission；reload mode 从 `"active"` 改为 `"projects"`；null prompt 清除逻辑；permission source/merge 层级修正 (custom > project > user)；`AgentsPage` permission config 标准化 | 已完成 |
 | Files | Editor Vim mode setting | 🔴 未实现。未看到 Vim mode / CodeMirror Vim keymap 设置 | 中等功能；确认依赖是否已在 lockfile 中，避免新增依赖 |
-| Files | Safer writes via temporary files | 🟡 部分：settings 写入已有 tmp + rename；`/api/fs/write` 仍直接 `writeFile` | 数据安全优先级高；应先改 server write path，再回归 rename/delete/read |
-| Git | Changed-file folders have revert action | 🔴 未实现。现有 git revert 只看到单文件 revert 和 commit revert | 中等风险；目录 revert 必须限制到 changed-file group，不可扩大删除范围 |
+| Files | Safer writes via temporary files | ✅ 已落地 (Tier1-9)：`/api/fs/write` 改为 `realpath()` 解析 + `isPathWithinRoot` 安全检查 + temp file → rename 原子写入；error 时 always unlink temp | 已完成 |
+| Git | Changed-file folders have revert action | ✅ 已落地 (Tier1-6)：`GitView` refactoring `handleRevertAll` → `handleRevertPaths(paths, setGlobalReverting, scope)`；`handleRevertDirectory` 使用 `scope: 'working'`；`ChangesSection` 目录行新增 revert 按钮 + 确认对话框；8 locale i18n key 补齐 | 已完成 |
 | GitHub | Issue/PR pickers use server-side search | 🔴 未实现。UI 仍先分页拉取，再前端 query 过滤；server list route 未收 search query | 中等风险；保留 fork 的 repo network/fork detection |
-| Preview | Inline module scripts rewritten in proxied HTML | 🟡 部分：preview proxy 已重写 HTML attrs、CSS URL、JS import/from；未看到对 HTML 内联 `<script type="module">...</script>` body 的改写 | 需移植官方 parser/rewriter 或最小安全实现，并补测试 |
+| Preview | Inline module scripts rewritten in proxied HTML | ✅ 已落地 (Tier1-7)：`rewriteInlineModuleScripts` 函数解析 `<script type="module">` 内容并用 `rewriteJavaScript` 改写 import/from 路径；`stripPreviewCspMeta` 移除 CSP meta 标签让 bridge 可运行；`rewriteHtml` 返回值包装两层处理 | 已完成 |
 | Voice | Plan/file preview markdown TTS buttons + selected/full setting | 🟡 部分：voice service/settings 已很完整；PlanView/File preview 上未看到 TTS button 和 selection/full-document setting | 中等 UX；不要把 TTS 控件接进高频 markdown render 热路径 |
 | Desktop/macOS | Menu bar tray with live session status, Mini Chat, provider usage submenu | 🔴 未实现。Mini Chat window 已有，但 Electron main 未见 Tray/menu-bar status item | macOS 独立批次；要考虑 remote/live session status source |
 | Desktop/macOS | Optional vibrancy for left sidebar | 🔴 未实现且当前强制禁用：`desktop_set_vibrancy` handler 会写 `desktopVibrancy=false` | 需重新评估 Electron 可行性；不能直接按旧 Tauri/SwiftUI 思路套 |
-| Desktop/macOS | Startup no longer opens unnecessary folder prompts | 🟡 待比对。本地 native open dialog 仍存在，但未确认是否由 startup 触发 | 需逐 commit 看官方修的是哪个启动路径 |
+| Desktop/macOS | Startup no longer opens unnecessary folder prompts | ✅ 已落地 (Tier1-5)：Electron `spawnLocalServer` 设置 `OPENCHAMBER_OPENCODE_CWD = app.getPath('userData')` 并确保目录存在；`hmr-state-runtime.js` 的 `getInitialOpenCodeWorkingDirectory` 从 env 读取配置的 CWD，不再 fallback 到 `os.homedir()` 导致文件夹提示 | 已完成 |
 | Mobile | Refreshed session controls/worktree deletion/MCP/update/usage layout | 🟡 延后/部分。本 fork 已有大量 mobile-specific UI，但此前 mobile 批次是延后策略 | 继续延后，除非用户明确优先移动端 |
 | Terminal/Mobile | Touch scrolling conflicts less with terminal input | 🟡 可能部分覆盖：`TerminalViewport` 已有 pointer/touch scroll 转 terminal scroll、tap threshold、passive false | 需真机/移动视口复测后决定是否还需官方 diff |
-| Usage | Cursor quota tracking | 🔴 未实现。quota providers 未见 Cursor provider | 中等功能；需确认 Cursor quota 数据源和 auth |
+| Usage | Cursor quota tracking | ✅ 已落地 (Tier1-8)：新增 `packages/web/server/lib/quota/providers/cursor.js` (319 行)；注册到 providers/index.js + quota/index.js；UI 端 `quota.ts` 类型 + `utils.ts` window label + `providers/index.ts` 入口；8 locale 补 `quota.window.*` key | 已完成 |
 | UI/Localization | French UI translations and French docs | 🔴 未实现。未见 `fr` locale files | 可低风险批量补，但应排在功能后 |
 | VSCode | Archive all sessions action | 🔴 未实现。未看到 extension action/command | VS Code 批次处理 |
 | VSCode | Multi-root workspace support + folder switching | 🔴 未实现。VS Code 多数路径仍取 `workspaceFolders[0]` | 高风险 VS Code 架构改动；需避免 web/desktop 假设污染 extension |
+
+### Tier 1 移植批次 (2026-06-15)
+
+**范围**: v1.12.4 低风险高价值功能，手工逐 commit 移植
+**验证**: `bun run type-check` ✅ 0 errors / `bun run lint` ✅ 0 errors
+
+| # | 功能 | 上游 commit | 文件数 | 说明 |
+|---|---|---|---|---|
+| 1 | @agent mentions 主色渲染 | `d0e9d317` | 4 | 新建 `inlineMessageLinks.ts`；`UserTextPart` 改 markdown 内部 href；`MarkdownRendererImpl` 解析 agent/skill href；CSS data attribute 强制 primary 色 |
+| 2 | Table copy Markdown 格式 | `274e886a` | 0 | ✅ 已在 fork 中（`markdownTableExport.ts` 更好的实现） |
+| 3 | Hidden models multi-select | `266dde2d` | 0 | ✅ 已在 fork 中 |
+| 4 | Collapsible user messages | `2f62f315` | 0 | ✅ 已在 fork 中 |
+| 5 | macOS 启动不弹文件夹 | `e3993eb0` | 2 | Electron 设置 `OPENCHAMBER_OPENCODE_CWD`；`hmr-state-runtime` 从 env 读取初始 CWD |
+| 6 | Git folder-level revert | `6ade0c4e` | 11 | `GitView` refactoring + `ChangesSection` revert button + dialog；8 locale i18n |
+| 7 | Preview inline module scripts | `389ee4d6` | 1 | `proxy-runtime.js` 添加 `rewriteInlineModuleScripts` + `stripPreviewCspMeta` |
+| 8 | Cursor quota tracking | `bf07ecaa` | 16 | 新建 `cursor.js` provider (319 行)；注册 + UI 类型 + utils + 8 locale i18n |
+| 9 | Safer atomic file writes | `3b88ed38` | 1 | `fs/routes.js` realpath + isPathWithinRoot + temp→rename 原子写入 |
+| 10 | Agent prompt/permission 持久化 | `1c6e8ef6` + `4b6cecf3` | 9 | cache invalidation；signature 扩展；reload mode 修正；null prompt 清除；permission source/merge 层级修正；`AgentsPage` permission config 标准化 |
+| 11 | Chat folder reload 持久化 | `50d378f0` | 2 | `useSessionFolderCleanup` 增加 `hasLoadedGlobalSessions` guard |
+
+**Tier 1 总计**: 37 files changed, +1105/-90
 
 ### 建议制作顺序
 
@@ -356,15 +377,13 @@ Batch 3.6 (按需)
 
 ---
 
-## 当前状态 & 已知问题 (2026-06-08 Batch A 后)
+## 当前状态 & 已知问题 (2026-06-15 Tier 1 后)
 
 | 项目 | 状态 |
 |---|---|
 | `bun run type-check` | ✅ 0 errors |
-| `bun run lint` | ✅ 0 errors, 1 pre-existing warning (`MainLayout.tsx` hook dependency) |
-| Targeted sync/client tests | ✅ 77 pass (`event-reducer`, `event-pipeline`, `session-routing`, `session-actions`, `session-switch-resync`, `reconnect-recovery`, `session-list-bootstrap`, `streaming`, `client-health`) |
+| `bun run lint` | ✅ 0 errors |
 | Electron | ✅ 正常，不会多开窗口 |
 | 聊天区域 | ✅ 正常 |
-| 远程实例侧边栏 | ✅ 已修复（还原 sync-context.tsx + session-list-bootstrap.ts） |
-| `ENOENT` 项目清理日志 | ⚠️ 非新功能 — 服务端 `validateProjectEntries` 原有项目校验逻辑，与 v1.12 移植无关 |
-| 上游版本差距 | ⚠️ v1.12.2 + v1.12.3 部分落地；下一批优先 `useConfigStore` startup/并行加载与服务端 tunnels/lifecycle |
+| 远程实例侧边栏 | ✅ 已修复 |
+| 上游版本差距 | v1.12.4 Tier 1 (11 features) 已落地；Tier 2/3 待移植 |

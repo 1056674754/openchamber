@@ -803,9 +803,33 @@ export const registerFsRoutes = (app, dependencies) => {
         return res.status(400).json({ error: resolved.error });
       }
 
-      await fsPromises.mkdir(path.dirname(resolved.resolved), { recursive: true });
-      await fsPromises.writeFile(resolved.resolved, content, 'utf8');
-      return res.json({ success: true, path: path.resolve(normalizeDirectoryPath(filePath)) });
+      const writePath = await fsPromises.realpath(resolved.resolved).catch((error) => {
+        if (error && typeof error === 'object' && error.code === 'ENOENT') {
+          return resolved.resolved;
+        }
+        throw error;
+      });
+      const canonicalBase = await fsPromises.realpath(resolved.base).catch(() => path.resolve(resolved.base));
+      if (!isPathWithinRoot(writePath, canonicalBase, path, os)) {
+        return res.status(403).json({ error: 'Access denied' });
+      }
+
+      const existing = await fsPromises.readFile(writePath, 'utf8').catch(() => null);
+      if (existing === content) {
+        return res.json({ success: true, path: resolved.resolved });
+      }
+
+      await fsPromises.mkdir(path.dirname(writePath), { recursive: true });
+
+      const tmp = `${writePath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      try {
+        await fsPromises.writeFile(tmp, content, 'utf8');
+        await fsPromises.rename(tmp, writePath);
+      } catch (error) {
+        await fsPromises.unlink(tmp).catch(() => {});
+        throw error;
+      }
+      return res.json({ success: true, path: resolved.resolved });
     } catch (error) {
       const err = error;
       if (err && typeof err === 'object' && err.code === 'EACCES') {

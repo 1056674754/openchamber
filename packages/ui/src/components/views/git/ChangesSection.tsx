@@ -29,6 +29,7 @@ interface ChangesSectionProps {
   onSelectAll: () => void;
   onClearSelection: () => void;
   onRevertAll?: (paths: string[]) => Promise<void> | void;
+  onRevertDirectory?: (paths: string[]) => Promise<void> | void;
   onViewDiff: (path: string) => void;
   onRevertFile: (path: string) => void;
   isRevertingAll?: boolean;
@@ -36,6 +37,12 @@ interface ChangesSectionProps {
   onVisiblePathsChange?: (paths: string[]) => void;
   onOpenStashes?: () => void;
 }
+
+type PendingDirectoryRevert = {
+  path: string;
+  paths: string[];
+  count: number;
+};
 
 const CHANGE_LIST_VIRTUALIZE_THRESHOLD = 1000;
 const CHANGE_ROW_ESTIMATE_PX = 34;
@@ -181,6 +188,7 @@ export const ChangesSection: React.FC<ChangesSectionProps> = ({
   onSelectAll,
   onClearSelection,
   onRevertAll,
+  onRevertDirectory,
   onViewDiff,
   onRevertFile,
   isRevertingAll = false,
@@ -195,6 +203,7 @@ export const ChangesSection: React.FC<ChangesSectionProps> = ({
   const selectedCount = selectedPaths.size;
   const totalCount = changeEntries.length;
   const [confirmRevertAllOpen, setConfirmRevertAllOpen] = React.useState(false);
+  const [pendingDirectoryRevert, setPendingDirectoryRevert] = React.useState<PendingDirectoryRevert | null>(null);
   const treeRoot = React.useMemo(() => buildChangesTree(changeEntries), [changeEntries]);
   const [expandedDirectories, setExpandedDirectories] = React.useState<Set<string>>(new Set());
 
@@ -382,6 +391,8 @@ export const ChangesSection: React.FC<ChangesSectionProps> = ({
     const directory = row.directory;
     const isExpanded = expandedDirectories.has(directory.path);
     const selectionState = getDirectorySelectionState(directory, selectedPaths);
+    const directoryPaths = directory.files.map((file) => file.path);
+    const isDirectoryReverting = isRevertingAll || directoryPaths.some((path) => revertingPaths.has(path));
 
     return (
       <div
@@ -416,6 +427,22 @@ export const ChangesSection: React.FC<ChangesSectionProps> = ({
           </span>
           <span className="ml-auto shrink-0 typography-micro text-muted-foreground">{directory.files.length}</span>
         </button>
+        {onRevertDirectory ? (
+          <button
+            type="button"
+            onClick={() => setPendingDirectoryRevert({ path: directory.path, paths: directoryPaths, count: directoryPaths.length })}
+            disabled={isDirectoryReverting}
+            className="flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--interactive-focus-ring)] disabled:cursor-not-allowed disabled:opacity-50"
+            aria-label={t('gitView.changes.revertDirectoryAria', { path: directory.path })}
+            title={t('gitView.changes.revertDirectoryTooltip')}
+          >
+            {isDirectoryReverting ? (
+              <Icon name="loader-4" className="size-3.5 animate-spin" />
+            ) : (
+              <Icon name="arrow-go-back" className="size-3.5" />
+            )}
+          </button>
+        ) : null}
       </div>
     );
   }, [
@@ -423,6 +450,7 @@ export const ChangesSection: React.FC<ChangesSectionProps> = ({
     expandedDirectories,
     isRevertingAll,
     isTreeView,
+    onRevertDirectory,
     onRevertFile,
     onToggleFile,
     onViewDiff,
@@ -442,6 +470,18 @@ export const ChangesSection: React.FC<ChangesSectionProps> = ({
     await onRevertAll(changeEntries.map((entry) => entry.path));
     setConfirmRevertAllOpen(false);
   }, [changeEntries, isRevertingAll, onRevertAll]);
+
+  const isPendingDirectoryReverting = pendingDirectoryRevert
+    ? isRevertingAll || pendingDirectoryRevert.paths.some((path) => revertingPaths.has(path))
+    : false;
+
+  const handleConfirmRevertDirectory = React.useCallback(async () => {
+    if (!onRevertDirectory || !pendingDirectoryRevert || isPendingDirectoryReverting) {
+      return;
+    }
+    await onRevertDirectory(pendingDirectoryRevert.paths);
+    setPendingDirectoryRevert(null);
+  }, [isPendingDirectoryReverting, onRevertDirectory, pendingDirectoryRevert]);
 
   return (
     <>
@@ -568,6 +608,39 @@ export const ChangesSection: React.FC<ChangesSectionProps> = ({
             </Button>
             <Button variant="destructive" size="sm" onClick={() => void handleConfirmRevertAll()} disabled={isRevertingAll}>
               {isRevertingAll ? t('gitView.changes.reverting') : t('gitView.changes.revertAll')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={!!pendingDirectoryRevert}
+        onOpenChange={(open) => {
+          if (!isPendingDirectoryReverting && !open) setPendingDirectoryRevert(null);
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>{t('gitView.changes.revertDirectoryDialogTitle')}</DialogTitle>
+            <DialogDescription>
+              {pendingDirectoryRevert
+                ? pendingDirectoryRevert.count === 1
+                  ? t('gitView.changes.revertDirectoryDescriptionSingle', { count: pendingDirectoryRevert.count, path: pendingDirectoryRevert.path })
+                  : t('gitView.changes.revertDirectoryDescriptionPlural', { count: pendingDirectoryRevert.count, path: pendingDirectoryRevert.path })
+                : null}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" size="sm" onClick={() => setPendingDirectoryRevert(null)} disabled={isPendingDirectoryReverting}>
+              {t('gitView.common.cancel')}
+            </Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={() => void handleConfirmRevertDirectory()}
+              disabled={isPendingDirectoryReverting || !pendingDirectoryRevert}
+            >
+              {isPendingDirectoryReverting ? t('gitView.changes.reverting') : t('gitView.changes.revertDirectory')}
             </Button>
           </DialogFooter>
         </DialogContent>

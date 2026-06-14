@@ -1243,6 +1243,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
 
   useSessionFolderCleanup({
     isSessionsLoading,
+    hasLoadedGlobalSessions,
     sessions,
     normalizedProjects,
     getArchivedSessionsForProject,

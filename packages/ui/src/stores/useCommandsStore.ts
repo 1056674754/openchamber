@@ -46,6 +46,10 @@ const getCommandsCacheKey = (directory: string | null): string => {
   return directory?.trim() || DEFAULT_COMMANDS_CACHE_KEY;
 };
 
+export const invalidateCommandsLoadCache = (directory: string | null = getRequestDirectory()) => {
+  commandsLastLoadedAt.delete(getCommandsCacheKey(directory));
+};
+
 const buildCommandsSignature = (commands: Command[]): string => {
   return commands
     .map((command) => [
@@ -276,6 +280,7 @@ export const useCommandsStore = create<CommandsStore>()(
             console.log('[CommandsStore] Command created successfully');
 
             const needsReload = payload?.requiresReload ?? true;
+            invalidateCommandsLoadCache(directory);
             if (needsReload) {
               requiresReload = true;
               await performFullConfigRefresh({
@@ -337,6 +342,7 @@ export const useCommandsStore = create<CommandsStore>()(
             console.log('[CommandsStore] Command updated successfully');
 
             const needsReload = payload?.requiresReload ?? true;
+            invalidateCommandsLoadCache(directory);
             if (needsReload) {
               requiresReload = true;
               await performFullConfigRefresh({
@@ -383,6 +389,7 @@ export const useCommandsStore = create<CommandsStore>()(
             console.log('[CommandsStore] Command deleted successfully');
 
             const needsReload = payload?.requiresReload ?? true;
+            invalidateCommandsLoadCache(directory);
             if (needsReload) {
               requiresReload = true;
               await performFullConfigRefresh({
@@ -494,6 +501,7 @@ async function performFullConfigRefresh(options: { message?: string; delayMs?: n
 
     const commandsStore = useCommandsStore.getState();
 
+    invalidateCommandsLoadCache();
     await commandsStore.loadCommands();
 
     emitConfigChange("commands", { source: CONFIG_EVENT_SOURCE });
@@ -501,6 +509,7 @@ async function performFullConfigRefresh(options: { message?: string; delayMs?: n
     console.error("[CommandsStore] Failed to refresh configuration after OpenCode restart:", error);
     updateConfigUpdateMessage("OpenCode refresh failed. Please retry refreshing configuration manually.");
     await sleep(1500);
+    throw error;
   } finally {
     finishConfigUpdate();
   }

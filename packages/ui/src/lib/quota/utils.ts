@@ -77,6 +77,11 @@ export const formatWindowLabel = (label: string): string => {
   if (label === 'daily') return 'Daily';
   if (label === 'monthly') return 'Monthly Limit';
   if (label === 'credits') return 'Credits';
+  if (label === 'billing_cycle') return 'Billing Cycle';
+  if (label === 'auto') return 'Auto';
+  if (label === 'api') return 'API';
+  if (label === 'plan_limit') return 'Plan Limit';
+  if (label === 'on_demand') return 'On-demand';
   if (label === 'session') return 'Session';
   if (label === 'premium') return 'Premium Interactions';
   if (label === 'chat') return 'Chat Requests';
