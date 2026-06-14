@@ -1,6 +1,7 @@
 import { useI18n } from '@/lib/i18n';
 import { useDesktopSshStore } from '@/stores/useDesktopSshStore';
 import type { DesktopSshPortForward } from '@/lib/desktopSsh';
+import { useInstanceContextStore } from '@/stores/useInstanceContextStore';
 
 function portLabel(fwd: DesktopSshPortForward): string {
   const parts: string[] = [];
@@ -13,7 +14,11 @@ function portLabel(fwd: DesktopSshPortForward): string {
 export function RemotePortForwardingPage() {
   const { t } = useI18n();
   const store = useDesktopSshStore();
-  const instances = store.instances;
+  const currentInstance = useInstanceContextStore((s) => s.currentInstance);
+  const selectedRemoteId = currentInstance?.type === 'remote' ? currentInstance.id : null;
+  const instances = selectedRemoteId
+    ? store.instances.filter((inst) => inst.id === selectedRemoteId)
+    : store.instances;
 
   const allForwards: { instanceId: string; label: string; fwd: DesktopSshPortForward }[] = [];
   for (const inst of instances) {

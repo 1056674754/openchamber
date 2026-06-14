@@ -10,6 +10,7 @@ import {
 } from '@/components/ui/dialog';
 import { useState } from 'react';
 import type { DesktopSshInstanceStatus } from '@/lib/desktopSsh';
+import { useInstanceContextStore } from '@/stores/useInstanceContextStore';
 
 function statusLabel(phase: string | undefined): string {
   switch (phase) {
@@ -32,7 +33,11 @@ function statusDot(phase: string | undefined): string {
 export function RemoteConnectionPage() {
   const { t } = useI18n();
   const store = useDesktopSshStore();
-  const instances = store.instances;
+  const currentInstance = useInstanceContextStore((s) => s.currentInstance);
+  const selectedRemoteId = currentInstance?.type === 'remote' ? currentInstance.id : null;
+  const instances = selectedRemoteId
+    ? store.instances.filter((inst) => inst.id === selectedRemoteId)
+    : store.instances;
   const statusesById = store.statusesById;
   const isRestarting = store.isRestarting;
 
@@ -47,7 +52,9 @@ export function RemoteConnectionPage() {
             {t('settings.page.remoteConnection.title')}
           </div>
           <p className="typography-ui text-muted-foreground">
-            No remote connections configured. Add one from the Remote Instances page.
+            {selectedRemoteId
+              ? 'The selected remote connection is not configured.'
+              : 'No remote connections configured. Add one from the Remote Instances page.'}
           </p>
         </div>
       </div>
