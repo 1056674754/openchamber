@@ -315,8 +315,8 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
   });
 
   app.get('/api/openchamber/sessions/unread', (_req, res) => {
-    if (!unreadStore) return res.json({ sessions: {} });
-    res.json({ sessions: unreadStore.getUnreadSessions() });
+    if (!unreadStore) return res.json({ sessions: {}, totalUnread: 0 });
+    res.json({ sessions: unreadStore.getUnreadSessions(), totalUnread: unreadStore.getTotalUnread() });
   });
 
   app.post('/api/openchamber/sessions/:sessionId/read', (req, res) => {
@@ -324,7 +324,16 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
     if (!sessionId || typeof sessionId !== 'string') {
       return res.status(400).json({ error: 'Missing sessionId' });
     }
-    if (unreadStore) unreadStore.markRead(sessionId);
-    res.json({ ok: true });
+    const state = unreadStore ? unreadStore.markRead(sessionId) : null;
+    res.json({ ok: true, sessionId, state, totalUnread: unreadStore ? unreadStore.getTotalUnread() : 0 });
+  });
+
+  app.post('/api/openchamber/sessions/:sessionId/unread', (req, res) => {
+    const sessionId = req.params.sessionId;
+    if (!sessionId || typeof sessionId !== 'string') {
+      return res.status(400).json({ error: 'Missing sessionId' });
+    }
+    const state = unreadStore ? unreadStore.markUnread(sessionId) : null;
+    res.json({ ok: true, sessionId, state, totalUnread: unreadStore ? unreadStore.getTotalUnread() : 0 });
   });
 };
