@@ -41,6 +41,10 @@ function createSkillDirectivePart(): Part {
     } as Part;
 }
 
+function createSubtaskPart(): Part {
+    return { type: 'subtask' } as Part;
+}
+
 describe('projectTurnRecords', () => {
     test('groups assistant replies under their parent user turn', () => {
         const user = createMessageEntry({ id: 'u1', role: 'user', createdAt: 1 });
@@ -181,6 +185,66 @@ describe('projectTurnRecords', () => {
         expect(projection.turns[2]?.isDirectiveTurn).toBe(true);
         expect(projection.turns[1]?.assistantMessageIds).toEqual(['ad1']);
         expect(projection.turns[2]?.assistantMessageIds).toEqual(['ad2']);
+        expect(projection.ungroupedMessageIds.size).toBe(0);
+    });
+
+    test('subtask continuation user message folds under parent turn (isDirectiveTurn)', () => {
+        const user = createMessageEntry({ id: 'u1', role: 'user', createdAt: 1 });
+        const assistant = createMessageEntry({ id: 'a1', role: 'assistant', parentID: 'u1', createdAt: 2 });
+        const subtaskContinuation = createMessageEntry({
+            id: 's1',
+            role: 'user',
+            parentID: 'a1',
+            createdAt: 3,
+            parts: [createSubtaskPart()],
+        });
+        const assistantToSubtask = createMessageEntry({
+            id: 'a2',
+            role: 'assistant',
+            parentID: 's1',
+            createdAt: 4,
+        });
+
+        const projection = projectTurnRecords([user, assistant, subtaskContinuation, assistantToSubtask]);
+
+        expect(projection.turns).toHaveLength(2);
+
+        expect(projection.turns[0]?.turnId).toBe('u1');
+        expect(projection.turns[0]?.isDirectiveTurn).toBe(false);
+        expect(projection.turns[0]?.assistantMessageIds).toEqual(['a1']);
+
+        // The subtask continuation turn is marked foldable so MessageList
+        // attaches it under its parent real-user turn instead of rendering
+        // a new sticky-header conversation block.
+        expect(projection.turns[1]?.turnId).toBe('s1');
+        expect(projection.turns[1]?.isDirectiveTurn).toBe(true);
+        expect(projection.turns[1]?.assistantMessageIds).toEqual(['a2']);
+
+        expect(projection.ungroupedMessageIds.size).toBe(0);
+    });
+
+    test('real user message after a subtask continuation is NOT foldable', () => {
+        const user1 = createMessageEntry({ id: 'u1', role: 'user', createdAt: 1 });
+        const a1 = createMessageEntry({ id: 'a1', role: 'assistant', parentID: 'u1', createdAt: 2 });
+        const subtask = createMessageEntry({
+            id: 's1',
+            role: 'user',
+            parentID: 'a1',
+            createdAt: 3,
+            parts: [createSubtaskPart()],
+        });
+        const a2 = createMessageEntry({ id: 'a2', role: 'assistant', parentID: 's1', createdAt: 4 });
+        const user2 = createMessageEntry({ id: 'u2', role: 'user', createdAt: 5 });
+        const a3 = createMessageEntry({ id: 'a3', role: 'assistant', parentID: 'u2', createdAt: 6 });
+
+        const projection = projectTurnRecords([user1, a1, subtask, a2, user2, a3]);
+
+        expect(projection.turns).toHaveLength(3);
+        expect(projection.turns.map((t) => t.turnId)).toEqual(['u1', 's1', 'u2']);
+        expect(projection.turns[0]?.isDirectiveTurn).toBe(false);
+        expect(projection.turns[1]?.isDirectiveTurn).toBe(true);
+        expect(projection.turns[2]?.isDirectiveTurn).toBe(false);
+        expect(projection.turns[2]?.assistantMessageIds).toEqual(['a3']);
         expect(projection.ungroupedMessageIds.size).toBe(0);
     });
 });

@@ -14,7 +14,12 @@ const CLOSED_ERROR_MARKERS = [
     'The user dismissed this question',
     'QuestionRejectedError',
     'question rejected',
+    'aborted',
+    'cancelled',
+    'canceled',
+    'dismissed',
 ];
+const TERMINAL_TOOL_STATUSES = new Set(['completed', 'error', 'aborted', 'failed', 'timeout', 'cancelled']);
 
 const getValue = (value: unknown, key: string): unknown => {
     if (typeof value !== 'object' || value === null) return undefined;
@@ -77,7 +82,14 @@ const hasQuestionAnswer = (part: ToolPartType): boolean => {
 const isQuestionClosedByUser = (part: ToolPartType): boolean => {
     const error = getStringValue(part.state, 'error');
     if (!error) return false;
-    return CLOSED_ERROR_MARKERS.some((marker) => error.includes(marker));
+    const lowerError = error.toLowerCase();
+    return CLOSED_ERROR_MARKERS.some((marker) => lowerError.includes(marker.toLowerCase()));
+};
+
+const isToolPartTerminatedWithoutAnswer = (part: ToolPartType): boolean => {
+    if (hasQuestionAnswer(part)) return false;
+    const status = getStringValue(part.state, 'status');
+    return status !== undefined && TERMINAL_TOOL_STATUSES.has(status);
 };
 
 const questionSignature = (questions: readonly QuestionInfo[]): string => {
@@ -99,7 +111,7 @@ export const recoverQuestionRequestFromToolPart = ({
     normalizedToolName,
 }: RecoverQuestionRequestInput): QuestionRequest | null => {
     if ((normalizedToolName ?? part.tool) !== 'question') return null;
-    if (hasQuestionAnswer(part) || isQuestionClosedByUser(part)) return null;
+    if (hasQuestionAnswer(part) || isQuestionClosedByUser(part) || isToolPartTerminatedWithoutAnswer(part)) return null;
 
     const requestSessionID = sessionID ?? part.sessionID;
     const requestMessageID = messageID ?? part.messageID;

@@ -354,6 +354,7 @@ export const dict = {
   'sessions.sidebar.remote.connecting': 'Connecting',
   'sessions.sidebar.remote.error': 'Error',
   'sessions.sidebar.session.status.permissionRequired': 'Permission required',
+  'sessions.sidebar.session.status.questionPending': 'Question pending',
   'sessions.sidebar.session.subsessions.collapse': 'Collapse subsessions',
   'sessions.sidebar.session.subsessions.expand': 'Expand subsessions',
   'sessions.sidebar.dialogs.deleteSession.title': 'Delete session?',

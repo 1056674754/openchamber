@@ -13,8 +13,13 @@ type QuestionDraftStorage = {
 
 const DRAFT_PREFIX = 'openchamber:question-card-draft:v1:';
 const HANDLED_PREFIX = 'openchamber:question-card-handled:v1:';
+const HANDLED_TOOL_PREFIX = 'openchamber:question-card-handled-tool:v1:';
 
 const keyFor = (prefix: string, questionId: string): string => `${prefix}${encodeURIComponent(questionId)}`;
+
+const toolKeyFor = (tool: { messageID: string; callID: string }): string => (
+    `${HANDLED_TOOL_PREFIX}${encodeURIComponent(tool.messageID)}:${encodeURIComponent(tool.callID)}`
+);
 
 const getBrowserStorage = (): QuestionDraftStorage | null => {
     if (typeof window === 'undefined') return null;
@@ -163,6 +168,32 @@ export const markQuestionHandled = (
     try {
         storage.setItem(keyFor(HANDLED_PREFIX, questionId), '1');
         storage.removeItem(keyFor(DRAFT_PREFIX, questionId));
+    } catch {
+        // Ignore localStorage quota and privacy-mode failures.
+    }
+};
+
+export const isQuestionHandledByTool = (
+    tool: { messageID: string; callID: string },
+    storage: QuestionDraftStorage | null = getBrowserStorage(),
+): boolean => {
+    if (!storage) return false;
+
+    try {
+        return storage.getItem(toolKeyFor(tool)) === '1';
+    } catch {
+        return false;
+    }
+};
+
+export const markQuestionHandledByTool = (
+    tool: { messageID: string; callID: string },
+    storage: QuestionDraftStorage | null = getBrowserStorage(),
+): void => {
+    if (!storage) return;
+
+    try {
+        storage.setItem(toolKeyFor(tool), '1');
     } catch {
         // Ignore localStorage quota and privacy-mode failures.
     }

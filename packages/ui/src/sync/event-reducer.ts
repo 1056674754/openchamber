@@ -280,6 +280,7 @@ export function applyDirectoryEvent(
       draft.session_status[props.sessionID] = props.status
       if (props.status.type === "idle") {
         delete draft.session_activity[props.sessionID]
+        delete draft.question[props.sessionID]
       }
       return true
     }
@@ -288,8 +289,12 @@ export function applyDirectoryEvent(
       const props = event.properties as { sessionID: string }
       const status = { type: "idle" } as const
       delete draft.session_activity[props.sessionID]
+      const hadQuestions = Boolean(draft.question[props.sessionID])
+      if (hadQuestions) {
+        delete draft.question[props.sessionID]
+      }
       if (areSessionStatusesEqual(draft.session_status[props.sessionID], status)) {
-        return false
+        return hadQuestions
       }
       draft.session_status[props.sessionID] = status
       return true

@@ -355,6 +355,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.remote.connecting': '연결 중',
   'sessions.sidebar.remote.error': '오류',
   'sessions.sidebar.session.status.permissionRequired': '권한 필요',
+  'sessions.sidebar.session.status.questionPending': '질문 대기 중',
   'sessions.sidebar.session.subsessions.collapse': '하위 세션 접기',
   'sessions.sidebar.session.subsessions.expand': '하위 세션 펼치기',
   'sessions.sidebar.dialogs.deleteSession.title': '세션 삭제?',

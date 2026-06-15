@@ -17,8 +17,10 @@ import { serializeQuestionAsJson, serializeQuestionAsMarkdown } from './question
 import {
   clearQuestionDraft,
   isQuestionHandled,
+  isQuestionHandledByTool,
   loadQuestionDraft,
   markQuestionHandled,
+  markQuestionHandledByTool,
   saveQuestionDraft,
 } from './lib/questionDraftPersistence';
 
@@ -81,8 +83,8 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({ question, inline = f
     setSelectedOptions(draft?.selectedOptions ?? {});
     setCustomMode(draft?.customMode ?? {});
     setCustomText(draft?.customText ?? {});
-    setHasResponded(isQuestionHandled(question.id));
-  }, [question.id]);
+    setHasResponded(isQuestionHandled(question.id) || (question.tool ? isQuestionHandledByTool(question.tool) : false));
+  }, [question.id, question.tool]);
 
   React.useEffect(() => {
     if (hasResponded) return;
@@ -235,6 +237,7 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({ question, inline = f
         await respondToQuestion(question.sessionID, target.requestId, answers, target.directory);
       }
       markQuestionHandled(question.id);
+      if (question.tool) markQuestionHandledByTool(question.tool);
       setHasResponded(true);
     } catch (error) {
       const description = describeQuestionError(error);
@@ -243,7 +246,7 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({ question, inline = f
     } finally {
       setIsResponding(false);
     }
-  }, [buildAnswersPayload, question.id, question.sessionID, requiredSatisfied, resolveEffectiveRequestTarget, respondToQuestion, submitStaleQuestionAnswer, t]);
+  }, [buildAnswersPayload, question.id, question.sessionID, question.tool, requiredSatisfied, resolveEffectiveRequestTarget, respondToQuestion, submitStaleQuestionAnswer, t]);
 
   const handleKeyDown = React.useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -269,6 +272,7 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({ question, inline = f
         await rejectQuestion(question.sessionID, target.requestId, target.directory);
       }
       markQuestionHandled(question.id);
+      if (question.tool) markQuestionHandledByTool(question.tool);
       clearQuestionDraft(question.id);
       setHasResponded(true);
     } catch (error) {
@@ -278,7 +282,7 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({ question, inline = f
     } finally {
       setIsResponding(false);
     }
-  }, [question.id, question.sessionID, rejectQuestion, resolveEffectiveRequestTarget, t]);
+  }, [question.id, question.sessionID, question.tool, rejectQuestion, resolveEffectiveRequestTarget, t]);
 
   const handleCopyMarkdown = React.useCallback(async () => {
     const result = await copyTextToClipboard(serializeQuestionAsMarkdown(question));

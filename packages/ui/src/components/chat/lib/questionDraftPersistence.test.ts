@@ -2,8 +2,10 @@ import { describe, expect, test } from 'bun:test';
 import {
     clearQuestionDraft,
     isQuestionHandled,
+    isQuestionHandledByTool,
     loadQuestionDraft,
     markQuestionHandled,
+    markQuestionHandledByTool,
     saveQuestionDraft,
     type QuestionDraftSnapshot,
 } from './questionDraftPersistence';
@@ -74,5 +76,34 @@ describe('question draft persistence', () => {
 
         expect(loadQuestionDraft('que-clear', storage)).toBeNull();
         expect(isQuestionHandled('que-clear', storage)).toBe(false);
+    });
+
+    test('tool-anchor handled state survives id change between live and recovered cards', () => {
+        const storage = new MemoryStorage();
+        const tool = { messageID: 'msg-1', callID: 'call-1' };
+
+        markQuestionHandledByTool(tool, storage);
+
+        expect(isQuestionHandledByTool(tool, storage)).toBe(true);
+    });
+
+    test('tool-anchor handled state is independent of request-id handled state', () => {
+        const storage = new MemoryStorage();
+        const tool = { messageID: 'msg-1', callID: 'call-1' };
+
+        markQuestionHandledByTool(tool, storage);
+
+        expect(isQuestionHandled('que-live', storage)).toBe(false);
+        expect(isQuestionHandledByTool(tool, storage)).toBe(true);
+    });
+
+    test('tool-anchor handled state keys by messageID and callID', () => {
+        const storage = new MemoryStorage();
+
+        markQuestionHandledByTool({ messageID: 'msg-1', callID: 'call-1' }, storage);
+
+        expect(isQuestionHandledByTool({ messageID: 'msg-1', callID: 'call-1' }, storage)).toBe(true);
+        expect(isQuestionHandledByTool({ messageID: 'msg-1', callID: 'call-2' }, storage)).toBe(false);
+        expect(isQuestionHandledByTool({ messageID: 'msg-2', callID: 'call-1' }, storage)).toBe(false);
     });
 });

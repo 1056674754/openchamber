@@ -18,7 +18,7 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { buildExportFilename, downloadAsMarkdown, formatSessionAsMarkdown, getExportRevealLabelKey, revealExportedMarkdown, saveAsMarkdownDesktop } from '@/lib/exportSession';
 import type { ChildSessionExport } from '@/lib/exportSession';
-import { buildSessionMessageRecordsSnapshot, useAllSessionStatuses, useChildStoreManager, useGlobalSessionStatus, useSession, useSessionPermissions } from '@/sync/sync-context';
+import { buildSessionMessageRecordsSnapshot, useAllSessionStatuses, useChildStoreManager, useGlobalSessionStatus, useSession, useSessionPermissions, useSessionQuestions } from '@/sync/sync-context';
 import { useSync } from '@/sync/use-sync';
 import { getSyncStoresForServer } from '@/sync/multi-server-registry';
 import { useViewportStore } from '@/sync/viewport-store';
@@ -508,6 +508,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
   );
   const sessionStatus = useGlobalSessionStatus(session.id);
   const sessionPermissions = useSessionPermissions(session.id, permissionDirectory);
+  const sessionQuestions = useSessionQuestions(session.id, permissionDirectory);
   const directoryState = sessionDirectory ? directoryStatus.get(sessionDirectory) : null;
   const isMissingDirectory = directoryState === 'missing';
   const isActive = currentSessionId === session.id;
@@ -669,6 +670,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
   const statusType = sessionStatus?.type ?? 'idle';
   const isStreaming = statusType === 'busy' || statusType === 'retry';
   const pendingPermissionCount = sessionPermissions.length;
+  const pendingQuestionCount = sessionQuestions.length;
   const showUnreadStatus = needsAttention;
 
   const spinnerState = (() => {
@@ -1117,6 +1119,12 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
                           <span className="leading-none">{pendingPermissionCount}</span>
                         </span>
                       ) : null}
+                      {pendingQuestionCount > 0 ? (
+                        <span className="inline-flex items-center gap-1 rounded bg-status-info/10 px-1 py-0.5 text-[0.7rem] text-status-info flex-shrink-0" title={t('sessions.sidebar.session.status.questionPending')} aria-label={t('sessions.sidebar.session.status.questionPending')}>
+                          <Icon name="question" className="h-3 w-3" />
+                          <span className="leading-none">{pendingQuestionCount}</span>
+                        </span>
+                      ) : null}
                     </div>
                   </button>
                 </TooltipTrigger>
@@ -1169,6 +1177,12 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
                     <span className="inline-flex items-center gap-1 rounded bg-destructive/10 px-1 py-0.5 text-[0.7rem] text-destructive flex-shrink-0" title={t('sessions.sidebar.session.status.permissionRequired')} aria-label={t('sessions.sidebar.session.status.permissionRequired')}>
                       <Icon name="shield" className="h-3 w-3"  />
                       <span className="leading-none">{pendingPermissionCount}</span>
+                    </span>
+                  ) : null}
+                  {pendingQuestionCount > 0 ? (
+                    <span className="inline-flex items-center gap-1 rounded bg-status-info/10 px-1 py-0.5 text-[0.7rem] text-status-info flex-shrink-0" title={t('sessions.sidebar.session.status.questionPending')} aria-label={t('sessions.sidebar.session.status.questionPending')}>
+                      <Icon name="question" className="h-3 w-3" />
+                      <span className="leading-none">{pendingQuestionCount}</span>
                     </span>
                   ) : null}
                 </div>

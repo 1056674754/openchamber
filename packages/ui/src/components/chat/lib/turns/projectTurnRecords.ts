@@ -1,4 +1,5 @@
 import { isSystemDirectiveMessage } from '@/lib/messages/system-directive';
+import { hasSubtaskPart } from '@/lib/messages/real-user';
 
 import { projectTurnActivity } from './projectTurnActivity';
 import { projectTurnIndexes } from './projectTurnIndexes';
@@ -177,13 +178,19 @@ export const projectTurnRecords = (
     // response (which has parentID → directive id) gets grouped correctly.
     // We mark them `isDirectiveTurn: true` so the UI can skip the sticky
     // header and render a banner card instead.
+    //
+    // [sscity-mod] Subtask continuations (task()/question bridge-back) ALSO
+    // arrive as role:user with a `subtask` part. We reuse the same fold flag
+    // so MessageList attaches them under their parent real-user turn instead
+    // of rendering a spurious new sticky-header block. Render style is decided
+    // later by ChatMessage via part content (not this flag), so reuse is safe.
     messages.forEach((message, index) => {
         const role = resolveMessageRole(message);
         if (role !== 'user') {
             return;
         }
 
-        const isDirective = isSystemDirectiveMessage(message.parts);
+        const foldUnderParent = isSystemDirectiveMessage(message.parts) || hasSubtaskPart(message.parts);
         const turnId = message.info.id;
         const turn: TurnRecord = {
             turnId,
@@ -193,7 +200,7 @@ export const projectTurnRecords = (
             messages: [createTurnMessageRecord(message, index)],
             assistantMessageIds: [],
             assistantMessages: [],
-            isDirectiveTurn: isDirective,
+            isDirectiveTurn: foldUnderParent,
             activityParts: [],
             activitySegments: [],
             summary: {},

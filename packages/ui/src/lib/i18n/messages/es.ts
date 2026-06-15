@@ -355,6 +355,7 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.remote.connecting": "Conectando",
   "sessions.sidebar.remote.error": "Error",
   "sessions.sidebar.session.status.permissionRequired": "Permiso requerido",
+  "sessions.sidebar.session.status.questionPending": "Pregunta pendiente",
   "sessions.sidebar.session.subsessions.collapse": "Colapsar subsesiones",
   "sessions.sidebar.session.subsessions.expand": "Expandir subsesiones",
   "sessions.sidebar.dialogs.deleteSession.title": "¿Eliminar sesión?",

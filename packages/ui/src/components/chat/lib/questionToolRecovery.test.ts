@@ -84,7 +84,7 @@ describe('recoverQuestionRequestFromToolPart', () => {
         expect(recovered).toBeNull();
     });
 
-    test('recovers an unanswered question regardless of tool error status', () => {
+    test('does not recover a question whose tool part terminated in error without an answer', () => {
         const recovered = recoverQuestionRequestFromToolPart({
             part: makeQuestionToolPart({
                 state: {
@@ -99,7 +99,7 @@ describe('recoverQuestionRequestFromToolPart', () => {
                             },
                         ],
                     },
-                    error: 'Tool execution aborted',
+                    error: 'Something unexpected happened',
                     metadata: {},
                     time: { start: 1, end: 2 },
                 },
@@ -107,8 +107,7 @@ describe('recoverQuestionRequestFromToolPart', () => {
             normalizedToolName: 'question',
         });
 
-        expect(recovered?.id).toBe('recovered-question:msg-1:call-1');
-        expect(recovered?.questions[0]?.question).toBe('Which mode?');
+        expect(recovered).toBeNull();
     });
 
     test('does not recover questions the user already dismissed', () => {
@@ -135,6 +134,35 @@ describe('recoverQuestionRequestFromToolPart', () => {
         });
 
         expect(recovered).toBeNull();
+    });
+
+    test('does not recover questions dismissed via expanded error markers (case-insensitive)', () => {
+        const markers = ['aborted', 'cancelled', 'canceled', 'dismissed', 'Aborted', 'CANCELLED'];
+        for (const marker of markers) {
+            const recovered = recoverQuestionRequestFromToolPart({
+                part: makeQuestionToolPart({
+                    state: {
+                        status: 'error',
+                        input: {
+                            questions: [
+                                {
+                                    header: 'Pick mode',
+                                    question: 'Which mode?',
+                                    options: [{ label: 'safe', description: 'Default' }],
+                                    multiple: false,
+                                },
+                            ],
+                        },
+                        error: `Tool was ${marker} by the runtime`,
+                        metadata: {},
+                        time: { start: 1, end: 2 },
+                    },
+                }),
+                normalizedToolName: 'question',
+            });
+
+            expect(recovered).toBeNull();
+        }
     });
 });
 
