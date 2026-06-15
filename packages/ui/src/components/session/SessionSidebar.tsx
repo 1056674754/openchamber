@@ -90,6 +90,7 @@ import { mapWithConcurrency } from '@/lib/concurrency';
 const PROJECT_COLLAPSE_STORAGE_KEY = 'oc.sessions.projectCollapse';
 const GROUP_ORDER_STORAGE_KEY = 'oc.sessions.groupOrder';
 const GROUP_COLLAPSE_STORAGE_KEY = 'oc.sessions.groupCollapse';
+const ARCHIVED_GROUP_INIT_STORAGE_KEY = 'oc.sessions.archivedGroupInit';
 const PROJECT_ACTIVE_SESSION_STORAGE_KEY = 'oc.sessions.activeSessionByProject';
 // v2 stores composite `${renderContext}:${active|archived}:${sessionId}` entries so
 // duplicate session rows in different contexts keep independent expand state.
@@ -1298,6 +1299,52 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
   });
 
   const { getOrderedGroups } = useGroupOrdering(groupOrderByProject);
+
+  const archivedGroupInitScopesRef = React.useRef<Set<string> | null>(null);
+
+  React.useEffect(() => {
+    if (projectSections.length === 0) return;
+
+    if (archivedGroupInitScopesRef.current === null) {
+      try {
+        const raw = getSafeStorage().getItem(ARCHIVED_GROUP_INIT_STORAGE_KEY);
+        archivedGroupInitScopesRef.current = raw
+          ? new Set((JSON.parse(raw) as unknown[]).filter((v): v is string => typeof v === 'string'))
+          : new Set<string>();
+      } catch {
+        archivedGroupInitScopesRef.current = new Set<string>();
+      }
+    }
+    const initScopes = archivedGroupInitScopesRef.current;
+
+    const keysToCollapse: string[] = [];
+    const newScopes: string[] = [];
+
+    projectSections.forEach((section) => {
+      section.groups.forEach((group) => {
+        if (!group.isArchivedBucket) return;
+        const scopeKey = group.folderScopeKey;
+        if (!scopeKey || initScopes.has(scopeKey)) return;
+        newScopes.push(scopeKey);
+        keysToCollapse.push(`${section.project.id}:${group.id}`);
+      });
+    });
+
+    if (keysToCollapse.length === 0) return;
+
+    setCollapsedGroups((prev) => {
+      const next = new Set(prev);
+      keysToCollapse.forEach((key) => next.add(key));
+      return next;
+    });
+
+    newScopes.forEach((scope) => initScopes.add(scope));
+    try {
+      getSafeStorage().setItem(ARCHIVED_GROUP_INIT_STORAGE_KEY, JSON.stringify(Array.from(initScopes)));
+    } catch {
+      // ignored
+    }
+  }, [projectSections]);
 
   const sessionSidebarMetaById = React.useMemo(() => {
     const meta = new Map<string, {
