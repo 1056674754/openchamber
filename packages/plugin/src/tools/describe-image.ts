@@ -39,6 +39,9 @@ const VISION_TOOL_PATTERNS = [
   "read_image",
   "image_ocr",
   "look_at",
+  "screenshot",
+  "visual_analyz",
+  "image_analyz",
 ]
 
 type ToolInfo = {

@@ -22,10 +22,11 @@ const SYSTEM_PROMPT_ADDITION = [
   ``,
   `## Image Analysis Tools`,
   `If a message references an image saved to disk (e.g. "[Image attachment: ... Saved to /path]"),`,
-  `use these tools in order:`,
-  `1. describe_image — checks for cached analyses from prior sessions.`,
-  `2. If no cache, it will tell you to call look_at. After look_at returns,`,
-  `   call save_image_analysis to cache the result for future reuse.`,
+  `follow this workflow:`,
+  `1. ALWAYS call describe_image FIRST — it checks the cross-session cache.`,
+  `2. If a cached analysis answers your question, use it directly.`,
+  `3. If no cache, use any available vision tool (look_at, analyze_image, etc.) to analyze the image.`,
+  `4. After receiving ANY vision analysis, call save_image_analysis to cache it for future sessions.`,
 ].join("\n")
 
 export function createSystemTransformHandler() {
