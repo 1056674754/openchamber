@@ -1394,6 +1394,7 @@ export const dict: Record<I18nKey, string> = {
   'session.githubIntegration.validation.failed': '驗證失敗',
   'chat.fileAttachment.toast.attachFailed': '附加檔案失敗',
   'chat.input.imageFallbackNotice': '此模型不支援圖片輸入。圖片將被儲存，模型可透過 describe_image 工具查看。',
+  'chat.input.imagePluginNotLoaded': 'Image fallback plugin is not loaded. Images sent to this model will trigger an error.',
   'chat.fileAttachment.toast.someFilesSkipped': '以下檔案被跳過：\n{summary}',
   'chat.fileAttachment.toast.vscodePickFailed': '在 VS Code 中選擇檔案失敗',
   'chat.fileAttachment.fileFallback': '檔案',

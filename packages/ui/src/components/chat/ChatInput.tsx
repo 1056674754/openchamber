@@ -12,6 +12,7 @@ import type { AttachedFile } from '@/stores/types/sessionTypes';
 import * as sessionActions from '@/sync/session-actions';
 import type { SendDeliveryMode } from '@/sync/session-actions';
 import { useDirectorySync, useSessionMessages, useSessionRevertMessageID, useUserMessageHistory } from '@/sync/sync-context';
+import { parseSlashInvocation } from '@/sync/slash-routing';
 import { useInlineCommentDraftStore, type InlineCommentDraft } from '@/stores/useInlineCommentDraftStore';
 import { useSnippetsStore } from '@/stores/useSnippetsStore';
 import { appendInlineComments } from '@/lib/messages/inlineComments';
@@ -170,6 +171,28 @@ const withInlineInsertionBoundaries = (content: string, before: string, after: s
         && !/^[\])}.,;:!?]/.test(after);
 
     return `${needsLeadingSpace ? ' ' : ''}${content}${needsTrailingSpace ? ' ' : ''}`;
+};
+
+const clipboardHasMeaningfulText = (clipboardData: DataTransfer): boolean => {
+    const plain = clipboardData.getData('text/plain');
+    if (plain.trim() !== '') {
+        return true;
+    }
+    const html = clipboardData.getData('text/html');
+    if (html.trim() !== '') {
+        // Strip markup so an html snippet that is only `<img>` stays an image, while
+        // rich-text pastes (e.g. Office html) with actual text content are detected.
+        const stripped = html
+            .replace(/<style[\s\S]*?<\/style>/gi, '')
+            .replace(/<script[\s\S]*?<\/script>/gi, '')
+            .replace(/<[^>]+>/g, ' ')
+            .replace(/&nbsp;/gi, ' ')
+            .trim();
+        if (stripped !== '') {
+            return true;
+        }
+    }
+    return false;
 };
 
 const collectInlineSkillMentions = (text: string, skillNames: Set<string>): string[] => {
@@ -1279,6 +1302,13 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const hasImageAttachments = attachedFiles.some((f) => f.mimeType.startsWith('image/'));
     const showImageFallbackNotice = hasImageAttachments && !currentModelSupportsImages;
 
+    const [pluginLoaded, setPluginLoaded] = React.useState<boolean | null>(null);
+    React.useEffect(() => {
+      fetch('/api/openchamber/plugin-status').then(r => r.json()).then((data: { loaded?: boolean }) => {
+        setPluginLoaded(data.loaded === true);
+      }).catch(() => setPluginLoaded(null));
+    }, []);
+
     const knownAgentNames = React.useMemo(
         () => new Set(agents.map((agent) => agent.name.toLowerCase())),
         [agents]
@@ -2136,6 +2166,22 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             else if (commandName === 'compact' && submittedSessionId) {
                 try {
                     await sessionActions.waitForConnectionOrThrow();
+
+                    const invocation = parseSlashInvocation(normalizedCommand);
+                    const focusText = invocation?.arguments?.trim() ?? '';
+                    if (focusText) {
+                        try {
+                            await fetch('/api/compact-focus', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ sessionID: submittedSessionId, focus: focusText }),
+                            });
+                            toast.info(t('chat.chatInput.toast.compactWithFocus', { focus: focusText }));
+                        } catch {
+                            // Focus injection is best-effort; proceed with plain compaction
+                        }
+                    }
+
                     const { opencodeClient } = await import('@/lib/opencode/client');
                     const sdk = opencodeClient.getSdkClient();
                     const configState = useConfigStore.getState();
@@ -3186,6 +3232,15 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         });
 
         const imageFiles = Array.from(fileMap.values());
+
+        // Word/Excel/Google Docs etc. copy the selection as text/plain + text/html AND a
+        // rendered PNG snapshot of that same selection. The PNG is a bitmap of the text,
+        // not a separately intended image — attaching it on every Office paste is noise.
+        // When real text rides along, drop the image and let the browser paste the text.
+        if (imageFiles.length > 0 && clipboardHasMeaningfulText(e.clipboardData)) {
+            return;
+        }
+
         if (imageFiles.length === 0) {
             return;
         }
@@ -4130,7 +4185,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                     <div className="mb-2 flex items-center gap-2 rounded-lg border border-border bg-surface-elevated px-3 py-1.5">
                         <Icon name="file-image" className="size-3.5 shrink-0 text-muted-foreground" />
                         <span className="typography-meta text-muted-foreground">
-                            {t('chat.input.imageFallbackNotice')}
+                            {pluginLoaded === false
+                                ? t('chat.input.imagePluginNotLoaded')
+                                : t('chat.input.imageFallbackNotice')}
                         </span>
                     </div>
                 )}

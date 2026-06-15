@@ -1478,6 +1478,7 @@ export const dict: Record<I18nKey, string> = {
   "session.githubIntegration.validation.failed": "Não foi possível validar",
   "chat.fileAttachment.toast.attachFailed": "Não foi possível anexar o arquivo",
   "chat.input.imageFallbackNotice": "This model does not support image input. Images will be saved and made available via the describe_image tool.",
+  'chat.input.imagePluginNotLoaded': 'Image fallback plugin is not loaded. Images sent to this model will trigger an error.',
   "chat.fileAttachment.toast.someFilesSkipped": "Alguns arquivos foram omitidos:\n{summary}",
   "chat.fileAttachment.toast.vscodePickFailed": "Não foi possível selecionar arquivos em VS Code",
   "chat.fileAttachment.fileFallback": "arquivo",

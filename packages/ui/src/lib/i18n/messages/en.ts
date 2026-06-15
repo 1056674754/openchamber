@@ -1512,6 +1512,7 @@ export const dict = {
   'session.githubIntegration.validation.failed': 'Validation failed',
   'chat.fileAttachment.toast.attachFailed': 'Failed to attach file',
   'chat.input.imageFallbackNotice': 'This model does not support image input. Images will be saved and made available via the describe_image tool.',
+  'chat.input.imagePluginNotLoaded': 'Image fallback plugin is not loaded. Images sent to this model will trigger an error.',
   'chat.fileAttachment.toast.someFilesSkipped': 'Some files were skipped:\n{summary}',
   'chat.fileAttachment.toast.vscodePickFailed': 'Failed to pick files in VS Code',
   'chat.fileAttachment.fileFallback': 'file',

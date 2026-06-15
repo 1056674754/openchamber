@@ -1,3 +1,9 @@
+import express from 'express';
+import { homedir } from 'node:os';
+
+import { SessionMarkersValidationError } from './session-markers-store.js';
+import { getPluginStatus } from './plugin-bootstrap.js';
+
 export const registerOpenChamberRoutes = (app, dependencies) => {
   const {
     fs,
@@ -12,6 +18,7 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
     fetchFreeZenModels,
     getCachedZenModels,
     unreadStore,
+    markersStore,
   } = dependencies;
 
   let cachedModelsMetadata = null;
@@ -335,5 +342,66 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
     }
     const state = unreadStore ? unreadStore.markUnread(sessionId) : null;
     res.json({ ok: true, sessionId, state, totalUnread: unreadStore ? unreadStore.getTotalUnread() : 0 });
+  });
+
+  app.get('/api/openchamber/sessions/markers', (_req, res) => {
+    if (!markersStore) return res.json({ version: 1, sessions: {} });
+    res.json(markersStore.getSnapshot());
+  });
+
+  app.put('/api/openchamber/sessions/:sessionId/markers', express.json({ limit: '16kb' }), (req, res) => {
+    const sessionId = req.params.sessionId;
+    if (!sessionId || typeof sessionId !== 'string') {
+      return res.status(400).json({ error: 'Missing sessionId' });
+    }
+    if (!markersStore) return res.status(503).json({ error: 'Markers store unavailable' });
+    try {
+      const markers = markersStore.applyPatch(sessionId, req.body || {});
+      res.json({ sessionId, markers });
+    } catch (error) {
+      if (error instanceof SessionMarkersValidationError) {
+        return res.status(400).json({ error: error.message });
+      }
+      throw error;
+    }
+  });
+
+  app.delete('/api/openchamber/sessions/:sessionId/markers', (req, res) => {
+    const sessionId = req.params.sessionId;
+    if (!sessionId || typeof sessionId !== 'string') {
+      return res.status(400).json({ error: 'Missing sessionId' });
+    }
+    if (!markersStore) return res.status(503).json({ error: 'Markers store unavailable' });
+    markersStore.clear(sessionId);
+    res.json({ sessionId, cleared: true });
+  });
+
+  // Write focus text for the compaction plugin hook to pick up.
+  // The UI calls this before sdk.session.summarize() when the user types
+  // `/compact <focus text>`. The plugin reads and deletes the file (one-time use).
+  app.post('/api/compact-focus', express.json({ limit: '64kb' }), async (req, res) => {
+    try {
+      const { sessionID, focus } = req.body || {};
+      if (typeof sessionID !== 'string' || !sessionID.trim()) {
+        return res.status(400).json({ error: 'sessionID is required' });
+      }
+      if (typeof focus !== 'string' || !focus.trim()) {
+        return res.status(400).json({ error: 'focus text is required' });
+      }
+
+      const focusDir = path.resolve(homedir(), '.config', 'openchamber', 'compact-focus');
+      await fs.promises.mkdir(focusDir, { recursive: true });
+      const focusFile = path.join(focusDir, `${sessionID}.txt`);
+      await fs.promises.writeFile(focusFile, focus, 'utf8');
+
+      res.json({ ok: true });
+    } catch (error) {
+      console.error('[openchamber] Failed to write compact focus:', error);
+      res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to write focus' });
+    }
+  });
+
+  app.get('/api/openchamber/plugin-status', (_req, res) => {
+    res.json(getPluginStatus());
   });
 };

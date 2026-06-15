@@ -58,7 +58,7 @@ import {
   registerServerStatusRoutes,
 } from './lib/opencode/core-routes.js';
 import { registerOpenChamberRoutes } from './lib/opencode/openchamber-routes.js';
-import { prepareOpenChamberConfig, cleanupOpenChamberPluginFromUserConfig } from './lib/opencode/plugin-bootstrap.js';
+import { prepareOpenChamberConfig, cleanupOpenChamberPluginFromUserConfig, checkPluginLoaded } from './lib/opencode/plugin-bootstrap.js';
 import { createServerUtilsRuntime } from './lib/opencode/server-utils-runtime.js';
 import { createStaticRoutesRuntime } from './lib/opencode/static-routes-runtime.js';
 import { createSettingsRuntime } from './lib/opencode/settings-runtime.js';
@@ -66,6 +66,7 @@ import { createOpenCodeResolutionRuntime } from './lib/opencode/opencode-resolut
 import { createBootstrapRuntime } from './lib/opencode/bootstrap-runtime.js';
 import { createSessionRuntime } from './lib/opencode/session-runtime.js';
 import { createSessionUnreadStore } from './lib/opencode/session-unread-store.js';
+import { createSessionMarkersStore } from './lib/opencode/session-markers-store.js';
 import { createOpenCodeWatcherRuntime } from './lib/opencode/watcher.js';
 import { createScheduledTasksRuntime } from './lib/scheduled-tasks/runtime.js';
 import { createServerStartupRuntime } from './lib/opencode/server-startup-runtime.js';
@@ -506,11 +507,25 @@ const unreadStore = createSessionUnreadStore({
 });
 unreadStore.load();
 
+const markersStore = createSessionMarkersStore({
+  fs,
+  path,
+  dataDir: OPENCHAMBER_DATA_DIR,
+  onChange: (change) => {
+    broadcastGlobalUiEvent({
+      type: 'openchamber:session-markers',
+      properties: change,
+    });
+  },
+});
+markersStore.load();
+
 const sessionRuntime = createSessionRuntime({
   writeSseEvent,
   getNotificationClients: () => uiNotificationClients,
   broadcastEvent: broadcastGlobalUiEvent,
   unreadStore,
+  markersStore,
 });
 
 const getActiveSessionCount = () => {
@@ -1095,6 +1110,17 @@ const bootstrapOpenCodeAtStartup = async (...args) => {
   if (openCodeLifecycleState.openCodePort && !openCodeLifecycleState.isExternalOpenCode) {
     startHealthMonitoring();
   }
+  setTimeout(async () => {
+    if (!openCodeLifecycleState.openCodePort) return;
+    const url = `http://127.0.0.1:${openCodeLifecycleState.openCodePort}`;
+    const result = await checkPluginLoaded(url, getOpenCodeAuthHeaders());
+    const result = await checkPluginLoaded(url, getOpenCodeAuthHeaders());
+    if (!result.loaded) {
+      console.warn('[openchamber] plugin not loaded:', result.reason);
+    } else {
+      console.log('[openchamber] plugin verified:', result.tools.join(', '));
+    }
+  }, 5000);
   if (ENV_DESKTOP_NOTIFY) {
     void ensureGlobalWatcherStarted().catch((error) => {
       console.warn(`Global event watcher startup failed: ${error?.message || error}`);
@@ -1314,6 +1340,7 @@ async function main(options = {}) {
     getCachedZenModels,
     setAutoAcceptSession,
     unreadStore,
+    markersStore,
   });
   uiAuthController = bootstrapResult.uiAuthController;
 

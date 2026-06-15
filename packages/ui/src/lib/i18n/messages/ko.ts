@@ -1514,6 +1514,7 @@ export const dict: Record<I18nKey, string> = {
   'session.githubIntegration.validation.failed': '유효성 검사에 실패했습니다',
   'chat.fileAttachment.toast.attachFailed': '첨부 파일 실패',
   'chat.input.imageFallbackNotice': 'This model does not support image input. Images will be saved and made available via the describe_image tool.',
+  'chat.input.imagePluginNotLoaded': 'Image fallback plugin is not loaded. Images sent to this model will trigger an error.',
   'chat.fileAttachment.toast.someFilesSkipped': '일부 파일을 건너뛰었습니다:\n{summary}',
   'chat.fileAttachment.toast.vscodePickFailed': 'VS Code에서 파일 선택에 실패했습니다',
   'chat.fileAttachment.fileFallback': '파일',

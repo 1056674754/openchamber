@@ -39,6 +39,7 @@ export const createBootstrapRuntime = (dependencies) => {
       setPushInitialized,
       setAutoAcceptSession,
       unreadStore,
+      markersStore,
       fs,
       os,
       path,
@@ -121,6 +122,7 @@ export const createBootstrapRuntime = (dependencies) => {
       fetchFreeZenModels,
       getCachedZenModels,
       unreadStore,
+      markersStore,
     });
 
     return {

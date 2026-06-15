@@ -115,3 +115,39 @@ export function cleanupOpenChamberPluginFromUserConfig() {
     // best-effort cleanup
   }
 }
+
+const REQUIRED_TOOLS = ['describe_image', 'save_image_analysis'];
+let _pluginStatus = { loaded: false, reason: 'not-checked' };
+
+export function getPluginStatus() {
+  return _pluginStatus;
+}
+
+export async function checkPluginLoaded(openCodeUrl, authHeaders) {
+  try {
+    const response = await fetch(`${openCodeUrl}/experimental/tool/ids`, {
+      headers: { Accept: 'application/json', ...authHeaders },
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!response.ok) {
+      _pluginStatus = { loaded: false, reason: `HTTP ${response.status}` };
+      return _pluginStatus;
+    }
+    const ids = await response.json();
+    if (!Array.isArray(ids)) {
+      _pluginStatus = { loaded: false, reason: 'unexpected response' };
+      return _pluginStatus;
+    }
+    const missing = REQUIRED_TOOLS.filter((t) => !ids.includes(t));
+    if (missing.length > 0) {
+      console.warn('[openchamber] plugin not fully loaded, missing tools:', missing);
+      _pluginStatus = { loaded: false, reason: `missing: ${missing.join(', ')}` };
+      return _pluginStatus;
+    }
+    _pluginStatus = { loaded: true, tools: REQUIRED_TOOLS };
+    return _pluginStatus;
+  } catch (error) {
+    _pluginStatus = { loaded: false, reason: error?.message || String(error) };
+    return _pluginStatus;
+  }
+}
