@@ -702,6 +702,13 @@ export function getImageMimeType(filePath: string): string {
   return mimeMap[ext || ''] || 'image/png';
 }
 
+const DIAGRAM_EXTENSIONS = ['drawio', 'dio'];
+
+export function isDrawioFile(filePath: string): boolean {
+  const ext = filePath.split('.').pop()?.toLowerCase();
+  return DIAGRAM_EXTENSIONS.includes(ext || '');
+}
+
 export function formatToolInput(input: Record<string, unknown>, toolName: string): string {
   if (!input) return '';
 
