@@ -781,7 +781,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   const autoSaveTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastLoadedFileStatRef = React.useRef<FileStatSnapshot | null>(null);
   const activeFileLoadIdRef = React.useRef(0);
-  const [autoSaveStatus, setAutoSaveStatus] = React.useState<'idle' | 'saved'>('idle');
+  const [autoSaveStatus, setAutoSaveStatus] = React.useState<'idle' | 'saved' | 'conflict'>('idle');
   const [autoSaveEnabled, setAutoSaveEnabled] = React.useState(getInitialAutoSaveEnabled);
 
   const [confirmDiscardOpen, setConfirmDiscardOpen] = React.useState(false);
@@ -1566,11 +1566,44 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     }
 
     autoSaveTimerRef.current = setTimeout(() => {
-      void saveDraft().then((saved) => {
-        if (!saved) return;
-        setAutoSaveStatus('saved');
-        setTimeout(() => setAutoSaveStatus('idle'), 2000);
-      });
+      const proceedWithSave = () => {
+        void saveDraft().then((saved) => {
+          if (!saved) return;
+          setAutoSaveStatus('saved');
+          setTimeout(() => setAutoSaveStatus('idle'), 2000);
+        });
+      };
+
+      // Prevent auto-save from clobbering external changes: if the file moved on
+      // since we last loaded it, surface the conflict instead of silently
+      // overwriting. Manual save (Cmd/Ctrl+S) bypasses this guard on intent.
+      if (!selectedFile?.path) {
+        proceedWithSave();
+        return;
+      }
+
+      void readFileStat(selectedFile.path, selectedFileReadOptions)
+        .then((currentStat) => {
+          const knownStat = lastLoadedFileStatRef.current;
+          const drifted =
+            currentStat !== null &&
+            knownStat !== null &&
+            knownStat.path === selectedFile.path &&
+            ((currentStat.mtimeMs !== undefined &&
+              knownStat.mtimeMs !== undefined &&
+              currentStat.mtimeMs !== knownStat.mtimeMs) ||
+              currentStat.size !== knownStat.size);
+          if (drifted) {
+            setAutoSaveStatus('conflict');
+            toast.warning(t('filesView.toast.externalChangeAutoSaveSkipped'));
+            return;
+          }
+          proceedWithSave();
+        })
+        .catch(() => {
+          // stat failed — proceed so the real write error surfaces.
+          proceedWithSave();
+        });
     }, AUTO_SAVE_DELAY);
 
     return () => {
@@ -1579,7 +1612,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
         autoSaveTimerRef.current = null;
       }
     };
-  }, [autoSaveEnabled, draftContent, isDirty, selectedFile, files.writeFile, isSaving, saveDraft]);
+  }, [autoSaveEnabled, draftContent, isDirty, selectedFile, files.writeFile, isSaving, saveDraft, readFileStat, selectedFileReadOptions, t]);
 
   // Reset auto-save status when switching files
   React.useEffect(() => {
@@ -2774,6 +2807,13 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
               <span className="flex items-center gap-1 px-1 text-muted-foreground typography-meta">
                 <Icon name="loader-4" className="size-3.5 animate-spin" />
                 {t('filesView.editor.saving')}
+              </span>
+            ) : autoSaveStatus === 'conflict' && isDirty ? (
+              <span
+                className="flex items-center gap-1 px-1 text-[color:var(--status-warning)] typography-meta"
+                title={t('filesView.toast.externalChangeAutoSaveSkipped')}
+              >
+                <Icon name="error-warning" className="size-3.5" />
               </span>
             ) : autoSaveEnabled && autoSaveStatus === 'saved' && !isDirty ? (
               <span className="flex items-center gap-1 px-1 text-[color:var(--status-success)] typography-meta">

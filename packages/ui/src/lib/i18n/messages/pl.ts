@@ -1403,6 +1403,7 @@ export const dict: Record<I18nKey, string> = {
   'filesView.toast.copyFailed': 'Nie udało się skopiować',
   'filesView.toast.openInAppFailed': 'Nie udało się otworzyć w {app}',
   'filesView.toast.saveFailed': 'Nie udało się zapisać',
+  'filesView.toast.externalChangeAutoSaveSkipped': 'Plik został zmieniony z zewnątrz — pominięto auto-zapis, aby uniknąć nadpisania',
   'filesView.diagram.closeDiagramView': 'Zamknij widok diagramu',
   'filesView.diagram.saveDiagram': 'Zapisz diagram',
   'filesView.toast.savingNotSupported': 'Zapisywanie nie jest obsługiwane',

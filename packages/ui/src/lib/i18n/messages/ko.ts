@@ -1033,6 +1033,7 @@ export const dict: Record<I18nKey, string> = {
   'filesView.toast.savingNotSupported': '저장을 지원하지 않음',
   'filesView.toast.writeFileFailed': '파일 쓰기 실패',
   'filesView.toast.saveFailed': '저장 실패',
+  'filesView.toast.externalChangeAutoSaveSkipped': '파일이 외부에서 변경됨 — 덮어쓰기를 방지하기 위해 자동 저장을 건너뛰었습니다',
   'filesView.diagram.closeDiagramView': '다이어그램 보기 닫기',
   'filesView.diagram.saveDiagram': '다이어그램 저장',
   'filesView.editor.copyFileContents': '파일 내용 복사',

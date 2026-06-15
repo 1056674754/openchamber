@@ -996,6 +996,7 @@ export const dict: Record<I18nKey, string> = {
   "filesView.toast.savingNotSupported": "Збереження не підтримується",
   "filesView.toast.writeFileFailed": "Не вдалося записати файл",
   "filesView.toast.saveFailed": "Не вдалося зберегти",
+  "filesView.toast.externalChangeAutoSaveSkipped": "Файл змінено зовні — автозбереження пропущено, щоб уникнути перезапису",
   "filesView.diagram.closeDiagramView": "Закрити перегляд діаграми",
   "filesView.diagram.saveDiagram": "Зберегти діаграму",
   "filesView.editor.copyFileContents": "Копіювати вміст файлу",

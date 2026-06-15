@@ -934,6 +934,7 @@ export const dict: Record<I18nKey, string> = {
   'filesView.toast.savingNotSupported': '不支援儲存',
   'filesView.toast.writeFileFailed': '寫入檔案失敗',
   'filesView.toast.saveFailed': '儲存失敗',
+  'filesView.toast.externalChangeAutoSaveSkipped': '檔案已被外部修改 — 已跳過自動儲存以避免覆蓋',
   'filesView.diagram.closeDiagramView': '關閉圖表檢視',
   'filesView.diagram.saveDiagram': '儲存圖表',
   'filesView.editor.copyFileContents': '複製檔案內容',

@@ -646,7 +646,7 @@ export const registerFsRoutes = (app, dependencies) => {
       if (err && typeof err === 'object' && err.code === 'ENOENT') {
         return res.status(404).json({ error: 'File not found' });
       }
-      if (err && typeof err === 'object' && err.code === 'EACCES') {
+      if (err && typeof err === 'object' && (err.code === 'EACCES' || err.code === 'EPERM')) {
         return res.status(403).json({ error: 'Access to file denied' });
       }
       console.error('Failed to stat file:', error);
@@ -700,7 +700,7 @@ export const registerFsRoutes = (app, dependencies) => {
         }
         return res.status(404).json({ error: 'File not found' });
       }
-      if (err && typeof err === 'object' && err.code === 'EACCES') {
+      if (err && typeof err === 'object' && (err.code === 'EACCES' || err.code === 'EPERM')) {
         return res.status(403).json({ error: 'Access to file denied' });
       }
       console.error('Failed to read file:', error);
@@ -771,7 +771,7 @@ export const registerFsRoutes = (app, dependencies) => {
       if (err && typeof err === 'object' && err.code === 'ENOENT') {
         return res.status(404).json({ error: 'File not found' });
       }
-      if (err && typeof err === 'object' && err.code === 'EACCES') {
+      if (err && typeof err === 'object' && (err.code === 'EACCES' || err.code === 'EPERM')) {
         return res.status(403).json({ error: 'Access to file denied' });
       }
       console.error('Failed to read raw file:', error);
@@ -832,7 +832,7 @@ export const registerFsRoutes = (app, dependencies) => {
       return res.json({ success: true, path: resolved.resolved });
     } catch (error) {
       const err = error;
-      if (err && typeof err === 'object' && err.code === 'EACCES') {
+      if (err && typeof err === 'object' && (err.code === 'EACCES' || err.code === 'EPERM')) {
         return res.status(403).json({ error: 'Access denied' });
       }
       console.error('Failed to write file:', error);
@@ -868,7 +868,7 @@ export const registerFsRoutes = (app, dependencies) => {
       if (err && typeof err === 'object' && err.code === 'ENOENT') {
         return res.status(404).json({ error: 'File or directory not found' });
       }
-      if (err && typeof err === 'object' && err.code === 'EACCES') {
+      if (err && typeof err === 'object' && (err.code === 'EACCES' || err.code === 'EPERM')) {
         return res.status(403).json({ error: 'Access denied' });
       }
       console.error('Failed to delete path:', error);
@@ -925,7 +925,7 @@ export const registerFsRoutes = (app, dependencies) => {
       if (err && typeof err === 'object' && err.code === 'ENOENT') {
         return res.status(404).json({ error: 'Source path not found' });
       }
-      if (err && typeof err === 'object' && err.code === 'EACCES') {
+      if (err && typeof err === 'object' && (err.code === 'EACCES' || err.code === 'EPERM')) {
         return res.status(403).json({ error: 'Access denied' });
       }
       console.error('Failed to rename path:', error);
@@ -1199,7 +1199,7 @@ export const registerFsRoutes = (app, dependencies) => {
         }
         return res.status(404).json({ error: 'Directory not found' });
       }
-      if (code === 'EACCES') {
+      if (code === 'EACCES' || code === 'EPERM') {
         return res.status(403).json({ error: 'Access to directory denied' });
       }
       return res.status(500).json({ error: (error && error.message) || 'Failed to list directory' });

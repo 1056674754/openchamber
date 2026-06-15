@@ -1030,6 +1030,7 @@ export const dict = {
   'filesView.toast.savingNotSupported': 'Saving not supported',
   'filesView.toast.writeFileFailed': 'Failed to write file',
   'filesView.toast.saveFailed': 'Save failed',
+  'filesView.toast.externalChangeAutoSaveSkipped': 'File changed externally — auto-save skipped to avoid overwriting',
   'filesView.diagram.closeDiagramView': 'Close diagram view',
   'filesView.diagram.saveDiagram': 'Save diagram',
   'filesView.editor.copyFileContents': 'Copy file contents',
