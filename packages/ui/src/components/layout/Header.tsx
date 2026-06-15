@@ -1532,6 +1532,7 @@ export const Header: React.FC<HeaderProps> = ({
       base.push(
         { id: 'diff', label: t('layout.mainTab.diff'), icon: 'diff' },
         { id: 'files', label: t('layout.mainTab.files'), icon: "folder-6" },
+        { id: 'diagram', label: t('layout.mainTab.diagram'), icon: "file" },
         { id: 'terminal', label: t('layout.mainTab.terminal'), icon: "terminal-box" },
         { id: 'context', label: t('layout.mainTab.context'), icon: "file-list-2" },
       );
@@ -1548,7 +1549,7 @@ export const Header: React.FC<HeaderProps> = ({
   }, [shortcutOverrides]);
 
   useEffect(() => {
-    if (!isMobile && (activeMainTab === 'git' || activeMainTab === 'terminal' || activeMainTab === 'diff' || activeMainTab === 'files' || activeMainTab === 'context')) {
+    if (!isMobile && (activeMainTab === 'git' || activeMainTab === 'terminal' || activeMainTab === 'diff' || activeMainTab === 'files' || activeMainTab === 'context' || activeMainTab === 'diagram')) {
       setActiveMainTab('chat');
     }
   }, [activeMainTab, isMobile, setActiveMainTab]);

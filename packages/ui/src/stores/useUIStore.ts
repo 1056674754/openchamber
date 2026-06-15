@@ -8,7 +8,7 @@ import type { DraftStarterRef } from '@/lib/draftStarters';
 import { DEFAULT_MONO_FONT, DEFAULT_UI_FONT, type MonoFontOption, type UiFontOption } from '@/lib/fontOptions';
 import { getStoredMobileKeyboardMode, type MobileKeyboardMode } from '@/lib/mobileKeyboardMode';
 
-export type MainTab = 'chat' | 'plan' | 'git' | 'diff' | 'terminal' | 'files' | 'context';
+export type MainTab = 'chat' | 'plan' | 'git' | 'diff' | 'terminal' | 'files' | 'context' | 'diagram';
 export type RightSidebarTab = 'git' | 'files' | 'context';
 export type ContextPanelMode = 'diff' | 'file' | 'context' | 'plan' | 'chat' | 'preview' | 'terminal' | 'browser';
 export type MermaidRenderingMode = 'svg' | 'ascii';
@@ -556,6 +556,10 @@ interface UIStore {
   mainTabGuard: MainTabGuard | null;
   sidebarOpenBeforeFullscreenTab: boolean | null;
   pendingDiffFile: string | null;
+  pendingDiagramFile: string | null;
+  setPendingDiagramFile: (filePath: string | null) => void;
+  navigateToDiagram: (filePath: string) => void;
+  consumePendingDiagramFile: () => string | null;
   pendingFileNavigation: PendingFileNavigation | null;
   pendingFileFocusPath: string | null;
   isMobile: boolean;
@@ -839,6 +843,7 @@ export const useUIStore = create<UIStore>()(
         mainTabGuard: null,
         sidebarOpenBeforeFullscreenTab: null,
         pendingDiffFile: null,
+        pendingDiagramFile: null,
         pendingFileNavigation: null,
         pendingFileFocusPath: null,
         isMobile: false,
@@ -1439,6 +1444,26 @@ export const useUIStore = create<UIStore>()(
             set({ pendingDiffFile: null });
           }
           return pendingDiffFile;
+        },
+
+        setPendingDiagramFile: (filePath) => {
+          set({ pendingDiagramFile: filePath });
+        },
+
+        navigateToDiagram: (filePath) => {
+          const guard = get().mainTabGuard;
+          if (guard && !guard('diagram')) {
+            return;
+          }
+          set({ pendingDiagramFile: filePath, activeMainTab: 'diagram' });
+        },
+
+        consumePendingDiagramFile: () => {
+          const { pendingDiagramFile } = get();
+          if (pendingDiagramFile) {
+            set({ pendingDiagramFile: null });
+          }
+          return pendingDiagramFile;
         },
 
         setIsMobile: (isMobile) => {
