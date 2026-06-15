@@ -17,7 +17,6 @@ import { createSaveImageAnalysisTool } from "./tools/save-image-analysis.js"
 import { createModelCapabilityChecker } from "./model-capability.js"
 import { createImageStore } from "./image-store.js"
 import { openCacheDb, type CacheDb } from "./cache/database.js"
-import { log } from "./logger.js"
 
 export function createPlugin(input: PluginInput): Promise<Hooks> {
   const modelSupportsImage = createModelCapabilityChecker(input.client)
@@ -25,9 +24,8 @@ export function createPlugin(input: PluginInput): Promise<Hooks> {
   let cacheDb: CacheDb | undefined
   try {
     cacheDb = openCacheDb()
-    log("[cache] opened openchamber.db")
-  } catch (error) {
-    log("[cache] failed to open, running without cache", { error: String(error) })
+  } catch {
+    // Cache is optional — all features degrade gracefully without it
   }
 
   const imageStore = createImageStore({ cacheDb })
