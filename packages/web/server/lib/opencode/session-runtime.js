@@ -151,10 +151,14 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
       metadata: { ...existing?.metadata, ...metadata },
     });
 
-    // Record unread only on genuine transition to idle/error (not on startup reports)
+    // Record unread only on genuine transition to idle/error (not on startup reports).
+    // Skip when a client is actively viewing this session — they saw the turn complete.
     if (unreadStore && prevStatus && prevStatus !== status) {
       if (status === 'idle' && (prevStatus === 'busy' || prevStatus === 'retry')) {
-        unreadStore.recordActivity(sessionId, { hasError: false });
+        const attention = sessionAttentionStates.get(sessionId);
+        if (!attention || attention.viewedByClients.size === 0) {
+          unreadStore.recordActivity(sessionId, { hasError: false });
+        }
       }
     }
 
@@ -348,7 +352,10 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
       const props = payload.properties && typeof payload.properties === 'object' ? payload.properties : {};
       const sessionId = typeof props.sessionID === 'string' ? props.sessionID.trim() : '';
       if (sessionId) {
-        unreadStore.recordActivity(sessionId, { hasError: true });
+        const attention = sessionAttentionStates.get(sessionId);
+        if (!attention || attention.viewedByClients.size === 0) {
+          unreadStore.recordActivity(sessionId, { hasError: true });
+        }
       }
     }
   };
