@@ -2,40 +2,56 @@ import { pathToFileURL, fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import { existsSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
+import { spawnSync } from 'node:child_process';
 
 const OVERLAY_DIR = resolve(homedir(), '.config', 'openchamber');
 const OVERLAY_FILE = resolve(OVERLAY_DIR, 'opencode-overlay.json');
+const PLUGIN_INSTALL_DIR = resolve(OVERLAY_DIR, 'plugin');
+const PLUGIN_ENTRY = resolve(PLUGIN_INSTALL_DIR, 'index.js');
 
-function resolvePluginSpec() {
-  const candidates = [];
-
-  const envOverride = process.env.OPENCHAMBER_PLUGIN_PATH;
-  if (envOverride) candidates.push(envOverride);
-
+function findPluginSource() {
   const here = dirname(fileURLToPath(import.meta.url));
-  candidates.push(resolve(here, '..', '..', '..', '..', '..', 'packages', 'plugin', 'src', 'index.ts'));
-
-  candidates.push(resolve(here, '..', '..', '..', '..', '..', '..', 'packages', 'plugin', 'src', 'index.ts'));
-
+  const candidates = [
+    resolve(here, '..', '..', '..', '..', '..', 'packages', 'plugin', 'src', 'index.ts'),
+    resolve(here, '..', '..', '..', '..', '..', '..', 'packages', 'plugin', 'src', 'index.ts'),
+  ];
   if (process.cwd().includes('openchamber')) {
     candidates.push(resolve(process.cwd(), 'packages', 'plugin', 'src', 'index.ts'));
   }
-
   for (const c of candidates) {
-    if (existsSync(c)) return pathToFileURL(c).href;
+    if (existsSync(c)) return c;
   }
+  return null;
+}
 
-  console.warn('[openchamber] could not locate plugin source, falling back to relative path');
-  return pathToFileURL(candidates[1]).href;
+function buildPlugin(sourcePath) {
+  mkdirSync(PLUGIN_INSTALL_DIR, { recursive: true });
+  const result = spawnSync('bun', [
+    'build',
+    sourcePath,
+    '--outfile', PLUGIN_ENTRY,
+    '--target', 'bun',
+  ], { stdio: 'pipe', timeout: 30000 });
+  return existsSync(PLUGIN_ENTRY);
 }
 
 export function prepareOpenChamberConfig() {
-  const spec = resolvePluginSpec();
-  const overlay = { plugin: [spec] };
+  if (!existsSync(PLUGIN_ENTRY)) {
+    const source = findPluginSource();
+    if (!source) {
+      console.warn('[openchamber] could not find plugin source to build');
+      return null;
+    }
+    if (!buildPlugin(source)) {
+      console.warn('[openchamber] plugin build failed');
+      return null;
+    }
+    console.log('[openchamber] plugin built to', PLUGIN_ENTRY);
+  }
 
+  const overlay = { plugin: [pathToFileURL(PLUGIN_ENTRY).href] };
   mkdirSync(OVERLAY_DIR, { recursive: true });
   writeFileSync(OVERLAY_FILE, JSON.stringify(overlay, null, 2), 'utf8');
-
   return OVERLAY_FILE;
 }
 
