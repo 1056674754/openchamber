@@ -1,17 +1,32 @@
-import { pathToFileURL } from 'node:url';
+import { pathToFileURL, fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 
 const OVERLAY_DIR = resolve(homedir(), '.config', 'openchamber');
 const OVERLAY_FILE = resolve(OVERLAY_DIR, 'opencode-overlay.json');
 
 function resolvePluginSpec() {
+  const candidates = [];
+
+  const envOverride = process.env.OPENCHAMBER_PLUGIN_PATH;
+  if (envOverride) candidates.push(envOverride);
+
   const here = dirname(fileURLToPath(import.meta.url));
-  const monorepoRoot = resolve(here, '..', '..', '..', '..', '..');
-  const pluginEntry = resolve(monorepoRoot, 'packages', 'plugin', 'src', 'index.ts');
-  return pathToFileURL(pluginEntry).href;
+  candidates.push(resolve(here, '..', '..', '..', '..', '..', 'packages', 'plugin', 'src', 'index.ts'));
+
+  candidates.push(resolve(here, '..', '..', '..', '..', '..', '..', 'packages', 'plugin', 'src', 'index.ts'));
+
+  if (process.cwd().includes('openchamber')) {
+    candidates.push(resolve(process.cwd(), 'packages', 'plugin', 'src', 'index.ts'));
+  }
+
+  for (const c of candidates) {
+    if (existsSync(c)) return pathToFileURL(c).href;
+  }
+
+  console.warn('[openchamber] could not locate plugin source, falling back to relative path');
+  return pathToFileURL(candidates[1]).href;
 }
 
 export function prepareOpenChamberConfig() {
