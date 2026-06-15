@@ -151,7 +151,7 @@ export function createDescribeImageTool(deps: DescribeImageDeps) {
             analysisLines.join("\n\n"),
             ``,
             `If one of these already answers your current question, use it directly.`,
-            `If none of them are relevant, call look_at with file_path="${imagePath}" and a goal that reflects your specific question.`,
+            `If none are relevant, use any available vision tool to analyze the image.`,
           ].join("\n"),
           metadata: {
             path: imagePath,
@@ -165,19 +165,19 @@ export function createDescribeImageTool(deps: DescribeImageDeps) {
       const visionTools = await getVisionTools()
 
       if (visionTools.length > 0) {
-        const primary = visionTools[0]!
-        const toolList = visionTools.map((t) => `- ${t.name}${t.description ? `: ${t.description.slice(0, 80)}` : ""}`).join("\n")
-        log("[describe_image] found vision tools, delegating", { tool: primary.name, path: imagePath })
+        const toolList = visionTools.map((t) => `- ${t.name}`).join("\n")
+        log("[describe_image] found vision tools", { count: visionTools.length, path: imagePath })
 
         return {
-          title: `describe_image → ${primary.name}`,
+          title: `describe_image: ${visionTools.length} vision tool(s) available`,
           output: [
             `Image confirmed: "${filename}" (${formatBytes(fileSize)})${questionHint}`,
             ``,
-            `The following vision tool(s) are available in this session:`,
-            toolList,
+            `Available vision tools:\n${toolList}`,
             ``,
-            `Call the tool "${primary.name}" with the file path "${imagePath}"${question ? ` and question "${question}"` : ""} to get a visual analysis.`,
+            `Note: This image is stored outside the project directory.`,
+            `Some tools (e.g. look_at) may reject file paths outside the working directory.`,
+            `If one tool fails, try another, or use image_data/base64 parameters if supported.`,
           ].join("\n"),
           metadata: {
             path: imagePath,

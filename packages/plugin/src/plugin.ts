@@ -9,6 +9,7 @@
 
 import type { Plugin, PluginInput, Hooks } from "@opencode-ai/plugin"
 
+import { createCompactionFocusHandler } from "./compaction-focus.js"
 import { createImageTransformHandler } from "./image-transform.js"
 import { createSystemTransformHandler } from "./system-transform.js"
 import { createDescribeImageTool } from "./tools/describe-image.js"
@@ -19,6 +20,7 @@ import { createImageStore } from "./image-store.js"
 import { openCacheDb, type CacheDb } from "./cache/database.js"
 
 export function createPlugin(input: PluginInput): Promise<Hooks> {
+  console.error("[openchamber-plugin] loaded successfully")
   const modelSupportsImage = createModelCapabilityChecker(input.client)
 
   let cacheDb: CacheDb | undefined
@@ -37,6 +39,7 @@ export function createPlugin(input: PluginInput): Promise<Hooks> {
   })
 
   const systemTransform = createSystemTransformHandler()
+  const compactionFocus = createCompactionFocusHandler()
   const describeImage = createDescribeImageTool({ client: input.client, cacheDb })
   const searchImages = createSearchImagesTool({ cacheDb })
   const saveAnalysis = createSaveImageAnalysisTool({
@@ -47,6 +50,7 @@ export function createPlugin(input: PluginInput): Promise<Hooks> {
   const hooks: Hooks = {
     "experimental.chat.messages.transform": imageTransform,
     "experimental.chat.system.transform": systemTransform,
+    "experimental.session.compacting": compactionFocus,
     tool: {
       describe_image: describeImage,
       search_images: searchImages,
