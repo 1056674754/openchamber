@@ -13,20 +13,19 @@ function resolvePluginSpec() {
   if (envOverride) candidates.push(envOverride);
 
   const here = dirname(fileURLToPath(import.meta.url));
-  candidates.push(resolve(here, '..', '..', '..', '..', '..', 'packages', 'plugin', 'src', 'index.ts'));
-
-  candidates.push(resolve(here, '..', '..', '..', '..', '..', '..', 'packages', 'plugin', 'src', 'index.ts'));
+  candidates.push(resolve(here, '..', '..', '..', '..', '..', 'packages', 'plugin'));
+  candidates.push(resolve(here, '..', '..', '..', '..', '..', '..', 'packages', 'plugin'));
 
   if (process.cwd().includes('openchamber')) {
-    candidates.push(resolve(process.cwd(), 'packages', 'plugin', 'src', 'index.ts'));
+    candidates.push(resolve(process.cwd(), 'packages', 'plugin'));
   }
 
   for (const c of candidates) {
-    if (existsSync(c)) return pathToFileURL(c).href;
+    if (existsSync(resolve(c, 'package.json'))) return pathToFileURL(c).href;
   }
 
-  console.warn('[openchamber] could not locate plugin source, falling back to relative path');
-  return pathToFileURL(candidates[1]).href;
+  console.warn('[openchamber] could not locate plugin package');
+  return pathToFileURL(candidates[0]).href;
 }
 
 export function prepareOpenChamberConfig() {
