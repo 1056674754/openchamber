@@ -2233,6 +2233,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                     if (!directory) {
                         throw new Error('Session directory is unavailable');
                     }
+                    toast.info('Starting review flow — generating handoff...');
                     await startReviewFlow({
                         originalSessionID: currentSessionId,
                         directory,
@@ -2245,6 +2246,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                     scrollToBottom?.();
                 } catch (error) {
                     console.error('[review-flow] failed to start review flow', error);
+                    toast.error(error instanceof Error ? error.message : 'Failed to start review flow');
                 }
                 return;
             }
