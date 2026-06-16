@@ -398,4 +398,115 @@ Batch 3.6 (按需)
 | Electron | ✅ 正常，不会多开窗口 |
 | 聊天区域 | ✅ 正常 |
 | 远程实例侧边栏 | ✅ 已修复 |
-| 上游版本差距 | v1.12.4 Tier 1 (11 features) 已落地；Tier 2/3 待移植 |
+| 上游版本差距 | v1.12.4 Tier 1+2 (14 features) 已落地；Tier 3 + v1.13.0 待移植 |
+
+---
+
+## v1.13.0 — 变更审核 (2026-06-17)
+
+**范围**: v1.12.4 (`4a263c1`) → v1.13.0，76 commits，239 files，+10465/-4025
+
+### 分歧概况：fork vs upstream 关键文件
+
+| 文件 | Fork 行数 | v1.13.0 行数 | 上游 delta | 分歧原因 |
+|---|---|---|---|---|
+| `DiffView.tsx` | 1778 | 1715 | +729/-902 | 上游完全重写 Changes 视图 |
+| `FilesView.tsx` | 3778 | 4226 | +404/-170 | fork 有 Vim/TTS 移植 + 上游加 PDF + docked toolbar |
+| `useConfigStore.ts` | 2618 | 2943 | +443/-125 | fork 有大量魔改 (provider circuit breaker, models metadata) |
+| `sync-context.tsx` | 3190 | 2739 | +102/-58 | fork 有 remote instance routing |
+| `MessageList.tsx` | 2114 | 1699 | +94/-157 | fork 有 process folding + 上游迁移到 `virtua` |
+| `ChatInput.tsx` | 4826 | 4569 | +81/-26 | fork 有 magic prompts + queue mode |
+| `electron/main.mjs` | 2938 | 4444 | +98/-7 | fork 有 OPENCHAMBER_OPENCODE_CWD + 上游加 LAN 密码 |
+| `SessionNodeItem.tsx` | 1530 | — | +78/-52 | fork 有 session markers |
+
+### 虚拟化库冲突（关键）
+
+| | Fork | v1.13.0 上游 |
+|---|---|---|
+| 库 | `@tanstack/react-virtual` | `virtua` |
+| 用于 | `VirtualizedCodeBlock`（代码块） | `MessageList`（整个聊天列表） |
+
+上游迁移到 `virtua` 是独立决策，fork 的 `@tanstack/react-virtual` 仅用于代码块虚拟化，两者不冲突——但如果要 port MessageList 虚拟化，需要引入 `virtua` 作为新依赖。
+
+### Tier 1 — 低风险 / 快速见效
+
+| # | Changelog 项 | 上游 commit | 关键文件 | 难度 | 说明 |
+|---|---|---|---|---|---|
+| 1 | Desktop: dev tools from Help menu | 零散 | `electron/main.mjs` menu | 🟢 极低 | 加一个 menu item |
+| 2 | Mobile: empty Changes close control | 零散 | mobile CSS | 🟢 极低 | 几行样式 |
+| 3 | Sessions: full gutter highlight | 零散 | CSS + sidebar | 🟢 极低 | `display:flex` 全行高亮 |
+| 4 | Chat: custom-answer textarea resize | `b0567047` 等 | `QuestionCard.tsx` + **新** `questionTextareaSizing.ts` | 🟢 低 | 新工具文件 + QuestionCard 改动 |
+| 5 | Settings/MCP: import snippets fix | 零散 | MCP settings | 🟢 低 | 小修复 |
+| 6 | Git/Diff: review flow dialog | `206ec704` | **新** `ReviewFlowDialog.tsx` (213L) | 🟢 低 | 独立新组件 |
+| 7 | GitHub: gh CLI credentials | `ce377e41` | **新** `gh-cli-credential.js` + `GitHubSettings.tsx` + `github/routes.js` | 🟡 中低 | server 新文件 + UI 改动 |
+| 8 | Chat: clickable file paths in code blocks | `45bedeac` | `MarkdownRendererImpl.tsx` | 🟡 中低 | fork 已有 inline link 解析，增量改动 |
+
+### Tier 2 — 中等风险 / 需逐文件合并
+
+| # | Changelog 项 | 上游 commit | 关键文件 | 难度 | 冲突点 |
+|---|---|---|---|---|---|
+| 9 | Chat/Input: tab-complete mention fix | `a8270076` | `ChatInput.tsx` (+81/-26) | 🟡 中 | fork ChatInput 4826L 魔改 |
+| 10 | Chat/Input: ArrowUp multi-line fix | 同上 | 同上 | 🟡 中 | 同上 |
+| 11 | Chat/Mobile: collapsed tool cards icon | 零散 | `ToolPart.tsx` (+60/-44) | 🟡 中 | fork 有 tool rendering 魔改 |
+| 12 | Sessions: delete action in menus | 零散 | `SessionNodeItem.tsx` (+78/-52) | 🟡 中 | fork 有 session markers 渲染 |
+| 13 | Sessions: deleting parent no zombie children | 零散 | sync 层 | 🟡 中 | fork sync 层有 remote routing |
+| 14 | Sessions: switching no blank chat | `475b7a99` | `MessageList.tsx` / chat controller | 🟡 中 | fork 有 process folding |
+| 15 | Comments: inline drafts stay on focus | 零散 | comment draft store | 🟡 中 | 需检查 fork comment 系统 |
+| 16 | Notifications: reliable streams behind proxies | `22f7b6ac` | event-stream WebSocket | 🟡 中 | SSE auth 改动 |
+| 17 | Security: file preview path rejection | 零散 | **新** `outsideFileGrants.ts` + `fs/routes.js` (+224) | 🟡 中 | server 新文件 + route 安全检查 |
+| 18 | Sessions: running session flicker fix | 零散 | sync/status | 🟡 中 | fork 有 live state 管理 |
+| 19 | Sessions: draft default model/agent | `7ecce96e` | startup/draft 逻辑 | 🟡 中 | fork 有自己的 draft starter |
+| 20 | Chat: context breakdown previews + cache hit | `8f629491` | `ContextSidebarTab.tsx` (+105/-31) + **新** `rawMessagePreview.ts` | 🟡 中 | fork 有 context tab 改动 |
+| 21 | Files: workspace directory consistency | `78196208` | `FilesView.tsx` + `fs/routes.js` | 🟡 中 | fork FilesView 有 Vim/TTS |
+| 22 | Chat: PDF preview (files) | `f9ce2ae8` | `FilesView.tsx` (+404/-170) | 🟡 中高 | fork FilesView 3778L，需增量合并 |
+
+### Tier 3 — 高风险 / 大规模重写或深度冲突
+
+| # | Changelog 项 | 上游 commit | 关键文件 | 难度 | 冲突点 |
+|---|---|---|---|---|---|
+| 23 | Security: LAN password required | `e58be0a0` 等 | `useConfigStore.ts` (+443/-125) + **新** `bind-host.js` + `server/index.js` + `electron/main.mjs` | 🔴 高 | fork useConfigStore 深度魔改；fork electron 退出流程不同 |
+| 24 | Desktop: LAN without password starts locally | 同上 | `electron/main.mjs` (+98/-7) | 🔴 高 | fork main.mjs 2938L vs 上游 4444L，LAN 逻辑差异大 |
+| 25 | Chat/Perf: virtualized rendering | `b920fd6f` | `MessageList.tsx` (+94/-157) + 新依赖 `virtua` | 🔴 高 | fork 有 process folding + 使用 `@tanstack/react-virtual`，上游用 `virtua`，需评估是否引入新库 |
+| 26 | Files: docked editor toolbar | 零散 | `FilesView.tsx` (同 #22 大改) | 🔴 高 | fork FilesView 与上游差距 448 行 |
+| 27 | Git/Diff: redesigned Changes view | 多 commit | `DiffView.tsx` (+729/-902) + `PierreDiffViewer.tsx` (+451) | 🔴 极高 | 上游完全重写，fork 有自己的 diff 改动；需决定是 port 还是保留 fork 版本 |
+| 28 | Git/Diff: stage/unstage/discard hunks | `859c426e` | **新** `patchFileDiff.ts` (195L) + `git/service.js` (+522) + `git/routes.js` (+115) + DiffView 集成 | 🔴 高 | server 端是新逻辑（可 port），DiffView 集成依赖 #27 完成 |
+| 29 | Startup: cached settings appear earlier | `c62f0d1c` | `useConfigStore.ts` + bootstrap | 🔴 高 | fork useConfigStore 深度魔改，cache hydration 逻辑需手动适配 |
+| 30 | Startup: model/agent faster on draft | `b0567047` | config loading + project key | 🔴 高 | 同上 |
+| 31 | VSCode: faster startup + cache | `fa5f9a9b` | `bridge-proxy-runtime.ts` + VS Code session list | 🟡 中高 | fork VS Code 改动较少，但 session grouping 需对齐 |
+| 32 | VSCode: workspace-grouped sessions | 同上 | VS Code session tree | 🟡 中高 | 同上 |
+
+### v1.13.0 新文件（可直接 port，不冲突）
+
+| 文件 | 行数 | 用途 |
+|---|---|---|
+| `packages/ui/src/components/chat/questionTextareaSizing.ts` | — | 自定义问答 textarea 尺寸工具 |
+| `packages/ui/src/components/layout/rawMessagePreview.ts` | 135 | 上下文侧栏消息预览 |
+| `packages/ui/src/components/session/ReviewFlowDialog.tsx` | 213 | Diff review 流程对话框 |
+| `packages/ui/src/lib/diff/patchFileDiff.ts` | 195 | Diff hunk patch 解析 |
+| `packages/ui/src/lib/outsideFileGrants.ts` | — | 文件访问授权 |
+| `packages/web/server/lib/github/gh-cli-credential.js` | — | gh CLI 凭据读取 |
+| `packages/web/server/lib/security/bind-host.js` | — | LAN 绑定安全 |
+| `packages/electron/opencode-cwd.mjs` | — | Electron CWD 管理 |
+| `packages/ui/src/sync/sanitize.ts` | 181 | 同步数据清洗 |
+
+### v1.13.0 建议移植顺序
+
+```
+Phase 1 — Tier 1 (#1-8): 独立小项，每项 30min-2h
+Phase 2 — Tier 2 (#9-22): 逐文件合并，每项 2-4h
+Phase 3 — Tier 3 安全 (#23-24): LAN 密码 + Desktop，需设计 fork 适配
+Phase 4 — Tier 3 性能 (#25, #29-30): 虚拟化 + 启动缓存，核心架构改动
+Phase 5 — Tier 3 Git/Diff (#27-28): DiffView 重写，最高风险
+Phase 6 — VSCode (#31-32): 单独批次
+```
+
+### 特别注意：`virtua` vs `@tanstack/react-virtual`
+
+上游 v1.13.0 将 `MessageList` 迁移到 [`virtua`](https://github.com/inokawa/virtua)，而 fork 当前使用 `@tanstack/react-virtual`（仅用于 `VirtualizedCodeBlock`）。
+
+**选项**：
+- A. 引入 `virtua`，跟随上游（长期维护成本低，但增加一个依赖）
+- B. 用 `@tanstack/react-virtual` 重新实现 MessageList 虚拟化（无新依赖，但维护成本高）
+- C. 不 port MessageList 虚拟化（fork 的 process folding 可能已足够缓解长对话性能）
+
+**建议**: A。`virtua` 是轻量库，fork 的 `@tanstack/react-virtual` 用途不同（代码块），两者共存无冲突。

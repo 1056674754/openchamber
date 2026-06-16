@@ -706,6 +706,25 @@ export async function updateSessionTitle(sessionId: string, title: string): Prom
   }
 }
 
+export async function patchSessionMetadata(
+  sessionId: string,
+  directory: string,
+  transform: (metadata: Record<string, unknown>) => Record<string, unknown>,
+): Promise<Session | null> {
+  const sessionDirectory = directory || requireSessionDirectory(sessionId, "patchSessionMetadata")
+  const sdk = sdkForSession(sessionId)
+  const current = await sdk.session.get({ sessionID: sessionId, directory: sessionDirectory })
+  const existingMetadata = (current.data && typeof (current.data as Session & { metadata?: unknown }).metadata === 'object' && (current.data as Session & { metadata?: unknown }).metadata !== null && !Array.isArray((current.data as Session & { metadata?: unknown }).metadata))
+    ? (current.data as Session & { metadata?: Record<string, unknown> }).metadata as Record<string, unknown>
+    : {}
+  const nextMetadata = transform(existingMetadata)
+  const result = await sdk.session.update({ sessionID: sessionId, directory: sessionDirectory, metadata: nextMetadata })
+  if (result.data) {
+    useGlobalSessionsStore.getState().upsertSession(result.data)
+  }
+  return result.data ?? null
+}
+
 export async function shareSession(sessionId: string): Promise<Session | null> {
   const sessionDirectory = requireSessionDirectory(sessionId, "shareSession")
   const result = await sdkForSession(sessionId).session.share({ sessionID: sessionId, directory: sessionDirectory })

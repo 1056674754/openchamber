@@ -31,6 +31,10 @@ import { toAbsoluteFilePath } from '@/lib/path-utils';
 import { sessionEvents } from '@/lib/sessionEvents';
 import { useI18n } from '@/lib/i18n';
 import type { I18nKey } from '@/lib/i18n/store';
+import { ReviewFlowDialog, type ReviewFlowExecution } from '@/components/session/ReviewFlowDialog';
+import { isVSCodeRuntime } from '@/lib/desktop';
+import { startReviewFlow } from '@/lib/reviewFlow';
+import { useSessionUIStore } from '@/sync/session-ui-store';
 
 // Minimum width for side-by-side diff view (px)
 const SIDE_BY_SIDE_MIN_WIDTH = 1100;
@@ -955,6 +959,8 @@ export const DiffView: React.FC<DiffViewProps> = ({
     const [pinnedStackedTarget, setPinnedStackedTarget] = React.useState<string | null>(null);
     const [diffRetryNonce, setDiffRetryNonce] = React.useState(0);
     const [diffLoadError, setDiffLoadError] = React.useState<string | null>(null);
+    const [reviewDialogOpen, setReviewDialogOpen] = React.useState(false);
+    const [reviewFlowSubmitting, setReviewFlowSubmitting] = React.useState(false);
     const lastDiffRequestRef = React.useRef<string | null>(null);
 
     const pendingDiffFile = useUIStore((state) => state.pendingDiffFile);
@@ -967,10 +973,12 @@ export const DiffView: React.FC<DiffViewProps> = ({
     const diffViewMode = useUIStore((state) => state.diffViewMode);
     const setDiffViewMode = useUIStore((state) => state.setDiffViewMode);
     const openContextFileAtLine = useUIStore((state) => state.openContextFileAtLine);
+    const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
     const diffWrapLines = diffWrapLinesStore;
 
     const isStackedView = diffViewMode === 'stacked';
     const isMobileLayout = isMobile || screenWidth <= 768;
+    const showReviewAction = Boolean(currentSessionId) && !isMobileLayout && !isVSCodeRuntime();
     const showFileSidebar = !hideStackedFileSidebar && !isMobileLayout && screenWidth >= 1024;
     const diffScrollRef = React.useRef<HTMLElement | null>(null);
     const fileSectionRefs = React.useRef(new Map<string, HTMLDivElement | null>());
@@ -1185,6 +1193,35 @@ export const DiffView: React.FC<DiffViewProps> = ({
         atScrollLimit: boolean;
         delta: number;
     };
+
+    const handleStartReviewFlow = React.useCallback(async (execution: ReviewFlowExecution) => {
+        if (!currentSessionId) return;
+        const directory = useSessionUIStore.getState().getDirectoryForSession(currentSessionId) || effectiveDirectory || '';
+        if (!directory) {
+            toast.error(t('diffView.reviewDialog.toast.noSessionDirectory'));
+            return;
+        }
+
+        setReviewFlowSubmitting(true);
+        try {
+            await startReviewFlow({
+                originalSessionID: currentSessionId,
+                directory,
+                providerID: execution.providerID,
+                modelID: execution.modelID,
+                agent: execution.agent || undefined,
+                variant: execution.variant || undefined,
+                generateHandoff: execution.generateHandoff,
+                returnAfterHandoffRequest: execution.generateHandoff,
+            });
+            setReviewDialogOpen(false);
+        } catch (error) {
+            console.error('[review-flow] failed to start review flow', error);
+            toast.error(error instanceof Error ? error.message : t('diffView.reviewDialog.toast.startFailed'));
+        } finally {
+            setReviewFlowSubmitting(false);
+        }
+    }, [currentSessionId, effectiveDirectory, t]);
 
     const scrollToFile = React.useCallback((path: string): ScrollToFileResult => {
         const node = fileSectionRefs.current.get(path);
@@ -1713,6 +1750,25 @@ export const DiffView: React.FC<DiffViewProps> = ({
                     />
                 )}
                 <div className="flex-1" />
+                {changedFiles.length > 0 && showReviewAction && (
+                    <Button
+                        variant="default"
+                        size="sm"
+                        onClick={() => setReviewDialogOpen(true)}
+                        disabled={reviewFlowSubmitting}
+                        className="h-7 flex-shrink-0 gap-1.5 px-2"
+                        aria-label={t('diffView.actions.reviewAria')}
+                    >
+                        {reviewFlowSubmitting ? (
+                            <Icon name="loader-4" className="size-4 animate-spin" />
+                        ) : (
+                            <Icon name="search-eye" className="size-4" />
+                        )}
+                        <span className="typography-ui-label">
+                            {t('diffView.actions.review')}
+                        </span>
+                    </Button>
+                )}
                 {selectedFileEntry && (
                     <Button
                         variant="ghost"
@@ -1752,6 +1808,14 @@ export const DiffView: React.FC<DiffViewProps> = ({
                     />
                 )}
             </div>
+
+            <ReviewFlowDialog
+                open={reviewDialogOpen}
+                onOpenChange={setReviewDialogOpen}
+                projectDirectory={effectiveDirectory ?? null}
+                submitting={reviewFlowSubmitting}
+                onConfirm={handleStartReviewFlow}
+            />
 
             {renderContent()}
         </div>

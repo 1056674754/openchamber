@@ -1190,6 +1190,12 @@ const reloadMenuTargetWindow = () => {
   target.webContents.reload();
 };
 
+const openDevToolsForMenuTarget = () => {
+  const target = getMenuTargetWindow();
+  if (!target || target.isDestroyed()) return;
+  target.webContents.toggleDevTools();
+};
+
 const relaunchFromMenu = () => {
   prepareForQuit();
   setImmediate(() => {
@@ -2697,6 +2703,7 @@ const buildMacMenu = () => {
       submenu: [
         { label: 'Keyboard Shortcuts', accelerator: 'Cmd+.', click: () => dispatchAction('help-dialog') },
         { label: 'Show Diagnostics', accelerator: 'Cmd+Shift+L', click: () => dispatchAction('download-logs') },
+        { label: 'Toggle Developer Tools', accelerator: 'Cmd+Alt+I', click: () => openDevToolsForMenuTarget() },
         { type: 'separator' },
         { label: 'Clear Cache', click: () => void handleInvoke(null, 'desktop_clear_cache') },
         { type: 'separator' },

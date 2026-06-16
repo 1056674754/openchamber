@@ -1235,14 +1235,16 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
           data-session-scope={sessionDirectory ?? ''}
           data-session-archived={archivedBucket ? '1' : '0'}
           className={cn(
-            'group relative my-0.5 flex items-center rounded-sm py-1',
-            isGlobalPinnedRootRow ? 'px-0.5' : 'px-1.5',
+            'group relative my-0.5 flex items-center rounded-md py-1',
+            '-ml-3',
+            isGlobalPinnedRootRow ? 'px-0.5' : 'pr-1.5',
             isGlobalPinnedRootRow && 'gap-1.5',
             isMissingDirectory ? 'opacity-75' : '',
             isDeleting && 'opacity-60',
-            isRowSelected && 'bg-primary/15',
+            isActive && !isRowSelected && 'bg-primary/10',
+            isRowSelected && 'bg-interactive-selection',
           )}
-          style={depth > 0 ? { paddingLeft: `${rowIndentPx}px` } : undefined}
+          style={depth > 0 ? { paddingLeft: `${rowIndentPx}px` } : { paddingLeft: '18px' }}
           onContextMenu={!mobileVariant ? (e) => {
             e.preventDefault();
             setMenuPosition({ x: e.clientX, y: e.clientY });

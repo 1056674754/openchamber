@@ -14,6 +14,7 @@ import { useSessions } from '@/sync/sync-context';
 import * as sessionActions from '@/sync/session-actions';
 import { useI18n } from '@/lib/i18n';
 import { serializeQuestionAsJson, serializeQuestionAsMarkdown } from './questionSerializers';
+import { QUESTION_CUSTOM_TEXTAREA_MIN_HEIGHT, getQuestionCustomTextareaHeight } from './questionTextareaSizing';
 import {
   clearQuestionDraft,
   isQuestionHandled,
@@ -45,6 +46,70 @@ const describeQuestionError = (error: unknown): string => {
   return String(error);
 };
 
+interface CustomAnswerTextareaProps {
+  value: string;
+  placeholder: string;
+  disabled: boolean;
+  onValueChange: (value: string) => void;
+  onKeyDown: (event: React.KeyboardEvent<HTMLTextAreaElement>) => void;
+}
+
+const CustomAnswerTextarea = React.memo(function CustomAnswerTextarea({
+  value,
+  placeholder,
+  disabled,
+  onValueChange,
+  onKeyDown,
+}: CustomAnswerTextareaProps) {
+  const textareaRef = React.useRef<HTMLTextAreaElement | null>(null);
+  const [localValue, setLocalValue] = React.useState(value);
+  const [height, setHeight] = React.useState(QUESTION_CUSTOM_TEXTAREA_MIN_HEIGHT);
+  const [isScrollable, setIsScrollable] = React.useState(false);
+
+  React.useEffect(() => {
+    setLocalValue(value);
+  }, [value]);
+
+  React.useLayoutEffect(() => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+
+    const nextHeight = getQuestionCustomTextareaHeight({
+      scrollHeight: textarea.scrollHeight,
+      currentHeight: height,
+    });
+    const nextScrollable = textarea.scrollHeight > (nextHeight ?? height);
+    if (isScrollable !== nextScrollable) {
+      setIsScrollable(nextScrollable);
+    }
+    if (nextHeight !== null) {
+      setHeight(nextHeight);
+    }
+  }, [height, isScrollable, localValue]);
+
+  return (
+    <textarea
+      ref={textareaRef}
+      value={localValue}
+      onChange={(event) => {
+        const nextValue = event.target.value;
+        setLocalValue(nextValue);
+        onValueChange(nextValue);
+      }}
+      placeholder={placeholder}
+      disabled={disabled}
+      rows={2}
+      onKeyDown={onKeyDown}
+      style={{ height }}
+      className={cn(
+        'w-full bg-transparent border border-border/30 focus:border-primary rounded px-2 py-1 outline-none typography-meta text-foreground placeholder:text-muted-foreground/50 transition-colors resize-none',
+        isScrollable ? 'overflow-y-auto' : 'overflow-hidden'
+      )}
+      autoFocus
+    />
+  );
+});
+
 export const QuestionCard: React.FC<QuestionCardProps> = ({ question, inline = false, resolveRequestTarget, submitStaleQuestionAnswer }) => {
   const { t } = useI18n();
   const respondToQuestion = sessionActions.respondToQuestion;
@@ -63,7 +128,8 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({ question, inline = f
 
   const [selectedOptions, setSelectedOptions] = React.useState<Record<number, string[]>>({});
   const [customMode, setCustomMode] = React.useState<Record<number, boolean>>({});
-  const [customText, setCustomText] = React.useState<Record<number, string>>({});
+  const customTextRef = React.useRef<Record<number, string>>({});
+  const [customTextFilled, setCustomTextFilled] = React.useState<Record<number, boolean>>({});
   const skipNextDraftSaveRef = React.useRef<string | null>(null);
 
   const questions = React.useMemo(() => question.questions ?? [], [question.questions]);
@@ -82,7 +148,15 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({ question, inline = f
     setActiveTab(draft?.activeTab ?? '0');
     setSelectedOptions(draft?.selectedOptions ?? {});
     setCustomMode(draft?.customMode ?? {});
-    setCustomText(draft?.customText ?? {});
+    customTextRef.current = { ...(draft?.customText ?? {}) };
+    const nextFilled: Record<number, boolean> = {};
+    for (const [key, value] of Object.entries(customTextRef.current)) {
+      const index = Number(key);
+      if (Number.isFinite(index) && value.trim().length > 0) {
+        nextFilled[index] = true;
+      }
+    }
+    setCustomTextFilled(nextFilled);
     setHasResponded(isQuestionHandled(question.id) || (question.tool ? isQuestionHandledByTool(question.tool) : false));
   }, [question.id, question.tool]);
 
@@ -97,9 +171,9 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({ question, inline = f
       activeTab,
       selectedOptions,
       customMode,
-      customText,
+      customText: customTextRef.current,
     });
-  }, [activeTab, customMode, customText, hasResponded, question.id, selectedOptions]);
+  }, [activeTab, customMode, customTextFilled, hasResponded, question.id, selectedOptions]);
 
   const tabs = React.useMemo(() => {
     const questionTabs = questions.map((q, index) => ({
@@ -117,12 +191,12 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({ question, inline = f
   const getAnswerDisplay = React.useCallback((index: number): string => {
     const isCustom = Boolean(customMode[index]);
     if (isCustom) {
-      const value = (customText[index] ?? '').trim();
+      const value = (customTextRef.current[index] ?? '').trim();
       return value || t('chat.questionCard.noAnswer');
     }
     const answers = selectedOptions[index] ?? [];
     return answers.length > 0 ? answers.join(', ') : t('chat.questionCard.noAnswer');
-  }, [customMode, customText, selectedOptions, t]);
+  }, [customMode, selectedOptions, t]);
 
   const isMultiple = Boolean(activeQuestion?.multiple);
   const selectedForActive = selectedOptions[activeIndex] ?? [];
@@ -133,8 +207,7 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({ question, inline = f
     for (let index = 0; index < questions.length; index += 1) {
       const isCustom = Boolean(customMode[index]);
       if (isCustom) {
-        const value = (customText[index] ?? '').trim();
-        if (!value) pending.push(index);
+        if (!customTextFilled[index]) pending.push(index);
         continue;
       }
 
@@ -144,7 +217,7 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({ question, inline = f
       }
     }
     return pending;
-  }, [customMode, customText, questions.length, selectedOptions]);
+  }, [customMode, customTextFilled, questions.length, selectedOptions]);
 
   const requiredSatisfied = React.useMemo(() => {
     if (questions.length === 0) return false;
@@ -172,7 +245,7 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({ question, inline = f
     for (let index = 0; index < questions.length; index += 1) {
       const isCustom = Boolean(customMode[index]);
       if (isCustom) {
-        const value = (customText[index] ?? '').trim();
+        const value = (customTextRef.current[index] ?? '').trim();
         answers.push(value ? [value] : []);
         continue;
       }
@@ -181,7 +254,7 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({ question, inline = f
     }
 
     return answers;
-  }, [customMode, customText, questions.length, selectedOptions]);
+  }, [customMode, questions.length, selectedOptions]);
 
   const resolveEffectiveRequestTarget = React.useCallback(async (): Promise<QuestionRequestTarget> => {
     if (!resolveRequestTarget) {
@@ -202,6 +275,7 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({ question, inline = f
       if (!activeQuestion) return;
 
       setCustomMode((prev) => ({ ...prev, [activeIndex]: false }));
+      setCustomTextFilled((prev) => (prev[activeIndex] ? { ...prev, [activeIndex]: false } : prev));
 
       setSelectedOptions((prev) => {
         const current = prev[activeIndex] ?? [];
@@ -219,6 +293,14 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({ question, inline = f
   const handleSelectCustom = React.useCallback(() => {
     setCustomMode((prev) => ({ ...prev, [activeIndex]: true }));
     setSelectedOptions((prev) => ({ ...prev, [activeIndex]: [] }));
+    const hasValue = (customTextRef.current[activeIndex] ?? '').trim().length > 0;
+    setCustomTextFilled((prev) => (prev[activeIndex] === hasValue ? prev : { ...prev, [activeIndex]: hasValue }));
+  }, [activeIndex]);
+
+  const handleCustomValueChange = React.useCallback((value: string) => {
+    customTextRef.current = { ...customTextRef.current, [activeIndex]: value };
+    const hasValue = value.trim().length > 0;
+    setCustomTextFilled((prev) => (prev[activeIndex] === hasValue ? prev : { ...prev, [activeIndex]: hasValue }));
   }, [activeIndex]);
 
   const handleConfirm = React.useCallback(async () => {
@@ -495,32 +577,12 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({ question, inline = f
 
                   {isCustomActive ? (
                     <div className="pl-6 pr-1 pt-0.5">
-                      <textarea
-                        ref={(el) => {
-                          if (el) {
-                            el.style.height = 'auto';
-                            const lineHeight = 20; // approx typography-meta line height
-                            const minHeight = lineHeight * 2;
-                            const maxHeight = lineHeight * 4;
-                            el.style.height = `${Math.min(Math.max(el.scrollHeight, minHeight), maxHeight)}px`;
-                          }
-                        }}
-                        value={customText[activeIndex] ?? ''}
-                        onChange={(event: React.ChangeEvent<HTMLTextAreaElement>) => {
-                          const el = event.target;
-                          el.style.height = 'auto';
-                          const lineHeight = 20;
-                          const minHeight = lineHeight * 2;
-                          const maxHeight = lineHeight * 4;
-                          el.style.height = `${Math.min(Math.max(el.scrollHeight, minHeight), maxHeight)}px`;
-                          setCustomText((prev) => ({ ...prev, [activeIndex]: el.value }));
-                        }}
+                      <CustomAnswerTextarea
+                        value={customTextRef.current[activeIndex] ?? ''}
+                        onValueChange={handleCustomValueChange}
                         placeholder={t('chat.questionCard.yourAnswer')}
                         disabled={isResponding}
-                        rows={2}
                         onKeyDown={handleKeyDown}
-                        className="w-full bg-transparent border border-border/30 focus:border-primary rounded px-2 py-1 outline-none typography-meta text-foreground placeholder:text-muted-foreground/50 transition-colors resize-none overflow-hidden"
-                        autoFocus
                       />
                     </div>
                   ) : null}

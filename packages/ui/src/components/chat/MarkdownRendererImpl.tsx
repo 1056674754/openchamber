@@ -1236,6 +1236,20 @@ interface MarkdownRendererProps {
 
 const MERMAID_BLOCK_SELECTOR = '[data-markdown="mermaid-block"]';
 const FILE_LINK_SELECTOR = '[data-openchamber-file-link="true"]';
+const BLOCK_PATH_TOKEN_ATTR = 'data-openchamber-block-path-token';
+const BLOCK_PATH_TOKEN_SELECTOR = `[${BLOCK_PATH_TOKEN_ATTR}]`;
+const CODE_BLOCK_PATH_SCANNED_ATTR = 'data-openchamber-block-paths-scanned';
+// Matches `path[:line[:col]]` inside shell/grep-style output. Requires a file
+// extension (1-8 alphanumerics) so plain words don't qualify; the path itself
+// must contain at least one extension-bearing segment.
+//
+// Known limitation: backslash-separated Windows paths (e.g.
+// `C:\Users\test\file.ts:12`) are not matched because the path character class
+// does not include `\`. Compiler output inside fenced code blocks predominantly
+// uses forward slashes, so this is a niche gap. The inline-code pipeline is not
+// affected — it reads full text content rather than matching with a regex.
+const BLOCK_PATH_TOKEN_RE = /(?:[A-Za-z]:[\\/])?[\w.\-/@+]*[\w\-/@+]\.[A-Za-z0-9]{1,8}(?::\d+){0,2}/g;
+const MAX_BLOCK_CODE_SCAN_LENGTH = 200_000;
 const FILE_REFERENCE_SELECTOR = '[data-openchamber-file-link="true"], [data-openchamber-file-status], [data-openchamber-original-href]';
 const IMAGE_PREVIEW_SELECTOR = '[data-openchamber-image-preview="true"]';
 const ORIGINAL_HREF_ATTRIBUTE = 'data-openchamber-original-href';
@@ -1297,6 +1311,103 @@ const resolveFileReferenceBaseUrl = (sessionId?: string | null, directory?: stri
   }
 
   return serverRegistry.get(serverId)?.config.baseUrl ?? `/api/remote/${encodeURIComponent(serverId)}`;
+};
+
+const findTextPosition = (textNodes: Text[], targetOffset: number): { node: Text; offset: number } | null => {
+  let currentOffset = 0;
+
+  for (const node of textNodes) {
+    const nextOffset = currentOffset + node.data.length;
+    if (targetOffset <= nextOffset) {
+      return { node, offset: Math.max(0, targetOffset - currentOffset) };
+    }
+    currentOffset = nextOffset;
+  }
+
+  const lastNode = textNodes.at(-1);
+  return lastNode ? { node: lastNode, offset: lastNode.data.length } : null;
+};
+
+const unwrapBlockCodePathTokens = (container: HTMLElement): void => {
+  const tokenSpans = container.querySelectorAll<HTMLElement>(BLOCK_PATH_TOKEN_SELECTOR);
+  for (const span of Array.from(tokenSpans)) {
+    span.replaceWith(container.ownerDocument.createTextNode(span.textContent ?? ''));
+  }
+
+  const scannedBlocks = container.querySelectorAll<HTMLElement>(`code[${CODE_BLOCK_PATH_SCANNED_ATTR}]`);
+  for (const codeBlock of Array.from(scannedBlocks)) {
+    codeBlock.removeAttribute(CODE_BLOCK_PATH_SCANNED_ATTR);
+    codeBlock.normalize();
+  }
+};
+
+const wrapBlockCodePathTokens = (container: HTMLElement): void => {
+  const codeBlocks = container.querySelectorAll<HTMLElement>('pre code');
+  if (codeBlocks.length === 0) {
+    return;
+  }
+
+  const doc = container.ownerDocument;
+  if (!doc) {
+    return;
+  }
+
+  for (const codeBlock of Array.from(codeBlocks)) {
+    if (codeBlock.getAttribute(CODE_BLOCK_PATH_SCANNED_ATTR) === 'true') {
+      continue;
+    }
+
+    if ((codeBlock.textContent ?? '').length > MAX_BLOCK_CODE_SCAN_LENGTH) {
+      codeBlock.setAttribute(CODE_BLOCK_PATH_SCANNED_ATTR, 'true');
+      continue;
+    }
+
+    const walker = doc.createTreeWalker(codeBlock, NodeFilter.SHOW_TEXT);
+    const textNodes: Text[] = [];
+    let currentNode = walker.nextNode();
+    while (currentNode) {
+      textNodes.push(currentNode as Text);
+      currentNode = walker.nextNode();
+    }
+
+    const fullText = codeBlock.textContent ?? '';
+    if (!fullText.includes('.')) {
+      codeBlock.setAttribute(CODE_BLOCK_PATH_SCANNED_ATTR, 'true');
+      continue;
+    }
+
+    BLOCK_PATH_TOKEN_RE.lastIndex = 0;
+    const matches: Array<{ start: number; end: number; raw: string }> = [];
+    let match: RegExpExecArray | null = BLOCK_PATH_TOKEN_RE.exec(fullText);
+    while (match) {
+      const raw = match[0];
+      if (raw && isLikelyFilePath(raw)) {
+        matches.push({ start: match.index, end: match.index + raw.length, raw });
+      }
+      match = BLOCK_PATH_TOKEN_RE.exec(fullText);
+    }
+
+    for (const { start, end, raw } of matches.reverse()) {
+      const startPosition = findTextPosition(textNodes, start);
+      const endPosition = findTextPosition(textNodes, end);
+      if (!startPosition || !endPosition) {
+        continue;
+      }
+
+      const range = doc.createRange();
+      range.setStart(startPosition.node, startPosition.offset);
+      range.setEnd(endPosition.node, endPosition.offset);
+
+      const span = doc.createElement('span');
+      span.setAttribute(BLOCK_PATH_TOKEN_ATTR, 'true');
+      span.textContent = raw;
+
+      range.deleteContents();
+      range.insertNode(span);
+    }
+
+    codeBlock.setAttribute(CODE_BLOCK_PATH_SCANNED_ATTR, 'true');
+  }
 };
 
 const extractPathCandidateFromElement = (element: HTMLElement): string => {
@@ -1601,6 +1712,7 @@ const useFileReferenceInteractions = ({
         clearFileLinkAttributes(candidate);
         removeMissingBadge(candidate);
       }
+      unwrapBlockCodePathTokens(container);
     };
 
     if (!enabled) {
@@ -1609,7 +1721,10 @@ const useFileReferenceInteractions = ({
     }
 
     const annotateFileLinks = () => {
-      const candidates = container.querySelectorAll<HTMLElement>('[data-markdown="inline-code"], a');
+      wrapBlockCodePathTokens(container);
+      const candidates = container.querySelectorAll<HTMLElement>(
+        `[data-markdown="inline-code"], a, ${BLOCK_PATH_TOKEN_SELECTOR}`,
+      );
       let linkedCount = 0;
       const note = tRef.current('chat.file.notFound');
 

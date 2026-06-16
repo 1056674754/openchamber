@@ -475,11 +475,12 @@ class OpencodeService {
     return Array.isArray(response.data) ? response.data : [];
   }
 
-  async createSession(params?: { parentID?: string; title?: string }): Promise<Session> {
+  async createSession(params?: { parentID?: string; title?: string; metadata?: Record<string, unknown> }): Promise<Session> {
     const response = await this.client.session.create({
       ...(this.currentDirectory ? { directory: this.currentDirectory } : {}),
       parentID: params?.parentID,
-      title: params?.title
+      title: params?.title,
+      ...(params?.metadata ? { metadata: params.metadata } : {}),
     });
     if (!response.data) throw new Error('Failed to create session');
     return response.data;
@@ -502,11 +503,12 @@ class OpencodeService {
     return response.data || false;
   }
 
-  async updateSession(id: string, title?: string): Promise<Session> {
+  async updateSession(id: string, title?: string, metadata?: Record<string, unknown>): Promise<Session> {
     const response = await this.client.session.update({
       sessionID: id,
       ...(this.currentDirectory ? { directory: this.currentDirectory } : {}),
-      title
+      title,
+      ...(metadata ? { metadata } : {}),
     });
     if (!response.data) throw new Error('Failed to update session');
     return response.data;
