@@ -707,6 +707,8 @@ export const settingsDict = {
   'settings.openchamber.keyboardShortcuts.title': 'Skróty klawiszowe',
   'settings.openchamber.keyboardShortcuts.tooltip': 'Przechwyć nową kombinację klawiszy, zapisz ją, a przypisania zostaną natychmiast zaktualizowane.',
   'settings.openchamber.keyboardShortcuts.warning.riskyBrowserShortcut': 'Ten skrót może kolidować z domyślnymi skrótami przeglądarki. Został jednak zapisany.',
+'settings.openchamber.keyboardShortcuts.doubleClickRename.label': 'Kliknij dwukrotnie sesję, aby zmienić nazwę',
+'settings.openchamber.keyboardShortcuts.doubleClickRename.aria': 'Włącz zmianę nazwy dwukrotnym kliknięciem',
   'settings.openchamber.opencodeCli.actions.browse': 'Przeglądaj',
   'settings.openchamber.opencodeCli.actions.browseAria': 'Przeglądaj ścieżkę do pliku binarnego OpenCode',
   'settings.openchamber.opencodeCli.actions.restartingOpenCode': 'Restartowanie OpenCode...',

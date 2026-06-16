@@ -841,6 +841,8 @@
   'settings.openchamber.keyboardShortcuts.field.pressKeys': '按下按鍵...',
   'settings.openchamber.keyboardShortcuts.error.captureFirst': '請先錄入一個快速鍵。',
   'settings.openchamber.keyboardShortcuts.warning.riskyBrowserShortcut': '該快速鍵可能與瀏覽器預設快速鍵衝突，但仍已儲存。',
+'settings.openchamber.keyboardShortcuts.doubleClickRename.label': '雙擊會話重新命名',
+'settings.openchamber.keyboardShortcuts.doubleClickRename.aria': '啟用雙擊重新命名會話',
   'settings.openchamber.keyboardShortcuts.action.open_go_to_line.label': '跳轉到行（檔案編輯器）',
   'settings.openchamber.keyboardShortcuts.action.open_command_palette.label': '開啟命令面板',
   'settings.openchamber.keyboardShortcuts.action.focus_input.label': '聚焦輸入方塊',

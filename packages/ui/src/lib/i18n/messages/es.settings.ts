@@ -956,6 +956,8 @@ export const settingsDict = {
   "settings.openchamber.keyboardShortcuts.field.pressKeys": "Pulsa las teclas...",
   "settings.openchamber.keyboardShortcuts.error.captureFirst": "Captura un atajo primero.",
   "settings.openchamber.keyboardShortcuts.warning.riskyBrowserShortcut": "Este atajo puede entrar en conflicto con los predeterminados del navegador. Todavía se guarda.",
+  "settings.openchamber.keyboardShortcuts.doubleClickRename.label": "Doble clic para cambiar el nombre de la sesión",
+  "settings.openchamber.keyboardShortcuts.doubleClickRename.aria": "Habilitar doble clic para cambiar el nombre",
   "settings.openchamber.keyboardShortcuts.action.open_go_to_line.label": "Ir a línea (editor de archivos)",
   "settings.openchamber.keyboardShortcuts.action.open_command_palette.label": "Abrir paleta de comandos",
   "settings.openchamber.keyboardShortcuts.action.focus_input.label": "Enfocar entrada",

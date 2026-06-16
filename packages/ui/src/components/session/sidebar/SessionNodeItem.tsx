@@ -23,6 +23,7 @@ import { useSync } from '@/sync/use-sync';
 import { getSyncStoresForServer } from '@/sync/multi-server-registry';
 import { useViewportStore } from '@/sync/viewport-store';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useUIStore } from '@/stores/useUIStore';
 import { DraggableSessionRow } from './sessionFolderDnd';
 import { SessionUnreadMenuItem } from './SessionUnreadMenuItem';
 import { SidebarSpinner } from './SidebarSpinner';
@@ -1085,7 +1086,9 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
                     onClick={(event) => handleRowSelect(event)}
                     onDoubleClick={(e) => {
                       e.stopPropagation();
-                      onRenameSession(session.id, sessionTitle);
+                      if (useUIStore.getState().doubleClickRenameSession) {
+                        onRenameSession(session.id, sessionTitle);
+                      }
                     }}
                     className={cn(
                       'flex min-w-0 flex-1 cursor-pointer flex-col gap-0 overflow-hidden rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 text-foreground select-none disabled:cursor-not-allowed',
@@ -1158,7 +1161,9 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
                 onClick={(event) => handleRowSelect(event)}
                 onDoubleClick={(e) => {
                   e.stopPropagation();
-                  onRenameSession(session.id, sessionTitle);
+                  if (useUIStore.getState().doubleClickRenameSession) {
+                    onRenameSession(session.id, sessionTitle);
+                  }
                 }}
                 className={cn(
                   'flex min-w-0 flex-1 cursor-pointer flex-col gap-0 overflow-hidden rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 text-foreground select-none disabled:cursor-not-allowed',

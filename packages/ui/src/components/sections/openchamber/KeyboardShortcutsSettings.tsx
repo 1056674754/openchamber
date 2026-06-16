@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Icon } from "@/components/icon/Icon";
+import { Checkbox } from '@/components/ui/checkbox';
 import { useUIStore } from '@/stores/useUIStore';
 import { cn } from '@/lib/utils';
 import {
@@ -52,6 +53,8 @@ export const KeyboardShortcutsSettings: React.FC = () => {
   const setShortcutOverride = useUIStore((state) => state.setShortcutOverride);
   const clearShortcutOverride = useUIStore((state) => state.clearShortcutOverride);
   const resetAllShortcutOverrides = useUIStore((state) => state.resetAllShortcutOverrides);
+  const doubleClickRename = useUIStore((state) => state.doubleClickRenameSession);
+  const setDoubleClickRename = useUIStore((state) => state.setDoubleClickRenameSession);
 
   const actions = React.useMemo(() => getCustomizableShortcutActions(), []);
   const actionLabel = React.useCallback((id: string, fallbackLabel: string): string => {
@@ -263,6 +266,17 @@ export const KeyboardShortcutsSettings: React.FC = () => {
             </div>
           );
         })}
+      </section>
+
+      <section className="mt-4 px-2 pb-2 pt-2 border-t border-[var(--surface-subtle)]">
+        <label className="flex items-center gap-2 typography-ui-label text-foreground">
+          <Checkbox
+            checked={doubleClickRename}
+            onChange={setDoubleClickRename}
+            ariaLabel={t('settings.openchamber.keyboardShortcuts.doubleClickRename.aria')}
+          />
+          {t('settings.openchamber.keyboardShortcuts.doubleClickRename.label')}
+        </label>
       </section>
     </div>
   );
