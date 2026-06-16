@@ -508,7 +508,7 @@ Fork 从未 port 过 `95aab547`。T1-6 agent 发现后，将 `95aab547` 的核�
 | `ReviewFlowDialog.tsx` (213L, 新建) | 对话框本身 (`206ec704`) |
 | `DiffView.tsx` (+64) | 审查按钮 + 对话框触发 |
 
-**正在补 port 的 `95aab547` 剩余部分** (2026-06-17 ~01:30, agent `bg_0b6c8f20`)：
+**已补 port 的 `95aab547` 剩余部分** (2026-06-17 01:52, fork commit `3a8ecc92`)：
 
 | 文件 | 改动 | 说明 |
 |---|---|---|

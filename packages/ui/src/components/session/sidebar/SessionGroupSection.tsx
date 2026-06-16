@@ -37,7 +37,7 @@ type Props = {
   hasSessionSearchQuery: boolean;
   normalizedSessionSearchQuery: string;
   groupSearchDataByGroup: WeakMap<SessionGroup, GroupSearchData>;
-  visibleSessionCount?: number;
+  expandedSessionGroups: Set<string>;
   collapsedGroups: Set<string>;
   hideDirectoryControls: boolean;
   collapsedFolderIds: Set<string>;
@@ -49,8 +49,7 @@ type Props = {
   renderSessionNode: (node: SessionNode, depth?: number, groupDirectory?: string | null, projectId?: string | null, archivedBucket?: boolean, secondaryMeta?: { projectLabel?: string | null; branchLabel?: string | null } | null) => React.ReactNode;
   currentSessionDirectory: string | null;
   projectRepoStatus: Map<string, boolean | null>;
-  showMoreGroupSessions: (groupKey: string, currentVisibleCount: number) => void;
-  resetGroupSessionLimit: (groupKey: string) => void;
+  toggleGroupSessionLimit: (groupKey: string) => void;
   mobileVariant: boolean;
   alwaysShowActions: boolean;
   activeProjectId: string | null;
@@ -105,7 +104,7 @@ export function SessionGroupSection(props: Props): React.ReactNode {
     hasSessionSearchQuery,
     normalizedSessionSearchQuery,
     groupSearchDataByGroup,
-    visibleSessionCount,
+    expandedSessionGroups,
     collapsedGroups,
     hideDirectoryControls,
     collapsedFolderIds,
@@ -116,8 +115,7 @@ export function SessionGroupSection(props: Props): React.ReactNode {
     setDeleteFolderConfirm,
     renderSessionNode,
     projectRepoStatus,
-    showMoreGroupSessions,
-    resetGroupSessionLimit,
+    toggleGroupSessionLimit,
     mobileVariant,
     alwaysShowActions,
     activeProjectId,
@@ -166,6 +164,7 @@ export function SessionGroupSection(props: Props): React.ReactNode {
   const displayMode = useSessionDisplayStore((state) => state.displayMode);
   const foldersMap = useSessionFoldersStore((state) => state.foldersMap);
   const isMinimalMode = displayMode === 'minimal';
+  const isExpanded = expandedSessionGroups.has(groupKey);
   const isCollapsed = hasSessionSearchQuery ? false : collapsedGroups.has(groupKey);
   const groupMatchesSearch = hasSessionSearchQuery ? searchData?.groupMatches === true : false;
   const shouldFilterGroupContents = hasSessionSearchQuery;
@@ -286,16 +285,13 @@ export function SessionGroupSection(props: Props): React.ReactNode {
     return Math.max(minVisible, recentCount);
   }, [hideDirectoryControls, ungroupedSessions, sessionGroupMinVisible, sessionGroupRecentHours]);
 
-  const nonArchivedVisibleCount = Math.max(maxVisible, visibleSessionCount ?? maxVisible);
-
   const totalSessions = ungroupedSessions.length;
   const visibleSessions = group.isArchivedBucket
     ? ungroupedSessions
     : hasSessionSearchQuery
       ? ungroupedSessions
-      : ungroupedSessions.slice(0, nonArchivedVisibleCount);
+      : (isExpanded ? ungroupedSessions : ungroupedSessions.slice(0, maxVisible));
   const remainingCount = totalSessions - visibleSessions.length;
-  const canShowLess = !group.isArchivedBucket && !hasSessionSearchQuery && totalSessions > maxVisible && remainingCount === 0;
 
   const { pinnedNodes, unpinnedNodes } = React.useMemo(() => {
     const allPinned = new Set([...pinnedSessionIds, ...projectPinnedSessionIds]);
@@ -626,19 +622,21 @@ export function SessionGroupSection(props: Props): React.ReactNode {
             : t('sessions.sidebar.group.empty.noSessionsInWorkspace')}
         </div>
       ) : null}
-      {remainingCount > 0 ? (
+      {remainingCount > 0 && !isExpanded ? (
         <button
           type="button"
-          onClick={() => showMoreGroupSessions(groupKey, visibleSessions.length)}
+          onClick={() => toggleGroupSessionLimit(groupKey)}
           className="mt-0.5 flex items-center justify-start rounded-md px-1.5 py-0.5 text-left text-xs text-muted-foreground/70 leading-tight hover:text-foreground hover:underline"
         >
-          {t('sessions.sidebar.group.showMore')}
+          {remainingCount === 1
+            ? t('sessions.sidebar.group.showMoreSingle', { count: remainingCount })
+            : t('sessions.sidebar.group.showMorePlural', { count: remainingCount })}
         </button>
       ) : null}
-      {canShowLess ? (
+      {isExpanded && totalSessions > maxVisible ? (
         <button
           type="button"
-          onClick={() => resetGroupSessionLimit(groupKey)}
+          onClick={() => toggleGroupSessionLimit(groupKey)}
           className="mt-0.5 flex items-center justify-start rounded-md px-1.5 py-0.5 text-left text-xs text-muted-foreground/70 leading-tight hover:text-foreground hover:underline"
         >
           {t('sessions.sidebar.group.showFewer')}

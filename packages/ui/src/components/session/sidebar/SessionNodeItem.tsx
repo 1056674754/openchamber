@@ -1234,17 +1234,18 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
           data-session-unread={showUnreadStatus ? '1' : '0'}
           data-session-scope={sessionDirectory ?? ''}
           data-session-archived={archivedBucket ? '1' : '0'}
+          // [OPENCHAMBER-FORK] Leading indicator uses a 2-slot layout (spinner/unread/chevron).
+          // Do not add negative margins, remove left padding, or override paddingLeft on depth=0 —
+          // doing so collapses the two slots into one. Baseline: commit 3832c124.
           className={cn(
-            'group relative my-0.5 flex items-center rounded-md py-1',
-            '-ml-3',
-            isGlobalPinnedRootRow ? 'px-0.5' : 'pr-1.5',
+            'group relative my-0.5 flex items-center rounded-sm py-1',
+            isGlobalPinnedRootRow ? 'px-0.5' : 'px-1.5',
             isGlobalPinnedRootRow && 'gap-1.5',
             isMissingDirectory ? 'opacity-75' : '',
             isDeleting && 'opacity-60',
-            isActive && !isRowSelected && 'bg-primary/10',
-            isRowSelected && 'bg-interactive-selection',
+            isRowSelected && 'bg-primary/15',
           )}
-          style={depth > 0 ? { paddingLeft: `${rowIndentPx}px` } : { paddingLeft: '18px' }}
+          style={depth > 0 ? { paddingLeft: `${rowIndentPx}px` } : undefined}
           onContextMenu={!mobileVariant ? (e) => {
             e.preventDefault();
             setMenuPosition({ x: e.clientX, y: e.clientY });
