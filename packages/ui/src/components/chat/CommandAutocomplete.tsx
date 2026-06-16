@@ -7,6 +7,8 @@ import { useSkillsStore } from '@/stores/useSkillsStore';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
+import { useUIStore } from '@/stores/useUIStore';
+import { isVSCodeRuntime } from '@/lib/desktop';
 import { CommandAutocompleteRow } from './CommandAutocompleteRow';
 import {
   buildCommandAutocompleteEntries,
@@ -43,6 +45,8 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
   const hasSession = Boolean(currentSessionId);
   const hasNewSessionDraft = useSessionUIStore((state) => Boolean(state.newSessionDraft?.open));
   const canStartSessionCommand = hasSession || hasNewSessionDraft;
+  const isMobile = useUIStore((state) => state.isMobile);
+  const canUseReviewHandoffFlow = hasSession && !isMobile && !isVSCodeRuntime();
 
   const [commands, setCommands] = React.useState<CommandInfo[]>([]);
   const [loading, setLoading] = React.useState(false);
@@ -63,6 +67,7 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
     compact: t('chat.commandAutocomplete.command.compactDescription'),
     summary: t('chat.commandAutocomplete.command.summaryDescription'),
     workspaceReview: t('chat.commandAutocomplete.command.workspaceReviewDescription'),
+    handoffReview: t('chat.commandAutocomplete.command.handoffReviewDescription'),
     featurePlan: t('chat.commandAutocomplete.command.featurePlanDescription'),
     catchUp: t('chat.commandAutocomplete.command.catchUpDescription'),
     debug: t('chat.commandAutocomplete.command.debugDescription'),
@@ -105,6 +110,7 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
           hasSession,
           hasMessagesInCurrentSession,
           canStartSessionCommand,
+          canUseReviewHandoffFlow,
           descriptions: commandDescriptions,
         }));
       } catch {
@@ -113,6 +119,7 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
           hasSession,
           hasMessagesInCurrentSession,
           canStartSessionCommand,
+          canUseReviewHandoffFlow,
           descriptions: commandDescriptions,
         }));
       } finally {
@@ -121,7 +128,7 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
     };
 
     loadCommands();
-  }, [searchQuery, hasMessagesInCurrentSession, hasSession, canStartSessionCommand, commandsWithMetadata, skills, commandDescriptions]);
+  }, [searchQuery, hasMessagesInCurrentSession, hasSession, canStartSessionCommand, canUseReviewHandoffFlow, commandsWithMetadata, skills, commandDescriptions]);
 
   React.useEffect(() => {
     setSelectedIndex(0);

@@ -43,7 +43,7 @@ const baseInput = (overrides: Partial<Parameters<typeof buildSidebarSessionPrefe
   groupSearchDataByGroup: new WeakMap<SessionGroup, GroupSearchData>(),
   collapsedProjects: new Set<string>(),
   collapsedGroups: new Set<string>(),
-  expandedSessionGroups: new Set<string>(),
+  visibleSessionCountByGroup: new Map<string, number>(),
   expandedParents: new Set<string>(),
   collapsedFolderIds: new Set<string>(),
   foldersMap: {},

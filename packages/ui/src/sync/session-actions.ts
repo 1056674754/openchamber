@@ -532,6 +532,7 @@ export async function createSession(
   parentID?: string | null,
   serverId?: string | null,
   options?: { select?: boolean },
+  metadata?: Record<string, unknown>,
 ): Promise<Session | null> {
   try {
     if (!directoryOverride) {
@@ -560,6 +561,7 @@ export async function createSession(
       directory: targetDir,
       title,
       parentID: parentID ?? undefined,
+      ...(metadata ? { metadata } : {}),
     })
     const session = result.data
     if (!session) return null

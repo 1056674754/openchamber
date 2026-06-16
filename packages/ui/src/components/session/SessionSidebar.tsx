@@ -77,7 +77,7 @@ import {
   normalizePath,
 } from './sidebar/utils';
 import { buildSidebarSessionPrefetchOrder } from './sidebar/prefetchOrder';
-import { mergeSessionDirectoryMetadata, refreshGlobalSessions, resolveGlobalSessionDirectory, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
+import { mergeSessionDirectoryMetadata, refreshGlobalSessions, refreshGlobalSessionsForDirectories, resolveGlobalSessionDirectory, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useSessionProjectStore } from '@/stores/useSessionProjectStore';
 import { hydrateSessionProjectBindings } from '@/lib/sessionOwnership';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
@@ -279,7 +279,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   );
 
   const [projectRepoStatus, setProjectRepoStatus] = React.useState<Map<string, boolean | null>>(new Map());
-  const [expandedSessionGroups, setExpandedSessionGroups] = React.useState<Set<string>>(new Set());
+  const [visibleSessionCountByGroup, setVisibleSessionCountByGroup] = React.useState<Map<string, number>>(new Map());
   const [newWorktreeDialogOpen, setNewWorktreeDialogOpen] = React.useState(false);
   const [updateDialogOpen, setUpdateDialogOpen] = React.useState(false);
   const [openSidebarMenuKey, setOpenSidebarMenuKey] = React.useState<string | null>(null);
@@ -1100,21 +1100,44 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
     [collapsedFolderIds, toggleFolderCollapse, createFolder, t],
   );
 
-  const toggleGroupSessionLimit = React.useCallback((groupId: string) => {
-    setExpandedSessionGroups((prev) => {
-      const next = new Set(prev);
-      if (next.has(groupId)) {
-        next.delete(groupId);
-      } else {
-        next.add(groupId);
-      }
+  const showMoreGroupSessions = React.useCallback((groupId: string, currentVisibleCount: number) => {
+    setVisibleSessionCountByGroup((prev) => {
+      const next = new Map(prev);
+      next.set(groupId, currentVisibleCount + 7);
       return next;
+    });
+  }, []);
+
+  const resetGroupSessionLimit = React.useCallback((groupId: string) => {
+    setVisibleSessionCountByGroup((prev) => {
+      if (!prev.has(groupId)) {
+        return prev;
+      }
+      const next = new Map(prev);
+      next.delete(groupId);
+      return next;
+    });
+  }, []);
+
+  const resetProjectSessionLimits = React.useCallback((projectId: string) => {
+    setVisibleSessionCountByGroup((prev) => {
+      let changed = false;
+      const next = new Map(prev);
+      const projectGroupPrefix = `${projectId}:`;
+      for (const groupId of next.keys()) {
+        if (groupId.startsWith(projectGroupPrefix)) {
+          next.delete(groupId);
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
     });
   }, []);
 
   const collapseAllProjects = React.useCallback(() => {
     ignoreIntersectionUntil.current = Date.now() + 150;
     markProjectCollapseUserTouched();
+    setVisibleSessionCountByGroup(new Map());
     setCollapsedProjects(() => {
       const allIds = new Set(projects.map((p) => p.id));
       try {
@@ -1130,6 +1153,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
   const expandAllProjects = React.useCallback(() => {
     ignoreIntersectionUntil.current = Date.now() + 150;
     markProjectCollapseUserTouched();
+    setVisibleSessionCountByGroup(new Map());
     setCollapsedProjects(() => {
       const empty = new Set<string>();
       try {
@@ -1146,6 +1170,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
     // Ignore intersection events for a short period after toggling
     ignoreIntersectionUntil.current = Date.now() + 150;
     markProjectCollapseUserTouched();
+    resetProjectSessionLimits(projectId);
     setCollapsedProjects((prev) => {
       const next = new Set(prev);
       if (next.has(projectId)) {
@@ -1163,7 +1188,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
       }
       return next;
     });
-  }, [isVSCode, safeStorage, scheduleCollapsedProjectsPersist, markProjectCollapseUserTouched]);
+  }, [isVSCode, resetProjectSessionLimits, safeStorage, scheduleCollapsedProjectsPersist, markProjectCollapseUserTouched]);
 
   const normalizedProjects = React.useMemo(() => {
     return projects
@@ -1189,6 +1214,36 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
     () => normalizedProjects.map((project) => project.normalizedPath),
     [normalizedProjects],
   );
+
+  const projectSessionDirectories = React.useMemo(() => {
+    const directories = new Set<string>();
+    normalizedProjects.forEach((project) => {
+      if (project.normalizedPath) directories.add(project.normalizedPath);
+      const worktrees = availableWorktreesByProject.get(project.normalizedPath) ?? [];
+      worktrees.forEach((worktree) => {
+        const directory = normalizePath(worktree.path);
+        if (directory) directories.add(directory);
+      });
+    });
+    return [...directories].sort();
+  }, [availableWorktreesByProject, normalizedProjects]);
+
+  const knownProjectSessionDirectoriesRef = React.useRef<Set<string> | null>(null);
+  React.useEffect(() => {
+    const nextDirectories = new Set(projectSessionDirectories);
+    const previousDirectories = knownProjectSessionDirectoriesRef.current;
+    knownProjectSessionDirectoriesRef.current = nextDirectories;
+    if (!previousDirectories) {
+      return;
+    }
+
+    const addedDirectories = projectSessionDirectories.filter((directory) => !previousDirectories.has(directory));
+    if (addedDirectories.length === 0) {
+      return;
+    }
+
+    void refreshGlobalSessionsForDirectories(addedDirectories, syncSessionsSnapshotRef.current);
+  }, [projectSessionDirectories]);
 
   const { github } = useRuntimeAPIs();
   const githubAuthStatus = useGitHubAuthStore((state) => state.status);
@@ -1556,39 +1611,16 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
 
   const recentSessionIdsList = React.useMemo(() => [...recentSessionIds], [recentSessionIds]);
 
+  const showArchivedSessions = useSessionDisplayStore((state) => state.showArchivedSessions);
+
   const sectionsForSidebarRender = React.useMemo(() => {
-    if (!isVSCode || hasSessionSearchQuery || recentSessionIds.size === 0) {
-      return sectionsForRender;
-    }
-
-    const filterNodes = (nodes: SessionNode[]): SessionNode[] => {
-      return nodes.reduce<SessionNode[]>((acc, node) => {
-        if (recentSessionIds.has(node.session.id)) {
-          return acc;
-        }
-
-        const filteredChildren = filterNodes(node.children);
-        if (filteredChildren.length === node.children.length) {
-          acc.push(node);
-          return acc;
-        }
-
-        acc.push({
-          ...node,
-          children: filteredChildren,
-        });
-        return acc;
-      }, []);
-    };
-
-    return sectionsForRender.map((section) => ({
-      ...section,
-      groups: section.groups.map((group) => ({
-        ...group,
-        sessions: filterNodes(group.sessions),
-      })),
-    }));
-  }, [isVSCode, hasSessionSearchQuery, recentSessionIds, sectionsForRender]);
+    return showArchivedSessions
+      ? sectionsForRender
+      : sectionsForRender.map((section) => ({
+        ...section,
+        groups: section.groups.filter((group) => !group.isArchivedBucket),
+      }));
+  }, [sectionsForRender, showArchivedSessions]);
 
   const sidebarActivitySections = React.useMemo(() => {
     if (hasSessionSearchQuery) {
@@ -1610,7 +1642,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
     sectionsForSidebarRender,
     collapsedProjects,
     collapsedGroups,
-    expandedSessionGroups,
+    visibleSessionCountByGroup,
     expandedParents,
     collapsedFolderIds,
     hasSessionSearchQuery,
@@ -1630,7 +1662,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
     groupSearchDataByGroup,
     collapsedProjects,
     collapsedGroups,
-    expandedSessionGroups,
+    visibleSessionCountByGroup,
     expandedParents,
     collapsedFolderIds,
     foldersMap,
@@ -1647,7 +1679,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
     collapsedGroups,
     collapsedProjects,
     expandedParents,
-    expandedSessionGroups,
+    visibleSessionCountByGroup,
     foldersMap,
     getOrderedGroups,
     groupSearchDataByGroup,
@@ -1870,13 +1902,14 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
   );
 
   const toggleCollapsedGroup = React.useCallback((key: string) => {
+    resetGroupSessionLimit(key);
     setCollapsedGroups((prev) => {
       const next = new Set(prev);
       if (next.has(key)) next.delete(key);
       else next.add(key);
       return next;
     });
-  }, []);
+  }, [resetGroupSessionLimit]);
 
   const prVisualStateByDirectoryBranch = React.useMemo(() => {
     const result = new Map<string, PrIndicator>();
@@ -1910,7 +1943,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
         hasSessionSearchQuery={hasSessionSearchQuery}
         normalizedSessionSearchQuery={normalizedSessionSearchQuery}
         groupSearchDataByGroup={groupSearchDataByGroup}
-        expandedSessionGroups={expandedSessionGroups}
+        visibleSessionCount={visibleSessionCountByGroup.get(groupKey)}
         collapsedGroups={collapsedGroups}
         hideDirectoryControls={hideDirectoryControls}
         collapsedFolderIds={collapsedFolderIds}
@@ -1922,7 +1955,8 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
         renderSessionNode={renderSessionNode}
         currentSessionDirectory={currentSessionDirectory}
         projectRepoStatus={projectRepoStatus}
-        toggleGroupSessionLimit={toggleGroupSessionLimit}
+        showMoreGroupSessions={showMoreGroupSessions}
+        resetGroupSessionLimit={resetGroupSessionLimit}
         mobileVariant={mobileVariant}
         alwaysShowActions={alwaysShowSidebarActions}
         activeProjectId={activeProjectId}
@@ -1948,7 +1982,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
       hasSessionSearchQuery,
       normalizedSessionSearchQuery,
       groupSearchDataByGroup,
-      expandedSessionGroups,
+      visibleSessionCountByGroup,
       collapsedGroups,
       hideDirectoryControls,
       collapsedFolderIds,
@@ -1959,7 +1993,8 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
       renderSessionNode,
       currentSessionDirectory,
       projectRepoStatus,
-      toggleGroupSessionLimit,
+      showMoreGroupSessions,
+      resetGroupSessionLimit,
       mobileVariant,
       alwaysShowSidebarActions,
       activeProjectId,

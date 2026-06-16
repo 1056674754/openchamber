@@ -10,6 +10,7 @@ export type CommandAutocompleteDescriptions = {
   readonly compact: string;
   readonly summary: string;
   readonly workspaceReview: string;
+  readonly handoffReview: string;
   readonly featurePlan: string;
   readonly catchUp: string;
   readonly debug: string;
@@ -40,6 +41,7 @@ type CommandBuildOptions = {
   readonly hasSession: boolean;
   readonly hasMessagesInCurrentSession: boolean;
   readonly canStartSessionCommand: boolean;
+  readonly canUseReviewHandoffFlow: boolean;
   readonly descriptions: CommandAutocompleteDescriptions;
 };
 
@@ -47,6 +49,7 @@ type BuiltInCommandOptions = {
   readonly hasSession: boolean;
   readonly hasMessagesInCurrentSession: boolean;
   readonly canStartSessionCommand: boolean;
+  readonly canUseReviewHandoffFlow: boolean;
   readonly descriptions: CommandAutocompleteDescriptions;
 };
 
@@ -54,6 +57,7 @@ const createBuiltInCommands = ({
   hasSession,
   hasMessagesInCurrentSession,
   canStartSessionCommand,
+  canUseReviewHandoffFlow,
   descriptions,
 }: BuiltInCommandOptions): CommandInfo[] => [
   ...(hasSession && !hasMessagesInCurrentSession
@@ -75,6 +79,10 @@ const createBuiltInCommands = ({
   ),
   ...(canStartSessionCommand
     ? [{ id: 'openchamber:workspace-review', name: 'workspace-review', source: 'openchamber' as const, description: descriptions.workspaceReview, isOpenChamber: true }]
+    : []
+  ),
+  ...(canUseReviewHandoffFlow
+    ? [{ id: 'openchamber:handoff-review', name: 'handoff-review', source: 'openchamber' as const, description: descriptions.handoffReview, isOpenChamber: true }]
     : []
   ),
   ...(canStartSessionCommand
@@ -129,6 +137,7 @@ export const buildCommandAutocompleteEntries = ({
   hasSession,
   hasMessagesInCurrentSession,
   canStartSessionCommand,
+  canUseReviewHandoffFlow,
   descriptions,
 }: CommandBuildOptions): CommandInfo[] => {
   const skillNames = new Set(skills.map((skill) => skill.name));
@@ -152,7 +161,7 @@ export const buildCommandAutocompleteEntries = ({
     scope: skill.scope,
   }));
   const allCommands = [
-    ...createBuiltInCommands({ hasSession, hasMessagesInCurrentSession, canStartSessionCommand, descriptions }),
+    ...createBuiltInCommands({ hasSession, hasMessagesInCurrentSession, canStartSessionCommand, canUseReviewHandoffFlow, descriptions }),
     ...customCommands,
     ...skillCommands,
   ];
@@ -165,9 +174,10 @@ export const buildFallbackCommandAutocompleteEntries = ({
   hasSession,
   hasMessagesInCurrentSession,
   canStartSessionCommand,
+  canUseReviewHandoffFlow,
   descriptions,
 }: Omit<CommandBuildOptions, 'commandsWithMetadata' | 'skills'>): CommandInfo[] => filterCommandEntries(
-  createBuiltInCommands({ hasSession, hasMessagesInCurrentSession, canStartSessionCommand, descriptions }),
+  createBuiltInCommands({ hasSession, hasMessagesInCurrentSession, canStartSessionCommand, canUseReviewHandoffFlow, descriptions }),
   searchQuery,
   !hasMessagesInCurrentSession
 );

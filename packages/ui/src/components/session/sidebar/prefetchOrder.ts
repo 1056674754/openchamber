@@ -24,7 +24,7 @@ type BuildSidebarSessionPrefetchOrderInput = {
   groupSearchDataByGroup: WeakMap<SessionGroup, GroupSearchData>;
   collapsedProjects: Set<string>;
   collapsedGroups: Set<string>;
-  expandedSessionGroups: Set<string>;
+  visibleSessionCountByGroup: Map<string, number>;
   expandedParents: Set<string>;
   collapsedFolderIds: Set<string>;
   foldersMap: SessionFoldersMap;
@@ -238,9 +238,7 @@ const collectGroupSessionIds = (
     ? ungroupedSessions
     : input.hasSessionSearchQuery
       ? ungroupedSessions
-      : input.expandedSessionGroups.has(groupKey)
-        ? ungroupedSessions
-        : ungroupedSessions.slice(0, maxVisible);
+      : ungroupedSessions.slice(0, Math.max(maxVisible, input.visibleSessionCountByGroup.get(groupKey) ?? maxVisible));
 
   const allPinned = new Set([...input.pinnedSessionIds, ...projectPinnedSessionIds]);
   const pinnedNodes: SessionNode[] = [];

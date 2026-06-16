@@ -17,6 +17,7 @@ import { useInlineCommentDraftStore, type InlineCommentDraft } from '@/stores/us
 import { useSnippetsStore } from '@/stores/useSnippetsStore';
 import { appendInlineComments } from '@/lib/messages/inlineComments';
 import { renderMagicPrompt, type MagicPromptId } from '@/lib/magicPrompts';
+import { startReviewFlow } from '@/lib/reviewFlow';
 import type { I18nKey } from '@/lib/i18n';
 import { AttachedFilesList, AttachedVSCodeFileChips, ActiveEditorFileSuggestion } from './FileAttachment';
 import { QueuedMessageChips } from './QueuedMessageChips';
@@ -1330,10 +1331,11 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             'workspace-review',
             ...Object.keys(GUIDED_SESSION_COMMANDS),
         ]);
+        if (!isMobile && !isVSCodeRuntime()) names.add('handoff-review');
         for (const command of availableCommands) names.add(command.name.toLowerCase());
         for (const skill of availableSkills) names.add(skill.name.toLowerCase());
         return names;
-    }, [availableCommands, availableSkills]);
+    }, [availableCommands, availableSkills, isMobile]);
 
     const composerCommandRanges = React.useMemo<HighlightRange[]>(() => {
         if (!message || !message.includes('/') || inputMode === 'shell' || knownSlashNames.size === 0) {
@@ -2222,6 +2224,27 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                     scrollToBottom?.();
                 } catch (error) {
                     toast.error(error instanceof Error ? error.message : t('chat.chatInput.toast.summaryFailed'));
+                }
+                return;
+            }
+            else if (commandName === 'handoff-review' && currentSessionId && !isMobile && !isVSCodeRuntime()) {
+                try {
+                    const directory = useSessionUIStore.getState().getDirectoryForSession(currentSessionId) || currentDirectory || '';
+                    if (!directory) {
+                        throw new Error('Session directory is unavailable');
+                    }
+                    await startReviewFlow({
+                        originalSessionID: currentSessionId,
+                        directory,
+                        providerID: currentProviderId,
+                        modelID: currentModelId,
+                        agent: currentAgentName,
+                        variant: currentVariant,
+                        agentMentionName,
+                    });
+                    scrollToBottom?.();
+                } catch (error) {
+                    console.error('[review-flow] failed to start review flow', error);
                 }
                 return;
             }

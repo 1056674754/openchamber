@@ -345,6 +345,7 @@ export type SessionUIState = {
     parentID?: string | null,
     serverIdOverride?: string | null,
     options?: { select?: boolean },
+    metadata?: Record<string, unknown>,
   ) => Promise<Session | null>
   deleteSession: (id: string, options?: Record<string, unknown>) => Promise<boolean>
   deleteSessions: (ids: string[], options?: Record<string, unknown>) => Promise<{ deletedIds: string[]; failedIds: string[] }>
@@ -1363,7 +1364,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
   // ---------------------------------------------------------------------------
   // createSession
   // ---------------------------------------------------------------------------
-  createSession: async (title, directoryOverride, parentID, serverIdOverride, options) => {
+  createSession: async (title, directoryOverride, parentID, serverIdOverride, options, metadata) => {
     const draft = get().newSessionDraft
     const targetFolderId = draft.targetFolderId
 
@@ -1393,7 +1394,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         : null
       const routingProject = activeDirectoryProject ?? selectedDirectoryProject ?? directoryProject ?? selectedProject ?? null
       const serverId = normalizeProjectServerId(serverIdOverride ?? routingProject?.serverId)
-      const session = await createSessionAction(title, directoryOverride, parentID ?? null, serverId, options)
+      const session = await createSessionAction(title, directoryOverride, parentID ?? null, serverId, options, metadata)
       if (!session) return null
 
       if (targetFolderId) {

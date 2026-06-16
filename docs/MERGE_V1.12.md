@@ -55,6 +55,29 @@
 | **sync-context.tsx** | 增加 `applySessionEventToGlobalSessions` 逻辑，导致远程实例侧边栏加载异常 —> 已还原 |
 | **session-list-bootstrap.ts** | 改用 `listGlobalSessionPages` API，与其他未移植的改动耦合 —> 已还原 |
 
+### v1.12.1 SessionSidebar Bugfix 补回 (2026-06-17 01:29 ~ 01:46)
+
+**调查背景**：当初还原 v1.12.1 SessionSidebar 的理由记为"依赖 `mobileSessionPanelOpen` 等 mobile 字段"。2026-06-17 01:05 recon 确认这是**误判**——`SessionSidebar.tsx` 在 v1.12.1 不引用任何 mobile 字段，这些字段仅被 `MobileSessionsSheet.tsx` 和 `MobileSessionStatusBar.tsx` 消费。对上游 v1.11.7 → v1.12.1 范围内触及 `SessionSidebar.tsx` 的 6 个 commit 逐一 diff 对比 fork 当前代码：
+
+| Commit | 功能 | Fork 状态 | 处理 |
+|---|---|---|---|
+| `7b3c59dc` | 增量刷新新目录 sessions | 🟡 store 层有 `refreshGlobalSessionsForDirectories` 但 SessionSidebar 未接入 | ✅ 已补：加 `projectSessionDirectories` memo + `knownProjectSessionDirectoriesRef` effect |
+| `fc1db82d` | worktree session 分组修复 | ⚪ 不适用：fork 用 `openNewSessionDraft` 而非 `setCurrentSession`，worktree 流程不同 | 跳过 |
+| `3715fa20` | 删除 recent session `filterNodes` 过滤 | ❌ 缺失：fork 仍有 `filterNodes`，recent session 被从 project group 隐藏 | ✅ 已补：删除 `filterNodes`，session 在 project group 正常显示 |
+| `c8949e1f` | session 分组修复（`mergeSessionDirectoryMetadata`） | ✅ fork 已有等效实现 | 跳过 |
+| `ddc7d0e1` | 归档开关 + 渐进式 show more | ❌ 缺失：fork 用旧 `expandedSessionGroups: Set<string>` 二态模式 | ✅ 已补：改为 `visibleSessionCountByGroup: Map<string, number>` 渐进式（每次 +7），加 `showArchivedSessions` toggle |
+| `a03b1e42` | VS Code session UI（`!isVSCode` bug 修复） | ❌ 缺失：fork 有 `!isVSCode` 条件反转 bug | ✅ 随 `3715fa20` 删除 `filterNodes` 一并消除 |
+
+**改动文件**（13 files）：
+- `packages/ui/src/stores/useSessionDisplayStore.ts` — 加 `showArchivedSessions` + toggle
+- `packages/ui/src/components/session/SessionSidebar.tsx` — state 改名 + callback 重写 + `sectionsForSidebarRender` 简化 + 增量刷新 memo/effect
+- `packages/ui/src/components/session/sidebar/SessionGroupSection.tsx` — props 接口改 + `visibleSessions`/`canShowLess` 逻辑 + show more/fewer 按钮
+- `packages/ui/src/components/session/sidebar/SidebarHeader.tsx` — 加 showArchivedSessions toggle
+- `packages/ui/src/components/session/sidebar/prefetchOrder.ts` + test — 类型改 `expandedSessionGroups` → `visibleSessionCountByGroup`
+- `packages/ui/src/lib/i18n/messages/*.ts` × 8 — 加 `showArchived` + `showMore` key
+
+**验证**：`bun run lint` ✅ 0 errors / `bun run type-check` ✅ 我的改动相关 0 errors（残余 5 个 pre-existing errors 来自别的 agent 在做的 v1.13.0 `/handoff-review` i18n key 缺失，与本次改动无关）
+
 ---
 
 ## v1.12.0 — 未移植 / 还原 / 延后
@@ -293,8 +316,9 @@
 | VSCode | Archive all sessions action | 🔴 未实现。未看到 extension action/command | VS Code 批次处理 |
 | VSCode | Multi-root workspace support + folder switching | 🔴 未实现。VS Code 多数路径仍取 `workspaceFolders[0]` | 高风险 VS Code 架构改动；需避免 web/desktop 假设污染 extension |
 
-### Tier 1 移植批次 (2026-06-15)
+### Tier 1 移植批次
 
+**时间**: 2026-06-15 03:53 (CST) | **Fork commit**: `f873cfd0`
 **范围**: v1.12.4 低风险高价值功能，手工逐 commit 移植
 **验证**: `bun run type-check` ✅ 0 errors / `bun run lint` ✅ 0 errors
 
@@ -312,8 +336,9 @@
 | 10 | Agent prompt/permission 持久化 | `1c6e8ef6` + `4b6cecf3` | 9 | cache invalidation；signature 扩展；reload mode 修正；null prompt 清除；permission source/merge 层级修正；`AgentsPage` permission config 标准化 |
 | 11 | Chat folder reload 持久化 | `50d378f0` | 2 | `useSessionFolderCleanup` 增加 `hasLoadedGlobalSessions` guard |
 
-### Tier 2 移植批次 (2026-06-15)
+### Tier 2 移植批次
 
+**时间**: 2026-06-15 04:31 (CST) | **Fork commit**: `86b69ddf`
 **范围**: v1.12.4 中等工程量功能
 **验证**: `bun run type-check` ✅ 0 errors / `bun run lint` ✅ 0 errors
 
@@ -398,7 +423,8 @@ Batch 3.6 (按需)
 | Electron | ✅ 正常，不会多开窗口 |
 | 聊天区域 | ✅ 正常 |
 | 远程实例侧边栏 | ✅ 已修复 |
-| 上游版本差距 | v1.12.4 Tier 1+2 (14 features) 已落地；Tier 3 + v1.13.0 待移植 |
+| 上游版本差距 | v1.12.4 Tier 1+2 (14 features) + v1.13.0 Tier 1 (7 features) 已落地；v1.13.0 Tier 2/3 待移植 |
+| 并发 agent 提交 | `3832c124` (2026-06-17 00:24): session markers + settings visibility policy (showOn: both→default) |
 
 ---
 
@@ -440,6 +466,58 @@ Batch 3.6 (按需)
 | 6 | Git/Diff: review flow dialog | `206ec704` | **新** `ReviewFlowDialog.tsx` (213L) | 🟢 低 | 独立新组件 |
 | 7 | GitHub: gh CLI credentials | `ce377e41` | **新** `gh-cli-credential.js` + `GitHubSettings.tsx` + `github/routes.js` | 🟡 中低 | server 新文件 + UI 改动 |
 | 8 | Chat: clickable file paths in code blocks | `45bedeac` | `MarkdownRendererImpl.tsx` | 🟡 中低 | fork 已有 inline link 解析，增量改动 |
+
+### v1.13.0 Tier 1 移植批次
+
+**时间**: 2026-06-17 01:07 (CST) | **Fork commit**: `8c06e59f`
+**范围**: v1.13.0 低风险功能
+**验证**: `bun run type-check` ✅ 0 errors / `bun run lint` ✅ 0 errors
+
+| # | 功能 | 上游 commit | 文件数 | 说明 |
+|---|---|---|---|---|
+| 1 | Desktop dev tools from Help menu | `22f7b6ac` (部分) | 1 | `openDevToolsForMenuTarget()` + Help 菜单 `Cmd+Alt+I` |
+| ~~2~~ | ~~Mobile empty Changes close~~ | — | — | **跳过**: fork 无 `MobileChangesSurface.tsx` |
+| 3 | Session gutter highlight | `b74600c3` | 1 | `-ml-3` + `bg-interactive-selection` + `bg-primary/10` for active |
+| 4 | Question textarea stabilize | `6b96f42c` | 3 | 新 `questionTextareaSizing.ts`；ref + `customTextFilled` 布尔值，打字不重渲染整个 card；保留 fork draft persistence |
+| 5 | MCP import snippets fix | `8e1d75b0` | 2 | `{ "mcp": { ... } }` wrapper detection + test |
+| 6 | Review flow dialog + 基础设施 | `206ec704` + `95aab547` (部分) | 15+ | **见下方详细说明** |
+| 7 | GitHub gh CLI credentials | `ce377e41` + `d733896c` | 10 | 新 `gh-cli-credential.js` server module + UI toggle + octokit fallback |
+| 8 | Clickable code block file paths | `45bedeac` + `d57ff40b` | 1 | Range API tokenization，`data-openchamber-block-path` anchor |
+
+#### T1-6 Review Flow 详细说明
+
+上游的 "session review handoff flow" 是 **三个 commit 的链条**：
+
+```
+95aab547  feat: add session review handoff flow   ← 地基 (1381行, 19文件)
+669ced38  refinements                              ← 微调
+206ec704  Add diff review flow dialog              ← 对话框 (最上层)
+```
+
+Fork 从未 port 过 `95aab547`。T1-6 agent 发现后，将 `95aab547` 的核心基础设施与 `206ec704` 的对话框一并 port。
+
+**已 port 的 `95aab547` 部分** (T1-6 commit `8c06e59f`)：
+
+| 文件 | 说明 |
+|---|---|
+| `sessionReviewMetadata.ts` (82L, 新建) | review session 元数据类型 + helper |
+| `reviewFlow.ts` (291L, 新建) | 编排逻辑：create/reuse review session、发 handoff、链接 session pair。适配了 fork 的 `withDirectory` API |
+| `opencode/client.ts` (+10) | `createSession`/`updateSession` 支持 `metadata` 参数 |
+| `session-actions.ts` (+19) | `patchSessionMetadata` — read-modify-write 元数据 |
+| `magicPrompts.ts` (+87) | `reviewHandoff`、`reviewSession`、`reviewSessionWithoutHandoff`、`reviewFeedbackToImplementer`、`implementationResponseToReviewer` |
+| `ReviewFlowDialog.tsx` (213L, 新建) | 对话框本身 (`206ec704`) |
+| `DiffView.tsx` (+64) | 审查按钮 + 对话框触发 |
+
+**正在补 port 的 `95aab547` 剩余部分** (2026-06-17 ~01:30, agent `bg_0b6c8f20`)：
+
+| 文件 | 改动 | 说明 |
+|---|---|---|
+| `ChatInput.tsx` | +25 | `/handoff-review` 命令入口 + 调用 `startReviewFlow` |
+| `CommandAutocomplete.tsx` | +14 | 补全列表显示 `handoff-review` 命令 |
+| `MessageBody.tsx` | +106 | 审查 session 中显示 "发送反馈"/"发送实现响应" 按钮；隐藏无关 action (saveAsPlan, multi-run, fork) |
+| `useGlobalSessionsStore.ts` | +1 | session signature 包含 `metadata`，确保元数据变化触发去重/更新 |
+| `session-ui-store.ts` | +6 | `createSession` 接受 `metadata` 参数 |
+| 8 locale files | +3 each | `handoffReviewDescription`、`sendReviewFeedback`、`sendImplementationResponse` |
 
 ### Tier 2 — 中等风险 / 需逐文件合并
 
