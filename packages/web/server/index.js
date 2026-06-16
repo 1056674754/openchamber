@@ -1114,7 +1114,6 @@ const bootstrapOpenCodeAtStartup = async (...args) => {
     if (!openCodeLifecycleState.openCodePort) return;
     const url = `http://127.0.0.1:${openCodeLifecycleState.openCodePort}`;
     const result = await checkPluginLoaded(url, getOpenCodeAuthHeaders());
-    const result = await checkPluginLoaded(url, getOpenCodeAuthHeaders());
     if (!result.loaded) {
       console.warn('[openchamber] plugin not loaded:', result.reason);
     } else {

@@ -23,6 +23,7 @@ import { retry } from "./retry"
 import { updateStreamingState } from "./streaming"
 import { setActionRefs, resolveBaseUrl, resolveSdkForDirectory } from "./session-actions"
 import { setSyncRefs } from "./sync-refs"
+import { deleteShield } from "./delete-shield"
 import { stripMessageDiffSnapshots, stripSessionDiffSnapshots } from "./sanitize"
 import { syncDebug } from "./debug"
 import { getReconnectCandidateSessionIds } from "./reconnect-recovery"
@@ -42,6 +43,7 @@ import { hasTerminalMessageSignal, type TerminalMessageSignalInfo } from "@/lib/
 import { dispatchOpenchamberEventEnvelope } from "@/lib/openchamberEvents"
 import { toast } from "@/components/ui"
 import { appendNotification, applyUnreadEventPayload, fetchAndHydrateUnreadState } from "./notification-store"
+import { fetchAndHydrateMarkersState } from "@/stores/useSessionMarkersStore"
 import { dispatchRemoteServerEvent, subscribeRemoteServerEvents } from "./remote-event-bus"
 import type { State } from "./types"
 import type { PermissionRequest } from "@/types/permission"
@@ -1413,6 +1415,9 @@ function handleEvent(
     // but only if not during recent boot
     if (payload.type === "server.connected" || payload.type === "global.disposed") {
       fetchAndHydrateUnreadState()
+      fetchAndHydrateMarkersState().catch((err) => {
+        console.warn("[markers] failed to hydrate markers state", err)
+      })
       const now = Date.now()
       const shouldRebootstrap =
         !recent
@@ -1654,6 +1659,7 @@ function handleEvent(
     onSetSessionTodo: (sessionID, todos) => {
       useTodosPersistStore.getState().setSessionTodos(sessionID, todos)
     },
+    isSessionDeleting: (sessionID) => deleteShield.has(sessionID),
   })
   const reducerChanged = typeof reducerResult === "boolean" ? reducerResult : reducerResult.changed
   const materializationResult = typeof reducerResult === "boolean" ? undefined : reducerResult.materialization

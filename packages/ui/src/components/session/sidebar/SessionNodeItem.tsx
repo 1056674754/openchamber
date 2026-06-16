@@ -2,6 +2,7 @@ import React from 'react';
 import type { Session } from '@opencode-ai/sdk/v2';
 import {
   DropdownMenu,
+  DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
@@ -44,10 +45,43 @@ import { parseMultiRunSessionTitle } from '@/lib/multirun/title';
 import { MultiRunFusionDialog } from '@/components/multirun/MultiRunFusionDialog';
 import { FusionIcon } from '@/components/icons/FusionIcon';
 import { Icon } from "@/components/icon/Icon";
+import type { IconName } from "@/components/icon/icons";
+import type {
+  SessionStatusMarker,
+  SessionTodoMarker,
+} from '@/stores/types/sessionMarkers';
+import {
+  MAX_TODO_MARKERS,
+  STATUS_MARKER_VALUES,
+  TODO_MARKER_VALUES,
+  UNTESTED_ICON,
+} from '@/stores/types/sessionMarkers';
+// Import store — if type-check fails because this file doesn't exist yet, that's expected (parallel agent)
+import { useSessionMarker, useSessionMarkersStore } from '@/stores/useSessionMarkersStore';
 
 type Folder = { id: string; name: string; sessionIds: string[] };
 
 const GLOBAL_PINNED_CHILD_INDENT = 20;
+
+// Icon maps for session markers — referenced in both title prefix and menu items
+const STATUS_ICON_MAP: Record<SessionStatusMarker, IconName> = {
+  draft: 'draft',
+  'in-progress': 'tools',
+  done: 'checkbox-circle',
+  blocked: 'forbid',
+  archived: 'archive',
+};
+
+const TODO_ICON_MAP: Record<SessionTodoMarker, IconName> = {
+  uncommitted: 'git-commit',
+  untested: UNTESTED_ICON as IconName,
+  'needs-review': 'eye',
+};
+
+export const IMPORTANT_ICON = 'fire' as IconName;
+
+// Icon references for sprite generator (used via maps above, scanner needs literals):
+// <Icon name="fire" /> <Icon name="draft" /> <Icon name="forbid" /> <Icon name="tools" /> <Icon name="list-check" /> <Icon name="eraser" />
 
 type SecondaryMeta = {
   projectLabel?: string | null;
@@ -391,6 +425,33 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
 
   const projectsStore = useProjectsStore((state) => state.projects);
   const { currentTheme } = useThemeSystem();
+
+  // Session markers — leaf selector, returns stable reference per session
+  const markers = useSessionMarker(session.id);
+  const status = markers?.status;
+  const todos = markers?.todos ?? [];
+  const important = markers?.important;
+
+  // Memoized marker colors to avoid recreating per render
+  const markerColors = React.useMemo(() => ({
+    status: {
+      draft: currentTheme.colors.surface.mutedForeground,
+      'in-progress': currentTheme.colors.status.info,
+      done: currentTheme.colors.status.success,
+      blocked: currentTheme.colors.status.error,
+      archived: currentTheme.colors.surface.mutedForeground,
+    } as Record<SessionStatusMarker, string>,
+    todoUncommitted: currentTheme.colors.status.warning,
+    todoUntested: currentTheme.colors.status.info,
+    todoNeedsReview: currentTheme.colors.status.warning,
+    important: currentTheme.colors.status.error,
+  }), [
+    currentTheme.colors.surface.mutedForeground,
+    currentTheme.colors.status.warning,
+    currentTheme.colors.status.info,
+    currentTheme.colors.status.success,
+    currentTheme.colors.status.error,
+  ]);
   const remoteProject = React.useMemo(() => {
     const indexedServerId = serverRegistry.getServerForSession(session.id);
     return resolveRemoteIndicatorProject({
@@ -687,7 +748,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
 
   const renderUnreadDot = () => (
     <span
-      className="h-1.5 w-1.5 rounded-full bg-[var(--status-info)]"
+      className="block h-1.5 w-1.5 rounded-full bg-[var(--status-info)]"
       aria-label={t('sessions.sidebar.session.status.unread')}
       title={t('sessions.sidebar.session.status.unread')}
     />
@@ -700,7 +761,9 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
   const renderAlternating = () => (
     <span className="relative inline-flex h-4 w-4 items-center justify-center">
       <span className="animate-slot-fade-in">{renderSpinner()}</span>
-      <span className="absolute animate-slot-fade-out">{renderUnreadDot()}</span>
+      <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 animate-slot-fade-out">
+        {renderUnreadDot()}
+      </span>
     </span>
   );
 
@@ -772,6 +835,29 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
       </span>
     );
   };
+
+  const renderBlockingRequestBadges = () => {
+    if (pendingPermissionCount === 0 && pendingQuestionCount === 0) return null;
+
+    return (
+      <span className="mr-1 inline-flex shrink-0 items-center gap-1">
+        {pendingPermissionCount > 0 ? (
+          <span className="oc-blocking-request-badge inline-flex items-center gap-1 rounded px-1 py-0.5 text-[0.7rem] text-destructive" title={t('sessions.sidebar.session.status.permissionRequired')} aria-label={t('sessions.sidebar.session.status.permissionRequired')}>
+            <Icon name="shield" className="h-3 w-3" />
+            <span className="leading-none">{pendingPermissionCount}</span>
+          </span>
+        ) : null}
+        {pendingQuestionCount > 0 ? (
+          <span className="oc-blocking-request-badge inline-flex items-center gap-1 rounded px-1 py-0.5 text-[0.7rem] text-status-info" title={t('sessions.sidebar.session.status.questionPending')} aria-label={t('sessions.sidebar.session.status.questionPending')}>
+            <Icon name="question" className="h-3 w-3" />
+            <span className="leading-none">{pendingQuestionCount}</span>
+          </span>
+        ) : null}
+      </span>
+    );
+  };
+
+  const blockingRequestBadges = renderBlockingRequestBadges();
 
   const slot1Content = renderLeadingSlot(leadingState.slot1);
   const slot2Content = renderLeadingSlot(leadingState.slot2);
@@ -1032,6 +1118,98 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
         </DropdownMenuItem>
       ) : null}
 
+      {/* Marker management block */}
+      <DropdownMenuSeparator />
+
+      {/* Set Status submenu — toggle behavior (click active = clear), no separate "Clear" item */}
+      <DropdownMenuSub>
+        <DropdownMenuSubTrigger>
+          <Icon name="pushpin" className="h-4 w-4" />
+          {t('sessions.sidebar.session.menu.setStatus')}
+        </DropdownMenuSubTrigger>
+        <DropdownMenuSubContent className="min-w-[180px]">
+          {STATUS_MARKER_VALUES.map((s) => (
+            <DropdownMenuItem
+              key={s}
+              onClick={() => {
+                const nextStatus = status === s ? null : s;
+                useSessionMarkersStore.getState().setMarker(session.id, { status: nextStatus });
+              }}
+            >
+              <Icon
+                name={STATUS_ICON_MAP[s]}
+                className="h-4 w-4"
+                style={{ color: markerColors.status[s] }}
+              />
+              {t(`sessions.sidebar.session.menu.status.${s === 'in-progress' ? 'inProgress' : s}`)}
+              <span className="ml-auto flex h-3.5 w-3.5 items-center justify-center">
+                {status === s ? <Icon name="check" className="h-3 w-3" /> : null}
+              </span>
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuSubContent>
+      </DropdownMenuSub>
+
+      {/* Set Todo Markers submenu */}
+      <DropdownMenuSub>
+        <DropdownMenuSubTrigger>
+          <Icon name="list-check" className="h-4 w-4" />
+          {t('sessions.sidebar.session.menu.setTodos')}
+        </DropdownMenuSubTrigger>
+        <DropdownMenuSubContent className="min-w-[180px]">
+          {TODO_MARKER_VALUES.map((todoKey) => {
+            const isChecked = todos.includes(todoKey);
+            const iconKey = TODO_ICON_MAP[todoKey];
+            const labelKey = todoKey === 'needs-review' ? 'needsReview' : todoKey;
+            const todoColor = todoKey === 'uncommitted' ? markerColors.todoUncommitted
+              : todoKey === 'untested' ? markerColors.todoUntested
+              : markerColors.todoNeedsReview;
+            return (
+              <DropdownMenuCheckboxItem
+                key={todoKey}
+                checked={isChecked}
+                onCheckedChange={() => {
+                  const store = useSessionMarkersStore.getState();
+                  if (isChecked) {
+                    store.setMarker(session.id, { todos: todos.filter((t: SessionTodoMarker) => t !== todoKey) });
+                  } else {
+                    if (todos.length >= MAX_TODO_MARKERS) {
+                      store.setMarker(session.id, { todos: [...todos.slice(1), todoKey] });
+                    } else {
+                      store.setMarker(session.id, { todos: [...todos, todoKey] });
+                    }
+                  }
+                }}
+              >
+                <Icon name={iconKey} className="h-4 w-4" style={{ color: todoColor }} />
+                {t(`sessions.sidebar.session.menu.todos.${labelKey}`)}
+              </DropdownMenuCheckboxItem>
+            );
+          })}
+        </DropdownMenuSubContent>
+      </DropdownMenuSub>
+
+      {/* Important toggle */}
+      <DropdownMenuCheckboxItem
+        checked={important ?? false}
+        onCheckedChange={(value) => {
+          useSessionMarkersStore.getState().setMarker(session.id, { important: value || null });
+        }}
+      >
+        <Icon name={IMPORTANT_ICON} className="h-4 w-4" style={{ color: markerColors.important }} />
+        {t('sessions.sidebar.session.menu.priority.important')}
+      </DropdownMenuCheckboxItem>
+
+      {/* Clear All Markers */}
+      <DropdownMenuSeparator />
+      <DropdownMenuItem
+        onClick={() => { useSessionMarkersStore.getState().clearMarker(session.id); }}
+        className="text-destructive focus:text-destructive"
+      >
+        <Icon name="eraser" className="h-4 w-4" />
+        {t('sessions.sidebar.session.menu.clearAllMarkers')}
+      </DropdownMenuItem>
+
       {!archivedBucket ? (
         <>
           <DropdownMenuSeparator />
@@ -1097,6 +1275,21 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
                     )}
                     >
                     <div className={cn('flex w-full items-center min-w-0 flex-1 overflow-hidden', isGlobalPinnedContext ? 'gap-1.5' : 'gap-0.5')}>
+                      {(status || todos.length > 0 || important) && (
+                        <span className="mr-1 flex shrink-0 items-center gap-0.5" aria-hidden="true">
+                          {status && <Icon name={STATUS_ICON_MAP[status]} className="h-3.5 w-3.5" style={{ color: markerColors.status[status], opacity: 0.7 }} />}
+                          {todos.map((t) => (
+                            <Icon key={t} name={TODO_ICON_MAP[t]} className="h-3.5 w-3.5" style={{
+                              color: t === 'uncommitted' ? markerColors.todoUncommitted
+                                : t === 'untested' ? markerColors.todoUntested
+                                : markerColors.todoNeedsReview,
+                              opacity: 0.7,
+                            }} />
+                          ))}
+                          {important && <Icon name={IMPORTANT_ICON} className="h-3.5 w-3.5" style={{ color: markerColors.important, opacity: 0.7 }} />}
+                        </span>
+                      )}
+                      {blockingRequestBadges}
                       <div
                         className={cn('block min-w-0 flex-1 truncate typography-ui-label font-normal', isDeleting ? 'text-status-error deleting-wave-text' : isActive ? 'text-primary' : 'text-foreground')}
                       >
@@ -1115,18 +1308,6 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
                             {sessionCompactUpdatedLabel}
                           </span>
                         </div>
-                      ) : null}
-                      {pendingPermissionCount > 0 ? (
-                        <span className="inline-flex items-center gap-1 rounded bg-destructive/10 px-1 py-0.5 text-[0.7rem] text-destructive flex-shrink-0" title={t('sessions.sidebar.session.status.permissionRequired')} aria-label={t('sessions.sidebar.session.status.permissionRequired')}>
-                          <Icon name="shield" className="h-3 w-3"  />
-                          <span className="leading-none">{pendingPermissionCount}</span>
-                        </span>
-                      ) : null}
-                      {pendingQuestionCount > 0 ? (
-                        <span className="inline-flex items-center gap-1 rounded bg-status-info/10 px-1 py-0.5 text-[0.7rem] text-status-info flex-shrink-0" title={t('sessions.sidebar.session.status.questionPending')} aria-label={t('sessions.sidebar.session.status.questionPending')}>
-                          <Icon name="question" className="h-3 w-3" />
-                          <span className="leading-none">{pendingQuestionCount}</span>
-                        </span>
                       ) : null}
                     </div>
                   </button>
@@ -1172,24 +1353,27 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
                 )}
               >
                   <div className={cn('flex w-full items-center min-w-0 flex-1 overflow-hidden', isGlobalPinnedContext ? 'gap-1.5' : 'gap-0.5')}>
+                  {(status || todos.length > 0 || important) && (
+                    <span className="mr-1 flex shrink-0 items-center gap-0.5" aria-hidden="true">
+                      {status && <Icon name={STATUS_ICON_MAP[status]} className="h-3.5 w-3.5" style={{ color: markerColors.status[status], opacity: 0.7 }} />}
+                      {todos.map((t) => (
+                        <Icon key={t} name={TODO_ICON_MAP[t]} className="h-3.5 w-3.5" style={{
+                          color: t === 'uncommitted' ? markerColors.todoUncommitted
+                            : t === 'untested' ? markerColors.todoUntested
+                            : markerColors.todoNeedsReview,
+                          opacity: 0.7,
+                        }} />
+                      ))}
+                      {important && <Icon name={IMPORTANT_ICON} className="h-3.5 w-3.5" style={{ color: markerColors.important, opacity: 0.7 }} />}
+                    </span>
+                  )}
+                  {blockingRequestBadges}
                   <div
                     className={cn('block min-w-0 flex-1 truncate typography-ui-label font-normal', isDeleting ? 'text-status-error deleting-wave-text' : isActive ? 'text-primary' : 'text-foreground')}
                   >
                     {renderHighlightedText(sessionTitle, normalizedSessionSearchQuery)}
                   </div>
                   {remoteIndicator}
-                  {pendingPermissionCount > 0 ? (
-                    <span className="inline-flex items-center gap-1 rounded bg-destructive/10 px-1 py-0.5 text-[0.7rem] text-destructive flex-shrink-0" title={t('sessions.sidebar.session.status.permissionRequired')} aria-label={t('sessions.sidebar.session.status.permissionRequired')}>
-                      <Icon name="shield" className="h-3 w-3"  />
-                      <span className="leading-none">{pendingPermissionCount}</span>
-                    </span>
-                  ) : null}
-                  {pendingQuestionCount > 0 ? (
-                    <span className="inline-flex items-center gap-1 rounded bg-status-info/10 px-1 py-0.5 text-[0.7rem] text-status-info flex-shrink-0" title={t('sessions.sidebar.session.status.questionPending')} aria-label={t('sessions.sidebar.session.status.questionPending')}>
-                      <Icon name="question" className="h-3 w-3" />
-                      <span className="leading-none">{pendingQuestionCount}</span>
-                    </span>
-                  ) : null}
                 </div>
 
                 {!isMinimalMode ? (

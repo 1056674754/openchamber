@@ -14,6 +14,7 @@ import type {
 } from "@opencode-ai/sdk/v2";
 import type { PermissionRequest } from "@/types/permission";
 import type { QuestionRequest } from "@/types/question";
+import type { SessionMarkers, SessionMarkersPatch } from "@/stores/types/sessionMarkers";
 import { waitForWorktreeBootstrap } from "@/lib/worktrees/worktreeBootstrap";
 import { resolveSdkForDirectory, resolveBaseUrlForSession } from "@/sync/session-routing";
 import { resolveApiUrl } from "@/lib/api/serverUrl";
@@ -1796,6 +1797,76 @@ class OpencodeService {
       console.warn('Failed to update OpenCode working directory:', error);
       throw error;
     }
+  }
+
+  // -------------------------------------------------------------------------
+  // Session markers — per-session user-defined status, todos, priority.
+  // Routes: GET/PUT/DELETE /api/openchamber/sessions/.../markers
+  // -------------------------------------------------------------------------
+
+  /**
+   * Fetch all session markers (bulk, for bootstrap hydration).
+   * Route: GET /api/openchamber/sessions/markers
+   */
+  async getSessionMarkers(): Promise<{ version: number; sessions: Record<string, SessionMarkers> }> {
+    const response = await fetch('/api/openchamber/sessions/markers', {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+    });
+    if (!response.ok) {
+      throw new Error(`getSessionMarkers failed: ${response.status} ${response.statusText}`);
+    }
+    const data = (await response.json()) as { version?: unknown; sessions?: unknown };
+    const version = typeof data.version === 'number' ? data.version : 0;
+    const sessions = data.sessions && typeof data.sessions === 'object'
+      ? data.sessions as Record<string, SessionMarkers>
+      : {};
+    return { version, sessions };
+  }
+
+  /**
+   * Partially update markers for a single session.
+   * Route: PUT /api/openchamber/sessions/:sessionId/markers
+   */
+  async setSessionMarkers(
+    sessionId: string,
+    patch: SessionMarkersPatch,
+  ): Promise<{ sessionId: string; markers: SessionMarkers }> {
+    const response = await fetch(
+      `/api/openchamber/sessions/${encodeURIComponent(sessionId)}/markers`,
+      {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json', accept: 'application/json' },
+        body: JSON.stringify(patch),
+      },
+    );
+    if (!response.ok) {
+      throw new Error(`setSessionMarkers failed: ${response.status} ${response.statusText}`);
+    }
+    const data = (await response.json()) as { sessionId?: unknown; markers?: unknown };
+    const resultSessionId = typeof data.sessionId === 'string' ? data.sessionId : sessionId;
+    const markers = (data.markers ?? { todos: [] }) as SessionMarkers;
+    return { sessionId: resultSessionId, markers };
+  }
+
+  /**
+   * Clear all markers for a session.
+   * Route: DELETE /api/openchamber/sessions/:sessionId/markers
+   */
+  async clearSessionMarkers(
+    sessionId: string,
+  ): Promise<{ sessionId: string; cleared: boolean }> {
+    const response = await fetch(
+      `/api/openchamber/sessions/${encodeURIComponent(sessionId)}/markers`,
+      { method: 'DELETE', headers: { accept: 'application/json' } },
+    );
+    if (!response.ok) {
+      throw new Error(`clearSessionMarkers failed: ${response.status} ${response.statusText}`);
+    }
+    const data = (await response.json()) as { sessionId?: unknown; cleared?: unknown };
+    const resultSessionId = typeof data.sessionId === 'string' ? data.sessionId : sessionId;
+    const cleared = typeof data.cleared === 'boolean' ? data.cleared : true;
+    return { sessionId: resultSessionId, cleared };
   }
 }
 

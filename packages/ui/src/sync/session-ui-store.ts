@@ -42,6 +42,7 @@ import {
   getSyncChildStores,
 } from "./sync-refs"
 import { markSessionViewed } from "./notification-store"
+import { deleteShield } from "./delete-shield"
 import { setActiveSession } from "./sync-context"
 import {
   createSession as createSessionAction,
@@ -830,6 +831,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       if (s.deletingSessionIds.has(sessionId)) return s
       const next = new Set(s.deletingSessionIds)
       next.add(sessionId)
+      deleteShield.add(sessionId)
       return { deletingSessionIds: next }
     }),
 
@@ -838,6 +840,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       if (!s.deletingSessionIds.has(sessionId)) return s
       const next = new Set(s.deletingSessionIds)
       next.delete(sessionId)
+      deleteShield.delete(sessionId)
       return { deletingSessionIds: next }
     }),
 

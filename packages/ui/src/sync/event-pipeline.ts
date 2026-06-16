@@ -13,6 +13,7 @@
  */
 
 import type { Event, OpencodeClient, SessionStatus } from "@opencode-ai/sdk/v2/client"
+import { useSessionMarkersStore, normalizeSessionMarkers } from "@/stores/useSessionMarkersStore"
 import { syncDebug } from "./debug"
 
 export type QueuedEvent = {
@@ -147,10 +148,49 @@ const normalizeOpenChamberSessionStatus = (payload: Event): Event | null => {
   } as Event
 }
 
+const normalizeOpenChamberSessionMarkers = (payload: Event): Event | null => {
+  const record = payload as unknown as {
+    id?: unknown
+    type?: unknown
+    properties?: {
+      sessionId?: unknown
+      sessionID?: unknown
+      markers?: unknown
+    }
+  }
+
+  if (record.type !== "openchamber:session-markers") return null
+
+  const sessionID = typeof record.properties?.sessionId === "string" && record.properties.sessionId.length > 0
+    ? record.properties.sessionId
+    : typeof record.properties?.sessionID === "string" && record.properties.sessionID.length > 0
+      ? record.properties.sessionID
+      : ""
+  if (!sessionID) return null
+
+  const rawMarkers = record.properties?.markers
+  if (rawMarkers === null) {
+    useSessionMarkersStore.getState().applyServerUpdate(sessionID, null)
+    return payload
+  }
+  const validated = normalizeSessionMarkers(rawMarkers)
+  if (validated) {
+    useSessionMarkersStore.getState().applyServerUpdate(sessionID, validated)
+    return payload
+  }
+
+  return null
+}
+
 const normalizeEventType = (payload: Event): Event => {
   const normalizedOpenChamberStatus = normalizeOpenChamberSessionStatus(payload)
   if (normalizedOpenChamberStatus) {
     return normalizedOpenChamberStatus
+  }
+
+  const normalizedMarkers = normalizeOpenChamberSessionMarkers(payload)
+  if (normalizedMarkers) {
+    return normalizedMarkers
   }
 
   const type = (payload as { type?: unknown }).type

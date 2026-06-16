@@ -5,7 +5,6 @@ import { Icon } from '@/components/icon/Icon';
 import type { ChatMessageEntry, TurnRecord } from '../lib/turns/types';
 import { formatTurnDuration } from '../lib/turns/duration';
 import { useI18n } from '@/lib/i18n';
-import { getMessageFinishReason } from '@/lib/messageCompletion';
 
 interface RenderMessageOptions {
     hideAssistantBody?: boolean;
@@ -112,22 +111,17 @@ const animateProcessDetailsHeight = (
 // scroll, the current directive sticks at P2 and gets pushed out when the next
 // sub-scope enters — only one directive is visible in P2 at a time. The real
 // user message in P1 stays active for the entire section.
-const getAssistantFinish = (message: ChatMessageEntry): string | undefined => {
-    return getMessageFinishReason(message.info, message.parts);
-};
-
 const splitProcessMessages = (messages: ChatMessageEntry[]) => {
     const lastMessage = messages[messages.length - 1];
-    if (lastMessage && getAssistantFinish(lastMessage) === 'stop') {
-        return {
-            processMessages: messages.slice(0, -1),
-            summaryMessage: lastMessage,
-        };
+    if (!lastMessage) {
+        return { processMessages: [], summaryMessage: undefined };
     }
 
+    // Always peel off the last message — completed, aborted, or streaming —
+    // so the latest state stays visible outside the collapsible area.
     return {
-        processMessages: messages,
-        summaryMessage: undefined,
+        processMessages: messages.slice(0, -1),
+        summaryMessage: lastMessage,
     };
 };
 

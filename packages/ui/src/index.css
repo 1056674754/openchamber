@@ -1667,15 +1667,13 @@ input[aria-label="Terminal input"] {
 }
 
 @keyframes slot-fade-in {
-  0%, 40% { opacity: 1; }
-  50%, 90% { opacity: 0; }
-  100% { opacity: 1; }
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
 }
 
 @keyframes slot-fade-out {
-  0%, 40% { opacity: 0; }
-  50%, 90% { opacity: 1; }
-  100% { opacity: 0; }
+  0%, 100% { opacity: 0; }
+  50% { opacity: 1; }
 }
 
 .animate-slot-fade-in {
@@ -1686,9 +1684,45 @@ input[aria-label="Terminal input"] {
   animation: slot-fade-out 2.4s ease-in-out infinite;
 }
 
+@keyframes oc-blocking-request-neon {
+  0%, 100% {
+    opacity: 0.82;
+    box-shadow:
+      0 0 0 1px color-mix(in srgb, currentColor 26%, transparent),
+      0 0 5px color-mix(in srgb, currentColor 18%, transparent),
+      0 0 12px color-mix(in srgb, currentColor 12%, transparent);
+  }
+  50% {
+    opacity: 1;
+    box-shadow:
+      0 0 0 1px color-mix(in srgb, currentColor 52%, transparent),
+      0 0 8px color-mix(in srgb, currentColor 42%, transparent),
+      0 0 18px color-mix(in srgb, currentColor 26%, transparent);
+  }
+}
+
+.oc-blocking-request-badge {
+  position: relative;
+  isolation: isolate;
+  background: color-mix(in srgb, currentColor 11%, transparent);
+  animation: oc-blocking-request-neon 1.45s ease-in-out infinite;
+}
+
+.oc-blocking-request-badge::before {
+  content: "";
+  position: absolute;
+  inset: -3px;
+  z-index: -1;
+  border-radius: inherit;
+  background: color-mix(in srgb, currentColor 18%, transparent);
+  filter: blur(6px);
+  opacity: 0.72;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .animate-slot-fade-in,
-  .animate-slot-fade-out {
+  .animate-slot-fade-out,
+  .oc-blocking-request-badge {
     animation: none;
   }
 }

@@ -150,7 +150,7 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
     title: 'Providers',
     group: 'opencode',
     kind: 'split',
-    showOn: 'both',
+    showOn: 'default',
     keywords: ['provider', 'providers', 'models', 'model', 'api key', 'api keys', 'openai', 'anthropic', 'ollama', 'credentials'],
   },
   {
@@ -158,7 +158,7 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
     title: 'Usage',
     group: 'usage',
     kind: 'split',
-    showOn: 'both',
+    showOn: 'default',
     keywords: ['quota', 'billing', 'tokens', 'usage', 'limits'],
   },
   {
@@ -166,7 +166,7 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
     title: 'Agents',
     group: 'opencode',
     kind: 'split',
-    showOn: 'both',
+    showOn: 'default',
     keywords: ['agent', 'agents', 'prompts', 'tools', 'permissions'],
   },
   {
@@ -174,7 +174,7 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
     title: 'Behavior',
     group: 'opencode',
     kind: 'single',
-    showOn: 'both',
+    showOn: 'default',
     keywords: ['behavior', 'agents.md', 'system prompt', 'global rules', 'instructions', 'override'],
   },
   {
@@ -182,7 +182,7 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
     title: 'Commands',
     group: 'opencode',
     kind: 'split',
-    showOn: 'both',
+    showOn: 'default',
     keywords: ['command', 'commands', 'slash', 'macros', 'automation'],
   },
   {
@@ -190,7 +190,7 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
     title: 'MCP',
     group: 'opencode',
     kind: 'split',
-    showOn: 'both',
+    showOn: 'default',
     keywords: ['mcp', 'model context protocol', 'servers', 'tools', 'remote', 'stdio'],
   },
   {
@@ -198,7 +198,7 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
     title: 'Plugins',
     group: 'opencode',
     kind: 'split',
-    showOn: 'both',
+    showOn: 'default',
     keywords: ['plugin', 'plugins', 'extensions', 'addons', 'npm', 'opencode-wakatime'],
   },
   {
@@ -206,7 +206,7 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
     title: 'Permissions',
     group: 'opencode',
     kind: 'split',
-    showOn: 'both',
+    showOn: 'default',
     keywords: ['permission', 'permissions', 'tools', 'rules', 'ask', 'allow', 'deny'],
   },
   {
@@ -214,7 +214,7 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
     title: 'Presets',
     group: 'opencode',
     kind: 'single',
-    showOn: 'both',
+    showOn: 'default',
     keywords: ['preset', 'presets', 'template', 'config', 'install', 'preferences'],
   },
   {
@@ -231,7 +231,7 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
     title: 'Skills',
     group: 'skills',
     kind: 'split',
-    showOn: 'both',
+    showOn: 'default',
     keywords: ['skill', 'skills', 'instructions', 'install', 'catalog'],
   },
   {
@@ -239,7 +239,7 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
     title: 'Skills Catalog',
     group: 'skills',
     kind: 'single',
-    showOn: 'both',
+    showOn: 'default',
     keywords: ['install', 'catalog', 'external', 'repository', 'skills catalog'],
   },
   {
@@ -247,7 +247,7 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
     title: 'Git',
     group: 'git',
     kind: 'single',
-    showOn: 'both',
+    showOn: 'default',
     keywords: ['git', 'github', 'identity', 'identities', 'ssh', 'profiles', 'credentials', 'keys', 'commit', 'gitmoji', 'oauth', 'prs', 'issues'],
     isAvailable: (ctx) => !ctx.isVSCode,
   },

@@ -14,6 +14,7 @@ import type { FileDiff, GlobalState, State } from "./types"
 import { dropSessionCaches } from "./session-cache"
 import { stripSessionDiffSnapshots } from "./sanitize"
 import { syncDebug } from "./debug"
+import { useSessionMarkersStore } from "@/stores/useSessionMarkersStore"
 
 const SKIP_PARTS = new Set(["patch", "step-start", "step-finish"])
 const DELTA_OVERLAP_FIELDS = ["text", "output"] as const
@@ -201,6 +202,7 @@ export function applyDirectoryEvent(
     onRefresh?: (directory: string) => void
     onLoadLsp?: () => void
     onSetSessionTodo?: (sessionID: string, todos: Todo[] | undefined) => void
+    isSessionDeleting?: (sessionID: string) => boolean
   },
 ): DirectoryEventResult {
   switch (event.type) {
@@ -229,6 +231,7 @@ export function applyDirectoryEvent(
       const result = Binary.search(sessions, info.id, (s) => s.id)
 
       if (info.time.archived) {
+        if (callbacks?.isSessionDeleting?.(info.id)) return false
         if (result.found) sessions.splice(result.index, 1)
         cleanupSessionCaches(draft, info.id, callbacks?.onSetSessionTodo)
         if (!info.parentID) draft.sessionTotal = Math.max(0, draft.sessionTotal - 1)
@@ -249,11 +252,13 @@ export function applyDirectoryEvent(
       const props = event.properties as { info?: Session; sessionID?: string }
       const sessionID = props.info?.id ?? props.sessionID
       if (!sessionID) return false
+      if (callbacks?.isSessionDeleting?.(sessionID)) return false
       const sessions = draft.session
       const result = Binary.search(sessions, sessionID, (s) => s.id)
       const existing = result.found ? sessions[result.index] : undefined
       if (result.found) sessions.splice(result.index, 1)
       cleanupSessionCaches(draft, sessionID, callbacks?.onSetSessionTodo)
+      useSessionMarkersStore.getState().clearAllForSession(sessionID)
       const parentID = props.info?.parentID ?? (existing as Session & { parentID?: string | null } | undefined)?.parentID
       if (result.found && !parentID) draft.sessionTotal = Math.max(0, draft.sessionTotal - 1)
       return true
