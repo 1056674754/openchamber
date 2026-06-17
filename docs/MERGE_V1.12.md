@@ -95,7 +95,7 @@
 
 **仍需单独处理**：
 - `handleHistoryScroll` 滚动自动加载历史仍未恢复，避免再次引入测量循环。
-- `MessageList` 的官方虚拟化优化和 `TurnChangedFilePills` / `changedFiles` 仍需单独批次验证。
+- `MessageList` 的官方虚拟化优化仍需单独批次验证。（`TurnChangedFilePills` / `changedFiles` 已落地，见 feature gap 表）
 - 注意命令名是 `/explore`，不是 `/explorer`。
 
 **后续建议**：不要再整批套官方 chat diff。按以下顺序恢复剩余功能：
@@ -128,7 +128,7 @@
 |---|---|---|
 | **草稿启动页** | ✅ 已落地：新建会话展示快捷命令 chips（拖拽排序、搜索添加），`DraftPresetChips` + `useDraftStarters` 已接入 `ChatContainer` | 🟢 已完成 |
 | **魔法命令** | ✅ 已落地：`/explore`、`/catch-up`、`/debug`、`/weigh`、`/plan-feature`、`/workspace-review` 均会展开为可见 prompt + hidden instructions，而不是裸发 slash command | 🟢 已完成 |
-| **消息改动文件标记** | 回复消息中显示本次改动涉及的文件列表 (TurnChangedFilePills)，含 `changedFiles` 字段 | 🟡 中 |
+| **消息改动文件标记** | ✅ 已落地：实现为 `TurnChangedFilesDropdown`（下拉而非 pills），`changedFiles` 由 `activityParts` 经 `extractGitChangedFiles` 派生（非独立类型字段），已在 `MessageBody.tsx:2149` 渲染 | 🟢 已完成 |
 | **时间格式偏好** | ✅ 已落地：新增 `packages/ui/src/lib/timeFormat.ts`，chat 消息 footer 与 Tunnel session 时间已接入 12/24 小时偏好 | 🟢 已完成 |
 | **滚动加载历史** | 聊天区域触底自动加载更早消息，替代 "Load older messages" 按钮 | 🟡 中 |
 
@@ -287,7 +287,7 @@
 
 | 类别 | Feature | 本 fork 初查状态 | 处理建议 |
 |---|---|---|---|
-| Chat | `/handoff-review` linked review session | 🟡 部分相近：本地已有 `/workspace-review` magic prompt，但只是当前 workspace review，没有 linked review session，也没有 feedback/reply 双向动作 | 高风险手工移植。需要先看官方会话关联数据结构，再映射到本 fork 的 multi-remote / serverId / directory context |
+| Chat | `/handoff-review` linked review session | ✅ 已落地 (T1-6, commits `8c06e59f` + `3a8ecc92`)：`ReviewFlowDialog.tsx` + `reviewFlow.ts` + `sessionReviewMetadata.ts` + ChatInput `/handoff-review` 入口 + MessageBody review 按钮 + 8 locale × 3 key | 已完成 |
 | Chat/UI | Collapse long user messages setting | ✅ 已落地：新增 `collapsibleUserMessages` UI preference，Settings > Chat 可开关，默认保持现有两行折叠行为；关闭后长用户消息完整显示 | 已完成；后续可和官方 Settings search 索引项一起复核搜索命中 |
 | Chat | Rendered `@agent` mentions use primary accent | ✅ 已落地 (Tier1-1)：`inlineMessageLinks.ts` 抽取 link builder/parser；`UserTextPart` 改用 markdown 格式内部 href；`MarkdownRendererImpl` 解析 `#openchamber-agent:` / `#openchamber-skill:` href 并渲染为 `text-primary` + data attribute；CSS `[data-openchamber-agent-mention]` / `[data-skill-name]` 强制 primary 色 | 已完成 |
 | Chat | Table copy action adds Markdown format | ✅ 已落地：copy dropdown 新增 Markdown 选项；表格导出逻辑抽到 `markdownTableExport.ts` 并加测试 | 已完成，后续只需和官方实现复核文案/i18n 是否一致 |
@@ -300,12 +300,12 @@
 | Sessions | Right-click menus for session/folder/project/worktree rows | 🟡 部分：session/temp session 已有 context menu；folder/project/worktree 覆盖面需逐文件对齐 | 中高风险，和 sidebar/tree 结构相关，需避免重复/错 server 操作 |
 | Settings | Search across settings pages | 🔴 未实现。`settings/metadata.ts` 有 keywords，但 `SettingsView` 没有全局 search UI | 中等 UX 功能，可独立做 |
 | Settings/Agents | Agent prompt and permission edits stay saved | ✅ 已落地 (Tier1-10)：cache invalidation (`invalidateAgentsLoadCache`/`invalidateCommandsLoadCache`/`invalidateSkillsLoadCache`) 在每次 CRUD 前调用；`buildAgentsSignature` 扩展覆盖 mode/model/temp/topP/prompt/permission；reload mode 从 `"active"` 改为 `"projects"`；null prompt 清除逻辑；permission source/merge 层级修正 (custom > project > user)；`AgentsPage` permission config 标准化 | 已完成 |
-| Files | Editor Vim mode setting | 🔴 未实现。未看到 Vim mode / CodeMirror Vim keymap 设置 | 中等功能；确认依赖是否已在 lockfile 中，避免新增依赖 |
+| Files | Editor Vim mode setting | ✅ 已落地 (Tier2-2)：`@replit/codemirror-vim` + `vimModeExtension.ts` + `fileEditorKeymap` store (useUIStore L671) + `OpenChamberVisualSettings.tsx` radio selector + 8 locale settings | 已完成 |
 | Files | Safer writes via temporary files | ✅ 已落地 (Tier1-9)：`/api/fs/write` 改为 `realpath()` 解析 + `isPathWithinRoot` 安全检查 + temp file → rename 原子写入；error 时 always unlink temp | 已完成 |
 | Git | Changed-file folders have revert action | ✅ 已落地 (Tier1-6)：`GitView` refactoring `handleRevertAll` → `handleRevertPaths(paths, setGlobalReverting, scope)`；`handleRevertDirectory` 使用 `scope: 'working'`；`ChangesSection` 目录行新增 revert 按钮 + 确认对话框；8 locale i18n key 补齐 | 已完成 |
-| GitHub | Issue/PR pickers use server-side search | 🔴 未实现。UI 仍先分页拉取，再前端 query 过滤；server list route 未收 search query | 中等风险；保留 fork 的 repo network/fork detection |
+| GitHub | Issue/PR pickers use server-side search | ✅ 已落地 (Tier2-1)：`/api/github/{issues,pulls}/list` 接收 `query` 参数并调用 `octokit.rest.search.issuesAndPullRequests`；UI 端 `useDebouncedValue(350ms)` + `isTextSearch` 切换；VS Code parity | 已完成 |
 | Preview | Inline module scripts rewritten in proxied HTML | ✅ 已落地 (Tier1-7)：`rewriteInlineModuleScripts` 函数解析 `<script type="module">` 内容并用 `rewriteJavaScript` 改写 import/from 路径；`stripPreviewCspMeta` 移除 CSP meta 标签让 bridge 可运行；`rewriteHtml` 返回值包装两层处理 | 已完成 |
-| Voice | Plan/file preview markdown TTS buttons + selected/full setting | 🟡 部分：voice service/settings 已很完整；PlanView/File preview 上未看到 TTS button 和 selection/full-document setting | 中等 UX；不要把 TTS 控件接进高频 markdown render 热路径 |
+| Voice | Plan/file preview markdown TTS buttons + selected/full setting | ✅ 已落地：PlanView (`PlanView.tsx:714-741`) + FilesView (`FilesView.tsx:2986-3013`) markdown preview toolbar 均有 speaker/stop 按钮，gate `showMessageTTSButtons`；`ttsInputMode: 'sanitized'\|'raw'` config + VoiceSettings chip selector + `useMessageTTS` raw mode（仅 server provider）+ 8 locale × 2 key | 已完成 |
 | Desktop/macOS | Menu bar tray with live session status, Mini Chat, provider usage submenu | 🔴 未实现。Mini Chat window 已有，但 Electron main 未见 Tray/menu-bar status item | macOS 独立批次；要考虑 remote/live session status source |
 | Desktop/macOS | Optional vibrancy for left sidebar | 🔴 未实现且当前强制禁用：`desktop_set_vibrancy` handler 会写 `desktopVibrancy=false` | 需重新评估 Electron 可行性；不能直接按旧 Tauri/SwiftUI 思路套 |
 | Desktop/macOS | Startup no longer opens unnecessary folder prompts | ✅ 已落地 (Tier1-5)：Electron `spawnLocalServer` 设置 `OPENCHAMBER_OPENCODE_CWD = app.getPath('userData')` 并确保目录存在；`hmr-state-runtime.js` 的 `getInitialOpenCodeWorkingDirectory` 从 env 读取配置的 CWD，不再 fallback 到 `os.homedir()` 导致文件夹提示 | 已完成 |
