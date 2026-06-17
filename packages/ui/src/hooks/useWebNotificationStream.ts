@@ -10,6 +10,16 @@ const isFocused = () => {
   return document.visibilityState === 'visible' && document.hasFocus();
 };
 
+const isLoopbackHost = (host: string): boolean => {
+  const normalized = host.replace(/^\[|\]$/g, '').toLowerCase();
+  return normalized === 'localhost' || normalized === '127.0.0.1' || normalized === '::1';
+};
+
+const isLocalServerOrigin = (): boolean => {
+  if (typeof window === 'undefined') return false;
+  return isLoopbackHost(window.location.hostname);
+};
+
 const toNotificationPayload = (value: unknown): NotificationPayload | null => {
   if (!value || typeof value !== 'object') return null;
   const record = value as Record<string, unknown>;
@@ -39,6 +49,12 @@ export const useWebNotificationStream = (options?: { enabled?: boolean }) => {
 
       const payload = toNotificationPayload(data);
       if (!payload) return;
+
+      const properties = (data as { properties?: Record<string, unknown> }).properties;
+      const deliveredNatively =
+        properties?.desktopNotificationDelivered === true ||
+        properties?.desktopStdoutActive === true;
+      if (deliveredNatively && isLocalServerOrigin()) return;
 
       const apis = getRegisteredRuntimeAPIs();
       void apis?.notifications?.notifyAgentCompletion(payload);
