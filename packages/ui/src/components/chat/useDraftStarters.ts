@@ -93,6 +93,10 @@ export function useDraftStarters(): UseDraftStartersResult {
         void useSkillsStore.getState().loadSkills?.();
     }, []);
 
+    React.useEffect(() => {
+        ensureLoaded();
+    }, [ensureLoaded]);
+
     const commandNames = React.useMemo(() => new Set(commands.map((c) => c.name)), [commands]);
     const skillNames = React.useMemo(() => new Set(skills.map((s) => s.name)), [skills]);
 

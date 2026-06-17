@@ -1259,6 +1259,13 @@ async function main(options = {}) {
   const app = express();
   const serverStartedAt = new Date().toISOString();
   app.set('trust proxy', true);
+  app.use((_req, res, next) => {
+    res.setHeader('X-Robots-Tag', 'noindex, nofollow');
+    next();
+  });
+  app.get('/robots.txt', (_req, res) => {
+    res.type('text/plain').send('User-agent: *\nDisallow: /\n');
+  });
   installLoopbackCors(app);
   app.use(compression({
     filter: (req, res) => {

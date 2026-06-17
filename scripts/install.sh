@@ -2,10 +2,11 @@
 # OpenChamber Install Script
 # Usage: curl -fsSL https://raw.githubusercontent.com/btriapitsyn/openchamber/main/scripts/install.sh | bash
 
-set -e
+set -euo pipefail
 
 PACKAGE_NAME="@openchamber/web"
-MIN_NODE_VERSION=20
+BIN_NAME="openchamber"
+MIN_NODE_VERSION=22
 
 # Colors
 RED='\033[0;31m'
@@ -38,7 +39,15 @@ command_exists() {
 # Get Node.js major version
 get_node_version() {
   if command_exists node; then
-    node -v | sed 's/v//' | cut -d. -f1
+    local version
+    version=$(node -v 2>/dev/null || true)
+    version=${version#v}
+    version=${version%%.*}
+    if [[ "$version" =~ ^[0-9]+$ ]]; then
+      echo "$version"
+    else
+      echo "0"
+    fi
   else
     echo "0"
   fi
@@ -47,7 +56,7 @@ get_node_version() {
 # Detect preferred package manager
 detect_package_manager() {
   # Check if running inside an npm/pnpm/yarn/bun context
-  if [ -n "$npm_config_user_agent" ]; then
+  if [ -n "${npm_config_user_agent:-}" ]; then
     case "$npm_config_user_agent" in
       pnpm*) echo "pnpm"; return ;;
       yarn*) echo "yarn"; return ;;
@@ -61,7 +70,7 @@ detect_package_manager() {
     echo "pnpm"; return
   elif [ -f "yarn.lock" ]; then
     echo "yarn"; return
-  elif [ -f "bun.lockb" ]; then
+  elif [ -f "bun.lock" ] || [ -f "bun.lockb" ]; then
     echo "bun"; return
   elif [ -f "package-lock.json" ]; then
     echo "npm"; return
@@ -101,7 +110,7 @@ suggest_node_install() {
   echo "Install Node.js using one of these methods:"
   echo ""
   
-  if [[ "$OSTYPE" == "darwin"* ]]; then
+  if [[ "${OSTYPE:-}" == "darwin"* ]]; then
     echo "  Using Homebrew:"
     echo "    brew install node"
     echo ""

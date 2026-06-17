@@ -588,3 +588,99 @@ Phase 6 — VSCode (#31-32): 单独批次
 - C. 不 port MessageList 虚拟化（fork 的 process folding 可能已足够缓解长对话性能）
 
 **建议**: A。`virtua` 是轻量库，fork 的 `@tanstack/react-virtual` 用途不同（代码块），两者共存无冲突。
+
+---
+
+## v1.13.1 — 变更审核 (2026-06-17)
+
+**范围**: v1.13.0 (`ee26f193`) → v1.13.1 (`dfa0ec61`)，31 commits，120 files，+5206/-2518
+**前提**: fork 的 v1.13.1 全部 31 个 commit 都不在 fork 中
+
+### 分歧概况：fork vs v1.13.1 关键文件
+
+| 文件 | Fork 行数 | v1.13.1 行数 | 上游 delta | 分歧原因 |
+|---|---|---|---|---|
+| `MarkdownRendererImpl.tsx` | 2289 | ~700 | +291/-1168 | **上游完全重写**：marked+morphdom+Shiki 替换 react-markdown+Prism |
+| `useConfigStore.ts` | 2618 | ~2800 | +124/-16 | fork 深度魔改 |
+| `opencode/client.ts` | 魔改 | — | +53/-11 | fork 深度魔改 |
+| `proxy.js` | 463 | — | +81/-51 | session list 请求重构 |
+| `sync-context.tsx` | 3190 | — | +19/-19 | 通知去重 |
+| `agents.js` (server) | 675 | — | +45/-21 | agent 删除修复 |
+
+### Markdown 渲染引擎迁移状态
+
+| | Fork | v1.13.1 上游 |
+|---|---|---|
+| 解析器 | `marked` 已在 deps 但实际仍用 `react-markdown` 渲染 | `marked` + `morphdom` (DOM diff) |
+| 代码高亮 | `react-syntax-highlighter`/Prism (37 处引用) | `shiki` Web Worker |
+| `markdown/` 目录 | ❌ 不存在 | ✅ 7 个新文件 (worker, core, theme) |
+| `syntaxThemeGenerator.ts` | ✅ 211L (使用中) | ❌ 已删除 (dead code) |
+| `shiki` 依赖 | ❌ | ✅ `^3.23.0` |
+| 数学分隔符修复 | ❌ | ✅ (改的是 `markdownCore.ts`，fork 无此文件) |
+
+### Tier 分类
+
+#### 🔴 极高风险 — 核心架构重写
+
+| # | 功能 | Commits | 说明 | 风险点 |
+|---|---|---|---|---|
+| 1 | **Markdown 渲染引擎完全重写** | `0d4009c4` `a08b4612` `55a098f6` | marked+morphdom+Shiki worker 替换 react-markdown+Prism。MarkdownRendererImpl +291/-1168。新建 7 个 worker 文件。移除 3 个依赖，新增 shiki | fork 的 agent mention、文件路径点击、inline comment drafts 全在被删的 1168 行里 |
+| 2 | **Shiki 代码编辑器高亮** | `552c2217` `1599bfe1` `62184049` | CodeMirror/PlanView/SkillsPage 改用 Shiki。新建 `shikiHighlight.ts` (135L)。删除 `syntaxThemeGenerator` 管道 | 依赖 #1 的 shiki 引入；fork 的 flexokiTheme 需评估 |
+| 3 | **Provider/Agent 启动性能** | `e24cd63c` | useConfigStore +124/-16、client.ts +53/-11。流线化 provider 和 agent 启动加载 | fork 最魔改的两个文件同时大改 |
+
+**依赖链**: 数学分隔符 (`1c87e55f`) 和 mermaid 全屏 (`2c3f4e14`) 被 #1 阻塞 — 它们改的 `markdownCore.ts` 在 markdown 重写后才存在。
+
+#### 🟡 中风险 — 需逐文件合并
+
+| # | 功能 | Commit | 关键文件 | Fork 状态 |
+|---|---|---|---|---|
+| 4 | Scheduled Tasks cron 语法 | `7c05f238` | 新 `cron.ts` (51L) + `cron-parser` 依赖 + Dialog +164 | Dialog 1578L |
+| 5 | Agent 删除修复 | `e3daeae1` | AgentsSidebar、useAgentsStore、server agents.js (+45/-21) | 文件都在 |
+| 6 | Session 诊断/Windows 加载 | `5cd8b9d3` | proxy.js +81/-51（重构 session list 请求） | proxy.js 463L |
+| 7 | Session 文件夹重渲染循环 | `65258d2c` | useSessionFoldersStore.ts +35（纯新增） | 620L |
+| 8 | 桌面通知去重 | `dfd138c3` | sync-context.tsx (+19/-19)、emitter-runtime.js、runtime.js | sync-context 3190L |
+| 9 | 主题同步（嵌入面板） | `4c26ce36` `c3e37e5a` | 新文件：theme-sync-payload.ts、theme-embedded-bootstrap.ts、contextPanelEmbeddedChat.ts (71L) | 新文件可直接 port |
+| 10 | History diff 加载稳定化 | `fe6cff65` | GitView +29、PierreDiffViewer +20、HistoryCommitRow +6 | 文件都在 |
+| 11 | 右侧边栏性能 | `b51dd008` | RightSidebar (+15/-15)、RightSidebarTabs (+103/-20) | RightSidebar 157L |
+
+#### 🟢 低风险 — 独立小项
+
+| # | 功能 | Commit | 改动量 | Fork 状态 |
+|---|---|---|---|---|
+| 12 | Draft starters preload | `5e13f79f` | useDraftStarters.ts +8 | 190L，纯新增 |
+| 13 | Context usage 圆形进度 | `c546d908` | ContextUsageDisplay +43/-4 + Mobile/Header/VSCode 小改 | 174L |
+| 14 | Agent definition missing toast | `7bf2e5a3` | AgentsSidebar + i18n | 637L |
+| 15 | 防止搜索引擎索引 | `797bbc56` | server/index.js +11 | 纯新增 |
+| 16 | 安装脚本版本检测 | `0847bfc8` | scripts/install.sh +75/-10 | — |
+| 17 | Electron dev auth Vite proxy | `39d4a3b3` | main.mjs +32/-4 | 2938L |
+| 18 | Android 移动端会话按钮 | `93485f08` | MobileSessionStatusBar +2/-16 | 1819L |
+
+### v1.13.1 新文件（可直接 port）
+
+| 文件 | 来源 commit | 用途 |
+|---|---|---|
+| `packages/ui/src/components/chat/markdown/markdownCore.ts` | `0d4009c4` | marked 渲染核心 |
+| `packages/ui/src/components/chat/markdown/markdown-worker.ts` | `a08b4612` | Web Worker 入口 |
+| `packages/ui/src/components/chat/markdown/markdown-shiki.worker.ts` | `a08b4612` | Shiki 高亮 Worker |
+| `packages/ui/src/components/chat/markdown/markdown-worker-protocol.ts` | `a08b4612` | Worker 通信协议 |
+| `packages/ui/src/components/chat/markdown/markdownTheme.ts` | `0d4009c4` | Markdown Shiki 主题 |
+| `packages/ui/src/components/chat/markdown/decorate.ts` | `0d4009c4` | Markdown 装饰器 |
+| `packages/ui/src/components/chat/markdown/markdownShikiThemeDefinition.ts` | `0d4009c4` | Shiki 主题定义 |
+| `packages/ui/src/components/code/WorkerHighlightedCode.tsx` | `55a098f6` | Worker 高亮代码组件 |
+| `packages/ui/src/components/code/useWorkerHighlightedLines.ts` | `55a098f6` | Worker 高亮 hook |
+| `packages/ui/src/lib/codemirror/shikiHighlight.ts` | `552c2217` | CodeMirror Shiki 高亮 |
+| `packages/ui/src/lib/cron.ts` | `7c05f238` | Cron 解析工具 |
+| `packages/ui/src/contexts/theme-sync-payload.ts` | `4c26ce36` | 主题同步数据 |
+| `packages/ui/src/contexts/theme-embedded-bootstrap.ts` | `c3e37e5a` | 嵌入面板主题引导 |
+| `packages/ui/src/contexts/theme-validation.ts` | `4c26ce36` | 主题验证 |
+| `packages/ui/src/components/layout/contextPanelEmbeddedChat.ts` | `c3e37e5a` | 嵌入式聊天面板 |
+
+### v1.13.1 建议移植顺序
+
+```
+Phase 1 — 🟢 低风险 (#12-18): 7 项独立小改动，每项 <1h
+Phase 2 — 🟡 独立中风险 (#7 文件夹重渲染, #9 主题同步, #4 cron)
+Phase 3 — 🟡 需合并 (#5 agent 删除, #6 session 诊断, #8 通知去重, #10 history diff, #11 右侧栏)
+Phase 4 — 🔴 Provider/Agent 性能 (#3): 逐段 diff3 合并
+Phase 5 — 🔴 Markdown/Shiki 重写 (#1+#2): 独立 milestone，需迁移 fork 自定义功能
+```
