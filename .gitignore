@@ -59,3 +59,7 @@ data/
 workspaces/
 *.pid
 .worktrees/
+
+# Linux build artifacts (local builds, not tracked)
+openchamber-linux
+artifacts/
