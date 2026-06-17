@@ -684,3 +684,19 @@ Phase 3 — 🟡 需合并 (#5 agent 删除, #6 session 诊断, #8 通知去重,
 Phase 4 — 🔴 Provider/Agent 性能 (#3): 逐段 diff3 合并
 Phase 5 — 🔴 Markdown/Shiki 重写 (#1+#2): 独立 milestone，需迁移 fork 自定义功能
 ```
+
+### v1.13.1 低风险移植批次 (2026-06-18)
+
+**时间**: 2026-06-18 01:56 (CST) | **Fork commit**: `c85b591e`
+**范围**: v1.13.1 低风险功能
+**验证**: `bun run type-check` ✅ 0 errors / `bun run lint` ✅ 0 errors
+
+| # | 功能 | 上游 commit | 文件数 | 说明 |
+|---|---|---|---|---|
+| 12 | Draft starters preload | `5e13f79f` | 1 | mount 时调 `ensureLoaded()`，pinned starters 立即可用 |
+| 13 | Context usage 圆形进度 | `c546d908` | 4 | SVG circular progress 替换 donut icon；tone-based 颜色 (success/warn/critical) |
+| 14 | Agent definition missing toast | `7bf2e5a3` | 10 | try/catch + re-throw；`definitionNotFound` i18n key × 8 locale |
+| 15 | 防止搜索引擎索引 | `797bbc56` | 1 | `X-Robots-Tag: noindex` + `/robots.txt` route |
+| 16 | 安装脚本版本检测 | `0847bfc8` | 1 | `set -euo pipefail`、Node 22、safe version parsing、`bun.lock` 支持 |
+| ~~17~~ | ~~Electron dev auth Vite proxy~~ | `39d4a3b3` | — | **⛔ 阻塞**: fork 的 `main.mjs` 无 `apiBaseUrl`/`clientToken`/`runtimeConfig` 模型，架构完全不同 |
+| ~~18~~ | ~~Android 移动端会话按钮~~ | `93485f08` | — | **⏭️ 跳过**: fork 无 `MobileSessionPanelTrigger` |
