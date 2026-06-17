@@ -95,7 +95,7 @@
 
 **仍需单独处理**：
 - `handleHistoryScroll` 滚动自动加载历史仍未恢复，避免再次引入测量循环。
-- `MessageList` 的官方虚拟化优化仍需单独批次验证。（`TurnChangedFilePills` / `changedFiles` 已落地，见 feature gap 表）
+- `MessageList` 的官方虚拟化优化 → 跳过 v1.12.0 旧版，改按 v1.13.0 #25 (`virtua` 重写) 实现。（`TurnChangedFilePills` / `changedFiles` 已落地，见 feature gap 表）
 - 注意命令名是 `/explore`，不是 `/explorer`。
 
 **后续建议**：不要再整批套官方 chat diff。按以下顺序恢复剩余功能：
