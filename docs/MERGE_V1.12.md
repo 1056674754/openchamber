@@ -700,3 +700,15 @@ Phase 5 — 🔴 Markdown/Shiki 重写 (#1+#2): 独立 milestone，需迁移 for
 | 16 | 安装脚本版本检测 | `0847bfc8` | 1 | `set -euo pipefail`、Node 22、safe version parsing、`bun.lock` 支持 |
 | ~~17~~ | ~~Electron dev auth Vite proxy~~ | `39d4a3b3` | — | **⛔ 阻塞**: fork 的 `main.mjs` 无 `apiBaseUrl`/`clientToken`/`runtimeConfig` 模型，架构完全不同 |
 | ~~18~~ | ~~Android 移动端会话按钮~~ | `93485f08` | — | **⏭️ 跳过**: fork 无 `MobileSessionPanelTrigger` |
+
+### v1.13.1 中风险移植批次 A (2026-06-18)
+
+**时间**: 2026-06-18 02:39 (CST) | **Fork commit**: `8b65650c`
+**范围**: v1.13.1 中风险 bug fix + 新功能
+**验证**: `bun run type-check` ✅ 0 errors / `bun run lint` ✅ 0 errors / cron tests 4/4 ✅
+
+| # | 功能 | 上游 commit | 文件数 | 说明 |
+|---|---|---|---|---|
+| 7 | Session 文件夹重渲染循环修复 | `65258d2c` | 1 | `addSessionToFolder`/`addSessionsToFolder` 加 early-return guard，无变化时不触发 state update |
+| 5 | Agent 删除 scope 修复 | `e3daeae1` | 6 | `scope` 参数贯穿 server→UI→VS Code；只删目标 config 层而非 disable built-ins |
+| 4 | Cron 语法支持 | `7c05f238` | 13 | `cron-parser` 依赖 + `cron.ts` 工具 + dialog cron 模式（验证+预览+示例）+ 8 locale × 12 i18n key |
