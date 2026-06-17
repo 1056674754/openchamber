@@ -712,3 +712,17 @@ Phase 5 — 🔴 Markdown/Shiki 重写 (#1+#2): 独立 milestone，需迁移 for
 | 7 | Session 文件夹重渲染循环修复 | `65258d2c` | 1 | `addSessionToFolder`/`addSessionsToFolder` 加 early-return guard，无变化时不触发 state update |
 | 5 | Agent 删除 scope 修复 | `e3daeae1` | 6 | `scope` 参数贯穿 server→UI→VS Code；只删目标 config 层而非 disable built-ins |
 | 4 | Cron 语法支持 | `7c05f238` | 13 | `cron-parser` 依赖 + `cron.ts` 工具 + dialog cron 模式（验证+预览+示例）+ 8 locale × 12 i18n key |
+
+### v1.13.1 中风险移植批次 B (2026-06-18)
+
+**时间**: 2026-06-18 03:21 (CST) | **Fork commit**: `19c46bef`
+**范围**: v1.13.1 通知去重
+**验证**: `bun run type-check` ✅ 0 errors / `bun run lint` ✅ 0 errors
+
+| # | 功能 | 上游 commit | 文件数 | 说明 |
+|---|---|---|---|---|
+| 8 | 桌面通知去重 | `dfd138c3` | 7 | `emitDesktopNotification` 返回 boolean；`broadcastUiNotification` 传 `desktopNotificationDelivered` 标记；`useWebNotificationStream` 在 loopback 上跳过重复通知；排除 reasoning chain-of-thought；新测试文件 |
+
+### #11 右侧边栏性能 — 重新评估为 🔴 高风险
+
+原分类为 🟡 中风险，但实际改动为 **8 文件 +681/-292 行**，包括 GitView (+270/-...) 和 SidebarFilesTree (+317/-...) 的深度重构。升级为 🔴 高风险，与 Markdown 重写、Provider 性能放在一起。
