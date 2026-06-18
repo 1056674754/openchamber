@@ -2882,6 +2882,14 @@ app.whenReady().then(async () => {
     isBackgroundStart,
     loginItemSettings,
   });
+  // Bypass system proxy for localhost/loopback so the Chromium renderer can
+  // reach the embedded web server. process.env.NO_PROXY only affects Node.js
+  // — without this, tools like Surge/Clash/mihomo intercept the renderer's
+  // fetch to 127.0.0.1:<port> and every API request hangs.
+  await session.defaultSession.setProxy({
+    proxyBypassRules: 'localhost,127.0.0.1,::1,<local>',
+  });
+
   nativeTheme.themeSource = readThemeSource();
   setupAutoUpdater();
 
