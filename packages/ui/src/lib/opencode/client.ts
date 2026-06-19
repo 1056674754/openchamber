@@ -723,6 +723,7 @@ class OpencodeService {
       schema: Record<string, unknown>;
       retryCount?: number;
     };
+    deliveryMode?: 'normal' | 'steer';
   }): Promise<string> {
     // Reuse one client-side message ID across retries. The server accepts this
     // as the real user message ID, making ambiguous network retries idempotent.
@@ -797,11 +798,13 @@ class OpencodeService {
       await waitForWorktreeBootstrap(requestDirectory);
     }
 
-    // Use async prompt endpoint so the client doesn't block waiting
-    // for model work (SSE will deliver output/status).
-    // This avoids 504s from proxy timeouts on long-running turns.
     const remoteBaseUrl = resolveBaseUrlForSession(params.id, requestDirectory, params.serverId ?? undefined)
     const effectiveBase = remoteBaseUrl ?? this.baseUrl
+
+    if (params.deliveryMode === 'steer') {
+      return this.sendSteer(params, parts, messageId, requestDirectory, effectiveBase);
+    }
+
     const url = buildApiFetchUrl(
       effectiveBase,
       `/session/${encodeURIComponent(params.id)}/prompt_async`,
@@ -887,6 +890,90 @@ class OpencodeService {
     // Defensive fallback — all loop paths return/throw, but TypeScript
     // control flow analysis cannot prove exhaustiveness without this.
     throw new Error('Failed to send message after retries');
+  }
+
+  private async sendSteer(
+    params: {
+      id: string;
+      providerID: string;
+    },
+    parts: Array<TextPartInput | FilePartInput | AgentPartInputLite>,
+    messageId: string,
+    requestDirectory: string | undefined,
+    effectiveBase: string,
+  ): Promise<string> {
+    const textParts = parts.filter((p): p is TextPartInput => p.type === 'text' && !(p as { synthetic?: boolean }).synthetic);
+    const fileParts = parts.filter((p): p is FilePartInput => p.type === 'file');
+    const agentParts = parts.filter((p): p is AgentPartInputLite => p.type === 'agent');
+
+    const promptBody: {
+      text: string;
+      files?: Array<{ type: 'file'; mime: string; url: string; filename?: string }>;
+      agents?: Array<{ name: string; source?: { value: string; start: number; end: number } }>;
+    } = {
+      text: textParts.map((p) => p.text).join('\n'),
+    };
+    if (fileParts.length > 0) {
+      promptBody.files = fileParts.map((f) => ({
+        type: 'file' as const,
+        mime: f.mime,
+        url: f.url,
+        ...(f.filename ? { filename: f.filename } : {}),
+      }));
+    }
+    if (agentParts.length > 0) {
+      promptBody.agents = agentParts.map((a) => ({
+        name: a.name,
+        ...(a.source ? { source: a.source } : {}),
+      }));
+    }
+
+    const url = buildApiFetchUrl(
+      effectiveBase,
+      `/api/session/${encodeURIComponent(params.id)}/prompt`,
+      { directory: requestDirectory },
+    );
+
+    assertProviderCircuitClosed(params.providerID);
+
+    let response!: Response;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        response = await fetch(url, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', accept: 'application/json' },
+          body: JSON.stringify({
+            id: messageId,
+            prompt: promptBody,
+            delivery: 'steer',
+          }),
+        });
+      } catch (error) {
+        if (attempt < 2 && isRetryableFetchError(error)) {
+          await new Promise((resolve) => setTimeout(resolve, getRetryDelayMs(attempt)));
+          continue;
+        }
+        recordProviderError(params.providerID);
+        throw error;
+      }
+
+      if (response.ok) {
+        recordProviderSuccess(params.providerID);
+        return messageId;
+      }
+
+      if (shouldRetry(params.providerID, response.status, attempt)) {
+        await new Promise((resolve) => setTimeout(resolve, getRetryDelayMs(attempt)));
+        continue;
+      }
+
+      let detail = '';
+      try { detail = await response.text(); } catch { /* ignore */ }
+      const suffix = detail.trim() ? `: ${detail.trim()}` : '';
+      recordProviderError(params.providerID, response.status);
+      throw new Error(`Failed to steer message (${response.status})${suffix}`);
+    }
+    throw new Error('Failed to steer message after retries');
   }
 
   async sendCommand(params: {

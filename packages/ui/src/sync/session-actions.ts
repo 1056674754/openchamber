@@ -47,7 +47,7 @@ type BuildOptimisticPartsInput = {
   createPartID: () => string
 }
 
-export type SendDeliveryMode = "normal" | "interrupt"
+export type SendDeliveryMode = "normal" | "interrupt" | "steer"
 
 export class SessionBusyError extends Error {
   readonly sessionId: string
@@ -115,6 +115,13 @@ async function resolveBlockedSessionBeforeSend(
     deliveryMode?: SendDeliveryMode
   },
 ): Promise<void> {
+  // Steer mode: inject as context via V2 API — never reject for busy, never abort.
+  // The V2 /api/session/{id}/prompt endpoint with delivery:"steer" handles busy
+  // sessions natively by promoting the input at the next step boundary.
+  if (input.deliveryMode === "steer") {
+    return
+  }
+
   if (input.deliveryMode !== "interrupt") {
     throw new SessionBusyError(input.sessionId, input.deliveryMode ?? "normal")
   }

@@ -2237,6 +2237,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                     await startReviewFlow({
                         originalSessionID: currentSessionId,
                         directory,
+                        serverId: serverRegistry.getServerForSession(currentSessionId) ?? null,
                         providerID: currentProviderId,
                         modelID: currentModelId,
                         agent: currentAgentName,
@@ -2454,7 +2455,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     }, [inputMode, getCurrentInputSnapshot, currentSessionId, sessionPhase, queueModeEnabled, handleQueueMessage]);
 
     const handleSendNow = React.useCallback(() => {
-        void handleSubmitRef.current();
+        void handleSubmitRef.current({ deliveryMode: 'steer' });
     }, []);
 
     const handleInterruptAndSend = React.useCallback(() => {
@@ -2689,8 +2690,12 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 
             if (queueModeEnabled) {
                 if (isCtrlEnter || !canQueue) {
-                    // Ctrl+Enter sends, or Enter when can't queue (new session)
-                    handleSubmit();
+                    // Ctrl+Enter sends (send now), or Enter when can't queue (new session)
+                    if (isCtrlEnter && sessionPhase !== 'idle') {
+                        handleSubmit({ deliveryMode: 'steer' });
+                    } else {
+                        handleSubmit();
+                    }
                 } else {
                     // Enter queues when we have a session
                     handleQueueMessage();

@@ -207,6 +207,7 @@ export function routeMessage(params: {
       messageId: messageID,
       directory: sessionDirectory,
       serverId: targetServerId,
+      deliveryMode: params.deliveryMode === "steer" ? "steer" : "normal",
     }).then(() => {}),
   })
 }

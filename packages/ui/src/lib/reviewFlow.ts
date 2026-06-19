@@ -13,12 +13,12 @@ import {
 } from '@/lib/sessionReviewMetadata';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
-import { useUIStore } from '@/stores/useUIStore';
 import { optimisticSend, patchSessionMetadata, waitForConnectionOrThrow } from '@/sync/session-actions';
 import { useSelectionStore } from '@/sync/selection-store';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { getSyncMessages, getSyncParts, registerSessionDirectory } from '@/sync/sync-refs';
 import { markPendingUserSendAnimation } from '@/lib/userSendAnimation';
+import { serverRegistry } from '@/lib/opencode/server-registry';
 
 const HANDOFF_TIMEOUT_MS = 180_000;
 const HANDOFF_POLL_MS = 400;
@@ -34,6 +34,7 @@ type SessionModelContext = {
 type StartReviewFlowInput = SessionModelContext & {
   originalSessionID: string;
   directory: string;
+  serverId?: string | null;
   agentMentionName?: string;
   generateHandoff?: boolean;
   returnAfterHandoffRequest?: boolean;
@@ -58,17 +59,44 @@ const getMessageRole = (message: Message): string => {
 
 const waitForAssistantText = async (sessionID: string, directory: string, afterCreatedAt: number): Promise<string> => {
   const deadline = Date.now() + HANDOFF_TIMEOUT_MS;
-  while (Date.now() < deadline) {
+  const extractText = (): string | null => {
     const messages = getSyncMessages(sessionID, directory);
     const candidates = messages
       .filter((message) => getMessageRole(message) === 'assistant')
       .filter((message) => getMessageCreatedAt(message) >= afterCreatedAt - 1000)
-      .filter(isMessageCompleted)
       .sort((left, right) => getMessageCreatedAt(right) - getMessageCreatedAt(left));
-
     for (const message of candidates) {
       const text = flattenAssistantTextParts(getSyncParts(message.id, directory)).trim();
       if (text) return text;
+    }
+    return null;
+  };
+  let sawBusy = false;
+  while (Date.now() < deadline) {
+    const status = useGlobalSessionsStore.getState().sessionStatuses.get(sessionID);
+    const isBusy = status?.type === 'busy' || status?.type === 'retry';
+    if (isBusy) sawBusy = true;
+
+    if (sawBusy && !isBusy) {
+      const text = extractText();
+      if (text) {
+        return text;
+      }
+    }
+
+    // Fallback: explicit completion markers.
+    {
+      const messages = getSyncMessages(sessionID, directory);
+      const completed = messages
+        .filter((message) => getMessageRole(message) === 'assistant')
+        .filter((message) => getMessageCreatedAt(message) >= afterCreatedAt - 1000)
+        .filter(isMessageCompleted)
+        .sort((left, right) => getMessageCreatedAt(right) - getMessageCreatedAt(left));
+
+      for (const message of completed) {
+        const text = flattenAssistantTextParts(getSyncParts(message.id, directory)).trim();
+        if (text) return text;
+      }
     }
 
     await new Promise((resolve) => setTimeout(resolve, HANDOFF_POLL_MS));
@@ -122,6 +150,7 @@ const sendPlainMessage = async (
   text: string,
   modelContext?: SessionModelContext | null,
   additionalParts?: Array<{ text: string; synthetic?: boolean }>,
+  serverId?: string | null,
 ): Promise<void> => {
   const resolved = modelContext ?? resolveModelContext(sessionID);
   if (!resolved) throw new Error('Select a model before sending review flow messages');
@@ -137,6 +166,7 @@ const sendPlainMessage = async (
     sessionId: sessionID,
     content: text,
     directory,
+    serverId: serverId ?? undefined,
     providerID: resolved.providerID,
     modelID: resolved.modelID,
     agent: resolved.agent,
@@ -150,17 +180,16 @@ const sendPlainMessage = async (
       text,
       additionalParts,
       messageId: messageID,
+      serverId: serverId ?? undefined,
     }).then(() => undefined),
   });
   requestChatForceScrollBottom(sessionID);
 };
 
-const openReviewSessionPanel = (directory: string, session: Session): void => {
-  useUIStore.getState().openContextPanelTab(directory, {
-    mode: 'chat',
-    dedupeKey: `session:${session.id}`,
-    label: session.title ?? null,
-  });
+// [OPENCHAMBER-FORK] Side panel's useEffectiveDirectory may return the wrong
+// path in worktree scenarios. Navigate directly until that is fixed.
+const openReviewSessionPanel = (directory: string, session: Session, serverId?: string | null): void => {
+  useSessionUIStore.getState().setCurrentSession(session.id, directory, { serverId: serverId ?? undefined });
 };
 
 const getSessionOrNull = async (sessionID: string, directory: string): Promise<Session | null> => {
@@ -210,6 +239,7 @@ const createOrReuseReviewSession = async (originalSessionID: string, directory: 
 
 export const startReviewFlow = async (input: StartReviewFlowInput): Promise<void> => {
   await waitForConnectionOrThrow();
+  const serverId = input.serverId ?? serverRegistry.getServerForSession(input.originalSessionID) ?? null;
   let reviewPrompt: string;
 
   if (input.generateHandoff ?? true) {
@@ -218,7 +248,7 @@ export const startReviewFlow = async (input: StartReviewFlowInput): Promise<void
     const startedAt = Date.now();
     await sendPlainMessage(input.originalSessionID, input.directory, visibleText, null, [
       { text: instructionsText, synthetic: true },
-    ]);
+    ], serverId);
 
     const continueFromHandoff = async (): Promise<void> => {
       const handoff = await waitForAssistantText(input.originalSessionID, input.directory, startedAt);
@@ -229,8 +259,8 @@ export const startReviewFlow = async (input: StartReviewFlowInput): Promise<void
         modelID: input.modelID,
         agent: input.agent,
         variant: input.variant,
-      });
-      openReviewSessionPanel(input.directory, reviewSession);
+      }, undefined, serverId);
+      openReviewSessionPanel(input.directory, reviewSession, serverId);
     };
 
     if (input.returnAfterHandoffRequest) {
@@ -252,19 +282,21 @@ export const startReviewFlow = async (input: StartReviewFlowInput): Promise<void
     modelID: input.modelID,
     agent: input.agent,
     variant: input.variant,
-  });
-  openReviewSessionPanel(input.directory, reviewSession);
+  }, undefined, serverId);
+  openReviewSessionPanel(input.directory, reviewSession, serverId);
 };
 
 export const sendReviewFeedbackToOriginal = async (reviewSessionID: string, directory: string, reviewFeedback: string): Promise<void> => {
+  const serverId = serverRegistry.getServerForSession(reviewSessionID) ?? null;
   const reviewSession = await opencodeClient.withDirectory(directory, () => opencodeClient.getSession(reviewSessionID));
   const originalSessionID = getOriginalSessionID(reviewSession);
   if (!originalSessionID) throw new Error('Original session is missing');
   const prompt = await renderMagicPrompt('session.reviewFeedbackToImplementer.visible', { review_feedback: reviewFeedback });
-  await sendPlainMessage(originalSessionID, directory, prompt);
+  await sendPlainMessage(originalSessionID, directory, prompt, null, undefined, serverId);
 };
 
 export const sendImplementationResponseToReviewer = async (originalSessionID: string, directory: string, implementationResponse: string): Promise<void> => {
+  const serverId = serverRegistry.getServerForSession(originalSessionID) ?? null;
   const originalSession = await opencodeClient.withDirectory(directory, () => opencodeClient.getSession(originalSessionID));
   const reviewSessionID = getReviewSessionID(originalSession);
   if (!reviewSessionID) throw new Error('Review session is missing');
@@ -276,8 +308,8 @@ export const sendImplementationResponseToReviewer = async (originalSessionID: st
     throw error;
   }
   const prompt = await renderMagicPrompt('session.implementationResponseToReviewer.visible', { implementation_response: implementationResponse });
-  await sendPlainMessage(reviewSessionID, directory, prompt);
-  openReviewSessionPanel(directory, reviewSession);
+  await sendPlainMessage(reviewSessionID, directory, prompt, null, undefined, serverId);
+  openReviewSessionPanel(directory, reviewSession, serverId);
 };
 
 export type ReviewTransferDirection = 'review-to-original' | 'original-to-review';

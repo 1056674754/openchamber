@@ -443,11 +443,17 @@ const ensureSocket = (state: RemoteRpcFetchState): Promise<WebSocket> => {
         responseBodyPreview: responsePreview.preview,
         responseBodyTruncated: responsePreview.truncated,
       })
-      pending.resolve(new Response(bytes, {
+      const responseInit: ResponseInit = {
         status,
         statusText: frame.statusText || "",
         headers: augmentResponseHeaders(frame.headers, pending.debug, elapsedMs),
-      }))
+      };
+      // [OPENCHAMBER-FORK] null-body statuses (204/205/304) reject Response with body.
+      if (bytes.byteLength > 0 && status !== 204 && status !== 205 && status !== 304) {
+        pending.resolve(new Response(bytes, responseInit));
+      } else {
+        pending.resolve(new Response(null, responseInit));
+      }
     }
 
     socket.onerror = () => {
