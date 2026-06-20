@@ -210,19 +210,28 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       return;
     }
 
-    try {
-      child.kill('SIGTERM');
-    } catch {
-    }
+    const signalChild = (signal) => {
+      if (process.env.OPENCHAMBER_RUNTIME === 'desktop') {
+        try {
+          process.kill(-pid, signal);
+          return;
+        } catch {
+        }
+      }
+
+      try {
+        child.kill(signal);
+      } catch {
+      }
+    };
+
+    signalChild('SIGTERM');
 
     if (await waitForChildProcessClose(child, 2500)) {
       return;
     }
 
-    try {
-      child.kill('SIGKILL');
-    } catch {
-    }
+    signalChild('SIGKILL');
 
     await waitForChildProcessClose(child, 1000);
   };

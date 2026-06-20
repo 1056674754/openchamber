@@ -28,6 +28,7 @@ const originalPath = process.env.PATH;
 const originalFetch = globalThis.fetch;
 
 afterEach(() => {
+  vi.restoreAllMocks();
   spawnMock.mockReset();
   finalizeInterruptedOpenCodeRunsMock.mockClear();
   globalThis.fetch = originalFetch;
@@ -173,6 +174,32 @@ describe('OpenCode lifecycle', () => {
     expect(persistManagedOpenCodeAuth).toHaveBeenCalledWith('password');
 
     await server.close();
+  });
+
+  it('terminates the detached desktop OpenCode process group on close', async () => {
+    process.env.OPENCHAMBER_RUNTIME = 'desktop';
+    delete process.env.OPENCODE_BINARY;
+    const child = createMockChild();
+    const killSpy = vi.spyOn(process, 'kill').mockImplementation((pid, signal) => {
+      expect(pid).toBe(-child.pid);
+      expect(signal).toBe('SIGTERM');
+      child.signalCode = 'SIGTERM';
+      queueMicrotask(() => child.emit('close', null, 'SIGTERM'));
+      return true;
+    });
+    spawnMock.mockImplementationOnce(() => {
+      queueMicrotask(() => {
+        child.stdout.emit('data', 'opencode server listening on http://127.0.0.1:45678\n');
+      });
+      return child;
+    });
+
+    const runtime = createRuntime();
+    const server = await runtime.startOpenCode();
+    await server.close();
+
+    expect(killSpy).toHaveBeenCalledWith(-child.pid, 'SIGTERM');
+    expect(child.kill).not.toHaveBeenCalledWith('SIGTERM');
   });
 
   it('restores persisted auth before reconnecting to the previous managed port', async () => {

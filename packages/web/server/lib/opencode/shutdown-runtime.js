@@ -21,6 +21,8 @@ export const createGracefulShutdownRuntime = (dependencies) => {
     setOpenCodeProcess,
     killProcessOnPort,
     waitForPortRelease,
+    getManagedOpenCodePorts = () => [],
+    clearManagedOpenCodePorts = () => {},
     getServer,
     getUiAuthController,
     setUiAuthController,
@@ -78,6 +80,15 @@ export const createGracefulShutdownRuntime = (dependencies) => {
     if (!skipOpenCodeStop) {
       const portToKill = getOpenCodePort();
       const openCodeProcess = getOpenCodeProcess();
+      const portsToKill = [];
+      const addPortToKill = (port) => {
+        if (!Number.isFinite(port) || port <= 0 || portsToKill.includes(port)) return;
+        portsToKill.push(port);
+      };
+      addPortToKill(portToKill);
+      for (const port of getManagedOpenCodePorts()) {
+        addPortToKill(port);
+      }
 
       if (openCodeProcess) {
         console.log('Stopping OpenCode process...');
@@ -89,10 +100,13 @@ export const createGracefulShutdownRuntime = (dependencies) => {
         setOpenCodeProcess(null);
       }
 
-      killProcessOnPort(portToKill);
-      if (!(await waitForPortRelease(portToKill, 5000))) {
-        console.warn(`Timed out waiting for OpenCode port ${portToKill} to be released during shutdown`);
+      for (const port of portsToKill) {
+        killProcessOnPort(port);
+        if (!(await waitForPortRelease(port, 5000))) {
+          console.warn(`Timed out waiting for OpenCode port ${port} to be released during shutdown`);
+        }
       }
+      clearManagedOpenCodePorts();
     } else {
       console.log('Skipping OpenCode shutdown (external server or preserved managed server)');
       const openCodeProcess = getOpenCodeProcess();

@@ -365,6 +365,7 @@ This module provides OpenCode server integration utilities for the web server ru
 - Project config: `<workingDirectory>/.opencode/opencode.json` or `opencode.json`.
 - Custom config: `OPENCODE_CONFIG` env var path.
 - Rate limit config: `OPENCHAMBER_RATE_LIMIT_MAX_ATTEMPTS`, `OPENCHAMBER_RATE_LIMIT_NO_IP_MAX_ATTEMPTS` env vars.
+- Managed OpenCode runtime state: `<openchamberDataDir>/last-opencode-port`, `<openchamberDataDir>/managed-opencode-ports.json`, and `<openchamberDataDir>/managed-opencode-auth.json`.
 
 ## Notes for contributors
 - This module serves as foundation for OpenCode-related server utilities.

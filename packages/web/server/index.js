@@ -302,11 +302,51 @@ const CLOUDFLARE_LEGACY_NAMED_TUNNELS_FILE_PATH = path.join(OPENCHAMBER_DATA_DIR
 const CLOUDFLARE_MANAGED_REMOTE_TUNNELS_VERSION = 1;
 
 const LAST_OPENCODE_PORT_FILE = path.join(OPENCHAMBER_DATA_DIR, 'last-opencode-port');
+const MANAGED_OPENCODE_PORTS_FILE = path.join(OPENCHAMBER_DATA_DIR, 'managed-opencode-ports.json');
 const MANAGED_OPENCODE_AUTH_FILE = path.join(OPENCHAMBER_DATA_DIR, 'managed-opencode-auth.json');
+
+const normalizeManagedOpenCodePort = (value) => {
+  const port = Number.parseInt(String(value ?? ''), 10);
+  return Number.isFinite(port) && port > 0 && port <= 65535 ? port : null;
+};
+
+const readManagedOpenCodePorts = () => {
+  try {
+    if (!fs.existsSync(MANAGED_OPENCODE_PORTS_FILE)) return [];
+    const raw = fs.readFileSync(MANAGED_OPENCODE_PORTS_FILE, 'utf8');
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return [...new Set(parsed.map(normalizeManagedOpenCodePort).filter((port) => port !== null))];
+  } catch {
+    return [];
+  }
+};
+
+const writeManagedOpenCodePorts = (ports) => {
+  try {
+    fs.mkdirSync(OPENCHAMBER_DATA_DIR, { recursive: true });
+    const normalized = [...new Set((ports || []).map(normalizeManagedOpenCodePort).filter((port) => port !== null))];
+    fs.writeFileSync(MANAGED_OPENCODE_PORTS_FILE, JSON.stringify(normalized, null, 2), 'utf8');
+  } catch {
+  }
+};
+
+const rememberManagedOpenCodePort = (port) => {
+  const normalizedPort = normalizeManagedOpenCodePort(port);
+  if (normalizedPort === null) return;
+  const ports = readManagedOpenCodePorts().filter((entry) => entry !== normalizedPort);
+  ports.push(normalizedPort);
+  writeManagedOpenCodePorts(ports.slice(-20));
+};
+
+const clearManagedOpenCodePorts = () => {
+  writeManagedOpenCodePorts([]);
+};
 
 const persistOpenCodePort = (port) => {
   try {
     fs.writeFileSync(LAST_OPENCODE_PORT_FILE, String(port), 'utf8');
+    rememberManagedOpenCodePort(port);
   } catch {
   }
 };
@@ -315,8 +355,7 @@ const readPersistedOpenCodePort = () => {
   try {
     if (!fs.existsSync(LAST_OPENCODE_PORT_FILE)) return null;
     const raw = fs.readFileSync(LAST_OPENCODE_PORT_FILE, 'utf8').trim();
-    const port = parseInt(raw, 10);
-    return Number.isFinite(port) && port > 0 && port <= 65535 ? port : null;
+    return normalizeManagedOpenCodePort(raw);
   } catch {
     return null;
   }
@@ -1181,6 +1220,8 @@ const gracefulShutdownRuntime = createGracefulShutdownRuntime({
   },
   killProcessOnPort,
   waitForPortRelease,
+  getManagedOpenCodePorts: readManagedOpenCodePorts,
+  clearManagedOpenCodePorts,
   getServer: () => server,
   getUiAuthController: () => uiAuthController,
   setUiAuthController: (value) => {
