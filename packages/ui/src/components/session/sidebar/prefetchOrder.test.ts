@@ -43,7 +43,7 @@ const baseInput = (overrides: Partial<Parameters<typeof buildSidebarSessionPrefe
   groupSearchDataByGroup: new WeakMap<SessionGroup, GroupSearchData>(),
   collapsedProjects: new Set<string>(),
   collapsedGroups: new Set<string>(),
-  expandedSessionGroups: new Set<string>(),
+  visibleSessionCountByGroup: new Map<string, number>(),
   expandedParents: new Set<string>(),
   collapsedFolderIds: new Set<string>(),
   foldersMap: {},
@@ -139,5 +139,45 @@ describe('buildSidebarSessionPrefetchOrder', () => {
       'recent-7',
       'project-session',
     ]);
+  });
+
+  test('prefetches only the staged visible session count for long groups', () => {
+    const nodes = Array.from({ length: 20 }, (_, index) => node(`session-${index + 1}`, [], 1));
+    const sectionsForRender = [
+      { project: { id: 'project-a' }, groups: [group('root', nodes)] },
+    ];
+    const input = {
+      ...baseInput({
+        now: 10_000_000_000,
+        sectionsForRender,
+        sessionOrderIndex: new Map(nodes.map((entry, index) => [entry.session.id, index])),
+      }),
+      visibleSessionCountByGroup: new Map([['project-a:root', 14]]),
+    };
+
+    expect(buildSidebarSessionPrefetchOrder(input)).toEqual(
+      Array.from({ length: 14 }, (_, index) => `session-${index + 1}`),
+    );
+  });
+
+  test('keeps the recent-session base visible when staged count is lower', () => {
+    const nodes = Array.from({ length: 15 }, (_, index) => node(`session-${index + 1}`, [], index < 10 ? 10_000_000 : 1));
+    const sectionsForRender = [
+      { project: { id: 'project-a' }, groups: [group('root', nodes)] },
+    ];
+    const input = {
+      ...baseInput({
+        now: 10_000_000,
+        sectionsForRender,
+        sessionGroupMinVisible: 7,
+        sessionGroupRecentHours: 1,
+        sessionOrderIndex: new Map(nodes.map((entry, index) => [entry.session.id, index])),
+      }),
+      visibleSessionCountByGroup: new Map([['project-a:root', 7]]),
+    };
+
+    expect(buildSidebarSessionPrefetchOrder(input)).toEqual(
+      Array.from({ length: 10 }, (_, index) => `session-${index + 1}`),
+    );
   });
 });

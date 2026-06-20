@@ -20,6 +20,7 @@ import { useI18n } from '@/lib/i18n';
 
 const ARCHIVED_VIRTUALIZE_THRESHOLD = 50;
 const ARCHIVED_ROW_ESTIMATE_PX = 28;
+const SESSION_GROUP_SHOW_MORE_INCREMENT = 7;
 
 type DeleteFolderConfirm = {
   scopeKey: string;
@@ -37,7 +38,7 @@ type Props = {
   hasSessionSearchQuery: boolean;
   normalizedSessionSearchQuery: string;
   groupSearchDataByGroup: WeakMap<SessionGroup, GroupSearchData>;
-  expandedSessionGroups: Set<string>;
+  visibleSessionCount: number | undefined;
   collapsedGroups: Set<string>;
   hideDirectoryControls: boolean;
   collapsedFolderIds: Set<string>;
@@ -49,7 +50,8 @@ type Props = {
   renderSessionNode: (node: SessionNode, depth?: number, groupDirectory?: string | null, projectId?: string | null, archivedBucket?: boolean, secondaryMeta?: { projectLabel?: string | null; branchLabel?: string | null } | null) => React.ReactNode;
   currentSessionDirectory: string | null;
   projectRepoStatus: Map<string, boolean | null>;
-  toggleGroupSessionLimit: (groupKey: string) => void;
+  showMoreGroupSessions: (groupKey: string, nextVisibleCount: number) => void;
+  resetGroupSessionLimit: (groupKey: string) => void;
   mobileVariant: boolean;
   alwaysShowActions: boolean;
   activeProjectId: string | null;
@@ -104,7 +106,7 @@ export function SessionGroupSection(props: Props): React.ReactNode {
     hasSessionSearchQuery,
     normalizedSessionSearchQuery,
     groupSearchDataByGroup,
-    expandedSessionGroups,
+    visibleSessionCount,
     collapsedGroups,
     hideDirectoryControls,
     collapsedFolderIds,
@@ -115,7 +117,8 @@ export function SessionGroupSection(props: Props): React.ReactNode {
     setDeleteFolderConfirm,
     renderSessionNode,
     projectRepoStatus,
-    toggleGroupSessionLimit,
+    showMoreGroupSessions,
+    resetGroupSessionLimit,
     mobileVariant,
     alwaysShowActions,
     activeProjectId,
@@ -164,7 +167,6 @@ export function SessionGroupSection(props: Props): React.ReactNode {
   const displayMode = useSessionDisplayStore((state) => state.displayMode);
   const foldersMap = useSessionFoldersStore((state) => state.foldersMap);
   const isMinimalMode = displayMode === 'minimal';
-  const isExpanded = expandedSessionGroups.has(groupKey);
   const isCollapsed = hasSessionSearchQuery ? false : collapsedGroups.has(groupKey);
   const groupMatchesSearch = hasSessionSearchQuery ? searchData?.groupMatches === true : false;
   const shouldFilterGroupContents = hasSessionSearchQuery;
@@ -268,7 +270,7 @@ export function SessionGroupSection(props: Props): React.ReactNode {
   const sessionGroupMinVisible = useUIStore((state) => state.sessionGroupMinVisible);
   const sessionGroupRecentHours = useUIStore((state) => state.sessionGroupRecentHours);
 
-  const maxVisible = React.useMemo(() => {
+  const baseVisibleCount = React.useMemo(() => {
     if (hideDirectoryControls) return 10;
     const minVisible = typeof sessionGroupMinVisible === 'number' && sessionGroupMinVisible >= 1
       ? sessionGroupMinVisible : 7;
@@ -286,12 +288,21 @@ export function SessionGroupSection(props: Props): React.ReactNode {
   }, [hideDirectoryControls, ungroupedSessions, sessionGroupMinVisible, sessionGroupRecentHours]);
 
   const totalSessions = ungroupedSessions.length;
+  const requestedVisibleCount = Math.max(baseVisibleCount, visibleSessionCount ?? baseVisibleCount);
   const visibleSessions = group.isArchivedBucket
     ? ungroupedSessions
     : hasSessionSearchQuery
       ? ungroupedSessions
-      : (isExpanded ? ungroupedSessions : ungroupedSessions.slice(0, maxVisible));
+      : ungroupedSessions.slice(0, requestedVisibleCount);
   const remainingCount = totalSessions - visibleSessions.length;
+  const showMoreCount = Math.min(SESSION_GROUP_SHOW_MORE_INCREMENT, remainingCount);
+  const nextVisibleCount = visibleSessions.length + showMoreCount;
+  const canShowLess = !group.isArchivedBucket
+    && !hasSessionSearchQuery
+    && remainingCount === 0
+    && totalSessions > baseVisibleCount
+    && visibleSessionCount !== undefined
+    && visibleSessionCount > baseVisibleCount;
 
   const { pinnedNodes, unpinnedNodes } = React.useMemo(() => {
     const allPinned = new Set([...pinnedSessionIds, ...projectPinnedSessionIds]);
@@ -622,21 +633,21 @@ export function SessionGroupSection(props: Props): React.ReactNode {
             : t('sessions.sidebar.group.empty.noSessionsInWorkspace')}
         </div>
       ) : null}
-      {remainingCount > 0 && !isExpanded ? (
+      {remainingCount > 0 ? (
         <button
           type="button"
-          onClick={() => toggleGroupSessionLimit(groupKey)}
+          onClick={() => showMoreGroupSessions(groupKey, nextVisibleCount)}
           className="mt-0.5 flex items-center justify-start rounded-md px-1.5 py-0.5 text-left text-xs text-muted-foreground/70 leading-tight hover:text-foreground hover:underline"
         >
-          {remainingCount === 1
-            ? t('sessions.sidebar.group.showMoreSingle', { count: remainingCount })
-            : t('sessions.sidebar.group.showMorePlural', { count: remainingCount })}
+          {showMoreCount === 1
+            ? t('sessions.sidebar.group.showMoreSingle', { count: showMoreCount })
+            : t('sessions.sidebar.group.showMorePlural', { count: showMoreCount })}
         </button>
       ) : null}
-      {isExpanded && totalSessions > maxVisible ? (
+      {canShowLess ? (
         <button
           type="button"
-          onClick={() => toggleGroupSessionLimit(groupKey)}
+          onClick={() => resetGroupSessionLimit(groupKey)}
           className="mt-0.5 flex items-center justify-start rounded-md px-1.5 py-0.5 text-left text-xs text-muted-foreground/70 leading-tight hover:text-foreground hover:underline"
         >
           {t('sessions.sidebar.group.showFewer')}
