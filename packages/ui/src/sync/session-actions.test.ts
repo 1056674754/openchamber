@@ -557,6 +557,43 @@ describe("optimisticSend", () => {
     expect(abortCalls[0].params.directory).toBe("/test/project")
   })
 
+  test("sends steer delivery without aborting a busy session", async () => {
+    const store = createStore({})
+    store.setState({
+      session_status: {
+        "session-a": { type: "busy" },
+      },
+    })
+    const childStores = createChildStores([["/test/project", store]])
+    let sendCalled = false
+    const optimisticAdds: Array<{ message: { metadata?: Record<string, unknown> } }> = []
+
+    const { setActionRefs, setOptimisticRefs, optimisticSend } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/test/project")
+    setOptimisticRefs(
+      (input) => {
+        optimisticAdds.push(input as (typeof optimisticAdds)[number])
+      },
+      () => {},
+    )
+
+    await optimisticSend({
+      sessionId: "session-a",
+      content: "steer me",
+      providerID: "anthropic",
+      modelID: "claude",
+      deliveryMode: "steer",
+      send: async () => {
+        sendCalled = true
+      },
+    })
+
+    expect(sendCalled).toBe(true)
+    expect(sessionCalls.filter((call) => call.method === "session.abort")).toHaveLength(0)
+    expect(optimisticAdds[0]?.message.metadata?.openchamberLiveSteer).toBe(true)
+    expect(optimisticAdds[0]?.message.metadata?.openchamberDeliveryMode).toBe("steer")
+  })
+
   test("allows shell sends to provide a custom optimistic display part", async () => {
     const store = createStore({})
     const childStores = createChildStores([["/test/project", store]])

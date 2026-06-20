@@ -1,5 +1,4 @@
-import { isSystemDirectiveMessage } from '@/lib/messages/system-directive';
-import { hasSubtaskPart } from '@/lib/messages/real-user';
+import { getAuxiliaryUserMessageKind } from '@/lib/messages/real-user';
 
 import { projectTurnActivity } from './projectTurnActivity';
 import { projectTurnIndexes } from './projectTurnIndexes';
@@ -190,7 +189,7 @@ export const projectTurnRecords = (
             return;
         }
 
-        const foldUnderParent = isSystemDirectiveMessage(message.parts) || hasSubtaskPart(message.parts);
+        const foldUnderParent = getAuxiliaryUserMessageKind(message.parts, message.info) !== null;
         const turnId = message.info.id;
         const turn: TurnRecord = {
             turnId,

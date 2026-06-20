@@ -21,7 +21,7 @@ const isUserMessage = (message: Message): boolean => {
 }
 
 export const isRealUserMessage = (message: Message, parts: Part[] | undefined): boolean => {
-  return isUserMessage(message) && hasRealUserMessageParts(parts)
+  return isUserMessage(message) && hasRealUserMessageParts(parts, message)
 }
 
 export const getPageParts = (page: Pick<MessagePage, "part">, messageID: string): Part[] | undefined => {

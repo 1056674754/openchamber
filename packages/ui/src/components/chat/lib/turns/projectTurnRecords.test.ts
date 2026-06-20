@@ -9,18 +9,21 @@ function createMessageEntry({
     parentID,
     createdAt,
     parts,
+    metadata,
 }: {
     id: string;
     role: 'user' | 'assistant' | 'system';
     parentID?: string;
     createdAt: number;
     parts?: Part[];
+    metadata?: Record<string, unknown>;
 }): ChatMessageEntry {
     return {
         info: {
             id,
             role,
             ...(parentID ? { parentID } : {}),
+            ...(metadata ? { metadata } : {}),
             time: { created: createdAt },
         } as Message,
         parts: parts ?? ([] as Part[]),
@@ -220,6 +223,38 @@ describe('projectTurnRecords', () => {
         expect(projection.turns[1]?.isDirectiveTurn).toBe(true);
         expect(projection.turns[1]?.assistantMessageIds).toEqual(['a2']);
 
+        expect(projection.ungroupedMessageIds.size).toBe(0);
+    });
+
+    test('live steer user message folds under parent turn (isDirectiveTurn)', () => {
+        const user = createMessageEntry({ id: 'u1', role: 'user', createdAt: 1 });
+        const assistant = createMessageEntry({ id: 'a1', role: 'assistant', parentID: 'u1', createdAt: 2 });
+        const steer = createMessageEntry({
+            id: 'st1',
+            role: 'user',
+            parentID: 'a1',
+            createdAt: 3,
+            metadata: { openchamberLiveSteer: true },
+            parts: [{
+                type: 'text',
+                text: 'steer this running turn',
+            } as Part],
+        });
+        const assistantToSteer = createMessageEntry({
+            id: 'a2',
+            role: 'assistant',
+            parentID: 'st1',
+            createdAt: 4,
+        });
+
+        const projection = projectTurnRecords([user, assistant, steer, assistantToSteer]);
+
+        expect(projection.turns).toHaveLength(2);
+        expect(projection.turns[0]?.turnId).toBe('u1');
+        expect(projection.turns[0]?.isDirectiveTurn).toBe(false);
+        expect(projection.turns[1]?.turnId).toBe('st1');
+        expect(projection.turns[1]?.isDirectiveTurn).toBe(true);
+        expect(projection.turns[1]?.assistantMessageIds).toEqual(['a2']);
         expect(projection.ungroupedMessageIds.size).toBe(0);
     });
 

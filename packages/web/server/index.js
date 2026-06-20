@@ -58,7 +58,11 @@ import {
   registerServerStatusRoutes,
 } from './lib/opencode/core-routes.js';
 import { registerOpenChamberRoutes } from './lib/opencode/openchamber-routes.js';
-import { prepareOpenChamberConfig, cleanupOpenChamberPluginFromUserConfig, checkPluginLoaded } from './lib/opencode/plugin-bootstrap.js';
+import {
+  prepareOpenChamberConfig,
+  cleanupOpenChamberPluginFromUserConfig,
+  checkPluginLoaded,
+} from './lib/opencode/plugin-bootstrap.js';
 import { createServerUtilsRuntime } from './lib/opencode/server-utils-runtime.js';
 import { createStaticRoutesRuntime } from './lib/opencode/static-routes-runtime.js';
 import { createSettingsRuntime } from './lib/opencode/settings-runtime.js';
@@ -1048,7 +1052,24 @@ const openCodeLifecycleRuntime = createOpenCodeLifecycleRuntime({
 const restartOpenCode = (...args) => openCodeLifecycleRuntime.restartOpenCode(...args);
 const waitForOpenCodeReady = (...args) => openCodeLifecycleRuntime.waitForOpenCodeReady(...args);
 const waitForAgentPresence = (...args) => openCodeLifecycleRuntime.waitForAgentPresence(...args);
-const refreshOpenCodeAfterConfigChange = (...args) => openCodeLifecycleRuntime.refreshOpenCodeAfterConfigChange(...args);
+const verifyOpenChamberPluginLoaded = async () => {
+  if (!openCodeLifecycleState.openCodePort) return null;
+  const url = `http://127.0.0.1:${openCodeLifecycleState.openCodePort}`;
+  const result = await checkPluginLoaded(url, getOpenCodeAuthHeaders(), {
+    expectedPid: openCodeLifecycleState.openCodeProcess?.pid,
+  });
+  if (!result.loaded) {
+    console.warn('[openchamber] plugin not loaded:', result.reason);
+  } else {
+    console.log('[openchamber] plugin verified:', result.tools.join(', '));
+  }
+  return result;
+};
+const refreshOpenCodeAfterConfigChange = async (...args) => {
+  const result = await openCodeLifecycleRuntime.refreshOpenCodeAfterConfigChange(...args);
+  await verifyOpenChamberPluginLoaded();
+  return result;
+};
 const startHealthMonitoring = () => openCodeLifecycleRuntime.startHealthMonitoring(HEALTH_CHECK_INTERVAL);
 const triggerHealthCheck = () => openCodeLifecycleRuntime.triggerHealthCheck();
 const scheduledTasksRuntime = createScheduledTasksRuntime({
@@ -1111,14 +1132,7 @@ const bootstrapOpenCodeAtStartup = async (...args) => {
     startHealthMonitoring();
   }
   setTimeout(async () => {
-    if (!openCodeLifecycleState.openCodePort) return;
-    const url = `http://127.0.0.1:${openCodeLifecycleState.openCodePort}`;
-    const result = await checkPluginLoaded(url, getOpenCodeAuthHeaders());
-    if (!result.loaded) {
-      console.warn('[openchamber] plugin not loaded:', result.reason);
-    } else {
-      console.log('[openchamber] plugin verified:', result.tools.join(', '));
-    }
+    await verifyOpenChamberPluginLoaded();
   }, 5000);
   if (ENV_DESKTOP_NOTIFY) {
     void ensureGlobalWatcherStarted().catch((error) => {

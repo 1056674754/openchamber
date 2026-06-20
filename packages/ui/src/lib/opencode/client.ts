@@ -17,7 +17,7 @@ import type { QuestionRequest } from "@/types/question";
 import type { SessionMarkers, SessionMarkersPatch } from "@/stores/types/sessionMarkers";
 import { waitForWorktreeBootstrap } from "@/lib/worktrees/worktreeBootstrap";
 import { resolveSdkForDirectory, resolveBaseUrlForSession } from "@/sync/session-routing";
-import { resolveApiUrl } from "@/lib/api/serverUrl";
+import { resolveApiUrl, resolveOpenCodeProxyApiUrl } from "@/lib/api/serverUrl";
 import { buildOpenCodeHealthUrl } from "./health-url";
 import {
   assertProviderCircuitClosed,
@@ -115,13 +115,7 @@ const ensureAbsoluteBaseUrl = (candidate: string): string => {
   }
 };
 
-const buildApiFetchUrl = (
-  baseUrl: string,
-  path: string,
-  query?: Record<string, string | undefined>,
-): string => {
-  const normalizedBase = baseUrl.replace(/\/+$/, "");
-  const url = resolveApiUrl(path, normalizedBase);
+const appendQueryString = (url: string, query?: Record<string, string | undefined>): string => {
   const params = new URLSearchParams();
   for (const [key, value] of Object.entries(query ?? {})) {
     if (value !== undefined) {
@@ -133,6 +127,24 @@ const buildApiFetchUrl = (
     return url;
   }
   return `${url}${url.includes("?") ? "&" : "?"}${queryString}`;
+};
+
+const buildApiFetchUrl = (
+  baseUrl: string,
+  path: string,
+  query?: Record<string, string | undefined>,
+): string => {
+  const normalizedBase = baseUrl.replace(/\/+$/, "");
+  return appendQueryString(resolveApiUrl(path, normalizedBase), query);
+};
+
+const buildOpenCodeProxyApiFetchUrl = (
+  baseUrl: string,
+  path: string,
+  query?: Record<string, string | undefined>,
+): string => {
+  const normalizedBase = baseUrl.replace(/\/+$/, "");
+  return appendQueryString(resolveOpenCodeProxyApiUrl(path, normalizedBase), query);
 };
 
 const resolveDesktopBaseUrl = (): string | null => {
@@ -183,6 +195,30 @@ export type ProjectFileSearchHit = {
 type MessageWithParts = {
   info: Message;
   parts: Part[];
+};
+
+const isObjectRecord = (value: unknown): value is Record<string, unknown> => {
+  return typeof value === "object" && value !== null;
+};
+
+const readSteerAdmission = async (response: Response, expectedMessageId: string): Promise<void> => {
+  const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
+  if (!contentType.includes("application/json")) {
+    const detail = await response.text().catch(() => "");
+    const excerpt = detail.trim().slice(0, 160);
+    throw new Error(`invalid admission response content-type ${contentType || "unknown"}${excerpt ? `: ${excerpt}` : ""}`);
+  }
+
+  const payload: unknown = await response.json().catch(() => null);
+  if (!isObjectRecord(payload) || !isObjectRecord(payload.data)) {
+    throw new Error("invalid admission response payload");
+  }
+
+  const admittedId = payload.data.id;
+  const delivery = payload.data.delivery;
+  if (admittedId !== expectedMessageId || delivery !== "steer") {
+    throw new Error(`unexpected admission response for ${expectedMessageId}`);
+  }
 };
 
 type AgentPartInputLite = {
@@ -928,7 +964,7 @@ class OpencodeService {
       }));
     }
 
-    const url = buildApiFetchUrl(
+    const url = buildOpenCodeProxyApiFetchUrl(
       effectiveBase,
       `/api/session/${encodeURIComponent(params.id)}/prompt`,
       { directory: requestDirectory },
@@ -958,6 +994,12 @@ class OpencodeService {
       }
 
       if (response.ok) {
+        try {
+          await readSteerAdmission(response, messageId);
+        } catch (error) {
+          recordProviderError(params.providerID, response.status);
+          throw new Error(`Failed to steer message: ${formatSdkError(error)}`);
+        }
         recordProviderSuccess(params.providerID);
         return messageId;
       }

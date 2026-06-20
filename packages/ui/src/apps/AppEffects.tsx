@@ -4,6 +4,7 @@ import { usePwaManifestSync } from '@/hooks/usePwaManifestSync';
 import { useQueuedMessageAutoSend } from '@/hooks/useQueuedMessageAutoSend';
 import { useSessionAutoCleanup } from '@/hooks/useSessionAutoCleanup';
 import { useWindowControlsOverlayLayout } from '@/hooks/useWindowControlsOverlayLayout';
+import { OpenChamberPluginStatusToast } from '@/components/update/OpenChamberPluginStatusToast';
 import { setOptimisticRefs } from '@/sync/session-actions';
 import { markSessionViewed } from '@/sync/notification-store';
 import { setExternallyViewedSession } from '@/sync/sync-context';
@@ -79,6 +80,7 @@ export function SyncAppEffects({ embeddedBackgroundWorkEnabled }: {
     <>
       <SyncRuntimeEffects embeddedBackgroundWorkEnabled={embeddedBackgroundWorkEnabled} />
       <MiniChatPresenceBridge />
+      <OpenChamberPluginStatusToast />
     </>
   );
 }

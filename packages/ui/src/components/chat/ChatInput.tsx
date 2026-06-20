@@ -1305,8 +1305,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 
     const [pluginLoaded, setPluginLoaded] = React.useState<boolean | null>(null);
     React.useEffect(() => {
-      fetch('/api/openchamber/plugin-status').then(r => r.json()).then((data: { loaded?: boolean }) => {
-        setPluginLoaded(data.loaded === true);
+      fetch('/api/openchamber/plugin-status').then(r => r.json()).then((data: { loaded?: boolean; reason?: string }) => {
+        setPluginLoaded(data.reason === 'not-checked' ? null : data.loaded === true);
       }).catch(() => setPluginLoaded(null));
     }, []);
 

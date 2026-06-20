@@ -23,16 +23,19 @@ import MessageBody from './message/MessageBody';
 import type { AgentMentionInfo } from './message/types';
 import type { StreamPhase, ToolPopupContent } from './message/types';
 import { deriveMessageRole } from './message/messageRole';
-import { extractTextContent, filterVisibleParts, normalizeParts } from './message/partUtils';
+import { filterVisibleParts, normalizeParts } from './message/partUtils';
 import { normalizeUserDisplayParts } from './message/normalizeUserDisplayParts';
 import { flattenAssistantTextParts } from '@/lib/messages/messageText';
-import { isFullySyntheticMessage } from '@/lib/messages/synthetic';
+import {
+    extractOpenChamberLiveSteerText,
+    getAuxiliaryUserMessageKind,
+    type AuxiliaryUserMessageKind,
+} from '@/lib/messages/real-user';
 import {
     extractDirectiveType,
     extractRemainingTasks,
     extractStatusInfo,
     hasOMOMarker,
-    isSystemDirectiveMessage,
     DIRECTIVE_TYPE_CONTINUATION,
 } from '@/lib/messages/system-directive';
 import { isLikelyProviderAuthFailure, PROVIDER_AUTH_FAILURE_MESSAGE } from '@/lib/messages/providerAuthError';
@@ -158,6 +161,7 @@ const SystemDirectiveBanner: React.FC<{
     message: { info: Message; parts: Part[] };
     displayParts: Part[];
     directiveType: string | null;
+    auxiliaryKind: AuxiliaryUserMessageKind | null;
     isMessageCompleted: boolean;
     messageFinish: string | undefined;
     syntaxTheme: { [key: string]: React.CSSProperties };
@@ -170,14 +174,17 @@ const SystemDirectiveBanner: React.FC<{
     streamPhase: StreamPhase;
     allowAnimation: boolean;
     onContentChange?: (reason?: ContentChangeReason, messageId?: string) => void;
-}> = ({ message, displayParts, directiveType, isMessageCompleted, messageFinish, syntaxTheme, isMobile, copiedCode, onCopyCode, expandedTools, onToggleTool, onShowPopup, streamPhase, allowAnimation, onContentChange }) => {
+}> = ({ message, displayParts, directiveType, auxiliaryKind, isMessageCompleted, messageFinish, syntaxTheme, isMobile, copiedCode, onCopyCode, expandedTools, onToggleTool, onShowPopup, streamPhase, allowAnimation, onContentChange }) => {
     const [isExpanded, setIsExpanded] = React.useState(false);
     const statusInfo = extractStatusInfo(message.parts);
     const remainingTasks = extractRemainingTasks(message.parts);
     const hasOMO = hasOMOMarker(message.parts);
+    const isLiveSteer = auxiliaryKind === 'live-steer';
+    const liveSteerText = isLiveSteer ? extractOpenChamberLiveSteerText(message.parts) : null;
     const isContinuation = directiveType === DIRECTIVE_TYPE_CONTINUATION;
-    const title = isContinuation ? 'Loop' : (directiveType ?? 'System');
-    const accentColor = isContinuation ? 'var(--status-warning)' : 'var(--status-info)';
+    const title = isLiveSteer ? 'Steer' : (isContinuation ? 'Loop' : (directiveType ?? 'System'));
+    const accentColor = isLiveSteer || isContinuation ? 'var(--status-warning)' : 'var(--status-info)';
+    const previewText = liveSteerText ?? statusInfo;
 
     return (
         <div
@@ -212,9 +219,9 @@ const SystemDirectiveBanner: React.FC<{
                 >
                     {title}
                 </span>
-                {statusInfo && (
+                {previewText && (
                     <span className="text-xs truncate" style={{ color: 'var(--surface-mutedForeground)' }}>
-                        {statusInfo}
+                        {previewText}
                     </span>
                 )}
                 <span className="flex items-center gap-1.5 ml-auto">
@@ -355,23 +362,20 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
 
 
     const messageRole = React.useMemo(() => deriveMessageRole(message.info), [message.info]);
-    const isSystemDirective = React.useMemo(() => {
-        if (!messageRole.isUser) return false;
-        return isSystemDirectiveMessage(message.parts);
-    }, [message.parts, messageRole.isUser]);
+    const auxiliaryUserMessageKind = React.useMemo(() => {
+        if (!messageRole.isUser) return null;
+        return getAuxiliaryUserMessageKind(message.parts, message.info);
+    }, [message.info, message.parts, messageRole.isUser]);
+    const rendersAsDirectiveBanner = auxiliaryUserMessageKind === 'system-directive'
+        || auxiliaryUserMessageKind === 'live-steer';
     const directiveType = React.useMemo(
-        () => isSystemDirective ? extractDirectiveType(message.parts) : null,
-        [isSystemDirective, message.parts],
+        () => rendersAsDirectiveBanner ? extractDirectiveType(message.parts) : null,
+        [rendersAsDirectiveBanner, message.parts],
     );
     const shouldRenderAsAssistant = React.useMemo(() => {
         if (!messageRole.isUser) return false;
-        const parts = Array.isArray(message.parts) ? message.parts : [];
-        if (isSystemDirective) return true;
-        if (parts.some((p) => p?.type === 'subtask')) return true;
-        if (isFullySyntheticMessage(parts)) return true;
-        if (parts.filter((p) => p?.type === 'text').some((p) => extractTextContent(p).includes('<system-reminder>'))) return true;
-        return false;
-    }, [message.parts, messageRole.isUser, isSystemDirective]);
+        return auxiliaryUserMessageKind !== null;
+    }, [auxiliaryUserMessageKind, messageRole.isUser]);
     const isUser = messageRole.isUser && !shouldRenderAsAssistant;
     const useExternalUserActionsRow = isUser && (isMobile || !stickyUserHeader);
     const showStickyInlineHoverRow = isUser && !isMobile && stickyUserHeader && !useExternalUserActionsRow;
@@ -591,8 +595,9 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
 
     const isMessageCompleted = React.useMemo(() => {
         if (isUser) return true;
+        if (auxiliaryUserMessageKind !== null) return true;
         return Boolean(messageCompletedAt && messageCompletedAt > 0);
-    }, [isUser, messageCompletedAt]);
+    }, [auxiliaryUserMessageKind, isUser, messageCompletedAt]);
 
     const messageFinish = React.useMemo(() => {
         return getMessageFinishReason(message.info, message.parts);
@@ -617,6 +622,25 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
 
         return visibleParts;
     }, [chatRenderMode, isMessageCompleted, isUser, visibleParts]);
+
+    const directiveDisplayParts = React.useMemo(() => {
+        if (auxiliaryUserMessageKind !== 'live-steer') {
+            return displayParts;
+        }
+
+        const liveSteerText = extractOpenChamberLiveSteerText(message.parts);
+        if (!liveSteerText) {
+            return displayParts;
+        }
+
+        return [{
+            id: `${message.info.id}-live-steer-display`,
+            sessionID: message.info.sessionID,
+            messageID: message.info.id,
+            type: 'text',
+            text: liveSteerText,
+        } as Part];
+    }, [auxiliaryUserMessageKind, displayParts, message.info.id, message.info.sessionID, message.parts]);
 
 
     const assistantTextParts = React.useMemo(() => {
@@ -1194,7 +1218,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
             <div
                 className={cn(
                     'group w-full',
-                    isSystemDirective ? 'pt-1 pb-0' : isUser ? (isMobile ? 'pt-1.5' : 'pt-4') : assistantTopPaddingClass,
+                    rendersAsDirectiveBanner ? 'pt-1 pb-0' : isUser ? (isMobile ? 'pt-1.5' : 'pt-4') : assistantTopPaddingClass,
                     'pb-0'
                 )}
                 id={`message-${message.info.id}`}
@@ -1202,11 +1226,12 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                 ref={messageContainerRef}
             >
                 <div className="chat-message-column relative">
-                    {isSystemDirective ? (
+                    {rendersAsDirectiveBanner ? (
                         <SystemDirectiveBanner
                             message={message}
-                            displayParts={displayParts}
+                            displayParts={directiveDisplayParts}
                             directiveType={directiveType}
+                            auxiliaryKind={auxiliaryUserMessageKind}
                             isMessageCompleted={isMessageCompleted}
                             messageFinish={messageFinish}
                             syntaxTheme={syntaxTheme}

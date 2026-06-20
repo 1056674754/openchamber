@@ -1,13 +1,22 @@
-import { pathToFileURL, fileURLToPath } from 'node:url';
+import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import { existsSync, mkdirSync, writeFileSync, readFileSync, statSync, readdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { spawnSync } from 'node:child_process';
+import { writeOpenChamberOverlay as writeOpenChamberOverlayFile } from './plugin-overlay.js';
 
 const OVERLAY_DIR = resolve(homedir(), '.config', 'openchamber');
 const OVERLAY_FILE = resolve(OVERLAY_DIR, 'opencode-overlay.json');
 const PLUGIN_INSTALL_DIR = resolve(OVERLAY_DIR, 'plugin');
 const PLUGIN_ENTRY = resolve(PLUGIN_INSTALL_DIR, 'index.js');
+const PLUGIN_STATUS_FILE = resolve(PLUGIN_INSTALL_DIR, 'status.json');
+const OPENCHAMBER_PLUGIN_ID = '@openchamber/plugin';
+const REQUIRED_TOOLS = ['describe_image', 'save_image_analysis'];
+const REQUIRED_RUNTIME_FEATURES = ['liveSteer'];
+
+function isRecord(value) {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
 
 function needsRebuild(sourcePath) {
   if (!existsSync(PLUGIN_ENTRY)) return true;
@@ -42,6 +51,14 @@ function buildPlugin(sourceDir) {
   return result.status === 0 && existsSync(PLUGIN_ENTRY);
 }
 
+function writeOpenChamberOverlay() {
+  return writeOpenChamberOverlayFile({
+    overlayDir: OVERLAY_DIR,
+    overlayFile: OVERLAY_FILE,
+    pluginEntry: PLUGIN_ENTRY,
+  });
+}
+
 function getLatestSourceMtime(dir) {
   const srcDir = resolve(dir, 'src');
   if (!existsSync(srcDir)) return 0;
@@ -61,10 +78,7 @@ export function prepareOpenChamberConfig() {
   const sourceDir = findPluginSourceDir();
   if (!sourceDir) {
     if (existsSync(PLUGIN_ENTRY)) {
-      const overlay = { plugin: [pathToFileURL(PLUGIN_ENTRY).href] };
-      mkdirSync(OVERLAY_DIR, { recursive: true });
-      writeFileSync(OVERLAY_FILE, JSON.stringify(overlay, null, 2), 'utf8');
-      return OVERLAY_FILE;
+      return writeOpenChamberOverlay();
     }
     console.warn('[openchamber] could not find plugin source and no cached build');
     return null;
@@ -86,10 +100,7 @@ export function prepareOpenChamberConfig() {
     }
   }
 
-  const overlay = { plugin: [pathToFileURL(PLUGIN_ENTRY).href] };
-  mkdirSync(OVERLAY_DIR, { recursive: true });
-  writeFileSync(OVERLAY_FILE, JSON.stringify(overlay, null, 2), 'utf8');
-  return OVERLAY_FILE;
+  return writeOpenChamberOverlay();
 }
 
 export function cleanupOpenChamberPluginFromUserConfig() {
@@ -116,38 +127,129 @@ export function cleanupOpenChamberPluginFromUserConfig() {
   }
 }
 
-const REQUIRED_TOOLS = ['describe_image', 'save_image_analysis'];
 let _pluginStatus = { loaded: false, reason: 'not-checked' };
 
 export function getPluginStatus() {
   return _pluginStatus;
 }
 
-export async function checkPluginLoaded(openCodeUrl, authHeaders) {
+export function normalizePluginRuntimeStatus(raw) {
+  if (!isRecord(raw)) return null;
+  const features = isRecord(raw.features) ? raw.features : null;
+  if (!features) return null;
+  const tools = Array.isArray(raw.tools) ? raw.tools.filter((tool) => typeof tool === 'string') : [];
+  return {
+    id: typeof raw.id === 'string' ? raw.id : null,
+    version: typeof raw.version === 'number' ? raw.version : null,
+    loadedAt: typeof raw.loadedAt === 'string' ? raw.loadedAt : null,
+    pid: typeof raw.pid === 'number' ? raw.pid : null,
+    features,
+    tools,
+  };
+}
+
+export function getMissingRequiredPluginRuntimeFeatures(status) {
+  return REQUIRED_RUNTIME_FEATURES.filter((feature) => status?.features?.[feature] !== true);
+}
+
+export function getPluginRuntimeStatusFailureReason(status, expectedPid) {
+  if (typeof expectedPid === 'number') {
+    if (typeof status?.pid !== 'number') {
+      return 'missing runtime pid';
+    }
+    if (status.pid !== expectedPid) {
+      return `runtime pid mismatch: ${status.pid} !== ${expectedPid}`;
+    }
+  }
+
+  const missingFeatures = getMissingRequiredPluginRuntimeFeatures(status);
+  return missingFeatures.length > 0 ? `missing runtime features: ${missingFeatures.join(', ')}` : null;
+}
+
+function readPluginRuntimeStatus() {
+  if (!existsSync(PLUGIN_STATUS_FILE)) return null;
+  try {
+    return normalizePluginRuntimeStatus(JSON.parse(readFileSync(PLUGIN_STATUS_FILE, 'utf8')));
+  } catch {
+    return null;
+  }
+}
+
+export async function checkPluginLoaded(openCodeUrl, authHeaders, options = {}) {
+  const checkedAt = new Date().toISOString();
   try {
     const response = await fetch(`${openCodeUrl}/experimental/tool/ids`, {
       headers: { Accept: 'application/json', ...authHeaders },
       signal: AbortSignal.timeout(5000),
     });
     if (!response.ok) {
-      _pluginStatus = { loaded: false, reason: `HTTP ${response.status}` };
+      _pluginStatus = { loaded: false, reason: `HTTP ${response.status}`, checkedAt };
       return _pluginStatus;
     }
     const ids = await response.json();
     if (!Array.isArray(ids)) {
-      _pluginStatus = { loaded: false, reason: 'unexpected response' };
+      _pluginStatus = { loaded: false, reason: 'unexpected response', checkedAt };
       return _pluginStatus;
     }
     const missing = REQUIRED_TOOLS.filter((t) => !ids.includes(t));
     if (missing.length > 0) {
       console.warn('[openchamber] plugin not fully loaded, missing tools:', missing);
-      _pluginStatus = { loaded: false, reason: `missing: ${missing.join(', ')}` };
+      _pluginStatus = {
+        loaded: false,
+        reason: `missing tools: ${missing.join(', ')}`,
+        missingTools: missing,
+        checkedAt,
+      };
       return _pluginStatus;
     }
-    _pluginStatus = { loaded: true, tools: REQUIRED_TOOLS };
+
+    const runtimeStatus = readPluginRuntimeStatus();
+    if (!runtimeStatus) {
+      _pluginStatus = {
+        loaded: false,
+        reason: 'missing runtime status',
+        tools: REQUIRED_TOOLS,
+        checkedAt,
+      };
+      return _pluginStatus;
+    }
+    if (runtimeStatus.id !== OPENCHAMBER_PLUGIN_ID) {
+      _pluginStatus = {
+        loaded: false,
+        reason: 'unexpected plugin runtime status',
+        tools: REQUIRED_TOOLS,
+        checkedAt,
+        runtime: runtimeStatus,
+      };
+      return _pluginStatus;
+    }
+    const runtimeFailureReason = getPluginRuntimeStatusFailureReason(runtimeStatus, options.expectedPid);
+    if (runtimeFailureReason) {
+      _pluginStatus = {
+        loaded: false,
+        reason: runtimeFailureReason,
+        tools: REQUIRED_TOOLS,
+        missingFeatures: getMissingRequiredPluginRuntimeFeatures(runtimeStatus),
+        checkedAt,
+        runtime: runtimeStatus,
+      };
+      return _pluginStatus;
+    }
+
+    _pluginStatus = {
+      loaded: true,
+      tools: REQUIRED_TOOLS,
+      features: runtimeStatus.features,
+      checkedAt,
+      runtime: {
+        loadedAt: runtimeStatus.loadedAt,
+        pid: runtimeStatus.pid,
+        version: runtimeStatus.version,
+      },
+    };
     return _pluginStatus;
   } catch (error) {
-    _pluginStatus = { loaded: false, reason: error?.message || String(error) };
+    _pluginStatus = { loaded: false, reason: error?.message || String(error), checkedAt };
     return _pluginStatus;
   }
 }

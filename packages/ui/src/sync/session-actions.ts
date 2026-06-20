@@ -845,7 +845,9 @@ export async function optimisticSend(input: {
     system: "",
     agent: input.agent ?? "",
     model: `${input.providerID}/${input.modelID}`,
-    metadata: {} as Record<string, unknown>,
+    metadata: (input.deliveryMode === "steer"
+      ? { openchamberLiveSteer: true, openchamberDeliveryMode: "steer" }
+      : {}) as Record<string, unknown>,
     time: { created: Date.now(), completed: 0 },
   } as unknown as Message
 
