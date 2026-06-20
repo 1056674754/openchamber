@@ -15,6 +15,7 @@ import { isSyntheticPart } from "@/lib/messages/synthetic"
 import { serverRegistry, DEFAULT_SERVER_ID } from "@/lib/opencode/server-registry"
 import { getSyncStoresForServer, getAllSyncStores } from "./multi-server-registry"
 import { materializeSessionSnapshots } from "./materialization"
+import { persistSteerSideChannelMessage } from "./steer-side-channel"
 import { stripMessageDiffSnapshots } from "./sanitize"
 import { sessionEvents } from "@/lib/sessionEvents"
 import { hasTerminalMessageSignal, type TerminalMessageSignalInfo } from "@/lib/messageCompletion"
@@ -835,11 +836,17 @@ export async function optimisticSend(input: {
     }
   }
 
+  const stateBeforeOptimistic = store.getState()
+  const parentAssistantMessage = input.deliveryMode === "steer"
+    ? [...(stateBeforeOptimistic.message[input.sessionId] ?? [])].reverse().find((message) => message.role === "assistant")
+    : undefined
+  const steerParentID = parentAssistantMessage?.id ?? ""
+
   const optimisticMessage = {
     id: messageID,
     role: "user" as const,
     sessionID: input.sessionId,
-    parentID: "",
+    parentID: steerParentID,
     modelID: input.modelID,
     providerID: input.providerID,
     system: "",
@@ -850,6 +857,19 @@ export async function optimisticSend(input: {
       : {}) as Record<string, unknown>,
     time: { created: Date.now(), completed: 0 },
   } as unknown as Message
+
+  if (input.deliveryMode === "steer") {
+    persistSteerSideChannelMessage({
+      sessionID: input.sessionId,
+      messageID,
+      parentID: steerParentID,
+      text: input.content,
+      createdAt: optimisticMessage.time.created,
+      providerID: input.providerID,
+      modelID: input.modelID,
+      agent: input.agent ?? "",
+    })
+  }
 
   // Insert into store + register in shadow Map (for mergeOptimisticPage cleanup)
   _optimisticAdd({

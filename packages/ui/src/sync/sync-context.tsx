@@ -53,6 +53,7 @@ import { getSessionMaterializationStatus, materializeSessionSnapshots } from "./
 import { setSessionPrefetch } from "./session-prefetch-cache"
 import { listSessionsForBootstrap } from "./session-list-bootstrap"
 import { fetchMessagePageToUserBoundary, getPageParts, type MessagePage } from "./message-page-boundary"
+import { getMissingSteerSideChannelRecords, getSteerSideChannelSignature } from "./steer-side-channel"
 
 // ---------------------------------------------------------------------------
 // Context
@@ -2827,6 +2828,7 @@ type SessionMessageRecordsSnapshot = {
   visibleMessages: Message[]
   revertMessageID?: string
   suspendPartUpdates: boolean
+  steerSideChannelSignature: string
   list: SessionMessageRecord[]
   byId: Map<string, SessionMessageRecord>
 }
@@ -2920,6 +2922,7 @@ const getReusableSessionMessageRecordsSnapshot = (
 ): SessionMessageRecordsSnapshot | undefined => {
   const cached = readCachedSessionMessageRecordsSnapshot(store, sessionID, suspendPartUpdates)
   if (!cached) return undefined
+  const steerSideChannelSignature = getSteerSideChannelSignature(sessionID)
   const sourceMessages = state.message[sessionID] ?? EMPTY_MESSAGES
   const session = state.session.find((candidate) => candidate.id === sessionID)
   const revertMessageID = (session as { revert?: { messageID?: string } } | undefined)?.revert?.messageID
@@ -2927,6 +2930,7 @@ const getReusableSessionMessageRecordsSnapshot = (
     cached.sourceMessages === sourceMessages
     && cached.revertMessageID === revertMessageID
     && cached.suspendPartUpdates === suspendPartUpdates
+    && cached.steerSideChannelSignature === steerSideChannelSignature
     && snapshotPartsMatchState(cached, state)
   ) {
     return cached
@@ -2969,12 +2973,18 @@ export function buildSessionMessageRecordsSnapshot(
   suspendPartUpdates = false,
 ): SessionMessageRecordsSnapshot {
   const { sourceMessages, visibleMessages, revertMessageID } = getVisibleMessagesForSession(state, sessionID, previous)
+  const steerSideChannelSignature = getSteerSideChannelSignature(sessionID)
+  const sideChannelRecords = getMissingSteerSideChannelRecords(sessionID, visibleMessages)
+  const sideChannelParts = new Map(sideChannelRecords.map((record) => [record.info.id, record.parts] as const))
+  const effectiveMessages = sideChannelRecords.length === 0
+    ? visibleMessages
+    : [...visibleMessages, ...sideChannelRecords.map((record) => record.info)].sort((left, right) => left.id.localeCompare(right.id))
   const nextById = new Map<string, SessionMessageRecord>()
-  const nextList = visibleMessages.map((message) => {
+  const nextList = effectiveMessages.map((message) => {
     const previousRecord = previous?.byId.get(message.id)
     const parts = suspendPartUpdates && previousRecord
       ? previousRecord.parts
-      : (state.part[message.id] ?? EMPTY_PARTS)
+      : (sideChannelParts.get(message.id) ?? state.part[message.id] ?? EMPTY_PARTS)
 
     const nextRecord = previousRecord && previousRecord.info === message && previousRecord.parts === parts
       ? previousRecord
@@ -2985,7 +2995,8 @@ export function buildSessionMessageRecordsSnapshot(
   })
 
   const unchanged = Boolean(previous)
-    && previous?.visibleMessages === visibleMessages
+    && previous?.visibleMessages === effectiveMessages
+    && previous.steerSideChannelSignature === steerSideChannelSignature
     && previous.list.length === nextList.length
     && previous.list.every((record, index) => record === nextList[index])
 
@@ -2996,9 +3007,10 @@ export function buildSessionMessageRecordsSnapshot(
   return {
     sessionID,
     sourceMessages,
-    visibleMessages,
+    visibleMessages: effectiveMessages,
     revertMessageID,
     suspendPartUpdates,
+    steerSideChannelSignature,
     list: nextList,
     byId: nextById,
   }
@@ -3065,6 +3077,7 @@ export function useSessionMessageRecords(
     visibleMessages: EMPTY_MESSAGES,
     revertMessageID: undefined,
     suspendPartUpdates: Boolean(options?.suspendPartUpdates),
+    steerSideChannelSignature: "",
     list: [],
     byId: new Map(),
   })
