@@ -4797,17 +4797,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                     />
                                 </div>
                                 <div className={cn('flex items-center flex-1 justify-end', footerGapClass, 'md:gap-x-3')}>
-                                    <div
-                                        className={cn('flex items-center justify-center', iconSizeClass)}
-                                        title={currentModelSupportsImages
-                                            ? t('chat.input.visionCapable')
-                                            : t('chat.input.visionNotCapable')}
-                                    >
-                                        <Icon
-                                            name={currentModelSupportsImages ? 'eye' : 'eye-off'}
-                                            className={cn(iconSizeClass, currentModelSupportsImages ? 'text-muted-foreground' : 'text-muted-foreground/40')}
-                                        />
-                                    </div>
                                     <MemoModelControls className={cn('flex-1 min-w-0 justify-end')} />
                                     <MemoBrowserVoiceButton />
                                     <ComposerActionButtons

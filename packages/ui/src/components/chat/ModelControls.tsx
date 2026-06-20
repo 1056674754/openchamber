@@ -3039,6 +3039,17 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                     ) : (
                         <>
                             {renderVariantSelector()}
+                            <div
+                                className={cn('flex items-center justify-center shrink-0', buttonHeight)}
+                                title={currentMetadata?.modalities?.input?.includes('image') || currentMetadata?.attachment
+                                    ? t('chat.input.visionCapable')
+                                    : t('chat.input.visionNotCapable')}
+                            >
+                                <Icon
+                                    name={(currentMetadata?.modalities?.input?.includes('image') || currentMetadata?.attachment) ? 'eye' : 'eye-off'}
+                                    className="size-3.5 text-muted-foreground/60"
+                                />
+                            </div>
                             {renderModelSelector()}
                             {renderAgentSelector()}
                         </>
