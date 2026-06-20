@@ -140,7 +140,7 @@ export const useChatTimelineController = ({
         let count = 0;
         for (const message of messages) {
             const role = (message.info as { clientRole?: string | null; role?: string | null }).clientRole ?? message.info.role;
-            if (role === 'user' && hasRealUserMessageParts(message.parts)) {
+            if (role === 'user' && hasRealUserMessageParts(message.parts, message.info)) {
                 count += 1;
             }
         }
@@ -155,7 +155,7 @@ export const useChatTimelineController = ({
         for (const message of messages) {
             const role = (message.info as { clientRole?: string | null; role?: string | null }).clientRole ?? message.info.role;
             if (role === 'user') {
-                if (hasRealUserMessageParts(message.parts)) {
+                if (hasRealUserMessageParts(message.parts, message.info)) {
                     groupIndex += 1;
                 }
                 map.set(message.info.id, Math.max(groupIndex, 0));
