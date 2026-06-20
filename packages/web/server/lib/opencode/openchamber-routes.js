@@ -1,7 +1,10 @@
 import express from 'express';
 import { homedir } from 'node:os';
 
-import { SessionMarkersValidationError } from './session-markers-store.js';
+import {
+  SessionMarkersPersistenceError,
+  SessionMarkersValidationError,
+} from './session-markers-store.js';
 import { getPluginStatus } from './plugin-bootstrap.js';
 
 export const registerOpenChamberRoutes = (app, dependencies) => {
@@ -362,6 +365,9 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
       if (error instanceof SessionMarkersValidationError) {
         return res.status(400).json({ error: error.message });
       }
+      if (error instanceof SessionMarkersPersistenceError) {
+        return res.status(500).json({ error: error.message });
+      }
       throw error;
     }
   });
@@ -372,7 +378,14 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
       return res.status(400).json({ error: 'Missing sessionId' });
     }
     if (!markersStore) return res.status(503).json({ error: 'Markers store unavailable' });
-    markersStore.clear(sessionId);
+    try {
+      markersStore.clear(sessionId);
+    } catch (error) {
+      if (error instanceof SessionMarkersPersistenceError) {
+        return res.status(500).json({ error: error.message });
+      }
+      throw error;
+    }
     res.json({ sessionId, cleared: true });
   });
 

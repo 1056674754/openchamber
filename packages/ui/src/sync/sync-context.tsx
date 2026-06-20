@@ -1990,6 +1990,10 @@ export function SyncProvider(props: {
     bootstrapGlobal(props.sdk, globalActions.set)
       .then(() => {
         bootedAt = Date.now()
+        fetchAndHydrateUnreadState()
+        fetchAndHydrateMarkersState().catch((err) => {
+          console.warn("[markers] failed to hydrate markers state", err)
+        })
       })
       .finally(() => {
         bootingRoot = false

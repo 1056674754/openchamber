@@ -143,6 +143,16 @@ export class SessionMarkersValidationError extends Error {
 }
 
 /**
+ * Error thrown when a validated marker change cannot be persisted.
+ */
+export class SessionMarkersPersistenceError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'SessionMarkersPersistenceError';
+  }
+}
+
+/**
  * Validate a patch in place. Throws {@link SessionMarkersValidationError} on
  * any invalid field.
  *
@@ -197,6 +207,11 @@ const validatePatch = (patch) => {
  * @throws {Error} if neither driver is available
  */
 const loadDatabaseConstructor = () => {
+  if (typeof Bun !== 'undefined') {
+    const bunSqlite = require('bun:sqlite');
+    if (typeof bunSqlite?.Database === 'function') return bunSqlite.Database;
+  }
+
   let betterSqliteError = null;
 
   try {
@@ -207,13 +222,6 @@ const loadDatabaseConstructor = () => {
     }
   } catch (error) {
     betterSqliteError = error;
-  }
-
-  try {
-    const bunSqlite = require('bun:sqlite');
-    if (typeof bunSqlite?.Database === 'function') return bunSqlite.Database;
-  } catch {
-    // fall through
   }
 
   const message = betterSqliteError instanceof Error ? betterSqliteError.message : String(betterSqliteError);
@@ -380,10 +388,8 @@ export const createSessionMarkersStore = ({ fs, path, dataDir, onChange }) => {
    * - `todos`: undefined → leave; array → REPLACE (deduped, validated)
    * - `important`: undefined → leave; null/false → clear; true → set
    *
-   * Persistence uses an atomic UPSERT. If the write throws, the in-memory
-   * state is still updated (so the route still returns 200 with the new
-   * view) but no broadcast fires — this matches the JSON version's lenient
-   * "broadcast gated on write success" behavior.
+   * Persistence uses an atomic UPSERT. If the write fails, the in-memory view
+   * is left unchanged and callers get a deterministic persistence error.
    *
    * @param {string} sessionId
    * @param {SessionMarkersPatch} patch
@@ -431,12 +437,12 @@ export const createSessionMarkersStore = ({ fs, path, dataDir, onChange }) => {
       }
     }
 
-    data.sessions[sessionId] = next;
-
     const view = normalizeEntry(next);
-    if (writeRow(sessionId, view)) {
-      emitChange(sessionId, view);
+    if (!writeRow(sessionId, view)) {
+      throw new SessionMarkersPersistenceError('Failed to persist session markers');
     }
+    data.sessions[sessionId] = view;
+    emitChange(sessionId, view);
     return view;
   };
 
@@ -451,8 +457,10 @@ export const createSessionMarkersStore = ({ fs, path, dataDir, onChange }) => {
     if (!sessionId || typeof sessionId !== 'string') return false;
     const hadEntry = sessionId in data.sessions;
     if (hadEntry) {
+      if (!deleteRow(sessionId)) {
+        throw new SessionMarkersPersistenceError('Failed to clear session markers');
+      }
       delete data.sessions[sessionId];
-      if (!deleteRow(sessionId)) return false;
     }
     emitChange(sessionId, null);
     return true;

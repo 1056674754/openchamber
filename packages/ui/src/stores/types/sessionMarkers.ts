@@ -5,7 +5,7 @@
  * because the Session type is owned by @opencode-ai/sdk and cannot be
  * extended from OpenChamber (AGENTS.md: do not modify ../opencode).
  *
- * Persisted server-side at `<openchamberDataDir>/session-markers.json`
+ * Persisted server-side at `<openchamberDataDir>/openchamber-sessions.db`
  * and broadcast to clients via `openchamber:session-markers` SSE events.
  * The pattern mirrors `session-unread-store.js` + `notification-store.ts`.
  */
