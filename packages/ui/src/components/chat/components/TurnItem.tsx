@@ -4,6 +4,7 @@ import { animate, type AnimationPlaybackControls } from 'motion';
 import { Icon } from '@/components/icon/Icon';
 import type { ChatMessageEntry, TurnRecord } from '../lib/turns/types';
 import { formatTurnDuration } from '../lib/turns/duration';
+import { segmentProcessMessagesByPinnedQuestions } from '../lib/turns/processSegments';
 import { useI18n } from '@/lib/i18n';
 
 interface RenderMessageOptions {
@@ -169,6 +170,7 @@ const ProcessToggle: React.FC<{
 
 const ProcessMessages: React.FC<{
     turn: TurnRecord;
+    foldId: string;
     processMessages: ChatMessageEntry[];
     foldDefault: {
         expanded: boolean;
@@ -186,24 +188,25 @@ const ProcessMessages: React.FC<{
     processedLabel,
     collapseLabel,
     durationText,
+    foldId,
 }) => {
     const regionRef = React.useRef<HTMLDivElement | null>(null);
     const mountedRef = React.useRef(false);
     const animationRunRef = React.useRef(0);
     const animationsRef = React.useRef<AnimationPlaybackControls[]>([]);
     const initialExpanded = foldDefault.enabled ? foldDefault.expanded : true;
-    const foldDefaultKey = `${turn.turnId}:${foldDefault.enabled ? 'enabled' : 'open'}:${foldDefault.expanded ? 'expanded' : 'collapsed'}`;
+    const foldDefaultKey = `${turn.turnId}:${foldId}:${foldDefault.enabled ? 'enabled' : 'open'}:${foldDefault.expanded ? 'expanded' : 'collapsed'}`;
     const [userExpansion, setUserExpansion] = React.useState<{ key: string; value: boolean | null }>(() => ({
         key: foldDefaultKey,
         value: null,
     }));
-    const [detailsRenderState, setDetailsRenderState] = React.useState<{ turnId: string; shouldRender: boolean }>(() => ({
-        turnId: turn.turnId,
+    const [detailsRenderState, setDetailsRenderState] = React.useState<{ key: string; shouldRender: boolean }>(() => ({
+        key: foldDefaultKey,
         shouldRender: initialExpanded,
     }));
 
     const userExpanded = userExpansion.key === foldDefaultKey ? userExpansion.value : null;
-    const shouldRenderDetails = detailsRenderState.turnId === turn.turnId
+    const shouldRenderDetails = detailsRenderState.key === foldDefaultKey
         ? detailsRenderState.shouldRender
         : initialExpanded;
 
@@ -216,12 +219,12 @@ const ProcessMessages: React.FC<{
 
     const setDetailsShouldRender = React.useCallback((shouldRender: boolean) => {
         setDetailsRenderState((previous) => {
-            if (previous.turnId === turn.turnId && previous.shouldRender === shouldRender) {
+            if (previous.key === foldDefaultKey && previous.shouldRender === shouldRender) {
                 return previous;
             }
-            return { turnId: turn.turnId, shouldRender };
+            return { key: foldDefaultKey, shouldRender };
         });
-    }, [turn.turnId]);
+    }, [foldDefaultKey]);
 
     const setExpandedOverride = React.useCallback((nextExpanded: boolean) => {
         if (nextExpanded) {
@@ -295,7 +298,7 @@ const ProcessMessages: React.FC<{
             animationsRef.current.forEach((animation) => animation.stop());
             animationsRef.current = [];
         };
-    }, [expanded, renderDetails, setDetailsShouldRender, turn.turnId]);
+    }, [expanded, foldDefaultKey, renderDetails, setDetailsShouldRender]);
 
     React.useEffect(() => {
         return () => {
@@ -384,17 +387,32 @@ const TurnItem: React.FC<TurnItemProps> = ({
                 {renderMessage(summaryMessage)}
             </div>
         ) : null;
+        const processSegments = segmentProcessMessagesByPinnedQuestions(processMessages);
         return (
             <>
-                <ProcessMessages
-                    turn={assistantTurn}
-                    processMessages={processMessages}
-                    foldDefault={resolveProcessFoldState(assistantTurn)}
-                    renderMessage={renderMessage}
-                    processedLabel={processLabel}
-                    collapseLabel={t('chat.messageBody.activity.collapse')}
-                    durationText={durationText}
-                />
+                {processSegments.map((segment, index) => {
+                    if (segment.kind === 'pinned-question') {
+                        return (
+                            <div key={`question-${segment.message.info.id}`} data-process-pinned-question="true">
+                                {renderMessage(segment.message)}
+                            </div>
+                        );
+                    }
+
+                    return (
+                        <ProcessMessages
+                            key={`fold-${index}-${segment.messages[0]?.info.id ?? 'empty'}`}
+                            turn={assistantTurn}
+                            foldId={`fold-${index}`}
+                            processMessages={segment.messages}
+                            foldDefault={resolveProcessFoldState(assistantTurn)}
+                            renderMessage={renderMessage}
+                            processedLabel={processLabel}
+                            collapseLabel={t('chat.messageBody.activity.collapse')}
+                            durationText={durationText}
+                        />
+                    );
+                })}
                 {summaryElement}
             </>
         );
