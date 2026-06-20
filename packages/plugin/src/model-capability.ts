@@ -59,14 +59,20 @@ export function createModelCapabilityChecker(client: PluginInput["client"]): Mod
         return { supportsImage: true, reason: "unknown" }
       }
 
-      // Primary signal: modalities.input includes "image"
-      if (model.modalities?.input && Array.isArray(model.modalities.input)) {
-        const hasImage = model.modalities.input.includes("image")
-        return { supportsImage: hasImage, reason: "modalities" }
+      const hasModalityImage = model.modalities?.input
+        && Array.isArray(model.modalities.input)
+        && model.modalities.input.includes("image")
+      const hasAttachment = model.attachment === true
+
+      if (hasModalityImage || hasAttachment) {
+        return { supportsImage: true, reason: hasModalityImage ? "modalities" : "attachment" }
       }
 
-      // Fallback signal: attachment capability flag
-      return { supportsImage: model.attachment === true, reason: "attachment" }
+      if (model.modalities?.input && Array.isArray(model.modalities.input)) {
+        return { supportsImage: false, reason: "modalities" }
+      }
+
+      return { supportsImage: true, reason: "unknown" }
     } catch {
       // On lookup failure, assume vision-capable to avoid blocking legitimate sends.
       return { supportsImage: true, reason: "error" }
