@@ -258,6 +258,29 @@ describe('projectTurnRecords', () => {
         expect(projection.ungroupedMessageIds.size).toBe(0);
     });
 
+    test('assistant-parented user message is inferred as live steer when metadata is missing', () => {
+        const user = createMessageEntry({ id: 'u1', role: 'user', createdAt: 1 });
+        const assistant = createMessageEntry({ id: 'a1', role: 'assistant', parentID: 'u1', createdAt: 2 });
+        const steer = createMessageEntry({
+            id: 'st1',
+            role: 'user',
+            parentID: 'a1',
+            createdAt: 3,
+            parts: [{
+                type: 'text',
+                text: 'steer this running turn',
+            } as Part],
+        });
+
+        const projection = projectTurnRecords([user, assistant, steer]);
+
+        expect(projection.turns).toHaveLength(2);
+        expect(projection.turns[1]?.turnId).toBe('st1');
+        expect(projection.turns[1]?.isDirectiveTurn).toBe(true);
+        expect((projection.turns[1]?.userMessage.info as unknown as { metadata?: Record<string, unknown> }).metadata?.openchamberLiveSteer).toBe(true);
+        expect(projection.ungroupedMessageIds.size).toBe(0);
+    });
+
     test('real user message after a subtask continuation is NOT foldable', () => {
         const user1 = createMessageEntry({ id: 'u1', role: 'user', createdAt: 1 });
         const a1 = createMessageEntry({ id: 'a1', role: 'assistant', parentID: 'u1', createdAt: 2 });

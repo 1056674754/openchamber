@@ -4,7 +4,8 @@ import { animate, type AnimationPlaybackControls } from 'motion';
 import { Icon } from '@/components/icon/Icon';
 import type { ChatMessageEntry, TurnRecord } from '../lib/turns/types';
 import { formatTurnDuration } from '../lib/turns/duration';
-import { segmentProcessMessagesByPinnedQuestions } from '../lib/turns/processSegments';
+import { segmentProcessMessagesByPinnedBoundaries } from '../lib/turns/processSegments';
+import { getDirectiveParentId, mergeDirectiveMessagesAfterAnchors } from '../lib/turns/directiveProcessMessages';
 import { useI18n } from '@/lib/i18n';
 
 interface RenderMessageOptions {
@@ -373,27 +374,37 @@ const TurnItem: React.FC<TurnItemProps> = ({
             enabled: true,
         };
     }, [getProcessFoldState]);
-    const renderAssistantMessages = React.useCallback((assistantTurn: TurnRecord) => {
+    const renderAssistantMessages = React.useCallback((assistantTurn: TurnRecord, inlineDirectiveTurns?: readonly TurnRecord[]) => {
         const assistantMessages = assistantTurn.assistantMessages;
         const { processMessages, summaryMessage } = splitProcessMessages(assistantMessages);
-        if (processMessages.length === 0) {
-            return summaryMessage ? renderMessage(summaryMessage) : null;
+        const summaryDirectiveTurns = inlineDirectiveTurns?.filter((directiveTurn) => {
+            const parentId = getDirectiveParentId(directiveTurn.userMessage);
+            return summaryMessage ? parentId === summaryMessage.info.id : false;
+        });
+        const processDirectiveTurns = inlineDirectiveTurns?.filter((directiveTurn) => !summaryDirectiveTurns?.includes(directiveTurn));
+        const processMessagesWithDirectives = mergeDirectiveMessagesAfterAnchors(processMessages, processDirectiveTurns);
+        const summaryMessages = mergeDirectiveMessagesAfterAnchors(
+            summaryMessage ? [summaryMessage] : [],
+            summaryDirectiveTurns,
+        );
+        if (processMessagesWithDirectives.length === 0) {
+            return summaryMessages.map((message) => renderMessage(message));
         }
 
         const durationText = getTurnDurationText(assistantTurn);
-        const processLabel = t(summaryMessage ? 'chat.messageBody.activity.processed' : 'chat.messageBody.activity.process');
-        const summaryElement = summaryMessage ? (
+        const processLabel = t(summaryMessages.length > 0 ? 'chat.messageBody.activity.processed' : 'chat.messageBody.activity.process');
+        const summaryElement = summaryMessages.length > 0 ? (
             <div data-process-fold-content="summary">
-                {renderMessage(summaryMessage)}
+                {summaryMessages.map((message) => renderMessage(message))}
             </div>
         ) : null;
-        const processSegments = segmentProcessMessagesByPinnedQuestions(processMessages);
+        const processSegments = segmentProcessMessagesByPinnedBoundaries(processMessagesWithDirectives);
         return (
             <>
                 {processSegments.map((segment, index) => {
-                    if (segment.kind === 'pinned-question') {
+                    if (segment.kind === 'pinned-message') {
                         return (
-                            <div key={`question-${segment.message.info.id}`} data-process-pinned-question="true">
+                            <div key={`pinned-${segment.message.info.id}`} data-process-pinned-message="true">
                                 {renderMessage(segment.message)}
                             </div>
                         );
@@ -486,29 +497,8 @@ const TurnItem: React.FC<TurnItemProps> = ({
             <div
                 className="relative z-0"
             >
-                {renderAssistantMessages(turn)}
+                {renderAssistantMessages(turn, directiveTurns)}
             </div>
-
-            {hasDirectives && directiveTurns.map((dTurn) => (
-                <div key={dTurn.turnId} data-directive-turn-id={dTurn.turnId}>
-                    {stickyUserHeader ? (
-                        <div
-                            className="sticky z-10 bg-[var(--surface-background)] [overflow-anchor:none]"
-                            style={{ top: 'var(--oc-user-sticky-h, 0px)' }}
-                            data-sticky-message-wrapper="true"
-                        >
-                            {renderMessage(dTurn.userMessage)}
-                        </div>
-                    ) : (
-                        renderMessage(dTurn.userMessage)
-                    )}
-                    <div
-                        className="relative z-0"
-                    >
-                        {renderAssistantMessages(dTurn)}
-                    </div>
-                </div>
-            ))}
         </section>
     );
 };

@@ -25,6 +25,25 @@ const getMessageParentId = (message: ChatMessageEntry): string | undefined => {
     return parentId;
 };
 
+const markMessageAsLiveSteer = (message: ChatMessageEntry): ChatMessageEntry => {
+    const info = message.info as unknown as { metadata?: Record<string, unknown> | null | undefined };
+    if (info.metadata?.openchamberLiveSteer === true) {
+        return message;
+    }
+
+    return {
+        ...message,
+        info: {
+            ...(message.info as unknown as Record<string, unknown>),
+            metadata: {
+                ...(info.metadata ?? {}),
+                openchamberLiveSteer: true,
+                openchamberDeliveryMode: 'steer',
+            },
+        } as unknown as ChatMessageEntry['info'],
+    };
+};
+
 const getMessageCreatedAt = (message: ChatMessageEntry): number | undefined => {
     const created = (message.info as { time?: { created?: unknown } }).time?.created;
     return typeof created === 'number' ? created : undefined;
@@ -170,6 +189,13 @@ export const projectTurnRecords = (
     const turns: TurnRecord[] = [];
     const turnByUserId = new Map<string, TurnRecord>();
     const groupedMessageIds = new Set<string>();
+    const assistantMessageIds = new Set<string>();
+
+    messages.forEach((message) => {
+        if (resolveMessageRole(message) === 'assistant') {
+            assistantMessageIds.add(message.info.id);
+        }
+    });
 
     // Pass 1: Create turns for every role:user message, including directives.
     // [sscity-mod] Directives arrive with role:user but are not real human
@@ -189,14 +215,18 @@ export const projectTurnRecords = (
             return;
         }
 
-        const foldUnderParent = getAuxiliaryUserMessageKind(message.parts, message.info) !== null;
-        const turnId = message.info.id;
+        const parentId = getMessageParentId(message);
+        const isAssistantParentedUserMessage = parentId ? assistantMessageIds.has(parentId) : false;
+        const foldUnderParent = getAuxiliaryUserMessageKind(message.parts, message.info) !== null
+            || isAssistantParentedUserMessage;
+        const turnMessage = isAssistantParentedUserMessage ? markMessageAsLiveSteer(message) : message;
+        const turnId = turnMessage.info.id;
         const turn: TurnRecord = {
             turnId,
-            userMessageId: message.info.id,
-            userMessage: message,
+            userMessageId: turnMessage.info.id,
+            userMessage: turnMessage,
             headerMessageId: undefined,
-            messages: [createTurnMessageRecord(message, index)],
+            messages: [createTurnMessageRecord(turnMessage, index)],
             assistantMessageIds: [],
             assistantMessages: [],
             isDirectiveTurn: foldUnderParent,

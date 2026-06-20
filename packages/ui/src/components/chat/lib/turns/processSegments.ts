@@ -1,8 +1,9 @@
 import type { ChatMessageEntry } from './types';
+import { getAuxiliaryUserMessageKind } from '@/lib/messages/real-user';
 
 export type ProcessMessageSegment =
     | { kind: 'fold'; messages: ChatMessageEntry[] }
-    | { kind: 'pinned-question'; message: ChatMessageEntry };
+    | { kind: 'pinned-message'; message: ChatMessageEntry };
 
 const normalizeToolName = (toolName: unknown): string => {
     if (typeof toolName !== 'string') {
@@ -33,7 +34,12 @@ export const messageHasQuestionTool = (message: ChatMessageEntry): boolean => {
     });
 };
 
-export const segmentProcessMessagesByPinnedQuestions = (
+export const messagePinsProcessFold = (message: ChatMessageEntry): boolean => {
+    return messageHasQuestionTool(message)
+        || getAuxiliaryUserMessageKind(message.parts, message.info) !== null;
+};
+
+export const segmentProcessMessagesByPinnedBoundaries = (
     messages: readonly ChatMessageEntry[],
 ): ProcessMessageSegment[] => {
     const segments: ProcessMessageSegment[] = [];
@@ -48,9 +54,9 @@ export const segmentProcessMessagesByPinnedQuestions = (
     };
 
     for (const message of messages) {
-        if (messageHasQuestionTool(message)) {
+        if (messagePinsProcessFold(message)) {
             flushFold();
-            segments.push({ kind: 'pinned-question', message });
+            segments.push({ kind: 'pinned-message', message });
             continue;
         }
 
