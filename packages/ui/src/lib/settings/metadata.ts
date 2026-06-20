@@ -150,7 +150,7 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
     title: 'Providers',
     group: 'opencode',
     kind: 'split',
-    showOn: 'default',
+    showOn: 'both',
     keywords: ['provider', 'providers', 'models', 'model', 'api key', 'api keys', 'openai', 'anthropic', 'ollama', 'credentials'],
   },
   {

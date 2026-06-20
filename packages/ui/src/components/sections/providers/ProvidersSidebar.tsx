@@ -10,6 +10,7 @@ import { Icon } from "@/components/icon/Icon";
 import { opencodeClient } from '@/lib/opencode/client';
 import { resolveApiUrl } from '@/lib/api/serverUrl';
 import { useSettingsServerBaseUrl } from '@/hooks/useSettingsServerBaseUrl';
+import { useSettingsProviders } from './useSettingsProviders';
 import { useI18n } from '@/lib/i18n';
 
 const ADD_PROVIDER_ID = '__add_provider__';
@@ -40,7 +41,7 @@ interface ProvidersSidebarProps {
 
 export const ProvidersSidebar: React.FC<ProvidersSidebarProps> = ({ onItemSelect }) => {
   const { t } = useI18n();
-  const providers = useConfigStore((state) => state.providers);
+  const { providers } = useSettingsProviders();
   const selectedProviderId = useConfigStore((state) => state.selectedProviderId);
   const setSelectedProvider = useConfigStore((state) => state.setSelectedProvider);
   const activeProjectId = useProjectsStore((s) => s.activeProjectId);

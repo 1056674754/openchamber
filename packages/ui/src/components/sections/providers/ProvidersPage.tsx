@@ -23,6 +23,7 @@ import type { ModelMetadata } from '@/types';
 import { useI18n } from '@/lib/i18n';
 import { resolveApiUrl } from '@/lib/api/serverUrl';
 import { useSettingsServerBaseUrl } from '@/hooks/useSettingsServerBaseUrl';
+import { useSettingsProviders } from './useSettingsProviders';
 
 const COMPACT_NUMBER_FORMATTER = new Intl.NumberFormat('en-US', {
   notation: 'compact',
@@ -144,7 +145,7 @@ const parseProvidersPayload = (payload: unknown): ProviderOption[] => {
 
 export const ProvidersPage: React.FC = () => {
   const { t } = useI18n();
-  const providers = useConfigStore((state) => state.providers);
+  const { providers } = useSettingsProviders();
   const selectedProviderId = useConfigStore((state) => state.selectedProviderId);
   const setSelectedProvider = useConfigStore((state) => state.setSelectedProvider);
   const getModelMetadata = useConfigStore((state) => state.getModelMetadata);
@@ -152,6 +153,12 @@ export const ProvidersPage: React.FC = () => {
   const toggleHiddenModel = useUIStore((state) => state.toggleHiddenModel);
   const hideAllModels = useUIStore((state) => state.hideAllModels);
   const showAllModels = useUIStore((state) => state.showAllModels);
+
+  const serverBaseUrl = useSettingsServerBaseUrl();
+  // Model visibility (hide/show) is a local UI preference. It must not be
+  // applied to, or mutated for, a remote instance whose model set differs.
+  const isRemote = Boolean(serverBaseUrl);
+  const effectiveHiddenModels = isRemote ? [] : hiddenModels;
 
   const [authMethodsByProvider, setAuthMethodsByProvider] = React.useState<Record<string, AuthMethod[]>>({});
   const [authLoading, setAuthLoading] = React.useState(false);
@@ -169,8 +176,6 @@ export const ProvidersPage: React.FC = () => {
   const [providerDropdownOpen, setProviderDropdownOpen] = React.useState(false);
   const [providerSources, setProviderSources] = React.useState<Record<string, ProviderSources>>({});
   const [showAuthPanel, setShowAuthPanel] = React.useState(false);
-
-  const serverBaseUrl = useSettingsServerBaseUrl();
 
   React.useEffect(() => {
     if (!selectedProviderId && providers.length > 0) {
@@ -1014,6 +1019,7 @@ export const ProvidersPage: React.FC = () => {
                 variant="outline"
                 size="xs"
                 className="!font-normal"
+                disabled={isRemote}
                 onClick={() => {
                   const allIds = providerModels
                     .map((model) => (typeof model?.id === 'string' ? model.id : ''))
@@ -1027,6 +1033,7 @@ export const ProvidersPage: React.FC = () => {
                 variant="outline"
                 size="xs"
                 className="!font-normal"
+                disabled={isRemote}
                 onClick={() => showAllModels(selectedProvider.id)}
               >
                 {t('settings.providers.page.actions.showAll')}
@@ -1053,7 +1060,7 @@ export const ProvidersPage: React.FC = () => {
                   const modelId = typeof model?.id === 'string' ? model.id : '';
                   const modelName = typeof model?.name === 'string' ? model.name : modelId;
                   const metadata = modelId ? getModelMetadata(selectedProvider.id, modelId) as ModelMetadata | undefined : undefined;
-                  const isHidden = hiddenModels.some(
+                  const isHidden = effectiveHiddenModels.some(
                     (item) => item.providerID === selectedProvider.id && item.modelID === modelId
                   );
 
@@ -1100,8 +1107,9 @@ export const ProvidersPage: React.FC = () => {
                         )}
                         <button
                           type="button"
+                          disabled={isRemote}
                           onClick={() => toggleHiddenModel(selectedProvider.id, modelId)}
-                          className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-[var(--interactive-hover)]/50"
+                          className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-[var(--interactive-hover)]/50 disabled:opacity-40 disabled:pointer-events-none"
                           title={isHidden ? t('settings.providers.page.models.actions.showModelInSelectors') : t('settings.providers.page.models.actions.hideModelFromSelectors')}
                           aria-label={isHidden ? t('settings.providers.page.models.actions.showModel') : t('settings.providers.page.models.actions.hideModel')}
                         >

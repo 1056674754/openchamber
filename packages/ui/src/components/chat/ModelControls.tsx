@@ -52,6 +52,7 @@ type MobileVariantTarget = { providerId: string; modelId: string };
 
 const buildModelRefKey = (providerID: string, modelID: string) => `${providerID}:${modelID}`;
 const MAX_INLINE_MOBILE_VARIANT_OPTIONS = 6;
+const EMPTY_HIDDEN_MODELS: Array<{ providerID: string; modelID: string }> = [];
 
 const providerHasModel = (
     providers: Array<{ id?: string; models?: ProviderModel[] }>,
@@ -348,6 +349,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     const readinessLabel = isUnavailable ? t('common.unavailable') : t('common.loading');
     const localProviders = useConfigStore((state) => state.providers);
     const activeServerId = useActiveServerId();
+    const isRemoteInstance = activeServerId !== DEFAULT_SERVER_ID;
     const [remoteProviders, setRemoteProviders] = React.useState<typeof localProviders | null>(null);
     const providers = React.useMemo(
         () => activeServerId === DEFAULT_SERVER_ID ? localProviders : (remoteProviders ?? []),
@@ -645,13 +647,21 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     const currentProvider = getCurrentProvider();
     const models = Array.isArray(currentProvider?.models) ? currentProvider.models : [];
 
+    // Local UI preferences (hiddenModels) are instance-local: they must not
+    // restrict the model list for a remote instance, whose provider/model set
+    // is different. When on a remote server, treat the local hide list as empty.
+    const effectiveHiddenModels = React.useMemo(
+        () => (isRemoteInstance ? EMPTY_HIDDEN_MODELS : hiddenModels),
+        [hiddenModels, isRemoteInstance],
+    );
+
     const visibleProviders = React.useMemo(() => {
         const result: typeof providers = [];
         for (const provider of providers) {
             const providerModels = Array.isArray(provider.models) ? provider.models : [];
             const visibleModels = providerModels.filter((model: ProviderModel) => {
                 const modelId = typeof model?.id === 'string' ? model.id : '';
-                return !hiddenModels.some(
+                return !effectiveHiddenModels.some(
                     (item) => item.providerID === String(provider.id) && item.modelID === modelId
                 );
             });
@@ -660,7 +670,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             }
         }
         return result;
-    }, [providers, hiddenModels]);
+    }, [providers, effectiveHiddenModels]);
 
     const normalizeModelSearchValue = React.useCallback((value: string) => {
         const lower = value.toLowerCase().trim();
@@ -1710,7 +1720,9 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         if (!isCompact) return null;
 
         const normalizedQuery = mobileModelQuery.trim();
-        const filteredFavorites = favoriteModelsList.filter(({ model, providerID }) => {
+        const scopedFavorites = isRemoteInstance ? [] : favoriteModelsList;
+        const scopedRecents = isRemoteInstance ? [] : recentModelsList;
+        const filteredFavorites = scopedFavorites.filter(({ model, providerID }) => {
             const provider = providers.find((entry) => entry.id === providerID);
             const providerName = provider?.name || providerID;
             const modelName = getModelDisplayName(model);
@@ -1719,7 +1731,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                 || matchesModelSearch(providerName, normalizedQuery);
         });
 
-        const filteredRecents = recentModelsList.filter(({ model, providerID }) => {
+        const filteredRecents = scopedRecents.filter(({ model, providerID }) => {
             const provider = providers.find((entry) => entry.id === providerID);
             const providerName = provider?.name || providerID;
             const modelName = getModelDisplayName(model);
@@ -2498,15 +2510,15 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                             </div>
                             <ModelPickerList
                                 providers={providers as ModelPickerProvider[]}
-                                favoriteModels={favoriteModelsList}
-                                recentModels={recentModelsList}
+                                favoriteModels={isRemoteInstance ? [] : favoriteModelsList}
+                                recentModels={isRemoteInstance ? [] : recentModelsList}
                                 modelsMetadata={useConfigStore.getState().modelsMetadata}
                                 searchQuery={desktopModelQuery}
                                 onSearchQueryChange={setDesktopModelQuery}
                                 onSelect={handleSharedModelSelect}
                                 labels={modelPickerLabels}
                                 selectedModel={currentProviderId && currentModelId ? { providerID: currentProviderId, modelID: currentModelId } : null}
-                                hiddenModels={hiddenModels}
+                                hiddenModels={effectiveHiddenModels}
                                 onActiveKeyDown={handleModelPickerKeyDown}
                                 onActiveEntryChange={(entry) => { activeModelPickerEntryRef.current = entry; }}
                                 onVariantKey={handleThinkingVariantKey}

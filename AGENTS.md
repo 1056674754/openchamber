@@ -391,6 +391,10 @@ A single store with N properties means every subscriber re-evaluates on every st
 - For sync or startup changes, verify fresh load, retry/failure, and restart behavior.
 - For session changes, verify create, stream, abort, permission, archive/delete, and revisit flows when relevant.
 
+## Known issues (remote-instances settings redesign, in progress)
+
+The settings page is mid-redesign to support remote instances. The model picker/provider filter is now instance-scoped (local `hiddenModels`/favorites/recents no longer leak to remote), and the Providers settings page is reachable on remote instances (fetches its provider list from the remote server). Still incomplete: most other OpenCode pages (`agents`, `behavior`, `commands`, `mcp`, `plugins`, `permissions`, etc.) remain `showOn: 'default'` and need their data/mutations wired to the active instance's server.
+
 ## Recent changes
 
 - Releases + high-level changes: `CHANGELOG.md`
