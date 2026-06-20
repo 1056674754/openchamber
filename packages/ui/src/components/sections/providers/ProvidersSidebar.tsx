@@ -41,12 +41,12 @@ interface ProvidersSidebarProps {
 
 export const ProvidersSidebar: React.FC<ProvidersSidebarProps> = ({ onItemSelect }) => {
   const { t } = useI18n();
-  const { providers } = useSettingsProviders();
+  const { providers, isLoading: providersLoading } = useSettingsProviders();
   const selectedProviderId = useConfigStore((state) => state.selectedProviderId);
   const setSelectedProvider = useConfigStore((state) => state.setSelectedProvider);
   const activeProjectId = useProjectsStore((s) => s.activeProjectId);
   const [sourcesByProvider, setSourcesByProvider] = React.useState<Record<string, ProviderSources>>({});
-  const serverBaseUrl = useSettingsServerBaseUrl();
+  const { status, baseUrl } = useSettingsServerBaseUrl();
   const directory = React.useMemo(() => {
     // tie refresh to active project changes (directory is stored in the client)
     void activeProjectId;
@@ -54,6 +54,14 @@ export const ProvidersSidebar: React.FC<ProvidersSidebarProps> = ({ onItemSelect
   }, [activeProjectId]);
 
   React.useEffect(() => {
+    if (status === 'loading') {
+      setSourcesByProvider({});
+      return;
+    }
+    if (!baseUrl) {
+      setSourcesByProvider({});
+      return;
+    }
     if (providers.length === 0) {
       setSourcesByProvider({});
       return;
@@ -65,7 +73,7 @@ export const ProvidersSidebar: React.FC<ProvidersSidebarProps> = ({ onItemSelect
       const tasks = providers.map(async (provider) => {
         try {
           const query = directory ? `?directory=${encodeURIComponent(directory)}` : '';
-          const response = await fetch(resolveApiUrl(`/api/provider/${encodeURIComponent(provider.id)}/source${query}`, serverBaseUrl), {
+          const response = await fetch(resolveApiUrl(`/api/provider/${encodeURIComponent(provider.id)}/source${query}`, baseUrl), {
             method: 'GET',
             headers: { Accept: 'application/json' },
           });
@@ -97,7 +105,7 @@ export const ProvidersSidebar: React.FC<ProvidersSidebarProps> = ({ onItemSelect
     return () => {
       cancelled = true;
     };
-  }, [directory, providers, serverBaseUrl]);
+  }, [directory, providers, status, baseUrl]);
 
   const bgClass = 'bg-background';
 
@@ -132,7 +140,12 @@ export const ProvidersSidebar: React.FC<ProvidersSidebarProps> = ({ onItemSelect
       </div>
 
       <ScrollableOverlay outerClassName="flex-1 min-h-0" className="space-y-1 px-3 py-2 overflow-x-hidden">
-        {providers.length === 0 ? (
+        {providersLoading ? (
+          <div className="py-12 px-4 text-center text-muted-foreground">
+            <Icon name="loader-4" className="mx-auto mb-3 h-8 w-8 animate-spin opacity-60" />
+            <p className="typography-ui-label font-medium">{t('settings.providers.page.state.loading')}</p>
+          </div>
+        ) : providers.length === 0 ? (
           <div className="py-12 px-4 text-center text-muted-foreground">
             <Icon name="stack" className="mx-auto mb-3 h-10 w-10 opacity-50" />
             <p className="typography-ui-label font-medium">{t('settings.providers.sidebar.empty.title')}</p>

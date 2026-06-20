@@ -1592,7 +1592,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
         const defaultExpandedCount = getStackedViewDefaultExpandedCount(changedFiles.length);
 
         return (
-            <div className="flex flex-1 min-h-0 h-full gap-3 px-3 pb-3 pt-2">
+            <div className="flex min-w-0 flex-1 min-h-0 h-full gap-3 px-3 pb-3 pt-2">
                 {showFileSidebar && (
                     <section className="hidden lg:flex w-72 flex-col rounded-xl border border-border/60 bg-background/70 overflow-hidden">
                         <div className="flex items-center justify-between px-3 py-1.5 border-b border-border/40">
@@ -1608,7 +1608,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
                 )}
                 <ScrollableOverlay
                     ref={diffScrollRef}
-                    outerClassName="flex-1 min-h-0 h-full"
+                    outerClassName="flex-1 min-w-0 min-h-0 h-full"
                     className="pr-2"
                     disableHorizontal
                     observeMutations={false}
@@ -1684,7 +1684,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
         }
 
         return (
-            <div className="flex flex-1 min-h-0 overflow-hidden px-3 py-3 relative" data-diff-virtual-root data-diff-virtual-content>
+            <div className="flex min-w-0 flex-1 min-h-0 overflow-hidden px-3 py-3 relative" data-diff-virtual-root data-diff-virtual-content>
                 {renderSelectedDiffViewer()}
                 {isCurrentFileLoading && !hasCurrentDiff && (
                     <div className="absolute inset-0 flex items-center justify-center gap-2 text-sm text-muted-foreground">

@@ -91,7 +91,21 @@ describe("ServerRegistry health probes", () => {
     unsubscribe();
     registry.setHealthStatus("remote-4", "unhealthy");
 
-    expect(statuses).toEqual(["unhealthy", null, "healthy"]);
+    expect(statuses).toEqual(["unhealthy", null, null, "healthy"]);
+  });
+
+  test("notifies health listeners when a watched server registers", () => {
+    const registry = new ServerRegistry();
+    let calls = 0;
+
+    const unsubscribe = registry.onHealthChange("remote-late", () => {
+      calls += 1;
+    });
+
+    registry.register({ id: "remote-late", label: "Late Remote", baseUrl: "/api/remote/late" });
+    unsubscribe();
+
+    expect(calls).toBe(1);
   });
 });
 

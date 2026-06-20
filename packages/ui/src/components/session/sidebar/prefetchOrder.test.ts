@@ -180,4 +180,18 @@ describe('buildSidebarSessionPrefetchOrder', () => {
       Array.from({ length: 10 }, (_, index) => `session-${index + 1}`),
     );
   });
+
+  test('does not prefetch a different project when active-workspace search has no active project match', () => {
+    const sectionsForRender = [
+      { project: { id: 'project-b' }, groups: [group('root', [node('b1')])] },
+    ];
+
+    expect(buildSidebarSessionPrefetchOrder(baseInput({
+      sectionsForRender,
+      activeProjectId: 'project-a',
+      showOnlyMainWorkspace: true,
+      hasSessionSearchQuery: true,
+      normalizedSessionSearchQuery: 'needle',
+    }))).toEqual([]);
+  });
 });

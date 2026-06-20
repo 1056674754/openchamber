@@ -30,19 +30,24 @@ function transformRemoteProviders(raw: RemoteProvidersPayload['providers']): Pro
  */
 export function useSettingsProviders(): { providers: ProviderWithModelList[]; isLoading: boolean } {
   const storeProviders = useConfigStore((state) => state.providers);
-  const serverBaseUrl = useSettingsServerBaseUrl();
+  const { status, baseUrl } = useSettingsServerBaseUrl();
   const [remoteProviders, setRemoteProviders] = React.useState<ProviderWithModelList[] | null>(null);
   const [isLoading, setIsLoading] = React.useState(false);
 
   React.useEffect(() => {
-    if (!serverBaseUrl) {
+    if (status === 'loading') {
+      setRemoteProviders(null);
+      setIsLoading(true);
+      return;
+    }
+    if (!baseUrl) {
       setRemoteProviders(null);
       setIsLoading(false);
       return;
     }
     let cancelled = false;
     setIsLoading(true);
-    fetch(resolveApiUrl('/api/config/providers', serverBaseUrl), {
+    fetch(resolveApiUrl('/api/config/providers', baseUrl), {
       method: 'GET',
       headers: { Accept: 'application/json' },
       cache: 'no-store',
@@ -61,8 +66,8 @@ export function useSettingsProviders(): { providers: ProviderWithModelList[]; is
     return () => {
       cancelled = true;
     };
-  }, [serverBaseUrl]);
+  }, [status, baseUrl]);
 
-  const providers = serverBaseUrl ? (remoteProviders ?? []) : storeProviders;
+  const providers = status === 'loading' ? [] : baseUrl ? (remoteProviders ?? []) : storeProviders;
   return { providers, isLoading };
 }

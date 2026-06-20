@@ -1121,6 +1121,57 @@ describe('createEventPipeline — delta coalescing (Option C)', () => {
     expect(byPart['part-2']).toBe('BBB');
   });
 
+  it('starts a fresh delta entry after a part snapshot for the same part', async () => {
+    const received = await runPipelineWithEvents([
+      {
+        directory: 'dir-a',
+        payload: {
+          type: 'message.part.delta',
+          properties: {
+            messageID: 'msg-1',
+            partID: 'part-1',
+            field: 'text',
+            delta: 'ab',
+          },
+        },
+      },
+      {
+        directory: 'dir-a',
+        payload: {
+          type: 'message.part.updated',
+          properties: {
+            part: {
+              id: 'part-1',
+              messageID: 'msg-1',
+              type: 'text',
+              text: 'ab',
+            },
+          },
+        },
+      },
+      {
+        directory: 'dir-a',
+        payload: {
+          type: 'message.part.delta',
+          properties: {
+            messageID: 'msg-1',
+            partID: 'part-1',
+            field: 'text',
+            delta: 'c',
+          },
+        },
+      },
+    ]);
+
+    expect(received.map((event) => event.payload.type)).toEqual([
+      'message.part.delta',
+      'message.part.updated',
+      'message.part.delta',
+    ]);
+    expect(received[0].payload.properties.delta).toBe('ab');
+    expect(received[2].payload.properties.delta).toBe('c');
+  });
+
   it('does NOT merge deltas across different directories (per-directory queues)', async () => {
     const received = await runPipelineWithEvents([
       {

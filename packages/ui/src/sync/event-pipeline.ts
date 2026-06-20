@@ -387,6 +387,18 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
     return false
   }
 
+  const clearPendingDeltaCoalesceKeysForUpdatedPart = (d: DirectoryQueue, payload: Event): void => {
+    const identity = updatedPartIdentity(payload)
+    if (!identity) return
+
+    const deltaPrefix = `message.part.delta:${identity.messageID}:${identity.partID}:`
+    for (const coalesceKey of d.coalesced.keys()) {
+      if (coalesceKey.startsWith(deltaPrefix)) {
+        d.coalesced.delete(coalesceKey)
+      }
+    }
+  }
+
   const flushDir = (directory: string) => {
     const d = directories.get(directory)
     if (!d) return
@@ -531,6 +543,9 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
     const normalizedPayload = normalizeEventType(payload)
     const routedDirectory = serverId ? directory : (routeDirectory?.(directory, normalizedPayload) || directory)
     const d = getOrCreateDir(routedDirectory)
+    if (normalizedPayload.type === "message.part.updated") {
+      clearPendingDeltaCoalesceKeysForUpdatedPart(d, normalizedPayload)
+    }
     const k = key(normalizedPayload)
     const nextEvent: QueuedEvent = {
       directory: routedDirectory,

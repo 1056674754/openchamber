@@ -292,20 +292,20 @@ export const useQuotaStore = create<QuotaStore>()(
   )
 );
 
-export const useQuotaAutoRefresh = () => {
+export const useQuotaAutoRefresh = (serverBaseUrl?: string, enabled = true) => {
   const autoRefresh = useQuotaStore((state) => state.autoRefresh);
   const refreshIntervalMs = useQuotaStore((state) => state.refreshIntervalMs);
   const fetchAllQuotas = useQuotaStore((state) => state.fetchAllQuotas);
 
   React.useEffect(() => {
-    if (!autoRefresh) {
+    if (!enabled || !autoRefresh) {
       return;
     }
 
     const interval = window.setInterval(() => {
-      fetchAllQuotas();
+      fetchAllQuotas(serverBaseUrl);
     }, refreshIntervalMs);
 
     return () => window.clearInterval(interval);
-  }, [autoRefresh, refreshIntervalMs, fetchAllQuotas]);
+  }, [autoRefresh, refreshIntervalMs, fetchAllQuotas, serverBaseUrl, enabled]);
 };

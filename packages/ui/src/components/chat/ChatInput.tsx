@@ -4795,6 +4795,17 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                         handlePermissionAutoAcceptToggle={handlePermissionAutoAcceptToggle}
                                         withTooltip
                                     />
+                                    <div
+                                        className={footerIconButtonClass}
+                                        title={currentModelSupportsImages
+                                            ? t('chat.input.visionCapable')
+                                            : t('chat.input.visionNotCapable')}
+                                    >
+                                        <Icon
+                                            name={currentModelSupportsImages ? 'eye' : 'eye-off'}
+                                            className={cn(iconSizeClass, currentModelSupportsImages ? 'text-muted-foreground' : 'text-muted-foreground/40')}
+                                        />
+                                    </div>
                                 </div>
                                 <div className={cn('flex items-center flex-1 justify-end', footerGapClass, 'md:gap-x-3')}>
                                     <MemoModelControls className={cn('flex-1 min-w-0 justify-end')} />

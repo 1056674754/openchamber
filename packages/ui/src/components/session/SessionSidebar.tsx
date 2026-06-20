@@ -84,8 +84,15 @@ import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
 import { subscribeOpenchamberEvents } from '@/lib/openchamberEvents';
 import { DEFAULT_SERVER_ID, serverRegistry } from '@/lib/opencode/server-registry';
-import { getProjectWorktreeKey, getWorktreesForProject } from '@/lib/worktrees/worktreeKeys';
+import { getWorktreesForProject } from '@/lib/worktrees/worktreeKeys';
 import { mapWithConcurrency } from '@/lib/concurrency';
+import {
+  buildWorktreeDiscoveryQueue,
+  mergeProjectWorktreeResult,
+  pruneWorktreesForDiscoveryQueue,
+  sameWorktreeList,
+  sameWorktreesByProject,
+} from './sidebar/worktreeDiscovery';
 
 const PROJECT_COLLAPSE_STORAGE_KEY = 'oc.sessions.projectCollapse';
 const GROUP_ORDER_STORAGE_KEY = 'oc.sessions.groupOrder';
@@ -584,6 +591,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
         project.serverId ?? DEFAULT_SERVER_ID,
         normalizePath(project.path) ?? '',
         project.unavailable ? 1 : 0,
+        project.pinned ? 1 : 0,
       ].join(':'))
       .join('|'),
     [projects],
@@ -611,86 +619,114 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
   }, [syncSessionStructureSignature, liveSessions]);
 
   React.useEffect(() => {
+    void refreshGlobalSessions(syncSessionsSnapshotRef.current);
+  }, [currentDirectory, syncSessionStructureSignature, projectsStructureSignature, remoteHealthRevision]);
+
+  React.useEffect(() => {
     let cancelled = false;
 
-    const discoverWorktrees = async () => {
-      const projectEntries = useProjectsStore.getState().projects
-        .filter((project) => {
-          if (project.unavailable) return false;
-          const projectPath = normalizePath(project.path);
-          if (!projectPath || (project.serverId && projectPath === '/')) return false;
-          const serverId = project.serverId && project.serverId !== DEFAULT_SERVER_ID ? project.serverId : null;
-          if (!serverId) return true;
-          return serverRegistry.get(serverId)?.healthStatus === 'healthy';
-        });
-      if (projectEntries.length === 0) return;
+    const projectQueue = buildWorktreeDiscoveryQueue(useProjectsStore.getState().projects)
+      .filter((project) => {
+        const serverId = project.serverId && project.serverId !== DEFAULT_SERVER_ID ? project.serverId : null;
+        if (!serverId) return true;
+        return serverRegistry.get(serverId)?.healthStatus === 'healthy';
+      });
+    const orderedProjectKeys = projectQueue.map((entry) => entry.discoveryKey);
 
-      const worktreesByProject = new Map<string, WorktreeMetadata[]>();
-      const allWorktrees: WorktreeMetadata[] = [];
-
-      await mapWithConcurrency(
-        projectEntries,
-        WORKTREE_DISCOVERY_CONCURRENCY,
-        async (project) => {
-          const projectPath = normalizePath(project.path);
-          if (!projectPath) return;
-          try {
-            // Use store-cached isGitRepo when available; fall back to direct check for initial worktree discovery
-            const serverId = project.serverId && project.serverId !== DEFAULT_SERVER_ID ? project.serverId : null;
-            const cachedIsGitRepo = serverId ? undefined : useGitStore.getState().directories.get(projectPath)?.isGitRepo;
-            const repoStatus = projectRepoStatus.get(project.id);
-            const isGitRepo = (cachedIsGitRepo === true || repoStatus === true)
-              ? true
-              : (cachedIsGitRepo === false && !serverId)
-                ? false
-                : await checkIsGitRepository(projectPath);
-            if (!isGitRepo) return;
-            if (await isLinkedWorktree(projectPath).catch(() => false)) return;
-            const worktrees = await listProjectWorktrees({
-              id: project.id,
-              path: projectPath,
-              serverId: project.serverId,
-              label: project.label,
-            });
-            if (cancelled || worktrees.length === 0) return;
-            worktreesByProject.set(getProjectWorktreeKey(projectPath, project.serverId), worktrees);
-            allWorktrees.push(...worktrees);
-          } catch {
-            // ignore discovery errors
-          }
-        },
-      );
-
+    const publishWorktreeResult = (
+      project: ReturnType<typeof buildWorktreeDiscoveryQueue>[number],
+      worktrees: WorktreeMetadata[],
+    ) => {
       if (cancelled) return;
 
-      const prev = useSessionUIStore.getState();
-      const prevByProject = prev.availableWorktreesByProject;
-      let byProjectUnchanged = prevByProject.size === worktreesByProject.size;
-      if (byProjectUnchanged) {
-        for (const [key, wt] of worktreesByProject) {
-          const prevWt = prevByProject.get(key);
-          if (!prevWt || prevWt.length !== wt.length) { byProjectUnchanged = false; break; }
-          for (let i = 0; i < wt.length; i++) {
-            if (wt[i].path !== prevWt[i].path || wt[i].branch !== prevWt[i].branch) { byProjectUnchanged = false; break; }
-          }
-          if (!byProjectUnchanged) break;
-        }
-      }
-      if (byProjectUnchanged && prev.availableWorktrees.length === allWorktrees.length) return;
+      useSessionUIStore.setState((state) => {
+        const currentProjectWorktrees = state.availableWorktreesByProject.get(project.discoveryKey) ?? [];
+        const legacyProjectHasWorktrees = project.legacyDiscoveryKey !== project.discoveryKey
+          && state.availableWorktreesByProject.has(project.legacyDiscoveryKey);
 
-      useSessionUIStore.setState({
-        availableWorktrees: allWorktrees,
-        availableWorktreesByProject: worktreesByProject,
+        const merged = mergeProjectWorktreeResult({
+          currentByProject: state.availableWorktreesByProject,
+          projectKey: project.discoveryKey,
+          legacyProjectKey: project.legacyDiscoveryKey,
+          worktrees,
+          orderedProjectKeys,
+        });
+
+        if (
+          !legacyProjectHasWorktrees
+          && sameWorktreeList(currentProjectWorktrees, worktrees)
+          && sameWorktreeList(state.availableWorktrees, merged.allWorktrees)
+        ) {
+          return state;
+        }
+
+        return {
+          availableWorktrees: merged.allWorktrees,
+          availableWorktreesByProject: merged.byProject,
+        };
       });
     };
 
-    void refreshGlobalSessions(syncSessionsSnapshotRef.current);
-    void discoverWorktrees();
+    if (projectQueue.length === 0) {
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    useSessionUIStore.setState((state) => {
+      const pruned = pruneWorktreesForDiscoveryQueue(state.availableWorktreesByProject, projectQueue);
+      if (
+        sameWorktreesByProject(state.availableWorktreesByProject, pruned.byProject)
+        && sameWorktreeList(state.availableWorktrees, pruned.allWorktrees)
+      ) {
+        return state;
+      }
+      return {
+        availableWorktrees: pruned.allWorktrees,
+        availableWorktreesByProject: pruned.byProject,
+      };
+    });
+
+    void mapWithConcurrency(
+      projectQueue,
+      WORKTREE_DISCOVERY_CONCURRENCY,
+      async (project) => {
+        const projectPath = project.normalizedPath;
+        try {
+          // Use store-cached isGitRepo when available; fall back to direct check for initial worktree discovery.
+          const serverId = project.serverId && project.serverId !== DEFAULT_SERVER_ID ? project.serverId : null;
+          const cachedIsGitRepo = serverId ? undefined : useGitStore.getState().directories.get(projectPath)?.isGitRepo;
+          const repoStatus = projectRepoStatus.get(project.id);
+          const isGitRepo = (cachedIsGitRepo === true || repoStatus === true)
+            ? true
+            : (cachedIsGitRepo === false && !serverId)
+              ? false
+              : await checkIsGitRepository(projectPath);
+          if (!isGitRepo) {
+            publishWorktreeResult(project, []);
+            return;
+          }
+          if (await isLinkedWorktree(projectPath).catch(() => false)) {
+            publishWorktreeResult(project, []);
+            return;
+          }
+          const worktrees = await listProjectWorktrees({
+            id: project.id,
+            path: projectPath,
+            serverId: project.serverId,
+            label: project.label,
+          });
+          publishWorktreeResult(project, worktrees);
+        } catch {
+          // Keep the previous project result on transient discovery failures.
+        }
+      },
+    );
 
     return () => {
       cancelled = true;
     };
-  }, [currentDirectory, syncSessionStructureSignature, projectsStructureSignature, projectRepoStatus, remoteHealthRevision]);
+  }, [projectsStructureSignature, projectRepoStatus, remoteHealthRevision]);
 
   React.useEffect(() => {
     let refreshTimeout: ReturnType<typeof setTimeout> | null = null;

@@ -51,14 +51,15 @@ export const UsagePage: React.FC = () => {
   const toggleModelSelected = useQuotaStore((state) => state.toggleModelSelected);
   const applyDefaultSelections = useQuotaStore((state) => state.applyDefaultSelections);
 
-  const serverBaseUrl = useSettingsServerBaseUrl();
+  const { status, baseUrl } = useSettingsServerBaseUrl();
 
-  useQuotaAutoRefresh();
+  useQuotaAutoRefresh(baseUrl, status === 'ready');
 
   React.useEffect(() => {
-    void loadSettings(serverBaseUrl);
-    void fetchAllQuotas(serverBaseUrl);
-  }, [loadSettings, fetchAllQuotas, serverBaseUrl]);
+    if (status === 'loading') return;
+    void loadSettings(baseUrl);
+    void fetchAllQuotas(baseUrl);
+  }, [loadSettings, fetchAllQuotas, status, baseUrl]);
 
   React.useEffect(() => {
     if (selectedProviderId) {
@@ -142,6 +143,17 @@ export const UsagePage: React.FC = () => {
   }, [selectedProviderId, selectedModels, toggleModelSelected]);
 
   const providerSelectedModels = selectedProviderId ? (selectedModels[selectedProviderId] ?? []) : [];
+
+  if (status === 'loading') {
+    return (
+      <div className="flex h-full items-center justify-center text-muted-foreground">
+        <div className="text-center">
+          <Icon name="loader-4" className="mx-auto mb-3 h-8 w-8 animate-spin opacity-60" />
+          <p className="typography-body">{t('settings.providers.page.state.loading')}</p>
+        </div>
+      </div>
+    );
+  }
 
   if (!selectedProviderId) {
     return (

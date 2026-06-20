@@ -24,10 +24,16 @@ import { SyncRuntimeEffects } from './AppEffects';
 import { useAppFontEffects } from './useAppFontEffects';
 import { useMiniChatKeyboardShortcuts } from '@/hooks/useMiniChatKeyboardShortcuts';
 import { listProjectWorktrees } from '@/lib/worktrees/worktreeManager';
-import { getProjectWorktreeKey } from '@/lib/worktrees/worktreeKeys';
 import { checkIsGitRepository, isLinkedWorktree } from '@/lib/gitApi';
 import type { WorktreeMetadata } from '@/types/worktree';
 import { mapWithConcurrency } from '@/lib/concurrency';
+import {
+  buildWorktreeDiscoveryQueue,
+  mergeProjectWorktreeResult,
+  pruneWorktreesForDiscoveryQueue,
+  sameWorktreeList,
+  sameWorktreesByProject,
+} from '@/components/session/sidebar/worktreeDiscovery';
 
 const MINI_CHAT_PRESENCE_CHANNEL = 'openchamber:mini-chat-presence';
 const WORKTREE_DISCOVERY_CONCURRENCY = 3;
@@ -210,12 +216,66 @@ const MiniChatBootstrap: React.FC<{ config: MiniChatConfig }> = ({ config }) => 
     if (projects.length === 0) return;
     let cancelled = false;
 
-    const discoverWorktrees = async () => {
-      const worktreesByProject = new Map<string, WorktreeMetadata[]>();
-      const allWorktrees: WorktreeMetadata[] = [];
+    const projectQueue = buildWorktreeDiscoveryQueue(projects);
+    const orderedProjectKeys = projectQueue.map((entry) => entry.discoveryKey);
 
-      await mapWithConcurrency(projects, WORKTREE_DISCOVERY_CONCURRENCY, async (project) => {
-        const projectPath = project.path.replace(/\\/g, '/').replace(/\/+$/, '');
+    if (projectQueue.length === 0) {
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    const publishWorktreeResult = (
+      project: ReturnType<typeof buildWorktreeDiscoveryQueue>[number],
+      worktrees: WorktreeMetadata[],
+    ) => {
+      if (cancelled) return;
+
+      useSessionUIStore.setState((state) => {
+        const currentProjectWorktrees = state.availableWorktreesByProject.get(project.discoveryKey) ?? [];
+        const legacyProjectHasWorktrees = project.legacyDiscoveryKey !== project.discoveryKey
+          && state.availableWorktreesByProject.has(project.legacyDiscoveryKey);
+
+        const merged = mergeProjectWorktreeResult({
+          currentByProject: state.availableWorktreesByProject,
+          projectKey: project.discoveryKey,
+          legacyProjectKey: project.legacyDiscoveryKey,
+          worktrees,
+          orderedProjectKeys,
+        });
+
+        if (
+          !legacyProjectHasWorktrees
+          && sameWorktreeList(currentProjectWorktrees, worktrees)
+          && sameWorktreeList(state.availableWorktrees, merged.allWorktrees)
+        ) {
+          return state;
+        }
+
+        return {
+          availableWorktrees: merged.allWorktrees,
+          availableWorktreesByProject: merged.byProject,
+        };
+      });
+    };
+
+    useSessionUIStore.setState((state) => {
+      const pruned = pruneWorktreesForDiscoveryQueue(state.availableWorktreesByProject, projectQueue);
+      if (
+        sameWorktreesByProject(state.availableWorktreesByProject, pruned.byProject)
+        && sameWorktreeList(state.availableWorktrees, pruned.allWorktrees)
+      ) {
+        return state;
+      }
+      return {
+        availableWorktrees: pruned.allWorktrees,
+        availableWorktreesByProject: pruned.byProject,
+      };
+    });
+
+    const discoverWorktrees = async () => {
+      await mapWithConcurrency(projectQueue, WORKTREE_DISCOVERY_CONCURRENCY, async (project) => {
+        const projectPath = project.normalizedPath;
         if (!projectPath) return;
         try {
           const serverId = project.serverId && project.serverId !== DEFAULT_SERVER_ID ? project.serverId : null;
@@ -223,26 +283,24 @@ const MiniChatBootstrap: React.FC<{ config: MiniChatConfig }> = ({ config }) => 
           const isGitRepo = cachedIsGitRepo === false && !serverId
             ? false
             : cachedIsGitRepo === true || await checkIsGitRepository(projectPath);
-          if (!isGitRepo) return;
-          if (await isLinkedWorktree(projectPath).catch(() => false)) return;
+          if (!isGitRepo) {
+            publishWorktreeResult(project, []);
+            return;
+          }
+          if (await isLinkedWorktree(projectPath).catch(() => false)) {
+            publishWorktreeResult(project, []);
+            return;
+          }
           const worktrees = await listProjectWorktrees({
             id: project.id,
             path: projectPath,
             serverId: project.serverId,
             label: project.label,
           });
-          if (cancelled || worktrees.length === 0) return;
-          worktreesByProject.set(getProjectWorktreeKey(projectPath, project.serverId), worktrees);
-          allWorktrees.push(...worktrees);
+          publishWorktreeResult(project, worktrees);
         } catch {
           // Worktree discovery is best-effort; draft selector falls back to the project root.
         }
-      });
-
-      if (cancelled) return;
-      useSessionUIStore.setState({
-        availableWorktrees: allWorktrees,
-        availableWorktreesByProject: worktreesByProject,
       });
     };
 

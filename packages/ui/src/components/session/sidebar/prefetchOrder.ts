@@ -3,6 +3,7 @@ import type { SessionFolder, SessionFoldersMap } from '@/stores/useSessionFolder
 import type { ActivitySection } from './SidebarActivitySections';
 import type { GroupSearchData, SessionGroup, SessionNode } from './types';
 import { compareSessionsByPinnedAndTime, normalizePath } from './utils';
+import { getMainWorkspaceSectionForRender } from './mainWorkspaceSection';
 
 const MAX_VISIBLE_RECENT_SESSIONS = 7;
 
@@ -332,8 +333,11 @@ export const buildSidebarSessionPrefetchOrder = (
   }
 
   if (input.showOnlyMainWorkspace) {
-    const activeSection = input.sectionsForRender.find((section) => section.project.id === input.activeProjectId)
-      ?? input.sectionsForRender[0];
+    const activeSection = getMainWorkspaceSectionForRender(
+      input.sectionsForRender,
+      input.activeProjectId,
+      input.hasSessionSearchQuery,
+    );
     if (!activeSection) return output;
 
     const primaryGroup =

@@ -894,6 +894,19 @@ html:not(.dark) .chat-scroll {
   line-height: inherit;
 }
 
+.markdown-content p {
+  margin: 0 0 var(--markdown-paragraph-spacing) 0;
+}
+
+.markdown-content > [data-md-block]:last-child p:last-child {
+  margin-bottom: 0;
+}
+
+.markdown-content.markdown-tool p,
+.markdown-content.markdown-reasoning p {
+  margin-bottom: 0;
+}
+
 /* Tool markdown should render at code size to match tool card typography. */
 .markdown-content.markdown-tool {
   font-size: var(--text-code) !important;

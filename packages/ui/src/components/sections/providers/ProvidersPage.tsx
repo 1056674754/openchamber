@@ -154,10 +154,10 @@ export const ProvidersPage: React.FC = () => {
   const hideAllModels = useUIStore((state) => state.hideAllModels);
   const showAllModels = useUIStore((state) => state.showAllModels);
 
-  const serverBaseUrl = useSettingsServerBaseUrl();
+  const { status, baseUrl } = useSettingsServerBaseUrl();
   // Model visibility (hide/show) is a local UI preference. It must not be
   // applied to, or mutated for, a remote instance whose model set differs.
-  const isRemote = Boolean(serverBaseUrl);
+  const isRemote = status === 'ready' && Boolean(baseUrl);
   const effectiveHiddenModels = isRemote ? [] : hiddenModels;
 
   const [authMethodsByProvider, setAuthMethodsByProvider] = React.useState<Record<string, AuthMethod[]>>({});
@@ -184,12 +184,13 @@ export const ProvidersPage: React.FC = () => {
   }, [providers, selectedProviderId, setSelectedProvider]);
 
   React.useEffect(() => {
+    if (status === 'loading') return;
     let isMounted = true;
 
     const loadAuthMethods = async () => {
       setAuthLoading(true);
       try {
-        const response = await fetch(resolveApiUrl('/api/provider/auth', serverBaseUrl), {
+        const response = await fetch(resolveApiUrl('/api/provider/auth', baseUrl), {
           method: 'GET',
           headers: { Accept: 'application/json' },
         });
@@ -217,16 +218,17 @@ export const ProvidersPage: React.FC = () => {
     return () => {
       isMounted = false;
     };
-  }, [t, serverBaseUrl]);
+  }, [t, status, baseUrl]);
 
   React.useEffect(() => {
+    if (status === 'loading') return;
     let isMounted = true;
 
     const loadAvailableProviders = async () => {
       setAvailableLoading(true);
       setAvailableError(null);
       try {
-        const response = await fetch(resolveApiUrl('/api/provider', serverBaseUrl), {
+        const response = await fetch(resolveApiUrl('/api/provider', baseUrl), {
           method: 'GET',
           headers: { Accept: 'application/json' },
         });
@@ -254,7 +256,7 @@ export const ProvidersPage: React.FC = () => {
     return () => {
       isMounted = false;
     };
-  }, [t, serverBaseUrl]);
+  }, [t, status, baseUrl]);
 
   const connectedProviderIds = React.useMemo(
     () => new Set(providers.map((provider) => provider.id)),
@@ -296,12 +298,13 @@ export const ProvidersPage: React.FC = () => {
     if (!selectedProviderId || selectedProviderId === ADD_PROVIDER_ID) {
       return;
     }
+    if (status === 'loading') return;
 
     let cancelled = false;
 
     const loadSources = async () => {
       try {
-        const response = await fetch(resolveApiUrl(`/api/provider/${encodeURIComponent(selectedProviderId)}/source`, serverBaseUrl), {
+        const response = await fetch(resolveApiUrl(`/api/provider/${encodeURIComponent(selectedProviderId)}/source`, baseUrl), {
           method: 'GET',
           headers: { Accept: 'application/json' },
         });
@@ -330,12 +333,13 @@ export const ProvidersPage: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [selectedProviderId, t, serverBaseUrl]);
+  }, [selectedProviderId, t, status, baseUrl]);
 
   const selectedProvider = providers.find((provider) => provider.id === selectedProviderId);
   const selectedSources = selectedProviderId ? providerSources[selectedProviderId] : undefined;
 
   const handleSaveApiKey = async (providerId: string) => {
+    if (status !== 'ready') return;
     const apiKey = apiKeyInputs[providerId]?.trim() ?? '';
     if (!apiKey) {
       toast.error(t('settings.providers.page.toast.apiKeyRequired'));
@@ -346,7 +350,7 @@ export const ProvidersPage: React.FC = () => {
     setAuthBusyKey(busyKey);
 
     try {
-      const response = await fetch(resolveApiUrl(`/api/auth/${encodeURIComponent(providerId)}`, serverBaseUrl), {
+      const response = await fetch(resolveApiUrl(`/api/auth/${encodeURIComponent(providerId)}`, baseUrl), {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ type: 'api', key: apiKey }),
@@ -371,11 +375,12 @@ export const ProvidersPage: React.FC = () => {
   };
 
   const handleOAuthStart = async (providerId: string, methodIndex: number) => {
+    if (status !== 'ready') return;
     const busyKey = `oauth:${providerId}:${methodIndex}`;
     setAuthBusyKey(busyKey);
 
     try {
-      const response = await fetch(resolveApiUrl(`/api/provider/${encodeURIComponent(providerId)}/oauth/authorize`, serverBaseUrl), {
+      const response = await fetch(resolveApiUrl(`/api/provider/${encodeURIComponent(providerId)}/oauth/authorize`, baseUrl), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ method: methodIndex }),
@@ -432,6 +437,7 @@ export const ProvidersPage: React.FC = () => {
   };
 
   const handleOAuthComplete = async (providerId: string, methodIndex: number) => {
+    if (status !== 'ready') return;
     const codeKey = `${providerId}:${methodIndex}`;
     const code = oauthCodes[codeKey]?.trim();
 
@@ -444,7 +450,7 @@ export const ProvidersPage: React.FC = () => {
         requestBody.code = code;
       }
 
-      const response = await fetch(resolveApiUrl(`/api/provider/${encodeURIComponent(providerId)}/oauth/callback`, serverBaseUrl), {
+      const response = await fetch(resolveApiUrl(`/api/provider/${encodeURIComponent(providerId)}/oauth/callback`, baseUrl), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(requestBody),
@@ -490,11 +496,12 @@ export const ProvidersPage: React.FC = () => {
   };
 
   const handleDisconnectProvider = async (providerId: string) => {
+    if (status !== 'ready') return;
     const busyKey = `disconnect:${providerId}`;
     setAuthBusyKey(busyKey);
 
     try {
-      const response = await fetch(resolveApiUrl(`/api/provider/${encodeURIComponent(providerId)}/auth?scope=all`, serverBaseUrl), {
+      const response = await fetch(resolveApiUrl(`/api/provider/${encodeURIComponent(providerId)}/auth?scope=all`, baseUrl), {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
       });
@@ -516,6 +523,17 @@ export const ProvidersPage: React.FC = () => {
   };
 
   const isAddMode = selectedProviderId === ADD_PROVIDER_ID;
+
+  if (status === 'loading') {
+    return (
+      <div className="flex h-full items-center justify-center">
+        <div className="text-center text-muted-foreground">
+          <Icon name="loader-4" className="mx-auto mb-3 h-8 w-8 animate-spin opacity-60" />
+          <p className="typography-body">{t('settings.providers.page.state.loading')}</p>
+        </div>
+      </div>
+    );
+  }
 
   if (!isAddMode && providers.length === 0) {
     return (

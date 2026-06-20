@@ -11,6 +11,7 @@ import { QUOTA_PROVIDERS, resolveUsageTone } from '@/lib/quota';
 import { useQuotaStore } from '@/stores/useQuotaStore';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { useI18n } from '@/lib/i18n';
+import { useSettingsServerBaseUrl } from '@/hooks/useSettingsServerBaseUrl';
 
 interface UsageSidebarProps {
   onItemSelect?: () => void;
@@ -43,10 +44,17 @@ export const UsageSidebar: React.FC<UsageSidebarProps> = ({ onItemSelect }) => {
   const showPredValues = useQuotaStore((state) => state.showPredValues);
   const setShowPredValues = useQuotaStore((state) => state.setShowPredValues);
   const loadUsageSettings = useQuotaStore((state) => state.loadSettings);
+  const { status, baseUrl } = useSettingsServerBaseUrl();
 
   React.useEffect(() => {
-    void loadUsageSettings();
-  }, [loadUsageSettings]);
+    if (status !== 'ready') return;
+    void loadUsageSettings(baseUrl);
+  }, [loadUsageSettings, status, baseUrl]);
+
+  const handleRefresh = React.useCallback(() => {
+    if (status !== 'ready') return;
+    void fetchAllQuotas(baseUrl);
+  }, [fetchAllQuotas, status, baseUrl]);
 
   const persistUsageSettings = React.useCallback(async (changes: { usageAutoRefresh?: boolean; usageRefreshIntervalMs?: number; usageDisplayMode?: 'usage' | 'remaining'; usageDropdownProviders?: string[]; usageShowPredValues?: boolean }) => {
     try {
@@ -123,10 +131,10 @@ export const UsageSidebar: React.FC<UsageSidebarProps> = ({ onItemSelect }) => {
             <Button size="sm"
               variant="ghost"
               className="h-7 w-7 px-0 text-muted-foreground"
-              onClick={() => fetchAllQuotas()}
+              onClick={handleRefresh}
               aria-label={t('settings.usage.sidebar.actions.refreshAria')}
               title={t('settings.usage.sidebar.actions.refreshTitle')}
-              disabled={isLoading}
+              disabled={isLoading || status !== 'ready'}
             >
               <Icon name="refresh" className={cn('h-3.5 w-3.5', isLoading && 'animate-spin')} />
             </Button>

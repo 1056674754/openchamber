@@ -1541,6 +1541,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.fileAttachment.toast.attachFailed': '첨부 파일 실패',
   'chat.input.imageFallbackNotice': 'This model does not support image input. Images will be saved and made available via the describe_image tool.',
   'chat.input.imagePluginNotLoaded': 'Image fallback plugin is not loaded. Images sent to this model will trigger an error.',
+  'chat.input.visionCapable': 'This model supports image input',
+  'chat.input.visionNotCapable': 'This model does not support image input',
   'openchamberPlugin.toast.loaded.title': 'OpenChamber plugin loaded',
   'openchamberPlugin.toast.loaded.description': 'Live steer and image fallback are active.',
   'openchamberPlugin.toast.failed.title': 'OpenChamber plugin failed to load',

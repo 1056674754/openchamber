@@ -1421,6 +1421,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.fileAttachment.toast.attachFailed': '附加檔案失敗',
   'chat.input.imageFallbackNotice': '此模型不支援圖片輸入。圖片將被儲存，模型可透過 describe_image 工具查看。',
   'chat.input.imagePluginNotLoaded': 'Image fallback plugin is not loaded. Images sent to this model will trigger an error.',
+  'chat.input.visionCapable': '此模型支援圖片輸入',
+  'chat.input.visionNotCapable': '此模型不支援圖片輸入',
   'openchamberPlugin.toast.loaded.title': 'OpenChamber 外掛已載入',
   'openchamberPlugin.toast.loaded.description': '執行中的 steer 和圖片 fallback 已啟用。',
   'openchamberPlugin.toast.failed.title': 'OpenChamber 外掛載入失敗',

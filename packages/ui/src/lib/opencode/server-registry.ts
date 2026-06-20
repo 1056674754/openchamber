@@ -71,6 +71,7 @@ export class ServerRegistry {
       lastHealthCheckAt: null,
     };
     this.connections.set(config.id, connection);
+    this.notifyHealthListeners(config.id);
     return connection;
   }
 

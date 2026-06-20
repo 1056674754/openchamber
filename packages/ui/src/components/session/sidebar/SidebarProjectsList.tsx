@@ -20,6 +20,7 @@ import { serverRegistry } from '@/lib/opencode/server-registry';
 import { getSyncStoresForServer, subscribeSyncStoresRegistry } from '@/sync/multi-server-registry';
 import { useDesktopSshStore } from '@/stores/useDesktopSshStore';
 import { resolveInstanceLabel } from '@/lib/desktopSsh';
+import { getMainWorkspaceSectionForRender } from './mainWorkspaceSection';
 
 type ProjectSection = {
   project: {
@@ -219,7 +220,11 @@ export function SidebarProjectsList(props: Props): React.ReactNode {
       {props.showOnlyMainWorkspace ? (
         <div className="space-y-[0.6rem] py-1">
           {(() => {
-            const activeSection = props.sectionsForRender.find((section) => section.project.id === props.activeProjectId) ?? props.sectionsForRender[0];
+            const activeSection = getMainWorkspaceSectionForRender(
+              props.sectionsForRender,
+              props.activeProjectId,
+              props.hasSessionSearchQuery,
+            );
             if (!activeSection) {
               return props.hasSessionSearchQuery ? props.searchEmptyState : props.emptyState;
             }
