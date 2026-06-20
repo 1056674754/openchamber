@@ -11,7 +11,7 @@ import type { PluginInput } from "@opencode-ai/plugin"
 
 type ModelCapabilityResult = {
   supportsImage: boolean
-  reason: "modalities" | "attachment" | "unknown" | "error"
+  reason: string
 }
 
 export type ModelCapabilityChecker = (
@@ -20,12 +20,10 @@ export type ModelCapabilityChecker = (
 ) => Promise<ModelCapabilityResult>
 
 type ProviderModelEntry = {
-  id: string
-  name: string
-  attachment: boolean
-  modalities?: {
-    input?: Array<"text" | "audio" | "image" | "video" | "pdf">
-    output?: Array<"text" | "audio" | "image" | "video" | "pdf">
+  capabilities?: {
+    attachment?: boolean
+    input?: { image?: boolean; text?: boolean; audio?: boolean; video?: boolean; pdf?: boolean }
+    output?: Record<string, boolean>
   }
 }
 
@@ -54,22 +52,25 @@ export function createModelCapabilityChecker(client: PluginInput["client"]): Mod
         return { supportsImage: true, reason: "unknown" }
       }
 
-      const model = provider.models?.[modelID]
+      const model = provider.models?.[modelID] as ProviderModelEntry | undefined
       if (!model) {
         return { supportsImage: true, reason: "unknown" }
       }
 
-      const hasModalityImage = model.modalities?.input
-        && Array.isArray(model.modalities.input)
-        && model.modalities.input.includes("image")
-      const hasAttachment = model.attachment === true
-
-      if (hasModalityImage || hasAttachment) {
-        return { supportsImage: true, reason: hasModalityImage ? "modalities" : "attachment" }
+      const caps = model.capabilities
+      if (!caps) {
+        return { supportsImage: true, reason: "unknown" }
       }
 
-      if (model.modalities?.input && Array.isArray(model.modalities.input)) {
-        return { supportsImage: false, reason: "modalities" }
+      const hasImageInput = caps.input?.image === true
+      const hasAttachment = caps.attachment === true
+
+      if (hasImageInput || hasAttachment) {
+        return { supportsImage: true, reason: hasImageInput ? "capabilities.input.image" : "capabilities.attachment" }
+      }
+
+      if (caps.input && typeof caps.input.image === "boolean") {
+        return { supportsImage: false, reason: "capabilities.input.image=false" }
       }
 
       return { supportsImage: true, reason: "unknown" }
