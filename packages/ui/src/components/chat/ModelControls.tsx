@@ -3047,7 +3047,10 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                             >
                                 <Icon
                                     name={(currentMetadata?.modalities?.input?.includes('image') || currentMetadata?.attachment) ? 'eye' : 'eye-off'}
-                                    className="size-3.5 text-muted-foreground/60"
+                                    className={cn(controlIconSize, 'flex-shrink-0',
+                                        (currentMetadata?.modalities?.input?.includes('image') || currentMetadata?.attachment)
+                                            ? 'text-[color:var(--status-success)]/50'
+                                            : 'text-muted-foreground/40')}
                                 />
                             </div>
                             {renderModelSelector()}
