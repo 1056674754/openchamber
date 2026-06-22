@@ -20,13 +20,10 @@ type SystemTransformOutput = {
 
 const SYSTEM_PROMPT_ADDITION = [
   ``,
-  `## Image Analysis Tools`,
-  `If a message references an image saved to disk (e.g. "[Image attachment: ... Saved to /path]"),`,
-  `follow this workflow:`,
-  `1. ALWAYS call describe_image FIRST — it checks the cross-session cache.`,
-  `2. If a cached analysis answers your question, use it directly.`,
-  `3. If no cache, use any available vision tool (look_at, analyze_image, etc.) to analyze the image.`,
-  `4. After receiving ANY vision analysis, call save_image_analysis to cache it for future sessions.`,
+  `## Image Handling`,
+  `When a message contains "[Image attachment: ...]" with a prior analysis, use it directly.`,
+  `When no analysis is included, use any available vision tool (look_at, analyze_image, etc.) to analyze the image.`,
+  `After receiving a vision analysis, call save_image_analysis to cache it for future sessions.`,
 ].join("\n")
 
 export function createSystemTransformHandler() {

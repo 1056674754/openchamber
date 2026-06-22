@@ -76,29 +76,28 @@ function buildReplacementText(
   const filename = saved.originalFilename ?? part.filename ?? "image"
   const mime = saved.mime
   const path = saved.filePath
-  const hash = saved.hash.slice(0, 12)
 
-  const analysisSection = priorAnalyses && priorAnalyses.length > 0
-    ? [
-        ``,
-        `Prior analyses available for this image (call describe_image for full text):`,
-        ...priorAnalyses.map((a, i) => {
-          const preview = a.summary ?? a.result.slice(0, 300)
-          const ellipsis = !a.summary && a.result.length > 300 ? "..." : ""
-          return `  ${i + 1}. ${a.goal ? `[${a.goal}]` : "[general]"}: ${preview}${ellipsis}`
-        }),
-        ``,
-      ].join("\n")
-    : ""
+  if (priorAnalyses && priorAnalyses.length > 0) {
+    const analysisLines = priorAnalyses.map((a, i) => {
+      const goalLabel = a.goal ? `[Goal: ${a.goal}]` : "[General]"
+      return `${i + 1}. ${goalLabel}: ${a.result}`
+    }).join("\n\n")
+
+    return [
+      `[Image attachment: "${filename}" (${mime}), saved to: ${path}]`,
+      `This model does not support direct image input. The following prior analysis/analyses exist:`,
+      ``,
+      analysisLines,
+      ``,
+      `If these answer your question, use them directly. If you need a different analysis, use any available vision tool with file_path="${path}".`,
+    ].join("\n")
+  }
 
   return [
-    `[Image attachment: "${filename}" (${mime})]`,
-    `The current model does not support direct image input.`,
-    `The image has been saved to: ${path}`,
-    `Content hash: ${hash}`,
-    analysisSection,
-    `To analyze this image, call the describe_image tool with path="${path}".`,
-  ].filter(Boolean).join("\n")
+    `[Image attachment: "${filename}" (${mime}), saved to: ${path}]`,
+    `This model does not support direct image input.`,
+    `No prior analysis exists. Use any available vision tool to analyze this image.`,
+  ].join("\n")
 }
 
 function buildAlreadyOnDiskText(part: FileLikePart): string {
