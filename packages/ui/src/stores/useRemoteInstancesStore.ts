@@ -11,12 +11,13 @@ import {
 } from '@/lib/desktopSsh';
 import { hasDesktopInvoke } from '@/lib/desktop';
 import { serverRegistry } from '@/lib/opencode/server-registry';
-import type {
-  RemoteInstance,
-  RemoteInstanceApiEntry,
-  RemoteInstancePhase,
-  RemoteInstanceStatus,
-  RemoteInstancesApiResponse,
+import {
+  RESERVED_REMOTE_INSTANCE_IDS,
+  type RemoteInstance,
+  type RemoteInstanceApiEntry,
+  type RemoteInstancePhase,
+  type RemoteInstanceStatus,
+  type RemoteInstancesApiResponse,
 } from '@/lib/remote-instances/types';
 import {
   mapSshPhaseToRemotePhase,
@@ -484,6 +485,12 @@ export const useRemoteInstancesStore = create<RemoteInstancesState>((set, get) =
       }
 
       const explicit = instances.filter((i) => i.source !== 'ssh');
+      const reserved = explicit.find((i) => RESERVED_REMOTE_INSTANCE_IDS.has(i.id));
+      if (reserved) {
+        throw new Error(
+          `Instance id "${reserved.id}" is reserved and cannot be used for a remote instance`,
+        );
+      }
       const response = await fetch('/api/remote-instances', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },

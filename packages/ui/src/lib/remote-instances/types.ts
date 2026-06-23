@@ -53,6 +53,15 @@ export type RemoteInstancesApiResponse = {
 };
 
 /**
+ * Reserved ids that remote instances must never occupy because they collide
+ * with internal sentinels: 'default' is the local in-process OpenCode server
+ * id (DEFAULT_SERVER_ID / InstanceType 'default'), 'local' is the desktop host
+ * id (LOCAL_HOST_ID) and RPC target (LOCAL_RPC_TARGET). Mirrors
+ * RESERVED_REMOTE_INSTANCE_IDS in packages/web/server/lib/remote-instances/config.js.
+ */
+export const RESERVED_REMOTE_INSTANCE_IDS = new Set(['default', 'local']);
+
+/**
  * Map fine-grained DesktopSshPhase values to the unified
  * RemoteInstancePhase. The `default` branch collapses all intermediate SSH
  * phases (master_connecting, installing, server_starting, …) into

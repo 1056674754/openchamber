@@ -1,5 +1,17 @@
 const VALID_AUTH_TYPES = new Set(['none', 'password', 'bearer']);
 
+/**
+ * Reserved ids that remote instances must never occupy. They collide with
+ * internal sentinels across layers:
+ * - 'default': local in-process OpenCode server id (DEFAULT_SERVER_ID) and
+ *   InstanceType 'default' in the instance-context store.
+ * - 'local': desktop host id (LOCAL_HOST_ID) and RPC target sentinel
+ *   (LOCAL_RPC_TARGET).
+ * Allowing a remote instance to claim either id would let it masquerade as or
+ * overwrite the local connection in the server registry / host switcher.
+ */
+const RESERVED_REMOTE_INSTANCE_IDS = new Set(['default', 'local']);
+
 const DEFAULT_HEALTH_CHECK_INTERVAL_MS = 60_000;
 export const DEFAULT_HEALTH_PROBE_TIMEOUT_SEC = 3;
 export const MAX_HEALTH_PROBE_TIMEOUT_SEC = 5;
@@ -51,6 +63,9 @@ const validateInstance = (inst) => {
 
   const id = typeof inst.id === 'string' ? inst.id.trim() : '';
   if (id.length === 0 || id.length > 128) {
+    return null;
+  }
+  if (RESERVED_REMOTE_INSTANCE_IDS.has(id)) {
     return null;
   }
 
