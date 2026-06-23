@@ -1019,7 +1019,16 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
                       ),
                     )}
                   />
-                  <SelectValue placeholder={t('settings.instance.selector.label')} />
+                  <SelectValue placeholder={t('settings.instance.selector.label')}>
+                    {(value: string | undefined) => {
+                      if (!value) return t('settings.instance.selector.label');
+                      const inst = instances.find((i) => i.id === value);
+                      if (!inst) return value;
+                      return inst.type === 'default'
+                        ? t('settings.instance.selector.defaultLabel')
+                        : inst.label;
+                    }}
+                  </SelectValue>
                 </div>
               </SelectTrigger>
               <SelectContent align="start" className="min-w-[240px]">
