@@ -727,8 +727,8 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   const selectedFilePath = selectedFile?.path ?? '';
   const selectedFileIsOutsideWorkspace = Boolean(root && selectedFilePath && !isPathWithinRoot(selectedFilePath, root));
   const selectedFileReadOptions = React.useMemo(
-    () => ({ allowOutsideWorkspace: mode === 'editor-only' && selectedFileIsOutsideWorkspace }),
-    [mode, selectedFileIsOutsideWorkspace],
+    () => ({ allowOutsideWorkspace: mode === 'editor-only' && selectedFileIsOutsideWorkspace, directory: currentDirectory }),
+    [mode, selectedFileIsOutsideWorkspace, currentDirectory],
   );
 
   // Editor tabs horizontal scroll fades
@@ -1399,7 +1399,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
 
   const readFile = React.useCallback(async (path: string, options?: { allowOutsideWorkspace?: boolean; optional?: boolean }): Promise<string> => {
     if (files.readFile && !serverBaseUrl) {
-      const result = await files.readFile(path, options);
+      const result = await files.readFile(path, { ...options, directory: currentDirectory });
       return result.content ?? '';
     }
 
@@ -1425,7 +1425,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
 
   const readFileStat = React.useCallback(async (path: string, options?: { allowOutsideWorkspace?: boolean }): Promise<FileStatSnapshot | null> => {
     if (files.statFile) {
-      const result = await files.statFile(path, options);
+      const result = await files.statFile(path, { ...options, directory: currentDirectory });
       return {
         path: result.path,
         size: result.size,
@@ -1433,7 +1433,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
       };
     }
     return null;
-  }, [files]);
+  }, [files, currentDirectory]);
 
   React.useEffect(() => {
     if (!root || !files.statFile || openPaths.length === 0) {
@@ -1445,7 +1445,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
 
     void Promise.all(paths.map(async (path) => {
       try {
-        const stat = await files.statFile?.(path);
+        const stat = await files.statFile?.(path, { directory: root });
         if (!cancelled && stat && !stat.isFile) {
           removeOpenPathsByPrefix(root, path);
         }

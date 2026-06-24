@@ -19,15 +19,22 @@ const resolveCurrentDirectory = (): string => {
   return typeof clientDirectory === 'string' ? normalizePath(clientDirectory.trim()) : '';
 };
 
-const appendExplicitDirectory = (params: URLSearchParams): void => {
-  const directory = resolveCurrentDirectory();
+const resolveExplicitDirectory = (override?: string): string => {
+  if (typeof override === 'string' && override.trim()) {
+    return normalizePath(override.trim());
+  }
+  return resolveCurrentDirectory();
+};
+
+const appendExplicitDirectory = (params: URLSearchParams, directoryOverride?: string): void => {
+  const directory = resolveExplicitDirectory(directoryOverride);
   if (directory) {
     params.set('directory', directory);
   }
 };
 
-const explicitDirectoryBody = <T extends Record<string, unknown>>(body: T): T & { directory?: string } => {
-  const directory = resolveCurrentDirectory();
+const explicitDirectoryBody = <T extends Record<string, unknown>>(body: T, directoryOverride?: string): T & { directory?: string } => {
+  const directory = resolveExplicitDirectory(directoryOverride);
   if (!directory) {
     return body;
   }
@@ -143,7 +150,7 @@ export const createWebFilesAPI = (): FilesAPI => ({
     if (options?.allowOutsideWorkspace) {
       params.set('allowOutsideWorkspace', 'true');
     } else {
-      appendExplicitDirectory(params);
+      appendExplicitDirectory(params, options?.directory);
     }
     const response = await fetch(`/api/fs/stat?${params.toString()}`);
 
@@ -167,7 +174,7 @@ export const createWebFilesAPI = (): FilesAPI => ({
     if (options?.allowOutsideWorkspace) {
       params.set('allowOutsideWorkspace', 'true');
     } else {
-      appendExplicitDirectory(params);
+      appendExplicitDirectory(params, options?.directory);
     }
     if (options?.optional) {
       params.set('optional', 'true');

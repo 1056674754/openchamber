@@ -589,6 +589,12 @@ export interface ListDirectoryOptions {
 export interface FileReadOptions {
   allowOutsideWorkspace?: boolean;
   optional?: boolean;
+  /**
+   * Explicit workspace directory for the file operation.
+   * When provided, overrides the global directory store so that
+   * session-scoped directories (e.g. worktrees) are respected.
+   */
+  directory?: string;
 }
 
 export interface FilesAPI {
