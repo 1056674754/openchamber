@@ -1,0 +1,44 @@
+diff --git a/node_modules/beautiful-mermaid/src/layout-engine.ts b/node_modules/beautiful-mermaid/src/layout-engine.ts
+index 0000000000000000000000000000000000000000..1111111111111111111111111111111111111111 100644
+--- a/node_modules/beautiful-mermaid/src/layout-engine.ts
++++ b/node_modules/beautiful-mermaid/src/layout-engine.ts
+@@ -209,6 +209,7 @@
+       'elk.layered.highDegreeNodes.threshold': '8',
+       'elk.layered.compaction.postCompaction.strategy': 'LEFT_RIGHT_CONSTRAINT_LOCKING',
+       'elk.layered.considerModelOrder.strategy': 'NODES_AND_EDGES',
++      'elk.layered.cycleBreaking.strategy': 'MODEL_ORDER',
+       'elk.layered.wrapping.strategy': 'OFF',
+       // Use SEPARATE when subgraphs have direction overrides (enables proper direction handling)
+       // Use INCLUDE_CHILDREN otherwise (simpler cross-hierarchy edge routing)
+@@ -355,6 +356,8 @@
+     'elk.layered.nodePlacement.bk.fixedAlignment': 'BALANCED',
+     'elk.layered.spacing.nodeNodeBetweenLayers': String(opts.layerSpacing),
+     'elk.spacing.nodeNode': String(opts.nodeSpacing),
++    'elk.layered.considerModelOrder.strategy': 'NODES_AND_EDGES',
++    'elk.layered.cycleBreaking.strategy': 'MODEL_ORDER',
+   }
+ 
+   // Apply direction override if specified
+diff --git a/node_modules/beautiful-mermaid/dist/index.js b/node_modules/beautiful-mermaid/dist/index.js
+index 0000000000000000000000000000000000000000..1111111111111111111111111111111111111111 100644
+--- a/node_modules/beautiful-mermaid/dist/index.js
++++ b/node_modules/beautiful-mermaid/dist/index.js
+@@ -6166,6 +6166,7 @@
+       "elk.layered.highDegreeNodes.threshold": "8",
+       "elk.layered.compaction.postCompaction.strategy": "LEFT_RIGHT_CONSTRAINT_LOCKING",
+       "elk.layered.considerModelOrder.strategy": "NODES_AND_EDGES",
++      "elk.layered.cycleBreaking.strategy": "MODEL_ORDER",
+       "elk.layered.wrapping.strategy": "OFF",
+       // Use SEPARATE when subgraphs have direction overrides (enables proper direction handling)
+       // Use INCLUDE_CHILDREN otherwise (simpler cross-hierarchy edge routing)
+@@ -6271,7 +6272,9 @@
+     "elk.layered.spacing.edgeNodeBetweenLayers": "12",
+     "elk.layered.nodePlacement.bk.fixedAlignment": "BALANCED",
+     "elk.layered.spacing.nodeNodeBetweenLayers": String(opts.layerSpacing),
+-    "elk.spacing.nodeNode": String(opts.nodeSpacing)
++    "elk.spacing.nodeNode": String(opts.nodeSpacing),
++    "elk.layered.considerModelOrder.strategy": "NODES_AND_EDGES",
++    "elk.layered.cycleBreaking.strategy": "MODEL_ORDER"
+   };
+   if (sg.direction) {
+     layoutOptions["elk.direction"] = directionToElk(sg.direction);

@@ -1387,9 +1387,9 @@ html:not(.dark) .chat-scroll {
 
 [data-markdown="mermaid-block"] [data-markdown="mermaid"] svg {
   width: auto !important;
-  min-width: 100%;
-  max-width: none !important;
   height: auto !important;
+  max-width: 100% !important;
+  max-height: 320px !important;
 }
 
 [data-markdown="mermaid-block"] svg {
