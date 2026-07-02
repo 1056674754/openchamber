@@ -1,7 +1,7 @@
 import React from 'react';
 import 'katex/dist/katex.min.css';
 import { renderMermaidASCII, renderMermaidSVG } from 'beautiful-mermaid';
-import ReactMarkdown from 'react-markdown';
+import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import type { Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
@@ -62,6 +62,16 @@ const useCurrentMermaidTheme = () => {
     ?? (typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches
       ? fallbackDark
       : fallbackLight);
+};
+
+const isFileUrlHref = (href: string): boolean => href.trim().toLowerCase().startsWith('file://');
+
+const markdownUrlTransform = (url: string, key: string): string => {
+  if (key === 'href' && isFileUrlHref(url)) {
+    return url;
+  }
+
+  return defaultUrlTransform(url);
 };
 
 const useExternalLinkInteractions = ({
@@ -1211,7 +1221,12 @@ const MarkdownBlockView: React.FC<{
   components: Components;
 }> = React.memo(({ block, components }) => {
   return (
-    <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[[rehypeKatex, { throwOnError: false, errorColor: 'var(--destructive)' }]]} components={components}>
+    <ReactMarkdown
+      remarkPlugins={[remarkGfm, remarkMath]}
+      rehypePlugins={[[rehypeKatex, { throwOnError: false, errorColor: 'var(--destructive)' }]]}
+      components={components}
+      urlTransform={markdownUrlTransform}
+    >
       {block.src}
     </ReactMarkdown>
   );
@@ -1489,6 +1504,139 @@ const resolveMarkdownImageReference = (
 
 const getContextDirectory = (effectiveDirectory: string, resolvedPath: string): string => {
   return getDirectoryForFilePath(effectiveDirectory, resolvedPath);
+};
+
+type OpenResolvedFileReferenceOptions = {
+  raw: string;
+  effectiveDirectory: string;
+  editor?: EditorAPI;
+  preferRuntimeEditor?: boolean;
+};
+
+const normalizePositiveInteger = (value: number | undefined): number | undefined => {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return undefined;
+  }
+
+  return Math.max(1, Math.trunc(value));
+};
+
+const openResolvedFileReference = ({
+  raw,
+  effectiveDirectory,
+  editor,
+  preferRuntimeEditor,
+}: OpenResolvedFileReferenceOptions): boolean => {
+  const resolved = getResolvedReference(raw, effectiveDirectory);
+  if (!resolved) {
+    return false;
+  }
+
+  const line = normalizePositiveInteger(resolved.line);
+  const column = normalizePositiveInteger(resolved.column);
+  const contextDirectory = getContextDirectory(effectiveDirectory, resolved.resolvedPath);
+  if (preferRuntimeEditor && editor) {
+    void editor.openFile(resolved.resolvedPath, line, column);
+    return true;
+  }
+
+  const uiStore = useUIStore.getState();
+  uiStore.openContextPanelTab(contextDirectory, { mode: 'file', targetPath: resolved.resolvedPath });
+
+  if (line !== undefined) {
+    uiStore.setPendingFileFocusPath(null);
+    uiStore.setPendingFileNavigation({
+      path: resolved.resolvedPath,
+      line,
+      column: column ?? 1,
+    });
+  } else {
+    uiStore.setPendingFileFocusPath(resolved.resolvedPath);
+    uiStore.setPendingFileNavigation(null);
+  }
+
+  return true;
+};
+
+const getFileUrlHrefFromEventTarget = (target: EventTarget | null): string | null => {
+  if (!(target instanceof Element)) {
+    return null;
+  }
+
+  const anchor = target.closest('a[href]');
+  if (!(anchor instanceof HTMLAnchorElement)) {
+    return null;
+  }
+
+  const href = anchor.getAttribute('href') ?? '';
+  return isFileUrlHref(href) ? href : null;
+};
+
+const useFileUrlNavigationGuard = ({
+  containerRef,
+  effectiveDirectory,
+  editor,
+  preferRuntimeEditor,
+}: {
+  containerRef: React.RefObject<HTMLDivElement | null>;
+  effectiveDirectory: string;
+  editor?: EditorAPI;
+  preferRuntimeEditor?: boolean;
+}) => {
+  React.useEffect(() => {
+    const container = containerRef.current;
+    if (!container) {
+      return;
+    }
+
+    const handleClick = (event: MouseEvent) => {
+      const href = getFileUrlHrefFromEventTarget(event.target);
+      if (!href) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+
+      if (event.button !== 0 || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) {
+        return;
+      }
+
+      openResolvedFileReference({
+        raw: href,
+        effectiveDirectory,
+        editor,
+        preferRuntimeEditor,
+      });
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Enter' && event.key !== ' ') {
+        return;
+      }
+
+      const href = getFileUrlHrefFromEventTarget(event.target);
+      if (!href) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+      openResolvedFileReference({
+        raw: href,
+        effectiveDirectory,
+        editor,
+        preferRuntimeEditor,
+      });
+    };
+
+    container.addEventListener('click', handleClick, true);
+    container.addEventListener('keydown', handleKeyDown, true);
+    return () => {
+      container.removeEventListener('click', handleClick, true);
+      container.removeEventListener('keydown', handleKeyDown, true);
+    };
+  }, [containerRef, editor, effectiveDirectory, preferRuntimeEditor]);
 };
 
 const fileReferenceExists = (path: string, fileReferenceBaseUrl?: string): Promise<boolean | null> => {
@@ -1846,41 +1994,12 @@ const useFileReferenceInteractions = ({
 
     const openFileReference = (sourceElement: HTMLElement) => {
       const raw = sourceElement.getAttribute('data-openchamber-file-ref') || extractPathCandidateFromElement(sourceElement);
-      const resolved = getResolvedReference(raw, effectiveDirectory);
-      if (!resolved) {
-        return;
-      }
-
-      const contextDirectory = getContextDirectory(effectiveDirectory, resolved.resolvedPath);
-      if (preferRuntimeEditor && editor) {
-        void editor.openFile(
-          resolved.resolvedPath,
-          Number.isFinite(resolved.line ?? Number.NaN)
-            ? Math.max(1, Math.trunc(resolved.line as number))
-            : undefined,
-          Number.isFinite(resolved.column ?? Number.NaN)
-            ? Math.max(1, Math.trunc(resolved.column as number))
-            : undefined,
-        );
-        return;
-      }
-
-      const uiStore = useUIStore.getState();
-      if (Number.isFinite(resolved.line ?? Number.NaN)) {
-        uiStore.openContextPanelTab(contextDirectory, { mode: 'file', targetPath: resolved.resolvedPath });
-        uiStore.setPendingFileFocusPath(null);
-        uiStore.setPendingFileNavigation({
-          path: resolved.resolvedPath,
-          line: Math.max(1, Math.trunc(resolved.line as number)),
-          column: Number.isFinite(resolved.column ?? Number.NaN)
-            ? Math.max(1, Math.trunc(resolved.column as number))
-            : 1,
-        });
-      } else {
-        uiStore.openContextPanelTab(contextDirectory, { mode: 'file', targetPath: resolved.resolvedPath });
-        uiStore.setPendingFileFocusPath(resolved.resolvedPath);
-        uiStore.setPendingFileNavigation(null);
-      }
+      openResolvedFileReference({
+        raw,
+        effectiveDirectory,
+        editor,
+        preferRuntimeEditor,
+      });
     };
 
     const handleClick = (event: MouseEvent) => {
@@ -2111,6 +2230,12 @@ const MarkdownRendererImpl: React.FC<MarkdownRendererProps> = ({
   const mermaidBlocks = React.useMemo(() => extractMermaidBlocks(content), [content]);
   useMermaidInlineInteractions({ containerRef, mermaidBlocks, onShowPopup });
   const fileReferencesEnabled = enableFileReferences && !isStreaming;
+  useFileUrlNavigationGuard({
+    containerRef,
+    effectiveDirectory,
+    editor,
+    preferRuntimeEditor: runtime.isVSCode,
+  });
   useFileReferenceInteractions({
     containerRef,
     effectiveDirectory,
@@ -2232,6 +2357,12 @@ const SimpleMarkdownRendererImpl: React.FC<{
     mermaidBlocks,
     onShowPopup,
     allowWheelZoom: allowMermaidWheelZoom,
+  });
+  useFileUrlNavigationGuard({
+    containerRef,
+    effectiveDirectory,
+    editor,
+    preferRuntimeEditor: runtime.isVSCode,
   });
   useFileReferenceInteractions({
     containerRef,

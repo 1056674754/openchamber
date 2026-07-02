@@ -120,6 +120,17 @@ const readAppMetadata = () => {
 const APP_METADATA = readAppMetadata();
 const APP_VERSION = APP_METADATA.version;
 
+const clearDesktopWebCacheStorage = async () => {
+  try {
+    await session.defaultSession.clearStorageData({
+      storages: ['serviceworkers', 'cachestorage'],
+    });
+    log.info('[electron] cleared desktop web service worker cache storage');
+  } catch (error) {
+    log.warn('[electron] failed to clear desktop web service worker cache storage:', error);
+  }
+};
+
 const DEFAULT_DESKTOP_PORT = 57123;
 const MIN_WINDOW_WIDTH = 800;
 const MIN_WINDOW_HEIGHT = 520;
@@ -1346,7 +1357,7 @@ const createBrowserWindow = ({ label, restoreGeometry, url }) => {
   const isAllowedNavigationUrl = (raw) => {
     try {
       const url = new URL(raw);
-      if (url.protocol === 'file:' || url.protocol === 'about:' || url.protocol === 'devtools:') return true;
+      if (url.protocol === 'about:' || url.protocol === 'devtools:') return true;
       if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
       const hostname = url.hostname;
       if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1') return true;
@@ -2889,6 +2900,7 @@ app.whenReady().then(async () => {
   await session.defaultSession.setProxy({
     proxyBypassRules: 'localhost,127.0.0.1,::1,<local>',
   });
+  await clearDesktopWebCacheStorage();
 
   nativeTheme.themeSource = readThemeSource();
   setupAutoUpdater();

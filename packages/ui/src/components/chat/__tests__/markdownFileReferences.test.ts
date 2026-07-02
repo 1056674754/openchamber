@@ -1,5 +1,11 @@
 import { describe, expect, test } from 'bun:test';
-import { getResolvedReference, isLikelyFilePath, parseFileReference } from '../markdownFileReferences';
+import {
+  findFileReferenceTextMatches,
+  getResolvedReference,
+  isLikelyFilePath,
+  isResolvedFileReferenceWithinDirectory,
+  parseFileReference,
+} from '../markdownFileReferences';
 
 describe('markdown file reference heuristics', () => {
   test('does not treat IP endpoints as file references', () => {
@@ -30,5 +36,45 @@ describe('markdown file reference heuristics', () => {
     expect(isLikelyFilePath('src/example.custom')).toBe(true);
     expect(isLikelyFilePath('./example.custom')).toBe(true);
     expect(isLikelyFilePath('../example.custom')).toBe(true);
+  });
+
+  test('keeps absolute references under hidden project folders scoped to their directory', () => {
+    const directory = '/Users/song/dev_suisqp_web/suisqp_sis_qiankun';
+    const path = `${directory}/.docs/ACADEMIC_REPORT_WORKBENCH_ROLE_DESIGN.md`;
+
+    expect(parseFileReference(path)).toEqual({ path });
+    expect(isLikelyFilePath(path)).toBe(true);
+    expect(getResolvedReference(path, directory)).toEqual({ path, resolvedPath: path });
+    expect(isResolvedFileReferenceWithinDirectory(path, directory)).toBe(true);
+  });
+
+  test('normalizes markdown file URLs into clickable local file references', () => {
+    const directory = '/Users/song/dev_suisqp_web/_worktrees/suisqp_portal_qiankun_activity_class_p0';
+    const path = `${directory}/src/views/activity/docs/P01_offering.md`;
+    const fileUrl = `file://${path}`;
+
+    expect(parseFileReference(fileUrl)).toEqual({ path });
+    expect(isLikelyFilePath(fileUrl)).toBe(true);
+    expect(getResolvedReference(fileUrl, directory)).toEqual({ path, resolvedPath: path });
+  });
+
+  test('does not truncate backup filenames with long timestamp suffixes in code blocks', () => {
+    const path = '/mnt/user/appdata/frpc-gitlab/frpc.toml.bak.20260624_161718';
+
+    expect(findFileReferenceTextMatches(`backup: ${path}`)).toEqual([{
+      start: 8,
+      end: 8 + path.length,
+      raw: path,
+    }]);
+  });
+
+  test('keeps whole absolute code-block lines with spaces and tildes', () => {
+    const path = '/Users/song/Library/Mobile Documents/com~apple~CloudDocs/ops/docs/it-architecture.md';
+
+    expect(findFileReferenceTextMatches(`  ${path}\n`)).toEqual([{
+      start: 2,
+      end: 2 + path.length,
+      raw: path,
+    }]);
   });
 });

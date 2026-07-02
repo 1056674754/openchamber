@@ -1,10 +1,23 @@
-import { isAbsoluteFilePath, normalizeFilePath, toAbsoluteFilePath } from '@/lib/path-utils';
+import { isAbsoluteFilePath, isFilePathWithinDirectory, normalizeFilePath, toAbsoluteFilePath } from '@/lib/path-utils';
 
 export type ParsedFileReference = {
   path: string;
   line?: number;
   column?: number;
 };
+
+export type FileReferenceTextMatch = {
+  start: number;
+  end: number;
+  raw: string;
+};
+
+// Matches `path[:line[:col]]` inside shell/grep-style output. Requires a file
+// extension so plain words don't qualify; the path itself must contain at least
+// one extension-bearing segment. Whole-line path detection below handles paths
+// with spaces, because regex tokenization cannot distinguish spaces inside a
+// filename from spaces between shell-output words without overmatching.
+const BLOCK_PATH_TOKEN_RE = /(?:[A-Za-z]:[\\/])?[\w.\-/@+~]*[\w\-/@+~]\.[A-Za-z0-9_-]{1,32}(?::\d+){0,2}/g;
 
 const IMAGE_FILE_EXTENSIONS = new Set([
   'avif',
@@ -127,6 +140,10 @@ export const toAbsolutePath = (basePath: string, targetPath: string): string => 
   return toAbsoluteFilePath(basePath, targetPath);
 };
 
+export const isResolvedFileReferenceWithinDirectory = (resolvedPath: string, directory: string): boolean => {
+  return isFilePathWithinDirectory(resolvedPath, directory);
+};
+
 export const trimPathCandidate = (value: string): string => {
   let next = (value || '').trim();
   if (!next) {
@@ -147,6 +164,36 @@ export const trimPathCandidate = (value: string): string => {
   }
 
   return next;
+};
+
+const decodeUriPathComponent = (value: string): string => {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+};
+
+const normalizeFileUrlPathCandidate = (value: string): string => {
+  const raw = (value || '').trim();
+  if (!raw.toLowerCase().startsWith('file://')) {
+    return raw;
+  }
+
+  try {
+    const parsed = new URL(raw);
+    const pathname = decodeUriPathComponent(parsed.pathname || '');
+    const path = parsed.hostname && parsed.hostname !== 'localhost'
+      ? `//${parsed.hostname}${pathname}`
+      : /^\/[A-Za-z]:\//.test(pathname)
+        ? pathname.slice(1)
+        : pathname;
+    const normalizedPath = normalizePath(path);
+    const lineHash = /^#L\d+(?:C\d+)?$/i.test(parsed.hash) ? parsed.hash : '';
+    return `${normalizedPath}${lineHash}`;
+  } catch {
+    return raw;
+  }
 };
 
 const stripTrailingReference = (value: string): string => {
@@ -178,7 +225,7 @@ const stripTrailingReference = (value: string): string => {
 };
 
 export const parseFileReference = (value: string): ParsedFileReference | null => {
-  const trimmed = trimPathCandidate(value);
+  const trimmed = trimPathCandidate(normalizeFileUrlPathCandidate(value));
   if (!trimmed) {
     return null;
   }
@@ -300,6 +347,65 @@ export const isLikelyFilePath = (value: string): boolean => {
   return isLikelyFilePathValue(parsed.path);
 };
 
+const overlapsExistingMatch = (start: number, end: number, matches: FileReferenceTextMatch[]): boolean => {
+  return matches.some((match) => start < match.end && end > match.start);
+};
+
+const startsWithExplicitFileReferencePrefix = (value: string): boolean => {
+  return value.startsWith('/')
+    || value.startsWith('./')
+    || value.startsWith('../')
+    || value.startsWith('~/')
+    || isAbsolutePath(value);
+};
+
+const addWholeLineFileReferenceMatches = (text: string, matches: FileReferenceTextMatch[]): void => {
+  let lineStart = 0;
+  while (lineStart <= text.length) {
+    const newlineIndex = text.indexOf('\n', lineStart);
+    const lineEnd = newlineIndex === -1 ? text.length : newlineIndex;
+    const rawLine = text.slice(lineStart, lineEnd).replace(/\r$/, '');
+    const leadingWhitespaceLength = rawLine.match(/^\s*/)?.[0].length ?? 0;
+    const trimmed = rawLine.trim();
+
+    if (trimmed && startsWithExplicitFileReferencePrefix(trimmed) && isLikelyFilePath(trimmed)) {
+      matches.push({
+        start: lineStart + leadingWhitespaceLength,
+        end: lineStart + leadingWhitespaceLength + trimmed.length,
+        raw: trimmed,
+      });
+    }
+
+    if (newlineIndex === -1) {
+      break;
+    }
+    lineStart = newlineIndex + 1;
+  }
+};
+
+export const findFileReferenceTextMatches = (text: string): FileReferenceTextMatch[] => {
+  if (!text.includes('.')) {
+    return [];
+  }
+
+  const matches: FileReferenceTextMatch[] = [];
+  addWholeLineFileReferenceMatches(text, matches);
+
+  BLOCK_PATH_TOKEN_RE.lastIndex = 0;
+  let match: RegExpExecArray | null = BLOCK_PATH_TOKEN_RE.exec(text);
+  while (match) {
+    const raw = match[0];
+    const start = match.index;
+    const end = start + raw.length;
+    if (raw && isLikelyFilePath(raw) && !overlapsExistingMatch(start, end, matches)) {
+      matches.push({ start, end, raw });
+    }
+    match = BLOCK_PATH_TOKEN_RE.exec(text);
+  }
+
+  return matches.sort((left, right) => left.start - right.start);
+};
+
 export const getResolvedReference = (rawValue: string, effectiveDirectory: string): (ParsedFileReference & { resolvedPath: string }) | null => {
   const parsed = parseFileReference(rawValue);
   if (!parsed || !isLikelyFilePathValue(parsed.path)) {
@@ -319,14 +425,6 @@ export const getResolvedReference = (rawValue: string, effectiveDirectory: strin
   };
 };
 
-const decodeUriPathComponent = (value: string): string => {
-  try {
-    return decodeURIComponent(value);
-  } catch {
-    return value;
-  }
-};
-
 export const normalizeMarkdownImageSource = (value: string): string => {
   const raw = (value || '').trim();
   if (!raw) {
@@ -334,19 +432,7 @@ export const normalizeMarkdownImageSource = (value: string): string => {
   }
 
   if (raw.toLowerCase().startsWith('file://')) {
-    try {
-      const parsed = new URL(raw);
-      const pathname = decodeUriPathComponent(parsed.pathname || '');
-      if (parsed.hostname && parsed.hostname !== 'localhost') {
-        return normalizePath(`//${parsed.hostname}${pathname}`);
-      }
-      if (/^\/[A-Za-z]:\//.test(pathname)) {
-        return normalizePath(pathname.slice(1));
-      }
-      return normalizePath(pathname);
-    } catch {
-      return raw;
-    }
+    return normalizeFileUrlPathCandidate(raw).replace(/#L\d+(?:C\d+)?$/i, '');
   }
 
   return decodeUriPathComponent(raw);
