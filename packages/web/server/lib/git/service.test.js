@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import simpleGit from 'simple-git';
 
 import {
@@ -139,6 +139,21 @@ describe('getStatus', () => {
     runGit(repo, ['commit', '-m', 'Initial commit']);
 
     await expect(getStatus(repo)).resolves.toMatchObject({ current: 'main' });
+  });
+
+  it('does not log an error when the directory no longer exists', async () => {
+    if (!canRunGit()) return;
+
+    const missingDir = createTempDir();
+    fs.rmSync(missingDir, { recursive: true, force: true });
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      await expect(getStatus(missingDir)).rejects.toThrow();
+      expect(errorSpy).not.toHaveBeenCalled();
+    } finally {
+      errorSpy.mockRestore();
+    }
   });
 });
 
