@@ -1,4 +1,5 @@
 import { isAbsoluteFilePath, isFilePathWithinDirectory, normalizeFilePath, toAbsoluteFilePath } from '@/lib/path-utils';
+import { resolveApiUrl } from '@/lib/api/serverUrl';
 
 export type ParsedFileReference = {
   path: string;
@@ -10,6 +11,12 @@ export type FileReferenceTextMatch = {
   start: number;
   end: number;
   raw: string;
+};
+
+export type MarkdownImageReference = {
+  source: string;
+  resolvedPath: string;
+  rawUrl: string;
 };
 
 // Matches `path[:line[:col]]` inside shell/grep-style output. Requires a file
@@ -142,6 +149,23 @@ export const toAbsolutePath = (basePath: string, targetPath: string): string => 
 
 export const isResolvedFileReferenceWithinDirectory = (resolvedPath: string, directory: string): boolean => {
   return isFilePathWithinDirectory(resolvedPath, directory);
+};
+
+export const buildFileRequestParams = (resolvedPath: string, effectiveDirectory: string): URLSearchParams => {
+  const normalizedDirectory = normalizePath(effectiveDirectory);
+  const normalizedPath = normalizePath(resolvedPath);
+  const params = new URLSearchParams({ path: normalizedPath });
+  if (normalizedDirectory && isResolvedFileReferenceWithinDirectory(normalizedPath, normalizedDirectory)) {
+    params.set('directory', normalizedDirectory);
+  } else {
+    params.set('allowOutsideWorkspace', 'true');
+  }
+  return params;
+};
+
+export const buildFileRawUrl = (resolvedPath: string, effectiveDirectory: string, fileReferenceBaseUrl?: string): string => {
+  const params = buildFileRequestParams(resolvedPath, effectiveDirectory);
+  return `${resolveApiUrl('/api/fs/raw', fileReferenceBaseUrl)}?${params.toString()}`;
 };
 
 export const trimPathCandidate = (value: string): string => {
@@ -448,4 +472,40 @@ export const getFileNameFromPath = (path: string): string => {
 
 export const isLikelyImageFilePath = (path: string): boolean => {
   return IMAGE_FILE_EXTENSIONS.has(getLowerFileExtension(path));
+};
+
+const isHttpUrl = (value: string): boolean => /^https?:\/\//i.test(value);
+
+export const resolveMarkdownImageReference = (
+  rawSrc: string,
+  effectiveDirectory: string,
+  fileReferenceBaseUrl?: string,
+): MarkdownImageReference | null => {
+  const source = normalizeMarkdownImageSource(rawSrc);
+  if (!source || isHttpUrl(source) || source.startsWith('data:') || source.startsWith('blob:')) {
+    return null;
+  }
+
+  const parsed = parseFileReference(source);
+  if (!parsed || !isLikelyFilePathValue(parsed.path) || !isLikelyImageFilePath(parsed.path)) {
+    return null;
+  }
+
+  const normalizedDirectory = normalizePath(effectiveDirectory);
+  if (!isAbsolutePath(parsed.path) && !normalizedDirectory) {
+    return null;
+  }
+
+  const resolvedPath = isAbsolutePath(parsed.path)
+    ? normalizePath(parsed.path)
+    : toAbsolutePath(normalizedDirectory, parsed.path);
+  if (!resolvedPath || !isAbsolutePath(resolvedPath)) {
+    return null;
+  }
+
+  return {
+    source,
+    resolvedPath,
+    rawUrl: buildFileRawUrl(resolvedPath, normalizedDirectory, fileReferenceBaseUrl),
+  };
 };

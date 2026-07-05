@@ -5,6 +5,7 @@ import {
   isLikelyFilePath,
   isResolvedFileReferenceWithinDirectory,
   parseFileReference,
+  resolveMarkdownImageReference,
 } from '../markdownFileReferences';
 
 describe('markdown file reference heuristics', () => {
@@ -56,6 +57,24 @@ describe('markdown file reference heuristics', () => {
     expect(parseFileReference(fileUrl)).toEqual({ path });
     expect(isLikelyFilePath(fileUrl)).toBe(true);
     expect(getResolvedReference(fileUrl, directory)).toEqual({ path, resolvedPath: path });
+  });
+
+  test('resolves markdown image links relative to the rendered markdown file directory', () => {
+    const directory = '/Users/song/dev_suisqp_web/.omo/evidence/admissions-workflow';
+    const rootImage = resolveMarkdownImageReference('task-13-shell.png', directory);
+    const nestedImage = resolveMarkdownImageReference('screenshots/task17-activities.png', directory);
+
+    expect(rootImage?.source).toBe('task-13-shell.png');
+    expect(rootImage?.resolvedPath).toBe(`${directory}/task-13-shell.png`);
+    expect(nestedImage?.source).toBe('screenshots/task17-activities.png');
+    expect(nestedImage?.resolvedPath).toBe(`${directory}/screenshots/task17-activities.png`);
+
+    const rootParams = new URLSearchParams(rootImage?.rawUrl.split('?')[1] ?? '');
+    const nestedParams = new URLSearchParams(nestedImage?.rawUrl.split('?')[1] ?? '');
+    expect(rootParams.get('path')).toBe(`${directory}/task-13-shell.png`);
+    expect(rootParams.get('directory')).toBe(directory);
+    expect(nestedParams.get('path')).toBe(`${directory}/screenshots/task17-activities.png`);
+    expect(nestedParams.get('directory')).toBe(directory);
   });
 
   test('does not truncate backup filenames with long timestamp suffixes in code blocks', () => {

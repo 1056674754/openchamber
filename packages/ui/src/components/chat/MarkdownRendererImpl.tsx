@@ -41,16 +41,12 @@ import { getDirectoryForFilePath } from '@/lib/path-utils';
 import { CODE_SHARED_STYLE, MARKDOWN_CODE_BODY_CLASSNAME } from './markdownCodeStyle';
 import { getTableCopyContent, tableToCSV, tableToMarkdown, type TableCopyFormat, type TableData } from './markdownTableExport';
 import {
+  buildFileRequestParams,
   getFileNameFromPath,
   getResolvedReference,
-  isAbsolutePath,
   isLikelyFilePath,
-  isLikelyFilePathValue,
-  isLikelyImageFilePath,
-  normalizeMarkdownImageSource,
   normalizePath,
-  parseFileReference,
-  toAbsolutePath,
+  resolveMarkdownImageReference,
 } from './markdownFileReferences';
 
 const useCurrentMermaidTheme = () => {
@@ -1441,67 +1437,6 @@ const extractPathCandidateFromElement = (element: HTMLElement): string => {
   return (element.textContent || '').trim();
 };
 
-const toComparableReferencePath = (value: string): string => {
-  return /^[A-Za-z]:\//.test(value) ? value.toLowerCase() : value;
-};
-
-const isResolvedPathWithinDirectory = (resolvedPath: string, directory: string): boolean => {
-  const normalizedPath = normalizePath(resolvedPath);
-  const normalizedDirectory = normalizePath(directory);
-  if (!normalizedPath || !normalizedDirectory) {
-    return false;
-  }
-
-  const comparablePath = toComparableReferencePath(normalizedPath);
-  const comparableDirectory = toComparableReferencePath(normalizedDirectory);
-  return comparablePath === comparableDirectory || comparablePath.startsWith(`${comparableDirectory}/`);
-};
-
-const buildFileRawUrl = (resolvedPath: string, effectiveDirectory: string, fileReferenceBaseUrl?: string): string => {
-  const normalizedDirectory = normalizePath(effectiveDirectory);
-  const params = new URLSearchParams({ path: resolvedPath });
-  if (normalizedDirectory && isResolvedPathWithinDirectory(resolvedPath, normalizedDirectory)) {
-    params.set('directory', normalizedDirectory);
-  } else {
-    params.set('allowOutsideWorkspace', 'true');
-  }
-  return `${resolveApiUrl('/api/fs/raw', fileReferenceBaseUrl)}?${params.toString()}`;
-};
-
-const resolveMarkdownImageReference = (
-  rawSrc: string,
-  effectiveDirectory: string,
-  fileReferenceBaseUrl?: string,
-): { source: string; resolvedPath: string; rawUrl: string } | null => {
-  const source = normalizeMarkdownImageSource(rawSrc);
-  if (!source || isExternalHttpUrl(source) || source.startsWith('data:') || source.startsWith('blob:')) {
-    return null;
-  }
-
-  const parsed = parseFileReference(source);
-  if (!parsed || !isLikelyFilePathValue(parsed.path) || !isLikelyImageFilePath(parsed.path)) {
-    return null;
-  }
-
-  const normalizedDirectory = normalizePath(effectiveDirectory);
-  if (!isAbsolutePath(parsed.path) && !normalizedDirectory) {
-    return null;
-  }
-
-  const resolvedPath = isAbsolutePath(parsed.path)
-    ? normalizePath(parsed.path)
-    : toAbsolutePath(normalizedDirectory, parsed.path);
-  if (!resolvedPath || !isAbsolutePath(resolvedPath)) {
-    return null;
-  }
-
-  return {
-    source,
-    resolvedPath,
-    rawUrl: buildFileRawUrl(resolvedPath, normalizedDirectory, fileReferenceBaseUrl),
-  };
-};
-
 const getContextDirectory = (effectiveDirectory: string, resolvedPath: string): string => {
   return getDirectoryForFilePath(effectiveDirectory, resolvedPath);
 };
@@ -2327,6 +2262,8 @@ const SimpleMarkdownRendererImpl: React.FC<{
   allowMermaidWheelZoom?: boolean;
   enableFileReferences?: boolean;
   sessionId?: string;
+  fileReferenceDirectory?: string;
+  fileReferenceBaseUrl?: string;
 }> = ({
   content,
   sessionId,
@@ -2337,6 +2274,8 @@ const SimpleMarkdownRendererImpl: React.FC<{
   onShowPopup,
   allowMermaidWheelZoom = false,
   enableFileReferences = true,
+  fileReferenceDirectory,
+  fileReferenceBaseUrl: explicitFileReferenceBaseUrl,
 }) => {
   const { editor, runtime } = useRuntimeAPIs();
   const renderedContent = React.useMemo(
@@ -2346,10 +2285,16 @@ const SimpleMarkdownRendererImpl: React.FC<{
   const currentTheme = useCurrentMermaidTheme();
   const containerRef = React.useRef<HTMLDivElement>(null);
   useCjkMonoFontForBlockCode(renderedContent);
-  const effectiveDirectory = useMessageDirectory(sessionId);
+  const messageDirectory = useMessageDirectory(sessionId);
+  const effectiveDirectory = React.useMemo(() => {
+    const normalizedFileReferenceDirectory = fileReferenceDirectory
+      ? normalizePath(fileReferenceDirectory)
+      : '';
+    return normalizedFileReferenceDirectory || messageDirectory;
+  }, [fileReferenceDirectory, messageDirectory]);
   const fileReferenceBaseUrl = React.useMemo(
-    () => resolveFileReferenceBaseUrl(sessionId, effectiveDirectory),
-    [effectiveDirectory, sessionId],
+    () => explicitFileReferenceBaseUrl ?? resolveFileReferenceBaseUrl(sessionId, effectiveDirectory),
+    [effectiveDirectory, explicitFileReferenceBaseUrl, sessionId],
   );
   const mermaidBlocks = React.useMemo(() => extractMermaidBlocks(renderedContent), [renderedContent]);
   useMermaidInlineInteractions({
@@ -2414,6 +2359,8 @@ export const SimpleMarkdownRenderer = React.memo(SimpleMarkdownRendererImpl, (pr
     && prev.disableLinkSafety === next.disableLinkSafety
     && prev.stripFrontmatter === next.stripFrontmatter
     && prev.sessionId === next.sessionId
+    && prev.fileReferenceDirectory === next.fileReferenceDirectory
+    && prev.fileReferenceBaseUrl === next.fileReferenceBaseUrl
     && prev.onShowPopup === next.onShowPopup
     && prev.allowMermaidWheelZoom === next.allowMermaidWheelZoom
     && prev.enableFileReferences === next.enableFileReferences;

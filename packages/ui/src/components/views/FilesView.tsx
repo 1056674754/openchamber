@@ -725,6 +725,10 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   const effectiveSelectedPath = React.useMemo(() => selectedPath ?? openPaths[0] ?? null, [openPaths, selectedPath]);
   const selectedFile = React.useMemo(() => (effectiveSelectedPath ? toFileNode(effectiveSelectedPath) : null), [effectiveSelectedPath, toFileNode]);
   const selectedFilePath = selectedFile?.path ?? '';
+  const selectedFileDirectory = React.useMemo(
+    () => (selectedFilePath ? getParentDirectoryPath(selectedFilePath) : ''),
+    [selectedFilePath],
+  );
   const selectedFileIsOutsideWorkspace = Boolean(root && selectedFilePath && !isPathWithinRoot(selectedFilePath, root));
   const selectedFileReadOptions = React.useMemo(
     () => ({ allowOutsideWorkspace: mode === 'editor-only' && selectedFileIsOutsideWorkspace, directory: currentDirectory }),
@@ -3409,6 +3413,8 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
                   content={fileContent}
                   className="typography-markdown-body"
                   stripFrontmatter
+                  fileReferenceDirectory={selectedFileDirectory}
+                  fileReferenceBaseUrl={serverBaseUrl}
                 />
               </ErrorBoundary>
             </div>
@@ -3693,6 +3699,8 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
                   content={fileContent}
                   className="typography-markdown-body"
                   stripFrontmatter
+                  fileReferenceDirectory={selectedFileDirectory}
+                  fileReferenceBaseUrl={serverBaseUrl}
                 />
               </ErrorBoundary>
             </div>
