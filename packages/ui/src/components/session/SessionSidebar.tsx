@@ -75,6 +75,7 @@ import {
   compareSessions,
   formatProjectLabel,
   normalizePath,
+  partitionSessionIdsByRunningStatus,
 } from './sidebar/utils';
 import { buildSidebarSessionPrefetchOrder } from './sidebar/prefetchOrder';
 import { mergeSessionDirectoryMetadata, refreshGlobalSessions, refreshGlobalSessionsForDirectories, resolveGlobalSessionDirectory, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
@@ -2120,8 +2121,25 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
     removeSessionsFromFolders(derivedSelectionScope, Array.from(selectedIds));
   }, [removeSessionsFromFolders, selectedIds, derivedSelectionScope]);
 
-  const executeBulkDelete = React.useCallback(async () => {
+  const getBulkActionIds = React.useCallback((notifySkipped: boolean) => {
     const ids = Array.from(selectedIds);
+    if (ids.length === 0) return [];
+    const { running, notRunning } = partitionSessionIdsByRunningStatus(
+      ids,
+      useGlobalSessionsStore.getState().sessionStatuses,
+    );
+    if (notifySkipped && running.length > 0) {
+      toast.warning(t('sessions.sidebar.toast.runningSessionsPreservedTitle'), {
+        description: running.length === 1
+          ? t('sessions.sidebar.toast.runningSessionsPreservedSingle', { count: running.length })
+          : t('sessions.sidebar.toast.runningSessionsPreservedPlural', { count: running.length }),
+      });
+    }
+    return notRunning;
+  }, [selectedIds, t]);
+
+  const executeBulkDelete = React.useCallback(async (options: { notifySkipped?: boolean } = {}) => {
+    const ids = getBulkActionIds(options.notifySkipped ?? true);
     if (ids.length === 0) return;
     if (bulkScopeIsArchived) {
       const { deletedIds, failedIds } = await deleteSessions(ids);
@@ -2149,21 +2167,26 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
       }
     }
     useSessionMultiSelectStore.getState().clear();
-  }, [archiveSessions, bulkScopeIsArchived, deleteSessions, selectedIds, t]);
+  }, [archiveSessions, bulkScopeIsArchived, deleteSessions, getBulkActionIds, t]);
 
   const handleBulkDelete = React.useCallback(() => {
-    const count = selectedIds.size;
+    const ids = getBulkActionIds(!showDeletionDialog);
+    const count = ids.length;
+    if (count === 0 && showDeletionDialog) {
+      getBulkActionIds(true);
+      return;
+    }
     if (count === 0) return;
     if (!showDeletionDialog) {
-      void executeBulkDelete();
+      void executeBulkDelete({ notifySkipped: false });
       return;
     }
     setBulkDeleteConfirm({ sessionCount: count, archivedBucket: bulkScopeIsArchived });
-  }, [bulkScopeIsArchived, executeBulkDelete, selectedIds, showDeletionDialog]);
+  }, [bulkScopeIsArchived, executeBulkDelete, getBulkActionIds, showDeletionDialog]);
 
   const confirmBulkDelete = React.useCallback(async () => {
     setBulkDeleteConfirm(null);
-    await executeBulkDelete();
+    await executeBulkDelete({ notifySkipped: true });
   }, [executeBulkDelete]);
 
   React.useEffect(() => {

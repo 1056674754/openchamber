@@ -13,6 +13,7 @@ This module provides OpenCode server integration utilities for the web server ru
 - `packages/web/server/lib/opencode/opencode-upgrade-runtime.js`: Direct OpenCode CLI upgrade fallback, including install-source detection and captured package-manager diagnostics.
 - `packages/web/server/lib/opencode/lifecycle.js`: OpenCode process lifecycle runtime (startup, restart, readiness, health monitoring).
 - `packages/web/server/lib/opencode/interrupted-runs.js`: managed OpenCode restart recovery for stale in-flight message/tool rows in the OpenCode SQLite database.
+- `packages/web/server/lib/opencode/sqlite-runtime.js`: shared synchronous SQLite driver selection for Bun, Electron/Node `node:sqlite`, and native `better-sqlite3` fallbacks.
 - `packages/web/server/lib/opencode/env-runtime.js`: OpenCode CLI/binary resolution and shell environment runtime.
 - `packages/web/server/lib/opencode/env-config.js`: OpenCode-related environment variable parsing and validation (host/port/hostname).
 - `packages/web/server/lib/opencode/hmr-state-runtime.js`: HMR-persistent runtime state initialization, auth-state bootstrap, and HMR sync helpers.

@@ -96,6 +96,7 @@ export function routeMessage(params: {
     throw new Error(`Cannot send message: directory for session ${params.sessionId} is not available`)
   }
   const targetServerId = params.serverId ?? serverRegistry.getServerForSession(params.sessionId)
+  registerSessionDirectory(params.sessionId, sessionDirectory)
   if (targetServerId) {
     serverRegistry.indexSession(params.sessionId, targetServerId)
   }
@@ -359,6 +360,8 @@ export type SessionUIState = {
   forkFromMessage: (sessionId: string, messageId: string) => Promise<void>
   handleSlashUndo: (sessionId: string) => Promise<void>
   handleSlashRedo: (sessionId: string, options?: { fullUnrevert?: boolean }) => Promise<void>
+  handleSlashCompact: (content: string, sessionId: string) => Promise<void>
+  tryDispatchLocalSlashCommand: (content: string, sessionId: string) => Promise<boolean>
   createSessionFromAssistantMessage: (sourceMessageId: string, execution: { providerID: string; modelID: string; variant: string; agent: string; instructions: string }) => Promise<void>
 
   // Data access helpers (read from sync)
@@ -569,18 +572,6 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
 
     const previousSessionId = get().currentSessionId
 
-    // Pin the new session's child store to prevent eviction while active.
-    // Unpin the previous session's directory when switching away.
-    try {
-      if (previousSessionId && previousSessionId !== id) {
-        const prevDir = get().getDirectoryForSession(previousSessionId)
-        if (prevDir) getSyncChildStores().unpin(prevDir)
-      }
-    } catch { /* child stores may not be initialized yet */ }
-
-    // Set currentSessionId immediately so the skeleton renders without delay.
-    set({ currentSessionId: id })
-
     const directoryState = useDirectoryStore.getState()
 
     const directoryHintNormalized = directoryHint ? normalizePath(directoryHint) : null
@@ -593,9 +584,6 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         useProjectsStore.getState().projects,
         get().availableWorktreesByProject,
       )
-    if (id && resolvedServerId) {
-      serverRegistry.indexSession(id, resolvedServerId)
-    }
 
     const sessionDir = resolveSessionDirectory(
       id,
@@ -603,6 +591,29 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       resolvedServerId,
     )
     const resolvedDir = sessionDir ?? inferredDirectory
+
+    if (id && resolvedServerId && resolvedServerId !== DEFAULT_SERVER_ID && !resolvedDir) {
+      set({ error: `Directory for remote session ${id} on ${resolvedServerId} is not available` })
+      return
+    }
+
+    // Pin the new session's child store to prevent eviction while active.
+    // Unpin the previous session's directory when switching away.
+    try {
+      if (previousSessionId && previousSessionId !== id) {
+        const prevDir = get().getDirectoryForSession(previousSessionId)
+        if (prevDir) getSyncChildStores().unpin(prevDir)
+      }
+    } catch { /* child stores may not be initialized yet */ }
+
+    set({ currentSessionId: id })
+
+    if (id && resolvedDir) {
+      registerSessionDirectory(id, resolvedDir)
+    }
+    if (id && resolvedServerId) {
+      serverRegistry.indexSession(id, resolvedServerId)
+    }
 
     const shouldSyncDirectory = options?.syncDirectory !== false
 
@@ -1321,6 +1332,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       throw new Error("Cannot send message: current session directory is not available")
     }
     const currentSessionServerId = targetServerId ?? serverRegistry.getServerForSession(currentSessionId)
+    registerSessionDirectory(currentSessionId, currentSessionDirectory)
     if (currentSessionServerId) {
       serverRegistry.indexSession(currentSessionId, currentSessionServerId)
     }
@@ -1539,6 +1551,87 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     const { useI18nStore, formatMessage } = await import("@/lib/i18n/store")
     const { dictionary } = useI18nStore.getState()
     toast.success(formatMessage(dictionary, "chat.revert.toast.restored"))
+  },
+
+  // ---------------------------------------------------------------------------
+  // handleSlashCompact — runs /compact locally (not via server command dispatch).
+  // Mirrors the inline logic that used to live in ChatInput.handleSubmit so that
+  // both direct input and queued auto-send invoke the same compaction path.
+  // ---------------------------------------------------------------------------
+  handleSlashCompact: async (content, sessionId) => {
+    try {
+      const { waitForConnectionOrThrow } = await import("./session-actions")
+      await waitForConnectionOrThrow(serverRegistry.getServerForSession(sessionId))
+
+      const { parseSlashInvocation } = await import("./slash-routing")
+      const invocation = parseSlashInvocation(content)
+      const focusText = invocation?.arguments?.trim() ?? ""
+
+      if (focusText) {
+        try {
+          await fetch("/api/compact-focus", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ sessionID: sessionId, focus: focusText }),
+          })
+          const { toast } = await import("sonner")
+          const { useI18nStore, formatMessage } = await import("@/lib/i18n/store")
+          const { dictionary } = useI18nStore.getState()
+          toast.info(formatMessage(dictionary, "chat.chatInput.toast.compactWithFocus", { focus: focusText }))
+        } catch {
+          // Focus injection is best-effort; proceed with plain compaction
+        }
+      }
+
+      const { opencodeClient } = await import("@/lib/opencode/client")
+      const sdk = opencodeClient.getSdkClient()
+      const { useConfigStore } = await import("@/stores/useConfigStore")
+      const configState = useConfigStore.getState()
+      await sdk.session.summarize({
+        sessionID: sessionId,
+        modelID: configState.currentModelId || "",
+        providerID: configState.currentProviderId || "",
+      })
+    } catch (error) {
+      const { toast } = await import("sonner")
+      const { useI18nStore, formatMessage } = await import("@/lib/i18n/store")
+      const { dictionary } = useI18nStore.getState()
+      toast.error(error instanceof Error ? error.message : formatMessage(dictionary, "chat.chatInput.toast.compactFailed"))
+    }
+  },
+
+  // ---------------------------------------------------------------------------
+  // tryDispatchLocalSlashCommand — returns true if a local slash command was
+  // handled (so callers can skip generic sendMessage). Used by both
+  // ChatInput.handleSubmit (direct input) and useQueuedMessageAutoSend (queue flush)
+  // so direct and queued invocations behave identically.
+  // ---------------------------------------------------------------------------
+  tryDispatchLocalSlashCommand: async (content, sessionId) => {
+    const trimmed = content.trimStart()
+    if (!trimmed.startsWith("/")) return false
+
+    const commandName = trimmed
+      .slice(1)
+      .trim()
+      .split(/\s+/)[0]
+      ?.toLowerCase()
+
+    if (!commandName) return false
+
+    if (commandName === "undo") {
+      await get().handleSlashUndo(sessionId)
+      return true
+    }
+    if (commandName === "redo") {
+      await get().handleSlashRedo(sessionId)
+      return true
+    }
+    if (commandName === "compact") {
+      await get().handleSlashCompact(content, sessionId)
+      return true
+    }
+
+    return false
   },
 
   // ---------------------------------------------------------------------------

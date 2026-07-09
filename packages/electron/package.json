@@ -1,6 +1,6 @@
 {
   "name": "@openchamber/electron",
-  "version": "1.12.3-merging-dev",
+  "version": "1.13.2-merging-dev",
   "private": true,
   "description": "Electron desktop runtime for OpenChamber",
   "author": "OpenChamber",
@@ -29,7 +29,10 @@
     "bundle:main": "bun ./scripts/bundle-main.mjs",
     "generate:macos-icon": "node ./scripts/generate-macos-icon-assets.cjs",
     "rebuild:native": "node ./scripts/rebuild-native.mjs",
-    "package": "bun run build:web-assets && bun run bundle:main && bun run rebuild:native && electron-builder",
+    "package:app": "bun run build:web-assets && bun run bundle:main && node ./scripts/electron-builder-local-sign.mjs --dir",
+    "package:app:native": "bun run build:web-assets && bun run bundle:main && bun run rebuild:native && node ./scripts/electron-builder-local-sign.mjs --dir",
+    "package": "node ./scripts/electron-builder-local-sign.mjs --check-release-signing && bun run build:web-assets && bun run bundle:main && bun run rebuild:native && node ./scripts/electron-builder-local-sign.mjs",
+    "verify:mac-gatekeeper": "node ./scripts/verify-mac-gatekeeper.mjs",
     "finalize:latest-yml": "node ./scripts/finalize-latest-yml.mjs",
     "type-check": "node --check ./main.mjs && node --check ./preload.mjs",
     "lint": "node -e \"process.exit(0)\""

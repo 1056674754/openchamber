@@ -178,15 +178,15 @@ describe('checkForUpdates', () => {
     fetchMock.when('api.openchamber.dev', {
       ok: true,
       json: async () => ({
-        latestVersion: '1.12.3',
+        latestVersion: '1.13.2',
         updateAvailable: true,
       }),
     });
 
-    const result = await checkForUpdates({ currentVersion: '1.12.3-merging-dev' });
+    const result = await checkForUpdates({ currentVersion: '1.13.2-merging-dev' });
 
     expect(result.available).toBe(false);
-    expect(result.version).toBe('1.12.3');
+    expect(result.version).toBe('1.13.2');
   });
 
   // --- Scenario: API unreachable, npm fallback ---

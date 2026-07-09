@@ -9,6 +9,7 @@ export type DeleteSessionConfirmState = {
   descendantCount: number;
   descendantIds: string[];
   archivedBucket: boolean;
+  skippedRunningCount: number;
 } | null;
 
 export function SessionDeleteConfirmDialog(props: {

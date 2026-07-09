@@ -16,22 +16,30 @@ export const DraggableSessionRow: React.FC<{
   sessionId: string;
   sessionDirectory: string | null;
   sessionTitle: string;
+  /** Disables folder-drag behavior. Required inside SortableContexts (e.g. global-pinned) where useSortable owns the row. */
+  disabled?: boolean;
   children: React.ReactNode;
-}> = ({ sessionId, sessionDirectory, sessionTitle, children }) => {
+}> = ({ sessionId, sessionDirectory, sessionTitle, disabled = false, children }) => {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: `session-drag:${sessionId}`,
     data: { type: 'session', sessionId, sessionDirectory, sessionTitle },
+    disabled,
   });
 
   const handlePointerDown = React.useCallback(
     (e: React.PointerEvent<HTMLDivElement>) => {
+      if (disabled) return;
       e.stopPropagation();
       if (listeners?.onPointerDown) {
         (listeners.onPointerDown as (event: React.PointerEvent) => void)(e);
       }
     },
-    [listeners],
+    [disabled, listeners],
   );
+
+  if (disabled) {
+    return <>{children}</>;
+  }
 
   return (
     <div

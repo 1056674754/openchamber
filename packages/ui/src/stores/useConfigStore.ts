@@ -16,7 +16,7 @@ import { streamDebugEnabled } from "@/stores/utils/streamDebug";
 import { parseModelIdentifier } from "@/lib/modelIdentifier";
 import { resolveApiUrl } from "@/lib/api/serverUrl";
 import { normalizeConfigString, persistOpenChamberSettingsPatch, resolveConfiguredAgentName, type OpenChamberSettingsPatch } from "@/lib/configDefaults";
-import { resolveSdkForDirectory, resolveApiUrl as resolveRemoteApiOrigin } from "@/sync/session-actions";
+import { resolveSdkForDirectory, resolveProjectServerIdForDirectory, resolveApiUrl as resolveRemoteApiOrigin } from "@/sync/session-actions";
 import { DEFAULT_SERVER_ID, serverRegistry } from "@/lib/opencode/server-registry";
 import { markStartupTrace, measureStartupTrace } from "@/lib/startupTrace";
 
@@ -2602,17 +2602,19 @@ let unsubscribeConfigStoreDirectoryChanges: (() => void) | null = null;
 
 if (typeof window !== "undefined" && !unsubscribeConfigStoreDirectoryChanges) {
     unsubscribeConfigStoreDirectoryChanges = useDirectoryStore.subscribe((state, prevState) => {
+        const projectServerId = resolveProjectServerIdForDirectory(state.currentDirectory);
         const currentSessionId = useSessionUIStore.getState().currentSessionId;
-        const serverId = currentSessionId
-            ? serverRegistry.getServerForSession(currentSessionId)
-            : serverIdFromDirectoryKey(useConfigStore.getState().activeDirectoryKey);
+        const serverId = projectServerId
+            ?? (currentSessionId
+                ? serverRegistry.getServerForSession(currentSessionId)
+                : serverIdFromDirectoryKey(useConfigStore.getState().activeDirectoryKey));
         const nextKey = toDirectoryKey(state.currentDirectory, serverId);
         const prevKey = toDirectoryKey(prevState.currentDirectory, serverId);
         if (nextKey === prevKey) {
             return;
         }
 
-        markStartupTrace('directoryStore:changed', { previous: prevKey, next: nextKey, serverId });
+        markStartupTrace('directoryStore:changed', { previous: prevKey, next: nextKey, serverId, projectServerId });
         void useConfigStore.getState().activateDirectory(state.currentDirectory, { serverId });
     });
 }

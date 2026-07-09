@@ -90,6 +90,13 @@ describe('preview body URL rewriting', () => {
     expect(output).toContain('const url = "/api/data";');
   });
 
+  it('rewrites Expo/Metro bundle entry URLs with query strings', () => {
+    const input = '<script src="/index.ts.bundle?platform=web&dev=true&hot=false" defer></script>';
+    const output = rewrite(input, 'html');
+
+    expect(output).toContain('src="/api/preview/proxy/abc123/index.ts.bundle?platform=web&dev=true&hot=false"');
+  });
+
   it('rewrites only CSS imports and url references in CSS responses', () => {
     const input = '@import "/theme.css"; .hero { background: url(/hero.png); } .copy::after { content: "/not-a-url"; }';
     const output = rewrite(input, 'css');

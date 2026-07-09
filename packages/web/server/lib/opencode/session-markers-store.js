@@ -14,9 +14,7 @@
  * contract; the server is plain JS).
  */
 
-import { createRequire } from 'module';
-
-const require = createRequire(import.meta.url);
+import { loadDefaultSqliteConstructors } from './sqlite-runtime.js';
 
 /**
  * Single-select main status (lifecycle stage).
@@ -199,36 +197,6 @@ const validatePatch = (patch) => {
 };
 
 /**
- * Load the SQLite driver, preferring `better-sqlite3` and falling back to
- * `bun:sqlite`. Both expose a compatible sync API for the operations this
- * store uses. Pattern cloned from `interrupted-runs.js`.
- *
- * @returns {{ new (path: string, options?: object): import('better-sqlite3').Database }}
- * @throws {Error} if neither driver is available
- */
-const loadDatabaseConstructor = () => {
-  if (typeof Bun !== 'undefined') {
-    const bunSqlite = require('bun:sqlite');
-    if (typeof bunSqlite?.Database === 'function') return bunSqlite.Database;
-  }
-
-  let betterSqliteError = null;
-
-  try {
-    const BetterSqlite = require('better-sqlite3');
-    if (typeof BetterSqlite === 'function') return BetterSqlite;
-    if (BetterSqlite && typeof BetterSqlite.Database === 'function') {
-      return BetterSqlite.Database;
-    }
-  } catch (error) {
-    betterSqliteError = error;
-  }
-
-  const message = betterSqliteError instanceof Error ? betterSqliteError.message : String(betterSqliteError);
-  throw new Error(`SQLite runtime unavailable for session markers store: ${message || 'no driver loaded'}`);
-};
-
-/**
  * Create a session-markers store.
  *
  * @param {{ fs: object, path: object, dataDir: string, onChange?: (payload: { sessionId: string, markers: SessionMarkers|null }) => void }} opts
@@ -266,8 +234,24 @@ export const createSessionMarkersStore = ({ fs, path, dataDir, onChange }) => {
     } catch {
       // directory may already exist or be a parent — ignore
     }
-    const DatabaseConstructor = loadDatabaseConstructor();
-    const handle = new DatabaseConstructor(dbPath, { create: true });
+    const constructors = loadDefaultSqliteConstructors();
+    const errors = [];
+    let handle = null;
+    for (const DatabaseConstructor of constructors) {
+      try {
+        handle = new DatabaseConstructor(dbPath, { create: true });
+        break;
+      } catch (error) {
+        errors.push(error);
+      }
+    }
+    if (!handle) {
+      const message = errors
+        .map((error) => (error instanceof Error ? error.message : String(error)))
+        .filter(Boolean)
+        .join('; ');
+      throw new Error(`SQLite runtime unavailable for session markers store: ${message || 'unknown error'}`);
+    }
     try {
       handle.pragma('journal_mode = WAL');
     } catch {

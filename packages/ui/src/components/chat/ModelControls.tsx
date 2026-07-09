@@ -974,13 +974,17 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
 
         if (latestChoiceAgentName) {
             saveSessionAgentSelection(currentSessionId, latestChoiceAgentName);
-            saveAgentModelVariantForSession(
-                currentSessionId,
-                latestChoiceAgentName,
-                latestLoadedUserChoice.providerID,
-                latestLoadedUserChoice.modelID,
-                latestLoadedUserChoice.variant,
-            );
+            // Guard: saveAgentModelVariantForSession(undefined) DELETES the
+            // existing record. Empty message variant ≠ user intent to clear.
+            if (latestLoadedUserChoice.variant) {
+                saveAgentModelVariantForSession(
+                    currentSessionId,
+                    latestChoiceAgentName,
+                    latestLoadedUserChoice.providerID,
+                    latestLoadedUserChoice.modelID,
+                    latestLoadedUserChoice.variant,
+                );
+            }
         }
         saveSessionModelSelection(currentSessionId, latestLoadedUserChoice.providerID, latestLoadedUserChoice.modelID);
         latestLoadedUserChoiceRestoreRef.current = restoreKey;

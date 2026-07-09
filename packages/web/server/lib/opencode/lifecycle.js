@@ -14,7 +14,21 @@ const HEALTH_CHECK_MAX_CONSECUTIVE_FAILURES = parsePositiveInt(
 );
 const HEALTH_CHECK_INTERVAL_OVERRIDE_MS = parsePositiveInt(process.env.OPENCHAMBER_OPENCODE_HEALTH_INTERVAL_MS, 0);
 const HEALTH_CHECK_RESULT_CACHE_MS = parsePositiveInt(process.env.OPENCHAMBER_OPENCODE_HEALTH_CACHE_MS, 750);
+const STALE_BUSY_GRACE_MS = parsePositiveInt(
+  process.env.OPENCHAMBER_OPENCODE_BUSY_RESTART_GRACE_MS,
+  30 * 60 * 1000
+);
 const OPENCODE_HEALTH_PATH = '/global/health';
+
+const formatDurationForLog = (ms) => {
+  if (ms >= 60 * 1000 && ms % (60 * 1000) === 0) {
+    return `${ms / (60 * 1000)} min`;
+  }
+  if (ms >= 1000 && ms % 1000 === 0) {
+    return `${ms / 1000} sec`;
+  }
+  return `${ms} ms`;
+};
 
 export const createOpenCodeLifecycleRuntime = (deps) => {
   const {
@@ -856,17 +870,20 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
   };
 
   /**
-   * Perform an immediate (one-shot) health check and restart OpenCode if it's
-   * not healthy.  Callers on the SSE / WS proxy path use this to trigger
+   * Perform an immediate (one-shot) health check and restart OpenCode if it
+   * remains unhealthy. Callers on the SSE / WS proxy path use this to trigger
    * recovery without waiting for the next periodic interval (up to 15 s).
    *
    * Skips restart when sessions are actively busy — a busy server under
    * concurrent load can fail the health check timeout without actually
    * being dead (the health endpoint competes with LLM work).
+   * A missing child-process handle is also treated as health evidence, not
+   * as an immediate restart signal. Desktop managed OpenCode processes are
+   * detached and can outlive or desync from the in-memory child object while
+   * still serving requests on the managed port.
    * Forces restart if sessions stay "busy" and the server stays unhealthy
-   * for over 2 minutes (staleness guard against stuck session state).
+   * past the stale-busy grace window (staleness guard against stuck session state).
    */
-  const STALE_BUSY_GRACE_MS = 2 * 60 * 1000;
   let lastUnhealthyWithBusySessionsAt = 0;
   let consecutiveHealthFailures = 0;
   let healthProbePromise = null;
@@ -915,13 +932,22 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
 
     if (now - lastUnhealthyWithBusySessionsAt >= STALE_BUSY_GRACE_MS) {
       console.warn(
-        `[lifecycle] OpenCode unhealthy with ${activeCount} busy session(s) for > 2 min — forcing restart`
+        `[lifecycle] OpenCode unhealthy with ${activeCount} busy session(s) for > ${formatDurationForLog(STALE_BUSY_GRACE_MS)} — forcing restart`
       );
       lastUnhealthyWithBusySessionsAt = 0;
       return false;
     }
 
     return true;
+  };
+
+  const recordHealthFailure = (source, detail = '') => {
+    consecutiveHealthFailures += 1;
+    const suffix = detail ? `; ${detail}` : '';
+    console.warn(
+      `[lifecycle] ${source} health check failed (${consecutiveHealthFailures}/${HEALTH_CHECK_MAX_CONSECUTIVE_FAILURES})${suffix}`
+    );
+    return consecutiveHealthFailures >= HEALTH_CHECK_MAX_CONSECUTIVE_FAILURES;
   };
 
   const runHealthCheckCycle = async (source) => {
@@ -931,18 +957,12 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     healthCheckCyclePromise = (async () => {
       const healthy = await probeOpenCodeHealth();
       if (!healthy) {
-        if (!state.openCodeProcess || !isManagedOpenCodeProcessAlive()) {
-          console.log(`[lifecycle] ${source} health check: OpenCode process unavailable, restarting...`);
-          consecutiveHealthFailures = 0;
-          lastHealthProbeResult = null;
-          await restartOpenCode();
-          return;
-        }
-        consecutiveHealthFailures += 1;
-        console.warn(
-          `[lifecycle] ${source} health check failed (${consecutiveHealthFailures}/${HEALTH_CHECK_MAX_CONSECUTIVE_FAILURES})`
+        const processUnavailable = !state.openCodeProcess || !isManagedOpenCodeProcessAlive();
+        const reachedFailureThreshold = recordHealthFailure(
+          source,
+          processUnavailable ? 'managed process handle unavailable' : ''
         );
-        if (consecutiveHealthFailures < HEALTH_CHECK_MAX_CONSECUTIVE_FAILURES) return;
+        if (!reachedFailureThreshold) return;
         if (shouldSkipRestartForBusySessions()) return;
         console.log(`[lifecycle] ${source} health check failure threshold reached, restarting OpenCode...`);
         consecutiveHealthFailures = 0;

@@ -14,8 +14,9 @@ import { useOptionalThemeSystem } from '@/contexts/useThemeSystem';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { routeMessage, useSessionUIStore } from '@/sync/session-ui-store';
 import { useDirectorySync, useSessionMessageRecords, useEnsureSessionMessages } from '@/sync/sync-context';
+import { useSync } from '@/sync/use-sync';
 import { resolveSdkForDirectory } from '@/sync/session-actions';
-import { getSyncChildStores } from '@/sync/sync-refs';
+import { getSyncChildStores, registerSessionDirectory } from '@/sync/sync-refs';
 import { useUIStore } from '@/stores/useUIStore';
 import { resolveProjectForSessionDirectory } from '@/lib/projectResolution';
 import { serverRegistry } from '@/lib/opencode/server-registry';
@@ -60,6 +61,7 @@ import { getDiffPatchEntries, getPatchText } from './toolDiffUtils';
 import {
     findPendingQuestionRequestForRecoveredTool,
     recoverQuestionRequestFromToolPart,
+    hasQuestionAnswer,
 } from '../../lib/questionToolRecovery';
 
 const TOOL_ROW_TEXT_CLASS = '!text-[length:var(--text-meta)] !leading-4 sm:!leading-6 tracking-normal';
@@ -816,12 +818,6 @@ const getToolDescription = (part: ToolPartType, state: ToolStateUnion, currentDi
         return '';
     }
 
-    // Question tool: show "Asked N question(s)"
-    if (part.tool === 'question' && input?.questions && Array.isArray(input.questions)) {
-        const count = input.questions.length;
-        return `Asked ${count} question${count !== 1 ? 's' : ''}`;
-    }
-
     if (part.tool === 'bash' && input?.command && typeof input.command === 'string') {
         const firstLine = input.command.split('\n')[0];
         return firstLine.substring(0, 100);
@@ -837,6 +833,23 @@ const getToolDescription = (part: ToolPartType, state: ToolStateUnion, currentDi
 
     const desc = input?.description || metadata?.description || ('title' in state && state.title) || '';
     return typeof desc === 'string' ? desc : '';
+};
+
+const QuestionToolDescription: React.FC<{ part: ToolPartType }> = ({ part }) => {
+    const { t } = useI18n();
+    const stateWithData = part.state as ToolStateWithMetadata;
+    const input = stateWithData.input;
+    const count = (input?.questions && Array.isArray(input.questions)) ? input.questions.length : 1;
+    const answered = hasQuestionAnswer(part);
+
+    if (count === 1) {
+        return answered
+            ? t('chat.toolPart.questionCountAnsweredSingular', { count: '1' })
+            : t('chat.toolPart.questionCountAskedSingular', { count: '1' });
+    }
+    return answered
+        ? t('chat.toolPart.questionCountAnsweredPlural', { count: String(count) })
+        : t('chat.toolPart.questionCountAskedPlural', { count: String(count) });
 };
 
 interface ToolScrollableSectionProps {
@@ -1660,6 +1673,47 @@ const DiffPreview: React.FC<DiffPreviewProps> = React.memo(({ diff, pierreTheme,
 
 DiffPreview.displayName = 'DiffPreview';
 
+const TaskSessionMaterializer: React.FC<{
+    sessionId?: string;
+    directory: string;
+    parentSessionId?: string;
+}> = React.memo(({ sessionId, directory, parentSessionId }) => {
+    const sync = useSync();
+    const syncKeyRef = React.useRef<string | null>(null);
+
+    React.useEffect(() => {
+        if (!sessionId || !directory) {
+            return;
+        }
+
+        const projects = useProjectsStore.getState().projects;
+        const availableWorktreesByProject = useSessionUIStore.getState().availableWorktreesByProject;
+        const serverId = serverRegistry.getServerForSession(sessionId)
+            ?? (parentSessionId ? serverRegistry.getServerForSession(parentSessionId) : undefined)
+            ?? resolveProjectForSessionDirectory(projects, availableWorktreesByProject, directory)?.serverId;
+        const syncKey = `${directory}\n${serverId ?? ''}\n${sessionId}`;
+        if (syncKeyRef.current === syncKey) {
+            return;
+        }
+
+        syncKeyRef.current = syncKey;
+        registerSessionDirectory(sessionId, directory);
+        if (serverId) {
+            serverRegistry.indexSession(sessionId, serverId);
+        }
+
+        void sync.syncSession(sessionId, true).catch(() => {
+            if (syncKeyRef.current === syncKey) {
+                syncKeyRef.current = null;
+            }
+        });
+    }, [directory, parentSessionId, sessionId, sync]);
+
+    return null;
+});
+
+TaskSessionMaterializer.displayName = 'TaskSessionMaterializer';
+
 interface ToolExpandedContentProps {
     part: ToolPartType;
     state: ToolStateUnion;
@@ -2062,6 +2116,9 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
         const pendingQuestions = await listPendingQuestionsForRecovery(client, directory);
         const liveRequest = findPendingQuestionRequestForRecoveredTool(recoveredQuestionRequest, pendingQuestions);
         if (!liveRequest) {
+            if (!isFinalized) {
+                throw new Error('Question is still active, but the pending request target is not synced yet. Please wait for reconnect/resync instead of sending a normal message.');
+            }
             return {
                 kind: 'stale' as const,
                 directory,
@@ -2072,7 +2129,7 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
             requestId: liveRequest.id,
             directory,
         };
-    }, [currentDirectory, messageSessionId, recoveredQuestionRequest]);
+    }, [currentDirectory, isFinalized, messageSessionId, recoveredQuestionRequest]);
     const submitRecoveredQuestionAsMessage = React.useCallback(async (answers: string[][], directoryHint?: string) => {
         if (!recoveredQuestionRequest) {
             throw new Error('Question reply target is not available');
@@ -2850,7 +2907,13 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
 
     return (
         <div>
-            {}
+            {isTaskTool && taskSessionId && currentDirectory ? (
+                <TaskSessionMaterializer
+                    sessionId={taskSessionId}
+                    directory={currentDirectory}
+                    parentSessionId={messageSessionId}
+                />
+            ) : null}
             <div
                 className={cn(
                 'group/tool flex gap-1.5 pr-2 pl-px py-1.5 rounded-xl cursor-pointer',
@@ -2943,7 +3006,16 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
                             {!justificationText && normalizedPartTool === 'lsp' && descriptionPath ? (
                                 renderAnimatedPathWithIcon(descriptionPath, animateTailText, false, showToolFileIcons)
                             ) : null}
-                            {!justificationText && normalizedPartTool !== 'lsp' && description && (
+                            {!justificationText && normalizedPartTool === 'question' ? (
+                                <Text
+                                    variant={animateTailText ? 'generate-effect' : 'static'}
+                                    className="min-w-0 truncate typography-meta"
+                                    style={{ color: 'var(--tools-description)' }}
+                                >
+                                    <QuestionToolDescription part={normalizedPart} />
+                                </Text>
+                            ) : null}
+                            {!justificationText && normalizedPartTool !== 'lsp' && normalizedPartTool !== 'question' && description && (
                                 descriptionPath && description === descriptionPath ? (
                                     renderAnimatedPathWithIcon(descriptionPath, animateTailText, false, showToolFileIcons)
                                 ) : (

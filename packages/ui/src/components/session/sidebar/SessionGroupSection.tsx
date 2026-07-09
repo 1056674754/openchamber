@@ -1,6 +1,7 @@
 import React from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import type { Session } from '@opencode-ai/sdk/v2';
+import { toast } from '@/components/ui';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Icon } from "@/components/icon/Icon";
 import { cn } from '@/lib/utils';
@@ -11,10 +12,11 @@ import { SessionFolderItem } from '../SessionFolderItem';
 import { DroppableFolderWrapper, SessionFolderDndScope } from './sessionFolderDnd';
 import type { SortableDragHandleProps } from './sortableItems';
 import type { GroupSearchData, SessionGroup, SessionNode } from './types';
-import { compareSessionsByPinnedAndTime, isBranchDifferentFromLabel, normalizePath, renderHighlightedText } from './utils';
+import { compareSessionsByPinnedAndTime, isBranchDifferentFromLabel, normalizePath, partitionSessionsByRunningStatus, renderHighlightedText } from './utils';
 import type { SessionFolder } from '@/stores/useSessionFoldersStore';
 import { useSessionFoldersStore } from '@/stores/useSessionFoldersStore';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
+import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { openExternalUrl } from '@/lib/url';
 import { useI18n } from '@/lib/i18n';
 
@@ -270,6 +272,20 @@ export function SessionGroupSection(props: Props): React.ReactNode {
   const sessionGroupMinVisible = useUIStore((state) => state.sessionGroupMinVisible);
   const sessionGroupRecentHours = useUIStore((state) => state.sessionGroupRecentHours);
 
+  const { pinnedNodes, unpinnedNodes: allUnpinnedNodes } = React.useMemo(() => {
+    const allPinned = new Set([...pinnedSessionIds, ...projectPinnedSessionIds]);
+    const pinned: typeof ungroupedSessions = [];
+    const unpinned: typeof ungroupedSessions = [];
+    for (const node of ungroupedSessions) {
+      if (allPinned.has(node.session.id)) {
+        pinned.push(node);
+      } else {
+        unpinned.push(node);
+      }
+    }
+    return { pinnedNodes: pinned, unpinnedNodes: unpinned };
+  }, [ungroupedSessions, pinnedSessionIds, projectPinnedSessionIds]);
+
   const baseVisibleCount = React.useMemo(() => {
     if (hideDirectoryControls) return 10;
     const minVisible = typeof sessionGroupMinVisible === 'number' && sessionGroupMinVisible >= 1
@@ -278,45 +294,32 @@ export function SessionGroupSection(props: Props): React.ReactNode {
       ? sessionGroupRecentHours : 48) * 60 * 60 * 1000;
     const cutoff = Date.now() - recentHoursMs;
     let recentCount = 0;
-    for (const node of ungroupedSessions) {
+    for (const node of allUnpinnedNodes) {
       const t = node.session.time;
       const updated = (typeof t?.updated === 'number' && t.updated > 0) ? t.updated
         : (typeof t?.created === 'number' && t.created > 0) ? t.created : 0;
       if (updated > cutoff) recentCount++;
     }
     return Math.max(minVisible, recentCount);
-  }, [hideDirectoryControls, ungroupedSessions, sessionGroupMinVisible, sessionGroupRecentHours]);
+  }, [hideDirectoryControls, allUnpinnedNodes, sessionGroupMinVisible, sessionGroupRecentHours]);
 
   const totalSessions = ungroupedSessions.length;
+  const totalUnpinned = allUnpinnedNodes.length;
   const requestedVisibleCount = Math.max(baseVisibleCount, visibleSessionCount ?? baseVisibleCount);
-  const visibleSessions = group.isArchivedBucket
-    ? ungroupedSessions
+  const unpinnedNodes = group.isArchivedBucket
+    ? allUnpinnedNodes
     : hasSessionSearchQuery
-      ? ungroupedSessions
-      : ungroupedSessions.slice(0, requestedVisibleCount);
-  const remainingCount = totalSessions - visibleSessions.length;
+      ? allUnpinnedNodes
+      : allUnpinnedNodes.slice(0, requestedVisibleCount);
+  const remainingCount = totalUnpinned - unpinnedNodes.length;
   const showMoreCount = Math.min(SESSION_GROUP_SHOW_MORE_INCREMENT, remainingCount);
-  const nextVisibleCount = visibleSessions.length + showMoreCount;
+  const nextVisibleCount = unpinnedNodes.length + showMoreCount;
   const canShowLess = !group.isArchivedBucket
     && !hasSessionSearchQuery
     && remainingCount === 0
-    && totalSessions > baseVisibleCount
+    && totalUnpinned > baseVisibleCount
     && visibleSessionCount !== undefined
     && visibleSessionCount > baseVisibleCount;
-
-  const { pinnedNodes, unpinnedNodes } = React.useMemo(() => {
-    const allPinned = new Set([...pinnedSessionIds, ...projectPinnedSessionIds]);
-    const pinned: typeof visibleSessions = [];
-    const unpinned: typeof visibleSessions = [];
-    for (const node of visibleSessions) {
-      if (allPinned.has(node.session.id)) {
-        pinned.push(node);
-      } else {
-        unpinned.push(node);
-      }
-    }
-    return { pinnedNodes: pinned, unpinnedNodes: unpinned };
-  }, [visibleSessions, pinnedSessionIds, projectPinnedSessionIds]);
 
   const shouldVirtualizeArchived = group.isArchivedBucket === true
     && !hasSessionSearchQuery
@@ -401,6 +404,20 @@ export function SessionGroupSection(props: Props): React.ReactNode {
   };
 
   const allGroupSessions = collectGroupSessions(sourceGroupNodes);
+  const partitionDeleteSessions = (sessions: Session[]): Session[] => {
+    const { running, notRunning } = partitionSessionsByRunningStatus(
+      sessions,
+      useGlobalSessionsStore.getState().sessionStatuses,
+    );
+    if (running.length > 0) {
+      toast.warning(t('sessions.sidebar.toast.runningSessionsPreservedTitle'), {
+        description: running.length === 1
+          ? t('sessions.sidebar.toast.runningSessionsPreservedSingle', { count: running.length })
+          : t('sessions.sidebar.toast.runningSessionsPreservedPlural', { count: running.length }),
+      });
+    }
+    return notRunning;
+  };
   const isGitProject = projectId ? projectRepoStatus.get(projectId) === true : false;
   const groupDirectoryKey = normalizePath(group.directory ?? null);
   const groupBranchKey = group.branch?.trim() ?? null;
@@ -506,8 +523,10 @@ export function SessionGroupSection(props: Props): React.ReactNode {
               if (group.isArchivedBucket) {
                 // Delete sessions in the folder
                 // Empty folders are auto-hidden by useArchivedAutoFolders
+                const sessionsForDelete = partitionDeleteSessions(folderSessionsForDelete);
+                if (sessionsForDelete.length === 0) return;
                 sessionEvents.requestDelete({
-                  sessions: folderSessionsForDelete,
+                  sessions: sessionsForDelete,
                   mode: 'session',
                 });
                 return;
@@ -757,7 +776,7 @@ export function SessionGroupSection(props: Props): React.ReactNode {
                   </span>
                   <span className={cn('min-w-0 flex-1 truncate', isCollapsed ? 'text-muted-foreground' : 'text-foreground/92')}>{renderHighlightedText(group.label, normalizedSessionSearchQuery)}</span>
                 </span>
-              ) : (!group.isMain || group.worktree) ? (
+              ) : (
                 <span className="inline-flex min-w-0 max-w-full items-center gap-1">
                   <span className="inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center">
                     <Icon name="git-branch"
@@ -773,8 +792,6 @@ export function SessionGroupSection(props: Props): React.ReactNode {
                   </span>
                   <span className="min-w-0 flex-1 truncate">{renderHighlightedText(group.label, normalizedSessionSearchQuery)}</span>
                 </span>
-              ) : (
-                renderHighlightedText(group.label, normalizedSessionSearchQuery)
               )}
             </p>
             {showBranchSubtitle && statusLine ? (
@@ -842,8 +859,10 @@ export function SessionGroupSection(props: Props): React.ReactNode {
                   type="button"
                   onClick={(event) => {
                     event.stopPropagation();
+                    const sessionsForDelete = partitionDeleteSessions(allGroupSessions);
+                    if (sessionsForDelete.length === 0) return;
                     sessionEvents.requestDelete({
-                      sessions: allGroupSessions,
+                      sessions: sessionsForDelete,
                       mode: 'session',
                     });
                   }}
@@ -865,8 +884,10 @@ export function SessionGroupSection(props: Props): React.ReactNode {
                   type="button"
                   onClick={(event) => {
                     event.stopPropagation();
+                    const sessionsForDelete = partitionDeleteSessions(allGroupSessions);
+                    if (sessionsForDelete.length === 0) return;
                     sessionEvents.requestDelete({
-                      sessions: allGroupSessions,
+                      sessions: sessionsForDelete,
                       mode: 'worktree',
                       worktree: group.worktree,
                     });

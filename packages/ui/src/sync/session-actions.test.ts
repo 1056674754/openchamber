@@ -1,5 +1,6 @@
 import { describe, expect, test, beforeEach, mock } from "bun:test"
 import type { PermissionRequest } from "@/types/permission"
+import type { QuestionRequest } from "@/types/question"
 
 type MockSdkResult = {
   data?: unknown
@@ -26,9 +27,12 @@ const replyCalls: Array<{ method: string; params: Record<string, unknown> }> = [
 const sessionCalls: Array<{ method: string; params: Record<string, unknown> }> = []
 let permissionReplyResult: MockSdkResult = { data: true }
 let permissionRespondResult: MockSdkResult = { data: true }
+let questionReplyResult: MockSdkResult = { data: true }
+let questionRejectResult: MockSdkResult = { data: true }
 let sessionAbortResult: MockSdkResult = { data: true }
 let sessionRevertResult: MockSdkResult = { data: null }
 let sessionUnrevertResult: MockSdkResult = { data: null }
+let sessionForkResult: MockSdkResult = { data: null }
 let configState = {
   isConnected: true,
   hasEverConnected: true,
@@ -54,11 +58,11 @@ const mockScopedClient = {
   question: {
     reply: mock((params: Record<string, unknown>) => {
       replyCalls.push({ method: "question.reply", params })
-      return Promise.resolve({ data: true })
+      return Promise.resolve(questionReplyResult)
     }),
     reject: mock((params: Record<string, unknown>) => {
       replyCalls.push({ method: "question.reject", params })
-      return Promise.resolve({ data: true })
+      return Promise.resolve(questionRejectResult)
     }),
   },
   session: {
@@ -74,6 +78,7 @@ const mockScopedClient = {
       sessionCalls.push({ method: "session.unrevert", params })
       return Promise.resolve(sessionUnrevertResult)
     }),
+    fork: mock(() => Promise.resolve(sessionForkResult)),
   },
 }
 
@@ -91,11 +96,11 @@ const mockSdk = {
   question: {
     reply: mock((params: Record<string, unknown>) => {
       replyCalls.push({ method: "question.reply", params })
-      return Promise.resolve({ data: true })
+      return Promise.resolve(questionReplyResult)
     }),
     reject: mock((params: Record<string, unknown>) => {
       replyCalls.push({ method: "question.reject", params })
-      return Promise.resolve({ data: true })
+      return Promise.resolve(questionRejectResult)
     }),
   },
   session: {
@@ -111,6 +116,7 @@ const mockSdk = {
       sessionCalls.push({ method: "session.unrevert", params })
       return Promise.resolve(sessionUnrevertResult)
     }),
+    fork: mock(() => Promise.resolve(sessionForkResult)),
   },
 }
 
@@ -149,15 +155,17 @@ mock.module("@/stores/useConfigStore", () => ({
 }))
 
 // Mock useSessionUIStore
+const sessionUiStoreState = {
+  getDirectoryForSession: (sessionId: string) => {
+    if (sessionId === "session-a") return "/test/project"
+    if (sessionId === "session-b") return "/other/project"
+    return null
+  },
+  setCurrentSession: () => {},
+}
 mock.module("./session-ui-store", () => ({
   useSessionUIStore: {
-    getState: () => ({
-      getDirectoryForSession: (sessionId: string) => {
-        if (sessionId === "session-a") return "/test/project"
-        if (sessionId === "session-b") return "/other/project"
-        return null
-      },
-    }),
+    getState: () => sessionUiStoreState,
   },
 }))
 
@@ -188,8 +196,11 @@ mock.module("@/stores/useGlobalSessionsStore", () => ({
 }))
 
 // Mock sync-refs (imported but not used in permission functions)
+const registerSessionDirectoryCalls: Array<{ sessionID: string; directory: string }> = []
 mock.module("./sync-refs", () => ({
-  registerSessionDirectory: () => {},
+  registerSessionDirectory: (sessionID: string, directory: string) => {
+    registerSessionDirectoryCalls.push({ sessionID, directory })
+  },
   setSyncRefs: () => {},
   getSyncChildStores: () => ({
     pin: () => undefined,
@@ -210,11 +221,15 @@ import { DEFAULT_SERVER_ID, serverRegistry } from "@/lib/opencode/server-registr
 beforeEach(() => {
   replyCalls.length = 0
   sessionCalls.length = 0
+  registerSessionDirectoryCalls.length = 0
   permissionReplyResult = { data: true }
   permissionRespondResult = { data: true }
+  questionReplyResult = { data: true }
+  questionRejectResult = { data: true }
   sessionAbortResult = { data: true }
   sessionRevertResult = { data: null }
   sessionUnrevertResult = { data: null }
+  sessionForkResult = { data: null }
   inputStoreState = {
     attachedFiles: [],
     pendingInputText: "",
@@ -233,10 +248,14 @@ beforeEach(() => {
   serverRegistry.clearSessionServerIndexDebugEntries()
 })
 
-function createStore(permissions: Record<string, PermissionRequest[]>): StoreApi<DirectoryStore> {
+function createStore(
+  permissions: Record<string, PermissionRequest[]>,
+  questions: Record<string, QuestionRequest[]> = {},
+): StoreApi<DirectoryStore> {
   return create<DirectoryStore>()((set) => ({
     ...INITIAL_STATE,
     permission: permissions,
+    question: questions,
     patch: (partial) => set(partial),
     replace: (next) => set(next),
   }))
@@ -740,6 +759,38 @@ describe("respondToQuestion passes directory", () => {
     expect(replyCalls[0].params.requestID).toBe("q-recovered")
     expect(replyCalls[0].params.directory).toBe("/recovered/project")
   })
+
+  test("optimistically removes only the replied question after SDK success", async () => {
+    const questions: QuestionRequest[] = [
+      { id: "q-1", sessionID: "session-a", questions: [] },
+      { id: "q-2", sessionID: "session-a", questions: [] },
+    ]
+    const store = createStore({}, { "session-a": questions })
+    const childStores = createChildStores([["/test/project", store]])
+
+    const { setActionRefs, respondToQuestion } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/test/project")
+
+    await respondToQuestion("session-a", "q-1", [["answer1"]])
+
+    expect(store.getState().question["session-a"]?.map((question) => question.id)).toEqual(["q-2"])
+  })
+
+  test("does not remove a question when SDK reply fails", async () => {
+    questionReplyResult = { data: false }
+    const questions: QuestionRequest[] = [
+      { id: "q-1", sessionID: "session-a", questions: [] },
+    ]
+    const store = createStore({}, { "session-a": questions })
+    const childStores = createChildStores([["/test/project", store]])
+
+    const { setActionRefs, respondToQuestion } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/test/project")
+
+    await expectRejectsWithMessage(respondToQuestion("session-a", "q-1", [["answer1"]]), "Question reply failed")
+
+    expect(store.getState().question["session-a"]?.map((question) => question.id)).toEqual(["q-1"])
+  })
 })
 
 describe("rejectQuestion passes directory", () => {
@@ -771,6 +822,21 @@ describe("rejectQuestion passes directory", () => {
     expect(replyCalls.length).toBe(1)
     expect(replyCalls[0].params.requestID).toBe("q-recovered")
     expect(replyCalls[0].params.directory).toBe("/recovered/project")
+  })
+
+  test("optimistically removes rejected questions after SDK success", async () => {
+    const questions: QuestionRequest[] = [
+      { id: "q-1", sessionID: "session-a", questions: [] },
+    ]
+    const store = createStore({}, { "session-a": questions })
+    const childStores = createChildStores([["/test/project", store]])
+
+    const { setActionRefs, rejectQuestion } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/test/project")
+
+    await rejectQuestion("session-a", "q-1")
+
+    expect(store.getState().question["session-a"]).toBe(undefined)
   })
 })
 
@@ -867,5 +933,58 @@ describe("revertToMessage", () => {
     expect(inputStoreState.pendingInputText).toBe("previous draft")
     expect(inputStoreState.pendingInputMode).toBe("append")
     expect(inputStoreState.attachedFiles).toEqual([{ id: "previous-attachment" }])
+  })
+})
+
+describe("forkFromMessage remote directory authority ordering", () => {
+  test("registers directory in routing index before indexing server for remote forked session", async () => {
+    const remoteServerId = "remote-fork-order-test"
+    serverRegistry.register({ id: remoteServerId, label: "Remote Fork", baseUrl: "/api/remote/fork-order" })
+    const remoteConnection = serverRegistry.get(remoteServerId)
+    if (remoteConnection) {
+      ;(remoteConnection as { client: OpencodeClient }).client = mockSdk as unknown as OpencodeClient
+    }
+    serverRegistry.indexSession("session-a", remoteServerId)
+
+    sessionForkResult = {
+      data: {
+        id: "ses_forked",
+        title: "Forked",
+        time: { created: 1, updated: 1 },
+        directory: "/test/project",
+      } as unknown,
+    }
+
+    const store = createStore({})
+    const childStores = createChildStores([["/test/project", store]])
+
+    const indexSessionTimeline: Array<{ sessionId: string; registerAlreadyCalled: boolean }> = []
+    const originalIndexSession = serverRegistry.indexSession.bind(serverRegistry)
+    const spyIndexSession = (sessionId: string, sid: string) => {
+      const registerAlreadyCalled = registerSessionDirectoryCalls.some((c) => c.sessionID === sessionId)
+      indexSessionTimeline.push({ sessionId, registerAlreadyCalled })
+      return originalIndexSession(sessionId, sid)
+    }
+    serverRegistry.indexSession = spyIndexSession
+
+    try {
+      const { setActionRefs, forkFromMessage } = await import("./session-actions")
+      setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/test/project")
+
+      await forkFromMessage("session-a", "msg-1")
+
+      const registerEntry = registerSessionDirectoryCalls.find((c) => c.sessionID === "ses_forked")
+      expect(registerEntry).not.toBeNull()
+      expect(registerEntry?.directory).toBe("/test/project")
+
+      const indexEntry = indexSessionTimeline.find((e) => e.sessionId === "ses_forked")
+      expect(indexEntry).not.toBeNull()
+      expect(indexEntry?.registerAlreadyCalled).toBe(true)
+    } finally {
+      serverRegistry.indexSession = originalIndexSession
+      serverRegistry.forgetSession("ses_forked")
+      serverRegistry.forgetSession("session-a")
+      serverRegistry.unregister(remoteServerId)
+    }
   })
 })

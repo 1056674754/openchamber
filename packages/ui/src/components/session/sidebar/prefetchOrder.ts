@@ -234,23 +234,27 @@ const collectGroupSessionIds = (
 
   const sessionIdsInFolders = new Set(foldersForGroup.flatMap((entry) => entry.folder.sessionIds));
   const ungroupedSessions = sourceGroupNodes.filter((node) => !sessionIdsInFolders.has(node.session.id));
-  const baseVisibleCount = getMaxVisibleUngroupedSessions(ungroupedSessions, input);
-  const visibleCount = Math.max(baseVisibleCount, input.visibleSessionCountByGroup.get(groupKey) ?? baseVisibleCount);
-  const visibleSessions = group.isArchivedBucket
-    ? ungroupedSessions
-    : input.hasSessionSearchQuery
-      ? ungroupedSessions
-      : ungroupedSessions.slice(0, visibleCount);
 
   const allPinned = new Set([...input.pinnedSessionIds, ...projectPinnedSessionIds]);
   const pinnedNodes: SessionNode[] = [];
-  const unpinnedNodes: SessionNode[] = [];
-  for (const node of visibleSessions) {
+  const unpinnedNodesPool: SessionNode[] = [];
+  for (const node of ungroupedSessions) {
     if (allPinned.has(node.session.id)) pinnedNodes.push(node);
-    else unpinnedNodes.push(node);
+    else unpinnedNodesPool.push(node);
   }
 
-  for (const node of [...pinnedNodes, ...unpinnedNodes]) {
+  const baseVisibleCount = getMaxVisibleUngroupedSessions(unpinnedNodesPool, input);
+  const visibleCount = Math.max(baseVisibleCount, input.visibleSessionCountByGroup.get(groupKey) ?? baseVisibleCount);
+  const visibleUnpinned = group.isArchivedBucket
+    ? unpinnedNodesPool
+    : input.hasSessionSearchQuery
+      ? unpinnedNodesPool
+      : unpinnedNodesPool.slice(0, visibleCount);
+
+  for (const node of pinnedNodes) {
+    collectVisibleNodeIds(node, input, output, seen, 'project', group.isArchivedBucket === true);
+  }
+  for (const node of visibleUnpinned) {
     collectVisibleNodeIds(node, input, output, seen, 'project', group.isArchivedBucket === true);
   }
 };

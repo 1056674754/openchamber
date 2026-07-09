@@ -248,3 +248,16 @@ export function resolveApiUrl(directory: string): string | undefined {
 
   return undefined
 }
+
+/** Resolve serverId from project ownership for a directory.
+ *  Returns null when no project owns the directory so callers can fall back
+ *  to session/cache resolution. For directory activation, project ownership
+ *  is authoritative — a stale session from another instance must not override it. */
+export function resolveProjectServerIdForDirectory(directory: string): string | null {
+  const normalizedDir = normalizeDirectoryKey(directory)
+  const project = findProjectForDirectory(normalizedDir)
+  if (!project) return null
+  return project.serverId && project.serverId !== DEFAULT_SERVER_ID
+    ? project.serverId
+    : DEFAULT_SERVER_ID
+}

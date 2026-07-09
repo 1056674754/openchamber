@@ -1,6 +1,6 @@
 {
   "name": "@openchamber/web",
-  "version": "1.12.3-merging-dev",
+  "version": "1.13.2-merging-dev",
   "private": false,
   "type": "module",
   "main": "./server/index.js",

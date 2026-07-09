@@ -2,6 +2,7 @@ import React from 'react';
 
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
 import { Button } from '@/components/ui/button';
+import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import { SortableTabsStrip } from '@/components/ui/sortable-tabs-strip';
 import { DiffView } from '@/components/views/DiffView';
 import { FilesView } from '@/components/views/FilesView';
@@ -13,6 +14,7 @@ import { copyTextToClipboard } from '@/lib/clipboard';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
+import { resolvePreviewHeaderDisplayUrl } from '@/lib/previewDisplayUrl';
 import { useFilesViewTabsStore } from '@/stores/useFilesViewTabsStore';
 import { useUIStore, type ContextPanelMode } from '@/stores/useUIStore';
 import { useInlineCommentDraftStore } from '@/stores/useInlineCommentDraftStore';
@@ -762,7 +764,7 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({ rawUrl, onNavigate }) => {
     : '';
 
   const effectiveSrc = isLoopback ? proxySrc : directSrc;
-  const headerSrc = effectiveSrc || directSrc;
+  const headerSrc = resolvePreviewHeaderDisplayUrl({ rawUrl, directSrc, effectiveSrc });
   const showLoading = isLoopback && (proxyState.status === 'loading' || proxyState.status === 'idle');
   const showError = isLoopback && proxyState.status === 'error';
 
@@ -1690,7 +1692,22 @@ const ContextPanelTabContent: React.FC<{
   }
 
   if (tab.mode === 'preview') {
-    return <PreviewPane rawUrl={tab.targetPath ?? ''} onNavigate={(url) => useUIStore.getState().openContextPreview(effectiveDirectory, url)} />;
+    return (
+      <ErrorBoundary
+        fallback={(
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-background px-6 text-center text-sm text-muted-foreground">
+            <div>{t('contextPanel.preview.proxyError')}</div>
+            <div className="text-xs opacity-70">{tab.targetPath ?? ''}</div>
+          </div>
+        )}
+      >
+        <PreviewPane
+          key={tab.targetPath ?? 'preview'}
+          rawUrl={tab.targetPath ?? ''}
+          onNavigate={(url) => useUIStore.getState().openContextPreview(effectiveDirectory, url)}
+        />
+      </ErrorBoundary>
+    );
   }
 
   if (tab.mode === 'terminal') {

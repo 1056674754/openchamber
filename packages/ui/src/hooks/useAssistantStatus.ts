@@ -6,6 +6,7 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useDirectorySync, useSessionPermissions, useSessionQuestions, useSessionStatus } from '@/sync/sync-context';
 import { serverRegistry } from '@/lib/opencode/server-registry';
 import { isFullySyntheticMessage } from '@/lib/messages/synthetic';
+import { getBlockingRequestToolKey, getToolPartRequestKey } from '@/components/chat/lib/blockingRequests';
 import { useCurrentSessionActivity } from './useSessionActivity';
 
 export type AssistantActivity = 'idle' | 'streaming' | 'tooling' | 'cooldown' | 'permission';
@@ -235,6 +236,16 @@ export function useAssistantStatus(): AssistantStatusSnapshot {
 
         const editingTools = new Set(['edit', 'write', 'multiedit', 'apply_patch']);
 
+        // The SDK pending question set is authoritative for whether a question
+        // tool is still actively asking. After question.replied clears the
+        // request, a lingering running question tool part must not be treated
+        // as the active status source.
+        const pendingQuestionKeys = new Set<string>();
+        for (const req of sessionQuestionRequests) {
+            const key = getBlockingRequestToolKey(req);
+            if (key) pendingQuestionKeys.add(key);
+        }
+
         for (let i = (lastAssistant.parts ?? []).length - 1; i >= 0; i -= 1) {
             const part = lastAssistant.parts?.[i];
             if (!part) continue;
@@ -252,6 +263,12 @@ export function useAssistantStatus(): AssistantStatusSnapshot {
                     const toolStatus = part.state?.status;
                     if ((toolStatus === 'running' || toolStatus === 'pending') && !activePartType) {
                         const toolName = getToolDisplayName(part);
+                        if (toolName === 'question') {
+                            const partKey = getToolPartRequestKey(lastAssistant.info.id, part);
+                            if (!partKey || !pendingQuestionKeys.has(partKey)) {
+                                break;
+                            }
+                        }
                         if (editingTools.has(toolName)) {
                             activePartType = 'editing';
                             activeToolName = toolName;
@@ -335,7 +352,7 @@ export function useAssistantStatus(): AssistantStatusSnapshot {
         })();
 
         return { activePartType, activeToolName, statusText, isGenericStatus };
-    }, [sessionMessages]);
+    }, [sessionMessages, sessionQuestionRequests]);
 
     const abortState = React.useMemo(() => {
         const hasActiveAbort = Boolean(sessionAbortRecord && !sessionAbortRecord.acknowledged);

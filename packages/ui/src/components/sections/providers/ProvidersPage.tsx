@@ -1127,7 +1127,10 @@ export const ProvidersPage: React.FC = () => {
                           type="button"
                           disabled={isRemote}
                           onClick={() => toggleHiddenModel(selectedProvider.id, modelId)}
-                          className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-[var(--interactive-hover)]/50 disabled:opacity-40 disabled:pointer-events-none"
+                          className={cn(
+                            'flex h-6 w-6 items-center justify-center rounded hover:bg-[var(--interactive-hover)]/50 disabled:opacity-40 disabled:pointer-events-none',
+                            isHidden ? 'text-muted-foreground hover:text-foreground' : 'text-foreground',
+                          )}
                           title={isHidden ? t('settings.providers.page.models.actions.showModelInSelectors') : t('settings.providers.page.models.actions.hideModelFromSelectors')}
                           aria-label={isHidden ? t('settings.providers.page.models.actions.showModel') : t('settings.providers.page.models.actions.hideModel')}
                         >

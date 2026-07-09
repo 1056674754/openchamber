@@ -8,10 +8,10 @@ import { useMessageQueueStore, type QueuedMessage } from '@/stores/messageQueueS
 import { useSessionUIStore, type SendMessageTarget } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
 import { useInputStore } from '@/sync/input-store';
-import type { AttachedFile } from '@/stores/types/sessionTypes';
+import type { AttachedFile, SessionContextUsage } from '@/stores/types/sessionTypes';
 import * as sessionActions from '@/sync/session-actions';
 import type { SendDeliveryMode } from '@/sync/session-actions';
-import { useDirectorySync, useSessionMessages, useSessionRevertMessageID, useUserMessageHistory } from '@/sync/sync-context';
+import { useDirectorySync, useSessionMessages, useSessionMessagesResolved, useSessionRevertMessageID, useUserMessageHistory } from '@/sync/sync-context';
 import { parseSlashInvocation } from '@/sync/slash-routing';
 import { useInlineCommentDraftStore, type InlineCommentDraft } from '@/stores/useInlineCommentDraftStore';
 import { useSnippetsStore } from '@/stores/useSnippetsStore';
@@ -40,6 +40,7 @@ import { Button } from '@/components/ui/button';
 // useMessageStore removed — messages now come from sync system
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { isIMECompositionEvent } from '@/lib/ime';
+import { ContextUsageDisplay } from '@/components/ui/ContextUsageDisplay';
 import { StopIcon } from '@/components/icons/StopIcon';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { getCycledPrimaryAgentName, type MobileControlsPanel } from './mobileControlsUtils';
@@ -89,7 +90,9 @@ import {
     buildAttachmentCitationText,
     findAttachmentCitationRanges,
 } from './attachmentCitations';
+import { buildSlashSkillDispatch } from './skillSlashDispatch';
 import type { Message, Part } from '@opencode-ai/sdk/v2/client';
+import type { ContextPanelMode } from '@/stores/useUIStore';
 
 const MAX_VISIBLE_TEXTAREA_LINES = 8;
 const EMPTY_QUEUE: QueuedMessage[] = [];
@@ -386,6 +389,35 @@ const MemoBrowserVoiceButton = React.memo(BrowserVoiceButton);
 const MemoMobileAgentButton = React.memo(MobileAgentButton);
 const MemoMobileModelButton = React.memo(MobileModelButton);
 const MemoStatusRow = React.memo(StatusRow);
+
+const isSameContextUsage = (
+    a: SessionContextUsage | null,
+    b: SessionContextUsage | null,
+): boolean => {
+    if (a === b) return true;
+    if (!a || !b) return false;
+
+    return a.totalTokens === b.totalTokens
+        && a.percentage === b.percentage
+        && a.contextLimit === b.contextLimit
+        && (a.outputLimit ?? 0) === (b.outputLimit ?? 0)
+        && (a.normalizedOutput ?? 0) === (b.normalizedOutput ?? 0)
+        && a.thresholdLimit === b.thresholdLimit
+        && (a.lastMessageId ?? '') === (b.lastMessageId ?? '');
+};
+
+const getActiveContextMode = (panelState: {
+    isOpen: boolean;
+    activeTabId: string | null;
+    tabs: Array<{ id: string; mode: ContextPanelMode }>;
+} | undefined): ContextPanelMode | null => {
+    if (!panelState?.isOpen || !Array.isArray(panelState.tabs) || panelState.tabs.length === 0) {
+        return null;
+    }
+
+    const activeTab = panelState.tabs.find((tab) => tab.id === panelState.activeTabId) ?? panelState.tabs[panelState.tabs.length - 1];
+    return activeTab?.mode ?? null;
+};
 
 type RevertedMessageDockProps = {
     sessionId: string | null;
@@ -1224,6 +1256,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const pendingPresetSubmit = useInputStore((s) => s.pendingPresetSubmit);
     const consumePendingPresetSubmit = useInputStore((s) => s.consumePendingPresetSubmit);
     const consumePendingSyntheticParts = useInputStore((s) => s.consumePendingSyntheticParts);
+    const getContextUsage = useSessionUIStore((s) => s.getContextUsage);
+    const openContextOverview = useUIStore((state) => state.openContextOverview);
+    const closeContextPanel = useUIStore((state) => state.closeContextPanel);
     const abortCurrentOperation = React.useCallback(
         (sessionIdOverride?: string) => sessionActions.abortCurrentOperation(sessionIdOverride ?? currentSessionId ?? ''),
         [currentSessionId],
@@ -1239,6 +1274,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const currentAgentName = useConfigStore((state) => state.currentAgentName);
     const setAgent = useConfigStore((state) => state.setAgent);
     const getVisibleAgents = useConfigStore((state) => state.getVisibleAgents);
+    const getCurrentModel = useConfigStore((state) => state.getCurrentModel);
     const agents = getVisibleAgents();
     const isMobile = useUIStore((state) => state.isMobile);
     const inputBarOffset = useUIStore((state) => state.inputBarOffset);
@@ -1258,14 +1294,69 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const currentGitStatus = useGitStore((state) =>
         currentDirectory ? state.directories.get(currentDirectory)?.status ?? null : null,
     );
+    const currentModel = getCurrentModel();
     const [abortFeedbackActive, setAbortFeedbackActive] = React.useState(false);
     const setSessionAutoAccept = usePermissionStore((state) => state.setSessionAutoAccept);
     const composerHighlightRef = React.useRef<HTMLDivElement | null>(null);
     const [isNarrowComposer, setIsNarrowComposer] = React.useState(false);
+    const currentSessionMessagesResolved = useSessionMessagesResolved(currentSessionId ?? '');
+    const [stableComposerContextUsage, setStableComposerContextUsage] = React.useState<SessionContextUsage | null>(null);
+    const currentComposerContextPanelState = useUIStore(
+        React.useCallback(
+            (state) => (currentSessionDirectoryForSync ? state.contextPanelByDirectory[currentSessionDirectoryForSync] : undefined),
+            [currentSessionDirectoryForSync],
+        ),
+    );
 
     const isDesktopExpanded = isExpandedInput && !isMobile;
     const chatInputRadius = 'var(--radius-xl)';
     const useCompactChatPlaceholder = isMobile || isNarrowComposer;
+
+    const contextLimit = currentModel && typeof currentModel.limit === 'object' && currentModel.limit !== null
+        ? (currentModel.limit as Record<string, unknown>)
+        : null;
+    const composerContextLimit = (contextLimit && typeof contextLimit.context === 'number' ? contextLimit.context : 0);
+    const composerOutputLimit = (contextLimit && typeof contextLimit.output === 'number' ? contextLimit.output : 0);
+    const composerContextUsage = getContextUsage(composerContextLimit, composerOutputLimit);
+    const isComposerContextUsageResolvedForSession = !currentSessionId || currentSessionMessagesResolved;
+
+    React.useEffect(() => {
+        if (!currentSessionId) {
+            setStableComposerContextUsage((prev) => (prev === null ? prev : null));
+            return;
+        }
+
+        if (composerContextUsage && composerContextUsage.totalTokens > 0) {
+            setStableComposerContextUsage((prev) => (isSameContextUsage(prev, composerContextUsage) ? prev : composerContextUsage));
+            return;
+        }
+
+        if (isComposerContextUsageResolvedForSession) {
+            setStableComposerContextUsage((prev) => (prev === null ? prev : null));
+        }
+    }, [composerContextUsage, currentSessionId, isComposerContextUsageResolvedForSession]);
+
+    const isComposerContextPanelActive = React.useMemo(() => {
+        return getActiveContextMode(currentComposerContextPanelState) === 'context';
+    }, [currentComposerContextPanelState]);
+
+    const handleOpenComposerContextPanel = React.useCallback(() => {
+        if (!currentSessionDirectoryForSync) {
+            return;
+        }
+
+        if (getActiveContextMode(currentComposerContextPanelState) === 'context') {
+            closeContextPanel(currentSessionDirectoryForSync);
+            return;
+        }
+
+        openContextOverview(currentSessionDirectoryForSync);
+    }, [closeContextPanel, currentComposerContextPanelState, currentSessionDirectoryForSync, openContextOverview]);
+
+    const shouldShowComposerContextUsage = !isMobile && !isVSCodeRuntime() && !!stableComposerContextUsage && stableComposerContextUsage.totalTokens > 0;
+    const composerContextUsagePercentage = stableComposerContextUsage && stableComposerContextUsage.contextLimit > 0
+        ? Math.min(999, (stableComposerContextUsage.totalTokens / stableComposerContextUsage.contextLimit) * 100)
+        : 0;
 
     React.useEffect(() => {
         const element = dropZoneRef.current;
@@ -2102,7 +2193,24 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             });
         }
 
-        const skillMentionInstruction = buildSkillMentionInstruction(mentionedSkillNames);
+        const slashSkillDispatch = inputMode === 'normal'
+            ? buildSlashSkillDispatch(primaryText, { commands: availableCommands, skills: availableSkills })
+            : null;
+        if (slashSkillDispatch) {
+            primaryText = slashSkillDispatch.visibleText;
+            if (!mentionedSkillNames.some((name) => name.toLowerCase() === slashSkillDispatch.skillName.toLowerCase())) {
+                mentionedSkillNames.push(slashSkillDispatch.skillName);
+            }
+            additionalParts.push({
+                text: slashSkillDispatch.instructionText,
+                synthetic: true,
+            });
+        }
+
+        const genericMentionedSkillNames = slashSkillDispatch
+            ? mentionedSkillNames.filter((name) => name.toLowerCase() !== slashSkillDispatch.skillName.toLowerCase())
+            : mentionedSkillNames;
+        const skillMentionInstruction = buildSkillMentionInstruction(genericMentionedSkillNames);
         if (skillMentionInstruction) {
             additionalParts.push({
                 text: skillMentionInstruction,
@@ -4797,6 +4905,23 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                     />
                                 </div>
                                 <div className={cn('flex items-center flex-1 justify-end', footerGapClass, 'md:gap-x-3')}>
+                                    {shouldShowComposerContextUsage ? (
+                                        <ContextUsageDisplay
+                                            totalTokens={stableComposerContextUsage.totalTokens}
+                                            percentage={composerContextUsagePercentage}
+                                            colorPercentage={stableComposerContextUsage.percentage}
+                                            contextLimit={stableComposerContextUsage.contextLimit}
+                                            outputLimit={stableComposerContextUsage.outputLimit ?? 0}
+                                            size="compact"
+                                            hideIcon
+                                            showPercentIcon
+                                            onClick={handleOpenComposerContextPanel}
+                                            pressed={isComposerContextPanelActive}
+                                            className="shrink-0"
+                                            valueClassName="typography-ui-label font-medium leading-none text-foreground"
+                                            percentIconClassName="h-4.5 w-4.5"
+                                        />
+                                    ) : null}
                                     <MemoModelControls className={cn('flex-1 min-w-0 justify-end')} />
                                     <MemoBrowserVoiceButton />
                                     <ComposerActionButtons

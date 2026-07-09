@@ -71,7 +71,7 @@ const parseQuestionInfos = (value: unknown): QuestionInfo[] => {
         .filter((question): question is QuestionInfo => question !== null);
 };
 
-const hasQuestionAnswer = (part: ToolPartType): boolean => {
+export const hasQuestionAnswer = (part: ToolPartType): boolean => {
     const metadata = getValue(part.state, 'metadata');
     if (Array.isArray(getValue(metadata, 'answers'))) return true;
 

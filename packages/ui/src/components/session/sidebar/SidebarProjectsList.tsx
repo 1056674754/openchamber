@@ -369,7 +369,7 @@ export function SidebarProjectsList(props: Props): React.ReactNode {
                               });
                             }}
                           >
-                            {rootGroup ? props.renderGroupSessions(rootGroup, `${projectKey}:${rootGroup.id}`, projectKey, true) : null}
+                            {rootGroup ? props.renderGroupSessions(rootGroup, `${projectKey}:${rootGroup.id}`, projectKey, nestedGroups.length === 0) : null}
                             <SortableContext items={nestedGroups.map((group) => group.id)} strategy={verticalListSortingStrategy}>
                               {nestedGroups.map((group) => {
                                 const groupKey = `${projectKey}:${group.id}`;

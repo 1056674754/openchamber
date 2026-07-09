@@ -500,6 +500,18 @@ const PREVIEW_BRIDGE_SCRIPT = String.raw`(() => {
       return value;
     };
 
+    const proxiedAbsoluteUrl = (value) => {
+      const next = proxiedUrl(value);
+      if (typeof next !== 'string' || !next.startsWith('/')) {
+        return next;
+      }
+      try {
+        return new URL(next, window.location.href).toString();
+      } catch {
+        return next;
+      }
+    };
+
     const proxiedWebSocketUrl = (value) => {
       if (typeof value !== 'string') return value;
       try {
@@ -517,18 +529,25 @@ const PREVIEW_BRIDGE_SCRIPT = String.raw`(() => {
 
     if (typeof window.fetch === 'function') {
       const nativeFetch = window.fetch.bind(window);
+      const NativeRequest = typeof window.Request === 'function' ? window.Request : null;
       window.fetch = function(input, init) {
-        if (typeof input === 'string') {
-          return nativeFetch(proxiedUrl(input), init);
-        }
-        if (input instanceof Request) {
-          try {
-            const parsed = new URL(input.url);
-            if (parsed.origin === window.location.origin && shouldProxyPath(parsed.pathname)) {
-              const nextUrl = proxyBase + parsed.pathname + parsed.search + parsed.hash;
-              return nativeFetch(new Request(nextUrl, input), init);
+        try {
+          if (typeof input === 'string') {
+            return nativeFetch(proxiedUrl(input), init);
+          }
+          if (NativeRequest && input instanceof NativeRequest) {
+            try {
+              const parsed = new URL(input.url);
+              if (parsed.origin === window.location.origin && shouldProxyPath(parsed.pathname)) {
+                const nextUrl = proxiedAbsoluteUrl(parsed.pathname + parsed.search + parsed.hash);
+                return nativeFetch(new NativeRequest(nextUrl, input), init);
+              }
+            } catch {
+              return nativeFetch(input, init);
             }
-          } catch {}
+          }
+        } catch {
+          return nativeFetch(input, init);
         }
         return nativeFetch(input, init);
       };
@@ -538,9 +557,11 @@ const PREVIEW_BRIDGE_SCRIPT = String.raw`(() => {
       const nativeOpen = window.XMLHttpRequest.prototype.open;
       window.XMLHttpRequest.prototype.open = function(method, url) {
         const args = Array.prototype.slice.call(arguments);
-        if (typeof url === 'string') {
-          args[1] = proxiedUrl(url);
-        }
+        try {
+          if (typeof url === 'string') {
+            args[1] = proxiedUrl(url);
+          }
+        } catch {}
         return nativeOpen.apply(this, args);
       };
     }
@@ -548,7 +569,11 @@ const PREVIEW_BRIDGE_SCRIPT = String.raw`(() => {
     if (typeof window.EventSource === 'function') {
       const NativeEventSource = window.EventSource;
       function OpenChamberPreviewEventSource(url, eventSourceInitDict) {
-        return new NativeEventSource(proxiedUrl(String(url)), eventSourceInitDict);
+        let nextUrl = url;
+        try {
+          nextUrl = proxiedAbsoluteUrl(String(url));
+        } catch {}
+        return new NativeEventSource(nextUrl, eventSourceInitDict);
       }
       OpenChamberPreviewEventSource.prototype = NativeEventSource.prototype;
       Object.setPrototypeOf(OpenChamberPreviewEventSource, NativeEventSource);
@@ -559,7 +584,10 @@ const PREVIEW_BRIDGE_SCRIPT = String.raw`(() => {
     if (typeof window.WebSocket === 'function') {
       const NativeWebSocket = window.WebSocket;
       function OpenChamberPreviewAppWebSocket(url, protocols) {
-        const nextUrl = proxiedWebSocketUrl(String(url));
+        let nextUrl = url;
+        try {
+          nextUrl = proxiedWebSocketUrl(String(url));
+        } catch {}
         return arguments.length === 1
           ? new NativeWebSocket(nextUrl)
           : new NativeWebSocket(nextUrl, protocols);

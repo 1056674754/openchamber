@@ -41,12 +41,13 @@ const MAX_VISIBLE_RECENT_SESSIONS = 7;
 const SortableActivityItem: React.FC<{ id: string; children: React.ReactNode }> = ({ id, children }) => {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
   return (
-    <div ref={setNodeRef} style={{ transform: CSS.Transform.toString(transform), transition }} className="relative">
-      <div
-        className="absolute left-0 top-0 bottom-0 w-3 cursor-grab active:cursor-grabbing -ml-1 z-10"
-        {...attributes}
-        {...listeners}
-      />
+    <div
+      ref={setNodeRef}
+      style={{ transform: CSS.Transform.toString(transform), transition }}
+      className="relative cursor-grab active:cursor-grabbing"
+      {...attributes}
+      {...listeners}
+    >
       <div style={{ opacity: isDragging ? 0.4 : undefined }}>
         {children}
       </div>

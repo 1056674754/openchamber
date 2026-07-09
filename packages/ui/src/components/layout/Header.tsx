@@ -17,11 +17,10 @@ import { SortableTabsStrip, type SortableTabsStripItem } from '@/components/ui/s
 
 import { DiffIcon } from '@/components/icons/DiffIcon';
 import { useUIStore, type ContextPanelMode, type MainTab } from '@/stores/useUIStore';
-import { useConfigStore } from '@/stores/useConfigStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSessionWorktreeStore } from '@/sync/session-worktree-store';
 import { formatSessionWorktreeBadge } from '@/sync/session-worktree-contract';
-import { useAllLiveSessions, useSession, useSessionMessagesResolved } from '@/sync/sync-context';
+import { useAllLiveSessions, useSession } from '@/sync/sync-context';
 import { getAllSyncSessions } from '@/sync/sync-refs';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useQuotaAutoRefresh, useQuotaStore } from '@/stores/useQuotaStore';
@@ -31,7 +30,6 @@ import { useFeatureFlagsStore } from '@/stores/useFeatureFlagsStore';
 
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
-import { ContextUsageDisplay } from '@/components/ui/ContextUsageDisplay';
 import { useDeviceInfo, useTabletStandalonePwaRuntime } from '@/lib/device';
 import { cn, hasModifier } from '@/lib/utils';
 import { McpDropdownContent } from '@/components/mcp/McpDropdown';
@@ -55,7 +53,6 @@ import {
 } from '@/components/ui/collapsible';
 import type { UsageWindow } from '@/types';
 import type { GitHubAuthStatus } from '@/lib/api/types';
-import type { SessionContextUsage } from '@/stores/types/sessionTypes';
 import { InstanceInfoPanel } from '@/components/desktop/InstanceInfoPanel';
 import { useActiveServerId } from '@/hooks/useActiveServerId';
 import { serverRegistry } from '@/lib/opencode/server-registry';
@@ -555,22 +552,6 @@ const DesktopServicesMenu = React.memo(function DesktopServicesMenu({
   );
 });
 
-const isSameContextUsage = (
-  a: SessionContextUsage | null,
-  b: SessionContextUsage | null,
-): boolean => {
-  if (a === b) return true;
-  if (!a || !b) return false;
-
-  return a.totalTokens === b.totalTokens
-    && a.percentage === b.percentage
-    && a.contextLimit === b.contextLimit
-    && (a.outputLimit ?? 0) === (b.outputLimit ?? 0)
-    && (a.normalizedOutput ?? 0) === (b.normalizedOutput ?? 0)
-    && a.thresholdLimit === b.thresholdLimit
-    && (a.lastMessageId ?? '') === (b.lastMessageId ?? '');
-};
-
 const formatCompactHeaderLabel = (value: string): string => {
   const trimmed = value.trim();
   if (!trimmed) {
@@ -660,7 +641,6 @@ export const Header: React.FC<HeaderProps> = ({
   const toggleSidebar = useUIStore((state) => state.toggleSidebar);
   const openContextTerminal = useUIStore((state) => state.openContextTerminal);
   const toggleRightSidebar = useUIStore((state) => state.toggleRightSidebar);
-  const openContextOverview = useUIStore((state) => state.openContextOverview);
   const openContextPlan = useUIStore((state) => state.openContextPlan);
   const openContextBrowser = useUIStore((state) => state.openContextBrowser);
   const closeContextPanel = useUIStore((state) => state.closeContextPanel);
@@ -669,14 +649,11 @@ export const Header: React.FC<HeaderProps> = ({
   const setActiveMainTab = useUIStore((state) => state.setActiveMainTab);
   const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
 
-  const getCurrentModel = useConfigStore((state) => state.getCurrentModel);
   const runtimeApis = useRuntimeAPIs();
   const [isDevShutdownInFlight, setIsDevShutdownInFlight] = React.useState(false);
 
-  const getContextUsage = useSessionUIStore((state) => state.getContextUsage);
   const isNewSessionDraftOpen = useSessionUIStore((state) => Boolean(state.newSessionDraft?.open));
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
-  const currentSessionMessagesResolved = useSessionMessagesResolved(currentSessionId ?? '');
   const currentSyncedSession = useSession(currentSessionId ?? null);
   const globalActiveSessions = useGlobalSessionsStore((state) => state.activeSessions);
   const liveSessions = useAllLiveSessions();
@@ -765,32 +742,6 @@ export const Header: React.FC<HeaderProps> = ({
     setIsDesktopApp(isDesktopShell());
   }, []);
 
-  const currentModel = getCurrentModel();
-  const limit = currentModel && typeof currentModel.limit === 'object' && currentModel.limit !== null
-    ? (currentModel.limit as Record<string, unknown>)
-    : null;
-  const contextLimit = (limit && typeof limit.context === 'number' ? limit.context : 0);
-  const outputLimit = (limit && typeof limit.output === 'number' ? limit.output : 0);
-  const contextUsage = getContextUsage(contextLimit, outputLimit);
-  const [stableDesktopContextUsage, setStableDesktopContextUsage] = React.useState<SessionContextUsage | null>(null);
-  const isContextUsageResolvedForSession = !currentSessionId || currentSessionMessagesResolved;
-
-  useEffect(() => {
-    if (!currentSessionId) {
-      setStableDesktopContextUsage((prev) => (prev === null ? prev : null));
-      return;
-    }
-
-    if (contextUsage && contextUsage.totalTokens > 0) {
-      setStableDesktopContextUsage((prev) => (isSameContextUsage(prev, contextUsage) ? prev : contextUsage));
-      return;
-    }
-
-    if (isContextUsageResolvedForSession) {
-      setStableDesktopContextUsage((prev) => (prev === null ? prev : null));
-    }
-  }, [contextUsage, currentSessionId, isContextUsageResolvedForSession]);
-
   const isSessionSwitcherOpen = useUIStore((state) => state.isSessionSwitcherOpen);
   const githubAvatarUrl = githubAuthStatus?.connected ? (githubAuthStatus.user?.avatarUrl ?? null) : null;
   const githubLogin = githubAuthStatus?.connected ? (githubAuthStatus.user?.login ?? null) : null;
@@ -816,11 +767,6 @@ export const Header: React.FC<HeaderProps> = ({
   }, [desktopServicesTab, isDesktopApp]);
 
   const isVSCode = React.useMemo(() => isVSCodeRuntime(), []);
-  const showDesktopHeaderContextUsage = !isVSCode && activeMainTab === 'chat' && !!stableDesktopContextUsage && stableDesktopContextUsage.totalTokens > 0;
-  const desktopHeaderDisplayPercentage = stableDesktopContextUsage && stableDesktopContextUsage.contextLimit > 0
-    ? Math.min(999, (stableDesktopContextUsage.totalTokens / stableDesktopContextUsage.contextLimit) * 100)
-    : 0;
-
   useQuotaAutoRefresh();
   const selectedModels = useQuotaStore((state) => state.selectedModels);
   const expandedFamilies = useQuotaStore((state) => state.expandedFamilies);
@@ -1264,30 +1210,6 @@ export const Header: React.FC<HeaderProps> = ({
       console.warn('[header] failed to open session mini chat window', error);
     });
   }, [activeProject?.path, currentSessionId, handleOpenDraftMiniChat, isNewSessionDraftOpen, openDirectory]);
-
-  const handleOpenContextPanel = React.useCallback(() => {
-    const directory = normalize(openDirectory || '');
-    if (!directory) {
-      return;
-    }
-
-    const panelState = contextPanelByDirectory[directory];
-    if (getActiveContextMode(panelState) === 'context') {
-      closeContextPanel(directory);
-      return;
-    }
-
-    openContextOverview(directory);
-  }, [closeContextPanel, contextPanelByDirectory, openContextOverview, openDirectory]);
-
-  const isContextPanelActive = React.useMemo(() => {
-    const directory = normalize(openDirectory || '');
-    if (!directory) {
-      return false;
-    }
-    const panelState = contextPanelByDirectory[directory];
-    return getActiveContextMode(panelState) === 'context';
-  }, [contextPanelByDirectory, openDirectory]);
 
   const handleOpenContextPlan = React.useCallback(() => {
     const directory = normalize(openDirectory || '');
@@ -1931,29 +1853,12 @@ export const Header: React.FC<HeaderProps> = ({
         <div className="flex-1" />
 
         <div className="flex shrink-0 items-center gap-1">
-          {showDesktopHeaderContextUsage && stableDesktopContextUsage ? (
-            <ContextUsageDisplay
-              totalTokens={stableDesktopContextUsage.totalTokens}
-              percentage={desktopHeaderDisplayPercentage}
-              colorPercentage={stableDesktopContextUsage.percentage}
-              contextLimit={stableDesktopContextUsage.contextLimit}
-              outputLimit={stableDesktopContextUsage.outputLimit ?? 0}
-              size="compact"
-              hideIcon
-              showPercentIcon
-              onClick={handleOpenContextPanel}
-              pressed={isContextPanelActive}
-              className={!showMiniChatHeaderAction ? 'mr-3.5' : ''}
-              valueClassName="typography-ui-label font-medium leading-none text-foreground"
-              percentIconClassName="h-4.5 w-4.5"
-            />
-          ) : null}
           <HeaderIconActionButton
             visible={showMiniChatHeaderAction}
             title={isNewSessionDraftOpen ? t('header.actions.newMiniChat') : t('header.actions.openSessionMiniChat')}
             ariaLabel={isNewSessionDraftOpen ? t('header.actions.newMiniChatAria') : t('header.actions.openSessionMiniChatAria')}
             onClick={handleOpenCurrentMiniChat}
-            className={cn(desktopHeaderIconButtonClass, showDesktopHeaderContextUsage ? 'mr-3.5' : 'mr-1')}
+            className={cn(desktopHeaderIconButtonClass, 'mr-1')}
             Icon={'picture-in-picture-2'}
           />
           {desktopSidebarActions}

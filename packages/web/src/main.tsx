@@ -17,6 +17,14 @@ type PrerenderingDocument = Document & {
   prerendering?: boolean;
 };
 
+const isElectronDesktopRuntime = (): boolean => {
+  const desktopWindow = window as unknown as {
+    __OPENCHAMBER_DESKTOP__?: unknown;
+    __OPENCHAMBER_ELECTRON__?: unknown;
+  };
+  return Boolean(desktopWindow.__OPENCHAMBER_DESKTOP__ || desktopWindow.__OPENCHAMBER_ELECTRON__);
+};
+
 const canUseServiceWorker = (): boolean => {
   if (!('serviceWorker' in navigator)) return false;
   if (!window.isSecureContext) return false;
@@ -74,13 +82,17 @@ const unregisterDevelopmentServiceWorkers = (): void => {
   runWhenDocumentCanRegisterServiceWorker(() => {
     void navigator.serviceWorker.getRegistrations()
       .then((registrations) => Promise.all(registrations.map((registration) => registration.unregister())))
+      .then(() => (typeof caches === 'undefined' ? [] : caches.keys()))
+      .then((keys) => Promise.all(keys.map((key) => caches.delete(key))))
       .catch(() => {});
   });
 };
 
 void import('@openchamber/ui/main');
 
-if (import.meta.env.PROD) {
+if (isElectronDesktopRuntime()) {
+  unregisterDevelopmentServiceWorkers();
+} else if (import.meta.env.PROD) {
   registerPwaServiceWorker();
 } else {
   unregisterDevelopmentServiceWorkers();

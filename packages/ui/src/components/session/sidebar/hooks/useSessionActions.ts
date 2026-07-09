@@ -6,13 +6,15 @@ import { useI18n } from '@/lib/i18n';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { DEFAULT_SERVER_ID, serverRegistry } from '@/lib/opencode/server-registry';
 import { useProjectsStore } from '@/stores/useProjectsStore';
-import { normalizePath } from '../utils';
+import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
+import { normalizePath, partitionSessionIdsByRunningStatus } from '../utils';
 
 type DeleteSessionConfirmSetter = React.Dispatch<React.SetStateAction<{
   session: Session;
   descendantCount: number;
   descendantIds: string[];
   archivedBucket: boolean;
+  skippedRunningCount: number;
 } | null>>;
 
 type Args = {
@@ -36,7 +38,7 @@ type Args = {
   childrenMap: Map<string, Session[]>;
   showDeletionDialog: boolean;
   setDeleteSessionConfirm: DeleteSessionConfirmSetter;
-  deleteSessionConfirm: { session: Session; descendantCount: number; descendantIds: string[]; archivedBucket: boolean } | null;
+  deleteSessionConfirm: { session: Session; descendantCount: number; descendantIds: string[]; archivedBucket: boolean; skippedRunningCount: number } | null;
 };
 
 const normalizeServerId = (serverId?: string | null): string =>
@@ -202,15 +204,48 @@ export const useSessionActions = (args: Args) => {
     return descendants.filter((session) => !session.time?.archived);
   }, []);
 
+  const showSkippedRunningWarning = React.useCallback(
+    (count: number, shouldHardDelete: boolean) => {
+      if (count <= 0) return;
+      toast.warning(count === 1
+        ? t(shouldHardDelete
+          ? 'sessions.sidebar.session.delete.skippedRunningSingle'
+          : 'sessions.sidebar.session.archive.skippedRunningSingle', { count })
+        : t(shouldHardDelete
+          ? 'sessions.sidebar.session.delete.skippedRunningPlural'
+          : 'sessions.sidebar.session.archive.skippedRunningPlural', { count }));
+    },
+    [t],
+  );
+
   const executeDeleteSession = React.useCallback(
     async (
       session: Session,
       source?: { archivedBucket?: boolean },
-      precomputed?: { descendantIds: string[] },
+      precomputed?: { descendantIds: string[]; skippedRunningCount?: number },
     ) => {
       const shouldHardDelete = source?.archivedBucket === true;
-      const descendantIds = precomputed?.descendantIds
-        ?? filterDescendantsForAction(collectDescendants(session.id), shouldHardDelete).map((descendant) => descendant.id);
+
+      let descendantIds: string[];
+      let skippedRunningCount: number;
+      const statusMap = useGlobalSessionsStore.getState().sessionStatuses;
+      if (precomputed) {
+        const partition = partitionSessionIdsByRunningStatus(precomputed.descendantIds, statusMap);
+        descendantIds = partition.notRunning;
+        skippedRunningCount = (precomputed.skippedRunningCount ?? 0) + partition.running.length;
+      } else {
+        const eligibleDescendants = filterDescendantsForAction(
+          collectDescendants(session.id),
+          shouldHardDelete,
+        );
+        const partition = partitionSessionIdsByRunningStatus(
+          eligibleDescendants.map((descendant) => descendant.id),
+          statusMap,
+        );
+        descendantIds = partition.notRunning;
+        skippedRunningCount = partition.running.length;
+      }
+
       if (descendantIds.length === 0) {
         const success = shouldHardDelete
           ? await args.deleteSession(session.id)
@@ -224,6 +259,7 @@ export const useSessionActions = (args: Args) => {
             ? t('sessions.sidebar.session.delete.error')
             : t('sessions.sidebar.session.archive.error'));
         }
+        showSkippedRunningWarning(skippedRunningCount, shouldHardDelete);
         return;
       }
 
@@ -240,6 +276,7 @@ export const useSessionActions = (args: Args) => {
             ? t('sessions.sidebar.bulkActions.failedDeleteSingle', { count: failedIds.length })
             : t('sessions.sidebar.bulkActions.failedDeletePlural', { count: failedIds.length }));
         }
+        showSkippedRunningWarning(skippedRunningCount, shouldHardDelete);
         return;
       }
 
@@ -254,19 +291,27 @@ export const useSessionActions = (args: Args) => {
           ? t('sessions.sidebar.bulkActions.failedArchiveSingle', { count: failedIds.length })
           : t('sessions.sidebar.bulkActions.failedArchivePlural', { count: failedIds.length }));
       }
+      showSkippedRunningWarning(skippedRunningCount, shouldHardDelete);
     },
-    [args, collectDescendants, filterDescendantsForAction, t],
+    [args, collectDescendants, filterDescendantsForAction, showSkippedRunningWarning, t],
   );
 
   const handleDeleteSession = React.useCallback(
     (session: Session, source?: { archivedBucket?: boolean }) => {
       const shouldHardDelete = source?.archivedBucket === true;
-      const descendantIds = filterDescendantsForAction(
+      const eligibleDescendants = filterDescendantsForAction(
         collectDescendants(session.id),
         shouldHardDelete,
-      ).map((descendant) => descendant.id);
+      );
+      const statusMap = useGlobalSessionsStore.getState().sessionStatuses;
+      const partition = partitionSessionIdsByRunningStatus(
+        eligibleDescendants.map((descendant) => descendant.id),
+        statusMap,
+      );
+      const descendantIds = partition.notRunning;
+      const skippedRunningCount = partition.running.length;
       if (!args.showDeletionDialog) {
-        void executeDeleteSession(session, source, { descendantIds });
+        void executeDeleteSession(session, source, { descendantIds, skippedRunningCount });
         return;
       }
       args.setDeleteSessionConfirm({
@@ -274,6 +319,7 @@ export const useSessionActions = (args: Args) => {
         descendantCount: descendantIds.length,
         descendantIds,
         archivedBucket: shouldHardDelete,
+        skippedRunningCount,
       });
     },
     [args, collectDescendants, executeDeleteSession, filterDescendantsForAction],
@@ -281,9 +327,9 @@ export const useSessionActions = (args: Args) => {
 
   const confirmDeleteSession = React.useCallback(async () => {
     if (!args.deleteSessionConfirm) return;
-    const { session, archivedBucket, descendantIds } = args.deleteSessionConfirm;
+    const { session, archivedBucket, descendantIds, skippedRunningCount } = args.deleteSessionConfirm;
     args.setDeleteSessionConfirm(null);
-    await executeDeleteSession(session, { archivedBucket }, { descendantIds });
+    await executeDeleteSession(session, { archivedBucket }, { descendantIds, skippedRunningCount });
   }, [args, executeDeleteSession]);
 
   return {

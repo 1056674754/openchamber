@@ -26,6 +26,7 @@ import {
   resolveApiUrl,
   resolveBaseUrl,
   resolveBaseUrlForSession,
+  resolveProjectServerIdForDirectory,
   resolveSdkForDirectory as resolveSdkForDirectoryFromRouting,
   setDirectoryServerId,
 } from "./session-routing"
@@ -34,6 +35,7 @@ export {
   resolveApiUrl,
   resolveBaseUrl,
   resolveBaseUrlForSession,
+  resolveProjectServerIdForDirectory,
   setDirectoryServerId,
 }
 
@@ -502,6 +504,54 @@ function requireBlockingRequestDirectory(
     throw new Error(`${type} reply target directory for request ${requestId} is not available`)
   }
   return directory
+}
+
+function removeQuestionFromStores(
+  stores: ChildStoreManager | undefined,
+  sessionId: string,
+  requestId: string,
+): boolean {
+  if (!stores) return false
+
+  for (const store of stores.children.values()) {
+    const questions = store.getState().question[sessionId]
+    if (!questions || questions.length === 0) continue
+    const next = questions.filter((question) => question.id !== requestId)
+    if (next.length === questions.length) continue
+
+    const question = { ...store.getState().question }
+    if (next.length === 0) {
+      delete question[sessionId]
+    } else {
+      question[sessionId] = next
+    }
+    store.setState({ question })
+    return true
+  }
+
+  return false
+}
+
+function optimisticRemoveQuestion(sessionId: string, requestId: string): void {
+  if (!sessionId || !requestId) return
+
+  const serverId = serverRegistry.getServerForSession(sessionId)
+  if (serverId && serverId !== DEFAULT_SERVER_ID) {
+    if (removeQuestionFromStores(getSyncStoresForServer(serverId), sessionId, requestId)) {
+      return
+    }
+  }
+
+  if (removeQuestionFromStores(_childStores ?? undefined, sessionId, requestId)) {
+    return
+  }
+
+  for (const entry of getAllSyncStores()) {
+    if (entry.serverId === DEFAULT_SERVER_ID || entry.serverId === serverId) continue
+    if (removeQuestionFromStores(entry.childStores, sessionId, requestId)) {
+      return
+    }
+  }
 }
 
 function resolveBlockingRequestServerId(sessionId: string, directoryHint?: string): string | undefined {
@@ -1128,6 +1178,7 @@ export async function respondToQuestion(
   if (!result.data) {
     throw new Error("Question reply failed")
   }
+  optimisticRemoveQuestion(sessionId, requestId)
 }
 
 export async function rejectQuestion(
@@ -1148,6 +1199,7 @@ export async function rejectQuestion(
   if (!result.data) {
     throw new Error("Question rejection failed")
   }
+  optimisticRemoveQuestion(sessionId, requestId)
 }
 
 // ---------------------------------------------------------------------------
@@ -1364,10 +1416,10 @@ export async function forkFromMessage(sessionId: string, messageId: string): Pro
   if (!result.data) return
 
   const forkedSession = result.data
+  registerSessionDirectory(forkedSession.id, sessionDirectory)
   if (parentServerId) {
     serverRegistry.indexSession(forkedSession.id, parentServerId)
   }
-  registerSessionDirectory(forkedSession.id, sessionDirectory)
 
   // Insert new session into child store so sidebar updates immediately
   const current = store.getState()

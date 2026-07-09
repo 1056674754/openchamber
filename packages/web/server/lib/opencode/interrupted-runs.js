@@ -1,9 +1,8 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { createRequire } from 'module';
 
-const require = createRequire(import.meta.url);
+import { loadDefaultSqliteConstructors } from './sqlite-runtime.js';
 
 const ACTIVE_TOOL_STATUSES = new Set([
   'pending',
@@ -29,34 +28,8 @@ const getOpenCodeDataPath = () => {
 
 const defaultOpenCodeDbPath = () => path.join(getOpenCodeDataPath(), 'opencode.db');
 
-const loadDefaultDatabaseConstructors = () => {
-  const constructors = [];
-  let betterSqliteError = null;
-
-  try {
-    constructors.push(require('better-sqlite3'));
-  } catch (error) {
-    betterSqliteError = error;
-  }
-
-  try {
-    const bunSqlite = require('bun:sqlite');
-    if (typeof bunSqlite?.Database === 'function') {
-      constructors.push(bunSqlite.Database);
-    }
-  } catch {
-  }
-
-  if (constructors.length === 0) {
-    const message = betterSqliteError instanceof Error ? betterSqliteError.message : String(betterSqliteError);
-    throw new Error(`SQLite runtime unavailable for OpenCode DB recovery: ${message}`);
-  }
-
-  return constructors;
-};
-
 const openDatabase = (dbPath, Database) => {
-  const constructors = Database ? [Database] : loadDefaultDatabaseConstructors();
+  const constructors = Database ? [Database] : loadDefaultSqliteConstructors();
   const errors = [];
 
   for (const DatabaseConstructor of constructors) {

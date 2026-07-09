@@ -17,7 +17,7 @@ export type MaterializedState = {
 
 export type MaterializeSessionSnapshotsOptions = {
   skipPartTypes?: ReadonlySet<string>
-  mode?: "merge" | "prepend"
+  mode?: "merge" | "prepend" | "replace"
 }
 
 export type MaterializeSessionSnapshotsResult = {
@@ -161,6 +161,7 @@ export function materializeSessionSnapshots(
     .sort((left, right) => cmp(left.info.id, right.info.id))
   const nextMessages = snapshots.map((record) => record.info)
   const currentMessages = state.message[sessionID] ?? []
+  const isReplace = options.mode === "replace"
   const messages = mergeMessages(currentMessages, nextMessages)
   const messagesChanged = messages !== currentMessages
 
@@ -177,7 +178,7 @@ export function materializeSessionSnapshots(
       existing,
       sortParts(record.parts ?? [], skipPartTypes),
       skipPartTypes,
-      record.info.role === "assistant",
+      record.info.role === "assistant" && !isReplace,
     )
     if (haveEquivalentPartSnapshots(existing, nextParts)) continue
 

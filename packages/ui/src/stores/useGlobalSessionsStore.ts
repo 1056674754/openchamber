@@ -293,6 +293,77 @@ type StatusLoadResult = {
   response: unknown;
 };
 
+export type StatusBatchMergeInput = {
+  currentStatuses: Map<string, SessionStatus>;
+  sessionsByDirectory: Map<string, readonly Session[]>;
+  results: ReadonlyArray<PromiseSettledResult<StatusLoadResult>>;
+};
+
+/**
+ * Pure merge of directory status batch results into the live status map.
+ *
+ * Rejected results, nullish responses, array `data`, and non-object `data`
+ * are treated as fetch failure / invalid: existing statuses are preserved.
+ * A fulfilled response with object `data` is authoritative for its directory:
+ * session IDs belonging to that directory (per `sessionsByDirectory`) but
+ * absent from the payload are stale and pruned; other directories are never
+ * pruned. Returns `null` when nothing changed so callers preserve the
+ * existing map reference.
+ */
+export const computeStatusBatchMerge = (
+  input: StatusBatchMergeInput,
+): Map<string, SessionStatus> | null => {
+  const { currentStatuses, sessionsByDirectory, results } = input;
+
+  let next: Map<string, SessionStatus> = currentStatuses;
+  let changed = false;
+
+  const clone = (): Map<string, SessionStatus> => {
+    if (!changed) {
+      next = new Map(currentStatuses);
+      changed = true;
+    }
+    return next;
+  };
+
+  for (const result of results) {
+    if (result.status !== 'fulfilled') {
+      continue;
+    }
+    const { directory, response } = result.value;
+    if (!response) {
+      continue;
+    }
+    const responseRecord = response as { data?: unknown };
+    const data = responseRecord?.data;
+    if (Array.isArray(data) || data === null || typeof data !== 'object') {
+      continue;
+    }
+    const payload = data as Record<string, SessionStatus>;
+
+    const directorySessions = sessionsByDirectory.get(directory);
+    if (directorySessions) {
+      for (const session of directorySessions) {
+        const sessionId = session?.id;
+        if (!sessionId) continue;
+        if (!(sessionId in payload) && next.has(sessionId)) {
+          clone().delete(sessionId);
+        }
+      }
+    }
+
+    for (const [sessionId, status] of Object.entries(payload)) {
+      if (status && typeof status.type === 'string') {
+        if (!sameStatus(next.get(sessionId), status)) {
+          clone().set(sessionId, status);
+        }
+      }
+    }
+  }
+
+  return changed ? next : null;
+};
+
 const loadStatusForDirectory = (directory: string): Promise<unknown> => {
   const existing = inflightStatusLoadsByDirectory.get(directory);
   if (existing) {
@@ -727,36 +798,13 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
 
     const results = await loadStatusesWithLimit(targetDirectories);
 
-    const currentStatuses = get().sessionStatuses;
-    const next = new Map(currentStatuses);
-    let changed = false;
-    for (const result of results) {
-      if (result.status !== 'fulfilled') {
-        continue;
-      }
-      const response = result.value.response;
-      if (!response) {
-        continue;
-      }
-      const responseRecord = response as { data?: unknown };
-      const payload = Array.isArray(responseRecord.data)
-        ? undefined
-        : responseRecord.data as Record<string, SessionStatus> | undefined;
-      if (!payload || typeof payload !== 'object') {
-        continue;
-      }
-      for (const [sessionId, status] of Object.entries(payload)) {
-        if (status && typeof status.type === 'string') {
-          if (sameStatus(next.get(sessionId), status)) {
-            continue;
-          }
-          next.set(sessionId, status);
-          changed = true;
-        }
-      }
-    }
+    const next = computeStatusBatchMerge({
+      currentStatuses: get().sessionStatuses,
+      sessionsByDirectory: get().sessionsByDirectory,
+      results,
+    });
 
-    if (changed) {
+    if (next) {
       set({ sessionStatuses: next });
     }
   },

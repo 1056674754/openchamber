@@ -20,8 +20,50 @@ const parseUrlSafely = (value: string): URL | null => {
   }
 };
 
+const URL_EXPLANATORY_TEXT_BOUNDARY = /[（(，,。；;、\s]/;
+const URL_ENCODED_EXPLANATORY_TEXT_BOUNDARY
+  = /%(?:20|28|2c|3b|ef%bc%88|ef%bc%8c|e3%80%82|ef%bc%9b|e3%80%81)/i;
+const URL_TRAILING_PUNCTUATION = /[),.;:!?'"`，。；、）]+$/g;
+
+const findUrlBoundaryIndex = (value: string): number => {
+  const literalIndex = URL_EXPLANATORY_TEXT_BOUNDARY.exec(value)?.index ?? -1;
+  const encodedIndex = URL_ENCODED_EXPLANATORY_TEXT_BOUNDARY.exec(value)?.index ?? -1;
+  if (literalIndex === -1) {
+    return encodedIndex;
+  }
+  if (encodedIndex === -1) {
+    return literalIndex;
+  }
+  return Math.min(literalIndex, encodedIndex);
+};
+
+export const normalizeHttpUrlCandidate = (url: string): string => {
+  const trimmed = url.trim();
+  if (!trimmed) {
+    return '';
+  }
+
+  if (parseUrlSafely(trimmed)) {
+    return trimmed.replace(URL_TRAILING_PUNCTUATION, '');
+  }
+
+  const schemeMatch = /^https?:\/\//i.exec(trimmed);
+  if (!schemeMatch) {
+    return trimmed;
+  }
+
+  const afterScheme = trimmed.slice(schemeMatch[0].length);
+  const boundaryIndex = findUrlBoundaryIndex(afterScheme);
+  if (boundaryIndex <= 0) {
+    return trimmed.replace(URL_TRAILING_PUNCTUATION, '');
+  }
+
+  const candidate = `${schemeMatch[0]}${afterScheme.slice(0, boundaryIndex)}`.replace(URL_TRAILING_PUNCTUATION, '');
+  return parseUrlSafely(candidate) ? candidate : trimmed.replace(URL_TRAILING_PUNCTUATION, '');
+};
+
 export const isExternalHttpUrl = (url: string): boolean => {
-  const parsed = parseUrlSafely(url.trim());
+  const parsed = parseUrlSafely(normalizeHttpUrlCandidate(url));
   if (!parsed) {
     return false;
   }
@@ -29,7 +71,7 @@ export const isExternalHttpUrl = (url: string): boolean => {
 };
 
 export const getExternalFaviconUrl = (url: string): string | null => {
-  const parsed = parseUrlSafely(url.trim());
+  const parsed = parseUrlSafely(normalizeHttpUrlCandidate(url));
   if (!parsed || (parsed.protocol !== 'http:' && parsed.protocol !== 'https:')) {
     return null;
   }
@@ -45,7 +87,7 @@ const LOOPBACK_HOSTNAMES = new Set(['localhost', '127.0.0.1', '0.0.0.0', '::1'])
  * preview pane instead of opening the system browser.
  */
 export const isLoopbackHttpUrl = (url: string): boolean => {
-  const parsed = parseUrlSafely(url.trim());
+  const parsed = parseUrlSafely(normalizeHttpUrlCandidate(url));
   if (!parsed) {
     return false;
   }
@@ -75,7 +117,7 @@ export const extractLoopbackUrls = (text: string): string[] => {
   const seen = new Set<string>();
   const out: string[] = [];
   for (const raw of matches) {
-    const cleaned = raw.replace(/[),.;:!?'"`]+$/g, '');
+    const cleaned = normalizeHttpUrlCandidate(raw);
     if (!cleaned || !isLoopbackHttpUrl(cleaned)) {
       continue;
     }

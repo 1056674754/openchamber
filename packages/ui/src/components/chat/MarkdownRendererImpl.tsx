@@ -17,7 +17,7 @@ import { Icon } from "@/components/icon/Icon";
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { useI18n } from '@/lib/i18n';
 
-import { getExternalFaviconUrl, isExternalHttpUrl, isLoopbackHttpUrl, openExternalUrl } from '@/lib/url';
+import { getExternalFaviconUrl, isExternalHttpUrl, isLoopbackHttpUrl, normalizeHttpUrlCandidate, openExternalUrl } from '@/lib/url';
 import {
   buildAgentMentionUrl,
   parseAgentHref,
@@ -41,6 +41,7 @@ import { getDirectoryForFilePath } from '@/lib/path-utils';
 import { CODE_SHARED_STYLE, MARKDOWN_CODE_BODY_CLASSNAME } from './markdownCodeStyle';
 import { getTableCopyContent, tableToCSV, tableToMarkdown, type TableCopyFormat, type TableData } from './markdownTableExport';
 import {
+  findFileReferenceTextMatches,
   buildFileRequestParams,
   getFileNameFromPath,
   getResolvedReference,
@@ -346,7 +347,7 @@ const TableWrapper: React.FC<{ children?: React.ReactNode; className?: string }>
   );
 };
 
-const MermaidBlock: React.FC<{ source: string; mode: 'svg' | 'ascii' }> = ({ source, mode }) => {
+const MermaidBlock: React.FC<{ source: string; mode: 'svg' | 'ascii'; onShowPopup?: (content: ToolPopupContent) => void }> = ({ source, mode, onShowPopup }) => {
   const { t } = useI18n();
   const currentTheme = useCurrentMermaidTheme();
   const { isMobile, isTablet } = useDeviceInfo();
@@ -487,6 +488,31 @@ const MermaidBlock: React.FC<{ source: string; mode: 'svg' | 'ascii' }> = ({ sou
           copyVisibilityClass,
         )}
       >
+        {onShowPopup ? (
+          <button
+            onClick={() => {
+              onShowPopup({
+                open: true,
+                title: t('markdownRenderer.mermaid.previewTitle'),
+                content: '',
+                metadata: {
+                  tool: 'mermaid-preview',
+                  filename: t('markdownRenderer.mermaid.previewTitle'),
+                },
+                mermaid: {
+                  url: `data:text/plain;charset=utf-8,${encodeURIComponent(source)}`,
+                  source,
+                  filename: t('markdownRenderer.mermaid.previewTitle'),
+                },
+              });
+            }}
+            className="p-1 rounded hover:bg-interactive-hover/60 text-muted-foreground hover:text-foreground transition-colors"
+            title={t('markdownRenderer.mermaid.actions.expandTitle')}
+            aria-label={t('markdownRenderer.mermaid.actions.expandAria')}
+          >
+            <Icon name="fullscreen" className="size-3.5" />
+          </button>
+        ) : null}
         <button
           onClick={handleCopyMermaidSource}
           className="p-1 rounded hover:bg-interactive-hover/60 text-muted-foreground hover:text-foreground transition-colors"
@@ -1071,7 +1097,7 @@ const buildMarkdownComponents = ({
     const language = getCodeLanguage(className);
     const code = normalizeCodeBlockText(extractCodeText(child.props.children).replace(/\n$/, ''), language);
     if (language === 'mermaid') {
-      return <MermaidBlock source={code} mode={useUIStore.getState().mermaidRenderingMode} />;
+      return <MermaidBlock source={code} mode={useUIStore.getState().mermaidRenderingMode} onShowPopup={onShowPopup} />;
     }
     return <MarkdownCodeBlock code={code} language={language} syntaxTheme={syntaxTheme} {...props} />;
   },
@@ -1177,18 +1203,26 @@ const buildMarkdownComponents = ({
       );
     }
 
-    const isExternal = isExternalHttpUrl(targetHref);
-    const isLoopback = onPreviewLoopback ? isLoopbackHttpUrl(targetHref) : false;
+    const normalizedHref = normalizeHttpUrlCandidate(targetHref);
+    const childText = React.Children.toArray(children).every((child) => typeof child === 'string')
+      ? React.Children.toArray(children).join('')
+      : null;
+    const splitAutolinkSuffix = normalizedHref !== targetHref && childText === targetHref && targetHref.startsWith(normalizedHref)
+      ? targetHref.slice(normalizedHref.length)
+      : '';
+    const linkChildren = splitAutolinkSuffix ? normalizedHref : children;
+    const isExternal = isExternalHttpUrl(normalizedHref);
+    const isLoopback = onPreviewLoopback ? isLoopbackHttpUrl(normalizedHref) : false;
     return (
       <>
         <a
           {...props}
-          href={href}
+          href={normalizedHref || href}
           target={isExternal ? '_blank' : undefined}
           rel={isExternal ? 'noopener noreferrer' : undefined}
         >
-          {isExternal ? <ExternalLinkFavicon href={targetHref} /> : null}
-          {children}
+          {isExternal ? <ExternalLinkFavicon href={normalizedHref} /> : null}
+          {linkChildren}
         </a>
         {isLoopback && onPreviewLoopback ? (
           <button
@@ -1196,7 +1230,7 @@ const buildMarkdownComponents = ({
             onClick={(event) => {
               event.preventDefault();
               event.stopPropagation();
-              onPreviewLoopback(targetHref);
+              onPreviewLoopback(normalizedHref);
             }}
             className="ml-1 inline-flex h-5 items-center gap-0.5 rounded border border-[var(--border)] bg-[var(--surface-background)] px-1.5 align-middle text-[11px] leading-none text-[var(--muted-foreground)] transition-colors hover:bg-[var(--surface-hover)] hover:text-[var(--foreground)]"
             aria-label={previewTitle ?? previewLabel ?? 'Open preview pane'}
@@ -1207,6 +1241,7 @@ const buildMarkdownComponents = ({
             <span className="font-medium">{previewLabel ?? 'Preview'}</span>
           </button>
         ) : null}
+        {splitAutolinkSuffix}
       </>
     );
   },
@@ -1250,16 +1285,6 @@ const FILE_LINK_SELECTOR = '[data-openchamber-file-link="true"]';
 const BLOCK_PATH_TOKEN_ATTR = 'data-openchamber-block-path-token';
 const BLOCK_PATH_TOKEN_SELECTOR = `[${BLOCK_PATH_TOKEN_ATTR}]`;
 const CODE_BLOCK_PATH_SCANNED_ATTR = 'data-openchamber-block-paths-scanned';
-// Matches `path[:line[:col]]` inside shell/grep-style output. Requires a file
-// extension (1-8 alphanumerics) so plain words don't qualify; the path itself
-// must contain at least one extension-bearing segment.
-//
-// Known limitation: backslash-separated Windows paths (e.g.
-// `C:\Users\test\file.ts:12`) are not matched because the path character class
-// does not include `\`. Compiler output inside fenced code blocks predominantly
-// uses forward slashes, so this is a niche gap. The inline-code pipeline is not
-// affected — it reads full text content rather than matching with a regex.
-const BLOCK_PATH_TOKEN_RE = /(?:[A-Za-z]:[\\/])?[\w.\-/@+]*[\w\-/@+]\.[A-Za-z0-9]{1,8}(?::\d+){0,2}/g;
 const MAX_BLOCK_CODE_SCAN_LENGTH = 200_000;
 const FILE_REFERENCE_SELECTOR = '[data-openchamber-file-link="true"], [data-openchamber-file-status], [data-openchamber-original-href]';
 const IMAGE_PREVIEW_SELECTOR = '[data-openchamber-image-preview="true"]';
@@ -1268,7 +1293,14 @@ const FILE_REFERENCE_STAT_CACHE_MAX = 1000;
 const VSCODE_FILE_REFERENCE_STAT_CACHE_MAX = 200;
 const FILE_REFERENCE_LINK_LIMIT = 200;
 const VSCODE_FILE_REFERENCE_LINK_LIMIT = 40;
+const FILE_REFERENCE_MISSING_RECHECK_DELAY_MS = 2_000;
+const FILE_REFERENCE_MISSING_MAX_RECHECKS = 60;
 const FILE_REFERENCE_STAT_CACHE = new Map<string, Promise<boolean | null>>();
+
+type FileReferenceValidation = {
+  ok: boolean;
+  checkedAt: number;
+};
 
 const getFileReferenceStatCacheMax = (): number => (
   isVSCodeRuntime() ? VSCODE_FILE_REFERENCE_STAT_CACHE_MAX : FILE_REFERENCE_STAT_CACHE_MAX
@@ -1387,16 +1419,7 @@ const wrapBlockCodePathTokens = (container: HTMLElement): void => {
       continue;
     }
 
-    BLOCK_PATH_TOKEN_RE.lastIndex = 0;
-    const matches: Array<{ start: number; end: number; raw: string }> = [];
-    let match: RegExpExecArray | null = BLOCK_PATH_TOKEN_RE.exec(fullText);
-    while (match) {
-      const raw = match[0];
-      if (raw && isLikelyFilePath(raw)) {
-        matches.push({ start: match.index, end: match.index + raw.length, raw });
-      }
-      match = BLOCK_PATH_TOKEN_RE.exec(fullText);
-    }
+    const matches = findFileReferenceTextMatches(fullText);
 
     for (const { start, end, raw } of matches.reverse()) {
       const startPosition = findTextPosition(textNodes, start);
@@ -1574,13 +1597,14 @@ const useFileUrlNavigationGuard = ({
   }, [containerRef, editor, effectiveDirectory, preferRuntimeEditor]);
 };
 
-const fileReferenceExists = (path: string, fileReferenceBaseUrl?: string): Promise<boolean | null> => {
+const fileReferenceExists = (path: string, effectiveDirectory: string, fileReferenceBaseUrl?: string): Promise<boolean | null> => {
   const normalizedPath = normalizePath(path);
   if (!normalizedPath) {
     return Promise.resolve(false);
   }
 
-  const cacheKey = `${fileReferenceBaseUrl ?? ''}\n${normalizedPath}`;
+  const normalizedDirectory = normalizePath(effectiveDirectory);
+  const cacheKey = `${fileReferenceBaseUrl ?? ''}\n${normalizedDirectory}\n${normalizedPath}`;
   const cached = FILE_REFERENCE_STAT_CACHE.get(cacheKey);
   if (cached) {
     FILE_REFERENCE_STAT_CACHE.delete(cacheKey);
@@ -1590,16 +1614,26 @@ const fileReferenceExists = (path: string, fileReferenceBaseUrl?: string): Promi
 
   const request = (async () => {
     try {
-      const params = new URLSearchParams({
-        path: normalizedPath,
-        allowOutsideWorkspace: 'true',
-      });
+      const params = buildFileRequestParams(normalizedPath, normalizedDirectory);
       const res = await fetch(`${resolveApiUrl('/api/fs/stat', fileReferenceBaseUrl)}?${params.toString()}`);
       return res.ok;
     } catch {
       return null;
     }
   })();
+
+  request.then(
+    (ok) => {
+      if (ok !== true && FILE_REFERENCE_STAT_CACHE.get(cacheKey) === request) {
+        FILE_REFERENCE_STAT_CACHE.delete(cacheKey);
+      }
+    },
+    () => {
+      if (FILE_REFERENCE_STAT_CACHE.get(cacheKey) === request) {
+        FILE_REFERENCE_STAT_CACHE.delete(cacheKey);
+      }
+    },
+  );
 
   const maxCacheEntries = getFileReferenceStatCacheMax();
   while (FILE_REFERENCE_STAT_CACHE.size >= maxCacheEntries) {
@@ -1634,7 +1668,8 @@ const useFileReferenceInteractions = ({
   const tRef = React.useRef(t);
   tRef.current = t;
   const annotationDebounceRef = React.useRef<number | null>(null);
-  const validationResultsRef = React.useRef<Map<string, boolean>>(new Map());
+  const validationResultsRef = React.useRef<Map<string, FileReferenceValidation>>(new Map());
+  const missingRetryCountsRef = React.useRef<Map<string, number>>(new Map());
   const validationContextRef = React.useRef('');
   const validateDebounceRef = React.useRef<number | null>(null);
 
@@ -1648,8 +1683,27 @@ const useFileReferenceInteractions = ({
     const validationContext = `${fileReferenceBaseUrl ?? ''}|${effectiveDirectory}`;
     if (validationContextRef.current !== validationContext) {
       validationResultsRef.current.clear();
+      missingRetryCountsRef.current.clear();
       validationContextRef.current = validationContext;
     }
+
+    const getCachedValidation = (path: string): boolean | undefined => {
+      const cached = validationResultsRef.current.get(path);
+      if (!cached) {
+        return undefined;
+      }
+      if (!cached.ok && Date.now() - cached.checkedAt >= FILE_REFERENCE_MISSING_RECHECK_DELAY_MS) {
+        return undefined;
+      }
+      return cached.ok;
+    };
+
+    const setCachedValidation = (path: string, ok: boolean) => {
+      validationResultsRef.current.set(path, { ok, checkedAt: Date.now() });
+      if (ok) {
+        missingRetryCountsRef.current.delete(path);
+      }
+    };
 
     const removeMissingBadge = (candidate: HTMLElement) => {
       const nextSibling = candidate.nextElementSibling;
@@ -1815,7 +1869,7 @@ const useFileReferenceInteractions = ({
         const rawCandidate = extractPathCandidateFromElement(candidate);
         const resolved = getResolvedReference(rawCandidate, effectiveDirectory);
         const knownValidation = resolved
-          ? validationResultsRef.current.get(resolved.resolvedPath)
+          ? getCachedValidation(resolved.resolvedPath)
           : undefined;
         if (
           resolved
@@ -1863,15 +1917,17 @@ const useFileReferenceInteractions = ({
       if (!container) return;
 
       const pending = container.querySelectorAll<HTMLElement>('[data-openchamber-file-status="pending"]');
-      if (pending.length === 0) return;
+      const missing = container.querySelectorAll<HTMLElement>('[data-openchamber-file-status="missing"]');
+      const candidates = [...Array.from(pending), ...Array.from(missing)];
+      if (candidates.length === 0) return;
 
       const pathsToCheck = new Map<string, HTMLElement[]>();
       const note = tRef.current('chat.file.notFound');
-      for (const el of pending) {
+      for (const el of candidates) {
         if (!el.isConnected) continue;
         const path = el.getAttribute('data-openchamber-file-path');
         if (!path) continue;
-        const knownValidation = validationResultsRef.current.get(path);
+        const knownValidation = getCachedValidation(path);
         if (knownValidation === true) {
           el.setAttribute('data-openchamber-file-status', 'valid');
           removeMissingBadge(el);
@@ -1894,10 +1950,13 @@ const useFileReferenceInteractions = ({
 
       const results = await Promise.allSettled(
         Array.from(pathsToCheck.keys()).map(async (path) => {
-          const ok = await fileReferenceExists(path, fileReferenceBaseUrl);
+          const ok = await fileReferenceExists(path, effectiveDirectory, fileReferenceBaseUrl);
           return { path, ok };
         })
       );
+
+      let recoveredMissingReference = false;
+      let shouldRecheckMissingReferences = false;
 
       for (const result of results) {
         if (result.status === 'rejected') continue;
@@ -1908,13 +1967,14 @@ const useFileReferenceInteractions = ({
         }
 
         const elements = pathsToCheck.get(path) || [];
-        validationResultsRef.current.set(path, ok);
+        setCachedValidation(path, ok);
 
         for (const el of elements) {
           if (!el.isConnected) continue;
           if (ok) {
             el.setAttribute('data-openchamber-file-status', 'valid');
             removeMissingBadge(el);
+            recoveredMissingReference = true;
           } else {
             demoteMissingFileReference(
               el,
@@ -1924,6 +1984,21 @@ const useFileReferenceInteractions = ({
             );
           }
         }
+
+        if (!ok) {
+          const retryCount = missingRetryCountsRef.current.get(path) ?? 0;
+          if (retryCount < FILE_REFERENCE_MISSING_MAX_RECHECKS) {
+            missingRetryCountsRef.current.set(path, retryCount + 1);
+            shouldRecheckMissingReferences = true;
+          }
+        }
+      }
+
+      if (recoveredMissingReference) {
+        annotateFileLinks();
+      }
+      if (shouldRecheckMissingReferences) {
+        scheduleValidate(FILE_REFERENCE_MISSING_RECHECK_DELAY_MS);
       }
     };
 
@@ -1990,7 +2065,7 @@ const useFileReferenceInteractions = ({
       openFileReference(target);
     };
 
-    const scheduleValidate = () => {
+    const scheduleValidate = (delayMs = 80) => {
       if (validateDebounceRef.current !== null && typeof window !== 'undefined') {
         window.clearTimeout(validateDebounceRef.current);
       }
@@ -2001,7 +2076,7 @@ const useFileReferenceInteractions = ({
       validateDebounceRef.current = window.setTimeout(() => {
         validateDebounceRef.current = null;
         void validateFileLinks();
-      }, 80);
+      }, delayMs);
     };
 
     annotateFileLinks();

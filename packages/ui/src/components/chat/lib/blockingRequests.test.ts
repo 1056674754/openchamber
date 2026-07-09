@@ -8,7 +8,7 @@ import {
 } from './blockingRequests';
 
 describe('blocking request tool anchoring', () => {
-    test('uses tool callID instead of part id when matching visible tool requests', () => {
+    test('indexes both tool callID and part id when matching visible tool requests', () => {
         const visibleKeys = collectVisibleToolRequestKeys([
             {
                 info: { id: 'msg-1' },
@@ -42,8 +42,45 @@ describe('blocking request tool anchoring', () => {
         const split = splitBlockingRequestsByVisibleTool([question], [], visibleKeys);
 
         expect(visibleKeys.has(getToolRequestKey('msg-1', 'call-1'))).toBe(true);
-        expect(visibleKeys.has(getToolRequestKey('msg-1', 'part-1'))).toBe(false);
+        expect(visibleKeys.has(getToolRequestKey('msg-1', 'part-1'))).toBe(true);
         expect(split.inlineByTool.get(getToolRequestKey('msg-1', 'call-1'))?.questions).toEqual([question]);
+        expect(split.trailingQuestions).toEqual([]);
+    });
+
+    test('matches pending requests that use the rendered part id as call id', () => {
+        const visibleKeys = collectVisibleToolRequestKeys([
+            {
+                info: { id: 'msg-1' },
+                parts: [
+                    {
+                        id: 'part-1',
+                        sessionID: 'ses-1',
+                        type: 'tool',
+                        messageID: 'msg-1',
+                        callID: 'call-1',
+                        tool: 'question',
+                        state: {
+                            status: 'running',
+                            input: {},
+                            time: { start: 1 },
+                        },
+                    },
+                ],
+            },
+        ]);
+
+        const question: QuestionRequest = {
+            id: 'que-1',
+            sessionID: 'ses-1',
+            questions: [],
+            tool: {
+                messageID: 'msg-1',
+                callID: 'part-1',
+            },
+        };
+        const split = splitBlockingRequestsByVisibleTool([question], [], visibleKeys);
+
+        expect(split.inlineByTool.get(getToolRequestKey('msg-1', 'part-1'))?.questions).toEqual([question]);
         expect(split.trailingQuestions).toEqual([]);
     });
 

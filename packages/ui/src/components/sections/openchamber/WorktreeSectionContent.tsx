@@ -2,8 +2,10 @@ import React from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { toast } from '@/components/ui';
 import { Icon } from "@/components/icon/Icon";
 import { useProjectsStore } from '@/stores/useProjectsStore';
+import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSessions } from '@/sync/sync-context';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
@@ -12,6 +14,7 @@ import { checkIsGitRepository } from '@/lib/gitApi';
 import { getWorktreeSetupCommands, saveWorktreeSetupCommands } from '@/lib/openchamberConfig';
 import { listProjectWorktrees } from '@/lib/worktrees/worktreeManager';
 import { sessionEvents } from '@/lib/sessionEvents';
+import { partitionSessionsByRunningStatus } from '@/components/session/sidebar/utils';
 import type { WorktreeMetadata } from '@/types/worktree';
 import { formatPathForDisplay, cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
@@ -253,12 +256,24 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
       return true;
     });
 
+    // Preserve running sessions: never pass them to a delete flow.
+    const statusMap = useGlobalSessionsStore.getState().sessionStatuses;
+    const { running, notRunning } = partitionSessionsByRunningStatus(allSessions, statusMap);
+    if (running.length > 0) {
+      toast.warning(t('sessions.sidebar.toast.runningSessionsPreservedTitle'), {
+        description: running.length === 1
+          ? t('sessions.sidebar.toast.runningSessionsPreservedSingle', { count: running.length })
+          : t('sessions.sidebar.toast.runningSessionsPreservedPlural', { count: running.length }),
+      });
+    }
+    if (notRunning.length === 0) return;
+
     sessionEvents.requestDelete({
-      sessions: allSessions,
+      sessions: notRunning,
       mode: 'worktree',
       worktree,
     });
-  }, [sessions, getWorktreeMetadata]);
+  }, [sessions, getWorktreeMetadata, t]);
 
   // Refresh worktrees when sessions change (after deletion)
   const sessionsKey = React.useMemo(() => sessions.map(s => s.id).join(','), [sessions]);

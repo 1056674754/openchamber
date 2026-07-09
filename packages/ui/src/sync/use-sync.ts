@@ -380,6 +380,7 @@ export function useSync() {
       targetDirectory?: string
       targetStore?: typeof store
       targetServerId?: string
+      throwOnError?: boolean
     }) => {
       const writeStore = options?.targetStore ?? store
       const targetDirectory = options?.targetDirectory ?? directory
@@ -418,7 +419,7 @@ export function useSync() {
             info,
             parts: merged.part.find((item) => item.id === info.id)?.part ?? [],
           })),
-          { skipPartTypes: SKIP_PARTS, mode: options?.mode === "prepend" ? "prepend" : "merge" },
+          { skipPartTypes: SKIP_PARTS, mode: options?.mode === "prepend" ? "prepend" : options?.mode === "replace" ? "replace" : "merge" },
         )
 
         const message = Object.prototype.hasOwnProperty.call(materialized.message, sessionID)
@@ -438,8 +439,11 @@ export function useSync() {
           cursor: merged.cursor,
           complete: merged.complete,
         })
-      } catch {
+      } catch (error) {
         setMetaFor(sessionID, { loading: false }, targetDirectory)
+        if (options?.throwOnError) {
+          throw error
+        }
       }
     },
     [store, fetchMessagesToUserBoundary, getMetaFor, setMetaFor, getOptimistic, clearOptimistic, directory],
@@ -590,9 +594,11 @@ export function useSync() {
       // 4. Load messages + parts.
       try {
         await loadMessages(sessionID, {
+          mode: "replace",
           targetDirectory: sessionDir,
           targetStore: target.store,
           targetServerId: target.serverId,
+          throwOnError: true,
         })
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e)

@@ -1,25 +1,15 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  RiLoader4Line,
-  RiRefreshLine,
-  RiServerLine,
-  RiSettings3Line,
-  RiCheckLine,
-  RiErrorWarningLine,
-  RiTimeLine,
-  RiStackLine,
-  RiPlugLine,
-  RiQuestionLine,
-} from '@remixicon/react';
 
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
+import { Icon } from '@/components/icon/Icon';
 import { serverRegistry, DEFAULT_SERVER_ID, type ServerConnection } from '@/lib/opencode/server-registry';
 import type { DesktopSshInstanceStatus } from '@/lib/desktopSsh';
 import { useUIStore } from '@/stores/useUIStore';
 import { useDesktopSshStore } from '@/stores/useDesktopSshStore';
 import { redactSensitiveUrl } from '@/lib/desktopHosts';
 import { useI18n } from '@/lib/i18n';
+import pluginPackageJson from '../../../../plugin/package.json';
 
 // --- Types ---
 
@@ -29,7 +19,20 @@ type HealthInfo = {
   error: boolean;
 };
 
+type PluginSource = 'injected' | 'path';
+
+type PluginMetadata = {
+  spec: string;
+  title: string;
+  displayName: string;
+  version: string | null;
+  source: PluginSource | null;
+};
+
 type TranslateFn = ReturnType<typeof useI18n>['t'];
+
+const OPENCHAMBER_PLUGIN_VERSION = pluginPackageJson.version;
+const COMMON_BUILD_DIRS = new Set(['dist', 'build', 'lib', 'esm', 'cjs']);
 
 // --- Helpers ---
 
@@ -42,6 +45,148 @@ const statusDotClass = (
   return 'bg-muted-foreground/40';
 };
 
+const isPluginSpecEntry = (entry: unknown): entry is string | [string, unknown] => {
+  if (typeof entry === 'string') {
+    return true;
+  }
+  return Array.isArray(entry) && typeof entry[0] === 'string';
+};
+
+const isOpenChamberPluginSpec = (spec: string): boolean => {
+  return spec === '@openchamber/plugin'
+    || spec.includes('/packages/plugin/src/index.ts')
+    || spec.includes('/openchamber/plugin/index.js')
+    || spec.includes('/.config/openchamber/plugin/index.js');
+};
+
+const stripFileUrl = (spec: string): string => spec.replace(/^file:\/\//, '');
+
+const isPathLikeSpec = (spec: string): boolean => {
+  return spec.startsWith('file://')
+    || spec.startsWith('/')
+    || spec.startsWith('./')
+    || spec.startsWith('../')
+    || spec.includes('\\');
+};
+
+const getPackageCandidate = (spec: string): string | null => {
+  const trimmed = spec.trim();
+  if (!trimmed || isPathLikeSpec(trimmed)) {
+    return null;
+  }
+
+  const segments = trimmed.split('/').filter(Boolean);
+  if (segments.length === 0) {
+    return null;
+  }
+
+  if (segments[0].startsWith('@')) {
+    if (segments.length < 2) {
+      return null;
+    }
+    return `${segments[0]}/${segments[1]}`;
+  }
+
+  return segments[0];
+};
+
+const parsePackageSpec = (spec: string): { name: string; version: string | null } | null => {
+  const candidate = getPackageCandidate(spec);
+  if (!candidate) {
+    return null;
+  }
+
+  const lastAt = candidate.lastIndexOf('@');
+  if (lastAt <= 0) {
+    return { name: candidate, version: null };
+  }
+
+  const name = candidate.slice(0, lastAt);
+  const version = candidate.slice(lastAt + 1).trim();
+  if (!name || !version) {
+    return null;
+  }
+
+  return { name, version };
+};
+
+const derivePathPluginName = (spec: string): string => {
+  const normalized = stripFileUrl(spec).replace(/\\/g, '/').replace(/\/+$/, '');
+  if (!normalized) {
+    return spec;
+  }
+
+  const nodeModulesIndex = normalized.lastIndexOf('/node_modules/');
+  if (nodeModulesIndex !== -1) {
+    const afterNodeModules = normalized.slice(nodeModulesIndex + '/node_modules/'.length);
+    const parts = afterNodeModules.split('/').filter(Boolean);
+    if (parts[0]?.startsWith('@') && parts.length >= 2) {
+      return `${parts[0]}/${parts[1]}`;
+    }
+    return parts[0] ?? normalized;
+  }
+
+  const parts = normalized.split('/').filter(Boolean);
+  if (parts.length === 0) {
+    return normalized;
+  }
+
+  const lastSegment = parts[parts.length - 1];
+  const baseName = lastSegment.includes('.')
+    ? lastSegment.slice(0, lastSegment.lastIndexOf('.'))
+    : lastSegment;
+  if (baseName === 'index' || baseName === 'main' || baseName === 'plugin') {
+    if (parts.length >= 3 && COMMON_BUILD_DIRS.has(parts[parts.length - 2])) {
+      return parts[parts.length - 3];
+    }
+    if (parts.length >= 2) {
+      return parts[parts.length - 2];
+    }
+  }
+
+  return baseName;
+};
+
+const buildPluginMetadata = (rawSpec: string): PluginMetadata => {
+  if (isOpenChamberPluginSpec(rawSpec)) {
+    return {
+      spec: rawSpec,
+      title: rawSpec,
+      displayName: '@openchamber/plugin',
+      version: OPENCHAMBER_PLUGIN_VERSION,
+      source: 'injected',
+    };
+  }
+
+  const packageSpec = parsePackageSpec(rawSpec);
+  if (packageSpec) {
+    return {
+      spec: rawSpec,
+      title: rawSpec,
+      displayName: packageSpec.name,
+      version: packageSpec.version,
+      source: null,
+    };
+  }
+
+  return {
+    spec: rawSpec,
+    title: rawSpec,
+    displayName: derivePathPluginName(rawSpec),
+    version: null,
+    source: 'path',
+  };
+};
+
+const pluginSourceLabelKey = (source: PluginSource): 'instanceInfoPanel.plugins.source.injected' | 'instanceInfoPanel.plugins.source.path' => {
+  if (source === 'injected') {
+    return 'instanceInfoPanel.plugins.source.injected';
+  }
+  return 'instanceInfoPanel.plugins.source.path';
+};
+
+const pluginBadgeClassName = 'inline-flex items-center rounded px-1.5 py-0.5 leading-none border typography-micro';
+
 const statusLabel = (
   localHealthStatus: 'healthy' | 'unhealthy' | 'connecting' | null,
   t: TranslateFn,
@@ -53,9 +198,9 @@ const statusLabel = (
 };
 
 const statusIcon = (localHealthStatus: 'healthy' | 'unhealthy' | 'connecting' | null) => {
-  if (localHealthStatus === 'healthy') return <RiCheckLine className="h-3.5 w-3.5" />;
-  if (localHealthStatus === 'connecting') return <RiLoader4Line className="h-3.5 w-3.5 animate-spin" />;
-  return <RiErrorWarningLine className="h-3.5 w-3.5" />;
+  if (localHealthStatus === 'healthy') return <Icon name="check" className="h-3.5 w-3.5" />;
+  if (localHealthStatus === 'connecting') return <Icon name="loader-4" className="h-3.5 w-3.5 animate-spin" />;
+  return <Icon name="error-warning" className="h-3.5 w-3.5" />;
 };
 
 const sshPhaseLabelKey = (phase: string | undefined):
@@ -106,9 +251,9 @@ const sshPhaseLabelKey = (phase: string | undefined):
 };
 
 const sshStatusIcon = (phase: string | undefined) => {
-  if (phase === 'ready') return <RiCheckLine className="h-3.5 w-3.5" />;
-  if (phase === 'error') return <RiErrorWarningLine className="h-3.5 w-3.5" />;
-  return <RiTimeLine className="h-3.5 w-3.5" />;
+  if (phase === 'ready') return <Icon name="check" className="h-3.5 w-3.5" />;
+  if (phase === 'error') return <Icon name="error-warning" className="h-3.5 w-3.5" />;
+  return <Icon name="time" className="h-3.5 w-3.5" />;
 };
 
 // --- Component ---
@@ -155,7 +300,7 @@ export const InstanceInfoPanel = React.memo(function InstanceInfoPanel({
     connection?.healthStatus ?? null,
   );
   const [skillsCount, setSkillsCount] = useState(0);
-  const [pluginNames, setPluginNames] = useState<string[]>([]);
+  const [pluginMetadata, setPluginMetadata] = useState<PluginMetadata[]>([]);
 
   const [healthInfo, setHealthInfo] = useState<HealthInfo>({
     version: null,
@@ -163,6 +308,7 @@ export const InstanceInfoPanel = React.memo(function InstanceInfoPanel({
     error: false,
   });
   const abortRef = useRef<AbortController | null>(null);
+  const pluginFetchSeqRef = useRef(0);
 
   useEffect(() => {
     if (!connection) return;
@@ -242,6 +388,8 @@ export const InstanceInfoPanel = React.memo(function InstanceInfoPanel({
 
   const fetchPlugins = useCallback(async () => {
     if (!connection) return;
+    const requestId = ++pluginFetchSeqRef.current;
+    setPluginMetadata([]);
     try {
       const baseUrl = connection.config.baseUrl.replace(/\/+$/, "");
       const configUrl = `${baseUrl}/global/config`;
@@ -250,21 +398,46 @@ export const InstanceInfoPanel = React.memo(function InstanceInfoPanel({
         headers["Authorization"] = `Bearer ${connection.config.authToken}`;
       }
       const res = await fetch(configUrl, { headers, signal: AbortSignal.timeout(5000) });
+      if (pluginFetchSeqRef.current !== requestId) {
+        return;
+      }
       if (res.ok) {
         const data = await res.json();
+        if (pluginFetchSeqRef.current !== requestId) {
+          return;
+        }
         const plugins = data?.plugin;
         if (Array.isArray(plugins)) {
-          setPluginNames(plugins.map((p: string | [string, unknown]) => {
-            const raw = Array.isArray(p) ? p[0] : p;
-            const nm = raw.indexOf('node_modules/');
-            if (nm !== -1) return raw.slice(nm + 'node_modules/'.length);
-            return raw.replace(/^file:\/\//, '');
-          }));
+          const nextPlugins = plugins.reduce<PluginMetadata[]>((acc, plugin) => {
+            if (!isPluginSpecEntry(plugin)) {
+              return acc;
+            }
+
+            const rawSpec = (Array.isArray(plugin) ? plugin[0] : plugin).trim();
+            if (!rawSpec) {
+              return acc;
+            }
+
+            acc.push(buildPluginMetadata(rawSpec));
+            return acc;
+          }, []);
+          if (pluginFetchSeqRef.current !== requestId) {
+            return;
+          }
+          setPluginMetadata(nextPlugins);
+          return;
         }
       }
     } catch (err) {
+      if (pluginFetchSeqRef.current !== requestId) {
+        return;
+      }
       void err;
     }
+    if (pluginFetchSeqRef.current !== requestId) {
+      return;
+    }
+    setPluginMetadata([]);
   }, [connection]);
 
   useEffect(() => {
@@ -285,7 +458,7 @@ export const InstanceInfoPanel = React.memo(function InstanceInfoPanel({
   if (!connection) {
     return (
       <div className={cn('w-full px-4 py-8 text-center', className)}>
-        <RiServerLine className="mx-auto mb-2 h-8 w-8 text-muted-foreground/50" />
+        <Icon name="server" className="mx-auto mb-2 h-8 w-8 text-muted-foreground/50" />
         <div className="typography-ui-label text-muted-foreground">
           {t('instanceInfoPanel.empty.noServerFound')}
         </div>
@@ -318,7 +491,7 @@ export const InstanceInfoPanel = React.memo(function InstanceInfoPanel({
             disabled={healthInfo.loading}
             aria-label={t('instanceInfoPanel.actions.refreshAria')}
           >
-            <RiRefreshLine className={cn('h-3.5 w-3.5', healthInfo.loading && 'animate-spin')} />
+            <Icon name="refresh" className={cn('h-3.5 w-3.5', healthInfo.loading && 'animate-spin')} />
           </Button>
         </div>
       </div>
@@ -360,7 +533,7 @@ export const InstanceInfoPanel = React.memo(function InstanceInfoPanel({
 
         <InfoRow
           label={t('instanceInfoPanel.row.version')}
-          icon={<RiQuestionLine className="h-3.5 w-3.5" />}
+          icon={<Icon name="question" className="h-3.5 w-3.5" />}
         >
           {healthInfo.loading ? (
             <span className="text-muted-foreground">{t('instanceInfoPanel.version.fetching')}</span>
@@ -375,26 +548,38 @@ export const InstanceInfoPanel = React.memo(function InstanceInfoPanel({
 
         <InfoRow
           label={t('instanceInfoPanel.row.skills')}
-          icon={<RiStackLine className="h-3.5 w-3.5" />}
+          icon={<Icon name="stack" className="h-3.5 w-3.5" />}
         >
           {t('instanceInfoPanel.skills.count', { count: skillsCount })}
         </InfoRow>
 
         <InfoRow
           label={t('instanceInfoPanel.row.plugins')}
-          icon={<RiPlugLine className="h-3.5 w-3.5" />}
+          icon={<Icon name="plug" className="h-3.5 w-3.5" />}
         >
-          {pluginNames.length > 0
-            ? t('instanceInfoPanel.plugins.count', { count: pluginNames.length })
+          {pluginMetadata.length > 0
+            ? t('instanceInfoPanel.plugins.count', { count: pluginMetadata.length })
             : t('instanceInfoPanel.plugins.none')
           }
         </InfoRow>
-        {pluginNames.length > 0 && (
+        {pluginMetadata.length > 0 && (
           <div className="mt-0.5 ml-5 space-y-0.5">
-            {pluginNames.map((name) => (
-              <div key={name} className="flex items-center gap-1.5">
+            {pluginMetadata.map((plugin, index) => (
+              <div key={`${plugin.spec}-${index}`} className="flex items-center gap-1.5 min-w-0" title={plugin.title}>
                 <span className="h-1 w-1 rounded-full bg-[var(--status-info)] shrink-0" />
-                <span className="typography-micro text-muted-foreground truncate">{name}</span>
+                <span className="typography-micro text-muted-foreground truncate min-w-0 flex-1">{plugin.displayName}</span>
+                <span className={cn(
+                  pluginBadgeClassName,
+                  'shrink-0 border-[var(--interactive-border)] bg-[var(--surface-elevated)]',
+                  plugin.version ? 'text-foreground' : 'text-muted-foreground',
+                )}>
+                  {plugin.version ?? t('instanceInfoPanel.plugins.version.unknown')}
+                </span>
+                {plugin.source && (
+                  <span className={cn(pluginBadgeClassName, 'shrink-0 border-[var(--interactive-border)] bg-[var(--surface-muted)] text-muted-foreground')}>
+                    {t(pluginSourceLabelKey(plugin.source))}
+                  </span>
+                )}
               </div>
             ))}
           </div>
@@ -433,7 +618,7 @@ export const InstanceInfoPanel = React.memo(function InstanceInfoPanel({
           className="w-full justify-start gap-1.5"
           onClick={openRemoteInstancesSettings}
         >
-          <RiSettings3Line className="h-4 w-4" />
+          <Icon name="settings-3" className="h-4 w-4" />
           <span className="typography-ui-label truncate">
             {t('instanceInfoPanel.actions.manageSettings')}
           </span>

@@ -10,6 +10,13 @@ export const runCliEntryIfMain = (dependencies) => {
     startServer,
   } = dependencies;
 
+  const isDesktopRuntime =
+    process.env?.OPENCHAMBER_RUNTIME === 'desktop' ||
+    Boolean(process.versions?.electron);
+  if (isDesktopRuntime) {
+    return;
+  }
+
   const isCliExecution = process.argv[1] === currentFilename;
   if (!isCliExecution) {
     return;

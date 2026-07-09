@@ -134,6 +134,17 @@ export function useQueuedMessageAutoSend(enabledOrOptions?: boolean | { enabled?
       try {
         useMessageQueueStore.getState().removeFromQueue(sessionId, payload.queuedMessageId);
 
+        // Route local slash commands (e.g. /compact, /undo, /redo) through their
+        // dedicated handlers instead of the generic sendMessage path, which would
+        // either send them as raw prompts to the LLM or fail to resolve them.
+        const wasLocalCommand = await useSessionUIStore.getState().tryDispatchLocalSlashCommand(
+          payload.primaryText,
+          sessionId,
+        );
+        if (wasLocalCommand) {
+          return;
+        }
+
         await useSessionUIStore.getState().sendMessage(
           payload.primaryText,
           resolved.providerID,

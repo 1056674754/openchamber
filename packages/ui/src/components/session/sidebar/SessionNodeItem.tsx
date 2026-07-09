@@ -1040,11 +1040,11 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
       ) : null}
       <DropdownMenuItem
         onClick={() => {
-          void sync.forceRefreshSession(session.id).then((result) => {
-            if (!result.ok) {
-              toast.error(result.error ?? 'Refresh failed');
-            }
-          });
+            void sync.forceRefreshSession(session.id).then((result) => {
+              if (!result.ok) {
+              toast.error(result.error ?? t('sessions.sidebar.session.toast.refreshFailed'));
+              }
+            });
         }}
         className="[&>svg]:mr-1"
       >
@@ -1228,7 +1228,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
 
   return (
     <React.Fragment key={session.id}>
-      <DraggableSessionRow sessionId={session.id} sessionDirectory={sessionDirectory ?? null} sessionTitle={sessionTitle}>
+      <DraggableSessionRow sessionId={session.id} sessionDirectory={sessionDirectory ?? null} sessionTitle={sessionTitle} disabled={isGlobalPinnedContext || renderContext === 'recent'}>
         <div
           data-session-row={session.id}
           data-session-unread={showUnreadStatus ? '1' : '0'}

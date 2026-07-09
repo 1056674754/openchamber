@@ -19,6 +19,8 @@ import { getRootBranch } from '@/lib/worktrees/worktreeStatus';
 import { getWorktreeSetupCommands } from '@/lib/openchamberConfig';
 import { sessionEvents } from '@/lib/sessionEvents';
 import { useSessions } from '@/sync/sync-context';
+import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
+import { partitionSessionsByRunningStatus } from '@/components/session/sidebar/utils';
 import { useI18n } from '@/lib/i18n';
 
 export interface BranchPickerProject {
@@ -260,6 +262,18 @@ export function BranchPickerDialog({ open, onOpenChange, project }: BranchPicker
       return true;
     });
 
+    // Preserve running sessions: never pass them to a delete flow.
+    const statusMap = useGlobalSessionsStore.getState().sessionStatuses;
+    const { running, notRunning } = partitionSessionsByRunningStatus(allSessions, statusMap);
+    if (running.length > 0) {
+      toast.warning(t('sessions.sidebar.toast.runningSessionsPreservedTitle'), {
+        description: running.length === 1
+          ? t('sessions.sidebar.toast.runningSessionsPreservedSingle', { count: running.length })
+          : t('sessions.sidebar.toast.runningSessionsPreservedPlural', { count: running.length }),
+      });
+    }
+    if (notRunning.length === 0) return;
+
     const normalizedBranch = normalizeBranchName(worktree.branch);
     const worktreeMetadata: WorktreeMetadata = {
       source: 'sdk',
@@ -271,11 +285,11 @@ export function BranchPickerDialog({ open, onOpenChange, project }: BranchPicker
     };
 
     sessionEvents.requestDelete({
-      sessions: allSessions,
+      sessions: notRunning,
       mode: 'worktree',
       worktree: worktreeMetadata,
     });
-  }, [project, sessions]);
+  }, [project, sessions, t]);
 
   const worktreeByBranch = new Map<string, GitWorktreeInfo>();
   for (const worktree of worktrees) {

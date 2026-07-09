@@ -1,5 +1,5 @@
 import React from 'react';
-import type { Session } from '@opencode-ai/sdk/v2';
+import type { Session, SessionStatus } from '@opencode-ai/sdk/v2';
 import type { SessionSummaryMeta } from './types';
 import type { SessionSortMode } from '@/stores/useUIStore';
 import { DEFAULT_SERVER_ID } from '@/lib/opencode/server-registry';
@@ -361,4 +361,70 @@ export const renderHighlightedText = (text: string, query: string): React.ReactN
   }
 
   return parts.length > 0 ? parts : text;
+};
+
+/**
+ * Structural status shape for {@link isSessionStatusRunning}. Accepts the
+ * SDK `SessionStatus` (idle|busy|retry) and any status-like object so the
+ * predicate stays defensive against future variants without caller casts.
+ */
+export type SessionStatusLike = { type: string } | null | undefined;
+
+/**
+ * True when a session is actively working: status `busy` or `retry`.
+ * `idle`, missing, and unrecognized statuses are not running.
+ *
+ * Callers MUST pass authoritative live status (the sync store's status
+ * map). Inferring running state from history risks stopping a still-running
+ * child during a descendant delete/archive flow.
+ */
+export const isSessionStatusRunning = (status: SessionStatusLike): boolean => {
+  if (!status) return false;
+  return status.type === 'busy' || status.type === 'retry';
+};
+
+export type SessionRunningPartition<T> = {
+  running: T[];
+  notRunning: T[];
+};
+
+/**
+ * Splits IDs into running/not-running using the authoritative status map.
+ * Absent IDs are not running. Order is preserved. The `running` bucket must
+ * be excluded from recursive delete/archive flows.
+ */
+export const partitionSessionIdsByRunningStatus = (
+  ids: Iterable<string>,
+  statusMap: ReadonlyMap<string, SessionStatus>,
+): SessionRunningPartition<string> => {
+  const running: string[] = [];
+  const notRunning: string[] = [];
+  for (const id of ids) {
+    if (isSessionStatusRunning(statusMap.get(id))) {
+      running.push(id);
+    } else {
+      notRunning.push(id);
+    }
+  }
+  return { running, notRunning };
+};
+
+/**
+ * Splits `Session` objects by `session.id` against the status map. Absent
+ * sessions are not running. Order is preserved.
+ */
+export const partitionSessionsByRunningStatus = (
+  sessions: Iterable<Session>,
+  statusMap: ReadonlyMap<string, SessionStatus>,
+): SessionRunningPartition<Session> => {
+  const running: Session[] = [];
+  const notRunning: Session[] = [];
+  for (const session of sessions) {
+    if (isSessionStatusRunning(statusMap.get(session.id))) {
+      running.push(session);
+    } else {
+      notRunning.push(session);
+    }
+  }
+  return { running, notRunning };
 };

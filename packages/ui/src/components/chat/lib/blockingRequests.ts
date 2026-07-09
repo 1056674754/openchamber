@@ -70,6 +70,18 @@ export const collectVisibleToolRequestKeys = (messages: readonly MessageRecordWi
             if (part.type !== 'tool') continue;
             const key = getToolPartRequestKey(fallbackMessageID, part);
             if (key) keys.add(key);
+            if (
+                typeof part.id === 'string'
+                && part.id.length > 0
+                && typeof part.callID === 'string'
+                && part.callID.length > 0
+                && part.id !== part.callID
+            ) {
+                const messageID = typeof part.messageID === 'string' && part.messageID.length > 0
+                    ? part.messageID
+                    : fallbackMessageID;
+                keys.add(getToolRequestKey(messageID, part.id));
+            }
         }
     }
     return keys;
