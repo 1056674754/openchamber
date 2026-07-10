@@ -825,9 +825,10 @@ Phase 5 — 🔴 Markdown/Shiki 重写 (#1+#2): 独立 milestone，需迁移 for
 | Native mobile app projects | 本地只有 `packages/ui` / `packages/web` / `packages/electron` / `packages/vscode`，无 `packages/mobile` | ❌ v1.13.9 native iOS/Android app project 未落地；mobile/PWA UI 修复只能按现有 web mobile surface 选合 |
 | Voice/TTS 基础 | `VoiceSettings.tsx`、`useBrowserVoice.ts`、`useMessageTTS.ts`、`wasmSttService.ts`、`ttsInputMode: 'sanitized'|'raw'` 已存在；`small-model` 相关目录不存在 | 🟡 已有旧语音/TTS/STT 和 Kokoro/OpenAI-compatible 基础；v1.14.0 streaming dictation、local model picker、Kokoro first-class read-aloud、v1.14.1 summarized TTS 未等价 |
 | Desktop OpenCode CLI / remote auth | 本地已有 `OPENCHAMBER_OPENCODE_PATH` / `OPENCHAMBER_OPENCODE_BIN`、拒绝 OpenCode.app 当 CLI、UI password/remote instance 基础；未见 `runtime-request-headers.mjs`、bundled CLI prepare/verify 脚本、Keep awake 设置 | 🟡/🔴 部分覆盖；v1.13.9 bundled CLI 必须服从本 fork custom OpenCode build/shared DB 规则，remote custom headers 和 Keep awake 可单独评估 |
-| Timeline dialog | 本地已有 `TimelineDialog.tsx` 和 `loadOlder` 主聊天入口，但 timeline dialog 自身未见 v1.14.1 的 load earlier 控件 | 🟡 可独立移植，需确认历史分页状态来自当前 session 的 authoritative store |
-| Line-range file refs / first changed line | 本地已有普通 timeline/file path click、`openFileAtFirstChangedLine` i18n key；未见 `fileReferenceParser.ts` | 🟡 可独立做；MarkdownRendererImpl 是 fork 深改文件，需补 focused parser tests |
-| VS Code favorites/settings return | 本地 VS Code 有独立 webview/runtime；未见 v1.14.1 favorite model persist / settings previous-view 修复证据 | 🟡 平台小批次处理，避免污染 web/desktop |
+| Timeline dialog | `TimelineDialog.tsx` 已接入 `onLoadEarlier` / loading 状态 / 加载前锚点保持，`ChatContainer` 使用当前 session timeline controller 提供分页状态 | ✅ 已有等价实现，无需重复移植 |
+| Line-range file refs / first changed line | `markdownFileReferences.ts` 已解析 `file.ts:10-20` / `#L10-L20` 并有 focused tests；`DiffView` 已按首个 changed line 打开文件 | ✅ 已有 fork 实现，保留现有 MarkdownRenderer 适配层 |
+| VS Code favorites/settings return | `modelPrefsAutoSave.ts` / `persistence.ts` 已持久化 favorites；`VSCodeLayout.tsx` 已用 `viewBeforeSettingsRef` 返回上一视图 | ✅ 已有等价实现，无需重复移植 |
+| Desktop LAN-bound auth token | Electron `isLocalRuntimeUrl()` 已按同端口 + 本机 hostname/interface 判断 `0.0.0.0` / LAN 地址为本地 runtime | ✅ 已有等价实现，无需重复移植 |
 
 ### 容易合并 / 建议第一批
 
@@ -843,10 +844,22 @@ Phase 5 — 🔴 Markdown/Shiki 重写 (#1+#2): 独立 milestone，需迁移 for
 | 8 | Preview duplicate auth token | v1.13.6 | URL 清理局部 | 先对照本 fork preview auth/token 机制，补 URL 去重测试 |
 | 9 | Context panel chat title/seen | v1.13.6 | 本地已有 context panel session/unread store | 逐文件合并，避免影响主 session unread 口径 |
 | 10 | Cross-project/worktree abort routing | v1.14.0 | `session-actions` 路由级修复，高价值且范围相对小 | 必须用 session 的 serverId/directory，不能读全局当前 project |
-| 11 | Desktop LAN-bound auth token fix | v1.14.0 | 本 fork 已有 UI password/LAN 基础，可能是局部 auth 判定 | 先读 `opencode` auth/runtime docs，验证 0.0.0.0 / 127.0.0.1 token 口径 |
-| 12 | Timeline dialog load earlier | v1.14.1 | 已有 TimelineDialog 和 loadOlder 主链路，适合小步补齐 | 只接当前 session 历史分页；避免用全局当前 session fallback |
-| 13 | Line-range file refs + first changed line jump | v1.14.1 | 解析和导航局部，用户价值高 | 新增 parser tests；MarkdownRendererImpl 不整包替换 |
-| 14 | VS Code favorite models / settings return | v1.14.1 | 平台内小修，不影响 web/desktop | 单独 VS Code 批次验证 reload/settings navigation |
+| 11 | Desktop LAN-bound auth token fix | v1.14.0 | ✅ 已有等价实现 | Electron 已按同端口 + 本机地址识别 local runtime |
+| 12 | Timeline dialog load earlier | v1.14.1 | ✅ 已有等价实现 | 当前 session timeline controller 已提供分页与滚动锚点保持 |
+| 13 | Line-range file refs + first changed line jump | v1.14.1 | ✅ 已有 fork 实现 | 保留 `markdownFileReferences.ts` 与现有 DiffView 路径 |
+| 14 | VS Code favorite models / settings return | v1.14.1 | ✅ 已有等价实现 | favorites 持久化和 previous-view return 均已存在 |
+
+### 第二轮独立小修 (2026-07-10)
+
+| 编号 | 功能 | 来源版本 | 状态 | 处理边界 |
+|---:|---|---|---|---|
+| 1 | Embedded JSON 示例误显示为 generated-result card | v1.13.9 | ✅ 已移植 | 只接受整段纯 JSON 或整个 fenced JSON block；已补 parser regression tests |
+| 2 | VS Code agent 可选字段清除写入 `null` | v1.13.9 | ✅ 已移植 | PATCH 传 `null` 时删除 md frontmatter / JSON field，保留其他 agent 配置；已补 bridge test |
+| 3 | Idle reconnect 后 stale busy 恢复 | v1.13.9 | ⏸️ 后续独立批次 | 需单独验证 SSE reconnect、session status resync 与多实例 routing |
+| 4 | Windows OpenCode CLI 路径发现与 `.cmd` 启动 | v1.14.0 | ✅ 已移植 | web/desktop + VS Code 去除包裹引号；补 system npm prefix / Scoop；`.cmd` 经 `cmd.exe call` 启动 |
+| 5 | Task/subagent session id parser 增强 | v1.13.9 | ⏸️ 后续独立批次 | 与本 fork fallback child-session 匹配语义一起校准，不直接覆盖 |
+
+**运行确认 (2026-07-10)**: 用户已确认第二轮 1 / 2 / 4 在实际使用中可用。自动化验证为 15 个 focused assertions、root + VS Code type-check/lint、root build 与 VS Code build 全部通过；Windows 专项由模拟 `win32` runtime tests 覆盖，尚未在 Windows 真机复测。
 
 ### 中等难度 / 需要逐段适配
 
@@ -880,12 +893,12 @@ Phase 5 — 🔴 Markdown/Shiki 重写 (#1+#2): 独立 milestone，需迁移 for
 
 ### 建议下一步批次
 
-1. **小修批次 A (低风险)**: header encoding、MiniMax quota、skills catalog refresh、provider disconnect、Git push sync、Preview duplicate token、line-range file refs、first changed line jump。
+1. **小修批次 A (低风险)**: header encoding、MiniMax quota、skills catalog refresh、provider disconnect、Git push sync、Preview duplicate token。line-range refs / first changed line 与第二轮 JSON/VS Code/Windows CLI 小修已完成。
 2. **CLI/Startup/Desktop auth 批次 B**: pid identity、live port check、update helper、quota/provider startup、Bun global CLI fix、LAN-bound local auth token，按 helper/route 切，不做 v1.13.4 cleanup。
 3. **GitHub PR status 批次 C**: timeout/rate-limit/cooldown/concurrent metadata，并验证启动时 session/diff/message 不被 PR status 阻塞。
 4. **Chat input/abort 批次 D**: pasted `@`、ArrowUp、question dismiss、slash skill 调用、cross-project abort routing，全部补 focused tests。
 5. **Queue/Steer 批次 E**: 把 boolean `queueModeEnabled` 迁到 Follow-up behavior (`steer` / `queue`)，复用本 fork `steer-side-channel`。
-6. **Session/worktree 批次 F**: selected project binding、folder/pinned refresh、worktree snap-back、subagent delete cascade、timeline dialog load earlier；必须按 `openchamber-context-authority` 校准 directory/serverId。
-7. **VS Code 批次 G**: favorite models persist、settings close returns previous view、agent null field cleanup、CLI detection，单独验证 extension reload/navigation。
+6. **Session/worktree 批次 F**: selected project binding、folder/pinned refresh、worktree snap-back、subagent delete cascade；timeline dialog load earlier 已完成。其余项必须按 `openchamber-context-authority` 校准 directory/serverId。
+7. **VS Code 批次 G**: favorites persist、settings previous-view、agent null field cleanup、Windows CLI detection 已完成；后续只按新发现的 extension-only gap 单独开批次。
 8. **Voice/Small Model 批次 H**: 先做 Small Model server capability + settings + one consumer（建议 TTS summarized 或 Notes selected text），再扩展 session recap/suggestion 和 Git/GitHub generation。
 9. **高风险 milestone**: chat scroll + auto-follow、OpenCode process ownership、Markdown/Shiki rewrite、mobile/native app、bundled custom OpenCode packaging、bulk docs/i18n，分别处理。
