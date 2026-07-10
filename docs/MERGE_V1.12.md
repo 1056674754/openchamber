@@ -855,11 +855,22 @@ Phase 5 — 🔴 Markdown/Shiki 重写 (#1+#2): 独立 milestone，需迁移 for
 |---:|---|---|---|---|
 | 1 | Embedded JSON 示例误显示为 generated-result card | v1.13.9 | ✅ 已移植 | 只接受整段纯 JSON 或整个 fenced JSON block；已补 parser regression tests |
 | 2 | VS Code agent 可选字段清除写入 `null` | v1.13.9 | ✅ 已移植 | PATCH 传 `null` 时删除 md frontmatter / JSON field，保留其他 agent 配置；已补 bridge test |
-| 3 | Idle reconnect 后 stale busy 恢复 | v1.13.9 | ⏸️ 后续独立批次 | 需单独验证 SSE reconnect、session status resync 与多实例 routing |
+| 3 | Idle reconnect 后 stale busy 恢复 | v1.13.9 | ✅ 本地已有更完整实现 | `reconnect-recovery.ts` + `resyncDirectoryAfterReconnect` 已按 candidate sessions 回读 authoritative status；缺失 status 强制 idle，并有 stale-busy watchdog 同步 global store |
 | 4 | Windows OpenCode CLI 路径发现与 `.cmd` 启动 | v1.14.0 | ✅ 已移植 | web/desktop + VS Code 去除包裹引号；补 system npm prefix / Scoop；`.cmd` 经 `cmd.exe call` 启动 |
 | 5 | Task/subagent session id parser 增强 | v1.13.9 | ⏸️ 后续独立批次 | 与本 fork fallback child-session 匹配语义一起校准，不直接覆盖 |
 
 **运行确认 (2026-07-10)**: 用户已确认第二轮 1 / 2 / 4 在实际使用中可用。自动化验证为 15 个 focused assertions、root + VS Code type-check/lint、root build 与 VS Code build 全部通过；Windows 专项由模拟 `win32` runtime tests 覆盖，尚未在 Windows 真机复测。
+
+### 第三轮候选 (2026-07-10)
+
+| 优先级 | 功能 | 难度 | 当前判断 |
+|---:|---|---|---|
+| 1 | `<task id="...">` 子会话标签解析 | 🟢 低 | 官方只有独立 parser + 2 个 tests；接入本 fork 已有 JSON / `task_id` / fallback 解析链，不替换 `ToolPart` |
+| 2 | 排除 Windows OpenCode Desktop app 路径 | 🟢 低 | web/desktop 与 VS Code 当前仍可能把 `%LOCALAPPDATA%/Programs/opencode/opencode.exe` 当 standalone CLI；补 path guard + tests |
+| 3 | Desktop Keep Awake | 🟡 中 | Electron `powerSaveBlocker` + settings persistence + Desktop Network toggle；与多实例/sidebar 无关，但涉及 Electron IPC、settings helper 和 i18n |
+| 4 | Follow-up behavior (`steer` / `queue`) | 🟡 中 | 本 fork 已有 steer side-channel 和 queue sendConfig；需把 boolean `queueModeEnabled` 迁为枚举并保持旧设置兼容 |
+| 5 | Desktop/browser password auth fallback | 🟠 中高 | 官方修复 password-protected desktop/browser 错走 mobile unlock；本 fork auth/remote host 深改，只能按行为测试逐段适配 |
+| 6 | PWA keyboard resize-content 默认与 safe-area 收尾 | 🟡 中 | 本地已有 keyboard mode / iOS fallback；官方改默认值和 viewport meta，必须做 iOS Safari/PWA 实机 QA，不能只套 HTML diff |
 
 ### 中等难度 / 需要逐段适配
 
