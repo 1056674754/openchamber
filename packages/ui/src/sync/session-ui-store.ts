@@ -66,6 +66,11 @@ import { useSessionWorktreeStore } from "./session-worktree-store"
 import { getAttachedSessionDirectory } from "./session-worktree-contract"
 import { savePendingMessage, deletePendingMessage } from "./pending-message"
 import { resolveSlashRouteTarget } from "./slash-routing"
+import {
+  applyDraftPermissionIntentAfterSessionCreation,
+  createDraftPermissionIntent,
+  type DraftPermissionIntent,
+} from "./draft-permission-intent"
 
 export type { AttachedFile }
 
@@ -232,6 +237,7 @@ export type NewSessionDraftState = {
   submitting?: boolean
   selectedProjectId?: string | null
   directoryOverride: string | null
+  permissionIntent: DraftPermissionIntent
   pendingWorktreeRequestId?: string | null
   bootstrapPendingDirectory?: string | null
   preserveDirectoryOverride?: boolean
@@ -308,6 +314,7 @@ export type SessionUIState = {
   closeNewSessionDraft: () => void
   setNewSessionDraftTarget: (target: { projectId?: string | null; selectedProjectId?: string | null; directoryOverride?: string | null }, options?: { force?: boolean }) => void
   setDraftPreserveDirectoryOverride: (value: boolean) => void
+  setDraftPermissionAutoAccept: (enabled: boolean) => void
   acknowledgeSessionAbort: (sessionId: string) => void
   clearAbortPrompt: () => void
   armAbortPrompt: (durationMs?: number) => number | null
@@ -534,9 +541,26 @@ const activateConfigForDirectory = async (
   await useConfigStore.getState().activateDirectory(normalizePath(directory), { serverId })
 }
 
+const migrateDraftPermissionIntentToCreatedSession = async (
+  sessionId: string,
+  draft: NewSessionDraftState,
+): Promise<void> => {
+  if (!draft.permissionIntent.autoAccept) {
+    return
+  }
+
+  const { usePermissionStore } = await import("@/stores/permissionStore")
+  await applyDraftPermissionIntentAfterSessionCreation({
+    sessionId,
+    intent: draft.permissionIntent,
+    setSessionAutoAccept: usePermissionStore.getState().setSessionAutoAccept,
+  })
+}
+
 const DEFAULT_DRAFT: NewSessionDraftState = {
   open: false,
   directoryOverride: null,
+  permissionIntent: createDraftPermissionIntent(),
   parentID: null,
 }
 
@@ -737,6 +761,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         open: true,
         selectedProjectId: selectedProject?.id ?? null,
         directoryOverride: directory,
+        permissionIntent: createDraftPermissionIntent(options?.permissionIntent?.autoAccept),
         pendingWorktreeRequestId: options?.pendingWorktreeRequestId ?? null,
         bootstrapPendingDirectory: normalizePath(options?.bootstrapPendingDirectory ?? null),
         preserveDirectoryOverride: options?.preserveDirectoryOverride,
@@ -772,6 +797,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         open: false,
         selectedProjectId: null,
         directoryOverride: null,
+        permissionIntent: createDraftPermissionIntent(),
         pendingWorktreeRequestId: null,
         bootstrapPendingDirectory: null,
         preserveDirectoryOverride: false,
@@ -808,6 +834,17 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     set((s) => {
       if (!s.newSessionDraft?.open) return s
       return { newSessionDraft: { ...s.newSessionDraft, preserveDirectoryOverride: value } }
+    }),
+
+  setDraftPermissionAutoAccept: (enabled) =>
+    set((s) => {
+      if (!s.newSessionDraft.open) return s
+      return {
+        newSessionDraft: {
+          ...s.newSessionDraft,
+          permissionIntent: createDraftPermissionIntent(enabled),
+        },
+      }
     }),
 
   acknowledgeSessionAbort: (sessionId) =>
@@ -1120,6 +1157,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
             if (createdServerId) {
               serverRegistry.indexSession(serverSession.id, createdServerId)
             }
+            await migrateDraftPermissionIntentToCreatedSession(serverSession.id, draft)
             await activateConfigForDirectory(createdDirectory, createdServerId)
 
             notifyMessageSent(serverSession.id, createdDirectory)
@@ -1197,6 +1235,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       if (createdServerId) {
         serverRegistry.indexSession(created.id, createdServerId)
       }
+      await migrateDraftPermissionIntentToCreatedSession(created.id, draft)
       await activateConfigForDirectory(created.directory ?? draftDirectoryOverride ?? null, createdServerId)
 
       const configState = useConfigStore.getState()

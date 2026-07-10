@@ -219,3 +219,29 @@ describe('session-worktree-store worktree routing', () => {
     expect(attachment.worktreeStatus).toBe('not-a-repo');
   });
 });
+
+describe('new-session draft permission intent', () => {
+  beforeEach(() => {
+    useSessionUIStore.getState().closeNewSessionDraft();
+  });
+
+  test('starts manual, can enable auto-accept, and resets after closing', () => {
+    useSessionUIStore.getState().openNewSessionDraft();
+
+    expect(useSessionUIStore.getState().newSessionDraft.permissionIntent.autoAccept).toBe(false);
+
+    useSessionUIStore.getState().setDraftPermissionAutoAccept(true);
+
+    expect(useSessionUIStore.getState().newSessionDraft.permissionIntent.autoAccept).toBe(true);
+
+    useSessionUIStore.getState().closeNewSessionDraft();
+
+    expect(useSessionUIStore.getState().newSessionDraft.permissionIntent.autoAccept).toBe(false);
+  });
+
+  test('does not change permission intent while the draft is closed', () => {
+    useSessionUIStore.getState().setDraftPermissionAutoAccept(true);
+
+    expect(useSessionUIStore.getState().newSessionDraft.permissionIntent.autoAccept).toBe(false);
+  });
+});

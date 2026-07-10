@@ -692,7 +692,7 @@ const ComposerAttachmentControls = React.memo(function ComposerAttachmentControl
 type PermissionAutoAcceptButtonProps = {
     footerIconButtonClass: string;
     iconSizeClass: string;
-    permissionScopeSessionId: string | null;
+    isInteractive: boolean;
     permissionAutoAcceptEnabled: boolean;
     handlePermissionAutoAcceptToggle: () => void;
     withTooltip?: boolean;
@@ -703,7 +703,7 @@ const PermissionAutoAcceptButton = React.memo(function PermissionAutoAcceptButto
     const {
         footerIconButtonClass,
         iconSizeClass,
-        permissionScopeSessionId,
+        isInteractive,
         permissionAutoAcceptEnabled,
         handlePermissionAutoAcceptToggle,
         withTooltip = false,
@@ -723,7 +723,7 @@ const PermissionAutoAcceptButton = React.memo(function PermissionAutoAcceptButto
             className={cn(
                 footerIconButtonClass,
                 'rounded-md hover:bg-transparent',
-                !permissionScopeSessionId && 'opacity-30',
+                !isInteractive && 'opacity-30',
             )}
             onMouseDown={(event) => {
                 event.preventDefault();
@@ -1242,6 +1242,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     );
     const newSessionDraft = useSessionUIStore((s) => s.newSessionDraft);
     const newSessionDraftOpen = Boolean(newSessionDraft?.open);
+    const draftPermissionAutoAcceptEnabled = useSessionUIStore(
+        (s) => s.newSessionDraft.open && s.newSessionDraft.permissionIntent.autoAccept,
+    );
+    const setDraftPermissionAutoAccept = useSessionUIStore((s) => s.setDraftPermissionAutoAccept);
     const setNewSessionDraftTarget = useSessionUIStore((s) => s.setNewSessionDraftTarget);
     const availableWorktreesByProject = useSessionUIStore((s) => s.availableWorktreesByProject);
     const abortPromptSessionId = useSessionUIStore((s) => s.abortPromptSessionId);
@@ -2050,14 +2054,27 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         };
         const submittedDraftText = !queuedOnly ? inputSnapshot.message : '';
         const confirmedMentionsSnapshot = new Set(confirmedMentionsRef.current);
+        const queuedMessagesToSend = queuedMessageId
+            ? queuedMessages.filter((message) => message.id === queuedMessageId)
+            : queuedMessages;
 
         if (queuedOnly) {
-            if (!hasQueuedMessages || !currentSessionId) return;
+            if (queuedMessagesToSend.length === 0 || !currentSessionId) return;
         } else if ((!inputSnapshot.hasContent && !hasQueuedMessages) || (!currentSessionId && !newSessionDraftOpen)) {
             return;
         }
 
-        if (!currentProviderId || !currentModelId) {
+        const capturedSendConfig = queuedOnly ? queuedMessagesToSend[0]?.sendConfig : undefined;
+        const providerIdToSend = capturedSendConfig?.providerID ?? currentProviderId;
+        const modelIdToSend = capturedSendConfig?.modelID ?? currentModelId;
+        const agentNameToSend = capturedSendConfig
+            ? capturedSendConfig.agent
+            : currentAgentName;
+        const variantToSend = capturedSendConfig
+            ? capturedSendConfig.variant
+            : currentVariant;
+
+        if (!providerIdToSend || !modelIdToSend) {
             console.warn('Cannot send message: provider or model not selected');
             return;
         }
@@ -2081,9 +2098,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         const consumedSyntheticPartsSnapshot = syntheticParts ? [...syntheticParts] : null;
 
         // Process queued messages first
-        const queuedMessagesToSend = queuedMessageId
-            ? queuedMessages.filter((message) => message.id === queuedMessageId)
-            : queuedMessages;
         const queuedMessagesSnapshot = currentSessionId && queuedMessagesToSend.length > 0
             ? [...queuedMessages]
             : [];
@@ -2294,11 +2308,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 
                     const { opencodeClient } = await import('@/lib/opencode/client');
                     const sdk = opencodeClient.getSdkClient();
-                    const configState = useConfigStore.getState();
                     await sdk.session.summarize({
                         sessionID: submittedSessionId,
-                        modelID: configState.currentModelId || '',
-                        providerID: configState.currentProviderId || '',
+                        modelID: modelIdToSend,
+                        providerID: providerIdToSend,
                     });
                 } catch (error) {
                     toast.error(error instanceof Error ? error.message : t('chat.chatInput.toast.compactFailed'));
@@ -2319,13 +2332,13 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                     const instructionsText = await renderMagicPrompt('session.summary.instructions', { topic_block: topicBlock });
                     await sendMessage(
                         visibleText,
-                        currentProviderId,
-                        currentModelId,
-                        currentAgentName,
+                        providerIdToSend,
+                        modelIdToSend,
+                        agentNameToSend,
                         [],
                         agentMentionName,
                         [{ text: instructionsText, synthetic: true }],
-                        currentVariant,
+                        variantToSend,
                         inputMode,
                         submittedSendTarget,
                     );
@@ -2346,10 +2359,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                         originalSessionID: currentSessionId,
                         directory,
                         serverId: serverRegistry.getServerForSession(currentSessionId) ?? null,
-                        providerID: currentProviderId,
-                        modelID: currentModelId,
-                        agent: currentAgentName,
-                        variant: currentVariant,
+                        providerID: providerIdToSend,
+                        modelID: modelIdToSend,
+                        agent: agentNameToSend,
+                        variant: variantToSend,
                         agentMentionName,
                     });
                     scrollToBottom?.();
@@ -2366,13 +2379,13 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                     const instructionsText = await renderMagicPrompt('session.review.instructions');
                     await sendMessage(
                         visibleText,
-                        currentProviderId,
-                        currentModelId,
-                        currentAgentName,
+                        providerIdToSend,
+                        modelIdToSend,
+                        agentNameToSend,
                         [],
                         agentMentionName,
                         [{ text: instructionsText, synthetic: true }],
-                        currentVariant,
+                        variantToSend,
                         inputMode,
                         submittedSendTarget,
                     );
@@ -2390,13 +2403,13 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                     const instructionsText = await renderMagicPrompt(command.instructions);
                     await sendMessage(
                         visibleText,
-                        currentProviderId,
-                        currentModelId,
-                        currentAgentName,
+                        providerIdToSend,
+                        modelIdToSend,
+                        agentNameToSend,
                         [],
                         agentMentionName,
                         [{ text: instructionsText, synthetic: true }],
-                        currentVariant,
+                        variantToSend,
                         inputMode,
                         submittedSendTarget,
                     );
@@ -2438,13 +2451,13 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 
         const sendPromise = sendMessage(
             primaryText,
-            currentProviderId,
-            currentModelId,
-            currentAgentName,
+            providerIdToSend,
+            modelIdToSend,
+            agentNameToSend,
             primaryAttachments,
             agentMentionName,
             additionalParts.length > 0 ? additionalParts : undefined,
-            currentVariant,
+            variantToSend,
             inputMode,
             submittedSendTarget,
             deliveryMode,
@@ -4279,15 +4292,23 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const iconButtonBaseClass = 'flex cursor-pointer items-center justify-center text-foreground transition-none outline-none focus:outline-none flex-shrink-0 disabled:cursor-not-allowed';
     const footerIconButtonClass = cn(iconButtonBaseClass, buttonSizeClass);
     const permissionScopeSessionId = currentSessionId ?? currentManagementSessionId;
-    const permissionAutoAcceptEnabled = usePermissionStore((state) => {
+    const sessionPermissionAutoAcceptEnabled = usePermissionStore((state) => {
         if (!permissionScopeSessionId) {
             return false;
         }
         return state.isSessionAutoAccepting(permissionScopeSessionId);
     });
+    const permissionAutoAcceptEnabled = permissionScopeSessionId
+        ? sessionPermissionAutoAcceptEnabled
+        : draftPermissionAutoAcceptEnabled;
+    const isPermissionAutoAcceptInteractive = Boolean(permissionScopeSessionId || newSessionDraftOpen);
 
     const handlePermissionAutoAcceptToggle = React.useCallback(() => {
         if (!permissionScopeSessionId) {
+            if (newSessionDraftOpen) {
+                setDraftPermissionAutoAccept(!draftPermissionAutoAcceptEnabled);
+                return;
+            }
             toast.error(t('chat.chatInput.toast.openSessionFirst'));
             return;
         }
@@ -4296,7 +4317,15 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         setSessionAutoAccept(permissionScopeSessionId, nextEnabled).catch(() => {
             toast.error(t('chat.chatInput.toast.togglePermissionAutoAcceptFailed'));
         });
-    }, [permissionAutoAcceptEnabled, permissionScopeSessionId, setSessionAutoAccept, t]);
+    }, [
+        draftPermissionAutoAcceptEnabled,
+        newSessionDraftOpen,
+        permissionAutoAcceptEnabled,
+        permissionScopeSessionId,
+        setDraftPermissionAutoAccept,
+        setSessionAutoAccept,
+        t,
+    ]);
 
     React.useEffect(() => {
         return () => {
@@ -4829,7 +4858,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                         <PermissionAutoAcceptButton
                                             footerIconButtonClass={footerIconButtonClass}
                                             iconSizeClass={iconSizeClass}
-                                            permissionScopeSessionId={permissionScopeSessionId}
+                                            isInteractive={isPermissionAutoAcceptInteractive}
                                             permissionAutoAcceptEnabled={permissionAutoAcceptEnabled}
                                             handlePermissionAutoAcceptToggle={handlePermissionAutoAcceptToggle}
                                         />
@@ -4898,7 +4927,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                     <PermissionAutoAcceptButton
                                         footerIconButtonClass={footerIconButtonClass}
                                         iconSizeClass={iconSizeClass}
-                                        permissionScopeSessionId={permissionScopeSessionId}
+                                        isInteractive={isPermissionAutoAcceptInteractive}
                                         permissionAutoAcceptEnabled={permissionAutoAcceptEnabled}
                                         handlePermissionAutoAcceptToggle={handlePermissionAutoAcceptToggle}
                                         withTooltip
