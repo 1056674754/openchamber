@@ -78,7 +78,8 @@ describe('fs routes explicit directory policy', () => {
       .send({ path: target, content: 'explicit', directory: workspace });
 
     expect(response.status).toBe(200);
-    expect(response.body).toMatchObject({ success: true, path: target });
+    expect(response.body).toMatchObject({ success: true });
+    await expect(fs.realpath(response.body.path)).resolves.toBe(await fs.realpath(target));
     await expect(fs.readFile(target, 'utf8')).resolves.toBe('explicit');
   });
 
@@ -108,5 +109,38 @@ describe('fs routes explicit directory policy', () => {
 
     expect(response.status).toBe(200);
     expect(response.text).toBe('existing');
+  });
+
+  it('uses RFC 5987 filename*= encoding for non-ASCII raw downloads', async () => {
+    const workspace = await makeTempDir();
+    const target = path.join(workspace, '文件.txt');
+    await fs.writeFile(target, 'content', 'utf8');
+    const app = createApp();
+
+    const response = await request(app)
+      .get('/api/fs/raw')
+      .query({ path: target, directory: workspace, download: 'true' });
+
+    expect(response.status).toBe(200);
+    const disposition = response.headers['content-disposition'];
+    expect(disposition).toContain('filename=".txt"');
+    expect(disposition).toContain("filename*=UTF-8''");
+    expect(disposition).toContain(encodeURIComponent('文件.txt'));
+  });
+
+  it('keeps plain filename fallback for ASCII raw downloads', async () => {
+    const workspace = await makeTempDir();
+    const target = path.join(workspace, 'readme.txt');
+    await fs.writeFile(target, 'content', 'utf8');
+    const app = createApp();
+
+    const response = await request(app)
+      .get('/api/fs/raw')
+      .query({ path: target, directory: workspace, download: 'true' });
+
+    expect(response.status).toBe(200);
+    const disposition = response.headers['content-disposition'];
+    expect(disposition).toContain('filename="readme.txt"');
+    expect(disposition).toContain("filename*=UTF-8''readme.txt");
   });
 });

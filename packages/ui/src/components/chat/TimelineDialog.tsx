@@ -7,6 +7,7 @@ import {
     DialogTitle,
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSessionMessageRecords } from '@/sync/sync-context';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -22,6 +23,9 @@ interface TimelineDialogProps {
     onScrollToMessage?: (messageId: string) => void | Promise<boolean>;
     onScrollByTurnOffset?: (offset: number) => void;
     onResumeToLatest?: () => void;
+    canLoadEarlier?: boolean;
+    isLoadingEarlier?: boolean;
+    onLoadEarlier?: () => void;
 }
 
 export const TimelineDialog: React.FC<TimelineDialogProps> = ({
@@ -30,6 +34,9 @@ export const TimelineDialog: React.FC<TimelineDialogProps> = ({
     onScrollToMessage,
     onScrollByTurnOffset,
     onResumeToLatest,
+    canLoadEarlier = false,
+    isLoadingEarlier = false,
+    onLoadEarlier,
 }) => {
     const { t } = useI18n();
     const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
@@ -43,6 +50,9 @@ export const TimelineDialog: React.FC<TimelineDialogProps> = ({
     const [searchQuery, setSearchQuery] = React.useState('');
     const [selectedIndex, setSelectedIndex] = React.useState(0);
     const itemRefs = React.useRef<(HTMLDivElement | null)[]>([]);
+    const listRef = React.useRef<HTMLDivElement | null>(null);
+    const pendingLoadAnchorRef = React.useRef<{ messageId: string; top: number } | null>(null);
+    const preservingLoadPositionRef = React.useRef(false);
 
     const formatRelativeTime = React.useCallback((timestamp: number): string => {
         const now = Date.now();
@@ -83,6 +93,9 @@ export const TimelineDialog: React.FC<TimelineDialogProps> = ({
     }, [userMessages, searchQuery]);
 
     React.useEffect(() => {
+        if (preservingLoadPositionRef.current) {
+            return;
+        }
         setSelectedIndex(0);
     }, [filteredMessages]);
 
@@ -91,10 +104,59 @@ export const TimelineDialog: React.FC<TimelineDialogProps> = ({
     }, [filteredMessages.length]);
 
     React.useEffect(() => {
+        if (preservingLoadPositionRef.current) {
+            return;
+        }
         itemRefs.current[selectedIndex]?.scrollIntoView({
             block: 'nearest',
         });
     }, [selectedIndex]);
+
+    React.useLayoutEffect(() => {
+        const anchor = pendingLoadAnchorRef.current;
+        const container = listRef.current;
+        if (!anchor || !container || isLoadingEarlier) {
+            return;
+        }
+
+        pendingLoadAnchorRef.current = null;
+        preservingLoadPositionRef.current = false;
+        const anchoredRow = itemRefs.current.find((row) => row?.dataset.timelineMessageId === anchor.messageId);
+        if (!anchoredRow) {
+            return;
+        }
+
+        const nextTop = anchoredRow.getBoundingClientRect().top - container.getBoundingClientRect().top;
+        container.scrollTop += nextTop - anchor.top;
+    }, [filteredMessages.length, isLoadingEarlier]);
+
+    React.useEffect(() => {
+        if (!preservingLoadPositionRef.current || pendingLoadAnchorRef.current || isLoadingEarlier) {
+            return;
+        }
+        preservingLoadPositionRef.current = false;
+    }, [filteredMessages.length, isLoadingEarlier]);
+
+    const handleLoadEarlier = React.useCallback(() => {
+        const container = listRef.current;
+        if (container) {
+            const containerTop = container.getBoundingClientRect().top;
+            const firstVisibleRow = itemRefs.current.find((row) => {
+                if (!row) return false;
+                return row.getBoundingClientRect().bottom >= containerTop;
+            });
+
+            if (firstVisibleRow?.dataset.timelineMessageId) {
+                pendingLoadAnchorRef.current = {
+                    messageId: firstVisibleRow.dataset.timelineMessageId,
+                    top: firstVisibleRow.getBoundingClientRect().top - containerTop,
+                };
+            }
+        }
+
+        preservingLoadPositionRef.current = true;
+        onLoadEarlier?.();
+    }, [onLoadEarlier]);
 
     const navigateToMessage = React.useCallback(async (messageId: string) => {
         const didNavigate = await onScrollToMessage?.(messageId);
@@ -171,7 +233,25 @@ export const TimelineDialog: React.FC<TimelineDialogProps> = ({
                     />
                 </div>
 
-                <div className="flex-1 overflow-y-auto">
+                {canLoadEarlier && onLoadEarlier && (
+                    <div className="flex justify-center py-1">
+                        <Button
+                            type="button"
+                            variant="link"
+                            size="sm"
+                            onClick={handleLoadEarlier}
+                            disabled={isLoadingEarlier}
+                            className="h-auto px-1 py-0 text-muted-foreground hover:text-foreground"
+                        >
+                            {isLoadingEarlier && (
+                                <Icon name="loader-4" className="size-4 animate-spin" />
+                            )}
+                            {t('chat.timeline.loadEarlier')}
+                        </Button>
+                    </div>
+                )}
+
+                <div ref={listRef} className="flex-1 overflow-y-auto">
                     {filteredMessages.length === 0 ? (
                         <div className="text-center text-muted-foreground py-8">
                             {searchQuery ? t('chat.timeline.empty.search') : t('chat.timeline.empty.session')}
@@ -190,6 +270,7 @@ export const TimelineDialog: React.FC<TimelineDialogProps> = ({
                             return (
                                 <div
                                     key={message.info.id}
+                                    data-timeline-message-id={message.info.id}
                                     ref={(element) => {
                                         itemRefs.current[index] = element;
                                     }}

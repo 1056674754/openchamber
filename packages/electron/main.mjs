@@ -650,6 +650,34 @@ const detectLanIPv4Address = async () => {
   return null;
 };
 
+const isMachineLocalHostname = (hostname) => {
+  const clean = String(hostname || '').replace(/^\[|\]$/g, '');
+  if (!clean) return false;
+  if (clean === 'localhost' || clean === '127.0.0.1' || clean === '::1' || clean === '0.0.0.0' || clean === '::') {
+    return true;
+  }
+  try {
+    return Object.values(os.networkInterfaces() || {}).some((entries) =>
+      (entries || []).some((entry) => entry?.address === clean));
+  } catch {
+    return false;
+  }
+};
+
+const isLocalRuntimeUrl = (targetUrl) => {
+  const localUrl = state.sidecarUrl || state.localOrigin || '';
+  if (!localUrl) return false;
+  try {
+    const target = new URL(targetUrl);
+    const local = new URL(localUrl);
+    if (target.origin === local.origin) return true;
+    const portOf = (url) => url.port || (url.protocol === 'https:' ? '443' : '80');
+    return portOf(target) === portOf(local) && isMachineLocalHostname(target.hostname);
+  } catch {
+    return false;
+  }
+};
+
 const buildLocalUrl = (port) => `http://127.0.0.1:${port}`;
 
 const resourceRoot = () => isDev ? path.join(__dirname, 'resources') : process.resourcesPath;
@@ -1359,14 +1387,7 @@ const createBrowserWindow = ({ label, restoreGeometry, url }) => {
       const url = new URL(raw);
       if (url.protocol === 'about:' || url.protocol === 'devtools:') return true;
       if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
-      const hostname = url.hostname;
-      if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1') return true;
-      if (state.localOrigin) {
-        try {
-          if (new URL(state.localOrigin).origin === url.origin) return true;
-        } catch {
-        }
-      }
+      if (isLocalRuntimeUrl(url.toString())) return true;
       const hosts = readDesktopHostsConfig()?.hosts || [];
       for (const entry of hosts) {
         if (typeof entry?.url !== 'string') continue;
@@ -2753,15 +2774,7 @@ const isLocalSender = (webContents) => {
     if (raw.startsWith('file://') || raw === 'about:blank') return true;
     const url = new URL(raw);
     if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
-    const hostname = url.hostname;
-    if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1') return true;
-    if (state.localOrigin) {
-      try {
-        const allowed = new URL(state.localOrigin);
-        if (allowed.origin === url.origin) return true;
-      } catch {
-      }
-    }
+    if (isLocalRuntimeUrl(url.toString())) return true;
     return false;
   } catch {
     return false;

@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 import type { GitHubPullRequestStatus, RuntimeAPIs } from '@/lib/api/types';
 import { getSafeStorage } from './utils/safeStorage';
+import { mapWithConcurrency } from '@/lib/concurrency';
 
 const PR_REVALIDATE_TTL_MS = 90_000;
 const PR_REVALIDATE_INTERVAL_MS = 15_000;
@@ -12,6 +13,7 @@ const PR_OPEN_DEFAULT_INTERVAL_MS = 2 * 60_000;
 const PR_OPEN_STABLE_INTERVAL_MS = 5 * 60_000;
 const PR_PERSIST_TTL_MS = 12 * 60 * 60_000;
 const PR_STATUS_STORAGE_KEY = 'openchamber.github-pr-status';
+const PR_STATUS_REFRESH_CONCURRENCY = 3;
 
 const isTerminalPrState = (state: string | null | undefined): boolean => state === 'closed' || state === 'merged';
 const isPendingChecks = (status: GitHubPullRequestStatus | null): boolean => {
@@ -604,7 +606,7 @@ export const useGitHubPrStatusStore = create<GitHubPrStatusStore>()(
             .filter((key): key is string => Boolean(key)),
         ));
 
-        await Promise.all(keys.map((key) => get().refresh(key, options)));
+        await mapWithConcurrency(keys, PR_STATUS_REFRESH_CONCURRENCY, (key) => get().refresh(key, options));
       },
 
       updateStatus: (key, updater) => {

@@ -115,14 +115,31 @@ function isExecutable(filePath: string): boolean {
   }
 }
 
-function shouldUseWindowsShell(binary: string): boolean {
-  if (process.platform !== 'win32') return false;
+function resolveWindowsLaunchSpec(binary: string, args: string[]): { binary: string; args: string[] } {
+  if (process.platform !== 'win32') {
+    return { binary, args };
+  }
   const trimmed = (binary || '').trim();
-  if (!trimmed) return true;
   const ext = path.extname(trimmed).toLowerCase();
-  if (ext === '.cmd' || ext === '.bat') return true;
-  // Bare command names often resolve to .cmd shims via PATHEXT.
-  return !ext && !trimmed.includes('\\') && !trimmed.includes('/');
+  const isBatchShim = ext === '.cmd' || ext === '.bat';
+  const isBareName = !ext && !trimmed.includes('\\') && !trimmed.includes('/');
+  if (!isBatchShim && !isBareName) {
+    return { binary: trimmed, args };
+  }
+  return {
+    binary: process.env.ComSpec || 'cmd.exe',
+    args: ['/d', '/s', '/c', 'call', trimmed, ...args],
+  };
+}
+
+function stripWrappingQuotes(value: string): string {
+  const trimmed = (value || '').trim();
+  if (trimmed.length >= 2
+    && ((trimmed.startsWith('"') && trimmed.endsWith('"'))
+      || (trimmed.startsWith("'") && trimmed.endsWith("'")))) {
+    return trimmed.slice(1, -1).trim();
+  }
+  return trimmed;
 }
 
 function appendToPath(dir: string) {
@@ -169,7 +186,7 @@ function normalizeConfiguredOpencodeBinary(raw: unknown): string | null {
   if (typeof raw !== 'string') {
     return null;
   }
-  const trimmed = raw.trim();
+  const trimmed = stripWrappingQuotes(raw);
   if (!trimmed) {
     return null;
   }
@@ -290,7 +307,7 @@ function resolveOpencodeCliPath(): string | null {
     process.env.OPENCHAMBER_OPENCODE_PATH,
     process.env.OPENCHAMBER_OPENCODE_BIN,
   ]
-    .map((v) => (typeof v === 'string' ? v.trim() : ''))
+    .map((v) => (typeof v === 'string' ? stripWrappingQuotes(v) : ''))
     .filter(Boolean);
 
   for (const candidate of explicit) {
@@ -321,6 +338,7 @@ function resolveOpencodeCliPath(): string | null {
     const appData = process.env.APPDATA || path.join(userProfile, 'AppData', 'Roaming');
     const localAppData = process.env.LOCALAPPDATA || '';
     const programData = process.env.ProgramData || 'C:\\ProgramData';
+    const programFiles = process.env.ProgramFiles || 'C:\\Program Files';
     const npmDir = path.join(appData, 'npm');
 
     return [
@@ -330,6 +348,8 @@ function resolveOpencodeCliPath(): string | null {
       path.join(npmDir, 'opencode.exe'),
       path.join(npmDir, 'opencode.cmd'),
       path.join(npmDir, 'opencode.bat'),
+      path.join(programFiles, 'nodejs', 'opencode.cmd'),
+      path.join(userProfile, 'scoop', 'shims', 'opencode.exe'),
       path.join(userProfile, 'scoop', 'shims', 'opencode.cmd'),
       path.join(programData, 'chocolatey', 'bin', 'opencode.exe'),
       path.join(programData, 'chocolatey', 'bin', 'opencode.cmd'),
@@ -607,14 +627,14 @@ async function spawnManagedOpenCodeServer(
   port: number,
   timeoutMs: number
 ): Promise<{ url: string; close: () => void }> {
-  const binary = (process.env.OPENCODE_BINARY || 'opencode').trim() || 'opencode';
+  const binary = stripWrappingQuotes(process.env.OPENCODE_BINARY || 'opencode') || 'opencode';
   const args = ['serve', '--hostname', '127.0.0.1', '--port', String(port)];
-  const child = spawn(binary, args, {
+  const launch = resolveWindowsLaunchSpec(binary, args);
+  const child = spawn(launch.binary, launch.args, {
     cwd: workingDirectory,
     env: { ...process.env },
     stdio: ['ignore', 'pipe', 'pipe'],
     windowsHide: true,
-    shell: shouldUseWindowsShell(binary),
   });
 
   const url = await new Promise<string>((resolve, reject) => {

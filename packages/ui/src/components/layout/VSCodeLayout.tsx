@@ -129,6 +129,8 @@ export const VSCodeLayout: React.FC = () => {
   }, []);
 
   const [currentView, setCurrentView] = React.useState<VSCodeView>(() => (bootDraftOpen ? 'chat' : 'sessions'));
+  const currentViewRef = React.useRef(currentView);
+  const viewBeforeSettingsRef = React.useRef<VSCodeView | null>(null);
   const [containerWidth, setContainerWidth] = React.useState<number>(0);
   const [expandedSidebarWidth, setExpandedSidebarWidth] = React.useState<number>(SESSIONS_SIDEBAR_WIDTH);
   const [isResizingExpandedSidebar, setIsResizingExpandedSidebar] = React.useState(false);
@@ -259,6 +261,10 @@ export const VSCodeLayout: React.FC = () => {
     setCurrentView('sessions');
   }, []);
 
+  React.useEffect(() => {
+    currentViewRef.current = currentView;
+  }, [currentView]);
+
   // Listen for connection status changes
   React.useEffect(() => {
     // Catch up with the latest status even if the extension posted the connection message
@@ -288,6 +294,9 @@ export const VSCodeLayout: React.FC = () => {
       const detail = (event as CustomEvent<{ view?: string }>).detail;
       const view = detail?.view;
       if (view === 'settings') {
+        if (currentViewRef.current !== 'settings') {
+          viewBeforeSettingsRef.current = currentViewRef.current;
+        }
         setCurrentView('settings');
       } else if (view === 'chat') {
         setCurrentView('chat');
@@ -473,7 +482,11 @@ export const VSCodeLayout: React.FC = () => {
         // Settings view
         <React.Suspense fallback={null}>
           <SettingsView
-            onClose={() => setCurrentView(usesExpandedLayout ? 'chat' : 'sessions')}
+            onClose={() => {
+              const previousView = viewBeforeSettingsRef.current;
+              viewBeforeSettingsRef.current = null;
+              setCurrentView(previousView ?? (usesExpandedLayout ? 'chat' : 'sessions'));
+            }}
             forceMobile={usesMobileLayout}
           />
         </React.Suspense>

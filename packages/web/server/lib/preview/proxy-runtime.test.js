@@ -2,11 +2,12 @@ import { describe, expect, it } from 'vitest';
 
 import { classifyPreviewNavigation, classifyPreviewResourceError, rewritePreviewBody } from './proxy-runtime.js';
 
-const rewrite = (bodyText, kind) => rewritePreviewBody({
+const rewrite = (bodyText, kind, overrides = {}) => rewritePreviewBody({
   bodyText,
   kind,
   proxyBasePath: '/api/preview/proxy/abc123',
   targetOrigin: 'http://127.0.0.1:3000',
+  ...overrides,
 });
 
 describe('preview resource error classification', () => {
@@ -114,6 +115,18 @@ describe('preview body URL rewriting', () => {
     expect(output).toContain('from "/api/preview/proxy/abc123/module.js"');
     expect(output).toContain('const url = "/api/data"');
     expect(output).toContain('fetch("/api/data")');
+  });
+
+  it('preserves proxy auth query params and drops duplicate client tokens', () => {
+    const input = '<script src="/entry.js"></script><a href="http://localhost:3000/docs?x=1&oc_client_token=legacy">Docs</a>';
+    const output = rewrite(input, 'html', {
+      previewToken: 'preview-secret',
+      urlAuthToken: 'url-secret',
+    });
+
+    expect(output).toContain('src="/api/preview/proxy/abc123/entry.js?oc_preview_token=preview-secret&oc_url_token=url-secret"');
+    expect(output).toContain('href="/api/preview/proxy/abc123/docs?x=1&oc_preview_token=preview-secret&oc_url_token=url-secret"');
+    expect(output).not.toContain('oc_client_token');
   });
 });
 

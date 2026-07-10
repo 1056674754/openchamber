@@ -16,32 +16,26 @@ export type GeneratedResult = GeneratedCommitResult | GeneratedPrResult;
 
 const parseJsonObjects = (value: string): Record<string, unknown>[] => {
   const text = value.trim();
-  const candidates = new Set<string>();
+  const candidates: string[] = [];
 
-  const fencedMatches = text.matchAll(/```(?:json)?\s*([\s\S]*?)```/gi);
-  for (const match of fencedMatches) {
-    if (match[1]) candidates.add(match[1].trim());
+  const fencedMatch = text.match(/^```(?:json)?\s*([\s\S]*?)```$/i);
+  if (fencedMatch?.[1]) {
+    candidates.push(fencedMatch[1].trim());
   }
 
-  const firstObjectStart = text.indexOf('{');
-  if (firstObjectStart >= 0) {
-    for (let end = text.length; end > firstObjectStart; end -= 1) {
-      if (text[end - 1] === '}') {
-        candidates.add(text.slice(firstObjectStart, end));
-        break;
-      }
-    }
+  if (text.startsWith('{') && text.endsWith('}')) {
+    candidates.push(text);
   }
 
   const parsed: Record<string, unknown>[] = [];
   for (const candidate of candidates) {
     try {
-      const item = JSON.parse(candidate) as unknown;
+      const item: unknown = JSON.parse(candidate);
       if (item && typeof item === 'object' && !Array.isArray(item)) {
         parsed.push(item as Record<string, unknown>);
       }
-    } catch {
-      // Ignore non-JSON prose; the model may include markdown before the object.
+    } catch (error) {
+      if (!(error instanceof SyntaxError)) throw error;
     }
   }
   return parsed;

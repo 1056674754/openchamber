@@ -33,6 +33,26 @@ describe('markdown file reference heuristics', () => {
     });
   });
 
+  test('keeps line-range file references clickable', () => {
+    expect(parseFileReference('MarkdownRendererImpl.tsx:872-900')).toEqual({
+      path: 'MarkdownRendererImpl.tsx',
+      line: 872,
+      endLine: 900,
+      column: undefined,
+    });
+    expect(parseFileReference('MarkdownRendererImpl.tsx#L872-L900')).toEqual({
+      path: 'MarkdownRendererImpl.tsx',
+      line: 872,
+      endLine: 900,
+      column: undefined,
+    });
+    expect(findFileReferenceTextMatches('see MarkdownRendererImpl.tsx:872-900')).toEqual([{
+      start: 4,
+      end: 4 + 'MarkdownRendererImpl.tsx:872-900'.length,
+      raw: 'MarkdownRendererImpl.tsx:872-900',
+    }]);
+  });
+
   test('keeps explicit paths with custom extensions discoverable', () => {
     expect(isLikelyFilePath('src/example.custom')).toBe(true);
     expect(isLikelyFilePath('./example.custom')).toBe(true);

@@ -1464,6 +1464,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.timeline.searchPlaceholder': '搜尋訊息...',
   'chat.timeline.empty.search': '找不到訊息',
   'chat.timeline.empty.session': '目前會話還沒有訊息',
+  'chat.timeline.loadEarlier': '載入更早訊息',
   'chat.timeline.noTextContent': '[無文字內容]',
   'chat.timeline.actions.title': '操作',
   'chat.timeline.actions.revertFromHere': '從此處還原',

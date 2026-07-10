@@ -8,6 +8,7 @@ import simpleGit from 'simple-git';
 import {
   checkoutCommit,
   cherryPick,
+  fetch,
   getRemotes,
   getStatus,
   resetToCommit,
@@ -167,6 +168,39 @@ describe('getRemotes', () => {
 
     const dir = createTempDir();
     await expect(getRemotes(dir)).resolves.toEqual([]);
+  });
+});
+
+describe('fetch', () => {
+  it('preserves an explicit remote when branch is omitted', async () => {
+    if (!canRunGit()) return;
+
+    const upstream = createTempDir();
+    runGit(upstream, ['init', '--bare']);
+
+    const other = createTempDir();
+    runGit(other, ['init', '--bare']);
+
+    const source = createTempDir();
+    runGit(source, ['init', '-b', 'main']);
+    runGit(source, ['config', 'user.name', 'Test User']);
+    runGit(source, ['config', 'user.email', 'test@example.com']);
+    fs.writeFileSync(path.join(source, 'README.md'), 'upstream', 'utf8');
+    runGit(source, ['add', 'README.md']);
+    runGit(source, ['commit', '-m', 'Initial upstream commit']);
+    runGit(source, ['remote', 'add', 'upstream', upstream]);
+    runGit(source, ['push', 'upstream', 'main']);
+
+    const repo = createTempDir();
+    runGit(repo, ['init', '-b', 'main']);
+    runGit(repo, ['remote', 'add', 'origin', other]);
+    runGit(repo, ['remote', 'add', 'upstream', upstream]);
+
+    await expect(fetch(repo, { remote: 'upstream' })).resolves.toEqual({ success: true });
+
+    const upstreamMain = runGit(repo, ['rev-parse', '--verify', 'refs/remotes/upstream/main']).trim();
+    expect(upstreamMain).toMatch(/^[0-9a-f]{40}$/);
+    expect(() => runGit(repo, ['rev-parse', '--verify', 'refs/remotes/origin/main'])).toThrow();
   });
 });
 

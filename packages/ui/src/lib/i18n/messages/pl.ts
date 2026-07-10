@@ -496,6 +496,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.timeline.searchPlaceholder': 'Szukaj wiadomości...',
   'chat.timeline.empty.search': 'Nie znaleziono wiadomości',
   'chat.timeline.empty.session': 'Brak wiadomości w tej sesji',
+  'chat.timeline.loadEarlier': 'Wczytaj wcześniejsze',
   'chat.timeline.noTextContent': '[Brak treści tekstowej]',
   'chat.timeline.actions.title': 'Akcje',
   'chat.timeline.actions.revertFromHere': 'Cofnij od tego miejsca',

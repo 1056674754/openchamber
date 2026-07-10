@@ -4,6 +4,7 @@ import { resolveApiUrl } from '@/lib/api/serverUrl';
 export type ParsedFileReference = {
   path: string;
   line?: number;
+  endLine?: number;
   column?: number;
 };
 
@@ -24,7 +25,7 @@ export type MarkdownImageReference = {
 // one extension-bearing segment. Whole-line path detection below handles paths
 // with spaces, because regex tokenization cannot distinguish spaces inside a
 // filename from spaces between shell-output words without overmatching.
-const BLOCK_PATH_TOKEN_RE = /(?:[A-Za-z]:[\\/])?[\w.\-/@+~]*[\w\-/@+~]\.[A-Za-z0-9_-]{1,32}(?::\d+){0,2}/g;
+const BLOCK_PATH_TOKEN_RE = /(?:[A-Za-z]:[\\/])?[\w.\-/@+~]*[\w\-/@+~]\.[A-Za-z0-9_-]{1,32}(?::\d+(?:-\d+)?(?::\d+)?)?/g;
 
 const IMAGE_FILE_EXTENSIONS = new Set([
   'avif',
@@ -262,11 +263,12 @@ export const parseFileReference = (value: string): ParsedFileReference | null =>
     return null;
   }
 
-  const hashMatch = withoutSemicolonSuffix.match(/^(.*)#L(\d+)(?:C(\d+))?$/i);
+  const hashMatch = withoutSemicolonSuffix.match(/^(.*)#L(\d+)(?:-L?(\d+))?(?:C(\d+))?$/i);
   if (hashMatch) {
     const path = stripTrailingReference(hashMatch[1] ?? '');
     const line = Number.parseInt(hashMatch[2] ?? '', 10);
-    const column = hashMatch[3] ? Number.parseInt(hashMatch[3], 10) : undefined;
+    const endLine = hashMatch[3] ? Number.parseInt(hashMatch[3], 10) : undefined;
+    const column = hashMatch[4] ? Number.parseInt(hashMatch[4], 10) : undefined;
     if (!path || !Number.isFinite(line)) {
       return null;
     }
@@ -274,15 +276,17 @@ export const parseFileReference = (value: string): ParsedFileReference | null =>
     return {
       path,
       line,
+      endLine: Number.isFinite(endLine ?? Number.NaN) ? endLine : undefined,
       column: Number.isFinite(column ?? Number.NaN) ? column : undefined,
     };
   }
 
-  const colonMatch = withoutSemicolonSuffix.match(/^(.*):(\d+)(?::(\d+))?$/);
+  const colonMatch = withoutSemicolonSuffix.match(/^(.*):(\d+)(?:-(\d+))?(?::(\d+))?$/);
   if (colonMatch) {
     const path = stripTrailingReference(colonMatch[1] ?? '');
     const line = Number.parseInt(colonMatch[2] ?? '', 10);
-    const column = colonMatch[3] ? Number.parseInt(colonMatch[3], 10) : undefined;
+    const endLine = colonMatch[3] ? Number.parseInt(colonMatch[3], 10) : undefined;
+    const column = colonMatch[4] ? Number.parseInt(colonMatch[4], 10) : undefined;
     if (!path || !Number.isFinite(line)) {
       return null;
     }
@@ -290,6 +294,7 @@ export const parseFileReference = (value: string): ParsedFileReference | null =>
     return {
       path,
       line,
+      endLine: Number.isFinite(endLine ?? Number.NaN) ? endLine : undefined,
       column: Number.isFinite(column ?? Number.NaN) ? column : undefined,
     };
   }

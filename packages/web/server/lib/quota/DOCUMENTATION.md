@@ -28,13 +28,20 @@ These provider IDs are currently dispatchable via `fetchQuotaForProvider(provide
 | `openrouter` | OpenRouter | `providers/openrouter.js` | `openrouter` |
 | `zai-coding-plan` | z.ai | `providers/zai.js` | `zai-coding-plan`, `zai`, `z.ai` |
 | `zhipuai-coding-plan` | Zhipu AI Coding Plan | `providers/zhipuai-coding-plan.js` | `zhipuai-coding-plan`, `zhipuai`, `zhipu` |
-| `minimax-coding-plan` | MiniMax Coding Plan (minimax.io) | `providers/minimax-coding-plan.js` | `minimax-coding-plan` |
-| `minimax-cn-coding-plan` | MiniMax Coding Plan (minimaxi.com) | `providers/minimax-cn-coding-plan.js` | `minimax-cn-coding-plan` |
+| `minimax-coding-plan` | MiniMax Coding Plan (minimax.io) | `providers/minimax-coding-plan.js` / `providers/minimax-shared.js` | `minimax-coding-plan` |
+| `minimax-cn-coding-plan` | MiniMax Coding Plan (minimaxi.com) | `providers/minimax-cn-coding-plan.js` / `providers/minimax-shared.js` | `minimax-cn-coding-plan` |
 | `ollama-cloud` | Ollama Cloud | `providers/ollama-cloud.js` | Cookie file at `~/.config/ollama-quota/cookie` (raw session cookie string) |
 | `wafer` | Wafer.ai | `providers/wafer.js` | `wafer`, `wafer-ai`, `wafer_ai`, `wafer.ai` |
 
 ## Internal-only provider module
 - `providers/openai.js` exists for logic parity/reuse but is intentionally not registered for dispatcher ID routing.
+
+## MiniMax M3 / Token Plan migration
+In 2025/2026 MiniMax rebranded "Coding Plan" to "Token Plan" alongside the M3 model release. The API underwent breaking changes:
+
+- Endpoint fallback: the provider tries `/v1/token_plan/remains` first, then falls back to legacy `/v1/api/openplatform/coding_plan/remains`.
+- Field semantics: on `token_plan/remains`, `current_interval_usage_count` returns remaining quota. The provider computes `used = total - remaining` for this endpoint. The legacy `coding_plan/remains` endpoint keeps the old consumed-count semantics.
+- `model_remains` can include multiple model categories. The provider selects `MiniMax-M*`, then `general`/`chat`/`text`, then any entry with remaining-percent data.
 
 ## Response contract
 All providers should return results via shared helpers to preserve API shape:

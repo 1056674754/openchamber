@@ -14,6 +14,7 @@ const createDependencies = (overrides = {}) => {
     tunnelToken: undefined,
     tunnelHostname: undefined,
     uiPassword: null,
+    apiOnly: false,
   }));
 
   return {
@@ -55,6 +56,7 @@ describe('runCliEntryIfMain', () => {
       host: '127.0.0.1',
       attachSignals: true,
       exitOnShutdown: true,
+      apiOnly: false,
     }));
   });
 

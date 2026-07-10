@@ -1576,6 +1576,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.timeline.searchPlaceholder": "Пошук повідомлень...",
   "chat.timeline.empty.search": "Повідомлень не знайдено",
   "chat.timeline.empty.session": "У цьому сесії ще немає повідомлень",
+  "chat.timeline.loadEarlier": "Завантажити попередні",
   "chat.timeline.noTextContent": "[Немає текстового вмісту]",
   "chat.timeline.actions.title": "Дії",
   "chat.timeline.actions.revertFromHere": "Повернутися звідси",

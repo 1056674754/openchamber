@@ -760,7 +760,10 @@ export const registerFsRoutes = (app, dependencies) => {
       const download = req.query.download === 'true';
       if (download) {
         const fileName = path.basename(canonicalPath);
-        res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+        const asciiOnly = fileName.replace(/[^\u0000-\u007F]/g, '');
+        const fallback = asciiOnly || 'file';
+        const encoded = encodeURIComponent(fileName);
+        res.setHeader('Content-Disposition', `attachment; filename="${fallback}"; filename*=UTF-8''${encoded}`);
       }
 
       const content = await fsPromises.readFile(canonicalPath);

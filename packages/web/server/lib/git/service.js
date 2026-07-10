@@ -18,6 +18,27 @@ const WORKTREE_BOOTSTRAP_PENDING = 'pending';
 const WORKTREE_BOOTSTRAP_READY = 'ready';
 const WORKTREE_BOOTSTRAP_FAILED = 'failed';
 
+const buildRawGitOptions = (raw) => {
+  if (Array.isArray(raw)) {
+    return raw.map((value) => String(value || '').trim()).filter(Boolean);
+  }
+
+  if (!raw || typeof raw !== 'object') {
+    return [];
+  }
+
+  return Object.entries(raw).flatMap(([key, value]) => {
+    const option = String(key || '').trim();
+    if (!option || value === false) {
+      return [];
+    }
+    if (value === true || value == null) {
+      return [option];
+    }
+    return [option, String(value)];
+  });
+};
+
 const toBootstrapStateKey = (directory) => {
   const normalized = normalizeDirectoryPath(directory);
   if (!normalized) {
@@ -1997,9 +2018,11 @@ export async function pull(directory, options = {}) {
     : options.options || {};
 
   try {
+    const remote = String(options.remote || '').trim();
+    const branch = String(options.branch || '').trim();
     const result = await git.pull(
-      options.remote || 'origin',
-      options.branch,
+      remote || 'origin',
+      branch || undefined,
       pullOptions
     );
 
@@ -2250,11 +2273,19 @@ export async function fetch(directory, options = {}) {
   const { git } = await createRepositoryGitContext(directory);
 
   try {
-    await git.fetch(
-      options.remote || 'origin',
-      options.branch,
-      options.options || {}
-    );
+    const remote = String(options.remote || '').trim();
+    const branch = String(options.branch || '').trim();
+    const fetchOptions = options.options || {};
+
+    if (remote && !branch) {
+      await git.raw(['fetch', ...buildRawGitOptions(fetchOptions), remote]);
+    } else {
+      await git.fetch(
+        remote || 'origin',
+        branch || undefined,
+        fetchOptions
+      );
+    }
 
     return { success: true };
   } catch (error) {

@@ -5,6 +5,12 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { createOpenCodeEnvRuntime } from './env-runtime.js';
 
 const originalOpencodeBinary = process.env.OPENCODE_BINARY;
+const originalPath = process.env.PATH;
+const originalUserProfile = process.env.USERPROFILE;
+const originalAppData = process.env.APPDATA;
+const originalProgramFiles = process.env.ProgramFiles;
+const originalProgramData = process.env.ProgramData;
+const originalComSpec = process.env.ComSpec;
 const originalPlatform = process.platform;
 const tempDirs = [];
 const itIf = (condition) => condition ? it : it.skip;
@@ -32,9 +38,20 @@ afterEach(() => {
 
   if (typeof originalOpencodeBinary === 'string') {
     process.env.OPENCODE_BINARY = originalOpencodeBinary;
-    return;
+  } else {
+    delete process.env.OPENCODE_BINARY;
   }
-  delete process.env.OPENCODE_BINARY;
+
+  const restoreEnv = (key, value) => {
+    if (typeof value === 'string') process.env[key] = value;
+    else delete process.env[key];
+  };
+  restoreEnv('PATH', originalPath);
+  restoreEnv('USERPROFILE', originalUserProfile);
+  restoreEnv('APPDATA', originalAppData);
+  restoreEnv('ProgramFiles', originalProgramFiles);
+  restoreEnv('ProgramData', originalProgramData);
+  restoreEnv('ComSpec', originalComSpec);
 });
 
 const createRuntime = (settings, options = {}) => {
@@ -94,6 +111,65 @@ describe('OpenCode env runtime', () => {
     expect(state.resolvedOpencodeBinarySource).toBe('settings');
   });
 
+  it('resolves an explicit Windows binary wrapped in quotes', () => {
+    setPlatform('win32');
+    const dir = createTempDir('openchamber-opencode-quoted-');
+    const binary = path.join(dir, 'opencode.exe');
+    fs.writeFileSync(binary, '');
+    process.env.OPENCODE_BINARY = `"${binary}"`;
+    process.env.PATH = '';
+    const { runtime } = createRuntime({});
+
+    expect(runtime.resolveOpencodeCliPath()).toBe(binary);
+  });
+
+  it('applies a configured Windows binary wrapped in quotes', async () => {
+    setPlatform('win32');
+    const dir = createTempDir('openchamber-opencode-quoted-setting-');
+    const binary = path.join(dir, 'opencode.exe');
+    fs.writeFileSync(binary, '');
+    const { runtime } = createRuntime({ opencodeBinary: `"${binary}"` });
+
+    await expect(runtime.applyOpencodeBinaryFromSettings({ strict: true })).resolves.toBe(binary);
+  });
+
+  it('discovers the system npm prefix on Windows', () => {
+    setPlatform('win32');
+    const root = createTempDir('openchamber-opencode-windows-fallbacks-');
+    const programFiles = path.join(root, 'Program Files');
+    const userProfile = path.join(root, 'User');
+    const npmShim = path.join(programFiles, 'nodejs', 'opencode.cmd');
+    fs.mkdirSync(path.dirname(npmShim), { recursive: true });
+    fs.writeFileSync(npmShim, '');
+    process.env.PATH = '';
+    process.env.ProgramFiles = programFiles;
+    process.env.USERPROFILE = userProfile;
+    process.env.APPDATA = path.join(root, 'Roaming');
+    process.env.ProgramData = path.join(root, 'ProgramData');
+    delete process.env.OPENCODE_BINARY;
+
+    const { runtime } = createRuntime({});
+    expect(runtime.resolveOpencodeCliPath()).toBe(npmShim);
+  });
+
+  it('discovers the Scoop executable on Windows', () => {
+    setPlatform('win32');
+    const root = createTempDir('openchamber-opencode-scoop-fallback-');
+    const userProfile = path.join(root, 'User');
+    const scoopExecutable = path.join(userProfile, 'scoop', 'shims', 'opencode.exe');
+    fs.mkdirSync(path.dirname(scoopExecutable), { recursive: true });
+    fs.writeFileSync(scoopExecutable, '');
+    process.env.PATH = '';
+    process.env.ProgramFiles = path.join(root, 'Program Files');
+    process.env.USERPROFILE = userProfile;
+    process.env.APPDATA = path.join(root, 'Roaming');
+    process.env.ProgramData = path.join(root, 'ProgramData');
+    delete process.env.OPENCODE_BINARY;
+
+    const { runtime } = createRuntime({});
+    expect(runtime.resolveOpencodeCliPath()).toBe(scoopExecutable);
+  });
+
   itIf(process.platform === 'darwin')('rejects known macOS OpenCode app bundle executable paths', async () => {
     const { runtime } = createRuntime({ opencodeBinary: '/Applications/OpenCode.app/Contents/MacOS/OpenCode' });
 
@@ -143,5 +219,20 @@ describe('OpenCode env runtime', () => {
 
     const wslCall = calls.find((call) => call.command === wslBinary);
     expect(wslCall).toBeUndefined();
+  });
+
+  it('launches Windows cmd shims through cmd call without embedded quotes', () => {
+    setPlatform('win32');
+    process.env.ComSpec = 'C:\\Windows\\System32\\cmd.exe';
+    const dir = createTempDir('openchamber-opencode-cmd-');
+    const shim = path.join(dir, 'opencode.cmd');
+    fs.writeFileSync(shim, '@echo off\r\nexit /b 0\r\n');
+    const { runtime } = createRuntime({});
+
+    expect(runtime.resolveManagedOpenCodeLaunchSpec(shim)).toEqual({
+      binary: 'C:\\Windows\\System32\\cmd.exe',
+      args: ['/d', '/s', '/c', 'call', shim],
+      wrapperType: 'cmd-wrapper',
+    });
   });
 });

@@ -1613,6 +1613,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.timeline.searchPlaceholder': '메시지 검색…',
   'chat.timeline.empty.search': '메시지 없음',
   'chat.timeline.empty.session': '아직 이 세션에 메시지 없음',
+  'chat.timeline.loadEarlier': '이전 메시지 불러오기',
   'chat.timeline.noTextContent': '[텍스트 내용 없음]',
   'chat.timeline.actions.title': '작업',
   'chat.timeline.actions.revertFromHere': '여기부터 되돌리기',

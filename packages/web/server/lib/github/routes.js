@@ -1,6 +1,20 @@
 const PR_STATUS_CACHE_TTL_MS = 90_000;
 const PR_STATUS_CACHE_MAX_ENTRIES = 200;
+const PR_STATUS_RESOLVE_TIMEOUT_MS = 12_000;
 const prStatusCache = new Map();
+
+function withTimeout(promise, timeoutMs, label) {
+  let timer;
+  const timeout = new Promise((_resolve, reject) => {
+    timer = setTimeout(() => {
+      const error = new Error(`${label} timed out after ${timeoutMs}ms`);
+      error.code = 'ETIMEDOUT';
+      reject(error);
+    }, timeoutMs);
+    if (typeof timer.unref === 'function') timer.unref();
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
 
 function getRequestedRepo(req) {
   const owner = typeof req.query?.owner === 'string' ? req.query.owner.trim() : '';
@@ -401,6 +415,14 @@ export function registerGitHubRoutes(app) {
         return res.json(cached.data);
       }
 
+      const { isGitHubRateLimited } = await import('./rate-limit.js');
+      if (isGitHubRateLimited()) {
+        if (cached) {
+          return res.json(cached.data);
+        }
+        return res.status(503).json({ error: 'GitHub rate limited' });
+      }
+
       // Intercept res.json to cache successful responses before sending
       // Only caches responses with connected:true — error/edge-case responses are not cached
       const originalJson = res.json.bind(res);
@@ -418,12 +440,16 @@ export function registerGitHubRoutes(app) {
       }
 
       const { resolveGitHubPrStatus } = await import('./pr-status.js');
-      const resolvedStatus = await resolveGitHubPrStatus({
-        octokit,
-        directory,
-        branch,
-        remoteName: remote,
-      });
+      const resolvedStatus = await withTimeout(
+        resolveGitHubPrStatus({
+          octokit,
+          directory,
+          branch,
+          remoteName: remote,
+        }),
+        PR_STATUS_RESOLVE_TIMEOUT_MS,
+        'resolveGitHubPrStatus'
+      );
       const searchRepo = resolvedStatus.repo;
       const first = resolvedStatus.pr;
       if (!searchRepo) {
@@ -566,6 +592,19 @@ export function registerGitHubRoutes(app) {
           defaultBranch: null,
           resolvedRemoteName: null,
         });
+      }
+      const { noteIfGitHubRateLimit } = await import('./rate-limit.js');
+      const wasRateLimited = noteIfGitHubRateLimit(error);
+      const wasTimeout = error?.code === 'ETIMEDOUT';
+      if (wasRateLimited || wasTimeout) {
+        const dir = typeof req.query?.directory === 'string' ? req.query.directory.trim() : '';
+        const br = typeof req.query?.branch === 'string' ? req.query.branch.trim() : '';
+        const rem = typeof req.query?.remote === 'string' ? req.query.remote.trim() : 'origin';
+        const cached = prStatusCache.get(`${dir}::${br}::${rem}`);
+        if (cached) {
+          return res.json(cached.data);
+        }
+        return res.status(503).json({ error: wasRateLimited ? 'GitHub rate limited' : 'GitHub PR status timed out' });
       }
       console.error('Failed to load GitHub PR status:', error);
       return res.status(500).json({ error: error.message || 'Failed to load GitHub PR status' });

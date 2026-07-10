@@ -1,5 +1,8 @@
 const DEFAULT_TARGET_TTL_MS = 30 * 60 * 1000;
 const TOKEN_COOKIE_NAME = 'oc_preview_token';
+const TOKEN_QUERY_PARAM = 'oc_preview_token';
+const CLIENT_TOKEN_QUERY_PARAM = 'oc_client_token';
+const URL_AUTH_TOKEN_QUERY_PARAM = 'oc_url_token';
 
 const LOOPBACK_HOSTS = new Set([
   'localhost',
@@ -879,7 +882,7 @@ const normalizeLoopbackUrl = (rawUrl) => {
   return { ok: true, origin: url.origin };
 };
 
-export const rewritePreviewBody = ({ bodyText, proxyBasePath, targetOrigin, kind }) => {
+export const rewritePreviewBody = ({ bodyText, proxyBasePath, targetOrigin, kind, previewToken = '', urlAuthToken = '' }) => {
   if (typeof bodyText !== 'string' || bodyText.length === 0) {
     return bodyText;
   }
@@ -895,16 +898,31 @@ export const rewritePreviewBody = ({ bodyText, proxyBasePath, targetOrigin, kind
     }
     return url.port === target.port;
   };
+  const withProxyAuth = (value) => {
+    if (typeof value !== 'string' || value.length === 0) return value;
+    try {
+      const parsed = new URL(value, 'http://localhost');
+      if (!parsed.pathname.startsWith(`${prefix}/`) && parsed.pathname !== prefix) {
+        return value;
+      }
+      parsed.searchParams.delete(CLIENT_TOKEN_QUERY_PARAM);
+      if (previewToken) parsed.searchParams.set(TOKEN_QUERY_PARAM, previewToken);
+      if (urlAuthToken) parsed.searchParams.set(URL_AUTH_TOKEN_QUERY_PARAM, urlAuthToken);
+      return parsed.pathname + parsed.search + parsed.hash;
+    } catch {
+      return value;
+    }
+  };
   const rewriteResourceUrl = (value) => {
     if (typeof value !== 'string' || value.length === 0) return value;
     if (value.startsWith('/') && !value.startsWith('//')) {
-      if (value.startsWith('/api/preview/proxy/')) return value;
-      return `${prefix}${value}`;
+      if (value.startsWith('/api/preview/proxy/')) return withProxyAuth(value);
+      return withProxyAuth(`${prefix}${value}`);
     }
     try {
       const parsed = new URL(value);
       if (isSameLoopbackTarget(parsed)) {
-        return `${prefix}${parsed.pathname}${parsed.search}${parsed.hash}`;
+        return withProxyAuth(`${prefix}${parsed.pathname}${parsed.search}${parsed.hash}`);
       }
     } catch {
       return value;
@@ -1280,6 +1298,8 @@ export const createPreviewProxyRuntime = ({
               proxyBasePath,
               targetOrigin: resolved.entry.origin,
               kind: 'javascript',
+              previewToken: parsed.searchParams.get(TOKEN_QUERY_PARAM) || '',
+              urlAuthToken: parsed.searchParams.get(URL_AUTH_TOKEN_QUERY_PARAM) || '',
             });
           }
 
@@ -1288,6 +1308,8 @@ export const createPreviewProxyRuntime = ({
             proxyBasePath,
             targetOrigin: resolved.entry.origin,
             kind: isHtml ? 'html' : isCss ? 'css' : 'javascript',
+            previewToken: parsed.searchParams.get(TOKEN_QUERY_PARAM) || '',
+            urlAuthToken: parsed.searchParams.get(URL_AUTH_TOKEN_QUERY_PARAM) || '',
           });
           return isHtml ? injectPreviewBridge(rewrittenBody) : rewrittenBody;
         }),

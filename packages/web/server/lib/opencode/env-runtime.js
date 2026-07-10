@@ -267,6 +267,16 @@ export const createOpenCodeEnvRuntime = (deps) => {
     state.resolvedWslDistro = null;
   };
 
+  const stripWrappingQuotes = (value) => {
+    const trimmed = typeof value === 'string' ? value.trim() : '';
+    if (trimmed.length >= 2
+      && ((trimmed.startsWith('"') && trimmed.endsWith('"'))
+        || (trimmed.startsWith("'") && trimmed.endsWith("'")))) {
+      return trimmed.slice(1, -1).trim();
+    }
+    return trimmed;
+  };
+
   const resolveOpencodeCliPath = () => {
     const explicit = [
       process.env.OPENCODE_BINARY,
@@ -274,7 +284,7 @@ export const createOpenCodeEnvRuntime = (deps) => {
       process.env.OPENCHAMBER_OPENCODE_PATH,
       process.env.OPENCHAMBER_OPENCODE_BIN,
     ]
-      .map((v) => (typeof v === 'string' ? v.trim() : ''))
+      .map(stripWrappingQuotes)
       .filter(Boolean);
 
     for (const candidate of explicit) {
@@ -309,11 +319,14 @@ export const createOpenCodeEnvRuntime = (deps) => {
       const appData = process.env.APPDATA || '';
       const localAppData = process.env.LOCALAPPDATA || '';
       const programData = process.env.ProgramData || 'C:\\ProgramData';
+      const programFiles = process.env.ProgramFiles || 'C:\\Program Files';
 
       return [
         path.join(userProfile, '.opencode', 'bin', 'opencode.exe'),
         path.join(userProfile, '.opencode', 'bin', 'opencode.cmd'),
         path.join(appData, 'npm', 'opencode.cmd'),
+        path.join(programFiles, 'nodejs', 'opencode.cmd'),
+        path.join(userProfile, 'scoop', 'shims', 'opencode.exe'),
         path.join(userProfile, 'scoop', 'shims', 'opencode.cmd'),
         path.join(programData, 'chocolatey', 'bin', 'opencode.exe'),
         path.join(programData, 'chocolatey', 'bin', 'opencode.cmd'),
@@ -602,7 +615,7 @@ export const createOpenCodeEnvRuntime = (deps) => {
         path.join(nodeModulesDir, packageName, 'bin', 'opencode.exe'),
         path.join(nodeModulesDir, 'opencode-ai', 'node_modules', packageName, 'bin', 'opencode.exe'),
       ];
-      for (const candidate of candidates) {
+    for (const candidate of candidates) {
         if (isExecutable(candidate)) {
           return candidate;
         }
@@ -749,12 +762,29 @@ export const createOpenCodeEnvRuntime = (deps) => {
 
       const directBinary = normalizeExecutableCandidate(candidate);
       if (directBinary) {
+        const directExt = path.extname(directBinary).toLowerCase();
+        if (WINDOWS_BATCH_EXTENSIONS.has(directExt)) {
+          return {
+            binary: process.env.ComSpec || 'cmd.exe',
+            args: ['/d', '/s', '/c', 'call', directBinary],
+            wrapperType: 'cmd-wrapper',
+          };
+        }
+
         return {
           binary: directBinary,
           args: [],
           wrapperType: directBinary === fallbackBinary ? null : 'executable-wrapper',
         };
       }
+    }
+
+    if (WINDOWS_BATCH_EXTENSIONS.has(ext)) {
+      return {
+        binary: process.env.ComSpec || 'cmd.exe',
+        args: ['/d', '/s', '/c', 'call', fallbackBinary],
+        wrapperType: 'cmd-wrapper',
+      };
     }
 
     return { binary: fallbackBinary, args: [], wrapperType: null };
@@ -857,7 +887,7 @@ export const createOpenCodeEnvRuntime = (deps) => {
     if (typeof raw !== 'string') {
       return null;
     }
-    const trimmed = normalizeDirectoryPath(raw).trim();
+    const trimmed = normalizeDirectoryPath(stripWrappingQuotes(raw)).trim();
     if (!trimmed) {
       return '';
     }

@@ -1610,6 +1610,7 @@ export const dict = {
   'chat.timeline.searchPlaceholder': 'Search messages...',
   'chat.timeline.empty.search': 'No messages found',
   'chat.timeline.empty.session': 'No messages in this session yet',
+  'chat.timeline.loadEarlier': 'Load earlier',
   'chat.timeline.noTextContent': '[No text content]',
   'chat.timeline.actions.title': 'Actions',
   'chat.timeline.actions.revertFromHere': 'Revert from here',
