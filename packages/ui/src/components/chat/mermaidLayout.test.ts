@@ -15,6 +15,12 @@ const registrationFlowchart = `flowchart TD
     H -->|成功| I([进入 /student 主页])
 `;
 
+const multilineSubgraphFlowchart = `flowchart TD
+    subgraph intake [Intake<br/>Validate<br/>Route]
+        A[Request] --> B[Decision]
+    end
+`;
+
 function extractNodeTop(svg: string, nodeId: string): number {
     const nodeMatch = svg.match(new RegExp(`<g class="node" data-id="${nodeId}"[\\s\\S]*?<\\/g>`));
 
@@ -58,5 +64,48 @@ describe('beautiful-mermaid flowchart layout', () => {
         expect(yByNode.F).toBeLessThan(yByNode.G);
         expect(yByNode.G).toBeLessThan(yByNode.H);
         expect(yByNode.H).toBeLessThan(yByNode.I);
+    });
+
+    test('renders subgraphs with multiline labels', () => {
+        // Given a subgraph label containing multiple Mermaid line breaks.
+        // When the SVG renderer lays out the compound graph.
+        const svg = renderMermaidSVG(multilineSubgraphFlowchart);
+
+        // Then it renders the subgraph and each label line instead of throwing.
+        expect(svg).toContain('<g class="subgraph" data-id="intake"');
+        expect(svg).toContain('>Intake</tspan>');
+        expect(svg).toContain('>Validate</tspan>');
+        expect(svg).toContain('>Route</tspan>');
+    });
+
+    test('keeps multiline subgraph labels inside the header band', () => {
+        // Given a rendered subgraph with a three-line header label.
+        // When its header and text baselines are read from the SVG geometry.
+        const svg = renderMermaidSVG(multilineSubgraphFlowchart);
+        const groupMatch = svg.match(/<g class="subgraph" data-id="intake"[\s\S]*?<\/g>/);
+
+        if (!groupMatch) {
+            throw new Error('Missing intake subgraph');
+        }
+
+        const rectMatches = Array.from(groupMatch[0].matchAll(/<rect\b[^>]*\by="([^"]+)"[^>]*\bheight="([^"]+)"/g));
+        const headerTextMatch = groupMatch[0].match(/<text\b[^>]*\by="([^"]+)"[^>]*>([\s\S]*?)<\/text>/);
+
+        if (!rectMatches[1]?.[1] || !rectMatches[1][2] || !headerTextMatch?.[1] || !headerTextMatch[2]) {
+            throw new Error('Missing intake subgraph header geometry');
+        }
+
+        const headerY = Number(rectMatches[1][1]);
+        const headerHeight = Number(rectMatches[1][2]);
+        const textY = Number(headerTextMatch[1]);
+        let baselineOffset = 0;
+        const baselines = Array.from(headerTextMatch[2].matchAll(/<tspan\b[^>]*\bdy="([^"]+)"/g)).map((match) => {
+            baselineOffset += Number(match[1]);
+            return textY + baselineOffset;
+        });
+
+        // Then every line baseline stays within the padded header band.
+        expect(Math.min(...baselines) >= headerY + 12).toBe(true);
+        expect(Math.max(...baselines) <= headerY + headerHeight - 6).toBe(true);
     });
 });
