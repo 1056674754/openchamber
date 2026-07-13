@@ -2,8 +2,52 @@ import { beforeEach, describe, expect, test } from 'bun:test';
 import type { Agent } from '@opencode-ai/sdk/v2';
 import type { QueuedMessage } from '../stores/messageQueueStore';
 import { buildQueuedAutoSendPayload } from './queuedMessageAutoSendPayload';
+import {
+  getQueuedAutoSendRetryDelayMs,
+  isQueuedAutoSendBackedOff,
+  shouldDispatchQueuedAutoSend,
+} from './queuedMessageAutoSendPolicy';
 
 let visibleAgents: Agent[] = [];
+
+describe('shouldDispatchQueuedAutoSend', () => {
+  test('dispatches after an active session becomes idle', () => {
+    expect(shouldDispatchQueuedAutoSend('busy', 'idle', false)).toBe(true);
+    expect(shouldDispatchQueuedAutoSend('retry', 'idle', false)).toBe(true);
+  });
+
+  test('does not dispatch when an empty queue first observes idle', () => {
+    expect(shouldDispatchQueuedAutoSend(undefined, 'idle', false)).toBe(false);
+    expect(shouldDispatchQueuedAutoSend('idle', 'idle', false)).toBe(false);
+  });
+
+  test('dispatches when queued items arrive while the session is already idle', () => {
+    expect(shouldDispatchQueuedAutoSend('idle', 'idle', true)).toBe(true);
+  });
+});
+
+describe('queued auto-send retry backoff', () => {
+  test('grows exponentially and caps retry delay', () => {
+    expect(getQueuedAutoSendRetryDelayMs(1)).toBe(2_000);
+    expect(getQueuedAutoSendRetryDelayMs(2)).toBe(4_000);
+    expect(getQueuedAutoSendRetryDelayMs(3)).toBe(8_000);
+    expect(getQueuedAutoSendRetryDelayMs(10)).toBe(60_000);
+    expect(getQueuedAutoSendRetryDelayMs(100)).toBe(60_000);
+  });
+
+  test('backs off only the failed queue head within its retry window', () => {
+    const failure = {
+      messageId: 'queued-1',
+      failures: 1,
+      nextAttemptAt: 10_000,
+    };
+
+    expect(isQueuedAutoSendBackedOff(failure, 'queued-1', 9_999)).toBe(true);
+    expect(isQueuedAutoSendBackedOff(failure, 'queued-1', 10_000)).toBe(false);
+    expect(isQueuedAutoSendBackedOff(failure, 'queued-2', 9_999)).toBe(false);
+    expect(isQueuedAutoSendBackedOff(undefined, 'queued-1', 0)).toBe(false);
+  });
+});
 
 describe('buildQueuedAutoSendPayload', () => {
   beforeEach(() => {

@@ -821,7 +821,7 @@ Phase 5 — 🔴 Markdown/Shiki 重写 (#1+#2): 独立 milestone，需迁移 for
 
 | 分组 | 状态 | 判断 |
 |---|---|---|
-| Queue idle dispatch (`73209d4f`) | 🟢 建议下一项 | 本 fork 仍只在 `busy/retry -> idle` 时发送；若队列项加入时 session 已经是 idle，会一直等待。官方仅扩展 dispatch predicate + focused tests，需继续保护 `sendConfig` / `sendTarget` 和失败回滚 |
+| Queue idle dispatch + failure backoff (`73209d4f`, `c387fb21`) | ✅ 已移植 | queue item 在 authoritative status 已是 idle 时也会发送；同一失败队首按 2s→60s 指数退避，队首变化后清除旧失败状态；保留 `sendConfig` / `sendTarget`、recent abort、in-flight guard 和失败恢复 |
 | Markdown preview toggle (`7ab06f15`) | 🟢/🟡 可独立合 | 本地 FilesView 已有 Markdown 文本渲染基础，但没有官方 preview/source toggle；只涉及 FilesView 和 i18n，避免带入 upstream 整体 FilesView 布局 |
 | VS Code Insiders / Windows drive casing | 🟢 可独立合 | 都是边界明确的平台兼容修复；drive casing 必须统一进入 project/session/directory key 之前处理，不能只修显示 |
 | Agent YAML frontmatter preservation (`e9193876`) | 🟡 高价值 | 本 fork 已有 agent 多 scope 和远端实例语义；应先写未知 frontmatter round-trip test，再改保存合并逻辑 |
@@ -837,7 +837,7 @@ Phase 5 — 🔴 Markdown/Shiki 重写 (#1+#2): 独立 milestone，需迁移 for
 | 功能 | 本地证据 | 结论 |
 |---|---|---|
 | macOS Dock unread badge | `packages/electron/main.mjs` 有 `desktop_set_dock_badge` IPC；`packages/ui/src/sync/desktop-dock-badge.ts` 已调用 | ✅ 已有 fork 实现；仍需和 v1.13.6 Appearance toggle / unseen activity 口径复核 |
-| Follow-up behavior / Steer delivery | `steer-side-channel.ts`、`session-actions.ts`、`client.ts`、`followUpBehavior.ts`、`messageQueueStore.ts` | ✅ 已完成枚举设置、旧值迁移、Enter/修饰键行为与 queue-time config/target 快照；v1.16 queue idle dispatch 仍是独立缺口 |
+| Follow-up behavior / Steer delivery | `steer-side-channel.ts`、`session-actions.ts`、`client.ts`、`followUpBehavior.ts`、`messageQueueStore.ts`、`useQueuedMessageAutoSend.ts` | ✅ 已完成枚举设置、旧值迁移、Enter/修饰键行为、queue-time config/target 快照、idle dispatch 和失败退避 |
 | gh CLI credentials | `packages/web/server/lib/github/gh-cli-credential.js`、routes/octokit 已接入 | ✅ 属于 v1.13.0 已移植项，后续 GitHub PR status 修复可在此基础上做 |
 | Cron parser | `packages/ui/src/lib/cron.ts`、scheduled-tasks runtime 已用 `cron-parser` | ✅ v1.13.1 已移植 |
 | Diff virtualization / PierreDiffViewer | `PierreDiffViewer.tsx`、`patchFileDiff.ts`、DiffView data-diff-virtual-root 已存在 | 🟡 有较多 v1.13.0 Git/Diff 地基，但 v1.13.3~8 的 history diff/cleanup 仍需 diff |
@@ -929,6 +929,13 @@ Phase 5 — 🔴 Markdown/Shiki 重写 (#1+#2): 独立 milestone，需迁移 for
 - Custom embedded OpenCode 已建立 staging、identity/version、shared data channel、双重签名和 packaged smoke-check 脚本；`docs/EMBEDDED_OPENCODE_PACKAGING.md` 是强制 runbook，禁止用官方 binary 替换 custom merged build。
 - Electron packaged app 与 `bun run dev` 均已用真实共享数据启动验证；这些是 fork runtime 稳定性/分发能力，不把它们误计为上游 release feature。
 
+### v1.16 Queue reliability 批次（2026-07-13）
+
+- `shouldDispatchQueuedAutoSend` 现在接受明确的 `hasQueuedItems` 条件：有 queue item 且当前 authoritative status 为 idle 时直接 dispatch，不再要求必须观察到 `busy/retry -> idle` 边沿。
+- 失败队首按 2 秒起步指数退避，最高 60 秒；只限制同一 message，队首变化后立即丢弃旧 failure record。成功发送或成功执行 local slash command 后清理失败状态。
+- 自动发送仍从 queue snapshot 读取 `provider/model/agent/variant` 和 `directory/serverId`，没有回退到后来切换的 instance 或 controls；原 recent-abort、per-session in-flight、remove/restore rollback 继续生效。
+- 纯策略被抽到 `queuedMessageAutoSendPolicy.ts`，避免测试加载 React/store 初始化副作用。focused queue tests 12/12、strict no-excuse check、全量 `bun run type-check` 和 `bun run lint` 均通过。
+
 ### 中等难度 / 需要逐段适配
 
 | 功能 | 影响文件/模块 | 风险点 |
@@ -961,7 +968,7 @@ Phase 5 — 🔴 Markdown/Shiki 重写 (#1+#2): 独立 milestone，需迁移 for
 
 ### 建议下一步批次
 
-1. **Queue reliability 批次 A (低风险)**: 先合 v1.16 queue idle dispatch (`73209d4f`)，补 idle→idle + queue snapshot 回归测试；queue drag reorder 后续单独处理。
+1. **Queue reliability 批次 A (已完成)**: v1.16 idle dispatch + failed auto-send backoff 已移植；queue drag reorder 继续作为独立项，不改变 queue snapshot 权威。
 2. **CLI/Startup/Desktop auth 批次 B**: pid identity、live port check、update helper、quota/provider startup、Bun global CLI fix、LAN-bound local auth token，按 helper/route 切，不做 v1.13.4 cleanup。
 3. **小修批次 C**: header encoding、MiniMax quota、skills catalog refresh、provider disconnect、Git push sync、Preview duplicate token、VS Code Insiders；line-range refs / first changed line 与第二轮 JSON/VS Code/Windows CLI 小修已完成。
 4. **GitHub PR status 批次 D**: timeout/rate-limit/cooldown/concurrent metadata，并验证启动时 session/diff/message 不被 PR status 阻塞。

@@ -7,8 +7,13 @@ import { useContextStore } from '@/stores/contextStore';
 import { useAllServersSessionStatuses } from '@/sync/multi-server-hooks';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { buildQueuedAutoSendPayload } from './queuedMessageAutoSendPayload';
-
-type SessionStatusType = 'idle' | 'busy' | 'retry';
+import {
+  getQueuedAutoSendRetryDelayMs,
+  isQueuedAutoSendBackedOff,
+  shouldDispatchQueuedAutoSend,
+  type QueuedAutoSendFailure,
+  type QueuedAutoSendSessionStatus,
+} from './queuedMessageAutoSendPolicy';
 
 const RECENT_ABORT_WINDOW_MS = 2000;
 
@@ -61,14 +66,6 @@ const resolveSessionSendConfig = (sessionId: string) => {
   };
 };
 
-export const shouldDispatchQueuedAutoSend = (
-  previousStatusType: SessionStatusType | undefined,
-  currentStatusType: SessionStatusType,
-): boolean => {
-  return (previousStatusType === 'busy' || previousStatusType === 'retry')
-    && currentStatusType === 'idle';
-};
-
 export function useQueuedMessageAutoSend(enabledOrOptions?: boolean | { enabled?: boolean }) {
   const enabled = typeof enabledOrOptions === 'boolean' ? enabledOrOptions : (enabledOrOptions?.enabled ?? true);
   const queuedMessages = useMessageQueueStore((state) => state.queuedMessages);
@@ -76,19 +73,20 @@ export function useQueuedMessageAutoSend(enabledOrOptions?: boolean | { enabled?
   const globalSessionStatuses = useGlobalSessionsStore((state) => state.sessionStatuses);
 
   const inFlightSessionsRef = React.useRef<Set<string>>(new Set());
-  const previousStatusRef = React.useRef<Map<string, SessionStatusType>>(new Map());
+  const sendFailuresRef = React.useRef<Map<string, QueuedAutoSendFailure>>(new Map());
+  const previousStatusRef = React.useRef<Map<string, QueuedAutoSendSessionStatus>>(new Map());
 
   React.useEffect(() => {
     if (!enabled) {
       return;
     }
 
-    const getKnownStatusType = (sessionId: string): SessionStatusType | undefined => {
-      const globalStatus = globalSessionStatuses.get(sessionId)?.type as SessionStatusType | undefined;
+    const getKnownStatusType = (sessionId: string): QueuedAutoSendSessionStatus | undefined => {
+      const globalStatus = globalSessionStatuses.get(sessionId)?.type as QueuedAutoSendSessionStatus | undefined;
       if (globalStatus) {
         return globalStatus;
       }
-      return liveSessionStatuses[sessionId]?.type as SessionStatusType | undefined;
+      return liveSessionStatuses[sessionId]?.type as QueuedAutoSendSessionStatus | undefined;
     };
 
     const dispatchSessionQueue = async (sessionId: string, queueSnapshot: QueuedMessage[]) => {
@@ -112,6 +110,13 @@ export function useQueuedMessageAutoSend(enabledOrOptions?: boolean | { enabled?
         return;
       }
       if (!payload.primaryText && payload.primaryAttachments.length === 0) {
+        return;
+      }
+
+      const failure = sendFailuresRef.current.get(sessionId);
+      if (failure && failure.messageId !== payload.queuedMessageId) {
+        sendFailuresRef.current.delete(sessionId);
+      } else if (isQueuedAutoSendBackedOff(failure, payload.queuedMessageId, Date.now())) {
         return;
       }
 
@@ -142,6 +147,7 @@ export function useQueuedMessageAutoSend(enabledOrOptions?: boolean | { enabled?
           sessionId,
         );
         if (wasLocalCommand) {
+          sendFailuresRef.current.delete(sessionId);
           return;
         }
 
@@ -161,9 +167,18 @@ export function useQueuedMessageAutoSend(enabledOrOptions?: boolean | { enabled?
             serverId: payload.sendTarget?.serverId,
           }
         );
+        sendFailuresRef.current.delete(sessionId);
       } catch (error) {
+        const sendError = error instanceof Error ? error : new Error(String(error));
         useMessageQueueStore.getState().restoreMessages(sessionId, [queuedMessage]);
-        console.warn('[queue] queued auto-send failed:', error);
+        const priorFailures = failure?.messageId === payload.queuedMessageId ? failure.failures : 0;
+        const failures = priorFailures + 1;
+        sendFailuresRef.current.set(sessionId, {
+          messageId: payload.queuedMessageId,
+          failures,
+          nextAttemptAt: Date.now() + getQueuedAutoSendRetryDelayMs(failures),
+        });
+        console.warn('[queue] queued auto-send failed:', sendError);
       } finally {
         inFlightSessionsRef.current.delete(sessionId);
       }
@@ -172,11 +187,11 @@ export function useQueuedMessageAutoSend(enabledOrOptions?: boolean | { enabled?
     const nextStatusMap = new Map(previousStatusRef.current);
     for (const [sessionId, status] of Object.entries(liveSessionStatuses)) {
       if (status) {
-        nextStatusMap.set(sessionId, status.type as SessionStatusType);
+        nextStatusMap.set(sessionId, status.type as QueuedAutoSendSessionStatus);
       }
     }
     for (const [sessionId, status] of globalSessionStatuses) {
-      nextStatusMap.set(sessionId, status.type as SessionStatusType);
+      nextStatusMap.set(sessionId, status.type as QueuedAutoSendSessionStatus);
     }
 
     const queueEntries = Object.entries(queuedMessages);
@@ -187,7 +202,7 @@ export function useQueuedMessageAutoSend(enabledOrOptions?: boolean | { enabled?
       }
       const previousStatusType = previousStatusRef.current.get(sessionId);
 
-      if (queue.length > 0 && shouldDispatchQueuedAutoSend(previousStatusType, currentStatusType)) {
+      if (queue.length > 0 && shouldDispatchQueuedAutoSend(previousStatusType, currentStatusType, true)) {
         void dispatchSessionQueue(sessionId, queue);
       }
 
