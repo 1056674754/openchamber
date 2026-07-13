@@ -173,6 +173,52 @@ describe('interrupted OpenCode run finalization', () => {
     }
   });
 
+  it('does not materialize terminal tool parts as interruption candidates', () => {
+    const { db, dbPath } = createTempDb();
+    try {
+      const message = {
+        id: 'msg_terminal_part',
+        role: 'assistant',
+        time: { created: 900, completed: 1200 },
+        finish: 'stop',
+      };
+      const part = {
+        id: 'prt_terminal',
+        type: 'tool',
+        tool: 'bash',
+        state: {
+          status: 'completed',
+          time: { start: 1000, end: 1100 },
+          output: 'done',
+        },
+      };
+      db.prepare('INSERT INTO message (id, data, time_updated) VALUES (?, ?, ?)').run(
+        message.id,
+        JSON.stringify(message),
+        1200
+      );
+      db.prepare('INSERT INTO part (id, message_id, data, time_updated) VALUES (?, ?, ?, ?)').run(
+        part.id,
+        message.id,
+        JSON.stringify(part),
+        1100
+      );
+    } finally {
+      db.close();
+    }
+
+    const result = finalizeInterruptedOpenCodeRuns({
+      dbPath,
+      Database,
+      now: () => 2000,
+      reason: 'test restart',
+    });
+
+    expect(result.candidateParts).toBe(0);
+    expect(result.updatedParts).toBe(0);
+    expect(result.updatedMessages).toBe(0);
+  });
+
   it('does not rewrite terminal messages that still contain a stale active-looking part', () => {
     const { db, dbPath } = createTempDb();
     try {

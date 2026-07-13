@@ -213,9 +213,24 @@ export const finalizeInterruptedOpenCodeRuns = ({
       };
     }
 
-    const candidateParts = db.prepare(
-      'SELECT id, message_id AS messageId, data FROM part WHERE data LIKE ?'
-    ).all('%"status"%');
+    const activeStatusValues = [...ACTIVE_TOOL_STATUSES];
+    const activeStatusPlaceholders = activeStatusValues.map(() => '?').join(', ');
+    const candidateParts = db.prepare(`
+      SELECT id, message_id AS messageId, data
+      FROM part
+      WHERE json_valid(data)
+        AND lower(
+          replace(
+            replace(
+              replace(trim(CAST(json_extract(data, '$.state.status') AS TEXT)), ' ', ''),
+              '_',
+              ''
+            ),
+            '-',
+            ''
+          )
+        ) IN (${activeStatusPlaceholders})
+    `).all(...activeStatusValues);
     if (candidateParts.length === 0) {
       return {
         dbPath,
