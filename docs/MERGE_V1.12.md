@@ -774,12 +774,13 @@ Phase 5 — 🔴 Markdown/Shiki 重写 (#1+#2): 独立 milestone，需迁移 for
 | 第三批 | Startup config 非阻塞 (`0542bcfc`) | 针对 `useConfigStore` / `client` / `bootstrap` 做逐段 diff，重点保护手动 model 和目录 model |
 | 独立 milestone | Chat/sidebar streaming 性能大改 (`e88afff2`) | 不整包合并；拆 chat tail isolation、sidebar row memo、sync stale guard 三块分别测试 |
 
-## v1.13.3 ~ v1.14.1 — 当前差距审核 (2026-07-09)
+## v1.13.3 ~ v1.16.0 — 当前差距审核 (更新于 2026-07-13)
 
-**社区当前版本**: `v1.14.1` (`9fc971c8`), 2026-07-07
+**社区当前版本**: `v1.16.0` (`e1e5bf61`), 2026-07-13
 **本 fork 当前版本标记**: `1.13.2-merging-dev` (`package.json`, `packages/{web,ui,electron,vscode}/package.json`)
 **已确认落地基线**: v1.12.4 Tier 1+2、v1.13.0 Tier 1、v1.13.1 低/中风险 A/B、v1.13.2 第一批低风险。
-**尚未等价宣布**: v1.13.3~v1.14.1 整体；本地已有若干后续功能的 fork 实现痕迹，但未按官方区间完整校准。
+**尚未等价宣布**: v1.13.3~v1.16.0 整体；本地已有若干后续功能的 fork 实现或等价实现，但未按官方区间完整校准。
+**Custom OpenCode 状态边界**: 外部 custom OpenCode 已单独更新 GPT-5.6 用量支持；这不等于 OpenChamber v1.16.0 的 OpenCode Go quota provider 或 Codex reset-window 修复，后两项仍按 OpenChamber 代码独立审核。
 
 ### 官方 compare 范围
 
@@ -796,6 +797,9 @@ Phase 5 — 🔴 Markdown/Shiki 重写 (#1+#2): 独立 milestone，需迁移 for
 | `v1.13.9...v1.14.0` | 26 | 133 | +11532/-6526 | voice input/local STT/Kokoro TTS、mobile composer 大重构、统一 list virtualization、cross-project abort、LAN auth/Windows CLI 修复 |
 | `v1.14.0...v1.14.1` | 17 | 91 | +4153/-392 | Small Model utility、session recap/suggestion、notes/TTS/git generation 改用 Small Model、timeline load earlier、line-range links、VS Code favorites/settings 修复 |
 | `v1.13.8...v1.14.1` | 70 | 450 | compare 过大未完整渲染 | 三个 release 合计；移动端/语音/Small Model/桌面运行时改动大，不能整包套 patch |
+| `v1.14.1...v1.15.0` | 50 | 249 | +19402/-2914 | private relay、native mobile pairing、多 transport desktop、通用 tool result/JSON viewer、project default model、Last turn diff、Mermaid zoom、code line number/wrap |
+| `v1.15.0...v1.16.0` | 63 | 231 | +11767/-1313 | server-driven session goals、server-persisted auto-accept、OpenCode Go quota、queue idle dispatch、subagent prompting、markdown preview、sidebar sort/pin/tree 修复、remote relay/security 修复 |
+| `v1.14.1...v1.16.0` | 113 | 408 | +31041/-4099 | 两个大版本合计；remote/mobile/goal 架构占比高，只能按独立能力切分，不能按 release 整包合并 |
 
 ### 版本功能盘点
 
@@ -810,13 +814,30 @@ Phase 5 — 🔴 Markdown/Shiki 重写 (#1+#2): 独立 milestone，需迁移 for
 | `v1.13.9` | native iOS/Android app projects、mobile saved connections/password unlock/QR/push/widgets/app resume、desktop bundled OpenCode CLI + custom CLI path、Keep awake、remote runtime custom headers、SSH UI password unlock、chat late tool/subagent/thinking scroll 修复、embedded JSON 防 result-card、idle reconnect 恢复、VS Code agent null-field/CLI detection 修复 | 🔴 高风险为主：本 fork 无 `packages/mobile`；desktop bundled CLI 与本 fork custom OpenCode binary/shared channel 约束冲突；remote headers/SSH/auth 可逐项评估；chat/sync 小修需适配本 fork scroll/routing |
 | `v1.14.0` | streaming dictation、local STT picker (Parakeet/Whisper/OpenAI-compatible)、Kokoro read-aloud、Voice settings 重构、mobile compact composer/bottom sheets/fullscreen editor/history button/autocomplete/keyboard choreography、统一 list virtualization、cross-project abort、LAN-bound local auth、prefer user OpenCode install、Windows CLI discovery/launch 修复 | 🟡/🔴 混合：本 fork 已有旧 STT/TTS/Kokoro/OpenAI-compatible 基础但没有 1.14 streaming dictation UI；mobile composer 大改因无 native mobile 包需延后；cross-project abort/Windows CLI 可单项合；list virtualization 要保护本 fork `@tanstack/react-virtual` MessageList |
 | `v1.14.1` | Small Model utility calls、finished reply recap/suggested next message、Notes selected text summarization、TTS summarized mode、Git/GitHub generation 改用 Small Model、timeline dialog load earlier、line-range file refs、first changed diff line jump、mobile keyboard/PWA safe-area 修复、desktop auth fallback 修复、VS Code favorite models/settings return 修复 | 🟡/🔴 混合：本地未见 `small-model`/session assist 地基；timeline/line-range/diff-line/VS Code favorites 多数可独立；Small Model 必须按 session directory/provider 权限设计，不能走全局 provider fallback |
+| `v1.15.0` | E2E private relay、native iOS/Android pairing v2、desktop 多 transport fallback/host health、Windows tray/startup、通用 tool result + navigable JSON、project default model、Last turn diff、Mermaid zoom、code line number/wrap、sticky user header/transport failure 等修复 | 🔴 架构功能占主导：本 fork 的 remote instances/sidebar 已深改且无 native mobile workspace；relay/pairing 不合。tool result、Mermaid zoom、code wrap、transport failure 可拆成独立中风险批次 |
+| `v1.16.0` | server-driven session goals、OpenCode Go quota/Codex reset time、relay candidate/identity/claim lock、server-persisted permission auto-accept、subagent direct prompt、queue idle dispatch、pending question/rename/pin refresh修复、markdown preview、project sort、editor font、fork source repo、agent YAML 保真、通知/Windows/mobile/security 修复 | 🟡/🔴 混合：queue idle dispatch 是最小高价值修复；markdown preview、VS Code Insiders、agent YAML 保真可单项合。Goals、relay、server auto-accept 会改 server/runtime authority，必须独立设计和验证 |
+
+### v1.15.0 ~ v1.16.0 新增差距分组
+
+| 分组 | 状态 | 判断 |
+|---|---|---|
+| Queue idle dispatch (`73209d4f`) | 🟢 建议下一项 | 本 fork 仍只在 `busy/retry -> idle` 时发送；若队列项加入时 session 已经是 idle，会一直等待。官方仅扩展 dispatch predicate + focused tests，需继续保护 `sendConfig` / `sendTarget` 和失败回滚 |
+| Markdown preview toggle (`7ab06f15`) | 🟢/🟡 可独立合 | 本地 FilesView 已有 Markdown 文本渲染基础，但没有官方 preview/source toggle；只涉及 FilesView 和 i18n，避免带入 upstream 整体 FilesView 布局 |
+| VS Code Insiders / Windows drive casing | 🟢 可独立合 | 都是边界明确的平台兼容修复；drive casing 必须统一进入 project/session/directory key 之前处理，不能只修显示 |
+| Agent YAML frontmatter preservation (`e9193876`) | 🟡 高价值 | 本 fork 已有 agent 多 scope 和远端实例语义；应先写未知 frontmatter round-trip test，再改保存合并逻辑 |
+| Tool result/JSON summary、Mermaid zoom、code line number/wrap、Last turn diff | 🟡 UI 批次 | 本地已有 JsonTreeViewer、Mermaid fork 修复、VirtualizedCodeBlock 和 turn projection；可复用现有组件，但不能直接换掉 Markdown/MessageBody/turn 模型 |
+| Project default model / project sort / command palette project search | 🟡 多 instance 敏感 | project default 必须按 serverId + directory 隔离；project sort 要保持所有 sidebar surface 使用同一 rank map；不能引入全局 active-project fallback |
+| Server-persisted permission auto-accept (`6231375b`) | 🟠 独立高风险 | 本地已有 UI store、draft intent、subagent inheritance和 server mirror，但 server 只保存进程内 Set；重启持久化、app 关闭后自动响应和多 server ownership 尚不等价 |
+| Session goals (`56cf5e29`) | 🔴 独立 milestone | 73 files / +3330，包含 server loop、Small Model audit、scheduled task、Plan、notifications、persistence、restart recovery；本 fork 还没完成 Small Model 地基，不能先套 UI 按钮 |
+| Private relay / pairing v2 / native mobile | 🔴 不合 | 与本 fork DIY remote instances/sidebar、认证、SSE proxy 和无 `packages/mobile` 的现状冲突；除非另立 remote transport 项目，不进入普通迁移批次 |
+| OpenCode Go quota / Codex reset windows | 🟡 独立 quota 批次 | GPT-5.6 用量更新发生在 custom OpenCode runtime；OpenChamber 的 provider registry、credential route、Web/VS Code parity 仍未移植，必须按 quota module 单独做 |
 
 ### 本地已有或部分覆盖
 
 | 功能 | 本地证据 | 结论 |
 |---|---|---|
 | macOS Dock unread badge | `packages/electron/main.mjs` 有 `desktop_set_dock_badge` IPC；`packages/ui/src/sync/desktop-dock-badge.ts` 已调用 | ✅ 已有 fork 实现；仍需和 v1.13.6 Appearance toggle / unseen activity 口径复核 |
-| Steer delivery 基础 | `steer-side-channel.ts`、`session-actions.ts`、`client.ts` 已支持 `deliveryMode: "steer"` | 🟡 有核心能力；v1.13.8 的 Settings > Chat `Follow-up behavior` 仍未完整替换现有 `queueModeEnabled` UX |
+| Follow-up behavior / Steer delivery | `steer-side-channel.ts`、`session-actions.ts`、`client.ts`、`followUpBehavior.ts`、`messageQueueStore.ts` | ✅ 已完成枚举设置、旧值迁移、Enter/修饰键行为与 queue-time config/target 快照；v1.16 queue idle dispatch 仍是独立缺口 |
 | gh CLI credentials | `packages/web/server/lib/github/gh-cli-credential.js`、routes/octokit 已接入 | ✅ 属于 v1.13.0 已移植项，后续 GitHub PR status 修复可在此基础上做 |
 | Cron parser | `packages/ui/src/lib/cron.ts`、scheduled-tasks runtime 已用 `cron-parser` | ✅ v1.13.1 已移植 |
 | Diff virtualization / PierreDiffViewer | `PierreDiffViewer.tsx`、`patchFileDiff.ts`、DiffView data-diff-virtual-root 已存在 | 🟡 有较多 v1.13.0 Git/Diff 地基，但 v1.13.3~8 的 history diff/cleanup 仍需 diff |
@@ -824,7 +845,7 @@ Phase 5 — 🔴 Markdown/Shiki 重写 (#1+#2): 独立 milestone，需迁移 for
 | Markdown/Shiki rewrite | 本地无 `packages/ui/src/components/chat/markdown/` 目录，仍有 `MarkdownRendererImpl.tsx` + react-markdown 路径 | ❌ v1.13.1 高风险重写仍未落地；后续 markdown fixes 若改 `markdownCore.ts` 不能直接套 |
 | Native mobile app projects | 本地只有 `packages/ui` / `packages/web` / `packages/electron` / `packages/vscode`，无 `packages/mobile` | ❌ v1.13.9 native iOS/Android app project 未落地；mobile/PWA UI 修复只能按现有 web mobile surface 选合 |
 | Voice/TTS 基础 | `VoiceSettings.tsx`、`useBrowserVoice.ts`、`useMessageTTS.ts`、`wasmSttService.ts`、`ttsInputMode: 'sanitized'|'raw'` 已存在；`small-model` 相关目录不存在 | 🟡 已有旧语音/TTS/STT 和 Kokoro/OpenAI-compatible 基础；v1.14.0 streaming dictation、local model picker、Kokoro first-class read-aloud、v1.14.1 summarized TTS 未等价 |
-| Desktop OpenCode CLI / remote auth | 本地已有 `OPENCHAMBER_OPENCODE_PATH` / `OPENCHAMBER_OPENCODE_BIN`、拒绝 OpenCode.app 当 CLI、UI password/remote instance 基础；未见 `runtime-request-headers.mjs`、bundled CLI prepare/verify 脚本、Keep awake 设置 | 🟡/🔴 部分覆盖；v1.13.9 bundled CLI 必须服从本 fork custom OpenCode build/shared DB 规则，remote custom headers 和 Keep awake 可单独评估 |
+| Desktop OpenCode CLI / remote auth | 本地已有 custom embedded OpenCode staging/verify/signing 脚本、强制 shared data channel、CLI path guards、Keep Awake、desktop/browser password fallback 和完整打包 runbook | ✅ custom packaging/Keep Awake/auth 已完成；官方 relay transport、remote custom headers/SSH saved password 仍未等价，不能混为一项 |
 | Timeline dialog | `TimelineDialog.tsx` 已接入 `onLoadEarlier` / loading 状态 / 加载前锚点保持，`ChatContainer` 使用当前 session timeline controller 提供分页状态 | ✅ 已有等价实现，无需重复移植 |
 | Line-range file refs / first changed line | `markdownFileReferences.ts` 已解析 `file.ts:10-20` / `#L10-L20` 并有 focused tests；`DiffView` 已按首个 changed line 打开文件 | ✅ 已有 fork 实现，保留现有 MarkdownRenderer 适配层 |
 | VS Code favorites/settings return | `modelPrefsAutoSave.ts` / `persistence.ts` 已持久化 favorites；`VSCodeLayout.tsx` 已用 `viewBeforeSettingsRef` 返回上一视图 | ✅ 已有等价实现，无需重复移植 |
@@ -857,7 +878,7 @@ Phase 5 — 🔴 Markdown/Shiki 重写 (#1+#2): 独立 milestone，需迁移 for
 | 2 | VS Code agent 可选字段清除写入 `null` | v1.13.9 | ✅ 已移植 | PATCH 传 `null` 时删除 md frontmatter / JSON field，保留其他 agent 配置；已补 bridge test |
 | 3 | Idle reconnect 后 stale busy 恢复 | v1.13.9 | ✅ 本地已有更完整实现 | `reconnect-recovery.ts` + `resyncDirectoryAfterReconnect` 已按 candidate sessions 回读 authoritative status；缺失 status 强制 idle，并有 stale-busy watchdog 同步 global store |
 | 4 | Windows OpenCode CLI 路径发现与 `.cmd` 启动 | v1.14.0 | ✅ 已移植 | web/desktop + VS Code 去除包裹引号；补 system npm prefix / Scoop；`.cmd` 经 `cmd.exe call` 启动 |
-| 5 | Task/subagent session id parser 增强 | v1.13.9 | ⏸️ 后续独立批次 | 与本 fork fallback child-session 匹配语义一起校准，不直接覆盖 |
+| 5 | Task/subagent session id parser 增强 | v1.13.9 | ✅ 已移植 | 已作为本 fork JSON / `task_id` / `session_id` 之后的补充解析，并保留 fallback child-session 匹配 |
 
 **运行确认 (2026-07-10)**: 用户已确认第二轮 1 / 2 / 4 在实际使用中可用。自动化验证为 15 个 focused assertions、root + VS Code type-check/lint、root build 与 VS Code build 全部通过；Windows 专项由模拟 `win32` runtime tests 覆盖，尚未在 Windows 真机复测。
 
@@ -865,19 +886,55 @@ Phase 5 — 🔴 Markdown/Shiki 重写 (#1+#2): 独立 milestone，需迁移 for
 
 | 优先级 | 功能 | 难度 | 当前判断 |
 |---:|---|---|---|
-| 1 | `<task id="...">` 子会话标签解析 | 🟢 低 | 官方只有独立 parser + 2 个 tests；接入本 fork 已有 JSON / `task_id` / fallback 解析链，不替换 `ToolPart` |
-| 2 | 排除 Windows OpenCode Desktop app 路径 | 🟢 低 | web/desktop 与 VS Code 当前仍可能把 `%LOCALAPPDATA%/Programs/opencode/opencode.exe` 当 standalone CLI；补 path guard + tests |
-| 3 | Desktop Keep Awake | 🟡 中 | Electron `powerSaveBlocker` + settings persistence + Desktop Network toggle；与多实例/sidebar 无关，但涉及 Electron IPC、settings helper 和 i18n |
-| 4 | Follow-up behavior (`steer` / `queue`) | 🟡 中 | 本 fork 已有 steer side-channel 和 queue sendConfig；需把 boolean `queueModeEnabled` 迁为枚举并保持旧设置兼容 |
-| 5 | Desktop/browser password auth fallback | 🟠 中高 | 官方修复 password-protected desktop/browser 错走 mobile unlock；本 fork auth/remote host 深改，只能按行为测试逐段适配 |
-| 6 | PWA keyboard resize-content 默认与 safe-area 收尾 | 🟡 中 | 本地已有 keyboard mode / iOS fallback；官方改默认值和 viewport meta，必须做 iOS Safari/PWA 实机 QA，不能只套 HTML diff |
+| 1 | `<task id="...">` 子会话标签解析 | ✅ 已移植 | 新增独立 parser + 3 tests（含属性乱序），作为本 fork JSON / `task_id` / `session_id` 之后的补充解析，不替换 fallback child-session 逻辑 |
+| 2 | 排除 Windows OpenCode Desktop app 路径 | ✅ 已移植 | web/desktop 与 VS Code 均排除 `%LOCALAPPDATA%/Programs/opencode/opencode.exe`；显式 settings 会报准确错误，PATH/where/fallback 自动发现会跳过；保留 WSL 禁用策略 |
+| 3 | Desktop Keep Awake | ✅ 已移植 | Electron `powerSaveBlocker('prevent-app-suspension')`、settings persistence、启动恢复、退出清理、Desktop Network toggle 和 8 locale 已接入 |
+| 4 | Follow-up behavior (`steer` / `queue`) | ✅ 已按 fork 架构移植 | 新增明确的 follow-up preference、旧 boolean/`immediate` 迁移和 busy submit 行为矩阵；保留 queue-time `sendConfig` + `sendTarget`，未整段替换官方 queue store |
+| 5 | Desktop/browser password auth fallback | ✅ 已按 fork 架构移植 | 未引入官方 `runtime-switch`/client-token 地基；Electron 主进程代发当前远端 origin 的密码登录并把 HttpOnly session Cookie 写入当前窗口 session，IPC 严格限制同源 |
+| 6 | PWA keyboard resize-content 默认与 safe-area 收尾 | ✅ 已移植，待真机复测 | 无配置默认改为 `resize-content`，保留显式 `native` override；iOS 不再强制回退；PWA composer、dialog、overlay、top toast safe-area 已按本 fork 现有 DOM 适配 |
+
+### Follow-up behavior 专项审计与实现（2026-07-13）
+
+**官方 v1.13.8 的行为**：
+
+- 把 `queueModeEnabled: boolean` 升级为 `followUpBehavior: 'steer' | 'queue'`，新默认值是 `steer`。
+- 迁移旧值：`queueModeEnabled=true` 映射到 `queue`，`false` 和旧 `immediate` 映射到 `steer`。
+- busy session 下，主 Enter 行为由该枚举决定；queue 模式下可用修饰键 steer，steer 模式下主 Enter 直接 steer。它同时改设置 UI、持久化和 `ChatInput` 热路径，并非只换一个 label。
+
+**本 fork 的 DIY 行为**：
+
+- 仍以 `queueModeEnabled=true` 为默认；busy 时普通提交进入 queue，并保留显式 `deliveryMode: 'steer'` / `'interrupt'` 路径。
+- queue item 已在排队时冻结 `provider/model/agent/variant` 的 `sendConfig`，解决了切换 agent/model 后排队消息仍用旧配置的问题。
+- queue item 额外冻结 `sendTarget`（`directory` + `serverId`）。这是本 fork 多 instance / remote routing 的关键字段，官方 queue store 没有这层上下文。
+- 本 fork 的 `steer-side-channel.ts`、`session-actions.ts` 和 `client.ts` 已有 steer transport；缺的是统一的 follow-up preference UX，不缺底层 steer 能力。
+
+**为什么没有直接套官方 diff**：
+
+1. 整段替换官方 queue store 会丢 `sendTarget`，排队消息可能被发到后来激活的 instance/directory。
+2. 新用户默认从 queue 变成 steer，属于明显行为改变；旧用户迁移和无旧设置用户的默认策略必须单独决定。
+3. 官方重写 Enter/Ctrl+Enter 分支，容易和本 fork 的 `normal` / `steer` / `interrupt`、magic prompt、question state、queued force-send 分支交叉。
+4. 现有“排队时冻结 agent/model/variant”修复必须继续以 queue item snapshot 为权威，不能在实际发送时从 live controls 重新解析。
+
+**本次实现结果**：
+
+- `followUpBehavior: 'steer' | 'queue'` 已替代运行时 `queueModeEnabled`；全新安装默认 `steer`，旧 `true/false/immediate` 分别迁移为 `queue/steer/steer`。
+- busy session 下，Enter 执行所选行为，Ctrl/Cmd+Enter 执行另一个行为；idle/new-session 始终走 normal send。原显式 interrupt-and-send 闪电按钮已移除，紧急中止统一使用停止按钮后再发送。
+- queue item 的 `sendConfig` 与 `sendTarget` 继续作为自动发送和手动发送的权威快照；迁移测试覆盖 agent/model/variant 与 directory/serverId 不丢失。
+- Settings > Chat 已改为 `Steer now / Queue` 选择器，并完成 8 个 locale、桌面和 390px 响应式验证；设置同时写入 Zustand v1 与 `/api/config/settings`。
+- focused tests、`bun run type-check`、`bun run lint` 和 Playwright 实际切换/恢复均通过。
+
+### Fork runtime / packaging 完成记录（2026-07-13）
+
+- Packaged app 启动时的 interrupted-run recovery 已改为 SQLite JSON 条件过滤，不再把所有含 `status` 的历史 part materialize 到 Electron 内存；22GB 实际 `opencode.db` 验证约 2.7 秒完成且候选为 0，修复此前约 3.7GB RSS 后 OOM 退出的问题。
+- Custom embedded OpenCode 已建立 staging、identity/version、shared data channel、双重签名和 packaged smoke-check 脚本；`docs/EMBEDDED_OPENCODE_PACKAGING.md` 是强制 runbook，禁止用官方 binary 替换 custom merged build。
+- Electron packaged app 与 `bun run dev` 均已用真实共享数据启动验证；这些是 fork runtime 稳定性/分发能力，不把它们误计为上游 release feature。
 
 ### 中等难度 / 需要逐段适配
 
 | 功能 | 影响文件/模块 | 风险点 |
 |---|---|---|
 | slash skill 调用、粘贴 `@`、ArrowUp history、发送关闭 question prompt | `ChatInput.tsx`、autocomplete、question state | 本地 `ChatInput.tsx` 近 5k 行，已有 magic prompts、queue mode、remote routing；只移植纯逻辑函数和测试 |
-| queue drag reorder + Follow-up behavior | `messageQueueStore.ts`、`QueuedMessageChips.tsx`、`OpenChamberVisualSettings.tsx`、`ChatInput.tsx` | 官方用 Follow-up behavior 替换 queue-mode；本 fork 已有 `steer` 能力但设置仍是 boolean `queueModeEnabled` |
+| queue drag reorder | `messageQueueStore.ts`、`QueuedMessageChips.tsx` | Follow-up behavior 已完成；剩余仅是 queued message drag reorder，需要继续保护 `sendConfig` + `sendTarget` 快照 |
 | model picker reorder/accordion/Shift+Delete + thinking variant | `ModelPickerList.tsx`、`ModelControls.tsx`、agents settings | fork 已有 hidden/favorite/recent 和 remote instance model scope；必须按 instance/serverId 隔离 |
 | agent temp/topP/thinking save/clear | `AgentsPage.tsx`、`useAgentsStore.ts`、server agents/config | 本 fork 已做过 prompt/permission persistence；新增字段要按 custom/project/user 层级合并 |
 | session project binding / pinned/folder empty refresh / worktree snap-back | sidebar hooks、global sessions store、project selection | fork 有 remote instance、Global Pinned、session markers；所有 fallback 必须使用 session/directory authoritative context |
@@ -899,17 +956,18 @@ Phase 5 — 🔴 Markdown/Shiki 重写 (#1+#2): 独立 milestone，需迁移 for
 | v1.13.4 dead-code cleanup / knip sweep | compare 删除大量 UI/shared 文件；fork 仍有远程实例、session markers、custom UI 依赖 | 暂缓。cleanup 不应和功能合并混在一起 |
 | Japanese docs/i18n bulk import | 文件量很大但业务风险低；容易污染 diff | 等功能批次稳定后单独做 docs/i18n 批次 |
 | Native iOS/Android app project | v1.13.9 新增 `packages/mobile`，当前 fork 无该 workspace，且本 fork desktop/web runtime 已有自定义远程实例/managed runtime 语义 | 不作为第一阶段；除非明确决定引入 mobile workspace，否则只选合 PWA/mobile web 修复 |
-| Bundled OpenCode CLI | 官方 v1.13.9 打包 pinned OpenCode CLI，但本 fork 明确要求保留 custom merged OpenCode build 和 shared `opencode.db` channel | 不能直接 port；先设计 custom build packaging/update 策略 |
+| 官方 bundled OpenCode CLI / updater | 官方 v1.13.9 打包 pinned official CLI；本 fork 已完成 custom merged binary staging/signing/runbook，并强制 shared `opencode.db` channel | 不直接 port 官方 binary 或自动升级；后续只评估 updater UX，custom binary provenance 与 shared-data invariant 不变 |
 | Mobile composer/keyboard full redesign | v1.14.0/1 大面积改 `MobileApp`/`ChatInput`/autocompletes/keyboard choreography；本 fork 没有 native mobile package，且 ChatInput 深改 | 先处理小的 PWA auth/safe-area bug；大重构单独排 |
 
 ### 建议下一步批次
 
-1. **小修批次 A (低风险)**: header encoding、MiniMax quota、skills catalog refresh、provider disconnect、Git push sync、Preview duplicate token。line-range refs / first changed line 与第二轮 JSON/VS Code/Windows CLI 小修已完成。
+1. **Queue reliability 批次 A (低风险)**: 先合 v1.16 queue idle dispatch (`73209d4f`)，补 idle→idle + queue snapshot 回归测试；queue drag reorder 后续单独处理。
 2. **CLI/Startup/Desktop auth 批次 B**: pid identity、live port check、update helper、quota/provider startup、Bun global CLI fix、LAN-bound local auth token，按 helper/route 切，不做 v1.13.4 cleanup。
-3. **GitHub PR status 批次 C**: timeout/rate-limit/cooldown/concurrent metadata，并验证启动时 session/diff/message 不被 PR status 阻塞。
-4. **Chat input/abort 批次 D**: pasted `@`、ArrowUp、question dismiss、slash skill 调用、cross-project abort routing，全部补 focused tests。
-5. **Queue/Steer 批次 E**: 把 boolean `queueModeEnabled` 迁到 Follow-up behavior (`steer` / `queue`)，复用本 fork `steer-side-channel`。
+3. **小修批次 C**: header encoding、MiniMax quota、skills catalog refresh、provider disconnect、Git push sync、Preview duplicate token、VS Code Insiders；line-range refs / first changed line 与第二轮 JSON/VS Code/Windows CLI 小修已完成。
+4. **GitHub PR status 批次 D**: timeout/rate-limit/cooldown/concurrent metadata，并验证启动时 session/diff/message 不被 PR status 阻塞。
+5. **Queue/Steer 批次 E (已完成)**: boolean 已迁到 Follow-up behavior (`steer` / `queue`) 并复用本 fork `steer-side-channel`；后续 queue drag reorder 单独处理。
 6. **Session/worktree 批次 F**: selected project binding、folder/pinned refresh、worktree snap-back、subagent delete cascade；timeline dialog load earlier 已完成。其余项必须按 `openchamber-context-authority` 校准 directory/serverId。
-7. **VS Code 批次 G**: favorites persist、settings previous-view、agent null field cleanup、Windows CLI detection 已完成；后续只按新发现的 extension-only gap 单独开批次。
+7. **Chat input/abort 批次 G**: pasted `@`、ArrowUp、question dismiss、slash skill 调用、cross-project abort routing，全部补 focused tests。
 8. **Voice/Small Model 批次 H**: 先做 Small Model server capability + settings + one consumer（建议 TTS summarized 或 Notes selected text），再扩展 session recap/suggestion 和 Git/GitHub generation。
-9. **高风险 milestone**: chat scroll + auto-follow、OpenCode process ownership、Markdown/Shiki rewrite、mobile/native app、bundled custom OpenCode packaging、bulk docs/i18n，分别处理。
+9. **v1.15 UI 批次 I**: Mermaid zoom、code line number/wrap、ambiguous transport failure、Markdown preview，按现有 Markdown/VirtualizedCodeBlock/FilesView 架构逐项适配。
+10. **高风险 milestone**: server-persisted auto-accept、session goals、chat scroll + auto-follow、OpenCode process ownership、Markdown/Shiki rewrite、mobile/native app、private relay/pairing、bulk docs/i18n，分别处理。

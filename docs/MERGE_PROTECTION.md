@@ -34,23 +34,23 @@ These files are changed in EVERY upstream release AND contain local features. **
 
 ## Feature Catalog
 
-### F1: Queue Mode (Commit: `19b6e6c9`)
+### F1: Follow-up Behavior (original Queue Mode commit: `19b6e6c9`)
 
 **Status**: ✅ Restored (was lost in v1.10.3 merge)
 
 **What it does**:
-- Enter/Ctrl+Enter send behavior toggles between "queue" and "send immediately" based on setting
-- Floating queue button above stop button with 45° rotated send icon
-- Dynamic tooltip showing "Click to queue" / "Ctrl+Click to send immediately"
+- Enter/Ctrl+Enter send behavior toggles between `steer` and `queue` based on setting
+- One centered floating follow-up button above the stop button with a 45° rotated send icon
+- Dynamic tooltip shows the selected action and its Ctrl/Meta alternate
 - Ctrl/Meta key held detection for real-time tooltip updates
 
 **Files containing this feature**:
 - `packages/ui/src/components/chat/ChatInput.tsx` — `ComposerActionButtons` component
-  - Props: `onSendNow`, `queueModeEnabled`
+  - Props: `onSendNow`, `followUpBehavior`
   - State: `isCtrlHeld` with keyboard listeners
   - Icon: `RiSendPlane2Line` with `-rotate-45`
   - Tooltip: `<Tooltip>` wrapping queue button with `tooltipText`
-  - Memo comparison must include `queueModeEnabled`
+  - Memo comparison must include `followUpBehavior`
 - `packages/ui/src/components/chat/ChatInput.tsx` — `handleKeyDown` (Enter/Ctrl+Enter logic, lines ~1844-1873)
 - `packages/ui/src/components/chat/ChatInput.tsx` — `handleSendNow` callback
 - `packages/ui/src/components/chat/ChatInput.tsx` — `handlePrimaryAction` callback
@@ -60,9 +60,6 @@ These files are changed in EVERY upstream release AND contain local features. **
 - `chat.chatInput.actions.queueButton.ctrlEnter`
 - `chat.chatInput.actions.queueButton.queue`
 - `chat.chatInput.actions.queueButton.send`
-- `chat.chatInput.actions.queueMessageTooltip`
-- `chat.chatInput.actions.sendImmediatelyAria`
-- `chat.chatInput.actions.sendImmediatelyTooltip`
 
 **Signature tokens to grep after merge**:
 ```
@@ -547,7 +544,7 @@ Any line prefixed with `>` is a local-only key that must survive the merge. Repe
 
 | Group | Count | Key prefix |
 |---|---|---|
-| Queue mode | 7 | `chat.chatInput.actions.queueButton.*`, `sendImmediately*` |
+| Follow-up behavior | 4 | `chat.chatInput.actions.queueButton.*` |
 | Reasoning UI | 2 | `chat.reasoning.*` |
 | Revert confirm | 4 | `chat.revertConfirm.*` |
 | Compaction | 2 | `chat.compaction.*` |
