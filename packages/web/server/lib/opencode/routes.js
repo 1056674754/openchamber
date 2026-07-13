@@ -251,6 +251,16 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
       ? req.body.target.trim()
       : undefined;
     try {
+      const settings = await readSettingsFromDiskMigrated();
+      const resolution = await getOpenCodeResolutionSnapshot(settings);
+      if (resolution?.source === 'bundled') {
+        return res.status(409).json({
+          success: false,
+          source: 'bundled',
+          error: 'Bundled OpenCode must be upgraded by rebuilding and re-signing OpenChamber',
+        });
+      }
+
       const response = await fetch(buildOpenCodeUrl('/global/upgrade', ''), {
         method: 'POST',
         headers: {

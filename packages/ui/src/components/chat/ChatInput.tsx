@@ -93,6 +93,10 @@ import {
 import { buildSlashSkillDispatch } from './skillSlashDispatch';
 import type { Message, Part } from '@opencode-ai/sdk/v2/client';
 import type { ContextPanelMode } from '@/stores/useUIStore';
+import {
+    resolveFollowUpAction,
+    type FollowUpBehavior,
+} from '@/lib/followUpBehavior';
 
 const MAX_VISIBLE_TEXTAREA_LINES = 8;
 const EMPTY_QUEUE: QueuedMessage[] = [];
@@ -810,7 +814,6 @@ const FocusModeButton = React.memo(function FocusModeButton(props: FocusModeButt
 type ComposerActionButtonsProps = {
     isMobile: boolean;
     footerIconButtonClass: string;
-    runningActionOffsetClass: string;
     sendIconSizeClass: string;
     stopIconSizeClass: string;
     canSend: boolean;
@@ -822,16 +825,14 @@ type ComposerActionButtonsProps = {
     onPrimaryAction: () => void;
     onQueueMessage: () => void;
     onSendNow: () => void;
-    onInterruptAndSend: () => void;
     onAbort: () => void;
-    queueModeEnabled: boolean;
+    followUpBehavior: FollowUpBehavior;
 };
 
 const ComposerActionButtons = React.memo(function ComposerActionButtons(props: ComposerActionButtonsProps) {
     const {
         isMobile,
         footerIconButtonClass,
-        runningActionOffsetClass,
         sendIconSizeClass,
         stopIconSizeClass,
         canSend,
@@ -843,9 +844,8 @@ const ComposerActionButtons = React.memo(function ComposerActionButtons(props: C
         onPrimaryAction,
         onQueueMessage,
         onSendNow,
-        onInterruptAndSend,
         onAbort,
-        queueModeEnabled,
+        followUpBehavior,
     } = props;
     const { t } = useI18n();
     const [isCtrlHeld, setIsCtrlHeld] = React.useState(false);
@@ -874,11 +874,11 @@ const ComposerActionButtons = React.memo(function ComposerActionButtons(props: C
 
     const ctrlKeyLabel = isMacOS() ? '⌘' : 'Ctrl';
 
-    const defaultAction = queueModeEnabled
+    const defaultAction = followUpBehavior === 'queue'
         ? t('chat.chatInput.actions.queueButton.queue')
         : t('chat.chatInput.actions.queueButton.send');
 
-    const alternateAction = queueModeEnabled
+    const alternateAction = followUpBehavior === 'queue'
         ? t('chat.chatInput.actions.queueButton.send')
         : t('chat.chatInput.actions.queueButton.queue');
 
@@ -922,8 +922,7 @@ const ComposerActionButtons = React.memo(function ComposerActionButtons(props: C
         <div className="relative">
             {hasContent ? (
                 <div className={cn(
-                    'absolute z-20 bottom-full left-1/2 mb-1 flex items-center gap-1',
-                    runningActionOffsetClass,
+                    'absolute z-20 bottom-full left-1/2 mb-1 flex -translate-x-1/2 items-center',
                 )}>
                     <Tooltip>
                         <TooltipTrigger asChild>
@@ -936,7 +935,7 @@ const ComposerActionButtons = React.memo(function ComposerActionButtons(props: C
                                     }
                                     const isCtrlClick = event.ctrlKey || event.metaKey;
                                     if (isCtrlClick) {
-                                        if (queueModeEnabled) {
+                                        if (followUpBehavior === 'queue') {
                                             onSendNow();
                                         } else {
                                             onQueueMessage();
@@ -956,32 +955,6 @@ const ComposerActionButtons = React.memo(function ComposerActionButtons(props: C
                         </TooltipTrigger>
                         <TooltipContent side="top" sideOffset={8}>
                             {tooltipText}
-                        </TooltipContent>
-                    </Tooltip>
-                    <Tooltip>
-                        <TooltipTrigger asChild>
-                            <button
-                                type="button"
-                                disabled={!currentSessionId}
-                                onClick={(event) => {
-                                    if (isMobile) {
-                                        event.preventDefault();
-                                    }
-                                    onInterruptAndSend();
-                                }}
-                                className={cn(
-                                    footerIconButtonClass,
-                                    currentSessionId
-                                        ? 'text-[var(--status-warning)] hover:bg-[var(--status-warning)]/10 hover:text-[var(--status-warning)]'
-                                        : 'opacity-30'
-                                )}
-                                aria-label={t('chat.chatInput.actions.interruptAndSendAria')}
-                            >
-                                <Icon name="flashlight" className={cn(sendIconSizeClass)} />
-                            </button>
-                        </TooltipTrigger>
-                        <TooltipContent side="top" sideOffset={8}>
-                            {t('chat.chatInput.actions.interruptAndSendTooltip')}
                         </TooltipContent>
                     </Tooltip>
                 </div>
@@ -1005,7 +978,6 @@ const ComposerActionButtons = React.memo(function ComposerActionButtons(props: C
 }, (prev, next) => (
     prev.isMobile === next.isMobile
     && prev.footerIconButtonClass === next.footerIconButtonClass
-    && prev.runningActionOffsetClass === next.runningActionOffsetClass
     && prev.sendIconSizeClass === next.sendIconSizeClass
     && prev.stopIconSizeClass === next.stopIconSizeClass
     && prev.canSend === next.canSend
@@ -1014,11 +986,10 @@ const ComposerActionButtons = React.memo(function ComposerActionButtons(props: C
     && prev.hasContent === next.hasContent
     && prev.currentSessionId === next.currentSessionId
     && prev.newSessionDraftOpen === next.newSessionDraftOpen
-    && prev.queueModeEnabled === next.queueModeEnabled
+    && prev.followUpBehavior === next.followUpBehavior
     && prev.onPrimaryAction === next.onPrimaryAction
     && prev.onQueueMessage === next.onQueueMessage
     && prev.onSendNow === next.onSendNow
-    && prev.onInterruptAndSend === next.onInterruptAndSend
     && prev.onAbort === next.onAbort
 ));
 
@@ -1647,7 +1618,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     } | null>(null);
 
     // Message queue
-    const queueModeEnabled = useMessageQueueStore((state) => state.queueModeEnabled);
+    const followUpBehavior = useMessageQueueStore((state) => state.followUpBehavior);
     const queuedMessages = useMessageQueueStore(
         React.useCallback(
             (state) => {
@@ -2564,23 +2535,22 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     // Update ref with latest handleSubmit on every render
     handleSubmitRef.current = handleSubmit;
 
-    // Primary action for send button - respects queue mode setting
     const handlePrimaryAction = React.useCallback(() => {
         const inputSnapshot = getCurrentInputSnapshot();
         const canQueue = inputMode === 'normal' && inputSnapshot.hasContent && currentSessionId && sessionPhase !== 'idle';
-        if (queueModeEnabled && canQueue) {
-            handleQueueMessage();
-        } else {
-            void handleSubmitRef.current();
+        const action = resolveFollowUpAction({
+            behavior: followUpBehavior,
+            canQueue: Boolean(canQueue),
+            alternate: false,
+        });
+        if (action === 'queue') {
+            return handleQueueMessage();
         }
-    }, [inputMode, getCurrentInputSnapshot, currentSessionId, sessionPhase, queueModeEnabled, handleQueueMessage]);
+        void handleSubmitRef.current({ deliveryMode: action });
+    }, [inputMode, getCurrentInputSnapshot, currentSessionId, sessionPhase, followUpBehavior, handleQueueMessage]);
 
     const handleSendNow = React.useCallback(() => {
         void handleSubmitRef.current({ deliveryMode: 'steer' });
-    }, []);
-
-    const handleInterruptAndSend = React.useCallback(() => {
-        void handleSubmitRef.current({ deliveryMode: 'interrupt' });
     }, []);
 
     const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -2797,39 +2767,21 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             return;
         }
 
-        // Handle Enter/Ctrl+Enter based on queue mode
         if (e.key === 'Enter' && !e.shiftKey && (!isMobile || e.ctrlKey || e.metaKey)) {
             e.preventDefault();
 
             const isCtrlEnter = e.ctrlKey || e.metaKey;
-
-            // Queue mode: Enter queues, Ctrl+Enter sends
-            // Normal mode: Enter sends, Ctrl+Enter queues
-            // Note: Queueing only works when there's an existing session (currentSessionId)
-            // For new sessions (draft), always send immediately
             const canQueue = inputMode === 'normal' && hasContent && currentSessionId && sessionPhase !== 'idle';
-
-            if (queueModeEnabled) {
-                if (isCtrlEnter || !canQueue) {
-                    // Ctrl+Enter sends (send now), or Enter when can't queue (new session)
-                    if (isCtrlEnter && sessionPhase !== 'idle') {
-                        handleSubmit({ deliveryMode: 'steer' });
-                    } else {
-                        handleSubmit();
-                    }
-                } else {
-                    // Enter queues when we have a session
-                    handleQueueMessage();
-                }
-            } else {
-                if (isCtrlEnter && canQueue) {
-                    // Ctrl+Enter queues when we have a session
-                    handleQueueMessage();
-                } else {
-                    // Enter sends
-                    handleSubmit();
-                }
+            const action = resolveFollowUpAction({
+                behavior: followUpBehavior,
+                canQueue: Boolean(canQueue),
+                alternate: isCtrlEnter,
+            });
+            if (action === 'queue') {
+                handleQueueMessage();
+                return;
             }
+            handleSubmit({ deliveryMode: action });
         }
     };
 
@@ -4282,9 +4234,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 
     const footerPaddingClass = isMobile ? 'px-1.5 py-1.5' : (isVSCode ? 'px-1.5 py-1' : 'px-2.5 py-1.5');
     const buttonSizeClass = isMobile ? 'h-8 w-8' : (isVSCode ? 'h-5 w-5' : 'h-6 w-6');
-    const runningActionOffsetClass = isMobile
-        ? 'translate-x-[calc(-50%+1.125rem)]'
-        : (isVSCode ? 'translate-x-[calc(-50%+0.75rem)]' : 'translate-x-[calc(-50%+0.875rem)]');
     const sendIconSizeClass = isMobile ? 'h-4 w-4' : (isVSCode ? 'h-3.5 w-3.5' : 'h-4 w-4');
     const stopIconSizeClass = isMobile ? 'h-6 w-6' : (isVSCode ? 'h-4 w-4' : 'h-5 w-5');
     const iconSizeClass = isMobile ? 'h-[18px] w-[18px]' : (isVSCode ? 'h-4 w-4' : 'h-[18px] w-[18px]');
@@ -4341,7 +4290,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         <form
             onSubmit={(e) => { e.preventDefault(); handlePrimaryAction(); }}
             className={cn(
-                "relative pt-0 pb-4",
+                "oc-mobile-composer relative pt-0 pb-4",
                 isDesktopExpanded && 'flex h-full min-h-0 flex-col pt-4',
                 isMobile && 'bottom-safe-area'
             )}
@@ -4877,7 +4826,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                             <ComposerActionButtons
                                                 isMobile={isMobile}
                                                 footerIconButtonClass={footerIconButtonClass}
-                                                runningActionOffsetClass={runningActionOffsetClass}
                                                 sendIconSizeClass={sendIconSizeClass}
                                                 stopIconSizeClass={stopIconSizeClass}
                                                 canSend={canSend}
@@ -4889,9 +4837,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                                 onPrimaryAction={handlePrimaryAction}
                                                 onQueueMessage={handleQueueMessage}
                                                 onSendNow={handleSendNow}
-                                                onInterruptAndSend={handleInterruptAndSend}
                                                 onAbort={handleAbort}
-                                                queueModeEnabled={queueModeEnabled}
+                                                followUpBehavior={followUpBehavior}
                                             />
                                         </div>
                                     </div>
@@ -4956,7 +4903,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                     <ComposerActionButtons
                                         isMobile={isMobile}
                                         footerIconButtonClass={footerIconButtonClass}
-                                        runningActionOffsetClass={runningActionOffsetClass}
                                         sendIconSizeClass={sendIconSizeClass}
                                         stopIconSizeClass={stopIconSizeClass}
                                         canSend={canSend}
@@ -4968,9 +4914,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                                 onPrimaryAction={handlePrimaryAction}
                                                 onQueueMessage={handleQueueMessage}
                                                 onSendNow={handleSendNow}
-                                                onInterruptAndSend={handleInterruptAndSend}
                                                 onAbort={handleAbort}
-                                                queueModeEnabled={queueModeEnabled}
+                                                followUpBehavior={followUpBehavior}
                                             />
                                 </div>
                             </>

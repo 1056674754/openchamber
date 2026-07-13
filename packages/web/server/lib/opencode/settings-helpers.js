@@ -24,6 +24,16 @@ export const createSettingsHelpers = (dependencies) => {
   const PWA_ORIENTATION_VALUES = new Set(['system', 'portrait', 'landscape']);
   const MOBILE_KEYBOARD_MODE_VALUES = new Set(['native', 'resize-content']);
 
+  const normalizeFollowUpBehavior = (value, fallback = 'steer') => {
+    if (value === 'steer' || value === 'queue') {
+      return value;
+    }
+    if (value === 'immediate') {
+      return 'steer';
+    }
+    return fallback;
+  };
+
   const normalizePwaAppName = (value, fallback = '') => {
     if (typeof value !== 'string') {
       return fallback;
@@ -115,6 +125,9 @@ export const createSettingsHelpers = (dependencies) => {
     }
     if (typeof candidate.desktopLanAccessEnabled === 'boolean') {
       result.desktopLanAccessEnabled = candidate.desktopLanAccessEnabled;
+    }
+    if (typeof candidate.desktopKeepAwakeEnabled === 'boolean') {
+      result.desktopKeepAwakeEnabled = candidate.desktopKeepAwakeEnabled;
     }
     if (typeof candidate.desktopKeepManagedOpenCodeAliveOnQuit === 'boolean') {
       result.desktopKeepManagedOpenCodeAliveOnQuit = candidate.desktopKeepManagedOpenCodeAliveOnQuit;
@@ -304,6 +317,9 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.defaultGitIdentityId === 'string') {
       const trimmed = candidate.defaultGitIdentityId.trim();
       result.defaultGitIdentityId = trimmed.length > 0 ? trimmed : undefined;
+    }
+    if (candidate.followUpBehavior === 'steer' || candidate.followUpBehavior === 'queue') {
+      result.followUpBehavior = candidate.followUpBehavior;
     }
     if (typeof candidate.queueModeEnabled === 'boolean') {
       result.queueModeEnabled = candidate.queueModeEnabled;
@@ -800,7 +816,15 @@ export const createSettingsHelpers = (dependencies) => {
     const hasManagedRemoteTunnelToken = typeof settings?.managedRemoteTunnelToken === 'string' && settings.managedRemoteTunnelToken.trim().length > 0;
     const pwaAppName = normalizePwaAppName(settings?.pwaAppName, '');
     const pwaOrientation = normalizePwaOrientation(settings?.pwaOrientation, 'system');
-    const mobileKeyboardMode = normalizeMobileKeyboardMode(settings?.mobileKeyboardMode, 'native');
+    const mobileKeyboardMode = normalizeMobileKeyboardMode(settings?.mobileKeyboardMode, 'resize-content');
+    const hasPersistedFollowUpBehavior = settings?.followUpBehavior === 'steer'
+      || settings?.followUpBehavior === 'queue'
+      || settings?.followUpBehavior === 'immediate'
+      || typeof settings?.queueModeEnabled === 'boolean';
+    const legacyFollowUpBehavior = typeof settings?.queueModeEnabled === 'boolean'
+      ? (settings.queueModeEnabled ? 'queue' : 'steer')
+      : 'steer';
+    const followUpBehavior = normalizeFollowUpBehavior(settings?.followUpBehavior, legacyFollowUpBehavior);
 
     return {
       ...sanitized,
@@ -809,6 +833,7 @@ export const createSettingsHelpers = (dependencies) => {
       ...(pwaAppName ? { pwaAppName } : {}),
       pwaOrientation,
       mobileKeyboardMode,
+      ...(hasPersistedFollowUpBehavior ? { followUpBehavior } : {}),
       approvedDirectories: approved,
       securityScopedBookmarks: bookmarks,
       pinnedDirectories: normalizeStringArray(settings.pinnedDirectories),

@@ -3,6 +3,10 @@ import { devtools, persist, createJSONStorage } from 'zustand/middleware';
 import { getSafeStorage } from './utils/safeStorage';
 import type { AttachedFile } from './types/sessionTypes';
 import { updateDesktopSettings } from '@/lib/persistence';
+import {
+    resolvePersistedFollowUpBehavior,
+    type FollowUpBehavior,
+} from '@/lib/followUpBehavior';
 
 export interface QueuedMessage {
     id: string;
@@ -25,7 +29,7 @@ export interface QueuedMessage {
 
 interface MessageQueueState {
     queuedMessages: Record<string, QueuedMessage[]>; // sessionId → queue
-    queueModeEnabled: boolean; // global toggle
+    followUpBehavior: FollowUpBehavior;
 }
 
 interface MessageQueueActions {
@@ -35,18 +39,115 @@ interface MessageQueueActions {
     popToInput: (sessionId: string, messageId: string) => QueuedMessage | null;
     clearQueue: (sessionId: string) => void;
     clearAllQueues: () => void;
-    setQueueMode: (enabled: boolean) => void;
+    setFollowUpBehavior: (behavior: FollowUpBehavior) => void;
     getQueueForSession: (sessionId: string) => QueuedMessage[];
 }
 
 type MessageQueueStore = MessageQueueState & MessageQueueActions;
+
+type MessageQueuePersistedState = Pick<MessageQueueState, 'queuedMessages' | 'followUpBehavior'>;
+
+const isRecord = (value: unknown): value is Record<string, unknown> => (
+    typeof value === 'object' && value !== null && !Array.isArray(value)
+);
+
+const parseSendTarget = (value: unknown): QueuedMessage['sendTarget'] => {
+    if (!isRecord(value)) return undefined;
+    const directory = typeof value.directory === 'string' ? value.directory : undefined;
+    const serverId = typeof value.serverId === 'string' ? value.serverId : undefined;
+    return directory || serverId ? { directory, serverId } : undefined;
+};
+
+const parseSendConfig = (value: unknown): QueuedMessage['sendConfig'] => {
+    if (!isRecord(value) || typeof value.providerID !== 'string' || typeof value.modelID !== 'string') {
+        return undefined;
+    }
+    return {
+        providerID: value.providerID,
+        modelID: value.modelID,
+        agent: typeof value.agent === 'string' ? value.agent : undefined,
+        variant: typeof value.variant === 'string' ? value.variant : undefined,
+    };
+};
+
+const parseAttachedFile = (value: unknown): AttachedFile | null => {
+    if (!isRecord(value)
+        || typeof value.id !== 'string'
+        || typeof value.dataUrl !== 'string'
+        || typeof value.mimeType !== 'string'
+        || typeof value.filename !== 'string'
+        || typeof value.size !== 'number'
+        || (value.source !== 'local' && value.source !== 'server' && value.source !== 'vscode')
+        || typeof File === 'undefined') {
+        return null;
+    }
+    const file = value.file instanceof File
+        ? value.file
+        : new File([], value.filename, { type: value.mimeType });
+    return {
+        id: value.id,
+        file,
+        dataUrl: value.dataUrl,
+        mimeType: value.mimeType,
+        filename: value.filename,
+        size: value.size,
+        source: value.source,
+        serverPath: typeof value.serverPath === 'string' ? value.serverPath : undefined,
+        vscodePath: typeof value.vscodePath === 'string' ? value.vscodePath : undefined,
+        vscodeSource: value.vscodeSource === 'file' || value.vscodeSource === 'selection'
+            ? value.vscodeSource
+            : undefined,
+    };
+};
+
+const parseQueuedMessage = (value: unknown): QueuedMessage | null => {
+    if (!isRecord(value)
+        || typeof value.id !== 'string'
+        || typeof value.content !== 'string'
+        || typeof value.createdAt !== 'number') {
+        return null;
+    }
+    const attachments = Array.isArray(value.attachments)
+        ? value.attachments.map(parseAttachedFile).filter((file): file is AttachedFile => file !== null)
+        : undefined;
+    return {
+        id: value.id,
+        content: value.content,
+        createdAt: value.createdAt,
+        attachments: attachments && attachments.length > 0 ? attachments : undefined,
+        sendTarget: parseSendTarget(value.sendTarget),
+        sendConfig: parseSendConfig(value.sendConfig),
+    };
+};
+
+const parseQueuedMessages = (value: unknown): Record<string, QueuedMessage[]> => {
+    if (!isRecord(value)) return {};
+    const result: Record<string, QueuedMessage[]> = {};
+    for (const [sessionId, messages] of Object.entries(value)) {
+        if (!Array.isArray(messages)) continue;
+        const parsed = messages.map(parseQueuedMessage).filter((message): message is QueuedMessage => message !== null);
+        if (parsed.length > 0) result[sessionId] = parsed;
+    }
+    return result;
+};
+
+export const migrateMessageQueuePersistedState = (value: unknown): MessageQueuePersistedState => {
+    const persisted = isRecord(value) ? value : {};
+    return {
+        queuedMessages: parseQueuedMessages(persisted.queuedMessages),
+        followUpBehavior: resolvePersistedFollowUpBehavior(
+            persisted.followUpBehavior,
+            persisted.queueModeEnabled,
+        ),
+    };
+};
 
 export const useMessageQueueStore = create<MessageQueueStore>()(
     devtools(
         persist(
             (set, get) => ({
                 queuedMessages: {},
-                queueModeEnabled: true,
+                followUpBehavior: 'steer',
 
                 addToQueue: (sessionId, message) => {
                     const id = `queued-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
@@ -158,10 +259,9 @@ export const useMessageQueueStore = create<MessageQueueStore>()(
                     set({ queuedMessages: {} });
                 },
 
-                setQueueMode: (enabled) => {
-                    set({ queueModeEnabled: enabled });
-                    // Persist to settings.json (async, fire-and-forget)
-                    void updateDesktopSettings({ queueModeEnabled: enabled });
+                setFollowUpBehavior: (behavior) => {
+                    set({ followUpBehavior: behavior });
+                    void updateDesktopSettings({ followUpBehavior: behavior });
                 },
 
                 getQueueForSession: (sessionId) => {
@@ -171,9 +271,11 @@ export const useMessageQueueStore = create<MessageQueueStore>()(
             {
                 name: 'message-queue-store',
                 storage: createJSONStorage(() => getSafeStorage()),
+                version: 1,
+                migrate: migrateMessageQueuePersistedState,
                 partialize: (state) => ({
                     queuedMessages: state.queuedMessages,
-                    queueModeEnabled: state.queueModeEnabled,
+                    followUpBehavior: state.followUpBehavior,
                 }),
             }
         ),

@@ -542,38 +542,7 @@ describe("optimisticSend", () => {
     }), "already running")
 
     expect(sendCalled).toBe(false)
-  })
-
-  test("aborts a busy session only for interrupt delivery", async () => {
-    const store = createStore({})
-    store.setState({
-      session_status: {
-        "session-a": { type: "busy" },
-      },
-    })
-    const childStores = createChildStores([["/test/project", store]])
-    let sendCalled = false
-
-    const { setActionRefs, setOptimisticRefs, optimisticSend } = await import("./session-actions")
-    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/test/project")
-    setOptimisticRefs(() => {}, () => {})
-
-    await optimisticSend({
-      sessionId: "session-a",
-      content: "interrupt me",
-      providerID: "anthropic",
-      modelID: "claude",
-      deliveryMode: "interrupt",
-      send: async () => {
-        sendCalled = true
-      },
-    })
-
-    expect(sendCalled).toBe(true)
-    const abortCalls = sessionCalls.filter((call) => call.method === "session.abort")
-    expect(abortCalls).toHaveLength(1)
-    expect(abortCalls[0].params.sessionID).toBe("session-a")
-    expect(abortCalls[0].params.directory).toBe("/test/project")
+    expect(sessionCalls.filter((call) => call.method === "session.abort")).toHaveLength(0)
   })
 
   test("sends steer delivery without aborting a busy session", async () => {

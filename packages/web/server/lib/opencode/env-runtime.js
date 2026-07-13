@@ -277,7 +277,34 @@ export const createOpenCodeEnvRuntime = (deps) => {
     return trimmed;
   };
 
+  const shouldUseExternalOpencode = () => process.env.OPENCHAMBER_USE_EXTERNAL_OPENCODE === 'true';
+
+  const resolveBundledOpencodeCliPath = () => {
+    if (shouldUseExternalOpencode()) return null;
+    const bundled = stripWrappingQuotes(process.env.OPENCHAMBER_BUNDLED_OPENCODE_BINARY);
+    return bundled && isExecutable(bundled) ? bundled : null;
+  };
+
+  const applyBundledOpencodeCli = () => {
+    const bundled = resolveBundledOpencodeCliPath();
+    if (!bundled) return null;
+    clearWslOpencodeResolution();
+    process.env.OPENCODE_BINARY = bundled;
+    prependToPath(path.dirname(bundled));
+    state.resolvedOpencodeBinary = bundled;
+    state.resolvedOpencodeBinarySource = 'bundled';
+    ensureOpencodeShimRuntime(bundled);
+    return bundled;
+  };
+
   const resolveOpencodeCliPath = () => {
+    const bundled = resolveBundledOpencodeCliPath();
+    if (bundled) {
+      clearWslOpencodeResolution();
+      state.resolvedOpencodeBinarySource = 'bundled';
+      return bundled;
+    }
+
     const explicit = [
       process.env.OPENCODE_BINARY,
       process.env.OPENCODE_PATH,
@@ -288,7 +315,7 @@ export const createOpenCodeEnvRuntime = (deps) => {
       .filter(Boolean);
 
     for (const candidate of explicit) {
-      if (isExecutable(candidate)) {
+      if (isExecutable(candidate) && !isKnownOpenCodeDesktopAppPath(candidate)) {
         clearWslOpencodeResolution();
         state.resolvedOpencodeBinarySource = 'env';
         return candidate;
@@ -296,7 +323,7 @@ export const createOpenCodeEnvRuntime = (deps) => {
     }
 
     const resolvedFromPath = searchPathFor('opencode');
-    if (resolvedFromPath) {
+    if (resolvedFromPath && !isKnownOpenCodeDesktopAppPath(resolvedFromPath)) {
       clearWslOpencodeResolution();
       state.resolvedOpencodeBinarySource = 'path';
       return resolvedFromPath;
@@ -317,7 +344,6 @@ export const createOpenCodeEnvRuntime = (deps) => {
     const winFallbacks = (() => {
       const userProfile = process.env.USERPROFILE || home;
       const appData = process.env.APPDATA || '';
-      const localAppData = process.env.LOCALAPPDATA || '';
       const programData = process.env.ProgramData || 'C:\\ProgramData';
       const programFiles = process.env.ProgramFiles || 'C:\\Program Files';
 
@@ -332,13 +358,12 @@ export const createOpenCodeEnvRuntime = (deps) => {
         path.join(programData, 'chocolatey', 'bin', 'opencode.cmd'),
         path.join(userProfile, '.bun', 'bin', 'opencode.exe'),
         path.join(userProfile, '.bun', 'bin', 'opencode.cmd'),
-        localAppData ? path.join(localAppData, 'Programs', 'opencode', 'opencode.exe') : '',
       ].filter(Boolean);
     })();
 
     const fallbacks = process.platform === 'win32' ? winFallbacks : unixFallbacks;
     for (const candidate of fallbacks) {
-      if (isExecutable(candidate)) {
+      if (isExecutable(candidate) && !isKnownOpenCodeDesktopAppPath(candidate)) {
         clearWslOpencodeResolution();
         state.resolvedOpencodeBinarySource = 'fallback';
         return candidate;
@@ -357,7 +382,7 @@ export const createOpenCodeEnvRuntime = (deps) => {
             .split(/\r?\n/)
             .map((line) => line.trim())
             .filter(Boolean);
-          const found = lines.find((line) => isExecutable(line));
+          const found = lines.find((line) => isExecutable(line) && !isKnownOpenCodeDesktopAppPath(line));
           if (found) {
             clearWslOpencodeResolution();
             state.resolvedOpencodeBinarySource = 'where';
@@ -845,6 +870,22 @@ export const createOpenCodeEnvRuntime = (deps) => {
     return /\/OpenCode\.app\/Contents\/MacOS\/(?:OpenCode|opencode-cli)$/i.test(candidate);
   };
 
+  const isWindowsOpenCodeDesktopAppPath = (candidate) => {
+    if (process.platform !== 'win32' || typeof candidate !== 'string') {
+      return false;
+    }
+    const localAppData = typeof process.env.LOCALAPPDATA === 'string' ? process.env.LOCALAPPDATA.trim() : '';
+    if (!localAppData) {
+      return false;
+    }
+    return path.resolve(candidate).toLowerCase()
+      === path.resolve(localAppData, 'Programs', 'opencode', 'opencode.exe').toLowerCase();
+  };
+
+  const isKnownOpenCodeDesktopAppPath = (candidate) => {
+    return isMacOpenCodeAppBundlePath(candidate) || isWindowsOpenCodeDesktopAppPath(candidate);
+  };
+
   const createConfiguredOpencodeBinaryError = (raw, normalized) => {
     const configured = typeof raw === 'string' ? raw.trim() : '';
     const candidate = typeof normalized === 'string' && normalized.trim().length > 0 ? normalized.trim() : configured;
@@ -852,6 +893,9 @@ export const createOpenCodeEnvRuntime = (deps) => {
     const error = (() => {
       if (isMacOpenCodeAppBundlePath(candidate) || isMacOpenCodeAppBundlePath(configured)) {
         return new Error(`Configured OpenCode binary points at the macOS desktop app bundle, not the CLI: ${candidate}. ${messageSuffix}`);
+      }
+      if (isWindowsOpenCodeDesktopAppPath(candidate) || isWindowsOpenCodeDesktopAppPath(configured)) {
+        return new Error(`Configured OpenCode binary points at the Windows OpenCode desktop app, not the CLI: ${candidate}. ${messageSuffix}`);
       }
 
       try {
@@ -906,6 +950,9 @@ export const createOpenCodeEnvRuntime = (deps) => {
 
   const applyOpencodeBinaryFromSettings = async (options = {}) => {
     const strict = options?.strict === true;
+    const bundled = applyBundledOpencodeCli();
+    if (bundled) return bundled;
+
     try {
       const settings = await readSettingsFromDiskMigrated();
       if (!settings || typeof settings !== 'object') {
@@ -948,7 +995,7 @@ export const createOpenCodeEnvRuntime = (deps) => {
         return null;
       }
 
-      if (normalized && isExecutable(normalized) && !isMacOpenCodeAppBundlePath(normalized)) {
+      if (normalized && isExecutable(normalized) && !isKnownOpenCodeDesktopAppPath(normalized)) {
         clearWslOpencodeResolution();
         process.env.OPENCODE_BINARY = normalized;
         prependToPath(path.dirname(normalized));

@@ -41,6 +41,22 @@ describe('settings helpers', () => {
     expect(helpers.sanitizeSettingsUpdate({ messageStreamTransport: 'websocket' })).toEqual({});
   });
 
+  it('accepts follow-up behavior and migrates legacy queue settings in responses', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({ followUpBehavior: 'steer' })).toEqual({
+      followUpBehavior: 'steer',
+    });
+    expect(helpers.sanitizeSettingsUpdate({ followUpBehavior: 'queue' })).toEqual({
+      followUpBehavior: 'queue',
+    });
+    expect(helpers.sanitizeSettingsUpdate({ followUpBehavior: 'later' })).toEqual({});
+    expect(helpers.formatSettingsResponse({ queueModeEnabled: true }).followUpBehavior).toBe('queue');
+    expect(helpers.formatSettingsResponse({ queueModeEnabled: false }).followUpBehavior).toBe('steer');
+    expect(helpers.formatSettingsResponse({ followUpBehavior: 'immediate' }).followUpBehavior).toBe('steer');
+    expect(helpers.formatSettingsResponse({ }).followUpBehavior).toBeUndefined();
+  });
+
   it('accepts desktopLanAccessEnabled as a persisted shared setting', () => {
     const helpers = createTestHelpers();
 
@@ -49,6 +65,17 @@ describe('settings helpers', () => {
     });
     expect(helpers.sanitizeSettingsUpdate({ desktopLanAccessEnabled: false })).toEqual({
       desktopLanAccessEnabled: false,
+    });
+  });
+
+  it('accepts desktopKeepAwakeEnabled as a persisted shared setting', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({ desktopKeepAwakeEnabled: true })).toEqual({
+      desktopKeepAwakeEnabled: true,
+    });
+    expect(helpers.sanitizeSettingsUpdate({ desktopKeepAwakeEnabled: false })).toEqual({
+      desktopKeepAwakeEnabled: false,
     });
   });
 
@@ -70,6 +97,12 @@ describe('settings helpers', () => {
     const helpers = createTestHelpers();
 
     expect(helpers.sanitizeSettingsUpdate({ mobileKeyboardMode: 'fixed-layout' })).toEqual({});
+  });
+
+  it('defaults mobileKeyboardMode to resize-content in settings responses', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.formatSettingsResponse({}).mobileKeyboardMode).toBe('resize-content');
   });
 
   it('accepts collapsibleThinkingBlocks as a persisted shared setting', () => {

@@ -98,6 +98,12 @@ Skills catalog management including discovery, installation, and configuration o
 
 ## Build / dev commands (verified)
 
+### Embedded OpenCode packaging (MANDATORY)
+
+Before rebuilding/staging OpenCode for OpenChamber, running any Electron packaging or release command, changing embedded-binary/signing/notarization behavior, or distributing a macOS build, agents **MUST read `docs/EMBEDDED_OPENCODE_PACKAGING.md` completely**.
+
+Do not substitute the official OpenCode binary for the custom merged build. Do not package, sign, notarize, upgrade, or distribute embedded OpenCode from memory or from generic Electron conventions; the runbook defines the required channel, shared-database invariant, staging source, dual-signing order, upgrade prohibition, and live verification gates.
+
 All scripts are in `package.json`.
 
 - Validate: `bun run type-check`, `bun run lint`

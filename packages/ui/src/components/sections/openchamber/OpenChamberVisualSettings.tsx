@@ -31,6 +31,7 @@ import {
     setDirectoryShowHidden,
     useDirectoryShowHidden,
 } from '@/lib/directoryShowHidden';
+import type { FollowUpBehavior } from '@/lib/followUpBehavior';
 
 interface Option<T extends string> {
     id: T;
@@ -81,6 +82,17 @@ const DIFF_VIEW_MODE_OPTIONS: Option<'single' | 'stacked'>[] = [
         id: 'stacked',
         labelKey: 'settings.openchamber.visual.option.diffViewMode.stacked.label',
         descriptionKey: 'settings.openchamber.visual.option.diffViewMode.stacked.description',
+    },
+];
+
+const FOLLOW_UP_BEHAVIOR_OPTIONS: Option<FollowUpBehavior>[] = [
+    {
+        id: 'steer',
+        labelKey: 'settings.openchamber.visual.option.followUpBehavior.steer',
+    },
+    {
+        id: 'queue',
+        labelKey: 'settings.openchamber.visual.option.followUpBehavior.queue',
     },
 ];
 
@@ -292,8 +304,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const setShowTerminalQuickKeysOnDesktop = useUIStore(state => state.setShowTerminalQuickKeysOnDesktop);
     const fileEditorKeymap = useUIStore(state => state.fileEditorKeymap);
     const setFileEditorKeymap = useUIStore(state => state.setFileEditorKeymap);
-    const queueModeEnabled = useMessageQueueStore(state => state.queueModeEnabled);
-    const setQueueMode = useMessageQueueStore(state => state.setQueueMode);
+    const followUpBehavior = useMessageQueueStore(state => state.followUpBehavior);
+    const setFollowUpBehavior = useMessageQueueStore(state => state.setFollowUpBehavior);
     const persistChatDraft = useUIStore(state => state.persistChatDraft);
     const setPersistChatDraft = useUIStore(state => state.setPersistChatDraft);
     const inputSpellcheckEnabled = useUIStore(state => state.inputSpellcheckEnabled);
@@ -639,7 +651,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                         setPwaOrientation('system');
                     }
                     if (showMobileKeyboardModeSetting) {
-                        setMobileKeyboardMode('native');
+                        setMobileKeyboardMode('resize-content');
                     }
                 }
             }
@@ -943,10 +955,10 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                             type="button"
                                             variant="ghost"
                                             onClick={() => {
-                                                setMobileKeyboardMode('native');
-                                                void updateDesktopSettings({ mobileKeyboardMode: 'native' });
+                                                setMobileKeyboardMode('resize-content');
+                                                void updateDesktopSettings({ mobileKeyboardMode: 'resize-content' });
                                             }}
-                                            disabled={mobileKeyboardMode === 'native'}
+                                            disabled={mobileKeyboardMode === 'resize-content'}
                                             className="h-7 w-7 px-0 text-muted-foreground hover:text-foreground"
                                             aria-label={t('settings.openchamber.visual.actions.resetMobileKeyboardModeAria')}
                                             title={t('settings.common.actions.reset')}
@@ -1860,24 +1872,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                     )}
 
                                     {shouldShow('queueMode') && (
-                                        <div
-                                            className="group flex cursor-pointer items-center gap-2 py-0.5"
-                                            role="button"
-                                            tabIndex={0}
-                                            aria-pressed={queueModeEnabled}
-                                            onClick={() => setQueueMode(!queueModeEnabled)}
-                                            onKeyDown={(event) => {
-                                                if (event.key === ' ' || event.key === 'Enter') {
-                                                    event.preventDefault();
-                                                    setQueueMode(!queueModeEnabled);
-                                                }
-                                            }}
-                                        >
-                                            <Checkbox
-                                                checked={queueModeEnabled}
-                                                onChange={setQueueMode}
-                                                ariaLabel={t('settings.openchamber.visual.field.queueMessagesByDefaultAria')}
-                                            />
+                                        <div className="flex min-w-0 flex-col items-stretch gap-1.5 py-0.5 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
                                             <div className="flex min-w-0 items-center gap-1.5">
                                                 <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.queueMessagesByDefault')}</span>
                                                 <Tooltip>
@@ -1889,6 +1884,26 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                     </TooltipContent>
                                                 </Tooltip>
                                             </div>
+                                            <Select<FollowUpBehavior>
+                                                value={followUpBehavior}
+                                                onValueChange={setFollowUpBehavior}
+                                            >
+                                                <SelectTrigger
+                                                    aria-label={t('settings.openchamber.visual.field.queueMessagesByDefaultAria')}
+                                                    className="w-full sm:w-fit sm:min-w-28"
+                                                >
+                                                    <SelectValue>
+                                                        {tUnsafe(`settings.openchamber.visual.option.followUpBehavior.${followUpBehavior}`)}
+                                                    </SelectValue>
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    {FOLLOW_UP_BEHAVIOR_OPTIONS.map((option) => (
+                                                        <SelectItem key={option.id} value={option.id}>
+                                                            {tUnsafe(option.labelKey)}
+                                                        </SelectItem>
+                                                    ))}
+                                                </SelectContent>
+                                            </Select>
                                         </div>
                                     )}
 

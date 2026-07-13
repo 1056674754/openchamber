@@ -54,6 +54,7 @@ import { setSessionPrefetch } from "./session-prefetch-cache"
 import { listSessionsForBootstrap } from "./session-list-bootstrap"
 import { fetchMessagePageToUserBoundary, getPageParts, type MessagePage } from "./message-page-boundary"
 import { getMissingSteerSideChannelRecords, getSteerSideChannelSignature } from "./steer-side-channel"
+import { getBootstrapFailureAction } from "./bootstrap-retry-policy"
 
 // ---------------------------------------------------------------------------
 // Context
@@ -1909,13 +1910,14 @@ export function SyncProvider(props: {
         })
 
         if (!bootstrapped) {
-          if (attempt < 5) {
+          if (getBootstrapFailureAction(attempt) === "retry") {
             const logRetry = attempt < 2 ? console.info : console.warn
             logRetry(`[bootstrap] bootstrap failed for ${directory} after attempt ${attempt + 1}; retrying in 2s`)
             await new Promise((r) => setTimeout(r, 2000))
             await runBootstrap(attempt + 1)
           } else {
             console.error(`[bootstrap] bootstrap failed for ${directory} after ${attempt + 1} attempts; giving up`)
+            store.setState({ status: "complete" as const })
           }
           return
         }

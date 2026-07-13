@@ -1,6 +1,7 @@
 import type { OpencodeClient, PermissionRequest, Project, QuestionRequest } from "@opencode-ai/sdk/v2/client"
 import { retry } from "./retry"
 import type { GlobalState, State } from "./types"
+import { formatSdkError } from "./sdk-error"
 
 const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0)
 const BOOTSTRAP_REQUEST_TIMEOUT_MS = 8_000
@@ -51,9 +52,7 @@ function unwrap<T>(
   if (result.error) {
     const rawError = result.error
     const status = result.response?.status
-    const message = typeof rawError === "object" && rawError !== null && "message" in rawError
-      ? String((rawError as { message?: unknown }).message)
-      : String(rawError)
+    const message = formatSdkError(rawError)
     const err = new Error(`${name} failed${status ? ` (${status})` : ""}: ${message}`)
     if (status !== undefined) {
       ;(err as Error & { status?: number }).status = status

@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
-import { useMessageQueueStore, type QueuedMessage } from './messageQueueStore';
+import {
+    migrateMessageQueuePersistedState,
+    useMessageQueueStore,
+    type QueuedMessage,
+} from './messageQueueStore';
 
 const queuedMessage = (id: string, content: string, createdAt: number): QueuedMessage => ({
     id,
@@ -11,7 +15,42 @@ describe('messageQueueStore', () => {
     beforeEach(() => {
         useMessageQueueStore.setState({
             queuedMessages: {},
+            followUpBehavior: 'steer',
+        });
+    });
+
+    test('migrates legacy queue mode without dropping captured routing', () => {
+        const migrated = migrateMessageQueuePersistedState({
+            queuedMessages: {
+                'session-1': [{
+                    id: 'queued-1',
+                    content: 'keep this target',
+                    createdAt: 1,
+                    sendTarget: {
+                        directory: '/remote/project',
+                        serverId: 'remote-1',
+                    },
+                    sendConfig: {
+                        providerID: 'provider-1',
+                        modelID: 'model-1',
+                        agent: 'review',
+                        variant: 'high',
+                    },
+                }],
+            },
             queueModeEnabled: true,
+        });
+
+        expect(migrated.followUpBehavior).toBe('queue');
+        expect(migrated.queuedMessages['session-1']?.[0]?.sendTarget).toEqual({
+            directory: '/remote/project',
+            serverId: 'remote-1',
+        });
+        expect(migrated.queuedMessages['session-1']?.[0]?.sendConfig).toEqual({
+            providerID: 'provider-1',
+            modelID: 'model-1',
+            agent: 'review',
+            variant: 'high',
         });
     });
 

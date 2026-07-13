@@ -1,6 +1,7 @@
 import type { ProjectEntry } from '@/lib/api/types';
 import type { MobileKeyboardMode } from '@/lib/mobileKeyboardMode';
 import type { DraftStarterRef } from '@/lib/draftStarters';
+import type { FollowUpBehavior } from '@/lib/followUpBehavior';
 
 export type AssistantNotificationPayload = {
   title?: string;
@@ -53,6 +54,7 @@ export type DesktopSettings = {
   // Optional absolute path to `opencode` binary.
   opencodeBinary?: string;
   desktopLanAccessEnabled?: boolean;
+  desktopKeepAwakeEnabled?: boolean;
   desktopKeepManagedOpenCodeAliveOnQuit?: boolean;
   projects?: ProjectEntry[];
   activeProjectId?: string;
@@ -119,6 +121,7 @@ export type DesktopSettings = {
   defaultGitIdentityId?: string; // ''/undefined = unset, 'global' or profile id
   openInAppId?: string;
   autoCreateWorktree?: boolean;
+  followUpBehavior?: FollowUpBehavior | 'immediate';
   queueModeEnabled?: boolean;
   gitmojiEnabled?: boolean;
   defaultFileViewerPreview?: boolean;
@@ -238,6 +241,12 @@ type LaunchAtLoginStatus = {
   enabled: boolean;
 };
 
+type KeepAwakeStatus = {
+  supported: boolean;
+  enabled: boolean;
+  active: boolean;
+};
+
 export const getDesktopLaunchAtLogin = async (): Promise<LaunchAtLoginStatus | null> => {
   if (!canUseElectronDesktopIPC() || !isDesktopLocalOriginActive()) {
     return null;
@@ -268,6 +277,69 @@ export const setDesktopLaunchAtLogin = async (enabled: boolean): Promise<LaunchA
     return result;
   } catch (error) {
     console.warn('Failed to set launch at login status', error);
+    return null;
+  }
+};
+
+export const getDesktopKeepAwake = async (): Promise<KeepAwakeStatus | null> => {
+  if (!canUseElectronDesktopIPC() || !isDesktopLocalOriginActive()) {
+    return null;
+  }
+
+  try {
+    const result = await invokeDesktop<KeepAwakeStatus>('desktop_get_keep_awake');
+    if (!result || typeof result.supported !== 'boolean' || typeof result.enabled !== 'boolean' || typeof result.active !== 'boolean') {
+      return null;
+    }
+    return result;
+  } catch (error) {
+    console.warn('Failed to get keep awake status', error);
+    return null;
+  }
+};
+
+export const setDesktopKeepAwake = async (enabled: boolean): Promise<KeepAwakeStatus | null> => {
+  if (!canUseElectronDesktopIPC() || !isDesktopLocalOriginActive()) {
+    return null;
+  }
+
+  try {
+    const result = await invokeDesktop<KeepAwakeStatus>('desktop_set_keep_awake', { enabled });
+    if (!result || typeof result.supported !== 'boolean' || typeof result.enabled !== 'boolean' || typeof result.active !== 'boolean') {
+      return null;
+    }
+    return result;
+  } catch (error) {
+    console.warn('Failed to set keep awake status', error);
+    return null;
+  }
+};
+
+export type DesktopRemotePasswordLoginResult = {
+  ok: boolean;
+  status: number;
+};
+
+export const loginDesktopRemotePassword = async (
+  password: string,
+  trustDevice: boolean,
+): Promise<DesktopRemotePasswordLoginResult | null> => {
+  if (!canUseElectronDesktopIPC() || isDesktopLocalOriginActive() || typeof window === 'undefined') {
+    return null;
+  }
+
+  try {
+    const result = await invokeDesktop<DesktopRemotePasswordLoginResult>('desktop_remote_password_login', {
+      url: window.location.href,
+      password,
+      trustDevice,
+    });
+    if (!result || typeof result.ok !== 'boolean' || typeof result.status !== 'number') {
+      return null;
+    }
+    return result;
+  } catch (error) {
+    console.warn('Failed to log in to remote desktop host', error);
     return null;
   }
 };

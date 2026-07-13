@@ -168,6 +168,27 @@ describe('opencode routes', () => {
     expect(refreshOpenCodeAfterConfigChange).not.toHaveBeenCalled();
   });
 
+  test('refuses to mutate a signed bundled OpenCode binary in place', async () => {
+    const fetchMock = useFetchMock(mock(async () => jsonResponse({ success: true })));
+
+    const response = await request(createApp({
+      getOpenCodeResolutionSnapshot: async () => ({
+        source: 'bundled',
+        resolved: '/Applications/OpenChamber.app/Contents/Resources/opencode/opencode',
+      }),
+    }))
+      .post('/api/opencode/upgrade')
+      .send({})
+      .expect(409);
+
+    expect(response.body).toEqual({
+      success: false,
+      source: 'bundled',
+      error: 'Bundled OpenCode must be upgraded by rebuilding and re-signing OpenChamber',
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   test('falls back to direct OpenCode upgrade when upstream closes the connection', async () => {
     const fetchMock = useFetchMock(mock(async () => {
       throw new TypeError('fetch failed');

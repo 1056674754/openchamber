@@ -1,5 +1,9 @@
 const fs = require('node:fs');
 const path = require('node:path');
+const {
+  resolveEmbeddedOpenCodeSource,
+  stageEmbeddedOpenCode,
+} = require('./embedded-opencode.cjs');
 
 module.exports = (context) => {
   if (context.electronPlatformName !== 'darwin') return;
@@ -14,4 +18,11 @@ module.exports = (context) => {
   }
 
   fs.copyFileSync(sourceAssetsPath, path.join(resourcesPath, 'Assets.car'));
+
+  const embedded = stageEmbeddedOpenCode({
+    source: resolveEmbeddedOpenCodeSource(),
+    resourcesPath,
+    signingIdentity: process.env.CSC_NAME,
+  });
+  console.log(`[electron] embedded signed OpenCode ${embedded.version} at ${embedded.binaryPath}`);
 };

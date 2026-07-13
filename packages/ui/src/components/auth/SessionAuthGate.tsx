@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { toast } from '@/components/ui';
-import { isDesktopShell, isVSCodeRuntime } from '@/lib/desktop';
+import { isDesktopLocalOriginActive, isDesktopShell, isVSCodeRuntime, loginDesktopRemotePassword } from '@/lib/desktop';
 import { syncDesktopSettings, initializeAppearancePreferences } from '@/lib/persistence';
 import { applyPersistedDirectoryPreferences } from '@/lib/directoryPersistence';
 import { DesktopHostSwitcherInline } from '@/components/desktop/DesktopHostSwitcher';
@@ -23,6 +23,10 @@ import {
 
 const STATUS_CHECK_ENDPOINT = '/auth/session';
 const TRUST_DEVICE_STORAGE_KEY = 'openchamber.uiAuth.trustDevice';
+
+const shouldUseDesktopRemotePasswordFallback = (): boolean => {
+  return isDesktopShell() && !isDesktopLocalOriginActive();
+};
 
 const fetchSessionStatus = async (): Promise<Response> => {
   const response = await fetch(STATUS_CHECK_ENDPOINT, {
@@ -246,6 +250,12 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({ children }) =>
       setIsTunnelLocked(false);
     } catch (error) {
       console.warn('Failed to check session status:', error);
+      if (shouldUseDesktopRemotePasswordFallback()) {
+        setState('locked');
+        setRetryAfter(undefined);
+        setIsTunnelLocked(false);
+        return;
+      }
       setState('error');
       setIsTunnelLocked(false);
     }
@@ -324,6 +334,28 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({ children }) =>
     setErrorMessage('');
 
     try {
+      if (shouldUseDesktopRemotePasswordFallback()) {
+        const fallbackResult = await loginDesktopRemotePassword(password, trustDevice);
+        if (fallbackResult?.ok) {
+          setPassword('');
+          setIsTunnelLocked(false);
+          setState('authenticated');
+          return;
+        }
+        if (fallbackResult?.status === 401) {
+          setErrorMessage(t('sessionAuth.error.incorrectPassword'));
+          setIsTunnelLocked(false);
+          setState('locked');
+          return;
+        }
+        if (fallbackResult?.status === 429) {
+          setRetryAfter(undefined);
+          setIsTunnelLocked(false);
+          setState('rate-limited');
+          return;
+        }
+      }
+
       const response = await submitPassword(password, trustDevice);
       if (response.ok) {
         setPassword('');

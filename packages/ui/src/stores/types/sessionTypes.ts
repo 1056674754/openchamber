@@ -28,7 +28,7 @@ export interface AttachedFile {
 }
 
 export type EditPermissionMode = 'allow' | 'ask' | 'deny' | 'full';
-export type SendDeliveryMode = 'normal' | 'interrupt';
+export type SendDeliveryMode = 'normal' | 'steer';
 
 export type MessageStreamPhase = 'streaming' | 'cooldown' | 'completed';
 

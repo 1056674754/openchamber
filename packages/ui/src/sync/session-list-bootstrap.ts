@@ -1,6 +1,7 @@
 import type { Session } from "@opencode-ai/sdk/v2"
 import type { OpencodeClient } from "@opencode-ai/sdk/v2/client"
 import { DEFAULT_SERVER_ID, serverRegistry } from "@/lib/opencode/server-registry"
+import { formatSdkError } from "./sdk-error"
 
 export const SESSION_LIST_BOOTSTRAP_TIMEOUT_MS = 8_000
 export const SESSION_LIST_BOOTSTRAP_LIMIT = 200
@@ -55,9 +56,7 @@ export async function listSessionsForBootstrap(
   if (rawError) {
     const response = (result as { response?: { status?: number } }).response
     const status = response?.status
-    const message = typeof rawError === "object" && rawError !== null && "message" in rawError
-      ? String((rawError as { message?: unknown }).message)
-      : String(rawError)
+    const message = formatSdkError(rawError)
     const wrapped = new Error(`session.list failed${status ? ` (${status})` : ""}: ${message}`)
     if (status !== undefined) {
       ;(wrapped as Error & { status?: number }).status = status

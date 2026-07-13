@@ -50,7 +50,7 @@ type BuildOptimisticPartsInput = {
   createPartID: () => string
 }
 
-export type SendDeliveryMode = "normal" | "interrupt" | "steer"
+export type SendDeliveryMode = "normal" | "steer"
 
 export class SessionBusyError extends Error {
   readonly sessionId: string
@@ -125,23 +125,7 @@ async function resolveBlockedSessionBeforeSend(
     return
   }
 
-  if (input.deliveryMode !== "interrupt") {
-    throw new SessionBusyError(input.sessionId, input.deliveryMode ?? "normal")
-  }
-
-  const sessionDirectory = requireSessionDirectory(input.sessionId, "optimisticSend")
-  const result = await sdkForSession(input.sessionId).session.abort({
-    sessionID: input.sessionId,
-    directory: sessionDirectory,
-  })
-  const aborted = unwrapSdkData(result, "session.abort")
-  if (!aborted) {
-    throw new SessionBusyError(
-      input.sessionId,
-      "interrupt",
-      `Session ${input.sessionId} is still running; abort did not complete.`,
-    )
-  }
+  throw new SessionBusyError(input.sessionId, input.deliveryMode ?? "normal")
 }
 
 export function setActionRefs(

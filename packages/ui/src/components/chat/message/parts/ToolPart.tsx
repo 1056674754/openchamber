@@ -55,6 +55,7 @@ import { ToolRevealOnMount } from './ToolRevealOnMount';
 import { getToolIcon } from './toolPresentation';
 import { useDurationTickerNow } from './useDurationTicker';
 import { resolveFallbackTaskSessionId } from './resolveFallbackTaskSessionId';
+import { readTaskTagSessionIdFromOutput } from './taskSessionIdParser';
 import { areRenderRelevantPartsEqual } from '../renderCompare';
 import { useI18n } from '@/lib/i18n';
 import { getDiffPatchEntries, getPatchText } from './toolDiffUtils';
@@ -1057,7 +1058,7 @@ const readTaskSessionIdFromOutput = (output: string | undefined): string | undef
     }
     const taskMatch = output.match(/task_id\s*:\s*([^\s<"']+)/i);
     const sessionMatch = output.match(/session[_\s-]?id\s*:\s*([^\s<"']+)/i);
-    const candidate = taskMatch?.[1] ?? sessionMatch?.[1];
+    const candidate = taskMatch?.[1] ?? sessionMatch?.[1] ?? readTaskTagSessionIdFromOutput(output);
     return normalizeSessionIdCandidate(candidate);
 };
 

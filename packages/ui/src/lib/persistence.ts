@@ -9,6 +9,7 @@ import { loadAppearancePreferences, applyAppearancePreferences } from '@/lib/app
 import { sanitizeStarterRefs } from '@/lib/draftStarters';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { normalizeMobileKeyboardMode, setStoredMobileKeyboardMode } from '@/lib/mobileKeyboardMode';
+import { resolvePersistedFollowUpBehavior } from '@/lib/followUpBehavior';
 
 const persistToLocalStorage = (settings: DesktopSettings) => {
   if (typeof window === 'undefined') {
@@ -377,8 +378,14 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
     }
   }
 
-  if (typeof settings.queueModeEnabled === 'boolean' && settings.queueModeEnabled !== queueStore.queueModeEnabled) {
-    queueStore.setQueueMode(settings.queueModeEnabled);
+  if (settings.followUpBehavior !== undefined || typeof settings.queueModeEnabled === 'boolean') {
+    const behavior = resolvePersistedFollowUpBehavior(
+      settings.followUpBehavior,
+      settings.queueModeEnabled,
+    );
+    if (behavior !== queueStore.followUpBehavior) {
+      queueStore.setFollowUpBehavior(behavior);
+    }
   }
 
   if (typeof settings.showDeletionDialog === 'boolean' && settings.showDeletionDialog !== store.showDeletionDialog) {
@@ -763,6 +770,9 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   }
   if (typeof candidate.gitmojiEnabled === 'boolean') {
     result.gitmojiEnabled = candidate.gitmojiEnabled;
+  }
+  if (candidate.followUpBehavior === 'steer' || candidate.followUpBehavior === 'queue' || candidate.followUpBehavior === 'immediate') {
+    result.followUpBehavior = candidate.followUpBehavior;
   }
   if (typeof candidate.queueModeEnabled === 'boolean') {
     result.queueModeEnabled = candidate.queueModeEnabled;

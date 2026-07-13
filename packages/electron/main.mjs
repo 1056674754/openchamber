@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, Notification, powerMonitor, session, shell, webContents } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, Notification, powerMonitor, powerSaveBlocker, session, shell, webContents } from 'electron';
 import contextMenu from 'electron-context-menu';
 import log from 'electron-log/main.js';
 import dgram from 'node:dgram';
@@ -11,6 +11,7 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import updaterPkg from 'electron-updater';
 import { ElectronSshManager } from './ssh-manager.mjs';
+import { hasSameHttpOrigin, loginRemotePasswordAndPersistSession } from './remote-password-login.mjs';
 
 const execFileAsync = promisify(execFile);
 
@@ -173,6 +174,32 @@ const state = {
   miniChatWindowsBySession: new Map(),
   sshStatuses: new Map(),
   sshLogs: new Map(),
+  keepAwakeBlockerId: null,
+};
+
+const setDesktopKeepAwakeActive = (enabled) => {
+  const currentId = state.keepAwakeBlockerId;
+  const isActive = Number.isInteger(currentId) && powerSaveBlocker.isStarted(currentId);
+
+  if (enabled) {
+    if (!isActive) {
+      state.keepAwakeBlockerId = powerSaveBlocker.start('prevent-app-suspension');
+    }
+    return Number.isInteger(state.keepAwakeBlockerId) && powerSaveBlocker.isStarted(state.keepAwakeBlockerId);
+  }
+
+  if (isActive) {
+    powerSaveBlocker.stop(currentId);
+  }
+  state.keepAwakeBlockerId = null;
+  return false;
+};
+
+const readDesktopKeepAwakeStatus = () => {
+  const enabled = readSettingsRoot().desktopKeepAwakeEnabled === true;
+  const currentId = state.keepAwakeBlockerId;
+  const active = Number.isInteger(currentId) && powerSaveBlocker.isStarted(currentId);
+  return { supported: true, enabled, active };
 };
 
 const quitRisk = {
@@ -213,6 +240,7 @@ const prepareForQuit = async ({ installingUpdate = false, stopManagedOpenCode } 
     : !shouldKeepManagedOpenCodeAliveByDefault();
   state.installingUpdate = installingUpdate;
   state.quitConfirmationPending = false;
+  setDesktopKeepAwakeActive(false);
 
   if (state.mainWindow && !state.mainWindow.isDestroyed()) {
     try {
@@ -665,14 +693,14 @@ const isMachineLocalHostname = (hostname) => {
 };
 
 const isLocalRuntimeUrl = (targetUrl) => {
-  const localUrl = state.sidecarUrl || state.localOrigin || '';
-  if (!localUrl) return false;
   try {
     const target = new URL(targetUrl);
-    const local = new URL(localUrl);
-    if (target.origin === local.origin) return true;
     const portOf = (url) => url.port || (url.protocol === 'https:' ? '443' : '80');
-    return portOf(target) === portOf(local) && isMachineLocalHostname(target.hostname);
+    return [state.sidecarUrl, state.localOrigin].filter(Boolean).some((localUrl) => {
+      const local = new URL(localUrl);
+      if (target.origin === local.origin) return true;
+      return portOf(target) === portOf(local) && isMachineLocalHostname(target.hostname);
+    });
   } catch {
     return false;
   }
@@ -847,6 +875,7 @@ const spawnLocalServer = async () => {
   // so phones/tablets on the same Wi-Fi can reach the app. UI shows a clear
   // warning and persists the flag via /api/config/settings.
   const lanAccessEnabled = settings.desktopLanAccessEnabled === true;
+  setDesktopKeepAwakeActive(settings.desktopKeepAwakeEnabled === true);
   const bindHost = lanAccessEnabled ? '0.0.0.0' : '127.0.0.1';
 
   // Probe before starting the server — main() in the server module sets up a
@@ -873,6 +902,14 @@ const spawnLocalServer = async () => {
   process.env.OPENCHAMBER_RUNTIME = 'desktop';
   process.env.OPENCHAMBER_OPENCODE_CWD = app.getPath('userData');
   process.env.OPENCHAMBER_DESKTOP_NOTIFY = 'true';
+  const bundledOpenCodeBinary = path.join(
+    resourceRoot(),
+    'opencode',
+    process.platform === 'win32' ? 'opencode.exe' : 'opencode',
+  );
+  if (!isDev && fs.existsSync(bundledOpenCodeBinary)) {
+    process.env.OPENCHAMBER_BUNDLED_OPENCODE_BINARY = bundledOpenCodeBinary;
+  }
   try {
     fs.mkdirSync(process.env.OPENCHAMBER_OPENCODE_CWD, { recursive: true });
   } catch {
@@ -2042,6 +2079,18 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       return { supported: true, enabled: settings.openAtLogin === true };
     }
 
+    case 'desktop_get_keep_awake':
+      return readDesktopKeepAwakeStatus();
+
+    case 'desktop_set_keep_awake': {
+      const enabled = args.enabled === true;
+      await mutateSettingsRoot((root) => {
+        root.desktopKeepAwakeEnabled = enabled;
+      });
+      const active = setDesktopKeepAwakeActive(enabled);
+      return { supported: true, enabled, active };
+    }
+
     case 'desktop_browser_capture_page': {
       const wcId = Number.isFinite(args.webContentsId) ? Math.trunc(args.webContentsId) : null;
       if (wcId === null || wcId < 0) throw new Error('webContentsId is required');
@@ -2371,6 +2420,18 @@ end tell`;
 
     case 'desktop_host_probe':
       return probeHostWithTimeout(String(args.url || ''), 2_000);
+
+    case 'desktop_remote_password_login': {
+      if (!browserWindow || browserWindow.isDestroyed()) {
+        throw new Error('Window is not available');
+      }
+      return loginRemotePasswordAndPersistSession({
+        url: args.url,
+        password: args.password,
+        trustDevice: args.trustDevice === true,
+        cookieStore: browserWindow.webContents.session.cookies,
+      });
+    }
 
     case 'desktop_set_window_theme': {
       const mode = typeof args.themeMode === 'string' ? args.themeMode : '';
@@ -2784,6 +2845,7 @@ const isLocalSender = (webContents) => {
 const COMMANDS_SAFE_FOR_REMOTE = new Set([
   'desktop_hosts_get',
   'desktop_host_probe',
+  'desktop_remote_password_login',
   'desktop_new_window',
   'desktop_new_window_at_url',
   'desktop_set_window_title',
@@ -2796,9 +2858,14 @@ const COMMANDS_SAFE_FOR_REMOTE = new Set([
 ]);
 
 ipcMain.handle('openchamber:invoke', async (event, command, args) => {
-  if (!isLocalSender(event.sender) && !COMMANDS_SAFE_FOR_REMOTE.has(command)) {
+  const localSender = isLocalSender(event.sender);
+  if (!localSender && !COMMANDS_SAFE_FOR_REMOTE.has(command)) {
     log.warn(`[ipc] rejected ${command} from non-local origin: ${event.sender?.getURL?.() || '(unknown)'}`);
     throw new Error('IPC not available for this origin');
+  }
+  if (!localSender && command === 'desktop_remote_password_login' && !hasSameHttpOrigin(event.sender?.getURL?.(), args?.url)) {
+    log.warn(`[ipc] rejected cross-origin remote password login from: ${event.sender?.getURL?.() || '(unknown)'}`);
+    throw new Error('Remote password login target must match the current origin');
   }
   const browserWindow = BrowserWindow.fromWebContents(event.sender);
   return handleInvoke(browserWindow, command, args);
