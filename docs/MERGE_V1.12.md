@@ -94,14 +94,14 @@
 - 运行时不稳（`handleHistoryScroll` 滚动检测效果引发测量死循环）
 
 **仍需单独处理**：
-- `handleHistoryScroll` 滚动自动加载历史仍未恢复，避免再次引入测量循环。
-- `MessageList` 的官方虚拟化优化 → 跳过 v1.12.0 旧版，改按 v1.13.0 #25 (`virtua` 重写) 实现。（`TurnChangedFilePills` / `changedFiles` 已落地，见 feature gap 表）
+- `handleHistoryScroll` 滚动自动加载历史仍未恢复；桌面端保留明确的 `Load older messages` 操作，避免滚动手势与 prepend 竞态。
+- `MessageList` 已在后续批次对齐 v1.16 的 `@tanstack/react-virtual` 路径；旧 `virtua` 迁移计划作废，详见 v1.16 Chat scroll stability 批次。
 - 注意命令名是 `/explore`，不是 `/explorer`。
 
 **后续建议**：不要再整批套官方 chat diff。按以下顺序恢复剩余功能：
-1. `handleHistoryScroll` 滚动加载逻辑（仅 `useChatTimelineController.ts`），验证不出现测量循环/跳动。
+1. `handleHistoryScroll` 自动触发策略仍待单独评估；手动 Load older 与 prepend 锚点已经稳定。
 2. `TurnChangedFilePills` / `changedFiles`，先补类型和 grouping contract，再接 UI。
-3. `MessageList` 虚拟化优化，最后处理。
+3. `MessageList` v1.16 虚拟化与桌面滚动稳定已完成；移动端 momentum 仍需独立验证。
 
 ### Batch 1.10 — Mobile UI（延后）
 
@@ -130,7 +130,7 @@
 | **魔法命令** | ✅ 已落地：`/explore`、`/catch-up`、`/debug`、`/weigh`、`/plan-feature`、`/workspace-review` 均会展开为可见 prompt + hidden instructions，而不是裸发 slash command | 🟢 已完成 |
 | **消息改动文件标记** | ✅ 已落地：实现为 `TurnChangedFilesDropdown`（下拉而非 pills），`changedFiles` 由 `activityParts` 经 `extractGitChangedFiles` 派生（非独立类型字段），已在 `MessageBody.tsx:2149` 渲染 | 🟢 已完成 |
 | **时间格式偏好** | ✅ 已落地：新增 `packages/ui/src/lib/timeFormat.ts`，chat 消息 footer 与 Tunnel session 时间已接入 12/24 小时偏好 | 🟢 已完成 |
-| **滚动加载历史** | 聊天区域触底自动加载更早消息，替代 "Load older messages" 按钮 | 🟡 中 |
+| **滚动加载历史** | ✅ 手动 `Load older messages` 已对齐官方 server pagination、虚拟化与 prepend 锚点；仅“接近顶部自动触发”仍待评估 | 🟡 部分完成 |
 
 ### 移动端（延后）
 
@@ -823,14 +823,15 @@ Phase 5 — 🔴 Markdown/Shiki 重写 (#1+#2): 独立 milestone，需迁移 for
 |---|---|---|
 | Queue idle dispatch + failure backoff (`73209d4f`, `c387fb21`) | ✅ 已移植 | queue item 在 authoritative status 已是 idle 时也会发送；同一失败队首按 2s→60s 指数退避，队首变化后清除旧失败状态；保留 `sendConfig` / `sendTarget`、recent abort、in-flight guard 和失败恢复 |
 | Markdown preview toggle (`7ab06f15`) | 🟢/🟡 可独立合 | 本地 FilesView 已有 Markdown 文本渲染基础，但没有官方 preview/source toggle；只涉及 FilesView 和 i18n，避免带入 upstream 整体 FilesView 布局 |
-| VS Code Insiders / Windows drive casing | 🟢 可独立合 | 都是边界明确的平台兼容修复；drive casing 必须统一进入 project/session/directory key 之前处理，不能只修显示 |
-| Agent YAML frontmatter preservation (`e9193876`) | 🟡 高价值 | 本 fork 已有 agent 多 scope 和远端实例语义；应先写未知 frontmatter round-trip test，再改保存合并逻辑 |
-| Tool result/JSON summary、Mermaid zoom、code line number/wrap、Last turn diff | 🟡 UI 批次 | 本地已有 JsonTreeViewer、Mermaid fork 修复、VirtualizedCodeBlock 和 turn projection；可复用现有组件，但不能直接换掉 Markdown/MessageBody/turn 模型 |
+| VS Code Insiders (`c8761951`) | ✅ 已移植 | Open In app registry 已加入 `Visual Studio Code - Insiders`，沿用现有 installed-app scan、icon、selection persistence 和 Electron `open -a` fallback |
+| Windows drive casing (`39c4bbd4`) | 🟡 待独立审计 | 必须统一进入 project/session/directory key 之前处理，不能只修显示；会触及多 instance 和目录 authority，不与一行级 app registry 小修混合 |
+| Agent YAML frontmatter preservation (`e9193876`) | ✅ 已移植 | UI 不再构造 undefined description/scope；web 与 VS Code 核心更新器均跳过 undefined，null 删除语义保持不变；project `.md` round-trip tests 覆盖自定义字段 |
+| Tool result/JSON summary、Mermaid zoom、code line number/wrap、Last turn diff | 🟡 部分完成 | code line number/wrap 已适配本地 `MarkdownRendererImpl`；其余沿用现有 JsonTreeViewer、Mermaid fork 修复和 turn projection，不能直接换掉 Markdown/MessageBody/turn 模型 |
 | Project default model / project sort / command palette project search | 🟡 多 instance 敏感 | project default 必须按 serverId + directory 隔离；project sort 要保持所有 sidebar surface 使用同一 rank map；不能引入全局 active-project fallback |
 | Server-persisted permission auto-accept (`6231375b`) | 🟠 独立高风险 | 本地已有 UI store、draft intent、subagent inheritance和 server mirror，但 server 只保存进程内 Set；重启持久化、app 关闭后自动响应和多 server ownership 尚不等价 |
 | Session goals (`56cf5e29`) | 🔴 独立 milestone | 73 files / +3330，包含 server loop、Small Model audit、scheduled task、Plan、notifications、persistence、restart recovery；本 fork 还没完成 Small Model 地基，不能先套 UI 按钮 |
 | Private relay / pairing v2 / native mobile | 🔴 不合 | 与本 fork DIY remote instances/sidebar、认证、SSE proxy 和无 `packages/mobile` 的现状冲突；除非另立 remote transport 项目，不进入普通迁移批次 |
-| OpenCode Go quota / Codex reset windows | 🟡 独立 quota 批次 | GPT-5.6 用量更新发生在 custom OpenCode runtime；OpenChamber 的 provider registry、credential route、Web/VS Code parity 仍未移植，必须按 quota module 单独做 |
+| OpenCode Go quota / Codex reset windows | ✅ 已移植 | 新增独立 credential store/route/provider、active-instance UI 和 VS Code bridge parity；Codex 两个窗口均按 `limit_window_seconds` 生成标签，不再固定假设 5h/weekly |
 
 ### 本地已有或部分覆盖
 
@@ -841,7 +842,7 @@ Phase 5 — 🔴 Markdown/Shiki 重写 (#1+#2): 独立 milestone，需迁移 for
 | gh CLI credentials | `packages/web/server/lib/github/gh-cli-credential.js`、routes/octokit 已接入 | ✅ 属于 v1.13.0 已移植项，后续 GitHub PR status 修复可在此基础上做 |
 | Cron parser | `packages/ui/src/lib/cron.ts`、scheduled-tasks runtime 已用 `cron-parser` | ✅ v1.13.1 已移植 |
 | Diff virtualization / PierreDiffViewer | `PierreDiffViewer.tsx`、`patchFileDiff.ts`、DiffView data-diff-virtual-root 已存在 | 🟡 有较多 v1.13.0 Git/Diff 地基，但 v1.13.3~8 的 history diff/cleanup 仍需 diff |
-| Chat MessageList virtualization | 本地 `MessageList.tsx` 使用 `@tanstack/react-virtual`，没有上游 `virtua` 迁移 | 🟡 fork 已有自己的虚拟化路径；后续 scroll fixes 应适配本地实现，不直接照搬官方 `virtua` 代码 |
+| Chat MessageList virtualization | `MessageList.tsx` 使用 `@tanstack/react-virtual@3.14.5` / `virtual-core@3.17.3`，带官方越界 offset clamp patch | ✅ 已按 v1.16 统一虚拟化路径校准；5 条以上始终虚拟化，本地 7 轮 buffered reveal 已移除；历史容器采用单一 `totalSize` + 行级测量，禁止全局 `measure()` 清空尺寸缓存 |
 | Markdown/Shiki rewrite | 本地无 `packages/ui/src/components/chat/markdown/` 目录，仍有 `MarkdownRendererImpl.tsx` + react-markdown 路径 | ❌ v1.13.1 高风险重写仍未落地；后续 markdown fixes 若改 `markdownCore.ts` 不能直接套 |
 | Native mobile app projects | 本地只有 `packages/ui` / `packages/web` / `packages/electron` / `packages/vscode`，无 `packages/mobile` | ❌ v1.13.9 native iOS/Android app project 未落地；mobile/PWA UI 修复只能按现有 web mobile surface 选合 |
 | Voice/TTS 基础 | `VoiceSettings.tsx`、`useBrowserVoice.ts`、`useMessageTTS.ts`、`wasmSttService.ts`、`ttsInputMode: 'sanitized'|'raw'` 已存在；`small-model` 相关目录不存在 | 🟡 已有旧语音/TTS/STT 和 Kokoro/OpenAI-compatible 基础；v1.14.0 streaming dictation、local model picker、Kokoro first-class read-aloud、v1.14.1 summarized TTS 未等价 |
@@ -936,12 +937,38 @@ Phase 5 — 🔴 Markdown/Shiki 重写 (#1+#2): 独立 milestone，需迁移 for
 - 自动发送仍从 queue snapshot 读取 `provider/model/agent/variant` 和 `directory/serverId`，没有回退到后来切换的 instance 或 controls；原 recent-abort、per-session in-flight、remove/restore rollback 继续生效。
 - 纯策略被抽到 `queuedMessageAutoSendPolicy.ts`，避免测试加载 React/store 初始化副作用。focused queue tests 12/12、strict no-excuse check、全量 `bun run type-check` 和 `bun run lint` 均通过。
 
+### v1.16 小型兼容批次（2026-07-14）
+
+- Open In app registry 新增 VS Code Insiders，使用 macOS 应用名 `Visual Studio Code - Insiders`；现有 Electron installed-app scan 与 `open -a` fallback 会自动接入，无需新增 IPC 或平台分支。
+- Agent update 的 `undefined` 与 `null` 语义已分离：`undefined` 表示 UI 没有提供该字段并保持现有 frontmatter，`null` 继续表示显式删除。web server 与 VS Code bridge 保持一致。
+- `AgentsPage` 仅在有值时发送 description，新 agent 仅在有 scope 时发送 scope，降低无意义字段进入 mutation boundary 的概率；核心更新器仍承担最终数据保护。
+- focused tests 4/4、全量 `bun run type-check` 与 `bun run lint` 通过。额外 strict scan 报告的 7 项均为 `opencodeConfig.ts` 既存违规，本批新增行没有引入新违规。
+
+### v1.13.4 / v1.15 / v1.16 交互与 quota 批次（2026-07-14）
+
+- queued message chips 支持鼠标、触摸和键盘拖拽排序；store 仅重排数组，queued item 本体及其 `sendConfig`、`sendTarget` 快照保持同一引用，自动发送仍以排队时上下文为权威。
+- OpenCode Go quota 已注册到共享 provider registry；workspace ID 与 dashboard auth cookie 使用 OpenChamber 独立的 owner-only credential file，状态 API 永不回传 cookie。Web/desktop 通过 active instance base URL 调用，VS Code bridge 提供同一契约。
+- Codex primary/secondary reset window 都从 API 的 `limit_window_seconds` 生成显示标签，支持服务端窗口长度变化。
+- Markdown code block 在高亮和流式降级路径均显示同步行号；全局换行按钮持久化 `codeBlockLineWrap`，纯文本/CJK 单元格渲染路径保留。
+
+### v1.16 Chat scroll stability 批次（2026-07-14）
+
+- 移除本 fork 的 7 轮 buffered reveal 双层分页：`turnStart` 固定为 0，`Load older messages` 只根据 authoritative server cursor 拉取真实历史，不再先改变本地窗口高度。
+- 5 条以上历史始终使用 `@tanstack/react-virtual`；依赖升级到 `3.14.5` / `virtual-core@3.17.3`，并应用官方 out-of-range scroll offset clamp patch。
+- 空闲会话不再因 ResizeObserver、内容重测或 settle burst 自动回到底部；用户向上滚动立即释放 auto-follow。桌面 prepend 只做一次同步锚点恢复，不再运行 900ms 重复写入。
+- 历史列表改为官方 v1.16 的单一尺寸容器：外层高度只使用 virtualizer `totalSize`，当前窗口只使用顶部偏移，不再把剩余估算高度重复渲染成尾部 padding。
+- 移除历史容器 ResizeObserver、entry 变化和内容变化触发的全局 `virtualizer.measure()`；该 API 会清空全部行高缓存，使大量 42px 的折叠 OMO 行反复退回 320px 估算并制造数千像素空白。现在只由每行 `measureElement` 更新尺寸，并使用已测行高的自适应平均值估算未测行。
+- virtualizer 的 `scrollToFn` 会先同步暴露新的 `totalSize` 再写滚动位置，避免浏览器按旧高度截断锚点修正；虚拟行尺寸变化只补偿当前首个可见行上方的变化。
+- 自动接近顶部触发 `handleHistoryScroll` 仍保持关闭；当前桌面策略是显式 Load older，避免请求、虚拟测量和用户滚轮并发。
+- 精确回归会话 `ses_0b5e6259bffd7VmOXn1RtsMN7S`：修复前在最后已渲染行后仍有 1480–1660px 尾部 padding，且全局重测使历史总高度保持约 18k；修复后首屏历史高度收敛到 7680px，物理底部 `scrollTop === max === 6888`，最后历史行位于 834px、最新用户消息位于 914–969px（视口 1009px）。
+- 同一会话 Playwright 验证：向上/向下各滚动 700px 后等待 1.5s 漂移均为 0；OMO 折叠展开后高度 8222 -> 11044 -> 8222，收起后漂移 0；`Load older` 后 `scrollTop 0 -> 1982` 且 1.2s 内漂移 0，再滚到底后最后历史行与最新消息仍完整落在视口内，无大块空白。
+
 ### 中等难度 / 需要逐段适配
 
 | 功能 | 影响文件/模块 | 风险点 |
 |---|---|---|
 | slash skill 调用、粘贴 `@`、ArrowUp history、发送关闭 question prompt | `ChatInput.tsx`、autocomplete、question state | 本地 `ChatInput.tsx` 近 5k 行，已有 magic prompts、queue mode、remote routing；只移植纯逻辑函数和测试 |
-| queue drag reorder | `messageQueueStore.ts`、`QueuedMessageChips.tsx` | Follow-up behavior 已完成；剩余仅是 queued message drag reorder，需要继续保护 `sendConfig` + `sendTarget` 快照 |
+| queue drag reorder | `messageQueueStore.ts`、`QueuedMessageChips.tsx` | ✅ 已完成；拖拽只改变队列次序，保留 queued item 对象及 `sendConfig` + `sendTarget` 快照 |
 | model picker reorder/accordion/Shift+Delete + thinking variant | `ModelPickerList.tsx`、`ModelControls.tsx`、agents settings | fork 已有 hidden/favorite/recent 和 remote instance model scope；必须按 instance/serverId 隔离 |
 | agent temp/topP/thinking save/clear | `AgentsPage.tsx`、`useAgentsStore.ts`、server agents/config | 本 fork 已做过 prompt/permission persistence；新增字段要按 custom/project/user 层级合并 |
 | session project binding / pinned/folder empty refresh / worktree snap-back | sidebar hooks、global sessions store、project selection | fork 有 remote instance、Global Pinned、session markers；所有 fallback 必须使用 session/directory authoritative context |
@@ -951,13 +978,13 @@ Phase 5 — 🔴 Markdown/Shiki 重写 (#1+#2): 独立 milestone，需迁移 for
 | Desktop remote custom headers / SSH saved password unlock | `packages/electron`、`remote-instances`、`ssh-manager`、remote proxy/SSE relay | 本 fork remote instance proxy 是深改区域；header forwarding 必须贯穿 HTTP + WebSocket + SSE，不能只改设置页 |
 | Voice input / local STT / Kokoro read-aloud refresh | `VoiceSettings.tsx`、`useBrowserVoice.ts`、`lib/voice/*`、`web/server/lib/tts/*` | 本地已有旧实现，官方 v1.14.0 是 UX + runtime 重构；应先抽取 local model picker/STT/TTS capability，不直接套 mobile composer 改动 |
 | Small Model utility consumers | `web/server/lib/small-model`（新）、config/settings、session assist metadata、Git/GitHub generation、TTS/Notes | 高价值但必须按 session directory/provider/model 权限约束；后台任务禁止无 session 的全局 provider 扫描 |
-| Unified list virtualization / chat history loading | `MessageList.tsx`、mobile history、scroll preservation | 官方从 `virtua` 转向统一 `@tanstack/react-virtual`，但 fork 已有自己的 MessageList 虚拟化和 process folding；只移植可证明的 scroll invariants |
+| Unified list virtualization / chat history loading | `MessageList.tsx`、desktop history、scroll preservation | ✅ desktop 已对齐统一 `@tanstack/react-virtual`、server-only pagination 和 scroll invariants；mobile momentum/explicit history button 仍需平台验证 |
 
 ### 高风险 / 不建议作为第一批
 
 | Milestone | 原因 | 处理方式 |
 |---|---|---|
-| Chat scroll 全链路稳定 (v1.13.3~7) | 上游多轮修复 `useChatAutoFollow` / `MessageList` / history virtualization；本 fork 用 `@tanstack/react-virtual`、process folding、custom scroll anchoring，文件差异大 | 单独开性能 milestone；先写滚动复现脚本，再 port 最小逻辑 |
+| Chat scroll 全链路稳定 (v1.13.3~7) | ✅ desktop 长会话、Load older、process folding 和空闲 auto-follow 已完成；mobile momentum 与自动接近顶部加载尚未验证 | 保留为平台收尾 milestone，不再重复改 desktop scroll writer |
 | Markdown/Shiki worker rewrite 相关后续 fixes | 本地没有上游 `chat/markdown/` 目录，`MarkdownRendererImpl.tsx` 仍承载 agent/skill links、文件路径点击、table copy 等 fork 功能 | 暂不混入 v1.13.3~8；若做，必须先迁移 fork 自定义渲染能力 |
 | OpenCode never auto-attach / orphan cleanup / process killer port ownership | 本 fork Electron 在同进程启动 web server，并有自定义 managed OpenCode keep-alive / detach / quit 语义 | 先读 `opencode` 模块 docs + Electron lifecycle，做 runtime-truth 验证；不能照搬上游 kill/attach 判断 |
 | v1.13.4 dead-code cleanup / knip sweep | compare 删除大量 UI/shared 文件；fork 仍有远程实例、session markers、custom UI 依赖 | 暂缓。cleanup 不应和功能合并混在一起 |
@@ -968,13 +995,13 @@ Phase 5 — 🔴 Markdown/Shiki 重写 (#1+#2): 独立 milestone，需迁移 for
 
 ### 建议下一步批次
 
-1. **Queue reliability 批次 A (已完成)**: v1.16 idle dispatch + failed auto-send backoff 已移植；queue drag reorder 继续作为独立项，不改变 queue snapshot 权威。
+1. **Queue reliability 批次 A (已完成)**: v1.16 idle dispatch、failed auto-send backoff 和 queue drag reorder 已移植；queue snapshot 继续作为权威。
 2. **CLI/Startup/Desktop auth 批次 B**: pid identity、live port check、update helper、quota/provider startup、Bun global CLI fix、LAN-bound local auth token，按 helper/route 切，不做 v1.13.4 cleanup。
-3. **小修批次 C**: header encoding、MiniMax quota、skills catalog refresh、provider disconnect、Git push sync、Preview duplicate token、VS Code Insiders；line-range refs / first changed line 与第二轮 JSON/VS Code/Windows CLI 小修已完成。
+3. **小修批次 C**: header encoding、MiniMax quota、skills catalog refresh、provider disconnect、Git push sync、Preview duplicate token；VS Code Insiders、line-range refs / first changed line 与第二轮 JSON/VS Code/Windows CLI 小修已完成。
 4. **GitHub PR status 批次 D**: timeout/rate-limit/cooldown/concurrent metadata，并验证启动时 session/diff/message 不被 PR status 阻塞。
 5. **Queue/Steer 批次 E (已完成)**: boolean 已迁到 Follow-up behavior (`steer` / `queue`) 并复用本 fork `steer-side-channel`；后续 queue drag reorder 单独处理。
 6. **Session/worktree 批次 F**: selected project binding、folder/pinned refresh、worktree snap-back、subagent delete cascade；timeline dialog load earlier 已完成。其余项必须按 `openchamber-context-authority` 校准 directory/serverId。
 7. **Chat input/abort 批次 G**: pasted `@`、ArrowUp、question dismiss、slash skill 调用、cross-project abort routing，全部补 focused tests。
 8. **Voice/Small Model 批次 H**: 先做 Small Model server capability + settings + one consumer（建议 TTS summarized 或 Notes selected text），再扩展 session recap/suggestion 和 Git/GitHub generation。
-9. **v1.15 UI 批次 I**: Mermaid zoom、code line number/wrap、ambiguous transport failure、Markdown preview，按现有 Markdown/VirtualizedCodeBlock/FilesView 架构逐项适配。
+9. **v1.15 UI 批次 I (部分完成)**: code line number/wrap 已按现有 Markdown 架构适配；Mermaid zoom、ambiguous transport failure、Markdown preview 继续逐项处理。
 10. **高风险 milestone**: server-persisted auto-accept、session goals、chat scroll + auto-follow、OpenCode process ownership、Markdown/Shiki rewrite、mobile/native app、private relay/pairing、bulk docs/i18n，分别处理。
