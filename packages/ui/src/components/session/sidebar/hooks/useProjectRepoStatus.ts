@@ -4,6 +4,7 @@ import { mapWithConcurrency } from '@/lib/concurrency';
 import { useGitStore } from '@/stores/useGitStore';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { DEFAULT_SERVER_ID, serverRegistry } from '@/lib/opencode/server-registry';
+import { retryProjectRepoStatusProbe } from './project-repo-status-probe';
 
 type Project = {
   id: string;
@@ -117,16 +118,21 @@ export const useProjectRepoStatus = (args: Args): void => {
       return;
     }
 
-    let cancelled = false;
+    const controller = new AbortController();
     void mapWithConcurrency(probeProjects, PROJECT_STATUS_PROBE_CONCURRENCY, async (project) => {
-      if (cancelled) return;
-      await ensureStatus(project.normalizedPath, git).catch(() => undefined);
+      await retryProjectRepoStatusProbe(
+        () => ensureStatus(project.normalizedPath, git, {
+          mode: 'light',
+          reportErrors: false,
+        }),
+        { signal: controller.signal },
+      );
     }).catch(() => {
       // Individual status fetches update the store with their own failure state.
     });
 
     return () => {
-      cancelled = true;
+      controller.abort();
     };
   }, [normalizedProjects.length, probeProjects, git, ensureStatus, setProjectRepoStatus]);
 

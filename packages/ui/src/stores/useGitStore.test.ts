@@ -91,4 +91,42 @@ describe('useGitStore', () => {
     const [fullResult, lightResult] = await Promise.all([fullPromise, lightPromise]);
     expect(lightResult).toBe(fullResult);
   });
+
+  test('forwards light mode through stale-safe status checks', async () => {
+    const statusCalls: Array<{ directory: string; options?: { mode?: 'light' } }> = [];
+    const git = createGitApi(async (directory, options) => {
+      statusCalls.push({ directory, options });
+      return createStatus();
+    });
+
+    await useGitStore.getState().ensureStatus('/large-remote-repo', git, { mode: 'light' });
+
+    expect(statusCalls).toEqual([
+      { directory: '/large-remote-repo', options: { mode: 'light' } },
+    ]);
+  });
+
+  test('reports a failed status fetch distinctly from an unchanged status', async () => {
+    const git = createGitApi(async () => {
+      throw new Error('Remote instance request lane is busy');
+    });
+
+    const result = await useGitStore.getState().fetchStatus('/busy-remote-repo', git, {
+      silent: true,
+      reportErrors: false,
+    });
+
+    expect(result).toBeNull();
+  });
+
+  test('returns a success signal from stale-safe status checks', async () => {
+    const git = createGitApi(async () => createStatus());
+
+    const result = await useGitStore.getState().ensureStatus('/unchanged-remote-repo', git, {
+      mode: 'light',
+      reportErrors: false,
+    });
+
+    expect(result).toBe(true);
+  });
 });

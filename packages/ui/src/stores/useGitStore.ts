@@ -24,6 +24,14 @@ const DIFF_CACHE_MAX_ENTRIES = 30;
 const DIFF_CACHE_MAX_TOTAL_SIZE_BYTES = 20 * 1024 * 1024; // 20MB
 type GitStatusFetchMode = 'full' | 'light';
 
+type GitStatusFetchOptions = {
+  silent?: boolean;
+  mode?: 'light';
+  reportErrors?: boolean;
+};
+
+type GitStatusEnsureOptions = Pick<GitStatusFetchOptions, 'mode' | 'reportErrors'>;
+
 interface DirectoryGitState {
   isGitRepo: boolean | null;
   status: GitStatus | null;
@@ -53,13 +61,13 @@ interface GitStore {
   setActiveDirectory: (directory: string | null) => void;
   getDirectoryState: (directory: string) => DirectoryGitState | null;
 
-  fetchStatus: (directory: string, git: GitAPI, options?: { silent?: boolean; mode?: 'light' }) => Promise<boolean>;
+  fetchStatus: (directory: string, git: GitAPI, options?: GitStatusFetchOptions) => Promise<boolean | null>;
   fetchBranches: (directory: string, git: GitAPI) => Promise<void>;
   fetchLog: (directory: string, git: GitAPI, maxCount?: number) => Promise<void>;
   fetchIdentity: (directory: string, git: GitAPI) => Promise<void>;
   fetchAll: (directory: string, git: GitAPI, options?: { force?: boolean; silentIfCached?: boolean }) => Promise<void>;
 
-  ensureStatus: (directory: string, git: GitAPI) => Promise<void>;
+  ensureStatus: (directory: string, git: GitAPI, options?: GitStatusEnsureOptions) => Promise<boolean>;
   ensureAll: (directory: string, git: GitAPI) => Promise<void>;
 
   getDiff: (directory: string, filePath: string) => { original: string; modified: string; fetchedAt: number; isBinary?: boolean } | null;
@@ -91,7 +99,7 @@ interface GitAPI {
 
 const inFlightDiffFetchesByDirectory = new Map<string, Set<string>>();
 const diffFetchGenerationByDirectory = new Map<string, number>();
-const inFlightStatusFetches = new Map<string, Promise<boolean>>();
+const inFlightStatusFetches = new Map<string, Promise<boolean | null>>();
 const inFlightEnsureAllByDirectory = new Map<string, Promise<void>>();
 
 const getStatusFetchKey = (directory: string, mode: GitStatusFetchMode): string => `${mode}:${directory}`;
@@ -421,7 +429,10 @@ export const useGitStore = create<GitStore>()(
               set({ directories: newDirectories });
             }
           } catch (error) {
-            console.error('Failed to fetch git status:', error);
+            if (options.reportErrors !== false) {
+              console.error('Failed to fetch git status:', error);
+            }
+            return null;
           } finally {
             if (!silent) {
               const newDirectories = new Map(get().directories);
@@ -713,13 +724,17 @@ export const useGitStore = create<GitStore>()(
         set({ directories: newDirectories });
       },
 
-      ensureStatus: async (directory, git) => {
+      ensureStatus: async (directory, git, options = {}) => {
         const dirState = get().directories.get(directory);
         const now = Date.now();
         if (dirState?.status && now - dirState.lastStatusFetch < STATUS_STALE_THRESHOLD) {
-          return;
+          return true;
         }
-        await get().fetchStatus(directory, git, { silent: Boolean(dirState?.status) });
+        const result = await get().fetchStatus(directory, git, {
+          silent: Boolean(dirState?.status),
+          ...options,
+        });
+        return result !== null;
       },
 
       ensureAll: (directory, git) => {
