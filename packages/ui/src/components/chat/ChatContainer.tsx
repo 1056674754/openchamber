@@ -633,7 +633,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
     }, [handleMessageContentChange, inlineBlockingRequestsByTool, releaseAutoFollow, sessionPermissions, sessionQuestions]);
 
     const handleLoadOlder = React.useCallback(() => {
-        void loadEarlier();
+        void loadEarlier({ userInitiated: true });
     }, [loadEarlier]);
 
     const navigation = useChatTurnNavigation({

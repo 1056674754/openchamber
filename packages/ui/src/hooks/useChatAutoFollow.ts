@@ -49,7 +49,6 @@ const LERP = 0.18;
 const SETTLE_EPSILON = 0.5;
 const SETTLE_FRAMES = 4;
 const TOUCH_FINGER_DOWN_THRESHOLD = 2;
-const SETTLE_BURST_DURATION_MS = 280;
 const REPIN_GRACE_AFTER_RELEASE_MS = 1200;
 const WHEEL_RELEASE_THRESHOLD_PX = 2;
 const PROCESS_FOLD_TRANSITION_CLASS = 'openchamber-process-fold-transition';
@@ -124,6 +123,8 @@ export const useChatAutoFollow = ({
     const [isFollowingProgrammatically, setIsFollowingProgrammatically] = React.useState(false);
 
     const stateRef = React.useRef<AutoFollowState>('following');
+    const sessionIsWorkingRef = React.useRef(sessionIsWorking);
+    sessionIsWorkingRef.current = sessionIsWorking;
     const sessionMessageCountRef = React.useRef(sessionMessageCount);
     sessionMessageCountRef.current = sessionMessageCount;
     const currentSessionIdRef = React.useRef(currentSessionId);
@@ -136,7 +137,6 @@ export const useChatAutoFollow = ({
     const lastScrollTopRef = React.useRef(0);
     const saveTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
     const pendingSaveRef = React.useRef<{ sessionId: string; anchor: number } | null>(null);
-    const settleBurstRafRef = React.useRef<number | null>(null);
     const lastUserReleaseAtRef = React.useRef(0);
     // When restoreSnapshot is invoked while ChatViewport is still hydrating
     // (skeleton rendered, no scroll container yet), we record the session here
@@ -266,55 +266,21 @@ export const useChatAutoFollow = ({
         writeScrollTopInstant(target);
     }, [writeScrollTopInstant]);
 
-    const stopSettleBurst = React.useCallback(() => {
-        if (settleBurstRafRef.current !== null && typeof window !== 'undefined') {
-            window.cancelAnimationFrame(settleBurstRafRef.current);
-        }
-        settleBurstRafRef.current = null;
-    }, []);
-
-    const startSettleBurst = React.useCallback(() => {
-        if (typeof window === 'undefined') return;
-        if (isProcessFoldViewTransitionActive()) return;
-        stopSettleBurst();
-        const until = (typeof performance !== 'undefined' ? performance.now() : Date.now()) + SETTLE_BURST_DURATION_MS;
-        const tick = () => {
-            settleBurstRafRef.current = null;
-            if (stateRef.current !== 'following') return;
-            if (isProcessFoldViewTransitionActive()) return;
-            const c = scrollRef.current;
-            if (!c) return;
-            const target = Math.max(0, c.scrollHeight - c.clientHeight);
-            if (target > c.scrollTop + SETTLE_EPSILON) {
-                markProgrammaticWrite();
-                c.scrollTop = target;
-                lastScrollTopRef.current = target;
-            }
-            const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
-            if (now < until) {
-                settleBurstRafRef.current = window.requestAnimationFrame(tick);
-            }
-        };
-        settleBurstRafRef.current = window.requestAnimationFrame(tick);
-    }, [markProgrammaticWrite, stopSettleBurst]);
-
     const releaseAutoFollow = React.useCallback(() => {
         stopFollowLoop();
-        stopSettleBurst();
         lastUserReleaseAtRef.current = typeof performance !== 'undefined' ? performance.now() : Date.now();
         setStateValue('released');
-    }, [setStateValue, stopFollowLoop, stopSettleBurst]);
+    }, [setStateValue, stopFollowLoop]);
 
     const releaseFromUserIntent = React.useCallback(() => {
         if (stateRef.current === 'following') {
             stopFollowLoop();
-            stopSettleBurst();
             lastUserReleaseAtRef.current = typeof performance !== 'undefined' ? performance.now() : Date.now();
             setStateValue('released');
         } else {
             lastUserReleaseAtRef.current = typeof performance !== 'undefined' ? performance.now() : Date.now();
         }
-    }, [setStateValue, stopFollowLoop, stopSettleBurst]);
+    }, [setStateValue, stopFollowLoop]);
 
     const goToBottom = React.useCallback((mode: 'instant' | 'smooth' = 'instant') => {
         const container = scrollRef.current;
@@ -327,8 +293,7 @@ export const useChatAutoFollow = ({
         }
         const target = Math.max(0, container.scrollHeight - container.clientHeight);
         writeScrollTopInstant(target);
-        startSettleBurst();
-    }, [setStateValue, startFollowLoop, startSettleBurst, writeScrollTopInstant]);
+    }, [setStateValue, startFollowLoop, writeScrollTopInstant]);
 
     const flushSave = React.useCallback(() => {
         if (saveTimerRef.current !== null) {
@@ -395,8 +360,6 @@ export const useChatAutoFollow = ({
             lastUserReleaseAtRef.current = 0;
             const target = Math.max(0, container.scrollHeight - container.clientHeight);
             writeScrollTopInstant(target);
-            startFollowLoop();
-            startSettleBurst();
             return false;
         }
 
@@ -416,7 +379,7 @@ export const useChatAutoFollow = ({
         });
 
         return true;
-    }, [isMobile, setStateValue, startFollowLoop, startSettleBurst, updateViewportAnchor, writeScrollTopInstant]);
+    }, [isMobile, setStateValue, updateViewportAnchor, writeScrollTopInstant]);
 
     React.useEffect(() => {
         if (!currentSessionId || currentSessionId === lastSessionIdRef.current) {
@@ -426,20 +389,18 @@ export const useChatAutoFollow = ({
         MessageFreshnessDetector.getInstance().recordSessionStart(currentSessionId);
         flushSave();
         stopFollowLoop();
-        stopSettleBurst();
         markProgrammaticWrite();
         // Drop any pending restore request inherited from a different session.
         if (pendingInitialRestoreRef.current && pendingInitialRestoreRef.current !== currentSessionId) {
             pendingInitialRestoreRef.current = null;
         }
-    }, [currentSessionId, flushSave, markProgrammaticWrite, stopFollowLoop, stopSettleBurst]);
+    }, [currentSessionId, flushSave, markProgrammaticWrite, stopFollowLoop]);
 
     React.useEffect(() => {
         if (sessionIsWorking && stateRef.current === 'following' && !isProcessFoldViewTransitionActive()) {
             stickToBottomIfFollowing();
-            startSettleBurst();
         }
-    }, [sessionIsWorking, startSettleBurst, stickToBottomIfFollowing]);
+    }, [sessionIsWorking, stickToBottomIfFollowing]);
 
     // Replay a deferred restoreSnapshot once ChatViewport mounts.
     React.useEffect(() => {
@@ -472,6 +433,7 @@ export const useChatAutoFollow = ({
 
         const programmatic = isInProgrammaticWindow();
         const currentTop = container.scrollTop;
+        const previousTop = lastScrollTopRef.current;
         lastScrollTopRef.current = currentTop;
 
         updateOverflowAndButton();
@@ -480,11 +442,18 @@ export const useChatAutoFollow = ({
             return;
         }
 
+        if (currentTop < previousTop - SETTLE_EPSILON) {
+            releaseFromUserIntent();
+            queueSave();
+            return;
+        }
+
         const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
         const inGrace = (now - lastUserReleaseAtRef.current) < REPIN_GRACE_AFTER_RELEASE_MS;
         if (stateRef.current === 'released' && isNearBottom(container, isMobile) && !inGrace) {
             setStateValue('following');
-            startFollowLoop();
+        } else if (stateRef.current === 'following' && !isNearBottom(container, isMobile)) {
+            releaseFromUserIntent();
         }
 
         queueSave();
@@ -492,14 +461,16 @@ export const useChatAutoFollow = ({
         isInProgrammaticWindow,
         isMobile,
         queueSave,
+        releaseFromUserIntent,
         setStateValue,
-        startFollowLoop,
         updateOverflowAndButton,
     ]);
 
     React.useEffect(() => {
         const container = containerEl;
         if (!container) return;
+
+        lastScrollTopRef.current = container.scrollTop;
 
         const handleWheel = (event: WheelEvent) => {
             const delta = normalizeWheelDelta({
@@ -578,9 +549,12 @@ export const useChatAutoFollow = ({
 
         const observer = new ResizeObserver(() => {
             updateOverflowAndButton();
-            if (stateRef.current === 'following' && !isProcessFoldViewTransitionActive()) {
+            if (
+                sessionIsWorkingRef.current
+                && stateRef.current === 'following'
+                && !isProcessFoldViewTransitionActive()
+            ) {
                 stickToBottomIfFollowing();
-                startSettleBurst();
             }
         });
         observer.observe(container);
@@ -589,7 +563,7 @@ export const useChatAutoFollow = ({
             observer.observe(inner);
         }
         return () => observer.disconnect();
-    }, [containerEl, startSettleBurst, stickToBottomIfFollowing, updateOverflowAndButton]);
+    }, [containerEl, stickToBottomIfFollowing, updateOverflowAndButton]);
 
     React.useEffect(() => {
         updateOverflowAndButton();
@@ -598,11 +572,14 @@ export const useChatAutoFollow = ({
     const notifyContentChange = React.useCallback((_reason?: ContentChangeReason) => {
         void _reason;
         updateOverflowAndButton();
-        if (stateRef.current === 'following' && !isProcessFoldViewTransitionActive()) {
+        if (
+            sessionIsWorkingRef.current
+            && stateRef.current === 'following'
+            && !isProcessFoldViewTransitionActive()
+        ) {
             stickToBottomIfFollowing();
-            startSettleBurst();
         }
-    }, [startSettleBurst, stickToBottomIfFollowing, updateOverflowAndButton]);
+    }, [stickToBottomIfFollowing, updateOverflowAndButton]);
 
     const animationHandlersRef = React.useRef<Map<string, AnimationHandlers>>(new Map());
 
@@ -611,9 +588,12 @@ export const useChatAutoFollow = ({
         if (cached) return cached;
 
         const kick = () => {
-            if (stateRef.current === 'following' && !isProcessFoldViewTransitionActive()) {
+            if (
+                sessionIsWorkingRef.current
+                && stateRef.current === 'following'
+                && !isProcessFoldViewTransitionActive()
+            ) {
                 stickToBottomIfFollowing();
-                startSettleBurst();
             }
         };
 
@@ -630,19 +610,18 @@ export const useChatAutoFollow = ({
         };
         animationHandlersRef.current.set(messageId, handlers);
         return handlers;
-    }, [startSettleBurst, stickToBottomIfFollowing, updateOverflowAndButton]);
+    }, [stickToBottomIfFollowing, updateOverflowAndButton]);
 
     React.useEffect(() => {
         return () => {
             stopFollowLoop();
-            stopSettleBurst();
             flushSave();
             if (saveTimerRef.current !== null) {
                 clearTimeout(saveTimerRef.current);
                 saveTimerRef.current = null;
             }
         };
-    }, [flushSave, stopFollowLoop, stopSettleBurst]);
+    }, [flushSave, stopFollowLoop]);
 
     React.useEffect(() => {
         if (!onActiveTurnChange) return;

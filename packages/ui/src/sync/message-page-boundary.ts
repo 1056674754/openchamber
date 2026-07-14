@@ -29,8 +29,8 @@ export const getPageParts = (page: Pick<MessagePage, "part">, messageID: string)
 }
 
 export const hasUserBoundary = (page: Pick<MessagePage, "session" | "part">): boolean => {
-  const oldest = page.session[0]
-  return Boolean(oldest && isRealUserMessage(oldest, getPageParts(page, oldest.id)))
+  const partsByMessageID = new Map(page.part.map((item) => [item.id, item.part]))
+  return page.session.some((message) => isRealUserMessage(message, partsByMessageID.get(message.id)))
 }
 
 export const mergeOlderMessagePage = (page: MessagePage, older: MessagePage): MessagePage => ({

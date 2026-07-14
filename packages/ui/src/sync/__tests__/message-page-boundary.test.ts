@@ -31,13 +31,38 @@ function page(input: {
 }
 
 describe("message page user boundary", () => {
-  test("does not treat an oldest assistant message as a user boundary", () => {
+  test("does not treat an assistant-only page as a user boundary", () => {
     const current = page({
       messages: [message("msg_002", "assistant"), message("msg_003", "assistant")],
       cursor: "msg_002",
     })
 
     expect(hasUserBoundary(current)).toBe(false)
+  })
+
+  test("stops without fetching older pages when a real user boundary is already in the page", async () => {
+    const current = page({
+      messages: [
+        message("msg_001", "assistant"),
+        message("msg_002", "user"),
+        message("msg_003", "assistant"),
+      ],
+      parts: [{ id: "msg_002", part: [textPart("prt_002", "msg_002", "hello")] }],
+      cursor: "msg_001",
+    })
+    const requestedCursors: string[] = []
+
+    const result = await fetchMessagePageToUserBoundary({
+      page: current,
+      fetchOlder: async (cursor) => {
+        requestedCursors.push(cursor)
+        return page({ messages: [], complete: true })
+      },
+    })
+
+    expect(requestedCursors).toEqual([])
+    expect(result.extraPages).toBe(0)
+    expect(result.stoppedBeforeBoundary).toBe(false)
   })
 
   test("becomes boundary-safe after merging an older real user message", () => {
@@ -103,7 +128,7 @@ describe("message page user boundary", () => {
     expect(hasUserBoundary(current)).toBe(false)
   })
 
-  test("fetches older pages until the merged page starts at a real user boundary", async () => {
+  test("fetches older pages until the merged page contains a real user boundary", async () => {
     const current = page({
       messages: [message("msg_003", "assistant"), message("msg_004", "assistant")],
       cursor: "msg_003",

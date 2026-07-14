@@ -44,7 +44,7 @@
     "@pierre/diffs": "1.1.0-beta.13",
     "@replit/codemirror-vim": "^6.3.0",
     "@simplewebauthn/browser": "13.3.0",
-    "@tanstack/react-virtual": "^3.13.18",
+    "@tanstack/react-virtual": "3.14.5",
     "@types/react-syntax-highlighter": "^15.5.13",
     "beautiful-mermaid": "^1.1.3",
     "class-variance-authority": "^0.7.1",

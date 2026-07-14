@@ -82,9 +82,8 @@ export const deriveTimelineHistorySignals = (
     input: TimelineHistorySignalsInput,
 ): TurnHistorySignals => {
     const hasBufferedTurns = input.turnStart > 0;
-    const loadedTurnWindowIsFull = input.loadedRealUserGroupCount >= input.initialTurns;
     const explicitHistoryHasMore = input.historyMeta
-        ? !input.historyMeta.complete && loadedTurnWindowIsFull
+        ? !input.historyMeta.complete
         : false;
     const fallbackHistoryHasMore = !input.historyMeta
         && input.loadedMessageCount >= input.defaultHistoryLimit

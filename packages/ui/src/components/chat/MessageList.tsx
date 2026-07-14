@@ -1,6 +1,6 @@
 import React from 'react';
 import type { Part } from '@opencode-ai/sdk/v2';
-import { measureElement as measureVirtualElement, type VirtualItem, useVirtualizer } from '@tanstack/react-virtual';
+import { elementScroll, type VirtualItem, useVirtualizer } from '@tanstack/react-virtual';
 
 import ChatMessage from './ChatMessage';
 import { areOptionalRenderRelevantMessagesEqual, areRelevantTurnGroupingContextsEqual, areRenderRelevantMessagesEqual } from './message/renderCompare';
@@ -24,20 +24,13 @@ import { streamPerfCount, streamPerfMeasure } from '@/stores/utils/streamDebug';
 import type { StreamPhase } from './message/types';
 import { normalizeParts } from './message/partUtils';
 
-const MESSAGE_LIST_VIRTUALIZE_THRESHOLD = 40;
+const MESSAGE_LIST_VIRTUALIZE_THRESHOLD = 5;
 const MESSAGE_LIST_OVERSCAN = 6;
-
-const estimateHistoryEntryHeight = (entry: RenderEntry | undefined): number => {
-    if (!entry) {
-        return 160;
-    }
-
-    if (entry.kind === 'turn') {
-        return 180 + Math.min(entry.turn.assistantMessages.length, 4) * 100;
-    }
-
-    return 140;
-};
+const MESSAGE_LIST_AT_END_THRESHOLD_PX = 80;
+const MESSAGE_LIST_ESTIMATED_ENTRY_SIZE = 320;
+const MESSAGE_LIST_ESTIMATE_MIN_SAMPLES = 5;
+const MESSAGE_LIST_ESTIMATE_MIN = 120;
+const MESSAGE_LIST_ESTIMATE_MAX = 1200;
 
 const useStableEvent = <TArgs extends unknown[], TResult>(handler: (...args: TArgs) => TResult) => {
     const handlerRef = React.useRef(handler);
@@ -1154,10 +1147,6 @@ const StaticHistoryList: React.FC<{
     const paddingTop = shouldVirtualize && virtualRows.length > 0
         ? Math.max(0, (virtualRows[0]?.start ?? 0) - scrollMargin)
         : 0;
-    const paddingBottom = shouldVirtualize && virtualRows.length > 0
-        ? Math.max(0, totalSize - ((virtualRows[virtualRows.length - 1]?.end ?? 0) - scrollMargin))
-        : 0;
-
     if (!shouldVirtualize) {
         return (
             <div ref={contentRef} className="relative w-full">
@@ -1174,15 +1163,9 @@ const StaticHistoryList: React.FC<{
     }
 
     if (virtualRows.length === 0 && entries.length > 0) {
-        const fallbackStart = Math.max(0, entries.length - MESSAGE_LIST_OVERSCAN * 2);
-        const fallbackEntries = entries.slice(fallbackStart);
-        const fallbackHeight = fallbackEntries.reduce((total, entry) => total + estimateHistoryEntryHeight(entry), 0);
-        const fallbackPaddingTop = Math.max(0, totalSize - fallbackHeight);
-
         return (
             <div ref={contentRef} className="relative w-full">
-                {fallbackPaddingTop > 0 ? <div aria-hidden="true" style={{ height: `${fallbackPaddingTop}px` }} /> : null}
-                {fallbackEntries.map((entry) => (
+                {entries.map((entry) => (
                     <div
                         key={entry.key}
                         data-turn-entry={entry.key}
@@ -1195,26 +1178,30 @@ const StaticHistoryList: React.FC<{
     }
 
     return (
-        <div ref={contentRef} className="relative w-full">
-            {paddingTop > 0 ? <div aria-hidden="true" style={{ height: `${paddingTop}px` }} /> : null}
-            {virtualRows.map((virtualRow) => {
-                const entry = entries[virtualRow.index];
-                if (!entry) {
-                    return null;
-                }
+        <div
+            ref={contentRef}
+            className="relative w-full"
+            style={{ height: `${Math.max(0, totalSize)}px` }}
+        >
+            <div style={{ paddingTop: `${paddingTop}px` }}>
+                {virtualRows.map((virtualRow) => {
+                    const entry = entries[virtualRow.index];
+                    if (!entry) {
+                        return null;
+                    }
 
-                return (
-                    <div
-                        key={virtualRow.key}
-                        ref={measureElement}
-                        data-index={virtualRow.index}
-                        data-turn-entry={entry.key}
-                    >
-                        {renderEntry(entry)}
-                    </div>
-                );
-            })}
-            {paddingBottom > 0 ? <div aria-hidden="true" style={{ height: `${paddingBottom}px` }} /> : null}
+                    return (
+                        <div
+                            key={virtualRow.key}
+                            ref={measureElement}
+                            data-index={virtualRow.index}
+                            data-turn-entry={entry.key}
+                        >
+                            {renderEntry(entry)}
+                        </div>
+                    );
+                })}
+            </div>
         </div>
     );
 };
@@ -1376,7 +1363,6 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
     }), [messages]);
 
     const historyContentRef = React.useRef<HTMLDivElement | null>(null);
-    const pendingVirtualMeasureFrameRef = React.useRef<number | null>(null);
     const resolveScrollContainer = React.useCallback((): HTMLDivElement | null => {
         if (scrollRef?.current) {
             return scrollRef.current;
@@ -1626,56 +1612,55 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
     }, [activeStreamingTurnHasStop, activeStreamingTurnId, sessionIsWorking]);
 
     const historyEntries = staticRenderEntries;
-    // The "load older" turn window is intentionally small; virtualizing it makes
-    // estimate/measure lag visible as spacer gaps while prepending history.
-    const shouldVirtualizeHistory = historyEntries.length >= MESSAGE_LIST_VIRTUALIZE_THRESHOLD && turnStart <= 0;
-    const previousHistoryLenRef = React.useRef(historyEntries.length);
-    const previousFirstEntryKeyRef = React.useRef(historyEntries[0]?.key);
+    const shouldVirtualizeHistory = historyEntries.length >= MESSAGE_LIST_VIRTUALIZE_THRESHOLD;
     const [historyScrollMargin, setHistoryScrollMargin] = React.useState(0);
+    const historyEstimatedEntrySizeRef = React.useRef(MESSAGE_LIST_ESTIMATED_ENTRY_SIZE);
     const showLoadOlder = turnStart > 0 || hasMoreAbove;
-
-    React.useLayoutEffect(() => {
-        const previousLen = previousHistoryLenRef.current;
-        const currentLen = historyEntries.length;
-        const previousFirstKey = previousFirstEntryKeyRef.current;
-        const currentFirstKey = historyEntries[0]?.key;
-
-        previousHistoryLenRef.current = currentLen;
-        previousFirstEntryKeyRef.current = currentFirstKey;
-
-        const grew = currentLen > previousLen;
-        const firstChanged = previousFirstKey !== currentFirstKey;
-        if (!shouldVirtualizeHistory || !grew || !firstChanged || previousLen === 0) {
-            return;
-        }
-
-        const prependedCount = currentLen - previousLen;
-        const shiftedOldFirst = historyEntries[prependedCount]?.key;
-        if (shiftedOldFirst !== previousFirstKey) {
-            return;
-        }
-
-        let prependedHeight = 0;
-        for (let i = 0; i < prependedCount; i++) {
-            prependedHeight += estimateHistoryEntryHeight(historyEntries[i]);
-        }
-
-        const scrollEl = resolveScrollContainer();
-        if (!scrollEl || prependedHeight <= 0) return;
-
-        scrollEl.scrollTop += prependedHeight;
-    });
 
     const historyVirtualizer = useVirtualizer({
         count: historyEntries.length,
         getScrollElement: resolveScrollContainer,
-        estimateSize: (index) => estimateHistoryEntryHeight(historyEntries[index]),
+        estimateSize: () => historyEstimatedEntrySizeRef.current,
+        scrollToFn: (offset, options, instance) => {
+            const sizeElement = historyContentRef.current;
+            if (sizeElement) {
+                sizeElement.style.height = `${instance.getTotalSize()}px`;
+            }
+            elementScroll(offset, options, instance);
+        },
         getItemKey: (index) => historyEntries[index]?.key ?? String(index),
-        measureElement: measureVirtualElement,
         useAnimationFrameWithResizeObserver: true,
         overscan: MESSAGE_LIST_OVERSCAN,
         scrollMargin: historyScrollMargin,
+        anchorTo: 'end',
+        initialOffset: () => Number.MAX_SAFE_INTEGER,
         enabled: shouldVirtualizeHistory,
+    });
+
+    historyVirtualizer.shouldAdjustScrollPositionOnItemSizeChange = (item, _delta, instance) => {
+        if (instance.isAtEnd(MESSAGE_LIST_AT_END_THRESHOLD_PX)) {
+            return false;
+        }
+        const firstVisibleIndex = instance.range?.startIndex;
+        return firstVisibleIndex !== undefined && item.index < firstVisibleIndex;
+    };
+
+    React.useEffect(() => {
+        if (!shouldVirtualizeHistory) {
+            return;
+        }
+        const sizes = historyVirtualizer.itemSizeCache;
+        if (sizes.size < MESSAGE_LIST_ESTIMATE_MIN_SAMPLES) {
+            return;
+        }
+        let total = 0;
+        for (const size of sizes.values()) {
+            total += size;
+        }
+        historyEstimatedEntrySizeRef.current = Math.min(
+            MESSAGE_LIST_ESTIMATE_MAX,
+            Math.max(MESSAGE_LIST_ESTIMATE_MIN, Math.round(total / sizes.size)),
+        );
     });
 
     React.useLayoutEffect(() => {
@@ -1701,76 +1686,16 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         ));
     }, [hasMoreAbove, historyEntries.length, isLoadingOlder, resolveScrollContainer, shouldVirtualizeHistory, turnStart]);
 
-    React.useLayoutEffect(() => {
-        const historyContent = historyContentRef.current;
-        if (!historyContent || !shouldVirtualizeHistory) {
-            return;
-        }
-
-        if (typeof ResizeObserver === 'undefined') {
-            return;
-        }
-
-        const observer = new ResizeObserver(() => {
-            historyVirtualizer.measure();
-        });
-        observer.observe(historyContent);
-        return () => {
-            observer.disconnect();
-        };
-    }, [historyEntries.length, shouldVirtualizeHistory, historyVirtualizer]);
-
-    React.useEffect(() => {
-        if (!shouldVirtualizeHistory) {
-            return;
-        }
-        historyVirtualizer.measure();
-    }, [historyEntries.length, historyVirtualizer, shouldVirtualizeHistory]);
-
-    React.useLayoutEffect(() => {
-        if (!shouldVirtualizeHistory) {
-            return;
-        }
-        historyVirtualizer.measure();
-    }, [autoExpandedTurnIds, historyVirtualizer, shouldVirtualizeHistory, turnUiStates]);
-
-    const scheduleVirtualMeasure = React.useCallback(() => {
-        if (!shouldVirtualizeHistory) {
-            return;
-        }
-        if (typeof window === 'undefined') {
-            historyVirtualizer.measure();
-            return;
-        }
-        if (pendingVirtualMeasureFrameRef.current !== null) {
-            return;
-        }
-        pendingVirtualMeasureFrameRef.current = window.requestAnimationFrame(() => {
-            pendingVirtualMeasureFrameRef.current = null;
-            historyVirtualizer.measure();
-        });
-    }, [historyVirtualizer, shouldVirtualizeHistory]);
-
-    React.useEffect(() => {
-        return () => {
-            if (pendingVirtualMeasureFrameRef.current !== null && typeof window !== 'undefined') {
-                window.cancelAnimationFrame(pendingVirtualMeasureFrameRef.current);
-            }
-        };
-    }, []);
-
     const historyTotalSize = historyVirtualizer.getTotalSize();
-    const historyVirtualRows = React.useMemo(
-        () => (shouldVirtualizeHistory && historyTotalSize >= 0 ? historyVirtualizer.getVirtualItems() : []),
-        [historyTotalSize, historyVirtualizer, shouldVirtualizeHistory],
-    );
+    const historyVirtualRows = shouldVirtualizeHistory && historyTotalSize >= 0
+        ? historyVirtualizer.getVirtualItems()
+        : [];
 
     const allEntries = React.useMemo(() => {
         return trailingStreamingEntry ? [...historyEntries, trailingStreamingEntry] : historyEntries;
     }, [historyEntries, trailingStreamingEntry]);
 
     const stableHistoryContentChange = useStableEvent((reason?: ContentChangeReason) => {
-        scheduleVirtualMeasure();
         onMessageContentChange(reason);
     });
 

@@ -3,7 +3,7 @@ import { describe, expect, test } from 'bun:test';
 import { deriveTimelineHistorySignals } from './historySignals';
 
 describe('deriveTimelineHistorySignals', () => {
-    test('does not expose a server cursor when raw messages fill a page but the visible turn window is sparse', () => {
+    test('keeps an authoritative server cursor actionable when the visible turn window is sparse', () => {
         const signals = deriveTimelineHistorySignals({
             historyMeta: { complete: false, loading: false },
             loadedMessageCount: 150,
@@ -13,8 +13,8 @@ describe('deriveTimelineHistorySignals', () => {
             initialTurns: 40,
         });
 
-        expect(signals.hasMoreAboveTurns).toBe(false);
-        expect(signals.canLoadEarlier).toBe(false);
+        expect(signals.hasMoreAboveTurns).toBe(true);
+        expect(signals.canLoadEarlier).toBe(true);
     });
 
     test('keeps the server history cursor actionable once the visible turn window is full', () => {
