@@ -29,7 +29,7 @@ const resolveEmbeddedOpenCodeSource = (env = process.env) => {
   const configured = typeof env.OPENCHAMBER_EMBEDDED_OPENCODE_SOURCE === 'string'
     ? env.OPENCHAMBER_EMBEDDED_OPENCODE_SOURCE.trim()
     : '';
-  return configured || path.join(os.homedir(), '.opencode', 'bin', 'opencode');
+  return configured || path.join(os.homedir(), '.openchamber', 'bin', 'opencode');
 };
 
 const stageEmbeddedOpenCode = ({

@@ -5,7 +5,7 @@ This document is the source of truth for building the custom OpenCode binary tha
 Read this document before any of the following:
 
 - rebuilding OpenCode for use by OpenChamber;
-- replacing `~/.opencode/bin/opencode` before an OpenChamber package build;
+- replacing `~/.openchamber/bin/opencode` before an OpenChamber package build;
 - running an OpenChamber Electron packaging or release command;
 - changing embedded OpenCode resolution, signing, upgrade, or notarization behavior;
 - distributing a macOS OpenChamber build.
@@ -14,7 +14,7 @@ Read this document before any of the following:
 
 1. OpenChamber embeds the custom merged OpenCode build, not an official release substituted for convenience.
 2. A custom OpenCode build intended to preserve the shared history database must use `OPENCODE_CHANNEL=latest`.
-3. The OpenCode version string must identify the custom build, for example `1.17.18-my`.
+3. The OpenCode version string must identify the custom build, for example `1.17.20-my`.
 4. The macOS packaged runtime must use `OpenChamber.app/Contents/Resources/opencode/opencode`, not the external ad-hoc binary under `~/.opencode/bin`.
 5. The nested OpenCode executable and the containing app must be signed by the same signing identity and Team ID.
 6. Never modify the app bundle after signing. Replacing OpenCode, metadata, `app.asar`, or any other bundled file invalidates the outer signature.
@@ -24,7 +24,8 @@ Read this document before any of the following:
 
 - OpenCode source: `/Users/song/dev_ai/opencode`
 - OpenChamber source: `/Users/song/dev_ai/openchamber-merge-v1.11.0`
-- Default custom OpenCode staging source: `~/.opencode/bin/opencode`
+- CLI OpenCode installation: `~/.opencode/bin/opencode`
+- Default OpenChamber packaging staging source: `~/.openchamber/bin/opencode`
 - Packaged OpenCode destination: `OpenChamber.app/Contents/Resources/opencode/opencode`
 - Shared OpenCode database for the `latest` channel: `~/.local/share/opencode/opencode.db`
 
@@ -37,7 +38,7 @@ Run from the OpenCode package directory:
 ```bash
 cd /Users/song/dev_ai/opencode/packages/opencode
 OPENCODE_CHANNEL=latest \
-OPENCODE_VERSION=1.17.18-my \
+OPENCODE_VERSION=1.17.20-my \
 bun run script/build.ts --single
 ```
 
@@ -60,16 +61,21 @@ Verify the build before staging it:
 
 The output must equal the intended custom version. Do not continue if it reports an official version or an unexpected channel-derived version.
 
-Stage the verified custom binary for the default OpenChamber packaging path:
+Stage the verified custom binary for the default OpenChamber-only packaging path:
 
 ```bash
+mkdir -p /Users/song/.openchamber/bin
 cp /Users/song/dev_ai/opencode/packages/opencode/dist/opencode-darwin-arm64/bin/opencode \
-  /Users/song/.opencode/bin/opencode
-chmod 755 /Users/song/.opencode/bin/opencode
-/Users/song/.opencode/bin/opencode --version
+  /Users/song/.openchamber/bin/opencode
+chmod 755 /Users/song/.openchamber/bin/opencode
+/Users/song/.openchamber/bin/opencode --version
 ```
 
-Alternatively, leave the external binary untouched and set this only for the packaging command:
+This staging file is intentionally separate from the CLI installation at
+`~/.opencode/bin/opencode`. Updating or packaging OpenChamber must not replace
+the CLI binary.
+
+Alternatively, leave both staging installations untouched and set this only for the packaging command:
 
 ```bash
 export OPENCHAMBER_EMBEDDED_OPENCODE_SOURCE=/absolute/path/to/opencode
