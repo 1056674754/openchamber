@@ -10,6 +10,10 @@ describe('remote instance proxy timeouts', () => {
     expect(getRemoteProxyRequestTimeoutMs('/api/fs/list?path=/repo', 'GET')).toBe(3_000);
   });
 
+  it('allows remote Git status reads to outlive the generic request deadline', () => {
+    expect(getRemoteProxyRequestTimeoutMs('/api/git/status?directory=/large-repo', 'GET')).toBe(30_000);
+  });
+
   it('keeps a longer timeout for session mutations', () => {
     expect(getRemoteProxyRequestTimeoutMs('/api/session/ses_123/prompt_async', 'POST')).toBe(15_000);
     expect(getRemoteProxyRequestTimeoutMs('/api/session/ses_123/abort', 'POST')).toBe(5_000);

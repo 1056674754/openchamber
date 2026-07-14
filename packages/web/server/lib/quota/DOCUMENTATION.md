@@ -31,10 +31,19 @@ These provider IDs are currently dispatchable via `fetchQuotaForProvider(provide
 | `minimax-coding-plan` | MiniMax Coding Plan (minimax.io) | `providers/minimax-coding-plan.js` / `providers/minimax-shared.js` | `minimax-coding-plan` |
 | `minimax-cn-coding-plan` | MiniMax Coding Plan (minimaxi.com) | `providers/minimax-cn-coding-plan.js` / `providers/minimax-shared.js` | `minimax-cn-coding-plan` |
 | `ollama-cloud` | Ollama Cloud | `providers/ollama-cloud.js` | Cookie file at `~/.config/ollama-quota/cookie` (raw session cookie string) |
+| `opencode-go` | OpenCode Go | `providers/opencode-go.js` | Managed workspace ID + dashboard auth cookie in the OpenChamber data directory |
 | `wafer` | Wafer.ai | `providers/wafer.js` | `wafer`, `wafer-ai`, `wafer_ai`, `wafer.ai` |
 
 ## Internal-only provider module
 - `providers/openai.js` exists for logic parity/reuse but is intentionally not registered for dispatcher ID routing.
+
+## Managed OpenCode Go credentials
+
+OpenCode Go uses a dedicated credential store in `opencode-go-credentials.js`; it does not modify OpenCode's provider auth or config files. The credential route supports status, save, validation, and deletion. Status responses expose only the workspace ID and a fixed mask, never the dashboard auth cookie. Writes use an owner-only directory/file and an atomic rename.
+
+The shared settings UI resolves the credential endpoint against the active instance base URL. The VS Code bridge implements the same route contract and quota provider so web, desktop, remote-instance, and VS Code surfaces do not silently diverge.
+
+Codex window labels are derived from each API window's `limit_window_seconds`. Primary and secondary windows are not assumed to mean five-hour and weekly windows.
 
 ## MiniMax M3 / Token Plan migration
 In 2025/2026 MiniMax rebranded "Coding Plan" to "Token Plan" alongside the M3 model release. The API underwent breaking changes:

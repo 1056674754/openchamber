@@ -6,6 +6,7 @@ import {
   toUsageWindow,
   toNumber,
   toTimestamp,
+  resolveWindowLabel,
   formatMoney
 } from '../utils/index.js';
 
@@ -17,6 +18,41 @@ export const isConfigured = () => {
   const auth = readAuthFile();
   const entry = normalizeAuthEntry(getAuthEntry(auth, aliases));
   return Boolean(entry?.access || entry?.token);
+};
+
+export const parseCodexUsageWindows = (payload) => {
+  const primary = payload?.rate_limit?.primary_window ?? null;
+  const secondary = payload?.rate_limit?.secondary_window ?? null;
+  const credits = payload?.credits ?? null;
+  const windows = {};
+
+  for (const window of [primary, secondary]) {
+    if (!window) continue;
+    const windowSeconds = toNumber(window.limit_window_seconds);
+    windows[resolveWindowLabel(windowSeconds)] = toUsageWindow({
+      usedPercent: toNumber(window.used_percent),
+      windowSeconds,
+      resetAt: toTimestamp(window.reset_at),
+    });
+  }
+
+  if (credits) {
+    const balance = toNumber(credits.balance);
+    const unlimited = Boolean(credits.unlimited);
+    const label = unlimited
+      ? 'Unlimited'
+      : balance !== null
+        ? `$${formatMoney(balance)} remaining`
+        : null;
+    windows.credits = toUsageWindow({
+      usedPercent: null,
+      windowSeconds: null,
+      resetAt: null,
+      valueLabel: label,
+    });
+  }
+
+  return windows;
 };
 
 export const fetchQuota = async () => {
@@ -59,40 +95,7 @@ export const fetchQuota = async () => {
     }
 
     const payload = await response.json();
-    const primary = payload?.rate_limit?.primary_window ?? null;
-    const secondary = payload?.rate_limit?.secondary_window ?? null;
-    const credits = payload?.credits ?? null;
-
-    const windows = {};
-    if (primary) {
-      windows['5h'] = toUsageWindow({
-        usedPercent: toNumber(primary.used_percent),
-        windowSeconds: toNumber(primary.limit_window_seconds),
-        resetAt: toTimestamp(primary.reset_at)
-      });
-    }
-    if (secondary) {
-      windows['weekly'] = toUsageWindow({
-        usedPercent: toNumber(secondary.used_percent),
-        windowSeconds: toNumber(secondary.limit_window_seconds),
-        resetAt: toTimestamp(secondary.reset_at)
-      });
-    }
-    if (credits) {
-      const balance = toNumber(credits.balance);
-      const unlimited = Boolean(credits.unlimited);
-      const label = unlimited
-        ? 'Unlimited'
-        : balance !== null
-          ? `$${formatMoney(balance)} remaining`
-          : null;
-      windows.credits = toUsageWindow({
-        usedPercent: null,
-        windowSeconds: null,
-        resetAt: null,
-        valueLabel: label
-      });
-    }
+    const windows = parseCodexUsageWindows(payload);
 
     return buildResult({
       providerId,

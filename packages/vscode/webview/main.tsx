@@ -998,6 +998,31 @@ const handleLocalApiRequest = async (url: URL, init?: RequestInit) => {
     }
   }
 
+  if (
+    pathname === '/api/quota/credentials/opencode-go'
+    || pathname === '/api/quota/credentials/opencode-go/validate'
+  ) {
+    try {
+      const bodyText = method === 'PUT' ? await extractBodyText(url, init, method) : '';
+      const body = bodyText ? JSON.parse(bodyText) : undefined;
+      const bridgeMethod = pathname.endsWith('/validate') ? 'VALIDATE' : method;
+      const data = await sendBridgeMessage('api:quota:opencode-go-credentials', {
+        method: bridgeMethod,
+        credential: body,
+      });
+      return new Response(JSON.stringify(data), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return new Response(JSON.stringify({ error: message }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+  }
+
   // Handle provider auth deletion: DELETE /api/provider/:providerId/auth
   const providerAuthMatch = pathname.match(/^\/api\/provider\/([^/]+)\/auth$/);
   if (providerAuthMatch && (init?.method || 'GET').toUpperCase() === 'DELETE') {

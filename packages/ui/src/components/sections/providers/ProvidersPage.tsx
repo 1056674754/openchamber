@@ -24,6 +24,7 @@ import { useI18n } from '@/lib/i18n';
 import { resolveApiUrl } from '@/lib/api/serverUrl';
 import { useSettingsServerBaseUrl } from '@/hooks/useSettingsServerBaseUrl';
 import { useSettingsProviders } from './useSettingsProviders';
+import { OpenCodeGoCredentials } from './OpenCodeGoCredentials';
 
 const COMPACT_NUMBER_FORMATTER = new Intl.NumberFormat('en-US', {
   notation: 'compact',
@@ -983,6 +984,10 @@ export const ProvidersPage: React.FC = () => {
             )}
           </section>
         </div>
+
+        {(selectedProvider.id === 'opencode' || selectedProvider.id === 'opencode-go') && (
+          <OpenCodeGoCredentials serverBaseUrl={baseUrl} />
+        )}
 
         {/* Connection Details */}
         <div className="mb-8">

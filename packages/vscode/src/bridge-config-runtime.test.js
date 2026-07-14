@@ -79,4 +79,46 @@ describe('VS Code config bridge agent updates', () => {
     expect(updated?.success).toBe(true);
     expect(stored.agent.build).toEqual({ mode: 'subagent' });
   });
+
+  test('preserves existing markdown frontmatter when an update field is undefined', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-vscode-agent-frontmatter-'));
+    tempRoots.push(root);
+    const restart = mock(async () => undefined);
+    const ctx = {
+      restart,
+      manager: {
+        getWorkingDirectory: () => root,
+        restart,
+      },
+    };
+    const agentDir = path.join(root, '.opencode', 'agents');
+    const agentPath = path.join(agentDir, 'build.md');
+    fs.mkdirSync(agentDir, { recursive: true });
+    fs.writeFileSync(agentPath, [
+      '---',
+      'description: Existing description',
+      'mode: subagent',
+      'custom_field: keep-me',
+      '---',
+      'Existing prompt',
+    ].join('\n'), 'utf8');
+
+    const updated = await handleConfigBridgeMessage({
+      id: 'update-agent-undefined-field',
+      type: 'api:config/agents',
+      payload: {
+        method: 'PATCH',
+        name: 'build',
+        directory: root,
+        body: { description: undefined, mode: 'primary' },
+      },
+    }, ctx, deps);
+
+    const stored = fs.readFileSync(agentPath, 'utf8');
+    expect(updated?.success).toBe(true);
+    expect(stored).toContain('description: Existing description');
+    expect(stored).toContain('mode: primary');
+    expect(stored).toContain('custom_field: keep-me');
+    expect(stored).toContain('Existing prompt');
+  });
 });
