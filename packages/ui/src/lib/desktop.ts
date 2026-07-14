@@ -148,6 +148,7 @@ export type DesktopSettings = {
   collapsibleUserMessages?: boolean;
   stickyUserHeader?: boolean;
   wideChatLayoutEnabled?: boolean;
+  codeBlockLineWrap?: boolean;
   showSplitAssistantMessageActions?: boolean;
   fontSize?: number;
   terminalFontSize?: number;

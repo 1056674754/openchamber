@@ -1681,6 +1681,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.queuedMessage.attachments': '+{count} 파일(s)',
   'chat.queuedMessage.empty': '(비어 있음)',
   'chat.queuedMessage.removeAria': '큐에서 제거',
+  'chat.queuedMessage.reorderAria': '대기 메시지 순서 변경',
   'chat.container.returnToParent.aria': '상위 세션으로 돌아가기',
   'chat.container.returnToParent.titleNamed': '돌아가기: {title}',
   'chat.container.returnToParent.title': '상위 세션으로 돌아가기',

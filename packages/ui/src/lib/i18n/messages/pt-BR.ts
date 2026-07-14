@@ -1644,6 +1644,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.queuedMessage.attachments": "+{count} arquivo(s)",
   "chat.queuedMessage.empty": "(vazio)",
   "chat.queuedMessage.removeAria": "Excluir da fila",
+  "chat.queuedMessage.reorderAria": "Reordenar mensagem na fila",
   "chat.container.returnToParent.aria": "Voltar para a sessão principal",
   "chat.container.returnToParent.titleNamed": "Voltar para: {title}",
   "chat.container.returnToParent.title": "Voltar para a sessão principal",

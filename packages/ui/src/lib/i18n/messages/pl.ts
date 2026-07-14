@@ -563,6 +563,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.queuedMessage.attachments': '+{count} plik(i)',
   'chat.queuedMessage.empty': '(puste)',
   'chat.queuedMessage.removeAria': 'Usuń z kolejki',
+  'chat.queuedMessage.reorderAria': 'Zmień kolejność wiadomości w kolejce',
   'chat.container.returnToParent.aria': 'Powrót do sesji nadrzędnej',
   'chat.container.returnToParent.titleNamed': 'Powrót do: {title}',
   'chat.container.returnToParent.title': 'Powrót do sesji nadrzędnej',

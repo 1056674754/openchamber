@@ -1678,6 +1678,7 @@ export const dict = {
   'chat.queuedMessage.attachments': '+{count} file(s)',
   'chat.queuedMessage.empty': '(empty)',
   'chat.queuedMessage.removeAria': 'Remove from queue',
+  'chat.queuedMessage.reorderAria': 'Reorder queued message',
   'chat.container.returnToParent.aria': 'Return to parent session',
   'chat.container.returnToParent.titleNamed': 'Return to: {title}',
   'chat.container.returnToParent.title': 'Return to parent session',

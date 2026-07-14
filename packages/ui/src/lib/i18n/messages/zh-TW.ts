@@ -1532,6 +1532,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.queuedMessage.attachments': '+{count} 個檔案',
   'chat.queuedMessage.empty': '（空）',
   'chat.queuedMessage.removeAria': '從佇列移除',
+  'chat.queuedMessage.reorderAria': '調整佇列訊息順序',
   'chat.container.returnToParent.aria': '返回父會話',
   'chat.container.returnToParent.titleNamed': '返回到：{title}',
   'chat.container.returnToParent.title': '返回父會話',

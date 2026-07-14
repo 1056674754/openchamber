@@ -16,6 +16,7 @@ import { toast } from '@/components/ui';
 import { Icon } from "@/components/icon/Icon";
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { useI18n } from '@/lib/i18n';
+import { updateDesktopSettings } from '@/lib/persistence';
 
 import { getExternalFaviconUrl, isExternalHttpUrl, isLoopbackHttpUrl, normalizeHttpUrlCandidate, openExternalUrl } from '@/lib/url';
 import {
@@ -880,12 +881,15 @@ const MarkdownCodeBlock: React.FC<{
   language: string;
   syntaxTheme: { [key: string]: React.CSSProperties };
 }> = ({ code, language, syntaxTheme }) => {
+  const { t } = useI18n();
   const [copied, setCopied] = React.useState(false);
   const [highlight, setHighlight] = React.useState(true);
   const [viewMode, setViewMode] = React.useState<'code' | 'preview'>('code');
   const prevCodeRef = React.useRef<string>(code);
   const timerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const { isMobile, isTablet } = useDeviceInfo();
+  const codeBlockLineWrap = useUIStore((state) => state.codeBlockLineWrap);
+  const setCodeBlockLineWrap = useUIStore((state) => state.setCodeBlockLineWrap);
   const skipHighlight = exceedsLineLimit(code, getCodeHighlightLineLimit());
 
   const canPreview = language === 'html' || language === 'htm';
@@ -938,6 +942,18 @@ const MarkdownCodeBlock: React.FC<{
     downloadTextFile(code, `preview-${safeSuffix}.html`, 'text/html;charset=utf-8');
   }, [canPreview, code]);
 
+  const handleLineWrapToggle = React.useCallback(() => {
+    const next = !codeBlockLineWrap;
+    setCodeBlockLineWrap(next);
+    void updateDesktopSettings({ codeBlockLineWrap: next });
+  }, [codeBlockLineWrap, setCodeBlockLineWrap]);
+
+  const lineWrapTitle = codeBlockLineWrap
+    ? t('filesView.editor.disableLineWrap')
+    : t('filesView.editor.enableLineWrap');
+  const codeLines = React.useMemo(() => code.split('\n'), [code]);
+  const lineNumberWidth = `${Math.max(2, String(codeLines.length).length + 1)}ch`;
+
   return (
     <div data-component="markdown-code" className="my-3 group overflow-hidden rounded-lg border border-border/70 bg-[var(--surface-elevated)]">
       <div className="flex items-center justify-between border-b border-border/60 px-2.5 py-1">
@@ -946,6 +962,19 @@ const MarkdownCodeBlock: React.FC<{
           "flex items-center gap-1 transition-opacity",
           isMobile || isTablet ? "opacity-100" : "opacity-100 md:opacity-0 md:group-hover:opacity-100"
         )}>
+          <button
+            type="button"
+            onClick={handleLineWrapToggle}
+            className={cn(
+              'grid size-6 place-items-center rounded transition-colors hover:bg-interactive-hover/60 hover:text-foreground',
+              codeBlockLineWrap ? 'text-foreground' : 'text-muted-foreground',
+            )}
+            title={lineWrapTitle}
+            aria-label={lineWrapTitle}
+            aria-pressed={codeBlockLineWrap}
+          >
+            <Icon name="text-wrap" className="size-3.5" />
+          </button>
           {canPreview ? (
             <button
               type="button"
@@ -998,22 +1027,49 @@ const MarkdownCodeBlock: React.FC<{
               customStyle={CODE_SHARED_STYLE}
               codeTagProps={{ style: CODE_SHARED_STYLE }}
               PreTag="pre"
+              showLineNumbers
+              wrapLongLines={codeBlockLineWrap}
+              lineNumberStyle={{
+                minWidth: lineNumberWidth,
+                paddingRight: '1ch',
+                color: 'var(--muted-foreground)',
+                userSelect: 'none',
+              }}
             >
               {code}
             </SyntaxHighlighter>
           ) : (
             <pre
-              style={CODE_SHARED_STYLE}
+              style={{
+                ...CODE_SHARED_STYLE,
+                minWidth: codeBlockLineWrap ? 0 : 'max-content',
+              }}
               data-openchamber-code-renderer={renderAsPlainText ? 'terminal-cell' : 'plain'}
               data-openchamber-code-language={language}
             >
-              <code
-                style={CODE_SHARED_STYLE}
-                data-openchamber-code-renderer={renderAsPlainText ? 'terminal-cell' : 'plain'}
-                data-openchamber-code-language={language}
-              >
-                {renderAsPlainText ? renderMonospaceTextCode(code) : code}
-              </code>
+              {codeLines.map((line, index) => (
+                <span key={index} className="flex items-start">
+                  <span
+                    aria-hidden="true"
+                    className="shrink-0 select-none pr-[1ch] text-right text-muted-foreground"
+                    style={{ width: lineNumberWidth }}
+                  >
+                    {index + 1}
+                  </span>
+                  <code
+                    className="min-w-0 flex-1"
+                    style={{
+                      ...CODE_SHARED_STYLE,
+                      whiteSpace: codeBlockLineWrap ? 'pre-wrap' : 'pre',
+                      overflowWrap: codeBlockLineWrap ? 'anywhere' : 'normal',
+                    }}
+                    data-openchamber-code-renderer={renderAsPlainText ? 'terminal-cell' : 'plain'}
+                    data-openchamber-code-language={language}
+                  >
+                    {renderAsPlainText ? renderMonospaceTextCode(line) : line}
+                  </code>
+                </span>
+              ))}
             </pre>
           )}
         </div>

@@ -659,6 +659,7 @@ export interface SettingsPayload {
   gitmojiEnabled?: boolean;
   inputSpellcheckEnabled?: boolean;
   showToolFileIcons?: boolean;
+  codeBlockLineWrap?: boolean;
   showExpandedBashTools?: boolean;
   showExpandedEditTools?: boolean;
   chatRenderMode?: 'sorted' | 'live';

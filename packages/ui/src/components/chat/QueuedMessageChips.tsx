@@ -1,10 +1,28 @@
 import React, { memo } from 'react';
+import {
+    closestCenter,
+    DndContext,
+    KeyboardSensor,
+    MouseSensor,
+    TouchSensor,
+    useSensor,
+    useSensors,
+    type DragEndEvent,
+} from '@dnd-kit/core';
+import {
+    sortableKeyboardCoordinates,
+    SortableContext,
+    useSortable,
+    verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import { useMessageQueueStore, type QueuedMessage } from '@/stores/messageQueueStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useInputStore } from '@/sync/input-store';
 import { useI18n } from '@/lib/i18n';
 import { Icon } from "@/components/icon/Icon";
 import { Button } from '@/components/ui/button';
+import { cn } from '@/lib/utils';
 
 interface QueuedMessageChipProps {
     message: QueuedMessage;
@@ -16,6 +34,15 @@ interface QueuedMessageChipProps {
 const QueuedMessageChip = memo(({ message, sessionId, onEdit, onSend }: QueuedMessageChipProps) => {
     const { t } = useI18n();
     const removeFromQueue = useMessageQueueStore((state) => state.removeFromQueue);
+    const {
+        attributes,
+        listeners,
+        setActivatorNodeRef,
+        setNodeRef,
+        transform,
+        transition,
+        isDragging,
+    } = useSortable({ id: message.id });
 
     const firstLine = React.useMemo(() => {
         const lines = message.content.split('\n');
@@ -30,7 +57,23 @@ const QueuedMessageChip = memo(({ message, sessionId, onEdit, onSend }: QueuedMe
     const attachmentCount = message.attachments?.length ?? 0;
 
     return (
-        <div className="flex min-w-0 items-center gap-2 py-1">
+        <div
+            ref={setNodeRef}
+            style={{ transform: CSS.Translate.toString(transform), transition }}
+            className={cn('flex min-w-0 items-center gap-2 py-1', isDragging && 'z-10 opacity-60')}
+        >
+            <Button
+                ref={setActivatorNodeRef}
+                type="button"
+                variant="ghost"
+                size="xs"
+                {...attributes}
+                {...listeners}
+                className="cursor-grab touch-none select-none text-muted-foreground active:cursor-grabbing"
+                aria-label={t('chat.queuedMessage.reorderAria')}
+            >
+                <Icon name="draggable" className="h-4 w-4" aria-hidden="true" />
+            </Button>
             <span className="min-w-0 flex-1 truncate typography-ui-label text-foreground">
                 {firstLine || t('chat.queuedMessage.empty')}
                 {attachmentCount > 0 && (
@@ -55,14 +98,15 @@ const QueuedMessageChip = memo(({ message, sessionId, onEdit, onSend }: QueuedMe
                 <Icon name="send-plane" className="h-3 w-3" aria-hidden="true" />
                 {t('chat.queuedMessage.send')}
             </Button>
-            <button
+            <Button
                 type="button"
+                variant="ghost"
+                size="xs"
                 onClick={() => removeFromQueue(sessionId, message.id)}
-                className="flex items-center justify-center h-6 w-6 flex-shrink-0 hover:bg-[var(--interactive-hover)] rounded-full transition-colors"
                 aria-label={t('chat.queuedMessage.removeAria')}
             >
                 <Icon name="close" className="h-4 w-4 text-muted-foreground" />
-            </button>
+            </Button>
         </div>
     );
 });
@@ -89,6 +133,17 @@ export const QueuedMessageChips = memo(({ onEditMessage, onSendMessage }: Queued
         )
     );
     const popToInput = useMessageQueueStore((state) => state.popToInput);
+    const reorderQueue = useMessageQueueStore((state) => state.reorderQueue);
+    const sensors = useSensors(
+        useSensor(MouseSensor, { activationConstraint: { distance: 8 } }),
+        useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 6 } }),
+        useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+    );
+
+    const handleDragEnd = React.useCallback((event: DragEndEvent) => {
+        if (!currentSessionId || !event.over || event.active.id === event.over.id) return;
+        reorderQueue(currentSessionId, String(event.active.id), String(event.over.id));
+    }, [currentSessionId, reorderQueue]);
 
     const handleEdit = React.useCallback((message: QueuedMessage) => {
         if (!currentSessionId) return;
@@ -120,17 +175,24 @@ export const QueuedMessageChips = memo(({ onEditMessage, onSendMessage }: Queued
                     </span>
                     <Icon name="time" className="ml-auto h-4 w-4 text-muted-foreground" aria-hidden="true" />
                 </div>
-                <div className="px-3 pb-3 flex flex-col gap-1.5 max-h-[10.5rem] overflow-y-auto">
-                    {queuedMessages.map((message) => (
-                        <QueuedMessageChip
-                            key={message.id}
-                            message={message}
-                            sessionId={currentSessionId}
-                            onEdit={handleEdit}
-                            onSend={handleSend}
-                        />
-                    ))}
-                </div>
+                <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+                    <SortableContext
+                        items={queuedMessages.map((message) => message.id)}
+                        strategy={verticalListSortingStrategy}
+                    >
+                        <div className="px-3 pb-3 flex flex-col gap-1.5 max-h-[10.5rem] overflow-y-auto">
+                            {queuedMessages.map((message) => (
+                                <QueuedMessageChip
+                                    key={message.id}
+                                    message={message}
+                                    sessionId={currentSessionId}
+                                    onEdit={handleEdit}
+                                    onSend={handleSend}
+                                />
+                            ))}
+                        </div>
+                    </SortableContext>
+                </DndContext>
             </div>
         </div>
     );

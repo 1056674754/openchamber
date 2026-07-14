@@ -366,9 +366,12 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.inputSpellcheckEnabled === 'boolean') {
       result.inputSpellcheckEnabled = candidate.inputSpellcheckEnabled;
     }
-    if (typeof candidate.showToolFileIcons === 'boolean') {
-      result.showToolFileIcons = candidate.showToolFileIcons;
-    }
+  if (typeof candidate.showToolFileIcons === 'boolean') {
+    result.showToolFileIcons = candidate.showToolFileIcons;
+  }
+  if (typeof candidate.codeBlockLineWrap === 'boolean') {
+    result.codeBlockLineWrap = candidate.codeBlockLineWrap;
+  }
     if (typeof candidate.showExpandedBashTools === 'boolean') {
       result.showExpandedBashTools = candidate.showExpandedBashTools;
     }

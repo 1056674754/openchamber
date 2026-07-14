@@ -83,4 +83,33 @@ describe('messageQueueStore', () => {
 
         expect(useMessageQueueStore.getState().queuedMessages['session-1']).toEqual([second]);
     });
+
+    test('reorders queued messages without rebuilding captured snapshots', () => {
+        const first: QueuedMessage = {
+            ...queuedMessage('queued-1', 'first', 1),
+            sendTarget: { directory: '/remote/project', serverId: 'remote-1' },
+            sendConfig: {
+                providerID: 'provider-1',
+                modelID: 'model-1',
+                agent: 'review',
+                variant: 'high',
+            },
+        };
+        const second = queuedMessage('queued-2', 'second', 2);
+        const third = queuedMessage('queued-3', 'third', 3);
+
+        useMessageQueueStore.setState({
+            queuedMessages: {
+                'session-1': [first, second, third],
+                'session-2': [queuedMessage('queued-other', 'other', 4)],
+            },
+        });
+
+        useMessageQueueStore.getState().reorderQueue('session-1', 'queued-1', 'queued-3');
+
+        const state = useMessageQueueStore.getState();
+        expect(state.queuedMessages['session-1']).toEqual([second, third, first]);
+        expect(state.queuedMessages['session-1']?.[2]).toBe(first);
+        expect(state.queuedMessages['session-2']?.map((message) => message.id)).toEqual(['queued-other']);
+    });
 });
