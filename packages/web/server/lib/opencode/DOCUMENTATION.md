@@ -21,6 +21,7 @@ This module provides OpenCode server integration utilities for the web server ru
 - `packages/web/server/lib/opencode/network-runtime.js`: OpenCode URL construction, health-probe readiness checks, and API prefix runtime.
 - `packages/web/server/lib/opencode/project-directory-runtime.js`: request-scoped and settings-backed project directory resolution/validation runtime.
 - `packages/web/server/lib/opencode/config-entity-routes.js`: route registration for agent/command/MCP config orchestration and reload semantics.
+- `packages/web/server/lib/opencode/plugins.js`: plugin config and plugin-directory data layer. Production calls resolve the active OpenCode config normally; tests and isolated consumers use `createPluginDataLayer({ configDir, customConfigPath })` so config ownership is explicit and cannot leak through process-global environment state.
 - `packages/web/server/lib/opencode/snippets.js`: opencode-snippets-compatible snippet file CRUD, discovery, and hashtag expansion.
 - `packages/web/server/lib/opencode/cli-options.js`: CLI/environment option parsing for server startup arguments.
 - `packages/web/server/lib/opencode/core-routes.js`: server status/system routes, auth/access guard routes, and settings utility route registration.
@@ -72,6 +73,12 @@ This module provides OpenCode server integration utilities for the web server ru
 - `addSkillFromMdFile(skillsMap, skillMdPath, scope, source)`: Parses and indexes a skill file.
 - `resolveSkillSearchDirectories(workingDirectory)`: Returns skill search path order (config, project, home, custom).
 - `listSkillSupportingFiles(skillDir)`, `readSkillSupportingFile(skillDir, relativePath)`, `writeSkillSupportingFile(skillDir, relativePath, content)`, `deleteSkillSupportingFile(skillDir, relativePath)`: Skill supporting file management.
+
+## Public exports (plugins.js)
+- `createPluginDataLayer({ configDir, customConfigPath })`: Returns plugin config/file CRUD functions bound to an explicit config context. Tests must use this factory instead of mutating `process.env.OPENCODE_CONFIG`, because Bun can execute test files concurrently in one process.
+- `listPluginEntries()`, `getPluginEntry()`, `createPluginEntry()`, `updatePluginEntry()`, `deletePluginEntry()`: Default production plugin config CRUD using the active OpenCode config.
+- `listPluginDirFiles()`, `readPluginDirFile()`, `writePluginDirFile()`, `deletePluginDirFile()`: Default production plugin-directory CRUD.
+- `encodePluginId()`, `decodePluginId()`, `parsePluginRaw()`, `serializePluginEntry()`: Plugin identifier and config-value helpers.
 
 ## Public exports (routes.js)
 - `registerOpenCodeRoutes(app, dependencies)`: Registers OpenCode-owned HTTP routes and internal module runtime:

@@ -9,6 +9,10 @@ import {
 import { isPathSpec } from './plugin-spec.js';
 
 const PLUGIN_FILE_NAME_PATTERN = /^[a-z0-9][a-z0-9-_.]*\.(js|ts|mjs|cjs)$/;
+const DEFAULT_PLUGIN_CONTEXT = Object.freeze({
+  configDir: null,
+  customConfigPath: null,
+});
 
 /**
  * @typedef {'user' | 'project'} PluginScope
@@ -65,16 +69,19 @@ function parsedKindForSpec(spec) {
   return isPathSpec(spec) ? 'path' : 'npm';
 }
 
-function getActiveOpencodeConfigDir() {
-  const customConfigPath = process.env.OPENCODE_CONFIG;
+function getActiveOpencodeConfigDir(context = DEFAULT_PLUGIN_CONTEXT) {
+  if (context.configDir) {
+    return context.configDir;
+  }
+  const customConfigPath = context.customConfigPath || process.env.OPENCODE_CONFIG;
   if (customConfigPath) {
     return path.dirname(path.resolve(customConfigPath));
   }
   return path.join(os.homedir(), '.config', 'opencode');
 }
 
-function getActiveUserConfigPaths() {
-  const configDir = getActiveOpencodeConfigDir();
+function getActiveUserConfigPaths(context = DEFAULT_PLUGIN_CONTEXT) {
+  const configDir = getActiveOpencodeConfigDir(context);
   return [
     path.join(configDir, 'config.json'),
     path.join(configDir, 'opencode.json'),
@@ -82,12 +89,13 @@ function getActiveUserConfigPaths() {
   ];
 }
 
-function getActiveCustomConfigPath() {
-  return process.env.OPENCODE_CONFIG ? path.resolve(process.env.OPENCODE_CONFIG) : null;
+function getActiveCustomConfigPath(context = DEFAULT_PLUGIN_CONTEXT) {
+  const customConfigPath = context.customConfigPath || process.env.OPENCODE_CONFIG;
+  return customConfigPath ? path.resolve(customConfigPath) : null;
 }
 
-function getPrimaryUserConfigPath() {
-  const [defaultPath, ...fallbackPaths] = getActiveUserConfigPaths();
+function getPrimaryUserConfigPath(context = DEFAULT_PLUGIN_CONTEXT) {
+  const [defaultPath, ...fallbackPaths] = getActiveUserConfigPaths(context);
   for (const userPath of [defaultPath, ...fallbackPaths]) {
     if (fs.existsSync(userPath)) {
       return userPath;
@@ -107,9 +115,9 @@ function getProjectConfigPath(workingDirectory) {
   return candidates.find((candidate) => fs.existsSync(candidate)) || candidates[0];
 }
 
-function readPluginConfigLayers(workingDirectory) {
-  const customPath = getActiveCustomConfigPath();
-  const userPath = getPrimaryUserConfigPath();
+function readPluginConfigLayers(workingDirectory, context = DEFAULT_PLUGIN_CONTEXT) {
+  const customPath = getActiveCustomConfigPath(context);
+  const userPath = getPrimaryUserConfigPath(context);
   const projectPath = getProjectConfigPath(workingDirectory);
   return {
     userConfig: readConfigFile(userPath),
@@ -166,14 +174,14 @@ function splitScopedValue(value) {
   };
 }
 
-function getPluginTarget(id, workingDirectory) {
+function getPluginTarget(id, workingDirectory, context = DEFAULT_PLUGIN_CONTEXT) {
   const decoded = decodePluginId(id);
   if (decoded.prefix !== 'config') {
     throw codedError('Plugin entry id must use config prefix', 'INVALID_SPEC');
   }
   const { scope, value: spec } = splitScopedValue(decoded.value);
   validateScope(scope);
-  const layers = readPluginConfigLayers(workingDirectory);
+  const layers = readPluginConfigLayers(workingDirectory, context);
   const source = configSources(layers).find((candidate) => candidate.scope === scope);
   const plugin = Array.isArray(source?.config?.plugin) ? source.config.plugin : [];
   const index = plugin.findIndex((raw) => parsePluginRaw(raw).spec === spec);
@@ -183,7 +191,7 @@ function getPluginTarget(id, workingDirectory) {
   return { source, plugin, index };
 }
 
-function pluginDirForScope(scope, workingDirectory) {
+function pluginDirForScope(scope, workingDirectory, context = DEFAULT_PLUGIN_CONTEXT) {
   validateScope(scope);
   if (scope === AGENT_SCOPE.PROJECT) {
     if (!workingDirectory) {
@@ -191,10 +199,10 @@ function pluginDirForScope(scope, workingDirectory) {
     }
     return path.join(workingDirectory, '.opencode', 'plugins');
   }
-  return path.join(getActiveOpencodeConfigDir(), 'plugins');
+  return path.join(getActiveOpencodeConfigDir(context), 'plugins');
 }
 
-function fileTargetFromId(id, workingDirectory) {
+function fileTargetFromId(id, workingDirectory, context = DEFAULT_PLUGIN_CONTEXT) {
   const decoded = decodePluginId(id);
   if (decoded.prefix !== 'file') {
     throw codedError('Plugin file id must use file prefix', 'INVALID_FILENAME');
@@ -205,7 +213,7 @@ function fileTargetFromId(id, workingDirectory) {
   return {
     fileName,
     scope,
-    absolutePath: path.join(pluginDirForScope(scope, workingDirectory), fileName),
+    absolutePath: path.join(pluginDirForScope(scope, workingDirectory, context), fileName),
   };
 }
 
@@ -240,8 +248,8 @@ function serializePluginEntry(entry) {
   return spec;
 }
 
-function listPluginEntries(workingDirectory) {
-  const layers = readPluginConfigLayers(workingDirectory);
+function listPluginEntries(workingDirectory, context = DEFAULT_PLUGIN_CONTEXT) {
+  const layers = readPluginConfigLayers(workingDirectory, context);
   return configSources(layers).flatMap((source) => {
     if (!Array.isArray(source.config?.plugin)) {
       return [];
@@ -261,16 +269,16 @@ function listPluginEntries(workingDirectory) {
   });
 }
 
-function getPluginEntry(id, workingDirectory) {
-  return listPluginEntries(workingDirectory).find((entry) => entry.id === id) || null;
+function getPluginEntry(id, workingDirectory, context = DEFAULT_PLUGIN_CONTEXT) {
+  return listPluginEntries(workingDirectory, context).find((entry) => entry.id === id) || null;
 }
 
-function createPluginEntry(entry, workingDirectory) {
+function createPluginEntry(entry, workingDirectory, context = DEFAULT_PLUGIN_CONTEXT) {
   const spec = validatePluginSpec(entry?.spec);
   const scope = entry?.scope || AGENT_SCOPE.USER;
   validateScope(scope);
 
-  const layers = readPluginConfigLayers(workingDirectory);
+  const layers = readPluginConfigLayers(workingDirectory, context);
   const existing = configSources(layers).find((source) => (
     source.scope === scope
     && Array.isArray(source.config?.plugin)
@@ -280,7 +288,7 @@ function createPluginEntry(entry, workingDirectory) {
     throw codedError(`Plugin "${spec}" already exists`, 'ENTRY_EXISTS');
   }
 
-  let targetPath = getPrimaryUserConfigPath();
+  let targetPath = getPrimaryUserConfigPath(context);
   let config = {};
   if (scope === AGENT_SCOPE.PROJECT) {
     targetPath = ensureProjectConfigPath(workingDirectory);
@@ -297,8 +305,8 @@ function createPluginEntry(entry, workingDirectory) {
   writeConfig(config, targetPath);
 }
 
-function updatePluginEntry(id, updates, workingDirectory) {
-  const target = getPluginTarget(id, workingDirectory);
+function updatePluginEntry(id, updates, workingDirectory, context = DEFAULT_PLUGIN_CONTEXT) {
+  const target = getPluginTarget(id, workingDirectory, context);
   if (!target) {
     throw codedError('Plugin entry not found', 'NOT_FOUND');
   }
@@ -309,8 +317,8 @@ function updatePluginEntry(id, updates, workingDirectory) {
   writeConfig(target.source.config, target.source.filePath);
 }
 
-function deletePluginEntry(id, workingDirectory) {
-  const target = getPluginTarget(id, workingDirectory);
+function deletePluginEntry(id, workingDirectory, context = DEFAULT_PLUGIN_CONTEXT) {
+  const target = getPluginTarget(id, workingDirectory, context);
   if (!target) {
     throw codedError('Plugin entry not found', 'NOT_FOUND');
   }
@@ -321,13 +329,13 @@ function deletePluginEntry(id, workingDirectory) {
   writeConfig(target.source.config, target.source.filePath);
 }
 
-function listPluginDirFiles(workingDirectory) {
+function listPluginDirFiles(workingDirectory, context = DEFAULT_PLUGIN_CONTEXT) {
   const scopes = [AGENT_SCOPE.USER];
   if (workingDirectory) {
     scopes.push(AGENT_SCOPE.PROJECT);
   }
   return scopes.flatMap((scope) => {
-    const dir = pluginDirForScope(scope, workingDirectory);
+    const dir = pluginDirForScope(scope, workingDirectory, context);
     if (!fs.existsSync(dir)) {
       return [];
     }
@@ -343,8 +351,8 @@ function listPluginDirFiles(workingDirectory) {
   });
 }
 
-function readPluginDirFile(id, workingDirectory) {
-  const target = fileTargetFromId(id, workingDirectory);
+function readPluginDirFile(id, workingDirectory, context = DEFAULT_PLUGIN_CONTEXT) {
+  const target = fileTargetFromId(id, workingDirectory, context);
   if (!fs.existsSync(target.absolutePath)) {
     return null;
   }
@@ -355,11 +363,11 @@ function readPluginDirFile(id, workingDirectory) {
   };
 }
 
-function writePluginDirFile(file, workingDirectory, opts = {}) {
+function writePluginDirFile(file, workingDirectory, opts = {}, context = DEFAULT_PLUGIN_CONTEXT) {
   const fileName = validateFileName(file?.fileName);
   const scope = file?.scope || AGENT_SCOPE.USER;
   validateScope(scope);
-  const dir = pluginDirForScope(scope, workingDirectory);
+  const dir = pluginDirForScope(scope, workingDirectory, context);
   const absolutePath = path.join(dir, fileName);
   if (!opts.overwrite && fs.existsSync(absolutePath)) {
     throw codedError(`Plugin file "${fileName}" already exists`, 'FILE_EXISTS');
@@ -368,15 +376,39 @@ function writePluginDirFile(file, workingDirectory, opts = {}) {
   fs.writeFileSync(absolutePath, file?.content ?? '', 'utf8');
 }
 
-function deletePluginDirFile(id, workingDirectory) {
-  const target = fileTargetFromId(id, workingDirectory);
+function deletePluginDirFile(id, workingDirectory, context = DEFAULT_PLUGIN_CONTEXT) {
+  const target = fileTargetFromId(id, workingDirectory, context);
   if (!fs.existsSync(target.absolutePath)) {
     throw codedError(`Plugin file "${target.fileName}" not found`, 'NOT_FOUND');
   }
   fs.unlinkSync(target.absolutePath);
 }
 
+function createPluginDataLayer(options = {}) {
+  const context = Object.freeze({
+    configDir: options.configDir ? path.resolve(options.configDir) : null,
+    customConfigPath: options.customConfigPath ? path.resolve(options.customConfigPath) : null,
+  });
+
+  return Object.freeze({
+    listPluginEntries: (workingDirectory) => listPluginEntries(workingDirectory, context),
+    getPluginEntry: (id, workingDirectory) => getPluginEntry(id, workingDirectory, context),
+    createPluginEntry: (entry, workingDirectory) => createPluginEntry(entry, workingDirectory, context),
+    updatePluginEntry: (id, updates, workingDirectory) => updatePluginEntry(id, updates, workingDirectory, context),
+    deletePluginEntry: (id, workingDirectory) => deletePluginEntry(id, workingDirectory, context),
+    listPluginDirFiles: (workingDirectory) => listPluginDirFiles(workingDirectory, context),
+    readPluginDirFile: (id, workingDirectory) => readPluginDirFile(id, workingDirectory, context),
+    writePluginDirFile: (file, workingDirectory, opts) => writePluginDirFile(file, workingDirectory, opts, context),
+    deletePluginDirFile: (id, workingDirectory) => deletePluginDirFile(id, workingDirectory, context),
+    encodePluginId,
+    decodePluginId,
+    parsePluginRaw,
+    serializePluginEntry,
+  });
+}
+
 export {
+  createPluginDataLayer,
   listPluginEntries,
   getPluginEntry,
   createPluginEntry,

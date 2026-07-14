@@ -6,6 +6,7 @@ import path from 'path';
 import request from 'supertest';
 
 import { registerPluginRoutes } from './plugin-routes.js';
+import { createPluginDataLayer } from './plugins.js';
 
 let projectDir;
 let userConfigPath;
@@ -64,11 +65,13 @@ async function createFile(fileName = 'test.js', content = '//x') {
 }
 
 describe('opencode plugin routes', () => {
-  beforeAll(async () => {
+  beforeAll(() => {
     rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-plugin-routes-'));
     userConfigPath = path.join(rootDir, 'user-opencode.json');
-    process.env.OPENCODE_CONFIG = userConfigPath;
-    plugins = await import('./plugins.js');
+    plugins = createPluginDataLayer({
+      configDir: rootDir,
+      customConfigPath: userConfigPath,
+    });
   });
 
   beforeEach(() => {
@@ -91,7 +94,6 @@ describe('opencode plugin routes', () => {
 
   afterAll(() => {
     fs.rmSync(rootDir, { recursive: true, force: true });
-    delete process.env.OPENCODE_CONFIG;
   });
 
   test('GET /api/config/plugins empty returns entries and files arrays', async () => {

@@ -978,6 +978,8 @@ export const updateAgent = (agentName: string, updates: Record<string, unknown>,
   const creatingNewMd = isBuiltinOverride;
 
   for (const [field, value] of Object.entries(updates || {})) {
+    if (value === undefined) continue;
+
     if (field === 'prompt') {
       if (value === null) {
         if (mdExists || creatingNewMd) {

@@ -2,6 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'bun:tes
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { createPluginDataLayer } from './plugins.js';
 
 let rootDir;
 let projectDir;
@@ -27,22 +28,22 @@ function readJson(filePath) {
 }
 
 describe('opencode plugins data layer', () => {
-  beforeAll(async () => {
+  beforeAll(() => {
     rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-plugins-'));
     userConfigPath = path.join(rootDir, 'user-opencode.json');
-    process.env.OPENCODE_CONFIG = userConfigPath;
-    plugins = await import('./plugins.js');
+    plugins = createPluginDataLayer({
+      configDir: rootDir,
+      customConfigPath: userConfigPath,
+    });
   });
 
   beforeEach(() => {
-    process.env.OPENCODE_CONFIG = userConfigPath;
     projectDir = fs.mkdtempSync(path.join(rootDir, 'project-'));
     fs.rmSync(userConfigPath, { force: true });
   });
 
   afterAll(() => {
     fs.rmSync(rootDir, { recursive: true, force: true });
-    delete process.env.OPENCODE_CONFIG;
   });
 
   test('parses raw plugin entries', () => {
@@ -86,17 +87,22 @@ describe('opencode plugins data layer', () => {
     expect(readJson(path.join(projectDir, '.opencode', 'opencode.json')).plugin).toEqual(['project-plugin']);
   });
 
-  test('re-resolves custom config env between calls', () => {
+  test('keeps explicit config contexts isolated', () => {
     const firstConfigPath = path.join(rootDir, 'first', 'opencode.json');
     const secondConfigPath = path.join(rootDir, 'second', 'opencode.json');
+    const firstPlugins = createPluginDataLayer({
+      configDir: path.dirname(firstConfigPath),
+      customConfigPath: firstConfigPath,
+    });
+    const secondPlugins = createPluginDataLayer({
+      configDir: path.dirname(secondConfigPath),
+      customConfigPath: secondConfigPath,
+    });
 
-    process.env.OPENCODE_CONFIG = firstConfigPath;
-    plugins.createPluginEntry({ spec: 'first-plugin', scope: 'user' }, projectDir);
-    plugins.writePluginDirFile({ fileName: 'first.js', content: 'one', scope: 'user' }, projectDir);
-
-    process.env.OPENCODE_CONFIG = secondConfigPath;
-    plugins.createPluginEntry({ spec: 'second-plugin', scope: 'user' }, projectDir);
-    plugins.writePluginDirFile({ fileName: 'second.js', content: 'two', scope: 'user' }, projectDir);
+    firstPlugins.createPluginEntry({ spec: 'first-plugin', scope: 'user' }, projectDir);
+    firstPlugins.writePluginDirFile({ fileName: 'first.js', content: 'one', scope: 'user' }, projectDir);
+    secondPlugins.createPluginEntry({ spec: 'second-plugin', scope: 'user' }, projectDir);
+    secondPlugins.writePluginDirFile({ fileName: 'second.js', content: 'two', scope: 'user' }, projectDir);
 
     expect(readJson(firstConfigPath).plugin).toEqual(['first-plugin']);
     expect(readJson(secondConfigPath).plugin).toEqual(['second-plugin']);
