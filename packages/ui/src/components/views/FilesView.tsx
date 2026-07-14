@@ -14,7 +14,9 @@ import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { CodeMirrorEditor } from '@/components/ui/CodeMirrorEditor';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { GoToLineDialog } from './GoToLineDialog';
+import { HtmlFilePreview } from './HtmlFilePreview';
 import { PreviewToggleButton } from './PreviewToggleButton';
 import { DiagramEditor } from '@/components/diagram';
 import { JsonTreeView } from '@/components/ui/JsonTreeView';
@@ -61,6 +63,7 @@ import { eventMatchesShortcut, getEffectiveShortcutCombo } from '@/lib/shortcuts
 import { useI18n } from '@/lib/i18n';
 import { useActiveServerBaseUrl } from '@/hooks/useActiveServerId';
 import { resolveApiUrl } from '@/lib/api/serverUrl';
+import { resolveJsonFileViewState } from './jsonFileViewState';
 
 type FileNode = {
   name: string;
@@ -1830,6 +1833,11 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     }
   }, [addOpenPath, ensurePathVisible, isDirty, isMobile, root, setSelectedPath]);
 
+  const handleHtmlPreviewOpenFile = React.useCallback((path: string) => {
+    if (!root || !isPathWithinRoot(path, root)) return;
+    void handleSelectFile(toFileNode(path));
+  }, [handleSelectFile, root, toFileNode]);
+
   React.useEffect(() => {
     if (!selectedFile?.path) {
       return;
@@ -2173,6 +2181,13 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   const isJson = Boolean(selectedFile?.path && isJsonFile(selectedFile.path));
   const isHtml = Boolean(selectedFile?.path && isHtmlFile(selectedFile.path));
   const isDrawio = Boolean(selectedFile?.path && isDrawioFile(selectedFile.path));
+  const jsonFileViewState = React.useMemo(
+    () => (isJson ? resolveJsonFileViewState(jsonViewMode, draftContent) : null),
+    [draftContent, isJson, jsonViewMode],
+  );
+  const invalidJsonError = jsonFileViewState?.kind === 'invalid-source'
+    ? jsonFileViewState.error
+    : null;
   const isTextFile = Boolean(selectedFile && !isSelectedImage);
   const canUseShikiFileView = isTextFile && !isMarkdown && !(isHtml && htmlViewMode === 'preview') && !isDrawio;
   const staticLanguageExtension = React.useMemo(
@@ -2180,6 +2195,25 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     [selectedFilePath],
   );
   const [dynamicLanguageExtension, setDynamicLanguageExtension] = React.useState<Extension | null>(null);
+
+  React.useEffect(() => {
+    if (!isJson || fileLoading || loadedFilePath !== selectedFile?.path) {
+      return;
+    }
+
+    if (jsonFileViewState?.kind === 'invalid-source' && jsonViewMode === 'tree') {
+      setJsonViewMode('text');
+    }
+  }, [fileLoading, isJson, jsonFileViewState?.kind, jsonViewMode, loadedFilePath, selectedFile?.path]);
+
+  const invalidJsonBanner = invalidJsonError ? (
+    <Alert className="shrink-0 rounded-none border-x-0 border-t-0 border-[var(--status-error-border)] bg-[var(--status-error-background)] px-3 py-2 text-[var(--status-error)]">
+      <AlertTitle>{t('jsonTreeView.error.invalidJsonTitle')}</AlertTitle>
+      <AlertDescription className="font-mono text-xs text-[var(--status-error)]/80">
+        {invalidJsonError}
+      </AlertDescription>
+    </Alert>
+  ) : null;
 
   React.useEffect(() => {
     let cancelled = false;
@@ -3373,7 +3407,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
                 onChange={handleDiagramChange}
               />
             </div>
-          ) : selectedFile && isJson && jsonViewMode === 'tree' ? (
+          ) : selectedFile && isJson && jsonFileViewState?.kind === 'tree' ? (
             <ErrorBoundary
               fallback={
                 <div className="rounded-md border border-destructive/20 bg-destructive/10 px-3 py-2">
@@ -3386,7 +3420,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
             >
               <div className="h-full overflow-auto">
                 <JsonTreeView
-                  jsonString={fileContent}
+                  jsonString={draftContent}
                   maxHeight="100%"
                   initiallyExpandedDepth={2}
                 />
@@ -3420,27 +3454,26 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
             </div>
           ) : selectedFile && isHtml && htmlViewMode === 'preview' ? (
             <div className="h-full overflow-hidden">
-              <iframe
-                srcDoc={(() => {
-                  // Inject base tag for relative paths (CSS/JS/images) to work
-                  const basePath = selectedFile.path.substring(0, selectedFile.path.lastIndexOf('/') + 1);
-                  if (!basePath) return fileContent;
-                  const baseTag = `<base href="${runtime.isDesktop ? basePath : basePath}">`;
-                  return fileContent.replace(/<head([^>]*)>/i, `<head$1>${baseTag}`);
-                })()}
-                className="w-full h-full border-none"
-                sandbox="allow-scripts allow-same-origin allow-forms"
+              <HtmlFilePreview
+                html={fileContent}
+                filePath={selectedFile.path}
+                onOpenFile={handleHtmlPreviewOpenFile}
                 title={t('filesView.editor.htmlPreviewTitle')}
               />
             </div>
-          ) : selectedFile && canUseShikiFileView && textViewMode === 'view' ? (
+          ) : selectedFile && canUseShikiFileView && !isJson && textViewMode === 'view' ? (
             renderShikiFileView(selectedFile, draftContent)
           ) : (
             <div
-              className={cn('relative h-full', shouldMaskEditorForPendingNavigation && 'overflow-hidden')}
+              className={cn(
+                'relative h-full',
+                invalidJsonError && 'flex min-h-0 flex-col',
+                shouldMaskEditorForPendingNavigation && 'overflow-hidden',
+              )}
               ref={editorWrapperRef}
             >
-              <div className={cn('h-full', shouldMaskEditorForPendingNavigation && 'invisible')}>
+              {invalidJsonBanner}
+              <div className={cn(invalidJsonError ? 'min-h-0 flex-1' : 'h-full', shouldMaskEditorForPendingNavigation && 'invisible')}>
                 <CodeMirrorEditor
                   value={draftContent}
                   onChange={setDraftContent}
@@ -3704,11 +3737,16 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
                 />
               </ErrorBoundary>
             </div>
-          ) : canUseShikiFileView && textViewMode === 'view' ? (
+          ) : canUseShikiFileView && !isJson && textViewMode === 'view' ? (
             renderShikiFileView(selectedFile, draftContent)
           ) : (
-            <div className={cn('relative h-full', shouldMaskEditorForPendingNavigation && 'overflow-hidden')}>
-              <div className={cn('h-full', shouldMaskEditorForPendingNavigation && 'invisible')}>
+            <div className={cn(
+              'relative h-full',
+              invalidJsonError && 'flex min-h-0 flex-col',
+              shouldMaskEditorForPendingNavigation && 'overflow-hidden',
+            )}>
+              {invalidJsonBanner}
+              <div className={cn(invalidJsonError ? 'min-h-0 flex-1' : 'h-full', shouldMaskEditorForPendingNavigation && 'invisible')}>
               <CodeMirrorEditor
                 value={draftContent}
                 onChange={setDraftContent}
