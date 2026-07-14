@@ -19,6 +19,7 @@ import { normalizeConfigString, persistOpenChamberSettingsPatch, resolveConfigur
 import { resolveSdkForDirectory, resolveProjectServerIdForDirectory, resolveApiUrl as resolveRemoteApiOrigin } from "@/sync/session-actions";
 import { DEFAULT_SERVER_ID, serverRegistry } from "@/lib/opencode/server-registry";
 import { markStartupTrace, measureStartupTrace } from "@/lib/startupTrace";
+import { SdkRequestError } from "@/sync/sdk-error";
 
 const MODELS_DEV_API_URL = "https://models.dev/api.json";
 const MODELS_DEV_PROXY_URL = "/api/openchamber/models-metadata";
@@ -1105,7 +1106,18 @@ export const useConfigStore = create<ConfigStore>()(
                                 ),
                                 { directoryKey, serverId, source, requestedDirectory: targetDirectory, effectiveDirectory, attempt: attempt + 1 },
                             )
-                            if (!rawResult.data) throw new Error('Failed to get providers')
+                            if (rawResult.error || !rawResult.data) {
+                                throw new SdkRequestError({
+                                    operation: 'config.providers',
+                                    endpoint: '/config/providers',
+                                    error: rawResult.error ?? new Error('Response did not include provider data'),
+                                    response: rawResult.response,
+                                    directory: targetDir,
+                                    serverId,
+                                    source,
+                                    attempt: attempt + 1,
+                                });
+                            }
                             const apiResult = rawResult.data;
                             const providers = Array.isArray(apiResult?.providers) ? apiResult.providers : [];
                             const defaults = apiResult?.default || {};
@@ -1203,7 +1215,17 @@ export const useConfigStore = create<ConfigStore>()(
                         }
                     }
 
-                    console.error("Failed to load providers:", lastError);
+                    const loaderEnded = typeof performance !== 'undefined' ? performance.now() : Date.now();
+                    console.error("Failed to load providers:", {
+                        endpoint: '/config/providers',
+                        directory: effectiveDirectory,
+                        directoryKey,
+                        serverId,
+                        source,
+                        attempts: 3,
+                        durationMs: Math.round(loaderEnded - loaderStarted),
+                        error: lastError,
+                    });
                     markStartupTrace('loadProviders:error', {
                         directoryKey,
                         serverId,
