@@ -94,16 +94,19 @@ import {
   sameWorktreeList,
   sameWorktreesByProject,
 } from './sidebar/worktreeDiscovery';
+import { buildTransientSessionExpansionKeys } from './sidebar/sessionExpansion';
 
 const PROJECT_COLLAPSE_STORAGE_KEY = 'oc.sessions.projectCollapse';
 const GROUP_ORDER_STORAGE_KEY = 'oc.sessions.groupOrder';
 const GROUP_COLLAPSE_STORAGE_KEY = 'oc.sessions.groupCollapse';
 const ARCHIVED_GROUP_INIT_STORAGE_KEY = 'oc.sessions.archivedGroupInit';
 const PROJECT_ACTIVE_SESSION_STORAGE_KEY = 'oc.sessions.activeSessionByProject';
-// v2 stores composite `${renderContext}:${active|archived}:${sessionId}` entries so
 // duplicate session rows in different contexts keep independent expand state.
-const SESSION_EXPANDED_STORAGE_KEY = 'oc.sessions.expandedParents.v2';
-const LEGACY_SESSION_EXPANDED_STORAGE_KEY = 'oc.sessions.expandedParents';
+const SESSION_EXPANDED_STORAGE_KEY = 'oc.sessions.expandedParents.v3';
+const DEPRECATED_SESSION_EXPANDED_STORAGE_KEYS = [
+  'oc.sessions.expandedParents.v2',
+  'oc.sessions.expandedParents',
+] as const;
 const SESSION_PINNED_PER_PROJECT_STORAGE_KEY = 'oc.sessions.pinnedByProject';
 const SESSION_PINNED_ORDER_STORAGE_KEY = 'oc.sessions.pinnedOrder';
 const SESSION_PINNED_ORDER_BY_PROJECT_STORAGE_KEY = 'oc.sessions.pinnedOrderByProject';
@@ -798,7 +801,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
     safeStorage,
     keys: {
       sessionExpanded: SESSION_EXPANDED_STORAGE_KEY,
-      sessionExpandedLegacy: LEGACY_SESSION_EXPANDED_STORAGE_KEY,
+      sessionExpandedDeprecated: DEPRECATED_SESSION_EXPANDED_STORAGE_KEYS,
       projectCollapse: PROJECT_COLLAPSE_STORAGE_KEY,
       groupOrder: GROUP_ORDER_STORAGE_KEY,
       projectActiveSession: PROJECT_ACTIVE_SESSION_STORAGE_KEY,
@@ -1077,32 +1080,14 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
     sessionEvents.requestDirectoryDialog();
   }, []);
 
-  // Auto-expand parent session when navigating to a subagent (child) session.
-  // The parent may be visible in multiple render contexts, so expand each common
-  // context without coupling future manual toggles across those contexts.
-  React.useEffect(() => {
-    if (!currentSessionId) return;
-    const current = sessions.find((s) => s.id === currentSessionId);
-    const parentID = (current as Session & { parentID?: string | null })?.parentID;
-    if (!parentID) return;
-    const keysToAdd = [
-      `project:active:${parentID}`,
-      `project:archived:${parentID}`,
-      `recent:active:${parentID}`,
-      `recent:archived:${parentID}`,
-      `global-pinned:active:${parentID}`,
-      `global-pinned:archived:${parentID}`,
-    ];
-    setExpandedParents((prev) => {
-      if (keysToAdd.every((key) => prev.has(key))) return prev;
-      const next = new Set(prev);
-      keysToAdd.forEach((key) => next.add(key));
-      try {
-        safeStorage.setItem(SESSION_EXPANDED_STORAGE_KEY, JSON.stringify(Array.from(next)));
-      } catch { /* ignored */ }
-      return next;
-    });
-  }, [currentSessionId, sessions, safeStorage]);
+  const transientExpandedParents = React.useMemo(
+    () => buildTransientSessionExpansionKeys(sessions, currentSessionId),
+    [currentSessionId, sessions],
+  );
+  const visibleExpandedParents = React.useMemo(() => {
+    if (transientExpandedParents.size === 0) return expandedParents;
+    return new Set([...expandedParents, ...transientExpandedParents]);
+  }, [expandedParents, transientExpandedParents]);
 
   const toggleParent = React.useCallback((expansionKey: string) => {
     setExpandedParents((prev) => {
@@ -1660,7 +1645,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
     collapsedProjects,
     collapsedGroups,
     visibleSessionCountByGroup,
-    expandedParents,
+    visibleExpandedParents,
     collapsedFolderIds,
     hasSessionSearchQuery,
     showOnlyMainWorkspace,
@@ -1680,7 +1665,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
     collapsedProjects,
     collapsedGroups,
     visibleSessionCountByGroup,
-    expandedParents,
+    expandedParents: visibleExpandedParents,
     collapsedFolderIds,
     foldersMap,
     pinnedSessionIds,
@@ -1695,7 +1680,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
     collapsedFolderIds,
     collapsedGroups,
     collapsedProjects,
-    expandedParents,
+    visibleExpandedParents,
     foldersMap,
     getOrderedGroups,
     groupSearchDataByGroup,
@@ -1855,7 +1840,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
         currentSessionId={currentSessionId}
         pinnedSessionIds={pinnedSessionIds}
         pinnedSessionIdsByProject={pinnedSessionIdsByProject}
-        expandedParents={expandedParents}
+        expandedParents={visibleExpandedParents}
         hasSessionSearchQuery={hasSessionSearchQuery}
         normalizedSessionSearchQuery={normalizedSessionSearchQuery}
         notifyOnSubtasks={notifyOnSubtasks}
@@ -1890,7 +1875,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
       currentSessionId,
       pinnedSessionIds,
       pinnedSessionIdsByProject,
-      expandedParents,
+      visibleExpandedParents,
       hasSessionSearchQuery,
       normalizedSessionSearchQuery,
       notifyOnSubtasks,

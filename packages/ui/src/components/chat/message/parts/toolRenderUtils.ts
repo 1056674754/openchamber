@@ -16,6 +16,17 @@ const WEB_SEARCH_TOOL_NAMES = new Set<string>([
     'google', 'bing', 'duckduckgo', 'perplexity',
 ]);
 
+const STATIC_TOOL_NAMES = new Set<string>([
+    ...SEARCH_TOOL_NAMES,
+    ...READ_TOOL_NAMES,
+    ...LIST_TOOL_NAMES,
+    ...FETCH_TOOL_NAMES,
+    ...WEB_SEARCH_TOOL_NAMES,
+    'skill',
+    'todowrite',
+    'todoread',
+]);
+
 export const normalizeToolName = (toolName: unknown): string => {
     if (typeof toolName !== 'string') return '';
     const trimmed = toolName.trim().toLowerCase();
@@ -30,7 +41,11 @@ export const normalizeToolName = (toolName: unknown): string => {
 };
 
 export const isExpandableTool = (toolName: unknown): boolean => {
-    return EXPANDABLE_TOOL_NAMES.has(normalizeToolName(toolName));
+    const normalized = normalizeToolName(toolName);
+    if (!normalized) return false;
+
+    return EXPANDABLE_TOOL_NAMES.has(normalized)
+        || (!STATIC_TOOL_NAMES.has(normalized) && !STANDALONE_TOOL_NAMES.has(normalized));
 };
 
 export const isStandaloneTool = (toolName: unknown): boolean => {
@@ -38,8 +53,7 @@ export const isStandaloneTool = (toolName: unknown): boolean => {
 };
 
 export const isStaticTool = (toolName: unknown): boolean => {
-    if (typeof toolName !== 'string') return false;
-    return !isExpandableTool(toolName) && !isStandaloneTool(toolName);
+    return STATIC_TOOL_NAMES.has(normalizeToolName(toolName));
 };
 
 export const getStaticGroupToolName = (toolName: string): string => {
@@ -96,7 +110,7 @@ export const buildToolCallSummary = (toolNames: string[]): ToolCallCategoryCount
 
     return order.map((category) => ({
         category,
-        count: counts.get(category)!,
+        count: counts.get(category) ?? 0,
     }));
 };
 

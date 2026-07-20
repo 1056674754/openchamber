@@ -35,16 +35,64 @@ export const shouldMarkBoundaryGesture = (input: {
     return input.delta > remaining;
 };
 
+export const isVerticallyScrollable = (input: {
+    scrollHeight: number;
+    clientHeight: number;
+    overflowY: string;
+}): boolean => {
+    return input.scrollHeight > input.clientHeight + 1
+        && /^(auto|scroll|overlay)$/.test(input.overflowY);
+};
+
 export const boundaryTarget = (root: HTMLElement, target: EventTarget | null): HTMLElement => {
-    const current = target instanceof Element ? target : undefined;
-    const nested = current?.closest('[data-scrollable]');
-    if (!nested || nested === root) {
-        return root;
+    const current = typeof Element !== 'undefined' && target instanceof Element ? target : undefined;
+    const marked = current?.closest('[data-scrollable]');
+    if (marked && marked !== root && marked instanceof HTMLElement) {
+        return marked;
     }
-    if (!(nested instanceof HTMLElement)) {
-        return root;
+
+    let candidate = current;
+    while (candidate && candidate !== root) {
+        if (candidate instanceof HTMLElement) {
+            const overflowY = typeof window !== 'undefined'
+                ? window.getComputedStyle(candidate).overflowY
+                : '';
+            if (isVerticallyScrollable({
+                scrollHeight: candidate.scrollHeight,
+                clientHeight: candidate.clientHeight,
+                overflowY,
+            })) {
+                return candidate;
+            }
+        }
+        candidate = candidate.parentElement ?? undefined;
     }
-    return nested;
+
+    return root;
+};
+
+export const shouldPauseAutoScrollAtBoundary = (input: {
+    root: HTMLElement;
+    boundary: HTMLElement;
+    delta: number;
+}): boolean => {
+    if (input.delta === 0) {
+        return false;
+    }
+
+    if (input.boundary === input.root) {
+        if (input.delta < 0) {
+            return true;
+        }
+        return input.boundary.scrollTop + input.boundary.clientHeight < input.boundary.scrollHeight - 1;
+    }
+
+    return shouldMarkBoundaryGesture({
+        delta: input.delta,
+        scrollTop: input.boundary.scrollTop,
+        scrollHeight: input.boundary.scrollHeight,
+        clientHeight: input.boundary.clientHeight,
+    });
 };
 
 export const shouldPauseAutoScrollOnWheel = (input: {
@@ -52,20 +100,10 @@ export const shouldPauseAutoScrollOnWheel = (input: {
     target: EventTarget | null;
     delta: number;
 }): boolean => {
-    if (input.delta >= 0) {
-        return false;
-    }
-
-    const target = boundaryTarget(input.root, input.target);
-    if (target === input.root) {
-        return true;
-    }
-
-    return shouldMarkBoundaryGesture({
+    return shouldPauseAutoScrollAtBoundary({
+        root: input.root,
+        boundary: boundaryTarget(input.root, input.target),
         delta: input.delta,
-        scrollTop: target.scrollTop,
-        scrollHeight: target.scrollHeight,
-        clientHeight: target.clientHeight,
     });
 };
 
@@ -73,6 +111,53 @@ export const isNearTop = (scrollTop: number, threshold: number): boolean => {
     return scrollTop <= threshold;
 };
 
+const OLDER_HISTORY_PREFETCH_MIN_PX = 2400;
+const OLDER_HISTORY_PREFETCH_VIEWPORT_RATIO = 3;
+
+export const getOlderHistoryPrefetchThreshold = (clientHeight: number): number => {
+    return Math.max(OLDER_HISTORY_PREFETCH_MIN_PX, clientHeight * OLDER_HISTORY_PREFETCH_VIEWPORT_RATIO);
+};
+
+export const shouldPrefetchOlderHistory = (input: {
+    readonly scrollTop: number;
+    readonly clientHeight: number;
+}): boolean => {
+    return isNearTop(input.scrollTop, getOlderHistoryPrefetchThreshold(input.clientHeight));
+};
+
+export const shouldStartOlderHistoryPrefetch = (input: {
+    readonly historyVersion: string;
+    readonly attemptedVersion: string | null;
+    readonly requestPending: boolean;
+    readonly isLoadingOlder: boolean;
+    readonly isWithinRange: boolean;
+}): boolean => {
+    return input.isWithinRange
+        && !input.requestPending
+        && !input.isLoadingOlder
+        && input.attemptedVersion !== input.historyVersion;
+};
+
 export const isNearBottom = (distanceFromBottom: number, threshold: number): boolean => {
     return distanceFromBottom <= threshold;
+};
+
+export const shouldCompensateVirtualItemResize = (input: {
+    isScrolling: boolean;
+    scrollInteractionActive: boolean;
+    processFoldTransitionActive: boolean;
+    isAtEnd: boolean;
+    itemIndex: number;
+    firstVisibleIndex: number | undefined;
+}): boolean => {
+    if (
+        input.isScrolling
+        || input.scrollInteractionActive
+        || input.processFoldTransitionActive
+        || input.isAtEnd
+    ) {
+        return false;
+    }
+
+    return input.firstVisibleIndex !== undefined && input.itemIndex < input.firstVisibleIndex;
 };

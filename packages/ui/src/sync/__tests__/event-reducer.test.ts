@@ -359,6 +359,37 @@ describe("applyDirectoryEvent", () => {
     expect(draft.session_activity.ses_1 === undefined).toBe(true)
   })
 
+  test("preserves pending questions when session.status flips to idle", () => {
+    const pending = [
+      { id: "que_1", sessionID: "ses_1" } as QuestionRequest,
+    ]
+    const draft = state({
+      session_status: { ses_1: { type: "busy" } as SessionStatus },
+      question: { ses_1: pending },
+    })
+
+    applyDirectoryEvent(draft, {
+      type: "session.status",
+      properties: { sessionID: "ses_1", status: { type: "idle" } as SessionStatus },
+    } as Event)
+
+    expect(draft.question.ses_1).toBe(pending)
+  })
+
+  test("preserves pending questions on session.idle", () => {
+    const pending = [
+      { id: "que_1", sessionID: "ses_1" } as QuestionRequest,
+    ]
+    const draft = state({ question: { ses_1: pending } })
+
+    applyDirectoryEvent(draft, {
+      type: "session.idle",
+      properties: { sessionID: "ses_1" },
+    } as Event)
+
+    expect(draft.question.ses_1).toBe(pending)
+  })
+
   test("keeps session_activity when session.status stays non-idle", () => {
     const stamp = Date.now() - 1_000
     const draft = state({

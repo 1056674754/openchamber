@@ -42,10 +42,14 @@ This module contains the OpenChamber message-stream WebSocket protocol and runti
 - The web server creates one shared global message-stream hub. OpenCode watcher side effects and global WS clients subscribe to that hub, so there is one upstream `/global/event` SSE reader for both server-side processing and browser fan-out.
 - When remote instances are configured, the global WS bridge also subscribes to a server-side remote fan-in. Remote events are sent over the same browser WS with `serverId` metadata, avoiding one browser global WS connection per remote instance.
 - The global hub keeps a bounded replay buffer keyed by SSE `eventId` so reconnecting browser clients can receive buffered events after their requested `Last-Event-ID`.
+- The global browser protocol distinguishes local transport liveness from upstream readiness:
+  - `transport-ready` means the browser WebSocket reached the local OpenChamber bridge.
+  - `ready` means the upstream global SSE reader is attached; buffered events are replayed before this frame. Its `replayGap` flag tells the UI whether the requested cursor was evicted or unknown.
+  - `disconnected` means the upstream SSE reader detached while the local WebSocket remains open. A later `ready` on the same socket marks successful upstream recovery.
 - Directory WS clients still attach one upstream `/event?directory=...` SSE reader per connection because directory streams are scoped.
 - If an upstream SSE stream stalls after the browser WS is already ready, the reader aborts that upstream fetch and reconnects upstream with `Last-Event-ID`, keeping the browser WS alive when recovery is fast.
 - Health checks are reserved for initial upstream connect failures and explicit upstream-unavailable responses, not for ordinary stall recovery on an already-established stream.
-- Global synthetic events such as `openchamber:session-status`, `openchamber:session-activity`, `openchamber:notification`, and `openchamber:heartbeat` are preserved on the WS path, but heartbeat frames are emitted only while an upstream SSE stream is actively attached.
+- Global synthetic events such as `openchamber:session-status`, `openchamber:session-activity`, `openchamber:notification`, and `openchamber:heartbeat` are preserved on the WS path. Global heartbeat frames prove only that the local bridge is responsive; consumers must use `ready` / `disconnected` for upstream state.
 - Global UI broadcasts are fan-out capable across both SSE and WS clients.
 - The reusable upstream reader centralizes SSE fetch/parsing/reconnect behavior for the WS runtime and OpenCode watcher. Additional event consumers should move to it only with parity tests for their lifecycle and error semantics.
 - Browser transport concerns live in the WS bridge modules; server-side global stream ownership lives in `global-hub.js`.
@@ -55,6 +59,7 @@ This module contains the OpenChamber message-stream WebSocket protocol and runti
 - Keep `runtime.js` focused on WebSocket upgrade and endpoint dispatch. Put global browser-client lifecycle in `global-ws-bridge.js`, directory stream lifecycle in `directory-ws-bridge.js`, and upstream stream sharing in `global-hub.js`.
 - Do not change upstream OpenCode transport assumptions here; OpenCode remains SSE-based.
 - Keep global replay bounded; do not turn it into an unbounded event log.
+- Never emit `ready` before replay completes, and never infer upstream readiness from heartbeat traffic.
 
 ## Testing
 - Run `bun test packages/web/server/lib/event-stream/protocol.test.js`

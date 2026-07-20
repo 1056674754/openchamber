@@ -114,6 +114,7 @@ These rules are important. Breaking them tends to reintroduce idle CPU churn, st
 6. Header should not depend on PR store.
 7. Closed sidebar should not create live PR work.
 8. File tree Git status should update only when the file tree is visible.
+9. Persisted `FilesView` instances may stay mounted to preserve editor state, but hidden instances must not load or poll directories. Missing expanded directory prefixes are removed from the persisted tree state after a confirmed not-found response.
 
 ## Selector Rules
 

@@ -27,6 +27,14 @@ type ApiProxyResponsePayload = {
   bodyText?: string;
 };
 
+const DECODED_PAYLOAD_LENGTH_HEADER = 'x-openchamber-decoded-content-length';
+
+export function setDecodedPayloadLengthHeader(headers: Record<string, string>, payloadBytes: number): void {
+  delete headers[DECODED_PAYLOAD_LENGTH_HEADER];
+  if (!Number.isSafeInteger(payloadBytes) || payloadBytes < 0) return;
+  headers[DECODED_PAYLOAD_LENGTH_HEADER] = String(payloadBytes);
+}
+
 const shouldReturnTextBody = (headers: Headers): boolean => {
   const contentType = headers.get('content-type')?.toLowerCase() || '';
   return contentType.startsWith('application/json')
@@ -107,6 +115,7 @@ export async function handleProxyBridgeMessage(
         const responseHeaders = collectProxyResponseHeaders(response.headers, deps);
         if (shouldReturnTextBody(response.headers)) {
           const bodyText = await response.text();
+          setDecodedPayloadLengthHeader(responseHeaders, Buffer.byteLength(bodyText));
           const data: ApiProxyResponsePayload = {
             status: response.status,
             headers: responseHeaders,
@@ -117,6 +126,7 @@ export async function handleProxyBridgeMessage(
         }
 
         const arrayBuffer = await response.arrayBuffer();
+        setDecodedPayloadLengthHeader(responseHeaders, arrayBuffer.byteLength);
         const data: ApiProxyResponsePayload = {
           status: response.status,
           headers: responseHeaders,
@@ -180,6 +190,7 @@ export async function handleProxyBridgeMessage(
         const responseHeaders = collectProxyResponseHeaders(response.headers, deps);
         if (shouldReturnTextBody(response.headers)) {
           const bodyText = await response.text();
+          setDecodedPayloadLengthHeader(responseHeaders, Buffer.byteLength(bodyText));
           const data: ApiProxyResponsePayload = {
             status: response.status,
             headers: responseHeaders,
@@ -190,6 +201,7 @@ export async function handleProxyBridgeMessage(
         }
 
         const arrayBuffer = await response.arrayBuffer();
+        setDecodedPayloadLengthHeader(responseHeaders, arrayBuffer.byteLength);
         const data: ApiProxyResponsePayload = {
           status: response.status,
           headers: responseHeaders,

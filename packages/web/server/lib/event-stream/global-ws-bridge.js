@@ -33,17 +33,19 @@ export function createGlobalMessageStreamWsBridge({
     wsClients.delete(socket);
   };
 
-  const replayEvents = (socket, requestedLastEventId) => {
-    for (const entry of globalHub.replayAfter(requestedLastEventId)) {
+  const replayEvents = (socket, events) => {
+    for (const entry of events) {
       const sent = sendMessageStreamWsEvent(socket, entry.payload, {
         directory: entry.directory,
         eventId: entry.eventId,
       });
       if (!sent) {
         removeClient(socket);
-        return;
+        return false;
       }
+      clientLastEventIds.set(socket, entry.eventId);
     }
+    return true;
   };
 
   const markReady = (socket, requestedLastEventId) => {
@@ -51,18 +53,21 @@ export function createGlobalMessageStreamWsBridge({
       return;
     }
 
+    const replay = globalHub.replayFrom(requestedLastEventId);
+    readyClients.add(socket);
+    if (!replayEvents(socket, replay.events)) {
+      return;
+    }
+
     const sent = sendMessageStreamWsFrame(socket, {
       type: 'ready',
       scope: 'global',
+      replayGap: replay.gap,
     });
     if (!sent) {
       removeClient(socket);
       return;
     }
-
-    readyClients.add(socket);
-    wsClients.add(socket);
-    replayEvents(socket, requestedLastEventId);
   };
 
   const stopHubIfUnused = () => {
@@ -137,6 +142,8 @@ export function createGlobalMessageStreamWsBridge({
       });
       if (!sent) {
         removeClient(socket);
+      } else if (eventId) {
+        clientLastEventIds.set(socket, eventId);
       }
     }
 
@@ -158,6 +165,20 @@ export function createGlobalMessageStreamWsBridge({
       for (const socket of Array.from(clients)) {
         if (!readyClients.has(socket)) {
           markReady(socket, clientLastEventIds.get(socket) ?? '');
+        }
+      }
+      return;
+    }
+
+    if (status.type === 'disconnect') {
+      const reason = typeof status.reason === 'string' && status.reason.length > 0
+        ? status.reason
+        : 'upstream_disconnected';
+      for (const socket of Array.from(readyClients)) {
+        readyClients.delete(socket);
+        const sent = sendMessageStreamWsFrame(socket, { type: 'disconnected', reason });
+        if (!sent) {
+          removeClient(socket);
         }
       }
       return;
@@ -199,11 +220,8 @@ export function createGlobalMessageStreamWsBridge({
       }
     }, heartbeatIntervalMs);
 
-    // Heartbeat must fire unconditionally so the client's heartbeat timer
-    // stays alive even when the upstream SSE reader is reconnecting.  If the
-    // hub is disconnected the client would otherwise time out after 30 s,
-    // causing a visible "Connection lost" toast even though the bridge will
-    // resume forwarding events once the upstream reconnects.
+    // This heartbeat only proves the local bridge transport is alive. Upstream
+    // readiness is reported separately through ready/disconnected frames.
     const heartbeatInterval = setInterval(() => {
       if (socket.readyState !== 1) {
         return;
@@ -225,17 +243,18 @@ export function createGlobalMessageStreamWsBridge({
 
     clients.add(socket);
     clientLastEventIds.set(socket, requestedLastEventId);
-    globalHub.start();
-
-    // Send ready frame immediately — prevents client-side wsReadyTimeoutMs.
-    // Event replay is deferred to when the upstream connects (via status subscriber).
-    sendMessageStreamWsFrame(socket, { type: 'ready', scope: 'global' });
+    const transportReady = sendMessageStreamWsFrame(socket, { type: 'transport-ready', scope: 'global' });
+    if (!transportReady) {
+      removeClient(socket);
+      stopHubIfUnused();
+      return;
+    }
     wsClients.add(socket);
     startRemoteGlobalEventFanout();
+    globalHub.start();
 
     if (globalHub.isConnected()) {
-      readyClients.add(socket);
-      replayEvents(socket, requestedLastEventId);
+      markReady(socket, requestedLastEventId);
     }
   };
 

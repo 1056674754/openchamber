@@ -93,4 +93,22 @@ describe('runCliEntryIfMain', () => {
     expect(setExitOnShutdown).not.toHaveBeenCalled();
     expect(startServer).not.toHaveBeenCalled();
   });
+
+  it('does not self-start in an Electron browser process before desktop environment setup', () => {
+    const { dependencies, parseServeCliOptions, setExitOnShutdown, startServer } = createDependencies({
+      process: {
+        argv: ['/Applications/OpenChamber.app/Contents/MacOS/OpenChamber', '/repo/packages/web/server/index.js'],
+        env: {},
+        versions: {},
+        type: 'browser',
+        exit: vi.fn(),
+      },
+    });
+
+    runCliEntryIfMain(dependencies);
+
+    expect(parseServeCliOptions).not.toHaveBeenCalled();
+    expect(setExitOnShutdown).not.toHaveBeenCalled();
+    expect(startServer).not.toHaveBeenCalled();
+  });
 });

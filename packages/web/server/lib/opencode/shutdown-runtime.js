@@ -7,6 +7,7 @@ export const createGracefulShutdownRuntime = (dependencies) => {
     setIsShuttingDown,
     syncToHmrState,
     openCodeWatcherRuntime,
+    openCodeConfigFileWatcherRuntime,
     sessionRuntime,
     scheduledTasksRuntime,
     getHealthCheckInterval,
@@ -41,6 +42,7 @@ export const createGracefulShutdownRuntime = (dependencies) => {
     const exitProcess = typeof options.exitProcess === 'boolean' ? options.exitProcess : getExitOnShutdown();
 
     openCodeWatcherRuntime.stop();
+    openCodeConfigFileWatcherRuntime?.stop();
     sessionRuntime.dispose();
     scheduledTasksRuntime?.stop?.();
 

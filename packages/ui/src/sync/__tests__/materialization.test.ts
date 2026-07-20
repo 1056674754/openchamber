@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import type { Message, Part } from "@opencode-ai/sdk/v2/client"
 import { getSessionMaterializationStatus, materializeSessionSnapshots } from "../materialization"
+import { INLINE_PART_PAYLOAD_CHAR_LIMIT, OPENCHAMBER_TRUNCATION_METADATA_KEY } from "../sanitize"
 
 function message(id: string, sessionID = "ses_1"): Message {
   return { id, sessionID, role: "assistant", time: { created: 1 } } as Message
@@ -129,6 +130,39 @@ describe("materializeSessionSnapshots", () => {
     )
 
     expect(result.part.msg_1).toEqual([serverPart])
+  })
+
+  test("sanitizes oversized tool payloads before retaining them in state", () => {
+    const toolPart: Part = {
+      id: "prt_tool",
+      messageID: "msg_1",
+      sessionID: "ses_1",
+      type: "tool",
+      callID: "call_1",
+      tool: "apply_patch",
+      state: {
+        status: "completed",
+        input: {},
+        output: "done",
+        title: "Apply patch",
+        metadata: { patch: "x".repeat(INLINE_PART_PAYLOAD_CHAR_LIMIT + 1) },
+        time: { start: 1, end: 2 },
+      },
+    }
+
+    const result = materializeSessionSnapshots(
+      { message: {}, part: {} },
+      "ses_1",
+      [{ info: message("msg_1"), parts: [toolPart] }],
+    )
+
+    const retained = result.part.msg_1[0]
+    expect(retained?.type).toBe("tool")
+    if (!retained || retained.type !== "tool") throw new Error("expected retained tool part")
+    expect(retained.metadata?.[OPENCHAMBER_TRUNCATION_METADATA_KEY]).toEqual({
+      fields: ["state.metadata"],
+      limit: INLINE_PART_PAYLOAD_CHAR_LIMIT,
+    })
   })
 })
 

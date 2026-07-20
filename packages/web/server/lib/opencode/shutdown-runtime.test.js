@@ -59,6 +59,15 @@ describe('graceful shutdown runtime', () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
+  it('stops the configuration watcher during shutdown', async () => {
+    const openCodeConfigFileWatcherRuntime = { stop: vi.fn() };
+    const runtime = createRuntime(null, { openCodeConfigFileWatcherRuntime });
+
+    await runtime.gracefulShutdown({ exitProcess: false });
+
+    expect(openCodeConfigFileWatcherRuntime.stop).toHaveBeenCalledTimes(1);
+  });
+
   it('stops every tracked managed OpenCode port when shutdown explicitly stops OpenCode', async () => {
     const killProcessOnPort = vi.fn();
     const waitForPortRelease = vi.fn(async () => true);

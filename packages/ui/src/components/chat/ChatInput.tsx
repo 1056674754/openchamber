@@ -74,8 +74,9 @@ import { useI18n } from '@/lib/i18n';
 import { fetchResponseStyleInstruction } from '@/lib/responseStyle';
 import { wrapSystemReminder } from '@/lib/systemReminder';
 import { eventMatchesShortcut, getEffectiveShortcutCombo, normalizeCombo } from '@/lib/shortcuts';
-import { getSyncMessages } from '@/sync/sync-refs';
+import { getSyncMessages, getSyncParts } from '@/sync/sync-refs';
 import { isSyntheticPart } from '@/lib/messages/synthetic';
+import { isRealUserMessage } from '@/lib/messages/real-user';
 import { serverRegistry } from '@/lib/opencode/server-registry';
 import {
     buildHighlightParts,
@@ -224,7 +225,9 @@ const buildSkillMentionInstruction = (skillNames: string[]): string | null => {
 };
 
 const hasUserMessages = (sessionId: string, directory?: string) => {
-    return getSyncMessages(sessionId, directory).some((message) => message.role === 'user');
+    return getSyncMessages(sessionId, directory).some((message) => (
+        isRealUserMessage(message, getSyncParts(message.id, directory))
+    ));
 };
 
 const getRevertedPreview = (parts: Part[], fallback: string): string => {
@@ -447,8 +450,10 @@ const RevertedMessageDock: React.FC<RevertedMessageDockProps> = React.memo(({ se
     );
 
     const userMessages = React.useMemo(
-        () => sessionMessages.filter((message): message is Message & { role: 'user' } => message.role === 'user'),
-        [sessionMessages],
+        () => sessionMessages.filter((message): message is Message & { role: 'user' } => (
+            isRealUserMessage(message, partsByMessage[message.id])
+        )),
+        [partsByMessage, sessionMessages],
     );
     const noTextContent = t('chat.revertPopover.noTextContent');
     const items = React.useMemo(() => {

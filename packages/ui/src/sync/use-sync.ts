@@ -14,7 +14,6 @@ import { useSessionUIStore } from "./session-ui-store"
 import { getSyncStoresForServer } from "./multi-server-registry"
 import { DEFAULT_SERVER_ID, serverRegistry } from "@/lib/opencode/server-registry"
 import { dropSessionCaches, getProtectedSessionCacheIds } from "./session-cache"
-import { stripMessageDiffSnapshots } from "./sanitize"
 import { isVSCodeRuntime } from "@/lib/desktop"
 import {
   shouldSkipSessionPrefetch,
@@ -26,7 +25,8 @@ import { getSessionMaterializationStatus, materializeSessionSnapshots } from "./
 import { useTodosPersistStore } from "@/stores/useTodosPersistStore"
 import { useConfigStore } from "@/stores/useConfigStore"
 import { useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
-import { fetchMessagePageToUserBoundary, type MessagePage } from "./message-page-boundary"
+import { getInteractiveHistoryRealUserTarget, loadMessageHistoryBatch } from "./message-history-loader"
+import { reconcileSyncMeta, type SyncMeta } from "./sync-meta"
 
 const SKIP_PARTS = new Set(["patch", "step-start", "step-finish"])
 const MESSAGE_PAGE_SIZE = 150
@@ -39,13 +39,6 @@ const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0)
 // Shared across useSync() instances so cache eviction is based on app-level
 // session recency, not whichever component happened to call sync first.
 const seenByDirectory = new Map<string, Set<string>>()
-
-type SyncMeta = {
-  limit: number
-  cursor: string | undefined
-  complete: boolean
-  loading: boolean
-}
 
 const getEffectiveSessionCacheLimit = () => isVSCodeRuntime() ? VSCODE_SESSION_CACHE_LIMIT : SESSION_CACHE_LIMIT
 const getEffectiveMessagePageSize = () => isVSCodeRuntime() ? VSCODE_MESSAGE_PAGE_SIZE : MESSAGE_PAGE_SIZE
@@ -81,30 +74,6 @@ function isUserMessage(message: Message): boolean {
 
 function hasUserMessage(messages: Message[] | undefined): boolean {
   return Boolean(messages?.some(isUserMessage))
-}
-
-function unwrapMessageRecords<T>(
-  result: { data?: T[]; error?: unknown; response?: { status?: number } },
-  name: string,
-): T[] {
-  if (result.error) {
-    const status = result.response?.status
-    const rawError = result.error
-    const message = typeof rawError === "object" && rawError !== null && "message" in rawError
-      ? String((rawError as { message?: unknown }).message)
-      : String(rawError)
-    const error = new Error(`${name} failed${status ? ` (${status})` : ""}: ${message}`)
-    if (status !== undefined) {
-      ;(error as Error & { status?: number }).status = status
-    }
-    throw error
-  }
-  if (result.data === undefined) {
-    const error = new Error(`${name} returned no data`)
-    ;(error as Error & { status?: number }).status = 503
-    throw error
-  }
-  return result.data
 }
 
 // ---------------------------------------------------------------------------
@@ -175,7 +144,10 @@ export function useSync() {
   const getMetaFor = useCallback(
     (sessionID: string, targetDirectory = directory) => {
       const key = keyFor(sessionID, targetDirectory)
-      return meta.current.get(key) ?? getPrefetchMeta(targetDirectory, sessionID) ?? getDefaultMeta()
+      return reconcileSyncMeta(
+        meta.current.get(key),
+        getPrefetchMeta(targetDirectory, sessionID),
+      ) ?? getDefaultMeta()
     },
     [directory, keyFor],
   )
@@ -183,7 +155,10 @@ export function useSync() {
   const setMetaFor = useCallback(
     (sessionID: string, patch: Partial<SyncMeta>, targetDirectory = directory) => {
       const key = keyFor(sessionID, targetDirectory)
-      const current = meta.current.get(key) ?? getPrefetchMeta(targetDirectory, sessionID) ?? getDefaultMeta()
+      const current = reconcileSyncMeta(
+        meta.current.get(key),
+        getPrefetchMeta(targetDirectory, sessionID),
+      ) ?? getDefaultMeta()
       meta.current.set(key, { ...current, ...patch })
     },
     [directory, keyFor],
@@ -322,44 +297,28 @@ export function useSync() {
     [directory],
   )
 
-  // Fetch messages from API
-  const fetchMessages = useCallback(
-    async (sessionID: string, limit: number, before?: string, targetDirectory = directory, targetServerId?: string): Promise<MessagePage> => {
-      const client = resolveSdkForDirectory(targetDirectory, sessionID, targetServerId)
-      const result = await retry(() =>
-        client.session.messages({ sessionID, directory: targetDirectory, limit, before }),
-      )
-      const items = unwrapMessageRecords(result, "session.messages")
-        .filter((x: { info?: { id?: string } }) => !!x?.info?.id)
-      const session = items
-        .map((x: { info: Message }) => stripMessageDiffSnapshots(x.info))
-        .sort((a: Message, b: Message) => cmp(a.id, b.id))
-      const part = items.map((x: { info: { id: string }; parts: Part[] }) => ({
-        id: x.info.id,
-        part: sortParts(x.parts),
-      }))
-      const cursor = result.response?.headers?.get?.("x-next-cursor") ?? undefined
-      return { session, part, cursor, complete: !cursor }
-    },
-    [directory],
-  )
-
   const fetchMessagesToUserBoundary = useCallback(
-    async (
-      sessionID: string,
-      limit: number,
-      before?: string,
-      targetDirectory = directory,
-      targetServerId?: string,
-    ): Promise<MessagePage> => {
-      const result = await fetchMessagePageToUserBoundary({
-        page: await fetchMessages(sessionID, limit, before, targetDirectory, targetServerId),
-        fetchOlder: (cursor) => fetchMessages(sessionID, limit, cursor, targetDirectory, targetServerId),
+    async (input: {
+      readonly sessionID: string
+      readonly limit: number
+      readonly before?: string
+      readonly targetDirectory?: string
+      readonly targetServerId?: string
+    }) => {
+      const targetDirectory = input.targetDirectory ?? directory
+      const client = resolveSdkForDirectory(targetDirectory, input.sessionID, input.targetServerId)
+      const result = await loadMessageHistoryBatch({
+        client,
+        sessionID: input.sessionID,
+        directory: targetDirectory,
+        limit: input.limit,
+        before: input.before,
+        minimumRealUserMessages: getInteractiveHistoryRealUserTarget(isVSCodeRuntime()),
       })
 
       if (result.stoppedBeforeBoundary) {
-        console.warn("[sync] session.messages stopped before reaching a user boundary", {
-          sessionID,
+        console.warn("[sync] session.messages stopped before reaching the interactive turn target", {
+          sessionID: input.sessionID,
           targetDirectory,
           loadedMessageCount: result.page.session.length,
           extraPages: result.extraPages,
@@ -369,7 +328,7 @@ export function useSync() {
 
       return result.page
     },
-    [directory, fetchMessages],
+    [directory],
   )
 
   // Load messages for a session.
@@ -390,7 +349,13 @@ export function useSync() {
 
       try {
         const limit = options?.before ? getEffectiveMessagePageSize() : m.limit
-        let page = await fetchMessagesToUserBoundary(sessionID, limit, options?.before, targetDirectory, options?.targetServerId)
+        let page = await fetchMessagesToUserBoundary({
+          sessionID,
+          limit,
+          before: options?.before,
+          targetDirectory,
+          targetServerId: options?.targetServerId,
+        })
 
         // VS Code keeps the initial page small for switch performance. Some
         // sessions have a very large final turn, so the latest 30 records can
@@ -399,7 +364,12 @@ export function useSync() {
         if (!options?.before && isVSCodeRuntime() && !page.complete && !hasUserMessage(page.session)) {
           for (const nextLimit of VSCODE_INITIAL_PAGE_EXPANSION_LIMITS) {
             if (nextLimit <= limit) continue
-            page = await fetchMessagesToUserBoundary(sessionID, nextLimit, undefined, targetDirectory, options?.targetServerId)
+            page = await fetchMessagesToUserBoundary({
+              sessionID,
+              limit: nextLimit,
+              targetDirectory,
+              targetServerId: options?.targetServerId,
+            })
             if (page.complete || hasUserMessage(page.session)) break
           }
         }

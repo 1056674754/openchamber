@@ -5,6 +5,12 @@ import { formatSdkError } from "./sdk-error"
 
 const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0)
 const BOOTSTRAP_REQUEST_TIMEOUT_MS = 8_000
+const GLOBAL_BOOTSTRAP_RETRY_OPTIONS = {
+  attempts: 10,
+  delay: 500,
+  factor: 1.5,
+  maxDelay: 3_000,
+} as const
 
 const readErrorStatus = (error: unknown): number | undefined => {
   if (typeof error !== "object" || error === null || !("status" in error)) return undefined
@@ -100,10 +106,11 @@ export async function bootstrapGlobal(
   sdk: OpencodeClient,
   set: (patch: Partial<GlobalState>) => void,
 ) {
+  const retryGlobal = <T>(operation: () => Promise<T>) => retry(operation, GLOBAL_BOOTSTRAP_RETRY_OPTIONS)
   const results = await Promise.allSettled([
-    retry(() => sdk.path.get().then((x) => set({ path: unwrap(x, "path.get") }))),
-    retry(() => sdk.global.config.get().then((x) => set({ config: unwrap(x, "global.config.get") }))),
-    retry(() =>
+    retryGlobal(() => sdk.path.get().then((x) => set({ path: unwrap(x, "path.get") }))),
+    retryGlobal(() => sdk.global.config.get().then((x) => set({ config: unwrap(x, "global.config.get") }))),
+    retryGlobal(() =>
       sdk.project.list().then((x) => {
         const data = unwrap(x, "project.list")
         const projects = data
@@ -113,7 +120,7 @@ export async function bootstrapGlobal(
         set({ projects })
       }),
     ),
-    retry(() => sdk.provider.list().then((x) => set({ providers: unwrap(x, "provider.list") }))),
+    retryGlobal(() => sdk.provider.list().then((x) => set({ providers: unwrap(x, "provider.list") }))),
   ])
 
   const errors = results

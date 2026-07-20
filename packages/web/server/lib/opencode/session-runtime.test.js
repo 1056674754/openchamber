@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createSessionRuntime } from './session-runtime.js';
 
@@ -49,7 +49,7 @@ describe('session runtime', () => {
     expect(events).toContainEqual({
       type: 'openchamber:session-status',
       properties: expect.objectContaining({
-        sessionId: 'session-1',
+        sessionID: 'session-1',
         status: 'idle',
         needsAttention: true,
       }),
@@ -57,7 +57,7 @@ describe('session runtime', () => {
     expect(events.at(-1)).toEqual({
       type: 'openchamber:session-status',
       properties: {
-        sessionId: 'session-1',
+        sessionID: 'session-1',
         status: 'idle',
         timestamp: expect.any(Number),
         metadata: {},
@@ -92,7 +92,7 @@ describe('session runtime', () => {
     expect(events).toContainEqual({
       type: 'openchamber:session-status',
       properties: expect.objectContaining({
-        sessionId: 'legacy-session-1',
+        sessionID: 'legacy-session-1',
         status: 'busy',
       }),
     });
@@ -143,6 +143,85 @@ describe('session runtime', () => {
       vi.advanceTimersByTime(1);
 
       expect(activityPhases()).toEqual(['busy', 'cooldown', 'idle']);
+    } finally {
+      runtime.dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it('suppresses unread while viewed and records it after the view is cleared', () => {
+    const unreadStore = {
+      recordActivity: vi.fn(),
+      markRead: vi.fn(),
+      getUnreadState: vi.fn(() => null),
+      flush: vi.fn(),
+      dispose: vi.fn(),
+    };
+    const runtime = createSessionRuntime({
+      writeSseEvent: vi.fn(),
+      getNotificationClients: () => new Set(),
+      broadcastEvent: vi.fn(),
+      unreadStore,
+    });
+    runtimes.push(runtime);
+
+    runtime.markSessionViewed('session-viewed', 'client-1');
+    runtime.processOpenCodeSsePayload({
+      type: 'session.status',
+      properties: { sessionID: 'session-viewed', status: { type: 'busy' } },
+    });
+    runtime.processOpenCodeSsePayload({
+      type: 'session.status',
+      properties: { sessionID: 'session-viewed', status: { type: 'idle' } },
+    });
+
+    expect(unreadStore.recordActivity).not.toHaveBeenCalled();
+
+    runtime.markSessionUnviewed('session-viewed', 'client-1');
+    runtime.processOpenCodeSsePayload({
+      type: 'session.status',
+      properties: { sessionID: 'session-viewed', status: { type: 'busy' } },
+    });
+    runtime.processOpenCodeSsePayload({
+      type: 'session.status',
+      properties: { sessionID: 'session-viewed', status: { type: 'idle' } },
+    });
+
+    expect(unreadStore.recordActivity).toHaveBeenCalledOnce();
+    expect(unreadStore.recordActivity).toHaveBeenCalledWith('session-viewed', { hasError: false });
+  });
+
+  it('expires a viewed client when its heartbeat stops', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-14T00:00:00Z'));
+    const unreadStore = {
+      recordActivity: vi.fn(),
+      markRead: vi.fn(),
+      getUnreadState: vi.fn(() => null),
+      flush: vi.fn(),
+      dispose: vi.fn(),
+    };
+    const runtime = createSessionRuntime({
+      writeSseEvent: vi.fn(),
+      getNotificationClients: () => new Set(),
+      broadcastEvent: vi.fn(),
+      unreadStore,
+    });
+
+    try {
+      runtime.markSessionViewed('session-expired', 'client-1');
+      runtime.processOpenCodeSsePayload({
+        type: 'session.status',
+        properties: { sessionID: 'session-expired', status: { type: 'busy' } },
+      });
+      vi.advanceTimersByTime(60_001);
+      runtime.processOpenCodeSsePayload({
+        type: 'session.status',
+        properties: { sessionID: 'session-expired', status: { type: 'idle' } },
+      });
+
+      expect(unreadStore.recordActivity).toHaveBeenCalledOnce();
+      expect(runtime.getSessionAttentionState('session-expired')?.isViewed).toBe(false);
     } finally {
       runtime.dispose();
       vi.useRealTimers();

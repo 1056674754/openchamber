@@ -14,7 +14,7 @@ Read this document before any of the following:
 
 1. OpenChamber embeds the custom merged OpenCode build, not an official release substituted for convenience.
 2. A custom OpenCode build intended to preserve the shared history database must use `OPENCODE_CHANNEL=latest`.
-3. The OpenCode version string must identify the custom build, for example `1.17.20-my`.
+3. The OpenCode version string must identify the custom build, for example `1.18.2-my`.
 4. The macOS packaged runtime must use `OpenChamber.app/Contents/Resources/opencode/opencode`, not the external ad-hoc binary under `~/.opencode/bin`.
 5. The nested OpenCode executable and the containing app must be signed by the same signing identity and Team ID.
 6. Never modify the app bundle after signing. Replacing OpenCode, metadata, `app.asar`, or any other bundled file invalidates the outer signature.
@@ -38,7 +38,7 @@ Run from the OpenCode package directory:
 ```bash
 cd /Users/song/dev_ai/opencode/packages/opencode
 OPENCODE_CHANNEL=latest \
-OPENCODE_VERSION=1.17.20-my \
+OPENCODE_VERSION=1.18.2-my \
 bun run script/build.ts --single
 ```
 
@@ -91,6 +91,39 @@ bun run electron:build
 ```
 
 This produces `packages/electron/dist/mac-arm64/OpenChamber.app` and uses an `Apple Development` identity when available. It is intended for local runtime QA only. It is not evidence of Developer ID distribution readiness or notarization.
+
+### Candidate safety and `/Applications` promotion (mandatory)
+
+Packaging and QA must not terminate or overwrite the OpenChamber instance the
+user is actively using.
+
+1. Inspect the running executable path before building. Never send `TERM`,
+   `KILL`, `pkill`, or `killall` to the active stable app or its managed
+   OpenCode process merely to make a build or candidate launch succeed.
+2. Never build into the app bundle that is currently executing. If the active
+   executable is under `packages/electron/dist`, use a unique Electron Builder
+   output directory instead of the default `dist` directory.
+3. While the stable app remains open, verify the candidate's web assets on a
+   separate port with Playwright and run static packaged checks (`codesign`,
+   embedded OpenCode version, and Gatekeeper where applicable). Do not treat a
+   successful build as functional verification.
+4. Packaged OpenChamber currently enforces a single-instance lock. When final
+   desktop-shell smoke testing is required, wait for the user to quit the
+   stable app voluntarily. Do not close it on the user's behalf. Launch the
+   candidate directly from its isolated build directory and complete the
+   requested runtime checks there.
+5. Only after candidate QA passes may it be promoted to `/Applications`.
+   Stage it as a separate `OpenChamber.next.app`, verify that staged bundle,
+   then swap it into place while no OpenChamber process is running. Keep the
+   previous bundle until the newly installed app has passed a post-install
+   smoke test.
+6. If candidate or post-install verification fails, leave or restore the
+   previous `/Applications/OpenChamber.app` and report the failure explicitly.
+
+The existing `electron:install` command removes `/Applications/OpenChamber.app`
+before copying. Do not run it as an initial build or QA command, and do not run
+it while the stable app is open. Installation is the final promotion step, not
+part of candidate discovery.
 
 ### Developer ID release build
 

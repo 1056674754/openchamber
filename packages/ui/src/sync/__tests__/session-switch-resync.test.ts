@@ -2,8 +2,8 @@ import { describe, expect, test, beforeEach, mock } from "bun:test"
 import { create, type StoreApi } from "zustand"
 import type { PermissionRequest, QuestionRequest } from "@opencode-ai/sdk/v2/client"
 
-const listPendingQuestionsCalls: Array<{ directories?: Array<string | null | undefined> }> = []
-const listPendingPermissionsCalls: Array<{ directories?: Array<string | null | undefined> }> = []
+const scopedQuestionListCalls: string[] = []
+const scopedPermissionListCalls: string[] = []
 let pendingQuestionsResponse: QuestionRequest[] = []
 let pendingPermissionsResponse: PermissionRequest[] = []
 let pendingQuestionsShouldThrow = false
@@ -11,18 +11,23 @@ let pendingPermissionsShouldThrow = false
 
 mock.module("@/lib/opencode/client", () => ({
   opencodeClient: {
-    listPendingQuestions: mock(async (opts?: { directories?: Array<string | null | undefined> }) => {
-      listPendingQuestionsCalls.push(opts ?? {})
-      if (pendingQuestionsShouldThrow) throw new Error("question.list failed: simulated")
-      return pendingQuestionsResponse
-    }),
-    listPendingPermissions: mock(async (opts?: { directories?: Array<string | null | undefined> }) => {
-      listPendingPermissionsCalls.push(opts ?? {})
-      if (pendingPermissionsShouldThrow) throw new Error("permission.list failed: simulated")
-      return pendingPermissionsResponse
-    }),
     getDirectory: () => "/repo",
-    getScopedSdkClient: () => ({}),
+    getScopedSdkClient: () => ({
+      question: {
+        list: mock(async ({ directory }: { directory: string }) => {
+          scopedQuestionListCalls.push(directory)
+          if (pendingQuestionsShouldThrow) return { error: new Error("question.list failed: simulated") }
+          return { data: pendingQuestionsResponse }
+        }),
+      },
+      permission: {
+        list: mock(async ({ directory }: { directory: string }) => {
+          scopedPermissionListCalls.push(directory)
+          if (pendingPermissionsShouldThrow) return { error: new Error("permission.list failed: simulated") }
+          return { data: pendingPermissionsResponse }
+        }),
+      },
+    }),
     setDirectory: () => undefined,
   },
 }))
@@ -94,25 +99,32 @@ function createDirectoryStore(initial: Partial<State>): StoreApi<DirectoryStore>
 
 describe("resyncBlockingRequestsForDirectory", () => {
   beforeEach(() => {
-    listPendingQuestionsCalls.length = 0
-    listPendingPermissionsCalls.length = 0
+    scopedQuestionListCalls.length = 0
+    scopedPermissionListCalls.length = 0
     pendingQuestionsResponse = []
     pendingPermissionsResponse = []
     pendingQuestionsShouldThrow = false
     pendingPermissionsShouldThrow = false
   })
 
-  test("calls listPendingQuestions and listPendingPermissions exactly once for the directory", async () => {
+  test("calls question.list and permission.list exactly once for the directory", async () => {
     const store = createDirectoryStore({})
     pendingQuestionsResponse = [buildQuestion()]
     pendingPermissionsResponse = [buildPermission()]
 
     await resyncBlockingRequestsForDirectory("/repo", store)
 
-    expect(listPendingQuestionsCalls).toHaveLength(1)
-    expect(listPendingQuestionsCalls[0]).toEqual({ directories: ["/repo"] })
-    expect(listPendingPermissionsCalls).toHaveLength(1)
-    expect(listPendingPermissionsCalls[0]).toEqual({ directories: ["/repo"] })
+    expect(scopedQuestionListCalls).toEqual(["/repo"])
+    expect(scopedPermissionListCalls).toEqual(["/repo"])
+  })
+
+  test("uses the directory-scoped SDK as pending-request authority", async () => {
+    const store = createDirectoryStore({})
+
+    await resyncBlockingRequestsForDirectory("/repo", store)
+
+    expect(scopedQuestionListCalls).toEqual(["/repo"])
+    expect(scopedPermissionListCalls).toEqual(["/repo"])
   })
 
   test("merges newly fetched questions/permissions into the directory store", async () => {
@@ -168,8 +180,8 @@ describe("resyncBlockingRequestsForDirectory", () => {
   test("returns early without fetching when no candidate sessions are known", async () => {
     const store = createDirectoryStore({ session: [] })
     await resyncBlockingRequestsForDirectory("/repo", store)
-    expect(listPendingQuestionsCalls).toHaveLength(0)
-    expect(listPendingPermissionsCalls).toHaveLength(0)
+    expect(scopedQuestionListCalls).toHaveLength(0)
+    expect(scopedPermissionListCalls).toHaveLength(0)
   })
 
   test("preserves existing questions when listPendingQuestions throws", async () => {
@@ -178,10 +190,11 @@ describe("resyncBlockingRequestsForDirectory", () => {
     })
     pendingQuestionsShouldThrow = true
 
-    await resyncBlockingRequestsForDirectory("/repo", store)
+    const result = await resyncBlockingRequestsForDirectory("/repo", store)
 
     expect(store.getState().question["ses_a"]).toHaveLength(1)
     expect(store.getState().question["ses_a"]?.[0]?.id).toBe("que_in_flight")
+    expect(result).toEqual({ questions: false, permissions: true })
   })
 
   test("preserves existing permissions when listPendingPermissions throws", async () => {
@@ -190,10 +203,11 @@ describe("resyncBlockingRequestsForDirectory", () => {
     })
     pendingPermissionsShouldThrow = true
 
-    await resyncBlockingRequestsForDirectory("/repo", store)
+    const result = await resyncBlockingRequestsForDirectory("/repo", store)
 
     expect(store.getState().permission["ses_a"]).toHaveLength(1)
     expect(store.getState().permission["ses_a"]?.[0]?.id).toBe("perm_in_flight")
+    expect(result).toEqual({ questions: true, permissions: false })
   })
 
   test("permission fetch failure does not block question resync", async () => {
@@ -205,6 +219,6 @@ describe("resyncBlockingRequestsForDirectory", () => {
 
     expect(store.getState().question["ses_a"]).toHaveLength(1)
     expect(store.getState().question["ses_a"]?.[0]?.id).toBe("que_1")
-    expect(listPendingPermissionsCalls).toHaveLength(1)
+    expect(scopedPermissionListCalls).toHaveLength(1)
   })
 })

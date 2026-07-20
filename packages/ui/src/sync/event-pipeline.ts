@@ -24,6 +24,10 @@ export type QueuedEvent = {
 
 export type FlushHandler = (events: QueuedEvent[]) => void
 
+export type EventPipelineReconnectMetadata = {
+  replayGap: boolean
+}
+
 const FLUSH_FRAME_MS = 33
 const BACKPRESSURE_FLUSH_FRAME_MS = 200
 const BACKPRESSURE_MODE_MS = 10_000
@@ -43,7 +47,7 @@ export type EventPipelineInput = {
   onEvent: (directory: string, payload: Event, meta?: { serverId?: string }) => void
   routeDirectory?: (directory: string, payload: Event) => string
   /** Called after stream reconnects (visibility restore or heartbeat timeout). */
-  onReconnect?: () => void
+  onReconnect?: (metadata: EventPipelineReconnectMetadata) => void
   /** Called when the stream disconnects (heartbeat timeout, network error, or transport failure). */
   onDisconnect?: (reason: string) => void
   transport?: "auto" | "ws" | "sse"
@@ -58,12 +62,14 @@ export type EventPipeline = {
 }
 
 type MessageStreamWsFrame = {
-  type: "ready" | "event" | "error" | "backpressure"
+  type: "transport-ready" | "ready" | "disconnected" | "event" | "error" | "backpressure"
   payload?: unknown
   eventId?: string
   directory?: string
   serverId?: string
   message?: string
+  reason?: string
+  replayGap?: boolean
   scope?: "global" | "directory"
 }
 
@@ -528,7 +534,7 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
     onDisconnect?.(reason)
   }
 
-  const markConnected = () => {
+  const markConnected = (replayGap = false) => {
     disconnected = false
     consecutiveFailures = 0
     // Fire onReconnect on every successful connect — including the very
@@ -536,7 +542,7 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
     // to be flipped positively; without this the send button throws
     // "Connection lost" until something else (HTTP health check) happens
     // to race a setState({isConnected: true}) through.
-    onReconnect?.()
+    onReconnect?.({ replayGap })
   }
 
   const enqueueEvent = (directory: string, payload: Event, serverId?: string) => {
@@ -711,6 +717,15 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
           return
         }
 
+        if (frame.type === "transport-ready") {
+          if (readyTimer) {
+            clearTimeout(readyTimer)
+            readyTimer = undefined
+          }
+          streamErrorLogged = false
+          return
+        }
+
         if (frame.type === "ready") {
           opened = true
           readyAt = Date.now()
@@ -719,7 +734,12 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
             readyTimer = undefined
           }
           streamErrorLogged = false
-          markConnected()
+          markConnected(frame.replayGap === true)
+          return
+        }
+
+        if (frame.type === "disconnected") {
+          notifyDisconnected(frame.reason || "upstream_disconnected")
           return
         }
 

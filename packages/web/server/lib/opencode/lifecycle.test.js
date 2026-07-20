@@ -2,6 +2,7 @@ import { EventEmitter } from 'node:events';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const spawnMock = vi.fn();
+const spawnSyncMock = vi.fn();
 const finalizeInterruptedOpenCodeRunsMock = vi.fn(() => ({
   dbPath: '/tmp/opencode.db',
   skipped: false,
@@ -13,7 +14,7 @@ const finalizeInterruptedOpenCodeRunsMock = vi.fn(() => ({
 
 vi.mock('node:child_process', () => ({
   spawn: spawnMock,
-  spawnSync: vi.fn(),
+  spawnSync: spawnSyncMock,
 }));
 
 vi.mock('./interrupted-runs.js', () => ({
@@ -30,6 +31,7 @@ const originalFetch = globalThis.fetch;
 afterEach(() => {
   vi.restoreAllMocks();
   spawnMock.mockReset();
+  spawnSyncMock.mockReset();
   finalizeInterruptedOpenCodeRunsMock.mockClear();
   globalThis.fetch = originalFetch;
   if (typeof originalOpenChamberRuntime === 'string') {
@@ -130,6 +132,24 @@ const createRuntime = (overrides = {}) => {
 };
 
 describe('OpenCode lifecycle', () => {
+  it('joins overlapping configuration refreshes into one lifecycle operation', async () => {
+    let rejectApply;
+    const applyOpencodeBinaryFromSettings = vi.fn(() => new Promise((_resolve, reject) => {
+      rejectApply = reject;
+    }));
+    const runtime = createRuntime({ applyOpencodeBinaryFromSettings });
+
+    const first = runtime.refreshOpenCodeAfterConfigChange('first request');
+    const second = runtime.refreshOpenCodeAfterConfigChange('second request');
+    expect(applyOpencodeBinaryFromSettings).toHaveBeenCalledTimes(1);
+
+    rejectApply(new Error('test failure'));
+    const results = await Promise.allSettled([first, second]);
+
+    expect(results.map((result) => result.status)).toEqual(['rejected', 'rejected']);
+    expect(applyOpencodeBinaryFromSettings).toHaveBeenCalledTimes(1);
+  });
+
   it('launches managed OpenCode with the managed PATH', async () => {
     delete process.env.OPENCODE_BINARY;
     const child = createMockChild();
@@ -232,6 +252,62 @@ describe('OpenCode lifecycle', () => {
 
     expect(restoreManagedOpenCodeAuth).toHaveBeenCalled();
     expect(spawnMock).not.toHaveBeenCalled();
+  });
+
+  it('terminates an unhealthy previous managed process group before launching its replacement', async () => {
+    process.env.OPENCHAMBER_RUNTIME = 'desktop';
+    delete process.env.OPENCODE_BINARY;
+    const stalePid = 43210;
+    const ownProcessGroupId = 99999;
+    spawnSyncMock.mockImplementation((command, args) => {
+      if (command === 'lsof') {
+        return { stdout: `${stalePid}\n` };
+      }
+      if (command === 'ps' && args.includes(String(stalePid))) {
+        return { stdout: `${stalePid}\n` };
+      }
+      if (command === 'ps' && args.includes(String(process.pid))) {
+        return { stdout: `${ownProcessGroupId}\n` };
+      }
+      return { stdout: '' };
+    });
+    const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => true);
+    globalThis.fetch = vi.fn(async (url) => {
+      const text = String(url);
+      if (text.includes(':4096/global/health') || text.includes(':56789/global/health')) {
+        return { ok: false, json: async () => ({ healthy: false }) };
+      }
+      return { ok: true, json: async () => ({ healthy: true }) };
+    });
+
+    const child = createMockChild();
+    spawnMock.mockImplementationOnce(() => {
+      queueMicrotask(() => {
+        child.stdout.emit('data', 'opencode server listening on http://127.0.0.1:45678\n');
+      });
+      return child;
+    });
+
+    const runtime = createRuntime({
+      env: {
+        ENV_CONFIGURED_OPENCODE_PORT: null,
+        ENV_CONFIGURED_OPENCODE_HOST: null,
+        ENV_EFFECTIVE_PORT: null,
+        ENV_CONFIGURED_OPENCODE_HOSTNAME: '127.0.0.1',
+        ENV_SKIP_OPENCODE_START: false,
+      },
+      readPersistedOpenCodePort: vi.fn(() => 56789),
+    });
+
+    await runtime.bootstrapOpenCodeAtStartup();
+
+    expect(spawnSyncMock).toHaveBeenCalledWith(
+      'lsof',
+      ['-nP', '-iTCP:56789', '-sTCP:LISTEN', '-t'],
+      expect.objectContaining({ encoding: 'utf8' }),
+    );
+    expect(killSpy).toHaveBeenCalledWith(-stalePid, 'SIGTERM');
+    expect(killSpy.mock.invocationCallOrder[0]).toBeLessThan(spawnMock.mock.invocationCallOrder[0]);
   });
 
   it('requires repeated failures before restarting a reconnected managed port without a child handle', async () => {

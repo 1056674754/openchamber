@@ -1,4 +1,4 @@
-import type { Part } from '@opencode-ai/sdk/v2';
+import type { Message, Part } from '@opencode-ai/sdk/v2';
 
 import { isFullySyntheticMessage } from './synthetic';
 import { isSystemDirectiveMessage } from './system-directive';
@@ -149,4 +149,26 @@ export const hasAuxiliaryUserMessageParts = (parts: Part[] | undefined, messageI
 
 export const hasRealUserMessageParts = (parts: Part[] | undefined, messageInfo?: unknown): boolean => {
     return !hasAuxiliaryUserMessageParts(parts, messageInfo);
+};
+
+export const isRealUserMessage = (message: Message, parts: Part[] | undefined): boolean => {
+    const info = message as Message & { clientRole?: unknown; role?: unknown };
+    const role = typeof info.clientRole === 'string' ? info.clientRole : info.role;
+    return role === 'user'
+        && Array.isArray(parts)
+        && parts.length > 0
+        && hasRealUserMessageParts(parts, message);
+};
+
+export const findLatestRealUserMessage = (
+    messages: readonly Message[],
+    partsByMessage: Readonly<Record<string, Part[] | undefined>>,
+): Message | undefined => {
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+        const message = messages[index];
+        if (isRealUserMessage(message, partsByMessage[message.id])) {
+            return message;
+        }
+    }
+    return undefined;
 };

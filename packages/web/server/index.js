@@ -72,6 +72,7 @@ import { createSessionRuntime } from './lib/opencode/session-runtime.js';
 import { createSessionUnreadStore } from './lib/opencode/session-unread-store.js';
 import { createSessionMarkersStore } from './lib/opencode/session-markers-store.js';
 import { createOpenCodeWatcherRuntime } from './lib/opencode/watcher.js';
+import { createOpenCodeConfigFileWatcherRuntime } from './lib/opencode/config-file-watcher.js';
 import { createScheduledTasksRuntime } from './lib/scheduled-tasks/runtime.js';
 import { createServerStartupRuntime } from './lib/opencode/server-startup-runtime.js';
 import { createTunnelWiringRuntime } from './lib/opencode/tunnel-wiring-runtime.js';
@@ -1104,11 +1105,41 @@ const verifyOpenChamberPluginLoaded = async () => {
   }
   return result;
 };
+let openCodeConfigFileWatcherRuntime = null;
 const refreshOpenCodeAfterConfigChange = async (...args) => {
+  openCodeConfigFileWatcherRuntime?.acknowledgeCurrentConfig();
+  try {
+    const overlayPath = prepareOpenChamberConfig();
+    if (overlayPath) process.env.OPENCODE_CONFIG = overlayPath;
+  } catch (error) {
+    console.warn('[openchamber] config overlay refresh skipped:', error?.message || error);
+  }
   const result = await openCodeLifecycleRuntime.refreshOpenCodeAfterConfigChange(...args);
   await verifyOpenChamberPluginLoaded();
   return result;
 };
+openCodeConfigFileWatcherRuntime = createOpenCodeConfigFileWatcherRuntime({
+  getWorkingDirectory: () => openCodeWorkingDirectory,
+  getActiveSessionCount,
+  isOpenCodeIdle: async () => {
+    if (getActiveSessionCount() > 0 || !openCodePort || !isOpenCodeReady) return false;
+    try {
+      const url = new URL(buildOpenCodeUrl('/session/status'));
+      if (openCodeWorkingDirectory) url.searchParams.set('directory', openCodeWorkingDirectory);
+      const response = await fetch(url, {
+        headers: { Accept: 'application/json', ...getOpenCodeAuthHeaders() },
+      });
+      if (!response.ok) return false;
+      const statuses = await response.json();
+      if (!statuses || typeof statuses !== 'object' || Array.isArray(statuses)) return false;
+      return Object.values(statuses).every((status) => status?.type !== 'busy' && status?.type !== 'retry');
+    } catch {
+      return false;
+    }
+  },
+  isManagedOpenCode: () => !ENV_SKIP_OPENCODE_START && !openCodeLifecycleState.isExternalOpenCode,
+  refreshOpenCodeAfterConfigChange,
+});
 const startHealthMonitoring = () => openCodeLifecycleRuntime.startHealthMonitoring(HEALTH_CHECK_INTERVAL);
 const triggerHealthCheck = () => openCodeLifecycleRuntime.triggerHealthCheck();
 const scheduledTasksRuntime = createScheduledTasksRuntime({
@@ -1166,6 +1197,7 @@ const bootstrapOpenCodeAtStartup = async (...args) => {
     console.warn('[openchamber] config overlay skipped:', error?.message || error);
   }
   await openCodeLifecycleRuntime.bootstrapOpenCodeAtStartup(...args);
+  openCodeConfigFileWatcherRuntime.start();
   scheduleOpenCodeApiDetection();
   if (openCodeLifecycleState.openCodePort && !openCodeLifecycleState.isExternalOpenCode) {
     startHealthMonitoring();
@@ -1196,6 +1228,7 @@ const gracefulShutdownRuntime = createGracefulShutdownRuntime({
   },
   syncToHmrState,
   openCodeWatcherRuntime,
+  openCodeConfigFileWatcherRuntime,
   sessionRuntime,
   getHealthCheckInterval: () => healthCheckInterval,
   clearHealthCheckInterval: (value) => clearInterval(value),

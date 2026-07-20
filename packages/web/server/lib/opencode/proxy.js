@@ -3,6 +3,7 @@ import { createProxyMiddleware } from 'http-proxy-middleware';
 import {
   applyForwardProxyResponseHeaders,
   collectForwardProxyHeaders,
+  preserveDecodedPayloadLengthHeader,
   shouldForwardProxyResponseHeader,
 } from '../../proxy-headers.js';
 import { createRealpathCache } from '../path-realpath-cache.js';
@@ -433,6 +434,7 @@ export const registerOpenCodeProxy = (app, deps) => {
         proxyReq.setHeader('accept-encoding', 'identity');
       },
       proxyRes: (proxyRes) => {
+        preserveDecodedPayloadLengthHeader(proxyRes.headers);
         for (const key of Object.keys(proxyRes.headers || {})) {
           if (!shouldForwardProxyResponseHeader(key)) {
             delete proxyRes.headers[key];

@@ -12,6 +12,7 @@ This module provides OpenCode server integration utilities for the web server ru
 - `packages/web/server/lib/opencode/routes.js`: OpenCode/provider settings and auth-related route registration.
 - `packages/web/server/lib/opencode/opencode-upgrade-runtime.js`: Direct OpenCode CLI upgrade fallback, including install-source detection and captured package-manager diagnostics.
 - `packages/web/server/lib/opencode/lifecycle.js`: OpenCode process lifecycle runtime (startup, restart, readiness, health monitoring).
+- `packages/web/server/lib/opencode/config-file-watcher.js`: debounced OpenCode config-file watcher that validates JSONC and waits for managed sessions to become idle before requesting a lifecycle reload.
 - `packages/web/server/lib/opencode/interrupted-runs.js`: managed OpenCode restart recovery for stale in-flight message/tool rows in the OpenCode SQLite database.
 - `packages/web/server/lib/opencode/sqlite-runtime.js`: shared synchronous SQLite driver selection for Bun, Electron/Node `node:sqlite`, and native `better-sqlite3` fallbacks.
 - `packages/web/server/lib/opencode/env-runtime.js`: OpenCode CLI/binary resolution and shell environment runtime.
@@ -22,6 +23,7 @@ This module provides OpenCode server integration utilities for the web server ru
 - `packages/web/server/lib/opencode/project-directory-runtime.js`: request-scoped and settings-backed project directory resolution/validation runtime.
 - `packages/web/server/lib/opencode/config-entity-routes.js`: route registration for agent/command/MCP config orchestration and reload semantics.
 - `packages/web/server/lib/opencode/plugins.js`: plugin config and plugin-directory data layer. Production calls resolve the active OpenCode config normally; tests and isolated consumers use `createPluginDataLayer({ configDir, customConfigPath })` so config ownership is explicit and cannot leak through process-global environment state.
+- `packages/web/server/lib/opencode/plugin-bootstrap.js` + `plugin-overlay.js`: install the first-party plugin under the `opencode-notifier` ownership basename and append it only to OpenChamber's managed config overlay. OMA recognizes that basename and disables its own OS notification hook for managed OpenCode, leaving Electron/OpenChamber as the single notification sender without changing standalone OpenCode behavior.
 - `packages/web/server/lib/opencode/snippets.js`: opencode-snippets-compatible snippet file CRUD, discovery, and hashtag expansion.
 - `packages/web/server/lib/opencode/cli-options.js`: CLI/environment option parsing for server startup arguments.
 - `packages/web/server/lib/opencode/core-routes.js`: server status/system routes, auth/access guard routes, and settings utility route registration.
@@ -122,6 +124,16 @@ This module provides OpenCode server integration utilities for the web server ru
   - `startHealthMonitoring(healthCheckIntervalMs)`
   - `waitForPortRelease(port, timeoutMs, hostname?)`
   - `killProcessOnPort(port)`
+
+Configuration refreshes are single-flight across manual and automatic callers, so overlapping requests join the same restart/readiness operation.
+The composition root rebuilds the OpenChamber plugin overlay before entering that lifecycle operation, keeping user plugin changes in sync with the managed overlay.
+At desktop startup, a healthy persisted managed port is reused. If that port is still listening but fails health checks, lifecycle termination targets the listener's detached process group and waits for the port to be released before launching a replacement; it will not stack another managed server on top of an unreleased stale instance.
+
+## Public exports (config-file-watcher.js)
+- `createOpenCodeConfigFileWatcherRuntime(dependencies)`: watches user and active-project `opencode.json`, `opencode.jsonc`, and legacy `config.json` files for a managed OpenCode server.
+- Invalid JSONC is ignored without disturbing the running server.
+- Valid changes are debounced and held until the authoritative `/session/status` response and OpenChamber's live activity state both report no busy/retrying sessions, then applied through `refreshOpenCodeAfterConfigChange()`.
+- External or skip-start OpenCode instances are never restarted by the watcher.
 
 ## Public exports (interrupted-runs.js)
 - `finalizeInterruptedOpenCodeRuns(options?)`: scans the OpenCode SQLite database for active tool parts left behind by an interrupted managed OpenCode process and marks the owning assistant message as aborted.
@@ -352,6 +364,7 @@ This module provides OpenCode server integration utilities for the web server ru
   - SSE forwarders: `GET /api/global/event`, `GET /api/event`
   - Session message forwarder: `POST /api/session/:sessionId/message`
   - Generic `/api/*` forwarding with hop-by-hop header filtering
+  - Decoded payload accounting via `x-openchamber-decoded-content-length`; the proxy only derives it from an identity-encoded upstream `content-length`, before browser-facing compression
   - Windows `/session` merge fallback path behavior
   - OpenCode readiness gate for proxied `/api` requests
 

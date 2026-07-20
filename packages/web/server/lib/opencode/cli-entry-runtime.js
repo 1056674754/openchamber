@@ -12,7 +12,8 @@ export const runCliEntryIfMain = (dependencies) => {
 
   const isDesktopRuntime =
     process.env?.OPENCHAMBER_RUNTIME === 'desktop' ||
-    Boolean(process.versions?.electron);
+    Boolean(process.versions?.electron) ||
+    process.type === 'browser';
   if (isDesktopRuntime) {
     return;
   }

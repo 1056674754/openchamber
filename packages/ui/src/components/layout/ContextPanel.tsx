@@ -1638,7 +1638,6 @@ const ContextPanelTabContent: React.FC<{
   active: boolean;
   directory: string;
   effectiveDirectory: string;
-  isFileTabActive: boolean;
   postEmbeddedVisibilityToChats: () => void;
   postThemeSyncToEmbeddedChat: () => void;
   setChatFrameRef: (tabID: string, node: HTMLIFrameElement | null) => void;
@@ -1647,7 +1646,6 @@ const ContextPanelTabContent: React.FC<{
   active,
   directory,
   effectiveDirectory,
-  isFileTabActive,
   postEmbeddedVisibilityToChats,
   postThemeSyncToEmbeddedChat,
   setChatFrameRef,
@@ -1655,7 +1653,7 @@ const ContextPanelTabContent: React.FC<{
   const { t } = useI18n();
 
   if (tab.mode === 'file') {
-    return isFileTabActive ? <FilesView mode="editor-only" /> : null;
+    return <FilesView mode="editor-only" active={active} />;
   }
 
   if (tab.mode === 'chat') {
@@ -2197,7 +2195,6 @@ export const ContextPanel: React.FC = () => {
       active={active}
       directory={directoryKey}
       effectiveDirectory={effectiveDirectory}
-      isFileTabActive={tab.mode === 'file'}
       postEmbeddedVisibilityToChats={postEmbeddedVisibilityToChats}
       postThemeSyncToEmbeddedChat={postThemeSyncToEmbeddedChat}
       setChatFrameRef={setChatFrameRef}
@@ -2350,7 +2347,7 @@ export const ContextPanel: React.FC = () => {
         {hasSplit && activeTab && splitTab ? (
           <div className="absolute inset-0 flex min-h-0 flex-col">
             <div className="relative min-h-0 overflow-hidden" style={{ height: `calc((100% - ${CONTEXT_PANEL_SPLIT_HANDLE_HEIGHT}px) * ${splitRatio})` }}>
-              <div className="absolute inset-0">{renderTabPaneContent(activeTab, true)}</div>
+              <div className="absolute inset-0">{renderTabPaneContent(activeTab, isOpen)}</div>
             </div>
             <div
               className="flex h-[3px] shrink-0 cursor-row-resize items-center justify-end bg-[var(--interactive-border)]/60 transition-colors hover:bg-[var(--interactive-border)]"
@@ -2378,14 +2375,14 @@ export const ContextPanel: React.FC = () => {
               </Button>
             </div>
             <div className="relative min-h-0 flex-1 overflow-hidden">
-              <div className="absolute inset-0">{renderTabPaneContent(splitTab, true)}</div>
+              <div className="absolute inset-0">{renderTabPaneContent(splitTab, isOpen)}</div>
             </div>
           </div>
         ) : (
           <>
             {hasFileTabs ? (
               <div className={cn('absolute inset-0', isFileTabActive ? 'block' : 'hidden')}>
-                <FilesView mode="editor-only" />
+                <FilesView mode="editor-only" active={isOpen && isFileTabActive} />
               </div>
             ) : null}
             {chatTabs.map((tab) => (

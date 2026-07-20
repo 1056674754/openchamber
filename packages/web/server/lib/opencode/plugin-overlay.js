@@ -38,7 +38,8 @@ function isOpenChamberPluginSpec(spec, openChamberPlugin) {
   return spec === OPENCHAMBER_PLUGIN_ID
     || spec === openChamberPlugin
     || spec.includes('/packages/plugin/src/index.ts')
-    || spec.includes('/openchamber/plugin/index.js');
+    || spec.includes('/openchamber/plugin/index.js')
+    || spec.endsWith('/openchamber/opencode-notifier');
 }
 
 export function mergeOpenChamberPluginEntries(existingPlugins, openChamberPlugin) {

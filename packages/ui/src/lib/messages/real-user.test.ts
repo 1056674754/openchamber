@@ -1,14 +1,23 @@
 import { describe, expect, test } from 'bun:test';
-import type { Part } from '@opencode-ai/sdk/v2';
+import type { Message, Part } from '@opencode-ai/sdk/v2';
 
 import {
     extractOpenChamberLiveSteerText,
+    findLatestRealUserMessage,
     getAuxiliaryUserMessageKind,
     hasRealUserMessageParts,
     hasSubtaskPart,
 } from './real-user';
 
 const textPart = (text: string): Part => ({ type: 'text', text } as Part);
+const userMessage = (id: string, agent: string): Message => ({
+    id,
+    sessionID: 'session-1',
+    role: 'user',
+    time: { created: 1 },
+    agent,
+    model: { providerID: 'provider-1', modelID: 'model-1' },
+} as Message);
 
 describe('real user message parts', () => {
     test('accepts ordinary text user parts', () => {
@@ -62,5 +71,19 @@ describe('real user message parts', () => {
 
         expect(getAuxiliaryUserMessageKind(parts)).toBe('synthetic');
         expect(hasRealUserMessageParts(parts)).toBe(false);
+    });
+
+    test('keeps the latest human choice when an OMO continuation injects another user-role message', () => {
+        const humanChoice = userMessage('message-1', 'Hephaestus - Deep Agent');
+        const omoContinuation = userMessage('message-2', 'Atlas - Plan Executor');
+        const partsByMessage = {
+            [humanChoice.id]: [textPart('用中文回答我做的怎么样了?')],
+            [omoContinuation.id]: [{
+                ...textPart('<system-reminder>BOULDER COMPLETE</system-reminder>'),
+                synthetic: true,
+            } as Part],
+        };
+
+        expect(findLatestRealUserMessage([humanChoice, omoContinuation], partsByMessage)?.id).toBe(humanChoice.id);
     });
 });

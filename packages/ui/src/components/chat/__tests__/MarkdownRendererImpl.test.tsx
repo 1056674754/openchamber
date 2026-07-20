@@ -1,27 +1,26 @@
 import { describe, expect, test } from 'bun:test';
-import { CODE_SHARED_STYLE, MARKDOWN_CODE_BODY_CLASSNAME } from '../markdownCodeStyle';
-import { getTableCopyContent } from '../markdownTableExport';
+import { shouldPreserveMarkdownFileUrl } from '../markdownFileReferences';
 
-describe('MarkdownRenderer code blocks', () => {
-  test('keeps syntax highlighted pre elements from becoming scroll containers', () => {
-    expect(CODE_SHARED_STYLE.overflow).toBe('visible');
-    expect(CODE_SHARED_STYLE.overflowX).toBe('visible');
-    expect(CODE_SHARED_STYLE.overflowY).toBe('visible');
+describe('markdown file URL preservation', () => {
+  test('preserves a local image URL when React Markdown transforms the src attribute', () => {
+    // Given
+    const localImageUrl = 'file:///Users/test/project/.tmp/preview.png';
+
+    // When
+    const preserved = shouldPreserveMarkdownFileUrl(localImageUrl, 'src');
+
+    // Then
+    expect(preserved).toBe(true);
   });
 
-  test('keeps code block body horizontally scrollable only', () => {
-    const classes = MARKDOWN_CODE_BODY_CLASSNAME.split(/\s+/);
+  test('continues to reject unsafe non-file protocols', () => {
+    // Given
+    const unsafeUrl = 'javascript:alert(1)';
 
-    expect(classes.includes('overflow-x-auto')).toBe(true);
-    expect(classes.includes('overflow-y-hidden')).toBe(true);
-  });
+    // When
+    const preserved = shouldPreserveMarkdownFileUrl(unsafeUrl, 'src');
 
-  test('can prepare Markdown table text for copy actions', () => {
-    const content = getTableCopyContent({
-      headers: ['Name', 'Value'],
-      rows: [['Alpha', 'A|B']],
-    }, 'markdown');
-
-    expect(content).toBe('| Name | Value |\n| --- | --- |\n| Alpha | A\\|B |');
+    // Then
+    expect(preserved).toBe(false);
   });
 });

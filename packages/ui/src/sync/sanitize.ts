@@ -1,20 +1,139 @@
 // ---------------------------------------------------------------------------
-// Payload sanitization — strip oversized diff snapshot fields client-side.
+// Payload sanitization — bound oversized history fields retained client-side.
 //
 // OpenCode session/message snapshots may carry large full-content diff fields
 // (legacy before/after or from/to). The UI never uses these fields but they
 // waste browser memory and can crash tabs for large sessions.
 //
-// Also caps the number of diff entries and individual patch sizes to prevent
-// OOM from pathological cases (e.g. an agent committing node_modules or
-// .pnpm-store producing 40K+ diff entries / 200MB+ payloads).
+// Also caps diff entries, individual patches, and completed tool payload fields
+// to prevent pathological history records from remaining in browser memory.
 //
 // Applied at two points:
 // 1. Event reducer — session.created/session.updated events
-// 2. Message loading — fetchMessages response
+// 2. Message loading/materialization — session.messages responses
+//
+// This runs after HTTP JSON parsing. The OpenCode server must still enforce its
+// own response byte budget to avoid upstream serialization and transport spikes.
 // ---------------------------------------------------------------------------
 
-import type { Session, Message } from "@opencode-ai/sdk/v2/client"
+import type { Message, Part, Session, ToolPart } from "@opencode-ai/sdk/v2/client"
+
+export const INLINE_PART_PAYLOAD_CHAR_LIMIT = 1_000_000
+export const OPENCHAMBER_TRUNCATION_METADATA_KEY = "__openchamberTruncated"
+
+type SanitizedRecord = {
+  readonly value: Record<string, unknown>
+  readonly truncated: boolean
+}
+
+function exceedsInlinePartBudget(value: unknown): boolean {
+  let remaining = INLINE_PART_PAYLOAD_CHAR_LIMIT
+  const pending: unknown[] = [value]
+  const seen = new WeakSet<object>()
+
+  while (pending.length > 0) {
+    const current = pending.pop()
+    if (current === null || current === undefined) continue
+
+    if (typeof current === "string") {
+      remaining -= current.length + 2
+    } else if (typeof current === "object") {
+      if (seen.has(current)) return true
+      seen.add(current)
+
+      if (Array.isArray(current)) {
+        remaining -= current.length + 1
+        for (let index = current.length - 1; index >= 0; index -= 1) {
+          pending.push(current[index])
+        }
+      } else {
+        remaining -= 2
+        for (const [key, child] of Object.entries(current)) {
+          remaining -= key.length + 4
+          pending.push(child)
+        }
+      }
+    } else {
+      remaining -= 16
+    }
+
+    if (remaining < 0) return true
+  }
+
+  return false
+}
+
+function sanitizeRecord(value: Record<string, unknown>): SanitizedRecord {
+  if (!exceedsInlinePartBudget(value)) {
+    return { value, truncated: false }
+  }
+  return { value: {}, truncated: true }
+}
+
+function sanitizeToolPart(part: ToolPart): ToolPart {
+  const truncatedFields: string[] = []
+  const input = sanitizeRecord(part.state.input)
+  if (input.truncated) truncatedFields.push("state.input")
+
+  let state: ToolPart["state"]
+  switch (part.state.status) {
+    case "pending": {
+      const raw = part.state.raw.length > INLINE_PART_PAYLOAD_CHAR_LIMIT
+        ? part.state.raw.slice(0, INLINE_PART_PAYLOAD_CHAR_LIMIT)
+        : part.state.raw
+      if (raw !== part.state.raw) truncatedFields.push("state.raw")
+      state = { ...part.state, input: input.value, raw }
+      break
+    }
+    case "running": {
+      const metadata = sanitizeRecord(part.state.metadata ?? {})
+      if (metadata.truncated) truncatedFields.push("state.metadata")
+      state = { ...part.state, input: input.value, metadata: metadata.value }
+      break
+    }
+    case "completed": {
+      const output = part.state.output.length > INLINE_PART_PAYLOAD_CHAR_LIMIT
+        ? part.state.output.slice(0, INLINE_PART_PAYLOAD_CHAR_LIMIT)
+        : part.state.output
+      const metadata = sanitizeRecord(part.state.metadata)
+      if (output !== part.state.output) truncatedFields.push("state.output")
+      if (metadata.truncated) truncatedFields.push("state.metadata")
+      state = { ...part.state, input: input.value, output, metadata: metadata.value }
+      break
+    }
+    case "error": {
+      const error = part.state.error.length > INLINE_PART_PAYLOAD_CHAR_LIMIT
+        ? part.state.error.slice(0, INLINE_PART_PAYLOAD_CHAR_LIMIT)
+        : part.state.error
+      const metadata = sanitizeRecord(part.state.metadata ?? {})
+      if (error !== part.state.error) truncatedFields.push("state.error")
+      if (metadata.truncated) truncatedFields.push("state.metadata")
+      state = { ...part.state, input: input.value, error, metadata: metadata.value }
+      break
+    }
+  }
+
+  const partMetadata = sanitizeRecord(part.metadata ?? {})
+  if (partMetadata.truncated) truncatedFields.push("metadata")
+  if (truncatedFields.length === 0) return part
+
+  return {
+    ...part,
+    state,
+    metadata: {
+      ...partMetadata.value,
+      [OPENCHAMBER_TRUNCATION_METADATA_KEY]: {
+        fields: truncatedFields,
+        limit: INLINE_PART_PAYLOAD_CHAR_LIMIT,
+      },
+    },
+  }
+}
+
+export function sanitizePartPayload(part: Part): Part {
+  if (part.type !== "tool") return part
+  return sanitizeToolPart(part)
+}
 
 /** Maximum number of diff entries we keep in memory. */
 const MAX_DIFF_ENTRIES = 500

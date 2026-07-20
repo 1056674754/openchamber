@@ -6,6 +6,7 @@ import { TooltipProvider } from '@/components/ui/tooltip';
 import { Toaster } from '@/components/ui/sonner';
 import { MiniChatLayout } from '@/components/mini-chat/MiniChatLayout';
 import { usePushVisibilityBeacon } from '@/hooks/usePushVisibilityBeacon';
+import { useSessionPresenceBeacon } from '@/hooks/useSessionPresenceBeacon';
 import { useWindowTitle } from '@/hooks/useWindowTitle';
 import { opencodeClient } from '@/lib/opencode/client';
 import { DEFAULT_SERVER_ID, serverRegistry } from '@/lib/opencode/server-registry';
@@ -407,6 +408,7 @@ export function ElectronMiniChatApp({ apis }: ElectronMiniChatAppProps) {
 }
 
 const ElectronMiniChatContent: React.FC<{ config: MiniChatConfig }> = ({ config }) => {
+  useSessionPresenceBeacon();
   const sessionUnavailable = useSessionUnavailable(config);
 
   return (

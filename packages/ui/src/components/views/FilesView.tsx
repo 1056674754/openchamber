@@ -289,9 +289,11 @@ const isFileMissingError = (error: unknown): boolean => {
   const message = error instanceof Error ? error.message : String(error ?? '');
   const normalized = message.toLowerCase();
   return normalized.includes('file not found')
+    || normalized.includes('directory not found')
     || normalized.includes('enoent')
     || normalized.includes('no such file')
-    || normalized.includes('does not exist');
+    || normalized.includes('does not exist')
+    || /\bhttp 404\b/.test(normalized);
 };
 
 const MAX_VIEW_CHARS = 200_000;
@@ -611,9 +613,10 @@ const Dialogs: React.FC<DialogsProps> = ({
 
 interface FilesViewProps {
   mode?: 'full' | 'editor-only';
+  active?: boolean;
 }
 
-export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
+export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = true }) => {
   const { t } = useI18n();
   const { files, runtime } = useRuntimeAPIs();
   const serverBaseUrl = useActiveServerBaseUrl();
@@ -1073,9 +1076,13 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
         loadedDirsRef.current.add(normalizedDir);
         setChildrenByDir((prev) => ({ ...prev, [normalizedDir]: mapped }));
       })
-      .catch(() => {
+      .catch((error) => {
         if (!isCurrentRequest()) {
           return;
+        }
+
+        if (root && isFileMissingError(error)) {
+          removeOpenPathsByPrefix(root, normalizedDir);
         }
 
         setChildrenByDir((prev) => ({
@@ -1093,7 +1100,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
         inFlightDirsRef.current = new Set(inFlightDirsRef.current);
         inFlightDirsRef.current.delete(normalizedDir);
       });
-  }, [files, mapDirectoryEntries, runtime.isDesktop, serverBaseUrl, showGitignored]);
+  }, [files, mapDirectoryEntries, removeOpenPathsByPrefix, root, runtime.isDesktop, serverBaseUrl, showGitignored]);
 
   const refreshRoot = React.useCallback(async () => {
     if (!root) {
@@ -1133,7 +1140,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   const lastFilesViewTreeKeyRef = React.useRef<string>('');
 
   React.useEffect(() => {
-    if (!root) {
+    if (!active || !root) {
       return;
     }
 
@@ -1162,11 +1169,11 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
       setChildrenByDir((prev) => (Object.keys(prev).length === 0 ? prev : {}));
       void loadDirectory(root);
     }
-  }, [loadDirectory, root, showGitignored, showHidden]);
+  }, [active, loadDirectory, root, showGitignored, showHidden]);
 
   // Auto-refresh expanded directories when user returns to the tab
   React.useEffect(() => {
-    if (!files.listDirectory && !serverBaseUrl) return;
+    if (!active || (!files.listDirectory && !serverBaseUrl)) return;
 
     const handleVisibilityChange = () => {
       if (!document.hidden && expandedPaths.length > 0) {
@@ -1178,11 +1185,11 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
 
     document.addEventListener('visibilitychange', handleVisibilityChange);
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
-  }, [expandedPaths, files.listDirectory, refreshDirectory, serverBaseUrl]);
+  }, [active, expandedPaths, files.listDirectory, refreshDirectory, serverBaseUrl]);
 
   // Poll expanded directories for external changes
   React.useEffect(() => {
-    if (!files.listDirectory && !serverBaseUrl) return;
+    if (!active || (!files.listDirectory && !serverBaseUrl)) return;
     if (expandedPaths.length === 0) return;
 
     const interval = setInterval(() => {
@@ -1193,7 +1200,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     }, 8000);
 
     return () => clearInterval(interval);
-  }, [expandedPaths, files.listDirectory, refreshDirectory, serverBaseUrl]);
+  }, [active, expandedPaths, files.listDirectory, refreshDirectory, serverBaseUrl]);
 
   const handleDialogSubmit = React.useCallback(async (e?: React.FormEvent) => {
     e?.preventDefault();

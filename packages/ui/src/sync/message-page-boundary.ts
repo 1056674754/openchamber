@@ -1,27 +1,21 @@
 import type { Message, Part } from "@opencode-ai/sdk/v2/client"
 
-import { hasRealUserMessageParts } from "@/lib/messages/real-user"
+import { isRealUserMessage } from "@/lib/messages/real-user"
 
 const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0)
 
 export const MESSAGE_USER_BOUNDARY_EXTRA_PAGE_LIMIT = 4
 export const MESSAGE_USER_BOUNDARY_RECORD_LIMIT = 600
+export const MESSAGE_USER_BOUNDARY_BYTE_AWARE_EXTRA_PAGE_LIMIT = 32
+export const MESSAGE_USER_BOUNDARY_BYTE_AWARE_RECORD_LIMIT = 5_000
+export const MESSAGE_USER_BOUNDARY_PAYLOAD_BYTE_LIMIT = 8_000_000
 
 export type MessagePage = {
   session: Message[]
   part: Array<{ id: string; part: Part[] }>
   cursor: string | undefined
   complete: boolean
-}
-
-const isUserMessage = (message: Message): boolean => {
-  const info = message as Message & { clientRole?: unknown; role?: unknown }
-  const role = typeof info.clientRole === "string" ? info.clientRole : info.role
-  return role === "user"
-}
-
-export const isRealUserMessage = (message: Message, parts: Part[] | undefined): boolean => {
-  return isUserMessage(message) && hasRealUserMessageParts(parts, message)
+  payloadBytes?: number
 }
 
 export const getPageParts = (page: Pick<MessagePage, "part">, messageID: string): Part[] | undefined => {
@@ -33,32 +27,52 @@ export const hasUserBoundary = (page: Pick<MessagePage, "session" | "part">): bo
   return page.session.some((message) => isRealUserMessage(message, partsByMessageID.get(message.id)))
 }
 
+export const countUserBoundaries = (page: Pick<MessagePage, "session" | "part">): number => {
+  const partsByMessageID = new Map(page.part.map((item) => [item.id, item.part]))
+  return page.session.filter((message) => isRealUserMessage(message, partsByMessageID.get(message.id))).length
+}
+
 export const mergeOlderMessagePage = (page: MessagePage, older: MessagePage): MessagePage => ({
   session: [...older.session, ...page.session].sort((left, right) => cmp(left.id, right.id)),
   part: [...older.part, ...page.part],
   cursor: older.cursor,
   complete: older.complete,
+  payloadBytes: typeof page.payloadBytes === "number" && typeof older.payloadBytes === "number"
+    ? page.payloadBytes + older.payloadBytes
+    : undefined,
 })
 
 export async function fetchMessagePageToUserBoundary(input: {
   page: MessagePage
   fetchOlder: (cursor: string) => Promise<MessagePage>
+  minimumRealUserMessages?: number
   maxExtraPages?: number
   maxRecords?: number
+  maxPayloadBytes?: number
 }): Promise<{ page: MessagePage; extraPages: number; stoppedBeforeBoundary: boolean }> {
   let page = input.page
   const seenCursors = new Set<string>()
   let extraPages = 0
-  const maxExtraPages = input.maxExtraPages ?? MESSAGE_USER_BOUNDARY_EXTRA_PAGE_LIMIT
-  const maxRecords = input.maxRecords ?? MESSAGE_USER_BOUNDARY_RECORD_LIMIT
+  const minimumRealUserMessages = Math.max(1, Math.floor(input.minimumRealUserMessages ?? 1))
+  const maxPayloadBytes = input.maxPayloadBytes ?? MESSAGE_USER_BOUNDARY_PAYLOAD_BYTE_LIMIT
 
-  while (
-    !page.complete
-    && page.cursor
-    && !hasUserBoundary(page)
-    && page.session.length < maxRecords
-    && extraPages < maxExtraPages
-  ) {
+  while (!page.complete && page.cursor && countUserBoundaries(page) < minimumRealUserMessages) {
+    const payloadBytes = page.payloadBytes
+    const hasPayloadBytes = typeof payloadBytes === "number" && Number.isFinite(payloadBytes)
+    const maxExtraPages = input.maxExtraPages ?? (
+      hasPayloadBytes ? MESSAGE_USER_BOUNDARY_BYTE_AWARE_EXTRA_PAGE_LIMIT : MESSAGE_USER_BOUNDARY_EXTRA_PAGE_LIMIT
+    )
+    const maxRecords = input.maxRecords ?? (
+      hasPayloadBytes ? MESSAGE_USER_BOUNDARY_BYTE_AWARE_RECORD_LIMIT : MESSAGE_USER_BOUNDARY_RECORD_LIMIT
+    )
+    if (
+      page.session.length >= maxRecords
+      || extraPages >= maxExtraPages
+      || (typeof payloadBytes === "number" && Number.isFinite(payloadBytes) && payloadBytes >= maxPayloadBytes)
+    ) {
+      break
+    }
+
     if (seenCursors.has(page.cursor)) {
       break
     }
@@ -76,6 +90,6 @@ export async function fetchMessagePageToUserBoundary(input: {
   return {
     page,
     extraPages,
-    stoppedBeforeBoundary: !page.complete && !hasUserBoundary(page),
+    stoppedBeforeBoundary: !page.complete && countUserBoundaries(page) < minimumRealUserMessages,
   }
 }

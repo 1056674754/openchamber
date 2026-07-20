@@ -93,13 +93,14 @@
 - 会话列表不显示对话，显示 "No sessions in this workspace yet."，远程分支大量重复
 - 运行时不稳（`handleHistoryScroll` 滚动检测效果引发测量死循环）
 
-**仍需单独处理**：
-- `handleHistoryScroll` 滚动自动加载历史仍未恢复；桌面端保留明确的 `Load older messages` 操作，避免滚动手势与 prepend 竞态。
+**已单独处理**：
+- 历史加载改为 sentinel + `IntersectionObserver` 提前预取：距离顶部约 3 个视口（最低 2400px）时自动请求；同一历史版本只自动尝试一次，`Load older messages` 保留为失败/无进展时的手动保底。
+- prepend 使用稳定 turn 锚点并在虚拟行测量收敛期间同步恢复；滚轮、触摸、指针或键盘继续滚动会立即取消锚点，避免与用户意图竞争。
 - `MessageList` 已在后续批次对齐 v1.16 的 `@tanstack/react-virtual` 路径；旧 `virtua` 迁移计划作废，详见 v1.16 Chat scroll stability 批次。
 - 注意命令名是 `/explore`，不是 `/explorer`。
 
 **后续建议**：不要再整批套官方 chat diff。按以下顺序恢复剩余功能：
-1. `handleHistoryScroll` 自动触发策略仍待单独评估；手动 Load older 与 prepend 锚点已经稳定。
+1. 历史自动预取、手动保底与 prepend 锚点已经稳定；后续改动必须继续验证同版本防自旋和用户输入取消锚点。
 2. `TurnChangedFilePills` / `changedFiles`，先补类型和 grouping contract，再接 UI。
 3. `MessageList` v1.16 虚拟化与桌面滚动稳定已完成；移动端 momentum 仍需独立验证。
 
@@ -130,7 +131,7 @@
 | **魔法命令** | ✅ 已落地：`/explore`、`/catch-up`、`/debug`、`/weigh`、`/plan-feature`、`/workspace-review` 均会展开为可见 prompt + hidden instructions，而不是裸发 slash command | 🟢 已完成 |
 | **消息改动文件标记** | ✅ 已落地：实现为 `TurnChangedFilesDropdown`（下拉而非 pills），`changedFiles` 由 `activityParts` 经 `extractGitChangedFiles` 派生（非独立类型字段），已在 `MessageBody.tsx:2149` 渲染 | 🟢 已完成 |
 | **时间格式偏好** | ✅ 已落地：新增 `packages/ui/src/lib/timeFormat.ts`，chat 消息 footer 与 Tunnel session 时间已接入 12/24 小时偏好 | 🟢 已完成 |
-| **滚动加载历史** | ✅ 手动 `Load older messages` 已对齐官方 server pagination、虚拟化与 prepend 锚点；仅“接近顶部自动触发”仍待评估 | 🟡 部分完成 |
+| **滚动加载历史** | ✅ 距顶部约 3 个视口自动预取，手动 `Load older messages` 作为保底；server pagination、虚拟化与 prepend 锚点均已验证 | 🟢 已完成 |
 
 ### 移动端（延后）
 
@@ -959,9 +960,10 @@ Phase 5 — 🔴 Markdown/Shiki 重写 (#1+#2): 独立 milestone，需迁移 for
 - 历史列表改为官方 v1.16 的单一尺寸容器：外层高度只使用 virtualizer `totalSize`，当前窗口只使用顶部偏移，不再把剩余估算高度重复渲染成尾部 padding。
 - 移除历史容器 ResizeObserver、entry 变化和内容变化触发的全局 `virtualizer.measure()`；该 API 会清空全部行高缓存，使大量 42px 的折叠 OMO 行反复退回 320px 估算并制造数千像素空白。现在只由每行 `measureElement` 更新尺寸，并使用已测行高的自适应平均值估算未测行。
 - virtualizer 的 `scrollToFn` 会先同步暴露新的 `totalSize` 再写滚动位置，避免浏览器按旧高度截断锚点修正；虚拟行尺寸变化只补偿当前首个可见行上方的变化。
-- 自动接近顶部触发 `handleHistoryScroll` 仍保持关闭；当前桌面策略是显式 Load older，避免请求、虚拟测量和用户滚轮并发。
+- 自动历史预取使用顶部 sentinel + `IntersectionObserver`，在约 3 个视口（最低 2400px）内触发；请求 pending、loading 和 history version 三重门控防止重入/自旋，无 observer 环境退回被动 scroll listener。显式 Load older 仍作为失败或无进展时的保底。
 - 精确回归会话 `ses_0b5e6259bffd7VmOXn1RtsMN7S`：修复前在最后已渲染行后仍有 1480–1660px 尾部 padding，且全局重测使历史总高度保持约 18k；修复后首屏历史高度收敛到 7680px，物理底部 `scrollTop === max === 6888`，最后历史行位于 834px、最新用户消息位于 914–969px（视口 1009px）。
 - 同一会话 Playwright 验证：向上/向下各滚动 700px 后等待 1.5s 漂移均为 0；OMO 折叠展开后高度 8222 -> 11044 -> 8222，收起后漂移 0；`Load older` 后 `scrollTop 0 -> 1982` 且 1.2s 内漂移 0，再滚到底后最后历史行与最新消息仍完整落在视口内，无大块空白。
+- 最大真实会话 `ses_18d725d60ffew6mw40mAFhIZMs` 自动预取验证（2026-07-19）：1280×900 下 `scrollTop=2400`、保底按钮仍在视口上方 2388px 时触发；450 条扩展到 900 条后稳定 turn 锚点从 `top=433.890625` 恢复到 `433.46875`，漂移 0.42px。375/768/1280 三档视口均无横向溢出。
 
 ### 中等难度 / 需要逐段适配
 
@@ -978,13 +980,13 @@ Phase 5 — 🔴 Markdown/Shiki 重写 (#1+#2): 独立 milestone，需迁移 for
 | Desktop remote custom headers / SSH saved password unlock | `packages/electron`、`remote-instances`、`ssh-manager`、remote proxy/SSE relay | 本 fork remote instance proxy 是深改区域；header forwarding 必须贯穿 HTTP + WebSocket + SSE，不能只改设置页 |
 | Voice input / local STT / Kokoro read-aloud refresh | `VoiceSettings.tsx`、`useBrowserVoice.ts`、`lib/voice/*`、`web/server/lib/tts/*` | 本地已有旧实现，官方 v1.14.0 是 UX + runtime 重构；应先抽取 local model picker/STT/TTS capability，不直接套 mobile composer 改动 |
 | Small Model utility consumers | `web/server/lib/small-model`（新）、config/settings、session assist metadata、Git/GitHub generation、TTS/Notes | 高价值但必须按 session directory/provider/model 权限约束；后台任务禁止无 session 的全局 provider 扫描 |
-| Unified list virtualization / chat history loading | `MessageList.tsx`、desktop history、scroll preservation | ✅ desktop 已对齐统一 `@tanstack/react-virtual`、server-only pagination 和 scroll invariants；mobile momentum/explicit history button 仍需平台验证 |
+| Unified list virtualization / chat history loading | `MessageList.tsx`、desktop history、scroll preservation | ✅ desktop 已对齐统一 `@tanstack/react-virtual`、server-only pagination、提前预取和 scroll invariants；375px 响应式视口已验证，原生 mobile momentum 仍需平台验证 |
 
 ### 高风险 / 不建议作为第一批
 
 | Milestone | 原因 | 处理方式 |
 |---|---|---|
-| Chat scroll 全链路稳定 (v1.13.3~7) | ✅ desktop 长会话、Load older、process folding 和空闲 auto-follow 已完成；mobile momentum 与自动接近顶部加载尚未验证 | 保留为平台收尾 milestone，不再重复改 desktop scroll writer |
+| Chat scroll 全链路稳定 (v1.13.3~7) | ✅ desktop 长会话、自动历史预取、Load older 保底、process folding 和空闲 auto-follow 已完成；仅原生 mobile momentum 仍待平台验证 | 保留为平台收尾 milestone，不再重复改 desktop scroll writer |
 | Markdown/Shiki worker rewrite 相关后续 fixes | 本地没有上游 `chat/markdown/` 目录，`MarkdownRendererImpl.tsx` 仍承载 agent/skill links、文件路径点击、table copy 等 fork 功能 | 暂不混入 v1.13.3~8；若做，必须先迁移 fork 自定义渲染能力 |
 | OpenCode never auto-attach / orphan cleanup / process killer port ownership | 本 fork Electron 在同进程启动 web server，并有自定义 managed OpenCode keep-alive / detach / quit 语义 | 先读 `opencode` 模块 docs + Electron lifecycle，做 runtime-truth 验证；不能照搬上游 kill/attach 判断 |
 | v1.13.4 dead-code cleanup / knip sweep | compare 删除大量 UI/shared 文件；fork 仍有远程实例、session markers、custom UI 依赖 | 暂缓。cleanup 不应和功能合并混在一起 |

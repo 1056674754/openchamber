@@ -1,8 +1,13 @@
 import React from 'react';
 
+import { isProcessFoldTransitionActive } from '@/components/chat/lib/scroll/processFoldViewport';
+
 import { MessageFreshnessDetector } from '@/lib/messageFreshness';
 import { createScrollSpy } from '@/components/chat/lib/scroll/scrollSpy';
-import { normalizeWheelDelta } from '@/components/chat/lib/scroll/scrollIntent';
+import {
+    normalizeWheelDelta,
+    shouldPauseAutoScrollOnWheel,
+} from '@/components/chat/lib/scroll/scrollIntent';
 import { useViewportStore, type SessionMemoryState } from '@/sync/viewport-store';
 import { CHAT_BOTTOM_ZONE_DESKTOP_PX, CHAT_BOTTOM_ZONE_MOBILE_PX } from '@/components/chat/lib/scroll/bottomSpacing';
 
@@ -48,10 +53,9 @@ const SAVE_DEBOUNCE_MS = 150;
 const LERP = 0.18;
 const SETTLE_EPSILON = 0.5;
 const SETTLE_FRAMES = 4;
-const TOUCH_FINGER_DOWN_THRESHOLD = 2;
+const TOUCH_RELEASE_THRESHOLD_PX = 2;
 const REPIN_GRACE_AFTER_RELEASE_MS = 1200;
 const WHEEL_RELEASE_THRESHOLD_PX = 2;
-const PROCESS_FOLD_TRANSITION_CLASS = 'openchamber-process-fold-transition';
 
 // Keep this aligned with the small visual gutter rendered below the live
 // assistant status row, so "near bottom" matches what the user sees.
@@ -67,11 +71,6 @@ const isNearBottom = (el: HTMLElement, isMobile: boolean): boolean => {
     return distanceFromBottom(el) <= computeBottomZoneThreshold(isMobile);
 };
 
-const isProcessFoldViewTransitionActive = (): boolean => (
-    typeof document !== 'undefined'
-    && document.documentElement.classList.contains(PROCESS_FOLD_TRANSITION_CLASS)
-);
-
 const isReleaseKey = (event: KeyboardEvent): boolean => {
     if (event.altKey || event.ctrlKey || event.metaKey) {
         return false;
@@ -84,19 +83,6 @@ const isReleaseKey = (event: KeyboardEvent): boolean => {
         default:
             return false;
     }
-};
-
-const nestedScrollableTarget = (root: HTMLElement, target: EventTarget | null): HTMLElement | null => {
-    if (!(target instanceof Element)) return null;
-    const nested = target.closest('[data-scrollable]');
-    if (!nested || nested === root || !(nested instanceof HTMLElement)) return null;
-    return nested;
-};
-
-const nestedScrollableCanConsumeUp = (root: HTMLElement, target: EventTarget | null): boolean => {
-    const nested = nestedScrollableTarget(root, target);
-    if (!nested) return false;
-    return nested.scrollTop > 0;
 };
 
 const isAtBottomSnapshot = (snapshot: NonNullable<SessionMemoryState['scrollPosition']>, isMobile: boolean): boolean => {
@@ -193,7 +179,7 @@ export const useChatAutoFollow = ({
             stopFollowLoop();
             return;
         }
-        if (isProcessFoldViewTransitionActive()) {
+        if (isProcessFoldTransitionActive()) {
             stopFollowLoop();
             return;
         }
@@ -254,7 +240,7 @@ export const useChatAutoFollow = ({
         if (!container || stateRef.current !== 'following') {
             return;
         }
-        if (isProcessFoldViewTransitionActive()) {
+        if (isProcessFoldTransitionActive()) {
             return;
         }
 
@@ -397,7 +383,7 @@ export const useChatAutoFollow = ({
     }, [currentSessionId, flushSave, markProgrammaticWrite, stopFollowLoop]);
 
     React.useEffect(() => {
-        if (sessionIsWorking && stateRef.current === 'following' && !isProcessFoldViewTransitionActive()) {
+        if (sessionIsWorking && stateRef.current === 'following' && !isProcessFoldTransitionActive()) {
             stickToBottomIfFollowing();
         }
     }, [sessionIsWorking, stickToBottomIfFollowing]);
@@ -478,8 +464,8 @@ export const useChatAutoFollow = ({
                 deltaMode: event.deltaMode,
                 rootHeight: container.clientHeight,
             });
-            if (delta >= -WHEEL_RELEASE_THRESHOLD_PX) return;
-            if (nestedScrollableCanConsumeUp(container, event.target)) return;
+            if (Math.abs(delta) < WHEEL_RELEASE_THRESHOLD_PX) return;
+            if (!shouldPauseAutoScrollOnWheel({ root: container, target: event.target, delta })) return;
             releaseFromUserIntent();
         };
 
@@ -497,9 +483,9 @@ export const useChatAutoFollow = ({
             const previousY = touchLastY;
             touchLastY = touch.clientY;
             if (previousY === null) return;
-            const fingerDelta = touch.clientY - previousY;
-            if (fingerDelta <= TOUCH_FINGER_DOWN_THRESHOLD) return;
-            if (nestedScrollableCanConsumeUp(container, event.target)) return;
+            const scrollDelta = previousY - touch.clientY;
+            if (Math.abs(scrollDelta) <= TOUCH_RELEASE_THRESHOLD_PX) return;
+            if (!shouldPauseAutoScrollOnWheel({ root: container, target: event.target, delta: scrollDelta })) return;
             releaseFromUserIntent();
         };
         const handleTouchEnd = () => {
@@ -552,7 +538,7 @@ export const useChatAutoFollow = ({
             if (
                 sessionIsWorkingRef.current
                 && stateRef.current === 'following'
-                && !isProcessFoldViewTransitionActive()
+                && !isProcessFoldTransitionActive()
             ) {
                 stickToBottomIfFollowing();
             }
@@ -575,7 +561,7 @@ export const useChatAutoFollow = ({
         if (
             sessionIsWorkingRef.current
             && stateRef.current === 'following'
-            && !isProcessFoldViewTransitionActive()
+            && !isProcessFoldTransitionActive()
         ) {
             stickToBottomIfFollowing();
         }
@@ -591,7 +577,7 @@ export const useChatAutoFollow = ({
             if (
                 sessionIsWorkingRef.current
                 && stateRef.current === 'following'
-                && !isProcessFoldViewTransitionActive()
+                && !isProcessFoldTransitionActive()
             ) {
                 stickToBottomIfFollowing();
             }

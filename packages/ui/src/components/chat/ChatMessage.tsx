@@ -23,7 +23,7 @@ import MessageBody from './message/MessageBody';
 import type { AgentMentionInfo } from './message/types';
 import type { StreamPhase, ToolPopupContent } from './message/types';
 import { deriveMessageRole } from './message/messageRole';
-import { filterVisibleParts, normalizeParts } from './message/partUtils';
+import { extractTextContent, filterVisibleParts, normalizeParts } from './message/partUtils';
 import { normalizeUserDisplayParts } from './message/normalizeUserDisplayParts';
 import { flattenAssistantTextParts } from '@/lib/messages/messageText';
 import {
@@ -49,6 +49,7 @@ import { areOptionalRenderRelevantMessagesEqual, areRenderRelevantMessagesEqual,
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { toast } from '@/components/ui';
 import { useI18n } from '@/lib/i18n';
+import { shouldHideAssistantMessageShell } from './messageVisibility';
 
 const ToolOutputDialog = lazyWithChunkRecovery(() => import('./message/ToolOutputDialog'));
 
@@ -1170,7 +1171,18 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
         };
     }, [allowAnimation, isUser, resolvedAnimationHandlers, shouldReserveAnimationSpace]);
 
-    if (shouldHideUserMessage) {
+    const hasRenderableAssistantContent = visibleParts.some((part) => {
+        if (part.type === 'tool') return true;
+        if (part.type !== 'text' && part.type !== 'reasoning') return false;
+        return extractTextContent(part).trim().length > 0;
+    });
+    const shouldHideAssistantShell = !isUser && shouldHideAssistantMessageShell({
+        hasRenderableContent: hasRenderableAssistantContent,
+        hasError: Boolean(assistantErrorText),
+        isDirectiveBanner: rendersAsDirectiveBanner,
+    });
+
+    if (shouldHideUserMessage || shouldHideAssistantShell) {
         return null;
     }
 

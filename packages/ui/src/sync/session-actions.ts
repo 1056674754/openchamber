@@ -17,6 +17,7 @@ import { getSyncStoresForServer, getAllSyncStores } from "./multi-server-registr
 import { materializeSessionSnapshots } from "./materialization"
 import { persistSteerSideChannelMessage } from "./steer-side-channel"
 import { stripMessageDiffSnapshots } from "./sanitize"
+import { formatSdkError } from "./sdk-error"
 import { sessionEvents } from "@/lib/sessionEvents"
 import { hasTerminalMessageSignal, type TerminalMessageSignalInfo } from "@/lib/messageCompletion"
 import {
@@ -226,9 +227,7 @@ function unwrapSdkData<T>(
   if (result.error) {
     const status = result.response?.status
     const rawError = result.error
-    const message = typeof rawError === "object" && rawError !== null && "message" in rawError
-      ? String((rawError as { message?: unknown }).message)
-      : String(rawError)
+    const message = formatSdkError(rawError)
     const error = new Error(`${name} failed${status ? ` (${status})` : ""}: ${message}`)
     if (status !== undefined) {
       ;(error as Error & { status?: number }).status = status
@@ -576,7 +575,6 @@ export async function createSession(
   options?: { select?: boolean },
   metadata?: Record<string, unknown>,
 ): Promise<Session | null> {
-  try {
     if (!directoryOverride) {
       console.error("[session-actions] createSession: directoryOverride is required (no global-directory fallback)")
       return null
@@ -605,8 +603,7 @@ export async function createSession(
       parentID: parentID ?? undefined,
       ...(metadata ? { metadata } : {}),
     })
-    const session = result.data
-    if (!session) return null
+    const session = unwrapSdkData(result, "session.create")
 
       const sessionDirectory = (session as { directory?: string }).directory ?? directoryOverride ?? null
       if (sessionDirectory) {
@@ -638,10 +635,6 @@ export async function createSession(
       useSessionUIStore.getState().markSessionAsOpenChamberCreated(session.id)
       useGlobalSessionsStore.getState().upsertSession(session)
       return session
-  } catch (error) {
-    console.error("[session-actions] createSession failed", error)
-    return null
-  }
 }
 
 /** Optimistically remove a session from the child store list. Returns previous list for rollback. */

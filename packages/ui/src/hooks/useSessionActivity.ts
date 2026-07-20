@@ -17,12 +17,35 @@ export interface SessionActivityResult {
   isCooldown: boolean;
 }
 
+type ActivityMessage = TerminalMessageSignalInfo & {
+  readonly role?: string
+}
+
+export type SessionActivitySnapshotInput = {
+  readonly sessionId: string | null | undefined
+  readonly status?: { readonly type: SessionActivityPhase }
+  readonly messages: readonly ActivityMessage[]
+  readonly permissions: readonly unknown[]
+  readonly lastActivityAt?: number
+  readonly now: number
+}
+
+export type SessionActivitySnapshot = {
+  readonly result: SessionActivityResult
+  readonly expiresAt: number | null
+}
+
 const IDLE_RESULT: SessionActivityResult = {
   phase: 'idle',
   isWorking: false,
   isBusy: false,
   isCooldown: false,
 };
+
+const IDLE_SNAPSHOT: SessionActivitySnapshot = {
+  result: IDLE_RESULT,
+  expiresAt: null,
+}
 
 /**
  * How recent a `message.part.*` event must be for the UI to override a
@@ -62,84 +85,88 @@ const IDLE_GRACE_PERIOD_MS = 3_000;
  *        → still working (race protection).
  *     b. Grace period expired → idle (server is authoritative).
  *  4. **No server status received** (no `session.status` event yet):
- *     a. Trailing assistant without `time.completed` → working.
- *     b. Recent `message.part.*` activity (within STREAM_DESYNC_WINDOW_MS)
- *        → working.
- *     c. Otherwise → idle.
+ *     a. Recent `message.part.*` activity (within STREAM_DESYNC_WINDOW_MS),
+ *        without a terminal trailing assistant signal → working.
+ *     b. Otherwise → idle. An incomplete historical assistant message alone
+ *        never keeps the session busy indefinitely.
  */
-export function useSessionActivity(sessionId: string | null | undefined, directory?: string): SessionActivityResult {
-  const status = useSessionStatus(sessionId ?? '', directory);
-  const messages = useSessionMessages(sessionId ?? '', directory);
-  const permissions = useSessionPermissions(sessionId ?? '', directory);
-  const lastActivityAt = useSessionActivityTimestamp(sessionId ?? '', directory);
+export function getSessionActivitySnapshot(input: SessionActivitySnapshotInput): SessionActivitySnapshot {
+  if (!input.sessionId || input.permissions.length > 0) return IDLE_SNAPSHOT
 
-  return React.useMemo<SessionActivityResult>(() => {
-    if (!sessionId) return IDLE_RESULT;
+  const phase = input.status?.type ?? 'idle'
+  const lastMessage = input.messages[input.messages.length - 1]
+  const hasTerminalTrailingAssistant = Boolean(
+    lastMessage
+    && lastMessage.role === 'assistant'
+    && hasTerminalMessageSignal(lastMessage),
+  )
+  const hasPendingAssistant = Boolean(
+    lastMessage
+    && lastMessage.role === 'assistant'
+    && !hasTerminalMessageSignal(lastMessage),
+  )
 
-    if (permissions.length > 0) return IDLE_RESULT;
-
-    const phase: SessionActivityPhase = (status?.type ?? 'idle') as SessionActivityPhase;
-
-    const lastMessage = messages[messages.length - 1];
-    const hasTerminalTrailingAssistant = Boolean(
-      lastMessage
-      && lastMessage.role === 'assistant'
-      && hasTerminalMessageSignal(lastMessage as TerminalMessageSignalInfo),
-    );
-    const hasPendingAssistant = Boolean(
-      lastMessage
-      && lastMessage.role === 'assistant'
-      && !hasTerminalMessageSignal(lastMessage as TerminalMessageSignalInfo),
-    );
-
-    const hasAuthoritativeStatus = status !== undefined;
-    const statusWorking = hasAuthoritativeStatus && phase !== 'idle';
-
-    // Server says busy/retry → working, no questions asked.
-    if (statusWorking) {
-      return {
+  if (input.status && phase !== 'idle') {
+    return {
+      result: {
         phase,
         isWorking: true,
         isBusy: phase === 'busy',
         isCooldown: false,
-      };
+      },
+      expiresAt: null,
     }
+  }
 
-    // --- Server says idle (or we have an explicit status that is idle) ---
-
-    if (hasAuthoritativeStatus) {
-      // Server explicitly reported idle. Only keep "working" if we're in the
-      // grace period AND the trailing assistant message hasn't been marked
-      // complete yet (race: session.idle arrived before message.updated).
-      if (hasPendingAssistant && lastActivityAt && Date.now() - lastActivityAt < IDLE_GRACE_PERIOD_MS) {
-        return {
-          phase: 'busy',
-          isWorking: true,
-          isBusy: true,
-          isCooldown: false,
-        };
+  if (input.status) {
+    const expiresAt = hasPendingAssistant && typeof input.lastActivityAt === 'number'
+      ? input.lastActivityAt + IDLE_GRACE_PERIOD_MS
+      : null
+    if (expiresAt !== null && input.now < expiresAt) {
+      return {
+        result: { phase: 'busy', isWorking: true, isBusy: true, isCooldown: false },
+        expiresAt,
       }
-      // Grace period expired or message already completed → server wins.
-      return IDLE_RESULT;
     }
+    return IDLE_SNAPSHOT
+  }
 
-    // --- No authoritative status received (no session.status event yet) ---
+  const expiresAt = typeof input.lastActivityAt === 'number'
+    ? input.lastActivityAt + STREAM_DESYNC_WINDOW_MS
+    : null
+  const hasRecentStreamActivity = expiresAt !== null && input.now < expiresAt
+  if (!hasRecentStreamActivity || hasTerminalTrailingAssistant) return IDLE_SNAPSHOT
 
-    const hasRecentStreamActivity = Boolean(
-      lastActivityAt && Date.now() - lastActivityAt < STREAM_DESYNC_WINDOW_MS,
-    );
+  return {
+    result: { phase: 'busy', isWorking: true, isBusy: true, isCooldown: false },
+    expiresAt,
+  }
+}
 
-    if (!hasPendingAssistant && (!hasRecentStreamActivity || hasTerminalTrailingAssistant)) {
-      return IDLE_RESULT;
-    }
+export function useSessionActivity(sessionId: string | null | undefined, directory?: string): SessionActivityResult {
+  const status = useSessionStatus(sessionId ?? '', directory)
+  const messages = useSessionMessages(sessionId ?? '', directory)
+  const permissions = useSessionPermissions(sessionId ?? '', directory)
+  const lastActivityAt = useSessionActivityTimestamp(sessionId ?? '', directory)
+  const [, refreshAfterExpiry] = React.useReducer((version: number) => version + 1, 0)
 
-    return {
-      phase: 'busy',
-      isWorking: true,
-      isBusy: true,
-      isCooldown: false,
-    };
-  }, [sessionId, status, messages, permissions, lastActivityAt]);
+  const snapshot = getSessionActivitySnapshot({
+    sessionId,
+    status,
+    messages,
+    permissions,
+    lastActivityAt,
+    now: Date.now(),
+  })
+
+  React.useEffect(() => {
+    if (snapshot.expiresAt === null) return
+    const delay = Math.max(0, snapshot.expiresAt - Date.now())
+    const timer = window.setTimeout(refreshAfterExpiry, delay)
+    return () => window.clearTimeout(timer)
+  }, [snapshot.expiresAt])
+
+  return snapshot.result
 }
 
 export function useCurrentSessionActivity(): SessionActivityResult {

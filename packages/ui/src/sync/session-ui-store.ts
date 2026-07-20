@@ -66,6 +66,7 @@ import { useSessionWorktreeStore } from "./session-worktree-store"
 import { getAttachedSessionDirectory } from "./session-worktree-contract"
 import { savePendingMessage, deletePendingMessage } from "./pending-message"
 import { resolveSlashRouteTarget } from "./slash-routing"
+import { findLatestRealUserMessage, isRealUserMessage } from "@/lib/messages/real-user"
 import {
   applyDraftPermissionIntentAfterSessionCreation,
   createDraftPermissionIntent,
@@ -676,7 +677,11 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       if (resolvedDir) {
         setActiveSession(resolvedDir, id)
         try { getSyncChildStores().pin(resolvedDir) } catch { /* not initialized */ }
+      } else {
+        setActiveSession("", "")
       }
+    } else {
+      setActiveSession("", "")
     }
   },
 
@@ -1214,14 +1219,22 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       }
 
       let created: Session | null = null
+      let createError: unknown = null
       for (let attempt = 0; attempt < 3; attempt++) {
-        created = await get().createSession(draft.title, draftDirectoryOverride, draft.parentID ?? null, targetServerId, {
-          select: !isCapturedDraftSend,
-        })
+        try {
+          created = await get().createSession(draft.title, draftDirectoryOverride, draft.parentID ?? null, targetServerId, {
+            select: !isCapturedDraftSend,
+          })
+        } catch (error) {
+          createError = error
+        }
         if (created?.id) break
         if (attempt < 2) await new Promise((r) => setTimeout(r, 500 * (attempt + 1)))
       }
-      if (!created?.id) throw new Error("Failed to create session")
+      if (!created?.id) {
+        if (createError !== null) throw createError
+        throw new Error("Failed to create session")
+      }
 
       if (!isTempDraft) {
         persistDraftTarget({
@@ -1420,7 +1433,6 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     const draft = get().newSessionDraft
     const targetFolderId = draft.targetFolderId
 
-    try {
       if (!directoryOverride) {
         console.error("[session-ui-store] createSession: directoryOverride is required (no global-directory fallback)")
         return null
@@ -1457,10 +1469,6 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       }
 
       return session
-    } catch (e) {
-      console.error("[session-ui-store] createSession failed", e)
-      return null
-    }
   },
 
   // ---------------------------------------------------------------------------
@@ -1520,11 +1528,14 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
   // handleSlashUndo — reads from sync
   // ---------------------------------------------------------------------------
   handleSlashUndo: async (sessionId) => {
-    const messages = getSyncMessages(sessionId)
-    const sessions = getSyncSessions()
+    const directory = get().getDirectoryForSession(sessionId) ?? undefined
+    const messages = getSyncMessages(sessionId, directory)
+    const sessions = getSyncSessions(directory)
     const currentSession = sessions.find((s) => s.id === sessionId)
 
-    const userMessages = messages.filter((m) => m.role === "user")
+    const userMessages = messages.filter((message) => (
+      isRealUserMessage(message, getSyncParts(message.id, directory))
+    ))
     if (userMessages.length === 0) return
 
     const revertToId = currentSession?.revert?.messageID
@@ -1537,7 +1548,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
 
     if (!targetMessage) return
 
-    const targetParts = getSyncParts(targetMessage.id)
+    const targetParts = getSyncParts(targetMessage.id, directory)
     const textPart = targetParts.find((p: Part) => p.type === "text") as TextPart | undefined
     const preview = textPart?.text
       ? String(textPart.text).slice(0, 50) + (textPart.text.length > 50 ? "..." : "")
@@ -1565,14 +1576,17 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       return
     }
 
-    const sessions = getSyncSessions()
+    const directory = get().getDirectoryForSession(sessionId) ?? undefined
+    const sessions = getSyncSessions(directory)
     const currentSession = sessions.find((s) => s.id === sessionId)
     const revertToId = currentSession?.revert?.messageID
     if (!revertToId) return
 
     await refetchSessionMessages(sessionId)
-    const messages = getSyncMessages(sessionId)
-    const userMessages = messages.filter((m) => m.role === "user")
+    const messages = getSyncMessages(sessionId, directory)
+    const userMessages = messages.filter((message) => (
+      isRealUserMessage(message, getSyncParts(message.id, directory))
+    ))
     const targetMessage = userMessages.find((m) => m.id > revertToId)
 
     if (targetMessage) {
@@ -1793,34 +1807,32 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
 
   getLastUserChoice: (sessionId) => {
     const directory = get().getDirectoryForSession(sessionId) ?? undefined
-    const messages = getSyncMessages(sessionId, directory)
-    for (let i = messages.length - 1; i >= 0; i -= 1) {
-      const message = messages[i] as Message & {
+    const directoryState = getDirectoryState(directory)
+    const message = findLatestRealUserMessage(
+      directoryState?.message[sessionId] ?? [],
+      directoryState?.part ?? {},
+    ) as (Message & {
         model?: { providerID?: string; modelID?: string; variant?: string }
         variant?: string
         mode?: string
-      }
-      if (message.role !== "user") {
-        continue
-      }
+      }) | undefined
+    if (!message) return null
 
-      const providerID = typeof message.model?.providerID === "string" && message.model.providerID.trim().length > 0
-        ? message.model.providerID
-        : undefined
-      const modelID = typeof message.model?.modelID === "string" && message.model.modelID.trim().length > 0
-        ? message.model.modelID
-        : undefined
-      const agent = typeof message.agent === "string" && message.agent.trim().length > 0
-        ? message.agent
-        : (typeof message.mode === "string" && message.mode.trim().length > 0 ? message.mode : undefined)
-      const variantCandidate = message.model?.variant ?? message.variant
-      const variant = typeof variantCandidate === "string" && variantCandidate.trim().length > 0
-        ? variantCandidate
-        : undefined
+    const providerID = typeof message.model?.providerID === "string" && message.model.providerID.trim().length > 0
+      ? message.model.providerID
+      : undefined
+    const modelID = typeof message.model?.modelID === "string" && message.model.modelID.trim().length > 0
+      ? message.model.modelID
+      : undefined
+    const agent = typeof message.agent === "string" && message.agent.trim().length > 0
+      ? message.agent
+      : (typeof message.mode === "string" && message.mode.trim().length > 0 ? message.mode : undefined)
+    const variantCandidate = message.model?.variant ?? message.variant
+    const variant = typeof variantCandidate === "string" && variantCandidate.trim().length > 0
+      ? variantCandidate
+      : undefined
 
-      return { agent, providerID, modelID, variant }
-    }
-    return null
+    return { agent, providerID, modelID, variant }
   },
 
   getCurrentAgent: (sessionId) => {

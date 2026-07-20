@@ -20,6 +20,10 @@ export type MarkdownImageReference = {
   rawUrl: string;
 };
 
+export const shouldPreserveMarkdownFileUrl = (url: string, key: string): boolean => (
+  (key === 'href' || key === 'src') && url.trim().toLowerCase().startsWith('file://')
+);
+
 // Matches `path[:line[:col]]` inside shell/grep-style output. Requires a file
 // extension so plain words don't qualify; the path itself must contain at least
 // one extension-bearing segment. Whole-line path detection below handles paths

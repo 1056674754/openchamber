@@ -22,6 +22,33 @@ const filteredResponseHeaders = new Set([
   'content-encoding',
 ]);
 
+export const DECODED_PAYLOAD_LENGTH_HEADER = 'x-openchamber-decoded-content-length';
+
+export const preserveDecodedPayloadLengthHeader = (responseHeaders) => {
+  if (!responseHeaders || typeof responseHeaders !== 'object') {
+    return;
+  }
+
+  delete responseHeaders[DECODED_PAYLOAD_LENGTH_HEADER];
+  const rawEncoding = responseHeaders['content-encoding'];
+  const encoding = (Array.isArray(rawEncoding) ? rawEncoding[0] : rawEncoding)?.trim().toLowerCase();
+  if (encoding && encoding !== 'identity') {
+    return;
+  }
+
+  const rawLength = responseHeaders['content-length'];
+  const normalizedLength = (Array.isArray(rawLength) ? rawLength[0] : rawLength)?.trim();
+  if (!normalizedLength || !/^\d+$/.test(normalizedLength)) {
+    return;
+  }
+
+  const payloadBytes = Number(normalizedLength);
+  if (!Number.isSafeInteger(payloadBytes) || payloadBytes < 0) {
+    return;
+  }
+  responseHeaders[DECODED_PAYLOAD_LENGTH_HEADER] = String(payloadBytes);
+};
+
 export const collectForwardProxyHeaders = (requestHeaders, authHeaders = {}) => {
   const headers = {};
 

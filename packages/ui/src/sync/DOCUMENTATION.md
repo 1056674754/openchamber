@@ -98,6 +98,38 @@ This keeps cold/global lists responsive without requiring a refetch after every 
 
 Live activity/status indicators must not depend on this cache. They must derive from aggregated child-store state.
 
+## Reconnect reconciliation
+
+The browser event pipeline treats connection recovery as two separate facts:
+
+1. `transport-ready` proves only that the local WebSocket bridge is reachable.
+2. `ready` proves that the upstream OpenCode event stream is attached. `disconnected` revokes this state without requiring the local socket to close.
+
+After every upstream `ready`, each initialized directory reconciles authoritative live state. A replay gap forces the same reconciliation path; replay alone is not allowed to claim convergence when the requested cursor is no longer buffered.
+
+Reconnect recovery deliberately uses two session sets:
+
+- **Authority sessions** are every session represented by the directory store's session, status, message, question, or permission state. Statuses and pending questions/permissions are reconciled for this complete set.
+- **Materialization sessions** are the smaller subset needing expensive session/message/todo hydration: active status, incomplete or unrenderable messages, relevant parents, and the viewed session.
+
+Failed authoritative fetches must remain distinguishable from successful empty results. A partial reconciliation is retried while the upstream provider stays connected; it must not clear known pending requests or status merely because one fetch failed.
+
+## Message history pagination and payload budgets
+
+`message-history-loader.ts` owns the shared `session.messages` page contract for interactive loading and reconnect materialization. Callers must pass the session's authoritative SDK client and directory; the loader never falls back to a global current directory.
+
+- Web/desktop interactive history targets 30 real user messages per batch.
+- VS Code targets 6 real user messages per batch to keep bridge and webview transfers smaller.
+- A batch remains bounded by `message-page-boundary.ts`. When a runtime reports decoded response bytes, it may follow at most 32 additional cursor pages and 5,000 raw message records, stopping at an 8 MB decoded-payload budget. If decoded bytes are unavailable, it falls back to four additional pages and 600 records.
+- Reconnect/materialization callers omit the interactive target and preserve the one-real-user-boundary behavior.
+- SDK errors throw `MessageHistoryLoadError`; a failed fetch is never represented as an empty successful page.
+
+The web/local and remote proxies copy a verified identity-encoded upstream `content-length` into `x-openchamber-decoded-content-length` before normal proxy header filtering and optional browser compression. The VS Code bridge measures the decoded body directly and supplies the same header. The loader never treats a compressed standard `content-length` as a decoded-memory budget.
+
+Message and part payload sanitization happens before records are retained in sync stores. Diff snapshots are stripped/capped, and individual tool input/output/metadata fields have a one-million-character retained-data budget. Truncated tool parts carry the `__openchamberTruncated` metadata marker with the affected field names and limit.
+
+This client-side budget does not protect OpenCode's own JSON serialization or the initial HTTP parse. OpenCode must enforce a server-side response byte budget and summary/detail API to eliminate upstream memory spikes; OpenChamber must not hide that limitation by treating a rejected or truncated response as an empty page.
+
 ## Session action rules
 
 Session actions live in `session-actions.ts` and are the canonical place for SDK-calling session mutations that affect global session lists.

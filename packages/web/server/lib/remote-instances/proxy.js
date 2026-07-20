@@ -1,6 +1,7 @@
 import { createProxyMiddleware } from 'http-proxy-middleware';
 
 import {
+  preserveDecodedPayloadLengthHeader,
   shouldForwardProxyResponseHeader,
 } from '../../proxy-headers.js';
 
@@ -257,6 +258,7 @@ export const registerRemoteProxy = (app, runtime, options = {}) => {
       },
       proxyReqWs: setRemoteWsHeaders,
       proxyRes: (proxyRes, req) => {
+        preserveDecodedPayloadLengthHeader(proxyRes.headers);
         for (const key of Object.keys(proxyRes.headers || {})) {
           if (!shouldForwardProxyResponseHeader(key)) {
             delete proxyRes.headers[key];

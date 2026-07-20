@@ -8,7 +8,7 @@ import { writeOpenChamberOverlay as writeOpenChamberOverlayFile } from './plugin
 const OVERLAY_DIR = resolve(homedir(), '.config', 'openchamber');
 const OVERLAY_FILE = resolve(OVERLAY_DIR, 'opencode-overlay.json');
 const PLUGIN_INSTALL_DIR = resolve(OVERLAY_DIR, 'plugin');
-const PLUGIN_ENTRY = resolve(PLUGIN_INSTALL_DIR, 'index.js');
+const PLUGIN_ENTRY = resolve(OVERLAY_DIR, 'opencode-notifier');
 const PLUGIN_STATUS_FILE = resolve(PLUGIN_INSTALL_DIR, 'status.json');
 const OPENCHAMBER_PLUGIN_ID = '@openchamber/plugin';
 const REQUIRED_TOOLS = ['describe_image', 'save_image_analysis'];

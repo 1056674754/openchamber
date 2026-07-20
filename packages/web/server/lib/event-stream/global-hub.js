@@ -146,13 +146,15 @@ export function createGlobalMessageStreamHub({
         statusSubscribers.delete(subscriber);
       };
     },
-    replayAfter(eventId) {
+    replayFrom(eventId) {
       if (!eventId) {
-        return [];
+        return { events: [], gap: false };
       }
 
       const index = replay.findIndex((entry) => entry.eventId === eventId);
-      return index === -1 ? [] : replay.slice(index + 1);
+      return index === -1
+        ? { events: [], gap: true }
+        : { events: replay.slice(index + 1), gap: false };
     },
   };
 }

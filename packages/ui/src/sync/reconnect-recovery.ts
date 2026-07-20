@@ -7,6 +7,8 @@ type ReconnectMaterializationState = {
   session_status?: Record<string, SessionStatus>
   message?: Record<string, Message[]>
   part?: Record<string, Part[]>
+  question?: Record<string, readonly unknown[]>
+  permission?: Record<string, readonly unknown[]>
 }
 
 export type ViewedSessionMaterializationTarget = {
@@ -19,11 +21,24 @@ type ReconnectCandidateOptions = {
   viewedSession?: ViewedSessionMaterializationTarget | null
 }
 
-export function getReconnectCandidateSessionIds(state: ReconnectMaterializationState, options?: ReconnectCandidateOptions) {
-  const ids = new Set<string>()
+export type ReconnectRecoveryPlan = {
+  authoritySessionIds: string[]
+  materializationSessionIds: string[]
+}
+
+export function getReconnectRecoveryPlan(
+  state: ReconnectMaterializationState,
+  options?: ReconnectCandidateOptions,
+): ReconnectRecoveryPlan {
+  const authorityIds = new Set(state.session.map((session) => session.id))
+  for (const source of [state.session_status, state.message, state.question, state.permission]) {
+    for (const sessionId of Object.keys(source ?? {})) authorityIds.add(sessionId)
+  }
+
+  const materializationIds = new Set<string>()
 
   for (const [sessionId, status] of Object.entries(state.session_status ?? {})) {
-    if (status && status.type !== "idle") ids.add(sessionId)
+    if (status && status.type !== "idle") materializationIds.add(sessionId)
   }
 
   for (const [sessionId, messages] of Object.entries(state.message ?? {})) {
@@ -33,13 +48,13 @@ export function getReconnectCandidateSessionIds(state: ReconnectMaterializationS
       && lastMessage.role === "assistant"
       && typeof (lastMessage as { time?: { completed?: number } }).time?.completed !== "number"
     ) {
-      ids.add(sessionId)
+      materializationIds.add(sessionId)
     } else if (!getSessionMaterializationStatus({ message: state.message ?? {}, part: state.part ?? {} }, sessionId).renderable) {
-      ids.add(sessionId)
+      materializationIds.add(sessionId)
     }
   }
 
-  const candidateChildIds = new Set(ids)
+  const candidateChildIds = new Set(materializationIds)
   const parentIds = new Set<string>()
   for (const session of state.session) {
     if (!candidateChildIds.has(session.id)) {
@@ -51,7 +66,7 @@ export function getReconnectCandidateSessionIds(state: ReconnectMaterializationS
     }
   }
   for (const pid of parentIds) {
-    ids.add(pid)
+    materializationIds.add(pid)
   }
 
   const viewedSession = options?.viewedSession
@@ -62,9 +77,12 @@ export function getReconnectCandidateSessionIds(state: ReconnectMaterializationS
       || Object.hasOwn(state.message ?? {}, sessionId)
 
     if (sessionExists) {
-      ids.add(sessionId)
+      materializationIds.add(sessionId)
     }
   }
 
-  return Array.from(ids)
+  return {
+    authoritySessionIds: Array.from(authorityIds),
+    materializationSessionIds: Array.from(materializationIds),
+  }
 }

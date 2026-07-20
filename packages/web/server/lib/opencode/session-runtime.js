@@ -2,6 +2,7 @@ const SESSION_COOLDOWN_DURATION_MS = 2000;
 const SESSION_STATE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const SESSION_ATTENTION_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const SESSION_STATE_CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
+const SESSION_VIEW_TTL_MS = 60 * 1000;
 
 const extractSessionStatusUpdate = (payload) => {
   if (!payload || payload.type !== 'session.status') {
@@ -67,12 +68,24 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
         needsAttention: false,
         lastUserMessageAt: null,
         lastStatusChangeAt: Date.now(),
-        viewedByClients: new Set(),
+        viewedByClients: new Map(),
         status: 'idle',
       };
       sessionAttentionStates.set(sessionId, state);
     }
     return state;
+  };
+
+  const hasActiveViewers = (state) => {
+    if (!state) return false;
+
+    const cutoff = Date.now() - SESSION_VIEW_TTL_MS;
+    for (const [clientId, lastSeenAt] of state.viewedByClients) {
+      if (lastSeenAt < cutoff) {
+        state.viewedByClients.delete(clientId);
+      }
+    }
+    return state.viewedByClients.size > 0;
   };
 
   const setSessionActivityPhase = (sessionId, phase) => {
@@ -126,7 +139,7 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
     state.lastStatusChangeAt = Date.now();
 
     if ((prevStatus === 'busy' || prevStatus === 'retry') && status === 'idle') {
-      if (state.lastUserMessageAt && state.viewedByClients.size === 0) {
+      if (state.lastUserMessageAt && !hasActiveViewers(state)) {
         state.needsAttention = true;
       }
     }
@@ -156,7 +169,7 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
     if (unreadStore && prevStatus && prevStatus !== status) {
       if (status === 'idle' && (prevStatus === 'busy' || prevStatus === 'retry')) {
         const attention = sessionAttentionStates.get(sessionId);
-        if (!attention || attention.viewedByClients.size === 0) {
+        if (!hasActiveViewers(attention)) {
           unreadStore.recordActivity(sessionId, { hasError: false });
         }
       }
@@ -222,9 +235,11 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
     if (!state) return;
 
     const wasNeedsAttention = state.needsAttention;
-    state.viewedByClients.add(clientId);
+    state.viewedByClients.set(clientId, Date.now());
 
-    if (unreadStore) unreadStore.markRead(sessionId);
+    if (unreadStore?.getUnreadState(sessionId)?.unread) {
+      unreadStore.markRead(sessionId);
+    }
 
     if (wasNeedsAttention) {
       state.needsAttention = false;
@@ -277,7 +292,7 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
         lastUserMessageAt: state.lastUserMessageAt,
         lastStatusChangeAt: state.lastStatusChangeAt,
         status: state.status,
-        isViewed: state.viewedByClients.size > 0,
+        isViewed: hasActiveViewers(state),
       };
     }
     return result;
@@ -292,7 +307,7 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
       lastUserMessageAt: state.lastUserMessageAt,
       lastStatusChangeAt: state.lastStatusChangeAt,
       status: state.status,
-      isViewed: state.viewedByClients.size > 0,
+      isViewed: hasActiveViewers(state),
     };
   };
 
@@ -353,7 +368,7 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
       const sessionId = typeof props.sessionID === 'string' ? props.sessionID.trim() : '';
       if (sessionId) {
         const attention = sessionAttentionStates.get(sessionId);
-        if (!attention || attention.viewedByClients.size === 0) {
+        if (!hasActiveViewers(attention)) {
           unreadStore.recordActivity(sessionId, { hasError: true });
         }
       }

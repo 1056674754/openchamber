@@ -1,7 +1,7 @@
 import React from 'react';
 
 import type { ChatMessageEntry } from '../lib/turns/types';
-import type { MessageListHandle } from '../MessageList';
+import type { MessageListHandle, MessageViewportAnchor } from '../MessageList';
 import { TURN_WINDOW_DEFAULTS } from '../lib/turns/constants';
 import {
     buildTurnWindowModel,
@@ -12,8 +12,6 @@ import { deriveTimelineHistorySignals, type TurnHistorySignals } from '../lib/tu
 import { getMemoryLimits, type SessionHistoryMeta } from '@/stores/types/sessionTypes';
 import { hasRealUserMessageParts } from '@/lib/messages/real-user';
 import { isVSCodeRuntime } from '@/lib/desktop';
-
-type ViewportAnchor = { messageId: string; offsetTop: number };
 
 type PendingScrollRequest = {
     sessionId: string;
@@ -53,8 +51,9 @@ export interface UseChatTimelineControllerResult {
     resumeToBottomInstant: () => Promise<void>;
     scrollToTurn: (turnId: string, options?: { behavior?: ScrollBehavior }) => Promise<boolean>;
     scrollToMessage: (messageId: string, options?: { behavior?: ScrollBehavior }) => Promise<boolean>;
-    captureViewportAnchor: () => ViewportAnchor | null;
-    restoreViewportAnchor: (anchor: ViewportAnchor) => boolean;
+    captureViewportAnchor: () => MessageViewportAnchor | null;
+    restoreViewportAnchor: (anchor: MessageViewportAnchor) => boolean;
+    cancelPendingPrependAnchor: () => void;
     handleActiveTurnChange: (turnId: string | null) => void;
 }
 
@@ -287,14 +286,23 @@ export const useChatTimelineController = ({
     const prePrependScrollRef = React.useRef<{
         height: number;
         top: number;
-        anchor: ViewportAnchor | null;
+        anchor: MessageViewportAnchor | null;
+        oldestMessageId: string | null;
     } | null>(null);
 
-    const captureViewportAnchor = React.useCallback((): ViewportAnchor | null => {
+    const cancelPendingPrependAnchor = React.useCallback(() => {
+        prePrependScrollRef.current = null;
+    }, []);
+
+    React.useLayoutEffect(() => {
+        cancelPendingPrependAnchor();
+    }, [cancelPendingPrependAnchor, sessionId]);
+
+    const captureViewportAnchor = React.useCallback((): MessageViewportAnchor | null => {
         return messageListRef.current?.captureViewportAnchor() ?? null;
     }, [messageListRef]);
 
-    const restoreViewportAnchor = React.useCallback((anchor: ViewportAnchor): boolean => {
+    const restoreViewportAnchor = React.useCallback((anchor: MessageViewportAnchor): boolean => {
         return messageListRef.current?.restoreViewportAnchor(anchor) ?? false;
     }, [messageListRef]);
 
@@ -302,6 +310,8 @@ export const useChatTimelineController = ({
         const snap = prePrependScrollRef.current;
         const container = scrollRef.current;
         if (!snap || !container) return;
+        const currentOldestMessageId = renderedMessages[0]?.info.id ?? null;
+        if (currentOldestMessageId === snap.oldestMessageId) return;
         prePrependScrollRef.current = null;
 
         if (snap.anchor && restoreViewportAnchor(snap.anchor)) {
@@ -339,10 +349,13 @@ export const useChatTimelineController = ({
                 height: container.scrollHeight,
                 top: container.scrollTop,
                 anchor: captureViewportAnchor(),
+                oldestMessageId: beforeOldestMessageId,
             };
         }
 
         setIsLoadingOlder(true);
+        let historyAdvanced = false;
+        let oldestMessageAdvanced = false;
 
         try {
             const targetSessionId = sessionIdRef.current;
@@ -362,11 +375,17 @@ export const useChatTimelineController = ({
                     && typeof afterOldestMessageId === 'string'
                     && beforeOldestMessageId !== afterOldestMessageId);
 
-            return historyGrew || afterLimit > beforeLimit;
+            oldestMessageAdvanced = typeof afterOldestMessageId === 'string'
+                && beforeOldestMessageId !== afterOldestMessageId;
+            historyAdvanced = historyGrew || afterLimit > beforeLimit;
+            return historyAdvanced;
         } finally {
+            if (!oldestMessageAdvanced) {
+                cancelPendingPrependAnchor();
+            }
             setIsLoadingOlder(false);
         }
-    }, [captureViewportAnchor, loadMoreMessages, scrollRef]);
+    }, [cancelPendingPrependAnchor, captureViewportAnchor, loadMoreMessages, scrollRef]);
 
     const loadEarlier = React.useCallback(async (options?: { userInitiated?: boolean }) => {
         if (options?.userInitiated) {
@@ -498,6 +517,7 @@ export const useChatTimelineController = ({
         scrollToMessage,
         captureViewportAnchor,
         restoreViewportAnchor,
+        cancelPendingPrependAnchor,
         handleActiveTurnChange,
     };
 };

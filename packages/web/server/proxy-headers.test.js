@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   applyForwardProxyResponseHeaders,
   collectForwardProxyHeaders,
+  preserveDecodedPayloadLengthHeader,
   shouldForwardProxyResponseHeader,
 } from './proxy-headers.js';
 
@@ -31,6 +32,29 @@ describe('OpenCode proxy header handling', () => {
   it('still keeps ordinary response headers', () => {
     expect(shouldForwardProxyResponseHeader('content-type')).toBe(true);
     expect(shouldForwardProxyResponseHeader('etag')).toBe(true);
+  });
+
+  it('preserves an identity response length under the decoded-payload header', () => {
+    const headers = {
+      'content-length': '7345',
+      'content-type': 'application/json',
+    };
+
+    preserveDecodedPayloadLengthHeader(headers);
+
+    expect(headers['x-openchamber-decoded-content-length']).toBe('7345');
+  });
+
+  it('does not label a compressed response length as decoded bytes', () => {
+    const headers = {
+      'content-encoding': 'gzip',
+      'content-length': '7345',
+      'x-openchamber-decoded-content-length': '9999',
+    };
+
+    preserveDecodedPayloadLengthHeader(headers);
+
+    expect(headers['x-openchamber-decoded-content-length']).toBeUndefined();
   });
 
   it('applies upstream response headers to express response without content-encoding', () => {

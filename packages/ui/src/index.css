@@ -894,6 +894,14 @@ html:not(.dark) .chat-scroll {
   line-height: inherit;
 }
 
+.markdown-content p,
+.markdown-content li,
+.markdown-content blockquote {
+  text-wrap: pretty;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+
 .markdown-content p {
   margin: 0 0 var(--markdown-paragraph-spacing) 0;
 }

@@ -248,7 +248,8 @@ export const useFilesViewTabsStore = create<FilesViewTabsStore>()(
               return comparablePath === comparablePrefix || comparablePath.startsWith(comparablePrefixWithSlash);
             };
             const openPaths = current.openPaths.filter((p) => !isWithinPrefix(p));
-            if (openPaths.length === current.openPaths.length) {
+            const expandedPaths = current.expandedPaths.filter((p) => !isWithinPrefix(p));
+            if (openPaths.length === current.openPaths.length && expandedPaths.length === current.expandedPaths.length) {
               return state;
             }
 
@@ -261,6 +262,7 @@ export const useFilesViewTabsStore = create<FilesViewTabsStore>()(
               [normalizedRoot]: {
                 ...current,
                 openPaths,
+                expandedPaths,
                 selectedPath,
                 touchedAt: Date.now(),
               },

@@ -41,6 +41,41 @@ async function waitForAssertion(assertion) {
 }
 
 describe('createGlobalMessageStreamHub', () => {
+  it('reports a replay gap when the requested cursor has fallen out of the buffer', async () => {
+    const received = [];
+    const hub = createGlobalMessageStreamHub({
+      buildOpenCodeUrl: (pathname) => `http://127.0.0.1:4096${pathname}`,
+      getOpenCodeAuthHeaders: () => ({}),
+      upstreamReconnectDelayMs: 100,
+      replayLimit: 2,
+      fetchImpl: async () => createSseResponse({
+        blocks: [
+          'id: evt-1\ndata: {"type":"session.updated","properties":{}}\n\n',
+          'id: evt-2\ndata: {"type":"session.updated","properties":{}}\n\n',
+          'id: evt-3\ndata: {"type":"session.updated","properties":{}}\n\n',
+        ],
+      }),
+    });
+
+    hub.subscribeEvent((event) => {
+      received.push(event.eventId);
+    });
+
+    try {
+      hub.start();
+      await waitForAssertion(() => {
+        expect(received).toEqual(['evt-1', 'evt-2', 'evt-3']);
+      });
+
+      const replay = hub.replayFrom('evt-2');
+      expect(replay.gap).toBe(false);
+      expect(replay.events.map((event) => event.eventId)).toEqual(['evt-3']);
+      expect(hub.replayFrom('evt-1')).toEqual({ events: [], gap: true });
+    } finally {
+      hub.stop();
+    }
+  });
+
   it('continues fanout when an event subscriber throws', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const received = [];

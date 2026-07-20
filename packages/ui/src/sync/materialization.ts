@@ -1,6 +1,7 @@
 import type { Message, Part } from "@opencode-ai/sdk/v2/client"
 import { mergeMessages } from "./optimistic"
 import { getMessageFinishReason } from "@/lib/messageCompletion"
+import { sanitizePartPayload } from "./sanitize"
 
 const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0)
 const STREAMING_PART_FIELDS = ["text", "output"] as const
@@ -37,6 +38,7 @@ export type SessionMaterializationStatus = {
 function sortParts(parts: Part[], skipPartTypes: ReadonlySet<string>) {
   return parts
     .filter((part) => !!part?.id && !skipPartTypes.has(part.type))
+    .map(sanitizePartPayload)
     .sort((a, b) => cmp(a.id, b.id))
 }
 

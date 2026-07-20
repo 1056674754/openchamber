@@ -6,6 +6,12 @@ import type { ChatMessageEntry, TurnRecord } from '../lib/turns/types';
 import { formatTurnDuration } from '../lib/turns/duration';
 import { segmentProcessMessagesByPinnedBoundaries } from '../lib/turns/processSegments';
 import { getDirectiveParentId, mergeDirectiveMessagesAfterAnchors } from '../lib/turns/directiveProcessMessages';
+import {
+    beginProcessFoldTransition,
+    captureProcessFoldViewportAnchor,
+    restoreProcessFoldViewportAnchor,
+    type ProcessFoldViewportAnchor,
+} from '../lib/scroll/processFoldViewport';
 import { useI18n } from '@/lib/i18n';
 
 interface RenderMessageOptions {
@@ -141,7 +147,7 @@ const getTurnDurationText = (turn: TurnRecord): string | undefined => {
 
 const ProcessToggle: React.FC<{
     expanded: boolean;
-    onToggle: () => void;
+    onToggle: (button: HTMLButtonElement) => void;
     label: string;
     durationText?: string;
     wrapColumn?: boolean;
@@ -151,7 +157,7 @@ const ProcessToggle: React.FC<{
             type="button"
             className="group/process-toggle flex items-center gap-1.5 py-1.5 pl-px pr-2 text-left text-muted-foreground/60 transition-colors hover:text-muted-foreground/80"
             aria-expanded={expanded}
-            onClick={onToggle}
+            onClick={(event) => onToggle(event.currentTarget)}
         >
             <span className="typography-ui-label font-semibold">
                 {durationText ? `${label} ${durationText}` : label}
@@ -195,6 +201,11 @@ const ProcessMessages: React.FC<{
     const mountedRef = React.useRef(false);
     const animationRunRef = React.useRef(0);
     const animationsRef = React.useRef<AnimationPlaybackControls[]>([]);
+    const viewportTransitionRef = React.useRef<{
+        anchor: ProcessFoldViewportAnchor;
+        observer: ResizeObserver | null;
+        release: () => void;
+    } | null>(null);
     const initialExpanded = foldDefault.enabled ? foldDefault.expanded : true;
     const foldDefaultKey = `${turn.turnId}:${foldId}:${foldDefault.enabled ? 'enabled' : 'open'}:${foldDefault.expanded ? 'expanded' : 'collapsed'}`;
     const [userExpansion, setUserExpansion] = React.useState<{ key: string; value: boolean | null }>(() => ({
@@ -234,6 +245,33 @@ const ProcessMessages: React.FC<{
         setUserExpansion({ key: foldDefaultKey, value: nextExpanded });
     }, [foldDefaultKey, setDetailsShouldRender]);
 
+    const finishViewportTransition = React.useCallback((transition: typeof viewportTransitionRef.current) => {
+        if (!transition) {
+            return;
+        }
+        transition.observer?.disconnect();
+        transition.release();
+        if (viewportTransitionRef.current === transition) {
+            viewportTransitionRef.current = null;
+        }
+    }, []);
+
+    const toggleExpanded = React.useCallback((button: HTMLButtonElement, nextExpanded: boolean) => {
+        finishViewportTransition(viewportTransitionRef.current);
+
+        const region = regionRef.current;
+        const container = region?.closest<HTMLElement>('[data-scrollbar="chat"]');
+        if (region && container) {
+            viewportTransitionRef.current = {
+                anchor: captureProcessFoldViewportAnchor(container, button),
+                observer: null,
+                release: beginProcessFoldTransition(),
+            };
+        }
+
+        setExpandedOverride(nextExpanded);
+    }, [finishViewportTransition, setExpandedOverride]);
+
     React.useLayoutEffect(() => {
         const region = regionRef.current;
         if (!region) {
@@ -246,8 +284,23 @@ const ProcessMessages: React.FC<{
         animationsRef.current = [];
 
         const detailElements = getProcessDetailElements(region);
+        const viewportTransition = viewportTransitionRef.current;
+        const restoreViewport = () => {
+            if (viewportTransition) {
+                restoreProcessFoldViewportAnchor(viewportTransition.anchor);
+            }
+        };
+        restoreViewport();
+        if (viewportTransition && typeof ResizeObserver !== 'undefined') {
+            viewportTransition.observer = new ResizeObserver(restoreViewport);
+            viewportTransition.observer.observe(region);
+        }
         const clearLocks = () => {
             detailElements.forEach(clearProcessDetailPresentationLock);
+        };
+        const finishTransition = () => {
+            restoreViewport();
+            finishViewportTransition(viewportTransition);
         };
 
         if (prefersReducedMotion()) {
@@ -255,6 +308,7 @@ const ProcessMessages: React.FC<{
             if (!expanded) {
                 setDetailsShouldRender(false);
             }
+            finishTransition();
             return;
         }
 
@@ -270,6 +324,7 @@ const ProcessMessages: React.FC<{
             if (!expanded && detailElements.length === 0) {
                 setDetailsShouldRender(false);
             }
+            finishTransition();
             return;
         }
 
@@ -292,29 +347,32 @@ const ProcessMessages: React.FC<{
             if (!expanded) {
                 setDetailsShouldRender(false);
             }
+            finishTransition();
         });
 
         return () => {
             animationRunRef.current += 1;
             animationsRef.current.forEach((animation) => animation.stop());
             animationsRef.current = [];
+            finishViewportTransition(viewportTransition);
         };
-    }, [expanded, foldDefaultKey, renderDetails, setDetailsShouldRender]);
+    }, [expanded, finishViewportTransition, foldDefaultKey, renderDetails, setDetailsShouldRender]);
 
     React.useEffect(() => {
         return () => {
             animationRunRef.current += 1;
             animationsRef.current.forEach((animation) => animation.stop());
             animationsRef.current = [];
+            finishViewportTransition(viewportTransitionRef.current);
         };
-    }, []);
+    }, [finishViewportTransition]);
 
     const firstProcessMessage = processMessages[0];
     const remainingProcessMessages = processMessages.slice(1);
     const headerToggle = foldDefault.enabled ? (
         <ProcessToggle
             expanded={expanded}
-            onToggle={() => setExpandedOverride(!expanded)}
+            onToggle={(button) => toggleExpanded(button, !expanded)}
             label={processedLabel}
             durationText={durationText}
             wrapColumn={false}
@@ -324,7 +382,7 @@ const ProcessMessages: React.FC<{
         <ProcessToggle
             key="process-collapse-toggle"
             expanded
-            onToggle={() => setExpandedOverride(false)}
+            onToggle={(button) => toggleExpanded(button, false)}
             label={collapseLabel}
         />
     ) : null;

@@ -3,6 +3,7 @@ import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
 import { usePwaManifestSync } from '@/hooks/usePwaManifestSync';
 import { useQueuedMessageAutoSend } from '@/hooks/useQueuedMessageAutoSend';
 import { useSessionAutoCleanup } from '@/hooks/useSessionAutoCleanup';
+import { useSessionPresenceBeacon } from '@/hooks/useSessionPresenceBeacon';
 import { useWindowControlsOverlayLayout } from '@/hooks/useWindowControlsOverlayLayout';
 import { OpenChamberPluginStatusToast } from '@/components/update/OpenChamberPluginStatusToast';
 import { setOptimisticRefs } from '@/sync/session-actions';
@@ -75,6 +76,7 @@ export function SyncAppEffects({ embeddedBackgroundWorkEnabled }: {
   usePwaManifestSync();
   useWindowControlsOverlayLayout();
   useKeyboardShortcuts();
+  useSessionPresenceBeacon({ enabled: embeddedBackgroundWorkEnabled });
 
   return (
     <>

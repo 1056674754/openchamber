@@ -140,6 +140,67 @@ async function runPipelineWithEvents(events, waitMs = 80) {
 }
 
 describe('createEventPipeline', () => {
+  it('does not report connected until upstream ready and forwards replay-gap metadata', async () => {
+    installDomStubs();
+    globalThis.WebSocket = FakeWebSocket;
+    const reconnects = [];
+
+    const pipeline = createEventPipeline({
+      sdk: {
+        global: {
+          event: async () => {
+            throw new Error('SSE should not be used in ws mode');
+          },
+        },
+      },
+      transport: 'ws',
+      onEvent: () => {},
+      onReconnect: (metadata) => {
+        reconnects.push(metadata);
+      },
+    });
+
+    const socket = FakeWebSocket.instances[0];
+    socket.emitOpen();
+    socket.emitMessage({ type: 'transport-ready', scope: 'global' });
+    expect(reconnects).toEqual([]);
+
+    socket.emitMessage({ type: 'ready', scope: 'global', replayGap: true });
+    expect(reconnects).toEqual([{ replayGap: true }]);
+    pipeline.cleanup();
+  });
+
+  it('reports an upstream disconnect without closing the local websocket', async () => {
+    installDomStubs();
+    globalThis.WebSocket = FakeWebSocket;
+    const disconnects = [];
+
+    const pipeline = createEventPipeline({
+      sdk: {
+        global: {
+          event: async () => {
+            throw new Error('SSE should not be used in ws mode');
+          },
+        },
+      },
+      transport: 'ws',
+      onEvent: () => {},
+      onDisconnect: (reason) => {
+        disconnects.push(reason);
+      },
+    });
+
+    const socket = FakeWebSocket.instances[0];
+    socket.emitOpen();
+    socket.emitMessage({ type: 'transport-ready', scope: 'global' });
+    socket.emitMessage({ type: 'ready', scope: 'global', replayGap: false });
+    socket.emitMessage({ type: 'disconnected', reason: 'upstream_stall' });
+
+    expect(disconnects).toEqual(['upstream_stall']);
+    expect(socket.readyState).toBe(1);
+    pipeline.cleanup();
+  });
+
   it('falls back to payload.properties.directory when the SDK event omits top-level directory', async () => {
     installDomStubs();
 

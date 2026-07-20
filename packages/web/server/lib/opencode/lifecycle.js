@@ -59,23 +59,75 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     restoreManagedOpenCodeAuth = () => false,
   } = deps;
 
-  const killProcessOnPort = (port) => {
-    if (!port || process.platform === 'win32') return;
+  const listListeningProcessIds = (port) => {
+    if (!port || process.platform === 'win32') return [];
     try {
-      const result = spawnSync('lsof', ['-ti', `:${port}`], { encoding: 'utf8', timeout: 5000, windowsHide: true });
+      const result = spawnSync('lsof', ['-nP', `-iTCP:${port}`, '-sTCP:LISTEN', '-t'], {
+        encoding: 'utf8',
+        timeout: 5000,
+        windowsHide: true,
+      });
       const output = result.stdout || '';
-      const myPid = process.pid;
-      for (const pidStr of output.split(/\s+/)) {
-        const pid = parseInt(pidStr.trim(), 10);
-        if (pid && pid !== myPid) {
-          try {
-            spawnSync('kill', ['-9', String(pid)], { stdio: 'ignore', timeout: 2000 });
-          } catch {
-          }
+      return [...new Set(output
+        .split(/\s+/)
+        .map((value) => Number.parseInt(value.trim(), 10))
+        .filter((pid) => Number.isFinite(pid) && pid > 0 && pid !== process.pid))];
+    } catch {
+      return [];
+    }
+  };
+
+  const readProcessGroupId = (pid) => {
+    if (!pid || process.platform === 'win32') return null;
+    try {
+      const result = spawnSync('ps', ['-o', 'pgid=', '-p', String(pid)], {
+        encoding: 'utf8',
+        timeout: 2000,
+        windowsHide: true,
+      });
+      const processGroupId = Number.parseInt(String(result.stdout || '').trim(), 10);
+      return Number.isFinite(processGroupId) && processGroupId > 0 ? processGroupId : null;
+    } catch {
+      return null;
+    }
+  };
+
+  const signalProcessOnPort = (port, signal) => {
+    if (!port) return false;
+    const processIds = listListeningProcessIds(port);
+    if (processIds.length === 0) return false;
+
+    if (process.platform === 'win32') {
+      for (const pid of processIds) {
+        try {
+          const args = ['/pid', String(pid), '/t'];
+          if (signal === 'SIGKILL') args.push('/f');
+          spawnSync('taskkill', args, { stdio: 'ignore', timeout: 5000, windowsHide: true });
+        } catch {
         }
       }
-    } catch {
+      return true;
     }
+
+    const ownProcessGroupId = readProcessGroupId(process.pid);
+    const signaledTargets = new Set();
+    for (const pid of processIds) {
+      const processGroupId = process.env.OPENCHAMBER_RUNTIME === 'desktop'
+        ? readProcessGroupId(pid)
+        : null;
+      const target = processGroupId && processGroupId !== ownProcessGroupId ? -processGroupId : pid;
+      if (signaledTargets.has(target)) continue;
+      signaledTargets.add(target);
+      try {
+        process.kill(target, signal);
+      } catch {
+      }
+    }
+    return signaledTargets.size > 0;
+  };
+
+  const killProcessOnPort = (port) => {
+    signalProcessOnPort(port, 'SIGKILL');
   };
 
   const hasChildProcessExited = (child) => !child || child.exitCode !== null || child.signalCode !== null;
@@ -157,6 +209,16 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
 
       attempt();
     });
+  };
+
+  const terminateStaleManagedOpenCodePort = async (port) => {
+    signalProcessOnPort(port, 'SIGTERM');
+    if (await waitForPortRelease(port, 2500)) {
+      return true;
+    }
+
+    signalProcessOnPort(port, 'SIGKILL');
+    return await waitForPortRelease(port, 2500);
   };
 
   const finalizeInterruptedManagedOpenCodeRuns = (reason) => {
@@ -764,31 +826,42 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     throw new Error(`Agent "${agentName}" not available after OpenCode restart`);
   };
 
+  let configRefreshPromise = null;
   const refreshOpenCodeAfterConfigChange = async (reason, options = {}) => {
     const { agentName } = options;
+    if (configRefreshPromise) {
+      console.log(`Joining in-progress OpenCode configuration refresh requested after ${reason}`);
+      await configRefreshPromise;
+      if (agentName) await waitForAgentPresence(agentName);
+      return;
+    }
 
-    console.log(`Refreshing OpenCode after ${reason}`);
-    clearResolvedOpenCodeBinary();
-    await applyOpencodeBinaryFromSettings();
+    const refresh = (async () => {
+      console.log(`Refreshing OpenCode after ${reason}`);
+      clearResolvedOpenCodeBinary();
+      await applyOpencodeBinaryFromSettings();
+      await restartOpenCode();
 
-    await restartOpenCode();
-
-    try {
-      await waitForOpenCodeReady();
-      state.isOpenCodeReady = true;
-      state.openCodeNotReadySince = 0;
-
-      if (agentName) {
-        await waitForAgentPresence(agentName);
+      try {
+        await waitForOpenCodeReady();
+        state.isOpenCodeReady = true;
+        state.openCodeNotReadySince = 0;
+        if (agentName) await waitForAgentPresence(agentName);
+        state.isOpenCodeReady = true;
+        state.openCodeNotReadySince = 0;
+      } catch (error) {
+        state.isOpenCodeReady = false;
+        state.openCodeNotReadySince = Date.now();
+        console.error(`Failed to refresh OpenCode after ${reason}:`, error.message);
+        throw error;
       }
+    })();
 
-      state.isOpenCodeReady = true;
-      state.openCodeNotReadySince = 0;
-    } catch (error) {
-      state.isOpenCodeReady = false;
-      state.openCodeNotReadySince = Date.now();
-      console.error(`Failed to refresh OpenCode after ${reason}:`, error.message);
-      throw error;
+    configRefreshPromise = refresh;
+    try {
+      await refresh;
+    } finally {
+      if (configRefreshPromise === refresh) configRefreshPromise = null;
     }
   };
 
@@ -829,7 +902,11 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
           syncToHmrState();
         } else {
           const lastPort = readPersistedOpenCodePort();
-          if (lastPort && lastPort !== 4096 && await probeExternalOpenCode(lastPort)) {
+          const previousManagedPort = lastPort && lastPort !== 4096 ? lastPort : null;
+          const previousManagedPortHealthy = previousManagedPort
+            ? await probeExternalOpenCode(previousManagedPort)
+            : false;
+          if (previousManagedPortHealthy) {
             console.log(`Reconnected to previous managed OpenCode server on port ${lastPort}`);
             setOpenCodePort(lastPort);
             state.isOpenCodeReady = true;
@@ -841,6 +918,14 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
             state.openCodeNotReadySince = 0;
             syncToHmrState();
           } else {
+            if (previousManagedPort) {
+              console.warn(`[OpenCode] Previous managed server on port ${previousManagedPort} is unhealthy; terminating it before replacement`);
+              const released = await terminateStaleManagedOpenCodePort(previousManagedPort);
+              if (!released) {
+                throw new Error(`Unable to release unhealthy previous managed OpenCode port ${previousManagedPort}`);
+              }
+            }
+
             if (env.ENV_EFFECTIVE_PORT) {
               console.log(`Using OpenCode port from environment: ${env.ENV_EFFECTIVE_PORT}`);
               setOpenCodePort(env.ENV_EFFECTIVE_PORT);

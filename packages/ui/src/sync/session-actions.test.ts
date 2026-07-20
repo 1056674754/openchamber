@@ -30,6 +30,7 @@ let permissionRespondResult: MockSdkResult = { data: true }
 let questionReplyResult: MockSdkResult = { data: true }
 let questionRejectResult: MockSdkResult = { data: true }
 let sessionAbortResult: MockSdkResult = { data: true }
+let sessionCreateResult: MockSdkResult = { data: null }
 let sessionRevertResult: MockSdkResult = { data: null }
 let sessionUnrevertResult: MockSdkResult = { data: null }
 let sessionForkResult: MockSdkResult = { data: null }
@@ -66,6 +67,10 @@ const mockScopedClient = {
     }),
   },
   session: {
+    create: mock((params: Record<string, unknown>) => {
+      sessionCalls.push({ method: "session.create", params })
+      return Promise.resolve(sessionCreateResult)
+    }),
     abort: mock((params: Record<string, unknown>) => {
       sessionCalls.push({ method: "session.abort", params })
       return Promise.resolve(sessionAbortResult)
@@ -104,6 +109,10 @@ const mockSdk = {
     }),
   },
   session: {
+    create: mock((params: Record<string, unknown>) => {
+      sessionCalls.push({ method: "session.create", params })
+      return Promise.resolve(sessionCreateResult)
+    }),
     abort: mock((params: Record<string, unknown>) => {
       sessionCalls.push({ method: "session.abort", params })
       return Promise.resolve(sessionAbortResult)
@@ -227,6 +236,7 @@ beforeEach(() => {
   questionReplyResult = { data: true }
   questionRejectResult = { data: true }
   sessionAbortResult = { data: true }
+  sessionCreateResult = { data: null }
   sessionRevertResult = { data: null }
   sessionUnrevertResult = { data: null }
   sessionForkResult = { data: null }
@@ -273,6 +283,30 @@ function createChildStores(entries: Array<[string, StoreApi<DirectoryStore>]>) {
     },
   } as unknown as import("./child-store").ChildStoreManager
 }
+
+describe("createSession", () => {
+  test("preserves the upstream SDK error when session creation fails", async () => {
+    sessionCreateResult = {
+      error: {
+        name: "UnknownError",
+        data: {
+          message: "Session storage is not writable",
+          ref: "err_session_create",
+        },
+      },
+      response: { status: 500 },
+    }
+    const childStores = createChildStores([])
+
+    const { createSession, setActionRefs } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/test/project")
+
+    await expectRejectsWithMessage(
+      createSession(undefined, "/test/project", null, DEFAULT_SERVER_ID),
+      "session.create failed (500): Session storage is not writable (err_session_create)",
+    )
+  })
+})
 
 describe("respondToPermission passes directory", () => {
   beforeEach(() => {

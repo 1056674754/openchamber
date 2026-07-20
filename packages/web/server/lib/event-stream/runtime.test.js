@@ -127,6 +127,57 @@ describe('event stream broadcaster', () => {
 });
 
 describe('message stream websocket runtime', () => {
+  it('keeps transport readiness separate from upstream readiness and reports replay gaps', async () => {
+    const server = new EventEmitter();
+    const wsClients = new Set();
+    let releaseUpstream;
+    const upstream = new Promise((resolve) => {
+      releaseUpstream = resolve;
+    });
+
+    const runtime = createMessageStreamWsRuntime({
+      server,
+      uiAuthController: null,
+      isRequestOriginAllowed: async () => true,
+      rejectWebSocketUpgrade() {
+        throw new Error('upgrade should not be used in this test');
+      },
+      buildOpenCodeUrl: (path) => `http://127.0.0.1:4096${path}`,
+      getOpenCodeAuthHeaders: () => ({}),
+      processForwardedEventPayload() {},
+      wsClients,
+      upstreamReconnectDelayMs: 100,
+      fetchImpl: async (_url, options) => {
+        const response = await upstream;
+        return createSseResponse({
+          signal: options.signal,
+          holdOpen: true,
+          blocks: response.blocks,
+        });
+      },
+    });
+
+    const socket = new FakeSocket();
+    runtime.wsServer.emit('connection', socket, { url: '/api/global/event/ws?lastEventId=evt-evicted' });
+
+    await Promise.resolve();
+    expect(socket.sent).toEqual([{ type: 'transport-ready', scope: 'global' }]);
+
+    releaseUpstream({
+      blocks: ['id: evt-1\ndata: {"type":"server.connected","properties":{}}\n\n'],
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(socket.sent).toContainEqual({
+      type: 'ready',
+      scope: 'global',
+      replayGap: true,
+    });
+
+    socket.close();
+    await runtime.close();
+  });
+
   it('rejects remote websocket upgrades when the instance is unavailable', async () => {
     const server = new EventEmitter();
     const wsClients = new Set();
@@ -265,8 +316,10 @@ describe('message stream websocket runtime', () => {
     await new Promise((resolve) => setTimeout(resolve, 5));
 
     expect(fetchCalls).toBe(1);
-    expect(firstSocket.sent).toContainEqual({ type: 'ready', scope: 'global' });
-    expect(secondSocket.sent).toContainEqual({ type: 'ready', scope: 'global' });
+    expect(firstSocket.sent).toContainEqual({ type: 'transport-ready', scope: 'global' });
+    expect(firstSocket.sent).toContainEqual({ type: 'ready', scope: 'global', replayGap: false });
+    expect(secondSocket.sent).toContainEqual({ type: 'transport-ready', scope: 'global' });
+    expect(secondSocket.sent).toContainEqual({ type: 'ready', scope: 'global', replayGap: false });
     expect(firstSocket.sent).toContainEqual({
       type: 'event',
       payload: { type: 'server.connected', properties: {} },
@@ -334,7 +387,8 @@ describe('message stream websocket runtime', () => {
 
     await new Promise((resolve) => setTimeout(resolve, 5));
 
-    expect(secondSocket.sent).toContainEqual({ type: 'ready', scope: 'global' });
+    expect(secondSocket.sent).toContainEqual({ type: 'transport-ready', scope: 'global' });
+    expect(secondSocket.sent).toContainEqual({ type: 'ready', scope: 'global', replayGap: false });
     expect(secondSocket.sent).toContainEqual({
       type: 'event',
       payload: { type: 'session.updated', properties: { directory: '/tmp/project' } },
@@ -426,7 +480,7 @@ describe('message stream websocket runtime', () => {
     await new Promise((resolve) => setTimeout(resolve, 5));
 
     expect(socket.sent).toEqual([
-      { type: 'ready', scope: 'global' },
+      { type: 'transport-ready', scope: 'global' },
       {
         type: 'error',
         message: 'OpenCode event stream unavailable (503)',
@@ -479,6 +533,7 @@ describe('message stream websocket runtime', () => {
     await new Promise((resolve) => setTimeout(resolve, 5));
 
     expect(socket.sent).toEqual([
+      { type: 'transport-ready', scope: 'global' },
       {
         type: 'error',
         message: 'OpenCode service unavailable',
@@ -537,7 +592,7 @@ describe('message stream websocket runtime', () => {
 
         return createSseResponse({
           signal: options.signal,
-          holdOpen: false,
+          holdOpen: true,
           blocks: [
             'id: evt-2\ndata: {"type":"server.connected","properties":{}}\n\n',
           ],

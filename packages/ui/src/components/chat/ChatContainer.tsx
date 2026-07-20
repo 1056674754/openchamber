@@ -161,7 +161,8 @@ type ChatViewportProps = {
     } | null;
     handleMessageContentChange: (reason?: ContentChangeReason) => void;
     getAnimationHandlers: (messageId: string) => AnimationHandlers;
-    handleLoadOlder: () => void;
+    handleLoadOlder: (options: { userInitiated: boolean }) => Promise<void>;
+    cancelPendingPrependAnchor: () => void;
     scrollToBottom: () => void;
     sessionQuestions: QuestionRequest[];
     sessionPermissions: PermissionRequest[];
@@ -188,6 +189,7 @@ const ChatViewport = React.memo(({
     handleMessageContentChange,
     getAnimationHandlers,
     handleLoadOlder,
+    cancelPendingPrependAnchor,
     scrollToBottom,
     sessionQuestions,
     sessionPermissions,
@@ -245,6 +247,7 @@ const ChatViewport = React.memo(({
                                 hasMoreAbove={hasMoreAboveTurns}
                                 isLoadingOlder={isLoadingOlder}
                                 onLoadOlder={handleLoadOlder}
+                                onExplicitScrollInteraction={cancelPendingPrependAnchor}
                                 scrollToBottom={scrollToBottom}
                                 scrollRef={scrollRef}
                             />
@@ -632,8 +635,8 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
         handleMessageContentChange('permission');
     }, [handleMessageContentChange, inlineBlockingRequestsByTool, releaseAutoFollow, sessionPermissions, sessionQuestions]);
 
-    const handleLoadOlder = React.useCallback(() => {
-        void loadEarlier({ userInitiated: true });
+    const handleLoadOlder = React.useCallback((options: { userInitiated: boolean }) => {
+        return loadEarlier({ userInitiated: options.userInitiated });
     }, [loadEarlier]);
 
     const navigation = useChatTurnNavigation({
@@ -919,6 +922,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
                 handleMessageContentChange={handleMessageContentChange}
                 getAnimationHandlers={getAnimationHandlers}
                 handleLoadOlder={handleLoadOlder}
+                cancelPendingPrependAnchor={timelineController.cancelPendingPrependAnchor}
                 scrollToBottom={resumeToLatestInstant}
                 sessionQuestions={trailingQuestions}
                 sessionPermissions={trailingPermissions}
@@ -951,7 +955,9 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
                 onResumeToLatest={resumeToLatestInstant}
                 canLoadEarlier={timelineController.historySignals.canLoadEarlier}
                 isLoadingEarlier={timelineController.isLoadingOlder}
-                onLoadEarlier={handleLoadOlder}
+                onLoadEarlier={() => {
+                    void handleLoadOlder({ userInitiated: true });
+                }}
             />
         </div>
     );

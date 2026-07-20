@@ -49,6 +49,7 @@ import {
   isLikelyFilePath,
   normalizePath,
   resolveMarkdownImageReference,
+  shouldPreserveMarkdownFileUrl,
 } from './markdownFileReferences';
 
 const useCurrentMermaidTheme = () => {
@@ -65,7 +66,7 @@ const useCurrentMermaidTheme = () => {
 const isFileUrlHref = (href: string): boolean => href.trim().toLowerCase().startsWith('file://');
 
 const markdownUrlTransform = (url: string, key: string): string => {
-  if (key === 'href' && isFileUrlHref(url)) {
+  if (shouldPreserveMarkdownFileUrl(url, key)) {
     return url;
   }
 

@@ -19,6 +19,7 @@ import { waitForWorktreeBootstrap } from "@/lib/worktrees/worktreeBootstrap";
 import { resolveSdkForDirectory, resolveBaseUrlForSession } from "@/sync/session-routing";
 import { resolveApiUrl, resolveOpenCodeProxyApiUrl } from "@/lib/api/serverUrl";
 import { buildOpenCodeHealthUrl } from "./health-url";
+import { createDirectoryListError } from "./directory-list-error";
 import {
   assertProviderCircuitClosed,
   recordProviderSuccess,
@@ -1725,74 +1726,72 @@ class OpencodeService {
     }
 
     const task = (async () => {
-    const desktopFiles = getDesktopFilesApi();
-    if (desktopFiles) {
+      const desktopFiles = getDesktopFilesApi();
+      if (desktopFiles) {
+        try {
+          const result = await desktopFiles.listDirectory(directoryPath || '', options);
+          if (!result || !Array.isArray(result.entries)) {
+            return [];
+          }
+          const entries = result.entries.map<FilesystemEntry>((entry) => ({
+            name: entry.name,
+            path: normalizeFsPath(entry.path),
+            isDirectory: !!entry.isDirectory,
+            isFile: !entry.isDirectory,
+            isSymbolicLink: false,
+          }));
+          this.listDirectoryCache.set(cacheKey, {
+            entries,
+            expiresAt: Date.now() + FS_LIST_CACHE_TTL_MS,
+          });
+          return entries;
+        } catch (error) {
+          throw createDirectoryListError(error, normalizedDirectoryPath);
+        }
+      }
+
       try {
-        const result = await desktopFiles.listDirectory(directoryPath || '', options);
+        const params = new URLSearchParams();
+        if (directoryPath && directoryPath.trim().length > 0) {
+          params.set('path', directoryPath);
+        }
+        if (options?.respectGitignore) {
+          params.set('respectGitignore', 'true');
+        }
+        const query = params.toString();
+        // [OPENCHAMBER-FORK] 2025-05-18 v1.11.1-dev-merge
+        // Resolve baseUrl by checking remote SyncProviders at runtime — no path matching.
+        let fsBaseUrl: string = this.baseUrl;
+        if (directoryPath) {
+          for (const e of getAllSyncStores()) {
+            if (e.serverId === DEFAULT_SERVER_ID) continue;
+            if (e.childStores.children.has(directoryPath)) {
+              const conn = serverRegistry.get(e.serverId);
+              if (conn) { fsBaseUrl = conn.config.baseUrl; break; }
+            }
+          }
+        }
+        const response = await fetch(`${fsBaseUrl}/fs/list${query ? `?${query}` : ''}`);
+        if (!response.ok) {
+          const error = await response.json().catch(() => ({}));
+          const message = typeof error.error === 'string' ? error.error : 'Failed to list directory';
+          throw new Error(`${message} (HTTP ${response.status})`);
+        }
+
+        const result = await response.json();
         if (!result || !Array.isArray(result.entries)) {
           return [];
         }
-        const entries = result.entries.map<FilesystemEntry>((entry) => ({
-          name: entry.name,
-          path: normalizeFsPath(entry.path),
-          isDirectory: !!entry.isDirectory,
-          isFile: !entry.isDirectory,
-          isSymbolicLink: false,
-        }));
+
+        const entries = result.entries as FilesystemEntry[];
         this.listDirectoryCache.set(cacheKey, {
           entries,
           expiresAt: Date.now() + FS_LIST_CACHE_TTL_MS,
         });
         return entries;
       } catch (error) {
-        console.error('Failed to list directory contents:', error);
-        throw error;
+        throw createDirectoryListError(error, normalizedDirectoryPath);
       }
-    }
-
-    try {
-      const params = new URLSearchParams();
-      if (directoryPath && directoryPath.trim().length > 0) {
-        params.set('path', directoryPath);
-      }
-      if (options?.respectGitignore) {
-        params.set('respectGitignore', 'true');
-      }
-      const query = params.toString();
-      // [OPENCHAMBER-FORK] 2025-05-18 v1.11.1-dev-merge
-      // Resolve baseUrl by checking remote SyncProviders at runtime — no path matching.
-      let fsBaseUrl: string = this.baseUrl;
-      if (directoryPath) {
-        for (const e of getAllSyncStores()) {
-          if (e.serverId === DEFAULT_SERVER_ID) continue;
-          if (e.childStores.children.has(directoryPath)) {
-            const conn = serverRegistry.get(e.serverId);
-            if (conn) { fsBaseUrl = conn.config.baseUrl; break; }
-          }
-        }
-      }
-      const response = await fetch(`${fsBaseUrl}/fs/list${query ? `?${query}` : ''}`);
-      if (!response.ok) {
-        const error = await response.json().catch(() => ({}));
-        const message = typeof error.error === 'string' ? error.error : 'Failed to list directory';
-        throw new Error(message);
-      }
-
-      const result = await response.json();
-      if (!result || !Array.isArray(result.entries)) {
-        return [];
-      }
-
-      const entries = result.entries as FilesystemEntry[];
-      this.listDirectoryCache.set(cacheKey, {
-        entries,
-        expiresAt: Date.now() + FS_LIST_CACHE_TTL_MS,
-      });
-      return entries;
-    } catch (error) {
-      console.error('Failed to list directory contents:', error);
-      throw error;
-    }
     })();
 
     const trackedTask = task.finally(() => {

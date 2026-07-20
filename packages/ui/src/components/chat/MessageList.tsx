@@ -10,6 +10,7 @@ import { filterSyntheticParts } from '@/lib/messages/synthetic';
 import { hasSubtaskPart } from '@/lib/messages/real-user';
 import type { ChatMessageEntry, TurnRecord, TurnGroupingContext } from './lib/turns/types';
 import { useTurnRecords } from './hooks/useTurnRecords';
+import { useOlderHistoryPrefetch } from './hooks/useOlderHistoryPrefetch';
 import { applyRetryOverlay } from './lib/turns/applyRetryOverlay';
 import {
     deriveAutoExpandedTurnIds,
@@ -23,6 +24,8 @@ import { hasPendingUserSendAnimation, consumePendingUserSendAnimation } from '@/
 import { streamPerfCount, streamPerfMeasure } from '@/stores/utils/streamDebug';
 import type { StreamPhase } from './message/types';
 import { normalizeParts } from './message/partUtils';
+import { isProcessFoldTransitionActive } from './lib/scroll/processFoldViewport';
+import { shouldCompensateVirtualItemResize } from './lib/scroll/scrollIntent';
 
 const MESSAGE_LIST_VIRTUALIZE_THRESHOLD = 5;
 const MESSAGE_LIST_OVERSCAN = 6;
@@ -31,6 +34,7 @@ const MESSAGE_LIST_ESTIMATED_ENTRY_SIZE = 320;
 const MESSAGE_LIST_ESTIMATE_MIN_SAMPLES = 5;
 const MESSAGE_LIST_ESTIMATE_MIN = 120;
 const MESSAGE_LIST_ESTIMATE_MAX = 1200;
+const SCROLL_INTERACTION_WINDOW_MS = 300;
 
 const useStableEvent = <TArgs extends unknown[], TResult>(handler: (...args: TArgs) => TResult) => {
     const handlerRef = React.useRef(handler);
@@ -465,16 +469,24 @@ interface MessageListProps {
     getAnimationHandlers: (messageId: string) => AnimationHandlers;
     hasMoreAbove: boolean;
     isLoadingOlder: boolean;
-    onLoadOlder: () => void;
+    onLoadOlder: (options: { userInitiated: boolean }) => Promise<void>;
+    onExplicitScrollInteraction: () => void;
     scrollToBottom?: () => void;
     scrollRef?: React.RefObject<HTMLDivElement | null>;
 }
 
+export type MessageViewportAnchor = {
+    messageId: string;
+    offsetTop: number;
+    entryKey: string;
+    entryOffsetTop: number;
+};
+
 export interface MessageListHandle {
     scrollToTurnId: (turnId: string, options?: { behavior?: ScrollBehavior }) => boolean;
     scrollToMessageId: (messageId: string, options?: { behavior?: ScrollBehavior }) => boolean;
-    captureViewportAnchor: () => { messageId: string; offsetTop: number } | null;
-    restoreViewportAnchor: (anchor: { messageId: string; offsetTop: number }) => boolean;
+    captureViewportAnchor: () => MessageViewportAnchor | null;
+    restoreViewportAnchor: (anchor: MessageViewportAnchor) => boolean;
     scrollToBottom: () => void;
 }
 
@@ -1278,6 +1290,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
     hasMoreAbove,
     isLoadingOlder,
     onLoadOlder,
+    onExplicitScrollInteraction,
     scrollToBottom,
     scrollRef,
 }, ref) => {
@@ -1296,6 +1309,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
     }>({ sessionKey: undefined, previousOrder: [], animatedIds: new Set() });
     const stableGetAnimationHandlers = useStableEvent(getAnimationHandlers);
     const stableOnLoadOlder = useStableEvent(onLoadOlder);
+    const stableOnExplicitScrollInteraction = useStableEvent(onExplicitScrollInteraction);
     const stableScrollToBottom = useStableEvent(() => {
         scrollToBottom?.();
     });
@@ -1363,6 +1377,16 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
     }), [messages]);
 
     const historyContentRef = React.useRef<HTMLDivElement | null>(null);
+    const scrollInteractionUntilRef = React.useRef(0);
+    const pendingViewportAnchorRef = React.useRef<MessageViewportAnchor | null>(null);
+    const pendingViewportAnchorTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+    const clearPendingViewportAnchor = React.useCallback(() => {
+        pendingViewportAnchorRef.current = null;
+        if (pendingViewportAnchorTimerRef.current) {
+            clearTimeout(pendingViewportAnchorTimerRef.current);
+            pendingViewportAnchorTimerRef.current = null;
+        }
+    }, []);
     const resolveScrollContainer = React.useCallback((): HTMLDivElement | null => {
         if (scrollRef?.current) {
             return scrollRef.current;
@@ -1372,6 +1396,61 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         }
         return document.querySelector<HTMLDivElement>('[data-scrollbar="chat"]');
     }, [scrollRef]);
+    const olderHistorySentinelRef = useOlderHistoryPrefetch({
+        historyVersion: `${sessionKey}:${messages[0]?.info.id ?? 'empty'}:${messages.length}`,
+        hasMoreAbove,
+        isLoadingOlder,
+        resolveScrollContainer,
+        onLoadOlder: stableOnLoadOlder,
+    });
+
+    React.useEffect(() => {
+        const container = resolveScrollContainer();
+        if (!container) {
+            return;
+        }
+
+        const markScrollInteraction = () => {
+            const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+            scrollInteractionUntilRef.current = now + SCROLL_INTERACTION_WINDOW_MS;
+        };
+        const markExplicitScrollInteraction = () => {
+            clearPendingViewportAnchor();
+            stableOnExplicitScrollInteraction();
+            markScrollInteraction();
+        };
+        const handleKeyDown = (event: KeyboardEvent) => {
+            if (
+                event.key === 'ArrowUp'
+                || event.key === 'ArrowDown'
+                || event.key === 'PageUp'
+                || event.key === 'PageDown'
+                || event.key === 'Home'
+                || event.key === 'End'
+                || event.key === ' '
+            ) {
+                markExplicitScrollInteraction();
+            }
+        };
+
+        container.addEventListener('scroll', markScrollInteraction, { passive: true });
+        container.addEventListener('wheel', markExplicitScrollInteraction, { passive: true });
+        container.addEventListener('touchstart', markExplicitScrollInteraction, { passive: true });
+        container.addEventListener('touchmove', markExplicitScrollInteraction, { passive: true });
+        container.addEventListener('pointerdown', markExplicitScrollInteraction, { passive: true });
+        container.addEventListener('keydown', handleKeyDown);
+
+        return () => {
+            container.removeEventListener('scroll', markScrollInteraction);
+            container.removeEventListener('wheel', markExplicitScrollInteraction);
+            container.removeEventListener('touchstart', markExplicitScrollInteraction);
+            container.removeEventListener('touchmove', markExplicitScrollInteraction);
+            container.removeEventListener('pointerdown', markExplicitScrollInteraction);
+            container.removeEventListener('keydown', handleKeyDown);
+        };
+    }, [clearPendingViewportAnchor, resolveScrollContainer, stableOnExplicitScrollInteraction]);
+
+    React.useEffect(() => clearPendingViewportAnchor, [clearPendingViewportAnchor]);
 
     const displayMessages = React.useMemo(() => streamPerfMeasure('ui.message_list.retry_overlay_ms', () => {
         return applyRetryOverlay(baseDisplayMessages, {
@@ -1638,11 +1717,15 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
     });
 
     historyVirtualizer.shouldAdjustScrollPositionOnItemSizeChange = (item, _delta, instance) => {
-        if (instance.isAtEnd(MESSAGE_LIST_AT_END_THRESHOLD_PX)) {
-            return false;
-        }
-        const firstVisibleIndex = instance.range?.startIndex;
-        return firstVisibleIndex !== undefined && item.index < firstVisibleIndex;
+        const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+        return shouldCompensateVirtualItemResize({
+            isScrolling: instance.isScrolling,
+            scrollInteractionActive: now < scrollInteractionUntilRef.current,
+            processFoldTransitionActive: isProcessFoldTransitionActive(),
+            isAtEnd: instance.isAtEnd(MESSAGE_LIST_AT_END_THRESHOLD_PX),
+            itemIndex: item.index,
+            firstVisibleIndex: instance.range?.startIndex,
+        });
     };
 
     React.useEffect(() => {
@@ -1690,6 +1773,8 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
     const historyVirtualRows = shouldVirtualizeHistory && historyTotalSize >= 0
         ? historyVirtualizer.getVirtualItems()
         : [];
+    const historyVirtualRangeStart = historyVirtualRows[0]?.index ?? -1;
+    const historyVirtualRangeEnd = historyVirtualRows[historyVirtualRows.length - 1]?.index ?? -1;
 
     const allEntries = React.useMemo(() => {
         return trailingStreamingEntry ? [...historyEntries, trailingStreamingEntry] : historyEntries;
@@ -1777,6 +1862,10 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         return indexMap;
     }, [allEntries]);
 
+    const entryIndexMap = React.useMemo(() => {
+        return new Map(allEntries.map((entry, index) => [entry.key, index]));
+    }, [allEntries]);
+
     const findMessageElement = React.useCallback((messageId: string): HTMLElement | null => {
         const container = resolveScrollContainer();
         if (!container) {
@@ -1784,6 +1873,36 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         }
         return container.querySelector(`[data-message-id="${messageId}"]`);
     }, [resolveScrollContainer]);
+
+    const applyViewportAnchor = React.useCallback((anchor: MessageViewportAnchor): boolean => {
+        const container = resolveScrollContainer();
+        if (!container) {
+            return false;
+        }
+
+        const containerRect = container.getBoundingClientRect();
+        const messageElement = findMessageElement(anchor.messageId);
+        const entryElement = container.querySelector<HTMLElement>(
+            `[data-turn-entry="${CSS.escape(anchor.entryKey)}"]`,
+        );
+        const element = messageElement ?? entryElement;
+        if (!element) {
+            return false;
+        }
+
+        const desiredTop = messageElement ? anchor.offsetTop : anchor.entryOffsetTop;
+        const currentTop = element.getBoundingClientRect().top - containerRect.top;
+        const delta = currentTop - desiredTop;
+        if (delta !== 0) {
+            const nextScrollTop = container.scrollTop + delta;
+            if (shouldVirtualizeHistory) {
+                historyVirtualizer.scrollToOffset(nextScrollTop, { align: 'start', behavior: 'auto' });
+            } else {
+                container.scrollTop = nextScrollTop;
+            }
+        }
+        return true;
+    }, [findMessageElement, historyVirtualizer, resolveScrollContainer, shouldVirtualizeHistory]);
 
     const scrollHistoryIndexIntoView = React.useCallback((index: number, behavior: ScrollBehavior = 'auto') => {
         if (!shouldVirtualizeHistory || index < 0 || index >= historyEntries.length) {
@@ -1794,6 +1913,17 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         historyVirtualizer.scrollToIndex(index, { align: 'start', behavior: virtualizerBehavior });
         return true;
     }, [historyEntries.length, historyVirtualizer, shouldVirtualizeHistory]);
+
+    React.useLayoutEffect(() => {
+        const anchor = pendingViewportAnchorRef.current;
+        if (!anchor || !applyViewportAnchor(anchor)) {
+            return;
+        }
+    }, [applyViewportAnchor, historyTotalSize, historyVirtualRangeEnd, historyVirtualRangeStart]);
+
+    React.useLayoutEffect(() => {
+        clearPendingViewportAnchor();
+    }, [clearPendingViewportAnchor, sessionKey]);
 
     const scrollMessageElementIntoView = React.useCallback((messageId: string, behavior: ScrollBehavior = 'auto') => {
         const container = resolveScrollContainer();
@@ -1813,7 +1943,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         return true;
     }, [findMessageElement, resolveScrollContainer]);
 
-    React.useEffect(() => {
+    React.useLayoutEffect(() => {
         if (!ref) {
             return;
         }
@@ -1885,8 +2015,15 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
                     return !isStuckSticky && !isInsideStuckStickyWrapper(node, containerRect);
                 };
 
-                const firstVisible = nodes.find((node) => isVisibleAnchorCandidate(node, false))
-                    ?? nodes.find((node) => isVisibleAnchorCandidate(node, true));
+                const visibleCandidates = nodes.filter((node) => isVisibleAnchorCandidate(node, false));
+                const stickyCandidates = nodes.filter((node) => isVisibleAnchorCandidate(node, true));
+                const hasStableTurnEntry = (node: HTMLElement): boolean => {
+                    return node.closest<HTMLElement>('[data-turn-entry]')?.dataset.turnEntry?.startsWith('turn:') === true;
+                };
+                const firstVisible = visibleCandidates.find(hasStableTurnEntry)
+                    ?? visibleCandidates[0]
+                    ?? stickyCandidates.find(hasStableTurnEntry)
+                    ?? stickyCandidates[0];
                 if (!firstVisible) {
                     return null;
                 }
@@ -1896,44 +2033,46 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
                     return null;
                 }
 
+                const entry = firstVisible.closest<HTMLElement>('[data-turn-entry]');
+                const entryKey = entry?.dataset.turnEntry;
+                if (!entry || !entryKey) {
+                    return null;
+                }
+
                 return {
                     messageId,
                     offsetTop: firstVisible.getBoundingClientRect().top - containerRect.top,
+                    entryKey,
+                    entryOffsetTop: entry.getBoundingClientRect().top - containerRect.top,
                 };
             },
 
-            restoreViewportAnchor: (anchor: { messageId: string; offsetTop: number }) => {
+            restoreViewportAnchor: (anchor: MessageViewportAnchor) => {
                 const container = resolveScrollContainer();
                 if (!container) {
                     return false;
                 }
 
-                if (!messageIndexMap.has(anchor.messageId)) {
+                const index = messageIndexMap.get(anchor.messageId) ?? entryIndexMap.get(anchor.entryKey);
+                if (index === undefined) {
                     return false;
                 }
 
-                const applyAnchor = (): boolean => {
-                    const element = findMessageElement(anchor.messageId);
-                    if (!element) {
-                        return false;
-                    }
-                    const containerRect = container.getBoundingClientRect();
-                    const targetTop = element.getBoundingClientRect().top - containerRect.top;
-                    const delta = targetTop - anchor.offsetTop;
-                    if (delta !== 0) {
-                        container.scrollTop += delta;
-                    }
+                if (applyViewportAnchor(anchor)) {
                     return true;
-                };
-
-                if (!applyAnchor()) {
-                    const index = messageIndexMap.get(anchor.messageId);
-                    if (typeof index === 'number' && index < historyEntries.length) {
-                        scrollHistoryIndexIntoView(index, 'auto');
-                    }
                 }
 
-                return applyAnchor();
+                if (shouldVirtualizeHistory && index < historyEntries.length) {
+                    pendingViewportAnchorRef.current = anchor;
+                    if (pendingViewportAnchorTimerRef.current) {
+                        clearTimeout(pendingViewportAnchorTimerRef.current);
+                    }
+                    pendingViewportAnchorTimerRef.current = setTimeout(clearPendingViewportAnchor, 1200);
+                    scrollHistoryIndexIntoView(index, 'auto');
+                    return true;
+                }
+
+                return false;
             },
 
             scrollToBottom: () => {
@@ -1960,14 +2099,14 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         return () => {
             objectRef.current = null;
         };
-    }, [findMessageElement, historyEntries.length, historyVirtualizer, messageIndexMap, resolveScrollContainer, scrollHistoryIndexIntoView, scrollMessageElementIntoView, shouldVirtualizeHistory, trailingStreamingEntry, turnIndexMap, ref]);
+    }, [applyViewportAnchor, clearPendingViewportAnchor, entryIndexMap, findMessageElement, historyEntries.length, historyVirtualizer, messageIndexMap, resolveScrollContainer, scrollHistoryIndexIntoView, scrollMessageElementIntoView, shouldVirtualizeHistory, trailingStreamingEntry, turnIndexMap, ref]);
 
     const disableFadeIn = false;
 
     return (
         <div>
                 {showLoadOlder && (
-                    <div className="flex justify-center py-3">
+                    <div ref={olderHistorySentinelRef} className="flex justify-center py-3">
                         {isLoadingOlder ? (
                             <span className="text-xs uppercase tracking-wide text-muted-foreground/80">
                                 Loading…
@@ -1975,7 +2114,9 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
                         ) : (
                             <button
                                 type="button"
-                                onClick={stableOnLoadOlder}
+                                onClick={() => {
+                                    void stableOnLoadOlder({ userInitiated: true });
+                                }}
                                 className="text-xs uppercase tracking-wide text-muted-foreground/80 hover:text-foreground"
                             >
                                 Load older messages

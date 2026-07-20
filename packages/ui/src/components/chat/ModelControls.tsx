@@ -28,7 +28,7 @@ import { useContextStore } from '@/stores/contextStore';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
-import { useSessionMessages, useSessionMessagesResolved } from '@/sync/sync-context';
+import { useLatestRealUserMessage, useSessionMessagesResolved } from '@/sync/sync-context';
 import { useSync } from '@/sync/use-sync';
 import { useUIStore } from '@/stores/useUIStore';
 import { useModelLists } from '@/hooks/useModelLists';
@@ -762,38 +762,30 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         currentSessionId ?? '',
         currentSessionDirectory ?? undefined,
     );
-    const currentSessionMessagesFromSync = useSessionMessages(currentSessionId ?? '', currentSessionDirectory ?? undefined);
+    const latestRealUserMessage = useLatestRealUserMessage(currentSessionId ?? '', currentSessionDirectory ?? undefined);
     const latestLoadedUserChoice = React.useMemo(() => {
-        for (let i = currentSessionMessagesFromSync.length - 1; i >= 0; i -= 1) {
-            const message = currentSessionMessagesFromSync[i] as typeof currentSessionMessagesFromSync[number] & {
-                model?: { providerID?: string; modelID?: string; variant?: string };
-                variant?: string;
-                mode?: string;
-            };
-            if (message.role !== 'user') {
-                continue;
-            }
-
-            const providerID = typeof message.model?.providerID === 'string' && message.model.providerID.trim().length > 0
-                ? message.model.providerID
-                : undefined;
-            const modelID = typeof message.model?.modelID === 'string' && message.model.modelID.trim().length > 0
-                ? message.model.modelID
-                : undefined;
-            const agent = typeof message.agent === 'string' && message.agent.trim().length > 0
-                ? message.agent
-                : (typeof message.mode === 'string' && message.mode.trim().length > 0 ? message.mode : undefined);
-            // OpenCode 1.4.0 moved variant from top-level to model.variant.
-            // Prefer the new location, fall back to the legacy one for older servers.
-            const variantCandidate = message.model?.variant ?? message.variant;
-            const variant = typeof variantCandidate === 'string' && variantCandidate.trim().length > 0
-                ? variantCandidate
-                : undefined;
-
-            return { id: message.id, agent, providerID, modelID, variant };
-        }
-        return null;
-    }, [currentSessionMessagesFromSync]);
+        if (!latestRealUserMessage) return null;
+        const message = latestRealUserMessage as typeof latestRealUserMessage & {
+            model?: { providerID?: string; modelID?: string; variant?: string };
+            variant?: string;
+            mode?: string;
+        };
+        const providerID = typeof message.model?.providerID === 'string' && message.model.providerID.trim().length > 0
+            ? message.model.providerID
+            : undefined;
+        const modelID = typeof message.model?.modelID === 'string' && message.model.modelID.trim().length > 0
+            ? message.model.modelID
+            : undefined;
+        const agent = typeof message.agent === 'string' && message.agent.trim().length > 0
+            ? message.agent
+            : (typeof message.mode === 'string' && message.mode.trim().length > 0 ? message.mode : undefined);
+        // OpenCode 1.4.0 moved variant from top-level to model.variant.
+        const variantCandidate = message.model?.variant ?? message.variant;
+        const variant = typeof variantCandidate === 'string' && variantCandidate.trim().length > 0
+            ? variantCandidate
+            : undefined;
+        return { id: message.id, agent, providerID, modelID, variant };
+    }, [latestRealUserMessage]);
     const latestLoadedUserChoiceKey = React.useMemo(() => {
         if (!currentSessionId || !latestLoadedUserChoice) {
             return null;
@@ -1212,7 +1204,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     }, [currentAgentName, currentSessionId, getAgentModelForSession, tryApplyModelSelection, contextHydrated]);
 
     React.useEffect(() => {
-        if (!contextHydrated || !currentAgentName) {
+        if (!contextHydrated || !uiAgentName) {
             manualVariantSelectionRef.current = false;
             setCurrentVariant(undefined);
             return;
@@ -1235,6 +1227,11 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             return;
         }
 
+        if (manualVariantSelectionRef.current) {
+            manualVariantSelectionRef.current = false;
+            return;
+        }
+
         // Draft state (no session yet): seed from settings default, but don't override
         // user selection while drafting.
         if (!currentSessionId) {
@@ -1249,7 +1246,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
 
         const savedVariant = getAgentModelVariantForSession(
             currentSessionId,
-            currentAgentName,
+            uiAgentName,
             currentProviderId,
             currentModelId,
         );
@@ -1264,13 +1261,13 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         availableVariants,
         contextHydrated,
         currentSessionId,
-        currentAgentName,
         currentProviderId,
         currentModelId,
         currentVariant,
         getAgentModelVariantForSession,
         setCurrentVariant,
         settingsDefaultVariant,
+        uiAgentName,
     ]);
 
     React.useEffect(() => {

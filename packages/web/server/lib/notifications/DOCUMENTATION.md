@@ -105,6 +105,10 @@ The `settings` parameter for `prepareNotificationLastMessage` supports `maxLastM
 
 ## Notes for contributors
 
+### Viewed-session authority
+
+The main UI and Electron mini chat report the focused selected session through `POST /api/sessions/:id/view` and clear it through `/unview`, using a per-tab `x-client-id`. `session-runtime.js` owns the authoritative `viewedByClients` heartbeat map and suppresses unread completion records while at least one client is actively viewing the session. Focus, visibility, session switches, page lifecycle, and a 20-second visible heartbeat are all part of this contract; server-side view ownership expires after 60 seconds without a heartbeat so a crashed or disconnected page cannot suppress unread state indefinitely.
+
 ### Adding new notification helpers
 1. Add new helper functions to `packages/web/server/lib/notifications/message.js`.
 2. Export functions that are intended for public use.
