@@ -1,5 +1,6 @@
 import React from 'react';
-import { Dialog, DialogContent } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
+import { Button } from '@/components/ui/button';
 import { File as PierreFile, PatchDiff } from '@pierre/diffs/react';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { createPortal } from 'react-dom';
@@ -337,7 +338,6 @@ const ImagePreviewDialog: React.FC<{
 
     const [currentIndex, setCurrentIndex] = React.useState(0);
     const [imageNaturalSize, setImageNaturalSize] = React.useState<{ width: number; height: number } | null>(null);
-    const { isRendered, isVisible, isTransitioning } = usePreviewOverlayState(popup.open);
     const viewport = usePreviewViewport(popup.open);
 
     React.useEffect(() => {
@@ -409,11 +409,6 @@ const ImagePreviewDialog: React.FC<{
         }
 
         const onKeyDown = (event: KeyboardEvent) => {
-            if (event.key === 'Escape') {
-                onOpenChange(false);
-                return;
-            }
-
             if (event.key === 'ArrowLeft' && hasMultipleImages) {
                 event.preventDefault();
                 showPrevious();
@@ -430,7 +425,7 @@ const ImagePreviewDialog: React.FC<{
         return () => {
             window.removeEventListener('keydown', onKeyDown);
         };
-    }, [hasMultipleImages, onOpenChange, popup.open, showNext, showPrevious]);
+    }, [hasMultipleImages, popup.open, showNext, showPrevious]);
 
     React.useEffect(() => {
         setImageNaturalSize(null);
@@ -457,110 +452,93 @@ const ImagePreviewDialog: React.FC<{
         };
     }, [imageNaturalSize, isMobile, viewport.height, viewport.width]);
 
-    if (!isRendered || !currentImage || typeof document === 'undefined') {
+    if (!currentImage) {
         return null;
     }
 
-    const content = (
-        <div className={cn('fixed inset-0 z-50', popup.open ? 'pointer-events-auto' : 'pointer-events-none')}>
-            <div
-                aria-hidden="true"
+    return (
+        <Dialog open={popup.open} onOpenChange={onOpenChange}>
+            <DialogContent
+                showCloseButton={false}
                 className={cn(
-                    'absolute inset-0 bg-black/40',
-                    isTransitioning && 'transition-opacity duration-150 ease-out',
-                    isVisible ? 'opacity-100' : 'opacity-0'
+                    'w-auto max-w-none max-h-none gap-2 overflow-visible border-0 bg-transparent p-0 shadow-none',
+                    isMobile ? 'mx-2.5' : 'mx-4'
                 )}
-                onMouseDown={() => onOpenChange(false)}
-            />
-
+                style={{ width: `${imageDisplaySize.width}px` }}
+            >
             {hasMultipleImages && (
                 <>
-                    <button
-                        type="button"
-                        onMouseDown={(event) => event.stopPropagation()}
+                    <Button
+                        variant="ghost"
+                        size="icon"
                         onClick={showPrevious}
-                        className="absolute left-3 top-1/2 -translate-y-1/2 z-10 h-10 w-10 flex items-center justify-center rounded-full bg-black/40 text-foreground/90 hover:bg-black/55 focus:outline-none focus:ring-2 focus:ring-primary/60"
+                        className="fixed left-3 top-1/2 z-10 size-10 -translate-y-1/2 rounded-full border border-border/60 bg-background/80 text-foreground backdrop-blur-sm hover:bg-interactive-hover"
                         aria-label={t('chat.toolOutputDialog.image.previousAria')}
                     >
                         <Icon name="arrow-left-s" className="h-6 w-6" />
-                    </button>
-                    <button
-                        type="button"
-                        onMouseDown={(event) => event.stopPropagation()}
+                    </Button>
+                    <Button
+                        variant="ghost"
+                        size="icon"
                         onClick={showNext}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 z-10 h-10 w-10 flex items-center justify-center rounded-full bg-black/40 text-foreground/90 hover:bg-black/55 focus:outline-none focus:ring-2 focus:ring-primary/60"
+                        className="fixed right-3 top-1/2 z-10 size-10 -translate-y-1/2 rounded-full border border-border/60 bg-background/80 text-foreground backdrop-blur-sm hover:bg-interactive-hover"
                         aria-label={t('chat.toolOutputDialog.image.nextAria')}
                     >
                         <Icon name="arrow-right-s" className="h-6 w-6" />
-                    </button>
+                    </Button>
                 </>
             )}
 
-            <div
-                className={cn(
-                    'absolute inset-0 flex items-center justify-center pointer-events-none',
-                    isMobile ? 'p-2.5' : 'p-4'
-                )}
-            >
-                <div
-                    className={cn(
-                        'pointer-events-auto flex flex-col gap-2',
-                        isTransitioning && 'transition-opacity duration-150 ease-out',
-                        isVisible ? 'opacity-100' : 'opacity-0'
-                    )}
-                    style={{ width: `${imageDisplaySize.width}px` }}
-                >
-                    <div className="flex items-center justify-between gap-2">
-                        <div className="min-w-0 flex-1 text-foreground typography-ui-header font-semibold truncate" title={imageTitle}>
-                            {imageTitle}
-                        </div>
-                        {filePanelTarget ? (
-                            <button
-                                type="button"
-                                className="h-8 w-8 flex items-center justify-center rounded-lg text-muted-foreground/80 hover:text-foreground focus:outline-none focus:ring-2 focus:ring-primary/60"
-                                onClick={openImageInFilePanel}
-                                aria-label={t('chat.toolOutputDialog.image.openFilePanelAria')}
-                                title={t('chat.toolOutputDialog.image.openFilePanelAria')}
-                            >
-                                <Icon name="file-search" className="h-4 w-4" />
-                            </button>
-                        ) : null}
-                        <button
-                            type="button"
-                            className="h-8 w-8 flex items-center justify-center rounded-lg text-muted-foreground/80 hover:text-foreground focus:outline-none focus:ring-2 focus:ring-primary/60"
-                            onClick={() => onOpenChange(false)}
-                            aria-label={t('chat.toolOutputDialog.image.closeAria')}
+                <div className="flex items-center justify-between gap-2">
+                    <DialogTitle className="min-w-0 flex-1 truncate" title={imageTitle}>
+                        {imageTitle}
+                    </DialogTitle>
+                    {filePanelTarget ? (
+                        <Button
+                            variant="ghost"
+                            size="icon"
+                            className="size-8 text-muted-foreground"
+                            onClick={openImageInFilePanel}
+                            aria-label={t('chat.toolOutputDialog.image.openFilePanelAria')}
+                            title={t('chat.toolOutputDialog.image.openFilePanelAria')}
                         >
-                            <Icon name="close" className="h-4 w-4" />
-                        </button>
-                    </div>
-
-                    <img
-                        src={currentImage.url}
-                        alt={imageTitle}
-                        className="block object-contain"
-                        style={{ width: `${imageDisplaySize.width}px`, height: `${imageDisplaySize.height}px` }}
-                        loading="lazy"
-                        onLoad={(event) => {
-                            const element = event.currentTarget;
-                            const width = element.naturalWidth;
-                            const height = element.naturalHeight;
-                            if (width > 0 && height > 0) {
-                                setImageNaturalSize((previous) => {
-                                    if (previous && previous.width === width && previous.height === height) {
-                                        return previous;
-                                    }
-                                    return { width, height };
-                                });
-                            }
-                        }}
-                    />
+                            <Icon name="file-search" className="h-4 w-4" />
+                        </Button>
+                    ) : null}
+                    <Button
+                        variant="ghost"
+                        size="icon"
+                        className="size-8 text-muted-foreground"
+                        onClick={() => onOpenChange(false)}
+                        aria-label={t('chat.toolOutputDialog.image.closeAria')}
+                    >
+                        <Icon name="close" className="h-4 w-4" />
+                    </Button>
                 </div>
-            </div>
-        </div>
-    );
 
-    return createPortal(content, document.body);
+                <img
+                    src={currentImage.url}
+                    alt={imageTitle}
+                    className="block object-contain"
+                    style={{ width: `${imageDisplaySize.width}px`, height: `${imageDisplaySize.height}px` }}
+                    loading="lazy"
+                    onLoad={(event) => {
+                        const element = event.currentTarget;
+                        const width = element.naturalWidth;
+                        const height = element.naturalHeight;
+                        if (width > 0 && height > 0) {
+                            setImageNaturalSize((previous) => {
+                                if (previous && previous.width === width && previous.height === height) {
+                                    return previous;
+                                }
+                                return { width, height };
+                            });
+                        }
+                    }}
+                />
+            </DialogContent>
+        </Dialog>
+    );
 };
 
 // ── PERF-007: Virtualised sub-components for dialog ──────────────────

@@ -1,4 +1,3 @@
-import React from 'react';
 import { Icon } from "@/components/icon/Icon";
 
 export const getToolIcon = (toolName: string) => {
@@ -52,6 +51,18 @@ export const getToolIcon = (toolName: string) => {
     }
     if (tool === 'task') {
         return <Icon name="ai-agent" className={iconClass} />;
+    }
+    if (tool.includes('memory')) {
+        return <Icon name="database-2" className={iconClass} />;
+    }
+    if (tool.includes('search') || tool.includes('query')) {
+        return <Icon name="menu-search" className={iconClass} />;
+    }
+    if (tool.includes('extract_text')) {
+        return <Icon name="file-text" className={iconClass} />;
+    }
+    if (tool === 'look_at' || tool.includes('analyze_image') || tool.includes('screenshot')) {
+        return <Icon name="file-image" className={iconClass} />;
     }
     if (tool === 'question') {
         return <Icon name="survey" className={iconClass} />;

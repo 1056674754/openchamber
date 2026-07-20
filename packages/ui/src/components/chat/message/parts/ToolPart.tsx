@@ -53,6 +53,12 @@ import { DiffViewToggle, type DiffViewMode } from '../DiffViewToggle';
 import { MinDurationShineText } from './MinDurationShineText';
 import { ToolRevealOnMount } from './ToolRevealOnMount';
 import { getToolIcon } from './toolPresentation';
+import { ToolInputPreview } from './ToolInputPreview';
+import {
+    buildToolInputPresentation,
+    buildToolResultSummary,
+    matchesToolInputSummary,
+} from './toolInputPresentation';
 import { useDurationTickerNow } from './useDurationTicker';
 import { resolveFallbackTaskSessionId } from './resolveFallbackTaskSessionId';
 import { readTaskTagSessionIdFromOutput } from './taskSessionIdParser';
@@ -830,6 +836,16 @@ const getToolDescription = (part: ToolPartType, state: ToolStateUnion, currentDi
 
     if (part.tool === 'lsp') {
         return getLspToolDescription(input, currentDirectory);
+    }
+
+    const inputSummary = buildToolInputPresentation(part.tool, input).summary;
+    if (inputSummary) {
+        return inputSummary;
+    }
+
+    const metadataSummary = buildToolInputPresentation(part.tool, metadata).summary;
+    if (metadataSummary) {
+        return metadataSummary;
     }
 
     const desc = input?.description || metadata?.description || ('title' in state && state.title) || '';
@@ -1720,6 +1736,8 @@ interface ToolExpandedContentProps {
     state: ToolStateUnion;
     syntaxTheme: { [key: string]: React.CSSProperties };
     currentDirectory: string;
+    isMobile: boolean;
+    sessionId?: string;
     onShowPopup?: (content: ToolPopupContent) => void;
 }
 
@@ -1728,11 +1746,17 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
     state,
     syntaxTheme,
     currentDirectory,
+    isMobile,
+    sessionId,
     onShowPopup,
 }) => {
     const { t } = useI18n();
     const { pierreTheme, pierreThemeType } = usePierreThemeConfig();
     const [diffViewMode, setDiffViewMode] = React.useState<DiffViewMode>('unified');
+    const [isMediaResultExpanded, setIsMediaResultExpanded] = React.useState(false);
+    const setCurrentSession = useSessionUIStore((storeState) => storeState.setCurrentSession);
+    const openContextPanelTab = useUIStore((storeState) => storeState.openContextPanelTab);
+    const runtime = React.useContext(RuntimeAPIContext);
     const stateWithData = state as ToolStateWithMetadata;
     const metadata = stateWithData.metadata;
     const input = stateWithData.input;
@@ -1751,9 +1775,75 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
         [currentDirectory, diffContent, metadata]
     );
     const hasVisualDiffEntry = diffEntries.some((entry) => entry.renderMode === 'diff');
-    const hideToolInputPreview = part.tool === 'apply_patch'
+    const hideRawToolInputPreview = part.tool === 'apply_patch'
         || part.tool === 'edit'
         || part.tool === 'multiedit';
+    const hideStructuredInputPreview = hideRawToolInputPreview
+        || part.tool === 'bash'
+        || part.tool === 'shell'
+        || part.tool === 'cmd'
+        || part.tool === 'terminal'
+        || part.tool === 'write'
+        || part.tool === 'create'
+        || part.tool === 'file_write'
+        || part.tool === 'question'
+        || part.tool === 'task';
+    const inputPresentation = React.useMemo(
+        () => buildToolInputPresentation(part.tool, input),
+        [input, part.tool],
+    );
+    const hasStructuredInput = !hideStructuredInputPreview
+        && (inputPresentation.fields.length > 0 || inputPresentation.media.length > 0);
+    const hasCompactMediaPreview = hasStructuredInput && inputPresentation.media.length > 0;
+    const compactMediaResultSummary = React.useMemo(() => {
+        if (!hasCompactMediaPreview) {
+            return '';
+        }
+        if (state.status === 'error' && 'error' in state) {
+            return state.error;
+        }
+        if (state.status !== 'completed' || !('output' in state)) {
+            return '';
+        }
+        return buildToolResultSummary(outputString) || t('chat.toolPart.noOutputProduced');
+    }, [hasCompactMediaPreview, outputString, state, t]);
+    const linkedSubagentSessionId = React.useMemo(() => {
+        if (!hasCompactMediaPreview) {
+            return undefined;
+        }
+        const partMetadata = (part as unknown as { metadata?: unknown }).metadata;
+        const candidate = readTaskSessionIdFromRecord(metadata)
+            ?? readTaskSessionIdFromRecord(partMetadata)
+            ?? parseTaskMetadataBlock(outputString).sessionId;
+        return candidate && candidate !== sessionId ? candidate : undefined;
+    }, [hasCompactMediaPreview, metadata, outputString, part, sessionId]);
+    const handleOpenLinkedSubagent = React.useCallback(() => {
+        if (!linkedSubagentSessionId || !currentDirectory) {
+            return;
+        }
+        const targetServerId = serverRegistry.getServerForSession(linkedSubagentSessionId)
+            ?? (sessionId ? serverRegistry.getServerForSession(sessionId) : undefined);
+        if (isMobile || runtime?.runtime.isVSCode) {
+            setCurrentSession(
+                linkedSubagentSessionId,
+                currentDirectory,
+                targetServerId ? { serverId: targetServerId } : undefined,
+            );
+            return;
+        }
+        openContextPanelTab(currentDirectory, {
+            mode: 'chat',
+            dedupeKey: `session:${linkedSubagentSessionId}`,
+            label: t('contextPanel.mode.chat'),
+            readOnly: true,
+        });
+    }, [currentDirectory, isMobile, linkedSubagentSessionId, openContextPanelTab, runtime, sessionId, setCurrentSession, t]);
+    const subagentType = typeof input?.subagent_type === 'string' && input.subagent_type.trim().length > 0
+        ? input.subagent_type.trim()
+        : 'Subagent';
+    const subagentLabel = t('chat.toolPart.openSubtask', {
+        type: subagentType.charAt(0).toUpperCase() + subagentType.slice(1),
+    });
     const diagnosticSection = React.useMemo(
         () => getToolDiagnosticSection(part.tool, input, metadata, currentDirectory),
         [currentDirectory, input, metadata, part.tool],
@@ -1774,7 +1864,9 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
 
         return formatInputForDisplay(input, part.tool);
     }, [input, part.tool]);
-    const hasInputText = !hideToolInputPreview && inputTextContent.trim().length > 0;
+    const hasInputText = !hideRawToolInputPreview
+        && !hasStructuredInput
+        && inputTextContent.trim().length > 0;
     const isWriteLikeTool = part.tool === 'write' || part.tool === 'create' || part.tool === 'file_write';
     const writeLikeInputPatch = React.useMemo(() => {
         if (!isWriteLikeTool || !hasInputText) {
@@ -1792,6 +1884,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
 
     React.useEffect(() => {
         setDiffViewMode('unified');
+        setIsMediaResultExpanded(false);
     }, [part.id]);
 
     const renderScrollableBlock = (
@@ -1993,13 +2086,29 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
     return (
         <div
             className={cn(
-                'relative pr-2 pb-2 pt-2 space-y-2 pl-4'
+                'relative pr-2 pl-4',
+                hasCompactMediaPreview ? 'space-y-1 py-1' : 'space-y-2 pb-2 pt-2',
             )}
         >
             {part.tool === 'question' ? (
                 renderResultContent()
             ) : (
                 <>
+                    {hasStructuredInput ? (
+                        <ToolInputPreview
+                            currentDirectory={currentDirectory}
+                            presentation={inputPresentation}
+                            sessionId={sessionId}
+                            onShowPopup={onShowPopup}
+                            resultSummary={compactMediaResultSummary}
+                            resultLabel={state.status === 'error' ? t('chat.toolPart.error') : t('chat.toolPart.output')}
+                            resultExpanded={isMediaResultExpanded}
+                            onToggleResult={compactMediaResultSummary ? () => setIsMediaResultExpanded((expanded) => !expanded) : undefined}
+                            onOpenSubagent={linkedSubagentSessionId ? handleOpenLinkedSubagent : undefined}
+                            subagentLabel={subagentLabel}
+                        />
+                    ) : null}
+
                     {hasInputText ? (
                         <div className="my-1">
                             {renderScrollableBlock(
@@ -2027,7 +2136,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                         </div>
                     ) : null}
 
-                    {state.status === 'completed' && 'output' in state && (
+                    {state.status === 'completed' && 'output' in state && (!hasCompactMediaPreview || isMediaResultExpanded) && (
                         <div>
                             {(part.tool === 'edit' || part.tool === 'multiedit' || part.tool === 'apply_patch' || part.tool === 'write') && hasVisualDiffEntry ? (
                                 <div className="mb-1 flex items-center justify-end gap-2">
@@ -2042,7 +2151,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                         </div>
                     )}
 
-                    {state.status === 'error' && 'error' in state && (
+                    {state.status === 'error' && 'error' in state && (!hasCompactMediaPreview || isMediaResultExpanded) && (
                         <div>
                             <div className="typography-meta font-medium text-muted-foreground/80 mb-1">{t('chat.toolPart.error')}</div>
                             <div className="typography-meta p-2 rounded-xl border" style={{
@@ -2799,6 +2908,11 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
     const normalizedPart = normalizedPartTool !== part.tool ? ({ ...part, tool: normalizedPartTool } as ToolPartType) : part;
     const descriptionPath = getToolDescriptionPath(normalizedPart, state, currentDirectory);
     const description = getToolDescription(normalizedPart, state, currentDirectory);
+    const headerInputPresentation = React.useMemo(
+        () => buildToolInputPresentation(normalizedPartTool || part.tool, input),
+        [input, normalizedPartTool, part.tool],
+    );
+    const hasMediaInput = headerInputPresentation.media.length > 0;
     const displayName = getToolMetadata(normalizedPartTool || part.tool).displayName;
     
     // Tool title/description — shown inline as context
@@ -2828,6 +2942,11 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
         }
         return null;
     }, [descriptionPath, normalizedPartTool, stateWithData, input]);
+    const duplicateExpandedMediaJustification = Boolean(
+        isExpanded
+        && hasMediaInput
+        && matchesToolInputSummary(justificationText, input, headerInputPresentation)
+    );
 
     const runtime = React.useContext(RuntimeAPIContext);
 
@@ -2995,7 +3114,7 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
                 {!isMultiFileApplyPatch && (
                     <div className="flex items-center gap-1 flex-1 min-w-0 typography-meta" style={{ color: 'var(--tools-description)' }}>
                         <div className="flex items-center gap-1 flex-1 min-w-0">
-                            {justificationText && (
+                            {justificationText && !duplicateExpandedMediaJustification && (
                                 <span
                                     className="min-w-0 truncate typography-meta"
                                     style={{ color: 'var(--tools-description)', opacity: 0.8 }}
@@ -3016,7 +3135,7 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
                                     <QuestionToolDescription part={normalizedPart} />
                                 </Text>
                             ) : null}
-                            {!justificationText && normalizedPartTool !== 'lsp' && normalizedPartTool !== 'question' && description && (
+                            {!justificationText && normalizedPartTool !== 'lsp' && normalizedPartTool !== 'question' && description && (!isExpanded || !hasMediaInput) && (
                                 descriptionPath && description === descriptionPath ? (
                                     renderAnimatedPathWithIcon(descriptionPath, animateTailText, false, showToolFileIcons)
                                 ) : (
@@ -3085,6 +3204,8 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
                                 state={state}
                                 syntaxTheme={syntaxTheme}
                                 currentDirectory={currentDirectory}
+                                isMobile={isMobile}
+                                sessionId={messageSessionId}
                                 onShowPopup={onShowPopup}
                             />
                         </div>

@@ -112,6 +112,17 @@ export const TOOL_METADATA: Record<string, ToolMetadata> = {
     ]
   },
 
+  look_at: {
+    displayName: 'Inspect Media',
+    category: 'ai',
+    outputLanguage: 'markdown',
+    inputFields: [
+      { key: 'file_path', label: 'File', type: 'file' },
+      { key: 'file_paths', label: 'Files', type: 'file' },
+      { key: 'goal', label: 'Goal', type: 'text' },
+    ]
+  },
+
   webfetch: {
     displayName: 'Fetch URL',
     category: 'web',
@@ -217,11 +228,23 @@ export const TOOL_METADATA: Record<string, ToolMetadata> = {
   };
 
 function formatUnknownToolDisplayName(toolName: string): string {
-  return toolName
+  const words = toolName
     .trim()
-    .replace(/[_-]+/g, ' ')
+    .replace(/[._:/-]+/g, ' ')
     .replace(/\s+/g, ' ')
-    .replace(/^./, (char) => char.toUpperCase());
+    .split(' ')
+    .filter(Boolean);
+  const actionWords = new Set([
+    'add', 'analyze', 'call', 'create', 'delete', 'download', 'execute', 'extract',
+    'fetch', 'find', 'get', 'inspect', 'list', 'look', 'query', 'read', 'run',
+    'search', 'send', 'update', 'upload', 'write',
+  ]);
+  const actionIndex = words.findIndex((word) => actionWords.has(word.toLowerCase()));
+  const displayWords = actionIndex > 0 && actionIndex < words.length - 1
+    ? words.slice(actionIndex)
+    : words;
+
+  return displayWords.join(' ').replace(/^./, (char) => char.toUpperCase());
 }
 
 export function getToolMetadata(toolName: string): ToolMetadata {
@@ -702,6 +725,41 @@ export function getImageMimeType(filePath: string): string {
   return mimeMap[ext || ''] || 'image/png';
 }
 
+const SENSITIVE_TOOL_INPUT_KEY_PATTERN = /(?:^|_)(?:api_?key|(?:access|private|secret|signing|ssh)_?key|auth|authorization|cookies?|credentials?|pass(?:word|wd)|secrets?|tokens?)(?:_|$)/i;
+
+export function isSensitiveToolInputKey(key: string): boolean {
+  const normalizedKey = key
+    .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+    .replace(/[\s.-]+/g, '_')
+    .toLowerCase();
+  return SENSITIVE_TOOL_INPUT_KEY_PATTERN.test(normalizedKey);
+}
+
+function sanitizeToolInputValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(sanitizeToolInputValue);
+  }
+  if (!value || typeof value !== 'object') {
+    return value;
+  }
+
+  return Object.fromEntries(
+    Object.entries(value).map(([key, nestedValue]) => [
+      key,
+      isSensitiveToolInputKey(key) ? '[redacted]' : sanitizeToolInputValue(nestedValue),
+    ]),
+  );
+}
+
+export function sanitizeToolInputForDisplay(input: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(input).map(([key, value]) => [
+      key,
+      isSensitiveToolInputKey(key) ? '[redacted]' : sanitizeToolInputValue(value),
+    ]),
+  );
+}
+
 const DIAGRAM_EXTENSIONS = ['drawio', 'dio'];
 
 export function isDrawioFile(filePath: string): boolean {
@@ -711,9 +769,10 @@ export function isDrawioFile(filePath: string): boolean {
 
 export function formatToolInput(input: Record<string, unknown>, toolName: string): string {
   if (!input) return '';
+  const displayInput = sanitizeToolInputForDisplay(input);
 
   const getString = (key: string): string | null => {
-    const val = input[key];
+    const val = displayInput[key];
     return typeof val === 'string' ? val : (typeof val === 'number' ? String(val) : null);
   };
 
@@ -749,21 +808,21 @@ export function formatToolInput(input: Record<string, unknown>, toolName: string
     if (desc) return desc;
   }
 
-  if (toolName === 'apply_patch' && typeof input === 'object') {
+  if (toolName === 'apply_patch' && typeof displayInput === 'object') {
     const patchText = getString('patchText') || getString('patch_text') || getString('patch');
     if (patchText) {
       return patchText;
     }
   }
 
-  if ((toolName === 'edit' || toolName === 'multiedit') && typeof input === 'object') {
+  if ((toolName === 'edit' || toolName === 'multiedit') && typeof displayInput === 'object') {
     const filePath = getString('filePath') || getString('file_path') || getString('path');
     if (filePath) {
       return `File path: ${filePath}`;
     }
   }
 
-  if (toolName === 'write' && typeof input === 'object') {
+  if (toolName === 'write' && typeof displayInput === 'object') {
 
     const content = getString('content');
     if (content) {
@@ -771,8 +830,8 @@ export function formatToolInput(input: Record<string, unknown>, toolName: string
     }
   }
 
-  if (typeof input === 'object') {
-    const entries = Object.entries(input)
+  if (typeof displayInput === 'object') {
+    const entries = Object.entries(displayInput)
       .filter(([, value]) => value !== undefined && value !== null && value !== '')
       .map(([key, value]) => {
 
