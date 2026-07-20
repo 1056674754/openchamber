@@ -53,6 +53,11 @@ type BuildOptimisticPartsInput = {
 
 export type SendDeliveryMode = "normal" | "steer"
 
+export type BlockingRequestTarget = {
+  readonly directory?: string
+  readonly serverId?: string
+}
+
 export class SessionBusyError extends Error {
   readonly sessionId: string
   readonly deliveryMode: SendDeliveryMode
@@ -1080,10 +1085,16 @@ export async function respondToPermission(
   sessionId: string,
   requestId: string,
   response: "once" | "always" | "reject",
+  target?: BlockingRequestTarget,
 ): Promise<void> {
-  await waitForConnectionOrThrow(serverRegistry.getServerForSession(sessionId))
-  const directory = requireBlockingRequestDirectory("permission", sessionId, requestId)
-  await sendPermissionResponse(sessionId, requestId, response, directory, "Permission reply failed")
+  const serverId = target?.serverId ?? serverRegistry.getServerForSession(sessionId)
+  await waitForConnectionOrThrow(serverId)
+  const directory = target?.directory?.trim()
+    || requireBlockingRequestDirectory("permission", sessionId, requestId)
+  const client = target?.directory
+    ? resolveSdkForDirectory(directory, sessionId, serverId)
+    : undefined
+  await sendPermissionResponse(sessionId, requestId, response, directory, "Permission reply failed", client)
 }
 
 export async function dismissPermission(
@@ -1101,8 +1112,9 @@ async function sendPermissionResponse(
   response: "once" | "always" | "reject",
   directory: string,
   failureMessage: string,
+  clientOverride?: OpencodeClient,
 ): Promise<void> {
-  const client = getRequestReplyClient("permission", sessionId, requestId)
+  const client = clientOverride ?? getRequestReplyClient("permission", sessionId, requestId)
   const directoryParam = directory ? { directory } : {}
 
   // Some OpenCode servers still expose only the session-scoped permission

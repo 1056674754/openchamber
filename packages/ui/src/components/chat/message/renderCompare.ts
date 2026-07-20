@@ -100,6 +100,15 @@ export const areRenderRelevantPartsEqual = (left: Part[], right: Part[]): boolea
       if (readPartText(leftPart) !== readPartText(rightPart)) {
         return false;
       }
+      const leftShell = (leftPart as { shellAction?: { command?: unknown; output?: unknown; status?: unknown } }).shellAction;
+      const rightShell = (rightPart as { shellAction?: { command?: unknown; output?: unknown; status?: unknown } }).shellAction;
+      if (
+        leftShell?.command !== rightShell?.command
+        || leftShell?.output !== rightShell?.output
+        || leftShell?.status !== rightShell?.status
+      ) {
+        return false;
+      }
     }
   }
 

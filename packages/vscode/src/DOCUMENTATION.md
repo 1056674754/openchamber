@@ -50,8 +50,11 @@ Keep `bridge.ts` as a thin orchestration layer that delegates message handling t
 - `bridge-system-runtime.ts`
   - System/editor/provider/quota/update-check message handlers.
   - Includes session activity snapshot bridge handler used by webview parity routes (`/api/session-activity`).
-  - Includes notification auto-accept parity handler (`/api/notifications/auto-accept`).
   - Includes Zen utility model parity handler (`/api/zen/models`) retained as an empty-list compatibility stub.
+
+- `bridge-permission-auto-accept-runtime.ts`
+  - Owns the persisted VS Code permission auto-accept policy and its GET/SET bridge contract.
+  - Broadcasts authoritative snapshots to every active OpenChamber webview after a successful write.
 
 ## Extension guideline
 

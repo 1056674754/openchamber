@@ -9,6 +9,10 @@ import {
   type VSCodeThemePayload,
 } from '@openchamber/ui/lib/theme/vscode/adapter';
 import type { VSCodeActiveEditorFile } from '@/sync/input-store';
+import { usePermissionStore } from '@/stores/permissionStore';
+import { getAllSyncSessions } from '@/sync/sync-refs';
+import { respondToPermission, resolveSdkForDirectory } from '@/sync/session-actions';
+import { createVSCodePermissionAutoAcceptRuntime } from '@/sync/vscode-permission-auto-accept';
 
 type ConnectionStatus = 'connecting' | 'connected' | 'error' | 'disconnected';
 type PanelType = 'chat' | 'agentManager';
@@ -440,15 +444,37 @@ const handleLocalApiRequest = async (url: URL, init?: RequestInit) => {
     });
   }
 
+  if (normalizedPathname === '/api/permission-auto-accept' && method === 'GET') {
+    const snapshot = await sendBridgeMessage('api:permission-auto-accept:get');
+    return new Response(JSON.stringify(snapshot), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  const permissionPolicyMatch = normalizedPathname.match(/^\/api\/permission-auto-accept\/sessions\/([^/]+)$/);
+  if (permissionPolicyMatch && method === 'PUT') {
+    const sessionId = decodeURIComponent(permissionPolicyMatch[1] ?? '');
+    const bodyText = await extractBodyText(url, init, method);
+    const body = bodyText ? JSON.parse(bodyText) : {};
+    const snapshot = await sendBridgeMessage('api:permission-auto-accept:set', {
+      sessionId,
+      enabled: typeof body === 'object' && body !== null && 'enabled' in body ? body.enabled : undefined,
+    });
+    return new Response(JSON.stringify(snapshot), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
   if (normalizedPathname === '/api/notifications/auto-accept' && method === 'POST') {
     const bodyText = await extractBodyText(url, init, method);
     const body = bodyText
       ? JSON.parse(bodyText) as { sessionId?: unknown; enabled?: unknown }
       : {};
-    const result = await sendBridgeMessage<{ success?: boolean }>('api:notifications/auto-accept', body)
-      .catch(() => ({ success: false }));
-    return new Response(JSON.stringify(result), {
-      status: result?.success === false ? 400 : 200,
+    const snapshot = await sendBridgeMessage('api:permission-auto-accept:set', body);
+    return new Response(JSON.stringify(snapshot), {
+      status: 200,
       headers: { 'Content-Type': 'application/json' },
     });
   }
@@ -1434,6 +1460,23 @@ const READY_NOTIFICATION_COOLDOWN_MS = 5000;
 const DEFAULT_NOTIFICATION_MESSAGE_MAX_LENGTH = 250;
 let notificationSettingsSyncPromise: Promise<void> | null = null;
 
+const vscodePermissionAutoAcceptRuntime = createVSCodePermissionAutoAcceptRuntime({
+  getPolicy: () => usePermissionStore.getState().autoAccept,
+  getSessions: () => new Map(getAllSyncSessions().map((session) => [session.id, session])),
+  getSession: async (sessionId, target) => {
+    const directory = target.directory?.trim();
+    if (!directory) throw new Error(`Directory is unavailable for session ${sessionId}`);
+    const client = resolveSdkForDirectory(directory, sessionId, target.serverId);
+    const result = await client.session.get({ sessionID: sessionId, directory });
+    if (!result.data) throw new Error(`Session ${sessionId} is unavailable`);
+    return result.data;
+  },
+  reply: (sessionId, requestId, target) => (
+    respondToPermission(sessionId, requestId, 'once', target)
+  ),
+  wait: (delayMs) => new Promise((resolve) => setTimeout(resolve, delayMs)),
+});
+
 const getPayloadString = (value: unknown): string => typeof value === 'string' ? value.trim() : '';
 
 const normalizeNotificationPlainText = (text: string): string => text
@@ -1625,6 +1668,20 @@ window.addEventListener('openchamber:vscode-notification-event', (event) => {
     import('@/stores/useUIStore'),
     import('@/stores/permissionStore'),
   ]).then(async ([{ useUIStore }, { usePermissionStore }]) => {
+    if (type === 'permission.asked') {
+      const requestId = getPayloadString(properties.id ?? properties.requestID);
+      if (requestId) {
+        const accepted = await vscodePermissionAutoAcceptRuntime.processPermission(
+          { id: requestId, sessionID: sessionId },
+          {
+            directory: directory || undefined,
+            serverId: serverId || undefined,
+          },
+        );
+        if (accepted) return;
+      }
+    }
+
     const localSettings = useUIStore.getState();
     await ensureNotificationSettingsSynced();
     const syncedSettings = useUIStore.getState();
@@ -1739,6 +1796,48 @@ onCommand('settingsSynced', () => {
   import('@openchamber/ui/lib/persistence').then(({ syncDesktopSettings }) => {
     void syncDesktopSettings();
   });
+});
+
+const isPermissionPolicySnapshot = (
+  value: unknown,
+): value is { readonly sessions: Readonly<Record<string, unknown>> } => {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  if (!('sessions' in value)) return false;
+  const sessions = value.sessions;
+  return typeof sessions === 'object' && sessions !== null && !Array.isArray(sessions);
+};
+
+const applyPermissionPolicySnapshot = (value: unknown): boolean => {
+  if (!isPermissionPolicySnapshot(value)) return false;
+  usePermissionStore.getState().applySnapshot(value);
+  return true;
+};
+
+const syncVSCodePermissionPolicy = async (): Promise<void> => {
+  const localPolicy = { ...usePermissionStore.getState().autoAccept };
+  const stored = await sendBridgeMessage('api:permission-auto-accept:get');
+  if (!isPermissionPolicySnapshot(stored)) return;
+
+  if (Object.keys(stored.sessions).length > 0 || Object.keys(localPolicy).length === 0) {
+    applyPermissionPolicySnapshot(stored);
+    return;
+  }
+
+  let migrated: unknown = stored;
+  for (const [sessionId, enabled] of Object.entries(localPolicy)) {
+    if (typeof enabled !== 'boolean') continue;
+    migrated = await sendBridgeMessage('api:permission-auto-accept:set', { sessionId, enabled });
+  }
+  applyPermissionPolicySnapshot(migrated);
+};
+
+onCommand('permissionAutoAcceptSynced', (payload) => {
+  applyPermissionPolicySnapshot(payload);
+});
+
+void syncVSCodePermissionPolicy().catch((error) => {
+  const message = error instanceof Error ? error.message : String(error);
+  console.warn('[OpenChamber] Failed to sync VS Code permission policy:', message);
 });
 
 // Listen for active editor file changes from the extension

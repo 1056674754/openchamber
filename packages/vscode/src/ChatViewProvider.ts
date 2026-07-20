@@ -306,6 +306,14 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     });
   }
 
+  public notifyPermissionAutoAcceptSynced(snapshot: unknown): void {
+    this._view?.webview.postMessage({
+      type: 'command',
+      command: 'permissionAutoAcceptSynced',
+      payload: snapshot,
+    });
+  }
+
   public notifyWindowFocusChanged(focused: boolean): void {
     if (!this._view) {
       return;

@@ -16,6 +16,7 @@ interface PermissionState {
 }
 
 interface PermissionActions {
+    applySnapshot: (snapshot: { sessions: Readonly<Record<string, unknown>> }) => void;
     isSessionAutoAccepting: (sessionId: string) => boolean;
     setSessionAutoAccept: (sessionId: string, enabled: boolean) => Promise<void>;
 }
@@ -207,6 +208,23 @@ export const usePermissionStore = create<PermissionStore>()(
         persist(
             (set, get) => ({
                 autoAccept: {},
+
+                applySnapshot: (snapshot) => {
+                    const autoAccept: PermissionAutoAcceptMap = {};
+                    for (const [sessionId, enabled] of Object.entries(snapshot.sessions)) {
+                        if (sessionId && typeof enabled === "boolean") {
+                            autoAccept[sessionId] = enabled;
+                        }
+                    }
+
+                    set((state) => {
+                        const currentEntries = Object.entries(state.autoAccept);
+                        const nextEntries = Object.entries(autoAccept);
+                        const unchanged = currentEntries.length === nextEntries.length
+                            && nextEntries.every(([sessionId, enabled]) => state.autoAccept[sessionId] === enabled);
+                        return unchanged ? state : { autoAccept };
+                    });
+                },
 
                 isSessionAutoAccepting: (sessionId: string) => {
                     if (!sessionId) {

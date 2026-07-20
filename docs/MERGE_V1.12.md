@@ -965,6 +965,18 @@ Phase 5 — 🔴 Markdown/Shiki 重写 (#1+#2): 独立 milestone，需迁移 for
 - 同一会话 Playwright 验证：向上/向下各滚动 700px 后等待 1.5s 漂移均为 0；OMO 折叠展开后高度 8222 -> 11044 -> 8222，收起后漂移 0；`Load older` 后 `scrollTop 0 -> 1982` 且 1.2s 内漂移 0，再滚到底后最后历史行与最新消息仍完整落在视口内，无大块空白。
 - 最大真实会话 `ses_18d725d60ffew6mw40mAFhIZMs` 自动预取验证（2026-07-19）：1280×900 下 `scrollTop=2400`、保底按钮仍在视口上方 2388px 时触发；450 条扩展到 900 条后稳定 turn 锚点从 `top=433.890625` 恢复到 `433.46875`，漂移 0.42px。375/768/1280 三档视口均无横向溢出。
 
+### v1.16.1 / v1.16.2 第一批核对（2026-07-20）
+
+| 功能 | 状态 | Fork 处理 |
+|---|---|---|
+| 创建 Session 失败时保留输入草稿 | ✅ 已有更完整实现 | `ChatInput` 在发送失败后恢复正文、附件、confirmed mentions、inline drafts、synthetic parts 和 queue snapshot；`session-ui-store` 同时恢复 `newSessionDraft` 的 selected project、directory、parent、folder 和 permission intent，不套官方只恢复正文的分支 |
+| 新 Session 严格留在所选项目，包含嵌套项目 | ✅ 已校准 | 新建发送继续冻结 `selectedProjectId + directory + serverId`；通用项目解析改为先匹配显式注册的最长项目路径，再回退到 worktree ownership，避免嵌套子项目被父项目 worktree 吞掉；新增 remote server 回归测试 |
+| 子智能体在侧栏打开并返回 Parent | ✅ 已有 fork 实现 | Task 卡通过 `openContextChat` 打开右侧 chat tab，`TaskSessionMaterializer` 按 child/parent `serverId` 和 directory 同步会话；嵌入会话显示 Parent 按钮并保持只读，不引入官方单实例 iframe 导航状态 |
+| Shell 模式卡片实时状态和输出 | ✅ 已完成 | 本地已有 optimistic `/shell` 卡、Bash bridge 折叠、实时 output/status 合并、展开/复制 UI；补齐 memo comparator 对 `shellAction.command/output/status` 的比较，确保 running、流式输出和 completed 变化触发重绘 |
+| Android 更新器区分 APK/AAB | ⏸️ 当前不适用 | 官方补丁只在 `appType=mobile-capacitor + platform=android` 时解析 GitHub Release APK；本 fork 没有 `packages/mobile`/Capacitor runtime，也没有该调用方。暂不加入无调用方的更新分支，待 native mobile milestone 一并移植 |
+| VS Code 每 Session Autoaccept 持久化 | ✅ 已按 fork 架构移植 | 保留 fork 的 Web/Desktop server mirror、子会话继承和多实例权限路由；VS Code extension `globalState` 作为权威策略并在 sidebar/editor/agent-manager Webview 间广播。首次升级会迁移旧 local policy；缺失子会话按通知携带的 `directory + serverId` 补取父链，权限回复使用同一显式目标并做 0/250/1000ms 有界重试 |
+| Small Model 环境变量/文件密钥 + Gemini thinking | ⏸️ 等待 Small Model 基础 milestone | 1.16.2 这两项是完整 `small-model/call.js` 的后续修复；本 fork 尚无 `/api/small-model`、resolver、provider credential dispatch、settings 或 consumer。官方基础模块约 1.6k 行并跨 36 个 server/UI/VS Code 文件；不先引入服务端密钥读取死代码，按批次 H 先落 capability + settings + 一个真实 consumer 时一并带入 `{env:NAME}`、`{file:path}` 和 Gemini 3 `thinkingLevel` |
+
 ### 中等难度 / 需要逐段适配
 
 | 功能 | 影响文件/模块 | 风险点 |

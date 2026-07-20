@@ -362,6 +362,23 @@ describe("respondToPermission passes directory", () => {
     expect(replyCalls[0].params.directory).toBe("/other/project")
   })
 
+  test("uses the event routing target before permission state reaches the child store", async () => {
+    const childStores = createChildStores([])
+
+    const { setActionRefs, respondToPermission } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/test/project")
+
+    await respondToPermission("new-child", "perm-event", "once", {
+      directory: "/event/project",
+      serverId: DEFAULT_SERVER_ID,
+    })
+
+    expect(replyCalls.length).toBe(1)
+    expect(replyCalls[0].params.sessionID).toBe("new-child")
+    expect(replyCalls[0].params.permissionID).toBe("perm-event")
+    expect(replyCalls[0].params.directory).toBe("/event/project")
+  })
+
   test("falls back to request-scoped reply when session-scoped route is missing", async () => {
     permissionRespondResult = { error: { name: "NotFoundError" }, response: { status: 404 } }
     const permission: PermissionRequest = {
