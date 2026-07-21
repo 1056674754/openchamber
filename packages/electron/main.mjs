@@ -12,6 +12,7 @@ import { promisify } from 'node:util';
 import updaterPkg from 'electron-updater';
 import { ElectronSshManager } from './ssh-manager.mjs';
 import { hasSameHttpOrigin, loginRemotePasswordAndPersistSession } from './remote-password-login.mjs';
+import { createSingleFlight } from './startup-coordinator.mjs';
 
 const execFileAsync = promisify(execFile);
 
@@ -942,6 +943,8 @@ const spawnLocalServer = async () => {
   return url;
 };
 
+const spawnLocalServerOnce = createSingleFlight(spawnLocalServer);
+
 const killSidecar = async ({ stopOpenCode = !shouldKeepManagedOpenCodeAliveByDefault() } = {}) => {
   if (state.serverHandle) {
     try {
@@ -1674,7 +1677,7 @@ const setMiniChatPinned = (browserWindow, pinned) => {
 const resolveInitialUrl = async () => {
   const localUrl = isDev && await waitForHealth('http://127.0.0.1:3901', 5_000, 100)
     ? 'http://127.0.0.1:3901'
-    : await spawnLocalServer();
+    : await spawnLocalServerOnce();
 
   const hmrUiPort = process.env.OPENCHAMBER_HMR_UI_PORT || '5173';
   const hmrUiOrigin = `http://127.0.0.1:${hmrUiPort}`;
