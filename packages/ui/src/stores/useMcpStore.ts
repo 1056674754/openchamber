@@ -1,10 +1,8 @@
 import { create } from 'zustand';
 import { devtools } from 'zustand/middleware';
 import type { McpStatus } from '@opencode-ai/sdk/v2';
-import { opencodeClient } from '@/lib/opencode/client';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
-import { resolveSdkForDirectory } from '@/sync/session-actions';
-import { serverRegistry, DEFAULT_SERVER_ID } from '@/lib/opencode/server-registry';
+import { getMcpApiClient } from '@/stores/mcpApiClient';
 
 export type McpStatusMap = Record<string, McpStatus>;
 export type McpRuntimeDiagnostic = {
@@ -33,20 +31,8 @@ const normalizeDirectory = (directory: string | null | undefined): string | null
 
 const toKey = (directory: string | null | undefined): string => normalizeDirectory(directory) ?? '__global__';
 
-/**
- * Get the SDK client for a directory's owning server.
- * Uses resolveSdkForDirectory which maps directory → project → serverId → server's client.
- * Falls back to default server when directory is unresolvable.
- */
-const getMcpApiClient = (directory: string | null | undefined) => {
-  const normalized = normalizeDirectory(directory);
-  if (!normalized) {
-    const defaultConn = serverRegistry.get(DEFAULT_SERVER_ID);
-    if (defaultConn) return defaultConn.client;
-    return opencodeClient.getApiClient();
-  }
-  return resolveSdkForDirectory(normalized);
-};
+const toDirectoryParameters = (directory: string | null): { directory?: string } =>
+  directory ? { directory } : {};
 
 export const computeMcpHealth = (status: McpStatusMap | null | undefined): McpHealth => {
   const entries = Object.entries(status ?? {});
@@ -121,7 +107,7 @@ export const useMcpStore = create<McpStore>()(
 
       try {
         const api = getMcpApiClient(directory);
-        const result = await api.mcp.status();
+        const result = await api.mcp.status(toDirectoryParameters(directory));
         const data = (result.data ?? {}) as McpStatusMap;
 
         set((state) => ({
@@ -149,7 +135,7 @@ export const useMcpStore = create<McpStore>()(
       const key = toKey(normalized);
       const api = getMcpApiClient(normalized);
       try {
-        await api.mcp.connect({ name }, { throwOnError: true });
+        await api.mcp.connect({ name, ...toDirectoryParameters(normalized) }, { throwOnError: true });
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Connection failed';
         set((state) => ({
@@ -169,14 +155,14 @@ export const useMcpStore = create<McpStore>()(
     disconnect: async (name, directory) => {
       const normalized = normalizeDirectory(directory ?? useDirectoryStore.getState().currentDirectory);
       const api = getMcpApiClient(normalized);
-      await api.mcp.disconnect({ name }, { throwOnError: true });
+      await api.mcp.disconnect({ name, ...toDirectoryParameters(normalized) }, { throwOnError: true });
       await get().refresh({ directory: normalized, silent: true });
     },
 
     startAuth: async (name, directory) => {
       const normalized = normalizeDirectory(directory ?? useDirectoryStore.getState().currentDirectory);
       const api = getMcpApiClient(normalized);
-      const result = await api.mcp.auth.start({ name }, { throwOnError: true });
+      const result = await api.mcp.auth.start({ name, ...toDirectoryParameters(normalized) }, { throwOnError: true });
       const authorizationUrl = result.data?.authorizationUrl;
 
       if (!authorizationUrl) {
@@ -189,14 +175,14 @@ export const useMcpStore = create<McpStore>()(
     completeAuth: async (name, code, directory) => {
       const normalized = normalizeDirectory(directory ?? useDirectoryStore.getState().currentDirectory);
       const api = getMcpApiClient(normalized);
-      await api.mcp.auth.callback({ name, code }, { throwOnError: true });
+      await api.mcp.auth.callback({ name, code, ...toDirectoryParameters(normalized) }, { throwOnError: true });
       await get().refresh({ directory: normalized, silent: true });
     },
 
     clearAuth: async (name, directory) => {
       const normalized = normalizeDirectory(directory ?? useDirectoryStore.getState().currentDirectory);
       const api = getMcpApiClient(normalized);
-      await api.mcp.auth.remove({ name }, { throwOnError: true });
+      await api.mcp.auth.remove({ name, ...toDirectoryParameters(normalized) }, { throwOnError: true });
       await get().refresh({ directory: normalized, silent: true });
     },
 
@@ -210,7 +196,7 @@ export const useMcpStore = create<McpStore>()(
       let warningMessage: string | undefined;
 
       try {
-        await api.mcp.connect({ name }, { throwOnError: true });
+        await api.mcp.connect({ name, ...toDirectoryParameters(normalized) }, { throwOnError: true });
       } catch (error) {
         errorMessage = error instanceof Error ? error.message : 'Connection failed';
         set((state) => ({
@@ -230,7 +216,7 @@ export const useMcpStore = create<McpStore>()(
 
       if (!wasConnected && currentStatus?.status === 'connected') {
         try {
-          await api.mcp.disconnect({ name }, { throwOnError: true });
+          await api.mcp.disconnect({ name, ...toDirectoryParameters(normalized) }, { throwOnError: true });
         } catch (error) {
           const message = error instanceof Error ? error.message : 'Disconnect failed';
           warningMessage = `Connection test succeeded, but cleanup disconnect failed: ${message}`;
