@@ -566,10 +566,17 @@ function trimSessions(draft: State) {
       .map(([sessionID]) => sessionID),
   )
   while (draft.session.length > draft.limit) {
-    // Remove from the beginning (oldest by sorted ID)
-    const candidate = draft.session[0]
-    if (hasPermission.has(candidate.id)) break
-    draft.session.shift()
+    let oldestIndex = -1
+    let oldestUpdatedAt = Number.POSITIVE_INFINITY
+    for (const [index, session] of draft.session.entries()) {
+      if (hasPermission.has(session.id)) continue
+      const updatedAt = session.time.updated ?? session.time.created
+      if (updatedAt >= oldestUpdatedAt) continue
+      oldestIndex = index
+      oldestUpdatedAt = updatedAt
+    }
+    if (oldestIndex < 0) break
+    draft.session.splice(oldestIndex, 1)
   }
 }
 
