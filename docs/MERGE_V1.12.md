@@ -977,6 +977,12 @@ Phase 5 — 🔴 Markdown/Shiki 重写 (#1+#2): 独立 milestone，需迁移 for
 | VS Code 每 Session Autoaccept 持久化 | ✅ 已按 fork 架构移植 | 保留 fork 的 Web/Desktop server mirror、子会话继承和多实例权限路由；VS Code extension `globalState` 作为权威策略并在 sidebar/editor/agent-manager Webview 间广播。首次升级会迁移旧 local policy；缺失子会话按通知携带的 `directory + serverId` 补取父链，权限回复使用同一显式目标并做 0/250/1000ms 有界重试 |
 | Small Model 环境变量/文件密钥 + Gemini thinking | ⏸️ 等待 Small Model 基础 milestone | 1.16.2 这两项是完整 `small-model/call.js` 的后续修复；本 fork 尚无 `/api/small-model`、resolver、provider credential dispatch、settings 或 consumer。官方基础模块约 1.6k 行并跨 36 个 server/UI/VS Code 文件；不先引入服务端密钥读取死代码，按批次 H 先落 capability + settings + 一个真实 consumer 时一并带入 `{env:NAME}`、`{file:path}` 和 Gemini 3 `thinkingLevel` |
 
+### Fork 稳定性：本地项目注册表启动保护（2026-07-22）
+
+| 故障 | 状态 | Fork 处理 |
+|---|---|---|
+| 远程项目发现覆盖全部本地项目 | ✅ 已修复并补回归测试 | 启动时 shared settings 尚未 hydrate，`RemoteProjectDiscovery` 会先发现远程目录；旧实现随后把“空初始列表 + 远程项目”作为完整 `projects` 写回 `settings.json`，导致本地项目和侧栏 Session 分组全部消失。`useProjectsStore` 现在显式记录 shared settings hydration，hydrate 完成前禁止自动远程发现和持久化；hydrate 后远程项目只能追加到已加载的本地项目。测试覆盖未 hydrate 时阻断、hydrate 后允许，以及本地项目不被远程追加替换三条路径。OpenCode 数据库未受损；恢复数据从 Electron Local Storage 的只读副本提取，并与当前远程项目合并后再部署。 |
+
 ### 中等难度 / 需要逐段适配
 
 | 功能 | 影响文件/模块 | 风险点 |

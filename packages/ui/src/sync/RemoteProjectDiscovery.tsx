@@ -29,6 +29,7 @@ const shouldSkipRemoteProjectPath = (value: string): boolean => {
 
 export function RemoteProjectDiscovery() {
   const ensureRemoteProject = useProjectsStore((s) => s.ensureRemoteProject);
+  const hasLoadedSharedSettings = useProjectsStore((s) => s.hasLoadedSharedSettings);
   const knownDirs = useRef(new Set<string>());
   const probedServers = useRef(new Set<string>()); // [OPENCHAMBER-FORK] track worktree discovery per server
   const availabilityProbes = useRef(new Map<string, AvailabilityProbeRecord>());
@@ -38,6 +39,7 @@ export function RemoteProjectDiscovery() {
   const discoveryRetryTimers = useRef(new Map<string, number>());
 
   useEffect(() => {
+    if (!hasLoadedSharedSettings) return;
     const storeUnsubs = new Map<string, () => void>();
     const healthUnsubs = new Map<string, () => void>();
     const pendingProjectQueue = pendingProjects.current;
@@ -168,7 +170,7 @@ export function RemoteProjectDiscovery() {
       storeUnsubs.clear();
       healthUnsubs.clear();
     };
-  }, [ensureRemoteProject]);
+  }, [ensureRemoteProject, hasLoadedSharedSettings]);
 
   return null;
 }

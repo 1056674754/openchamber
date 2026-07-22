@@ -42,6 +42,7 @@ interface ProjectPathValidationResult {
 interface ProjectsStore {
   projects: ProjectEntry[];
   activeProjectId: string | null;
+  hasLoadedSharedSettings: boolean;
 
   addProject: (path: string, options?: { label?: string; id?: string }) => ProjectEntry | null;
   ensureRemoteProject: (path: string, serverId: string, label?: string) => ProjectEntry | null;
@@ -364,6 +365,7 @@ export const useProjectsStore = create<ProjectsStore>()(
   devtools((set, get) => ({
     projects: effectiveInitialProjects,
     activeProjectId: initialActiveProjectId,
+    hasLoadedSharedSettings: false,
 
     validateProjectPath: (path: string): ProjectPathValidationResult => {
       if (typeof path !== 'string' || path.trim().length === 0) {
@@ -422,6 +424,7 @@ export const useProjectsStore = create<ProjectsStore>()(
     },
 
     ensureRemoteProject: (path: string, serverId: string, label?: string) => {
+      if (!get().hasLoadedSharedSettings) return null;
       const normalizedPath = path.replace(/\\/g, '/').replace(/\/+$/, '') || '/';
       if (isUnsupportedRemoteProjectPath(normalizedPath)) return null;
       const id = createProjectIdFromPath(`${serverId}:${normalizedPath}`);
@@ -769,10 +772,12 @@ export const useProjectsStore = create<ProjectsStore>()(
             ? current.projects.some((project) => project.id === incomingActive)
             : true;
           if (activeExists) {
-            set({ activeProjectId: incomingActive });
+            set({ activeProjectId: incomingActive, hasLoadedSharedSettings: true });
             cacheProjects(current.projects, incomingActive);
+            return;
           }
         }
+        set({ hasLoadedSharedSettings: true });
         return;
       }
 
@@ -780,10 +785,13 @@ export const useProjectsStore = create<ProjectsStore>()(
       const activeChanged = current.activeProjectId !== nextActive;
 
       if (!projectsChanged && !activeChanged) {
+        if (!current.hasLoadedSharedSettings) {
+          set({ hasLoadedSharedSettings: true });
+        }
         return;
       }
 
-      set({ projects: incomingProjects, activeProjectId: nextActive });
+      set({ projects: incomingProjects, activeProjectId: nextActive, hasLoadedSharedSettings: true });
       cacheProjects(incomingProjects, nextActive);
 
       const resolvedActive = nextActive && incomingProjects.some((p) => p.id === nextActive)
