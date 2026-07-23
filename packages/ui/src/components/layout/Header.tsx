@@ -37,6 +37,7 @@ import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { formatQuotaValueLabel, formatQuotaResetLabel, formatWindowLabel, QUOTA_PROVIDERS, calculatePace, calculateExpectedUsageMarkerPercent } from '@/lib/quota';
 import { UsageProgressBar } from '@/components/sections/usage/UsageProgressBar';
 import { PaceIndicator } from '@/components/sections/usage/PaceIndicator';
+import { ProviderQuotaRefreshButton } from '@/components/sections/usage/ProviderQuotaRefreshButton';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { eventMatchesShortcut, formatShortcutForDisplay, getEffectiveShortcutCombo } from '@/lib/shortcuts';
 import {
@@ -51,7 +52,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from '@/components/ui/collapsible';
-import type { UsageWindow } from '@/types';
+import type { QuotaProviderId, UsageWindow } from '@/types';
 import type { GitHubAuthStatus } from '@/lib/api/types';
 import { InstanceInfoPanel } from '@/components/desktop/InstanceInfoPanel';
 import { useActiveServerId } from '@/hooks/useActiveServerId';
@@ -427,9 +428,15 @@ const DesktopServicesMenu = React.memo(function DesktopServicesMenu({
                 return (
                   <React.Fragment key={group.providerId}>
                     {index > 0 ? <div className="mx-4 my-2 border-t border-[var(--interactive-border)]" /> : null}
-                    <div className="flex items-center gap-2 px-4 py-2">
-                      <ProviderLogo providerId={group.providerId} className="h-4 w-4" />
-                      <span className="typography-ui-label font-medium text-foreground">{group.providerName}</span>
+                    <div className="flex items-center justify-between gap-2 px-4 py-2">
+                      <div className="flex min-w-0 items-center gap-2">
+                        <ProviderLogo providerId={group.providerId} className="h-4 w-4" />
+                        <span className="truncate typography-ui-label font-medium text-foreground">{group.providerName}</span>
+                      </div>
+                      <ProviderQuotaRefreshButton
+                        providerId={group.providerId}
+                        providerName={group.providerName}
+                      />
                     </div>
                     {group.entries.length === 0 && (!group.modelFamilies || group.modelFamilies.length === 0) ? (
                       <div className="px-4 pb-2">
@@ -610,7 +617,7 @@ interface TabConfig {
 }
 
 interface RateLimitGroup {
-  providerId: string;
+  providerId: QuotaProviderId;
   providerName: string;
   entries: Array<[string, UsageWindow]>;
   error?: string;
@@ -2065,14 +2072,14 @@ export const Header: React.FC<HeaderProps> = ({
                     <div className="flex-1 overflow-y-auto overflow-x-hidden pb-[calc(4rem+env(safe-area-inset-bottom))]">
                       {/* Mobile usage header */}
                       <div className="border-b border-[var(--interactive-border)]">
-                        <div className="flex items-center justify-between gap-3 px-4 py-3">
+                        <div className="flex flex-col items-stretch gap-2 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
                           <div className="flex flex-col min-w-0 gap-0.5">
                             <span className="typography-ui-header font-semibold text-foreground">{t('header.services.rateLimits')}</span>
                             <span className="truncate typography-micro text-muted-foreground">
                               {formatTime(quotaLastUpdated)}
                             </span>
                           </div>
-                          <div className="flex items-center gap-2 shrink-0">
+                          <div className="flex w-full items-center justify-between gap-2 sm:w-auto sm:shrink-0 sm:justify-start">
                             <div className="flex items-center h-6">
                               <button
                                 type="button"
@@ -2132,9 +2139,15 @@ export const Header: React.FC<HeaderProps> = ({
                             ) : null}
 
                             {/* Provider header */}
-                            <div className="flex items-center gap-2 px-4 py-2">
-                              <ProviderLogo providerId={group.providerId} className="h-4 w-4" />
-                              <span className="typography-ui-label font-medium text-foreground">{group.providerName}</span>
+                            <div className="flex items-center justify-between gap-2 px-4 py-2">
+                              <div className="flex min-w-0 items-center gap-2">
+                                <ProviderLogo providerId={group.providerId} className="h-4 w-4" />
+                                <span className="truncate typography-ui-label font-medium text-foreground">{group.providerName}</span>
+                              </div>
+                              <ProviderQuotaRefreshButton
+                                providerId={group.providerId}
+                                providerName={group.providerName}
+                              />
                             </div>
 
                             {group.entries.length === 0 && (!group.modelFamilies || group.modelFamilies.length === 0) ? (
@@ -2162,16 +2175,16 @@ export const Header: React.FC<HeaderProps> = ({
                                       <div className="flex min-w-0 items-center justify-between gap-3">
                                         <div className="min-w-0 flex items-center gap-2">
                                           <span className="truncate typography-ui-label text-foreground">{formatWindowLabel(label)}</span>
-                                          {resetLabel ? (
-                                            <span className="truncate typography-micro text-muted-foreground">
-                                              {resetLabel}
-                                            </span>
-                                          ) : null}
                                         </div>
-                                        <span className="typography-ui-label text-foreground tabular-nums">
+                                        <span className="typography-ui-label text-right text-foreground tabular-nums">
                                           {metricLabel === '-' ? '' : metricLabel}
                                         </span>
                                       </div>
+                                      {resetLabel ? (
+                                        <span className="block typography-micro leading-snug text-muted-foreground">
+                                          {resetLabel}
+                                        </span>
+                                      ) : null}
                                       <UsageProgressBar
                                         percent={displayPercent}
                                         tonePercent={window.usedPercent}
