@@ -332,9 +332,14 @@ export const createNotificationTriggerRuntime = (deps) => {
       const cacheKey = getSessionParentCacheKey(sessionId, notificationDirectory);
       pendingCompletionPayloads.delete(cacheKey);
       const error = payload.properties?.error;
-      const errorText = typeof error?.message === 'string'
-        ? error.message
-        : typeof error === 'string' ? error : '';
+      let errorText = '';
+      if (typeof error?.data?.message === 'string') {
+        errorText = error.data.message;
+      } else if (typeof error?.message === 'string') {
+        errorText = error.message;
+      } else if (typeof error === 'string') {
+        errorText = error;
+      }
       await maybeSendPushForTrigger({
         ...payload,
         type: 'message.updated',

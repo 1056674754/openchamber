@@ -125,7 +125,14 @@ describe('notification trigger runtime', () => {
       properties: {
         sessionID: 'main',
         directory: '/workspace/project',
-        error: { message: 'Connection failed' },
+        error: {
+          name: 'APIError',
+          data: {
+            message: 'Connection failed',
+            statusCode: 503,
+            isRetryable: true,
+          },
+        },
       },
     };
 

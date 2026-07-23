@@ -44,6 +44,7 @@ This module provides notification message preparation utilities for the web serv
   - completion/error/question/permission trigger routing
   - directory-scoped session parent cache and direct session lookup for subtask suppression
   - `session.idle` / `session.error` fallback normalization and per-session cooldowns
+  - named OpenCode error extraction from `error.data.message`, with legacy flat-message compatibility
   - template resolution and fallback behavior
   - native notification fanout and web push payload fanout
 
