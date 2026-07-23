@@ -2432,6 +2432,7 @@ export const dict: Record<I18nKey, string> = {
   "vscodeLayout.quota.actions.showUsedAria": "Mostrar cota usada",
   "vscodeLayout.quota.actions.showRemainingAria": "Mostrar cota restante",
   "vscodeLayout.quota.actions.refreshAria": "Atualizar limites de taxa",
+  "quota.actions.refreshProviderAria": "Atualizar cota de {provider}",
   "quota.window.billingCycle": "Billing Cycle",
   "quota.window.auto": "Auto",
   "quota.window.api": "API",

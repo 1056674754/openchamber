@@ -2307,6 +2307,7 @@ export const dict: Record<I18nKey, string> = {
   'vscodeLayout.quota.actions.showUsedAria': '顯示已用配額',
   'vscodeLayout.quota.actions.showRemainingAria': '顯示剩餘配額',
   'vscodeLayout.quota.actions.refreshAria': '重新整理速率限制',
+  'quota.actions.refreshProviderAria': '重新整理 {provider} 配額',
   'quota.window.billingCycle': 'Billing Cycle',
   'quota.window.auto': 'Auto',
   'quota.window.api': 'API',

@@ -2432,6 +2432,7 @@ export const dict: Record<I18nKey, string> = {
   "vscodeLayout.quota.actions.showUsedAria": "Показати використану квоту",
   "vscodeLayout.quota.actions.showRemainingAria": "Показати залишок квоти",
   "vscodeLayout.quota.actions.refreshAria": "Оновити ліміти запитів",
+  "quota.actions.refreshProviderAria": "Оновити квоту {provider}",
   "quota.window.billingCycle": "Billing Cycle",
   "quota.window.auto": "Auto",
   "quota.window.api": "API",

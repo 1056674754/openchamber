@@ -2377,6 +2377,7 @@ export const dict: Record<I18nKey, string> = {
   'vscodeLayout.actions.settingsAria': 'Ustawienia',
   'vscodeLayout.quota.actions.rateLimitsAria': 'Limity użycia',
   'vscodeLayout.quota.actions.refreshAria': 'Odśwież limity użycia',
+  'quota.actions.refreshProviderAria': 'Odśwież limit {provider}',
   'quota.window.billingCycle': 'Billing Cycle',
   'quota.window.auto': 'Auto',
   'quota.window.api': 'API',

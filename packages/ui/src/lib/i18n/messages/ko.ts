@@ -2467,6 +2467,7 @@ export const dict: Record<I18nKey, string> = {
   'vscodeLayout.quota.actions.showUsedAria': '사용량 표시',
   'vscodeLayout.quota.actions.showRemainingAria': '잔여량 표시',
   'vscodeLayout.quota.actions.refreshAria': '레이트 리밋 새로고침',
+  'quota.actions.refreshProviderAria': '{provider} 할당량 새로고침',
   'quota.window.billingCycle': 'Billing Cycle',
   'quota.window.auto': 'Auto',
   'quota.window.api': 'API',

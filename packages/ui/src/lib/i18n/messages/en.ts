@@ -2466,6 +2466,7 @@ export const dict = {
   'vscodeLayout.quota.actions.showUsedAria': 'Show used quota',
   'vscodeLayout.quota.actions.showRemainingAria': 'Show remaining quota',
   'vscodeLayout.quota.actions.refreshAria': 'Refresh rate limits',
+  'quota.actions.refreshProviderAria': 'Refresh {provider} quota',
   'quota.window.billingCycle': 'Billing Cycle',
   'quota.window.auto': 'Auto',
   'quota.window.api': 'API',
