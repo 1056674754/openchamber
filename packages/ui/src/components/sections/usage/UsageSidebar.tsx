@@ -12,6 +12,7 @@ import { useQuotaStore } from '@/stores/useQuotaStore';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { useI18n } from '@/lib/i18n';
 import { useSettingsServerBaseUrl } from '@/hooks/useSettingsServerBaseUrl';
+import { ProviderQuotaRefreshButton } from './ProviderQuotaRefreshButton';
 
 interface UsageSidebarProps {
   onItemSelect?: () => void;
@@ -201,11 +202,17 @@ export const UsageSidebar: React.FC<UsageSidebarProps> = ({ onItemSelect }) => {
                 <span className="typography-ui-label font-normal truncate flex-1 min-w-0 text-foreground">
                   {provider.name}
                 </span>
-              {!configured && (
-                <span className="typography-micro text-muted-foreground/60 flex-shrink-0">{t('settings.usage.sidebar.status.notSet')}</span>
-              )}
-            </button>
-          </div>
+                {!configured && (
+                  <span className="typography-micro text-muted-foreground/60 flex-shrink-0">{t('settings.usage.sidebar.status.notSet')}</span>
+                )}
+              </button>
+              <ProviderQuotaRefreshButton
+                providerId={provider.id}
+                providerName={provider.name}
+                serverBaseUrl={baseUrl}
+                disabled={status !== 'ready'}
+              />
+            </div>
           );
         })}
       </ScrollableOverlay>

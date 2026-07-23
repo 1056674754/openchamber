@@ -2,6 +2,7 @@ import React from 'react';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { Checkbox } from '@/components/ui/checkbox';
 import { UsageCard } from './UsageCard';
+import { ProviderQuotaRefreshButton } from './ProviderQuotaRefreshButton';
 import { QUOTA_PROVIDERS } from '@/lib/quota';
 import { useQuotaAutoRefresh, useQuotaStore } from '@/stores/useQuotaStore';
 import { updateDesktopSettings } from '@/lib/persistence';
@@ -43,6 +44,9 @@ export const UsagePage: React.FC = () => {
   const loadSettings = useQuotaStore((state) => state.loadSettings);
   const fetchAllQuotas = useQuotaStore((state) => state.fetchAllQuotas);
   const isLoading = useQuotaStore((state) => state.isLoading);
+  const isFetchingSelectedProvider = useQuotaStore((state) =>
+    selectedProviderId ? state.isFetchingProvider[selectedProviderId] === true : false
+  );
   const lastUpdated = useQuotaStore((state) => state.lastUpdated);
   const error = useQuotaStore((state) => state.error);
   const dropdownProviderIds = useQuotaStore((state) => state.dropdownProviderIds);
@@ -168,20 +172,27 @@ export const UsagePage: React.FC = () => {
       <div className="mx-auto w-full max-w-3xl p-3 sm:p-6 sm:pt-8">
 
         {/* Header */}
-        <div className="mb-4 flex items-center gap-3">
-          <ProviderLogo providerId={selectedProviderId} className="h-5 w-5 shrink-0" />
-          <div className="min-w-0">
-            <h2 className="typography-ui-header font-semibold text-foreground truncate">
-              {t('settings.usage.page.header.providerUsage', { provider: providerName })}
-            </h2>
-            <p className="typography-meta text-muted-foreground truncate">
-              {isLoading ? (
-                <span className="animate-pulse">{t('settings.usage.page.header.refreshing')}</span>
-              ) : (
-                t('settings.usage.page.header.lastUpdated', { time: formatTime(lastUpdated) })
-              )}
-            </p>
+        <div className="mb-4 flex items-center justify-between gap-2">
+          <div className="flex min-w-0 flex-1 items-center gap-3">
+            <ProviderLogo providerId={selectedProviderId} className="h-5 w-5 shrink-0" />
+            <div className="min-w-0">
+              <h2 className="typography-ui-header font-semibold text-foreground truncate">
+                {t('settings.usage.page.header.providerUsage', { provider: providerName })}
+              </h2>
+              <p className="typography-meta text-muted-foreground truncate">
+                {isLoading || isFetchingSelectedProvider ? (
+                  <span className="animate-pulse">{t('settings.usage.page.header.refreshing')}</span>
+                ) : (
+                  t('settings.usage.page.header.lastUpdated', { time: formatTime(lastUpdated) })
+                )}
+              </p>
+            </div>
           </div>
+          <ProviderQuotaRefreshButton
+            providerId={selectedProviderId}
+            providerName={providerName}
+            serverBaseUrl={baseUrl}
+          />
         </div>
 
         {/* Options */}
