@@ -25,6 +25,7 @@ import { useI18n } from '@/lib/i18n';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { UsageProgressBar } from '@/components/sections/usage/UsageProgressBar';
 import { PaceIndicator } from '@/components/sections/usage/PaceIndicator';
+import { ProviderQuotaRefreshButton } from '@/components/sections/usage/ProviderQuotaRefreshButton';
 import { Icon } from "@/components/icon/Icon";
 import { formatQuotaValueLabel, formatWindowLabel, QUOTA_PROVIDERS, calculatePace, calculateExpectedUsageMarkerPercent } from '@/lib/quota';
 import { useQuotaAutoRefresh, useQuotaStore } from '@/stores/useQuotaStore';
@@ -32,7 +33,7 @@ import { useUpdateStore } from '@/stores/useUpdateStore';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
 import { serverRegistry } from '@/lib/opencode/server-registry';
-import type { UsageWindow } from '@/types';
+import type { QuotaProviderId, UsageWindow } from '@/types';
 import type { SessionContextUsage } from '@/stores/types/sessionTypes';
 
 const SettingsView = lazyWithChunkRecovery(() => import('@/components/views/SettingsView').then(m => ({ default: m.SettingsView })));
@@ -712,7 +713,7 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
 
   const rateLimitGroups = React.useMemo(() => {
     const groups: Array<{
-      providerId: string;
+      providerId: QuotaProviderId;
       providerName: string;
       entries: Array<[string, UsageWindow]>;
       error?: string;
@@ -870,9 +871,15 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
             )}
             {rateLimitGroups.map((group, index) => (
               <React.Fragment key={group.providerId}>
-                <DropdownMenuLabel className="flex items-center gap-2 bg-[var(--surface-elevated)] typography-ui-label text-foreground">
-                  <ProviderLogo providerId={group.providerId} className="h-4 w-4" />
-                  {group.providerName}
+                <DropdownMenuLabel className="flex items-center justify-between gap-2 bg-[var(--surface-elevated)] typography-ui-label text-foreground">
+                  <span className="flex min-w-0 items-center gap-2">
+                    <ProviderLogo providerId={group.providerId} className="h-4 w-4" />
+                    <span className="truncate">{group.providerName}</span>
+                  </span>
+                  <ProviderQuotaRefreshButton
+                    providerId={group.providerId}
+                    providerName={group.providerName}
+                  />
                 </DropdownMenuLabel>
                 {group.entries.length === 0 ? (
                   <DropdownMenuItem
