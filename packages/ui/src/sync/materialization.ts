@@ -59,7 +59,7 @@ function normalizeMaterializedMessageInfo(info: Message, parts: Part[]): Message
 }
 
 function haveEquivalentPartSnapshots(left: Part[] | undefined, right: Part[]): boolean {
-  if (!left) return right.length === 0
+  if (!left) return false
   if (left.length !== right.length) return false
 
   for (let index = 0; index < left.length; index += 1) {
@@ -184,11 +184,8 @@ export function materializeSessionSnapshots(
     )
     if (haveEquivalentPartSnapshots(existing, nextParts)) continue
 
-    if (nextParts.length === 0) {
-      delete nextPartState[messageID]
-    } else {
-      nextPartState[messageID] = nextParts
-    }
+    // Preserve authoritative empty snapshots: an absent key means parts have not materialized yet.
+    nextPartState[messageID] = nextParts
     partsChanged = true
   }
 
@@ -214,7 +211,7 @@ export function getSessionMaterializationStatus(
   for (const message of messages) {
     if (message.role !== "assistant") continue
     const parts = state.part[message.id]
-    if (!parts || parts.length === 0) {
+    if (!parts) {
       missingPartMessageIDs.push(message.id)
     }
   }

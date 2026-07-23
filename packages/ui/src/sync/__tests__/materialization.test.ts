@@ -69,6 +69,22 @@ describe("materializeSessionSnapshots", () => {
     expect(result.part.msg_1.map((item) => item.id)).toEqual(["prt_text"])
   })
 
+  test("marks an authoritative empty assistant snapshot as renderable", () => {
+    const result = materializeSessionSnapshots(
+      { message: {}, part: {} },
+      "ses_1",
+      [{ info: message("msg_1"), parts: [] }],
+    )
+
+    expect(Object.prototype.hasOwnProperty.call(result.part, "msg_1")).toBe(true)
+    expect(result.part.msg_1).toEqual([])
+    expect(getSessionMaterializationStatus(result, "ses_1")).toEqual({
+      hasMessages: true,
+      renderable: true,
+      missingPartMessageIDs: [],
+    })
+  })
+
   test("promotes skipped step-finish reason onto assistant message info", () => {
     const result = materializeSessionSnapshots(
       { message: {}, part: {} },
