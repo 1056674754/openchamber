@@ -11,6 +11,13 @@ import { resolveApiUrl } from "@/lib/api/serverUrl";
 
 const DEFAULT_REFRESH_INTERVAL_MS = 60000;
 
+type InFlightQuotaRequest = {
+  readonly providerId: QuotaProviderId;
+  readonly promise: Promise<void>;
+};
+
+const inFlightQuotaRequestsByUrl = new Map<string, InFlightQuotaRequest>();
+
 interface QuotaSettingsState {
   autoRefresh: boolean;
   refreshIntervalMs: number;
@@ -179,46 +186,70 @@ export const useQuotaStore = create<QuotaStore>()(
       },
 
       fetchProviderQuota: async (providerId, serverBaseUrl?: string) => {
+        const url = resolveApiUrl(`/api/quota/${encodeURIComponent(providerId)}`, serverBaseUrl);
+        const existingRequest = inFlightQuotaRequestsByUrl.get(url);
+        if (existingRequest) {
+          await existingRequest.promise;
+          return;
+        }
+
         set((state) => ({
           isFetchingProvider: { ...state.isFetchingProvider, [providerId]: true }
         }));
-        try {
-          const response = await fetch(resolveApiUrl(`/api/quota/${encodeURIComponent(providerId)}`, serverBaseUrl));
-          const payload = await response.json().catch(() => null);
-          if (!response.ok) {
-            throw new Error(payload?.error || 'Failed to fetch quota');
-          }
-          if (!payload || typeof payload !== 'object' || typeof payload.providerId !== 'string') {
-            throw new Error('Invalid quota response');
-          }
 
-          const result = payload as ProviderResult;
-          set((state) => {
-            const next = state.results.filter((entry) => entry.providerId !== providerId);
-            next.push(result);
-            return { results: next, error: null };
-          });
-        } catch (error) {
-          const message = error instanceof Error ? error.message : 'Failed to fetch quota';
-          const fallback: ProviderResult = {
-            providerId,
-            providerName: providerId,
-            ok: false,
-            configured: false,
-            error: message,
-            usage: null,
-            fetchedAt: Date.now()
-          };
-          set((state) => {
-            const next = state.results.filter((entry) => entry.providerId !== providerId);
-            next.push(fallback);
-            return { results: next, error: message };
-          });
-        } finally {
+        const request = Promise.resolve().then(async () => {
+          try {
+            const response = await fetch(url);
+            const payload = await response.json().catch(() => null);
+            if (!response.ok) {
+              throw new Error(payload?.error || 'Failed to fetch quota');
+            }
+            if (!payload || typeof payload !== 'object' || typeof payload.providerId !== 'string') {
+              throw new Error('Invalid quota response');
+            }
+
+            const result: ProviderResult = payload;
+            set((state) => {
+              const next = state.results.filter((entry) => entry.providerId !== providerId);
+              next.push(result);
+              return { results: next, error: null };
+            });
+          } catch (error) {
+            const message = error instanceof Error ? error.message : 'Failed to fetch quota';
+            const fallback: ProviderResult = {
+              providerId,
+              providerName: providerId,
+              ok: false,
+              configured: false,
+              error: message,
+              usage: null,
+              fetchedAt: Date.now()
+            };
+            set((state) => {
+              const next = state.results.filter((entry) => entry.providerId !== providerId);
+              next.push(fallback);
+              return { results: next, error: message };
+            });
+          }
+        }).finally(() => {
+          inFlightQuotaRequestsByUrl.delete(url);
+          let hasInFlightProviderRequest = false;
+          for (const entry of inFlightQuotaRequestsByUrl.values()) {
+            if (entry.providerId === providerId) {
+              hasInFlightProviderRequest = true;
+              break;
+            }
+          }
           set((state) => ({
-            isFetchingProvider: { ...state.isFetchingProvider, [providerId]: false }
+            isFetchingProvider: {
+              ...state.isFetchingProvider,
+              [providerId]: hasInFlightProviderRequest
+            }
           }));
-        }
+        });
+
+        inFlightQuotaRequestsByUrl.set(url, { providerId, promise: request });
+        await request;
       },
 
       setSelectedProvider: (providerId) => set({ selectedProviderId: providerId }),
