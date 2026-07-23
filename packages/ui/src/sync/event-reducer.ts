@@ -14,6 +14,7 @@ import type { FileDiff, GlobalState, State } from "./types"
 import { dropSessionCaches } from "./session-cache"
 import { stripSessionDiffSnapshots } from "./sanitize"
 import { syncDebug } from "./debug"
+import { shouldSkipStaleSessionEvent } from "./session-event-freshness"
 import { useSessionMarkersStore } from "@/stores/useSessionMarkersStore"
 
 const SKIP_PARTS = new Set(["patch", "step-start", "step-finish"])
@@ -215,6 +216,9 @@ export function applyDirectoryEvent(
       const info = stripSessionDiffSnapshots((event.properties as { info: Session }).info)
       const sessions = draft.session
       const result = Binary.search(sessions, info.id, (s) => s.id)
+      if (result.found && shouldSkipStaleSessionEvent(sessions[result.index], info)) {
+        return false
+      }
       if (result.found) {
         sessions[result.index] = info
       } else {
@@ -229,6 +233,10 @@ export function applyDirectoryEvent(
       const info = stripSessionDiffSnapshots((event.properties as { info: Session }).info)
       const sessions = draft.session
       const result = Binary.search(sessions, info.id, (s) => s.id)
+
+      if (result.found && shouldSkipStaleSessionEvent(sessions[result.index], info)) {
+        return false
+      }
 
       if (info.time.archived) {
         if (callbacks?.isSessionDeleting?.(info.id)) return false

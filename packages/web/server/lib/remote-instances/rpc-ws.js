@@ -13,7 +13,7 @@ import {
 export const REMOTE_RPC_WS_PATH = '/api/remote-rpc/ws';
 export const LOCAL_RPC_TARGET = 'local';
 
-const REMOTE_RPC_MAX_RESPONSE_BYTES = 16 * 1024 * 1024;
+const REMOTE_RPC_MAX_RESPONSE_BYTES = 32 * 1024 * 1024;
 const REMOTE_RPC_QUEUE_TIMEOUT_MS = 1_000;
 const HOP_BY_HOP_BASE_REQUEST_HEADERS = [
   'connection',
@@ -315,6 +315,16 @@ export function createRemoteRpcConnectionAcceptor({
         });
       } catch (error) {
         const formatted = formatRemoteGateError(error, instanceId);
+        logger?.warn?.('[remote-rpc] request lane rejected', {
+          instanceId,
+          lane: 'normal',
+          method: normalizeMethod(frame.method),
+          path: rpcPath.split('?')[0],
+          status: formatted.status,
+          code: formatted.body.code,
+          retryAfterMs: formatted.body.retryAfterMs,
+          pressure: remoteInstancesRuntime.getRequestPressure?.(instanceId),
+        });
         sendErrorResponse(socket, id, formatted.status, formatted.body, responseMeta);
         return;
       }

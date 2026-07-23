@@ -10,6 +10,7 @@ export type SettingsPageSlug =
   | 'config-sync'
   | 'providers'
   | 'usage'
+  | 'subscriptions'
   | 'agents'
   | 'behavior'
   | 'commands'
@@ -160,6 +161,15 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
     kind: 'split',
     showOn: 'default',
     keywords: ['quota', 'billing', 'tokens', 'usage', 'limits'],
+  },
+  {
+    slug: 'subscriptions',
+    title: 'Subscriptions',
+    group: 'usage',
+    kind: 'split',
+    showOn: 'both',
+    description: 'Read-only view of provider credentials, quota linkage, and conflicts.',
+    keywords: ['subscription', 'subscriptions', 'auth', 'credentials', 'api key', 'oauth', 'quota', 'egress', 'conflicts'],
   },
   {
     slug: 'agents',

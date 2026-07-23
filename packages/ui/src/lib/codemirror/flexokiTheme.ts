@@ -6,19 +6,23 @@ import { classHighlighter, tags as t } from '@lezer/highlight';
 
 import type { Theme } from '@/types/theme';
 
-export function createFlexokiCodeMirrorTheme(theme: Theme): Extension {
+export function createFlexokiCodeMirrorTheme(
+  theme: Theme,
+  options?: { fontSize?: number },
+): Extension {
   const isDark = theme.metadata.variant === 'dark';
 
   const monoFont = theme.config?.fonts?.mono || 'monospace';
   const highlights = theme.colors.syntax.highlights || {};
   const tokens = theme.colors.syntax.tokens || {};
+  const contentFontSize = options?.fontSize ? `${options.fontSize}px` : 'var(--text-code)';
 
   const ui = EditorView.theme({
     '&': {
       backgroundColor: 'var(--background)',
       color: theme.colors.syntax.base.foreground,
-      fontSize: 'var(--text-code)',
-      lineHeight: '1.5rem',
+      fontSize: contentFontSize,
+      lineHeight: '1.5',
       position: 'relative' as const,
     },
     '.cm-scroller': {

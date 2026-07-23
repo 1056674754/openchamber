@@ -3,6 +3,10 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { executeDirectOpenCodeUpgrade as defaultExecuteDirectOpenCodeUpgrade } from './opencode-upgrade-runtime.js';
+import {
+  getProviderAuthStates,
+  removeProviderAuth as removeProviderAuthWithAdapter,
+} from '../subscriptions/auth-adapter.js';
 
 export const registerOpenCodeRoutes = (app, dependencies) => {
   const {
@@ -21,6 +25,7 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
     refreshOpenCodeAfterConfigChange,
     buildOpenCodeUrl,
     getOpenCodeAuthHeaders,
+    fetchProvidersSnapshot,
     executeDirectOpenCodeUpgrade = defaultExecuteDirectOpenCodeUpgrade,
   } = dependencies;
 
@@ -490,9 +495,14 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
       }
 
       const sources = getProviderSources(providerId, directory);
-      const { getProviderAuth } = await getAuthLibrary();
-      const auth = getProviderAuth(providerId);
-      sources.sources.auth.exists = Boolean(auth);
+      const { listProviderAuths } = await getAuthLibrary();
+      const authResult = await getProviderAuthStates({
+        fetchProvidersSnapshot,
+        buildOpenCodeUrl,
+        getOpenCodeAuthHeaders,
+        listProviderAuths,
+      });
+      sources.sources.auth.exists = authResult.states[providerId]?.configured === true;
 
       return res.json({
         providerId,
@@ -534,13 +544,25 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
 
       let removed = false;
       if (scope === 'auth') {
-        const { removeProviderAuth } = await getAuthLibrary();
-        removed = removeProviderAuth(providerId);
+        const { removeProviderAuth: removeLegacyProviderAuth } = await getAuthLibrary();
+        const result = await removeProviderAuthWithAdapter(providerId, {
+          buildOpenCodeUrl,
+          getOpenCodeAuthHeaders,
+          removeLegacyProviderAuth,
+        });
+        console.log(`[subscriptions] Removed provider auth via ${result.path}: ${providerId}`);
+        removed = result.removed;
       } else if (scope === 'user' || scope === 'project' || scope === 'custom') {
         removed = removeProviderConfig(providerId, directory, scope);
       } else if (scope === 'all') {
-        const { removeProviderAuth } = await getAuthLibrary();
-        const authRemoved = removeProviderAuth(providerId);
+        const { removeProviderAuth: removeLegacyProviderAuth } = await getAuthLibrary();
+        const authResult = await removeProviderAuthWithAdapter(providerId, {
+          buildOpenCodeUrl,
+          getOpenCodeAuthHeaders,
+          removeLegacyProviderAuth,
+        });
+        console.log(`[subscriptions] Removed provider auth via ${authResult.path}: ${providerId}`);
+        const authRemoved = authResult.removed;
         const userRemoved = removeProviderConfig(providerId, directory, 'user');
         const projectRemoved = directory ? removeProviderConfig(providerId, directory, 'project') : false;
         const customRemoved = removeProviderConfig(providerId, directory, 'custom');

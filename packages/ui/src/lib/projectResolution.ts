@@ -2,15 +2,9 @@ import type { ProjectEntry } from "@/lib/api/types";
 import type { WorktreeMetadata } from "@/types/worktree";
 import { getWorktreesForProject } from "@/lib/worktrees/worktreeKeys";
 import { DEFAULT_SERVER_ID } from "@/lib/opencode/server-registry";
+import { normalizePath } from "@/lib/pathNormalization";
 
-export const normalizeProjectPath = (value?: string | null): string | null => {
-  if (typeof value !== "string") return null;
-  const trimmed = value.trim();
-  if (!trimmed) return null;
-  const replaced = trimmed.replace(/\\/g, "/");
-  if (replaced === "/") return "/";
-  return replaced.length > 1 ? replaced.replace(/\/+$/, "") : replaced;
-};
+export const normalizeProjectPath = normalizePath;
 
 const usesDefaultConnection = (project: ProjectEntry): boolean =>
   !project.serverId || project.serverId === DEFAULT_SERVER_ID;

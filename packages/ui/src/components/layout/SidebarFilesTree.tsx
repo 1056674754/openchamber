@@ -331,6 +331,7 @@ export const SidebarFilesTree: React.FC = () => {
   const [loadErrorsByDir, setLoadErrorsByDir] = React.useState<Record<string, string>>({});
   const loadedDirsRef = React.useRef<Set<string>>(new Set());
   const inFlightDirsRef = React.useRef<Set<string>>(new Set());
+  const refreshAbortRef = React.useRef<AbortController | null>(null);
 
   const EMPTY_PATHS: string[] = React.useMemo(() => [], []);
   const EMPTY_CONTEXT_TABS: Array<{ mode: string; targetPath: string | null }> = React.useMemo(() => [], []);
@@ -403,7 +404,7 @@ export const SidebarFilesTree: React.FC = () => {
     return sortNodes(nodes);
   }, [showGitignored, showHidden]);
 
-  const loadDirectory = React.useCallback(async (dirPath: string) => {
+  const loadDirectory = React.useCallback(async (dirPath: string, isCancelled?: () => boolean) => {
     const normalizedDir = normalizePath(dirPath.trim());
     if (!normalizedDir) return;
 
@@ -441,6 +442,7 @@ export const SidebarFilesTree: React.FC = () => {
 
     await listPromise
       .then((entries) => {
+        if (isCancelled?.()) return;
         const mapped = mapDirectoryEntries(normalizedDir, entries);
 
         loadedDirsRef.current = new Set(loadedDirsRef.current);
@@ -454,6 +456,7 @@ export const SidebarFilesTree: React.FC = () => {
         setChildrenByDir((prev) => ({ ...prev, [normalizedDir]: mapped }));
       })
       .catch((error) => {
+        if (isCancelled?.()) return;
         const message = error instanceof Error ? error.message : String(error ?? '');
         console.error('Failed to load sidebar directory:', error);
         setLoadErrorsByDir((prev) => ({
@@ -470,12 +473,45 @@ export const SidebarFilesTree: React.FC = () => {
   const refreshRoot = React.useCallback(async () => {
     if (!root) return;
 
-    loadedDirsRef.current = new Set();
-    inFlightDirsRef.current = new Set();
-    setLoadErrorsByDir({});
-    setChildrenByDir((prev) => (Object.keys(prev).length === 0 ? prev : {}));
+    refreshAbortRef.current?.abort();
+    const controller = new AbortController();
+    refreshAbortRef.current = controller;
 
-    await loadDirectory(root);
+    try {
+      const currentExpanded = useFilesViewTabsStore.getState().byRoot[root]?.expandedPaths ?? [];
+      const normalizedExpanded = currentExpanded
+        .map((path) => normalizePath(path))
+        .filter((path): path is string => Boolean(path) && path !== root && path.startsWith(`${root}/`));
+      const pathsToRefresh = [root, ...normalizedExpanded];
+
+      loadedDirsRef.current = new Set(loadedDirsRef.current);
+      for (const path of pathsToRefresh) {
+        loadedDirsRef.current.delete(path);
+      }
+
+      setLoadErrorsByDir((prev) => {
+        const next = { ...prev };
+        let changed = false;
+        for (const path of pathsToRefresh) {
+          if (path in next) {
+            delete next[path];
+            changed = true;
+          }
+        }
+        return changed ? next : prev;
+      });
+
+      const isCancelled = () => controller.signal.aborted;
+      await loadDirectory(root, isCancelled);
+      for (let index = 0; index < normalizedExpanded.length && !controller.signal.aborted; index += 3) {
+        const batch = normalizedExpanded.slice(index, index + 3);
+        await Promise.all(batch.map((path) => loadDirectory(path, isCancelled)));
+      }
+    } finally {
+      if (refreshAbortRef.current === controller) {
+        refreshAbortRef.current = null;
+      }
+    }
   }, [loadDirectory, root]);
 
   /**
@@ -499,12 +535,17 @@ export const SidebarFilesTree: React.FC = () => {
   React.useEffect(() => {
     if (!root) return;
 
+    refreshAbortRef.current?.abort();
     loadedDirsRef.current = new Set();
     inFlightDirsRef.current = new Set();
     setLoadErrorsByDir({});
     setChildrenByDir((prev) => (Object.keys(prev).length === 0 ? prev : {}));
     void loadDirectory(root);
   }, [loadDirectory, root, showHidden, showGitignored]);
+
+  React.useEffect(() => () => {
+    refreshAbortRef.current?.abort();
+  }, []);
 
   React.useEffect(() => {
     if (!root || expandedPaths.length === 0) return;

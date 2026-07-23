@@ -2171,6 +2171,40 @@ function isProcessRunning(pid) {
   }
 }
 
+function readProcessCmdline(pid) {
+  try {
+    if (process.platform === 'linux') {
+      return fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').replace(/\0/g, ' ').trim();
+    }
+    if (process.platform === 'darwin') {
+      const result = spawnSync('ps', ['-p', String(pid), '-o', 'command='], {
+        encoding: 'utf8',
+        timeout: 3000,
+        windowsHide: true,
+      });
+      const output = (result.stdout || '').trim();
+      return output.length > 0 ? output : null;
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+function isOpenchamberCmdline(cmdline) {
+  return typeof cmdline === 'string'
+    && cmdline.length > 0
+    && cmdline.toLowerCase().includes('openchamber');
+}
+
+function isOpenchamberProcessRunning(pid) {
+  if (!isProcessRunning(pid)) {
+    return false;
+  }
+  const cmdline = readProcessCmdline(pid);
+  return cmdline === null ? true : isOpenchamberCmdline(cmdline);
+}
+
 function waitForProcessExit(pid, timeoutMs) {
   if (!Number.isFinite(pid) || pid <= 0) {
     return Promise.resolve(true);
@@ -2474,7 +2508,7 @@ async function discoverRunningInstances() {
       if (!Number.isFinite(port) || port <= 0) continue;
       const pidFilePath = path.join(runDir, file);
       const pid = readPidFile(pidFilePath);
-      if (!pid || !isProcessRunning(pid)) {
+      if (!pid || !isOpenchamberProcessRunning(pid)) {
         removePidFile(pidFilePath);
         removeInstanceFile(path.join(runDir, `openchamber-${port}.json`));
         continue;
@@ -3200,8 +3234,11 @@ const commands = {
     if (targetPort !== 0) {
       const pidFilePath = await getPidFilePath(targetPort);
       const existingPid = readPidFile(pidFilePath);
-      if (existingPid && isProcessRunning(existingPid)) {
-        throw new Error(`OpenChamber is already running on port ${targetPort} (PID: ${existingPid})`);
+      if (existingPid) {
+        if (isOpenchamberProcessRunning(existingPid)) {
+          throw new Error(`OpenChamber is already running on port ${targetPort} (PID: ${existingPid})`);
+        }
+        removePidFile(pidFilePath);
       }
 
       if (explicitPort && !(await isPortAvailable(targetPort, options.host))) {
@@ -5435,6 +5472,8 @@ export {
   isValidTunnelDoctorResponse,
   readDesktopLocalPortFromSettings,
   getPidFilePath,
+  isOpenchamberProcessRunning,
+  isOpenchamberCmdline,
   resolveTunnelProviders,
   fetchTunnelProvidersFromPort,
   fetchSystemInfoFromPort,

@@ -42,6 +42,46 @@ describe('resolveFallbackTaskSessionId', () => {
     expect(result).toBeUndefined();
   });
 
+  it('recovers a finalized interrupted task only from one exact title match', () => {
+    const child = makeSession({
+      id: 'child-recovery',
+      parentID: parentSessionId,
+      title: 'Resume run recovery API (@Sisyphus-Junior subagent)',
+      time: { created: taskStartTime + 2000, updated: taskStartTime + 2500 },
+    });
+
+    const result = resolveFallbackTaskSessionId({
+      isTaskTool: true,
+      parentSessionId,
+      taskStartTime,
+      taskDescription: 'Resume run recovery API',
+      isTaskFinalized: true,
+      sessions: [child],
+    });
+
+    expect(result).toBe('child-recovery');
+  });
+
+  it('does not recover a finalized task from a differently titled child', () => {
+    const child = makeSession({
+      id: 'child-other',
+      parentID: parentSessionId,
+      title: 'Audit interrupted recovery work (@Sisyphus-Junior subagent)',
+      time: { created: taskStartTime + 2000, updated: taskStartTime + 2500 },
+    });
+
+    const result = resolveFallbackTaskSessionId({
+      isTaskTool: true,
+      parentSessionId,
+      taskStartTime,
+      taskDescription: 'Resume run recovery API',
+      isTaskFinalized: true,
+      sessions: [child],
+    });
+
+    expect(result).toBeUndefined();
+  });
+
   it('returns undefined when parentSessionId is missing', () => {
     const result = resolveFallbackTaskSessionId({
       isTaskTool: true,
@@ -153,6 +193,40 @@ describe('resolveFallbackTaskSessionId', () => {
       },
     });
     expect(result).toBe('child-2');
+  });
+
+  it('keeps the resolved child stable while all matching children are briefly idle', () => {
+    const child1 = makeSession({
+      id: 'child-1',
+      parentID: parentSessionId,
+      time: { created: taskStartTime + 100, updated: taskStartTime + 100 },
+    });
+    const child2 = makeSession({
+      id: 'child-2',
+      parentID: parentSessionId,
+      time: { created: taskStartTime + 200, updated: taskStartTime + 200 },
+    });
+
+    const resolvedWhileBusy = resolveFallbackTaskSessionId({
+      isTaskTool: true,
+      parentSessionId,
+      taskStartTime,
+      sessions: [child1, child2],
+      sessionStatusMap: {
+        'child-2': busyStatus,
+      },
+    });
+    const resolvedWhileIdle = resolveFallbackTaskSessionId({
+      isTaskTool: true,
+      parentSessionId,
+      taskStartTime,
+      sessions: [child1, child2],
+      sessionStatusMap: {},
+      previousSessionId: resolvedWhileBusy,
+    });
+
+    expect(resolvedWhileBusy).toBe('child-2');
+    expect(resolvedWhileIdle).toBe('child-2');
   });
 
   it('returns undefined when multiple children are both busy (ambiguous)', () => {

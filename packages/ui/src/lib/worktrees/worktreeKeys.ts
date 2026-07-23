@@ -1,19 +1,15 @@
 import { DEFAULT_SERVER_ID } from '@/lib/opencode/server-registry';
+import { normalizePath } from '@/lib/pathNormalization';
 import type { WorktreeMetadata } from '@/types/worktree';
 
-const normalizePath = (value?: string | null): string => {
-  const source = (value ?? '').trim().replace(/\\/g, '/');
-  if (!source) return '';
-  if (source === '/') return '/';
-  return source.replace(/\/+$/, '') || '/';
-};
+const normalizeWorktreePath = (value?: string | null): string => normalizePath(value) ?? '';
 
 const normalizeServerId = (serverId?: string | null): string => {
   const value = (serverId ?? '').trim();
   return value && value !== DEFAULT_SERVER_ID ? value : '';
 };
 
-const normalizeMetadataPath = (value?: string | null): string => normalizePath(value);
+const normalizeMetadataPath = (value?: string | null): string => normalizeWorktreePath(value);
 
 const mergeWorktreeMetadata = (
   current: WorktreeMetadata,
@@ -45,7 +41,7 @@ const mergeWorktreeMetadata = (
 };
 
 export const getProjectWorktreeKey = (path?: string | null, serverId?: string | null): string => {
-  const normalizedPath = normalizePath(path);
+  const normalizedPath = normalizeWorktreePath(path);
   const normalizedServerId = normalizeServerId(serverId);
   return normalizedServerId ? `${normalizedServerId}::${normalizedPath}` : normalizedPath;
 };
@@ -104,6 +100,6 @@ export const getWorktreesForProject = (
   }
 
   // Backward compatibility for maps populated before server-scoped keys existed.
-  const legacyPathKey = normalizePath(path);
+  const legacyPathKey = normalizeWorktreePath(path);
   return legacyPathKey ? (worktreesByProject.get(legacyPathKey) ?? []) : [];
 };

@@ -1365,6 +1365,16 @@ export async function setLocalIdentity(directory, profile) {
       await git.raw(['config', '--local', '--unset', 'core.sshCommand']).catch(() => {});
     }
 
+    if (profile.signCommits === true && typeof profile.signingKey === 'string' && profile.signingKey.trim()) {
+      await git.addConfig('gpg.format', 'ssh', false, 'local');
+      await git.addConfig('user.signingkey', profile.signingKey.trim(), false, 'local');
+      await git.addConfig('commit.gpgsign', 'true', false, 'local');
+    } else {
+      await git.raw(['config', '--local', '--unset-all', 'gpg.format']).catch(() => {});
+      await git.raw(['config', '--local', '--unset-all', 'user.signingkey']).catch(() => {});
+      await git.raw(['config', '--local', '--unset-all', 'commit.gpgsign']).catch(() => {});
+    }
+
     return true;
   } catch (error) {
     console.error('Failed to set Git identity:', error);

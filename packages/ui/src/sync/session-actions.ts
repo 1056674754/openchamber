@@ -4,6 +4,7 @@
  */
 
 import type { OpencodeClient, Session, Message, Part, SessionStatus } from "@opencode-ai/sdk/v2/client"
+import type { QuestionRequest } from "@/types/question"
 import { Binary } from "./binary"
 import { useSessionUIStore } from "./session-ui-store"
 import { useInputStore } from "./input-store"
@@ -41,6 +42,9 @@ export {
 }
 
 const MESSAGE_REFETCH_LIMIT = 200
+const SEND_CONFIRMATION_REFETCH_LIMIT = 30
+const SEND_CONFIRMATION_REFETCH_ATTEMPTS = 2
+const SEND_CONFIRMATION_REFETCH_RETRY_MS = 150
 const MESSAGE_REFETCH_SKIP_PARTS = new Set(["patch", "step-start", "step-finish"])
 const UNREVERT_REFETCH_ATTEMPTS = 3
 const UNREVERT_REFETCH_RETRY_MS = 150
@@ -76,6 +80,7 @@ let _childStores: ChildStoreManager | null = null
 let _getDirectory: () => string = () => ""
 let _optimisticAdd: ((input: { sessionID: string; message: Message; parts: Part[]; directory?: string | null; serverId?: string | null }) => void) | null = null
 let _optimisticRemove: ((input: { sessionID: string; messageID: string; directory?: string | null; serverId?: string | null }) => void) | null = null
+let _optimisticConfirm: ((input: { sessionID: string; messageID: string; directory?: string | null; serverId?: string | null }) => void) | null = null
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
@@ -147,9 +152,11 @@ export function setActionRefs(
 export function setOptimisticRefs(
   add: (input: { sessionID: string; message: Message; parts: Part[]; directory?: string | null; serverId?: string | null }) => void,
   remove: (input: { sessionID: string; messageID: string; directory?: string | null; serverId?: string | null }) => void,
+  confirm?: (input: { sessionID: string; messageID: string; directory?: string | null; serverId?: string | null }) => void,
 ) {
   _optimisticAdd = add
   _optimisticRemove = remove
+  _optimisticConfirm = confirm ?? null
 }
 
 function sdk() {
@@ -293,6 +300,40 @@ function connectionLostError(serverId?: string | null): Error {
     ? ` for ${serverRegistry.getServerLabel(normalizedServerId)}`
     : ""
   return new Error(`Connection lost${serverSuffix}${suffix}. Please wait for reconnection.`)
+}
+
+function getErrorStatus(error: unknown): number | null {
+  if (typeof error !== "object" || error === null) return null
+  const directStatus = Reflect.get(error, "status")
+  if (typeof directStatus === "number") return directStatus
+  const response = Reflect.get(error, "response")
+  if (typeof response !== "object" || response === null) return null
+  const responseStatus = Reflect.get(response, "status")
+  return typeof responseStatus === "number" ? responseStatus : null
+}
+
+function isAmbiguousSendFailure(error: unknown): boolean {
+  const status = getErrorStatus(error)
+  if (status === 408 || status === 503 || status === 504) return true
+  if (error instanceof TypeError) return true
+  if (typeof DOMException !== "undefined" && error instanceof DOMException) {
+    if (error.name === "AbortError" || error.name === "TimeoutError") return true
+  }
+
+  const message = error instanceof Error
+    ? error.message.toLowerCase()
+    : typeof error === "string"
+      ? error.toLowerCase()
+      : ""
+
+  return message.includes("timeout")
+    || message.includes("timed out")
+    || message.includes("failed to fetch")
+    || message.includes("networkerror")
+    || message.includes("network error")
+    || message.includes("gateway timeout")
+    || message.includes("econnreset")
+    || message.includes("socket hang up")
 }
 
 // Wait briefly for the pipeline to re-establish connection before failing a
@@ -657,6 +698,28 @@ function optimisticRemoveSession(sessionId: string, directory?: string): Session
   return null
 }
 
+function cleanupDeletedSession(sessionId: string, directory: string): void {
+  if (!optimisticRemoveSession(sessionId, directory) && _childStores) {
+    for (const [, store] of _childStores.children.entries()) {
+      const current = store.getState()
+      const sessions = [...current.session]
+      const result = Binary.search(sessions, sessionId, (session) => session.id)
+      if (!result.found) continue
+      sessions.splice(result.index, 1)
+      store.setState({ session: sessions })
+      break
+    }
+  }
+  useGlobalSessionsStore.getState().removeSessions([sessionId])
+  useSessionUIStore.getState().setWorktreeMetadata(sessionId, null)
+}
+
+function isSessionNotFound(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false
+  const candidate = error as { status?: unknown; response?: { status?: unknown } }
+  return candidate.status === 404 || candidate.response?.status === 404
+}
+
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 export async function deleteSession(sessionId: string, _options?: Record<string, unknown>): Promise<boolean> {
   const sessionDirectory = requireSessionDirectory(sessionId, "deleteSession")
@@ -668,24 +731,13 @@ export async function deleteSession(sessionId: string, _options?: Record<string,
   }
   try {
     await sdkForSession(sessionId).session.delete({ sessionID: sessionId, directory: sessionDirectory })
-    // Session was kept in the store during the network call so that
-    // session.updated SSE events update it in place instead of re-inserting
-    // it (which caused the disappear-then-reappear flicker). Remove now.
-    if (!optimisticRemoveSession(sessionId, sessionDirectory) && _childStores) {
-      for (const [, store] of _childStores.children.entries()) {
-        const current = store.getState()
-        const sessions = [...current.session]
-        const result = Binary.search(sessions, sessionId, (s) => s.id)
-        if (result.found) {
-          sessions.splice(result.index, 1)
-          store.setState({ session: sessions })
-          break
-        }
-      }
-    }
-    useGlobalSessionsStore.getState().removeSessions([sessionId])
+    cleanupDeletedSession(sessionId, sessionDirectory)
     return true
   } catch (error) {
+    if (isSessionNotFound(error)) {
+      cleanupDeletedSession(sessionId, sessionDirectory)
+      return true
+    }
     console.error("[session-actions] deleteSession failed", error)
     return false
   } finally {
@@ -696,22 +748,18 @@ export async function deleteSession(sessionId: string, _options?: Record<string,
 /** Delete a session specifying which directory it lives in. Used by agent groups for cross-directory deletes. */
 export async function deleteSessionInDirectory(sessionId: string, directory: string): Promise<boolean> {
   if (!_childStores) return false
-  const store = _childStores.ensureChild(directory)
   const ui = useSessionUIStore.getState()
   ui.markSessionDeleting(sessionId)
   if (ui.currentSessionId === sessionId) ui.setCurrentSession(null)
   try {
     await sdkForSession(sessionId).session.delete({ sessionID: sessionId, directory })
-    const current = store.getState()
-    const sessions = [...current.session]
-    const result = Binary.search(sessions, sessionId, (s) => s.id)
-    if (result.found) {
-      sessions.splice(result.index, 1)
-      store.setState({ session: sessions })
-    }
-    useGlobalSessionsStore.getState().removeSessions([sessionId])
+    cleanupDeletedSession(sessionId, directory)
     return true
   } catch (error) {
+    if (isSessionNotFound(error)) {
+      cleanupDeletedSession(sessionId, directory)
+      return true
+    }
     console.error("[session-actions] deleteSessionInDirectory failed", error)
     return false
   } finally {
@@ -926,6 +974,25 @@ export async function optimisticSend(input: {
 
     await input.send(messageID)
   } catch (error) {
+    const targetDirectory = input.directory
+      ? normalizeDirectoryKey(input.directory)
+      : getSessionDirectory(input.sessionId)
+    const targetServerId = input.serverId ?? serverRegistry.getServerForSession(input.sessionId)
+    const acceptedRecords = isAmbiguousSendFailure(error) && targetDirectory
+      ? await fetchRecentSendConfirmationRecords(input.sessionId, messageID, targetDirectory, targetServerId)
+      : null
+
+    if (acceptedRecords) {
+      materializeConfirmedSendRecords(store, input.sessionId, messageID, acceptedRecords)
+      _optimisticConfirm?.({
+        sessionID: input.sessionId,
+        messageID,
+        directory: targetDirectory,
+        serverId: targetServerId,
+      })
+      return
+    }
+
     // Rollback via optimistic infrastructure
     _optimisticRemove({
       sessionID: input.sessionId,
@@ -942,6 +1009,62 @@ export async function optimisticSend(input: {
     })
     throw error
   }
+}
+
+async function fetchRecentSendConfirmationRecords(
+  sessionId: string,
+  messageID: string,
+  directory: string,
+  serverId?: string | null,
+): Promise<Array<{ info: Message; parts?: Part[] }> | null> {
+  const client = resolveSdkForDirectory(directory, sessionId, serverId ?? undefined)
+  for (let attempt = 0; attempt < SEND_CONFIRMATION_REFETCH_ATTEMPTS; attempt += 1) {
+    if (attempt > 0) await wait(SEND_CONFIRMATION_REFETCH_RETRY_MS)
+    const outcome = await client.session.messages({
+      sessionID: sessionId,
+      directory,
+      limit: SEND_CONFIRMATION_REFETCH_LIMIT,
+    }).then(
+      (result) => ({ kind: "success" as const, result }),
+      () => ({ kind: "failure" as const }),
+    )
+    if (outcome.kind === "failure" || outcome.result.error || !outcome.result.data) {
+      continue
+    }
+    const records = outcome.result.data.filter((record) => Boolean(record?.info?.id))
+    if (records.some((record) => record.info.id === messageID)) {
+      return records
+    }
+  }
+  return null
+}
+
+function materializeConfirmedSendRecords(
+  store: ReturnType<ChildStoreManager["ensureChild"]>,
+  sessionId: string,
+  messageID: string,
+  records: Array<{ info: Message; parts?: Part[] }>,
+): void {
+  store.setState((state) => {
+    const message = { ...state.message }
+    const part = { ...state.part }
+    const currentMessages = message[sessionId]
+    if (currentMessages) {
+      message[sessionId] = currentMessages.filter((entry) => entry.id !== messageID)
+    }
+    delete part[messageID]
+
+    const materialized = materializeSessionSnapshots(
+      { ...state, message, part },
+      sessionId,
+      records.map((record) => ({
+        info: stripMessageDiffSnapshots(record.info),
+        parts: record.parts ?? [],
+      })),
+      { skipPartTypes: MESSAGE_REFETCH_SKIP_PARTS },
+    )
+    return { message: materialized.message, part: materialized.part }
+  })
 }
 
 export function materializeReturnedMessage(input: {
@@ -1004,8 +1127,8 @@ export async function abortCurrentOperation(sessionId: string): Promise<boolean>
   }
 
   const directories = new Set<string>()
-  if (liveDirectory) directories.add(liveDirectory)
-  if (sessionDirectory) directories.add(sessionDirectory)
+  const targetDirectory = sessionDirectory ?? liveDirectory
+  if (targetDirectory) directories.add(targetDirectory)
 
   console.info("[session-actions] abort: directories resolved", {
     sessionId,
@@ -1173,13 +1296,14 @@ export async function respondToQuestion(
 export async function rejectQuestion(
   sessionId: string,
   requestId: string,
-  directoryHint?: string,
+  directoryHint?: string | BlockingRequestTarget,
 ): Promise<void> {
-  const serverId = resolveBlockingRequestServerId(sessionId, directoryHint)
+  const target = typeof directoryHint === "string" ? { directory: directoryHint } : directoryHint
+  const serverId = target?.serverId ?? resolveBlockingRequestServerId(sessionId, target?.directory)
   await waitForConnectionOrThrow(serverId)
-  const directory = directoryHint ?? requireBlockingRequestDirectory("question", sessionId, requestId)
-  const client = directoryHint
-    ? resolveSdkForDirectory(directoryHint, sessionId, serverId)
+  const directory = target?.directory?.trim() || requireBlockingRequestDirectory("question", sessionId, requestId)
+  const client = target?.directory || target?.serverId
+    ? resolveSdkForDirectory(directory, sessionId, serverId)
     : getRequestReplyClient("question", sessionId, requestId)
   const result = await client.question.reject({
     requestID: requestId,
@@ -1189,6 +1313,124 @@ export async function rejectQuestion(
     throw new Error("Question rejection failed")
   }
   optimisticRemoveQuestion(sessionId, requestId)
+}
+
+type QuestionDismissalTarget = {
+  readonly sessionId: string
+  readonly requestId: string
+  readonly directory: string
+  readonly serverId: string
+  readonly question: QuestionRequest
+  readonly stores: ChildStoreManager
+}
+
+function computeSessionSubtreeIds(sessions: Session[], rootId: string): Set<string> {
+  const childrenByParent = new Map<string, string[]>()
+  for (const session of sessions) {
+    if (!session.parentID) continue
+    const children = childrenByParent.get(session.parentID) ?? []
+    children.push(session.id)
+    childrenByParent.set(session.parentID, children)
+  }
+
+  const ids = new Set<string>([rootId])
+  const pending = [rootId]
+  for (const sessionId of pending) {
+    for (const childId of childrenByParent.get(sessionId) ?? []) {
+      if (ids.has(childId)) continue
+      ids.add(childId)
+      pending.push(childId)
+    }
+  }
+  return ids
+}
+
+function collectQuestionDismissalTargets(sessionId: string): QuestionDismissalTarget[] {
+  const indexedServerId = serverRegistry.getServerForSession(sessionId)
+  const managersByServer = new Map<string, Set<ChildStoreManager>>()
+  const addManager = (serverId: string, stores: ChildStoreManager | null | undefined) => {
+    if (!stores) return
+    const managers = managersByServer.get(serverId) ?? new Set<ChildStoreManager>()
+    managers.add(stores)
+    managersByServer.set(serverId, managers)
+  }
+
+  if (indexedServerId) {
+    if (indexedServerId === DEFAULT_SERVER_ID) addManager(DEFAULT_SERVER_ID, _childStores)
+    addManager(indexedServerId, getSyncStoresForServer(indexedServerId))
+  } else {
+    addManager(DEFAULT_SERVER_ID, _childStores)
+    for (const entry of getAllSyncStores()) addManager(entry.serverId, entry.childStores)
+  }
+
+  const targets: QuestionDismissalTarget[] = []
+  const seen = new Set<string>()
+  for (const [serverId, managers] of managersByServer) {
+    const sessionsById = new Map<string, Session>()
+    for (const stores of managers) {
+      for (const store of stores.children.values()) {
+        for (const session of store.getState().session) sessionsById.set(session.id, session)
+      }
+    }
+    const subtreeIds = computeSessionSubtreeIds([...sessionsById.values()], sessionId)
+
+    for (const stores of managers) {
+      for (const [directory, store] of stores.children) {
+        const questionsBySession = store.getState().question
+        for (const scopedSessionId of subtreeIds) {
+          for (const request of questionsBySession[scopedSessionId] ?? []) {
+            const key = `${serverId}\0${directory}\0${scopedSessionId}\0${request.id}`
+            if (seen.has(key)) continue
+            seen.add(key)
+            targets.push({
+              sessionId: scopedSessionId,
+              requestId: request.id,
+              directory,
+              serverId,
+              question: request,
+              stores,
+            })
+          }
+        }
+      }
+    }
+  }
+  return targets
+}
+
+export async function dismissOpenQuestionsForSession(sessionId: string): Promise<boolean> {
+  if (!sessionId) return false
+  const targets = collectQuestionDismissalTargets(sessionId)
+  if (targets.length === 0) return false
+
+  for (const target of targets) {
+    removeQuestionFromStores(target.stores, target.sessionId, target.requestId)
+  }
+
+  await Promise.all(targets.map(async (target) => {
+    try {
+      await rejectQuestion(target.sessionId, target.requestId, {
+        directory: target.directory,
+        serverId: target.serverId,
+      })
+    } catch (error) {
+      console.error("[session-actions] Failed to dismiss open question on send:", error)
+      const store = target.stores.getChild(target.directory)
+      if (store) {
+        const state = store.getState()
+        const current = state.question[target.sessionId] ?? []
+        if (!current.some((question) => question.id === target.requestId)) {
+          store.setState({
+            question: {
+              ...state.question,
+              [target.sessionId]: [...current, target.question],
+            },
+          })
+        }
+      }
+    }
+  }))
+  return true
 }
 
 // ---------------------------------------------------------------------------

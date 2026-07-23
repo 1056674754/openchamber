@@ -184,6 +184,70 @@ describe("message page user boundary", () => {
     expect(result.stoppedBeforeBoundary).toBe(false)
   })
 
+  test("refetches the exact latest turn instead of returning extra real user turns", async () => {
+    const current = page({
+      messages: [
+        message("msg_001", "user"),
+        message("msg_002", "assistant"),
+        message("msg_003", "user"),
+        message("msg_004", "assistant"),
+      ],
+      parts: [
+        { id: "msg_001", part: [textPart("prt_001", "msg_001", "older question")] },
+        { id: "msg_003", part: [textPart("prt_003", "msg_003", "latest question")] },
+      ],
+      cursor: "cursor-before-msg-001",
+    })
+    const requestedLimits: number[] = []
+
+    const result = await fetchMessagePageToUserBoundary({
+      page: current,
+      minimumRealUserMessages: 1,
+      fetchOlder: async () => page({ messages: [], complete: true }),
+      refetchFromStart: async (limit) => {
+        requestedLimits.push(limit)
+        return page({
+          messages: [message("msg_003", "user"), message("msg_004", "assistant")],
+          parts: [{ id: "msg_003", part: [textPart("prt_003", "msg_003", "latest question")] }],
+          cursor: "cursor-before-msg-003",
+        })
+      },
+    })
+
+    expect(requestedLimits).toEqual([2])
+    expect(result.page.session.map((item) => item.id)).toEqual(["msg_003", "msg_004"])
+    expect(result.page.cursor).toBe("cursor-before-msg-003")
+  })
+
+  test("removes an assistant fragment that precedes the oldest requested turn", async () => {
+    const current = page({
+      messages: [
+        message("msg_001", "assistant"),
+        message("msg_002", "user"),
+        message("msg_003", "assistant"),
+      ],
+      parts: [{ id: "msg_002", part: [textPart("prt_002", "msg_002", "latest question")] }],
+      cursor: "cursor-before-msg-001",
+    })
+
+    const result = await fetchMessagePageToUserBoundary({
+      page: current,
+      minimumRealUserMessages: 1,
+      fetchOlder: async () => page({ messages: [], complete: true }),
+      refetchFromStart: async (limit) => {
+        expect(limit).toBe(2)
+        return page({
+          messages: [message("msg_002", "user"), message("msg_003", "assistant")],
+          parts: [{ id: "msg_002", part: [textPart("prt_002", "msg_002", "latest question")] }],
+          cursor: "cursor-before-msg-002",
+        })
+      },
+    })
+
+    expect(result.page.session.map((item) => item.id)).toEqual(["msg_002", "msg_003"])
+    expect(result.page.cursor).toBe("cursor-before-msg-002")
+  })
+
   test("stops at the record budget before reaching the requested turn target", async () => {
     const current = page({
       messages: [message("msg_003", "assistant"), message("msg_004", "assistant")],

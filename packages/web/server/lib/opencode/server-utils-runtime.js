@@ -198,7 +198,25 @@ export const createServerUtilsRuntime = (dependencies) => {
   };
 
   const fetchAgentsSnapshot = () => fetchArraySnapshot('/agent', 'agents snapshot');
-  const fetchProvidersSnapshot = () => fetchArraySnapshot('/provider', 'providers snapshot');
+  const fetchProvidersSnapshot = async () => {
+    if (!getOpenCodePort()) {
+      throw new Error('OpenCode port is not available');
+    }
+
+    const response = await fetch(buildOpenCodeUrl('/provider'), {
+      method: 'GET',
+      headers: { Accept: 'application/json', ...getOpenCodeAuthHeaders() },
+    });
+    if (!response.ok) {
+      throw new Error(`Failed to fetch providers snapshot (status ${response.status})`);
+    }
+    const payload = await response.json().catch(() => null);
+    const providers = Array.isArray(payload) ? payload : payload?.all;
+    if (!Array.isArray(providers)) {
+      throw new Error('Invalid providers snapshot payload from OpenCode');
+    }
+    return providers;
+  };
   const fetchModelsSnapshot = () => fetchArraySnapshot('/model', 'models snapshot');
 
   const setupProxy = (app) => {

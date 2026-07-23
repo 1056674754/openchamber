@@ -29,6 +29,7 @@ export const createNotificationTriggerRuntime = (deps) => {
   const pushPermissionDebounceTimers = new Map();
   const notifiedPermissionRequests = new Set();
   const lastReadyNotificationAt = new Map();
+  const lastErrorNotificationAt = new Map();
 
   // Cache the last message.updated payload per session so the session.idle
   // handler can send a notification with the correct template variables
@@ -60,24 +61,29 @@ export const createNotificationTriggerRuntime = (deps) => {
     return `/?session=${encodeURIComponent(sessionId)}`;
   };
 
-  const getCachedSessionParentId = (sessionId) => {
-    const entry = sessionParentIdCache.get(sessionId);
+  const getSessionParentCacheKey = (sessionId, directory) => `${directory || ''}\0${sessionId}`;
+
+  const getCachedSessionParentId = (sessionId, directory) => {
+    const cacheKey = getSessionParentCacheKey(sessionId, directory);
+    const entry = sessionParentIdCache.get(cacheKey);
     if (!entry) return undefined;
     if (Date.now() - entry.at > SESSION_PARENT_CACHE_TTL_MS) {
-      sessionParentIdCache.delete(sessionId);
+      sessionParentIdCache.delete(cacheKey);
       return undefined;
     }
     return entry.parentID;
   };
 
-  const setCachedSessionParentId = (sessionId, parentID) => {
-    if (!parentID) return;
-    sessionParentIdCache.set(sessionId, { parentID: parentID ?? null, at: Date.now() });
+  const setCachedSessionParentId = (sessionId, directory, parentID) => {
+    sessionParentIdCache.set(getSessionParentCacheKey(sessionId, directory), {
+      parentID: parentID ?? null,
+      at: Date.now(),
+    });
   };
 
   const getParentIdFromPayload = (payload) => {
-    if (!payload || typeof payload !== 'object') return null;
-    if (payload.type !== 'session.created' && payload.type !== 'session.updated') return null;
+    if (!payload || typeof payload !== 'object') return undefined;
+    if (payload.type !== 'session.created' && payload.type !== 'session.updated') return undefined;
     const parentID = payload.properties?.info?.parentID ?? null;
     return typeof parentID === 'string' && parentID.length > 0 ? parentID : null;
   };
@@ -85,20 +91,22 @@ export const createNotificationTriggerRuntime = (deps) => {
   const maybeCacheSessionParentFromPayload = (payload) => {
     const sessionId = extractSessionIdFromPayload(payload);
     if (typeof sessionId !== 'string' || sessionId.length === 0) return;
+    const directory = extractDirectoryFromPayload(payload);
     const parentID = getParentIdFromPayload(payload);
-    if (parentID) {
-      setCachedSessionParentId(sessionId, parentID);
-    }
+    if (parentID === undefined) return;
+    setCachedSessionParentId(sessionId, directory, parentID);
   };
 
-  const fetchSessionParentId = async (sessionId) => {
+  const fetchSessionParentId = async (sessionId, directory) => {
     if (!sessionId) return undefined;
 
-    const cached = getCachedSessionParentId(sessionId);
+    const cached = getCachedSessionParentId(sessionId, directory);
     if (cached !== undefined) return cached;
 
     try {
-      const response = await fetch(buildOpenCodeUrl('/session', ''), {
+      const base = buildOpenCodeUrl(`/session/${encodeURIComponent(sessionId)}`, '');
+      const url = directory ? `${base}?directory=${encodeURIComponent(directory)}` : base;
+      const response = await fetch(url, {
         method: 'GET',
         headers: {
           Accept: 'application/json',
@@ -109,21 +117,15 @@ export const createNotificationTriggerRuntime = (deps) => {
       if (!response.ok) {
         return undefined;
       }
-      const data = await response.json().catch(() => null);
-      const sessions = Array.isArray(data)
-        ? data
-        : Array.isArray(data?.items)
-          ? data.items
-          : Array.isArray(data?.data)
-            ? data.data
-            : null;
-      if (!sessions) {
+      const session = await response.json().catch(() => null);
+      if (!session || typeof session !== 'object') {
         return undefined;
       }
 
-      const match = sessions.find((session) => session && typeof session === 'object' && session.id === sessionId);
-      const parentID = match?.parentID ?? null;
-      setCachedSessionParentId(sessionId, parentID);
+      const parentID = typeof session.parentID === 'string' && session.parentID.length > 0
+        ? session.parentID
+        : null;
+      setCachedSessionParentId(sessionId, directory, parentID);
       return parentID;
     } catch {
       return undefined;
@@ -132,14 +134,14 @@ export const createNotificationTriggerRuntime = (deps) => {
 
   // Mirrors client-side autoRespondsPermission: a session auto-accepts if it
   // OR any ancestor is flagged. Walks the parent chain via fetchSessionParentId.
-  const isSessionAutoAccepting = async (sessionId) => {
+  const isSessionAutoAccepting = async (sessionId, directory) => {
     if (!sessionId || autoAcceptingSessions.size === 0) return false;
     let current = sessionId;
     const seen = new Set();
     while (current && !seen.has(current)) {
       if (autoAcceptingSessions.has(current)) return true;
       seen.add(current);
-      const parent = await fetchSessionParentId(current);
+      const parent = await fetchSessionParentId(current, directory);
       if (!parent) return false;
       current = parent;
     }
@@ -158,6 +160,15 @@ export const createNotificationTriggerRuntime = (deps) => {
       props?.session ??
       null;
     return typeof sessionId === 'string' && sessionId.length > 0 ? sessionId : null;
+  };
+
+  const extractDirectoryFromPayload = (payload) => {
+    if (!payload || typeof payload !== 'object') return undefined;
+    const props = payload.properties;
+    const directory = props?.directory ?? props?.info?.directory;
+    if (typeof directory !== 'string') return undefined;
+    const trimmed = directory.trim();
+    return trimmed.length > 0 ? trimmed : undefined;
   };
 
   const formatMode = (raw) => {
@@ -194,11 +205,22 @@ export const createNotificationTriggerRuntime = (deps) => {
       .join(' ');
   };
 
-  const sendCompletionNotification = async (payload, sessionId) => {
+  const sendCompletionNotification = async (payload, sessionId, directory) => {
     const info = payload.properties?.info;
     const settings = await readSettingsFromDisk();
 
     if (settings.notifyOnCompletion === false) {
+      return;
+    }
+
+    if (settings.notifyOnSubtasks === false) {
+      const parentID = await fetchSessionParentId(sessionId, directory);
+      if (parentID !== null) {
+        return;
+      }
+    }
+
+    if (settings.notificationMode !== 'always' && getIsWindowFocused?.()) {
       return;
     }
 
@@ -214,7 +236,7 @@ export const createNotificationTriggerRuntime = (deps) => {
 
     try {
       const templates = settings.notificationTemplates || {};
-      const isSubtask = await fetchSessionParentId(sessionId);
+      const isSubtask = await fetchSessionParentId(sessionId, directory);
       const completionTemplate = isSubtask && settings.notifyOnSubtasks !== false
         ? (templates.subtask || templates.completion || { title: '{agent_name} is ready', message: '{model_name} completed the task' })
         : (templates.completion || { title: '{agent_name} is ready', message: '{model_name} completed the task' });
@@ -286,12 +308,46 @@ export const createNotificationTriggerRuntime = (deps) => {
     maybeCacheSessionParentFromPayload(payload);
 
     const sessionId = extractSessionIdFromPayload(payload);
+    const notificationDirectory = extractDirectoryFromPayload(payload);
     if (payload.type === 'session.idle' && sessionId) {
-      const cached = pendingCompletionPayloads.get(sessionId);
-      if (cached) {
-        pendingCompletionPayloads.delete(sessionId);
-        await sendCompletionNotification(cached, sessionId);
-      }
+      const cacheKey = getSessionParentCacheKey(sessionId, notificationDirectory);
+      const cached = pendingCompletionPayloads.get(cacheKey);
+      pendingCompletionPayloads.delete(cacheKey);
+      await sendCompletionNotification(cached ?? {
+        ...payload,
+        type: 'message.updated',
+        properties: {
+          ...payload.properties,
+          info: {
+            sessionID: sessionId,
+            role: 'assistant',
+            finish: 'stop',
+          },
+        },
+      }, sessionId, notificationDirectory);
+      return;
+    }
+
+    if (payload.type === 'session.error' && sessionId) {
+      const cacheKey = getSessionParentCacheKey(sessionId, notificationDirectory);
+      pendingCompletionPayloads.delete(cacheKey);
+      const error = payload.properties?.error;
+      const errorText = typeof error?.message === 'string'
+        ? error.message
+        : typeof error === 'string' ? error : '';
+      await maybeSendPushForTrigger({
+        ...payload,
+        type: 'message.updated',
+        properties: {
+          ...payload.properties,
+          info: {
+            sessionID: sessionId,
+            role: 'assistant',
+            finish: 'error',
+            ...(errorText ? { parts: [{ type: 'text', text: errorText }] } : {}),
+          },
+        },
+      });
       return;
     }
 
@@ -302,11 +358,11 @@ export const createNotificationTriggerRuntime = (deps) => {
 
         if (settings.notifyOnSubtasks === false) {
           const parentIDFromPayload = getParentIdFromPayload(payload);
-          const parentID = parentIDFromPayload
+          const parentID = parentIDFromPayload !== undefined
             ? parentIDFromPayload
-            : await fetchSessionParentId(sessionId);
+            : await fetchSessionParentId(sessionId, notificationDirectory);
 
-          if (parentID) {
+          if (parentID !== null) {
             return;
           }
         }
@@ -315,7 +371,10 @@ export const createNotificationTriggerRuntime = (deps) => {
           return;
         }
 
-        pendingCompletionPayloads.set(sessionId, payload);
+        pendingCompletionPayloads.set(
+          getSessionParentCacheKey(sessionId, notificationDirectory),
+          payload,
+        );
 
         if (settings.notificationMode !== 'always' && getIsWindowFocused?.()) {
           return;
@@ -333,7 +392,7 @@ export const createNotificationTriggerRuntime = (deps) => {
 
         try {
           const templates = settings.notificationTemplates || {};
-          const isSubtask = await fetchSessionParentId(sessionId);
+          const isSubtask = await fetchSessionParentId(sessionId, notificationDirectory);
           const completionTemplate = isSubtask && settings.notifyOnSubtasks !== false
             ? (templates.subtask || templates.completion || { title: '{agent_name} is ready', message: '{model_name} completed the task' })
             : (templates.completion || { title: '{agent_name} is ready', message: '{model_name} completed the task' });
@@ -391,6 +450,11 @@ export const createNotificationTriggerRuntime = (deps) => {
       if (info?.role === 'assistant' && info?.finish === 'error' && sessionId) {
         const settings = await readSettingsFromDisk();
         if (settings.notifyOnError === false) return;
+
+        const now = Date.now();
+        const lastAt = lastErrorNotificationAt.get(sessionId) ?? 0;
+        if (now - lastAt < PUSH_READY_COOLDOWN_MS) return;
+        lastErrorNotificationAt.set(sessionId, now);
 
         if (settings.notificationMode !== 'always' && getIsWindowFocused?.()) {
           return;
@@ -557,7 +621,7 @@ export const createNotificationTriggerRuntime = (deps) => {
       // Client may be in Permission Auto-Accept for this session (or any
       // ancestor). Skip the whole notification path — the client responds
       // directly and the user has opted out of approval prompts.
-      if (await isSessionAutoAccepting(sessionId)) {
+      if (await isSessionAutoAccepting(sessionId, notificationDirectory)) {
         if (requestKey) notifiedPermissionRequests.add(requestKey);
         return;
       }
@@ -570,7 +634,7 @@ export const createNotificationTriggerRuntime = (deps) => {
       const timer = setTimeout(async () => {
         pushPermissionDebounceTimers.delete(sessionId);
 
-        if (await isSessionAutoAccepting(sessionId)) {
+        if (await isSessionAutoAccepting(sessionId, notificationDirectory)) {
           if (requestKey) notifiedPermissionRequests.add(requestKey);
           return;
         }

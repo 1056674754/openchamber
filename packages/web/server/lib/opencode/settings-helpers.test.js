@@ -20,7 +20,43 @@ const createTestHelpers = () => createSettingsHelpers({
   sanitizeProjects: () => undefined,
 });
 
+const createModelPrefsTestHelpers = () => createSettingsHelpers({
+  normalizePathForPersistence: (value) => value,
+  normalizeDirectoryPath: (value) => value,
+  normalizeTunnelBootstrapTtlMs: (value) => value,
+  normalizeTunnelSessionTtlMs: (value) => value,
+  normalizeTunnelProvider: (value) => value,
+  normalizeTunnelMode: (value) => value,
+  normalizeOptionalPath: (value) => value,
+  normalizeManagedRemoteTunnelHostname: (value) => value,
+  normalizeManagedRemoteTunnelPresets: () => undefined,
+  normalizeManagedRemoteTunnelPresetTokens: () => undefined,
+  sanitizeTypographySizesPartial: () => undefined,
+  normalizeStringArray: (input) => Array.isArray(input)
+    ? Array.from(new Set(input.filter((value) => typeof value === 'string' && value.length > 0)))
+    : [],
+  sanitizeModelRefs: (input, limit) => Array.isArray(input) ? input.slice(0, limit) : undefined,
+  sanitizeSkillCatalogs: () => undefined,
+  sanitizeProjects: () => undefined,
+});
+
 describe('settings helpers', () => {
+  it('persists model visibility and sibling selector state', () => {
+    const helpers = createModelPrefsTestHelpers();
+    const payload = {
+      hiddenModels: [{ providerID: 'openai', modelID: 'gpt-5' }],
+      collapsedModelProviders: ['openai'],
+      recentAgents: ['build'],
+      recentEfforts: { 'openai/gpt-5': ['high', 'high', 'low'] },
+    };
+
+    expect(helpers.sanitizeSettingsUpdate(payload)).toEqual({
+      ...payload,
+      recentEfforts: { 'openai/gpt-5': ['high', 'low'] },
+    });
+    expect(helpers.sanitizeSettingsUpdate({ recentEfforts: {} })).toEqual({ recentEfforts: {} });
+  });
+
   it('accepts messageStreamTransport as a persisted shared setting', () => {
     const helpers = createTestHelpers();
 
@@ -33,6 +69,39 @@ describe('settings helpers', () => {
     expect(helpers.sanitizeSettingsUpdate({ messageStreamTransport: 'auto' })).toEqual({
       messageStreamTransport: 'auto',
     });
+  });
+
+  it('clamps editor font size before persisting shared settings', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({ editorFontSize: 8.6 })).toEqual({ editorFontSize: 9 });
+    expect(helpers.sanitizeSettingsUpdate({ editorFontSize: 18.4 })).toEqual({ editorFontSize: 18 });
+    expect(helpers.sanitizeSettingsUpdate({ editorFontSize: 80 })).toEqual({ editorFontSize: 32 });
+    expect(helpers.sanitizeSettingsUpdate({ editorFontSize: '18' })).toEqual({});
+  });
+
+  it('only accepts a boolean subagent prompting preference', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({ allowPromptingSubagentSessions: true })).toEqual({
+      allowPromptingSubagentSessions: true,
+    });
+    expect(helpers.sanitizeSettingsUpdate({ allowPromptingSubagentSessions: false })).toEqual({
+      allowPromptingSubagentSessions: false,
+    });
+    expect(helpers.sanitizeSettingsUpdate({ allowPromptingSubagentSessions: 'true' })).toEqual({});
+  });
+
+  it('only accepts a boolean prompt navigator preference', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({ promptNavigatorEnabled: true })).toEqual({
+      promptNavigatorEnabled: true,
+    });
+    expect(helpers.sanitizeSettingsUpdate({ promptNavigatorEnabled: false })).toEqual({
+      promptNavigatorEnabled: false,
+    });
+    expect(helpers.sanitizeSettingsUpdate({ promptNavigatorEnabled: 'true' })).toEqual({});
   });
 
   it('rejects invalid messageStreamTransport values', () => {

@@ -26,7 +26,7 @@ import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { UsageProgressBar } from '@/components/sections/usage/UsageProgressBar';
 import { PaceIndicator } from '@/components/sections/usage/PaceIndicator';
 import { Icon } from "@/components/icon/Icon";
-import { formatQuotaValueLabel, formatWindowLabel, QUOTA_PROVIDERS, calculatePace, calculateExpectedUsagePercent } from '@/lib/quota';
+import { formatQuotaValueLabel, formatWindowLabel, QUOTA_PROVIDERS, calculatePace, calculateExpectedUsageMarkerPercent } from '@/lib/quota';
 import { useQuotaAutoRefresh, useQuotaStore } from '@/stores/useQuotaStore';
 import { useUpdateStore } from '@/stores/useUpdateStore';
 import { updateDesktopSettings } from '@/lib/persistence';
@@ -890,11 +890,10 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
                       ? window.remainingPercent
                       : window.usedPercent;
                     const paceInfo = calculatePace(window.usedPercent, window.resetAt, window.windowSeconds, label);
-                    const expectedMarker = paceInfo?.dailyAllocationPercent != null
-                      ? (quotaDisplayMode === 'remaining'
-                          ? 100 - calculateExpectedUsagePercent(paceInfo.elapsedRatio)
-                          : calculateExpectedUsagePercent(paceInfo.elapsedRatio))
-                      : null;
+                    const expectedMarker = calculateExpectedUsageMarkerPercent(
+                      paceInfo?.elapsedRatio ?? null,
+                      quotaDisplayMode,
+                    );
                     const metricLabel = formatQuotaValueLabel(window.valueLabel, displayPercent);
                     return (
                     <DropdownMenuItem

@@ -173,6 +173,13 @@ const SHORTCUT_ACTIONS: ReadonlyArray<ShortcutAction> = [
     customizable: true,
   },
   {
+    id: 'toggle_prompt_navigator',
+    defaultCombo: 'mod+alt+p',
+    label: 'Toggle prompt navigator',
+    description: 'Focus or close the prompt navigator in chat',
+    customizable: true,
+  },
+  {
     id: 'toggle_right_sidebar',
     defaultCombo: 'mod+b',
     label: 'Toggle right sidebar',
@@ -290,6 +297,7 @@ const SHORTCUT_ACTIONS: ReadonlyArray<ShortcutAction> = [
     defaultCombo: 'mod+shift+m',
     label: 'Open model selector',
     description: 'Open model selector while in chat',
+    customizable: true,
   },
   {
     id: 'cycle_thinking_variant',

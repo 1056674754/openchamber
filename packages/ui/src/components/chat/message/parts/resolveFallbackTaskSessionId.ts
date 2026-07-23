@@ -31,13 +31,25 @@ export interface ResolveFallbackParams {
   taskStartTime: number | undefined;
   /** True when the task tool is finalized (completed/error/etc.) */
   isTaskFinalized?: boolean;
+  taskDescription?: string;
   /** Sessions from the directory store */
   sessions: Session[];
   /** Session status map from the sync store */
   sessionStatusMap?: Record<string, SessionStatus>;
   /** True when a previous resolution attempt has already failed (enables wider window) */
   hasRetried?: boolean;
+  previousSessionId?: string;
 }
+
+const normalizeTaskTitle = (value: unknown): string => {
+  if (typeof value !== 'string') {
+    return '';
+  }
+
+  return value
+    .replace(/\s+\(@[^()]+\s+subagent\)\s*$/i, '')
+    .trim();
+};
 
 /**
  * Attempts to resolve a child session id for a pending task tool by matching
@@ -45,7 +57,7 @@ export interface ResolveFallbackParams {
  *
  * Returns `undefined` when:
  * - Not a task tool
- * - Task is finalized
+ * - Task is finalized before any child session was resolved
  * - Parent session is unknown
  * - No unambiguous match found
  */
@@ -55,16 +67,28 @@ export function resolveFallbackTaskSessionId(params: ResolveFallbackParams): str
     parentSessionId,
     taskStartTime,
     isTaskFinalized = false,
+    taskDescription,
     sessions,
     sessionStatusMap,
     hasRetried = false,
+    previousSessionId,
   } = params;
 
-  if (!isTaskTool || isTaskFinalized || !parentSessionId || typeof taskStartTime !== 'number') {
+  if (!isTaskTool) {
+    return undefined;
+  }
+  if (previousSessionId) {
+    return previousSessionId;
+  }
+  if (!parentSessionId || typeof taskStartTime !== 'number') {
     return undefined;
   }
 
-  const windowMs = hasRetried ? TASK_SESSION_MATCH_WINDOW_WIDE_MS : TASK_SESSION_MATCH_WINDOW_MS;
+  const windowMs = isTaskFinalized
+    ? TASK_SESSION_MATCH_WINDOW_MS
+    : hasRetried
+      ? TASK_SESSION_MATCH_WINDOW_WIDE_MS
+      : TASK_SESSION_MATCH_WINDOW_MS;
   const latestAllowed = taskStartTime + windowMs;
 
   // Filter candidate sessions: parentID matches and created shortly after task start.
@@ -81,6 +105,18 @@ export function resolveFallbackTaskSessionId(params: ResolveFallbackParams): str
 
   if (candidates.length === 0) {
     return undefined;
+  }
+
+  if (isTaskFinalized) {
+    const normalizedDescription = normalizeTaskTitle(taskDescription);
+    if (!normalizedDescription) {
+      return undefined;
+    }
+
+    const exactTitleMatches = candidates.filter(
+      (session) => normalizeTaskTitle(session.title) === normalizedDescription,
+    );
+    return exactTitleMatches.length === 1 ? exactTitleMatches[0].id : undefined;
   }
 
   // If exactly one candidate, return it regardless of status

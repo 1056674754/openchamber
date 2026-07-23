@@ -32,6 +32,17 @@ export const countUserBoundaries = (page: Pick<MessagePage, "session" | "part">)
   return page.session.filter((message) => isRealUserMessage(message, partsByMessageID.get(message.id))).length
 }
 
+const getUserBoundaryIndexes = (page: Pick<MessagePage, "session" | "part">): number[] => {
+  const partsByMessageID = new Map(page.part.map((item) => [item.id, item.part]))
+  const indexes: number[] = []
+  page.session.forEach((message, index) => {
+    if (isRealUserMessage(message, partsByMessageID.get(message.id))) {
+      indexes.push(index)
+    }
+  })
+  return indexes
+}
+
 export const mergeOlderMessagePage = (page: MessagePage, older: MessagePage): MessagePage => ({
   session: [...older.session, ...page.session].sort((left, right) => cmp(left.id, right.id)),
   part: [...older.part, ...page.part],
@@ -45,6 +56,7 @@ export const mergeOlderMessagePage = (page: MessagePage, older: MessagePage): Me
 export async function fetchMessagePageToUserBoundary(input: {
   page: MessagePage
   fetchOlder: (cursor: string) => Promise<MessagePage>
+  refetchFromStart?: (limit: number) => Promise<MessagePage>
   minimumRealUserMessages?: number
   maxExtraPages?: number
   maxRecords?: number
@@ -85,6 +97,24 @@ export async function fetchMessagePageToUserBoundary(input: {
     }
 
     page = mergeOlderMessagePage(page, older)
+  }
+
+  const boundaryIndexes = getUserBoundaryIndexes(page)
+  const selectedBoundaryOffset = boundaryIndexes.length - minimumRealUserMessages
+  const selectedBoundaryIndex = selectedBoundaryOffset >= 0
+    ? boundaryIndexes[selectedBoundaryOffset]
+    : undefined
+  const shouldAlignToBoundary = typeof selectedBoundaryIndex === "number"
+    && selectedBoundaryIndex > 0
+    && (boundaryIndexes.length > minimumRealUserMessages || !page.complete)
+
+  if (shouldAlignToBoundary && input.refetchFromStart) {
+    const expectedBoundaryID = page.session[selectedBoundaryIndex]?.id
+    const exactRecordLimit = page.session.length - selectedBoundaryIndex
+    const aligned = await input.refetchFromStart(exactRecordLimit)
+    if (expectedBoundaryID && aligned.session[0]?.id === expectedBoundaryID) {
+      page = aligned
+    }
   }
 
   return {

@@ -5,6 +5,10 @@ import { parseRoute, updateBrowserURL, hasRouteParams } from '@/lib/router';
 import type { RouteState, AppRouteState } from '@/lib/router';
 import type { MainTab } from '@/stores/useUIStore';
 import { resolveSettingsSlug } from '@/lib/settings/metadata';
+import { isEmbeddedSessionChat } from '@/components/layout/contextPanelEmbeddedChat';
+import { opencodeClient } from '@/lib/opencode/client';
+import { DEFAULT_SERVER_ID, serverRegistry } from '@/lib/opencode/server-registry';
+import { normalizePath } from '@/lib/pathNormalization';
 
 /**
  * Check if running in VS Code webview context.
@@ -32,9 +36,8 @@ function isVSCodeContext(): boolean {
  */
 export function useRouter(): void {
   const isVSCode = React.useMemo(() => isVSCodeContext(), []);
+  const isEmbeddedChat = React.useMemo(() => isEmbeddedSessionChat(), []);
 
-  // Track initialization to avoid duplicate applies
-  const initializedRef = React.useRef(false);
   const isApplyingRouteRef = React.useRef(false);
 
   // Get store actions (stable references)
@@ -60,7 +63,29 @@ export function useRouter(): void {
         if (route.sessionId) {
           const currentSessionId = useSessionUIStore.getState().currentSessionId;
           if (route.sessionId !== currentSessionId) {
-            await setCurrentSession(route.sessionId);
+            let directoryHint = useSessionUIStore.getState().getDirectoryForSession(route.sessionId);
+            let serverId = serverRegistry.getServerForSession(route.sessionId);
+
+            if (!directoryHint) {
+              try {
+                const client = serverId
+                  ? serverRegistry.get(serverId)?.client
+                  : opencodeClient.getSdkClient();
+                const response = await client?.session.get({ sessionID: route.sessionId });
+                directoryHint = normalizePath(response?.data?.directory ?? null);
+                if (directoryHint && !serverId) {
+                  serverId = DEFAULT_SERVER_ID;
+                }
+              } catch (error) {
+                console.warn('[router] Failed to resolve direct session route:', error);
+              }
+            }
+
+            setCurrentSession(
+              route.sessionId,
+              directoryHint,
+              serverId ? { serverId } : undefined,
+            );
           }
         }
 
@@ -114,23 +139,18 @@ export function useRouter(): void {
    */
   const syncURLFromState = React.useCallback(
     (options: { replace?: boolean } = {}) => {
-      if (isVSCode || isApplyingRouteRef.current) {
+      if (isVSCode || isEmbeddedChat || isApplyingRouteRef.current) {
         return;
       }
 
       const state = getCurrentAppState();
       updateBrowserURL(state, options);
     },
-    [isVSCode, getCurrentAppState]
+    [isVSCode, isEmbeddedChat, getCurrentAppState]
   );
 
   // Initialize: parse URL and apply route on mount
   React.useEffect(() => {
-    if (initializedRef.current) {
-      return;
-    }
-    initializedRef.current = true;
-
     // Only process if URL has route params
     if (!hasRouteParams()) {
       // No route params - just set up sync (URL will update when user navigates)
@@ -143,18 +163,23 @@ export function useRouter(): void {
     const initializeRoute = async () => {
       await applyRoute(route);
 
-      // After applying, update URL to normalized form (use replaceState)
-      if (!isVSCode) {
-        syncURLFromState({ replace: true });
+      if (!isVSCode && !isEmbeddedChat) {
+        updateBrowserURL({
+          ...getCurrentAppState(),
+          sessionId: route.sessionId ?? useSessionUIStore.getState().currentSessionId,
+          tab: route.tab ?? useUIStore.getState().activeMainTab,
+          settingsPath: route.settingsPath ?? useUIStore.getState().settingsPage,
+          diffFile: route.diffFile ?? useUIStore.getState().pendingDiffFile,
+        }, { replace: true, force: true });
       }
     };
 
     void initializeRoute();
-  }, [applyRoute, isVSCode, syncURLFromState]);
+  }, [applyRoute, getCurrentAppState, isEmbeddedChat, isVSCode]);
 
   // Subscribe to session changes
   React.useEffect(() => {
-    if (isVSCode) {
+    if (isVSCode || isEmbeddedChat) {
       return;
     }
 
@@ -173,11 +198,11 @@ export function useRouter(): void {
     });
 
     return unsubscribe;
-  }, [isVSCode, syncURLFromState]);
+  }, [isEmbeddedChat, isVSCode, syncURLFromState]);
 
   // Subscribe to UI store changes (tab, settings)
   React.useEffect(() => {
-    if (isVSCode) {
+    if (isVSCode || isEmbeddedChat) {
       return;
     }
 
@@ -210,11 +235,11 @@ export function useRouter(): void {
     });
 
     return unsubscribe;
-  }, [isVSCode, syncURLFromState]);
+  }, [isEmbeddedChat, isVSCode, syncURLFromState]);
 
   // Listen for browser back/forward navigation
   React.useEffect(() => {
-    if (typeof window === 'undefined' || isVSCode) {
+    if (typeof window === 'undefined' || isVSCode || isEmbeddedChat) {
       return;
     }
 
@@ -244,7 +269,7 @@ export function useRouter(): void {
     return () => {
       window.removeEventListener('popstate', handlePopState);
     };
-  }, [applyRoute, isVSCode, setActiveMainTab, setSettingsDialogOpen]);
+  }, [applyRoute, isEmbeddedChat, isVSCode, setActiveMainTab, setSettingsDialogOpen]);
 }
 
 /**

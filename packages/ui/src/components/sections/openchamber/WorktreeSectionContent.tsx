@@ -1,4 +1,5 @@
 import React from 'react';
+import type { Session } from '@opencode-ai/sdk/v2';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -231,10 +232,15 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
     // Build a set of session IDs that are directly linked
     const directSessionIds = new Set(directSessions.map((s) => s.id));
 
-    // Find all subsessions recursively
-    const findSubsessions = (parentIds: Set<string>): typeof sessions => {
-      const subsessions = sessions.filter((session) => {
-        const parentID = (session as { parentID?: string | null }).parentID;
+    const globalSessions = useGlobalSessionsStore.getState();
+    const allKnownSessions = [
+      ...globalSessions.activeSessions,
+      ...globalSessions.archivedSessions,
+    ];
+
+    const findSubsessions = (parentIds: Set<string>): Session[] => {
+      const subsessions = allKnownSessions.filter((session) => {
+        const parentID = (session as Session & { parentID?: string | null }).parentID;
         return parentID && parentIds.has(parentID);
       });
       if (subsessions.length === 0) {

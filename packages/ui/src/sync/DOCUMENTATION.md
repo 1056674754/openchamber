@@ -37,6 +37,8 @@ So:
 - Use the **global sessions store** for cold/global session coverage (especially archived pages and unopened directories)
 - Use **aggregated child-store snapshots** for live session/status truth across already initialized directories
 
+Remote instances keep the same boundary explicitly: discovering a project or worktree loads only session summaries into the global cache. It does not create a directory child store. A full child store is materialized only when the directory is opened or receives an event that requires message or blocking-request state.
+
 ## Ownership map
 
 | Layer / Store | Owns | Scope |
@@ -82,10 +84,12 @@ Current consumers:
 
 ### Mutation responsibility
 
-`useGlobalSessionsStore` is not maintained by SSE directly. It is kept correct by:
+`useGlobalSessionsStore` is kept correct by:
 
 1. shared global fetch/reconciliation via `loadSessions()` / `refreshGlobalSessions()`
-2. direct mutation from session actions after successful SDK calls:
+2. paced remote directory summary scans for unopened remote directories
+3. selected session/status SSE projections that can be represented without materializing a directory store
+4. direct mutation from session actions after successful SDK calls:
    - create
    - title update
    - share
@@ -96,7 +100,15 @@ Current consumers:
 
 This keeps cold/global lists responsive without requiring a refetch after every change.
 
-Live activity/status indicators must not depend on this cache. They must derive from aggregated child-store state.
+Resident sessions prefer child-store state. Cold remote rows can use global SSE/status summaries until the session is activated.
+
+## Remote read admission
+
+Remote summary and status reads share one scheduler per remote server. The scheduler admits at most three reads concurrently, leaving one slot in the server's four-request normal lane for user operations. Interactive status reads take precedence over queued background discovery, and identical status/list keys share one in-flight promise.
+
+Remote summary scans cache successful directory reads for 30 seconds. A failed fetch is not recorded as an empty snapshot and is eligible for retry. Repeating the same 42-directory input therefore performs no second bootstrap and creates no child stores.
+
+HTTP 408, 429, and 5xx failures use bounded exponential retry. Generated server-lane failures carry `retryAfterMs` and HTTP `Retry-After`; clients add jitter so concurrent providers do not retry in lockstep.
 
 ## Reconnect reconciliation
 
@@ -105,7 +117,7 @@ The browser event pipeline treats connection recovery as two separate facts:
 1. `transport-ready` proves only that the local WebSocket bridge is reachable.
 2. `ready` proves that the upstream OpenCode event stream is attached. `disconnected` revokes this state without requiring the local socket to close.
 
-After every upstream `ready`, each initialized directory reconciles authoritative live state. A replay gap forces the same reconciliation path; replay alone is not allowed to claim convergence when the requested cursor is no longer buffered.
+After every upstream `ready`, each initialized directory reconciles authoritative live state. Cold summary-only directories are not materialized during reconnect. A replay gap forces the same reconciliation path for resident directories; replay alone is not allowed to claim convergence when the requested cursor is no longer buffered.
 
 Reconnect recovery deliberately uses two session sets:
 
@@ -118,15 +130,22 @@ Failed authoritative fetches must remain distinguishable from successful empty r
 
 `message-history-loader.ts` owns the shared `session.messages` page contract for interactive loading and reconnect materialization. Callers must pass the session's authoritative SDK client and directory; the loader never falls back to a global current directory.
 
-- Web/desktop interactive history targets 30 real user messages per batch.
-- VS Code targets 6 real user messages per batch to keep bridge and webview transfers smaller.
+- Web/desktop cold history starts with 30 raw messages and follows cursors until it has 30 real user turns or reaches the beginning of the session. VS Code targets 6 real user turns to keep bridge and webview transfers smaller. Subsequent interactive older-page loads stop at the next real user-turn boundary, so one click/near-top trigger prepends one coherent turn rather than an arbitrary raw-message slice.
+- Session and message-history requests use module-shared keyed single-flight coordination. Every `useSync()` consumer and React Strict Mode remount joins the same directory/session request instead of downloading and materializing the same history in parallel.
+- A direct `?session=<id>` route resolves that session with `session.get` before selecting it. Existing sessions never borrow the currently open workspace as a directory fallback: chat hydration waits for an authoritative session directory and reruns when it arrives. This prevents a cold URL restore from sending history requests to an unrelated project and then remaining on the skeleton until HMR or another state change.
+- Initial chat hydration fetches the parent session's direct children alongside message history. Historical Agent Task parts can therefore resolve child sessions that have fallen outside the global session-list window; task inputs remain the primary identity source when they contain `task_id`/`taskId`.
+- After committing the initial page, web/desktop keeps only the active session's next cursor page in a single-slot background prefetch. Loading within one viewport of the top (minimum 640px) consumes that prepared page, prepends it synchronously, preserves the viewport anchor in a layout effect, and then prepares the following page.
+- Near-top detection uses both `IntersectionObserver` and a scroll-position fallback. The shared attempted-version and pending-request guards prevent the two signals from loading the same cursor twice.
+- If the user keeps scrolling while a prepend is pending, the saved anchor is refreshed to the current viewport instead of being discarded. Session changes and failed loads still cancel it.
+- Virtual row measurement may keep a genuinely bottom-pinned viewport at the bottom, but it does not rewrite `scrollTop` while the user is reading older content. Prepend and fold transitions use their explicit anchors instead.
+- Prompt Navigator completeness is independent from the rendered chat page. On desktop web/Electron, its full cursor scan starts only after the active chat snapshot is renderable, retains only real user records, and does not commit scanned assistant/tool history into the chat store. Sidebar neighbor prefetch follows the same foreground-first gate. Each completed navigator page is published immediately and cached by server/session, so long scans grow the navigator progressively and preserve partial results if a later page fails. Its 30-tick window is presentation virtualization, not a history limit. Selecting a prompt whose body is not loaded waits for any in-flight history request, then follows older cursors through that message and performs one prepend commit so the existing layout-effect anchor restoration remains authoritative.
 - A batch remains bounded by `message-page-boundary.ts`. When a runtime reports decoded response bytes, it may follow at most 32 additional cursor pages and 5,000 raw message records, stopping at an 8 MB decoded-payload budget. If decoded bytes are unavailable, it falls back to four additional pages and 600 records.
 - Reconnect/materialization callers omit the interactive target and preserve the one-real-user-boundary behavior.
 - SDK errors throw `MessageHistoryLoadError`; a failed fetch is never represented as an empty successful page.
 
 The web/local and remote proxies copy a verified identity-encoded upstream `content-length` into `x-openchamber-decoded-content-length` before normal proxy header filtering and optional browser compression. The VS Code bridge measures the decoded body directly and supplies the same header. The loader never treats a compressed standard `content-length` as a decoded-memory budget.
 
-Message and part payload sanitization happens before records are retained in sync stores. Diff snapshots are stripped/capped, and individual tool input/output/metadata fields have a one-million-character retained-data budget. Truncated tool parts carry the `__openchamberTruncated` metadata marker with the affected field names and limit.
+Message and part payload sanitization happens before records are retained in sync stores. The web and VS Code `session.messages` projections remove historical summary-diff snapshot bodies (`before`, `after`, `from`, and `to`) before transport, cap diff lists, and cap oversized patch text; those fields are not used by chat rendering and previously made a single older page exceed 30 MB. Individual tool input/output/metadata fields have a one-million-character retained-data budget. Truncated tool parts carry the `__openchamberTruncated` metadata marker with the affected field names and limit.
 
 This client-side budget does not protect OpenCode's own JSON serialization or the initial HTTP parse. OpenCode must enforce a server-side response byte budget and summary/detail API to eliminate upstream memory spikes; OpenChamber must not hide that limitation by treating a rejected or truncated response as an empty page.
 

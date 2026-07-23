@@ -34,7 +34,7 @@ import { useDeviceInfo, useTabletStandalonePwaRuntime } from '@/lib/device';
 import { cn, hasModifier } from '@/lib/utils';
 import { McpDropdownContent } from '@/components/mcp/McpDropdown';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
-import { formatQuotaValueLabel, formatQuotaResetLabel, formatWindowLabel, QUOTA_PROVIDERS, calculatePace, calculateExpectedUsagePercent } from '@/lib/quota';
+import { formatQuotaValueLabel, formatQuotaResetLabel, formatWindowLabel, QUOTA_PROVIDERS, calculatePace, calculateExpectedUsageMarkerPercent } from '@/lib/quota';
 import { UsageProgressBar } from '@/components/sections/usage/UsageProgressBar';
 import { PaceIndicator } from '@/components/sections/usage/PaceIndicator';
 import { updateDesktopSettings } from '@/lib/persistence';
@@ -440,11 +440,10 @@ const DesktopServicesMenu = React.memo(function DesktopServicesMenu({
                         {group.entries.map(([label, window]) => {
                           const displayPercent = quotaDisplayMode === 'remaining' ? window.remainingPercent : window.usedPercent;
                           const paceInfo = calculatePace(window.usedPercent, window.resetAt, window.windowSeconds, label);
-                          const expectedMarker = paceInfo?.dailyAllocationPercent != null
-                            ? (quotaDisplayMode === 'remaining'
-                                ? 100 - calculateExpectedUsagePercent(paceInfo.elapsedRatio)
-                                : calculateExpectedUsagePercent(paceInfo.elapsedRatio))
-                            : null;
+                          const expectedMarker = calculateExpectedUsageMarkerPercent(
+                            paceInfo?.elapsedRatio ?? null,
+                            quotaDisplayMode,
+                          );
                           const metricLabel = formatQuotaValueLabel(window.valueLabel, displayPercent);
                           const resetLabel = formatQuotaResetLabel(window.resetAt, window.resetAfterFormatted ?? window.resetAtFormatted);
                           return (
@@ -492,11 +491,10 @@ const DesktopServicesMenu = React.memo(function DesktopServicesMenu({
                                       {family.models.map(([modelName, window]) => {
                                         const displayPercent = quotaDisplayMode === 'remaining' ? window.remainingPercent : window.usedPercent;
                                         const paceInfo = calculatePace(window.usedPercent, window.resetAt, window.windowSeconds);
-                                        const expectedMarker = paceInfo?.dailyAllocationPercent != null
-                                          ? (quotaDisplayMode === 'remaining'
-                                              ? 100 - calculateExpectedUsagePercent(paceInfo.elapsedRatio)
-                                              : calculateExpectedUsagePercent(paceInfo.elapsedRatio))
-                                          : null;
+                                        const expectedMarker = calculateExpectedUsageMarkerPercent(
+                                          paceInfo?.elapsedRatio ?? null,
+                                          quotaDisplayMode,
+                                        );
                                         const metricLabel = formatQuotaValueLabel(window.valueLabel, displayPercent);
                                         return (
                                           <div key={`${group.providerId}-${modelName}`} className="flex flex-col gap-1.5">
@@ -2153,11 +2151,10 @@ export const Header: React.FC<HeaderProps> = ({
                                     ? window.remainingPercent
                                     : window.usedPercent;
                                   const paceInfo = calculatePace(window.usedPercent, window.resetAt, window.windowSeconds, label);
-                                  const expectedMarker = paceInfo?.dailyAllocationPercent != null
-                                    ? (quotaDisplayMode === 'remaining'
-                                        ? 100 - calculateExpectedUsagePercent(paceInfo.elapsedRatio)
-                                        : calculateExpectedUsagePercent(paceInfo.elapsedRatio))
-                                    : null;
+                                  const expectedMarker = calculateExpectedUsageMarkerPercent(
+                                    paceInfo?.elapsedRatio ?? null,
+                                    quotaDisplayMode,
+                                  );
                                   const metricLabel = formatQuotaValueLabel(window.valueLabel, displayPercent);
                                   const resetLabel = formatQuotaResetLabel(window.resetAt, window.resetAfterFormatted ?? window.resetAtFormatted);
                                   return (
@@ -2218,11 +2215,10 @@ export const Header: React.FC<HeaderProps> = ({
                                                   ? window.remainingPercent
                                                   : window.usedPercent;
                                                 const paceInfo = calculatePace(window.usedPercent, window.resetAt, window.windowSeconds);
-                                                const expectedMarker = paceInfo?.dailyAllocationPercent != null
-                                                  ? (quotaDisplayMode === 'remaining'
-                                                      ? 100 - calculateExpectedUsagePercent(paceInfo.elapsedRatio)
-                                                      : calculateExpectedUsagePercent(paceInfo.elapsedRatio))
-                                                  : null;
+                                                const expectedMarker = calculateExpectedUsageMarkerPercent(
+                                                  paceInfo?.elapsedRatio ?? null,
+                                                  quotaDisplayMode,
+                                                );
                                                 const metricLabel = formatQuotaValueLabel(window.valueLabel, displayPercent);
                                                 return (
                                                   <div key={`${group.providerId}-${modelName}`} className="flex flex-col gap-1.5">

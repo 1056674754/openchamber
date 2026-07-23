@@ -1,8 +1,9 @@
 # Dependencies
 node_modules/
 
-# Electron build output
+# Electron build output (dist, dist-bundle, dist-release-*, dist-candidate-*, …)
 dist/
+dist-*/
 dist-bundle/
 
 # Generated packaging resources

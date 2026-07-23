@@ -3,10 +3,11 @@ import type { OpencodeClient, Session } from '@opencode-ai/sdk/v2';
 import type { SessionStatus } from '@opencode-ai/sdk/v2/client';
 import { opencodeClient } from '@/lib/opencode/client';
 import { DEFAULT_SERVER_ID, serverRegistry } from '@/lib/opencode/server-registry';
-import { registerRemoteInstanceProxy } from '@/lib/remote-instances/registry';
 import { listGlobalSessionPages } from '@/stores/globalSessions';
 import { retry } from '@/sync/retry';
-import { useProjectsStore } from './useProjectsStore';
+import { readRemoteSessionStatuses } from '@/sync/remote-session-status';
+import { shouldSkipStaleSessionEvent } from '@/sync/session-event-freshness';
+import { normalizePath } from '@/lib/pathNormalization';
 
 type GlobalSessionsStatus = 'idle' | 'loading' | 'ready' | 'error';
 
@@ -26,6 +27,7 @@ type GlobalSessionsState = {
   loadSessions: (fallbackActive?: Session[]) => Promise<LoadResult>;
   refreshSessionsForDirectories: (directories: Iterable<string>, fallbackActive?: Session[]) => Promise<LoadResult>;
   applySnapshot: (activeSessions: Session[], archivedSessions: Session[], status?: GlobalSessionsStatus) => void;
+  applyRemoteDirectorySnapshot: (serverId: string, directory: string, sessions: Session[]) => void;
   upsertSession: (session: Session) => void;
   removeSessions: (ids: Iterable<string>) => void;
   archiveSessions: (ids: Iterable<string>, archivedAt?: number) => void;
@@ -41,58 +43,6 @@ const STATUS_BATCH_MAX_CONCURRENCY = 6;
 let inflightLoad: Promise<LoadResult> | null = null;
 const statusLoadedAtByDirectory = new Map<string, number>();
 const inflightStatusLoadsByDirectory = new Map<string, Promise<unknown>>();
-
-const normalizePath = (value?: string | null): string | null => {
-  if (typeof value !== 'string') {
-    return null;
-  }
-  const trimmed = value.trim();
-  if (!trimmed) {
-    return null;
-  }
-  const replaced = trimmed.replace(/\\/g, '/');
-  if (replaced === '/') {
-    return '/';
-  }
-  return replaced.length > 1 ? replaced.replace(/\/+$/, '') : replaced;
-};
-
-const resolveStatusClientForDirectory = (directory: string) => {
-  const normalized = normalizePath(directory);
-  if (!normalized) {
-    return opencodeClient.getSdkClient();
-  }
-
-  const projects = useProjectsStore.getState().projects;
-  let bestProject: typeof projects[number] | null = null;
-  for (const project of projects) {
-    const projectPath = normalizePath(project.path);
-    if (!projectPath || projectPath === '/') {
-      continue;
-    }
-    if (normalized !== projectPath && !normalized.startsWith(`${projectPath}/`)) {
-      continue;
-    }
-    if (!bestProject || projectPath.length > (normalizePath(bestProject.path)?.length ?? 0)) {
-      bestProject = project;
-    }
-  }
-
-  if (bestProject?.serverId && bestProject.serverId !== DEFAULT_SERVER_ID) {
-    const conn = serverRegistry.get(bestProject.serverId)
-      ?? registerRemoteInstanceProxy({
-        id: bestProject.serverId,
-        label: bestProject.label || bestProject.serverId,
-        healthStatus: 'connecting',
-      });
-    if (conn.healthStatus !== 'healthy') {
-      return null;
-    }
-    return conn.client;
-  }
-
-  return serverRegistry.getDefault()?.client ?? opencodeClient.getSdkClient();
-};
 
 export const resolveGlobalSessionDirectory = (session: Session): string | null => {
   const record = session as Session & {
@@ -144,6 +94,17 @@ export const mergeSessionDirectoryMetadata = (incoming: Session, existing?: Sess
   }
 
   return changed ? next : incoming;
+};
+
+export const mergeLiveSessionWithGlobalSession = (
+  liveSession: Session,
+  globalSession: Session,
+): Session => {
+  const merged = mergeSessionDirectoryMetadata(liveSession, globalSession);
+  if (merged.share !== globalSession.share) {
+    return { ...merged, share: globalSession.share };
+  }
+  return merged;
 };
 
 const buildSessionsByDirectory = (sessions: Session[]): Map<string, Session[]> => {
@@ -290,12 +251,14 @@ const fetchDirectoryPages = async (
 
 type StatusLoadResult = {
   directory: string;
+  serverId?: string;
   response: unknown;
 };
 
 export type StatusBatchMergeInput = {
   currentStatuses: Map<string, SessionStatus>;
   sessionsByDirectory: Map<string, readonly Session[]>;
+  serverIdBySession?: ReadonlyMap<string, string>;
   results: ReadonlyArray<PromiseSettledResult<StatusLoadResult>>;
 };
 
@@ -313,7 +276,7 @@ export type StatusBatchMergeInput = {
 export const computeStatusBatchMerge = (
   input: StatusBatchMergeInput,
 ): Map<string, SessionStatus> | null => {
-  const { currentStatuses, sessionsByDirectory, results } = input;
+  const { currentStatuses, sessionsByDirectory, serverIdBySession, results } = input;
 
   let next: Map<string, SessionStatus> = currentStatuses;
   let changed = false;
@@ -330,7 +293,7 @@ export const computeStatusBatchMerge = (
     if (result.status !== 'fulfilled') {
       continue;
     }
-    const { directory, response } = result.value;
+    const { directory, serverId, response } = result.value;
     if (!response) {
       continue;
     }
@@ -346,6 +309,7 @@ export const computeStatusBatchMerge = (
       for (const session of directorySessions) {
         const sessionId = session?.id;
         if (!sessionId) continue;
+        if (serverId && serverIdBySession?.get(sessionId) !== serverId) continue;
         if (!(sessionId in payload) && next.has(sessionId)) {
           clone().delete(sessionId);
         }
@@ -364,44 +328,50 @@ export const computeStatusBatchMerge = (
   return changed ? next : null;
 };
 
-const loadStatusForDirectory = (directory: string): Promise<unknown> => {
-  const existing = inflightStatusLoadsByDirectory.get(directory);
+const loadStatusForDirectory = (serverId: string, directory: string): Promise<unknown> => {
+  const key = `${serverId}\n${directory}`;
+  const existing = inflightStatusLoadsByDirectory.get(key);
   if (existing) {
     return existing;
   }
 
   const promise = (async () => {
-    const sdk = resolveStatusClientForDirectory(directory);
-    if (!sdk) return null;
-    return retry(() => sdk.session.status({ directory }), { attempts: 2, delay: 300, retryIf: () => true });
+    if (serverId !== DEFAULT_SERVER_ID) {
+      return { data: await readRemoteSessionStatuses(serverId, directory) };
+    }
+    const client = serverRegistry.getDefault()?.client ?? opencodeClient.getSdkClient();
+    return retry(() => client.session.status({ directory }), { attempts: 2, delay: 300 });
   })().finally(() => {
-    inflightStatusLoadsByDirectory.delete(directory);
+    inflightStatusLoadsByDirectory.delete(key);
   });
 
-  inflightStatusLoadsByDirectory.set(directory, promise);
+  inflightStatusLoadsByDirectory.set(key, promise);
   return promise;
 };
 
-const loadStatusesWithLimit = async (directories: string[]): Promise<Array<PromiseSettledResult<StatusLoadResult>>> => {
+type StatusTarget = { serverId: string; directory: string };
+
+const loadStatusesWithLimit = async (targets: StatusTarget[]): Promise<Array<PromiseSettledResult<StatusLoadResult>>> => {
   const results: Array<PromiseSettledResult<StatusLoadResult>> = [];
   let nextIndex = 0;
 
   const worker = async () => {
-    while (nextIndex < directories.length) {
-      const directory = directories[nextIndex];
+    while (nextIndex < targets.length) {
+      const target = targets[nextIndex];
       nextIndex += 1;
-      if (!directory) continue;
+      if (!target) continue;
       try {
-        const response = await loadStatusForDirectory(directory);
-        statusLoadedAtByDirectory.set(directory, Date.now());
-        results.push({ status: 'fulfilled', value: { directory, response } });
+        const response = await loadStatusForDirectory(target.serverId, target.directory);
+        const key = `${target.serverId}\n${target.directory}`;
+        statusLoadedAtByDirectory.set(key, Date.now());
+        results.push({ status: 'fulfilled', value: { ...target, response } });
       } catch (reason) {
         results.push({ status: 'rejected', reason });
       }
     }
   };
 
-  const workerCount = Math.min(STATUS_BATCH_MAX_CONCURRENCY, directories.length);
+  const workerCount = Math.min(STATUS_BATCH_MAX_CONCURRENCY, targets.length);
   await Promise.all(Array.from({ length: workerCount }, () => worker()));
   return results;
 };
@@ -513,6 +483,87 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
 
   applySnapshot: (activeSessions, archivedSessions, status = 'ready') => {
     set((state) => applySnapshot(state, activeSessions, archivedSessions, status));
+  },
+
+  applyRemoteDirectorySnapshot: (serverId, directory, sessions) => {
+    const normalizedDirectory = normalizePath(directory);
+    if (!normalizedDirectory || serverId === DEFAULT_SERVER_ID) {
+      return;
+    }
+
+    const current = get();
+    const existingById = new Map(
+      [...current.activeSessions, ...current.archivedSessions].map((session) => [session.id, session]),
+    );
+    const incoming = sessions
+      .filter((session) => Boolean(session?.id))
+      .map((session) => mergeSessionDirectoryMetadata(session, existingById.get(session.id)));
+    const incomingIds = new Set(incoming.map((session) => session.id));
+    const previousScopeIds = new Set(
+      [...current.activeSessions, ...current.archivedSessions]
+        .filter((session) => (
+          serverRegistry.getServerForSession(session.id) === serverId
+          && resolveGlobalSessionDirectory(session) === normalizedDirectory
+        ))
+        .map((session) => session.id),
+    );
+
+    for (const session of incoming) {
+      serverRegistry.indexSession(session.id, serverId);
+    }
+
+    set((state) => {
+      const keepExisting = (session: Session): boolean => (
+        !incomingIds.has(session.id) && !previousScopeIds.has(session.id)
+      );
+      const incomingActive = incoming.filter((session) => !session.time?.archived);
+      const incomingArchived = incoming.filter((session) => Boolean(session.time?.archived));
+      let nextActiveSessions = sortSessionsByUpdated([
+        ...state.activeSessions.filter(keepExisting),
+        ...incomingActive,
+      ]);
+      let nextArchivedSessions = sortSessionsByUpdated([
+        ...state.archivedSessions.filter(keepExisting),
+        ...incomingArchived,
+      ]);
+
+      if (sameSessionList(state.activeSessions, nextActiveSessions)) {
+        nextActiveSessions = state.activeSessions;
+      }
+      if (sameSessionList(state.archivedSessions, nextArchivedSessions)) {
+        nextArchivedSessions = state.archivedSessions;
+      }
+
+      let nextStatuses = state.sessionStatuses;
+      for (const id of previousScopeIds) {
+        if (incomingIds.has(id) || !nextStatuses.has(id)) continue;
+        if (nextStatuses === state.sessionStatuses) nextStatuses = new Map(state.sessionStatuses);
+        nextStatuses.delete(id);
+      }
+
+      if (
+        nextActiveSessions === state.activeSessions
+        && nextArchivedSessions === state.archivedSessions
+        && nextStatuses === state.sessionStatuses
+      ) {
+        return state;
+      }
+
+      return {
+        activeSessions: nextActiveSessions,
+        archivedSessions: nextArchivedSessions,
+        sessionsByDirectory: nextActiveSessions === state.activeSessions
+          ? state.sessionsByDirectory
+          : buildSessionsByDirectory(nextActiveSessions),
+        sessionStatuses: nextStatuses,
+      };
+    });
+
+    for (const id of previousScopeIds) {
+      if (!incomingIds.has(id) && serverRegistry.getServerForSession(id) === serverId) {
+        serverRegistry.forgetSession(id);
+      }
+    }
   },
 
   loadSessions: async (fallbackActive) => {
@@ -645,6 +696,9 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
       const existingSession = state.activeSessions.find((candidate) => candidate.id === session.id)
         ?? state.archivedSessions.find((candidate) => candidate.id === session.id)
         ?? null;
+      if (shouldSkipStaleSessionEvent(existingSession, session)) {
+        return state;
+      }
       const sessionWithMetadata = mergeSessionDirectoryMetadata(session, existingSession);
       const isArchived = Boolean(sessionWithMetadata.time?.archived);
       const nextActiveSessions = isArchived
@@ -777,7 +831,7 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
     }
 
     const now = Date.now();
-    const targetDirectories: string[] = [];
+    const targets: StatusTarget[] = [];
     const seenDirectories = new Set<string>();
     for (const directory of directories) {
       const normalized = normalizePath(directory);
@@ -785,22 +839,37 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
         continue;
       }
       seenDirectories.add(normalized);
-      const lastLoadedAt = statusLoadedAtByDirectory.get(normalized) ?? 0;
-      if (now - lastLoadedAt < STATUS_BATCH_TTL_MS) {
-        continue;
+      const sessions = get().sessionsByDirectory.get(normalized) ?? [];
+      const serverIds = new Set<string>();
+      for (const session of sessions) {
+        const sessionServerId = serverRegistry.getServerForSession(session.id);
+        if (sessionServerId) serverIds.add(sessionServerId);
       }
-      targetDirectories.push(normalized);
+      for (const serverId of serverIds) {
+        const key = `${serverId}\n${normalized}`;
+        const lastLoadedAt = statusLoadedAtByDirectory.get(key) ?? 0;
+        if (now - lastLoadedAt < STATUS_BATCH_TTL_MS) continue;
+        targets.push({ serverId, directory: normalized });
+      }
     }
 
-    if (targetDirectories.length === 0) {
+    if (targets.length === 0) {
       return;
     }
 
-    const results = await loadStatusesWithLimit(targetDirectories);
+    const results = await loadStatusesWithLimit(targets);
+    const serverIdBySession = new Map<string, string>();
+    for (const sessions of get().sessionsByDirectory.values()) {
+      for (const session of sessions) {
+        const sessionServerId = serverRegistry.getServerForSession(session.id);
+        if (sessionServerId) serverIdBySession.set(session.id, sessionServerId);
+      }
+    }
 
     const next = computeStatusBatchMerge({
       currentStatuses: get().sessionStatuses,
       sessionsByDirectory: get().sessionsByDirectory,
+      serverIdBySession,
       results,
     });
 

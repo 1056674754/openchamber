@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import type { Event, Part, PermissionRequest, QuestionRequest, SessionStatus } from "@opencode-ai/sdk/v2/client"
+import type { Event, Part, PermissionRequest, QuestionRequest, Session, SessionStatus } from "@opencode-ai/sdk/v2/client"
 import { applyDirectoryEvent } from "../event-reducer"
 import { INITIAL_STATE, type State } from "../types"
 
@@ -42,6 +42,26 @@ function partUpdatedEvent(): Event {
 }
 
 describe("applyDirectoryEvent", () => {
+  test("does not let a stale session update overwrite a newer title", () => {
+    const current = {
+      id: "ses_1",
+      title: "New Title",
+      time: { created: 1, updated: 20 },
+    } as Session
+    const incoming = {
+      ...current,
+      title: "Old Title",
+      time: { created: 1, updated: 10 },
+    } as Session
+    const draft = state({ session: [current] })
+
+    expect(applyDirectoryEvent(draft, {
+      type: "session.updated",
+      properties: { info: incoming },
+    } as Event)).toBe(false)
+    expect(draft.session[0]).toBe(current)
+  })
+
   test("returns typed materialization when delta arrives before parts", () => {
     const result = applyDirectoryEvent(state(), deltaEvent())
 

@@ -13,6 +13,7 @@ import { Text } from '@/components/ui/text';
 import { Icon } from "@/components/icon/Icon";
 import { FadeInOnReveal } from '../FadeInOnReveal';
 import { getToolIcon } from './toolPresentation';
+import { buildToolInputPresentation } from './toolInputPresentation';
 import { getToolMetadata } from '@/lib/toolHelpers';
 import { getStaticGroupToolName, isExpandableTool, isStandaloneTool, isStaticTool } from './toolRenderUtils';
 import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
@@ -371,6 +372,16 @@ const getToolShortDescription = (activity: TurnActivityPart): string | null => {
     // For todo tools, show status summary without task names
     if (toolName === 'todowrite' || toolName === 'todoread') {
         return getTodoSummaryFromActivity(activity);
+    }
+
+    const inputSummary = buildToolInputPresentation(toolName, input).summary;
+    if (inputSummary) {
+        return inputSummary;
+    }
+
+    const metadataSummary = buildToolInputPresentation(toolName, metadata).summary;
+    if (metadataSummary) {
+        return metadataSummary;
     }
 
     // Fallback: try filename

@@ -40,6 +40,7 @@ import { eventMatchesShortcut, getEffectiveShortcutCombo, normalizeCombo } from 
 import { markStartupTrace } from '@/lib/startupTrace';
 import { useActiveServerId } from '@/hooks/useActiveServerId';
 import { DEFAULT_SERVER_ID, serverRegistry } from '@/lib/opencode/server-registry';
+import { resolveModelVariant } from '@/lib/modelVariantResolution';
 
  
 type IconComponent = IconName;
@@ -755,6 +756,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     ];
 
     const prevAgentNameRef = React.useRef<string | undefined>(undefined);
+    const explicitAgentSwitchRef = React.useRef<string | null>(null);
     const latestLoadedUserChoiceRestoreRef = React.useRef<string | null>(null);
 
     const currentSessionDirectory = currentSessionId ? getDirectoryForSession(currentSessionId) : undefined;
@@ -852,23 +854,30 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         }
 
         const effectiveAgentName = uiAgentName || currentAgentName;
+        let savedVariant: string | undefined;
         if (currentSessionId && effectiveAgentName) {
-            const savedVariant = getAgentModelVariantForSession(currentSessionId, effectiveAgentName, providerId, modelId);
-            if (savedVariant && variantOptions.includes(savedVariant)) {
-                return savedVariant;
-            }
+            savedVariant = getAgentModelVariantForSession(currentSessionId, effectiveAgentName, providerId, modelId);
         }
 
-        if (currentProviderId === providerId && currentModelId === modelId && currentVariant && variantOptions.includes(currentVariant)) {
-            return currentVariant;
-        }
+        const currentSelection = currentProviderId === providerId && currentModelId === modelId
+            ? currentVariant
+            : undefined;
+        const selectedAgent = effectiveAgentName
+            ? agents.find((agent) => agent.name === effectiveAgentName)
+            : undefined;
+        const agentVariant = selectedAgent?.model?.providerID === providerId
+            && selectedAgent.model.modelID === modelId
+            ? selectedAgent.variant
+            : undefined;
 
-        if (!currentSessionId && settingsDefaultVariant && variantOptions.includes(settingsDefaultVariant)) {
-            return settingsDefaultVariant;
-        }
-
-        return undefined;
+        return resolveModelVariant({
+            variants: Object.fromEntries(variantOptions.map((variant) => [variant, true])),
+            savedVariant: savedVariant ?? currentSelection,
+            agentVariant,
+            defaultVariant: settingsDefaultVariant,
+        });
     }, [
+        agents,
         currentAgentName,
         currentModelId,
         currentProviderId,
@@ -955,9 +964,14 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             setAgent(latestChoiceAgentName);
         }
 
-        const applyResult = tryApplyModelSelection(
+        const historicalVariant = latestLoadedUserChoice.variant
+            && getModelVariantOptions(latestLoadedUserChoice.providerID, latestLoadedUserChoice.modelID).includes(latestLoadedUserChoice.variant)
+            ? latestLoadedUserChoice.variant
+            : undefined;
+        const applyResult = applyModelSelectionWithVariant(
             latestLoadedUserChoice.providerID,
             latestLoadedUserChoice.modelID,
+            historicalVariant,
             latestChoiceAgentName || (isKnownAgentName(currentAgentName) ? currentAgentName : undefined),
         );
         if (applyResult !== 'applied') {
@@ -968,13 +982,13 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             saveSessionAgentSelection(currentSessionId, latestChoiceAgentName);
             // Guard: saveAgentModelVariantForSession(undefined) DELETES the
             // existing record. Empty message variant ≠ user intent to clear.
-            if (latestLoadedUserChoice.variant) {
+            if (historicalVariant) {
                 saveAgentModelVariantForSession(
                     currentSessionId,
                     latestChoiceAgentName,
                     latestLoadedUserChoice.providerID,
                     latestLoadedUserChoice.modelID,
-                    latestLoadedUserChoice.variant,
+                    historicalVariant,
                 );
             }
         }
@@ -991,7 +1005,8 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         latestLoadedUserChoice,
         latestLoadedUserChoiceKey,
         setAgent,
-        tryApplyModelSelection,
+        applyModelSelectionWithVariant,
+        getModelVariantOptions,
         saveSessionAgentSelection,
         saveAgentModelVariantForSession,
         saveSessionModelSelection,
@@ -1124,6 +1139,9 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         }
 
         if (!hasCurrentSessionMessagesResolved) {
+            if (!currentSessionDirectory) {
+                return;
+            }
             if (!sync.isLoading(currentSessionId)) {
                 void sync.ensureSessionRenderable(currentSessionId);
             }
@@ -1143,6 +1161,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         agents,
         primaryAgents,
         currentAgentName,
+        currentSessionDirectory,
         getSessionModelSelection,
         getAgentModelForSession,
         setAgent,
@@ -1165,6 +1184,9 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                     prevAgentNameRef.current = currentAgentName;
 
                     if (currentAgentName && currentSessionId) {
+                        const shouldPreferAgentModel = explicitAgentSwitchRef.current === currentAgentName;
+                        explicitAgentSwitchRef.current = null;
+
                         await new Promise<void>((resolve) => {
                             const timer = setTimeout(resolve, 50);
                             abortController.signal.addEventListener('abort', () => {
@@ -1175,6 +1197,28 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
 
                         if (abortController.signal.aborted) {
                             return;
+                        }
+
+                        const selectedAgent = shouldPreferAgentModel
+                            ? agents.find((agent) => agent.name === currentAgentName)
+                            : undefined;
+                        if (selectedAgent?.model?.providerID && selectedAgent.model.modelID) {
+                            const providerId = selectedAgent.model.providerID;
+                            const modelId = selectedAgent.model.modelID;
+                            const variant = resolveModelVariant({
+                                variants: Object.fromEntries(getModelVariantOptions(providerId, modelId).map((entry) => [entry, true])),
+                                savedVariant: getAgentModelVariantForSession(currentSessionId, currentAgentName, providerId, modelId),
+                                agentVariant: selectedAgent.variant,
+                                defaultVariant: settingsDefaultVariant,
+                            });
+                            const result = applyModelSelectionWithVariant(providerId, modelId, variant, currentAgentName);
+                            if (result === 'applied' || result === 'provider-missing') {
+                                if (result === 'applied') {
+                                    saveSessionModelSelection(currentSessionId, providerId, modelId);
+                                    saveAgentModelForSession(currentSessionId, currentAgentName, providerId, modelId);
+                                }
+                                return;
+                            }
                         }
 
                         const persistedChoice = getAgentModelForSession(currentSessionId, currentAgentName);
@@ -1201,7 +1245,20 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         return () => {
             abortController.abort();
         };
-    }, [currentAgentName, currentSessionId, getAgentModelForSession, tryApplyModelSelection, contextHydrated]);
+    }, [
+        agents,
+        applyModelSelectionWithVariant,
+        contextHydrated,
+        currentAgentName,
+        currentSessionId,
+        getAgentModelForSession,
+        getAgentModelVariantForSession,
+        getModelVariantOptions,
+        saveAgentModelForSession,
+        saveSessionModelSelection,
+        settingsDefaultVariant,
+        tryApplyModelSelection,
+    ]);
 
     React.useEffect(() => {
         if (!contextHydrated || !uiAgentName) {
@@ -1251,14 +1308,23 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             currentModelId,
         );
 
-        const resolvedSaved = savedVariant && availableVariants.includes(savedVariant)
-            ? savedVariant
+        const selectedAgent = agents.find((agent) => agent.name === uiAgentName);
+        const agentVariant = selectedAgent?.model?.providerID === currentProviderId
+            && selectedAgent.model.modelID === currentModelId
+            ? selectedAgent.variant
             : undefined;
+        const resolvedSaved = resolveModelVariant({
+            variants: Object.fromEntries(availableVariants.map((variant) => [variant, true])),
+            savedVariant,
+            agentVariant,
+            defaultVariant: settingsDefaultVariant,
+        });
 
         setCurrentVariant(resolvedSaved);
         manualVariantSelectionRef.current = false;
     }, [
         availableVariants,
+        agents,
         contextHydrated,
         currentSessionId,
         currentProviderId,
@@ -1282,6 +1348,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
 
     const handleAgentChange = React.useCallback((agentName: string, options?: { closeModelSelector?: boolean }) => {
         try {
+            explicitAgentSwitchRef.current = agentName;
             setAgent(agentName);
             addRecentAgent(agentName);
             if (options?.closeModelSelector ?? true) {
@@ -1834,7 +1901,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                         isSelected && 'bg-interactive-selection/15 text-interactive-selection-foreground'
                     )}
                 >
-                    <div className="flex items-start gap-2 px-2 py-1.5">
+                    <div className="flex items-center gap-2 px-2 py-1.5">
                         <button
                             type="button"
                             onClick={() => handleMobileModelApply(providerId, modelId, resolvedVariant)}
@@ -1843,15 +1910,15 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                 'focus:outline-none focus-visible:ring-1 focus-visible:ring-primary rounded-lg'
                             )}
                         >
-                            {showProviderLogo ? (
-                                <ProviderLogo providerId={providerId} className="mt-0.5 size-3.5 flex-shrink-0" />
-                            ) : null}
                             <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-                                <div className="flex min-w-0 items-start gap-2">
+                                <div className="flex min-w-0 items-center gap-1.5">
+                                    {showProviderLogo ? (
+                                        <ProviderLogo providerId={providerId} className="size-3.5 flex-shrink-0" />
+                                    ) : null}
                                     <span className="typography-meta font-medium text-foreground truncate">
                                         {getModelDisplayName(model)}
                                     </span>
-                                    {isSelected ? <Icon name="check" className="mt-0.5 size-4 flex-shrink-0 text-primary" /> : null}
+                                    {isSelected ? <Icon name="check" className="size-4 flex-shrink-0 text-primary" /> : null}
                                 </div>
                                 {contextText || indicatorIcons.length > 0 ? (
                                     <div className="flex min-w-0 items-center gap-1.5 overflow-hidden typography-micro text-muted-foreground">
@@ -1885,7 +1952,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                             <button
                                 type="button"
                                 onClick={() => setExpandedMobileModelKey((prev) => prev === rowKey ? null : rowKey)}
-                                className="flex items-center gap-1 rounded-lg border border-border/40 px-2 py-1 typography-micro font-medium text-muted-foreground hover:bg-interactive-hover/50 flex-shrink-0"
+                                className="flex items-center gap-0.5 typography-micro font-medium text-muted-foreground hover:text-foreground flex-shrink-0"
                                 aria-expanded={isExpanded}
                                 aria-label={isExpanded ? t('chat.modelControls.hideThinkingModes') : t('chat.modelControls.showThinkingModes')}
                             >
@@ -1893,7 +1960,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                 {isExpanded ? <Icon name="arrow-down-s" className="size-3.5" /> : <Icon name="arrow-right-s" className="size-3.5" />}
                             </button>
                         ) : null}
-                        <div className="flex flex-shrink-0 items-start gap-1.5">
+                        <div className="flex flex-shrink-0 items-center gap-1.5">
                             <button
                                 type="button"
                                 onClick={(event) => {

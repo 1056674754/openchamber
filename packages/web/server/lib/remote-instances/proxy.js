@@ -9,6 +9,7 @@ const remoteProxyPathPrefix = '/api/remote/';
 const REMOTE_PROXY_FAST_TIMEOUT_MS = 3_000;
 const REMOTE_PROXY_DEFAULT_TIMEOUT_MS = 5_000;
 const REMOTE_PROXY_GIT_STATUS_TIMEOUT_MS = 30_000;
+const REMOTE_PROXY_MESSAGE_HISTORY_TIMEOUT_MS = 30_000;
 const REMOTE_PROXY_LONG_MUTATION_TIMEOUT_MS = 15_000;
 const REMOTE_PROXY_UPGRADE_TIMEOUT_MS = 10 * 60_000;
 const REMOTE_PROXY_SHELL_TIMEOUT_MS = REMOTE_PROXY_UPGRADE_TIMEOUT_MS;
@@ -108,6 +109,10 @@ export const getRemoteProxyRequestTimeoutMs = (remotePath, method = 'GET') => {
     return REMOTE_PROXY_GIT_STATUS_TIMEOUT_MS;
   }
 
+  if (normalizedMethod === 'GET' && /\/api\/session\/[^/]+\/message$/.test(pathname)) {
+    return REMOTE_PROXY_MESSAGE_HISTORY_TIMEOUT_MS;
+  }
+
   if (normalizedMethod === 'POST' && /\/api\/session\/[^/]+\/prompt_async$/.test(pathname)) {
     return REMOTE_PROXY_LONG_MUTATION_TIMEOUT_MS;
   }
@@ -197,14 +202,23 @@ export const resolveHealthyRemoteInstance = async (runtime, instanceId, options 
   return { ok: true, instance };
 };
 
-export const formatRemoteGateError = (error, instanceId) => ({
-  status: Number.isInteger(error?.statusCode) ? error.statusCode : 503,
-  body: {
-    error: error?.message || 'Remote instance unavailable',
-    code: error?.code || 'REMOTE_REQUEST_REJECTED',
-    instanceId,
-  },
-});
+export const formatRemoteGateError = (error, instanceId) => {
+  const retryAfterMs = Number.isFinite(error?.retryAfterMs) && error.retryAfterMs >= 0
+    ? Math.round(error.retryAfterMs)
+    : undefined;
+  return {
+    status: Number.isInteger(error?.statusCode) ? error.statusCode : 503,
+    headers: retryAfterMs === undefined
+      ? {}
+      : { 'Retry-After': String(Math.max(1, Math.ceil(retryAfterMs / 1_000))) },
+    body: {
+      error: error?.message || 'Remote instance unavailable',
+      code: error?.code || 'REMOTE_REQUEST_REJECTED',
+      instanceId,
+      ...(retryAfterMs === undefined ? {} : { retryAfterMs }),
+    },
+  };
+};
 
 const releaseRemoteLaneOnResponseEnd = (res, release) => {
   if (typeof release !== 'function') {
@@ -303,6 +317,20 @@ export const registerRemoteProxy = (app, runtime, options = {}) => {
       });
     } catch (error) {
       const formatted = formatRemoteGateError(error, instanceId);
+      const pressure = runtime.getRequestPressure?.(instanceId);
+      console.warn('[remote-proxy] request lane rejected', {
+        instanceId,
+        lane: 'normal',
+        method: req.method,
+        path: req.path,
+        status: formatted.status,
+        code: formatted.body.code,
+        retryAfterMs: formatted.body.retryAfterMs,
+        pressure,
+      });
+      for (const [name, value] of Object.entries(formatted.headers)) {
+        res.setHeader(name, value);
+      }
       return res.status(formatted.status).json(formatted.body);
     }
 
@@ -352,6 +380,15 @@ export const registerRemoteProxy = (app, runtime, options = {}) => {
             releaseLane = await runtime.enterRequestLane?.(parsed.instanceId, 'stream');
           } catch (error) {
             const formatted = formatRemoteGateError(error, parsed.instanceId);
+            console.warn('[remote-proxy] stream lane rejected', {
+              instanceId: parsed.instanceId,
+              lane: 'stream',
+              path: parsed.remotePath.split('?')[0],
+              status: formatted.status,
+              code: formatted.body.code,
+              retryAfterMs: formatted.body.retryAfterMs,
+              pressure: runtime.getRequestPressure?.(parsed.instanceId),
+            });
             rejectUpgrade(socket, formatted.status, formatted.body.error, rejectWebSocketUpgrade);
             return;
           }

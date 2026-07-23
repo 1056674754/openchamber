@@ -4,6 +4,7 @@ import type { WorktreeMetadata } from "@/types/worktree"
 import { serverRegistry, DEFAULT_SERVER_ID } from "@/lib/opencode/server-registry"
 import { registerRemoteInstanceProxy } from "@/lib/remote-instances/registry"
 import { getWorktreesForProject } from "@/lib/worktrees/worktreeKeys"
+import { normalizePath } from "@/lib/pathNormalization"
 import { getAllSyncStores } from "./multi-server-registry"
 
 type RoutingContextGetters = {
@@ -21,7 +22,18 @@ export function setSessionRoutingContextGetters(getters: RoutingContextGetters):
 }
 
 export const normalizeDirectoryKey = (directory: string): string =>
-  directory.replace(/\\/g, "/").replace(/\/+$/, "") || "/"
+  normalizePath(directory) ?? "/"
+
+export function requireExistingSessionDirectory(
+  sessionID: string,
+  directory: string | null | undefined,
+): string {
+  const normalizedDirectory = normalizePath(directory)
+  if (!normalizedDirectory) {
+    throw new Error(`Directory for session ${sessionID} is not available`)
+  }
+  return normalizedDirectory
+}
 
 function usesDefaultConnection(project: { serverId?: string | null }): boolean {
   return !project.serverId || project.serverId === DEFAULT_SERVER_ID

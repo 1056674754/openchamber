@@ -204,11 +204,14 @@ const percentFromSpend = (planUsage) => {
   return Math.min(100, Math.max(0, ((limit - remaining) / limit) * 100));
 };
 
-const buildWindows = (usage, plan) => {
+export const parseCursorUsageWindows = (usage, plan) => {
   const planUsage = usage?.planUsage ?? {};
   const spendLimitUsage = usage?.spendLimitUsage ?? {};
+  const windowStart = toTimestamp(usage?.billingCycleStart ?? plan?.planInfo?.billingCycleStart);
   const resetAt = toTimestamp(usage?.billingCycleEnd ?? plan?.planInfo?.billingCycleEnd);
-  const windowSeconds = resetAt ? Math.max(0, Math.floor((resetAt - Date.now()) / 1000)) : null;
+  const windowSeconds = windowStart !== null && resetAt !== null && resetAt > windowStart
+    ? Math.floor((resetAt - windowStart) / 1000)
+    : null;
   const windows = {};
 
   windows.billing_cycle = toUsageWindow({
@@ -297,7 +300,7 @@ export const fetchQuota = async () => {
       });
     }
 
-    const windows = buildWindows(usage, plan);
+    const windows = parseCursorUsageWindows(usage, plan);
     appendCreditsWindow(windows, credits);
 
     return buildResult({

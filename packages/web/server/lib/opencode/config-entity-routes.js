@@ -26,6 +26,24 @@ export const registerConfigEntityRoutes = (app, dependencies) => {
     expandSnippets,
   } = dependencies;
 
+  const buildAgentMutationResponse = (refreshResult, liveMessage, manualRestartMessage) => {
+    if (refreshResult?.external === true) {
+      return {
+        success: true,
+        requiresReload: false,
+        requiresManualRestart: true,
+        message: manualRestartMessage,
+      };
+    }
+
+    return {
+      success: true,
+      requiresReload: true,
+      message: liveMessage,
+      reloadDelayMs: clientReloadDelayMs,
+    };
+  };
+
   const completeMcpMutation = async (res, action, name, applyChange) => {
     applyChange();
 
@@ -104,16 +122,15 @@ export const registerConfigEntityRoutes = (app, dependencies) => {
       console.log('[Server] Scope:', scope, 'Working directory:', directory);
 
       createAgent(agentName, config, directory, scope);
-      await refreshOpenCodeAfterConfigChange('agent creation', {
+      const refreshResult = await refreshOpenCodeAfterConfigChange('agent creation', {
         agentName
       });
 
-      res.json({
-        success: true,
-        requiresReload: true,
-        message: `Agent ${agentName} created successfully. Reloading interface…`,
-        reloadDelayMs: clientReloadDelayMs,
-      });
+      res.json(buildAgentMutationResponse(
+        refreshResult,
+        `Agent ${agentName} created successfully. Reloading interface…`,
+        `Agent ${agentName} saved. Restart your connected OpenCode server to apply the change.`,
+      ));
     } catch (error) {
       console.error('Failed to create agent:', error);
       res.status(500).json({ error: error.message || 'Failed to create agent' });
@@ -134,16 +151,15 @@ export const registerConfigEntityRoutes = (app, dependencies) => {
       console.log('[Server] Working directory:', directory);
 
       updateAgent(agentName, updates, directory);
-      await refreshOpenCodeAfterConfigChange('agent update');
+      const refreshResult = await refreshOpenCodeAfterConfigChange('agent update');
 
       console.log(`[Server] Agent ${agentName} updated successfully`);
 
-      res.json({
-        success: true,
-        requiresReload: true,
-        message: `Agent ${agentName} updated successfully. Reloading interface…`,
-        reloadDelayMs: clientReloadDelayMs,
-      });
+      res.json(buildAgentMutationResponse(
+        refreshResult,
+        `Agent ${agentName} updated successfully. Reloading interface…`,
+        `Agent ${agentName} saved. Restart your connected OpenCode server to apply the change.`,
+      ));
     } catch (error) {
       console.error('[Server] Failed to update agent:', error);
       console.error('[Server] Error stack:', error.stack);
@@ -161,14 +177,13 @@ export const registerConfigEntityRoutes = (app, dependencies) => {
 
       const scope = req.body?.scope;
       deleteAgent(agentName, directory, scope);
-      await refreshOpenCodeAfterConfigChange('agent deletion');
+      const refreshResult = await refreshOpenCodeAfterConfigChange('agent deletion');
 
-      res.json({
-        success: true,
-        requiresReload: true,
-        message: `Agent ${agentName} deleted successfully. Reloading interface…`,
-        reloadDelayMs: clientReloadDelayMs,
-      });
+      res.json(buildAgentMutationResponse(
+        refreshResult,
+        `Agent ${agentName} deleted successfully. Reloading interface…`,
+        `Agent ${agentName} deleted. Restart your connected OpenCode server to apply the change.`,
+      ));
     } catch (error) {
       console.error('Failed to delete agent:', error);
       res.status(500).json({ error: error.message || 'Failed to delete agent' });

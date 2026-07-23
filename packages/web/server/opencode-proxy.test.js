@@ -148,4 +148,66 @@ describe('OpenCode proxy SSE forwarding', () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ ok: true, source: 'external-host' });
   });
+
+  it('projects unused diff snapshots out of message history before sending it to the UI', async () => {
+    const upstream = express();
+    upstream.get('/session/:sessionID/message', (_req, res) => {
+      res.setHeader('X-Next-Cursor', 'cursor-older');
+      res.json([{
+        info: {
+          id: 'msg_user',
+          role: 'user',
+          summary: {
+            additions: 4,
+            deletions: 2,
+            files: 1,
+            diffs: [{
+              file: 'large.ts',
+              before: 'b'.repeat(400_000),
+              after: 'a'.repeat(400_000),
+              patch: 'p'.repeat(120_000),
+            }],
+          },
+        },
+        parts: [],
+      }]);
+    });
+    upstreamServer = await listen(upstream);
+    const upstreamPort = upstreamServer.address().port;
+
+    const app = express();
+    registerOpenCodeProxy(app, {
+      fs: {},
+      os: {},
+      path,
+      OPEN_CODE_READY_GRACE_MS: 0,
+      getRuntime: () => ({
+        openCodePort: upstreamPort,
+        isOpenCodeReady: true,
+        openCodeNotReadySince: 0,
+        isRestartingOpenCode: false,
+      }),
+      getOpenCodeAuthHeaders: () => ({}),
+      buildOpenCodeUrl: (requestPath) => `http://127.0.0.1:${upstreamPort}${requestPath}`,
+      ensureOpenCodeApiPrefix: () => {},
+    });
+    proxyServer = await listen(app);
+    const proxyPort = proxyServer.address().port;
+
+    const response = await fetch(
+      `http://127.0.0.1:${proxyPort}/api/session/ses_1/message?directory=%2Frepo&limit=30`,
+    );
+    const bodyText = await response.text();
+    const body = JSON.parse(bodyText);
+    const diff = body[0].info.summary.diffs[0];
+
+    expect(diff.before).toBeUndefined();
+    expect(diff.after).toBeUndefined();
+    expect(diff.patch).toHaveLength(100_000);
+    expect(body[0].info.summary.additions).toBe(4);
+    expect(response.headers.get('x-next-cursor')).toBe('cursor-older');
+    expect(response.headers.get('x-openchamber-decoded-content-length')).toBe(
+      String(Buffer.byteLength(bodyText)),
+    );
+  });
 });

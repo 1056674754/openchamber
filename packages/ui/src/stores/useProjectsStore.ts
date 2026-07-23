@@ -8,6 +8,7 @@ import { createProjectIdFromPath } from '@/lib/projectId';
 import { getSafeStorage } from './utils/safeStorage';
 import { useDirectoryStore } from './useDirectoryStore';
 import { streamDebugEnabled } from '@/stores/utils/streamDebug';
+import { normalizePath } from '@/lib/pathNormalization';
 import { PROJECT_COLORS } from '@/lib/projectMeta';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSessionProjectStore } from './useSessionProjectStore';
@@ -114,11 +115,7 @@ const normalizeProjectPath = (value: string): string => {
   const homeDirectory = safeStorage.getItem('homeDirectory') || useDirectoryStore.getState().homeDirectory || '';
   const expanded = resolveTildePath(trimmed, homeDirectory);
 
-  const normalized = expanded.replace(/\\/g, '/');
-  if (normalized === '/') {
-    return '/';
-  }
-  return normalized.length > 1 ? normalized.replace(/\/+$/, '') : normalized;
+  return normalizePath(expanded) ?? '';
 };
 
 const deriveProjectLabel = (path: string): string => {

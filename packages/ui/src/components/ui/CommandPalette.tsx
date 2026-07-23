@@ -86,6 +86,7 @@ export const CommandPalette: React.FC = () => {
   const activeSessions = useGlobalSessionsStore((s) => s.activeSessions);
   const currentDirectory = useDirectoryStore((s) => s.currentDirectory);
   const activeProject = useProjectsStore((s) => s.getActiveProject());
+  const projects = useProjectsStore((s) => s.projects);
   const effectiveDirectory = useEffectiveDirectory();
   const searchFiles = useFileSearchStore((s) => s.searchFiles);
   const { files: filesApi, git: gitApi } = useRuntimeAPIs();
@@ -391,23 +392,38 @@ export const CommandPalette: React.FC = () => {
     });
   }, [fileResults, liveTrimmed, hasQuery]);
 
+  const scoredProjects = React.useMemo(() => {
+    if (!hasQuery) return [];
+    const entries = projects.map((project) => ({
+      ...project,
+      displayName: project.label || project.path.split('/').pop() || project.path,
+      searchText: `${project.label || ''} ${project.path}`,
+    }));
+    return scoreByFuzzyQuery(entries, liveTrimmed, (project) => project.searchText, {
+      limit: 7,
+      threshold: 0.4,
+    });
+  }, [hasQuery, liveTrimmed, projects]);
+
   const visibleCommands = scoredCommands.map((x) => x.item);
   const visibleSettings = scoredSettings.map((x) => x.item);
   const visibleSessions = scoredSessions.map((x) => x.item);
   const visibleFiles = hasQuery ? scoredFiles.map((x) => x.item) : [];
+  const visibleProjects = hasQuery ? scoredProjects.map((x) => x.item) : [];
 
-  const groupOrder = React.useMemo<('commands' | 'settings' | 'sessions' | 'files')[]>(() => {
+  const groupOrder = React.useMemo<('commands' | 'settings' | 'sessions' | 'files' | 'projects')[]>(() => {
     if (!hasQuery) return ['commands', 'sessions'];
     const best = (arr: { score: number }[]): number => (arr.length ? arr[0].score : Infinity);
-    const groups: { key: 'commands' | 'settings' | 'sessions' | 'files'; score: number }[] = [
+    const groups: { key: 'commands' | 'settings' | 'sessions' | 'files' | 'projects'; score: number }[] = [
       { key: 'commands', score: best(scoredCommands) },
       { key: 'settings', score: best(scoredSettings) },
       { key: 'sessions', score: best(scoredSessions) },
       { key: 'files', score: best(scoredFiles) },
+      { key: 'projects', score: best(scoredProjects) },
     ];
     groups.sort((a, b) => a.score - b.score);
     return groups.map((g) => g.key);
-  }, [hasQuery, scoredCommands, scoredSettings, scoredSessions, scoredFiles]);
+  }, [hasQuery, scoredCommands, scoredSettings, scoredSessions, scoredFiles, scoredProjects]);
 
   const handleOpenSession = React.useCallback(
     (session: Session) => {
@@ -429,6 +445,16 @@ export const CommandPalette: React.FC = () => {
       close();
     },
     [currentRoot, filesApi, openContextFile, close],
+  );
+
+  const handleOpenProject = React.useCallback(
+    (projectId: string, projectPath: string) => {
+      close();
+      setActiveMainTab('chat');
+      setSessionSwitcherOpen(false);
+      openNewSessionDraft({ selectedProjectId: projectId, directoryOverride: projectPath });
+    },
+    [close, openNewSessionDraft, setActiveMainTab, setSessionSwitcherOpen],
   );
 
   const shortcut = React.useCallback(
@@ -533,6 +559,25 @@ export const CommandPalette: React.FC = () => {
                         </CommandItem>
                       );
                     })}
+                  </CommandGroup>
+                );
+              }
+              if (groupKey === 'projects' && visibleProjects.length > 0) {
+                return (
+                  <CommandGroup key="projects">
+                    {visibleProjects.map((project) => (
+                      <CommandItem
+                        key={`project:${project.id}`}
+                        value={`project:${project.id}`}
+                        onSelect={() => handleOpenProject(project.id, project.path)}
+                      >
+                        <Icon name="folder" className="mr-2 h-4 w-4" />
+                        <span className="truncate">{project.displayName}</span>
+                        <span className="ml-auto max-w-[160px] truncate text-muted-foreground typography-meta">
+                          {project.path}
+                        </span>
+                      </CommandItem>
+                    ))}
                   </CommandGroup>
                 );
               }

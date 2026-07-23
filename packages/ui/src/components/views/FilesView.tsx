@@ -710,6 +710,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
   const addOpenPath = useFilesViewTabsStore((state) => state.addOpenPath);
   const removeOpenPath = useFilesViewTabsStore((state) => state.removeOpenPath);
   const removeOpenPathsByPrefix = useFilesViewTabsStore((state) => state.removeOpenPathsByPrefix);
+  const removeExpandedPathsByPrefix = useFilesViewTabsStore((state) => state.removeExpandedPathsByPrefix);
   const setSelectedPath = useFilesViewTabsStore((state) => state.setSelectedPath);
   const toggleExpandedPath = useFilesViewTabsStore((state) => state.toggleExpandedPath);
   const expandPaths = useFilesViewTabsStore((state) => state.expandPaths);
@@ -1081,8 +1082,8 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
           return;
         }
 
-        if (root && isFileMissingError(error)) {
-          removeOpenPathsByPrefix(root, normalizedDir);
+        if (root && normalizedDir !== root && isFileMissingError(error)) {
+          removeExpandedPathsByPrefix(root, normalizedDir);
         }
 
         setChildrenByDir((prev) => ({
@@ -1100,7 +1101,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
         inFlightDirsRef.current = new Set(inFlightDirsRef.current);
         inFlightDirsRef.current.delete(normalizedDir);
       });
-  }, [files, mapDirectoryEntries, removeOpenPathsByPrefix, root, runtime.isDesktop, serverBaseUrl, showGitignored]);
+  }, [files, mapDirectoryEntries, removeExpandedPathsByPrefix, root, runtime.isDesktop, serverBaseUrl, showGitignored]);
 
   const refreshRoot = React.useCallback(async () => {
     if (!root) {
@@ -2698,12 +2699,14 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [canEdit, isMobile, shortcutOverrides, textViewMode]);
 
+  const editorFontSize = useUIStore((state) => state.editorFontSize);
+
   const editorExtensions = React.useMemo(() => {
     if (!selectedFile?.path) {
-      return [createFlexokiCodeMirrorTheme(currentTheme)];
+      return [createFlexokiCodeMirrorTheme(currentTheme, { fontSize: editorFontSize })];
     }
 
-    const extensions = [createFlexokiCodeMirrorTheme(currentTheme)];
+    const extensions = [createFlexokiCodeMirrorTheme(currentTheme, { fontSize: editorFontSize })];
     const language = staticLanguageExtension ?? dynamicLanguageExtension;
     if (language) {
       extensions.push(language);
@@ -2726,7 +2729,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
       }));
     }
     return extensions;
-  }, [currentTheme, selectedFile?.path, staticLanguageExtension, dynamicLanguageExtension, wrapLines, isMobile, nudgeEditorSelectionAboveKeyboard]);
+  }, [currentTheme, selectedFile?.path, staticLanguageExtension, dynamicLanguageExtension, wrapLines, isMobile, nudgeEditorSelectionAboveKeyboard, editorFontSize]);
 
   const pierreTheme = React.useMemo(
     () => ({ light: lightTheme.metadata.id, dark: darkTheme.metadata.id }),

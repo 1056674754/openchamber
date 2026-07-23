@@ -1,7 +1,7 @@
 import { create } from "zustand";
-import { devtools, persist, createJSONStorage } from "zustand/middleware";
+import { devtools, persist } from "zustand/middleware";
 import type { AttachedFile } from "./types/sessionTypes";
-import { getSafeStorage } from "./utils/safeStorage";
+import { createDeferredSafeJSONStorage } from "./utils/safeStorage";
 import { resolveApiUrl } from "@/lib/api/serverUrl";
 
 interface FileState {
@@ -256,7 +256,7 @@ export const useFileStore = create<FileStore>()(
             }),
             {
                 name: "file-store",
-                storage: createJSONStorage(() => getSafeStorage()),
+                storage: createDeferredSafeJSONStorage(),
                 version: 3,
                 migrate: (persistedState) => {
                     const state = persistedState as { attachedFiles?: AttachedFile[] } | undefined;

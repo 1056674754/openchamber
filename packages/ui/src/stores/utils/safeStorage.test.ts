@@ -208,4 +208,79 @@ describe('safeStorage', () => {
             }
         }
     });
+
+    test('defers JSON serialization while preserving read-after-write', async () => {
+        const baseStore = new Map<string, string>();
+        const mockWindow = {
+            localStorage: createMockBaseStorage(baseStore),
+            sessionStorage: createMockBaseStorage(new Map()),
+            addEventListener: () => {},
+        };
+        const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
+        const previousStringify = JSON.stringify;
+        const stringifyCalls: unknown[] = [];
+        Object.defineProperty(globalThis, 'window', { configurable: true, value: mockWindow });
+
+        try {
+            JSON.stringify = ((value: unknown, replacer?: Parameters<typeof JSON.stringify>[1], space?: Parameters<typeof JSON.stringify>[2]) => {
+                stringifyCalls.push(value);
+                return previousStringify(value, replacer, space);
+            }) as typeof JSON.stringify;
+
+            const { createDeferredSafeJSONStorage } = await importSafeStorage();
+            const storage = createDeferredSafeJSONStorage<{ value: string }>();
+            if (!storage) throw new Error('storage unavailable');
+
+            storage.setItem('key', { state: { value: 'first' } });
+            storage.setItem('key', { state: { value: 'latest' } });
+
+            expect(stringifyCalls).toHaveLength(0);
+            expect(baseStore.has('key')).toBe(false);
+            expect(storage.getItem('key')).toEqual({ state: { value: 'latest' } });
+
+            await new Promise((resolve) => setTimeout(resolve, 10));
+
+            expect(stringifyCalls).toEqual([{ state: { value: 'latest' } }]);
+            expect(baseStore.get('key')).toBe('{"state":{"value":"latest"}}');
+        } finally {
+            JSON.stringify = previousStringify;
+            if (previousWindow) {
+                Object.defineProperty(globalThis, 'window', previousWindow);
+            } else {
+                delete (globalThis as { window?: unknown }).window;
+            }
+        }
+    });
+
+    test('flushes deferred direct writes on pagehide', async () => {
+        const baseStore = new Map<string, string>();
+        const listeners = new Map<string, Array<() => void>>();
+        const mockWindow = {
+            localStorage: createMockBaseStorage(baseStore),
+            sessionStorage: createMockBaseStorage(new Map()),
+            addEventListener: (event: string, listener: () => void) => {
+                listeners.set(event, [...(listeners.get(event) ?? []), listener]);
+            },
+        };
+        const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
+        Object.defineProperty(globalThis, 'window', { configurable: true, value: mockWindow });
+
+        try {
+            const { getDeferredSafeStorage } = await importSafeStorage();
+            const storage = getDeferredSafeStorage();
+            storage.setItem('key', 'value');
+
+            expect(baseStore.has('key')).toBe(false);
+            expect(storage.getItem('key')).toBe('value');
+
+            for (const listener of listeners.get('pagehide') ?? []) listener();
+            expect(baseStore.get('key')).toBe('value');
+        } finally {
+            if (previousWindow) {
+                Object.defineProperty(globalThis, 'window', previousWindow);
+            } else {
+                delete (globalThis as { window?: unknown }).window;
+            }
+        }
+    });
 });

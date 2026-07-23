@@ -28,6 +28,64 @@ type ApiProxyResponsePayload = {
 };
 
 const DECODED_PAYLOAD_LENGTH_HEADER = 'x-openchamber-decoded-content-length';
+const MAX_MESSAGE_HISTORY_DIFFS = 500;
+const MAX_MESSAGE_HISTORY_PATCH_LENGTH = 100_000;
+
+export function projectMessageHistoryResponseText(bodyText: string): string {
+  try {
+    const payload: unknown = JSON.parse(bodyText);
+    if (!Array.isArray(payload)) {
+      return bodyText;
+    }
+
+    return JSON.stringify(payload.map((record: unknown) => {
+      if (!record || typeof record !== 'object' || Array.isArray(record)) {
+        return record;
+      }
+      const typedRecord = record as Record<string, unknown>;
+      const info = typedRecord.info;
+      if (!info || typeof info !== 'object' || Array.isArray(info)) {
+        return record;
+      }
+      const typedInfo = info as Record<string, unknown>;
+      const summary = typedInfo.summary;
+      if (!summary || typeof summary !== 'object' || Array.isArray(summary)) {
+        return record;
+      }
+      const typedSummary = summary as Record<string, unknown>;
+      if (!Array.isArray(typedSummary.diffs)) {
+        return record;
+      }
+
+      const diffs = typedSummary.diffs.slice(0, MAX_MESSAGE_HISTORY_DIFFS).map((diff: unknown) => {
+        if (!diff || typeof diff !== 'object' || Array.isArray(diff)) {
+          return diff;
+        }
+        const typedDiff = diff as Record<string, unknown>;
+        const projected = Object.fromEntries(
+          Object.entries(typedDiff).filter(([key]) => !['before', 'after', 'from', 'to'].includes(key)),
+        );
+        if (typeof projected.patch === 'string' && projected.patch.length > MAX_MESSAGE_HISTORY_PATCH_LENGTH) {
+          projected.patch = projected.patch.slice(0, MAX_MESSAGE_HISTORY_PATCH_LENGTH);
+        }
+        return projected;
+      });
+
+      return {
+        ...typedRecord,
+        info: {
+          ...typedInfo,
+          summary: {
+            ...typedSummary,
+            diffs,
+          },
+        },
+      };
+    }));
+  } catch {
+    return bodyText;
+  }
+}
 
 export function setDecodedPayloadLengthHeader(headers: Record<string, string>, payloadBytes: number): void {
   delete headers[DECODED_PAYLOAD_LENGTH_HEADER];
@@ -114,7 +172,12 @@ export async function handleProxyBridgeMessage(
 
         const responseHeaders = collectProxyResponseHeaders(response.headers, deps);
         if (shouldReturnTextBody(response.headers)) {
-          const bodyText = await response.text();
+          const upstreamBodyText = await response.text();
+          const isMessageHistoryRequest = normalizedMethod === 'GET'
+            && /^\/session\/[^/]+\/message(?:\?.*)?$/.test(normalizedPath);
+          const bodyText = response.ok && isMessageHistoryRequest
+            ? projectMessageHistoryResponseText(upstreamBodyText)
+            : upstreamBodyText;
           setDecodedPayloadLengthHeader(responseHeaders, Buffer.byteLength(bodyText));
           const data: ApiProxyResponsePayload = {
             status: response.status,

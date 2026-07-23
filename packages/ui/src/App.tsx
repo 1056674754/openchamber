@@ -57,6 +57,7 @@ import { SyncAppEffects } from '@/apps/AppEffects';
 import { useAppFontEffects } from '@/apps/useAppFontEffects';
 import { OpenCodeUpdateToast } from '@/components/update/OpenCodeUpdateToast';
 import { markStartupTrace, startupTraceEnabled } from '@/lib/startupTrace';
+import { isEmbeddedSessionChat } from '@/components/layout/contextPanelEmbeddedChat';
 
 // Lazy-loaded heavy views — loaded on demand to reduce initial bundle size.
 const OnboardingScreen = lazyWithChunkRecovery(() =>
@@ -109,21 +110,21 @@ type EmbeddedVisibilityPayload = {
   visible?: unknown;
 };
 
+type EmbeddedChatSettingsPayload = {
+  allowPromptingSubagentSessions?: unknown;
+};
+
 const normalizeEmbeddedDirectory = (value: string | null | undefined): string => {
   if (!value) return '';
   return value.replace(/\\/g, '/').replace(/\/+$/g, '');
 };
 
 const readEmbeddedSessionChatConfig = (): EmbeddedSessionChatConfig | null => {
-  if (typeof window === 'undefined') {
+  if (typeof window === 'undefined' || !isEmbeddedSessionChat()) {
     return null;
   }
 
   const params = new URLSearchParams(window.location.search);
-  if (params.get('ocPanel') !== 'session-chat') {
-    return null;
-  }
-
   const sessionIdRaw = params.get('sessionId');
   const sessionId = typeof sessionIdRaw === 'string' ? sessionIdRaw.trim() : '';
   if (!sessionId) {
@@ -169,7 +170,7 @@ const EmbeddedSessionChatContent: React.FC<{
     if (expectedDirectory && activeDirectory !== expectedDirectory) return;
 
     const bootstrapKey = `${expectedDirectory}\n${embeddedSessionChat.sessionId}`;
-    if (bootstrapKeyRef.current === bootstrapKey && currentSessionId === embeddedSessionChat.sessionId) {
+    if (bootstrapKeyRef.current === bootstrapKey && currentSessionId) {
       return;
     }
 
@@ -524,6 +525,45 @@ function App({ apis }: AppProps) {
       window.removeEventListener('message', handleMessage);
       if (scopedWindow.__openchamberSetEmbeddedVisibility === applyVisibility) {
         delete scopedWindow.__openchamberSetEmbeddedVisibility;
+      }
+    };
+  }, [embeddedSessionChat]);
+
+  React.useEffect(() => {
+    if (!embeddedSessionChat || typeof window === 'undefined') {
+      return;
+    }
+
+    const applyChatSettings = (payload?: EmbeddedChatSettingsPayload) => {
+      if (typeof payload?.allowPromptingSubagentSessions !== 'boolean') {
+        return;
+      }
+      useUIStore.getState().setAllowPromptingSubagentSessions(payload.allowPromptingSubagentSessions);
+    };
+
+    const handleMessage = (event: MessageEvent) => {
+      if (event.origin !== window.location.origin) {
+        return;
+      }
+
+      const data = event.data as { type?: unknown; payload?: EmbeddedChatSettingsPayload };
+      if (data?.type === 'openchamber:chat-settings-sync') {
+        applyChatSettings(data.payload);
+      }
+    };
+
+    const scopedWindow = window as unknown as {
+      __openchamberApplyChatSettingsSync?: (payload?: EmbeddedChatSettingsPayload) => void;
+    };
+
+    scopedWindow.__openchamberApplyChatSettingsSync = applyChatSettings;
+    window.addEventListener('message', handleMessage);
+    window.parent.postMessage({ type: 'openchamber:chat-settings-request' }, window.location.origin);
+
+    return () => {
+      window.removeEventListener('message', handleMessage);
+      if (scopedWindow.__openchamberApplyChatSettingsSync === applyChatSettings) {
+        delete scopedWindow.__openchamberApplyChatSettingsSync;
       }
     };
   }, [embeddedSessionChat]);

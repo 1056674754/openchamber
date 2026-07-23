@@ -42,7 +42,8 @@ This module provides notification message preparation utilities for the web serv
   - `maybeSendPushForTrigger(payload)`
 - Owns:
   - completion/error/question/permission trigger routing
-  - session parent cache for subtask suppression
+  - directory-scoped session parent cache and direct session lookup for subtask suppression
+  - `session.idle` / `session.error` fallback normalization and per-session cooldowns
   - template resolution and fallback behavior
   - native notification fanout and web push payload fanout
 

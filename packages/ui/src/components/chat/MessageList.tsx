@@ -25,16 +25,18 @@ import { streamPerfCount, streamPerfMeasure } from '@/stores/utils/streamDebug';
 import type { StreamPhase } from './message/types';
 import { normalizeParts } from './message/partUtils';
 import { isProcessFoldTransitionActive } from './lib/scroll/processFoldViewport';
-import { shouldCompensateVirtualItemResize } from './lib/scroll/scrollIntent';
+import { getMessageListOverscan, shouldCompensateVirtualItemResize } from './lib/scroll/scrollIntent';
+import { useDeviceInfo } from '@/lib/device';
 
 const MESSAGE_LIST_VIRTUALIZE_THRESHOLD = 5;
-const MESSAGE_LIST_OVERSCAN = 6;
 const MESSAGE_LIST_AT_END_THRESHOLD_PX = 80;
 const MESSAGE_LIST_ESTIMATED_ENTRY_SIZE = 320;
 const MESSAGE_LIST_ESTIMATE_MIN_SAMPLES = 5;
 const MESSAGE_LIST_ESTIMATE_MIN = 120;
 const MESSAGE_LIST_ESTIMATE_MAX = 1200;
-const SCROLL_INTERACTION_WINDOW_MS = 300;
+// Large turns can finish virtual row measurement well after the wheel event.
+// Keep those measurements from rewriting scrollTop during the same gesture.
+const SCROLL_INTERACTION_WINDOW_MS = 1200;
 
 const useStableEvent = <TArgs extends unknown[], TResult>(handler: (...args: TArgs) => TResult) => {
     const handlerRef = React.useRef(handler);
@@ -1297,6 +1299,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
     streamPerfCount('ui.message_list.render');
     void _disableStaging;
     const stickyUserHeader = useUIStore(state => state.stickyUserHeader);
+    const { isMobile } = useDeviceInfo();
     const chatRenderMode = useUIStore((state) => state.chatRenderMode);
     const activityRenderMode = useUIStore((state) => state.activityRenderMode);
     const defaultActivityExpanded = false;
@@ -1380,12 +1383,19 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
     const scrollInteractionUntilRef = React.useRef(0);
     const pendingViewportAnchorRef = React.useRef<MessageViewportAnchor | null>(null);
     const pendingViewportAnchorTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+    const pendingTargetScrollRef = React.useRef<{ kind: 'turn' | 'message'; id: string } | null>(null);
     const clearPendingViewportAnchor = React.useCallback(() => {
         pendingViewportAnchorRef.current = null;
         if (pendingViewportAnchorTimerRef.current) {
             clearTimeout(pendingViewportAnchorTimerRef.current);
             pendingViewportAnchorTimerRef.current = null;
         }
+    }, []);
+    const clearPendingTargetScroll = React.useCallback(() => {
+        pendingTargetScrollRef.current = null;
+    }, []);
+    const retainPendingTargetScroll = React.useCallback((kind: 'turn' | 'message', id: string) => {
+        pendingTargetScrollRef.current = { kind, id };
     }, []);
     const resolveScrollContainer = React.useCallback((): HTMLDivElement | null => {
         if (scrollRef?.current) {
@@ -1414,8 +1424,13 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
             const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
             scrollInteractionUntilRef.current = now + SCROLL_INTERACTION_WINDOW_MS;
         };
+        const handleScrollInteraction = () => {
+            markScrollInteraction();
+            stableOnExplicitScrollInteraction();
+        };
         const markExplicitScrollInteraction = () => {
             clearPendingViewportAnchor();
+            clearPendingTargetScroll();
             stableOnExplicitScrollInteraction();
             markScrollInteraction();
         };
@@ -1433,7 +1448,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
             }
         };
 
-        container.addEventListener('scroll', markScrollInteraction, { passive: true });
+        container.addEventListener('scroll', handleScrollInteraction, { passive: true, capture: true });
         container.addEventListener('wheel', markExplicitScrollInteraction, { passive: true });
         container.addEventListener('touchstart', markExplicitScrollInteraction, { passive: true });
         container.addEventListener('touchmove', markExplicitScrollInteraction, { passive: true });
@@ -1441,16 +1456,17 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         container.addEventListener('keydown', handleKeyDown);
 
         return () => {
-            container.removeEventListener('scroll', markScrollInteraction);
+            container.removeEventListener('scroll', handleScrollInteraction, { capture: true });
             container.removeEventListener('wheel', markExplicitScrollInteraction);
             container.removeEventListener('touchstart', markExplicitScrollInteraction);
             container.removeEventListener('touchmove', markExplicitScrollInteraction);
             container.removeEventListener('pointerdown', markExplicitScrollInteraction);
             container.removeEventListener('keydown', handleKeyDown);
         };
-    }, [clearPendingViewportAnchor, resolveScrollContainer, stableOnExplicitScrollInteraction]);
+    }, [clearPendingTargetScroll, clearPendingViewportAnchor, resolveScrollContainer, stableOnExplicitScrollInteraction]);
 
     React.useEffect(() => clearPendingViewportAnchor, [clearPendingViewportAnchor]);
+    React.useEffect(() => clearPendingTargetScroll, [clearPendingTargetScroll]);
 
     const displayMessages = React.useMemo(() => streamPerfMeasure('ui.message_list.retry_overlay_ms', () => {
         return applyRetryOverlay(baseDisplayMessages, {
@@ -1709,14 +1725,16 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         },
         getItemKey: (index) => historyEntries[index]?.key ?? String(index),
         useAnimationFrameWithResizeObserver: true,
-        overscan: MESSAGE_LIST_OVERSCAN,
+        overscan: getMessageListOverscan(isMobile),
         scrollMargin: historyScrollMargin,
-        anchorTo: 'end',
         initialOffset: () => Number.MAX_SAFE_INTEGER,
         enabled: shouldVirtualizeHistory,
     });
 
     historyVirtualizer.shouldAdjustScrollPositionOnItemSizeChange = (item, _delta, instance) => {
+        if (pendingTargetScrollRef.current) {
+            return false;
+        }
         const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
         return shouldCompensateVirtualItemResize({
             isScrolling: instance.isScrolling,
@@ -1915,11 +1933,36 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
     }, [historyEntries.length, historyVirtualizer, shouldVirtualizeHistory]);
 
     React.useLayoutEffect(() => {
+        const pending = pendingTargetScrollRef.current;
+        const container = resolveScrollContainer();
+        if (!pending || !container) {
+            return;
+        }
+
+        const selector = pending.kind === 'turn'
+            ? `[data-turn-id="${CSS.escape(pending.id)}"]`
+            : `[data-message-id="${CSS.escape(pending.id)}"]`;
+        const element = container.querySelector<HTMLElement>(selector);
+        if (!element) {
+            return;
+        }
+
+        const offset = pending.kind === 'message' ? 50 : 0;
+        const delta = element.getBoundingClientRect().top - container.getBoundingClientRect().top - offset;
+        if (Math.abs(delta) <= 1) {
+            return;
+        }
+
+        historyVirtualizer.scrollToOffset(container.scrollTop + delta, { align: 'start', behavior: 'auto' });
+    }, [historyTotalSize, historyVirtualRangeEnd, historyVirtualRangeStart, historyVirtualizer, resolveScrollContainer]);
+
+    React.useLayoutEffect(() => {
         const anchor = pendingViewportAnchorRef.current;
         if (!anchor || !applyViewportAnchor(anchor)) {
             return;
         }
-    }, [applyViewportAnchor, historyTotalSize, historyVirtualRangeEnd, historyVirtualRangeStart]);
+        clearPendingViewportAnchor();
+    }, [applyViewportAnchor, clearPendingViewportAnchor, historyTotalSize, historyVirtualRangeEnd, historyVirtualRangeStart]);
 
     React.useLayoutEffect(() => {
         clearPendingViewportAnchor();
@@ -1960,6 +2003,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
                 if (!container) {
                     return false;
                 }
+                retainPendingTargetScroll('turn', turnId);
                 const turnElement = container.querySelector<HTMLElement>(`[data-turn-id="${turnId}"]`);
                 if (turnElement) {
                     turnElement.scrollIntoView({ behavior, block: 'start' });
@@ -1980,6 +2024,8 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
                 if (index === undefined) {
                     return false;
                 }
+
+                retainPendingTargetScroll('message', messageId);
 
                 return scrollMessageElementIntoView(messageId, behavior)
                     || (
@@ -2059,6 +2105,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
                 }
 
                 if (applyViewportAnchor(anchor)) {
+                    clearPendingViewportAnchor();
                     return true;
                 }
 
@@ -2076,6 +2123,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
             },
 
             scrollToBottom: () => {
+                clearPendingTargetScroll();
                 if (shouldVirtualizeHistory && historyEntries.length > 0) {
                     historyVirtualizer.scrollToIndex(historyEntries.length - 1, { align: 'end' });
                     return;
@@ -2099,7 +2147,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         return () => {
             objectRef.current = null;
         };
-    }, [applyViewportAnchor, clearPendingViewportAnchor, entryIndexMap, findMessageElement, historyEntries.length, historyVirtualizer, messageIndexMap, resolveScrollContainer, scrollHistoryIndexIntoView, scrollMessageElementIntoView, shouldVirtualizeHistory, trailingStreamingEntry, turnIndexMap, ref]);
+    }, [applyViewportAnchor, clearPendingTargetScroll, clearPendingViewportAnchor, entryIndexMap, findMessageElement, historyEntries.length, historyVirtualizer, messageIndexMap, resolveScrollContainer, retainPendingTargetScroll, scrollHistoryIndexIntoView, scrollMessageElementIntoView, shouldVirtualizeHistory, trailingStreamingEntry, turnIndexMap, ref]);
 
     const disableFadeIn = false;
 

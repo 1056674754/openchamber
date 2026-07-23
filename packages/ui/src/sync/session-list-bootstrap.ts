@@ -18,10 +18,39 @@ export const buildRemoteSessionListUrl = (baseUrl: string, directory: string): s
   return `${normalizedBaseUrl}/session?${params.toString()}`
 }
 
+const readRetryAfterMs = (response: Response, body: unknown): number | undefined => {
+  if (body && typeof body === "object") {
+    const value = (body as { retryAfterMs?: unknown }).retryAfterMs
+    if (typeof value === "number" && Number.isFinite(value) && value >= 0) return value
+  }
+
+  const header = response.headers.get("retry-after")
+  if (!header) return undefined
+  const seconds = Number(header)
+  if (Number.isFinite(seconds) && seconds >= 0) return seconds * 1_000
+  const date = Date.parse(header)
+  return Number.isFinite(date) ? Math.max(0, date - Date.now()) : undefined
+}
+
+const createRemoteListSignal = (external?: AbortSignal) => {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), SESSION_LIST_BOOTSTRAP_TIMEOUT_MS)
+  const abort = () => controller.abort()
+  external?.addEventListener("abort", abort, { once: true })
+  return {
+    signal: controller.signal,
+    cleanup: () => {
+      clearTimeout(timeout)
+      external?.removeEventListener("abort", abort)
+    },
+  }
+}
+
 export async function listSessionsForBootstrap(
   sdkClient: OpencodeClient,
   serverId: string,
   directory: string,
+  signal?: AbortSignal,
 ): Promise<Session[]> {
   const connection = serverId !== DEFAULT_SERVER_ID ? serverRegistry.get(serverId) : undefined
   if (connection) {
@@ -29,22 +58,35 @@ export async function listSessionsForBootstrap(
     if (connection.config.authToken) {
       headers.Authorization = `Bearer ${connection.config.authToken}`
     }
-    const response = await fetch(buildRemoteSessionListUrl(connection.config.baseUrl, directory), {
-      headers,
-      signal: AbortSignal.timeout(SESSION_LIST_BOOTSTRAP_TIMEOUT_MS),
-    })
-    if (!response.ok) {
-      const err = new Error(`session.list failed (${response.status})`)
-      ;(err as Error & { status?: number }).status = response.status
-      throw err
+    const request = createRemoteListSignal(signal)
+    try {
+      const response = await fetch(buildRemoteSessionListUrl(connection.config.baseUrl, directory), {
+        headers,
+        signal: request.signal,
+      })
+      if (!response.ok) {
+        const body: unknown = await response.json().catch(() => null)
+        const code = body && typeof body === "object" && typeof (body as { code?: unknown }).code === "string"
+          ? (body as { code: string }).code
+          : undefined
+        const err = new Error(`session.list failed (${response.status})${code ? `: ${code}` : ""}`)
+        const detail = err as Error & { status?: number; code?: string; retryAfterMs?: number }
+        detail.status = response.status
+        if (code) detail.code = code
+        const retryAfterMs = readRetryAfterMs(response, body)
+        if (retryAfterMs !== undefined) detail.retryAfterMs = retryAfterMs
+        throw err
+      }
+      const data: unknown = await response.json()
+      if (!Array.isArray(data)) {
+        const err = new Error("session.list returned invalid data")
+        ;(err as Error & { status?: number }).status = 503
+        throw err
+      }
+      return data.filter((item): item is Session => Boolean(item?.id))
+    } finally {
+      request.cleanup()
     }
-    const data = await response.json()
-    if (!Array.isArray(data)) {
-      const err = new Error("session.list returned invalid data")
-      ;(err as Error & { status?: number }).status = 503
-      throw err
-    }
-    return data.filter((item): item is Session => Boolean(item?.id)) as Session[]
   }
 
   const result = await sdkClient.session.list({

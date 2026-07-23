@@ -1,13 +1,13 @@
 import { create } from "zustand";
 import type { StoreApi, UseBoundStore } from "zustand";
-import { devtools, persist, createJSONStorage } from "zustand/middleware";
+import { devtools, persist } from "zustand/middleware";
 import { emitConfigChange, scopeMatches, subscribeToConfigChanges } from "@/lib/configSync";
 import {
   startConfigUpdate,
   finishConfigUpdate,
   updateConfigUpdateMessage,
 } from "@/lib/configUpdate";
-import { getSafeStorage } from "./utils/safeStorage";
+import { createDeferredSafeJSONStorage } from "./utils/safeStorage";
 
 import { opencodeClient } from '@/lib/opencode/client';
 import { resolveApiUrl } from "@/lib/api/serverUrl";
@@ -490,7 +490,7 @@ export const useSkillsStore = create<SkillsStore>()(
       }),
       {
         name: "skills-store",
-        storage: createJSONStorage(() => getSafeStorage()),
+        storage: createDeferredSafeJSONStorage(),
         partialize: (state) => ({
           selectedSkillName: state.selectedSkillName,
         }),

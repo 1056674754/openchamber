@@ -1,29 +1,131 @@
 import { describe, expect, test } from 'bun:test';
 
 import {
+    getMessageListOverscan,
     getOlderHistoryPrefetchThreshold,
+    isMatchingAutoScrollPosition,
     isVerticallyScrollable,
     shouldPrefetchOlderHistory,
     shouldStartOlderHistoryPrefetch,
     shouldCompensateVirtualItemResize,
+    shouldApplyPassiveAutoFollow,
+    shouldPinFollowedViewportOnWorkingChange,
     shouldPauseAutoScrollAtBoundary,
     shouldPauseAutoScrollOnWheel,
 } from './scrollIntent';
 
+describe('passive chat auto-follow', () => {
+    test('runs only while a followed session is working or settling', () => {
+        expect(shouldApplyPassiveAutoFollow({
+            state: 'following',
+            sessionIsWorking: true,
+            settling: false,
+            processFoldTransitionActive: false,
+        })).toBe(true);
+        expect(shouldApplyPassiveAutoFollow({
+            state: 'following',
+            sessionIsWorking: false,
+            settling: true,
+            processFoldTransitionActive: false,
+        })).toBe(true);
+        expect(shouldApplyPassiveAutoFollow({
+            state: 'following',
+            sessionIsWorking: false,
+            settling: false,
+            processFoldTransitionActive: false,
+        })).toBe(false);
+        expect(shouldApplyPassiveAutoFollow({
+            state: 'released',
+            sessionIsWorking: true,
+            settling: false,
+            processFoldTransitionActive: false,
+        })).toBe(false);
+        expect(shouldApplyPassiveAutoFollow({
+            state: 'following',
+            sessionIsWorking: true,
+            settling: false,
+            processFoldTransitionActive: true,
+        })).toBe(false);
+    });
+
+    test('pins a followed viewport when a running turn finishes', () => {
+        expect(shouldPinFollowedViewportOnWorkingChange({
+            state: 'following',
+            sameSession: true,
+            wasWorking: true,
+            sessionIsWorking: false,
+        })).toBe(true);
+        expect(shouldPinFollowedViewportOnWorkingChange({
+            state: 'released',
+            sameSession: true,
+            wasWorking: true,
+            sessionIsWorking: false,
+        })).toBe(false);
+        expect(shouldPinFollowedViewportOnWorkingChange({
+            state: 'following',
+            sameSession: true,
+            wasWorking: false,
+            sessionIsWorking: false,
+        })).toBe(false);
+        expect(shouldPinFollowedViewportOnWorkingChange({
+            state: 'following',
+            sameSession: false,
+            wasWorking: true,
+            sessionIsWorking: false,
+        })).toBe(false);
+    });
+});
+
+describe('message list overscan', () => {
+    test('keeps more rows mounted for touch momentum scrolling', () => {
+        expect(getMessageListOverscan(false)).toBe(6);
+        expect(getMessageListOverscan(true)).toBe(12);
+    });
+});
+
+describe('auto-follow programmatic marker', () => {
+    test('matches only the recent programmatic destination', () => {
+        expect(isMatchingAutoScrollPosition({
+            currentTop: 1000,
+            markedTop: 1001,
+            markedAt: 500,
+            currentTime: 1800,
+            ttl: 1500,
+            tolerance: 2,
+        })).toBe(true);
+        expect(isMatchingAutoScrollPosition({
+            currentTop: 900,
+            markedTop: 1000,
+            markedAt: 500,
+            currentTime: 1800,
+            ttl: 1500,
+            tolerance: 2,
+        })).toBe(false);
+        expect(isMatchingAutoScrollPosition({
+            currentTop: 1000,
+            markedTop: 1000,
+            markedAt: 500,
+            currentTime: 2101,
+            ttl: 1500,
+            tolerance: 2,
+        })).toBe(false);
+    });
+});
+
 describe('older history prefetch', () => {
-    test('starts before the user reaches the top of a typical chat viewport', () => {
+    test('merges the prepared page within one typical chat viewport of the top', () => {
         expect(shouldPrefetchOlderHistory({
-            scrollTop: 2000,
+            scrollTop: 700,
             clientHeight: 800,
         })).toBe(true);
         expect(shouldPrefetchOlderHistory({
-            scrollTop: 2401,
+            scrollTop: 801,
             clientHeight: 800,
         })).toBe(false);
     });
 
     test('scales the lead distance for tall viewports', () => {
-        expect(getOlderHistoryPrefetchThreshold(1600)).toBe(4800);
+        expect(getOlderHistoryPrefetchThreshold(1600)).toBe(1600);
     });
 
     test('does not repeat an automatic request for an unchanged history version', () => {
@@ -154,7 +256,7 @@ describe('virtualized chat resize compensation', () => {
         })).toBe(false);
     });
 
-    test('preserves a settled viewport when an earlier item changes height', () => {
+    test('does not rewrite a settled reading viewport when an earlier item changes height', () => {
         expect(shouldCompensateVirtualItemResize({
             isScrolling: false,
             scrollInteractionActive: false,
@@ -162,10 +264,25 @@ describe('virtualized chat resize compensation', () => {
             isAtEnd: false,
             itemIndex: 2,
             firstVisibleIndex: 8,
+        })).toBe(false);
+    });
+
+    test('keeps a settled bottom-pinned viewport anchored as rows finish measuring', () => {
+        const base = {
+            isScrolling: false,
+            scrollInteractionActive: false,
+            itemIndex: 2,
+            firstVisibleIndex: 8,
+        };
+
+        expect(shouldCompensateVirtualItemResize({
+            ...base,
+            processFoldTransitionActive: false,
+            isAtEnd: true,
         })).toBe(true);
     });
 
-    test('does not compensate fold transitions or bottom-pinned history', () => {
+    test('does not compensate fold transitions', () => {
         const base = {
             isScrolling: false,
             scrollInteractionActive: false,
@@ -177,11 +294,6 @@ describe('virtualized chat resize compensation', () => {
             ...base,
             processFoldTransitionActive: true,
             isAtEnd: false,
-        })).toBe(false);
-        expect(shouldCompensateVirtualItemResize({
-            ...base,
-            processFoldTransitionActive: false,
-            isAtEnd: true,
         })).toBe(false);
     });
 });

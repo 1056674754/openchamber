@@ -207,6 +207,7 @@ describe('remote instances runtime config', () => {
     await expect(runtime.enterRequestLane('remote-a', 'stream')).rejects.toMatchObject({
       statusCode: 429,
       code: 'REMOTE_LANE_BUSY',
+      retryAfterMs: 1_000,
     });
 
     const normalRelease = await runtime.enterRequestLane('remote-a', 'normal');
@@ -247,6 +248,7 @@ describe('remote instances runtime config', () => {
     await expect(runtime.enterRequestLane('remote-a', 'normal')).rejects.toMatchObject({
       statusCode: 503,
       code: 'REMOTE_CIRCUIT_OPEN',
+      retryAfterMs: expect.any(Number),
     });
 
     const healthRelease = await runtime.enterRequestLane('remote-a', 'health');

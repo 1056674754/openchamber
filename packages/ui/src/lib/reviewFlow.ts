@@ -22,8 +22,6 @@ import { serverRegistry } from '@/lib/opencode/server-registry';
 
 const HANDOFF_TIMEOUT_MS = 180_000;
 const HANDOFF_POLL_MS = 400;
-const REVIEW_SESSION_TITLE = 'Review of workspace changes';
-
 type SessionModelContext = {
   providerID: string;
   modelID: string;
@@ -108,23 +106,26 @@ const resolveModelContext = (sessionID: string): SessionModelContext | null => {
   const selection = useSelectionStore.getState();
   const config = useConfigStore.getState();
   const lastChoice = useSessionUIStore.getState().getLastUserChoice(sessionID);
-  const agent = selection.getSessionAgentSelection(sessionID) || lastChoice?.agent || config.currentAgentName || undefined;
+  const agent = lastChoice?.agent || selection.getSessionAgentSelection(sessionID) || config.currentAgentName || undefined;
   const sessionModel = selection.getSessionModelSelection(sessionID);
   const agentModel = agent ? selection.getAgentModelForSession(sessionID, agent) : null;
   const lastChoiceModel = lastChoice?.providerID && lastChoice.modelID
     ? { providerId: lastChoice.providerID, modelId: lastChoice.modelID }
     : null;
-  const selectedModel = agentModel || sessionModel || lastChoiceModel || (config.currentProviderId && config.currentModelId
+  const selectedModel = lastChoiceModel || agentModel || sessionModel || (config.currentProviderId && config.currentModelId
     ? { providerId: config.currentProviderId, modelId: config.currentModelId }
     : null);
   if (!selectedModel?.providerId || !selectedModel?.modelId) return null;
+  if (lastChoiceModel) {
+    return {
+      providerID: lastChoiceModel.providerId,
+      modelID: lastChoiceModel.modelId,
+      agent,
+      variant: lastChoice?.variant,
+    };
+  }
   const selectionVariant = agent
     ? selection.getAgentModelVariantForSession(sessionID, agent, selectedModel.providerId, selectedModel.modelId)
-    : undefined;
-  const lastChoiceVariant = lastChoiceModel
-    && lastChoiceModel.providerId === selectedModel.providerId
-    && lastChoiceModel.modelId === selectedModel.modelId
-    ? lastChoice?.variant
     : undefined;
   const configVariant = config.currentProviderId === selectedModel.providerId && config.currentModelId === selectedModel.modelId
     ? config.currentVariant
@@ -133,7 +134,7 @@ const resolveModelContext = (sessionID: string): SessionModelContext | null => {
     providerID: selectedModel.providerId,
     modelID: selectedModel.modelId,
     agent,
-    variant: selectionVariant || lastChoiceVariant || configVariant || undefined,
+    variant: selectionVariant || configVariant || undefined,
   };
 };
 
@@ -200,6 +201,11 @@ const getSessionOrNull = async (sessionID: string, directory: string): Promise<S
   }
 };
 
+const getReviewSessionTitle = (original: Session): string => {
+  const implementationTitle = original.title?.trim() || original.id;
+  return `Review: ${implementationTitle}`;
+};
+
 const createOrReuseReviewSession = async (originalSessionID: string, directory: string): Promise<Session> => {
   const original = await opencodeClient.withDirectory(directory, () => opencodeClient.getSession(originalSessionID));
   const existingReviewID = getReviewSessionID(original);
@@ -220,7 +226,7 @@ const createOrReuseReviewSession = async (originalSessionID: string, directory: 
 
   const review = await opencodeClient.withDirectory(directory, () =>
     opencodeClient.createSession({
-      title: REVIEW_SESSION_TITLE,
+      title: getReviewSessionTitle(original),
       metadata: withReviewSessionMarker({}, originalSessionID),
     }),
   );

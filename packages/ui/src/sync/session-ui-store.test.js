@@ -10,9 +10,11 @@ mock.module('@/lib/opencode/client', () => ({
 }));
 
 const { serverRegistry } = await import('@/lib/opencode/server-registry');
+const { useConfigStore } = await import('@/stores/useConfigStore');
 const { useProjectsStore } = await import('@/stores/useProjectsStore');
+const { useSelectionStore } = await import('./selection-store');
 const { useSessionWorktreeStore } = await import('./session-worktree-store');
-const { useSessionUIStore } = await import('./session-ui-store');
+const { materializeOpenDraftSession, useSessionUIStore } = await import('./session-ui-store');
 
 /**
  * Unit tests for session worktree routing through the authoritative store.
@@ -243,5 +245,82 @@ describe('new-session draft permission intent', () => {
     useSessionUIStore.getState().setDraftPermissionAutoAccept(true);
 
     expect(useSessionUIStore.getState().newSessionDraft.permissionIntent.autoAccept).toBe(false);
+  });
+
+  test('materializes a draft in its selected remote project', async () => {
+    const original = useSessionUIStore.getState();
+    const originalConfig = useConfigStore.getState();
+    const createCalls = [];
+    useProjectsStore.setState({
+      projects: [{
+        id: 'remote-project',
+        path: '/remote/project',
+        label: 'Remote Project',
+        serverId: 'remote-a',
+      }],
+      activeProjectId: null,
+    });
+    useConfigStore.setState({
+      currentAgentName: 'build',
+      agents: [],
+      activateDirectory: async () => {},
+    });
+    useSessionUIStore.setState({
+      currentSessionId: null,
+      newSessionDraft: {
+        open: true,
+        selectedProjectId: 'remote-project',
+        directoryOverride: '/remote/project/nested',
+        permissionIntent: { autoAccept: false },
+        parentID: null,
+      },
+      createSession: async (...args) => {
+        createCalls.push(args);
+        return {
+          id: 'ses_draft',
+          title: '',
+          directory: '/remote/project/nested',
+          time: { created: 1, updated: 1 },
+        };
+      },
+      initializeNewOpenChamberSession: () => {},
+      setCurrentSession: (sessionId) => {
+        useSessionUIStore.setState({ currentSessionId: sessionId });
+      },
+    });
+
+    try {
+      const result = await materializeOpenDraftSession({
+        providerID: 'provider-a',
+        modelID: 'model-a',
+        variant: 'high',
+      });
+
+      expect(result).toEqual({
+        sessionId: 'ses_draft',
+        directory: '/remote/project/nested',
+        serverId: 'remote-a',
+        agent: 'build',
+      });
+      expect(createCalls[0]?.[3]).toBe('remote-a');
+      expect(useSelectionStore.getState().getSessionModelSelection('ses_draft')).toEqual({
+        providerId: 'provider-a',
+        modelId: 'model-a',
+      });
+      expect(useSessionUIStore.getState().currentSessionId).toBe('ses_draft');
+      expect(useSessionUIStore.getState().newSessionDraft.open).toBe(false);
+    } finally {
+      useSessionUIStore.setState({
+        createSession: original.createSession,
+        initializeNewOpenChamberSession: original.initializeNewOpenChamberSession,
+        setCurrentSession: original.setCurrentSession,
+      });
+      useConfigStore.setState({
+        currentAgentName: originalConfig.currentAgentName,
+        agents: originalConfig.agents,
+        activateDirectory: originalConfig.activateDirectory,
+      });
+      serverRegistry.forgetSession('ses_draft');
+    }
   });
 });

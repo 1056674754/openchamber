@@ -295,14 +295,14 @@ export async function activate(context: vscode.ExtensionContext) {
       }
 
       // Get file info for context
-      const filePath = vscode.workspace.asRelativePath(editor.document.uri);
+      const filePath = vscode.workspace.asRelativePath(editor.document.uri, false);
 
       // Get line numbers (1-based for display)
       const startLine = selection.start.line + 1;
       const endLine = selection.end.line + 1;
       const lineRange = startLine === endLine ? `${startLine}` : `${startLine}-${endLine}`;
 
-      const filename = `${editor.document.fileName.split(/[\\/]/).pop() || filePath}:${lineRange}`;
+      const filename = `${filePath}:${lineRange}`;
       const contextSelection = {
         filePath: editor.document.uri.fsPath,
         filename,

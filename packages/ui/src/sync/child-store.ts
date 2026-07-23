@@ -3,6 +3,7 @@ import type { DirState, State } from "./types"
 import { INITIAL_STATE, MAX_DIR_STORES, DIR_IDLE_TTL_MS } from "./types"
 import { pickDirectoriesToEvict, canDisposeDirectory, hasPendingBlockingRequests } from "./eviction"
 import { readDirCache, persistVcs, persistProjectMeta, persistIcon } from "./persist-cache"
+import { normalizePath } from "@/lib/pathNormalization"
 
 export type DirectoryStore = State & {
   /** Apply a partial state update */
@@ -65,80 +66,88 @@ export class ChildStoreManager {
   }
 
   mark(directory: string) {
-    if (!directory) return
-    this.lifecycle.set(directory, { lastAccessAt: Date.now() })
-    this.runEviction(directory)
+    const canonicalDirectory = normalizePath(directory)
+    if (!canonicalDirectory) return
+    this.lifecycle.set(canonicalDirectory, { lastAccessAt: Date.now() })
+    this.runEviction(canonicalDirectory)
   }
 
   pin(directory: string) {
-    if (!directory) return
-    this.pins.set(directory, (this.pins.get(directory) ?? 0) + 1)
-    this.mark(directory)
+    const canonicalDirectory = normalizePath(directory)
+    if (!canonicalDirectory) return
+    this.pins.set(canonicalDirectory, (this.pins.get(canonicalDirectory) ?? 0) + 1)
+    this.mark(canonicalDirectory)
   }
 
   unpin(directory: string) {
-    if (!directory) return
-    const next = (this.pins.get(directory) ?? 0) - 1
+    const canonicalDirectory = normalizePath(directory)
+    if (!canonicalDirectory) return
+    const next = (this.pins.get(canonicalDirectory) ?? 0) - 1
     if (next > 0) {
-      this.pins.set(directory, next)
+      this.pins.set(canonicalDirectory, next)
       return
     }
-    this.pins.delete(directory)
+    this.pins.delete(canonicalDirectory)
     this.runEviction()
   }
 
   pinned(directory: string) {
-    return (this.pins.get(directory) ?? 0) > 0
+    const canonicalDirectory = normalizePath(directory)
+    return canonicalDirectory ? (this.pins.get(canonicalDirectory) ?? 0) > 0 : false
   }
 
   ensureChild(directory: string, options?: { bootstrap?: boolean }): StoreApi<DirectoryStore> {
-    if (!directory) throw new Error("No directory provided to ensureChild")
+    const canonicalDirectory = normalizePath(directory)
+    if (!canonicalDirectory) throw new Error("No directory provided to ensureChild")
 
-    let store = this.children.get(directory)
+    let store = this.children.get(canonicalDirectory)
     if (!store) {
-      store = createDirectoryStore(directory)
-      this.children.set(directory, store)
+      store = createDirectoryStore(canonicalDirectory)
+      this.children.set(canonicalDirectory, store)
       this.notifyRegistrySubscribers()
     }
 
-    this.mark(directory)
+    this.mark(canonicalDirectory)
 
     const shouldBootstrap = options?.bootstrap ?? true
     const status = store.getState().status
     if (shouldBootstrap && (status === "loading" || status === "partial")) {
-      this.onBootstrap?.(directory)
+      this.onBootstrap?.(canonicalDirectory)
     }
 
     return store
   }
 
   getChild(directory: string): StoreApi<DirectoryStore> | undefined {
-    return this.children.get(directory)
+    const canonicalDirectory = normalizePath(directory)
+    return canonicalDirectory ? this.children.get(canonicalDirectory) : undefined
   }
 
   disposeDirectory(directory: string): boolean {
+    const canonicalDirectory = normalizePath(directory)
+    if (!canonicalDirectory) return false
     if (
       !canDisposeDirectory({
-        directory,
-        hasStore: this.children.has(directory),
-        pinned: this.pinned(directory),
-        booting: this.isBooting?.(directory) ?? false,
-        loadingSessions: this.isLoadingSessions?.(directory) ?? false,
-        hasPendingBlockingRequests: this.hasPendingBlockingRequestsForDirectory(directory),
+        directory: canonicalDirectory,
+        hasStore: this.children.has(canonicalDirectory),
+        pinned: this.pinned(canonicalDirectory),
+        booting: this.isBooting?.(canonicalDirectory) ?? false,
+        loadingSessions: this.isLoadingSessions?.(canonicalDirectory) ?? false,
+        hasPendingBlockingRequests: this.hasPendingBlockingRequestsForDirectory(canonicalDirectory),
       })
     ) {
       return false
     }
 
-    this.lifecycle.delete(directory)
-    this.children.delete(directory)
+    this.lifecycle.delete(canonicalDirectory)
+    this.children.delete(canonicalDirectory)
     this.notifyRegistrySubscribers()
-    const dispose = this.disposers.get(directory)
+    const dispose = this.disposers.get(canonicalDirectory)
     if (dispose) {
       dispose()
-      this.disposers.delete(directory)
+      this.disposers.delete(canonicalDirectory)
     }
-    this.onDispose?.(directory)
+    this.onDispose?.(canonicalDirectory)
     return true
   }
 
@@ -160,12 +169,12 @@ export class ChildStoreManager {
   }
 
   hasPendingBlockingRequestsForDirectory(directory: string): boolean {
-    return hasPendingBlockingRequests(this.children.get(directory)?.getState())
+    return hasPendingBlockingRequests(this.getChild(directory)?.getState())
   }
 
   /** Apply a state mutation to a directory's store */
   update(directory: string, fn: (state: State) => Partial<State>) {
-    const store = this.children.get(directory)
+    const store = this.getChild(directory)
     if (!store) return
     const current = store.getState()
     const patch = fn(current)
@@ -174,7 +183,7 @@ export class ChildStoreManager {
 
   /** Get current state of a directory store (snapshot) */
   getState(directory: string): State | undefined {
-    return this.children.get(directory)?.getState()
+    return this.getChild(directory)?.getState()
   }
 
   disposeAll() {

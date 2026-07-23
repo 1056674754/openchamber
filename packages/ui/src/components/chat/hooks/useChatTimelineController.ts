@@ -12,6 +12,8 @@ import { deriveTimelineHistorySignals, type TurnHistorySignals } from '../lib/tu
 import { getMemoryLimits, type SessionHistoryMeta } from '@/stores/types/sessionTypes';
 import { hasRealUserMessageParts } from '@/lib/messages/real-user';
 import { isVSCodeRuntime } from '@/lib/desktop';
+import { toast } from '@/components/ui';
+import { formatSdkError } from '@/sync/sdk-error';
 
 type PendingScrollRequest = {
     sessionId: string;
@@ -19,6 +21,7 @@ type PendingScrollRequest = {
     id: string;
     behavior: ScrollBehavior;
     turnId: string | null;
+    awaitingLoad: boolean;
     resolve: (value: boolean) => void;
 };
 
@@ -29,6 +32,7 @@ interface UseChatTimelineControllerOptions {
     scrollRef: React.RefObject<HTMLDivElement | null>;
     messageListRef: React.RefObject<MessageListHandle | null>;
     loadMoreMessages: (sessionId: string, direction: 'up' | 'down') => Promise<void>;
+    loadThroughMessage: (sessionId: string, messageId: string) => Promise<boolean>;
     goToBottom: (mode?: 'instant' | 'smooth') => void;
     releaseAutoFollow: () => void;
     isPinned: boolean;
@@ -53,7 +57,7 @@ export interface UseChatTimelineControllerResult {
     scrollToMessage: (messageId: string, options?: { behavior?: ScrollBehavior }) => Promise<boolean>;
     captureViewportAnchor: () => MessageViewportAnchor | null;
     restoreViewportAnchor: (anchor: MessageViewportAnchor) => boolean;
-    cancelPendingPrependAnchor: () => void;
+    syncPendingPrependAnchorToViewport: () => void;
     handleActiveTurnChange: (turnId: string | null) => void;
 }
 
@@ -89,6 +93,7 @@ export const useChatTimelineController = ({
     scrollRef,
     messageListRef,
     loadMoreMessages,
+    loadThroughMessage,
     goToBottom,
     releaseAutoFollow,
     isPinned,
@@ -256,7 +261,11 @@ export const useChatTimelineController = ({
                 return tId ? turnIdToGroupIndexRef.current.get(tId) : undefined;
             })();
 
-        if (typeof targetGroupIndex === 'number' && targetGroupIndex >= turnStartRef.current) {
+        if (
+            typeof targetGroupIndex === 'number'
+            && targetGroupIndex >= turnStartRef.current
+            && !pending.awaitingLoad
+        ) {
             resolvePendingScrollRequest(false);
         }
     }, [messageListRef, resolvePendingScrollRequest]);
@@ -302,6 +311,21 @@ export const useChatTimelineController = ({
         return messageListRef.current?.captureViewportAnchor() ?? null;
     }, [messageListRef]);
 
+    const syncPendingPrependAnchorToViewport = React.useCallback(() => {
+        const pending = prePrependScrollRef.current;
+        const container = scrollRef.current;
+        if (!pending || !container) {
+            return;
+        }
+
+        prePrependScrollRef.current = {
+            height: container.scrollHeight,
+            top: container.scrollTop,
+            anchor: captureViewportAnchor(),
+            oldestMessageId: pending.oldestMessageId,
+        };
+    }, [captureViewportAnchor, scrollRef]);
+
     const restoreViewportAnchor = React.useCallback((anchor: MessageViewportAnchor): boolean => {
         return messageListRef.current?.restoreViewportAnchor(anchor) ?? false;
     }, [messageListRef]);
@@ -328,6 +352,7 @@ export const useChatTimelineController = ({
 
     const fetchOlderHistory = React.useCallback(async (input: {
         preserveViewport: boolean;
+        notifyFailure: boolean;
     }): Promise<boolean> => {
         if (!sessionIdRef.current || isLoadingOlderRef.current) {
             return false;
@@ -379,6 +404,13 @@ export const useChatTimelineController = ({
                 && beforeOldestMessageId !== afterOldestMessageId;
             historyAdvanced = historyGrew || afterLimit > beforeLimit;
             return historyAdvanced;
+        } catch (error) {
+            if (input.notifyFailure) {
+                toast.error('Could not load older messages', {
+                    description: formatSdkError(error),
+                });
+            }
+            return false;
         } finally {
             if (!oldestMessageAdvanced) {
                 cancelPendingPrependAnchor();
@@ -392,7 +424,10 @@ export const useChatTimelineController = ({
             releaseAutoFollow();
         }
 
-        void (await fetchOlderHistory({ preserveViewport: true }));
+        void (await fetchOlderHistory({
+            preserveViewport: true,
+            notifyFailure: options?.userInitiated === true,
+        }));
     }, [fetchOlderHistory, releaseAutoFollow]);
 
     const scrollToTurn = React.useCallback(async (
@@ -411,32 +446,61 @@ export const useChatTimelineController = ({
                 return false;
             }
 
-            const turnIndex = turnIdToGroupIndexRef.current.get(turnId);
-            if (typeof turnIndex !== 'number') {
-                return false;
-            }
-
-            const result = await new Promise<boolean>((resolve) => {
+            const targetLoaded = typeof turnIdToGroupIndexRef.current.get(turnId) === 'number';
+            const pendingResult = new Promise<boolean>((resolve) => {
                 pendingScrollRequestRef.current = {
                     sessionId: sessionIdRef.current ?? sessionId ?? '',
                     kind: 'turn',
                     id: turnId,
                     behavior: options?.behavior ?? 'auto',
                     turnId,
+                    awaitingLoad: !targetLoaded,
                     resolve,
                 };
-                attemptPendingScrollRequest();
             });
 
-            if (result) {
-                return true;
+            if (targetLoaded) {
+                attemptPendingScrollRequest();
+                return await pendingResult;
             }
 
-            return false;
+            cancelPendingPrependAnchor();
+
+            setIsLoadingOlder(true);
+            try {
+                const loaded = await loadThroughMessage(sessionIdRef.current ?? sessionId ?? '', turnId);
+                if (!loaded) {
+                    cancelPendingPrependAnchor();
+                    resolvePendingScrollRequest(false);
+                    return false;
+                }
+                const pending = pendingScrollRequestRef.current;
+                if (pending?.kind === 'turn' && pending.id === turnId) {
+                    pending.awaitingLoad = false;
+                }
+                attemptPendingScrollRequest();
+                return await pendingResult;
+            } catch (error) {
+                cancelPendingPrependAnchor();
+                resolvePendingScrollRequest(false);
+                toast.error('Could not load the selected prompt', {
+                    description: formatSdkError(error),
+                });
+                return false;
+            } finally {
+                setIsLoadingOlder(false);
+            }
         } finally {
             setPendingRevealWork(false);
         }
-    }, [attemptPendingScrollRequest, releaseAutoFollow, sessionId]);
+    }, [
+        attemptPendingScrollRequest,
+        cancelPendingPrependAnchor,
+        loadThroughMessage,
+        releaseAutoFollow,
+        resolvePendingScrollRequest,
+        sessionId,
+    ]);
 
     const scrollToMessage = React.useCallback(async (
         messageId: string,
@@ -468,6 +532,7 @@ export const useChatTimelineController = ({
                     id: messageId,
                     behavior: options?.behavior ?? 'auto',
                     turnId: turnId ?? null,
+                    awaitingLoad: false,
                     resolve,
                 };
                 attemptPendingScrollRequest();
@@ -517,7 +582,7 @@ export const useChatTimelineController = ({
         scrollToMessage,
         captureViewportAnchor,
         restoreViewportAnchor,
-        cancelPendingPrependAnchor,
+        syncPendingPrependAnchorToViewport,
         handleActiveTurnChange,
     };
 };

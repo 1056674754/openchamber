@@ -48,6 +48,8 @@ import { ProvidersSidebar } from '@/components/sections/providers/ProvidersSideb
 import { ProvidersPage } from '@/components/sections/providers/ProvidersPage';
 import { UsageSidebar } from '@/components/sections/usage/UsageSidebar';
 import { UsagePage } from '@/components/sections/usage/UsagePage';
+import { SubscriptionsSidebar } from '@/components/sections/subscriptions/SubscriptionsSidebar';
+import { SubscriptionsPage } from '@/components/sections/subscriptions/SubscriptionsPage';
 import { MagicPromptsSidebar } from '@/components/sections/magic-prompts/MagicPromptsSidebar';
 import { MagicPromptsPage } from '@/components/sections/magic-prompts/MagicPromptsPage';
 import { SnippetsSidebar } from '@/components/sections/snippets/SnippetsSidebar';
@@ -134,6 +136,7 @@ const pageOrder: SettingsPageSlug[] = [
   'config-presets',
   'providers',
   'usage',
+  'subscriptions',
   'skills.installed',
   'skills.catalog',
   'voice',
@@ -198,6 +201,8 @@ export function getSettingsNavIcon(slug: SettingsPageSlug): IconName | null {
 
     case 'usage':
       return 'bar-chart-2';
+    case 'subscriptions':
+      return 'shield-keyhole';
     case 'voice':
       return 'mic';
     case 'tunnel':
@@ -602,6 +607,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
         return t('settings.page.providers.title');
       case 'usage':
         return t('settings.page.usage.title');
+      case 'subscriptions':
+        return t('settings.page.subscriptions.title');
       case 'agents':
         return t('settings.page.agents.title');
       case 'behavior':
@@ -687,6 +694,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
         return <ProvidersSidebar onItemSelect={opts.onItemSelect} />;
       case 'usage':
         return <UsageSidebar onItemSelect={opts.onItemSelect} />;
+      case 'subscriptions':
+        return <SubscriptionsSidebar onItemSelect={opts.onItemSelect} />;
       case 'magic-prompts':
         return <MagicPromptsSidebar onItemSelect={opts.onItemSelect} />;
       case 'snippets':
@@ -739,6 +748,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
         return <ProvidersPage />;
       case 'usage':
         return <UsagePage />;
+      case 'subscriptions':
+        return <SubscriptionsPage />;
       case 'magic-prompts':
         return <MagicPromptsPage />;
       case 'snippets':

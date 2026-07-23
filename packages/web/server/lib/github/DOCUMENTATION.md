@@ -37,6 +37,7 @@
 
 ### Octokit
 
+- `createOctokit(token)`: create an Octokit client with the shared per-request timeout.
 - `getOctokitOrNull()`: current Octokit or `null`.
 
 ### Repo
@@ -111,6 +112,10 @@
 - Closed or merged PR -> stop regular polling.
 - Hidden tab -> skip polling.
 - Non-forced refreshes use a `90s` TTL.
+- Client PR-status calls share a global concurrency limit of `2`, preserving browser connections for bootstrap, diffs, and message sends.
+- Every Octokit request has an `8s` timeout; one PR-status resolution has a `12s` total budget.
+- Detected GitHub rate limits start a process-wide cooldown and reuse stale cached PR status when available.
+- Deleted worktree directories return an empty PR status before git or GitHub work starts.
 
 ## Background tracking rules
 

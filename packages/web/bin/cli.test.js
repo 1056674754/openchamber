@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
+import { spawn } from 'child_process';
 import path from 'path';
 import { pathToFileURL } from 'url';
 
 import { isModuleCliExecution, normalizeCliEntryPath } from './cli-entry.js';
-import { parseArgs } from './cli.js';
+import { isOpenchamberCmdline, isOpenchamberProcessRunning, parseArgs } from './cli.js';
 
 describe('cli args', () => {
   it('accepts legacy daemon flags as no-ops', () => {
@@ -61,4 +62,36 @@ describe('cli entry detection', () => {
 
     expect(normalizeCliEntryPath(unresolvedPath, realpath)).toBe(path.resolve(unresolvedPath));
   });
+});
+
+describe('isOpenchamberCmdline', () => {
+  it('accepts CLI and server entrypoints', () => {
+    expect(isOpenchamberCmdline('node /x/@openchamber/web/bin/cli.js serve')).toBe(true);
+    expect(isOpenchamberCmdline('bun /home/u/openchamber/packages/web/server/index.js')).toBe(true);
+  });
+
+  it('rejects unrelated processes', () => {
+    expect(isOpenchamberCmdline('node /usr/lib/node_modules/npm/bin/npm-cli.js install')).toBe(false);
+    expect(isOpenchamberCmdline('')).toBe(false);
+    expect(isOpenchamberCmdline(null)).toBe(false);
+  });
+});
+
+describe('isOpenchamberProcessRunning', () => {
+  it('returns false for a dead PID', () => {
+    expect(isOpenchamberProcessRunning(2147483646)).toBe(false);
+  });
+
+  it.runIf(process.platform === 'linux' || process.platform === 'darwin')(
+    'rejects a live process that does not belong to OpenChamber',
+    async () => {
+      const child = spawn('sleep', ['30'], { stdio: 'ignore' });
+      try {
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        expect(isOpenchamberProcessRunning(child.pid)).toBe(false);
+      } finally {
+        child.kill('SIGKILL');
+      }
+    }
+  );
 });

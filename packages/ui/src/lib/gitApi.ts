@@ -4,9 +4,11 @@ import type { RuntimeAPIs } from './api/types';
 import * as gitHttp from './gitApiHttp';
 import { opencodeClient } from './opencode/client';
 import { renderMagicPrompt } from './magicPrompts';
-import { useSessionUIStore } from '@/sync/session-ui-store';
-import { useContextStore } from '@/stores/contextStore';
+import { materializeOpenDraftSession, useSessionUIStore } from '@/sync/session-ui-store';
+import { useSelectionStore } from '@/sync/selection-store';
+import { resolveSdkForDirectory } from '@/sync/session-routing';
 import { useConfigStore } from '@/stores/useConfigStore';
+import { serverRegistry } from '@/lib/opencode/server-registry';
 
 export type {
   GitStatus,
@@ -187,11 +189,7 @@ export async function generateCommitMessage(
 ): Promise<{ message: import('./api/types').GeneratedCommitMessage }> {
   const startedAt = Date.now();
   void options;
-  const generationSession = resolveSessionGenerationContext();
-
-  if (!generationSession) {
-    throw new Error('Select existing session for generation');
-  }
+  const generationSession = await resolveGenerationSessionContext(directory);
 
   console.info('[git-generation][browser] request', {
     transport: 'session',
@@ -253,10 +251,7 @@ export async function generatePullRequestDescription(
   payload: { base: string; head: string; context?: string; zenModel?: string; providerId?: string; modelId?: string }
 ): Promise<import('./api/types').GeneratedPullRequestDescription> {
   const startedAt = Date.now();
-  const generationSession = resolveSessionGenerationContext();
-  if (!generationSession) {
-    throw new Error('Select existing session for generation');
-  }
+  const generationSession = await resolveGenerationSessionContext(directory);
 
   const commitLog = await getGitLog(directory, {
     from: payload.base,
@@ -354,21 +349,76 @@ type SessionGenerationContext = {
   providerID: string;
   modelID: string;
   agent?: string;
+  variant?: string;
+  serverId?: string;
 };
 
-const resolveSessionGenerationContext = (): SessionGenerationContext | null => {
-  const sessionId = useSessionUIStore.getState().currentSessionId;
+const resolveGenerationSessionContext = async (directory: string): Promise<SessionGenerationContext> => {
+  const activeSession = resolveSessionGenerationContext(directory);
+  if (activeSession) return activeSession;
+  if (useSessionUIStore.getState().currentSessionId) {
+    throw new Error('The active session belongs to a different project directory');
+  }
+
+  const draft = useSessionUIStore.getState().newSessionDraft;
+  if (!draft.open) {
+    throw new Error('Select existing session for generation');
+  }
+
+  const config = useConfigStore.getState();
+  if (!config.currentProviderId || !config.currentModelId) {
+    throw new Error('Select a provider and model before generating');
+  }
+
+  const created = await materializeOpenDraftSession({
+    providerID: config.currentProviderId,
+    modelID: config.currentModelId,
+    agent: config.currentAgentName || undefined,
+    variant: config.currentVariant || undefined,
+    expectedDirectory: directory,
+  });
+  if (!created) {
+    throw new Error('Failed to create session for generation');
+  }
+
+  return {
+    sessionId: created.sessionId,
+    providerID: config.currentProviderId,
+    modelID: config.currentModelId,
+    agent: created.agent,
+    variant: config.currentVariant || undefined,
+    serverId: created.serverId,
+  };
+};
+
+const normalizeGenerationDirectory = (value: string | null | undefined): string | null => {
+  if (typeof value !== 'string' || value.trim().length === 0) return null;
+  const normalized = value.trim().replace(/\\/g, '/').replace(/\/+$/, '');
+  return normalized || '/';
+};
+
+const resolveSessionGenerationContext = (expectedDirectory: string): SessionGenerationContext | null => {
+  const sessionState = useSessionUIStore.getState();
+  const sessionId = sessionState.currentSessionId;
   if (!sessionId) {
     return null;
   }
+  const sessionDirectory = normalizeGenerationDirectory(sessionState.getDirectoryForSession(sessionId));
+  if (!sessionDirectory || sessionDirectory !== normalizeGenerationDirectory(expectedDirectory)) {
+    return null;
+  }
 
-  const context = useContextStore.getState();
+  const selection = useSelectionStore.getState();
   const config = useConfigStore.getState();
+  const lastChoice = useSessionUIStore.getState().getLastUserChoice(sessionId);
 
-  const agent = context.getSessionAgentSelection(sessionId) || config.currentAgentName || undefined;
-  const sessionModel = context.getSessionModelSelection(sessionId);
-  const agentModel = agent ? context.getAgentModelForSession(sessionId, agent) : null;
-  const selectedModel = agentModel || sessionModel || (config.currentProviderId && config.currentModelId
+  const agent = lastChoice?.agent || selection.getSessionAgentSelection(sessionId) || config.currentAgentName || undefined;
+  const sessionModel = selection.getSessionModelSelection(sessionId);
+  const agentModel = agent ? selection.getAgentModelForSession(sessionId, agent) : null;
+  const lastChoiceModel = lastChoice?.providerID && lastChoice.modelID
+    ? { providerId: lastChoice.providerID, modelId: lastChoice.modelID }
+    : null;
+  const selectedModel = lastChoiceModel || agentModel || sessionModel || (config.currentProviderId && config.currentModelId
     ? { providerId: config.currentProviderId, modelId: config.currentModelId }
     : null);
 
@@ -376,11 +426,20 @@ const resolveSessionGenerationContext = (): SessionGenerationContext | null => {
     return null;
   }
 
+  const selectionVariant = agent
+    ? selection.getAgentModelVariantForSession(sessionId, agent, selectedModel.providerId, selectedModel.modelId)
+    : undefined;
+  const configVariant = config.currentProviderId === selectedModel.providerId && config.currentModelId === selectedModel.modelId
+    ? config.currentVariant
+    : undefined;
+
   return {
     sessionId,
     providerID: selectedModel.providerId,
     modelID: selectedModel.modelId,
     agent,
+    variant: lastChoiceModel ? lastChoice?.variant : (selectionVariant || configVariant || undefined),
+    serverId: serverRegistry.getServerForSession(sessionId) ?? undefined,
   };
 };
 
@@ -426,17 +485,22 @@ const runStructuredGenerationInActiveSession = async ({
 
   requestChatForceScrollBottom(generationSession.sessionId);
 
-  const response = await opencodeClient.withDirectory(directory, async () => {
-    return opencodeClient.getApiClient().session.prompt({
-      sessionID: generationSession.sessionId,
-      ...(trimmedDirectory.length > 0 ? { directory: trimmedDirectory } : {}),
-      model: {
-        providerID: generationSession.providerID,
-        modelID: generationSession.modelID,
-      },
-      ...(generationSession.agent ? { agent: generationSession.agent } : {}),
-      parts: promptParts,
-    });
+  const sdkClient = resolveSdkForDirectory(
+    directory,
+    generationSession.sessionId,
+    generationSession.serverId,
+    opencodeClient.getApiClient(),
+  );
+  const response = await sdkClient.session.prompt({
+    sessionID: generationSession.sessionId,
+    ...(trimmedDirectory.length > 0 ? { directory: trimmedDirectory } : {}),
+    model: {
+      providerID: generationSession.providerID,
+      modelID: generationSession.modelID,
+    },
+    ...(generationSession.agent ? { agent: generationSession.agent } : {}),
+    ...(generationSession.variant ? { variant: generationSession.variant } : {}),
+    parts: promptParts,
   });
 
   const responseError = response?.error as { message?: string } | undefined;

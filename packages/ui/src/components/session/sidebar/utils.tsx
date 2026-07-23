@@ -3,6 +3,9 @@ import type { Session, SessionStatus } from '@opencode-ai/sdk/v2';
 import type { SessionSummaryMeta } from './types';
 import type { SessionSortMode } from '@/stores/useUIStore';
 import { DEFAULT_SERVER_ID } from '@/lib/opencode/server-registry';
+import { normalizePath } from '@/lib/pathNormalization';
+
+export { normalizePath };
 
 const formatDateLabel = (value: string | number) => {
   const targetDate = new Date(value);
@@ -73,14 +76,6 @@ export const formatSessionCompactDateLabel = (updatedMs: number): string => {
     return `${Math.floor(diff / month)}mo`;
   }
   return `${Math.floor(diff / year)}y`;
-};
-
-export const normalizePath = (value?: string | null) => {
-  if (!value) {
-    return null;
-  }
-  const normalized = value.replace(/\\/g, '/').replace(/\/+$/, '');
-  return normalized.length === 0 ? '/' : normalized;
 };
 
 export const isPathWithinProject = (directory?: string | null, projectPath?: string | null): boolean => {

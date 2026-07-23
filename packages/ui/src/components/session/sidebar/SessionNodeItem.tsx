@@ -19,7 +19,7 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { buildExportFilename, downloadAsMarkdown, formatSessionAsMarkdown, getExportRevealLabelKey, revealExportedMarkdown, saveAsMarkdownDesktop } from '@/lib/exportSession';
 import type { ChildSessionExport } from '@/lib/exportSession';
-import { buildSessionMessageRecordsSnapshot, useAllSessionStatuses, useChildStoreManager, useGlobalSessionStatus, useSession, useSessionPermissions, useSessionQuestions } from '@/sync/sync-context';
+import { buildSessionMessageRecordsSnapshot, useAllSessionStatuses, useChildStoreManager, useExistingSessionPermissions, useExistingSessionQuestions, useGlobalSessionStatus, useSession } from '@/sync/sync-context';
 import { useSync } from '@/sync/use-sync';
 import { getSyncStoresForServer } from '@/sync/multi-server-registry';
 import { useViewportStore } from '@/sync/viewport-store';
@@ -569,8 +569,8 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
     React.useCallback((state) => Boolean(state.sessionMemoryState.get(session.id)?.isZombie), [session.id]),
   );
   const sessionStatus = useGlobalSessionStatus(session.id);
-  const sessionPermissions = useSessionPermissions(session.id, permissionDirectory);
-  const sessionQuestions = useSessionQuestions(session.id, permissionDirectory);
+  const sessionPermissions = useExistingSessionPermissions(session.id, permissionDirectory);
+  const sessionQuestions = useExistingSessionQuestions(session.id, permissionDirectory);
   const directoryState = sessionDirectory ? directoryStatus.get(sessionDirectory) : null;
   const isMissingDirectory = directoryState === 'missing';
   const isActive = currentSessionId === session.id;
@@ -803,6 +803,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
           e.preventDefault(); e.stopPropagation(); toggleParent(expansionKey);
         }
       }}
+      style={{ minWidth: 14, minHeight: 14 }}
       className={cn(
         mode === 'overlay'
           ? 'absolute inset-0 inline-flex h-4 w-3.5 items-center justify-center rounded-md text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 opacity-0 group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto'

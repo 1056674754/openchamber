@@ -1,5 +1,6 @@
 import type { MainTab } from '@/stores/useUIStore';
 import { ROUTE_PARAMS } from './types';
+import { isEmbeddedSessionChat } from '@/components/layout/contextPanelEmbeddedChat';
 
 /**
  * Application state relevant for URL serialization.
@@ -111,7 +112,7 @@ export function updateBrowserURL(
   }
 
   // Skip URL updates in VS Code webview
-  if (isVSCodeContext()) {
+  if (isVSCodeContext() || isEmbeddedSessionChat()) {
     return;
   }
 

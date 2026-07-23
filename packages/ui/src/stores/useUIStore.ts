@@ -1,7 +1,7 @@
 import { create } from 'zustand';
-import { devtools, persist, createJSONStorage } from 'zustand/middleware';
+import { devtools, persist } from 'zustand/middleware';
 import type { SidebarSection } from '@/constants/sidebar';
-import { getSafeStorage } from './utils/safeStorage';
+import { createDeferredSafeJSONStorage } from './utils/safeStorage';
 import { SEMANTIC_TYPOGRAPHY, getTypographyVariable, type SemanticTypographyKey } from '@/lib/typography';
 import type { ShortcutCombo } from '@/lib/shortcuts';
 import type { DraftStarterRef } from '@/lib/draftStarters';
@@ -599,8 +599,9 @@ interface UIStore {
    messageLimit: number;
    fontSize: number;
    // Global draft welcome starters; null = unset (use the default built-in set).
-   globalDraftStarters: DraftStarterRef[] | null;
+  globalDraftStarters: DraftStarterRef[] | null;
   terminalFontSize: number;
+  editorFontSize: number;
   uiFont: UiFontOption;
   monoFont: MonoFontOption;
   padding: number;
@@ -621,10 +622,12 @@ interface UIStore {
   diffViewMode: 'single' | 'stacked';
   gitChangesViewMode: 'flat' | 'tree';
   isTimelineDialogOpen: boolean;
+  isPromptNavigatorPanelOpen: boolean;
   isImagePreviewOpen: boolean;
   nativeNotificationsEnabled: boolean;
   notificationMode: 'always' | 'hidden-only';
   notifyOnSubtasks: boolean;
+  dockBadgeEnabled: boolean;
   doubleClickRenameSession: boolean;
 
   // Event toggles (which events trigger notifications)
@@ -662,7 +665,9 @@ interface UIStore {
   userMessageRenderingMode: UserMessageRenderingMode;
   collapsibleUserMessages: boolean;
   stickyUserHeader: boolean;
+  promptNavigatorEnabled: boolean;
   showSplitAssistantMessageActions: boolean;
+  allowPromptingSubagentSessions: boolean;
   showMobileSessionStatusBar: boolean;
   isMobileSessionStatusBarCollapsed: boolean;
   isExpandedInput: boolean;
@@ -742,8 +747,9 @@ interface UIStore {
   setAutoDeleteLastRunAt: (timestamp: number | null) => void;
    setMessageLimit: (value: number) => void;
    setFontSize: (size: number) => void;
-   setGlobalDraftStarters: (refs: DraftStarterRef[]) => void;
+  setGlobalDraftStarters: (refs: DraftStarterRef[]) => void;
   setTerminalFontSize: (size: number) => void;
+  setEditorFontSize: (size: number) => void;
   setUiFont: (font: UiFontOption) => void;
   setMonoFont: (font: MonoFontOption) => void;
   setPadding: (size: number) => void;
@@ -776,11 +782,14 @@ interface UIStore {
   setGitChangesViewMode: (mode: 'flat' | 'tree') => void;
   setMultiRunLauncherOpen: (open: boolean) => void;
   setTimelineDialogOpen: (open: boolean) => void;
+  setPromptNavigatorPanelOpen: (open: boolean) => void;
+  togglePromptNavigatorPanel: () => void;
   setImagePreviewOpen: (open: boolean) => void;
   setNativeNotificationsEnabled: (value: boolean) => void;
   setNotificationMode: (mode: 'always' | 'hidden-only') => void;
   setShowTerminalQuickKeysOnDesktop: (value: boolean) => void;
   setNotifyOnSubtasks: (value: boolean) => void;
+  setDockBadgeEnabled: (value: boolean) => void;
   setDoubleClickRenameSession: (value: boolean) => void;
   setNotifyOnCompletion: (value: boolean) => void;
   setNotifyOnError: (value: boolean) => void;
@@ -805,7 +814,9 @@ interface UIStore {
   setUserMessageRenderingMode: (value: UserMessageRenderingMode) => void;
   setCollapsibleUserMessages: (value: boolean) => void;
   setStickyUserHeader: (value: boolean) => void;
+  setPromptNavigatorEnabled: (value: boolean) => void;
   setShowSplitAssistantMessageActions: (value: boolean) => void;
+  setAllowPromptingSubagentSessions: (value: boolean) => void;
   setShowMobileSessionStatusBar: (value: boolean) => void;
   setIsMobileSessionStatusBarCollapsed: (value: boolean) => void;
   viewPagerPage: 'left' | 'center' | 'right';
@@ -884,8 +895,9 @@ export const useUIStore = create<UIStore>()(
         autoDeleteLastRunAt: null,
          messageLimit: 200,
          fontSize: 100,
-         globalDraftStarters: null,
+        globalDraftStarters: null,
         terminalFontSize: 13,
+        editorFontSize: 13,
         uiFont: DEFAULT_UI_FONT,
         monoFont: DEFAULT_MONO_FONT,
         padding: 100,
@@ -904,10 +916,12 @@ export const useUIStore = create<UIStore>()(
         diffViewMode: 'stacked',
         gitChangesViewMode: 'flat',
         isTimelineDialogOpen: false,
+        isPromptNavigatorPanelOpen: false,
         isImagePreviewOpen: false,
         nativeNotificationsEnabled: false,
         notificationMode: 'hidden-only',
         notifyOnSubtasks: true,
+        dockBadgeEnabled: true,
         doubleClickRenameSession: false,
 
         // Event toggles (which events trigger notifications)
@@ -943,7 +957,9 @@ export const useUIStore = create<UIStore>()(
         userMessageRenderingMode: 'markdown',
         collapsibleUserMessages: true,
         stickyUserHeader: false,
+        promptNavigatorEnabled: true,
         showSplitAssistantMessageActions: false,
+        allowPromptingSubagentSessions: false,
         showMobileSessionStatusBar: true,
         isMobileSessionStatusBarCollapsed: false,
         isExpandedInput: false,
@@ -1630,6 +1646,12 @@ export const useUIStore = create<UIStore>()(
           set({ terminalFontSize: clamped });
         },
 
+        setEditorFontSize: (size) => {
+          const rounded = Math.round(size);
+          const clamped = Math.max(9, Math.min(32, rounded));
+          set({ editorFontSize: clamped });
+        },
+
         setUiFont: (font) => {
           set({ uiFont: font });
         },
@@ -1975,6 +1997,14 @@ export const useUIStore = create<UIStore>()(
           set({ isTimelineDialogOpen: open });
         },
 
+        setPromptNavigatorPanelOpen: (open) => {
+          set({ isPromptNavigatorPanelOpen: open });
+        },
+
+        togglePromptNavigatorPanel: () => {
+          set((state) => ({ isPromptNavigatorPanelOpen: !state.isPromptNavigatorPanelOpen }));
+        },
+
         setImagePreviewOpen: (open) => {
           set({ isImagePreviewOpen: open });
         },
@@ -1993,6 +2023,10 @@ export const useUIStore = create<UIStore>()(
 
         setNotifyOnSubtasks: (value) => {
           set({ notifyOnSubtasks: value });
+        },
+
+        setDockBadgeEnabled: (value) => {
+          set({ dockBadgeEnabled: value });
         },
 
         setDoubleClickRenameSession: (value) => {
@@ -2054,8 +2088,14 @@ export const useUIStore = create<UIStore>()(
         setStickyUserHeader: (value) => {
           set({ stickyUserHeader: value });
         },
+        setPromptNavigatorEnabled: (value) => {
+          set({ promptNavigatorEnabled: value });
+        },
         setShowSplitAssistantMessageActions: (value) => {
           set({ showSplitAssistantMessageActions: value });
+        },
+        setAllowPromptingSubagentSessions: (value) => {
+          set({ allowPromptingSubagentSessions: value });
         },
         setShowMobileSessionStatusBar: (value) => {
           set({ showMobileSessionStatusBar: value });
@@ -2116,7 +2156,7 @@ export const useUIStore = create<UIStore>()(
       }),
       {
         name: 'ui-store',
-        storage: createJSONStorage(() => getSafeStorage()),
+        storage: createDeferredSafeJSONStorage(),
         version: 10,
         migrate: (persistedState, version) => {
           if (!persistedState || typeof persistedState !== 'object') {
@@ -2249,6 +2289,7 @@ export const useUIStore = create<UIStore>()(
           fontSize: state.fontSize,
           globalDraftStarters: state.globalDraftStarters,
           terminalFontSize: state.terminalFontSize,
+          editorFontSize: state.editorFontSize,
           uiFont: state.uiFont,
           monoFont: state.monoFont,
           padding: state.padding,
@@ -2267,6 +2308,7 @@ export const useUIStore = create<UIStore>()(
           notificationMode: state.notificationMode,
           showTerminalQuickKeysOnDesktop: state.showTerminalQuickKeysOnDesktop,
           notifyOnSubtasks: state.notifyOnSubtasks,
+          dockBadgeEnabled: state.dockBadgeEnabled,
           doubleClickRenameSession: state.doubleClickRenameSession,
           notifyOnCompletion: state.notifyOnCompletion,
           notifyOnError: state.notifyOnError,
@@ -2291,7 +2333,9 @@ export const useUIStore = create<UIStore>()(
           userMessageRenderingMode: state.userMessageRenderingMode,
           collapsibleUserMessages: state.collapsibleUserMessages,
           stickyUserHeader: state.stickyUserHeader,
+          promptNavigatorEnabled: state.promptNavigatorEnabled,
           showSplitAssistantMessageActions: state.showSplitAssistantMessageActions,
+          allowPromptingSubagentSessions: state.allowPromptingSubagentSessions,
           showMobileSessionStatusBar: state.showMobileSessionStatusBar,
           isMobileSessionStatusBarCollapsed: state.isMobileSessionStatusBarCollapsed,
           shortcutOverrides: state.shortcutOverrides,

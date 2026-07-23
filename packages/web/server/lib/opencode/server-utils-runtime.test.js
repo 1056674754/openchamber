@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createServerUtilsRuntime } from './server-utils-runtime.js';
 
@@ -49,6 +49,40 @@ const createRuntime = (loginShellPath, processLike = { platform: 'linux', env: p
 });
 
 describe('server utils runtime', () => {
+  it('normalizes the object-shaped OpenCode provider response', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(async () => new Response(JSON.stringify({
+      all: [{ id: 'anthropic' }],
+      connected: ['anthropic'],
+    }), { status: 200 }));
+    try {
+      const runtime = createServerUtilsRuntime({
+        fs,
+        os,
+        path,
+        process: { platform: 'linux', env: process.env },
+        openCodeReadyGraceMs: 0,
+        longRequestTimeoutMs: 0,
+        getRuntime: () => ({}),
+        getOpenCodeAuthHeaders: () => ({ Authorization: 'Basic hidden' }),
+        buildOpenCodeUrl: (route) => `http://opencode.test${route}`,
+        ensureOpenCodeApiPrefix: () => {},
+        getUiNotificationClients: () => new Set(),
+        getOpenCodePort: () => 4096,
+        setOpenCodePortState: () => {},
+        syncToHmrState: () => {},
+        markOpenCodeNotReady: () => {},
+        setOpenCodeNotReadySince: () => {},
+        clearLastOpenCodeError: () => {},
+        getLoginShellPath: () => null,
+      });
+
+      await expect(runtime.fetchProvidersSnapshot()).resolves.toEqual([{ id: 'anthropic' }]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it('prefers shell PATH for managed OpenCode before appending process-only entries', () => {
     const home = os.homedir();
     const currentPath = [

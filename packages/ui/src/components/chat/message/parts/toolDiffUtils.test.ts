@@ -69,6 +69,40 @@ describe('toolDiffUtils', () => {
         expect(getRenderablePatchInfo(entries[0]?.patch ?? '')).not.toBeNull();
     });
 
+    test('normalizes loose unified headers, body lines, and hunk counts', () => {
+        const entries = getDiffPatchEntries(undefined, [
+            ' --- a\\src\\file.ts',
+            ' +++ b\\src\\file.ts',
+            '@@ -10,99 +10,99 @@ section',
+            'unchanged',
+            '-old',
+            '+new',
+            '',
+            'tail',
+        ].join('\n'), identity);
+
+        expect(entries).toHaveLength(1);
+        expect(entries[0]?.renderMode).toBe('diff');
+        expect(entries[0]?.title).toBe('src/file.ts');
+        expect(entries[0]?.patch).toContain('--- a/src/file.ts');
+        expect(entries[0]?.patch).toContain('@@ -10,4 +10,4 @@ section');
+        expect(entries[0]?.patch).toContain('\n unchanged\n');
+        expect(entries[0]?.patch).toContain('\n \n tail');
+    });
+
+    test('keeps dev-null headers intact while normalizing loose added files', () => {
+        const info = getRenderablePatchInfo([
+            '--- /dev/null',
+            '+++ src\\new.ts',
+            '@@ -0,0 +1,9 @@',
+            '+export const value = 1;',
+        ].join('\n'));
+
+        expect(info).not.toBeNull();
+        expect(info?.title).toBe('src/new.ts');
+        expect(info?.patch).toContain('@@ -0,0 +1 @@');
+    });
+
     test('keeps malformed unified patches as text fallbacks', () => {
         const entries = getDiffPatchEntries(undefined, [
             '--- a/src/file.ts',

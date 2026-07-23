@@ -15,6 +15,7 @@
 import type { Event, OpencodeClient, SessionStatus } from "@opencode-ai/sdk/v2/client"
 import { useSessionMarkersStore, normalizeSessionMarkers } from "@/stores/useSessionMarkersStore"
 import { syncDebug } from "./debug"
+import { applyBoundedRetryJitter } from "./retry"
 
 export type QueuedEvent = {
   directory: string
@@ -463,6 +464,12 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
     return undefined
   }
 
+  const extractRetryAfterMs = (error: unknown): number | undefined => {
+    if (!error || typeof error !== "object") return undefined
+    const value = (error as { retryAfterMs?: unknown }).retryAfterMs
+    return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined
+  }
+
   const isPermanentHttpStatus = (status: number): boolean => {
     if (status < 400 || status >= 500) return false
     if (status === 408 || status === 429) return false
@@ -509,12 +516,14 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
     abort.signal.addEventListener("abort", onInterrupt, { once: true })
   })
 
-  const computeRetryDelay = (failures: number): number => {
+  const computeRetryDelay = (failures: number, error?: unknown): number => {
     if (failures <= 0) return 0
     if (isOffline()) return RETRY_BACKOFF_CAP_HIDDEN_OR_OFFLINE_MS
     const cap = isHidden() ? RETRY_BACKOFF_CAP_HIDDEN_OR_OFFLINE_MS : RETRY_BACKOFF_CAP_VISIBLE_MS
     const exponent = Math.min(failures - 1, RETRY_BACKOFF_MAX_EXPONENT)
-    return Math.min(cap, RETRY_BACKOFF_BASE_MS * 2 ** exponent)
+    const exponentialDelay = Math.min(cap, RETRY_BACKOFF_BASE_MS * 2 ** exponent)
+    const retryAfterMs = extractRetryAfterMs(error) ?? 0
+    return applyBoundedRetryJitter(Math.max(exponentialDelay, Math.min(cap, retryAfterMs)), cap)
   }
 
   let streamErrorLogged = false
@@ -867,7 +876,7 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
           if (status !== undefined && isPermanentHttpStatus(status)) {
             retryDelayMs = RETRY_BACKOFF_CAP_HIDDEN_OR_OFFLINE_MS
           } else {
-            retryDelayMs = computeRetryDelay(consecutiveFailures)
+            retryDelayMs = computeRetryDelay(consecutiveFailures, error)
           }
         }
       } finally {

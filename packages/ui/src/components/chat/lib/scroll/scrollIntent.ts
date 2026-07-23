@@ -111,8 +111,10 @@ export const isNearTop = (scrollTop: number, threshold: number): boolean => {
     return scrollTop <= threshold;
 };
 
-const OLDER_HISTORY_PREFETCH_MIN_PX = 2400;
-const OLDER_HISTORY_PREFETCH_VIEWPORT_RATIO = 3;
+const OLDER_HISTORY_PREFETCH_MIN_PX = 640;
+const OLDER_HISTORY_PREFETCH_VIEWPORT_RATIO = 1;
+const MESSAGE_LIST_DESKTOP_OVERSCAN = 6;
+const MESSAGE_LIST_MOBILE_OVERSCAN = 12;
 
 export const getOlderHistoryPrefetchThreshold = (clientHeight: number): number => {
     return Math.max(OLDER_HISTORY_PREFETCH_MIN_PX, clientHeight * OLDER_HISTORY_PREFETCH_VIEWPORT_RATIO);
@@ -123,6 +125,10 @@ export const shouldPrefetchOlderHistory = (input: {
     readonly clientHeight: number;
 }): boolean => {
     return isNearTop(input.scrollTop, getOlderHistoryPrefetchThreshold(input.clientHeight));
+};
+
+export const getMessageListOverscan = (isMobileSurface: boolean): number => {
+    return isMobileSurface ? MESSAGE_LIST_MOBILE_OVERSCAN : MESSAGE_LIST_DESKTOP_OVERSCAN;
 };
 
 export const shouldStartOlderHistoryPrefetch = (input: {
@@ -142,6 +148,41 @@ export const isNearBottom = (distanceFromBottom: number, threshold: number): boo
     return distanceFromBottom <= threshold;
 };
 
+export const isMatchingAutoScrollPosition = (input: {
+    readonly currentTop: number;
+    readonly markedTop: number;
+    readonly markedAt: number;
+    readonly currentTime: number;
+    readonly ttl: number;
+    readonly tolerance: number;
+}): boolean => {
+    return input.currentTime - input.markedAt <= input.ttl
+        && Math.abs(input.currentTop - input.markedTop) < input.tolerance;
+};
+
+export const shouldApplyPassiveAutoFollow = (input: {
+    readonly state: 'following' | 'released';
+    readonly sessionIsWorking: boolean;
+    readonly settling: boolean;
+    readonly processFoldTransitionActive: boolean;
+}): boolean => {
+    return input.state === 'following'
+        && (input.sessionIsWorking || input.settling)
+        && !input.processFoldTransitionActive;
+};
+
+export const shouldPinFollowedViewportOnWorkingChange = (input: {
+    readonly state: 'following' | 'released';
+    readonly sameSession: boolean;
+    readonly wasWorking: boolean;
+    readonly sessionIsWorking: boolean;
+}): boolean => {
+    return input.sameSession
+        && input.state === 'following'
+        && input.wasWorking
+        && !input.sessionIsWorking;
+};
+
 export const shouldCompensateVirtualItemResize = (input: {
     isScrolling: boolean;
     scrollInteractionActive: boolean;
@@ -154,10 +195,9 @@ export const shouldCompensateVirtualItemResize = (input: {
         input.isScrolling
         || input.scrollInteractionActive
         || input.processFoldTransitionActive
-        || input.isAtEnd
     ) {
         return false;
     }
 
-    return input.firstVisibleIndex !== undefined && input.itemIndex < input.firstVisibleIndex;
+    return input.isAtEnd;
 };

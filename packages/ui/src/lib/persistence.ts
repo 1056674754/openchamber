@@ -167,6 +167,44 @@ const sanitizeSkillCatalogs = (value: unknown): DesktopSettings['skillCatalogs']
   return result;
 };
 
+const areModelRefsEqual = (
+  left: Array<{ providerID: string; modelID: string }>,
+  right: Array<{ providerID: string; modelID: string }>,
+): boolean => (
+  left.length === right.length
+  && left.every((item, index) => item.providerID === right[index]?.providerID && item.modelID === right[index]?.modelID)
+);
+
+const areStringArraysEqual = (left: string[], right: string[]): boolean => (
+  left.length === right.length && left.every((value, index) => value === right[index])
+);
+
+const sanitizeStringArray = (value: unknown): string[] | undefined => {
+  if (!Array.isArray(value)) return undefined;
+  return Array.from(new Set(
+    value.filter((entry): entry is string => typeof entry === 'string' && entry.length > 0),
+  ));
+};
+
+const sanitizeRecentEfforts = (value: unknown): Record<string, string[]> | undefined => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const result: Record<string, string[]> = {};
+  for (const [key, variants] of Object.entries(value)) {
+    if (!key || !Array.isArray(variants)) continue;
+    const sanitized = sanitizeStringArray(variants);
+    if (sanitized && sanitized.length > 0) {
+      result[key] = sanitized.slice(0, 5);
+    }
+  }
+  return result;
+};
+
+const areRecentEffortsEqual = (left: Record<string, string[]>, right: Record<string, string[]>): boolean => {
+  const keys = Object.keys(left);
+  return keys.length === Object.keys(right).length
+    && keys.every((key) => Array.isArray(right[key]) && areStringArraysEqual(left[key], right[key]));
+};
+
 const HEX_COLOR_PATTERN = /^#(?:[\da-fA-F]{3}|[\da-fA-F]{6})$/;
 
 const normalizeIconBackground = (value: unknown): string | null => {
@@ -402,6 +440,9 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
   if (typeof settings.notifyOnSubtasks === 'boolean' && settings.notifyOnSubtasks !== store.notifyOnSubtasks) {
     store.setNotifyOnSubtasks(settings.notifyOnSubtasks);
   }
+  if (typeof settings.dockBadgeEnabled === 'boolean' && settings.dockBadgeEnabled !== store.dockBadgeEnabled) {
+    store.setDockBadgeEnabled(settings.dockBadgeEnabled);
+  }
   if (typeof settings.notifyOnCompletion === 'boolean' && settings.notifyOnCompletion !== store.notifyOnCompletion) {
     store.setNotifyOnCompletion(settings.notifyOnCompletion);
   }
@@ -509,6 +550,9 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
   if (typeof settings.stickyUserHeader === 'boolean' && settings.stickyUserHeader !== store.stickyUserHeader) {
     store.setStickyUserHeader(settings.stickyUserHeader);
   }
+  if (typeof settings.promptNavigatorEnabled === 'boolean' && settings.promptNavigatorEnabled !== store.promptNavigatorEnabled) {
+    store.setPromptNavigatorEnabled(settings.promptNavigatorEnabled);
+  }
   if (typeof settings.wideChatLayoutEnabled === 'boolean' && settings.wideChatLayoutEnabled !== store.wideChatLayoutEnabled) {
     store.setWideChatLayoutEnabled(settings.wideChatLayoutEnabled);
   }
@@ -517,6 +561,12 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
     && settings.showSplitAssistantMessageActions !== store.showSplitAssistantMessageActions
   ) {
     store.setShowSplitAssistantMessageActions(settings.showSplitAssistantMessageActions);
+  }
+  if (
+    typeof settings.allowPromptingSubagentSessions === 'boolean'
+    && settings.allowPromptingSubagentSessions !== store.allowPromptingSubagentSessions
+  ) {
+    store.setAllowPromptingSubagentSessions(settings.allowPromptingSubagentSessions);
   }
   if (typeof settings.reportUsage === 'boolean' && settings.reportUsage !== store.reportUsage) {
     store.setReportUsage(settings.reportUsage);
@@ -535,6 +585,9 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
   }
   if (typeof settings.terminalFontSize === 'number' && Number.isFinite(settings.terminalFontSize) && settings.terminalFontSize !== store.terminalFontSize) {
     store.setTerminalFontSize(settings.terminalFontSize);
+  }
+  if (typeof settings.editorFontSize === 'number' && Number.isFinite(settings.editorFontSize) && settings.editorFontSize !== store.editorFontSize) {
+    store.setEditorFontSize(settings.editorFontSize);
   }
   if (isUiFontOption(settings.uiFont) && settings.uiFont !== store.uiFont) {
     store.setUiFont(settings.uiFont);
@@ -588,23 +641,33 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
   if (Array.isArray(settings.favoriteModels)) {
     const current = store.favoriteModels;
     const next = settings.favoriteModels;
-    const same =
-      current.length === next.length &&
-      current.every((item, idx) => item.providerID === next[idx]?.providerID && item.modelID === next[idx]?.modelID);
-    if (!same) {
+    if (!areModelRefsEqual(current, next)) {
       useUIStore.setState({ favoriteModels: next });
     }
+  }
+
+  if (Array.isArray(settings.hiddenModels) && !areModelRefsEqual(store.hiddenModels, settings.hiddenModels)) {
+    useUIStore.setState({ hiddenModels: settings.hiddenModels });
+  }
+
+  if (Array.isArray(settings.collapsedModelProviders)
+    && !areStringArraysEqual(store.collapsedModelProviders, settings.collapsedModelProviders)) {
+    useUIStore.setState({ collapsedModelProviders: settings.collapsedModelProviders });
   }
 
   if (Array.isArray(settings.recentModels)) {
     const current = store.recentModels;
     const next = settings.recentModels;
-    const same =
-      current.length === next.length &&
-      current.every((item, idx) => item.providerID === next[idx]?.providerID && item.modelID === next[idx]?.modelID);
-    if (!same) {
+    if (!areModelRefsEqual(current, next)) {
       useUIStore.setState({ recentModels: next });
     }
+  }
+  if (Array.isArray(settings.recentAgents) && !areStringArraysEqual(store.recentAgents, settings.recentAgents)) {
+    useUIStore.setState({ recentAgents: settings.recentAgents });
+  }
+  if (settings.recentEfforts && typeof settings.recentEfforts === 'object'
+    && !areRecentEffortsEqual(store.recentEfforts, settings.recentEfforts)) {
+    useUIStore.setState({ recentEfforts: settings.recentEfforts });
   }
   if (typeof settings.diffLayoutPreference === 'string'
     && (settings.diffLayoutPreference === 'dynamic' || settings.diffLayoutPreference === 'inline' || settings.diffLayoutPreference === 'side-by-side')) {
@@ -791,6 +854,9 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   }
   if (typeof candidate.notifyOnSubtasks === 'boolean') {
     result.notifyOnSubtasks = candidate.notifyOnSubtasks;
+  }
+  if (typeof candidate.dockBadgeEnabled === 'boolean') {
+    result.dockBadgeEnabled = candidate.dockBadgeEnabled;
   }
   if (typeof candidate.notifyOnCompletion === 'boolean') {
     result.notifyOnCompletion = candidate.notifyOnCompletion;
@@ -1014,17 +1080,26 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   if (typeof candidate.stickyUserHeader === 'boolean') {
     result.stickyUserHeader = candidate.stickyUserHeader;
   }
+  if (typeof candidate.promptNavigatorEnabled === 'boolean') {
+    result.promptNavigatorEnabled = candidate.promptNavigatorEnabled;
+  }
   if (typeof candidate.wideChatLayoutEnabled === 'boolean') {
     result.wideChatLayoutEnabled = candidate.wideChatLayoutEnabled;
   }
   if (typeof candidate.showSplitAssistantMessageActions === 'boolean') {
     result.showSplitAssistantMessageActions = candidate.showSplitAssistantMessageActions;
   }
+  if (typeof candidate.allowPromptingSubagentSessions === 'boolean') {
+    result.allowPromptingSubagentSessions = candidate.allowPromptingSubagentSessions;
+  }
   if (typeof candidate.fontSize === 'number' && Number.isFinite(candidate.fontSize)) {
     result.fontSize = candidate.fontSize;
   }
   if (typeof candidate.terminalFontSize === 'number' && Number.isFinite(candidate.terminalFontSize)) {
     result.terminalFontSize = candidate.terminalFontSize;
+  }
+  if (typeof candidate.editorFontSize === 'number' && Number.isFinite(candidate.editorFontSize)) {
+    result.editorFontSize = candidate.editorFontSize;
   }
   if (isUiFontOption(candidate.uiFont)) {
     result.uiFont = candidate.uiFont;
@@ -1053,9 +1128,27 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
     result.favoriteModels = favoriteModels;
   }
 
+  const hiddenModels = sanitizeModelRefs(candidate.hiddenModels, 1024);
+  if (hiddenModels) {
+    result.hiddenModels = hiddenModels;
+  }
+
+  const collapsedModelProviders = sanitizeStringArray(candidate.collapsedModelProviders);
+  if (collapsedModelProviders) {
+    result.collapsedModelProviders = collapsedModelProviders;
+  }
+
   const recentModels = sanitizeModelRefs(candidate.recentModels, 16);
   if (recentModels) {
     result.recentModels = recentModels;
+  }
+  const recentAgents = sanitizeStringArray(candidate.recentAgents);
+  if (recentAgents) {
+    result.recentAgents = recentAgents;
+  }
+  const recentEfforts = sanitizeRecentEfforts(candidate.recentEfforts);
+  if (recentEfforts) {
+    result.recentEfforts = recentEfforts;
   }
   if (
     typeof candidate.diffLayoutPreference === 'string'

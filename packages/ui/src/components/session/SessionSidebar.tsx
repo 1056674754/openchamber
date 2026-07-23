@@ -7,11 +7,12 @@ import { isDesktopShell } from '@/lib/desktop';
 import { sessionEvents } from '@/lib/sessionEvents';
 import { formatDirectoryName, cn } from '@/lib/utils';
 import { useSessionUIStore } from '@/sync/session-ui-store';
-import { useDesktopDockUnreadBadge } from '@/sync/desktop-dock-badge';
+import { countDockBadgeChats, useDesktopDockUnreadBadge } from '@/sync/desktop-dock-badge';
 import { useNotificationStore } from '@/sync/notification-store';
 import { useAllServersLiveSessions, useAllServersSessionStatuses } from '@/sync/multi-server-hooks';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useSync } from '@/sync/use-sync';
+import { useSessionMessagesRenderable } from '@/sync/sync-context';
 import { useSessionPrefetch } from './sidebar/hooks/useSessionPrefetch';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useUIStore } from '@/stores/useUIStore';
@@ -64,6 +65,7 @@ import {
 import { BulkActionBar } from './sidebar/BulkActionBar';
 import { useSessionMultiSelectStore } from '@/stores/useSessionMultiSelectStore';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
+import { sortProjectsByOrder } from '@/lib/projectSorting';
 import { type SessionGroup, type SessionNode } from './sidebar/types';
 import {
   deriveActiveNowSessions,
@@ -78,7 +80,7 @@ import {
   partitionSessionIdsByRunningStatus,
 } from './sidebar/utils';
 import { buildSidebarSessionPrefetchOrder } from './sidebar/prefetchOrder';
-import { mergeSessionDirectoryMetadata, refreshGlobalSessions, refreshGlobalSessionsForDirectories, resolveGlobalSessionDirectory, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
+import { mergeLiveSessionWithGlobalSession, refreshGlobalSessions, refreshGlobalSessionsForDirectories, resolveGlobalSessionDirectory, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useSessionProjectStore } from '@/stores/useSessionProjectStore';
 import { hydrateSessionProjectBindings } from '@/lib/sessionOwnership';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
@@ -284,7 +286,6 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   const addActiveNowSessionToStore = useActiveNowStore((state) => state.addSession);
   const pruneActiveNowEntriesInStore = useActiveNowStore((state) => state.prune);
   const sessionUnreadCounts = useNotificationStore((state) => state.index.session.unseenCount);
-  const [visibleDockUnreadCount, setVisibleDockUnreadCount] = React.useState(0);
   const [collapsedProjects, setCollapsedProjects] = React.useState<Set<string>>(
     () => readInitialCollapsedProjects(safeStorage, useProjectsStore.getState().projects),
   );
@@ -423,6 +424,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   const updateProjectMeta = useProjectsStore((state) => state.updateProjectMeta);
   const reorderProjectsById = useProjectsStore((state) => state.reorderProjectsById);
   const toggleProjectPin = useProjectsStore((state) => state.toggleProjectPin);
+  const projectSortOrder = useSessionDisplayStore((state) => state.projectSortOrder);
   const setActiveMainTab = useUIStore((state) => state.setActiveMainTab);
   const openContextPanelTab = useUIStore((state) => state.openContextPanelTab);
   const setSettingsDialogOpen = useUIStore((state) => state.setSettingsDialogOpen);
@@ -433,6 +435,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   const openMultiRunLauncher = useUIStore((state) => state.openMultiRunLauncher);
 const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
   const notifyOnSubtasks = useUIStore((state) => state.notifyOnSubtasks);
+  const dockBadgeEnabled = useUIStore((state) => state.dockBadgeEnabled);
   const showDeletionDialog = useUIStore((state) => state.showDeletionDialog);
   const setShowDeletionDialog = useUIStore((state) => state.setShowDeletionDialog);
   const sessionSortMode = useUIStore((state) => state.sessionSortMode);
@@ -510,7 +513,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
     const liveById = new Map(liveSessions.map((session) => [session.id, session]));
     const merged = globalActiveSessions.map((session) => {
       const liveSession = liveById.get(session.id);
-      return liveSession ? mergeSessionDirectoryMetadata(liveSession, session) : session;
+      return liveSession ? mergeLiveSessionWithGlobalSession(liveSession, session) : session;
     });
     const seenIds = new Set(merged.map((session) => session.id));
 
@@ -1220,9 +1223,11 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
   const projectSessionDirectories = React.useMemo(() => {
     const directories = new Set<string>();
     normalizedProjects.forEach((project) => {
+      if (project.serverId && project.serverId !== DEFAULT_SERVER_ID) return;
       if (project.normalizedPath) directories.add(project.normalizedPath);
       const worktrees = availableWorktreesByProject.get(project.normalizedPath) ?? [];
       worktrees.forEach((worktree) => {
+        if (worktree.serverId && worktree.serverId !== DEFAULT_SERVER_ID) return;
         const directory = normalizePath(worktree.path);
         if (directory) directories.add(directory);
       });
@@ -1319,13 +1324,18 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
     defaultCollapseArchivedFolders,
   });
 
+  const sortedProjects = React.useMemo(
+    () => sortProjectsByOrder(normalizedProjects, projectSortOrder),
+    [normalizedProjects, projectSortOrder],
+  );
+
   const {
     projectSections,
     groupSearchDataByGroup,
     sectionsForRender,
     searchMatchCount,
   } = useSessionSidebarSections({
-    normalizedProjects,
+    normalizedProjects: sortedProjects,
     getSessionsForProject,
     getArchivedSessionsForProject,
     availableWorktreesByProject,
@@ -1354,6 +1364,10 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
     sessions,
     worktreeMetadata,
   });
+  const currentSessionRenderable = useSessionMessagesRenderable(
+    currentSessionId ?? '',
+    currentSessionDirectory ?? undefined,
+  );
 
   const { getOrderedGroups } = useGroupOrdering(groupOrderByProject);
 
@@ -1634,25 +1648,17 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
     ];
   }, [activitySections, globalPinnedSection, hasSessionSearchQuery, showRecentSection]);
 
-  React.useLayoutEffect(() => {
-    const root = sessionSearchContainerRef.current;
-    const nextCount = root?.querySelectorAll('[data-session-row][data-session-unread="1"]').length ?? 0;
-    setVisibleDockUnreadCount((previous) => (previous === nextCount ? previous : nextCount));
-  }, [
+  const dockUnreadCount = React.useMemo(() => countDockBadgeChats({
+    sessions,
+    unseenCount: sessionUnreadCounts,
+    notifyOnSubtasks,
+  }), [
+    sessions,
     sessionUnreadCounts,
-    sidebarActivitySections,
-    sectionsForSidebarRender,
-    collapsedProjects,
-    collapsedGroups,
-    visibleSessionCountByGroup,
-    visibleExpandedParents,
-    collapsedFolderIds,
-    hasSessionSearchQuery,
-    showOnlyMainWorkspace,
     notifyOnSubtasks,
   ]);
 
-  useDesktopDockUnreadBadge(visibleDockUnreadCount);
+  useDesktopDockUnreadBadge(dockUnreadCount, dockBadgeEnabled);
 
   const sidebarPrefetchSessionIds = React.useMemo(() => buildSidebarSessionPrefetchOrder({
     activitySections: sidebarActivitySections,
@@ -1700,6 +1706,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
 
   useSessionPrefetch({
     currentSessionId,
+    currentSessionRenderable,
     sortedSessions,
     recentSessionIds: recentSessionIdsList,
     sidebarSessionIds: sidebarPrefetchSessionIds,
@@ -2326,6 +2333,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
         removeProject={removeProject}
         projectHeaderSentinelRefs={projectHeaderSentinelRefs}
         reorderProjectsById={reorderProjectsById}
+        projectSortOrder={projectSortOrder}
         toggleProjectPin={toggleProjectPin}
         getOrderedGroups={getOrderedGroups}
         setGroupOrderByProject={setGroupOrderByProject}

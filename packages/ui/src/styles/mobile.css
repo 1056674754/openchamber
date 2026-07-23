@@ -85,6 +85,11 @@
     min-width: 36px;
   }
 
+  .composer-mobile-actions button {
+    width: 1.5rem !important;
+    min-width: 0 !important;
+  }
+
   /* Improve input field touch targets */
   :root.mobile-pointer:not(.desktop-runtime) input,
   :root.mobile-pointer:not(.desktop-runtime) textarea,

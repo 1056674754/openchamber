@@ -901,6 +901,7 @@ const spawnLocalServer = async () => {
   process.env.OPENCHAMBER_HOST = bindHost;
   process.env.OPENCHAMBER_DIST_DIR = resolveWebDistDir();
   process.env.OPENCHAMBER_RUNTIME = 'desktop';
+  process.env.OPENCHAMBER_VERSION = APP_VERSION;
   process.env.OPENCHAMBER_OPENCODE_CWD = app.getPath('userData');
   process.env.OPENCHAMBER_DESKTOP_NOTIFY = 'true';
   const bundledOpenCodeBinary = path.join(
@@ -1192,10 +1193,6 @@ const dispatchDeepLink = (link) => {
   log.info('[electron] dispatching deep-link', { type: link.type, valueLen: link.value?.length || 0 });
   if (link.type === 'session' && link.value) {
     emitToAllWindows('openchamber:open-session', { sessionId: link.value });
-    return;
-  }
-  if (link.type === 'project' && link.value) {
-    emitToAllWindows('openchamber:open-project', { projectPath: link.value });
     return;
   }
   if (link.type === 'host' && link.value) {

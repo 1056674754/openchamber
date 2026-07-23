@@ -21,6 +21,7 @@ import { getSyncStoresForServer, subscribeSyncStoresRegistry } from '@/sync/mult
 import { useDesktopSshStore } from '@/stores/useDesktopSshStore';
 import { resolveInstanceLabel } from '@/lib/desktopSsh';
 import { getMainWorkspaceSectionForRender } from './mainWorkspaceSection';
+import type { ProjectSortOrder } from '@/stores/useSessionDisplayStore';
 
 type ProjectSection = {
   project: {
@@ -66,6 +67,7 @@ type Props = {
   removeProject: (id: string) => void;
   projectHeaderSentinelRefs: React.MutableRefObject<Map<string, HTMLDivElement | null>>;
   reorderProjectsById: (activeProjectId: string, overProjectId: string) => void;
+  projectSortOrder: ProjectSortOrder;
   toggleProjectPin: (id: string) => void;
   getOrderedGroups: (projectId: string, groups: SessionGroup[]) => SessionGroup[];
   setGroupOrderByProject: React.Dispatch<React.SetStateAction<Map<string, string[]>>>;
@@ -264,6 +266,7 @@ export function SidebarProjectsList(props: Props): React.ReactNode {
             collisionDetection={closestCenter}
             onDragEnd={(event) => {
               if (props.isInlineEditing) return;
+              if (props.projectSortOrder !== 'manual') return;
               const { active, over } = event;
               if (!over || active.id === over.id) return;
               const activeProjectId = String(active.id);
@@ -305,6 +308,7 @@ export function SidebarProjectsList(props: Props): React.ReactNode {
                   <SortableProjectItem
                     key={projectKey}
                     id={projectKey}
+                    disabled={props.projectSortOrder !== 'manual'}
                     projectLabel={projectLabel}
                     projectDescription={projectDescription}
                     projectIcon={project.icon}

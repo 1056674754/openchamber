@@ -1,12 +1,60 @@
 import { createProxyMiddleware } from 'http-proxy-middleware';
 
 import {
+  DECODED_PAYLOAD_LENGTH_HEADER,
   applyForwardProxyResponseHeaders,
   collectForwardProxyHeaders,
   preserveDecodedPayloadLengthHeader,
   shouldForwardProxyResponseHeader,
 } from '../../proxy-headers.js';
 import { createRealpathCache } from '../path-realpath-cache.js';
+
+const MAX_MESSAGE_HISTORY_DIFFS = 500;
+const MAX_MESSAGE_HISTORY_PATCH_LENGTH = 100_000;
+
+export const projectMessageHistoryPayload = (payload) => {
+  if (!Array.isArray(payload)) {
+    return payload;
+  }
+
+  return payload.map((record) => {
+    const summary = record?.info?.summary;
+    if (!summary || !Array.isArray(summary.diffs)) {
+      return record;
+    }
+
+    const diffs = summary.diffs.slice(0, MAX_MESSAGE_HISTORY_DIFFS).map((diff) => {
+      if (!diff || typeof diff !== 'object' || Array.isArray(diff)) {
+        return diff;
+      }
+
+      const { before: _before, after: _after, from: _from, to: _to, ...projected } = diff;
+      if (typeof projected.patch === 'string' && projected.patch.length > MAX_MESSAGE_HISTORY_PATCH_LENGTH) {
+        projected.patch = projected.patch.slice(0, MAX_MESSAGE_HISTORY_PATCH_LENGTH);
+      }
+      return projected;
+    });
+
+    return {
+      ...record,
+      info: {
+        ...record.info,
+        summary: {
+          ...summary,
+          diffs,
+        },
+      },
+    };
+  });
+};
+
+export const projectMessageHistoryResponseText = (bodyText) => {
+  try {
+    return JSON.stringify(projectMessageHistoryPayload(JSON.parse(bodyText)));
+  } catch {
+    return bodyText;
+  }
+};
 
 export const createDirectoryQueryCanonicalizer = ({ realpath, ...cacheOptions } = {}) => {
   const realpathCache = createRealpathCache({ fallbackOnError: true, realpath, ...cacheOptions });
@@ -459,6 +507,34 @@ export const registerOpenCodeProxy = (app, deps) => {
     } catch {
     }
     next();
+  });
+
+  app.get('/api/session/:sessionID/message', async (req, res) => {
+    try {
+      const requestUrl = typeof req.url === 'string' ? req.url : '';
+      const upstreamPath = requestUrl.startsWith('/api') ? requestUrl.slice(4) || '/' : requestUrl;
+      const headers = collectForwardProxyHeaders(req.headers, getOpenCodeAuthHeaders());
+      headers.accept ??= 'application/json';
+      headers['accept-encoding'] = 'identity';
+
+      const upstream = await fetch(buildOpenCodeUrl(upstreamPath, ''), {
+        method: 'GET',
+        headers,
+      });
+      const upstreamBody = await upstream.text();
+      const contentType = upstream.headers.get('content-type')?.toLowerCase() || '';
+      const bodyText = upstream.ok && contentType.includes('json')
+        ? projectMessageHistoryResponseText(upstreamBody)
+        : upstreamBody;
+
+      res.status(upstream.status);
+      applyForwardProxyResponseHeaders(upstream.headers, res);
+      res.setHeader(DECODED_PAYLOAD_LENGTH_HEADER, String(Buffer.byteLength(bodyText)));
+      res.send(bodyText);
+    } catch (error) {
+      console.error('[proxy] OpenCode message history proxy error:', error?.message ?? error);
+      res.status(503).json({ error: 'OpenCode service unavailable' });
+    }
   });
 
   app.use('/api', apiProxy);

@@ -35,6 +35,7 @@ export const useKeyboardShortcuts = () => {
   const setSettingsDialogOpen = useUIStore((s) => s.setSettingsDialogOpen);
   const setModelSelectorOpen = useUIStore((s) => s.setModelSelectorOpen);
   const setTimelineDialogOpen = useUIStore((s) => s.setTimelineDialogOpen);
+  const togglePromptNavigatorPanel = useUIStore((s) => s.togglePromptNavigatorPanel);
   const toggleExpandedInput = useUIStore((s) => s.toggleExpandedInput);
   const shortcutOverrides = useUIStore((s) => s.shortcutOverrides);
   const currentDirectory = useDirectoryStore((s) => s.currentDirectory);
@@ -101,6 +102,33 @@ export const useKeyboardShortcuts = () => {
       if (eventMatchesShortcut(e, combo('open_timeline_dialog'))) {
         e.preventDefault();
         setTimelineDialogOpen(true);
+        return;
+      }
+
+      if (eventMatchesShortcut(e, combo('toggle_prompt_navigator'))) {
+        const {
+          activeMainTab,
+          isAboutDialogOpen,
+          isCommandPaletteOpen,
+          isHelpDialogOpen,
+          isImagePreviewOpen,
+          isMobile: isMobileViewport,
+          isMultiRunLauncherOpen,
+          isSessionSwitcherOpen,
+          isSettingsDialogOpen,
+          promptNavigatorEnabled,
+        } = useUIStore.getState();
+        const hasOverlay = isAboutDialogOpen
+          || isCommandPaletteOpen
+          || isHelpDialogOpen
+          || isImagePreviewOpen
+          || isMultiRunLauncherOpen
+          || isSessionSwitcherOpen
+          || isSettingsDialogOpen;
+        if (!isVSCodeRuntime() && !isMobileViewport && promptNavigatorEnabled && activeMainTab === 'chat' && currentSessionId && !hasOverlay) {
+          e.preventDefault();
+          togglePromptNavigatorPanel();
+        }
         return;
       }
 
@@ -443,10 +471,18 @@ export const useKeyboardShortcuts = () => {
           isAboutDialogOpen,
           isMultiRunLauncherOpen,
           isImagePreviewOpen,
+          isPromptNavigatorPanelOpen,
           activeMainTab,
         } = useUIStore.getState();
 
         if (isInsideDialog || isInsideTerminal) {
+          resetAbortPriming();
+          return;
+        }
+
+        if (isPromptNavigatorPanelOpen) {
+          e.preventDefault();
+          useUIStore.getState().setPromptNavigatorPanelOpen(false);
           resetAbortPriming();
           return;
         }
@@ -533,6 +569,7 @@ export const useKeyboardShortcuts = () => {
     setSettingsDialogOpen,
     setModelSelectorOpen,
     setTimelineDialogOpen,
+    togglePromptNavigatorPanel,
     toggleExpandedInput,
     setThemeMode,
     working,

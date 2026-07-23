@@ -289,3 +289,15 @@ export const formatRemainingTime = (seconds: number): string => {
 export const calculateExpectedUsagePercent = (elapsedRatio: number): number => {
   return Math.min(100, Math.max(0, elapsedRatio * 100));
 };
+
+export const calculateExpectedUsageMarkerPercent = (
+  elapsedRatio: number | null,
+  displayMode: 'usage' | 'remaining',
+): number | null => {
+  if (elapsedRatio === null || !Number.isFinite(elapsedRatio)) {
+    return null;
+  }
+
+  const expectedUsed = calculateExpectedUsagePercent(elapsedRatio);
+  return displayMode === 'remaining' ? 100 - expectedUsed : expectedUsed;
+};

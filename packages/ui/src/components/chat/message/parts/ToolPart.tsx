@@ -62,6 +62,10 @@ import {
 import { useDurationTickerNow } from './useDurationTicker';
 import { resolveFallbackTaskSessionId } from './resolveFallbackTaskSessionId';
 import { readTaskTagSessionIdFromOutput } from './taskSessionIdParser';
+import {
+    readTaskSessionIdFromRecord,
+    resolveAuthoritativeTaskSessionId,
+} from './taskSessionIdentity';
 import { areRenderRelevantPartsEqual } from '../renderCompare';
 import { useI18n } from '@/lib/i18n';
 import { getDiffPatchEntries, getPatchText } from './toolDiffUtils';
@@ -70,6 +74,7 @@ import {
     recoverQuestionRequestFromToolPart,
     hasQuestionAnswer,
 } from '../../lib/questionToolRecovery';
+import { isEmbeddedSessionChat } from '@/components/layout/contextPanelEmbeddedChat';
 
 const TOOL_ROW_TEXT_CLASS = '!text-[length:var(--text-meta)] !leading-4 sm:!leading-6 tracking-normal';
 const TOOL_ROW_TITLE_CLASS = cn('typography-meta font-medium', TOOL_ROW_TEXT_CLASS);
@@ -200,7 +205,6 @@ const VSCODE_TASK_TOOL_ACTIVE_FETCH_LIMIT = 30;
 const VSCODE_TASK_TOOL_IDLE_FETCH_LIMIT = 30;
 const TASK_TOOL_NO_CHANGE_BACKOFF_AFTER_POLLS = 3;
 const TASK_TOOL_SETTLE_GRACE_MS = 2500;
-const TASK_TOOL_FALLBACK_RETRY_MS = 3000;
 const GIT_REFRESH_MUTATING_TOOLS = new Set([
     'bash',
     'edit',
@@ -1052,18 +1056,6 @@ const normalizeSessionIdCandidate = (value: unknown): string | undefined => {
     return trimmed.length > 0 ? trimmed : undefined;
 };
 
-const readTaskSessionIdFromRecord = (value: unknown): string | undefined => {
-    if (!value || typeof value !== 'object') {
-        return undefined;
-    }
-
-    const record = value as Record<string, unknown>;
-    return (
-        normalizeSessionIdCandidate(record.sessionID)
-        ?? normalizeSessionIdCandidate(record.sessionId)
-    );
-};
-
 const readTaskSessionIdFromOutput = (output: string | undefined): string | undefined => {
     if (typeof output !== 'string' || output.trim().length === 0) {
         return undefined;
@@ -1823,7 +1815,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
         }
         const targetServerId = serverRegistry.getServerForSession(linkedSubagentSessionId)
             ?? (sessionId ? serverRegistry.getServerForSession(sessionId) : undefined);
-        if (isMobile || runtime?.runtime.isVSCode) {
+        if (isEmbeddedSessionChat() || isMobile || runtime?.runtime.isVSCode) {
             setCurrentSession(
                 linkedSubagentSessionId,
                 currentDirectory,
@@ -2351,12 +2343,21 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
     const input = stateWithData.input;
     const time = stateWithData.time;
 
-    const [pinnedTime, setPinnedTime] = React.useState<{ start?: number; end?: number }>({});
+    const [pinnedTime, setPinnedTime] = React.useState<{ start?: number; end?: number }>(() => ({
+        start: typeof time?.start === 'number' ? time.start : undefined,
+        end: typeof time?.end === 'number' ? time.end : undefined,
+    }));
     const [localStartAt, setLocalStartAt] = React.useState<number | undefined>(undefined);
     const [localFinalizedAt, setLocalFinalizedAt] = React.useState<number | undefined>(undefined);
+    const serverTimeRef = React.useRef(time);
+    serverTimeRef.current = time;
 
     React.useEffect(() => {
-        setPinnedTime({});
+        const nextTime = serverTimeRef.current;
+        setPinnedTime({
+            start: typeof nextTime?.start === 'number' ? nextTime.start : undefined,
+            end: typeof nextTime?.end === 'number' ? nextTime.end : undefined,
+        });
         setLocalStartAt(undefined);
         setLocalFinalizedAt(undefined);
     }, [part.id]);
@@ -2423,10 +2424,6 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
         return parseTaskMetadataBlock(taskOutputString);
     }, [taskOutputString]);
 
-    // Track whether fallback session resolution has failed at least once.
-    // When true, resolveFallbackTaskSessionId widens its time window (3s → 8s).
-    const [taskFallbackRetried, setTaskFallbackRetried] = React.useState(false);
-
     const metadataTaskSummaryEntries = React.useMemo<TaskToolSummaryEntry[]>(() => {
         if (!isTaskTool) {
             return [];
@@ -2445,30 +2442,23 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
 
     const hasFinalMetadataTaskSummary = isFinalized && metadataTaskSummaryEntries.length > 0;
 
-    const explicitTaskSessionId = React.useMemo<string | undefined>(() => {
+    const authoritativeTaskSessionId = React.useMemo<string | undefined>(() => {
         if (!isTaskTool) {
             return undefined;
         }
 
-        const metadataSessionId = readTaskSessionIdFromRecord(metadata);
-        if (metadataSessionId) {
-            return metadataSessionId;
-        }
-
-        const partLevelSessionId = readTaskSessionIdFromRecord(partMetadata);
-        if (partLevelSessionId) {
-            return partLevelSessionId;
-        }
-
-        if (parsedTaskMetadata.sessionId) {
-            return parsedTaskMetadata.sessionId;
-        }
-        return readTaskSessionIdFromOutput(taskOutputString);
-    }, [isTaskTool, metadata, parsedTaskMetadata.sessionId, partMetadata, taskOutputString]);
+        return resolveAuthoritativeTaskSessionId({
+            stateMetadata: metadata,
+            partMetadata,
+            stateInput: input,
+            parsedOutputSessionId: parsedTaskMetadata.sessionId,
+            outputSessionId: readTaskSessionIdFromOutput(taskOutputString),
+        });
+    }, [input, isTaskTool, metadata, parsedTaskMetadata.sessionId, partMetadata, taskOutputString]);
 
     const fallbackTaskSessionId = useDirectorySync(
         React.useCallback((storeState) => {
-            if (explicitTaskSessionId) {
+            if (authoritativeTaskSessionId) {
                 return undefined;
             }
 
@@ -2476,16 +2466,16 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
                 isTaskTool,
                 parentSessionId: currentSessionId ?? undefined,
                 taskStartTime: taskSessionResolutionStart,
+                taskDescription: typeof input?.description === 'string' ? input.description : undefined,
                 isTaskFinalized: isFinalized,
                 sessions: storeState.session,
                 sessionStatusMap: storeState.session_status,
-                hasRetried: taskFallbackRetried,
             });
-        }, [explicitTaskSessionId, isTaskTool, currentSessionId, taskSessionResolutionStart, isFinalized, taskFallbackRetried]),
+        }, [authoritativeTaskSessionId, currentSessionId, input?.description, isFinalized, isTaskTool, taskSessionResolutionStart]),
         currentDirectory,
     );
 
-    const taskSessionId = explicitTaskSessionId ?? fallbackTaskSessionId;
+    const taskSessionId = authoritativeTaskSessionId ?? fallbackTaskSessionId;
     const childSessionLookupId = hasFinalMetadataTaskSummary ? '' : (taskSessionId ?? '');
 
     const childSessionMessages = useSessionMessageRecords(childSessionLookupId, currentDirectory);
@@ -2544,41 +2534,7 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
         taskPollNoChangeCountRef.current = 0;
         taskPollLastSignatureRef.current = '';
         taskFinalFetchDoneRef.current = false;
-        setTaskFallbackRetried(false);
     }, [taskSessionId]);
-
-    // Widen fallback resolution window only after a real retry boundary.
-    React.useEffect(() => {
-        if (!isTaskTool || taskFallbackRetried || explicitTaskSessionId != null || taskSessionId != null || isFinalized) {
-            return;
-        }
-
-        const sinceStart =
-            typeof taskSessionResolutionStart === 'number'
-                ? Date.now() - taskSessionResolutionStart
-                : 0;
-        const delay = Math.max(0, TASK_TOOL_FALLBACK_RETRY_MS - sinceStart);
-
-        if (typeof window === 'undefined') {
-            setTaskFallbackRetried(true);
-            return;
-        }
-
-        const timer = window.setTimeout(() => {
-            setTaskFallbackRetried(true);
-        }, delay);
-
-        return () => {
-            window.clearTimeout(timer);
-        };
-    }, [
-        explicitTaskSessionId,
-        isFinalized,
-        isTaskTool,
-        taskFallbackRetried,
-        taskSessionId,
-        taskSessionResolutionStart,
-    ]);
 
     React.useEffect(() => {
         if (hasFinalMetadataTaskSummary || !isTaskTool || !taskSessionId) {

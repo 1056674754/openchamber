@@ -22,6 +22,7 @@ const DEFAULT_REQUEST_LANE_LIMITS = {
 };
 const REQUEST_CIRCUIT_FAILURE_THRESHOLD = 3;
 const REQUEST_CIRCUIT_COOLDOWN_MS = 15_000;
+const REQUEST_LANE_RETRY_AFTER_MS = 1_000;
 
 export const normalizeHealthProbeTimeoutSec = (...values) => {
   for (const value of values) {
@@ -40,11 +41,14 @@ const isTimeoutError = (error) => (
 );
 
 export class RemoteInstanceRequestRejectedError extends Error {
-  constructor(message, statusCode = 503, code = 'REMOTE_REQUEST_REJECTED') {
+  constructor(message, statusCode = 503, code = 'REMOTE_REQUEST_REJECTED', retryAfterMs) {
     super(message);
     this.name = 'RemoteInstanceRequestRejectedError';
     this.statusCode = statusCode;
     this.code = code;
+    if (Number.isFinite(retryAfterMs) && retryAfterMs >= 0) {
+      this.retryAfterMs = retryAfterMs;
+    }
   }
 }
 
@@ -275,6 +279,7 @@ export const createRemoteInstancesRuntime = (deps) => {
             'Remote instance is temporarily unavailable',
             503,
             'REMOTE_CIRCUIT_OPEN',
+            Math.max(REQUEST_LANE_RETRY_AFTER_MS, state.circuitOpenUntil - Date.now()),
           ),
         );
         continue;
@@ -302,6 +307,7 @@ export const createRemoteInstancesRuntime = (deps) => {
         'Remote instance is temporarily unavailable',
         503,
         'REMOTE_CIRCUIT_OPEN',
+        Math.max(REQUEST_LANE_RETRY_AFTER_MS, state.circuitOpenUntil - Date.now()),
       );
     }
 
@@ -314,6 +320,7 @@ export const createRemoteInstancesRuntime = (deps) => {
         'Remote instance request lane is busy',
         429,
         'REMOTE_LANE_BUSY',
+        Math.max(REQUEST_LANE_RETRY_AFTER_MS, limits.queueTimeoutMs),
       );
     }
 
@@ -334,6 +341,7 @@ export const createRemoteInstancesRuntime = (deps) => {
             'Remote instance request lane timed out',
             503,
             'REMOTE_LANE_QUEUE_TIMEOUT',
+            Math.max(REQUEST_LANE_RETRY_AFTER_MS, queueTimeoutMs),
           ));
         }, queueTimeoutMs);
       }
@@ -386,6 +394,7 @@ export const createRemoteInstancesRuntime = (deps) => {
             'Remote instance is temporarily unavailable',
             503,
             'REMOTE_CIRCUIT_OPEN',
+            REQUEST_CIRCUIT_COOLDOWN_MS,
           ),
         );
       }

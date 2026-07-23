@@ -29,7 +29,9 @@ import { getSafeStorage } from "@/stores/utils/safeStorage"
 import { markPendingUserSendAnimation } from "@/lib/userSendAnimation"
 import { flattenAssistantTextParts } from "@/lib/messages/messageText"
 import { composeForkSessionMessage } from "@/lib/messages/executionMeta"
+import { normalizePath } from "@/lib/pathNormalization"
 import { waitForPendingDraftWorktreeRequest } from "@/lib/worktrees/pendingDraftWorktree"
+import { waitForWorktreeBootstrap } from "@/lib/worktrees/worktreeBootstrap"
 import { resolveProjectForSessionDirectory } from "@/lib/projectResolution"
 import {
   getSyncSessions,
@@ -386,15 +388,6 @@ export type SessionUIState = {
 // Helpers
 // ---------------------------------------------------------------------------
 
-const normalizePath = (value?: string | null): string | null => {
-  if (typeof value !== "string") return null
-  const trimmed = value.trim()
-  if (!trimmed) return null
-  const replaced = trimmed.replace(/\\/g, "/")
-  if (replaced === "/") return "/"
-  return replaced.length > 1 ? replaced.replace(/\/+$/, "") : replaced
-}
-
 const resolveDirectoryKey = (session: Session): string | null => {
   const sessionRecord = session as Session & {
     directory?: string | null
@@ -563,6 +556,112 @@ const DEFAULT_DRAFT: NewSessionDraftState = {
   directoryOverride: null,
   permissionIntent: createDraftPermissionIntent(),
   parentID: null,
+}
+
+export type MaterializedDraftSession = {
+  readonly sessionId: string
+  readonly directory: string
+  readonly serverId?: string
+  readonly agent?: string
+}
+
+export async function materializeOpenDraftSession(selection: {
+  readonly providerID: string
+  readonly modelID: string
+  readonly agent?: string
+  readonly variant?: string
+  readonly expectedDirectory?: string
+}): Promise<MaterializedDraftSession | null> {
+  const store = useSessionUIStore.getState()
+  const draft = store.newSessionDraft
+  if (!draft.open) return null
+  if (draft.preserveDirectoryOverride === false) {
+    throw new Error("Git generation requires a project-backed draft session")
+  }
+
+  let directory = normalizePath(draft.bootstrapPendingDirectory ?? draft.directoryOverride)
+  const pendingWorktreeRequestId = draft.pendingWorktreeRequestId ?? null
+  if (pendingWorktreeRequestId) {
+    directory = normalizePath(await waitForPendingDraftWorktreeRequest(pendingWorktreeRequestId))
+    store.resolvePendingDraftWorktreeTarget(pendingWorktreeRequestId, directory)
+  }
+  if (!directory) {
+    throw new Error("Draft session directory is not available")
+  }
+
+  const expectedDirectory = normalizePath(selection.expectedDirectory)
+  if (expectedDirectory && expectedDirectory !== directory) {
+    throw new Error("Draft session belongs to a different project directory")
+  }
+
+  if (pendingWorktreeRequestId || normalizePath(draft.bootstrapPendingDirectory) === directory) {
+    await waitForWorktreeBootstrap(directory)
+  }
+
+  const projectsState = useProjectsStore.getState()
+  const selectedProject = draft.selectedProjectId
+    ? projectsState.projects.find((project) => project.id === draft.selectedProjectId)
+    : null
+  const directoryProject = resolveProjectForSessionDirectory(
+    projectsState.projects,
+    store.availableWorktreesByProject,
+    directory,
+  )
+  const routingProject = projectOwnsDirectory(selectedProject, store.availableWorktreesByProject, directory)
+    ? selectedProject
+    : directoryProject
+  const serverId = normalizeOptionalServerId(routingProject?.serverId)
+
+  let created: Session | null = null
+  let createError: unknown = null
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      created = await store.createSession(draft.title, directory, draft.parentID ?? null, serverId, { select: true })
+    } catch (error) {
+      createError = error
+    }
+    if (created?.id) break
+    if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, 500 * (attempt + 1)))
+  }
+  if (!created?.id) {
+    if (createError !== null) throw createError
+    throw new Error("Failed to create session")
+  }
+
+  const createdDirectory = normalizePath(created.directory ?? directory)
+  if (!createdDirectory) {
+    throw new Error("Created session directory is not available")
+  }
+  persistDraftTarget({ projectId: draft.selectedProjectId ?? null, directory: createdDirectory })
+
+  const createdServerId = serverId ?? serverRegistry.getServerForSession(created.id)
+  if (createdServerId) serverRegistry.indexSession(created.id, createdServerId)
+  await migrateDraftPermissionIntentToCreatedSession(created.id, draft)
+  await activateConfigForDirectory(createdDirectory, createdServerId)
+
+  const configState = useConfigStore.getState()
+  const agent = selection.agent?.trim() || configState.currentAgentName || undefined
+  const selectionState = useSelectionStore.getState()
+  selectionState.saveSessionModelSelection(created.id, selection.providerID, selection.modelID)
+  if (agent) {
+    selectionState.saveSessionAgentSelection(created.id, agent)
+    selectionState.saveAgentModelForSession(created.id, agent, selection.providerID, selection.modelID)
+    selectionState.saveAgentModelVariantForSession(created.id, agent, selection.providerID, selection.modelID, selection.variant)
+  }
+
+  store.initializeNewOpenChamberSession(created.id, configState.agents ?? [])
+  if (draft.targetFolderId) {
+    useSessionFoldersStore.getState().addSessionToFolder(createdDirectory, draft.targetFolderId, created.id)
+  }
+  store.closeNewSessionDraft()
+  store.setCurrentSession(created.id, createdDirectory, { serverId: createdServerId })
+
+  return {
+    sessionId: created.id,
+    directory: createdDirectory,
+    ...(createdServerId ? { serverId: createdServerId } : {}),
+    ...(agent ? { agent } : {}),
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -913,7 +1012,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         const remoteStores = getSyncStoresForServer(sessionServerId)
         if (!remoteStores) return []
         const directoryMessages = directory
-          ? remoteStores.children.get(directory)?.getState().message[sessionId]
+          ? remoteStores.getChild(directory)?.getState().message[sessionId]
           : undefined
         if (directoryMessages) return directoryMessages
         for (const store of remoteStores.children.values()) {

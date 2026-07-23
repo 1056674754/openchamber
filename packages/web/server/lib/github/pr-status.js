@@ -1,5 +1,17 @@
+import { stat } from 'node:fs/promises';
 import { getRemotes, getStatus } from '../git/index.js';
 import { resolveGitHubRepoFromDirectory } from './repo/index.js';
+import { noteIfGitHubRateLimit } from './rate-limit.js';
+
+const directoryExists = async (directory) => {
+  if (!directory) return false;
+  try {
+    await stat(directory);
+    return true;
+  } catch {
+    return false;
+  }
+};
 
 const REPO_DEFAULT_BRANCH_TTL_MS = 5 * 60_000;
 const defaultBranchCache = new Map();
@@ -160,6 +172,13 @@ const getRepoDefaultBranch = async (octokit, repo) => {
     return cached.defaultBranch;
   }
 
+  const metadata = repoMetadataCache.get(repoKey);
+  if (metadata && Date.now() - metadata.fetchedAt < REPO_DEFAULT_BRANCH_TTL_MS) {
+    const defaultBranch = normalizeText(metadata.data?.default_branch) || null;
+    defaultBranchCache.set(repoKey, { defaultBranch, fetchedAt: Date.now() });
+    return defaultBranch;
+  }
+
   try {
     const response = await octokit.rest.repos.get({
       owner: repo.owner,
@@ -171,7 +190,8 @@ const getRepoDefaultBranch = async (octokit, repo) => {
       fetchedAt: Date.now(),
     });
     return defaultBranch;
-  } catch {
+  } catch (error) {
+    noteIfGitHubRateLimit(error);
     return null;
   }
 };
@@ -199,6 +219,7 @@ const getRepoMetadata = async (octokit, repo) => {
     });
     return data;
   } catch (error) {
+    noteIfGitHubRateLimit(error);
     if (error?.status === 403 || error?.status === 404) {
       repoMetadataCache.set(repoKey, {
         data: null,
@@ -211,21 +232,23 @@ const getRepoMetadata = async (octokit, repo) => {
 };
 
 const resolveRemoteCandidates = async (directory, rankedRemoteNames) => {
+  const resolvedRemotes = await Promise.all(
+    rankedRemoteNames.map((remoteName) =>
+      resolveGitHubRepoFromDirectory(directory, remoteName)
+        .then((resolved) => ({ remoteName, repo: resolved?.repo || null }))
+        .catch(() => ({ remoteName, repo: null })),
+    ),
+  );
+
   const results = [];
   const seenRepoKeys = new Set();
-
-  for (const remoteName of rankedRemoteNames) {
-    const resolved = await resolveGitHubRepoFromDirectory(directory, remoteName).catch(() => ({ repo: null }));
-    const repo = resolved?.repo || null;
+  for (const { remoteName, repo } of resolvedRemotes) {
     const repoKey = normalizeRepoKey(repo?.owner, repo?.repo);
     if (!repo || !repoKey || seenRepoKeys.has(repoKey)) {
       continue;
     }
     seenRepoKeys.add(repoKey);
-    results.push({
-      remoteName,
-      repo,
-    });
+    results.push({ remoteName, repo });
   }
 
   return results;
@@ -244,8 +267,13 @@ const expandRepoNetwork = async (octokit, candidates) => {
     expanded.push({ repo, remoteName, priority });
   };
 
-  for (const candidate of candidates) {
-    const metadata = await getRepoMetadata(octokit, candidate.repo);
+  const metadatas = await Promise.all(
+    candidates.map((candidate) =>
+      getRepoMetadata(octokit, candidate.repo).then((metadata) => ({ candidate, metadata })),
+    ),
+  );
+
+  for (const { candidate, metadata } of metadatas) {
     if (!metadata) {
       continue;
     }
@@ -279,6 +307,7 @@ const safeListPulls = async (octokit, options) => {
     const response = await octokit.rest.pulls.list(options);
     return Array.isArray(response?.data) ? response.data : [];
   } catch (error) {
+    noteIfGitHubRateLimit(error);
     if (error?.status === 404 || error?.status === 403) {
       return [];
     }
@@ -334,6 +363,7 @@ const searchFallbackPr = async ({ octokit, branch, repoNames }) => {
       // If we get here, search API works for this repo — clear the disabled flag
       _searchApiDisabledRepos.delete(repoKey);
     } catch (error) {
+      noteIfGitHubRateLimit(error);
       if (error?.status === 403) {
         _searchApiDisabledRepos.set(repoKey, Date.now());
         return null;
@@ -424,6 +454,10 @@ const findFirstMatchingPr = async ({ octokit, target, branch, sourceCandidates }
 };
 
 export async function resolveGitHubPrStatus({ octokit, directory, branch, remoteName }) {
+  if (!(await directoryExists(directory))) {
+    return { repo: null, pr: null, defaultBranch: null, resolvedRemoteName: null };
+  }
+
   const normalizedBranch = normalizeText(branch);
   const normalizedRemoteName = normalizeText(remoteName) || 'origin';
 

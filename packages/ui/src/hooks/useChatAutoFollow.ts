@@ -5,7 +5,10 @@ import { isProcessFoldTransitionActive } from '@/components/chat/lib/scroll/proc
 import { MessageFreshnessDetector } from '@/lib/messageFreshness';
 import { createScrollSpy } from '@/components/chat/lib/scroll/scrollSpy';
 import {
+    isMatchingAutoScrollPosition,
     normalizeWheelDelta,
+    shouldApplyPassiveAutoFollow,
+    shouldPinFollowedViewportOnWorkingChange,
     shouldPauseAutoScrollOnWheel,
 } from '@/components/chat/lib/scroll/scrollIntent';
 import { useViewportStore, type SessionMemoryState } from '@/sync/viewport-store';
@@ -48,14 +51,14 @@ export interface UseChatAutoFollowResult {
     restoreSnapshot: () => Promise<boolean>;
 }
 
-const PROGRAMMATIC_WRITE_WINDOW_MS = 200;
 const SAVE_DEBOUNCE_MS = 150;
-const LERP = 0.18;
-const SETTLE_EPSILON = 0.5;
-const SETTLE_FRAMES = 4;
 const TOUCH_RELEASE_THRESHOLD_PX = 2;
-const REPIN_GRACE_AFTER_RELEASE_MS = 1200;
 const WHEEL_RELEASE_THRESHOLD_PX = 2;
+const AUTO_MARK_TTL_MS = 1500;
+const AUTO_MATCH_TOLERANCE_PX = 2;
+const PASSIVE_FOLLOW_SETTLE_MS = 300;
+
+const now = (): number => (typeof performance !== 'undefined' ? performance.now() : Date.now());
 
 // Keep this aligned with the small visual gutter rendered below the live
 // assistant status row, so "near bottom" matches what the user sees.
@@ -65,6 +68,10 @@ const computeBottomZoneThreshold = (isMobile: boolean): number => {
 
 const distanceFromBottom = (el: HTMLElement): number => {
     return el.scrollHeight - el.scrollTop - el.clientHeight;
+};
+
+const canScroll = (el: HTMLElement): boolean => {
+    return el.scrollHeight - el.clientHeight > 1;
 };
 
 const isNearBottom = (el: HTMLElement, isMobile: boolean): boolean => {
@@ -109,21 +116,26 @@ export const useChatAutoFollow = ({
     const [isFollowingProgrammatically, setIsFollowingProgrammatically] = React.useState(false);
 
     const stateRef = React.useRef<AutoFollowState>('following');
+    const isMobileRef = React.useRef(isMobile);
+    isMobileRef.current = isMobile;
     const sessionIsWorkingRef = React.useRef(sessionIsWorking);
     sessionIsWorkingRef.current = sessionIsWorking;
+    const previousWorkingStateRef = React.useRef({
+        sessionId: currentSessionId,
+        isWorking: sessionIsWorking,
+    });
+    const settlingRef = React.useRef(false);
+    const settleTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
     const sessionMessageCountRef = React.useRef(sessionMessageCount);
     sessionMessageCountRef.current = sessionMessageCount;
     const currentSessionIdRef = React.useRef(currentSessionId);
     currentSessionIdRef.current = currentSessionId;
 
     const lastSessionIdRef = React.useRef<string | null>(null);
-    const programmaticWriteUntilRef = React.useRef(0);
-    const followRafRef = React.useRef<number | null>(null);
-    const settledFramesRef = React.useRef(0);
-    const lastScrollTopRef = React.useRef(0);
+    const autoRef = React.useRef<{ top: number; time: number } | null>(null);
+    const autoTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
     const saveTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
     const pendingSaveRef = React.useRef<{ sessionId: string; anchor: number } | null>(null);
-    const lastUserReleaseAtRef = React.useRef(0);
     // When restoreSnapshot is invoked while ChatViewport is still hydrating
     // (skeleton rendered, no scroll container yet), we record the session here
     // so a follow-up effect can replay the restore once the container mounts.
@@ -149,91 +161,60 @@ export const useChatAutoFollow = ({
         setState(next);
     }, []);
 
-    const markProgrammaticWrite = React.useCallback(() => {
-        const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
-        programmaticWriteUntilRef.current = now + PROGRAMMATIC_WRITE_WINDOW_MS;
+    const clearAutoMarker = React.useCallback(() => {
+        autoRef.current = null;
+        if (autoTimerRef.current !== null) {
+            clearTimeout(autoTimerRef.current);
+            autoTimerRef.current = null;
+        }
     }, []);
 
-    const isInProgrammaticWindow = React.useCallback(() => {
-        const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
-        return now < programmaticWriteUntilRef.current;
+    const markAuto = React.useCallback((target: number) => {
+        autoRef.current = { top: target, time: now() };
+        if (autoTimerRef.current !== null) {
+            clearTimeout(autoTimerRef.current);
+        }
+        autoTimerRef.current = setTimeout(() => {
+            autoRef.current = null;
+            autoTimerRef.current = null;
+        }, AUTO_MARK_TTL_MS);
     }, []);
 
-    const stopFollowLoop = React.useCallback(() => {
-        if (followRafRef.current !== null && typeof window !== 'undefined') {
-            window.cancelAnimationFrame(followRafRef.current);
+    const isAuto = React.useCallback((container: HTMLElement): boolean => {
+        const marker = autoRef.current;
+        if (!marker) return false;
+        const currentTime = now();
+        if (currentTime - marker.time > AUTO_MARK_TTL_MS) {
+            clearAutoMarker();
+            return false;
         }
-        followRafRef.current = null;
-        settledFramesRef.current = 0;
-        setIsFollowingProgrammatically(false);
+        return isMatchingAutoScrollPosition({
+            currentTop: container.scrollTop,
+            markedTop: marker.top,
+            markedAt: marker.time,
+            currentTime,
+            ttl: AUTO_MARK_TTL_MS,
+            tolerance: AUTO_MATCH_TOLERANCE_PX,
+        });
+    }, [clearAutoMarker]);
+
+    const isPassiveFollowActive = React.useCallback((): boolean => {
+        return shouldApplyPassiveAutoFollow({
+            state: stateRef.current,
+            sessionIsWorking: sessionIsWorkingRef.current,
+            settling: settlingRef.current,
+            processFoldTransitionActive: isProcessFoldTransitionActive(),
+        });
     }, []);
-
-    const tickFollow = React.useCallback(() => {
-        followRafRef.current = null;
-        const container = scrollRef.current;
-        if (!container) {
-            stopFollowLoop();
-            return;
-        }
-        if (stateRef.current !== 'following') {
-            stopFollowLoop();
-            return;
-        }
-        if (isProcessFoldTransitionActive()) {
-            stopFollowLoop();
-            return;
-        }
-
-        const target = Math.max(0, container.scrollHeight - container.clientHeight);
-        const current = container.scrollTop;
-        const delta = target - current;
-
-        if (delta < -SETTLE_EPSILON) {
-            stopFollowLoop();
-            return;
-        }
-
-        if (Math.abs(delta) <= SETTLE_EPSILON) {
-            if (current !== target) {
-                markProgrammaticWrite();
-                container.scrollTop = target;
-                lastScrollTopRef.current = target;
-            }
-            settledFramesRef.current += 1;
-            if (settledFramesRef.current >= SETTLE_FRAMES) {
-                stopFollowLoop();
-                return;
-            }
-            followRafRef.current = window.requestAnimationFrame(tickFollow);
-            return;
-        }
-
-        settledFramesRef.current = 0;
-        const next = current + delta * LERP;
-        markProgrammaticWrite();
-        container.scrollTop = next;
-        lastScrollTopRef.current = container.scrollTop;
-        followRafRef.current = window.requestAnimationFrame(tickFollow);
-    }, [markProgrammaticWrite, stopFollowLoop]);
-
-    const startFollowLoop = React.useCallback(() => {
-        if (typeof window === 'undefined') return;
-        if (followRafRef.current !== null) return;
-        if (stateRef.current !== 'following') return;
-        settledFramesRef.current = 0;
-        setIsFollowingProgrammatically(true);
-        followRafRef.current = window.requestAnimationFrame(tickFollow);
-    }, [tickFollow]);
 
     const writeScrollTopInstant = React.useCallback((target: number) => {
         const container = scrollRef.current;
         if (!container) return;
         const max = Math.max(0, container.scrollHeight - container.clientHeight);
         const clamped = Math.max(0, Math.min(target, max));
-        markProgrammaticWrite();
+        markAuto(clamped);
         container.scrollTop = clamped;
-        lastScrollTopRef.current = container.scrollTop;
-    }, [markProgrammaticWrite]);
+    }, [markAuto]);
 
     const stickToBottomIfFollowing = React.useCallback(() => {
         const container = scrollRef.current;
@@ -245,41 +226,37 @@ export const useChatAutoFollow = ({
         }
 
         const target = Math.max(0, container.scrollHeight - container.clientHeight);
-        if (target <= container.scrollTop + SETTLE_EPSILON) {
+        if (Math.abs(target - container.scrollTop) < AUTO_MATCH_TOLERANCE_PX) {
+            markAuto(target);
             return;
         }
 
         writeScrollTopInstant(target);
-    }, [writeScrollTopInstant]);
+    }, [markAuto, writeScrollTopInstant]);
 
     const releaseAutoFollow = React.useCallback(() => {
-        stopFollowLoop();
-        lastUserReleaseAtRef.current = typeof performance !== 'undefined' ? performance.now() : Date.now();
         setStateValue('released');
-    }, [setStateValue, stopFollowLoop]);
+    }, [setStateValue]);
 
     const releaseFromUserIntent = React.useCallback(() => {
         if (stateRef.current === 'following') {
-            stopFollowLoop();
-            lastUserReleaseAtRef.current = typeof performance !== 'undefined' ? performance.now() : Date.now();
             setStateValue('released');
-        } else {
-            lastUserReleaseAtRef.current = typeof performance !== 'undefined' ? performance.now() : Date.now();
         }
-    }, [setStateValue, stopFollowLoop]);
+    }, [setStateValue]);
 
     const goToBottom = React.useCallback((mode: 'instant' | 'smooth' = 'instant') => {
         const container = scrollRef.current;
         setStateValue('following');
-        lastUserReleaseAtRef.current = 0;
         if (!container) return;
         if (mode === 'smooth') {
-            startFollowLoop();
+            const target = Math.max(0, container.scrollHeight - container.clientHeight);
+            markAuto(target);
+            container.scrollTo({ top: target, behavior: 'smooth' });
             return;
         }
         const target = Math.max(0, container.scrollHeight - container.clientHeight);
         writeScrollTopInstant(target);
-    }, [setStateValue, startFollowLoop, writeScrollTopInstant]);
+    }, [markAuto, setStateValue, writeScrollTopInstant]);
 
     const flushSave = React.useCallback(() => {
         if (saveTimerRef.current !== null) {
@@ -343,7 +320,6 @@ export const useChatAutoFollow = ({
 
         if (!saved || isAtBottomSnapshot(saved, isMobile)) {
             setStateValue('following');
-            lastUserReleaseAtRef.current = 0;
             const target = Math.max(0, container.scrollHeight - container.clientHeight);
             writeScrollTopInstant(target);
             return false;
@@ -374,22 +350,54 @@ export const useChatAutoFollow = ({
         lastSessionIdRef.current = currentSessionId;
         MessageFreshnessDetector.getInstance().recordSessionStart(currentSessionId);
         flushSave();
-        stopFollowLoop();
-        markProgrammaticWrite();
+        clearAutoMarker();
         // Drop any pending restore request inherited from a different session.
         if (pendingInitialRestoreRef.current && pendingInitialRestoreRef.current !== currentSessionId) {
             pendingInitialRestoreRef.current = null;
         }
-    }, [currentSessionId, flushSave, markProgrammaticWrite, stopFollowLoop]);
+    }, [clearAutoMarker, currentSessionId, flushSave]);
 
-    React.useEffect(() => {
-        if (sessionIsWorking && stateRef.current === 'following' && !isProcessFoldTransitionActive()) {
+    React.useLayoutEffect(() => {
+        const previousWorkingState = previousWorkingStateRef.current;
+        previousWorkingStateRef.current = {
+            sessionId: currentSessionId,
+            isWorking: sessionIsWorking,
+        };
+
+        settlingRef.current = false;
+        if (settleTimerRef.current !== null) {
+            clearTimeout(settleTimerRef.current);
+            settleTimerRef.current = null;
+        }
+
+        if (sessionIsWorking) {
+            if (stateRef.current === 'following' && !isProcessFoldTransitionActive()) {
+                stickToBottomIfFollowing();
+            }
+            return;
+        }
+
+        settlingRef.current = true;
+        if (shouldPinFollowedViewportOnWorkingChange({
+            state: stateRef.current,
+            sameSession: previousWorkingState.sessionId === currentSessionId,
+            wasWorking: previousWorkingState.isWorking,
+            sessionIsWorking,
+        }) && !isProcessFoldTransitionActive()) {
             stickToBottomIfFollowing();
         }
-    }, [sessionIsWorking, stickToBottomIfFollowing]);
+        settleTimerRef.current = setTimeout(() => {
+            settlingRef.current = false;
+            settleTimerRef.current = null;
+        }, PASSIVE_FOLLOW_SETTLE_MS);
+    }, [currentSessionId, sessionIsWorking, stickToBottomIfFollowing]);
+
+    React.useEffect(() => {
+        setIsFollowingProgrammatically(state === 'following' && sessionIsWorking);
+    }, [sessionIsWorking, state]);
 
     // Replay a deferred restoreSnapshot once ChatViewport mounts.
-    React.useEffect(() => {
+    React.useLayoutEffect(() => {
         if (!containerEl) return;
         if (pendingInitialRestoreRef.current && pendingInitialRestoreRef.current === currentSessionId) {
             void restoreSnapshot();
@@ -417,35 +425,26 @@ export const useChatAutoFollow = ({
         const container = scrollRef.current;
         if (!container) return;
 
-        const programmatic = isInProgrammaticWindow();
-        const currentTop = container.scrollTop;
-        const previousTop = lastScrollTopRef.current;
-        lastScrollTopRef.current = currentTop;
-
         updateOverflowAndButton();
 
-        if (programmatic) {
+        if (!canScroll(container)) {
+            setStateValue('following');
             return;
         }
 
-        if (currentTop < previousTop - SETTLE_EPSILON) {
-            releaseFromUserIntent();
+        if (isNearBottom(container, isMobileRef.current)) {
+            setStateValue('following');
             queueSave();
             return;
         }
 
-        const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
-        const inGrace = (now - lastUserReleaseAtRef.current) < REPIN_GRACE_AFTER_RELEASE_MS;
-        if (stateRef.current === 'released' && isNearBottom(container, isMobile) && !inGrace) {
-            setStateValue('following');
-        } else if (stateRef.current === 'following' && !isNearBottom(container, isMobile)) {
+        if (stateRef.current === 'following' && !isAuto(container)) {
             releaseFromUserIntent();
         }
 
         queueSave();
     }, [
-        isInProgrammaticWindow,
-        isMobile,
+        isAuto,
         queueSave,
         releaseFromUserIntent,
         setStateValue,
@@ -455,8 +454,6 @@ export const useChatAutoFollow = ({
     React.useEffect(() => {
         const container = containerEl;
         if (!container) return;
-
-        lastScrollTopRef.current = container.scrollTop;
 
         const handleWheel = (event: WheelEvent) => {
             const delta = normalizeWheelDelta({
@@ -535,11 +532,7 @@ export const useChatAutoFollow = ({
 
         const observer = new ResizeObserver(() => {
             updateOverflowAndButton();
-            if (
-                sessionIsWorkingRef.current
-                && stateRef.current === 'following'
-                && !isProcessFoldTransitionActive()
-            ) {
+            if (isPassiveFollowActive()) {
                 stickToBottomIfFollowing();
             }
         });
@@ -549,7 +542,7 @@ export const useChatAutoFollow = ({
             observer.observe(inner);
         }
         return () => observer.disconnect();
-    }, [containerEl, stickToBottomIfFollowing, updateOverflowAndButton]);
+    }, [containerEl, isPassiveFollowActive, stickToBottomIfFollowing, updateOverflowAndButton]);
 
     React.useEffect(() => {
         updateOverflowAndButton();
@@ -558,14 +551,7 @@ export const useChatAutoFollow = ({
     const notifyContentChange = React.useCallback((_reason?: ContentChangeReason) => {
         void _reason;
         updateOverflowAndButton();
-        if (
-            sessionIsWorkingRef.current
-            && stateRef.current === 'following'
-            && !isProcessFoldTransitionActive()
-        ) {
-            stickToBottomIfFollowing();
-        }
-    }, [stickToBottomIfFollowing, updateOverflowAndButton]);
+    }, [updateOverflowAndButton]);
 
     const animationHandlersRef = React.useRef<Map<string, AnimationHandlers>>(new Map());
 
@@ -573,41 +559,35 @@ export const useChatAutoFollow = ({
         const cached = animationHandlersRef.current.get(messageId);
         if (cached) return cached;
 
-        const kick = () => {
-            if (
-                sessionIsWorkingRef.current
-                && stateRef.current === 'following'
-                && !isProcessFoldTransitionActive()
-            ) {
-                stickToBottomIfFollowing();
-            }
-        };
-
         const handlers: AnimationHandlers = {
-            onChunk: kick,
+            onChunk: () => {},
             onComplete: () => {
                 updateOverflowAndButton();
             },
             onStreamingCandidate: () => {},
             onAnimationStart: () => {},
-            onAnimatedHeightChange: kick,
+            onAnimatedHeightChange: () => {},
             onReservationCancelled: () => {},
             onReasoningBlock: () => {},
         };
         animationHandlersRef.current.set(messageId, handlers);
         return handlers;
-    }, [stickToBottomIfFollowing, updateOverflowAndButton]);
+    }, [updateOverflowAndButton]);
 
     React.useEffect(() => {
         return () => {
-            stopFollowLoop();
+            clearAutoMarker();
             flushSave();
             if (saveTimerRef.current !== null) {
                 clearTimeout(saveTimerRef.current);
                 saveTimerRef.current = null;
             }
+            if (settleTimerRef.current !== null) {
+                clearTimeout(settleTimerRef.current);
+                settleTimerRef.current = null;
+            }
         };
-    }, [flushSave, stopFollowLoop]);
+    }, [clearAutoMarker, flushSave]);
 
     React.useEffect(() => {
         if (!onActiveTurnChange) return;

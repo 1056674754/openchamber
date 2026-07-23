@@ -22,6 +22,13 @@ class FakeSocket extends EventEmitter {
 
 const decodeBody = (frame) => JSON.parse(Buffer.from(frame.bodyBase64 || '', 'base64').toString('utf8'));
 
+const waitForSentFrames = async (socket, count) => {
+  const deadline = Date.now() + 2_000;
+  while (socket.sent.length < count && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+};
+
 describe('remote RPC websocket', () => {
   it('forwards local API requests over the websocket without remote instance lookup', async () => {
     const socket = new FakeSocket();
@@ -77,6 +84,48 @@ describe('remote RPC websocket', () => {
       headers: { 'content-type': 'application/json' },
     });
     expect(decodeBody(socket.sent[1])).toEqual({ ok: true });
+  });
+
+  it('forwards 17 MiB local session message pages required by desktop history pagination', async () => {
+    const socket = new FakeSocket();
+    const responseBody = Buffer.alloc(17 * 1024 * 1024, 0x61);
+
+    const accept = createRemoteRpcConnectionAcceptor({
+      remoteInstancesRuntime: {
+        getInstanceSync: () => null,
+        isHealthy: () => false,
+      },
+      getLocalBaseUrl: () => 'http://127.0.0.1:45173',
+      fetchImpl: async () => new Response(responseBody, {
+        status: 200,
+        statusText: 'OK',
+        headers: {
+          'content-length': String(responseBody.byteLength),
+          'content-type': 'application/json',
+        },
+      }),
+      logger: { warn() {} },
+    });
+
+    accept(socket);
+    socket.emit('message', JSON.stringify({
+      type: 'request',
+      id: 'local-large-history',
+      target: 'local',
+      method: 'GET',
+      path: '/api/session/ses_large/message?directory=%2Ftmp&limit=900',
+      headers: { Accept: 'application/json' },
+    }));
+
+    await waitForSentFrames(socket, 2);
+
+    expect(socket.sent[1]).toMatchObject({
+      type: 'response',
+      id: 'local-large-history',
+      target: 'local',
+      status: 200,
+    });
+    expect(Buffer.from(socket.sent[1].bodyBase64, 'base64')).toHaveLength(responseBody.byteLength);
   });
 
   it('forwards ordinary remote API requests over one websocket connection', async () => {

@@ -36,4 +36,18 @@ describe('resolveProjectForSessionDirectory', () => {
 
     expect(resolved).toEqual(nestedProject);
   });
+
+  test('matches Windows project paths regardless of drive-letter casing', () => {
+    const project: ProjectEntry = {
+      id: 'windows-project',
+      path: 'C:\\repos\\project',
+      serverId: 'remote-windows',
+    };
+
+    expect(resolveProjectForSessionDirectory(
+      [project],
+      new Map(),
+      'c:/repos/project/src',
+    )).toEqual(project);
+  });
 });

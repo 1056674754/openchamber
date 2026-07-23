@@ -2,6 +2,7 @@ import { describe, expect, test, mock } from 'bun:test';
 
 import type { Session } from '@opencode-ai/sdk/v2';
 import type { SessionStatus } from '@opencode-ai/sdk/v2/client';
+import { DEFAULT_SERVER_ID, serverRegistry } from '@/lib/opencode/server-registry';
 
 // useGlobalSessionsStore pulls in @/lib/opencode/client, which has a circular
 // dependency that surfaces as a TDZ ("Cannot access 'opencodeClient before
@@ -16,7 +17,7 @@ mock.module('@/lib/opencode/client', () => ({
   },
 }));
 
-const { computeStatusBatchMerge } = await import('./useGlobalSessionsStore');
+const { computeStatusBatchMerge, mergeLiveSessionWithGlobalSession, useGlobalSessionsStore } = await import('./useGlobalSessionsStore');
 
 type Result = PromiseSettledResult<{ directory: string; response: unknown }>;
 
@@ -189,6 +190,31 @@ describe('computeStatusBatchMerge', () => {
     expect(map.get('s2')).toEqual(busy);
   });
 
+  test('scopes pruning by server when two remotes expose the same directory', () => {
+    const current = new Map<string, SessionStatus>([
+      ['s1', busy],
+      ['s2', busy],
+    ]);
+    const byDir = new Map<string, readonly Session[]>([
+      [DIR_A, [makeSession('s1', DIR_A), makeSession('s2', DIR_A)]],
+    ]);
+    const next = computeStatusBatchMerge({
+      currentStatuses: current,
+      sessionsByDirectory: byDir,
+      serverIdBySession: new Map([
+        ['s1', 'remote-a'],
+        ['s2', 'remote-b'],
+      ]),
+      results: [{
+        status: 'fulfilled',
+        value: { directory: DIR_A, serverId: 'remote-a', response: { data: {} } },
+      }],
+    });
+
+    expect(next?.has('s1')).toBe(false);
+    expect(next?.get('s2')).toEqual(busy);
+  });
+
   test('never mutates the input currentStatuses map', () => {
     const current = new Map<string, SessionStatus>([['s1', busy]]);
     const byDir = new Map<string, readonly Session[]>([
@@ -202,5 +228,78 @@ describe('computeStatusBatchMerge', () => {
     expect(current.get('s1')).toEqual(busy);
     expect(current.has('s2')).toBe(false);
     expect(current.size).toBe(1);
+  });
+});
+
+describe('mergeLiveSessionWithGlobalSession', () => {
+  test('uses the authoritative global share state while preserving live fields', () => {
+    const live = {
+      ...makeSession('s1', DIR_A),
+      share: { url: 'https://live.example/s1' },
+      time: { created: 1, updated: 5 },
+    };
+    const global = {
+      ...makeSession('s1', DIR_A),
+      share: undefined,
+      time: { created: 1, updated: 3 },
+    };
+
+    const merged = mergeLiveSessionWithGlobalSession(live, global);
+
+    expect(merged.share).toBe(undefined);
+    expect(merged.time.updated).toBe(5);
+  });
+});
+
+describe('upsertSession freshness', () => {
+  test('preserves a newer session when a stale SSE echo arrives', () => {
+    const current = {
+      ...makeSession('s1', DIR_A),
+      title: 'New Title',
+      time: { created: 1, updated: 20 },
+    };
+    const incoming = {
+      ...current,
+      title: 'Old Title',
+      time: { created: 1, updated: 10 },
+    };
+    useGlobalSessionsStore.setState({
+      activeSessions: [current],
+      archivedSessions: [],
+      sessionsByDirectory: new Map([[DIR_A, [current]]]),
+    });
+
+    useGlobalSessionsStore.getState().upsertSession(incoming);
+
+    expect(useGlobalSessionsStore.getState().activeSessions[0]).toBe(current);
+  });
+});
+
+describe('applyRemoteDirectorySnapshot', () => {
+  test('replaces only the matching server and directory', () => {
+    const local = makeSession('local-session', DIR_A);
+    const previousA = makeSession('remote-a-old', DIR_A);
+    const remoteB = makeSession('remote-b-session', DIR_A);
+    const nextA = makeSession('remote-a-new', DIR_A);
+    serverRegistry.indexSession(local.id, DEFAULT_SERVER_ID);
+    serverRegistry.indexSession(previousA.id, 'remote-a');
+    serverRegistry.indexSession(remoteB.id, 'remote-b');
+    useGlobalSessionsStore.setState({
+      activeSessions: [local, previousA, remoteB],
+      archivedSessions: [],
+      sessionsByDirectory: new Map([[DIR_A, [local, previousA, remoteB]]]),
+      sessionStatuses: new Map([[previousA.id, busy]]),
+    });
+
+    useGlobalSessionsStore.getState().applyRemoteDirectorySnapshot('remote-a', DIR_A, [nextA]);
+
+    const state = useGlobalSessionsStore.getState();
+    expect(state.activeSessions.map((session) => session.id).sort()).toEqual([
+      'local-session',
+      'remote-a-new',
+      'remote-b-session',
+    ]);
+    expect(state.sessionStatuses.has(previousA.id)).toBe(false);
+    expect(serverRegistry.getServerForSession(nextA.id)).toBe('remote-a');
   });
 });

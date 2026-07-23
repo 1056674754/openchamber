@@ -16,6 +16,9 @@ import { useChatAutoFollow, type AnimationHandlers, type ContentChangeReason } f
 import { useChatTimelineController } from './hooks/useChatTimelineController';
 import { TimelineDialog } from './TimelineDialog';
 import { useChatTurnNavigation } from './hooks/useChatTurnNavigation';
+import { useCompletePromptHistory } from './hooks/useCompletePromptHistory';
+import { PromptNavigatorRail } from './components/PromptNavigatorRail';
+import { buildPromptPreviews, createPromptPreviewCache, resolvePromptNavigatorActiveTurnId } from './lib/promptNavigatorModel';
 import { useDeviceInfo } from '@/lib/device';
 import { Button } from '@/components/ui/button';
 import { OverlayScrollbar } from '@/components/ui/OverlayScrollbar';
@@ -55,6 +58,11 @@ import { getAllSyncSessions } from '@/sync/sync-refs';
 import { useI18n } from '@/lib/i18n';
 import { useCurrentSessionActivity } from '@/hooks/useSessionActivity';
 import { CHAT_BOTTOM_SPACER_DESKTOP_PX, CHAT_BOTTOM_SPACER_MOBILE_PX } from './lib/scroll/bottomSpacing';
+import { resolvePromptReadOnly } from '@/lib/subagentPrompting';
+import { getEmbeddedSessionChatOriginSessionId } from '@/components/layout/contextPanelEmbeddedChat';
+import { serverRegistry } from '@/lib/opencode/server-registry';
+import { isVSCodeRuntime } from '@/lib/desktop';
+import { resolveGlobalSessionDirectory, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 
 const EMPTY_MESSAGES: Array<{ info: Message; parts: Part[] }> = [];
 const IDLE_SESSION_STATUS = { type: 'idle' as const };
@@ -143,6 +151,7 @@ type ChatViewportProps = {
     isDesktopExpandedInput: boolean;
     isMobile: boolean;
     stickyUserHeader: boolean;
+    showPromptNavigator: boolean;
     scrollRef: React.RefObject<HTMLDivElement | null>;
     messageListRef: React.RefObject<MessageListHandle | null>;
     turnStart: number;
@@ -162,12 +171,16 @@ type ChatViewportProps = {
     handleMessageContentChange: (reason?: ContentChangeReason) => void;
     getAnimationHandlers: (messageId: string) => AnimationHandlers;
     handleLoadOlder: (options: { userInitiated: boolean }) => Promise<void>;
-    cancelPendingPrependAnchor: () => void;
+    syncPendingPrependAnchorToViewport: () => void;
     scrollToBottom: () => void;
     sessionQuestions: QuestionRequest[];
     sessionPermissions: PermissionRequest[];
     inlineBlockingRequestsByTool: ReturnType<typeof splitBlockingRequestsByVisibleTool>['inlineByTool'];
     isProgrammaticFollowActive: boolean;
+    promptHistoryRecords: readonly SessionMessageRecord[];
+    activeTurnId: string | null;
+    onSelectTurn: (turnId: string) => void;
+    canLoadEarlierPrompts: boolean;
 };
 
 const ChatViewport = React.memo(({
@@ -175,6 +188,7 @@ const ChatViewport = React.memo(({
     isDesktopExpandedInput,
     isMobile,
     stickyUserHeader,
+    showPromptNavigator,
     scrollRef,
     messageListRef,
     turnStart,
@@ -189,13 +203,37 @@ const ChatViewport = React.memo(({
     handleMessageContentChange,
     getAnimationHandlers,
     handleLoadOlder,
-    cancelPendingPrependAnchor,
+    syncPendingPrependAnchorToViewport,
     scrollToBottom,
     sessionQuestions,
     sessionPermissions,
     inlineBlockingRequestsByTool,
     isProgrammaticFollowActive,
+    promptHistoryRecords,
+    activeTurnId,
+    onSelectTurn,
+    canLoadEarlierPrompts,
 }: ChatViewportProps) => {
+    const promptPreviewCache = React.useRef(createPromptPreviewCache());
+    const promptSourceMessages = React.useMemo(() => {
+        if (promptHistoryRecords.length === 0) return renderedMessages;
+        const byMessageID = new Map<string, SessionMessageRecord>();
+        for (const record of promptHistoryRecords) byMessageID.set(record.info.id, record);
+        for (const record of renderedMessages) byMessageID.set(record.info.id, record);
+        return [...byMessageID.values()].sort((left, right) => left.info.id.localeCompare(right.info.id));
+    }, [promptHistoryRecords, renderedMessages]);
+    const promptPreviewsByTurnId = React.useMemo(
+        () => buildPromptPreviews(promptSourceMessages, promptPreviewCache.current),
+        [promptSourceMessages],
+    );
+    const promptTurnIds = React.useMemo(
+        () => [...promptPreviewsByTurnId.keys()],
+        [promptPreviewsByTurnId],
+    );
+    const promptActiveTurnId = React.useMemo(
+        () => resolvePromptNavigatorActiveTurnId(promptTurnIds, promptPreviewsByTurnId, activeTurnId),
+        [activeTurnId, promptPreviewsByTurnId, promptTurnIds],
+    );
     const focusScrollContainer = React.useCallback((event: React.MouseEvent<HTMLElement>) => {
         if (event.defaultPrevented || shouldIgnoreChatNavigationTarget(event.target)) {
             return;
@@ -247,7 +285,7 @@ const ChatViewport = React.memo(({
                                 hasMoreAbove={hasMoreAboveTurns}
                                 isLoadingOlder={isLoadingOlder}
                                 onLoadOlder={handleLoadOlder}
-                                onExplicitScrollInteraction={cancelPendingPrependAnchor}
+                                onExplicitScrollInteraction={syncPendingPrependAnchorToViewport}
                                 scrollToBottom={scrollToBottom}
                                 scrollRef={scrollRef}
                             />
@@ -275,6 +313,19 @@ const ChatViewport = React.memo(({
                     </div>
                 </ScrollShadow>
                 <OverlayScrollbar containerRef={scrollRef} suppressVisibility={isProgrammaticFollowActive} userIntentOnly observeMutations={false} />
+                {showPromptNavigator && promptTurnIds.length >= 2 ? (
+                    <PromptNavigatorRail
+                        turnIds={promptTurnIds}
+                        previewsByTurnId={promptPreviewsByTurnId}
+                        activeTurnId={promptActiveTurnId}
+                        onSelectTurn={onSelectTurn}
+                        canLoadEarlier={canLoadEarlierPrompts}
+                        isLoadingOlder={isLoadingOlder}
+                        onLoadEarlier={() => {
+                            void handleLoadOlder({ userInitiated: true });
+                        }}
+                    />
+                ) : null}
             </div>
         </div>
     );
@@ -283,6 +334,7 @@ const ChatViewport = React.memo(({
         && prev.isDesktopExpandedInput === next.isDesktopExpandedInput
         && prev.isMobile === next.isMobile
         && prev.stickyUserHeader === next.stickyUserHeader
+        && prev.showPromptNavigator === next.showPromptNavigator
         && prev.scrollRef === next.scrollRef
         && prev.messageListRef === next.messageListRef
         && prev.turnStart === next.turnStart
@@ -301,7 +353,11 @@ const ChatViewport = React.memo(({
         && prev.sessionQuestions === next.sessionQuestions
         && prev.sessionPermissions === next.sessionPermissions
         && prev.inlineBlockingRequestsByTool === next.inlineBlockingRequestsByTool
-        && prev.isProgrammaticFollowActive === next.isProgrammaticFollowActive;
+        && prev.isProgrammaticFollowActive === next.isProgrammaticFollowActive
+        && prev.promptHistoryRecords === next.promptHistoryRecords
+        && prev.activeTurnId === next.activeTurnId
+        && prev.onSelectTurn === next.onSelectTurn
+        && prev.canLoadEarlierPrompts === next.canLoadEarlierPrompts;
 });
 
 ChatViewport.displayName = 'ChatViewport';
@@ -376,10 +432,16 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
         (sessionId: string, _direction: 'up' | 'down') => sync.loadMore(sessionId),
         [sync],
     );
+    const loadThroughMessage = React.useCallback(
+        (sessionId: string, messageId: string) => sync.loadThroughMessage(sessionId, messageId),
+        [sync],
+    );
 
     // UI store
     const isExpandedInput = useUIStore((state) => state.isExpandedInput);
     const stickyUserHeader = useUIStore((state) => state.stickyUserHeader);
+    const promptNavigatorEnabled = useUIStore((state) => state.promptNavigatorEnabled);
+    const allowPromptingSubagentSessions = useUIStore((state) => state.allowPromptingSubagentSessions);
     const isTimelineDialogOpen = useUIStore((s) => s.isTimelineDialogOpen);
     const setTimelineDialogOpen = useUIStore((s) => s.setTimelineDialogOpen);
 
@@ -399,7 +461,16 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
             [streamingMessageId],
         ),
     );
-    const currentSessionDirectory = useSessionDirectory(currentSessionId ?? '');
+    const liveSessionDirectory = useSessionDirectory(currentSessionId ?? '');
+    const globalActiveSessions = useGlobalSessionsStore((state) => state.activeSessions);
+    const globalArchivedSessions = useGlobalSessionsStore((state) => state.archivedSessions);
+    const globalSessionDirectory = React.useMemo(() => {
+        if (!currentSessionId) return undefined;
+        const session = globalActiveSessions.find((candidate) => candidate.id === currentSessionId)
+            ?? globalArchivedSessions.find((candidate) => candidate.id === currentSessionId);
+        return session ? resolveGlobalSessionDirectory(session) ?? undefined : undefined;
+    }, [currentSessionId, globalActiveSessions, globalArchivedSessions]);
+    const currentSessionDirectory = liveSessionDirectory ?? globalSessionDirectory;
     const sessionMessageCount = useSessionMessageCount(currentSessionId ?? '', currentSessionDirectory);
     const hasRenderableSessionSnapshot = useSessionMessagesRenderable(currentSessionId ?? '', currentSessionDirectory);
     // Messages from sync system
@@ -495,39 +566,59 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
 
     // History metadata — use sync's hasMore/isLoading
     const historyMeta = React.useMemo(() => {
-        if (!currentSessionId) return null;
-        const prefetchHasMore = Boolean(sessionPrefetchInfo?.cursor) && sessionPrefetchInfo?.complete !== true;
+        if (!currentSessionId || !currentSessionDirectory) return null;
+        const syncComplete = sync.isComplete(currentSessionId);
+        const prefetchHasMore = !syncComplete
+            && Boolean(sessionPrefetchInfo?.cursor)
+            && sessionPrefetchInfo?.complete !== true;
         return {
             limit: sessionMessages.length,
-            complete: !(sync.hasMore(currentSessionId) || prefetchHasMore),
+            complete: syncComplete || !(sync.hasMore(currentSessionId) || prefetchHasMore),
             loading: sync.isLoading(currentSessionId),
         };
-    }, [currentSessionId, sessionMessages.length, sessionPrefetchInfo, sync]);
+    }, [currentSessionDirectory, currentSessionId, sessionMessages.length, sessionPrefetchInfo, sync]);
 
     const { isMobile } = useDeviceInfo();
+    const isVSCode = isVSCodeRuntime();
+    const promptHistory = useCompletePromptHistory({
+        enabled: promptNavigatorEnabled && hasRenderableSessionSnapshot && !isMobile && !isVSCode,
+        sessionID: currentSessionId,
+        directory: sessionPrefetchDirectory,
+    });
     const draftOpen = Boolean(newSessionDraft?.open);
     const isDesktopExpandedInput = isExpandedInput && !isMobile;
     const messageListRef = React.useRef<MessageListHandle | null>(null);
 
-    const parentSession = React.useMemo(() => {
+    const activeSession = React.useMemo(() => {
         if (!currentSessionId) return null;
-        const current = directorySessions.find((session) => session.id === currentSessionId)
-            ?? sessions.find((session) => session.id === currentSessionId);
-        const parentID = current?.parentID;
+        return directorySessions.find((session) => session.id === currentSessionId)
+            ?? sessions.find((session) => session.id === currentSessionId)
+            ?? getAllSyncSessions().find((session) => session.id === currentSessionId)
+            ?? null;
+    }, [currentSessionId, directorySessions, sessions]);
+
+    const parentSession = React.useMemo(() => {
+        const parentID = activeSession?.parentID;
         if (!parentID) return null;
         return directorySessions.find((session) => session.id === parentID)
             ?? sessions.find((session) => session.id === parentID)
             ?? getAllSyncSessions().find((session) => session.id === parentID)
             ?? null;
-    }, [currentSessionId, directorySessions, sessions]);
+    }, [activeSession?.parentID, directorySessions, sessions]);
 
     const handleReturnToParentSession = React.useCallback(() => {
         if (!parentSession) return;
         const parentDirectory = (parentSession as Session & { directory?: string | null }).directory ?? null;
-        setCurrentSession(parentSession.id, parentDirectory);
+        const parentServerId = serverRegistry.getServerForSession(parentSession.id);
+        setCurrentSession(
+            parentSession.id,
+            parentDirectory,
+            parentServerId ? { serverId: parentServerId } : undefined,
+        );
     }, [parentSession, setCurrentSession]);
 
-    const returnToParentButton = parentSession ? (
+    const embeddedAnchorSessionId = getEmbeddedSessionChatOriginSessionId();
+    const returnToParentButton = parentSession && currentSessionId !== embeddedAnchorSessionId ? (
         <Button
             type="button"
             variant="outline"
@@ -543,7 +634,11 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
             {t('chat.container.returnToParent.label')}
         </Button>
     ) : null;
-    const promptReadOnly = readOnly || Boolean(parentSession);
+    const promptReadOnly = resolvePromptReadOnly(
+        readOnly,
+        Boolean(activeSession?.parentID),
+        allowPromptingSubagentSessions,
+    );
 
     React.useEffect(() => {
         if (autoOpenDraft && !currentSessionId && !draftOpen) {
@@ -583,6 +678,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
         scrollRef,
         messageListRef,
         loadMoreMessages,
+        loadThroughMessage,
         goToBottom,
         releaseAutoFollow,
         isPinned,
@@ -647,6 +743,21 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
         scrollToMessage: timelineController.scrollToMessage,
         resumeToBottom: timelineController.resumeToBottomInstant,
     });
+    const { scrollToTurnId } = navigation;
+    const handleSelectPromptTurn = React.useCallback((turnId: string) => {
+        void scrollToTurnId(turnId, { behavior: 'auto' });
+    }, [scrollToTurnId]);
+    const showPromptNavigator = !isMobile
+        && !isVSCode
+        && !isDesktopExpandedInput
+        && promptNavigatorEnabled
+        && (timelineController.turnIds.length >= 2 || promptHistory.records.length >= 2);
+
+    React.useEffect(() => {
+        if (!showPromptNavigator) {
+            useUIStore.getState().setPromptNavigatorPanelOpen(false);
+        }
+    }, [showPromptNavigator]);
 
     React.useEffect(() => {
         if (typeof window === 'undefined' || !currentSessionId) return;
@@ -772,9 +883,10 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
 
     React.useEffect(() => {
         if (!currentSessionId) return;
+        if (!currentSessionDirectory) return;
         if (hasRenderableSessionSnapshot) return;
         void ensureSessionRenderable(currentSessionId);
-    }, [currentSessionId, ensureSessionRenderable, hasRenderableSessionSnapshot]);
+    }, [currentSessionDirectory, currentSessionId, ensureSessionRenderable, hasRenderableSessionSnapshot]);
 
 	if (!currentSessionId && !draftOpen) {
 		return (
@@ -908,6 +1020,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
                 isDesktopExpandedInput={isDesktopExpandedInput}
                 isMobile={isMobile}
                 stickyUserHeader={stickyUserHeader}
+                showPromptNavigator={showPromptNavigator}
                 scrollRef={scrollRef}
                 messageListRef={messageListRef}
                 turnStart={timelineController.turnStart}
@@ -922,12 +1035,16 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
                 handleMessageContentChange={handleMessageContentChange}
                 getAnimationHandlers={getAnimationHandlers}
                 handleLoadOlder={handleLoadOlder}
-                cancelPendingPrependAnchor={timelineController.cancelPendingPrependAnchor}
+                syncPendingPrependAnchorToViewport={timelineController.syncPendingPrependAnchorToViewport}
                 scrollToBottom={resumeToLatestInstant}
                 sessionQuestions={trailingQuestions}
                 sessionPermissions={trailingPermissions}
                 inlineBlockingRequestsByTool={inlineBlockingRequestsByTool}
                 isProgrammaticFollowActive={isFollowingProgrammatically}
+                promptHistoryRecords={promptHistory.records}
+                activeTurnId={timelineController.activeTurnId}
+                onSelectTurn={handleSelectPromptTurn}
+                canLoadEarlierPrompts={timelineController.historySignals.canLoadEarlier}
             />
 
                 <div

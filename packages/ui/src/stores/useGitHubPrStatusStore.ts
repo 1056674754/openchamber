@@ -1,7 +1,7 @@
 import { create } from 'zustand';
-import { createJSONStorage, persist } from 'zustand/middleware';
+import { persist } from 'zustand/middleware';
 import type { GitHubPullRequestStatus, RuntimeAPIs } from '@/lib/api/types';
-import { getSafeStorage } from './utils/safeStorage';
+import { createDeferredSafeJSONStorage } from './utils/safeStorage';
 import { mapWithConcurrency } from '@/lib/concurrency';
 
 const PR_REVALIDATE_TTL_MS = 90_000;
@@ -93,6 +93,29 @@ const timers = new Map<string, number>();
 const bootstrapTimers = new Map<string, number[]>();
 const inFlightBySignature = new Set<string>();
 const lastRefreshBySignature = new Map<string, number>();
+const PR_STATUS_NETWORK_CONCURRENCY = 2;
+let prStatusNetworkActive = 0;
+const prStatusNetworkWaiters: Array<() => void> = [];
+
+const acquirePrStatusNetworkSlot = (): Promise<void> => {
+  if (prStatusNetworkActive < PR_STATUS_NETWORK_CONCURRENCY) {
+    prStatusNetworkActive += 1;
+    return Promise.resolve();
+  }
+  return new Promise<void>((resolve) => {
+    prStatusNetworkWaiters.push(resolve);
+  });
+};
+
+const releasePrStatusNetworkSlot = (): void => {
+  const next = prStatusNetworkWaiters.shift();
+  if (next) {
+    next();
+    return;
+  }
+  prStatusNetworkActive = Math.max(0, prStatusNetworkActive - 1);
+};
+
 const createEntry = (): PrStatusEntry => ({
   status: null,
   isLoading: false,
@@ -511,7 +534,13 @@ export const useGitHubPrStatusStore = create<GitHubPrStatusStore>()(
             activeRequestCount: prev.activeRequestCount + 1,
             totalRequestCount: prev.totalRequestCount + 1,
           }));
-          const next = await params.github.prStatus(params.directory, params.branch, params.remoteName ?? undefined, { force: options?.force });
+          await acquirePrStatusNetworkSlot();
+          let next: GitHubPullRequestStatus;
+          try {
+            next = await params.github.prStatus(params.directory, params.branch, params.remoteName ?? undefined, { force: options?.force });
+          } finally {
+            releasePrStatusNetworkSlot();
+          }
           set((prev) => {
             const nextEntries = { ...prev.entries };
             signatureKeys.forEach((signatureKey) => {
@@ -627,7 +656,7 @@ export const useGitHubPrStatusStore = create<GitHubPrStatusStore>()(
     }),
     {
       name: PR_STATUS_STORAGE_KEY,
-      storage: createJSONStorage(() => getSafeStorage()),
+      storage: createDeferredSafeJSONStorage(),
       partialize: (state) => ({
         entries: Object.fromEntries(
           Object.entries(state.entries)

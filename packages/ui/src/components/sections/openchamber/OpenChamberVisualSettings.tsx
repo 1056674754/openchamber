@@ -19,7 +19,7 @@ import {
     SelectValue,
 } from '@/components/ui/select';
 import { Icon } from "@/components/icon/Icon";
-import { isDesktopShell, isVSCodeRuntime, isWebRuntime } from '@/lib/desktop';
+import { isDesktopLocalOriginActive, isDesktopShell, isVSCodeRuntime, isWebRuntime } from '@/lib/desktop';
 import { useDeviceInfo } from '@/lib/device';
 import { usePwaDetection } from '@/hooks/usePwaDetection';
 import { updateDesktopSettings } from '@/lib/persistence';
@@ -246,7 +246,7 @@ const normalizeUserMessageRenderingMode = (mode: unknown): 'markdown' | 'plain' 
     return mode === 'markdown' ? 'markdown' : 'plain';
 };
 
-export type VisibleSetting = 'theme' | 'pwaInstallName' | 'pwaOrientation' | 'mobileKeyboardMode' | 'timeFormat' | 'weekStart' | 'fontSize' | 'terminalFontSize' | 'spacing' | 'inputBarOffset' | 'mermaidRendering' | 'userMessageRendering' | 'chatRenderMode' | 'messageTransport' | 'activityRenderMode' | 'collapsibleUserMessages' | 'stickyUserHeader' | 'wideChatLayout' | 'splitAssistantMessageActions' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'reasoning' | 'showToolFileIcons' | 'expandedTools' | 'queueMode' | 'terminalQuickKeys' | 'fileEditorKeymap' | 'persistDraft' | 'inputSpellcheck' | 'reportUsage' | 'multiRun';
+export type VisibleSetting = 'theme' | 'dockBadge' | 'pwaInstallName' | 'pwaOrientation' | 'mobileKeyboardMode' | 'timeFormat' | 'weekStart' | 'fontSize' | 'terminalFontSize' | 'editorFontSize' | 'spacing' | 'inputBarOffset' | 'mermaidRendering' | 'userMessageRendering' | 'chatRenderMode' | 'messageTransport' | 'activityRenderMode' | 'collapsibleUserMessages' | 'stickyUserHeader' | 'promptNavigatorEnabled' | 'wideChatLayout' | 'splitAssistantMessageActions' | 'subagentPrompting' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'reasoning' | 'showToolFileIcons' | 'expandedTools' | 'queueMode' | 'terminalQuickKeys' | 'fileEditorKeymap' | 'persistDraft' | 'inputSpellcheck' | 'reportUsage' | 'multiRun';
 
 interface OpenChamberVisualSettingsProps {
     /** Which settings to show. If undefined, shows all. */
@@ -276,6 +276,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const setCollapsibleUserMessages = useUIStore(state => state.setCollapsibleUserMessages);
     const stickyUserHeader = useUIStore(state => state.stickyUserHeader);
     const setStickyUserHeader = useUIStore(state => state.setStickyUserHeader);
+    const promptNavigatorEnabled = useUIStore(state => state.promptNavigatorEnabled);
+    const setPromptNavigatorEnabled = useUIStore(state => state.setPromptNavigatorEnabled);
     const wideChatLayoutEnabled = useUIStore(state => state.wideChatLayoutEnabled);
     const setWideChatLayoutEnabled = useUIStore(state => state.setWideChatLayoutEnabled);
     const chatRenderMode = useUIStore(state => state.chatRenderMode);
@@ -286,6 +288,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const setFontSize = useUIStore(state => state.setFontSize);
     const terminalFontSize = useUIStore(state => state.terminalFontSize);
     const setTerminalFontSize = useUIStore(state => state.setTerminalFontSize);
+    const editorFontSize = useUIStore(state => state.editorFontSize);
+    const setEditorFontSize = useUIStore(state => state.setEditorFontSize);
     const uiFont = useUIStore(state => state.uiFont);
     const setUiFont = useUIStore(state => state.setUiFont);
     const monoFont = useUIStore(state => state.monoFont);
@@ -322,8 +326,12 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const setWeekStartPreference = useUIStore(state => state.setWeekStartPreference);
     const showSplitAssistantMessageActions = useUIStore(state => state.showSplitAssistantMessageActions);
     const setShowSplitAssistantMessageActions = useUIStore(state => state.setShowSplitAssistantMessageActions);
+    const allowPromptingSubagentSessions = useUIStore(state => state.allowPromptingSubagentSessions);
+    const setAllowPromptingSubagentSessions = useUIStore(state => state.setAllowPromptingSubagentSessions);
     const showMobileSessionStatusBar = useUIStore(state => state.showMobileSessionStatusBar);
     const setShowMobileSessionStatusBar = useUIStore(state => state.setShowMobileSessionStatusBar);
+    const dockBadgeEnabled = useUIStore(state => state.dockBadgeEnabled);
+    const setDockBadgeEnabled = useUIStore(state => state.setDockBadgeEnabled);
     const messageStreamTransport = useConfigStore((state) => state.settingsMessageStreamTransport);
     const setMessageStreamTransport = useConfigStore((state) => state.setSettingsMessageStreamTransport);
     const isSettingsDialogOpen = useUIStore(state => state.isSettingsDialogOpen);
@@ -419,6 +427,11 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         void updateDesktopSettings({ stickyUserHeader: enabled });
     }, [setStickyUserHeader]);
 
+    const handlePromptNavigatorEnabledChange = React.useCallback((enabled: boolean) => {
+        setPromptNavigatorEnabled(enabled);
+        void updateDesktopSettings({ promptNavigatorEnabled: enabled });
+    }, [setPromptNavigatorEnabled]);
+
     const handleWideChatLayoutChange = React.useCallback((enabled: boolean) => {
         setWideChatLayoutEnabled(enabled);
         void updateDesktopSettings({ wideChatLayoutEnabled: enabled });
@@ -428,6 +441,11 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         setShowSplitAssistantMessageActions(enabled);
         void updateDesktopSettings({ showSplitAssistantMessageActions: enabled });
     }, [setShowSplitAssistantMessageActions]);
+
+    const handleAllowPromptingSubagentSessionsChange = React.useCallback((enabled: boolean) => {
+        setAllowPromptingSubagentSessions(enabled);
+        void updateDesktopSettings({ allowPromptingSubagentSessions: enabled });
+    }, [setAllowPromptingSubagentSessions]);
 
     const handleInputSpellcheckChange = React.useCallback((enabled: boolean) => {
         setInputSpellcheckEnabled(enabled);
@@ -518,8 +536,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const hasLocalizationSettings = shouldShow('theme') || shouldShow('timeFormat') || shouldShow('weekStart');
     const hasAppearanceSettings = isVSCode
         ? hasLocalizationSettings
-        : (shouldShow('theme') || shouldShow('pwaInstallName') || shouldShow('pwaOrientation') || shouldShow('timeFormat') || shouldShow('weekStart'));
-    const hasLayoutSettings = shouldShow('fontSize') || shouldShow('terminalFontSize') || shouldShow('spacing') || shouldShow('inputBarOffset');
+        : (shouldShow('theme') || shouldShow('dockBadge') || shouldShow('pwaInstallName') || shouldShow('pwaOrientation') || shouldShow('timeFormat') || shouldShow('weekStart'));
+    const hasLayoutSettings = shouldShow('fontSize') || shouldShow('terminalFontSize') || shouldShow('editorFontSize') || shouldShow('spacing') || shouldShow('inputBarOffset');
     const hasNavigationSettings = (shouldShow('terminalQuickKeys') && !isMobile) || shouldShow('fileEditorKeymap');
     const hasBehaviorSettings = shouldShow('mermaidRendering')
         || shouldShow('userMessageRendering')
@@ -527,8 +545,10 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         || shouldShow('messageTransport')
         || (shouldShow('activityRenderMode') && chatRenderMode === 'sorted')
         || shouldShow('stickyUserHeader')
+        || (shouldShow('promptNavigatorEnabled') && !isVSCode)
         || shouldShow('wideChatLayout')
         || shouldShow('splitAssistantMessageActions')
+        || shouldShow('subagentPrompting')
         || shouldShow('diffLayout')
         || (shouldShow('mobileStatusBar') && isMobile)
         || shouldShow('dotfiles')
@@ -543,6 +563,11 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const showPwaInstallNameSetting = shouldShow('pwaInstallName') && isWebRuntime() && browserTab && !isDesktopShell() && !isVSCode;
     const showPwaOrientationSetting = shouldShow('pwaOrientation') && isWebRuntime() && !isDesktopShell() && !isVSCode;
     const showMobileKeyboardModeSetting = shouldShow('mobileKeyboardMode') && isWebRuntime() && !isDesktopShell() && !isVSCode && supportsMobileKeyboardResizeContent();
+    const showDockBadgeSetting = shouldShow('dockBadge')
+        && isDesktopShell()
+        && isDesktopLocalOriginActive()
+        && typeof window !== 'undefined'
+        && Number(window.__OPENCHAMBER_MACOS_MAJOR__ ?? 0) > 0;
     const [pwaInstallName, setPwaInstallName] = React.useState('');
     const [pwaOrientation, setPwaOrientation] = React.useState<'system' | 'portrait' | 'landscape'>('system');
     const selectedTimeFormatLabel = React.useMemo(() => {
@@ -767,6 +792,38 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                             {t('settings.openchamber.visual.field.themeImportInfoTooltip')}
                                         </TooltipContent>
                                     </Tooltip>
+                                </div>
+                            </section>
+                        )}
+
+                        {showDockBadgeSetting && (
+                            <section className="px-2 pb-2 pt-0 space-y-2" data-settings-item="appearance.dock-badge">
+                                <div
+                                    className="group flex cursor-pointer items-start gap-2 py-0.5"
+                                    role="button"
+                                    tabIndex={0}
+                                    aria-pressed={dockBadgeEnabled}
+                                    onClick={() => setDockBadgeEnabled(!dockBadgeEnabled)}
+                                    onKeyDown={(event) => {
+                                        if (event.key === ' ' || event.key === 'Enter') {
+                                            event.preventDefault();
+                                            setDockBadgeEnabled(!dockBadgeEnabled);
+                                        }
+                                    }}
+                                >
+                                    <Checkbox
+                                        checked={dockBadgeEnabled}
+                                        onChange={setDockBadgeEnabled}
+                                        ariaLabel={t('settings.openchamber.visual.field.dockBadge')}
+                                    />
+                                    <div className="flex min-w-0 flex-col">
+                                        <span className="typography-ui-label text-foreground">
+                                            {t('settings.openchamber.visual.field.dockBadge')}
+                                        </span>
+                                        <span className="typography-meta text-muted-foreground">
+                                            {t('settings.openchamber.visual.field.dockBadgeHint')}
+                                        </span>
+                                    </div>
                                 </div>
                             </section>
                         )}
@@ -1097,6 +1154,35 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                             disabled={terminalFontSize === 13}
                                             className="h-7 w-7 px-0 text-muted-foreground hover:text-foreground"
                                             aria-label={t('settings.openchamber.visual.actions.resetTerminalFontSizeAria')}
+                                            title={t('settings.common.actions.reset')}
+                                        >
+                                            <Icon name="restart" className="h-3.5 w-3.5" />
+                                        </Button>
+                                    </div>
+                                </div>
+                            )}
+
+                            {shouldShow('editorFontSize') && (
+                                <div className={cn("py-1", isMobile ? "flex flex-col gap-3" : "flex items-center gap-8")}>
+                                    <div className={cn("flex min-w-0 flex-col", isMobile ? "w-full" : "w-56 shrink-0")}>
+                                        <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.editorFontSize')}</span>
+                                    </div>
+                                    <div className={cn("flex items-center gap-2", isMobile ? "w-full" : "w-fit")}>
+                                        <NumberInput
+                                            value={editorFontSize}
+                                            onValueChange={setEditorFontSize}
+                                            min={9}
+                                            max={32}
+                                            step={1}
+                                            className="w-16"
+                                        />
+                                        <Button size="sm"
+                                            type="button"
+                                            variant="ghost"
+                                            onClick={() => setEditorFontSize(13)}
+                                            disabled={editorFontSize === 13}
+                                            className="h-7 w-7 px-0 text-muted-foreground hover:text-foreground"
+                                            aria-label={t('settings.openchamber.visual.actions.resetEditorFontSizeAria')}
                                             title={t('settings.common.actions.reset')}
                                         >
                                             <Icon name="restart" className="h-3.5 w-3.5" />
@@ -1609,8 +1695,13 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                 </div>
                             )}
 
-                            {(shouldShow('collapsibleUserMessages') || shouldShow('stickyUserHeader') || shouldShow('wideChatLayout') || shouldShow('splitAssistantMessageActions') || (shouldShow('mobileStatusBar') && isMobile) || shouldShow('dotfiles') || shouldShow('queueMode') || shouldShow('persistDraft') || shouldShow('showToolFileIcons') || (!isMobile && shouldShow('inputSpellcheck')) || shouldShow('reasoning') || shouldShow('multiRun')) && (
+                            {(shouldShow('collapsibleUserMessages') || shouldShow('stickyUserHeader') || (shouldShow('promptNavigatorEnabled') && !isVSCode) || shouldShow('wideChatLayout') || shouldShow('splitAssistantMessageActions') || shouldShow('subagentPrompting') || (shouldShow('mobileStatusBar') && isMobile) || shouldShow('dotfiles') || shouldShow('queueMode') || shouldShow('persistDraft') || shouldShow('showToolFileIcons') || (!isMobile && shouldShow('inputSpellcheck')) || shouldShow('reasoning') || shouldShow('multiRun')) && (
                                 <section className="p-2 space-y-0.5">
+                                    {shouldShow('reasoning') && (
+                                        <h3 className="typography-ui-header py-1.5 font-medium text-foreground">
+                                            {t('settings.openchamber.visual.section.reasoning')}
+                                        </h3>
+                                    )}
                                     {shouldShow('reasoning') && (
                                         <div
                                             className="group flex cursor-pointer items-center gap-2 py-0.5"
@@ -1700,6 +1791,11 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                         </div>
                                     )}
 
+                                    {(shouldShow('collapsibleUserMessages') || shouldShow('stickyUserHeader') || (shouldShow('promptNavigatorEnabled') && !isVSCode) || shouldShow('wideChatLayout') || shouldShow('splitAssistantMessageActions') || (shouldShow('mobileStatusBar') && isMobile)) && (
+                                        <h3 className="typography-ui-header mt-3 py-1.5 font-medium text-foreground">
+                                            {t('settings.openchamber.visual.section.messageAppearance')}
+                                        </h3>
+                                    )}
                                     {shouldShow('collapsibleUserMessages') && (
                                         <div
                                             className="group flex cursor-pointer items-center gap-2 py-0.5"
@@ -1743,6 +1839,29 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                 ariaLabel={t('settings.openchamber.visual.field.stickyUserHeaderAria')}
                                             />
                                             <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.stickyUserHeader')}</span>
+                                        </div>
+                                    )}
+
+                                    {shouldShow('promptNavigatorEnabled') && !isVSCode && (
+                                        <div
+                                            className="group flex cursor-pointer items-center gap-2 py-0.5"
+                                            role="button"
+                                            tabIndex={0}
+                                            aria-pressed={promptNavigatorEnabled}
+                                            onClick={() => handlePromptNavigatorEnabledChange(!promptNavigatorEnabled)}
+                                            onKeyDown={(event) => {
+                                                if (event.key === ' ' || event.key === 'Enter') {
+                                                    event.preventDefault();
+                                                    handlePromptNavigatorEnabledChange(!promptNavigatorEnabled);
+                                                }
+                                            }}
+                                        >
+                                            <Checkbox
+                                                checked={promptNavigatorEnabled}
+                                                onChange={handlePromptNavigatorEnabledChange}
+                                                ariaLabel={t('settings.openchamber.visual.field.promptNavigatorEnabledAria')}
+                                            />
+                                            <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.promptNavigatorEnabled')}</span>
                                         </div>
                                     )}
 
@@ -1802,6 +1921,39 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                         </div>
                                     )}
 
+                                    {(shouldShow('subagentPrompting') || shouldShow('multiRun')) && (
+                                        <h3 className="typography-ui-header mt-3 py-1.5 font-medium text-foreground">
+                                            {t('settings.openchamber.visual.section.sessionAssistance')}
+                                        </h3>
+                                    )}
+                                    {shouldShow('subagentPrompting') && (
+                                        <div
+                                            className="group flex cursor-pointer items-center gap-2 py-0.5"
+                                            role="button"
+                                            tabIndex={0}
+                                            aria-pressed={allowPromptingSubagentSessions}
+                                            onClick={() => handleAllowPromptingSubagentSessionsChange(!allowPromptingSubagentSessions)}
+                                            onKeyDown={(event) => {
+                                                if (event.key === ' ' || event.key === 'Enter') {
+                                                    event.preventDefault();
+                                                    handleAllowPromptingSubagentSessionsChange(!allowPromptingSubagentSessions);
+                                                }
+                                            }}
+                                        >
+                                            <Checkbox
+                                                checked={allowPromptingSubagentSessions}
+                                                onChange={handleAllowPromptingSubagentSessionsChange}
+                                                ariaLabel={t('settings.openchamber.visual.field.allowPromptingSubagentSessionsAria')}
+                                            />
+                                            <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.allowPromptingSubagentSessions')}</span>
+                                        </div>
+                                    )}
+
+                                    {(shouldShow('showToolFileIcons') || shouldShow('dotfiles')) && (
+                                        <h3 className="typography-ui-header mt-3 py-1.5 font-medium text-foreground">
+                                            {t('settings.openchamber.visual.section.toolsAndFiles')}
+                                        </h3>
+                                    )}
                                     {shouldShow('showToolFileIcons') && (
                                         <div
                                             className="group flex cursor-pointer items-center gap-2 py-0.5"
@@ -1871,6 +2023,11 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                         </div>
                                     )}
 
+                                    {(shouldShow('queueMode') || shouldShow('persistDraft') || (!isMobile && shouldShow('inputSpellcheck'))) && (
+                                        <h3 className="typography-ui-header mt-3 py-1.5 font-medium text-foreground">
+                                            {t('settings.openchamber.visual.section.composer')}
+                                        </h3>
+                                    )}
                                     {shouldShow('queueMode') && (
                                         <div className="flex min-w-0 flex-col items-stretch gap-1.5 py-0.5 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
                                             <div className="flex min-w-0 items-center gap-1.5">

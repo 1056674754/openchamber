@@ -69,6 +69,7 @@ const createMockChild = () => {
 };
 
 const createRuntime = (overrides = {}) => {
+  const { state: stateOverrides = {}, ...dependencyOverrides } = overrides;
   const state = {
     openCodeWorkingDirectory: '/tmp/project',
     openCodeProcess: null,
@@ -90,6 +91,7 @@ const createRuntime = (overrides = {}) => {
     resolvedWslBinary: null,
     resolvedWslOpencodePath: null,
     resolvedWslDistro: null,
+    ...stateOverrides,
   };
 
   return createOpenCodeLifecycleRuntime({
@@ -127,7 +129,7 @@ const createRuntime = (overrides = {}) => {
     })),
     persistManagedOpenCodeAuth: vi.fn(),
     restoreManagedOpenCodeAuth: vi.fn(() => false),
-    ...overrides,
+    ...dependencyOverrides,
   });
 };
 
@@ -148,6 +150,29 @@ describe('OpenCode lifecycle', () => {
 
     expect(results.map((result) => result.status)).toEqual(['rejected', 'rejected']);
     expect(applyOpencodeBinaryFromSettings).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports an external config refresh without waiting for agent presence', async () => {
+    globalThis.fetch = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ healthy: true }),
+    }));
+    const runtime = createRuntime({
+      state: {
+        isExternalOpenCode: true,
+        openCodePort: 45678,
+      },
+    });
+
+    const result = await runtime.refreshOpenCodeAfterConfigChange('agent creation', {
+      agentName: 'build',
+    });
+
+    expect(result).toEqual({ reloaded: false, external: true });
+    expect(globalThis.fetch).not.toHaveBeenCalledWith(
+      expect.stringContaining('/agent'),
+      expect.anything(),
+    );
   });
 
   it('launches managed OpenCode with the managed PATH', async () => {
@@ -254,6 +279,44 @@ describe('OpenCode lifecycle', () => {
     expect(spawnMock).not.toHaveBeenCalled();
   });
 
+  it('does not attach to an unrelated OpenCode server on the default port', async () => {
+    delete process.env.OPENCODE_BINARY;
+    globalThis.fetch = vi.fn(async (url) => {
+      const text = String(url);
+      if (text.includes(':4096/global/health')) {
+        return { ok: true, json: async () => ({ healthy: true }) };
+      }
+      return { ok: true, json: async () => ({ healthy: true }) };
+    });
+
+    const child = createMockChild();
+    spawnMock.mockImplementationOnce(() => {
+      queueMicrotask(() => {
+        child.stdout.emit('data', 'opencode server listening on http://127.0.0.1:45678\n');
+      });
+      return child;
+    });
+
+    const runtime = createRuntime({
+      env: {
+        ENV_CONFIGURED_OPENCODE_PORT: null,
+        ENV_CONFIGURED_OPENCODE_HOST: null,
+        ENV_EFFECTIVE_PORT: null,
+        ENV_CONFIGURED_OPENCODE_HOSTNAME: '127.0.0.1',
+        ENV_SKIP_OPENCODE_START: false,
+      },
+      readPersistedOpenCodePort: vi.fn(() => null),
+    });
+
+    await runtime.bootstrapOpenCodeAtStartup();
+
+    expect(spawnMock).toHaveBeenCalledTimes(1);
+    expect(globalThis.fetch).not.toHaveBeenCalledWith(
+      expect.stringContaining(':4096/global/health'),
+      expect.anything(),
+    );
+  });
+
   it('terminates an unhealthy previous managed process group before launching its replacement', async () => {
     process.env.OPENCHAMBER_RUNTIME = 'desktop';
     delete process.env.OPENCODE_BINARY;
@@ -314,6 +377,12 @@ describe('OpenCode lifecycle', () => {
     delete process.env.OPENCODE_BINARY;
     const restoreManagedOpenCodeAuth = vi.fn(() => true);
     let previousManagedPortHealthy = true;
+    spawnSyncMock.mockImplementation((command) => {
+      if (command === 'lsof') {
+        return { stdout: '43210\n' };
+      }
+      return { stdout: '' };
+    });
     globalThis.fetch = vi.fn(async (url) => {
       const text = String(url);
       if (text.includes(':4096/global/health')) {
@@ -370,6 +439,12 @@ describe('OpenCode lifecycle', () => {
     delete process.env.OPENCODE_BINARY;
     const restoreManagedOpenCodeAuth = vi.fn(() => true);
     let previousManagedPortHealthy = true;
+    spawnSyncMock.mockImplementation((command) => {
+      if (command === 'lsof') {
+        return { stdout: '43210\n' };
+      }
+      return { stdout: '' };
+    });
     globalThis.fetch = vi.fn(async (url) => {
       const text = String(url);
       if (text.includes(':4096/global/health')) {
@@ -404,6 +479,54 @@ describe('OpenCode lifecycle', () => {
     await runtime.triggerHealthCheck();
 
     expect(spawnMock).not.toHaveBeenCalled();
+  });
+
+  it('restarts a dead reconnected managed port immediately even when sessions look busy', async () => {
+    delete process.env.OPENCODE_BINARY;
+    const restoreManagedOpenCodeAuth = vi.fn(() => true);
+    let previousManagedPortHealthy = true;
+    globalThis.fetch = vi.fn(async (url) => {
+      const text = String(url);
+      if (text.includes(':4096/global/health')) {
+        return { ok: false, json: async () => ({ healthy: false }) };
+      }
+      if (text.includes(':56789/global/health')) {
+        return {
+          ok: previousManagedPortHealthy,
+          json: async () => ({ healthy: previousManagedPortHealthy }),
+        };
+      }
+      return { ok: true, json: async () => ({}) };
+    });
+
+    const child = createMockChild();
+    spawnMock.mockImplementationOnce(() => {
+      queueMicrotask(() => {
+        child.stdout.emit('data', 'opencode server listening on http://127.0.0.1:45678\n');
+      });
+      return child;
+    });
+
+    const runtime = createRuntime({
+      env: {
+        ENV_CONFIGURED_OPENCODE_PORT: null,
+        ENV_CONFIGURED_OPENCODE_HOST: null,
+        ENV_EFFECTIVE_PORT: null,
+        ENV_CONFIGURED_OPENCODE_HOSTNAME: '127.0.0.1',
+        ENV_SKIP_OPENCODE_START: false,
+      },
+      getActiveSessionCount: vi.fn(() => 1),
+      restoreManagedOpenCodeAuth,
+      readPersistedOpenCodePort: vi.fn(() => 56789),
+    });
+
+    await runtime.bootstrapOpenCodeAtStartup();
+    expect(spawnMock).not.toHaveBeenCalled();
+
+    previousManagedPortHealthy = false;
+    await runtime.triggerHealthCheck();
+
+    expect(spawnMock).toHaveBeenCalledTimes(1);
   });
 
   it('falls back to buildAugmentedPath when buildManagedOpenCodePath is not provided', async () => {

@@ -148,6 +148,60 @@ describe("materializeSessionSnapshots", () => {
     expect(result.part.msg_1).toEqual([serverPart])
   })
 
+  test("preserves tool state time when a materialized snapshot omits it", () => {
+    const livePart = {
+      id: "prt_1",
+      messageID: "msg_1",
+      sessionID: "ses_1",
+      type: "tool",
+      callID: "call_1",
+      tool: "bash",
+      state: {
+        status: "completed",
+        input: {},
+        output: "done",
+        title: "Tool",
+        metadata: {},
+        time: { start: 1000, end: 2000 },
+      },
+    } as Part
+    const snapshotPart = {
+      id: "prt_1",
+      messageID: "msg_1",
+      sessionID: "ses_1",
+      type: "tool",
+      callID: "call_1",
+      tool: "bash",
+      state: {
+        status: "completed",
+        input: {},
+        output: "done",
+        title: "Tool",
+        metadata: {},
+      },
+    } as Part
+    const state = {
+      message: { ses_1: [message("msg_1")] },
+      part: { msg_1: [livePart] },
+    }
+
+    const result = materializeSessionSnapshots(
+      state,
+      "ses_1",
+      [{ info: message("msg_1"), parts: [snapshotPart] }],
+    )
+
+    const mergedPart = result.part.msg_1[0]
+    expect(mergedPart?.type).toBe("tool")
+    if (!mergedPart || mergedPart.type !== "tool") throw new Error("expected merged tool part")
+    expect("time" in mergedPart.state).toBe(true)
+    if (!("time" in mergedPart.state)) throw new Error("expected merged tool time")
+    expect(mergedPart.state.time?.start).toBe(1000)
+    expect(mergedPart.state.time && "end" in mergedPart.state.time).toBe(true)
+    if (!mergedPart.state.time || !("end" in mergedPart.state.time)) throw new Error("expected merged tool end time")
+    expect(mergedPart.state.time.end).toBe(2000)
+  })
+
   test("sanitizes oversized tool payloads before retaining them in state", () => {
     const toolPart: Part = {
       id: "prt_tool",

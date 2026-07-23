@@ -414,7 +414,7 @@ export const ActiveEditorFileSuggestion = memo(() => {
       ? `${selection.startLine}`
       : `${selection.startLine}-${selection.endLine}`
   }
-  const selectionLabel = selection ? `${fileName}:${selectionRange}` : ''
+  const selectionLabel = selection ? `${relativePath}:${selectionRange}` : ''
   const isSelectionAttached = !!selectionLabel && attachedFiles.some(
     (f) => f.source === 'vscode' && f.vscodeSource === 'selection' && f.filename === selectionLabel && f.vscodePath === filePath
   )

@@ -45,6 +45,7 @@ describe('settings page instance visibility', () => {
       'snippets',
       'providers',
       'usage',
+      'subscriptions',
       'agents',
       'behavior',
       'commands',

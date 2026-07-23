@@ -40,6 +40,13 @@ export const useSessionFolderCleanup = (args: Args): void => {
       return;
     }
 
+    if (
+      sessions.length === 0
+      && normalizedProjects.every((project) => getArchivedSessionsForProject(project).length === 0)
+    ) {
+      return;
+    }
+
     const idsByScope = new Map<string, Set<string>>();
     sessions.forEach((session) => {
       const directory = normalizePath((session as Session & { directory?: string | null }).directory ?? null);

@@ -67,6 +67,63 @@ describe('opencode routes', () => {
     );
   });
 
+  test('keeps provider source response shape while reading auth from the adapter', async () => {
+    const response = await request(createApp({
+      getProviderSources: () => ({
+        sources: {
+          auth: { exists: false },
+          user: { exists: false, path: '/user/config.json' },
+          project: { exists: true, path: '/project/opencode.json' },
+          custom: { exists: false, path: null },
+        },
+      }),
+      fetchProvidersSnapshot: async () => [{
+        id: 'anthropic',
+        name: 'Anthropic',
+        source: 'api',
+        env: ['ANTHROPIC_API_KEY'],
+        key: 'hidden',
+      }],
+    }))
+      .get('/api/provider/anthropic/source')
+      .expect(200);
+
+    expect(response.body).toEqual({
+      providerId: 'anthropic',
+      sources: {
+        auth: { exists: true },
+        user: { exists: false, path: '/user/config.json' },
+        project: { exists: true, path: '/project/opencode.json' },
+        custom: { exists: false, path: null },
+      },
+    });
+  });
+
+  test('proxies provider auth deletion to OpenCode without changing the response shape', async () => {
+    const fetchMock = useFetchMock(mock(async () => jsonResponse(true)));
+    const refreshOpenCodeAfterConfigChange = mock(async () => {});
+
+    const response = await request(createApp({ refreshOpenCodeAfterConfigChange }))
+      .delete('/api/provider/anthropic/auth')
+      .expect(200);
+
+    expect(response.body).toEqual({
+      success: true,
+      removed: true,
+      requiresReload: true,
+      message: 'Provider disconnected successfully',
+      reloadDelayMs: 0,
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://opencode.test/auth/anthropic',
+      expect.objectContaining({
+        method: 'DELETE',
+        headers: expect.objectContaining({ Authorization: 'Bearer test-token' }),
+      }),
+    );
+    expect(refreshOpenCodeAfterConfigChange).toHaveBeenCalled();
+  });
+
   test('returns the normalized OpenCode version from global health', async () => {
     const fetchMock = useFetchMock(mock(async () => jsonResponse({ version: 'v1.2.3' })));
 

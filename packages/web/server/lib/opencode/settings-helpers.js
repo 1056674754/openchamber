@@ -23,6 +23,33 @@ export const createSettingsHelpers = (dependencies) => {
   const STT_LANGUAGE_MAX_LENGTH = 64;
   const PWA_ORIENTATION_VALUES = new Set(['system', 'portrait', 'landscape']);
   const MOBILE_KEYBOARD_MODE_VALUES = new Set(['native', 'resize-content']);
+  const HIDDEN_MODELS_MAX = 1024;
+  const RECENT_EFFORTS_MAX_KEYS = 128;
+  const RECENT_EFFORTS_MAX_VARIANTS_PER_KEY = 5;
+
+  const sanitizeRecentEfforts = (value) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+    const result = {};
+    let count = 0;
+    for (const [rawKey, rawVariants] of Object.entries(value)) {
+      const key = typeof rawKey === 'string' ? rawKey.trim() : '';
+      if (!key || !Array.isArray(rawVariants)) continue;
+      const variants = [];
+      const seen = new Set();
+      for (const rawVariant of rawVariants) {
+        const variant = typeof rawVariant === 'string' ? rawVariant.trim() : '';
+        if (!variant || seen.has(variant)) continue;
+        seen.add(variant);
+        variants.push(variant);
+        if (variants.length >= RECENT_EFFORTS_MAX_VARIANTS_PER_KEY) break;
+      }
+      if (variants.length === 0) continue;
+      result[key] = variants;
+      count += 1;
+      if (count >= RECENT_EFFORTS_MAX_KEYS) break;
+    }
+    return result;
+  };
 
   const normalizeFollowUpBehavior = (value, fallback = 'steer') => {
     if (value === 'steer' || value === 'queue') {
@@ -423,14 +450,23 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.stickyUserHeader === 'boolean') {
       result.stickyUserHeader = candidate.stickyUserHeader;
     }
+    if (typeof candidate.promptNavigatorEnabled === 'boolean') {
+      result.promptNavigatorEnabled = candidate.promptNavigatorEnabled;
+    }
     if (typeof candidate.showSplitAssistantMessageActions === 'boolean') {
       result.showSplitAssistantMessageActions = candidate.showSplitAssistantMessageActions;
+    }
+    if (typeof candidate.allowPromptingSubagentSessions === 'boolean') {
+      result.allowPromptingSubagentSessions = candidate.allowPromptingSubagentSessions;
     }
     if (typeof candidate.fontSize === 'number' && Number.isFinite(candidate.fontSize)) {
       result.fontSize = Math.max(50, Math.min(200, Math.round(candidate.fontSize)));
     }
     if (typeof candidate.terminalFontSize === 'number' && Number.isFinite(candidate.terminalFontSize)) {
       result.terminalFontSize = Math.max(9, Math.min(52, Math.round(candidate.terminalFontSize)));
+    }
+    if (typeof candidate.editorFontSize === 'number' && Number.isFinite(candidate.editorFontSize)) {
+      result.editorFontSize = Math.max(9, Math.min(32, Math.round(candidate.editorFontSize)));
     }
     if (typeof candidate.padding === 'number' && Number.isFinite(candidate.padding)) {
       result.padding = Math.max(50, Math.min(200, Math.round(candidate.padding)));
@@ -450,6 +486,20 @@ export const createSettingsHelpers = (dependencies) => {
     const recentModels = sanitizeModelRefs(candidate.recentModels, 16);
     if (recentModels) {
       result.recentModels = recentModels;
+    }
+    const hiddenModels = sanitizeModelRefs(candidate.hiddenModels, HIDDEN_MODELS_MAX);
+    if (hiddenModels) {
+      result.hiddenModels = hiddenModels;
+    }
+    if (Array.isArray(candidate.collapsedModelProviders)) {
+      result.collapsedModelProviders = normalizeStringArray(candidate.collapsedModelProviders);
+    }
+    if (Array.isArray(candidate.recentAgents)) {
+      result.recentAgents = normalizeStringArray(candidate.recentAgents);
+    }
+    const recentEfforts = sanitizeRecentEfforts(candidate.recentEfforts);
+    if (recentEfforts) {
+      result.recentEfforts = recentEfforts;
     }
     if (typeof candidate.diffLayoutPreference === 'string') {
       const mode = candidate.diffLayoutPreference.trim();

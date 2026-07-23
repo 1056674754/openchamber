@@ -24,8 +24,6 @@ import {
   assertProviderCircuitClosed,
   recordProviderSuccess,
   recordProviderError,
-  shouldRetry,
-  getRetryDelayMs,
 } from "./provider-tracker";
 
 // Use relative path by default (works with both dev and nginx proxy server)
@@ -86,10 +84,12 @@ const ascendingId = (prefix: "msg"): string => {
   return `${prefix}_${hex}${randomBase62(ID_RANDOM_LENGTH)}`;
 };
 
-const isRetryableFetchError = (error: unknown): boolean => {
-  if (error instanceof DOMException && error.name === 'AbortError') return true;
-  if (error instanceof TypeError) return true;
-  return false;
+const readResponseTextOrEmpty = async (response: Response): Promise<string> => {
+  try {
+    return await response.text();
+  } catch {
+    return '';
+  }
 };
 
 const ensureAbsoluteBaseUrl = (candidate: string): string => {
@@ -762,8 +762,6 @@ class OpencodeService {
     };
     deliveryMode?: 'normal' | 'steer';
   }): Promise<string> {
-    // Reuse one client-side message ID across retries. The server accepts this
-    // as the real user message ID, making ambiguous network retries idempotent.
     const messageId = params.messageId ?? ascendingId("msg");
 
     // Build parts array using SDK types (TextPartInput | FilePartInput) plus lightweight agent parts
@@ -863,70 +861,42 @@ class OpencodeService {
 
     assertProviderCircuitClosed(params.providerID);
 
-    let response!: Response;
-
-    for (let attempt = 0; attempt < 3; attempt++) {
-      try {
-        response = await fetch(url, {
-          method: 'POST',
-          headers: {
-            'content-type': 'application/json',
-            accept: 'application/json',
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          accept: 'application/json',
+        },
+        body: JSON.stringify({
+          model: {
+            providerID: params.providerID,
+            modelID: params.modelID,
           },
-          body: JSON.stringify({
-            model: {
-              providerID: params.providerID,
-              modelID: params.modelID,
-            },
-            agent: params.agent,
-            variant: params.variant,
-            messageID: messageId,
-            ...(params.format ? { format: params.format } : {}),
-            parts,
-          }),
-        });
-      } catch (error) {
-        if (attempt < 2 && isRetryableFetchError(error)) {
-          const delay = getRetryDelayMs(attempt);
-          console.warn(
-            `[prompt] fetch failed for ${params.providerID}/${params.modelID} (attempt ${attempt + 1}/3), retrying in ${delay}ms`,
-            (error as Error)?.message
-          );
-          await new Promise((resolve) => setTimeout(resolve, delay));
-          continue;
-        }
-        recordProviderError(params.providerID);
-        throw error;
-      }
-
-      if (response.ok) {
-        recordProviderSuccess(params.providerID);
-        return messageId;
-      }
-
-      if (shouldRetry(params.providerID, response.status, attempt)) {
-        const delay = getRetryDelayMs(attempt);
-        console.warn(
-          `[prompt] ${response.status} for ${params.providerID}/${params.modelID} (attempt ${attempt + 1}/3), retrying in ${delay}ms`
-        );
-        await new Promise((resolve) => setTimeout(resolve, delay));
-        continue;
-      }
-
-      let detail = '';
-      try {
-        detail = await response.text();
-      } catch {
-        // ignore
-      }
-      const suffix = detail && detail.trim().length > 0 ? `: ${detail.trim()}` : '';
-      const error = new Error(`Failed to send message (${response.status})${suffix}`);
-      recordProviderError(params.providerID, response.status);
+          agent: params.agent,
+          variant: params.variant,
+          messageID: messageId,
+          ...(params.format ? { format: params.format } : {}),
+          parts,
+        }),
+      });
+    } catch (error) {
+      recordProviderError(params.providerID);
       throw error;
     }
-    // Defensive fallback — all loop paths return/throw, but TypeScript
-    // control flow analysis cannot prove exhaustiveness without this.
-    throw new Error('Failed to send message after retries');
+
+    if (response.ok) {
+      recordProviderSuccess(params.providerID);
+      return messageId;
+    }
+
+    const detail = await readResponseTextOrEmpty(response);
+    const suffix = detail && detail.trim().length > 0 ? `: ${detail.trim()}` : '';
+    const error = new Error(`Failed to send message (${response.status})${suffix}`);
+    Object.defineProperty(error, 'status', { value: response.status, enumerable: true });
+    recordProviderError(params.providerID, response.status);
+    throw error;
   }
 
   private async sendSteer(
@@ -973,50 +943,39 @@ class OpencodeService {
 
     assertProviderCircuitClosed(params.providerID);
 
-    let response!: Response;
-    for (let attempt = 0; attempt < 3; attempt++) {
-      try {
-        response = await fetch(url, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json', accept: 'application/json' },
-          body: JSON.stringify({
-            id: messageId,
-            prompt: promptBody,
-            delivery: 'steer',
-          }),
-        });
-      } catch (error) {
-        if (attempt < 2 && isRetryableFetchError(error)) {
-          await new Promise((resolve) => setTimeout(resolve, getRetryDelayMs(attempt)));
-          continue;
-        }
-        recordProviderError(params.providerID);
-        throw error;
-      }
-
-      if (response.ok) {
-        try {
-          await readSteerAdmission(response, messageId);
-        } catch (error) {
-          recordProviderError(params.providerID, response.status);
-          throw new Error(`Failed to steer message: ${formatSdkError(error)}`);
-        }
-        recordProviderSuccess(params.providerID);
-        return messageId;
-      }
-
-      if (shouldRetry(params.providerID, response.status, attempt)) {
-        await new Promise((resolve) => setTimeout(resolve, getRetryDelayMs(attempt)));
-        continue;
-      }
-
-      let detail = '';
-      try { detail = await response.text(); } catch { /* ignore */ }
-      const suffix = detail.trim() ? `: ${detail.trim()}` : '';
-      recordProviderError(params.providerID, response.status);
-      throw new Error(`Failed to steer message (${response.status})${suffix}`);
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', accept: 'application/json' },
+        body: JSON.stringify({
+          id: messageId,
+          prompt: promptBody,
+          delivery: 'steer',
+        }),
+      });
+    } catch (error) {
+      recordProviderError(params.providerID);
+      throw error;
     }
-    throw new Error('Failed to steer message after retries');
+
+    if (response.ok) {
+      try {
+        await readSteerAdmission(response, messageId);
+      } catch (error) {
+        recordProviderError(params.providerID, response.status);
+        throw new Error(`Failed to steer message: ${formatSdkError(error)}`);
+      }
+      recordProviderSuccess(params.providerID);
+      return messageId;
+    }
+
+    const detail = await readResponseTextOrEmpty(response);
+    const suffix = detail.trim() ? `: ${detail.trim()}` : '';
+    const error = new Error(`Failed to steer message (${response.status})${suffix}`);
+    Object.defineProperty(error, 'status', { value: response.status, enumerable: true });
+    recordProviderError(params.providerID, response.status);
+    throw error;
   }
 
   async sendCommand(params: {
@@ -1506,7 +1465,7 @@ class OpencodeService {
       if (targetDir) {
         for (const e of getAllSyncStores()) {
           if (e.serverId === DEFAULT_SERVER_ID) continue;
-          if (e.childStores.children.has(targetDir)) {
+          if (e.childStores.getChild(targetDir)) {
             const conn = serverRegistry.get(e.serverId);
             if (conn) { fsBaseUrl = conn.config.baseUrl; break; }
           }
@@ -1663,7 +1622,7 @@ class OpencodeService {
     let fsBaseUrl: string = this.baseUrl;
     for (const e of getAllSyncStores()) {
       if (e.serverId === DEFAULT_SERVER_ID) continue;
-      if (e.childStores.children.has(dirPath)) {
+      if (e.childStores.getChild(dirPath)) {
         const conn = serverRegistry.get(e.serverId);
         if (conn) { fsBaseUrl = conn.config.baseUrl; break; }
       }
@@ -1689,7 +1648,7 @@ class OpencodeService {
     let fsBaseUrl: string = this.baseUrl;
     for (const e of getAllSyncStores()) {
       if (e.serverId === DEFAULT_SERVER_ID) continue;
-      if (e.childStores.children.has(input.destinationPath)) {
+      if (e.childStores.getChild(input.destinationPath)) {
         const conn = serverRegistry.get(e.serverId);
         if (conn) { fsBaseUrl = conn.config.baseUrl; break; }
       }
@@ -1765,7 +1724,7 @@ class OpencodeService {
         if (directoryPath) {
           for (const e of getAllSyncStores()) {
             if (e.serverId === DEFAULT_SERVER_ID) continue;
-            if (e.childStores.children.has(directoryPath)) {
+            if (e.childStores.getChild(directoryPath)) {
               const conn = serverRegistry.get(e.serverId);
               if (conn) { fsBaseUrl = conn.config.baseUrl; break; }
             }

@@ -7,7 +7,24 @@ mock.module("@opencode-ai/sdk/v2", () => ({
 const { DEFAULT_SERVER_ID, serverRegistry } = await import("@/lib/opencode/server-registry");
 const { ChildStoreManager } = await import("./child-store");
 const { registerSyncStores } = await import("./multi-server-registry");
-const { resolveSdkForDirectory, setSessionRoutingContextGetters } = await import("./session-routing");
+const {
+  normalizeDirectoryKey,
+  requireExistingSessionDirectory,
+  resolveSdkForDirectory,
+  setSessionRoutingContextGetters,
+} = await import("./session-routing");
+
+describe("requireExistingSessionDirectory", () => {
+  test("returns the normalized authoritative directory", () => {
+    expect(requireExistingSessionDirectory("ses_known", "c:\\repo\\project\\")).toBe("C:/repo/project");
+  });
+
+  test("rejects an existing session without authoritative directory context", () => {
+    expect(() => requireExistingSessionDirectory("ses_unknown", null)).toThrow(
+      "Directory for session ses_unknown is not available",
+    );
+  });
+});
 
 describe("resolveSdkForDirectory", () => {
   beforeEach(() => {
@@ -54,5 +71,15 @@ describe("resolveSdkForDirectory", () => {
     } finally {
       serverRegistry.unregister(serverId);
     }
+  });
+
+  test("canonicalizes Windows drive letters before routing", () => {
+    expect(normalizeDirectoryKey("c:\\repo\\project\\")).toBe("C:/repo/project");
+
+    const stores = new ChildStoreManager();
+    const lower = stores.ensureChild("c:\\repo\\project", { bootstrap: false });
+    const upper = stores.ensureChild("C:/repo/project", { bootstrap: false });
+    expect(upper).toBe(lower);
+    expect(stores.children.size).toBe(1);
   });
 });

@@ -8,6 +8,7 @@ export const DIRECTIVE_TYPE_CONTINUATION = "CONTINUATION"
 const DIRECTIVE_TYPE_SKILL = "SKILL"
 const SYSTEM_REMINDER_OPEN = "<system-reminder>"
 const SYSTEM_DIRECTIVE_PREFIX = "[SYSTEM DIRECTIVE: OH-MY-OPENCODE"
+const DIRECTORY_CONTEXT_PREFIX = "[Directory Context:"
 const SKILL_INSTRUCTION_RE = /<skill-instruction>[\s\S]*?Base directory for this skill:[\s\S]*?<\/skill-instruction>/
 
 const textHasSkillInstructionDirective = (text: string): boolean => {
@@ -30,6 +31,7 @@ const textPartHasDirectiveMarker = (part: Part): boolean => {
 
   // Directive prefix always appears at the START of the message.
   if (text.trimStart().startsWith(SYSTEM_DIRECTIVE_PREFIX)) return true
+  if (text.trimStart().startsWith(DIRECTORY_CONTEXT_PREFIX)) return true
 
   return false
 }

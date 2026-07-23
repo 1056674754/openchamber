@@ -4,8 +4,9 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import { randomUUID } from 'crypto';
 import { removeProviderConfig, getProviderSources } from './opencodeConfig';
-import { getProviderAuth, removeProviderAuth } from './opencodeAuth';
+import { getProviderAuth, listProviderAuths, removeProviderAuth } from './opencodeAuth';
 import { fetchQuotaForProvider, listConfiguredQuotaProviders } from './quotaProviders';
+import { aggregateSubscriptions, fetchOpenCodeProviderSnapshot } from './subscriptions';
 import {
   deleteOpenCodeGoCredential,
   fetchOpenCodeGoUsage,
@@ -536,6 +537,26 @@ export async function handleSystemBridgeMessage(
       try {
         const result = await fetchQuotaForProvider(providerId);
         return { id, type, success: true, data: result };
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        return { id, type, success: false, error: errorMessage };
+      }
+    }
+
+    case 'api:subscriptions:get': {
+      try {
+        const manager = ctx?.manager;
+        const payload = await aggregateSubscriptions({
+          workingDirectory: manager?.getWorkingDirectory(),
+          fetchProvidersSnapshot: () => fetchOpenCodeProviderSnapshot({
+            apiUrl: manager?.getApiUrl() ?? null,
+            authHeaders: manager?.getOpenCodeAuthHeaders() ?? {},
+          }),
+          listProviderAuths,
+          getProviderSources,
+          listConfiguredQuotaProviders,
+        });
+        return { id, type, success: true, data: payload };
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
         return { id, type, success: false, error: errorMessage };

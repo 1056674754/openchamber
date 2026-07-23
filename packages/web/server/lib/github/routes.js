@@ -103,8 +103,8 @@ export function registerGitHubRoutes(app) {
 
       if (ghToken !== null && !ghCliDisabled) {
         try {
-          const { Octokit } = await import('@octokit/rest');
-          ghCliUser = await getGitHubUserSummary(new Octokit({ auth: ghToken }));
+          const { createOctokit } = await import('./octokit.js');
+          ghCliUser = await getGitHubUserSummary(createOctokit(ghToken));
         } catch {
           ghCliUser = null;
         }
@@ -242,8 +242,8 @@ export function registerGitHubRoutes(app) {
         return res.status(500).json({ error: 'Missing access_token from GitHub' });
       }
 
-      const { Octokit } = await import('@octokit/rest');
-      const octokit = new Octokit({ auth: accessToken });
+      const { createOctokit } = await import('./octokit.js');
+      const octokit = createOctokit(accessToken);
       const user = await getGitHubUserSummary(octokit);
 
       setGitHubAuth({
@@ -279,8 +279,8 @@ export function registerGitHubRoutes(app) {
           return res.status(404).json({ error: 'GitHub CLI account not found' });
         }
 
-        const { Octokit } = await import('@octokit/rest');
-        const user = await getGitHubUserSummary(new Octokit({ auth: ghToken }));
+        const { createOctokit } = await import('./octokit.js');
+        const user = await getGitHubUserSummary(createOctokit(ghToken));
         setGhCliActive(true);
         const accounts = getGitHubAuthAccounts()
           .map((account) => ({ ...account, current: false }))
@@ -315,8 +315,8 @@ export function registerGitHubRoutes(app) {
       let ghCliUser = null;
       if (ghToken) {
         try {
-          const { Octokit } = await import('@octokit/rest');
-          ghCliUser = await getGitHubUserSummary(new Octokit({ auth: ghToken }));
+          const { createOctokit } = await import('./octokit.js');
+          ghCliUser = await getGitHubUserSummary(createOctokit(ghToken));
           accounts = accounts.concat({
             id: GH_CLI_ACCOUNT_ID,
             user: ghCliUser,
@@ -1022,6 +1022,7 @@ export function registerGitHubRoutes(app) {
       if (upstream) {
         try {
           const { getRemotes } = await import('../git/index.js');
+          const { resolveGitHubRepoFromDirectory } = await import('./index.js');
           const remotes = await getRemotes(directory);
           for (const r of remotes) {
             if (r?.name) {

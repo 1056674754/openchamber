@@ -14,6 +14,7 @@ import {
   resetToCommit,
   resolveBaseRefForLog,
   revertCommit,
+  setLocalIdentity,
   stageFiles,
   unstageFiles,
 } from './service.js';
@@ -168,6 +169,47 @@ describe('getRemotes', () => {
 
     const dir = createTempDir();
     await expect(getRemotes(dir)).resolves.toEqual([]);
+  });
+});
+
+describe('setLocalIdentity', () => {
+  it('configures SSH commit signing in the repository only', async () => {
+    if (!canRunGit()) return;
+
+    const repo = createTempDir();
+    runGit(repo, ['init', '-b', 'main']);
+
+    await setLocalIdentity(repo, {
+      userName: 'Signing User',
+      userEmail: 'signing@example.com',
+      signCommits: true,
+      signingKey: '~/.ssh/id_ed25519.pub',
+    });
+
+    expect(runGit(repo, ['config', '--local', '--get', 'gpg.format']).trim()).toBe('ssh');
+    expect(runGit(repo, ['config', '--local', '--get', 'user.signingkey']).trim()).toBe('~/.ssh/id_ed25519.pub');
+    expect(runGit(repo, ['config', '--local', '--get', 'commit.gpgsign']).trim()).toBe('true');
+  });
+
+  it('clears signing config when the selected identity disables signing', async () => {
+    if (!canRunGit()) return;
+
+    const repo = createTempDir();
+    runGit(repo, ['init', '-b', 'main']);
+    runGit(repo, ['config', '--local', 'gpg.format', 'ssh']);
+    runGit(repo, ['config', '--local', 'user.signingkey', '~/.ssh/old.pub']);
+    runGit(repo, ['config', '--local', 'commit.gpgsign', 'true']);
+
+    await setLocalIdentity(repo, {
+      userName: 'Unsigned User',
+      userEmail: 'unsigned@example.com',
+      signCommits: false,
+      signingKey: null,
+    });
+
+    expect(() => runGit(repo, ['config', '--local', '--get', 'gpg.format'])).toThrow();
+    expect(() => runGit(repo, ['config', '--local', '--get', 'user.signingkey'])).toThrow();
+    expect(() => runGit(repo, ['config', '--local', '--get', 'commit.gpgsign'])).toThrow();
   });
 });
 

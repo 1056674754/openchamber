@@ -831,9 +831,9 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     const { agentName } = options;
     if (configRefreshPromise) {
       console.log(`Joining in-progress OpenCode configuration refresh requested after ${reason}`);
-      await configRefreshPromise;
-      if (agentName) await waitForAgentPresence(agentName);
-      return;
+      const result = await configRefreshPromise;
+      if (agentName && result.reloaded) await waitForAgentPresence(agentName);
+      return result;
     }
 
     const refresh = (async () => {
@@ -841,12 +841,13 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       clearResolvedOpenCodeBinary();
       await applyOpencodeBinaryFromSettings();
       await restartOpenCode();
+      const external = state.isExternalOpenCode === true;
 
       try {
         await waitForOpenCodeReady();
         state.isOpenCodeReady = true;
         state.openCodeNotReadySince = 0;
-        if (agentName) await waitForAgentPresence(agentName);
+        if (agentName && !external) await waitForAgentPresence(agentName);
         state.isOpenCodeReady = true;
         state.openCodeNotReadySince = 0;
       } catch (error) {
@@ -855,11 +856,13 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
         console.error(`Failed to refresh OpenCode after ${reason}:`, error.message);
         throw error;
       }
+
+      return { reloaded: !external, external };
     })();
 
     configRefreshPromise = refresh;
     try {
-      await refresh;
+      return await refresh;
     } finally {
       if (configRefreshPromise === refresh) configRefreshPromise = null;
     }
@@ -887,14 +890,6 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
           console.log(`Auto-detected existing OpenCode server at ${label}`);
           state.openCodeBaseUrl = env.ENV_CONFIGURED_OPENCODE_HOST?.origin ?? null;
           setOpenCodePort(env.ENV_EFFECTIVE_PORT);
-          state.isOpenCodeReady = true;
-          state.isExternalOpenCode = true;
-          state.lastOpenCodeError = null;
-          state.openCodeNotReadySince = 0;
-          syncToHmrState();
-        } else if (!env.ENV_EFFECTIVE_PORT && await probeExternalOpenCode(4096)) {
-          console.log('Auto-detected existing OpenCode server on default port 4096');
-          setOpenCodePort(4096);
           state.isOpenCodeReady = true;
           state.isExternalOpenCode = true;
           state.lastOpenCodeError = null;
@@ -1043,14 +1038,24 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       const healthy = await probeOpenCodeHealth();
       if (!healthy) {
         const processUnavailable = !state.openCodeProcess || !isManagedOpenCodeProcessAlive();
+        const managedListenerUnavailable = processUnavailable
+          && process.platform !== 'win32'
+          && listListeningProcessIds(state.openCodePort).length === 0;
         const reachedFailureThreshold = recordHealthFailure(
           source,
           processUnavailable ? 'managed process handle unavailable' : ''
         );
-        if (!reachedFailureThreshold) return;
-        if (shouldSkipRestartForBusySessions()) return;
-        console.log(`[lifecycle] ${source} health check failure threshold reached, restarting OpenCode...`);
+        if (!managedListenerUnavailable && !reachedFailureThreshold) return;
+        if (!managedListenerUnavailable && shouldSkipRestartForBusySessions()) return;
+        console.log(
+          managedListenerUnavailable
+            ? `[lifecycle] ${source} health check found no managed OpenCode listener, restarting OpenCode...`
+            : `[lifecycle] ${source} health check failure threshold reached, restarting OpenCode...`
+        );
         consecutiveHealthFailures = 0;
+        if (managedListenerUnavailable) {
+          lastUnhealthyWithBusySessionsAt = 0;
+        }
         lastHealthProbeResult = null;
         await restartOpenCode();
       } else {

@@ -1,6 +1,6 @@
 {
   "name": "@openchamber/web",
-  "version": "1.13.2-merging-dev",
+  "version": "1.16.0-sscity",
   "private": false,
   "type": "module",
   "main": "./server/index.js",
@@ -26,8 +26,8 @@
     "@clack/prompts": "^1.1.0",
     "@octokit/rest": "^22.0.1",
     "@openchamber/plugin": "workspace:*",
-    "@opencode-ai/sdk": "^1.15.10",
-    "@simplewebauthn/server": "13.3.0",
+    "@opencode-ai/sdk": "^1.17.9",
+    "@simplewebauthn/server": "13.3.1",
     "adm-zip": "^0.5.16",
     "better-sqlite3": "^11.7.0",
     "bun-pty": "^0.4.5",

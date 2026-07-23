@@ -171,6 +171,9 @@ function shouldSkipCompression(req, res) {
 }
 
 const OPENCHAMBER_VERSION = (() => {
+  const runtimeVersion = process.env.OPENCHAMBER_VERSION?.trim();
+  if (runtimeVersion) return runtimeVersion;
+
   try {
     const packagePath = path.resolve(__dirname, '..', 'package.json');
     const raw = fs.readFileSync(packagePath, 'utf8');
@@ -1470,6 +1473,7 @@ async function main(options = {}) {
     buildOpenCodeUrl,
     getOpenCodeAuthHeaders,
     getOpenCodePort: () => openCodePort,
+    fetchProvidersSnapshot,
     buildAugmentedPath,
     projectConfigRuntime,
     scheduledTasksRuntime,

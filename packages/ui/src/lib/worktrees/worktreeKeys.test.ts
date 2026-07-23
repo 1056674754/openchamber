@@ -17,6 +17,11 @@ describe('worktree keys', () => {
     expect(getProjectWorktreeKey('/repo/wvh', 'default')).toBe('/repo/wvh');
   });
 
+  test('uses one server-scoped key for Windows drive-letter variants', () => {
+    expect(getProjectWorktreeKey('c:\\repo\\wvh\\', 'remote-a'))
+      .toBe(getProjectWorktreeKey('C:/repo/wvh', 'remote-a'));
+  });
+
   test('dedupes worktrees by normalized path and server', () => {
     const result = dedupeWorktreesByPath([
       worktree('/repo/wvh/', { serverId: 'remote-a', label: 'wvh' }),

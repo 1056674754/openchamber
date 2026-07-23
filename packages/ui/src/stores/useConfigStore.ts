@@ -1,11 +1,11 @@
 import { create } from "zustand";
 import type { StoreApi, UseBoundStore } from "zustand";
-import { devtools, persist, createJSONStorage } from "zustand/middleware";
+import { devtools, persist } from "zustand/middleware";
 import type { Provider, Agent } from "@opencode-ai/sdk/v2";
 import { opencodeClient } from "@/lib/opencode/client";
 import { scopeMatches, subscribeToConfigChanges } from "@/lib/configSync";
 import type { ModelMetadata } from "@/types";
-import { getSafeStorage } from "./utils/safeStorage";
+import { createDeferredSafeJSONStorage } from "./utils/safeStorage";
 import { filterVisibleAgents } from "./useAgentsStore";
 import { useSessionUIStore } from "@/sync/session-ui-store";
 import { useSelectionStore } from "@/sync/selection-store";
@@ -19,7 +19,10 @@ import { normalizeConfigString, persistOpenChamberSettingsPatch, resolveConfigur
 import { resolveSdkForDirectory, resolveProjectServerIdForDirectory, resolveApiUrl as resolveRemoteApiOrigin } from "@/sync/session-actions";
 import { DEFAULT_SERVER_ID, serverRegistry } from "@/lib/opencode/server-registry";
 import { markStartupTrace, measureStartupTrace } from "@/lib/startupTrace";
+import { normalizePath } from "@/lib/pathNormalization";
 import { SdkRequestError } from "@/sync/sdk-error";
+import { resolveModelVariant } from "@/lib/modelVariantResolution";
+import { preserveAddProviderSelection, sanitizePersistedProviderSelection } from "./configProviderSelection";
 
 const MODELS_DEV_API_URL = "https://models.dev/api.json";
 const MODELS_DEV_PROXY_URL = "/api/openchamber/models-metadata";
@@ -480,8 +483,7 @@ const normalizeConfigServerId = (serverId: string | null | undefined): string =>
 };
 
 const toDirectoryKey = (directory: string | null | undefined, serverId?: string | null): string => {
-    const trimmed = typeof directory === 'string' ? directory.trim() : '';
-    const directoryPart = trimmed.length > 0 ? trimmed : DIRECTORY_KEY_GLOBAL;
+    const directoryPart = normalizePath(directory) ?? DIRECTORY_KEY_GLOBAL;
     const normalizedServerId = normalizeConfigServerId(serverId);
     if (normalizedServerId === DEFAULT_SERVER_ID) {
         return directoryPart;
@@ -508,7 +510,7 @@ const parseDirectoryKey = (key: string): { directory: string | null; serverId: s
 
     const rawServerId = scopedKey.slice(0, separatorIndex);
     const rawDirectory = scopedKey.slice(separatorIndex + DIRECTORY_SCOPE_SEPARATOR.length);
-    const directoryPart = decodeURIComponent(rawDirectory);
+    const directoryPart = normalizePath(decodeURIComponent(rawDirectory)) ?? DIRECTORY_KEY_GLOBAL;
     return {
         directory: directoryPart === DIRECTORY_KEY_GLOBAL ? null : directoryPart,
         serverId: normalizeConfigServerId(decodeURIComponent(rawServerId)),
@@ -528,9 +530,7 @@ const resolveConfigServerId = (
     }
 
     const activeScope = parseDirectoryKey(activeDirectoryKey);
-    const normalizedDirectory = typeof directory === 'string' && directory.trim().length > 0
-        ? directory.trim()
-        : null;
+    const normalizedDirectory = normalizePath(directory);
     if (activeScope.directory === normalizedDirectory) {
         return activeScope.serverId;
     }
@@ -1173,12 +1173,12 @@ export const useConfigStore = create<ConfigStore>()(
                                                 nextState.currentProviderId = parsed.providerId;
                                                 nextState.currentModelId = parsed.modelId;
                                                 nextState.currentVariant = currentVariant;
-                                                nextState.selectedProviderId = parsed.providerId;
+                                                nextState.selectedProviderId = preserveAddProviderSelection(state.selectedProviderId, parsed.providerId);
 
                                                 nextSnapshot.currentProviderId = parsed.providerId;
                                                 nextSnapshot.currentModelId = parsed.modelId;
                                                 nextSnapshot.currentVariant = currentVariant;
-                                                nextSnapshot.selectedProviderId = parsed.providerId;
+                                                nextSnapshot.selectedProviderId = preserveAddProviderSelection(baseSnapshot.selectedProviderId, parsed.providerId);
                                             }
                                         }
                                     }
@@ -1277,12 +1277,12 @@ export const useConfigStore = create<ConfigStore>()(
                                         nextState.currentProviderId = parsed.providerId;
                                         nextState.currentModelId = parsed.modelId;
                                         nextState.currentVariant = currentVariant;
-                                        nextState.selectedProviderId = parsed.providerId;
+                                        nextState.selectedProviderId = preserveAddProviderSelection(state.selectedProviderId, parsed.providerId);
 
                                         nextSnapshot.currentProviderId = parsed.providerId;
                                         nextSnapshot.currentModelId = parsed.modelId;
                                         nextSnapshot.currentVariant = currentVariant;
-                                        nextSnapshot.selectedProviderId = parsed.providerId;
+                                        nextSnapshot.selectedProviderId = preserveAddProviderSelection(baseSnapshot.selectedProviderId, parsed.providerId);
                                     }
                                 }
                             }
@@ -2012,52 +2012,30 @@ export const useConfigStore = create<ConfigStore>()(
                             });
                         };
 
-                        if (currentSessionId) {
-                            const existingAgentModel = useSelectionStore.getState().getAgentModelForSession(currentSessionId, agentName);
-                            if (existingAgentModel && hasProviderModel(providers, existingAgentModel.providerId, existingAgentModel.modelId)) {
-                                const savedVariant = useSelectionStore.getState().getAgentModelVariantForSession(
+                        const resolveVariantForModel = (
+                            providerId: string,
+                            modelId: string,
+                            agentVariant?: string,
+                        ): string | undefined => {
+                            const model = providers
+                                .find((provider) => provider.id === providerId)
+                                ?.models.find((candidate) => candidate.id === modelId) as { variants?: Record<string, unknown> } | undefined;
+                            const savedVariant = currentSessionId
+                                ? useSelectionStore.getState().getAgentModelVariantForSession(
                                     currentSessionId,
                                     agentName,
-                                    existingAgentModel.providerId,
-                                    existingAgentModel.modelId,
-                                );
-                                if (
-                                    currentProviderId !== existingAgentModel.providerId
-                                    || currentModelId !== existingAgentModel.modelId
-                                    || get().currentVariant !== savedVariant
-                                ) {
-                                    applyResolvedModelSelection(existingAgentModel.providerId, existingAgentModel.modelId, savedVariant);
-                                }
-                                return;
-                            }
-                        }
+                                    providerId,
+                                    modelId,
+                                )
+                                : undefined;
+                            return resolveModelVariant({
+                                variants: model?.variants,
+                                savedVariant,
+                                agentVariant,
+                                defaultVariant: settingsDefaultVariant,
+                            });
+                        };
 
-                        if (hasProviderModel(providers, currentProviderId, currentModelId)) {
-                            return;
-                        }
-
-                        // If settings has a default model, use it instead of agent's preferred
-                        if (settingsDefaultModel) {
-                            const parsed = parseModelString(settingsDefaultModel);
-                            if (parsed) {
-                                const settingsProvider = providers.find((p) => p.id === parsed.providerId);
-                                if (settingsProvider?.models.some((m) => m.id === parsed.modelId)) {
-                                    let nextVariant: string | undefined;
-                                    if (settingsDefaultVariant) {
-                                        const model = settingsProvider.models.find((m) => m.id === parsed.modelId) as { variants?: Record<string, unknown> } | undefined;
-                                        const variants = model?.variants;
-                                        if (variants && Object.prototype.hasOwnProperty.call(variants, settingsDefaultVariant)) {
-                                            nextVariant = settingsDefaultVariant;
-                                        }
-                                    }
-
-                                    applyResolvedModelSelection(parsed.providerId, parsed.modelId, nextVariant);
-                                    return;
-                                }
-                            }
-                        }
-
-                        // Fall back to agent's preferred model
                         const agent = agents.find((candidate) => candidate.name === agentName);
                         const agentModelSelection = agent?.model;
                         if (agentModelSelection?.providerID && agentModelSelection?.modelID) {
@@ -2066,9 +2044,53 @@ export const useConfigStore = create<ConfigStore>()(
                             const agentModel = agentProvider?.models.find((model) => model.id === modelID);
 
                             if (agentModel) {
-                                applyResolvedModelSelection(providerID, modelID, undefined);
+                                applyResolvedModelSelection(
+                                    providerID,
+                                    modelID,
+                                    resolveVariantForModel(providerID, modelID, agent?.variant),
+                                );
+                                return;
                             }
                         }
+
+                        if (currentSessionId) {
+                            const existingAgentModel = useSelectionStore.getState().getAgentModelForSession(currentSessionId, agentName);
+                            if (existingAgentModel && hasProviderModel(providers, existingAgentModel.providerId, existingAgentModel.modelId)) {
+                                const resolvedVariant = resolveVariantForModel(
+                                    existingAgentModel.providerId,
+                                    existingAgentModel.modelId,
+                                    agent?.variant,
+                                );
+                                if (
+                                    currentProviderId !== existingAgentModel.providerId
+                                    || currentModelId !== existingAgentModel.modelId
+                                    || get().currentVariant !== resolvedVariant
+                                ) {
+                                    applyResolvedModelSelection(
+                                        existingAgentModel.providerId,
+                                        existingAgentModel.modelId,
+                                        resolvedVariant,
+                                    );
+                                }
+                                return;
+                            }
+                        }
+
+                        if (settingsDefaultModel) {
+                            const parsed = parseModelString(settingsDefaultModel);
+                            if (parsed) {
+                                const settingsProvider = providers.find((p) => p.id === parsed.providerId);
+                                if (settingsProvider?.models.some((m) => m.id === parsed.modelId)) {
+                                    applyResolvedModelSelection(
+                                        parsed.providerId,
+                                        parsed.modelId,
+                                        resolveVariantForModel(parsed.providerId, parsed.modelId, agent?.variant),
+                                    );
+                                    return;
+                                }
+                            }
+                        }
+
                     }
                 },
 
@@ -2566,15 +2588,23 @@ export const useConfigStore = create<ConfigStore>()(
             }),
             {
                 name: "config-store",
-                storage: createJSONStorage(() => getSafeStorage()),
+                storage: createDeferredSafeJSONStorage(),
                 partialize: (state) => ({
                     activeDirectoryKey: state.activeDirectoryKey,
-                    directoryScoped: state.directoryScoped,
+                    directoryScoped: Object.fromEntries(
+                        Object.entries(state.directoryScoped).map(([directoryKey, snapshot]) => [
+                            directoryKey,
+                            {
+                                ...snapshot,
+                                selectedProviderId: sanitizePersistedProviderSelection(snapshot.selectedProviderId),
+                            },
+                        ]),
+                    ),
                     currentProviderId: state.currentProviderId,
                     currentModelId: state.currentModelId,
                     currentVariant: state.currentVariant,
                     currentAgentName: state.currentAgentName,
-                    selectedProviderId: state.selectedProviderId,
+                    selectedProviderId: sanitizePersistedProviderSelection(state.selectedProviderId),
                     agentModelSelections: state.agentModelSelections,
                     defaultProviders: state.defaultProviders,
                     settingsDefaultModel: state.settingsDefaultModel,

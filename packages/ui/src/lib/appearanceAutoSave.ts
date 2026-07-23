@@ -11,6 +11,7 @@ type AppearanceSlice = {
   nativeNotificationsEnabled: boolean;
   notificationMode: 'always' | 'hidden-only';
   notifyOnSubtasks: boolean;
+  dockBadgeEnabled: boolean;
   notifyOnCompletion: boolean;
   notifyOnError: boolean;
   notifyOnQuestion: boolean;
@@ -29,6 +30,7 @@ type AppearanceSlice = {
   sessionRetentionAction: 'archive' | 'delete';
   fontSize: number;
   terminalFontSize: number;
+  editorFontSize: number;
   uiFont: UiFontOption;
   monoFont: MonoFontOption;
   padding: number;
@@ -56,6 +58,7 @@ export const startAppearanceAutoSave = (): void => {
     nativeNotificationsEnabled: useUIStore.getState().nativeNotificationsEnabled,
     notificationMode: useUIStore.getState().notificationMode,
     notifyOnSubtasks: useUIStore.getState().notifyOnSubtasks,
+    dockBadgeEnabled: useUIStore.getState().dockBadgeEnabled,
     notifyOnCompletion: useUIStore.getState().notifyOnCompletion,
     notifyOnError: useUIStore.getState().notifyOnError,
     notifyOnQuestion: useUIStore.getState().notifyOnQuestion,
@@ -69,6 +72,7 @@ export const startAppearanceAutoSave = (): void => {
     sessionRetentionAction: useUIStore.getState().sessionRetentionAction,
     fontSize: useUIStore.getState().fontSize,
     terminalFontSize: useUIStore.getState().terminalFontSize,
+    editorFontSize: useUIStore.getState().editorFontSize,
     uiFont: useUIStore.getState().uiFont,
     monoFont: useUIStore.getState().monoFont,
     padding: useUIStore.getState().padding,
@@ -108,6 +112,7 @@ export const startAppearanceAutoSave = (): void => {
       nativeNotificationsEnabled: state.nativeNotificationsEnabled,
       notificationMode: state.notificationMode,
       notifyOnSubtasks: state.notifyOnSubtasks,
+      dockBadgeEnabled: state.dockBadgeEnabled,
       notifyOnCompletion: state.notifyOnCompletion,
       notifyOnError: state.notifyOnError,
       notifyOnQuestion: state.notifyOnQuestion,
@@ -121,6 +126,7 @@ export const startAppearanceAutoSave = (): void => {
       sessionRetentionAction: state.sessionRetentionAction,
       fontSize: state.fontSize,
       terminalFontSize: state.terminalFontSize,
+      editorFontSize: state.editorFontSize,
       uiFont: state.uiFont,
       monoFont: state.monoFont,
       padding: state.padding,
@@ -151,6 +157,9 @@ export const startAppearanceAutoSave = (): void => {
     }
     if (current.notifyOnSubtasks !== previous.notifyOnSubtasks) {
       diff.notifyOnSubtasks = current.notifyOnSubtasks;
+    }
+    if (current.dockBadgeEnabled !== previous.dockBadgeEnabled) {
+      diff.dockBadgeEnabled = current.dockBadgeEnabled;
     }
     if (current.notifyOnCompletion !== previous.notifyOnCompletion) {
       diff.notifyOnCompletion = current.notifyOnCompletion;
@@ -190,6 +199,9 @@ export const startAppearanceAutoSave = (): void => {
     }
     if (current.terminalFontSize !== previous.terminalFontSize) {
       diff.terminalFontSize = current.terminalFontSize;
+    }
+    if (current.editorFontSize !== previous.editorFontSize) {
+      diff.editorFontSize = current.editorFontSize;
     }
     if (current.uiFont !== previous.uiFont) {
       diff.uiFont = current.uiFont;

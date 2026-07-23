@@ -12,5 +12,6 @@ export {
   getPaceStatusColor,
   formatRemainingTime,
   calculateExpectedUsagePercent,
+  calculateExpectedUsageMarkerPercent,
 } from './utils';
 export type { PaceStatus, PaceInfo } from './utils';

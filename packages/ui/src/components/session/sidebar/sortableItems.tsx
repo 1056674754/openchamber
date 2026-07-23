@@ -21,6 +21,7 @@ import type { RemoteInstanceStatus } from '@/lib/remote-instances/types';
 
 export interface SortableProjectItemProps {
   id: string;
+  disabled?: boolean;
   projectLabel: string;
   projectDescription: string;
   projectIcon?: string;
@@ -369,6 +370,7 @@ function ProjectInfoTooltip({
 
 export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
   id,
+  disabled = false,
   projectLabel,
   projectDescription,
   projectIcon,
@@ -439,7 +441,7 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
     transform,
     transition,
     isDragging,
-  } = useSortable({ id });
+  } = useSortable({ id, disabled });
 
   const [imageFailed, setImageFailed] = React.useState(false);
   const suppressNextToggleRef = React.useRef(false);

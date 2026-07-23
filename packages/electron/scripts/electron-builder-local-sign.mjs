@@ -1,7 +1,10 @@
 import { execFileSync, spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 
+import { createBuildVersion } from './build-version.mjs';
+
 const require = createRequire(import.meta.url);
+const electronPackage = require('../package.json');
 
 const APPLE_DEVELOPMENT_PREFIX = 'Apple Development:';
 const DEVELOPER_ID_PREFIX = 'Developer ID Application:';
@@ -28,6 +31,12 @@ const findIdentity = (prefix) => {
   return readCodesigningIdentities()?.find((identity) => identity.startsWith(prefix)) || null;
 };
 
+const toElectronBuilderIdentityName = (identity) => {
+  return identity.startsWith(DEVELOPER_ID_PREFIX)
+    ? identity.slice(DEVELOPER_ID_PREFIX.length).trim()
+    : identity;
+};
+
 const env = { ...process.env };
 const rawBuilderArgs = process.argv.slice(2);
 const isReleaseSigningCheck = rawBuilderArgs.includes('--check-release-signing');
@@ -36,6 +45,10 @@ const isMac = process.platform === 'darwin';
 const isDirBuild = builderArgs.includes('--dir');
 const hasCertificateBundle = Boolean(env.CSC_LINK);
 const hasExplicitIdentity = Boolean(env.CSC_NAME);
+const hasExplicitBuildVersion = builderArgs.some((arg) => (
+  arg.startsWith('-c.extraMetadata.version=')
+  || arg.startsWith('--config.extraMetadata.version=')
+));
 const disablesTimestamp = builderArgs.some((arg) => {
   return arg === '-c.mac.timestamp=none' || arg === '--config.mac.timestamp=none';
 });
@@ -78,11 +91,22 @@ if (isMac && !isDirBuild) {
   } else if (hasCertificateBundle && !hasExplicitIdentity) {
     console.log('[electron] using CSC_LINK certificate material for release signing; verify with spctl after packaging.');
   }
+
+  if (env.CSC_NAME?.startsWith(DEVELOPER_ID_PREFIX)) {
+    env.CSC_NAME = toElectronBuilderIdentityName(env.CSC_NAME);
+  }
 }
 
 if (isReleaseSigningCheck) {
   console.log('[electron] release signing preflight passed.');
   process.exit(0);
+}
+
+if (!hasExplicitBuildVersion) {
+  const buildVersion = env.OPENCHAMBER_BUILD_VERSION?.trim()
+    || createBuildVersion(electronPackage.version);
+  builderArgs.push(`--config.extraMetadata.version=${buildVersion}`);
+  console.log(`[electron] packaging OpenChamber ${buildVersion}`);
 }
 
 const builderCli = require.resolve('electron-builder/out/cli/cli.js');

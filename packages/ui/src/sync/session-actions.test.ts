@@ -34,6 +34,7 @@ let sessionCreateResult: MockSdkResult = { data: null }
 let sessionRevertResult: MockSdkResult = { data: null }
 let sessionUnrevertResult: MockSdkResult = { data: null }
 let sessionForkResult: MockSdkResult = { data: null }
+let sessionMessagesResult: MockSdkResult = { data: [] }
 let configState = {
   isConnected: true,
   hasEverConnected: true,
@@ -67,6 +68,10 @@ const mockScopedClient = {
     }),
   },
   session: {
+    messages: mock((params: Record<string, unknown>) => {
+      sessionCalls.push({ method: "session.messages", params })
+      return Promise.resolve(sessionMessagesResult)
+    }),
     create: mock((params: Record<string, unknown>) => {
       sessionCalls.push({ method: "session.create", params })
       return Promise.resolve(sessionCreateResult)
@@ -109,6 +114,10 @@ const mockSdk = {
     }),
   },
   session: {
+    messages: mock((params: Record<string, unknown>) => {
+      sessionCalls.push({ method: "session.messages", params })
+      return Promise.resolve(sessionMessagesResult)
+    }),
     create: mock((params: Record<string, unknown>) => {
       sessionCalls.push({ method: "session.create", params })
       return Promise.resolve(sessionCreateResult)
@@ -240,6 +249,7 @@ beforeEach(() => {
   sessionRevertResult = { data: null }
   sessionUnrevertResult = { data: null }
   sessionForkResult = { data: null }
+  sessionMessagesResult = { data: [] }
   inputStoreState = {
     attachedFiles: [],
     pendingInputText: "",
@@ -522,6 +532,98 @@ describe("optimisticSend", () => {
     expect(targetStore.getState().session_status["session-new"]?.type).toBe("busy")
     expect(fallbackStore.getState().session_status["session-new"]).toBe(undefined)
     expect(optimisticRemoves).toHaveLength(0)
+  })
+
+  test("confirms an ambiguous send failure from the authoritative session messages", async () => {
+    class AmbiguousSendError extends Error {
+      readonly status = 504
+    }
+
+    const store = createStore({})
+    const childStores = createChildStores([["/target/project", store]])
+    const optimisticRemoves: Array<{ sessionID: string; messageID: string }> = []
+    const optimisticConfirms: Array<{ sessionID: string; messageID: string; directory?: string | null; serverId?: string | null }> = []
+    let sentMessageID = ""
+
+    const { setActionRefs, setOptimisticRefs, optimisticSend } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/fallback/dir")
+    setOptimisticRefs(
+      () => {},
+      (input) => optimisticRemoves.push(input),
+      (input) => optimisticConfirms.push(input),
+    )
+
+    await optimisticSend({
+      sessionId: "session-confirmed",
+      content: "hello",
+      providerID: "provider",
+      modelID: "model",
+      directory: "/target/project",
+      serverId: DEFAULT_SERVER_ID,
+      send: async (messageID) => {
+        sentMessageID = messageID
+        sessionMessagesResult = {
+          data: [{
+            info: {
+              id: messageID,
+              sessionID: "session-confirmed",
+              role: "user",
+              time: { created: 1 },
+            } as unknown as Message,
+            parts: [{ id: "server-part", type: "text", text: "hello" } as unknown as Part],
+          }],
+        }
+        throw new AmbiguousSendError("gateway timeout")
+      },
+    })
+
+    expect(optimisticRemoves).toHaveLength(0)
+    expect(optimisticConfirms).toHaveLength(1)
+    expect(optimisticConfirms[0]?.messageID).toBe(sentMessageID)
+    expect(optimisticConfirms[0]?.directory).toBe("/target/project")
+    expect(optimisticConfirms[0]?.serverId).toBe(DEFAULT_SERVER_ID)
+    const confirmationCall = sessionCalls.find((call) => call.method === "session.messages")
+    expect(confirmationCall?.params.sessionID).toBe("session-confirmed")
+    expect(confirmationCall?.params.directory).toBe("/target/project")
+    expect(confirmationCall?.params.limit).toBe(30)
+    expect(store.getState().message["session-confirmed"]?.[0]?.id).toBe(sentMessageID)
+    expect(store.getState().part[sentMessageID]?.[0]?.id).toBe("server-part")
+  })
+
+  test("rolls back an ambiguous send failure when the message was not accepted", async () => {
+    class AmbiguousSendError extends Error {
+      readonly status = 503
+    }
+
+    const store = createStore({})
+    const childStores = createChildStores([["/target/project", store]])
+    const optimisticRemoves: Array<{ sessionID: string; messageID: string }> = []
+    const optimisticConfirms: Array<{ sessionID: string; messageID: string }> = []
+
+    const { setActionRefs, setOptimisticRefs, optimisticSend } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/fallback/dir")
+    setOptimisticRefs(
+      () => {},
+      (input) => optimisticRemoves.push(input),
+      (input) => optimisticConfirms.push(input),
+    )
+
+    await expectRejectsWithMessage(optimisticSend({
+      sessionId: "session-missing",
+      content: "hello",
+      providerID: "provider",
+      modelID: "model",
+      directory: "/target/project",
+      serverId: DEFAULT_SERVER_ID,
+      send: async () => {
+        throw new AmbiguousSendError("service unavailable")
+      },
+    }), "service unavailable")
+
+    expect(optimisticRemoves).toHaveLength(1)
+    expect(optimisticConfirms).toHaveLength(0)
+    expect(sessionCalls.filter((call) => call.method === "session.messages")).toHaveLength(2)
+    expect(store.getState().session_status["session-missing"]?.type).toBe("idle")
   })
 
   test("rejects normal sends while a session is busy", async () => {
@@ -860,7 +962,136 @@ describe("rejectQuestion passes directory", () => {
   })
 })
 
+describe("dismissOpenQuestionsForSession", () => {
+  test("dismisses questions for the session subtree without touching unrelated sessions", async () => {
+    const rootId = "dismiss-root"
+    const childId = "dismiss-child"
+    const unrelatedId = "dismiss-unrelated"
+    const store = createStore({}, {
+      [rootId]: [{ id: "q-root", sessionID: rootId, questions: [] }],
+      [childId]: [{ id: "q-child", sessionID: childId, questions: [] }],
+      [unrelatedId]: [{ id: "q-unrelated", sessionID: unrelatedId, questions: [] }],
+    })
+    store.setState({
+      session: [
+        { id: rootId } as Session,
+        { id: childId, parentID: rootId } as Session,
+        { id: unrelatedId } as Session,
+      ],
+    })
+    const childStores = createChildStores([["/test/project", store]])
+
+    const { dismissOpenQuestionsForSession, setActionRefs } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/test/project")
+    serverRegistry.indexSession(rootId, DEFAULT_SERVER_ID)
+    serverRegistry.indexSession(childId, DEFAULT_SERVER_ID)
+
+    try {
+      expect(await dismissOpenQuestionsForSession(rootId)).toBe(true)
+      expect(replyCalls.filter((call) => call.method === "question.reject").map((call) => call.params.requestID).sort()).toEqual([
+        "q-child",
+        "q-root",
+      ])
+      expect(store.getState().question[rootId]).toBe(undefined)
+      expect(store.getState().question[childId]).toBe(undefined)
+      expect(store.getState().question[unrelatedId]?.[0]?.id).toBe("q-unrelated")
+    } finally {
+      serverRegistry.forgetSession(rootId)
+      serverRegistry.forgetSession(childId)
+    }
+  })
+
+  test("uses the owning remote server and directory for every dismissal", async () => {
+    const serverId = "remote-question-dismiss"
+    const rootId = "remote-dismiss-root"
+    const childId = "remote-dismiss-child"
+    const remoteCalls: Array<Record<string, unknown>> = []
+    const remoteClient = {
+      question: {
+        reject: mock((params: Record<string, unknown>) => {
+          remoteCalls.push(params)
+          return Promise.resolve({ data: true })
+        }),
+      },
+    } as unknown as OpencodeClient
+    serverRegistry.register({ id: serverId, label: "Remote question", baseUrl: "/api/remote/question" })
+    const connection = serverRegistry.get(serverId)
+    if (connection) {
+      ;(connection as { client: OpencodeClient }).client = remoteClient
+    }
+
+    const store = createStore({}, {
+      [rootId]: [{ id: "q-remote-root", sessionID: rootId, questions: [] }],
+      [childId]: [{ id: "q-remote-child", sessionID: childId, questions: [] }],
+    })
+    store.setState({
+      session: [
+        { id: rootId } as Session,
+        { id: childId, parentID: rootId } as Session,
+      ],
+    })
+    const remoteStores = createChildStores([["/remote/project", store]])
+    const { registerSyncStores } = await import("./multi-server-registry")
+    const unregisterStores = registerSyncStores(serverId, remoteStores, () => {})
+    serverRegistry.indexSession(rootId, serverId)
+    serverRegistry.indexSession(childId, serverId)
+
+    try {
+      const { dismissOpenQuestionsForSession } = await import("./session-actions")
+      expect(await dismissOpenQuestionsForSession(rootId)).toBe(true)
+      expect(remoteCalls.map((call) => call.requestID).sort()).toEqual(["q-remote-child", "q-remote-root"])
+      expect(remoteCalls.every((call) => call.directory === "/remote/project")).toBe(true)
+      expect(replyCalls.filter((call) => call.method === "question.reject")).toHaveLength(0)
+    } finally {
+      unregisterStores()
+      serverRegistry.forgetSession(rootId)
+      serverRegistry.forgetSession(childId)
+      serverRegistry.unregister(serverId)
+    }
+  })
+
+  test("restores the question without discarding the queued send path when rejection fails", async () => {
+    questionRejectResult = { data: false }
+    const rootId = "dismiss-failure-root"
+    const store = createStore({}, {
+      [rootId]: [{ id: "q-failure", sessionID: rootId, questions: [] }],
+    })
+    store.setState({ session: [{ id: rootId } as Session] })
+    const childStores = createChildStores([["/test/project", store]])
+
+    const { dismissOpenQuestionsForSession, setActionRefs } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/test/project")
+    serverRegistry.indexSession(rootId, DEFAULT_SERVER_ID)
+
+    try {
+      expect(await dismissOpenQuestionsForSession(rootId)).toBe(true)
+      expect(store.getState().question[rootId]?.[0]?.id).toBe("q-failure")
+    } finally {
+      serverRegistry.forgetSession(rootId)
+    }
+  })
+})
+
 describe("abortCurrentOperation", () => {
+  test("uses the session directory instead of the active UI directory", async () => {
+    const sessionId = "abort-cross-directory-session"
+    const activeStore = createStore({})
+    const sessionStore = createStore({})
+    sessionStore.setState({ session: [{ id: sessionId } as Session] })
+    const childStores = createChildStores([
+      ["/test/active", activeStore],
+      ["/test/session", sessionStore],
+    ])
+
+    const { setActionRefs, abortCurrentOperation } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/test/active")
+
+    expect(await abortCurrentOperation(sessionId)).toBe(true)
+    expect(sessionCalls.filter((call) => call.method === "session.abort")).toEqual([
+      { method: "session.abort", params: { sessionID: sessionId, directory: "/test/session" } },
+    ])
+  })
+
   test("returns false when SDK abort reports an error", async () => {
     sessionAbortResult = { error: { name: "InternalError", message: "abort failed" }, response: { status: 500 } }
     const store = createStore({})

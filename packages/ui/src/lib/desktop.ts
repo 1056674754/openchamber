@@ -68,6 +68,7 @@ export type DesktopSettings = {
   nativeNotificationsEnabled?: boolean;
   notificationMode?: 'always' | 'hidden-only';
   notifyOnSubtasks?: boolean;
+  dockBadgeEnabled?: boolean;
 
   // Event toggles (which events trigger notifications)
   notifyOnCompletion?: boolean;
@@ -147,11 +148,14 @@ export type DesktopSettings = {
   userMessageRenderingMode?: 'markdown' | 'plain';
   collapsibleUserMessages?: boolean;
   stickyUserHeader?: boolean;
+  promptNavigatorEnabled?: boolean;
   wideChatLayoutEnabled?: boolean;
   codeBlockLineWrap?: boolean;
   showSplitAssistantMessageActions?: boolean;
+  allowPromptingSubagentSessions?: boolean;
   fontSize?: number;
   terminalFontSize?: number;
+  editorFontSize?: number;
   uiFont?: string;
   monoFont?: string;
   padding?: number;
@@ -159,7 +163,11 @@ export type DesktopSettings = {
   inputBarOffset?: number;
 
   favoriteModels?: Array<{ providerID: string; modelID: string }>;
+  hiddenModels?: Array<{ providerID: string; modelID: string }>;
+  collapsedModelProviders?: string[];
   recentModels?: Array<{ providerID: string; modelID: string }>;
+  recentAgents?: string[];
+  recentEfforts?: Record<string, string[]>;
   diffLayoutPreference?: 'dynamic' | 'inline' | 'side-by-side';
   diffViewMode?: 'single' | 'stacked';
   gitChangesViewMode?: 'flat' | 'tree';

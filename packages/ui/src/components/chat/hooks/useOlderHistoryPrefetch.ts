@@ -60,6 +60,20 @@ export const useOlderHistoryPrefetch = (
             }
         };
 
+        const handleScroll = () => {
+            const isWithinRange = shouldPrefetchOlderHistory({
+                scrollTop: container.scrollTop,
+                clientHeight: container.clientHeight,
+            });
+            if (!isWithinRange) {
+                markOutsideRange();
+                return;
+            }
+            requestOlderHistory(true);
+        };
+
+        container.addEventListener('scroll', handleScroll, { passive: true });
+
         if (typeof IntersectionObserver !== 'undefined') {
             const prefetchThreshold = getOlderHistoryPrefetchThreshold(container.clientHeight);
             const observer = new IntersectionObserver((entries) => {
@@ -74,22 +88,12 @@ export const useOlderHistoryPrefetch = (
                 rootMargin: `${prefetchThreshold}px 0px 0px 0px`,
             });
             observer.observe(sentinel);
-            return () => observer.disconnect();
+            return () => {
+                observer.disconnect();
+                container.removeEventListener('scroll', handleScroll);
+            };
         }
 
-        const handleScroll = () => {
-            const isWithinRange = shouldPrefetchOlderHistory({
-                scrollTop: container.scrollTop,
-                clientHeight: container.clientHeight,
-            });
-            if (!isWithinRange) {
-                markOutsideRange();
-                return;
-            }
-            requestOlderHistory(true);
-        };
-        container.addEventListener('scroll', handleScroll, { passive: true });
-        handleScroll();
         return () => container.removeEventListener('scroll', handleScroll);
     }, [hasMoreAbove, historyVersion, isLoadingOlder, onLoadOlder, resolveScrollContainer]);
 

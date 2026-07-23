@@ -29,7 +29,7 @@ import { getDefaultTheme } from '@/lib/theme/themes';
 import { generateSyntaxTheme } from '@/lib/theme/syntaxThemeGenerator';
 import type { ToolPopupContent } from './message/types';
 import { useUIStore } from '@/stores/useUIStore';
-import { useDeviceInfo } from '@/lib/device';
+import { isMobileDeviceViaCSS, useDeviceInfo } from '@/lib/device';
 import { useMessageDirectory } from '@/hooks/useMessageDirectory';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { loadCjkMonoFont } from '@/lib/fontLoader';
@@ -1736,6 +1736,7 @@ const useFileReferenceInteractions = ({
       return;
     }
     const fileReferenceLinkLimit = getFileReferenceLinkLimit();
+    const fileReferencesEnabled = enabled && !isMobileDeviceViaCSS();
 
     const validationContext = `${fileReferenceBaseUrl ?? ''}|${effectiveDirectory}`;
     if (validationContextRef.current !== validationContext) {
@@ -1909,7 +1910,7 @@ const useFileReferenceInteractions = ({
       unwrapBlockCodePathTokens(container);
     };
 
-    if (!enabled) {
+    if (!fileReferencesEnabled) {
       clearAnnotatedFileLinks();
       return;
     }

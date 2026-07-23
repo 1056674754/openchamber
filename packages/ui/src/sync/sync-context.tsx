@@ -38,7 +38,6 @@ import { useConfigStore, type ConfigConnectionState } from "@/stores/useConfigSt
 import { useTodosPersistStore } from "@/stores/useTodosPersistStore"
 import { useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
 import { markRemoteInstanceTransportStatus } from "@/stores/useRemoteInstancesStore"
-import { resolveApiUrl as resolveServerApiUrl } from "@/lib/api/serverUrl"
 import { hasTerminalMessageSignal, type TerminalMessageSignalInfo } from "@/lib/messageCompletion"
 import { dispatchOpenchamberEventEnvelope } from "@/lib/openchamberEvents"
 import { toast } from "@/components/ui"
@@ -52,6 +51,8 @@ import * as sessionActions from "./session-actions"
 import { getSessionMaterializationStatus, materializeSessionSnapshots } from "./materialization"
 import { setSessionPrefetch } from "./session-prefetch-cache"
 import { listSessionsForBootstrap } from "./session-list-bootstrap"
+import { remoteSessionSummarySync } from "./remote-session-summaries"
+import { readRemoteSessionStatuses } from "./remote-session-status"
 import { getPageParts, type MessagePage } from "./message-page-boundary"
 import { loadMessageHistoryBatch } from "./message-history-loader"
 import { isPageActivelyViewed } from "./session-presence"
@@ -83,7 +84,6 @@ const emptyDirectoryStore = emptyDirectoryStoreManager.ensureChild("__openchambe
 const REMOTE_BOOTSTRAP_MAX_CONCURRENCY = 1
 const REMOTE_BOOTSTRAP_STAGGER_MS = 350
 const REMOTE_BOOTSTRAP_MAX_STAGGER_MS = 3_500
-const REMOTE_STATUS_REQUEST_TIMEOUT_MS = 5_000
 const REMOTE_RECONNECT_REQUEST_TIMEOUT_MS = 8_000
 
 async function withRemoteTimeout<T>(promise: Promise<T>, label: string, timeoutMs: number): Promise<T> {
@@ -311,6 +311,7 @@ async function materializeSessionFromServer(
       pageRecords(page),
       { skipPartTypes: RECONNECT_SKIP_PARTS },
     )
+    if (!materialized.messagesChanged && !materialized.partsChanged) return state
     return { message: materialized.message, part: materialized.part }
   })
 }
@@ -432,30 +433,8 @@ async function getSessionStatusForServer(
     return opencodeClient.getSessionStatusForDirectory(directory)
   }
 
-  const connection = serverRegistry.get(serverId)
-  if (!connection) return null
-
   try {
-    const url = resolveServerApiUrl("/session/status", connection.config.baseUrl)
-    const params = new URLSearchParams()
-    const trimmedDirectory = directory.trim()
-    if (trimmedDirectory.length > 0) {
-      params.set("directory", trimmedDirectory)
-    }
-    const query = params.toString()
-    const requestUrl = query.length > 0 ? `${url}?${query}` : url
-    const headers: Record<string, string> = { Accept: "application/json" }
-    if (connection.config.authToken) {
-      headers.Authorization = `Bearer ${connection.config.authToken}`
-    }
-    const response = await fetch(requestUrl, {
-      headers,
-      signal: AbortSignal.timeout(REMOTE_STATUS_REQUEST_TIMEOUT_MS),
-    })
-    if (!response.ok) return null
-    const data = await response.json().catch(() => null)
-    if (!data || typeof data !== "object") return null
-    return data as Record<string, SessionStatusSnapshot>
+    return await readRemoteSessionStatuses(serverId, directory)
   } catch {
     return null
   }
@@ -1324,6 +1303,45 @@ function handleEvent(
   const directory = resolveDirectoryFromRoutingIndex(routingIndex, rawDirectory, payload, childStores)
 
   if (directory && directory !== "global") {
+    if (serverId !== DEFAULT_SERVER_ID && !childStores.getChild(directory)) {
+      if (payload.type === "session.created" || payload.type === "session.updated") {
+        const info = (payload.properties as { info?: Session }).info
+        if (info?.id) {
+          setIndexedSessionDirectory(routingIndex, info.id, directory)
+          serverRegistry.indexSession(info.id, serverId)
+          useGlobalSessionsStore.getState().upsertSession(info)
+        }
+        return
+      }
+
+      const sessionID = getSessionIdFromPayload(payload) ?? undefined
+      if (payload.type === "session.status") {
+        const status = (payload.properties as { status?: SessionStatus }).status
+        if (sessionID && status) {
+          setIndexedSessionDirectory(routingIndex, sessionID, directory)
+          serverRegistry.indexSession(sessionID, serverId)
+          useGlobalSessionsStore.getState().upsertStatus(sessionID, status)
+        }
+        return
+      }
+      if (payload.type === "session.idle" || payload.type === "session.error") {
+        if (sessionID) {
+          setIndexedSessionDirectory(routingIndex, sessionID, directory)
+          serverRegistry.indexSession(sessionID, serverId)
+          useGlobalSessionsStore.getState().upsertStatus(sessionID, { type: "idle" })
+        }
+        return
+      }
+      if (payload.type === "session.deleted") {
+        if (sessionID) {
+          useGlobalSessionsStore.getState().removeSessions([sessionID])
+          removeIndexedSession(routingIndex, sessionID)
+          serverRegistry.forgetSession(sessionID)
+        }
+        return
+      }
+    }
+
     if (
       (payload.type === "session.created" || payload.type === "session.updated")
       && !childStores.getChild(directory)
@@ -1336,7 +1354,7 @@ function handleEvent(
         if (serverId === DEFAULT_SERVER_ID) {
           const allEntries = getAllSyncStores()
           const existsInRemote = allEntries.some(
-            (e) => e.serverId !== DEFAULT_SERVER_ID && e.childStores.children.has(directory)
+            (e) => e.serverId !== DEFAULT_SERVER_ID && Boolean(e.childStores.getChild(directory))
           )
           if (existsInRemote) {
             setIndexedSessionDirectory(routingIndex, info.id, directory)
@@ -1426,17 +1444,8 @@ function handleEvent(
     }
   }
 
-  // [OPENCHAMBER-FORK] 2025-05-18 v1.11.1-dev-merge
-  // Auto-create child store for remote servers only. When the SSE event pipeline
-  // delivers events for an unregistered remote directory (e.g. worktree paths not
-  // in the projects store), create a child store on-the-fly so events aren't dropped.
-  // Also register the directory as a remote project so remoteDirectories picks it up
-  // on next render, enabling bootstrap and correct routing.
-  // Guard: only for remote SyncProviders — the default SyncProvider can receive
-  // events for remote paths when currentDirectory changes, and must not auto-create.
   if (!store && resolvedDirectory && resolvedDirectory !== "global" && serverId !== DEFAULT_SERVER_ID) {
     store = childStores.ensureChild(resolvedDirectory)
-    useProjectsStore.getState().ensureRemoteProject(resolvedDirectory, serverId) // [OPENCHAMBER-FORK]
   }
 
   if (!store) {
@@ -1727,8 +1736,9 @@ export function SyncProvider(props: {
   const childStoresRef = useRef<ChildStoreManager | null>(null)
   if (!childStoresRef.current) childStoresRef.current = new ChildStoreManager()
   const childStores = childStoresRef.current
-  const emptyRemoteSessionRetryDirsRef = useRef(new Set<string>())
   const pendingMessagesRecoveredRef = useRef(false)
+  const pipelineHasConnectedRef = useRef(false)
+  const pipelineDisconnectedBeforeFirstConnectRef = useRef(false)
   const routingIndexRef = useRef<EventRoutingIndex | null>(null)
   if (!routingIndexRef.current) routingIndexRef.current = createEventRoutingIndex()
   const routingIndex = routingIndexRef.current
@@ -1945,7 +1955,6 @@ export function SyncProvider(props: {
         loadingSessionDirs.delete(directory)
         const queueIndex = remoteBootstrapQueue.indexOf(directory)
         if (queueIndex >= 0) remoteBootstrapQueue.splice(queueIndex, 1)
-        emptyRemoteSessionRetryDirsRef.current.delete(directory)
       },
       isBooting: (directory) => bootingDirs.has(directory) || scheduledRemoteDirs.has(directory) || queuedRemoteDirs.has(directory),
       isLoadingSessions: (directory) => loadingSessionDirs.has(directory),
@@ -2013,7 +2022,7 @@ export function SyncProvider(props: {
     }
 
     function triggerReconnectMaterialization(directory: string) {
-      const store = childStores.children.get(directory)
+      const store = childStores.getChild(directory)
       if (!store) return
       if (reconnectResyncing.has(directory)) return
 
@@ -2110,8 +2119,12 @@ export function SyncProvider(props: {
           lastDisconnectReason: null,
         })
         markRemoteTransportStatus(true)
-        for (const dir of childStores.children.keys()) {
-          triggerReconnectMaterialization(dir)
+        const isFirstConnect = !pipelineHasConnectedRef.current
+        pipelineHasConnectedRef.current = true
+        if (!isFirstConnect || pipelineDisconnectedBeforeFirstConnectRef.current) {
+          for (const dir of childStores.children.keys()) {
+            triggerReconnectMaterialization(dir)
+          }
         }
         // One-time pending message recovery after first SSE connection
         if (!pendingMessagesRecoveredRef.current) {
@@ -2120,6 +2133,9 @@ export function SyncProvider(props: {
         }
       },
       onDisconnect: (reason) => {
+        if (!pipelineHasConnectedRef.current) {
+          pipelineDisconnectedBeforeFirstConnectRef.current = true
+        }
         streamDisconnected = true
         clearDisconnectTimer()
         setProviderConnectionState({ lastDisconnectReason: reason })
@@ -2167,21 +2183,42 @@ export function SyncProvider(props: {
     const dirs = props.remoteDirectories
     if (!dirs?.length) return
 
-    for (const dir of dirs) {
-      const store = childStores.ensureChild(dir)
-      const state = store.getState()
-      if (
-        state.status === "complete"
-        && state.session.length === 0
-        && !emptyRemoteSessionRetryDirsRef.current.has(dir)
-      ) {
-        emptyRemoteSessionRetryDirsRef.current.add(dir)
-        store.setState({ status: "loading" as const })
-        childStores.ensureChild(dir)
+    const controller = new AbortController()
+    void remoteSessionSummarySync.scan({
+      serverId,
+      directories: dirs,
+      signal: controller.signal,
+      onSnapshot: (directory, sessions) => {
+        useGlobalSessionsStore.getState().applyRemoteDirectorySnapshot(serverId, directory, sessions)
+        for (const session of sessions) {
+          if (session.id) {
+            setIndexedSessionDirectory(routingIndex, session.id, directory)
+            serverRegistry.indexSession(session.id, serverId)
+          }
+        }
+      },
+    }).then((result) => {
+      if (result.scannedDirectories.length > 0) {
+        console.info(
+          `[remote-session-summaries] scan complete server=${serverId}`
+          + ` requested=${dirs.length}`
+          + ` scanned=${result.scannedDirectories.length}`
+          + ` failed=${result.failedDirectories.length}`,
+        )
       }
-      ingestDirectoryStateIntoRoutingIndex(routingIndex, dir, store.getState())
-    }
-  }, [serverId, props.remoteDirectories, childStores, routingIndex])
+      if (result.failures.length === 0) return
+      console.warn(
+        `[remote-session-summaries] scan incomplete server=${serverId}`
+        + ` failed=${result.failedDirectories.join(",")}`,
+        result.failures[0]?.error,
+      )
+    }).catch((error: unknown) => {
+      if (typeof error === "object" && error !== null && "name" in error && error.name === "AbortError") return
+      console.warn("[remote-session-summaries] scan failed", { serverId, error })
+    })
+
+    return () => controller.abort()
+  }, [serverId, props.remoteDirectories, routingIndex])
 
   // Set refs so non-React code (session-actions, session-ui-store) can access sync state
   useEffect(() => {
@@ -2530,6 +2567,54 @@ export function useSessionQuestions(sessionID: string, directory?: string) {
     if (!sessionID) return () => undefined
     return store.subscribe(notify)
   }, [sessionID, store])
+  return React.useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
+}
+
+export function useExistingSessionPermissions(sessionID: string, directory?: string) {
+  const { childStores } = useSyncSystem()
+  const serverId = useServerIdForSession(sessionID)
+  const stores = serverId && serverId !== DEFAULT_SERVER_ID
+    ? getSyncStoresForServer(serverId)
+    : childStores
+  const getSnapshot = useCallback(() => {
+    if (!sessionID || !stores) return EMPTY_PERMISSION_REQUESTS
+    if (directory) {
+      return stores.getChild(directory)?.getState().permission[sessionID] ?? EMPTY_PERMISSION_REQUESTS
+    }
+    for (const store of stores.children.values()) {
+      const requests = store.getState().permission[sessionID]
+      if (requests) return requests
+    }
+    return EMPTY_PERMISSION_REQUESTS
+  }, [directory, sessionID, stores])
+  const subscribe = useCallback(
+    (notify: () => void) => stores?.subscribeAll(notify) ?? (() => undefined),
+    [stores],
+  )
+  return React.useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
+}
+
+export function useExistingSessionQuestions(sessionID: string, directory?: string) {
+  const { childStores } = useSyncSystem()
+  const serverId = useServerIdForSession(sessionID)
+  const stores = serverId && serverId !== DEFAULT_SERVER_ID
+    ? getSyncStoresForServer(serverId)
+    : childStores
+  const getSnapshot = useCallback(() => {
+    if (!sessionID || !stores) return EMPTY_QUESTION_REQUESTS
+    if (directory) {
+      return stores.getChild(directory)?.getState().question[sessionID] ?? EMPTY_QUESTION_REQUESTS
+    }
+    for (const store of stores.children.values()) {
+      const requests = store.getState().question[sessionID]
+      if (requests) return requests
+    }
+    return EMPTY_QUESTION_REQUESTS
+  }, [directory, sessionID, stores])
+  const subscribe = useCallback(
+    (notify: () => void) => stores?.subscribeAll(notify) ?? (() => undefined),
+    [stores],
+  )
   return React.useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
 }
 

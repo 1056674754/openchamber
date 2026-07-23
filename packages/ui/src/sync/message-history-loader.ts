@@ -3,6 +3,7 @@ import type { Message, Part } from "@opencode-ai/sdk/v2/client"
 import { fetchMessagePageToUserBoundary, type MessagePage } from "./message-page-boundary"
 import { retry } from "./retry"
 import { sanitizePartPayload, stripMessageDiffSnapshots } from "./sanitize"
+import { formatSdkError } from "./sdk-error"
 
 const DECODED_PAYLOAD_LENGTH_HEADER = "x-openchamber-decoded-content-length"
 const compareIDs = (left: string, right: string) => left < right ? -1 : left > right ? 1 : 0
@@ -55,6 +56,8 @@ export type MessageHistoryBatchResult = {
   readonly stoppedBeforeBoundary: boolean
 }
 
+export type MessageHistoryPageInput = Omit<MessageHistoryBatchInput, "minimumRealUserMessages">
+
 export class MessageHistoryLoadError extends Error {
   readonly name = "MessageHistoryLoadError"
 
@@ -63,22 +66,20 @@ export class MessageHistoryLoadError extends Error {
   }
 }
 
-export function getInteractiveHistoryRealUserTarget(isVSCode: boolean): number {
+export function getInitialHistoryRealUserTarget(isVSCode: boolean): number {
   return isVSCode ? 6 : 30
 }
 
-function errorMessage(error: unknown): string {
-  if (typeof error !== "object" || error === null || !("message" in error)) {
-    return String(error)
-  }
-  return String(error.message)
+export function getInteractiveHistoryRealUserTarget(isVSCode: boolean): number {
+  void isVSCode
+  return 1
 }
 
 function unwrapMessageRecords(result: MessageHistoryResponse): readonly MessageHistoryRecord[] {
   if (result.error !== undefined) {
     const status = result.response?.status
     const suffix = status === undefined ? "" : ` (${status})`
-    throw new MessageHistoryLoadError(`session.messages failed${suffix}: ${errorMessage(result.error)}`, status)
+    throw new MessageHistoryLoadError(`session.messages failed${suffix}: ${formatSdkError(result.error)}`, status)
   }
   if (result.data === undefined) {
     throw new MessageHistoryLoadError("session.messages returned no data", 503)
@@ -100,42 +101,52 @@ function readPayloadBytes(result: MessageHistoryResponse): number | undefined {
   return Number.isSafeInteger(value) && value >= 0 ? value : undefined
 }
 
-export async function loadMessageHistoryBatch(input: MessageHistoryBatchInput): Promise<MessageHistoryBatchResult> {
-  const fetchPage = async (before?: string): Promise<MessagePage> => {
-    const request: MessageHistoryRequest = {
-      sessionID: input.sessionID,
-      directory: input.directory,
-      limit: input.limit,
-      before,
-    }
-    const result = await retry(() => {
-      const pending = input.client.session.messages(request)
-      return input.requestTimeout
-        ? input.requestTimeout(pending, `session.messages ${input.sessionID}`)
-        : pending
-    })
-    const records = unwrapMessageRecords(result).filter((record) => Boolean(record.info?.id))
-    const cursor = result.response?.headers?.get("x-next-cursor") || undefined
-
-    return {
-      session: records
-        .map((record) => stripMessageDiffSnapshots(record.info))
-        .sort((left, right) => compareIDs(left.id, right.id)),
-      part: records.map((record) => ({
-        id: record.info.id,
-        part: (record.parts ?? [])
-          .map(sanitizePartPayload)
-          .sort((left, right) => compareIDs(left.id, right.id)),
-      })),
-      cursor,
-      complete: !cursor,
-      payloadBytes: readPayloadBytes(result),
-    }
+export async function fetchMessageHistoryPage(input: MessageHistoryPageInput): Promise<MessagePage> {
+  const request: MessageHistoryRequest = {
+    sessionID: input.sessionID,
+    directory: input.directory,
+    limit: input.limit,
+    before: input.before,
   }
+  const result = await retry(() => {
+    const pending = input.client.session.messages(request)
+    return input.requestTimeout
+      ? input.requestTimeout(pending, `session.messages ${input.sessionID}`)
+      : pending
+  })
+  const records = unwrapMessageRecords(result).filter((record) => Boolean(record.info?.id))
+  const cursor = result.response?.headers?.get("x-next-cursor") || undefined
+
+  return {
+    session: records
+      .map((record) => stripMessageDiffSnapshots(record.info))
+      .sort((left, right) => compareIDs(left.id, right.id)),
+    part: records.map((record) => ({
+      id: record.info.id,
+      part: (record.parts ?? [])
+        .map(sanitizePartPayload)
+        .sort((left, right) => compareIDs(left.id, right.id)),
+    })),
+    cursor,
+    complete: !cursor,
+    payloadBytes: readPayloadBytes(result),
+  }
+}
+
+export async function loadMessageHistoryBatch(input: MessageHistoryBatchInput): Promise<MessageHistoryBatchResult> {
+  const fetchPage = (before: string | undefined, limit: number): Promise<MessagePage> => fetchMessageHistoryPage({
+    client: input.client,
+    sessionID: input.sessionID,
+    directory: input.directory,
+    limit,
+    before,
+    requestTimeout: input.requestTimeout,
+  })
 
   return fetchMessagePageToUserBoundary({
-    page: await fetchPage(input.before),
-    fetchOlder: fetchPage,
+    page: await fetchPage(input.before, input.limit),
+    fetchOlder: (cursor) => fetchPage(cursor, input.limit),
+    refetchFromStart: (limit) => fetchPage(input.before, limit),
     minimumRealUserMessages: input.minimumRealUserMessages,
   })
 }

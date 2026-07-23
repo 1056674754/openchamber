@@ -1,5 +1,5 @@
 import { useCallback, useRef, useMemo } from "react"
-import type { Message, Part, Todo } from "@opencode-ai/sdk/v2/client"
+import type { Message, OpencodeClient, Part, SessionStatus, Todo } from "@opencode-ai/sdk/v2/client"
 import { Binary } from "./binary"
 import { retry } from "./retry"
 import { SESSION_CACHE_LIMIT, type State } from "./types"
@@ -10,6 +10,7 @@ import {
 } from "./optimistic"
 import { dropCachedSessionMessageRecordsSnapshots, useDirectoryStore, useSyncDirectory, useChildStoreManager } from "./sync-context"
 import { resolveSdkForDirectory } from "./session-actions"
+import { requireExistingSessionDirectory } from "./session-routing"
 import { useSessionUIStore } from "./session-ui-store"
 import { getSyncStoresForServer } from "./multi-server-registry"
 import { DEFAULT_SERVER_ID, serverRegistry } from "@/lib/opencode/server-registry"
@@ -25,11 +26,22 @@ import { getSessionMaterializationStatus, materializeSessionSnapshots } from "./
 import { useTodosPersistStore } from "@/stores/useTodosPersistStore"
 import { useConfigStore } from "@/stores/useConfigStore"
 import { useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
-import { getInteractiveHistoryRealUserTarget, loadMessageHistoryBatch } from "./message-history-loader"
+import {
+  getInitialHistoryRealUserTarget,
+  getInteractiveHistoryRealUserTarget,
+  loadMessageHistoryBatch,
+  MessageHistoryLoadError,
+} from "./message-history-loader"
+import { createSinglePageHistoryPrefetch } from "./message-history-prefetch"
+import { loadMessageHistoryThroughTarget } from "./prompt-history-loader"
+import type { MessagePage } from "./message-page-boundary"
 import { reconcileSyncMeta, type SyncMeta } from "./sync-meta"
+import { formatSdkError } from "./sdk-error"
+import { readRemoteSessionStatuses } from "./remote-session-status"
+import { KeyedSingleFlight } from "./keyed-single-flight"
 
 const SKIP_PARTS = new Set(["patch", "step-start", "step-finish"])
-const MESSAGE_PAGE_SIZE = 150
+const MESSAGE_PAGE_SIZE = 30
 const VSCODE_MESSAGE_PAGE_SIZE = 30
 const VSCODE_INITIAL_PAGE_EXPANSION_LIMITS = [50, 80, 120] as const
 const MAX_SEEN_DIRS = 30
@@ -39,6 +51,36 @@ const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0)
 // Shared across useSync() instances so cache eviction is based on app-level
 // session recency, not whichever component happened to call sync first.
 const seenByDirectory = new Map<string, Set<string>>()
+const sessionSingleFlight = new KeyedSingleFlight<string, void>()
+const messageHistorySingleFlight = new KeyedSingleFlight<string, void>()
+
+const readStatusesForTarget = async (
+  client: OpencodeClient,
+  serverId: string,
+  directory: string,
+): Promise<Record<string, SessionStatus>> => {
+  if (serverId !== DEFAULT_SERVER_ID) {
+    return readRemoteSessionStatuses(serverId, directory)
+  }
+  const result = await client.session.status({ directory })
+  if (result.error) throw new Error(`session.status failed: ${formatSdkError(result.error)}`)
+  return result.data ?? {}
+}
+
+export function logMessageHistoryLoadFailure(input: {
+  readonly sessionID: string
+  readonly directory: string
+  readonly serverId: string
+  readonly error: unknown
+}): void {
+  console.error("[sync] session.messages failed", {
+    sessionID: input.sessionID,
+    directory: input.directory,
+    serverId: input.serverId,
+    status: input.error instanceof MessageHistoryLoadError ? input.error.status : undefined,
+    message: formatSdkError(input.error),
+  }, input.error)
+}
 
 const getEffectiveSessionCacheLimit = () => isVSCodeRuntime() ? VSCODE_SESSION_CACHE_LIMIT : SESSION_CACHE_LIMIT
 const getEffectiveMessagePageSize = () => isVSCodeRuntime() ? VSCODE_MESSAGE_PAGE_SIZE : MESSAGE_PAGE_SIZE
@@ -87,9 +129,9 @@ export function useSync() {
   const childStores = useChildStoreManager()
 
   // Refs for mutable tracking (no re-renders)
-  const inflight = useRef(new Map<string, Promise<void>>())
   const optimistic = useRef(new Map<string, Map<string, OptimisticItem>>())
   const meta = useRef(new Map<string, SyncMeta>())
+  const historyPrefetch = useRef(createSinglePageHistoryPrefetch<MessagePage>())
 
   const resolveSessionTarget = useCallback(
     (sessionID: string) => {
@@ -122,7 +164,7 @@ export function useSync() {
         throw new Error(`Directory for remote session ${sessionID} on ${serverId} is not available`)
       }
 
-      const targetDirectory = knownSessionDir || directory
+      const targetDirectory = requireExistingSessionDirectory(sessionID, knownSessionDir)
       const targetStore = targetDirectory === directory
         ? store
         : childStores.ensureChild(targetDirectory)
@@ -313,23 +355,54 @@ export function useSync() {
         directory: targetDirectory,
         limit: input.limit,
         before: input.before,
-        minimumRealUserMessages: getInteractiveHistoryRealUserTarget(isVSCodeRuntime()),
+        minimumRealUserMessages: input.before
+          ? getInteractiveHistoryRealUserTarget(isVSCodeRuntime())
+          : getInitialHistoryRealUserTarget(isVSCodeRuntime()),
       })
 
       if (result.stoppedBeforeBoundary) {
-        console.warn("[sync] session.messages stopped before reaching the interactive turn target", {
+        console.warn("[sync] session.messages stopped before reaching the interactive turn target", JSON.stringify({
           sessionID: input.sessionID,
           targetDirectory,
           loadedMessageCount: result.page.session.length,
           extraPages: result.extraPages,
           hasCursor: Boolean(result.page.cursor),
-        })
+          payloadBytes: result.page.payloadBytes,
+        }))
       }
 
       return result.page
     },
     [directory],
   )
+
+  const prefetchOlderMessages = useCallback((input: {
+    readonly sessionID: string
+    readonly targetDirectory: string
+    readonly targetServerId: string
+  }) => {
+    if (useSessionUIStore.getState().currentSessionId !== input.sessionID) return
+
+    const current = getMetaFor(input.sessionID, input.targetDirectory)
+    if (current.complete || !current.cursor) return
+
+    const cursor = current.cursor
+    const prefetchKey = `${input.targetDirectory}\n${input.sessionID}\n${cursor}`
+    const request = historyPrefetch.current.prepare(prefetchKey, () => fetchMessagesToUserBoundary({
+      sessionID: input.sessionID,
+      limit: getEffectiveMessagePageSize(),
+      before: cursor,
+      targetDirectory: input.targetDirectory,
+      targetServerId: input.targetServerId,
+    }))
+    void request.catch((error: unknown) => {
+      console.warn("[sync] failed to prefetch older message history", {
+        sessionID: input.sessionID,
+        targetDirectory: input.targetDirectory,
+        error: error instanceof Error ? error.message : String(error),
+      })
+    })
+  }, [fetchMessagesToUserBoundary, getMetaFor])
 
   // Load messages for a session.
   const loadMessages = useCallback(
@@ -340,22 +413,42 @@ export function useSync() {
       targetStore?: typeof store
       targetServerId?: string
       throwOnError?: boolean
+      prefetchedPage?: Promise<MessagePage>
+      throughMessageID?: string
     }) => {
       const writeStore = options?.targetStore ?? store
       const targetDirectory = options?.targetDirectory ?? directory
-      const m = getMetaFor(sessionID, targetDirectory)
-      if (m.loading) return
-      setMetaFor(sessionID, { loading: true }, targetDirectory)
+      const targetServerId = options?.targetServerId ?? DEFAULT_SERVER_ID
+      const historyKey = `${targetServerId}\n${keyFor(sessionID, targetDirectory)}`
+      await messageHistorySingleFlight.run(historyKey, async () => {
+        const m = getMetaFor(sessionID, targetDirectory)
+        if (m.loading) return
+        setMetaFor(sessionID, { loading: true }, targetDirectory)
 
-      try {
+        try {
         const limit = options?.before ? getEffectiveMessagePageSize() : m.limit
-        let page = await fetchMessagesToUserBoundary({
-          sessionID,
-          limit,
-          before: options?.before,
-          targetDirectory,
-          targetServerId: options?.targetServerId,
-        })
+        const preparedPage = options?.prefetchedPage
+          ? await options.prefetchedPage.then(
+            (value) => value,
+            () => undefined,
+          )
+          : undefined
+        let page = options?.before && options.throughMessageID
+          ? (await loadMessageHistoryThroughTarget({
+              client: resolveSdkForDirectory(targetDirectory, sessionID, options.targetServerId),
+              sessionID,
+              directory: targetDirectory,
+              limit,
+              before: options.before,
+              targetMessageID: options.throughMessageID,
+            })).page
+          : preparedPage ?? await fetchMessagesToUserBoundary({
+              sessionID,
+              limit,
+              before: options?.before,
+              targetDirectory,
+              targetServerId: options?.targetServerId,
+            })
 
         // VS Code keeps the initial page small for switch performance. Some
         // sessions have a very large final turn, so the latest 30 records can
@@ -409,14 +502,26 @@ export function useSync() {
           cursor: merged.cursor,
           complete: merged.complete,
         })
-      } catch (error) {
-        setMetaFor(sessionID, { loading: false }, targetDirectory)
-        if (options?.throwOnError) {
-          throw error
+        prefetchOlderMessages({
+          sessionID,
+          targetDirectory,
+          targetServerId: options?.targetServerId ?? DEFAULT_SERVER_ID,
+        })
+        } catch (error) {
+          setMetaFor(sessionID, { loading: false }, targetDirectory)
+          logMessageHistoryLoadFailure({
+            sessionID,
+            directory: targetDirectory,
+            serverId: targetServerId,
+            error,
+          })
+          if (options?.throwOnError) {
+            throw error
+          }
         }
-      }
+      })
     },
-    [store, fetchMessagesToUserBoundary, getMetaFor, setMetaFor, getOptimistic, clearOptimistic, directory],
+    [store, fetchMessagesToUserBoundary, getMetaFor, setMetaFor, getOptimistic, clearOptimistic, directory, keyFor, prefetchOlderMessages],
   )
 
   // Sync a session (load if not cached)
@@ -426,46 +531,40 @@ export function useSync() {
       if (target.serverId === DEFAULT_SERVER_ID) {
         touch(sessionID)
       }
-      const key = keyFor(sessionID, target.directory)
+      const key = `${target.serverId}\n${keyFor(sessionID, target.directory)}`
+      return sessionSingleFlight.run(key, async () => {
+        const current = target.store.getState()
+        const m = getMetaFor(sessionID, target.directory)
+        const materialization = getSessionMaterializationStatus(current, sessionID)
+        const cached = materialization.hasMessages && materialization.renderable && m.limit > 0
+        const prefetchInfo = !force ? getSessionPrefetch(target.directory, sessionID) : undefined
+        const knownCachedLimit = Math.max(m.limit, prefetchInfo?.limit ?? 0)
+        const needsVSCodeInitialTurnBoundary = isVSCodeRuntime()
+          && cached
+          && !hasUserMessage(current.message[sessionID])
+          && knownCachedLimit < getVSCodeInitialPageExpansionMax()
+          && !m.complete
+          && prefetchInfo?.complete !== true
+          && Boolean(m.cursor ?? prefetchInfo?.cursor)
+        if (needsVSCodeInitialTurnBoundary && prefetchInfo && prefetchInfo.limit > m.limit) {
+          setMetaFor(sessionID, {
+            limit: prefetchInfo.limit,
+            cursor: prefetchInfo.cursor,
+            complete: prefetchInfo.complete,
+          }, target.directory)
+        }
+        const cachedReady = cached && !needsVSCodeInitialTurnBoundary
+        const hasSession = Binary.search(current.session, sessionID, (s) => s.id).found
+        if (cachedReady && hasSession && !force) return
 
-      // Dedup inflight requests
-      const existing = inflight.current.get(key)
-      if (existing) return existing
+        if (!force && !needsVSCodeInitialTurnBoundary) {
+          if (shouldSkipSessionPrefetch({
+            hasMessages: cachedReady,
+            info: prefetchInfo,
+            pageSize: getEffectiveMessagePageSize(),
+          })) return
+        }
 
-      const current = target.store.getState()
-      const m = getMetaFor(sessionID, target.directory)
-      const materialization = getSessionMaterializationStatus(current, sessionID)
-      const cached = materialization.hasMessages && materialization.renderable && m.limit > 0
-      const prefetchInfo = !force ? getSessionPrefetch(target.directory, sessionID) : undefined
-      const knownCachedLimit = Math.max(m.limit, prefetchInfo?.limit ?? 0)
-      const needsVSCodeInitialTurnBoundary = isVSCodeRuntime()
-        && cached
-        && !hasUserMessage(current.message[sessionID])
-        && knownCachedLimit < getVSCodeInitialPageExpansionMax()
-        && !m.complete
-        && prefetchInfo?.complete !== true
-        && Boolean(m.cursor ?? prefetchInfo?.cursor)
-      if (needsVSCodeInitialTurnBoundary && prefetchInfo && prefetchInfo.limit > m.limit) {
-        setMetaFor(sessionID, {
-          limit: prefetchInfo.limit,
-          cursor: prefetchInfo.cursor,
-          complete: prefetchInfo.complete,
-        }, target.directory)
-      }
-      const cachedReady = cached && !needsVSCodeInitialTurnBoundary
-      const hasSession = Binary.search(current.session, sessionID, (s) => s.id).found
-      if (cachedReady && hasSession && !force) return
-
-      // Skip if recently fetched (TTL)
-      if (!force && !needsVSCodeInitialTurnBoundary) {
-        if (shouldSkipSessionPrefetch({
-          hasMessages: cachedReady,
-          info: prefetchInfo,
-          pageSize: getEffectiveMessagePageSize(),
-        })) return
-      }
-
-      const promise = (async () => {
         if (!hasSession || force) {
           try {
             const sessionDir = target.directory
@@ -488,20 +587,54 @@ export function useSync() {
         }
 
         if (!cachedReady || force) {
-          await loadMessages(sessionID, {
-            targetDirectory: target.directory,
-            targetStore: target.store,
-            targetServerId: target.serverId,
+          const client = resolveSdkForDirectory(target.directory, sessionID, target.serverId)
+          const loadChildren = client.session.children({
+            sessionID,
+            directory: target.directory,
+          }).then((result) => {
+            if (result.error) {
+              throw new Error(`session.children failed: ${formatSdkError(result.error)}`)
+            }
+
+            const children = result.data ?? []
+            if (children.length === 0) return
+
+            const state = target.store.getState()
+            let sessions = state.session
+            for (const child of children) {
+              const index = Binary.search(sessions, child.id, (session) => session.id)
+              if (index.found) continue
+              if (sessions === state.session) sessions = [...sessions]
+              sessions.splice(index.index, 0, child)
+            }
+            if (sessions !== state.session) {
+              target.store.setState({ session: sessions })
+            }
+          }).catch((error: unknown) => {
+            console.warn("[sync] failed to hydrate session children", {
+              sessionID,
+              directory: target.directory,
+              serverId: target.serverId,
+              error: formatSdkError(error),
+            })
           })
+
+          await Promise.all([
+            loadMessages(sessionID, {
+              targetDirectory: target.directory,
+              targetStore: target.store,
+              targetServerId: target.serverId,
+            }),
+            loadChildren,
+          ])
         }
 
         if (force) {
           const sessionDir = target.directory
           const client = resolveSdkForDirectory(sessionDir, sessionID, target.serverId)
           await Promise.all([
-            client.session.status({ directory: sessionDir }).then((res) => {
-              if (!res.data) return
-              const status = res.data[sessionID] ?? { type: "idle" as const }
+            readStatusesForTarget(client, target.serverId, sessionDir).then((statuses) => {
+              const status = statuses[sessionID] ?? { type: "idle" as const }
               target.store.setState((s) => ({
                 session_status: { ...s.session_status, [sessionID]: status },
               }))
@@ -516,11 +649,7 @@ export function useSync() {
             }).catch(() => {}),
           ])
         }
-      })()
-
-      inflight.current.set(key, promise)
-      promise.finally(() => inflight.current.delete(key))
-      return promise
+      })
     },
     [keyFor, touch, getMetaFor, setMetaFor, loadMessages, resolveSessionTarget],
   )
@@ -578,9 +707,8 @@ export function useSync() {
       // 5. Fetch status, todos, and sub-agents in parallel.
       try {
         await Promise.all([
-          client.session.status({ directory: sessionDir }).then((res) => {
-            if (!res.data) return
-            const status = res.data[sessionID] ?? { type: "idle" as const }
+          readStatusesForTarget(client, target.serverId, sessionDir).then((statuses) => {
+            const status = statuses[sessionID] ?? { type: "idle" as const }
             target.store.setState((s) => ({
               session_status: { ...s.session_status, [sessionID]: status },
             }))
@@ -612,15 +740,52 @@ export function useSync() {
       }
       const m = getMetaFor(sessionID, target.directory)
       if (m.loading || m.complete || !m.cursor) return
+      const prefetchKey = `${target.directory}\n${sessionID}\n${m.cursor}`
       await loadMessages(sessionID, {
         before: m.cursor,
         mode: "prepend",
         targetDirectory: target.directory,
         targetStore: target.store,
         targetServerId: target.serverId,
+        prefetchedPage: historyPrefetch.current.take(prefetchKey),
+        throwOnError: true,
       })
     },
     [touch, getMetaFor, loadMessages, resolveSessionTarget],
+  )
+
+  const loadThroughMessage = useCallback(
+    async (sessionID: string, messageID: string): Promise<boolean> => {
+      const target = resolveSessionTarget(sessionID)
+      let currentMessages = target.store.getState().message[sessionID] ?? []
+      if (currentMessages.some((message) => message.id === messageID)) return true
+
+      let m = getMetaFor(sessionID, target.directory)
+      if (m.loading) {
+        await loadMessages(sessionID, {
+          targetDirectory: target.directory,
+          targetStore: target.store,
+          targetServerId: target.serverId,
+        })
+        currentMessages = target.store.getState().message[sessionID] ?? []
+        if (currentMessages.some((message) => message.id === messageID)) return true
+        m = getMetaFor(sessionID, target.directory)
+      }
+      if (m.complete || !m.cursor) return false
+      await loadMessages(sessionID, {
+        before: m.cursor,
+        mode: "prepend",
+        targetDirectory: target.directory,
+        targetStore: target.store,
+        targetServerId: target.serverId,
+        throughMessageID: messageID,
+        throwOnError: true,
+      })
+
+      currentMessages = target.store.getState().message[sessionID] ?? []
+      return currentMessages.some((message) => message.id === messageID)
+    },
+    [getMetaFor, loadMessages, resolveSessionTarget],
   )
 
   const hasMore = useCallback(
@@ -636,6 +801,14 @@ export function useSync() {
     (sessionID: string) => {
       const target = resolveSessionTarget(sessionID)
       return getMetaFor(sessionID, target.directory).loading
+    },
+    [getMetaFor, resolveSessionTarget],
+  )
+
+  const isComplete = useCallback(
+    (sessionID: string) => {
+      const target = resolveSessionTarget(sessionID)
+      return getMetaFor(sessionID, target.directory).complete
     },
     [getMetaFor, resolveSessionTarget],
   )
@@ -721,19 +894,30 @@ export function useSync() {
     [clearOptimistic, resolveOptimisticTarget],
   )
 
+  const optimisticConfirm = useCallback(
+    (input: { sessionID: string; messageID: string; directory?: string | null; serverId?: string | null }) => {
+      const target = resolveOptimisticTarget(input)
+      clearOptimistic(input.sessionID, input.messageID, target.directory)
+    },
+    [clearOptimistic, resolveOptimisticTarget],
+  )
+
   return useMemo(
     () => ({
       ensureSessionRenderable: syncSession,
       syncSession,
       forceRefreshSession,
       loadMore,
+      loadThroughMessage,
       hasMore,
       isLoading,
+      isComplete,
       optimistic: {
         add: optimisticAdd,
         remove: optimisticRemove,
+        confirm: optimisticConfirm,
       },
     }),
-    [syncSession, forceRefreshSession, loadMore, hasMore, isLoading, optimisticAdd, optimisticRemove],
+    [syncSession, forceRefreshSession, loadMore, loadThroughMessage, hasMore, isLoading, isComplete, optimisticAdd, optimisticRemove, optimisticConfirm],
   )
 }
