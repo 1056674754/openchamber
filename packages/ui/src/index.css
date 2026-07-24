@@ -1383,6 +1383,8 @@ html:not(.dark) .chat-scroll {
 
 [data-markdown="mermaid-block"] [data-markdown="mermaid-scroll"] {
   overflow: auto;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 320px;
 }
 
 [data-markdown="mermaid-block"] [data-markdown="mermaid"] {

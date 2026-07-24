@@ -355,14 +355,14 @@ const MERMAID_CACHE_MAX = 30;
 let mermaidLastSource = '';
 let mermaidLastSvg = '';
 
-const MermaidBlock: React.FC<{ source: string; onShowPopup?: (content: ToolPopupContent) => void }> = ({ source, onShowPopup }) => {
+const MermaidBlockImpl: React.FC<{ source: string; onShowPopup?: (content: ToolPopupContent) => void }> = ({ source, onShowPopup }) => {
   const { t } = useI18n();
   const currentTheme = useCurrentMermaidTheme();
   const { isMobile, isTablet } = useDeviceInfo();
   const [copied, setCopied] = React.useState(false);
   const [downloaded, setDownloaded] = React.useState(false);
   const containerRef = React.useRef<HTMLDivElement>(null);
-  const [isVisible, setIsVisible] = React.useState(false);
+  const [shouldRender, setShouldRender] = React.useState(false);
 
   const debouncedSource = useDebouncedValue(source, 400);
   const isStreaming = source !== debouncedSource;
@@ -382,18 +382,24 @@ const MermaidBlock: React.FC<{ source: string; onShowPopup?: (content: ToolPopup
   const colorKey = `${tc.surface.elevated}|${tc.surface.foreground}|${tc.interactive.border}|${tc.primary.base}|${tc.surface.mutedForeground}|${tc.surface.muted}`;
 
   React.useEffect(() => {
+    if (svg) return;
     const el = containerRef.current;
     if (!el) return;
     const observer = new IntersectionObserver(
-      ([entry]) => setIsVisible(entry.isIntersecting),
+      (entries) => {
+        if (entries[0]?.isIntersecting) {
+          setShouldRender(true);
+          observer.disconnect();
+        }
+      },
       { rootMargin: '300px' },
     );
     observer.observe(el);
     return () => observer.disconnect();
-  }, []);
+  }, [svg]);
 
   React.useEffect(() => {
-    if (!debouncedSource || !isVisible) return;
+    if (!debouncedSource || !shouldRender) return;
     let cancelled = false;
 
     const cached = mermaidSvgCache.get(debouncedSource);
@@ -428,7 +434,7 @@ const MermaidBlock: React.FC<{ source: string; onShowPopup?: (content: ToolPopup
 
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [debouncedSource, colorKey, isVisible]);
+  }, [debouncedSource, colorKey, shouldRender]);
 
   const copyVisibilityClass = isMobile || isTablet ? 'opacity-100' : 'opacity-0 group-hover:opacity-100';
 
@@ -460,7 +466,7 @@ const MermaidBlock: React.FC<{ source: string; onShowPopup?: (content: ToolPopup
     }
   };
 
-  if (!svg && !isVisible) {
+  if (!svg && !shouldRender) {
     return (
       <div ref={containerRef} data-markdown="mermaid-block" className="group">
         <div data-markdown="mermaid-scroll" className="flex items-center justify-center py-8">
@@ -570,6 +576,8 @@ const MermaidBlock: React.FC<{ source: string; onShowPopup?: (content: ToolPopup
     </div>
   );
 };
+
+const MermaidBlock = React.memo(MermaidBlockImpl, (prev, next) => prev.source === next.source);
 
 const extractMermaidBlocks = (markdown: string): string[] => {
   if (!markdown.includes('mermaid')) return [];
