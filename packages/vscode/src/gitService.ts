@@ -11,6 +11,7 @@ import * as fs from 'fs';
 import { spawn, execFile } from 'child_process';
 import { promisify } from 'util';
 import type { API as GitAPI, Repository, GitExtension, Status } from './git.d';
+import { populateWorktreeWithLockRecovery } from './git-lock-recovery-runtime';
 
 let gitApi: GitAPI | null = null;
 let gitExtensionEnabled = false;
@@ -1397,7 +1398,7 @@ const queueWorktreeBootstrap = (args: {
   } = args;
   setTimeout(() => {
     const run = async () => {
-      await runGitCommandOrThrow(directory, ['reset', '--hard'], 'Failed to populate worktree');
+      await populateWorktreeWithLockRecovery(directory, runGitCommand);
       if (setUpstream) {
         await applyUpstreamConfiguration({
           primaryWorktree,

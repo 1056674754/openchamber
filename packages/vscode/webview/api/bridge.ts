@@ -9,10 +9,20 @@ interface VSCodeAPI {
 }
 
 let vscodeApi: VSCodeAPI | null = null;
+let unavailableApiWarningLogged = false;
+
+const unavailableVSCodeApi: VSCodeAPI = {
+  postMessage: () => {
+    if (unavailableApiWarningLogged) return;
+    unavailableApiWarningLogged = true;
+    console.warn('[openchamber] VS Code API unavailable; dropping postMessage');
+  },
+};
 
 function getVSCodeAPI(): VSCodeAPI {
   if (!vscodeApi) {
-    vscodeApi = acquireVsCodeApi();
+    const acquired = typeof acquireVsCodeApi === 'function' ? acquireVsCodeApi() : undefined;
+    vscodeApi = acquired ?? unavailableVSCodeApi;
   }
   return vscodeApi;
 }

@@ -21,6 +21,10 @@ Keep `bridge.ts` as a thin orchestration layer that delegates message handling t
 - `bridge-git-process-runtime.ts`
   - Git process execution and environment setup (`execGit`), including SSH agent socket resolution.
 
+- `git-lock-recovery-runtime.ts`
+  - Conservative worktree bootstrap recovery for stale `index.lock` files.
+  - Retries transient conflicts, removes only metadata-identical locks, and preserves locks that change during the observation window.
+
 - `bridge-fs-runtime.ts`
   - Bridge handlers for filesystem-related message routes.
   - Uses shared FS helpers via injected dependencies.
@@ -36,6 +40,7 @@ Keep `bridge.ts` as a thin orchestration layer that delegates message handling t
 
 - `bridge-localfs-proxy-runtime.ts`
   - Local `/api/fs/read` and `/api/fs/raw` proxy helpers and shared proxy utility helpers.
+  - Serves plugin-published `/api/artifacts/:artifactId/content` responses from the local immutable Artifact store.
 
 - `bridge-proxy-runtime.ts`
   - Proxy route handlers (`api:proxy`, `api:session:message`) with injected helper dependencies.
