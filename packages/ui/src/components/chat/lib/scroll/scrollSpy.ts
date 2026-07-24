@@ -1,10 +1,11 @@
 export type OffsetTurn = {
     id: string;
     top: number;
+    bottom?: number;
 };
 
 type ScrollSpyInput = {
-    onActive: (id: string) => void;
+    onActive: (id: string, visibleIds: string[]) => void;
     raf?: (cb: FrameRequestCallback) => number;
     caf?: (id: number) => void;
     ResizeObserver?: typeof globalThis.ResizeObserver;
@@ -54,6 +55,26 @@ export const pickActiveTurnId = (
     return pickOffsetTurnId(offsets, viewport.scrollTop + READ_LINE_OFFSET_PX);
 };
 
+export const pickVisibleTurnIds = (
+    offsets: OffsetTurn[],
+    viewport: { scrollTop: number; scrollHeight: number; clientHeight: number },
+): string[] => {
+    const viewportTop = viewport.scrollTop;
+    const viewportBottom = viewport.scrollTop + viewport.clientHeight;
+    const visible = offsets.filter((turn, index) => {
+        const nextTop = offsets[index + 1]?.top;
+        const turnBottom = turn.bottom ?? nextTop ?? viewport.scrollHeight;
+        return turnBottom > viewportTop && turn.top < viewportBottom;
+    }).map((turn) => turn.id);
+
+    if (visible.length > 0) {
+        return visible;
+    }
+
+    const active = pickActiveTurnId(offsets, viewport);
+    return active ? [active] : [];
+};
+
 export const createScrollSpy = (input: ScrollSpyInput) => {
     const raf = input.raf ?? requestAnimationFrame;
     const caf = input.caf ?? cancelAnimationFrame;
@@ -66,6 +87,7 @@ export const createScrollSpy = (input: ScrollSpyInput) => {
     let frame: number | undefined;
     let roDebounce: ReturnType<typeof setTimeout> | undefined;
     let active: string | undefined;
+    let visibleIds: string[] = [];
     let dirty = true;
 
     const nodes = new Map<string, HTMLElement>();
@@ -90,10 +112,14 @@ export const createScrollSpy = (input: ScrollSpyInput) => {
         }
 
         const baseTop = container.getBoundingClientRect().top;
-        offsets = [...nodes].map(([key, element]) => ({
-            id: key,
-            top: element.getBoundingClientRect().top - baseTop + container.scrollTop,
-        }));
+        offsets = [...nodes].map(([key, element]) => {
+            const rect = element.getBoundingClientRect();
+            return {
+                id: key,
+                top: rect.top - baseTop + container.scrollTop,
+                bottom: rect.bottom - baseTop + container.scrollTop,
+            };
+        });
         offsets.sort((a, b) => a.top - b.top);
         dirty = false;
     };
@@ -109,13 +135,21 @@ export const createScrollSpy = (input: ScrollSpyInput) => {
         }
 
         const next = pickActiveTurnId(offsets, container);
+        const nextVisibleIds = pickVisibleTurnIds(offsets, container);
 
-        if (!next || next === active) {
+        if (!next) {
+            return;
+        }
+
+        const visibleUnchanged = nextVisibleIds.length === visibleIds.length
+            && nextVisibleIds.every((id, index) => id === visibleIds[index]);
+        if (next === active && visibleUnchanged) {
             return;
         }
 
         active = next;
-        input.onActive(next);
+        visibleIds = nextVisibleIds;
+        input.onActive(next, nextVisibleIds);
     };
 
     const observe = () => {
@@ -213,6 +247,7 @@ export const createScrollSpy = (input: ScrollSpyInput) => {
         nodes.clear();
         offsets = [];
         active = undefined;
+        visibleIds = [];
         dirty = true;
     };
 
@@ -240,5 +275,6 @@ export const createScrollSpy = (input: ScrollSpyInput) => {
         clear,
         destroy,
         getActiveId: () => active,
+        getVisibleIds: () => visibleIds,
     };
 };

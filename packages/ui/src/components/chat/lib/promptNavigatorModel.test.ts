@@ -7,6 +7,7 @@ import {
     createPromptPreviewCache,
     getPromptPreview,
     resolvePromptNavigatorActiveTurnId,
+    resolvePromptNavigatorVisibleTurnIds,
 } from './promptNavigatorModel';
 
 const createMessage = (
@@ -61,6 +62,29 @@ describe('promptNavigatorModel', () => {
 
         expect(resolvePromptNavigatorActiveTurnId(['one', 'two', 'three'], previews, 'two')).toBe('one');
         expect(resolvePromptNavigatorActiveTurnId(['one', 'two', 'three'], previews, 'three')).toBe('three');
+    });
+
+    test('keeps an active prompt that is present in complete history but absent from the local turn index', () => {
+        const previews = new Map<string, Part[]>([
+            ['older', [{ type: 'text', text: 'older' } as Part]],
+            ['latest', [{ type: 'text', text: 'latest' } as Part]],
+        ]);
+
+        expect(resolvePromptNavigatorActiveTurnId(['latest'], previews, 'older')).toBe('older');
+        expect(resolvePromptNavigatorActiveTurnId(['latest'], previews, 'missing')).toBeNull();
+    });
+
+    test('maps the visible turn window to distinct real prompts', () => {
+        const previews = new Map<string, Part[]>([
+            ['one', [{ type: 'text', text: 'one' } as Part]],
+            ['three', [{ type: 'text', text: 'three' } as Part]],
+        ]);
+
+        expect(resolvePromptNavigatorVisibleTurnIds(
+            ['one', 'two', 'three'],
+            previews,
+            ['one', 'two', 'three'],
+        )).toEqual(['one', 'three']);
     });
 
     test('reuses the preview map when streaming updates do not change user prompts', () => {

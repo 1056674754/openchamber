@@ -7,7 +7,7 @@ import { useUIStore } from '@/stores/useUIStore';
 import { useMessageQueueStore, type QueuedMessage } from '@/stores/messageQueueStore';
 import { useSessionUIStore, type SendMessageTarget } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
-import { useInputStore } from '@/sync/input-store';
+import { resolveAttachmentSessionKey, useInputStore } from '@/sync/input-store';
 import type { AttachedFile, SessionContextUsage } from '@/stores/types/sessionTypes';
 import * as sessionActions from '@/sync/session-actions';
 import type { SendDeliveryMode } from '@/sync/session-actions';
@@ -1757,6 +1757,17 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         }
     }, [persistChatDraft]);
 
+    // Keep composer attachments scoped to the active session/draft.
+    // Text drafts already swap on session change; attachments used to be global
+    // and would "follow" into the next conversation (including after queue send).
+    const attachmentSessionKey = resolveAttachmentSessionKey({
+        currentSessionId,
+        newSessionDraftOpen,
+    });
+    React.useEffect(() => {
+        useInputStore.getState().setAttachmentSessionKey(attachmentSessionKey);
+    }, [attachmentSessionKey]);
+
     // Handle session switching: save draft for old session, restore draft for new session
     const prevSessionIdRef = React.useRef(currentSessionId);
     React.useEffect(() => {
@@ -2513,8 +2524,18 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                     messageRef.current = restoredDraft;
                     setMessage(restoredDraft);
                 }
-                if (restoreIntoVisibleInput && composerAttachmentsSnapshot.length > 0) {
-                    useInputStore.getState().setAttachedFiles(composerAttachmentsSnapshot);
+                if (composerAttachmentsSnapshot.length > 0) {
+                    if (restoreIntoVisibleInput) {
+                        useInputStore.getState().setAttachedFiles(composerAttachmentsSnapshot);
+                    } else if (submittedSessionId) {
+                        // User already switched away: restore into the original
+                        // session bucket so the image is not carried into the
+                        // visible composer (and so returning to the session still has it).
+                        useInputStore.getState().setAttachedFilesForSession(
+                            submittedSessionId,
+                            composerAttachmentsSnapshot,
+                        );
+                    }
                 }
             }
 

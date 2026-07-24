@@ -18,7 +18,12 @@ import { TimelineDialog } from './TimelineDialog';
 import { useChatTurnNavigation } from './hooks/useChatTurnNavigation';
 import { useCompletePromptHistory } from './hooks/useCompletePromptHistory';
 import { PromptNavigatorRail } from './components/PromptNavigatorRail';
-import { buildPromptPreviews, createPromptPreviewCache, resolvePromptNavigatorActiveTurnId } from './lib/promptNavigatorModel';
+import {
+    buildPromptPreviews,
+    createPromptPreviewCache,
+    resolvePromptNavigatorActiveTurnId,
+    resolvePromptNavigatorVisibleTurnIds,
+} from './lib/promptNavigatorModel';
 import { useDeviceInfo } from '@/lib/device';
 import { Button } from '@/components/ui/button';
 import { OverlayScrollbar } from '@/components/ui/OverlayScrollbar';
@@ -179,6 +184,8 @@ type ChatViewportProps = {
     isProgrammaticFollowActive: boolean;
     promptHistoryRecords: readonly SessionMessageRecord[];
     activeTurnId: string | null;
+    visibleTurnIds: string[];
+    timelineTurnIds: string[];
     onSelectTurn: (turnId: string) => void;
     canLoadEarlierPrompts: boolean;
 };
@@ -211,6 +218,8 @@ const ChatViewport = React.memo(({
     isProgrammaticFollowActive,
     promptHistoryRecords,
     activeTurnId,
+    visibleTurnIds,
+    timelineTurnIds,
     onSelectTurn,
     canLoadEarlierPrompts,
 }: ChatViewportProps) => {
@@ -230,9 +239,19 @@ const ChatViewport = React.memo(({
         () => [...promptPreviewsByTurnId.keys()],
         [promptPreviewsByTurnId],
     );
+    const promptVisibleTurnIds = React.useMemo(
+        () => resolvePromptNavigatorVisibleTurnIds(
+            timelineTurnIds,
+            promptPreviewsByTurnId,
+            visibleTurnIds,
+        ),
+        [promptPreviewsByTurnId, timelineTurnIds, visibleTurnIds],
+    );
     const promptActiveTurnId = React.useMemo(
-        () => resolvePromptNavigatorActiveTurnId(promptTurnIds, promptPreviewsByTurnId, activeTurnId),
-        [activeTurnId, promptPreviewsByTurnId, promptTurnIds],
+        () => resolvePromptNavigatorActiveTurnId(timelineTurnIds, promptPreviewsByTurnId, activeTurnId)
+            ?? promptVisibleTurnIds[0]
+            ?? null,
+        [activeTurnId, promptPreviewsByTurnId, promptVisibleTurnIds, timelineTurnIds],
     );
     const focusScrollContainer = React.useCallback((event: React.MouseEvent<HTMLElement>) => {
         if (event.defaultPrevented || shouldIgnoreChatNavigationTarget(event.target)) {
@@ -318,6 +337,7 @@ const ChatViewport = React.memo(({
                         turnIds={promptTurnIds}
                         previewsByTurnId={promptPreviewsByTurnId}
                         activeTurnId={promptActiveTurnId}
+                        visibleTurnIds={promptVisibleTurnIds}
                         onSelectTurn={onSelectTurn}
                         canLoadEarlier={canLoadEarlierPrompts}
                         isLoadingOlder={isLoadingOlder}
@@ -356,6 +376,8 @@ const ChatViewport = React.memo(({
         && prev.isProgrammaticFollowActive === next.isProgrammaticFollowActive
         && prev.promptHistoryRecords === next.promptHistoryRecords
         && prev.activeTurnId === next.activeTurnId
+        && prev.visibleTurnIds === next.visibleTurnIds
+        && prev.timelineTurnIds === next.timelineTurnIds
         && prev.onSelectTurn === next.onSelectTurn
         && prev.canLoadEarlierPrompts === next.canLoadEarlierPrompts;
 });
@@ -646,9 +668,9 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
         }
     }, [autoOpenDraft, currentSessionId, draftOpen, openNewSessionDraft]);
 
-    const activeTurnChangeRef = React.useRef<(turnId: string | null) => void>(() => {});
-    const handleActiveTurnChange = React.useCallback((turnId: string | null) => {
-        activeTurnChangeRef.current(turnId);
+    const activeTurnChangeRef = React.useRef<(turnId: string | null, visibleTurnIds: string[]) => void>(() => {});
+    const handleActiveTurnChange = React.useCallback((turnId: string | null, visibleTurnIds: string[]) => {
+        activeTurnChangeRef.current(turnId, visibleTurnIds);
     }, []);
 
     const {
@@ -1043,6 +1065,8 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
                 isProgrammaticFollowActive={isFollowingProgrammatically}
                 promptHistoryRecords={promptHistory.records}
                 activeTurnId={timelineController.activeTurnId}
+                visibleTurnIds={timelineController.visibleTurnIds}
+                timelineTurnIds={timelineController.turnIds}
                 onSelectTurn={handleSelectPromptTurn}
                 canLoadEarlierPrompts={timelineController.historySignals.canLoadEarlier}
             />

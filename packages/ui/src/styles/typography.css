@@ -10,18 +10,22 @@
 
   .typography-ui-header {
     font-size: var(--text-ui-header);
+    line-height: round(1.45em, 1px);
   }
 
   .typography-ui-label {
     font-size: var(--text-ui-label);
+    line-height: round(1.45em, 1px);
   }
 
   .typography-meta {
     font-size: var(--text-meta);
+    line-height: round(1.45em, 1px);
   }
 
   .typography-micro {
     font-size: var(--text-micro);
+    line-height: round(1.45em, 1px);
   }
 
   .chat-column {

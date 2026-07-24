@@ -133,9 +133,10 @@ export const resolvePromptNavigatorActiveTurnId = (
     const promptTurnIds = turnIds.filter((turnId) => previewsByTurnId.has(turnId));
     if (promptTurnIds.length === 0) return null;
     if (!activeTurnId) return promptTurnIds[promptTurnIds.length - 1];
+    if (previewsByTurnId.has(activeTurnId)) return activeTurnId;
 
     const activeTurnIndex = turnIds.indexOf(activeTurnId);
-    if (activeTurnIndex < 0) return promptTurnIds[promptTurnIds.length - 1];
+    if (activeTurnIndex < 0) return null;
 
     for (let index = activeTurnIndex; index >= 0; index -= 1) {
         const turnId = turnIds[index];
@@ -143,4 +144,19 @@ export const resolvePromptNavigatorActiveTurnId = (
     }
 
     return promptTurnIds[0];
+};
+
+export const resolvePromptNavigatorVisibleTurnIds = (
+    turnIds: string[],
+    previewsByTurnId: Map<string, Part[]>,
+    visibleTurnIds: string[],
+): string[] => {
+    const resolved: string[] = [];
+    for (const turnId of visibleTurnIds) {
+        const promptTurnId = resolvePromptNavigatorActiveTurnId(turnIds, previewsByTurnId, turnId);
+        if (promptTurnId && resolved[resolved.length - 1] !== promptTurnId) {
+            resolved.push(promptTurnId);
+        }
+    }
+    return resolved;
 };

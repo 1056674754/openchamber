@@ -400,6 +400,7 @@ interface ExpandableToolRowProps {
     activity: TurnActivityPart;
     sessionId?: string;
     isExpanded: boolean;
+    streamPhase: StreamPhase;
     syntaxTheme: Record<string, React.CSSProperties>;
     isMobile: boolean;
     onToggleTool: (toolId: string) => void;
@@ -413,6 +414,7 @@ const ExpandableToolRow: React.FC<ExpandableToolRowProps> = ({
     activity,
     sessionId,
     isExpanded,
+    streamPhase,
     syntaxTheme,
     isMobile,
     onToggleTool,
@@ -431,6 +433,7 @@ const ExpandableToolRow: React.FC<ExpandableToolRowProps> = ({
             sessionId={sessionId}
             messageId={activity.messageId}
             isExpanded={isExpanded}
+            streamPhase={streamPhase}
             onToggle={handleToggle}
             syntaxTheme={syntaxTheme}
             isMobile={isMobile}
@@ -455,6 +458,7 @@ const ExpandableToolRow: React.FC<ExpandableToolRowProps> = ({
 
 const MemoExpandableToolRow = React.memo(ExpandableToolRow, (prev, next) => {
     return prev.isExpanded === next.isExpanded
+        && prev.streamPhase === next.streamPhase
         && prev.sessionId === next.sessionId
         && prev.syntaxTheme === next.syntaxTheme
         && prev.isMobile === next.isMobile
@@ -1007,6 +1011,7 @@ const ProgressiveGroup: React.FC<ProgressiveGroupProps> = ({
                         activity={row.activity}
                         sessionId={sessionId}
                         isExpanded={expandedTools.has(row.activity.id)}
+                        streamPhase={streamPhase}
                         syntaxTheme={syntaxTheme}
                         isMobile={isMobile}
                         onToggleTool={onToggleTool}
@@ -1048,6 +1053,7 @@ const ProgressiveGroup: React.FC<ProgressiveGroupProps> = ({
                         activity={row.activity}
                         sessionId={sessionId}
                         isExpanded={expandedTools.has(row.activity.id)}
+                        streamPhase={streamPhase}
                         syntaxTheme={syntaxTheme}
                         isMobile={isMobile}
                         onToggleTool={onToggleTool}

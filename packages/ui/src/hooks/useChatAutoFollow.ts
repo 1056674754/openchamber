@@ -33,7 +33,7 @@ interface UseChatAutoFollowOptions {
     sessionMessageCount: number;
     sessionIsWorking: boolean;
     isMobile: boolean;
-    onActiveTurnChange?: (turnId: string | null) => void;
+    onActiveTurnChange?: (turnId: string | null, visibleTurnIds: string[]) => void;
 }
 
 export interface UseChatAutoFollowResult {
@@ -595,11 +595,15 @@ export const useChatAutoFollow = ({
         if (!container) return;
 
         let lastActiveTurnId: string | null = null;
+        let lastVisibleTurnIds: string[] = [];
         const spy = createScrollSpy({
-            onActive: (turnId) => {
-                if (turnId === lastActiveTurnId) return;
+            onActive: (turnId, visibleTurnIds) => {
+                const visibleUnchanged = visibleTurnIds.length === lastVisibleTurnIds.length
+                    && visibleTurnIds.every((id, index) => id === lastVisibleTurnIds[index]);
+                if (turnId === lastActiveTurnId && visibleUnchanged) return;
                 lastActiveTurnId = turnId;
-                onActiveTurnChange(turnId);
+                lastVisibleTurnIds = visibleTurnIds;
+                onActiveTurnChange(turnId, visibleTurnIds);
             },
         });
         spy.setContainer(container);

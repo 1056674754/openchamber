@@ -47,6 +47,7 @@ export interface UseChatTimelineControllerResult {
     isLoadingOlder: boolean;
     pendingRevealWork: boolean;
     activeTurnId: string | null;
+    visibleTurnIds: string[];
     showScrollToBottom: boolean;
     turnWindowModel: TurnWindowModel;
     loadEarlier: (options?: { userInitiated?: boolean }) => Promise<void>;
@@ -58,7 +59,7 @@ export interface UseChatTimelineControllerResult {
     captureViewportAnchor: () => MessageViewportAnchor | null;
     restoreViewportAnchor: (anchor: MessageViewportAnchor) => boolean;
     syncPendingPrependAnchorToViewport: () => void;
-    handleActiveTurnChange: (turnId: string | null) => void;
+    handleActiveTurnChange: (turnId: string | null, visibleTurnIds: string[]) => void;
 }
 
 const TURN_MODEL_CACHE_MAX = 30;
@@ -178,6 +179,7 @@ export const useChatTimelineController = ({
     const [isLoadingOlder, setIsLoadingOlder] = React.useState(false);
     const [pendingRevealWork, setPendingRevealWork] = React.useState(false);
     const [activeTurnId, setActiveTurnId] = React.useState<string | null>(null);
+    const [visibleTurnIds, setVisibleTurnIds] = React.useState<string[]>([]);
 
     const turnModelRef = React.useRef(turnWindowModel);
     const turnStartRef = React.useRef(turnStart);
@@ -220,6 +222,7 @@ export const useChatTimelineController = ({
         setIsLoadingOlder(false);
         setPendingRevealWork(false);
         setActiveTurnId(null);
+        setVisibleTurnIds([]);
     }, [sessionId]);
 
     const resolvePendingScrollRequest = React.useCallback((value: boolean) => {
@@ -560,8 +563,13 @@ export const useChatTimelineController = ({
         goToBottom('instant');
     }, [goToBottom]);
 
-    const handleActiveTurnChange = React.useCallback((turnId: string | null) => {
+    const handleActiveTurnChange = React.useCallback((turnId: string | null, nextVisibleTurnIds: string[]) => {
         setActiveTurnId(turnId);
+        setVisibleTurnIds((previous) => {
+            const unchanged = previous.length === nextVisibleTurnIds.length
+                && nextVisibleTurnIds.every((id, index) => id === previous[index]);
+            return unchanged ? previous : nextVisibleTurnIds;
+        });
     }, []);
 
     return {
@@ -572,6 +580,7 @@ export const useChatTimelineController = ({
         isLoadingOlder,
         pendingRevealWork,
         activeTurnId,
+        visibleTurnIds,
         showScrollToBottom: showScrollButton && !pendingRevealWork,
         turnWindowModel,
         loadEarlier,

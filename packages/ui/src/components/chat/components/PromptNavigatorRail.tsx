@@ -16,6 +16,7 @@ type PromptNavigatorRailProps = {
     turnIds: string[];
     previewsByTurnId: Map<string, Part[]>;
     activeTurnId: string | null;
+    visibleTurnIds: string[];
     onSelectTurn: (turnId: string) => void;
     canLoadEarlier: boolean;
     isLoadingOlder: boolean;
@@ -33,14 +34,14 @@ const GUTTER_NARROW_WIDTH_PX = 12;
 const GUTTER_RIGHT_OFFSET_PX = 6;
 // The rail shows at most a window of ticks; hovering the gutter edges
 // carousels the window through the rest of the prompts.
-const MAX_VISIBLE_TICKS = 30;
-const TICK_PITCH_PX = 12;
-const EDGE_ZONE_PX = 18;
+const MAX_VISIBLE_TICKS = 72;
+const TICK_PITCH_PX = 8;
+const EDGE_ZONE_PX = 16;
 const CAROUSEL_INTERVAL_MS = 80;
 const TICK_OVERSCAN = 4;
 // Tick lengths for the proximity wave around the cursor.
-const TICK_BASE_WIDTH_PX = 10;
-const TICK_ACTIVE_WIDTH_PX = 14;
+const TICK_BASE_WIDTH_PX = 8;
+const TICK_ACTIVE_WIDTH_PX = 12;
 const TICK_FOCUS_WIDTH_PX = 20;
 // The hover preview is a scrolling mini-list of all prompts: the highlighted
 // row stays centered while the list glides, and the panel itself is
@@ -91,6 +92,7 @@ export function PromptNavigatorRail({
     turnIds,
     previewsByTurnId,
     activeTurnId,
+    visibleTurnIds,
     onSelectTurn,
     canLoadEarlier,
     isLoadingOlder,
@@ -104,6 +106,7 @@ export function PromptNavigatorRail({
     const [highlightedIndex, setHighlightedIndex] = React.useState<number | null>(null);
     const [windowStart, setWindowStart] = React.useState(0);
     const [isNarrowGutter, setIsNarrowGutter] = React.useState(false);
+    const [tickCapacity, setTickCapacity] = React.useState(MAX_VISIBLE_TICKS);
 
     // Shrink the hit zone whenever the message column reaches under the
     // full-width gutter, so bubble clicks (expand/collapse) stay clickable.
@@ -113,12 +116,17 @@ export function PromptNavigatorRail({
             return;
         }
         const measure = () => {
+            const containerRect = container.getBoundingClientRect();
+            const availableHeight = Math.max(TICK_PITCH_PX, containerRect.height - 48);
+            setTickCapacity(Math.max(
+                1,
+                Math.min(MAX_VISIBLE_TICKS, Math.floor(availableHeight / TICK_PITCH_PX)),
+            ));
             const column = container.querySelector('.chat-message-column');
             if (!column) {
                 setIsNarrowGutter(false);
                 return;
             }
-            const containerRect = container.getBoundingClientRect();
             const columnRect = column.getBoundingClientRect();
             const fullGutterLeft = containerRect.right - GUTTER_RIGHT_OFFSET_PX - GUTTER_WIDTH_PX;
             setIsNarrowGutter(columnRect.right > fullGutterLeft);
@@ -133,8 +141,9 @@ export function PromptNavigatorRail({
         () => buildPromptEntries(turnIds, previewsByTurnId),
         [previewsByTurnId, turnIds],
     );
+    const visibleTurnIdSet = React.useMemo(() => new Set(visibleTurnIds), [visibleTurnIds]);
 
-    const visibleCount = Math.min(prompts.length, MAX_VISIBLE_TICKS);
+    const visibleCount = Math.min(prompts.length, tickCapacity);
     const maxWindowStart = Math.max(0, prompts.length - visibleCount);
     const clampedWindowStart = Math.min(windowStart, maxWindowStart);
     const windowEnd = clampedWindowStart + visibleCount;
@@ -157,6 +166,8 @@ export function PromptNavigatorRail({
     windowStartRef.current = clampedWindowStart;
     const promptsLengthRef = React.useRef(prompts.length);
     promptsLengthRef.current = prompts.length;
+    const tickCapacityRef = React.useRef(tickCapacity);
+    tickCapacityRef.current = tickCapacity;
     const pointerYRef = React.useRef<number | null>(null);
     const carouselTimerRef = React.useRef<number | null>(null);
     const carouselDirRef = React.useRef<0 | 1 | -1>(0);
@@ -164,7 +175,7 @@ export function PromptNavigatorRail({
     const ensureWindowContains = React.useCallback((index: number) => {
         setWindowStart((start) => {
             const length = promptsLengthRef.current;
-            const count = Math.min(length, MAX_VISIBLE_TICKS);
+            const count = Math.min(length, tickCapacityRef.current);
             const maxStart = Math.max(0, length - count);
             const clamped = Math.min(start, maxStart);
             if (index < clamped) {
@@ -202,11 +213,11 @@ export function PromptNavigatorRail({
         const target = activeIndex >= 0 ? activeIndex : prompts.length - 1;
         setWindowStart(() => {
             const length = promptsLengthRef.current;
-            const count = Math.min(length, MAX_VISIBLE_TICKS);
+            const count = Math.min(length, tickCapacityRef.current);
             const maxStart = Math.max(0, length - count);
             return Math.max(0, Math.min(maxStart, target - Math.floor(count / 2)));
         });
-    }, [activeIndex, highlightedIndex, prompts.length]);
+    }, [activeIndex, highlightedIndex, prompts.length, tickCapacity]);
 
     const relativeIndexFromPointer = React.useCallback((clientY: number): number | null => {
         const gutter = gutterRef.current;
@@ -215,7 +226,7 @@ export function PromptNavigatorRail({
         }
         const rect = gutter.getBoundingClientRect();
         const raw = Math.floor((clientY - rect.top) / TICK_PITCH_PX);
-        const count = Math.min(promptsLengthRef.current, MAX_VISIBLE_TICKS);
+        const count = Math.min(promptsLengthRef.current, tickCapacityRef.current);
         if (count === 0) {
             return null;
         }
@@ -237,7 +248,7 @@ export function PromptNavigatorRail({
             return;
         }
         const length = promptsLengthRef.current;
-        const count = Math.min(length, MAX_VISIBLE_TICKS);
+        const count = Math.min(length, tickCapacityRef.current);
         const maxStart = Math.max(0, length - count);
         const current = Math.min(windowStartRef.current, maxStart);
         const next = Math.max(0, Math.min(maxStart, current + dir));
@@ -585,8 +596,13 @@ export function PromptNavigatorRail({
                             {visiblePrompts.map((prompt, slot) => {
                                 const index = overscanStart + slot;
                                 const isActive = prompt.turnId === activeTurnId;
+                                const isInViewport = visibleTurnIdSet.has(prompt.turnId);
                                 const isHighlighted = highlightedIndex === index;
-                                const tickWidth = resolveTickWidth(index, highlightedIndex, isActive);
+                                const tickWidth = resolveTickWidth(
+                                    index,
+                                    highlightedIndex,
+                                    isActive || isInViewport,
+                                );
 
                                 return (
                                     <div
@@ -604,8 +620,8 @@ export function PromptNavigatorRail({
                                         <span
                                             aria-hidden="true"
                                             className={cn(
-                                                'block h-0.5 rounded-full transition-all duration-200 ease-out',
-                                                isActive
+                                                'block h-px rounded-full transition-all duration-200 ease-out',
+                                                isActive || isInViewport
                                                     ? 'bg-[var(--surface-foreground)]'
                                                     : isHighlighted
                                                         ? 'bg-[var(--surface-foreground)]/80'
