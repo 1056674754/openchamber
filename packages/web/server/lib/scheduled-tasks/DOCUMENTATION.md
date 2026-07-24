@@ -15,7 +15,10 @@ Server-owned scheduled task runtime and routes for OpenChamber-only automation.
   - Timer scheduling and queueing
   - Concurrency controls
   - Session create + prompt_async execution
+  - Optional permission auto-accept enrollment before the first prompt
   - Emits OpenChamber task-run events
+
+Permission auto-accept enrollment is delegated to `packages/web/server/lib/permission-auto-accept/runtime.js`. Enrollment failure is reported but does not prevent the scheduled task from running; the task then waits for normal user approval.
 
 - `packages/web/server/lib/scheduled-tasks/routes.js`
   - Scheduled task CRUD endpoints

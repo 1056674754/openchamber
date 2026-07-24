@@ -17,9 +17,15 @@ export const createNotificationTriggerRuntime = (deps) => {
   let getIsWindowFocused = typeof deps.getIsWindowFocused === 'function'
     ? deps.getIsWindowFocused
     : null;
+  let getIsSessionAutoAccepting = typeof deps.getIsSessionAutoAccepting === 'function'
+    ? deps.getIsSessionAutoAccepting
+    : null;
 
   const setGetIsWindowFocused = (cb) => {
     getIsWindowFocused = typeof cb === 'function' ? cb : null;
+  };
+  const setGetIsSessionAutoAccepting = (cb) => {
+    getIsSessionAutoAccepting = typeof cb === 'function' ? cb : null;
   };
 
   const PUSH_READY_COOLDOWN_MS = 5000;
@@ -626,7 +632,10 @@ export const createNotificationTriggerRuntime = (deps) => {
       // Client may be in Permission Auto-Accept for this session (or any
       // ancestor). Skip the whole notification path — the client responds
       // directly and the user has opted out of approval prompts.
-      if (await isSessionAutoAccepting(sessionId, notificationDirectory)) {
+      if (
+        await isSessionAutoAccepting(sessionId, notificationDirectory)
+        || await getIsSessionAutoAccepting?.(sessionId, notificationDirectory)
+      ) {
         if (requestKey) notifiedPermissionRequests.add(requestKey);
         return;
       }
@@ -639,7 +648,10 @@ export const createNotificationTriggerRuntime = (deps) => {
       const timer = setTimeout(async () => {
         pushPermissionDebounceTimers.delete(sessionId);
 
-        if (await isSessionAutoAccepting(sessionId, notificationDirectory)) {
+        if (
+          await isSessionAutoAccepting(sessionId, notificationDirectory)
+          || await getIsSessionAutoAccepting?.(sessionId, notificationDirectory)
+        ) {
           if (requestKey) notifiedPermissionRequests.add(requestKey);
           return;
         }
@@ -718,5 +730,6 @@ export const createNotificationTriggerRuntime = (deps) => {
     maybeSendPushForTrigger,
     setAutoAcceptSession,
     setGetIsWindowFocused,
+    setGetIsSessionAutoAccepting,
   };
 };

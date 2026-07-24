@@ -225,6 +225,7 @@ export const createScheduledTasksRuntime = (deps) => {
     getOpenCodeAuthHeaders,
     waitForOpenCodeReady,
     emitTaskRunEvent,
+    setSessionAutoAccept,
     logger = console,
     maxGlobalConcurrency = DEFAULT_GLOBAL_CONCURRENCY,
     maxProjectConcurrency = DEFAULT_PROJECT_CONCURRENCY,
@@ -509,6 +510,18 @@ export const createScheduledTasksRuntime = (deps) => {
         sessionID,
       });
     } catch {
+    }
+
+    if (task.execution.permissionAutoAccept && typeof setSessionAutoAccept === 'function') {
+      try {
+        await setSessionAutoAccept(sessionID, true, projectPath);
+      } catch (error) {
+        logger.warn?.(
+          '[scheduled-tasks] failed to enable permission auto-accept for session',
+          sessionID,
+          error?.message ?? error,
+        );
+      }
     }
 
     const executedAsCommand = await runScheduledCommandIfApplicable({
