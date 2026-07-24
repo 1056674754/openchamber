@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import {
   buildEmbeddedSessionChatURL,
+  canPostMessageToParentFrame,
   getEmbeddedSessionChatOriginSessionId,
   isEmbeddedSessionChat,
   parseEmbeddedSessionChatLocation,
@@ -33,6 +34,17 @@ const withWindowLocation = (href: string, run: () => void): void => {
 };
 
 describe('embedded session chat location', () => {
+  test('requires a real parent frame before posting embedded chat settings', () => {
+    const topLevelWindow: { parent?: unknown } = {};
+    topLevelWindow.parent = topLevelWindow;
+
+    expect(canPostMessageToParentFrame(undefined)).toBe(false);
+    expect(canPostMessageToParentFrame({ parent: undefined })).toBe(false);
+    expect(canPostMessageToParentFrame({ parent: null })).toBe(false);
+    expect(canPostMessageToParentFrame(topLevelWindow)).toBe(false);
+    expect(canPostMessageToParentFrame({ parent: {} })).toBe(true);
+  });
+
   test('recognizes only the session-chat panel and trims its anchor session', () => {
     expect(parseEmbeddedSessionChatLocation('?ocPanel=session-chat&sessionId=%20ses_child%20')).toEqual({
       isEmbedded: true,

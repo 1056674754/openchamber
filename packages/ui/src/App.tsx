@@ -57,7 +57,10 @@ import { SyncAppEffects } from '@/apps/AppEffects';
 import { useAppFontEffects } from '@/apps/useAppFontEffects';
 import { OpenCodeUpdateToast } from '@/components/update/OpenCodeUpdateToast';
 import { markStartupTrace, startupTraceEnabled } from '@/lib/startupTrace';
-import { isEmbeddedSessionChat } from '@/components/layout/contextPanelEmbeddedChat';
+import {
+  canPostMessageToParentFrame,
+  isEmbeddedSessionChat,
+} from '@/components/layout/contextPanelEmbeddedChat';
 
 // Lazy-loaded heavy views — loaded on demand to reduce initial bundle size.
 const OnboardingScreen = lazyWithChunkRecovery(() =>
@@ -530,10 +533,15 @@ function App({ apis }: AppProps) {
   }, [embeddedSessionChat]);
 
   React.useEffect(() => {
-    if (!embeddedSessionChat || typeof window === 'undefined') {
+    if (
+      !embeddedSessionChat
+      || typeof window === 'undefined'
+      || !canPostMessageToParentFrame(window)
+    ) {
       return;
     }
 
+    const parentWindow = window.parent;
     const applyChatSettings = (payload?: EmbeddedChatSettingsPayload) => {
       if (typeof payload?.allowPromptingSubagentSessions !== 'boolean') {
         return;
@@ -542,7 +550,7 @@ function App({ apis }: AppProps) {
     };
 
     const handleMessage = (event: MessageEvent) => {
-      if (event.origin !== window.location.origin) {
+      if (event.source !== parentWindow || event.origin !== window.location.origin) {
         return;
       }
 
@@ -558,7 +566,7 @@ function App({ apis }: AppProps) {
 
     scopedWindow.__openchamberApplyChatSettingsSync = applyChatSettings;
     window.addEventListener('message', handleMessage);
-    window.parent.postMessage({ type: 'openchamber:chat-settings-request' }, window.location.origin);
+    parentWindow.postMessage({ type: 'openchamber:chat-settings-request' }, window.location.origin);
 
     return () => {
       window.removeEventListener('message', handleMessage);

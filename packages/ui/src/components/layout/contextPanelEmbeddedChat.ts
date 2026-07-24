@@ -32,6 +32,13 @@ export const resetEmbeddedSessionChatLocationCache = (): void => {
   embeddedLocationCache = null;
 };
 
+export const canPostMessageToParentFrame = (
+  targetWindow: { readonly parent?: unknown } | undefined,
+): boolean => {
+  if (!targetWindow?.parent) return false;
+  return targetWindow.parent !== targetWindow;
+};
+
 export const buildEmbeddedSessionChatURL = (
   sessionID: string,
   directory: string | null,

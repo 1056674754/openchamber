@@ -14,11 +14,11 @@ Read this document before any of the following:
 
 1. OpenChamber embeds the custom merged OpenCode build, not an official release substituted for convenience.
 2. A custom OpenCode build intended to preserve the shared history database must use `OPENCODE_CHANNEL=latest`.
-3. The OpenCode version string must identify the custom build, for example `1.18.2-my`.
+3. The OpenCode version string must identify the custom build with the `-sscity` suffix, for example `1.18.4-sscity`.
 4. The macOS packaged runtime must use `OpenChamber.app/Contents/Resources/opencode/opencode`, not the external ad-hoc binary under `~/.opencode/bin`.
 5. The nested OpenCode executable and the containing app must be signed by the same signing identity and Team ID.
 6. Never modify the app bundle after signing. Replacing OpenCode, metadata, `app.asar`, or any other bundled file invalidates the outer signature.
-7. Never upgrade bundled OpenCode in place. Rebuild OpenCode, rebuild OpenChamber, then sign and notarize the new app.
+7. Never upgrade bundled OpenCode in place. Rebuild OpenCode and OpenChamber, then use the signing mode appropriate to the requested artifact. Notarization is required for release/distribution builds, not direct local QA or `/Applications` installation.
 
 ## Repository roles
 
@@ -31,6 +31,8 @@ Read this document before any of the following:
 
 OpenChamber's `packages/electron/scripts/after-pack.cjs` calls `embedded-opencode.cjs` during packaging. The hook copies the selected OpenCode binary into the app bundle, assigns executable permissions, signs it, verifies it, runs `--version`, and writes `Resources/opencode/metadata.json`. Electron Builder then performs the final recursive application signing pass.
 
+OpenChamber's source version is `1.16.0-sscity` after the v1.16.0 migration audit and validation closed. Every Electron package appends its Asia/Shanghai build time and emits `1.16.0-sscity.YYYYMMDD.HHMMSS`. This generated value is the package metadata and About-dialog version. Do not advance the baseline again until the migration table records the next upstream baseline as fully audited.
+
 ## 1. Build the custom OpenCode binary
 
 Run from the OpenCode package directory:
@@ -38,7 +40,7 @@ Run from the OpenCode package directory:
 ```bash
 cd /Users/song/dev_ai/opencode/packages/opencode
 OPENCODE_CHANNEL=latest \
-OPENCODE_VERSION=1.18.2-my \
+OPENCODE_VERSION=1.18.4-sscity \
 bun run script/build.ts --single
 ```
 
@@ -91,6 +93,11 @@ bun run electron:build
 ```
 
 This produces `packages/electron/dist/mac-arm64/OpenChamber.app` and uses an `Apple Development` identity when available. It is intended for local runtime QA only. It is not evidence of Developer ID distribution readiness or notarization.
+
+This is the default mode when the user asks to build, install, replace, or open
+OpenChamber on this Mac. Do not invoke the Developer ID release workflow or
+submit a notarization job unless the user explicitly requests a distributable
+artifact such as a DMG/ZIP or a build for an internal download site.
 
 ### Candidate safety and `/Applications` promotion (mandatory)
 
@@ -195,6 +202,8 @@ Verify the complete bundle:
 ```bash
 codesign --verify --deep --strict --verbose=4 "$APP"
 spctl --assess --type execute --verbose=4 "$APP"
+test -f "$APP/Contents/Resources/legal/OpenChamber-LICENSE.txt"
+test -f "$APP/Contents/Resources/legal/THIRD-PARTY-NOTICES.md"
 ```
 
 These commands answer different questions:

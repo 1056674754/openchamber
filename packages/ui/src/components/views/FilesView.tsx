@@ -2571,32 +2571,26 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
     }
 
     if (selectedFile?.path !== targetPath) {
-      if (confirmDiscardOpen) {
-        return;
-      }
-      void handleSelectFile(toFileNode(targetPath));
+      // Selection is owned by the tab sync / user. A pending focus request must
+      // not steal selection back after the user switches tabs while loading.
       return;
     }
 
-    if (fileLoading || loadedFilePath !== targetPath || fileError || isSelectedImage) {
+    if (fileLoading || loadedFilePath !== targetPath) {
       return;
     }
 
-    if (canEdit && textViewMode === 'edit') {
-      const view = editorViewRef.current;
-      if (!view) {
-        return;
-      }
-      view.focus();
+    // Preview renderers never mount CodeMirror, so clear the request even when
+    // there is no editor to focus. Otherwise it can replay on later updates.
+    if (!fileError && !isSelectedImage && canEdit && textViewMode === 'edit') {
+      editorViewRef.current?.focus();
     }
 
     setPendingFileFocusPath(null);
   }, [
     canEdit,
-    confirmDiscardOpen,
     fileError,
     fileLoading,
-    handleSelectFile,
     isSelectedImage,
     loadedFilePath,
     pendingFileFocusPath,
@@ -2604,7 +2598,6 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
     selectedFile?.path,
     setPendingFileFocusPath,
     textViewMode,
-    toFileNode,
   ]);
 
   const nudgeEditorSelectionAboveKeyboard = React.useCallback((view: EditorView | null) => {
