@@ -1,6 +1,10 @@
 import { describe, expect, test } from 'bun:test';
 import type { Session } from '@opencode-ai/sdk/v2';
-import { buildTransientSessionExpansionKeys } from './sessionExpansion';
+import {
+  buildTransientSessionExpansionKeys,
+  getNextSessionExpansionKeys,
+  shouldRenderSessionExpanded,
+} from './sessionExpansion';
 
 const session = (id: string, parentID?: string): Session => ({
   id,
@@ -32,5 +36,33 @@ describe('buildTransientSessionExpansionKeys', () => {
       'global-pinned:active:root',
       'global-pinned:archived:root',
     ]));
+  });
+});
+
+describe('demand-loaded session expansion', () => {
+  test('renders a persisted expansion as collapsed until children are available', () => {
+    expect(shouldRenderSessionExpanded({
+      hasSessionSearchQuery: false,
+      expansionRequested: true,
+      hasChildren: false,
+      childrenLoaded: false,
+    })).toBe(false);
+
+    expect(shouldRenderSessionExpanded({
+      hasSessionSearchQuery: false,
+      expansionRequested: true,
+      hasChildren: false,
+      childrenLoaded: true,
+    })).toBe(true);
+  });
+
+  test('the first click keeps a hidden persisted expansion requested', () => {
+    const expansionKey = 'project:active:root';
+    const previous = new Set([expansionKey]);
+
+    expect(getNextSessionExpansionKeys(previous, expansionKey, false)).toEqual(
+      new Set([expansionKey]),
+    );
+    expect(previous).toEqual(new Set([expansionKey]));
   });
 });

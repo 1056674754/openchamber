@@ -5,6 +5,7 @@ import { useGitStore } from '@/stores/useGitStore';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { DEFAULT_SERVER_ID, serverRegistry } from '@/lib/opencode/server-registry';
 import { retryProjectRepoStatusProbe } from './project-repo-status-probe';
+import { createProjectRootBranchScheduler } from './project-root-branch-scheduler';
 
 type Project = {
   id: string;
@@ -145,89 +146,48 @@ export const useProjectRepoStatus = (args: Args): void => {
     setProjectRepoStatus((prev) => projectRepoStatusEqual(prev, next) ? prev : next);
   }, [normalizedProjects, gitRepoStatus, setProjectRepoStatus]);
 
-  const projectGitBranchesKey = React.useMemo(() => {
-    return probeProjects
-      .map((project) => {
-        const branch = gitRepoStatus.get(project.normalizedPath)?.branch ?? '';
-        return `${project.id}:${project.serverId ?? DEFAULT_SERVER_ID}:${branch}`;
-      })
-      .join('|');
-  }, [probeProjects, gitRepoStatus]);
-
-  const resolvedInputKeyByProjectId = React.useRef<Map<string, string>>(new Map());
+  const rootBranchScheduler = React.useMemo(
+    () => createProjectRootBranchScheduler({
+      concurrency: 2,
+      onResolved: ({ id, branch }) => {
+        setProjectRootBranches((prev) => {
+          if (prev.get(id) === branch) {
+            return prev;
+          }
+          const next = new Map(prev);
+          next.set(id, branch);
+          return next;
+        });
+      },
+    }),
+    [setProjectRootBranches],
+  );
 
   React.useEffect(() => {
-    let cancelled = false;
+    const candidates = probeProjects.flatMap((project) => {
+      const status = gitRepoStatus.get(project.normalizedPath);
+      if (status?.isGitRepo !== true || status.branch === null) {
+        return [];
+      }
 
-    const timer = window.setTimeout(() => {
-      const run = async () => {
-        const validIds = new Set(probeProjects.map((project) => project.id));
-        for (const id of resolvedInputKeyByProjectId.current.keys()) {
-          if (!validIds.has(id)) {
-            resolvedInputKeyByProjectId.current.delete(id);
-          }
-        }
+      const inputBranch = status.branch.trim();
+      const inputKey = `${project.serverId ?? DEFAULT_SERVER_ID}\0${project.normalizedPath}\0${inputBranch}`;
+      const baseUrl = getProjectBaseUrl(project);
+      return [{
+        id: project.id,
+        inputKey,
+        resolve: () => getRootBranch(project.normalizedPath, {
+          ...(inputBranch ? { knownBranch: inputBranch } : {}),
+          ...(baseUrl ? { baseUrl } : {}),
+        }),
+      }];
+    });
+    rootBranchScheduler.sync(candidates);
+  }, [probeProjects, gitRepoStatus, rootBranchScheduler]);
 
-        const pending = probeProjects.filter((project) => {
-          const status = gitRepoStatus.get(project.normalizedPath);
-          if (status?.isGitRepo === false) {
-            resolvedInputKeyByProjectId.current.delete(project.id);
-            return false;
-          }
-          if (status?.isGitRepo !== true || status.branch === null) {
-            return false;
-          }
-
-          const currentBranch = status.branch.trim();
-          const currentInputKey = `${project.serverId ?? DEFAULT_SERVER_ID}\0${project.normalizedPath}\0${currentBranch}`;
-          const lastInputKey = resolvedInputKeyByProjectId.current.get(project.id);
-          return lastInputKey === undefined || lastInputKey !== currentInputKey;
-        });
-
-        if (pending.length === 0) {
-          return;
-        }
-
-        const entries = await mapWithConcurrency(pending, 2, async (project) => {
-          const inputBranch = gitRepoStatus.get(project.normalizedPath)?.branch?.trim() ?? '';
-          const inputKey = `${project.serverId ?? DEFAULT_SERVER_ID}\0${project.normalizedPath}\0${inputBranch}`;
-          const branch = await getRootBranch(project.normalizedPath, {
-            ...(inputBranch ? { knownBranch: inputBranch } : {}),
-            ...(getProjectBaseUrl(project) ? { baseUrl: getProjectBaseUrl(project) } : {}),
-          }).catch(() => null);
-          return { id: project.id, inputKey, branch };
-        });
-
-        if (cancelled) {
-          return;
-        }
-
-        const resolved = entries.filter((entry) => entry.branch);
-        if (resolved.length === 0) {
-          return;
-        }
-
-        setProjectRootBranches((prev) => {
-          const next = new Map(prev);
-          let changed = false;
-          resolved.forEach(({ id, branch }) => {
-            if (branch && next.get(id) !== branch) {
-              next.set(id, branch);
-              changed = true;
-            }
-          });
-          return changed ? next : prev;
-        });
-        resolved.forEach(({ id, inputKey }) => {
-          resolvedInputKeyByProjectId.current.set(id, inputKey);
-        });
-      };
-      void run();
-    }, 150);
-
+  React.useEffect(() => {
     return () => {
-      cancelled = true;
-      window.clearTimeout(timer);
+      rootBranchScheduler.dispose();
     };
-  }, [probeProjects, projectGitBranchesKey, gitRepoStatus, setProjectRootBranches]);
+  }, [rootBranchScheduler]);
 };

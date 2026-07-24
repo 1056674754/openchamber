@@ -275,20 +275,18 @@ export const useSessionGrouping = (args: Args) => {
       });
 
       const archivedSessions = groupedNodes.get(archivedKey) ?? [];
-      if (archivedSessions.length > 0) {
-        groups.push({
-          id: 'archived',
-          label: t('sessions.sidebar.grouping.archived'),
-          branch: null,
-          description: t('sessions.sidebar.grouping.archivedDescription'),
-          isMain: false,
-          isArchivedBucket: true,
-          worktree: null,
-          directory: null,
-          folderScopeKey: !args.isVSCode && normalizedProjectRoot ? getArchivedScopeKey(normalizedProjectRoot) : null,
-          sessions: archivedSessions,
-        });
-      }
+      groups.push({
+        id: 'archived',
+        label: t('sessions.sidebar.grouping.archived'),
+        branch: null,
+        description: t('sessions.sidebar.grouping.archivedDescription'),
+        isMain: false,
+        isArchivedBucket: true,
+        worktree: null,
+        directory: null,
+        folderScopeKey: !args.isVSCode && normalizedProjectRoot ? getArchivedScopeKey(normalizedProjectRoot) : null,
+        sessions: archivedSessions,
+      });
 
       return groups;
     },

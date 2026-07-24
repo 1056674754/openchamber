@@ -39,6 +39,7 @@ import { useProjectSessionLists } from './sidebar/hooks/useProjectSessionLists';
 import { useSessionFolderCleanup } from './sidebar/hooks/useSessionFolderCleanup';
 import { useStickyProjectHeaders } from './sidebar/hooks/useStickyProjectHeaders';
 import { getGitHubPrStatusKey, usePrVisualSummaryByKeys, useGitHubPrStatusStore } from '@/stores/useGitHubPrStatusStore';
+import { buildPrSummaryLookup } from './sidebar/prSummaryLookup';
 import { ProjectEditDialog } from '@/components/layout/ProjectEditDialog';
 import { UpdateDialog } from '@/components/ui/UpdateDialog';
 import { SessionGroupSection } from './sidebar/SessionGroupSection';
@@ -75,12 +76,20 @@ import { useActiveNowStore } from '@/stores/useActiveNowStore';
 import { checkIsGitRepository, isLinkedWorktree } from '@/lib/gitApi';
 import {
   compareSessions,
+  dedupeSessionsById,
   formatProjectLabel,
   normalizePath,
   partitionSessionIdsByRunningStatus,
 } from './sidebar/utils';
 import { buildSidebarSessionPrefetchOrder } from './sidebar/prefetchOrder';
-import { mergeLiveSessionWithGlobalSession, refreshGlobalSessions, refreshGlobalSessionsForDirectories, resolveGlobalSessionDirectory, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
+import {
+  ensureGlobalSessionsLoaded,
+  mergeLiveSessionWithGlobalSession,
+  refreshGlobalSessions,
+  resolveGlobalSessionDirectory,
+  searchGlobalRootSessions,
+  useGlobalSessionsStore,
+} from '@/stores/useGlobalSessionsStore';
 import { useSessionProjectStore } from '@/stores/useSessionProjectStore';
 import { hydrateSessionProjectBindings } from '@/lib/sessionOwnership';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
@@ -96,7 +105,10 @@ import {
   sameWorktreeList,
   sameWorktreesByProject,
 } from './sidebar/worktreeDiscovery';
-import { buildTransientSessionExpansionKeys } from './sidebar/sessionExpansion';
+import {
+  buildTransientSessionExpansionKeys,
+  getNextSessionExpansionKeys,
+} from './sidebar/sessionExpansion';
 
 const PROJECT_COLLAPSE_STORAGE_KEY = 'oc.sessions.projectCollapse';
 const GROUP_ORDER_STORAGE_KEY = 'oc.sessions.groupOrder';
@@ -272,6 +284,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   const { t } = useI18n();
   const [isSessionSearchOpen, setIsSessionSearchOpen] = React.useState(false);
   const [sessionSearchQuery, setSessionSearchQuery] = React.useState('');
+  const [serverSearchSessions, setServerSearchSessions] = React.useState<Session[]>([]);
   const sessionSearchContainerRef = React.useRef<HTMLDivElement | null>(null);
   const sessionSearchInputRef = React.useRef<HTMLInputElement | null>(null);
   const retriedNoPrStatusKeysRef = React.useRef<Set<string>>(new Set());
@@ -450,6 +463,26 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
 
   const hasSessionSearchQuery = normalizedSessionSearchQuery.length > 0;
 
+  React.useEffect(() => {
+    let cancelled = false;
+    setServerSearchSessions([]);
+    if (!normalizedSessionSearchQuery) {
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    void searchGlobalRootSessions(normalizedSessionSearchQuery)
+      .then((matches) => {
+        if (!cancelled) setServerSearchSessions(matches);
+      })
+      .catch(() => undefined);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [normalizedSessionSearchQuery]);
+
   // Session Folders store
   const collapsedFolderIds = useSessionFoldersStore((state) => state.collapsedFolderIds);
   const foldersMap = useSessionFoldersStore((state) => state.foldersMap);
@@ -479,8 +512,11 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
   const liveSessions = useAllServersLiveSessions();
   const liveSessionStatuses = useAllServersSessionStatuses();
   const hasLoadedGlobalSessions = useGlobalSessionsStore((state) => state.hasLoaded);
+  const isCompleteSessionSnapshot = useGlobalSessionsStore((state) => state.isCompleteSnapshot);
   const globalActiveSessions = useGlobalSessionsStore((state) => state.activeSessions);
-  const archivedSessions = useGlobalSessionsStore((state) => state.archivedSessions);
+  const globalArchivedSessions = useGlobalSessionsStore((state) => state.archivedSessions);
+  const loadSessionChildren = useGlobalSessionsStore((state) => state.loadSessionChildren);
+  const loadArchivedSessions = useGlobalSessionsStore((state) => state.loadArchivedSessions);
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
   const tempDraftSubmitting = useSessionUIStore((state) => Boolean(state.newSessionDraft?.open && state.newSessionDraft?.preserveDirectoryOverride === false && state.newSessionDraft?.submitting));
   const setCurrentSession = useSessionUIStore((state) => state.setCurrentSession);
@@ -511,7 +547,9 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
 
   const sessions = React.useMemo(() => {
     const liveById = new Map(liveSessions.map((session) => [session.id, session]));
-    const merged = globalActiveSessions.map((session) => {
+    const searchedActiveSessions = serverSearchSessions.filter((session) => !session.time?.archived);
+    const catalogSessions = dedupeSessionsById([...globalActiveSessions, ...searchedActiveSessions]);
+    const merged = catalogSessions.map((session) => {
       const liveSession = liveById.get(session.id);
       return liveSession ? mergeLiveSessionWithGlobalSession(liveSession, session) : session;
     });
@@ -550,7 +588,15 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
     };
 
     return merged.filter((session) => isVisible(session));
-  }, [globalActiveSessions, knownSessionDirectoryScopes, liveSessions]);
+  }, [globalActiveSessions, knownSessionDirectoryScopes, liveSessions, serverSearchSessions]);
+
+  const archivedSessions = React.useMemo(
+    () => dedupeSessionsById([
+      ...globalArchivedSessions,
+      ...serverSearchSessions.filter((session) => Boolean(session.time?.archived)),
+    ]),
+    [globalArchivedSessions, serverSearchSessions],
+  );
 
   const tempSessionsWithSession = React.useMemo<TempSessionEntry[]>(() => {
     const sessionsByDirectory = new Map<string, Session>();
@@ -626,8 +672,30 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
   }, [syncSessionStructureSignature, liveSessions]);
 
   React.useEffect(() => {
-    void refreshGlobalSessions(syncSessionsSnapshotRef.current);
-  }, [currentDirectory, syncSessionStructureSignature, projectsStructureSignature, remoteHealthRevision]);
+    let cancelled = false;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    let attempt = 0;
+
+    const load = async (): Promise<void> => {
+      attempt += 1;
+      await ensureGlobalSessionsLoaded(syncSessionsSnapshotRef.current);
+      if (
+        !cancelled
+        && useGlobalSessionsStore.getState().status === 'error'
+        && attempt < 3
+      ) {
+        retryTimer = setTimeout(() => {
+          void load();
+        }, 1_500);
+      }
+    };
+
+    void load();
+    return () => {
+      cancelled = true;
+      if (retryTimer) clearTimeout(retryTimer);
+    };
+  }, []);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -1092,20 +1160,22 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
     return new Set([...expandedParents, ...transientExpandedParents]);
   }, [expandedParents, transientExpandedParents]);
 
-  const toggleParent = React.useCallback((expansionKey: string) => {
+  const toggleParent = React.useCallback((
+    expansionKey: string,
+    session: Session,
+    isRenderedExpanded: boolean,
+  ) => {
+    if (!isRenderedExpanded) {
+      void loadSessionChildren(session).catch(() => undefined);
+    }
     setExpandedParents((prev) => {
-      const next = new Set(prev);
-      if (next.has(expansionKey)) {
-        next.delete(expansionKey);
-      } else {
-        next.add(expansionKey);
-      }
+      const next = getNextSessionExpansionKeys(prev, expansionKey, isRenderedExpanded);
       try {
         safeStorage.setItem(SESSION_EXPANDED_STORAGE_KEY, JSON.stringify(Array.from(next)));
       } catch { /* ignored */ }
       return next;
     });
-  }, [safeStorage]);
+  }, [loadSessionChildren, safeStorage]);
 
   const createFolderAndStartRename = React.useCallback(
     (scopeKey: string, parentId?: string | null) => {
@@ -1220,38 +1290,6 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
     [normalizedProjects],
   );
 
-  const projectSessionDirectories = React.useMemo(() => {
-    const directories = new Set<string>();
-    normalizedProjects.forEach((project) => {
-      if (project.serverId && project.serverId !== DEFAULT_SERVER_ID) return;
-      if (project.normalizedPath) directories.add(project.normalizedPath);
-      const worktrees = availableWorktreesByProject.get(project.normalizedPath) ?? [];
-      worktrees.forEach((worktree) => {
-        if (worktree.serverId && worktree.serverId !== DEFAULT_SERVER_ID) return;
-        const directory = normalizePath(worktree.path);
-        if (directory) directories.add(directory);
-      });
-    });
-    return [...directories].sort();
-  }, [availableWorktreesByProject, normalizedProjects]);
-
-  const knownProjectSessionDirectoriesRef = React.useRef<Set<string> | null>(null);
-  React.useEffect(() => {
-    const nextDirectories = new Set(projectSessionDirectories);
-    const previousDirectories = knownProjectSessionDirectoriesRef.current;
-    knownProjectSessionDirectoriesRef.current = nextDirectories;
-    if (!previousDirectories) {
-      return;
-    }
-
-    const addedDirectories = projectSessionDirectories.filter((directory) => !previousDirectories.has(directory));
-    if (addedDirectories.length === 0) {
-      return;
-    }
-
-    void refreshGlobalSessionsForDirectories(addedDirectories, syncSessionsSnapshotRef.current);
-  }, [projectSessionDirectories]);
-
   const { github } = useRuntimeAPIs();
   const githubAuthStatus = useGitHubAuthStore((state) => state.status);
   const githubAuthChecked = useGitHubAuthStore((state) => state.hasChecked);
@@ -1294,6 +1332,13 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
     })),
     [normalizedProjects],
   );
+  const serverIdByProjectId = React.useMemo(
+    () => new Map(ownershipProjects.map((project) => [
+      project.id,
+      project.serverId ?? DEFAULT_SERVER_ID,
+    ])),
+    [ownershipProjects],
+  );
 
   const { getSessionsForProject, getArchivedSessionsForProject } = useProjectSessionLists({
     isVSCode,
@@ -1306,7 +1351,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
 
   useSessionFolderCleanup({
     isSessionsLoading,
-    hasLoadedGlobalSessions,
+    hasCompleteSessionSnapshot: isCompleteSessionSnapshot,
     sessions,
     normalizedProjects,
     getArchivedSessionsForProject,
@@ -1321,6 +1366,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
     createFolder,
     addSessionToFolder,
     cleanupSessions,
+    canCleanup: isCompleteSessionSnapshot,
     defaultCollapseArchivedFolders,
   });
 
@@ -1629,6 +1675,31 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
 
   const showArchivedSessions = useSessionDisplayStore((state) => state.showArchivedSessions);
 
+  React.useEffect(() => {
+    if (!showArchivedSessions) return;
+
+    const serverIds = new Set<string>();
+    for (const project of normalizedProjects) {
+      const serverId = project.serverId ?? DEFAULT_SERVER_ID;
+      if (
+        serverId !== DEFAULT_SERVER_ID
+        && serverRegistry.get(serverId)?.healthStatus !== 'healthy'
+      ) {
+        continue;
+      }
+      serverIds.add(serverId);
+    }
+
+    for (const serverId of serverIds) {
+      void loadArchivedSessions(serverId).catch(() => undefined);
+    }
+  }, [
+    loadArchivedSessions,
+    normalizedProjects,
+    remoteHealthRevision,
+    showArchivedSessions,
+  ]);
+
   const sectionsForSidebarRender = React.useMemo(() => {
     return showArchivedSessions
       ? sectionsForRender
@@ -1713,8 +1784,8 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
     ensureSessionRenderable: sync.ensureSessionRenderable,
   });
 
-  const prLookupKeys = React.useMemo(() => {
-    const keys = new Set<string>();
+  const prLookup = React.useMemo(() => {
+    const targets: Array<{ directory: string; branch: string }> = [];
     sectionsForSidebarRender.forEach((section) => {
       section.groups.forEach((group) => {
         const directory = normalizePath(group.directory ?? null);
@@ -1722,13 +1793,13 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
         if (!directory || !branch) {
           return;
         }
-        keys.add(getGitHubPrStatusKey(directory, branch));
+        targets.push({ directory, branch });
       });
     });
-    return [...keys];
+    return buildPrSummaryLookup(targets);
   }, [gitBranches, sectionsForSidebarRender]);
 
-  const prVisualSummaryMap = usePrVisualSummaryByKeys(prLookupKeys);
+  const prVisualSummaryMap = usePrVisualSummaryByKeys(prLookup.keys);
 
   React.useEffect(() => {
     if (!githubAuthChecked || !githubAuthStatus?.connected || !github) {
@@ -1910,19 +1981,36 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
     ],
   );
 
-  const toggleCollapsedGroup = React.useCallback((key: string) => {
+  const toggleCollapsedGroup = React.useCallback((
+    key: string,
+    group: SessionGroup,
+    projectId?: string | null,
+  ) => {
+    if (
+      group.isArchivedBucket
+      && collapsedGroups.has(key)
+    ) {
+      const serverId = projectId
+        ? (serverIdByProjectId.get(projectId) ?? DEFAULT_SERVER_ID)
+        : DEFAULT_SERVER_ID;
+      void loadArchivedSessions(serverId).catch(() => undefined);
+    }
     setCollapsedGroups((prev) => {
       const next = new Set(prev);
       if (next.has(key)) next.delete(key);
       else next.add(key);
       return next;
     });
-  }, []);
+  }, [collapsedGroups, loadArchivedSessions, serverIdByProjectId]);
 
   const prVisualStateByDirectoryBranch = React.useMemo(() => {
     const result = new Map<string, PrIndicator>();
     for (const [key, summary] of prVisualSummaryMap) {
-      result.set(key, {
+      const displayKey = prLookup.displayKeyByLookupKey.get(key);
+      if (!displayKey) {
+        continue;
+      }
+      result.set(displayKey, {
         visualState: summary.visualState as PrVisualState,
         number: summary.number,
         url: summary.url,
@@ -1938,7 +2026,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
       });
     }
     return result;
-  }, [prVisualSummaryMap]);
+  }, [prLookup.displayKeyByLookupKey, prVisualSummaryMap]);
 
   const renderGroupSessions = React.useCallback(
     (group: SessionGroup, groupKey: string, projectId?: string | null, hideGroupLabel?: boolean, dragHandleProps?: SortableDragHandleProps | null, compactBodyPadding?: boolean) => (
@@ -1982,7 +2070,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
         projectPinnedSessionIds={group.directory ? (pinnedSessionIdsByProject.get(normalizePath(group.directory) ?? '') ?? new Set()) : new Set()}
         sessionOrderIndex={sessionOrderIndex}
         prVisualStateByDirectoryBranch={prVisualStateByDirectoryBranch}
-        onToggleCollapsedGroup={toggleCollapsedGroup}
+        onToggleCollapsedGroup={(key) => toggleCollapsedGroup(key, group, projectId)}
         dragHandleProps={dragHandleProps}
       />
     ),

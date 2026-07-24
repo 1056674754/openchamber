@@ -1,14 +1,16 @@
 import React from 'react';
 import type { Session } from '@opencode-ai/sdk/v2';
-import { ensureGlobalSessionsLoaded, useGlobalSessionsStore, resolveGlobalSessionDirectory } from '@/stores/useGlobalSessionsStore';
+import { useGlobalSessionsStore, resolveGlobalSessionDirectory } from '@/stores/useGlobalSessionsStore';
+import { listGlobalSessionPages } from '@/stores/globalSessions';
+import { opencodeClient } from '@/lib/opencode/client';
 import { resolveSdkForDirectory } from '@/sync/session-actions';
 import { useSessionUIStore } from '@/sync/session-ui-store';
-import { getAllSyncSessions } from '@/sync/sync-refs';
 import { useUIStore } from '@/stores/useUIStore';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const AUTO_DELETE_KEEP_RECENT = 5;
 const AUTO_DELETE_INTERVAL_MS = 24 * 60 * 60 * 1000;
+const AUTO_DELETE_STARTUP_DELAY_MS = 30_000;
 
 const getSessionLastActivity = (session: Session): number => {
   return session.time?.updated ?? session.time?.created ?? 0;
@@ -56,7 +58,7 @@ type CleanupResult = {
   completedIds: string[];
   failedIds: string[];
   action: 'archive' | 'delete';
-  skippedReason?: 'disabled' | 'loading' | 'cooldown' | 'no-candidates' | 'running';
+  skippedReason?: 'disabled' | 'loading' | 'cooldown' | 'no-candidates' | 'running' | 'load-failed';
 };
 
 type CleanupOptions = {
@@ -82,10 +84,6 @@ export const useSessionAutoCleanup = (enabledOrOptions?: boolean | CleanupOption
 
   const [isRunning, setIsRunning] = React.useState(false);
   const runningRef = React.useRef(false);
-
-  React.useEffect(() => {
-    void ensureGlobalSessionsLoaded(getAllSyncSessions());
-  }, []);
 
   const candidates = React.useMemo(() => {
     if (autoDeleteAfterDays <= 0) {
@@ -119,7 +117,16 @@ export const useSessionAutoCleanup = (enabledOrOptions?: boolean | CleanupOption
         return { completedIds: [], failedIds: [], action: sessionRetentionAction, skippedReason: 'cooldown' };
       }
 
-      const { activeSessions: sessions } = await ensureGlobalSessionsLoaded(getAllSyncSessions());
+      let sessions: Session[];
+      try {
+        sessions = await listGlobalSessionPages(opencodeClient.getSdkClient(), {
+          archived: false,
+          roots: true,
+          pageSize: 200,
+        });
+      } catch {
+        return { completedIds: [], failedIds: [], action: sessionRetentionAction, skippedReason: 'load-failed' };
+      }
 
       if (sessions.length === 0) {
         return { completedIds: [], failedIds: [], action: sessionRetentionAction, skippedReason: 'no-candidates' };
@@ -207,7 +214,10 @@ export const useSessionAutoCleanup = (enabledOrOptions?: boolean | CleanupOption
     if (autoDeleteLastRunAt && now - autoDeleteLastRunAt < AUTO_DELETE_INTERVAL_MS) {
       return;
     }
-    void runCleanup();
+    const timer = window.setTimeout(() => {
+      void runCleanup();
+    }, AUTO_DELETE_STARTUP_DELAY_MS);
+    return () => window.clearTimeout(timer);
   }, [
     autoDeleteAfterDays,
     autoDeleteEnabled,

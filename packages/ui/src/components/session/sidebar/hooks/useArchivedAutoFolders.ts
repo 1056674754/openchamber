@@ -22,6 +22,7 @@ type Args = {
   createFolder: (scopeKey: string, name: string, parentId?: string | null) => FolderEntry;
   addSessionToFolder: (scopeKey: string, folderId: string, sessionId: string) => void;
   cleanupSessions: (scopeKey: string, existingSessionIds: Set<string>) => void;
+  canCleanup: boolean;
   defaultCollapseArchivedFolders: (scopeKey: string, folderIds: string[]) => void;
 };
 
@@ -67,6 +68,7 @@ export const useArchivedAutoFolders = (args: Args): void => {
     createFolder,
     addSessionToFolder,
     cleanupSessions,
+    canCleanup,
     defaultCollapseArchivedFolders,
   } = args;
 
@@ -103,7 +105,9 @@ export const useArchivedAutoFolders = (args: Args): void => {
         }
       });
 
-      cleanupSessions(scopeKey, sessionIds);
+      if (canCleanup) {
+        cleanupSessions(scopeKey, sessionIds);
+      }
 
       const latestScopeFolders = useSessionFoldersStore.getState().foldersMap[scopeKey] ?? [];
       if (latestScopeFolders.length >= 2) {
@@ -118,6 +122,7 @@ export const useArchivedAutoFolders = (args: Args): void => {
     createFolder,
     addSessionToFolder,
     cleanupSessions,
+    canCleanup,
     defaultCollapseArchivedFolders,
   ]);
 };

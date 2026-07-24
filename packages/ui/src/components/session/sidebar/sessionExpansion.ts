@@ -36,3 +36,32 @@ export const buildTransientSessionExpansionKeys = (
 
   return expanded;
 };
+
+export const shouldRenderSessionExpanded = ({
+  hasSessionSearchQuery,
+  expansionRequested,
+  hasChildren,
+  childrenLoaded,
+}: {
+  hasSessionSearchQuery: boolean;
+  expansionRequested: boolean;
+  hasChildren: boolean;
+  childrenLoaded: boolean;
+}): boolean => {
+  return hasSessionSearchQuery
+    || (expansionRequested && (hasChildren || childrenLoaded));
+};
+
+export const getNextSessionExpansionKeys = (
+  previous: Set<string>,
+  expansionKey: string,
+  isRenderedExpanded: boolean,
+): Set<string> => {
+  const next = new Set(previous);
+  if (isRenderedExpanded) {
+    next.delete(expansionKey);
+  } else {
+    next.add(expansionKey);
+  }
+  return next;
+};

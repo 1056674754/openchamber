@@ -15,6 +15,8 @@ import { useSessionProjectStore } from './useSessionProjectStore';
 import { getProjectWorktreeKey } from '@/lib/worktrees/worktreeKeys';
 import { DEFAULT_SERVER_ID } from '@/lib/opencode/server-registry';
 import { reorderProjectList, reorderProjectListById } from './projectOrdering';
+import { getVSCodeBootstrapConfig, isVSCodeRuntime } from './utils/vscodeRuntime';
+import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 
 /** Pick a color key that's least used among existing projects */
 const pickAutoColor = (projects: ProjectEntry[]): string => {
@@ -301,17 +303,13 @@ const persistProjects = (projects: ProjectEntry[], activeProjectId: string | nul
 
 const initialProjects: ProjectEntry[] = [];
 const getVSCodeWorkspaceProject = (): { projects: ProjectEntry[]; activeProjectId: string | null } | null => {
-  if (typeof window === 'undefined') {
+  const runtimeApis = getRegisteredRuntimeAPIs();
+  const bootstrapConfig = getVSCodeBootstrapConfig();
+  if (!isVSCodeRuntime(runtimeApis, bootstrapConfig)) {
     return null;
   }
 
-  const runtimeApis = (window as unknown as { __OPENCHAMBER_RUNTIME_APIS__?: { runtime?: { isVSCode?: boolean } } })
-    .__OPENCHAMBER_RUNTIME_APIS__;
-  if (!runtimeApis?.runtime?.isVSCode) {
-    return null;
-  }
-
-  const workspaceFolder = (window as unknown as { __VSCODE_CONFIG__?: { workspaceFolder?: unknown } }).__VSCODE_CONFIG__?.workspaceFolder;
+  const workspaceFolder = bootstrapConfig?.workspaceFolder;
   if (typeof workspaceFolder !== 'string' || workspaceFolder.trim().length === 0) {
     return null;
   }

@@ -10,7 +10,7 @@ type NormalizedProject = {
 
 type Args = {
   isSessionsLoading: boolean;
-  hasLoadedGlobalSessions: boolean;
+  hasCompleteSessionSnapshot: boolean;
   sessions: Session[];
   normalizedProjects: NormalizedProject[];
   getArchivedSessionsForProject: (project: { id: string }) => Session[];
@@ -20,7 +20,7 @@ type Args = {
 export const useSessionFolderCleanup = (args: Args): void => {
   const {
     isSessionsLoading,
-    hasLoadedGlobalSessions,
+    hasCompleteSessionSnapshot,
     sessions,
     normalizedProjects,
     getArchivedSessionsForProject,
@@ -28,7 +28,7 @@ export const useSessionFolderCleanup = (args: Args): void => {
   } = args;
 
   React.useEffect(() => {
-    if (isSessionsLoading || !hasLoadedGlobalSessions) {
+    if (isSessionsLoading || !hasCompleteSessionSnapshot) {
       return;
     }
 
@@ -80,7 +80,7 @@ export const useSessionFolderCleanup = (args: Args): void => {
   }, [
     cleanupSessions,
     getArchivedSessionsForProject,
-    hasLoadedGlobalSessions,
+    hasCompleteSessionSnapshot,
     isSessionsLoading,
     normalizedProjects,
     sessions,

@@ -18,6 +18,17 @@ type SessionDisplayStore = {
   setProjectSortOrder: (order: ProjectSortOrder) => void;
 };
 
+export const migrateSessionDisplayState = (
+  persisted: unknown,
+  version: number,
+): Partial<SessionDisplayStore> => {
+  const state = (persisted ?? {}) as Partial<SessionDisplayStore>;
+  if (version < 1 && state.projectSortOrder === 'recent') {
+    return { ...state, projectSortOrder: 'manual' };
+  }
+  return state;
+};
+
 export const useSessionDisplayStore = create<SessionDisplayStore>()(
   persist(
     (set) => ({
@@ -34,6 +45,8 @@ export const useSessionDisplayStore = create<SessionDisplayStore>()(
     }),
     {
       name: 'session-display-mode',
+      version: 1,
+      migrate: migrateSessionDisplayState,
     },
   ),
 );

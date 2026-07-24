@@ -29,6 +29,7 @@ import { DraggableSessionRow } from './sessionFolderDnd';
 import { SessionUnreadMenuItem } from './SessionUnreadMenuItem';
 import { SidebarSpinner } from './SidebarSpinner';
 import type { SessionNode, SessionSummaryMeta } from './types';
+import { shouldRenderSessionExpanded } from './sessionExpansion';
 import { formatSessionCompactDateLabel, formatSessionDateLabel, normalizePath, renderHighlightedText, resolveRemoteIndicatorProject, resolveSessionDiffStats } from './utils';
 import { resolveGlobalSessionDirectory, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
@@ -165,7 +166,7 @@ type Props = {
   hasSessionSearchQuery: boolean;
   normalizedSessionSearchQuery: string;
   notifyOnSubtasks: boolean;
-  toggleParent: (expansionKey: string) => void;
+  toggleParent: (expansionKey: string, session: Session, isRenderedExpanded: boolean) => void;
   handleSessionSelect: (sessionId: string, sessionDirectory: string | null, isMissingDirectory: boolean, projectId?: string | null) => void;
   onRenameSession: (sessionId: string, sessionTitle: string) => void;
   togglePinnedSession: (sessionId: string, scope: 'global' | string) => void;
@@ -410,6 +411,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
   const [isTouchPressed, setIsTouchPressed] = React.useState(false);
 
   const session = node.session;
+  const childLoadStatus = useGlobalSessionsStore((state) => state.childLoadState.get(session.id));
   const liveSession = useSession(session.id);
   const resolvedSession = liveSession ?? session;
   const isDeleting = useSessionUIStore((s) => s.deletingSessionIds.has(session.id));
@@ -580,7 +582,12 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
     || Boolean(groupDirectory && pinnedSessionIdsByProject.get(groupDirectory)?.has(session.id));
   const isGloballyPinned = pinnedSessionIds.has(session.id);
   const expansionKey = menuInstanceKey;
-  const isExpanded = hasSessionSearchQuery ? true : expandedParents.has(expansionKey);
+  const isExpanded = shouldRenderSessionExpanded({
+    hasSessionSearchQuery,
+    expansionRequested: expandedParents.has(expansionKey),
+    hasChildren,
+    childrenLoaded: childLoadStatus === 'loaded',
+  });
   const isSubtaskSession = Boolean((resolvedSession as Session & { parentID?: string | null }).parentID);
   const unseenCount = useSessionUnseenCount(session.id);
   const needsAttention = unseenCount > 0 && (!isSubtaskSession || notifyOnSubtasks);
@@ -744,7 +751,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
 
   const shouldShowSpinner = spinnerState !== 'hidden';
 
-  const hasChildrenChevron = hasChildren;
+  const hasChildrenChevron = hasChildren || childLoadStatus !== 'loaded';
 
   const renderUnreadDot = () => (
     <span
@@ -796,11 +803,11 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
       onClick={(e) => {
         e.preventDefault();
         e.stopPropagation();
-        toggleParent(expansionKey);
+        toggleParent(expansionKey, session, isExpanded);
       }}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault(); e.stopPropagation(); toggleParent(expansionKey);
+          e.preventDefault(); e.stopPropagation(); toggleParent(expansionKey, session, isExpanded);
         }
       }}
       style={{ minWidth: 14, minHeight: 14 }}
