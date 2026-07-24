@@ -533,6 +533,18 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.editorFontSize === 'number' && Number.isFinite(candidate.editorFontSize)) {
       result.editorFontSize = Math.max(9, Math.min(32, Math.round(candidate.editorFontSize)));
     }
+    if (typeof candidate.smallModelUseDefault === 'boolean') {
+      result.smallModelUseDefault = candidate.smallModelUseDefault;
+    }
+    if (typeof candidate.smallModelOverride === 'string') {
+      const trimmed = candidate.smallModelOverride.trim();
+      // Empty string clears an override; non-empty must be provider/model.
+      if (!trimmed) {
+        result.smallModelOverride = '';
+      } else if (trimmed.includes('/')) {
+        result.smallModelOverride = trimmed;
+      }
+    }
     if (typeof candidate.padding === 'number' && Number.isFinite(candidate.padding)) {
       result.padding = Math.max(50, Math.min(200, Math.round(candidate.padding)));
     }

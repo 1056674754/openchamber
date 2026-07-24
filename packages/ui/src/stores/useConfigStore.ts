@@ -678,6 +678,11 @@ interface ConfigStore {
     cycleCurrentVariant: () => void;
     getCurrentModelVariants: () => string[];
     setAgent: (agentName: string | undefined) => void;
+    /**
+     * Re-apply draft defaults for the active directory snapshot.
+     * Model cascade: project.defaultModel → settings.defaultModel → agent pin → fallback.
+     */
+    applyDefaultModelAgentSelection: (options?: { projectDefaultModel?: string }) => void;
     setSelectedProvider: (providerId: string) => void;
     setSettingsDefaultModel: (model: string | undefined) => void;
     setSettingsDefaultVariant: (variant: string | undefined) => void;
@@ -2092,6 +2097,130 @@ export const useConfigStore = create<ConfigStore>()(
                         }
 
                     }
+                },
+
+                applyDefaultModelAgentSelection: (options) => {
+                    const {
+                        agents,
+                        providers,
+                        settingsDefaultModel,
+                        settingsDefaultVariant,
+                        settingsDefaultAgent,
+                    } = get();
+
+                    if (agents.length === 0 || providers.length === 0) {
+                        return;
+                    }
+
+                    const primaryAgents = agents.filter((agent) => isPrimaryMode(agent.mode));
+                    let resolvedAgent = settingsDefaultAgent
+                        ? agents.find((agent) => agent.name === settingsDefaultAgent)
+                        : undefined;
+                    if (!resolvedAgent) {
+                        resolvedAgent = primaryAgents.find((agent) => agent.name === 'build')
+                            || primaryAgents[0]
+                            || agents[0];
+                    }
+                    if (!resolvedAgent) {
+                        return;
+                    }
+
+                    const resolveVariant = (providerId: string, modelId: string, variant?: string): string | undefined => {
+                        if (!variant) return undefined;
+                        const model = providers
+                            .find((provider) => provider.id === providerId)
+                            ?.models.find((entry) => entry.id === modelId) as { variants?: Record<string, unknown> } | undefined;
+                        return model?.variants && Object.prototype.hasOwnProperty.call(model.variants, variant)
+                            ? variant
+                            : undefined;
+                    };
+
+                    let providerId: string | undefined;
+                    let modelId: string | undefined;
+                    let variant: string | undefined;
+                    const effectiveDefaultModel = options?.projectDefaultModel || settingsDefaultModel;
+
+                    if (effectiveDefaultModel) {
+                        const parsed = parseModelString(effectiveDefaultModel);
+                        if (parsed && hasProviderModel(providers, parsed.providerId, parsed.modelId)) {
+                            providerId = parsed.providerId;
+                            modelId = parsed.modelId;
+                            variant = resolveVariant(
+                                providerId,
+                                modelId,
+                                options?.projectDefaultModel ? undefined : settingsDefaultVariant,
+                            );
+                        }
+                    }
+
+                    if (
+                        !providerId
+                        && resolvedAgent.model?.providerID
+                        && resolvedAgent.model?.modelID
+                        && hasProviderModel(providers, resolvedAgent.model.providerID, resolvedAgent.model.modelID)
+                    ) {
+                        providerId = resolvedAgent.model.providerID;
+                        modelId = resolvedAgent.model.modelID;
+                        variant = resolveVariant(providerId, modelId, resolvedAgent.variant);
+                    }
+
+                    if (!providerId) {
+                        if (hasProviderModel(providers, FALLBACK_PROVIDER_ID, FALLBACK_MODEL_ID)) {
+                            providerId = FALLBACK_PROVIDER_ID;
+                            modelId = FALLBACK_MODEL_ID;
+                        } else {
+                            const firstProvider = providers[0];
+                            const firstModel = firstProvider?.models[0];
+                            if (firstProvider && firstModel) {
+                                providerId = firstProvider.id;
+                                modelId = firstModel.id;
+                            }
+                        }
+                    }
+
+                    set((state) => {
+                        const directoryKey = state.activeDirectoryKey;
+                        const baseSnapshot: DirectoryScopedConfig = state.directoryScoped[directoryKey] ?? {
+                            providers: state.providers,
+                            agents: state.agents,
+                            currentProviderId: state.currentProviderId,
+                            currentModelId: state.currentModelId,
+                            currentVariant: state.currentVariant,
+                            currentAgentName: state.currentAgentName,
+                            selectedProviderId: state.selectedProviderId,
+                            agentModelSelections: state.agentModelSelections,
+                            defaultProviders: state.defaultProviders,
+                        };
+
+                        const nextSnapshot: DirectoryScopedConfig = {
+                            ...baseSnapshot,
+                            currentAgentName: resolvedAgent!.name,
+                            ...(providerId && modelId
+                                ? {
+                                    currentProviderId: providerId,
+                                    currentModelId: modelId,
+                                    currentVariant: variant,
+                                    selectedProviderId: providerId,
+                                }
+                                : {}),
+                        };
+
+                        return {
+                            directoryScoped: {
+                                ...state.directoryScoped,
+                                [directoryKey]: nextSnapshot,
+                            },
+                            currentAgentName: resolvedAgent!.name,
+                            ...(providerId && modelId
+                                ? {
+                                    currentProviderId: providerId,
+                                    currentModelId: modelId,
+                                    currentVariant: variant,
+                                    selectedProviderId: providerId,
+                                }
+                                : {}),
+                        };
+                    });
                 },
 
                  setSettingsDefaultModel: (model: string | undefined) => {

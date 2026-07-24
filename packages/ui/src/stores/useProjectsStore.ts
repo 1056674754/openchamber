@@ -17,6 +17,7 @@ import { DEFAULT_SERVER_ID } from '@/lib/opencode/server-registry';
 import { reorderProjectList, reorderProjectListById } from './projectOrdering';
 import { getVSCodeBootstrapConfig, isVSCodeRuntime } from './utils/vscodeRuntime';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
+import { normalizeProjectDefaultModel } from '@/lib/projectDefaultModel';
 
 /** Pick a color key that's least used among existing projects */
 const pickAutoColor = (projects: ProjectEntry[]): string => {
@@ -61,7 +62,13 @@ interface ProjectsStore {
   setActiveProject: (id: string, options?: { syncDirectory?: boolean }) => void;
   setActiveProjectIdOnly: (id: string) => void;
   renameProject: (id: string, label: string) => void;
-  updateProjectMeta: (id: string, meta: { label?: string; icon?: string | null; color?: string | null; iconBackground?: string | null }) => void;
+  updateProjectMeta: (id: string, meta: {
+    label?: string;
+    icon?: string | null;
+    color?: string | null;
+    iconBackground?: string | null;
+    defaultModel?: string | null;
+  }) => void;
   uploadProjectIcon: (id: string, file: File) => Promise<{ ok: boolean; error?: string }>;
   removeProjectIcon: (id: string) => Promise<{ ok: boolean; error?: string }>;
   discoverProjectIcon: (id: string, options?: { force?: boolean }) => Promise<{ ok: boolean; skipped?: boolean; reason?: string; error?: string }>;
@@ -271,6 +278,10 @@ const sanitizeProjects = (value: unknown): ProjectEntry[] => {
     }
     if (candidate.unavailable === true) {
       project.unavailable = true;
+    }
+    const defaultModel = normalizeProjectDefaultModel(candidate.defaultModel);
+    if (defaultModel) {
+      project.defaultModel = defaultModel;
     }
     result.push(project);
   }
@@ -565,7 +576,13 @@ export const useProjectsStore = create<ProjectsStore>()(
       persistProjects(nextProjects, activeProjectId);
     },
 
-    updateProjectMeta: (id: string, meta: { label?: string; icon?: string | null; color?: string | null; iconBackground?: string | null }) => {
+    updateProjectMeta: (id: string, meta: {
+      label?: string;
+      icon?: string | null;
+      color?: string | null;
+      iconBackground?: string | null;
+      defaultModel?: string | null;
+    }) => {
       if (vscodeWorkspace) {
         return;
       }
@@ -581,6 +598,14 @@ export const useProjectsStore = create<ProjectsStore>()(
         if (meta.color !== undefined) updated.color = meta.color;
         if (meta.iconBackground !== undefined) {
           updated.iconBackground = normalizeIconBackground(meta.iconBackground);
+        }
+        if (meta.defaultModel !== undefined) {
+          const normalized = normalizeProjectDefaultModel(meta.defaultModel);
+          if (normalized) {
+            updated.defaultModel = normalized;
+          } else {
+            delete updated.defaultModel;
+          }
         }
         return updated;
       });

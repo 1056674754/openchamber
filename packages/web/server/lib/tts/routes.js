@@ -130,7 +130,14 @@ export function registerTtsRoutes(app, { sayTTSCapability }) {
 
   app.post('/api/text/session-title-candidates', async (req, res) => {
     try {
-      const { text, count, maxLength } = req.body || {};
+      const {
+        text,
+        count,
+        maxLength,
+        directory,
+        preferredProviderID,
+        preferredModelID,
+      } = req.body || {};
 
       if (!text || typeof text !== 'string' || !text.trim()) {
         return res.status(400).json({ error: 'Text is required' });
@@ -140,6 +147,9 @@ export function registerTtsRoutes(app, { sayTTSCapability }) {
         text,
         count,
         maxLength,
+        directory,
+        preferredProviderID,
+        preferredModelID,
       });
 
       return res.json(result);

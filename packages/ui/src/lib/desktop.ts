@@ -119,6 +119,10 @@ export type DesktopSettings = {
   defaultModel?: string; // format: "provider/model"
   defaultVariant?: string;
   defaultAgent?: string;
+  /** When false, `smallModelOverride` outranks OpenCode `small_model` / family scan. */
+  smallModelUseDefault?: boolean;
+  /** Explicit utility model as `provider/model`. Empty string clears. */
+  smallModelOverride?: string;
   defaultGitIdentityId?: string; // ''/undefined = unset, 'global' or profile id
   openInAppId?: string;
   autoCreateWorktree?: boolean;

@@ -15,6 +15,11 @@ import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useI18n } from '@/lib/i18n';
 import { Icon } from "@/components/icon/Icon";
+import { ModelSelector } from '@/components/sections/agents/ModelSelector';
+import {
+  formatProjectDefaultModel,
+  parseProjectDefaultModel,
+} from '@/lib/projectDefaultModel';
 
 interface ProjectEditDialogProps {
   open: boolean;
@@ -25,7 +30,14 @@ interface ProjectEditDialogProps {
   initialIcon?: string | null;
   initialColor?: string | null;
   initialIconBackground?: string | null;
-  onSave: (data: { label: string; icon: string | null; color: string | null; iconBackground: string | null }) => void;
+  initialDefaultModel?: string | null;
+  onSave: (data: {
+    label: string;
+    icon: string | null;
+    color: string | null;
+    iconBackground: string | null;
+    defaultModel: string | null;
+  }) => void;
 }
 
 const HEX_COLOR_PATTERN = /^#(?:[\da-fA-F]{3}|[\da-fA-F]{6})$/;
@@ -50,6 +62,7 @@ export const ProjectEditDialog: React.FC<ProjectEditDialogProps> = ({
   initialIcon = null,
   initialColor = null,
   initialIconBackground = null,
+  initialDefaultModel = null,
   onSave,
 }) => {
   const { t } = useI18n();
@@ -62,6 +75,9 @@ export const ProjectEditDialog: React.FC<ProjectEditDialogProps> = ({
   const [icon, setIcon] = React.useState<string | null>(initialIcon);
   const [color, setColor] = React.useState<string | null>(initialColor);
   const [iconBackground, setIconBackground] = React.useState<string | null>(normalizeIconBackground(initialIconBackground));
+  const initialParsedDefaultModel = parseProjectDefaultModel(initialDefaultModel);
+  const [defaultProviderId, setDefaultProviderId] = React.useState(initialParsedDefaultModel?.providerId ?? '');
+  const [defaultModelId, setDefaultModelId] = React.useState(initialParsedDefaultModel?.modelId ?? '');
   const [isUploadingIcon, setIsUploadingIcon] = React.useState(false);
   const [isRemovingCustomIcon, setIsRemovingCustomIcon] = React.useState(false);
   const [isDiscoveringIcon, setIsDiscoveringIcon] = React.useState(false);
@@ -87,11 +103,14 @@ export const ProjectEditDialog: React.FC<ProjectEditDialogProps> = ({
       setIcon(initialIcon);
       setColor(initialColor);
       setIconBackground(normalizeIconBackground(initialIconBackground));
+      const parsed = parseProjectDefaultModel(initialDefaultModel);
+      setDefaultProviderId(parsed?.providerId ?? '');
+      setDefaultModelId(parsed?.modelId ?? '');
       setPendingRemoveImageIcon(false);
       clearPendingUploadIcon();
       setPreviewImageFailed(false);
     }
-  }, [open, projectName, initialIcon, initialColor, initialIconBackground, clearPendingUploadIcon]);
+  }, [open, projectName, initialIcon, initialColor, initialIconBackground, initialDefaultModel, clearPendingUploadIcon]);
 
   React.useEffect(() => {
     return () => {
@@ -136,6 +155,7 @@ export const ProjectEditDialog: React.FC<ProjectEditDialogProps> = ({
       icon,
       color,
       iconBackground: normalizeIconBackground(willRemoveImageIcon ? null : iconBackground),
+      defaultModel: formatProjectDefaultModel(defaultProviderId, defaultModelId) ?? null,
     });
     onOpenChange(false);
   };
@@ -258,6 +278,25 @@ export const ProjectEditDialog: React.FC<ProjectEditDialogProps> = ({
             <p className="typography-meta text-muted-foreground truncate" title={projectPath}>
               {projectPath}
             </p>
+          </div>
+
+          {/* Default model for new chats */}
+          <div className="min-w-0 space-y-1.5">
+            <label className="typography-ui-label font-medium text-foreground">
+              {t('projectEditDialog.field.defaultModel')}
+            </label>
+            <p className="typography-meta text-muted-foreground">
+              {t('projectEditDialog.field.defaultModelDescription')}
+            </p>
+            <ModelSelector
+              providerId={defaultProviderId}
+              modelId={defaultModelId}
+              onChange={(nextProviderId, nextModelId) => {
+                setDefaultProviderId(nextProviderId);
+                setDefaultModelId(nextModelId);
+              }}
+              placeholder={t('projectEditDialog.field.defaultModelPlaceholder')}
+            />
           </div>
 
           {/* Color */}

@@ -8,9 +8,11 @@
  * - topic: short directory-name-friendly topic
  *
  * Helpers:
- * - generateSessionTitleCandidates: produces 3 human-readable session title
- *   fallback candidates without touching any OpenCode session.
+ * - generateSessionTitleCandidates: produces session title candidates via the
+ *   Small Model runtime (`../small-model`). No silent local heuristic fallback.
  */
+
+import { generateSmallModelText } from '../small-model/index.js';
 
 export function sanitizeForTTS(text) {
   if (!text || typeof text !== 'string') return '';
@@ -159,14 +161,24 @@ export async function summarizeText({ text, threshold = 200, maxLength = 500, ze
 const DEFAULT_SESSION_TITLE_COUNT = 3;
 const DEFAULT_SESSION_TITLE_MAX_LENGTH = 60;
 
+const SESSION_TITLE_SYSTEM_PROMPT = [
+  'You invent short session titles for a coding-agent conversation.',
+  'Return ONLY the titles — one per line, no numbering, no bullets, no quotes, no preamble.',
+  'Each title must be a concise human-readable label (not a sentence dump).',
+  'Match the language of the conversation text.',
+  'Prefer concrete topics (feature, bug, area) over vague words like "help" or "chat".',
+].join(' ');
+
 function sanitizeSessionTitleCandidate(raw, maxLength) {
   if (typeof raw !== 'string') return '';
   let value = raw.trim();
-  value = value.replace(/^["'`\u201c\u201d\u2018\u2019\u00ab\u00bb\s]+/, '');
-  value = value.replace(/["'`\u201c\u201d\u2018\u2019\u00ab\u00bb\s]+$/, '');
   value = value.replace(/\s+/g, ' ');
+  // Strip list markers before quotes — models often emit `1. "Title"`.
   value = value.replace(/^\s*[-*\u2022\u2023\u25cb]\s*/, '');
   value = value.replace(/^\s*\d+[.)]\s*/, '');
+  value = value.replace(/^["'`\u201c\u201d\u2018\u2019\u00ab\u00bb]+/, '');
+  value = value.replace(/["'`\u201c\u201d\u2018\u2019\u00ab\u00bb]+$/, '');
+  value = value.trim();
   if (value.length > maxLength) {
     value = value.slice(0, maxLength).trim();
   }
@@ -188,29 +200,36 @@ function dedupeSessionTitleCandidates(candidates, count) {
   return unique;
 }
 
-function buildLocalSessionTitleCandidates(text, count, maxLength) {
-  const sanitized = sanitizeForNotification(text)
-    .replace(/\b(?:user|assistant|system)\s*:\s*/gi, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-  if (!sanitized) return [];
-
-  const sentences = sanitized
-    .split(/(?<=[.!?。！？])\s*/)
-    .map((part) => sanitizeSessionTitleCandidate(part, maxLength))
-    .filter((part) => part.length >= 4);
-  const firstSentence = sentences[0] || sanitizeSessionTitleCandidate(sanitized, maxLength);
-  const lastSentence = sentences.length > 1 ? sentences[sentences.length - 1] : '';
-  const leadingWords = sanitizeSessionTitleCandidate(sanitized.split(/\s+/).slice(0, 8).join(' '), maxLength);
-
-  return dedupeSessionTitleCandidates([firstSentence, lastSentence, leadingWords], count);
+function parseSessionTitleCandidates(rawText, count, maxLength) {
+  if (typeof rawText !== 'string' || !rawText.trim()) {
+    return [];
+  }
+  const lines = rawText
+    .split(/\r?\n/)
+    .map((line) => sanitizeSessionTitleCandidate(line, maxLength))
+    .filter((line) => line.length >= 2);
+  return dedupeSessionTitleCandidates(lines, count);
 }
 
+/**
+ * @param {{
+ *   text: string,
+ *   count?: number,
+ *   maxLength?: number,
+ *   directory?: string,
+ *   preferredProviderID?: string,
+ *   preferredModelID?: string,
+ *   generateText?: typeof generateSmallModelText,
+ * }} input
+ */
 export async function generateSessionTitleCandidates({
   text,
   count = DEFAULT_SESSION_TITLE_COUNT,
   maxLength = DEFAULT_SESSION_TITLE_MAX_LENGTH,
-  zenModel,
+  directory,
+  preferredProviderID,
+  preferredModelID,
+  generateText = generateSmallModelText,
 }) {
   const safeCount = Math.max(1, Math.min(5, Number.isFinite(count) ? Number(count) : DEFAULT_SESSION_TITLE_COUNT));
   const safeMaxLength = Math.max(10, Math.min(120, Number.isFinite(maxLength) ? Number(maxLength) : DEFAULT_SESSION_TITLE_MAX_LENGTH));
@@ -223,12 +242,46 @@ export async function generateSessionTitleCandidates({
     };
   }
 
-  void zenModel;
+  try {
+    const result = await generateText({
+      prompt: text.trim(),
+      system: `${SESSION_TITLE_SYSTEM_PROMPT} Return exactly ${safeCount} titles, each at most ${safeMaxLength} characters.`,
+      maxOutputTokens: 256,
+      directory: typeof directory === 'string' && directory.trim() ? directory.trim() : undefined,
+      preferredProviderID: typeof preferredProviderID === 'string' && preferredProviderID.trim()
+        ? preferredProviderID.trim()
+        : undefined,
+      preferredModelID: typeof preferredModelID === 'string' && preferredModelID.trim()
+        ? preferredModelID.trim()
+        : undefined,
+      restrictToPreferredProvider: true,
+    });
 
-  const candidates = buildLocalSessionTitleCandidates(text, safeCount, safeMaxLength);
-  return {
-    candidates,
-    generated: false,
-    reason: 'Model summarization provider unavailable',
-  };
+    const candidates = parseSessionTitleCandidates(result?.text, safeCount, safeMaxLength);
+    if (candidates.length === 0) {
+      return {
+        candidates: [],
+        generated: false,
+        reason: 'Small model returned no usable titles',
+        providerID: result?.providerID,
+        modelID: result?.modelID,
+        source: result?.source,
+      };
+    }
+
+    return {
+      candidates,
+      generated: true,
+      providerID: result.providerID,
+      modelID: result.modelID,
+      source: result.source,
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      candidates: [],
+      generated: false,
+      reason: message || 'Small model unavailable',
+    };
+  }
 }

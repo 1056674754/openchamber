@@ -305,6 +305,12 @@ const sanitizeProjects = (value: unknown): DesktopSettings['projects'] | undefin
     if (typeof candidate.serverId === 'string' && candidate.serverId.trim().length > 0) {
       (project as unknown as Record<string, unknown>).serverId = candidate.serverId.trim();
     }
+    if (typeof candidate.defaultModel === 'string') {
+      const trimmed = candidate.defaultModel.trim();
+      if (trimmed.includes('/') && trimmed.indexOf('/') > 0 && trimmed.indexOf('/') < trimmed.length - 1) {
+        (project as unknown as Record<string, unknown>).defaultModel = trimmed;
+      }
+    }
     result.push(project);
   }
 
@@ -1115,6 +1121,17 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   }
   if (typeof candidate.editorFontSize === 'number' && Number.isFinite(candidate.editorFontSize)) {
     result.editorFontSize = candidate.editorFontSize;
+  }
+  if (typeof candidate.smallModelUseDefault === 'boolean') {
+    result.smallModelUseDefault = candidate.smallModelUseDefault;
+  }
+  if (typeof candidate.smallModelOverride === 'string') {
+    const trimmed = candidate.smallModelOverride.trim();
+    if (!trimmed) {
+      result.smallModelOverride = '';
+    } else if (trimmed.includes('/')) {
+      result.smallModelOverride = trimmed;
+    }
   }
   if (isUiFontOption(candidate.uiFont)) {
     result.uiFont = candidate.uiFont;

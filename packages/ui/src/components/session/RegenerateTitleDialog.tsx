@@ -6,6 +6,9 @@ import { RiSparklingLine, RiCheckLine, RiRefreshLine } from '@remixicon/react';
 import { useI18n } from '@/lib/i18n';
 import { toast } from '@/components/ui';
 import { opencodeClient } from '@/lib/opencode/client';
+import { useConfigStore } from '@/stores/useConfigStore';
+import { getSessionLastAssistantModel } from '@/sync/session-actions';
+import { getSessionDirectoryFromRoutingIndex } from '@/sync/sync-refs';
 import { buildSessionText, fetchSessionTitleCandidates } from '@/lib/sessionTitleApi';
 
 type RegenerateTitleDialogProps = {
@@ -42,37 +45,57 @@ export function RegenerateTitleDialog({
     }
   }, [open]);
 
+  const loadCandidates = React.useCallback(async (signal?: { cancelled: boolean }) => {
+    setLoading(true);
+    setError(null);
+    setCandidates([]);
+    setSelectedIndex(-1);
+    // Manual escape hatch: keep the current title editable when AI fails.
+    setEditedTitle(sessionTitle || '');
+    try {
+      const messages = await opencodeClient.getSessionMessages(sessionId, 30);
+      if (signal?.cancelled) return;
+      const text = buildSessionText(messages);
+      const sessionModel = getSessionLastAssistantModel(sessionId);
+      const { currentProviderId, currentModelId } = useConfigStore.getState();
+      const directory = getSessionDirectoryFromRoutingIndex(sessionId)
+        || opencodeClient.getDirectory()
+        || null;
+      const res = await fetchSessionTitleCandidates({
+        text,
+        directory,
+        preferredProviderID: sessionModel?.providerID || currentProviderId || null,
+        preferredModelID: sessionModel?.modelID || currentModelId || null,
+      });
+      if (signal?.cancelled) return;
+      if (res.generated && res.candidates.length > 0) {
+        setCandidates(res.candidates);
+        setSelectedIndex(0);
+        setEditedTitle(res.candidates[0]);
+        setError(null);
+      } else {
+        setCandidates([]);
+        setSelectedIndex(-1);
+        setEditedTitle(sessionTitle || '');
+        setError(res.reason || t('sessions.sidebar.session.regenerateTitle.error'));
+      }
+    } catch (err) {
+      if (signal?.cancelled) return;
+      setCandidates([]);
+      setSelectedIndex(-1);
+      setEditedTitle(sessionTitle || '');
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      if (!signal?.cancelled) setLoading(false);
+    }
+  }, [sessionId, sessionTitle, t]);
+
   React.useEffect(() => {
     if (!open || !sessionId) return;
-    let cancelled = false;
-
-    async function load() {
-      setLoading(true);
-      setError(null);
-      try {
-        const messages = await opencodeClient.getSessionMessages(sessionId, 30);
-        const text = buildSessionText(messages);
-        const res = await fetchSessionTitleCandidates(text);
-        if (cancelled) return;
-        setCandidates(res.candidates);
-        if (res.candidates.length > 0) {
-          setSelectedIndex(0);
-          setEditedTitle(res.candidates[0]);
-        } else {
-          setError(res.reason || 'No candidates');
-        }
-      } catch (err) {
-        if (cancelled) return;
-        setError(err instanceof Error ? err.message : String(err));
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    }
-
-    void load();
-    return () => { cancelled = true; };
-  }, [open, sessionId]);
-
+    const signal = { cancelled: false };
+    void loadCandidates(signal);
+    return () => { signal.cancelled = true; };
+  }, [open, sessionId, loadCandidates]);
   const handleSelect = React.useCallback((index: number) => {
     setSelectedIndex(index);
     setEditedTitle(candidates[index]);
@@ -92,30 +115,6 @@ export function RegenerateTitleDialog({
     }
   }, [editedTitle, applying, onApply, sessionId, onOpenChange, t]);
 
-  const handleRegenerate = React.useCallback(async () => {
-    setLoading(true);
-    setCandidates([]);
-    setSelectedIndex(-1);
-    setEditedTitle('');
-    setError(null);
-    try {
-      const messages = await opencodeClient.getSessionMessages(sessionId, 30);
-      const text = buildSessionText(messages);
-      const res = await fetchSessionTitleCandidates(text);
-      setCandidates(res.candidates);
-      if (res.candidates.length > 0) {
-        setSelectedIndex(0);
-        setEditedTitle(res.candidates[0]);
-      } else {
-        setError(res.reason || 'No candidates');
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setLoading(false);
-    }
-  }, [sessionId]);
-
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-md gap-4">
@@ -133,34 +132,45 @@ export function RegenerateTitleDialog({
           <div className="flex items-center justify-center py-6">
             <SidebarSpinner state="streaming" />
           </div>
-        ) : error ? (
-          <div className="py-4 text-center text-sm text-[var(--status-error)]">
-            {t('sessions.sidebar.session.regenerateTitle.error')}
-            {error && <p className="mt-1 text-xs text-[var(--surface-mutedForeground)]">{error}</p>}
-          </div>
-        ) : candidates.length > 0 ? (
-          <div className="flex flex-col gap-2">
-            {candidates.map((candidate, index) => (
-              <button
-                key={index}
-                type="button"
-                onClick={() => handleSelect(index)}
-                className={`flex items-start gap-2 rounded-md border px-3 py-2 text-left text-sm transition-colors ${
-                  selectedIndex === index
-                    ? 'border-[var(--primary-base)] bg-[var(--primary-base)]/10 text-[var(--surface-foreground)]'
-                    : 'border-[var(--interactive-border)] hover:bg-[var(--interactive-hover)] text-[var(--surface-foreground)]'
-                }`}
-              >
-                <span className="mt-0.5 flex-shrink-0">
-                  {selectedIndex === index
-                    ? <RiCheckLine className="h-4 w-4 text-[var(--primary-base)]" />
-                    : <span className="inline-block h-4 w-4 rounded-full border border-[var(--interactive-border)]" />}
-                </span>
-                <span className="flex-1">{candidate}</span>
-              </button>
-            ))}
+        ) : (
+          <div className="flex flex-col gap-3">
+            {error ? (
+              <div className="rounded-md border border-[var(--status-error)]/40 bg-[var(--status-error)]/5 px-3 py-3 text-sm">
+                <p className="font-medium text-[var(--status-error)]">
+                  {t('sessions.sidebar.session.regenerateTitle.error')}
+                </p>
+                <p className="mt-1 text-xs text-[var(--surface-mutedForeground)]">{error}</p>
+                <p className="mt-2 text-xs text-[var(--surface-mutedForeground)]">
+                  {t('sessions.sidebar.session.regenerateTitle.manualHint')}
+                </p>
+              </div>
+            ) : null}
 
-            <div className="mt-2">
+            {candidates.length > 0 ? (
+              <div className="flex flex-col gap-2">
+                {candidates.map((candidate, index) => (
+                  <button
+                    key={index}
+                    type="button"
+                    onClick={() => handleSelect(index)}
+                    className={`flex items-start gap-2 rounded-md border px-3 py-2 text-left text-sm transition-colors ${
+                      selectedIndex === index
+                        ? 'border-[var(--primary-base)] bg-[var(--primary-base)]/10 text-[var(--surface-foreground)]'
+                        : 'border-[var(--interactive-border)] hover:bg-[var(--interactive-hover)] text-[var(--surface-foreground)]'
+                    }`}
+                  >
+                    <span className="mt-0.5 flex-shrink-0">
+                      {selectedIndex === index
+                        ? <RiCheckLine className="h-4 w-4 text-[var(--primary-base)]" />
+                        : <span className="inline-block h-4 w-4 rounded-full border border-[var(--interactive-border)]" />}
+                    </span>
+                    <span className="flex-1">{candidate}</span>
+                  </button>
+                ))}
+              </div>
+            ) : null}
+
+            <div>
               <label className="mb-1 block text-xs text-[var(--surface-mutedForeground)]">
                 {t('sessions.sidebar.session.regenerateTitle.editLabel')}
               </label>
@@ -172,13 +182,13 @@ export function RegenerateTitleDialog({
               />
             </div>
           </div>
-        ) : null}
+        )}
 
         <DialogFooter className="gap-2 sm:justify-between">
           <Button
             variant="ghost"
             size="sm"
-            onClick={handleRegenerate}
+            onClick={() => { void loadCandidates(); }}
             disabled={loading}
           >
             <RiRefreshLine className="mr-1 h-3.5 w-3.5" />
@@ -197,7 +207,7 @@ export function RegenerateTitleDialog({
               variant="default"
               size="sm"
               onClick={handleApply}
-              disabled={loading || applying || selectedIndex < 0 || !editedTitle.trim()}
+              disabled={loading || applying || !editedTitle.trim()}
             >
               {t('sessions.sidebar.session.regenerateTitle.apply')}
             </Button>

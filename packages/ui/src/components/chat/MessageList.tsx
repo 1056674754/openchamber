@@ -19,6 +19,7 @@ import {
     turnHasStopSummary,
 } from './lib/turns/processFold';
 import { useUIStore } from '@/stores/useUIStore';
+import { useFeatureFlagsStore } from '@/stores/useFeatureFlagsStore';
 import { FadeInDisabledProvider } from './message/FadeInOnReveal';
 import { hasPendingUserSendAnimation, consumePendingUserSendAnimation } from '@/lib/userSendAnimation';
 import { streamPerfCount, streamPerfMeasure } from '@/stores/utils/streamDebug';
@@ -1486,9 +1487,11 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         });
     }), [baseDisplayMessages, retryOverlay]);
 
+    const planModeEnabled = useFeatureFlagsStore((state) => state.planModeEnabled);
     const { projection, staticTurns, streamingTurn } = useTurnRecords(displayMessages, {
         sessionKey,
         showTextJustificationActivity: true,
+        planModeEnabled,
     });
 
     const buildUngroupedEntry = React.useCallback((message: ChatMessageEntry, index: number, nextMessage?: ChatMessageEntry): RenderEntry => {

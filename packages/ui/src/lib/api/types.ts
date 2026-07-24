@@ -626,6 +626,8 @@ export interface ProjectEntry {
   } | null;
   iconBackground?: string | null;
   color?: string | null;
+  /** Per-project default model for new drafts: `"providerID/modelID"`. */
+  defaultModel?: string;
   addedAt?: number;
   lastOpenedAt?: number;
   sidebarCollapsed?: boolean;

@@ -211,6 +211,14 @@ export const useChatAutoFollow = ({
         const container = scrollRef.current;
         if (!container) return;
         const max = Math.max(0, container.scrollHeight - container.clientHeight);
+        // When pinning to the bottom, overshoot so the browser clamps to the
+        // exact fractional maximum. Integer `scrollHeight` otherwise leaves a
+        // 0–1px remainder that jitters bottom-anchored rows during streaming.
+        if (target >= max - AUTO_MATCH_TOLERANCE_PX) {
+            container.scrollTop = container.scrollHeight + 4096;
+            markAuto(container.scrollTop);
+            return;
+        }
         const clamped = Math.max(0, Math.min(target, max));
         markAuto(clamped);
         container.scrollTop = clamped;
@@ -225,14 +233,11 @@ export const useChatAutoFollow = ({
             return;
         }
 
+        // Always re-pin, even within tolerance, so sub-pixel growth during
+        // streaming does not leave bottom-anchored rows drifting.
         const target = Math.max(0, container.scrollHeight - container.clientHeight);
-        if (Math.abs(target - container.scrollTop) < AUTO_MATCH_TOLERANCE_PX) {
-            markAuto(target);
-            return;
-        }
-
         writeScrollTopInstant(target);
-    }, [markAuto, writeScrollTopInstant]);
+    }, [writeScrollTopInstant]);
 
     const releaseAutoFollow = React.useCallback(() => {
         setStateValue('released');

@@ -6,6 +6,7 @@ import { streamPerfMeasure } from '@/stores/utils/streamDebug';
 interface UseTurnRecordsOptions {
     sessionKey?: string;
     showTextJustificationActivity: boolean;
+    planModeEnabled: boolean;
 }
 
 export interface TurnRecordsResult {
@@ -22,9 +23,14 @@ export const useTurnRecords = (
     const staticTurnsRef = React.useRef<TurnRecord[]>([]);
     const streamingTurnRef = React.useRef<TurnRecord | undefined>(undefined);
     const previousSessionKeyRef = React.useRef<string | undefined>(options.sessionKey);
+    const previousPlanModeEnabledRef = React.useRef(options.planModeEnabled);
 
-    if (previousSessionKeyRef.current !== options.sessionKey) {
+    if (
+        previousSessionKeyRef.current !== options.sessionKey
+        || previousPlanModeEnabledRef.current !== options.planModeEnabled
+    ) {
         previousSessionKeyRef.current = options.sessionKey;
+        previousPlanModeEnabledRef.current = options.planModeEnabled;
         previousProjectionRef.current = null;
         staticTurnsRef.current = [];
         streamingTurnRef.current = undefined;
@@ -34,18 +40,19 @@ export const useTurnRecords = (
         previousProjectionRef.current = null;
         staticTurnsRef.current = [];
         streamingTurnRef.current = undefined;
-    }, [options.sessionKey, options.showTextJustificationActivity]);
+    }, [options.sessionKey, options.showTextJustificationActivity, options.planModeEnabled]);
 
     const projection = React.useMemo(() => {
         return streamPerfMeasure('ui.turns.projection_ms', () => {
             const nextProjection = projectTurnRecords(messages, {
                 previousProjection: previousProjectionRef.current,
                 showTextJustificationActivity: options.showTextJustificationActivity,
+                mergeHiddenUserTurns: { planModeEnabled: options.planModeEnabled },
             });
             previousProjectionRef.current = nextProjection;
             return nextProjection;
         });
-    }, [messages, options.showTextJustificationActivity]);
+    }, [messages, options.showTextJustificationActivity, options.planModeEnabled]);
 
     const staticTurns = React.useMemo(() => {
         if (projection.turns.length === 0) {

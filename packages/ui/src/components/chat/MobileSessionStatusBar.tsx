@@ -1130,9 +1130,21 @@ function ProjectBar({
     setEditingProject(project);
   };
 
-  const handleSaveProjectEdit = (data: { label: string; icon: string | null; color: string | null; iconBackground: string | null }) => {
+  const handleSaveProjectEdit = (data: {
+    label: string;
+    icon: string | null;
+    color: string | null;
+    iconBackground: string | null;
+    defaultModel: string | null;
+  }) => {
     if (editingProject) {
-      updateProjectMeta(editingProject.id, data);
+      updateProjectMeta(editingProject.id, {
+        label: data.label,
+        icon: data.icon,
+        color: data.color,
+        iconBackground: data.iconBackground,
+        defaultModel: data.defaultModel,
+      });
     }
     setEditingProject(null);
   };
@@ -1283,6 +1295,7 @@ function ProjectBar({
           initialIcon={editingProject.icon}
           initialColor={editingProject.color}
           initialIconBackground={editingProject.iconBackground}
+          initialDefaultModel={editingProject.defaultModel}
           onSave={handleSaveProjectEdit}
         />
       )}

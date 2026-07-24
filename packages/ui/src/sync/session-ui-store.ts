@@ -892,8 +892,16 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       useInputStore.getState().setPendingInputText(options.initialPrompt)
     }
 
-    if (directory) {
-      void activateConfigForDirectory(directory, selectedProject?.serverId)
+    // Config (providers/agents/default model) is project-scoped. Activate the
+    // selected project's root path + serverId so remote instances resolve the
+    // correct provider list, then apply project → global default cascade.
+    const configDirectory = normalizePath(selectedProject?.path ?? null) ?? directory
+    if (configDirectory) {
+      void activateConfigForDirectory(configDirectory, selectedProject?.serverId).then(() => {
+        useConfigStore.getState().applyDefaultModelAgentSelection({
+          projectDefaultModel: selectedProject?.defaultModel,
+        })
+      })
     }
   },
 
@@ -922,12 +930,17 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
   setNewSessionDraftTarget: (target) => {
     let nextDirectory: string | null = null
     let nextServerId: string | null | undefined
+    let nextProjectDefaultModel: string | undefined
+    let configDirectory: string | null = null
     set((s) => {
       nextDirectory = normalizePath(target.directoryOverride ?? s.newSessionDraft.directoryOverride)
       const nextProjectId = target.projectId ?? target.selectedProjectId ?? s.newSessionDraft.selectedProjectId
-      nextServerId = nextProjectId
-        ? useProjectsStore.getState().projects.find((project) => project.id === nextProjectId)?.serverId
-        : undefined
+      const nextProject = nextProjectId
+        ? useProjectsStore.getState().projects.find((project) => project.id === nextProjectId) ?? null
+        : null
+      nextServerId = nextProject?.serverId
+      nextProjectDefaultModel = nextProject?.defaultModel
+      configDirectory = normalizePath(nextProject?.path ?? null) ?? nextDirectory
       return {
         newSessionDraft: {
           ...s.newSessionDraft,
@@ -936,7 +949,13 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         },
       }
     })
-    void activateConfigForDirectory(nextDirectory, nextServerId)
+    if (configDirectory) {
+      void activateConfigForDirectory(configDirectory, nextServerId).then(() => {
+        useConfigStore.getState().applyDefaultModelAgentSelection({
+          projectDefaultModel: nextProjectDefaultModel,
+        })
+      })
+    }
   },
 
   setDraftPreserveDirectoryOverride: (value) =>

@@ -1637,6 +1637,35 @@ export async function unrevertSession(sessionId: string): Promise<void> {
  * 3. Insert the new session into the child store (so sidebar updates immediately)
  * 4. Switch to new session and populate pending input text + attachedFiles
  */
+/**
+ * Last assistant provider/model for a session — authoritative for small-model
+ * utility calls that must stay on the conversation's subscription.
+ */
+export function getSessionLastAssistantModel(
+  sessionId: string,
+): { providerID: string; modelID: string } | null {
+  try {
+    const store = storeForSession(sessionId)
+    const messages = store.getState().message[sessionId]
+    if (!messages) return null
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      const info = messages[i] as { role?: string; providerID?: string; modelID?: string }
+      if (
+        info?.role === "assistant"
+        && typeof info.providerID === "string"
+        && info.providerID
+        && typeof info.modelID === "string"
+        && info.modelID
+      ) {
+        return { providerID: info.providerID, modelID: info.modelID }
+      }
+    }
+    return null
+  } catch {
+    return null
+  }
+}
+
 export async function forkFromMessage(sessionId: string, messageId: string): Promise<void> {
   const sessionDirectory = requireSessionDirectory(sessionId, "forkFromMessage")
   const parentServerId = serverRegistry.getServerForSession(sessionId)

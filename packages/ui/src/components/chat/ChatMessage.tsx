@@ -18,13 +18,13 @@ import type { AgentColorSource } from '@/lib/agentColors';
 import { serverRegistry } from '@/lib/opencode/server-registry';
 
 import type { AnimationHandlers, ContentChangeReason } from '@/hooks/useChatAutoFollow';
-import MessageHeader from './message/MessageHeader';
 import MessageBody from './message/MessageBody';
 import type { AgentMentionInfo } from './message/types';
 import type { StreamPhase, ToolPopupContent } from './message/types';
 import { deriveMessageRole } from './message/messageRole';
 import { extractTextContent, filterVisibleParts, normalizeParts } from './message/partUtils';
 import { normalizeUserDisplayParts } from './message/normalizeUserDisplayParts';
+import { isHiddenUserMessage } from './message/hiddenUserMessage';
 import { flattenAssistantTextParts } from '@/lib/messages/messageText';
 import {
     extractOpenChamberLiveSteerText,
@@ -288,7 +288,6 @@ const SystemDirectiveBanner: React.FC<{
 const ChatMessage: React.FC<ChatMessageProps> = ({
     message,
     previousMessage,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     nextMessage,
     onContentChange,
     animationHandlers,
@@ -580,7 +579,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
     const displayModelName = useStickyDisplayValue<string>(modelName);
 
     const headerAgentName = displayAgentName ?? undefined;
-    const headerAgentColorSource = displayAgentColorSource ?? headerAgentName;
+    void displayAgentColorSource;
     const headerProviderID = displayProviderIDValue ?? null;
     const headerModelName = displayModelName ?? undefined;
 
@@ -1186,7 +1185,24 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
         return null;
     }
 
-    const assistantTopPaddingClass = !isUser && shouldShowHeader
+    const previousIsHiddenUserMessage = !isUser && isHiddenUserMessage(
+        previousMessage ? { info: previousMessage.info as never, parts: previousMessage.parts ?? [] } : null,
+        { planModeEnabled },
+    );
+    const nextIsHiddenUserMessage = !isUser && isHiddenUserMessage(
+        nextMessage ? { info: nextMessage.info as never, parts: nextMessage.parts ?? [] } : null,
+        { planModeEnabled },
+    );
+    const isFollowedByAssistant = (() => {
+        if (isUser) return false;
+        if (turnGroupingContext) {
+            return turnGroupingContext.isLastAssistantInTurn !== true;
+        }
+        if (!nextMessage?.info) return false;
+        return !deriveMessageRole(nextMessage.info as never).isUser;
+    })();
+
+    const assistantTopPaddingClass = !isUser && shouldShowHeader && !previousIsHiddenUserMessage
         ? (stickyUserHeader ? (isMobile ? 'pt-4' : 'pt-6') : 'pt-0')
         : 'pt-0';
     const userMessageRadius = 'var(--radius-xl)';
@@ -1222,6 +1238,11 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
             turnGroupingContext={turnGroupingContext}
             errorMessage={assistantErrorText}
             errorVariant={assistantErrorVariant}
+            footerProviderID={headerProviderID}
+            footerModelName={headerModelName}
+            footerAgentName={headerAgentName}
+            footerVariant={headerVariant}
+            isDarkTheme={isDarkTheme}
         />
     ) : null;
 
@@ -1229,9 +1250,11 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
         <>
             <div
                 className={cn(
-                    'group w-full',
+                    'group w-full group/message',
                     rendersAsDirectiveBanner ? 'pt-1 pb-0' : isUser ? (isMobile ? 'pt-1.5' : 'pt-4') : assistantTopPaddingClass,
-                    'pb-0'
+                    isUser || rendersAsDirectiveBanner
+                        ? 'pb-0'
+                        : (isFollowedByAssistant || nextIsHiddenUserMessage) ? 'pb-0' : 'pb-2',
                 )}
                 id={`message-${message.info.id}`}
                 data-message-id={message.info.id}
@@ -1350,18 +1373,6 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                         )
                     ) : (
                         <div className="relative">
-                            {shouldShowHeader && (
-                                <MessageHeader
-                                    isUser={isUser}
-                                    providerID={headerProviderID}
-                                    agentName={headerAgentName}
-                                    agentColorSource={headerAgentColorSource}
-                                    modelName={headerModelName}
-                                    variant={headerVariant}
-                                    isDarkTheme={isDarkTheme}
-                                />
-                            )}
-
                             {assistantHeaderAddon}
 
                             {!hideAssistantBody ? (

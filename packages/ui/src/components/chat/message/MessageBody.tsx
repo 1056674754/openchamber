@@ -10,9 +10,11 @@ import { TurnChangedFilesDropdown } from '../TurnChangedFilesDropdown';
 import TurnActivity from '../components/TurnActivity';
 import type { ToolPart as ToolPartType } from '@opencode-ai/sdk/v2';
 import type { StreamPhase, ToolPopupContent, AgentMentionInfo } from './types';
-import type { TurnActivityRecord, TurnGroupingContext } from '../lib/turns/types';
+import type { TurnActivityGroup, TurnActivityRecord, TurnGroupingContext } from '../lib/turns/types';
 import { formatTurnDuration } from '../lib/turns/duration';
 import { cn } from '@/lib/utils';
+import { useProviderLogo } from '@/hooks/useProviderLogo';
+import { getAgentColor } from '@/lib/agentColors';
 import { isEmptyTextPart, extractTextContent } from './partUtils';
 import { FadeInOnReveal } from './FadeInOnReveal';
 import { Button } from '@/components/ui/button';
@@ -334,6 +336,11 @@ interface MessageBodyProps {
     errorVariant?: 'error' | 'info';
     userActionsMode?: 'inline' | 'external-content' | 'external-actions';
     stickyUserHeaderEnabled?: boolean;
+    footerProviderID?: string | null;
+    footerModelName?: string;
+    footerAgentName?: string;
+    footerVariant?: string;
+    isDarkTheme?: boolean;
 }
 
 const TOOL_REVEAL_CACHE_MAX = 200;
@@ -938,6 +945,11 @@ const AssistantMessageBody = React.memo(({
     turnGroupingContext,
     errorMessage,
     errorVariant = 'error',
+    footerProviderID,
+    footerModelName,
+    footerAgentName,
+    footerVariant,
+    isDarkTheme = false,
 }: Omit<MessageBodyProps, 'isUser'>) => {
     const { t } = useI18n();
     const chatSurfaceMode = useChatSurfaceMode();
@@ -953,6 +965,7 @@ const AssistantMessageBody = React.memo(({
 
     const isTouchContext = Boolean(hasTouchInput ?? isMobile);
     const alwaysShowMessageActions = Boolean(alwaysShowActions ?? isMobile);
+    const { src: footerLogoSrc, onError: handleFooterLogoError, hasLogo: footerHasLogo } = useProviderLogo(footerProviderID ?? null);
     const awaitingMessageCompletion = !isMessageCompleted;
     const animateActivityRows = awaitingMessageCompletion || Boolean(turnGroupingContext?.isWorking);
 
@@ -1650,39 +1663,79 @@ const AssistantMessageBody = React.memo(({
     const renderedParts = React.useMemo(() => {
         const rendered: React.ReactNode[] = [];
 
+        const renderSegmentBlock = (segment: TurnActivityGroup): React.ReactNode | null => {
+            if (!shouldRenderActivityGroup || !toggleActivityGroup) {
+                return null;
+            }
+            const visibleSegmentParts = showReasoningTraces
+                ? segment.parts
+                : segment.parts.filter((activity) => activity.kind !== 'reasoning');
+            if (visibleSegmentParts.length === 0) {
+                return null;
+            }
+            return (
+                <div key={`progressive-group-${segment.id}`} className="mb-3">
+                    <TurnActivity
+                        sessionId={sessionId}
+                        parts={visibleSegmentParts}
+                        isExpanded={turnGroupingContext?.isGroupExpanded === true}
+                        collapsedPreviewCount={collapsedPreviewCount}
+                        onToggle={toggleActivityGroup}
+                        syntaxTheme={syntaxTheme}
+                        isMobile={isMobile}
+                        expandedTools={expandedTools}
+                        onToggleTool={onToggleTool}
+                        onShowPopup={onShowPopup}
+                        onContentChange={onContentChange}
+                        streamPhase={effectiveStreamPhase}
+                        showHeader={true}
+                        animateRows={animateActivityRows}
+                        animatedToolIds={animatedToolIdsLookup}
+                        diffStats={turnGroupingContext?.diffStats}
+                        renderJustificationActions={renderJustificationActions}
+                    />
+                </div>
+            );
+        };
+
+        // Segments that follow a standalone tool of THIS message render right
+        // after that tool's row so e.g. an Agent Task sits chronologically
+        // between the activity before it and the activity after it.
+        const localToolPartIds = new Set<string>();
+        visibleParts.forEach((part, partIndex) => {
+            if (part.type === 'tool') {
+                localToolPartIds.add(part.id ?? `${messageId}-part-${partIndex}-${part.type}`);
+            }
+        });
+        const segmentsAfterLocalTool = new Map<string, TurnActivityGroup[]>();
         if (shouldRenderActivityGroup && toggleActivityGroup) {
             activityGroupSegmentsForMessage.forEach((segment) => {
-                const visibleSegmentParts = showReasoningTraces
-                    ? segment.parts
-                    : segment.parts.filter((activity) => activity.kind !== 'reasoning');
-                if (visibleSegmentParts.length === 0) {
+                if (segment.afterToolPartId && localToolPartIds.has(segment.afterToolPartId)) {
+                    const list = segmentsAfterLocalTool.get(segment.afterToolPartId) ?? [];
+                    list.push(segment);
+                    segmentsAfterLocalTool.set(segment.afterToolPartId, list);
                     return;
                 }
-                rendered.push(
-                    <div key={`progressive-group-${segment.id}`} className="mb-3">
-                        <TurnActivity
-                            sessionId={sessionId}
-                            parts={visibleSegmentParts}
-                            isExpanded={turnGroupingContext.isGroupExpanded === true}
-                            collapsedPreviewCount={collapsedPreviewCount}
-                            onToggle={toggleActivityGroup}
-                            syntaxTheme={syntaxTheme}
-                            isMobile={isMobile}
-                            expandedTools={expandedTools}
-                            onToggleTool={onToggleTool}
-                            onShowPopup={onShowPopup}
-                            onContentChange={onContentChange}
-                            streamPhase={effectiveStreamPhase}
-                            showHeader={true}
-                            animateRows={animateActivityRows}
-                            animatedToolIds={animatedToolIdsLookup}
-                            diffStats={turnGroupingContext.diffStats}
-                            renderJustificationActions={renderJustificationActions}
-                        />
-                    </div>
-                );
+                const block = renderSegmentBlock(segment);
+                if (block) {
+                    rendered.push(block);
+                }
             });
         }
+
+        const flushSegmentsAfterTool = (toolPartId: string) => {
+            const segments = segmentsAfterLocalTool.get(toolPartId);
+            if (!segments) {
+                return;
+            }
+            segmentsAfterLocalTool.delete(toolPartId);
+            segments.forEach((segment) => {
+                const block = renderSegmentBlock(segment);
+                if (block) {
+                    rendered.push(block);
+                }
+            });
+        };
 
         // Flat rendering: iterate parts in natural order.
         // Group consecutive static tools (read, grep, glob, etc.) into compact rows.
@@ -1792,19 +1845,23 @@ const AssistantMessageBody = React.memo(({
             if (part.type === 'tool') {
                 const toolPart = part as ToolPartType;
                 const toolName = toolPart.tool?.toLowerCase() ?? '';
+                const toolPartId = toolPart.id ?? `${messageId}-part-${i}-${part.type}`;
 
                 if (isSortedRenderMode && !isActivityOwnerMessage) {
+                    flushSegmentsAfterTool(toolPartId);
                     i += 1;
                     continue;
                 }
 
                 const activity = activityByPart.get(part);
                 if (activity?.kind === 'tool' && !isStandaloneTool(toolName)) {
+                    flushSegmentsAfterTool(toolPartId);
                     i += 1;
                     continue;
                 }
 
                 if (!shouldShowTool(toolPart)) {
+                    flushSegmentsAfterTool(toolPartId);
                     i++;
                     continue;
                 }
@@ -1831,6 +1888,7 @@ const AssistantMessageBody = React.memo(({
                             </ToolRevealOnMount>
                         </FadeInOnReveal>
                     );
+                    flushSegmentsAfterTool(toolPartId);
                     i++;
                     continue;
                 }
@@ -1884,6 +1942,7 @@ const AssistantMessageBody = React.memo(({
                             </ToolRevealOnMount>
                         </FadeInOnReveal>
                     );
+                    flushSegmentsAfterTool(toolPartId);
                     i = j;
                     continue;
                 }
@@ -1901,6 +1960,7 @@ const AssistantMessageBody = React.memo(({
                         </ToolRevealOnMount>
                     </FadeInOnReveal>
                 );
+                flushSegmentsAfterTool(toolPartId);
                 i = j;
                 continue;
             }
@@ -1908,6 +1968,17 @@ const AssistantMessageBody = React.memo(({
             // Unknown part type — skip
             i++;
         }
+
+        // Any segments whose anchor tool never got flushed (filtered parts,
+        // unexpected ordering) must still render rather than disappear.
+        segmentsAfterLocalTool.forEach((segments) => {
+            segments.forEach((segment) => {
+                const block = renderSegmentBlock(segment);
+                if (block) {
+                    rendered.push(block);
+                }
+            });
+        });
 
         return rendered;
     }, [
@@ -2114,14 +2185,46 @@ const AssistantMessageBody = React.memo(({
                 )}
                 {shouldShowTurnFooter && (
                     <div
-                        className="mt-2 mb-1 flex items-center justify-start gap-1.5"
+                        className="mt-2 mb-1 flex flex-wrap items-center justify-start gap-x-3 gap-y-1.5"
                         style={MESSAGE_FOOTER_CONTAINER_STYLE}
                     >
-                        <div className="flex items-center gap-1" data-message-action-group="true">
-                            {messageActionButtons}
-                            {finalTurnActionButtons}
-                        </div>
-                        <div className="flex items-center gap-1.5">
+                        <div className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1 text-sm text-muted-foreground/60">
+                            {footerModelName ? (
+                                <span className="flex min-w-0 items-center gap-1.5">
+                                    {footerHasLogo && footerLogoSrc ? (
+                                        <img
+                                            src={footerLogoSrc}
+                                            alt=""
+                                            className="h-3.5 w-3.5 flex-shrink-0"
+                                            style={{
+                                                filter: isDarkTheme ? 'brightness(0.9) contrast(1.1) invert(1)' : 'brightness(0.9) contrast(1.1)',
+                                            }}
+                                            onError={handleFooterLogoError}
+                                        />
+                                    ) : (
+                                        <Icon
+                                            name="brain-ai-3"
+                                            className="h-3.5 w-3.5 flex-shrink-0"
+                                            style={{ color: `var(${getAgentColor(footerAgentName).var})` }}
+                                        />
+                                    )}
+                                    <span className="truncate">{footerModelName}</span>
+                                </span>
+                            ) : null}
+                            {footerVariant && !['default', 'none'].includes(footerVariant.toLowerCase()) ? (
+                                <span className="flex items-center gap-1">
+                                    <Icon name="brain-ai-3" className="h-3.5 w-3.5 flex-shrink-0" />
+                                    <span className="message-footer__label">
+                                        {footerVariant[0].toLowerCase() + footerVariant.slice(1)}
+                                    </span>
+                                </span>
+                            ) : null}
+                            {footerAgentName ? (
+                                <span className="flex items-center gap-1">
+                                    <Icon name="ai-agent" className="h-3.5 w-3.5 flex-shrink-0" />
+                                    <span className="message-footer__label">{footerAgentName}</span>
+                                </span>
+                            ) : null}
                             {turnDurationText ? (
                                 <Tooltip>
                                     <TooltipTrigger asChild>
@@ -2155,6 +2258,18 @@ const AssistantMessageBody = React.memo(({
                                     isLatestTurn={turnGroupingContext?.isLatestTurn === true}
                                 />
                             ) : null}
+                        </div>
+                        <div
+                            className={cn(
+                                'flex items-center gap-1.5',
+                                alwaysShowMessageActions || isTouchContext
+                                    ? undefined
+                                    : 'pointer-events-none opacity-0 transition-opacity duration-150 focus-within:pointer-events-auto focus-within:opacity-100 group-hover/message:pointer-events-auto group-hover/message:opacity-100',
+                            )}
+                            data-message-action-group="true"
+                        >
+                            {messageActionButtons}
+                            {finalTurnActionButtons}
                         </div>
                     </div>
                 )}

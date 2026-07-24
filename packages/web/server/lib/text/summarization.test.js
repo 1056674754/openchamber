@@ -53,44 +53,114 @@ describe('generateSessionTitleCandidates', () => {
     globalThis.fetch = originalFetch;
   });
 
-  it('returns local fallback candidates without calling zen', async () => {
-    const fetchMock = vi.fn();
-    globalThis.fetch = fetchMock;
+  it('parses titles from the small model and marks generated=true', async () => {
+    const generateText = vi.fn(async () => ({
+      text: 'OAuth token refresh\nLifecycle audit\nAuth expiry handling',
+      providerID: 'openai',
+      modelID: 'gpt-5.4-mini',
+      source: 'family-scan',
+    }));
 
     const result = await generateSessionTitleCandidates({
       text: 'OAuth token refresh failed. Token lifecycle audit is needed.',
       count: 3,
       maxLength: 60,
-      zenModel: 'gpt-5-nano',
+      directory: '/tmp/proj',
+      preferredProviderID: 'openai',
+      preferredModelID: 'gpt-5.4',
+      generateText,
     });
 
-    expect(fetchMock).not.toHaveBeenCalled();
-    expect(result.generated).toBe(false);
-    expect(result.reason).toBe('Model summarization provider unavailable');
-    expect(result.candidates).toContain('OAuth token refresh failed.');
-    expect(result.candidates).toContain('Token lifecycle audit is needed.');
+    expect(generateText).toHaveBeenCalledWith(expect.objectContaining({
+      directory: '/tmp/proj',
+      preferredProviderID: 'openai',
+      preferredModelID: 'gpt-5.4',
+      restrictToPreferredProvider: true,
+    }));
+    expect(result.generated).toBe(true);
+    expect(result.candidates).toEqual([
+      'OAuth token refresh',
+      'Lifecycle audit',
+      'Auth expiry handling',
+    ]);
+    expect(result.providerID).toBe('openai');
+    expect(result.modelID).toBe('gpt-5.4-mini');
   });
 
-  it('truncates local candidates exceeding maxLength', async () => {
+  it('returns empty candidates with an explicit reason when small model fails', async () => {
+    const generateText = vi.fn(async () => {
+      throw Object.assign(new Error('No small model available within the session provider'), {
+        statusCode: 404,
+      });
+    });
+
     const result = await generateSessionTitleCandidates({
-      text: 'This is an extremely long title that goes on and on and on way past the limit.',
-      count: 1,
-      maxLength: 20,
-      zenModel: 'gpt-5-nano',
+      text: 'OAuth token refresh failed. Token lifecycle audit is needed.',
+      count: 3,
+      maxLength: 60,
+      preferredProviderID: 'anthropic',
+      preferredModelID: 'claude-opus-4',
+      generateText,
     });
 
     expect(result.generated).toBe(false);
-    expect(result.candidates).toHaveLength(1);
-    expect(result.candidates[0].length).toBeLessThanOrEqual(20);
+    expect(result.candidates).toEqual([]);
+    expect(result.reason).toBe('No small model available within the session provider');
+    // Must not invent local first-sentence heuristics.
+    expect(result.candidates).not.toContain('OAuth token refresh failed.');
+  });
+
+  it('treats an empty model response as failure without local heuristics', async () => {
+    const generateText = vi.fn(async () => ({
+      text: '   \n\n',
+      providerID: 'openai',
+      modelID: 'gpt-5.4-mini',
+      source: 'family-scan',
+    }));
+
+    const result = await generateSessionTitleCandidates({
+      text: 'This is an extremely long title that goes on and on and on way past the limit.',
+      count: 3,
+      maxLength: 20,
+      generateText,
+    });
+
+    expect(result.generated).toBe(false);
+    expect(result.candidates).toEqual([]);
+    expect(result.reason).toBe('Small model returned no usable titles');
   });
 
   it('returns generated=false with reason when text is empty', async () => {
+    const generateText = vi.fn();
     const result = await generateSessionTitleCandidates({
       text: '   ',
       count: 3,
+      generateText,
     });
+    expect(generateText).not.toHaveBeenCalled();
     expect(result.generated).toBe(false);
     expect(result.candidates).toEqual([]);
     expect(result.reason).toBe('No text provided');
+  });
+
+  it('strips numbering and truncates each candidate to maxLength', async () => {
+    const generateText = vi.fn(async () => ({
+      text: '1. Short title\n2. This title is way too long for the configured limit and must be cut\n3. "Quoted title"',
+      providerID: 'google',
+      modelID: 'gemini-2.5-flash',
+      source: 'family-scan',
+    }));
+
+    const result = await generateSessionTitleCandidates({
+      text: 'session body',
+      count: 3,
+      maxLength: 20,
+      generateText,
+    });
+
+    expect(result.generated).toBe(true);
+    expect(result.candidates[0]).toBe('Short title');
+    expect(result.candidates[1].length).toBeLessThanOrEqual(20);
+    expect(result.candidates[2]).toBe('Quoted title');
   });
 });

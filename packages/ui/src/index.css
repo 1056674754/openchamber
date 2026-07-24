@@ -93,6 +93,14 @@ textarea[data-chat-input="true"]:focus-visible {
   cursor: not-allowed;
 }
 
+/* Fractional line heights make streamed content grow by sub-pixel amounts
+   while scroll positions quantize to the device-pixel grid. Rounding keeps
+   bottom-anchored rows from creeping/snapping by 1px during streaming. */
+.message-content-text.leading-relaxed,
+.message-content-text .leading-relaxed {
+  line-height: round(1.625em, 1px);
+}
+
 :root.light .message-content-text::selection,
 :root.light .message-content-text ::selection {
   background: color-mix(in srgb, var(--interactive-border-focus) 18%, transparent);

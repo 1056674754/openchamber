@@ -12,6 +12,11 @@ import { ProjectActionsSection } from '@/components/sections/projects/ProjectAct
 import { Icon } from "@/components/icon/Icon";
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useI18n } from '@/lib/i18n';
+import { ModelSelector } from '@/components/sections/agents/ModelSelector';
+import {
+  formatProjectDefaultModel,
+  parseProjectDefaultModel,
+} from '@/lib/projectDefaultModel';
 
 export const ProjectsPage: React.FC = () => {
   const { t } = useI18n();
@@ -44,6 +49,8 @@ export const ProjectsPage: React.FC = () => {
   const [icon, setIcon] = React.useState<string | null>(null);
   const [color, setColor] = React.useState<string | null>(null);
   const [iconBackground, setIconBackground] = React.useState<string | null>(null);
+  const [defaultProviderId, setDefaultProviderId] = React.useState('');
+  const [defaultModelId, setDefaultModelId] = React.useState('');
   const [isUploadingIcon, setIsUploadingIcon] = React.useState(false);
   const [isRemovingCustomIcon, setIsRemovingCustomIcon] = React.useState(false);
   const [isDiscoveringIcon, setIsDiscoveringIcon] = React.useState(false);
@@ -81,12 +88,17 @@ export const ProjectsPage: React.FC = () => {
       setIcon(null);
       setColor(null);
       setIconBackground(null);
+      setDefaultProviderId('');
+      setDefaultModelId('');
       return;
     }
     setName(selectedProject.label ?? '');
     setIcon(selectedProject.icon ?? null);
     setColor(selectedProject.color ?? null);
     setIconBackground(selectedProject.iconBackground ?? null);
+    const parsed = parseProjectDefaultModel(selectedProject.defaultModel);
+    setDefaultProviderId(parsed?.providerId ?? '');
+    setDefaultModelId(parsed?.modelId ?? '');
     setPendingRemoveImageIcon(false);
     clearPendingUploadIcon();
     setPreviewImageFailed(false);
@@ -143,9 +155,12 @@ export const ProjectsPage: React.FC = () => {
       icon,
       color,
       iconBackground: willRemoveImageIcon ? null : iconBackground,
+      defaultModel: formatProjectDefaultModel(defaultProviderId, defaultModelId) ?? null,
     });
   }, [
     color,
+    defaultModelId,
+    defaultProviderId,
     icon,
     iconBackground,
     name,
@@ -282,6 +297,28 @@ export const ProjectsPage: React.FC = () => {
                   onChange={(e) => setName(e.target.value)} 
                   placeholder={t('settings.projects.page.field.projectNamePlaceholder')} 
                   className="h-7 min-w-0 w-full sm:max-w-[19rem]" 
+                />
+              </div>
+            </div>
+
+            {/* Default model */}
+            <div className="py-1.5">
+              <div className="flex min-w-0 flex-col">
+                <span className="typography-ui-label text-foreground">{t('projectEditDialog.field.defaultModel')}</span>
+                <span className="typography-meta text-muted-foreground">
+                  {t('projectEditDialog.field.defaultModelDescription')}
+                </span>
+              </div>
+              <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-2">
+                <ModelSelector
+                  providerId={defaultProviderId}
+                  modelId={defaultModelId}
+                  onChange={(nextProviderId, nextModelId) => {
+                    setDefaultProviderId(nextProviderId);
+                    setDefaultModelId(nextModelId);
+                  }}
+                  placeholder={t('projectEditDialog.field.defaultModelPlaceholder')}
+                  className="h-7 min-w-0 w-full sm:max-w-[19rem]"
                 />
               </div>
             </div>

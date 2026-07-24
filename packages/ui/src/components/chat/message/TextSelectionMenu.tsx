@@ -10,6 +10,7 @@ import { copyTextToClipboard } from '@/lib/clipboard';
 import { toast } from '@/components/ui';
 import { Icon } from "@/components/icon/Icon";
 import { OPENCHAMBER_PROJECT_NOTES_MAX_LENGTH, getProjectNotesAndTodos, saveProjectNotesAndTodos } from '@/lib/openchamberConfig';
+import { summarizeSelectionForNotes } from '@/lib/smallModel';
 import { resolveProjectForSessionDirectory } from '@/lib/projectResolution';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { isVSCodeRuntime } from '@/lib/desktop';
@@ -518,7 +519,13 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
 
     try {
       setIsAddingToNotes(true);
-      const noteText = selectedTextMarkdown || selectedText;
+      const directory = effectiveDirectory
+        ?? (typeof currentSession?.directory === 'string' ? currentSession.directory : null);
+      const noteText = await summarizeSelectionForNotes(
+        selectedTextMarkdown || selectedText,
+        currentSessionId,
+        directory,
+      );
       const projectData = await getProjectNotesAndTodos(currentProjectRef);
       const nextNotes = appendDistilledInsightToNotes(projectData.notes, noteText);
       const saved = await saveProjectNotesAndTodos(currentProjectRef, {
@@ -541,7 +548,16 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
     } finally {
       setIsAddingToNotes(false);
     }
-  }, [currentProjectRef, hideMenu, selectedText, selectedTextMarkdown, t]);
+  }, [
+    currentProjectRef,
+    currentSession?.directory,
+    currentSessionId,
+    effectiveDirectory,
+    hideMenu,
+    selectedText,
+    selectedTextMarkdown,
+    t,
+  ]);
 
   if (!position.show) return null;
 

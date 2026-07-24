@@ -1059,11 +1059,23 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
     [projects, editingProjectDialogId],
   );
 
-  const handleSaveProjectEdit = React.useCallback((data: { label: string; icon: string | null; color: string | null; iconBackground: string | null }) => {
+  const handleSaveProjectEdit = React.useCallback((data: {
+    label: string;
+    icon: string | null;
+    color: string | null;
+    iconBackground: string | null;
+    defaultModel: string | null;
+  }) => {
     if (!editingProjectDialogId) {
       return;
     }
-    updateProjectMeta(editingProjectDialogId, data);
+    updateProjectMeta(editingProjectDialogId, {
+      label: data.label,
+      icon: data.icon,
+      color: data.color,
+      iconBackground: data.iconBackground,
+      defaultModel: data.defaultModel,
+    });
     setEditingProjectDialogId(null);
   }, [editingProjectDialogId, updateProjectMeta]);
 
@@ -2522,6 +2534,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
           initialIcon={editingProject.icon}
           initialColor={editingProject.color}
           initialIconBackground={editingProject.iconBackground}
+          initialDefaultModel={editingProject.defaultModel}
           onSave={handleSaveProjectEdit}
         />
       ) : null}

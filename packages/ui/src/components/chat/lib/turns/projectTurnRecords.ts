@@ -1,4 +1,5 @@
 import { getAuxiliaryUserMessageKind } from '@/lib/messages/real-user';
+import { isHiddenUserMessage } from '../../message/hiddenUserMessage';
 
 import { projectTurnActivity } from './projectTurnActivity';
 import { projectTurnIndexes } from './projectTurnIndexes';
@@ -170,11 +171,18 @@ const buildTurnStreamState = (userMessage: ChatMessageEntry, assistantMessages: 
 interface ProjectTurnRecordsOptions {
     previousProjection?: TurnProjectionResult | null;
     showTextJustificationActivity: boolean;
+    /**
+     * When set, a turn whose user message is hidden (no visible display parts,
+     * e.g. synthetic subagent-completion nudges) is merged into the previous
+     * turn instead of starting a new one.
+     */
+    mergeHiddenUserTurns?: { planModeEnabled: boolean };
 }
 
 const DEFAULT_OPTIONS: ProjectTurnRecordsOptions = {
     previousProjection: null,
     showTextJustificationActivity: false,
+    mergeHiddenUserTurns: undefined,
 };
 
 export const projectTurnRecords = (
@@ -197,6 +205,8 @@ export const projectTurnRecords = (
         }
     });
 
+    const mergeHiddenUserTurns = effectiveOptions.mergeHiddenUserTurns;
+
     // Pass 1: Create turns for every role:user message, including directives.
     // [sscity-mod] Directives arrive with role:user but are not real human
     // messages. They still need their own turn so that the agent's assistant
@@ -209,9 +219,25 @@ export const projectTurnRecords = (
     // so MessageList attaches them under their parent real-user turn instead
     // of rendering a spurious new sticky-header block. Render style is decided
     // later by ChatMessage via part content (not this flag), so reuse is safe.
+    //
+    // When mergeHiddenUserTurns is enabled, fully-hidden user messages (no
+    // visible display parts) merge into the previous turn so Activity/footer
+    // stay continuous across subagent nudges.
     messages.forEach((message, index) => {
         const role = resolveMessageRole(message);
         if (role !== 'user') {
+            return;
+        }
+
+        const previousTurn = turns[turns.length - 1];
+        if (
+            mergeHiddenUserTurns
+            && previousTurn
+            && isHiddenUserMessage(message, { planModeEnabled: mergeHiddenUserTurns.planModeEnabled })
+        ) {
+            turnByUserId.set(message.info.id, previousTurn);
+            previousTurn.messages.push(createTurnMessageRecord(message, index));
+            groupedMessageIds.add(message.info.id);
             return;
         }
 
