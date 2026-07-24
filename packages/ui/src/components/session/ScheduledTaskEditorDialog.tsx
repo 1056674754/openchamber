@@ -16,17 +16,20 @@ import { CommandAutocomplete, type CommandAutocompleteHandle, type CommandInfo }
 import { FileMentionAutocomplete, type FileMentionHandle } from '@/components/chat/FileMentionAutocomplete';
 import { SnippetAutocomplete, type SnippetAutocompleteHandle } from '@/components/chat/SnippetAutocomplete';
 import { Icon } from "@/components/icon/Icon";
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
 import type { ScheduledTask } from '@/lib/scheduledTasksApi';
 import { useI18n } from '@/lib/i18n';
 import { isValidCronExpression, getNextRuns, CRON_EXAMPLES } from '@/lib/cron';
+import { canonicalizeTimezone } from '@/lib/timezones';
 
 const WEEKDAY_INDEXES = [0, 1, 2, 3, 4, 5, 6] as const;
+const EDITOR_TOGGLE_BUTTON_CLASS = 'flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center text-foreground outline-none transition-none focus:outline-none';
 
 const TIMEZONE_OPTIONS = (() => {
   if (typeof Intl !== 'undefined' && typeof Intl.supportedValuesOf === 'function') {
-    return Intl.supportedValuesOf('timeZone');
+    return [...new Set(Intl.supportedValuesOf('timeZone').map(canonicalizeTimezone))];
   }
   return [
     'UTC',
@@ -466,6 +469,7 @@ type ScheduledTaskDraft = {
     modelID: string;
     variant: string;
     agent: string;
+    permissionAutoAccept: boolean;
   };
   state?: ScheduledTask['state'];
 };
@@ -495,7 +499,7 @@ const toDraft = (
     agent: string;
   },
 ): ScheduledTaskDraft => {
-  const timezoneFallback = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+  const timezoneFallback = canonicalizeTimezone(Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC');
   if (!task) {
     return {
       name: '',
@@ -515,6 +519,7 @@ const toDraft = (
         modelID: defaults.modelID,
         variant: defaults.variant,
         agent: defaults.agent,
+        permissionAutoAccept: false,
       },
     };
   }
@@ -537,7 +542,7 @@ const toDraft = (
         ? task.schedule.time
         : '09:00',
       weekdays: Array.isArray(task.schedule.weekdays) ? task.schedule.weekdays : [1],
-      timezone: task.schedule.timezone || timezoneFallback,
+      timezone: canonicalizeTimezone(task.schedule.timezone || timezoneFallback),
       cronExpression: task.schedule.kind === 'cron' && typeof task.schedule.cron === 'string'
         ? task.schedule.cron
         : '',
@@ -548,6 +553,7 @@ const toDraft = (
       modelID: task.execution.modelID,
       variant: task.execution.variant || '',
       agent: task.execution.agent || '',
+      permissionAutoAccept: task.execution.permissionAutoAccept === true,
     },
     state: task.state,
   };
@@ -1161,6 +1167,7 @@ export function ScheduledTaskEditorDialog(props: {
         modelID: draft.execution.modelID,
         ...(draft.execution.variant.trim() ? { variant: draft.execution.variant.trim() } : {}),
         ...(draft.execution.agent.trim() ? { agent: draft.execution.agent.trim() } : {}),
+        ...(draft.execution.permissionAutoAccept ? { permissionAutoAccept: true } : {}),
       },
       ...(draft.state ? { state: draft.state } : {}),
     };
@@ -1181,7 +1188,7 @@ export function ScheduledTaskEditorDialog(props: {
     if (typeof document === 'undefined') return false;
     return Boolean(
       document.querySelector(
-        '[data-slot="dropdown-menu-content"], [data-slot="select-content"]'
+        '[data-slot="dropdown-menu-content"][data-open], [data-slot="select-content"][data-open]'
       )
     );
   }, []);
@@ -1631,6 +1638,36 @@ export function ScheduledTaskEditorDialog(props: {
       </label>
 
       <div className="flex items-center gap-2">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              className={EDITOR_TOGGLE_BUTTON_CLASS}
+              onClick={() => setDraft((prev) => ({
+                ...prev,
+                execution: {
+                  ...prev.execution,
+                  permissionAutoAccept: !prev.execution.permissionAutoAccept,
+                },
+              }))}
+              aria-pressed={draft.execution.permissionAutoAccept}
+              aria-label={t('sessions.scheduledTasks.editor.permissionAutoAccept.aria')}
+            >
+              {draft.execution.permissionAutoAccept ? (
+                <Icon
+                  name="shield-check"
+                  className="h-[18px] w-[18px] text-[var(--status-info)]"
+                  aria-hidden="true"
+                />
+              ) : (
+                <Icon name="shield-user" className="h-[18px] w-[18px]" aria-hidden="true" />
+              )}
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="top" sideOffset={6}>
+            {t('sessions.scheduledTasks.editor.permissionAutoAccept.label')}
+          </TooltipContent>
+        </Tooltip>
         <Button type="button" variant="ghost" size="sm" onClick={() => onOpenChange(false)} disabled={saving}>
           {t('sessions.scheduledTasks.editor.actions.cancel')}
         </Button>

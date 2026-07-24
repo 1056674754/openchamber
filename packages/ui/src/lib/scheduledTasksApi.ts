@@ -19,6 +19,7 @@ export type ScheduledTask = {
     modelID: string;
     variant?: string;
     agent?: string;
+    permissionAutoAccept?: boolean;
   };
   state: {
     createdAt: number;
