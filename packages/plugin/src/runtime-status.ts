@@ -14,6 +14,7 @@ export const OPENCHAMBER_PLUGIN_RUNTIME_TOOLS = [
   "describe_image",
   "search_images",
   "save_image_analysis",
+  "publish_artifact",
 ] as const
 
 export type OpenChamberPluginRuntimeStatus = {
@@ -25,8 +26,18 @@ export type OpenChamberPluginRuntimeStatus = {
   readonly tools: typeof OPENCHAMBER_PLUGIN_RUNTIME_TOOLS
 }
 
-const OPENCHAMBER_PLUGIN_STATUS_DIR = resolve(homedir(), ".config", "openchamber", "plugin")
-export const OPENCHAMBER_PLUGIN_STATUS_FILE = resolve(OPENCHAMBER_PLUGIN_STATUS_DIR, "status.json")
+export function resolveOpenChamberPluginStatusFile(
+  env: Readonly<Record<string, string | undefined>> = process.env,
+  homeDirectory = homedir(),
+): string {
+  const dataDirectory = env.OPENCHAMBER_DATA_DIR
+    ? resolve(env.OPENCHAMBER_DATA_DIR)
+    : resolve(homeDirectory, ".config", "openchamber")
+  return resolve(dataDirectory, "plugin", "status.json")
+}
+
+export const OPENCHAMBER_PLUGIN_STATUS_FILE = resolveOpenChamberPluginStatusFile()
+const OPENCHAMBER_PLUGIN_STATUS_DIR = resolve(OPENCHAMBER_PLUGIN_STATUS_FILE, "..")
 
 export function createOpenChamberPluginRuntimeStatus(now = new Date()): OpenChamberPluginRuntimeStatus {
   const pid = typeof process === "object" && typeof process.pid === "number" ? process.pid : undefined

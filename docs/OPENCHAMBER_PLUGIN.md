@@ -234,6 +234,29 @@ Cross-session image caching requires:
 All of this is cleanly expressible as a plugin with its own storage. OpenCode's DB
 stays untouched.
 
+## Artifact Publishing
+
+The first-party plugin also registers:
+
+```
+publish_artifact(path, title?, description?) → persisted artifact metadata
+```
+
+The tool copies a completed file into
+`{OPENCHAMBER_DATA_DIR}/artifacts/{publication_id}/content` and writes an immutable
+`manifest.json` beside it. The publication ID is derived from the content SHA-256,
+session ID, message ID, and filename, so retrying the same tool call is idempotent.
+
+The completed OpenCode tool part stores a versioned `metadata.openchamberArtifact`
+record. OpenChamber's shared UI recognizes that record and renders a persistent
+preview/download card without parsing Markdown paths. The web server and VS Code
+bridge expose content through `GET /api/artifacts/:artifactId/content`; clients
+never send a local filesystem path to that endpoint.
+
+Files inside the active worktree publish directly. Publishing a path outside the
+worktree triggers an `artifact_publish` permission request before any content is
+copied.
+
 ## Package Layout
 
 ```
@@ -246,7 +269,9 @@ packages/plugin/
 │   ├── image-transform.ts    # experimental.chat.messages.transform handler
 │   ├── system-transform.ts   # experimental.chat.system.transform handler
 │   ├── tools/
-│   │   └── describe-image.ts # describe_image tool definition
+│   │   ├── describe-image.ts # describe_image tool definition
+│   │   └── publish-artifact.ts # persistent deliverable publishing
+│   ├── artifact-store.ts     # Content-addressed persistent artifacts
 │   ├── image-store.ts        # Save base64 → file, sha256 naming, dedup
 │   ├── model-capability.ts   # Query model vision capability via SDK client
 │   └── logger.ts             # Plugin-scoped logging
@@ -280,6 +305,8 @@ exists. The plugin is resolved from the workspace `node_modules`.
 | Separate cache DB for Stage 2 | Never write to `opencode.db` — avoids corruption risk and migration drift. |
 | UI does not block sends | The plugin handles the transformation; blocking would prevent the fallback from working. |
 | File paths over base64 in fallback text | MCP vision tools need file paths; base64 in text is useless to a text model. |
+| Artifact metadata in tool parts | Works without adding a custom OpenCode Part variant and survives session reload. |
+| Copy-on-publish | Temporary source cleanup cannot remove a published deliverable. |
 
 ## Validation
 

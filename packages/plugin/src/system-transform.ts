@@ -24,6 +24,10 @@ const SYSTEM_PROMPT_ADDITION = [
   `When a message contains "[Image attachment: ...]" with a prior analysis, use it directly.`,
   `When no analysis is included, use any available vision tool (look_at, analyze_image, etc.) to analyze the image.`,
   `After receiving a vision analysis, call save_image_analysis to cache it for future sessions.`,
+  ``,
+  `## Artifact Publishing`,
+  `When you create a completed user-facing deliverable or evidence file that must survive temporary-directory cleanup, call publish_artifact before handing it off.`,
+  `Do not use a temporary filesystem path as the final handoff when publish_artifact is available.`,
 ].join("\n")
 
 export function createSystemTransformHandler() {

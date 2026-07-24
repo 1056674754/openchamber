@@ -49,10 +49,25 @@ export const OpenChamberPluginStatusToast: React.FC = () => {
             });
         };
 
+        const showDegraded = (reason: string, copyText: string) => {
+            statusToastShown = true;
+            toast.warning(t('openchamberPlugin.toast.degraded.title'), {
+                id: PLUGIN_STATUS_TOAST_ID,
+                description: t('openchamberPlugin.toast.degraded.description', { reason }),
+                copyText,
+                duration: Infinity,
+                icon: <Icon name="error-warning" className="h-4 w-4 text-[var(--status-warning)]" />,
+            });
+        };
+
         const handleStatus = (status: OpenChamberPluginStatus, attempt: number) => {
             const decision = resolveOpenChamberPluginStatusDecision(status);
             if (decision.kind === 'loaded') {
                 showLoaded();
+                return;
+            }
+            if (decision.kind === 'degraded') {
+                showDegraded(decision.reason, decision.copyText);
                 return;
             }
             if (decision.kind === 'failed') {

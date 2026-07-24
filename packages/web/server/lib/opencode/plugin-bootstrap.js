@@ -5,13 +5,36 @@ import { homedir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { writeOpenChamberOverlay as writeOpenChamberOverlayFile } from './plugin-overlay.js';
 
-const OVERLAY_DIR = resolve(homedir(), '.config', 'openchamber');
-const OVERLAY_FILE = resolve(OVERLAY_DIR, 'opencode-overlay.json');
-const PLUGIN_INSTALL_DIR = resolve(OVERLAY_DIR, 'plugin');
-const PLUGIN_ENTRY = resolve(OVERLAY_DIR, 'opencode-notifier');
-const PLUGIN_STATUS_FILE = resolve(PLUGIN_INSTALL_DIR, 'status.json');
+export function resolveOpenChamberPluginPaths(env = process.env, homeDirectory = homedir()) {
+  const overlayDir = env.OPENCHAMBER_DATA_DIR
+    ? resolve(env.OPENCHAMBER_DATA_DIR)
+    : resolve(homeDirectory, '.config', 'openchamber');
+  const pluginInstallDir = resolve(overlayDir, 'plugin');
+  const openCodeConfigDir = env.OPENCODE_CONFIG_DIR
+    ? resolve(env.OPENCODE_CONFIG_DIR)
+    : resolve(homeDirectory, '.config', 'opencode');
+  return {
+    overlayDir,
+    overlayFile: resolve(overlayDir, 'opencode-overlay.json'),
+    pluginInstallDir,
+    pluginEntry: resolve(overlayDir, 'opencode-notifier'),
+    pluginStatusFile: resolve(pluginInstallDir, 'status.json'),
+    openCodeConfigDir,
+  };
+}
+
+const {
+  overlayDir: OVERLAY_DIR,
+  overlayFile: OVERLAY_FILE,
+  pluginInstallDir: PLUGIN_INSTALL_DIR,
+  pluginEntry: PLUGIN_ENTRY,
+  pluginStatusFile: PLUGIN_STATUS_FILE,
+  openCodeConfigDir: OPENCODE_CONFIG_DIR,
+} = resolveOpenChamberPluginPaths();
 const OPENCHAMBER_PLUGIN_ID = '@openchamber/plugin';
 const REQUIRED_TOOLS = ['describe_image', 'save_image_analysis'];
+const OPTIONAL_TOOLS = ['publish_artifact'];
+const EXPECTED_TOOLS = [...REQUIRED_TOOLS, ...OPTIONAL_TOOLS];
 const REQUIRED_RUNTIME_FEATURES = ['liveSteer'];
 
 function isRecord(value) {
@@ -56,6 +79,7 @@ function writeOpenChamberOverlay() {
     overlayDir: OVERLAY_DIR,
     overlayFile: OVERLAY_FILE,
     pluginEntry: PLUGIN_ENTRY,
+    userConfigDir: OPENCODE_CONFIG_DIR,
   });
 }
 
@@ -104,7 +128,7 @@ export function prepareOpenChamberConfig() {
 }
 
 export function cleanupOpenChamberPluginFromUserConfig() {
-  const userConfigPath = resolve(homedir(), '.config', 'opencode', 'opencode.json');
+  const userConfigPath = resolve(OPENCODE_CONFIG_DIR, 'opencode.json');
   if (!existsSync(userConfigPath)) return;
 
   try {
@@ -178,7 +202,8 @@ function readPluginRuntimeStatus() {
 export async function checkPluginLoaded(openCodeUrl, authHeaders, options = {}) {
   const checkedAt = new Date().toISOString();
   try {
-    const response = await fetch(`${openCodeUrl}/experimental/tool/ids`, {
+    const fetchPluginTools = options.fetch ?? fetch;
+    const response = await fetchPluginTools(`${openCodeUrl}/experimental/tool/ids`, {
       headers: { Accept: 'application/json', ...authHeaders },
       signal: AbortSignal.timeout(5000),
     });
@@ -191,24 +216,29 @@ export async function checkPluginLoaded(openCodeUrl, authHeaders, options = {}) 
       _pluginStatus = { loaded: false, reason: 'unexpected response', checkedAt };
       return _pluginStatus;
     }
-    const missing = REQUIRED_TOOLS.filter((t) => !ids.includes(t));
-    if (missing.length > 0) {
-      console.warn('[openchamber] plugin not fully loaded, missing tools:', missing);
+    const missingRequiredTools = REQUIRED_TOOLS.filter((tool) => !ids.includes(tool));
+    const missingOptionalTools = OPTIONAL_TOOLS.filter((tool) => !ids.includes(tool));
+    const availableTools = EXPECTED_TOOLS.filter((tool) => ids.includes(tool));
+    if (missingRequiredTools.length > 0) {
+      console.warn('[openchamber] plugin not fully loaded, missing tools:', missingRequiredTools);
       _pluginStatus = {
         loaded: false,
-        reason: `missing tools: ${missing.join(', ')}`,
-        missingTools: missing,
+        reason: `missing tools: ${missingRequiredTools.join(', ')}`,
+        tools: availableTools,
+        missingTools: missingRequiredTools,
         checkedAt,
       };
       return _pluginStatus;
     }
 
-    const runtimeStatus = readPluginRuntimeStatus();
+    const readRuntimeStatus = options.readRuntimeStatus ?? readPluginRuntimeStatus;
+    const runtimeStatus = readRuntimeStatus();
     if (!runtimeStatus) {
       _pluginStatus = {
         loaded: false,
         reason: 'missing runtime status',
-        tools: REQUIRED_TOOLS,
+        tools: availableTools,
+        ...(missingOptionalTools.length > 0 ? { missingTools: missingOptionalTools } : {}),
         checkedAt,
       };
       return _pluginStatus;
@@ -217,7 +247,8 @@ export async function checkPluginLoaded(openCodeUrl, authHeaders, options = {}) 
       _pluginStatus = {
         loaded: false,
         reason: 'unexpected plugin runtime status',
-        tools: REQUIRED_TOOLS,
+        tools: availableTools,
+        ...(missingOptionalTools.length > 0 ? { missingTools: missingOptionalTools } : {}),
         checkedAt,
         runtime: runtimeStatus,
       };
@@ -228,7 +259,8 @@ export async function checkPluginLoaded(openCodeUrl, authHeaders, options = {}) 
       _pluginStatus = {
         loaded: false,
         reason: runtimeFailureReason,
-        tools: REQUIRED_TOOLS,
+        tools: availableTools,
+        ...(missingOptionalTools.length > 0 ? { missingTools: missingOptionalTools } : {}),
         missingFeatures: getMissingRequiredPluginRuntimeFeatures(runtimeStatus),
         checkedAt,
         runtime: runtimeStatus,
@@ -238,8 +270,12 @@ export async function checkPluginLoaded(openCodeUrl, authHeaders, options = {}) 
 
     _pluginStatus = {
       loaded: true,
-      tools: REQUIRED_TOOLS,
-      features: runtimeStatus.features,
+      tools: availableTools,
+      ...(missingOptionalTools.length > 0 ? { missingTools: missingOptionalTools } : {}),
+      features: {
+        ...runtimeStatus.features,
+        artifactPublishing: missingOptionalTools.length === 0,
+      },
       checkedAt,
       runtime: {
         loadedAt: runtimeStatus.loadedAt,

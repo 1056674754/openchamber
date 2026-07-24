@@ -12,6 +12,7 @@ export type OpenChamberPluginStatus = {
 export type OpenChamberPluginStatusDecision =
     | { readonly kind: 'pending' }
     | { readonly kind: 'loaded' }
+    | { readonly kind: 'degraded'; readonly reason: string; readonly copyText: string }
     | { readonly kind: 'failed'; readonly reason: string; readonly copyText: string };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -76,6 +77,13 @@ export function resolveOpenChamberPluginStatusDecision(
         return { kind: 'pending' };
     }
     if (status.loaded && status.features?.liveSteer === true) {
+        if (status.missingTools && status.missingTools.length > 0) {
+            return {
+                kind: 'degraded',
+                reason: formatOpenChamberPluginStatusReason(status),
+                copyText: formatOpenChamberPluginStatusCopyText(status),
+            };
+        }
         return { kind: 'loaded' };
     }
     return {

@@ -24,6 +24,8 @@ This module provides OpenCode server integration utilities for the web server ru
 - `packages/web/server/lib/opencode/config-entity-routes.js`: route registration for agent/command/MCP config orchestration and reload semantics.
 - `packages/web/server/lib/opencode/plugins.js`: plugin config and plugin-directory data layer. Production calls resolve the active OpenCode config normally; tests and isolated consumers use `createPluginDataLayer({ configDir, customConfigPath })` so config ownership is explicit and cannot leak through process-global environment state.
 - `packages/web/server/lib/opencode/plugin-bootstrap.js` + `plugin-overlay.js`: install the first-party plugin under the `opencode-notifier` ownership basename and append it only to OpenChamber's managed config overlay. OMA recognizes that basename and disables its own OS notification hook for managed OpenCode, leaving Electron/OpenChamber as the single notification sender without changing standalone OpenCode behavior.
+  - Plugin bundles, overlays, and runtime status live under `OPENCHAMBER_DATA_DIR` when set.
+  - User plugin discovery and stale-entry cleanup use `OPENCODE_CONFIG_DIR` when set, so isolated runtimes do not read or mutate the default `~/.config/opencode`.
 - `packages/web/server/lib/opencode/snippets.js`: opencode-snippets-compatible snippet file CRUD, discovery, and hashtag expansion.
 - `packages/web/server/lib/opencode/cli-options.js`: CLI/environment option parsing for server startup arguments.
 - `packages/web/server/lib/opencode/core-routes.js`: server status/system routes, auth/access guard routes, and settings utility route registration.
@@ -36,6 +38,7 @@ This module provides OpenCode server integration utilities for the web server ru
 - `packages/web/server/lib/opencode/startup-pipeline-runtime.js`: server startup tail orchestration runtime for terminal/proxy/static/start-listen flow.
 - `packages/web/server/lib/opencode/server-utils-runtime.js`: shared server runtime utilities for OpenCode proxy wiring, OpenCode port/readiness helpers, and snapshot fetchers.
 - `packages/web/server/lib/opencode/openchamber-routes.js`: OpenChamber update, models metadata, and session unread state route registration.
+- `packages/web/server/lib/permission-auto-accept/runtime.js`: persisted server-side permission auto-accept policy and pending-permission reconciliation for scheduled/background sessions.
 - `packages/web/server/lib/opencode/pwa-manifest-routes.js`: PWA manifest route registration with recent-session shortcut resolution and short-lived caching.
 - `packages/web/server/lib/opencode/project-icon-routes.js`: project icon upload/read/discovery route registration and icon storage orchestration.
 - `packages/web/server/lib/opencode/skill-routes.js`: route registration for skill config CRUD, supporting files, and skills catalog scan/install flows.

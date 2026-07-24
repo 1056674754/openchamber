@@ -5,16 +5,15 @@ import { pathToFileURL } from 'node:url';
 import { parse as parseJsonc } from 'jsonc-parser';
 
 const OPENCHAMBER_PLUGIN_ID = '@openchamber/plugin';
-const OPENCODE_CONFIG_DIR = resolve(homedir(), '.config', 'opencode');
-const USER_CONFIG_CANDIDATES = [
-  resolve(OPENCODE_CONFIG_DIR, 'config.json'),
-  resolve(OPENCODE_CONFIG_DIR, 'opencode.json'),
-  resolve(OPENCODE_CONFIG_DIR, 'opencode.jsonc'),
-];
 
-function readUserConfigPlugins() {
+function readUserConfigPlugins(userConfigDir) {
   const plugins = [];
-  for (const configPath of USER_CONFIG_CANDIDATES) {
+  const configCandidates = [
+    resolve(userConfigDir, 'config.json'),
+    resolve(userConfigDir, 'opencode.json'),
+    resolve(userConfigDir, 'opencode.jsonc'),
+  ];
+  for (const configPath of configCandidates) {
     if (!existsSync(configPath)) continue;
     try {
       const config = parseJsonc(readFileSync(configPath, 'utf8'), [], { allowTrailingComma: true });
@@ -57,10 +56,17 @@ export function mergeOpenChamberPluginEntries(existingPlugins, openChamberPlugin
   return merged;
 }
 
-export function writeOpenChamberOverlay({ overlayDir, overlayFile, pluginEntry }) {
+export function writeOpenChamberOverlay({
+  overlayDir,
+  overlayFile,
+  pluginEntry,
+  userConfigDir = process.env.OPENCODE_CONFIG_DIR
+    ? resolve(process.env.OPENCODE_CONFIG_DIR)
+    : resolve(homedir(), '.config', 'opencode'),
+}) {
   const openChamberPlugin = pathToFileURL(pluginEntry).href;
   const overlay = {
-    plugin: mergeOpenChamberPluginEntries(readUserConfigPlugins(), openChamberPlugin),
+    plugin: mergeOpenChamberPluginEntries(readUserConfigPlugins(userConfigDir), openChamberPlugin),
   };
   mkdirSync(overlayDir, { recursive: true });
   writeFileSync(overlayFile, JSON.stringify(overlay, null, 2), 'utf8');

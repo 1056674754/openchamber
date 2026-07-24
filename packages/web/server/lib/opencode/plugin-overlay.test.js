@@ -1,6 +1,9 @@
 import { describe, expect, test } from 'bun:test';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
-import { mergeOpenChamberPluginEntries } from './plugin-overlay.js';
+import { mergeOpenChamberPluginEntries, writeOpenChamberOverlay } from './plugin-overlay.js';
 
 describe('OpenChamber plugin overlay entries', () => {
   test('preserves existing user plugins before appending OpenChamber', () => {
@@ -29,5 +32,36 @@ describe('OpenChamber plugin overlay entries', () => {
     ], openChamberPlugin);
 
     expect(merged).toEqual(['other-plugin', openChamberPlugin]);
+  });
+
+  test('reads plugin entries only from the explicit OpenCode config directory', async () => {
+    const rootDirectory = await mkdtemp(join(tmpdir(), 'openchamber-overlay-'));
+    const configDirectory = join(rootDirectory, 'opencode');
+    const overlayDirectory = join(rootDirectory, 'openchamber');
+    const overlayFile = join(overlayDirectory, 'opencode-overlay.json');
+    const pluginEntry = join(overlayDirectory, 'opencode-notifier');
+
+    try {
+      await mkdir(configDirectory, { recursive: true });
+      await writeFile(
+        join(configDirectory, 'opencode.json'),
+        JSON.stringify({ plugin: ['isolated-plugin'] }),
+        'utf8',
+      );
+
+      writeOpenChamberOverlay({
+        overlayDir: overlayDirectory,
+        overlayFile,
+        pluginEntry,
+        userConfigDir: configDirectory,
+      });
+
+      expect(JSON.parse(await readFile(overlayFile, 'utf8')).plugin).toEqual([
+        'isolated-plugin',
+        `file://${pluginEntry}`,
+      ]);
+    } finally {
+      await rm(rootDirectory, { recursive: true, force: true });
+    }
   });
 });

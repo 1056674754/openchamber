@@ -24,6 +24,21 @@ describe('OpenChamber plugin status decisions', () => {
         expect(resolveOpenChamberPluginStatusDecision(status!)).toEqual({ kind: 'loaded' });
     });
 
+    test('reports an artifact-only tool gap as degraded without disabling live steer', () => {
+        const status = normalizeOpenChamberPluginStatus({
+            loaded: true,
+            features: { liveSteer: true, imageFallback: true, artifactPublishing: false },
+            missingTools: ['publish_artifact'],
+        });
+
+        expect(status).not.toBeNull();
+        const decision = resolveOpenChamberPluginStatusDecision(status!);
+        expect(decision.kind).toBe('degraded');
+        expect(decision.kind === 'degraded' ? decision.reason : '').toBe(
+            'missing tools: publish_artifact',
+        );
+    });
+
     test('fails loaded=true payloads that do not prove live steer is active', () => {
         const status = normalizeOpenChamberPluginStatus({
             loaded: true,
