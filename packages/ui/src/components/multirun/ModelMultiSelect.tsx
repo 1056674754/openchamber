@@ -7,6 +7,7 @@ import { cn } from '@/lib/utils';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useModelLists } from '@/hooks/useModelLists';
+import { useModelPickerLayout } from '@/hooks/useModelPickerLayout';
 import { useI18n } from '@/lib/i18n';
 import { ModelPickerList, type ModelPickerEntry, type ModelPickerProvider } from '@/components/model-picker/ModelPickerList';
 
@@ -114,6 +115,12 @@ export const ModelMultiSelect: React.FC<ModelMultiSelectProps> = ({
   const toggleFavoriteModel = useUIStore((state) => state.toggleFavoriteModel);
   const isFavoriteModel = useUIStore((state) => state.isFavoriteModel);
   const { favoriteModelsList, recentModelsList, hiddenModels } = useModelLists();
+  const {
+    providerOrder,
+    collapsedSections,
+    toggleSectionCollapsed,
+    reorderProviders,
+  } = useModelPickerLayout();
   const [isOpen, setIsOpen] = React.useState(false);
   const [searchQuery, setSearchQuery] = React.useState('');
   const [availableHeight, setAvailableHeight] = React.useState<number | null>(null);
@@ -281,6 +288,12 @@ export const ModelMultiSelect: React.FC<ModelMultiSelectProps> = ({
                 maxHeightStyle={{ maxHeight: availableHeight ? `${availableHeight}px` : '300px' }}
                 stickyHeaders
                 tooltipsEnabled={isOpen}
+                collapsedSections={collapsedSections}
+                onToggleSectionCollapsed={toggleSectionCollapsed}
+                providerOrder={providerOrder}
+                onReorderProviders={reorderProviders}
+                reorderProviderAriaLabel={t('chat.modelControls.reorderProviderAria')}
+                reorderProviderTitle={t('chat.modelControls.reorderProviderTitle')}
                 isFavorite={(entry) => isFavoriteModel(entry.providerID, entry.modelID)}
                 onToggleFavorite={(entry) => toggleFavoriteModel(entry.providerID, entry.modelID)}
                 onEscape={() => {

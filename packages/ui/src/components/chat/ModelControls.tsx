@@ -32,7 +32,9 @@ import { useLatestRealUserMessage, useSessionMessagesResolved } from '@/sync/syn
 import { useSync } from '@/sync/use-sync';
 import { useUIStore } from '@/stores/useUIStore';
 import { useModelLists } from '@/hooks/useModelLists';
+import { useModelPickerLayout } from '@/hooks/useModelPickerLayout';
 import { useIsTextTruncated } from '@/hooks/useIsTextTruncated';
+import { sortProvidersByOrder } from '@/lib/modelPickerLayout';
 import { formatEffortLabel, getCycledPrimaryAgentName, type MobileControlsPanel } from './mobileControlsUtils';
 import { useI18n } from '@/lib/i18n';
 import { useOpenCodeReadiness } from '@/hooks/useOpenCodeReadiness';
@@ -515,13 +517,14 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     const closeMobilePanel = React.useCallback(() => setActiveMobilePanel(null), [setActiveMobilePanel]);
     const closeMobileTooltip = React.useCallback(() => setMobileTooltipOpen(null), []);
     const longPressTimerRef = React.useRef<NodeJS.Timeout | undefined>(undefined);
-    const [expandedMobileProviders, setExpandedMobileProviders] = React.useState<Set<string>>(() => {
-        const initial = new Set<string>();
-        if (currentProviderId) {
-            initial.add(currentProviderId);
-        }
-        return initial;
-    });
+    const {
+        providerOrder,
+        collapsedSections,
+        toggleSectionCollapsed,
+        reorderProviders,
+        isProviderExpanded,
+        toggleProviderExpanded,
+    } = useModelPickerLayout();
     // Use global state for model selector (allows Ctrl+M shortcut)
     const agentMenuOpen = isModelSelectorOpen;
     const setAgentMenuOpen = setModelSelectorOpen;
@@ -539,18 +542,6 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     const [pendingThinkingVariants, setPendingThinkingVariants] = React.useState<Map<string, string | undefined>>(new Map());
     const [adjustedThinkingModels, setAdjustedThinkingModels] = React.useState<Set<string>>(new Set());
     const [modelPickerRenderVersion, setModelPickerRenderVersion] = React.useState(0);
-
-    React.useEffect(() => {
-        if (activeMobilePanel === 'model') {
-            setExpandedMobileProviders(() => {
-                const initial = new Set<string>();
-                if (currentProviderId) {
-                    initial.add(currentProviderId);
-                }
-                return initial;
-            });
-        }
-    }, [activeMobilePanel, currentProviderId]);
 
     React.useEffect(() => {
         if (activeMobilePanel === null) {
@@ -1530,18 +1521,6 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         return name.charAt(0).toUpperCase() + name.slice(1);
     };
 
-    const toggleMobileProviderExpansion = React.useCallback((providerId: string) => {
-        setExpandedMobileProviders((prev) => {
-            const next = new Set(prev);
-            if (next.has(providerId)) {
-                next.delete(providerId);
-            } else {
-                next.add(providerId);
-            }
-            return next;
-        });
-    }, []);
-
     const handleLongPressStart = React.useCallback((type: 'model' | 'agent') => {
         if (longPressTimerRef.current) {
             clearTimeout(longPressTimerRef.current);
@@ -1813,7 +1792,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             providerModels: ProviderModel[];
             matchesProvider: boolean;
         }[] = [];
-        for (const provider of visibleProviders) {
+        for (const provider of sortProvidersByOrder(visibleProviders, providerOrder)) {
             const providerModels = Array.isArray(provider.models) ? provider.models : [];
             const matchesProvider = normalizedQuery.length === 0
                 ? true
@@ -2111,7 +2090,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                         }
 
                         const isActiveProvider = provider.id === currentProviderId;
-                        const isExpanded = expandedMobileProviders.has(provider.id) || normalizedQuery.length > 0;
+                        const isExpanded = isProviderExpanded(provider.id) || normalizedQuery.length > 0;
 
                          return (
                              <div key={provider.id} className="rounded-xl border border-border/40 bg-[var(--surface-elevated)] overflow-hidden">
@@ -2121,7 +2100,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                         if (normalizedQuery.length > 0) {
                                             return;
                                         }
-                                        toggleMobileProviderExpansion(provider.id);
+                                        toggleProviderExpanded(provider.id);
                                     }}
                                     className="flex w-full items-center justify-between gap-1.5 px-2 py-1.5 text-left"
                                     aria-expanded={isExpanded}
@@ -2587,6 +2566,12 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                 labels={modelPickerLabels}
                                 selectedModel={currentProviderId && currentModelId ? { providerID: currentProviderId, modelID: currentModelId } : null}
                                 hiddenModels={effectiveHiddenModels}
+                                collapsedSections={collapsedSections}
+                                onToggleSectionCollapsed={toggleSectionCollapsed}
+                                providerOrder={providerOrder}
+                                onReorderProviders={reorderProviders}
+                                reorderProviderAriaLabel={t('chat.modelControls.reorderProviderAria')}
+                                reorderProviderTitle={t('chat.modelControls.reorderProviderTitle')}
                                 onActiveKeyDown={handleModelPickerKeyDown}
                                 onActiveEntryChange={(entry) => { activeModelPickerEntryRef.current = entry; }}
                                 onVariantKey={handleThinkingVariantKey}

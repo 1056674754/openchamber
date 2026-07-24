@@ -8,6 +8,7 @@ import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { Icon } from '@/components/icon/Icon';
 import { useModelLists } from '@/hooks/useModelLists';
+import { useModelPickerLayout } from '@/hooks/useModelPickerLayout';
 import { useOpenCodeReadiness } from '@/hooks/useOpenCodeReadiness';
 import { useDeviceInfo } from '@/lib/device';
 import { useI18n } from '@/lib/i18n';
@@ -43,6 +44,12 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
     const isFavoriteModel = useUIStore((state) => state.isFavoriteModel);
     const addRecentModel = useUIStore((state) => state.addRecentModel);
     const { favoriteModelsList, recentModelsList } = useModelLists();
+    const {
+        providerOrder,
+        collapsedSections,
+        toggleSectionCollapsed,
+        reorderProviders,
+    } = useModelPickerLayout();
     const { isMobile: deviceIsMobile } = useDeviceInfo();
     const isActuallyMobile = isMobile || deviceIsMobile;
 
@@ -104,6 +111,12 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
             onSelectNone={handleSelectNone}
             onEscape={closePicker}
             tooltipsEnabled={isActuallyMobile ? isMobilePanelOpen : isDropdownOpen}
+            collapsedSections={collapsedSections}
+            onToggleSectionCollapsed={toggleSectionCollapsed}
+            providerOrder={providerOrder}
+            onReorderProviders={reorderProviders}
+            reorderProviderAriaLabel={t('chat.modelControls.reorderProviderAria')}
+            reorderProviderTitle={t('chat.modelControls.reorderProviderTitle')}
             isFavorite={(entry) => isFavoriteModel(entry.providerID, entry.modelID)}
             onToggleFavorite={(entry) => toggleFavoriteModel(entry.providerID, entry.modelID)}
         />

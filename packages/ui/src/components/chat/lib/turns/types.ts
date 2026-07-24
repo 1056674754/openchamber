@@ -114,10 +114,18 @@ export interface TurnGroupingContext {
     activityOwnerMessageId?: string | null;
     isFirstAssistantInTurn: boolean;
     isLastAssistantInTurn: boolean;
+    isLatestTurn?: boolean;
     isWorking: boolean;
     hasTools: boolean;
     hasReasoning: boolean;
     summaryBody?: string;
+    summaryDiffs?: Array<{
+        file?: string;
+        additions?: number;
+        deletions?: number;
+        patch?: string;
+        status?: string;
+    }>;
     activityParts?: TurnActivityRecord[];
     activityGroupSegments?: TurnActivityGroup[];
     headerMessageId?: string;

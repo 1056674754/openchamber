@@ -27,6 +27,7 @@ import { normalizeParts } from './message/partUtils';
 import { isProcessFoldTransitionActive } from './lib/scroll/processFoldViewport';
 import { getMessageListOverscan, shouldCompensateVirtualItemResize } from './lib/scroll/scrollIntent';
 import { useDeviceInfo } from '@/lib/device';
+import { listTurnSnapshotDiffs } from '@/lib/diff/turnSnapshotDiff';
 
 const MESSAGE_LIST_VIRTUALIZE_THRESHOLD = 5;
 const MESSAGE_LIST_AT_END_THRESHOLD_PX = 80;
@@ -800,14 +801,20 @@ const TurnBlock = React.memo(({
         const userCreatedAt = (turn.userMessage.info.time as { created?: number } | undefined)?.created;
         // OpenCode 1.4.0 moved variant from top-level to model.variant on UserMessage.
         // Prefer the new location, fall back to the legacy one for older servers.
-        const info = turn.userMessage.info as { variant?: unknown; model?: { variant?: unknown } } | undefined;
+        const info = turn.userMessage.info as {
+            variant?: unknown;
+            model?: { variant?: unknown };
+            summary?: { diffs?: unknown };
+        } | undefined;
         const rawVariant = info?.model?.variant ?? info?.variant;
         const userMessageVariant = typeof rawVariant === 'string' && rawVariant.trim().length > 0
             ? rawVariant
             : undefined;
+        const summaryDiffs = listTurnSnapshotDiffs(info?.summary?.diffs);
         return {
             turnId: turn.turnId,
             summaryBody: turn.summaryText,
+            summaryDiffs: summaryDiffs.length > 0 ? summaryDiffs : undefined,
             activityParts: visibleActivityParts,
             activityGroupSegments: visibleActivitySegments,
             headerMessageId: turn.headerMessageId,
@@ -849,6 +856,7 @@ const TurnBlock = React.memo(({
                     activityOwnerMessageId,
                     isFirstAssistantInTurn: isFirstAssistant,
                     isLastAssistantInTurn: isLastAssistant,
+                    isLatestTurn: isLastTurn,
                     isWorking: isLastTurn && sessionIsWorking && (
                         chatRenderMode === 'sorted'
                             ? hasAnchoredActivitySegment
@@ -858,6 +866,7 @@ const TurnBlock = React.memo(({
                     hasReasoning: turn.hasReasoning,
                     ...(shouldAttachFullTurnContext ? {
                         summaryBody: turnGroupingContextBase.summaryBody,
+                        summaryDiffs: turnGroupingContextBase.summaryDiffs,
                         activityParts: turnGroupingContextBase.activityParts,
                         activityGroupSegments: turnGroupingContextBase.activityGroupSegments,
                         headerMessageId: turnGroupingContextBase.headerMessageId,

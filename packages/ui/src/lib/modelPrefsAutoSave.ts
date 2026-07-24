@@ -1,12 +1,17 @@
 import { useUIStore } from '@/stores/useUIStore';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { isVSCodeRuntime } from '@/lib/desktop';
+import {
+  areModelPickerLayoutMapsEqual,
+  type ModelPickerLayoutByServerId,
+} from '@/lib/modelPickerLayout';
 
 type ModelRef = { providerID: string; modelID: string };
 type ModelPrefsPayload = {
   favoriteModels: ModelRef[];
   hiddenModels: ModelRef[];
   collapsedModelProviders: string[];
+  modelPickerLayoutByServerId: ModelPickerLayoutByServerId;
   recentModels: ModelRef[];
   recentAgents: string[];
   recentEfforts: Record<string, string[]>;
@@ -33,12 +38,25 @@ const recentEffortsEqual = (a: Record<string, string[]>, b: Record<string, strin
     && keys.every((key) => Array.isArray(b[key]) && stringsEqual(a[key], b[key]));
 };
 
+const cloneLayoutMap = (layoutByServerId: ModelPickerLayoutByServerId): ModelPickerLayoutByServerId => (
+  Object.fromEntries(
+    Object.entries(layoutByServerId).map(([serverId, layout]) => [
+      serverId,
+      {
+        providerOrder: layout.providerOrder.slice(),
+        collapsedProviders: layout.collapsedProviders.slice(),
+      },
+    ]),
+  )
+);
+
 const snapshotModelPrefs = (): ModelPrefsPayload => {
   const state = useUIStore.getState();
   return {
     favoriteModels: state.favoriteModels,
     hiddenModels: state.hiddenModels,
-    collapsedModelProviders: state.collapsedModelProviders,
+    collapsedModelProviders: [],
+    modelPickerLayoutByServerId: state.modelPickerLayoutByServerId,
     recentModels: state.recentModels,
     recentAgents: state.recentAgents,
     recentEfforts: state.recentEfforts,
@@ -49,6 +67,7 @@ const modelPrefsEqual = (a: ModelPrefsPayload, b: ModelPrefsPayload): boolean =>
   refsEqual(a.favoriteModels, b.favoriteModels)
   && refsEqual(a.hiddenModels, b.hiddenModels)
   && stringsEqual(a.collapsedModelProviders, b.collapsedModelProviders)
+  && areModelPickerLayoutMapsEqual(a.modelPickerLayoutByServerId, b.modelPickerLayoutByServerId)
   && refsEqual(a.recentModels, b.recentModels)
   && stringsEqual(a.recentAgents, b.recentAgents)
   && recentEffortsEqual(a.recentEfforts, b.recentEfforts)
@@ -58,6 +77,7 @@ const cloneModelPrefs = (prefs: ModelPrefsPayload): ModelPrefsPayload => ({
   favoriteModels: prefs.favoriteModels.slice(),
   hiddenModels: prefs.hiddenModels.slice(),
   collapsedModelProviders: prefs.collapsedModelProviders.slice(),
+  modelPickerLayoutByServerId: cloneLayoutMap(prefs.modelPickerLayoutByServerId),
   recentModels: prefs.recentModels.slice(),
   recentAgents: prefs.recentAgents.slice(),
   recentEfforts: Object.fromEntries(
@@ -105,7 +125,8 @@ export const startModelPrefsAutoSave = () => {
     const next: ModelPrefsPayload = {
       favoriteModels: state.favoriteModels,
       hiddenModels: state.hiddenModels,
-      collapsedModelProviders: state.collapsedModelProviders,
+      collapsedModelProviders: [],
+      modelPickerLayoutByServerId: state.modelPickerLayoutByServerId,
       recentModels: state.recentModels,
       recentAgents: state.recentAgents,
       recentEfforts: state.recentEfforts,
@@ -113,7 +134,8 @@ export const startModelPrefsAutoSave = () => {
     const prev: ModelPrefsPayload = {
       favoriteModels: prevState.favoriteModels,
       hiddenModels: prevState.hiddenModels,
-      collapsedModelProviders: prevState.collapsedModelProviders,
+      collapsedModelProviders: [],
+      modelPickerLayoutByServerId: prevState.modelPickerLayoutByServerId,
       recentModels: prevState.recentModels,
       recentAgents: prevState.recentAgents,
       recentEfforts: prevState.recentEfforts,

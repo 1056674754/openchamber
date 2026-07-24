@@ -9,6 +9,38 @@
   - v1.12.3 (`cafbff47`) → v1.12.4 (`4a263c1`), 2026-06-11 release-note feature inventory added; commit/file diff pending
 **Method**: 手工逐功能点移植，禁止 git merge/force
 
+## Work Item 管理
+
+- **GitLab 项目**: `https://coding.s-s.city/songsong/openchamber`
+- **总览 Work Item**: `https://coding.s-s.city/songsong/openchamber/-/issues/1`
+- GitLab 是未完成能力、优先级、风险、阻塞关系和版本 milestone 的权威执行 backlog；本文继续作为逐 commit 审计、架构判断和验证证据账本。
+- Agent 双源规则见 [`AGENTS.md`](../AGENTS.md)「Migration backlog (dual source of truth)」。
+- 已完成、fork 已等价、明确不适用和纯上游维护项不重复创建待办。每个延期或新发现的运行时能力必须对应一个 GitLab Work Item。
+- 关闭 Work Item 前必须完成实现、定向测试、全仓检查、对应运行面的实际 QA，并把验证证据更新回本文。
+- Native mobile / Android 从上游 `v1.13.9` 开始作为跨版本产品轨道管理；`v1.16.2` 的 APK/AAB 区分只是该轨道的后续更新器修复，不再错误归类为 1.16 新功能。
+
+### 同步清单
+
+完成一个 Work Item 后，按顺序做完再关闭：
+
+1. 本文对应功能行改为 ✅，并链到该 WI（`/-/work_items/<n>`）。
+2. GitLab：加 `status::done`、close issue，附实现/验证 note。
+3. 总览 [#1](https://coding.s-s.city/songsong/openchamber/-/issues/1) checklist 勾选该条目。
+
+新延期 / 新发现上游运行时能力时：
+
+1. 先在 GitLab 建 WI（milestone + labels），并挂到 [#1](https://coding.s-s.city/songsong/openchamber/-/issues/1)。
+2. 再在本文记 ⏸️ / 🟡 / 🟠 等状态，并链到该 WI。
+3. 不为本地未提交 WIP 批量建 issue；只有已判定延期的上游运行时能力才进 backlog。
+
+### 元任务 [#30](https://coding.s-s.city/songsong/openchamber/-/work_items/30)
+
+[#30](https://coding.s-s.city/songsong/openchamber/-/work_items/30) 是流程收口项：固化 GitLab ↔ 本文双源规则，而不是常驻 open blocker。关闭后靠 `AGENTS.md` 与本节清单持续遵守；后续同步不再依赖 #30 保持打开。
+
+| 项 | 状态 | 证据 |
+|---|---|---|
+| GitLab backlog 集成与文档同步 | ✅ 已收口；Work Item [#30](https://coding.s-s.city/songsong/openchamber/-/work_items/30) 已关闭 | `AGENTS.md` 写入 dual-source 规则；本节补充同步清单；MERGE 延期行交叉链接 #6/#7/#9–#12/#14–#19/#23–#26/#29/#31/#32 等；已完成项 #3/#5/#13/#20/#21/#22 与总览 [#1](https://coding.s-s.city/songsong/openchamber/-/issues/1) checklist 对齐。无产品运行时代码改动 |
+
 ---
 
 ## v1.12.0 — 已移植功能
@@ -744,7 +776,7 @@ Phase 5 — 🔴 Markdown/Shiki 重写 (#1+#2): 独立 milestone，需迁移 for
 | `e88afff2` | Chat/Performance: 长会话和大 session list streaming 更顺 | 47 files, +3167/-1828；chat streaming、turn projection cache、sidebar memo、sync stale guard、history preload | 🔴 高风险：不能整包拿，需拆成 chat/sidebar/sync 三个 milestone |
 | `fefad721` | Chat: assistant 段落间距恢复 | `index.css` + design token，小 CSS 修复 | 🟢 低风险 |
 | `5e8fe1ec` | Chat: streamed response 末尾不再偶发截断 | `event-pipeline.ts` + 测试；`message.part.updated` 作为 delta coalescing barrier | 🟢 低风险，高价值 |
-| `30b5cf14` | Files: HTML/image/PDF preview 不再 50 秒后 auth required | `runtime-auth.ts` + `FilesView.tsx`，官方新增 proactive token refresh | 🟡 中风险：fork 当前无 `runtime-auth.ts`，需按本地预览鉴权适配 |
+| `30b5cf14` | Files: HTML/image/PDF preview 不再 50 秒后 auth required | `runtime-auth.ts` + `FilesView.tsx`，官方新增 proactive token refresh | ✅ fork 架构等价；Work Item [#3](https://coding.s-s.city/songsong/openchamber/-/work_items/3) 已关闭。fork 不存在约 50 秒的 `oc_url_token` 生命周期：Web/remote 图片通过同源 `/api/fs/raw` 和 UI Session cookie，HTML 使用已读取内容的 `srcDoc`，Desktop 图片使用 data URL；不引入无调用方的 token scheduler |
 | `c051409e` | Diff: line wrap off 时 header/横向滚动不溢出 | `DiffView.tsx` 2 行级布局修复 | 🟢 低风险 |
 | `bbc89a65` | release v1.13.2 | version/changelog | release-only，发布收尾再处理 |
 
@@ -771,7 +803,7 @@ Phase 5 — 🔴 Markdown/Shiki 重写 (#1+#2): 独立 milestone，需迁移 for
 
 | 批次 | 内容 | 处理方式 |
 |---|---|---|
-| 第二批 | Files preview token 续期 (`30b5cf14`) | 先梳理 fork 当前 `/api/fs/raw` 和 preview 鉴权，再按本地结构实现 proactive refresh |
+| 第二批 | Files preview token 续期 (`30b5cf14`) | ✅ 审计完成：上游短命 URL token 模型不适用于 fork；`/api/fs/raw` 显式目录、preview proxy 认证参数重写和 HTML preview 导航共 24 条定向测试通过 |
 | 第三批 | Startup config 非阻塞 (`0542bcfc`) | 针对 `useConfigStore` / `client` / `bootstrap` 做逐段 diff，重点保护手动 model 和目录 model |
 | 独立 milestone | Chat/sidebar streaming 性能大改 (`e88afff2`) | 不整包合并；拆 chat tail isolation、sidebar row memo、sync stale guard 三块分别测试 |
 
@@ -827,10 +859,10 @@ Phase 5 — 🔴 Markdown/Shiki 重写 (#1+#2): 独立 milestone，需迁移 for
 | VS Code Insiders (`c8761951`) | ✅ 已移植 | Open In app registry 已加入 `Visual Studio Code - Insiders`，沿用现有 installed-app scan、icon、selection persistence 和 Electron `open -a` fallback |
 | Windows drive casing (`39c4bbd4`) | ✅ 已按多实例架构移植 | 共享规范化已进入 project/session/config/worktree/child-store 权威键；只统一 Windows 首位盘符，不折叠 POSIX 大小写，`serverId` 分域保持不变 |
 | Agent YAML frontmatter preservation (`e9193876`) | ✅ 已移植 | UI 不再构造 undefined description/scope；web 与 VS Code 核心更新器均跳过 undefined，null 删除语义保持不变；project `.md` round-trip tests 覆盖自定义字段 |
-| Tool result/JSON summary、Mermaid zoom、code line number/wrap、Last turn diff | 🟡 部分完成 | code line number/wrap 已适配本地 `MarkdownRendererImpl`；其余沿用现有 JsonTreeViewer、Mermaid fork 修复和 turn projection，不能直接换掉 Markdown/MessageBody/turn 模型 |
+| Tool result/JSON summary、Mermaid zoom、code line number/wrap、Last turn diff | 🟡 部分完成 | Last-turn Diff [#13](https://coding.s-s.city/songsong/openchamber/-/work_items/13) 与 Navigable JSON [#14](https://coding.s-s.city/songsong/openchamber/-/work_items/14) 已关闭；code line number/wrap 已适配本地 `MarkdownRendererImpl`；Mermaid 沿用现有 fork，不能直接换掉 Markdown/MessageBody |
 | Project default model / project sort / command palette project search | 🟡 部分完成 | project sort 与 Command Palette 项目搜索已按唯一 project ID、`serverId + directory` 适配；project default model 仍需独立按实例隔离，不能引入全局 active-project fallback |
-| Server-persisted permission auto-accept (`6231375b`) | 🟠 独立高风险 | 本地已有 UI store、draft intent、subagent inheritance和 server mirror，但 server 只保存进程内 Set；重启持久化、app 关闭后自动响应和多 server ownership 尚不等价 |
-| Session goals (`56cf5e29`) | 🔴 独立 milestone | 73 files / +3330，包含 server loop、Small Model audit、scheduled task、Plan、notifications、persistence、restart recovery；本 fork 还没完成 Small Model 地基，不能先套 UI 按钮 |
+| Server-persisted permission auto-accept (`6231375b`) | 🟠 独立高风险 | 本地已有 UI store、draft intent、subagent inheritance和 server mirror，但 server 只保存进程内 Set；重启持久化、app 关闭后自动响应和多 server ownership 尚不等价。无独立 WI：继续作为 Goals/权限相关后续发现项跟踪，确认延期时再建 WI |
+| Session goals (`56cf5e29`) | 🔴 独立 milestone；Work Item [#29](https://coding.s-s.city/songsong/openchamber/-/work_items/29) | 73 files / +3330，包含 server loop、Small Model audit、scheduled task、Plan、notifications、persistence、restart recovery；本 fork 还没完成 Small Model 地基，不能先套 UI 按钮 |
 | Direct subagent prompting | ✅ 已移植 | Chat 设置新增默认关闭的显式开关；子会话按自身 `parentID` 识别，不依赖父会话是否已载入，Parent 返回入口保留。右侧嵌入 chat 通过同源、已登记 frame 校验的双向桥实时同步；Web/Desktop 设置 API、启动 hydration 与服务端 boolean sanitizer 已接入 |
 | Local Host spoof protection | ✅ 已移植 | tunnel auth 不再只信任 `Host: localhost`；Host 必须是 localhost/private/loopback 且真实 socket 地址同时为 private/loopback，配置中的公开 tunnel host 仍优先识别为 tunnel。控制器级测试覆盖远端伪造 Host |
 | Notification reliability | ✅ 已移植 | 父会话判断已从可能受分页影响的全量 Session 列表改为带 directory 的单 Session 查询，main/null 结果也进入短期缓存；`session.idle` 可补发 completion，`session.error` 规范化进入错误通知并按 Session 冷却去重。focused runtime 测试覆盖子会话模板/抑制、idle fallback 与 error fallback |
@@ -838,7 +870,7 @@ Phase 5 — 🔴 Markdown/Shiki 重写 (#1+#2): 独立 milestone，需迁移 for
 | Sidebar project sorting | ✅ 已移植 | 侧栏菜单提供 `manual / A-Z / Z-A / date-added / recent`，持久化 display store；所有 project sections 在分组前统一使用同一顺序。默认 `manual` 保留 fork 现有手工排序，只有 manual 模式允许拖拽，project pin 继续高于所选排序规则；无自定义标签时沿官方规则使用完整 path 排序 |
 | Pinned Session 空刷新保护 | ✅ fork 已有更强等价实现 | 全局 pin 由独立 `oc.sessions.pinned` Zustand store 持久化，项目内 pin 与两类排序也使用独立 storage；Session snapshot 的空成功或暂时缺项只替换列表数据，不会清空 pin。现有 store tests 覆盖持久化、rehydrate、损坏数据和跨 tab 同步 |
 | Chat visual settings 分组 | ✅ 已按 fork 设置项适配 | 保留本 fork 的 queue/steer、multi-run、diff、自动折叠 thinking 等额外设置，只为现有 Chat 设置加入“会话辅助 / 推理 / 消息外观 / 工具和文件 / 输入框”语义标题；未复制官方 Goals、recap 等尚未落地的控件，8 个 locale 同步 |
-| Private relay / pairing v2 / native mobile | 🔴 不合 | 与本 fork DIY remote instances/sidebar、认证、SSE proxy 和无 `packages/mobile` 的现状冲突；除非另立 remote transport 项目，不进入普通迁移批次 |
+| Private relay / pairing v2 / native mobile | 🔴 不合；Work Items [#16](https://coding.s-s.city/songsong/openchamber/-/work_items/16) / [#9](https://coding.s-s.city/songsong/openchamber/-/work_items/9) | 与本 fork DIY remote instances/sidebar、认证、SSE proxy 和无 `packages/mobile` 的现状冲突；除非另立 remote transport 项目，不进入普通迁移批次 |
 | OpenCode Go quota / Codex reset windows | ✅ 已移植 | 新增独立 credential store/route/provider、active-instance UI 和 VS Code bridge parity；Codex 两个窗口均按 `limit_window_seconds` 生成标签，不再固定假设 5h/weekly |
 
 ### 本地已有或部分覆盖
@@ -980,9 +1012,9 @@ Phase 5 — 🔴 Markdown/Shiki 重写 (#1+#2): 独立 milestone，需迁移 for
 | 新 Session 严格留在所选项目，包含嵌套项目 | ✅ 已校准 | 新建发送继续冻结 `selectedProjectId + directory + serverId`；通用项目解析改为先匹配显式注册的最长项目路径，再回退到 worktree ownership，避免嵌套子项目被父项目 worktree 吞掉；新增 remote server 回归测试 |
 | 子智能体在侧栏打开并返回 Parent | ✅ 已有 fork 实现 | Task 卡通过 `openContextChat` 打开右侧 chat tab，`TaskSessionMaterializer` 按 child/parent `serverId` 和 directory 同步会话；嵌入会话显示 Parent 按钮并保持只读，不引入官方单实例 iframe 导航状态 |
 | Shell 模式卡片实时状态和输出 | ✅ 已完成 | 本地已有 optimistic `/shell` 卡、Bash bridge 折叠、实时 output/status 合并、展开/复制 UI；补齐 memo comparator 对 `shellAction.command/output/status` 的比较，确保 running、流式输出和 completed 变化触发重绘 |
-| Android 更新器区分 APK/AAB | ⏸️ 当前不适用 | 官方补丁只在 `appType=mobile-capacitor + platform=android` 时解析 GitHub Release APK；本 fork 没有 `packages/mobile`/Capacitor runtime，也没有该调用方。暂不加入无调用方的更新分支，待 native mobile milestone 一并移植 |
+| Android 更新器区分 APK/AAB | ⏸️ 当前不适用；Work Item [#9](https://coding.s-s.city/songsong/openchamber/-/work_items/9) | 官方补丁只在 `appType=mobile-capacitor + platform=android` 时解析 GitHub Release APK；本 fork 没有 `packages/mobile`/Capacitor runtime，也没有该调用方。暂不加入无调用方的更新分支，待 native mobile milestone 一并移植 |
 | VS Code 每 Session Autoaccept 持久化 | ✅ 已按 fork 架构移植 | 保留 fork 的 Web/Desktop server mirror、子会话继承和多实例权限路由；VS Code extension `globalState` 作为权威策略并在 sidebar/editor/agent-manager Webview 间广播。首次升级会迁移旧 local policy；缺失子会话按通知携带的 `directory + serverId` 补取父链，权限回复使用同一显式目标并做 0/250/1000ms 有界重试 |
-| Small Model 环境变量/文件密钥 + Gemini thinking | ⏸️ 等待 Small Model 基础 milestone | 1.16.2 这两项是完整 `small-model/call.js` 的后续修复；本 fork 尚无 `/api/small-model`、resolver、provider credential dispatch、settings 或 consumer。官方基础模块约 1.6k 行并跨 36 个 server/UI/VS Code 文件；不先引入服务端密钥读取死代码，按批次 H 先落 capability + settings + 一个真实 consumer 时一并带入 `{env:NAME}`、`{file:path}` 和 Gemini 3 `thinkingLevel` |
+| Small Model 环境变量/文件密钥 + Gemini thinking | ⏸️ 等待 Small Model 基础 milestone；Work Item [#12](https://coding.s-s.city/songsong/openchamber/-/work_items/12) | 1.16.2 这两项是完整 `small-model/call.js` 的后续修复；本 fork 尚无 `/api/small-model`、resolver、provider credential dispatch、settings 或 consumer。官方基础模块约 1.6k 行并跨 36 个 server/UI/VS Code 文件；不先引入服务端密钥读取死代码，按批次 H 先落 capability + settings + 一个真实 consumer 时一并带入 `{env:NAME}`、`{file:path}` 和 Gemini 3 `thinkingLevel` |
 | 嵌入侧栏子任务原地导航 | ✅ 已按多实例架构移植 | 抽取稳定 iframe 身份与锚点 Session helper；嵌入 Chat 打开子任务时在当前 iframe 内切换，router 不改写 `ocPanel/sessionId/directory/readOnly`，bootstrap 不把孙级任务拉回锚点。Parent 只在钻取后出现并按 session registry 保留目标 `serverId`；主聊天、移动端、VS Code 和普通右侧开新 tab 行为保持不变，纯 helper 回归测试在每个用例内显式恢复 window，以兼容本仓库精简的 Bun 测试类型声明 |
 | Quota 凭据保存提示本地化 | ✅ fork 已等价 | 上游为通用 `QuotaCredentials` 增加 provider 插值；本 fork 当前只有专用 `OpenCodeGoCredentials`，保存提示已使用 8 套 locale 的专用 key，不存在英文硬编码或 provider 混淆，无需把单 provider 组件泛化 |
 | 新 Session 缺 directory 时的项目路由 | ✅ fork 已有更强实现 | `createSession` 强制显式 `directoryOverride`，按目标 `serverId` 选择 client，并以服务端 directory 优先、显式目录兜底注册 session routing；嵌套项目解析也已改为注册项目最长路径优先，不会回退到可变全局目录 |
@@ -996,16 +1028,16 @@ Phase 5 — 🔴 Markdown/Shiki 重写 (#1+#2): 独立 milestone，需迁移 for
 |---|---|---|
 | Desktop Prompt Navigator rail | ✅ 已补齐社区完整交互 | 已对齐 v1.16.2 的整条 gutter 命中、边缘轮播、30 刻度窗口、8 行虚拟预览、全 Prompt 键盘/滚轮遍历、prepend 索引保持、窄窗口避让、渐隐遮罩与邻近刻度波形；rail 仅在桌面 Web/Electron、非展开输入且至少 2 条真实 Prompt 时显示，VS Code 与移动端隐藏，隐藏时关闭键盘面板。HelpDialog、Chat 设置开关和快捷键自定义列表均按官方规则在 VS Code 过滤无效入口；非 VS Code 设置仍可同步桌面偏好。HelpDialog 已接入 `mod+alt+p`，8 套现有 locale 使用社区文案。保留 fork 的 synthetic/Shell 过滤、稳定预览缓存和 `scrollToTurnId(..., { behavior: 'auto' })` 滚动边界，避免覆盖 multi-instance 上下文与重新引入聊天滚动跳动；简化版遗留且无调用方的居中窗口 helper/test 已删除。模型 4 项与 settings 19 项测试通过，改动文件 ESLint、docs validation、全 workspace type-check/build 通过；隔离真实组件在 1280/768/375 验证边缘轮播、面板滚轮、前插 12 条后的 Prompt 身份保持、`End + Enter` 选到第 48 条、28px/12px gutter 和移动端隐藏，最终两路只读审阅均以 0.98 高置信 PASS。全量 lint 仅剩并行 `sync/retry.ts:87` 的 `prefer-const`，不属于本批且未覆盖 |
 | Sidebar Session ownership 性能索引 | ✅ fork 已等价且多实例更强 | `useProjectSessionLists` 已一次建立 `sessionById`、direct/tree project cache 和 project buckets；全局 store 维护 `sessionsByDirectory` 与 status Map，SessionSidebar 另有 remote server、嵌套项目、Global Pinned 和 worktree 索引。官方单实例 `sessionOwnership.ts` 不能覆盖这些结构，不再重复引入第二套 owner source |
-| Small Model 自定义 OpenAI provider dispatch | ⏸️ 随 Small Model 基础批次 | 与已有“环境变量/文件密钥 + Gemini thinking”同属尚未落地的 small-model runtime；必须一次带入 provider credential resolver、capability、settings 和至少一个真实 consumer，不能只复制后续修复形成无调用方服务 |
-| Linux AppImage window controls / updater polish | ⏸️ Linux 发行批次 | 当前内部发行和真实 QA 均为 macOS Developer ID + notarization；AppImage 标题栏、安装检测和 Linux 更新文案不影响现有 runtime。保留官方差异清单，建立 Linux 构建与安装 QA 后再移植 |
+| Small Model 自定义 OpenAI provider dispatch | ⏸️ 随 Small Model 基础批次；Work Item [#12](https://coding.s-s.city/songsong/openchamber/-/work_items/12) | 与已有“环境变量/文件密钥 + Gemini thinking”同属尚未落地的 small-model runtime；必须一次带入 provider credential resolver、capability、settings 和至少一个真实 consumer，不能只复制后续修复形成无调用方服务 |
+| Linux AppImage window controls / updater polish | ⏸️ Linux 发行批次；Work Item [#32](https://coding.s-s.city/songsong/openchamber/-/work_items/32) | 当前内部发行和真实 QA 均为 macOS Developer ID + notarization；AppImage 标题栏、安装检测和 Linux 更新文案不影响现有 runtime。保留官方差异清单，建立 Linux 构建与安装 QA 后再移植 |
 | Quota toast / Shell 状态与输出 / Task 权威绑定 | ✅ 已完成 | Quota 已有专用本地化；Shell optimistic card 与流式状态已补 comparator；Task 已移除时间/状态猜测并只消费明确 child Session ID |
 | 删除 Share Opinion sidebar prompt | ✅ fork 无对应 surface | 当前 sidebar、footer、设置与 i18n 均不存在 `ShareOpinionDialog` 或 opinion CTA，无需删除不存在的社区推广入口 |
-| Session goal child-activity gate / evaluation diagnostics | ➖ 基础功能尚未移植 | fork 尚无 `session-goal` runtime 和 Small Model audit consumer；不能只拿 child busy gate 或诊断字段。后续 Goal milestone 必须从第一版就按目标 Session 的 `serverId + directory` 拉 authoritative parent/children status，并记录 evaluation provider/model |
+| Session goal child-activity gate / evaluation diagnostics | ➖ 基础功能尚未移植；Work Item [#29](https://coding.s-s.city/songsong/openchamber/-/work_items/29) | fork 尚无 `session-goal` runtime 和 Small Model audit consumer；不能只拿 child busy gate 或诊断字段。后续 Goal milestone 必须从第一版就按目标 Session 的 `serverId + directory` 拉 authoritative parent/children status，并记录 evaluation provider/model |
 | Chat input 与 Editor font size 解耦 | ✅ fork 已等价 | `editorFontSize` 仅用于 FilesView CodeMirror theme；ChatInput 使用聊天 typography/token，不读取 editor font setting，因此不存在官方修复的输入字号串联 |
 | 新 Session draft 所选项目 / 创建失败恢复 | ✅ 已完成 | selected project、directory、serverId 和完整输入/附件/inline drafts 均在 draft snapshot 中恢复，覆盖官方两个小修 |
-| 固定消息跨 compaction 恢复 | ⏸️ 独立上下文安全批次 | 官方不是本地收藏：它把 message ID 写入 Session metadata，监听 `session.compacted`，回读旧消息后自动发送 synthetic prompt。必须先定义每个 pinned entry 与注入请求的 `serverId + directory + sessionId`，处理部分消息已丢失、重复 compaction、queue/steer 并发和远程实例，不能复用全局当前目录 |
+| 固定消息跨 compaction 恢复 | ⏸️ 独立上下文安全批次；Work Item [#18](https://coding.s-s.city/songsong/openchamber/-/work_items/18) | 官方不是本地收藏：它把 message ID 写入 Session metadata，监听 `session.compacted`，回读旧消息后自动发送 synthetic prompt。必须先定义每个 pinned entry 与注入请求的 `serverId + directory + sessionId`，处理部分消息已丢失、重复 compaction、queue/steer 并发和远程实例，不能复用全局当前目录 |
 | VS Code Autoaccept / missing-directory project routing | ✅ 已完成 | 已按 VS Code `globalState`、父链继承和显式多实例权限目标移植；新 Session 路由以服务端 directory 优先、冻结目录兜底并按最长注册项目匹配 |
-| Terminal runtime refactor + mobile workspace | ⏸️ 独立 Terminal/mobile 批次 | 官方替换 replay buffer、shell/theme/history 协议并新增 mobile workspace；fork 已深改 ghostty-web、context terminal、SSH forward 和 server-scoped terminal store。需先做协议兼容矩阵，不能覆盖现有 terminal runtime |
+| Terminal runtime refactor + mobile workspace | ⏸️ 独立 Terminal/mobile 批次；Work Item [#19](https://coding.s-s.city/songsong/openchamber/-/work_items/19) | 官方替换 replay buffer、shell/theme/history 协议并新增 mobile workspace；fork 已深改 ghostty-web、context terminal、SSH forward 和 server-scoped terminal store。需先做协议兼容矩阵，不能覆盖现有 terminal runtime |
 | Project action auto-discover tooltip/icon | ✅ 核心能力已有，视觉微调暂缓 | fork 已有自动检测 dev server、实时终端输出 URL、Preview 自动打开、等待状态、停止和多 server terminal 路由；当前 search icon 与动态 aria-label 已提供语义，官方 scan icon/tooltip 仅视觉微调，待 Terminal 批次统一处理 |
 | Settings layout 标准化 + AgentPermissionsEditor 抽取 | ✅ 功能已有，布局不覆盖 | Agent permission 的 allow/ask/deny、pattern、继承和序列化已在 fork AgentsPage；Settings 正在做 remote-instance wiring，官方大规模单实例页面重排会覆盖 fork 的可见性和路由。继续按页面逐项迁移功能，不机械替换 layout |
 | Chat/sidebar/mobile shadows | ➖ 不移植纯视觉差异 | 不为版本号同步引入独立阴影；遵循 fork 现有 theme token 和密度，待对应 surface 有明确设计目标时统一调整 |
@@ -1014,6 +1046,44 @@ Phase 5 — 🔴 Markdown/Shiki 重写 (#1+#2): 独立 milestone，需迁移 for
 | Virtual scroll clamp / SDK 1.18.3 | ✅ 已超过官方基线 | virtual-core 3.17.3 clamp patch 与历史滚动验证已完成；manifest 为 `^1.17.9`，lock 实际解析 SDK `1.18.4`，高于官方 1.18.3。嵌入 OpenCode `1.18.4-sscity` 仍是独立发行产物 |
 
 本批验证：Task identity、scroll spy 与 embedded session chat 共 8 条测试通过；全 workspace `type-check`、`lint`、`build` 通过；Electron main 语法检查通过。运行驱动确认阅读线中部选择第二轮、物理底部选择最后一轮、Task live metadata 优先且无明确 ID 时不生成值；deep-link dispatch 保留 Session/Host 并已不存在 Project 分支。未启动、终止或替换 `/Applications/OpenChamber.app` 与任何 OpenCode 进程。
+
+### v1.16.3 第一批审计与兼容小修（2026-07-23）
+
+官方 `v1.16.2..v1.16.3` 共 46 个提交；本轮不按 tag 整包覆盖，按 fork 的多实例侧栏、消息投影和 managed OpenCode 生命周期边界逐项手工移植。遇到并行修改时只补目标逻辑，不替换整文件。
+
+| 官方功能/修复 | 状态 | Fork 处理 |
+|---|---|---|
+| Mobile Web Terminal hidden input 自动聚焦 | ✅ 已移植并验证 | `TerminalView` 在可见时始终把 `autoFocus` 传给 terminal viewport，触屏输入 overlay 不再因 mobile 判定而失去首次聚焦；不改变 ghostty touch scroll、SSH terminal 或 server-scoped tab 状态 |
+| Cursor / VS Code `postMessage` 空对象崩溃 | ✅ 已按 fork 结构移植并验证 | 官方改 `ChatContainer`，fork 的嵌入设置同步位于 `App`；现在要求真实 parent frame、校验 `event.source` 并缓存 parent。VS Code bridge 在 `acquireVsCodeApi()` 缺失/返回空时使用只告警一次的无数据日志 fallback，SSE 回调在 panel 已释放时不再直接解引用 |
+| 项目排序默认 manual 的旧偏好迁移 | ✅ 已移植并验证 | fork 已默认 `manual`，但此前没有 persist version；新增只把旧的 `recent` 默认迁到 `manual` 的 v1 migration，保留用户显式 `a-z`、`z-a` 和 `date-added`，不带入官方对 display mode 的历史迁移 |
+| Permission Card 隐藏重复 bash pattern | ✅ 已移植并验证 | bash/shell/shell_command 已单独渲染 command 时，从 patterns 展示列表删除完全相同的一项；不同 wildcard/pattern 继续显示 |
+| `/plan-feature`、`/debug`、`/weigh` 强制用 Question tool | ✅ 已移植并验证 | 只补 fork 实际存在的三组 magic prompt；不新增官方不存在于本 fork 的 Goal prompt，也不对自然语言 prompt 写脆弱字符串测试 |
+| Meta typography 像素取整 | ✅ 已移植并验证 | UI header/label/meta/micro 使用 `round(1.45em, 1px)`，避免非整数 line-height 让小图标在状态更新时上下抖动；字号与 theme token 不变 |
+| Project action 打开 terminal 不切主 Tab | ✅ fork 已等价 | 当前 `ProjectActionsButton` 只打开底部 terminal 并切 terminal 内部 tab，没有调用 `setActiveMainTab('terminal')` |
+| Active assistant model 显示 | ✅ fork 已等价 | 当前 status row 已从运行中的 assistant/message metadata 解析并展示 provider/model；不回退到可变的 composer 当前选择 |
+| FilesView 延迟焦点抢回旧文件 | ✅ 已移植并通过静态验证 | pending focus 只对当前仍选中的目标文件生效，不再在异步加载后把用户切走的 tab 重新选回；preview/error/image 无 CodeMirror 时也会消费请求，避免后续状态变化重复触发。需随下次隔离桌面包补一次“打开文件后立即切换 tab”的交互 QA |
+| PR summary 映射回 sidebar directory/branch | ✅ 已移植并验证；Work Item [#20](https://coding.s-s.city/songsong/openchamber/-/work_items/20) 已关闭 | `usePrVisualSummaryByKeys` 继续使用规范化 GitHub lookup key；收集 sidebar group 时同时保留 lookup key 到 `${directory}::${branch}` 展示 key 的映射，渲染前显式转换并跳过已失效条目。未改变多实例项目归属、GitHub client 或 PR 刷新目标路由 |
+| VS Code runtime API 注册前识别 workspace | ✅ 已移植并验证；Work Item [#21](https://coding.s-s.city/songsong/openchamber/-/work_items/21) 已关闭 | 新增独立 runtime detector，同时读取 extension host 注入的 `__VSCODE_CONFIG__` 与已注册 runtime API；project store 在静态 import 阶段即可锁定 VS Code workspace，不会短暂按普通 Web 初始化。保留 fork 当前单 workspace、无远程项目写入的 VS Code 约束 |
+| Cursor quota token 标签本地化 | ➖ 当前 surface 不存在 | fork 没有官方通用 `QuotaCredentials` 组件；OpenCode Go 与 subscription quota 使用各自本地化 surface，不为 Cursor 凭据造无调用方表单 |
+| Parent Session bootstrap recovery / session loading overhaul | 🟠 独立 sync 批次；Work Item [#23](https://coding.s-s.city/songsong/openchamber/-/work_items/23) | 官方包含 197 文件的 runtime isolation、cache ownership、authoritative deletion 和 sidebar cleanup；与 fork 当前并行的多实例 sidebar/global store 修改重叠，必须逐 helper 对照，禁止覆盖 |
+| Worktree stale `index.lock` 恢复 | ✅ Web / VS Code 均已移植并验证；Work Item [#22](https://coding.s-s.city/songsong/openchamber/-/work_items/22) 已关闭 | 两端 bootstrap 都先重试两次，再比较锁文件 `dev/ino/size/mtime`，只有第三次仍失败且锁身份完全不变才删除并重试；变化中的锁绝不删除。两端均保留 Git error 文本识别和 worktree `.git` 文件 fallback。VS Code 抽出无 extension-host 依赖的 `git-lock-recovery-runtime`，真实临时仓库/worktree 测试覆盖“稳定旧锁恢复”与“变化活锁保留” |
+| Session 移动到新 worktree | 🟠 独立 Git/worktree 批次；Work Item [#24](https://coding.s-s.city/songsong/openchamber/-/work_items/24) | 涉及 Session metadata、folder/pin/todo/queue 迁移，需保持 `serverId + directory` 权威和部分失败语义，不能和 stale lock 小修捆绑 |
+| Tool/Office/图片附件标准化 | 🟠 独立 attachment 批次；Work Item [#25](https://coding.s-s.city/songsong/openchamber/-/work_items/25) | 包含 materializer attachment 保留、文件归一化、Office 文档转换、unsupported warning 和 VS Code CSP；需先核对 fork 现有本地图片、`file://` raw route、queue snapshot 与远程文件读取 |
+| Remote-only desktop startup / Windows SSH | 🟠 独立 desktop/remote 批次；Work Item [#26](https://coding.s-s.city/songsong/openchamber/-/work_items/26) | 与 fork 自定义 remote instances、SSH manager、managed OpenCode keep-alive 和 chooser/recovery 深度重叠，不能直接套官方 desktop boot 或 SSH rewrite |
+| Scheduled task permission autoaccept | ✅ 已移植并验证 | 补齐 fork 缺失的服务端 `permission-auto-accept` 权威策略、持久化 revision、最近显式父子继承、事件监听、失败重试和 pending reconciliation；scheduled task 在首次 prompt 前登记 session policy，登记失败时仍执行任务并退回人工审批。编辑器提供与 composer 一致的 shield toggle，并完成项目配置/API schema、8 个 locale 和旧 IANA timezone canonicalization。保留 fork 现有交互式客户端 autoaccept，通知抑制同时检查客户端和服务端策略 |
+| macOS 菜单栏开关 | 🟠 缺少 tray 基线，改为独立 desktop 批次 | 官方开关依赖既有 `trayController`、`setupTray`、`useTraySync`、preload `trayEnabled` bridge 和托盘图标资产；本 fork 当前这些 surface 均不存在。不能只加入设置项形成无效 UI，需先审计并移植完整 tray/runtime，再接开关和重启语义 |
+| Hidden-user turn 合并 / footer metadata / streaming jitter | 🟠 暂缓当前并行文件 | 直接触碰当前正在修改的 `MessageBody`、`ToolPart`、turn projection 和 sidebar 状态；待并行工作提交后再按 turn identity 与 scroll writer 约束审核 |
+| React Scan、PR review workflow、LF/docs/mobile native | ➖ 不作为运行时迁移 | React Scan 仅官方 dev helper；PR workflow/agent guidance 属维护策略；`.gitattributes`、纯换行和无 `packages/mobile` 的 native 文件不混入功能批次 |
+
+验证：4 个定向测试文件共 10 条用例通过，覆盖 parent-frame 判定、VS Code API 缺失 fallback、项目排序持久化迁移和 permission pattern 去重；全仓 `bun run type-check`、`bun run lint`、`bun run build` 通过。未重启或替换当前桌面应用；独立浏览器 QA 因本机 `127.0.0.1:5191` 当时无监听进程而未执行。
+
+Scheduled task autoaccept 验证：permission policy、settings sanitizer、project config、scheduled runtime 和 timezone 共 41 条定向测试通过；全仓 type-check、lint、build 通过。隔离运行态驱动真实 scheduled runtime 与临时 OpenCode HTTP surface，观察到 `Session 创建 -> autoaccept policy 登记 -> prompt_async`，且运行结果返回目标 Session ID；未连接或修改正在使用的 OpenCode/OpenChamber。
+
+FilesView focus / worktree lock 验证：stale-lock 两条真实 Git worktree 集成用例通过；全仓 `type-check`、`lint`、`build`、Git service `node --check` 与 docs validation 通过。完整 `service.test.js` 另有 19 条既存环境失败（Bun 下测试 helper 获取 Git stdout/commit hash 为空及签名配置差异），不属于本批回归；新增两条用例可独立通过。未启动、终止或替换当前 OpenChamber/OpenCode。
+
+PR summary / VS Code bootstrap 验证：两个纯函数回归文件共 4 条用例通过，实际使用规范化 GitHub lookup key 验证 `${directory}::${branch}` 映射，并驱动“runtime API 尚未注册但 bootstrap config 已存在”的 VS Code 初始化场景；全仓 `type-check`、`lint`、`build` 与 docs validation 通过。未启动、终止或替换当前 OpenChamber/OpenCode。
+
+VS Code worktree lock 验证：在两个真实临时 Git 仓库及 `--no-checkout` worktree 上分别制造稳定旧锁和观察窗口内变化的活锁；旧锁路径经 `.git` 文件解析后被删除，worktree 成功填充，活锁内容保持为 `active-lock` 且 bootstrap 明确失败。定向测试 2/2、VS Code 专用 type-check、全仓 `type-check`、`lint`、`build` 与 docs validation 通过；未启动、终止或替换当前 OpenChamber/OpenCode。
 
 ### 内部发行版本与许可证（2026-07-21）
 
@@ -1077,13 +1147,13 @@ Phase 5 — 🔴 Markdown/Shiki 重写 (#1+#2): 独立 milestone，需迁移 for
 | Sidebar worktree 排序回弹 | ➖ 架构不适用 | 上游修复是失效一份 fork 中不存在的 `worktreeOrderCache`；本 fork 的项目/工作树顺序由 `useProjectsStore` 的持久项目数组和 `reorderProjectsById` 直接维护，且覆盖“隐藏 worktree 项目仍保序”的测试。机械加入另一份 cache 会制造双重排序源 |
 | Provider 添加表单保留 | ✅ fork 已等价 | 添加模式使用稳定 sentinel `ADD_PROVIDER_ID`；provider 列表刷新时默认选择 effect 只在 selection 为空时运行，不会把 sentinel 改回第一个 provider。候选项只有在确实不再属于未连接列表时才清理，后台刷新不会退出表单 |
 | Chat scroll jiggle / 历史定位瞬移 | ✅ fork 已有更完整实现 | 聊天容器已禁用原生 anchoring，并在 `useLayoutEffect` 中同步消费加载旧消息前保存的 `scrollHeight/scrollTop`；历史定位、展开折叠和回到底部使用单一 timeline controller 的 instant/smooth 意图。此前长会话、自动 Load older 与展开流程已专项修复，不再叠加上游旧 scroll writer |
-| Model picker 折叠持久化与 provider 排序 | ⏸️ 拆为独立多实例适配 | 本地已有 favorite/recent 排序，但 provider section 折叠仍是组件内状态。上游新增的是全局 `providerOrder`，直接套用会让本地与远程实例互相污染；后续需要按 `serverId` 分区持久化，并让 chat、MultiRun、Agent selector 共用同一实例作用域 |
+| Model picker 折叠持久化与 provider 排序 | ✅ 已移植并验证；Work Item [#5](https://coding.s-s.city/songsong/openchamber/-/work_items/5) 已关闭 | 新增 `modelPickerLayoutByServerId`（`providerOrder` + `collapsedProviders` section keys），按 `serverId` 分区；旧扁平 `collapsedModelProviders` 迁移到 `DEFAULT_SERVER_ID`。`ModelPickerList` 受控折叠、按 order 排序并支持 provider DnD；Chat / MultiRun / Agent selector / 移动端 accordion 共用 `useModelPickerLayout()`。favorites/hidden/recents 仍保持本地全局 + 远程清空展示，未扩成 per-server。定向 helper/sanitize 测试与 type-check/lint 通过 |
 | Shift 永久删除 Session | ⛔ 不随普通 UI 批次移植 | 上游同一提交把“按住 Shift 点击删除”变成跳过确认的永久删除，属于高危快捷操作，且与 provider 排序没有必要耦合。本 fork 保留现有确认、运行中检查和子智能体 partial-failure 流程；除非单独设计可发现提示与撤销/保护规则，否则不引入 |
-| Automatic review loop | ⏸️ 独立高风险 milestone | 上游新增持久 auto-review store、重启恢复、reviewer/implementation 双向转发、queue 阻塞与 runtime switch 续跑，共改动 21 个文件。它会直接接触本 fork 已深改的 steer/queue 快照、多实例 SDK 路由和 review handoff，必须先定义每个 loop 的 `serverId + directory + target Session` 权威记录并做中断恢复测试，不能在 v1.13.4 小修批次机械合入 |
-| CLI live-port lifecycle 检测 | ⏸️ 延后到 CLI/Startup 批次 | 上游提交重写实例发现、目标实例解析、doctor/status/stop 与端口占用校验，并新增数百行测试；本 fork 已有 PID 进程归属校验、desktop runtime 判定和自定义 managed OpenCode keep-alive。需在读取 Clack CLI 规则后按当前 lifecycle contract 逐段适配，避免误停持久 OpenCode 或远程实例 |
-| CLI 大规模内部重构 | ⏸️ 不混入功能版本 | `e59dc5e59f` 主要拆分/整理 CLI 内部结构，和 live-port patch 高度重叠。当前功能没有依赖该重构；待 CLI 专项先建立行为测试，再按边界迁移，避免以结构一致性为由覆盖 fork 的命令策略 |
+| Automatic review loop | ⏸️ 独立高风险 milestone；Work Item [#6](https://coding.s-s.city/songsong/openchamber/-/work_items/6) | 上游新增持久 auto-review store、重启恢复、reviewer/implementation 双向转发、queue 阻塞与 runtime switch 续跑，共改动 21 个文件。它会直接接触本 fork 已深改的 steer/queue 快照、多实例 SDK 路由和 review handoff，必须先定义每个 loop 的 `serverId + directory + target Session` 权威记录并做中断恢复测试，不能在 v1.13.4 小修批次机械合入 |
+| CLI live-port lifecycle 检测 | ⏸️ 延后到 CLI/Startup 批次；Work Item [#7](https://coding.s-s.city/songsong/openchamber/-/work_items/7) | 上游提交重写实例发现、目标实例解析、doctor/status/stop 与端口占用校验，并新增数百行测试；本 fork 已有 PID 进程归属校验、desktop runtime 判定和自定义 managed OpenCode keep-alive。需在读取 Clack CLI 规则后按当前 lifecycle contract 逐段适配，避免误停持久 OpenCode 或远程实例 |
+| CLI 大规模内部重构 | ⏸️ 不混入功能版本；随 Work Item [#7](https://coding.s-s.city/songsong/openchamber/-/work_items/7) | `e59dc5e59f` 主要拆分/整理 CLI 内部结构，和 live-port patch 高度重叠。当前功能没有依赖该重构；待 CLI 专项先建立行为测试，再按边界迁移，避免以结构一致性为由覆盖 fork 的命令策略 |
 | Dead-code / dead-export sweep | ⏸️ 独立维护批次 | 两个官方提交及新增 `dead-code` 脚本服务于 knip 清理。fork 的 remote instances、Session markers、custom sidebar 仍使用大量上游已删除导出，当前也没有 knip 依赖；不在功能合并中删除。后续只能依据本仓库引用结果逐个清理 |
-| Japanese locale | ⏸️ 语言包批次 | 上游新增完整日文 locale；本 fork 当前明确支持 8 个 locale，启动文案也严格按这 8 个闭合。日语是独立产品范围扩展，不阻塞运行功能同步，待语言包批次一次性加入 runtime、标签、字典和 fallback 测试 |
+| Japanese locale | ⏸️ 语言包批次；Work Item [#31](https://coding.s-s.city/songsong/openchamber/-/work_items/31) | 上游新增完整日文 locale；本 fork 当前明确支持 8 个 locale，启动文案也严格按这 8 个闭合。日语是独立产品范围扩展，不阻塞运行功能同步，待语言包批次一次性加入 runtime、标签、字典和 fallback 测试 |
 | v1.13.4 manifest/release 元数据 | ✅ 无依赖变更 | 官方 root/ui/web manifests 除版本号外只新增 `bunx knip` 脚本，没有 runtime dependency 变化；fork 不为尚未采用的清理工具增加脚本或依赖。上述功能审计完成后将内部基线推进为 `1.13.4-sscity` |
 
 **v1.13.4 收口**：20 个官方提交已逐项审计；实际移植、fork 等价覆盖、架构不适用和明确延后项均已记录。源码与 Electron 构建前缀推进到 `1.13.4-sscity`，不代表高风险 auto-review、跨实例 model provider 排序或 CLI lifecycle 重构已被静默合入。
@@ -1154,8 +1224,8 @@ Phase 5 — 🔴 Markdown/Shiki 重写 (#1+#2): 独立 milestone，需迁移 for
 | Safe storage interaction-path writes | ✅ 第一批已移植 | 17 个 Zustand 持久化 store 已切到 deferred JSON storage：序列化和同 key 合并移出交互调用栈，读取立即返回 pending value，下一任务写盘；`pagehide` / hidden / freeze 强制 flush，listener 注册失败时仍由 timer 写盘，并保留 fork 现有 quota fallback 语义 |
 | Mobile Markdown file-reference probing | ✅ 第一批已移植 | mobile surface 不再为 inline file reference 发 `/api/fs/stat`；本地图片 `/api/fs/raw` 转换仍保留，不把图片代理与 annotation probe 混为一项 |
 | Chat first-open / Thinking scroll | ✅ 审计完成，保留 fork 实现 | fork 已有单 writer、wheel/touch/key 用户意图释放、process-fold guard、历史锚点和 working/settle passive follow。官方 first-open 最长 8s 强制贴底会重新引入用户反馈过的滚动硬控；Thinking patch又依赖上游已改写的 reasoning DOM，因此不机械叠加第二套 scroll writer |
-| Desktop remote custom headers / realtime proxy | 🔴 独立高风险批次 | 官方依赖单 runtime-switch/relay；fork 是多 serverId + directory 路由，必须同时覆盖 HTTP、SSE、WS、auth，禁止只移植设置 UI |
-| Native mobile workspace / official bundled CLI | ⏸ 不直接移植 | 当前无 `packages/mobile`；官方 CLI 与 custom `1.18.4-sscity`、shared database 和签名 runbook 冲突，继续保留 fork packaging authority |
+| Desktop remote custom headers / realtime proxy | 🔴 独立高风险批次；Work Item [#10](https://coding.s-s.city/songsong/openchamber/-/work_items/10) | 官方依赖单 runtime-switch/relay；fork 是多 serverId + directory 路由，必须同时覆盖 HTTP、SSE、WS、auth，禁止只移植设置 UI |
+| Native mobile workspace / official bundled CLI | ⏸ 不直接移植；Work Item [#9](https://coding.s-s.city/songsong/openchamber/-/work_items/9) | 当前无 `packages/mobile`；官方 CLI 与 custom `1.18.4-sscity`、shared database 和签名 runbook 冲突，继续保留 fork packaging authority |
 
 **v1.13.9 收口**：27 个官方提交已逐项审计。Embedded JSON、agent null-field、stale busy、Keep Awake、CLI path 防护、custom bundled CLI 等已有或更强实现；本批新增 deferred safeStorage 与 mobile file-reference probe guard。原生 mobile、official CLI、remote relay headers 明确保留为架构分歧，chat scroll 继续使用 fork 单 writer，不引入上游强制贴底窗口。源码、workspace lock、Electron 构建前缀和打包 runbook 已推进到 `1.13.9-sscity`。
 
@@ -1182,8 +1252,8 @@ Phase 5 — 🔴 Markdown/Shiki 重写 (#1+#2): 独立 milestone，需迁移 for
 | Timeline load earlier | ✅ 已提前移植 | TimelineDialog 使用当前 Session 的 timeline controller、server cursor、loading 状态和 prepend anchor，不新增第二套分页状态 |
 | VS Code favorites / settings return | ✅ 已提前移植 | favorites 已持久化，退出 settings 恢复 previous view |
 | Mobile auth fallback / PWA safe area | ✅ fork 已等价或更强 | 非 desktop status probe 失败进入 network error；只有 desktop remote password fallback 显示 unlock。PWA keyboard mode、safe-area composer/dialog/toast 已按现有 DOM 适配 |
-| Small Model + session recap/suggestion | ⏸ 独立高风险批次 | 官方新增 provider credential resolver、server runtime、session-assist 服务、settings 和多消费者。必须按 `serverId + directory + provider/model` 权威上下文重构后再落地，不能使用无 Session 的全局 provider 扫描 |
-| Native mobile resume/focus/dictation overlay | ➖ 当前架构不适用 | fork 无 Capacitor mobile workspace，也没有官方 `ComposerDictation` surface；旧 browser voice/STT/TTS 后续与 Small Model/voice 批次一起重构 |
+| Small Model + session recap/suggestion | ⏸ 独立高风险批次；Work Item [#12](https://coding.s-s.city/songsong/openchamber/-/work_items/12) | 官方新增 provider credential resolver、server runtime、session-assist 服务、settings 和多消费者。必须按 `serverId + directory + provider/model` 权威上下文重构后再落地，不能使用无 Session 的全局 provider 扫描 |
+| Native mobile resume/focus/dictation overlay | ➖ 当前架构不适用；Work Item [#11](https://coding.s-s.city/songsong/openchamber/-/work_items/11) | fork 无 Capacitor mobile workspace，也没有官方 `ComposerDictation` surface；旧 browser voice/STT/TTS 后续与 Small Model/voice 批次一起重构 |
 | Share opinion prompt / `oc-dev` Bun global helper | ➖ 不移植 | 临时社区调查不属于产品功能；当前仓库无官方 `oc-dev.mjs` 部署 surface |
 
 **v1.14.1 收口**：17 个官方提交已逐项审计。文件范围、Diff 首行、Timeline、VS Code favorites/返回页和 auth/PWA 边界已有实现；native mobile 与临时调查不适用。Small Model/session assist 明确保留为后续独立批次，不把未完成能力计作已合并。源码、workspace lock、Electron 构建前缀和打包 runbook 已推进到 `1.14.1-sscity`。
@@ -1201,13 +1271,14 @@ Phase 5 — 🔴 Markdown/Shiki 重写 (#1+#2): 独立 milestone，需迁移 for
 | Mermaid zoom controls | ✅ fork 已提前完成 | inline diagram 可展开，fullscreen Mermaid preview 已启用 pan/zoom 与 wheel zoom，并保留 fork 的本地文件读取、下载和多实例 raw-file route |
 | Context raw message rows | ✅ fork 已有不同简化实现 | 当前只渲染角色、message ID、时间与按需 JSON，不存在上游待删除的 parts/token/snippet 四列布局；不为套补丁重新引入派生列 |
 | OpenCode SDK bump | ✅ lock 已超前 | workspace manifest 范围仍为 `^1.17.9`，`bun.lock` 实际统一解析 `@opencode-ai/sdk@1.18.4`，高于官方本版的 `1.17.18` |
-| Last-turn Diff / navigable JSON summaries | 🟡 后续功能批次 | 两项分别跨 DiffView/turn snapshot 和 ToolPart/JSON navigation；价值明确，但需适配 fork 的 context panel、changed-files 与文件路由后独立验证 |
-| Project edit / per-project default model | 🟠 独立高风险批次 | 官方提交同时重写 settings 与 sidebar edit shell、actions/worktree auto-save；fork sidebar 与多 remote project authority 完全不同，后续只抽取 `defaultModel` 数据契约和新草稿解析，不整包覆盖 UI |
-| Private relay / pairing v2 / desktop transports | ⏸ 架构批次 | 会贯穿 HTTP/SSE/WS/auth、server list 和多实例 registry，必须以 fork 的多 `serverId + directory` 为权威单独设计 |
-| Windows tray/startup | 🟡 平台批次 | Electron shell 可适配，但与本轮 macOS 自用包无直接运行面；保留为 Windows 专项，不和 relay host 列表混做 |
-| Native mobile / mobile release/update/iPad split | ➖ 当前架构不适用 | fork 无 `packages/mobile`/Capacitor workspace；CI、iOS/Android signing、native update UI 与 connect sheet 不导入 |
+| Last-turn Diff | ✅ 已移植并验证；Work Item [#13](https://coding.s-s.city/songsong/openchamber/-/work_items/13) 已关闭 | DiffView 新增 `working` / `turn` scope：`turn` 读取最新 user message 的 `summary.diffs`（sanitize 后靠 `patch` 重建 before/after），不走 live git。Chat 最新回合 changed-files 经 `openContextDiff`/`navigateToDiff(..., 'turn')` 进入；历史回合只读。Git 仓库优先用 summary snapshot，不再只交给 PendingChangesBar。未引入上游 staged scope。定向 `turnSnapshotDiff` 测试与 type-check/lint 通过 |
+| Navigable JSON summaries | ✅ 已移植并验证；Work Item [#14](https://coding.s-s.city/songsong/openchamber/-/work_items/14) 已关闭 | 新增 `JsonSummaryView`：对象身份摘要、`depth < 2` 默认展开、`http(s)` URL 可点。`ToolScrollableTextOutput` 三视图 `summary`（默认）/ `formatted`（JsonTreeViewer）/ `raw`；summary 限高 400px。未收紧工具 expandable 策略，未做 edit→diff。定向 `JsonSummaryView` 测试与 type-check/lint 通过 |
+| Project edit / per-project default model | 🟠 独立高风险批次；Work Item [#15](https://coding.s-s.city/songsong/openchamber/-/work_items/15) | 官方提交同时重写 settings 与 sidebar edit shell、actions/worktree auto-save；fork sidebar 与多 remote project authority 完全不同，后续只抽取 `defaultModel` 数据契约和新草稿解析，不整包覆盖 UI |
+| Private relay / pairing v2 / desktop transports | ⏸ 架构批次；Work Item [#16](https://coding.s-s.city/songsong/openchamber/-/work_items/16) | 会贯穿 HTTP/SSE/WS/auth、server list 和多实例 registry，必须以 fork 的多 `serverId + directory` 为权威单独设计 |
+| Windows tray/startup | 🟡 平台批次；Work Item [#17](https://coding.s-s.city/songsong/openchamber/-/work_items/17) | Electron shell 可适配，但与本轮 macOS 自用包无直接运行面；保留为 Windows 专项，不和 relay host 列表混做 |
+| Native mobile / mobile release/update/iPad split | ➖ 当前架构不适用；Work Item [#9](https://coding.s-s.city/songsong/openchamber/-/work_items/9) | fork 无 `packages/mobile`/Capacitor workspace；CI、iOS/Android signing、native update UI 与 connect sheet 不导入 |
 
-**v1.15.0 收口**：50 个官方提交已逐项分类。Loose diff、ambiguous prompt、browser/deep-link、右栏 resize 与 VS Code 相对路径已按 fork 架构移植；code wrap/line numbers、Mermaid zoom、sticky header、CORS encoding 与 SDK 版本已有等价或更强实现。Native mobile 不适用，relay/pairing、project default model、Last-turn Diff、JSON summary 和 Windows shell 明确保留为独立批次，不把延期能力计作已合并。源码、workspace lock、Electron 构建前缀和打包 runbook 已推进到 `1.15.0-sscity`。
+**v1.15.0 收口**：50 个官方提交已逐项分类。Loose diff、ambiguous prompt、browser/deep-link、右栏 resize、VS Code 相对路径、Last-turn Diff 与 Navigable JSON summaries 已按 fork 架构移植；code wrap/line numbers、Mermaid zoom、sticky header、CORS encoding 与 SDK 版本已有等价或更强实现。Native mobile 不适用，relay/pairing、project default model 和 Windows shell 明确保留为独立批次，不把延期能力计作已合并。源码、workspace lock、Electron 构建前缀和打包 runbook 已推进到 `1.15.0-sscity`。
 
 ### v1.16.0 逐项推进（2026-07-21）
 
@@ -1238,15 +1309,15 @@ Phase 5 — 🔴 Markdown/Shiki 重写 (#1+#2): 独立 milestone，需迁移 for
 | 功能 | 影响文件/模块 | 风险点 |
 |---|---|---|
 | queue drag reorder | `messageQueueStore.ts`、`QueuedMessageChips.tsx` | ✅ 已完成；拖拽只改变队列次序，保留 queued item 对象及 `sendConfig` + `sendTarget` 快照 |
-| model picker reorder/accordion/Shift+Delete + thinking variant | `ModelPickerList.tsx`、`ModelControls.tsx`、agents settings | fork 已有 hidden/favorite/recent 和 remote instance model scope；必须按 instance/serverId 隔离 |
+| model picker reorder/accordion/Shift+Delete + thinking variant | `ModelPickerList.tsx`、`ModelControls.tsx`、agents settings | ✅ provider order + accordion 已按 `serverId` 落地（#5）；Shift+Delete 永久删除仍不移植；thinking variant 已有 |
 | agent temp/topP/thinking save/clear | `AgentsPage.tsx`、`useAgentsStore.ts`、server agents/config | 本 fork 已做过 prompt/permission persistence；新增字段要按 custom/project/user 层级合并 |
 | session project binding / pinned/folder empty refresh / worktree snap-back | sidebar hooks、global sessions store、project selection | fork 有 remote instance、Global Pinned、session markers；所有 fallback 必须使用 session/directory authoritative context |
 | worktree session bootstrap gate / draft generate materialization | worktree store、session actions、GitView generate | 不能破坏 `[OPENCHAMBER-FORK] ensureWorktreeProject` 和 pending draft flow |
 | subagent 删除级联 | `SessionNodeItem`、`useSessionActions`、delete/archive flow | fork 已有 export/delete subtask 文案和运行中跳过逻辑；需保留 per-child partial failure |
 | VS Code font prefs / mobile exact grouping / mobile history | `packages/vscode/*`、mobile apps | 可做，但建议平台批次，不和 web/desktop 混合 |
-| Desktop remote custom headers / SSH saved password unlock | `packages/electron`、`remote-instances`、`ssh-manager`、remote proxy/SSE relay | 本 fork remote instance proxy 是深改区域；header forwarding 必须贯穿 HTTP + WebSocket + SSE，不能只改设置页 |
-| Voice input / local STT / Kokoro read-aloud refresh | `VoiceSettings.tsx`、`useBrowserVoice.ts`、`lib/voice/*`、`web/server/lib/tts/*` | 本地已有旧实现，官方 v1.14.0 是 UX + runtime 重构；应先抽取 local model picker/STT/TTS capability，不直接套 mobile composer 改动 |
-| Small Model utility consumers | `web/server/lib/small-model`（新）、config/settings、session assist metadata、Git/GitHub generation、TTS/Notes | 高价值但必须按 session directory/provider/model 权限约束；后台任务禁止无 session 的全局 provider 扫描 |
+| Desktop remote custom headers / SSH saved password unlock | `packages/electron`、`remote-instances`、`ssh-manager`、remote proxy/SSE relay | Work Item [#10](https://coding.s-s.city/songsong/openchamber/-/work_items/10)。本 fork remote instance proxy 是深改区域；header forwarding 必须贯穿 HTTP + WebSocket + SSE，不能只改设置页 |
+| Voice input / local STT / Kokoro read-aloud refresh | `VoiceSettings.tsx`、`useBrowserVoice.ts`、`lib/voice/*`、`web/server/lib/tts/*` | Work Item [#11](https://coding.s-s.city/songsong/openchamber/-/work_items/11)。本地已有旧实现，官方 v1.14.0 是 UX + runtime 重构；应先抽取 local model picker/STT/TTS capability，不直接套 mobile composer 改动 |
+| Small Model utility consumers | `web/server/lib/small-model`（新）、config/settings、session assist metadata、Git/GitHub generation、TTS/Notes | Work Item [#12](https://coding.s-s.city/songsong/openchamber/-/work_items/12)。高价值但必须按 session directory/provider/model 权限约束；后台任务禁止无 session 的全局 provider 扫描 |
 | Unified list virtualization / chat history loading | `MessageList.tsx`、desktop history、scroll preservation | ✅ desktop 已对齐统一 `@tanstack/react-virtual`、server-only pagination、提前预取和 scroll invariants；375px 响应式视口已验证，原生 mobile momentum 仍需平台验证 |
 
 ### 高风险 / 不建议作为第一批
@@ -1257,8 +1328,8 @@ Phase 5 — 🔴 Markdown/Shiki 重写 (#1+#2): 独立 milestone，需迁移 for
 | Markdown/Shiki worker rewrite 相关后续 fixes | 本地没有上游 `chat/markdown/` 目录，`MarkdownRendererImpl.tsx` 仍承载 agent/skill links、文件路径点击、table copy 等 fork 功能 | 暂不混入 v1.13.3~8；若做，必须先迁移 fork 自定义渲染能力 |
 | OpenCode never auto-attach / orphan cleanup / process killer port ownership | 本 fork Electron 在同进程启动 web server，并有自定义 managed OpenCode keep-alive / detach / quit 语义 | 先读 `opencode` 模块 docs + Electron lifecycle，做 runtime-truth 验证；不能照搬上游 kill/attach 判断 |
 | v1.13.4 dead-code cleanup / knip sweep | compare 删除大量 UI/shared 文件；fork 仍有远程实例、session markers、custom UI 依赖 | 暂缓。cleanup 不应和功能合并混在一起 |
-| Japanese docs/i18n bulk import | 文件量很大但业务风险低；容易污染 diff | 等功能批次稳定后单独做 docs/i18n 批次 |
-| Native iOS/Android app project | v1.13.9 新增 `packages/mobile`，当前 fork 无该 workspace，且本 fork desktop/web runtime 已有自定义远程实例/managed runtime 语义 | 不作为第一阶段；除非明确决定引入 mobile workspace，否则只选合 PWA/mobile web 修复 |
+| Japanese docs/i18n bulk import | 文件量很大但业务风险低；容易污染 diff | Work Item [#31](https://coding.s-s.city/songsong/openchamber/-/work_items/31)。等功能批次稳定后单独做 docs/i18n 批次 |
+| Native iOS/Android app project | v1.13.9 新增 `packages/mobile`，当前 fork 无该 workspace，且本 fork desktop/web runtime 已有自定义远程实例/managed runtime 语义 | Work Item [#9](https://coding.s-s.city/songsong/openchamber/-/work_items/9)。不作为第一阶段；除非明确决定引入 mobile workspace，否则只选合 PWA/mobile web 修复 |
 | 官方 bundled OpenCode CLI / updater | 官方 v1.13.9 打包 pinned official CLI；本 fork 已完成 custom merged binary staging/signing/runbook，并强制 shared `opencode.db` channel | 不直接 port 官方 binary 或自动升级；后续只评估 updater UX，custom binary provenance 与 shared-data invariant 不变 |
 | Mobile composer/keyboard full redesign | v1.14.0/1 大面积改 `MobileApp`/`ChatInput`/autocompletes/keyboard choreography；本 fork 没有 native mobile package，且 ChatInput 深改 | 先处理小的 PWA auth/safe-area bug；大重构单独排 |
 

@@ -26,6 +26,51 @@ export const createSettingsHelpers = (dependencies) => {
   const HIDDEN_MODELS_MAX = 1024;
   const RECENT_EFFORTS_MAX_KEYS = 128;
   const RECENT_EFFORTS_MAX_VARIANTS_PER_KEY = 5;
+  const MODEL_PICKER_LAYOUT_MAX_SERVERS = 64;
+  const MODEL_PICKER_LAYOUT_MAX_ORDER = 256;
+  const MODEL_PICKER_LAYOUT_MAX_COLLAPSED = 256;
+
+  const normalizeModelPickerStringList = (value, limit) => {
+    if (!Array.isArray(value)) return [];
+    const seen = new Set();
+    const result = [];
+    for (const entry of value) {
+      if (typeof entry !== 'string') continue;
+      const trimmed = entry.trim();
+      if (!trimmed || seen.has(trimmed)) continue;
+      seen.add(trimmed);
+      result.push(trimmed);
+      if (result.length >= limit) break;
+    }
+    return result;
+  };
+
+  const migrateLegacyCollapsedProviders = (value) => {
+    const raw = normalizeModelPickerStringList(value, MODEL_PICKER_LAYOUT_MAX_COLLAPSED);
+    return raw.map((entry) => {
+      if (entry === 'favorites' || entry === 'recent' || entry.startsWith('provider:')) {
+        return entry;
+      }
+      return `provider:${entry}`;
+    });
+  };
+
+  const sanitizeModelPickerLayoutByServerId = (value) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+    const result = {};
+    for (const [rawKey, rawLayout] of Object.entries(value)) {
+      if (Object.keys(result).length >= MODEL_PICKER_LAYOUT_MAX_SERVERS) break;
+      const serverId = typeof rawKey === 'string' ? rawKey.trim() : '';
+      if (!serverId || result[serverId] || !rawLayout || typeof rawLayout !== 'object' || Array.isArray(rawLayout)) {
+        continue;
+      }
+      const providerOrder = normalizeModelPickerStringList(rawLayout.providerOrder, MODEL_PICKER_LAYOUT_MAX_ORDER);
+      const collapsedProviders = migrateLegacyCollapsedProviders(rawLayout.collapsedProviders);
+      if (providerOrder.length === 0 && collapsedProviders.length === 0) continue;
+      result[serverId] = { providerOrder, collapsedProviders };
+    }
+    return result;
+  };
 
   const sanitizeRecentEfforts = (value) => {
     if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
@@ -155,6 +200,26 @@ export const createSettingsHelpers = (dependencies) => {
     }
     if (typeof candidate.desktopKeepAwakeEnabled === 'boolean') {
       result.desktopKeepAwakeEnabled = candidate.desktopKeepAwakeEnabled;
+    }
+    if (
+      candidate.permissionAutoAccept
+      && typeof candidate.permissionAutoAccept === 'object'
+      && !Array.isArray(candidate.permissionAutoAccept)
+    ) {
+      const sessions = {};
+      const sourceSessions = candidate.permissionAutoAccept.sessions;
+      if (sourceSessions && typeof sourceSessions === 'object' && !Array.isArray(sourceSessions)) {
+        for (const [sessionId, enabled] of Object.entries(sourceSessions)) {
+          if (sessionId && typeof enabled === 'boolean') sessions[sessionId] = enabled;
+        }
+      }
+      result.permissionAutoAccept = {
+        sessions,
+        revision: Number.isSafeInteger(candidate.permissionAutoAccept.revision)
+          && candidate.permissionAutoAccept.revision >= 0
+          ? candidate.permissionAutoAccept.revision
+          : 0,
+      };
     }
     if (typeof candidate.desktopKeepManagedOpenCodeAliveOnQuit === 'boolean') {
       result.desktopKeepManagedOpenCodeAliveOnQuit = candidate.desktopKeepManagedOpenCodeAliveOnQuit;
@@ -492,7 +557,12 @@ export const createSettingsHelpers = (dependencies) => {
       result.hiddenModels = hiddenModels;
     }
     if (Array.isArray(candidate.collapsedModelProviders)) {
+      // Legacy field retained for older clients; new writes prefer modelPickerLayoutByServerId.
       result.collapsedModelProviders = normalizeStringArray(candidate.collapsedModelProviders);
+    }
+    const modelPickerLayoutByServerId = sanitizeModelPickerLayoutByServerId(candidate.modelPickerLayoutByServerId);
+    if (modelPickerLayoutByServerId) {
+      result.modelPickerLayoutByServerId = modelPickerLayoutByServerId;
     }
     if (Array.isArray(candidate.recentAgents)) {
       result.recentAgents = normalizeStringArray(candidate.recentAgents);

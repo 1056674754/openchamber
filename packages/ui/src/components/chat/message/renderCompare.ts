@@ -292,6 +292,7 @@ export const areRelevantTurnGroupingContextsEqual = (
   if (left.turnId !== right.turnId) return false;
   if (left.isFirstAssistantInTurn !== right.isFirstAssistantInTurn) return false;
   if (left.isLastAssistantInTurn !== right.isLastAssistantInTurn) return false;
+  if (left.isLatestTurn !== right.isLatestTurn) return false;
   if (left.isWorking !== right.isWorking) return false;
   if (left.hasTools !== right.hasTools) return false;
   if (left.hasReasoning !== right.hasReasoning) return false;
@@ -335,6 +336,21 @@ export const areRelevantTurnGroupingContextsEqual = (
 
   if (groupControlRelevant && !areTurnDiffStatsEqual(left.diffStats, right.diffStats)) {
     return false;
+  }
+
+  if (finalMessageRelevant) {
+    const leftDiffs = left.summaryDiffs ?? [];
+    const rightDiffs = right.summaryDiffs ?? [];
+    if (leftDiffs.length !== rightDiffs.length) return false;
+    for (let index = 0; index < leftDiffs.length; index += 1) {
+      const leftDiff = leftDiffs[index];
+      const rightDiff = rightDiffs[index];
+      if (leftDiff?.file !== rightDiff?.file) return false;
+      if (leftDiff?.additions !== rightDiff?.additions) return false;
+      if (leftDiff?.deletions !== rightDiff?.deletions) return false;
+      if (leftDiff?.status !== rightDiff?.status) return false;
+      if (leftDiff?.patch !== rightDiff?.patch) return false;
+    }
   }
 
   return true;

@@ -40,6 +40,20 @@ Workspaces are `packages/*` (see `package.json`).
 
 Before changing any mapped module, read its module documentation first.
 
+### Migration backlog (dual source of truth)
+
+Upstream migration work uses two complementary sources. Do not treat either as optional.
+
+- **Executable backlog (GitLab)**: [`https://coding.s-s.city/songsong/openchamber`](https://coding.s-s.city/songsong/openchamber) — overview issue [`#1`](https://coding.s-s.city/songsong/openchamber/-/issues/1). Priority, risk, blockers, milestones, and open/closed state live here.
+- **Evidence ledger**: [`docs/MERGE_V1.12.md`](docs/MERGE_V1.12.md). Per-commit audits, architecture decisions, verification evidence, and fork-equivalence notes live here.
+
+Rules for agents:
+
+- Every deferred or newly discovered **upstream runtime** capability must have one GitLab work item. Do not invent backlog rows only in MERGE, and do not leave completed work closed only in GitLab without MERGE evidence.
+- Close a work item only after implementation, focused tests / workspace checks where applicable, matching-surface runtime QA, and a MERGE evidence update that links the work item. Then mark the checkbox on issue `#1`.
+- Preserve this fork's multi-instance `serverId + directory` authority. Migration ports must not reintroduce single-instance global current-directory assumptions.
+- Completed, already-equivalent, explicitly N/A, and pure upstream-maintenance items must not be re-created as open backlog.
+
 ### web
 
 Web runtime and server implementation for OpenChamber.
@@ -103,6 +117,8 @@ Skills catalog management including discovery, installation, and configuration o
 Before rebuilding/staging OpenCode for OpenChamber, running any Electron packaging or release command, changing embedded-binary/signing/notarization behavior, or distributing a macOS build, agents **MUST read `docs/EMBEDDED_OPENCODE_PACKAGING.md` completely**.
 
 Do not substitute the official OpenCode binary for the custom merged build. Do not package, sign, notarize, upgrade, or distribute embedded OpenCode from memory or from generic Electron conventions; the runbook defines the required channel, shared-database invariant, staging source, dual-signing order, upgrade prohibition, and live verification gates.
+
+For direct local QA or installation into `/Applications`, use the runbook's local app-only flow and do not submit a notarization job. Developer ID release signing and notarization are only for an explicitly requested distributable artifact, such as a DMG/ZIP or an internal download build.
 
 All scripts are in `package.json`.
 

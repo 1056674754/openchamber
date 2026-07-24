@@ -10,6 +10,11 @@ import { sanitizeStarterRefs } from '@/lib/draftStarters';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { normalizeMobileKeyboardMode, setStoredMobileKeyboardMode } from '@/lib/mobileKeyboardMode';
 import { resolvePersistedFollowUpBehavior } from '@/lib/followUpBehavior';
+import {
+  areModelPickerLayoutMapsEqual,
+  migrateModelPickerLayoutState,
+  sanitizeModelPickerLayoutByServerId,
+} from '@/lib/modelPickerLayout';
 
 const persistToLocalStorage = (settings: DesktopSettings) => {
   if (typeof window === 'undefined') {
@@ -650,9 +655,19 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
     useUIStore.setState({ hiddenModels: settings.hiddenModels });
   }
 
-  if (Array.isArray(settings.collapsedModelProviders)
-    && !areStringArraysEqual(store.collapsedModelProviders, settings.collapsedModelProviders)) {
-    useUIStore.setState({ collapsedModelProviders: settings.collapsedModelProviders });
+  {
+    const nextLayoutByServerId = migrateModelPickerLayoutState({
+      modelPickerLayoutByServerId: settings.modelPickerLayoutByServerId,
+      collapsedModelProviders: settings.collapsedModelProviders,
+    });
+    if (!areModelPickerLayoutMapsEqual(store.modelPickerLayoutByServerId, nextLayoutByServerId)) {
+      useUIStore.setState({
+        modelPickerLayoutByServerId: nextLayoutByServerId,
+        collapsedModelProviders: [],
+      });
+    } else if (store.collapsedModelProviders.length > 0) {
+      useUIStore.setState({ collapsedModelProviders: [] });
+    }
   }
 
   if (Array.isArray(settings.recentModels)) {
@@ -1136,6 +1151,11 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   const collapsedModelProviders = sanitizeStringArray(candidate.collapsedModelProviders);
   if (collapsedModelProviders) {
     result.collapsedModelProviders = collapsedModelProviders;
+  }
+
+  const modelPickerLayoutByServerId = sanitizeModelPickerLayoutByServerId(candidate.modelPickerLayoutByServerId);
+  if (Object.keys(modelPickerLayoutByServerId).length > 0) {
+    result.modelPickerLayoutByServerId = modelPickerLayoutByServerId;
   }
 
   const recentModels = sanitizeModelRefs(candidate.recentModels, 16);

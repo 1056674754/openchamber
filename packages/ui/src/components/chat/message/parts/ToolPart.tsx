@@ -31,7 +31,7 @@ import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { useMessageDirectory } from '@/hooks/useMessageDirectory';
 import type { ContentChangeReason } from '@/hooks/useChatAutoFollow';
-import type { ToolPopupContent } from '../types';
+import type { StreamPhase, ToolPopupContent } from '../types';
 import { ensurePierreThemeRegistered } from '@/lib/shiki/appThemeRegistry';
 import { getDefaultTheme } from '@/lib/theme/themes';
 import type { MessageRecord } from '@/lib/messageCompletion';
@@ -43,6 +43,7 @@ import {
     tryParseJsonOutput,
 } from '../toolRenderers';
 import { JsonTreeViewer } from '@/components/ui/JsonTreeViewer';
+import { JsonSummaryView } from './JsonSummaryView';
 import { Icon } from "@/components/icon/Icon";
 import { PermissionCard } from '../../PermissionCard';
 import { QuestionCard } from '../../QuestionCard';
@@ -75,6 +76,9 @@ import {
     hasQuestionAnswer,
 } from '../../lib/questionToolRecovery';
 import { isEmbeddedSessionChat } from '@/components/layout/contextPanelEmbeddedChat';
+import { shouldMaterializeTaskDetails } from './taskToolVisibility';
+import { ArtifactCard } from './ArtifactCard';
+import { parsePublishedArtifactToolPart } from './artifactMetadata';
 
 const TOOL_ROW_TEXT_CLASS = '!text-[length:var(--text-meta)] !leading-4 sm:!leading-6 tracking-normal';
 const TOOL_ROW_TITLE_CLASS = cn('typography-meta font-medium', TOOL_ROW_TEXT_CLASS);
@@ -87,6 +91,7 @@ interface ToolPartProps {
     sessionId?: string;
     messageId?: string;
     isExpanded: boolean;
+    streamPhase: StreamPhase;
     onToggle: (toolId: string) => void;
     syntaxTheme: { [key: string]: React.CSSProperties };
     isMobile: boolean;
@@ -941,17 +946,17 @@ const ToolScrollableTextOutput: React.FC<{
     const renderedOutput = getToolOutputText(output, part, metadata);
     const outputLanguage = getToolOutputLanguage(output, part, metadata, input);
     const jsonResult = React.useMemo(() => tryParseJsonOutput(renderedOutput), [renderedOutput]);
-    const [jsonViewMode, setJsonViewMode] = React.useState<'formatted' | 'raw'>('formatted');
+    const [jsonViewMode, setJsonViewMode] = React.useState<'summary' | 'formatted' | 'raw'>('summary');
     const [copiedJson, setCopiedJson] = React.useState(false);
 
     React.useEffect(() => {
-        setJsonViewMode('formatted');
+        setJsonViewMode('summary');
         setCopiedJson(false);
     }, [renderedOutput]);
 
-    const handleToggleJsonView = React.useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
+    const handleJsonViewChange = React.useCallback((view: 'summary' | 'formatted' | 'raw', event: React.MouseEvent<HTMLButtonElement>) => {
         event.stopPropagation();
-        setJsonViewMode((prev) => prev === 'formatted' ? 'raw' : 'formatted');
+        setJsonViewMode(view);
     }, []);
 
     const handleCopyOutput = React.useCallback(async (event: React.MouseEvent<HTMLButtonElement>) => {
@@ -974,13 +979,44 @@ const ToolScrollableTextOutput: React.FC<{
                     <Button
                         variant="ghost"
                         size="icon"
-                        className="h-6 w-6 rounded-md bg-[var(--surface-elevated)]/80 text-muted-foreground hover:text-foreground"
-                        onClick={handleToggleJsonView}
+                        className={cn(
+                            'h-6 w-6 rounded-md text-muted-foreground hover:text-foreground',
+                            jsonViewMode === 'summary' && 'bg-[var(--interactive-selection)] text-[var(--interactive-selection-foreground)]',
+                        )}
+                        onClick={(event) => handleJsonViewChange('summary', event)}
                         onPointerDown={(event) => event.stopPropagation()}
-                        aria-label={jsonViewMode === 'formatted' ? t('chat.toolPart.showRawJson') : t('chat.toolPart.showFormattedJson')}
-                        title={jsonViewMode === 'formatted' ? t('chat.toolPart.showRawJson') : t('chat.toolPart.showFormattedJson')}
+                        aria-label={t('chat.toolPart.showNavigableJson')}
+                        title={t('chat.toolPart.showNavigableJson')}
                     >
-                        <Icon name={jsonViewMode === 'formatted' ? 'code-box' : 'list-check-2'} className="h-3.5 w-3.5" />
+                        <Icon name="list-unordered" className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button
+                        variant="ghost"
+                        size="icon"
+                        className={cn(
+                            'h-6 w-6 rounded-md text-muted-foreground hover:text-foreground',
+                            jsonViewMode === 'formatted' && 'bg-[var(--interactive-selection)] text-[var(--interactive-selection-foreground)]',
+                        )}
+                        onClick={(event) => handleJsonViewChange('formatted', event)}
+                        onPointerDown={(event) => event.stopPropagation()}
+                        aria-label={t('chat.toolPart.showFormattedJson')}
+                        title={t('chat.toolPart.showFormattedJson')}
+                    >
+                        <Icon name="node-tree" className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button
+                        variant="ghost"
+                        size="icon"
+                        className={cn(
+                            'h-6 w-6 rounded-md text-muted-foreground hover:text-foreground',
+                            jsonViewMode === 'raw' && 'bg-[var(--interactive-selection)] text-[var(--interactive-selection-foreground)]',
+                        )}
+                        onClick={(event) => handleJsonViewChange('raw', event)}
+                        onPointerDown={(event) => event.stopPropagation()}
+                        aria-label={t('chat.toolPart.showRawJson')}
+                        title={t('chat.toolPart.showRawJson')}
+                    >
+                        <Icon name="code-box" className="h-3.5 w-3.5" />
                     </Button>
                     <Button
                         variant="ghost"
@@ -994,7 +1030,11 @@ const ToolScrollableTextOutput: React.FC<{
                         <Icon name={copiedJson ? 'check' : 'file-copy'} className="h-3.5 w-3.5" />
                     </Button>
                 </div>
-                {jsonViewMode === 'formatted' ? (
+                {jsonViewMode === 'summary' ? (
+                    <div className="max-h-[400px] overflow-auto pr-12">
+                        <JsonSummaryView data={jsonResult.data} />
+                    </div>
+                ) : jsonViewMode === 'formatted' ? (
                     <JsonTreeViewer
                         data={jsonResult.data}
                         initiallyExpandedDepth={1}
@@ -1306,7 +1346,8 @@ const TaskToolSummary: React.FC<{
     input?: Record<string, unknown>;
     animateTailText?: boolean;
     isActive?: boolean;
-}> = ({ entries, isExpanded, isMobile, output, sessionId, directorySessionId, onShowPopup, input, animateTailText = true, isActive = false }) => {
+    showDetails?: boolean;
+}> = ({ entries, isExpanded, isMobile, output, sessionId, directorySessionId, onShowPopup, input, animateTailText = true, isActive = false, showDetails = true }) => {
     const { t } = useI18n();
     const currentDirectory = useMessageDirectory(directorySessionId ?? sessionId);
     const setCurrentSession = useSessionUIStore((state) => state.setCurrentSession);
@@ -1315,9 +1356,9 @@ const TaskToolSummary: React.FC<{
     const projects = useProjectsStore((state) => state.projects);
     const availableWorktreesByProject = useSessionUIStore((state) => state.availableWorktreesByProject);
     const runtime = React.useContext(RuntimeAPIContext);
-    const displayEntries = entries;
+    const displayEntries = showDetails ? entries : [];
 
-    const trimmedOutput = typeof output === 'string'
+    const trimmedOutput = showDetails && typeof output === 'string'
         ? stripTaskMetadataFromOutput(output)
         : '';
     const hasOutput = trimmedOutput.length > 0;
@@ -2168,6 +2209,7 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
     sessionId,
     messageId,
     isExpanded,
+    streamPhase,
     onToggle,
     syntaxTheme,
     isMobile,
@@ -2190,6 +2232,10 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
 
     const normalizedPartTool = normalizeToolName(part.tool);
     const isTaskTool = normalizedPartTool === 'task';
+    const materializeTaskDetails = isTaskTool && shouldMaterializeTaskDetails({
+        isExpanded,
+        streamPhase,
+    });
 
     const status = state?.status as string | undefined;
     const isFinalized = status === 'completed' || status === 'error' || status === 'aborted' || status === 'failed' || status === 'timeout' || status === 'cancelled';
@@ -2339,6 +2385,10 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
 
     const stateWithData = state as ToolStateWithMetadata;
     const metadata = stateWithData.metadata;
+    const publishedArtifact = React.useMemo(
+        () => parsePublishedArtifactToolPart(part),
+        [part],
+    );
     const partMetadata = (part as unknown as { metadata?: unknown }).metadata;
     const input = stateWithData.input;
     const time = stateWithData.time;
@@ -2467,32 +2517,33 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
                 parentSessionId: currentSessionId ?? undefined,
                 taskStartTime: taskSessionResolutionStart,
                 taskDescription: typeof input?.description === 'string' ? input.description : undefined,
-                isTaskFinalized: isFinalized,
+                isTaskFinalized: isFinalized || streamPhase === 'completed',
                 sessions: storeState.session,
                 sessionStatusMap: storeState.session_status,
             });
-        }, [authoritativeTaskSessionId, currentSessionId, input?.description, isFinalized, isTaskTool, taskSessionResolutionStart]),
+        }, [authoritativeTaskSessionId, currentSessionId, input?.description, isFinalized, isTaskTool, streamPhase, taskSessionResolutionStart]),
         currentDirectory,
     );
 
     const taskSessionId = authoritativeTaskSessionId ?? fallbackTaskSessionId;
-    const childSessionLookupId = hasFinalMetadataTaskSummary ? '' : (taskSessionId ?? '');
+    const taskDetailsSessionId = materializeTaskDetails ? taskSessionId : undefined;
+    const childSessionLookupId = hasFinalMetadataTaskSummary ? '' : (taskDetailsSessionId ?? '');
 
     const childSessionMessages = useSessionMessageRecords(childSessionLookupId, currentDirectory);
     useEnsureSessionMessages(childSessionLookupId, currentDirectory);
 
     const childSessionTaskSummaryEntries = React.useMemo<TaskToolSummaryEntry[]>(() => {
-        if (!isTaskTool || !taskSessionId) {
+        if (!isTaskTool || !taskDetailsSessionId) {
             return [];
         }
         if (!Array.isArray(childSessionMessages) || childSessionMessages.length === 0) {
             return [];
         }
         return buildTaskSummaryEntriesFromSession(childSessionMessages);
-    }, [childSessionMessages, isTaskTool, taskSessionId]);
+    }, [childSessionMessages, isTaskTool, taskDetailsSessionId]);
 
     const childSessionHasInFlightTools = React.useMemo(() => {
-        if (!isTaskTool || !taskSessionId || !Array.isArray(childSessionMessages) || childSessionMessages.length === 0) {
+        if (!isTaskTool || !taskDetailsSessionId || !Array.isArray(childSessionMessages) || childSessionMessages.length === 0) {
             return false;
         }
 
@@ -2516,9 +2567,9 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
         }
 
         return false;
-    }, [childSessionMessages, isTaskTool, taskSessionId]);
+    }, [childSessionMessages, isTaskTool, taskDetailsSessionId]);
 
-    const childSessionActivity = useSessionActivity(taskSessionId, currentDirectory);
+    const childSessionActivity = useSessionActivity(taskDetailsSessionId, currentDirectory);
     const [taskChildSeenActive, setTaskChildSeenActive] = React.useState(false);
     const [taskChildPollingStopped, setTaskChildPollingStopped] = React.useState(false);
     const [taskPendingFinalFetch, setTaskPendingFinalFetch] = React.useState(false);
@@ -2534,10 +2585,10 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
         taskPollNoChangeCountRef.current = 0;
         taskPollLastSignatureRef.current = '';
         taskFinalFetchDoneRef.current = false;
-    }, [taskSessionId]);
+    }, [taskDetailsSessionId]);
 
     React.useEffect(() => {
-        if (hasFinalMetadataTaskSummary || !isTaskTool || !taskSessionId) {
+        if (hasFinalMetadataTaskSummary || !isTaskTool || !taskDetailsSessionId) {
             return;
         }
 
@@ -2613,16 +2664,16 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
         taskPendingFinalFetch,
         taskChildPollingStopped,
         taskChildSeenActive,
-        taskSessionId,
+        taskDetailsSessionId,
     ]);
 
     React.useEffect(() => {
-        if (hasFinalMetadataTaskSummary || !isTaskTool || !taskSessionId || !taskChildPollingStopped || !taskPendingFinalFetch || taskFinalFetchDoneRef.current) {
+        if (hasFinalMetadataTaskSummary || !isTaskTool || !taskDetailsSessionId || !taskChildPollingStopped || !taskPendingFinalFetch || taskFinalFetchDoneRef.current) {
             return;
         }
 
         let cancelled = false;
-        const capturedSessionId = taskSessionId;
+        const capturedSessionId = taskDetailsSessionId;
 
         const runFinalFetch = async () => {
             try {
@@ -2675,7 +2726,7 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
         isTaskTool,
         taskChildPollingStopped,
         taskPendingFinalFetch,
-        taskSessionId,
+        taskDetailsSessionId,
     ]);
 
     React.useEffect(() => {
@@ -2712,7 +2763,7 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
     }, [childSessionTaskSummaryEntries, metadataTaskSummaryEntries]);
 
     React.useEffect(() => {
-        if (!isTaskTool || !taskSessionId) {
+        if (!isTaskTool || !taskDetailsSessionId) {
             return;
         }
 
@@ -2783,7 +2834,7 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
             try {
                 const scopedClient = resolveSdkForDirectory(currentDirectory);
                 const response = await scopedClient.session.messages({
-                    sessionID: taskSessionId,
+                    sessionID: taskDetailsSessionId,
                     limit: resolveFetchLimit(isInitialFetch),
                 });
                 const messages = response.data ?? [];
@@ -2808,7 +2859,7 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
                         partPatch[rec.info.id] = rec.parts;
                     }
                     return {
-                        message: { ...prev.message, [taskSessionId]: records.map((r) => r.info) as import('@opencode-ai/sdk/v2').Message[] },
+                        message: { ...prev.message, [taskDetailsSessionId]: records.map((r) => r.info) as import('@opencode-ai/sdk/v2').Message[] },
                         part: partPatch,
                     };
                 });
@@ -2837,12 +2888,12 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
         isTaskTool,
         taskPendingFinalFetch,
         taskChildPollingStopped,
-        taskSessionId,
+        taskDetailsSessionId,
     ]);
 
     const taskSummaryLenRef = React.useRef<number>(taskSummaryEntries.length);
     React.useEffect(() => {
-        if (!isTaskTool) {
+        if (!isTaskTool || !materializeTaskDetails) {
             return;
         }
         if (taskSummaryLenRef.current === taskSummaryEntries.length) {
@@ -2850,7 +2901,7 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
         }
         taskSummaryLenRef.current = taskSummaryEntries.length;
         onContentChange?.('structural');
-    }, [isTaskTool, onContentChange, taskSummaryEntries.length]);
+    }, [isTaskTool, materializeTaskDetails, onContentChange, taskSummaryEntries.length]);
 
     const diffStats = React.useMemo(() => {
         return (normalizedPartTool === 'edit' || normalizedPartTool === 'multiedit' || normalizedPartTool === 'apply_patch')
@@ -2983,9 +3034,9 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
 
     return (
         <div>
-            {isTaskTool && taskSessionId && currentDirectory ? (
+            {taskDetailsSessionId && currentDirectory ? (
                 <TaskSessionMaterializer
-                    sessionId={taskSessionId}
+                    sessionId={taskDetailsSessionId}
                     directory={currentDirectory}
                     parentSessionId={messageSessionId}
                 />
@@ -3122,8 +3173,10 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
                 )}
             </div>
 
-            {}
-            {isTaskTool && (taskSummaryEntries.length > 0 || isActive || shouldTreatAsFinalized || taskSessionId) ? (
+            {publishedArtifact ? (
+                <ArtifactCard artifact={publishedArtifact} sessionId={messageSessionId} />
+            ) : null}
+            {(materializeTaskDetails || taskSessionId) && (taskSummaryEntries.length > 0 || isActive || shouldTreatAsFinalized || taskSessionId) ? (
                 <TaskToolSummary
                     entries={taskSummaryEntries}
                     isExpanded={isExpanded}
@@ -3135,6 +3188,7 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
                     input={input}
                     animateTailText={animateTailText}
                     isActive={isActive}
+                    showDetails={materializeTaskDetails}
                 />
             ) : null}
 

@@ -57,6 +57,35 @@ describe('settings helpers', () => {
     expect(helpers.sanitizeSettingsUpdate({ recentEfforts: {} })).toEqual({ recentEfforts: {} });
   });
 
+  it('persists per-server model picker layout without cross-server leakage', () => {
+    const helpers = createModelPrefsTestHelpers();
+    const payload = {
+      modelPickerLayoutByServerId: {
+        default: {
+          providerOrder: ['openai', 'openai', 'anthropic'],
+          collapsedProviders: ['openai', 'favorites'],
+        },
+        remote: {
+          providerOrder: ['remote-a'],
+          collapsedProviders: ['provider:remote-a'],
+        },
+      },
+    };
+
+    expect(helpers.sanitizeSettingsUpdate(payload)).toEqual({
+      modelPickerLayoutByServerId: {
+        default: {
+          providerOrder: ['openai', 'anthropic'],
+          collapsedProviders: ['provider:openai', 'favorites'],
+        },
+        remote: {
+          providerOrder: ['remote-a'],
+          collapsedProviders: ['provider:remote-a'],
+        },
+      },
+    });
+  });
+
   it('accepts messageStreamTransport as a persisted shared setting', () => {
     const helpers = createTestHelpers();
 
@@ -145,6 +174,22 @@ describe('settings helpers', () => {
     });
     expect(helpers.sanitizeSettingsUpdate({ desktopKeepAwakeEnabled: false })).toEqual({
       desktopKeepAwakeEnabled: false,
+    });
+  });
+
+  it('sanitizes the persisted permission auto-accept policy', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({
+      permissionAutoAccept: {
+        sessions: { root: true, child: false, invalid: 'true' },
+        revision: 4,
+      },
+    })).toEqual({
+      permissionAutoAccept: {
+        sessions: { root: true, child: false },
+        revision: 4,
+      },
     });
   });
 

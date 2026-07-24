@@ -7,9 +7,15 @@ interface ChangedFilesListProps {
     files: ChangedFileEntry[];
     currentDirectory: string;
     onOpenFile: (file: ChangedFileEntry) => void;
+    readOnly?: boolean;
 }
 
-export const ChangedFilesList: React.FC<ChangedFilesListProps> = ({ files, currentDirectory, onOpenFile }) => {
+export const ChangedFilesList: React.FC<ChangedFilesListProps> = ({
+    files,
+    currentDirectory,
+    onOpenFile,
+    readOnly = false,
+}) => {
     const { t } = useI18n();
     return (
         <>
@@ -27,9 +33,21 @@ export const ChangedFilesList: React.FC<ChangedFilesListProps> = ({ files, curre
                         <button
                             key={`${file.path}:${index}`}
                             type="button"
-                            className="relative flex w-full cursor-pointer items-center gap-2 rounded-lg px-2 py-1 typography-ui-label outline-hidden select-none text-left hover:bg-interactive-hover"
-                            title={t('chat.changedFiles.actions.openFileTitle', { path: file.path })}
-                            onClick={() => onOpenFile(file)}
+                            disabled={readOnly}
+                            className={
+                                readOnly
+                                    ? 'relative flex w-full cursor-default items-center gap-2 rounded-lg px-2 py-1 typography-ui-label outline-hidden select-none text-left'
+                                    : 'relative flex w-full cursor-pointer items-center gap-2 rounded-lg px-2 py-1 typography-ui-label outline-hidden select-none text-left hover:bg-interactive-hover'
+                            }
+                            title={
+                                readOnly
+                                    ? t('chat.changedFiles.actions.historicalFileTitle', { path: file.path })
+                                    : t('chat.changedFiles.actions.openFileTitle', { path: file.path })
+                            }
+                            onClick={() => {
+                                if (readOnly) return;
+                                onOpenFile(file);
+                            }}
                         >
                             <FileTypeIcon filePath={file.path} className="h-3.5 w-3.5 flex-shrink-0" />
                             <span className="min-w-0 flex-1 flex items-baseline overflow-hidden" title={file.path}>

@@ -7,8 +7,22 @@ import type { ShortcutCombo } from '@/lib/shortcuts';
 import type { DraftStarterRef } from '@/lib/draftStarters';
 import { DEFAULT_MONO_FONT, DEFAULT_UI_FONT, type MonoFontOption, type UiFontOption } from '@/lib/fontOptions';
 import { getStoredMobileKeyboardMode, type MobileKeyboardMode } from '@/lib/mobileKeyboardMode';
+import { DEFAULT_SERVER_ID } from '@/lib/opencode/server-registry';
+import {
+  EMPTY_MODEL_PICKER_LAYOUT,
+  areModelPickerLayoutsEqual,
+  getModelPickerLayout as readModelPickerLayout,
+  migrateModelPickerLayoutState,
+  normalizeModelPickerServerId,
+  setCollapsedSectionKeys,
+  toggleCollapsedSectionKey,
+  type ModelPickerLayout,
+  type ModelPickerLayoutByServerId,
+} from '@/lib/modelPickerLayout';
 
 export type MainTab = 'chat' | 'plan' | 'git' | 'diff' | 'terminal' | 'files' | 'context' | 'diagram';
+/** Diff navigation scope. Fork has no staged selector; `turn` is last-turn snapshot mode. */
+export type PendingDiffScope = 'working' | 'turn';
 export type RightSidebarTab = 'git' | 'files' | 'context';
 export type ContextPanelMode = 'diff' | 'file' | 'context' | 'plan' | 'chat' | 'preview' | 'terminal' | 'browser';
 export type MermaidRenderingMode = 'svg' | 'ascii';
@@ -556,6 +570,7 @@ interface UIStore {
   mainTabGuard: MainTabGuard | null;
   sidebarOpenBeforeFullscreenTab: boolean | null;
   pendingDiffFile: string | null;
+  pendingDiffScope: PendingDiffScope | null;
   pendingDiagramFile: string | null;
   setPendingDiagramFile: (filePath: string | null) => void;
   navigateToDiagram: (filePath: string) => void;
@@ -611,7 +626,9 @@ interface UIStore {
 
   favoriteModels: Array<{ providerID: string; modelID: string }>;
   hiddenModels: Array<{ providerID: string; modelID: string }>;
+  /** @deprecated Migrated into modelPickerLayoutByServerId; kept empty for hydrate compat. */
   collapsedModelProviders: string[];
+  modelPickerLayoutByServerId: ModelPickerLayoutByServerId;
   recentModels: Array<{ providerID: string; modelID: string }>;
   recentAgents: string[];
   recentEfforts: Record<string, string[]>;
@@ -685,7 +702,7 @@ interface UIStore {
   setRightSidebarWidth: (width: number) => void;
   setRightSidebarTab: (tab: RightSidebarTab) => void;
   openContextPanelTab: (directory: string, tab: ContextPanelTabDescriptor) => void;
-  openContextDiff: (directory: string, filePath: string) => void;
+  openContextDiff: (directory: string, filePath: string, scope?: PendingDiffScope | null) => void;
   openContextFile: (directory: string, filePath: string) => void;
   openContextFileAtLine: (directory: string, filePath: string, line: number, column?: number) => void;
   openContextOverview: (directory: string) => void;
@@ -708,11 +725,12 @@ interface UIStore {
   setSessionDropdownOpen: (open: boolean) => void;
   setActiveMainTab: (tab: MainTab) => void;
   setMainTabGuard: (guard: MainTabGuard | null) => void;
-  setPendingDiffFile: (filePath: string | null) => void;
+  setPendingDiffFile: (filePath: string | null, scope?: PendingDiffScope | null) => void;
   setPendingFileNavigation: (navigation: PendingFileNavigation | null) => void;
   setPendingFileFocusPath: (path: string | null) => void;
-  navigateToDiff: (filePath: string) => void;
+  navigateToDiff: (filePath: string, scope?: PendingDiffScope | null) => void;
   consumePendingDiffFile: () => string | null;
+  consumePendingDiffScope: () => PendingDiffScope | null;
   setIsMobile: (isMobile: boolean) => void;
   toggleCommandPalette: () => void;
   setCommandPaletteOpen: (open: boolean) => void;
@@ -769,8 +787,10 @@ interface UIStore {
   isHiddenModel: (providerID: string, modelID: string) => boolean;
   hideAllModels: (providerID: string, modelIDs: string[]) => void;
   showAllModels: (providerID: string) => void;
-  toggleModelProviderCollapsed: (providerID: string) => void;
-  setModelProvidersCollapsed: (providerIDs: string[], collapsed: boolean) => void;
+  toggleModelPickerSectionCollapsed: (serverId: string, sectionKey: string) => void;
+  setModelPickerSectionsCollapsed: (serverId: string, sectionKeys: string[], collapsed: boolean) => void;
+  reorderModelProviders: (serverId: string, orderedProviderIDs: string[]) => void;
+  getModelPickerLayout: (serverId?: string | null) => ModelPickerLayout;
   isFavoriteModel: (providerID: string, modelID: string) => boolean;
   addRecentModel: (providerID: string, modelID: string) => void;
   addRecentAgent: (agentName: string) => void;
@@ -858,6 +878,7 @@ export const useUIStore = create<UIStore>()(
         mainTabGuard: null,
         sidebarOpenBeforeFullscreenTab: null,
         pendingDiffFile: null,
+        pendingDiffScope: null,
         pendingDiagramFile: null,
         pendingFileNavigation: null,
         pendingFileFocusPath: null,
@@ -907,6 +928,7 @@ export const useUIStore = create<UIStore>()(
         favoriteModels: [],
         hiddenModels: [],
         collapsedModelProviders: [],
+        modelPickerLayoutByServerId: {},
         recentModels: [],
         recentAgents: [],
         recentEfforts: {},
@@ -1079,7 +1101,7 @@ export const useUIStore = create<UIStore>()(
           });
         },
 
-        openContextDiff: (directory, filePath) => {
+        openContextDiff: (directory, filePath, scope = null) => {
           const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
           const normalizedFilePath = (filePath || '').trim();
           if (!normalizedDirectory || !normalizedFilePath) {
@@ -1087,7 +1109,7 @@ export const useUIStore = create<UIStore>()(
           }
 
           get().openContextPanelTab(normalizedDirectory, { mode: 'diff', targetPath: normalizedFilePath });
-          get().setPendingDiffFile(normalizedFilePath);
+          get().setPendingDiffFile(normalizedFilePath, scope ?? 'working');
         },
 
         openContextFile: (directory, filePath) => {
@@ -1440,8 +1462,11 @@ export const useUIStore = create<UIStore>()(
           set({ activeMainTab: tab });
         },
 
-        setPendingDiffFile: (filePath) => {
-          set({ pendingDiffFile: filePath });
+        setPendingDiffFile: (filePath, scope = null) => {
+          set({
+            pendingDiffFile: filePath,
+            pendingDiffScope: filePath ? (scope ?? 'working') : null,
+          });
         },
 
         setPendingFileNavigation: (navigation) => {
@@ -1452,12 +1477,16 @@ export const useUIStore = create<UIStore>()(
           set({ pendingFileFocusPath: path });
         },
 
-        navigateToDiff: (filePath) => {
+        navigateToDiff: (filePath, scope = null) => {
           const guard = get().mainTabGuard;
           if (guard && !guard('diff')) {
             return;
           }
-          set({ pendingDiffFile: filePath, activeMainTab: 'diff' });
+          set({
+            pendingDiffFile: filePath,
+            pendingDiffScope: filePath ? (scope ?? 'working') : null,
+            activeMainTab: 'diff',
+          });
         },
 
         consumePendingDiffFile: () => {
@@ -1466,6 +1495,14 @@ export const useUIStore = create<UIStore>()(
             set({ pendingDiffFile: null });
           }
           return pendingDiffFile;
+        },
+
+        consumePendingDiffScope: () => {
+          const { pendingDiffScope } = get();
+          if (pendingDiffScope) {
+            set({ pendingDiffScope: null });
+          }
+          return pendingDiffScope;
         },
 
         setPendingDiagramFile: (filePath) => {
@@ -1849,48 +1886,86 @@ export const useUIStore = create<UIStore>()(
           }));
         },
 
-        toggleModelProviderCollapsed: (providerID) => {
-          const normalizedProviderID = typeof providerID === 'string' ? providerID.trim() : '';
-          if (!normalizedProviderID) {
+        toggleModelPickerSectionCollapsed: (serverId, sectionKey) => {
+          const normalizedSectionKey = typeof sectionKey === 'string' ? sectionKey.trim() : '';
+          if (!normalizedSectionKey) {
             return;
           }
 
+          const key = normalizeModelPickerServerId(serverId);
           set((state) => {
-            const isCollapsed = state.collapsedModelProviders.includes(normalizedProviderID);
-            if (isCollapsed) {
-              return {
-                collapsedModelProviders: state.collapsedModelProviders.filter((id) => id !== normalizedProviderID),
-              };
+            const previous = state.modelPickerLayoutByServerId[key] ?? EMPTY_MODEL_PICKER_LAYOUT;
+            const nextCollapsed = toggleCollapsedSectionKey(previous.collapsedProviders, normalizedSectionKey);
+            const nextLayout: ModelPickerLayout = {
+              providerOrder: previous.providerOrder.slice(),
+              collapsedProviders: nextCollapsed,
+            };
+            if (areModelPickerLayoutsEqual(previous, nextLayout)) {
+              return state;
             }
-
             return {
-              collapsedModelProviders: [...state.collapsedModelProviders, normalizedProviderID],
+              modelPickerLayoutByServerId: {
+                ...state.modelPickerLayoutByServerId,
+                [key]: nextLayout,
+              },
+              collapsedModelProviders: [],
             };
           });
         },
 
-        setModelProvidersCollapsed: (providerIDs, collapsed) => {
-          const normalizedProviderIDs = Array.from(new Set(
-            providerIDs
-              .filter((providerID): providerID is string => typeof providerID === 'string')
-              .map((providerID) => providerID.trim())
-              .filter(Boolean)
-          ));
-
-          if (normalizedProviderIDs.length === 0) {
-            return;
-          }
-
+        setModelPickerSectionsCollapsed: (serverId, sectionKeys, collapsed) => {
+          const key = normalizeModelPickerServerId(serverId);
           set((state) => {
-            const scopedProviderIDs = new Set(normalizedProviderIDs);
-            const untouchedProviders = state.collapsedModelProviders.filter((providerID) => !scopedProviderIDs.has(providerID));
-
+            const previous = state.modelPickerLayoutByServerId[key] ?? EMPTY_MODEL_PICKER_LAYOUT;
+            const nextCollapsed = setCollapsedSectionKeys(previous.collapsedProviders, sectionKeys, collapsed);
+            const nextLayout: ModelPickerLayout = {
+              providerOrder: previous.providerOrder.slice(),
+              collapsedProviders: nextCollapsed,
+            };
+            if (areModelPickerLayoutsEqual(previous, nextLayout)) {
+              return state;
+            }
             return {
-              collapsedModelProviders: collapsed
-                ? [...untouchedProviders, ...normalizedProviderIDs]
-                : untouchedProviders,
+              modelPickerLayoutByServerId: {
+                ...state.modelPickerLayoutByServerId,
+                [key]: nextLayout,
+              },
+              collapsedModelProviders: [],
             };
           });
+        },
+
+        reorderModelProviders: (serverId, orderedProviderIDs) => {
+          const key = normalizeModelPickerServerId(serverId);
+          const nextOrder = Array.from(new Set(
+            orderedProviderIDs
+              .filter((providerID): providerID is string => typeof providerID === 'string')
+              .map((providerID) => providerID.trim())
+              .filter(Boolean),
+          ));
+
+          set((state) => {
+            const previous = state.modelPickerLayoutByServerId[key] ?? EMPTY_MODEL_PICKER_LAYOUT;
+            const nextLayout: ModelPickerLayout = {
+              providerOrder: nextOrder,
+              collapsedProviders: previous.collapsedProviders.slice(),
+            };
+            if (areModelPickerLayoutsEqual(previous, nextLayout)) {
+              return state;
+            }
+            return {
+              modelPickerLayoutByServerId: {
+                ...state.modelPickerLayoutByServerId,
+                [key]: nextLayout,
+              },
+              collapsedModelProviders: [],
+            };
+          });
+        },
+
+        getModelPickerLayout: (serverId) => {
+          const state = get();
+          return readModelPickerLayout(state.modelPickerLayoutByServerId, serverId ?? DEFAULT_SERVER_ID);
         },
 
         isFavoriteModel: (providerID, modelID) => {
@@ -2157,7 +2232,7 @@ export const useUIStore = create<UIStore>()(
       {
         name: 'ui-store',
         storage: createDeferredSafeJSONStorage(),
-        version: 10,
+        version: 11,
         migrate: (persistedState, version) => {
           if (!persistedState || typeof persistedState !== 'object') {
             return persistedState;
@@ -2247,6 +2322,15 @@ export const useUIStore = create<UIStore>()(
             }
           }
 
+          // v10 -> v11: per-server model picker layout (order + collapsed sections).
+          if (version < 11) {
+            state.modelPickerLayoutByServerId = migrateModelPickerLayoutState({
+              modelPickerLayoutByServerId: state.modelPickerLayoutByServerId,
+              collapsedModelProviders: state.collapsedModelProviders,
+            });
+            state.collapsedModelProviders = [];
+          }
+
           state.fileEditorKeymap = normalizeFileEditorKeymap(state.fileEditorKeymap);
 
           return state;
@@ -2296,7 +2380,8 @@ export const useUIStore = create<UIStore>()(
           cornerRadius: state.cornerRadius,
           favoriteModels: state.favoriteModels,
           hiddenModels: state.hiddenModels,
-          collapsedModelProviders: state.collapsedModelProviders,
+          collapsedModelProviders: [],
+          modelPickerLayoutByServerId: state.modelPickerLayoutByServerId,
           recentModels: state.recentModels,
           recentAgents: state.recentAgents,
           recentEfforts: state.recentEfforts,

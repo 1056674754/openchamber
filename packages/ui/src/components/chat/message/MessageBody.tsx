@@ -1799,7 +1799,7 @@ const AssistantMessageBody = React.memo(({
                 }
 
                 const activity = activityByPart.get(part);
-                if (activity?.kind === 'tool' && (shouldRenderActivityGroup || !isStandaloneTool(toolName))) {
+                if (activity?.kind === 'tool' && !isStandaloneTool(toolName)) {
                     i += 1;
                     continue;
                 }
@@ -1819,6 +1819,7 @@ const AssistantMessageBody = React.memo(({
                                     sessionId={sessionId}
                                     messageId={messageId}
                                     isExpanded={expandedTools.has(toolPart.id)}
+                                    streamPhase={effectiveStreamPhase}
                                     onToggle={onToggleTool}
                                     syntaxTheme={syntaxTheme}
                                     isMobile={isMobile}
@@ -2147,7 +2148,12 @@ const AssistantMessageBody = React.memo(({
                                 </Tooltip>
                             ) : null}
                             {!isMiniChatSurface && isLastAssistantInTurn && hasStopFinish ? (
-                                <TurnChangedFilesDropdown sessionId={sessionId} activityParts={turnGroupingContext?.activityParts} />
+                                <TurnChangedFilesDropdown
+                                    sessionId={sessionId}
+                                    activityParts={turnGroupingContext?.activityParts}
+                                    summaryDiffs={turnGroupingContext?.summaryDiffs}
+                                    isLatestTurn={turnGroupingContext?.isLatestTurn === true}
+                                />
                             ) : null}
                         </div>
                     </div>
