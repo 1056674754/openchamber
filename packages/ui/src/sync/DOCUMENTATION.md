@@ -65,11 +65,16 @@ Examples:
 
 ### Global session list
 
-Use `useGlobalSessionsStore` when the UI needs a **shared global session cache**.
+Use `useGlobalSessionsStore` when the UI needs a **shared partial session catalog**.
+The catalog is intentionally not a complete database snapshot:
 
-Current consumers:
+- startup loads one page of active roots
+- expanding a session loads its direct children
+- expanding an archive group loads archived roots for that server
+- SSE and successful mutations incrementally maintain entries already in memory
 
-- `useSessionAutoCleanup.ts`
+Code that deletes or reconciles by absence must not use this catalog. Retention
+cleanup performs its own paginated root scan only when cleanup actually runs.
 
 ### Live cross-directory session/status view
 
@@ -86,10 +91,11 @@ Current consumers:
 
 `useGlobalSessionsStore` is kept correct by:
 
-1. shared global fetch/reconciliation via `loadSessions()` / `refreshGlobalSessions()`
-2. paced remote directory summary scans for unopened remote directories
-3. selected session/status SSE projections that can be represented without materializing a directory store
-4. direct mutation from session actions after successful SDK calls:
+1. one-page root bootstrap via `loadSessions()` / `refreshGlobalSessions()`
+2. explicit child and archived-root demand loads
+3. paced remote directory summary scans for unopened remote directories
+4. selected session/status SSE projections that can be represented without materializing a directory store
+5. direct mutation from session actions after successful SDK calls:
    - create
    - title update
    - share

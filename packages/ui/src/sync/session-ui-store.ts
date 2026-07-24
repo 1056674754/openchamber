@@ -61,7 +61,11 @@ import {
 import { setSessionRoutingContextGetters } from "./session-routing"
 import { serverRegistry, DEFAULT_SERVER_ID } from "@/lib/opencode/server-registry"
 import { getAllSyncStores, getSyncStoresForServer } from "./multi-server-registry"
-import { useInputStore, type SyntheticContextPart } from "./input-store"
+import {
+  DRAFT_ATTACHMENT_SESSION_KEY,
+  useInputStore,
+  type SyntheticContextPart,
+} from "./input-store"
 import { useSelectionStore } from "./selection-store"
 import { useViewportStore } from "./viewport-store"
 import { useSessionWorktreeStore } from "./session-worktree-store"
@@ -879,8 +883,9 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       error: null,
     })
 
-    // Clear composer attachments when opening a new session draft.
-    // Attachments restored by revert/fork must not bleed into the new draft.
+    // Switch into the draft attachment bucket, then clear it.
+    // Previous session attachments stay stashed under their session key.
+    useInputStore.getState().setAttachmentSessionKey(DRAFT_ATTACHMENT_SESSION_KEY)
     useInputStore.getState().clearAttachedFiles()
 
     if (options?.initialPrompt) {

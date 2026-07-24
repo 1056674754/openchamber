@@ -42,6 +42,7 @@ let configState = {
 }
 let inputStoreState = {
   attachedFiles: [] as unknown[],
+  attachmentSessionKey: null as string | null,
   pendingInputText: "",
   pendingInputMode: "append" as "append" | "replace",
 }
@@ -189,9 +190,16 @@ mock.module("./session-ui-store", () => ({
 
 // Mock useInputStore
 mock.module("./input-store", () => ({
+  DRAFT_ATTACHMENT_SESSION_KEY: "__draft__",
   useInputStore: {
     getState: () => ({
       ...inputStoreState,
+      setAttachmentSessionKey: (sessionKey: string | null) => {
+        inputStoreState = { ...inputStoreState, attachmentSessionKey: sessionKey }
+      },
+      setAttachedFiles: (files: unknown[]) => {
+        inputStoreState = { ...inputStoreState, attachedFiles: files }
+      },
       clearAttachedFiles: () => {
         inputStoreState = { ...inputStoreState, attachedFiles: [] }
       },
@@ -252,6 +260,7 @@ beforeEach(() => {
   sessionMessagesResult = { data: [] }
   inputStoreState = {
     attachedFiles: [],
+    attachmentSessionKey: null,
     pendingInputText: "",
     pendingInputMode: "append",
   }
@@ -1157,6 +1166,7 @@ describe("revertToMessage", () => {
 
     inputStoreState = {
       attachedFiles: [{ id: "previous-attachment" }],
+      attachmentSessionKey: null,
       pendingInputText: "previous draft",
       pendingInputMode: "append",
     }

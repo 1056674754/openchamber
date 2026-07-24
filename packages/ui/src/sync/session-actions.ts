@@ -1449,8 +1449,12 @@ function extractUserMessageText(parts: Part[]): string {
     .trim()
 }
 
-function restoreFilePartsToInput(fileParts: Array<Record<string, unknown>>): void {
-  useInputStore.getState().clearAttachedFiles()
+function restoreFilePartsToInput(sessionId: string, fileParts: Array<Record<string, unknown>>): void {
+  const input = useInputStore.getState()
+  // Ensure restored attachments land on the target session bucket even if the
+  // visible composer is briefly on another key during the switch.
+  input.setAttachmentSessionKey(sessionId)
+  input.clearAttachedFiles()
   for (const filePart of fileParts) {
     const url = typeof filePart.url === "string" ? filePart.url : ""
     const mime = typeof filePart.mime === "string" ? filePart.mime : "application/octet-stream"
@@ -1529,7 +1533,7 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
     })
   }
 
-  restoreFilePartsToInput(submittedFileParts)
+  restoreFilePartsToInput(sessionId, submittedFileParts)
 
   // Call SDK and merge authoritative result into store
   try {
@@ -1556,8 +1560,8 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
     useInputStore.setState({
       pendingInputText: prevInputText,
       pendingInputMode: prevInputMode,
-      attachedFiles: prevInputAttachments,
     })
+    useInputStore.getState().setAttachedFiles(prevInputAttachments)
     throw err
   }
 }
@@ -1672,5 +1676,5 @@ export async function forkFromMessage(sessionId: string, messageId: string): Pro
     })
   }
 
-  restoreFilePartsToInput(fileParts)
+  restoreFilePartsToInput(forkedSession.id, fileParts)
 }

@@ -3,6 +3,9 @@ import { describe, expect, test, mock } from 'bun:test';
 import type { Session } from '@opencode-ai/sdk/v2';
 import type { SessionStatus } from '@opencode-ai/sdk/v2/client';
 import { DEFAULT_SERVER_ID, serverRegistry } from '@/lib/opencode/server-registry';
+import type { SessionListRequest } from './globalSessions';
+
+let mockedSdkClient: unknown = {};
 
 // useGlobalSessionsStore pulls in @/lib/opencode/client, which has a circular
 // dependency that surfaces as a TDZ ("Cannot access 'opencodeClient before
@@ -11,7 +14,7 @@ import { DEFAULT_SERVER_ID, serverRegistry } from '@/lib/opencode/server-registr
 // the client is sufficient to load the module under test.
 mock.module('@/lib/opencode/client', () => ({
   opencodeClient: {
-    getSdkClient: () => ({}),
+    getSdkClient: () => mockedSdkClient,
     setDirectory: () => {},
     getDirectory: () => '',
   },
@@ -37,6 +40,20 @@ const makeSession = (id: string, directory: string): Session => ({
   version: 'v1',
   time: { created: 1, updated: 2 },
 });
+
+const resetCatalog = (): void => {
+  useGlobalSessionsStore.setState({
+    activeSessions: [],
+    archivedSessions: [],
+    sessionsByDirectory: new Map(),
+    childLoadState: new Map(),
+    archivedLoadState: new Map(),
+    sessionStatuses: new Map(),
+    hasLoaded: false,
+    isCompleteSnapshot: false,
+    status: 'idle',
+  });
+};
 
 const fulfilled = (directory: string, response: unknown): Result => ({
   status: 'fulfilled',
@@ -301,5 +318,118 @@ describe('applyRemoteDirectorySnapshot', () => {
     ]);
     expect(state.sessionStatuses.has(previousA.id)).toBe(false);
     expect(serverRegistry.getServerForSession(nextA.id)).toBe('remote-a');
+  });
+});
+
+describe('demand-loaded session catalog', () => {
+  test('bootstraps with one root-only page even when a cursor is present', async () => {
+    resetCatalog();
+    const requests: SessionListRequest[] = [];
+    mockedSdkClient = {
+      experimental: {
+        session: {
+          list: async (request: SessionListRequest) => {
+            requests.push(request);
+            return {
+              data: [makeSession('root', DIR_A)],
+              response: { headers: new Headers({ 'x-next-cursor': '1' }) },
+            };
+          },
+        },
+      },
+    };
+
+    await useGlobalSessionsStore.getState().loadSessions();
+
+    expect(requests).toEqual([{
+      archived: false,
+      roots: true,
+      limit: 200,
+    }]);
+    expect(useGlobalSessionsStore.getState().activeSessions.map((session) => session.id)).toEqual(['root']);
+  });
+
+  test('preserves an SSE upsert that arrives while roots are loading', async () => {
+    resetCatalog();
+    const deferred: {
+      resolve?: (value: { data: Session[] }) => void;
+    } = {};
+    mockedSdkClient = {
+      experimental: {
+        session: {
+          list: () => new Promise<{ data: Session[] }>((resolve) => {
+            deferred.resolve = resolve;
+          }),
+        },
+      },
+    };
+
+    const load = useGlobalSessionsStore.getState().loadSessions();
+    useGlobalSessionsStore.getState().upsertSession(makeSession('live-during-load', DIR_B));
+    const resolveList = deferred.resolve;
+    if (!resolveList) throw new Error('session list request did not start');
+    resolveList({ data: [makeSession('root', DIR_A)] });
+    await load;
+
+    expect(useGlobalSessionsStore.getState().activeSessions.map((session) => session.id).sort()).toEqual([
+      'live-during-load',
+      'root',
+    ]);
+  });
+
+  test('loads children once and merges them without replacing roots', async () => {
+    resetCatalog();
+    const parent = makeSession('parent-demand', DIR_A);
+    const child = {
+      ...makeSession('child-demand', DIR_A),
+      parentID: parent.id,
+    };
+    let childRequests = 0;
+    mockedSdkClient = {
+      session: {
+        children: async () => {
+          childRequests += 1;
+          return { data: [child] };
+        },
+      },
+    };
+    serverRegistry.indexSession(parent.id, DEFAULT_SERVER_ID);
+    useGlobalSessionsStore.setState({
+      activeSessions: [parent],
+      sessionsByDirectory: new Map([[DIR_A, [parent]]]),
+    });
+
+    await useGlobalSessionsStore.getState().loadSessionChildren(parent);
+    await useGlobalSessionsStore.getState().loadSessionChildren(parent);
+
+    expect(childRequests).toBe(1);
+    expect(useGlobalSessionsStore.getState().activeSessions.map((session) => session.id).sort()).toEqual([
+      'child-demand',
+      'parent-demand',
+    ]);
+    expect(useGlobalSessionsStore.getState().childLoadState.get(parent.id)).toBe('loaded');
+  });
+
+  test('filters active roots out of the include-archived response', async () => {
+    resetCatalog();
+    const active = makeSession('active-root', DIR_A);
+    const archived = {
+      ...makeSession('archived-root', DIR_A),
+      time: { created: 1, updated: 2, archived: 3 },
+    };
+    mockedSdkClient = {
+      experimental: {
+        session: {
+          list: async () => ({ data: [active, archived] }),
+        },
+      },
+    };
+
+    await useGlobalSessionsStore.getState().loadArchivedSessions(DEFAULT_SERVER_ID, true);
+
+    expect(useGlobalSessionsStore.getState().archivedSessions.map((session) => session.id)).toEqual([
+      'archived-root',
+    ]);
+    expect(useGlobalSessionsStore.getState().activeSessions).toEqual([]);
   });
 });

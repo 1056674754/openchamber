@@ -704,26 +704,34 @@ export function useSync() {
         return { ok: false, error: `Failed to load messages: ${msg}` }
       }
 
-      // 5. Fetch status, todos, and sub-agents in parallel.
       try {
-        await Promise.all([
-          readStatusesForTarget(client, target.serverId, sessionDir).then((statuses) => {
-            const status = statuses[sessionID] ?? { type: "idle" as const }
-            target.store.setState((s) => ({
-              session_status: { ...s.session_status, [sessionID]: status },
-            }))
-            useGlobalSessionsStore.getState().upsertStatus(sessionID, status)
-          }),
-          client.session.todo({ sessionID, directory: sessionDir }).then((res) => {
-            const todos: Todo[] | undefined = res.data && res.data.length > 0 ? res.data : undefined
-            target.store.setState((s) => ({
-              todo: { ...s.todo, [sessionID]: todos ?? [] },
-            }))
-            useTodosPersistStore.getState().setSessionTodos(sessionID, todos)
-          }),
-        ])
-      } catch {
-        // Status/todo failures are non-critical for the refresh.
+        const statuses = await readStatusesForTarget(client, target.serverId, sessionDir)
+        const status = statuses[sessionID] ?? { type: "idle" as const }
+        target.store.setState((s) => ({
+          session_status: { ...s.session_status, [sessionID]: status },
+        }))
+        useGlobalSessionsStore.getState().upsertStatus(sessionID, status)
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e)
+        return { ok: false, error: `Failed to refresh session status: ${msg}` }
+      }
+
+      try {
+        const result = await client.session.todo({ sessionID, directory: sessionDir })
+        if (result.error) throw new Error(`session.todo failed: ${formatSdkError(result.error)}`)
+        const todos: Todo[] | undefined = result.data && result.data.length > 0 ? result.data : undefined
+        target.store.setState((s) => ({
+          todo: { ...s.todo, [sessionID]: todos ?? [] },
+        }))
+        useTodosPersistStore.getState().setSessionTodos(sessionID, todos)
+      } catch (e) {
+        const error = e instanceof Error ? e : new Error(String(e))
+        console.warn("[sync] failed to refresh session todos", {
+          sessionID,
+          directory: sessionDir,
+          serverId: target.serverId,
+          error: formatSdkError(error),
+        })
       }
 
       return { ok: true }

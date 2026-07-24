@@ -1,4 +1,4 @@
-import type { OpencodeClient, Session } from "@opencode-ai/sdk/v2";
+import type { Session } from "@opencode-ai/sdk/v2";
 import { retry } from "@/sync/retry";
 
 export type GlobalSessionRecord = Session & {
@@ -7,6 +7,33 @@ export type GlobalSessionRecord = Session & {
         name?: string;
         worktree?: string;
     } | null;
+};
+
+export type SessionListRequest = {
+    directory?: string;
+    archived: boolean;
+    roots?: boolean;
+    search?: string;
+    start?: number;
+    cursor?: number;
+    limit: number;
+};
+
+type SessionListResponse = {
+    data?: Session[];
+    error?: unknown;
+    response?: {
+        status?: number;
+        headers?: unknown;
+    };
+};
+
+export type SessionListClient = {
+    experimental: {
+        session: {
+            list: (request: SessionListRequest) => Promise<SessionListResponse>;
+        };
+    };
 };
 
 const toNumber = (value: string | null): number | null => {
@@ -72,6 +99,21 @@ const unwrapSessionList = (
     return result.data as GlobalSessionRecord[];
 };
 
+const requestSessionPage = async (
+    apiClient: SessionListClient,
+    request: SessionListRequest,
+): Promise<{ sessions: GlobalSessionRecord[]; response: unknown }> => {
+    const result = await retry(
+        () => apiClient.experimental.session.list(request),
+        { attempts: 3, delay: 500, retryIf: () => true },
+    );
+
+    return {
+        sessions: unwrapSessionList(result, "experimental.session.list"),
+        response: result.response,
+    };
+};
+
 export const readNextCursor = (response: unknown): number | null => {
     return toNumber(readResponseHeader(response, "x-next-cursor"));
 };
@@ -95,12 +137,36 @@ export const isMissingGlobalSessionsEndpointError = (error: unknown): boolean =>
     return status === 404;
 };
 
-export async function listGlobalSessionPages(
-    apiClient: OpencodeClient,
+export async function listGlobalSessionPage(
+    apiClient: SessionListClient,
     options: {
         directory?: string;
         archived: boolean;
         roots?: boolean;
+        search?: string;
+        start?: number;
+        pageSize: number;
+    },
+): Promise<GlobalSessionRecord[]> {
+    const { sessions } = await requestSessionPage(apiClient, {
+        ...(options.directory ? { directory: options.directory } : {}),
+        archived: options.archived,
+        ...(options.roots !== undefined ? { roots: options.roots } : {}),
+        ...(options.search ? { search: options.search } : {}),
+        ...(options.start !== undefined ? { start: options.start } : {}),
+        limit: options.pageSize,
+    });
+    return sessions;
+}
+
+export async function listGlobalSessionPages(
+    apiClient: SessionListClient,
+    options: {
+        directory?: string;
+        archived: boolean;
+        roots?: boolean;
+        search?: string;
+        start?: number;
         pageSize: number;
         onPage?: (sessions: GlobalSessionRecord[]) => void;
     },
@@ -110,18 +176,17 @@ export async function listGlobalSessionPages(
     let cursor: number | undefined;
 
     while (true) {
-        const response = await retry(
-            () => apiClient.experimental.session.list({
+        const page = await requestSessionPage(apiClient, {
                 ...(options.directory ? { directory: options.directory } : {}),
                 archived: options.archived,
                 ...(options.roots !== undefined ? { roots: options.roots } : {}),
+                ...(options.search ? { search: options.search } : {}),
+                ...(options.start !== undefined ? { start: options.start } : {}),
                 limit: options.pageSize,
                 ...(cursor !== undefined ? { cursor } : {}),
-            }),
-            { attempts: 3, delay: 500, retryIf: () => true },
-        );
+        });
 
-        const payload = unwrapSessionList(response, "experimental.session.list");
+        const payload = page.sessions;
         if (payload.length === 0) break;
 
         let appended = 0;
@@ -140,7 +205,7 @@ export async function listGlobalSessionPages(
 
         // Prefer server header; fall back to last session's `time.updated`
         // (cursor semantics on server = "updated strictly before this timestamp").
-        const headerCursor = toNumber(readResponseHeader(response, "x-next-cursor"));
+        const headerCursor = toNumber(readResponseHeader(page.response, "x-next-cursor"));
         const lastUpdated = payload[payload.length - 1]?.time?.updated;
         const nextCursor = headerCursor
             ?? (typeof lastUpdated === "number" && Number.isFinite(lastUpdated) ? lastUpdated : undefined);

@@ -3,13 +3,14 @@ import type { OpencodeClient, Session } from '@opencode-ai/sdk/v2';
 import type { SessionStatus } from '@opencode-ai/sdk/v2/client';
 import { opencodeClient } from '@/lib/opencode/client';
 import { DEFAULT_SERVER_ID, serverRegistry } from '@/lib/opencode/server-registry';
-import { listGlobalSessionPages } from '@/stores/globalSessions';
+import { listGlobalSessionPage, listGlobalSessionPages } from '@/stores/globalSessions';
 import { retry } from '@/sync/retry';
 import { readRemoteSessionStatuses } from '@/sync/remote-session-status';
 import { shouldSkipStaleSessionEvent } from '@/sync/session-event-freshness';
 import { normalizePath } from '@/lib/pathNormalization';
 
 type GlobalSessionsStatus = 'idle' | 'loading' | 'ready' | 'error';
+type DemandLoadStatus = 'loading' | 'loaded' | 'error';
 
 type LoadResult = {
   activeSessions: Session[];
@@ -21,11 +22,16 @@ type GlobalSessionsState = {
   archivedSessions: Session[];
   sessionsByDirectory: Map<string, Session[]>;
   hasLoaded: boolean;
+  isCompleteSnapshot: boolean;
   status: GlobalSessionsStatus;
+  childLoadState: Map<string, DemandLoadStatus>;
+  archivedLoadState: Map<string, DemandLoadStatus>;
   /** Session running status across all directories — single source of truth for sidebar indicators */
   sessionStatuses: Map<string, SessionStatus>;
   loadSessions: (fallbackActive?: Session[]) => Promise<LoadResult>;
   refreshSessionsForDirectories: (directories: Iterable<string>, fallbackActive?: Session[]) => Promise<LoadResult>;
+  loadSessionChildren: (session: Session) => Promise<Session[]>;
+  loadArchivedSessions: (serverId?: string, force?: boolean) => Promise<Session[]>;
   applySnapshot: (activeSessions: Session[], archivedSessions: Session[], status?: GlobalSessionsStatus) => void;
   applyRemoteDirectorySnapshot: (serverId: string, directory: string, sessions: Session[]) => void;
   upsertSession: (session: Session) => void;
@@ -41,6 +47,8 @@ const STATUS_BATCH_TTL_MS = 15_000;
 const STATUS_BATCH_MAX_CONCURRENCY = 6;
 
 let inflightLoad: Promise<LoadResult> | null = null;
+const inflightChildLoads = new Map<string, Promise<Session[]>>();
+const inflightArchivedLoads = new Map<string, Promise<Session[]>>();
 const statusLoadedAtByDirectory = new Map<string, number>();
 const inflightStatusLoadsByDirectory = new Map<string, Promise<unknown>>();
 
@@ -189,34 +197,7 @@ const normalizeDirectorySet = (directories: Iterable<string>): Set<string> => {
   return next;
 };
 
-const replaceSessionsForDirectories = (
-  existing: Session[],
-  incoming: Session[],
-  directories: Set<string>,
-): Session[] => {
-  if (directories.size === 0) {
-    return existing;
-  }
-
-  const existingById = new Map(existing.map((session) => [session.id, session]));
-  const incomingById = new Map<string, Session>();
-
-  for (const session of incoming) {
-    if (!session?.id) continue;
-    incomingById.set(session.id, mergeSessionDirectoryMetadata(session, existingById.get(session.id)));
-  }
-
-  const kept = existing.filter((session) => {
-    if (incomingById.has(session.id)) return false;
-    const directory = resolveGlobalSessionDirectory(session);
-    return !directory || !directories.has(directory);
-  });
-
-  return sortSessionsByUpdated([...incomingById.values(), ...kept]);
-};
-
 type DirectoryPageResult = {
-  directories: Set<string>;
   sessions: Session[];
   errors: unknown[];
 };
@@ -224,29 +205,31 @@ type DirectoryPageResult = {
 const fetchDirectoryPages = async (
   sdk: OpencodeClient,
   directories: Set<string>,
-  archived: boolean,
 ): Promise<DirectoryPageResult> => {
   const results = await Promise.allSettled(
     [...directories].map(async (directory) => ({
       directory,
-      sessions: await listGlobalSessionPages(sdk, { directory, archived, pageSize: PAGE_SIZE }),
+      sessions: await listGlobalSessionPage(sdk, {
+        directory,
+        archived: false,
+        roots: true,
+        pageSize: PAGE_SIZE,
+      }),
     })),
   );
 
-  const fulfilledDirectories = new Set<string>();
   const sessions: Session[] = [];
   const errors: unknown[] = [];
 
   for (const result of results) {
     if (result.status === 'fulfilled') {
-      fulfilledDirectories.add(result.value.directory);
       sessions.push(...result.value.sessions);
     } else {
       errors.push(result.reason);
     }
   }
 
-  return { directories: fulfilledDirectories, sessions, errors };
+  return { sessions, errors };
 };
 
 type StatusLoadResult = {
@@ -438,6 +421,117 @@ const indexDefaultServerSessions = (sessions: Session[]): void => {
   }
 };
 
+const indexServerSessions = (sessions: Session[], serverId: string): void => {
+  for (const session of sessions) {
+    if (session.id) {
+      serverRegistry.indexSession(session.id, serverId);
+    }
+  }
+};
+
+const getClientForServer = (serverId: string): OpencodeClient => {
+  if (serverId === DEFAULT_SERVER_ID) {
+    return opencodeClient.getSdkClient();
+  }
+
+  const connection = serverRegistry.get(serverId);
+  if (!connection) {
+    throw new Error(`OpenCode server is not registered: ${serverId}`);
+  }
+  return connection.client;
+};
+
+const unwrapChildren = (
+  result: { data?: Session[]; error?: unknown; response?: { status?: number } },
+): Session[] => {
+  if (result.error) {
+    const status = result.response?.status;
+    throw new Error(`session.children failed${status ? ` (${status})` : ''}`);
+  }
+  if (!Array.isArray(result.data)) {
+    throw new Error('session.children returned no data');
+  }
+  return result.data;
+};
+
+const mergeDemandSessions = (
+  state: GlobalSessionsState,
+  sessions: Session[],
+): Pick<GlobalSessionsState, 'activeSessions' | 'archivedSessions' | 'sessionsByDirectory'> => {
+  const incomingActive = sessions.filter((session) => !session.time?.archived);
+  const incomingArchived = sessions.filter((session) => Boolean(session.time?.archived));
+  const activeSessions = sortSessionsByUpdated(mergeSessionLists(state.activeSessions, incomingActive));
+  const archivedSessions = sortSessionsByUpdated(mergeSessionLists(state.archivedSessions, incomingArchived));
+  const nextActiveSessions = sameSessionList(state.activeSessions, activeSessions)
+    ? state.activeSessions
+    : activeSessions;
+  const nextArchivedSessions = sameSessionList(state.archivedSessions, archivedSessions)
+    ? state.archivedSessions
+    : archivedSessions;
+
+  return {
+    activeSessions: nextActiveSessions,
+    archivedSessions: nextArchivedSessions,
+    sessionsByDirectory: nextActiveSessions === state.activeSessions
+      ? state.sessionsByDirectory
+      : buildSessionsByDirectory(nextActiveSessions),
+  };
+};
+
+export const searchGlobalRootSessions = async (query: string): Promise<Session[]> => {
+  const search = query.trim();
+  if (!search) return [];
+
+  const targets = new Map<string, OpencodeClient>([
+    [DEFAULT_SERVER_ID, getClientForServer(DEFAULT_SERVER_ID)],
+  ]);
+  for (const connection of serverRegistry.getAll()) {
+    if (
+      connection.config.id !== DEFAULT_SERVER_ID
+      && connection.healthStatus === 'healthy'
+    ) {
+      targets.set(connection.config.id, connection.client);
+    }
+  }
+
+  const results = await Promise.allSettled(
+    [...targets].map(async ([serverId, client]) => ({
+      serverId,
+      sessions: await listGlobalSessionPage(client, {
+        archived: true,
+        roots: true,
+        search,
+        pageSize: PAGE_SIZE,
+      }),
+    })),
+  );
+
+  const sessions: Session[] = [];
+  const seen = new Set<string>();
+  let successfulTargets = 0;
+  const failures: unknown[] = [];
+  for (const result of results) {
+    if (result.status === 'rejected') {
+      failures.push(result.reason);
+      continue;
+    }
+
+    successfulTargets += 1;
+    indexServerSessions(result.value.sessions, result.value.serverId);
+    for (const session of result.value.sessions) {
+      if (!session.id || seen.has(session.id)) continue;
+      seen.add(session.id);
+      sessions.push(session);
+    }
+  }
+
+  if (successfulTargets === 0) {
+    throw new AggregateError(failures, 'Session search failed on every OpenCode server');
+  }
+
+  return sortSessionsByUpdated(sessions);
+};
+
 const applySnapshot = (
   state: GlobalSessionsState,
   activeSessions: Session[],
@@ -478,7 +572,10 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
   archivedSessions: [],
   sessionsByDirectory: new Map(),
   sessionStatuses: new Map(),
+  childLoadState: new Map(),
+  archivedLoadState: new Map(),
   hasLoaded: false,
+  isCompleteSnapshot: false,
   status: 'idle',
 
   applySnapshot: (activeSessions, archivedSessions, status = 'ready') => {
@@ -574,63 +671,36 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
     set((state) => (state.status === 'loading' ? state : { status: 'loading' }));
 
     inflightLoad = (async () => {
-      const current = get();
-
       try {
         const sdk = opencodeClient.getSdkClient();
-        const [activeResult, archivedResult] = await Promise.allSettled([
-          listGlobalSessionPages(sdk, { archived: false, pageSize: PAGE_SIZE }),
-          listGlobalSessionPages(sdk, { archived: true, pageSize: PAGE_SIZE }),
-        ]);
+        const roots = await listGlobalSessionPage(sdk, {
+          archived: false,
+          roots: true,
+          pageSize: PAGE_SIZE,
+        });
+        indexDefaultServerSessions(roots);
 
-        const fallbackSnapshot = mergeSessionLists(current.activeSessions, fallbackActive);
-        // Preserve live sessions on success — server list may lag behind newly created sessions.
-        const nextActiveSessions = activeResult.status === 'fulfilled'
-          ? mergeSessionLists(activeResult.value, fallbackActive)
-          : fallbackSnapshot;
-        const nextArchivedSessions = archivedResult.status === 'fulfilled'
-          ? archivedResult.value
-          : current.archivedSessions;
-
-        if (activeResult.status === 'rejected') {
-          console.warn('[GlobalSessions] Failed to load active sessions, preserving existing snapshot with fallback merge:', activeResult.reason);
-        }
-        if (archivedResult.status === 'rejected') {
-          console.warn('[GlobalSessions] Failed to load archived sessions, preserving current snapshot:', archivedResult.reason);
-        }
-
-        if (activeResult.status === 'fulfilled') {
-          indexDefaultServerSessions(activeResult.value);
-        }
-        if (archivedResult.status === 'fulfilled') {
-          indexDefaultServerSessions(archivedResult.value);
-        }
-
-        set((state) => applySnapshot(state, nextActiveSessions, nextArchivedSessions, 'ready'));
-
-        if (nextActiveSessions.length > 0) {
-          const directories = new Set<string>();
-          for (const session of nextActiveSessions) {
-            const dir = resolveGlobalSessionDirectory(session);
-            if (dir) directories.add(dir);
-          }
-          if (directories.size > 0) {
-            void get().batchLoadStatuses([...directories]).catch((err) => {
-              console.warn('[GlobalSessions] Failed to batch-load statuses:', err);
-            });
-          }
-        }
-
-        return { activeSessions: nextActiveSessions, archivedSessions: nextArchivedSessions };
+        set((state) => {
+          const nextActiveSessions = sortSessionsByUpdated(
+            mergeSessionLists(mergeSessionLists(roots, state.activeSessions), fallbackActive),
+          );
+          return applySnapshot(state, nextActiveSessions, state.archivedSessions, 'ready');
+        });
       } catch (error) {
-        const nextActiveSessions = mergeSessionLists(current.activeSessions, fallbackActive);
-        const nextArchivedSessions = current.archivedSessions;
         console.warn('[GlobalSessions] Failed to load sessions, using fallback snapshot:', error);
-        set((state) => applySnapshot(state, nextActiveSessions, nextArchivedSessions, 'error'));
-        return { activeSessions: nextActiveSessions, archivedSessions: nextArchivedSessions };
+        set((state) => {
+          const nextActiveSessions = mergeSessionLists(state.activeSessions, fallbackActive);
+          return applySnapshot(state, nextActiveSessions, state.archivedSessions, 'error');
+        });
       } finally {
         inflightLoad = null;
       }
+
+      const state = get();
+      return {
+        activeSessions: state.activeSessions,
+        archivedSessions: state.archivedSessions,
+      };
     })();
 
     return inflightLoad;
@@ -644,28 +714,18 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
     }
 
     const sdk = opencodeClient.getSdkClient();
-    const [active, archived] = await Promise.all([
-      fetchDirectoryPages(sdk, directorySet, false),
-      fetchDirectoryPages(sdk, directorySet, true),
-    ]);
+    const active = await fetchDirectoryPages(sdk, directorySet);
 
     if (active.errors.length > 0) {
-      console.warn('[GlobalSessions] Failed to refresh active sessions for some directories:', active.errors[0]);
+      console.warn('[GlobalSessions] Failed to refresh root sessions for some directories:', active.errors[0]);
     }
-    if (archived.errors.length > 0) {
-      console.warn('[GlobalSessions] Failed to refresh archived sessions for some directories:', archived.errors[0]);
-    }
+    indexDefaultServerSessions(active.sessions);
 
     set((state) => {
-      let nextActiveSessions = replaceSessionsForDirectories(state.activeSessions, active.sessions, active.directories);
-      nextActiveSessions = mergeSessionLists(nextActiveSessions, fallbackActive);
+      let nextActiveSessions = sortSessionsByUpdated(mergeSessionLists(state.activeSessions, active.sessions));
+      nextActiveSessions = sortSessionsByUpdated(mergeSessionLists(nextActiveSessions, fallbackActive));
       if (sameSessionList(state.activeSessions, nextActiveSessions)) {
         nextActiveSessions = state.activeSessions;
-      }
-
-      let nextArchivedSessions = replaceSessionsForDirectories(state.archivedSessions, archived.sessions, archived.directories);
-      if (sameSessionList(state.archivedSessions, nextArchivedSessions)) {
-        nextArchivedSessions = state.archivedSessions;
       }
 
       const nextSessionsByDirectory = nextActiveSessions === state.activeSessions
@@ -674,7 +734,6 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
 
       if (
         nextActiveSessions === state.activeSessions
-        && nextArchivedSessions === state.archivedSessions
         && nextSessionsByDirectory === state.sessionsByDirectory
       ) {
         return state;
@@ -682,13 +741,115 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
 
       return {
         activeSessions: nextActiveSessions,
-        archivedSessions: nextArchivedSessions,
         sessionsByDirectory: nextSessionsByDirectory,
       };
     });
 
     const state = get();
     return { activeSessions: state.activeSessions, archivedSessions: state.archivedSessions };
+  },
+
+  loadSessionChildren: async (session) => {
+    const currentStatus = get().childLoadState.get(session.id);
+    if (currentStatus === 'loaded') {
+      return [...get().activeSessions, ...get().archivedSessions].filter((candidate) => (
+        (candidate as Session & { parentID?: string | null }).parentID === session.id
+      ));
+    }
+
+    const existing = inflightChildLoads.get(session.id);
+    if (existing) return existing;
+
+    const load = (async () => {
+      set((state) => {
+        const childLoadState = new Map(state.childLoadState);
+        childLoadState.set(session.id, 'loading');
+        return { childLoadState };
+      });
+
+      try {
+        const serverId = serverRegistry.getServerForSession(session.id) ?? DEFAULT_SERVER_ID;
+        const client = getClientForServer(serverId);
+        const directory = resolveGlobalSessionDirectory(session);
+        const result = await retry(() => client.session.children({
+          sessionID: session.id,
+          ...(directory ? { directory } : {}),
+        }));
+        const children = unwrapChildren(result);
+        indexServerSessions(children, serverId);
+
+        set((state) => {
+          const merged = mergeDemandSessions(state, children);
+          const childLoadState = new Map(state.childLoadState);
+          childLoadState.set(session.id, 'loaded');
+          return { ...merged, childLoadState };
+        });
+        return children;
+      } catch (error) {
+        set((state) => {
+          const childLoadState = new Map(state.childLoadState);
+          childLoadState.set(session.id, 'error');
+          return { childLoadState };
+        });
+        throw error;
+      } finally {
+        inflightChildLoads.delete(session.id);
+      }
+    })();
+
+    inflightChildLoads.set(session.id, load);
+    return load;
+  },
+
+  loadArchivedSessions: async (serverId = DEFAULT_SERVER_ID, force = false) => {
+    const currentStatus = get().archivedLoadState.get(serverId);
+    if (!force && currentStatus === 'loaded') {
+      return get().archivedSessions.filter((session) => (
+        (serverRegistry.getServerForSession(session.id) ?? DEFAULT_SERVER_ID) === serverId
+      ));
+    }
+
+    const existing = inflightArchivedLoads.get(serverId);
+    if (existing) return existing;
+
+    const load = (async () => {
+      set((state) => {
+        const archivedLoadState = new Map(state.archivedLoadState);
+        archivedLoadState.set(serverId, 'loading');
+        return { archivedLoadState };
+      });
+
+      try {
+        const client = getClientForServer(serverId);
+        const includedRoots = await listGlobalSessionPages(client, {
+          archived: true,
+          roots: true,
+          pageSize: PAGE_SIZE,
+        });
+        indexServerSessions(includedRoots, serverId);
+        const archivedRoots = includedRoots.filter((session) => Boolean(session.time?.archived));
+
+        set((state) => {
+          const merged = mergeDemandSessions(state, archivedRoots);
+          const archivedLoadState = new Map(state.archivedLoadState);
+          archivedLoadState.set(serverId, 'loaded');
+          return { ...merged, archivedLoadState };
+        });
+        return archivedRoots;
+      } catch (error) {
+        set((state) => {
+          const archivedLoadState = new Map(state.archivedLoadState);
+          archivedLoadState.set(serverId, 'error');
+          return { archivedLoadState };
+        });
+        throw error;
+      } finally {
+        inflightArchivedLoads.delete(serverId);
+      }
+    })();
+
+    inflightArchivedLoads.set(serverId, load);
+    return load;
   },
 
   upsertSession: (session) => {
