@@ -36,6 +36,7 @@ describe('project-config runtime', () => {
           prompt: 'Summarize repository changes',
           providerID: 'openai',
           modelID: 'gpt-4.1',
+          permissionAutoAccept: true,
         },
       });
 
@@ -46,6 +47,7 @@ describe('project-config runtime', () => {
       expect(reloaded[0].name).toBe('Nightly digest');
       expect(reloaded[0].schedule.timezone).toBe('UTC');
       expect(reloaded[0].schedule.times).toEqual(['09:30']);
+      expect(reloaded[0].execution.permissionAutoAccept).toBe(true);
     } finally {
       await cleanup();
     }

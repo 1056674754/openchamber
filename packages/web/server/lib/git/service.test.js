@@ -11,6 +11,7 @@ import {
   fetch,
   getRemotes,
   getStatus,
+  populateWorktreeWithLockRecovery,
   resetToCommit,
   resolveBaseRefForLog,
   revertCommit,
@@ -53,6 +54,55 @@ afterEach(() => {
     fs.rmSync(dir, { recursive: true, force: true });
   }
   tempDirs.length = 0;
+});
+
+describe('worktree population', () => {
+  const createLockedWorktree = () => {
+    const repo = createTempDir();
+    const worktree = createTempDir();
+    runGit(repo, ['init', '-b', 'main']);
+    runGit(repo, ['config', 'user.email', 'test@example.com']);
+    runGit(repo, ['config', 'user.name', 'Test User']);
+    fs.writeFileSync(path.join(repo, 'README.md'), '# Test\n');
+    runGit(repo, ['add', 'README.md']);
+    runGit(repo, ['commit', '-m', 'Initial commit']);
+    fs.rmSync(worktree, { recursive: true, force: true });
+    runGit(repo, ['worktree', 'add', '--no-checkout', '-b', `feature/lock-${Date.now()}`, worktree, 'HEAD']);
+
+    const gitDirValue = fs.readFileSync(path.join(worktree, '.git'), 'utf8').replace(/^gitdir:\s*/, '').trim();
+    const gitDir = path.isAbsolute(gitDirValue)
+      ? gitDirValue
+      : path.resolve(worktree, gitDirValue);
+    const lockPath = path.join(gitDir, 'index.lock');
+    fs.writeFileSync(lockPath, 'stale');
+    return { lockPath, worktree };
+  };
+
+  it('recovers from an unchanged stale index lock', async () => {
+    if (!canRunGit()) return;
+
+    const { lockPath, worktree } = createLockedWorktree();
+
+    await populateWorktreeWithLockRecovery(worktree);
+    expect(fs.existsSync(lockPath)).toBe(false);
+    expect(fs.readFileSync(path.join(worktree, 'README.md'), 'utf8')).toBe('# Test\n');
+  });
+
+  it('preserves an index lock that changes during the stale observation window', async () => {
+    if (!canRunGit()) return;
+
+    const { lockPath, worktree } = createLockedWorktree();
+    const updateTimer = setTimeout(() => {
+      fs.writeFileSync(lockPath, 'active-lock');
+    }, 500);
+
+    try {
+      await expect(populateWorktreeWithLockRecovery(worktree)).rejects.toThrow();
+      expect(fs.readFileSync(lockPath, 'utf8')).toBe('active-lock');
+    } finally {
+      clearTimeout(updateTimer);
+    }
+  });
 });
 
 /**

@@ -213,6 +213,7 @@ const normalizeExecution = (value) => {
   const modelID = asNonEmptyString(value.modelID);
   const variant = asNonEmptyString(value.variant);
   const agent = asNonEmptyString(value.agent);
+  const permissionAutoAccept = value.permissionAutoAccept === true;
 
   if (!prompt) {
     throw new Error('execution.prompt is required');
@@ -230,6 +231,7 @@ const normalizeExecution = (value) => {
     modelID,
     ...(variant ? { variant } : {}),
     ...(agent ? { agent } : {}),
+    ...(permissionAutoAccept ? { permissionAutoAccept: true } : {}),
   };
 };
 

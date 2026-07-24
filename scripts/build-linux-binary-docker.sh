@@ -53,7 +53,7 @@ docker run --rm --platform linux/amd64 \
       --exclude .DS_Store \
       --exclude node_modules \
       --exclude "packages/*/node_modules" \
-      --exclude artifacts \
+      --exclude ./artifacts \
       --exclude openchamber-linux \
       --exclude ".*.bun-build" \
       -cf - . | tar -C /work -xf -

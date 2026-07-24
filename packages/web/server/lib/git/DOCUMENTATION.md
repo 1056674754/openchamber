@@ -116,6 +116,7 @@ The following functions are internal helpers used by exported functions:
 - `name`: Worktree name.
 - `branch`: Local branch name.
 - `path`: Absolute path to worktree directory.
+- Worktree bootstrap retries transient `index.lock` conflicts. If the lock remains metadata-identical across the retry window, it is treated as stale, removed, and population continues; changing locks are left untouched and reported as failures.
 
 ### Log Response
 - `all`: Array of commit objects with hash, date, message, author info, stats.
