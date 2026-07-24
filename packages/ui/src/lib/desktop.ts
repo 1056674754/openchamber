@@ -123,6 +123,10 @@ export type DesktopSettings = {
   smallModelUseDefault?: boolean;
   /** Explicit utility model as `provider/model`. Empty string clears. */
   smallModelOverride?: string;
+  /** Session Goals control loop (local OpenCode only in v1). */
+  sessionGoalEnabled?: boolean;
+  sessionGoalDefaultBudgetEnabled?: boolean;
+  sessionGoalDefaultBudget?: number;
   defaultGitIdentityId?: string; // ''/undefined = unset, 'global' or profile id
   openInAppId?: string;
   autoCreateWorktree?: boolean;
@@ -148,7 +152,6 @@ export type DesktopSettings = {
   sessionSortMode?: 'updated-desc' | 'created-desc';
   sessionGroupMinVisible?: number;
   sessionGroupRecentHours?: number;
-  mermaidRenderingMode?: 'svg' | 'ascii';
   userMessageRenderingMode?: 'markdown' | 'plain';
   collapsibleUserMessages?: boolean;
   stickyUserHeader?: boolean;

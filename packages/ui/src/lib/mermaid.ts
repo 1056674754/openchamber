@@ -1,0 +1,93 @@
+import type { MermaidConfig } from 'mermaid'
+
+let mermaidModule: typeof import('mermaid')['default'] | null = null
+
+async function getMermaid() {
+  if (!mermaidModule) {
+    const { default: mermaid } = await import('mermaid')
+    mermaidModule = mermaid
+  }
+  return mermaidModule
+}
+
+export type MermaidThemeColors = {
+  elevated: string
+  foreground: string
+  border: string
+  accent: string
+  mutedForeground: string
+  muted: string
+}
+
+function buildConfig(colors: MermaidThemeColors): MermaidConfig {
+  return {
+    startOnLoad: false,
+    theme: 'base',
+    securityLevel: 'strict',
+    suppressErrorRendering: true,
+    flowchart: {
+      curve: 'basis',
+      useMaxWidth: true,
+      htmlLabels: true,
+    },
+    themeVariables: {
+      background: 'transparent',
+      primaryColor: colors.muted,
+      primaryTextColor: colors.foreground,
+      primaryBorderColor: colors.border,
+      lineColor: colors.border,
+      secondaryColor: colors.elevated,
+      secondaryTextColor: colors.mutedForeground,
+      tertiaryColor: colors.elevated,
+      tertiaryTextColor: colors.foreground,
+      textColor: colors.foreground,
+      mainBkg: colors.muted,
+      nodeBorder: colors.border,
+      clusterBkg: colors.elevated,
+      clusterBorder: colors.border,
+      titleColor: colors.foreground,
+      edgeLabelBackground: colors.elevated,
+      fontFamily: '"IBM Plex Sans", sans-serif',
+      fontSize: '13px',
+    },
+  }
+}
+
+let activeRenders = 0
+const MAX_CONCURRENT = 2
+const renderQueue: Array<() => void> = []
+
+function acquireSlot(): Promise<void> {
+  if (activeRenders < MAX_CONCURRENT) {
+    activeRenders++
+    return Promise.resolve()
+  }
+  return new Promise((resolve) => {
+    renderQueue.push(() => { activeRenders++; resolve() })
+  })
+}
+
+function releaseSlot(): void {
+  activeRenders--
+  const next = renderQueue.shift()
+  if (next) next()
+}
+
+let renderCounter = 0
+
+export async function renderMermaidDiagram(
+  source: string,
+  colors: MermaidThemeColors,
+): Promise<string> {
+  await acquireSlot()
+  try {
+    const mermaid = await getMermaid()
+    mermaid.initialize(buildConfig(colors))
+    await mermaid.parse(source)
+    const id = `mmd-${++renderCounter}`
+    const { svg } = await mermaid.render(id, source)
+    return svg
+  } finally {
+    releaseSlot()
+  }
+}

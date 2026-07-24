@@ -537,12 +537,6 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
       store.setSessionGroupRecentHours(settings.sessionGroupRecentHours);
     }
   }
-  if (typeof settings.mermaidRenderingMode === 'string'
-    && (settings.mermaidRenderingMode === 'svg' || settings.mermaidRenderingMode === 'ascii')) {
-    if (settings.mermaidRenderingMode !== store.mermaidRenderingMode) {
-      store.setMermaidRenderingMode(settings.mermaidRenderingMode);
-    }
-  }
   if (typeof settings.userMessageRenderingMode === 'string'
     && (settings.userMessageRenderingMode === 'markdown' || settings.userMessageRenderingMode === 'plain')) {
     if (settings.userMessageRenderingMode !== store.userMessageRenderingMode) {
@@ -584,6 +578,22 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
   }
   if (typeof settings.multiRunEnabled === 'boolean' && settings.multiRunEnabled !== store.multiRunEnabled) {
     store.setMultiRunEnabled(settings.multiRunEnabled);
+  }
+  if (typeof settings.sessionGoalEnabled === 'boolean' && settings.sessionGoalEnabled !== store.sessionGoalEnabled) {
+    store.setSessionGoalEnabled(settings.sessionGoalEnabled);
+  }
+  if (
+    typeof settings.sessionGoalDefaultBudgetEnabled === 'boolean'
+    && settings.sessionGoalDefaultBudgetEnabled !== store.sessionGoalDefaultBudgetEnabled
+  ) {
+    store.setSessionGoalDefaultBudgetEnabled(settings.sessionGoalDefaultBudgetEnabled);
+  }
+  if (
+    typeof settings.sessionGoalDefaultBudget === 'number'
+    && Number.isFinite(settings.sessionGoalDefaultBudget)
+    && settings.sessionGoalDefaultBudget !== store.sessionGoalDefaultBudget
+  ) {
+    store.setSessionGoalDefaultBudget(settings.sessionGoalDefaultBudget);
   }
   if (typeof settings.fontSize === 'number' && Number.isFinite(settings.fontSize) && settings.fontSize !== store.fontSize) {
     store.setFontSize(settings.fontSize);
@@ -1087,10 +1097,6 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
     && candidate.sessionGroupRecentHours >= 1) {
     result.sessionGroupRecentHours = candidate.sessionGroupRecentHours;
   }
-  if (typeof candidate.mermaidRenderingMode === 'string'
-    && (candidate.mermaidRenderingMode === 'svg' || candidate.mermaidRenderingMode === 'ascii')) {
-    result.mermaidRenderingMode = candidate.mermaidRenderingMode;
-  }
   if (typeof candidate.userMessageRenderingMode === 'string'
     && (candidate.userMessageRenderingMode === 'markdown' || candidate.userMessageRenderingMode === 'plain')) {
     result.userMessageRenderingMode = candidate.userMessageRenderingMode;
@@ -1132,6 +1138,15 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
     } else if (trimmed.includes('/')) {
       result.smallModelOverride = trimmed;
     }
+  }
+  if (typeof candidate.sessionGoalEnabled === 'boolean') {
+    result.sessionGoalEnabled = candidate.sessionGoalEnabled;
+  }
+  if (typeof candidate.sessionGoalDefaultBudgetEnabled === 'boolean') {
+    result.sessionGoalDefaultBudgetEnabled = candidate.sessionGoalDefaultBudgetEnabled;
+  }
+  if (typeof candidate.sessionGoalDefaultBudget === 'number' && Number.isFinite(candidate.sessionGoalDefaultBudget)) {
+    result.sessionGoalDefaultBudget = candidate.sessionGoalDefaultBudget;
   }
   if (isUiFontOption(candidate.uiFont)) {
     result.uiFont = candidate.uiFont;

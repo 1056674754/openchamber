@@ -500,12 +500,6 @@ export const createSettingsHelpers = (dependencies) => {
         result.activityRenderMode = mode;
       }
     }
-    if (typeof candidate.mermaidRenderingMode === 'string') {
-      const mode = candidate.mermaidRenderingMode.trim();
-      if (mode === 'svg' || mode === 'ascii') {
-        result.mermaidRenderingMode = mode;
-      }
-    }
     if (typeof candidate.userMessageRenderingMode === 'string') {
       const mode = candidate.userMessageRenderingMode.trim();
       if (mode === 'markdown' || mode === 'plain') {
@@ -535,6 +529,15 @@ export const createSettingsHelpers = (dependencies) => {
     }
     if (typeof candidate.smallModelUseDefault === 'boolean') {
       result.smallModelUseDefault = candidate.smallModelUseDefault;
+    }
+    if (typeof candidate.sessionGoalEnabled === 'boolean') {
+      result.sessionGoalEnabled = candidate.sessionGoalEnabled;
+    }
+    if (typeof candidate.sessionGoalDefaultBudgetEnabled === 'boolean') {
+      result.sessionGoalDefaultBudgetEnabled = candidate.sessionGoalDefaultBudgetEnabled;
+    }
+    if (typeof candidate.sessionGoalDefaultBudget === 'number' && Number.isFinite(candidate.sessionGoalDefaultBudget)) {
+      result.sessionGoalDefaultBudget = Math.max(1_000, Math.min(10_000_000, Math.round(candidate.sessionGoalDefaultBudget)));
     }
     if (typeof candidate.smallModelOverride === 'string') {
       const trimmed = candidate.smallModelOverride.trim();

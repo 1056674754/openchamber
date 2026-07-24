@@ -1,6 +1,6 @@
 import React from 'react';
 import 'katex/dist/katex.min.css';
-import { renderMermaidASCII, renderMermaidSVG } from 'beautiful-mermaid';
+import { renderMermaidDiagram, type MermaidThemeColors } from '@/lib/mermaid';
 import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import type { Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -32,6 +32,7 @@ import { useUIStore } from '@/stores/useUIStore';
 import { isMobileDeviceViaCSS, useDeviceInfo } from '@/lib/device';
 import { useMessageDirectory } from '@/hooks/useMessageDirectory';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
+import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { loadCjkMonoFont } from '@/lib/fontLoader';
 import type { EditorAPI } from '@/lib/api/types';
 import { DEFAULT_SERVER_ID, serverRegistry } from '@/lib/opencode/server-registry';
@@ -349,57 +350,87 @@ const TableWrapper: React.FC<{ children?: React.ReactNode; className?: string }>
   );
 };
 
-const MermaidBlock: React.FC<{ source: string; mode: 'svg' | 'ascii'; onShowPopup?: (content: ToolPopupContent) => void }> = ({ source, mode, onShowPopup }) => {
+const mermaidSvgCache = new Map<string, string>();
+const MERMAID_CACHE_MAX = 30;
+let mermaidLastSource = '';
+let mermaidLastSvg = '';
+
+const MermaidBlock: React.FC<{ source: string; onShowPopup?: (content: ToolPopupContent) => void }> = ({ source, onShowPopup }) => {
   const { t } = useI18n();
   const currentTheme = useCurrentMermaidTheme();
   const { isMobile, isTablet } = useDeviceInfo();
   const [copied, setCopied] = React.useState(false);
   const [downloaded, setDownloaded] = React.useState(false);
+  const containerRef = React.useRef<HTMLDivElement>(null);
+  const [isVisible, setIsVisible] = React.useState(false);
+
+  const debouncedSource = useDebouncedValue(source, 400);
+  const isStreaming = source !== debouncedSource;
+
+  const [svg, setSvg] = React.useState(() => {
+    const cached = mermaidSvgCache.get(source);
+    if (cached) return cached;
+    if (mermaidLastSvg && source.length > mermaidLastSource.length
+      && source.startsWith(mermaidLastSource.slice(0, Math.max(0, mermaidLastSource.length - 20)))) {
+      return mermaidLastSvg;
+    }
+    return '';
+  });
+  const [renderError, setRenderError] = React.useState<string | null>(null);
+
+  const tc = currentTheme.colors;
+  const colorKey = `${tc.surface.elevated}|${tc.surface.foreground}|${tc.interactive.border}|${tc.primary.base}|${tc.surface.mutedForeground}|${tc.surface.muted}`;
 
   React.useEffect(() => {
-    if (mode === 'ascii') {
-      void loadCjkMonoFont();
-    }
-  }, [mode]);
+    const el = containerRef.current;
+    if (!el) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => setIsVisible(entry.isIntersecting),
+      { rootMargin: '300px' },
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
 
-  const svg = React.useMemo(() => {
-    if (mode !== 'svg') return '';
-    try {
-      return renderMermaidSVG(source, {
-        bg: currentTheme.colors.surface.elevated,
-        fg: currentTheme.colors.surface.foreground,
-        line: currentTheme.colors.interactive.border,
-        accent: currentTheme.colors.primary.base,
-        muted: currentTheme.colors.surface.mutedForeground,
-        surface: currentTheme.colors.surface.muted,
-        border: currentTheme.colors.interactive.border,
-        transparent: true,
-        font: 'IBM Plex Sans, sans-serif',
+  React.useEffect(() => {
+    if (!debouncedSource || !isVisible) return;
+    let cancelled = false;
+
+    const cached = mermaidSvgCache.get(debouncedSource);
+    if (cached) { setSvg(cached); setRenderError(null); return; }
+
+    const colors: MermaidThemeColors = {
+      elevated: tc.surface.elevated,
+      foreground: tc.surface.foreground,
+      border: tc.interactive.border,
+      accent: tc.primary.base,
+      mutedForeground: tc.surface.mutedForeground,
+      muted: tc.surface.muted,
+    };
+
+    renderMermaidDiagram(debouncedSource, colors)
+      .then((result) => {
+        if (cancelled) return;
+        setSvg(result);
+        setRenderError(null);
+        mermaidLastSvg = result;
+        mermaidLastSource = debouncedSource;
+        if (mermaidSvgCache.size >= MERMAID_CACHE_MAX) {
+          const firstKey = mermaidSvgCache.keys().next().value;
+          if (firstKey) mermaidSvgCache.delete(firstKey);
+        }
+        mermaidSvgCache.set(debouncedSource, result);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setRenderError(err instanceof Error ? err.message : String(err));
       });
-    } catch {
-      return '';
-    }
-  }, [currentTheme, mode, source]);
 
-  const ascii = React.useMemo(() => {
-    if (mode !== 'ascii') return '';
-    try {
-      return renderMermaidASCII(source);
-    } catch {
-      return '';
-    }
-  }, [mode, source]);
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [debouncedSource, colorKey, isVisible]);
 
   const copyVisibilityClass = isMobile || isTablet ? 'opacity-100' : 'opacity-0 group-hover:opacity-100';
-
-  const handleCopyAscii = async (asciiText: string) => {
-    if (!asciiText) return;
-    const result = await copyTextToClipboard(asciiText);
-    if (result.ok) {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    }
-  };
 
   const handleCopyMermaidSource = async () => {
     if (!source) return;
@@ -429,24 +460,40 @@ const MermaidBlock: React.FC<{ source: string; mode: 'svg' | 'ascii'; onShowPopu
     }
   };
 
-  if (mode === 'ascii') {
-    const asciiText = ascii || source;
-
+  if (!svg && !isVisible) {
     return (
-      <div data-markdown="mermaid-block" className="group">
-        <div data-markdown="mermaid-scroll">
-          <pre data-markdown="mermaid-ascii">{asciiText}</pre>
+      <div ref={containerRef} data-markdown="mermaid-block" className="group">
+        <div data-markdown="mermaid-scroll" className="flex items-center justify-center py-8">
+          <span className="text-xs text-muted-foreground">{t('markdownRenderer.mermaid.rendering')}</span>
         </div>
-        <div
-          className={cn(
-            'absolute top-1 right-2 transition-opacity',
-            copyVisibilityClass,
-          )}
-        >
+      </div>
+    );
+  }
+
+  if (!svg && isStreaming) {
+    return (
+      <div ref={containerRef} data-markdown="mermaid-block" className="group">
+        <div data-markdown="mermaid-scroll" className="flex items-center justify-center py-8">
+          <span className="text-sm text-muted-foreground animate-pulse">{t('markdownRenderer.mermaid.rendering')}</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (!svg && renderError) {
+    return (
+      <div ref={containerRef} data-markdown="mermaid-block" className="group">
+        <div data-markdown="mermaid-scroll">
+          <div className="p-3 text-sm text-destructive">
+            <pre data-markdown="mermaid-ascii" className="text-xs whitespace-pre-wrap">{source}</pre>
+            <p className="mt-2 text-xs opacity-70">{renderError}</p>
+          </div>
+        </div>
+        <div className={cn('absolute top-1 right-2 transition-opacity', copyVisibilityClass)}>
           <button
-            onClick={() => handleCopyAscii(asciiText)}
+            onClick={handleCopyMermaidSource}
             className="p-1 rounded hover:bg-interactive-hover/60 text-muted-foreground hover:text-foreground transition-colors"
-            title={t('markdownRenderer.mermaid.actions.copyTitle')}
+            title={t('markdownRenderer.mermaid.actions.copySourceTitle')}
           >
             {copied ? <Icon name="check" className="size-3.5" /> : <Icon name="file-copy" className="size-3.5" />}
           </button>
@@ -457,20 +504,15 @@ const MermaidBlock: React.FC<{ source: string; mode: 'svg' | 'ascii'; onShowPopu
 
   if (!svg) {
     return (
-      <div data-markdown="mermaid-block" className="group">
+      <div ref={containerRef} data-markdown="mermaid-block" className="group">
         <div data-markdown="mermaid-scroll">
           <pre data-markdown="mermaid-ascii">{source}</pre>
         </div>
-        <div
-          className={cn(
-            'absolute top-1 right-2 transition-opacity',
-            copyVisibilityClass,
-          )}
-        >
+        <div className={cn('absolute top-1 right-2 transition-opacity', copyVisibilityClass)}>
           <button
-            onClick={() => handleCopyAscii(source)}
+            onClick={handleCopyMermaidSource}
             className="p-1 rounded hover:bg-interactive-hover/60 text-muted-foreground hover:text-foreground transition-colors"
-            title={t('markdownRenderer.mermaid.actions.copyTitle')}
+            title={t('markdownRenderer.mermaid.actions.copySourceTitle')}
           >
             {copied ? <Icon name="check" className="size-3.5" /> : <Icon name="file-copy" className="size-3.5" />}
           </button>
@@ -480,16 +522,11 @@ const MermaidBlock: React.FC<{ source: string; mode: 'svg' | 'ascii'; onShowPopu
   }
 
   return (
-    <div data-markdown="mermaid-block" className="group">
+    <div ref={containerRef} data-markdown="mermaid-block" className="group">
       <div data-markdown="mermaid-scroll">
         <div data-markdown="mermaid" dangerouslySetInnerHTML={{ __html: svg }} />
       </div>
-      <div
-        className={cn(
-          'absolute top-1 right-2 flex items-center gap-1 transition-opacity',
-          copyVisibilityClass,
-        )}
-      >
+      <div className={cn('absolute top-1 right-2 flex items-center gap-1 transition-opacity', copyVisibilityClass)}>
         {onShowPopup ? (
           <button
             onClick={() => {
@@ -532,13 +569,6 @@ const MermaidBlock: React.FC<{ source: string; mode: 'svg' | 'ascii'; onShowPopu
       </div>
     </div>
   );
-};
-
-type MermaidControlOptions = {
-  download: boolean;
-  copy: boolean;
-  fullscreen: boolean;
-  panZoom: boolean;
 };
 
 const extractMermaidBlocks = (markdown: string): string[] => {
@@ -1154,7 +1184,7 @@ const buildMarkdownComponents = ({
     const language = getCodeLanguage(className);
     const code = normalizeCodeBlockText(extractCodeText(child.props.children).replace(/\n$/, ''), language);
     if (language === 'mermaid') {
-      return <MermaidBlock source={code} mode={useUIStore.getState().mermaidRenderingMode} onShowPopup={onShowPopup} />;
+      return <MermaidBlock source={code} onShowPopup={onShowPopup} />;
     }
     return <MarkdownCodeBlock code={code} language={language} syntaxTheme={syntaxTheme} {...props} />;
   },
@@ -2391,7 +2421,6 @@ const SimpleMarkdownRendererImpl: React.FC<{
   disableLinkSafety?: boolean;
   stripFrontmatter?: boolean;
   onShowPopup?: (content: ToolPopupContent) => void;
-  mermaidControls?: MermaidControlOptions;
   allowMermaidWheelZoom?: boolean;
   enableFileReferences?: boolean;
   sessionId?: string;

@@ -96,19 +96,6 @@ const FOLLOW_UP_BEHAVIOR_OPTIONS: Option<FollowUpBehavior>[] = [
     },
 ];
 
-const MERMAID_RENDERING_OPTIONS: Option<'svg' | 'ascii'>[] = [
-    {
-        id: 'svg',
-        labelKey: 'settings.openchamber.visual.option.mermaidRendering.svg.label',
-        descriptionKey: 'settings.openchamber.visual.option.mermaidRendering.svg.description',
-    },
-    {
-        id: 'ascii',
-        labelKey: 'settings.openchamber.visual.option.mermaidRendering.ascii.label',
-        descriptionKey: 'settings.openchamber.visual.option.mermaidRendering.ascii.description',
-    },
-];
-
 const DEFAULT_PWA_INSTALL_NAME = 'OpenChamber - AI Coding Assistant';
 const PWA_ORIENTATION_OPTIONS: Option<'system' | 'portrait' | 'landscape'>[] = [
     {
@@ -246,7 +233,7 @@ const normalizeUserMessageRenderingMode = (mode: unknown): 'markdown' | 'plain' 
     return mode === 'markdown' ? 'markdown' : 'plain';
 };
 
-export type VisibleSetting = 'theme' | 'dockBadge' | 'pwaInstallName' | 'pwaOrientation' | 'mobileKeyboardMode' | 'timeFormat' | 'weekStart' | 'fontSize' | 'terminalFontSize' | 'editorFontSize' | 'spacing' | 'inputBarOffset' | 'mermaidRendering' | 'userMessageRendering' | 'chatRenderMode' | 'messageTransport' | 'activityRenderMode' | 'collapsibleUserMessages' | 'stickyUserHeader' | 'promptNavigatorEnabled' | 'wideChatLayout' | 'splitAssistantMessageActions' | 'subagentPrompting' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'reasoning' | 'showToolFileIcons' | 'expandedTools' | 'queueMode' | 'terminalQuickKeys' | 'fileEditorKeymap' | 'persistDraft' | 'inputSpellcheck' | 'reportUsage' | 'multiRun';
+export type VisibleSetting = 'theme' | 'dockBadge' | 'pwaInstallName' | 'pwaOrientation' | 'mobileKeyboardMode' | 'timeFormat' | 'weekStart' | 'fontSize' | 'terminalFontSize' | 'editorFontSize' | 'spacing' | 'inputBarOffset' | 'userMessageRendering' | 'chatRenderMode' | 'messageTransport' | 'activityRenderMode' | 'collapsibleUserMessages' | 'stickyUserHeader' | 'promptNavigatorEnabled' | 'wideChatLayout' | 'splitAssistantMessageActions' | 'subagentPrompting' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'reasoning' | 'showToolFileIcons' | 'expandedTools' | 'queueMode' | 'terminalQuickKeys' | 'fileEditorKeymap' | 'persistDraft' | 'inputSpellcheck' | 'reportUsage' | 'multiRun' | 'sessionGoal';
 
 interface OpenChamberVisualSettingsProps {
     /** Which settings to show. If undefined, shows all. */
@@ -268,8 +255,6 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const autoCollapseThinkingThreshold = useUIStore(state => state.autoCollapseThinkingThreshold);
     const setAutoCollapseThinkingThreshold = useUIStore(state => state.setAutoCollapseThinkingThreshold);
 
-    const mermaidRenderingMode = useUIStore(state => state.mermaidRenderingMode);
-    const setMermaidRenderingMode = useUIStore(state => state.setMermaidRenderingMode);
     const userMessageRenderingMode = useUIStore(state => state.userMessageRenderingMode);
     const setUserMessageRenderingMode = useUIStore(state => state.setUserMessageRenderingMode);
     const collapsibleUserMessages = useUIStore(state => state.collapsibleUserMessages);
@@ -354,6 +339,12 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
 
     const multiRunEnabled = useUIStore(state => state.multiRunEnabled);
     const setMultiRunEnabled = useUIStore(state => state.setMultiRunEnabled);
+    const sessionGoalEnabled = useUIStore(state => state.sessionGoalEnabled);
+    const setSessionGoalEnabled = useUIStore(state => state.setSessionGoalEnabled);
+    const sessionGoalDefaultBudgetEnabled = useUIStore(state => state.sessionGoalDefaultBudgetEnabled);
+    const setSessionGoalDefaultBudgetEnabled = useUIStore(state => state.setSessionGoalDefaultBudgetEnabled);
+    const sessionGoalDefaultBudget = useUIStore(state => state.sessionGoalDefaultBudget);
+    const setSessionGoalDefaultBudget = useUIStore(state => state.setSessionGoalDefaultBudget);
 
     // Sync reportUsage changes to server settings
     const handleReportUsageChange = React.useCallback((enabled: boolean) => {
@@ -365,6 +356,22 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         setMultiRunEnabled(enabled);
         void updateDesktopSettings({ multiRunEnabled: enabled });
     }, [setMultiRunEnabled]);
+
+    const handleSessionGoalEnabledChange = React.useCallback((enabled: boolean) => {
+        setSessionGoalEnabled(enabled);
+        void updateDesktopSettings({ sessionGoalEnabled: enabled });
+    }, [setSessionGoalEnabled]);
+
+    const handleSessionGoalDefaultBudgetEnabledChange = React.useCallback((enabled: boolean) => {
+        setSessionGoalDefaultBudgetEnabled(enabled);
+        void updateDesktopSettings({ sessionGoalDefaultBudgetEnabled: enabled });
+    }, [setSessionGoalDefaultBudgetEnabled]);
+
+    const handleSessionGoalDefaultBudgetChange = React.useCallback((value: number) => {
+        const next = Math.max(1_000, Math.min(10_000_000, Math.floor(value)));
+        setSessionGoalDefaultBudget(next);
+        void updateDesktopSettings({ sessionGoalDefaultBudget: next });
+    }, [setSessionGoalDefaultBudget]);
 
     const shouldAnimateChatPreview = isSettingsDialogOpen
         && (visibleSettings ? visibleSettings.includes('chatRenderMode') : true);
@@ -467,11 +474,6 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         void updateDesktopSettings({ activityRenderMode: mode });
     }, [setActivityRenderMode]);
 
-    const handleMermaidRenderingModeChange = React.useCallback((mode: 'svg' | 'ascii') => {
-        setMermaidRenderingMode(mode);
-        void updateDesktopSettings({ mermaidRenderingMode: mode });
-    }, [setMermaidRenderingMode]);
-
     const handleShowToolFileIconsChange = React.useCallback((enabled: boolean) => {
         setShowToolFileIcons(enabled);
         void updateDesktopSettings({ showToolFileIcons: enabled });
@@ -539,8 +541,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         : (shouldShow('theme') || shouldShow('dockBadge') || shouldShow('pwaInstallName') || shouldShow('pwaOrientation') || shouldShow('timeFormat') || shouldShow('weekStart'));
     const hasLayoutSettings = shouldShow('fontSize') || shouldShow('terminalFontSize') || shouldShow('editorFontSize') || shouldShow('spacing') || shouldShow('inputBarOffset');
     const hasNavigationSettings = (shouldShow('terminalQuickKeys') && !isMobile) || shouldShow('fileEditorKeymap');
-    const hasBehaviorSettings = shouldShow('mermaidRendering')
-        || shouldShow('userMessageRendering')
+    const hasBehaviorSettings = shouldShow('userMessageRendering')
         || shouldShow('chatRenderMode')
         || shouldShow('messageTransport')
         || (shouldShow('activityRenderMode') && chatRenderMode === 'sorted')
@@ -558,7 +559,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         || shouldShow('showToolFileIcons')
         || shouldShow('expandedTools')
         || (!isMobile && shouldShow('inputSpellcheck'))
-        || shouldShow('multiRun');
+        || shouldShow('multiRun')
+        || (shouldShow('sessionGoal') && !isVSCode);
 
     const showPwaInstallNameSetting = shouldShow('pwaInstallName') && isWebRuntime() && browserTab && !isDesktopShell() && !isVSCode;
     const showPwaOrientationSetting = shouldShow('pwaOrientation') && isWebRuntime() && !isDesktopShell() && !isVSCode;
@@ -1351,7 +1353,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                 {hasBehaviorSettings && (
                     <div className="space-y-3">
 
-                            {(shouldShow('userMessageRendering') || shouldShow('mermaidRendering') || shouldShow('chatRenderMode') || shouldShow('messageTransport') || (shouldShow('activityRenderMode') && chatRenderMode === 'sorted') || (shouldShow('diffLayout') && !isVSCode)) && (
+                            {(shouldShow('userMessageRendering') || shouldShow('chatRenderMode') || shouldShow('messageTransport') || (shouldShow('activityRenderMode') && chatRenderMode === 'sorted') || (shouldShow('diffLayout') && !isVSCode)) && (
                                 <div className="grid grid-cols-1 gap-y-2 md:grid-cols-[minmax(0,16rem)_minmax(0,16rem)] md:justify-start md:gap-x-2">
                                     {shouldShow('chatRenderMode') && (
                                         <section className="p-2 md:col-span-2">
@@ -1585,42 +1587,6 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                         </section>
                                     )}
 
-                                    {shouldShow('mermaidRendering') && (
-                                        <section className="p-2">
-                                            <h4 className="typography-ui-header font-medium text-foreground">{t('settings.openchamber.visual.section.mermaidRendering')}</h4>
-                                            <div role="radiogroup" aria-label={t('settings.openchamber.visual.section.mermaidRenderingAria')} className="mt-0.5 space-y-0">
-                                                {MERMAID_RENDERING_OPTIONS.map((option) => {
-                                                    const selected = mermaidRenderingMode === option.id;
-                                                    return (
-                                                        <div
-                                                            key={option.id}
-                                                            role="button"
-                                                            tabIndex={0}
-                                                            aria-pressed={selected}
-                                                            onClick={() => handleMermaidRenderingModeChange(option.id)}
-                                                            onKeyDown={(event) => {
-                                                                if (event.key === ' ' || event.key === 'Enter') {
-                                                                    event.preventDefault();
-                                                                    handleMermaidRenderingModeChange(option.id);
-                                                                }
-                                                            }}
-                                                            className="flex w-full items-center gap-2 py-0 text-left"
-                                                        >
-                                                            <Radio
-                                                                checked={selected}
-                                                                onChange={() => handleMermaidRenderingModeChange(option.id)}
-                                                                ariaLabel={t('settings.openchamber.visual.field.mermaidRenderingAria', { option: tUnsafe(option.labelKey) })}
-                                                            />
-                                                            <span className={cn('typography-ui-label font-normal', selected ? 'text-foreground' : 'text-foreground/50')}>
-                                                                {tUnsafe(option.labelKey)}
-                                                            </span>
-                                                        </div>
-                                                    );
-                                                })}
-                                            </div>
-                                        </section>
-                                    )}
-
                                     {shouldShow('diffLayout') && !isVSCode && (
                                         <section className="p-2">
                                             <h4 className="typography-ui-header font-medium text-foreground">{t('settings.openchamber.visual.section.diffLayout')}</h4>
@@ -1695,7 +1661,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                 </div>
                             )}
 
-                            {(shouldShow('collapsibleUserMessages') || shouldShow('stickyUserHeader') || (shouldShow('promptNavigatorEnabled') && !isVSCode) || shouldShow('wideChatLayout') || shouldShow('splitAssistantMessageActions') || shouldShow('subagentPrompting') || (shouldShow('mobileStatusBar') && isMobile) || shouldShow('dotfiles') || shouldShow('queueMode') || shouldShow('persistDraft') || shouldShow('showToolFileIcons') || (!isMobile && shouldShow('inputSpellcheck')) || shouldShow('reasoning') || shouldShow('multiRun')) && (
+                            {(shouldShow('collapsibleUserMessages') || shouldShow('stickyUserHeader') || (shouldShow('promptNavigatorEnabled') && !isVSCode) || shouldShow('wideChatLayout') || shouldShow('splitAssistantMessageActions') || shouldShow('subagentPrompting') || (shouldShow('mobileStatusBar') && isMobile) || shouldShow('dotfiles') || shouldShow('queueMode') || shouldShow('persistDraft') || shouldShow('showToolFileIcons') || (!isMobile && shouldShow('inputSpellcheck')) || shouldShow('reasoning') || shouldShow('multiRun') || (shouldShow('sessionGoal') && !isVSCode)) && (
                                 <section className="p-2 space-y-0.5">
                                     {shouldShow('reasoning') && (
                                         <h3 className="typography-ui-header py-1.5 font-medium text-foreground">
@@ -1921,7 +1887,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                         </div>
                                     )}
 
-                                    {(shouldShow('subagentPrompting') || shouldShow('multiRun')) && (
+                                    {(shouldShow('subagentPrompting') || shouldShow('multiRun') || (shouldShow('sessionGoal') && !isVSCode)) && (
                                         <h3 className="typography-ui-header mt-3 py-1.5 font-medium text-foreground">
                                             {t('settings.openchamber.visual.section.sessionAssistance')}
                                         </h3>
@@ -2095,6 +2061,77 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                 </Tooltip>
                                             </div>
                                         </div>
+                                    )}
+
+                                    {shouldShow('sessionGoal') && !isVSCode && (
+                                        <>
+                                            <div
+                                                className="group flex cursor-pointer items-center gap-2 py-0.5"
+                                                role="button"
+                                                tabIndex={0}
+                                                aria-pressed={sessionGoalEnabled}
+                                                onClick={() => handleSessionGoalEnabledChange(!sessionGoalEnabled)}
+                                                onKeyDown={(event) => {
+                                                    if (event.key === ' ' || event.key === 'Enter') {
+                                                        event.preventDefault();
+                                                        handleSessionGoalEnabledChange(!sessionGoalEnabled);
+                                                    }
+                                                }}
+                                            >
+                                                <Checkbox
+                                                    checked={sessionGoalEnabled}
+                                                    onChange={handleSessionGoalEnabledChange}
+                                                    ariaLabel={t('settings.openchamber.visual.field.sessionGoalAria')}
+                                                />
+                                                <div className="flex min-w-0 items-center gap-1.5">
+                                                    <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.sessionGoal')}</span>
+                                                    <Tooltip>
+                                                        <TooltipTrigger asChild>
+                                                            <Icon name="information" className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
+                                                        </TooltipTrigger>
+                                                        <TooltipContent sideOffset={8} className="max-w-xs">
+                                                            {t('settings.openchamber.visual.field.sessionGoalTooltip')}
+                                                        </TooltipContent>
+                                                    </Tooltip>
+                                                </div>
+                                            </div>
+                                            <div
+                                                className="group flex cursor-pointer items-center gap-2 py-0.5"
+                                                role="button"
+                                                tabIndex={0}
+                                                aria-pressed={sessionGoalDefaultBudgetEnabled}
+                                                onClick={() => handleSessionGoalDefaultBudgetEnabledChange(!sessionGoalDefaultBudgetEnabled)}
+                                                onKeyDown={(event) => {
+                                                    if (event.key === ' ' || event.key === 'Enter') {
+                                                        event.preventDefault();
+                                                        handleSessionGoalDefaultBudgetEnabledChange(!sessionGoalDefaultBudgetEnabled);
+                                                    }
+                                                }}
+                                            >
+                                                <Checkbox
+                                                    checked={sessionGoalDefaultBudgetEnabled}
+                                                    onChange={handleSessionGoalDefaultBudgetEnabledChange}
+                                                    disabled={!sessionGoalEnabled}
+                                                    ariaLabel={t('settings.openchamber.visual.field.sessionGoalBudgetAria')}
+                                                />
+                                                <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.sessionGoalBudget')}</span>
+                                            </div>
+                                            {sessionGoalEnabled && sessionGoalDefaultBudgetEnabled ? (
+                                                <div className="pl-6 py-0.5">
+                                                    <NumberInput
+                                                        value={sessionGoalDefaultBudget}
+                                                        onValueChange={(value) => {
+                                                            if (typeof value === 'number' && Number.isFinite(value)) {
+                                                                handleSessionGoalDefaultBudgetChange(value);
+                                                            }
+                                                        }}
+                                                        min={1_000}
+                                                        max={10_000_000}
+                                                        step={50_000}
+                                                    />
+                                                </div>
+                                            ) : null}
+                                        </>
                                     )}
 
                                     {shouldShow('persistDraft') && (

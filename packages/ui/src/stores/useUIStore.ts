@@ -25,7 +25,6 @@ export type MainTab = 'chat' | 'plan' | 'git' | 'diff' | 'terminal' | 'files' | 
 export type PendingDiffScope = 'working' | 'turn';
 export type RightSidebarTab = 'git' | 'files' | 'context';
 export type ContextPanelMode = 'diff' | 'file' | 'context' | 'plan' | 'chat' | 'preview' | 'terminal' | 'browser';
-export type MermaidRenderingMode = 'svg' | 'ascii';
 export type UserMessageRenderingMode = 'markdown' | 'plain';
 export type ChatRenderMode = 'sorted' | 'live';
 export type ActivityRenderMode = 'collapsed' | 'summary';
@@ -678,7 +677,6 @@ interface UIStore {
   showExpandedEditTools: boolean;
   timeFormatPreference: TimeFormatPreference;
   weekStartPreference: WeekStartPreference;
-  mermaidRenderingMode: MermaidRenderingMode;
   userMessageRenderingMode: UserMessageRenderingMode;
   collapsibleUserMessages: boolean;
   stickyUserHeader: boolean;
@@ -690,6 +688,10 @@ interface UIStore {
   isExpandedInput: boolean;
   reportUsage: boolean;
   multiRunEnabled: boolean;
+  /** Session Goals control loop (local OpenCode only in v1). */
+  sessionGoalEnabled: boolean;
+  sessionGoalDefaultBudgetEnabled: boolean;
+  sessionGoalDefaultBudget: number;
   shortcutOverrides: Record<string, ShortcutCombo>;
   fileEditorKeymap: FileEditorKeymap;
 
@@ -830,7 +832,6 @@ interface UIStore {
   setShowExpandedEditTools: (value: boolean) => void;
   setTimeFormatPreference: (value: TimeFormatPreference) => void;
   setWeekStartPreference: (value: WeekStartPreference) => void;
-  setMermaidRenderingMode: (value: MermaidRenderingMode) => void;
   setUserMessageRenderingMode: (value: UserMessageRenderingMode) => void;
   setCollapsibleUserMessages: (value: boolean) => void;
   setStickyUserHeader: (value: boolean) => void;
@@ -847,6 +848,9 @@ interface UIStore {
   openMultiRunLauncherWithPrompt: (prompt: string) => void;
   setReportUsage: (value: boolean) => void;
   setMultiRunEnabled: (value: boolean) => void;
+  setSessionGoalEnabled: (value: boolean) => void;
+  setSessionGoalDefaultBudgetEnabled: (value: boolean) => void;
+  setSessionGoalDefaultBudget: (value: number) => void;
   setShortcutOverride: (actionId: string, combo: ShortcutCombo) => void;
   clearShortcutOverride: (actionId: string) => void;
   resetAllShortcutOverrides: () => void;
@@ -975,7 +979,6 @@ export const useUIStore = create<UIStore>()(
         showExpandedEditTools: false,
         timeFormatPreference: 'auto',
         weekStartPreference: 'auto',
-        mermaidRenderingMode: 'svg',
         userMessageRenderingMode: 'markdown',
         collapsibleUserMessages: true,
         stickyUserHeader: false,
@@ -987,6 +990,9 @@ export const useUIStore = create<UIStore>()(
         isExpandedInput: false,
         reportUsage: true,
         multiRunEnabled: true,
+        sessionGoalEnabled: true,
+        sessionGoalDefaultBudgetEnabled: false,
+        sessionGoalDefaultBudget: 200_000,
         shortcutOverrides: {},
         fileEditorKeymap: 'default',
 
@@ -2151,9 +2157,6 @@ export const useUIStore = create<UIStore>()(
         setWeekStartPreference: (value) => {
           set({ weekStartPreference: value });
         },
-        setMermaidRenderingMode: (value) => {
-          set({ mermaidRenderingMode: value });
-        },
         setUserMessageRenderingMode: (value) => {
           set({ userMessageRenderingMode: value });
         },
@@ -2183,6 +2186,15 @@ export const useUIStore = create<UIStore>()(
         },
         setMultiRunEnabled: (value) => {
           set({ multiRunEnabled: value });
+        },
+        setSessionGoalEnabled: (value) => {
+          set({ sessionGoalEnabled: value });
+        },
+        setSessionGoalDefaultBudgetEnabled: (value) => {
+          set({ sessionGoalDefaultBudgetEnabled: value });
+        },
+        setSessionGoalDefaultBudget: (value) => {
+          set({ sessionGoalDefaultBudget: value });
         },
         viewPagerPage: 'center',
         setViewPagerPage: (page: 'left' | 'center' | 'right') => {
@@ -2414,7 +2426,6 @@ export const useUIStore = create<UIStore>()(
           showExpandedEditTools: state.showExpandedEditTools,
           timeFormatPreference: state.timeFormatPreference,
           weekStartPreference: state.weekStartPreference,
-          mermaidRenderingMode: state.mermaidRenderingMode,
           userMessageRenderingMode: state.userMessageRenderingMode,
           collapsibleUserMessages: state.collapsibleUserMessages,
           stickyUserHeader: state.stickyUserHeader,
@@ -2423,6 +2434,9 @@ export const useUIStore = create<UIStore>()(
           allowPromptingSubagentSessions: state.allowPromptingSubagentSessions,
           showMobileSessionStatusBar: state.showMobileSessionStatusBar,
           isMobileSessionStatusBarCollapsed: state.isMobileSessionStatusBarCollapsed,
+          sessionGoalEnabled: state.sessionGoalEnabled,
+          sessionGoalDefaultBudgetEnabled: state.sessionGoalDefaultBudgetEnabled,
+          sessionGoalDefaultBudget: state.sessionGoalDefaultBudget,
           shortcutOverrides: state.shortcutOverrides,
           fileEditorKeymap: state.fileEditorKeymap,
         })

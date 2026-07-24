@@ -101,8 +101,6 @@ const MERMAID_ASPECT_MAX_RETRIES = 3;
 
 const DIALOG_CODE_TAG_PROPS = { style: { background: 'transparent', backgroundColor: 'transparent', fontSize: 'inherit' } };
 
-const MERMAID_CONTROLS = { download: false, copy: false, fullscreen: false, panZoom: true };
-
 type PierreThemeConfig = {
     theme: { light: string; dark: string };
     themeType: 'light' | 'dark';
@@ -1003,7 +1001,6 @@ const MermaidPreviewDialog: React.FC<{
                                         variant="tool"
                                         allowMermaidWheelZoom
                                         className="markdown-mermaid-fullscreen h-full [&_[data-markdown='mermaid-block']_button]:hidden"
-                                        mermaidControls={MERMAID_CONTROLS}
                                     />
                                 </div>
                             )}
