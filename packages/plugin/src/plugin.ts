@@ -16,6 +16,7 @@ import { createSteerTransformHandler } from "./steer-transform.js"
 import { createDescribeImageTool } from "./tools/describe-image.js"
 import { createSearchImagesTool } from "./tools/search-images.js"
 import { createSaveImageAnalysisTool } from "./tools/save-image-analysis.js"
+import { createPublishArtifactTool } from "./tools/publish-artifact.js"
 import { createModelCapabilityChecker } from "./model-capability.js"
 import { createImageStore } from "./image-store.js"
 import { openCacheDb, type CacheDb } from "./cache/database.js"
@@ -48,6 +49,7 @@ export function createPlugin(input: PluginInput): Promise<Hooks> {
     cacheDb,
     imageDirectory: imageStore.getDirectory(),
   })
+  const publishArtifact = createPublishArtifactTool()
 
   const hooks: Hooks = {
     event: steerTransform.event,
@@ -61,6 +63,7 @@ export function createPlugin(input: PluginInput): Promise<Hooks> {
       describe_image: describeImage,
       search_images: searchImages,
       save_image_analysis: saveAnalysis,
+      publish_artifact: publishArtifact,
     },
     dispose: async () => {
       cacheDb?.close()

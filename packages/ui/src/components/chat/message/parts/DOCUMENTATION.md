@@ -23,7 +23,14 @@ Use this doc when you ask an agent to change tool/header/description behavior.
 - `ToolPart.tsx`
   - Renders expandable tool rows (bash/edit/write/question/task + fallback).
   - Controls expandable header title/description/diff stats/timer and expanded output body.
+  - Renders valid `publish_artifact` metadata as an always-visible `ArtifactCard`.
+  - Artifact tool messages are pinned outside the turn-level process fold by `processSegments.ts`.
   - If you want to change expandable tool layout, edit here.
+
+- `ArtifactCard.tsx` / `artifactMetadata.ts`
+  - Parse the plugin-owned Artifact metadata boundary.
+  - Render safe image previews plus stable open/download actions.
+  - Resolve content through `/api/artifacts/:artifactId/content`; never render a stored filesystem path.
 
 - `toolPresentation.tsx`
   - Shared icon mapping for tool names (`getToolIcon`).

@@ -29,6 +29,8 @@ local-dev*
 .opencode/plans/*
 .hive
 .sisyphus
+.omo
+.playwright-mcp
 docs/personal/*
 
 # Build outputs
@@ -62,4 +64,4 @@ workspaces/
 
 # Linux build artifacts (local builds, not tracked)
 openchamber-linux
-artifacts/
+/artifacts/

@@ -15,4 +15,10 @@ describe('tool rendering classification', () => {
     expect(isExpandableTool('grep')).toBe(false);
     expect(isStandaloneTool('task')).toBe(true);
   });
+
+  test('keeps published artifacts outside grouped activity rows', () => {
+    expect(isStandaloneTool('publish_artifact')).toBe(true);
+    expect(isExpandableTool('publish_artifact')).toBe(true);
+    expect(isStaticTool('publish_artifact')).toBe(false);
+  });
 });

@@ -32,6 +32,16 @@ export const TOOL_METADATA: Record<string, ToolMetadata> = {
       { key: 'content', label: 'Content', type: 'code' }
     ]
   },
+  publish_artifact: {
+    displayName: 'Publish Artifact',
+    category: 'file',
+    outputLanguage: 'text',
+    inputFields: [
+      { key: 'path', label: 'File Path', type: 'file' },
+      { key: 'title', label: 'Title', type: 'text' },
+      { key: 'description', label: 'Description', type: 'text' },
+    ],
+  },
   edit: {
     displayName: 'Edit File',
     category: 'file',

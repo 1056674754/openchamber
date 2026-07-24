@@ -24,18 +24,23 @@ const normalizeToolName = (toolName: unknown): string => {
     return parts[parts.length - 1] ?? withoutIndex;
 };
 
-export const messageHasQuestionTool = (message: ChatMessageEntry): boolean => {
+const messageHasNamedTool = (message: ChatMessageEntry, toolName: string): boolean => {
     return message.parts.some((part) => {
         if (part.type !== 'tool') {
             return false;
         }
 
-        return normalizeToolName((part as { tool?: unknown }).tool) === 'question';
+        return normalizeToolName((part as { tool?: unknown }).tool) === toolName;
     });
+};
+
+export const messageHasQuestionTool = (message: ChatMessageEntry): boolean => {
+    return messageHasNamedTool(message, 'question');
 };
 
 export const messagePinsProcessFold = (message: ChatMessageEntry): boolean => {
     return messageHasQuestionTool(message)
+        || messageHasNamedTool(message, 'publish_artifact')
         || getAuxiliaryUserMessageKind(message.parts, message.info) !== null;
 };
 

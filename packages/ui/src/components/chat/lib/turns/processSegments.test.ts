@@ -51,6 +51,19 @@ describe('process message segments', () => {
         ]);
     });
 
+    test('keeps published artifacts outside collapsed process folds', () => {
+        const before = message('before');
+        const artifact = message('artifact', [toolPart('publish_artifact')]);
+        const after = message('after');
+
+        expect(messagePinsProcessFold(artifact)).toBe(true);
+        expect(segmentProcessMessagesByPinnedBoundaries([before, artifact, after])).toEqual([
+            { kind: 'fold', messages: [before] },
+            { kind: 'pinned-message', message: artifact },
+            { kind: 'fold', messages: [after] },
+        ]);
+    });
+
     test('keeps live steer messages pinned between process folds', () => {
         const before = message('before');
         const steer = {

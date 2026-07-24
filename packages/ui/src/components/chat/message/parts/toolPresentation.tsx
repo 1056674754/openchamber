@@ -10,6 +10,9 @@ export const getToolIcon = (toolName: string) => {
     if (tool === 'write' || tool === 'create' || tool === 'file_write') {
         return <Icon name="file-edit" className={iconClass} />;
     }
+    if (tool === 'publish_artifact') {
+        return <Icon name="archive-stack" className={iconClass} />;
+    }
     if (tool === 'read' || tool === 'view' || tool === 'file_read' || tool === 'cat') {
         return <Icon name="file-text" className={iconClass} />;
     }

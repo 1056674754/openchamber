@@ -3,9 +3,10 @@ const EXPANDABLE_TOOL_NAMES = new Set<string>([
     'bash', 'shell', 'cmd', 'terminal',
     'write', 'create', 'file_write',
     'question', 'task', 'lsp',
+    'publish_artifact',
 ]);
 
-const STANDALONE_TOOL_NAMES = new Set<string>(['task']);
+const STANDALONE_TOOL_NAMES = new Set<string>(['task', 'publish_artifact']);
 
 const SEARCH_TOOL_NAMES = new Set<string>(['grep', 'rg', 'search', 'find', 'ripgrep', 'glob']);
 const READ_TOOL_NAMES = new Set<string>(['read', 'readfile', 'read_file', 'view', 'file_read', 'cat']);
