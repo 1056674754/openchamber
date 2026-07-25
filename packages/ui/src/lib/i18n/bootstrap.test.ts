@@ -17,5 +17,6 @@ describe('bootstrap messages', () => {
   test('uses the selected locale before React mounts', () => {
     expect(getBootstrapMessages('zh-CN').startingApi).toBe('正在启动 OpenCode API…');
     expect(getBootstrapMessages('es').connectionError).toBe('Error de conexión');
+    expect(getBootstrapMessages('ja').startingApi).toBe('OpenCode API を起動中…');
   });
 });
