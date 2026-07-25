@@ -1558,18 +1558,19 @@ export type DiscoveredSkill = {
   source: SkillSource;
   description?: string;
   content?: string;
+  opencodeSynced?: boolean;
 };
 
 export const BUILT_IN_SKILL_LOCATION = '<built-in>';
 
 export const mergeDiscoveredSkills = (
-  primarySkills: DiscoveredSkill[] = [],
+  primarySkills: DiscoveredSkill[] | null = [],
   fallbackSkills: DiscoveredSkill[] = []
 ): DiscoveredSkill[] => {
   const merged: DiscoveredSkill[] = [];
   const seenNames = new Set<string>();
 
-  const appendSkill = (skill: DiscoveredSkill | null | undefined) => {
+  const appendSkill = (skill: DiscoveredSkill | null | undefined, opencodeSynced?: boolean) => {
     if (!skill) {
       return;
     }
@@ -1578,11 +1579,13 @@ export const mergeDiscoveredSkills = (
       return;
     }
     seenNames.add(name);
-    merged.push(skill);
+    merged.push(opencodeSynced === undefined ? skill : { ...skill, opencodeSynced });
   };
 
-  for (const skill of primarySkills || []) appendSkill(skill);
-  for (const skill of fallbackSkills || []) appendSkill(skill);
+  if (primarySkills !== null) {
+    for (const skill of primarySkills) appendSkill(skill, true);
+  }
+  for (const skill of fallbackSkills) appendSkill(skill, primarySkills === null ? undefined : false);
 
   return merged;
 };

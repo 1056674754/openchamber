@@ -99,7 +99,7 @@ const resolveDiscoveredSkills = async (
   ctx: BridgeContext | undefined,
   workingDirectory?: string,
 ): Promise<DiscoveredSkill[]> => mergeDiscoveredSkills(
-  (await deps.fetchOpenCodeSkillsFromApi(ctx, workingDirectory)) || [],
+  await deps.fetchOpenCodeSkillsFromApi(ctx, workingDirectory),
   discoverSkills(workingDirectory),
 );
 

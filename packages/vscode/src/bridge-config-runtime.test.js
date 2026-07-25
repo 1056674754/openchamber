@@ -11,6 +11,7 @@ mock.module('vscode', () => ({
 }));
 
 const { handleConfigBridgeMessage } = await import('./bridge-config-runtime.ts');
+const { mergeDiscoveredSkills } = await import('./opencodeConfig.ts');
 
 const tempRoots = [];
 const originalOpencodeConfig = process.env.OPENCODE_CONFIG;
@@ -26,6 +27,13 @@ const deps = {
   clientReloadDelayMs: 800,
 };
 
+const skill = (name, skillPath, source) => ({
+  name,
+  path: skillPath,
+  scope: 'user',
+  source,
+});
+
 afterEach(() => {
   if (originalOpencodeConfig === undefined) {
     delete process.env.OPENCODE_CONFIG;
@@ -36,6 +44,62 @@ afterEach(() => {
   for (const root of tempRoots.splice(0)) {
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+describe('mergeDiscoveredSkills', () => {
+  test('marks OpenCode and filesystem skills by sync state when discovery succeeds', () => {
+    const primary = [
+      skill('skill-a', '/opencode/skill-a/SKILL.md', 'opencode'),
+      skill('skill-b', '/opencode/skill-b/SKILL.md', 'opencode'),
+    ];
+    const fallback = [
+      skill('skill-a', '/filesystem/skill-a/SKILL.md', 'agents'),
+      skill('skill-b', '/filesystem/skill-b/SKILL.md', 'agents'),
+      skill('skill-c', '/filesystem/skill-c/SKILL.md', 'agents'),
+    ];
+
+    const merged = mergeDiscoveredSkills(primary, fallback);
+
+    expect(merged).toEqual([
+      { ...primary[0], opencodeSynced: true },
+      { ...primary[1], opencodeSynced: true },
+      { ...fallback[2], opencodeSynced: false },
+    ]);
+  });
+
+  test('marks filesystem-only skills unsynced when OpenCode reports zero skills', () => {
+    const fallback = [skill('skill-x', '/filesystem/skill-x/SKILL.md', 'agents')];
+
+    const merged = mergeDiscoveredSkills([], fallback);
+
+    expect(merged).toEqual([{ ...fallback[0], opencodeSynced: false }]);
+  });
+
+  test('leaves filesystem skill sync state unknown when OpenCode discovery fails', () => {
+    const fallback = [skill('skill-y', '/filesystem/skill-y/SKILL.md', 'agents')];
+
+    const merged = mergeDiscoveredSkills(null, fallback);
+
+    expect(merged).toEqual(fallback);
+    expect(merged[0]).not.toHaveProperty('opencodeSynced');
+  });
+
+  test('keeps the OpenCode skill when a filesystem skill has the same name', () => {
+    const primary = [skill('skill-a', '/opencode/skill-a/SKILL.md', 'opencode')];
+    const fallback = [skill('skill-a', '/filesystem/skill-a/SKILL.md', 'agents')];
+
+    const merged = mergeDiscoveredSkills(primary, fallback);
+
+    expect(merged).toEqual([{ ...primary[0], opencodeSynced: true }]);
+  });
+
+  test('marks OpenCode-only skills synced when filesystem discovery is empty', () => {
+    const primary = [skill('skill-a', '/opencode/skill-a/SKILL.md', 'opencode')];
+
+    const merged = mergeDiscoveredSkills(primary, []);
+
+    expect(merged).toEqual([{ ...primary[0], opencodeSynced: true }]);
+  });
 });
 
 describe('VS Code config bridge agent updates', () => {
