@@ -3,12 +3,67 @@ import { describe, expect, test } from 'bun:test';
 import { buildSlashSkillDispatch } from './skillSlashDispatch';
 
 describe('skill slash dispatch', () => {
+    test('returns unsynced when the matched skill is known to be missing from OpenCode', () => {
+        const dispatch = buildSlashSkillDispatch('/foo arg', {
+            commands: [],
+            skills: [{ name: 'foo', opencodeSynced: false }],
+        });
+
+        expect(dispatch).toEqual({ kind: 'unsynced', skillName: 'foo' });
+    });
+
+    test('dispatches when the matched skill is synced with OpenCode', () => {
+        const dispatch = buildSlashSkillDispatch('/foo arg', {
+            commands: [],
+            skills: [{ name: 'foo', opencodeSynced: true }],
+        });
+
+        expect(dispatch?.kind).toBe('dispatch');
+        if (dispatch?.kind !== 'dispatch') return;
+        expect(dispatch.skillName).toBe('foo');
+        expect(dispatch.visibleText).toBe('arg');
+        expect(typeof dispatch.instructionText).toBe('string');
+    });
+
+    test('dispatches when the matched skill sync status is unknown', () => {
+        const dispatch = buildSlashSkillDispatch('/foo arg', {
+            commands: [],
+            skills: [{ name: 'foo' }],
+        });
+
+        expect(dispatch?.kind).toBe('dispatch');
+        if (dispatch?.kind !== 'dispatch') return;
+        expect(dispatch.skillName).toBe('foo');
+        expect(dispatch.visibleText).toBe('arg');
+        expect(typeof dispatch.instructionText).toBe('string');
+    });
+
+    test('returns null when no skill matches the invocation', () => {
+        const dispatch = buildSlashSkillDispatch('/foo arg', {
+            commands: [],
+            skills: [],
+        });
+
+        expect(dispatch).toBeNull();
+    });
+
+    test('returns null when a real command shadows a matching skill', () => {
+        const dispatch = buildSlashSkillDispatch('/undo', {
+            commands: [{ name: 'undo', source: 'opencode' }],
+            skills: [{ name: 'undo', opencodeSynced: false }],
+        });
+
+        expect(dispatch).toBeNull();
+    });
+
     test('rewrites a leading slash skill into a visible request plus skill instruction', () => {
         const dispatch = buildSlashSkillDispatch('/saas-app-ui-guardrail 用这个skill 重新计划', {
             commands: [],
             skills: [{ name: 'saas-app-ui-guardrail' }],
         });
 
+        expect(dispatch?.kind).toBe('dispatch');
+        if (dispatch?.kind !== 'dispatch') return;
         expect(dispatch?.skillName).toBe('saas-app-ui-guardrail');
         expect(dispatch?.visibleText).toBe('用这个skill 重新计划');
         expect(dispatch?.visibleText.startsWith('/')).toBe(false);
@@ -22,6 +77,8 @@ describe('skill slash dispatch', () => {
             skills: [{ name: 'saas-app-ui-guardrail' }],
         });
 
+        expect(dispatch?.kind).toBe('dispatch');
+        if (dispatch?.kind !== 'dispatch') return;
         expect(dispatch?.visibleText).toBe('Use the saas-app-ui-guardrail skill.');
     });
 
@@ -40,6 +97,8 @@ describe('skill slash dispatch', () => {
             skills: [],
         });
 
+        expect(dispatch?.kind).toBe('dispatch');
+        if (dispatch?.kind !== 'dispatch') return;
         expect(dispatch?.skillName).toBe('project-review');
         expect(dispatch?.visibleText).toBe('check these docs');
     });
@@ -50,6 +109,8 @@ describe('skill slash dispatch', () => {
             skills: [{ name: 'Lark-OpenApi-Explorer' }],
         });
 
+        expect(dispatch?.kind).toBe('dispatch');
+        if (dispatch?.kind !== 'dispatch') return;
         expect(dispatch?.skillName).toBe('Lark-OpenApi-Explorer');
     });
 });

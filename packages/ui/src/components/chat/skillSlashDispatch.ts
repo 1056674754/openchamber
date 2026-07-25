@@ -7,6 +7,7 @@ export type SlashSkillDispatchCommand = {
 
 export type SlashSkillDispatchSkill = {
     readonly name: string;
+    readonly opencodeSynced?: boolean;
 };
 
 type SlashSkillDispatchSources = {
@@ -14,27 +15,33 @@ type SlashSkillDispatchSources = {
     readonly skills: readonly SlashSkillDispatchSkill[];
 };
 
-export type SlashSkillDispatch = {
-    readonly skillName: string;
-    readonly visibleText: string;
-    readonly instructionText: string;
-};
+export type SlashSkillDispatch =
+    | {
+        readonly kind: 'dispatch';
+        readonly skillName: string;
+        readonly visibleText: string;
+        readonly instructionText: string;
+    }
+    | {
+        readonly kind: 'unsynced';
+        readonly skillName: string;
+    };
 
 const normalizeSlashName = (name: string): string => name.trim().toLowerCase();
 
-const findSkillName = (rawName: string, sources: SlashSkillDispatchSources): string | null => {
+const findSkill = (rawName: string, sources: SlashSkillDispatchSources): SlashSkillDispatchSkill | null => {
     const normalizedName = normalizeSlashName(rawName);
     if (!normalizedName) return null;
 
     for (const skill of sources.skills) {
         if (normalizeSlashName(skill.name) === normalizedName) {
-            return skill.name;
+            return skill;
         }
     }
 
     for (const command of sources.commands) {
         if (command.source === 'skill' && normalizeSlashName(command.name) === normalizedName) {
-            return command.name;
+            return { name: command.name };
         }
     }
 
@@ -57,18 +64,23 @@ export const buildSlashSkillDispatch = (
         return null;
     }
 
-    const skillName = findSkillName(invocation.name, sources);
-    if (!skillName) return null;
+    const skill = findSkill(invocation.name, sources);
+    if (!skill) return null;
+
+    if (skill.opencodeSynced === false) {
+        return { kind: 'unsynced', skillName: skill.name };
+    }
 
     const userRequest = invocation.arguments.trim();
-    const visibleText = userRequest || `Use the ${skillName} skill.`;
+    const visibleText = userRequest || `Use the ${skill.name} skill.`;
 
     return {
-        skillName,
+        kind: 'dispatch',
+        skillName: skill.name,
         visibleText,
         instructionText: [
-            `The user selected the \`${skillName}\` skill via slash syntax.`,
-            `Call the skill tool with the exact skill name \`${skillName}\` before responding.`,
+            `The user selected the \`${skill.name}\` skill via slash syntax.`,
+            `Call the skill tool with the exact skill name \`${skill.name}\` before responding.`,
             'Treat the visible user request as the arguments or context for that skill.',
         ].join(' '),
     };
