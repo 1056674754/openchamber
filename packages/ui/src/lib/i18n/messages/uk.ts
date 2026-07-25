@@ -1840,6 +1840,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.chatInput.placeholder.chat": "@ для файлів/агентів; / для команд і навичок; ! для shell; # для сніпетів",
   "chat.chatInput.placeholder.chatCompact": "Використовуйте @ / ! # для помічників",
   "chat.chatInput.placeholder.selectSession": "Виберіть або створіть сесію, щоб розпочати спілкування",
+  "chat.chatInput.error.skillNotLoaded": "OpenCode поки що не може використовувати навичку \"{name}\". Вона є на диску, але кеш навичок цього сервера ще не було перезавантажено. Перезапустіть OpenCode або підключіться до збірки з гарячим перезавантаженням навичок і спробуйте ще раз.",
   "chat.snippetAutocomplete.action.addNew": "+ Додати новий сніпет",
   "chat.snippetAutocomplete.empty": "Сніпети не знайдено",
   "chat.snippetAutocomplete.footer": "↑↓ навігація • Enter вибрати • Esc закрити",

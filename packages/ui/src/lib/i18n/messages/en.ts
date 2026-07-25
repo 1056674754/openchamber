@@ -1874,6 +1874,7 @@ export const dict = {
   'chat.chatInput.placeholder.chat': '@ for files/agents; / for commands and skills; ! for shell; # for snippets',
   'chat.chatInput.placeholder.chatCompact': 'Use @ / ! # for helpers',
   'chat.chatInput.placeholder.selectSession': 'Select or create a session to start chatting',
+  'chat.chatInput.error.skillNotLoaded': 'OpenCode cannot use the "{name}" skill yet. It exists on disk, but this server\'s skill cache has not reloaded. Restart OpenCode or connect to a build with skill hot reload, then try again.',
   'chat.snippetAutocomplete.action.addNew': '+ Add new snippet',
   'chat.snippetAutocomplete.empty': 'No snippets found',
   'chat.snippetAutocomplete.footer': '↑↓ navigate • Enter select • Esc close',

@@ -1840,6 +1840,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.chatInput.placeholder.chat": "@ para archivos/agentes; / para comandos y habilidades; ! para shell; # para snippets",
   "chat.chatInput.placeholder.chatCompact": "Usa @ / ! # para ayudas",
   "chat.chatInput.placeholder.selectSession": "Selecciona o crea una sesión para comenzar a chatear",
+  "chat.chatInput.error.skillNotLoaded": "OpenCode aún no puede usar la habilidad \"{name}\". Existe en disco, pero la caché de habilidades de este servidor no se ha recargado. Reinicia OpenCode o conéctate a una compilación con recarga en caliente de habilidades y vuelve a intentarlo.",
   "chat.snippetAutocomplete.action.addNew": "+ Agregar nuevo snippet",
   "chat.snippetAutocomplete.empty": "No se encontraron snippets",
   "chat.snippetAutocomplete.footer": "↑↓ navegar • Enter seleccionar • Esc cerrar",

@@ -1010,6 +1010,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.chatInput.placeholder.chat': '@ dla plików/agentów; / dla poleceń i umiejętności; ! dla shell; # dla fragmentów',
   'chat.chatInput.placeholder.chatCompact': 'Użyj @ / ! # dla pomocników',
   'chat.chatInput.placeholder.selectSession': 'Wybierz lub utwórz sesję, aby zacząć czatować',
+  'chat.chatInput.error.skillNotLoaded': 'OpenCode nie może jeszcze użyć umiejętności „{name}”. Istnieje na dysku, ale pamięć podręczna umiejętności tego serwera nie została jeszcze przeładowana. Uruchom ponownie OpenCode albo połącz się z buildem z gorącym przeładowywaniem umiejętności i spróbuj ponownie.',
   'chat.chatInput.placeholder.shell': 'Wpisz polecenie powłoki...',
   'chat.snippetAutocomplete.action.addNew': '+ Dodaj nowy fragment',
   'chat.snippetAutocomplete.empty': 'Nie znaleziono fragmentów',

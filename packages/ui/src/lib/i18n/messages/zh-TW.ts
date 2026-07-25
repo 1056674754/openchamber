@@ -1717,6 +1717,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.chatInput.placeholder.chat': '@ 用於檔案/Agent；/ 用於命令；! 用於 shell；# 用於程式片段',
   'chat.chatInput.placeholder.chatCompact': '使用 @ / ! # 輔助',
   'chat.chatInput.placeholder.selectSession': '選擇或建立會話以開始聊天',
+  'chat.chatInput.error.skillNotLoaded': 'OpenCode 目前還無法使用「{name}」技能。它已存在於磁碟上，但此伺服器的技能快取尚未重新載入。請重新啟動 OpenCode，或連線到支援技能熱重載的版本，然後再試一次。',
   'chat.snippetAutocomplete.action.addNew': '+ 新建程式片段',
   'chat.snippetAutocomplete.empty': '未找到程式片段',
   'chat.snippetAutocomplete.footer': '↑↓ 導航 • Enter 選擇 • Esc 關閉',

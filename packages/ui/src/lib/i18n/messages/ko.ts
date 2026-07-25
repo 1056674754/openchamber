@@ -1875,6 +1875,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.chatInput.placeholder.chat': '@ 파일/에이전트; / 명령 및 스킬; ! shell; # 스니펫',
   'chat.chatInput.placeholder.chatCompact': '@ / ! # 도우미 사용',
   'chat.chatInput.placeholder.selectSession': '채팅을 시작할 세션을 선택하거나 새로 만드세요',
+  'chat.chatInput.error.skillNotLoaded': 'OpenCode는 아직 "{name}" 기술을 사용할 수 없습니다. 디스크에는 있지만 이 서버의 기술 캐시가 아직 다시 로드되지 않았습니다. OpenCode를 다시 시작하거나 기술 핫 리로드가 가능한 빌드에 연결한 다음 다시 시도하세요.',
   'chat.snippetAutocomplete.action.addNew': '+ 새 스니펫 추가',
   'chat.snippetAutocomplete.empty': '스니펫을 찾을 수 없음',
   'chat.snippetAutocomplete.footer': '↑↓ 이동 • Enter 선택 • Esc 닫기',
