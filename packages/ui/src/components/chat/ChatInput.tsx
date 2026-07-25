@@ -1196,6 +1196,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const [snippetQuery, setSnippetQuery] = React.useState('');
     const [textareaSize, setTextareaSize] = React.useState<{ height: number; maxHeight: number } | null>(null);
     const [mobileControlsPanel, setMobileControlsPanel] = React.useState<MobileControlsPanel>(null);
+    const [unsyncedSkillError, setUnsyncedSkillError] = React.useState<string | null>(null);
     // Message history navigation state (up/down arrow to recall previous messages)
     const [historyIndex, setHistoryIndex] = React.useState(-1); // -1 = not browsing, 0+ = index from most recent
     const [draftMessage, setDraftMessage] = React.useState(''); // Preserves input when entering history mode
@@ -1224,13 +1225,26 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     // TODO: port sendMessage to session-actions (complex — creates sessions, handles attachments, etc.)
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const sendMessage = React.useRef((...args: any[]) =>
-        Promise.resolve((useSessionUIStore.getState().sendMessage as (...a: unknown[]) => unknown)(...args)),
+        Promise.resolve((useSessionUIStore.getState().sendMessage as (...a: unknown[]) => unknown)(...args))
+            .then((result) => {
+                setUnsyncedSkillError(null);
+                return result;
+            }),
     ).current;
     const currentSessionId = useSessionUIStore((s) => s.currentSessionId);
     const currentDirectory = useDirectoryStore((s) => s.currentDirectory);
     const currentSessionDirectoryForSync = useSessionUIStore(
         React.useCallback((s) => currentSessionId ? s.getDirectoryForSession(currentSessionId) : null, [currentSessionId]),
     );
+    const composerDirectoryContext = currentSessionDirectoryForSync ?? currentDirectory;
+    React.useEffect(() => {
+        setUnsyncedSkillError(null);
+    }, [composerDirectoryContext, currentSessionId]);
+    React.useEffect(() => {
+        if (!showSkillAutocomplete) {
+            setUnsyncedSkillError(null);
+        }
+    }, [showSkillAutocomplete]);
     const newSessionDraft = useSessionUIStore((s) => s.newSessionDraft);
     const newSessionDraftOpen = Boolean(newSessionDraft?.open);
     const draftPermissionAutoAcceptEnabled = useSessionUIStore(
@@ -1938,6 +1952,15 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         const inputSnapshot = getCurrentInputSnapshot();
         if (!inputSnapshot.hasContent || !currentSessionId) return;
 
+        const slashSkillText = parseAgentMentions(inputSnapshot.message, agents).sanitizedText;
+        const slashSkillDispatch = inputMode === 'normal'
+            ? buildSlashSkillDispatch(slashSkillText, { commands: availableCommands, skills: availableSkills })
+            : null;
+        if (slashSkillDispatch?.kind === 'unsynced') {
+            setUnsyncedSkillError(t('chat.chatInput.error.skillNotLoaded', { name: slashSkillDispatch.skillName }));
+            return;
+        }
+
         const drafts = consumeDrafts(currentSessionId);
 
         let messageToQueue = inputSnapshot.message.replace(/^\n+|\n+$/g, '');
@@ -1985,7 +2008,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         if (!isMobile) {
             textareaRef.current?.focus();
         }
-    }, [getCurrentInputSnapshot, currentSessionId, currentSessionDirectoryForSync, currentDirectory, projects, availableWorktreesByProject, sendableAttachedFiles, sanitizeAttachmentsForSend, addToQueue, clearAttachedFiles, isMobile, consumeDrafts, currentProviderId, currentModelId, currentAgentName, currentVariant]);
+    }, [getCurrentInputSnapshot, currentSessionId, inputMode, availableCommands, availableSkills, agents, t, currentSessionDirectoryForSync, currentDirectory, projects, availableWorktreesByProject, sendableAttachedFiles, sanitizeAttachmentsForSend, addToQueue, clearAttachedFiles, isMobile, consumeDrafts, currentProviderId, currentModelId, currentAgentName, currentVariant]);
 
     const handleQueuedMessageEdit = React.useCallback((content: string) => {
         setMessage(content);
@@ -2062,6 +2085,17 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         if (queuedOnly) {
             if (queuedMessagesToSend.length === 0 || !currentSessionId) return;
         } else if ((!inputSnapshot.hasContent && !hasQueuedMessages) || (!currentSessionId && !newSessionDraftOpen)) {
+            return;
+        }
+
+        const slashSkillSource = queuedMessagesToSend[0]?.content
+            ?? (!queuedOnly && inputSnapshot.hasContent ? inputSnapshot.message.replace(/^\n+|\n+$/g, '') : '');
+        const slashSkillText = parseAgentMentions(slashSkillSource, agents).sanitizedText;
+        const slashSkillPreflight = inputMode === 'normal'
+            ? buildSlashSkillDispatch(slashSkillText, { commands: availableCommands, skills: availableSkills })
+            : null;
+        if (slashSkillPreflight?.kind === 'unsynced') {
+            setUnsyncedSkillError(t('chat.chatInput.error.skillNotLoaded', { name: slashSkillPreflight.skillName }));
             return;
         }
 
@@ -2230,7 +2264,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         const slashSkillDispatch = inputMode === 'normal'
             ? buildSlashSkillDispatch(primaryText, { commands: availableCommands, skills: availableSkills })
             : null;
-        if (slashSkillDispatch) {
+        if (slashSkillDispatch?.kind === 'dispatch') {
             primaryText = slashSkillDispatch.visibleText;
             if (!mentionedSkillNames.some((name) => name.toLowerCase() === slashSkillDispatch.skillName.toLowerCase())) {
                 mentionedSkillNames.push(slashSkillDispatch.skillName);
@@ -2241,7 +2275,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             });
         }
 
-        const genericMentionedSkillNames = slashSkillDispatch
+        const genericMentionedSkillNames = slashSkillDispatch?.kind === 'dispatch'
             ? mentionedSkillNames.filter((name) => name.toLowerCase() !== slashSkillDispatch.skillName.toLowerCase())
             : mentionedSkillNames;
         const skillMentionInstruction = buildSkillMentionInstruction(genericMentionedSkillNames);
@@ -3378,6 +3412,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         }
 
         const value = e.target.value;
+        setUnsyncedSkillError(null);
         const cursorPosition = e.target.selectionStart ?? value.length;
         const pasteMarked = suppressNextFileMentionPasteRef.current;
         const pastedInsertedText = getPastedInsertedText({
@@ -3638,6 +3673,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     };
 
     const handleSkillSelect = (skillName: string) => {
+        setUnsyncedSkillError(null);
         const textarea = textareaRef.current;
         const cursorPosition = textarea?.selectionStart ?? message.length;
         const textBeforeCursor = message.substring(0, cursorPosition);
@@ -4929,6 +4965,19 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                             />
                         </div>
                     </div>
+                    {unsyncedSkillError ? (
+                        <div
+                            role="alert"
+                            className="typography-meta mx-3 mb-1 break-words rounded-xl border p-2"
+                            style={{
+                                backgroundColor: 'var(--status-error-background)',
+                                color: 'var(--status-error)',
+                                borderColor: 'var(--status-error-border)',
+                            }}
+                        >
+                            {unsyncedSkillError}
+                        </div>
+                    ) : null}
                     <div
                         className={cn(
                             'bg-transparent flex-shrink-0',
