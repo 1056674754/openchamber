@@ -59,6 +59,58 @@ describe('remote instances runtime config', () => {
     expect(internal.auth).toEqual({ type: 'bearer', value: 'secret-token' });
   });
 
+  it('redacts and preserves requestHeaders across list/save', async () => {
+    const { runtime, getSettings } = createRuntimeWithSettings({
+      remoteInstances: [
+        {
+          id: 'remote-a',
+          label: 'Remote A',
+          url: 'http://remote-a.example',
+          enabled: true,
+          auth: { type: 'bearer', value: 'token-a' },
+          requestHeaders: {
+            'CF-Access-Client-Id': 'id-a',
+            'CF-Access-Client-Secret': 'secret-a',
+          },
+        },
+      ],
+    });
+
+    await runtime.refreshCache();
+
+    const listed = await runtime.getInstances();
+    expect(listed[0].requestHeaders).toEqual({
+      'CF-Access-Client-Id': '',
+      'CF-Access-Client-Secret': '',
+    });
+    expect(listed[0].hasRequestHeaders).toBe(true);
+
+    const internal = await runtime.getInstance('remote-a');
+    expect(internal.requestHeaders).toEqual({
+      'CF-Access-Client-Id': 'id-a',
+      'CF-Access-Client-Secret': 'secret-a',
+    });
+
+    await runtime.setInstances([
+      {
+        id: 'remote-a',
+        label: 'Remote A',
+        url: 'http://remote-a.example',
+        enabled: true,
+        auth: { type: 'bearer', hasValue: true },
+        requestHeaders: {
+          'CF-Access-Client-Id': '',
+          'CF-Access-Client-Secret': '',
+        },
+      },
+    ]);
+
+    expect(getSettings().remoteInstances[0].requestHeaders).toEqual({
+      'CF-Access-Client-Id': 'id-a',
+      'CF-Access-Client-Secret': 'secret-a',
+    });
+  });
+
   it('preserves existing auth secrets when saves omit the secret value', async () => {
     const { runtime, getSettings } = createRuntimeWithSettings({
       remoteInstances: [

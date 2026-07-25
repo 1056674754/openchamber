@@ -1,3 +1,9 @@
+import {
+  normalizeRemoteRequestHeadersDraft,
+  preserveRemoteRequestHeaderValues,
+  redactRemoteRequestHeadersForApi,
+} from '../remote-instances/request-headers.js';
+
 export const createSettingsHelpers = (dependencies) => {
   const {
     normalizePathForPersistence,
@@ -816,18 +822,24 @@ export const createSettingsHelpers = (dependencies) => {
       const instances = candidate.remoteInstances
         .filter((inst) => inst && typeof inst.id === 'string' && inst.id.length > 0
                           && typeof inst.url === 'string' && inst.url.length > 0)
-        .map((inst) => ({
-          id: inst.id.trim().slice(0, 128),
-          label: typeof inst.label === 'string' ? inst.label.trim().slice(0, 256) : inst.id,
-          url: inst.url.trim().replace(/\/+$/, ''),
-          auth: {
-            type: ['none', 'password', 'bearer'].includes(inst?.auth?.type) ? inst.auth.type : 'none',
-            value: typeof inst?.auth?.value === 'string' ? inst.auth.value : undefined,
-          },
-          connectionTimeoutSec: typeof inst.connectionTimeoutSec === 'number' && Number.isFinite(inst.connectionTimeoutSec)
-            ? Math.max(5, Math.min(300, Math.round(inst.connectionTimeoutSec))) : 30,
-          enabled: typeof inst.enabled === 'boolean' ? inst.enabled : true,
-        }))
+        .map((inst) => {
+          const requestHeadersDraft = Object.prototype.hasOwnProperty.call(inst || {}, 'requestHeaders')
+            ? normalizeRemoteRequestHeadersDraft(inst.requestHeaders)
+            : undefined;
+          return {
+            id: inst.id.trim().slice(0, 128),
+            label: typeof inst.label === 'string' ? inst.label.trim().slice(0, 256) : inst.id,
+            url: inst.url.trim().replace(/\/+$/, ''),
+            auth: {
+              type: ['none', 'password', 'bearer'].includes(inst?.auth?.type) ? inst.auth.type : 'none',
+              value: typeof inst?.auth?.value === 'string' ? inst.auth.value : undefined,
+            },
+            ...(requestHeadersDraft !== undefined ? { requestHeaders: requestHeadersDraft } : {}),
+            connectionTimeoutSec: typeof inst.connectionTimeoutSec === 'number' && Number.isFinite(inst.connectionTimeoutSec)
+              ? Math.max(5, Math.min(300, Math.round(inst.connectionTimeoutSec))) : 30,
+            enabled: typeof inst.enabled === 'boolean' ? inst.enabled : true,
+          };
+        })
         .filter((inst) => {
           try { new URL(inst.url); return true; } catch { return false; }
         });
@@ -846,10 +858,16 @@ export const createSettingsHelpers = (dependencies) => {
       const authType = ['none', 'password', 'bearer'].includes(inst?.auth?.type)
         ? inst.auth.type
         : 'none';
+      const headerRedaction = redactRemoteRequestHeadersForApi(inst?.requestHeaders);
       const redacted = {
         ...inst,
         auth: { type: authType },
+        ...headerRedaction,
       };
+      if (!headerRedaction.requestHeaders) {
+        delete redacted.requestHeaders;
+        delete redacted.hasRequestHeaders;
+      }
       if (authType !== 'none' && typeof inst?.auth?.value === 'string' && inst.auth.value.length > 0) {
         redacted.auth.hasValue = true;
       }
@@ -869,23 +887,36 @@ export const createSettingsHelpers = (dependencies) => {
     );
 
     return nextInstances.map((inst) => {
-      const authType = ['password', 'bearer'].includes(inst?.auth?.type) ? inst.auth.type : 'none';
-      if (authType === 'none' || inst?.auth?.value) {
-        return inst;
-      }
-
       const current = currentById.get(inst.id);
-      if (current?.auth?.type !== authType || !current.auth.value) {
-        return inst;
+      let next = inst;
+
+      const authType = ['password', 'bearer'].includes(inst?.auth?.type) ? inst.auth.type : 'none';
+      if (authType !== 'none' && !inst?.auth?.value) {
+        if (current?.auth?.type === authType && current.auth.value) {
+          next = {
+            ...next,
+            auth: {
+              ...next.auth,
+              value: current.auth.value,
+            },
+          };
+        }
       }
 
-      return {
-        ...inst,
-        auth: {
-          ...inst.auth,
-          value: current.auth.value,
-        },
-      };
+      const preservedHeaders = preserveRemoteRequestHeaderValues(
+        current?.requestHeaders,
+        Object.prototype.hasOwnProperty.call(inst || {}, 'requestHeaders')
+          ? inst.requestHeaders
+          : undefined,
+      );
+      if (preservedHeaders) {
+        next = { ...next, requestHeaders: preservedHeaders };
+      } else if (Object.prototype.hasOwnProperty.call(inst || {}, 'requestHeaders')) {
+        const { requestHeaders: _drop, ...rest } = next;
+        next = rest;
+      }
+
+      return next;
     });
   };
 

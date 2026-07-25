@@ -8,9 +8,11 @@
 import React from "react";
 import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { NumberInput } from "@/components/ui/number-input";
 import { Icon } from "@/components/icon/Icon";
+import { useI18n } from "@/lib/i18n";
 import type { ConfigCardProps } from "./types";
 
 /* ─── helpers ─────────────────────────────────────────────────── */
@@ -88,7 +90,10 @@ export function ConfigCard({
   // Web URL
   webUrl,
   onWebUrlChange,
+  requestHeaderEntries,
+  onRequestHeaderEntriesChange,
 }: ConfigCardProps) {
+  const { t } = useI18n();
   return (
     <div className="border-t border-[var(--surface-subtle)] pt-8">
       <div className={HEADER_CLASSES}>
@@ -378,6 +383,72 @@ export function ConfigCard({
           )}
         </SubSection>
       </div>
+
+      {/* Web: additional upstream headers */}
+      {!isDesktop && onRequestHeaderEntriesChange ? (
+        <div className="border-t border-[var(--surface-subtle)] pt-6">
+          <SubSection
+            title={t('settings.remoteInstances.page.section.requestHeaders')}
+            description={t('settings.remoteInstances.page.section.requestHeadersDescription')}
+          >
+            <div className="space-y-2">
+              {(requestHeaderEntries ?? []).map((entry, index) => (
+                <div key={`header-${index}`} className="flex flex-col gap-1.5 md:flex-row md:items-center md:gap-2">
+                  <Input
+                    className="h-7 md:w-44 font-mono text-sm"
+                    value={entry.key}
+                    onChange={(e) => {
+                      const next = [...(requestHeaderEntries ?? [])];
+                      next[index] = { ...entry, key: e.target.value };
+                      onRequestHeaderEntriesChange(next);
+                    }}
+                    placeholder={t('settings.remoteInstances.page.field.headerNamePlaceholder')}
+                    data-bwignore="true"
+                    data-1p-ignore="true"
+                  />
+                  <Input
+                    className="h-7 flex-1 font-mono text-sm"
+                    type="password"
+                    value={entry.value}
+                    onChange={(e) => {
+                      const next = [...(requestHeaderEntries ?? [])];
+                      next[index] = { ...entry, value: e.target.value };
+                      onRequestHeaderEntriesChange(next);
+                    }}
+                    placeholder={t('settings.remoteInstances.page.field.headerValuePlaceholder')}
+                    data-bwignore="true"
+                    data-1p-ignore="true"
+                  />
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="xs"
+                    className="!font-normal"
+                    onClick={() => {
+                      onRequestHeaderEntriesChange(
+                        (requestHeaderEntries ?? []).filter((_, i) => i !== index),
+                      );
+                    }}
+                    aria-label={t('settings.remoteInstances.page.actions.removeHeader')}
+                  >
+                    <Icon name="delete-bin" className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              ))}
+              <Button
+                type="button"
+                variant="outline"
+                size="xs"
+                className="!font-normal"
+                onClick={() => onRequestHeaderEntriesChange([...(requestHeaderEntries ?? []), { key: '', value: '' }])}
+              >
+                <Icon name="add" className="h-3.5 w-3.5" />
+                {t('settings.remoteInstances.page.actions.addHeader')}
+              </Button>
+            </div>
+          </SubSection>
+        </div>
+      ) : null}
     </div>
   );
 }

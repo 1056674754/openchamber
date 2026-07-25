@@ -141,6 +141,10 @@ describe('remote RPC websocket', () => {
           url: 'http://remote-a.example',
           enabled: true,
           auth: { type: 'bearer', value: 'secret-token' },
+          requestHeaders: {
+            'CF-Access-Client-Id': 'id-a',
+            'CF-Access-Client-Secret': 'secret-a',
+          },
         }),
         isHealthy: () => true,
         enterRequestLane: async () => {
@@ -186,6 +190,8 @@ describe('remote RPC websocket', () => {
     expect(fetchCalls[0].url).toBe('http://remote-a.example/api/fs/list?path=%2Ftmp');
     expect(fetchCalls[0].init.headers.Authorization).toBe('Bearer secret-token');
     expect(fetchCalls[0].init.headers.Cookie).toBeUndefined();
+    expect(fetchCalls[0].init.headers['CF-Access-Client-Id']).toBe('id-a');
+    expect(fetchCalls[0].init.headers['CF-Access-Client-Secret']).toBe('secret-a');
     expect(socket.sent[1]).toMatchObject({
       type: 'response',
       id: 'req-1',

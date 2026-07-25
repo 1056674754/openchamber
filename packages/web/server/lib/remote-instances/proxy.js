@@ -4,6 +4,7 @@ import {
   preserveDecodedPayloadLengthHeader,
   shouldForwardProxyResponseHeader,
 } from '../../proxy-headers.js';
+import { buildRemoteUpstreamHeaders } from './request-headers.js';
 
 const remoteProxyPathPrefix = '/api/remote/';
 const REMOTE_PROXY_FAST_TIMEOUT_MS = 3_000;
@@ -128,15 +129,10 @@ export const getRemoteProxyRequestTimeoutMs = (remotePath, method = 'GET') => {
   return REMOTE_PROXY_DEFAULT_TIMEOUT_MS;
 };
 
-export const buildRemoteProxyAuthHeaders = (instance) => {
-  const headers = {};
-  if (instance?.auth?.type === 'password' && instance.auth.value) {
-    headers.Authorization = `Basic ${Buffer.from(`user:${instance.auth.value}`).toString('base64')}`;
-  } else if (instance?.auth?.type === 'bearer' && instance.auth.value) {
-    headers.Authorization = `Bearer ${instance.auth.value}`;
-  }
-  return headers;
-};
+/** @deprecated Prefer buildRemoteUpstreamHeaders; kept as alias for existing imports. */
+export const buildRemoteProxyAuthHeaders = (instance) => buildRemoteUpstreamHeaders(instance);
+
+export { buildRemoteUpstreamHeaders };
 
 const setRemoteAuthHeaders = (proxyReq, req) => {
   const headers = buildRemoteProxyAuthHeaders(req.remoteInstance);

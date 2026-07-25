@@ -161,6 +161,10 @@ export interface ConfigCardProps {
   // Web URL
   webUrl: string;
   onWebUrlChange: (value: string) => void;
+
+  /** Web-only additional upstream headers (key/value rows). */
+  requestHeaderEntries?: Array<{ key: string; value: string }>;
+  onRequestHeaderEntriesChange?: (entries: Array<{ key: string; value: string }>) => void;
 }
 
 // ─── Forward Card ────────────────────────────────────────────

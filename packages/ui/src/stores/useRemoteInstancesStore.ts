@@ -491,10 +491,15 @@ export const useRemoteInstancesStore = create<RemoteInstancesState>((set, get) =
           `Instance id "${reserved.id}" is reserved and cannot be used for a remote instance`,
         );
       }
+      const payload = explicit.map((instance) => {
+        const { hasRequestHeaders, ...rest } = instance;
+        void hasRequestHeaders;
+        return rest;
+      });
       const response = await fetch('/api/remote-instances', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ instances: explicit }),
+        body: JSON.stringify({ instances: payload }),
       });
       if (!response.ok) {
         throw new Error(`Failed to save remote instances: ${response.status}`);

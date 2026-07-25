@@ -10,6 +10,7 @@ import {
   createSseBoundaryTracker,
   writeSseChunkWithBackpressure,
 } from '../opencode/proxy.js';
+import { buildRemoteUpstreamHeaders } from './request-headers.js';
 
 const REMOTE_STREAM_CONNECT_TIMEOUT_MS = 8_000;
 
@@ -22,18 +23,8 @@ const isClientClosedStreamError = (error) => {
   );
 };
 
-/**
- * Build auth headers for a remote instance based on its auth config.
- */
-export const buildRemoteEventAuthHeaders = (instance) => {
-  const headers = {};
-  if (instance.auth?.type === 'password' && instance.auth.value) {
-    headers['Authorization'] = `Basic ${Buffer.from(`user:${instance.auth.value}`).toString('base64')}`;
-  } else if (instance.auth?.type === 'bearer' && instance.auth.value) {
-    headers['Authorization'] = `Bearer ${instance.auth.value}`;
-  }
-  return headers;
-};
+/** @deprecated Prefer buildRemoteUpstreamHeaders; kept as alias for existing imports. */
+export const buildRemoteEventAuthHeaders = (instance) => buildRemoteUpstreamHeaders(instance);
 
 const parseLastEventId = (searchParams) => {
   if (typeof searchParams !== 'string' || searchParams.length === 0) {

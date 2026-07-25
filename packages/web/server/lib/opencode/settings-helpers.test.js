@@ -330,4 +330,68 @@ describe('settings helpers', () => {
 
     expect(merged.remoteInstances[0].auth).toEqual({ type: 'password', value: 'open-sesame' });
   });
+
+  it('redacts and preserves remote instance requestHeaders', () => {
+    const helpers = createTestHelpers();
+
+    const response = helpers.formatSettingsResponse({
+      remoteInstances: [
+        {
+          id: 'remote-a',
+          label: 'Remote A',
+          url: 'http://remote-a.example',
+          auth: { type: 'none' },
+          requestHeaders: {
+            'CF-Access-Client-Id': 'id-a',
+            'CF-Access-Client-Secret': 'secret-a',
+          },
+          enabled: true,
+        },
+      ],
+    });
+
+    expect(response.remoteInstances[0].requestHeaders).toEqual({
+      'CF-Access-Client-Id': '',
+      'CF-Access-Client-Secret': '',
+    });
+    expect(response.remoteInstances[0].hasRequestHeaders).toBe(true);
+
+    const merged = helpers.mergePersistedSettings(
+      {
+        remoteInstances: [
+          {
+            id: 'remote-a',
+            label: 'Remote A',
+            url: 'http://remote-a.example',
+            auth: { type: 'none' },
+            requestHeaders: {
+              'CF-Access-Client-Id': 'id-a',
+              'CF-Access-Client-Secret': 'secret-a',
+            },
+            enabled: true,
+          },
+        ],
+      },
+      {
+        remoteInstances: [
+          {
+            id: 'remote-a',
+            label: 'Remote A',
+            url: 'http://remote-a.example',
+            auth: { type: 'none' },
+            requestHeaders: {
+              'CF-Access-Client-Id': '',
+              'CF-Access-Client-Secret': '',
+            },
+            enabled: true,
+          },
+        ],
+      },
+    );
+
+    expect(merged.remoteInstances[0].requestHeaders).toEqual({
+      'CF-Access-Client-Id': 'id-a',
+      'CF-Access-Client-Secret': 'secret-a',
+    });
+  });
 });

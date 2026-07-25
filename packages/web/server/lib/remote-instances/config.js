@@ -1,3 +1,10 @@
+import {
+  buildRemoteUpstreamHeaders,
+  preserveRemoteRequestHeaderValues,
+  redactRemoteRequestHeadersForApi,
+  sanitizeRemoteRequestHeaders,
+} from './request-headers.js';
+
 const VALID_AUTH_TYPES = new Set(['none', 'password', 'bearer']);
 
 /**
@@ -91,6 +98,7 @@ const validateInstance = (inst) => {
   const authValue = authType !== 'none' && typeof inst?.auth?.value === 'string' && inst.auth.value.length > 0
     ? inst.auth.value
     : undefined;
+  const requestHeaders = sanitizeRemoteRequestHeaders(inst?.requestHeaders);
 
   return {
     id,
@@ -100,6 +108,7 @@ const validateInstance = (inst) => {
       type: authType,
       value: authValue,
     },
+    ...(Object.keys(requestHeaders).length > 0 ? { requestHeaders } : {}),
     connectionTimeoutSec:
       typeof inst.connectionTimeoutSec === 'number' && Number.isFinite(inst.connectionTimeoutSec)
         ? Math.max(5, Math.min(300, Math.round(inst.connectionTimeoutSec)))
@@ -110,12 +119,18 @@ const validateInstance = (inst) => {
 
 const redactInstanceForApi = (inst) => {
   const authType = VALID_AUTH_TYPES.has(inst?.auth?.type) ? inst.auth.type : 'none';
+  const headerRedaction = redactRemoteRequestHeadersForApi(inst?.requestHeaders);
   const redacted = {
     ...inst,
     auth: {
       type: authType,
     },
+    ...headerRedaction,
   };
+  if (!headerRedaction.requestHeaders) {
+    delete redacted.requestHeaders;
+    delete redacted.hasRequestHeaders;
+  }
 
   if (authType !== 'none' && Boolean(inst?.auth?.value)) {
     redacted.auth.hasValue = true;
@@ -124,15 +139,10 @@ const redactInstanceForApi = (inst) => {
   return redacted;
 };
 
-const buildRemoteAuthHeaders = (instance) => {
-  const headers = { Accept: 'application/json' };
-  if (instance.auth?.type === 'password' && instance.auth.value) {
-    headers.Authorization = `Basic ${Buffer.from(`user:${instance.auth.value}`).toString('base64')}`;
-  } else if (instance.auth?.type === 'bearer' && instance.auth.value) {
-    headers.Authorization = `Bearer ${instance.auth.value}`;
-  }
-  return headers;
-};
+const buildRemoteAuthHeaders = (instance) => ({
+  Accept: 'application/json',
+  ...buildRemoteUpstreamHeaders(instance),
+});
 
 const readJsonOrNull = async (response) => {
   try {
@@ -177,6 +187,18 @@ const sanitizeInstancesOrThrow = (input, existingInstances = []) => {
       && existing.auth.value
     ) {
       validated.auth.value = existing.auth.value;
+    }
+
+    const preservedHeaders = preserveRemoteRequestHeaderValues(
+      existing?.requestHeaders,
+      item && Object.prototype.hasOwnProperty.call(item, 'requestHeaders')
+        ? item.requestHeaders
+        : undefined,
+    );
+    if (preservedHeaders) {
+      validated.requestHeaders = preservedHeaders;
+    } else {
+      delete validated.requestHeaders;
     }
 
     result.push(validated);

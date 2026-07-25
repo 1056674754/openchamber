@@ -24,6 +24,10 @@ export type RemoteInstance = {
   enabled: boolean;
   url?: string;
   auth?: RemoteInstanceAuth;
+  /** Extra upstream headers (e.g. Cloudflare Access). Authorization is via auth. */
+  requestHeaders?: Record<string, string>;
+  /** True when the API redacted stored header values (names kept, values empty). */
+  hasRequestHeaders?: boolean;
   connectionTimeoutSec?: number;
   source?: 'ssh' | 'explicit';
 };

@@ -378,6 +378,22 @@ const WebRemoteInstancesPage: React.FC<WebPageProps> = ({
         onAuthValueChange={(v) => updateWebDraft((c) => ({ ...c, auth: { ...(c.auth || { type: 'password' }), value: v } }))}
         webUrl={webDraft.url || ''}
         onWebUrlChange={(v) => updateWebDraft((c) => ({ ...c, url: v }))}
+        requestHeaderEntries={Object.entries(webDraft.requestHeaders ?? {}).map(([key, value]) => ({ key, value }))}
+        onRequestHeaderEntriesChange={(entries) => {
+          updateWebDraft((current) => {
+            const requestHeaders: Record<string, string> = {};
+            for (const entry of entries) {
+              const name = entry.key.trim();
+              if (!name) continue;
+              requestHeaders[name] = entry.value;
+            }
+            return {
+              ...current,
+              requestHeaders,
+              hasRequestHeaders: Object.keys(requestHeaders).length > 0 ? current.hasRequestHeaders : undefined,
+            };
+          });
+        }}
       />
 
       {/* Danger Card */}
