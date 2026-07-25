@@ -34,46 +34,78 @@ const normalizePath = (value: string): string => value.replace(/\\/g, '/').repla
 // belongs to a remote server. Without this, the remote SyncProvider never creates
 // a child store for the worktree path, so SSE events are dropped and sessions are
 // invisible on startup.
-const ensureWorktreeProject = (worktreePath: string, projectRef: ProjectRef) => {
+/** Register a worktree path as a remote project when the owner is remote. */
+export const ensureWorktreeProject = (worktreePath: string, projectRef: ProjectRef) => {
   const project = useProjectsStore.getState().projects.find((p) => p.id === projectRef.id);
-  const serverId = project?.serverId;
+  const serverId = project?.serverId ?? projectRef.serverId;
   if (!serverId || serverId === DEFAULT_SERVER_ID) return;
   useProjectsStore.getState().ensureRemoteProject(worktreePath, serverId);
 };
 
-const resolveProjectRef = (directory: string): ProjectRef | null => {
-  const normalized = normalizePath(directory);
+/**
+ * Resolve the owning project for a session/worktree directory.
+ * Prefers longest worktree/project path match and preserves serverId.
+ * Does not fall back to activeProject when a longer path owner exists.
+ */
+export const resolveProjectRef = (directory: string): ProjectRef | null => {
   const projects = useProjectsStore.getState().projects;
-  if (projects.length === 0) {
+  const normalizedDirectory = normalizePath(directory);
+  if (!normalizedDirectory || projects.length === 0) {
     return null;
   }
 
-  const activeProject = useProjectsStore.getState().getActiveProject();
-  if (activeProject?.path) {
-    const activePath = normalizePath(activeProject.path);
-    if (normalized === activePath || normalized.startsWith(`${activePath}/`)) {
-      return {
-        id: activeProject.id,
-        path: activeProject.path,
-        serverId: activeProject.serverId,
-        label: activeProject.label,
-      };
+  let project: (typeof projects)[number] | null = null;
+  let matchedPathLength = -1;
+
+  for (const [projectPath, worktrees] of useSessionUIStore.getState().availableWorktreesByProject) {
+    for (const worktree of worktrees) {
+      const worktreePath = normalizePath(worktree.path);
+      if (!worktreePath) continue;
+      if (normalizedDirectory !== worktreePath && !normalizedDirectory.startsWith(`${worktreePath}/`)) continue;
+      if (worktreePath.length <= matchedPathLength) continue;
+
+      const ownerPaths = [worktree.projectDirectory, projectPath].filter(Boolean) as string[];
+      for (const ownerPath of ownerPaths) {
+        const owner = projects.find((candidate) => normalizePath(candidate.path) === normalizePath(ownerPath));
+        if (!owner) continue;
+        project = owner;
+        matchedPathLength = worktreePath.length;
+        break;
+      }
     }
   }
 
-  const matches = projects.filter((project) => {
-    const projectPath = normalizePath(project.path);
-    return normalized === projectPath || normalized.startsWith(`${projectPath}/`);
-  });
+  if (!project) {
+    const matches = projects.filter((candidate) => {
+      const projectPath = normalizePath(candidate.path);
+      return normalizedDirectory === projectPath || normalizedDirectory.startsWith(`${projectPath}/`);
+    });
+    project = matches.sort((a, b) => normalizePath(b.path).length - normalizePath(a.path).length)[0] ?? null;
+  }
 
-  const match = matches.sort((a, b) => normalizePath(b.path).length - normalizePath(a.path).length)[0];
-
-  return match ? {
-    id: match.id,
-    path: match.path,
-    serverId: match.serverId,
-    label: match.label,
+  return project ? {
+    id: project.id,
+    path: project.path,
+    serverId: project.serverId,
+    label: project.label,
   } : null;
+};
+
+export const createQuickWorktree = async (
+  project: ProjectRef,
+  options: { preferredName?: string; startRef?: string } = {},
+) => {
+  const preferredName = options.preferredName ?? generateBranchName();
+  const setupCommands = await getWorktreeSetupCommands(project);
+  return createWorktreeWithDefaults(project, {
+    preferredName,
+    mode: 'new',
+    branchName: preferredName,
+    worktreeName: preferredName,
+    startRef: options.startRef,
+    setupCommands,
+    returnAfterDirectoryCreated: true,
+  });
 };
 
 // Track if a worktree creation flow is already running

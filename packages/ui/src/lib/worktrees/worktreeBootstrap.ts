@@ -10,14 +10,62 @@ declare global {
 }
 
 type WorktreeBootstrapState = GitWorktreeBootstrapStatus;
+type WorktreeBootstrapTarget = 'git-ready' | 'setup-ready';
 
 const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000;
 const POLL_INTERVAL_MS = 250;
 
 const state = new Map<string, WorktreeBootstrapState>();
 const waiters = new Map<string, Promise<void>>();
+const lifecycleVersions = new Map<string, number>();
+let nextLifecycleVersion = 0;
 
 const getKey = (directory: string): string => normalizePath(directory) ?? '';
+const getWaiterKey = (key: string, target: WorktreeBootstrapTarget): string => `${key}\n${target}`;
+
+const startLifecycle = (key: string): void => {
+  waiters.delete(getWaiterKey(key, 'git-ready'));
+  waiters.delete(getWaiterKey(key, 'setup-ready'));
+  const version = ++nextLifecycleVersion;
+  lifecycleVersions.set(key, version);
+};
+
+const isCurrentLifecycle = (key: string, version: number): boolean => lifecycleVersions.get(key) === version;
+
+const phaseRank = (phase: GitWorktreeBootstrapStatus['phase']): number => {
+  switch (phase) {
+    case 'setup-ready':
+      return 2;
+    case 'git-ready':
+      return 1;
+    case 'directory-created':
+    default:
+      return 0;
+  }
+};
+
+const storePolledState = (
+  key: string,
+  next: WorktreeBootstrapState,
+  lifecycleVersion: number,
+): WorktreeBootstrapState | null => {
+  if (!isCurrentLifecycle(key, lifecycleVersion)) {
+    return null;
+  }
+
+  const current = state.get(key);
+  const wouldRegressReadyState = current?.status === 'ready' && next.status === 'pending';
+  const wouldRegressPendingPhase = current?.status === 'pending'
+    && next.status === 'pending'
+    && phaseRank(next.phase) < phaseRank(current.phase);
+
+  if (wouldRegressReadyState || wouldRegressPendingPhase) {
+    return current ?? null;
+  }
+
+  state.set(key, next);
+  return next;
+};
 
 const getGitWorktreeBootstrapStatus = async (directory: string): Promise<GitWorktreeBootstrapStatus> => {
   const runtimeGit = typeof window !== 'undefined' ? window.__OPENCHAMBER_RUNTIME_APIS__?.git : undefined;
@@ -35,8 +83,10 @@ export const markWorktreeBootstrapPending = (directory: string): void => {
   if (!key) {
     return;
   }
+  startLifecycle(key);
   state.set(key, {
     status: 'pending',
+    phase: 'directory-created',
     error: null,
     updatedAt: Date.now(),
   });
@@ -47,8 +97,9 @@ export const clearWorktreeBootstrapState = (directory: string): void => {
   if (!key) {
     return;
   }
+  startLifecycle(key);
   state.delete(key);
-  waiters.delete(key);
+  lifecycleVersions.delete(key);
 };
 
 export const setWorktreeBootstrapState = (directory: string, next: WorktreeBootstrapState): void => {
@@ -56,10 +107,8 @@ export const setWorktreeBootstrapState = (directory: string, next: WorktreeBoots
   if (!key) {
     return;
   }
+  startLifecycle(key);
   state.set(key, next);
-  if (next.status !== 'pending') {
-    waiters.delete(key);
-  }
 };
 
 export const getWorktreeBootstrapState = (directory: string): WorktreeBootstrapState | null => {
@@ -70,19 +119,42 @@ export const getWorktreeBootstrapState = (directory: string): WorktreeBootstrapS
   return state.get(key) ?? null;
 };
 
-const pollWorktreeBootstrapUntilSettled = async (directory: string, timeoutMs: number): Promise<void> => {
+const hasReachedTarget = (status: GitWorktreeBootstrapStatus, target: WorktreeBootstrapTarget): boolean => {
+  if (status.status === 'ready') return true;
+  if (target === 'git-ready' && (status.phase === 'git-ready' || status.phase === 'setup-ready')) return true;
+  return false;
+};
+
+const pollWorktreeBootstrapUntilSettled = async (
+  directory: string,
+  key: string,
+  lifecycleVersion: number,
+  timeoutMs: number,
+  target: WorktreeBootstrapTarget,
+): Promise<void> => {
   const startedAt = Date.now();
 
   while (Date.now() - startedAt < timeoutMs) {
-    const result = await getGitWorktreeBootstrapStatus(directory);
-    setWorktreeBootstrapState(directory, result);
-
-    if (result.status === 'ready') {
-      return;
+    let current: WorktreeBootstrapState | null = null
+    try {
+      const result = await getGitWorktreeBootstrapStatus(directory)
+      current = storePolledState(key, result, lifecycleVersion)
+    } catch {
+      // Transient poll/network failures should not abort an in-flight wait.
+      await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS))
+      continue
     }
 
-    if (result.status === 'failed') {
-      throw new Error(result.error || 'Worktree bootstrap failed');
+    if (!current) {
+      throw new Error('Worktree bootstrap wait was cancelled')
+    }
+
+    if (hasReachedTarget(current, target)) {
+      return
+    }
+
+    if (current.status === 'failed') {
+      throw new Error(current.error || 'Worktree bootstrap failed')
     }
 
     await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
@@ -91,28 +163,49 @@ const pollWorktreeBootstrapUntilSettled = async (directory: string, timeoutMs: n
   throw new Error('Timed out waiting for worktree bootstrap');
 };
 
-export const waitForWorktreeBootstrap = async (directory: string, timeoutMs = DEFAULT_TIMEOUT_MS): Promise<void> => {
+const waitForWorktreePhase = async (
+  directory: string,
+  target: WorktreeBootstrapTarget,
+  timeoutMs = DEFAULT_TIMEOUT_MS,
+): Promise<void> => {
   const key = getKey(directory);
   if (!key) {
     return;
   }
 
   const current = state.get(key);
-  if (current?.status === 'ready') {
+  if (!current) {
+    // No pending bootstrap tracked locally — treat as already usable.
     return;
   }
-  if (current?.status === 'failed') {
+
+  if (hasReachedTarget(current, target)) {
+    return;
+  }
+  if (current.status === 'failed') {
     throw new Error(current.error || 'Worktree bootstrap failed');
   }
 
-  const existing = waiters.get(key);
+  const waiterKey = getWaiterKey(key, target);
+  const existing = waiters.get(waiterKey);
   if (existing) {
     return existing;
   }
 
-  const pending = pollWorktreeBootstrapUntilSettled(directory, timeoutMs).finally(() => {
-    waiters.delete(key);
+  const lifecycleVersion = lifecycleVersions.get(key) ?? 0;
+  const pending = pollWorktreeBootstrapUntilSettled(directory, key, lifecycleVersion, timeoutMs, target).finally(() => {
+    if (waiters.get(waiterKey) === pending) {
+      waiters.delete(waiterKey);
+    }
   });
-  waiters.set(key, pending);
+  waiters.set(waiterKey, pending);
   return pending;
 };
+
+/** Wait until git worktree populate is done (session move / control-plane). */
+export const waitForWorktreeGitReady = (directory: string, timeoutMs = DEFAULT_TIMEOUT_MS): Promise<void> =>
+  waitForWorktreePhase(directory, 'git-ready', timeoutMs);
+
+/** Wait until setup scripts finish (existing create-session / config flows). */
+export const waitForWorktreeBootstrap = (directory: string, timeoutMs = DEFAULT_TIMEOUT_MS): Promise<void> =>
+  waitForWorktreePhase(directory, 'setup-ready', timeoutMs);

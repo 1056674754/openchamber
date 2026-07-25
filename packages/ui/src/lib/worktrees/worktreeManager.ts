@@ -9,6 +9,7 @@ import * as gitHttp from '@/lib/gitApiHttp';
 import {
   clearWorktreeBootstrapState,
   markWorktreeBootstrapPending,
+  setWorktreeBootstrapState,
 } from '@/lib/worktrees/worktreeBootstrap';
 import { invalidateResolvedProjectRootCache } from '@/lib/worktrees/worktreeStatus';
 import type {
@@ -56,6 +57,18 @@ const normalizePath = (value: string): string => {
     return '/';
   }
   return replaced.length > 1 ? replaced.replace(/\/+$/, '') : replaced;
+};
+
+export const getLatestWorktreeMetadata = (metadata: WorktreeMetadata): WorktreeMetadata => {
+  const target = normalizePath(metadata.path);
+  const state = useSessionUIStore.getState();
+  const available = state.availableWorktrees.find((candidate) => normalizePath(candidate.path) === target);
+  if (available) return available;
+  for (const worktrees of state.availableWorktreesByProject.values()) {
+    const candidate = worktrees.find((worktree) => normalizePath(worktree.path) === target);
+    if (candidate) return candidate;
+  }
+  return metadata;
 };
 
 const toAbsolutePath = (baseDir: string, maybeRelativePath: string): string => {
@@ -303,6 +316,8 @@ export type CreateWorktreeArgs = {
   upstreamBranch?: string;
   ensureRemoteName?: string;
   ensureRemoteUrl?: string;
+  /** Reserved for API parity; fork create already returns after git worktree add. */
+  returnAfterDirectoryCreated?: boolean;
 };
 
 export async function createWorktree(project: ProjectRef, args: CreateWorktreeArgs): Promise<WorktreeMetadata> {
@@ -336,7 +351,11 @@ export async function createWorktree(project: ProjectRef, args: CreateWorktreeAr
     worktreeSource: 'created-for-session',
   };
 
-  markWorktreeBootstrapPending(metadata.path);
+  if (created?.bootstrapStatus) {
+    setWorktreeBootstrapState(metadata.path, created.bootstrapStatus);
+  } else {
+    markWorktreeBootstrapPending(metadata.path);
+  }
 
   _worktreeListCache.delete(getProjectWorktreeKey(projectDirectory, project.serverId));
   invalidateResolvedProjectRootCache();

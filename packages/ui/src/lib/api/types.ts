@@ -337,8 +337,15 @@ export interface GitWorktreeValidationResult {
   };
 }
 
+export type GitWorktreeBootstrapPhase =
+  | 'directory-created'
+  | 'git-ready'
+  | 'setup-ready';
+
 export interface GitWorktreeBootstrapStatus {
   status: 'pending' | 'ready' | 'failed';
+  /** Present when the server/runtime reports phased bootstrap (move waits for git-ready). */
+  phase?: GitWorktreeBootstrapPhase;
   error: string | null;
   updatedAt: number;
 }
@@ -371,6 +378,8 @@ export interface GitWorktreeCreateResult {
   name: string;
   branch: string;
   path: string;
+  bootstrapStatus?: GitWorktreeBootstrapStatus;
+  directoryCreated?: boolean;
 }
 
 export interface RemoveGitWorktreePayload {
