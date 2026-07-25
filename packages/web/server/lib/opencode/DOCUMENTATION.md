@@ -361,6 +361,7 @@ At desktop startup, a healthy persisted managed port is reused. If that port is 
   - Skills config CRUD and metadata under `/api/config/skills*`
   - Skills catalog listing/source pagination, scan, and install routes
   - Supporting skill file read/write/delete routes
+- `GET /api/config/skills` merges OpenCode's skill report with filesystem discovery scoped to the request directory. Each merged skill may include `opencodeSynced`: `true` when OpenCode reported it, `false` when it exists only on disk after a successful OpenCode fetch, and absent when the OpenCode fetch failed so synchronization state is unknown.
 
 ## Public exports (proxy.js)
 - `registerOpenCodeProxy(app, dependencies)`: registers OpenCode proxy routes and middleware.

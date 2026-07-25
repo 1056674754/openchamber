@@ -117,7 +117,7 @@ export const registerSkillRoutes = (app, dependencies) => {
 
   const fetchOpenCodeDiscoveredSkills = async (workingDirectory) => {
     if (!getOpenCodePort()) {
-      return [];
+      return null;
     }
 
     try {
@@ -131,9 +131,12 @@ export const registerSkillRoutes = (app, dependencies) => {
       const response = await client.app.skills(
         workingDirectory ? { directory: workingDirectory } : undefined,
       );
+      if (response?.error) {
+        return null;
+      }
       const payload = response?.data;
       if (!Array.isArray(payload)) {
-        return [];
+        return null;
       }
 
       return payload
@@ -171,7 +174,7 @@ export const registerSkillRoutes = (app, dependencies) => {
         .filter(Boolean);
     } catch (error) {
       console.error('Failed to list OpenCode skills:', error);
-      return [];
+      return null;
     }
   };
 

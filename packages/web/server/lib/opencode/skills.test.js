@@ -5,22 +5,68 @@ import path from 'path';
 import { getSkillSources, mergeDiscoveredSkills } from './skills.js';
 
 describe('skills', () => {
-  it('merges locally discovered skills missing from OpenCode live discovery', () => {
+  it('marks OpenCode and filesystem skills by sync state when discovery succeeds', () => {
     const merged = mergeDiscoveredSkills(
       [
-        { name: 'existing-opencode-skill', path: '/home/jkker/.config/opencode/skills/existing-opencode-skill/SKILL.md', source: 'opencode' },
-        { name: 'existing-agent-skill', path: '/home/jkker/.agents/skills/existing-agent-skill/SKILL.md', source: 'agents' },
+        { name: 'skill-a', path: '/opencode/skill-a/SKILL.md', source: 'opencode' },
+        { name: 'skill-b', path: '/opencode/skill-b/SKILL.md', source: 'opencode' },
       ],
       [
-        { name: 'existing-agent-skill', path: '/home/jkker/.agents/skills/existing-agent-skill/SKILL.md', source: 'agents' },
-        { name: 'new-agent-skill', path: '/home/jkker/.agents/skills/new-agent-skill/SKILL.md', source: 'agents' },
+        { name: 'skill-a', path: '/filesystem/skill-a/SKILL.md', source: 'agents' },
+        { name: 'skill-b', path: '/filesystem/skill-b/SKILL.md', source: 'agents' },
+        { name: 'skill-c', path: '/filesystem/skill-c/SKILL.md', source: 'agents' },
       ],
     );
 
-    expect(merged.map((skill) => skill.name)).toEqual([
-      'existing-opencode-skill',
-      'existing-agent-skill',
-      'new-agent-skill',
+    expect(merged).toEqual([
+      { name: 'skill-a', path: '/opencode/skill-a/SKILL.md', source: 'opencode', opencodeSynced: true },
+      { name: 'skill-b', path: '/opencode/skill-b/SKILL.md', source: 'opencode', opencodeSynced: true },
+      { name: 'skill-c', path: '/filesystem/skill-c/SKILL.md', source: 'agents', opencodeSynced: false },
+    ]);
+  });
+
+  it('marks filesystem-only skills unsynced when OpenCode reports zero skills', () => {
+    const merged = mergeDiscoveredSkills(
+      [],
+      [{ name: 'skill-x', path: '/filesystem/skill-x/SKILL.md', source: 'agents' }],
+    );
+
+    expect(merged).toEqual([
+      { name: 'skill-x', path: '/filesystem/skill-x/SKILL.md', source: 'agents', opencodeSynced: false },
+    ]);
+  });
+
+  it('leaves filesystem skill sync state unknown when OpenCode discovery fails', () => {
+    const merged = mergeDiscoveredSkills(
+      null,
+      [{ name: 'skill-y', path: '/filesystem/skill-y/SKILL.md', source: 'agents' }],
+    );
+
+    expect(merged).toEqual([
+      { name: 'skill-y', path: '/filesystem/skill-y/SKILL.md', source: 'agents' },
+    ]);
+    expect(merged[0]).not.toHaveProperty('opencodeSynced');
+  });
+
+  it('keeps the OpenCode skill when a filesystem skill has the same name', () => {
+    const merged = mergeDiscoveredSkills(
+      [{ name: 'skill-a', path: '/opencode/skill-a/SKILL.md', source: 'opencode' }],
+      [{ name: 'skill-a', path: '/filesystem/skill-a/SKILL.md', source: 'agents' }],
+    );
+
+    expect(merged).toEqual([
+      { name: 'skill-a', path: '/opencode/skill-a/SKILL.md', source: 'opencode', opencodeSynced: true },
+    ]);
+  });
+
+  it('marks OpenCode-only skills synced when filesystem discovery is empty', () => {
+    const merged = mergeDiscoveredSkills(
+      [{ name: 'skill-a', path: '/opencode/skill-a/SKILL.md', source: 'opencode' }],
+      [],
+    );
+
+    expect(merged).toEqual([
+      { name: 'skill-a', path: '/opencode/skill-a/SKILL.md', source: 'opencode', opencodeSynced: true },
     ]);
   });
 

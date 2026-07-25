@@ -241,21 +241,22 @@ function discoverSkills(workingDirectory) {
 function mergeDiscoveredSkills(primarySkills = [], fallbackSkills = []) {
   const merged = [];
   const seenNames = new Set();
+  const openCodeFetchSucceeded = primarySkills !== null;
 
-  const appendSkill = (skill) => {
+  const appendSkill = (skill, opencodeSynced) => {
     const name = typeof skill?.name === 'string' ? skill.name.trim() : '';
     if (!name || seenNames.has(name)) {
       return;
     }
     seenNames.add(name);
-    merged.push(skill);
+    merged.push(opencodeSynced === undefined ? { ...skill } : { ...skill, opencodeSynced });
   };
 
   for (const skill of primarySkills || []) {
-    appendSkill(skill);
+    appendSkill(skill, true);
   }
   for (const skill of fallbackSkills || []) {
-    appendSkill(skill);
+    appendSkill(skill, openCodeFetchSucceeded ? false : undefined);
   }
 
   return merged;
