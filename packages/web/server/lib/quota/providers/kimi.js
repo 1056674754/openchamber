@@ -59,9 +59,9 @@ export const fetchQuota = async () => {
     const usage = payload?.usage ?? null;
     if (usage) {
       const limit = toNumber(usage.limit);
-      const remaining = toNumber(usage.remaining);
-      const usedPercent = limit && remaining !== null
-        ? Math.max(0, Math.min(100, 100 - (remaining / limit) * 100))
+      const used = toNumber(usage.used);
+      const usedPercent = limit && used !== null
+        ? Math.max(0, Math.min(100, (used / limit) * 100))
         : null;
       windows.weekly = toUsageWindow({
         usedPercent,

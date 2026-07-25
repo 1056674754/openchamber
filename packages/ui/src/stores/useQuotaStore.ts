@@ -56,7 +56,7 @@ const parseSettings = (data: Record<string, unknown> | null): QuotaSettingsState
   const allProviderIds = QUOTA_PROVIDERS.map((provider) => provider.id);
   const autoRefresh = typeof data?.usageAutoRefresh === 'boolean'
     ? data.usageAutoRefresh
-    : false;
+    : true;
   const refreshIntervalMs =
     typeof data?.usageRefreshIntervalMs === 'number' && Number.isFinite(data.usageRefreshIntervalMs)
       ? Math.max(30000, Math.min(300000, Math.round(data.usageRefreshIntervalMs)))
@@ -132,7 +132,7 @@ const loadSettingsFromRuntime = async (serverBaseUrl?: string): Promise<QuotaSet
   }
 
   return {
-    autoRefresh: false,
+    autoRefresh: true,
     refreshIntervalMs: DEFAULT_REFRESH_INTERVAL_MS,
     displayMode: 'usage',
     showPredValues: false,
@@ -151,7 +151,7 @@ export const useQuotaStore = create<QuotaStore>()(
       isFetchingProvider: {},
       lastUpdated: null,
       error: null,
-      autoRefresh: false,
+      autoRefresh: true,
       refreshIntervalMs: DEFAULT_REFRESH_INTERVAL_MS,
       displayMode: 'usage',
       showPredValues: false,
