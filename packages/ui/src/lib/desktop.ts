@@ -55,6 +55,7 @@ export type DesktopSettings = {
   opencodeBinary?: string;
   desktopLanAccessEnabled?: boolean;
   desktopMacMenuBarEnabled?: boolean;
+  desktopMinimizeToTrayEnabled?: boolean;
   desktopKeepAwakeEnabled?: boolean;
   desktopKeepManagedOpenCodeAliveOnQuit?: boolean;
   projects?: ProjectEntry[];
@@ -299,6 +300,45 @@ export const setDesktopLaunchAtLogin = async (enabled: boolean): Promise<LaunchA
     return result;
   } catch (error) {
     console.warn('Failed to set launch at login status', error);
+    return null;
+  }
+};
+
+type MinimizeToTrayStatus = {
+  supported: boolean;
+  enabled: boolean;
+};
+
+export const getDesktopMinimizeToTray = async (): Promise<MinimizeToTrayStatus | null> => {
+  if (!canUseElectronDesktopIPC() || !isDesktopLocalOriginActive()) {
+    return null;
+  }
+
+  try {
+    const result = await invokeDesktop<MinimizeToTrayStatus>('desktop_get_minimize_to_tray');
+    if (!result || typeof result.supported !== 'boolean' || typeof result.enabled !== 'boolean') {
+      return null;
+    }
+    return result;
+  } catch (error) {
+    console.warn('Failed to get minimize to tray status', error);
+    return null;
+  }
+};
+
+export const setDesktopMinimizeToTray = async (enabled: boolean): Promise<MinimizeToTrayStatus | null> => {
+  if (!canUseElectronDesktopIPC() || !isDesktopLocalOriginActive()) {
+    return null;
+  }
+
+  try {
+    const result = await invokeDesktop<MinimizeToTrayStatus>('desktop_set_minimize_to_tray', { enabled });
+    if (!result || typeof result.supported !== 'boolean' || typeof result.enabled !== 'boolean') {
+      return null;
+    }
+    return result;
+  } catch (error) {
+    console.warn('Failed to set minimize to tray status', error);
     return null;
   }
 };

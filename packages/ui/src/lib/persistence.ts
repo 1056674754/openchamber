@@ -766,6 +766,9 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   if (typeof candidate.desktopMacMenuBarEnabled === 'boolean') {
     result.desktopMacMenuBarEnabled = candidate.desktopMacMenuBarEnabled;
   }
+  if (typeof candidate.desktopMinimizeToTrayEnabled === 'boolean') {
+    result.desktopMinimizeToTrayEnabled = candidate.desktopMinimizeToTrayEnabled;
+  }
 
   const projects = sanitizeProjects(candidate.projects);
   if (projects) {

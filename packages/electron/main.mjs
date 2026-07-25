@@ -25,10 +25,21 @@ const DEEP_LINK_PROTOCOL = 'openchamber';
 const APP_USER_MODEL_ID = 'dev.openchamber.desktop';
 const BACKGROUND_START_ARG = '--background';
 
+const getLoginItemOptions = () => {
+  if (process.platform === 'win32') {
+    return {
+      path: process.execPath,
+      args: [BACKGROUND_START_ARG],
+      name: APP_USER_MODEL_ID,
+    };
+  }
+  return {};
+};
+
 const readLoginItemSettings = () => {
-  if (process.platform !== 'darwin') return null;
+  if (process.platform !== 'darwin' && process.platform !== 'win32') return null;
   try {
-    return app.getLoginItemSettings();
+    return app.getLoginItemSettings(getLoginItemOptions());
   } catch {
     return null;
   }
@@ -718,7 +729,34 @@ const resolveWebDistDir = () => path.join(resourceRoot(), 'web-dist');
 
 const isMacMenuBarEnabled = () => readSettingsRoot().desktopMacMenuBarEnabled !== false;
 
-const isTrayEnabledForPlatform = () => process.platform === 'darwin' && isMacMenuBarEnabled();
+const isTrayEnabledForPlatform = () =>
+  (process.platform === 'darwin' && isMacMenuBarEnabled()) || process.platform === 'win32';
+
+const readDesktopMinimizeToTrayStatus = () => {
+  const supported = process.platform === 'win32';
+  return {
+    supported,
+    enabled: supported && readSettingsRoot().desktopMinimizeToTrayEnabled === true,
+  };
+};
+
+const shouldHideMainWindowToTray = (browserWindow) => {
+  if (process.platform !== 'win32') return false;
+  if (!state.trayController) return false;
+  if (!browserWindow || browserWindow.isDestroyed()) return false;
+  if (browserWindow.__ocMiniChat === true) return false;
+  return readSettingsRoot().desktopMinimizeToTrayEnabled === true;
+};
+
+const getWindowIconPath = () => {
+  if (process.platform !== 'win32' && process.platform !== 'linux') {
+    return undefined;
+  }
+  const iconPath = isDev
+    ? path.join(__dirname, 'resources', 'icons', 'icon.ico')
+    : path.join(process.resourcesPath, 'icons', 'icon.ico');
+  return fs.existsSync(iconPath) ? iconPath : undefined;
+};
 
 const TRAY_BREATH_FRAME_COUNT = 16;
 
@@ -740,6 +778,21 @@ const destroyTray = () => {
 const trayIconAssets = () => {
   const dir = path.join(resourceRoot(), 'icons', 'tray');
   const statusDir = path.join(dir, 'status');
+  if (process.platform === 'win32') {
+    const iconPath = getWindowIconPath() || path.join(resourceRoot(), 'icons', 'icon.ico');
+    return {
+      idleIconPath: iconPath,
+      unseenIconPath: iconPath,
+      breathIconPaths: [iconPath],
+      statusIconPaths: {
+        busy: path.join(statusDir, 'busy.png'),
+        retry: path.join(statusDir, 'retry.png'),
+        error: path.join(statusDir, 'error.png'),
+        unseen: path.join(statusDir, 'unseen.png'),
+        blank: path.join(statusDir, 'blank.png'),
+      },
+    };
+  }
   return {
     idleIconPath: path.join(dir, 'trayTemplate-idle.png'),
     unseenIconPath: path.join(dir, 'trayTemplate-unseen.png'),
@@ -855,8 +908,8 @@ const dispatchTrayAction = async (action) => {
 };
 
 const setupTray = () => {
-  if (process.platform !== 'darwin' || state.trayController) return;
-  if (!isMacMenuBarEnabled()) return;
+  if (!['darwin', 'win32'].includes(process.platform) || state.trayController) return;
+  if (process.platform === 'darwin' && !isMacMenuBarEnabled()) return;
   const assets = trayIconAssets();
   if (!fs.existsSync(assets.idleIconPath)) {
     log.warn('[electron] tray icon missing, skipping tray setup', { iconPath: assets.idleIconPath });
@@ -1475,12 +1528,14 @@ const createBrowserWindow = ({ label, restoreGeometry, url }) => {
   const desktopHome = os.homedir() || '';
   const desktopMacosMajor = String(macosMajorVersion());
   const trayEnabled = isTrayEnabledForPlatform();
+  const windowIconPath = getWindowIconPath();
   const options = {
     title: 'OpenChamber',
     width: useSaved ? Math.max(saved.width, MIN_RESTORE_WINDOW_WIDTH) : 1280,
     height: useSaved ? Math.max(saved.height, MIN_RESTORE_WINDOW_HEIGHT) : 800,
     minWidth: MIN_WINDOW_WIDTH,
     minHeight: MIN_WINDOW_HEIGHT,
+    icon: windowIconPath,
     show: false,
     backgroundColor: '#151313',
     // The previous desktop shell used an overlay title bar with explicit traffic-light placement.
@@ -1558,7 +1613,20 @@ const createBrowserWindow = ({ label, restoreGeometry, url }) => {
   browserWindow.on('move', () => {
     debounceWindowStatePersist(browserWindow, false);
   });
+  browserWindow.on('minimize', (event) => {
+    if (!shouldHideMainWindowToTray(browserWindow)) return;
+    debounceWindowStatePersist(browserWindow, true);
+    event.preventDefault();
+    browserWindow.hide();
+  });
   browserWindow.on('close', (event) => {
+    if (!state.quitRequested && shouldHideMainWindowToTray(browserWindow)) {
+      debounceWindowStatePersist(browserWindow, true);
+      event.preventDefault();
+      browserWindow.hide();
+      return;
+    }
+
     if (process.platform === 'darwin' && !state.quitRequested) {
       const remainingVisible = BrowserWindow.getAllWindows().filter(
         (window) => !window.isDestroyed() && window.isVisible(),
@@ -2259,21 +2327,37 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       return APP_VERSION;
 
     case 'desktop_get_launch_at_login': {
-      if (process.platform !== 'darwin') return { supported: false, enabled: false };
-      const settings = app.getLoginItemSettings();
+      if (process.platform !== 'darwin' && process.platform !== 'win32') return { supported: false, enabled: false };
+      const settings = app.getLoginItemSettings(getLoginItemOptions());
       return { supported: true, enabled: settings.openAtLogin === true };
     }
 
     case 'desktop_set_launch_at_login': {
-      if (process.platform !== 'darwin') return { supported: false, enabled: false };
+      if (process.platform !== 'darwin' && process.platform !== 'win32') return { supported: false, enabled: false };
       const enabled = args.enabled === true;
-      app.setLoginItemSettings({
+      const settingsArgs = {
         openAtLogin: enabled,
-        openAsHidden: enabled,
-        args: enabled ? [BACKGROUND_START_ARG] : [],
-      });
-      const settings = app.getLoginItemSettings();
+        ...(process.platform === 'darwin' ? { openAsHidden: enabled } : {}),
+        ...(process.platform === 'win32' ? getLoginItemOptions() : { args: enabled ? [BACKGROUND_START_ARG] : [] }),
+        ...(process.platform === 'win32' ? { enabled } : {}),
+      };
+      app.setLoginItemSettings(settingsArgs);
+      const settings = app.getLoginItemSettings(getLoginItemOptions());
       return { supported: true, enabled: settings.openAtLogin === true };
+    }
+
+    case 'desktop_get_minimize_to_tray': {
+      return readDesktopMinimizeToTrayStatus();
+    }
+
+    case 'desktop_set_minimize_to_tray': {
+      if (process.platform !== 'win32') return { supported: false, enabled: false };
+      const enabled = args.enabled === true;
+      await mutateSettingsRoot((root) => {
+        root.desktopMinimizeToTrayEnabled = enabled;
+      });
+      setupTray();
+      return readDesktopMinimizeToTrayStatus();
     }
 
     case 'desktop_get_keep_awake':
@@ -3186,12 +3270,12 @@ app.whenReady().then(async () => {
     Menu.setApplicationMenu(buildMacMenu());
   }
 
-  if (process.platform === 'darwin' && app.isPackaged) {
+  if ((process.platform === 'darwin' || process.platform === 'win32') && app.isPackaged) {
     const openAtLogin = loginItemSettings?.openAtLogin === true;
     app.setLoginItemSettings({
       openAtLogin,
-      openAsHidden: openAtLogin,
-      args: openAtLogin ? [BACKGROUND_START_ARG] : [],
+      ...(process.platform === 'darwin' ? { openAsHidden: openAtLogin, args: openAtLogin ? [BACKGROUND_START_ARG] : [] } : {}),
+      ...(process.platform === 'win32' ? { ...getLoginItemOptions(), enabled: openAtLogin } : {}),
     });
   }
 

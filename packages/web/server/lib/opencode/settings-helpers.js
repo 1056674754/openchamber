@@ -204,6 +204,9 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.desktopMacMenuBarEnabled === 'boolean') {
       result.desktopMacMenuBarEnabled = candidate.desktopMacMenuBarEnabled;
     }
+    if (typeof candidate.desktopMinimizeToTrayEnabled === 'boolean') {
+      result.desktopMinimizeToTrayEnabled = candidate.desktopMinimizeToTrayEnabled;
+    }
     if (
       candidate.permissionAutoAccept
       && typeof candidate.permissionAutoAccept === 'object'

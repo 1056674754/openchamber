@@ -50,6 +50,10 @@
         "to": "web-dist"
       },
       {
+        "from": "resources/icons/icon.ico",
+        "to": "icons/icon.ico"
+      },
+      {
         "from": "resources/icons/tray",
         "to": "icons/tray"
       },
@@ -84,6 +88,14 @@
         "dmg",
         "zip"
       ]
+    },
+    "win": {
+      "icon": "resources/icons/icon.ico",
+      "target": [
+        "nsis"
+      ],
+      "verifyUpdateCodeSignature": false,
+      "artifactName": "${productName}-${version}-win-${arch}.${ext}"
     },
     "dmg": {
       "sign": true,
