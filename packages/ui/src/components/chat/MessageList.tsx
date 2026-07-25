@@ -29,6 +29,8 @@ import { isProcessFoldTransitionActive } from './lib/scroll/processFoldViewport'
 import { getMessageListOverscan, shouldCompensateVirtualItemResize } from './lib/scroll/scrollIntent';
 import { useDeviceInfo } from '@/lib/device';
 import { listTurnSnapshotDiffs } from '@/lib/diff/turnSnapshotDiff';
+import { useSessionParts } from '@/sync/sync-context';
+import { buildLiveStreamingEntry } from './lib/turns/streamingTailEntry';
 
 const MESSAGE_LIST_VIRTUALIZE_THRESHOLD = 5;
 const MESSAGE_LIST_AT_END_THRESHOLD_PX = 80;
@@ -457,6 +459,8 @@ const getNormalizedMessageForDisplay = (message: ChatMessageEntry): ChatMessageE
 
 interface MessageListProps {
     sessionKey: string;
+    /** Session-authoritative directory for live part reinjection (never UI getDirectory fallback). */
+    sessionDirectory?: string | null;
     turnStart: number;
     disableStaging?: boolean;
     messages: ChatMessageEntry[];
@@ -1234,6 +1238,7 @@ StaticHistoryList.displayName = 'StaticHistoryList';
 
 const StreamingTailContent: React.FC<{
     entry: RenderEntry;
+    sessionDirectory?: string | null;
     onMessageContentChange: (reason?: ContentChangeReason) => void;
     getAnimationHandlers: (messageId: string) => AnimationHandlers;
     scrollToBottom?: () => void;
@@ -1250,6 +1255,7 @@ const StreamingTailContent: React.FC<{
     activeStreamingPhase?: StreamPhase | null;
 }> = ({
     entry,
+    sessionDirectory,
     onMessageContentChange,
     getAnimationHandlers,
     scrollToBottom,
@@ -1265,9 +1271,20 @@ const StreamingTailContent: React.FC<{
     activeStreamingMessageId,
     activeStreamingPhase,
 }) => {
+    // Live parts reinjected only in this leaf — bulk projection freezes streaming parts via suspendPartUpdates.
+    const liveParts = useSessionParts(activeStreamingMessageId ?? '', sessionDirectory ?? undefined);
+    const liveEntry = React.useMemo(
+        () => buildLiveStreamingEntry(entry, {
+            activeStreamingMessageId,
+            liveParts,
+            showTextJustificationActivity: chatRenderMode === 'sorted',
+        }),
+        [activeStreamingMessageId, chatRenderMode, entry, liveParts],
+    );
+
     return (
         <MessageListEntry
-            entry={entry}
+            entry={liveEntry}
             onMessageContentChange={onMessageContentChange}
             getAnimationHandlers={getAnimationHandlers}
             scrollToBottom={scrollToBottom}
@@ -1290,6 +1307,7 @@ StreamingTailContent.displayName = 'StreamingTailContent';
 
 const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({ 
     sessionKey,
+    sessionDirectory = null,
     turnStart,
     disableStaging: _disableStaging,
     messages,
@@ -2212,6 +2230,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
                         {trailingStreamingEntry ? (
                             <StreamingTailContent
                                 entry={trailingStreamingEntry}
+                                sessionDirectory={sessionDirectory}
                                 onMessageContentChange={stableTailContentChange}
                                 getAnimationHandlers={stableGetAnimationHandlers}
                                 scrollToBottom={stableScrollToBottom}

@@ -1918,6 +1918,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
       archivedBucket = false,
       secondaryMeta?: { projectLabel?: string | null; branchLabel?: string | null } | null,
       renderContext: 'project' | 'recent' | 'global-pinned' = 'project',
+      renderExtras?: import('./sidebar/sessionNodeItemUtils').SessionNodeChildRenderExtras,
     ): React.ReactNode => (
       <SessionNodeItem
         key={`${renderContext}:${projectId ?? 'none'}:${groupDirectory ?? 'none'}:${node.session.id}`}
@@ -1958,6 +1959,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
         renderSessionNode={renderSessionNode}
         secondaryMeta={secondaryMeta}
         renderContext={renderContext}
+        renderExtras={renderExtras}
       />
     ),
     [
@@ -2061,6 +2063,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
         showDeletionDialog={showDeletionDialog}
         setDeleteFolderConfirm={setDeleteFolderConfirm}
         renderSessionNode={renderSessionNode}
+        openSidebarMenuKey={openSidebarMenuKey}
         currentSessionDirectory={currentSessionDirectory}
         projectRepoStatus={projectRepoStatus}
         showMoreGroupSessions={showMoreGroupSessions}
@@ -2099,6 +2102,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
       deleteFolder,
       showDeletionDialog,
       renderSessionNode,
+      openSidebarMenuKey,
       currentSessionDirectory,
       projectRepoStatus,
       showMoreGroupSessions,
@@ -2128,6 +2132,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
         <SidebarActivitySections
           sections={[globalPinnedSection]}
           renderSessionNode={renderSessionNode}
+          openSidebarMenuKey={openSidebarMenuKey}
           onReorderGlobalPinned={reorderGlobalPinned}
         />
       ) : null}
@@ -2135,6 +2140,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
         <SidebarActivitySections
           sections={activitySections}
           renderSessionNode={renderSessionNode}
+          openSidebarMenuKey={openSidebarMenuKey}
         />
       ) : null}
     </>

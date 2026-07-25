@@ -773,7 +773,7 @@ Phase 5 — 🔴 Markdown/Shiki 重写 (#1+#2): 独立 milestone，需迁移 for
 | 上游 commit | Changelog 项 | 真实改动范围 | 本地合并判断 |
 |---|---|---|---|
 | `0542bcfc` | Startup: 不等待 default OpenCode config | `useConfigStore.ts`、`client.ts`、`bootstrap.ts`、`sync-refs.ts`，+940/-33 | ✅ 已逐段移植；Work Item [#2](https://coding.s-s.city/songsong/openchamber/-/work_items/2) 已关闭。`getConfig` 实例缓存 + sync-config bridge；`loadAgents`/`initializeApp` 不再 await `config.get`；`selectionSource` + `applyOpenCodeConfigDefaults` 保护 manual/project 选择；directory key 仍含 `serverId` |
-| `e88afff2` | Chat/Performance: 长会话和大 session list streaming 更顺 | 47 files, +3167/-1828；chat streaming、turn projection cache、sidebar memo、sync stale guard、history preload | 🔴 高风险：不能整包拿，需拆成 chat/sidebar/sync 三个 milestone |
+| `e88afff2` | Chat/Performance: 长会话和大 session list streaming 更顺 | 47 files, +3167/-1828；chat streaming、turn projection cache、sidebar memo、sync stale guard、history preload | ✅ 三块缺口已移植（不整包）；Work Item [#4](https://coding.s-s.city/songsong/openchamber/-/work_items/4)：chat tail isolation + sidebar precomputed memo + `syncSessionGenerationByKey`；未采用 virtua / 未替换 TanStack MessageList |
 | `fefad721` | Chat: assistant 段落间距恢复 | `index.css` + design token，小 CSS 修复 | 🟢 低风险 |
 | `5e8fe1ec` | Chat: streamed response 末尾不再偶发截断 | `event-pipeline.ts` + 测试；`message.part.updated` 作为 delta coalescing barrier | 🟢 低风险，高价值 |
 | `30b5cf14` | Files: HTML/image/PDF preview 不再 50 秒后 auth required | `runtime-auth.ts` + `FilesView.tsx`，官方新增 proactive token refresh | ✅ fork 架构等价；Work Item [#3](https://coding.s-s.city/songsong/openchamber/-/work_items/3) 已关闭。fork 不存在约 50 秒的 `oc_url_token` 生命周期：Web/remote 图片通过同源 `/api/fs/raw` 和 UI Session cookie，HTML 使用已读取内容的 `srcDoc`，Desktop 图片使用 data URL；不引入无调用方的 token scheduler |
@@ -805,7 +805,7 @@ Phase 5 — 🔴 Markdown/Shiki 重写 (#1+#2): 独立 milestone，需迁移 for
 |---|---|---|
 | 第二批 | Files preview token 续期 (`30b5cf14`) | ✅ 审计完成：上游短命 URL token 模型不适用于 fork；`/api/fs/raw` 显式目录、preview proxy 认证参数重写和 HTML preview 导航共 24 条定向测试通过 |
 | 第三批 | Startup config 非阻塞 (`0542bcfc`) | ✅ 已完成；Work Item [#2](https://coding.s-s.city/songsong/openchamber/-/work_items/2)。定向测试：`client.getConfig` / `sync-refs.config` / `useConfigStore.nonblocking` |
-| 独立 milestone | Chat/sidebar streaming 性能大改 (`e88afff2`) | 不整包合并；拆 chat tail isolation、sidebar row memo、sync stale guard 三块分别测试 |
+| 独立 milestone | Chat/sidebar streaming 性能大改 (`e88afff2`) | ✅ 三块缺口已完成；Work Item [#4](https://coding.s-s.city/songsong/openchamber/-/work_items/4)。定向：`streamingTailEntry` / `sessionNodeItemUtils` / `sync-session-generation`；保留 fork MessageList + 多实例 sidebar |
 
 ## v1.13.3 ~ v1.16.0 — 当前差距审核 (更新于 2026-07-13)
 
@@ -1280,6 +1280,7 @@ VS Code worktree lock 验证：在两个真实临时 Git 仓库及 `--no-checkou
 | Private relay / pairing v2 / desktop transports | ⏸ 架构批次；Work Item [#16](https://coding.s-s.city/songsong/openchamber/-/work_items/16) | 会贯穿 HTTP/SSE/WS/auth、server list 和多实例 registry，必须以 fork 的多 `serverId + directory` 为权威单独设计 |
 | Windows tray/startup | ✅ 已移植并验证；Work Item [#17](https://coding.s-s.city/songsong/openchamber/-/work_items/17) 已关闭 | 上游 `4a9aebdb6`（#2112）叠在 fork #27 macOS tray 上：`setupTray`/`isTrayEnabledForPlatform` 含 win32（不依赖 `desktopMacMenuBarEnabled`）；`icon.ico` + extraResources/win NSIS；`getLoginItemOptions` + `--background` 开机自启；`desktopMinimizeToTrayEnabled` + minimize/close hide；`useTraySync` 扩 win32；Quit 仍走 `requestQuitWithConfirmation`。8 locale + settings-helpers 测试；macOS 菜单栏开关/呼吸图标不变。Windows 交互 QA（托盘点击 / minimize-to-tray / login item / Keep·Stop OpenCode）随下次 Windows 包补测 |
 | Startup OpenCode config 非阻塞 | ✅ 已移植并验证；Work Item [#2](https://coding.s-s.city/songsong/openchamber/-/work_items/2) 已关闭 | 上游 `0542bcfc5` 逐段适配（禁止整文件覆盖）：`sync-refs` `getSyncConfig`/`emit`/`subscribe`（扫 default + `getAllSyncStores`）；`client.getConfig` 按 `baseUrl+directory` 缓存/去重；bootstrap Phase2/seed `emitSyncConfigChanged`；`useConfigStore` 去掉 `loadAgents`/`initializeApp` 对 `config.get` 的阻塞等待，新增 `selectionSource` + `applyOpenCodeConfigDefaults`（manual 优先）。定向 9 tests；UI type-check 目标文件绿 |
+| 长会话 streaming 性能三块缺口 | ✅ 已移植并验证；Work Item [#4](https://coding.s-s.city/songsong/openchamber/-/work_items/4) 已关闭 | 上游 `e88afff2` 仅 port 剩余缺口（不整包、不 virtua）：`streamingTailEntry` + `MessageList`/`useSessionParts` 尾叶 live reinject（session directory/serverId）；sidebar `sessionNodeItemUtils` 预计算 subtree/menu/structure 经 `SessionGroupSection`/`SidebarActivitySections` 下传；`sync-session-generation` + `loadMessages(isStale)` 写守卫（`serverId+directory+sessionID`）。定向 10 tests；大会话/大侧栏 runtime QA 随交互补测 |
 | Native mobile / mobile release/update/iPad split | ➖ 当前架构不适用；Work Item [#9](https://coding.s-s.city/songsong/openchamber/-/work_items/9) | fork 无 `packages/mobile`/Capacitor workspace；CI、iOS/Android signing、native update UI 与 connect sheet 不导入 |
 
 **v1.15.0 收口**：50 个官方提交已逐项分类。Loose diff、ambiguous prompt、browser/deep-link、右栏 resize、VS Code 相对路径、Last-turn Diff 与 Navigable JSON summaries 已按 fork 架构移植；code wrap/line numbers、Mermaid zoom、sticky header、CORS encoding 与 SDK 版本已有等价或更强实现。Native mobile 不适用，relay/pairing、project default model 和 Windows shell 明确保留为独立批次，不把延期能力计作已合并。源码、workspace lock、Electron 构建前缀和打包 runbook 已推进到 `1.15.0-sscity`。

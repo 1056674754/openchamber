@@ -2900,6 +2900,7 @@ type SessionMessageRecordsSnapshot = {
   visibleMessages: Message[]
   revertMessageID?: string
   suspendPartUpdates: boolean
+  suspendedPartUpdatesMessageID?: string
   steerSideChannelSignature: string
   list: SessionMessageRecord[]
   byId: Map<string, SessionMessageRecord>
@@ -2910,8 +2911,12 @@ const VSCODE_SESSION_MESSAGE_RECORDS_CACHE_MAX = 4
 const VSCODE_SESSION_MESSAGE_RECORDS_CACHE_MAX_MESSAGES = 30
 const sessionMessageRecordsCache = new WeakMap<StoreApi<DirectoryStore>, Map<string, SessionMessageRecordsSnapshot>>()
 
-const getSessionMessageRecordsCacheKey = (sessionID: string, suspendPartUpdates: boolean): string => (
-  `${sessionID}\u0000${suspendPartUpdates ? 1 : 0}`
+const getSessionMessageRecordsCacheKey = (
+  sessionID: string,
+  suspendPartUpdates: boolean,
+  suspendedPartUpdatesMessageID?: string,
+): string => (
+  `${sessionID}\u0000${suspendPartUpdates ? 1 : 0}\u0000${suspendedPartUpdatesMessageID ?? ""}`
 )
 
 const getSessionMessageRecordsCache = (store: StoreApi<DirectoryStore>): Map<string, SessionMessageRecordsSnapshot> => {
@@ -2927,10 +2932,11 @@ const readCachedSessionMessageRecordsSnapshot = (
   store: StoreApi<DirectoryStore>,
   sessionID: string,
   suspendPartUpdates: boolean,
+  suspendedPartUpdatesMessageID?: string,
 ): SessionMessageRecordsSnapshot | undefined => {
   const cache = sessionMessageRecordsCache.get(store)
   if (!cache) return undefined
-  const key = getSessionMessageRecordsCacheKey(sessionID, suspendPartUpdates)
+  const key = getSessionMessageRecordsCacheKey(sessionID, suspendPartUpdates, suspendedPartUpdatesMessageID)
   const cached = cache.get(key)
   if (!cached) return undefined
   cache.delete(key)
@@ -2944,7 +2950,11 @@ const rememberSessionMessageRecordsSnapshot = (
 ): void => {
   if (!snapshot.sessionID) return
   const cache = getSessionMessageRecordsCache(store)
-  const key = getSessionMessageRecordsCacheKey(snapshot.sessionID, snapshot.suspendPartUpdates)
+  const key = getSessionMessageRecordsCacheKey(
+    snapshot.sessionID,
+    snapshot.suspendPartUpdates,
+    snapshot.suspendedPartUpdatesMessageID,
+  )
   if (isVSCodeRuntime() && snapshot.list.length > VSCODE_SESSION_MESSAGE_RECORDS_CACHE_MAX_MESSAGES) {
     cache.delete(key)
     return
@@ -2967,17 +2977,25 @@ export function dropCachedSessionMessageRecordsSnapshots(
   if (!cache) return
   for (const sessionID of sessionIDs) {
     if (!sessionID) continue
-    cache.delete(getSessionMessageRecordsCacheKey(sessionID, false))
-    cache.delete(getSessionMessageRecordsCacheKey(sessionID, true))
+    for (const key of [...cache.keys()]) {
+      if (key.startsWith(`${sessionID}\u0000`)) {
+        cache.delete(key)
+      }
+    }
   }
 }
 
 const snapshotPartsMatchState = (snapshot: SessionMessageRecordsSnapshot, state: State): boolean => {
-  if (snapshot.suspendPartUpdates) {
-    return true
-  }
-
   for (const record of snapshot.list) {
+    if (
+      snapshot.suspendPartUpdates
+      && (
+        !snapshot.suspendedPartUpdatesMessageID
+        || record.info.id === snapshot.suspendedPartUpdatesMessageID
+      )
+    ) {
+      continue
+    }
     if ((state.part[record.info.id] ?? EMPTY_PARTS) !== record.parts) {
       return false
     }
@@ -2991,8 +3009,14 @@ const getReusableSessionMessageRecordsSnapshot = (
   state: State,
   sessionID: string,
   suspendPartUpdates: boolean,
+  suspendedPartUpdatesMessageID?: string,
 ): SessionMessageRecordsSnapshot | undefined => {
-  const cached = readCachedSessionMessageRecordsSnapshot(store, sessionID, suspendPartUpdates)
+  const cached = readCachedSessionMessageRecordsSnapshot(
+    store,
+    sessionID,
+    suspendPartUpdates,
+    suspendedPartUpdatesMessageID,
+  )
   if (!cached) return undefined
   const steerSideChannelSignature = getSteerSideChannelSignature(sessionID)
   const sourceMessages = state.message[sessionID] ?? EMPTY_MESSAGES
@@ -3002,6 +3026,7 @@ const getReusableSessionMessageRecordsSnapshot = (
     cached.sourceMessages === sourceMessages
     && cached.revertMessageID === revertMessageID
     && cached.suspendPartUpdates === suspendPartUpdates
+    && cached.suspendedPartUpdatesMessageID === suspendedPartUpdatesMessageID
     && cached.steerSideChannelSignature === steerSideChannelSignature
     && snapshotPartsMatchState(cached, state)
   ) {
@@ -3043,6 +3068,7 @@ export function buildSessionMessageRecordsSnapshot(
   sessionID: string,
   previous?: SessionMessageRecordsSnapshot,
   suspendPartUpdates = false,
+  suspendedPartUpdatesMessageID?: string,
 ): SessionMessageRecordsSnapshot {
   const { sourceMessages, visibleMessages, revertMessageID } = getVisibleMessagesForSession(state, sessionID, previous)
   const steerSideChannelSignature = getSteerSideChannelSignature(sessionID)
@@ -3054,7 +3080,10 @@ export function buildSessionMessageRecordsSnapshot(
   const nextById = new Map<string, SessionMessageRecord>()
   const nextList = effectiveMessages.map((message) => {
     const previousRecord = previous?.byId.get(message.id)
-    const parts = suspendPartUpdates && previousRecord
+    const shouldSuspendParts = suspendPartUpdates
+      && previousRecord
+      && (!suspendedPartUpdatesMessageID || message.id === suspendedPartUpdatesMessageID)
+    const parts = shouldSuspendParts
       ? previousRecord.parts
       : (sideChannelParts.get(message.id) ?? state.part[message.id] ?? EMPTY_PARTS)
 
@@ -3068,6 +3097,8 @@ export function buildSessionMessageRecordsSnapshot(
 
   const unchanged = Boolean(previous)
     && previous?.visibleMessages === effectiveMessages
+    && previous.suspendPartUpdates === suspendPartUpdates
+    && previous.suspendedPartUpdatesMessageID === suspendedPartUpdatesMessageID
     && previous.steerSideChannelSignature === steerSideChannelSignature
     && previous.list.length === nextList.length
     && previous.list.every((record, index) => record === nextList[index])
@@ -3082,6 +3113,7 @@ export function buildSessionMessageRecordsSnapshot(
     visibleMessages: effectiveMessages,
     revertMessageID,
     suspendPartUpdates,
+    suspendedPartUpdatesMessageID,
     steerSideChannelSignature,
     list: nextList,
     byId: nextById,
@@ -3143,7 +3175,7 @@ export function useUserMessageHistory(sessionID: string, directory?: string): st
 export function useSessionMessageRecords(
   sessionID: string,
   directory?: string,
-  options?: { suspendPartUpdates?: boolean },
+  options?: { suspendPartUpdates?: boolean; suspendPartUpdatesForMessageId?: string | null },
 ) {
   const store = useDirectoryStore(directory, useServerIdForSession(sessionID), sessionID)
   const snapshotRef = useRef<SessionMessageRecordsSnapshot>({
@@ -3152,6 +3184,7 @@ export function useSessionMessageRecords(
     visibleMessages: EMPTY_MESSAGES,
     revertMessageID: undefined,
     suspendPartUpdates: Boolean(options?.suspendPartUpdates),
+    suspendedPartUpdatesMessageID: options?.suspendPartUpdatesForMessageId ?? undefined,
     steerSideChannelSignature: "",
     list: [],
     byId: new Map(),
@@ -3164,7 +3197,14 @@ export function useSessionMessageRecords(
 
     const state = store.getState()
     const suspendPartUpdates = Boolean(options?.suspendPartUpdates)
-    const reusableSnapshot = getReusableSessionMessageRecordsSnapshot(store, state, sessionID, suspendPartUpdates)
+    const suspendedPartUpdatesMessageID = options?.suspendPartUpdatesForMessageId ?? undefined
+    const reusableSnapshot = getReusableSessionMessageRecordsSnapshot(
+      store,
+      state,
+      sessionID,
+      suspendPartUpdates,
+      suspendedPartUpdatesMessageID,
+    )
     if (reusableSnapshot) {
       snapshotRef.current = reusableSnapshot
       return reusableSnapshot.list
@@ -3172,18 +3212,19 @@ export function useSessionMessageRecords(
 
     const previousSnapshot = snapshotRef.current.sessionID === sessionID
       ? snapshotRef.current
-      : readCachedSessionMessageRecordsSnapshot(store, sessionID, suspendPartUpdates)
+      : readCachedSessionMessageRecordsSnapshot(store, sessionID, suspendPartUpdates, suspendedPartUpdatesMessageID)
 
     const nextSnapshot = buildSessionMessageRecordsSnapshot(
       state,
       sessionID,
       previousSnapshot,
       suspendPartUpdates,
+      suspendedPartUpdatesMessageID,
     )
     snapshotRef.current = nextSnapshot
     rememberSessionMessageRecordsSnapshot(store, nextSnapshot)
     return nextSnapshot.list
-  }, [options?.suspendPartUpdates, sessionID, store])
+  }, [options?.suspendPartUpdates, options?.suspendPartUpdatesForMessageId, sessionID, store])
 
   const subscribe = useCallback((notify: () => void) => {
     if (!sessionID) return () => undefined

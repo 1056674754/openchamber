@@ -148,6 +148,7 @@ Failed authoritative fetches must remain distinguishable from successful empty r
 - A batch remains bounded by `message-page-boundary.ts`. When a runtime reports decoded response bytes, it may follow at most 32 additional cursor pages and 5,000 raw message records, stopping at an 8 MB decoded-payload budget. If decoded bytes are unavailable, it falls back to four additional pages and 600 records.
 - Reconnect/materialization callers omit the interactive target and preserve the one-real-user-boundary behavior.
 - SDK errors throw `MessageHistoryLoadError`; a failed fetch is never represented as an empty successful page.
+- `syncSession` / `forceRefreshSession` bump a per-key generation (`serverId + directory + sessionID`) via `sync-session-generation.ts`. `loadMessages` accepts `isStale` and skips store writes when a newer sync for the same key has started. Fetch failure still clears loading without wiping existing messages.
 
 The web/local and remote proxies copy a verified identity-encoded upstream `content-length` into `x-openchamber-decoded-content-length` before normal proxy header filtering and optional browser compression. The VS Code bridge measures the decoded body directly and supplies the same header. The loader never treats a compressed standard `content-length` as a decoded-memory budget.
 

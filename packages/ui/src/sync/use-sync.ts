@@ -39,6 +39,7 @@ import { reconcileSyncMeta, type SyncMeta } from "./sync-meta"
 import { formatSdkError } from "./sdk-error"
 import { readRemoteSessionStatuses } from "./remote-session-status"
 import { KeyedSingleFlight } from "./keyed-single-flight"
+import { beginSyncSessionGeneration } from "./sync-session-generation"
 
 const SKIP_PARTS = new Set(["patch", "step-start", "step-finish"])
 const MESSAGE_PAGE_SIZE = 30
@@ -415,6 +416,7 @@ export function useSync() {
       throwOnError?: boolean
       prefetchedPage?: Promise<MessagePage>
       throughMessageID?: string
+      isStale?: () => boolean
     }) => {
       const writeStore = options?.targetStore ?? store
       const targetDirectory = options?.targetDirectory ?? directory
@@ -467,6 +469,11 @@ export function useSync() {
           }
         }
 
+        if (options?.isStale?.()) {
+          setMetaFor(sessionID, { loading: false }, targetDirectory)
+          return
+        }
+
         // Merge optimistic items
         const items = getOptimistic(sessionID, targetDirectory)
         const merged = mergeOptimisticPage(page, items)
@@ -484,6 +491,11 @@ export function useSync() {
           })),
           { skipPartTypes: SKIP_PARTS, mode: options?.mode === "prepend" ? "prepend" : options?.mode === "replace" ? "replace" : "merge" },
         )
+
+        if (options?.isStale?.()) {
+          setMetaFor(sessionID, { loading: false }, targetDirectory)
+          return
+        }
 
         const message = Object.prototype.hasOwnProperty.call(materialized.message, sessionID)
           ? materialized.message
@@ -533,6 +545,9 @@ export function useSync() {
       }
       const key = `${target.serverId}\n${keyFor(sessionID, target.directory)}`
       return sessionSingleFlight.run(key, async () => {
+        // New flight: bump generation so older in-flight loads for this key
+        // (e.g. previous lifecycle) know not to write after they finish.
+        const isStale = beginSyncSessionGeneration(key)
         const current = target.store.getState()
         const m = getMetaFor(sessionID, target.directory)
         const materialization = getSessionMaterializationStatus(current, sessionID)
@@ -570,7 +585,7 @@ export function useSync() {
             const sessionDir = target.directory
             const client = resolveSdkForDirectory(sessionDir, sessionID, target.serverId)
             const result = await retry(() => client.session.get({ sessionID, directory: sessionDir }))
-            if (result.data) {
+            if (result.data && !isStale()) {
               const s = target.store.getState()
               const sessions = [...s.session]
               const idx = Binary.search(sessions, sessionID, (s) => s.id)
@@ -579,7 +594,9 @@ export function useSync() {
               } else {
                 sessions.splice(idx.index, 0, result.data)
               }
-              target.store.setState({ session: sessions })
+              if (!isStale()) {
+                target.store.setState({ session: sessions })
+              }
             }
           } catch (e) {
             console.error("[sync] failed to fetch session", sessionID, e)
@@ -592,6 +609,7 @@ export function useSync() {
             sessionID,
             directory: target.directory,
           }).then((result) => {
+            if (isStale()) return
             if (result.error) {
               throw new Error(`session.children failed: ${formatSdkError(result.error)}`)
             }
@@ -607,7 +625,7 @@ export function useSync() {
               if (sessions === state.session) sessions = [...sessions]
               sessions.splice(index.index, 0, child)
             }
-            if (sessions !== state.session) {
+            if (sessions !== state.session && !isStale()) {
               target.store.setState({ session: sessions })
             }
           }).catch((error: unknown) => {
@@ -624,6 +642,7 @@ export function useSync() {
               targetDirectory: target.directory,
               targetStore: target.store,
               targetServerId: target.serverId,
+              isStale,
             }),
             loadChildren,
           ])
@@ -658,6 +677,8 @@ export function useSync() {
     async (sessionID: string): Promise<{ ok: boolean; error?: string }> => {
       const target = resolveSessionTarget(sessionID)
       const sessionDir = target.directory
+      const generationKey = `${target.serverId}\n${keyFor(sessionID, sessionDir)}`
+      const isStale = beginSyncSessionGeneration(generationKey)
 
       // 1. Clear stale loading state so loadMessages won't short-circuit.
       setMetaFor(sessionID, { loading: false }, sessionDir)
@@ -674,7 +695,7 @@ export function useSync() {
       const client = resolveSdkForDirectory(sessionDir, sessionID, target.serverId)
       try {
         const result = await retry(() => client.session.get({ sessionID, directory: sessionDir }))
-        if (result.data) {
+        if (result.data && !isStale()) {
           const s = target.store.getState()
           const sessions = [...s.session]
           const idx = Binary.search(sessions, sessionID, (s) => s.id)
@@ -683,7 +704,9 @@ export function useSync() {
           } else {
             sessions.splice(idx.index, 0, result.data)
           }
-          target.store.setState({ session: sessions })
+          if (!isStale()) {
+            target.store.setState({ session: sessions })
+          }
         }
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e)
@@ -698,14 +721,20 @@ export function useSync() {
           targetStore: target.store,
           targetServerId: target.serverId,
           throwOnError: true,
+          isStale,
         })
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e)
         return { ok: false, error: `Failed to load messages: ${msg}` }
       }
 
+      if (isStale()) {
+        return { ok: true }
+      }
+
       try {
         const statuses = await readStatusesForTarget(client, target.serverId, sessionDir)
+        if (isStale()) return { ok: true }
         const status = statuses[sessionID] ?? { type: "idle" as const }
         target.store.setState((s) => ({
           session_status: { ...s.session_status, [sessionID]: status },
@@ -717,13 +746,16 @@ export function useSync() {
       }
 
       try {
+        if (isStale()) return { ok: true }
         const result = await client.session.todo({ sessionID, directory: sessionDir })
         if (result.error) throw new Error(`session.todo failed: ${formatSdkError(result.error)}`)
         const todos: Todo[] | undefined = result.data && result.data.length > 0 ? result.data : undefined
-        target.store.setState((s) => ({
-          todo: { ...s.todo, [sessionID]: todos ?? [] },
-        }))
-        useTodosPersistStore.getState().setSessionTodos(sessionID, todos)
+        if (!isStale()) {
+          target.store.setState((s) => ({
+            todo: { ...s.todo, [sessionID]: todos ?? [] },
+          }))
+          useTodosPersistStore.getState().setSessionTodos(sessionID, todos)
+        }
       } catch (e) {
         const error = e instanceof Error ? e : new Error(String(e))
         console.warn("[sync] failed to refresh session todos", {
@@ -736,7 +768,7 @@ export function useSync() {
 
       return { ok: true }
     },
-    [resolveSessionTarget, setMetaFor, loadMessages],
+    [resolveSessionTarget, setMetaFor, loadMessages, keyFor],
   )
 
   // Load more (pagination)

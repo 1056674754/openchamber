@@ -19,6 +19,12 @@ import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { openExternalUrl } from '@/lib/url';
 import { useI18n } from '@/lib/i18n';
+import { useSessionUIStore } from '@/sync/session-ui-store';
+import {
+  buildSessionNodeRenderExtras,
+  type SessionNodeChildRenderExtras,
+  type SessionNodeRenderExtras,
+} from './sessionNodeItemUtils';
 
 const ARCHIVED_VIRTUALIZE_THRESHOLD = 50;
 const ARCHIVED_ROW_ESTIMATE_PX = 28;
@@ -49,7 +55,17 @@ type Props = {
   deleteFolder: (scopeKey: string, folderId: string) => void;
   showDeletionDialog: boolean;
   setDeleteFolderConfirm: React.Dispatch<React.SetStateAction<DeleteFolderConfirm>>;
-  renderSessionNode: (node: SessionNode, depth?: number, groupDirectory?: string | null, projectId?: string | null, archivedBucket?: boolean, secondaryMeta?: { projectLabel?: string | null; branchLabel?: string | null } | null) => React.ReactNode;
+  renderSessionNode: (
+    node: SessionNode,
+    depth?: number,
+    groupDirectory?: string | null,
+    projectId?: string | null,
+    archivedBucket?: boolean,
+    secondaryMeta?: { projectLabel?: string | null; branchLabel?: string | null } | null,
+    renderContext?: 'project' | 'recent' | 'global-pinned',
+    renderExtras?: SessionNodeChildRenderExtras | SessionNodeRenderExtras,
+  ) => React.ReactNode;
+  openSidebarMenuKey: string | null;
   currentSessionDirectory: string | null;
   projectRepoStatus: Map<string, boolean | null>;
   showMoreGroupSessions: (groupKey: string, nextVisibleCount: number) => void;
@@ -118,6 +134,7 @@ export function SessionGroupSection(props: Props): React.ReactNode {
     showDeletionDialog,
     setDeleteFolderConfirm,
     renderSessionNode,
+    openSidebarMenuKey,
     projectRepoStatus,
     showMoreGroupSessions,
     resetGroupSessionLimit,
@@ -324,6 +341,36 @@ export function SessionGroupSection(props: Props): React.ReactNode {
   const shouldVirtualizeArchived = group.isArchivedBucket === true
     && !hasSessionSearchQuery
     && unpinnedNodes.length >= ARCHIVED_VIRTUALIZE_THRESHOLD;
+
+  const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
+  const sessionNodeRenderExtras = React.useMemo(() => {
+    const roots: SessionNode[] = [
+      ...pinnedNodes,
+      ...unpinnedNodes,
+      ...rootFolders.flatMap(({ nodes }) => nodes),
+    ];
+    return buildSessionNodeRenderExtras(
+      roots,
+      currentSessionId,
+      null,
+      openSidebarMenuKey,
+      'project',
+      group.isArchivedBucket === true,
+    );
+  }, [currentSessionId, group.isArchivedBucket, openSidebarMenuKey, pinnedNodes, rootFolders, unpinnedNodes]);
+
+  const renderNode = React.useCallback(
+    (node: SessionNode, archivedBucket: boolean) => {
+      const extras = sessionNodeRenderExtras.childRenderExtrasFor?.(node) ?? {
+        subtreeContainsActive: sessionNodeRenderExtras.subtreeContainsActive,
+        subtreeContainsEditing: sessionNodeRenderExtras.subtreeContainsEditing,
+        menuOpenSessionId: sessionNodeRenderExtras.menuOpenSessionId,
+        nodeStructureKey: sessionNodeRenderExtras.nodeStructureKey,
+      };
+      return renderSessionNode(node, 0, group.directory, projectId, archivedBucket, null, 'project', extras);
+    },
+    [group.directory, projectId, renderSessionNode, sessionNodeRenderExtras],
+  );
 
   const archivedVirtualContainerRef = React.useRef<HTMLDivElement | null>(null);
   const [archivedScrollEl, setArchivedScrollEl] = React.useState<HTMLElement | null>(null);
@@ -546,7 +593,7 @@ export function SessionGroupSection(props: Props): React.ReactNode {
                 sessionCount,
               });
             }}
-            renderSessionNode={renderSessionNode}
+            renderSessionNode={(node) => renderNode(node, group.isArchivedBucket === true)}
             groupDirectory={group.directory}
             projectId={projectId}
             mobileVariant={mobileVariant}
@@ -608,7 +655,7 @@ export function SessionGroupSection(props: Props): React.ReactNode {
       }}
     >
       {renderFolderItems()}
-      {pinnedNodes.map((node) => renderSessionNode(node, 0, group.directory, projectId, group.isArchivedBucket === true))}
+      {pinnedNodes.map((node) => renderNode(node, group.isArchivedBucket === true))}
       {pinnedNodes.length > 0 && unpinnedNodes.length > 0 ? (
         <div className="mx-0.5 my-0.5 h-px bg-[var(--surface-subtle)]" />
       ) : null}
@@ -637,13 +684,13 @@ export function SessionGroupSection(props: Props): React.ReactNode {
                   transform: `translateY(${virtualRow.start - archivedScrollMargin}px)`,
                 }}
               >
-                {renderSessionNode(node, 0, group.directory, projectId, true)}
+                {renderNode(node, true)}
               </div>
             );
           })}
         </div>
       ) : (
-        unpinnedNodes.map((node) => renderSessionNode(node, 0, group.directory, projectId, group.isArchivedBucket === true))
+        unpinnedNodes.map((node) => renderNode(node, group.isArchivedBucket === true))
       )}
       {totalSessions === 0 && allFoldersForGroup.length === 0 ? (
         <div className="py-1 text-left typography-micro text-muted-foreground">

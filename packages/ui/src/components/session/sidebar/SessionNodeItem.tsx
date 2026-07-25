@@ -29,6 +29,7 @@ import { DraggableSessionRow } from './sessionFolderDnd';
 import { SessionUnreadMenuItem } from './SessionUnreadMenuItem';
 import { SidebarSpinner } from './SidebarSpinner';
 import type { SessionNode, SessionSummaryMeta } from './types';
+import type { SessionNodeChildRenderExtras, SessionNodeRenderExtras } from './sessionNodeItemUtils';
 import { shouldRenderSessionExpanded } from './sessionExpansion';
 import { formatSessionCompactDateLabel, formatSessionDateLabel, normalizePath, renderHighlightedText, resolveRemoteIndicatorProject, resolveSessionDiffStats } from './utils';
 import { resolveGlobalSessionDirectory, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
@@ -190,9 +191,11 @@ type Props = {
   onRegenerateTitle?: (sessionId: string, sessionTitle: string) => void;
   mobileVariant: boolean;
   alwaysShowActions: boolean;
-  renderSessionNode: (node: SessionNode, depth?: number, groupDirectory?: string | null, projectId?: string | null, archivedBucket?: boolean, secondaryMeta?: SecondaryMeta | null, renderContext?: 'project' | 'recent' | 'global-pinned') => React.ReactNode;
+  renderSessionNode: (node: SessionNode, depth?: number, groupDirectory?: string | null, projectId?: string | null, archivedBucket?: boolean, secondaryMeta?: SecondaryMeta | null, renderContext?: 'project' | 'recent' | 'global-pinned', renderExtras?: SessionNodeChildRenderExtras) => React.ReactNode;
   secondaryMeta?: SecondaryMeta | null;
   renderContext?: 'project' | 'recent' | 'global-pinned';
+  /** Precomputed subtree memo keys (from SessionGroupSection / parent). */
+  renderExtras?: SessionNodeRenderExtras | SessionNodeChildRenderExtras;
 };
 
 const getNodeChildSignature = (node: SessionNode): string => {
@@ -296,14 +299,20 @@ const areEqual = (prev: Props, next: Props): boolean => {
 
   if (prevSessionId !== nextSessionId) return false;
   if (prev.node.session !== next.node.session) return false;
-  if (getNodeChildSignature(prev.node) !== getNodeChildSignature(next.node)) return false;
+  const prevStructureKey = prev.renderExtras?.nodeStructureKey ?? getNodeChildSignature(prev.node);
+  const nextStructureKey = next.renderExtras?.nodeStructureKey ?? getNodeChildSignature(next.node);
+  if (prevStructureKey !== nextStructureKey) return false;
   if (prev.depth !== next.depth) return false;
   if (prev.groupDirectory !== next.groupDirectory) return false;
   if (prev.projectId !== next.projectId) return false;
   if (prev.archivedBucket !== next.archivedBucket) return false;
   if (prev.currentSessionId !== next.currentSessionId) {
-    const prevActiveInTree = treeContainsSessionId(prev.node, prev.currentSessionId);
-    const nextActiveInTree = treeContainsSessionId(next.node, next.currentSessionId);
+    const prevActiveInTree = prev.renderExtras
+      ? prev.renderExtras.subtreeContainsActive.has(prevSessionId)
+      : treeContainsSessionId(prev.node, prev.currentSessionId);
+    const nextActiveInTree = next.renderExtras
+      ? next.renderExtras.subtreeContainsActive.has(nextSessionId)
+      : treeContainsSessionId(next.node, next.currentSessionId);
     if (prevActiveInTree || nextActiveInTree) {
       return false;
     }
@@ -330,9 +339,19 @@ const areEqual = (prev: Props, next: Props): boolean => {
   if (prev.notifyOnSubtasks !== next.notifyOnSubtasks) return false;
   if ((prev.copiedSessionId === prevSessionId) !== (next.copiedSessionId === nextSessionId)) return false;
 
-  const prevMenuInTree = treeContainsMenuKey(prev.node, prev.openSidebarMenuKey, prev.renderContext ?? 'project', prev.archivedBucket ?? false);
-  const nextMenuInTree = treeContainsMenuKey(next.node, next.openSidebarMenuKey, next.renderContext ?? 'project', next.archivedBucket ?? false);
-  if (prevMenuInTree !== nextMenuInTree) return false;
+  if (prev.renderExtras && next.renderExtras) {
+    const prevMenu = prev.renderExtras.menuOpenSessionId;
+    const nextMenu = next.renderExtras.menuOpenSessionId;
+    if (prevMenu !== nextMenu) {
+      const prevAffected = !!prevMenu && (prevMenu === prevSessionId || treeContainsSessionId(prev.node, prevMenu));
+      const nextAffected = !!nextMenu && (nextMenu === nextSessionId || treeContainsSessionId(next.node, nextMenu));
+      if (prevAffected || nextAffected) return false;
+    }
+  } else {
+    const prevMenuInTree = treeContainsMenuKey(prev.node, prev.openSidebarMenuKey, prev.renderContext ?? 'project', prev.archivedBucket ?? false);
+    const nextMenuInTree = treeContainsMenuKey(next.node, next.openSidebarMenuKey, next.renderContext ?? 'project', next.archivedBucket ?? false);
+    if (prevMenuInTree !== nextMenuInTree) return false;
+  }
 
   const prevIsGlobalPinned = (prev.renderContext ?? 'project') === 'global-pinned';
   const nextIsGlobalPinned = (next.renderContext ?? 'project') === 'global-pinned';
@@ -396,6 +415,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
     renderSessionNode,
     secondaryMeta,
     renderContext = 'project',
+    renderExtras,
   } = props;
   const displayMode = useSessionDisplayStore((state) => state.displayMode);
   const isMinimalMode = displayMode === 'minimal';
@@ -1503,7 +1523,20 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
         </div>
       </DraggableSessionRow>
       {hasChildren && isExpanded
-        ? node.children.map((child) => renderSessionNode(child, depth + 1, sessionDirectory ?? groupDirectory, projectId, archivedBucket, undefined, renderContext))
+        ? node.children.map((child) => {
+          const parentExtras = renderExtras as SessionNodeRenderExtras | undefined;
+          const childExtras = parentExtras?.childRenderExtrasFor?.(child) ?? renderExtras;
+          return renderSessionNode(
+            child,
+            depth + 1,
+            sessionDirectory ?? groupDirectory,
+            projectId,
+            archivedBucket,
+            undefined,
+            renderContext,
+            childExtras,
+          );
+        })
         : null}
       <Dialog open={exportDialogOpen} onOpenChange={setExportDialogOpen}>
         <DialogContent showCloseButton={false} className="max-w-sm gap-5">

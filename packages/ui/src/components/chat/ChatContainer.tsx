@@ -153,6 +153,7 @@ type HydratingToolSkeletonRow = {
 
 type ChatViewportProps = {
     currentSessionId: string;
+    sessionDirectory?: string | null;
     isDesktopExpandedInput: boolean;
     isMobile: boolean;
     stickyUserHeader: boolean;
@@ -192,6 +193,7 @@ type ChatViewportProps = {
 
 const ChatViewport = React.memo(({
     currentSessionId,
+    sessionDirectory = null,
     isDesktopExpandedInput,
     isMobile,
     stickyUserHeader,
@@ -292,6 +294,7 @@ const ChatViewport = React.memo(({
                             <MessageList
                                 ref={messageListRef}
                                 sessionKey={currentSessionId}
+                                sessionDirectory={sessionDirectory}
                                 turnStart={turnStart}
                                 disableStaging={pendingRevealWork}
                                 messages={renderedMessages}
@@ -351,6 +354,7 @@ const ChatViewport = React.memo(({
     );
 }, (prev, next) => {
     return prev.currentSessionId === next.currentSessionId
+        && prev.sessionDirectory === next.sessionDirectory
         && prev.isDesktopExpandedInput === next.isDesktopExpandedInput
         && prev.isMobile === next.isMobile
         && prev.stickyUserHeader === next.stickyUserHeader
@@ -496,7 +500,10 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
     const sessionMessageCount = useSessionMessageCount(currentSessionId ?? '', currentSessionDirectory);
     const hasRenderableSessionSnapshot = useSessionMessagesRenderable(currentSessionId ?? '', currentSessionDirectory);
     // Messages from sync system
-    const sessionMessageRecords = useSessionMessageRecords(currentSessionId ?? '', currentSessionDirectory);
+    const sessionMessageRecords = useSessionMessageRecords(currentSessionId ?? '', currentSessionDirectory, {
+        suspendPartUpdates: Boolean(streamingMessageId),
+        suspendPartUpdatesForMessageId: streamingMessageId,
+    });
     const sessionMessages = currentSessionId ? sessionMessageRecords : EMPTY_MESSAGES;
     const sessionPrefetchDirectory = React.useMemo(() => {
         if (!currentSessionId) return syncDirectory;
@@ -1039,6 +1046,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
 			<ChatViewport
 				key={currentSessionId}
 				currentSessionId={currentSessionId}
+                sessionDirectory={currentSessionDirectory}
                 isDesktopExpandedInput={isDesktopExpandedInput}
                 isMobile={isMobile}
                 stickyUserHeader={stickyUserHeader}

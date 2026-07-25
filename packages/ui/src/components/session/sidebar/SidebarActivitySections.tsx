@@ -13,6 +13,12 @@ import { cn } from '@/lib/utils';
 import type { SessionNode } from './types';
 import { useI18n } from '@/lib/i18n';
 import { Icon } from "@/components/icon/Icon";
+import { useSessionUIStore } from '@/sync/session-ui-store';
+import {
+  buildSessionNodeRenderExtras,
+  type SessionNodeChildRenderExtras,
+  type SidebarRenderContext,
+} from './sessionNodeItemUtils';
 
 export type ActivityItem = {
   node: SessionNode;
@@ -32,7 +38,17 @@ export type ActivitySection = {
 
 type Props = {
   sections: ActivitySection[];
-  renderSessionNode: (node: SessionNode, depth?: number, groupDirectory?: string | null, projectId?: string | null, archivedBucket?: boolean, secondaryMeta?: { projectLabel?: string | null; branchLabel?: string | null } | null, renderContext?: 'project' | 'recent' | 'global-pinned') => React.ReactNode;
+  renderSessionNode: (
+    node: SessionNode,
+    depth?: number,
+    groupDirectory?: string | null,
+    projectId?: string | null,
+    archivedBucket?: boolean,
+    secondaryMeta?: { projectLabel?: string | null; branchLabel?: string | null } | null,
+    renderContext?: SidebarRenderContext,
+    renderExtras?: SessionNodeChildRenderExtras,
+  ) => React.ReactNode;
+  openSidebarMenuKey?: string | null;
   onReorderGlobalPinned?: (fromIndex: number, toIndex: number) => void;
 };
 
@@ -55,10 +71,35 @@ const SortableActivityItem: React.FC<{ id: string; children: React.ReactNode }> 
   );
 };
 
-export function SidebarActivitySections({ sections, renderSessionNode, onReorderGlobalPinned }: Props): React.ReactNode {
+export function SidebarActivitySections({
+  sections,
+  renderSessionNode,
+  openSidebarMenuKey = null,
+  onReorderGlobalPinned,
+}: Props): React.ReactNode {
   const { t } = useI18n();
+  const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
   const [collapsed, setCollapsed] = React.useState<Set<string>>(new Set());
   const [expandedSections, setExpandedSections] = React.useState<Set<string>>(new Set());
+
+  const extrasBySectionKey = React.useMemo(() => {
+    const map = new Map<string, ReturnType<typeof buildSessionNodeRenderExtras>>();
+    for (const section of sections) {
+      const renderContext: SidebarRenderContext = section.key === 'global-pinned' ? 'global-pinned' : 'recent';
+      map.set(
+        section.key,
+        buildSessionNodeRenderExtras(
+          section.items.map((item) => item.node),
+          currentSessionId,
+          null,
+          openSidebarMenuKey,
+          renderContext,
+          false,
+        ),
+      );
+    }
+    return map;
+  }, [currentSessionId, openSidebarMenuKey, sections]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
@@ -95,6 +136,22 @@ export function SidebarActivitySections({ sections, renderSessionNode, onReorder
   }
 
   const renderItems = (section: ActivitySection, visibleItems: ActivityItem[]) => {
+    const renderContext: SidebarRenderContext = section.key === 'global-pinned' ? 'global-pinned' : 'recent';
+    const sectionExtras = extrasBySectionKey.get(section.key);
+    const renderItem = (item: ActivityItem) => {
+      const extras = sectionExtras?.childRenderExtrasFor?.(item.node);
+      return renderSessionNode(
+        item.node,
+        0,
+        item.groupDirectory,
+        item.projectId,
+        false,
+        item.secondaryMeta,
+        renderContext,
+        extras,
+      );
+    };
+
     if (section.key === 'global-pinned' && onReorderGlobalPinned && section.items.length > 1) {
       return (
         <DndContext
@@ -112,7 +169,7 @@ export function SidebarActivitySections({ sections, renderSessionNode, onReorder
           <SortableContext items={section.items.map((item) => item.node.session.id)} strategy={verticalListSortingStrategy}>
             {visibleItems.map((item) => (
               <SortableActivityItem key={item.node.session.id} id={item.node.session.id}>
-                {renderSessionNode(item.node, 0, item.groupDirectory, item.projectId, false, item.secondaryMeta, 'global-pinned')}
+                {renderItem(item)}
               </SortableActivityItem>
             ))}
           </SortableContext>
@@ -120,9 +177,7 @@ export function SidebarActivitySections({ sections, renderSessionNode, onReorder
       );
     }
 
-    return visibleItems.map((item) =>
-      renderSessionNode(item.node, 0, item.groupDirectory, item.projectId, false, item.secondaryMeta, section.key === 'global-pinned' ? 'global-pinned' : 'recent'),
-    );
+    return visibleItems.map((item) => renderItem(item));
   };
 
   return (
