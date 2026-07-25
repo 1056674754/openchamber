@@ -34,7 +34,7 @@
     "package": "node ./scripts/electron-builder-local-sign.mjs --check-release-signing && bun run build:web-assets && bun run bundle:main && bun run rebuild:native && node ./scripts/electron-builder-local-sign.mjs",
     "verify:mac-gatekeeper": "node ./scripts/verify-mac-gatekeeper.mjs",
     "finalize:latest-yml": "node ./scripts/finalize-latest-yml.mjs",
-    "type-check": "node --check ./main.mjs && node --check ./preload.mjs",
+    "type-check": "node --check ./main.mjs && node --check ./preload.mjs && node --check ./tray.mjs",
     "lint": "node -e \"process.exit(0)\""
   },
   "build": {
@@ -48,6 +48,10 @@
       {
         "from": "resources/web-dist",
         "to": "web-dist"
+      },
+      {
+        "from": "resources/icons/tray",
+        "to": "icons/tray"
       },
       {
         "from": "../../LICENSE",

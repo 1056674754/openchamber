@@ -4,6 +4,7 @@ import { usePwaManifestSync } from '@/hooks/usePwaManifestSync';
 import { useQueuedMessageAutoSend } from '@/hooks/useQueuedMessageAutoSend';
 import { useSessionAutoCleanup } from '@/hooks/useSessionAutoCleanup';
 import { useSessionPresenceBeacon } from '@/hooks/useSessionPresenceBeacon';
+import { useTraySync } from '@/hooks/useTraySync';
 import { useWindowControlsOverlayLayout } from '@/hooks/useWindowControlsOverlayLayout';
 import { OpenChamberPluginStatusToast } from '@/components/update/OpenChamberPluginStatusToast';
 import { RemoteSessionGoalSettleToast } from '@/components/chat/RemoteSessionGoalSettleToast';
@@ -81,6 +82,7 @@ export function SyncAppEffects({ embeddedBackgroundWorkEnabled }: {
   useWindowControlsOverlayLayout();
   useKeyboardShortcuts();
   useSessionPresenceBeacon({ enabled: embeddedBackgroundWorkEnabled });
+  useTraySync();
 
   return (
     <>

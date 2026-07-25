@@ -13,6 +13,7 @@ import updaterPkg from 'electron-updater';
 import { ElectronSshManager } from './ssh-manager.mjs';
 import { hasSameHttpOrigin, loginRemotePasswordAndPersistSession } from './remote-password-login.mjs';
 import { createSingleFlight } from './startup-coordinator.mjs';
+import { createTrayController } from './tray.mjs';
 
 const execFileAsync = promisify(execFile);
 
@@ -176,6 +177,9 @@ const state = {
   sshStatuses: new Map(),
   sshLogs: new Map(),
   keepAwakeBlockerId: null,
+  trayController: null,
+  trayFocusListener: null,
+  lastFocusedWindowId: null,
 };
 
 const setDesktopKeepAwakeActive = (enabled) => {
@@ -711,6 +715,172 @@ const buildLocalUrl = (port) => `http://127.0.0.1:${port}`;
 
 const resourceRoot = () => isDev ? path.join(__dirname, 'resources') : process.resourcesPath;
 const resolveWebDistDir = () => path.join(resourceRoot(), 'web-dist');
+
+const isMacMenuBarEnabled = () => readSettingsRoot().desktopMacMenuBarEnabled !== false;
+
+const isTrayEnabledForPlatform = () => process.platform === 'darwin' && isMacMenuBarEnabled();
+
+const TRAY_BREATH_FRAME_COUNT = 16;
+
+const destroyTray = () => {
+  if (state.trayController) {
+    try {
+      state.trayController.destroy();
+    } catch (error) {
+      log.warn('[electron] tray destroy failed', error);
+    }
+    state.trayController = null;
+  }
+  if (state.trayFocusListener) {
+    app.removeListener('browser-window-focus', state.trayFocusListener);
+    state.trayFocusListener = null;
+  }
+};
+
+const trayIconAssets = () => {
+  const dir = path.join(resourceRoot(), 'icons', 'tray');
+  const statusDir = path.join(dir, 'status');
+  return {
+    idleIconPath: path.join(dir, 'trayTemplate-idle.png'),
+    unseenIconPath: path.join(dir, 'trayTemplate-unseen.png'),
+    breathIconPaths: Array.from({ length: TRAY_BREATH_FRAME_COUNT }, (_, i) =>
+      path.join(dir, `trayTemplate-breath-${String(i).padStart(2, '0')}.png`)),
+    statusIconPaths: {
+      busy: path.join(statusDir, 'busy.png'),
+      retry: path.join(statusDir, 'retry.png'),
+      error: path.join(statusDir, 'error.png'),
+      unseen: path.join(statusDir, 'unseen.png'),
+      blank: path.join(statusDir, 'blank.png'),
+    },
+  };
+};
+
+const resolveTraySurface = () => {
+  const focused = BrowserWindow.getFocusedWindow();
+  if (focused && !focused.isDestroyed()) return focused;
+  if (state.lastFocusedWindowId != null) {
+    const remembered = BrowserWindow.fromId(state.lastFocusedWindowId);
+    if (remembered && !remembered.isDestroyed()) return remembered;
+  }
+  return null;
+};
+
+const revealMainWindow = async () => {
+  let target = state.mainWindow;
+  if (!target || target.isDestroyed()) {
+    target = await openMainWindow().catch(() => null) || state.mainWindow;
+  }
+  if (target && !target.isDestroyed()) {
+    if (target.isMinimized()) target.restore();
+    target.show();
+    target.focus();
+  }
+  return target;
+};
+
+const focusMainWindowWithSession = async (sessionId, directory, serverId = '') => {
+  if (state.mainWindow && !state.mainWindow.isDestroyed()) {
+    if (state.mainWindow.isMinimized()) state.mainWindow.restore();
+    state.mainWindow.show();
+    state.mainWindow.focus();
+    if (sessionId) {
+      emitToWindow(state.mainWindow, 'openchamber:open-session', {
+        sessionId,
+        directory: directory || '',
+        serverId: serverId || '',
+      });
+    }
+    return;
+  }
+  if (sessionId) pendingDeepLinks.push({ type: 'session', value: sessionId });
+  await openMainWindow();
+};
+
+const dispatchOpenMiniChat = (browserWindow) => {
+  const target = browserWindow && !browserWindow.isDestroyed() ? browserWindow : getMenuTargetWindow();
+  void createMiniChatWindow({ mode: 'draft' }).catch((error) => {
+    log.warn('[electron] failed to open mini chat from tray', error);
+    if (target && !target.isDestroyed()) {
+      emitToWindow(target, 'openchamber:open-draft-session', { directory: '', projectId: '' });
+    }
+  });
+};
+
+const dispatchTrayAction = async (action) => {
+  if (!action || typeof action !== 'object') return;
+
+  if (action.type === 'quit') {
+    void requestQuitWithConfirmation();
+    return;
+  }
+
+  if (action.type === 'respond-permission') {
+    const target = (state.mainWindow && !state.mainWindow.isDestroyed())
+      ? state.mainWindow
+      : await revealMainWindow();
+    emitToWindow(target, 'openchamber:tray-action', action);
+    return;
+  }
+
+  if (action.type === 'new-mini-chat') {
+    let target = getMenuTargetWindow();
+    if (!target) target = await revealMainWindow();
+    dispatchOpenMiniChat(target);
+    return;
+  }
+
+  if (action.type === 'focus-session') {
+    const surface = resolveTraySurface();
+    if (surface && surface.__ocMiniChat === true && action.sessionId) {
+      if (surface.isMinimized()) surface.restore();
+      surface.show();
+      surface.focus();
+      emitToWindow(surface, 'openchamber:open-session', {
+        sessionId: action.sessionId,
+        directory: action.directory || '',
+        serverId: action.serverId || '',
+      });
+      return;
+    }
+    await focusMainWindowWithSession(action.sessionId, action.directory || '', action.serverId || '');
+    return;
+  }
+
+  const target = await revealMainWindow();
+  if (!target || target.isDestroyed()) return;
+
+  if (action.type === 'new-session') {
+    emitToWindow(target, 'openchamber:open-draft-session', { directory: '', projectId: '' });
+  }
+};
+
+const setupTray = () => {
+  if (process.platform !== 'darwin' || state.trayController) return;
+  if (!isMacMenuBarEnabled()) return;
+  const assets = trayIconAssets();
+  if (!fs.existsSync(assets.idleIconPath)) {
+    log.warn('[electron] tray icon missing, skipping tray setup', { iconPath: assets.idleIconPath });
+    return;
+  }
+  try {
+    state.trayController = createTrayController({
+      ...assets,
+      onAction: (action) => { void dispatchTrayAction(action); },
+    });
+    state.trayController.update({ sessions: [], approvals: [] });
+    if (!state.trayFocusListener) {
+      state.trayFocusListener = (_event, browserWindow) => {
+        if (browserWindow && !browserWindow.isDestroyed()) {
+          state.lastFocusedWindowId = browserWindow.id;
+        }
+      };
+      app.on('browser-window-focus', state.trayFocusListener);
+    }
+  } catch (error) {
+    log.warn('[electron] failed to set up tray', error);
+    state.trayController = null;
+  }
+};
 
 const normalizeNotificationInput = (raw) => {
   if (!raw || typeof raw !== 'object') return {};
@@ -1304,6 +1474,7 @@ const createBrowserWindow = ({ label, restoreGeometry, url }) => {
   const desktopLocalOrigin = state.localOrigin || '';
   const desktopHome = os.homedir() || '';
   const desktopMacosMajor = String(macosMajorVersion());
+  const trayEnabled = isTrayEnabledForPlatform();
   const options = {
     title: 'OpenChamber',
     width: useSaved ? Math.max(saved.width, MIN_RESTORE_WINDOW_WIDTH) : 1280,
@@ -1323,6 +1494,8 @@ const createBrowserWindow = ({ label, restoreGeometry, url }) => {
         `--openchamber-home=${desktopHome}`,
         `--openchamber-macos-major=${desktopMacosMajor}`,
         `--openchamber-boot-outcome=${JSON.stringify(state.bootOutcome || null)}`,
+        `--openchamber-tray-enabled=${trayEnabled ? '1' : '0'}`,
+        `--openchamber-platform=${process.platform}`,
       ],
       preload: isDev ? path.join(__dirname, 'preload.mjs') : path.join(app.getAppPath(), 'preload.mjs'),
       backgroundThrottling: false,
@@ -1567,6 +1740,7 @@ const createMiniChatWindow = async ({ mode, sessionId = '', directory = '', proj
   const desktopLocalOrigin = state.localOrigin || '';
   const desktopHome = os.homedir() || '';
   const desktopMacosMajor = String(macosMajorVersion());
+  const trayEnabled = isTrayEnabledForPlatform();
   const browserWindow = new BrowserWindow({
     title: 'OpenChamber Mini Chat',
     width: MINI_CHAT_WINDOW_WIDTH,
@@ -1582,6 +1756,8 @@ const createMiniChatWindow = async ({ mode, sessionId = '', directory = '', proj
         `--openchamber-local-origin=${desktopLocalOrigin}`,
         `--openchamber-home=${desktopHome}`,
         `--openchamber-macos-major=${desktopMacosMajor}`,
+        `--openchamber-tray-enabled=${trayEnabled ? '1' : '0'}`,
+        `--openchamber-platform=${process.platform}`,
       ],
       preload: isDev ? path.join(__dirname, 'preload.mjs') : path.join(app.getAppPath(), 'preload.mjs'),
       backgroundThrottling: false,
@@ -2056,6 +2232,27 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       const label = count > 999 ? '999+' : (count > 0 ? String(count) : '');
       app.dock.setBadge(label);
       return { supported: true, count };
+    }
+
+    case 'desktop_tray_update': {
+      if (state.trayController) {
+        try {
+          state.trayController.update(args || {});
+        } catch (error) {
+          log.warn('[electron] tray update failed', error);
+        }
+      }
+      if (process.platform === 'darwin' && app.dock) {
+        try {
+          const rawCount = args && typeof args.dockBadgeCount === 'number' ? args.dockBadgeCount : 0;
+          const badgeCount = Number.isFinite(rawCount) ? Math.max(0, Math.floor(rawCount)) : 0;
+          const label = badgeCount > 999 ? '999+' : (badgeCount > 0 ? String(badgeCount) : '');
+          app.dock.setBadge(label);
+        } catch (error) {
+          log.warn('[electron] dock badge update failed', error);
+        }
+      }
+      return null;
     }
 
     case 'desktop_get_app_version':
@@ -3003,6 +3200,7 @@ app.whenReady().then(async () => {
     state.localOrigin = localOrigin;
     state.bootOutcome = bootOutcome ?? null;
     state.initScript = buildInitScript(localOrigin, state.bootOutcome);
+    setupTray();
     log.info('[electron] started in background without window');
     return;
   }
@@ -3018,6 +3216,7 @@ app.whenReady().then(async () => {
 
   const { initialUrl, localOrigin, bootOutcome } = await resolveInitialUrl();
   await activateMainWindow(initialUrl, localOrigin, bootOutcome);
+  setupTray();
 
   // Auto-connect all configured SSH instances in parallel.
   try {

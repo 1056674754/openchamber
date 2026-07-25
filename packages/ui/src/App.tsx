@@ -32,6 +32,7 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { opencodeClient } from '@/lib/opencode/client';
+import { serverRegistry } from '@/lib/opencode/server-registry';
 import { SyncProvider } from '@/sync/sync-context';
 import { useSync } from '@/sync/use-sync';
 import { MultiServerSyncLayer } from '@/sync/MultiServerSyncLayer';
@@ -615,12 +616,18 @@ function App({ apis }: AppProps) {
     if (typeof window === 'undefined') return;
 
     const handler = (event: Event) => {
-      const detail = (event as CustomEvent<{ sessionId?: string; directory?: string }>).detail;
+      const detail = (event as CustomEvent<{ sessionId?: string; directory?: string; serverId?: string }>).detail;
       const sessionId = typeof detail?.sessionId === 'string' ? detail.sessionId.trim() : '';
       if (!sessionId) return;
       const directory = typeof detail?.directory === 'string' && detail.directory.trim().length > 0
         ? detail.directory.trim()
         : null;
+      const serverId = typeof detail?.serverId === 'string' && detail.serverId.trim().length > 0
+        ? detail.serverId.trim()
+        : null;
+      if (serverId) {
+        serverRegistry.indexSession(sessionId, serverId);
+      }
       useUIStore.getState().setActiveMainTab('chat');
       void useSessionUIStore.getState().setCurrentSession(sessionId, directory);
     };

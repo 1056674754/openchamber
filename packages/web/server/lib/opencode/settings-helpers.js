@@ -201,6 +201,9 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.desktopKeepAwakeEnabled === 'boolean') {
       result.desktopKeepAwakeEnabled = candidate.desktopKeepAwakeEnabled;
     }
+    if (typeof candidate.desktopMacMenuBarEnabled === 'boolean') {
+      result.desktopMacMenuBarEnabled = candidate.desktopMacMenuBarEnabled;
+    }
     if (
       candidate.permissionAutoAccept
       && typeof candidate.permissionAutoAccept === 'object'

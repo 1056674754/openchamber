@@ -54,6 +54,7 @@ export type DesktopSettings = {
   // Optional absolute path to `opencode` binary.
   opencodeBinary?: string;
   desktopLanAccessEnabled?: boolean;
+  desktopMacMenuBarEnabled?: boolean;
   desktopKeepAwakeEnabled?: boolean;
   desktopKeepManagedOpenCodeAliveOnQuit?: boolean;
   projects?: ProjectEntry[];
@@ -211,6 +212,7 @@ export type DesktopSettings = {
 
 type ElectronRuntimeGlobal = {
   runtime?: string;
+  trayEnabled?: boolean;
 };
 
 const getElectronRuntime = (): ElectronRuntimeGlobal | null => {

@@ -17,8 +17,11 @@ import { useI18n } from '@/lib/i18n';
 export const DesktopNetworkSettings: React.FC = () => {
   const { t } = useI18n();
   const isLocalDesktop = isDesktopShell() && isDesktopLocalOriginActive();
+  const isMacDesktop = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/.test(navigator.platform);
   const [savedValue, setSavedValue] = React.useState(false);
   const [draftValue, setDraftValue] = React.useState(false);
+  const [savedMacMenuBarEnabled, setSavedMacMenuBarEnabled] = React.useState(true);
+  const [draftMacMenuBarEnabled, setDraftMacMenuBarEnabled] = React.useState(true);
   const [isLoading, setIsLoading] = React.useState(true);
   const [isSaving, setIsSaving] = React.useState(false);
   const [launchAtLoginSupported, setLaunchAtLoginSupported] = React.useState(false);
@@ -47,7 +50,10 @@ export const DesktopNetworkSettings: React.FC = () => {
           throw new Error(t('settings.openchamber.desktopNetwork.error.loadFailed'));
         }
 
-        const data = (await response.json().catch(() => null)) as null | { desktopLanAccessEnabled?: unknown };
+        const data = (await response.json().catch(() => null)) as null | {
+          desktopLanAccessEnabled?: unknown;
+          desktopMacMenuBarEnabled?: unknown;
+        };
         if (cancelled) {
           return;
         }
@@ -55,6 +61,9 @@ export const DesktopNetworkSettings: React.FC = () => {
         const enabled = data?.desktopLanAccessEnabled === true;
         setSavedValue(enabled);
         setDraftValue(enabled);
+        const macMenuBarEnabled = data?.desktopMacMenuBarEnabled !== false;
+        setSavedMacMenuBarEnabled(macMenuBarEnabled);
+        setDraftMacMenuBarEnabled(macMenuBarEnabled);
         setError(null);
       } catch (cause) {
         if (!cancelled) {
@@ -134,7 +143,8 @@ export const DesktopNetworkSettings: React.FC = () => {
     };
   }, [draftValue, isLocalDesktop]);
 
-  const isDirty = draftValue !== savedValue;
+  const isDirty = draftValue !== savedValue
+    || (isMacDesktop && draftMacMenuBarEnabled !== savedMacMenuBarEnabled);
   const currentPort = React.useMemo(() => {
     if (typeof window === 'undefined') {
       return null;
@@ -147,6 +157,10 @@ export const DesktopNetworkSettings: React.FC = () => {
 
   const handleToggle = React.useCallback(() => {
     setDraftValue((current) => !current);
+  }, []);
+
+  const handleMacMenuBarToggle = React.useCallback(() => {
+    setDraftMacMenuBarEnabled((current) => !current);
   }, []);
 
   const handleLaunchAtLoginToggle = React.useCallback(async () => {
@@ -212,7 +226,10 @@ export const DesktopNetworkSettings: React.FC = () => {
           'Content-Type': 'application/json',
           Accept: 'application/json',
         },
-        body: JSON.stringify({ desktopLanAccessEnabled: draftValue }),
+        body: JSON.stringify({
+          desktopLanAccessEnabled: draftValue,
+          ...(isMacDesktop ? { desktopMacMenuBarEnabled: draftMacMenuBarEnabled } : {}),
+        }),
       });
 
       if (!response.ok) {
@@ -220,6 +237,7 @@ export const DesktopNetworkSettings: React.FC = () => {
       }
 
       setSavedValue(draftValue);
+      setSavedMacMenuBarEnabled(draftMacMenuBarEnabled);
 
       const restarted = await restartDesktopApp();
       if (!restarted) {
@@ -229,7 +247,7 @@ export const DesktopNetworkSettings: React.FC = () => {
       setError(cause instanceof Error ? cause.message : t('settings.openchamber.desktopNetwork.error.saveFailed'));
       setIsSaving(false);
     }
-  }, [draftValue, isDirty, t]);
+  }, [draftMacMenuBarEnabled, draftValue, isDirty, isMacDesktop, t]);
 
   if (!isLocalDesktop) {
     return null;
@@ -265,6 +283,34 @@ export const DesktopNetworkSettings: React.FC = () => {
               <div className="typography-ui-label text-foreground">{t('settings.openchamber.desktopNetwork.field.launchAtLogin')}</div>
               <div className="typography-micro text-muted-foreground/70">
                 {t('settings.openchamber.desktopNetwork.field.launchAtLoginDescription')}
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        {isMacDesktop ? (
+          <div
+            className="group flex cursor-pointer items-start gap-2 py-1.5"
+            role="button"
+            tabIndex={0}
+            onClick={handleMacMenuBarToggle}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                handleMacMenuBarToggle();
+              }
+            }}
+          >
+            <Checkbox
+              checked={draftMacMenuBarEnabled}
+              onChange={handleMacMenuBarToggle}
+              ariaLabel={t('settings.openchamber.desktopNetwork.field.macMenuBarAria')}
+              disabled={isLoading || isSaving}
+            />
+            <div className="min-w-0 flex-1">
+              <div className="typography-ui-label text-foreground">{t('settings.openchamber.desktopNetwork.field.macMenuBar')}</div>
+              <div className="typography-micro text-muted-foreground/70">
+                {t('settings.openchamber.desktopNetwork.field.macMenuBarDescription')}
               </div>
             </div>
           </div>

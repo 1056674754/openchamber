@@ -214,6 +214,29 @@ const MiniChatBootstrap: React.FC<{ config: MiniChatConfig }> = ({ config }) => 
   }, [config, currentSessionId, draftOpen, openNewSessionDraft]);
 
   React.useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<{ sessionId?: string; directory?: string; serverId?: string }>).detail;
+      const sessionId = typeof detail?.sessionId === 'string' ? detail.sessionId.trim() : '';
+      if (!sessionId) return;
+      const directory = typeof detail?.directory === 'string' && detail.directory.trim().length > 0
+        ? detail.directory.trim()
+        : null;
+      const serverId = typeof detail?.serverId === 'string' && detail.serverId.trim().length > 0
+        ? detail.serverId.trim()
+        : null;
+      if (serverId) {
+        serverRegistry.indexSession(sessionId, serverId);
+      }
+      void setCurrentSession(sessionId, directory);
+    };
+
+    window.addEventListener('openchamber:open-session', handler as EventListener);
+    return () => window.removeEventListener('openchamber:open-session', handler as EventListener);
+  }, [setCurrentSession]);
+
+  React.useEffect(() => {
     if (projects.length === 0) return;
     let cancelled = false;
 

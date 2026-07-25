@@ -15,6 +15,8 @@ const localOrigin = readArgValue('--openchamber-local-origin');
 const homeDirectory = readArgValue('--openchamber-home');
 const macosMajorRaw = readArgValue('--openchamber-macos-major');
 const macosMajor = Number.parseInt(macosMajorRaw, 10);
+const trayEnabled = process.platform !== 'darwin' || readArgValue('--openchamber-tray-enabled') !== '0';
+const platformHint = readArgValue('--openchamber-platform') || process.platform;
 
 // Preload re-executes on every cross-origin navigation (we run with
 // sandbox:false, per-document). Two separate concerns to balance:
@@ -64,7 +66,10 @@ if (Number.isFinite(macosMajor) && macosMajor > 0) {
 
 contextBridge.exposeInMainWorld('__OPENCHAMBER_ELECTRON__', {
   runtime: 'electron',
+  trayEnabled,
 });
+
+contextBridge.exposeInMainWorld('__OPENCHAMBER_PLATFORM__', platformHint);
 
 // Note: bootOutcome must stay writable from the main world's initScript so
 // re-navigations (host switch via deep link) can refresh it. contextBridge-
