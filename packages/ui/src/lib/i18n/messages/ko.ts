@@ -1899,6 +1899,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.chatInput.toast.weighFailed': '옵션을 비교하지 못했습니다',
   'chat.chatInput.toast.exploreFailed': '둘러보기를 시작하지 못했습니다',
   'chat.chatInput.toast.attachmentsTooLarge': '첨부 파일이 너무 커서 보낼 수 없습니다. 이미지 수나 크기를 줄여 보세요.',
+  'chat.chatInput.toast.unsupportedAttachmentModalities': '{model}은(는) {files}에 필요한 {modalities} 입력을 지원하지 않습니다. 메시지는 보낼 수 있지만 이 첨부 파일은 무시될 수 있습니다.',
   'chat.chatInput.toast.sendAttachmentsFailed': '첨부 파일 전송 실패. 파일 수나 이미지 크기를 줄여 보세요.',
   'chat.chatInput.toast.messageSendFailed': '메시지 전송에 실패했습니다. 첨부 파일을 복원했습니다.',
   'chat.chatInput.toast.clipboardAttachFailed': '클립보드 이미지 첨부 실패',

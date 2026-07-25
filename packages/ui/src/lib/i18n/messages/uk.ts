@@ -1864,6 +1864,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.chatInput.toast.weighFailed": "Не вдалося зважити варіанти",
   "chat.chatInput.toast.exploreFailed": "Не вдалося розпочати огляд",
   "chat.chatInput.toast.attachmentsTooLarge": "Вкладені файли завеликі для надсилання. Спробуйте зменшити кількість або розмір зображень.",
+  "chat.chatInput.toast.unsupportedAttachmentModalities": "{model} не підтримує введення {modalities}, потрібне для {files}. Повідомлення все одно можна надіслати, але ці вкладення можуть бути проігноровані.",
   "chat.chatInput.toast.sendAttachmentsFailed": "Не вдалося надіслати вкладення. Спробуйте зменшити кількість файлів або зображень.",
   "chat.chatInput.toast.messageSendFailed": "Не вдалося надіслати повідомлення. Вкладення відновлено.",
   "chat.chatInput.toast.clipboardAttachFailed": "Не вдалося вкласти зображення з буфера обміну",

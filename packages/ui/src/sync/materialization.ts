@@ -105,8 +105,29 @@ function getPartStateTime(part: Part): { start?: number; end?: number } | undefi
   return { start, end }
 }
 
+function getPartStateAttachments(part: Part): Array<unknown> | undefined {
+  const state = (part as Record<string, unknown>).state as Record<string, unknown> | undefined
+  if (!state) return undefined
+  const attachments = state.attachments
+  return Array.isArray(attachments) ? attachments : undefined
+}
+
 function mergeMaterializedPart(existing: Part | undefined, next: Part): Part {
-  if (!existing || getPartEndTime(next) !== undefined) return next
+  if (!existing) return next
+
+  if (getPartEndTime(next) !== undefined) {
+    const existingAttachments = getPartStateAttachments(existing)
+    if (existingAttachments?.length && getPartStateAttachments(next) === undefined) {
+      const nextRecord = { ...next }
+      const nextState = {
+        ...((next as Record<string, unknown>).state as Record<string, unknown> ?? {}),
+        attachments: existingAttachments,
+      }
+      ;(nextRecord as Record<string, unknown>).state = nextState
+      return nextRecord
+    }
+    return next
+  }
 
   let merged: Part = next
   for (const field of STREAMING_PART_FIELDS) {
@@ -122,6 +143,14 @@ function mergeMaterializedPart(existing: Part | undefined, next: Part): Part {
     mergedRecord[field] = existingValue
   }
 
+  const existingAttachments = getPartStateAttachments(existing)
+  if (existingAttachments?.length && getPartStateAttachments(next) === undefined) {
+    if (merged === next) merged = { ...next }
+    const mergedRecord = merged as Record<string, unknown>
+    const nextState = (next as Record<string, unknown>).state as Record<string, unknown> | undefined
+    mergedRecord.state = { ...(nextState ?? {}), attachments: existingAttachments }
+  }
+
   const existingTime = getPartStateTime(existing)
   if (existingTime) {
     const nextTime = getPartStateTime(next)
@@ -130,9 +159,10 @@ function mergeMaterializedPart(existing: Part | undefined, next: Part): Part {
     if (preservedStart !== nextTime?.start || preservedEnd !== nextTime?.end) {
       if (merged === next) merged = { ...next }
       const mergedRecord = merged as Record<string, unknown>
-      const nextState = (next as Record<string, unknown>).state as Record<string, unknown> | undefined
+      const currentState = (mergedRecord.state as Record<string, unknown> | undefined)
+        ?? (next as Record<string, unknown>).state as Record<string, unknown> | undefined
       mergedRecord.state = {
-        ...(nextState ?? {}),
+        ...(currentState ?? {}),
         time: { start: preservedStart, end: preservedEnd },
       }
     }

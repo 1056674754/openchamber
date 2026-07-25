@@ -1897,6 +1897,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.chatInput.toast.weighFailed': '比較検討に失敗しました',
   'chat.chatInput.toast.exploreFailed': 'ツアーの開始に失敗しました',
   'chat.chatInput.toast.attachmentsTooLarge': '添付ファイルが大きすぎて送信できません。画像の数またはサイズを減らしてください。',
+  'chat.chatInput.toast.unsupportedAttachmentModalities': '{model} は {files} に必要な {modalities} 入力をサポートしていません。メッセージは送信できますが、これらの添付ファイルは無視される可能性があります。',
   'chat.chatInput.toast.sendAttachmentsFailed': '添付ファイルの送信に失敗しました。ファイルを減らすかサイズを小さくしてください。',
   'chat.chatInput.toast.messageSendFailed': 'メッセージの送信に失敗しました。添付ファイルは復元されました。',
   'chat.chatInput.toast.clipboardAttachFailed': 'クリップボードからの画像添付に失敗しました',

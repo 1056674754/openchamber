@@ -239,6 +239,28 @@ describe("input-store session-scoped attachments", () => {
     expect(useInputStore.getState().attachedFiles.map((file) => file.filename)).toEqual(["queued.png"])
   })
 
+  test("normalizes code files to text/plain", async () => {
+    const addPromise = useInputStore.getState().addAttachedFile(
+      new File(["const value = 1"], "example.ts", { type: "text/typescript" }),
+    )
+    expect(pendingReaders).toHaveLength(1)
+    resolveReader(pendingReaders[0], "data:text/typescript;base64,Y29uc3QgdmFsdWUgPSAx")
+    expect(await addPromise).toBe(true)
+    expect(useInputStore.getState().attachedFiles[0]?.mimeType).toBe("text/plain")
+    expect(useInputStore.getState().attachedFiles[0]?.dataUrl).toBe(
+      "data:text/plain;base64,Y29uc3QgdmFsdWUgPSAx",
+    )
+  })
+
+  test("rejects an unknown binary file after inspecting its contents", async () => {
+    const attached = await useInputStore.getState().addAttachedFile(
+      new File([new Uint8Array([0, 1, 2, 3])], "archive.bin", { type: "application/octet-stream" }),
+    )
+    expect(attached).toBe(false)
+    expect(pendingReaders).toHaveLength(0)
+    expect(useInputStore.getState().attachedFiles).toEqual([])
+  })
+
   test("opening a cleared draft does not steal the previous session attachments", () => {
     useInputStore.getState().setAttachmentSessionKey("ses_a")
     useInputStore.getState().setAttachedFiles([{

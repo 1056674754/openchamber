@@ -121,6 +121,21 @@ Authoritative delete-missing and completeness are scoped by `serverId + director
 
 Persisted child-store metadata (`persist-cache`) keys include `serverId` (`oc.dir.v2.*`) with one-shot migrate from legacy `oc.dir.*` for the default server. Clearing one server's bucket must not clear another's.
 
+### Composer attachment preparation
+
+Local pick/drop/paste attachments go through `prepareAttachmentFiles` before entering the session-scoped input-store bucket:
+
+- Shared allowlist (`ATTACHMENT_ACCEPT` / `ACCEPTED_ATTACHMENT_EXTENSIONS`) filters picker MIME/extensions.
+- HEIC/HEIF converts to JPEG; notebooks/HAR sanitize to `text/plain`; other text-like formats normalize MIME.
+- Office/ODF (`docx`/`pptx`/`xlsx`/`odt`/`odp`/`ods`) expand via `extractDocumentAttachments` (`fflate`) into extracted text plus embedded images, attached atomically.
+- Files outside the allowlist are rejected (not attached as opaque binaries).
+- VS Code `file://` path attachments and server mentions stay path references and skip Office zip extraction.
+- Composer compares prepared MIME modalities with the selected model’s `modalities.input` and shows a non-blocking warning when incompatible.
+- Plugin tool `state.attachments` are preserved across materialization snapshots and rendered with `MessageFilesDisplay` (entries without `url` are omitted).
+- VS Code webview CSP allows `blob:` only on `worker-src` so Office inflate workers run without permitting blob scripts.
+
+Sending still uses the owning session’s `serverId + directory`; preparation only produces `data:` / `text/plain` parts in the UI.
+
 ## Remote read admission
 
 Remote summary and status reads share one scheduler per remote server. The scheduler admits at most three reads concurrently, leaving one slot in the server's four-request normal lane for user operations. Interactive status reads take precedence over queued background discovery, and identical status/list keys share one in-flight promise.

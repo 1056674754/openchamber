@@ -1865,6 +1865,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.chatInput.toast.weighFailed': '无法权衡方案',
   'chat.chatInput.toast.exploreFailed': '无法开始导览',
   'chat.chatInput.toast.attachmentsTooLarge': '附件过大，无法发送。请减少图片数量或大小。',
+  'chat.chatInput.toast.unsupportedAttachmentModalities': '{model} 不支持 {files} 所需的 {modalities} 输入。你仍可发送消息，但这些附件可能会被忽略。',
   'chat.chatInput.toast.sendAttachmentsFailed': '发送附件失败。请尝试更少文件或更小图片。',
   'chat.chatInput.toast.messageSendFailed': '消息发送失败，附件已恢复。',
   'chat.chatInput.toast.clipboardAttachFailed': '从剪贴板附加图片失败',

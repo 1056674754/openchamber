@@ -1,5 +1,6 @@
 import React, { useRef, memo } from 'react';
 import { useInputStore } from '@/sync/input-store';
+import { ACCEPTED_ATTACHMENT_EXTENSIONS, ATTACHMENT_ACCEPT } from '@/sync/attachment-files';
 import type { AttachedFile } from '@/sync/session-ui-store';
 import { useUIStore } from '@/stores/useUIStore';
 import { toast } from '@/components/ui';
@@ -55,7 +56,10 @@ export const FileAttachmentButton = memo(() => {
 
   const handleVSCodePick = async () => {
     try {
-      const response = await fetch('/api/vscode/pick-files');
+      const params = new URLSearchParams({
+        extensions: ACCEPTED_ATTACHMENT_EXTENSIONS.join(','),
+      });
+      const response = await fetch(`/api/vscode/pick-files?${params.toString()}`);
       const data = await response.json();
       const picked = Array.isArray(data?.files) ? data.files : [];
       const skipped = Array.isArray(data?.skipped) ? data.skipped : [];
@@ -103,6 +107,7 @@ export const FileAttachmentButton = memo(() => {
         multiple
         className="hidden"
         onChange={handleFileSelect}
+        accept={ATTACHMENT_ACCEPT}
       />
       <Tooltip>
         <TooltipTrigger asChild>

@@ -8,6 +8,12 @@ import { useMessageQueueStore, type QueuedMessage } from '@/stores/messageQueueS
 import { useSessionUIStore, type SendMessageTarget } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
 import { resolveAttachmentSessionKey, useInputStore } from '@/sync/input-store';
+import {
+    ACCEPTED_ATTACHMENT_EXTENSIONS,
+    ATTACHMENT_ACCEPT,
+    getUnsupportedAttachmentInputs,
+    type AttachmentInputModality,
+} from '@/sync/attachment-files';
 import type { AttachedFile, SessionContextUsage } from '@/stores/types/sessionTypes';
 import * as sessionActions from '@/sync/session-actions';
 import type { SendDeliveryMode } from '@/sync/session-actions';
@@ -635,7 +641,7 @@ const ComposerAttachmentControls = React.memo(function ComposerAttachmentControl
                 multiple
                 className="hidden"
                 onChange={handleLocalFileSelect}
-                accept="*/*"
+                accept={ATTACHMENT_ACCEPT}
             />
 
             <div className="relative inline-flex">
@@ -1394,6 +1400,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const sendableAttachedFiles = attachedFiles;
 
     const getModelMetadata = useConfigStore((s) => s.getModelMetadata);
+    // Subscribe to both sources read by getModelMetadata so async metadata updates are observed.
+    useConfigStore((s) => s.modelsMetadata);
+    useConfigStore((s) => s.providers);
     const currentModelMetadata = currentProviderId && currentModelId
         ? getModelMetadata(currentProviderId, currentModelId)
         : undefined;
@@ -1402,6 +1411,54 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         ?? true;
     const hasImageAttachments = attachedFiles.some((f) => f.mimeType.startsWith('image/'));
     const showImageFallbackNotice = hasImageAttachments && !currentModelSupportsImages;
+
+    const attachmentCompatibilityRef = React.useRef({
+        modelKey: `${currentProviderId ?? ''}/${currentModelId ?? ''}`,
+        modalitySignature: currentModelMetadata?.modalities?.input?.slice().sort().join(',') ?? null,
+        attachmentIds: new Set<string>(),
+    });
+
+    React.useEffect(() => {
+        const modelKey = `${currentProviderId ?? ''}/${currentModelId ?? ''}`;
+        const inputModalities = currentModelMetadata?.modalities?.input;
+        const modalitySignature = inputModalities?.slice().sort().join(',') ?? null;
+        const previous = attachmentCompatibilityRef.current;
+        const modelChanged = previous.modelKey !== modelKey;
+        const metadataBecameAvailable = previous.modalitySignature === null && modalitySignature !== null;
+        const filesToCheck = modelChanged || metadataBecameAvailable
+            ? attachedFiles
+            : attachedFiles.filter((file) => !previous.attachmentIds.has(file.id));
+
+        attachmentCompatibilityRef.current = {
+            modelKey,
+            modalitySignature,
+            attachmentIds: new Set(attachedFiles.map((file) => file.id)),
+        };
+
+        if (!inputModalities || filesToCheck.length === 0) return;
+
+        const incompatibleFiles = getUnsupportedAttachmentInputs(filesToCheck, inputModalities);
+        if (incompatibleFiles.length === 0) return;
+
+        const unsupportedModalities = Array.from(new Set(incompatibleFiles.map(({ modality }) => modality)));
+        const modalityLabels: Record<AttachmentInputModality, string> = {
+            text: t('chat.modelControls.modality.text'),
+            image: t('chat.modelControls.modality.image'),
+            pdf: t('chat.modelControls.modality.pdf'),
+            audio: t('chat.modelControls.modality.audio'),
+            video: t('chat.modelControls.modality.video'),
+        };
+        const filenames = incompatibleFiles.map(({ attachment }) => attachment.filename);
+        const fileSummary = filenames.length > 3
+            ? `${filenames.slice(0, 3).join(', ')} (+${filenames.length - 3})`
+            : filenames.join(', ');
+
+        toast.warning(t('chat.chatInput.toast.unsupportedAttachmentModalities', {
+            model: currentModelMetadata?.name ?? currentModelId ?? '',
+            modalities: unsupportedModalities.map((modality) => modalityLabels[modality]).join(', '),
+            files: fileSummary,
+        }), { id: `attachment-modalities:${modelKey}` });
+    }, [attachedFiles, currentModelId, currentModelMetadata, currentProviderId, t]);
 
     const [pluginLoaded, setPluginLoaded] = React.useState<boolean | null>(null);
     React.useEffect(() => {
@@ -4062,7 +4119,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 
     const handleVSCodePickFiles = React.useCallback(async () => {
         try {
-            const response = await fetch('/api/vscode/pick-files');
+            const params = new URLSearchParams({
+                extensions: ACCEPTED_ATTACHMENT_EXTENSIONS.join(','),
+            });
+            const response = await fetch(`/api/vscode/pick-files?${params.toString()}`);
             const data = await response.json();
             const picked = Array.isArray(data?.files) ? data.files : [];
             const skipped = Array.isArray(data?.skipped) ? data.skipped : [];

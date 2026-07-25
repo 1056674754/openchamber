@@ -1027,6 +1027,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.chatInput.toast.attachFileFailed': 'Nie udało się dołączyć pliku',
   'chat.chatInput.toast.attachNamedFailed': 'Nie udało się dołączyć {name}',
   'chat.chatInput.toast.attachmentsTooLarge': 'Załączniki są zbyt duże, aby je wysłać. Spróbuj zmniejszyć liczbę lub rozmiar obrazów.',
+  'chat.chatInput.toast.unsupportedAttachmentModalities': '{model} nie obsługuje wejścia {modalities} wymaganego przez {files}. Nadal możesz wysłać wiadomość, ale te załączniki mogą zostać zignorowane.',
   'chat.chatInput.toast.clipboardAttachFailed': 'Nie udało się dołączyć obrazu ze schowka',
   'chat.chatInput.toast.compactFailed': 'Nie udało się skompaktować sesji',
   'chat.chatInput.toast.compactWithFocus': 'Kompaktowanie sesji z uwzględnieniem: {focus}',

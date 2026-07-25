@@ -1737,6 +1737,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.chatInput.toast.weighFailed': '無法權衡方案',
   'chat.chatInput.toast.exploreFailed': '無法開始導覽',
   'chat.chatInput.toast.attachmentsTooLarge': '附件過大，無法傳送。請減少圖片數量或大小。',
+  'chat.chatInput.toast.unsupportedAttachmentModalities': '{model} 不支援 {files} 所需的 {modalities} 輸入。你仍可傳送訊息，但這些附件可能會被忽略。',
   'chat.chatInput.toast.sendAttachmentsFailed': '傳送附件失敗。請嘗試更少檔案或更小圖片。',
   'chat.chatInput.toast.messageSendFailed': '訊息傳送失敗，附件已恢復。',
   'chat.chatInput.toast.clipboardAttachFailed': '從剪貼簿附加圖片失敗',
