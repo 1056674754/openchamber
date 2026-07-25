@@ -66,6 +66,7 @@ export interface DiscoveredSkill {
   path: string;
   scope: SkillScope;
   source: SkillSource;
+  opencodeSynced?: boolean;
   description?: string;
   /** Domain folder parsed from file path, e.g. "automation-ai", "lark-ecosystem" */
   group?: string;
@@ -92,6 +93,7 @@ interface RawSkillResponse {
   path: string;
   scope?: SkillScope;
   source?: SkillSource;
+  opencodeSynced?: boolean;
   sources?: {
     md?: {
       description?: string;
@@ -233,6 +235,7 @@ export const useSkillsStore = create<SkillsStore>()(
                   path: s.path,
                   scope: s.scope ?? 'user',
                   source: s.source ?? 'opencode',
+                  opencodeSynced: s.opencodeSynced,
                   description: s.sources?.md?.description || '',
                   group: parseSkillGroup(s.path),
                 }));
