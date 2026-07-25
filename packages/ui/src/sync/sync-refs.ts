@@ -5,17 +5,18 @@
  * session-actions) use them to read child-store domain data without hooks.
  */
 
-import type { OpencodeClient } from "@opencode-ai/sdk/v2/client"
+import type { Config, OpencodeClient } from "@opencode-ai/sdk/v2/client"
 import type { ChildStoreManager } from "./child-store"
 import { getSessionMaterializationStatus } from "./materialization"
 import type { State } from "./types"
-import { getAllSyncStores } from "./multi-server-registry"
+import { getAllSyncStores, getSyncStoresForServer } from "./multi-server-registry"
 
 let _sdk: OpencodeClient | null = null
 let _childStores: ChildStoreManager | null = null
 let _directory: string = ""
 let _registerSessionDirectory: ((sessionID: string, directory: string) => void) | null = null
 let _getSessionDirectoryFromRoutingIndex: ((sessionID: string) => string | undefined) | null = null
+const configListeners = new Set<(directory: string, config: Config) => void>()
 
 export function setSyncRefs(
   sdk: OpencodeClient,
@@ -70,6 +71,46 @@ export function getDirectoryState(directory?: string): State | undefined {
   const dir = directory || _directory
   if (!dir) return undefined
   return stores.getState(dir)
+}
+
+function nonemptyConfig(config: State["config"] | undefined): Config | undefined {
+  return config && Object.keys(config).length > 0 ? config : undefined
+}
+
+/** Read resolved OpenCode config from default + multi-server child stores. */
+export function getSyncConfig(directory?: string, serverId?: string): Config | undefined {
+  const dir = directory || _directory
+  if (!dir) return undefined
+
+  if (serverId) {
+    const scoped = nonemptyConfig(getSyncStoresForServer(serverId)?.getState(dir)?.config)
+    if (scoped) return scoped
+  }
+
+  const fromDefault = nonemptyConfig(getDirectoryState(dir)?.config)
+  if (fromDefault) return fromDefault
+
+  for (const entry of getAllSyncStores()) {
+    if (serverId && entry.serverId !== serverId) continue
+    const config = nonemptyConfig(entry.childStores.getState(dir)?.config)
+    if (config) return config
+  }
+
+  return undefined
+}
+
+export function subscribeToSyncConfigChanges(listener: (directory: string, config: Config) => void): () => void {
+  configListeners.add(listener)
+  return () => {
+    configListeners.delete(listener)
+  }
+}
+
+export function emitSyncConfigChanged(directory: string, config: Config): void {
+  if (!directory) return
+  for (const listener of configListeners) {
+    listener(directory, config)
+  }
 }
 
 /** Read sessions from current directory's child store */

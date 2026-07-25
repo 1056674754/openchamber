@@ -25,10 +25,12 @@ import {
   recordProviderSuccess,
   recordProviderError,
 } from "./provider-tracker";
+import { markStartupTrace } from "@/lib/startupTrace";
 
 // Use relative path by default (works with both dev and nginx proxy server)
 // Can be overridden with VITE_OPENCODE_URL for absolute URLs in special deployments
 const DEFAULT_BASE_URL = import.meta.env.VITE_OPENCODE_URL || "/api";
+const CONFIG_CACHE_TTL_MS = 10_000;
 
 function formatSdkError(error: unknown): string {
   if (error instanceof Error) return error.message;
@@ -271,6 +273,9 @@ class OpencodeService {
   private directoryContextQueue: Promise<void> = Promise.resolve();
   private listDirectoryInFlight: Map<string, Promise<FilesystemEntry[]>> = new Map();
   private listDirectoryCache: Map<string, { entries: FilesystemEntry[]; expiresAt: number }> = new Map();
+  private configInFlight: Map<string, Promise<Config>> = new Map();
+  private configCache: Map<string, { config: Config; expiresAt: number }> = new Map();
+  private configCacheGeneration = 0;
 
   constructor(baseUrl: string = DEFAULT_BASE_URL) {
     const desktopBase = resolveDesktopBaseUrl();
@@ -1339,10 +1344,58 @@ class OpencodeService {
   }
 
   // Configuration
-  async getConfig(): Promise<Config> {
-    const response = await this.client.config.get();
-    if (!response.data) throw new Error('Failed to get config');
-    return response.data;
+  clearConfigCache(): void {
+    this.configCacheGeneration += 1;
+    this.configInFlight.clear();
+    this.configCache.clear();
+  }
+
+  /**
+   * Fetch OpenCode config with instance-aware cache + in-flight dedupe.
+   * Cache keys include base URL (server identity) and directory scope.
+   */
+  async getConfig(directory?: string | null): Promise<Config> {
+    const effectiveDirectory = this.normalizeCandidatePath(directory) ?? directory ?? this.currentDirectory ?? undefined;
+    const key = `${this.baseUrl}\0${effectiveDirectory ?? ''}`;
+    const cached = this.configCache.get(key);
+    if (cached && cached.expiresAt > Date.now()) {
+      markStartupTrace('opencodeClient.getConfig:cacheHit', { directory: effectiveDirectory ?? null, baseUrl: this.baseUrl });
+      return cached.config;
+    }
+
+    const existing = this.configInFlight.get(key);
+    if (existing) {
+      markStartupTrace('opencodeClient.getConfig:deduped', { directory: effectiveDirectory ?? null, baseUrl: this.baseUrl });
+      return existing;
+    }
+
+    const generation = this.configCacheGeneration;
+    const request = (async () => {
+      markStartupTrace('opencodeClient.getConfig:start', { directory: effectiveDirectory ?? null, baseUrl: this.baseUrl });
+      const started = typeof performance !== 'undefined' ? performance.now() : Date.now();
+      const scopedClient = effectiveDirectory ? this.getScopedApiClient(effectiveDirectory) : this.client;
+      const response = await scopedClient.config.get();
+      if (!response.data) throw new Error('Failed to get config');
+      const ended = typeof performance !== 'undefined' ? performance.now() : Date.now();
+      markStartupTrace('opencodeClient.getConfig:end', {
+        directory: effectiveDirectory ?? null,
+        baseUrl: this.baseUrl,
+        durationMs: Math.round(ended - started),
+      });
+      if (generation === this.configCacheGeneration) {
+        this.configCache.set(key, { config: response.data, expiresAt: Date.now() + CONFIG_CACHE_TTL_MS });
+      }
+      return response.data;
+    })();
+
+    this.configInFlight.set(key, request);
+    try {
+      return await request;
+    } finally {
+      if (this.configInFlight.get(key) === request) {
+        this.configInFlight.delete(key);
+      }
+    }
   }
 
   async updateConfig(config: Record<string, unknown>): Promise<Config> {
@@ -1365,6 +1418,7 @@ class OpencodeService {
     }
 
     const data = await response.json();
+    this.clearConfigCache();
     return data;
   }
 

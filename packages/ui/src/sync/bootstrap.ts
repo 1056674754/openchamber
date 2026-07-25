@@ -2,6 +2,7 @@ import type { OpencodeClient, PermissionRequest, Project, QuestionRequest } from
 import { retry } from "./retry"
 import type { GlobalState, State } from "./types"
 import { formatSdkError } from "./sdk-error"
+import { emitSyncConfigChanged } from "./sync-refs"
 
 const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0)
 const BOOTSTRAP_REQUEST_TIMEOUT_MS = 8_000
@@ -181,7 +182,9 @@ export async function bootstrapDirectory(input: {
     set({ provider: g.providers as State["provider"] })
   }
   if (Object.keys(state.config ?? {}).length === 0 && Object.keys(g.config ?? {}).length > 0) {
-    set({ config: g.config as State["config"] })
+    const seededConfig = g.config as State["config"]
+    set({ config: seededConfig })
+    emitSyncConfigChanged(directory, seededConfig)
   }
   if (loading) set({ status: "partial" })
 
@@ -254,7 +257,11 @@ export async function bootstrapDirectory(input: {
       ? Promise.resolve()
       : retry(() => sdk.project.current({ directory }).then((x) => set({ project: unwrap(x, "project.current").id }))),
     retry(() => sdk.provider.list({ directory }).then((x) => set({ provider: unwrap(x, "provider.list") }))),
-    retry(() => sdk.config.get({ directory }).then((x) => set({ config: unwrap(x, "config.get") }))),
+    retry(() => sdk.config.get({ directory }).then((x) => {
+      const config = unwrap(x, "config.get")
+      set({ config })
+      emitSyncConfigChanged(directory, config)
+    })),
     retry(() => sdk.app.agents({ directory }).then((x) => set({ agent: unwrap(x, "app.agents") }))),
     retry(() => sdk.command.list({ directory }).then((x) => set({ command: unwrap(x, "command.list") }))),
     retry(() => sdk.mcp.status({ directory }).then((x) => set({ mcp: unwrap(x, "mcp.status") }))),

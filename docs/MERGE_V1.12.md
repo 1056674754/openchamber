@@ -772,7 +772,7 @@ Phase 5 — 🔴 Markdown/Shiki 重写 (#1+#2): 独立 milestone，需迁移 for
 
 | 上游 commit | Changelog 项 | 真实改动范围 | 本地合并判断 |
 |---|---|---|---|
-| `0542bcfc` | Startup: 不等待 default OpenCode config | `useConfigStore.ts`、`client.ts`、`bootstrap.ts`、`sync-refs.ts`，+940/-33 | 🟡 中高风险：fork 的 config/client/bootstrap 已深改，需逐段合并 |
+| `0542bcfc` | Startup: 不等待 default OpenCode config | `useConfigStore.ts`、`client.ts`、`bootstrap.ts`、`sync-refs.ts`，+940/-33 | ✅ 已逐段移植；Work Item [#2](https://coding.s-s.city/songsong/openchamber/-/work_items/2) 已关闭。`getConfig` 实例缓存 + sync-config bridge；`loadAgents`/`initializeApp` 不再 await `config.get`；`selectionSource` + `applyOpenCodeConfigDefaults` 保护 manual/project 选择；directory key 仍含 `serverId` |
 | `e88afff2` | Chat/Performance: 长会话和大 session list streaming 更顺 | 47 files, +3167/-1828；chat streaming、turn projection cache、sidebar memo、sync stale guard、history preload | 🔴 高风险：不能整包拿，需拆成 chat/sidebar/sync 三个 milestone |
 | `fefad721` | Chat: assistant 段落间距恢复 | `index.css` + design token，小 CSS 修复 | 🟢 低风险 |
 | `5e8fe1ec` | Chat: streamed response 末尾不再偶发截断 | `event-pipeline.ts` + 测试；`message.part.updated` 作为 delta coalescing barrier | 🟢 低风险，高价值 |
@@ -804,7 +804,7 @@ Phase 5 — 🔴 Markdown/Shiki 重写 (#1+#2): 独立 milestone，需迁移 for
 | 批次 | 内容 | 处理方式 |
 |---|---|---|
 | 第二批 | Files preview token 续期 (`30b5cf14`) | ✅ 审计完成：上游短命 URL token 模型不适用于 fork；`/api/fs/raw` 显式目录、preview proxy 认证参数重写和 HTML preview 导航共 24 条定向测试通过 |
-| 第三批 | Startup config 非阻塞 (`0542bcfc`) | 针对 `useConfigStore` / `client` / `bootstrap` 做逐段 diff，重点保护手动 model 和目录 model |
+| 第三批 | Startup config 非阻塞 (`0542bcfc`) | ✅ 已完成；Work Item [#2](https://coding.s-s.city/songsong/openchamber/-/work_items/2)。定向测试：`client.getConfig` / `sync-refs.config` / `useConfigStore.nonblocking` |
 | 独立 milestone | Chat/sidebar streaming 性能大改 (`e88afff2`) | 不整包合并；拆 chat tail isolation、sidebar row memo、sync stale guard 三块分别测试 |
 
 ## v1.13.3 ~ v1.16.0 — 当前差距审核 (更新于 2026-07-13)
@@ -1279,6 +1279,7 @@ VS Code worktree lock 验证：在两个真实临时 Git 仓库及 `--no-checkou
 | Project edit / per-project default model | ✅ 已移植并验证；Work Item [#15](https://coding.s-s.city/songsong/openchamber/-/work_items/15) 已关闭 | 抽取 `defaultModel`（`providerID/modelID`）数据契约：`projectDefaultModel` helper、`ProjectEntry.defaultModel`、settings sanitize/persist、`updateProjectMeta(..., null` 清除）。ProjectEditDialog / Settings ProjectsPage / MobileSessionStatusBar 接入 `ModelSelector`（可清空）。新建草稿经 selected project 的 `serverId + path` activate 后 `applyDefaultModelAgentSelection({ projectDefaultModel })` 冻结 provider/model/variant；不整包上游 sidebar/settings shell。定向 `projectDefaultModel` 测试与 UI type-check 通过 |
 | Private relay / pairing v2 / desktop transports | ⏸ 架构批次；Work Item [#16](https://coding.s-s.city/songsong/openchamber/-/work_items/16) | 会贯穿 HTTP/SSE/WS/auth、server list 和多实例 registry，必须以 fork 的多 `serverId + directory` 为权威单独设计 |
 | Windows tray/startup | ✅ 已移植并验证；Work Item [#17](https://coding.s-s.city/songsong/openchamber/-/work_items/17) 已关闭 | 上游 `4a9aebdb6`（#2112）叠在 fork #27 macOS tray 上：`setupTray`/`isTrayEnabledForPlatform` 含 win32（不依赖 `desktopMacMenuBarEnabled`）；`icon.ico` + extraResources/win NSIS；`getLoginItemOptions` + `--background` 开机自启；`desktopMinimizeToTrayEnabled` + minimize/close hide；`useTraySync` 扩 win32；Quit 仍走 `requestQuitWithConfirmation`。8 locale + settings-helpers 测试；macOS 菜单栏开关/呼吸图标不变。Windows 交互 QA（托盘点击 / minimize-to-tray / login item / Keep·Stop OpenCode）随下次 Windows 包补测 |
+| Startup OpenCode config 非阻塞 | ✅ 已移植并验证；Work Item [#2](https://coding.s-s.city/songsong/openchamber/-/work_items/2) 已关闭 | 上游 `0542bcfc5` 逐段适配（禁止整文件覆盖）：`sync-refs` `getSyncConfig`/`emit`/`subscribe`（扫 default + `getAllSyncStores`）；`client.getConfig` 按 `baseUrl+directory` 缓存/去重；bootstrap Phase2/seed `emitSyncConfigChanged`；`useConfigStore` 去掉 `loadAgents`/`initializeApp` 对 `config.get` 的阻塞等待，新增 `selectionSource` + `applyOpenCodeConfigDefaults`（manual 优先）。定向 9 tests；UI type-check 目标文件绿 |
 | Native mobile / mobile release/update/iPad split | ➖ 当前架构不适用；Work Item [#9](https://coding.s-s.city/songsong/openchamber/-/work_items/9) | fork 无 `packages/mobile`/Capacitor workspace；CI、iOS/Android signing、native update UI 与 connect sheet 不导入 |
 
 **v1.15.0 收口**：50 个官方提交已逐项分类。Loose diff、ambiguous prompt、browser/deep-link、右栏 resize、VS Code 相对路径、Last-turn Diff 与 Navigable JSON summaries 已按 fork 架构移植；code wrap/line numbers、Mermaid zoom、sticky header、CORS encoding 与 SDK 版本已有等价或更强实现。Native mobile 不适用，relay/pairing、project default model 和 Windows shell 明确保留为独立批次，不把延期能力计作已合并。源码、workspace lock、Electron 构建前缀和打包 runbook 已推进到 `1.15.0-sscity`。
@@ -1338,7 +1339,7 @@ VS Code worktree lock 验证：在两个真实临时 Git 仓库及 `--no-checkou
 
 ### 建议下一步批次
 
-**当前确认（2026-07-25）**：`#28` / `#15` / `#12` / **[#29](https://coding.s-s.city/songsong/openchamber/-/work_items/29)（v1 local-only）** / [#33](https://coding.s-s.city/songsong/openchamber/-/work_items/33) / [#34](https://coding.s-s.city/songsong/openchamber/-/work_items/34) / **[#35](https://coding.s-s.city/songsong/openchamber/-/work_items/35) Remote Goals** / **[#27](https://coding.s-s.city/songsong/openchamber/-/work_items/27) macOS tray** / **[#8](https://coding.s-s.city/songsong/openchamber/-/work_items/8) Pierre diff runtime** / **[#6](https://coding.s-s.city/songsong/openchamber/-/work_items/6) automatic review loop** / **[#7](https://coding.s-s.city/songsong/openchamber/-/work_items/7) CLI live-port** / **[#17](https://coding.s-s.city/songsong/openchamber/-/work_items/17) Windows tray** 已关闭。
+**当前确认（2026-07-25）**：`#28` / `#15` / `#12` / **[#29](https://coding.s-s.city/songsong/openchamber/-/work_items/29)（v1 local-only）** / [#33](https://coding.s-s.city/songsong/openchamber/-/work_items/33) / [#34](https://coding.s-s.city/songsong/openchamber/-/work_items/34) / **[#35](https://coding.s-s.city/songsong/openchamber/-/work_items/35) Remote Goals** / **[#27](https://coding.s-s.city/songsong/openchamber/-/work_items/27) macOS tray** / **[#8](https://coding.s-s.city/songsong/openchamber/-/work_items/8) Pierre diff runtime** / **[#6](https://coding.s-s.city/songsong/openchamber/-/work_items/6) automatic review loop** / **[#7](https://coding.s-s.city/songsong/openchamber/-/work_items/7) CLI live-port** / **[#17](https://coding.s-s.city/songsong/openchamber/-/work_items/17) Windows tray** / **[#2](https://coding.s-s.city/songsong/openchamber/-/work_items/2) startup config 非阻塞** 已关闭。
 
 1. **Queue reliability 批次 A (已完成)**: v1.16 idle dispatch、failed auto-send backoff 和 queue drag reorder 已移植；queue snapshot 继续作为权威。
 2. **CLI/Startup/Desktop auth 批次 B**: pid identity、live port check、update helper、quota/provider startup、Bun global CLI fix、LAN-bound local auth token，按 helper/route 切，不做 v1.13.4 cleanup。
