@@ -26,6 +26,8 @@ type RecoveryScreenProps = {
   onEnterLocalSetup?: () => void;
   /** Whether retry action is in progress */
   isRetrying?: boolean;
+  /** When false, hide local OpenCode recovery actions */
+  localOpenCodeAvailable?: boolean;
 };
 
 export function RecoveryScreen({
@@ -39,6 +41,7 @@ export function RecoveryScreen({
   onSwitchToLocalFromRemote,
   onEnterLocalSetup,
   isRetrying = false,
+  localOpenCodeAvailable = true,
 }: RecoveryScreenProps) {
   // Persist the user's first choice (local or remote)
   const persistFirstChoice = React.useCallback(async (choice: 'local' | 'remote') => {
@@ -67,6 +70,7 @@ export function RecoveryScreen({
   }, [onRetry]);
 
   const handleRecoveryUseLocal = React.useCallback(async () => {
+    if (localOpenCodeAvailable === false) return;
     const step = resolveRecoveryNextStep(variant, 'use-local');
     if (step.kind === 'local-setup') {
       // local-unavailable + local → enter local-setup subflow without reload
@@ -82,7 +86,7 @@ export function RecoveryScreen({
     }
 
     window.location.reload();
-  }, [variant, persistFirstChoice, onEnterLocalSetup]);
+  }, [variant, persistFirstChoice, onEnterLocalSetup, localOpenCodeAvailable]);
 
   const handleRecoveryUseRemote = React.useCallback(() => {
     const step = resolveRecoveryNextStep(variant, 'use-remote');
@@ -102,15 +106,17 @@ export function RecoveryScreen({
         initialUrl={prefillUrl}
         initialLabel={prefillLabel}
         isRecoveryMode={true}
-        onSwitchToLocal={onSwitchToLocalFromRemote || (() => {
-          persistFirstChoice('local').then(() => {
-            if (hasDesktopInvoke()) {
-              restartDesktopApp();
-            } else {
-              onEnterLocalSetup?.();
-            }
-          });
-        })}
+        onSwitchToLocal={localOpenCodeAvailable === false
+          ? undefined
+          : (onSwitchToLocalFromRemote || (() => {
+            persistFirstChoice('local').then(() => {
+              if (hasDesktopInvoke()) {
+                restartDesktopApp();
+              } else {
+                onEnterLocalSetup?.();
+              }
+            });
+          }))}
       />
     );
   }
@@ -120,8 +126,9 @@ export function RecoveryScreen({
       variant={variant}
       hostLabel={hostLabel}
       hostUrl={hostUrl}
+      localOpenCodeAvailable={localOpenCodeAvailable}
       onRetry={handleRecoveryRetry}
-      onUseLocal={handleRecoveryUseLocal}
+      onUseLocal={localOpenCodeAvailable === false ? undefined : handleRecoveryUseLocal}
       onUseRemote={handleRecoveryUseRemote}
       isRetrying={isRetrying}
     />

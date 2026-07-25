@@ -72,6 +72,40 @@ describe('resolveDesktopBootView', () => {
     ).toEqual({ screen: 'recovery', variant: 'local-unavailable' });
   });
 
+  test('routes remote-only local unreachable to chooser (no broken local fix)', () => {
+    expect(
+      resolveDesktopBootView({
+        isDesktopShell: true,
+        bootOutcome: {
+          target: 'local',
+          status: 'unreachable',
+          localOpenCodeAvailable: false,
+        },
+      }),
+    ).toEqual({ screen: 'chooser', localOpenCodeAvailable: false });
+  });
+
+  test('propagates localOpenCodeAvailable through remote recovery', () => {
+    expect(
+      resolveDesktopBootView({
+        isDesktopShell: true,
+        bootOutcome: {
+          target: 'remote',
+          status: 'unreachable',
+          hostId: 'remote-a',
+          url: 'https://x.test',
+          localOpenCodeAvailable: false,
+        },
+      }),
+    ).toEqual({
+      screen: 'recovery',
+      variant: 'remote-unreachable',
+      hostId: 'remote-a',
+      url: 'https://x.test',
+      localOpenCodeAvailable: false,
+    });
+  });
+
   test('returns recovery view for remote missing', () => {
     expect(
       resolveDesktopBootView({
@@ -260,6 +294,28 @@ describe('getInjectedBootOutcome', () => {
     w.__OPENCHAMBER_DESKTOP_BOOT_OUTCOME__ = { target: 'local', status: 'ok' };
     try {
       expect(getInjectedBootOutcome()).toEqual({ target: 'local', status: 'ok' });
+    } finally {
+      restoreWindow();
+    }
+  });
+
+  test('accepts legacy localAvailable:false as localOpenCodeAvailable:false', () => {
+    const w = mockWindow();
+    w.__OPENCHAMBER_DESKTOP_BOOT_OUTCOME__ = {
+      target: 'remote',
+      status: 'ok',
+      hostId: 'r1',
+      url: 'https://example.com',
+      localAvailable: false,
+    };
+    try {
+      expect(getInjectedBootOutcome()).toEqual({
+        target: 'remote',
+        status: 'ok',
+        hostId: 'r1',
+        url: 'https://example.com',
+        localOpenCodeAvailable: false,
+      });
     } finally {
       restoreWindow();
     }

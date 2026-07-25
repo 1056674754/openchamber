@@ -228,7 +228,39 @@ const quitRisk = {
 
 const shouldKeepManagedOpenCodeAliveByDefault = () => {
   const settings = readSettingsRoot();
+  // When managed OpenCode is not started this session, do not keep it "alive" on quit.
+  if (shouldSkipManagedOpenCodeStart(settings)) return false;
   return settings.desktopKeepManagedOpenCodeAliveOnQuit !== false;
+};
+
+/**
+ * Explicit remote-only product policy: local OpenCode is unavailable by design.
+ * Chooser/recovery must not offer broken "fix local OpenCode" actions.
+ */
+const isDesktopRemoteOnlyPolicy = (settings = readSettingsRoot()) => {
+  const envRemoteOnly = process.env.OPENCHAMBER_REMOTE_ONLY === '1'
+    || process.env.OPENCHAMBER_REMOTE_ONLY === 'true';
+  const envSkipOpenCode = process.env.OPENCODE_SKIP_START === 'true'
+    || process.env.OPENCHAMBER_SKIP_OPENCODE_START === 'true'
+    || process.env.OPENCHAMBER_SKIP_OPENCODE_START === '1';
+  if (envRemoteOnly || envSkipOpenCode) return true;
+  return settings?.desktopRemoteOnly === true;
+};
+
+/**
+ * Whether Electron should skip managed OpenCode attach/start.
+ * Broader than remote-only policy: also skips when the default desktop host is remote
+ * (local UI/proxy still boots; user may later switch default to local and restart).
+ */
+const shouldSkipManagedOpenCodeStart = (settings = readSettingsRoot()) => {
+  if (isDesktopRemoteOnlyPolicy(settings)) return true;
+  try {
+    const config = readDesktopHostsConfig();
+    const defaultId = config?.defaultHostId || '';
+    if (defaultId && defaultId !== LOCAL_HOST_ID) return true;
+  } catch {
+  }
+  return false;
 };
 
 const quitConfirmationMessage = () => {
@@ -1143,6 +1175,15 @@ const spawnLocalServer = async () => {
   process.env.NO_PROXY = process.env.NO_PROXY || 'localhost,127.0.0.1';
   process.env.no_proxy = process.env.no_proxy || 'localhost,127.0.0.1';
 
+  // Keep UI/proxy; skip managed OpenCode when remote-only or default host is remote.
+  if (shouldSkipManagedOpenCodeStart(settings)) {
+    process.env.OPENCHAMBER_SKIP_OPENCODE_START = 'true';
+    process.env.OPENCODE_SKIP_START = process.env.OPENCODE_SKIP_START || 'true';
+    log.info('[electron] skipping managed OpenCode start', {
+      remoteOnly: isDesktopRemoteOnlyPolicy(settings),
+    });
+  }
+
   const { startWebUiServer } = await import('@openchamber/web/server/index.js');
 
   const handle = await startWebUiServer({
@@ -1205,30 +1246,44 @@ const buildInitScript = (localOrigin, bootOutcome) => {
   ].join('');
 };
 
-const computeBootOutcome = ({ envTargetUrl, probe, config, localAvailable }) => {
+const computeBootOutcome = ({
+  envTargetUrl,
+  probe,
+  config,
+  localAvailable,
+  localOpenCodeAvailable = true,
+}) => {
+  const availability = localOpenCodeAvailable === false
+    ? { localOpenCodeAvailable: false }
+    : {};
+
   if (envTargetUrl) {
     const status = probe && probe.status === 'unreachable' ? 'unreachable' : 'ok';
-    return { target: 'remote', status, hostId: ENV_OVERRIDE_HOST_ID, url: envTargetUrl };
+    return { target: 'remote', status, hostId: ENV_OVERRIDE_HOST_ID, url: envTargetUrl, ...availability };
   }
 
   const defaultId = config.defaultHostId || '';
   if (!defaultId) {
-    return { target: null, status: 'not-configured' };
+    return { target: null, status: 'not-configured', ...availability };
   }
 
   if (defaultId === LOCAL_HOST_ID) {
+    if (localOpenCodeAvailable === false) {
+      // Remote-only policy with local default → chooser (via unreachable + flag).
+      return { target: 'local', status: 'unreachable', ...availability };
+    }
     return localAvailable
-      ? { target: 'local', status: 'ok' }
-      : { target: 'local', status: 'unreachable' };
+      ? { target: 'local', status: 'ok', ...availability }
+      : { target: 'local', status: 'unreachable', ...availability };
   }
 
   const host = config.hosts.find((entry) => entry.id === defaultId);
   if (!host) {
-    return { target: 'remote', status: 'missing', hostId: defaultId };
+    return { target: 'remote', status: 'missing', hostId: defaultId, ...availability };
   }
 
   const status = probe && probe.status === 'unreachable' ? 'unreachable' : 'ok';
-  return { target: 'remote', status, hostId: host.id, url: host.url };
+  return { target: 'remote', status, hostId: host.id, url: host.url, ...availability };
 };
 
 const buildStartupSplashHtml = () => {
@@ -1404,9 +1459,15 @@ const switchToHostById = async (rawId) => {
     log.warn('[electron] deep-link host has no target URL:', id);
     return;
   }
+  const localOpenCodeAvailable = !isDesktopRemoteOnlyPolicy();
+  const availability = localOpenCodeAvailable === false
+    ? { localOpenCodeAvailable: false }
+    : {};
   const bootOutcome = id === LOCAL_HOST_ID
-    ? { target: 'local', status: 'ok' }
-    : { target: 'remote', status: 'ok', hostId: id, url: targetUrl };
+    ? (localOpenCodeAvailable
+      ? { target: 'local', status: 'ok', ...availability }
+      : { target: 'local', status: 'unreachable', ...availability })
+    : { target: 'remote', status: 'ok', hostId: id, url: targetUrl, ...availability };
   log.info('[electron] switching to host', { id, bootOutcome });
   await activateMainWindow(targetUrl, state.localOrigin, bootOutcome);
 };
@@ -1928,6 +1989,8 @@ const resolveInitialUrl = async () => {
 
   state.sidecarUrl = localUrl;
   const localAvailable = Boolean(localUrl);
+  // Only explicit remote-only hides local recovery actions; default-remote skip still allows "Use Local" + restart.
+  const localOpenCodeAvailable = !isDesktopRemoteOnlyPolicy();
 
   const localOrigin = new URL(localUiUrl).origin;
   let initialUrl = localUiUrl;
@@ -1951,6 +2014,7 @@ const resolveInitialUrl = async () => {
     }
     if (remoteProbe.status === 'unreachable') {
       state.unreachableHosts.add(initialUrl);
+      // Keep UI on local origin for chooser/recovery; do not mutate remote catalogs.
       initialUrl = localUiUrl;
     }
   }
@@ -1960,6 +2024,7 @@ const resolveInitialUrl = async () => {
     probe: remoteProbe,
     config,
     localAvailable,
+    localOpenCodeAvailable,
   });
 
   return { initialUrl, localOrigin, localUiUrl, bootOutcome };
@@ -2693,6 +2758,7 @@ end tell`;
         probe: null,
         config: updatedConfig,
         localAvailable: Boolean(state.sidecarUrl || state.localOrigin),
+        localOpenCodeAvailable: !isDesktopRemoteOnlyPolicy(),
       });
       state.initScript = buildInitScript(state.localOrigin, state.bootOutcome);
       log.info('[electron] hosts config updated, recomputed bootOutcome', state.bootOutcome);

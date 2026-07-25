@@ -236,6 +236,9 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.desktopKeepManagedOpenCodeAliveOnQuit === 'boolean') {
       result.desktopKeepManagedOpenCodeAliveOnQuit = candidate.desktopKeepManagedOpenCodeAliveOnQuit;
     }
+    if (typeof candidate.desktopRemoteOnly === 'boolean') {
+      result.desktopRemoteOnly = candidate.desktopRemoteOnly;
+    }
     if (Array.isArray(candidate.projects)) {
       const projects = sanitizeProjects(candidate.projects);
       if (projects) {

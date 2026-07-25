@@ -23,6 +23,8 @@ type OnboardingScreenProps = {
   onEnterLocalSetup?: () => void;
   /** Callback when user wants to switch to remote (first-launch only) */
   onChooseRemote?: () => void;
+  /** When false, remote-only chooser/recovery (no local OpenCode actions) */
+  localOpenCodeAvailable?: boolean;
 };
 
 export function OnboardingScreen({
@@ -33,6 +35,7 @@ export function OnboardingScreen({
   recoveryHostUrl,
   recoveryHostLabel,
   onEnterLocalSetup,
+  localOpenCodeAvailable = true,
 }: OnboardingScreenProps) {
   const [showRecoveryRemoteForm, setShowRecoveryRemoteForm] = React.useState(false);
   const [recoveryEnteredLocalSetup, setRecoveryEnteredLocalSetup] = React.useState(false);
@@ -56,21 +59,26 @@ export function OnboardingScreen({
         hostUrl={recoveryHostUrl}
         hostLabel={recoveryHostLabel}
         showRemoteForm={showRecoveryRemoteForm}
+        localOpenCodeAvailable={localOpenCodeAvailable}
         onCloseRemoteForm={() => setShowRecoveryRemoteForm(false)}
-        onSwitchToLocalFromRemote={() => {
-          setShowRecoveryRemoteForm(false);
-          setRecoveryEnteredLocalSetup(true);
-        }}
-        onEnterLocalSetup={() => {
-          setRecoveryEnteredLocalSetup(true);
-          onEnterLocalSetup?.();
-        }}
+        onSwitchToLocalFromRemote={localOpenCodeAvailable === false
+          ? undefined
+          : () => {
+            setShowRecoveryRemoteForm(false);
+            setRecoveryEnteredLocalSetup(true);
+          }}
+        onEnterLocalSetup={localOpenCodeAvailable === false
+          ? undefined
+          : () => {
+            setRecoveryEnteredLocalSetup(true);
+            onEnterLocalSetup?.();
+          }}
       />
     );
   }
 
-  // Local-setup mode
-  if (effectiveMode === 'local-setup') {
+  // Local-setup mode (blocked under remote-only policy)
+  if (effectiveMode === 'local-setup' && localOpenCodeAvailable !== false) {
     return (
       <LocalSetupScreen
         onBack={() => {
@@ -87,10 +95,11 @@ export function OnboardingScreen({
     );
   }
 
-  // First-launch mode (default)
+  // First-launch mode (default) — also remote-only fallback when local setup is disabled
   return (
     <ChooserScreen
       onCliAvailable={onCliAvailable}
+      localOpenCodeAvailable={localOpenCodeAvailable}
     />
   );
 }

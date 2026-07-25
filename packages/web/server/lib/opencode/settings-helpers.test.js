@@ -133,6 +133,18 @@ describe('settings helpers', () => {
     expect(helpers.sanitizeSettingsUpdate({ promptNavigatorEnabled: 'true' })).toEqual({});
   });
 
+  it('only accepts a boolean desktopRemoteOnly preference', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({ desktopRemoteOnly: true })).toEqual({
+      desktopRemoteOnly: true,
+    });
+    expect(helpers.sanitizeSettingsUpdate({ desktopRemoteOnly: false })).toEqual({
+      desktopRemoteOnly: false,
+    });
+    expect(helpers.sanitizeSettingsUpdate({ desktopRemoteOnly: 'true' })).toEqual({});
+  });
+
   it('rejects invalid messageStreamTransport values', () => {
     const helpers = createTestHelpers();
 

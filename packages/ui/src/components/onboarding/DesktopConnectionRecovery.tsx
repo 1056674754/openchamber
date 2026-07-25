@@ -15,6 +15,8 @@ export type DesktopConnectionRecoveryProps = {
   variant: RecoveryVariant;
   hostLabel?: string;
   hostUrl?: string;
+  /** When false, hide "use/fix local OpenCode" actions (remote-only desktop). */
+  localOpenCodeAvailable?: boolean;
   onRetry?: () => void;
   onUseLocal?: () => void;
   onUseRemote?: () => void;
@@ -35,13 +37,16 @@ export function DesktopConnectionRecovery({
   variant,
   hostLabel,
   hostUrl,
+  localOpenCodeAvailable = true,
   onRetry,
   onUseLocal,
   onUseRemote,
   isRetrying = false,
 }: DesktopConnectionRecoveryProps) {
   const { t } = useI18n();
-  const config = getDesktopRecoveryConfig(variant, hostLabel, hostUrl);
+  const config = getDesktopRecoveryConfig(variant, hostLabel, hostUrl, {
+    localOpenCodeAvailable,
+  });
   const retryLabelKey = (config.retryLabelKey ?? 'onboarding.desktopRecovery.actions.retryConnection') as Parameters<typeof t>[0];
   const descriptionParams = React.useMemo(() => {
     if (config.descriptionParams?.host) {

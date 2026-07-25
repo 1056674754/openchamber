@@ -37,7 +37,10 @@ export function getDesktopRecoveryConfig(
   variant: RecoveryVariant,
   hostLabel?: string,
   hostUrl?: string,
+  options: { localOpenCodeAvailable?: boolean } = {},
 ): DesktopRecoveryConfig {
+  const allowLocal = options.localOpenCodeAvailable !== false;
+
   switch (variant) {
     case 'local-unavailable':
       return {
@@ -46,10 +49,10 @@ export function getDesktopRecoveryConfig(
         titleKey: 'onboarding.desktopRecovery.localUnavailable.title',
         descriptionKey: 'onboarding.desktopRecovery.localUnavailable.description',
         iconKey: 'local',
-        showRetry: true,
+        showRetry: allowLocal,
         retryLabel: 'Retry Local',
         retryLabelKey: 'onboarding.desktopRecovery.localUnavailable.retry',
-        showUseLocal: true,
+        showUseLocal: allowLocal,
         showUseRemote: true,
         useLocalLabel: 'Set Up Local',
         useLocalLabelKey: 'onboarding.desktopRecovery.localUnavailable.useLocal',
@@ -65,7 +68,7 @@ export function getDesktopRecoveryConfig(
         descriptionKey: 'onboarding.desktopRecovery.noDefaultConnection.description',
         iconKey: 'local',
         showRetry: false,
-        showUseLocal: true,
+        showUseLocal: allowLocal,
         showUseRemote: true,
         useLocalLabel: 'Use Local',
         useLocalLabelKey: 'onboarding.desktopRecovery.common.useLocal',
@@ -85,7 +88,7 @@ export function getDesktopRecoveryConfig(
         showRetry: true,
         retryLabel: 'Retry Connection',
         retryLabelKey: 'onboarding.desktopRecovery.remoteUnreachable.retry',
-        showUseLocal: true,
+        showUseLocal: allowLocal,
         showUseRemote: true,
         useLocalLabel: 'Use Local',
         useLocalLabelKey: 'onboarding.desktopRecovery.common.useLocal',
@@ -104,7 +107,7 @@ export function getDesktopRecoveryConfig(
         descriptionParams: host ? { host } : undefined,
         iconKey: 'remote',
         showRetry: false,
-        showUseLocal: true,
+        showUseLocal: allowLocal,
         showUseRemote: true,
         useLocalLabel: 'Use Local',
         useLocalLabelKey: 'onboarding.desktopRecovery.common.useLocal',
@@ -121,7 +124,7 @@ export function getDesktopRecoveryConfig(
         descriptionKey: 'onboarding.desktopRecovery.noDefaultConnection.description',
         iconKey: 'local',
         showRetry: false,
-        showUseLocal: true,
+        showUseLocal: allowLocal,
         showUseRemote: true,
         useLocalLabel: 'Use Local',
         useLocalLabelKey: 'onboarding.desktopRecovery.common.useLocal',

@@ -847,6 +847,7 @@ function App({ apis }: AppProps) {
             <React.Suspense fallback={<div className="h-full" />}>
               <OnboardingScreen
                 mode="first-launch"
+                localOpenCodeAvailable={bootView.localOpenCodeAvailable !== false}
                 onCliAvailable={handleDesktopBootDismiss}
                 onChooseRemote={() => {
                   // Switch to remote tab - handled internally by OnboardingScreen
@@ -871,6 +872,7 @@ function App({ apis }: AppProps) {
               recoveryVariant={recoveryVariant}
               recoveryHostUrl={hostUrl}
               recoveryHostLabel={undefined}
+              localOpenCodeAvailable={bootView.localOpenCodeAvailable !== false}
               onCliAvailable={handleDesktopBootDismiss}
             />
           </React.Suspense>
