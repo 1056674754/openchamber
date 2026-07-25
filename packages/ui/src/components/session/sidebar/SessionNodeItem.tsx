@@ -48,6 +48,7 @@ import { MultiRunFusionDialog } from '@/components/multirun/MultiRunFusionDialog
 import { FusionIcon } from '@/components/icons/FusionIcon';
 import { Icon } from "@/components/icon/Icon";
 import type { IconName } from "@/components/icon/icons";
+import { startSessionTreeWorktreeMove, useIsSessionWorktreeMovePending } from '@/lib/worktrees/sessionWorktreeMove';
 import { getSessionGoal } from '@/lib/sessionGoalMetadata';
 import { sessionGoalStatusColor, sessionGoalStatusLabelKey } from '@/lib/sessionGoalPresentation';
 import type {
@@ -595,6 +596,18 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
     return out;
   }, []);
 
+  const collectNodeDescendantSessions = React.useCallback((root: SessionNode): Session[] => {
+    const out: Session[] = [];
+    const walk = (current: SessionNode) => {
+      current.children.forEach((child) => {
+        out.push(child.session);
+        walk(child);
+      });
+    };
+    walk(root);
+    return out;
+  }, []);
+
   const [exportDialogOpen, setExportDialogOpen] = React.useState(false);
   const [exportIncludeSubtasks, setExportIncludeSubtasks] = React.useState(true);
 
@@ -603,6 +616,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
     React.useCallback((state) => Boolean(state.sessionMemoryState.get(session.id)?.isZombie), [session.id]),
   );
   const sessionStatus = useGlobalSessionStatus(session.id);
+  const isMovingToWorktree = useIsSessionWorktreeMovePending(session.id);
   const sessionPermissions = useExistingSessionPermissions(session.id, permissionDirectory);
   const sessionQuestions = useExistingSessionQuestions(session.id, permissionDirectory);
   const directoryState = sessionDirectory ? directoryStatus.get(sessionDirectory) : null;
@@ -772,9 +786,10 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
   const isStreaming = statusType === 'busy' || statusType === 'retry';
   const pendingPermissionCount = sessionPermissions.length;
   const pendingQuestionCount = sessionQuestions.length;
-  const showUnreadStatus = needsAttention;
+  const showUnreadStatus = !isMovingToWorktree && needsAttention;
 
   const spinnerState = (() => {
+    if (isMovingToWorktree) return 'streaming' as const;
     if (isStreaming && isSubtaskSession) return 'subagent' as const;
     if (isStreaming) return 'streaming' as const;
     if (hasRunningChildSession) return 'subagent' as const;
@@ -794,7 +809,14 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
   );
 
   const renderSpinner = () => (
-    <SidebarSpinner state={spinnerState} aria-label={t('sessions.sidebar.session.status.active')} />
+    <SidebarSpinner
+      state={spinnerState}
+      aria-label={
+        isMovingToWorktree
+          ? t('sessions.sidebar.session.status.movingToWorktree')
+          : t('sessions.sidebar.session.status.active')
+      }
+    />
   );
 
   const renderAlternating = () => (
@@ -1072,6 +1094,38 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
         <Icon name="download" className="mr-1 h-4 w-4"  />
         {t('sessions.sidebar.session.menu.exportMarkdown')}
       </DropdownMenuItem>
+      {!isSubtaskSession && !archivedBucket && !isVSCode ? (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="block">
+              <DropdownMenuItem
+                disabled={!sessionDirectory || isStreaming || isMovingToWorktree}
+                onClick={() => {
+                  if (!sessionDirectory || isStreaming || isMovingToWorktree) return;
+                  startSessionTreeWorktreeMove({
+                    root: resolvedSession,
+                    descendants: collectNodeDescendantSessions(node),
+                    sourceDirectory: sessionDirectory,
+                    successMessage: t('sessions.sidebar.session.moveToWorktree.success'),
+                    failureMessage: t('sessions.sidebar.session.moveToWorktree.failed'),
+                  });
+                }}
+                className="w-full [&>svg]:mr-1"
+              >
+                <Icon name="folder-shared" className="mr-1 h-4 w-4" />
+                {t('sessions.sidebar.session.menu.moveToWorktree')}
+              </DropdownMenuItem>
+            </span>
+          </TooltipTrigger>
+          <TooltipContent side="right" className="max-w-72">
+            {isMovingToWorktree
+              ? t('sessions.sidebar.session.moveToWorktree.tooltipMoving')
+              : isStreaming
+                ? t('sessions.sidebar.session.moveToWorktree.tooltipBusy')
+                : t('sessions.sidebar.session.moveToWorktree.tooltip')}
+          </TooltipContent>
+        </Tooltip>
+      ) : null}
       {isMultiRunLikeSession ? (
         <DropdownMenuItem onClick={() => setFusionDialogOpen(true)} className="[&>svg]:mr-1">
           <FusionIcon className="mr-1 h-4 w-4" />

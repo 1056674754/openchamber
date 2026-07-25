@@ -47,7 +47,7 @@ describe("persist-cache serverId scoping", () => {
 
     clearDirCache(DIRECTORY, "remote-a")
     expect(readDirCache(DIRECTORY, DEFAULT_SERVER_ID).icon).toBe("local-icon")
-    expect(readDirCache(DIRECTORY, "remote-a").icon).toBeUndefined()
+    expect(readDirCache(DIRECTORY, "remote-a").icon).toBe(undefined)
   })
 
   test("migrates legacy directory keys forward for the default server", () => {
@@ -74,7 +74,7 @@ describe("persist-cache serverId scoping", () => {
     persistVcs(DIRECTORY, { branch: "remote" } as never, "remote-a")
     persistVcs(DIRECTORY, undefined, DEFAULT_SERVER_ID)
 
-    expect(readDirCache(DIRECTORY, DEFAULT_SERVER_ID).vcs).toBeUndefined()
+    expect(readDirCache(DIRECTORY, DEFAULT_SERVER_ID).vcs).toBe(undefined)
     expect(readDirCache(DIRECTORY, "remote-a").vcs).toEqual({ branch: "remote" })
   })
 })

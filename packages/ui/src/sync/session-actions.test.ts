@@ -47,7 +47,18 @@ let inputStoreState = {
   pendingInputMode: "append" as "append" | "replace",
 }
 
+let moveSessionResult: MockSdkResult = { response: { status: 204 } }
+const globalUpsertedSessions: Array<{ id: string; directory?: string }> = []
+
 const mockScopedClient = {
+  experimental: {
+    controlPlane: {
+      moveSession: mock((params: Record<string, unknown>) => {
+        sessionCalls.push({ method: "controlPlane.moveSession", params })
+        return Promise.resolve(moveSessionResult)
+      }),
+    },
+  },
   permission: {
     reply: mock((params: Record<string, unknown>) => {
       replyCalls.push({ method: "permission.reply", params })
@@ -94,6 +105,14 @@ const mockScopedClient = {
 }
 
 const mockSdk = {
+  experimental: {
+    controlPlane: {
+      moveSession: mock((params: Record<string, unknown>) => {
+        sessionCalls.push({ method: "controlPlane.moveSession", params })
+        return Promise.resolve(moveSessionResult)
+      }),
+    },
+  },
   permission: {
     reply: mock((params: Record<string, unknown>) => {
       replyCalls.push({ method: "permission.reply", params })
@@ -216,9 +235,15 @@ mock.module("./input-store", () => ({
   },
 }))
 
-// Mock useGlobalSessionsStore (imported but not used in permission functions)
+// Mock useGlobalSessionsStore
 mock.module("@/stores/useGlobalSessionsStore", () => ({
-  useGlobalSessionsStore: {},
+  useGlobalSessionsStore: {
+    getState: () => ({
+      upsertSession: (session: { id: string; directory?: string }) => {
+        globalUpsertedSessions.push(session)
+      },
+    }),
+  },
 }))
 
 // Mock sync-refs (imported but not used in permission functions)
@@ -248,6 +273,7 @@ beforeEach(() => {
   replyCalls.length = 0
   sessionCalls.length = 0
   registerSessionDirectoryCalls.length = 0
+  globalUpsertedSessions.length = 0
   permissionReplyResult = { data: true }
   permissionRespondResult = { data: true }
   questionReplyResult = { data: true }
@@ -258,6 +284,7 @@ beforeEach(() => {
   sessionUnrevertResult = { data: null }
   sessionForkResult = { data: null }
   sessionMessagesResult = { data: [] }
+  moveSessionResult = { response: { status: 204 } }
   inputStoreState = {
     attachedFiles: [],
     attachmentSessionKey: null,
@@ -280,11 +307,13 @@ beforeEach(() => {
 function createStore(
   permissions: Record<string, PermissionRequest[]>,
   questions: Record<string, QuestionRequest[]> = {},
+  overrides: Partial<DirectoryStore> = {},
 ): StoreApi<DirectoryStore> {
   return create<DirectoryStore>()((set) => ({
     ...INITIAL_STATE,
     permission: permissions,
     question: questions,
+    ...overrides,
     patch: (partial) => set(partial),
     replace: (next) => set(next),
   }))
@@ -1247,5 +1276,110 @@ describe("forkFromMessage remote directory authority ordering", () => {
       serverRegistry.forgetSession("session-a")
       serverRegistry.unregister(remoteServerId)
     }
+  })
+})
+
+describe("moveSessionToDirectory", () => {
+  test("moves through the control plane and reconciles directory stores", async () => {
+    const message = {
+      id: "message-a",
+      sessionID: "session-a",
+      role: "user",
+      time: { created: 1 },
+    } as Message
+    const part = {
+      id: "part-a",
+      messageID: "message-a",
+      type: "text",
+      text: "hello",
+    } as Part
+    const source = createStore(
+      { "session-a": [{ id: "permission-a" }] as never },
+      { "session-a": [{ id: "question-a" }] as never },
+      {
+        session: [{ id: "session-a", title: "Move me", directory: "/source" } as Session],
+        sessionTotal: 1,
+        session_status: { "session-a": { type: "idle" } },
+        session_diff: { "session-a": [{ file: "changed.ts", additions: 1, deletions: 0 }] },
+        todo: { "session-a": [{ id: "todo-a", content: "Check move", status: "pending", priority: "medium" }] as never },
+        message: { "session-a": [message] },
+        part: { "message-a": [part] },
+      },
+    )
+    const destination = createStore({})
+    const childStores = createChildStores([
+      ["/source", source],
+      ["/destination", destination],
+    ])
+    const { moveSessionToDirectory, setActionRefs } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/source")
+
+    await moveSessionToDirectory(source.getState().session[0], "/source", "/destination", true)
+
+    expect(sessionCalls.filter((call) => call.method === "controlPlane.moveSession")).toEqual([{
+      method: "controlPlane.moveSession",
+      params: {
+        sessionID: "session-a",
+        destination: { directory: "/destination" },
+        moveChanges: true,
+      },
+    }])
+    expect(source.getState().session).toHaveLength(0)
+    expect(source.getState().sessionTotal).toBe(0)
+    expect(source.getState().session_status["session-a"]).toBe(undefined)
+    expect(source.getState().session_diff["session-a"]).toBe(undefined)
+    expect(source.getState().todo["session-a"]).toBe(undefined)
+    expect(source.getState().permission["session-a"]).toBe(undefined)
+    expect(source.getState().question["session-a"]).toBe(undefined)
+    expect(source.getState().message["session-a"]).toBe(undefined)
+    expect(source.getState().part["message-a"]).toBe(undefined)
+    expect(destination.getState().session[0]?.id).toBe("session-a")
+    expect(destination.getState().sessionTotal).toBe(1)
+    expect((destination.getState().session[0] as Session).directory).toBe("/destination")
+    expect(destination.getState().session_status["session-a"]?.type).toBe("idle")
+    expect(destination.getState().session_diff["session-a"]?.[0]?.file).toBe("changed.ts")
+    expect(destination.getState().todo["session-a"]?.[0]?.content).toBe("Check move")
+    expect(destination.getState().permission["session-a"]?.[0]?.id).toBe("permission-a")
+    expect(destination.getState().question["session-a"]?.[0]?.id).toBe("question-a")
+    expect(destination.getState().message["session-a"]?.[0]?.id).toBe("message-a")
+    expect(destination.getState().part["message-a"]?.[0]?.id).toBe("part-a")
+    expect(registerSessionDirectoryCalls).toEqual([{ sessionID: "session-a", directory: "/destination" }])
+    expect(globalUpsertedSessions[0]?.directory).toBe("/destination")
+
+    await moveSessionToDirectory(destination.getState().session[0], "/destination", "/source", true)
+
+    expect(sessionCalls.filter((call) => call.method === "controlPlane.moveSession")[1]?.params.moveChanges).toBe(true)
+    expect(source.getState().session[0]?.id).toBe("session-a")
+    expect(source.getState().message["session-a"]?.[0]?.id).toBe("message-a")
+    expect(source.getState().part["message-a"]?.[0]?.id).toBe("part-a")
+    expect(destination.getState().session).toHaveLength(0)
+    expect(destination.getState().message["session-a"]).toBe(undefined)
+    expect(destination.getState().part["message-a"]).toBe(undefined)
+  })
+
+  test("passes moveChanges=false for descendant rollback ordering", async () => {
+    const source = createStore(
+      {},
+      {},
+      {
+        session: [{ id: "session-child", title: "Child", directory: "/source" } as Session],
+        sessionTotal: 1,
+      },
+    )
+    const destination = createStore({})
+    const childStores = createChildStores([
+      ["/source", source],
+      ["/destination", destination],
+    ])
+    const { moveSessionToDirectory, setActionRefs } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/source")
+
+    await moveSessionToDirectory(source.getState().session[0], "/source", "/destination", false)
+
+    expect(sessionCalls.filter((call) => call.method === "controlPlane.moveSession")[0]?.params).toEqual({
+      sessionID: "session-child",
+      destination: { directory: "/destination" },
+      moveChanges: false,
+    })
   })
 })

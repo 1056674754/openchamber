@@ -615,7 +615,6 @@ const handleLocalApiRequest = async (url: URL, init?: RequestInit) => {
   }
 
   if (pathname.startsWith('/api/vscode/pick-files')) {
-    const url = new URL(input instanceof Request ? input.url : String(input), 'http://openchamber.local');
     const extensions = (url.searchParams.get('extensions') ?? '')
       .split(',')
       .map((extension) => extension.trim())

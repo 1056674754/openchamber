@@ -201,7 +201,6 @@ export function resolveSdkForDirectory(directory: string, sessionID?: string, ex
 }
 
 /** Get the child store manager for a session's server. Falls back to default. */
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function storesForSession(sessionId?: string | null): ChildStoreManager {
   if (sessionId) {
     const serverId = serverRegistry.getServerForSession(sessionId)
@@ -611,6 +610,144 @@ function getSdkResultStatus(result: unknown): number | undefined {
   }
   const status = (response as { status?: unknown }).status
   return typeof status === "number" ? status : undefined
+}
+
+// ---------------------------------------------------------------------------
+// Session directory move (worktree)
+// ---------------------------------------------------------------------------
+
+function moveRecordEntries<T>(
+  source: Record<string, T>,
+  destination: Record<string, T>,
+  keys: Iterable<string>,
+): { source: Record<string, T>; destination: Record<string, T> } {
+  let nextSource = source
+  let nextDestination = destination
+
+  for (const key of keys) {
+    if (!Object.prototype.hasOwnProperty.call(source, key)) continue
+    if (nextSource === source) nextSource = { ...source }
+    if (nextDestination === destination) nextDestination = { ...destination }
+    nextDestination[key] = source[key]
+    delete nextSource[key]
+  }
+
+  return { source: nextSource, destination: nextDestination }
+}
+
+function reconcileSessionMove(
+  session: Session,
+  sourceDirectory: string,
+  destinationDirectory: string,
+): Session {
+  const stores = storesForSession(session.id)
+  const sourceStore = stores.getChild(sourceDirectory)
+  const destinationStore = stores.ensureChild(destinationDirectory, { bootstrap: false })
+  const sourceState = sourceStore?.getState()
+  const destinationState = destinationStore.getState()
+  const liveSession = sourceState?.session.find((candidate) => candidate.id === session.id) ?? session
+  const movedSession = { ...liveSession, directory: destinationDirectory } as Session
+
+  if (sourceStore === destinationStore) {
+    return movedSession
+  }
+
+  const destinationSessionIndex = destinationState.session.findIndex((candidate) => candidate.id === session.id)
+  const destinationSessions = [...destinationState.session]
+  if (destinationSessionIndex === -1) destinationSessions.push(movedSession)
+  else destinationSessions[destinationSessionIndex] = movedSession
+
+  if (!sourceStore || !sourceState) {
+    destinationStore.setState({
+      session: destinationSessions,
+      sessionTotal: destinationSessionIndex === -1
+        ? destinationState.sessionTotal + 1
+        : destinationState.sessionTotal,
+    })
+    return movedSession
+  }
+
+  const sourceContainsSession = sourceState.session.some((candidate) => candidate.id === session.id)
+  const status = moveRecordEntries(sourceState.session_status, destinationState.session_status, [session.id])
+  const diffs = moveRecordEntries(sourceState.session_diff, destinationState.session_diff, [session.id])
+  const todos = moveRecordEntries(sourceState.todo, destinationState.todo, [session.id])
+  const permissions = moveRecordEntries(sourceState.permission, destinationState.permission, [session.id])
+  const questions = moveRecordEntries(sourceState.question, destinationState.question, [session.id])
+  const messages = moveRecordEntries(sourceState.message, destinationState.message, [session.id])
+  const messageIds = sourceState.message[session.id]?.map((message) => message.id) ?? []
+  const parts = moveRecordEntries(sourceState.part, destinationState.part, messageIds)
+
+  sourceStore.setState({
+    session: sourceState.session.filter((candidate) => candidate.id !== session.id),
+    sessionTotal: sourceContainsSession ? Math.max(0, sourceState.sessionTotal - 1) : sourceState.sessionTotal,
+    session_status: status.source,
+    session_diff: diffs.source,
+    todo: todos.source,
+    permission: permissions.source,
+    question: questions.source,
+    message: messages.source,
+    part: parts.source,
+  })
+  destinationStore.setState({
+    session: destinationSessions,
+    sessionTotal: destinationSessionIndex === -1
+      ? destinationState.sessionTotal + 1
+      : destinationState.sessionTotal,
+    session_status: status.destination,
+    session_diff: diffs.destination,
+    todo: todos.destination,
+    permission: permissions.destination,
+    question: questions.destination,
+    message: messages.destination,
+    part: parts.destination,
+  })
+
+  return movedSession
+}
+
+/**
+ * Move a session's OpenCode location via control-plane, then reconcile live stores.
+ * Caller must keep serverId unchanged; only directory changes.
+ */
+export async function moveSessionToDirectory(
+  session: Session,
+  sourceDirectory: string,
+  destinationDirectory: string,
+  moveChanges = true,
+): Promise<void> {
+  const client = sdkForSession(session.id)
+  const controlPlane = client.experimental?.controlPlane
+  if (!controlPlane?.moveSession) {
+    throw new Error("OpenCode control-plane moveSession is unavailable on this server")
+  }
+
+  const result = await controlPlane.moveSession({
+    sessionID: session.id,
+    destination: { directory: destinationDirectory },
+    moveChanges,
+  })
+
+  if (result && typeof result === "object" && "error" in result && result.error) {
+    const status = getSdkResultStatus(result)
+    const message = formatSdkError(result.error)
+    const error = new Error(`Move session failed${status ? ` (${status})` : ""}: ${message}`)
+    if (status !== undefined) {
+      ;(error as Error & { status?: number }).status = status
+    }
+    throw error
+  }
+
+  const status = getSdkResultStatus(result)
+  if (status !== undefined && status >= 400) {
+    const error = new Error(`Move session failed (${status})`)
+    ;(error as Error & { status?: number }).status = status
+    throw error
+  }
+
+  const moved = reconcileSessionMove(session, sourceDirectory, destinationDirectory)
+
+  registerSessionDirectory(session.id, destinationDirectory)
+  useGlobalSessionsStore.getState().upsertSession(moved)
 }
 
 // ---------------------------------------------------------------------------

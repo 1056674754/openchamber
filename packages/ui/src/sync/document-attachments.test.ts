@@ -128,7 +128,13 @@ describe("document attachment extraction", () => {
     const file = zippedFile("unsafe.docx", {
       "../word/document.xml": `<w:document xmlns:w="w"><w:p><w:t>Unsafe</w:t></w:p></w:document>`,
     })
-    await expect(extractDocumentAttachments(file)).rejects.toThrow("unsafe file path")
+    let unsafeError: unknown = null
+    try {
+      await extractDocumentAttachments(file)
+    } catch (error) {
+      unsafeError = error
+    }
+    expect(unsafeError instanceof Error && unsafeError.message.includes("unsafe file path")).toBe(true)
   })
 
   test("rejects archives over the entry-count limit", async () => {
@@ -137,7 +143,13 @@ describe("document attachment extraction", () => {
       "<metadata/>",
     ]))
 
-    await expect(extractDocumentAttachments(zippedFile("too-many.docx", entries))).rejects.toThrow("too many files")
+    let tooManyError: unknown = null
+    try {
+      await extractDocumentAttachments(zippedFile("too-many.docx", entries))
+    } catch (error) {
+      tooManyError = error
+    }
+    expect(tooManyError instanceof Error && tooManyError.message.includes("too many files")).toBe(true)
   })
 
   test("bounds embedded image count and marks omitted images in document text", async () => {

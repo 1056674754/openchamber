@@ -201,6 +201,7 @@ Examples of global-store updates performed in `session-actions.ts`:
 - `shareSession()` / `unshareSession()` -> `upsertSession(result.data)`
 - `archiveSession()` -> `archiveSessions([id], archivedAt)`
 - `deleteSession()` -> `removeSessions([id])`
+- `moveSessionToDirectory()` -> control-plane `experimental.controlPlane.moveSession`, reconcile child stores for that session's `serverId`, then `registerSessionDirectory` + `upsertSession`
 
 ## The golden rule
 
