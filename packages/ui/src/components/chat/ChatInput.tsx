@@ -2309,8 +2309,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             }
             else if (commandName === 'compact' && submittedSessionId) {
                 try {
-                    await sessionActions.waitForConnectionOrThrow();
-
                     const invocation = parseSlashInvocation(normalizedCommand);
                     const focusText = invocation?.arguments?.trim() ?? '';
                     if (focusText) {
@@ -2326,10 +2324,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                         }
                     }
 
-                    const { opencodeClient } = await import('@/lib/opencode/client');
-                    const sdk = opencodeClient.getSdkClient();
-                    await sdk.session.summarize({
-                        sessionID: submittedSessionId,
+                    await sessionActions.summarizeSession(submittedSessionId, {
                         modelID: modelIdToSend,
                         providerID: providerIdToSend,
                     });

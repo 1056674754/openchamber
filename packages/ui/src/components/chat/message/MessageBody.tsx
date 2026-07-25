@@ -334,6 +334,9 @@ interface MessageBodyProps {
     turnGroupingContext?: TurnGroupingContext;
     onRevert?: () => void;
     onFork?: () => void;
+    contextPinned?: boolean;
+    contextPinPending?: boolean;
+    onToggleContextPin?: () => void;
     errorMessage?: string;
     errorVariant?: 'error' | 'info';
     userActionsMode?: 'inline' | 'external-content' | 'external-actions';
@@ -363,7 +366,7 @@ const writeRevealedToolIds = (messageId: string, value: Set<string>): void => {
     revealedToolIdsByMessage.set(messageId, new Set(value));
 };
 
-const UserMessageBody = React.memo(({ sessionId, messageId, parts, isMobile, alwaysShowActions = isMobile, hasTouchInput, hasTextContent, onCopyMessage, copiedMessage, onShowPopup, agentMention, onRevert, onFork, userActionsMode = 'inline', stickyUserHeaderEnabled = true }: {
+const UserMessageBody = React.memo(({ sessionId, messageId, parts, isMobile, alwaysShowActions = isMobile, hasTouchInput, hasTextContent, onCopyMessage, copiedMessage, onShowPopup, agentMention, onRevert, onFork, contextPinned, contextPinPending, onToggleContextPin, userActionsMode = 'inline', stickyUserHeaderEnabled = true }: {
     sessionId?: string;
     messageId: string;
     parts: Part[];
@@ -377,6 +380,9 @@ const UserMessageBody = React.memo(({ sessionId, messageId, parts, isMobile, alw
     agentMention?: AgentMentionInfo;
     onRevert?: () => void;
     onFork?: () => void;
+    contextPinned?: boolean;
+    contextPinPending?: boolean;
+    onToggleContextPin?: () => void;
     userActionsMode?: 'inline' | 'external-content' | 'external-actions';
     stickyUserHeaderEnabled?: boolean;
 }) => {
@@ -456,7 +462,7 @@ const UserMessageBody = React.memo(({ sessionId, messageId, parts, isMobile, alw
     );
 
     const effectiveOnFork = chatSurfaceMode === 'mini-chat' ? undefined : onFork;
-    const actionsBlock = ((canCopyMessage && hasCopyableText) || onRevert || effectiveOnFork) && showUserActions ? (
+    const actionsBlock = ((canCopyMessage && hasCopyableText) || onRevert || effectiveOnFork || (onToggleContextPin && hasCopyableText)) && showUserActions ? (
         <div className={cn(
             'group/user-actions',
             isMobile
@@ -524,6 +530,32 @@ const UserMessageBody = React.memo(({ sessionId, messageId, parts, isMobile, alw
                             </Button>
                         </TooltipTrigger>
                         <TooltipContent sideOffset={6}>{t('chat.messageBody.actions.fork')}</TooltipContent>
+                    </Tooltip>
+                )}
+                {onToggleContextPin && hasCopyableText && (
+                    <Tooltip>
+                        <TooltipTrigger asChild>
+                            <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                className={cn(
+                                    'h-6 w-6 bg-transparent hover:text-foreground hover:!bg-transparent active:!bg-transparent focus-visible:!bg-transparent focus-visible:ring-2 focus-visible:ring-primary/50',
+                                    contextPinned ? 'text-[color:var(--status-info)]' : 'text-muted-foreground',
+                                )}
+                                disabled={contextPinPending}
+                                aria-pressed={contextPinned}
+                                aria-label={t(contextPinned ? 'chat.messageBody.actions.unpinContext' : 'chat.messageBody.actions.pinContext')}
+                                onPointerDown={(event) => event.stopPropagation()}
+                                onClick={(event) => {
+                                    event.stopPropagation();
+                                    onToggleContextPin();
+                                }}
+                            >
+                                <Icon name={contextPinned ? 'pushpin-2-fill' : 'pushpin-2'} className="h-3 w-3" />
+                            </Button>
+                        </TooltipTrigger>
+                        <TooltipContent sideOffset={6}>{t(contextPinned ? 'chat.messageBody.actions.unpinContext' : 'chat.messageBody.actions.pinContext')}</TooltipContent>
                     </Tooltip>
                 )}
                 {canCopyMessage && hasCopyableText && (
@@ -634,6 +666,9 @@ interface AssistantMessageActionButtonsProps {
     };
     onShareImage: (sourceElement?: HTMLElement | null) => Promise<void>;
     ttsText: string;
+    contextPinned?: boolean;
+    contextPinPending?: boolean;
+    onToggleContextPin?: () => void;
 }
 
 const AssistantMessageActionButtons = React.memo(({
@@ -643,6 +678,9 @@ const AssistantMessageActionButtons = React.memo(({
     reviewTransferAction,
     onShareImage,
     ttsText,
+    contextPinned,
+    contextPinPending,
+    onToggleContextPin,
 }: AssistantMessageActionButtonsProps) => {
     const { t } = useI18n();
     const chatSurfaceMode = useChatSurfaceMode();
@@ -799,6 +837,32 @@ const AssistantMessageActionButtons = React.memo(({
 
     return (
         <>
+            {onToggleContextPin && hasCopyableText ? (
+                <Tooltip>
+                    <TooltipTrigger asChild>
+                        <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className={cn(
+                                'h-6 w-6 bg-transparent hover:text-foreground hover:!bg-transparent active:!bg-transparent focus-visible:!bg-transparent focus-visible:ring-2 focus-visible:ring-primary/50',
+                                contextPinned ? 'text-[color:var(--status-info)]' : 'text-muted-foreground',
+                            )}
+                            disabled={contextPinPending}
+                            aria-pressed={contextPinned}
+                            aria-label={t(contextPinned ? 'chat.messageBody.actions.unpinContext' : 'chat.messageBody.actions.pinContext')}
+                            onPointerDown={(event) => event.stopPropagation()}
+                            onClick={(event) => {
+                                event.stopPropagation();
+                                onToggleContextPin();
+                            }}
+                        >
+                            <Icon name={contextPinned ? 'pushpin-2-fill' : 'pushpin-2'} className="h-3 w-3" />
+                        </Button>
+                    </TooltipTrigger>
+                    <TooltipContent sideOffset={6}>{t(contextPinned ? 'chat.messageBody.actions.unpinContext' : 'chat.messageBody.actions.pinContext')}</TooltipContent>
+                </Tooltip>
+            ) : null}
             {onCopyMessage && (
                 <Tooltip>
                     <TooltipTrigger asChild>
@@ -945,6 +1009,9 @@ const AssistantMessageBody = React.memo(({
     onAuxiliaryContentComplete,
     showReasoningTraces = false,
     turnGroupingContext,
+    contextPinned,
+    contextPinPending,
+    onToggleContextPin,
     errorMessage,
     errorVariant = 'error',
     footerProviderID,
@@ -1568,8 +1635,11 @@ const AssistantMessageBody = React.memo(({
             onShareImage={shareMessageAsImage}
             ttsText={assistantPlanText}
             reviewTransferAction={reviewTransferAction}
+            contextPinned={contextPinned}
+            contextPinPending={contextPinPending}
+            onToggleContextPin={onToggleContextPin}
         />
-    ), [assistantPlanText, hasCopyableText, isTouchContext, onCopyMessage, reviewTransferAction, shareMessageAsImage]);
+    ), [assistantPlanText, contextPinPending, contextPinned, hasCopyableText, isTouchContext, onCopyMessage, onToggleContextPin, reviewTransferAction, shareMessageAsImage]);
 
     const renderJustificationActions = React.useCallback((activity: NonNullable<TurnGroupingContext['activityParts']>[number]) => {
         if (!showSplitAssistantMessageActions || !isSortedRenderMode) {
@@ -2303,6 +2373,9 @@ const MessageBody = React.memo(({ isUser, ...props }: MessageBodyProps) => {
                 agentMention={props.agentMention}
                 onRevert={props.onRevert}
                 onFork={props.onFork}
+                contextPinned={props.contextPinned}
+                contextPinPending={props.contextPinPending}
+                onToggleContextPin={props.onToggleContextPin}
                 userActionsMode={props.userActionsMode}
                 stickyUserHeaderEnabled={props.stickyUserHeaderEnabled}
             />

@@ -1807,8 +1807,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
   // ---------------------------------------------------------------------------
   handleSlashCompact: async (content, sessionId) => {
     try {
-      const { waitForConnectionOrThrow } = await import("./session-actions")
-      await waitForConnectionOrThrow(serverRegistry.getServerForSession(sessionId))
+      const { summarizeSession } = await import("./session-actions")
 
       const { parseSlashInvocation } = await import("./slash-routing")
       const invocation = parseSlashInvocation(content)
@@ -1821,7 +1820,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ sessionID: sessionId, focus: focusText }),
           })
-          const { toast } = await import("sonner")
+          const { toast } = await import("@/components/ui")
           const { useI18nStore, formatMessage } = await import("@/lib/i18n/store")
           const { dictionary } = useI18nStore.getState()
           toast.info(formatMessage(dictionary, "chat.chatInput.toast.compactWithFocus", { focus: focusText }))
@@ -1830,17 +1829,14 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         }
       }
 
-      const { opencodeClient } = await import("@/lib/opencode/client")
-      const sdk = opencodeClient.getSdkClient()
       const { useConfigStore } = await import("@/stores/useConfigStore")
       const configState = useConfigStore.getState()
-      await sdk.session.summarize({
-        sessionID: sessionId,
+      await summarizeSession(sessionId, {
         modelID: configState.currentModelId || "",
         providerID: configState.currentProviderId || "",
       })
     } catch (error) {
-      const { toast } = await import("sonner")
+      const { toast } = await import("@/components/ui")
       const { useI18nStore, formatMessage } = await import("@/lib/i18n/store")
       const { dictionary } = useI18nStore.getState()
       toast.error(error instanceof Error ? error.message : formatMessage(dictionary, "chat.chatInput.toast.compactFailed"))

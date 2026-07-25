@@ -32,6 +32,10 @@ import {
   resolveSdkForDirectory as resolveSdkForDirectoryFromRouting,
   setDirectoryServerId,
 } from "./session-routing"
+import {
+  withContextObligatoryMessage,
+  type ContextObligatoryMessage,
+} from "@/lib/contextObligatoryMessages"
 
 export {
   resolveApiUrl,
@@ -813,6 +817,37 @@ export async function patchSessionMetadata(
     useGlobalSessionsStore.getState().upsertSession(result.data)
   }
   return result.data ?? null
+}
+
+export async function setContextObligatoryMessage(
+  sessionId: string,
+  directory: string,
+  message: ContextObligatoryMessage,
+  pinned: boolean,
+): Promise<Session | null> {
+  const sessionDirectory = typeof directory === "string" ? directory.trim() : ""
+  if (!sessionDirectory) {
+    throw new Error(`setContextObligatoryMessage: directory for session ${sessionId} is not available`)
+  }
+  return patchSessionMetadata(sessionId, sessionDirectory, (metadata) =>
+    withContextObligatoryMessage(metadata, message, pinned))
+}
+
+export async function summarizeSession(
+  sessionId: string,
+  input: { modelID: string; providerID: string },
+): Promise<void> {
+  const sessionDirectory = requireSessionDirectory(sessionId, "summarizeSession")
+  await waitForConnectionOrThrow(serverRegistry.getServerForSession(sessionId))
+  unwrapSdkData(
+    await sdkForSession(sessionId).session.summarize({
+      sessionID: sessionId,
+      directory: sessionDirectory,
+      modelID: input.modelID,
+      providerID: input.providerID,
+    }),
+    "session.summarize",
+  )
 }
 
 export async function shareSession(sessionId: string): Promise<Session | null> {

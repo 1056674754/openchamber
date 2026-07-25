@@ -86,13 +86,16 @@ import { createNotificationTemplateRuntime } from './lib/notifications/template-
 import { createPermissionAutoAcceptRuntime } from './lib/permission-auto-accept/runtime.js';
 import { createGracefulShutdownRuntime } from './lib/opencode/shutdown-runtime.js';
 import { createSessionGoalRuntime } from './lib/session-goal/runtime.js';
+import { createContextObligatoryRuntime } from './lib/context-obligatory/runtime.js';
 import { createProjectConfigRuntime } from './lib/projects/project-config.js';
 import { createPreviewProxyRuntime } from './lib/preview/proxy-runtime.js';
 import { createRemoteInstancesRuntime } from './lib/remote-instances/config.js';
+import { createRemoteGlobalEventFanout } from './lib/remote-instances/global-event-fanout.js';
 import { registerRemoteInstanceRoutes } from './lib/remote-instances/routes.js';
 import { registerRemoteProxy } from './lib/remote-instances/proxy.js';
 import { registerRemoteSseRelay } from './lib/remote-instances/sse-relay.js';
 import { registerRemoteRpcWebSocket } from './lib/remote-instances/rpc-ws.js';
+import { buildRemoteUpstreamHeaders } from './lib/remote-instances/request-headers.js';
 import { createProxyMiddleware, responseInterceptor } from 'http-proxy-middleware';
 import webPush from 'web-push';
 
@@ -883,6 +886,19 @@ const sessionGoalRuntime = createSessionGoalRuntime({
   },
 });
 
+const contextObligatoryRuntime = createContextObligatoryRuntime({
+  buildOpenCodeUrl,
+  getOpenCodeAuthHeaders,
+  resolveRemoteUpstream: (serverId) => {
+    const instance = remoteInstancesRuntimeRef?.getInstanceSync?.(serverId);
+    if (!instance?.url) return null;
+    return {
+      baseUrl: String(instance.url).replace(/\/$/, ''),
+      headers: buildRemoteUpstreamHeaders(instance),
+    };
+  },
+});
+
 console.log('[session-goal] listening for local OpenCode session events');
 globalMessageStreamHub.subscribeEvent((event) => {
   const raw = event?.payload;
@@ -893,6 +909,7 @@ globalMessageStreamHub.subscribeEvent((event) => {
     : '';
   // Local hub has no remote serverId; pass default explicitly for the hard gate.
   sessionGoalRuntime.processPayload(payload, directory, 'default');
+  contextObligatoryRuntime.processPayload(payload, directory, 'default');
 });
 
 const permissionAutoAcceptRuntime = createPermissionAutoAcceptRuntime({
@@ -1293,6 +1310,7 @@ const gracefulShutdownRuntime = createGracefulShutdownRuntime({
   openCodeConfigFileWatcherRuntime,
   sessionRuntime,
   sessionGoalRuntime,
+  contextObligatoryRuntime,
   getHealthCheckInterval: () => healthCheckInterval,
   clearHealthCheckInterval: (value) => clearInterval(value),
   getTerminalRuntime: () => terminalRuntime,
@@ -1579,6 +1597,11 @@ async function main(options = {}) {
     rejectWebSocketUpgrade,
   });
   remoteInstancesRuntime.startHealthMonitoring();
+  contextObligatoryRuntime.bindRemoteFanout(createRemoteGlobalEventFanout({
+    remoteInstancesRuntime,
+    fetchImpl: fetch,
+    upstreamStallTimeoutMs: getUpstreamStallTimeoutMs,
+  }));
 
   const startupPipelineResult = await startupPipelineRuntime.run({
     app,

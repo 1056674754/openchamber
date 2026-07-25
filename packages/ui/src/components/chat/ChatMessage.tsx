@@ -50,6 +50,10 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { toast } from '@/components/ui';
 import { useI18n } from '@/lib/i18n';
 import { shouldHideAssistantMessageShell } from './messageVisibility';
+import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
+import { getContextObligatoryMessages } from '@/lib/contextObligatoryMessages';
+import { setContextObligatoryMessage } from '@/sync/session-actions';
+import { isVSCodeRuntime } from '@/lib/desktop';
 
 const ToolOutputDialog = lazyWithChunkRecovery(() => import('./message/ToolOutputDialog'));
 
@@ -304,6 +308,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
 }) => {
     const { isMobile, isTablet, hasTouchInput } = useDeviceInfo();
     const alwaysShowMessageActions = isMobile || isTablet;
+    const canPinIntoContext = !isVSCodeRuntime();
     const { currentTheme } = useThemeSystem();
     const messageContainerRef = React.useRef<HTMLDivElement | null>(null);
     const sessionId = message.info.sessionID;
@@ -592,6 +597,33 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
         const timeInfo = message.info.time as { created?: number } | undefined;
         return typeof timeInfo?.created === 'number' ? timeInfo.created : null;
     }, [message.info.time]);
+
+    const isPinnedIntoContext = useGlobalSessionsStore((state) => {
+        const session = state.activeSessions.find((candidate) => candidate.id === sessionId)
+            ?? state.archivedSessions.find((candidate) => candidate.id === sessionId);
+        return getContextObligatoryMessages(session).some((entry) => entry.id === message.info.id);
+    });
+    const [pinPending, setPinPending] = React.useState(false);
+    const handleToggleContextPin = React.useCallback(async () => {
+        if (!sessionId || !messageCreatedAt || pinPending) return;
+        setPinPending(true);
+        try {
+            const directory = useSessionUIStore.getState().getDirectoryForSession(sessionId);
+            if (!directory) {
+                throw new Error('session directory is not available');
+            }
+            await setContextObligatoryMessage(sessionId, directory, {
+                id: message.info.id,
+                createdAt: messageCreatedAt,
+                role: isUser ? 'user' : 'assistant',
+            }, !isPinnedIntoContext);
+        } catch (error) {
+            console.error('[chat-message] failed to update context pin', error);
+            toast.error(t('chat.messageBody.actions.contextPinFailed'));
+        } finally {
+            setPinPending(false);
+        }
+    }, [isPinnedIntoContext, isUser, message.info.id, messageCreatedAt, pinPending, sessionId, t]);
 
     const isMessageCompleted = React.useMemo(() => {
         if (isUser) return true;
@@ -1236,6 +1268,9 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
             showReasoningTraces={showReasoningTraces}
             agentMention={agentMention}
             turnGroupingContext={turnGroupingContext}
+            contextPinned={isPinnedIntoContext}
+            contextPinPending={pinPending}
+            onToggleContextPin={canPinIntoContext && messageCreatedAt ? handleToggleContextPin : undefined}
             errorMessage={assistantErrorText}
             errorVariant={assistantErrorVariant}
             footerProviderID={headerProviderID}
@@ -1326,6 +1361,9 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                                                 agentMention={agentMention}
                                                 onRevert={handleRevert}
                                                 onFork={isUser ? handleFork : undefined}
+                                                contextPinned={isPinnedIntoContext}
+                                                contextPinPending={pinPending}
+                                                onToggleContextPin={canPinIntoContext && messageCreatedAt ? handleToggleContextPin : undefined}
                                                 errorMessage={assistantErrorText}
                                                 errorVariant={assistantErrorVariant}
                                                 userActionsMode={useExternalUserActionsRow ? 'external-content' : 'inline'}
@@ -1361,6 +1399,9 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                                                 agentMention={agentMention}
                                                 onRevert={handleRevert}
                                                 onFork={isUser ? handleFork : undefined}
+                                                contextPinned={isPinnedIntoContext}
+                                                contextPinPending={pinPending}
+                                                onToggleContextPin={canPinIntoContext && messageCreatedAt ? handleToggleContextPin : undefined}
                                                 errorMessage={assistantErrorText}
                                                 errorVariant={assistantErrorVariant}
                                                 userActionsMode="external-actions"
