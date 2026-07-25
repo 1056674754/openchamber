@@ -7,6 +7,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Button } from '@/components/ui/button';
+import { NumberInput } from '@/components/ui/number-input';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { toast } from '@/components/ui';
 import { ModelSelector } from '@/components/sections/agents/ModelSelector';
@@ -23,6 +24,7 @@ import type { ScheduledTask } from '@/lib/scheduledTasksApi';
 import { useI18n } from '@/lib/i18n';
 import { isValidCronExpression, getNextRuns, CRON_EXAMPLES } from '@/lib/cron';
 import { canonicalizeTimezone } from '@/lib/timezones';
+import { isVSCodeRuntime } from '@/lib/desktop';
 
 const WEEKDAY_INDEXES = [0, 1, 2, 3, 4, 5, 6] as const;
 const EDITOR_TOGGLE_BUTTON_CLASS = 'flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center text-foreground outline-none transition-none focus:outline-none';
@@ -469,6 +471,8 @@ type ScheduledTaskDraft = {
     modelID: string;
     variant: string;
     agent: string;
+    goalEnabled: boolean;
+    goalTokenBudget: number | null;
     permissionAutoAccept: boolean;
   };
   state?: ScheduledTask['state'];
@@ -519,6 +523,8 @@ const toDraft = (
         modelID: defaults.modelID,
         variant: defaults.variant,
         agent: defaults.agent,
+        goalEnabled: false,
+        goalTokenBudget: null,
         permissionAutoAccept: false,
       },
     };
@@ -553,6 +559,10 @@ const toDraft = (
       modelID: task.execution.modelID,
       variant: task.execution.variant || '',
       agent: task.execution.agent || '',
+      goalEnabled: task.execution.goalEnabled === true,
+      goalTokenBudget: typeof task.execution.goalTokenBudget === 'number' && task.execution.goalTokenBudget > 0
+        ? task.execution.goalTokenBudget
+        : null,
       permissionAutoAccept: task.execution.permissionAutoAccept === true,
     },
     state: task.state,
@@ -715,8 +725,11 @@ export function ScheduledTaskEditorDialog(props: {
   task: ScheduledTask | null;
   onOpenChange: (open: boolean) => void;
   onSave: (draft: Partial<ScheduledTask>) => Promise<void>;
+  /** Local OpenCode only — remote projects cannot stamp host session goals. */
+  allowRunAsGoal?: boolean;
 }) {
-  const { open, task, onOpenChange, onSave } = props;
+  const { open, task, onOpenChange, onSave, allowRunAsGoal = false } = props;
+  const showRunAsGoal = allowRunAsGoal && !isVSCodeRuntime();
   const { t, locale } = useI18n();
   const loadProviders = useConfigStore((state) => state.loadProviders);
   const loadAgents = useConfigStore((state) => state.loadAgents);
@@ -1168,6 +1181,10 @@ export function ScheduledTaskEditorDialog(props: {
         ...(draft.execution.variant.trim() ? { variant: draft.execution.variant.trim() } : {}),
         ...(draft.execution.agent.trim() ? { agent: draft.execution.agent.trim() } : {}),
         ...(draft.execution.permissionAutoAccept ? { permissionAutoAccept: true } : {}),
+        ...(showRunAsGoal && draft.execution.goalEnabled ? { goalEnabled: true } : {}),
+        ...(showRunAsGoal && draft.execution.goalEnabled && draft.execution.goalTokenBudget
+          ? { goalTokenBudget: draft.execution.goalTokenBudget }
+          : {}),
       },
       ...(draft.state ? { state: draft.state } : {}),
     };
@@ -1181,7 +1198,7 @@ export function ScheduledTaskEditorDialog(props: {
     } finally {
       setSaving(false);
     }
-  }, [draft, onOpenChange, onSave, t]);
+  }, [draft, onOpenChange, onSave, showRunAsGoal, t]);
 
   const descriptionId = React.useId();
   const hasOpenFloatingMenu = React.useCallback(() => {
@@ -1623,6 +1640,38 @@ export function ScheduledTaskEditorDialog(props: {
               ) : null}
             </div>
           </div>
+
+          {showRunAsGoal && draft.execution.goalEnabled ? (
+            <div className="flex flex-wrap items-center gap-x-8 gap-y-2">
+              <label className="inline-flex cursor-pointer items-center gap-2">
+                <Checkbox
+                  checked={draft.execution.goalTokenBudget !== null}
+                  onChange={(hasBudget) => setDraft((prev) => ({
+                    ...prev,
+                    execution: { ...prev.execution, goalTokenBudget: hasBudget ? 200_000 : null },
+                  }))}
+                  ariaLabel={t('sessions.scheduledTasks.editor.goal.budgetAria')}
+                />
+                <span className="typography-meta">{t('sessions.scheduledTasks.editor.goal.budgetLabel')}</span>
+              </label>
+              {draft.execution.goalTokenBudget !== null ? (
+                <NumberInput
+                  value={draft.execution.goalTokenBudget}
+                  onValueChange={(value) => {
+                    if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
+                      setDraft((prev) => ({
+                        ...prev,
+                        execution: { ...prev.execution, goalTokenBudget: Math.floor(value) },
+                      }));
+                    }
+                  }}
+                  min={1000}
+                  max={100000000}
+                  step={50000}
+                />
+              ) : null}
+            </div>
+          ) : null}
     </div>
   );
 
@@ -1668,6 +1717,29 @@ export function ScheduledTaskEditorDialog(props: {
             {t('sessions.scheduledTasks.editor.permissionAutoAccept.label')}
           </TooltipContent>
         </Tooltip>
+        {showRunAsGoal ? (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                className={cn(EDITOR_TOGGLE_BUTTON_CLASS, draft.execution.goalEnabled && 'text-[var(--status-info)]')}
+                onClick={() => setDraft((prev) => ({
+                  ...prev,
+                  execution: { ...prev.execution, goalEnabled: !prev.execution.goalEnabled },
+                }))}
+                aria-pressed={draft.execution.goalEnabled}
+                aria-label={t('sessions.scheduledTasks.editor.goal.aria')}
+              >
+                {draft.execution.goalEnabled ? (
+                  <Icon name="target-fill" className="h-[18px] w-[18px] text-current" aria-hidden="true" />
+                ) : (
+                  <Icon name="target" className="h-[18px] w-[18px] text-current" aria-hidden="true" />
+                )}
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="top" sideOffset={6}>{t('sessions.scheduledTasks.editor.goal.label')}</TooltipContent>
+          </Tooltip>
+        ) : null}
         <Button type="button" variant="ghost" size="sm" onClick={() => onOpenChange(false)} disabled={saving}>
           {t('sessions.scheduledTasks.editor.actions.cancel')}
         </Button>

@@ -34,6 +34,7 @@ import {
 } from '@/lib/scheduledTasksApi';
 import { ScheduledTaskEditorDialog } from './ScheduledTaskEditorDialog';
 import { canonicalizeTimezone } from '@/lib/timezones';
+import { useSessionGoalServerSupport } from '@/hooks/useSessionGoalServerSupport';
 
 const scheduleTimes = (task: ScheduledTask): string[] => {
   const raw = Array.isArray(task.schedule.times)
@@ -194,6 +195,7 @@ export function ScheduledTasksDialog() {
     () => projects.find((project) => project.id === selectedProjectID) || null,
     [projects, selectedProjectID],
   );
+  const scheduledGoalSupport = useSessionGoalServerSupport(selectedProject?.serverId);
 
   const scheduledTasksBaseUrl = React.useMemo(() => {
     if (!selectedProject?.serverId || selectedProject.serverId === 'default') return undefined;
@@ -632,6 +634,7 @@ export function ScheduledTasksDialog() {
         task={editorTask}
         onOpenChange={setEditorOpen}
         onSave={handleSaveTask}
+        allowRunAsGoal={scheduledGoalSupport.supported}
       />
     </>
   );

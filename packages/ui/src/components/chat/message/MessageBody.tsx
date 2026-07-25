@@ -36,6 +36,8 @@ import { TextSelectionMenu } from './TextSelectionMenu';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { useChatSurfaceMode } from '@/components/chat/useChatSurfaceMode';
 import { isVSCodeRuntime } from '@/lib/desktop';
+import { resolveSessionGoalServerId } from '@/lib/sessionGoalLocal';
+import { useSessionGoalServerSupport } from '@/hooks/useSessionGoalServerSupport';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { toPng } from 'html-to-image';
 import { toast } from '@/components/ui';
@@ -1153,6 +1155,9 @@ const AssistantMessageBody = React.memo(({
     const [isSavingPlan, setIsSavingPlan] = React.useState(false);
     const [isForkDialogOpen, setIsForkDialogOpen] = React.useState(false);
     const [isForkSubmitting, setIsForkSubmitting] = React.useState(false);
+    const forkGoalSupport = useSessionGoalServerSupport(
+      sessionId ? resolveSessionGoalServerId(sessionId) : null,
+    );
     const chatRenderMode = useUIStore((state) => state.chatRenderMode);
     const showSplitAssistantMessageActions = useUIStore((state) => state.showSplitAssistantMessageActions);
     const collapsibleThinkingBlocks = useUIStore((state) => state.collapsibleThinkingBlocks);
@@ -2141,6 +2146,7 @@ const AssistantMessageBody = React.memo(({
                      onOpenChange={setIsForkDialogOpen}
                      projectDirectory={effectiveDirectory ?? null}
                      submitting={isForkSubmitting}
+                     allowRunAsGoal={forkGoalSupport.supported}
                      onConfirm={handleConfirmFork}
                  />
              ) : null}

@@ -98,6 +98,21 @@ describe('notification trigger runtime', () => {
     expect(sendPushToAllUiSessions).not.toHaveBeenCalled();
   });
 
+  it('suppresses ready notifications while a session goal is active', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        id: 'main',
+        metadata: { openchamber: { goal: { id: 'g1', status: 'active', objective: 'Ship it' } } },
+      }),
+    })));
+    const { runtime, sendPushToAllUiSessions } = createRuntime();
+
+    await runtime.maybeSendPushForTrigger(assistantStop('main', '/workspace/project'));
+
+    expect(sendPushToAllUiSessions).not.toHaveBeenCalled();
+  });
+
   it('sends a completion from session idle when no final message event arrived', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({
       ok: true,

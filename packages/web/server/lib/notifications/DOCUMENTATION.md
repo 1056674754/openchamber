@@ -42,6 +42,7 @@ This module provides notification message preparation utilities for the web serv
   - `maybeSendPushForTrigger(payload)`
 - Owns:
   - completion/error/question/permission trigger routing
+  - active Session Goal suppression for per-turn ready notifications (settle notify comes from `session-goal` runtime)
   - directory-scoped session parent cache and direct session lookup for subtask suppression
   - `session.idle` / `session.error` fallback normalization and per-session cooldowns
   - named OpenCode error extraction from `error.data.message`, with legacy flat-message compatibility

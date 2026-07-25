@@ -9,6 +9,9 @@ import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
 import { useUIStore } from '@/stores/useUIStore';
 import { isVSCodeRuntime } from '@/lib/desktop';
+import { resolveSessionGoalServerId } from '@/lib/sessionGoalLocal';
+import { useSessionGoalServerSupport } from '@/hooks/useSessionGoalServerSupport';
+import { useProjectsStore } from '@/stores/useProjectsStore';
 import { CommandAutocompleteRow } from './CommandAutocompleteRow';
 import {
   buildCommandAutocompleteEntries,
@@ -47,6 +50,18 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
   const canStartSessionCommand = hasSession || hasNewSessionDraft;
   const isMobile = useUIStore((state) => state.isMobile);
   const canUseReviewHandoffFlow = hasSession && !isMobile && !isVSCodeRuntime();
+  const draftProjectId = useSessionUIStore((state) => state.newSessionDraft?.selectedProjectId ?? null);
+  const draftProjectServerId = useProjectsStore((state) => {
+    if (!draftProjectId) return undefined;
+    return state.projects.find((project) => project.id === draftProjectId)?.serverId;
+  });
+  const craftGoalServerId = hasSession
+    ? resolveSessionGoalServerId(currentSessionId)
+    : (draftProjectServerId ?? null);
+  const craftGoalSupport = useSessionGoalServerSupport(craftGoalServerId);
+  const canUseCraftGoal = canStartSessionCommand
+    && !isVSCodeRuntime()
+    && craftGoalSupport.supported;
 
   const [commands, setCommands] = React.useState<CommandInfo[]>([]);
   const [loading, setLoading] = React.useState(false);
@@ -69,6 +84,7 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
     workspaceReview: t('chat.commandAutocomplete.command.workspaceReviewDescription'),
     handoffReview: t('chat.commandAutocomplete.command.handoffReviewDescription'),
     featurePlan: t('chat.commandAutocomplete.command.featurePlanDescription'),
+    craftGoal: t('chat.commandAutocomplete.command.craftGoalDescription'),
     catchUp: t('chat.commandAutocomplete.command.catchUpDescription'),
     debug: t('chat.commandAutocomplete.command.debugDescription'),
     weigh: t('chat.commandAutocomplete.command.weighDescription'),
@@ -111,6 +127,7 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
           hasMessagesInCurrentSession,
           canStartSessionCommand,
           canUseReviewHandoffFlow,
+          canUseCraftGoal,
           descriptions: commandDescriptions,
         }));
       } catch {
@@ -120,6 +137,7 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
           hasMessagesInCurrentSession,
           canStartSessionCommand,
           canUseReviewHandoffFlow,
+          canUseCraftGoal,
           descriptions: commandDescriptions,
         }));
       } finally {
@@ -128,7 +146,7 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
     };
 
     loadCommands();
-  }, [searchQuery, hasMessagesInCurrentSession, hasSession, canStartSessionCommand, canUseReviewHandoffFlow, commandsWithMetadata, skills, commandDescriptions]);
+  }, [searchQuery, hasMessagesInCurrentSession, hasSession, canStartSessionCommand, canUseReviewHandoffFlow, canUseCraftGoal, commandsWithMetadata, skills, commandDescriptions]);
 
   React.useEffect(() => {
     setSelectedIndex(0);

@@ -27,6 +27,8 @@ import { SkillAutocomplete, type SkillAutocompleteHandle } from './SkillAutocomp
 import { SnippetAutocomplete, type SnippetAutocompleteHandle } from './SnippetAutocomplete';
 import { cn, formatDirectoryName, isMacOS } from '@/lib/utils';
 import { ModelControls } from './ModelControls';
+import { SessionGoalRow } from '@/components/chat/SessionGoalRow';
+import { SessionGoalButton, SessionGoalObjectiveCounter } from '@/components/chat/SessionGoalButton';
 import { parseAgentMentions } from '@/lib/messages/agentMentions';
 import { StatusRow } from './StatusRow';
 import { PendingChangesBar } from './PendingChangesBar';
@@ -39,6 +41,7 @@ import { toast } from '@/components/ui';
 import { Button } from '@/components/ui/button';
 // useMessageStore removed — messages now come from sync system
 import { isVSCodeRuntime } from '@/lib/desktop';
+import { probeSessionGoalSupport, probeSessionGoalSupportForSession } from '@/lib/sessionGoalLocal';
 import { isIMECompositionEvent } from '@/lib/ime';
 import { ContextUsageDisplay } from '@/components/ui/ContextUsageDisplay';
 import { StopIcon } from '@/components/icons/StopIcon';
@@ -1413,6 +1416,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             ...Object.keys(GUIDED_SESSION_COMMANDS),
         ]);
         if (!isMobile && !isVSCodeRuntime()) names.add('handoff-review');
+        if (!isVSCodeRuntime()) names.add('craft-goal');
         for (const command of availableCommands) names.add(command.name.toLowerCase());
         for (const skill of availableSkills) names.add(skill.name.toLowerCase());
         return names;
@@ -2391,6 +2395,53 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                     scrollToBottom?.();
                 } catch (error) {
                     toast.error(error instanceof Error ? error.message : t('chat.chatInput.toast.reviewFailed'));
+                }
+                return;
+            }
+            else if (
+                commandName === 'craft-goal'
+                && !isVSCodeRuntime()
+                && (submittedSessionId || submittedNewSessionDraftOpen)
+            ) {
+                const craftGoalSupport = submittedSessionId
+                    ? await probeSessionGoalSupportForSession(submittedSessionId)
+                    : await probeSessionGoalSupport(
+                        submittedNewSessionDraftOpen
+                            ? useProjectsStore.getState().projects.find(
+                                (project) => project.id === useSessionUIStore.getState().newSessionDraft?.selectedProjectId,
+                            )?.serverId
+                            : undefined,
+                    );
+                if (!craftGoalSupport.supported) {
+                    toast.error(t(
+                        craftGoalSupport.reason === 'unreachable'
+                            ? 'chat.goal.toast.remoteUnreachable'
+                            : 'chat.goal.toast.remoteUnsupported',
+                    ));
+                    return;
+                }
+                try {
+                    await sessionActions.waitForConnectionOrThrow();
+                    const idea = normalizedCommand.replace(/^\/craft-goal\b/i, '').trim();
+                    const visibleText = await renderMagicPrompt('session.craftGoal.visible', {
+                        idea_block: idea ? `\n\nHere is my initial idea:\n${idea}` : '',
+                    });
+                    const instructionsText = await renderMagicPrompt('session.craftGoal.instructions');
+                    await sendMessage(
+                        visibleText,
+                        providerIdToSend,
+                        modelIdToSend,
+                        agentNameToSend,
+                        [],
+                        agentMentionName,
+                        [{ text: instructionsText, synthetic: true }],
+                        variantToSend,
+                        inputMode,
+                        submittedSendTarget,
+                    );
+                    scrollToBottom?.();
+                } catch (error) {
+                    toast.error(error instanceof Error ? error.message : t('chat.chatInput.toast.craftGoalFailed'));
                 }
                 return;
             }
@@ -4564,6 +4615,11 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                     sessionId={currentSessionId}
                     directory={currentSessionDirectoryForSync ?? currentDirectory}
                 />
+                <SessionGoalRow
+                    sessionId={currentSessionId}
+                    directory={currentSessionDirectoryForSync ?? currentDirectory}
+                    className="mb-1.5"
+                />
                 <MemoStatusRow
                     showAssistantStatus={false}
                     showTodos
@@ -4896,6 +4952,15 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                             permissionAutoAcceptEnabled={permissionAutoAcceptEnabled}
                                             handlePermissionAutoAcceptToggle={handlePermissionAutoAcceptToggle}
                                         />
+                                        <SessionGoalButton
+                                            sessionId={currentSessionId}
+                                            directory={currentSessionDirectoryForSync ?? currentDirectory}
+                                            draftOpen={newSessionDraftOpen}
+                                            serverIdHint={selectedDraftProject?.serverId}
+                                            footerIconButtonClass={footerIconButtonClass}
+                                            iconSizeClass={iconSizeClass}
+                                        />
+                                        <SessionGoalObjectiveCounter length={message.length} />
                                     </div>
                                     <div className="flex items-center min-w-0 gap-x-1 justify-end">
                                         <div className="flex items-center gap-x-2 min-w-0 max-w-[60vw] flex-shrink">
@@ -4964,6 +5029,16 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                         handlePermissionAutoAcceptToggle={handlePermissionAutoAcceptToggle}
                                         withTooltip
                                     />
+                                    <SessionGoalButton
+                                        sessionId={currentSessionId}
+                                        directory={currentSessionDirectoryForSync ?? currentDirectory}
+                                        draftOpen={newSessionDraftOpen}
+                                        serverIdHint={selectedDraftProject?.serverId}
+                                        footerIconButtonClass={footerIconButtonClass}
+                                        iconSizeClass={iconSizeClass}
+                                        withTooltip
+                                    />
+                                    <SessionGoalObjectiveCounter length={message.length} />
                                 </div>
                                 <div className={cn('flex items-center flex-1 justify-end', footerGapClass, 'md:gap-x-3')}>
                                     {shouldShowComposerContextUsage ? (

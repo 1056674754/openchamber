@@ -47,6 +47,8 @@ import { MultiRunFusionDialog } from '@/components/multirun/MultiRunFusionDialog
 import { FusionIcon } from '@/components/icons/FusionIcon';
 import { Icon } from "@/components/icon/Icon";
 import type { IconName } from "@/components/icon/icons";
+import { getSessionGoal } from '@/lib/sessionGoalMetadata';
+import { sessionGoalStatusColor, sessionGoalStatusLabelKey } from '@/lib/sessionGoalPresentation';
 import type {
   SessionStatusMarker,
   SessionTodoMarker,
@@ -414,6 +416,16 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
   const childLoadStatus = useGlobalSessionsStore((state) => state.childLoadState.get(session.id));
   const liveSession = useSession(session.id);
   const resolvedSession = liveSession ?? session;
+  const sessionGoal = getSessionGoal(resolvedSession);
+  const sessionGoalGlyph = sessionGoal ? (
+    <span
+      className="inline-flex flex-shrink-0 items-center"
+      title={t(sessionGoalStatusLabelKey[sessionGoal.status])}
+      aria-label={t(sessionGoalStatusLabelKey[sessionGoal.status])}
+    >
+      <Icon name="target" className="h-3 w-3" style={{ color: sessionGoalStatusColor[sessionGoal.status] }} />
+    </span>
+  ) : null;
   const isDeleting = useSessionUIStore((s) => s.deletingSessionIds.has(session.id));
   const isGlobalPinnedContext = renderContext === 'global-pinned';
   const isGlobalPinnedRootRow = isGlobalPinnedContext && depth === 0;
@@ -1307,15 +1319,21 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
                         {renderHighlightedText(sessionTitle, normalizedSessionSearchQuery)}
                       </div>
                       {remoteIndicator}
-                      {alwaysShowActions ? <span className="ml-2 flex-shrink-0 text-[0.72rem] text-muted-foreground/75">{sessionCompactUpdatedLabel}</span> : null}
+                      {alwaysShowActions ? (
+                        <span className="ml-2 inline-flex flex-shrink-0 items-center gap-1 text-[0.72rem] text-muted-foreground/75">
+                          {sessionGoalGlyph}
+                          {sessionCompactUpdatedLabel}
+                        </span>
+                      ) : null}
                       {!alwaysShowActions ? (
                         <div className="relative ml-1 flex h-4 min-w-4 flex-shrink-0 items-center justify-end">
                           <span className={cn(
-                            'whitespace-nowrap text-right text-[0.72rem] text-muted-foreground/75 transition-opacity duration-150',
+                            'inline-flex items-center gap-1 whitespace-nowrap text-right text-[0.72rem] text-muted-foreground/75 transition-opacity duration-150',
                             isMenuOpen
                               ? 'opacity-0'
                               : hideOnHoverClass,
                           )}>
+                            {sessionGoalGlyph}
                             {sessionCompactUpdatedLabel}
                           </span>
                         </div>
@@ -1390,6 +1408,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
                 {!isMinimalMode ? (
                   <div className="flex items-center justify-between gap-3 text-muted-foreground/60 min-w-0 overflow-hidden leading-tight" style={{ fontSize: 'calc(var(--text-ui-label) * 0.85)' }}>
                     <div className="flex min-w-0 items-center gap-1.5 overflow-hidden">
+                      {sessionGoalGlyph}
                       <span className="flex-shrink-0">{sessionUpdatedLabel}</span>
                       {sessionDiffStats ? <span className="flex flex-shrink-0 items-center gap-0 text-[0.92em]"><span className="text-status-success/80">+{sessionDiffStats.additions}</span><span className="text-muted-foreground/60">/</span><span className="text-status-error/65">-{sessionDiffStats.deletions}</span></span> : null}
                       {hasSecondaryProjectLabel ? <span className="truncate">{secondaryMeta?.projectLabel}</span> : null}

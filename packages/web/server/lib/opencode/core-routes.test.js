@@ -25,6 +25,25 @@ describe('core-routes', () => {
     expect(shutdownOpts).toEqual({ exitProcess: true });
   });
 
+  it('should advertise sessionGoals on /api/system/info', async () => {
+    const app = express();
+    const dependencies = {
+      gracefulShutdown: vi.fn(async () => {}),
+      getHealthSnapshot: () => ({ status: 'ok' }),
+      openchamberVersion: '1.0.0',
+      runtimeName: 'test',
+      serverStartedAt: 1,
+      process,
+      express,
+    };
+    registerServerStatusRoutes(app, dependencies);
+
+    const response = await request(app).get('/api/system/info').expect(200);
+    expect(response.body.features).toEqual({
+      sessionGoals: { apiVersion: 1 },
+    });
+  });
+
   it('should parse JSON bodies for snippet config routes', async () => {
     const app = express();
     registerCommonRequestMiddleware(app, { express });

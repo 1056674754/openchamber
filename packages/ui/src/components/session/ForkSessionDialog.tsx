@@ -7,14 +7,19 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/textarea';
+import { Checkbox } from '@/components/ui/checkbox';
 import { ModelSelector } from '@/components/sections/agents/ModelSelector';
 import { AgentSelector } from '@/components/sections/commands/AgentSelector';
 import { ThinkingPill } from '@/components/session/ThinkingPill';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useAgentsStore } from '@/stores/useAgentsStore';
 import { isPrimaryMode } from '@/components/chat/mobileControlsUtils';
-import { EXECUTION_FORK_DEFAULT_INSTRUCTIONS } from '@/lib/messages/executionMeta';
+import {
+  EXECUTION_FORK_DEFAULT_INSTRUCTIONS,
+  EXECUTION_FORK_GOAL_INSTRUCTIONS,
+} from '@/lib/messages/executionMeta';
 import { useI18n } from '@/lib/i18n';
+import { isVSCodeRuntime } from '@/lib/desktop';
 
 export type ForkSessionExecution = {
   providerID: string;
@@ -22,6 +27,7 @@ export type ForkSessionExecution = {
   variant: string;
   agent: string;
   instructions: string;
+  runAsGoal?: boolean;
 };
 
 type ForkSessionDialogProps = {
@@ -29,12 +35,21 @@ type ForkSessionDialogProps = {
   onOpenChange: (open: boolean) => void;
   projectDirectory: string | null;
   submitting?: boolean;
+  /** Offer a "Run as goal" checkbox (hidden in VS Code / remote). */
+  allowRunAsGoal?: boolean;
   onConfirm: (execution: ForkSessionExecution) => Promise<void> | void;
 };
 
 export function ForkSessionDialog(props: ForkSessionDialogProps) {
   const { t } = useI18n();
-  const { open, onOpenChange, projectDirectory, submitting = false, onConfirm } = props;
+  const {
+    open,
+    onOpenChange,
+    projectDirectory,
+    submitting = false,
+    allowRunAsGoal = false,
+    onConfirm,
+  } = props;
 
   const loadProviders = useConfigStore((state) => state.loadProviders);
   const loadConfigAgents = useConfigStore((state) => state.loadAgents);
@@ -50,6 +65,20 @@ export function ForkSessionDialog(props: ForkSessionDialogProps) {
   const [variant, setVariant] = React.useState(currentVariant);
   const [agent, setAgent] = React.useState(currentAgentName);
   const [instructions, setInstructions] = React.useState(EXECUTION_FORK_DEFAULT_INSTRUCTIONS);
+  const [runAsGoal, setRunAsGoal] = React.useState(false);
+  const showRunAsGoal = allowRunAsGoal && !isVSCodeRuntime();
+
+  // Toggling goal mode swaps the prefilled instructions between the
+  // report-back default and the assertive execute-to-completion variant —
+  // but never clobbers text the user has edited.
+  const handleToggleRunAsGoal = React.useCallback((next: boolean) => {
+    setRunAsGoal(next);
+    setInstructions((current) => {
+      if (next && current === EXECUTION_FORK_DEFAULT_INSTRUCTIONS) return EXECUTION_FORK_GOAL_INSTRUCTIONS;
+      if (!next && current === EXECUTION_FORK_GOAL_INSTRUCTIONS) return EXECUTION_FORK_DEFAULT_INSTRUCTIONS;
+      return current;
+    });
+  }, []);
 
   React.useEffect(() => {
     if (!open) return;
@@ -69,6 +98,7 @@ export function ForkSessionDialog(props: ForkSessionDialogProps) {
     setVariant(config.currentVariant || '');
     setAgent(config.currentAgentName || '');
     setInstructions(EXECUTION_FORK_DEFAULT_INSTRUCTIONS);
+    setRunAsGoal(false);
   }, [open]);
 
   React.useEffect(() => {
@@ -106,8 +136,15 @@ export function ForkSessionDialog(props: ForkSessionDialogProps) {
 
   const handleSubmit = React.useCallback(() => {
     if (!canConfirm || submitting) return;
-    void onConfirm({ providerID, modelID, variant, agent, instructions });
-  }, [canConfirm, submitting, onConfirm, providerID, modelID, variant, agent, instructions]);
+    void onConfirm({
+      providerID,
+      modelID,
+      variant,
+      agent,
+      instructions,
+      runAsGoal: showRunAsGoal && runAsGoal,
+    });
+  }, [canConfirm, submitting, onConfirm, providerID, modelID, variant, agent, instructions, showRunAsGoal, runAsGoal]);
 
   React.useEffect(() => {
     if (!open) return;
@@ -171,15 +208,35 @@ export function ForkSessionDialog(props: ForkSessionDialogProps) {
           </div>
         </div>
 
-        <div className="flex items-center justify-end gap-2">
-          <Button variant="ghost" size="sm" onClick={() => onOpenChange(false)} disabled={submitting}>
-            {t('rightSidebar.contextNotesTodo.sendDialog.actions.cancel')}
-          </Button>
-          <Button size="sm" onClick={handleSubmit} disabled={!canConfirm || submitting}>
-            {submitting
-              ? t('rightSidebar.contextNotesTodo.sendDialog.actions.sending')
-              : t('rightSidebar.contextNotesTodo.sendDialog.actions.send')}
-          </Button>
+        <div className={`flex items-center gap-3 ${showRunAsGoal ? 'justify-between' : 'justify-end'}`}>
+          {showRunAsGoal ? (
+            <div className="flex min-w-0 items-center gap-2">
+              <Checkbox
+                checked={runAsGoal}
+                onChange={handleToggleRunAsGoal}
+                disabled={submitting}
+                ariaLabel={t('sessions.scheduledTasks.editor.goal.aria')}
+              />
+              <button
+                type="button"
+                className="truncate typography-ui-label text-muted-foreground transition-colors hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={submitting}
+                onClick={() => handleToggleRunAsGoal(!runAsGoal)}
+              >
+                {t('sessions.scheduledTasks.editor.goal.label')}
+              </button>
+            </div>
+          ) : null}
+          <div className="flex items-center justify-end gap-2">
+            <Button variant="ghost" size="sm" onClick={() => onOpenChange(false)} disabled={submitting}>
+              {t('rightSidebar.contextNotesTodo.sendDialog.actions.cancel')}
+            </Button>
+            <Button size="sm" onClick={handleSubmit} disabled={!canConfirm || submitting}>
+              {submitting
+                ? t('rightSidebar.contextNotesTodo.sendDialog.actions.sending')
+                : t('rightSidebar.contextNotesTodo.sendDialog.actions.send')}
+            </Button>
+          </div>
         </div>
       </DialogContent>
     </Dialog>

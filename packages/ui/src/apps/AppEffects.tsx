@@ -6,6 +6,7 @@ import { useSessionAutoCleanup } from '@/hooks/useSessionAutoCleanup';
 import { useSessionPresenceBeacon } from '@/hooks/useSessionPresenceBeacon';
 import { useWindowControlsOverlayLayout } from '@/hooks/useWindowControlsOverlayLayout';
 import { OpenChamberPluginStatusToast } from '@/components/update/OpenChamberPluginStatusToast';
+import { RemoteSessionGoalSettleToast } from '@/components/chat/RemoteSessionGoalSettleToast';
 import { setOptimisticRefs } from '@/sync/session-actions';
 import { markSessionViewed } from '@/sync/notification-store';
 import { setExternallyViewedSession } from '@/sync/sync-context';
@@ -86,6 +87,7 @@ export function SyncAppEffects({ embeddedBackgroundWorkEnabled }: {
       <SyncRuntimeEffects embeddedBackgroundWorkEnabled={embeddedBackgroundWorkEnabled} />
       <MiniChatPresenceBridge />
       <OpenChamberPluginStatusToast />
+      <RemoteSessionGoalSettleToast />
     </>
   );
 }

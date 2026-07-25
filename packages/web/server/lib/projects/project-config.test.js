@@ -37,6 +37,8 @@ describe('project-config runtime', () => {
           providerID: 'openai',
           modelID: 'gpt-4.1',
           permissionAutoAccept: true,
+          goalEnabled: true,
+          goalTokenBudget: 200000,
         },
       });
 
@@ -48,6 +50,8 @@ describe('project-config runtime', () => {
       expect(reloaded[0].schedule.timezone).toBe('UTC');
       expect(reloaded[0].schedule.times).toEqual(['09:30']);
       expect(reloaded[0].execution.permissionAutoAccept).toBe(true);
+      expect(reloaded[0].execution.goalEnabled).toBe(true);
+      expect(reloaded[0].execution.goalTokenBudget).toBe(200000);
     } finally {
       await cleanup();
     }

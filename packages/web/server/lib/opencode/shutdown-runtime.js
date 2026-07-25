@@ -10,6 +10,7 @@ export const createGracefulShutdownRuntime = (dependencies) => {
     openCodeConfigFileWatcherRuntime,
     sessionRuntime,
     scheduledTasksRuntime,
+    sessionGoalRuntime,
     getHealthCheckInterval,
     clearHealthCheckInterval,
     getTerminalRuntime,
@@ -45,6 +46,7 @@ export const createGracefulShutdownRuntime = (dependencies) => {
     openCodeConfigFileWatcherRuntime?.stop();
     sessionRuntime.dispose();
     scheduledTasksRuntime?.stop?.();
+    sessionGoalRuntime?.stop?.();
 
     const remoteInstancesRuntime = getRemoteInstancesRuntime?.();
     if (remoteInstancesRuntime) {

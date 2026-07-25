@@ -78,6 +78,13 @@ import {
   createDraftPermissionIntent,
   type DraftPermissionIntent,
 } from "./draft-permission-intent"
+import { useSessionGoalArmStore } from "@/stores/useSessionGoalArmStore"
+import { setSessionGoal } from "@/lib/sessionGoalActions"
+import { probeSessionGoalSupport } from "@/lib/sessionGoalLocal"
+import { wrapSystemReminder } from "@/lib/systemReminder"
+import { useUIStore } from "@/stores/useUIStore"
+import { toast } from "@/components/ui"
+import { formatMessage, useI18nStore } from "@/lib/i18n/store"
 
 export type { AttachedFile }
 
@@ -376,7 +383,7 @@ export type SessionUIState = {
   handleSlashRedo: (sessionId: string, options?: { fullUnrevert?: boolean }) => Promise<void>
   handleSlashCompact: (content: string, sessionId: string) => Promise<void>
   tryDispatchLocalSlashCommand: (content: string, sessionId: string) => Promise<boolean>
-  createSessionFromAssistantMessage: (sourceMessageId: string, execution: { providerID: string; modelID: string; variant: string; agent: string; instructions: string }) => Promise<void>
+  createSessionFromAssistantMessage: (sourceMessageId: string, execution: { providerID: string; modelID: string; variant: string; agent: string; instructions: string; runAsGoal?: boolean }) => Promise<void>
 
   // Data access helpers (read from sync)
   getSessionsByDirectory: (directory: string) => Session[]
@@ -1200,6 +1207,67 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     const draft = targetSessionId ? null : (sendTarget.draft ?? get().newSessionDraft)
     const trimmedAgent = typeof agent === "string" && agent.trim().length > 0 ? agent.trim() : undefined
 
+    const goalArm = inputMode !== "shell" && content.trim().length > 0
+      ? useSessionGoalArmStore.getState().consume()
+      : { armed: false, objectiveOverride: null }
+    let goalArmed = goalArm.armed
+    let mutableAdditionalParts = additionalParts
+    if (goalArmed) {
+      const prospectiveSessionId = targetSessionId ?? sid
+      const draftProjectId = draft?.selectedProjectId ?? null
+      const draftProjectServerId = draftProjectId
+        ? useProjectsStore.getState().projects.find((project) => project.id === draftProjectId)?.serverId
+        : undefined
+      const prospectiveServerId = targetServerId
+        ?? (prospectiveSessionId ? serverRegistry.getServerForSession(prospectiveSessionId) : undefined)
+        ?? (draftProjectServerId ? normalizeOptionalServerId(draftProjectServerId) : undefined)
+        ?? DEFAULT_SERVER_ID
+      // Capability probe: local always ok; remote needs Goals-capable OpenChamber.
+      const support = await probeSessionGoalSupport(prospectiveServerId)
+      if (!support.supported) {
+        const { dictionary } = useI18nStore.getState()
+        toast.error(formatMessage(
+          dictionary,
+          support.reason === "unreachable"
+            ? "chat.goal.toast.remoteUnreachable"
+            : "chat.goal.toast.remoteUnsupported",
+        ))
+        goalArmed = false
+      } else {
+        // Teach the agent the goal protocol from turn one — without this it
+        // only learns about goal mode from the first server continuation.
+        const uiState = useUIStore.getState()
+        const budgetLine = uiState.sessionGoalDefaultBudgetEnabled
+          ? ` A token budget of ${uiState.sessionGoalDefaultBudget} tokens applies to this goal.`
+          : ""
+        const goalIntro = wrapSystemReminder(
+          "Goal mode is active for this session. The user message above defines the goal objective. "
+          + "Work toward it across turns; whenever you stop before the objective is verifiably complete, the system will automatically prompt you to continue. "
+          + "Progress is evaluated independently after each turn, so end every turn with a clear, factual statement of what is done, what was verified, and what remains."
+          + budgetLine,
+        )
+        mutableAdditionalParts = [...(mutableAdditionalParts ?? []), { text: goalIntro, synthetic: true }]
+      }
+    }
+    const applyArmedGoal = (goalSessionId: string, goalDirectory: string | null | undefined) => {
+      if (!goalArmed) return
+      // setSessionGoal re-probes and toasts on failure — never leave a half-armed send.
+      const uiState = useUIStore.getState()
+      const tokenBudget = uiState.sessionGoalDefaultBudgetEnabled ? uiState.sessionGoalDefaultBudget : null
+      const objective = goalArm.objectiveOverride?.trim() || content
+      void setSessionGoal(goalSessionId, goalDirectory ?? undefined, { objective, tokenBudget }, null)
+        .catch((error) => {
+          console.warn("[session-ui-store] failed to set goal from armed send", error)
+          const { dictionary } = useI18nStore.getState()
+          toast.error(
+            error instanceof Error && error.message
+              ? error.message
+              : formatMessage(dictionary, "chat.goal.toast.actionFailed"),
+          )
+        })
+    }
+    additionalParts = mutableAdditionalParts
+
     // ---- New session from draft ----
     if (draft?.open) {
       const draftTargetFolderId = draft.targetFolderId
@@ -1290,6 +1358,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
 
             notifyMessageSent(serverSession.id, createdDirectory)
             markPendingUserSendAnimation(serverSession.id)
+            applyArmedGoal(serverSession.id, createdDirectory)
 
             const files = attachments?.map((a) => ({
               type: "file" as const,
@@ -1408,6 +1477,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       notifyMessageSent(created.id, createdDirectory)
 
       markPendingUserSendAnimation(created.id)
+      applyArmedGoal(created.id, createdDirectory)
 
       const files = attachments?.map((a) => ({
         type: "file" as const,
@@ -1515,6 +1585,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     notifyMessageSent(currentSessionId, currentSessionDirectory)
 
     markPendingUserSendAnimation(currentSessionId)
+    applyArmedGoal(currentSessionId, currentSessionDirectory)
 
     const files = attachments?.map((a) => ({
       type: "file" as const,
@@ -1883,16 +1954,26 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
 
     const sessionDirectory = normalizePath((session as { directory?: string | null }).directory ?? directory)
     const sessionServerId = serverRegistry.getServerForSession(session.id)
-    await opencodeClient.sendMessage({
-      id: session.id,
-      providerID: pID,
-      modelID: mID,
-      variant: execution.variant || undefined,
-      text: composeForkSessionMessage(execution.instructions, assistantPlanText),
-      agent: execution.agent || undefined,
-      directory: sessionDirectory,
-      serverId: sessionServerId,
-    })
+
+    // "Run as goal" rides the same arm mechanism as the composer target
+    // button: sendMessage consumes the flag, stamps the goal (objective =
+    // the composed fork message) and attaches the goal-mode intro part.
+    // Set explicitly either way so a stray armed flag cannot leak into a
+    // non-goal fork.
+    useSessionGoalArmStore.getState().setArmed(execution.runAsGoal === true)
+
+    await get().sendMessage(
+      composeForkSessionMessage(execution.instructions, assistantPlanText),
+      pID,
+      mID,
+      execution.agent || undefined,
+      undefined,
+      undefined,
+      undefined,
+      execution.variant || undefined,
+      undefined,
+      { sessionId: session.id, directory: sessionDirectory, serverId: sessionServerId },
+    )
   },
 
   // ---------------------------------------------------------------------------

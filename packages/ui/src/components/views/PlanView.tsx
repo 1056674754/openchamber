@@ -42,6 +42,8 @@ import { Icon } from "@/components/icon/Icon";
 import { useMessageTTS } from '@/hooks/useMessageTTS';
 import { renderMagicPrompt } from '@/lib/magicPrompts';
 import { useI18n } from '@/lib/i18n';
+import { useSessionGoalArmStore } from '@/stores/useSessionGoalArmStore';
+import { useSessionGoalServerSupport } from '@/hooks/useSessionGoalServerSupport';
 
 type PlanViewProps = {
   targetPath?: string | null;
@@ -192,6 +194,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
     () => resolveProjectRefForDirectory(projectDirectory, projects, activeProjectId),
     [activeProjectId, projectDirectory, projects],
   );
+  const planGoalSupport = useSessionGoalServerSupport(currentProjectRef?.serverId);
   const canCreateWorktree = React.useMemo(
     () => (currentProjectRef ? gitDirectories.get(currentProjectRef.path)?.isGitRepo === true : false),
     [currentProjectRef, gitDirectories],
@@ -595,6 +598,17 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
         }
 
         setCurrentSession(sessionId, directoryHint);
+        // Oversized objectives are distilled inside setSessionGoal. Here we
+        // only compose header + full plan content for the auditor objective.
+        const goalObjective = execution.runAsGoal === true
+          ? [
+              `Implement the plan "${sendPromptTitle}" end-to-end${resolvedPath ? ` (plan file: ${resolvedPath})` : ''}.`,
+              'Re-read that file for full details — it is the source of truth.',
+              '',
+              content,
+            ].join('\n')
+          : null;
+        useSessionGoalArmStore.getState().setArmed(execution.runAsGoal === true, goalObjective);
         await sendMessage(
           visiblePrompt,
           execution.providerID,
@@ -613,7 +627,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
         setIsPlanSendSubmitting(false);
       }
     },
-    [canCreateWorktree, createSession, currentProjectRef, initializeNewOpenChamberSession, pendingPlanSend, resolvedPath, routeToChat, sendMessage, sendPromptTitle, setCurrentSession]
+    [canCreateWorktree, content, createSession, currentProjectRef, initializeNewOpenChamberSession, pendingPlanSend, resolvedPath, routeToChat, sendMessage, sendPromptTitle, setCurrentSession]
   );
 
   const blockWidgets = React.useMemo(() => {
@@ -780,6 +794,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
         target={pendingPlanSend?.target ?? 'session'}
         projectDirectory={currentProjectRef?.path ?? null}
         submitting={isPlanSendSubmitting}
+        allowRunAsGoal={planGoalSupport.supported}
         onConfirm={handleConfirmPlanSend}
       />
 

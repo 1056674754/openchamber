@@ -12,6 +12,7 @@ export type CommandAutocompleteDescriptions = {
   readonly workspaceReview: string;
   readonly handoffReview: string;
   readonly featurePlan: string;
+  readonly craftGoal: string;
   readonly catchUp: string;
   readonly debug: string;
   readonly weigh: string;
@@ -42,6 +43,7 @@ type CommandBuildOptions = {
   readonly hasMessagesInCurrentSession: boolean;
   readonly canStartSessionCommand: boolean;
   readonly canUseReviewHandoffFlow: boolean;
+  readonly canUseCraftGoal: boolean;
   readonly descriptions: CommandAutocompleteDescriptions;
 };
 
@@ -50,6 +52,7 @@ type BuiltInCommandOptions = {
   readonly hasMessagesInCurrentSession: boolean;
   readonly canStartSessionCommand: boolean;
   readonly canUseReviewHandoffFlow: boolean;
+  readonly canUseCraftGoal: boolean;
   readonly descriptions: CommandAutocompleteDescriptions;
 };
 
@@ -58,6 +61,7 @@ const createBuiltInCommands = ({
   hasMessagesInCurrentSession,
   canStartSessionCommand,
   canUseReviewHandoffFlow,
+  canUseCraftGoal,
   descriptions,
 }: BuiltInCommandOptions): CommandInfo[] => [
   ...(hasSession && !hasMessagesInCurrentSession
@@ -87,6 +91,10 @@ const createBuiltInCommands = ({
   ),
   ...(canStartSessionCommand
     ? [{ id: 'openchamber:plan-feature', name: 'plan-feature', source: 'openchamber' as const, description: descriptions.featurePlan, isOpenChamber: true }]
+    : []
+  ),
+  ...(canUseCraftGoal
+    ? [{ id: 'openchamber:craft-goal', name: 'craft-goal', source: 'openchamber' as const, description: descriptions.craftGoal, isOpenChamber: true }]
     : []
   ),
   ...(canStartSessionCommand
@@ -138,6 +146,7 @@ export const buildCommandAutocompleteEntries = ({
   hasMessagesInCurrentSession,
   canStartSessionCommand,
   canUseReviewHandoffFlow,
+  canUseCraftGoal,
   descriptions,
 }: CommandBuildOptions): CommandInfo[] => {
   const skillNames = new Set(skills.map((skill) => skill.name));
@@ -161,7 +170,7 @@ export const buildCommandAutocompleteEntries = ({
     scope: skill.scope,
   }));
   const allCommands = [
-    ...createBuiltInCommands({ hasSession, hasMessagesInCurrentSession, canStartSessionCommand, canUseReviewHandoffFlow, descriptions }),
+    ...createBuiltInCommands({ hasSession, hasMessagesInCurrentSession, canStartSessionCommand, canUseReviewHandoffFlow, canUseCraftGoal, descriptions }),
     ...customCommands,
     ...skillCommands,
   ];
@@ -175,9 +184,10 @@ export const buildFallbackCommandAutocompleteEntries = ({
   hasMessagesInCurrentSession,
   canStartSessionCommand,
   canUseReviewHandoffFlow,
+  canUseCraftGoal,
   descriptions,
 }: Omit<CommandBuildOptions, 'commandsWithMetadata' | 'skills'>): CommandInfo[] => filterCommandEntries(
-  createBuiltInCommands({ hasSession, hasMessagesInCurrentSession, canStartSessionCommand, canUseReviewHandoffFlow, descriptions }),
+  createBuiltInCommands({ hasSession, hasMessagesInCurrentSession, canStartSessionCommand, canUseReviewHandoffFlow, canUseCraftGoal, descriptions }),
   searchQuery,
   !hasMessagesInCurrentSession
 );
