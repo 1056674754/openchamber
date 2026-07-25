@@ -51,6 +51,10 @@ const resetCatalog = (): void => {
     sessionStatuses: new Map(),
     hasLoaded: false,
     isCompleteSnapshot: false,
+    completeSnapshotScopes: new Set(),
+    catalogRevision: 0,
+    sessionEventRevision: {},
+    sessionDeletedRevision: {},
     status: 'idle',
   });
 };
@@ -294,6 +298,7 @@ describe('upsertSession freshness', () => {
 
 describe('applyRemoteDirectorySnapshot', () => {
   test('replaces only the matching server and directory', () => {
+    resetCatalog();
     const local = makeSession('local-session', DIR_A);
     const previousA = makeSession('remote-a-old', DIR_A);
     const remoteB = makeSession('remote-b-session', DIR_A);
@@ -318,6 +323,150 @@ describe('applyRemoteDirectorySnapshot', () => {
     ]);
     expect(state.sessionStatuses.has(previousA.id)).toBe(false);
     expect(serverRegistry.getServerForSession(nextA.id)).toBe('remote-a');
+    expect(state.isScopeSnapshotComplete('remote-a', DIR_A)).toBe(true);
+  });
+
+  test('successful empty snapshot clears only that remote scope', () => {
+    resetCatalog();
+    const local = makeSession('local-session', DIR_A);
+    const remote = makeSession('remote-a-old', DIR_A);
+    serverRegistry.indexSession(local.id, DEFAULT_SERVER_ID);
+    serverRegistry.indexSession(remote.id, 'remote-a');
+    useGlobalSessionsStore.setState({
+      activeSessions: [local, remote],
+      archivedSessions: [],
+      sessionsByDirectory: new Map([[DIR_A, [local, remote]]]),
+      hasLoaded: true,
+    });
+
+    useGlobalSessionsStore.getState().applyRemoteDirectorySnapshot('remote-a', DIR_A, []);
+
+    const state = useGlobalSessionsStore.getState();
+    expect(state.activeSessions.map((session) => session.id)).toEqual(['local-session']);
+    expect(state.isScopeSnapshotComplete('remote-a', DIR_A)).toBe(true);
+  });
+
+  test('preserves an in-flight create that raced the list response', () => {
+    resetCatalog();
+    const listed = makeSession('listed', DIR_A);
+    const live = makeSession('live-create', DIR_A);
+    serverRegistry.indexSession(listed.id, 'remote-a');
+    serverRegistry.indexSession(live.id, 'remote-a');
+    useGlobalSessionsStore.setState({
+      activeSessions: [live],
+      archivedSessions: [],
+      sessionsByDirectory: new Map([[DIR_A, [live]]]),
+      catalogRevision: 4,
+      sessionEventRevision: { [live.id]: 5 },
+    });
+
+    useGlobalSessionsStore.getState().applyRemoteDirectorySnapshot('remote-a', DIR_A, [listed], {
+      baselineRevision: 4,
+    });
+
+    expect(useGlobalSessionsStore.getState().activeSessions.map((session) => session.id).sort()).toEqual([
+      'listed',
+      'live-create',
+    ]);
+  });
+
+  test('does not resurrect a session deleted after the list request started', () => {
+    resetCatalog();
+    const deleted = makeSession('deleted', DIR_A);
+    serverRegistry.indexSession(deleted.id, 'remote-a');
+    useGlobalSessionsStore.setState({
+      activeSessions: [],
+      archivedSessions: [],
+      sessionsByDirectory: new Map(),
+      catalogRevision: 3,
+      sessionDeletedRevision: { [deleted.id]: 3 },
+    });
+
+    useGlobalSessionsStore.getState().applyRemoteDirectorySnapshot('remote-a', DIR_A, [deleted], {
+      baselineRevision: 2,
+    });
+
+    expect(useGlobalSessionsStore.getState().activeSessions).toEqual([]);
+  });
+});
+
+describe('applyDirectorySnapshot isolation', () => {
+  test('same-path local and remote catalogs do not prune each other', () => {
+    resetCatalog();
+    const local = makeSession('local-same-path', DIR_A);
+    const remote = makeSession('remote-same-path', DIR_A);
+    serverRegistry.indexSession(local.id, DEFAULT_SERVER_ID);
+    serverRegistry.indexSession(remote.id, 'remote-a');
+    useGlobalSessionsStore.setState({
+      activeSessions: [local, remote],
+      archivedSessions: [],
+      sessionsByDirectory: new Map([[DIR_A, [local, remote]]]),
+      hasLoaded: true,
+    });
+
+    useGlobalSessionsStore.getState().applyDirectorySnapshot(DEFAULT_SERVER_ID, DIR_A, [
+      makeSession('local-next', DIR_A),
+    ]);
+
+    const state = useGlobalSessionsStore.getState();
+    expect(state.activeSessions.map((session) => session.id).sort()).toEqual([
+      'local-next',
+      'remote-same-path',
+    ]);
+    expect(state.isCompleteSnapshot).toBe(true);
+    expect(state.isScopeSnapshotComplete(DEFAULT_SERVER_ID, DIR_A)).toBe(true);
+    expect(state.isScopeSnapshotComplete('remote-a', DIR_A)).toBe(false);
+  });
+});
+
+describe('loadSessions completeness', () => {
+  test('marks a successful roots load as a complete snapshot', async () => {
+    resetCatalog();
+    mockedSdkClient = {
+      experimental: {
+        session: {
+          list: async () => ({
+            data: [makeSession('root', DIR_A)],
+            response: { headers: new Headers() },
+          }),
+        },
+      },
+    };
+
+    await useGlobalSessionsStore.getState().loadSessions();
+
+    expect(useGlobalSessionsStore.getState().isCompleteSnapshot).toBe(true);
+    expect(useGlobalSessionsStore.getState().status).toBe('ready');
+  });
+
+  test('failed fetch preserves existing catalog and does not mark complete', async () => {
+    resetCatalog();
+    const existing = makeSession('keep-me', DIR_A);
+    serverRegistry.indexSession(existing.id, DEFAULT_SERVER_ID);
+    useGlobalSessionsStore.setState({
+      activeSessions: [existing],
+      archivedSessions: [],
+      sessionsByDirectory: new Map([[DIR_A, [existing]]]),
+      hasLoaded: true,
+      isCompleteSnapshot: false,
+      status: 'ready',
+    });
+    mockedSdkClient = {
+      experimental: {
+        session: {
+          list: async () => {
+            throw new Error('network down');
+          },
+        },
+      },
+    };
+
+    await useGlobalSessionsStore.getState().loadSessions();
+
+    const state = useGlobalSessionsStore.getState();
+    expect(state.activeSessions.map((session) => session.id)).toEqual(['keep-me']);
+    expect(state.isCompleteSnapshot).toBe(false);
+    expect(state.status).toBe('error');
   });
 });
 

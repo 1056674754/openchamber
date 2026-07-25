@@ -11,6 +11,14 @@ describe("buildRemoteSessionListUrl", () => {
     expect(url.searchParams.get("limit")).toBe(String(SESSION_LIST_BOOTSTRAP_LIMIT))
   })
 
+  test("can request root-only remote sessions", () => {
+    const url = new URL(
+      buildRemoteSessionListUrl("/api/remote/ssh-1/", "/repo", { roots: true }),
+      "http://openchamber.test",
+    )
+    expect(url.searchParams.get("roots")).toBe("true")
+  })
+
   test("requests local session trees instead of root-only sessions", async () => {
     const calls: unknown[] = []
     const sdk = {

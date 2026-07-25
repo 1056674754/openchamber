@@ -8,11 +8,19 @@ export const SESSION_LIST_BOOTSTRAP_LIMIT = 200
 export const REMOTE_SESSION_LIST_TIMEOUT_MS = SESSION_LIST_BOOTSTRAP_TIMEOUT_MS
 export const REMOTE_SESSION_LIST_LIMIT = SESSION_LIST_BOOTSTRAP_LIMIT
 
-export const buildRemoteSessionListUrl = (baseUrl: string, directory: string): string => {
+export type ListSessionsForBootstrapOptions = {
+  roots?: boolean
+}
+
+export const buildRemoteSessionListUrl = (
+  baseUrl: string,
+  directory: string,
+  options?: ListSessionsForBootstrapOptions,
+): string => {
   const normalizedBaseUrl = baseUrl.replace(/\/+$/, "")
   const params = new URLSearchParams({
     directory,
-    roots: "false",
+    roots: options?.roots === true ? "true" : "false",
     limit: String(REMOTE_SESSION_LIST_LIMIT),
   })
   return `${normalizedBaseUrl}/session?${params.toString()}`
@@ -51,7 +59,9 @@ export async function listSessionsForBootstrap(
   serverId: string,
   directory: string,
   signal?: AbortSignal,
+  options?: ListSessionsForBootstrapOptions,
 ): Promise<Session[]> {
+  const roots = options?.roots === true
   const connection = serverId !== DEFAULT_SERVER_ID ? serverRegistry.get(serverId) : undefined
   if (connection) {
     const headers: Record<string, string> = { Accept: "application/json" }
@@ -60,7 +70,7 @@ export async function listSessionsForBootstrap(
     }
     const request = createRemoteListSignal(signal)
     try {
-      const response = await fetch(buildRemoteSessionListUrl(connection.config.baseUrl, directory), {
+      const response = await fetch(buildRemoteSessionListUrl(connection.config.baseUrl, directory, { roots }), {
         headers,
         signal: request.signal,
       })
@@ -91,7 +101,7 @@ export async function listSessionsForBootstrap(
 
   const result = await sdkClient.session.list({
     directory,
-    roots: false,
+    roots,
     limit: SESSION_LIST_BOOTSTRAP_LIMIT,
   })
   const rawError = (result as { error?: unknown }).error

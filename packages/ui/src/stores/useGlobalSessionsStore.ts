@@ -17,12 +17,32 @@ type LoadResult = {
   archivedSessions: Session[];
 };
 
+export type ApplyDirectorySnapshotOptions = {
+  /** Catalog revision captured before the list request started. */
+  baselineRevision?: number;
+};
+
+export const catalogScopeKey = (serverId: string, directory: string): string => {
+  const normalizedDirectory = normalizePath(directory) ?? directory;
+  return `${serverId}\0${normalizedDirectory}`;
+};
+
 type GlobalSessionsState = {
   activeSessions: Session[];
   archivedSessions: Session[];
   sessionsByDirectory: Map<string, Session[]>;
   hasLoaded: boolean;
+  /**
+   * True after a known-successful default-server catalog load.
+   * Per-directory completeness lives in `completeSnapshotScopes`.
+   */
   isCompleteSnapshot: boolean;
+  /** Keys are `${serverId}\0${directory}` for authoritative directory snapshots. */
+  completeSnapshotScopes: Set<string>;
+  /** Monotonic catalog mutation counter for list/overlay races. */
+  catalogRevision: number;
+  sessionEventRevision: Record<string, number>;
+  sessionDeletedRevision: Record<string, number>;
   status: GlobalSessionsStatus;
   childLoadState: Map<string, DemandLoadStatus>;
   archivedLoadState: Map<string, DemandLoadStatus>;
@@ -33,7 +53,19 @@ type GlobalSessionsState = {
   loadSessionChildren: (session: Session) => Promise<Session[]>;
   loadArchivedSessions: (serverId?: string, force?: boolean) => Promise<Session[]>;
   applySnapshot: (activeSessions: Session[], archivedSessions: Session[], status?: GlobalSessionsStatus) => void;
-  applyRemoteDirectorySnapshot: (serverId: string, directory: string, sessions: Session[]) => void;
+  applyDirectorySnapshot: (
+    serverId: string,
+    directory: string,
+    sessions: Session[],
+    options?: ApplyDirectorySnapshotOptions,
+  ) => void;
+  applyRemoteDirectorySnapshot: (
+    serverId: string,
+    directory: string,
+    sessions: Session[],
+    options?: ApplyDirectorySnapshotOptions,
+  ) => void;
+  isScopeSnapshotComplete: (serverId: string, directory: string) => boolean;
   upsertSession: (session: Session) => void;
   removeSessions: (ids: Iterable<string>) => void;
   archiveSessions: (ids: Iterable<string>, archivedAt?: number) => void;
@@ -537,6 +569,7 @@ const applySnapshot = (
   activeSessions: Session[],
   archivedSessions: Session[],
   status: GlobalSessionsStatus,
+  options?: { markComplete?: boolean },
 ): Partial<GlobalSessionsState> | GlobalSessionsState => {
   const nextActiveSessions = sameSessionList(state.activeSessions, activeSessions)
     ? state.activeSessions
@@ -547,6 +580,8 @@ const applySnapshot = (
   const nextSessionsByDirectory = nextActiveSessions === state.activeSessions
     ? state.sessionsByDirectory
     : buildSessionsByDirectory(nextActiveSessions);
+  const markComplete = options?.markComplete === true;
+  const nextIsCompleteSnapshot = markComplete ? true : state.isCompleteSnapshot;
 
   if (
     nextActiveSessions === state.activeSessions
@@ -554,6 +589,7 @@ const applySnapshot = (
     && nextSessionsByDirectory === state.sessionsByDirectory
     && state.hasLoaded
     && state.status === status
+    && state.isCompleteSnapshot === nextIsCompleteSnapshot
   ) {
     return state;
   }
@@ -563,8 +599,36 @@ const applySnapshot = (
     archivedSessions: nextArchivedSessions,
     sessionsByDirectory: nextSessionsByDirectory,
     hasLoaded: true,
+    isCompleteSnapshot: nextIsCompleteSnapshot,
     status,
   };
+};
+
+const bumpEventRevision = (
+  state: GlobalSessionsState,
+  sessionId: string,
+): Pick<GlobalSessionsState, 'catalogRevision' | 'sessionEventRevision'> => {
+  const catalogRevision = state.catalogRevision + 1;
+  return {
+    catalogRevision,
+    sessionEventRevision: {
+      ...state.sessionEventRevision,
+      [sessionId]: catalogRevision,
+    },
+  };
+};
+
+const bumpDeletedRevisions = (
+  state: GlobalSessionsState,
+  ids: Iterable<string>,
+): Pick<GlobalSessionsState, 'catalogRevision' | 'sessionDeletedRevision'> => {
+  let catalogRevision = state.catalogRevision;
+  const sessionDeletedRevision = { ...state.sessionDeletedRevision };
+  for (const id of ids) {
+    catalogRevision += 1;
+    sessionDeletedRevision[id] = catalogRevision;
+  }
+  return { catalogRevision, sessionDeletedRevision };
 };
 
 export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => ({
@@ -576,38 +640,64 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
   archivedLoadState: new Map(),
   hasLoaded: false,
   isCompleteSnapshot: false,
+  completeSnapshotScopes: new Set(),
+  catalogRevision: 0,
+  sessionEventRevision: {},
+  sessionDeletedRevision: {},
   status: 'idle',
 
   applySnapshot: (activeSessions, archivedSessions, status = 'ready') => {
     set((state) => applySnapshot(state, activeSessions, archivedSessions, status));
   },
 
-  applyRemoteDirectorySnapshot: (serverId, directory, sessions) => {
+  isScopeSnapshotComplete: (serverId, directory) => {
     const normalizedDirectory = normalizePath(directory);
-    if (!normalizedDirectory || serverId === DEFAULT_SERVER_ID) {
+    if (!normalizedDirectory) return false;
+    return get().completeSnapshotScopes.has(catalogScopeKey(serverId, normalizedDirectory));
+  },
+
+  applyDirectorySnapshot: (serverId, directory, sessions, options) => {
+    const normalizedDirectory = normalizePath(directory);
+    if (!normalizedDirectory) {
       return;
     }
 
     const current = get();
+    const baselineRevision = options?.baselineRevision ?? current.catalogRevision;
     const existingById = new Map(
       [...current.activeSessions, ...current.archivedSessions].map((session) => [session.id, session]),
     );
+    const deletedIds = new Set(
+      Object.entries(current.sessionDeletedRevision)
+        .filter(([, revision]) => revision > baselineRevision)
+        .map(([sessionId]) => sessionId),
+    );
+
     const incoming = sessions
-      .filter((session) => Boolean(session?.id))
+      .filter((session) => Boolean(session?.id) && !deletedIds.has(session.id))
       .map((session) => mergeSessionDirectoryMetadata(session, existingById.get(session.id)));
     const incomingIds = new Set(incoming.map((session) => session.id));
-    const previousScopeIds = new Set(
-      [...current.activeSessions, ...current.archivedSessions]
-        .filter((session) => (
-          serverRegistry.getServerForSession(session.id) === serverId
-          && resolveGlobalSessionDirectory(session) === normalizedDirectory
-        ))
-        .map((session) => session.id),
-    );
+
+    const previousScopeSessions = [...current.activeSessions, ...current.archivedSessions]
+      .filter((session) => (
+        (serverRegistry.getServerForSession(session.id) ?? DEFAULT_SERVER_ID) === serverId
+        && resolveGlobalSessionDirectory(session) === normalizedDirectory
+      ));
+    const previousScopeIds = new Set(previousScopeSessions.map((session) => session.id));
+
+    // Overlay in-flight creates/updates that raced the list response.
+    for (const session of previousScopeSessions) {
+      if (incomingIds.has(session.id) || deletedIds.has(session.id)) continue;
+      if ((current.sessionEventRevision[session.id] ?? 0) <= baselineRevision) continue;
+      incoming.push(mergeSessionDirectoryMetadata(session, existingById.get(session.id)));
+      incomingIds.add(session.id);
+    }
 
     for (const session of incoming) {
       serverRegistry.indexSession(session.id, serverId);
     }
+
+    const scopeKey = catalogScopeKey(serverId, normalizedDirectory);
 
     set((state) => {
       const keepExisting = (session: Session): boolean => (
@@ -638,10 +728,20 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
         nextStatuses.delete(id);
       }
 
+      const nextCompleteScopes = state.completeSnapshotScopes.has(scopeKey)
+        ? state.completeSnapshotScopes
+        : new Set(state.completeSnapshotScopes).add(scopeKey);
+      // Any successful scoped snapshot unlocks cleanup; per-scope flags still
+      // decide which directories may be pruned.
+      const nextIsCompleteSnapshot = true;
+
       if (
         nextActiveSessions === state.activeSessions
         && nextArchivedSessions === state.archivedSessions
         && nextStatuses === state.sessionStatuses
+        && nextCompleteScopes === state.completeSnapshotScopes
+        && nextIsCompleteSnapshot === state.isCompleteSnapshot
+        && state.hasLoaded
       ) {
         return state;
       }
@@ -653,14 +753,25 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
           ? state.sessionsByDirectory
           : buildSessionsByDirectory(nextActiveSessions),
         sessionStatuses: nextStatuses,
+        completeSnapshotScopes: nextCompleteScopes,
+        isCompleteSnapshot: nextIsCompleteSnapshot,
+        hasLoaded: true,
+        status: state.status === 'idle' ? 'ready' : state.status,
       };
     });
 
     for (const id of previousScopeIds) {
-      if (!incomingIds.has(id) && serverRegistry.getServerForSession(id) === serverId) {
+      if (!incomingIds.has(id) && (serverRegistry.getServerForSession(id) ?? DEFAULT_SERVER_ID) === serverId) {
         serverRegistry.forgetSession(id);
       }
     }
+  },
+
+  applyRemoteDirectorySnapshot: (serverId, directory, sessions, options) => {
+    if (serverId === DEFAULT_SERVER_ID) {
+      return;
+    }
+    get().applyDirectorySnapshot(serverId, directory, sessions, options);
   },
 
   loadSessions: async (fallbackActive) => {
@@ -684,7 +795,9 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
           const nextActiveSessions = sortSessionsByUpdated(
             mergeSessionLists(mergeSessionLists(roots, state.activeSessions), fallbackActive),
           );
-          return applySnapshot(state, nextActiveSessions, state.archivedSessions, 'ready');
+          return applySnapshot(state, nextActiveSessions, state.archivedSessions, 'ready', {
+            markComplete: true,
+          });
         });
       } catch (error) {
         console.warn('[GlobalSessions] Failed to load sessions, using fallback snapshot:', error);
@@ -868,15 +981,19 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
       const nextArchivedSessions = isArchived
         ? upsertSessionIntoList(state.archivedSessions, sessionWithMetadata)
         : state.archivedSessions.filter((candidate) => candidate.id !== session.id);
+      const revisionPatch = bumpEventRevision(state, session.id);
 
       if (
         nextActiveSessions === state.activeSessions
         && nextArchivedSessions === state.archivedSessions
       ) {
-        return state;
+        return {
+          ...revisionPatch,
+        };
       }
 
       return {
+        ...revisionPatch,
         activeSessions: nextActiveSessions,
         archivedSessions: nextArchivedSessions,
         sessionsByDirectory: nextActiveSessions === state.activeSessions
@@ -895,12 +1012,15 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
     set((state) => {
       const nextActiveSessions = state.activeSessions.filter((session) => !idSet.has(session.id));
       const nextArchivedSessions = state.archivedSessions.filter((session) => !idSet.has(session.id));
+      const revisionPatch = bumpDeletedRevisions(state, idSet);
 
       if (
         nextActiveSessions.length === state.activeSessions.length
         && nextArchivedSessions.length === state.archivedSessions.length
       ) {
-        return state;
+        return {
+          ...revisionPatch,
+        };
       }
 
       const nextStatuses = new Map(state.sessionStatuses);
@@ -912,6 +1032,7 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
       }
 
       return {
+        ...revisionPatch,
         activeSessions: nextActiveSessions,
         archivedSessions: nextArchivedSessions,
         sessionsByDirectory: buildSessionsByDirectory(nextActiveSessions),
@@ -948,8 +1069,22 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
       }
 
       const remainingArchivedSessions = state.archivedSessions.filter((session) => !idSet.has(session.id));
+      let revisionState = state;
+      const eventRevision = { ...state.sessionEventRevision };
+      let catalogRevision = state.catalogRevision;
+      for (const session of movedSessions) {
+        catalogRevision += 1;
+        eventRevision[session.id] = catalogRevision;
+      }
+      revisionState = {
+        ...state,
+        catalogRevision,
+        sessionEventRevision: eventRevision,
+      };
 
       return {
+        catalogRevision: revisionState.catalogRevision,
+        sessionEventRevision: revisionState.sessionEventRevision,
         activeSessions: nextActiveSessions,
         archivedSessions: [...movedSessions, ...remainingArchivedSessions],
         sessionsByDirectory: buildSessionsByDirectory(nextActiveSessions),

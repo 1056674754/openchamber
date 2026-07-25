@@ -1,16 +1,19 @@
 import React from 'react';
 import type { Session } from '@opencode-ai/sdk/v2';
+import { DEFAULT_SERVER_ID } from '@/lib/opencode/server-registry';
 import { useSessionFoldersStore } from '@/stores/useSessionFoldersStore';
 import { getArchivedScopeKey, normalizePath } from '../utils';
 
 type NormalizedProject = {
   id: string;
   normalizedPath: string;
+  serverId?: string;
 };
 
 type Args = {
   isSessionsLoading: boolean;
   hasCompleteSessionSnapshot: boolean;
+  isScopeSnapshotComplete?: (serverId: string, directory: string) => boolean;
   sessions: Session[];
   normalizedProjects: NormalizedProject[];
   getArchivedSessionsForProject: (project: { id: string }) => Session[];
@@ -21,6 +24,7 @@ export const useSessionFolderCleanup = (args: Args): void => {
   const {
     isSessionsLoading,
     hasCompleteSessionSnapshot,
+    isScopeSnapshotComplete,
     sessions,
     normalizedProjects,
     getArchivedSessionsForProject,
@@ -45,6 +49,26 @@ export const useSessionFolderCleanup = (args: Args): void => {
       && normalizedProjects.every((project) => getArchivedSessionsForProject(project).length === 0)
     ) {
       return;
+    }
+
+    const completeDirectories = new Set<string>();
+    const incompleteDirectories = new Set<string>();
+    for (const project of normalizedProjects) {
+      const serverId = project.serverId && project.serverId !== DEFAULT_SERVER_ID
+        ? project.serverId
+        : DEFAULT_SERVER_ID;
+      const scopeComplete = isScopeSnapshotComplete?.(serverId, project.normalizedPath) ?? false;
+      // Default-server roots bootstrap sets isCompleteSnapshot without per-directory
+      // scope keys. Remote catalogs must wait for their scoped authoritative snapshot.
+      const complete = scopeComplete
+        || (serverId === DEFAULT_SERVER_ID && hasCompleteSessionSnapshot);
+      if (complete) {
+        completeDirectories.add(project.normalizedPath);
+        completeDirectories.add(getArchivedScopeKey(project.normalizedPath));
+      } else {
+        incompleteDirectories.add(project.normalizedPath);
+        incompleteDirectories.add(getArchivedScopeKey(project.normalizedPath));
+      }
     }
 
     const idsByScope = new Map<string, Set<string>>();
@@ -75,12 +99,25 @@ export const useSessionFolderCleanup = (args: Args): void => {
     const currentFoldersMap = useSessionFoldersStore.getState().foldersMap;
     const allScopeKeys = new Set([...Object.keys(currentFoldersMap), ...idsByScope.keys()]);
     allScopeKeys.forEach((scopeKey) => {
+      // Skip scopes whose owning server/directory catalog is not yet complete.
+      if (incompleteDirectories.has(scopeKey)) {
+        return;
+      }
+      if (
+        isScopeSnapshotComplete
+        && !completeDirectories.has(scopeKey)
+        && !idsByScope.has(scopeKey)
+      ) {
+        // Unknown folder scopes with no matching complete project: leave alone.
+        return;
+      }
       cleanupSessions(scopeKey, idsByScope.get(scopeKey) ?? new Set<string>());
     });
   }, [
     cleanupSessions,
     getArchivedSessionsForProject,
     hasCompleteSessionSnapshot,
+    isScopeSnapshotComplete,
     isSessionsLoading,
     normalizedProjects,
     sessions,

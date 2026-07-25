@@ -108,6 +108,19 @@ This keeps cold/global lists responsive without requiring a refetch after every 
 
 Resident sessions prefer child-store state. Cold remote rows can use global SSE/status summaries until the session is activated.
 
+### Bootstrap hierarchy and catalog isolation
+
+Directory bootstrap loads roots (`roots: true`) and the broader tree (`roots: false`), then builds a closed hierarchy with `mergeBootstrapSessions`:
+
+- Recover `parentID` ancestors from the broader response or existing cache when roots temporarily lag.
+- `allSessions === null` (child/full list failed) keeps known children from cache; it must not be treated as an empty success.
+- A successful empty list is authoritative for that scope and drops stale store-only roots.
+- Optional catalog `eventRevision` / `deletedRevision` overlays preserve in-flight creates/updates and suppress deletes that raced the list.
+
+Authoritative delete-missing and completeness are scoped by `serverId + directory` (`applyDirectorySnapshot` / `completeSnapshotScopes`). Same path on local vs remote never prune each other. Fetch failure must not write an authoritative empty catalog for that scope. Folder cleanup consumers only reconcile scopes whose matching snapshot is complete.
+
+Persisted child-store metadata (`persist-cache`) keys include `serverId` (`oc.dir.v2.*`) with one-shot migrate from legacy `oc.dir.*` for the default server. Clearing one server's bucket must not clear another's.
+
 ## Remote read admission
 
 Remote summary and status reads share one scheduler per remote server. The scheduler admits at most three reads concurrently, leaving one slot in the server's four-request normal lane for user operations. Interactive status reads take precedence over queued background discovery, and identical status/list keys share one in-flight promise.

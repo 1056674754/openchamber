@@ -4,6 +4,7 @@ import { INITIAL_STATE, MAX_DIR_STORES, DIR_IDLE_TTL_MS } from "./types"
 import { pickDirectoriesToEvict, canDisposeDirectory, hasPendingBlockingRequests } from "./eviction"
 import { readDirCache, persistVcs, persistProjectMeta, persistIcon } from "./persist-cache"
 import { normalizePath } from "@/lib/pathNormalization"
+import { DEFAULT_SERVER_ID } from "@/lib/opencode/server-registry"
 
 export type DirectoryStore = State & {
   /** Apply a partial state update */
@@ -12,9 +13,9 @@ export type DirectoryStore = State & {
   replace: (next: State) => void
 }
 
-function createDirectoryStore(directory: string): StoreApi<DirectoryStore> {
-  // Restore cached metadata from localStorage
-  const cached = readDirCache(directory)
+function createDirectoryStore(directory: string, serverId: string): StoreApi<DirectoryStore> {
+  // Restore cached metadata from localStorage (scoped by serverId + directory)
+  const cached = readDirCache(directory, serverId)
 
   const store = create<DirectoryStore>()((set) => ({
     ...INITIAL_STATE,
@@ -27,15 +28,16 @@ function createDirectoryStore(directory: string): StoreApi<DirectoryStore> {
 
   // Subscribe to persist metadata changes back to localStorage
   store.subscribe((state, prev) => {
-    if (state.vcs !== prev.vcs) persistVcs(directory, state.vcs)
-    if (state.projectMeta !== prev.projectMeta) persistProjectMeta(directory, state.projectMeta)
-    if (state.icon !== prev.icon) persistIcon(directory, state.icon)
+    if (state.vcs !== prev.vcs) persistVcs(directory, state.vcs, serverId)
+    if (state.projectMeta !== prev.projectMeta) persistProjectMeta(directory, state.projectMeta, serverId)
+    if (state.icon !== prev.icon) persistIcon(directory, state.icon, serverId)
   })
 
   return store
 }
 
 export class ChildStoreManager {
+  readonly serverId: string
   readonly children = new Map<string, StoreApi<DirectoryStore>>()
   private readonly lifecycle = new Map<string, DirState>()
   private readonly pins = new Map<string, number>()
@@ -46,6 +48,10 @@ export class ChildStoreManager {
   private onDispose?: (directory: string) => void
   private isBooting?: (directory: string) => boolean
   private isLoadingSessions?: (directory: string) => boolean
+
+  constructor(serverId: string = DEFAULT_SERVER_ID) {
+    this.serverId = serverId || DEFAULT_SERVER_ID
+  }
 
   private notifyRegistrySubscribers() {
     for (const subscriber of this.registrySubscribers) {
@@ -102,7 +108,7 @@ export class ChildStoreManager {
 
     let store = this.children.get(canonicalDirectory)
     if (!store) {
-      store = createDirectoryStore(canonicalDirectory)
+      store = createDirectoryStore(canonicalDirectory, this.serverId)
       this.children.set(canonicalDirectory, store)
       this.notifyRegistrySubscribers()
     }

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import type { Message, Part, SessionStatus } from "@opencode-ai/sdk/v2/client"
 import type { Session } from "@opencode-ai/sdk/v2"
-import { getReconnectRecoveryPlan } from "./reconnect-recovery"
+import { getReconnectRecoveryPlan, mergeBootstrapSessions } from "./reconnect-recovery"
 
 function createSession(id: string, overrides: Partial<Session> = {}): Session {
   return {
@@ -129,5 +129,83 @@ describe("getReconnectRecoveryPlan", () => {
       directory: "/repo-a",
       viewedSession: { directory: "/repo-b", sessionId: "active" },
     }).materializationSessionIds.sort()).not.toContain("active")
+  })
+})
+
+describe("mergeBootstrapSessions", () => {
+  test("recovers a referenced parent when the roots response is temporarily empty", () => {
+    const parent = createSession("parent")
+    const child = createSession("child", { parentID: "parent" })
+
+    expect(mergeBootstrapSessions([], [child], [parent])).toEqual({
+      sessions: [child, parent],
+      rootCount: 1,
+    })
+  })
+
+  test("recovers referenced parents from the broader response without retaining stale roots", () => {
+    const parent = createSession("parent")
+    const stale = createSession("stale")
+    const child = createSession("child", { parentID: "parent" })
+
+    expect(mergeBootstrapSessions([], [parent, child], [stale])).toEqual({
+      sessions: [child, parent],
+      rootCount: 1,
+    })
+  })
+
+  test("treats a successful empty response as authoritative", () => {
+    const persisted = createSession("persisted")
+
+    expect(mergeBootstrapSessions([], [], [persisted])).toEqual({
+      sessions: [],
+      rootCount: 0,
+    })
+  })
+
+  test("preserves known children when the child-session request fails", () => {
+    const cachedParent = createSession("parent")
+    const authoritativeParent = createSession("parent", { title: "Current" })
+    const cachedChild = createSession("child", { parentID: "parent" })
+
+    expect(mergeBootstrapSessions([authoritativeParent], null, [cachedChild, cachedParent])).toEqual({
+      sessions: [cachedChild, authoritativeParent],
+      rootCount: 1,
+    })
+  })
+
+  test("skips missing parents that are absent from cache and the broader response", () => {
+    const orphan = createSession("orphan", { parentID: "missing-parent" })
+
+    expect(mergeBootstrapSessions([], [orphan], [])).toEqual({
+      sessions: [orphan],
+      rootCount: 0,
+    })
+  })
+
+  test("overlays live session events that arrive after the request starts", () => {
+    const staleResponse = createSession("existing", { title: "Stale" })
+    const liveUpdate = createSession("existing", { title: "Live" })
+    const liveCreate = createSession("new")
+
+    expect(mergeBootstrapSessions([staleResponse], [], [liveUpdate, liveCreate], {
+      baselineRevision: 4,
+      eventRevision: { existing: 5, new: 6 },
+    })).toEqual({
+      sessions: [liveUpdate, liveCreate],
+      rootCount: 2,
+    })
+  })
+
+  test("does not resurrect a session deleted after the request starts", () => {
+    const deleted = createSession("deleted")
+
+    expect(mergeBootstrapSessions([deleted], [], [], {
+      baselineRevision: 2,
+      deletedRevision: { deleted: 3 },
+    })).toEqual({
+      sessions: [],
+      rootCount: 0,
+    })
   })
 })

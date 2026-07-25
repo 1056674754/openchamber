@@ -26,7 +26,7 @@ import { setSyncRefs } from "./sync-refs"
 import { deleteShield } from "./delete-shield"
 import { stripSessionDiffSnapshots } from "./sanitize"
 import { syncDebug } from "./debug"
-import { getReconnectRecoveryPlan } from "./reconnect-recovery"
+import { getReconnectRecoveryPlan, mergeBootstrapSessions } from "./reconnect-recovery"
 import { STUCK_SESSION_TIMEOUT_MS } from "@/stores/types/sessionTypes"
 import { opencodeClient } from "@/lib/opencode/client"
 import { recoverPendingMessages } from "./pending-message"
@@ -1734,7 +1734,7 @@ export function SyncProvider(props: {
     : "ws"
   const projects = useProjectsStore((state) => state.projects)
   const childStoresRef = useRef<ChildStoreManager | null>(null)
-  if (!childStoresRef.current) childStoresRef.current = new ChildStoreManager()
+  if (!childStoresRef.current) childStoresRef.current = new ChildStoreManager(serverId)
   const childStores = childStoresRef.current
   const pendingMessagesRecoveredRef = useRef(false)
   const pipelineHasConnectedRef = useRef(false)
@@ -1845,41 +1845,64 @@ export function SyncProvider(props: {
           loadSessions: async (dir) => {
             loadingSessionDirs.add(dir)
             try {
-              const maxEmptyRetries = 0
-              let emptyRetries = 0
-              while (true) {
-                const sessionCount = await retry(async () => {
-                  const sessions = (await listSessionsForBootstrap(props.sdk, serverId, dir))
-                    .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
-                  // Merge: server data wins on overlap; store-only sessions are preserved.
-                  const currentSessions = store.getState().session
-                  if (sessions.length === 0 && currentSessions.length > 0) {
-                    console.warn(
-                      `[bootstrap] session.list returned empty for ${dir}; preserving ${currentSessions.length} existing sessions`,
-                    )
-                    return currentSessions.length
-                  }
-                  const serverIds = new Set(sessions.map((s: { id: string }) => s.id))
-                  const preserved = currentSessions.filter((s: { id: string }) => !serverIds.has(s.id))
-                  const merged = preserved.length > 0
-                    ? [...sessions, ...preserved].sort((a: { id: string }, b: { id: string }) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
-                    : sessions
-                  store.setState({ session: merged, sessionTotal: merged.length, limit: Math.max(merged.length, 50) })
-                  for (const s of sessions) {
-                    if (s.id) serverRegistry.indexSession(s.id, serverId)
-                  }
-                  ingestDirectoryStateIntoRoutingIndex(routingIndex, dir, store.getState())
-                  return sessions.length
-                })
+              await retry(async () => {
+                const catalog = useGlobalSessionsStore.getState()
+                const baselineRevision = catalog.catalogRevision
+                // Roots fetch is authoritative: failure must throw (retry / abort apply).
+                // Do not treat fetch failure as a successful empty list.
+                const rootSessions = (await listSessionsForBootstrap(props.sdk, serverId, dir, undefined, { roots: true }))
+                  .filter((session) => Boolean(session?.id))
+                  .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
 
-                if (sessionCount > 0 || emptyRetries >= maxEmptyRetries) {
-                  return
+                let allSessions: Session[] | null = null
+                try {
+                  allSessions = await listSessionsForBootstrap(props.sdk, serverId, dir, undefined, { roots: false })
+                } catch (error) {
+                  // Child/full list is best-effort; keep known children via mergeBootstrapSessions(null).
+                  console.warn(`[bootstrap] child session.list failed for ${dir}; retaining known children`, error)
                 }
 
-                emptyRetries += 1
-                console.warn(`[bootstrap] sessions empty for ${dir}; retrying session list in 2s`)
-                await new Promise((r) => setTimeout(r, 2000))
-              }
+                const current = store.getState()
+                const { sessions: mergedSessions, rootCount } = mergeBootstrapSessions(
+                  rootSessions,
+                  allSessions,
+                  current.session,
+                  {
+                    baselineRevision,
+                    eventRevision: catalog.sessionEventRevision,
+                    deletedRevision: catalog.sessionDeletedRevision,
+                  },
+                )
+
+                // Preserve only scoped sessions with a live reason — not the entire store catalog.
+                const mergedIds = new Set(mergedSessions.map((session) => session.id))
+                const statusMap = current.session_status ?? {}
+                const protectedExtras = current.session.filter((session) => {
+                  if (!session.id || mergedIds.has(session.id) || deleteShield.has(session.id)) {
+                    return false
+                  }
+                  const status = statusMap[session.id]
+                  return Boolean(status && status.type !== "idle")
+                })
+                const sessions = (protectedExtras.length > 0
+                  ? [...mergedSessions, ...protectedExtras]
+                  : mergedSessions)
+                  .filter((session) => !deleteShield.has(session.id))
+                  .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+
+                store.setState({
+                  session: sessions,
+                  sessionTotal: rootCount,
+                  limit: Math.max(sessions.length, 50),
+                })
+                for (const session of sessions) {
+                  if (session.id) serverRegistry.indexSession(session.id, serverId)
+                }
+                useGlobalSessionsStore.getState().applyDirectorySnapshot(serverId, dir, sessions, {
+                  baselineRevision,
+                })
+                ingestDirectoryStateIntoRoutingIndex(routingIndex, dir, store.getState())
+              })
             } finally {
               loadingSessionDirs.delete(dir)
             }
@@ -2184,12 +2207,15 @@ export function SyncProvider(props: {
     if (!dirs?.length) return
 
     const controller = new AbortController()
+    const baselineRevision = useGlobalSessionsStore.getState().catalogRevision
     void remoteSessionSummarySync.scan({
       serverId,
       directories: dirs,
       signal: controller.signal,
       onSnapshot: (directory, sessions) => {
-        useGlobalSessionsStore.getState().applyRemoteDirectorySnapshot(serverId, directory, sessions)
+        useGlobalSessionsStore.getState().applyRemoteDirectorySnapshot(serverId, directory, sessions, {
+          baselineRevision,
+        })
         for (const session of sessions) {
           if (session.id) {
             setIndexedSessionDirectory(routingIndex, session.id, directory)

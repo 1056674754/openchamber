@@ -513,6 +513,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
   const liveSessionStatuses = useAllServersSessionStatuses();
   const hasLoadedGlobalSessions = useGlobalSessionsStore((state) => state.hasLoaded);
   const isCompleteSessionSnapshot = useGlobalSessionsStore((state) => state.isCompleteSnapshot);
+  const isScopeSnapshotComplete = useGlobalSessionsStore((state) => state.isScopeSnapshotComplete);
   const globalActiveSessions = useGlobalSessionsStore((state) => state.activeSessions);
   const globalArchivedSessions = useGlobalSessionsStore((state) => state.archivedSessions);
   const loadSessionChildren = useGlobalSessionsStore((state) => state.loadSessionChildren);
@@ -1364,6 +1365,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
   useSessionFolderCleanup({
     isSessionsLoading,
     hasCompleteSessionSnapshot: isCompleteSessionSnapshot,
+    isScopeSnapshotComplete,
     sessions,
     normalizedProjects,
     getArchivedSessionsForProject,
