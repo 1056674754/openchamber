@@ -18,6 +18,8 @@ import { useSnippetsStore } from '@/stores/useSnippetsStore';
 import { appendInlineComments } from '@/lib/messages/inlineComments';
 import { renderMagicPrompt, type MagicPromptId } from '@/lib/magicPrompts';
 import { startReviewFlow } from '@/lib/reviewFlow';
+import { AutoReviewBanner } from '@/components/chat/AutoReviewBanner';
+import { useAutoReviewStore } from '@/stores/useAutoReviewStore';
 import type { I18nKey } from '@/lib/i18n';
 import { AttachedFilesList, AttachedVSCodeFileChips, ActiveEditorFileSuggestion } from './FileAttachment';
 import { QueuedMessageChips } from './QueuedMessageChips';
@@ -1856,6 +1858,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 
     // Session activity for queue availability and controls
     const { phase: sessionPhase } = useCurrentSessionActivity();
+    const autoReviewRunning = useAutoReviewStore(React.useCallback((state) => {
+        if (!currentSessionId) return false;
+        return state.isRunningForSession(currentSessionId);
+    }, [currentSessionId]));
 
     const handleOpenMobilePanel = React.useCallback((panel: MobileControlsPanel) => {
         if (!isMobile) {
@@ -2071,6 +2077,17 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 
         if (!providerIdToSend || !modelIdToSend) {
             console.warn('Cannot send message: provider or model not selected');
+            return;
+        }
+
+        if (queuedOnly && autoReviewRunning) {
+            return;
+        }
+
+        // While an auto-review loop owns the implementer session, queue user
+        // input instead of racing the loop's forwarded turns.
+        if (currentSessionId && !queuedOnly && autoReviewRunning) {
+            handleQueueMessage();
             return;
         }
 
@@ -2626,7 +2643,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 
     const handlePrimaryAction = React.useCallback(() => {
         const inputSnapshot = getCurrentInputSnapshot();
-        const canQueue = inputMode === 'normal' && inputSnapshot.hasContent && currentSessionId && sessionPhase !== 'idle';
+        const canQueue = inputMode === 'normal' && inputSnapshot.hasContent && currentSessionId && (sessionPhase !== 'idle' || autoReviewRunning);
         const action = resolveFollowUpAction({
             behavior: followUpBehavior,
             canQueue: Boolean(canQueue),
@@ -2636,7 +2653,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             return handleQueueMessage();
         }
         void handleSubmitRef.current({ deliveryMode: action });
-    }, [inputMode, getCurrentInputSnapshot, currentSessionId, sessionPhase, followUpBehavior, handleQueueMessage]);
+    }, [inputMode, getCurrentInputSnapshot, currentSessionId, sessionPhase, autoReviewRunning, followUpBehavior, handleQueueMessage]);
 
     const handleSendNow = React.useCallback(() => {
         void handleSubmitRef.current({ deliveryMode: 'steer' });
@@ -2860,7 +2877,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             e.preventDefault();
 
             const isCtrlEnter = e.ctrlKey || e.metaKey;
-            const canQueue = inputMode === 'normal' && hasContent && currentSessionId && sessionPhase !== 'idle';
+            const canQueue = inputMode === 'normal' && hasContent && currentSessionId && (sessionPhase !== 'idle' || autoReviewRunning);
             const action = resolveFollowUpAction({
                 behavior: followUpBehavior,
                 canQueue: Boolean(canQueue),
@@ -4448,6 +4465,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                     onEditMessage={handleQueuedMessageEdit}
                     onSendMessage={handleQueuedMessageSend}
                 />
+                <AutoReviewBanner />
                 {hasDrafts && (
                     <div className="flex flex-wrap items-center gap-2 pb-2">
                         {reviewCount > 0 ? (

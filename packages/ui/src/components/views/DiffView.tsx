@@ -34,6 +34,7 @@ import type { I18nKey } from '@/lib/i18n/store';
 import { ReviewFlowDialog, type ReviewFlowExecution } from '@/components/session/ReviewFlowDialog';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { startReviewFlow } from '@/lib/reviewFlow';
+import { serverRegistry } from '@/lib/opencode/server-registry';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSessionMessages } from '@/sync/sync-context';
 import {
@@ -1324,11 +1325,13 @@ export const DiffView: React.FC<DiffViewProps> = ({
             await startReviewFlow({
                 originalSessionID: currentSessionId,
                 directory,
+                serverId: serverRegistry.getServerForSession(currentSessionId) ?? null,
                 providerID: execution.providerID,
                 modelID: execution.modelID,
                 agent: execution.agent || undefined,
                 variant: execution.variant || undefined,
                 generateHandoff: execution.generateHandoff,
+                autoReview: execution.autoReview,
                 returnAfterHandoffRequest: execution.generateHandoff,
             });
             setReviewDialogOpen(false);

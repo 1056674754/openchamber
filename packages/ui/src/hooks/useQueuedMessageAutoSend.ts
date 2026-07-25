@@ -6,6 +6,7 @@ import { useConfigStore } from '@/stores/useConfigStore';
 import { useContextStore } from '@/stores/contextStore';
 import { useAllServersSessionStatuses } from '@/sync/multi-server-hooks';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
+import { useAutoReviewStore } from '@/stores/useAutoReviewStore';
 import { buildQueuedAutoSendPayload } from './queuedMessageAutoSendPayload';
 import {
   getQueuedAutoSendRetryDelayMs,
@@ -71,10 +72,12 @@ export function useQueuedMessageAutoSend(enabledOrOptions?: boolean | { enabled?
   const queuedMessages = useMessageQueueStore((state) => state.queuedMessages);
   const liveSessionStatuses = useAllServersSessionStatuses();
   const globalSessionStatuses = useGlobalSessionsStore((state) => state.sessionStatuses);
+  const autoReviewRuns = useAutoReviewStore((state) => state.runsByOriginalSessionID);
 
   const inFlightSessionsRef = React.useRef<Set<string>>(new Set());
   const sendFailuresRef = React.useRef<Map<string, QueuedAutoSendFailure>>(new Map());
   const previousStatusRef = React.useRef<Map<string, QueuedAutoSendSessionStatus>>(new Map());
+  const autoReviewBlockedSessionsRef = React.useRef<Set<string>>(new Set());
 
   React.useEffect(() => {
     if (!enabled) {
@@ -97,6 +100,10 @@ export function useQueuedMessageAutoSend(enabledOrOptions?: boolean | { enabled?
         return;
       }
       if (hasRecentAbort(sessionId)) {
+        return;
+      }
+      if (useAutoReviewStore.getState().isRunningForSession(sessionId)) {
+        autoReviewBlockedSessionsRef.current.add(sessionId);
         return;
       }
 
@@ -201,8 +208,19 @@ export function useQueuedMessageAutoSend(enabledOrOptions?: boolean | { enabled?
         return;
       }
       const previousStatusType = previousStatusRef.current.get(sessionId);
+      const wasAutoReviewBlocked = autoReviewBlockedSessionsRef.current.has(sessionId);
+      const isAutoReviewRunning = useAutoReviewStore.getState().isRunningForSession(sessionId);
+      if (isAutoReviewRunning) {
+        autoReviewBlockedSessionsRef.current.add(sessionId);
+      } else if (wasAutoReviewBlocked) {
+        autoReviewBlockedSessionsRef.current.delete(sessionId);
+      }
 
-      if (queue.length > 0 && shouldDispatchQueuedAutoSend(previousStatusType, currentStatusType, true)) {
+      if (
+        queue.length > 0
+        && !isAutoReviewRunning
+        && shouldDispatchQueuedAutoSend(previousStatusType, currentStatusType, true)
+      ) {
         void dispatchSessionQueue(sessionId, queue);
       }
 
@@ -210,5 +228,5 @@ export function useQueuedMessageAutoSend(enabledOrOptions?: boolean | { enabled?
     });
 
     previousStatusRef.current = nextStatusMap;
-  }, [enabled, queuedMessages, liveSessionStatuses, globalSessionStatuses]);
+  }, [enabled, queuedMessages, liveSessionStatuses, globalSessionStatuses, autoReviewRuns]);
 }

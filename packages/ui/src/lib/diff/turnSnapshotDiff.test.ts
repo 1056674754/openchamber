@@ -99,12 +99,10 @@ describe('turnSnapshotDiff', () => {
       '',
     ].join('\n');
     const fromPatch = turnSnapshotDiffToData({ file: 'c.ts', patch });
-    expect(fromPatch).toMatchObject({
-      original: 'x\n',
-      modified: 'y\n',
-      patch,
-    });
-    expect(fromPatch?.fileDiff).toBeDefined();
+    expect(fromPatch?.original).toBe('x\n');
+    expect(fromPatch?.modified).toBe('y\n');
+    expect(fromPatch?.patch).toBe(patch);
+    expect(Boolean(fromPatch?.fileDiff)).toBe(true);
   });
 
   test('builds a path-keyed data map', () => {

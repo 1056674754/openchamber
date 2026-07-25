@@ -43,6 +43,7 @@ export class ServerRegistry {
   private healthPollTimer: ReturnType<typeof setInterval> | null = null;
   private healthListeners: Map<string, Set<(status: ServerConnection["healthStatus"]) => void>> = new Map();
   private sessionServerListeners: Map<string, Set<() => void>> = new Map();
+  private unregisterListeners: Set<(serverId: string) => void> = new Set();
   private healthProbeInFlight: Map<string, Promise<boolean>> = new Map();
   private lastHealthProbeAt: Map<string, number> = new Map();
   private sessionServerIndexDebugEntries: SessionServerIndexDebugEntry[] = [];
@@ -82,8 +83,18 @@ export class ServerRegistry {
       this.healthProbeInFlight.delete(serverId);
       this.lastHealthProbeAt.delete(serverId);
       this.notifyHealthListeners(serverId);
+      for (const cb of Array.from(this.unregisterListeners)) {
+        cb(serverId);
+      }
     }
     return deleted;
+  }
+
+  onUnregister(callback: (serverId: string) => void): () => void {
+    this.unregisterListeners.add(callback);
+    return () => {
+      this.unregisterListeners.delete(callback);
+    };
   }
 
   get(serverId: string): ServerConnection | undefined {
