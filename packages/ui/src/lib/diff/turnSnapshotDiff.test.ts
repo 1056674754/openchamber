@@ -82,7 +82,12 @@ describe('turnSnapshotDiff', () => {
     expect(turnSnapshotDiffToData({
       file: 'b.ts',
       patch: 'Binary files a and b differ\n',
-    })).toEqual({ original: '', modified: '', isBinary: true });
+    })).toEqual({
+      original: '',
+      modified: '',
+      isBinary: true,
+      patch: 'Binary files a and b differ\n',
+    });
 
     const patch = [
       'diff --git a/c.ts b/c.ts',
@@ -93,10 +98,13 @@ describe('turnSnapshotDiff', () => {
       '+y',
       '',
     ].join('\n');
-    expect(turnSnapshotDiffToData({ file: 'c.ts', patch })).toEqual({
+    const fromPatch = turnSnapshotDiffToData({ file: 'c.ts', patch });
+    expect(fromPatch).toMatchObject({
       original: 'x\n',
       modified: 'y\n',
+      patch,
     });
+    expect(fromPatch?.fileDiff).toBeDefined();
   });
 
   test('builds a path-keyed data map', () => {

@@ -1,3 +1,6 @@
+import type { FileDiffMetadata } from '@pierre/diffs';
+import { fileDiffFromPatch } from '@/lib/diff/patchFileDiff';
+
 export type TurnSnapshotDiff = {
   file?: string;
   status?: string;
@@ -12,6 +15,8 @@ export type TurnSnapshotDiffData = {
   original: string;
   modified: string;
   isBinary?: boolean;
+  patch?: string;
+  fileDiff?: FileDiffMetadata;
 };
 
 export const isBinaryPatch = (patch: string): boolean => (
@@ -158,23 +163,38 @@ export const turnSnapshotDiffToData = (diff: TurnSnapshotDiff): TurnSnapshotDiff
   }
 
   if (typeof diff.patch === 'string' && isBinaryPatch(diff.patch)) {
-    return { original: '', modified: '', isBinary: true };
+    return { original: '', modified: '', isBinary: true, patch: diff.patch };
   }
 
   if (typeof diff.before === 'string' || typeof diff.after === 'string') {
+    const original = diff.before ?? '';
+    const modified = diff.after ?? '';
+    const patch = typeof diff.patch === 'string' && diff.patch.trim() ? diff.patch : undefined;
     return {
-      original: diff.before ?? '',
-      modified: diff.after ?? '',
+      original,
+      modified,
+      patch,
+      fileDiff: patch ? fileDiffFromPatch(diff.file, patch) : undefined,
     };
   }
 
   if (typeof diff.patch === 'string' && diff.patch.trim()) {
     const complete = completePatchContents(diff.patch);
     if (complete) {
-      return { original: complete.before, modified: complete.after };
+      return {
+        original: complete.before,
+        modified: complete.after,
+        patch: diff.patch,
+        fileDiff: fileDiffFromPatch(diff.file, diff.patch),
+      };
     }
     const approximate = approximateContentsFromPatch(diff.patch);
-    return { original: approximate.before, modified: approximate.after };
+    return {
+      original: approximate.before,
+      modified: approximate.after,
+      patch: diff.patch,
+      fileDiff: fileDiffFromPatch(diff.file, diff.patch),
+    };
   }
 
   return { original: '', modified: '' };

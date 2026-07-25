@@ -41,6 +41,7 @@ import {
     listTurnSnapshotDiffs,
     statusToGitCode,
 } from '@/lib/diff/turnSnapshotDiff';
+import type { FileDiffMetadata } from '@pierre/diffs';
 
 // Minimum width for side-by-side diff view (px)
 const SIDE_BY_SIDE_MIN_WIDTH = 1100;
@@ -62,7 +63,13 @@ type FileEntry = GitStatus['files'][number] & {
     isNew: boolean;
 };
 
-type DiffData = { original: string; modified: string; isBinary?: boolean };
+type DiffData = {
+    original: string;
+    modified: string;
+    isBinary?: boolean;
+    patch?: string;
+    fileDiff?: FileDiffMetadata;
+};
 
 const BinaryDiffPlaceholder = React.memo(() => {
     const { t } = useI18n();
@@ -584,6 +591,7 @@ const InlineDiffViewer = React.memo<InlineDiffViewerProps>(({
             <PierreDiffViewer
                 original={diff.original}
                 modified={diff.modified}
+                fileDiff={diff.fileDiff}
                 language={language}
                 fileName={filePath}
                 renderSideBySide={renderSideBySide}
@@ -648,6 +656,7 @@ const SingleDiffViewer = React.memo<SingleDiffViewerProps>(({
             <PierreDiffViewer
                 original={diff.original}
                 modified={diff.modified}
+                fileDiff={diff.fileDiff}
                 language={language}
                 fileName={filePath}
                 renderSideBySide={renderSideBySide}

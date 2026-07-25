@@ -884,7 +884,7 @@ Phase 5 — 🔴 Markdown/Shiki 重写 (#1+#2): 独立 milestone，需迁移 for
 | Follow-up behavior / Steer delivery | `steer-side-channel.ts`、`session-actions.ts`、`client.ts`、`followUpBehavior.ts`、`messageQueueStore.ts`、`useQueuedMessageAutoSend.ts` | ✅ 已完成枚举设置、旧值迁移、Enter/修饰键行为、queue-time config/target 快照、idle dispatch 和失败退避 |
 | gh CLI credentials | `packages/web/server/lib/github/gh-cli-credential.js`、routes/octokit 已接入 | ✅ 属于 v1.13.0 已移植项，后续 GitHub PR status 修复可在此基础上做 |
 | Cron parser | `packages/ui/src/lib/cron.ts`、scheduled-tasks runtime 已用 `cron-parser` | ✅ v1.13.1 已移植 |
-| Diff virtualization / PierreDiffViewer | `PierreDiffViewer.tsx`、`patchFileDiff.ts`、DiffView data-diff-virtual-root 已存在 | 🟡 有较多 v1.13.0 Git/Diff 地基，但 v1.13.3~8 的 history diff/cleanup 仍需 diff |
+| Diff virtualization / PierreDiffViewer | `@pierre/diffs@1.3.0-beta.6`；`patchFileDiff.ts` + `PierreDiffViewer` 1.3 API（`FileDiffMetadata` / `areFilesEqual` / separator CSS）；`appThemeRegistry` signature+LRU；DiffView turn/working 传 `fileDiff`；Tool metrics `spacing` | ✅ [#8](https://coding.s-s.city/songsong/openchamber/-/work_items/8) 已关闭。未重写 DiffView Changes UX（Tier3 changelog #27）亦未做 hunk stage（MERGE #28） |
 | Chat MessageList virtualization | `MessageList.tsx` 使用 `@tanstack/react-virtual@3.14.5` / `virtual-core@3.17.3`，带官方越界 offset clamp patch | ✅ 已按 v1.16 统一虚拟化路径校准；5 条以上始终虚拟化，本地 7 轮 buffered reveal 已移除；历史容器采用单一 `totalSize` + 行级测量，禁止全局 `measure()` 清空尺寸缓存 |
 | Markdown/Shiki rewrite | 本地无 `packages/ui/src/components/chat/markdown/` 目录，仍有 `MarkdownRendererImpl.tsx` + react-markdown 路径 | ❌ v1.13.1 高风险重写仍未落地；后续 markdown fixes 若改 `markdownCore.ts` 不能直接套 |
 | Native mobile app projects | 本地只有 `packages/ui` / `packages/web` / `packages/electron` / `packages/vscode`，无 `packages/mobile` | ❌ v1.13.9 native iOS/Android app project 未落地；mobile/PWA UI 修复只能按现有 web mobile surface 选合 |
@@ -1215,7 +1215,7 @@ VS Code worktree lock 验证：在两个真实临时 Git 仓库及 `--no-checkou
 | Sync watchdog heartbeat 去重 | ✅ fork 已等价覆盖 | fork 没有上游“安静即 full resync”的 watchdog；event-pipeline 已用包含 heartbeat 的全部 SSE/WS 活动维护连接超时并重连，另有 90s stuck-session authoritative status reconciliation。叠加上游全局 timer 反而会破坏多 server/directory 边界 |
 | 禁止自动接管外部 OpenCode | ✅ 已按 fork lifecycle 移植并验证 | 删除无配置时对默认 4096 的隐式 probe/attach；显式 `OPENCODE_HOST` / `OPENCODE_PORT` / skip-start 不变，并保留本 fork 对自身 persisted managed port 的安全重连。当前 Electron server in-process handle 不向 shell 暴露 OpenCode pid/port，官方 Electron killer 防护不适用 |
 | Worktree/subagent 删除与 selection snap-back | ✅ 核心缺口已移植并验证 | sidebar 已有子代优先逐项删除、running 保留和 passive selection，故不套官方 JSX/selection patch；设置页删除 worktree 改从 server-scoped global active+archived snapshot 递归找跨目录 subagent。delete 404 视为 server cascade 已完成，并同步清理 child/global session、状态与 worktree attachment |
-| 依赖与 v1.13.8 release 元数据 | ✅ baseline 已收口；依赖单独延后 | 源码、workspace lock、Electron 构建前缀和打包 runbook 已推进为 `1.13.8-sscity`。官方 `@pierre/diffs 1.3.0-beta.6` 相对 fork 的 `1.1.0-beta.13` 是跨代 API/worker/theme 升级，保留为独立兼容批次；Docker 镜像更新不影响当前发行面 |
+| 依赖与 v1.13.8 release 元数据 | ✅ baseline 已收口；Pierre 兼容批次已完成 | 源码、workspace lock、Electron 构建前缀和打包 runbook 已推进为 `1.13.8-sscity`。`@pierre/diffs` 已升到 `1.3.0-beta.6`（[#8](https://coding.s-s.city/songsong/openchamber/-/work_items/8)）：`patchFileDiff` / viewer / theme registry / tool metrics；type-check、lint、`patchFileDiff`+`turnSnapshotDiff` tests 通过。Docker 镜像更新不影响当前发行面 |
 
 **v1.13.8 收口**：23 个官方提交已逐项审计。GitHub PR status 防阻塞、默认 4096 attach 防护、跨目录 subagent 删除和 404 cleanup 已按 fork 架构移植；Follow-up、sync heartbeat、Git missing-directory 与 selection 防回弹判定为已有等价或更强实现。16 个 lifecycle tests、80 个 session/worktree focused tests、UI/Web type-check/lint 和全仓 build 均通过；未替换或停止正在使用的 OpenChamber/OpenCode。
 
@@ -1338,7 +1338,7 @@ VS Code worktree lock 验证：在两个真实临时 Git 仓库及 `--no-checkou
 
 ### 建议下一步批次
 
-**当前确认（2026-07-25）**：`#28` / `#15` / `#12` / **[#29](https://coding.s-s.city/songsong/openchamber/-/work_items/29)（v1 local-only）** / [#33](https://coding.s-s.city/songsong/openchamber/-/work_items/33) / [#34](https://coding.s-s.city/songsong/openchamber/-/work_items/34) / **[#35](https://coding.s-s.city/songsong/openchamber/-/work_items/35) Remote Goals** / **[#27](https://coding.s-s.city/songsong/openchamber/-/work_items/27) macOS tray** 已关闭。Goals 全链路与 macOS menu bar baseline（capability probe + tray toggle）已落地。勿与 `#6` / `#17` Windows tray 混批。备选：`#8` Diff。
+**当前确认（2026-07-25）**：`#28` / `#15` / `#12` / **[#29](https://coding.s-s.city/songsong/openchamber/-/work_items/29)（v1 local-only）** / [#33](https://coding.s-s.city/songsong/openchamber/-/work_items/33) / [#34](https://coding.s-s.city/songsong/openchamber/-/work_items/34) / **[#35](https://coding.s-s.city/songsong/openchamber/-/work_items/35) Remote Goals** / **[#27](https://coding.s-s.city/songsong/openchamber/-/work_items/27) macOS tray** / **[#8](https://coding.s-s.city/songsong/openchamber/-/work_items/8) Pierre diff runtime** 已关闭。Goals、tray baseline、Pierre `1.3.0-beta.6` 兼容层已落地。勿与 `#6` auto-review / `#17` Windows tray / DiffView Changes 全量重写混批。建议下一步：`#6`。
 
 1. **Queue reliability 批次 A (已完成)**: v1.16 idle dispatch、failed auto-send backoff 和 queue drag reorder 已移植；queue snapshot 继续作为权威。
 2. **CLI/Startup/Desktop auth 批次 B**: pid identity、live port check、update helper、quota/provider startup、Bun global CLI fix、LAN-bound local auth token，按 helper/route 切，不做 v1.13.4 cleanup。
@@ -1349,4 +1349,4 @@ VS Code worktree lock 验证：在两个真实临时 Git 仓库及 `--no-checkou
 7. **Chat input/abort 批次 G**: pasted `@`、ArrowUp、question dismiss、slash skill 调用、cross-project abort routing，全部补 focused tests。
 8. **Voice/Small Model 批次 H（#12 基础已完成）**: capability + settings + Notes consumer 已落地；session-assist / TTS summarized / git generation 仍可后续加。Goals：`#29`/`#33`/`#34`/`#35` 已落地（remote 需远端 OC 广告 `/api/goals/capability`）。
 9. **v1.15 UI 批次 I (部分完成)**: code line number/wrap 已按现有 Markdown 架构适配；Mermaid zoom、ambiguous transport failure、Markdown preview 继续逐项处理。
-10. **高风险 milestone**: server-persisted auto-accept、chat scroll + auto-follow、OpenCode process ownership、Markdown/Shiki rewrite、mobile/native app、private relay/pairing、bulk docs/i18n、`#17` Windows tray，分别处理。`#35` Remote Goals / `#27` macOS tray 已关闭。
+10. **高风险 milestone**: server-persisted auto-accept、chat scroll + auto-follow、OpenCode process ownership、Markdown/Shiki rewrite、mobile/native app、private relay/pairing、bulk docs/i18n、`#17` Windows tray，分别处理。`#35` Remote Goals / `#27` macOS tray / `#8` Pierre 已关闭。
