@@ -43,6 +43,85 @@
 
 ---
 
+## Mobile 产品轨道
+
+联结现实（fork 今天）：手机 = 浏览器/PWA 打开桌面暴露的 URL（LAN / Tunnel `/connect?t=` / 反代）。UI 现实：共享 `packages/ui` 组件；Capacitor 另有入口壳 `MobileApp`。业务组件一套，App 壳不是同一文件。权威镜像：GitLab epic [#1](https://coding.s-s.city/songsong/openchamber/-/issues/1) 独立 `## Mobile` 分区；fork ADR：[`docs/NATIVE_MOBILE_FORK_ADR.md`](NATIVE_MOBILE_FORK_ADR.md)。
+
+**Instances 契约（纠正）**：多 host **要有**。权威在 Electron；手机与桌面 UI 拉取 host **已聚合**的 instances 列表，**禁止**客户端为列表/侧栏对每个 remote 再挂一套 sync fanout。一次会话连接仍是单 URL；列表 ≠ 并行多 Sync 引擎。空闲 CPU 问题见 index [#40](https://coding.s-s.city/songsong/openchamber/-/work_items/40)——根因是误 fanout / 抽屉常驻 / Diff warmup，不是「有 remote」。
+
+### A. 已做（Web / PWA mobile surface — 无原生壳）
+
+这些是「手机浏览器可用」的选合，**不等于** native app 已落地：
+
+- [x] PWA keyboard / safe-area / auth fallback（web）
+- [x] Mobile typography + composer controls（web）
+- [x] Mobile history prefetch / virtualizer overscan（web）
+- [x] Mobile Markdown file-reference probe guard（web）
+- [x] Mobile 子会话箭头触摸尺寸（web）
+- [x] VS Code 不被 `mobile.css` 误伤（desktop-runtime 判定）
+- [x] Terminal：mobile web hidden-input autofocus（[#19](https://coding.s-s.city/songsong/openchamber/-/work_items/19) 协议已关；web touch only）
+- [x] `MobileSessionStatusBar` 等沿用共享侧栏（已删上游独立 `MobileSessionsSheet` 路径）
+
+跳过 / 架构不适用（记为不做，勿再开卡重复）：
+
+- 官方独立 `MobileSessionsSheet` / `MobileChangesSurface` 整包（fork 共用多实例 `SessionSidebar`）
+- 上游 v1.14 composer/keyboard mega-refactor 整包
+- Oniro / ArkUI 鸿蒙原生壳
+- 纯视觉 mobile shadows（无设计目标不跟）
+
+### B. 进行中 / 已规划（Native Capacitor）
+
+- [x] **[#9](https://coding.s-s.city/songsong/openchamber/-/work_items/9) Native Capacitor iOS + Android（第一刀落地）**
+  - 引入 `packages/mobile` + `mobile.html` / 薄壳 `MobileApp`
+  - 连接：URL + 密码解锁 + Saved instances；`connectMobileEndpoint` = `switchRuntimeEndpoint` **+** `serverRegistry`（`mobile-active` / retarget `default`）
+  - CORS packaged origins：`capacitor://localhost` / `https://localhost` / `openchamber-ui://app`
+  - UI session：`POST /auth/session` 返回 `token`/`clientToken`；Bearer 与 cookie 等价（原生跨 Origin）
+  - 验证：`mobileRuntimeBridge` tests；`build:web` 产出 `mobile.html`；iOS Simulator `sim:run` 已启动；Android `assembleDebug`（见 runbook）
+  - ADR / runbook：[`NATIVE_MOBILE_FORK_ADR.md`](NATIVE_MOBILE_FORK_ADR.md) / [`NATIVE_MOBILE_RUNBOOK.md`](NATIVE_MOBILE_RUNBOOK.md)
+  - **非 DoD（仍后置）**：鸿蒙侧载验收、商店上架、Push、pairing v2
+- **#9 follow-up 拆卡（合并顺序：chrome → composer → sidebar → packaging）**
+  - [x] [#36](https://coding.s-s.city/songsong/openchamber/-/work_items/36) Capacitor native chrome：safe-area / keyboard inset / Instances·Disconnect
+  - [x] [#37](https://coding.s-s.city/songsong/openchamber/-/work_items/37) Mobile composer/keyboard **增量**（非整包上游 v1.14）— pick-list 见 [`NATIVE_MOBILE_RUNBOOK.md`](NATIVE_MOBILE_RUNBOOK.md)
+  - [x] [#38](https://coding.s-s.city/songsong/openchamber/-/work_items/38) 窄屏会话侧栏 UX（共享 `SessionSidebar`，drawer↔switcher 双向同步）
+  - [x] [#39](https://coding.s-s.city/songsong/openchamber/-/work_items/39) Android APK/AAB 更新器 + iPad 共享侧栏 + 本地 debug 脚本（无商店 CI）
+- **P0 — 变轻 / 纠正 fanout（index [#40](https://coding.s-s.city/songsong/openchamber/-/work_items/40)）**
+  - [x] [#41](https://coding.s-s.city/songsong/openchamber/-/work_items/41) M1 — instances 由 Electron 聚合下发；禁客户端逐 host Sync fanout（手机+桌面）
+  - [x] [#42](https://coding.s-s.city/songsong/openchamber/-/work_items/42) M2 — 抽屉懒挂载 SessionSidebar / GitView
+  - [x] [#43](https://coding.s-s.city/songsong/openchamber/-/work_items/43) M3 — Diff/shiki warmup 延后
+  - [x] [#44](https://coding.s-s.city/songsong/openchamber/-/work_items/44) M4 — 抽屉关闭停轮询（open-only mount + hooks `enabled`）
+  - [x] [#45](https://coding.s-s.city/songsong/openchamber/-/work_items/45) M5 — 空闲 CPU 验收写入 runbook（真机复测补 Evidence）
+- **P1 — 机感（仍共用侧栏）**
+  - [x] [#46](https://coding.s-s.city/songsong/openchamber/-/work_items/46) M6 — Capacitor 显示密度
+  - [x] [#47](https://coding.s-s.city/songsong/openchamber/-/work_items/47) M7 — 键盘/composer 收口（不回归黑屏）
+  - [x] [#48](https://coding.s-s.city/songsong/openchamber/-/work_items/48) M8 — 连接页 / 空会话密度
+- **P2 — 产品缺口（有意后置，已开卡）**
+  - [ ] [#11](https://coding.s-s.city/songsong/openchamber/-/work_items/11) M9 — Capacitor Voice resume / dictation overlay（已挂 `appStateChange` → `openchamber:capacitor-resume`；dictation 待主轨）
+  - [ ] [#49](https://coding.s-s.city/songsong/openchamber/-/work_items/49) M10 — Push（APNs / FCM）
+  - [ ] [#16](https://coding.s-s.city/songsong/openchamber/-/work_items/16) M11 — Pairing / redeem 移动面（挂本卡）
+  - [ ] [#50](https://coding.s-s.city/songsong/openchamber/-/work_items/50) M12 — 商店签名 / CI release
+
+### C. 相关但非 Mobile 主轨（交叉引用）
+
+- [#16](https://coding.s-s.city/songsong/openchamber/-/work_items/16) Private relay / pairing — **桌面侧**设计已接受；**mobile redeem 面**见上 M11
+- [#11](https://coding.s-s.city/songsong/openchamber/-/work_items/11) Voice — browser voice 可先做；Capacitor resume / overlay 见 M9
+- [#19](https://coding.s-s.city/songsong/openchamber/-/work_items/19) Terminal v3 — **已关闭**；后置 terminalContext / shell UI / mobile fullscreen quick keys（仍不引入鸿蒙壳）
+
+### D. 明确不做 / 后置说明
+
+| 主题 | 状态 | 说明 |
+|---|---|---|
+| Oniro Capacitor-OpenHarmony | 不采用 | 0.1.x、插件不全；不进 #9 |
+| ArkUI / 鸿蒙原生壳 | 不做（本轨） | 若做鸿蒙 App，优先独立 WI，不绑 Capacitor |
+| 鸿蒙 NEXT 官方支持 | 未规划 | 用户可自测 Android APK；失败不阻塞 #9 |
+| App Store / 华为商店上架与签名流水线 | 已开卡 | [#50](https://coding.s-s.city/songsong/openchamber/-/work_items/50) |
+| APNs / FCM Push | 已开卡 | [#49](https://coding.s-s.city/songsong/openchamber/-/work_items/49) |
+| Pairing v2 / `openchamber://` mobile redeem | 挂 #16 | M11；非桌面 ADR 单独范围 |
+| 上游 Mobile composer/keyboard 大重构整包 | 不做 | 增量见 [#37](https://coding.s-s.city/songsong/openchamber/-/work_items/37) / [#47](https://coding.s-s.city/songsong/openchamber/-/work_items/47) |
+| Terminal mobile fullscreen workspace / quick keys | 未规划 | #19 Phase4；web touch 另议 |
+| 中央 `api.openchamber.dev` push relay | 未规划 | 产品/合规另定 |
+
+---
+
 ## v1.12.0 — 已移植功能
 
 | Batch | 功能 | 文件数 | 说明 |
@@ -873,7 +952,7 @@ Phase 5 — 🔴 Markdown/Shiki 重写 (#1+#2): 独立 milestone，需迁移 for
 | Sidebar project sorting | ✅ 已移植 | 侧栏菜单提供 `manual / A-Z / Z-A / date-added / recent`，持久化 display store；所有 project sections 在分组前统一使用同一顺序。默认 `manual` 保留 fork 现有手工排序，只有 manual 模式允许拖拽，project pin 继续高于所选排序规则；无自定义标签时沿官方规则使用完整 path 排序 |
 | Pinned Session 空刷新保护 | ✅ fork 已有更强等价实现 | 全局 pin 由独立 `oc.sessions.pinned` Zustand store 持久化，项目内 pin 与两类排序也使用独立 storage；Session snapshot 的空成功或暂时缺项只替换列表数据，不会清空 pin。现有 store tests 覆盖持久化、rehydrate、损坏数据和跨 tab 同步 |
 | Chat visual settings 分组 | ✅ 已按 fork 设置项适配 | 保留本 fork 的 queue/steer、multi-run、diff、自动折叠 thinking 等额外设置，只为现有 Chat 设置加入“会话辅助 / 推理 / 消息外观 / 工具和文件 / 输入框”语义标题；未复制官方 Goals、recap 等尚未落地的控件，8 个 locale 同步 |
-| Private relay / pairing v2 / native mobile | 🔴 不合；Work Items [#16](https://coding.s-s.city/songsong/openchamber/-/work_items/16) / [#9](https://coding.s-s.city/songsong/openchamber/-/work_items/9) | 与本 fork DIY remote instances/sidebar、认证、SSE proxy 和无 `packages/mobile` 的现状冲突；除非另立 remote transport 项目，不进入普通迁移批次 |
+| Private relay / pairing v2 / native mobile | 🟡 分轨；Work Items [#16](https://coding.s-s.city/songsong/openchamber/-/work_items/16) / [#9](https://coding.s-s.city/songsong/openchamber/-/work_items/9) | #16 桌面设计已接受（实现延期）；#9 进行中：引入 Capacitor `packages/mobile`（iOS+Android），连接层适配 `serverRegistry`/`serverId`。见 [Mobile 产品轨道](#mobile-产品轨道) 与 [`docs/NATIVE_MOBILE_FORK_ADR.md`](NATIVE_MOBILE_FORK_ADR.md)。不整包上游单 runtime / mobile pairing |
 | OpenCode Go quota / Codex reset windows | ✅ 已移植 | 新增独立 credential store/route/provider、active-instance UI 和 VS Code bridge parity；Codex 两个窗口均按 `limit_window_seconds` 生成标签，不再固定假设 5h/weekly |
 
 ### 本地已有或部分覆盖
@@ -1015,7 +1094,7 @@ Phase 5 — 🔴 Markdown/Shiki 重写 (#1+#2): 独立 milestone，需迁移 for
 | 新 Session 严格留在所选项目，包含嵌套项目 | ✅ 已校准 | 新建发送继续冻结 `selectedProjectId + directory + serverId`；通用项目解析改为先匹配显式注册的最长项目路径，再回退到 worktree ownership，避免嵌套子项目被父项目 worktree 吞掉；新增 remote server 回归测试 |
 | 子智能体在侧栏打开并返回 Parent | ✅ 已有 fork 实现 | Task 卡通过 `openContextChat` 打开右侧 chat tab，`TaskSessionMaterializer` 按 child/parent `serverId` 和 directory 同步会话；嵌入会话显示 Parent 按钮并保持只读，不引入官方单实例 iframe 导航状态 |
 | Shell 模式卡片实时状态和输出 | ✅ 已完成 | 本地已有 optimistic `/shell` 卡、Bash bridge 折叠、实时 output/status 合并、展开/复制 UI；补齐 memo comparator 对 `shellAction.command/output/status` 的比较，确保 running、流式输出和 completed 变化触发重绘 |
-| Android 更新器区分 APK/AAB | ⏸️ 当前不适用；Work Item [#9](https://coding.s-s.city/songsong/openchamber/-/work_items/9) | 官方补丁只在 `appType=mobile-capacitor + platform=android` 时解析 GitHub Release APK；本 fork 没有 `packages/mobile`/Capacitor runtime，也没有该调用方。暂不加入无调用方的更新分支，待 native mobile milestone 一并移植 |
+| Android 更新器区分 APK/AAB | ✅ #39；Work Item [#39](https://coding.s-s.city/songsong/openchamber/-/work_items/39) | `resolveAndroidApkUrl` + `useUpdateStore` `mobile-capacitor`；iPad 持久共享侧栏；本地 `mobile:android:*` / `mobile:sim:*`；无商店 CI |
 | VS Code 每 Session Autoaccept 持久化 | ✅ 已按 fork 架构移植 | 保留 fork 的 Web/Desktop server mirror、子会话继承和多实例权限路由；VS Code extension `globalState` 作为权威策略并在 sidebar/editor/agent-manager Webview 间广播。首次升级会迁移旧 local policy；缺失子会话按通知携带的 `directory + serverId` 补取父链，权限回复使用同一显式目标并做 0/250/1000ms 有界重试 |
 | Small Model 环境变量/文件密钥 + Gemini thinking | ✅ 已随基础批次落地；Work Item [#12](https://coding.s-s.city/songsong/openchamber/-/work_items/12) | 随 `packages/web/server/lib/small-model` 一并引入 `{env:NAME}`、`{file:path}` 与 Gemini 3 `thinkingLevel`；`call.test.js` 覆盖 custom OpenAI / Gemini thinking |
 | 嵌入侧栏子任务原地导航 | ✅ 已按多实例架构移植 | 抽取稳定 iframe 身份与锚点 Session helper；嵌入 Chat 打开子任务时在当前 iframe 内切换，router 不改写 `ocPanel/sessionId/directory/readOnly`，bootstrap 不把孙级任务拉回锚点。Parent 只在钻取后出现并按 session registry 保留目标 `serverId`；主聊天、移动端、VS Code 和普通右侧开新 tab 行为保持不变，纯 helper 回归测试在每个用例内显式恢复 window，以兼容本仓库精简的 Bun 测试类型声明 |
@@ -1040,7 +1119,7 @@ Phase 5 — 🔴 Markdown/Shiki 重写 (#1+#2): 独立 milestone，需迁移 for
 | 新 Session draft 所选项目 / 创建失败恢复 | ✅ 已完成 | selected project、directory、serverId 和完整输入/附件/inline drafts 均在 draft snapshot 中恢复，覆盖官方两个小修 |
 | 固定消息跨 compaction 恢复 | ✅ 已完成（[#18](https://coding.s-s.city/songsong/openchamber/-/work_items/18)） | UI pin/unpin 写入 `session.metadata.openchamber.context_obligatory_messages`（fresh-read merge）；host `context-obligatory` runtime 监听 local hub + remote fanout 的 `session.compacted`，按 `serverId + directory + sessionID` 回读 pinned 文本并 `prompt_async` 注入；cursor `context_obligatory_last_compaction_message_id` 防重放；VS Code 隐藏 pin；`/compact` 改为 `sdkForSession` + session directory |
 | VS Code Autoaccept / missing-directory project routing | ✅ 已完成 | 已按 VS Code `globalState`、父链继承和显式多实例权限目标移植；新 Session 路由以服务端 directory 优先、冻结目录兜底并按最长注册项目匹配 |
-| Terminal runtime refactor + mobile workspace | ⏸️ 独立 Terminal/mobile 批次；Work Item [#19](https://coding.s-s.city/songsong/openchamber/-/work_items/19) | 官方替换 replay buffer、shell/theme/history 协议并新增 mobile workspace；fork 已深改 ghostty-web、context terminal、SSH forward 和 server-scoped terminal store。需先做协议兼容矩阵，不能覆盖现有 terminal runtime |
+| Terminal runtime refactor + mobile workspace | ✅ v3 协议已落地（desktop-first）；Work Item [#19](https://coding.s-s.city/songsong/openchamber/-/work_items/19) | 兼容矩阵见 [`docs/TERMINAL_PROTOCOL_COMPAT_V2_V3.md`](TERMINAL_PROTOCOL_COMPAT_V2_V3.md)。已 adapt 上游 v3（attach/snapshot/sequence，WS-only，`history`/`shells`/`theme-response`）；保留 fork sacred cows：`serverId:directory` store、per-baseUrl transport、Context Panel、Electron SSH 外开、ghostty viewport。已删 SSE/HTTP input/`output-replay-buffer`。后置：terminalContext 选区→chat、shell settings UI、mobile workspace/quick keys（不引入 `packages/mobile`） |
 | Project action auto-discover tooltip/icon | ✅ 核心能力已有，视觉微调暂缓 | fork 已有自动检测 dev server、实时终端输出 URL、Preview 自动打开、等待状态、停止和多 server terminal 路由；当前 search icon 与动态 aria-label 已提供语义，官方 scan icon/tooltip 仅视觉微调，待 Terminal 批次统一处理 |
 | Settings layout 标准化 + AgentPermissionsEditor 抽取 | ✅ 功能已有，布局不覆盖 | Agent permission 的 allow/ask/deny、pattern、继承和序列化已在 fork AgentsPage；Settings 正在做 remote-instance wiring，官方大规模单实例页面重排会覆盖 fork 的可见性和路由。继续按页面逐项迁移功能，不机械替换 layout |
 | Chat/sidebar/mobile shadows | ➖ 不移植纯视觉差异 | 不为版本号同步引入独立阴影；遵循 fork 现有 theme token 和密度，待对应 surface 有明确设计目标时统一调整 |
@@ -1228,7 +1307,7 @@ VS Code worktree lock 验证：在两个真实临时 Git 仓库及 `--no-checkou
 | Mobile Markdown file-reference probing | ✅ 第一批已移植 | mobile surface 不再为 inline file reference 发 `/api/fs/stat`；本地图片 `/api/fs/raw` 转换仍保留，不把图片代理与 annotation probe 混为一项 |
 | Chat first-open / Thinking scroll | ✅ 审计完成，保留 fork 实现 | fork 已有单 writer、wheel/touch/key 用户意图释放、process-fold guard、历史锚点和 working/settle passive follow。官方 first-open 最长 8s 强制贴底会重新引入用户反馈过的滚动硬控；Thinking patch又依赖上游已改写的 reasoning DOM，因此不机械叠加第二套 scroll writer |
 | Desktop remote custom headers / realtime proxy | ✅ 已移植并验证；Work Item [#10](https://coding.s-s.city/songsong/openchamber/-/work_items/10) 已关闭 | 未整包上游 realtime-proxy/runtime-switch。在 fork `remoteInstances` 上增加 per-`serverId` `requestHeaders`，统一 `buildRemoteUpstreamHeaders` 注入 health/HTTP/SSE/event-WS/RPC/fanout；Authorization 仍由 auth 独占。API 红acted 空值 + preserve；Web ConfigCard 可编辑。定向 `request-headers`/`config`/`rpc-ws`/`settings-helpers` 测试通过。双远端 CF Access 交互 QA 随环境补测 |
-| Native mobile workspace / official bundled CLI | ⏸ 不直接移植；Work Item [#9](https://coding.s-s.city/songsong/openchamber/-/work_items/9) | 当前无 `packages/mobile`；官方 CLI 与 custom `1.18.4-sscity`、shared database 和签名 runbook 冲突，继续保留 fork packaging authority |
+| Native mobile workspace / official bundled CLI | 🟡 #9 进行中（壳）；CLI 仍不移植；Work Item [#9](https://coding.s-s.city/songsong/openchamber/-/work_items/9) | 引入 fork 适配的 `packages/mobile` + `MobileApp`/`serverRegistry` 桥；官方 bundled CLI 与 custom `1.18.4-sscity`、shared database 和签名 runbook 冲突，继续保留 fork packaging authority |
 
 **v1.13.9 收口**：27 个官方提交已逐项审计。Embedded JSON、agent null-field、stale busy、Keep Awake、CLI path 防护、custom bundled CLI 等已有或更强实现；本批新增 deferred safeStorage 与 mobile file-reference probe guard。原生 mobile、official CLI、remote relay headers 明确保留为架构分歧，chat scroll 继续使用 fork 单 writer，不引入上游强制贴底窗口。源码、workspace lock、Electron 构建前缀和打包 runbook 已推进到 `1.13.9-sscity`。
 
@@ -1256,7 +1335,7 @@ VS Code worktree lock 验证：在两个真实临时 Git 仓库及 `--no-checkou
 | VS Code favorites / settings return | ✅ 已提前移植 | favorites 已持久化，退出 settings 恢复 previous view |
 | Mobile auth fallback / PWA safe area | ✅ fork 已等价或更强 | 非 desktop status probe 失败进入 network error；只有 desktop remote password fallback 显示 unlock。PWA keyboard mode、safe-area composer/dialog/toast 已按现有 DOM 适配 |
 | Small Model + session recap/suggestion | ✅ Small Model 基础已移植（Notes + 标题重生成）；session-assist 仍延期 | Work Item [#12](https://coding.s-s.city/songsong/openchamber/-/work_items/12)：`/api/small-model` + settings + Notes 选区摘要；另将侧栏「AI 重新生成标题」改为调用 Small Model（`restrictToPreferredProvider` + directory），删除本地首句/末句假候选，失败时明确 `reason` 并允许手改当前标题。**未**移植 `session-assist` recap/suggestion、Goals、git generation |
-| Native mobile resume/focus/dictation overlay | ➖ 当前架构不适用；Work Item [#11](https://coding.s-s.city/songsong/openchamber/-/work_items/11) | fork 无 Capacitor mobile workspace，也没有官方 `ComposerDictation` surface；旧 browser voice/STT/TTS 后续与 Small Model/voice 批次一起重构 |
+| Native mobile resume/focus/dictation overlay | ⏸️ 壳已有；Work Item [#11](https://coding.s-s.city/songsong/openchamber/-/work_items/11) | #9/#36 chrome 已落地；`ComposerDictation` / Capacitor resume 仍挂 #11，等 voice 批次 |
 | Share opinion prompt / `oc-dev` Bun global helper | ➖ 不移植 | 临时社区调查不属于产品功能；当前仓库无官方 `oc-dev.mjs` 部署 surface |
 
 **v1.14.1 收口**：17 个官方提交已逐项审计。文件范围、Diff 首行、Timeline、VS Code favorites/返回页和 auth/PWA 边界已有实现；native mobile 与临时调查不适用。Small Model/session assist 明确保留为后续独立批次，不把未完成能力计作已合并。源码、workspace lock、Electron 构建前缀和打包 runbook 已推进到 `1.14.1-sscity`。
@@ -1281,7 +1360,7 @@ VS Code worktree lock 验证：在两个真实临时 Git 仓库及 `--no-checkou
 | Windows tray/startup | ✅ 已移植并验证；Work Item [#17](https://coding.s-s.city/songsong/openchamber/-/work_items/17) 已关闭 | 上游 `4a9aebdb6`（#2112）叠在 fork #27 macOS tray 上：`setupTray`/`isTrayEnabledForPlatform` 含 win32（不依赖 `desktopMacMenuBarEnabled`）；`icon.ico` + extraResources/win NSIS；`getLoginItemOptions` + `--background` 开机自启；`desktopMinimizeToTrayEnabled` + minimize/close hide；`useTraySync` 扩 win32；Quit 仍走 `requestQuitWithConfirmation`。8 locale + settings-helpers 测试；macOS 菜单栏开关/呼吸图标不变。Windows 交互 QA（托盘点击 / minimize-to-tray / login item / Keep·Stop OpenCode）随下次 Windows 包补测 |
 | Startup OpenCode config 非阻塞 | ✅ 已移植并验证；Work Item [#2](https://coding.s-s.city/songsong/openchamber/-/work_items/2) 已关闭 | 上游 `0542bcfc5` 逐段适配（禁止整文件覆盖）：`sync-refs` `getSyncConfig`/`emit`/`subscribe`（扫 default + `getAllSyncStores`）；`client.getConfig` 按 `baseUrl+directory` 缓存/去重；bootstrap Phase2/seed `emitSyncConfigChanged`；`useConfigStore` 去掉 `loadAgents`/`initializeApp` 对 `config.get` 的阻塞等待，新增 `selectionSource` + `applyOpenCodeConfigDefaults`（manual 优先）。定向 9 tests；UI type-check 目标文件绿 |
 | 长会话 streaming 性能三块缺口 | ✅ 已移植并验证；Work Item [#4](https://coding.s-s.city/songsong/openchamber/-/work_items/4) 已关闭 | 上游 `e88afff2` 仅 port 剩余缺口（不整包、不 virtua）：`streamingTailEntry` + `MessageList`/`useSessionParts` 尾叶 live reinject（session directory/serverId）；sidebar `sessionNodeItemUtils` 预计算 subtree/menu/structure 经 `SessionGroupSection`/`SidebarActivitySections` 下传；`sync-session-generation` + `loadMessages(isStale)` 写守卫（`serverId+directory+sessionID`）。定向 10 tests；大会话/大侧栏 runtime QA 随交互补测 |
-| Native mobile / mobile release/update/iPad split | ➖ 当前架构不适用；Work Item [#9](https://coding.s-s.city/songsong/openchamber/-/work_items/9) | fork 无 `packages/mobile`/Capacitor workspace；CI、iOS/Android signing、native update UI 与 connect sheet 不导入 |
+| Native mobile / mobile release/update/iPad split | ✅ #9 壳 + #36–#39 follow-up；Work Items [#9](https://coding.s-s.city/songsong/openchamber/-/work_items/9)/[#36](https://coding.s-s.city/songsong/openchamber/-/work_items/36)–[#39](https://coding.s-s.city/songsong/openchamber/-/work_items/39) | 原生 chrome/Instances、composer 增量、侧栏同步、APK 更新器与 iPad 共享侧栏已落地；商店签名/Push/pairing/CI release 仍后置 |
 
 **v1.15.0 收口**：50 个官方提交已逐项分类。Loose diff、ambiguous prompt、browser/deep-link、右栏 resize、VS Code 相对路径、Last-turn Diff 与 Navigable JSON summaries 已按 fork 架构移植；code wrap/line numbers、Mermaid zoom、sticky header、CORS encoding 与 SDK 版本已有等价或更强实现。Native mobile 不适用，relay/pairing、project default model 和 Windows shell 明确保留为独立批次，不把延期能力计作已合并。源码、workspace lock、Electron 构建前缀和打包 runbook 已推进到 `1.15.0-sscity`。
 
@@ -1334,7 +1413,7 @@ VS Code worktree lock 验证：在两个真实临时 Git 仓库及 `--no-checkou
 | OpenCode never auto-attach / orphan cleanup / process killer port ownership | 本 fork Electron 在同进程启动 web server，并有自定义 managed OpenCode keep-alive / detach / quit 语义 | 先读 `opencode` 模块 docs + Electron lifecycle，做 runtime-truth 验证；不能照搬上游 kill/attach 判断 |
 | v1.13.4 dead-code cleanup / knip sweep | compare 删除大量 UI/shared 文件；fork 仍有远程实例、session markers、custom UI 依赖 | 暂缓。cleanup 不应和功能合并混在一起 |
 | Japanese docs/i18n bulk import | 文件量很大但业务风险低；容易污染 diff | Work Item [#31](https://coding.s-s.city/songsong/openchamber/-/work_items/31)。等功能批次稳定后单独做 docs/i18n 批次 |
-| Native iOS/Android app project | v1.13.9 新增 `packages/mobile`，当前 fork 无该 workspace，且本 fork desktop/web runtime 已有自定义远程实例/managed runtime 语义 | Work Item [#9](https://coding.s-s.city/songsong/openchamber/-/work_items/9)。不作为第一阶段；除非明确决定引入 mobile workspace，否则只选合 PWA/mobile web 修复 |
+| Native iOS/Android app project | v1.13.9 新增 `packages/mobile`；fork 现按 [#9](https://coding.s-s.city/songsong/openchamber/-/work_items/9) 引入并适配 `serverRegistry` | 进行中。薄壳 `MobileApp` + registry 桥；不整包上游 pairing/push/MobileSessionsSheet。见 [`docs/NATIVE_MOBILE_FORK_ADR.md`](NATIVE_MOBILE_FORK_ADR.md) |
 | 官方 bundled OpenCode CLI / updater | 官方 v1.13.9 打包 pinned official CLI；本 fork 已完成 custom merged binary staging/signing/runbook，并强制 shared `opencode.db` channel | 不直接 port 官方 binary 或自动升级；后续只评估 updater UX，custom binary provenance 与 shared-data invariant 不变 |
 | Mobile composer/keyboard full redesign | v1.14.0/1 大面积改 `MobileApp`/`ChatInput`/autocompletes/keyboard choreography；本 fork 没有 native mobile package，且 ChatInput 深改 | 先处理小的 PWA auth/safe-area bug；大重构单独排 |
 

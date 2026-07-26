@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type { UpdateInfo, UpdateProgress } from '@/lib/desktop';
 import { getDeviceInfo } from '@/lib/device';
+import { getClientPlatform, isCapacitorApp } from '@/lib/platform';
 import { useUIStore } from './useUIStore';
 import {
   checkForDesktopUpdates,
@@ -20,7 +21,7 @@ export type UpdateState = {
   info: UpdateInfo | null;
   progress: UpdateProgress | null;
   error: string | null;
-  runtimeType: 'desktop' | 'web' | 'vscode' | null;
+  runtimeType: 'desktop' | 'web' | 'vscode' | 'mobile' | null;
   lastChecked: number | null;
   nextCheckInSec: number | null;
 };
@@ -33,7 +34,7 @@ interface UpdateStore extends UpdateState {
   reset: () => void;
 }
 
-type ClientRuntime = 'desktop' | 'web' | 'vscode';
+type ClientRuntime = 'desktop' | 'web' | 'vscode' | 'mobile';
 
 function detectDeviceClass(): 'mobile' | 'tablet' | 'desktop' | 'unknown' {
   if (typeof window === 'undefined') return 'unknown';
@@ -63,7 +64,11 @@ function detectArch(): 'arm64' | 'x64' | 'unknown' {
   return 'unknown';
 }
 
-function detectPlatform(): 'macos' | 'windows' | 'linux' | 'web' {
+function detectPlatform(): 'macos' | 'windows' | 'linux' | 'web' | 'android' | 'ios' {
+  if (isCapacitorApp()) {
+    const client = getClientPlatform();
+    if (client === 'android' || client === 'ios') return client;
+  }
   if (typeof navigator === 'undefined') return 'web';
   const platform = (navigator.platform || '').toLowerCase();
   if (platform.includes('mac')) return 'macos';
@@ -89,6 +94,12 @@ function mapRuntimeParams(runtime: ClientRuntime): URLSearchParams {
   if (runtime === 'vscode') {
     params.set('appType', 'vscode');
     params.set('instanceMode', 'local');
+    return params;
+  }
+
+  if (runtime === 'mobile') {
+    params.set('appType', 'mobile-capacitor');
+    params.set('instanceMode', 'remote');
     return params;
   }
 
@@ -126,6 +137,8 @@ async function checkForWebUpdates(runtime: ClientRuntime, currentVersion?: strin
           : undefined,
       packageManager: data.packageManager,
       updateCommand: data.updateCommand,
+      downloadUrl: typeof data.downloadUrl === 'string' ? data.downloadUrl : undefined,
+      releaseUrl: typeof data.releaseUrl === 'string' ? data.releaseUrl : undefined,
     };
   } catch (error) {
     console.warn('Failed to check for updates:', error);
@@ -133,7 +146,8 @@ async function checkForWebUpdates(runtime: ClientRuntime, currentVersion?: strin
   }
 }
 
-function detectRuntimeType(): 'desktop' | 'web' | 'vscode' | null {
+function detectRuntimeType(): 'desktop' | 'web' | 'vscode' | 'mobile' | null {
+  if (isCapacitorApp()) return 'mobile';
   if (isElectronShell()) {
     // Only use the desktop updater when we're on the local instance.
     // When viewing a remote host inside the desktop shell, treat update as web update.
@@ -208,8 +222,8 @@ export const useUpdateStore = create<UpdateStore>()((set, get) => ({
         }
 
         return suggestedSec;
-      } else if (runtime === 'web') {
-        info = await checkForWebUpdates('web');
+      } else if (runtime === 'web' || runtime === 'mobile') {
+        info = await checkForWebUpdates(runtime);
         suggestedSec = info?.nextSuggestedCheckInSec ?? null;
       } else if (runtime === 'vscode') {
         const vscodeInfo = await checkForWebUpdates('vscode');
@@ -234,7 +248,14 @@ export const useUpdateStore = create<UpdateStore>()((set, get) => ({
   },
 
   downloadUpdate: async () => {
-    const { available, runtimeType } = get();
+    const { available, runtimeType, info } = get();
+
+    if (runtimeType === 'mobile') {
+      const url = info?.downloadUrl || info?.releaseUrl;
+      if (!available || !url || typeof window === 'undefined') return;
+      window.open(url, '_blank', 'noopener,noreferrer');
+      return;
+    }
 
     // For web runtime, there's no download - user uses in-app update or CLI
     if (runtimeType !== 'desktop' || !available) {

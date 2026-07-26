@@ -85,6 +85,14 @@
     min-width: 36px;
   }
 
+  /* Capacitor phones: denser hit targets than PWA mobile defaults */
+  :root.capacitor:not(.desktop-runtime) button:not([role="radio"]):not([role="checkbox"]):not([role="switch"]),
+  :root.capacitor:not(.desktop-runtime) .btn,
+  :root.capacitor:not(.desktop-runtime) [role="button"] {
+    min-height: 28px;
+    min-width: 28px;
+  }
+
   .composer-mobile-actions button {
     width: 1.5rem !important;
     min-width: 0 !important;
@@ -464,12 +472,16 @@
 
 @media (display-mode: standalone) {
   :root:not(.desktop-runtime) .oc-mobile-composer {
-    padding-bottom: calc(0.75rem + max(16px, var(--oc-safe-area-bottom, env(safe-area-inset-bottom, 0px)))) !important;
+    padding-bottom: calc(
+      0.75rem
+      + max(16px, var(--oc-safe-area-bottom, env(safe-area-inset-bottom, 0px)))
+      + var(--oc-keyboard-inset, 0px)
+    ) !important;
     transition: padding-bottom 220ms cubic-bezier(0.33, 1, 0.68, 1);
   }
 
   :root:not(.desktop-runtime) .oc-mobile-composer:focus-within {
-    padding-bottom: 0.75rem !important;
+    padding-bottom: calc(0.75rem + var(--oc-keyboard-inset, 0px)) !important;
   }
 
   :root:not(.desktop-runtime) [data-sonner-toaster][data-y-position='top'] {
@@ -527,4 +539,149 @@
       );
     }
   }
+}
+
+/* Capacitor native shell: apply safe-area + keyboard inset without PWA display-mode */
+:root.capacitor:not(.desktop-runtime) {
+  --oc-safe-area-top: env(safe-area-inset-top, 0px);
+  --oc-safe-area-right: env(safe-area-inset-right, 0px);
+  --oc-safe-area-bottom: env(safe-area-inset-bottom, 0px);
+  --oc-safe-area-bottom-visual: clamp(0px, calc(var(--oc-safe-area-bottom) * 0.05), 4px);
+  --oc-safe-area-left: env(safe-area-inset-left, 0px);
+  /* Phone density closer to native chat apps (DeepSeek-class), not desktop sidebar scale. */
+  --font-scale: 0.78;
+  --text-markdown: 0.8125rem;
+  --text-code: 0.75rem;
+  --text-ui-header: 0.8125rem;
+  --text-ui-label: 0.75rem;
+  --text-meta: 0.6875rem;
+  --text-micro: 0.6875rem;
+}
+
+/* Prefer targeted surfaces over `:root.capacitor *` universal override. */
+:root.capacitor:not(.desktop-runtime) body,
+:root.capacitor:not(.desktop-runtime) .main-content-safe-area,
+:root.capacitor:not(.desktop-runtime) .drawer-safe-area,
+:root.capacitor:not(.desktop-runtime) .header-safe-area,
+:root.capacitor:not(.desktop-runtime) .oc-mobile-composer {
+  --text-markdown: 0.8125rem;
+  --text-code: 0.75rem;
+  --text-ui-header: 0.8125rem;
+  --text-ui-label: 0.75rem;
+  --text-meta: 0.6875rem;
+  --text-micro: 0.6875rem;
+}
+
+:root.capacitor:not(.desktop-runtime) .px-4 {
+  padding-left: 0.75rem !important;
+  padding-right: 0.75rem !important;
+}
+
+:root.capacitor:not(.desktop-runtime) .py-2 {
+  padding-top: 0.4rem !important;
+  padding-bottom: 0.4rem !important;
+}
+
+/* Header chrome: shrink the desktop icon rail on phones */
+:root.capacitor:not(.desktop-runtime) .header-safe-area button,
+:root.capacitor:not(.desktop-runtime) .header-safe-area [role="button"] {
+  min-height: 28px !important;
+  min-width: 28px !important;
+  padding: 0.2rem !important;
+}
+
+:root.capacitor:not(.desktop-runtime) .header-safe-area svg {
+  width: 1rem !important;
+  height: 1rem !important;
+}
+
+:root.capacitor:not(.desktop-runtime) .header-safe-area {
+  padding-top: var(--oc-safe-area-top);
+}
+
+:root.capacitor:not(.desktop-runtime) .main-content-safe-area {
+  padding-left: var(--oc-safe-area-left);
+  padding-right: var(--oc-safe-area-right);
+}
+
+:root.capacitor:not(.desktop-runtime) .bottom-safe-area {
+  padding-bottom: var(--oc-safe-area-bottom-visual) !important;
+}
+
+:root.capacitor:not(.desktop-runtime) .drawer-safe-area {
+  padding-bottom: var(--oc-safe-area-bottom-visual);
+}
+
+/* Sidebar / project rows: cut vertical padding for phone density */
+:root.capacitor:not(.desktop-runtime) .drawer-safe-area button,
+:root.capacitor:not(.desktop-runtime) .drawer-safe-area [role="button"] {
+  min-height: 26px !important;
+  min-width: 26px !important;
+  padding-top: 0.15rem !important;
+  padding-bottom: 0.15rem !important;
+}
+
+:root.capacitor:not(.desktop-runtime) .drawer-safe-area .typography-ui-label,
+:root.capacitor:not(.desktop-runtime) .drawer-safe-area .typography-meta {
+  line-height: 1.2;
+  font-size: var(--text-ui-label) !important;
+}
+
+:root.capacitor:not(.desktop-runtime) .drawer-safe-area .space-y-1 > :not([hidden]) ~ :not([hidden]) {
+  margin-top: 0.15rem;
+}
+
+/* Skip layout/paint for offscreen session rows while the drawer list scrolls. */
+:root.capacitor:not(.desktop-runtime) .drawer-safe-area [data-session-row] {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 36px;
+}
+
+/*
+ * Pin the shell to the viewport. Keyboard.resize=body was collapsing this to
+ * ~header height on IME hide (main/chat height:0 → full black content).
+ */
+:root.capacitor:not(.desktop-runtime) .main-content-safe-area {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  max-height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
+}
+
+:root.capacitor:not(.desktop-runtime) .main-content-safe-area .flex-1 {
+  min-height: 0;
+}
+
+:root.capacitor:not(.desktop-runtime) .oc-mobile-composer {
+  padding-bottom: calc(
+    0.5rem
+    + max(12px, var(--oc-safe-area-bottom, env(safe-area-inset-bottom, 0px)))
+  ) !important;
+}
+
+:root.capacitor:not(.desktop-runtime).oc-keyboard-open .oc-mobile-composer {
+  transition:
+    padding-bottom 180ms cubic-bezier(0.33, 1, 0.68, 1),
+    bottom 180ms cubic-bezier(0.33, 1, 0.68, 1);
+}
+
+/*
+ * Pin the composer to the screen above the IME. Flex/padding/translate fights
+ * Android WebView + StatusBar overlay on Harmony (layout rects disagree with
+ * pixels — vhello only a sliver above the keys). fixed + bottom:inset matches
+ * the Keyboard plugin height to the visible keyboard top.
+ */
+:root.capacitor:not(.desktop-runtime).oc-keyboard-open .oc-mobile-composer,
+:root.capacitor:not(.desktop-runtime).oc-keyboard-open .oc-mobile-composer.bottom-safe-area {
+  position: fixed !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: var(--oc-keyboard-inset, 0px) !important;
+  z-index: 80 !important;
+  margin: 0 !important;
+  padding-bottom: 0.5rem !important;
+  transform: none !important;
+  background: var(--background);
 }

@@ -1,5 +1,6 @@
 import React from 'react';
 import { isDesktopShell, isVSCodeRuntime } from '@/lib/desktop';
+import { isCapacitorApp } from '@/lib/platform';
 
 export type DeviceType = 'desktop' | 'mobile' | 'tablet';
 
@@ -89,7 +90,10 @@ const setRootDeviceAttributes = (
     root.classList.remove('desktop-runtime');
     root.style.setProperty('--is-mobile', isMobile ? '1' : '0');
     root.style.setProperty('--device-type', deviceType);
-    root.style.setProperty('--font-scale', isMobile ? '0.9' : isTablet ? '0.95' : '1');
+    root.style.setProperty(
+      '--font-scale',
+      isCapacitorApp() ? '0.78' : isMobile ? '0.9' : isTablet ? '0.95' : '1',
+    );
     root.style.setProperty('--has-coarse-pointer', hasTouchInput ? '1' : '0');
     root.style.setProperty('--has-touch-input', hasTouchInput ? '1' : '0');
     if (hasTouchInput) {
@@ -127,6 +131,13 @@ export function getDeviceInfo(): DeviceInfo {
     isTablet = false;
     isDesktop = true;
     deviceType = 'desktop';
+  } else if (isCapacitorApp()) {
+    // Capacitor shell is the mobile product surface for shared UI branches
+    // (draft starters, panels). iPad wide layout is handled in MainLayout via isIPadApp().
+    isMobile = true;
+    isTablet = false;
+    isDesktop = false;
+    deviceType = 'mobile';
   } else if (isMobile) {
     deviceType = 'mobile';
   } else if (isTablet) {

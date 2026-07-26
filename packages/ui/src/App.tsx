@@ -930,7 +930,11 @@ function App({ apis }: AppProps) {
       <SyncProvider sdk={opencodeClient.getSdkClient()} directory={currentDirectory || ''}>
         <MultiServerSyncLayer />
         <RemoteProjectDiscovery />
-        <BootstrapDebug />
+        {/* Opt-in only — always-on overlay covers the mobile composer / keyboard inset. */}
+        {typeof window !== 'undefined'
+          && window.localStorage?.getItem?.('openchamber_bootstrap_debug') === '1'
+          ? <BootstrapDebug />
+          : null}
         <RuntimeAPIProvider apis={apis}>
           <FireworksProvider>
             <VoiceProvider>

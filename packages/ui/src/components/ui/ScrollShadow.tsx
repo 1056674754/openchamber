@@ -24,28 +24,43 @@ function mergeRefs<T>(...refs: Array<React.Ref<T>>): React.RefCallback<T> {
   };
 }
 
+const SELF_MANAGED_ATTRS = new Set([
+  "data-top-scroll",
+  "data-bottom-scroll",
+  "data-top-bottom-scroll",
+  "data-left-scroll",
+  "data-right-scroll",
+  "data-left-right-scroll",
+  "style",
+  "data-orientation",
+  "data-scroll-shadow",
+  "class",
+]);
+
 export const ScrollShadow = React.forwardRef<HTMLElement, ScrollShadowProps>(
-      (
-      {
-        as: Component = "div",
-        orientation = "vertical",
-        offset = 0,
-        size = 48,
-        isEnabled = true,
-        hideTopShadow = false,
-        hideBottomShadow = false,
-        observeMutations = true,
-        onVisibilityChange,
-        style,
-        className,
-        children,
-        ...rest
+  (
+    {
+      as: Component = "div",
+      orientation = "vertical",
+      offset = 0,
+      size = 48,
+      isEnabled = true,
+      hideTopShadow = false,
+      hideBottomShadow = false,
+      observeMutations = true,
+      onVisibilityChange,
+      style,
+      className,
+      children,
+      ...rest
     },
     ref,
   ) => {
     const internalRef = React.useRef<HTMLElement>(null);
     const visibleRef = React.useRef<"both" | "none" | "top" | "bottom" | "left" | "right">("none");
     const progressRef = React.useRef<number>(0);
+    const shadowStateRef = React.useRef<{ before: boolean; after: boolean } | null>(null);
+    const updatingRef = React.useRef(false);
 
     const dataScrollShadow = (rest as Record<string, unknown>)["data-scroll-shadow"];
     delete (rest as Record<string, unknown>)["data-scroll-shadow"];
@@ -62,15 +77,27 @@ export const ScrollShadow = React.forwardRef<HTMLElement, ScrollShadowProps>(
     const setAttributes = React.useCallback(
       (el: HTMLElement, hasBefore: boolean, hasAfter: boolean, prefix: "top" | "left", suffix: "bottom" | "right") => {
         const bothKey = `${prefix}${suffix.charAt(0).toUpperCase()}${suffix.slice(1)}Scroll` as const;
+        const beforeAttr = `data-${prefix}-scroll`;
+        const afterAttr = `data-${suffix}-scroll`;
+        const bothAttr = `data-${prefix}-${suffix}-scroll`;
 
         if (hasBefore && hasAfter) {
-          (el.dataset as Record<string, string>)[bothKey] = "true";
-          el.removeAttribute(`data-${prefix}-scroll`);
-          el.removeAttribute(`data-${suffix}-scroll`);
-        } else {
-          el.dataset[`${prefix}Scroll`] = String(hasBefore);
-          el.dataset[`${suffix}Scroll`] = String(hasAfter);
-          el.removeAttribute(`data-${prefix}-${suffix}-scroll`);
+          if (el.getAttribute(bothAttr) !== "true") {
+            el.setAttribute(bothAttr, "true");
+          }
+          if (el.hasAttribute(beforeAttr)) el.removeAttribute(beforeAttr);
+          if (el.hasAttribute(afterAttr)) el.removeAttribute(afterAttr);
+          return;
+        }
+
+        if (el.hasAttribute(bothAttr)) el.removeAttribute(bothAttr);
+        const beforeValue = String(hasBefore);
+        const afterValue = String(hasAfter);
+        if (el.getAttribute(beforeAttr) !== beforeValue) {
+          el.setAttribute(beforeAttr, beforeValue);
+        }
+        if (el.getAttribute(afterAttr) !== afterValue) {
+          el.setAttribute(afterAttr, afterValue);
         }
       },
       [],
@@ -78,7 +105,8 @@ export const ScrollShadow = React.forwardRef<HTMLElement, ScrollShadowProps>(
 
     const clearAttributes = React.useCallback((el: HTMLElement) => {
       ["top", "bottom", "top-bottom", "left", "right", "left-right"].forEach((attr) => {
-        el.removeAttribute(`data-${attr}-scroll`);
+        const name = `data-${attr}-scroll`;
+        if (el.hasAttribute(name)) el.removeAttribute(name);
       });
     }, []);
 
@@ -87,7 +115,12 @@ export const ScrollShadow = React.forwardRef<HTMLElement, ScrollShadowProps>(
       if (!el) return;
 
       if (!isEnabled) {
-        clearAttributes(el);
+        if (shadowStateRef.current !== null) {
+          updatingRef.current = true;
+          clearAttributes(el);
+          shadowStateRef.current = null;
+          updatingRef.current = false;
+        }
         return;
       }
 
@@ -110,9 +143,31 @@ export const ScrollShadow = React.forwardRef<HTMLElement, ScrollShadowProps>(
         hasAfter = false;
       }
 
-      setAttributes(el, effectiveHasBefore, hasAfter, orientation === "vertical" ? "top" : "left", orientation === "vertical" ? "bottom" : "right");
+      const prevShadow = shadowStateRef.current;
+      const shadowChanged = !prevShadow
+        || prevShadow.before !== effectiveHasBefore
+        || prevShadow.after !== hasAfter;
 
-      const next = effectiveHasBefore && hasAfter ? "both" : effectiveHasBefore ? (orientation === "vertical" ? "top" : "left") : hasAfter ? (orientation === "vertical" ? "bottom" : "right") : "none";
+      if (shadowChanged) {
+        updatingRef.current = true;
+        setAttributes(
+          el,
+          effectiveHasBefore,
+          hasAfter,
+          orientation === "vertical" ? "top" : "left",
+          orientation === "vertical" ? "bottom" : "right",
+        );
+        shadowStateRef.current = { before: effectiveHasBefore, after: hasAfter };
+        updatingRef.current = false;
+      }
+
+      const next = effectiveHasBefore && hasAfter
+        ? "both"
+        : effectiveHasBefore
+          ? (orientation === "vertical" ? "top" : "left")
+          : hasAfter
+            ? (orientation === "vertical" ? "bottom" : "right")
+            : "none";
       if (next !== visibleRef.current) {
         visibleRef.current = next;
         onVisibilityChange?.(next);
@@ -121,9 +176,13 @@ export const ScrollShadow = React.forwardRef<HTMLElement, ScrollShadowProps>(
       if (orientation === "vertical") {
         const scrollable = el.scrollHeight - el.clientHeight;
         const progress = scrollable > 0 ? Math.min(1, Math.max(0, el.scrollTop / scrollable)) : 0;
-        if (progress !== progressRef.current) {
-          progressRef.current = progress;
-          el.style.setProperty("--scroll-progress", String(progress));
+        // Quantize to avoid float chatter rewriting --scroll-progress every frame.
+        const quantized = Math.round(progress * 1000) / 1000;
+        if (quantized !== progressRef.current) {
+          progressRef.current = quantized;
+          updatingRef.current = true;
+          el.style.setProperty("--scroll-progress", String(quantized));
+          updatingRef.current = false;
         }
       }
     }, [clearAttributes, hideTopShadow, hideBottomShadow, isEnabled, offset, onVisibilityChange, orientation, setAttributes]);
@@ -145,7 +204,25 @@ export const ScrollShadow = React.forwardRef<HTMLElement, ScrollShadowProps>(
       const handleScroll = () => checkOverflow(); // Scroll should be immediate
       const resizeObserver = typeof ResizeObserver !== "undefined" ? new ResizeObserver(throttledCheck) : null;
       const mutationObserver =
-        observeMutations && typeof MutationObserver !== "undefined" ? new MutationObserver(throttledCheck) : null;
+        observeMutations && typeof MutationObserver !== "undefined"
+          ? new MutationObserver((records) => {
+              if (updatingRef.current) return;
+              // Ignore mutations we authored (data-*-scroll / style). Watching
+              // those re-entered checkOverflow every frame and pegged mobile CPU
+              // when the sidebar ScrollShadow + chat list were both mounted.
+              for (const record of records) {
+                if (record.type !== "attributes") {
+                  throttledCheck();
+                  return;
+                }
+                const attr = record.attributeName;
+                if (!attr || !SELF_MANAGED_ATTRS.has(attr)) {
+                  throttledCheck();
+                  return;
+                }
+              }
+            })
+          : null;
 
       checkOverflow();
 

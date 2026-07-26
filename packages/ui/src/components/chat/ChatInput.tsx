@@ -45,6 +45,9 @@ import { MobileAgentButton } from './MobileAgentButton';
 import { MobileModelButton } from './MobileModelButton';
 import { MobileSessionStatusBar } from './MobileSessionStatusBar';
 import { useCurrentSessionActivity } from '@/hooks/useSessionActivity';
+import { useVisualViewport } from '@/hooks/useVisualViewport';
+import { setKeyboardInsetCssVar } from '@/hooks/nativeMobileChrome';
+import { isCapacitorApp } from '@/lib/platform';
 import { toast } from '@/components/ui';
 import { Button } from '@/components/ui/button';
 // useMessageStore removed — messages now come from sync system
@@ -622,6 +625,9 @@ const ComposerAttachmentControls = React.memo(function ComposerAttachmentControl
                         'rounded-md',
                         'hover:bg-interactive-hover/40'
                     )}
+                    onMouseDown={(event) => {
+                        event.preventDefault();
+                    }}
                     onPointerDownCapture={(event) => {
                         if (event.pointerType === 'touch') {
                             event.preventDefault();
@@ -661,6 +667,14 @@ const ComposerAttachmentControls = React.memo(function ComposerAttachmentControl
                             <button
                                 type="button"
                                 className={footerIconButtonClass}
+                                onMouseDown={(event) => {
+                                    event.preventDefault();
+                                }}
+                                onPointerDownCapture={(event) => {
+                                    if (event.pointerType === 'touch') {
+                                        event.preventDefault();
+                                    }
+                                }}
                                 title={t('chat.chatInput.actions.addAttachment')}
                                 aria-label={t('chat.chatInput.actions.addAttachment')}
                             >
@@ -1293,6 +1307,19 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const agents = getVisibleAgents();
     const isMobile = useUIStore((state) => state.isMobile);
     const inputBarOffset = useUIStore((state) => state.inputBarOffset);
+    // PWA/web only: Capacitor inset ownership lives in useNativeMobileChrome
+    // (Keyboard plugin + single visualViewport fallback). Do not dual-write here.
+    const { keyboardHeight } = useVisualViewport();
+    React.useEffect(() => {
+        if (!isMobile || typeof document === 'undefined' || isCapacitorApp()) {
+            return;
+        }
+        const root = document.documentElement;
+        setKeyboardInsetCssVar(root, keyboardHeight);
+        return () => {
+            setKeyboardInsetCssVar(root, 0);
+        };
+    }, [isMobile, keyboardHeight]);
     const persistChatDraft = useUIStore((state) => state.persistChatDraft);
     const inputSpellcheckEnabled = useUIStore((state) => state.inputSpellcheckEnabled);
     const isExpandedInput = useUIStore((state) => state.isExpandedInput);

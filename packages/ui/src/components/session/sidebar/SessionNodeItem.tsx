@@ -1322,7 +1322,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
 
   return (
     <React.Fragment key={session.id}>
-      <DraggableSessionRow sessionId={session.id} sessionDirectory={sessionDirectory ?? null} sessionTitle={sessionTitle} disabled={isGlobalPinnedContext || renderContext === 'recent'}>
+      <DraggableSessionRow sessionId={session.id} sessionDirectory={sessionDirectory ?? null} sessionTitle={sessionTitle} disabled={mobileVariant || isGlobalPinnedContext || renderContext === 'recent'}>
         <div
           data-session-row={session.id}
           data-session-unread={showUnreadStatus ? '1' : '0'}

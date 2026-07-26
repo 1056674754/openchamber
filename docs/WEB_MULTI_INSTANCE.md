@@ -20,11 +20,17 @@ Electron Main Process
 
 UI Layer
   ├── serverRegistry (server-registry.ts) — 核心：多 server 注册 + session→server 路由
-  ├── useDesktopSshStore — SSH 状态管理，ready 时注册到 serverRegistry
-  ├── MultiServerSyncLayer — 每个非 default server 挂一个独立 SyncProvider
-  ├── resolveSdkForDirectory() — session→server→client 路由链
+  ├── useDesktopSshStore / useRemoteInstancesStore — instances **列表**（host 聚合）与显式 connect 时 registry
+  ├── MultiServerSyncLayer — **仅**为当前 active remote 挂 SyncProvider（列表 ≠ N×Sync fanout）
+  ├── resolveSdkForDirectory() / getOrRegisterRemoteConnection — 按需 live 注册
   └── DesktopHostSwitcher — 实例切换 UI
 ```
+
+### Instances 契约（#41）
+
+- Host `GET /api/remote-instances`（含 SSH merge）是聚合列表源；手机/桌面 UI 都读这份列表。
+- **列表加载不得**把每个 healthy remote 注册进 `serverRegistry` 并挂 `SyncProvider`。
+- Live sync 仅对 active session/project 的 remote（connect / switch / `getOrRegisterRemoteConnection`）开启。
 
 ### Web 模式（现状：单实例）
 
@@ -43,7 +49,7 @@ OpenChamber Express (port 3000)
 | 组件 | 状态 |
 |------|------|
 | `serverRegistry` (server-registry.ts) | ✅ 多 server 注册、session 路由、health polling |
-| `MultiServerSyncLayer` | ✅ 每个非 default server 挂独立 SyncProvider |
+| `MultiServerSyncLayer` | ✅ 仅 active remote SyncProvider（非整列表 fanout） |
 | `resolveSdkForDirectory()` (session-actions.ts) | ✅ session→server→client 路由链 |
 | `session-ui-store.ts` setCurrentSession | ✅ 接受 serverId，indexSession |
 | `useProjectsStore.ts` ProjectEntry.serverId | ✅ project 绑定 server |

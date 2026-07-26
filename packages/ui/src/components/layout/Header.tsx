@@ -30,7 +30,9 @@ import { useFeatureFlagsStore } from '@/stores/useFeatureFlagsStore';
 
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
+import { openMobileInstancesSheet } from '@/apps/mobileInstancesUi';
 import { useDeviceInfo, useTabletStandalonePwaRuntime } from '@/lib/device';
+import { isCapacitorApp } from '@/lib/platform';
 import { cn, hasModifier } from '@/lib/utils';
 import { McpDropdownContent } from '@/components/mcp/McpDropdown';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
@@ -1988,6 +1990,34 @@ export const Header: React.FC<HeaderProps> = ({
                 className="h-9"
               />
             )}
+
+            {isCapacitorApp() ? (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    aria-label={t('header.instances.openAria')}
+                    className={mobileHeaderIconButtonClass}
+                    onClick={() => {
+                      blurActiveElement();
+                      closeMobileHeaderPanels();
+                      if (leftDrawerOpen && onToggleLeftDrawer) {
+                        onToggleLeftDrawer();
+                      }
+                      if (rightDrawerOpen && onToggleRightDrawer) {
+                        onToggleRightDrawer();
+                      }
+                      openMobileInstancesSheet();
+                    }}
+                  >
+                    <Icon name="server" className="h-5 w-5" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>{t('header.instances.title')}</p>
+                </TooltipContent>
+              </Tooltip>
+            ) : null}
 
             {/* Mobile Services Menu (Usage + MCP) */}
             <DropdownMenu

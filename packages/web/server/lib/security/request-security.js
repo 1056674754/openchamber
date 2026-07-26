@@ -1,6 +1,13 @@
 export const createRequestSecurityRuntime = (deps) => {
   const { readSettingsFromDiskMigrated } = deps;
 
+  // Packaged clients whose WebView Origin never matches the server host.
+  const packagedClientOrigins = new Set([
+    'openchamber-ui://app',
+    'capacitor://localhost',
+    'https://localhost',
+  ]);
+
   const getUiSessionTokenFromRequest = (req) => {
     const cookieHeader = req?.headers?.cookie;
     if (!cookieHeader || typeof cookieHeader !== 'string') {
@@ -101,6 +108,10 @@ export const createRequestSecurityRuntime = (deps) => {
       normalizedOrigin = new URL(originHeader).origin;
     } catch {
       return false;
+    }
+
+    if (packagedClientOrigins.has(normalizedOrigin)) {
+      return true;
     }
 
     const allowedOrigins = await getRequestOriginCandidates(req);

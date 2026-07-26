@@ -22,6 +22,7 @@ const formatAge = (timestamp: number | null): string => {
   return `${seconds}s`;
 };
 
+/** Enable with: localStorage.setItem('openchamber_bootstrap_debug', '1') then reload. */
 export function BootstrapDebug() {
   const [visible, setVisible] = React.useState(true);
   const activeServerId = useActiveServerId();

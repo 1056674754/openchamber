@@ -649,7 +649,7 @@ export function SessionGroupSection(props: Props): React.ReactNode {
   const body = (
     <SessionFolderDndScope
       scopeKey={folderScopeKey}
-      hasFolders={allFoldersForGroup.length > 0}
+      hasFolders={!mobileVariant && allFoldersForGroup.length > 0}
       onSessionDroppedOnFolder={(sessionId, folderId) => {
         if (folderScopeKey) addSessionToFolder(folderScopeKey, folderId, sessionId);
       }}

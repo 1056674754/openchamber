@@ -18,6 +18,9 @@ export type UpdateInfo = {
   // Web-specific fields
   packageManager?: string;
   updateCommand?: string;
+  /** Direct download URL (Android Capacitor APK when available). */
+  downloadUrl?: string;
+  releaseUrl?: string;
 };
 
 export type UpdateProgress = {

@@ -477,14 +477,17 @@ export const ProjectActionsButton = ({
       let createdSession = false;
 
       if (!activeSessionId) {
-        setConnecting(normalizedDirectory, tabId, true);
+        setConnecting(normalizedDirectory, tabId, true, activeServerId);
         try {
-          const created = await terminal.createSession({ cwd: normalizedDirectory });
+          const created = await terminal.createSession({
+            cwd: normalizedDirectory,
+            baseUrl: activeServerBaseUrl || undefined,
+          });
           activeSessionId = created.sessionId;
           createdSession = true;
-          setTabSessionId(normalizedDirectory, tabId, activeSessionId);
+          setTabSessionId(normalizedDirectory, tabId, activeSessionId, activeServerId);
         } finally {
-          setConnecting(normalizedDirectory, tabId, false);
+          setConnecting(normalizedDirectory, tabId, false, activeServerId);
         }
       }
 
@@ -502,8 +505,25 @@ export const ProjectActionsButton = ({
         streamCleanupByRunKeyRef.current[key] = connectTerminalStream(
           activeSessionId,
           (event) => {
+            if (event.type === 'snapshot') {
+              useTerminalStore.getState().replaceBuffer(
+                normalizedDirectory,
+                tabId,
+                event.data ?? '',
+                typeof event.sequence === 'number' ? event.sequence : 0,
+                activeServerId,
+              );
+              useTerminalStore.getState().setConnecting(normalizedDirectory, tabId, false, activeServerId);
+            }
             if (event.type === 'data' && typeof event.data === 'string' && event.data.length > 0) {
-              useTerminalStore.getState().appendToBuffer(normalizedDirectory, tabId, event.data, activeServerId);
+              useTerminalStore.getState().appendToBuffer(
+                normalizedDirectory,
+                tabId,
+                event.data,
+                activeServerId,
+                event.sequence,
+                event.replayData,
+              );
             }
             if (event.type === 'exit') {
               useTerminalStore.getState().setTabLifecycle(normalizedDirectory, tabId, 'exited', activeServerId);
@@ -550,21 +570,21 @@ export const ProjectActionsButton = ({
       }
 
       if (desktopForwardUrl) {
-        setTabPreviewUrl(normalizedDirectory, tabId, null, { locked: true });
+        setTabPreviewUrl(normalizedDirectory, tabId, null, { locked: true }, activeServerId);
         void openExternal(desktopForwardUrl);
         toast.success(t('projectActions.toast.openedForwardedUrl'));
       } else if (manualOpenUrl) {
-        setTabPreviewUrl(normalizedDirectory, tabId, manualOpenUrl, { locked: true, autoOpened: true });
+        setTabPreviewUrl(normalizedDirectory, tabId, manualOpenUrl, { locked: true, autoOpened: true }, activeServerId);
         openContextPreview(normalizedDirectory, manualOpenUrl);
         toast.success(t('projectActions.toast.openedActionUrl'));
       } else if (hasCustomOpenUrl) {
-        setTabPreviewUrl(normalizedDirectory, tabId, null, { locked: true });
+        setTabPreviewUrl(normalizedDirectory, tabId, null, { locked: true }, activeServerId);
         toast.error(t('projectActions.error.invalidCustomUrlFormat'));
       } else if (hasDesktopForwardSelection) {
-        setTabPreviewUrl(normalizedDirectory, tabId, null, { locked: true });
+        setTabPreviewUrl(normalizedDirectory, tabId, null, { locked: true }, activeServerId);
         toast.error(t('projectActions.error.selectedDesktopSshForwardUnavailable'));
       } else {
-        setTabPreviewUrl(normalizedDirectory, tabId, null, { locked: false, autoOpened: false });
+        setTabPreviewUrl(normalizedDirectory, tabId, null, { locked: false, autoOpened: false }, activeServerId);
       }
 
       urlWatchByRunKeyRef.current[key] = {
@@ -575,7 +595,11 @@ export const ProjectActionsButton = ({
       };
 
       const normalizedCommand = stripControlChars(discovered.command.trim().replace(/\r\n|\r/g, '\n'));
-      await terminal.sendInput(activeSessionId, `${normalizedCommand}\r`);
+      await terminal.sendInput(
+        activeSessionId,
+        `${normalizedCommand}\r`,
+        activeServerBaseUrl || undefined,
+      );
     } catch (error) {
       removeProjectActionRun(runKey);
       delete urlWatchByRunKeyRef.current[runKey];
@@ -618,7 +642,7 @@ export const ProjectActionsButton = ({
     updateProjectActionRunStatus(runKey, 'stopping');
 
     try {
-      await terminal.sendInput(activeRun.sessionId, '\x03');
+      await terminal.sendInput(activeRun.sessionId, '\x03', activeServerBaseUrl || undefined);
     } catch {
       // noop
     }

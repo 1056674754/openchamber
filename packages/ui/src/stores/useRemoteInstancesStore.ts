@@ -134,13 +134,29 @@ function probeRegisteredWebInstance(id: string): void {
   });
 }
 
+/**
+ * List/poll updates must not register every remote into serverRegistry (that
+ * drives SyncProvider fanout). Only refresh health for already-live connections,
+ * and unregister when a previously live remote drops.
+ */
 function syncRegistryForStatus(
   status: RemoteInstanceStatus,
   label: string,
-  options?: { enabled?: boolean },
+  options?: { enabled?: boolean; allowRegister?: boolean },
 ): void {
+  const existing = serverRegistry.get(status.id);
+  const allowRegister = options?.allowRegister === true;
+
+  if (status.phase === 'error' || status.phase === 'idle' || status.phase === 'disconnected') {
+    if (existing) serverRegistry.unregister(status.id);
+    return;
+  }
+
+  if (!existing && !allowRegister) {
+    return;
+  }
+
   if (isDesktop && status.phase === 'connected' && status.url) {
-    const existing = serverRegistry.get(status.id);
     registerRemoteInstanceProxy({
       id: status.id,
       label,
@@ -153,7 +169,10 @@ function syncRegistryForStatus(
     if (status.healthy !== false && existing?.healthStatus !== 'healthy') {
       probeRegisteredWebInstance(status.id);
     }
-  } else if (!isDesktop && status.url && options?.enabled !== false) {
+    return;
+  }
+
+  if (!isDesktop && status.url && options?.enabled !== false) {
     registerRemoteInstanceProxy({
       id: status.id,
       label,
@@ -168,20 +187,19 @@ function syncRegistryForStatus(
       serverRegistry.setHealthStatus(status.id, 'unhealthy');
       probeRegisteredWebInstance(status.id);
     }
-  } else if (status.phase === 'error' || status.phase === 'idle' || status.phase === 'disconnected') {
-    serverRegistry.unregister(status.id);
   }
 }
 
-function syncRegistryForInstance(instance: RemoteInstance, status?: RemoteInstanceStatus): void {
+function syncRegistryForInstance(
+  instance: RemoteInstance,
+  status?: RemoteInstanceStatus,
+  options?: { allowRegister?: boolean },
+): void {
   if (!status) return;
-  syncRegistryForStatus(status, resolveRemoteLabel(instance), { enabled: instance.enabled });
-}
-
-function syncRegistryForInstances(instances: RemoteInstance[], statuses: Record<string, RemoteInstanceStatus>): void {
-  for (const inst of instances) {
-    syncRegistryForInstance(inst, statuses[inst.id]);
-  }
+  syncRegistryForStatus(status, resolveRemoteLabel(instance), {
+    enabled: instance.enabled,
+    allowRegister: options?.allowRegister,
+  });
 }
 
 export function markRemoteInstanceTransportStatus(
@@ -326,7 +344,9 @@ function startWebPolling(set: SetFn, get: GetFn): void {
 
       set({ instances, statuses });
 
-      syncRegistryForInstances(instances, statuses);
+      for (const inst of instances) {
+        syncRegistryForInstance(inst, statuses[inst.id]);
+      }
     } catch {
       // intentionally empty — next poll cycle retries
     }
@@ -456,6 +476,7 @@ export const useRemoteInstancesStore = create<RemoteInstancesState>((set, get) =
 
         set({ instances, statuses, loading: false, initialized: true });
 
+        // List load updates store only; do not register every remote for Sync fanout.
         for (const inst of instances) {
           const s = statuses[inst.id];
           if (s) syncRegistryForStatus(s, inst.label);
@@ -465,7 +486,9 @@ export const useRemoteInstancesStore = create<RemoteInstancesState>((set, get) =
         const { instances, statuses } = await fetchWebInstances();
 
         set({ instances, statuses, loading: false, initialized: true });
-        syncRegistryForInstances(instances, statuses);
+        for (const inst of instances) {
+          syncRegistryForInstance(inst, statuses[inst.id]);
+        }
 
         startWebPolling(set, get);
       }
@@ -525,12 +548,13 @@ export const useRemoteInstancesStore = create<RemoteInstancesState>((set, get) =
           throw new Error(`Connect failed: ${response.status}`);
         }
         await get().refreshStatus(id);
+      }
 
-        const instance = get().instances.find((i) => i.id === id);
-        const status = get().statuses[id];
-        if (instance && status) {
-          syncRegistryForInstance(instance, status);
-        }
+      // Explicit connect is the allow-list for live registry registration.
+      const instance = get().instances.find((i) => i.id === id);
+      const status = get().statuses[id];
+      if (instance && status) {
+        syncRegistryForInstance(instance, status, { allowRegister: true });
       }
     } catch (error) {
       set({ error: error instanceof Error ? error.message : String(error) });
@@ -601,7 +625,9 @@ export const useRemoteInstancesStore = create<RemoteInstancesState>((set, get) =
             }
           }
         }
-        syncRegistryForInstances(instances, statuses);
+        for (const inst of instances) {
+          syncRegistryForInstance(inst, statuses[inst.id]);
+        }
         if (!changed && get().instances.length === instances.length) return;
         set({ instances, statuses });
       }

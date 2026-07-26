@@ -17,6 +17,8 @@ type ScrollableOverlayProps = React.HTMLAttributes<HTMLElement> & {
   useScrollShadow?: boolean;
   scrollShadowSize?: number;
   userIntentOnly?: boolean;
+  /** Skip custom thumb overlay (prefer native scroll on Capacitor lists). */
+  disableOverlayScrollbar?: boolean;
   /** Forwarded to the inner element (e.g. textarea). */
   disabled?: boolean;
 };
@@ -38,6 +40,7 @@ export const ScrollableOverlay = React.forwardRef<HTMLElement, ScrollableOverlay
     useScrollShadow = false,
     scrollShadowSize,
     userIntentOnly = false,
+    disableOverlayScrollbar = false,
     ...rest
   }, ref) => {
     const containerRef = React.useRef<HTMLElement | null>(null);
@@ -86,15 +89,17 @@ export const ScrollableOverlay = React.forwardRef<HTMLElement, ScrollableOverlay
             {children}
           </Component>
         )}
-        <OverlayScrollbar
-          containerRef={containerRef}
-          minThumbSize={minThumbSize}
-          hideDelayMs={hideDelayMs}
-          className={scrollbarClassName}
-          disableHorizontal={disableHorizontal}
-          observeMutations={observeMutations}
-          userIntentOnly={userIntentOnly}
-        />
+        {disableOverlayScrollbar ? null : (
+          <OverlayScrollbar
+            containerRef={containerRef}
+            minThumbSize={minThumbSize}
+            hideDelayMs={hideDelayMs}
+            className={scrollbarClassName}
+            disableHorizontal={disableHorizontal}
+            observeMutations={observeMutations}
+            userIntentOnly={userIntentOnly}
+          />
+        )}
       </div>
     );
   }

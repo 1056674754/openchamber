@@ -103,6 +103,7 @@ export default defineConfig({
     rollupOptions: {
       input: {
         main: path.resolve(__dirname, 'index.html'),
+        mobile: path.resolve(__dirname, 'mobile.html'),
         miniChat: path.resolve(__dirname, 'mini-chat.html'),
       },
       external: ['node:child_process', 'node:fs', 'node:path', 'node:url'],
@@ -124,8 +125,15 @@ export default defineConfig({
           if (packageName === '@base-ui/react' || packageName.startsWith('@base-ui')) return 'vendor-base-ui';
           if (packageName.includes('react-syntax-highlighter') || packageName.includes('highlight.js')) return 'vendor-syntax';
 
-          const sanitized = packageName.replace(/^@/, '').replace(/\//g, '-');
-          return `vendor-${sanitized}`;
+          // Android aapt ignoreAssetsPattern treats `.*` as "starts with '.'"; bun's
+          // virtual package roots like `.bun` would become `vendor-.bun-…` and get dropped
+          // from Capacitor APK assets. Collapse dots so chunk names stay packable.
+          const sanitized = packageName
+            .replace(/^@/, '')
+            .replace(/\//g, '-')
+            .replace(/^\.+/, '')
+            .replace(/\./g, '-');
+          return `vendor-${sanitized || 'pkg'}`;
         },
       },
     },

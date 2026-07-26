@@ -163,7 +163,8 @@ export function useAllServersSessionQuestions(sessionIds: readonly string[]): Qu
   return useAllServersBlockingRequests<QuestionRequest>("question", sessionIds);
 }
 
-export function useAllServersLiveSessions(): Session[] {
+export function useAllServersLiveSessions(options?: { enabled?: boolean }): Session[] {
+  const enabled = options?.enabled !== false;
   const { childStores } = useSyncSystem();
 
   const getDefaultSessions = useCallback(
@@ -179,6 +180,7 @@ export function useAllServersLiveSessions(): Session[] {
   const inflightRef = useRef(false);
 
   useEffect(() => {
+    if (!enabled) return;
     const updateDefault = () => {
       if (inflightRef.current) return;
       inflightRef.current = true;
@@ -213,9 +215,10 @@ export function useAllServersLiveSessions(): Session[] {
       unsubRegistry();
       for (const u of unsubs) u();
     };
-  }, [childStores, getDefaultSessions]);
+  }, [childStores, enabled, getDefaultSessions]);
 
   useEffect(() => {
+    if (!enabled) return;
     const updateExtra = () => {
       const next = collectExtraSessions();
       const sig = sessionsStableSignature(next);
@@ -253,7 +256,7 @@ export function useAllServersLiveSessions(): Session[] {
       unsubRegistry();
       for (const u of storeUnsubs) u();
     };
-  }, []);
+  }, [enabled]);
 
   return useMemo(() => {
     if (extraSessions.length === 0) return defaultSessions;
@@ -268,7 +271,8 @@ export function useAllServersLiveSessions(): Session[] {
   }, [defaultSessions, extraSessions]);
 }
 
-export function useAllServersSessionStatuses(): Record<string, SessionStatus> {
+export function useAllServersSessionStatuses(options?: { enabled?: boolean }): Record<string, SessionStatus> {
+  const enabled = options?.enabled !== false;
   const { childStores } = useSyncSystem();
 
   const getDefaultStatuses = useCallback(
@@ -282,6 +286,7 @@ export function useAllServersSessionStatuses(): Record<string, SessionStatus> {
   const extraSigRef = useRef('');
 
   useEffect(() => {
+    if (!enabled) return;
     const updateDefault = () => {
       const next = getDefaultStatuses();
       const sig = statusStableSignature(next);
@@ -311,9 +316,10 @@ export function useAllServersSessionStatuses(): Record<string, SessionStatus> {
       unsubRegistry();
       for (const u of unsubs) u();
     };
-  }, [childStores, getDefaultStatuses]);
+  }, [childStores, enabled, getDefaultStatuses]);
 
   useEffect(() => {
+    if (!enabled) return;
     const updateExtra = () => {
       const next = collectExtraStatuses();
       const sig = statusStableSignature(next);
@@ -351,7 +357,7 @@ export function useAllServersSessionStatuses(): Record<string, SessionStatus> {
       unsubRegistry();
       for (const u of storeUnsubs) u();
     };
-  }, []);
+  }, [enabled]);
 
   return useMemo(() => {
     if (Object.keys(extraStatuses).length === 0) return defaultStatuses;

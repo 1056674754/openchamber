@@ -20,6 +20,15 @@ export const MobileModelButton: React.FC<MobileModelButtonProps> = ({ onOpenMode
         <button
             type="button"
             onClick={onOpenModel}
+            onMouseDown={(event) => {
+                // Keep the soft keyboard from stealing the tap on mobile/PWA.
+                event.preventDefault();
+            }}
+            onPointerDownCapture={(event) => {
+                if (event.pointerType === 'touch') {
+                    event.preventDefault();
+                }
+            }}
             className={cn(
                 'inline-flex min-w-0 items-stretch rounded-lg',
                 'typography-micro font-medium text-foreground/80',

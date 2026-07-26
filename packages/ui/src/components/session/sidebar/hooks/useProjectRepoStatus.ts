@@ -20,6 +20,8 @@ type Args = {
   gitRepoStatus: Map<string, { isGitRepo: boolean | null; branch: string | null }>;
   setProjectRepoStatus: React.Dispatch<React.SetStateAction<Map<string, boolean | null>>>;
   setProjectRootBranches: React.Dispatch<React.SetStateAction<Map<string, string>>>;
+  /** When false, skip light-status burst / remote health subscriptions. Default true. */
+  enabled?: boolean;
 };
 
 const PROJECT_STATUS_PROBE_CONCURRENCY = 3;
@@ -65,6 +67,7 @@ export const useProjectRepoStatus = (args: Args): void => {
     gitRepoStatus,
     setProjectRepoStatus,
     setProjectRootBranches,
+    enabled = true,
   } = args;
 
   const { git } = useRuntimeAPIs();
@@ -82,6 +85,7 @@ export const useProjectRepoStatus = (args: Args): void => {
   const [serverHealthById, setServerHealthById] = React.useState<Map<string, string | null>>(() => new Map());
 
   React.useEffect(() => {
+    if (!enabled) return;
     const readHealth = () => {
       const next = new Map<string, string | null>();
       for (const serverId of remoteServerIds) {
@@ -98,7 +102,7 @@ export const useProjectRepoStatus = (args: Args): void => {
     return () => {
       for (const unsub of unsubs) unsub();
     };
-  }, [remoteServerIds, remoteServerIdsKey]);
+  }, [enabled, remoteServerIds, remoteServerIdsKey]);
 
   const probeProjects = React.useMemo(
     () => normalizedProjects.filter((project) => {
@@ -114,7 +118,8 @@ export const useProjectRepoStatus = (args: Args): void => {
   );
   // Derive repo status from centralized Git store
   React.useEffect(() => {
-    if (!git || normalizedProjects.length === 0) {
+    if (!enabled || !git || normalizedProjects.length === 0) {
+      if (!enabled) return;
       setProjectRepoStatus((prev) => prev.size === 0 ? prev : new Map());
       return;
     }
@@ -135,7 +140,7 @@ export const useProjectRepoStatus = (args: Args): void => {
     return () => {
       controller.abort();
     };
-  }, [normalizedProjects.length, probeProjects, git, ensureStatus, setProjectRepoStatus]);
+  }, [enabled, normalizedProjects.length, probeProjects, git, ensureStatus, setProjectRepoStatus]);
 
   // Read isGitRepo from the store-populated state
   React.useEffect(() => {

@@ -426,6 +426,15 @@ export const createUiAuth = ({
     if (cookies[cookieName]) {
       return cookies[cookieName];
     }
+    // Capacitor / packaged WebViews cannot rely on SameSite cookies across
+    // capacitor:// (or https://localhost) → LAN HTTP. Accept the UI session JWT
+    // as Bearer so mobile can authenticate after password unlock.
+    const authorization = req.headers.authorization;
+    if (typeof authorization === 'string') {
+      const match = authorization.match(/^Bearer\s+(.+)$/i);
+      const bearer = match?.[1]?.trim();
+      if (bearer) return bearer;
+    }
     return null;
   };
 
@@ -551,10 +560,16 @@ export const createUiAuth = ({
 
     await clearRateLimit(req);
 
-    await issueSession(req, res, {
+    const sessionToken = await issueSession(req, res, {
       trustDevice: isTrustedDeviceRequest(req.body?.trustDevice),
     });
-    res.json({ authenticated: true });
+    // `token` / `clientToken` are aliases for packaged clients that cannot keep
+    // the HttpOnly session cookie (native mobile). Browser clients ignore them.
+    res.json({
+      authenticated: true,
+      token: sessionToken,
+      clientToken: sessionToken,
+    });
   };
 
   const respondPasskeyError = (res, error) => {
@@ -601,10 +616,14 @@ export const createUiAuth = ({
   const handlePasskeyAuthenticationVerify = async (req, res) => {
     try {
       await passkeyController.finishAuthentication(req.body);
-      await issueSession(req, res, {
+      const sessionToken = await issueSession(req, res, {
         trustDevice: isTrustedDeviceRequest(req.body?.trustDevice),
       });
-      res.json({ authenticated: true });
+      res.json({
+        authenticated: true,
+        token: sessionToken,
+        clientToken: sessionToken,
+      });
     } catch (error) {
       respondPasskeyError(res, error);
     }

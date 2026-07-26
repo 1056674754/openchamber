@@ -699,6 +699,12 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
   }, []);
 
   React.useEffect(() => {
+    // Phone drawer: skip concurrent worktree discovery on every open — list scroll
+    // already pays for thousands of session rows.
+    if (mobileVariant) {
+      return;
+    }
+
     let cancelled = false;
 
     const projectQueue = buildWorktreeDiscoveryQueue(useProjectsStore.getState().projects)
@@ -802,7 +808,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
     return () => {
       cancelled = true;
     };
-  }, [projectsStructureSignature, projectRepoStatus, remoteHealthRevision]);
+  }, [mobileVariant, projectsStructureSignature, projectRepoStatus, remoteHealthRevision]);
 
   React.useEffect(() => {
     let refreshTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -1114,7 +1120,9 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
 
   const showSidebarUpdateButton =
     updateStore.available &&
-    (updateStore.runtimeType === 'desktop' || updateStore.runtimeType === 'web');
+    (updateStore.runtimeType === 'desktop'
+      || updateStore.runtimeType === 'web'
+      || updateStore.runtimeType === 'mobile');
 
   const deleteSession = useSessionUIStore((state) => state.deleteSession);
   const deleteSessions = useSessionUIStore((state) => state.deleteSessions);
@@ -1316,6 +1324,8 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
     gitRepoStatus,
     setProjectRepoStatus,
     setProjectRootBranches,
+    // Mobile drawer opens onto 2k+ nodes; defer git light-burst until desktop sidebar.
+    enabled: !mobileVariant,
   });
 
   const isSessionsLoading = useSessionUIStore((state) => state.isLoading);
@@ -1692,15 +1702,13 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
   React.useEffect(() => {
     if (!showArchivedSessions) return;
 
-    const serverIds = new Set<string>();
+    // Avoid archived fanout across every remote listed in projects; load the
+    // active/default server plus remotes that already have a live registry entry.
+    const serverIds = new Set<string>([DEFAULT_SERVER_ID]);
     for (const project of normalizedProjects) {
       const serverId = project.serverId ?? DEFAULT_SERVER_ID;
-      if (
-        serverId !== DEFAULT_SERVER_ID
-        && serverRegistry.get(serverId)?.healthStatus !== 'healthy'
-      ) {
-        continue;
-      }
+      if (serverId === DEFAULT_SERVER_ID) continue;
+      if (serverRegistry.get(serverId)?.healthStatus !== 'healthy') continue;
       serverIds.add(serverId);
     }
 
@@ -1816,6 +1824,9 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
   const prVisualSummaryMap = usePrVisualSummaryByKeys(prLookup.keys);
 
   React.useEffect(() => {
+    if (mobileVariant) {
+      return;
+    }
     if (!githubAuthChecked || !githubAuthStatus?.connected || !github) {
       return;
     }
@@ -1894,6 +1905,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
     githubAuthChecked,
     githubAuthStatus?.connected,
     gitBranches,
+    mobileVariant,
     refreshPrStatusTargets,
     sectionsForSidebarRender,
     setPrStatusParams,

@@ -39,10 +39,30 @@ export interface TerminalTransportCapability {
   };
 }
 
+export type TerminalShell =
+  | 'auto'
+  | 'bash'
+  | 'zsh'
+  | 'sh'
+  | 'fish'
+  | 'pwsh'
+  | 'powershell'
+  | 'cmd'
+  | 'dash'
+  | 'ksh'
+  | 'nu';
+
+export interface TerminalShellOption {
+  id: TerminalShell;
+  name: string;
+  supportsLogin: boolean;
+}
+
 export interface TerminalSession {
   sessionId: string;
   cols: number;
   rows: number;
+  status?: 'running' | 'exited';
   capabilities?: {
     input?: TerminalTransportCapability;
     stream?: TerminalTransportCapability;
@@ -50,13 +70,15 @@ export interface TerminalSession {
 }
 
 export interface TerminalStreamEvent {
-  type: 'connected' | 'data' | 'exit' | 'reconnecting';
+  type: 'connected' | 'snapshot' | 'data' | 'exit' | 'reconnecting';
   data?: string;
+  replayData?: string;
+  sequence?: number;
+  status?: 'running' | 'exited';
   exitCode?: number;
   signal?: number | null;
   attempt?: number;
   maxAttempts?: number;
-
   runtime?: 'node' | 'bun';
   ptyBackend?: string;
 }
@@ -66,6 +88,12 @@ export interface CreateTerminalOptions {
   cols?: number;
   rows?: number;
   baseUrl?: string;
+  sessionId?: string;
+  themeMode?: 'light' | 'dark';
+  terminalBackground?: string;
+  terminalForeground?: string;
+  shell?: TerminalShell;
+  loginShell?: boolean;
 }
 
 export interface TerminalStreamOptions {
@@ -79,6 +107,10 @@ export interface ResizeTerminalPayload {
   cols: number;
   rows: number;
   baseUrl?: string;
+}
+
+export interface TerminalError extends Error {
+  code?: string;
 }
 
 export interface TerminalHandlers {

@@ -1,44 +1,27 @@
 import React from "react";
-import type { OpencodeClient } from "@opencode-ai/sdk/v2/client";
 import { SyncProvider } from "./sync-context";
-import { serverRegistry, DEFAULT_SERVER_ID } from "@/lib/opencode/server-registry";
 import { useProjectsStore } from "@/stores/useProjectsStore";
 import { useSessionUIStore } from "./session-ui-store";
 import { useRemoteInstancesStore } from "@/stores/useRemoteInstancesStore";
 import { hasDesktopInvoke, isWebRuntime } from "@/lib/desktop";
 import { buildRemoteBootstrapDirectoryMap } from "./remote-bootstrap-directories";
+import { useActiveServerId } from "@/hooks/useActiveServerId";
+import { getOrRegisterRemoteConnection } from "./session-routing";
+import {
+  areLiveSyncServerListsEquivalent,
+  resolveLiveSyncServers,
+  type LiveSyncServer,
+} from "./live-sync-servers";
+import { DEFAULT_SERVER_ID } from "@/lib/opencode/server-registry";
 
-type AdditionalServer = {
-  id: string;
-  sdk: OpencodeClient;
-  baseUrl: string;
-};
-
-function areServerListsEquivalent(left: AdditionalServer[], right: AdditionalServer[]): boolean {
-  if (left.length !== right.length) return false;
-  for (let i = 0; i < left.length; i++) {
-    if (
-      left[i]?.id !== right[i]?.id
-      || left[i]?.sdk !== right[i]?.sdk
-      || left[i]?.baseUrl !== right[i]?.baseUrl
-    ) {
-      return false;
-    }
-  }
-  return true;
-}
-
-function setServersIfChanged(
-  setServers: React.Dispatch<React.SetStateAction<AdditionalServer[]>>,
-) {
-  setServers((current) => {
-    const next = loadAdditionalServers();
-    return areServerListsEquivalent(current, next) ? current : next;
-  });
-}
-
+/**
+ * Loads host-aggregated remote instances for list UI, and mounts at most one
+ * extra SyncProvider for the active remote. Healthy remotes in the list must
+ * not each get a SyncProvider (client fanout).
+ */
 export function MultiServerSyncLayer() {
-  const servers = useServerList();
+  const activeServerId = useActiveServerId();
+  const servers = useLiveSyncServerList(activeServerId);
   const projects = useProjectsStore((s) => s.projects);
   const availableWorktreesByProject = useSessionUIStore((s) => s.availableWorktreesByProject);
   const remoteInstancesInitialized = useRemoteInstancesStore((s) => s.initialized);
@@ -50,6 +33,13 @@ export function MultiServerSyncLayer() {
     if (remoteInstancesInitialized || remoteInstancesLoading) return;
     void loadRemoteInstances();
   }, [loadRemoteInstances, remoteInstancesInitialized, remoteInstancesLoading]);
+
+  // Ensure the active remote is registered for live sync without registering the whole list.
+  React.useEffect(() => {
+    if (!activeServerId || activeServerId === DEFAULT_SERVER_ID) return;
+    const instance = useRemoteInstancesStore.getState().instances.find((entry) => entry.id === activeServerId);
+    getOrRegisterRemoteConnection(activeServerId, instance?.label);
+  }, [activeServerId]);
 
   const healthyServerIds = React.useMemo(() => new Set(servers.map((server) => server.id)), [servers]);
 
@@ -82,8 +72,8 @@ export function MultiServerSyncLayer() {
   );
 }
 
-function useServerList() {
-  const [servers, setServers] = React.useState<AdditionalServer[]>(loadAdditionalServers);
+function useLiveSyncServerList(activeServerId: string): LiveSyncServer[] {
+  const [servers, setServers] = React.useState<LiveSyncServer[]>(() => resolveLiveSyncServers(activeServerId));
   const remoteHealthSignature = useRemoteInstancesStore((s) => (
     Object.values(s.statuses)
       .map((status) => `${status.id}:${status.phase}:${status.healthy === true ? 1 : 0}:${status.url ?? ""}`)
@@ -92,28 +82,16 @@ function useServerList() {
   ));
 
   React.useEffect(() => {
-    const id = setInterval(() => setServersIfChanged(setServers), 5000);
-    return () => clearInterval(id);
-  }, []);
-
-  React.useEffect(() => {
-    const update = () => setServersIfChanged(setServers);
-    update();
-    const unsubs = serverRegistry
-      .getAll()
-      .filter((connection) => connection.config.id !== DEFAULT_SERVER_ID)
-      .map((connection) => serverRegistry.onHealthChange(connection.config.id, update));
-    return () => {
-      for (const unsub of unsubs) unsub();
+    const refresh = () => {
+      setServers((current) => {
+        const next = resolveLiveSyncServers(activeServerId);
+        return areLiveSyncServerListsEquivalent(current, next) ? current : next;
+      });
     };
-  }, [remoteHealthSignature]);
+    refresh();
+    const id = setInterval(refresh, 5000);
+    return () => clearInterval(id);
+  }, [activeServerId, remoteHealthSignature]);
 
   return servers;
-}
-
-function loadAdditionalServers(): AdditionalServer[] {
-  return serverRegistry
-    .getAll()
-    .filter((c) => c.config.id !== DEFAULT_SERVER_ID && c.healthStatus === "healthy")
-    .map((c) => ({ id: c.config.id, sdk: c.client, baseUrl: c.config.sseUrl || c.config.baseUrl }));
 }
