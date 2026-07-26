@@ -5231,7 +5231,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                         )}
                     </div>
 
-                    {/* Mobile Session Status Bar - above input */}
+                    {/* order-first inside the composer column — compact header by default */}
                     {isMobile && <MobileSessionStatusBar />}
                 </div>
             </div>

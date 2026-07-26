@@ -342,7 +342,7 @@ const TableWrapper: React.FC<{ children?: React.ReactNode; className?: string }>
         <TableDownloadButton tableRef={tableRef} />
       </div>
       <div className="overflow-x-auto rounded-lg border border-border/70 bg-[var(--surface-elevated)]">
-        <table className={cn('w-full border-collapse text-sm', className)} data-markdown="table">
+        <table className={cn('w-full border-collapse typography-meta', className)} data-markdown="table">
           {children}
         </table>
       </div>

@@ -46,6 +46,7 @@ import { Icon } from "@/components/icon/Icon";
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useNotificationStore } from '@/sync/notification-store';
 import { useI18n } from '@/lib/i18n';
+import { isCapacitorApp } from '@/lib/platform';
 import { getWorktreesForProject } from '@/lib/worktrees/worktreeKeys';
 
 interface MobileSessionStatusBarProps {
@@ -1642,6 +1643,17 @@ export const MobileSessionStatusBar: React.FC<MobileSessionStatusBarProps> = ({
   const showMobileSessionStatusBar = useUIStore((state) => state.showMobileSessionStatusBar);
   const isMobileSessionStatusBarCollapsed = useUIStore((state) => state.isMobileSessionStatusBarCollapsed);
   const setIsMobileSessionStatusBarCollapsed = useUIStore((state) => state.setIsMobileSessionStatusBarCollapsed);
+  const setViewPagerPage = useUIStore((state) => state.setViewPagerPage);
+
+  // Capacitor: never embed the expanded project/session switcher in the
+  // composer (duplicates the drawer and looks like the draft welcome card).
+  // Header tap opens the session drawer instead.
+  const capacitorShell = isCapacitorApp();
+  React.useEffect(() => {
+    if (capacitorShell && !isMobileSessionStatusBarCollapsed) {
+      setIsMobileSessionStatusBarCollapsed(true);
+    }
+  }, [capacitorShell, isMobileSessionStatusBarCollapsed, setIsMobileSessionStatusBarCollapsed]);
 
   // Project store
   const projects = useProjectsStore((state) => state.projects);
@@ -1764,7 +1776,7 @@ export const MobileSessionStatusBar: React.FC<MobileSessionStatusBarProps> = ({
     sessionEvents.requestDirectoryDialog();
   };
 
-  if (isMobileSessionStatusBarCollapsed) {
+  if (capacitorShell || isMobileSessionStatusBarCollapsed) {
     return (
       <CollapsedView
         runningCount={totalRunning}
@@ -1776,7 +1788,13 @@ export const MobileSessionStatusBar: React.FC<MobileSessionStatusBarProps> = ({
         currentProjectIconImageUrl={currentProjectIconImageUrl}
         currentProjectIconBackground={currentProjectIconBackground}
         currentProjectColor={currentProjectColor}
-        onToggle={() => setIsMobileSessionStatusBarCollapsed(false)}
+        onToggle={() => {
+          if (capacitorShell) {
+            setViewPagerPage('left');
+            return;
+          }
+          setIsMobileSessionStatusBarCollapsed(false);
+        }}
         onNewSession={handleCreateSession}
         contextUsage={contextUsage}
         childIndicators={currentSessionChildIndicators}

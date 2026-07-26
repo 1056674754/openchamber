@@ -603,7 +603,10 @@ const UserMessageBody = React.memo(({ sessionId, messageId, parts, isMobile, alw
         >
             <div
                 className={cn(
-                    'leading-relaxed text-foreground/90 text-base overflow-x-hidden',
+                    'leading-relaxed text-foreground/90 overflow-x-hidden',
+                    // text-base ignores mobile/Capacitor typography tokens and
+                    // blows up under Android system font scaling.
+                    isMobile ? 'typography-markdown-body' : 'text-base',
                     useStickyScrollableUserContent
                         ? 'overflow-y-auto overscroll-contain scrollbar-none'
                         : 'overflow-y-hidden'

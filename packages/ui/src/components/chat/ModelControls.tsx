@@ -2809,7 +2809,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                         'model-controls__variant-label',
                         controlTextSize,
                         'font-medium truncate min-w-0',
-                        isMobile && 'max-w-[60px]',
+                        isMobile && 'max-w-[4.5rem]',
                         colorClass
                     )}>
                         {displayVariant}
@@ -3041,7 +3041,8 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                 'model-controls__agent-label',
                                 controlTextSize,
                                 'font-medium truncate min-w-0',
-                                isMobile && 'max-w-[60px]'
+                                // Was 60px — system font scale + dense tokens made agent/model unreadable.
+                                isMobile && 'max-w-[5.5rem]'
                             )}
                             style={uiAgentName ? { color: selectedAgentColor.value } : undefined}
                         >

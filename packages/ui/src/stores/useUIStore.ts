@@ -986,7 +986,9 @@ export const useUIStore = create<UIStore>()(
         showSplitAssistantMessageActions: false,
         allowPromptingSubagentSessions: false,
         showMobileSessionStatusBar: true,
-        isMobileSessionStatusBarCollapsed: false,
+        // Collapsed by default: expanded view duplicates sidebar (projects +
+        // session list) inside the composer and reads like a home/welcome card.
+        isMobileSessionStatusBarCollapsed: true,
         isExpandedInput: false,
         reportUsage: true,
         multiRunEnabled: true,
@@ -2244,7 +2246,7 @@ export const useUIStore = create<UIStore>()(
       {
         name: 'ui-store',
         storage: createDeferredSafeJSONStorage(),
-        version: 11,
+        version: 12,
         migrate: (persistedState, version) => {
           if (!persistedState || typeof persistedState !== 'object') {
             return persistedState;
@@ -2341,6 +2343,12 @@ export const useUIStore = create<UIStore>()(
               collapsedModelProviders: state.collapsedModelProviders,
             });
             state.collapsedModelProviders = [];
+          }
+
+          // v11 -> v12: mobile composer must not open with the expanded
+          // project/session switcher (looks like the draft welcome surface).
+          if (version < 12) {
+            state.isMobileSessionStatusBarCollapsed = true;
           }
 
           state.fileEditorKeymap = normalizeFileEditorKeymap(state.fileEditorKeymap);

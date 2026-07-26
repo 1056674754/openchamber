@@ -40,8 +40,10 @@
 
 /* General mobile improvements for all mobile devices */
 @media (max-width: 1024px) {
-  /* Override CSS custom properties for mobile */
-  :root.mobile-pointer:not(.desktop-runtime) {
+  /* Override CSS custom properties for mobile (PWA/browser only).
+   * Capacitor has its own denser tokens — do NOT force 1rem here or chat
+   * markdown stays desktop-sized on phones. */
+  :root.mobile-pointer:not(.desktop-runtime):not(.capacitor) {
     --text-markdown: 1rem;
     --text-code: 0.875rem;
     --text-ui-header: 0.9375rem;
@@ -51,7 +53,7 @@
   }
 
   /* Force override with higher specificity */
-  :root.mobile-pointer:not(.desktop-runtime) * {
+  :root.mobile-pointer:not(.desktop-runtime):not(.capacitor) * {
     --text-markdown: 1rem !important;
     --text-code: 0.875rem !important;
     --text-ui-header: 0.9375rem !important;
@@ -61,18 +63,18 @@
   }
 
   /* Additional override for elements using typography classes */
-  :root.mobile-pointer:not(.desktop-runtime) .typography-markdown,
-  :root.mobile-pointer:not(.desktop-runtime) .typography-code,
-  :root.mobile-pointer:not(.desktop-runtime) .typography-ui-header,
-  :root.mobile-pointer:not(.desktop-runtime) .typography-ui-label,
-  :root.mobile-pointer:not(.desktop-runtime) .typography-meta,
-  :root.mobile-pointer:not(.desktop-runtime) .typography-micro {
+  :root.mobile-pointer:not(.desktop-runtime):not(.capacitor) .typography-markdown,
+  :root.mobile-pointer:not(.desktop-runtime):not(.capacitor) .typography-code,
+  :root.mobile-pointer:not(.desktop-runtime):not(.capacitor) .typography-ui-header,
+  :root.mobile-pointer:not(.desktop-runtime):not(.capacitor) .typography-ui-label,
+  :root.mobile-pointer:not(.desktop-runtime):not(.capacitor) .typography-meta,
+  :root.mobile-pointer:not(.desktop-runtime):not(.capacitor) .typography-micro {
     font-size: unset !important;
   }
 
   /* Fix font size for tool displays */
-  :root.mobile-pointer:not(.desktop-runtime) [class*="tool"],
-  :root.mobile-pointer:not(.desktop-runtime) [class*="code"] {
+  :root.mobile-pointer:not(.desktop-runtime):not(.capacitor) [class*="tool"],
+  :root.mobile-pointer:not(.desktop-runtime):not(.capacitor) [class*="code"] {
     --text-code: 0.875rem !important;
     font-size: var(--text-code) !important;
   }
@@ -105,13 +107,21 @@
     min-height: 36px;
   }
 
-  /* Fix mobile text inputs */
-  :root.mobile-pointer:not(.desktop-runtime) input[type="text"],
-  :root.mobile-pointer:not(.desktop-runtime) input[type="search"],
-  :root.mobile-pointer:not(.desktop-runtime) input[type="email"],
-  :root.mobile-pointer:not(.desktop-runtime) input[type="password"],
-  :root.mobile-pointer:not(.desktop-runtime) textarea {
+  /* Fix mobile text inputs — 16px only where iOS would zoom the page */
+  :root.mobile-pointer:not(.desktop-runtime):not(.capacitor) input[type="text"],
+  :root.mobile-pointer:not(.desktop-runtime):not(.capacitor) input[type="search"],
+  :root.mobile-pointer:not(.desktop-runtime):not(.capacitor) input[type="email"],
+  :root.mobile-pointer:not(.desktop-runtime):not(.capacitor) input[type="password"],
+  :root.mobile-pointer:not(.desktop-runtime):not(.capacitor) textarea {
     font-size: 16px !important; /* Prevents iOS zoom */
+  }
+
+  :root.capacitor:not(.desktop-runtime) input[type="text"],
+  :root.capacitor:not(.desktop-runtime) input[type="search"],
+  :root.capacitor:not(.desktop-runtime) input[type="email"],
+  :root.capacitor:not(.desktop-runtime) input[type="password"],
+  :root.capacitor:not(.desktop-runtime) textarea {
+    font-size: var(--text-markdown) !important;
   }
 
   /* Prevent keyboard on non-input elements */
@@ -550,26 +560,30 @@
   --oc-safe-area-left: env(safe-area-inset-left, 0px);
   /* Phone density closer to native chat apps (DeepSeek-class), not desktop sidebar scale. */
   --font-scale: 0.78;
-  --text-markdown: 0.8125rem;
-  --text-code: 0.75rem;
-  --text-ui-header: 0.8125rem;
-  --text-ui-label: 0.75rem;
-  --text-meta: 0.6875rem;
-  --text-micro: 0.6875rem;
+  --text-markdown: 0.75rem;
+  --text-code: 0.6875rem;
+  --text-ui-header: 0.75rem;
+  --text-ui-label: 0.6875rem;
+  --text-meta: 0.625rem;
+  --text-micro: 0.625rem;
+  /* Keep chat usable when Android/Harmony accessibility font scale is large. */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
 }
 
-/* Prefer targeted surfaces over `:root.capacitor *` universal override. */
-:root.capacitor:not(.desktop-runtime) body,
-:root.capacitor:not(.desktop-runtime) .main-content-safe-area,
-:root.capacitor:not(.desktop-runtime) .drawer-safe-area,
-:root.capacitor:not(.desktop-runtime) .header-safe-area,
-:root.capacitor:not(.desktop-runtime) .oc-mobile-composer {
-  --text-markdown: 0.8125rem;
-  --text-code: 0.75rem;
-  --text-ui-header: 0.8125rem;
-  --text-ui-label: 0.75rem;
-  --text-meta: 0.6875rem;
-  --text-micro: 0.6875rem;
+/*
+ * Must use `*` + !important so chat markdown actually receives dense tokens.
+ * The PWA mobile block used to set `--text-markdown: 1rem !important` on every
+ * node; even after excluding Capacitor there, descendants need an explicit win.
+ */
+:root.capacitor:not(.desktop-runtime),
+:root.capacitor:not(.desktop-runtime) * {
+  --text-markdown: 0.75rem !important;
+  --text-code: 0.6875rem !important;
+  --text-ui-header: 0.75rem !important;
+  --text-ui-label: 0.6875rem !important;
+  --text-meta: 0.625rem !important;
+  --text-micro: 0.625rem !important;
 }
 
 :root.capacitor:not(.desktop-runtime) .px-4 {
@@ -631,10 +645,19 @@
   margin-top: 0.15rem;
 }
 
-/* Skip layout/paint for offscreen session rows while the drawer list scrolls. */
+/*
+ * Skip layout/paint for offscreen session rows while the drawer list scrolls.
+ * Do NOT apply inside JS-virtualized lists — content-visibility + unmount windowing
+ * stacks and shows blank flashes during fling.
+ */
 :root.capacitor:not(.desktop-runtime) .drawer-safe-area [data-session-row] {
   content-visibility: auto;
-  contain-intrinsic-size: auto 36px;
+  contain-intrinsic-size: auto 40px;
+}
+
+:root.capacitor:not(.desktop-runtime) .drawer-safe-area [data-session-virtual-list] [data-session-row] {
+  content-visibility: visible;
+  contain-intrinsic-size: none;
 }
 
 /*
@@ -659,6 +682,44 @@
     0.5rem
     + max(12px, var(--oc-safe-area-bottom, env(safe-area-inset-bottom, 0px)))
   ) !important;
+}
+
+/* Composer chrome + user bubbles: honor density tokens (not Tailwind text-base / system scale). */
+:root.capacitor:not(.desktop-runtime) .oc-mobile-composer .typography-micro,
+:root.capacitor:not(.desktop-runtime) .oc-mobile-composer .typography-meta,
+:root.capacitor:not(.desktop-runtime) .oc-mobile-composer .typography-ui-label {
+  font-size: var(--text-micro) !important;
+  line-height: 1.25;
+}
+
+/*
+ * Chat transcript — use px (not rem) so Android/Harmony accessibility font
+ * scale cannot inflate the conversation. Tables used Tailwind text-sm which
+ * ignored density tokens and forced vertical wrapping on narrow screens.
+ */
+:root.capacitor:not(.desktop-runtime) .main-content-safe-area .message-content-text,
+:root.capacitor:not(.desktop-runtime) .main-content-safe-area .markdown-content,
+:root.capacitor:not(.desktop-runtime) .main-content-safe-area .markdown-content table,
+:root.capacitor:not(.desktop-runtime) .main-content-safe-area .markdown-content th,
+:root.capacitor:not(.desktop-runtime) .main-content-safe-area .markdown-content td,
+:root.capacitor:not(.desktop-runtime) .main-content-safe-area .markdown-content .text-sm,
+:root.capacitor:not(.desktop-runtime) .main-content-safe-area .markdown-content .text-base,
+:root.capacitor:not(.desktop-runtime) .main-content-safe-area .typography-markdown,
+:root.capacitor:not(.desktop-runtime) .main-content-safe-area .typography-markdown-body,
+:root.capacitor:not(.desktop-runtime) .main-content-safe-area .typography-markdown-h1,
+:root.capacitor:not(.desktop-runtime) .main-content-safe-area .typography-markdown-h2,
+:root.capacitor:not(.desktop-runtime) .main-content-safe-area .typography-markdown-h3,
+:root.capacitor:not(.desktop-runtime) .main-content-safe-area .typography-markdown-h4,
+:root.capacitor:not(.desktop-runtime) .main-content-safe-area .typography-meta,
+:root.capacitor:not(.desktop-runtime) .main-content-safe-area .typography-code {
+  font-size: 12px !important;
+  line-height: 1.4 !important;
+}
+
+:root.capacitor:not(.desktop-runtime) .main-content-safe-area .markdown-content th,
+:root.capacitor:not(.desktop-runtime) .main-content-safe-area .markdown-content td {
+  padding: 0.25rem 0.4rem !important;
+  white-space: nowrap;
 }
 
 :root.capacitor:not(.desktop-runtime).oc-keyboard-open .oc-mobile-composer {
