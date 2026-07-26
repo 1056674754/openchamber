@@ -27,6 +27,8 @@ type Props = {
   collapsed?: boolean;
   onToggleCollapse?: () => void;
   isSubmitting?: boolean;
+  /** When true, skip outer horizontal padding (already provided by parent scroll area). */
+  embedded?: boolean;
 };
 
 export function TempSessionsSection(props: Props): React.ReactNode {
@@ -40,6 +42,7 @@ export function TempSessionsSection(props: Props): React.ReactNode {
     collapsed = false,
     onToggleCollapse,
     isSubmitting = false,
+    embedded = false,
   } = props;
 
   const [confirmingArchive, setConfirmingArchive] = React.useState<string | null>(null);
@@ -47,7 +50,7 @@ export function TempSessionsSection(props: Props): React.ReactNode {
 
   if (tempSessions.length === 0 && !isSubmitting) {
     return (
-      <div className="px-2.5 py-2">
+      <div className={cn('py-2', embedded ? null : 'px-2.5')}>
         <button
           type="button"
           onClick={onCreateTempSession}
@@ -61,7 +64,7 @@ export function TempSessionsSection(props: Props): React.ReactNode {
   }
 
   return (
-    <div className="py-1 pl-2.5 pr-2">
+    <div className={cn('py-1', embedded ? null : 'pl-2.5 pr-2')}>
       <button
         type="button"
         onClick={onToggleCollapse}

@@ -2393,6 +2393,47 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
     });
   }, [mobileVariant, openNewSessionDraft, setActiveMainTab, setSessionSwitcherOpen]);
 
+  const tempSessionsSection = !hasSessionSearchQuery ? (
+    <TempSessionsSection
+      tempSessions={tempSessionsWithSession}
+      currentSessionDirectory={currentDirectory}
+      onSelectTempSession={(session) => {
+        setActiveMainTab('chat');
+        if (!session.sessionId) {
+          toast.error(t('sessions.sidebar.tempSession.unavailable'));
+          return;
+        }
+        setCurrentSession(session.sessionId, session.sessionDirectory ?? session.path);
+        if (mobileVariant) {
+          setSessionSwitcherOpen(false);
+        }
+      }}
+      onArchiveTempSession={async (path) => {
+        try {
+          await deleteTempSession(path);
+          setTempSessions((prev) => prev.filter((s) => s.path !== path));
+        } catch {
+          toast.error(t('sessions.sidebar.tempSession.archiveError'));
+        }
+      }}
+      onCreateTempSession={handleNewTempSession}
+      collapsed={tempSessionsCollapsed}
+      onToggleCollapse={() => {
+        setTempSessionsCollapsed((prev) => {
+          const next = !prev;
+          try {
+            getSafeStorage().setItem('oc.tempSessions.collapsed', String(next));
+          } catch {
+            void 0;
+          }
+          return next;
+        });
+      }}
+      isSubmitting={tempDraftSubmitting}
+      embedded={mobileVariant}
+    />
+  ) : null;
+
   return (
     <div
       ref={sessionSearchContainerRef}
@@ -2427,6 +2468,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
 
       <SidebarProjectsList
         topContent={topContent}
+        bottomContent={mobileVariant ? tempSessionsSection : null}
         sectionsForRender={sectionsForSidebarRender}
         projectSections={projectSections}
         activeProjectId={activeProjectId}
@@ -2478,45 +2520,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
         />
       ) : null}
 
-      {!hasSessionSearchQuery && (
-        <TempSessionsSection
-          tempSessions={tempSessionsWithSession}
-          currentSessionDirectory={currentDirectory}
-          onSelectTempSession={(session) => {
-            setActiveMainTab('chat');
-            if (!session.sessionId) {
-              toast.error(t('sessions.sidebar.tempSession.unavailable'));
-              return;
-            }
-            setCurrentSession(session.sessionId, session.sessionDirectory ?? session.path);
-            if (mobileVariant) {
-              setSessionSwitcherOpen(false);
-            }
-          }}
-          onArchiveTempSession={async (path) => {
-            try {
-              await deleteTempSession(path);
-              setTempSessions((prev) => prev.filter((s) => s.path !== path));
-            } catch {
-              toast.error(t('sessions.sidebar.tempSession.archiveError'));
-            }
-          }}
-          onCreateTempSession={handleNewTempSession}
-          collapsed={tempSessionsCollapsed}
-          onToggleCollapse={() => {
-            setTempSessionsCollapsed((prev) => {
-              const next = !prev;
-              try {
-                getSafeStorage().setItem('oc.tempSessions.collapsed', String(next));
-              } catch {
-                void 0;
-              }
-              return next;
-            });
-          }}
-          isSubmitting={tempDraftSubmitting}
-        />
-      )}
+      {!mobileVariant ? tempSessionsSection : null}
 
       <SidebarFooter
         onOpenSettings={handleOpenSettings}
