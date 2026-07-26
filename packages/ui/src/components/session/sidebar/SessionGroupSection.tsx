@@ -25,9 +25,18 @@ import {
   type SessionNodeChildRenderExtras,
   type SessionNodeRenderExtras,
 } from './sessionNodeItemUtils';
+import {
+  ARCHIVED_ROW_ESTIMATE_PX,
+  DESKTOP_ARCHIVED_VIRTUAL_OVERSCAN,
+  MOBILE_ROW_ESTIMATE_PX,
+  MOBILE_VIRTUAL_FLING_HOLD_MS,
+  MOBILE_VIRTUAL_FLING_SPEED_PX_MS,
+  MOBILE_VIRTUAL_OVERSCAN,
+  MOBILE_VIRTUAL_OVERSCAN_FLING,
+  shouldRenderAllUnpinnedSessions,
+  shouldVirtualizeSessionGroupUnpinned,
+} from './sessionGroupVirtualization';
 
-const ARCHIVED_VIRTUALIZE_THRESHOLD = 50;
-const ARCHIVED_ROW_ESTIMATE_PX = 28;
 const SESSION_GROUP_SHOW_MORE_INCREMENT = 7;
 
 type DeleteFolderConfirm = {
@@ -323,11 +332,14 @@ export function SessionGroupSection(props: Props): React.ReactNode {
   const totalSessions = ungroupedSessions.length;
   const totalUnpinned = allUnpinnedNodes.length;
   const requestedVisibleCount = Math.max(baseVisibleCount, visibleSessionCount ?? baseVisibleCount);
-  const unpinnedNodes = group.isArchivedBucket
+  const renderAllUnpinned = shouldRenderAllUnpinnedSessions({
+    isArchivedBucket: group.isArchivedBucket === true,
+    mobileVariant,
+    hasSessionSearchQuery,
+  });
+  const unpinnedNodes = renderAllUnpinned
     ? allUnpinnedNodes
-    : hasSessionSearchQuery
-      ? allUnpinnedNodes
-      : allUnpinnedNodes.slice(0, requestedVisibleCount);
+    : allUnpinnedNodes.slice(0, requestedVisibleCount);
   const remainingCount = totalUnpinned - unpinnedNodes.length;
   const showMoreCount = Math.min(SESSION_GROUP_SHOW_MORE_INCREMENT, remainingCount);
   const nextVisibleCount = unpinnedNodes.length + showMoreCount;
@@ -338,9 +350,13 @@ export function SessionGroupSection(props: Props): React.ReactNode {
     && visibleSessionCount !== undefined
     && visibleSessionCount > baseVisibleCount;
 
-  const shouldVirtualizeArchived = group.isArchivedBucket === true
-    && !hasSessionSearchQuery
-    && unpinnedNodes.length >= ARCHIVED_VIRTUALIZE_THRESHOLD;
+  const shouldVirtualizeUnpinned = shouldVirtualizeSessionGroupUnpinned({
+    isArchivedBucket: group.isArchivedBucket === true,
+    mobileVariant,
+    hasSessionSearchQuery,
+    unpinnedCount: unpinnedNodes.length,
+  });
+  const virtualRowEstimatePx = mobileVariant ? MOBILE_ROW_ESTIMATE_PX : ARCHIVED_ROW_ESTIMATE_PX;
 
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
   const sessionNodeRenderExtras = React.useMemo(() => {
@@ -372,31 +388,78 @@ export function SessionGroupSection(props: Props): React.ReactNode {
     [group.directory, projectId, renderSessionNode, sessionNodeRenderExtras],
   );
 
-  const archivedVirtualContainerRef = React.useRef<HTMLDivElement | null>(null);
-  const [archivedScrollEl, setArchivedScrollEl] = React.useState<HTMLElement | null>(null);
-  const [archivedScrollMargin, setArchivedScrollMargin] = React.useState(0);
+  const unpinnedVirtualContainerRef = React.useRef<HTMLDivElement | null>(null);
+  const [unpinnedScrollEl, setUnpinnedScrollEl] = React.useState<HTMLElement | null>(null);
+  const [unpinnedScrollMargin, setUnpinnedScrollMargin] = React.useState(0);
+  const [mobileVirtualOverscan, setMobileVirtualOverscan] = React.useState(MOBILE_VIRTUAL_OVERSCAN);
+  const mobileVirtualOverscanRef = React.useRef(MOBILE_VIRTUAL_OVERSCAN);
 
-  const archivedVirtualizer = useVirtualizer({
+  React.useEffect(() => {
+    if (!mobileVariant || !shouldVirtualizeUnpinned || !unpinnedScrollEl) {
+      if (mobileVirtualOverscanRef.current !== MOBILE_VIRTUAL_OVERSCAN) {
+        mobileVirtualOverscanRef.current = MOBILE_VIRTUAL_OVERSCAN;
+        setMobileVirtualOverscan(MOBILE_VIRTUAL_OVERSCAN);
+      }
+      return;
+    }
+
+    let lastTop = unpinnedScrollEl.scrollTop;
+    let lastTs = performance.now();
+    let flingUntil = 0;
+    let raf = 0;
+
+    const applyOverscan = (next: number) => {
+      if (next === mobileVirtualOverscanRef.current) return;
+      mobileVirtualOverscanRef.current = next;
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => {
+        setMobileVirtualOverscan(next);
+      });
+    };
+
+    const onScroll = () => {
+      const now = performance.now();
+      const top = unpinnedScrollEl.scrollTop;
+      const dt = now - lastTs;
+      if (dt > 0) {
+        const speed = Math.abs(top - lastTop) / dt;
+        if (speed >= MOBILE_VIRTUAL_FLING_SPEED_PX_MS) {
+          flingUntil = now + MOBILE_VIRTUAL_FLING_HOLD_MS;
+        }
+      }
+      lastTop = top;
+      lastTs = now;
+      applyOverscan(now < flingUntil ? MOBILE_VIRTUAL_OVERSCAN_FLING : MOBILE_VIRTUAL_OVERSCAN);
+    };
+
+    unpinnedScrollEl.addEventListener('scroll', onScroll, { passive: true });
+    return () => {
+      unpinnedScrollEl.removeEventListener('scroll', onScroll);
+      cancelAnimationFrame(raf);
+    };
+  }, [mobileVariant, shouldVirtualizeUnpinned, unpinnedScrollEl]);
+
+  const unpinnedVirtualizer = useVirtualizer({
     count: unpinnedNodes.length,
-    getScrollElement: () => archivedScrollEl,
-    estimateSize: () => ARCHIVED_ROW_ESTIMATE_PX,
-    overscan: 8,
-    enabled: shouldVirtualizeArchived && archivedScrollEl !== null,
-    scrollMargin: archivedScrollMargin,
+    getScrollElement: () => unpinnedScrollEl,
+    estimateSize: () => virtualRowEstimatePx,
+    overscan: mobileVariant ? mobileVirtualOverscan : DESKTOP_ARCHIVED_VIRTUAL_OVERSCAN,
+    enabled: shouldVirtualizeUnpinned && unpinnedScrollEl !== null,
+    scrollMargin: unpinnedScrollMargin,
   });
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   React.useLayoutEffect(() => {
-    if (!shouldVirtualizeArchived) {
-      if (archivedScrollEl !== null) setArchivedScrollEl(null);
-      if (archivedScrollMargin !== 0) setArchivedScrollMargin(0);
+    if (!shouldVirtualizeUnpinned) {
+      if (unpinnedScrollEl !== null) setUnpinnedScrollEl(null);
+      if (unpinnedScrollMargin !== 0) setUnpinnedScrollMargin(0);
       return;
     }
     if (typeof window === 'undefined') return;
-    const container = archivedVirtualContainerRef.current;
+    const container = unpinnedVirtualContainerRef.current;
     if (!container) return;
 
-    let scrollEl: HTMLElement | null = archivedScrollEl;
+    let scrollEl: HTMLElement | null = unpinnedScrollEl;
     if (!scrollEl || !scrollEl.contains(container)) {
       let element: HTMLElement | null = container.parentElement;
       while (element) {
@@ -407,8 +470,8 @@ export function SessionGroupSection(props: Props): React.ReactNode {
         }
         element = element.parentElement;
       }
-      if (scrollEl !== archivedScrollEl) {
-        setArchivedScrollEl(scrollEl);
+      if (scrollEl !== unpinnedScrollEl) {
+        setUnpinnedScrollEl(scrollEl);
         return;
       }
     }
@@ -417,21 +480,21 @@ export function SessionGroupSection(props: Props): React.ReactNode {
     const offset = container.getBoundingClientRect().top
       - scrollEl.getBoundingClientRect().top
       + scrollEl.scrollTop;
-    setArchivedScrollMargin((prev) => (Math.abs(prev - offset) < 1 ? prev : offset));
+    setUnpinnedScrollMargin((prev) => (Math.abs(prev - offset) < 1 ? prev : offset));
   });
 
   React.useEffect(() => {
-    if (!shouldVirtualizeArchived || !archivedScrollEl || typeof ResizeObserver === 'undefined') return;
+    if (!shouldVirtualizeUnpinned || !unpinnedScrollEl || typeof ResizeObserver === 'undefined') return;
     const observer = new ResizeObserver(() => {
-      archivedVirtualizer.measure();
+      unpinnedVirtualizer.measure();
     });
-    observer.observe(archivedScrollEl);
+    observer.observe(unpinnedScrollEl);
     return () => observer.disconnect();
-  }, [shouldVirtualizeArchived, archivedScrollEl, archivedVirtualizer]);
+  }, [shouldVirtualizeUnpinned, unpinnedScrollEl, unpinnedVirtualizer]);
 
-  const archivedTotalSize = archivedVirtualizer.getTotalSize();
-  const archivedVirtualRows = shouldVirtualizeArchived && archivedScrollEl !== null
-    ? archivedVirtualizer.getVirtualItems()
+  const unpinnedTotalSize = unpinnedVirtualizer.getTotalSize();
+  const unpinnedVirtualRows = shouldVirtualizeUnpinned && unpinnedScrollEl !== null
+    ? unpinnedVirtualizer.getVirtualItems()
     : [];
 
   if (hasSessionSearchQuery && !groupMatchesSearch && rootFolders.length === 0 && ungroupedSessions.length === 0) {
@@ -659,32 +722,34 @@ export function SessionGroupSection(props: Props): React.ReactNode {
       {pinnedNodes.length > 0 && unpinnedNodes.length > 0 ? (
         <div className="mx-0.5 my-0.5 h-px bg-[var(--surface-subtle)]" />
       ) : null}
-      {shouldVirtualizeArchived ? (
+      {shouldVirtualizeUnpinned ? (
         <div
-          ref={archivedVirtualContainerRef}
+          ref={unpinnedVirtualContainerRef}
+          data-session-virtual-list=""
           style={{
             position: 'relative',
-            height: archivedTotalSize > 0 ? archivedTotalSize : undefined,
+            height: unpinnedTotalSize > 0 ? unpinnedTotalSize : undefined,
             width: '100%',
           }}
         >
-          {archivedVirtualRows.map((virtualRow) => {
+          {unpinnedVirtualRows.map((virtualRow) => {
             const node = unpinnedNodes[virtualRow.index];
             if (!node) return null;
             return (
               <div
                 key={virtualRow.key}
                 data-index={virtualRow.index}
-                ref={archivedVirtualizer.measureElement}
+                ref={mobileVariant ? undefined : unpinnedVirtualizer.measureElement}
                 style={{
                   position: 'absolute',
                   top: 0,
                   left: 0,
                   width: '100%',
-                  transform: `translateY(${virtualRow.start - archivedScrollMargin}px)`,
+                  height: mobileVariant ? virtualRowEstimatePx : undefined,
+                  transform: `translateY(${virtualRow.start - unpinnedScrollMargin}px)`,
                 }}
               >
-                {renderNode(node, true)}
+                {renderNode(node, group.isArchivedBucket === true)}
               </div>
             );
           })}

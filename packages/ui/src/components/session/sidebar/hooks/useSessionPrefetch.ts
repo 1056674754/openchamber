@@ -10,6 +10,7 @@ const SESSION_PREFETCH_CONCURRENCY = 1;
 const SESSION_PREFETCH_PENDING_LIMIT = 6;
 
 type Args = {
+  enabled?: boolean;
   currentSessionId: string | null;
   currentSessionRenderable: boolean;
   sortedSessions: Session[];
@@ -18,11 +19,21 @@ type Args = {
   ensureSessionRenderable: (sessionId: string) => Promise<unknown>;
 };
 
-export const useSessionPrefetch = ({ currentSessionId, currentSessionRenderable, sortedSessions, recentSessionIds = [], sidebarSessionIds = [], ensureSessionRenderable }: Args): void => {
+export const useSessionPrefetch = ({
+  enabled = true,
+  currentSessionId,
+  currentSessionRenderable,
+  sortedSessions,
+  recentSessionIds = [],
+  sidebarSessionIds = [],
+  ensureSessionRenderable,
+}: Args): void => {
   const sessionPrefetchTimersRef = React.useRef<Map<string, number>>(new Map());
   const sessionPrefetchQueueRef = React.useRef<string[]>([]);
   const sessionPrefetchInFlightRef = React.useRef<Set<string>>(new Set());
-  const prefetchDisabled = isVSCodeRuntime() || (Boolean(currentSessionId) && !currentSessionRenderable);
+  const prefetchDisabled = !enabled
+    || isVSCodeRuntime()
+    || (Boolean(currentSessionId) && !currentSessionRenderable);
 
   const pumpSessionPrefetchQueue = React.useCallback(() => {
     if (prefetchDisabled || typeof window === 'undefined') {

@@ -94,10 +94,13 @@ export const MainLayout: React.FC = () => {
 
     // Mobile drawer state
     const [mobileLeftDrawerOpen, setMobileLeftDrawerOpen] = React.useState(false);
+    // Lazy-once keep-alive: first open mounts SessionSidebar; later opens reuse the tree.
+    const [hasMountedLeftSidebar, setHasMountedLeftSidebar] = React.useState(false);
     const mobileRightDrawerOpenRef = React.useRef(false);
     const initialDrawerWidthRef = React.useRef(typeof window === 'undefined' ? 0 : window.innerWidth);
 
     const setLeftDrawerOpen = React.useCallback((open: boolean) => {
+        if (open) setHasMountedLeftSidebar(true);
         setMobileLeftDrawerOpen(open);
         syncSessionSwitcherWithDrawer(open);
     }, []);
@@ -146,6 +149,7 @@ export const MainLayout: React.FC = () => {
     // Sync session switcher → left drawer (drawer → switcher goes through setLeftDrawerOpen)
     useEffect(() => {
         if (useMobileDrawers) {
+            if (isSessionSwitcherOpen) setHasMountedLeftSidebar(true);
             setMobileLeftDrawerOpen(isSessionSwitcherOpen);
         }
     }, [isSessionSwitcherOpen, useMobileDrawers]);
@@ -408,11 +412,27 @@ export const MainLayout: React.FC = () => {
                             style={{ backgroundImage: 'linear-gradient(var(--surface-muted), var(--surface-muted))' }}
                         >
                             <div className="flex-1 min-w-0 overflow-hidden flex flex-col" data-page-scroll-lock="true">
-                                {/* Open-only mount: closed drawers must not keep sidebar polls alive. */}
-                                {mobileLeftDrawerOpen ? (
-                                  <ErrorBoundary>
-                                      <SessionSidebar mobileVariant />
-                                  </ErrorBoundary>
+                                {/* Lazy-once keep-alive: avoid remount cost on every open.
+                                    Closed drawers stay mounted but inert/hidden; SessionSidebar
+                                    gates polls via sidebarActive. */}
+                                {hasMountedLeftSidebar ? (
+                                  <div
+                                    className="flex h-full min-h-0 flex-1 flex-col overflow-hidden"
+                                    aria-hidden={!mobileLeftDrawerOpen}
+                                    inert={!mobileLeftDrawerOpen || undefined}
+                                    style={{
+                                      visibility: mobileLeftDrawerOpen ? 'visible' : 'hidden',
+                                      contentVisibility: mobileLeftDrawerOpen ? 'visible' : 'hidden',
+                                      pointerEvents: mobileLeftDrawerOpen ? 'auto' : 'none',
+                                    }}
+                                  >
+                                    <ErrorBoundary>
+                                      <SessionSidebar
+                                        mobileVariant
+                                        sidebarActive={mobileLeftDrawerOpen}
+                                      />
+                                    </ErrorBoundary>
+                                  </div>
                                 ) : null}
                             </div>
                         </div>

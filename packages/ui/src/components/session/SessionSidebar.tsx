@@ -268,6 +268,8 @@ const SIDEBAR_PR_NO_PR_RETRY_MS = 5 * 60_000;
 
 interface SessionSidebarProps {
   mobileVariant?: boolean;
+  /** When false, pause drawer-only polls/prefetch (mobile keep-alive while closed). */
+  sidebarActive?: boolean;
   onSessionSelected?: (sessionId: string) => void;
   allowReselect?: boolean;
   hideDirectoryControls?: boolean;
@@ -276,6 +278,7 @@ interface SessionSidebarProps {
 
 export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   mobileVariant = false,
+  sidebarActive = true,
   onSessionSelected,
   allowReselect = false,
   hideDirectoryControls = false,
@@ -601,7 +604,9 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
 
   const tempSessionsWithSession = React.useMemo<TempSessionEntry[]>(() => {
     const sessionsByDirectory = new Map<string, Session>();
-    const merged = [...globalActiveSessions, ...liveSessions];
+    // Archived temp topics still have OpenCode history; matching only active
+    // sessions made them look like orphans ("no chat history").
+    const merged = [...globalActiveSessions, ...liveSessions, ...globalArchivedSessions];
 
     for (const session of merged) {
       const directory = resolveGlobalSessionDirectory(session);
@@ -610,9 +615,19 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
       }
 
       const existing = sessionsByDirectory.get(directory);
-      const existingTime = existing?.time?.updated ?? existing?.time?.created ?? 0;
+      if (!existing) {
+        sessionsByDirectory.set(directory, session);
+        continue;
+      }
+      const existingArchived = Boolean(existing.time?.archived);
+      const nextArchived = Boolean(session.time?.archived);
+      if (existingArchived !== nextArchived) {
+        if (!nextArchived) sessionsByDirectory.set(directory, session);
+        continue;
+      }
+      const existingTime = existing.time?.updated ?? existing.time?.created ?? 0;
       const nextTime = session.time?.updated ?? session.time?.created ?? 0;
-      if (!existing || nextTime >= existingTime) {
+      if (nextTime >= existingTime) {
         sessionsByDirectory.set(directory, session);
       }
     }
@@ -623,11 +638,24 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
         return entry;
       }
       const session = sessionsByDirectory.get(normalizedPath);
-      return session
-        ? { ...entry, sessionId: session.id, sessionDirectory: normalizedPath }
+      if (session) {
+        return {
+          ...entry,
+          sessionId: session.id,
+          sessionDirectory: normalizedPath,
+          archived: Boolean(session.time?.archived),
+        };
+      }
+      // Server list enrichment may already carry sessionId for archived topics
+      // that are not present in the in-memory catalog yet.
+      return entry.sessionId
+        ? {
+            ...entry,
+            sessionDirectory: normalizePath(entry.sessionDirectory ?? entry.path) ?? entry.path,
+          }
         : entry;
     });
-  }, [globalActiveSessions, liveSessions, tempSessions]);
+  }, [globalActiveSessions, globalArchivedSessions, liveSessions, tempSessions]);
 
   const syncSessionStructureSignature = React.useMemo(
     () => liveSessions
@@ -834,6 +862,8 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
   const isDesktopShellRuntime = React.useMemo(() => isDesktopShell(), []);
 
   React.useEffect(() => {
+    if (!sidebarActive) return;
+
     const loadTempSessions = async () => {
       try {
         const sessions = await listTempSessions();
@@ -850,7 +880,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
     }, 30000);
 
     return () => clearInterval(interval);
-  }, []);
+  }, [sidebarActive]);
 
   const isVSCode = React.useMemo(() => isVSCodeRuntime(), []);
   const { isTablet } = useDeviceInfo();
@@ -1798,6 +1828,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
   ]);
 
   useSessionPrefetch({
+    enabled: sidebarActive,
     currentSessionId,
     currentSessionRenderable,
     sortedSessions,
@@ -2398,15 +2429,57 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
       tempSessions={tempSessionsWithSession}
       currentSessionDirectory={currentDirectory}
       onSelectTempSession={(session) => {
-        setActiveMainTab('chat');
-        if (!session.sessionId) {
-          toast.error(t('sessions.sidebar.tempSession.unavailable'));
-          return;
-        }
-        setCurrentSession(session.sessionId, session.sessionDirectory ?? session.path);
-        if (mobileVariant) {
-          setSessionSwitcherOpen(false);
-        }
+        void (async () => {
+          setActiveMainTab('chat');
+          let sessionId = session.sessionId;
+          let directory = session.sessionDirectory ?? session.path;
+          let archived = Boolean(session.archived);
+
+          if (!sessionId) {
+            try {
+              const response = await fetch(`/api/session?directory=${encodeURIComponent(session.path)}`);
+              if (response.ok) {
+                const sessions = await response.json() as Array<Session & { time?: { archived?: number; updated?: number; created?: number } }>;
+                if (Array.isArray(sessions) && sessions.length > 0) {
+                  const ranked = [...sessions].sort((a, b) => {
+                    const aArchived = a.time?.archived ? 0 : 1;
+                    const bArchived = b.time?.archived ? 0 : 1;
+                    if (aArchived !== bArchived) return bArchived - aArchived;
+                    const aTime = a.time?.updated ?? a.time?.created ?? 0;
+                    const bTime = b.time?.updated ?? b.time?.created ?? 0;
+                    return bTime - aTime;
+                  });
+                  const best = ranked[0];
+                  sessionId = best.id;
+                  directory = resolveGlobalSessionDirectory(best) ?? session.path;
+                  archived = Boolean(best.time?.archived);
+                  useGlobalSessionsStore.getState().upsertSession(best);
+                }
+              }
+            } catch {
+              // fall through to unavailable toast
+            }
+          }
+
+          if (!sessionId) {
+            toast.error(t('sessions.sidebar.tempSession.unavailable'));
+            return;
+          }
+
+          if (archived) {
+            const { unarchiveSession } = await import('@/sync/session-actions');
+            const ok = await unarchiveSession(sessionId, directory);
+            if (!ok) {
+              toast.error(t('sessions.sidebar.tempSession.unavailable'));
+              return;
+            }
+          }
+
+          setCurrentSession(sessionId, directory);
+          if (mobileVariant) {
+            setSessionSwitcherOpen(false);
+          }
+        })();
       }}
       onArchiveTempSession={async (path) => {
         try {
