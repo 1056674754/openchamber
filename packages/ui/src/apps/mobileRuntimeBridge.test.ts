@@ -26,6 +26,8 @@ const {
   connectMobileEndpoint,
   disconnectMobileEndpoint,
   getMobileActiveServerId,
+  isLegacyMobileActiveServerId,
+  LEGACY_MOBILE_ACTIVE_SERVER_ID,
   normalizeMobileServerUrl,
 } = await import('./mobileRuntimeBridge');
 
@@ -36,7 +38,7 @@ describe('mobileRuntimeBridge', () => {
     expect(normalizeMobileServerUrl('  ')).toBe('');
   });
 
-  test('connectMobileEndpoint switches runtime and registers serverIds', () => {
+  test('connectMobileEndpoint retargets default only (no synthetic mobile-active persist id)', () => {
     switchCalls.length = 0;
     registerCalls.length = 0;
     unregisterCalls.length = 0;
@@ -47,28 +49,24 @@ describe('mobileRuntimeBridge', () => {
       label: 'Office',
     });
 
-    expect(serverId).toBe(getMobileActiveServerId());
+    expect(serverId).toBe('default');
+    expect(getMobileActiveServerId()).toBe('default');
     expect(switchCalls).toEqual([{
       apiBaseUrl: 'http://10.0.0.2:3000',
       clientToken: 'tok',
       runtimeKey: 'mobile:http://10.0.0.2:3000',
     }]);
-    expect(registerCalls.length).toBe(2);
-    expect(registerCalls[0]).toEqual({
-      id: 'mobile-active',
-      label: 'Office',
-      baseUrl: 'http://10.0.0.2:3000',
-      authToken: 'tok',
-    });
-    expect(registerCalls[1]).toEqual({
+    expect(registerCalls).toEqual([{
       id: 'default',
       label: 'Office',
-      baseUrl: 'http://10.0.0.2:3000',
+      baseUrl: 'http://10.0.0.2:3000/api',
+      healthUrl: 'http://10.0.0.2:3000/health',
       authToken: 'tok',
-    });
+    }]);
+    expect(unregisterCalls).toEqual([LEGACY_MOBILE_ACTIVE_SERVER_ID]);
   });
 
-  test('disconnectMobileEndpoint clears runtime and unregisters mobile-active', () => {
+  test('disconnectMobileEndpoint clears runtime and drops legacy mobile-active', () => {
     switchCalls.length = 0;
     unregisterCalls.length = 0;
 
@@ -78,6 +76,12 @@ describe('mobileRuntimeBridge', () => {
       clientToken: null,
       runtimeKey: 'mobile-disconnected',
     }]);
-    expect(unregisterCalls).toEqual(['mobile-active']);
+    expect(unregisterCalls).toEqual([LEGACY_MOBILE_ACTIVE_SERVER_ID]);
+  });
+
+  test('isLegacyMobileActiveServerId detects polluted project tags', () => {
+    expect(isLegacyMobileActiveServerId('mobile-active')).toBe(true);
+    expect(isLegacyMobileActiveServerId('default')).toBe(false);
+    expect(isLegacyMobileActiveServerId(null)).toBe(false);
   });
 });

@@ -1,7 +1,15 @@
 import { DEFAULT_SERVER_ID, serverRegistry } from '@/lib/opencode/server-registry';
 import { switchRuntimeEndpoint } from '@/lib/runtime-switch';
 
-const MOBILE_ACTIVE_SERVER_ID = 'mobile-active';
+/**
+ * Legacy synthetic id used briefly by Capacitor connect. It must NEVER be
+ * persisted on shared host projects — that polluted the desktop sidebar with
+ * "mobile-active" remote labels and broke chat routing.
+ */
+export const LEGACY_MOBILE_ACTIVE_SERVER_ID = 'mobile-active';
+
+export const isLegacyMobileActiveServerId = (serverId: string | null | undefined): boolean =>
+  Boolean(serverId && serverId.trim() === LEGACY_MOBILE_ACTIVE_SERVER_ID);
 
 export const normalizeMobileServerUrl = (value: string): string => {
   const trimmed = value.trim();
@@ -14,12 +22,13 @@ export const normalizeMobileServerUrl = (value: string): string => {
   return url.toString().replace(/\/+$/, '');
 };
 
-export const getMobileActiveServerId = (): string => MOBILE_ACTIVE_SERVER_ID;
+/** Mobile's bound host is the default server from the phone's point of view. */
+export const getMobileActiveServerId = (): string => DEFAULT_SERVER_ID;
 
 /**
  * Connect Capacitor mobile to a remote OpenChamber host.
- * Keeps fork authority: registers `serverId` in serverRegistry AND switches the
- * runtime URL resolver so relative `/api` fetches hit the absolute host.
+ * Retargets DEFAULT_SERVER_ID only — do not invent a second serverId that
+ * RemoteProjectDiscovery would persist back onto the host project list.
  */
 export const connectMobileEndpoint = (options: {
   url: string;
@@ -45,23 +54,22 @@ export const connectMobileEndpoint = (options: {
     runtimeKey: `mobile:${apiBaseUrl}`,
   });
 
-  serverRegistry.register({
-    id: MOBILE_ACTIVE_SERVER_ID,
-    label,
-    baseUrl: apiBaseUrl,
-    authToken: options.clientToken ?? undefined,
-  });
-
-  // Also retarget default so code paths that still read DEFAULT_SERVER_ID work
-  // while a single mobile connection is active.
+  // OpenCode SDK paths are relative to /api (e.g. /session/:id/message).
+  // Register the API root — host origin alone serves the SPA HTML for those
+  // paths, which surfaces as "session.messages returned non-array data".
+  const sdkBaseUrl = `${apiBaseUrl}/api`;
   serverRegistry.register({
     id: DEFAULT_SERVER_ID,
     label,
-    baseUrl: apiBaseUrl,
+    baseUrl: sdkBaseUrl,
+    healthUrl: `${apiBaseUrl}/health`,
     authToken: options.clientToken ?? undefined,
   });
 
-  return MOBILE_ACTIVE_SERVER_ID;
+  // Drop any leftover synthetic registration from older builds.
+  serverRegistry.unregister(LEGACY_MOBILE_ACTIVE_SERVER_ID);
+
+  return DEFAULT_SERVER_ID;
 };
 
 export const disconnectMobileEndpoint = (): void => {
@@ -70,5 +78,5 @@ export const disconnectMobileEndpoint = (): void => {
     clientToken: null,
     runtimeKey: 'mobile-disconnected',
   });
-  serverRegistry.unregister(MOBILE_ACTIVE_SERVER_ID);
+  serverRegistry.unregister(LEGACY_MOBILE_ACTIVE_SERVER_ID);
 };

@@ -197,6 +197,28 @@ describe("loadMessageHistoryBatch", () => {
 
     expect(result.page.payloadBytes).toBe(2400)
   })
+
+  test("unwraps nested message arrays from wrapped payloads", async () => {
+    const client: MessageHistoryClient = {
+      session: {
+        messages: async () => ({
+          data: {
+            data: [{ info: message("msg_010", "user"), parts: [textPart("prt_010", "msg_010")] }],
+          } as unknown as MessageHistoryResponse["data"],
+        }),
+      },
+    }
+
+    const result = await loadMessageHistoryBatch({
+      client,
+      sessionID: "ses_1",
+      directory: "/repo/authoritative",
+      limit: 30,
+      minimumRealUserMessages: 1,
+    })
+
+    expect(result.page.session.map((item) => item.id)).toEqual(["msg_010"])
+  })
 })
 
 describe("getInteractiveHistoryRealUserTarget", () => {

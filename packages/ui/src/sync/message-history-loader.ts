@@ -84,7 +84,26 @@ function unwrapMessageRecords(result: MessageHistoryResponse): readonly MessageH
   if (result.data === undefined) {
     throw new MessageHistoryLoadError("session.messages returned no data", 503)
   }
-  return result.data
+  const data = result.data as unknown
+  if (Array.isArray(data)) {
+    return data as readonly MessageHistoryRecord[]
+  }
+  // Defensive: some proxies / Capacitor rewrite paths wrap the page as an object.
+  if (data && typeof data === "object") {
+    const nested = (data as { data?: unknown; messages?: unknown; items?: unknown }).data
+      ?? (data as { messages?: unknown }).messages
+      ?? (data as { items?: unknown }).items
+    if (Array.isArray(nested)) {
+      return nested as readonly MessageHistoryRecord[]
+    }
+  }
+  const kind = Array.isArray(data) ? "array" : typeof data
+  const hint = typeof data === "string"
+    ? (data.trimStart().startsWith("<") ? " (html)" : " (string)")
+    : data && typeof data === "object"
+      ? ` (keys: ${Object.keys(data as object).slice(0, 6).join(",") || "none"})`
+      : ""
+  throw new MessageHistoryLoadError(`session.messages returned non-array data: ${kind}${hint}`, 503)
 }
 
 function readPayloadBytes(result: MessageHistoryResponse): number | undefined {
