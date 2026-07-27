@@ -269,6 +269,24 @@ export const createRelayService = ({
   // relay pairing link IS the demand signal, so the relay turns itself on here
   // rather than requiring a separate manual toggle. Idempotent: a no-op when the
   // relay is already enabled and running.
+  const waitForRelayConnected = (timeoutMs = 8000) => new Promise((resolve) => {
+    if (status.state === 'connected') {
+      resolve(true);
+      return;
+    }
+    const deadline = Date.now() + timeoutMs;
+    const timer = setInterval(() => {
+      if (status.state === 'connected') {
+        clearInterval(timer);
+        resolve(true);
+      } else if (status.state === 'disabled' || Date.now() >= deadline) {
+        clearInterval(timer);
+        resolve(false);
+      }
+    }, 200);
+    if (typeof timer.unref === 'function') timer.unref();
+  });
+
   const ensureEnabledForPairing = async () => {
     const config = await readConfig();
     if (!config.enabled) {
@@ -276,11 +294,13 @@ export const createRelayService = ({
     }
     if (!hostClient) {
       const next = await readConfig();
-      // Force-claim: creating a pairing link is explicit user intent — the
-      // instance the user is pairing against MUST be the one devices reach,
-      // even if another local process currently holds the machine's claim
-      // (its claim watcher sees the takeover and stands down).
       await start(next.relayUrl, { claim: 'force' });
+    }
+    const connected = await waitForRelayConnected(8000);
+    if (!connected) {
+      logger.warn(
+        `[Relay] ensureEnabledForPairing: host not connected after timeout (state=${status.state}, lastError=${status.lastError ?? null})`,
+      );
     }
     return buildPairingCandidate();
   };
