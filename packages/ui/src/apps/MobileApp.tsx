@@ -298,6 +298,22 @@ export const MobileApp: React.FC<MobileAppProps> = ({ apis }) => {
     );
   }
 
+  if (showAutoSplash) {
+    return (
+      <RuntimeAPIProvider apis={apis}>
+        <div className="flex min-h-[100dvh] flex-col items-center justify-center gap-4 bg-background px-6 text-center header-safe-area bottom-safe-area">
+          <span className="typography-ui-label font-semibold tracking-tight">OpenChamber</span>
+          <div className="flex items-center gap-2">
+            <Icon name="loader-4" className="size-4 animate-spin text-muted-foreground" />
+            <span className="typography-meta text-muted-foreground">
+              {t('mobile.connect.connectingTo', { label: autoConnectLabel ?? '' })}
+            </span>
+          </div>
+        </div>
+      </RuntimeAPIProvider>
+    );
+  }
+
   return (
     <RuntimeAPIProvider apis={apis}>
       {scanBusy ? (
@@ -373,12 +389,6 @@ export const MobileApp: React.FC<MobileAppProps> = ({ apis }) => {
               </p>
             </div>
           )}
-
-          {showAutoSplash ? (
-            <p className="typography-ui-label text-muted-foreground">
-              {t('mobile.connect.connectingTo', { label: autoConnectLabel ?? '' })}
-            </p>
-          ) : null}
 
           <div className="mt-auto space-y-2 pt-2">
             <Button
