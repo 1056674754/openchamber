@@ -95,7 +95,7 @@
   - [x] [#47](https://coding.s-s.city/songsong/openchamber/-/work_items/47) M7 — 键盘/composer 收口（不回归黑屏）
   - [x] [#48](https://coding.s-s.city/songsong/openchamber/-/work_items/48) M8 — 连接页 / 空会话密度
 - **P2 — 产品缺口（有意后置，已开卡）**
-  - [ ] [#11](https://coding.s-s.city/songsong/openchamber/-/work_items/11) M9 — Capacitor Voice resume / dictation overlay（resume 端到端已通：`useCapacitorVoiceResume` emit `openchamber:capacitor-resume` + `useBrowserVoice` 750ms dedup consume；dictation overlay / `ComposerDictation` 待主轨）
+  - [ ] [#11](https://coding.s-s.city/songsong/openchamber/-/work_items/11) M9 — Capacitor Voice resume / dictation overlay（resume 端到端 + dictation overlay MVP 已通：`ComposerDictation` 移动 portal + `useBrowserVoice.interimTranscript` 暴露；hook 所有权提升到 `ChatInput`，desktop inline 按钮行为不变；MVP 限制：cancel 不 rollback 已 append 的 final、非对话模式 phrase-at-a-time、`es`/`ja`/`ko`/`pl`/`pt-BR`/`uk` 五 key English fallback；待真机迭代）
   - [ ] [#49](https://coding.s-s.city/songsong/openchamber/-/work_items/49) M10 — Push（APNs / FCM）— **现状仅 web-push**：浏览器 service-worker 订阅 + `web-push` 发送 + presence suppression 已通；原生 token 注册（iOS `register()` / Android `FirebaseMessagingService`）与服务端 APNs/FCM sender 未接，iOS `AppDelegate` 仅转发 APNs 回调、Android 仅有 Firebase 脚手架。`HANDOFF.md` 已纠偏
   - [x] [#16](https://coding.s-s.city/songsong/openchamber/-/work_items/16) M11 — Pairing / redeem 移动面（QR + `openchamber://` + Instances transport）
   - [ ] [#50](https://coding.s-s.city/songsong/openchamber/-/work_items/50) M12 — 商店签名 / CI release
