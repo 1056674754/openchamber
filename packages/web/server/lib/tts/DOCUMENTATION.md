@@ -1,14 +1,14 @@
 # TTS Module Documentation
 
 ## Purpose
-This module provides server-side Text-to-Speech services using OpenAI's TTS API. The historical shared text summarization endpoint now lives in `packages/web/server/lib/text/` as an API-compatible stub because the previous Zen model provider is unavailable.
+This module provides server-side Text-to-Speech services using OpenAI's TTS API. The shared text summarization endpoint lives in `packages/web/server/lib/text/` and is backed by the Small Model runtime (see `../small-model/DOCUMENTATION.md`); it falls back to mode-specific local distillation when the text is short or the model is unavailable.
 
 ## Entrypoints and structure
 - `packages/web/server/lib/tts/index.js`: Public entrypoint imported by `packages/web/server/index.js`.
 - `packages/web/server/lib/tts/routes.js`: Express route registration for `/api/voice/*`, `/api/tts/*`, and `/api/stt/*` endpoints.
 - `packages/web/server/lib/tts/capability-runtime.js`: runtime helper for probing local macOS `say` TTS voice capability.
 - `packages/web/server/lib/tts/service.js`: TTS service implementation with OpenAI integration.
-- `packages/web/server/lib/text/summarization.js`: Shared text summarization stub, session-title fallback, and sanitization utilities. It performs no external Zen calls.
+- `packages/web/server/lib/text/summarization.js`: Shared text summarizer (Small Model backed, with mode-specific local fallback), session-title candidates, and sanitization utilities.
 - `packages/web/server/lib/tts/stt.js`: STT proxy for OpenAI-compatible transcription endpoints.
 - `packages/web/server/lib/tts/base-url.js`: shared base URL validation and normalization for custom OpenAI-compatible endpoints.
 
@@ -20,7 +20,7 @@ This module provides server-side Text-to-Speech services using OpenAI's TTS API.
 - `TTS_VOICES`: Array of supported OpenAI voice identifiers.
 
 ### Shared text summarization (re-exported from ../text/summarization.js)
-- `summarizeText({ text, threshold, maxLength, zenModel, mode })`: Retired shared text summarizer retained as a stub. TTS uses `mode: 'tts'`; `zenModel` is ignored.
+- `summarizeText({ text, threshold, maxLength, mode, directory, preferredProviderID, preferredModelID })`: Summarizes long text via the Small Model runtime; returns mode-specific local fallback when the text is under threshold or if the model call fails. TTS uses `mode: 'tts'`.
 - `sanitizeForTTS(text)`: Sanitizes text by removing markdown, URLs, file paths, and other non-speakable content.
 - `sanitizeForNote(text)`: Re-exported for note-mode callers that still import through the TTS surface.
 
@@ -62,7 +62,7 @@ Generates speech and returns as Buffer for caching purposes.
 ### `summarizeText`
 Returns object with:
 - `summary`: Sanitized or locally distilled fallback text.
-- `summarized`: Always `false` while the model provider is unavailable.
+- `summarized`: `true` when the Small Model produced the summary; `false` for under-threshold text or local fallback.
 - `reason`: String explaining why summarization was skipped.
 - `originalLength`: Optional number for original text length.
 - `summaryLength`: Optional number for summarized text length.

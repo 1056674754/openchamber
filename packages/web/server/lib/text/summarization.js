@@ -137,25 +137,77 @@ function fallbackByMode(text, maxLength, mode) {
   return sanitizeByMode(text, mode);
 }
 
-export async function summarizeText({ text, threshold = 200, maxLength = 500, zenModel, mode = 'tts' }) {
-  void zenModel;
+const SUMMARIZE_MODE_PROMPTS = {
+  tts: 'You condense text for text-to-speech playback. Return concise, speakable prose — no markdown, no code, no symbols. Preserve the original meaning and language.',
+  notification: 'You condense text into a single short notification line. Return plain text only.',
+  note: 'You distill text into a brief project note. Return plain text only.',
+  topic: 'You distill text into a short kebab-case topic slug suitable for a directory name. Return only the slug, no quotes.',
+};
 
-  const summary = fallbackByMode(text || '', maxLength, mode);
+export async function summarizeText({
+  text,
+  threshold = 200,
+  maxLength = 500,
+  mode = 'tts',
+  directory,
+  preferredProviderID,
+  preferredModelID,
+  generateText = generateSmallModelText,
+}) {
+  const fallback = fallbackByMode(text || '', maxLength, mode);
   if (!text || text.length <= threshold) {
     return {
-      summary,
+      summary: fallback,
       summarized: false,
       reason: text ? 'Text under threshold' : 'No text provided',
     };
   }
 
-  return {
-    summary,
-    summarized: false,
-    reason: 'Model summarization provider unavailable',
-    originalLength: text.length,
-    summaryLength: summary.length,
-  };
+  const systemPrompt = SUMMARIZE_MODE_PROMPTS[mode] || SUMMARIZE_MODE_PROMPTS.tts;
+  try {
+    const result = await generateText({
+      prompt: text.trim(),
+      system: `${systemPrompt} Keep it under ${maxLength} characters.`,
+      maxOutputTokens: 256,
+      directory: typeof directory === 'string' && directory.trim() ? directory.trim() : undefined,
+      preferredProviderID: typeof preferredProviderID === 'string' && preferredProviderID.trim()
+        ? preferredProviderID.trim()
+        : undefined,
+      preferredModelID: typeof preferredModelID === 'string' && preferredModelID.trim()
+        ? preferredModelID.trim()
+        : undefined,
+      restrictToPreferredProvider: true,
+    });
+    const raw = (result?.text || '').trim();
+    const summary = raw ? raw.slice(0, maxLength).trim() : '';
+    if (!summary) {
+      return {
+        summary: fallback,
+        summarized: false,
+        reason: 'Small model returned empty',
+        originalLength: text.length,
+        summaryLength: fallback.length,
+      };
+    }
+    return {
+      summary,
+      summarized: true,
+      providerID: result?.providerID,
+      modelID: result?.modelID,
+      source: result?.source,
+      originalLength: text.length,
+      summaryLength: summary.length,
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      summary: fallback,
+      summarized: false,
+      reason: message || 'Small model unavailable',
+      originalLength: text.length,
+      summaryLength: fallback.length,
+    };
+  }
 }
 
 const DEFAULT_SESSION_TITLE_COUNT = 3;

@@ -79,8 +79,9 @@ module is imported on first request, not at server startup.
   `preferredProviderID` / `preferredModelID` and set
   `restrictToPreferredProvider: true` so conversation content never silently
   switches to another subscription via the global auth scan.
-- This batch ships capability + settings + Notes selection summarization.
-  Session assist / Goals / git generation remain separate Work Items.
+- This batch ships capability + settings + Notes selection summarization, and
+  backs `summarizeText` (TTS/notification/note/topic). Session assist / git
+  generation remain separate Work Items.
 
 ## Known limitations
 
