@@ -196,12 +196,27 @@ export const encodePairingConnectionPayload = (payload: PairingConnectionPayload
   return `openchamber://connect?${params.toString()}`;
 };
 
+/**
+ * True when `url` is an `openchamber://connect…` pairing link.
+ *
+ * Desktop Chromium / Node put `connect` in `hostname`. Some Android WebViews
+ * (observed on Huawei) leave `hostname` empty and put `//connect` in
+ * `pathname` instead — rejecting those made every successful QR scan look
+ * like an invalid pairing link.
+ */
+export const isPairingConnectUrl = (url: URL): boolean => {
+  if (url.protocol !== 'openchamber:') return false;
+  if (url.hostname === 'connect' || url.host === 'connect') return true;
+  const pathHead = url.pathname.replace(/^\/+/, '').split('/')[0] ?? '';
+  return pathHead === 'connect';
+};
+
 export const parsePairingConnectionPayload = (value: string): PairingConnectionPayload | null => {
   const trimmed = value.trim();
   if (!trimmed || trimmed.length > MAX_PAIRING_PAYLOAD_LENGTH) return null;
   try {
     const url = new URL(trimmed);
-    if (url.protocol !== 'openchamber:' || url.hostname !== 'connect') return null;
+    if (!isPairingConnectUrl(url)) return null;
     if (url.searchParams.get('v') !== '2') return null;
     const encoded = url.searchParams.get('p') || '';
     if (!encoded || encoded.length > MAX_PAIRING_PAYLOAD_LENGTH) return null;

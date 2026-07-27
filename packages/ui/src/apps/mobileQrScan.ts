@@ -5,10 +5,11 @@
 // redeemed server-side over whichever candidate connects first. We also accept a
 // bare http(s) URL so a QR encoding only the server address works.
 //
-// QR scanning is delegated to a Capacitor barcode-scanner plugin if the native
-// shell registered one (`window.Capacitor.Plugins.BarcodeScanner`). We resolve it
-// at runtime instead of importing the package so the web build stays dependency-free
-// and the browser-hosted mobile UI degrades to `unsupported` cleanly.
+// Scan strategy (in order):
+// 1. Capawesome startScan (CameraX behind WebView). Patched to emit on the first
+//    ML Kit decode (upstream default is 10 consistent votes).
+// 2. Web BarcodeDetector + getUserMedia when Capawesome is unavailable.
+// 3. Capawesome scan() Google Code Scanner — often unavailable without GMS module.
 
 import { parsePairingConnectionPayload, type PairingConnectionPayload } from '@/lib/connectionPayload';
 
@@ -33,74 +34,39 @@ export type QrScanResult =
 
 type ScannedBarcode = { rawValue?: string; displayValue?: string };
 
-type ModuleInstallProgress = { state?: number };
-type ListenerHandle = { remove: () => void };
+type ListenerHandle = { remove: () => void | Promise<void> };
 
 type BarcodeScannerPlugin = {
   requestPermissions?: () => Promise<{ camera?: string } | undefined>;
+  startScan?: (options?: {
+    formats?: string[];
+    lensFacing?: 'BACK' | 'FRONT';
+    /** Capawesome Resolution enum: 0=640x480, 1=1280x720, 2=1920x1080, 3=3840x2160 */
+    resolution?: number;
+  }) => Promise<void>;
+  stopScan?: () => Promise<void>;
+  setZoomRatio?: (options: { zoomRatio: number }) => Promise<void>;
+  getMaxZoomRatio?: () => Promise<{ zoomRatio?: number } | undefined>;
+  getMinZoomRatio?: () => Promise<{ zoomRatio?: number } | undefined>;
   scan?: (options?: { formats?: string[] }) => Promise<{ barcodes?: ScannedBarcode[] } | undefined>;
-  // Android-only: the Google code scanner used by scan() needs the ML Kit barcode module,
-  // which Play Services must download once before the first scan. Absent on iOS.
-  isGoogleBarcodeScannerModuleAvailable?: () => Promise<{ available?: boolean } | undefined>;
-  installGoogleBarcodeScannerModule?: () => Promise<void>;
+  isSupported?: () => Promise<{ supported?: boolean } | undefined>;
   addListener?: (
-    event: 'googleBarcodeScannerModuleInstallProgress',
-    cb: (info: ModuleInstallProgress) => void,
-  ) => Promise<ListenerHandle>;
+    event: 'barcodeScanned' | 'barcodesScanned' | 'scanError',
+    cb: (info: { barcode?: ScannedBarcode; barcodes?: ScannedBarcode[]; message?: string }) => void,
+  ) => Promise<ListenerHandle> | ListenerHandle;
 };
 
-// Google's ModuleInstallProgress states: 4 = COMPLETED, 3 = CANCELED, 5 = FAILED.
-const MODULE_STATE_COMPLETED = 4;
-const MODULE_STATE_CANCELED = 3;
-const MODULE_STATE_FAILED = 5;
-const MODULE_INSTALL_TIMEOUT_MS = 90_000;
-
-// Ensure the Android Google barcode module is downloaded before scanning. No-op on platforms
-// where these methods don't exist (iOS) or when it's already available. Resolves once the module
-// is usable; rejects if the install is canceled, fails, or times out.
-const ensureScannerModule = async (plugin: BarcodeScannerPlugin): Promise<void> => {
-  const capacitor = (window as typeof window & { Capacitor?: { getPlatform?: () => string } }).Capacitor;
-  if (
-    capacitor?.getPlatform?.() !== 'android' ||
-    !plugin.isGoogleBarcodeScannerModuleAvailable ||
-    !plugin.installGoogleBarcodeScannerModule
-  ) {
-    return;
-  }
-  const status = await plugin.isGoogleBarcodeScannerModuleAvailable().catch(() => undefined);
-  if (status?.available) return;
-
-  await new Promise<void>((resolve, reject) => {
-    let handle: ListenerHandle | undefined;
-    const finish = (fn: () => void) => {
-      window.clearTimeout(timer);
-      handle?.remove();
-      fn();
-    };
-    const timer = window.setTimeout(
-      () => finish(() => reject(new Error('module install timed out'))),
-      MODULE_INSTALL_TIMEOUT_MS,
-    );
-    // addListener may return a handle synchronously OR a Promise<handle> depending on the
-    // Capacitor proxy — normalize with Promise.resolve so a non-thenable handle doesn't throw
-    // and abort the install call below.
-    Promise.resolve(
-      plugin.addListener?.('googleBarcodeScannerModuleInstallProgress', (info) => {
-        if (info?.state === MODULE_STATE_COMPLETED) finish(resolve);
-        else if (info?.state === MODULE_STATE_CANCELED || info?.state === MODULE_STATE_FAILED) {
-          finish(() => reject(new Error('module install failed')));
-        }
-      }),
-    )
-      .then((h) => {
-        handle = h as ListenerHandle | undefined;
-      })
-      .catch(() => undefined);
-    Promise.resolve(plugin.installGoogleBarcodeScannerModule?.()).catch((error) =>
-      finish(() => reject(error instanceof Error ? error : new Error('module install failed'))),
-    );
-  });
+type BarcodeDetectorLike = {
+  detect: (source: ImageBitmapSource) => Promise<Array<{ rawValue?: string }>>;
 };
+
+type BarcodeDetectorCtor = new (options?: { formats?: string[] }) => BarcodeDetectorLike;
+
+const SCANNER_ACTIVE_CLASS = 'barcode-scanner-active';
+const SCAN_VIDEO_ID = 'oc-barcode-scan-video';
+
+/** Set while a scan is waiting for a barcode / cancel. */
+let activeScanCancel: (() => void) | null = null;
 
 const getScannerPlugin = (): BarcodeScannerPlugin | null => {
   if (typeof window === 'undefined') return null;
@@ -108,7 +74,15 @@ const getScannerPlugin = (): BarcodeScannerPlugin | null => {
     Capacitor?: { Plugins?: Record<string, unknown> };
   }).Capacitor;
   const plugin = capacitor?.Plugins?.BarcodeScanner as BarcodeScannerPlugin | undefined;
-  return plugin && typeof plugin.scan === 'function' ? plugin : null;
+  if (!plugin) return null;
+  if (typeof plugin.startScan === 'function' || typeof plugin.scan === 'function') return plugin;
+  return null;
+};
+
+const getBarcodeDetectorCtor = (): BarcodeDetectorCtor | null => {
+  if (typeof window === 'undefined') return null;
+  const ctor = (window as typeof window & { BarcodeDetector?: BarcodeDetectorCtor }).BarcodeDetector;
+  return typeof ctor === 'function' ? ctor : null;
 };
 
 export const parseConnectionPayload = (raw: string): MobileConnectionPayload | MobilePairingPayload | null => {
@@ -124,25 +98,277 @@ export const parseConnectionPayload = (raw: string): MobileConnectionPayload | M
   return null;
 };
 
-// The Google code scanner can briefly still throw "module not available" in the moments right
-// after its install completes. Detect that specific error so we can re-ensure + retry rather
-// than surfacing a failure the user would have to manually tap through.
-const isModuleUnavailableError = (error: unknown): boolean => {
-  const message =
-    typeof error === 'object' && error && 'message' in error
-      ? String((error as { message?: unknown }).message ?? '')
-      : String(error ?? '');
-  return /module/i.test(message) && /not\s*available|unavailable/i.test(message);
+const logScan = (event: string, detail: Record<string, unknown>): void => {
+  // Visible in `adb logcat` via Chromium console (Console / chromium).
+  console.info(`[oc-qr-scan] ${event}`, JSON.stringify(detail));
 };
 
-export const isQrScanSupported = (): boolean => getScannerPlugin() !== null;
+const payloadFromRaw = (raw: string): QrScanResult => {
+  const trimmed = raw.trim();
+  if (!trimmed) return { status: 'cancelled' };
+  const payload = parseConnectionPayload(trimmed);
+  if (!payload) {
+    logScan('invalid', {
+      rawLen: trimmed.length,
+      prefix: trimmed.slice(0, 120),
+      suffix: trimmed.slice(-40),
+    });
+    return { status: 'invalid' };
+  }
+  if ('pairing' in payload) {
+    logScan('ok-pairing', {
+      rawLen: trimmed.length,
+      pairingId: payload.pairing.pairingId,
+      candidates: payload.pairing.candidates.map((c) => c.type),
+      expiresAt: payload.pairing.expiresAt ?? null,
+    });
+    return { status: 'pairing', ...payload };
+  }
+  logScan('ok-url', { rawLen: trimmed.length, url: payload.url });
+  return { status: 'ok', ...payload };
+};
+
+const setScannerUiActive = (active: boolean): void => {
+  if (typeof document === 'undefined') return;
+  document.documentElement.classList.toggle(SCANNER_ACTIVE_CLASS, active);
+  document.body.classList.toggle(SCANNER_ACTIVE_CLASS, active);
+};
+
+const removeListener = async (handle: ListenerHandle | undefined): Promise<void> => {
+  if (!handle) return;
+  try {
+    await handle.remove();
+  } catch {
+    // ignore
+  }
+};
+
+const ensureScanVideo = (): HTMLVideoElement => {
+  let video = document.getElementById(SCAN_VIDEO_ID) as HTMLVideoElement | null;
+  if (!video) {
+    video = document.createElement('video');
+    video.id = SCAN_VIDEO_ID;
+    video.className = 'barcode-scanner-video';
+    video.setAttribute('playsinline', 'true');
+    video.setAttribute('muted', 'true');
+    video.muted = true;
+    video.playsInline = true;
+    video.autoplay = true;
+    document.body.appendChild(video);
+  }
+  return video;
+};
+
+const removeScanVideo = (): void => {
+  const video = document.getElementById(SCAN_VIDEO_ID) as HTMLVideoElement | null;
+  if (!video) return;
+  try {
+    const stream = video.srcObject as MediaStream | null;
+    stream?.getTracks().forEach((track) => track.stop());
+  } catch {
+    // ignore
+  }
+  video.srcObject = null;
+  video.remove();
+};
+
+/**
+ * Chromium BarcodeDetector path — decode on the first successful frame.
+ * Matches the "easy scan" feel of system / WeChat scanners.
+ */
+const scanWithBarcodeDetector = async (Detector: BarcodeDetectorCtor): Promise<QrScanResult> => {
+  setScannerUiActive(true);
+  let settled = false;
+  let rafId = 0;
+  let stream: MediaStream | null = null;
+  const video = ensureScanVideo();
+
+  const cleanup = () => {
+    activeScanCancel = null;
+    if (rafId) cancelAnimationFrame(rafId);
+    rafId = 0;
+    try {
+      stream?.getTracks().forEach((track) => track.stop());
+    } catch {
+      // ignore
+    }
+    stream = null;
+    removeScanVideo();
+    setScannerUiActive(false);
+  };
+
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      audio: false,
+      video: {
+        facingMode: { ideal: 'environment' },
+        width: { ideal: 1920 },
+        height: { ideal: 1080 },
+      },
+    });
+  } catch (err) {
+    cleanup();
+    const name = err instanceof DOMException ? err.name : '';
+    if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
+      return { status: 'permission-denied' };
+    }
+    return { status: 'failed' };
+  }
+
+  video.srcObject = stream;
+  try {
+    await video.play();
+  } catch {
+    cleanup();
+    return { status: 'failed' };
+  }
+
+  const detector = new Detector({ formats: ['qr_code'] });
+
+  return await new Promise<QrScanResult>((resolve) => {
+    const finish = (value: QrScanResult) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve(value);
+    };
+
+    activeScanCancel = () => finish({ status: 'cancelled' });
+
+    let detecting = false;
+    const tick = () => {
+      if (settled) return;
+      rafId = requestAnimationFrame(() => {
+        void (async () => {
+          if (settled) return;
+          if (!detecting && video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
+            detecting = true;
+            try {
+              const codes = await detector.detect(video);
+              const raw = (codes[0]?.rawValue ?? '').trim();
+              if (raw) {
+                finish(payloadFromRaw(raw));
+                return;
+              }
+            } catch {
+              // Transient detect errors — keep trying until cancel.
+            } finally {
+              detecting = false;
+            }
+          }
+          if (!settled) tick();
+        })();
+      });
+    };
+    tick();
+  });
+};
+
+/**
+ * Capawesome camera-behind-WebView path (patched to emit on first decode).
+ */
+const scanWithCameraPreview = async (plugin: BarcodeScannerPlugin): Promise<QrScanResult> => {
+  if (!plugin.startScan || !plugin.addListener) return { status: 'unsupported' };
+
+  setScannerUiActive(true);
+  let settled = false;
+  let barcodeHandle: ListenerHandle | undefined;
+  let barcodesHandle: ListenerHandle | undefined;
+  let errorHandle: ListenerHandle | undefined;
+
+  const cleanup = async () => {
+    activeScanCancel = null;
+    setScannerUiActive(false);
+    await removeListener(barcodeHandle);
+    await removeListener(barcodesHandle);
+    await removeListener(errorHandle);
+    await plugin.stopScan?.().catch(() => undefined);
+  };
+
+  try {
+    const result = await new Promise<QrScanResult>((resolve, reject) => {
+      const finish = (value: QrScanResult) => {
+        if (settled) return;
+        settled = true;
+        resolve(value);
+      };
+
+      const onRaw = (raw: string) => {
+        finish(payloadFromRaw(raw));
+      };
+
+      activeScanCancel = () => finish({ status: 'cancelled' });
+
+      void (async () => {
+        try {
+          barcodeHandle = await Promise.resolve(
+            plugin.addListener!('barcodeScanned', (event) => {
+              const raw = (event?.barcode?.rawValue ?? event?.barcode?.displayValue ?? '').trim();
+              logScan('native-barcode', { rawLen: raw.length, prefix: raw.slice(0, 120) });
+              if (raw) onRaw(raw);
+            }),
+          );
+          barcodesHandle = await Promise.resolve(
+            plugin.addListener!('barcodesScanned', (event) => {
+              const first = event?.barcodes?.[0];
+              const raw = (first?.rawValue ?? first?.displayValue ?? '').trim();
+              if (raw) onRaw(raw);
+            }),
+          ).catch(() => undefined);
+          errorHandle = await Promise.resolve(
+            plugin.addListener!('scanError', () => {
+              finish({ status: 'failed' });
+            }),
+          ).catch(() => undefined);
+
+          await plugin.startScan!({
+            formats: ['QR_CODE'],
+            lensFacing: 'BACK',
+          });
+        } catch {
+          finish({ status: 'failed' });
+        }
+      })().catch(reject);
+    });
+
+    await cleanup();
+    return result;
+  } catch {
+    await cleanup();
+    return { status: 'failed' };
+  }
+};
+
+/** Stop an in-progress scan (e.g. user tapped Cancel). */
+export const cancelActiveQrScan = async (): Promise<void> => {
+  const cancel = activeScanCancel;
+  if (cancel) {
+    cancel();
+    return;
+  }
+  removeScanVideo();
+  setScannerUiActive(false);
+  await getScannerPlugin()?.stopScan?.().catch(() => undefined);
+};
+
+export const isQrScanSupported = (): boolean => getBarcodeDetectorCtor() !== null || getScannerPlugin() !== null;
+
+const isCapacitorNative = (): boolean => {
+  if (typeof window === 'undefined') return false;
+  const capacitor = (window as typeof window & {
+    Capacitor?: { isNativePlatform?: () => boolean };
+  }).Capacitor;
+  return capacitor?.isNativePlatform?.() === true;
+};
 
 export const scanConnectionQr = async (): Promise<QrScanResult> => {
   const plugin = getScannerPlugin();
-  if (!plugin?.scan) return { status: 'unsupported' };
+  const Detector = getBarcodeDetectorCtor();
+
+  if (!plugin && !Detector) return { status: 'unsupported' };
 
   try {
-    if (plugin.requestPermissions) {
+    if (plugin?.requestPermissions) {
       const permission = await plugin.requestPermissions();
       const camera = permission?.camera;
       if (camera && camera !== 'granted' && camera !== 'limited') {
@@ -150,29 +376,35 @@ export const scanConnectionQr = async (): Promise<QrScanResult> => {
       }
     }
 
-    // First scan on Android downloads the Google barcode module (the button stays in its
-    // scanning state for the whole wait). The module can still report "not available" for a
-    // moment right after install, so re-ensure + retry within this same call instead of erroring
-    // out — the user shouldn't have to guess to tap again.
-    for (let attempt = 0; attempt < 3; attempt++) {
-      try {
-        await ensureScannerModule(plugin);
-        const result = await plugin.scan({ formats: ['QR_CODE'] });
-        const barcode = result?.barcodes?.[0];
-        const raw = (barcode?.rawValue ?? barcode?.displayValue ?? '').trim();
-        if (!raw) return { status: 'cancelled' };
-
-        const payload = parseConnectionPayload(raw);
-        if (!payload) return { status: 'invalid' };
-        if ('pairing' in payload) return { status: 'pairing', ...payload };
-        return { status: 'ok', ...payload };
-      } catch (error) {
-        if (!isModuleUnavailableError(error) || attempt === 2) return { status: 'failed' };
-        await new Promise((resolve) => window.setTimeout(resolve, 600));
-      }
+    if (plugin?.isSupported) {
+      const support = await plugin.isSupported().catch(() => undefined);
+      if (support && support.supported === false && !Detector) return { status: 'unsupported' };
     }
-    return { status: 'failed' };
+
+    // Native Capacitor: Capawesome CameraX first (real preview + patched first-decode).
+    if (plugin && typeof plugin.startScan === 'function') {
+      return await scanWithCameraPreview(plugin);
+    }
+
+    // Browser / fallback only — skip on native when Capawesome exists (handled above).
+    if (Detector && !isCapacitorNative()) {
+      return await scanWithBarcodeDetector(Detector);
+    }
+
+    if (Detector) {
+      // Capawesome missing but native — last resort (may be black frames on Huawei).
+      return await scanWithBarcodeDetector(Detector);
+    }
+
+    if (!plugin || typeof plugin.scan !== 'function') return { status: 'unsupported' };
+    const result = await plugin.scan({ formats: ['QR_CODE'] });
+    const barcode = result?.barcodes?.[0];
+    const raw = (barcode?.rawValue ?? barcode?.displayValue ?? '').trim();
+    return payloadFromRaw(raw);
   } catch {
+    removeScanVideo();
+    setScannerUiActive(false);
+    await plugin?.stopScan?.().catch(() => undefined);
     return { status: 'failed' };
   }
 };

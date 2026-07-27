@@ -3,6 +3,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   buildPairingConnectionPayload,
   encodePairingConnectionPayload,
+  isPairingConnectUrl,
   parsePairingConnectionPayload,
 } from './connectionPayload';
 
@@ -101,5 +102,32 @@ describe('connection payload helpers', () => {
       candidates: [{ type: 'lan', url: 'http://runtime.example' }],
     })).toString('base64url');
     expect(parsePairingConnectionPayload(`openchamber://connect?v=2&p=${expired}`)).toBeNull();
+  });
+
+  test('isPairingConnectUrl tolerates Android WebView hostname/pathname split', () => {
+    expect(isPairingConnectUrl(new URL('openchamber://connect?v=2&p=x'))).toBe(true);
+    // Authority-less / empty-host forms used by some Android WebViews.
+    expect(isPairingConnectUrl(new URL('openchamber:/connect?v=2&p=x'))).toBe(true);
+    expect(isPairingConnectUrl(new URL('openchamber:///connect?v=2&p=x'))).toBe(true);
+    // Huawei Capawesome path observed in the field: hostname "", pathname "//connect".
+    const huawei = new URL('openchamber://connect?v=2&p=x');
+    Object.defineProperty(huawei, 'hostname', { value: '' });
+    Object.defineProperty(huawei, 'host', { value: '' });
+    Object.defineProperty(huawei, 'pathname', { value: '//connect' });
+    expect(isPairingConnectUrl(huawei)).toBe(true);
+    expect(isPairingConnectUrl(new URL('openchamber://session/abc'))).toBe(false);
+  });
+
+  test('parses pairing links when the host is only in the pathname', () => {
+    const payload = buildPairingConnectionPayload({
+      pairingId: 'pair_android',
+      secret: 'one-time',
+      expiresAt: '2099-01-01T00:00:00.000Z',
+      candidates: [{ type: 'lan', url: 'http://192.168.1.20:4096' }],
+    });
+    const encoded = encodePairingConnectionPayload(payload);
+    const p = new URL(encoded).searchParams.get('p');
+    expect(parsePairingConnectionPayload(`openchamber:/connect?v=2&p=${p}`)?.pairingId).toBe('pair_android');
+    expect(parsePairingConnectionPayload(`openchamber:///connect?v=2&p=${p}`)?.pairingId).toBe('pair_android');
   });
 });

@@ -746,3 +746,77 @@
   transform: none !important;
   background: var(--background);
 }
+
+/*
+ * QR scan UI (Capawesome startScan = camera behind WebView).
+ * Hide page chrome; keep the scan modal visible. Avoid body{visibility:hidden}
+ * — it breaks <video> compositing on Huawei WebView for the fallback path.
+ */
+html.barcode-scanner-active,
+html.barcode-scanner-active body,
+:root.capacitor.barcode-scanner-active,
+:root.capacitor.barcode-scanner-active body {
+  background: transparent !important;
+}
+
+body.barcode-scanner-active #root {
+  visibility: hidden !important;
+}
+
+body.barcode-scanner-active .barcode-scanner-modal,
+body.barcode-scanner-active .barcode-scanner-video {
+  visibility: visible !important;
+}
+
+.barcode-scanner-video {
+  position: fixed;
+  inset: 0;
+  z-index: 9998;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  background: #000;
+}
+
+.barcode-scanner-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  padding: 1rem 1rem calc(1rem + env(safe-area-inset-bottom, 0px));
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  background: transparent;
+  pointer-events: none;
+}
+
+.barcode-scanner-modal > * {
+  pointer-events: auto;
+}
+
+.barcode-scanner-frame {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: min(72vw, 18rem);
+  height: min(72vw, 18rem);
+  transform: translate(-50%, -54%);
+  border: 2px solid rgba(255, 255, 255, 0.85);
+  border-radius: 0.75rem;
+  /* Keep the center fully clear so the native camera layer shows through. */
+  background: transparent;
+  box-shadow: none;
+  pointer-events: none;
+}
+
+.barcode-scanner-hint {
+  color: #fff;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.65);
+  background: rgba(0, 0, 0, 0.45);
+  padding: 0.4rem 0.75rem;
+  border-radius: 9999px;
+  text-align: center;
+  max-width: 20rem;
+}

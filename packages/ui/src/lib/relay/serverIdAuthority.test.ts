@@ -21,8 +21,9 @@ describe('serverIdAuthority', () => {
     expect(isReservedLocalServerId(generated)).toBe(false);
   });
 
-  test('describePairingTransport summarizes candidates', () => {
-    expect(describePairingTransport([{ type: 'lan' }, { type: 'relay' }]).label).toBe('LAN+Relay');
+  test('describePairingTransport summarizes candidates as i18n keys', () => {
+    expect(describePairingTransport([{ type: 'lan' }, { type: 'relay' }]).messageKey).toBe('mobile.transport.lanRelay');
     expect(describePairingTransport([{ type: 'relay' }], 'relay').kind).toBe('relay');
+    expect(describePairingTransport([{ type: 'relay' }], 'relay').messageKey).toBe('mobile.transport.relay');
   });
 });

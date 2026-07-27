@@ -49,16 +49,23 @@ export type PairingTransportKind = 'lan' | 'tunnel' | 'relay';
 export const describePairingTransport = (
   candidates: Array<{ type?: string }> | null | undefined,
   activeType?: string | null,
-): { kind: PairingTransportKind | 'unknown'; label: string } => {
+): { kind: PairingTransportKind | 'unknown'; messageKey: `mobile.transport.${'lan' | 'relay' | 'tunnel' | 'lanRelay' | 'unknown'}` } => {
   if (activeType === 'relay' || activeType === 'lan' || activeType === 'tunnel') {
-    return { kind: activeType, label: activeType === 'relay' ? 'Relay' : activeType === 'tunnel' ? 'Tunnel' : 'LAN' };
+    return {
+      kind: activeType,
+      messageKey: activeType === 'relay'
+        ? 'mobile.transport.relay'
+        : activeType === 'tunnel'
+          ? 'mobile.transport.tunnel'
+          : 'mobile.transport.lan',
+    };
   }
   const types = new Set((candidates || []).map((c) => c.type).filter(Boolean));
   if (types.has('relay') && (types.has('lan') || types.has('tunnel'))) {
-    return { kind: 'lan', label: 'LAN+Relay' };
+    return { kind: 'lan', messageKey: 'mobile.transport.lanRelay' };
   }
-  if (types.has('relay')) return { kind: 'relay', label: 'Relay' };
-  if (types.has('tunnel')) return { kind: 'tunnel', label: 'Tunnel' };
-  if (types.has('lan')) return { kind: 'lan', label: 'LAN' };
-  return { kind: 'unknown', label: 'Unknown' };
+  if (types.has('relay')) return { kind: 'relay', messageKey: 'mobile.transport.relay' };
+  if (types.has('tunnel')) return { kind: 'tunnel', messageKey: 'mobile.transport.tunnel' };
+  if (types.has('lan')) return { kind: 'lan', messageKey: 'mobile.transport.lan' };
+  return { kind: 'unknown', messageKey: 'mobile.transport.unknown' };
 };

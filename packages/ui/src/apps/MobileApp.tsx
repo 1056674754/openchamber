@@ -12,17 +12,22 @@ import { markAppBootReady } from '@/apps/appBootReady';
 import {
   autoConnectLastInstance,
   connectionDisplayUrl,
+  failureReasonMessageKey,
+  getAutoConnectTargetLabel,
   isActiveRuntimeConnection,
+  mobileTransportCapability,
   useMobileConnection,
+  type MobileConnectPhase,
   type MobileSavedConnection,
+  type MobileTransportCapability,
 } from '@/apps/mobileConnections';
-import { scanConnectionQr } from '@/apps/mobileQrScan';
+import { cancelActiveQrScan, scanConnectionQr } from '@/apps/mobileQrScan';
 import { parsePairingConnectionPayload } from '@/lib/connectionPayload';
 import { isCapacitorApp } from '@/lib/platform';
 import { useCapacitorVoiceResume } from '@/hooks/useCapacitorVoiceResume';
+import { useMobileConnectionResume } from '@/hooks/useMobileConnectionResume';
 import { useNativeMobileChrome } from '@/hooks/useNativeMobileChrome';
-import { useI18n } from '@/lib/i18n';
-import { describePairingTransport } from '@/lib/relay/serverIdAuthority';
+import { useI18n, type I18nKey } from '@/lib/i18n';
 import { isRelayModeActive } from '@/lib/relay/runtime-tunnel';
 import { getRuntimeApiBaseUrl, subscribeRuntimeEndpointChanged, switchRuntimeEndpoint } from '@/lib/runtime-switch';
 
@@ -34,6 +39,50 @@ const disconnectRuntime = (): void => {
   switchRuntimeEndpoint({ apiBaseUrl: '', clientToken: null, runtimeKey: 'mobile-disconnected' });
 };
 
+const transportLabelKey = (capability: MobileTransportCapability): I18nKey => {
+  switch (capability) {
+    case 'relay':
+      return 'mobile.transport.relay';
+    case 'tunnel':
+      return 'mobile.transport.tunnel';
+    case 'lan+relay':
+      return 'mobile.transport.lanRelay';
+    case 'lan':
+      return 'mobile.transport.lan';
+    default:
+      return 'mobile.transport.unknown';
+  }
+};
+
+const phaseMessageKey = (phase: MobileConnectPhase): I18nKey | null => {
+  switch (phase) {
+    case 'auto-connecting':
+      return 'mobile.connect.phase.autoConnecting';
+    case 'scanning':
+      return 'mobile.connect.phase.scanning';
+    case 'establishing':
+      return 'mobile.connect.phase.establishing';
+    case 'redeeming':
+      return 'mobile.connect.phase.redeeming';
+    case 'authenticating':
+      return 'mobile.connect.phase.authenticating';
+    default:
+      return null;
+  }
+};
+
+const formatLastUsed = (timestamp: number, t: (key: I18nKey, vars?: Record<string, string | number>) => string): string => {
+  const deltaMs = Date.now() - timestamp;
+  if (!Number.isFinite(deltaMs) || deltaMs < 0) return t('mobile.instances.lastUsedUnknown');
+  const minutes = Math.floor(deltaMs / 60_000);
+  if (minutes < 1) return t('mobile.instances.lastUsedJustNow');
+  if (minutes < 60) return t('mobile.instances.lastUsedMinutes', { count: minutes });
+  const hours = Math.floor(minutes / 60);
+  if (hours < 48) return t('mobile.instances.lastUsedHours', { count: hours });
+  const days = Math.floor(hours / 24);
+  return t('mobile.instances.lastUsedDays', { count: days });
+};
+
 export const MobileApp: React.FC<MobileAppProps> = ({ apis }) => {
   useNativeMobileChrome();
   useCapacitorVoiceResume();
@@ -41,8 +90,10 @@ export const MobileApp: React.FC<MobileAppProps> = ({ apis }) => {
   const [url, setUrl] = React.useState('');
   const [password, setPassword] = React.useState('');
   const [scanBusy, setScanBusy] = React.useState(false);
+  const [manualOpen, setManualOpen] = React.useState(false);
   const [runtimeUrl, setRuntimeUrl] = React.useState(() => getRuntimeApiBaseUrl());
   const [autoConnectTried, setAutoConnectTried] = React.useState(false);
+  const [autoConnectLabel, setAutoConnectLabel] = React.useState<string | null>(null);
 
   const onConnected = React.useCallback(() => {
     setRuntimeUrl(getRuntimeApiBaseUrl());
@@ -50,6 +101,23 @@ export const MobileApp: React.FC<MobileAppProps> = ({ apis }) => {
   }, []);
 
   const conn = useMobileConnection(onConnected);
+  const setPhaseRef = React.useRef(conn.setPhase);
+  const setFailureRef = React.useRef(conn.setFailure);
+  const redeemRef = React.useRef(conn.redeemPairingConnection);
+  setPhaseRef.current = conn.setPhase;
+  setFailureRef.current = conn.setFailure;
+  redeemRef.current = conn.redeemPairingConnection;
+
+  useMobileConnectionResume({
+    enabled: Boolean(runtimeUrl),
+    onOutcome: (outcome) => {
+      if (outcome === 'unreachable' || outcome === 'no-connection') {
+        disconnectRuntime();
+        setRuntimeUrl('');
+        setFailureRef.current('unreachable');
+      }
+    },
+  });
 
   React.useEffect(() => {
     markAppBootReady();
@@ -61,9 +129,28 @@ export const MobileApp: React.FC<MobileAppProps> = ({ apis }) => {
   React.useEffect(() => {
     if (autoConnectTried || runtimeUrl) return;
     setAutoConnectTried(true);
+    const label = getAutoConnectTargetLabel();
+    if (!label) {
+      markAppBootReady();
+      return;
+    }
+    setAutoConnectLabel(label);
+    setPhaseRef.current('auto-connecting');
     void autoConnectLastInstance().then((ok) => {
-      if (ok) setRuntimeUrl(getRuntimeApiBaseUrl());
-    }).catch(() => undefined);
+      if (ok) {
+        setRuntimeUrl(getRuntimeApiBaseUrl());
+        setPhaseRef.current('connected');
+      } else {
+        setPhaseRef.current('idle');
+        setFailureRef.current('unreachable');
+      }
+    }).catch(() => {
+      setPhaseRef.current('idle');
+      setFailureRef.current('unreachable');
+    }).finally(() => {
+      setAutoConnectLabel(null);
+      markAppBootReady();
+    });
   }, [autoConnectTried, runtimeUrl]);
 
   React.useEffect(() => {
@@ -72,8 +159,11 @@ export const MobileApp: React.FC<MobileAppProps> = ({ apis }) => {
     const handleUrl = (raw: string | undefined) => {
       if (!raw || cancelled) return;
       const payload = parsePairingConnectionPayload(raw);
-      if (!payload) return;
-      void conn.redeemPairingConnection(payload).catch(() => undefined);
+      if (!payload) {
+        setFailureRef.current('invalid-payload');
+        return;
+      }
+      void redeemRef.current(payload).catch(() => undefined);
     };
     void CapApp.getLaunchUrl().then((result) => {
       handleUrl(result?.url);
@@ -85,7 +175,7 @@ export const MobileApp: React.FC<MobileAppProps> = ({ apis }) => {
       cancelled = true;
       void sub.then((handle) => handle.remove()).catch(() => undefined);
     };
-  }, [conn]);
+  }, []);
 
   const onSubmit = (event: React.FormEvent) => {
     event.preventDefault();
@@ -101,15 +191,22 @@ export const MobileApp: React.FC<MobileAppProps> = ({ apis }) => {
     void conn.connect({ url });
   };
 
-  const onSelect = (saved: MobileSavedConnection) => {
+  const onSelectSaved = (saved: MobileSavedConnection) => {
     setUrl(connectionDisplayUrl(saved));
     void conn.connect({ id: saved.id, candidates: saved.candidates, label: saved.label });
   };
 
   const onScan = async () => {
     setScanBusy(true);
+    conn.setError(null);
+    conn.setPhase('scanning');
     try {
       const result = await scanConnectionQr();
+      // Dismiss the scan chrome before redeem/connect. Leaving the overlay up
+      // while pairing runs looks like a stuck black viewfinder on top of
+      // "connecting…", and on some devices delaying stopScan/cleanup also
+      // stalls WebSocket work for the relay tunnel.
+      setScanBusy(false);
       if (result.status === 'pairing') {
         await conn.redeemPairingConnection(result.pairing);
         return;
@@ -121,10 +218,33 @@ export const MobileApp: React.FC<MobileAppProps> = ({ apis }) => {
           label: result.label,
           clientToken: result.clientToken,
         });
+        return;
       }
+      if (result.status === 'cancelled') return;
+      if (result.status === 'unsupported') {
+        conn.setError(t('mobile.connect.scanUnsupported'));
+        return;
+      }
+      if (result.status === 'permission-denied') {
+        conn.setError(t('mobile.connect.scanPermissionDenied'));
+        return;
+      }
+      if (result.status === 'invalid') {
+        conn.setError(t('mobile.connect.scanInvalid'));
+        return;
+      }
+      conn.setError(t('mobile.connect.scanFailed'));
     } finally {
       setScanBusy(false);
+      if (conn.phase === 'scanning') conn.setPhase('idle');
     }
+  };
+
+  const onCancelScan = () => {
+    void cancelActiveQrScan().finally(() => {
+      setScanBusy(false);
+      conn.setPhase('idle');
+    });
   };
 
   const onDisconnected = React.useCallback(() => {
@@ -133,6 +253,31 @@ export const MobileApp: React.FC<MobileAppProps> = ({ apis }) => {
     conn.cancelPassword();
     setPassword('');
   }, [conn]);
+
+  const onSelectInstance = React.useCallback(async (saved: MobileSavedConnection) => {
+    const result = await conn.connect({
+      id: saved.id,
+      candidates: saved.candidates,
+      label: saved.label,
+    });
+    if (result.status === 'needs-password') {
+      disconnectRuntime();
+      setRuntimeUrl('');
+      setUrl(connectionDisplayUrl(saved));
+      setManualOpen(true);
+      return { ok: false as const, needsPassword: true as const };
+    }
+    if (result.status === 'connected') {
+      return { ok: true as const };
+    }
+    const error = result.status === 'failed'
+      ? t(failureReasonMessageKey(result.reason))
+      : t('mobile.instances.connectFailed');
+    return { ok: false as const, needsPassword: false as const, error };
+  }, [conn, t]);
+
+  const phaseKey = phaseMessageKey(conn.phase);
+  const showAutoSplash = conn.phase === 'auto-connecting' && Boolean(autoConnectLabel);
 
   if (runtimeUrl) {
     return (
@@ -143,8 +288,11 @@ export const MobileApp: React.FC<MobileAppProps> = ({ apis }) => {
         <MobileInstancesSheet
           connections={conn.connections}
           busy={conn.isBusy}
-          onSelect={(saved) => { void conn.connect({ id: saved.id, candidates: saved.candidates, label: saved.label }); }}
-          onRemove={(saved) => { void conn.removeConnection(saved.id); }}
+          error={conn.error}
+          onSelect={onSelectInstance}
+          onRemove={async (saved) => {
+            await conn.removeConnection(saved.id);
+          }}
           onDisconnected={onDisconnected}
         />
       </div>
@@ -153,65 +301,38 @@ export const MobileApp: React.FC<MobileAppProps> = ({ apis }) => {
 
   return (
     <RuntimeAPIProvider apis={apis}>
+      {scanBusy ? (
+        <div className="barcode-scanner-modal" role="dialog" aria-label={t('mobile.connect.scanning')}>
+          <div className="barcode-scanner-frame" aria-hidden="true" />
+          <p className="barcode-scanner-hint typography-meta">{t('mobile.connect.scanningHint')}</p>
+          <Button type="button" variant="secondary" className="h-11 min-w-[10rem]" onClick={onCancelScan}>
+            {t('mobile.connect.scanCancel')}
+          </Button>
+        </div>
+      ) : null}
       <div className="flex min-h-[100dvh] flex-col bg-background px-3 py-3 text-foreground header-safe-area bottom-safe-area">
-        <div className="mx-auto w-full max-w-md space-y-3">
-          <div className="space-y-0.5">
+        <div className="mx-auto w-full max-w-md space-y-4">
+          <div className="space-y-1">
             <h1 className="typography-ui-header font-semibold tracking-tight">OpenChamber</h1>
             <p className="typography-meta leading-snug text-muted-foreground">
-              {t('mobile.connect.subtitle')}
+              {t('mobile.connect.desktopQrHint')}
             </p>
           </div>
 
-          <Button
-            type="button"
-            size="sm"
-            className="h-9 w-full"
-            disabled={conn.isBusy || scanBusy}
-            onClick={() => { void onScan(); }}
-          >
-            {scanBusy ? t('mobile.connect.connecting') : t('mobile.connect.scanQr')}
-          </Button>
-
-          <p className="typography-meta text-muted-foreground text-center">{t('mobile.connect.orUrl')}</p>
-
-          <form className="space-y-2" onSubmit={onSubmit}>
-            <Input
-              value={url}
-              onChange={(event) => setUrl(event.target.value)}
-              placeholder="http://192.168.1.10:3000"
-              autoCapitalize="none"
-              autoCorrect="off"
-              spellCheck={false}
-              disabled={conn.isBusy}
-              className="h-9 typography-ui-label"
-            />
-            {conn.pendingConnection || password ? (
-              <Input
-                type="password"
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                placeholder={t('mobile.connect.passwordPlaceholder')}
-                disabled={conn.isBusy}
-                autoFocus={Boolean(conn.pendingConnection)}
-                className="h-9 typography-ui-label"
-              />
-            ) : null}
-            {conn.error ? (
-              <p className="typography-meta text-[var(--status-error)]">{conn.error}</p>
-            ) : null}
-            <Button type="submit" size="sm" className="h-9 w-full" disabled={conn.isBusy || !url.trim()}>
-              {conn.isBusy ? t('mobile.connect.connecting') : t('mobile.connect.submit')}
-            </Button>
-          </form>
+          {showAutoSplash ? (
+            <p className="typography-ui-label text-muted-foreground">
+              {t('mobile.connect.connectingTo', { label: autoConnectLabel ?? '' })}
+            </p>
+          ) : null}
 
           {conn.connections.length > 0 ? (
             <div className="space-y-1.5">
               <h2 className="typography-meta font-medium text-muted-foreground">{t('mobile.instances.saved')}</h2>
               <ul className="space-y-1.5">
                 {conn.connections.map((saved) => {
-                  const transport = describePairingTransport(
-                    saved.candidates.map((c) => (c.kind === 'relay' ? { type: 'relay' } : { type: 'lan' })),
-                    isActiveRuntimeConnection(saved) && isRelayModeActive() ? 'relay' : 'lan',
+                  const capability = mobileTransportCapability(
+                    saved.candidates,
+                    isActiveRuntimeConnection(saved) && isRelayModeActive() ? 'relay' : null,
                   );
                   return (
                     <li key={saved.id} className="flex items-center gap-1.5">
@@ -219,13 +340,19 @@ export const MobileApp: React.FC<MobileAppProps> = ({ apis }) => {
                         type="button"
                         variant="outline"
                         size="sm"
-                        className="min-w-0 flex-1 justify-start h-8"
-                        disabled={conn.isBusy}
-                        onClick={() => onSelect(saved)}
+                        className="min-w-0 flex-1 justify-start h-auto min-h-9 py-1.5"
+                        disabled={conn.isBusy || scanBusy}
+                        onClick={() => onSelectSaved(saved)}
                       >
-                        <span className="truncate typography-ui-label">
-                          {saved.label}
-                          {` · ${transport.label}`}
+                        <span className="flex min-w-0 flex-col items-start gap-0.5">
+                          <span className="truncate typography-ui-label w-full text-left">
+                            {saved.label}
+                            {' · '}
+                            {t(transportLabelKey(capability))}
+                          </span>
+                          <span className="typography-meta text-muted-foreground">
+                            {formatLastUsed(saved.lastUsedAt, t)}
+                          </span>
                         </span>
                       </Button>
                       <Button
@@ -234,7 +361,11 @@ export const MobileApp: React.FC<MobileAppProps> = ({ apis }) => {
                         variant="ghost"
                         className="h-8"
                         disabled={conn.isBusy}
-                        onClick={() => { void conn.removeConnection(saved.id); }}
+                        onClick={() => {
+                          if (window.confirm(t('mobile.instances.confirmRemove', { label: saved.label }))) {
+                            void conn.removeConnection(saved.id);
+                          }
+                        }}
                       >
                         {t('mobile.instances.remove')}
                       </Button>
@@ -244,6 +375,76 @@ export const MobileApp: React.FC<MobileAppProps> = ({ apis }) => {
               </ul>
             </div>
           ) : null}
+
+          <Button
+            type="button"
+            className="h-11 w-full"
+            disabled={conn.isBusy || scanBusy}
+            onClick={() => { void onScan(); }}
+          >
+            {scanBusy ? t('mobile.connect.scanning') : t('mobile.connect.scanQr')}
+          </Button>
+
+          {phaseKey && !scanBusy && conn.isBusy ? (
+            <p className="typography-meta text-center text-muted-foreground">{t(phaseKey)}</p>
+          ) : null}
+
+          <div className="space-y-2">
+            <button
+              type="button"
+              className="typography-meta text-muted-foreground underline-offset-2 hover:underline"
+              onClick={() => setManualOpen((open) => !open)}
+            >
+              {manualOpen ? t('mobile.connect.hideManual') : t('mobile.connect.pasteLinkHint')}
+            </button>
+
+            {manualOpen || conn.pendingConnection ? (
+              <form className="space-y-2" onSubmit={onSubmit}>
+                {conn.pendingConnection ? (
+                  <p className="typography-meta text-muted-foreground">
+                    {t('mobile.connect.passwordRequired')}
+                    {conn.pendingConnection.label ? ` · ${conn.pendingConnection.label}` : ''}
+                  </p>
+                ) : null}
+                <Input
+                  value={url}
+                  onChange={(event) => setUrl(event.target.value)}
+                  placeholder={t('mobile.connect.urlPlaceholder')}
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  disabled={conn.isBusy || Boolean(conn.pendingConnection)}
+                  className="h-9 typography-ui-label"
+                />
+                {conn.pendingConnection || password ? (
+                  <Input
+                    type="password"
+                    value={password}
+                    onChange={(event) => setPassword(event.target.value)}
+                    placeholder={t('mobile.connect.passwordPlaceholder')}
+                    disabled={conn.isBusy}
+                    autoFocus={Boolean(conn.pendingConnection)}
+                    className="h-9 typography-ui-label"
+                  />
+                ) : null}
+                {conn.error ? (
+                  <p className="typography-meta text-[var(--status-error)]">{conn.error}</p>
+                ) : null}
+                <Button
+                  type="submit"
+                  size="sm"
+                  className="h-9 w-full"
+                  disabled={conn.isBusy || (!url.trim() && !conn.pendingConnection)}
+                >
+                  {conn.isBusy
+                    ? (phaseKey ? t(phaseKey) : t('mobile.connect.connecting'))
+                    : t('mobile.connect.submit')}
+                </Button>
+              </form>
+            ) : conn.error ? (
+              <p className="typography-meta text-[var(--status-error)]">{conn.error}</p>
+            ) : null}
+          </div>
         </div>
       </div>
     </RuntimeAPIProvider>

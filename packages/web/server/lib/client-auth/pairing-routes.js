@@ -116,6 +116,13 @@ export const registerClientAuthPairingRoutes = (app, deps) => {
     return raw || 'missing';
   };
 
+  // In-memory redeem rate limit (per IP + pairingId). Forked from upstream
+  // core-routes; these bindings must live next to the checker — omitting them
+  // throws ReferenceError and every redeem returns HTTP 500.
+  const PAIRING_REDEEM_RATE_LIMIT_WINDOW_MS = 5 * 60 * 1000;
+  const PAIRING_REDEEM_RATE_LIMIT_MAX_ATTEMPTS = 10;
+  const pairingRedeemAttempts = new Map();
+
   const checkPairingRedeemRateLimit = (req) => {
     const now = Date.now();
     const key = `${requestIp(req)}:${pairingIdFromRequest(req)}`;
@@ -159,6 +166,17 @@ export const registerClientAuthPairingRoutes = (app, deps) => {
     }
   };
 
+  // Loopback is fine for the desktop UI talking to itself, but a phone that
+  // scans the QR will resolve 127.0.0.1 to the phone — never this host.
+  const isLoopbackCandidateUrl = (value) => {
+    try {
+      const host = new URL(value).hostname.toLowerCase();
+      return host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]';
+    } catch {
+      return false;
+    }
+  };
+
   // `preferredServerUrl` is the caller-supplied externally reachable URL (the
   // desktop UI reaches its own server over loopback, so the request origin is not
   // scannable — it passes the LAN URL instead). Falls back to the request origin
@@ -172,8 +190,20 @@ export const registerClientAuthPairingRoutes = (app, deps) => {
   const pairingServerCandidates = async (req, { preferredServerUrl, includeRelay, includeDirect = true } = {}) => {
     const candidates = [];
     if (includeDirect) {
-      const direct = normalizeCandidateUrl(preferredServerUrl) || requestOrigin(req);
-      if (direct) {
+      const preferred = normalizeCandidateUrl(preferredServerUrl);
+      const origin = requestOrigin(req);
+      const directUrls = [];
+      const pushDirect = (url) => {
+        if (!url || isLoopbackCandidateUrl(url) || directUrls.includes(url)) return;
+        directUrls.push(url);
+      };
+      pushDirect(preferred);
+      // Prefer real LAN addresses over the desktop's loopback request origin.
+      for (const url of getDirectCandidateUrls(req) || []) {
+        pushDirect(normalizeCandidateUrl(url));
+      }
+      pushDirect(origin && !isLoopbackCandidateUrl(origin) ? origin : null);
+      for (const direct of directUrls) {
         let type = 'lan';
         try {
           const parsed = new URL(direct);

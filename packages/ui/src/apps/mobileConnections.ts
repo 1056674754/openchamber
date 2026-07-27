@@ -18,7 +18,7 @@ import { SecureStorage } from '@aparajita/capacitor-secure-storage';
 import { Capacitor } from '@capacitor/core';
 import React from 'react';
 
-import { useI18n } from '@/lib/i18n';
+import { useI18n, type I18nKey } from '@/lib/i18n';
 import type { PairingConnectionPayload, PairingEndpointCandidate } from '@/lib/connectionPayload';
 import { isCapacitorApp } from '@/lib/platform';
 import { adoptRelayTunnel, isRelayModeActive } from '@/lib/relay/runtime-tunnel';
@@ -110,6 +110,106 @@ export type MobilePendingConnection = {
   // Present when the password unlock must ride the relay tunnel.
   relay?: MobileRelayConfig;
   relayGrant?: string;
+};
+
+/** UI-facing connect lifecycle for splash / button / phase copy. */
+export type MobileConnectPhase =
+  | 'idle'
+  | 'auto-connecting'
+  | 'scanning'
+  | 'establishing'
+  | 'redeeming'
+  | 'authenticating'
+  | 'connected';
+
+/** Structured failure so UI can pick a specific i18n string. */
+export type MobileConnectFailureReason =
+  | 'unreachable'
+  | 'relay-timeout'
+  | 'auth-required'
+  | 'pairing-expired'
+  | 'pairing-used'
+  | 'password-required'
+  | 'password-failed'
+  | 'invalid-payload'
+  | 'storage-failed'
+  | 'url-required'
+  | 'invalid-url'
+  | 'server-error'
+  | 'unknown';
+
+export type MobileConnectResult =
+  | { status: 'connected' }
+  | { status: 'needs-password' }
+  | { status: 'failed'; reason: MobileConnectFailureReason }
+  | { status: 'busy' };
+
+/** Capability badge for a saved candidate set (not necessarily the live path). */
+export type MobileTransportCapability = 'lan' | 'relay' | 'tunnel' | 'lan+relay' | 'unknown';
+
+export const mobileTransportCapability = (
+  candidates: MobileTransportCandidate[],
+  active?: 'lan' | 'relay' | null,
+): MobileTransportCapability => {
+  if (active === 'relay') return 'relay';
+  if (active === 'lan') {
+    const hasHttps = candidates.some((c) => c.kind === 'direct' && c.url.startsWith('https://'));
+    return hasHttps ? 'tunnel' : 'lan';
+  }
+  const hasRelay = candidates.some((c) => c.kind === 'relay');
+  const directs = candidates.filter((c): c is Extract<MobileTransportCandidate, { kind: 'direct' }> => c.kind === 'direct');
+  const hasHttps = directs.some((c) => c.url.startsWith('https://'));
+  const hasHttp = directs.some((c) => c.url.startsWith('http://'));
+  if (hasRelay && (hasHttp || hasHttps)) return 'lan+relay';
+  if (hasRelay) return 'relay';
+  if (hasHttps && !hasHttp) return 'tunnel';
+  if (directs.length > 0) return 'lan';
+  return 'unknown';
+};
+
+export const mapPairingRedeemFailure = (status: number | null): MobileConnectFailureReason => {
+  // Pairing redeem is unauthenticated; server errors here are almost never
+  // "please log in". A broad default to auth-required made expired QR / 500s
+  // look like a password problem. 5xx after a live tunnel means desktop bug,
+  // not "LAN and relay both failed".
+  if (status === null) return 'unreachable';
+  if (status === 404 || status === 410 || status === 400) return 'pairing-expired';
+  if (status === 409) return 'pairing-used';
+  if (status === 429) return 'pairing-expired';
+  if (status === 401 || status === 403) return 'auth-required';
+  if (status >= 500) return 'server-error';
+  return 'unknown';
+};
+
+export const failureReasonMessageKey = (reason: MobileConnectFailureReason): I18nKey => {
+  switch (reason) {
+    case 'unreachable':
+      return 'mobile.connect.error.unreachable';
+    case 'server-error':
+      return 'mobile.connect.error.serverError';
+    case 'relay-timeout':
+      return 'mobile.connect.error.relayTimeout';
+    case 'auth-required':
+      return 'mobile.connect.error.authRequired';
+    case 'pairing-expired':
+      return 'mobile.connect.error.pairingExpired';
+    case 'pairing-used':
+      return 'mobile.connect.error.pairingUsed';
+    case 'password-required':
+      return 'mobile.connect.passwordRequired';
+    case 'password-failed':
+      return 'mobile.connect.error.passwordFailed';
+    case 'invalid-payload':
+      return 'mobile.connect.error.invalidUrl';
+    case 'storage-failed':
+      return 'mobile.connect.error.storageFailed';
+    case 'url-required':
+      return 'mobile.connect.error.urlRequired';
+    case 'invalid-url':
+      return 'mobile.connect.error.invalidUrl';
+    default:
+      return 'mobile.connect.failed';
+  }
 };
 
 // Input to `connect`. Either a raw URL/candidates for a NEW connection, or an
@@ -402,7 +502,9 @@ const readSessionStatus = async (response: { json: () => Promise<unknown> } | nu
 // Relay connect helpers
 // ---------------------------------------------------------------------------
 
-const RELAY_CONNECT_TIMEOUT_MS = 15_000;
+// Pairing redeem + first tunnel open on cellular can exceed 15s (handshake +
+// ECDH + first /health). Keep the timeout above a slow-but-alive phone path.
+const RELAY_CONNECT_TIMEOUT_MS = 25_000;
 
 type RelayProbeOutcome = 'ok' | 'needs-login' | 'auth-failed' | 'unreachable';
 
@@ -962,10 +1064,30 @@ export const getAutoConnectTargetLabel = (): string | null => {
 // the runtime endpoint when reachable AND we already have a usable bearer token;
 // returns false — caller shows the connect screen — when there is no saved
 // instance, it's unreachable, or it needs a (re)login. No prompts or UI state.
+const isLoopbackDirectUrl = (url: string): boolean => {
+  try {
+    const host = new URL(url).hostname.toLowerCase();
+    return host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]';
+  } catch {
+    return false;
+  }
+};
+
 export const autoConnectLastInstance = async (): Promise<boolean> => {
   await migrateLegacyInlineTokens();
   const candidate = readConnections()[0]; // sorted most-recent-first
   if (!candidate) return false;
+
+  // On a physical phone, a saved desktop loopback address cannot be this
+  // device's server — probing it can hit Capacitor's own WebView origin and
+  // falsely "succeed" into a black main shell. Skip auto-connect; user must
+  // re-pair / enter a real LAN or relay candidate.
+  if (
+    isCapacitorApp()
+    && candidate.candidates.every((entry) => entry.kind === 'direct' && isLoopbackDirectUrl(entry.url))
+  ) {
+    return false;
+  }
 
   // The runtime transport needs a bearer token; only auto-connect when one is
   // already saved. A missing/expired token must go through the login UI.
@@ -981,6 +1103,15 @@ export const autoConnectLastInstance = async (): Promise<boolean> => {
 
   const result = await probeConnectionCandidates(candidate.candidates, token);
   if (result.status !== 'ok') return false;
+  // Refuse a "success" that landed on loopback from a native device — same
+  // false-positive as above when a mixed candidate set somehow resolves local.
+  if (
+    isCapacitorApp()
+    && result.transport.kind === 'direct'
+    && isLoopbackDirectUrl(result.transport.url)
+  ) {
+    return false;
+  }
   await upsertMobileConnection({ id: candidate.id, label: candidate.label, candidates: candidate.candidates }); // bump lastUsedAt (keeps token)
   switchToTransport(result.transport, token, { runtimeKey: secureTokenKeyOf(candidate) });
   return true;
@@ -1020,9 +1151,10 @@ type LiveTransport =
 
 // Convert pairing-payload candidates into ordered mobile transport candidates:
 // priority number ascending, relay last on ties (relay is the fallback), invalid
-// entries dropped. The resulting order is what gets persisted and re-probed.
-const pairingCandidatesToMobile = (candidates: PairingEndpointCandidate[]): MobileTransportCandidate[] =>
-  [...candidates]
+// entries dropped. On Capacitor, loopback directs are moved last so LAN/relay
+// win before a false local /health. The resulting order is persisted and re-probed.
+export const pairingCandidatesToMobile = (candidates: PairingEndpointCandidate[]): MobileTransportCandidate[] => {
+  const mapped = [...candidates]
     .sort((left, right) => {
       const delta = (left.priority ?? 100) - (right.priority ?? 100);
       if (delta !== 0) return delta;
@@ -1037,39 +1169,113 @@ const pairingCandidatesToMobile = (candidates: PairingEndpointCandidate[]): Mobi
       return directCandidatesFromUrl(c.url);
     });
 
+  // On a phone, desktop loopback is usually THIS device (Capacitor), not the
+  // Mac. A false local /health used to win redeem and surface as
+  // "Authentication required". Keep loopback only when it is the sole path
+  // (USB `adb reverse` / emulator). Otherwise drop it entirely.
+  if (!isCapacitorApp()) return mapped;
+  const preferred = mapped.filter((c) => c.kind !== 'direct' || !isLoopbackDirectUrl(c.url));
+  if (preferred.length > 0) return preferred;
+  return mapped;
+};
+
+type EstablishOutcome =
+  | { status: 'ok'; transport: LiveTransport }
+  | { status: 'failed'; reason: Extract<MobileConnectFailureReason, 'unreachable' | 'relay-timeout' | 'invalid-payload'> };
+
 // Establish the first reachable LIVE transport for an ordered candidate set:
 // health-check a direct URL, or open + health-check a relay tunnel. A returned
 // relay transport owns an OPEN tunnel the caller must close.
 const establishLiveTransport = async (
   candidates: MobileTransportCandidate[],
-): Promise<LiveTransport | null> => {
+): Promise<EstablishOutcome> => {
   // Same identity gate as probeConnectionCandidates: a redeem/login must not send
   // its secret to a direct address that reports a different server identity.
   const expectedServerId = relayCandidateOf({ candidates })?.serverId ?? null;
+  logConnect('establish:start', {
+    count: candidates.length,
+    kinds: candidates.map((c) => c.kind),
+    expectedServerId,
+  });
+  if (candidates.length === 0) {
+    logConnect('establish:empty-candidates');
+    return { status: 'failed', reason: 'invalid-payload' };
+  }
+  let sawRelayTimeout = false;
+  let triedRelay = false;
   for (const candidate of candidates) {
     if (candidate.kind === 'relay') {
+      triedRelay = true;
       const tunnel = createRelayTunnelClient(candidate.relay);
-      const health = await raceWithTimeout(RELAY_CONNECT_TIMEOUT_MS, tunnel.fetch('/health').catch(() => null));
-      logConnect('establish:relay:health', { ok: health?.ok === true, status: health?.status ?? null });
-      if (health?.ok) return { kind: 'relay', relay: candidate.relay, tunnel };
+      logConnect('establish:relay:open', {
+        relayUrl: candidate.relay.relayUrl,
+        serverId: candidate.relay.serverId,
+        status: tunnel.getStatus().state,
+      });
+      let timedOut = false;
+      const health = await raceWithTimeout(
+        RELAY_CONNECT_TIMEOUT_MS,
+        tunnel.fetch('/health').catch((error: unknown) => {
+          logConnect('establish:relay:fetch-error', {
+            error: error instanceof Error ? error.message : String(error),
+            status: tunnel.getStatus(),
+          });
+          return null;
+        }),
+        () => {
+          timedOut = true;
+          logConnect('establish:relay:timeout', { status: tunnel.getStatus() });
+          tunnel.close();
+        },
+      );
+      logConnect('establish:relay:health', {
+        ok: health?.ok === true,
+        status: health?.status ?? null,
+        timedOut,
+        tunnel: tunnel.getStatus(),
+      });
+      if (health?.ok) return { status: 'ok', transport: { kind: 'relay', relay: candidate.relay, tunnel } };
+      if (timedOut) sawRelayTimeout = true;
       tunnel.close();
       continue;
     }
     const url = normalizeConnectionUrl(candidate.url) || candidate.url;
+    // Capacitor serves the app at https://localhost — a bare /health or
+    // http://127.0.0.1 hit without adb-reverse can look "healthy" while not
+    // being the desktop. Require serverId match when we know the expected
+    // host identity (pairing/reconnect with a relay candidate).
+    if (isCapacitorApp() && isLoopbackDirectUrl(url)) {
+      logConnect('establish:direct:try-loopback', { url, expectedServerId });
+    }
     const health = await requestWithTimeout(`${url}/health`, { method: 'GET' });
-    logConnect('establish:direct:health', { ok: health?.ok === true, status: health?.status ?? null });
+    logConnect('establish:direct:health', { ok: health?.ok === true, status: health?.status ?? null, url });
     if (!health?.ok) continue;
-    if (expectedServerId) {
+    if (expectedServerId || (isCapacitorApp() && isLoopbackDirectUrl(url))) {
       const payload = await health.json().catch(() => null);
       const reported = payload && typeof payload === 'object' ? (payload as Record<string, unknown>).serverId : null;
-      if (typeof reported === 'string' && reported && reported !== expectedServerId) {
-        logConnect('establish:server-id-mismatch', { url });
-        continue;
+      if (expectedServerId) {
+        if (typeof reported !== 'string' || !reported || reported !== expectedServerId) {
+          logConnect('establish:server-id-mismatch', { url, reported: reported ?? null, expectedServerId });
+          continue;
+        }
+      } else if (isCapacitorApp() && isLoopbackDirectUrl(url)) {
+        // No expected id (URL-only connect): refuse Capacitor's own shell.
+        if (typeof reported !== 'string' || !reported) {
+          logConnect('establish:direct:reject-local-shell', { url });
+          continue;
+        }
       }
     }
-    return { kind: 'direct', url };
+    return { status: 'ok', transport: { kind: 'direct', url } };
   }
-  return null;
+  logConnect('establish:exhausted', { sawRelayTimeout, triedRelay });
+  if (sawRelayTimeout && candidates.every((c) => c.kind === 'relay')) {
+    return { status: 'failed', reason: 'relay-timeout' };
+  }
+  if (sawRelayTimeout && triedRelay) {
+    return { status: 'failed', reason: 'relay-timeout' };
+  }
+  return { status: 'failed', reason: 'unreachable' };
 };
 
 // Relay-aware session validation for the ACTIVE runtime (native resume path).
@@ -1103,7 +1309,7 @@ const transportMatchesCurrentRuntime = (transport: ChosenTransport): boolean =>
     : !isRelayModeActive() && isSameConnectionUrl(transport.url, getRuntimeApiBaseUrl());
 
 // The saved device currently bound to the runtime, matched by its stable key.
-const findActiveConnection = (): MobileSavedConnection | null => {
+export const findActiveConnection = (): MobileSavedConnection | null => {
   const runtimeKey = getRuntimeKey();
   if (!runtimeKey) return null;
   return readConnections().find((connection) => secureTokenKeyOf(connection) === runtimeKey) ?? null;
@@ -1292,15 +1498,19 @@ export type UseMobileConnection = {
   connections: MobileSavedConnection[];
   isBusy: boolean;
   isPasswordBusy: boolean;
+  phase: MobileConnectPhase;
   error: string | null;
+  failureReason: MobileConnectFailureReason | null;
   pendingConnection: MobilePendingConnection | null;
-  connect: (input: MobileConnectInput) => Promise<void>;
-  redeemPairingConnection: (payload: PairingConnectionPayload) => Promise<void>;
-  submitPassword: (password: string) => Promise<void>;
+  connect: (input: MobileConnectInput) => Promise<MobileConnectResult>;
+  redeemPairingConnection: (payload: PairingConnectionPayload) => Promise<MobileConnectResult>;
+  submitPassword: (password: string) => Promise<MobileConnectResult>;
   cancelPassword: () => void;
   saveConnection: (input: MobileConnectInput) => Promise<MobileSavedConnection | null>;
   removeConnection: (id: string) => Promise<MobileSavedConnection | null>;
   setError: (message: string | null) => void;
+  setPhase: (phase: MobileConnectPhase) => void;
+  setFailure: (reason: MobileConnectFailureReason | null) => void;
 };
 
 // `onConnected` fires once the runtime endpoint is switched (the caller navigates
@@ -1309,7 +1519,9 @@ export const useMobileConnection = (onConnected: () => void): UseMobileConnectio
   const { t } = useI18n();
   const [connections, setConnections] = React.useState<MobileSavedConnection[]>(() => readConnections());
   const [busyOperation, setBusyOperation] = React.useState<'connect' | 'password' | 'pairing' | null>(null);
-  const [error, setError] = React.useState<string | null>(null);
+  const [phase, setPhase] = React.useState<MobileConnectPhase>('idle');
+  const [error, setErrorState] = React.useState<string | null>(null);
+  const [failureReason, setFailureReason] = React.useState<MobileConnectFailureReason | null>(null);
   const [pendingConnection, setPendingConnection] = React.useState<MobilePendingConnection | null>(null);
   const connectionsRef = React.useRef(connections);
   const busyRef = React.useRef<'connect' | 'password' | 'pairing' | null>(null);
@@ -1319,15 +1531,27 @@ export const useMobileConnection = (onConnected: () => void): UseMobileConnectio
     setConnections(next);
   }, []);
 
-  const beginBusy = React.useCallback((operation: 'connect' | 'password' | 'pairing') => {
+  const setError = React.useCallback((message: string | null) => {
+    setErrorState(message);
+    if (!message) setFailureReason(null);
+  }, []);
+
+  const setFailure = React.useCallback((reason: MobileConnectFailureReason | null) => {
+    setFailureReason(reason);
+    setErrorState(reason ? t(failureReasonMessageKey(reason)) : null);
+  }, [t]);
+
+  const beginBusy = React.useCallback((operation: 'connect' | 'password' | 'pairing', nextPhase: MobileConnectPhase) => {
     busyRef.current = operation;
     setBusyOperation(operation);
+    setPhase(nextPhase);
   }, []);
 
   const endBusy = React.useCallback((operation: 'connect' | 'password' | 'pairing') => {
     if (busyRef.current !== operation) return;
     busyRef.current = null;
     setBusyOperation(null);
+    setPhase((current) => (current === 'connected' ? current : 'idle'));
   }, []);
 
   // Refresh from storage on mount (runs the legacy-token migration too).
@@ -1347,14 +1571,15 @@ export const useMobileConnection = (onConnected: () => void): UseMobileConnectio
     return next;
   }, [applyConnections]);
 
-  const connect = React.useCallback(async (input: MobileConnectInput) => {
-    setError(null);
-    beginBusy('connect');
+  const connect = React.useCallback(async (input: MobileConnectInput): Promise<MobileConnectResult> => {
+    if (busyRef.current) return { status: 'busy' };
+    setFailure(null);
+    beginBusy('connect', 'establishing');
     try {
       const candidates = buildCandidatesFromInput(input);
       if (candidates.length === 0) {
-        setError(t('mobile.connect.error.urlRequired'));
-        return;
+        setFailure('url-required');
+        return { status: 'failed', reason: 'url-required' };
       }
       const saved = input.id
         ? connectionsRef.current.find((c) => c.id === input.id)
@@ -1378,8 +1603,8 @@ export const useMobileConnection = (onConnected: () => void): UseMobileConnectio
       logConnect('connect:probe', { status: result.status });
 
       if (result.status === 'unreachable') {
-        setError(t('mobile.connect.error.unreachable'));
-        return;
+        setFailure('unreachable');
+        return { status: 'failed', reason: 'unreachable' };
       }
       if (result.status === 'needs-login') {
         persistMetadata({ id: saved?.id, label, candidates });
@@ -1390,7 +1615,8 @@ export const useMobileConnection = (onConnected: () => void): UseMobileConnectio
           relay: relayCandidateOf({ candidates }) ?? undefined,
           relayGrant: grant,
         });
-        return;
+        setFailure('password-required');
+        return { status: 'needs-password' };
       }
 
       // Connected. Persist a user-supplied token before switching so a cold
@@ -1400,34 +1626,44 @@ export const useMobileConnection = (onConnected: () => void): UseMobileConnectio
       }
       persistMetadata({ id: saved?.id, label, candidates, clientToken: token });
       switchToTransport(result.transport, token ?? null, { runtimeKey: secureTokenKeyOf({ candidates }), grant });
+      setPhase('connected');
       onConnected();
+      return { status: 'connected' };
     } catch (error) {
       console.warn('[mobile-connect] connect threw', error);
-      setError(t('mobile.connect.error.invalidUrl'));
+      setFailure('invalid-url');
+      return { status: 'failed', reason: 'invalid-url' };
     } finally {
       endBusy('connect');
     }
-  }, [beginBusy, endBusy, onConnected, persistMetadata, t]);
+  }, [beginBusy, endBusy, onConnected, persistMetadata, setFailure]);
 
-  const redeemPairingConnection = React.useCallback(async (payload: PairingConnectionPayload) => {
-    if (busyRef.current === 'pairing') return;
-    setError(null);
-    beginBusy('pairing');
+  const redeemPairingConnection = React.useCallback(async (payload: PairingConnectionPayload): Promise<MobileConnectResult> => {
+    if (busyRef.current === 'pairing') return { status: 'busy' };
+    setFailure(null);
+    beginBusy('pairing', 'establishing');
     const deviceCandidates = pairingCandidatesToMobile(payload.candidates);
+    logConnect('pairing:redeem:candidates', {
+      pairingId: payload.pairingId,
+      raw: payload.candidates.map((c) => c.type),
+      mobile: deviceCandidates.map((c) => (c.kind === 'relay' ? `relay:${c.relay.serverId.slice(0, 12)}` : `direct:${c.url}`)),
+    });
     // A chosen relay transport owns an open tunnel; close it unless the switch
     // adopted it as the runtime tunnel.
     let chosen: LiveTransport | null = null;
     let adopted = false;
     try {
       // 1. Find the first reachable transport across all candidates.
-      chosen = await establishLiveTransport(deviceCandidates);
-      if (!chosen) {
-        setError(t('mobile.connect.error.unreachable'));
-        return;
+      const established = await establishLiveTransport(deviceCandidates);
+      if (established.status !== 'ok') {
+        setFailure(established.reason);
+        return { status: 'failed', reason: established.reason };
       }
+      chosen = established.transport;
 
       // 2. Redeem the one-time secret over that transport. Single-use: we never
       // retry other candidates once redeem runs (the secret is consumed).
+      setPhase('redeeming');
       const redeemBody = JSON.stringify({
         pairingId: payload.pairingId,
         secret: payload.secret,
@@ -1444,19 +1680,24 @@ export const useMobileConnection = (onConnected: () => void): UseMobileConnectio
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         body: redeemBody,
       } as const;
+      logConnect('pairing:redeem:start', { transport: chosen.kind, pairingId: payload.pairingId });
       const response = chosen.kind === 'relay'
         ? await raceWithTimeout(RELAY_CONNECT_TIMEOUT_MS, chosen.tunnel.fetch('/api/client-auth/pairing/redeem', redeemInit).catch(() => null))
         : await requestWithTimeout(`${chosen.url}/api/client-auth/pairing/redeem`, redeemInit);
       if (!response?.ok) {
-        setError(t('mobile.connect.error.authRequired'));
-        return;
+        const reason = mapPairingRedeemFailure(response?.status ?? null);
+        logConnect('pairing:redeem:failed', { status: response?.status ?? null, transport: chosen.kind, reason });
+        setFailure(reason);
+        return { status: 'failed', reason };
       }
       const result = await response.json().catch(() => null) as PairingRedeemResponse | null;
       const issuedToken = typeof result?.clientToken === 'string' ? result.clientToken.trim() : '';
       if (!issuedToken) {
-        setError(t('mobile.connect.error.authRequired'));
-        return;
+        logConnect('pairing:redeem:no-token', { transport: chosen.kind });
+        setFailure('unknown');
+        return { status: 'failed', reason: 'unknown' };
       }
+      logConnect('pairing:redeem:ok', { transport: chosen.kind });
       // Name the connection by the issuing server (its hostname), not the
       // per-device pairing label — that label is the operator's name for THIS
       // phone in their device list, not a name for the server we connect to.
@@ -1469,8 +1710,8 @@ export const useMobileConnection = (onConnected: () => void): UseMobileConnectio
       if (isCapacitorApp()) {
         const stored = await writeSecureToken(secureTokenKeyOf({ candidates: deviceCandidates }), issuedToken);
         if (!stored) {
-          setError(t('mobile.connect.error.authRequired'));
-          return;
+          setFailure('storage-failed');
+          return { status: 'failed', reason: 'storage-failed' };
         }
       }
       persistMetadata({ label, candidates: deviceCandidates, clientToken: issuedToken });
@@ -1482,20 +1723,24 @@ export const useMobileConnection = (onConnected: () => void): UseMobileConnectio
         { runtimeKey: secureTokenKeyOf({ candidates: deviceCandidates }) },
       );
       adopted = chosen.kind === 'relay';
+      setPhase('connected');
       onConnected();
+      return { status: 'connected' };
     } catch (error) {
       console.warn('[mobile-connect] pairing threw', error);
-      setError(t('mobile.connect.error.authRequired'));
+      setFailure('unknown');
+      return { status: 'failed', reason: 'unknown' };
     } finally {
       if (!adopted && chosen?.kind === 'relay') chosen.tunnel.close();
       endBusy('pairing');
     }
-  }, [beginBusy, endBusy, onConnected, persistMetadata, t]);
+  }, [beginBusy, endBusy, onConnected, persistMetadata, setFailure]);
 
-  const submitPassword = React.useCallback(async (password: string) => {
-    if (!pendingConnection || !password.trim() || busyRef.current === 'password') return;
-    setError(null);
-    beginBusy('password');
+  const submitPassword = React.useCallback(async (password: string): Promise<MobileConnectResult> => {
+    if (!pendingConnection || !password.trim()) return { status: 'failed', reason: 'password-required' };
+    if (busyRef.current === 'password') return { status: 'busy' };
+    setFailure(null);
+    beginBusy('password', 'authenticating');
     const { id, label, candidates } = pendingConnection;
     // A chosen relay transport owns an open tunnel; close it unless the switch
     // adopted it as the runtime tunnel.
@@ -1505,11 +1750,14 @@ export const useMobileConnection = (onConnected: () => void): UseMobileConnectio
       // Log in over whichever transport is reachable. Relay login rides the
       // tunnel; cookies never cross it, so an issued bearer token is mandatory
       // there. `issueClientToken` mints the device's token in one round-trip.
-      chosen = await establishLiveTransport(candidates);
-      if (!chosen) {
-        setError(t('mobile.connect.error.unreachable'));
-        return;
+      setPhase('establishing');
+      const established = await establishLiveTransport(candidates);
+      if (established.status !== 'ok') {
+        setFailure(established.reason);
+        return { status: 'failed', reason: established.reason };
       }
+      chosen = established.transport;
+      setPhase('authenticating');
       const loginInit = {
         method: 'POST',
         credentials: 'include' as const,
@@ -1524,8 +1772,8 @@ export const useMobileConnection = (onConnected: () => void): UseMobileConnectio
         : await requestWithTimeout(`${chosen.url}/auth/session`, loginInit);
       logConnect('password:done', { ok: response?.ok === true, status: response?.status ?? null });
       if (!response?.ok) {
-        setError(t('mobile.connect.error.passwordFailed'));
-        return;
+        setFailure('password-failed');
+        return { status: 'failed', reason: 'password-failed' };
       }
       const body = await response.json().catch(() => null) as { clientToken?: unknown } | null;
       const issuedToken = typeof body?.clientToken === 'string' ? body.clientToken.trim() : '';
@@ -1539,11 +1787,12 @@ export const useMobileConnection = (onConnected: () => void): UseMobileConnectio
           persistMetadata({ id, label, candidates });
           setPendingConnection(null);
           switchToTransport({ kind: 'direct', url: chosen.url }, null, { runtimeKey: secureTokenKeyOf({ candidates }) });
+          setPhase('connected');
           onConnected();
-          return;
+          return { status: 'connected' };
         }
-        setError(t('mobile.connect.error.authRequired'));
-        return;
+        setFailure('auth-required');
+        return { status: 'failed', reason: 'auth-required' };
       }
 
       // Persist the token BEFORE switching (no fire-and-forget).
@@ -1560,23 +1809,26 @@ export const useMobileConnection = (onConnected: () => void): UseMobileConnectio
         { runtimeKey: secureTokenKeyOf({ candidates }) },
       );
       adopted = chosen.kind === 'relay';
+      setPhase('connected');
       onConnected();
+      return { status: 'connected' };
     } catch (error) {
       console.warn('[mobile-connect] password threw', error);
-      setError(t('mobile.connect.error.passwordFailed'));
+      setFailure('password-failed');
+      return { status: 'failed', reason: 'password-failed' };
     } finally {
       if (!adopted && chosen?.kind === 'relay') chosen.tunnel.close();
       endBusy('password');
     }
-  }, [beginBusy, endBusy, onConnected, pendingConnection, persistMetadata, t]);
+  }, [beginBusy, endBusy, onConnected, pendingConnection, persistMetadata, setFailure]);
 
   const cancelPassword = React.useCallback(() => {
     setPendingConnection(null);
-    setError(null);
-  }, []);
+    setFailure(null);
+  }, [setFailure]);
 
   const saveConnection = React.useCallback(async (input: MobileConnectInput): Promise<MobileSavedConnection | null> => {
-    setError(null);
+    setFailure(null);
     let candidates = buildCandidatesFromInput(input);
     const existing = input.id ? connectionsRef.current.find((connection) => connection.id === input.id) ?? null : null;
     if (existing) {
@@ -1595,7 +1847,7 @@ export const useMobileConnection = (onConnected: () => void): UseMobileConnectio
       candidates = [...inputDirects, ...preservedHttps, ...(relay ? [{ kind: 'relay' as const, relay }] : [])];
     }
     if (candidates.length === 0) {
-      setError(t('mobile.connect.error.urlRequired'));
+      setFailure('url-required');
       return null;
     }
     const clientToken = input.clientToken?.trim() || undefined;
@@ -1618,7 +1870,7 @@ export const useMobileConnection = (onConnected: () => void): UseMobileConnectio
     }
     const next = persistMetadata({ id: input.id, label, candidates, clientToken });
     return next.find((connection) => candidateSetsMatch(connection.candidates, candidates)) ?? null;
-  }, [persistMetadata, t]);
+  }, [persistMetadata, setFailure]);
 
   const removeConnection = React.useCallback(async (id: string): Promise<MobileSavedConnection | null> => {
     const removed = connectionsRef.current.find((connection) => connection.id === id) ?? null;
@@ -1631,7 +1883,9 @@ export const useMobileConnection = (onConnected: () => void): UseMobileConnectio
     connections,
     isBusy: busyOperation !== null,
     isPasswordBusy: busyOperation === 'password',
+    phase,
     error,
+    failureReason,
     pendingConnection,
     connect,
     redeemPairingConnection,
@@ -1640,5 +1894,7 @@ export const useMobileConnection = (onConnected: () => void): UseMobileConnectio
     saveConnection,
     removeConnection,
     setError,
+    setPhase,
+    setFailure,
   };
 };

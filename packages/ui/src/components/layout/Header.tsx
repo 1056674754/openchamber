@@ -30,6 +30,7 @@ import { useFeatureFlagsStore } from '@/stores/useFeatureFlagsStore';
 
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
+import { MobileActiveInstanceChip } from '@/apps/MobileActiveInstanceChip';
 import { openMobileInstancesSheet } from '@/apps/mobileInstancesUi';
 import { useDeviceInfo, useTabletStandalonePwaRuntime } from '@/lib/device';
 import { isCapacitorApp } from '@/lib/platform';
@@ -1997,7 +1998,7 @@ export const Header: React.FC<HeaderProps> = ({
                   <button
                     type="button"
                     aria-label={t('header.instances.openAria')}
-                    className={mobileHeaderIconButtonClass}
+                    className="app-region-no-drag inline-flex h-9 max-w-[12rem] items-center gap-1.5 rounded-md px-2 typography-ui-label font-medium text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:pointer-events-none disabled:opacity-50 hover:text-foreground hover:bg-interactive-hover transition-colors"
                     onClick={() => {
                       blurActiveElement();
                       closeMobileHeaderPanels();
@@ -2010,7 +2011,8 @@ export const Header: React.FC<HeaderProps> = ({
                       openMobileInstancesSheet();
                     }}
                   >
-                    <Icon name="server" className="h-5 w-5" />
+                    <Icon name="server" className="h-5 w-5 shrink-0" />
+                    <MobileActiveInstanceChip />
                   </button>
                 </TooltipTrigger>
                 <TooltipContent>

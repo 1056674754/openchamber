@@ -118,7 +118,7 @@ bun run mobile:sim:run
 |---|---|---|
 | [#11](https://coding.s-s.city/songsong/openchamber/-/work_items/11) | Capacitor Voice resume / dictation overlay | 待 voice 主轨；本轮无 ComposerDictation 可接 |
 | [#49](https://coding.s-s.city/songsong/openchamber/-/work_items/49) | Push APNs/FCM | 未实现 |
-| [#16](https://coding.s-s.city/songsong/openchamber/-/work_items/16) | Pairing / redeem 移动面 | 挂桌面 ADR；移动 UX 未做 |
+| [#16](https://coding.s-s.city/songsong/openchamber/-/work_items/16) | Pairing / redeem 移动面 | 能力已通（扫码/redeem/relay/saved）；本轮为连接 UX 产品化（阶段文案、resume 重探测、Instances sheet） |
 | [#50](https://coding.s-s.city/songsong/openchamber/-/work_items/50) | 商店签名 / CI release | 仅本地 debug；无商店流水线 |
 
 ## Troubleshooting

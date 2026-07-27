@@ -132,18 +132,20 @@ export const PairingDevicesPanel: React.FC = () => {
       // Payload label is what the paired device names THIS connection (server
       // hostname). The typed deviceLabel already went to createPairingSession
       // as the per-device row name on this host.
+      // Omit fingerprint from the QR payload — it is not required to redeem and
+      // every saved byte lowers QR version (easier for soft phone autofocus).
       const payload = buildPairingConnectionPayload({
         pairingId,
         secret,
-        fingerprint: body.pairing?.fingerprint,
         expiresAt: body.pairing?.expiresAt,
         label: (typeof body.server?.label === 'string' && body.server.label.trim()) || undefined,
         candidates: candidates as never,
       });
       const link = encodePairingConnectionPayload(payload);
       setPairingLink(link);
-      // Dense pairing payloads (relay key + candidates) need high-res / low ECC.
-      setQrDataUrl(await QRCode.toDataURL(link, { width: 1024, margin: 2, errorCorrectionLevel: 'L' }));
+      // Dense pairing payloads (relay JWK + candidates) need quiet-zone margin and
+      // medium ECC so phone cameras (esp. soft autofocus) can lock on modules.
+      setQrDataUrl(await QRCode.toDataURL(link, { width: 1400, margin: 4, errorCorrectionLevel: 'M' }));
       await refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -253,7 +255,14 @@ export const PairingDevicesPanel: React.FC = () => {
 
       {pairingLink && qrDataUrl ? (
         <div className="space-y-2 rounded-md border border-border p-3">
-          <img src={qrDataUrl} alt="Pairing QR" className="mx-auto h-48 w-48" />
+          <img
+            src={qrDataUrl}
+            alt="Pairing QR"
+            className="mx-auto h-72 w-72 bg-white p-2 sm:h-80 sm:w-80"
+          />
+          <p className="typography-meta text-center text-muted-foreground">
+            {t('settings.pairing.qrHint')}
+          </p>
           <Button
             type="button"
             size="sm"

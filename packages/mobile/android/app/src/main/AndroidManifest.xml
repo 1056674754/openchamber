@@ -35,12 +35,11 @@
             <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/file_paths" />
         </provider>
 
-        <!-- Tell Play Services to download the ML Kit barcode "code scanner" module (used by
-             @capacitor-mlkit/barcode-scanning's scan()) at install time, so the QR pairing scan
-             works without a per-scan module download. -->
+        <!-- `barcode` = on-device ML Kit model for camera startScan (preferred).
+             `barcode_ui` = optional Google Code Scanner module for scan() fallback. -->
         <meta-data
             android:name="com.google.mlkit.vision.DEPENDENCIES"
-            android:value="barcode_ui" />
+            android:value="barcode,barcode_ui" />
 
         <!-- Small icon shown in the status bar / notification shade for FCM notifications the
              system displays while the app is backgrounded. Must be a monochrome silhouette. -->

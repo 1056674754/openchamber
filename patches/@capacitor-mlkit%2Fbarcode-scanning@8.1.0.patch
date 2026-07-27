@@ -1,0 +1,15 @@
+diff --git a/android/src/main/java/io/capawesome/capacitorjs/plugins/mlkit/barcodescanning/BarcodeScanner.java b/android/src/main/java/io/capawesome/capacitorjs/plugins/mlkit/barcodescanning/BarcodeScanner.java
+index 6ccdc2563ff58f063d91b6b754f6753b74b683d6..670f87e8c7f4fe69b87f0786d13825496de9d93f 100644
+--- a/android/src/main/java/io/capawesome/capacitorjs/plugins/mlkit/barcodescanning/BarcodeScanner.java
++++ b/android/src/main/java/io/capawesome/capacitorjs/plugins/mlkit/barcodescanning/BarcodeScanner.java
+@@ -465,7 +465,10 @@ public class BarcodeScanner implements ImageAnalysis.Analyzer {
+         List<Barcode> barcodesWithEnoughVotes = new ArrayList<>();
+         for (Barcode barcode : barcodes) {
+             Integer votes = voteForBarcode(barcode);
+-            if (votes == null || votes >= 10) {
++            // Upstream waits for 10 consistent reads; OpenChamber emits on the
++            // first successful decode (1–2 frame debounce is enough).
++            if (votes == null || votes >= 1) {
+                 // Do not filter out barcodes without raw value.
+                 barcodesWithEnoughVotes.add(barcode);
+             }

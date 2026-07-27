@@ -1,6 +1,16 @@
 import { describe, expect, mock, test } from 'bun:test';
 
-import { loadMobileConnections, migrateLegacyInlineTokenRecords, upsertMobileConnection, validateMobileConnectionSession, type MobileRelayConfig } from './mobileConnections';
+import {
+  failureReasonMessageKey,
+  loadMobileConnections,
+  mapPairingRedeemFailure,
+  migrateLegacyInlineTokenRecords,
+  mobileTransportCapability,
+  pairingCandidatesToMobile,
+  upsertMobileConnection,
+  validateMobileConnectionSession,
+  type MobileRelayConfig,
+} from './mobileConnections';
 
 const originalFetch = globalThis.fetch;
 const originalWindow = globalThis.window;
@@ -144,6 +154,86 @@ describe('mobile connection storage', () => {
       expect(relayEntries[0]?.label).toBe('Relay renamed');
     } finally {
       restoreGlobals();
+    }
+  });
+});
+
+describe('connect failure mapping', () => {
+  test('mapPairingRedeemFailure maps HTTP status to reasons', () => {
+    expect(mapPairingRedeemFailure(410)).toBe('pairing-expired');
+    expect(mapPairingRedeemFailure(404)).toBe('pairing-expired');
+    expect(mapPairingRedeemFailure(400)).toBe('pairing-expired');
+    expect(mapPairingRedeemFailure(409)).toBe('pairing-used');
+    expect(mapPairingRedeemFailure(401)).toBe('auth-required');
+    expect(mapPairingRedeemFailure(500)).toBe('server-error');
+    expect(mapPairingRedeemFailure(null)).toBe('unreachable');
+  });
+
+  test('failureReasonMessageKey returns stable i18n keys', () => {
+    expect(failureReasonMessageKey('relay-timeout')).toBe('mobile.connect.error.relayTimeout');
+    expect(failureReasonMessageKey('pairing-expired')).toBe('mobile.connect.error.pairingExpired');
+    expect(failureReasonMessageKey('storage-failed')).toBe('mobile.connect.error.storageFailed');
+  });
+
+  test('mobileTransportCapability summarizes candidate sets', () => {
+    expect(mobileTransportCapability([{ kind: 'relay', relay: testRelay }])).toBe('relay');
+    expect(mobileTransportCapability([
+      { kind: 'direct', url: 'http://192.168.1.5:2606' },
+      { kind: 'relay', relay: testRelay },
+    ])).toBe('lan+relay');
+    expect(mobileTransportCapability(
+      [{ kind: 'direct', url: 'http://192.168.1.5:2606' }, { kind: 'relay', relay: testRelay }],
+      'relay',
+    )).toBe('relay');
+  });
+});
+
+describe('pairingCandidatesToMobile', () => {
+  const relayCandidate = {
+    type: 'relay' as const,
+    priority: 10,
+    relayUrl: testRelay.relayUrl,
+    serverId: testRelay.serverId,
+    hostEncPubJwk: testRelay.hostEncPubJwk,
+  };
+
+  test('orders by priority with https before http before relay on ties', () => {
+    const ordered = pairingCandidatesToMobile([
+      { type: 'lan', url: 'http://192.168.1.5:2606', priority: 10 },
+      relayCandidate,
+      { type: 'tunnel', url: 'https://tunnel.example', priority: 10 },
+    ]);
+    expect(ordered.map((c) => c.kind === 'relay' ? 'relay' : c.url)).toEqual([
+      'https://tunnel.example',
+      'http://192.168.1.5:2606',
+      'relay',
+    ]);
+  });
+
+  test('on Capacitor, drops loopback when LAN/relay exist', () => {
+    const previous = (globalThis as { window?: unknown }).window;
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      value: {
+        Capacitor: { isNativePlatform: () => true },
+        location: { protocol: 'https:' },
+        localStorage: createLocalStorageStub(),
+      },
+    });
+    try {
+      // Loopback has the best numeric priority but must not be tried at all
+      // when a real LAN/relay candidate exists (false local /health).
+      const ordered = pairingCandidatesToMobile([
+        { type: 'lan', url: 'http://127.0.0.1:2606', priority: 1 },
+        { type: 'lan', url: 'http://192.168.1.5:2606', priority: 20 },
+        relayCandidate,
+      ]);
+      expect(ordered.map((c) => c.kind === 'relay' ? 'relay' : c.url)).toEqual([
+        'relay',
+        'http://192.168.1.5:2606',
+      ]);
+    } finally {
+      Object.defineProperty(globalThis, 'window', { configurable: true, value: previous });
     }
   });
 });
