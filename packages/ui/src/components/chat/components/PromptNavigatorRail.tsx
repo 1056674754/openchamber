@@ -5,7 +5,10 @@ import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
 import { useUIStore } from '@/stores/useUIStore';
 import { cn } from '@/lib/utils';
-import { getPromptPreview } from '../lib/promptNavigatorModel';
+import {
+    getPromptPreview,
+    resolvePromptNavigatorWindowStart,
+} from '../lib/promptNavigatorModel';
 
 type PromptEntry = {
     turnId: string;
@@ -34,7 +37,7 @@ const GUTTER_NARROW_WIDTH_PX = 12;
 const GUTTER_RIGHT_OFFSET_PX = 6;
 // The rail shows at most a window of ticks; hovering the gutter edges
 // carousels the window through the rest of the prompts.
-const MAX_VISIBLE_TICKS = 72;
+const MAX_VISIBLE_TICKS = 30;
 const TICK_PITCH_PX = 8;
 const EDGE_ZONE_PX = 16;
 const CAROUSEL_INTERVAL_MS = 80;
@@ -210,13 +213,11 @@ export function PromptNavigatorRail({
         if (highlightedIndex !== null) {
             return;
         }
-        const target = activeIndex >= 0 ? activeIndex : prompts.length - 1;
-        setWindowStart(() => {
-            const length = promptsLengthRef.current;
-            const count = Math.min(length, tickCapacityRef.current);
-            const maxStart = Math.max(0, length - count);
-            return Math.max(0, Math.min(maxStart, target - Math.floor(count / 2)));
-        });
+        setWindowStart(resolvePromptNavigatorWindowStart({
+            promptCount: promptsLengthRef.current,
+            visibleCount: tickCapacityRef.current,
+            activeIndex,
+        }));
     }, [activeIndex, highlightedIndex, prompts.length, tickCapacity]);
 
     const relativeIndexFromPointer = React.useCallback((clientY: number): number | null => {

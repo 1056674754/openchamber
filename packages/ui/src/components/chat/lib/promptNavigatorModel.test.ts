@@ -6,6 +6,7 @@ import {
     buildPromptPreviews,
     createPromptPreviewCache,
     getPromptPreview,
+    resolvePromptNavigatorWindowStart,
     resolvePromptNavigatorActiveTurnId,
     resolvePromptNavigatorVisibleTurnIds,
 } from './promptNavigatorModel';
@@ -85,6 +86,14 @@ describe('promptNavigatorModel', () => {
             previews,
             ['one', 'two', 'three'],
         )).toEqual(['one', 'three']);
+    });
+
+    test('keeps a bounded tick window movable when the full prompt history is longer', () => {
+        expect(resolvePromptNavigatorWindowStart({
+            promptCount: 45,
+            visibleCount: 30,
+            activeIndex: 35,
+        })).toBe(15);
     });
 
     test('reuses the preview map when streaming updates do not change user prompts', () => {

@@ -160,3 +160,24 @@ export const resolvePromptNavigatorVisibleTurnIds = (
     }
     return resolved;
 };
+
+export const resolvePromptNavigatorWindowStart = (input: {
+    readonly promptCount: number;
+    readonly visibleCount: number;
+    readonly activeIndex: number;
+}): number => {
+    const promptCount = Math.max(0, input.promptCount);
+    const visibleCount = Math.min(promptCount, Math.max(0, input.visibleCount));
+    if (promptCount === 0 || visibleCount === 0) {
+        return 0;
+    }
+
+    const target = input.activeIndex >= 0
+        ? Math.min(promptCount - 1, input.activeIndex)
+        : promptCount - 1;
+    const maxWindowStart = promptCount - visibleCount;
+    return Math.max(
+        0,
+        Math.min(maxWindowStart, target - Math.floor(visibleCount / 2)),
+    );
+};
