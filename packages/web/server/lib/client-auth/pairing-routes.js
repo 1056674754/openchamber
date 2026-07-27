@@ -168,10 +168,15 @@ export const registerClientAuthPairingRoutes = (app, deps) => {
 
   // Loopback is fine for the desktop UI talking to itself, but a phone that
   // scans the QR will resolve 127.0.0.1 to the phone — never this host.
+  // Also drop the unspecified addresses (0.0.0.0 / ::) which a phone cannot
+  // route to either.
   const isLoopbackCandidateUrl = (value) => {
     try {
-      const host = new URL(value).hostname.toLowerCase();
-      return host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]';
+      const host = new URL(value).hostname.toLowerCase().replace(/^\[|\]$/g, '');
+      if (host === 'localhost' || host === '::1' || host === '0.0.0.0' || host === '::') return true;
+      // 127/8 is the full IPv4 loopback block, not just 127.0.0.1.
+      if (/^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host)) return true;
+      return false;
     } catch {
       return false;
     }
@@ -219,10 +224,17 @@ export const registerClientAuthPairingRoutes = (app, deps) => {
       try {
         const relayCandidate = await getRelayPairingCandidate({ ensureEnabled: includeRelay === true });
         if (relayCandidate) candidates.push(relayCandidate);
-      } catch {
-        // A relay enable/status failure must not break direct pairing.
+      } catch (relayError) {
+        // Don't break direct pairing, but surface the failure — the previous
+        // silent swallow hid real relay provisioning failures and made
+        // "relay missing from candidates" impossible to diagnose.
+        console.warn('[pairing] relay candidate generation failed:', relayError?.message || relayError);
       }
     }
+    console.log(
+      '[pairing] candidates:',
+      candidates.length ? candidates.map((c) => `${c.type}@${c.priority}`).join(', ') : '(empty)',
+    );
     return candidates;
   };
 
