@@ -5,6 +5,7 @@ import App from '@/App';
 import { MobileInstancesSheet } from '@/apps/MobileInstancesSheet';
 import { SessionAuthGate } from '@/components/auth/SessionAuthGate';
 import { Button } from '@/components/ui/button';
+import { Icon } from '@/components/icon/Icon';
 import { Input } from '@/components/ui/input';
 import { RuntimeAPIProvider } from '@/contexts/RuntimeAPIProvider';
 import type { RuntimeAPIs } from '@/lib/api/types';
@@ -90,7 +91,6 @@ export const MobileApp: React.FC<MobileAppProps> = ({ apis }) => {
   const [url, setUrl] = React.useState('');
   const [password, setPassword] = React.useState('');
   const [scanBusy, setScanBusy] = React.useState(false);
-  const [manualOpen, setManualOpen] = React.useState(false);
   const [runtimeUrl, setRuntimeUrl] = React.useState(() => getRuntimeApiBaseUrl());
   const [autoConnectTried, setAutoConnectTried] = React.useState(false);
   const [autoConnectLabel, setAutoConnectLabel] = React.useState<string | null>(null);
@@ -264,7 +264,6 @@ export const MobileApp: React.FC<MobileAppProps> = ({ apis }) => {
       disconnectRuntime();
       setRuntimeUrl('');
       setUrl(connectionDisplayUrl(saved));
-      setManualOpen(true);
       return { ok: false as const, needsPassword: true as const };
     }
     if (result.status === 'connected') {
@@ -310,24 +309,16 @@ export const MobileApp: React.FC<MobileAppProps> = ({ apis }) => {
           </Button>
         </div>
       ) : null}
-      <div className="flex min-h-[100dvh] flex-col bg-background px-3 py-3 text-foreground header-safe-area bottom-safe-area">
-        <div className="mx-auto w-full max-w-md space-y-4">
-          <div className="space-y-1">
-            <h1 className="typography-ui-header font-semibold tracking-tight">OpenChamber</h1>
-            <p className="typography-meta leading-snug text-muted-foreground">
-              {t('mobile.connect.desktopQrHint')}
-            </p>
-          </div>
-
-          {showAutoSplash ? (
-            <p className="typography-ui-label text-muted-foreground">
-              {t('mobile.connect.connectingTo', { label: autoConnectLabel ?? '' })}
-            </p>
-          ) : null}
-
+      <div className="flex min-h-[100dvh] flex-col bg-background text-foreground header-safe-area">
+        <header className="flex items-center px-3 py-3">
+          <span className="typography-ui-label font-semibold tracking-tight">OpenChamber</span>
+        </header>
+        <div className="mx-auto flex w-full max-w-md flex-1 flex-col gap-4 px-3 pb-4 bottom-safe-area">
           {conn.connections.length > 0 ? (
             <div className="space-y-1.5">
-              <h2 className="typography-meta font-medium text-muted-foreground">{t('mobile.instances.saved')}</h2>
+              <h2 className="typography-micro font-medium uppercase tracking-wide text-muted-foreground">
+                {t('mobile.instances.saved')}
+              </h2>
               <ul className="space-y-1.5">
                 {conn.connections.map((saved) => {
                   const capability = mobileTransportCapability(
@@ -374,76 +365,77 @@ export const MobileApp: React.FC<MobileAppProps> = ({ apis }) => {
                 })}
               </ul>
             </div>
+          ) : (
+            <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
+              <Icon name="server" className="size-10 text-muted-foreground/50" />
+              <p className="typography-meta leading-snug text-muted-foreground">
+                {t('mobile.connect.desktopQrHint')}
+              </p>
+            </div>
+          )}
+
+          {showAutoSplash ? (
+            <p className="typography-ui-label text-muted-foreground">
+              {t('mobile.connect.connectingTo', { label: autoConnectLabel ?? '' })}
+            </p>
           ) : null}
 
-          <Button
-            type="button"
-            className="h-11 w-full"
-            disabled={conn.isBusy || scanBusy}
-            onClick={() => { void onScan(); }}
-          >
-            {scanBusy ? t('mobile.connect.scanning') : t('mobile.connect.scanQr')}
-          </Button>
-
-          {phaseKey && !scanBusy && conn.isBusy ? (
-            <p className="typography-meta text-center text-muted-foreground">{t(phaseKey)}</p>
-          ) : null}
-
-          <div className="space-y-2">
-            <button
+          <div className="mt-auto space-y-2 pt-2">
+            <Button
               type="button"
-              className="typography-meta text-muted-foreground underline-offset-2 hover:underline"
-              onClick={() => setManualOpen((open) => !open)}
+              className="h-11 w-full"
+              disabled={conn.isBusy || scanBusy}
+              onClick={() => { void onScan(); }}
             >
-              {manualOpen ? t('mobile.connect.hideManual') : t('mobile.connect.pasteLinkHint')}
-            </button>
+              {scanBusy ? t('mobile.connect.scanning') : t('mobile.connect.scanQr')}
+            </Button>
 
-            {manualOpen || conn.pendingConnection ? (
-              <form className="space-y-2" onSubmit={onSubmit}>
-                {conn.pendingConnection ? (
-                  <p className="typography-meta text-muted-foreground">
-                    {t('mobile.connect.passwordRequired')}
-                    {conn.pendingConnection.label ? ` · ${conn.pendingConnection.label}` : ''}
-                  </p>
-                ) : null}
+            {phaseKey && !scanBusy && conn.isBusy ? (
+              <p className="typography-meta text-center text-muted-foreground">{t(phaseKey)}</p>
+            ) : null}
+
+            <form className="space-y-2" onSubmit={onSubmit}>
+              {conn.pendingConnection ? (
+                <p className="typography-meta text-muted-foreground">
+                  {t('mobile.connect.passwordRequired')}
+                  {conn.pendingConnection.label ? ` · ${conn.pendingConnection.label}` : ''}
+                </p>
+              ) : null}
+              <Input
+                value={url}
+                onChange={(event) => setUrl(event.target.value)}
+                placeholder={t('mobile.connect.urlPlaceholder')}
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
+                disabled={conn.isBusy || Boolean(conn.pendingConnection)}
+                className="h-9 typography-ui-label"
+              />
+              {conn.pendingConnection || password ? (
                 <Input
-                  value={url}
-                  onChange={(event) => setUrl(event.target.value)}
-                  placeholder={t('mobile.connect.urlPlaceholder')}
-                  autoCapitalize="none"
-                  autoCorrect="off"
-                  spellCheck={false}
-                  disabled={conn.isBusy || Boolean(conn.pendingConnection)}
+                  type="password"
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  placeholder={t('mobile.connect.passwordPlaceholder')}
+                  disabled={conn.isBusy}
+                  autoFocus={Boolean(conn.pendingConnection)}
                   className="h-9 typography-ui-label"
                 />
-                {conn.pendingConnection || password ? (
-                  <Input
-                    type="password"
-                    value={password}
-                    onChange={(event) => setPassword(event.target.value)}
-                    placeholder={t('mobile.connect.passwordPlaceholder')}
-                    disabled={conn.isBusy}
-                    autoFocus={Boolean(conn.pendingConnection)}
-                    className="h-9 typography-ui-label"
-                  />
-                ) : null}
-                {conn.error ? (
-                  <p className="typography-meta text-[var(--status-error)]">{conn.error}</p>
-                ) : null}
-                <Button
-                  type="submit"
-                  size="sm"
-                  className="h-9 w-full"
-                  disabled={conn.isBusy || (!url.trim() && !conn.pendingConnection)}
-                >
-                  {conn.isBusy
-                    ? (phaseKey ? t(phaseKey) : t('mobile.connect.connecting'))
-                    : t('mobile.connect.submit')}
-                </Button>
-              </form>
-            ) : conn.error ? (
-              <p className="typography-meta text-[var(--status-error)]">{conn.error}</p>
-            ) : null}
+              ) : null}
+              {conn.error ? (
+                <p className="typography-meta text-[var(--status-error)]">{conn.error}</p>
+              ) : null}
+              <Button
+                type="submit"
+                size="sm"
+                className="h-9 w-full"
+                disabled={conn.isBusy || (!url.trim() && !conn.pendingConnection)}
+              >
+                {conn.isBusy
+                  ? (phaseKey ? t(phaseKey) : t('mobile.connect.connecting'))
+                  : t('mobile.connect.submit')}
+              </Button>
+            </form>
           </div>
         </div>
       </div>
