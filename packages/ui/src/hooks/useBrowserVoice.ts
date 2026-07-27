@@ -638,8 +638,13 @@ export function useBrowserVoice(): UseBrowserVoiceReturn {
       return;
     }
 
-    const handleVisibilityChange = () => {
-      if (document.visibilityState !== 'visible') {
+    // Capacitor appStateChange and visibilitychange can both fire on resume;
+    // coalesce so we only restart STT once.
+    let lastResumeAt = 0;
+    const RESUME_DEDUP_MS = 750;
+
+    const resumeListeningIfNeeded = (source: 'visibility' | 'capacitor') => {
+      if (source === 'visibility' && document.visibilityState !== 'visible') {
         return;
       }
       if (!pendingResumeOnVisibleRef.current) {
@@ -650,6 +655,12 @@ export function useBrowserVoice(): UseBrowserVoiceReturn {
         return;
       }
 
+      const now = Date.now();
+      if (now - lastResumeAt < RESUME_DEDUP_MS) {
+        pendingResumeOnVisibleRef.current = false;
+        return;
+      }
+      lastResumeAt = now;
       pendingResumeOnVisibleRef.current = false;
       setStatus('listening');
       try {
@@ -661,9 +672,18 @@ export function useBrowserVoice(): UseBrowserVoiceReturn {
       }
     };
 
+    const handleVisibilityChange = () => {
+      resumeListeningIfNeeded('visibility');
+    };
+    const handleCapacitorResume = () => {
+      resumeListeningIfNeeded('capacitor');
+    };
+
     document.addEventListener('visibilitychange', handleVisibilityChange);
+    document.addEventListener('openchamber:capacitor-resume', handleCapacitorResume);
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
+      document.removeEventListener('openchamber:capacitor-resume', handleCapacitorResume);
     };
   }, [conversationMode, isMobile, language, sttProvider, startCurrentSTT]);
 
