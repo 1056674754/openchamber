@@ -11,16 +11,21 @@ public class MainActivity extends BridgeActivity {
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        // Camera QR scan draws behind the WebView (ML Kit startScan). Keep the
-        // WebView transparent so the preview is visible when the connect UI
-        // toggles the barcode-scanner-active CSS class.
+        // Force the window background to the splash drawable at runtime. The
+        // theme windowBackground does not reliably surface through Capacitor's
+        // contentView, so without this the transparent WebView shows a bare
+        // black surface during the ~10s bundle-eval window on cold start.
+        getWindow().setBackgroundDrawableResource(R.drawable.splash_background);
         final View decor = getWindow().getDecorView();
-        decor.post(() -> {
-            WebView webView = findWebView(decor);
-            if (webView != null) {
-                webView.setBackgroundColor(Color.TRANSPARENT);
-            }
-        });
+        WebView webView = findWebView(decor);
+        if (webView != null) {
+            webView.setBackgroundColor(Color.TRANSPARENT);
+        } else {
+            decor.post(() -> {
+                WebView wv = findWebView(decor);
+                if (wv != null) wv.setBackgroundColor(Color.TRANSPARENT);
+            });
+        }
     }
 
     private static WebView findWebView(View root) {
