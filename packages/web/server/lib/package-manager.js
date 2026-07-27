@@ -12,6 +12,8 @@ const PACKAGE_NAME = '@openchamber/web';
 const PACKAGE_PATH_SEGMENTS = PACKAGE_NAME.split('/');
 const NPM_REGISTRY_URL = `https://registry.npmjs.org/${PACKAGE_NAME}`;
 const CHANGELOG_URL = 'https://raw.githubusercontent.com/btriapitsyn/openchamber/main/CHANGELOG.md';
+const GITHUB_RELEASES_URL = 'https://github.com/openchamber/openchamber/releases';
+const GITHUB_RELEASES_API_URL = 'https://api.github.com/repos/openchamber/openchamber/releases';
 let cachedDetectedPm = null;
 
 function getSpawnSyncBaseOptions() {
@@ -65,7 +67,14 @@ function mapArch(value) {
 }
 
 function normalizeAppType(value) {
-  if (value === 'web' || value === 'desktop-electron' || value === 'vscode') return value;
+  if (
+    value === 'web'
+    || value === 'desktop-electron'
+    || value === 'vscode'
+    || value === 'mobile-capacitor'
+  ) {
+    return value;
+  }
   return 'web';
 }
 
@@ -75,7 +84,16 @@ function normalizeDeviceClass(value) {
 }
 
 function normalizePlatform(value) {
-  if (value === 'macos' || value === 'windows' || value === 'linux' || value === 'web') return value;
+  if (
+    value === 'macos'
+    || value === 'windows'
+    || value === 'linux'
+    || value === 'web'
+    || value === 'android'
+    || value === 'ios'
+  ) {
+    return value;
+  }
   return mapPlatform(process.platform);
 }
 
@@ -84,13 +102,48 @@ function normalizeArch(value) {
   return mapArch(process.arch);
 }
 
+async function resolveAndroidApkUrl(version, candidateUrl) {
+  if (typeof candidateUrl === 'string') {
+    try {
+      if (new URL(candidateUrl).pathname.toLowerCase().endsWith('.apk')) return candidateUrl;
+    } catch {
+      // Resolve malformed or non-APK values from the authoritative release assets below.
+    }
+  }
+
+  try {
+    const response = await fetch(`${GITHUB_RELEASES_API_URL}/tags/v${version}`, {
+      headers: {
+        Accept: 'application/vnd.github+json',
+        'User-Agent': 'openchamber-update-check',
+      },
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!response.ok) return undefined;
+
+    const release = await response.json();
+    const apkAssets = Array.isArray(release?.assets)
+      ? release.assets.filter((asset) => (
+        typeof asset?.name === 'string'
+        && asset.name.toLowerCase().endsWith('.apk')
+        && typeof asset.browser_download_url === 'string'
+      ))
+      : [];
+    const canonicalAsset = apkAssets.find((asset) => /^OpenChamber-.+-android\.apk$/i.test(asset.name));
+    return (canonicalAsset || apkAssets[0])?.browser_download_url;
+  } catch {
+    return undefined;
+  }
+}
+
 async function checkForUpdatesFromApi(currentVersion, options = {}) {
   try {
     const appType = normalizeAppType(options.appType);
     const hostPlatform = mapPlatform(process.platform);
     const hostArch = mapArch(process.arch);
-    const platform = appType === 'vscode' ? normalizePlatform(options.platform) : hostPlatform;
-    const arch = appType === 'vscode' ? normalizeArch(options.arch) : hostArch;
+    const usesClientPlatform = appType === 'vscode' || appType === 'mobile-capacitor';
+    const platform = usesClientPlatform ? normalizePlatform(options.platform) : hostPlatform;
+    const arch = usesClientPlatform ? normalizeArch(options.arch) : hostArch;
     const payload = {
       appType,
       deviceClass: normalizeDeviceClass(options.deviceClass),
@@ -120,11 +173,25 @@ async function checkForUpdatesFromApi(currentVersion, options = {}) {
     const versionComparison = compareVersions(data.latestVersion, currentVersion);
     if (versionComparison < 0) return null;
 
+    const downloadUrl = typeof data.downloadUrl === 'string'
+      ? data.downloadUrl
+      : typeof data.download?.url === 'string'
+        ? data.download.url
+        : undefined;
+    const updateAvailable = Boolean(data.updateAvailable) && versionComparison > 0;
+    const mobileDownloadUrl = updateAvailable && appType === 'mobile-capacitor' && platform === 'android'
+      ? await resolveAndroidApkUrl(data.latestVersion, downloadUrl)
+      : undefined;
+
     return {
-      available: Boolean(data.updateAvailable) && versionComparison > 0,
+      available: updateAvailable,
       version: data.latestVersion,
       currentVersion,
       body: typeof data.releaseNotes === 'string' ? data.releaseNotes : undefined,
+      releaseUrl: typeof data.releaseNotesUrl === 'string'
+        ? data.releaseNotesUrl
+        : `${GITHUB_RELEASES_URL}/tag/v${data.latestVersion}`,
+      downloadUrl: mobileDownloadUrl,
       nextSuggestedCheckInSec:
         typeof data.nextSuggestedCheckInSec === 'number' && Number.isFinite(data.nextSuggestedCheckInSec)
           ? data.nextSuggestedCheckInSec
@@ -723,6 +790,9 @@ export async function checkForUpdates(options = {}) {
   const currentVersion = options.currentVersion || getCurrentVersion();
   const pm = detectPackageManager();
   const appType = normalizeAppType(options.appType);
+  const platform = (appType === 'vscode' || appType === 'mobile-capacitor')
+    ? normalizePlatform(options.platform)
+    : mapPlatform(process.platform);
 
   if (currentVersion !== 'unknown') {
     const remote = await checkForUpdatesFromApi(currentVersion, options);
@@ -753,8 +823,12 @@ export async function checkForUpdates(options = {}) {
 
   const available = compareVersions(latestVersion, currentVersion) > 0;
   let changelog;
+  let downloadUrl;
   if (available) {
     changelog = await fetchChangelogNotes(currentVersion, latestVersion);
+    if (appType === 'mobile-capacitor' && platform === 'android') {
+      downloadUrl = await resolveAndroidApkUrl(latestVersion);
+    }
   }
 
   return {
@@ -762,6 +836,8 @@ export async function checkForUpdates(options = {}) {
     version: latestVersion,
     currentVersion,
     body: changelog,
+    releaseUrl: `${GITHUB_RELEASES_URL}/tag/v${latestVersion}`,
+    downloadUrl,
     packageManager: pm,
     // Show our CLI command, not raw package manager command
     updateCommand: 'openchamber update',
