@@ -54,13 +54,24 @@ const disablesTimestamp = builderArgs.some((arg) => {
 });
 
 if (isMac && isDirBuild && !hasExplicitIdentity && !hasCertificateBundle) {
-  const identity = findIdentity(APPLE_DEVELOPMENT_PREFIX);
+  // Prefer the team Developer ID so local QA shares the release Team ID.
+  // macOS TCC keys authorizations to bundle id + Team ID; mixing Apple
+  // Development (personal team) with Developer ID (company team) resets
+  // privacy prompts (mic, folders, automation, iCloud) on every switch.
+  // Fall back to Apple Development only when Developer ID is absent from
+  // this keychain (e.g. a contributor machine without release credentials).
+  const identity = findIdentity(DEVELOPER_ID_PREFIX) || findIdentity(APPLE_DEVELOPMENT_PREFIX);
   if (identity) {
-    env.CSC_NAME = identity;
+    env.CSC_NAME = identity.startsWith(DEVELOPER_ID_PREFIX)
+      ? toElectronBuilderIdentityName(identity)
+      : identity;
     builderArgs.push('-c.mac.timestamp=none');
-    console.log(`[electron] using local app-only codesigning identity: ${identity}`);
+    const scope = identity.startsWith(DEVELOPER_ID_PREFIX)
+      ? ' (team-aligned with release)'
+      : ' (Apple Development; Team ID differs from release — expect TCC reset)';
+    console.log(`[electron] using local app-only codesigning identity: ${identity}${scope}`);
   } else {
-    console.warn('[electron] no Apple Development codesigning identity found; --dir build may be ad-hoc signed.');
+    console.warn('[electron] no Developer ID or Apple Development identity found; --dir build may be ad-hoc signed.');
   }
 }
 

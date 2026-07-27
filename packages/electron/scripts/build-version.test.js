@@ -7,8 +7,16 @@ describe('Electron build version', () => {
     const builtAt = new Date('2026-07-21T04:05:06.000Z');
 
     expect(createBuildVersion('1.16.0-sscity', builtAt, 'UTC')).toBe(
-      '1.16.0-sscity.20260721.040506',
+      '1.16.0-sscity.20260721-040506',
     );
+  });
+
+  it('keeps early-morning timestamps valid for electron-updater semver checks', () => {
+    const builtAt = new Date('2026-07-26T17:23:23.000Z'); // Asia/Shanghai 01:23:23
+
+    const version = createBuildVersion('1.16.0-sscity', builtAt, 'Asia/Shanghai');
+    expect(version).toBe('1.16.0-sscity.20260727-012323');
+    expect(version.includes('.012323')).toBe(false);
   });
 
   it('rejects a source version that could misrepresent the merge baseline', () => {

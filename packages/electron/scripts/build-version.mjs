@@ -22,5 +22,8 @@ export const createBuildVersion = (sourceVersion, builtAt = new Date(), timeZone
   const date = `${value('year')}${value('month')}${value('day')}`;
   const time = `${value('hour')}${value('minute')}${value('second')}`;
 
-  return `${BUILD_VERSION_PREFIX}.${date}.${time}`;
+  // Use `YYYYMMDD-HHMMSS` as one prerelease identifier. A dotted time segment
+  // like `.012323` is invalid semver (numeric identifiers cannot have leading
+  // zeros), which crashes electron-updater for builds between 00:00 and 09:59.
+  return `${BUILD_VERSION_PREFIX}.${date}-${time}`;
 };

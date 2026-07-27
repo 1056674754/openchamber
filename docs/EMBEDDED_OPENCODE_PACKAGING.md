@@ -31,7 +31,7 @@ Read this document before any of the following:
 
 OpenChamber's `packages/electron/scripts/after-pack.cjs` calls `embedded-opencode.cjs` during packaging. The hook copies the selected OpenCode binary into the app bundle, assigns executable permissions, signs it, verifies it, runs `--version`, and writes `Resources/opencode/metadata.json`. Electron Builder then performs the final recursive application signing pass.
 
-OpenChamber's source version is `1.16.0-sscity` after the v1.16.0 migration audit and validation closed. Every Electron package appends its Asia/Shanghai build time and emits `1.16.0-sscity.YYYYMMDD.HHMMSS`. This generated value is the package metadata and About-dialog version. Do not advance the baseline again until the migration table records the next upstream baseline as fully audited.
+OpenChamber's source version is `1.16.0-sscity` after the v1.16.0 migration audit and validation closed. Every Electron package appends its Asia/Shanghai build time and emits `1.16.0-sscity.YYYYMMDD-HHMMSS` (hyphen before time so early-morning `0HHMMSS` stays valid semver for electron-updater). This generated value is the package metadata and About-dialog version. Do not advance the baseline again until the migration table records the next upstream baseline as fully audited.
 
 ## 1. Build the custom OpenCode binary
 
@@ -92,7 +92,7 @@ cd /Users/song/dev_ai/openchamber-merge-v1.11.0
 bun run electron:build
 ```
 
-This produces `packages/electron/dist/mac-arm64/OpenChamber.app` and uses an `Apple Development` identity when available. It is intended for local runtime QA only. It is not evidence of Developer ID distribution readiness or notarization.
+This produces `packages/electron/dist/mac-arm64/OpenChamber.app`. The signing identity prefers the team `Developer ID Application` certificate so local QA shares the release Team ID; it falls back to `Apple Development` only when Developer ID is absent from the keychain (for example, a contributor machine). Keeping Team ID stable across rebuilds prevents macOS TCC prompts (microphone, folders, automation, iCloud) from resetting on every switch. Local `--dir` builds disable signing timestamps; they are intended for runtime QA only and are not evidence of notarization readiness.
 
 This is the default mode when the user asks to build, install, replace, or open
 OpenChamber on this Mac. Do not invoke the Developer ID release workflow or
