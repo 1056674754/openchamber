@@ -44,6 +44,12 @@ import { useChatSurfaceMode } from './useChatSurfaceMode';
 import { MobileAgentButton } from './MobileAgentButton';
 import { MobileModelButton } from './MobileModelButton';
 import { MobileSessionStatusBar } from './MobileSessionStatusBar';
+import {
+  canNavigateComposerHistoryDown,
+  canNavigateComposerHistoryUp,
+  resolveComposerHistoryArrowDown,
+  resolveComposerHistoryArrowUp,
+} from './composerHistoryNavigation';
 import { useCurrentSessionActivity } from '@/hooks/useSessionActivity';
 import { useVisualViewport } from '@/hooks/useVisualViewport';
 import { setKeyboardInsetCssVar } from '@/hooks/nativeMobileChrome';
@@ -2892,10 +2898,16 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         // ArrowUp: only when cursor at start (position 0) or input is empty
         // ArrowDown: also works when cursor at end (to cycle forward through history)
         const isAnyAutocompleteOpen = showCommandAutocomplete || showSkillAutocomplete || showSnippetAutocomplete || showFileMention;
-        const cursorAtStart = textareaRef.current?.selectionStart === 0 && textareaRef.current?.selectionEnd === 0;
-        const cursorAtEnd = textareaRef.current?.selectionStart === message.length && textareaRef.current?.selectionEnd === message.length;
-        const canNavigateHistoryUp = !isAnyAutocompleteOpen && (message.length === 0 || cursorAtStart);
-        const canNavigateHistoryDown = !isAnyAutocompleteOpen && (message.length === 0 || cursorAtEnd);
+        const historySelectionStart = textareaRef.current?.selectionStart ?? 0;
+        const historySelectionEnd = textareaRef.current?.selectionEnd ?? 0;
+        const historyNavGate = {
+          autocompleteOpen: isAnyAutocompleteOpen,
+          messageLength: message.length,
+          selectionStart: historySelectionStart,
+          selectionEnd: historySelectionEnd,
+        };
+        const canNavigateHistoryUp = canNavigateComposerHistoryUp(historyNavGate);
+        const canNavigateHistoryDown = canNavigateComposerHistoryDown(historyNavGate);
 
         if (inputMode === 'normal' && !isAnyAutocompleteOpen && !e.metaKey && !e.ctrlKey && !e.altKey) {
             const textarea = textareaRef.current;
@@ -2950,38 +2962,37 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         }
 
         if (e.key === 'ArrowUp' && canNavigateHistoryUp && userMessageHistory.length > 0) {
+            const step = resolveComposerHistoryArrowUp({
+              historyIndex,
+              historyLength: userMessageHistory.length,
+            });
+            if (step.type === 'noop') return;
             e.preventDefault();
-            if (historyIndex === -1) {
-                // Entering history mode - save current input as draft
+            if (step.type === 'enter') {
                 setDraftMessage(message);
                 setHistoryIndex(0);
                 setMessage(userMessageHistory[0]);
-            } else if (historyIndex < userMessageHistory.length - 1) {
-                // Navigate to older message
-                const newIndex = historyIndex + 1;
-                setHistoryIndex(newIndex);
-                setMessage(userMessageHistory[newIndex]);
+            } else if (step.type === 'older') {
+                setHistoryIndex(step.index);
+                setMessage(userMessageHistory[step.index]);
             }
-            // Move cursor to start after history navigation
             requestAnimationFrame(() => {
                 textareaRef.current?.setSelectionRange(0, 0);
             });
-            // If at oldest message, do nothing
             return;
         }
 
         if (e.key === 'ArrowDown' && canNavigateHistoryDown && historyIndex >= 0) {
+            const step = resolveComposerHistoryArrowDown({ historyIndex });
+            if (step.type === 'noop') return;
             e.preventDefault();
-            if (historyIndex === 0) {
-                // Exit history mode - restore draft
+            if (step.type === 'exit') {
                 setHistoryIndex(-1);
                 setMessage(draftMessage);
                 setDraftMessage('');
-            } else {
-                // Navigate to newer message
-                const newIndex = historyIndex - 1;
-                setHistoryIndex(newIndex);
-                setMessage(userMessageHistory[newIndex]);
+            } else if (step.type === 'newer') {
+                setHistoryIndex(step.index);
+                setMessage(userMessageHistory[step.index]);
             }
             return;
         }

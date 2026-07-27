@@ -1157,6 +1157,19 @@ describe("abortCurrentOperation", () => {
     expect(aborted).toBe(false)
     expect(sessionCalls.filter((call) => call.method === "session.abort")).toHaveLength(1)
   })
+
+  test("fails closed when session directory is unknown (does not use live UI directory)", async () => {
+    const activeStore = createStore({})
+    const childStores = createChildStores([["/test/active", activeStore]])
+
+    const { setActionRefs, abortCurrentOperation } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/test/active")
+
+    const aborted = await abortCurrentOperation("missing-session")
+
+    expect(aborted).toBe(false)
+    expect(sessionCalls.filter((call) => call.method === "session.abort")).toHaveLength(0)
+  })
 })
 
 describe("revertToMessage", () => {

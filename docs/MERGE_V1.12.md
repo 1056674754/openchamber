@@ -1395,7 +1395,7 @@ VS Code worktree lock 验证：在两个真实临时 Git 仓库及 `--no-checkou
 | queue drag reorder | `messageQueueStore.ts`、`QueuedMessageChips.tsx` | ✅ 已完成；拖拽只改变队列次序，保留 queued item 对象及 `sendConfig` + `sendTarget` 快照 |
 | model picker reorder/accordion/Shift+Delete + thinking variant | `ModelPickerList.tsx`、`ModelControls.tsx`、agents settings | ✅ provider order + accordion 已按 `serverId` 落地（#5）；Shift+Delete 永久删除仍不移植；thinking variant 已有 |
 | agent temp/topP/thinking save/clear | `AgentsPage.tsx`、`useAgentsStore.ts`、server agents/config | 本 fork 已做过 prompt/permission persistence；新增字段要按 custom/project/user 层级合并 |
-| session project binding / pinned/folder empty refresh / worktree snap-back | sidebar hooks、global sessions store、project selection | fork 有 remote instance、Global Pinned、session markers；所有 fallback 必须使用 session/directory authoritative context |
+| session project binding / pinned/folder empty refresh / worktree snap-back | sidebar hooks、global sessions store、project selection | ✅ 收口（[#52](https://coding.s-s.city/songsong/openchamber/-/issues/52)）：`projectResolution` + draft 冻结；folder/pinned 空刷新保护；worktree passive selection；abort fail-closed（无 session directory 不回退 live UI dir） |
 | worktree session bootstrap gate / draft generate materialization | worktree store、session actions、GitView generate | 不能破坏 `[OPENCHAMBER-FORK] ensureWorktreeProject` 和 pending draft flow |
 | subagent 删除级联 | `SessionNodeItem`、`useSessionActions`、delete/archive flow | fork 已有 export/delete subtask 文案和运行中跳过逻辑；需保留 per-child partial failure |
 | VS Code font prefs / mobile exact grouping / mobile history | `packages/vscode/*`、mobile apps | 可做，但建议平台批次，不和 web/desktop 混合 |
@@ -1426,8 +1426,8 @@ VS Code worktree lock 验证：在两个真实临时 Git 仓库及 `--no-checkou
 3. **小修批次 C**: header encoding、MiniMax quota、skills catalog refresh、provider disconnect、Git push sync、Preview duplicate token；VS Code Insiders、line-range refs / first changed line 与第二轮 JSON/VS Code/Windows CLI 小修已完成。
 4. **GitHub PR status 批次 D**: timeout/rate-limit/cooldown/concurrent metadata，并验证启动时 session/diff/message 不被 PR status 阻塞。
 5. **Queue/Steer 批次 E (已完成)**: boolean 已迁到 Follow-up behavior (`steer` / `queue`) 并复用本 fork `steer-side-channel`；后续 queue drag reorder 单独处理。
-6. **Session/worktree 批次 F**: selected project binding、folder/pinned refresh、worktree snap-back、subagent delete cascade；timeline dialog load earlier 已完成。其余项必须按 `openchamber-context-authority` 校准 directory/serverId。
-7. **Chat input/abort 批次 G**: pasted `@`、ArrowUp、question dismiss、slash skill 调用、cross-project abort routing，全部补 focused tests。
-8. **Voice/Small Model 批次 H（#12 基础已完成）**: capability + settings + Notes consumer 已落地；session-assist / TTS summarized / git generation 仍可后续加。Goals：`#29`/`#33`/`#34`/`#35` 已落地（remote 需远端 OC 广告 `/api/goals/capability`）。
+6. **Session/worktree 批次 F**: ✅ 收口（[#52](https://coding.s-s.city/songsong/openchamber/-/issues/52)）。selected project binding、folder/pinned refresh、worktree snap-back、subagent delete cascade、timeline earlier load 已在树；`abortCurrentOperation` 缺 session directory 时 fail closed（不回退 `_getDirectory()`）。
+7. **Chat input/abort 批次 G**: ✅ 收口（[#53](https://coding.s-s.city/songsong/openchamber/-/issues/53)）。pasted `@` / question dismiss / slash skill / cross-project abort 已有 focused tests；ArrowUp/Down history 抽为 `composerHistoryNavigation` + 测试，条件与 1.16.x 一致（无 autocomplete、折叠光标在首/尾）。
+8. **Voice/Small Model 批次 H（#12 基础已完成）**: capability + settings + Notes consumer 已落地；session-assist / TTS summarized / git generation 仍可后续加（[#54](https://coding.s-s.city/songsong/openchamber/-/issues/54)）。Goals：`#29`/`#33`/`#34`/`#35` 已落地（remote 需远端 OC 广告 `/api/goals/capability`）。
 9. **v1.15 UI 批次 I (部分完成)**: code line number/wrap 已按现有 Markdown 架构适配；Mermaid zoom、ambiguous transport failure、Markdown preview 继续逐项处理。
 10. **高风险 milestone**: server-persisted auto-accept、chat scroll + auto-follow、OpenCode process ownership、Markdown/Shiki rewrite、mobile/native app、private relay/pairing、bulk docs/i18n，分别处理。`#35` Remote Goals / `#27` macOS tray / `#8` Pierre / `#6` auto-review / `#7` CLI live-port / `#17` Windows tray 已关闭。

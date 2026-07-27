@@ -1326,32 +1326,27 @@ export async function abortCurrentOperation(sessionId: string): Promise<boolean>
     return false
   }
 
-  const liveDirectory = _getDirectory() || undefined
-  let sessionDirectory: string | undefined
-  let sessionDirectoryError: string | undefined
+  // Fail closed: abort must target the session's own directory, never the
+  // active UI directory fallback (cross-project mis-route risk).
+  let sessionDirectory: string
   try {
     sessionDirectory = requireSessionDirectory(sessionId, "abortCurrentOperation")
   } catch (err) {
-    sessionDirectoryError = String(err)
+    console.error("[session-actions] abort: FAILED — no session directory", {
+      sessionId,
+      error: String(err),
+    })
+    return false
   }
 
-  const directories = new Set<string>()
-  const targetDirectory = sessionDirectory ?? liveDirectory
-  if (targetDirectory) directories.add(targetDirectory)
+  const directories = new Set<string>([sessionDirectory])
 
   console.info("[session-actions] abort: directories resolved", {
     sessionId,
-    liveDirectory: liveDirectory || null,
-    sessionDirectory: sessionDirectory || null,
-    sessionDirectoryError: sessionDirectoryError || null,
+    sessionDirectory,
     candidates: [...directories],
     count: directories.size,
   })
-
-  if (directories.size === 0) {
-    console.error("[session-actions] abort: FAILED — no directory", { sessionId })
-    return false
-  }
 
   let client: OpencodeClient
   try {
