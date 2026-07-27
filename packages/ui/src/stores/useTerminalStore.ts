@@ -8,6 +8,7 @@ import { getSafeSessionStorage } from '@/stores/utils/safeStorage';
 export interface TerminalChunk {
   id: number;
   data: string;
+  replayData?: string;
 }
 
 export type TerminalTabLifecycle = 'idle' | 'running' | 'exited';
@@ -20,6 +21,7 @@ export type TerminalTab = {
   iconKey: string | null;
   bufferChunks: TerminalChunk[];
   bufferLength: number;
+  lastSequence: number;
   isConnecting: boolean;
   createdAt: number;
   previewUrl: string | null;
@@ -61,7 +63,8 @@ interface TerminalStore {
   setTabSessionId: (directory: string, tabId: string, sessionId: string | null, serverId?: string) => void;
   setTabLifecycle: (directory: string, tabId: string, lifecycle: TerminalTabLifecycle, serverId?: string) => void;
   setConnecting: (directory: string, tabId: string, isConnecting: boolean, serverId?: string) => void;
-  appendToBuffer: (directory: string, tabId: string, chunk: string, serverId?: string) => void;
+  replaceBuffer: (directory: string, tabId: string, content: string, sequence: number, serverId?: string) => void;
+  appendToBuffer: (directory: string, tabId: string, chunk: string, serverId?: string, sequence?: number, replayData?: string) => void;
   clearBuffer: (directory: string, tabId: string, serverId?: string) => void;
   setTabPreviewUrl: (directory: string, tabId: string, url: string | null, options?: { locked?: boolean; autoOpened?: boolean }, serverId?: string) => void;
   markPreviewAutoOpened: (directory: string, tabId: string, serverId?: string) => void;
@@ -130,6 +133,7 @@ const createEmptyTab = (id: string, label: string): TerminalTab => ({
   iconKey: null,
   bufferChunks: [],
   bufferLength: 0,
+  lastSequence: -1,
   isConnecting: false,
   createdAt: Date.now(),
   previewUrl: null,
@@ -397,7 +401,7 @@ export const useTerminalStore = create<TerminalStore>()(
               terminalSessionId: sessionId,
               lifecycle: nextLifecycle,
               isConnecting: false,
-              ...(shouldResetBuffer ? { bufferChunks: [], bufferLength: 0 } : {}),
+              ...(shouldResetBuffer ? { bufferChunks: [], bufferLength: 0, lastSequence: -1 } : {}),
             };
 
             const nextTabs = [...existing.tabs];
@@ -449,7 +453,54 @@ export const useTerminalStore = create<TerminalStore>()(
           });
         },
 
-        appendToBuffer: (directory: string, tabId: string, chunk: string, serverId?: string) => {
+        replaceBuffer: (directory: string, tabId: string, content: string, sequence: number, serverId?: string) => {
+          const key = makeStoreKey(directory, serverId);
+          set((state) => {
+            const existing = state.sessions.get(key);
+            if (!existing) return state;
+            const idx = findTabIndex(existing, tabId);
+            if (idx < 0 || existing.tabs[idx].lastSequence > sequence) return state;
+            const tab = existing.tabs[idx];
+            // Preserve painted live output when a reattach snapshot is still empty
+            // (common while shells emit only CSI queries into history).
+            if (!content && tab.bufferLength > 0) {
+              if (tab.lastSequence === sequence) return state;
+              const nextTabs = [...existing.tabs];
+              nextTabs[idx] = { ...tab, lastSequence: sequence };
+              const sessions = new Map(state.sessions);
+              sessions.set(key, { ...existing, tabs: nextTabs });
+              return { sessions };
+            }
+            if (
+              tab.lastSequence === sequence
+              && tab.bufferLength === content.length
+              && tab.bufferChunks.map((chunk) => chunk.data).join('') === content
+            ) {
+              return state;
+            }
+            const chunkId = state.nextChunkId;
+            const bufferChunks = content ? [{ id: chunkId, data: content }] : [];
+            const nextTabs = [...existing.tabs];
+            nextTabs[idx] = {
+              ...tab,
+              bufferChunks,
+              bufferLength: content.length,
+              lastSequence: sequence,
+            };
+            const sessions = new Map(state.sessions);
+            sessions.set(key, { ...existing, tabs: nextTabs });
+            return { sessions, nextChunkId: content ? chunkId + 1 : chunkId };
+          });
+        },
+
+        appendToBuffer: (
+          directory: string,
+          tabId: string,
+          chunk: string,
+          serverId?: string,
+          sequence?: number,
+          replayData?: string,
+        ) => {
           if (!chunk) {
             return;
           }
@@ -468,8 +519,15 @@ export const useTerminalStore = create<TerminalStore>()(
             }
 
             const tab = existing.tabs[idx];
+            if (sequence !== undefined && sequence <= tab.lastSequence) {
+              return state;
+            }
             const chunkId = state.nextChunkId;
-            const chunkEntry: TerminalChunk = { id: chunkId, data: chunk };
+            const chunkEntry: TerminalChunk = {
+              id: chunkId,
+              data: chunk,
+              ...(replayData !== undefined && replayData !== chunk ? { replayData } : {}),
+            };
 
             const bufferChunks = [...tab.bufferChunks, chunkEntry];
             let bufferLength = tab.bufferLength + chunk.length;
@@ -487,6 +545,7 @@ export const useTerminalStore = create<TerminalStore>()(
               ...tab,
               bufferChunks,
               bufferLength,
+              lastSequence: sequence ?? tab.lastSequence,
             };
             newSessions.set(key, { ...existing, tabs: nextTabs });
 
@@ -613,6 +672,7 @@ export const useTerminalStore = create<TerminalStore>()(
               ...nextTabs[idx],
               bufferChunks: [],
               bufferLength: 0,
+              lastSequence: -1,
             };
             newSessions.set(key, { ...existing, tabs: nextTabs });
             return { sessions: newSessions };
@@ -714,6 +774,7 @@ export const useTerminalStore = create<TerminalStore>()(
                 createdAt: typeof rawTab.createdAt === 'number' ? rawTab.createdAt : Date.now(),
                 bufferChunks: [],
                 bufferLength: 0,
+                lastSequence: -1,
                 isConnecting: false,
                 previewUrl: null,
                 previewAutoOpened: false,

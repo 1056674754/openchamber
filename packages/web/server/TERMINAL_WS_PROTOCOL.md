@@ -1,48 +1,48 @@
-# Terminal WebSocket Transport Protocol
+# Terminal WebSocket Protocol (v3)
 
-## Goal
-Use a single persistent WebSocket for terminal input and output, while keeping the legacy SSE output route and HTTP input route as compatibility fallbacks.
+Authoritative ownership lives in [`lib/terminal/DOCUMENTATION.md`](lib/terminal/DOCUMENTATION.md).
 
-## Scope
-- Primary full-duplex path: WebSocket (`/api/terminal/ws`)
-- Legacy output fallback: SSE (`/api/terminal/:sessionId/stream`)
-- HTTP input fallback remains: `POST /api/terminal/:sessionId/input`
+## Transport
 
-## Framing
-- Text frame:
-  - client -> server: terminal keystroke payload
-  - server -> client: raw PTY output chunk
-- Binary frame: control envelope
-  - Byte 0: tag (`0x01` = JSON control)
-  - Bytes 1..N: UTF-8 JSON payload
+- Single data plane: WebSocket `GET /api/terminal/ws`
+- Binary JSON control frames (`0x01` + UTF-8 JSON)
+- Protocol version: **v3** (`capabilities.ws.v === 3` on create/restart)
+- No SSE output (`/api/terminal/:sessionId/stream`) and no HTTP input (`POST .../input`)
 
-## Control Messages
-- Bind active socket to terminal session:
-  - client -> server: `{"t":"b","s":"<sessionId>","v":2}`
-- Keepalive ping:
-  - client -> server: `{"t":"p","v":2}`
-  - server -> client: `{"t":"po","v":2}`
-- Server control responses:
-  - ready: `{"t":"ok","v":2}`
-  - bind ok: `{"t":"bok","s":"<sessionId>","runtime":"node|bun","ptyBackend":"...","v":2}`
-  - exit: `{"t":"x","s":"<sessionId>","exitCode":0,"signal":null}`
-  - error: `{"t":"e","c":"<code>","f":true|false}`
+## Control messages
 
-## Multiplexing Model
-- Single shared socket per client runtime.
-- Socket has one mutable bound session.
-- Client sends a bind control when the active terminal changes.
-- Text frames always apply to the currently bound session.
-- PTY output is pushed back over the same socket as text frames.
-- Client keeps the socket primed so both stream subscription and input reuse the same transport.
+Client → server:
 
-## Security
-- UI auth session required when UI password is enabled.
-- Origin validation enforced for cookie-authenticated browser upgrades.
-- Invalid or malformed frames are rate-limited and may close the socket.
+| `t` | Purpose |
+|---|---|
+| `hello` | Optional handshake ack |
+| `ping` | Keepalive |
+| `attach` `{s}` | Attach socket to a terminal session |
+| `detach` `{s}` | Detach one session |
+| `write` `{s,d}` | Write input to a specific session |
 
-## Fallback Behavior
-- New clients prefer `capabilities.stream.ws` and reuse the same socket for input.
-- If stream WebSocket capability is unavailable, clients fall back to SSE output.
-- If terminal input cannot be sent over WebSocket, clients fall back to HTTP input.
-- The removed `/api/terminal/input-ws` path should fail with `404 Not Found`.
+Server → client:
+
+| `t` | Purpose |
+|---|---|
+| `hello` | Socket ready |
+| `pong` | Keepalive reply |
+| `snapshot` `{s,q,history,status,...}` | Authoritative late-attach state |
+| `output` `{s,q,d,r?}` | Live output (`r` = replay-safe sanitized bytes) |
+| `exit` `{s,q,exitCode,signal}` | Process exited |
+| `restarted` `{s,q,history}` | Same id, new process |
+| `error` `{s?,code,message,fatal}` | Scoped or global error |
+
+## HTTP command plane (still used)
+
+- `POST /api/terminal/create`
+- `GET /api/terminal/shells`
+- `POST /api/terminal/:sessionId/resize`
+- `POST /api/terminal/:sessionId/appearance`
+- `POST /api/terminal/:sessionId/restart`
+- `DELETE /api/terminal/:sessionId`
+- `POST /api/terminal/force-kill`
+
+## Fork notes
+
+OpenChamber keeps multi-instance UI keys (`serverId:directory`) and per-`baseUrl` client transports. Protocol framing matches upstream v3; do not reintroduce v2 `b`/`bok` bind or chunk-cursor replay.

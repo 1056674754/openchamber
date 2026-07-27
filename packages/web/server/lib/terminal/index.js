@@ -22,10 +22,11 @@ export {
   createTerminalWsControlFrame as createTerminalInputWsControlFrame,
 } from './terminal-ws-protocol.js';
 
+export { createTerminalRuntime } from './runtime.js';
+export { sanitizeTerminalHistoryChunk } from './history.js';
 export {
-  TERMINAL_OUTPUT_REPLAY_MAX_BYTES,
-  createTerminalOutputReplayBuffer,
-  appendTerminalOutputReplayChunk,
-  listTerminalOutputReplayChunksSince,
-  getLatestTerminalOutputReplayChunkId,
-} from './output-replay-buffer.js';
+  createTerminalShellResolver,
+  getTerminalShellLoginArgs,
+  normalizeTerminalShell,
+} from './shells.js';
+export { consumeTerminalThemeQueries, terminalThemeModeReport } from './theme-response.js';

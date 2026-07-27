@@ -1235,7 +1235,9 @@ const TerminalViewport = React.forwardRef<TerminalController, TerminalViewportPr
       }
 
       if (pending.length > 0) {
-        enqueueWrite(pending.map((chunk) => chunk.data).join(''));
+        // Prefer server-sanitized replay payload when present (strips CSI queries
+        // like DSR that otherwise paint as garbage on mobile WebViews).
+        enqueueWrite(pending.map((chunk) => chunk.replayData ?? chunk.data).join(''));
       }
 
       lastProcessedChunkIdRef.current = chunks[chunks.length - 1].id;

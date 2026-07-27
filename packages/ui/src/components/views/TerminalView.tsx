@@ -115,6 +115,7 @@ export const TerminalView: React.FC = () => {
     const setTabSessionId = useTerminalStore((s) => s.setTabSessionId);
     const setTabLifecycle = useTerminalStore((s) => s.setTabLifecycle);
     const setConnecting = useTerminalStore((s) => s.setConnecting);
+    const replaceBuffer = useTerminalStore((s) => s.replaceBuffer);
     const appendToBuffer = useTerminalStore((s) => s.appendToBuffer);
     const setTabPreviewUrl = useTerminalStore((s) => s.setTabPreviewUrl);
     const clearBuffer = useTerminalStore((s) => s.clearBuffer);
@@ -189,7 +190,6 @@ export const TerminalView: React.FC = () => {
     const terminalControllerRef = React.useRef<TerminalController | null>(null);
     const lastViewportSizeRef = React.useRef<{ cols: number; rows: number } | null>(null);
     const isTerminalVisibleRef = React.useRef(false);
-    const nudgeOnConnectTerminalIdRef = React.useRef<string | null>(null);
     const rehydratedTerminalIdsRef = React.useRef<Set<string>>(new Set());
     const rehydratedSnapshotTakenRef = React.useRef(false);
     const previewScanTailRef = React.useRef('');
@@ -379,20 +379,30 @@ export const TerminalView: React.FC = () => {
                         }
 
                         switch (event.type) {
-                            case 'connected': {
+                            case 'connected':
+                            case 'snapshot': {
+                                const sequence = typeof event.sequence === 'number' ? event.sequence : 0;
+                                const snapshotData = event.data ?? '';
+                                // Empty snapshots preserve existing buffer in the store (query-only history).
+                                replaceBuffer(directory, tabId, snapshotData, sequence, serverId);
+                                if (event.status === 'exited') {
+                                    setTabLifecycle(directory, tabId, 'exited', serverId);
+                                } else {
+                                    const lifecycle = useTerminalStore.getState()
+                                        .getDirectoryState(directory, serverId)
+                                        ?.tabs.find((tab) => tab.id === tabId)
+                                        ?.lifecycle;
+                                    if (lifecycle !== 'running') {
+                                        setTabLifecycle(directory, tabId, 'running', serverId);
+                                    }
+                                }
                                 setConnecting(directory, tabId, false, serverId);
                                 setConnectionError(null);
                                 setIsFatalError(false);
                                 setIsReconnectPending(false);
                                 focusTerminalWhenWindowActive();
-
-                                // After a reload, buffer is empty and a reused PTY can look "stuck"
-                                // until the first output arrives. Nudge with a newline once.
-                                if (nudgeOnConnectTerminalIdRef.current === terminalId) {
-                                    nudgeOnConnectTerminalIdRef.current = null;
-                                    void terminal.sendInput(terminalId, '\r', streamBaseUrl).catch(() => {
-                                        // ignore
-                                    });
+                                if (snapshotData) {
+                                    scanTerminalPreviewOutput(directory, tabId, snapshotData, serverId, streamBaseUrl);
                                 }
                                 break;
                             }
@@ -405,7 +415,14 @@ export const TerminalView: React.FC = () => {
                             }
                             case 'data': {
                                 if (event.data) {
-                                    appendToBuffer(directory, tabId, event.data, serverId);
+                                    appendToBuffer(
+                                        directory,
+                                        tabId,
+                                        event.data,
+                                        serverId,
+                                        event.sequence,
+                                        event.replayData,
+                                    );
                                     scanTerminalPreviewOutput(directory, tabId, event.data, serverId, streamBaseUrl);
                                 }
                                 break;
@@ -481,6 +498,7 @@ export const TerminalView: React.FC = () => {
             clearBuffer,
             disconnectStream,
             focusTerminalWhenWindowActive,
+            replaceBuffer,
             resetTerminalPreviewScan,
             scanTerminalPreviewOutput,
             setConnecting,
@@ -490,6 +508,14 @@ export const TerminalView: React.FC = () => {
             terminal,
         ]
     );
+
+    // Tear the stream only when leaving the tab/directory context — not when create
+    // writes terminalSessionId/lifecycle into the store (that used to blank mobile).
+    React.useEffect(() => {
+        return () => {
+            disconnectStream();
+        };
+    }, [activeTabId, effectiveDirectory, activeServerId, disconnectStream]);
 
     React.useEffect(() => {
         let cancelled = false;
@@ -532,12 +558,6 @@ export const TerminalView: React.FC = () => {
             const terminalLifecycle = tab?.lifecycle ?? 'idle';
             const isActionTab = Boolean(tab?.label?.startsWith('Action:'));
             const hasBufferedOutput = (tab?.bufferLength ?? 0) > 0 || (tab?.bufferChunks?.length ?? 0) > 0;
-
-            const shouldNudgeExisting =
-                Boolean(terminalId) &&
-                rehydratedTerminalIdsRef.current.has(terminalId as string) &&
-                (tab?.bufferLength ?? 0) === 0 &&
-                (tab?.bufferChunks?.length ?? 0) === 0;
 
             const isRehydratedSession =
                 Boolean(terminalId) && rehydratedTerminalIdsRef.current.has(terminalId as string);
@@ -608,9 +628,6 @@ export const TerminalView: React.FC = () => {
                 rehydratedTerminalIdsRef.current.delete(terminalId);
             }
 
-            if (shouldNudgeExisting) {
-                nudgeOnConnectTerminalIdRef.current = terminalId;
-            }
             startStream(
                 directory,
                 tabId,
@@ -624,14 +641,11 @@ export const TerminalView: React.FC = () => {
 
         return () => {
             cancelled = true;
-            terminalIdRef.current = null;
-            disconnectStream();
         };
     }, [
         hasActiveContext,
         effectiveDirectory,
-        terminalSessionId,
-        terminalLifecycle,
+        // Omit terminalSessionId / terminalLifecycle — create must not self-disconnect.
         activeTabId,
         hasOpenedTerminalViewport,
         viewportSizeVersion,
@@ -793,9 +807,15 @@ export const TerminalView: React.FC = () => {
     const handleViewportResize = React.useCallback(
         (cols: number, rows: number) => {
             const previous = lastViewportSizeRef.current;
-            if (!previous || previous.cols !== cols || previous.rows !== rows) {
+            const sizeChanged = !previous || previous.cols !== cols || previous.rows !== rows;
+            if (sizeChanged) {
                 lastViewportSizeRef.current = { cols, rows };
-                setViewportSizeVersion((version) => version + 1);
+                // First measured size must kick ensureSession (create needs cols/rows).
+                // Later fits only resize the PTY — bumping version would tear the WS and
+                // often blank the viewport via an empty history snapshot.
+                if (!previous) {
+                    setViewportSizeVersion((version) => version + 1);
+                }
             }
             if (!isTerminalVisibleRef.current) {
                 return;
@@ -931,13 +951,13 @@ export const TerminalView: React.FC = () => {
 
     const xtermTheme = React.useMemo(() => convertThemeToXterm(currentTheme), [currentTheme]);
 
+    // Stable across null→sessionId so Ghostty is not remounted (and blanked) on create.
     const terminalViewportKey = React.useMemo(() => {
         const serverPart = activeServerId === 'default' ? '' : `${activeServerId}::`;
         const directoryPart = effectiveDirectory ?? 'no-dir';
         const tabPart = activeTabId ?? 'no-tab';
-        const terminalPart = terminalSessionId ?? 'no-terminal';
-        return `${serverPart}${directoryPart}::${tabPart}::${terminalPart}`;
-    }, [activeServerId, effectiveDirectory, activeTabId, terminalSessionId]);
+        return `${serverPart}${directoryPart}::${tabPart}`;
+    }, [activeServerId, effectiveDirectory, activeTabId]);
 
     React.useEffect(() => {
         if (!isTerminalVisible || useTouchTerminalInput) {
