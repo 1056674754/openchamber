@@ -178,6 +178,25 @@ describe('settings helpers', () => {
     });
   });
 
+  it('accepts session pin fields for desktop/mobile sync', () => {
+    const helpers = createModelPrefsTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({
+      pinnedSessions: ['ses_a', 'ses_a', ''],
+      pinnedSessionOrder: ['ses_a'],
+      pinnedSessionsByProject: { '/proj': ['ses_b', 'ses_b'] },
+      pinnedSessionOrderByProject: { '/proj': ['ses_b'] },
+    })).toEqual({
+      pinnedSessions: ['ses_a'],
+      pinnedSessionOrder: ['ses_a'],
+      pinnedSessionsByProject: { '/proj': ['ses_b'] },
+      pinnedSessionOrderByProject: { '/proj': ['ses_b'] },
+    });
+
+    expect(helpers.formatSettingsResponse({}).pinnedSessions).toBeUndefined();
+    expect(helpers.formatSettingsResponse({ pinnedSessions: ['ses_a'] }).pinnedSessions).toEqual(['ses_a']);
+  });
+
   it('accepts desktopKeepAwakeEnabled as a persisted shared setting', () => {
     const helpers = createTestHelpers();
 

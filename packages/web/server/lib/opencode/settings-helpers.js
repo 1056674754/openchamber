@@ -36,6 +36,19 @@ export const createSettingsHelpers = (dependencies) => {
   const MODEL_PICKER_LAYOUT_MAX_ORDER = 256;
   const MODEL_PICKER_LAYOUT_MAX_COLLAPSED = 256;
 
+  const normalizeStringRecordOfStringArrays = (value) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return undefined;
+    }
+    const result = {};
+    for (const [key, ids] of Object.entries(value)) {
+      if (typeof key !== 'string' || key.length === 0) continue;
+      if (!Array.isArray(ids)) continue;
+      result[key] = normalizeStringArray(ids);
+    }
+    return result;
+  };
+
   const normalizeModelPickerStringList = (value, limit) => {
     if (!Array.isArray(value)) return [];
     const seen = new Set();
@@ -266,7 +279,20 @@ export const createSettingsHelpers = (dependencies) => {
           .filter((entry) => typeof entry === 'string' && entry.length > 0)
       );
     }
-
+    if (Array.isArray(candidate.pinnedSessions)) {
+      result.pinnedSessions = normalizeStringArray(candidate.pinnedSessions);
+    }
+    if (Array.isArray(candidate.pinnedSessionOrder)) {
+      result.pinnedSessionOrder = normalizeStringArray(candidate.pinnedSessionOrder);
+    }
+    const pinnedSessionsByProject = normalizeStringRecordOfStringArrays(candidate.pinnedSessionsByProject);
+    if (pinnedSessionsByProject) {
+      result.pinnedSessionsByProject = pinnedSessionsByProject;
+    }
+    const pinnedSessionOrderByProject = normalizeStringRecordOfStringArrays(candidate.pinnedSessionOrderByProject);
+    if (pinnedSessionOrderByProject) {
+      result.pinnedSessionOrderByProject = pinnedSessionOrderByProject;
+    }
 
     if (typeof candidate.uiFont === 'string' && candidate.uiFont.length > 0) {
       result.uiFont = candidate.uiFont;
@@ -1015,6 +1041,22 @@ export const createSettingsHelpers = (dependencies) => {
       approvedDirectories: approved,
       securityScopedBookmarks: bookmarks,
       pinnedDirectories: normalizeStringArray(settings.pinnedDirectories),
+      // Omit session-pin fields when never persisted so clients can migrate local pins once.
+      ...(Array.isArray(settings.pinnedSessions)
+        ? { pinnedSessions: normalizeStringArray(settings.pinnedSessions) }
+        : {}),
+      ...(Array.isArray(settings.pinnedSessionOrder)
+        ? { pinnedSessionOrder: normalizeStringArray(settings.pinnedSessionOrder) }
+        : {}),
+      ...(settings.pinnedSessionsByProject && typeof settings.pinnedSessionsByProject === 'object'
+        ? { pinnedSessionsByProject: normalizeStringRecordOfStringArrays(settings.pinnedSessionsByProject) || {} }
+        : {}),
+      ...(settings.pinnedSessionOrderByProject && typeof settings.pinnedSessionOrderByProject === 'object'
+        ? {
+            pinnedSessionOrderByProject:
+              normalizeStringRecordOfStringArrays(settings.pinnedSessionOrderByProject) || {},
+          }
+        : {}),
       typographySizes: sanitizeTypographySizesPartial(settings.typographySizes),
       showReasoningTraces:
         typeof settings.showReasoningTraces === 'boolean'

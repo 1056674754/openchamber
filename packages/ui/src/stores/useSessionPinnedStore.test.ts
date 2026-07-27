@@ -25,6 +25,13 @@ mock.module('@/stores/utils/safeStorage', () => ({
   getSafeSessionStorage: () => mockStorage,
 }));
 
+const updateDesktopSettingsCalls: Array<Record<string, unknown>> = [];
+mock.module('@/lib/persistence', () => ({
+  updateDesktopSettings: async (changes: Record<string, unknown>) => {
+    updateDesktopSettingsCalls.push(changes);
+  },
+}));
+
 const { useSessionPinnedStore } = await import('./useSessionPinnedStore');
 
 const resetStore = () => {
@@ -34,6 +41,7 @@ const resetStore = () => {
 describe('useSessionPinnedStore', () => {
   beforeEach(() => {
     memoryStore.clear();
+    updateDesktopSettingsCalls.length = 0;
     resetStore();
   });
 
@@ -155,6 +163,46 @@ describe('useSessionPinnedStore', () => {
       );
 
       expect(useSessionPinnedStore.getState().ids).toEqual(new Set(['original']));
+    });
+  });
+
+  describe('host settings sync', () => {
+    test('toggle pushes pinnedSessions to host settings', () => {
+      useSessionPinnedStore.getState().toggle('sess-1');
+      expect(updateDesktopSettingsCalls.some(
+        (call) => JSON.stringify(call) === JSON.stringify({ pinnedSessions: ['sess-1'] }),
+      )).toBe(true);
+    });
+
+    test('replaceFromRemote updates ids without pushing to host', () => {
+      useSessionPinnedStore.getState().replaceFromRemote(['remote-a', 'remote-b']);
+      expect(useSessionPinnedStore.getState().ids).toEqual(new Set(['remote-a', 'remote-b']));
+      expect(updateDesktopSettingsCalls).toEqual([]);
+    });
+
+    test('settings-synced with pinnedSessions applies remotely', () => {
+      if (typeof window === 'undefined') return;
+      window.dispatchEvent(
+        new CustomEvent('openchamber:settings-synced', {
+          detail: { pinnedSessions: ['host-1'] },
+        }),
+      );
+      expect(useSessionPinnedStore.getState().ids).toEqual(new Set(['host-1']));
+      expect(updateDesktopSettingsCalls).toEqual([]);
+    });
+
+    test('settings-synced without pinnedSessions migrates local pins', () => {
+      if (typeof window === 'undefined') return;
+      useSessionPinnedStore.getState().replaceFromRemote(['local-1']);
+      updateDesktopSettingsCalls.length = 0;
+      window.dispatchEvent(
+        new CustomEvent('openchamber:settings-synced', {
+          detail: { themeId: 'x' },
+        }),
+      );
+      expect(updateDesktopSettingsCalls.some(
+        (call) => JSON.stringify(call) === JSON.stringify({ pinnedSessions: ['local-1'] }),
+      )).toBe(true);
     });
   });
 });

@@ -15,6 +15,15 @@ import {
   migrateModelPickerLayoutState,
   sanitizeModelPickerLayoutByServerId,
 } from '@/lib/modelPickerLayout';
+import {
+  SESSION_PINNED_BY_PROJECT_STORAGE_KEY,
+  SESSION_PINNED_ORDER_BY_PROJECT_STORAGE_KEY,
+  SESSION_PINNED_ORDER_STORAGE_KEY,
+  SESSION_PINNED_STORAGE_KEY,
+  sanitizePinnedSessionIds,
+  sanitizePinnedSessionsByKey,
+} from '@/lib/sessionPinSettings';
+import { subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 
 const persistToLocalStorage = (settings: DesktopSettings) => {
   if (typeof window === 'undefined') {
@@ -65,6 +74,26 @@ const persistToLocalStorage = (settings: DesktopSettings) => {
     localStorage.setItem('pinnedDirectories', JSON.stringify(settings.pinnedDirectories));
   } else {
     localStorage.removeItem('pinnedDirectories');
+  }
+  // Only touch session-pin keys when the host actually persisted them.
+  // Omitting the field must not wipe local pins before one-time migration.
+  if (Array.isArray(settings.pinnedSessions)) {
+    localStorage.setItem(SESSION_PINNED_STORAGE_KEY, JSON.stringify(settings.pinnedSessions));
+  }
+  if (settings.pinnedSessionsByProject && typeof settings.pinnedSessionsByProject === 'object') {
+    localStorage.setItem(
+      SESSION_PINNED_BY_PROJECT_STORAGE_KEY,
+      JSON.stringify(settings.pinnedSessionsByProject),
+    );
+  }
+  if (Array.isArray(settings.pinnedSessionOrder)) {
+    localStorage.setItem(SESSION_PINNED_ORDER_STORAGE_KEY, JSON.stringify(settings.pinnedSessionOrder));
+  }
+  if (settings.pinnedSessionOrderByProject && typeof settings.pinnedSessionOrderByProject === 'object') {
+    localStorage.setItem(
+      SESSION_PINNED_ORDER_BY_PROJECT_STORAGE_KEY,
+      JSON.stringify(settings.pinnedSessionOrderByProject),
+    );
   }
 
   if (Array.isArray(settings.projects) && settings.projects.length > 0) {
@@ -795,6 +824,22 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
       )
     );
   }
+  const pinnedSessions = sanitizePinnedSessionIds(candidate.pinnedSessions);
+  if (pinnedSessions) {
+    result.pinnedSessions = pinnedSessions;
+  }
+  const pinnedSessionsByProject = sanitizePinnedSessionsByKey(candidate.pinnedSessionsByProject);
+  if (pinnedSessionsByProject) {
+    result.pinnedSessionsByProject = pinnedSessionsByProject;
+  }
+  const pinnedSessionOrder = sanitizePinnedSessionIds(candidate.pinnedSessionOrder);
+  if (pinnedSessionOrder) {
+    result.pinnedSessionOrder = pinnedSessionOrder;
+  }
+  const pinnedSessionOrderByProject = sanitizePinnedSessionsByKey(candidate.pinnedSessionOrderByProject);
+  if (pinnedSessionOrderByProject) {
+    result.pinnedSessionOrderByProject = pinnedSessionOrderByProject;
+  }
   if (typeof candidate.showReasoningTraces === 'boolean') {
     result.showReasoningTraces = candidate.showReasoningTraces;
   }
@@ -1354,6 +1399,13 @@ const fetchWebSettings = async (): Promise<DesktopSettings | null> => {
 export const invalidateSettingsCache = (): void => {
   _settingsCache = null;
 };
+
+// Mobile/desktop host switches must not reuse a previous endpoint's GET cache.
+if (typeof window !== 'undefined') {
+  subscribeRuntimeEndpointChanged(() => {
+    invalidateSettingsCache();
+  });
+}
 
 export const syncDesktopSettings = async (): Promise<void> => {
   if (typeof window === 'undefined') {

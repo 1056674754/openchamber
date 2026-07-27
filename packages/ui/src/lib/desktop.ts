@@ -66,6 +66,14 @@ export type DesktopSettings = {
   approvedDirectories?: string[];
   securityScopedBookmarks?: string[];
    pinnedDirectories?: string[];
+  /** Global session pins — shared via host settings (desktop ↔ mobile). */
+  pinnedSessions?: string[];
+  /** Per-project session pins keyed by project path/id. */
+  pinnedSessionsByProject?: Record<string, string[]>;
+  /** Display order for global pinned sessions. */
+  pinnedSessionOrder?: string[];
+  /** Display order for per-project pinned sessions. */
+  pinnedSessionOrderByProject?: Record<string, string[]>;
    showReasoningTraces?: boolean;
    draftStarters?: DraftStarterRef[];
    collapsibleThinkingBlocks?: boolean;

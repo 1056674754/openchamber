@@ -19,7 +19,21 @@ import { useUIStore } from '@/stores/useUIStore';
 import { getSafeStorage } from '@/stores/utils/safeStorage';
 import { useSessionPinnedStore } from '@/stores/useSessionPinnedStore';
 import { useGitStore, useGitAllBranches, useGitRepoStatusMap } from '@/stores/useGitStore';
+import type { DesktopSettings } from '@/lib/desktop';
 import { isVSCodeRuntime } from '@/lib/desktop';
+import { updateDesktopSettings } from '@/lib/persistence';
+import {
+  SESSION_PINNED_BY_PROJECT_STORAGE_KEY,
+  SESSION_PINNED_ORDER_BY_PROJECT_STORAGE_KEY,
+  SESSION_PINNED_ORDER_STORAGE_KEY,
+  arePinnedByProjectMapsEqual,
+  arePinnedOrderByProjectMapsEqual,
+  areStringArraysEqual,
+  mapPinnedOrderByProject,
+  mapPinnedSessionsByProject,
+  pinnedOrderByProjectToMap,
+  pinnedSessionsByProjectToMap,
+} from '@/lib/sessionPinSettings';
 import { NewWorktreeDialog } from './NewWorktreeDialog';
 import { ScheduledTasksDialog } from './ScheduledTasksDialog';
 import { RegenerateTitleDialog } from './RegenerateTitleDialog';
@@ -121,9 +135,6 @@ const DEPRECATED_SESSION_EXPANDED_STORAGE_KEYS = [
   'oc.sessions.expandedParents.v2',
   'oc.sessions.expandedParents',
 ] as const;
-const SESSION_PINNED_PER_PROJECT_STORAGE_KEY = 'oc.sessions.pinnedByProject';
-const SESSION_PINNED_ORDER_STORAGE_KEY = 'oc.sessions.pinnedOrder';
-const SESSION_PINNED_ORDER_BY_PROJECT_STORAGE_KEY = 'oc.sessions.pinnedOrderByProject';
 const WORKTREE_DISCOVERY_CONCURRENCY = 3;
 
 type PrVisualState = 'draft' | 'open' | 'blocked' | 'merged' | 'closed';
@@ -322,7 +333,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   const setGlobalPinnedIds = useSessionPinnedStore((state) => state.setIds);
   const [pinnedSessionIdsByProject, setPinnedSessionIdsByProject] = React.useState<Map<string, Set<string>>>(() => {
     try {
-      const raw = getSafeStorage().getItem(SESSION_PINNED_PER_PROJECT_STORAGE_KEY);
+      const raw = getSafeStorage().getItem(SESSION_PINNED_BY_PROJECT_STORAGE_KEY);
       if (!raw) {
         return new Map();
       }
@@ -922,17 +933,115 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
     setCollapsedProjects,
   });
 
-  // [2026-05-04] Persist per-project pins to safeStorage
+  const isInitialProjectPinsSync = React.useRef(true);
+  const isInitialPinnedOrderSync = React.useRef(true);
+  const isInitialPinnedOrderByProjectSync = React.useRef(true);
+  const suppressProjectPinsHostSync = React.useRef(false);
+  const pinnedSessionIdsByProjectRef = React.useRef(pinnedSessionIdsByProject);
+  const pinnedOrderRef = React.useRef(pinnedOrder);
+  const pinnedOrderByProjectRef = React.useRef(pinnedOrderByProject);
+  pinnedSessionIdsByProjectRef.current = pinnedSessionIdsByProject;
+  pinnedOrderRef.current = pinnedOrder;
+  pinnedOrderByProjectRef.current = pinnedOrderByProject;
+
+  // Apply host-synced project pins / order (and migrate local → host once).
   React.useEffect(() => {
-    try {
-      const obj: Record<string, string[]> = {};
-      pinnedSessionIdsByProject.forEach((ids, key) => {
-        obj[key] = Array.from(ids);
+    let cancelled = false;
+
+    const withHostSyncSuppressed = (apply: () => void) => {
+      suppressProjectPinsHostSync.current = true;
+      apply();
+      queueMicrotask(() => {
+        suppressProjectPinsHostSync.current = false;
       });
-      getSafeStorage().setItem(SESSION_PINNED_PER_PROJECT_STORAGE_KEY, JSON.stringify(obj));
+    };
+
+    const applyFromSettings = (settings: DesktopSettings) => {
+      if (cancelled) return;
+      if (settings.pinnedSessionsByProject && typeof settings.pinnedSessionsByProject === 'object') {
+        const next = pinnedSessionsByProjectToMap(settings.pinnedSessionsByProject);
+        withHostSyncSuppressed(() => {
+          setPinnedSessionIdsByProject((prev) => (arePinnedByProjectMapsEqual(prev, next) ? prev : next));
+        });
+      }
+      if (Array.isArray(settings.pinnedSessionOrder)) {
+        const nextOrder = [...settings.pinnedSessionOrder];
+        withHostSyncSuppressed(() => {
+          setPinnedOrder((prev) => (areStringArraysEqual(prev, nextOrder) ? prev : nextOrder));
+        });
+      }
+      if (settings.pinnedSessionOrderByProject && typeof settings.pinnedSessionOrderByProject === 'object') {
+        const next = pinnedOrderByProjectToMap(settings.pinnedSessionOrderByProject);
+        withHostSyncSuppressed(() => {
+          setPinnedOrderByProject((prev) => (arePinnedOrderByProjectMapsEqual(prev, next) ? prev : next));
+        });
+      }
+    };
+
+    const maybeMigrateLocalPins = (settings: DesktopSettings) => {
+      const hasProjectPins = settings.pinnedSessionsByProject && typeof settings.pinnedSessionsByProject === 'object';
+      const hasOrder = Array.isArray(settings.pinnedSessionOrder);
+      const hasOrderByProject = settings.pinnedSessionOrderByProject
+        && typeof settings.pinnedSessionOrderByProject === 'object';
+      if (hasProjectPins || hasOrder || hasOrderByProject) {
+        applyFromSettings(settings);
+        return;
+      }
+
+      const byProject = mapPinnedSessionsByProject(pinnedSessionIdsByProjectRef.current);
+      const orderByProject = mapPinnedOrderByProject(pinnedOrderByProjectRef.current);
+      const payload: Partial<DesktopSettings> = {};
+      if (Object.keys(byProject).length > 0) payload.pinnedSessionsByProject = byProject;
+      if (pinnedOrderRef.current.length > 0) payload.pinnedSessionOrder = pinnedOrderRef.current;
+      if (Object.keys(orderByProject).length > 0) payload.pinnedSessionOrderByProject = orderByProject;
+      if (Object.keys(payload).length > 0) {
+        void updateDesktopSettings(payload);
+      }
+    };
+
+    const handleSettingsSynced = (event: Event) => {
+      const detail = (event as CustomEvent<DesktopSettings>).detail;
+      if (!detail) return;
+      maybeMigrateLocalPins(detail);
+    };
+
+    window.addEventListener('openchamber:settings-synced', handleSettingsSynced);
+
+    void (async () => {
+      try {
+        const response = await fetch('/api/config/settings', {
+          method: 'GET',
+          headers: { Accept: 'application/json' },
+        });
+        if (!response.ok || cancelled) return;
+        const data = (await response.json().catch(() => null)) as DesktopSettings | null;
+        if (!data || cancelled) return;
+        maybeMigrateLocalPins(data);
+      } catch (error) {
+        console.warn('Failed to load session pins from host settings:', error);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      window.removeEventListener('openchamber:settings-synced', handleSettingsSynced);
+    };
+  }, []);
+
+  // Persist per-project pins to safeStorage + host settings
+  React.useEffect(() => {
+    const obj = mapPinnedSessionsByProject(pinnedSessionIdsByProject);
+    try {
+      getSafeStorage().setItem(SESSION_PINNED_BY_PROJECT_STORAGE_KEY, JSON.stringify(obj));
     } catch {
       // ignored
     }
+    if (isInitialProjectPinsSync.current) {
+      isInitialProjectPinsSync.current = false;
+      return;
+    }
+    if (suppressProjectPinsHostSync.current) return;
+    void updateDesktopSettings({ pinnedSessionsByProject: obj });
   }, [pinnedSessionIdsByProject]);
 
   React.useEffect(() => {
@@ -941,6 +1050,12 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
     } catch {
       // ignored
     }
+    if (isInitialPinnedOrderSync.current) {
+      isInitialPinnedOrderSync.current = false;
+      return;
+    }
+    if (suppressProjectPinsHostSync.current) return;
+    void updateDesktopSettings({ pinnedSessionOrder: pinnedOrder });
   }, [pinnedOrder]);
 
   React.useEffect(() => {
@@ -959,15 +1074,18 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
   }, [pinnedSessionIds]);
 
   React.useEffect(() => {
+    const obj = mapPinnedOrderByProject(pinnedOrderByProject);
     try {
-      const obj: Record<string, string[]> = {};
-      pinnedOrderByProject.forEach((order, key) => {
-        obj[key] = order;
-      });
       getSafeStorage().setItem(SESSION_PINNED_ORDER_BY_PROJECT_STORAGE_KEY, JSON.stringify(obj));
     } catch {
       // ignored
     }
+    if (isInitialPinnedOrderByProjectSync.current) {
+      isInitialPinnedOrderByProjectSync.current = false;
+      return;
+    }
+    if (suppressProjectPinsHostSync.current) return;
+    void updateDesktopSettings({ pinnedSessionOrderByProject: obj });
   }, [pinnedOrderByProject]);
 
   React.useEffect(() => {

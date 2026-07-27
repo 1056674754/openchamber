@@ -1,7 +1,8 @@
 import { create } from 'zustand';
+import type { DesktopSettings } from '@/lib/desktop';
+import { updateDesktopSettings } from '@/lib/persistence';
+import { SESSION_PINNED_STORAGE_KEY, areStringSetsEqual } from '@/lib/sessionPinSettings';
 import { getSafeStorage } from './utils/safeStorage';
-
-const SESSION_PINNED_STORAGE_KEY = 'oc.sessions.pinned';
 
 const readPinned = (storage: Storage): Set<string> => {
   try {
@@ -27,10 +28,19 @@ type SessionPinnedStore = {
   ids: Set<string>;
   setIds: (next: Set<string> | ((prev: Set<string>) => Set<string>)) => void;
   toggle: (sessionId: string) => void;
+  replaceFromRemote: (ids: string[]) => void;
   rehydrate: () => void;
 };
 
 const safeStorage = getSafeStorage();
+
+/** When true, local mutations must not PUT back to host settings. */
+let suppressHostSync = false;
+
+const syncPinnedSessionsToHost = (ids: Set<string>): void => {
+  if (suppressHostSync) return;
+  void updateDesktopSettings({ pinnedSessions: [...ids] });
+};
 
 export const useSessionPinnedStore = create<SessionPinnedStore>((set, get) => ({
   ids: readPinned(safeStorage),
@@ -40,6 +50,7 @@ export const useSessionPinnedStore = create<SessionPinnedStore>((set, get) => ({
     if (resolved === current) return;
     set({ ids: resolved });
     persistPinned(safeStorage, resolved);
+    syncPinnedSessionsToHost(resolved);
   },
   toggle: (sessionId) => {
     const current = get().ids;
@@ -51,12 +62,33 @@ export const useSessionPinnedStore = create<SessionPinnedStore>((set, get) => ({
     }
     set({ ids: next });
     persistPinned(safeStorage, next);
+    syncPinnedSessionsToHost(next);
+  },
+  replaceFromRemote: (ids) => {
+    const next = new Set(ids.filter((item): item is string => typeof item === 'string' && item.length > 0));
+    const current = get().ids;
+    if (areStringSetsEqual(current, next)) {
+      persistPinned(safeStorage, next);
+      return;
+    }
+    suppressHostSync = true;
+    try {
+      set({ ids: next });
+      persistPinned(safeStorage, next);
+    } finally {
+      suppressHostSync = false;
+    }
   },
   rehydrate: () => {
     const next = readPinned(safeStorage);
     const current = get().ids;
-    if (next.size === current.size && [...next].every((id) => current.has(id))) return;
-    set({ ids: next });
+    if (areStringSetsEqual(next, current)) return;
+    suppressHostSync = true;
+    try {
+      set({ ids: next });
+    } finally {
+      suppressHostSync = false;
+    }
   },
 }));
 
@@ -65,5 +97,21 @@ if (typeof window !== 'undefined') {
   window.addEventListener('storage', (event) => {
     if (event.key !== SESSION_PINNED_STORAGE_KEY) return;
     useSessionPinnedStore.getState().rehydrate();
+  });
+
+  window.addEventListener('openchamber:settings-synced', (event: Event) => {
+    const detail = (event as CustomEvent<DesktopSettings>).detail;
+    if (!detail) return;
+
+    if (Array.isArray(detail.pinnedSessions)) {
+      useSessionPinnedStore.getState().replaceFromRemote(detail.pinnedSessions);
+      return;
+    }
+
+    // Host has never persisted global pins — upload local once (desktop migration).
+    const local = [...useSessionPinnedStore.getState().ids];
+    if (local.length > 0) {
+      void updateDesktopSettings({ pinnedSessions: local });
+    }
   });
 }
