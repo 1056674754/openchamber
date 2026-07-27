@@ -1,7 +1,11 @@
 import { create } from 'zustand';
 import type { DesktopSettings } from '@/lib/desktop';
 import { updateDesktopSettings } from '@/lib/persistence';
-import { SESSION_PINNED_STORAGE_KEY, areStringSetsEqual } from '@/lib/sessionPinSettings';
+import {
+  SESSION_PINNED_STORAGE_KEY,
+  areStringSetsEqual,
+  markHostSessionPinsApplied,
+} from '@/lib/sessionPinSettings';
 import { getSafeStorage } from './utils/safeStorage';
 
 const readPinned = (storage: Storage): Set<string> => {
@@ -105,10 +109,12 @@ if (typeof window !== 'undefined') {
 
     if (Array.isArray(detail.pinnedSessions)) {
       useSessionPinnedStore.getState().replaceFromRemote(detail.pinnedSessions);
+      markHostSessionPinsApplied();
       return;
     }
 
-    // Host has never persisted global pins — upload local once (desktop migration).
+    // Host responded without global pins — handshake done; migrate local once.
+    markHostSessionPinsApplied();
     const local = [...useSessionPinnedStore.getState().ids];
     if (local.length > 0) {
       void updateDesktopSettings({ pinnedSessions: local });

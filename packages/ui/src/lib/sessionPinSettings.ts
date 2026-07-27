@@ -5,6 +5,63 @@ export const SESSION_PINNED_BY_PROJECT_STORAGE_KEY = 'oc.sessions.pinnedByProjec
 export const SESSION_PINNED_ORDER_STORAGE_KEY = 'oc.sessions.pinnedOrder';
 export const SESSION_PINNED_ORDER_BY_PROJECT_STORAGE_KEY = 'oc.sessions.pinnedOrderByProject';
 
+const SESSION_PIN_SETTINGS_KEYS = [
+  'pinnedSessions',
+  'pinnedSessionsByProject',
+  'pinnedSessionOrder',
+  'pinnedSessionOrderByProject',
+] as const;
+
+export type SessionPinSettingsKey = (typeof SESSION_PIN_SETTINGS_KEYS)[number];
+
+/**
+ * After connect/switch, local pin effects must not PUT until the host settings
+ * handshake has been observed for this endpoint (host wins).
+ */
+let hostSessionPinsApplied = false;
+
+export const haveHostSessionPinsApplied = (): boolean => hostSessionPinsApplied;
+
+export const markHostSessionPinsApplied = (): void => {
+  hostSessionPinsApplied = true;
+};
+
+export const resetHostSessionPinsApplied = (): void => {
+  hostSessionPinsApplied = false;
+};
+
+export const settingsHaveSessionPinFields = (settings: {
+  pinnedSessions?: unknown;
+  pinnedSessionsByProject?: unknown;
+  pinnedSessionOrder?: unknown;
+  pinnedSessionOrderByProject?: unknown;
+}): boolean => {
+  return (
+    Array.isArray(settings.pinnedSessions)
+    || Array.isArray(settings.pinnedSessionOrder)
+    || (settings.pinnedSessionsByProject != null
+      && typeof settings.pinnedSessionsByProject === 'object'
+      && !Array.isArray(settings.pinnedSessionsByProject))
+    || (settings.pinnedSessionOrderByProject != null
+      && typeof settings.pinnedSessionOrderByProject === 'object'
+      && !Array.isArray(settings.pinnedSessionOrderByProject))
+  );
+};
+
+/** Drop session-pin keys from a settings PUT when host pins are not applied yet. */
+export const stripSessionPinSettingsIfHostPending = <T extends Record<string, unknown>>(
+  changes: T,
+): T => {
+  if (hostSessionPinsApplied) return changes;
+  let stripped: Record<string, unknown> | null = null;
+  for (const key of SESSION_PIN_SETTINGS_KEYS) {
+    if (!(key in changes)) continue;
+    if (!stripped) stripped = { ...changes };
+    delete stripped[key];
+  }
+  return (stripped ?? changes) as T;
+};
+
 export const sanitizePinnedSessionIds = (value: unknown): string[] | undefined => {
   if (!Array.isArray(value)) return undefined;
   return Array.from(

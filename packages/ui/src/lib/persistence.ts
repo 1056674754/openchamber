@@ -20,10 +20,15 @@ import {
   SESSION_PINNED_ORDER_BY_PROJECT_STORAGE_KEY,
   SESSION_PINNED_ORDER_STORAGE_KEY,
   SESSION_PINNED_STORAGE_KEY,
+  resetHostSessionPinsApplied,
   sanitizePinnedSessionIds,
   sanitizePinnedSessionsByKey,
+  stripSessionPinSettingsIfHostPending,
 } from '@/lib/sessionPinSettings';
-import { subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
+import {
+  subscribeRuntimeEndpointChanged,
+  subscribeRuntimeEndpointWillChange,
+} from '@/lib/runtime-switch';
 
 const persistToLocalStorage = (settings: DesktopSettings) => {
   if (typeof window === 'undefined') {
@@ -1400,13 +1405,6 @@ export const invalidateSettingsCache = (): void => {
   _settingsCache = null;
 };
 
-// Mobile/desktop host switches must not reuse a previous endpoint's GET cache.
-if (typeof window !== 'undefined') {
-  subscribeRuntimeEndpointChanged(() => {
-    invalidateSettingsCache();
-  });
-}
-
 export const syncDesktopSettings = async (): Promise<void> => {
   if (typeof window === 'undefined') {
     return;
@@ -1470,6 +1468,20 @@ export const syncDesktopSettings = async (): Promise<void> => {
   }
 };
 
+// Mobile/desktop host switches must not reuse a previous endpoint's GET cache.
+// When a new host is bound, re-pull settings so pin/project prefs follow host.
+if (typeof window !== 'undefined') {
+  subscribeRuntimeEndpointWillChange(() => {
+    resetHostSessionPinsApplied();
+  });
+  subscribeRuntimeEndpointChanged((detail) => {
+    invalidateSettingsCache();
+    if (typeof detail.apiBaseUrl === 'string' && detail.apiBaseUrl.trim().length > 0) {
+      void syncDesktopSettings();
+    }
+  });
+}
+
 // Coalesce rapid updateDesktopSettings calls into a single PUT
 let _pendingSettingsChanges: Partial<DesktopSettings> | null = null;
 let _settingsFlushTimer: ReturnType<typeof setTimeout> | null = null;
@@ -1529,7 +1541,12 @@ export const updateDesktopSettings = async (changes: Partial<DesktopSettings>): 
     return;
   }
 
-  _pendingSettingsChanges = { ...(_pendingSettingsChanges ?? {}), ...changes };
+  const safeChanges = stripSessionPinSettingsIfHostPending(changes as Record<string, unknown>) as Partial<DesktopSettings>;
+  if (Object.keys(safeChanges).length === 0) {
+    return;
+  }
+
+  _pendingSettingsChanges = { ...(_pendingSettingsChanges ?? {}), ...safeChanges };
 
   if (_settingsFlushTimer) {
     clearTimeout(_settingsFlushTimer);

@@ -7,6 +7,7 @@ import { toast } from '@/components/ui';
 import { isDesktopLocalOriginActive, isDesktopShell, isVSCodeRuntime, loginDesktopRemotePassword } from '@/lib/desktop';
 import { syncDesktopSettings, initializeAppearancePreferences } from '@/lib/persistence';
 import { applyPersistedDirectoryPreferences } from '@/lib/directoryPersistence';
+import { subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 import { DesktopHostSwitcherInline } from '@/components/desktop/DesktopHostSwitcher';
 import { OpenChamberLogo } from '@/components/ui/OpenChamberLogo';
 import { Icon } from "@/components/icon/Icon";
@@ -147,6 +148,17 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({ children }) =>
   const [activePasskeyAction, setActivePasskeyAction] = React.useState<'auth' | 'register' | null>(null);
   const passwordInputRef = React.useRef<HTMLInputElement | null>(null);
   const hasResyncedRef = React.useRef(skipAuth);
+  const [endpointEpoch, setEndpointEpoch] = React.useState(0);
+
+  React.useEffect(() => {
+    if (skipAuth) {
+      return;
+    }
+    return subscribeRuntimeEndpointChanged(() => {
+      hasResyncedRef.current = false;
+      setEndpointEpoch((value) => value + 1);
+    });
+  }, [skipAuth]);
 
   React.useEffect(() => {
     if (typeof window === 'undefined') {
@@ -293,7 +305,7 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({ children }) =>
         await applyPersistedDirectoryPreferences();
       })();
     }
-  }, [skipAuth, state]);
+  }, [skipAuth, state, endpointEpoch]);
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();

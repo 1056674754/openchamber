@@ -1,4 +1,8 @@
 import { beforeEach, describe, expect, mock, test } from 'bun:test';
+import {
+  haveHostSessionPinsApplied,
+  resetHostSessionPinsApplied,
+} from '@/lib/sessionPinSettings';
 
 const STORAGE_KEY = 'oc.sessions.pinned';
 const memoryStore = new Map<string, string>();
@@ -42,6 +46,7 @@ describe('useSessionPinnedStore', () => {
   beforeEach(() => {
     memoryStore.clear();
     updateDesktopSettingsCalls.length = 0;
+    resetHostSessionPinsApplied();
     resetStore();
   });
 
@@ -189,6 +194,7 @@ describe('useSessionPinnedStore', () => {
       );
       expect(useSessionPinnedStore.getState().ids).toEqual(new Set(['host-1']));
       expect(updateDesktopSettingsCalls).toEqual([]);
+      expect(haveHostSessionPinsApplied()).toBe(true);
     });
 
     test('settings-synced without pinnedSessions migrates local pins', () => {
@@ -200,9 +206,22 @@ describe('useSessionPinnedStore', () => {
           detail: { themeId: 'x' },
         }),
       );
+      expect(haveHostSessionPinsApplied()).toBe(true);
       expect(updateDesktopSettingsCalls.some(
         (call) => JSON.stringify(call) === JSON.stringify({ pinnedSessions: ['local-1'] }),
       )).toBe(true);
+    });
+
+    test('settings-synced marks host pins applied even when empty', () => {
+      if (typeof window === 'undefined') return;
+      expect(haveHostSessionPinsApplied()).toBe(false);
+      window.dispatchEvent(
+        new CustomEvent('openchamber:settings-synced', {
+          detail: { pinnedSessions: [] },
+        }),
+      );
+      expect(haveHostSessionPinsApplied()).toBe(true);
+      expect(useSessionPinnedStore.getState().ids).toEqual(new Set());
     });
   });
 });

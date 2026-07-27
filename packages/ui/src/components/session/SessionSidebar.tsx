@@ -29,11 +29,15 @@ import {
   arePinnedByProjectMapsEqual,
   arePinnedOrderByProjectMapsEqual,
   areStringArraysEqual,
+  haveHostSessionPinsApplied,
   mapPinnedOrderByProject,
   mapPinnedSessionsByProject,
+  markHostSessionPinsApplied,
   pinnedOrderByProjectToMap,
   pinnedSessionsByProjectToMap,
+  settingsHaveSessionPinFields,
 } from '@/lib/sessionPinSettings';
+import { resolveGlobalPinnedSessions } from './sidebar/globalPinnedSessions';
 import { NewWorktreeDialog } from './NewWorktreeDialog';
 import { ScheduledTasksDialog } from './ScheduledTasksDialog';
 import { RegenerateTitleDialog } from './RegenerateTitleDialog';
@@ -985,9 +989,19 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
         && typeof settings.pinnedSessionOrderByProject === 'object';
       if (hasProjectPins || hasOrder || hasOrderByProject) {
         applyFromSettings(settings);
+        markHostSessionPinsApplied();
         return;
       }
 
+      // Host already has global pins (applied by the store listener) or any pin
+      // field — handshake done; do not migrate empty local project maps over host.
+      if (settingsHaveSessionPinFields(settings)) {
+        markHostSessionPinsApplied();
+        return;
+      }
+
+      // Host has never persisted session pins — upload local project/order once.
+      markHostSessionPinsApplied();
       const byProject = mapPinnedSessionsByProject(pinnedSessionIdsByProjectRef.current);
       const orderByProject = mapPinnedOrderByProject(pinnedOrderByProjectRef.current);
       const payload: Partial<DesktopSettings> = {};
@@ -1041,6 +1055,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
       return;
     }
     if (suppressProjectPinsHostSync.current) return;
+    if (!haveHostSessionPinsApplied()) return;
     void updateDesktopSettings({ pinnedSessionsByProject: obj });
   }, [pinnedSessionIdsByProject]);
 
@@ -1055,6 +1070,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
       return;
     }
     if (suppressProjectPinsHostSync.current) return;
+    if (!haveHostSessionPinsApplied()) return;
     void updateDesktopSettings({ pinnedSessionOrder: pinnedOrder });
   }, [pinnedOrder]);
 
@@ -1085,6 +1101,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
       return;
     }
     if (suppressProjectPinsHostSync.current) return;
+    if (!haveHostSessionPinsApplied()) return;
     void updateDesktopSettings({ pinnedSessionOrderByProject: obj });
   }, [pinnedOrderByProject]);
 
@@ -1775,16 +1792,28 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
   }, [archivedSessions, pruneActiveNowEntriesInStore, sessions, showRecentSection]);
 
   const globalPinnedSessions = React.useMemo(() => {
-    const pinned = sessions.filter((s) => pinnedSessionIds.has(s.id));
-    if (pinnedOrder.length === 0) return pinned;
-    const orderMap = new Map(pinnedOrder.map((id, index) => [id, index]));
-    return pinned.sort((a, b) => {
-      const aIdx = orderMap.get(a.id) ?? Infinity;
-      const bIdx = orderMap.get(b.id) ?? Infinity;
-      if (aIdx !== bIdx) return aIdx - bIdx;
-      return (a.time?.updated ?? a.time?.created ?? 0) - (b.time?.updated ?? b.time?.created ?? 0);
+    // Use unfiltered catalogs — project-visibility `sessions` can omit pinned IDs
+    // and would make the global pin section silently empty on mobile.
+    return resolveGlobalPinnedSessions({
+      pinnedIds: pinnedSessionIds,
+      pinnedOrder,
+      catalogs: [
+        globalActiveSessions,
+        globalArchivedSessions,
+        liveSessions,
+        serverSearchSessions,
+      ],
+      stubTitle: t('sessions.sidebar.activity.globalPinnedTitle'),
     });
-  }, [sessions, pinnedSessionIds, pinnedOrder]);
+  }, [
+    globalActiveSessions,
+    globalArchivedSessions,
+    liveSessions,
+    pinnedOrder,
+    pinnedSessionIds,
+    serverSearchSessions,
+    t,
+  ]);
 
   const globalPinnedSection = React.useMemo(() => {
     if (globalPinnedSessions.length === 0) {
