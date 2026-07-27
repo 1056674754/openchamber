@@ -675,6 +675,10 @@ const MermaidPreviewDialog: React.FC<{
     const viewport = usePreviewViewport(popup.open);
     const requestIdRef = React.useRef(0);
     const mermaidPreviewRef = React.useRef<HTMLDivElement | null>(null);
+    const [zoom, setZoom] = React.useState(1);
+    const adjustZoom = React.useCallback((delta: number) => {
+        setZoom((prev) => Math.min(4, Math.max(0.25, Number((prev + delta).toFixed(2)))));
+    }, []);
 
     const normalizeFilePath = React.useCallback((rawPath: string): string | null => {
         const input = rawPath.trim();
@@ -951,7 +955,33 @@ const MermaidPreviewDialog: React.FC<{
                     style={{ width: `${dialogSize.width}px` }}
                     onMouseDown={(event) => event.stopPropagation()}
                 >
-                    <div className="flex items-center justify-end">
+                    <div className="flex items-center justify-end gap-1">
+                        <button
+                            type="button"
+                            className="h-8 w-8 flex items-center justify-center rounded-lg text-muted-foreground/80 hover:text-foreground focus:outline-none focus:ring-2 focus:ring-primary/60 disabled:opacity-40"
+                            onClick={() => adjustZoom(-0.25)}
+                            disabled={zoom <= 0.25}
+                            aria-label={t('chat.toolOutputDialog.mermaid.zoomOutAria')}
+                        >
+                            <Icon name="subtract" className="h-4 w-4" />
+                        </button>
+                        <button
+                            type="button"
+                            className="h-8 min-w-[3rem] px-2 flex items-center justify-center rounded-lg typography-micro text-muted-foreground/80 hover:text-foreground focus:outline-none focus:ring-2 focus:ring-primary/60"
+                            onClick={() => setZoom(1)}
+                            aria-label={t('chat.toolOutputDialog.mermaid.zoomResetAria')}
+                        >
+                            {Math.round(zoom * 100)}%
+                        </button>
+                        <button
+                            type="button"
+                            className="h-8 w-8 flex items-center justify-center rounded-lg text-muted-foreground/80 hover:text-foreground focus:outline-none focus:ring-2 focus:ring-primary/60 disabled:opacity-40"
+                            onClick={() => adjustZoom(0.25)}
+                            disabled={zoom >= 4}
+                            aria-label={t('chat.toolOutputDialog.mermaid.zoomInAria')}
+                        >
+                            <Icon name="add" className="h-4 w-4" />
+                        </button>
                         <button
                             type="button"
                             className="h-8 w-8 flex items-center justify-center rounded-lg text-muted-foreground/80 hover:text-foreground focus:outline-none focus:ring-2 focus:ring-primary/60"
@@ -995,7 +1025,7 @@ const MermaidPreviewDialog: React.FC<{
                             )}
 
                             {status === 'ready' && (
-                                <div ref={mermaidPreviewRef} className="h-full">
+                                <div ref={mermaidPreviewRef} className="h-full flex items-center justify-center" style={{ transform: `scale(${zoom})`, transformOrigin: 'center center', transition: 'transform 0.15s ease-out' }}>
                                     <SimpleMarkdownRenderer
                                         content={mermaidMarkdown}
                                         variant="tool"
