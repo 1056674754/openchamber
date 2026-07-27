@@ -34,12 +34,17 @@ export async function createTempSessionWithOpenCodeSession(
   return response.json();
 }
 
-export async function listTempSessions(): Promise<Array<{
+export type TempSessionDirectory = {
   path: string;
   topic: string;
   date: string;
   createdAt: number;
-}>> {
+  sessionId?: string;
+  sessionDirectory?: string;
+  archived?: boolean;
+};
+
+export async function listTempSessions(): Promise<TempSessionDirectory[]> {
   const response = await fetch('/api/temp-sessions');
 
   if (!response.ok) {

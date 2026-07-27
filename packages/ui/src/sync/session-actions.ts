@@ -929,6 +929,43 @@ export async function archiveSession(sessionId: string): Promise<boolean> {
   }
 }
 
+export async function unarchiveSession(
+  sessionId: string,
+  directoryHint?: string | null,
+): Promise<boolean> {
+  const sessionDirectory = directoryHint?.trim()
+    || requireSessionDirectory(sessionId, "unarchiveSession")
+  registerSessionDirectory(sessionId, sessionDirectory)
+  try {
+    const result = await sdkForSession(sessionId).session.update({
+      sessionID: sessionId,
+      directory: sessionDirectory,
+      // OpenCode clears archive when archived is falsy/0.
+      time: { archived: 0 },
+    })
+    if (result.data) {
+      useGlobalSessionsStore.getState().upsertSession(result.data)
+      return true
+    }
+    const existing = useGlobalSessionsStore.getState().archivedSessions.find((session) => session.id === sessionId)
+      ?? useGlobalSessionsStore.getState().activeSessions.find((session) => session.id === sessionId)
+    if (existing) {
+      const { archived: _archived, ...restTime } = existing.time || { created: Date.now(), updated: Date.now() }
+      useGlobalSessionsStore.getState().upsertSession({
+        ...existing,
+        time: {
+          ...restTime,
+          updated: Date.now(),
+        },
+      })
+    }
+    return true
+  } catch (error) {
+    console.error("[session-actions] unarchiveSession failed", error)
+    return false
+  }
+}
+
 export async function updateSessionTitle(sessionId: string, title: string): Promise<void> {
   const sessionDirectory = requireSessionDirectory(sessionId, "updateSessionTitle")
   const result = await sdkForSession(sessionId).session.update({ sessionID: sessionId, directory: sessionDirectory, title })

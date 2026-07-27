@@ -14,6 +14,7 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSessionProjectStore } from './useSessionProjectStore';
 import { getProjectWorktreeKey } from '@/lib/worktrees/worktreeKeys';
 import { DEFAULT_SERVER_ID } from '@/lib/opencode/server-registry';
+import { isLegacyMobileActiveServerId } from '@/apps/mobileRuntimeBridge';
 import { reorderProjectList, reorderProjectListById } from './projectOrdering';
 import { getVSCodeBootstrapConfig, isVSCodeRuntime } from './utils/vscodeRuntime';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
@@ -219,6 +220,9 @@ const sanitizeProjects = (value: unknown): ProjectEntry[] => {
 
     const hasServerId = typeof candidate.serverId === 'string' && candidate.serverId.trim().length > 0;
     const serverId = hasServerId ? (candidate.serverId as string).trim() : undefined;
+    // Capacitor briefly persisted host-local paths under this synthetic id.
+    // Drop them so desktop stops showing "mobile-active" remote rows.
+    if (isLegacyMobileActiveServerId(serverId)) continue;
     if (serverId && isUnsupportedRemoteProjectPath(normalizedPath)) continue;
 
     const id = serverId
@@ -431,6 +435,7 @@ export const useProjectsStore = create<ProjectsStore>()(
 
     ensureRemoteProject: (path: string, serverId: string, label?: string) => {
       if (!get().hasLoadedSharedSettings) return null;
+      if (isLegacyMobileActiveServerId(serverId) || serverId === DEFAULT_SERVER_ID) return null;
       const normalizedPath = path.replace(/\\/g, '/').replace(/\/+$/, '') || '/';
       if (isUnsupportedRemoteProjectPath(normalizedPath)) return null;
       const id = createProjectIdFromPath(`${serverId}:${normalizedPath}`);
@@ -769,7 +774,12 @@ export const useProjectsStore = create<ProjectsStore>()(
       if (vscodeWorkspace) {
         return;
       }
-      const incomingProjects = sanitizeProjects(settings.projects ?? []);
+      const rawProjects = settings.projects ?? [];
+      const strippedLegacyMobileActive = Array.isArray(rawProjects)
+        && rawProjects.some((entry) => (
+          Boolean(entry && typeof entry === 'object' && isLegacyMobileActiveServerId((entry as { serverId?: string }).serverId))
+        ));
+      const incomingProjects = sanitizeProjects(rawProjects);
       const incomingActive = typeof settings.activeProjectId === 'string' && settings.activeProjectId.trim()
         ? settings.activeProjectId.trim()
         : null;
@@ -820,6 +830,11 @@ export const useProjectsStore = create<ProjectsStore>()(
       if (resolvedActive !== nextActive) {
         set({ activeProjectId: resolvedActive });
         cacheProjects(incomingProjects, resolvedActive);
+      }
+
+      // Persist once after scrubbing polluted Capacitor rows from shared settings.
+      if (strippedLegacyMobileActive) {
+        persistProjects(incomingProjects, resolvedActive);
       }
 
       if (resolvedActive) {

@@ -81,7 +81,9 @@ export const SessionFolderDndScope: React.FC<{
   const [activeDragWidth, setActiveDragWidth] = React.useState<number | null>(null);
   const [activeDragHeight, setActiveDragHeight] = React.useState<number | null>(null);
 
-  if (!scopeKey) {
+  // No folders (or mobile) → no DndContext. Nested PointerSensors on Capacitor
+  // WebView swallow taps on session rows ("no reaction" when picking a chat).
+  if (!scopeKey || !hasFolders) {
     return <>{children}</>;
   }
 

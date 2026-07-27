@@ -18,6 +18,56 @@ export function setOpenCodeDeps(deps) {
   _getOpenCodeAuthHeaders = deps.getOpenCodeAuthHeaders;
 }
 
+async function resolveLatestSessionForDirectory(dirPath) {
+  if (!_buildOpenCodeUrl || !_getOpenCodeAuthHeaders) {
+    return null;
+  }
+
+  let sessionUrl;
+  try {
+    sessionUrl = _buildOpenCodeUrl(`/session?directory=${encodeURIComponent(dirPath)}`, '');
+  } catch {
+    return null;
+  }
+
+  const response = await fetch(sessionUrl, {
+    method: 'GET',
+    headers: {
+      Accept: 'application/json',
+      ..._getOpenCodeAuthHeaders(),
+    },
+  });
+  if (!response.ok) {
+    return null;
+  }
+
+  const sessions = await response.json().catch(() => null);
+  if (!Array.isArray(sessions) || sessions.length === 0) {
+    return null;
+  }
+
+  const rank = (session) => {
+    const time = session?.time || {};
+    const updated = typeof time.updated === 'number' ? time.updated : 0;
+    const created = typeof time.created === 'number' ? time.created : 0;
+    const activeBoost = time.archived ? 0 : 1_000_000_000_000;
+    return activeBoost + Math.max(updated, created);
+  };
+
+  const best = [...sessions].sort((a, b) => rank(b) - rank(a))[0];
+  if (!best?.id) {
+    return null;
+  }
+
+  return {
+    sessionId: best.id,
+    sessionDirectory: typeof best.directory === 'string' && best.directory
+      ? best.directory
+      : dirPath,
+    archived: Boolean(best.time?.archived),
+  };
+}
+
 export function registerTempSessionRoutes(app) {
   /**
    * POST /api/temp-sessions/create-session
@@ -110,7 +160,18 @@ export function registerTempSessionRoutes(app) {
   app.get('/api/temp-sessions', async (_req, res) => {
     try {
       const dirs = await listTempSessionDirectories();
-      res.json({ directories: dirs });
+      // Attach OpenCode session ids (including archived). Directory listing alone
+      // left the sidebar treating archived temp topics as orphans.
+      const directories = await Promise.all(dirs.map(async (dir) => {
+        try {
+          const resolved = await resolveLatestSessionForDirectory(dir.path);
+          return resolved ? { ...dir, ...resolved } : dir;
+        } catch (error) {
+          console.warn('[TempSessions] Failed to resolve session for', dir.path, error?.message || error);
+          return dir;
+        }
+      }));
+      res.json({ directories });
     } catch (error) {
       console.error('[TempSessions] Failed to list temp session directories:', error);
       res.status(500).json({ error: 'Failed to list temporary session directories' });

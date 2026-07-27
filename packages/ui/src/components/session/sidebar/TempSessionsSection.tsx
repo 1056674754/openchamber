@@ -16,6 +16,7 @@ export type TempSessionEntry = {
   createdAt: number;
   sessionId?: string;
   sessionDirectory?: string;
+  archived?: boolean;
 };
 
 type Props = {
