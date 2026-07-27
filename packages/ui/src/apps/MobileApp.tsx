@@ -87,9 +87,11 @@ const formatLastUsed = (timestamp: number, t: (key: I18nKey, vars?: Record<strin
 export const MobileApp: React.FC<MobileAppProps> = ({ apis }) => {
   useNativeMobileChrome();
   useCapacitorVoiceResume();
+  const [bootResolved, setBootResolved] = React.useState(false);
   React.useEffect(() => {
+    if (!bootResolved) return;
     document.getElementById('boot-splash')?.remove();
-  }, []);
+  }, [bootResolved]);
   const { t } = useI18n();
   const [url, setUrl] = React.useState('');
   const [password, setPassword] = React.useState('');
@@ -135,10 +137,12 @@ export const MobileApp: React.FC<MobileAppProps> = ({ apis }) => {
     const label = getAutoConnectTargetLabel();
     if (!label) {
       markAppBootReady();
+      setBootResolved(true);
       return;
     }
     setAutoConnectLabel(label);
     setPhaseRef.current('auto-connecting');
+    setBootResolved(true);
     void autoConnectLastInstance().then((ok) => {
       if (ok) {
         setRuntimeUrl(getRuntimeApiBaseUrl());
@@ -280,6 +284,10 @@ export const MobileApp: React.FC<MobileAppProps> = ({ apis }) => {
 
   const phaseKey = phaseMessageKey(conn.phase);
   const showAutoSplash = conn.phase === 'auto-connecting' && Boolean(autoConnectLabel);
+
+  if (!bootResolved && !runtimeUrl) {
+    return null;
+  }
 
   if (runtimeUrl) {
     return (
