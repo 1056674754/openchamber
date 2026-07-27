@@ -8,6 +8,7 @@ import { materializeOpenDraftSession, useSessionUIStore } from '@/sync/session-u
 import { useSelectionStore } from '@/sync/selection-store';
 import { resolveSdkForDirectory } from '@/sync/session-routing';
 import { useConfigStore } from '@/stores/useConfigStore';
+import { runtimeFetch } from '@/lib/runtime-fetch';
 import { serverRegistry } from '@/lib/opencode/server-registry';
 
 export type {
@@ -182,6 +183,71 @@ export async function deleteRemoteBranch(directory: string, payload: import('./a
   return gitHttp.deleteRemoteBranch(directory, payload);
 }
 
+const COMMIT_DIFF_FILE_LIMIT = 12;
+const COMMIT_DIFF_TOTAL_CHAR_LIMIT = 8000;
+
+const collectSelectedFileDiffs = async (directory: string, files: string[]): Promise<string> => {
+  const limited = files.slice(0, COMMIT_DIFF_FILE_LIMIT);
+  const chunks = await Promise.all(limited.map(async (path) => {
+    try {
+      const [staged, unstaged] = await Promise.all([
+        gitHttp.getGitDiff(directory, { path, staged: true }).catch(() => null),
+        gitHttp.getGitDiff(directory, { path, staged: false }).catch(() => null),
+      ]);
+      const text = [staged?.diff, unstaged?.diff]
+        .filter((diff): diff is string => typeof diff === 'string' && diff.trim().length > 0)
+        .join('\n');
+      return text ? text : `--- ${path} (no textual diff available)`;
+    } catch {
+      return `--- ${path} (diff unavailable)`;
+    }
+  }));
+
+  let total = '';
+  for (const chunk of chunks) {
+    if (total.length + chunk.length > COMMIT_DIFF_TOTAL_CHAR_LIMIT) {
+      total += '\n[remaining diffs truncated]';
+      break;
+    }
+    total += (total ? '\n\n' : '') + chunk;
+  }
+  if (files.length > limited.length) {
+    total += `\n[${files.length - limited.length} more selected files omitted]`;
+  }
+  return total;
+};
+
+const parseCommitStructured = (structured: Record<string, unknown> | null): { subject: string; highlights: string[] } => {
+  const subject = typeof structured?.subject === 'string' ? structured.subject.trim() : '';
+  const highlights = Array.isArray(structured?.highlights)
+    ? structured.highlights.filter((item) => typeof item === 'string').map((item) => item.trim()).filter(Boolean).slice(0, 3)
+    : [];
+  if (!subject) {
+    throw new Error('Structured output missing subject');
+  }
+  return { subject, highlights };
+};
+
+// Legacy transport: run structured generation inside the active chat session.
+// Kept as the fallback for setups with no direct provider login (vanilla
+// installs on OpenCode's free models), where the small-model endpoint has
+// nothing to call but the session itself still works.
+async function generateCommitMessageViaSession(
+  directory: string,
+  visiblePrompt: string,
+  hiddenPrompt: string,
+): Promise<{ message: import('./api/types').GeneratedCommitMessage }> {
+  const generationSession = await resolveGenerationSessionContext(directory);
+  const structured = await runStructuredGenerationInActiveSession({
+    directory,
+    visiblePrompt,
+    hiddenPrompt,
+    generationSession,
+    kind: 'commit',
+  });
+  return { message: parseCommitStructured(structured) };
+}
+
 export async function generateCommitMessage(
   directory: string,
   files: string[],
@@ -189,17 +255,12 @@ export async function generateCommitMessage(
 ): Promise<{ message: import('./api/types').GeneratedCommitMessage }> {
   const startedAt = Date.now();
   void options;
-  const generationSession = await resolveGenerationSessionContext(directory);
 
   console.info('[git-generation][browser] request', {
-    transport: 'session',
+    transport: 'small-model',
     kind: 'commit',
     directory,
     selectedFiles: files.length,
-    sessionId: generationSession.sessionId,
-    providerId: generationSession.providerID,
-    modelId: generationSession.modelID,
-    agent: generationSession.agent,
   });
 
   const visiblePrompt = await renderMagicPrompt('git.commit.generate.visible');
@@ -208,26 +269,44 @@ export async function generateCommitMessage(
   });
 
   try {
-    const structured = await runStructuredGenerationInActiveSession({
-      directory,
-      visiblePrompt,
-      hiddenPrompt,
-      generationSession,
-      kind: 'commit',
+    const diffs = await collectSelectedFileDiffs(directory, files);
+    const { currentProviderId, currentModelId } = useConfigStore.getState();
+    const response = await runtimeFetch('/api/small-model/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        system: visiblePrompt,
+        prompt: `${hiddenPrompt}\n\nDiffs of the selected files:\n${diffs}`,
+        directory,
+        ...(currentProviderId ? { preferredProviderID: currentProviderId } : {}),
+        ...(currentModelId ? { preferredModelID: currentModelId } : {}),
+      }),
     });
 
-    const subject = typeof structured.subject === 'string' ? structured.subject.trim() : '';
-    const highlights = Array.isArray(structured.highlights)
-      ? structured.highlights.filter((item) => typeof item === 'string').map((item) => item.trim()).filter(Boolean).slice(0, 3)
-      : [];
-
-    if (!subject) {
-      throw new Error('Structured output missing subject');
+    if (response.status === 404) {
+      // No authenticated provider has a small model — fall back to the session
+      // transport so free-model-only setups keep a working generate button.
+      console.info('[git-generation][browser] small model unavailable, falling back to session transport');
+      const result = await generateCommitMessageViaSession(directory, visiblePrompt, hiddenPrompt);
+      console.info('[git-generation][browser] success', {
+        transport: 'session-fallback',
+        kind: 'commit',
+        elapsedMs: Date.now() - startedAt,
+        subjectLength: result.message.subject.length,
+        highlightsCount: result.message.highlights.length,
+      });
+      return result;
     }
 
-    const result = { message: { subject, highlights } };
+    const payload = await response.json().catch(() => null) as { text?: unknown; error?: unknown } | null;
+    if (!response.ok || typeof payload?.text !== 'string') {
+      const message = typeof payload?.error === 'string' ? payload.error : `HTTP ${response.status}`;
+      throw new Error(message);
+    }
+
+    const result = { message: parseCommitStructured(extractJsonObject(payload.text)) };
     console.info('[git-generation][browser] success', {
-      transport: 'session',
+      transport: 'small-model',
       kind: 'commit',
       elapsedMs: Date.now() - startedAt,
       subjectLength: result.message.subject.length,
@@ -236,7 +315,7 @@ export async function generateCommitMessage(
     return result;
   } catch (error) {
     console.error('[git-generation][browser] failed', {
-      transport: 'session',
+      transport: 'small-model',
       kind: 'commit',
       elapsedMs: Date.now() - startedAt,
       message: error instanceof Error ? error.message : String(error),
@@ -246,12 +325,37 @@ export async function generateCommitMessage(
   }
 }
 
+const parsePullRequestStructured = (structured: Record<string, unknown> | null): import('./api/types').GeneratedPullRequestDescription => {
+  const title = typeof structured?.title === 'string' ? structured.title.trim() : '';
+  const body = typeof structured?.body === 'string' ? structured.body.trim() : '';
+  return { title, body };
+};
+
+// Legacy transport — same rationale as generateCommitMessageViaSession.
+async function generatePullRequestDescriptionViaSession(
+  directory: string,
+  visiblePrompt: string,
+  hiddenPrompt: string,
+): Promise<import('./api/types').GeneratedPullRequestDescription> {
+  const generationSession = await resolveGenerationSessionContext(directory);
+  const structured = await runStructuredGenerationInActiveSession({
+    directory,
+    visiblePrompt,
+    hiddenPrompt,
+    generationSession,
+    kind: 'pr',
+  });
+  return parsePullRequestStructured(structured);
+}
+
 export async function generatePullRequestDescription(
   directory: string,
   payload: { base: string; head: string; context?: string; zenModel?: string; providerId?: string; modelId?: string }
 ): Promise<import('./api/types').GeneratedPullRequestDescription> {
   const startedAt = Date.now();
-  const generationSession = await resolveGenerationSessionContext(directory);
+  void payload.zenModel;
+  void payload.providerId;
+  void payload.modelId;
 
   const commitLog = await getGitLog(directory, {
     from: payload.base,
@@ -289,13 +393,9 @@ export async function generatePullRequestDescription(
   const changedFiles = Array.from(filesSet).sort().slice(0, 300);
 
   console.info('[git-generation][browser] request', {
-    transport: 'session',
+    transport: 'small-model',
     kind: 'pr',
     directory,
-    sessionId: generationSession.sessionId,
-    providerId: generationSession.providerID,
-    modelId: generationSession.modelID,
-    agent: generationSession.agent,
     base: payload.base,
     head: payload.head,
     commits: commits.length,
@@ -312,20 +412,41 @@ export async function generatePullRequestDescription(
   });
 
   try {
-    const structured = await runStructuredGenerationInActiveSession({
-      directory,
-      visiblePrompt,
-      hiddenPrompt,
-      generationSession,
-      kind: 'pr',
+    const { currentProviderId, currentModelId } = useConfigStore.getState();
+    const response = await runtimeFetch('/api/small-model/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        system: visiblePrompt,
+        prompt: hiddenPrompt,
+        directory,
+        ...(currentProviderId ? { preferredProviderID: currentProviderId } : {}),
+        ...(currentModelId ? { preferredModelID: currentModelId } : {}),
+      }),
     });
 
-    const result = {
-      title: typeof structured.title === 'string' ? structured.title.trim() : '',
-      body: typeof structured.body === 'string' ? structured.body.trim() : '',
-    };
+    if (response.status === 404) {
+      console.info('[git-generation][browser] small model unavailable, falling back to session transport');
+      const result = await generatePullRequestDescriptionViaSession(directory, visiblePrompt, hiddenPrompt);
+      console.info('[git-generation][browser] success', {
+        transport: 'session-fallback',
+        kind: 'pr',
+        elapsedMs: Date.now() - startedAt,
+        titleLength: result.title.length,
+        bodyLength: result.body.length,
+      });
+      return result;
+    }
+
+    const jsonPayload = await response.json().catch(() => null) as { text?: unknown; error?: unknown } | null;
+    if (!response.ok || typeof jsonPayload?.text !== 'string') {
+      const message = typeof jsonPayload?.error === 'string' ? jsonPayload.error : `HTTP ${response.status}`;
+      throw new Error(message);
+    }
+
+    const result = parsePullRequestStructured(extractJsonObject(jsonPayload.text));
     console.info('[git-generation][browser] success', {
-      transport: 'session',
+      transport: 'small-model',
       kind: 'pr',
       elapsedMs: Date.now() - startedAt,
       titleLength: result.title.length,
@@ -334,7 +455,7 @@ export async function generatePullRequestDescription(
     return result;
   } catch (error) {
     console.error('[git-generation][browser] failed', {
-      transport: 'session',
+      transport: 'small-model',
       kind: 'pr',
       elapsedMs: Date.now() - startedAt,
       message: error instanceof Error ? error.message : String(error),
