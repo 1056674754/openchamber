@@ -87,6 +87,9 @@ const formatLastUsed = (timestamp: number, t: (key: I18nKey, vars?: Record<strin
 export const MobileApp: React.FC<MobileAppProps> = ({ apis }) => {
   useNativeMobileChrome();
   useCapacitorVoiceResume();
+  React.useEffect(() => {
+    document.getElementById('boot-splash')?.remove();
+  }, []);
   const { t } = useI18n();
   const [url, setUrl] = React.useState('');
   const [password, setPassword] = React.useState('');
