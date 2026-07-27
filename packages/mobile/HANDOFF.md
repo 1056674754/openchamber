@@ -87,8 +87,10 @@ iOS Simulator helpers: `mobile:sim:{boot,install,launch,run,serve,list,kill}` (s
 - **Secure storage** — `@aparajita/capacitor-secure-storage` for connection tokens.
 - **Deep links** — `openchamber://` URL scheme; a reusable intent vocabulary (`apps/deepLinks.ts`)
   used by notification taps, widgets, and Control Center. Cold-launch intents are stashed.
-- **Push notifications** — iOS APNs + Android FCM (see below). Presence-aware routing suppresses a
-  device's push when an interactive (desktop/web) client is visible.
+- **Push notifications (PWA web-push)** — browser service-worker subscriptions; server stores
+  subscriptions and sends via web-push. Presence-aware routing suppresses a device's push when an
+  interactive (desktop/web) client is visible. Native APNs/FCM token registration and an APNs/FCM
+  sender are scaffolded but not wired; see #49.
 - **iOS widgets + Control Center + Notification Service Extension** — WidgetKit extension
   (`OpenChamberWidget`), a Control Center control, and an NSE (`OpenChamberNotificationService`)
   that refreshes widgets from push. All share the App Group `group.com.openchamber.app`.
@@ -100,15 +102,26 @@ iOS Simulator helpers: `mobile:sim:{boot,install,launch,run,serve,list,kill}` (s
 
 ## Push / notifications architecture
 
-- Registration: on launch the app registers a device token — **iOS → APNs, Android → FCM** — and
-  sends it to the connected server tagged with `platform` (`ios`/`android`).
-- The server forwards notification-worthy events to a signed **relay**; the relay routes each token
-  to APNs or FCM by its bound platform. The app itself only needs to obtain and register the token.
-- **Presence-aware suppression**: each client reports foreground visibility + its platform; a
-  mobile push is skipped while an interactive (desktop/web/vscode) client is visible (it already
-  shows the in-app notification). Gated on the desktop's visibility, never the phone's own.
-- Foreground behavior: iOS suppresses the banner via `presentationOptions: []`; the web/PWA service
-  worker suppresses when a window is focused.
+Current state: **web-push only** (browser service-worker subscriptions). Native
+APNs/FCM end-to-end push is scaffolded but not wired (#49).
+
+- Web-push registration: `NotificationSettings` subscribes via
+  `serviceWorker.pushManager.subscribe(...)` and POSTs `endpoint/p256dh/auth` to
+  `/api/push/subscribe`. Server stores subscriptions in `push-runtime.js` and
+  sends via `webPush.sendNotification`.
+- Native scaffolding present but **incomplete**: iOS `AppDelegate` forwards
+  already-issued APNs callbacks to Capacitor (no active registration or token
+  upload); Android has `google-services.json` + Firebase plugin + manifest
+  metadata but no `FirebaseMessagingService` and no `PushNotifications.register()`
+  call; server has no APNs/FCM sender.
+- iOS NSE + widgets + Control Center are real: the NSE refreshes widget
+  snapshots from an incoming push (makes no network calls); widgets render
+  session lists/quick actions; Control Center opens `openchamber://new`.
+- **Presence-aware suppression**: each client reports foreground visibility; a
+  push is skipped while an interactive (desktop/web/vscode) client is visible.
+  Gated on the desktop's visibility, never the phone's own.
+- Foreground behavior: iOS suppresses the banner via `presentationOptions: []`;
+  the web/PWA service worker suppresses when a window is focused.
 
 ## Platform config specifics
 
@@ -208,11 +221,14 @@ quality. Done in-repo vs. to-do at release time:
 
 - **Privacy policy URL** — required by both stores because the app uses camera + notifications.
 - iOS **App Privacy nutrition label** (App Store Connect) and Android **Data Safety** form — declare
-  what's collected (device push token; the app otherwise talks only to the user's own server).
-- **Production APNs** for App Store / TestFlight builds: the app's `aps-environment` must be
-  `production` in the release build, and the relay must send to production APNs (not sandbox).
+  what's collected (web-push subscription endpoint/keys; the app otherwise talks only to the user's
+  own server). Native APNs/FCM token collection is blocked on #49.
+- **Production APNs** for App Store / TestFlight builds (blocked on #49): once native push is
+  wired, the app's `aps-environment` must be `production` in the release build, and the relay must
+  send to production APNs (not sandbox). Today only web-push subscriptions are collected.
 - **Demo instance + credentials** for reviewers — the app connects to a user's server, so review
   needs a reachable test instance (App Store 2.1 / Play).
 - **Guideline 4.2 (minimum functionality)** — WebView-wrapper apps can be scrutinized; cite the
-  native features (push, widgets, Control Center, QR pairing) in the review notes.
+  native features (widgets, Control Center, QR pairing, secure-token storage, deep links) in the
+  review notes. Native push (#49) is not yet a citable capability.
 - Signing/upload as covered in the CI section above (all three iOS targets; signed Android AAB).

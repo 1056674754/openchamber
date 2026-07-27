@@ -95,8 +95,8 @@
   - [x] [#47](https://coding.s-s.city/songsong/openchamber/-/work_items/47) M7 — 键盘/composer 收口（不回归黑屏）
   - [x] [#48](https://coding.s-s.city/songsong/openchamber/-/work_items/48) M8 — 连接页 / 空会话密度
 - **P2 — 产品缺口（有意后置，已开卡）**
-  - [ ] [#11](https://coding.s-s.city/songsong/openchamber/-/work_items/11) M9 — Capacitor Voice resume / dictation overlay（已挂 `appStateChange` → `openchamber:capacitor-resume`；dictation 待主轨）
-  - [ ] [#49](https://coding.s-s.city/songsong/openchamber/-/work_items/49) M10 — Push（APNs / FCM）
+  - [ ] [#11](https://coding.s-s.city/songsong/openchamber/-/work_items/11) M9 — Capacitor Voice resume / dictation overlay（resume 端到端已通：`useCapacitorVoiceResume` emit `openchamber:capacitor-resume` + `useBrowserVoice` 750ms dedup consume；dictation overlay / `ComposerDictation` 待主轨）
+  - [ ] [#49](https://coding.s-s.city/songsong/openchamber/-/work_items/49) M10 — Push（APNs / FCM）— **现状仅 web-push**：浏览器 service-worker 订阅 + `web-push` 发送 + presence suppression 已通；原生 token 注册（iOS `register()` / Android `FirebaseMessagingService`）与服务端 APNs/FCM sender 未接，iOS `AppDelegate` 仅转发 APNs 回调、Android 仅有 Firebase 脚手架。`HANDOFF.md` 已纠偏
   - [x] [#16](https://coding.s-s.city/songsong/openchamber/-/work_items/16) M11 — Pairing / redeem 移动面（QR + `openchamber://` + Instances transport）
   - [ ] [#50](https://coding.s-s.city/songsong/openchamber/-/work_items/50) M12 — 商店签名 / CI release
 
@@ -1428,6 +1428,6 @@ VS Code worktree lock 验证：在两个真实临时 Git 仓库及 `--no-checkou
 5. **Queue/Steer 批次 E (已完成)**: boolean 已迁到 Follow-up behavior (`steer` / `queue`) 并复用本 fork `steer-side-channel`；后续 queue drag reorder 单独处理。
 6. **Session/worktree 批次 F**: ✅ 收口（[#52](https://coding.s-s.city/songsong/openchamber/-/issues/52)）。selected project binding、folder/pinned refresh、worktree snap-back、subagent delete cascade、timeline earlier load 已在树；`abortCurrentOperation` 缺 session directory 时 fail closed（不回退 `_getDirectory()`）。
 7. **Chat input/abort 批次 G**: ✅ 收口（[#53](https://coding.s-s.city/songsong/openchamber/-/issues/53)）。pasted `@` / question dismiss / slash skill / cross-project abort 已有 focused tests；ArrowUp/Down history 抽为 `composerHistoryNavigation` + 测试，条件与 1.16.x 一致（无 autocomplete、折叠光标在首/尾）。
-8. **Voice/Small Model 批次 H（#12 基础已完成）**: capability + settings + Notes consumer 已落地；session-assist / TTS summarized / git generation 仍可后续加（[#54](https://coding.s-s.city/songsong/openchamber/-/issues/54)）。Goals：`#29`/`#33`/`#34`/`#35` 已落地（remote 需远端 OC 广告 `/api/goals/capability`）。
+8. **Voice/Small Model 批次 H（#12 基础已完成）**: capability + settings + Notes consumer 已落地；session-assist / git generation 未实现，TTS summarized 仍是 stub（`text/summarization.js` 总返回 `summarized: false`），均挂在 [#54](https://coding.s-s.city/songsong/openchamber/-/issues/54)。Goals：`#29`/`#33`/`#34`/`#35` 已落地（remote 需远端 OC 广告 `/api/goals/capability`）。
 9. **v1.15 UI 批次 I (部分完成)**: code line number/wrap 已按现有 Markdown 架构适配；Mermaid zoom、ambiguous transport failure、Markdown preview 继续逐项处理。
 10. **高风险 milestone**: server-persisted auto-accept、chat scroll + auto-follow、OpenCode process ownership、Markdown/Shiki rewrite、mobile/native app、private relay/pairing、bulk docs/i18n，分别处理。`#35` Remote Goals / `#27` macOS tray / `#8` Pierre / `#6` auto-review / `#7` CLI live-port / `#17` Windows tray 已关闭。
