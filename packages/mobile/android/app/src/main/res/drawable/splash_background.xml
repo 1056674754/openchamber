@@ -10,7 +10,9 @@
      logo does not block scanning. -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
     <item android:drawable="@color/splash_bg" />
-    <item>
-        <bitmap android:gravity="center" android:src="@drawable/splash_logo" />
-    </item>
+    <item
+        android:drawable="@drawable/splash_logo"
+        android:gravity="center"
+        android:width="128dp"
+        android:height="128dp" />
 </layer-list>
