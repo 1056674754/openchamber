@@ -2,6 +2,7 @@ import { useEffect, useRef, type MutableRefObject } from "react";
 import { getAllSyncStores, subscribeSyncStoresRegistry } from "./multi-server-registry";
 import { useProjectsStore } from "@/stores/useProjectsStore";
 import { serverRegistry, DEFAULT_SERVER_ID, type ServerConnection } from "@/lib/opencode/server-registry";
+import { isLegacyMobileActiveServerId } from "@/apps/mobileRuntimeBridge";
 import { setDirectoryServerId } from "./session-routing";
 import { useSessionUIStore } from "./session-ui-store";
 import { resolveApiUrl } from "@/lib/api/serverUrl";
@@ -88,7 +89,7 @@ export function RemoteProjectDiscovery() {
     const syncStoreSubscriptions = (entries: ReturnType<typeof getAllSyncStores>) => {
       const activeKeys = new Set<string>();
       for (const entry of entries) {
-        if (entry.serverId === DEFAULT_SERVER_ID) continue;
+        if (entry.serverId === DEFAULT_SERVER_ID || isLegacyMobileActiveServerId(entry.serverId)) continue;
         ensureHealthSubscription(entry.serverId);
 
         for (const [directory, childStore] of entry.childStores.children) {
@@ -113,7 +114,7 @@ export function RemoteProjectDiscovery() {
       syncStoreSubscriptions(entries);
       const store = useProjectsStore.getState();
       for (const entry of entries) {
-        if (entry.serverId === DEFAULT_SERVER_ID) continue;
+        if (entry.serverId === DEFAULT_SERVER_ID || isLegacyMobileActiveServerId(entry.serverId)) continue;
         for (const store of entry.childStores.children.values()) {
           const state = store.getState();
           const dirSessions = new Map<string, string[]>();

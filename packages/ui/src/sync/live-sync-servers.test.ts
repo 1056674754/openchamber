@@ -53,4 +53,9 @@ describe("resolveLiveSyncServers", () => {
     expect(resolveLiveSyncServers("remote-a")).toEqual([])
     clearNonDefaultServers()
   })
+
+  test("skips legacy mobile-active synthetic id", () => {
+    clearNonDefaultServers()
+    expect(resolveLiveSyncServers("mobile-active")).toEqual([])
+  })
 })

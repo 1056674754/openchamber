@@ -1,5 +1,6 @@
 import type { OpencodeClient } from "@opencode-ai/sdk/v2/client"
 import { serverRegistry, DEFAULT_SERVER_ID } from "@/lib/opencode/server-registry"
+import { isLegacyMobileActiveServerId } from "@/apps/mobileRuntimeBridge"
 
 export type LiveSyncServer = {
   id: string
@@ -13,7 +14,7 @@ export type LiveSyncServer = {
  */
 export function resolveLiveSyncServers(activeServerId: string | null | undefined): LiveSyncServer[] {
   const serverId = activeServerId?.trim() || DEFAULT_SERVER_ID
-  if (!serverId || serverId === DEFAULT_SERVER_ID) return []
+  if (!serverId || serverId === DEFAULT_SERVER_ID || isLegacyMobileActiveServerId(serverId)) return []
 
   const connection = serverRegistry.get(serverId)
   if (!connection || connection.healthStatus !== "healthy") return []

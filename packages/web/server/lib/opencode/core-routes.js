@@ -162,10 +162,20 @@ export const registerServerStatusRoutes = (app, dependencies) => {
     }
   };
 
-  app.get('/health', (_req, res) => {
+  app.get('/health', async (_req, res) => {
+    let serverId = null;
+    try {
+      if (typeof dependencies.getServerId === 'function') {
+        const value = await dependencies.getServerId();
+        serverId = typeof value === 'string' && value.trim() ? value.trim() : null;
+      }
+    } catch {
+      serverId = null;
+    }
     res.json({
       status: 'ok',
       timestamp: new Date().toISOString(),
+      ...(serverId ? { serverId } : {}),
       ...getHealthSnapshot(),
     });
   });
@@ -309,6 +319,18 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
       return res.status(403).json({ error: 'Password login is disabled for tunnel scope', tunnelLocked: true });
     }
     return uiAuthController.handleSessionCreate(req, res);
+  });
+
+  // Short-lived URL-scoped token for WebSocket upgrades (relay + direct).
+  app.post('/auth/url-token', async (req, res, next) => {
+    try {
+      if (typeof uiAuthController.handleUrlAuthToken !== 'function') {
+        return res.status(501).json({ error: 'URL auth tokens are unavailable' });
+      }
+      await uiAuthController.handleUrlAuthToken(req, res);
+    } catch (error) {
+      next(error);
+    }
   });
 
   app.get('/auth/passkey/status', (req, res) => {

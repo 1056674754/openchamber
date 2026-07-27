@@ -14,6 +14,7 @@
 
 import type { Event, OpencodeClient, SessionStatus } from "@opencode-ai/sdk/v2/client"
 import { useSessionMarkersStore, normalizeSessionMarkers } from "@/stores/useSessionMarkersStore"
+import { openRuntimeWebSocket } from "@/lib/relay/runtime-socket"
 import { syncDebug } from "./debug"
 import { applyBoundedRetryJitter } from "./retry"
 
@@ -662,7 +663,7 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
       let settled = false
       let opened = false
       let readyAt = 0
-      const socket = new WebSocket(buildGlobalEventWsUrl(baseUrl, lastEventId)) as ClosableWebSocket
+      const socket = openRuntimeWebSocket(buildGlobalEventWsUrl(baseUrl, lastEventId)) as unknown as ClosableWebSocket
 
       let readyTimer: ReturnType<typeof setTimeout> | undefined = setTimeout(() => {
         readyTimer = undefined
