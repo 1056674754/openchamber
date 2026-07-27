@@ -99,6 +99,7 @@
   - [ ] [#49](https://coding.s-s.city/songsong/openchamber/-/work_items/49) M10 — Push（APNs / FCM）— **现状仅 web-push**：浏览器 service-worker 订阅 + `web-push` 发送 + presence suppression 已通；原生 token 注册（iOS `register()` / Android `FirebaseMessagingService`）与服务端 APNs/FCM sender 未接，iOS `AppDelegate` 仅转发 APNs 回调、Android 仅有 Firebase 脚手架。`HANDOFF.md` 已纠偏
   - [x] [#16](https://coding.s-s.city/songsong/openchamber/-/work_items/16) M11 — Pairing / redeem 移动面（QR + `openchamber://` + Instances transport）
   - [ ] [#50](https://coding.s-s.city/songsong/openchamber/-/work_items/50) M12 — 商店签名 / CI release
+  - [ ] [#56](https://coding.s-s.city/songsong/openchamber/-/issues/56) 连接/onboarding UX 改进 — auto-connect 状态应占满（brand + spinner，隐藏可操作元素）、启动闪屏白→黑→首屏序列需平滑、整体工具感打磨；真机反馈"依旧非常非人类"
 
 ### C. 相关但非 Mobile 主轨（交叉引用）
 
