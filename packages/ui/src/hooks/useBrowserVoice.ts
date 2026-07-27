@@ -66,6 +66,8 @@ export interface UseBrowserVoiceReturn {
   isMobile: boolean;
   /** Current voice provider */
   voiceProvider: 'browser' | 'openai' | 'openai-compatible' | 'say';
+  /** Live interim (non-final) speech transcript; cleared on start/stop and on each final. */
+  interimTranscript: string;
 }
 
 // Storage key for persisting language preference
@@ -96,6 +98,7 @@ const sanitizeSpeechLanguage = (lang: string): string => {
 export function useBrowserVoice(): UseBrowserVoiceReturn {
   const [status, setStatus] = useState<BrowserVoiceStatus>('idle');
   const [error, setError] = useState<string | null>(null);
+  const [interimTranscript, setInterimTranscript] = useState<string>('');
   const [language, setLanguageState] = useState<string>(() => {
     // Try to load from localStorage, fallback to navigator.language
     if (typeof window !== 'undefined') {
@@ -615,7 +618,15 @@ export function useBrowserVoice(): UseBrowserVoiceReturn {
   const handleSpeechResult = useCallback(async (text: string, isFinal: boolean) => {
     if (!isActiveRef.current) return;
     const normalized = text.trim();
-    if (!isFinal || !normalized) return;
+
+    if (!isFinal) {
+      setInterimTranscript(normalized);
+      return;
+    }
+
+    setInterimTranscript('');
+
+    if (!normalized) return;
 
     console.log('[useBrowserVoice] Speech result:', normalized);
     pendingFinalTranscriptRef.current = normalized;
@@ -791,6 +802,7 @@ export function useBrowserVoice(): UseBrowserVoiceReturn {
       recoveryTimerRef.current = null;
     }
     setError(null);
+    setInterimTranscript('');
     setStatus('listening');
 
     if (sttProvider === 'server') {
@@ -917,6 +929,7 @@ export function useBrowserVoice(): UseBrowserVoiceReturn {
     stopSayTTS(); // Also stop Say TTS if playing
     setStatus('idle');
     setError(null);
+    setInterimTranscript('');
   }, [stopServerTTS, stopSayTTS]);
 
   const finishVoiceInput = useCallback(() => {
@@ -1025,5 +1038,6 @@ export function useBrowserVoice(): UseBrowserVoiceReturn {
     prepareVoice,
     isMobile,
     voiceProvider,
+    interimTranscript,
   };
 }

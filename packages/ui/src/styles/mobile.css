@@ -747,6 +747,23 @@
   background: var(--background);
 }
 
+/* Composer dictation overlay (mobile only) — scoped under mobile/capacitor guards so it never affects desktop. */
+:root.mobile-pointer:not(.desktop-runtime) .oc-dictation-grabber,
+:root.capacitor:not(.desktop-runtime) .oc-dictation-grabber {
+  opacity: 0.55;
+}
+
+:root.capacitor:not(.desktop-runtime) .oc-dictation-sheet,
+:root.mobile-pointer:not(.desktop-runtime) .oc-dictation-sheet {
+  padding-bottom: var(--oc-safe-area-bottom-visual, 0px);
+}
+
+:root.capacitor:not(.desktop-runtime) .oc-dictation-body,
+:root.mobile-pointer:not(.desktop-runtime) .oc-dictation-body {
+  font-size: var(--text-markdown);
+  line-height: 1.45;
+}
+
 /*
  * QR scan UI (Capawesome startScan = camera behind WebView).
  * Hide page chrome; keep the scan modal visible. Avoid body{visibility:hidden}

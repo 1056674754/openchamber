@@ -11,7 +11,7 @@
  */
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { useBrowserVoice } from '@/hooks/useBrowserVoice';
+import type { UseBrowserVoiceReturn } from '@/hooks/useBrowserVoice';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { browserVoiceService } from '@/lib/voice/browserVoiceService';
 import { isVSCodeRuntime } from '@/lib/desktop';
@@ -64,13 +64,21 @@ const normalizeVoiceErrorMessage = (error: string): string => {
 
 /**
  * Browser Voice Button with language selection
+ *
+ * Voice hook ownership is lifted to the parent (ChatInput) so that the mic
+ * singleton is not double-mounted by the mobile dictation overlay. The parent
+ * passes the shared `voice` object here for the inline (desktop) button.
  */
-export function BrowserVoiceButton() {
+export interface BrowserVoiceButtonProps {
+    voice: UseBrowserVoiceReturn;
+}
+
+export function BrowserVoiceButton({ voice }: BrowserVoiceButtonProps) {
     const { t } = useI18n();
     const voiceModeEnabled = useConfigStore((s) => s.voiceModeEnabled);
     const sttProvider = useConfigStore((s) => s.sttProvider);
     const sttTranscribeOnStop = useConfigStore((s) => s.sttTranscribeOnStop);
-    
+
     const {
         status,
         isSupported,
@@ -82,7 +90,7 @@ export function BrowserVoiceButton() {
         conversationMode,
         toggleConversationMode,
         isMobile,
-    } = useBrowserVoice();
+    } = voice;
     
     const [isPressing, setIsPressing] = useState(false);
     const isVSCode = isVSCodeRuntime();

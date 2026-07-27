@@ -1,6 +1,7 @@
 import React from 'react';
 import { Textarea } from '@/components/ui/textarea';
-import { BrowserVoiceButton } from '@/components/voice';
+import { BrowserVoiceButton, ComposerDictation } from '@/components/voice';
+import { useBrowserVoice } from '@/hooks/useBrowserVoice';
 // sessionStore removed — currentSessionId comes from useSessionUIStore
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
@@ -421,7 +422,21 @@ const getProjectIconColor = (projectColor?: string | null): string | undefined =
 };
 
 const MemoModelControls = React.memo(ModelControls);
-const MemoBrowserVoiceButton = React.memo(BrowserVoiceButton);
+const browserVoiceButtonPropsEqual = (prev: { voice: import('@/hooks/useBrowserVoice').UseBrowserVoiceReturn }, next: { voice: import('@/hooks/useBrowserVoice').UseBrowserVoiceReturn }): boolean => {
+    const a = prev.voice;
+    const b = next.voice;
+    return a.status === b.status
+        && a.error === b.error
+        && a.conversationMode === b.conversationMode
+        && a.isSupported === b.isSupported
+        && a.isMobile === b.isMobile
+        && a.language === b.language
+        && a.startVoice === b.startVoice
+        && a.stopVoice === b.stopVoice
+        && a.finishVoiceInput === b.finishVoiceInput
+        && a.toggleConversationMode === b.toggleConversationMode;
+};
+const MemoBrowserVoiceButton = React.memo(BrowserVoiceButton, browserVoiceButtonPropsEqual);
 const MemoMobileAgentButton = React.memo(MobileAgentButton);
 const MemoMobileModelButton = React.memo(MobileModelButton);
 const MemoStatusRow = React.memo(StatusRow);
@@ -1326,6 +1341,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             setKeyboardInsetCssVar(root, 0);
         };
     }, [isMobile, keyboardHeight]);
+    const voice = useBrowserVoice();
+    const voiceModeEnabled = useConfigStore((state) => state.voiceModeEnabled);
+    const [showDictation, setShowDictation] = React.useState(false);
     const persistChatDraft = useUIStore((state) => state.persistChatDraft);
     const inputSpellcheckEnabled = useUIStore((state) => state.inputSpellcheckEnabled);
     const isExpandedInput = useUIStore((state) => state.isExpandedInput);
@@ -1976,6 +1994,19 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             setMobileControlsPanel(panel);
         });
     }, [isMobile]);
+
+    const handleOpenDictation = React.useCallback(() => {
+        if (!voiceModeEnabled || !voice.isSupported) {
+            return;
+        }
+        textareaRef.current?.blur();
+        voice.startVoice();
+        setShowDictation(true);
+    }, [voice, voiceModeEnabled]);
+
+    const handleCloseDictation = React.useCallback(() => {
+        setShowDictation(false);
+    }, []);
 
     // Consume pending input text (e.g., from revert action)
     React.useEffect(() => {
@@ -5132,7 +5163,28 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                             />
                                         </div>
                                         <div className="flex items-center gap-x-1 flex-shrink-0">
-                                            <MemoBrowserVoiceButton />
+                                            {voiceModeEnabled ? (
+                                                <button
+                                                    type="button"
+                                                    className={cn(footerIconButtonClass, 'rounded-md')}
+                                                    onMouseDown={(event) => event.preventDefault()}
+                                                    onPointerDownCapture={(event) => {
+                                                        if (event.pointerType === 'touch') {
+                                                            event.preventDefault();
+                                                            event.stopPropagation();
+                                                        }
+                                                    }}
+                                                    onClick={handleOpenDictation}
+                                                    disabled={!voice.isSupported}
+                                                    aria-label={t('voice.dictation.title')}
+                                                    title={t('voice.dictation.title')}
+                                                >
+                                                    <Icon
+                                                        name={voice.isSupported ? 'mic' : 'mic-off'}
+                                                        className={cn(iconSizeClass, !voice.isSupported && 'opacity-50')}
+                                                    />
+                                                </button>
+                                            ) : null}
                                             <ComposerActionButtons
                                                 isMobile={isMobile}
                                                 footerIconButtonClass={footerIconButtonClass}
@@ -5219,7 +5271,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                         />
                                     ) : null}
                                     <MemoModelControls className={cn('flex-1 min-w-0 justify-end')} />
-                                    <MemoBrowserVoiceButton />
+                                    <MemoBrowserVoiceButton voice={voice} />
                                     <ComposerActionButtons
                                         isMobile={isMobile}
                                         footerIconButtonClass={footerIconButtonClass}
@@ -5249,6 +5301,15 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         </form>
 
         {/* Issue Picker Dialog */}
+        {isMobile ? (
+            <ComposerDictation
+                open={showDictation}
+                voice={voice}
+                composerMessage={message}
+                onClose={handleCloseDictation}
+                onCommit={handleCloseDictation}
+            />
+        ) : null}
         <GitHubIssuePickerDialog
             open={issuePickerOpen}
             onOpenChange={setIssuePickerOpen}
