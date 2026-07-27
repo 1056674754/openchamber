@@ -88,6 +88,10 @@ export type DesktopSettings = {
   notifyOnError?: boolean;
   notifyOnQuestion?: boolean;
 
+  // Session assist (recap + suggested next message generated server-side)
+  sessionRecapEnabled?: boolean;
+  sessionSuggestionEnabled?: boolean;
+
   // Per-event notification templates
   notificationTemplates?: {
     completion: { title: string; message: string };

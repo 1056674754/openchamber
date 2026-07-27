@@ -2775,4 +2775,12 @@ export const dict: Record<I18nKey, string> = {
   'instanceInfoPanel.sshPhase.idle': '대기 중',
   'instanceInfoPanel.actions.refreshAria': '인스턴스 정보 새로 고침',
   'instanceInfoPanel.actions.manageSettings': '설정에서 관리',
+  'chat.recap.aria': 'Session recap',
+  'chat.recap.label': 'Recap:',
+  'chat.suggestion.applyAria': 'Use suggested message',
+  'chat.suggestion.dismissAria': 'Dismiss suggestion',
+  'settings.openchamber.visual.field.sessionRecap': 'Generate Session Recap',
+  'settings.openchamber.visual.field.sessionRecapAria': 'Generate a recap after the agent finishes',
+  'settings.openchamber.visual.field.sessionSuggestion': 'Generate Next User Message Suggestion',
+  'settings.openchamber.visual.field.sessionSuggestionAria': 'Generate a suggested next user message after the agent finishes',
 };

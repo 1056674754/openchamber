@@ -86,6 +86,7 @@ import { createNotificationTemplateRuntime } from './lib/notifications/template-
 import { createPermissionAutoAcceptRuntime } from './lib/permission-auto-accept/runtime.js';
 import { createGracefulShutdownRuntime } from './lib/opencode/shutdown-runtime.js';
 import { createSessionGoalRuntime } from './lib/session-goal/runtime.js';
+import { createSessionAssistRuntime } from './lib/session-assist/runtime.js';
 import { createContextObligatoryRuntime } from './lib/context-obligatory/runtime.js';
 import { createProjectConfigRuntime } from './lib/projects/project-config.js';
 import { createPreviewProxyRuntime } from './lib/preview/proxy-runtime.js';
@@ -915,6 +916,13 @@ const sessionGoalRuntime = createSessionGoalRuntime({
   },
 });
 
+const sessionAssistRuntime = createSessionAssistRuntime({
+  buildOpenCodeUrl,
+  getOpenCodeAuthHeaders,
+  getSmallModelService: async () => import('./lib/small-model/index.js'),
+  readSettings: () => readSettingsFromDisk(),
+});
+
 const contextObligatoryRuntime = createContextObligatoryRuntime({
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
@@ -938,6 +946,7 @@ globalMessageStreamHub.subscribeEvent((event) => {
     : '';
   // Local hub has no remote serverId; pass default explicitly for the hard gate.
   sessionGoalRuntime.processPayload(payload, directory, 'default');
+  sessionAssistRuntime.processPayload(payload, directory, 'default');
   contextObligatoryRuntime.processPayload(payload, directory, 'default');
 });
 
@@ -1339,6 +1348,7 @@ const gracefulShutdownRuntime = createGracefulShutdownRuntime({
   openCodeConfigFileWatcherRuntime,
   sessionRuntime,
   sessionGoalRuntime,
+  sessionAssistRuntime,
   contextObligatoryRuntime,
   getHealthCheckInterval: () => healthCheckInterval,
   clearHealthCheckInterval: (value) => clearInterval(value),

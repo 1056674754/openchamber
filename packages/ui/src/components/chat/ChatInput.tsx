@@ -1,6 +1,7 @@
 import React from 'react';
 import { Textarea } from '@/components/ui/textarea';
 import { BrowserVoiceButton, ComposerDictation } from '@/components/voice';
+import { SessionSuggestionChip } from '@/components/chat/SessionSuggestionChip';
 import { useBrowserVoice } from '@/hooks/useBrowserVoice';
 // sessionStore removed — currentSessionId comes from useSessionUIStore
 import { useConfigStore } from '@/stores/useConfigStore';
@@ -2046,6 +2047,11 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     }, [pendingPresetSubmit, consumePendingPresetSubmit]);
 
     const hasContent = message.trim().length > 0 || sendableAttachedFiles.length > 0 || hasDrafts;
+
+    const applyAssistSuggestion = React.useCallback((text: string) => {
+        setMessage(text);
+        requestAnimationFrame(() => textareaRef.current?.focus());
+    }, []);
     const hasQueuedMessages = queuedMessages.length > 0;
     const canSend = hasContent || hasQueuedMessages;
 
@@ -4877,6 +4883,13 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                         ) : null}
                     </div>
                 ) : null}
+                <SessionSuggestionChip
+                    sessionId={currentSessionId}
+                    directory={currentSessionDirectoryForSync}
+                    hidden={hasContent || newSessionDraftOpen}
+                    onApply={applyAssistSuggestion}
+                    className="mb-1.5"
+                />
                 <div
                     className={cn(
                         "flex flex-col relative overflow-visible",

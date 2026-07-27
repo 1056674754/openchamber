@@ -233,7 +233,7 @@ const normalizeUserMessageRenderingMode = (mode: unknown): 'markdown' | 'plain' 
     return mode === 'markdown' ? 'markdown' : 'plain';
 };
 
-export type VisibleSetting = 'theme' | 'dockBadge' | 'pwaInstallName' | 'pwaOrientation' | 'mobileKeyboardMode' | 'timeFormat' | 'weekStart' | 'fontSize' | 'terminalFontSize' | 'editorFontSize' | 'spacing' | 'inputBarOffset' | 'userMessageRendering' | 'chatRenderMode' | 'messageTransport' | 'activityRenderMode' | 'collapsibleUserMessages' | 'stickyUserHeader' | 'promptNavigatorEnabled' | 'wideChatLayout' | 'splitAssistantMessageActions' | 'subagentPrompting' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'reasoning' | 'showToolFileIcons' | 'expandedTools' | 'queueMode' | 'terminalQuickKeys' | 'fileEditorKeymap' | 'persistDraft' | 'inputSpellcheck' | 'reportUsage' | 'multiRun' | 'sessionGoal';
+export type VisibleSetting = 'theme' | 'dockBadge' | 'pwaInstallName' | 'pwaOrientation' | 'mobileKeyboardMode' | 'timeFormat' | 'weekStart' | 'fontSize' | 'terminalFontSize' | 'editorFontSize' | 'spacing' | 'inputBarOffset' | 'userMessageRendering' | 'chatRenderMode' | 'messageTransport' | 'activityRenderMode' | 'collapsibleUserMessages' | 'stickyUserHeader' | 'promptNavigatorEnabled' | 'wideChatLayout' | 'splitAssistantMessageActions' | 'subagentPrompting' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'reasoning' | 'showToolFileIcons' | 'expandedTools' | 'queueMode' | 'terminalQuickKeys' | 'fileEditorKeymap' | 'persistDraft' | 'inputSpellcheck' | 'reportUsage' | 'multiRun' | 'sessionGoal' | 'sessionAssist';
 
 interface OpenChamberVisualSettingsProps {
     /** Which settings to show. If undefined, shows all. */
@@ -313,6 +313,10 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const setShowSplitAssistantMessageActions = useUIStore(state => state.setShowSplitAssistantMessageActions);
     const allowPromptingSubagentSessions = useUIStore(state => state.allowPromptingSubagentSessions);
     const setAllowPromptingSubagentSessions = useUIStore(state => state.setAllowPromptingSubagentSessions);
+    const sessionRecapEnabled = useUIStore(state => state.sessionRecapEnabled);
+    const sessionSuggestionEnabled = useUIStore(state => state.sessionSuggestionEnabled);
+    const setSessionRecapEnabled = useUIStore(state => state.setSessionRecapEnabled);
+    const setSessionSuggestionEnabled = useUIStore(state => state.setSessionSuggestionEnabled);
     const showMobileSessionStatusBar = useUIStore(state => state.showMobileSessionStatusBar);
     const setShowMobileSessionStatusBar = useUIStore(state => state.setShowMobileSessionStatusBar);
     const dockBadgeEnabled = useUIStore(state => state.dockBadgeEnabled);
@@ -1887,10 +1891,56 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                         </div>
                                     )}
 
-                                    {(shouldShow('subagentPrompting') || shouldShow('multiRun') || (shouldShow('sessionGoal') && !isVSCode)) && (
+                                    {(shouldShow('sessionAssist') || shouldShow('subagentPrompting') || shouldShow('multiRun') || (shouldShow('sessionGoal') && !isVSCode)) && (
                                         <h3 className="typography-ui-header mt-3 py-1.5 font-medium text-foreground">
                                             {t('settings.openchamber.visual.section.sessionAssistance')}
                                         </h3>
+                                    )}
+                                    {shouldShow('sessionAssist') && (
+                                        <>
+                                        <div
+                                            data-settings-item="chat.session-recap"
+                                            className="group flex cursor-pointer items-center gap-2 py-0.5"
+                                            role="button"
+                                            tabIndex={0}
+                                            aria-pressed={sessionRecapEnabled}
+                                            onClick={() => setSessionRecapEnabled(!sessionRecapEnabled)}
+                                            onKeyDown={(event) => {
+                                                if (event.key === ' ' || event.key === 'Enter') {
+                                                    event.preventDefault();
+                                                    setSessionRecapEnabled(!sessionRecapEnabled);
+                                                }
+                                            }}
+                                        >
+                                            <Checkbox
+                                                checked={sessionRecapEnabled}
+                                                onChange={setSessionRecapEnabled}
+                                                ariaLabel={t('settings.openchamber.visual.field.sessionRecapAria')}
+                                            />
+                                            <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.sessionRecap')}</span>
+                                        </div>
+                                        <div
+                                            data-settings-item="chat.session-suggestion"
+                                            className="group flex cursor-pointer items-center gap-2 py-0.5"
+                                            role="button"
+                                            tabIndex={0}
+                                            aria-pressed={sessionSuggestionEnabled}
+                                            onClick={() => setSessionSuggestionEnabled(!sessionSuggestionEnabled)}
+                                            onKeyDown={(event) => {
+                                                if (event.key === ' ' || event.key === 'Enter') {
+                                                    event.preventDefault();
+                                                    setSessionSuggestionEnabled(!sessionSuggestionEnabled);
+                                                }
+                                            }}
+                                        >
+                                            <Checkbox
+                                                checked={sessionSuggestionEnabled}
+                                                onChange={setSessionSuggestionEnabled}
+                                                ariaLabel={t('settings.openchamber.visual.field.sessionSuggestionAria')}
+                                            />
+                                            <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.sessionSuggestion')}</span>
+                                        </div>
+                                        </>
                                     )}
                                     {shouldShow('subagentPrompting') && (
                                         <div

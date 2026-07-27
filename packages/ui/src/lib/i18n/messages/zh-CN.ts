@@ -2776,4 +2776,8 @@ export const dict: Record<I18nKey, string> = {
   'instanceInfoPanel.sshPhase.idle': '空闲',
   'instanceInfoPanel.actions.refreshAria': '刷新实例信息',
   'instanceInfoPanel.actions.manageSettings': '在设置中管理',
+  'chat.recap.aria': '会话回顾',
+  'chat.recap.label': '回顾：',
+  'chat.suggestion.applyAria': '使用建议的消息',
+  'chat.suggestion.dismissAria': '关闭建议',
 };

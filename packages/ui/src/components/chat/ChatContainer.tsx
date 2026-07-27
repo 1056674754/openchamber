@@ -9,6 +9,7 @@ import { DraftPresetChips } from './DraftPresetChips';
 import MessageList, { type MessageListHandle } from './MessageList';
 import { PermissionCard } from './PermissionCard';
 import { QuestionCard } from './QuestionCard';
+import { SessionRecapNote } from './SessionRecapNote';
 import { StatusRowContainer } from './StatusRowContainer';
 import ScrollToBottomButton from './components/ScrollToBottomButton';
 import { ScrollShadow } from '@/components/ui/ScrollShadow';
@@ -321,6 +322,10 @@ const ChatViewport = React.memo(({
                                     <PermissionCard key={permission.id} permission={permission} />
                                 ))}
                             </div>
+                        )}
+
+                        {currentSessionId && (
+                            <SessionRecapNote sessionId={currentSessionId} directory={sessionDirectory} isMobile={isMobile} />
                         )}
 
                         <div className="mb-2">

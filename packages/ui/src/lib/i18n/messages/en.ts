@@ -2775,6 +2775,10 @@ export const dict = {
   'instanceInfoPanel.sshPhase.idle': 'Idle',
   'instanceInfoPanel.actions.refreshAria': 'Refresh instance info',
   'instanceInfoPanel.actions.manageSettings': 'Manage in Settings',
+  'chat.recap.aria': 'Session recap',
+  'chat.recap.label': 'Recap:',
+  'chat.suggestion.applyAria': 'Use suggested message',
+  'chat.suggestion.dismissAria': 'Dismiss suggestion',
 } as const;
 
 export type I18nKey = keyof typeof dict;

@@ -2018,4 +2018,8 @@ export const settingsDict = {
   'settings.openchamber.keyboardShortcuts.action.toggle_prompt_navigator.label': 'Toggle prompt navigator',
   'settings.openchamber.visual.field.promptNavigatorEnabledAria': 'Prompt navigator',
   'settings.openchamber.visual.field.promptNavigatorEnabled': 'Prompt Navigator',
+  'settings.openchamber.visual.field.sessionRecap': 'Generate Session Recap',
+  'settings.openchamber.visual.field.sessionRecapAria': 'Generate a recap after the agent finishes',
+  'settings.openchamber.visual.field.sessionSuggestion': 'Generate Next User Message Suggestion',
+  'settings.openchamber.visual.field.sessionSuggestionAria': 'Generate a suggested next user message after the agent finishes',
 } as const;

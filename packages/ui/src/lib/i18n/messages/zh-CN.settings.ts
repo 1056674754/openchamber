@@ -2017,4 +2017,8 @@ export const settingsDict = {
   'settings.openchamber.keyboardShortcuts.action.toggle_prompt_navigator.label': '显示或隐藏提示词导航',
   'settings.openchamber.visual.field.promptNavigatorEnabledAria': '提示词导航',
   'settings.openchamber.visual.field.promptNavigatorEnabled': '提示词导航',
+  'settings.openchamber.visual.field.sessionRecap': '生成会话回顾',
+  'settings.openchamber.visual.field.sessionRecapAria': '代理完成后生成回顾',
+  'settings.openchamber.visual.field.sessionSuggestion': '生成下一条用户消息建议',
+  'settings.openchamber.visual.field.sessionSuggestionAria': '代理完成后生成下一条用户消息建议',
 } as const;

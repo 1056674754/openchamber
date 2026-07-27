@@ -2773,4 +2773,12 @@ export const dict: Record<I18nKey, string> = {
   'instanceInfoPanel.sshPhase.idle': 'アイドル',
   'instanceInfoPanel.actions.refreshAria': 'インスタンス情報を更新',
   'instanceInfoPanel.actions.manageSettings': '設定で管理',
+  'chat.recap.aria': 'Session recap',
+  'chat.recap.label': 'Recap:',
+  'chat.suggestion.applyAria': 'Use suggested message',
+  'chat.suggestion.dismissAria': 'Dismiss suggestion',
+  'settings.openchamber.visual.field.sessionRecap': 'Generate Session Recap',
+  'settings.openchamber.visual.field.sessionRecapAria': 'Generate a recap after the agent finishes',
+  'settings.openchamber.visual.field.sessionSuggestion': 'Generate Next User Message Suggestion',
+  'settings.openchamber.visual.field.sessionSuggestionAria': 'Generate a suggested next user message after the agent finishes',
 };
