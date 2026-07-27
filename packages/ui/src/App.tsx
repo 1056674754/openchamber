@@ -200,7 +200,6 @@ const EmbeddedSessionChatContent: React.FC<{
   return (
     <>
       <SyncAppEffects embeddedBackgroundWorkEnabled={embeddedBackgroundWorkEnabled} />
-      <OpenCodeUpdateToast />
       <ChatView readOnly={embeddedSessionChat.readOnly} />
       <Toaster />
     </>
