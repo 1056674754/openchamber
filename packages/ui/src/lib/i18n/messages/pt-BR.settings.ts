@@ -62,6 +62,8 @@ export const settingsDict = {
   "settings.page.notifications.title": "Notificações",
   "settings.page.voice.title": "Voz",
   "settings.page.tunnel.title": "Túnel remoto",
+  "settings.page.pairing.title": "Private Relay",
+  "settings.page.pairing.description": "Pareie celulares ou outros desktops a esta máquina. Fora de casa usa o Private Relay oficial; na rede local prioriza LAN.",
   "settings.page.snippets.title": "Snippets",
 
   "settings.instance.selector.label": "Instance",

@@ -523,17 +523,97 @@ const normalizeHostUrl = (raw) => {
 
 const sanitizeHostUrlForStorage = (raw) => normalizeHostUrl(raw);
 
+const sanitizeClientTokenForStorage = (raw) => {
+  const token = typeof raw === 'string' ? raw.trim() : '';
+  return token.length > 0 ? token : null;
+};
+
+const isReservedRequestHeaderName = (name) => String(name || '').trim().toLowerCase() === 'authorization';
+
+const sanitizeRuntimeRequestHeaders = (headers) => {
+  if (!headers || typeof headers !== 'object' || Array.isArray(headers)) return {};
+  const next = {};
+  for (const [key, value] of Object.entries(headers)) {
+    const name = typeof key === 'string' ? key.trim() : '';
+    const headerValue = typeof value === 'string' ? value.trim() : '';
+    if (!name || !headerValue || /[\r\n:]/.test(name) || /[\r\n]/.test(headerValue)) continue;
+    if (isReservedRequestHeaderName(name)) continue;
+    next[name] = headerValue;
+  }
+  return next;
+};
+
+const sanitizeHostRelayForStorage = (value) => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const relayUrl = typeof value.relayUrl === 'string' ? value.relayUrl.trim() : '';
+  const serverId = typeof value.serverId === 'string' ? value.serverId.trim() : '';
+  const jwk = value.hostEncPubJwk;
+  if (!relayUrl || !serverId || !jwk || typeof jwk !== 'object' || Array.isArray(jwk)) return null;
+  if (typeof jwk.kty !== 'string' || typeof jwk.crv !== 'string' || typeof jwk.x !== 'string') return null;
+  try {
+    const parsed = new URL(relayUrl);
+    if (parsed.protocol !== 'ws:' && parsed.protocol !== 'wss:') return null;
+  } catch {
+    return null;
+  }
+  return { relayUrl, serverId, hostEncPubJwk: jwk };
+};
+
+// Host may carry direct HTTP, relay, or both (LAN at home / E2EE away).
+const buildStoredHostEntry = (entry) => {
+  const id = typeof entry?.id === 'string' ? entry.id.trim() : '';
+  if (!id || id === LOCAL_HOST_ID) return null;
+  const clientToken = sanitizeClientTokenForStorage(entry?.clientToken);
+  const requestHeaders = sanitizeRuntimeRequestHeaders(entry?.requestHeaders);
+  const headerFields = Object.keys(requestHeaders).length > 0 ? { requestHeaders } : {};
+  const tokenField = clientToken ? { clientToken } : {};
+  const labelRaw = typeof entry?.label === 'string' && entry.label.trim() ? entry.label.trim() : '';
+
+  const relay = sanitizeHostRelayForStorage(entry?.relay);
+  const relayField = relay ? { relay } : {};
+  const directUrl = sanitizeHostUrlForStorage(entry?.url);
+  const apiUrl = directUrl ? (sanitizeHostUrlForStorage(entry?.apiUrl) || directUrl) : sanitizeHostUrlForStorage(entry?.apiUrl);
+
+  if (directUrl) {
+    return { id, label: labelRaw || directUrl, url: directUrl, apiUrl: apiUrl || directUrl, ...tokenField, ...headerFields, ...relayField };
+  }
+  if (relay) {
+    const url = `relay://${relay.serverId}`;
+    return {
+      id,
+      label: labelRaw || url,
+      url,
+      ...(apiUrl ? { apiUrl } : {}),
+      ...tokenField,
+      ...headerFields,
+      relay,
+    };
+  }
+  return null;
+};
+
+const getOrCreateDesktopInstallId = async () => {
+  const existing = readSettingsRoot().desktopInstallId;
+  if (typeof existing === 'string' && existing.trim()) return existing.trim();
+  const generated = globalThis.crypto.randomUUID();
+  await mutateSettingsRoot((root) => {
+    if (typeof root.desktopInstallId === 'string' && root.desktopInstallId.trim()) return root;
+    root.desktopInstallId = generated;
+    return root;
+  });
+  const after = readSettingsRoot().desktopInstallId;
+  return typeof after === 'string' && after.trim() ? after.trim() : generated;
+};
+
+const readDesktopLocalClientToken = () => {
+  return sanitizeClientTokenForStorage(readSettingsRoot().desktopLocalClientToken) || '';
+};
+
 const readDesktopHostsConfig = () => {
   const root = readSettingsRoot();
   const hostsRaw = Array.isArray(root.desktopHosts) ? root.desktopHosts : [];
   const hosts = hostsRaw
-    .map((entry) => {
-      const id = typeof entry?.id === 'string' ? entry.id.trim() : '';
-      const url = sanitizeHostUrlForStorage(entry?.url);
-      if (!id || id === LOCAL_HOST_ID || !url) return null;
-      const label = typeof entry?.label === 'string' && entry.label.trim() ? entry.label.trim() : url;
-      return { id, label, url };
-    })
+    .map(buildStoredHostEntry)
     .filter(Boolean);
 
   return {
@@ -549,16 +629,7 @@ const writeDesktopHostsConfig = async (config) => {
   await mutateSettingsRoot((root) => {
     root.desktopHosts = Array.isArray(config?.hosts)
       ? config.hosts
-          .map((entry) => {
-            const id = typeof entry?.id === 'string' ? entry.id.trim() : '';
-            const url = sanitizeHostUrlForStorage(entry?.url);
-            if (!id || id === LOCAL_HOST_ID || !url) return null;
-            return {
-              id,
-              label: typeof entry?.label === 'string' && entry.label.trim() ? entry.label.trim() : url,
-              url,
-            };
-          })
+          .map(buildStoredHostEntry)
           .filter(Boolean)
       : [];
     root.desktopDefaultHostId = typeof config?.defaultHostId === 'string' && config.defaultHostId.trim()
@@ -566,6 +637,14 @@ const writeDesktopHostsConfig = async (config) => {
       : null;
     if (typeof config?.initialHostChoiceCompleted === 'boolean') {
       root.desktopInitialHostChoiceCompleted = config.initialHostChoiceCompleted;
+    }
+    if (Object.prototype.hasOwnProperty.call(config || {}, 'localClientToken')) {
+      const localClientToken = sanitizeClientTokenForStorage(config.localClientToken);
+      if (localClientToken) {
+        root.desktopLocalClientToken = localClientToken;
+      } else {
+        delete root.desktopLocalClientToken;
+      }
     }
   });
 };
@@ -624,15 +703,41 @@ const buildHealthUrl = (url) => {
   }
 };
 
-const probeHostWithTimeout = async (url, timeoutMs) => {
+const probeHostWithTimeout = async (url, timeoutMs, clientToken = '', requestHeaders = {}, expectedServerId = '') => {
   const healthUrl = buildHealthUrl(url);
   if (!healthUrl) {
     throw new Error('Invalid URL');
   }
 
   const started = Date.now();
+
+  // Identity gate for learned/untrusted addresses: verify UNAUTHENTICATED
+  // /health serverId before sending the bearer token.
+  if (typeof expectedServerId === 'string' && expectedServerId.trim()) {
+    try {
+      const response = await fetch(healthUrl, {
+        signal: AbortSignal.timeout(timeoutMs),
+        headers: { Accept: 'application/json' },
+      });
+      if (response.ok) {
+        const payload = await response.json().catch(() => null);
+        const reported = typeof payload?.serverId === 'string' ? payload.serverId.trim() : '';
+        if (reported && reported !== expectedServerId.trim()) {
+          return { status: 'wrong-service', latencyMs: Date.now() - started };
+        }
+      }
+    } catch {
+      // Unreachable/timeout surfaces in the authenticated health fetch below.
+    }
+  }
+
   try {
-    const response = await fetch(healthUrl, { signal: AbortSignal.timeout(timeoutMs) });
+    const headers = { ...sanitizeRuntimeRequestHeaders(requestHeaders), Accept: 'application/json' };
+    const token = typeof clientToken === 'string' ? clientToken.trim() : '';
+    if (token) {
+      headers.Authorization = `Bearer ${token}`;
+    }
+    const response = await fetch(healthUrl, { signal: AbortSignal.timeout(timeoutMs), headers });
     const status = response.status;
     return {
       status: status >= 200 && status < 300 ? 'ok' : (status === 401 || status === 403 ? 'auth' : 'unreachable'),
@@ -2049,41 +2154,51 @@ const setupAutoUpdater = () => {
   if (!app.isPackaged) {
     return;
   }
-  autoUpdater.autoDownload = false;
-  autoUpdater.autoInstallOnAppQuit = false;
-  autoUpdater.allowPrerelease = false;
-  autoUpdater.fullChangelog = true;
-  autoUpdater.disableWebInstaller = false;
-  autoUpdater.logger = log;
 
-  const { owner, repo } = parseGithubRepo();
-  autoUpdater.setFeedURL({
-    provider: 'github',
-    owner,
-    repo,
-  });
+  // electron-updater validates app.getVersion() as semver on first property
+  // access. A bad packaged version must not take down the whole desktop shell.
+  try {
+    autoUpdater.autoDownload = false;
+    autoUpdater.autoInstallOnAppQuit = false;
+    autoUpdater.allowPrerelease = false;
+    autoUpdater.fullChangelog = true;
+    autoUpdater.disableWebInstaller = false;
+    autoUpdater.logger = log;
 
-  autoUpdater.on('download-progress', (progress) => {
-    emitToAllWindows('openchamber:update-progress', mapUpdaterProgressEvent({
-      event: 'Progress',
-      data: {
-        chunkLength: Math.max(0, Math.round(progress.bytesPerSecond || 0)),
-        downloaded: Math.round(progress.transferred || 0),
-        total: Math.round(progress.total || 0),
-      },
-    }));
-  });
+    const { owner, repo } = parseGithubRepo();
+    autoUpdater.setFeedURL({
+      provider: 'github',
+      owner,
+      repo,
+    });
 
-  autoUpdater.on('update-downloaded', (info) => {
-    log.info(`[electron] update-downloaded version=${info?.version || 'unknown'}`);
-    if (state.pendingUpdate) {
-      state.pendingUpdate.downloaded = true;
-    }
-  });
+    autoUpdater.on('download-progress', (progress) => {
+      emitToAllWindows('openchamber:update-progress', mapUpdaterProgressEvent({
+        event: 'Progress',
+        data: {
+          chunkLength: Math.max(0, Math.round(progress.bytesPerSecond || 0)),
+          downloaded: Math.round(progress.transferred || 0),
+          total: Math.round(progress.total || 0),
+        },
+      }));
+    });
 
-  autoUpdater.on('error', (err) => {
-    log.error('[electron] autoUpdater error', err);
-  });
+    autoUpdater.on('update-downloaded', (info) => {
+      log.info(`[electron] update-downloaded version=${info?.version || 'unknown'}`);
+      if (state.pendingUpdate) {
+        state.pendingUpdate.downloaded = true;
+      }
+    });
+
+    autoUpdater.on('error', (err) => {
+      log.error('[electron] autoUpdater error', err);
+    });
+  } catch (error) {
+    log.error('[electron] autoUpdater setup failed; continuing without updates', {
+      version: APP_VERSION,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
 };
 
 const parseRelevantChangelogNotes = async (fromVersion, toVersion) => {
@@ -2765,8 +2880,20 @@ end tell`;
       return null;
     }
 
+    case 'desktop_local_client_token_get':
+      return readDesktopLocalClientToken();
+
+    case 'desktop_install_id_get':
+      return getOrCreateDesktopInstallId();
+
     case 'desktop_host_probe':
-      return probeHostWithTimeout(String(args.url || ''), 2_000);
+      return probeHostWithTimeout(
+        String(args.url || ''),
+        2_000,
+        String(args.clientToken || ''),
+        args.requestHeaders || {},
+        String(args.expectedServerId || ''),
+      );
 
     case 'desktop_remote_password_login': {
       if (!browserWindow || browserWindow.isDestroyed()) {
@@ -3192,6 +3319,8 @@ const isLocalSender = (webContents) => {
 const COMMANDS_SAFE_FOR_REMOTE = new Set([
   'desktop_hosts_get',
   'desktop_host_probe',
+  'desktop_local_client_token_get',
+  'desktop_install_id_get',
   'desktop_remote_password_login',
   'desktop_new_window',
   'desktop_new_window_at_url',

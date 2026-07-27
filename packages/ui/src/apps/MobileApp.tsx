@@ -1,4 +1,5 @@
 import React from 'react';
+import { App as CapApp } from '@capacitor/app';
 
 import App from '@/App';
 import { MobileInstancesSheet } from '@/apps/MobileInstancesSheet';
@@ -9,90 +10,143 @@ import { RuntimeAPIProvider } from '@/contexts/RuntimeAPIProvider';
 import type { RuntimeAPIs } from '@/lib/api/types';
 import { markAppBootReady } from '@/apps/appBootReady';
 import {
-  connectToMobileServer,
-  disconnectMobileServer,
-  listMobileConnections,
-  removeMobileConnection,
+  autoConnectLastInstance,
+  connectionDisplayUrl,
+  isActiveRuntimeConnection,
+  useMobileConnection,
   type MobileSavedConnection,
-  useMobileConnections,
 } from '@/apps/mobileConnections';
-import { getRuntimeApiBaseUrl, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
+import { scanConnectionQr } from '@/apps/mobileQrScan';
+import { parsePairingConnectionPayload } from '@/lib/connectionPayload';
+import { isCapacitorApp } from '@/lib/platform';
 import { useCapacitorVoiceResume } from '@/hooks/useCapacitorVoiceResume';
 import { useNativeMobileChrome } from '@/hooks/useNativeMobileChrome';
 import { useI18n } from '@/lib/i18n';
+import { describePairingTransport } from '@/lib/relay/serverIdAuthority';
+import { isRelayModeActive } from '@/lib/relay/runtime-tunnel';
+import { getRuntimeApiBaseUrl, subscribeRuntimeEndpointChanged, switchRuntimeEndpoint } from '@/lib/runtime-switch';
 
 type MobileAppProps = {
   apis: RuntimeAPIs;
+};
+
+const disconnectRuntime = (): void => {
+  switchRuntimeEndpoint({ apiBaseUrl: '', clientToken: null, runtimeKey: 'mobile-disconnected' });
 };
 
 export const MobileApp: React.FC<MobileAppProps> = ({ apis }) => {
   useNativeMobileChrome();
   useCapacitorVoiceResume();
   const { t } = useI18n();
-  const { connections, refresh } = useMobileConnections();
   const [url, setUrl] = React.useState('');
   const [password, setPassword] = React.useState('');
-  const [error, setError] = React.useState<string | null>(null);
-  const [busy, setBusy] = React.useState(false);
-  const [needsPassword, setNeedsPassword] = React.useState(false);
-  const [connectedUrl, setConnectedUrl] = React.useState(() => getRuntimeApiBaseUrl());
+  const [scanBusy, setScanBusy] = React.useState(false);
+  const [runtimeUrl, setRuntimeUrl] = React.useState(() => getRuntimeApiBaseUrl());
+  const [autoConnectTried, setAutoConnectTried] = React.useState(false);
+
+  const onConnected = React.useCallback(() => {
+    setRuntimeUrl(getRuntimeApiBaseUrl());
+    markAppBootReady();
+  }, []);
+
+  const conn = useMobileConnection(onConnected);
 
   React.useEffect(() => {
     markAppBootReady();
     return subscribeRuntimeEndpointChanged((detail) => {
-      setConnectedUrl(detail.apiBaseUrl);
+      setRuntimeUrl(detail.apiBaseUrl);
     });
   }, []);
 
-  const connect = React.useCallback(async (targetUrl: string, targetPassword?: string) => {
-    setBusy(true);
-    setError(null);
-    try {
-      const saved = await connectToMobileServer({
-        url: targetUrl,
-        password: targetPassword,
-      });
-      setConnectedUrl(saved.url);
-      setNeedsPassword(false);
-      setPassword('');
-      refresh();
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      if (message === 'PASSWORD_REQUIRED') {
-        setNeedsPassword(true);
-        setError(t('mobile.connect.passwordRequired'));
-      } else {
-        setError(message || t('mobile.connect.failed'));
-      }
-    } finally {
-      setBusy(false);
-    }
-  }, [refresh, t]);
+  React.useEffect(() => {
+    if (autoConnectTried || runtimeUrl) return;
+    setAutoConnectTried(true);
+    void autoConnectLastInstance().then((ok) => {
+      if (ok) setRuntimeUrl(getRuntimeApiBaseUrl());
+    }).catch(() => undefined);
+  }, [autoConnectTried, runtimeUrl]);
+
+  React.useEffect(() => {
+    if (!isCapacitorApp()) return;
+    let cancelled = false;
+    const handleUrl = (raw: string | undefined) => {
+      if (!raw || cancelled) return;
+      const payload = parsePairingConnectionPayload(raw);
+      if (!payload) return;
+      void conn.redeemPairingConnection(payload).catch(() => undefined);
+    };
+    void CapApp.getLaunchUrl().then((result) => {
+      handleUrl(result?.url);
+    }).catch(() => undefined);
+    const sub = CapApp.addListener('appUrlOpen', (event) => {
+      handleUrl(event.url);
+    });
+    return () => {
+      cancelled = true;
+      void sub.then((handle) => handle.remove()).catch(() => undefined);
+    };
+  }, [conn]);
 
   const onSubmit = (event: React.FormEvent) => {
     event.preventDefault();
-    void connect(url, password);
+    const pairing = parsePairingConnectionPayload(url);
+    if (pairing) {
+      void conn.redeemPairingConnection(pairing);
+      return;
+    }
+    if (conn.pendingConnection) {
+      void conn.submitPassword(password);
+      return;
+    }
+    void conn.connect({ url });
   };
 
-  const onSelect = (connection: MobileSavedConnection) => {
-    setUrl(connection.url);
-    void connect(connection.url);
+  const onSelect = (saved: MobileSavedConnection) => {
+    setUrl(connectionDisplayUrl(saved));
+    void conn.connect({ id: saved.id, candidates: saved.candidates, label: saved.label });
+  };
+
+  const onScan = async () => {
+    setScanBusy(true);
+    try {
+      const result = await scanConnectionQr();
+      if (result.status === 'pairing') {
+        await conn.redeemPairingConnection(result.pairing);
+        return;
+      }
+      if (result.status === 'ok') {
+        setUrl(result.url);
+        await conn.connect({
+          url: result.url,
+          label: result.label,
+          clientToken: result.clientToken,
+        });
+      }
+    } finally {
+      setScanBusy(false);
+    }
   };
 
   const onDisconnected = React.useCallback(() => {
-    disconnectMobileServer();
-    setConnectedUrl('');
-    setNeedsPassword(false);
+    disconnectRuntime();
+    setRuntimeUrl('');
+    conn.cancelPassword();
     setPassword('');
-  }, []);
+  }, [conn]);
 
-  if (connectedUrl) {
+  if (runtimeUrl) {
     return (
       <div className="relative h-[100dvh] w-full">
         <SessionAuthGate>
           <App apis={apis} />
         </SessionAuthGate>
-        <MobileInstancesSheet onDisconnected={onDisconnected} />
+        <MobileInstancesSheet
+          connections={conn.connections}
+          busy={conn.isBusy}
+          onSelect={(saved) => { void conn.connect({ id: saved.id, candidates: saved.candidates, label: saved.label }); }}
+          onRemove={(saved) => { void conn.removeConnection(saved.id); }}
+          onDisconnected={onDisconnected}
+        />
       </div>
     );
   }
@@ -108,6 +162,18 @@ export const MobileApp: React.FC<MobileAppProps> = ({ apis }) => {
             </p>
           </div>
 
+          <Button
+            type="button"
+            size="sm"
+            className="h-9 w-full"
+            disabled={conn.isBusy || scanBusy}
+            onClick={() => { void onScan(); }}
+          >
+            {scanBusy ? t('mobile.connect.connecting') : t('mobile.connect.scanQr')}
+          </Button>
+
+          <p className="typography-meta text-muted-foreground text-center">{t('mobile.connect.orUrl')}</p>
+
           <form className="space-y-2" onSubmit={onSubmit}>
             <Input
               value={url}
@@ -116,59 +182,65 @@ export const MobileApp: React.FC<MobileAppProps> = ({ apis }) => {
               autoCapitalize="none"
               autoCorrect="off"
               spellCheck={false}
-              disabled={busy}
+              disabled={conn.isBusy}
               className="h-9 typography-ui-label"
             />
-            {needsPassword ? (
+            {conn.pendingConnection || password ? (
               <Input
                 type="password"
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
                 placeholder={t('mobile.connect.passwordPlaceholder')}
-                disabled={busy}
-                autoFocus
+                disabled={conn.isBusy}
+                autoFocus={Boolean(conn.pendingConnection)}
                 className="h-9 typography-ui-label"
               />
             ) : null}
-            {error ? <p className="typography-meta text-[var(--status-error)]">{error}</p> : null}
-            <Button type="submit" size="sm" className="h-9 w-full" disabled={busy || !url.trim()}>
-              {busy ? t('mobile.connect.connecting') : t('mobile.connect.submit')}
+            {conn.error ? (
+              <p className="typography-meta text-[var(--status-error)]">{conn.error}</p>
+            ) : null}
+            <Button type="submit" size="sm" className="h-9 w-full" disabled={conn.isBusy || !url.trim()}>
+              {conn.isBusy ? t('mobile.connect.connecting') : t('mobile.connect.submit')}
             </Button>
           </form>
 
-          {connections.length > 0 ? (
+          {conn.connections.length > 0 ? (
             <div className="space-y-1.5">
               <h2 className="typography-meta font-medium text-muted-foreground">{t('mobile.instances.saved')}</h2>
               <ul className="space-y-1.5">
-                {connections.map((connection) => (
-                  <li key={connection.id} className="flex items-center gap-1.5">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="min-w-0 flex-1 justify-start h-8"
-                      disabled={busy}
-                      onClick={() => onSelect(connection)}
-                    >
-                      <span className="truncate typography-ui-label">{connection.label}</span>
-                    </Button>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="ghost"
-                      className="h-8"
-                      disabled={busy}
-                      onClick={() => {
-                        void removeMobileConnection(connection.url).then(() => {
-                          refresh();
-                          if (listMobileConnections().length === 0) setUrl('');
-                        });
-                      }}
-                    >
-                      {t('mobile.instances.remove')}
-                    </Button>
-                  </li>
-                ))}
+                {conn.connections.map((saved) => {
+                  const transport = describePairingTransport(
+                    saved.candidates.map((c) => (c.kind === 'relay' ? { type: 'relay' } : { type: 'lan' })),
+                    isActiveRuntimeConnection(saved) && isRelayModeActive() ? 'relay' : 'lan',
+                  );
+                  return (
+                    <li key={saved.id} className="flex items-center gap-1.5">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="min-w-0 flex-1 justify-start h-8"
+                        disabled={conn.isBusy}
+                        onClick={() => onSelect(saved)}
+                      >
+                        <span className="truncate typography-ui-label">
+                          {saved.label}
+                          {` · ${transport.label}`}
+                        </span>
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        className="h-8"
+                        disabled={conn.isBusy}
+                        onClick={() => { void conn.removeConnection(saved.id); }}
+                      >
+                        {t('mobile.instances.remove')}
+                      </Button>
+                    </li>
+                  );
+                })}
               </ul>
             </div>
           ) : null}

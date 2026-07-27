@@ -97,12 +97,12 @@
 - **P2 — 产品缺口（有意后置，已开卡）**
   - [ ] [#11](https://coding.s-s.city/songsong/openchamber/-/work_items/11) M9 — Capacitor Voice resume / dictation overlay（已挂 `appStateChange` → `openchamber:capacitor-resume`；dictation 待主轨）
   - [ ] [#49](https://coding.s-s.city/songsong/openchamber/-/work_items/49) M10 — Push（APNs / FCM）
-  - [ ] [#16](https://coding.s-s.city/songsong/openchamber/-/work_items/16) M11 — Pairing / redeem 移动面（挂本卡）
+  - [x] [#16](https://coding.s-s.city/songsong/openchamber/-/work_items/16) M11 — Pairing / redeem 移动面（QR + `openchamber://` + Instances transport）
   - [ ] [#50](https://coding.s-s.city/songsong/openchamber/-/work_items/50) M12 — 商店签名 / CI release
 
 ### C. 相关但非 Mobile 主轨（交叉引用）
 
-- [#16](https://coding.s-s.city/songsong/openchamber/-/work_items/16) Private relay / pairing — **桌面侧**设计已接受；**mobile redeem 面**见上 M11
+- [#16](https://coding.s-s.city/songsong/openchamber/-/work_items/16) Private relay / pairing — **已实现**（桌面 Anywhere + 官方中继 + Mobile M11）；ADR Implemented
 - [#11](https://coding.s-s.city/songsong/openchamber/-/work_items/11) Voice — browser voice 可先做；Capacitor resume / overlay 见 M9
 - [#19](https://coding.s-s.city/songsong/openchamber/-/work_items/19) Terminal v3 — **已关闭**；后置 terminalContext / shell UI / mobile fullscreen quick keys（仍不引入鸿蒙壳）
 
@@ -115,7 +115,7 @@
 | 鸿蒙 NEXT 官方支持 | 未规划 | 用户可自测 Android APK；失败不阻塞 #9 |
 | App Store / 华为商店上架与签名流水线 | 已开卡 | [#50](https://coding.s-s.city/songsong/openchamber/-/work_items/50) |
 | APNs / FCM Push | 已开卡 | [#49](https://coding.s-s.city/songsong/openchamber/-/work_items/49) |
-| Pairing v2 / `openchamber://` mobile redeem | 挂 #16 | M11；非桌面 ADR 单独范围 |
+| Pairing v2 / `openchamber://` mobile redeem | ✅ #16 | M11 已落地（扫码 / deep link redeem） |
 | 上游 Mobile composer/keyboard 大重构整包 | 不做 | 增量见 [#37](https://coding.s-s.city/songsong/openchamber/-/work_items/37) / [#47](https://coding.s-s.city/songsong/openchamber/-/work_items/47) |
 | Terminal mobile fullscreen workspace / quick keys | 未规划 | #19 Phase4；web touch 另议 |
 | 中央 `api.openchamber.dev` push relay | 未规划 | 产品/合规另定 |
@@ -952,7 +952,7 @@ Phase 5 — 🔴 Markdown/Shiki 重写 (#1+#2): 独立 milestone，需迁移 for
 | Sidebar project sorting | ✅ 已移植 | 侧栏菜单提供 `manual / A-Z / Z-A / date-added / recent`，持久化 display store；所有 project sections 在分组前统一使用同一顺序。默认 `manual` 保留 fork 现有手工排序，只有 manual 模式允许拖拽，project pin 继续高于所选排序规则；无自定义标签时沿官方规则使用完整 path 排序 |
 | Pinned Session 空刷新保护 | ✅ fork 已有更强等价实现 | 全局 pin 由独立 `oc.sessions.pinned` Zustand store 持久化，项目内 pin 与两类排序也使用独立 storage；Session snapshot 的空成功或暂时缺项只替换列表数据，不会清空 pin。现有 store tests 覆盖持久化、rehydrate、损坏数据和跨 tab 同步 |
 | Chat visual settings 分组 | ✅ 已按 fork 设置项适配 | 保留本 fork 的 queue/steer、multi-run、diff、自动折叠 thinking 等额外设置，只为现有 Chat 设置加入“会话辅助 / 推理 / 消息外观 / 工具和文件 / 输入框”语义标题；未复制官方 Goals、recap 等尚未落地的控件，8 个 locale 同步 |
-| Private relay / pairing v2 / native mobile | 🟡 分轨；Work Items [#16](https://coding.s-s.city/songsong/openchamber/-/work_items/16) / [#9](https://coding.s-s.city/songsong/openchamber/-/work_items/9) | #16 桌面设计已接受（实现延期）；#9 进行中：引入 Capacitor `packages/mobile`（iOS+Android），连接层适配 `serverRegistry`/`serverId`。见 [Mobile 产品轨道](#mobile-产品轨道) 与 [`docs/NATIVE_MOBILE_FORK_ADR.md`](NATIVE_MOBILE_FORK_ADR.md)。不整包上游单 runtime / mobile pairing |
+| Private relay / pairing v2 / native mobile | ✅ #16 已实现；#9 壳继续 | Work Items [#16](https://coding.s-s.city/songsong/openchamber/-/work_items/16) / [#9](https://coding.s-s.city/songsong/openchamber/-/work_items/9)。#16：官方 `wss://relay.openchamber.dev/ws` host/client E2EE、pairing redeem→add host/instance、desktop multi-transport、Mobile QR/`openchamber://`；ADR Implemented。#9 继续 Capacitor 壳与 `serverRegistry`/`serverId`。不整包上游单 runtime MobileApp |
 | OpenCode Go quota / Codex reset windows | ✅ 已移植 | 新增独立 credential store/route/provider、active-instance UI 和 VS Code bridge parity；Codex 两个窗口均按 `limit_window_seconds` 生成标签，不再固定假设 5h/weekly |
 
 ### 本地已有或部分覆盖
@@ -1356,7 +1356,7 @@ VS Code worktree lock 验证：在两个真实临时 Git 仓库及 `--no-checkou
 | Last-turn Diff | ✅ 已移植并验证；Work Item [#13](https://coding.s-s.city/songsong/openchamber/-/work_items/13) 已关闭 | DiffView 新增 `working` / `turn` scope：`turn` 读取最新 user message 的 `summary.diffs`（sanitize 后靠 `patch` 重建 before/after），不走 live git。Chat 最新回合 changed-files 经 `openContextDiff`/`navigateToDiff(..., 'turn')` 进入；历史回合只读。Git 仓库优先用 summary snapshot，不再只交给 PendingChangesBar。未引入上游 staged scope。定向 `turnSnapshotDiff` 测试与 type-check/lint 通过 |
 | Navigable JSON summaries | ✅ 已移植并验证；Work Item [#14](https://coding.s-s.city/songsong/openchamber/-/work_items/14) 已关闭 | 新增 `JsonSummaryView`：对象身份摘要、`depth < 2` 默认展开、`http(s)` URL 可点。`ToolScrollableTextOutput` 三视图 `summary`（默认）/ `formatted`（JsonTreeViewer）/ `raw`；summary 限高 400px。未收紧工具 expandable 策略，未做 edit→diff。定向 `JsonSummaryView` 测试与 type-check/lint 通过 |
 | Project edit / per-project default model | ✅ 已移植并验证；Work Item [#15](https://coding.s-s.city/songsong/openchamber/-/work_items/15) 已关闭 | 抽取 `defaultModel`（`providerID/modelID`）数据契约：`projectDefaultModel` helper、`ProjectEntry.defaultModel`、settings sanitize/persist、`updateProjectMeta(..., null` 清除）。ProjectEditDialog / Settings ProjectsPage / MobileSessionStatusBar 接入 `ModelSelector`（可清空）。新建草稿经 selected project 的 `serverId + path` activate 后 `applyDefaultModelAgentSelection({ projectDefaultModel })` 冻结 provider/model/variant；不整包上游 sidebar/settings shell。定向 `projectDefaultModel` 测试与 UI type-check 通过 |
-| Private relay / pairing v2 / desktop transports | 📝 设计已接受；实现延期；Work Item [#16](https://coding.s-s.city/songsong/openchamber/-/work_items/16) | 兼容 ADR：[`docs/PRIVATE_RELAY_TRANSPORT_COMPAT_ADR.md`](PRIVATE_RELAY_TRANSPORT_COMPAT_ADR.md)。官方 relay/pairing/multi-transport 映射到 fork 多 `serverId + directory` registry；不整包移植单 runtime / native mobile pairing。代码实现与 e2e 仍挂 #16 |
+| Private relay / pairing v2 / desktop transports | ✅ 已移植并验证；Work Item [#16](https://coding.s-s.city/songsong/openchamber/-/work_items/16) 已关闭 | ADR Implemented：[`docs/PRIVATE_RELAY_TRANSPORT_COMPAT_ADR.md`](PRIVATE_RELAY_TRANSPORT_COMPAT_ADR.md)。Host `packages/web/server/lib/relay/*` + client-auth pairing；UI `packages/ui/src/lib/relay/*` 隧道（runtime-fetch/WS）；Electron 持久化 LAN+relay、`expectedServerId` probe、install id；Settings `PairingDevicesPanel` Import Link；DesktopHostSwitcher / `restoreDesktopRelayRuntime` multi-transport；Mobile QR + `openchamber://` redeem。默认官方中继 `wss://relay.openchamber.dev/ws`。定向 crypto/handshake/codec/tunnel/cross-compat/pairing/host-lock + `serverIdAuthority` 测试通过；`bun run type-check` 绿。不整包上游单 runtime |
 | Windows tray/startup | ✅ 已移植并验证；Work Item [#17](https://coding.s-s.city/songsong/openchamber/-/work_items/17) 已关闭 | 上游 `4a9aebdb6`（#2112）叠在 fork #27 macOS tray 上：`setupTray`/`isTrayEnabledForPlatform` 含 win32（不依赖 `desktopMacMenuBarEnabled`）；`icon.ico` + extraResources/win NSIS；`getLoginItemOptions` + `--background` 开机自启；`desktopMinimizeToTrayEnabled` + minimize/close hide；`useTraySync` 扩 win32；Quit 仍走 `requestQuitWithConfirmation`。8 locale + settings-helpers 测试；macOS 菜单栏开关/呼吸图标不变。Windows 交互 QA（托盘点击 / minimize-to-tray / login item / Keep·Stop OpenCode）随下次 Windows 包补测 |
 | Startup OpenCode config 非阻塞 | ✅ 已移植并验证；Work Item [#2](https://coding.s-s.city/songsong/openchamber/-/work_items/2) 已关闭 | 上游 `0542bcfc5` 逐段适配（禁止整文件覆盖）：`sync-refs` `getSyncConfig`/`emit`/`subscribe`（扫 default + `getAllSyncStores`）；`client.getConfig` 按 `baseUrl+directory` 缓存/去重；bootstrap Phase2/seed `emitSyncConfigChanged`；`useConfigStore` 去掉 `loadAgents`/`initializeApp` 对 `config.get` 的阻塞等待，新增 `selectionSource` + `applyOpenCodeConfigDefaults`（manual 优先）。定向 9 tests；UI type-check 目标文件绿 |
 | 长会话 streaming 性能三块缺口 | ✅ 已移植并验证；Work Item [#4](https://coding.s-s.city/songsong/openchamber/-/work_items/4) 已关闭 | 上游 `e88afff2` 仅 port 剩余缺口（不整包、不 virtua）：`streamingTailEntry` + `MessageList`/`useSessionParts` 尾叶 live reinject（session directory/serverId）；sidebar `sessionNodeItemUtils` 预计算 subtree/menu/structure 经 `SessionGroupSection`/`SidebarActivitySections` 下传；`sync-session-generation` + `loadMessages(isStale)` 写守卫（`serverId+directory+sessionID`）。定向 10 tests；大会话/大侧栏 runtime QA 随交互补测 |

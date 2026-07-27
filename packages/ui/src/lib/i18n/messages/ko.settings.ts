@@ -62,6 +62,8 @@ export const settingsDict = {
   'settings.page.notifications.title': '알림',
   'settings.page.voice.title': '음성',
   'settings.page.tunnel.title': '원격 터널',
+  'settings.page.pairing.title': '프라이빗 릴레이',
+  'settings.page.pairing.description': '이 기기와 휴대폰/다른 데스크톱을 페어링합니다. 외부에서는 공식 Private Relay, 홈 네트워크에서는 LAN을 우선합니다.',
   'settings.page.snippets.title': '스니펫',
 
   'settings.instance.selector.label': 'Instance',

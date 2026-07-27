@@ -62,6 +62,8 @@ export const settingsDict = {
   'settings.page.notifications.title': 'Notifications',
   'settings.page.voice.title': 'Voice',
   'settings.page.tunnel.title': 'Remote Tunnel',
+  'settings.page.pairing.title': 'Private Relay',
+  'settings.page.pairing.description': 'Pair phones or other desktops to this machine. Anywhere uses the official Private Relay; Home network uses LAN when reachable.',
   'settings.page.snippets.title': 'Snippets',
 
   'settings.instance.selector.label': 'Instance',

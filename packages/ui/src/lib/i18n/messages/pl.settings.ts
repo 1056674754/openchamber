@@ -1122,6 +1122,8 @@ export const settingsDict = {
   'settings.page.skills.title': 'Umiejętności',
   'settings.page.skillsCatalog.title': 'Katalog umiejętności',
   'settings.page.tunnel.title': 'Zdalny Tunel',
+  'settings.page.pairing.title': 'Private Relay',
+  'settings.page.pairing.description': 'Sparuj telefony lub inne komputery z tą maszyną. Poza domem używa oficjalnego Private Relay; w sieci lokalnej preferuje LAN.',
   'settings.page.snippets.title': 'Fragmenty',
 
   'settings.instance.selector.label': 'Instance',

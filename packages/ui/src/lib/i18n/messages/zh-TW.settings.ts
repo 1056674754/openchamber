@@ -59,6 +59,8 @@
   'settings.page.notifications.title': '通知',
   'settings.page.voice.title': '語音',
   'settings.page.tunnel.title': 'Remote Tunnel',
+  'settings.page.pairing.title': '私人中繼',
+  'settings.page.pairing.description': '把手機或其他桌面配對到本機。外出走官方 Private Relay；同一區域網路優先直連。',
   'settings.page.snippets.title': '程式片段',
 
   'settings.instance.selector.label': 'Instance',

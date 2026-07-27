@@ -44,6 +44,7 @@ import { ProjectsSidebar } from '@/components/sections/projects/ProjectsSidebar'
 import { ProjectsPage } from '@/components/sections/projects/ProjectsPage';
 import { RemoteInstancesSidebar } from '@/components/sections/remote-instances/RemoteInstancesSidebar';
 import { RemoteInstancesPage } from '@/components/sections/remote-instances/RemoteInstancesPage';
+import { PairingPage } from '@/components/sections/pairing/PairingPage';
 import { ProvidersSidebar } from '@/components/sections/providers/ProvidersSidebar';
 import { ProvidersPage } from '@/components/sections/providers/ProvidersPage';
 import { UsageSidebar } from '@/components/sections/usage/UsageSidebar';
@@ -141,6 +142,7 @@ const pageOrder: SettingsPageSlug[] = [
   'skills.catalog',
   'voice',
   'tunnel',
+  'pairing',
 ];
 
 function buildRuntimeContext(isDesktop: boolean): SettingsRuntimeContext {
@@ -207,6 +209,8 @@ export function getSettingsNavIcon(slug: SettingsPageSlug): IconName | null {
       return 'mic';
     case 'tunnel':
       return 'global';
+    case 'pairing':
+      return 'smartphone';
     case 'home':
       return null;
     default:
@@ -643,6 +647,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
         return t('settings.page.voice.title');
       case 'tunnel':
         return t('settings.page.tunnel.title');
+      case 'pairing':
+        return t('settings.page.pairing.title');
       case 'remote-connection':
         return t('settings.page.remoteConnection.title');
       case 'remote-port-forwarding':
@@ -718,6 +724,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
         return <ProjectsPage />;
       case 'remote-instances':
         return <RemoteInstancesPage />;
+      case 'pairing':
+        return <PairingPage />;
       case 'agents':
         return <AgentsPage />;
       case 'behavior':
@@ -831,7 +839,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
                       <Icon name={iconName} className="h-4 w-4 shrink-0" />
                       <span className="flex items-center gap-1.5 whitespace-nowrap overflow-hidden transition-opacity duration-150 opacity-100">
                         <span className="typography-ui-label font-normal truncate">{getPageTitle(page.slug)}</span>
-                        {(page.slug === 'voice' || page.slug === 'tunnel') && (
+                        {(page.slug === 'voice' || page.slug === 'tunnel' || page.slug === 'pairing') && (
                           <span className="shrink-0 typography-micro px-1 rounded leading-none pb-px text-[var(--status-warning)] bg-[var(--status-warning)]/10">
                             {t('settings.view.badge.beta')}
                           </span>

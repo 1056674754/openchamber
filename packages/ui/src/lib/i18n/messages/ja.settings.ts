@@ -62,6 +62,8 @@ export const settingsDict = {
   'settings.page.notifications.title': '通知',
   'settings.page.voice.title': '音声',
   'settings.page.tunnel.title': '外部トンネル',
+  'settings.page.pairing.title': 'プライベートリレー',
+  'settings.page.pairing.description': 'このマシンにスマホや他のデスクトップをペアリングします。外出時は公式 Private Relay、同一 LAN では直接接続を優先します。',
   'settings.page.snippets.title': 'スニペット',
   'settings.instance.selector.label': 'インスタンス',
   'settings.instance.selector.defaultLabel': '自分の Mac',

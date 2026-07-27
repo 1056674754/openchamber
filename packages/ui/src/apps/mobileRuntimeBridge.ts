@@ -1,4 +1,5 @@
 import { DEFAULT_SERVER_ID, serverRegistry } from '@/lib/opencode/server-registry';
+import type { RelayRuntimeDescriptor } from '@/lib/relay/runtime-tunnel';
 import { switchRuntimeEndpoint } from '@/lib/runtime-switch';
 
 /**
@@ -34,13 +35,18 @@ export const connectMobileEndpoint = (options: {
   url: string;
   clientToken?: string | null;
   label?: string;
+  /** When set, runtime HTTP/WS ride the E2EE private relay tunnel. */
+  relay?: RelayRuntimeDescriptor | null;
 }): string => {
-  const apiBaseUrl = normalizeMobileServerUrl(options.url);
-  if (!apiBaseUrl) {
+  const apiBaseUrl = options.relay
+    ? (normalizeMobileServerUrl(options.url) || `relay://${options.relay.serverId}`)
+    : normalizeMobileServerUrl(options.url);
+  if (!apiBaseUrl && !options.relay) {
     throw new Error('Server URL is required');
   }
 
   const label = (options.label || '').trim() || (() => {
+    if (options.relay) return options.relay.serverId;
     try {
       return new URL(apiBaseUrl).host;
     } catch {
@@ -49,9 +55,12 @@ export const connectMobileEndpoint = (options: {
   })();
 
   switchRuntimeEndpoint({
-    apiBaseUrl,
+    apiBaseUrl: apiBaseUrl || `relay://${options.relay?.serverId || 'unknown'}`,
     clientToken: options.clientToken ?? null,
-    runtimeKey: `mobile:${apiBaseUrl}`,
+    runtimeKey: options.relay
+      ? `relay:${options.relay.serverId}@${options.relay.relayUrl}`
+      : `mobile:${apiBaseUrl}`,
+    relay: options.relay ?? null,
   });
 
   // OpenCode SDK paths are relative to /api (e.g. /session/:id/message).

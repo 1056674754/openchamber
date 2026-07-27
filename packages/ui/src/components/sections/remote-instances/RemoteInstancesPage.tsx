@@ -45,7 +45,6 @@ import {
   ChangeBar,
   type PhaseStep,
 } from './cards';
-
 // ─── module-level helpers ────────────────────────────────────
 
 const CONNECTING_PHASE_ORDER = [
@@ -840,6 +839,7 @@ export const RemoteInstancesPage: React.FC = () => {
             />
           </section>
         </div>
+
       </SettingsPageLayout>
     );
   }

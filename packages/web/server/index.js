@@ -96,6 +96,12 @@ import { registerRemoteProxy } from './lib/remote-instances/proxy.js';
 import { registerRemoteSseRelay } from './lib/remote-instances/sse-relay.js';
 import { registerRemoteRpcWebSocket } from './lib/remote-instances/rpc-ws.js';
 import { buildRemoteUpstreamHeaders } from './lib/remote-instances/request-headers.js';
+import { createRemoteClientAuthRuntime } from './lib/client-auth/remote-clients.js';
+import { createClientPairingRuntime } from './lib/client-auth/pairing.js';
+import { registerClientAuthPairingRoutes } from './lib/client-auth/pairing-routes.js';
+import { createPairingLanHelpers } from './lib/client-auth/pairing-lan.js';
+import { createRelayService } from './lib/relay/service.js';
+import { createRelayHostLock } from './lib/relay/host-lock.js';
 import { createProxyMiddleware, responseInterceptor } from 'http-proxy-middleware';
 import webPush from 'web-push';
 
@@ -159,9 +165,6 @@ function shouldSkipCompression(req, res) {
     return true;
   }
 
-  if (pathname.startsWith('/api/terminal/') && pathname.endsWith('/stream')) {
-    return true;
-  }
   for (const prefix of SSE_PATH_PREFIXES) {
     if (pathname === prefix) {
       return true;
@@ -313,6 +316,8 @@ const CLOUDFLARE_MANAGED_REMOTE_TUNNELS_VERSION = 1;
 const LAST_OPENCODE_PORT_FILE = path.join(OPENCHAMBER_DATA_DIR, 'last-opencode-port');
 const MANAGED_OPENCODE_PORTS_FILE = path.join(OPENCHAMBER_DATA_DIR, 'managed-opencode-ports.json');
 const MANAGED_OPENCODE_AUTH_FILE = path.join(OPENCHAMBER_DATA_DIR, 'managed-opencode-auth.json');
+const REMOTE_CLIENTS_FILE_PATH = path.join(OPENCHAMBER_DATA_DIR, 'remote-clients.json');
+const CLIENT_PAIRING_SESSIONS_FILE_PATH = path.join(OPENCHAMBER_DATA_DIR, 'client-pairing-sessions.json');
 
 const normalizeManagedOpenCodePort = (value) => {
   const port = Number.parseInt(String(value ?? ''), 10);
@@ -632,6 +637,30 @@ const tunnelProviderRegistry = createTunnelProviderRegistry([
 ]);
 tunnelProviderRegistry.seal();
 const tunnelAuthController = createTunnelAuth();
+
+const remoteClientAuthRuntime = createRemoteClientAuthRuntime({
+  fsPromises,
+  path,
+  crypto,
+  storePath: REMOTE_CLIENTS_FILE_PATH,
+});
+const clientPairingRuntime = createClientPairingRuntime({
+  fsPromises,
+  path,
+  crypto,
+  storePath: CLIENT_PAIRING_SESSIONS_FILE_PATH,
+  remoteClientAuthRuntime,
+});
+/** @type {ReturnType<typeof createRelayService> | null} */
+let relayServiceInstance = null;
+
+const readSettingsFromDiskStrict = async () => {
+  const settings = await readSettingsFromDiskMigrated();
+  if (!settings || typeof settings !== 'object') {
+    throw new Error('Settings file is unreadable or corrupt');
+  }
+  return settings;
+};
 let runtimeManagedRemoteTunnelToken = '';
 let runtimeManagedRemoteTunnelHostname = '';
 let terminalRuntime = null;
@@ -1487,6 +1516,8 @@ async function main(options = {}) {
     verboseRequestLogs: OPENCHAMBER_VERBOSE_REQUEST_LOGS,
     uiPassword,
     tunnelAuthController,
+    clientAuthController: remoteClientAuthRuntime,
+    getServerId: () => (relayServiceInstance ? relayServiceInstance.getServerId() : Promise.resolve(null)),
     readSettingsFromDiskMigrated,
     normalizeTunnelSessionTtlMs,
     sayTTSCapability,
@@ -1521,6 +1552,60 @@ async function main(options = {}) {
 
   const tunnelRuntimeContext = tunnelWiringRuntime.initialize(app, port);
   const { tunnelService, startTunnelWithNormalizedRequest } = tunnelRuntimeContext;
+
+  const bindHost = typeof host === 'string' && host.length > 0 ? host : '127.0.0.1';
+  const { resolvePairingTransports, resolveDirectLanUrls } = createPairingLanHelpers({
+    os,
+    getActivePort: () => tunnelRuntimeContext.getActivePort(),
+    bindHost,
+    fallbackPort: port,
+  });
+
+  const relayService = createRelayService({
+    crypto,
+    readSettingsFromDiskMigrated,
+    writeSettingsToDisk,
+    readSettingsStrict: readSettingsFromDiskStrict,
+    getLocalPort: () => tunnelRuntimeContext.getActivePort(),
+    hostLock: createRelayHostLock({
+      lockFilePath: path.join(OPENCHAMBER_DATA_DIR, 'relay-host.lock'),
+      fs,
+      process,
+    }),
+    hasRelayDemand: async () => {
+      const [pendingRelay, deviceRelay] = await Promise.all([
+        clientPairingRuntime.hasActiveRelaySession().catch(() => false),
+        remoteClientAuthRuntime.hasActiveRelayClients().catch(() => false),
+      ]);
+      return pendingRelay || deviceRelay;
+    },
+  });
+  relayServiceInstance = relayService;
+  relayService.registerRoutes(app);
+
+  registerClientAuthPairingRoutes(app, {
+    uiAuthController,
+    remoteClientAuthRuntime,
+    clientPairingRuntime,
+    getRelayPairingCandidate: (options) => {
+      if (!relayServiceInstance) return null;
+      return options?.ensureEnabled
+        ? relayServiceInstance.ensureEnabledForPairing()
+        : relayServiceInstance.getPairingCandidate();
+    },
+    reconcileRelay: () => (relayServiceInstance ? relayServiceInstance.reconcile() : Promise.resolve()),
+    getPairingTransports: resolvePairingTransports,
+    getDirectCandidateUrls: resolveDirectLanUrls,
+    getServerId: () => (relayServiceInstance ? relayServiceInstance.getServerId() : Promise.resolve(null)),
+    getServerLabel: () => {
+      try {
+        const name = os.hostname();
+        return typeof name === 'string' && name.trim().length > 0 ? name.trim() : 'OpenChamber';
+      } catch {
+        return 'OpenChamber';
+      }
+    },
+  });
 
   await featureRoutesRuntime.registerRoutes(app, {
     crypto,
@@ -1655,6 +1740,12 @@ async function main(options = {}) {
   });
   terminalRuntime = startupPipelineResult.terminalRuntime;
   messageStreamRuntime = startupPipelineResult.messageStreamRuntime;
+
+  try {
+    await relayService.reconcile();
+  } catch (error) {
+    console.warn('[Relay] Failed to reconcile on startup:', error?.message || error);
+  }
 
   try {
     await scheduledTasksRuntime.start();

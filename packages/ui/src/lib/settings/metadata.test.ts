@@ -30,7 +30,7 @@ describe('settings page instance visibility', () => {
   });
 
   test('keeps local UI settings out of the remote instance scope', () => {
-    for (const slug of ['appearance', 'chat', 'notifications', 'shortcuts', 'voice', 'tunnel']) {
+    for (const slug of ['appearance', 'chat', 'notifications', 'shortcuts', 'voice', 'tunnel', 'pairing']) {
       const page = meta(slug);
       expect(isSettingsPageVisibleForInstance(page, 'default')).toBe(true);
       expect(isSettingsPageVisibleForInstance(page, 'remote')).toBe(false);

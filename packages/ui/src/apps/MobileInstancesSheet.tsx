@@ -1,12 +1,8 @@
 import React from 'react';
 
 import {
-  connectToMobileServer,
-  disconnectMobileServer,
-  isSameConnectionUrl,
-  listMobileConnections,
-  removeMobileConnection,
-  useMobileConnections,
+  connectionDisplayUrl,
+  isActiveRuntimeConnection,
   type MobileSavedConnection,
 } from '@/apps/mobileConnections';
 import {
@@ -16,72 +12,40 @@ import {
 import { Button } from '@/components/ui/button';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { useI18n } from '@/lib/i18n';
-import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
+import { describePairingTransport } from '@/lib/relay/serverIdAuthority';
+import { isRelayModeActive } from '@/lib/relay/runtime-tunnel';
 
 type MobileInstancesSheetProps = {
+  connections: MobileSavedConnection[];
+  busy?: boolean;
+  onSelect: (connection: MobileSavedConnection) => void;
+  onRemove: (connection: MobileSavedConnection) => void;
   onDisconnected?: () => void;
 };
 
 export const MobileInstancesSheet: React.FC<MobileInstancesSheetProps> = ({
+  connections,
+  busy = false,
+  onSelect,
+  onRemove,
   onDisconnected,
 }) => {
   const open = useMobileInstancesSheetOpen();
   const { t } = useI18n();
-  const { connections, refresh } = useMobileConnections();
-  const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
-  const activeUrl = getRuntimeApiBaseUrl();
 
   React.useEffect(() => {
-    if (open) {
-      refresh();
-      setError(null);
-    }
-  }, [open, refresh]);
+    if (open) setError(null);
+  }, [open]);
 
   const onClose = React.useCallback(() => {
     closeMobileInstancesSheet();
   }, []);
 
   const onDisconnect = React.useCallback(() => {
-    disconnectMobileServer();
     onDisconnected?.();
     closeMobileInstancesSheet();
   }, [onDisconnected]);
-
-  const onSelect = React.useCallback(async (connection: MobileSavedConnection) => {
-    if (activeUrl && isSameConnectionUrl(connection.url, activeUrl)) {
-      closeMobileInstancesSheet();
-      return;
-    }
-    setBusy(true);
-    setError(null);
-    try {
-      await connectToMobileServer({ url: connection.url });
-      refresh();
-      closeMobileInstancesSheet();
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      setError(message === 'PASSWORD_REQUIRED'
-        ? t('mobile.instances.passwordRequired')
-        : (message || t('mobile.instances.connectFailed')));
-    } finally {
-      setBusy(false);
-    }
-  }, [activeUrl, refresh, t]);
-
-  const onRemove = React.useCallback(async (connection: MobileSavedConnection) => {
-    setBusy(true);
-    try {
-      await removeMobileConnection(connection.url);
-      refresh();
-      if (listMobileConnections().length === 0 && activeUrl && isSameConnectionUrl(connection.url, activeUrl)) {
-        onDisconnect();
-      }
-    } finally {
-      setBusy(false);
-    }
-  }, [activeUrl, onDisconnect, refresh]);
 
   return (
     <MobileOverlayPanel
@@ -95,7 +59,7 @@ export const MobileInstancesSheet: React.FC<MobileInstancesSheetProps> = ({
             variant="destructive"
             size="sm"
             className="h-9 w-full"
-            disabled={busy || !activeUrl}
+            disabled={busy}
             onClick={onDisconnect}
           >
             {t('mobile.instances.disconnect')}
@@ -114,7 +78,11 @@ export const MobileInstancesSheet: React.FC<MobileInstancesSheetProps> = ({
         ) : (
           <ul className="space-y-1.5">
             {connections.map((connection) => {
-              const isActive = Boolean(activeUrl && isSameConnectionUrl(connection.url, activeUrl));
+              const isActive = isActiveRuntimeConnection(connection);
+              const transport = describePairingTransport(
+                connection.candidates.map((c) => (c.kind === 'relay' ? { type: 'relay' } : { type: 'lan' })),
+                isActive && isRelayModeActive() ? 'relay' : 'lan',
+              );
               return (
                 <li key={connection.id} className="flex items-center gap-1.5">
                   <Button
@@ -123,10 +91,22 @@ export const MobileInstancesSheet: React.FC<MobileInstancesSheetProps> = ({
                     size="sm"
                     className="min-w-0 flex-1 justify-start h-8"
                     disabled={busy}
-                    onClick={() => { void onSelect(connection); }}
+                    onClick={() => {
+                      if (isActive) {
+                        closeMobileInstancesSheet();
+                        return;
+                      }
+                      try {
+                        onSelect(connection);
+                        closeMobileInstancesSheet();
+                      } catch (err) {
+                        setError(err instanceof Error ? err.message : t('mobile.instances.connectFailed'));
+                      }
+                    }}
                   >
                     <span className="truncate typography-ui-label">
-                      {connection.label}
+                      {connection.label || connectionDisplayUrl(connection)}
+                      {` · ${transport.label}`}
                       {isActive ? ` · ${t('mobile.instances.current')}` : ''}
                     </span>
                   </Button>
@@ -136,7 +116,7 @@ export const MobileInstancesSheet: React.FC<MobileInstancesSheetProps> = ({
                     variant="ghost"
                     className="h-8"
                     disabled={busy}
-                    onClick={() => { void onRemove(connection); }}
+                    onClick={() => { onRemove(connection); }}
                   >
                     {t('mobile.instances.remove')}
                   </Button>

@@ -62,6 +62,8 @@ export const settingsDict = {
   "settings.page.notifications.title": "Сповіщення",
   "settings.page.voice.title": "Голос",
   "settings.page.tunnel.title": "Віддалений тунель",
+  "settings.page.pairing.title": "Private Relay",
+  "settings.page.pairing.description": "Підключіть телефони або інші комп’ютери до цієї машини. Поза домом — офіційний Private Relay; у локальній мережі — LAN.",
   "settings.page.snippets.title": "Сніпети",
 
   "settings.instance.selector.label": "Instance",

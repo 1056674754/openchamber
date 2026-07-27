@@ -62,6 +62,8 @@ export const settingsDict = {
   'settings.page.notifications.title': '通知',
   'settings.page.voice.title': '语音',
   'settings.page.tunnel.title': '远程隧道',
+  'settings.page.pairing.title': '私人中继',
+  'settings.page.pairing.description': '把手机或其他桌面配对到本机。外出走官方 Private Relay；同一局域网优先直连。',
   'settings.page.snippets.title': '代码片段',
 
   'settings.instance.selector.label': '实例',

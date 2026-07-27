@@ -29,7 +29,8 @@ export type SettingsPageSlug =
   | 'snippets'
   | 'notifications'
   | 'voice'
-  | 'tunnel';
+  | 'tunnel'
+  | 'pairing';
 
 export type SettingsPageGroup =
   | 'appearance'
@@ -314,7 +315,16 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
 
   { slug: 'notifications', title: 'Notifications', group: 'general', kind: 'single', showOn: 'default', keywords: ['alerts', 'native', 'summary', 'summarization'], },
   { slug: 'voice', title: 'Voice', group: 'advanced', kind: 'single', showOn: 'default', keywords: ['tts', 'speech', 'voice'], isAvailable: (ctx) => !ctx.isVSCode },
-  { slug: 'tunnel', title: 'Remote Tunnel', group: 'advanced', kind: 'single', showOn: 'default', keywords: ['tunnel', 'cloudflare', 'qr', 'remote', 'mobile', 'share'], isAvailable: (ctx) => !ctx.isVSCode },
+  { slug: 'tunnel', title: 'Remote Tunnel', group: 'advanced', kind: 'single', showOn: 'default', keywords: ['tunnel', 'cloudflare', 'ngrok', 'remote', 'share'], isAvailable: (ctx) => !ctx.isVSCode },
+  {
+    slug: 'pairing',
+    title: 'Private Relay',
+    group: 'advanced',
+    kind: 'single',
+    showOn: 'default',
+    keywords: ['relay', 'pairing', 'qr', 'mobile', 'openchamber://', 'anywhere', 'private relay', 'device'],
+    isAvailable: (ctx) => !ctx.isVSCode,
+  },
 ] as const;
 
 export const LEGACY_SIDEBAR_SECTION_TO_SETTINGS_SLUG: Record<SidebarSection, SettingsPageSlug> = {

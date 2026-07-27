@@ -27,6 +27,7 @@ import {
   type BootInjectionStatus,
   type DesktopBootView,
 } from '@/lib/desktopBoot';
+import { restoreDesktopRelayRuntime } from '@/lib/desktopRelayRestore';
 import type { RecoveryVariant } from '@/components/onboarding/DesktopConnectionRecovery';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
@@ -282,6 +283,12 @@ function App({ apis }: AppProps) {
     registerRuntimeAPIs(apis);
     return () => registerRuntimeAPIs(null);
   }, [apis]);
+
+  // Multi-transport desktop hosts: probe LAN first, fall back to E2EE relay.
+  React.useEffect(() => {
+    if (!isDesktopRuntime || embeddedSessionChat) return;
+    void restoreDesktopRelayRuntime().catch(() => undefined);
+  }, [isDesktopRuntime, embeddedSessionChat]);
 
   React.useEffect(() => {
     if (embeddedSessionChat) {

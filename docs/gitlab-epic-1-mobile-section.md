@@ -55,12 +55,12 @@ UI 现实：共享 `packages/ui` 组件；Capacitor 另有入口壳 `MobileApp`�
 - **P2 — 产品缺口（有意后置，已开卡）**
   - [ ] [#11](https://coding.s-s.city/songsong/openchamber/-/work_items/11) M9 — Capacitor Voice resume / dictation overlay（已挂 `appStateChange` → `openchamber:capacitor-resume`；dictation 待主轨）
   - [ ] [#49](https://coding.s-s.city/songsong/openchamber/-/work_items/49) M10 — Push（APNs / FCM）
-  - [ ] [#16](https://coding.s-s.city/songsong/openchamber/-/work_items/16) M11 — Pairing / redeem 移动面（挂本卡）
+  - [x] [#16](https://coding.s-s.city/songsong/openchamber/-/work_items/16) M11 — Pairing / redeem 移动面（QR + `openchamber://` + Instances transport）
   - [ ] [#50](https://coding.s-s.city/songsong/openchamber/-/work_items/50) M12 — 商店签名 / CI release
 
 ### C. 相关但非 Mobile 主轨（交叉引用）
 
-- [#16](https://coding.s-s.city/songsong/openchamber/-/work_items/16) Private relay / pairing — **桌面侧**设计已接受；**mobile redeem 面**见上 M11
+- [#16](https://coding.s-s.city/songsong/openchamber/-/work_items/16) Private relay / pairing — **已实现**（桌面 Anywhere + 官方中继 + Mobile M11）；ADR Implemented
 - [#11](https://coding.s-s.city/songsong/openchamber/-/work_items/11) Voice — browser voice 可先做；Capacitor resume / overlay 见 M9
 - [#19](https://coding.s-s.city/songsong/openchamber/-/work_items/19) Terminal v3 — **已关闭**；后置 terminalContext / shell UI / mobile fullscreen quick keys（仍不引入鸿蒙壳）
 
@@ -73,7 +73,7 @@ UI 现实：共享 `packages/ui` 组件；Capacitor 另有入口壳 `MobileApp`�
 | 鸿蒙 NEXT 官方支持 | 未规划 | 用户可自测 Android APK；失败不阻塞 #9 |
 | App Store / 华为商店上架与签名流水线 | 已开卡 | [#50](https://coding.s-s.city/songsong/openchamber/-/work_items/50) |
 | APNs / FCM Push | 已开卡 | [#49](https://coding.s-s.city/songsong/openchamber/-/work_items/49) |
-| Pairing v2 / `openchamber://` mobile redeem | 挂 #16 | M11 note；非桌面 ADR 单独范围 |
+| Pairing v2 / `openchamber://` mobile redeem | ✅ #16 | M11 已落地（扫码 / deep link redeem） |
 | 上游 Mobile composer/keyboard 大重构整包 | 不做 | 增量见 [#37](https://coding.s-s.city/songsong/openchamber/-/work_items/37) / [#47](https://coding.s-s.city/songsong/openchamber/-/work_items/47) |
 | Terminal mobile fullscreen workspace / quick keys | 未规划 | #19 Phase4；web touch 另议 |
 | 中央 `api.openchamber.dev` push relay | 未规划 | 产品/合规另定 |

@@ -1,10 +1,10 @@
 # ADR — Private Relay / Pairing / Desktop Transport Compatibility
 
-Status: **Accepted (design only; implementation deferred)**
-Date: 2026-07-26
+Status: **Implemented**
+Date: 2026-07-26 (design); 2026-07-27 (implementation)
 Work Item: [#16](https://coding.s-s.city/songsong/openchamber/-/work_items/16)
 Related: [#26](https://coding.s-s.city/songsong/openchamber/-/work_items/26) remote-only desktop + Windows SSH
-Non-goals: do **not** replace the fork multi-instance registry with upstream single-active-runtime assumptions; do **not** ship native mobile pairing in this design phase.
+Non-goals: do **not** replace the fork multi-instance registry with upstream single-active-runtime assumptions; Push (#49), self-hosted relay productization, and preview/AI egress relay remain out of scope.
 
 ## Context
 
@@ -14,14 +14,12 @@ This fork already runs a different remote topology:
 
 | Fork surface | Role |
 |---|---|
-| Desktop hosts (`defaultHostId` / `hosts[]`) | Whole-window navigation to another OpenChamber URL |
+| Desktop hosts (`defaultHostId` / `hosts[]`) | Whole-window / runtime switch to another OpenChamber URL (LAN + optional relay) |
 | Remote instances (`/api/remote/:id`) | Same-window HTTP/SSE/WS proxy to a remote OpenCode/OpenChamber |
 | SSH manager | ControlMaster tunnel + managed/external remote OpenChamber |
 | Reserved ids `default` / `local` | Local OpenCode vs desktop-local host identity |
 
 Session/project/settings authority is always `serverId + directory`, never “the one current runtime.”
-
-Official relay/pairing assumes a smaller number of host identities and often a single desktop transport candidate list. Importing it wholesale would collide with concurrent multi-server connections and reserved ids.
 
 ## Decision drivers
 
@@ -29,40 +27,35 @@ Official relay/pairing assumes a smaller number of host identities and often a s
 2. Failover must rebind `serverId` explicitly; never invent directory from `getDirectory()` / global current.
 3. Remote-only desktop boot (#26) may skip local OpenCode while keeping the in-process UI/proxy.
 4. SSRF gates on preview/proxy stay closed; relay must not become a generic open egress.
-5. Native mobile pairing is out of scope until a mobile product track exists.
+5. Mobile pairing redeem is in scope for M11 (QR / `openchamber://`), without importing the full upstream Mobile shell.
 
 ## Decision
 
-### Design accepted now
+### Implemented
 
-1. **Keep fork primitives as the primary remote path.** Remote instances + SSH + desktop hosts remain the supported product surfaces. Official relay/pairing are *candidate transports* that may later attach to a `serverId`, not replacements for the registry.
+1. **Keep fork primitives as the primary remote path.** Remote instances + SSH + desktop hosts remain the supported product surfaces. Official relay/pairing attach as *candidate transports* keyed by `serverId`, not replacements for the registry.
 
-2. **Remote-only boot means “no local OpenCode,” not “no local OpenChamber UI.”** Electron continues to spawn the in-process UI server for static UI and `/api/remote/*` proxy. Managed OpenCode start/attach is skipped via `OPENCHAMBER_SKIP_OPENCODE_START` / equivalent settings when remote-only policy is active.
+2. **Identity adapter (`packages/ui/src/lib/relay/serverIdAuthority.ts`).** Pairing / relay enrollment maps to a non-reserved `serverId`; `default` / `local` cannot be overwritten.
 
-3. **Boot contract carries `localOpenCodeAvailable`.** Chooser/recovery must hide “fix local OpenCode” actions when that flag is false. Failure to reach a remote must not prune or mutate unrelated `default` catalogs.
+3. **Host outbound relay (`packages/web/server/lib/relay/*`).** Opt-in enable/status/offer/disable; default `wss://relay.openchamber.dev/ws` (`OPENCHAMBER_RELAY_URL` override). Claim lock uses the host data-dir lock (same machine identity as upstream); tunnels terminate on loopback UI/API with WS allowlists.
 
-4. **Identity isolation rules for any future relay/pairing impl:**
-   - A transport candidate resolves to at most one `serverId`.
-   - Claim locks / host keys must not overwrite another instance’s registry entry.
-   - SSE/WS fanout remains keyed by `serverId` (+ directory where applicable).
-   - Pairing enrollment creates or selects a remote-instance id; it does not become the global current directory.
+4. **Client E2EE tunnel (`packages/ui/src/lib/relay/*`).** `runtime-fetch` / runtime auth / `openRuntimeWebSocket` (terminal + event pipeline) route through the tunnel when relay mode is active. TS↔JS cross-compat tests green.
 
-5. **Phased implementation backlog (later #16 code batch):**
-   1. Map relay host identity → remote-instance `serverId` adapter (no UI rewrite).
-   2. Optional desktop multi-transport candidate restore **without** collapsing concurrent connections.
-   3. Pairing URL redeem as “add remote instance,” not “replace local runtime.”
-   4. Host claim lock scoped per `serverId`.
-   5. E2E: failover + identity isolation tests across two remotes + local `default`.
+5. **Desktop multi-transport + pairing UI.** Saved hosts persist LAN + relay; `DesktopHostSwitcher` / `restoreDesktopRelayRuntime` prefer LAN then relay; Settings → Remote Instances → `PairingDevicesPanel` for enable/QR/Import Link → **add** desktop host (not replace local).
 
-### Explicit non-goals (this design phase)
+6. **Mobile M11.** `MobileApp` QR scan + `openchamber://connect` redeem via `mobileConnections`; Instances sheet shows transport/reachability.
 
-- Implementing `packages/*/relay/*`, pairing v2 LAN/QR, or mobile connect UI.
+7. **Remote-only boot means “no local OpenCode,” not “no local OpenChamber UI.”** Unchanged from #26.
+
+### Explicit non-goals
+
 - Upstream `OPENCHAMBER_SKIP_LOCAL_SERVER=1` (skip entire UI server) as the fork product path.
 - AI subscription egress relay (separate ADR).
-- Preview remote-host relay design (`docs/PREVIEW_REMOTE_RELAY.md`) — different problem (dev-server tunnel).
+- Preview remote-host relay (`docs/PREVIEW_REMOTE_RELAY.md`).
+- Central push relay / APNs productization (#49).
+- Self-hosted relay Worker packaging in this repo.
 
 ## Consequences
 
-- #26 can ship remote-only OpenCode skip + Windows SSH under these constraints.
-- #16 remains open until the phased impl backlog passes end-to-end; this ADR satisfies the “written compatibility design” gate only.
+- #16 Done when desktop Anywhere pairing + official relay chat path + multi-transport failover preserve multi-`serverId`, and Mobile QR/deep-link redeem works (evidence in MERGE).
 - Future PRs that touch desktop hosts / remote-instances / SSH must cite this ADR when adding transport candidates.
