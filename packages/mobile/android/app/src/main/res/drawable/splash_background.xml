@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Launch + runtime window background: themed background color with the
+     OpenChamber logo centered. Used by both AppTheme.NoActionBarLaunch
+     (cold-start launch screen) and AppTheme.NoActionBar (runtime window
+     background, visible through the transparent WebView until the React
+     UI paints). This keeps the logo visible across the whole cold-start
+     sequence instead of flashing a bare black/white surface.
+
+     The QR scanner camera preview surface sits above this window, so the
+     logo does not block scanning. -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:drawable="@color/splash_bg" />
+    <item>
+        <bitmap android:gravity="center" android:src="@drawable/splash_logo" />
+    </item>
+</layer-list>

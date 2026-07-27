@@ -5,6 +5,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { toast } from '@/components/ui';
 import { isDesktopLocalOriginActive, isDesktopShell, isVSCodeRuntime, loginDesktopRemotePassword } from '@/lib/desktop';
+import { isCapacitorApp } from '@/lib/platform';
 import { syncDesktopSettings, initializeAppearancePreferences } from '@/lib/persistence';
 import { applyPersistedDirectoryPreferences } from '@/lib/directoryPersistence';
 import { subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
@@ -84,11 +85,20 @@ const AuthShell: React.FC<{ children: React.ReactNode }> = ({ children }) => (
   </div>
 );
 
-const LoadingScreen: React.FC = () => (
-  <div className="flex min-h-screen items-center justify-center bg-background text-foreground">
-    <OpenChamberLogo width={120} height={120} />
-  </div>
-);
+const LoadingScreen: React.FC = () => {
+  const { t } = useI18n();
+  return (
+    <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-background text-foreground">
+      <OpenChamberLogo width={120} height={120} />
+      {isCapacitorApp() ? (
+        <div className="flex items-center gap-2">
+          <Icon name="loader-4" className="size-4 animate-spin text-muted-foreground" />
+          <span className="typography-meta text-muted-foreground">{t('mobile.connect.connecting')}</span>
+        </div>
+      ) : null}
+    </div>
+  );
+};
 
 const ErrorScreen: React.FC<ErrorScreenProps> = ({ onRetry, errorType = 'network', retryAfter }) => {
   const { t } = useI18n();

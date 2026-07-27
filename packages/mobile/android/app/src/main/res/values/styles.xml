@@ -13,15 +13,16 @@
         <item name="windowActionBar">false</item>
         <item name="windowNoTitle">true</item>
         <item name="android:background">@null</item>
-        <!-- White window background so the transparent WebView (kept transparent
-             for QR camera-behind-WebView scanning) shows white instead of the
-             black surface during cold-start load. The camera preview surface
-             sits above the window, so this does not block QR scanning. -->
-        <item name="android:windowBackground">@android:color/white</item>
+        <!-- Runtime window background: themed splash_background (logo + DayNight
+             bg color). The WebView is kept transparent for QR camera-behind-
+             WebView scanning, so this drawable shows through during cold-start
+             load and keeps the logo visible instead of flashing a bare surface.
+             The camera preview surface sits above the window. -->
+        <item name="android:windowBackground">@drawable/splash_background</item>
     </style>
 
 
     <style name="AppTheme.NoActionBarLaunch" parent="Theme.SplashScreen">
-        <item name="android:background">@drawable/splash</item>
+        <item name="android:windowBackground">@drawable/splash_background</item>
     </style>
 </resources>

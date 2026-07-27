@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Splash background matches the light theme surface so the launch logo
+         cross-fades into the first screen without a white/black flash. -->
+    <color name="splash_bg">#FFFCF0</color>
+</resources>
