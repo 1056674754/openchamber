@@ -26,6 +26,7 @@ import {
   stripSessionPinSettingsIfHostPending,
 } from '@/lib/sessionPinSettings';
 import {
+  getRuntimeKey,
   subscribeRuntimeEndpointChanged,
   subscribeRuntimeEndpointWillChange,
 } from '@/lib/runtime-switch';
@@ -1369,6 +1370,33 @@ let _settingsCache: { value: DesktopSettings | null; at: number } | null = null;
 let _settingsInflight: Promise<DesktopSettings | null> | null = null;
 const SETTINGS_CACHE_TTL = 2_000; // 2 seconds — covers the startup burst
 
+const performSettingsFetch = async (): Promise<DesktopSettings | null> => {
+  const runtimeSettings = getRuntimeSettingsAPI();
+  if (runtimeSettings) {
+    try {
+      const result = await runtimeSettings.load();
+      return sanitizeWebSettings(result.settings);
+    } catch (error) {
+      console.warn('Failed to load shared settings from runtime settings API:', error);
+    }
+  }
+
+  try {
+    const response = await fetch('/api/config/settings', {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+    });
+    if (!response.ok) {
+      return null;
+    }
+    const data = await response.json().catch(() => null);
+    return sanitizeWebSettings(data);
+  } catch (error) {
+    console.warn('Failed to load shared settings from server:', error);
+    return null;
+  }
+};
+
 const fetchWebSettings = async (): Promise<DesktopSettings | null> => {
   // Return cached if fresh
   if (_settingsCache && Date.now() - _settingsCache.at < SETTINGS_CACHE_TTL) {
@@ -1379,37 +1407,22 @@ const fetchWebSettings = async (): Promise<DesktopSettings | null> => {
   if (_settingsInflight) return _settingsInflight;
 
   _settingsInflight = (async (): Promise<DesktopSettings | null> => {
-    const runtimeSettings = getRuntimeSettingsAPI();
-    if (runtimeSettings) {
-      try {
-        const result = await runtimeSettings.load();
-        const settings = sanitizeWebSettings(result.settings);
-        _settingsCache = { value: settings, at: Date.now() };
-        return settings;
-      } catch (error) {
-        console.warn('Failed to load shared settings from runtime settings API:', error);
-      }
-    }
-
-    try {
-      const response = await fetch('/api/config/settings', {
-        method: 'GET',
-        headers: { Accept: 'application/json' },
-      });
-      if (!response.ok) {
-        return null;
-      }
-      const data = await response.json().catch(() => null);
-      const settings = sanitizeWebSettings(data);
-      _settingsCache = { value: settings, at: Date.now() };
-      return settings;
-    } catch (error) {
-      console.warn('Failed to load shared settings from server:', error);
-      return null;
-    }
+    const settings = await performSettingsFetch();
+    _settingsCache = { value: settings, at: Date.now() };
+    return settings;
   })().finally(() => { _settingsInflight = null; });
 
   return _settingsInflight;
+};
+
+/**
+ * Real GET bypassing cache + in-flight dedup. Deliberately does not touch
+ * `_settingsInflight` so it cannot cancel a concurrent background read.
+ */
+const fetchWebSettingsFresh = async (): Promise<DesktopSettings | null> => {
+  const settings = await performSettingsFetch();
+  _settingsCache = { value: settings, at: Date.now() };
+  return settings;
 };
 
 /** Invalidate cached settings (call after a successful PUT) */
@@ -1417,63 +1430,62 @@ export const invalidateSettingsCache = (): void => {
   _settingsCache = null;
 };
 
+// Wait for Zustand persist hydration before applying server settings.
+// Otherwise `set()`-calls race with hydration: we set X, then hydration
+// reads localStorage and overwrites back to the persisted value.
+const waitForSettingsHydration = (): Promise<void> => {
+  const persistApi = getPersistApi();
+  if (!persistApi?.hasHydrated || persistApi.hasHydrated()) {
+    return Promise.resolve();
+  }
+  if (!persistApi.onFinishHydration) {
+    return Promise.resolve();
+  }
+  return new Promise<void>((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      resolve();
+    };
+    const unsubscribe = persistApi.onFinishHydration!(() => {
+      unsubscribe?.();
+      finish();
+    });
+    // Guard: hydration may have flipped to true between the hasHydrated
+    // check and the onFinishHydration subscription — resolve immediately.
+    if (persistApi.hasHydrated?.()) finish();
+  });
+};
+
+// Each step is wrapped in try/catch so a failure in one side-effect (e.g.
+// a TypeError from writing to a contextBridge-protected global) doesn't
+// prevent server settings from reaching the Zustand store.
+const applySettingsAndDispatch = async (settings: DesktopSettings): Promise<void> => {
+  try {
+    persistToLocalStorage(settings);
+  } catch (error) {
+    console.warn('persistToLocalStorage failed:', error);
+  }
+  await waitForSettingsHydration();
+  try {
+    applyDesktopUiPreferences(settings);
+  } catch (error) {
+    console.warn('applyDesktopUiPreferences failed:', error);
+  }
+
+  dispatchSettingsSynced(settings);
+};
+
 export const syncDesktopSettings = async (): Promise<void> => {
   if (typeof window === 'undefined') {
     return;
   }
 
-  const persistApi = getPersistApi();
-
-  // Wait for Zustand persist hydration before applying server settings.
-  // Otherwise `set()`-calls race with hydration: we set X, then hydration
-  // reads localStorage and overwrites back to the persisted value.
-  const waitForHydration = (): Promise<void> => {
-    if (!persistApi?.hasHydrated || persistApi.hasHydrated()) {
-      return Promise.resolve();
-    }
-    if (!persistApi.onFinishHydration) {
-      return Promise.resolve();
-    }
-    return new Promise<void>((resolve) => {
-      let settled = false;
-      const finish = () => {
-        if (settled) return;
-        settled = true;
-        resolve();
-      };
-      const unsubscribe = persistApi.onFinishHydration!(() => {
-        unsubscribe?.();
-        finish();
-      });
-      // Guard: hydration may have flipped to true between the hasHydrated
-      // check and the onFinishHydration subscription — resolve immediately.
-      if (persistApi.hasHydrated?.()) finish();
-    });
-  };
-
-  // Each step is wrapped in try/catch so a failure in one side-effect (e.g.
-  // a TypeError from writing to a contextBridge-protected global) doesn't
-  // prevent server settings from reaching the Zustand store.
-  const applySettings = async (settings: DesktopSettings) => {
-    try {
-      persistToLocalStorage(settings);
-    } catch (error) {
-      console.warn('persistToLocalStorage failed:', error);
-    }
-    await waitForHydration();
-    try {
-      applyDesktopUiPreferences(settings);
-    } catch (error) {
-      console.warn('applyDesktopUiPreferences failed:', error);
-    }
-
-    dispatchSettingsSynced(settings);
-  };
-
   try {
     const webSettings = await fetchWebSettings();
     if (webSettings) {
-      await applySettings(webSettings);
+      await applySettingsAndDispatch(webSettings);
     }
   } catch (error) {
     console.warn('Failed to synchronise settings:', error);
@@ -1497,13 +1509,22 @@ if (typeof window !== 'undefined') {
 // Coalesce rapid updateDesktopSettings calls into a single PUT
 let _pendingSettingsChanges: Partial<DesktopSettings> | null = null;
 let _settingsFlushTimer: ReturnType<typeof setTimeout> | null = null;
+// Serialized flush chain. Each enqueued flush awaits the previous one, so
+// concurrent kicks never overwrite the tracked promise (which would lose a
+// still-running PUT). Resolves to whether the flush succeeded.
+let _settingsFlushChain: Promise<boolean> | null = null;
+// Bumped on every locally-initiated PUT. A forced host refresh captures this
+// before its GET and discards the response if a mutation lands during the GET,
+// since that response is stale relative to local intent (the PUT has not
+// reached disk yet and replaceFromRemote would otherwise clobber the new pin).
+let _localSettingsMutationGeneration = 0;
 const SETTINGS_DEBOUNCE_MS = 200;
 
-const _flushSettingsUpdate = async (): Promise<void> => {
+const _flushSettingsUpdate = async (): Promise<boolean> => {
   const changes = _pendingSettingsChanges;
   _pendingSettingsChanges = null;
   _settingsFlushTimer = null;
-  if (!changes || Object.keys(changes).length === 0) return;
+  if (!changes || Object.keys(changes).length === 0) return true;
 
   const runtimeSettings = getRuntimeSettingsAPI();
   if (runtimeSettings) {
@@ -1513,10 +1534,13 @@ const _flushSettingsUpdate = async (): Promise<void> => {
         persistToLocalStorage(updated);
         applyDesktopUiPreferences(updated);
         dispatchSettingsSynced(updated);
+        // Invalidate GET cache so the next read sees the fresh data
+        _settingsCache = null;
       }
-      return;
+      return true;
     } catch (error) {
       console.warn('Failed to update settings via runtime settings API:', error);
+      return false;
     }
   }
 
@@ -1532,7 +1556,7 @@ const _flushSettingsUpdate = async (): Promise<void> => {
 
     if (!response.ok) {
       console.warn('Failed to update shared settings via API:', response.status, response.statusText);
-      return;
+      return false;
     }
 
     const updated = (await response.json().catch(() => null)) as DesktopSettings | null;
@@ -1543,9 +1567,49 @@ const _flushSettingsUpdate = async (): Promise<void> => {
       // Invalidate GET cache so next read sees the fresh data
       _settingsCache = null;
     }
+    return true;
   } catch (error) {
     console.warn('Failed to update shared settings via API:', error);
+    return false;
   }
+};
+
+const _enqueueSettingsFlush = (): void => {
+  const previous = _settingsFlushChain;
+  const current = (async (): Promise<boolean> => {
+    if (previous) await previous;
+    return _flushSettingsUpdate();
+  })();
+  _settingsFlushChain = current;
+  current.finally(() => {
+    if (_settingsFlushChain === current) _settingsFlushChain = null;
+  });
+};
+
+/**
+ * Flush debounced/pending settings PUTs and await completion. Resolves false
+ * if any flush failed — callers must not then read host settings, since the
+ * host still holds the pre-mutation value and applying it would revert the
+ * local write whose PUT just failed.
+ */
+export const flushPendingSettingsUpdates = async (): Promise<boolean> => {
+  if (_settingsFlushTimer) {
+    clearTimeout(_settingsFlushTimer);
+    _settingsFlushTimer = null;
+    _enqueueSettingsFlush();
+  }
+  let safety = 0;
+  while (_settingsFlushChain && safety < 50) {
+    const ok = await _settingsFlushChain;
+    safety += 1;
+    if (!ok) return false;
+    if (_settingsFlushTimer) {
+      clearTimeout(_settingsFlushTimer);
+      _settingsFlushTimer = null;
+      _enqueueSettingsFlush();
+    }
+  }
+  return true;
 };
 
 export const updateDesktopSettings = async (changes: Partial<DesktopSettings>): Promise<void> => {
@@ -1558,12 +1622,56 @@ export const updateDesktopSettings = async (changes: Partial<DesktopSettings>): 
     return;
   }
 
+  _localSettingsMutationGeneration += 1;
   _pendingSettingsChanges = { ...(_pendingSettingsChanges ?? {}), ...safeChanges };
 
   if (_settingsFlushTimer) {
     clearTimeout(_settingsFlushTimer);
   }
-  _settingsFlushTimer = setTimeout(() => void _flushSettingsUpdate(), SETTINGS_DEBOUNCE_MS);
+  _settingsFlushTimer = setTimeout(() => _enqueueSettingsFlush(), SETTINGS_DEBOUNCE_MS);
+};
+
+/**
+ * Force a fresh host settings pull for the sidebar "refresh" action, so a pin
+ * made on another client becomes visible without a restart. Flushes pending
+ * local PUTs first, then GETs; aborts on a failed PUT (host would revert the
+ * local write) and discards the response if the endpoint switched or a local
+ * mutation began during the GET (stale relative to local intent).
+ */
+export const refreshDesktopSettingsFromHost = async (): Promise<void> => {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  const startKey = getRuntimeKey();
+
+  const flushOk = await flushPendingSettingsUpdates();
+  // A pending PUT failed — the host still holds the pre-mutation value, so a
+  // GET now would revert the local write. Abort without refreshing.
+  if (!flushOk) return;
+  if (getRuntimeKey() !== startKey) return;
+
+  const getGeneration = _localSettingsMutationGeneration;
+  const settings = await fetchWebSettingsFresh();
+
+  // fetchWebSettingsFresh wrote the (possibly stale) response into the shared
+  // cache. If we discard it, invalidate so the next ordinary sync re-reads.
+  // Module singletons are not endpoint-keyed: an old-host response must not
+  // apply under a new host.
+  if (getRuntimeKey() !== startKey) {
+    invalidateSettingsCache();
+    return;
+  }
+  // A local mutation began during the GET; its PUT has not reached disk, so
+  // this response is stale and must not clobber the newer local intent.
+  if (_localSettingsMutationGeneration !== getGeneration) {
+    invalidateSettingsCache();
+    return;
+  }
+
+  if (settings) {
+    await applySettingsAndDispatch(settings);
+  }
 };
 
 export const initializeAppearancePreferences = async (): Promise<void> => {

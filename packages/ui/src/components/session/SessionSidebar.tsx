@@ -21,7 +21,7 @@ import { useSessionPinnedStore } from '@/stores/useSessionPinnedStore';
 import { useGitStore, useGitAllBranches, useGitRepoStatusMap } from '@/stores/useGitStore';
 import type { DesktopSettings } from '@/lib/desktop';
 import { isVSCodeRuntime } from '@/lib/desktop';
-import { updateDesktopSettings } from '@/lib/persistence';
+import { refreshDesktopSettingsFromHost, syncDesktopSettings, updateDesktopSettings } from '@/lib/persistence';
 import {
   SESSION_PINNED_BY_PROJECT_STORAGE_KEY,
   SESSION_PINNED_ORDER_BY_PROJECT_STORAGE_KEY,
@@ -715,6 +715,13 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
     syncSessionsSnapshotRef.current = liveSessions;
   }, [syncSessionStructureSignature, liveSessions]);
 
+  // Refresh re-pulls host settings AND the session list. Settings are pull-only
+  // with no push, so the settings pull is what surfaces pins made on another client.
+  const handleRefreshSessions = React.useCallback(() => {
+    void refreshDesktopSettingsFromHost();
+    void refreshGlobalSessions(syncSessionsSnapshotRef.current);
+  }, []);
+
   React.useEffect(() => {
     let cancelled = false;
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
@@ -1021,20 +1028,9 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
 
     window.addEventListener('openchamber:settings-synced', handleSettingsSynced);
 
-    void (async () => {
-      try {
-        const response = await fetch('/api/config/settings', {
-          method: 'GET',
-          headers: { Accept: 'application/json' },
-        });
-        if (!response.ok || cancelled) return;
-        const data = (await response.json().catch(() => null)) as DesktopSettings | null;
-        if (!data || cancelled) return;
-        maybeMigrateLocalPins(data);
-      } catch (error) {
-        console.warn('Failed to load session pins from host settings:', error);
-      }
-    })();
+    // Centralized sync dispatches the event that drives maybeMigrateLocalPins;
+    // the listener's `cancelled` guard preserves unmount safety.
+    void syncDesktopSettings();
 
     return () => {
       cancelled = true;
@@ -2683,7 +2679,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
         openScheduledTasksDialog={() => setScheduledTasksDialogOpen(true)}
         selectionModeEnabled={selectionModeEnabled}
         onToggleSelectionMode={handleToggleSelectionMode}
-        onRefresh={() => { void refreshGlobalSessions(syncSessionsSnapshotRef.current); }}
+        onRefresh={handleRefreshSessions}
       />
 
       <SidebarProjectsList
@@ -2721,7 +2717,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
         setGroupOrderByProject={setGroupOrderByProject}
         openSidebarMenuKey={openSidebarMenuKey}
         setOpenSidebarMenuKey={setOpenSidebarMenuKey}
-        onRefreshProject={() => { void refreshGlobalSessions(syncSessionsSnapshotRef.current); }}
+        onRefreshProject={handleRefreshSessions}
         isInlineEditing={isInlineEditing}
       />
 
