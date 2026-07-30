@@ -14,6 +14,10 @@ import { ElectronSshManager } from './ssh-manager.mjs';
 import { hasSameHttpOrigin, loginRemotePasswordAndPersistSession } from './remote-password-login.mjs';
 import { createSingleFlight } from './startup-coordinator.mjs';
 import { createTrayController } from './tray.mjs';
+import {
+  buildLinuxInstalledApps,
+  fetchLinuxAppIcons,
+} from './linux-app-discovery.mjs';
 
 const execFileAsync = promisify(execFile);
 
@@ -867,7 +871,9 @@ const resolveWebDistDir = () => path.join(resourceRoot(), 'web-dist');
 const isMacMenuBarEnabled = () => readSettingsRoot().desktopMacMenuBarEnabled !== false;
 
 const isTrayEnabledForPlatform = () =>
-  (process.platform === 'darwin' && isMacMenuBarEnabled()) || process.platform === 'win32';
+  (process.platform === 'darwin' && isMacMenuBarEnabled())
+  || process.platform === 'win32'
+  || process.platform === 'linux';
 
 const readDesktopMinimizeToTrayStatus = () => {
   const supported = process.platform === 'win32';
@@ -1004,6 +1010,30 @@ const dispatchTrayAction = async (action) => {
     return;
   }
 
+  if (action.type === 'hide-main-window') {
+    const target = (state.mainWindow && !state.mainWindow.isDestroyed())
+      ? state.mainWindow
+      : BrowserWindow.getFocusedWindow();
+    if (target && !target.isDestroyed() && target.isVisible()) {
+      debounceWindowStatePersist(target, true);
+      target.hide();
+    }
+    return;
+  }
+
+  if (action.type === 'toggle-main-window') {
+    const target = (state.mainWindow && !state.mainWindow.isDestroyed())
+      ? state.mainWindow
+      : null;
+    if (target && target.isVisible() && !target.isMinimized()) {
+      debounceWindowStatePersist(target, true);
+      target.hide();
+      return;
+    }
+    await revealMainWindow();
+    return;
+  }
+
   if (action.type === 'respond-permission') {
     const target = (state.mainWindow && !state.mainWindow.isDestroyed())
       ? state.mainWindow
@@ -1045,7 +1075,7 @@ const dispatchTrayAction = async (action) => {
 };
 
 const setupTray = () => {
-  if (!['darwin', 'win32'].includes(process.platform) || state.trayController) return;
+  if (!['darwin', 'win32', 'linux'].includes(process.platform) || state.trayController) return;
   if (process.platform === 'darwin' && !isMacMenuBarEnabled()) return;
   const assets = trayIconAssets();
   if (!fs.existsSync(assets.idleIconPath)) {
@@ -2330,6 +2360,13 @@ const buildInstalledApps = async (apps) => {
   return results;
 };
 
+const buildPlatformInstalledApps = async (apps) => {
+  if (process.platform === 'linux') {
+    return buildLinuxInstalledApps(apps);
+  }
+  return buildInstalledApps(apps);
+};
+
 const parseSshConfigImports = () => {
   const sshConfigPath = path.join(os.homedir(), '.ssh', 'config');
   if (!fs.existsSync(sshConfigPath)) return [];
@@ -2821,8 +2858,11 @@ end tell`;
     }
 
     case 'desktop_fetch_app_icons': {
+      if (process.platform === 'linux') {
+        return fetchLinuxAppIcons(Array.isArray(args.apps) ? args.apps : []);
+      }
       if (process.platform !== 'darwin') {
-        throw new Error('desktop_fetch_app_icons is only supported on macOS');
+        throw new Error('desktop_fetch_app_icons is only supported on macOS and Linux');
       }
       const names = Array.isArray(args.apps) ? args.apps : [];
       const results = [];
@@ -2836,8 +2876,8 @@ end tell`;
     }
 
     case 'desktop_get_installed_apps': {
-      if (process.platform !== 'darwin') {
-        throw new Error('desktop_get_installed_apps is only supported on macOS');
+      if (process.platform !== 'darwin' && process.platform !== 'linux') {
+        return { apps: [], hasCache: false, isCacheStale: false, supported: false };
       }
       const cachePath = buildInstalledAppsCachePath();
       const now = Math.floor(Date.now() / 1000);
@@ -2850,7 +2890,7 @@ end tell`;
       const hasCache = Boolean(cache);
       const isCacheStale = !cache || (now - Number(cache.updatedAt || 0)) > INSTALLED_APPS_CACHE_TTL_SECS;
       const refresh = async () => {
-        const apps = await buildInstalledApps(Array.isArray(args.apps) ? args.apps : []);
+        const apps = await buildPlatformInstalledApps(Array.isArray(args.apps) ? args.apps : []);
         await fsp.mkdir(path.dirname(cachePath), { recursive: true });
         await fsp.writeFile(cachePath, JSON.stringify({ updatedAt: now, apps }, null, 2));
         emitToAllWindows('openchamber:installed-apps-updated', apps);

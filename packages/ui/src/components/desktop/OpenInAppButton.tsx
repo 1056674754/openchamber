@@ -27,7 +27,7 @@ type OpenInAppOptionWithFallback = OpenInAppOption & {
 
 const withFallbackIcon = (app: OpenInAppOption): OpenInAppOptionWithFallback => ({
   ...app,
-  fallbackIconDataUrl: app.id === 'finder'
+  fallbackIconDataUrl: app.id === 'finder' && window.__OPENCHAMBER_PLATFORM__ === 'darwin'
     ? FINDER_DEFAULT_ICON_DATA_URL
     : app.id === 'terminal'
       ? TERMINAL_DEFAULT_ICON_DATA_URL
