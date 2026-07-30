@@ -13,6 +13,7 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
     crypto,
     clientReloadDelayMs,
     getOpenCodeResolutionSnapshot,
+    getOpenCodeUpgradeCapability,
     formatSettingsResponse,
     readSettingsFromDisk,
     readSettingsFromDiskMigrated,
@@ -221,6 +222,18 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
     };
   };
 
+  const readOpenCodeCurrentVersion = async () => {
+    const response = await fetch(buildOpenCodeUrl('/global/health', ''), {
+      method: 'GET',
+      headers: { Accept: 'application/json', ...getOpenCodeAuthHeaders() },
+    });
+    const payload = await response.json().catch(() => null);
+    const currentVersion = typeof payload?.version === 'string'
+      ? payload.version.trim().replace(/^v/, '')
+      : null;
+    return { ok: response.ok, currentVersion };
+  };
+
   const pruneExpiredPendingMcpAuthContexts = () => {
     const now = Date.now();
     for (const [state, entry] of pendingMcpAuthContextByState.entries()) {
@@ -256,13 +269,16 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
       ? req.body.target.trim()
       : undefined;
     try {
-      const settings = await readSettingsFromDiskMigrated();
-      const resolution = await getOpenCodeResolutionSnapshot(settings);
-      if (resolution?.source === 'bundled') {
+      const capability = getOpenCodeUpgradeCapability();
+      if (!capability.supported) {
         return res.status(409).json({
           success: false,
-          source: 'bundled',
-          error: 'Bundled OpenCode must be upgraded by rebuilding and re-signing OpenChamber',
+          code: capability.reason === 'bundled'
+            ? 'OPENCODE_UPGRADE_MANAGED_BY_OPENCHAMBER'
+            : 'OPENCODE_UPGRADE_UNSUPPORTED',
+          error: capability.reason === 'bundled'
+            ? 'OpenCode is bundled with OpenChamber Desktop and updates with the app.'
+            : 'This OpenCode runtime cannot be upgraded by OpenChamber.',
         });
       }
 
@@ -313,6 +329,20 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
 
   app.get('/api/opencode/upgrade-status', async (_req, res) => {
     try {
+      const capability = getOpenCodeUpgradeCapability();
+      if (!capability.supported) {
+        const current = await readOpenCodeCurrentVersion().catch(() => ({
+          ok: false,
+          currentVersion: null,
+        }));
+        return res.json({
+          available: false,
+          currentVersion: current.ok ? current.currentVersion : null,
+          latestVersion: null,
+          upgrade: capability,
+        });
+      }
+
       const [healthResponse, latestVersion] = await Promise.all([
         fetch(buildOpenCodeUrl('/global/health', ''), {
           method: 'GET',
@@ -325,17 +355,24 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
         return res.status(healthResponse.status).json({
           available: null,
           error: health?.error || healthResponse.statusText || 'Failed to read OpenCode version',
+          upgrade: capability,
         });
       }
       const currentVersion = typeof health?.version === 'string' ? health.version.replace(/^v/, '') : null;
       if (!currentVersion || !latestVersion) {
-        return res.json({ available: null, currentVersion, latestVersion: latestVersion || null });
+        return res.json({
+          available: null,
+          currentVersion,
+          latestVersion: latestVersion || null,
+          upgrade: capability,
+        });
       }
       const available = isOpenCodeUpgradeAvailable(latestVersion, currentVersion);
       return res.json({
         available,
         currentVersion,
         latestVersion,
+        upgrade: capability,
       });
     } catch (error) {
       return res.status(500).json({

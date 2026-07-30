@@ -285,6 +285,21 @@ export const createOpenCodeEnvRuntime = (deps) => {
     return bundled && isExecutable(bundled) ? bundled : null;
   };
 
+  const canonicalExecutablePath = (candidate) => {
+    if (typeof candidate !== 'string' || !candidate.trim()) return null;
+    try {
+      return fs.realpathSync.native(candidate.trim());
+    } catch {
+      return path.resolve(candidate.trim());
+    }
+  };
+
+  const isBundledOpenCodeCliPath = (candidate) => {
+    const canonicalCandidate = canonicalExecutablePath(candidate);
+    const bundled = canonicalExecutablePath(resolveBundledOpencodeCliPath());
+    return Boolean(canonicalCandidate && bundled && canonicalCandidate === bundled);
+  };
+
   const applyBundledOpencodeCli = () => {
     const bundled = resolveBundledOpencodeCliPath();
     if (!bundled) return null;
@@ -1149,6 +1164,7 @@ export const createOpenCodeEnvRuntime = (deps) => {
     applyOpencodeBinaryFromSettings,
     getLoginShellEnvSnapshot,
     resolveOpencodeCliPath,
+    isBundledOpenCodeCliPath,
     resolveManagedOpenCodeLaunchSpec,
     isExecutable,
     searchPathFor,

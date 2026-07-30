@@ -67,6 +67,7 @@ import { createServerUtilsRuntime } from './lib/opencode/server-utils-runtime.js
 import { createStaticRoutesRuntime } from './lib/opencode/static-routes-runtime.js';
 import { createSettingsRuntime } from './lib/opencode/settings-runtime.js';
 import { createOpenCodeResolutionRuntime } from './lib/opencode/opencode-resolution-runtime.js';
+import { resolveOpenCodeUpgradeCapability } from './lib/opencode/upgrade-capability.js';
 import { createBootstrapRuntime } from './lib/opencode/bootstrap-runtime.js';
 import { createSessionRuntime } from './lib/opencode/session-runtime.js';
 import { createSessionUnreadStore } from './lib/opencode/session-unread-store.js';
@@ -824,6 +825,7 @@ const getLoginShellEnvSnapshot = (...args) => openCodeEnvRuntime.getLoginShellEn
 const ensureOpencodeCliEnv = (...args) => openCodeEnvRuntime.ensureOpencodeCliEnv(...args);
 const applyOpencodeBinaryFromSettings = (...args) => openCodeEnvRuntime.applyOpencodeBinaryFromSettings(...args);
 const resolveOpencodeCliPath = (...args) => openCodeEnvRuntime.resolveOpencodeCliPath(...args);
+const isBundledOpenCodeCliPath = (...args) => openCodeEnvRuntime.isBundledOpenCodeCliPath(...args);
 const isExecutable = (...args) => openCodeEnvRuntime.isExecutable(...args);
 const searchPathFor = (...args) => openCodeEnvRuntime.searchPathFor(...args);
 const resolveGitBinaryForSpawn = (...args) => openCodeEnvRuntime.resolveGitBinaryForSpawn(...args);
@@ -1205,6 +1207,15 @@ const openCodeLifecycleRuntime = createOpenCodeLifecycleRuntime({
 });
 
 const restartOpenCode = (...args) => openCodeLifecycleRuntime.restartOpenCode(...args);
+const getOpenCodeUpgradeCapability = () => {
+  const activeBinary = lastOpenCodeLaunchDiagnostics?.binary || resolvedOpencodeBinary;
+  return resolveOpenCodeUpgradeCapability({
+    isExternal: isExternalOpenCode,
+    hasManagedProcess: Boolean(openCodeProcess),
+    activeBinary,
+    isBundledBinary: isBundledOpenCodeCliPath,
+  });
+};
 const waitForOpenCodeReady = (...args) => openCodeLifecycleRuntime.waitForOpenCodeReady(...args);
 const waitForAgentPresence = (...args) => openCodeLifecycleRuntime.waitForAgentPresence(...args);
 const verifyOpenChamberPluginLoaded = async () => {
@@ -1636,6 +1647,7 @@ async function main(options = {}) {
     readCustomThemesFromDisk,
     refreshOpenCodeAfterConfigChange,
     getOpenCodeResolutionSnapshot,
+    getOpenCodeUpgradeCapability,
     formatSettingsResponse,
     readSettingsFromDisk,
     readSettingsFromDiskMigrated,

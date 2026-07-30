@@ -43,12 +43,16 @@ export const resolveOpenCodeUpdateVersion = (detail: unknown): string => {
 export interface OpenCodeUpgradeStatusLike {
   readonly available?: boolean | null;
   readonly latestVersion?: string | null;
+  readonly upgrade?: {
+    readonly supported?: boolean | null;
+  } | null;
 }
 
 export const resolveOpenCodeUpgradeStatusVersion = (
   status: OpenCodeUpgradeStatusLike | null | undefined,
 ): string => {
   if (!status) return '';
+  if (status.upgrade?.supported !== true) return '';
   if (status.available !== true) return '';
   if (typeof status.latestVersion !== 'string') return '';
   return status.latestVersion.trim();

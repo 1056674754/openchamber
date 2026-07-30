@@ -16,6 +16,7 @@ import {
   writeOpenCodeGoCredential,
 } from './opencodeGoQuota';
 import { getSessionActivitySnapshot } from './sessionActivityWatcher';
+import { getOpenCodeUpgradeStatus, upgradeManagedOpenCode } from './opencode-upgrade-runtime';
 import type { BridgeContext, BridgeResponse } from './bridge';
 
 type BridgeMessageInput = {
@@ -275,6 +276,25 @@ export async function handleSystemBridgeMessage(
         const errorMessage = error instanceof Error ? error.message : String(error);
         return { id, type, success: true, data: { version: null, error: errorMessage } };
       }
+    }
+
+    case 'api:opencode/upgrade-status': {
+      return {
+        id,
+        type,
+        success: true,
+        data: await getOpenCodeUpgradeStatus(ctx?.manager),
+      };
+    }
+
+    case 'api:opencode/upgrade': {
+      const target = (payload as { target?: unknown } | undefined)?.target;
+      return {
+        id,
+        type,
+        success: true,
+        data: await upgradeManagedOpenCode(ctx?.manager, target),
+      };
     }
 
     case 'api:session-activity:get': {

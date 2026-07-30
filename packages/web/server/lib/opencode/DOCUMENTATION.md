@@ -91,8 +91,8 @@ This module provides OpenCode server integration utilities for the web server ru
   - `GET /api/config/settings`
   - `PUT /api/config/settings`
   - `GET /api/config/opencode-resolution`
-  - `POST /api/opencode/upgrade` (proxies OpenCode upgrade, falls back to direct install-source upgrade when `/global/upgrade` fails without diagnostics, and returns `requiresReload` without restarting managed OpenCode)
-  - `GET /api/opencode/upgrade-status`
+  - `POST /api/opencode/upgrade` (requires an explicit supported capability, proxies OpenCode upgrade, falls back to direct install-source upgrade when `/global/upgrade` fails without diagnostics, and returns `requiresReload` without restarting managed OpenCode)
+  - `GET /api/opencode/upgrade-status` (returns an explicit `upgrade` capability; bundled and external runtimes fail closed)
   - `GET /api/opencode/health`
   - `GET /api/opencode/version`
   - `POST /api/opencode/directory`
@@ -396,7 +396,7 @@ At desktop startup, a healthy persisted managed port is reused. If that port is 
 ## Notes for contributors
 - Packaged Electron builds set `OPENCHAMBER_BUNDLED_OPENCODE_BINARY` before importing the server. A valid bundled executable is authoritative over persisted `settings.opencodeBinary`, keeping the managed child inside the signed app bundle with a stable macOS code identity.
 - Set `OPENCHAMBER_USE_EXTERNAL_OPENCODE=true` only as an explicit desktop troubleshooting escape hatch. Development builds without a bundled executable keep the existing settings, environment, PATH, and fallback resolution order.
-- `/api/opencode/upgrade` refuses in-place upgrades when the resolution source is `bundled`; embedded code must be rebuilt and re-signed with the containing application.
+- `/api/opencode/upgrade` refuses in-place upgrades for bundled and external runtimes; embedded `-sscity` code must be rebuilt through the packaging runbook.
 - This module serves as foundation for OpenCode-related server utilities.
 - Route ownership moved to module-level `routes.js`; `index.js` wires dependencies only.
 - All file writes include automatic backup before modification.

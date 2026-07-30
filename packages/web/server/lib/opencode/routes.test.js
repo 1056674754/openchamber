@@ -10,6 +10,11 @@ const createApp = (overrides = {}) => {
     crypto,
     clientReloadDelayMs: 0,
     getOpenCodeResolutionSnapshot: () => null,
+    getOpenCodeUpgradeCapability: () => ({
+      supported: true,
+      manager: 'opencode',
+      reason: null,
+    }),
     formatSettingsResponse: (settings) => settings,
     readSettingsFromDisk: async () => ({}),
     readSettingsFromDiskMigrated: async () => ({}),
@@ -177,6 +182,11 @@ describe('opencode routes', () => {
       available: false,
       currentVersion: '1.17.6-codex.session-fixes.20260614',
       latestVersion: '1.17.6',
+      upgrade: {
+        supported: true,
+        manager: 'opencode',
+        reason: null,
+      },
     });
   });
 
@@ -203,6 +213,11 @@ describe('opencode routes', () => {
       available: true,
       currentVersion: '1.17.6-rc.1',
       latestVersion: '1.17.6',
+      upgrade: {
+        supported: true,
+        manager: 'opencode',
+        reason: null,
+      },
     });
   });
 
@@ -229,9 +244,10 @@ describe('opencode routes', () => {
     const fetchMock = useFetchMock(mock(async () => jsonResponse({ success: true })));
 
     const response = await request(createApp({
-      getOpenCodeResolutionSnapshot: async () => ({
-        source: 'bundled',
-        resolved: '/Applications/OpenChamber.app/Contents/Resources/opencode/opencode',
+      getOpenCodeUpgradeCapability: () => ({
+        supported: false,
+        manager: 'openchamber',
+        reason: 'bundled',
       }),
     }))
       .post('/api/opencode/upgrade')
@@ -240,10 +256,39 @@ describe('opencode routes', () => {
 
     expect(response.body).toEqual({
       success: false,
-      source: 'bundled',
-      error: 'Bundled OpenCode must be upgraded by rebuilding and re-signing OpenChamber',
+      code: 'OPENCODE_UPGRADE_MANAGED_BY_OPENCHAMBER',
+      error: 'OpenCode is bundled with OpenChamber Desktop and updates with the app.',
     });
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  test('reports bundled ownership without checking release registries', async () => {
+    const fetchMock = useFetchMock(mock(async (url) => {
+      expect(String(url)).toBe('http://opencode.test/global/health');
+      return jsonResponse({ version: '1.18.5-sscity' });
+    }));
+
+    const response = await request(createApp({
+      getOpenCodeUpgradeCapability: () => ({
+        supported: false,
+        manager: 'openchamber',
+        reason: 'bundled',
+      }),
+    }))
+      .get('/api/opencode/upgrade-status')
+      .expect(200);
+
+    expect(response.body).toEqual({
+      available: false,
+      currentVersion: '1.18.5-sscity',
+      latestVersion: null,
+      upgrade: {
+        supported: false,
+        manager: 'openchamber',
+        reason: 'bundled',
+      },
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   test('falls back to direct OpenCode upgrade when upstream closes the connection', async () => {

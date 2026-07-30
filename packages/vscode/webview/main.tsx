@@ -1009,6 +1009,26 @@ const handleLocalApiRequest = async (url: URL, init?: RequestInit) => {
     return new Response(JSON.stringify(result), { status: 200, headers: { 'Content-Type': 'application/json' } });
   }
 
+  if (pathname === '/api/opencode/upgrade-status' && method === 'GET') {
+    const data = await sendBridgeMessage('api:opencode/upgrade-status');
+    return new Response(JSON.stringify(data), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  if (pathname === '/api/opencode/upgrade' && method === 'POST') {
+    const body = await extractJsonBody(input, init, method);
+    const result = await sendBridgeMessage<{ status: number; body: unknown }>(
+      'api:opencode/upgrade',
+      body,
+    );
+    return new Response(JSON.stringify(result.body), {
+      status: result.status,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
   if (pathname === '/api/quota/providers') {
     try {
       const data = await sendBridgeMessage('api:quota:providers');

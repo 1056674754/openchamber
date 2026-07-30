@@ -136,6 +136,19 @@ describe('OpenCode env runtime', () => {
     expect(state.resolvedOpencodeBinarySource).toBe('bundled');
   });
 
+  it('recognizes the packaged OpenCode binary by canonical path', () => {
+    const dir = createTempDir('openchamber-opencode-bundled-canonical-');
+    const bundled = path.join(dir, 'bundled-opencode');
+    fs.writeFileSync(bundled, '#!/bin/sh\nexit 0\n');
+    fs.chmodSync(bundled, 0o755);
+    process.env.OPENCHAMBER_BUNDLED_OPENCODE_BINARY = bundled;
+    const { runtime } = createRuntime({});
+
+    expect(runtime.isBundledOpenCodeCliPath(bundled)).toBe(true);
+    expect(runtime.isBundledOpenCodeCliPath(path.join(dir, '.', 'bundled-opencode'))).toBe(true);
+    expect(runtime.isBundledOpenCodeCliPath(path.join(dir, 'other'))).toBe(false);
+  });
+
   it('allows an explicit external-binary escape hatch for desktop troubleshooting', async () => {
     const dir = createTempDir('openchamber-opencode-external-');
     const bundled = path.join(dir, 'bundled-opencode');

@@ -56,6 +56,10 @@ Keep `bridge.ts` as a thin orchestration layer that delegates message handling t
   - System/editor/provider/quota/update-check message handlers.
   - Includes session activity snapshot bridge handler used by webview parity routes (`/api/session-activity`).
   - Includes Zen utility model parity handler (`/api/zen/models`) retained as an empty-list compatibility stub.
+  - Exposes managed OpenCode upgrade status and mutation handlers with explicit external/unavailable capability reporting.
+
+- `opencode-upgrade-runtime.ts`
+  - Owns managed-versus-external capability decisions, latest-version checks, serialized upgrades, custom-build-aware version comparison, and restart-after-upgrade behavior.
 
 - `bridge-permission-auto-accept-runtime.ts`
   - Owns the persisted VS Code permission auto-accept policy and its GET/SET bridge contract.
