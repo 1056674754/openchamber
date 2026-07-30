@@ -136,7 +136,7 @@ export type InputState = {
   pendingInputText: string | null
   pendingInputMode: "replace" | "append" | "append-inline"
   pendingSyntheticParts: SyntheticContextPart[] | null
-  pendingPresetSubmit: string | null
+  pendingPresetSubmit: { text: string; type: "command" | "skill" } | null
   /** Active composer attachments (current attachmentSessionKey). */
   attachedFiles: AttachedFile[]
   /** Inactive session/draft attachment buckets. */
@@ -147,8 +147,8 @@ export type InputState = {
 
   setPendingInputText: (text: string | null, mode?: "replace" | "append" | "append-inline") => void
   consumePendingInputText: () => { text: string; mode: "replace" | "append" | "append-inline" } | null
-  requestPresetSubmit: (text: string) => void
-  consumePendingPresetSubmit: () => string | null
+  requestPresetSubmit: (text: string, type: "command" | "skill") => void
+  consumePendingPresetSubmit: () => { text: string; type: "command" | "skill" } | null
   setPendingSyntheticParts: (parts: SyntheticContextPart[] | null) => void
   consumePendingSyntheticParts: () => SyntheticContextPart[] | null
   setAttachmentSessionKey: (sessionKey: string | null) => void
@@ -183,7 +183,7 @@ export const useInputStore = create<InputState>()((set, get) => ({
     return { text: pendingInputText, mode: pendingInputMode }
   },
 
-  requestPresetSubmit: (text) => set({ pendingPresetSubmit: text }),
+  requestPresetSubmit: (text, type) => set({ pendingPresetSubmit: { text, type } }),
 
   consumePendingPresetSubmit: () => {
     const { pendingPresetSubmit } = get()

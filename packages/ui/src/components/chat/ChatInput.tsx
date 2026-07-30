@@ -114,6 +114,7 @@ import {
     findAttachmentCitationRanges,
 } from './attachmentCitations';
 import { buildSlashSkillDispatch } from './skillSlashDispatch';
+import { buildDraftStarterSubmitText } from './draftStarterSubmit';
 import {
     getFileMentionAutocompleteQuery,
     getPastedInsertedText,
@@ -2039,11 +2040,14 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         }
 
         const preset = consumePendingPresetSubmit();
-        if (!preset?.trim()) {
+        if (!preset?.text.trim()) {
             return;
         }
 
-        void handleSubmitRef.current({ presetText: preset });
+        const draft = composerRef.current?.getValue() ?? messageRef.current;
+        void handleSubmitRef.current({
+            presetText: buildDraftStarterSubmitText(preset.text, preset.type, draft),
+        });
     }, [pendingPresetSubmit, consumePendingPresetSubmit]);
 
     const hasContent = message.trim().length > 0 || sendableAttachedFiles.length > 0 || hasDrafts;

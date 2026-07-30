@@ -93,6 +93,32 @@ export const parseScheduledCommandPrompt = (prompt) => {
   };
 };
 
+export const expandCommandGoalObjective = (template, argumentsText) => {
+  if (typeof template !== 'string' || !template.trim()) {
+    return null;
+  }
+
+  const rawArguments = String(argumentsText ?? '');
+  if (template.includes('$ARGUMENTS')) {
+    return template.replaceAll('$ARGUMENTS', rawArguments);
+  }
+
+  const positions = [...template.matchAll(/\$(\d+)/g)].map((match) => Number(match[1]));
+  if (positions.length > 0) {
+    const parsedArguments = [...rawArguments.matchAll(/"([^"]*)"|'([^']*)'|(\S+)/g)]
+      .map((match) => match[1] ?? match[2] ?? match[3] ?? '');
+    const lastPosition = Math.max(...positions);
+    return template.replace(/\$(\d+)/g, (_match, value) => {
+      const position = Number(value);
+      return position === lastPosition
+        ? parsedArguments.slice(position - 1).join(' ')
+        : (parsedArguments[position - 1] ?? '');
+    });
+  }
+
+  return rawArguments ? `${template}\n\n${rawArguments}` : template;
+};
+
 export const computeNextRunAt = (task, nowMs = Date.now()) => {
   if (!task?.enabled) {
     return null;
@@ -443,12 +469,12 @@ export const createScheduledTasksRuntime = (deps) => {
   // Scheduled goal runs: stamp the goal onto the fresh session's metadata
   // before the prompt goes out; the session-goal runtime picks the loop up
   // from session events like any other goal.
-  const createTaskGoal = async ({ baseUrl, authHeaders, sessionID, projectPath, task }) => {
+  const createTaskGoal = async ({ baseUrl, authHeaders, sessionID, projectPath, task, objective }) => {
     const now = Date.now();
     // File-backed objective keyed by session id: metadata stays light, the
     // full expanded prompt lives under the OpenChamber data dir. If the file
     // write fails, fall back to an inline (clamped) objective.
-    let objectiveText = expandSnippets(task.execution.prompt, projectPath);
+    let objectiveText = objective ?? expandSnippets(task.execution.prompt, projectPath);
     if (objectiveText.length > 5000) {
       let distilled = null;
       try {
@@ -538,10 +564,10 @@ export const createScheduledTasksRuntime = (deps) => {
     }
   };
 
-  const runScheduledCommandIfApplicable = async ({ client, projectPath, sessionID, task }) => {
+  const resolveScheduledCommand = async ({ client, projectPath, task }) => {
     const parsed = parseScheduledCommandPrompt(task?.execution?.prompt);
     if (!parsed) {
-      return false;
+      return null;
     }
 
     let commands = [];
@@ -549,25 +575,24 @@ export const createScheduledTasksRuntime = (deps) => {
       const response = await client.command.list({ directory: projectPath });
       commands = Array.isArray(response?.data) ? response.data : [];
     } catch {
-      return false;
+      return null;
     }
 
-    const hasMatchingCommand = commands.some((command) => command?.name === parsed.command);
-    if (!hasMatchingCommand) {
-      return false;
-    }
+    const command = commands.find((candidate) => candidate?.name === parsed.command);
+    return command ? { ...parsed, template: command.template } : null;
+  };
 
+  const runScheduledCommand = async ({ client, projectPath, sessionID, task, command }) => {
     await client.session.command({
       sessionID,
       directory: projectPath,
-      command: parsed.command,
-      arguments: parsed.arguments,
+      command: command.command,
+      arguments: command.arguments,
       ...(task.execution.agent ? { agent: task.execution.agent } : {}),
       model: `${task.execution.providerID}/${task.execution.modelID}`,
       ...(task.execution.variant ? { variant: task.execution.variant } : {}),
     });
 
-    return true;
   };
 
   const runTaskWithWatchdog = async (projectID, task, reason) => {
@@ -621,17 +646,31 @@ export const createScheduledTasksRuntime = (deps) => {
       }
     }
 
+    const scheduledCommand = await resolveScheduledCommand({ client, projectPath, task });
+
     if (task.execution.goalEnabled) {
-      await createTaskGoal({ baseUrl, authHeaders, sessionID, projectPath, task });
+      const commandObjective = scheduledCommand
+        ? expandCommandGoalObjective(scheduledCommand.template, scheduledCommand.arguments)
+        : null;
+      await createTaskGoal({
+        baseUrl,
+        authHeaders,
+        sessionID,
+        projectPath,
+        task,
+        objective: commandObjective,
+      });
     }
 
-    const executedAsCommand = await runScheduledCommandIfApplicable({
-      client,
-      projectPath,
-      sessionID,
-      task,
-    });
-    if (!executedAsCommand) {
+    if (scheduledCommand) {
+      await runScheduledCommand({
+        client,
+        projectPath,
+        sessionID,
+        task,
+        command: scheduledCommand,
+      });
+    } else {
       await runPromptAsync({
         baseUrl,
         authHeaders,

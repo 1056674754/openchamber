@@ -88,6 +88,34 @@ import { formatMessage, useI18nStore } from "@/lib/i18n/store"
 
 export type { AttachedFile }
 
+type GoalCommand = { name: string; template?: string }
+
+export function expandSlashCommandGoalObjective(content: string, commands: GoalCommand[]): string {
+  if (!content.startsWith("/")) return content
+  const [head, ...tail] = content.split(" ")
+  const command = commands.find((candidate) => candidate.name === head.slice(1))
+  if (!command?.template?.trim()) return content
+  const argumentsText = tail.join(" ")
+  if (command.template.includes("$ARGUMENTS")) {
+    return command.template.replaceAll("$ARGUMENTS", argumentsText)
+  }
+
+  const positions = [...command.template.matchAll(/\$(\d+)/g)].map((match) => Number(match[1]))
+  if (positions.length > 0) {
+    const parsedArguments = [...argumentsText.matchAll(/"([^"]*)"|'([^']*)'|(\S+)/g)]
+      .map((match) => match[1] ?? match[2] ?? match[3] ?? "")
+    const lastPosition = Math.max(...positions)
+    return command.template.replace(/\$(\d+)/g, (_match, value: string) => {
+      const position = Number(value)
+      return position === lastPosition
+        ? parsedArguments.slice(position - 1).join(" ")
+        : (parsedArguments[position - 1] ?? "")
+    })
+  }
+
+  return argumentsText ? `${command.template}\n\n${argumentsText}` : command.template
+}
+
 // ---------------------------------------------------------------------------
 // Send routing — shell mode, slash commands, or normal prompt
 // ---------------------------------------------------------------------------
@@ -1249,22 +1277,35 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         mutableAdditionalParts = [...(mutableAdditionalParts ?? []), { text: goalIntro, synthetic: true }]
       }
     }
-    const applyArmedGoal = (goalSessionId: string, goalDirectory: string | null | undefined) => {
+    const applyArmedGoal = async (goalSessionId: string, goalDirectory: string | null | undefined) => {
       if (!goalArmed) return
-      // setSessionGoal re-probes and toasts on failure — never leave a half-armed send.
       const uiState = useUIStore.getState()
       const tokenBudget = uiState.sessionGoalDefaultBudgetEnabled ? uiState.sessionGoalDefaultBudget : null
-      const objective = goalArm.objectiveOverride?.trim() || content
-      void setSessionGoal(goalSessionId, goalDirectory ?? undefined, { objective, tokenBudget }, null)
-        .catch((error) => {
-          console.warn("[session-ui-store] failed to set goal from armed send", error)
-          const { dictionary } = useI18nStore.getState()
-          toast.error(
-            error instanceof Error && error.message
-              ? error.message
-              : formatMessage(dictionary, "chat.goal.toast.actionFailed"),
+      let objective = goalArm.objectiveOverride?.trim() || content
+      if (!goalArm.objectiveOverride && content.startsWith("/")) {
+        const directoryCommands = getDirectoryState(goalDirectory ?? undefined)?.command ?? []
+        const storedCommands = useCommandsStore.getState().commands
+        objective = expandSlashCommandGoalObjective(content, [...directoryCommands, ...storedCommands])
+        if (objective === content) {
+          objective = expandSlashCommandGoalObjective(
+            content,
+            await opencodeClient.listCommandsWithDetails(goalDirectory),
           )
-        })
+        }
+      }
+      try {
+        await setSessionGoal(goalSessionId, goalDirectory ?? undefined, { objective, tokenBudget }, null)
+      } catch (error) {
+        useSessionGoalArmStore.getState().setArmed(true, goalArm.objectiveOverride)
+        console.warn("[session-ui-store] failed to set goal from armed send", error)
+        const { dictionary } = useI18nStore.getState()
+        toast.error(
+          error instanceof Error && error.message
+            ? error.message
+            : formatMessage(dictionary, "chat.goal.toast.actionFailed"),
+        )
+        throw error
+      }
     }
     additionalParts = mutableAdditionalParts
 
@@ -1358,7 +1399,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
 
             notifyMessageSent(serverSession.id, createdDirectory)
             markPendingUserSendAnimation(serverSession.id)
-            applyArmedGoal(serverSession.id, createdDirectory)
+            await applyArmedGoal(serverSession.id, createdDirectory)
 
             const files = attachments?.map((a) => ({
               type: "file" as const,
@@ -1477,7 +1518,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       notifyMessageSent(created.id, createdDirectory)
 
       markPendingUserSendAnimation(created.id)
-      applyArmedGoal(created.id, createdDirectory)
+      await applyArmedGoal(created.id, createdDirectory)
 
       const files = attachments?.map((a) => ({
         type: "file" as const,
@@ -1585,7 +1626,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     notifyMessageSent(currentSessionId, currentSessionDirectory)
 
     markPendingUserSendAnimation(currentSessionId)
-    applyArmedGoal(currentSessionId, currentSessionDirectory)
+    await applyArmedGoal(currentSessionId, currentSessionDirectory)
 
     const files = attachments?.map((a) => ({
       type: "file" as const,

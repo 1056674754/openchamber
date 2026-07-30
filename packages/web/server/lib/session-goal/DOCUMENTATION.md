@@ -53,7 +53,11 @@ target button arms "the next prompt is the objective", and the run-as-goal
 flows (fork-from-answer dialog, plan implement dialog) arm the same way —
 the plan flow additionally supplies an objective OVERRIDE carrying the plan
 content, since "Implement this plan: X" alone gives the audit nothing to
-judge against. The armed send also attaches a synthetic system-reminder
+judge against. When the armed prompt invokes a slash command, goal creation
+resolves that command from the target Session directory and expands its
+template using OpenCode's `$ARGUMENTS` / positional argument rules before
+dispatch. The raw invocation remains the fallback when command details are
+unavailable. The armed send also attaches a synthetic system-reminder
 part telling the agent goal mode is active and that each turn should end
 with a factual done/verified/remaining statement for the independent audit.
 Freshness/stale-write protection is by `id`: every runtime write re-reads the
@@ -186,9 +190,10 @@ sees only that final turn, so the report is its evidence.
 
 Scheduled tasks can run as goals: `execution.goalEnabled` (+ optional
 `execution.goalTokenBudget`) on a task makes the scheduled-tasks runtime
-stamp `metadata.openchamber.goal` onto the fresh session (objective = the
-expanded task prompt) and attach the goal-mode intro part to the prompt.
-The loop here picks it up from session events like any other goal.
+stamp `metadata.openchamber.goal` onto the fresh session and attach the
+goal-mode intro part to the prompt. Plain prompts use the expanded task text;
+slash commands use the matched command template expanded with the scheduled
+arguments. The loop here picks it up from session events like any other goal.
 
 ## Limitations
 

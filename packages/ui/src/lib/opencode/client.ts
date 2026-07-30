@@ -1565,10 +1565,11 @@ class OpencodeService {
     }
   }
 
-  async listCommandsWithDetails(): Promise<Array<{ name: string; description?: string; agent?: string; model?: string; source?: string; template?: string }>> {
+  async listCommandsWithDetails(directory?: string | null): Promise<Array<{ name: string; description?: string; agent?: string; model?: string; source?: string; template?: string }>> {
     try {
+      const requestDirectory = this.normalizeCandidatePath(directory ?? null) ?? this.currentDirectory;
       const response = await this.client.command.list(
-        this.currentDirectory ? { directory: this.currentDirectory } : undefined
+        requestDirectory ? { directory: requestDirectory } : undefined
       );
       // Return full command details including template
       return (response.data || []).map((cmd: Record<string, unknown>) => ({

@@ -6,6 +6,7 @@ import { useUIStore } from '@/stores/useUIStore';
 import { Skeleton } from '@/components/ui/skeleton';
 import ChatEmptyState from './ChatEmptyState';
 import { DraftPresetChips } from './DraftPresetChips';
+import type { ResolvedStarter } from './useDraftStarters';
 import MessageList, { type MessageListHandle } from './MessageList';
 import { PermissionCard } from './PermissionCard';
 import { QuestionCard } from './QuestionCard';
@@ -737,8 +738,8 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
         goToBottom('instant');
     }, [goToBottom]);
 
-    const handleDraftStarterSubmit = React.useCallback((text: string) => {
-        requestPresetSubmit(text);
+    const handleDraftStarterSubmit = React.useCallback((starter: ResolvedStarter) => {
+        requestPresetSubmit(starter.submitText, starter.ref.type);
     }, [requestPresetSubmit]);
 
     const draftWelcome = React.useMemo(() => (
