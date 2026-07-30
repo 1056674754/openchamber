@@ -21,6 +21,8 @@ import {
   type ResponseStylePreset,
 } from '@/lib/responseStyle';
 import type { DesktopSettings } from '@/lib/desktop';
+import { useIsVSCodeRuntime } from '@/hooks/useRuntimeAPIs';
+import { reloadOpenCodeConfiguration } from '@/stores/useAgentsStore';
 
 const AGENTS_MD_PATH = '~/.config/opencode/AGENTS.md';
 
@@ -37,6 +39,7 @@ type ResponseStyleValue = ResponseStylePreset | 'custom';
 
 type BehaviorSettingsState = {
   prompt: string;
+  optimizeSystemPrompt: boolean;
   responseStyleEnabled: boolean;
   responseStylePreset: ResponseStyleValue;
   responseStyleCustomInstructions: string;
@@ -44,6 +47,7 @@ type BehaviorSettingsState = {
 
 const DEFAULT_BEHAVIOR_SETTINGS: BehaviorSettingsState = {
   prompt: '',
+  optimizeSystemPrompt: false,
   responseStyleEnabled: false,
   responseStylePreset: 'concise',
   responseStyleCustomInstructions: '',
@@ -85,13 +89,17 @@ const saveBehaviorSetting = async (settings: Partial<DesktopSettings>, fallbackE
 
 export const BehaviorPage: React.FC = () => {
   const { t } = useI18n();
+  const isVSCode = useIsVSCodeRuntime();
   const [prompt, setPrompt] = React.useState('');
+  const [optimizeSystemPrompt, setOptimizeSystemPrompt] = React.useState(false);
   const [responseStyleEnabled, setResponseStyleEnabled] = React.useState(DEFAULT_BEHAVIOR_SETTINGS.responseStyleEnabled);
   const [responseStylePreset, setResponseStylePreset] = React.useState<ResponseStyleValue>(DEFAULT_BEHAVIOR_SETTINGS.responseStylePreset);
   const [responseStyleCustomInstructions, setResponseStyleCustomInstructions] = React.useState(DEFAULT_BEHAVIOR_SETTINGS.responseStyleCustomInstructions);
   const [isLoading, setIsLoading] = React.useState(true);
   const [isSaving, setIsSaving] = React.useState(false);
+  const [isApplyingPromptOptimization, setIsApplyingPromptOptimization] = React.useState(false);
   const [initialPrompt, setInitialPrompt] = React.useState('');
+  const [initialOptimizeSystemPrompt, setInitialOptimizeSystemPrompt] = React.useState(false);
   const lastSavedResponseStyleRef = React.useRef<{
     enabled: boolean;
     preset: ResponseStyleValue;
@@ -121,6 +129,7 @@ export const BehaviorPage: React.FC = () => {
           const data = await settingsRes.json();
           nextSettings = {
             ...nextSettings,
+            optimizeSystemPrompt: data.optimizeSystemPrompt === true,
             responseStyleEnabled: data.responseStyleEnabled === true,
             responseStylePreset: sanitizeResponseStylePreset(data.responseStylePreset),
             responseStyleCustomInstructions: typeof data.responseStyleCustomInstructions === 'string'
@@ -140,6 +149,8 @@ export const BehaviorPage: React.FC = () => {
         }
 
         setPrompt(nextSettings.prompt);
+        setOptimizeSystemPrompt(nextSettings.optimizeSystemPrompt);
+        setInitialOptimizeSystemPrompt(nextSettings.optimizeSystemPrompt);
         setResponseStyleEnabled(nextSettings.responseStyleEnabled);
         setResponseStylePreset(nextSettings.responseStylePreset);
         setResponseStyleCustomInstructions(nextSettings.responseStyleCustomInstructions);
@@ -199,6 +210,7 @@ export const BehaviorPage: React.FC = () => {
 
   const responseStylePreview = getResponseStylePreview(responseStylePreset, responseStyleCustomInstructions);
   const isPromptDirty = prompt !== initialPrompt;
+  const isPromptOptimizationDirty = optimizeSystemPrompt !== initialOptimizeSystemPrompt;
 
   const handleSave = async () => {
     setIsSaving(true);
@@ -233,6 +245,35 @@ export const BehaviorPage: React.FC = () => {
     }
   };
 
+  const handleSavePromptOptimization = async () => {
+    setIsApplyingPromptOptimization(true);
+    try {
+      await saveBehaviorSetting(
+        { optimizeSystemPrompt },
+        t('settings.behavior.page.toast.saveFailed'),
+      );
+      setInitialOptimizeSystemPrompt(optimizeSystemPrompt);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : t('settings.behavior.page.toast.saveFailed');
+      toast.error(message);
+      setIsApplyingPromptOptimization(false);
+      return;
+    }
+
+    try {
+      await reloadOpenCodeConfiguration({
+        message: t('settings.behavior.page.systemPromptOptimization.restarting'),
+        mode: 'projects',
+        scopes: ['all'],
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : t('settings.behavior.page.toast.saveFailed');
+      toast.error(message);
+    } finally {
+      setIsApplyingPromptOptimization(false);
+    }
+  };
+
   return (
     <ScrollableOverlay outerClassName="h-full" className="w-full">
       <div className="mx-auto w-full max-w-3xl p-3 sm:p-6 sm:pt-8 space-y-6">
@@ -241,6 +282,49 @@ export const BehaviorPage: React.FC = () => {
             {t('settings.behavior.page.title')}
           </h2>
         </div>
+
+        {!isVSCode && (
+          <div>
+            <div className="mb-1 px-1">
+              <div className="flex items-center gap-1.5">
+                <h3 className="typography-ui-header font-medium text-foreground">
+                  {t('settings.behavior.page.section.systemPromptOptimization')}
+                </h3>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Icon name="information" className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
+                  </TooltipTrigger>
+                  <TooltipContent sideOffset={8} className="max-w-xs">
+                    {t('settings.behavior.page.systemPromptOptimization.info')}
+                  </TooltipContent>
+                </Tooltip>
+              </div>
+            </div>
+
+            <section className="px-2 pb-2 pt-0 space-y-3">
+              <label className="flex items-center gap-2 typography-ui-label text-foreground">
+                <Checkbox
+                  checked={optimizeSystemPrompt}
+                  onChange={setOptimizeSystemPrompt}
+                  disabled={isLoading || isApplyingPromptOptimization}
+                  ariaLabel={t('settings.behavior.page.systemPromptOptimization.enableAria')}
+                />
+                {t('settings.behavior.page.systemPromptOptimization.enable')}
+              </label>
+              <Button
+                type="button"
+                size="xs"
+                onClick={() => void handleSavePromptOptimization()}
+                disabled={isLoading || isApplyingPromptOptimization || !isPromptOptimizationDirty}
+                className="!font-normal"
+              >
+                {isApplyingPromptOptimization
+                  ? t('settings.common.actions.saving')
+                  : t('settings.openchamber.opencodeCli.actions.saveAndReload')}
+              </Button>
+            </section>
+          </div>
+        )}
 
         <div>
           <div className="mb-1 px-1">

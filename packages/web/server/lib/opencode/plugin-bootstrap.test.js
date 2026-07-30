@@ -1,10 +1,14 @@
 import { describe, expect, test } from 'bun:test';
+import { mkdtemp, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 import {
   checkPluginLoaded,
   getPluginRuntimeStatusFailureReason,
   getMissingRequiredPluginRuntimeFeatures,
   normalizePluginRuntimeStatus,
+  readOpenChamberPluginOptions,
   resolveOpenChamberPluginPaths,
 } from './plugin-bootstrap.js';
 
@@ -21,6 +25,19 @@ describe('plugin runtime status validation', () => {
       pluginStatusFile: '/tmp/openchamber-isolated/plugin/status.json',
       openCodeConfigDir: '/tmp/opencode-isolated',
     });
+  });
+
+  test('enables system prompt optimization only for a strict true setting', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'openchamber-plugin-options-'));
+    const settingsPath = join(directory, 'settings.json');
+
+    await writeFile(settingsPath, JSON.stringify({ optimizeSystemPrompt: true }), 'utf8');
+    expect(readOpenChamberPluginOptions(settingsPath)).toEqual({
+      optimizeSystemPrompt: true,
+    });
+
+    await writeFile(settingsPath, JSON.stringify({ optimizeSystemPrompt: 'true' }), 'utf8');
+    expect(readOpenChamberPluginOptions(settingsPath)).toBeUndefined();
   });
 
   test('accepts a status with the live steer feature', () => {

@@ -186,7 +186,7 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
     group: 'opencode',
     kind: 'single',
     showOn: 'default',
-    keywords: ['behavior', 'agents.md', 'system prompt', 'global rules', 'instructions', 'override'],
+    keywords: ['behavior', 'agents.md', 'system prompt', 'global rules', 'instructions', 'override', 'tokens', 'optimize', 'minimal'],
   },
   {
     slug: 'commands',

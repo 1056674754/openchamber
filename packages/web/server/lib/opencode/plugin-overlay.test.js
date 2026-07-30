@@ -34,6 +34,20 @@ describe('OpenChamber plugin overlay entries', () => {
     expect(merged).toEqual(['other-plugin', openChamberPlugin]);
   });
 
+  test('attaches managed plugin options without replacing user plugins', () => {
+    const openChamberPlugin = 'file:///Users/test/.config/openchamber/opencode-notifier';
+    const merged = mergeOpenChamberPluginEntries(
+      ['other-plugin'],
+      openChamberPlugin,
+      { optimizeSystemPrompt: true },
+    );
+
+    expect(merged).toEqual([
+      'other-plugin',
+      [openChamberPlugin, { optimizeSystemPrompt: true }],
+    ]);
+  });
+
   test('reads plugin entries only from the explicit OpenCode config directory', async () => {
     const rootDirectory = await mkdtemp(join(tmpdir(), 'openchamber-overlay-'));
     const configDirectory = join(rootDirectory, 'opencode');

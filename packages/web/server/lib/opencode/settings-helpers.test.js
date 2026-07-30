@@ -425,4 +425,16 @@ describe('settings helpers', () => {
       'CF-Access-Client-Secret': 'secret-a',
     });
   });
+
+  it('accepts only booleans for system prompt optimization', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({ optimizeSystemPrompt: true })).toEqual({
+      optimizeSystemPrompt: true,
+    });
+    expect(helpers.sanitizeSettingsUpdate({ optimizeSystemPrompt: false })).toEqual({
+      optimizeSystemPrompt: false,
+    });
+    expect(helpers.sanitizeSettingsUpdate({ optimizeSystemPrompt: 'true' })).toEqual({});
+  });
 });

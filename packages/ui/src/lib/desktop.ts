@@ -56,6 +56,7 @@ export type DesktopSettings = {
   homeDirectory?: string;
   // Optional absolute path to `opencode` binary.
   opencodeBinary?: string;
+  optimizeSystemPrompt?: boolean;
   desktopLanAccessEnabled?: boolean;
   desktopMacMenuBarEnabled?: boolean;
   desktopMinimizeToTrayEnabled?: boolean;

@@ -81,6 +81,17 @@ A plugin also receives a `PluginInput` with:
 - `$` — `BunShell` for running shell commands
 - `directory`, `worktree`, `project`, `serverUrl`
 
+### Built-in system prompt optimization
+
+The first-party plugin also owns the opt-in built-in system prompt optimizer.
+OpenChamber passes `optimizeSystemPrompt: true` as a plugin option only when
+the local managed setting is enabled. The optimizer reads the authoritative
+OpenCode agent registry and applies only to `build` or `plan` entries marked
+`builtIn` or `native`; custom agents and registry failures are left unchanged.
+It removes only the text before OpenCode's provider boundary, preserving
+environment, project, MCP, skill, history, tool, image-handling, and artifact
+publishing context.
+
 There is **no sandbox**. Plugins run with full process privileges in the OpenCode
 server process. This is by design — OMA, Cloudflare, Copilot, and Codex all ship as
 plugins.
@@ -268,6 +279,7 @@ packages/plugin/
 │   ├── plugin.ts             # Plugin factory (input, options) => Hooks
 │   ├── image-transform.ts    # experimental.chat.messages.transform handler
 │   ├── system-transform.ts   # experimental.chat.system.transform handler
+│   ├── system-prompt-optimizer.ts # Opt-in built-in build/plan prompt prefix reduction
 │   ├── tools/
 │   │   ├── describe-image.ts # describe_image tool definition
 │   │   └── publish-artifact.ts # persistent deliverable publishing

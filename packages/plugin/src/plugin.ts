@@ -12,6 +12,7 @@ import type { Plugin, PluginInput, Hooks } from "@opencode-ai/plugin"
 import { createCompactionFocusHandler } from "./compaction-focus.js"
 import { createImageTransformHandler } from "./image-transform.js"
 import { createSystemTransformHandler } from "./system-transform.js"
+import { createSystemPromptOptimizer } from "./system-prompt-optimizer.js"
 import { createSteerTransformHandler } from "./steer-transform.js"
 import { createDescribeImageTool } from "./tools/describe-image.js"
 import { createSearchImagesTool } from "./tools/search-images.js"
@@ -22,7 +23,10 @@ import { createImageStore } from "./image-store.js"
 import { openCacheDb, type CacheDb } from "./cache/database.js"
 import { writeOpenChamberPluginRuntimeStatus } from "./runtime-status.js"
 
-export function createPlugin(input: PluginInput): Promise<Hooks> {
+export function createPlugin(
+  input: PluginInput,
+  options?: Record<string, unknown>,
+): Promise<Hooks> {
   const modelSupportsImage = createModelCapabilityChecker(input.client)
 
   let cacheDb: CacheDb | undefined
@@ -41,6 +45,11 @@ export function createPlugin(input: PluginInput): Promise<Hooks> {
   })
 
   const systemTransform = createSystemTransformHandler()
+  const systemPromptOptimizer = createSystemPromptOptimizer({
+    client: input.client,
+    directory: input.directory,
+    enabled: options?.optimizeSystemPrompt === true,
+  })
   const compactionFocus = createCompactionFocusHandler()
   const steerTransform = createSteerTransformHandler()
   const describeImage = createDescribeImageTool({ client: input.client, cacheDb })
@@ -52,12 +61,19 @@ export function createPlugin(input: PluginInput): Promise<Hooks> {
   const publishArtifact = createPublishArtifactTool()
 
   const hooks: Hooks = {
-    event: steerTransform.event,
+    "chat.message": systemPromptOptimizer.chatMessage,
+    event: async (input) => {
+      await steerTransform.event(input)
+      await systemPromptOptimizer.event(input)
+    },
     "experimental.chat.messages.transform": async (input, output) => {
       await imageTransform(input, output)
       await steerTransform.messages(input, output)
     },
-    "experimental.chat.system.transform": systemTransform,
+    "experimental.chat.system.transform": async (input, output) => {
+      await systemTransform(input, output)
+      await systemPromptOptimizer.transform(input, output)
+    },
     "experimental.session.compacting": compactionFocus,
     tool: {
       describe_image: describeImage,

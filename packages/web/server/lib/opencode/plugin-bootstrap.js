@@ -74,12 +74,28 @@ function buildPlugin(sourceDir) {
   return result.status === 0 && existsSync(PLUGIN_ENTRY);
 }
 
+export function readOpenChamberPluginOptions(settingsPath) {
+  if (!existsSync(settingsPath)) return undefined;
+  const settings = JSON.parse(readFileSync(settingsPath, 'utf8'));
+  if (settings?.optimizeSystemPrompt !== true) return undefined;
+  return { optimizeSystemPrompt: true };
+}
+
 function writeOpenChamberOverlay() {
+  let pluginOptions;
+  try {
+    const settingsPath = resolve(OVERLAY_DIR, 'settings.json');
+    pluginOptions = readOpenChamberPluginOptions(settingsPath);
+  } catch (error) {
+    console.warn('[openchamber] failed to read system prompt optimization setting:', error?.message || error);
+  }
+
   return writeOpenChamberOverlayFile({
     overlayDir: OVERLAY_DIR,
     overlayFile: OVERLAY_FILE,
     pluginEntry: PLUGIN_ENTRY,
     userConfigDir: OPENCODE_CONFIG_DIR,
+    pluginOptions,
   });
 }
 

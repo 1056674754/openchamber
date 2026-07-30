@@ -41,7 +41,7 @@ function isOpenChamberPluginSpec(spec, openChamberPlugin) {
     || spec.endsWith('/openchamber/opencode-notifier');
 }
 
-export function mergeOpenChamberPluginEntries(existingPlugins, openChamberPlugin) {
+export function mergeOpenChamberPluginEntries(existingPlugins, openChamberPlugin, pluginOptions) {
   const merged = [];
   const seen = new Set();
 
@@ -52,7 +52,7 @@ export function mergeOpenChamberPluginEntries(existingPlugins, openChamberPlugin
     merged.push(raw);
   }
 
-  merged.push(openChamberPlugin);
+  merged.push(pluginOptions ? [openChamberPlugin, pluginOptions] : openChamberPlugin);
   return merged;
 }
 
@@ -63,10 +63,15 @@ export function writeOpenChamberOverlay({
   userConfigDir = process.env.OPENCODE_CONFIG_DIR
     ? resolve(process.env.OPENCODE_CONFIG_DIR)
     : resolve(homedir(), '.config', 'opencode'),
+  pluginOptions,
 }) {
   const openChamberPlugin = pathToFileURL(pluginEntry).href;
   const overlay = {
-    plugin: mergeOpenChamberPluginEntries(readUserConfigPlugins(userConfigDir), openChamberPlugin),
+    plugin: mergeOpenChamberPluginEntries(
+      readUserConfigPlugins(userConfigDir),
+      openChamberPlugin,
+      pluginOptions,
+    ),
   };
   mkdirSync(overlayDir, { recursive: true });
   writeFileSync(overlayFile, JSON.stringify(overlay, null, 2), 'utf8');
