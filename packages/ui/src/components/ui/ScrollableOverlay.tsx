@@ -1,11 +1,13 @@
 import React from "react";
 import { cn } from "@/lib/utils";
 import { OverlayScrollbar } from "./OverlayScrollbar";
+import { OverlayScrollbarVisibilityContext } from "./overlayScrollbarVisibility";
 import { ScrollShadow } from "./ScrollShadow";
 
 type ScrollableOverlayProps = React.HTMLAttributes<HTMLElement> & {
   minThumbSize?: number;
   hideDelayMs?: number;
+  alwaysVisible?: boolean;
   as?: React.ElementType;
   outerClassName?: string;
   scrollbarClassName?: string;
@@ -31,6 +33,7 @@ export const ScrollableOverlay = React.forwardRef<HTMLElement, ScrollableOverlay
     style,
     minThumbSize,
     hideDelayMs,
+    alwaysVisible,
     as: Component = "div",
     scrollbarClassName,
     disableHorizontal = false,
@@ -44,6 +47,8 @@ export const ScrollableOverlay = React.forwardRef<HTMLElement, ScrollableOverlay
     ...rest
   }, ref) => {
     const containerRef = React.useRef<HTMLElement | null>(null);
+    const inheritedAlwaysVisible = React.useContext(OverlayScrollbarVisibilityContext);
+    const effectiveAlwaysVisible = alwaysVisible ?? inheritedAlwaysVisible;
 
     React.useImperativeHandle(ref, () => containerRef.current as HTMLElement, []);
 
@@ -94,6 +99,7 @@ export const ScrollableOverlay = React.forwardRef<HTMLElement, ScrollableOverlay
             containerRef={containerRef}
             minThumbSize={minThumbSize}
             hideDelayMs={hideDelayMs}
+            alwaysVisible={effectiveAlwaysVisible}
             className={scrollbarClassName}
             disableHorizontal={disableHorizontal}
             observeMutations={observeMutations}

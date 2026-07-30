@@ -1,10 +1,12 @@
 import React from "react";
 import { cn } from "@/lib/utils";
+import { resolveOverlayScrollbarOpacity } from "./overlayScrollbarVisibility";
 
 type OverlayScrollbarProps = {
   containerRef: React.RefObject<HTMLElement | null>;
   minThumbSize?: number;
   hideDelayMs?: number;
+  alwaysVisible?: boolean;
   className?: string;
   disableHorizontal?: boolean;
   observeMutations?: boolean;
@@ -29,6 +31,7 @@ const OverlayScrollbarComponent: React.FC<OverlayScrollbarProps> = ({
   containerRef,
   minThumbSize = 32,
   hideDelayMs = 1000,
+  alwaysVisible = false,
   className,
   disableHorizontal = false,
   observeMutations = true,
@@ -317,7 +320,7 @@ const OverlayScrollbarComponent: React.FC<OverlayScrollbarProps> = ({
     <div
       className={cn("overlay-scrollbar", className)}
       aria-hidden="true"
-      style={{ opacity: visible ? 1 : 0 }}
+      style={{ opacity: resolveOverlayScrollbarOpacity({ alwaysVisible, suppressVisibility, visible }) }}
     >
       {showVertical && (
         <div

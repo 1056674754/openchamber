@@ -11,6 +11,7 @@ import { useSkillsStore } from '@/stores/useSkillsStore';
 import { useSkillsCatalogStore } from '@/stores/useSkillsCatalogStore';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
+import { OverlayScrollbarVisibilityContext } from '@/components/ui/overlayScrollbarVisibility';
 import {
   Select,
   SelectContent,
@@ -904,13 +905,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
         // No sidebar available; fall back to direct content.
         const fallback = renderPageContent(effectiveSettingsSlug);
         return (
-          <div className="flex-1 min-h-0 overflow-hidden bg-background">
+          <div className="flex-1 min-h-0 overflow-y-scroll overflow-x-hidden bg-background">
             <ErrorBoundary>{fallback}</ErrorBoundary>
           </div>
         );
       }
       return (
-        <div className={cn('flex-1 min-h-0 overflow-hidden', runtimeCtx.isVSCode ? 'bg-background' : 'bg-sidebar')}>
+        <div className={cn('flex-1 min-h-0 overflow-y-scroll overflow-x-hidden', runtimeCtx.isVSCode ? 'bg-background' : 'bg-sidebar')}>
           <ErrorBoundary>
             {renderPageSidebar(effectiveSettingsSlug, { onItemSelect: () => setMobileStage('page-content') })}
           </ErrorBoundary>
@@ -922,7 +923,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
     const content = renderPageContent(effectiveSettingsSlug);
 
     return (
-      <div className="flex-1 min-h-0 overflow-hidden bg-background">
+      <div className="flex-1 min-h-0 overflow-y-scroll overflow-x-hidden bg-background">
         <ErrorBoundary>{content}</ErrorBoundary>
       </div>
     );
@@ -939,7 +940,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
           <div className={cn('w-[264px] min-w-[264px] border-r', runtimeCtx.isVSCode ? 'bg-background' : 'bg-sidebar')} style={{ borderColor: 'var(--interactive-border)' }}>
             <ErrorBoundary>{renderPageSidebar(effectiveSettingsSlug, {})}</ErrorBoundary>
           </div>
-          <div className="flex-1 min-h-0 overflow-hidden bg-background">
+          <div className="flex-1 min-h-0 overflow-y-scroll overflow-x-hidden bg-background">
             <ErrorBoundary>{renderPageContent(effectiveSettingsSlug)}</ErrorBoundary>
           </div>
         </div>
@@ -947,14 +948,15 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
     }
 
     return (
-      <div className="h-full min-h-0 overflow-hidden bg-background">
+      <div className="h-full min-h-0 overflow-y-scroll overflow-x-hidden bg-background">
         <ErrorBoundary>{renderPageContent(effectiveSettingsSlug)}</ErrorBoundary>
       </div>
     );
   };
 
   return (
-    <div ref={containerRef} data-settings-view="true" className={cn('relative flex h-full min-h-0 flex-col overflow-hidden bg-background')}>
+    <OverlayScrollbarVisibilityContext.Provider value>
+      <div ref={containerRef} data-settings-view="true" className={cn('relative flex h-full min-h-0 flex-col overflow-hidden bg-background')}>
       {isMobile ? (
         <div
           className={cn(
@@ -1144,6 +1146,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
           </>
         )}
       </div>
-    </div>
+      </div>
+    </OverlayScrollbarVisibilityContext.Provider>
   );
 };
