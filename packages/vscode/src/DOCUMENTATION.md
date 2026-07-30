@@ -44,6 +44,7 @@ Keep `bridge.ts` as a thin orchestration layer that delegates message handling t
 
 - `bridge-proxy-runtime.ts`
   - Proxy route handlers (`api:proxy`, `api:session:message`) with injected helper dependencies.
+  - SSE routes use `sseProxy.ts`; its upstream-only stall watchdog closes an open but silent OpenCode stream so the webview can reconnect.
 
 - `bridge-config-runtime.ts`
   - Config and skills message handlers (`api:config/*`).

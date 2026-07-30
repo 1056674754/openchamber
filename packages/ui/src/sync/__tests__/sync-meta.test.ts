@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 
-import { reconcileSyncMeta, type SyncMeta } from "../sync-meta"
+import { preserveCompleteHistoryCoverage, reconcileSyncMeta, type SyncMeta } from "../sync-meta"
 
 const meta = (input: Partial<SyncMeta> = {}): SyncMeta => ({
   limit: 150,
@@ -31,5 +31,19 @@ describe("reconcileSyncMeta", () => {
       meta({ loading: true }),
       meta({ limit: 300, cursor: "msg-older" }),
     )).toEqual(meta({ limit: 300, cursor: "msg-older", loading: true }))
+  })
+
+  test("does not weaken authoritative complete history with a tail cursor", () => {
+    expect(preserveCompleteHistoryCoverage(
+      { cursor: undefined, complete: true },
+      { cursor: "stale-tail-cursor", complete: false },
+    )).toEqual({ cursor: undefined, complete: true })
+  })
+
+  test("keeps complete local coverage when reconciling a wider stale prefetch", () => {
+    expect(reconcileSyncMeta(
+      meta({ complete: true }),
+      meta({ limit: 300, cursor: "stale-tail-cursor", complete: false }),
+    )).toEqual(meta({ limit: 300, complete: true }))
   })
 })

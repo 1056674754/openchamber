@@ -35,7 +35,7 @@ import {
 import { createSinglePageHistoryPrefetch } from "./message-history-prefetch"
 import { loadMessageHistoryThroughTarget } from "./prompt-history-loader"
 import type { MessagePage } from "./message-page-boundary"
-import { reconcileSyncMeta, type SyncMeta } from "./sync-meta"
+import { preserveCompleteHistoryCoverage, reconcileSyncMeta, type SyncMeta } from "./sync-meta"
 import { formatSdkError } from "./sdk-error"
 import { readRemoteSessionStatuses } from "./remote-session-status"
 import { KeyedSingleFlight } from "./keyed-single-flight"
@@ -500,10 +500,13 @@ export function useSync() {
         const message = Object.prototype.hasOwnProperty.call(materialized.message, sessionID)
           ? materialized.message
           : { ...materialized.message, [sessionID]: materialized.messages }
+        const coverage = options?.before
+          ? { cursor: merged.cursor, complete: merged.complete }
+          : preserveCompleteHistoryCoverage(m, merged)
         setMetaFor(sessionID, {
           limit: materialized.messages.length,
-          cursor: merged.cursor,
-          complete: merged.complete,
+          cursor: coverage.cursor,
+          complete: coverage.complete,
           loading: false,
         }, targetDirectory)
         writeStore.setState({ message, part: materialized.part })
@@ -511,8 +514,8 @@ export function useSync() {
           directory: targetDirectory,
           sessionID,
           limit: materialized.messages.length,
-          cursor: merged.cursor,
-          complete: merged.complete,
+          cursor: coverage.cursor,
+          complete: coverage.complete,
         })
         prefetchOlderMessages({
           sessionID,

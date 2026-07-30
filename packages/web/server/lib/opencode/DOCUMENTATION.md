@@ -132,6 +132,7 @@ This module provides OpenCode server integration utilities for the web server ru
 Configuration refreshes are single-flight across manual and automatic callers, so overlapping requests join the same restart/readiness operation.
 The composition root rebuilds the OpenChamber plugin overlay before entering that lifecycle operation, keeping user plugin changes in sync with the managed overlay.
 At desktop startup, a healthy persisted managed port is reused. If that port is still listening but fails health checks, lifecycle termination targets the listener's detached process group and waits for the port to be released before launching a replacement; it will not stack another managed server on top of an unreleased stale instance.
+Transport-triggered health checks can run more frequently than the periodic monitor. Failed probes are therefore counted at most once per configured health interval, while a confirmed missing managed listener can still restart immediately. Busy-session grace and lifecycle evidence remain authoritative.
 
 ## Public exports (config-file-watcher.js)
 - `createOpenCodeConfigFileWatcherRuntime(dependencies)`: watches user and active-project `opencode.json`, `opencode.jsonc`, and legacy `config.json` files for a managed OpenCode server.
@@ -367,6 +368,7 @@ At desktop startup, a healthy persisted managed port is reused. If that port is 
 - `registerOpenCodeProxy(app, dependencies)`: registers OpenCode proxy routes and middleware.
 - Owns:
   - SSE forwarders: `GET /api/global/event`, `GET /api/event`
+  - Upstream-only SSE stall detection; proxy-generated downstream heartbeats do not mask a silent OpenCode stream, which is closed so clients can reconnect
   - Session message forwarder: `POST /api/session/:sessionId/message`
   - Generic `/api/*` forwarding with hop-by-hop header filtering
   - Decoded payload accounting via `x-openchamber-decoded-content-length`; the proxy only derives it from an identity-encoded upstream `content-length`, before browser-facing compression

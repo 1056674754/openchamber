@@ -1108,6 +1108,45 @@ export async function optimisticSend(input: {
   if (isSessionBlockedForSend(store, input.sessionId)) {
     await resolveBlockedSessionBeforeSend(input)
   }
+  const targetDirectory = input.directory
+    ? normalizeDirectoryKey(input.directory)
+    : getSessionDirectory(input.sessionId)
+  const targetServerId = input.serverId ?? serverRegistry.getServerForSession(input.sessionId)
+  const stateBeforeSend = store.getState()
+  const sessionBeforeSend = stateBeforeSend.session.find((session) => session.id === input.sessionId)
+  const revertMessageID = sessionBeforeSend?.revert?.messageID
+  const revertedMessages = revertMessageID
+    ? (stateBeforeSend.message[input.sessionId] ?? []).filter((message) => message.id >= revertMessageID)
+    : []
+  const revertedParts = new Map(
+    revertedMessages.map((message) => [message.id, stateBeforeSend.part[message.id] ?? []] as const),
+  )
+
+  if (revertMessageID) {
+    const session = stateBeforeSend.session.map((candidate) => (
+      candidate.id === input.sessionId ? { ...candidate, revert: undefined } as Session : candidate
+    ))
+    const message = {
+      ...stateBeforeSend.message,
+      [input.sessionId]: (stateBeforeSend.message[input.sessionId] ?? [])
+        .filter((candidate) => candidate.id < revertMessageID),
+    }
+    const part = { ...stateBeforeSend.part }
+    for (const revertedMessage of revertedMessages) delete part[revertedMessage.id]
+    store.setState({ session, message, part })
+  }
+
+  const confirmRevertedShadows = () => {
+    for (const revertedMessage of revertedMessages) {
+      _optimisticConfirm?.({
+        sessionID: input.sessionId,
+        messageID: revertedMessage.id,
+        directory: targetDirectory,
+        serverId: targetServerId,
+      })
+    }
+  }
+
   const messageID = ascendingId("msg")
   const textPartId = ascendingId("prt")
 
@@ -1179,14 +1218,11 @@ export async function optimisticSend(input: {
   })
 
   try {
-    await waitForConnectionOrThrow(input.serverId ?? serverRegistry.getServerForSession(input.sessionId))
+    await waitForConnectionOrThrow(targetServerId)
 
     await input.send(messageID)
+    confirmRevertedShadows()
   } catch (error) {
-    const targetDirectory = input.directory
-      ? normalizeDirectoryKey(input.directory)
-      : getSessionDirectory(input.sessionId)
-    const targetServerId = input.serverId ?? serverRegistry.getServerForSession(input.sessionId)
     const acceptedRecords = isAmbiguousSendFailure(error) && targetDirectory
       ? await fetchRecentSendConfirmationRecords(input.sessionId, messageID, targetDirectory, targetServerId)
       : null
@@ -1199,6 +1235,7 @@ export async function optimisticSend(input: {
         directory: targetDirectory,
         serverId: targetServerId,
       })
+      confirmRevertedShadows()
       return
     }
 
@@ -1210,7 +1247,27 @@ export async function optimisticSend(input: {
       serverId: input.serverId,
     })
     const s = store.getState()
+    let session = s.session
+    let message = s.message
+    let part = s.part
+    if (revertMessageID) {
+      session = s.session.map((candidate) => (
+        candidate.id === input.sessionId ? { ...candidate, revert: sessionBeforeSend?.revert } as Session : candidate
+      ))
+      message = {
+        ...s.message,
+        [input.sessionId]: [...(s.message[input.sessionId] ?? []), ...revertedMessages]
+          .sort((left, right) => left.id < right.id ? -1 : left.id > right.id ? 1 : 0),
+      }
+      part = { ...s.part }
+      for (const [revertedMessageId, parts] of revertedParts) {
+        part[revertedMessageId] = parts
+      }
+    }
     store.setState({
+      session,
+      message,
+      part,
       session_status: {
         ...s.session_status,
         [input.sessionId]: { type: "idle" as const },

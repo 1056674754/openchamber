@@ -1555,9 +1555,9 @@ VS Code worktree lock 验证：在两个真实临时 Git 仓库及 `--no-checkou
 
 | 能力 | 当前状态 | Fork 处理 / Work Item |
 |---|---|---|
-| OpenCode stalled SSE 恢复与 managed restart-loop 抑制 | 🟡 部分已有 | lifecycle 已有 health、busy grace、取证日志与 restart reason；仍缺 proxy upstream-stall 截断，以及按 health interval 限制连续失败计数。按 [#68](https://coding.s-s.city/songsong/openchamber/-/work_items/68) 适配，不改变 detached keep-alive、shared database 或进程所有权 |
+| OpenCode stalled SSE 恢复与 managed restart-loop 抑制 | ✅ 已合并 | [#68](https://coding.s-s.city/songsong/openchamber/-/work_items/68)：Web 与 VS Code SSE proxy 均以 OpenCode 上游字节为唯一活性信号，静默超时后结束 downstream 促使 UI 重连；proxy 自己发送的 heartbeat 不会掩盖上游卡死。health 失败最多每个配置 interval 计数一次，同时保留 missing-listener 立即恢复、busy grace、detached process ownership、shared database 与 lifecycle journal |
 | Bash 卡片实时输出、固定高度与无 5 分钟计时上限 | ✅ 已合并 | [#69](https://coding.s-s.city/songsong/openchamber/-/work_items/69)：`ToolPart` 局部消费 Bash `metadata.output`，运行中使用固定高度输出区并只追加新增文本；自动跟随在用户向上滚动后停止，回到底部后恢复。计时器不再截断于 300s；未向共享 store 扩散高频订阅 |
-| 历史完整性与 revert optimistic 清理 | 🟡 部分已有 | server-only pagination、自动旧消息预取和同步 scroll anchor 已完成；tail/force refresh 仍可能弱化既有 `complete/cursor`，revert 后 optimistic shadow 也未同步确认删除。按 [#70](https://coding.s-s.city/songsong/openchamber/-/work_items/70) 收口，禁止引入第二个 scroll writer |
+| 历史完整性与 revert optimistic 清理 | ✅ 已合并 | [#70](https://coding.s-s.city/songsong/openchamber/-/work_items/70)：本 fork 的真实权威点 `use-sync + sync-meta` 在 tail/force refresh 时保留既有 complete coverage，避免重新出现 Load older；revert 后新分支发送成功才从 optimistic shadow 确认删除旧分支，失败则恢复 Session/message/part。保留 server-only pagination、同步 scroll anchor 和 `serverId + directory` 路由，未增加 scroll writer |
 | bundled OpenCode 不显示独立 updater | ✅ 已合并 | [#71](https://coding.s-s.city/songsong/openchamber/-/work_items/71)：Web/desktop 与 VS Code 统一返回显式 `upgrade` capability；bundled/external fail closed，事件通知也必须重新读取当前 runtime status 后才展示。managed non-bundled 保留升级能力，自定义 `-sscity` binary/runbook 仍是内嵌版本唯一升级通道 |
 | Slash starter 携带 draft 参数；Goal 使用展开后的 command template | ✅ 已合并 | [#72](https://coding.s-s.city/songsong/openchamber/-/work_items/72)：command starter 将现有 draft 作为同行参数，skill starter 保持多行；interactive Goal 按目标 Session 的 directory 解析 command template，scheduled Goal 复用同一套 `$ARGUMENTS` / positional 语义，均在消息派发前写入目标。attachments、queue-time config 与 `serverId + directory` 路由未改 |
 | OpenAI Business Codex spend limit | ✅ 已合并 | [#73](https://coding.s-s.city/songsong/openchamber/-/work_items/73)：Web 与 VS Code Codex provider 统一解析 `spend_control.individual_limit`，复用现有 `credits` window 渲染 `used / limit used`；`0` 作为真实额度保留，字段缺失/空对象不伪造 window。UI 仍按 active runtime base URL 请求，remote instance 不回落 local |
@@ -1581,7 +1581,11 @@ VS Code worktree lock 验证：在两个真实临时 Git 仓库及 `--no-checkou
 
 **#73 验证证据（2026-07-30）**：Web/VS Code Codex provider 与 active-runtime quota store focused tests 15 条通过，覆盖 Business 正常额度、全零额度、字段缺失/空对象、既有 5h/weekly windows，以及 local/remote endpoint 隔离和并发刷新；改动文件定向 ESLint、全 workspace type-check/build 通过。matching-surface driver 将 provider 输出交给 UI `formatQuotaValueLabel`，实际观察 `2675 / 7500 used`、`0 / 0 used`，缺失字段没有 window。未改变 quota route 或 active runtime base URL 解析。
 
-**执行总览**：GitLab Overview [#1](https://coding.s-s.city/songsong/openchamber/-/work_items/1) 已推进到 v1.17.1，并加入 [#68](https://coding.s-s.city/songsong/openchamber/-/work_items/68)–[#79](https://coding.s-s.city/songsong/openchamber/-/work_items/79)。其中 #69/#71/#72/#73/#74/#75 已按实现、focused tests / workspace checks、matching-surface QA 和本台账证据闭环；其余条目保持 open。
+**#68 验证证据（2026-07-30）**：Web lifecycle/proxy Vitest 27 条与 VS Code SSE focused tests 2 条通过。Web matching-surface 真实启动上游与 Express proxy：上游在 40/80ms 发字节时重置 watchdog，proxy 每 10ms 发 downstream heartbeat，最终仍在上游静默 100ms 后结束 response；响应同时包含 heartbeat 和两段上游数据，证明 heartbeat 不会伪造 OpenCode 活性。25 次同一时间点的 transport health trigger 只计一次，跨 15s 后才计第二次；现有 busy/missing-listener/lifecycle tests 全部保持通过。UI/VS Code type-check 通过。
+
+**#70 验证证据（2026-07-30）**：sync meta 与 session actions focused tests 43 条通过。matching-surface 状态驱动验证观察到 authoritative `{complete:true,cursor:undefined}` 与 stale tail cursor 合并后仍保持 complete；模拟 Session `revert=msg_2`、optimistic shadow 含 `msg_2` 后发送新分支，最终 store 仅保留 `msg_1 + 新 message`、旧 part 删除、旧 shadow 删除而新 shadow 保留。失败路径在实现中先 rollback store 且不会确认旧 shadow。UI type-check 通过；未触碰 chat scroll controller。
+
+**执行总览**：GitLab Overview [#1](https://coding.s-s.city/songsong/openchamber/-/work_items/1) 已推进到 v1.17.1，并加入 [#68](https://coding.s-s.city/songsong/openchamber/-/work_items/68)–[#79](https://coding.s-s.city/songsong/openchamber/-/work_items/79)。其中 #68/#69/#70/#71/#72/#73/#74/#75 已按实现、focused tests / workspace checks、matching-surface QA 和本台账证据闭环；#76–#79 保持 open。
 
 ### Fork 稳定性：Markdown 相对文件链接整页导航（2026-07-30）
 

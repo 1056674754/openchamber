@@ -377,6 +377,7 @@ describe('OpenCode lifecycle', () => {
     delete process.env.OPENCODE_BINARY;
     const restoreManagedOpenCodeAuth = vi.fn(() => true);
     let previousManagedPortHealthy = true;
+    let checkedAt = 1;
     spawnSyncMock.mockImplementation((command) => {
       if (command === 'lsof') {
         return { stdout: '43210\n' };
@@ -418,6 +419,7 @@ describe('OpenCode lifecycle', () => {
       },
       restoreManagedOpenCodeAuth,
       readPersistedOpenCodePort: vi.fn(() => 56789),
+      now: () => checkedAt,
     });
 
     await runtime.bootstrapOpenCodeAtStartup();
@@ -426,6 +428,7 @@ describe('OpenCode lifecycle', () => {
     previousManagedPortHealthy = false;
     for (let index = 0; index < 19; index += 1) {
       await runtime.triggerHealthCheck();
+      checkedAt += 15_000;
     }
 
     expect(spawnMock).not.toHaveBeenCalled();
@@ -666,5 +669,43 @@ describe('OpenCode lifecycle', () => {
 
     expect(spawnMock).toHaveBeenCalledTimes(2);
     await server.close();
+  });
+
+  it('counts rapid transport-triggered checks at most once per health interval', async () => {
+    let checkedAt = 1;
+    globalThis.fetch = vi.fn(async () => ({
+      ok: false,
+      json: async () => ({ healthy: false }),
+    }));
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const processHandle = {
+      pid: 12345,
+      exitCode: null,
+      signalCode: null,
+      close: vi.fn(async () => {}),
+    };
+    vi.spyOn(process, 'kill').mockImplementation(() => true);
+
+    const runtime = createRuntime({
+      now: () => checkedAt,
+      state: {
+        openCodePort: 45678,
+        openCodeProcess: processHandle,
+        isOpenCodeReady: true,
+      },
+    });
+
+    for (let attempt = 0; attempt < 25; attempt += 1) {
+      await runtime.triggerHealthCheck();
+    }
+
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(processHandle.close).not.toHaveBeenCalled();
+
+    checkedAt += 15_000;
+    await runtime.triggerHealthCheck();
+
+    expect(warn).toHaveBeenCalledTimes(2);
+    expect(warn).toHaveBeenLastCalledWith(expect.stringContaining('(2/20)'));
   });
 });

@@ -572,6 +572,85 @@ describe("optimisticSend", () => {
     expect(optimisticRemoves).toHaveLength(0)
   })
 
+  test("commits a new branch after revert and discards reverted optimistic shadows", async () => {
+    const retainedMessage = {
+      id: "msg_1",
+      role: "user",
+      sessionID: "session-reverted",
+    } as unknown as Message
+    const revertedMessage = {
+      id: "msg_2",
+      role: "user",
+      sessionID: "session-reverted",
+    } as unknown as Message
+    const revertedPart = {
+      id: "prt_2",
+      messageID: revertedMessage.id,
+      sessionID: "session-reverted",
+      type: "text",
+      text: "reverted",
+    } as unknown as Part
+    const targetStore = createStore({}, {}, {
+      session: [{
+        id: "session-reverted",
+        directory: "/target/project",
+        revert: { messageID: revertedMessage.id },
+      } as unknown as Session],
+      message: {
+        "session-reverted": [retainedMessage, revertedMessage],
+      },
+      part: {
+        [revertedMessage.id]: [revertedPart],
+      },
+    })
+    const childStores = createChildStores([["/target/project", targetStore]])
+    const optimisticShadow = new Set([revertedMessage.id])
+    let optimisticMessageID = ""
+
+    const { setActionRefs, setOptimisticRefs, optimisticSend } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/target/project")
+    setOptimisticRefs(
+      (input) => {
+        optimisticMessageID = input.message.id
+        optimisticShadow.add(input.message.id)
+        const state = targetStore.getState()
+        targetStore.setState({
+          message: {
+            ...state.message,
+            [input.sessionID]: [...(state.message[input.sessionID] ?? []), input.message],
+          },
+          part: {
+            ...state.part,
+            [input.message.id]: input.parts,
+          },
+        })
+      },
+      () => {},
+      (input) => {
+        optimisticShadow.delete(input.messageID)
+      },
+    )
+
+    await optimisticSend({
+      sessionId: "session-reverted",
+      content: "new branch",
+      providerID: "provider",
+      modelID: "model",
+      directory: "/target/project",
+      serverId: DEFAULT_SERVER_ID,
+      send: async () => {},
+    })
+
+    expect(targetStore.getState().session[0]?.revert).toBe(undefined)
+    expect(targetStore.getState().message["session-reverted"]?.map((message) => message.id)).toEqual([
+      retainedMessage.id,
+      optimisticMessageID,
+    ])
+    expect(targetStore.getState().part[revertedMessage.id]).toBe(undefined)
+    expect(optimisticShadow.has(revertedMessage.id)).toBe(false)
+    expect(optimisticShadow.has(optimisticMessageID)).toBe(true)
+  })
+
   test("confirms an ambiguous send failure from the authoritative session messages", async () => {
     class AmbiguousSendError extends Error {
       readonly status = 504
