@@ -63,6 +63,7 @@ import { eventMatchesShortcut, getEffectiveShortcutCombo } from '@/lib/shortcuts
 import { useI18n } from '@/lib/i18n';
 import { useActiveServerBaseUrl } from '@/hooks/useActiveServerId';
 import { resolveApiUrl } from '@/lib/api/serverUrl';
+import { runtimeFetch } from '@/lib/runtime-fetch';
 import { resolveJsonFileViewState } from './jsonFileViewState';
 
 type FileNode = {
@@ -783,6 +784,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
   const [fileLoading, setFileLoading] = React.useState(false);
   const [fileError, setFileError] = React.useState<string | null>(null);
   const [desktopImageSrc, setDesktopImageSrc] = React.useState<string>('');
+  const [runtimeImageSrc, setRuntimeImageSrc] = React.useState<string>('');
 
   const [loadedFilePath, setLoadedFilePath] = React.useState<string | null>(null);
 
@@ -1680,6 +1682,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
 
     setFileError(null);
     setDesktopImageSrc('');
+    setRuntimeImageSrc('');
     setLoadedFilePath(null);
 
     const selectedIsImage = isImageFile(node.path);
@@ -1701,8 +1704,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
     if (!runtime.isDesktop && selectedIsImage && !isSvg) {
       setFileContent('');
       setDraftContent('');
-      setLoadedFilePath(node.path);
-      setFileLoading(false);
+      setFileLoading(true);
       return;
     }
 
@@ -2736,11 +2738,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
         : desktopImageSrc)
       : (isSelectedSvg
         ? `data:${getImageMimeType(selectedFile.path)};utf8,${encodeURIComponent(fileContent)}`
-        : `${resolveApiUrl('/api/fs/raw', serverBaseUrl)}?${new URLSearchParams({
-          path: selectedFile.path,
-          ...(selectedFileReadOptions.allowOutsideWorkspace ? { allowOutsideWorkspace: 'true' } : {}),
-          ...(!selectedFileReadOptions.allowOutsideWorkspace && currentDirectory ? { directory: currentDirectory } : {}),
-        }).toString()}`))
+        : runtimeImageSrc))
     : '';
 
   React.useEffect(() => {
@@ -2789,6 +2787,58 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
       cancelled = true;
     };
   }, [currentDirectory, files, isSelectedImage, isSelectedSvg, runtime.isDesktop, selectedFile?.path, selectedFileReadOptions, serverBaseUrl, t]);
+
+  React.useEffect(() => {
+    if (runtime.isDesktop || !selectedFile?.path || !isSelectedImage || isSelectedSvg) {
+      setRuntimeImageSrc('');
+      return;
+    }
+
+    let cancelled = false;
+    let objectUrl = '';
+    setFileError(null);
+    setFileLoading(true);
+
+    void runtimeFetch(resolveApiUrl('/api/fs/raw', serverBaseUrl), {
+      query: {
+        path: selectedFile.path,
+        ...(selectedFileReadOptions.allowOutsideWorkspace ? { allowOutsideWorkspace: 'true' } : {}),
+        ...(!selectedFileReadOptions.allowOutsideWorkspace && currentDirectory ? { directory: currentDirectory } : {}),
+      },
+    })
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error(t('filesView.error.readFileFailed'));
+        }
+        objectUrl = URL.createObjectURL(await response.blob());
+        if (cancelled) {
+          URL.revokeObjectURL(objectUrl);
+          objectUrl = '';
+          return;
+        }
+        setRuntimeImageSrc(objectUrl);
+        setLoadedFilePath(selectedFile.path);
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setRuntimeImageSrc('');
+          setFileError(error instanceof Error ? error.message : t('filesView.error.readFileFailed'));
+          setLoadedFilePath(null);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setFileLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+      if (objectUrl) {
+        URL.revokeObjectURL(objectUrl);
+      }
+    };
+  }, [currentDirectory, isSelectedImage, isSelectedSvg, runtime.isDesktop, selectedFile?.path, selectedFileReadOptions, serverBaseUrl, t]);
 
   const blockWidgets = React.useMemo(() => {
     return buildCodeMirrorCommentWidgets({

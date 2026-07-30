@@ -1564,7 +1564,7 @@ VS Code worktree lock 验证：在两个真实临时 Git 仓库及 `--no-checkou
 | Prompt Navigator 底部最新 turn anchor | ✅ 已合并 | [#74](https://coding.s-s.city/songsong/openchamber/-/work_items/74)：`scrollSpy` 底部 anchor 从固定 8px 调整为 `max(48px, viewport × 10%)`；进入近底部区间后保持最新 turn，离开边界立即恢复 reading-line 判定。保留 fork 的 timeline controller、完整 Prompt 键盘遍历与多实例上下文，不引入第二个 scroll writer |
 | Settings 可见纵向 scrollbar | ✅ 已合并 | [#75](https://coding.s-s.city/songsong/openchamber/-/work_items/75)：移植上游 Settings 外层 `overflow-y-scroll overflow-x-hidden` 边界，并让 Settings 根作用域内的现有 `ScrollableOverlay` 继承常驻纵向 scrollbar；不改变聊天、侧栏或其他非 Settings surface |
 | Linux AppImage tray Show/Hide/Close 与 system icons | ❌ 未合并 | AppImage build/update QA 已完成，但 Linux tray 仍只有 Show，Open-in icon resolver 返回空；按 [#76](https://coding.s-s.city/songsong/openchamber/-/work_items/76) 独立做 Xvfb/Openbox 实测，不触碰 macOS/Windows tray |
-| Mobile relay image preview | 🟡 需架构适配 | 上游 `MobileFilesSurface` 在 fork 中不存在；按 [#77](https://coding.s-s.city/songsong/openchamber/-/work_items/77) 接入共享 `FilesView` 和 owning runtime URL resolver，禁止恢复 per-host sync fanout |
+| Mobile relay image preview | ✅ 已合并 | [#77](https://coding.s-s.city/songsong/openchamber/-/work_items/77)：上游 `MobileFilesSurface` 在 fork 中不存在，因此在共享 `FilesView` 中通过 `runtimeFetch` 读取 bitmap，并将响应 Blob 转为受生命周期管理的 object URL；请求继续携带 owning runtime 的 base URL、directory 与 workspace 边界，relay 由现有 runtime tunnel 接管，未恢复 per-host sync fanout。SVG 与 Electron binary IPC 路径保持不变 |
 | built-in build/plan system prompt 优化 | ⏸️ 高风险审计 | 上游只优化 built-in build/plan；fork 主要使用 OMO/custom agents 和 plugin-composed prompt。按 [#78](https://coding.s-s.city/songsong/openchamber/-/work_items/78) 先证明 prompt ownership 与必需策略不丢失，不机械复制、不对 prose 做快照测试 |
 | Sidebar sticky header fixes | ⏸️ 高风险适配 | fork 侧栏已重写为 local/remote 多实例、项目/worktree zones 与 Global Pinned；按 [#79](https://coding.s-s.city/songsong/openchamber/-/work_items/79) 从可复现视觉缺陷出发做局部边界修复，禁止覆盖上游 sidebar modules |
 | SDK `1.18.9`、iOS simulator dev loop、review CI timeout | ➖ 维护项 | SDK manifest/lock 在对应 capability 验证时统一评估；dev loop 和 CI timeout 不创建 runtime backlog，不用纯维护提交伪装成功能合并 |
@@ -1585,7 +1585,9 @@ VS Code worktree lock 验证：在两个真实临时 Git 仓库及 `--no-checkou
 
 **#70 验证证据（2026-07-30）**：sync meta 与 session actions focused tests 43 条通过。matching-surface 状态驱动验证观察到 authoritative `{complete:true,cursor:undefined}` 与 stale tail cursor 合并后仍保持 complete；模拟 Session `revert=msg_2`、optimistic shadow 含 `msg_2` 后发送新分支，最终 store 仅保留 `msg_1 + 新 message`、旧 part 删除、旧 shadow 删除而新 shadow 保留。失败路径在实现中先 rollback store 且不会确认旧 shadow。UI type-check 通过；未触碰 chat scroll controller。
 
-**执行总览**：GitLab Overview [#1](https://coding.s-s.city/songsong/openchamber/-/work_items/1) 已推进到 v1.17.1，并加入 [#68](https://coding.s-s.city/songsong/openchamber/-/work_items/68)–[#79](https://coding.s-s.city/songsong/openchamber/-/work_items/79)。其中 #68/#69/#70/#71/#72/#73/#74/#75 已按实现、focused tests / workspace checks、matching-surface QA 和本台账证据闭环；#76–#79 保持 open。
+**#77 验证证据（2026-07-30）**：`runtimeFetch` transport focused tests 22 条通过，其中新增 relay binary driver 以活动 tunnel 请求 `/api/fs/raw?path=...&directory=...`，实际收到 `image/png` Blob 与完整 body；UI type-check 与改动文件定向 ESLint 通过。matching-surface QA 在真实 HMR OpenChamber 中从会话 Markdown 文件引用进入实际 `FilesView` editor surface，确认该共享渲染面正常挂载；relay 专属传输边界由上述 tunnel driver 覆盖。实现只为非 Electron bitmap 创建 object URL，并在切换文件/卸载时 revoke；SVG data URL、Electron `readFileBinary`、多实例 `serverId + directory` authority 均未改。
+
+**执行总览**：GitLab Overview [#1](https://coding.s-s.city/songsong/openchamber/-/work_items/1) 已推进到 v1.17.1，并加入 [#68](https://coding.s-s.city/songsong/openchamber/-/work_items/68)–[#79](https://coding.s-s.city/songsong/openchamber/-/work_items/79)。其中 #68/#69/#70/#71/#72/#73/#74/#75/#77 已按实现、focused tests / workspace checks、matching-surface QA 和本台账证据闭环；#76/#78/#79 保持 open。
 
 ### Fork 稳定性：Markdown 相对文件链接整页导航（2026-07-30）
 

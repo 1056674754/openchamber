@@ -3,6 +3,8 @@ import { createOpencodeClient } from '@opencode-ai/sdk/v2';
 import { buildRuntimeFetchUrl, isLatin1Safe, runtimeFetch, sanitizeHeadersForBrowser } from './runtime-fetch';
 import { clearRuntimeAuthCredentialProvider, setRuntimeBearerToken } from './runtime-auth';
 import { configureRuntimeUrlResolver, getRuntimeUrlResolver, setRuntimeUrlResolver } from './runtime-url';
+import { adoptRelayTunnel, deactivateRelayTunnel } from './relay/runtime-tunnel';
+import type { RelayTunnelClient } from './relay/tunnel-client';
 
 const originalFetch = globalThis.fetch;
 
@@ -236,6 +238,48 @@ describe('runtimeFetch transport contract', () => {
       setRuntimeUrlResolver(previous);
       globalThis.fetch = originalFetch;
       clearRuntimeAuthCredentialProvider();
+    }
+  });
+
+  test('loads binary runtime assets through the active relay tunnel', async () => {
+    const calls: string[] = [];
+    const relayClient: RelayTunnelClient = {
+      fetch: async (input) => {
+        calls.push(input instanceof Request ? input.url : input.toString());
+        return new Response(new Blob(['relay-image'], { type: 'image/png' }), {
+          status: 200,
+          headers: { 'content-type': 'image/png' },
+        });
+      },
+      openWebSocket: () => {
+        throw new Error('WebSocket is not used by this test');
+      },
+      getStatus: () => ({ state: 'connected' }),
+      subscribeStatus: () => () => undefined,
+      close: () => undefined,
+    };
+
+    adoptRelayTunnel({
+      relayUrl: 'wss://relay.example',
+      serverId: 'relay-server',
+      hostEncPubJwk: { kty: 'EC' },
+    }, relayClient);
+
+    try {
+      const response = await runtimeFetch('/api/fs/raw', {
+        query: {
+          path: '/workspace/image.png',
+          directory: '/workspace',
+        },
+      });
+
+      expect(calls).toEqual([
+        '/api/fs/raw?path=%2Fworkspace%2Fimage.png&directory=%2Fworkspace',
+      ]);
+      expect(response.headers.get('content-type')).toBe('image/png');
+      expect(await response.text()).toBe('relay-image');
+    } finally {
+      deactivateRelayTunnel();
     }
   });
 
