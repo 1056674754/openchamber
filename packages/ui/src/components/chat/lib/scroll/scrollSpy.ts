@@ -41,14 +41,19 @@ export const pickOffsetTurnId = (list: OffsetTurn[], cutoff: number): string | u
 };
 
 const READ_LINE_OFFSET_PX = 100;
-const BOTTOM_ANCHOR_EPSILON_PX = 8;
+const BOTTOM_ANCHOR_MIN_PX = 48;
+const BOTTOM_ANCHOR_VIEWPORT_FACTOR = 0.1;
 
 export const pickActiveTurnId = (
     offsets: OffsetTurn[],
     viewport: { scrollTop: number; scrollHeight: number; clientHeight: number },
 ): string | undefined => {
     const distanceFromBottom = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight;
-    if (distanceFromBottom <= BOTTOM_ANCHOR_EPSILON_PX) {
+    const bottomAnchorDistance = Math.max(
+        BOTTOM_ANCHOR_MIN_PX,
+        viewport.clientHeight * BOTTOM_ANCHOR_VIEWPORT_FACTOR,
+    );
+    if (distanceFromBottom <= bottomAnchorDistance) {
         return offsets[offsets.length - 1]?.id;
     }
 

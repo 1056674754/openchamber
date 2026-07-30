@@ -18,16 +18,32 @@ describe('scrollSpy', () => {
         })).toBe('turn-2');
     });
 
-    test('anchors the final turn at the physical bottom', () => {
-        expect(pickActiveTurnId(offsets, {
+    test('anchors the final turn throughout the near-bottom zone', () => {
+        const bottomOffsets = [
+            { id: 'turn-1', top: 0 },
+            { id: 'turn-2', top: 700 },
+            { id: 'turn-3', top: 1700 },
+        ];
+
+        expect(pickActiveTurnId(bottomOffsets, {
             scrollTop: 1600,
             scrollHeight: 2400,
             clientHeight: 800,
         })).toBe('turn-3');
-        expect(pickActiveTurnId(offsets, {
-            scrollTop: 1593,
+        expect(pickActiveTurnId(bottomOffsets, {
+            scrollTop: 1520,
             scrollHeight: 2400,
             clientHeight: 800,
+        })).toBe('turn-3');
+        expect(pickActiveTurnId(bottomOffsets, {
+            scrollTop: 1519,
+            scrollHeight: 2400,
+            clientHeight: 800,
+        })).toBe('turn-2');
+        expect(pickActiveTurnId(bottomOffsets, {
+            scrollTop: 870,
+            scrollHeight: 1000,
+            clientHeight: 100,
         })).toBe('turn-3');
     });
 

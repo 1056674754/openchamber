@@ -1561,7 +1561,7 @@ VS Code worktree lock 验证：在两个真实临时 Git 仓库及 `--no-checkou
 | bundled OpenCode 不显示独立 updater | 🟡 后端已有保护 | POST upgrade 已对 bundled 返回 409，但 upgrade status/toast 仍可能展示入口；按 [#71](https://coding.s-s.city/songsong/openchamber/-/work_items/71) 统一 capability、UI 与 VS Code 合约，自定义 `-sscity` binary/runbook 继续作为唯一升级通道 |
 | Slash starter 携带 draft 参数；Goal 使用展开后的 command template | ❌ 未合并 | 当前 starter 与 draft 使用换行组合，Goal 的 interactive/scheduled 路径未统一展开模板；按 [#72](https://coding.s-s.city/songsong/openchamber/-/work_items/72) 处理，保留 queue-time send config/target 快照 |
 | OpenAI Business Codex spend limit | ❌ 未合并 | web/VS Code quota 尚未解析 `spend_control`；按 [#73](https://coding.s-s.city/songsong/openchamber/-/work_items/73) 增加 active-runtime scoped provider contract，缺失与零值必须可区分 |
-| Prompt Navigator 底部最新 turn anchor | ❌ 未合并 | fork 已有完整 Prompt Navigator/键盘遍历，但 `scrollSpy` 底部 anchor 仍为固定 8px；按 [#74](https://coding.s-s.city/songsong/openchamber/-/work_items/74) 只修边界判定，不改 timeline controller |
+| Prompt Navigator 底部最新 turn anchor | ✅ 已合并 | [#74](https://coding.s-s.city/songsong/openchamber/-/work_items/74)：`scrollSpy` 底部 anchor 从固定 8px 调整为 `max(48px, viewport × 10%)`；进入近底部区间后保持最新 turn，离开边界立即恢复 reading-line 判定。保留 fork 的 timeline controller、完整 Prompt 键盘遍历与多实例上下文，不引入第二个 scroll writer |
 | Settings 可见纵向 scrollbar | ✅ 已合并 | [#75](https://coding.s-s.city/songsong/openchamber/-/work_items/75)：移植上游 Settings 外层 `overflow-y-scroll overflow-x-hidden` 边界，并让 Settings 根作用域内的现有 `ScrollableOverlay` 继承常驻纵向 scrollbar；不改变聊天、侧栏或其他非 Settings surface |
 | Linux AppImage tray Show/Hide/Close 与 system icons | ❌ 未合并 | AppImage build/update QA 已完成，但 Linux tray 仍只有 Show，Open-in icon resolver 返回空；按 [#76](https://coding.s-s.city/songsong/openchamber/-/work_items/76) 独立做 Xvfb/Openbox 实测，不触碰 macOS/Windows tray |
 | Mobile relay image preview | 🟡 需架构适配 | 上游 `MobileFilesSurface` 在 fork 中不存在；按 [#77](https://coding.s-s.city/songsong/openchamber/-/work_items/77) 接入共享 `FilesView` 和 owning runtime URL resolver，禁止恢复 per-host sync fanout |
@@ -1571,7 +1571,9 @@ VS Code worktree lock 验证：在两个真实临时 Git 仓库及 `--no-checkou
 
 **#75 验证证据（2026-07-30）**：`OverlayScrollbar` visibility focused tests 2 条、改动文件定向 ESLint、全 workspace type-check/build 通过。matching-surface QA 在真实 Chat Settings 长页面确认纵向 thumb 静置时 `opacity=1`，滚动到 `scrollTop=500` 并等待自动隐藏周期后仍为 `opacity=1`；滚动容器 `scrollWidth=clientWidth=923` 且未生成 horizontal thumb。实现使用 Settings 根级 context 覆盖该 surface 内直接创建 `ScrollableOverlay` 的页面，避免仅覆盖共享 `SettingsPageLayout` 而遗漏 OpenChamber/legacy settings 页面。
 
-**执行总览**：GitLab Overview [#1](https://coding.s-s.city/songsong/openchamber/-/work_items/1) 已推进到 v1.17.1，并加入 [#68](https://coding.s-s.city/songsong/openchamber/-/work_items/68)–[#79](https://coding.s-s.city/songsong/openchamber/-/work_items/79)。这些条目均保持 open，只有实现、focused tests / workspace checks、matching-surface QA 和本台账证据全部完成后才关闭。
+**#74 验证证据（2026-07-30）**：focused `scrollSpy` 测试覆盖物理底部、800px 视口的 80px anchor 边界、81px 退出边界，以及 100px 小视口下由 48px 最小值接管的 30px 场景；4 条测试、改动文件定向 ESLint、全 workspace type-check/build 通过。matching-surface QA 在真实 OpenCode 会话 `ses_04d1d70f4ffeK7C5QHSP6gBjRc` 操作 Prompt Navigator，选择最新刻度后确认聊天滚动区 `distanceFromBottom=0`，active tick 为最新的 `2/2`；未改动 timeline controller 或 rail 的键盘遍历实现。
+
+**执行总览**：GitLab Overview [#1](https://coding.s-s.city/songsong/openchamber/-/work_items/1) 已推进到 v1.17.1，并加入 [#68](https://coding.s-s.city/songsong/openchamber/-/work_items/68)–[#79](https://coding.s-s.city/songsong/openchamber/-/work_items/79)。其中 #74/#75 已按实现、focused tests / workspace checks、matching-surface QA 和本台账证据闭环；其余条目保持 open。
 
 ### Fork 稳定性：Markdown 相对文件链接整页导航（2026-07-30）
 
