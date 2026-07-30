@@ -1018,7 +1018,7 @@ const handleLocalApiRequest = async (url: URL, init?: RequestInit) => {
   }
 
   if (pathname === '/api/opencode/upgrade' && method === 'POST') {
-    const body = await extractJsonBody(input, init, method);
+    const body = init?.body ? JSON.parse(init.body as string) : {};
     const result = await sendBridgeMessage<{ status: number; body: unknown }>(
       'api:opencode/upgrade',
       body,
