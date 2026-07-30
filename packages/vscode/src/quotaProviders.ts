@@ -39,6 +39,13 @@ type OpenAiUsagePayload = {
     balance?: number | string;
     unlimited?: boolean;
   };
+  spend_control?: {
+    individual_limit?: {
+      limit?: number | string;
+      used?: number | string;
+      used_percent?: number | string;
+    };
+  };
 };
 
 type GoogleModelsPayload = {
@@ -459,6 +466,59 @@ export const listConfiguredQuotaProviders = () => {
   return Array.from(configured);
 };
 
+export const parseCodexUsageWindows = (payload: OpenAiUsagePayload): Record<string, UsageWindow> => {
+  const primary = payload.rate_limit?.primary_window ?? null;
+  const secondary = payload.rate_limit?.secondary_window ?? null;
+  const credits = payload.credits ?? null;
+  const spendLimit = payload.spend_control?.individual_limit ?? null;
+  const windows: Record<string, UsageWindow> = {};
+
+  for (const window of [primary, secondary]) {
+    if (!window) continue;
+    const windowSeconds = toNumber(window.limit_window_seconds);
+    windows[resolveWindowLabel(windowSeconds)] = toUsageWindow({
+      usedPercent: toNumber(window.used_percent),
+      windowSeconds,
+      resetAt: toTimestamp(window.reset_at),
+    });
+  }
+
+  if (credits) {
+    const balance = toNumber(credits.balance);
+    const unlimited = Boolean(credits.unlimited);
+    const valueLabel = unlimited
+      ? 'Unlimited'
+      : balance !== null
+        ? `$${formatMoney(balance)} remaining`
+        : null;
+    windows.credits = toUsageWindow({
+      usedPercent: null,
+      windowSeconds: null,
+      resetAt: null,
+      valueLabel,
+    });
+  }
+
+  if (spendLimit) {
+    const used = toNumber(spendLimit.used);
+    const limit = toNumber(spendLimit.limit);
+    const usedPercent = toNumber(spendLimit.used_percent);
+    if (used !== null || limit !== null || usedPercent !== null) {
+      const valueLabel = used !== null && limit !== null
+        ? `${used.toFixed(0)} / ${limit.toFixed(0)} used`
+        : null;
+      windows.credits = toUsageWindow({
+        usedPercent,
+        windowSeconds: null,
+        resetAt: null,
+        valueLabel,
+      });
+    }
+  }
+
+  return windows;
+};
+
 export const fetchCodexQuota = async (): Promise<ProviderResult> => {
   const auth = readAuthFile();
   const entry = normalizeAuthEntry(getAuthEntry(auth, ['openai', 'codex', 'chatgpt'])) as Record<string, unknown> | null;
@@ -496,42 +556,7 @@ export const fetchCodexQuota = async (): Promise<ProviderResult> => {
     }
 
     const payload = await response.json() as OpenAiUsagePayload;
-    const primary = payload?.rate_limit?.primary_window ?? null;
-    const secondary = payload?.rate_limit?.secondary_window ?? null;
-    const credits = payload?.credits ?? null;
-
-    const windows: Record<string, UsageWindow> = {};
-    if (primary) {
-      const windowSeconds = toNumber(primary.limit_window_seconds);
-      windows[resolveWindowLabel(windowSeconds)] = toUsageWindow({
-        usedPercent: toNumber(primary.used_percent),
-        windowSeconds,
-        resetAt: toTimestamp(primary.reset_at),
-      });
-    }
-    if (secondary) {
-      const windowSeconds = toNumber(secondary.limit_window_seconds);
-      windows[resolveWindowLabel(windowSeconds)] = toUsageWindow({
-        usedPercent: toNumber(secondary.used_percent),
-        windowSeconds,
-        resetAt: toTimestamp(secondary.reset_at),
-      });
-    }
-    if (credits) {
-      const balance = toNumber(credits.balance);
-      const unlimited = Boolean(credits.unlimited);
-      const valueLabel = unlimited
-        ? 'Unlimited'
-        : balance !== null
-          ? `$${formatMoney(balance)} remaining`
-          : null;
-      windows.credits = toUsageWindow({
-        usedPercent: null,
-        windowSeconds: null,
-        resetAt: null,
-        valueLabel,
-      });
-    }
+    const windows = parseCodexUsageWindows(payload);
 
     return buildResult({
       providerId: 'codex',

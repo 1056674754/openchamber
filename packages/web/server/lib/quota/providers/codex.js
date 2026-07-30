@@ -24,6 +24,7 @@ export const parseCodexUsageWindows = (payload) => {
   const primary = payload?.rate_limit?.primary_window ?? null;
   const secondary = payload?.rate_limit?.secondary_window ?? null;
   const credits = payload?.credits ?? null;
+  const spendLimit = payload?.spend_control?.individual_limit ?? null;
   const windows = {};
 
   for (const window of [primary, secondary]) {
@@ -50,6 +51,23 @@ export const parseCodexUsageWindows = (payload) => {
       resetAt: null,
       valueLabel: label,
     });
+  }
+
+  if (spendLimit) {
+    const used = toNumber(spendLimit.used);
+    const limit = toNumber(spendLimit.limit);
+    const usedPercent = toNumber(spendLimit.used_percent);
+    if (used !== null || limit !== null || usedPercent !== null) {
+      const valueLabel = used !== null && limit !== null
+        ? `${used.toFixed(0)} / ${limit.toFixed(0)} used`
+        : null;
+      windows.credits = toUsageWindow({
+        usedPercent,
+        windowSeconds: null,
+        resetAt: null,
+        valueLabel,
+      });
+    }
   }
 
   return windows;

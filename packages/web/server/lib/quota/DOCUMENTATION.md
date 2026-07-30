@@ -44,6 +44,11 @@ OpenCode Go uses a dedicated credential store in `opencode-go-credentials.js`; i
 The shared settings UI resolves the credential endpoint against the active instance base URL. The VS Code bridge implements the same route contract and quota provider so web, desktop, remote-instance, and VS Code surfaces do not silently diverge.
 
 Codex window labels are derived from each API window's `limit_window_seconds`. Primary and secondary windows are not assumed to mean five-hour and weekly windows.
+OpenAI Business/enterprise `spend_control.individual_limit` is exposed through
+the Codex `credits` window with its API-provided percentage and a
+`used / limit used` value label. Zero is preserved as a real value; absent or
+empty spend-control fields do not create a quota window. The VS Code provider
+implements the same contract.
 
 ## MiniMax M3 / Token Plan migration
 In 2025/2026 MiniMax rebranded "Coding Plan" to "Token Plan" alongside the M3 model release. The API underwent breaking changes:
