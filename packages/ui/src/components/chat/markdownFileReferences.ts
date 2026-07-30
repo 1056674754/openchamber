@@ -14,6 +14,18 @@ export type FileReferenceTextMatch = {
   raw: string;
 };
 
+export type BlockCodeTextSegment = {
+  text: string;
+  isLineNumber: boolean;
+};
+
+export const buildBlockCodePathScanText = (segments: readonly BlockCodeTextSegment[]): string => (
+  segments
+    .filter((segment) => !segment.isLineNumber)
+    .map((segment) => segment.text)
+    .join('')
+);
+
 export type MarkdownImageReference = {
   source: string;
   resolvedPath: string;
@@ -379,6 +391,10 @@ export const isLikelyFilePath = (value: string): boolean => {
   }
   return isLikelyFilePathValue(parsed.path);
 };
+
+export const shouldInterceptMarkdownFileHref = (href: string): boolean => (
+  isLikelyFilePath(href)
+);
 
 const overlapsExistingMatch = (start: number, end: number, matches: FileReferenceTextMatch[]): boolean => {
   return matches.some((match) => start < match.end && end > match.start);

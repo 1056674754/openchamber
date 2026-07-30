@@ -11,7 +11,7 @@ import remend from 'remend';
 import { FadeInOnReveal } from './message/FadeInOnReveal';
 import type { Part } from '@opencode-ai/sdk/v2';
 import { cn } from '@/lib/utils';
-import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
+import { createElement as createSyntaxElement, Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { toast } from '@/components/ui';
 import { Icon } from "@/components/icon/Icon";
 import { copyTextToClipboard } from '@/lib/clipboard';
@@ -43,6 +43,7 @@ import { getDirectoryForFilePath } from '@/lib/path-utils';
 import { CODE_SHARED_STYLE, MARKDOWN_CODE_BODY_CLASSNAME } from './markdownCodeStyle';
 import { getTableCopyContent, tableToCSV, tableToMarkdown, type TableCopyFormat, type TableData } from './markdownTableExport';
 import {
+  buildBlockCodePathScanText,
   findFileReferenceTextMatches,
   buildFileRequestParams,
   getFileNameFromPath,
@@ -50,6 +51,7 @@ import {
   isLikelyFilePath,
   normalizePath,
   resolveMarkdownImageReference,
+  shouldInterceptMarkdownFileHref,
   shouldPreserveMarkdownFileUrl,
 } from './markdownFileReferences';
 
@@ -63,8 +65,6 @@ const useCurrentMermaidTheme = () => {
       ? fallbackDark
       : fallbackLight);
 };
-
-const isFileUrlHref = (href: string): boolean => href.trim().toLowerCase().startsWith('file://');
 
 const markdownUrlTransform = (url: string, key: string): string => {
   if (shouldPreserveMarkdownFileUrl(url, key)) {
@@ -743,7 +743,7 @@ const extractCodeText = (children: React.ReactNode): string => {
 };
 
 const getCodeLanguage = (className: string | undefined): string => {
-  const match = className?.match(/language-([\w-]+)/);
+  const match = className?.match(/language-([\w+#.-]+)/);
   return match?.[1]?.toLowerCase() ?? 'text';
 };
 
@@ -895,6 +895,10 @@ const shouldRenderCodeAsPlainText = (language: string): boolean => (
   language === 'text' || language === 'txt' || language === 'plain' || language === 'plaintext'
 );
 
+const MarkdownCodeLines: React.FC<React.HTMLProps<HTMLElement>> = (props) => (
+  <code {...props} data-md-code-lines />
+);
+
 const downloadTextFile = (content: string, filename: string, mimeType: string) => {
   if (typeof window === 'undefined') {
     return;
@@ -994,7 +998,7 @@ const MarkdownCodeBlock: React.FC<{
   const lineNumberWidth = `${Math.max(2, String(codeLines.length).length + 1)}ch`;
 
   return (
-    <div data-component="markdown-code" className="my-3 group overflow-hidden rounded-lg border border-border/70 bg-[var(--surface-elevated)]">
+	    <div data-component="markdown-code" data-md-block className="my-3 group overflow-hidden rounded-lg border border-border/70 bg-[var(--surface-elevated)]">
       <div className="flex items-center justify-between border-b border-border/60 px-2.5 py-1">
         <span className="font-mono text-[12px] text-muted-foreground">{language}</span>
         <div className={cn(
@@ -1060,57 +1064,86 @@ const MarkdownCodeBlock: React.FC<{
       ) : (
         <div data-component="markdown-code-body" className={MARKDOWN_CODE_BODY_CLASSNAME}>
           {highlight && !skipHighlight && !renderAsPlainText ? (
-            <SyntaxHighlighter
-              language={language}
-              style={syntaxTheme}
-              customStyle={CODE_SHARED_STYLE}
-              codeTagProps={{ style: CODE_SHARED_STYLE }}
-              PreTag="pre"
-              showLineNumbers
-              wrapLongLines={codeBlockLineWrap}
-              lineNumberStyle={{
-                minWidth: lineNumberWidth,
-                paddingRight: '1ch',
-                color: 'var(--muted-foreground)',
-                userSelect: 'none',
-              }}
-            >
-              {code}
-            </SyntaxHighlighter>
-          ) : (
-            <pre
+	            <SyntaxHighlighter
+	              language={language}
+	              style={syntaxTheme}
+	              customStyle={CODE_SHARED_STYLE}
+	              codeTagProps={{ style: CODE_SHARED_STYLE }}
+	              PreTag="pre"
+	              CodeTag={MarkdownCodeLines}
+	              data-md-lang={language}
+	              wrapLines
+	              wrapLongLines={codeBlockLineWrap}
+	              renderer={({ rows, stylesheet, useInlineStyles }) => (
+	                <span data-md-highlighted-code-lines>
+	                  {rows.map((row, index) => (
+	                    <span key={index} data-md-code-line>
+	                      <span
+	                        aria-hidden="true"
+	                        data-md-code-line-number
+	                        style={{ width: lineNumberWidth }}
+	                      >
+	                        {index + 1}
+	                      </span>
+	                      <span data-md-code-line-content>
+	                        {createSyntaxElement({
+	                          node: row,
+	                          stylesheet,
+	                          useInlineStyles,
+	                          key: index,
+	                        })}
+	                      </span>
+	                    </span>
+	                  ))}
+	                </span>
+	              )}
+	            >
+	              {code}
+	            </SyntaxHighlighter>
+	          ) : (
+	            <pre
               style={{
                 ...CODE_SHARED_STYLE,
                 minWidth: codeBlockLineWrap ? 0 : 'max-content',
-              }}
-              data-openchamber-code-renderer={renderAsPlainText ? 'terminal-cell' : 'plain'}
-              data-openchamber-code-language={language}
-            >
-              {codeLines.map((line, index) => (
-                <span key={index} className="flex items-start">
-                  <span
-                    aria-hidden="true"
-                    className="shrink-0 select-none pr-[1ch] text-right text-muted-foreground"
-                    style={{ width: lineNumberWidth }}
-                  >
-                    {index + 1}
-                  </span>
-                  <code
-                    className="min-w-0 flex-1"
-                    style={{
-                      ...CODE_SHARED_STYLE,
-                      whiteSpace: codeBlockLineWrap ? 'pre-wrap' : 'pre',
+	              }}
+	              data-md-lang={language}
+	              data-openchamber-code-renderer={renderAsPlainText ? 'terminal-cell' : 'plain'}
+	              data-openchamber-code-language={language}
+	            >
+	              <code
+	                data-md-code-lines
+	                data-openchamber-code-renderer={renderAsPlainText ? 'terminal-cell' : 'plain'}
+	                data-openchamber-code-language={language}
+	              >
+	                {codeLines.map((line, index) => (
+	                  <span key={index} data-md-code-line>
+	                  <span
+	                    aria-hidden="true"
+	                    data-md-code-line-number
+	                    style={{ width: lineNumberWidth }}
+	                  >
+	                    {index + 1}
+	                  </span>
+	                  <span
+	                    data-md-code-line-content
+	                    style={{
+	                      ...CODE_SHARED_STYLE,
+	                      whiteSpace: codeBlockLineWrap ? 'pre-wrap' : 'pre',
                       overflowWrap: codeBlockLineWrap ? 'anywhere' : 'normal',
                     }}
                     data-openchamber-code-renderer={renderAsPlainText ? 'terminal-cell' : 'plain'}
                     data-openchamber-code-language={language}
-                  >
-                    {renderAsPlainText ? renderMonospaceTextCode(line) : line}
-                  </code>
-                </span>
-              ))}
-            </pre>
-          )}
+	                  >
+	                    {renderAsPlainText ? renderMonospaceTextCode(line) : line}
+	                  </span>
+	                  {index < codeLines.length - 1 ? (
+	                    <span data-md-code-line-break>{'\n'}</span>
+	                  ) : null}
+	                  </span>
+	                ))}
+	              </code>
+	            </pre>
+	          )}
         </div>
       )}
     </div>
@@ -1500,39 +1533,52 @@ const wrapBlockCodePathTokens = (container: HTMLElement): void => {
       continue;
     }
 
-    const walker = doc.createTreeWalker(codeBlock, NodeFilter.SHOW_TEXT);
-    const textNodes: Text[] = [];
-    let currentNode = walker.nextNode();
-    while (currentNode) {
-      textNodes.push(currentNode as Text);
-      currentNode = walker.nextNode();
-    }
+    const lineContents = Array.from(
+      codeBlock.querySelectorAll<HTMLElement>('[data-md-code-line-content]'),
+    );
+    const scanContainers = lineContents.length > 0 ? lineContents : [codeBlock];
 
-    const fullText = codeBlock.textContent ?? '';
-    if (!fullText.includes('.')) {
-      codeBlock.setAttribute(CODE_BLOCK_PATH_SCANNED_ATTR, 'true');
-      continue;
-    }
+    for (const scanContainer of scanContainers) {
+      const walker = doc.createTreeWalker(scanContainer, NodeFilter.SHOW_TEXT);
+      const textNodes: Text[] = [];
+      let currentNode = walker.nextNode();
+      while (currentNode) {
+        textNodes.push(currentNode as Text);
+        currentNode = walker.nextNode();
+      }
 
-    const matches = findFileReferenceTextMatches(fullText);
-
-    for (const { start, end, raw } of matches.reverse()) {
-      const startPosition = findTextPosition(textNodes, start);
-      const endPosition = findTextPosition(textNodes, end);
-      if (!startPosition || !endPosition) {
+      const lineNumberTextNodes = new Set(
+        textNodes.filter((node) => node.parentElement?.closest('[data-md-code-line-number]')),
+      );
+      const scannableTextNodes = textNodes.filter((node) => !lineNumberTextNodes.has(node));
+      const fullText = buildBlockCodePathScanText(textNodes.map((node) => ({
+        text: node.data,
+        isLineNumber: lineNumberTextNodes.has(node),
+      })));
+      if (!fullText.includes('.')) {
         continue;
       }
 
-      const range = doc.createRange();
-      range.setStart(startPosition.node, startPosition.offset);
-      range.setEnd(endPosition.node, endPosition.offset);
+      const matches = findFileReferenceTextMatches(fullText);
 
-      const span = doc.createElement('span');
-      span.setAttribute(BLOCK_PATH_TOKEN_ATTR, 'true');
-      span.textContent = raw;
+      for (const { start, end, raw } of matches.reverse()) {
+        const startPosition = findTextPosition(scannableTextNodes, start);
+        const endPosition = findTextPosition(scannableTextNodes, end);
+        if (!startPosition || !endPosition) {
+          continue;
+        }
 
-      range.deleteContents();
-      range.insertNode(span);
+        const range = doc.createRange();
+        range.setStart(startPosition.node, startPosition.offset);
+        range.setEnd(endPosition.node, endPosition.offset);
+
+        const span = doc.createElement('span');
+        span.setAttribute(BLOCK_PATH_TOKEN_ATTR, 'true');
+        span.textContent = raw;
+
+        range.deleteContents();
+        range.insertNode(span);
+      }
     }
 
     codeBlock.setAttribute(CODE_BLOCK_PATH_SCANNED_ATTR, 'true');
@@ -1611,7 +1657,7 @@ const openResolvedFileReference = ({
   return true;
 };
 
-const getFileUrlHrefFromEventTarget = (target: EventTarget | null): string | null => {
+const getFileReferenceHrefFromEventTarget = (target: EventTarget | null): string | null => {
   if (!(target instanceof Element)) {
     return null;
   }
@@ -1622,7 +1668,7 @@ const getFileUrlHrefFromEventTarget = (target: EventTarget | null): string | nul
   }
 
   const href = anchor.getAttribute('href') ?? '';
-  return isFileUrlHref(href) ? href : null;
+  return shouldInterceptMarkdownFileHref(href) ? href : null;
 };
 
 const useFileUrlNavigationGuard = ({
@@ -1643,7 +1689,7 @@ const useFileUrlNavigationGuard = ({
     }
 
     const handleClick = (event: MouseEvent) => {
-      const href = getFileUrlHrefFromEventTarget(event.target);
+      const href = getFileReferenceHrefFromEventTarget(event.target);
       if (!href) {
         return;
       }
@@ -1668,7 +1714,7 @@ const useFileUrlNavigationGuard = ({
         return;
       }
 
-      const href = getFileUrlHrefFromEventTarget(event.target);
+      const href = getFileReferenceHrefFromEventTarget(event.target);
       if (!href) {
         return;
       }
@@ -1857,6 +1903,14 @@ const useFileReferenceInteractions = ({
     };
 
     const demoteMissingFileReference = (candidate: HTMLElement, rawCandidate: string, resolvedPath: string, note: string) => {
+      if (candidate.hasAttribute(BLOCK_PATH_TOKEN_ATTR)) {
+        removeMissingBadge(candidate);
+        const parent = candidate.parentNode;
+        candidate.replaceWith(candidate.ownerDocument.createTextNode(candidate.textContent ?? ''));
+        parent?.normalize();
+        return;
+      }
+
       const alreadyDemoted = candidate.getAttribute('data-openchamber-file-status') === 'missing'
         && candidate.getAttribute('data-openchamber-file-link') !== 'true'
         && candidate.getAttribute('data-openchamber-file-ref') === rawCandidate

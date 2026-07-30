@@ -1075,6 +1075,48 @@ html:not(.dark) .chat-scroll {
   font-variant-emoji: emoji;
 }
 
+.markdown-content [data-md-code-lines],
+.markdown-content [data-md-highlighted-code-lines] {
+  display: block;
+  min-width: 100%;
+}
+
+.markdown-content [data-md-code-line] {
+  display: grid;
+  grid-template-columns: 2rem minmax(0, 1fr);
+  column-gap: 0.75rem;
+  min-width: 100%;
+}
+
+.markdown-content [data-md-code-line-number] {
+  align-self: stretch;
+  padding-right: 0.75rem;
+  border-right: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  color: var(--muted-foreground);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  user-select: none;
+}
+
+.markdown-content [data-md-code-line-content] {
+  min-width: 0;
+}
+
+.markdown-content [data-md-code-line-content] > span {
+  display: inline;
+}
+
+.markdown-content [data-md-code-line-break] {
+  display: none;
+}
+
+.markdown-content [data-md-code-line] .oc-file-missing-badge {
+  display: inline-block;
+  line-height: 1;
+  vertical-align: baseline;
+  transform: translateY(-0.35em);
+}
+
 /* Override Streamdown's hardcoded bg-muted for inline code - use theme colors instead */
 .markdown-content code[data-markdown="inline-code"] {
   background-color: var(--markdown-inline-code-bg, var(--surface-muted)) !important;
