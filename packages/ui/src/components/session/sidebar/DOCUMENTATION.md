@@ -19,7 +19,7 @@
 ### Components
 
 - `SidebarHeader.tsx`: Top header UI for add-project, session search, and display mode.
-- `SidebarActivitySections.tsx`: Global top section renderer; currently used for the `recent` section only.
+- `SidebarActivitySections.tsx`: Global Pinned and `recent` section renderer. Each rendered section instance owns its own sticky sentinel so their stuck state cannot leak across zones.
 - `SidebarFooter.tsx`: Static footer with icon-only settings, shortcuts, and about actions.
 - `SidebarProjectsList.tsx`: Main scrollable tree renderer for projects, root sessions, worktrees/groups, and empty/search states.
 - `SessionGroupSection.tsx`: Renders a single worktree/archived group, collapse/expand, folder subtree, and group-level controls.
@@ -43,7 +43,7 @@
 - `hooks/useProjectRepoStatus.ts`: Tracks per-project git-repo state and root branch metadata.
 - `hooks/useProjectSessionLists.ts`: Builds live and archived session lists for a given project (including worktrees + dedupe).
 - `hooks/useSessionFolderCleanup.ts`: Cleans stale folder session IDs by reconciling known sessions/archived scopes.
-- `hooks/useStickyProjectHeaders.ts`: Tracks which project headers are sticky/stuck via `IntersectionObserver`.
+- `hooks/useStickyProjectHeaders.ts`: Tracks project and activity header stuck state via `IntersectionObserver`. Headers remain sticky while the preference is enabled, but receive vibrancy backing only while actually stuck; disabling the preference or leaving the desktop shell clears stale stuck state.
 
 ### Types and utilities
 

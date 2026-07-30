@@ -14,11 +14,13 @@ import type { SessionNode } from './types';
 import { useI18n } from '@/lib/i18n';
 import { Icon } from "@/components/icon/Icon";
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import {
   buildSessionNodeRenderExtras,
   type SessionNodeChildRenderExtras,
   type SidebarRenderContext,
 } from './sessionNodeItemUtils';
+import { useStickyHeader } from './hooks/useStickyProjectHeaders';
 
 export type ActivityItem = {
   node: SessionNode;
@@ -50,6 +52,7 @@ type Props = {
   ) => React.ReactNode;
   openSidebarMenuKey?: string | null;
   onReorderGlobalPinned?: (fromIndex: number, toIndex: number) => void;
+  isDesktopShellRuntime: boolean;
 };
 
 const MAX_VISIBLE_RECENT_SESSIONS = 7;
@@ -76,11 +79,17 @@ export function SidebarActivitySections({
   renderSessionNode,
   openSidebarMenuKey = null,
   onReorderGlobalPinned,
+  isDesktopShellRuntime,
 }: Props): React.ReactNode {
   const { t } = useI18n();
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
+  const stickyZoneHeaders = useSessionDisplayStore((state) => state.stickyZoneHeaders);
   const [collapsed, setCollapsed] = React.useState<Set<string>>(new Set());
   const [expandedSections, setExpandedSections] = React.useState<Set<string>>(new Set());
+  const { isStuck: isActivityHeaderStuck, sentinelRef: activityHeaderSentinelRef } = useStickyHeader({
+    enabled: stickyZoneHeaders,
+    isDesktopShellRuntime,
+  });
 
   const extrasBySectionKey = React.useMemo(() => {
     const map = new Map<string, ReturnType<typeof buildSessionNodeRenderExtras>>();
@@ -191,8 +200,17 @@ export function SidebarActivitySections({
 
         if (isGlobalPinned) {
           return (
-            <div key={section.key} className="space-y-1">
-              <span className="block px-0.5 py-0.5 text-[14px] font-normal text-foreground/95">{section.title}</span>
+            <div key={section.key} className="relative space-y-1">
+              <div
+                ref={activityHeaderSentinelRef}
+                className="absolute top-0 h-px w-full pointer-events-none"
+                aria-hidden="true"
+              />
+              <span className={cn(
+                'block px-0.5 py-0.5 text-[14px] font-normal text-foreground/95',
+                stickyZoneHeaders && 'sticky top-0 z-20 bg-sidebar',
+                stickyZoneHeaders && isActivityHeaderStuck && 'oc-zone-header-backing',
+              )}>{section.title}</span>
               <div className="space-y-0 pt-0 pb-0.5">
                 {renderItems(section, visibleItems)}
               </div>
@@ -201,18 +219,28 @@ export function SidebarActivitySections({
         }
 
         return (
-          <div key={section.key} className="space-y-1">
-            <button
-              type="button"
-              onClick={() => toggleSection(section.key)}
-              className="group flex w-full items-center gap-1 rounded-md px-0.5 py-0.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
-              aria-expanded={!isCollapsed}
-            >
-              <span className="inline-flex h-4 w-4 items-center justify-center text-muted-foreground">
-                {isCollapsed ? <Icon name="arrow-right-s" className="h-3.5 w-3.5" /> : <Icon name="arrow-down-s" className="h-3.5 w-3.5" />}
-              </span>
-              <span className="text-[14px] font-normal text-foreground/95">{section.title}</span>
-            </button>
+          <div key={section.key} className="relative space-y-1">
+            <div
+              ref={activityHeaderSentinelRef}
+              className="absolute top-0 h-px w-full pointer-events-none"
+              aria-hidden="true"
+            />
+            <div className={cn(
+              stickyZoneHeaders && 'sticky top-0 z-20 bg-sidebar',
+              stickyZoneHeaders && isActivityHeaderStuck && 'oc-zone-header-backing',
+            )}>
+              <button
+                type="button"
+                onClick={() => toggleSection(section.key)}
+                className="group flex w-full items-center gap-1 rounded-md px-0.5 py-0.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+                aria-expanded={!isCollapsed}
+              >
+                <span className="inline-flex h-4 w-4 items-center justify-center text-muted-foreground">
+                  {isCollapsed ? <Icon name="arrow-right-s" className="h-3.5 w-3.5" /> : <Icon name="arrow-down-s" className="h-3.5 w-3.5" />}
+                </span>
+                <span className="text-[14px] font-normal text-foreground/95">{section.title}</span>
+              </button>
+            </div>
             {!isCollapsed ? (
               <div className={cn('space-y-0.5 pl-7')}>
                 {renderItems(section, visibleItems)}

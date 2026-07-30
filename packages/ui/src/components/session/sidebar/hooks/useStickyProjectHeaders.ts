@@ -1,17 +1,76 @@
 import React from 'react';
 
 type Args = {
+  enabled?: boolean;
   isDesktopShellRuntime: boolean;
   projectSections: unknown[];
-  projectHeaderSentinelRefs: React.MutableRefObject<Map<string, HTMLDivElement | null>>;
+  projectHeaderSentinelRefs: React.RefObject<Map<string, HTMLDivElement | null>>;
+};
+
+type StickyHeaderArgs = {
+  enabled: boolean;
+  isDesktopShellRuntime: boolean;
+};
+
+export const updateStuckProjectHeaders = (
+  previous: Set<string>,
+  projectId: string,
+  isStuck: boolean,
+): Set<string> => {
+  if (previous.has(projectId) === isStuck) return previous;
+  const next = new Set(previous);
+  if (isStuck) {
+    next.add(projectId);
+  } else {
+    next.delete(projectId);
+  }
+  return next;
+};
+
+export const clearStuckProjectHeaders = (previous: Set<string>): Set<string> => {
+  return previous.size === 0 ? previous : new Set();
+};
+
+export const useStickyHeader = (args: StickyHeaderArgs) => {
+  const { enabled, isDesktopShellRuntime } = args;
+  const [sentinel, setSentinel] = React.useState<HTMLDivElement | null>(null);
+  const [isStuck, setIsStuck] = React.useState(false);
+
+  const sentinelRef = React.useCallback((node: HTMLDivElement | null) => {
+    setSentinel(node);
+  }, []);
+
+  React.useEffect(() => {
+    if (!enabled || !isDesktopShellRuntime || !sentinel) {
+      setIsStuck(false);
+      return;
+    }
+
+    const observer = new IntersectionObserver(([entry]) => {
+      setIsStuck(entry.intersectionRatio < 1);
+    }, { threshold: 1 });
+
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [enabled, isDesktopShellRuntime, sentinel]);
+
+  return { isStuck, sentinelRef };
 };
 
 export const useStickyProjectHeaders = (args: Args): Set<string> => {
-  const { isDesktopShellRuntime, projectSections, projectHeaderSentinelRefs } = args;
+  const { enabled = true, isDesktopShellRuntime, projectSections, projectHeaderSentinelRefs } = args;
   const [stuckProjectHeaders, setStuckProjectHeaders] = React.useState<Set<string>>(new Set());
 
   React.useEffect(() => {
-    if (!isDesktopShellRuntime) {
+    if (enabled && isDesktopShellRuntime) {
+      return;
+    }
+
+    setStuckProjectHeaders(clearStuckProjectHeaders);
+  }, [enabled, isDesktopShellRuntime]);
+
+  React.useEffect(() => {
+    if (!enabled || !isDesktopShellRuntime) {
       return;
     }
 
@@ -23,20 +82,11 @@ export const useStickyProjectHeaders = (args: Args): Set<string> => {
             return;
           }
 
-          setStuckProjectHeaders((prev) => {
-            const nextIsStuck = !entry.isIntersecting;
-            if (prev.has(projectId) === nextIsStuck) {
-              return prev;
-            }
-
-            const next = new Set(prev);
-            if (nextIsStuck) {
-              next.add(projectId);
-            } else {
-              next.delete(projectId);
-            }
-            return next;
-          });
+          setStuckProjectHeaders((prev) => updateStuckProjectHeaders(
+            prev,
+            projectId,
+            !entry.isIntersecting,
+          ));
         });
       },
       { threshold: 0 },
@@ -49,7 +99,7 @@ export const useStickyProjectHeaders = (args: Args): Set<string> => {
     });
 
     return () => observer.disconnect();
-  }, [isDesktopShellRuntime, projectHeaderSentinelRefs, projectSections]);
+  }, [enabled, isDesktopShellRuntime, projectHeaderSentinelRefs, projectSections]);
 
   return stuckProjectHeaders;
 };

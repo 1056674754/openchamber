@@ -13,6 +13,7 @@ import { cn } from '@/lib/utils';
 import { PROJECT_COLOR_MAP, PROJECT_ICON_MAP, getProjectIconImageUrl } from '@/lib/projectMeta';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useI18n } from '@/lib/i18n';
+import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { useDesktopSshStore } from '@/stores/useDesktopSshStore';
 import { useRemoteInstancesStore } from '@/stores/useRemoteInstancesStore';
 import { resolveInstanceLabel, type DesktopSshInstanceStatus, type DesktopSshPhase } from '@/lib/desktopSsh';
@@ -404,6 +405,7 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
 }) => {
   const { t } = useI18n();
   const { currentTheme } = useThemeSystem();
+  const stickyZoneHeaders = useSessionDisplayStore((state) => state.stickyZoneHeaders);
   const registrySnapshot = useServerRegistrySnapshot(serverId);
   const sshInstance = useDesktopSshStore((state) => serverId ? state.instances.find((entry) => entry.id === serverId) : undefined);
   const sshStatus = useDesktopSshStore((state) => serverId ? state.statusesById[serverId] : undefined);
@@ -500,8 +502,9 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
           <div
             className={cn(
               'w-full text-left group/project select-none',
+              stickyZoneHeaders && 'sticky top-0 z-20 bg-sidebar',
+              stickyZoneHeaders && isStuck && 'oc-zone-header-backing shadow-md',
             )}
-            style={{ backgroundColor: isDesktopShell && isStuck ? 'transparent' : undefined }}
             onContextMenu={!mobileVariant ? (e) => {
               e.preventDefault();
               setMenuPosition({ x: e.clientX, y: e.clientY });

@@ -140,6 +140,7 @@ const DEPRECATED_SESSION_EXPANDED_STORAGE_KEYS = [
   'oc.sessions.expandedParents',
 ] as const;
 const WORKTREE_DISCOVERY_CONCURRENCY = 3;
+const EMPTY_STUCK_PROJECT_HEADERS = new Set<string>();
 
 type PrVisualState = 'draft' | 'open' | 'blocked' | 'merged' | 'closed';
 
@@ -1871,6 +1872,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
   const recentSessionIdsList = React.useMemo(() => [...recentSessionIds], [recentSessionIds]);
 
   const showArchivedSessions = useSessionDisplayStore((state) => state.showArchivedSessions);
+  const stickyZoneHeaders = useSessionDisplayStore((state) => state.stickyZoneHeaders);
 
   React.useEffect(() => {
     if (!showArchivedSessions) return;
@@ -2092,6 +2094,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
   const headerActionButtonClass = mobileVariant ? mobileHeaderActionButtonClass : desktopHeaderActionButtonClass;
   const headerActionIconClass = 'h-4.5 w-4.5';
   const stuckProjectHeaders = useStickyProjectHeaders({
+    enabled: stickyZoneHeaders,
     isDesktopShellRuntime,
     projectSections,
     projectHeaderSentinelRefs,
@@ -2322,6 +2325,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
           renderSessionNode={renderSessionNode}
           openSidebarMenuKey={openSidebarMenuKey}
           onReorderGlobalPinned={reorderGlobalPinned}
+          isDesktopShellRuntime={isDesktopShellRuntime}
         />
       ) : null}
       {showRecentSection ? (
@@ -2329,6 +2333,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
           sections={activitySections}
           renderSessionNode={renderSessionNode}
           openSidebarMenuKey={openSidebarMenuKey}
+          isDesktopShellRuntime={isDesktopShellRuntime}
         />
       ) : null}
     </>
@@ -2698,7 +2703,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
         hideDirectoryControls={hideDirectoryControls}
         projectRepoStatus={projectRepoStatus}
         isDesktopShellRuntime={isDesktopShellRuntime}
-        stuckProjectHeaders={stuckProjectHeaders}
+        stuckProjectHeaders={stickyZoneHeaders ? stuckProjectHeaders : EMPTY_STUCK_PROJECT_HEADERS}
         mobileVariant={mobileVariant}
         alwaysShowActions={alwaysShowSidebarActions}
         toggleProject={toggleProject}
