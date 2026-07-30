@@ -1556,7 +1556,7 @@ VS Code worktree lock 验证：在两个真实临时 Git 仓库及 `--no-checkou
 | 能力 | 当前状态 | Fork 处理 / Work Item |
 |---|---|---|
 | OpenCode stalled SSE 恢复与 managed restart-loop 抑制 | 🟡 部分已有 | lifecycle 已有 health、busy grace、取证日志与 restart reason；仍缺 proxy upstream-stall 截断，以及按 health interval 限制连续失败计数。按 [#68](https://coding.s-s.city/songsong/openchamber/-/work_items/68) 适配，不改变 detached keep-alive、shared database 或进程所有权 |
-| Bash 卡片实时输出、固定高度与无 5 分钟计时上限 | ❌ 未合并 | 当前 `ToolPart` 仍以 final output 为主且 timer capped at 300s；按 [#69](https://coding.s-s.city/songsong/openchamber/-/work_items/69) 在局部 renderer 消费 live metadata，避免向共享 store 扩散高频订阅 |
+| Bash 卡片实时输出、固定高度与无 5 分钟计时上限 | ✅ 已合并 | [#69](https://coding.s-s.city/songsong/openchamber/-/work_items/69)：`ToolPart` 局部消费 Bash `metadata.output`，运行中使用固定高度输出区并只追加新增文本；自动跟随在用户向上滚动后停止，回到底部后恢复。计时器不再截断于 300s；未向共享 store 扩散高频订阅 |
 | 历史完整性与 revert optimistic 清理 | 🟡 部分已有 | server-only pagination、自动旧消息预取和同步 scroll anchor 已完成；tail/force refresh 仍可能弱化既有 `complete/cursor`，revert 后 optimistic shadow 也未同步确认删除。按 [#70](https://coding.s-s.city/songsong/openchamber/-/work_items/70) 收口，禁止引入第二个 scroll writer |
 | bundled OpenCode 不显示独立 updater | 🟡 后端已有保护 | POST upgrade 已对 bundled 返回 409，但 upgrade status/toast 仍可能展示入口；按 [#71](https://coding.s-s.city/songsong/openchamber/-/work_items/71) 统一 capability、UI 与 VS Code 合约，自定义 `-sscity` binary/runbook 继续作为唯一升级通道 |
 | Slash starter 携带 draft 参数；Goal 使用展开后的 command template | ❌ 未合并 | 当前 starter 与 draft 使用换行组合，Goal 的 interactive/scheduled 路径未统一展开模板；按 [#72](https://coding.s-s.city/songsong/openchamber/-/work_items/72) 处理，保留 queue-time send config/target 快照 |
@@ -1573,7 +1573,9 @@ VS Code worktree lock 验证：在两个真实临时 Git 仓库及 `--no-checkou
 
 **#74 验证证据（2026-07-30）**：focused `scrollSpy` 测试覆盖物理底部、800px 视口的 80px anchor 边界、81px 退出边界，以及 100px 小视口下由 48px 最小值接管的 30px 场景；4 条测试、改动文件定向 ESLint、全 workspace type-check/build 通过。matching-surface QA 在真实 OpenCode 会话 `ses_04d1d70f4ffeK7C5QHSP6gBjRc` 操作 Prompt Navigator，选择最新刻度后确认聊天滚动区 `distanceFromBottom=0`，active tick 为最新的 `2/2`；未改动 timeline controller 或 rail 的键盘遍历实现。
 
-**执行总览**：GitLab Overview [#1](https://coding.s-s.city/songsong/openchamber/-/work_items/1) 已推进到 v1.17.1，并加入 [#68](https://coding.s-s.city/songsong/openchamber/-/work_items/68)–[#79](https://coding.s-s.city/songsong/openchamber/-/work_items/79)。其中 #74/#75 已按实现、focused tests / workspace checks、matching-surface QA 和本台账证据闭环；其余条目保持 open。
+**#69 验证证据（2026-07-30）**：focused helper tests 6 条覆盖完成态 output 权威、仅 Bash 使用 live metadata、增量追加与重写、stream throttle replacement 和超过 5 分钟的 elapsed time；改动文件定向 ESLint、全 workspace type-check/build 通过。matching-surface QA 在真实 OpenCode 会话 `ses_04d00c54dffehmxfAdlPLtKi4A` 展开运行中的 Bash 卡片：命令执行到 `13.0s` 时已显示 `verified-live-start`，状态仍为 running，`verified-live-finish` 尚未出现，确认不是完成后才渲染的 final output。实现保持 `ToolPart` 局部订阅和单文本节点增量更新，未改变多实例或 Session 数据流。
+
+**执行总览**：GitLab Overview [#1](https://coding.s-s.city/songsong/openchamber/-/work_items/1) 已推进到 v1.17.1，并加入 [#68](https://coding.s-s.city/songsong/openchamber/-/work_items/68)–[#79](https://coding.s-s.city/songsong/openchamber/-/work_items/79)。其中 #69/#74/#75 已按实现、focused tests / workspace checks、matching-surface QA 和本台账证据闭环；其余条目保持 open。
 
 ### Fork 稳定性：Markdown 相对文件链接整页导航（2026-07-30）
 
