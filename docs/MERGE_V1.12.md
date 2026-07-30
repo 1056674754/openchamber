@@ -1265,7 +1265,7 @@ VS Code worktree lock 验证：在两个真实临时 Git 仓库及 `--no-checkou
 
 ### 内部发行版本与许可证（2026-07-21）
 
-- OpenChamber 的 merge baseline 已于 2026-07-30 提升到 `1.17.0`；源码版本使用 `1.17.0-sscity`，Electron 每次打包生成 `1.17.0-sscity.YYYYMMDD-HHMMSS`，About、包元数据和内部下载记录使用同一个构建版本。下一次 baseline 提升仍需先完成对应官方区间的逐项审计和验证。
+- OpenChamber 的 merge baseline 已于 2026-07-30 提升到 `1.17.1`；源码版本使用 `1.17.1-sscity`，Electron 每次打包生成 `1.17.1-sscity.YYYYMMDD-HHMMSS`，About、包元数据和内部下载记录使用同一个构建版本。下一次 baseline 提升仍需先完成对应官方区间的逐项审计和验证。
 - 自定义 OpenCode 统一使用 `-sscity` 后缀；当前 Linux AppImage 嵌入并核验的是 `1.18.9-sscity`，且必须以 `OPENCODE_CHANNEL=latest` 构建以继续使用共享数据库。
 - OMO 是独立的内部发行产物，不嵌入 OpenChamber；OpenCode、Codex 与 Senpi edition 当前统一为 `4.19.0-sscity`。
 - macOS 包新增 `Resources/legal/OpenChamber-LICENSE.txt` 和 `Resources/legal/THIRD-PARTY-NOTICES.md`。内部网站只分发通过 Developer ID 签名、公证、staple 和 Gatekeeper 验证的最终产物。
@@ -1593,7 +1593,9 @@ VS Code worktree lock 验证：在两个真实临时 Git 仓库及 `--no-checkou
 
 **#79 验证证据（2026-07-30）**：sticky state focused tests 3 条、12 个断言通过，覆盖 no-op Set 引用保持、不可变 add/remove 与 disabled stale-state 清理；UI type-check、改动文件定向 ESLint 与 workspace build 通过。matching-surface Playwright 使用真实 build、Electron runtime identity、40 个 local Session、1 个 remote project、Global Pinned 与 Recent：顶部顺序为 Global Pinned → Recent → local project → remote project，未 stuck 时三类 header 均无 backing；滚动 900px 后 local header 固定在 sidebar 顶部 1px 范围内且仅实际 stuck headers 获得 `oc-zone-header-backing`；关闭 Sticky project headers 后 sticky/backing 同步清空。720×900 与 375×812 均无横向溢出、无 page error。实现复用 fork 现有 local/remote section 和 Global Pinned 顺序，没有引入上游单实例目录权威或 sidebar modules。
 
-**执行总览**：GitLab Overview [#1](https://coding.s-s.city/songsong/openchamber/-/work_items/1) 已推进到 v1.17.1，并加入 [#68](https://coding.s-s.city/songsong/openchamber/-/work_items/68)–[#79](https://coding.s-s.city/songsong/openchamber/-/work_items/79)。#68–#79 均已按实现、focused tests / workspace checks、matching-surface QA 和本台账证据闭环；v1.17.1 用户可观察能力已完成迁移。
+**执行总览**：GitLab Overview [#1](https://coding.s-s.city/songsong/openchamber/-/work_items/1) 已推进到 v1.17.1，并加入 [#68](https://coding.s-s.city/songsong/openchamber/-/work_items/68)–[#79](https://coding.s-s.city/songsong/openchamber/-/work_items/79)。#68–#79 均已按实现、focused tests / workspace checks、matching-surface QA 和本台账证据闭环；v1.17.1 用户可观察能力已完成迁移。源码与六个 workspace manifest、Bun workspace lock、Electron 构建版本前缀和 standalone CLI 已统一提升到 `1.17.1-sscity`；`version:bump` 同时移除失效的 Tauri/Cargo 路径并纳入 Mobile workspace。
+
+**v1.17.1 版本收口验证（2026-07-30）**：升级脚本幂等执行成功；六个 manifest 与 Bun workspace lock 一致性检查通过；Electron build-version 3 条测试通过；standalone CLI 实际输出 `1.17.1-sscity`，构建版本生成器实际输出 `1.17.1-sscity.20260730-000000`。全 workspace type-check、完整 Web/UI/VS Code/Mobile build、docs validation 与版本相关文件定向 ESLint 均通过。
 
 ### Fork 稳定性：Markdown 相对文件链接整页导航（2026-07-30）
 

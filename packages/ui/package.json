@@ -1,6 +1,6 @@
 {
   "name": "@openchamber/ui",
-  "version": "1.16.0-sscity",
+  "version": "1.17.1-sscity",
   "private": true,
   "type": "module",
   "main": "src/main.tsx",

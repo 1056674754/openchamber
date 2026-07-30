@@ -31,7 +31,7 @@ Read this document before any of the following:
 
 OpenChamber's `packages/electron/scripts/after-pack.cjs` calls `embedded-opencode.cjs` during packaging. The hook copies the selected OpenCode binary into the app bundle, assigns executable permissions, signs it, verifies it, runs `--version`, and writes `Resources/opencode/metadata.json`. Electron Builder then performs the final recursive application signing pass.
 
-OpenChamber's source version is `1.16.0-sscity` after the v1.16.0 migration audit and validation closed. Every Electron package appends its Asia/Shanghai build time and emits `1.16.0-sscity.YYYYMMDD-HHMMSS` (hyphen before time so early-morning `0HHMMSS` stays valid semver for electron-updater). This generated value is the package metadata and About-dialog version. Do not advance the baseline again until the migration table records the next upstream baseline as fully audited.
+OpenChamber's source version is `1.17.1-sscity` after the v1.17.1 migration audit and validation closed. Every Electron package appends its Asia/Shanghai build time and emits `1.17.1-sscity.YYYYMMDD-HHMMSS` (hyphen before time so early-morning `0HHMMSS` stays valid semver for electron-updater). This generated value is the package metadata and About-dialog version. Do not advance the baseline again until the migration table records the next upstream baseline as fully audited.
 
 ## 1. Build the custom OpenCode binary
 

@@ -8,7 +8,7 @@ import { homedir } from 'node:os';
 import { createHash } from 'node:crypto';
 import { EMBEDDED_ASSETS } from './embedded-assets.generated.mjs';
 
-const STANDALONE_VERSION = '1.16.0-sscity';
+const STANDALONE_VERSION = '1.17.1-sscity';
 
 // Derive assets version from binary content hash to avoid stale caches
 const ASSETS_HASH = createHash('sha256')
