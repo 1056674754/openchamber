@@ -58,6 +58,7 @@ docker run --rm \
       --exclude "packages/*/node_modules" \
       --exclude "./artifacts" \
       --exclude "packages/electron/dist" \
+      --exclude "packages/electron/dist-*" \
       --exclude "packages/electron/.cache" \
       -cf - . | tar -C /work -xf -
     if [ -d "$preserve_openchamber/node_modules" ]; then

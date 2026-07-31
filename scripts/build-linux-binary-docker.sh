@@ -55,6 +55,7 @@ docker run --rm --platform linux/amd64 \
       --exclude "packages/*/node_modules" \
       --exclude ./artifacts \
       --exclude openchamber-linux \
+      --exclude "packages/electron/dist-*" \
       --exclude ".*.bun-build" \
       -cf - . | tar -C /work -xf -
     if [ -d "$preserve_dir/node_modules" ]; then
