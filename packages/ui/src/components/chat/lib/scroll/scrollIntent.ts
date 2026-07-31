@@ -111,6 +111,34 @@ export const isNearTop = (scrollTop: number, threshold: number): boolean => {
     return scrollTop <= threshold;
 };
 
+export const resolveSessionEntryScrollAction = (input: {
+    readonly hasRenderableSnapshot: boolean;
+    readonly hasHashTarget: boolean;
+}): 'wait' | 'hash' | 'latest' => {
+    if (!input.hasRenderableSnapshot) {
+        return 'wait';
+    }
+
+    return input.hasHashTarget ? 'hash' : 'latest';
+};
+
+export const shouldRevealInitialLatestViewport = (input: {
+    readonly atBottom: boolean;
+    readonly hasLastHistoryEntry: boolean;
+    readonly startedAt: number;
+    readonly lastLayoutChangeAt: number;
+    readonly now: number;
+    readonly quietPeriodMs: number;
+    readonly maxWaitMs: number;
+}): boolean => {
+    if (!input.atBottom || !input.hasLastHistoryEntry) {
+        return false;
+    }
+
+    return input.now - input.lastLayoutChangeAt >= input.quietPeriodMs
+        || input.now - input.startedAt >= input.maxWaitMs;
+};
+
 const OLDER_HISTORY_PREFETCH_MIN_PX = 640;
 const OLDER_HISTORY_PREFETCH_VIEWPORT_RATIO = 1;
 const MESSAGE_LIST_DESKTOP_OVERSCAN = 6;

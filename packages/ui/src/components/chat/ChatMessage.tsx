@@ -1421,6 +1421,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                                     <div
                                         data-process-fold-content="primary"
                                         aria-hidden={assistantBodyProcessFoldCollapsed ? 'true' : undefined}
+                                        inert={assistantBodyProcessFoldCollapsed ? true : undefined}
                                     >
                                         {assistantBodyElement}
                                     </div>

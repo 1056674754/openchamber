@@ -62,6 +62,7 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
   const canUseCraftGoal = canStartSessionCommand
     && !isVSCodeRuntime()
     && craftGoalSupport.supported;
+  const canUseScheduleTask = canStartSessionCommand && !isVSCodeRuntime();
 
   const [commands, setCommands] = React.useState<CommandInfo[]>([]);
   const [loading, setLoading] = React.useState(false);
@@ -85,6 +86,7 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
     handoffReview: t('chat.commandAutocomplete.command.handoffReviewDescription'),
     featurePlan: t('chat.commandAutocomplete.command.featurePlanDescription'),
     craftGoal: t('chat.commandAutocomplete.command.craftGoalDescription'),
+    scheduleTask: t('chat.commandAutocomplete.command.scheduleTaskDescription'),
     catchUp: t('chat.commandAutocomplete.command.catchUpDescription'),
     debug: t('chat.commandAutocomplete.command.debugDescription'),
     weigh: t('chat.commandAutocomplete.command.weighDescription'),
@@ -128,6 +130,7 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
           canStartSessionCommand,
           canUseReviewHandoffFlow,
           canUseCraftGoal,
+          canUseScheduleTask,
           descriptions: commandDescriptions,
         }));
       } catch {
@@ -138,6 +141,7 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
           canStartSessionCommand,
           canUseReviewHandoffFlow,
           canUseCraftGoal,
+          canUseScheduleTask,
           descriptions: commandDescriptions,
         }));
       } finally {
@@ -146,7 +150,7 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
     };
 
     loadCommands();
-  }, [searchQuery, hasMessagesInCurrentSession, hasSession, canStartSessionCommand, canUseReviewHandoffFlow, canUseCraftGoal, commandsWithMetadata, skills, commandDescriptions]);
+  }, [searchQuery, hasMessagesInCurrentSession, hasSession, canStartSessionCommand, canUseReviewHandoffFlow, canUseCraftGoal, canUseScheduleTask, commandsWithMetadata, skills, commandDescriptions]);
 
   React.useEffect(() => {
     setSelectedIndex(0);

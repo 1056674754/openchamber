@@ -252,6 +252,14 @@ export const useChatAutoFollow = ({
     const goToBottom = React.useCallback((mode: 'instant' | 'smooth' = 'instant') => {
         const container = scrollRef.current;
         setStateValue('following');
+        settlingRef.current = true;
+        if (settleTimerRef.current !== null) {
+            clearTimeout(settleTimerRef.current);
+        }
+        settleTimerRef.current = setTimeout(() => {
+            settlingRef.current = false;
+            settleTimerRef.current = null;
+        }, PASSIVE_FOLLOW_SETTLE_MS);
         if (!container) return;
         if (mode === 'smooth') {
             const target = Math.max(0, container.scrollHeight - container.clientHeight);
@@ -437,6 +445,12 @@ export const useChatAutoFollow = ({
             return;
         }
 
+        if (stateRef.current === 'following' && settlingRef.current) {
+            stickToBottomIfFollowing();
+            queueSave();
+            return;
+        }
+
         if (isNearBottom(container, isMobileRef.current)) {
             setStateValue('following');
             queueSave();
@@ -453,6 +467,7 @@ export const useChatAutoFollow = ({
         queueSave,
         releaseFromUserIntent,
         setStateValue,
+        stickToBottomIfFollowing,
         updateOverflowAndButton,
     ]);
 

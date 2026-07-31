@@ -84,6 +84,28 @@ describe('blocking request tool anchoring', () => {
         expect(split.trailingQuestions).toEqual([]);
     });
 
+    test('renders the same pending question request only once', () => {
+        const visibleKey = getToolRequestKey('msg-1', 'call-1');
+        const question: QuestionRequest = {
+            id: 'que-1',
+            sessionID: 'ses-1',
+            questions: [],
+            tool: {
+                messageID: 'msg-1',
+                callID: 'call-1',
+            },
+        };
+
+        const split = splitBlockingRequestsByVisibleTool(
+            [question, question],
+            [],
+            new Set([visibleKey]),
+        );
+
+        expect(split.inlineByTool.get(visibleKey)?.questions).toEqual([question]);
+        expect(split.trailingQuestions).toEqual([]);
+    });
+
     test('falls back to part id for older tool records without callID', () => {
         expect(getToolPartRequestKey('msg-1', { id: 'part-1', messageID: 'msg-2' })).toBe(
             getToolRequestKey('msg-2', 'part-1'),

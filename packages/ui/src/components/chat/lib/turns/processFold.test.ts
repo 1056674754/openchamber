@@ -1,6 +1,12 @@
 import { describe, expect, test } from 'bun:test';
 import type { Message, Part } from '@opencode-ai/sdk/v2';
-import { deriveAutoExpandedTurnIds, deriveProcessFoldState, turnHasStopSummary } from './processFold';
+import {
+    deriveAutoExpandedTurnIds,
+    deriveProcessFoldState,
+    resolveProcessFoldExpansion,
+    setProcessFoldOverride,
+    turnHasStopSummary,
+} from './processFold';
 import { projectTurnRecords } from './projectTurnRecords';
 import type { ChatMessageEntry, TurnRecord } from './types';
 
@@ -141,6 +147,23 @@ describe('process fold state', () => {
             expanded: false,
             enabled: true,
         });
+    });
+
+    test('keeps an interacted live process open when the turn becomes completed', () => {
+        const userExpanded = true;
+
+        expect(resolveProcessFoldExpansion({
+            foldDefault: { expanded: false, enabled: true },
+            userExpanded,
+        })).toBe(true);
+    });
+
+    test('keeps a process override in hoisted turn state across a renderer remount', () => {
+        const liveRendererState = setProcessFoldOverride(undefined, 'fold-0', true);
+        const staticRendererState = setProcessFoldOverride(liveRendererState, 'fold-1', false);
+
+        expect(staticRendererState.get('fold-0')).toBe(true);
+        expect(staticRendererState.get('fold-1')).toBe(false);
     });
 
     test('ignores stale auto-expanded turn ids once the session is not working', () => {

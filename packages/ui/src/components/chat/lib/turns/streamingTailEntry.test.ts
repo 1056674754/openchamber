@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import type { Message, Part } from '@opencode-ai/sdk/v2';
 
 import { buildLiveStreamingEntry, type StreamingTailEntry } from './streamingTailEntry';
+import { projectTurnRecords } from './projectTurnRecords';
 import type { ChatMessageEntry, TurnRecord } from './types';
 
 const message = (id: string, role: 'user' | 'assistant', parentID?: string, parts: Part[] = []): ChatMessageEntry => ({
@@ -68,6 +69,7 @@ describe('buildLiveStreamingEntry', () => {
             activeStreamingMessageId: 'assistant_other',
             liveParts: [textPart('part_live', 'live')],
             showTextJustificationActivity: true,
+            planModeEnabled: false,
         });
 
         expect(next).toBe(entry);
@@ -82,6 +84,7 @@ describe('buildLiveStreamingEntry', () => {
             activeStreamingMessageId: 'assistant_1',
             liveParts,
             showTextJustificationActivity: true,
+            planModeEnabled: false,
         });
 
         expect(next).not.toBe(entry);
@@ -104,6 +107,7 @@ describe('buildLiveStreamingEntry', () => {
             activeStreamingMessageId: 'assistant_1',
             liveParts,
             showTextJustificationActivity: false,
+            planModeEnabled: false,
         });
 
         expect(next).not.toBe(entry);
@@ -122,10 +126,47 @@ describe('buildLiveStreamingEntry', () => {
             activeStreamingMessageId: 'assistant_1',
             liveParts: [synthetic, visible],
             showTextJustificationActivity: true,
+            planModeEnabled: false,
         });
 
         expect(next.kind).toBe('turn');
         if (next.kind !== 'turn') return;
         expect(next.turn.assistantMessages[0]?.parts).toEqual([visible]);
+    });
+
+    test('preserves a streaming assistant parented by a hidden compaction continuation', () => {
+        const user = message('user_1', 'user');
+        const completed = message('assistant_1', 'assistant', 'user_1', [textPart('part_done', 'done')]);
+        const continuation = message('user_continue', 'user', undefined, [
+            syntheticTextPart('part_continue', '[SYSTEM DIRECTIVE: TODO CONTINUATION]'),
+        ]);
+        const streaming = message('assistant_2', 'assistant', 'user_continue', [
+            reasoningPart('part_stale', 'starting'),
+        ]);
+        const projection = projectTurnRecords([user, completed, continuation, streaming], {
+            mergeHiddenUserTurns: { planModeEnabled: false },
+        });
+        const projectedTurn = projection.turns[0];
+        expect(projectedTurn?.assistantMessageIds).toEqual(['assistant_1', 'assistant_2']);
+        if (!projectedTurn) return;
+
+        const next = buildLiveStreamingEntry({
+            kind: 'turn',
+            key: 'turn:user_1',
+            isLastTurn: true,
+            turn: projectedTurn,
+        }, {
+            activeStreamingMessageId: 'assistant_2',
+            liveParts: [reasoningPart('part_live', 'delegating task')],
+            showTextJustificationActivity: true,
+            planModeEnabled: false,
+        });
+
+        expect(next.kind).toBe('turn');
+        if (next.kind !== 'turn') return;
+        expect(next.turn.assistantMessageIds).toEqual(['assistant_1', 'assistant_2']);
+        expect(next.turn.assistantMessages[1]?.parts).toEqual([
+            reasoningPart('part_live', 'delegating task'),
+        ]);
     });
 });

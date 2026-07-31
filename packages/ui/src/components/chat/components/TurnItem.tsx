@@ -6,6 +6,7 @@ import type { ChatMessageEntry, TurnRecord } from '../lib/turns/types';
 import { formatTurnDuration } from '../lib/turns/duration';
 import { segmentProcessMessagesByPinnedBoundaries } from '../lib/turns/processSegments';
 import { getDirectiveParentId, mergeDirectiveMessagesAfterAnchors } from '../lib/turns/directiveProcessMessages';
+import { resolveProcessFoldExpansion } from '../lib/turns/processFold';
 import {
     beginProcessFoldTransition,
     captureProcessFoldViewportAnchor,
@@ -30,10 +31,13 @@ interface TurnItemProps {
         expanded: boolean;
         enabled: boolean;
     };
+    processFoldOverrides: ReadonlyMap<string, boolean>;
+    onProcessFoldOverride: (turnId: string, foldId: string, expanded: boolean) => void;
 }
 
 const PROCESS_FOLD_REGION_SELECTOR = '[data-process-fold-region="true"]';
 const PROCESS_FOLD_DETAIL_SELECTOR = '[data-process-fold-content="primary"], [data-process-fold-content="tail"]';
+const PROCESS_FOLD_INTERACTIVE_SELECTOR = 'a[href], button, input, select, textarea, [contenteditable="true"], [role="button"]';
 const PROCESS_FOLD_CONTENT_SPRING = { type: 'spring' as const, visualDuration: 0.24, bounce: 0 };
 
 interface ProcessDetailLock {
@@ -187,6 +191,8 @@ const ProcessMessages: React.FC<{
     processedLabel: string;
     collapseLabel: string;
     durationText?: string;
+    userExpanded: boolean | null;
+    onUserExpansionChange: (turnId: string, foldId: string, expanded: boolean) => void;
 }> = ({
     turn,
     processMessages,
@@ -196,6 +202,8 @@ const ProcessMessages: React.FC<{
     collapseLabel,
     durationText,
     foldId,
+    userExpanded,
+    onUserExpansionChange,
 }) => {
     const regionRef = React.useRef<HTMLDivElement | null>(null);
     const mountedRef = React.useRef(false);
@@ -207,24 +215,17 @@ const ProcessMessages: React.FC<{
         release: () => void;
     } | null>(null);
     const initialExpanded = foldDefault.enabled ? foldDefault.expanded : true;
-    const foldDefaultKey = `${turn.turnId}:${foldId}:${foldDefault.enabled ? 'enabled' : 'open'}:${foldDefault.expanded ? 'expanded' : 'collapsed'}`;
-    const [userExpansion, setUserExpansion] = React.useState<{ key: string; value: boolean | null }>(() => ({
-        key: foldDefaultKey,
-        value: null,
-    }));
+    const foldDefaultKey = `${turn.turnId}:${foldId}`;
     const [detailsRenderState, setDetailsRenderState] = React.useState<{ key: string; shouldRender: boolean }>(() => ({
         key: foldDefaultKey,
         shouldRender: initialExpanded,
     }));
 
-    const userExpanded = userExpansion.key === foldDefaultKey ? userExpansion.value : null;
     const shouldRenderDetails = detailsRenderState.key === foldDefaultKey
         ? detailsRenderState.shouldRender
         : initialExpanded;
 
-    const expanded = foldDefault.enabled
-        ? (userExpanded ?? foldDefault.expanded)
-        : true;
+    const expanded = resolveProcessFoldExpansion({ foldDefault, userExpanded });
     const detailsHidden = !expanded;
     const isExternallyCollapsed = foldDefault.enabled && userExpanded === null && !foldDefault.expanded;
     const renderDetails = isExternallyCollapsed ? false : (expanded || shouldRenderDetails);
@@ -242,8 +243,26 @@ const ProcessMessages: React.FC<{
         if (nextExpanded) {
             setDetailsShouldRender(true);
         }
-        setUserExpansion({ key: foldDefaultKey, value: nextExpanded });
-    }, [foldDefaultKey, setDetailsShouldRender]);
+        onUserExpansionChange(turn.turnId, foldId, nextExpanded);
+    }, [foldId, onUserExpansionChange, setDetailsShouldRender, turn.turnId]);
+
+    const preserveExpansionAfterInteraction = React.useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+        if (foldDefault.enabled || userExpanded !== null || !expanded) {
+            return;
+        }
+
+        const target = event.target;
+        if (!(target instanceof Element)) {
+            return;
+        }
+
+        const interactive = target.closest(PROCESS_FOLD_INTERACTIVE_SELECTOR);
+        if (interactive?.closest(PROCESS_FOLD_REGION_SELECTOR) !== regionRef.current) {
+            return;
+        }
+
+        setExpandedOverride(true);
+    }, [expanded, foldDefault.enabled, setExpandedOverride, userExpanded]);
 
     const finishViewportTransition = React.useCallback((transition: typeof viewportTransitionRef.current) => {
         if (!transition) {
@@ -392,6 +411,7 @@ const ProcessMessages: React.FC<{
             ref={regionRef}
             data-process-fold-region="true"
             data-process-fold-expanded={expanded ? 'true' : 'false'}
+            onClickCapture={preserveExpansionAfterInteraction}
         >
             <div data-process-fold-content="body">
                 {firstProcessMessage ? renderMessage(firstProcessMessage, {
@@ -404,6 +424,7 @@ const ProcessMessages: React.FC<{
                     <div
                         data-process-fold-content="tail"
                         aria-hidden={detailsHidden ? 'true' : undefined}
+                        inert={detailsHidden ? true : undefined}
                     >
                         {remainingProcessMessages.map((message) => renderMessage(message))}
                         {collapseToggle}
@@ -420,6 +441,8 @@ const TurnItem: React.FC<TurnItemProps> = ({
     renderMessage,
     directiveTurns,
     getProcessFoldState,
+    processFoldOverrides,
+    onProcessFoldOverride,
 }) => {
     const { t } = useI18n();
     const sectionRef = React.useRef<HTMLElement | null>(null);
@@ -479,13 +502,15 @@ const TurnItem: React.FC<TurnItemProps> = ({
                             processedLabel={processLabel}
                             collapseLabel={t('chat.messageBody.activity.collapse')}
                             durationText={durationText}
+                            userExpanded={processFoldOverrides.get(`fold-${index}`) ?? null}
+                            onUserExpansionChange={onProcessFoldOverride}
                         />
                     );
                 })}
                 {summaryElement}
             </>
         );
-    }, [renderMessage, resolveProcessFoldState, t]);
+    }, [onProcessFoldOverride, processFoldOverrides, renderMessage, resolveProcessFoldState, t]);
 
     React.useLayoutEffect(() => {
         if (!stickyUserHeader || !hasDirectives) return;

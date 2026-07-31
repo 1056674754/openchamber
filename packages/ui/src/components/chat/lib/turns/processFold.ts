@@ -55,6 +55,28 @@ export const deriveProcessFoldState = ({
     };
 };
 
+export const resolveProcessFoldExpansion = (input: {
+    foldDefault: {
+        expanded: boolean;
+        enabled: boolean;
+    };
+    userExpanded: boolean | null;
+}): boolean => {
+    return input.foldDefault.enabled
+        ? (input.userExpanded ?? input.foldDefault.expanded)
+        : true;
+};
+
+export const setProcessFoldOverride = (
+    previous: ReadonlyMap<string, boolean> | undefined,
+    foldId: string,
+    expanded: boolean,
+): Map<string, boolean> => {
+    const next = new Map(previous);
+    next.set(foldId, expanded);
+    return next;
+};
+
 export interface AutoExpandedTurnIdsInput {
     previous: Set<string>;
     sessionIsWorking: boolean;

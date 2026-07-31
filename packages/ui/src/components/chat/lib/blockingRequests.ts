@@ -99,6 +99,7 @@ export const splitBlockingRequestsByVisibleTool = (
     const inlineByTool = new Map<string, InlineBlockingRequests>();
     const trailingQuestions: QuestionRequest[] = [];
     const trailingPermissions: PermissionRequest[] = [];
+    const seenQuestionIds = new Set<string>();
 
     const ensureBucket = (key: string): InlineBlockingRequests => {
         const existing = inlineByTool.get(key);
@@ -109,6 +110,8 @@ export const splitBlockingRequestsByVisibleTool = (
     };
 
     for (const question of questions) {
+        if (seenQuestionIds.has(question.id)) continue;
+        seenQuestionIds.add(question.id);
         const key = getBlockingRequestToolKey(question);
         if (key && visibleToolRequestKeys.has(key)) {
             ensureBucket(key).questions.push(question);

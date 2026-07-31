@@ -26,6 +26,13 @@ const getMessageParentId = (message: ChatMessageEntry): string | undefined => {
     return parentId;
 };
 
+const isCompactionCommand = (message: ChatMessageEntry): boolean => {
+    return message.parts.some((part) => {
+        if (part.type === 'compaction') return true;
+        return part.type === 'text' && getPartText(part)?.trim() === '/compact';
+    });
+};
+
 const markMessageAsLiveSteer = (message: ChatMessageEntry): ChatMessageEntry => {
     const info = message.info as unknown as { metadata?: Record<string, unknown> | null | undefined };
     if (info.metadata?.openchamberLiveSteer === true) {
@@ -233,6 +240,7 @@ export const projectTurnRecords = (
         if (
             mergeHiddenUserTurns
             && previousTurn
+            && !isCompactionCommand(previousTurn.userMessage)
             && isHiddenUserMessage(message, { planModeEnabled: mergeHiddenUserTurns.planModeEnabled })
         ) {
             turnByUserId.set(message.info.id, previousTurn);

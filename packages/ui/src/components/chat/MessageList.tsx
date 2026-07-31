@@ -15,6 +15,7 @@ import { applyRetryOverlay } from './lib/turns/applyRetryOverlay';
 import {
     deriveAutoExpandedTurnIds,
     deriveProcessFoldState,
+    setProcessFoldOverride,
     turnContainsMessageId,
     turnHasStopSummary,
 } from './lib/turns/processFold';
@@ -26,7 +27,11 @@ import { streamPerfCount, streamPerfMeasure } from '@/stores/utils/streamDebug';
 import type { StreamPhase } from './message/types';
 import { normalizeParts } from './message/partUtils';
 import { isProcessFoldTransitionActive } from './lib/scroll/processFoldViewport';
-import { getMessageListOverscan, shouldCompensateVirtualItemResize } from './lib/scroll/scrollIntent';
+import {
+    getMessageListOverscan,
+    shouldCompensateVirtualItemResize,
+    shouldRevealInitialLatestViewport,
+} from './lib/scroll/scrollIntent';
 import { useDeviceInfo } from '@/lib/device';
 import { listTurnSnapshotDiffs } from '@/lib/diff/turnSnapshotDiff';
 import { useSessionParts } from '@/sync/sync-context';
@@ -38,6 +43,9 @@ const MESSAGE_LIST_ESTIMATED_ENTRY_SIZE = 320;
 const MESSAGE_LIST_ESTIMATE_MIN_SAMPLES = 5;
 const MESSAGE_LIST_ESTIMATE_MIN = 120;
 const MESSAGE_LIST_ESTIMATE_MAX = 1200;
+const INITIAL_LATEST_QUIET_PERIOD_MS = 250;
+const INITIAL_LATEST_MAX_WAIT_MS = 2000;
+const EMPTY_PROCESS_FOLD_OVERRIDES: ReadonlyMap<string, boolean> = new Map();
 // Large turns can finish virtual row measurement well after the wheel event.
 // Keep those measurements from rewriting scrollTop during the same gesture.
 const SCROLL_INTERACTION_WINDOW_MS = 1200;
@@ -481,6 +489,8 @@ interface MessageListProps {
     onExplicitScrollInteraction: () => void;
     scrollToBottom?: () => void;
     scrollRef?: React.RefObject<HTMLDivElement | null>;
+    initialPinToBottom: boolean;
+    onInitialBottomReady: () => void;
 }
 
 export type MessageViewportAnchor = {
@@ -520,7 +530,10 @@ type RenderEntry =
         directiveTurns?: TurnRecord[];
     };
 
-type TurnUiState = { isExpanded: boolean };
+type TurnUiState = {
+    isExpanded?: boolean;
+    processFoldOverrides?: ReadonlyMap<string, boolean>;
+};
 
 interface RenderMessageOptions {
     hideAssistantBody?: boolean;
@@ -627,6 +640,7 @@ interface TurnBlockProps {
     autoExpandedTurnIds: Set<string>;
     turnUiStates: Map<string, TurnUiState>;
     onToggleTurnGroup: (turnId: string, currentExpanded: boolean) => void;
+    onProcessFoldOverride: (turnId: string, foldId: string, expanded: boolean) => void;
     chatRenderMode: 'sorted' | 'live';
     onMessageContentChange: (reason?: ContentChangeReason) => void;
     getAnimationHandlers: (messageId: string) => AnimationHandlers;
@@ -648,6 +662,7 @@ const TurnBlock = React.memo(({
     autoExpandedTurnIds,
     turnUiStates,
     onToggleTurnGroup,
+    onProcessFoldOverride,
     chatRenderMode,
     onMessageContentChange,
     getAnimationHandlers,
@@ -672,7 +687,8 @@ const TurnBlock = React.memo(({
         });
     }, [activeStreamingMessageId, autoExpandedTurnIds, defaultActivityExpanded, lastTurnId, sessionIsWorking]);
 
-    const isTurnExpanded = turnUiStates.get(turn.turnId)?.isExpanded ?? defaultActivityExpanded;
+    const turnUiState = turnUiStates.get(turn.turnId);
+    const isTurnExpanded = turnUiState?.isExpanded ?? defaultActivityExpanded;
     const handleToggleTurnGroup = React.useCallback(() => {
         onToggleTurnGroup(turn.turnId, isTurnExpanded);
     }, [isTurnExpanded, onToggleTurnGroup, turn.turnId]);
@@ -952,6 +968,8 @@ const TurnBlock = React.memo(({
             renderMessage={renderMessage}
             directiveTurns={directiveTurns}
             getProcessFoldState={getProcessFoldState}
+            processFoldOverrides={turnUiState?.processFoldOverrides ?? EMPTY_PROCESS_FOLD_OVERRIDES}
+            onProcessFoldOverride={onProcessFoldOverride}
         />
     );
 });
@@ -1053,6 +1071,7 @@ interface MessageListEntryProps {
     autoExpandedTurnIds: Set<string>;
     turnUiStates: Map<string, TurnUiState>;
     onToggleTurnGroup: (turnId: string, currentExpanded: boolean) => void;
+    onProcessFoldOverride: (turnId: string, foldId: string, expanded: boolean) => void;
     chatRenderMode: 'sorted' | 'live';
     shouldAnimateUserMessage: (message: ChatMessageEntry) => boolean;
     onUserAnimationConsumed: (messageId: string) => void;
@@ -1071,6 +1090,7 @@ const MessageListEntry = React.memo(({
     autoExpandedTurnIds,
     turnUiStates,
     onToggleTurnGroup,
+    onProcessFoldOverride,
     chatRenderMode,
     shouldAnimateUserMessage,
     onUserAnimationConsumed,
@@ -1110,6 +1130,7 @@ const MessageListEntry = React.memo(({
             autoExpandedTurnIds={autoExpandedTurnIds}
             turnUiStates={turnUiStates}
             onToggleTurnGroup={onToggleTurnGroup}
+            onProcessFoldOverride={onProcessFoldOverride}
             chatRenderMode={chatRenderMode}
             shouldAnimateUserMessage={shouldAnimateUserMessage}
             onUserAnimationConsumed={onUserAnimationConsumed}
@@ -1144,11 +1165,12 @@ const StaticHistoryList: React.FC<{
     autoExpandedTurnIds: Set<string>;
     turnUiStates: Map<string, TurnUiState>;
     onToggleTurnGroup: (turnId: string, currentExpanded: boolean) => void;
+    onProcessFoldOverride: (turnId: string, foldId: string, expanded: boolean) => void;
     chatRenderMode: 'sorted' | 'live';
     shouldAnimateUserMessage: (message: ChatMessageEntry) => boolean;
     onUserAnimationConsumed: (messageId: string) => void;
     activeStreamingPhase?: StreamPhase | null;
-}> = ({ entries, shouldVirtualize, virtualRows, totalSize, scrollMargin, measureElement, contentRef, onMessageContentChange, getAnimationHandlers, scrollToBottom, stickyUserHeader, sessionIsWorking, defaultActivityExpanded, autoExpandedTurnIds, turnUiStates, onToggleTurnGroup, chatRenderMode, shouldAnimateUserMessage, onUserAnimationConsumed, activeStreamingPhase }) => {
+}> = ({ entries, shouldVirtualize, virtualRows, totalSize, scrollMargin, measureElement, contentRef, onMessageContentChange, getAnimationHandlers, scrollToBottom, stickyUserHeader, sessionIsWorking, defaultActivityExpanded, autoExpandedTurnIds, turnUiStates, onToggleTurnGroup, onProcessFoldOverride, chatRenderMode, shouldAnimateUserMessage, onUserAnimationConsumed, activeStreamingPhase }) => {
     const renderEntry = React.useCallback((entry: RenderEntry) => {
         return (
             <MessageListEntry
@@ -1163,6 +1185,7 @@ const StaticHistoryList: React.FC<{
                 autoExpandedTurnIds={autoExpandedTurnIds}
                 turnUiStates={turnUiStates}
                 onToggleTurnGroup={onToggleTurnGroup}
+                onProcessFoldOverride={onProcessFoldOverride}
                 chatRenderMode={chatRenderMode}
                 shouldAnimateUserMessage={shouldAnimateUserMessage}
                 onUserAnimationConsumed={onUserAnimationConsumed}
@@ -1170,7 +1193,7 @@ const StaticHistoryList: React.FC<{
                 activeStreamingPhase={activeStreamingPhase}
             />
         );
-    }, [activeStreamingPhase, autoExpandedTurnIds, chatRenderMode, defaultActivityExpanded, getAnimationHandlers, onMessageContentChange, onToggleTurnGroup, onUserAnimationConsumed, scrollToBottom, sessionIsWorking, shouldAnimateUserMessage, stickyUserHeader, turnUiStates]);
+    }, [activeStreamingPhase, autoExpandedTurnIds, chatRenderMode, defaultActivityExpanded, getAnimationHandlers, onMessageContentChange, onProcessFoldOverride, onToggleTurnGroup, onUserAnimationConsumed, scrollToBottom, sessionIsWorking, shouldAnimateUserMessage, stickyUserHeader, turnUiStates]);
 
     const paddingTop = shouldVirtualize && virtualRows.length > 0
         ? Math.max(0, (virtualRows[0]?.start ?? 0) - scrollMargin)
@@ -1248,7 +1271,9 @@ const StreamingTailContent: React.FC<{
     autoExpandedTurnIds: Set<string>;
     turnUiStates: Map<string, TurnUiState>;
     onToggleTurnGroup: (turnId: string, currentExpanded: boolean) => void;
+    onProcessFoldOverride: (turnId: string, foldId: string, expanded: boolean) => void;
     chatRenderMode: 'sorted' | 'live';
+    planModeEnabled: boolean;
     shouldAnimateUserMessage: (message: ChatMessageEntry) => boolean;
     onUserAnimationConsumed: (messageId: string) => void;
     activeStreamingMessageId?: string | null;
@@ -1265,7 +1290,9 @@ const StreamingTailContent: React.FC<{
     autoExpandedTurnIds,
     turnUiStates,
     onToggleTurnGroup,
+    onProcessFoldOverride,
     chatRenderMode,
+    planModeEnabled,
     shouldAnimateUserMessage,
     onUserAnimationConsumed,
     activeStreamingMessageId,
@@ -1278,8 +1305,9 @@ const StreamingTailContent: React.FC<{
             activeStreamingMessageId,
             liveParts,
             showTextJustificationActivity: chatRenderMode === 'sorted',
+            planModeEnabled,
         }),
-        [activeStreamingMessageId, chatRenderMode, entry, liveParts],
+        [activeStreamingMessageId, chatRenderMode, entry, liveParts, planModeEnabled],
     );
 
     return (
@@ -1294,6 +1322,7 @@ const StreamingTailContent: React.FC<{
             autoExpandedTurnIds={autoExpandedTurnIds}
             turnUiStates={turnUiStates}
             onToggleTurnGroup={onToggleTurnGroup}
+            onProcessFoldOverride={onProcessFoldOverride}
             chatRenderMode={chatRenderMode}
             shouldAnimateUserMessage={shouldAnimateUserMessage}
             onUserAnimationConsumed={onUserAnimationConsumed}
@@ -1323,6 +1352,8 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
     onExplicitScrollInteraction,
     scrollToBottom,
     scrollRef,
+    initialPinToBottom,
+    onInitialBottomReady,
 }, ref) => {
     streamPerfCount('ui.message_list.render');
     void _disableStaging;
@@ -1344,6 +1375,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
     const stableScrollToBottom = useStableEvent(() => {
         scrollToBottom?.();
     });
+    const stableOnInitialBottomReady = useStableEvent(onInitialBottomReady);
 
     React.useLayoutEffect(() => {
         setTurnUiStates(new Map());
@@ -1353,7 +1385,23 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
     const toggleTurnGroup = React.useCallback((turnId: string, currentExpanded: boolean) => {
         setTurnUiStates((previous) => {
             const next = new Map(previous);
-            next.set(turnId, { isExpanded: !currentExpanded });
+            next.set(turnId, {
+                ...previous.get(turnId),
+                isExpanded: !currentExpanded,
+            });
+            return next;
+        });
+    }, []);
+
+    const setTurnProcessFoldOverride = React.useCallback((turnId: string, foldId: string, expanded: boolean) => {
+        setTurnUiStates((previous) => {
+            const current = previous.get(turnId);
+            const processFoldOverrides = setProcessFoldOverride(current?.processFoldOverrides, foldId, expanded);
+            const next = new Map(previous);
+            next.set(turnId, {
+                ...current,
+                processFoldOverrides,
+            });
             return next;
         });
     }, []);
@@ -1757,7 +1805,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         useAnimationFrameWithResizeObserver: true,
         overscan: getMessageListOverscan(isMobile),
         scrollMargin: historyScrollMargin,
-        initialOffset: () => Number.MAX_SAFE_INTEGER,
+        initialOffset: () => initialPinToBottom ? 0 : Number.MAX_SAFE_INTEGER,
         enabled: shouldVirtualizeHistory,
     });
 
@@ -1827,6 +1875,118 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
     const allEntries = React.useMemo(() => {
         return trailingStreamingEntry ? [...historyEntries, trailingStreamingEntry] : historyEntries;
     }, [historyEntries, trailingStreamingEntry]);
+
+    React.useLayoutEffect(() => {
+        if (!initialPinToBottom) {
+            return;
+        }
+        if (allEntries.length === 0) {
+            stableOnInitialBottomReady();
+            return;
+        }
+
+        const readNow = () => (
+            typeof performance !== 'undefined' ? performance.now() : Date.now()
+        );
+        const startedAt = readNow();
+        let lastLayoutChangeAt = startedAt;
+        let lastScrollHeight = -1;
+        let lastTotalSize = -1;
+        let lastVirtualRangeEnd = -1;
+        let frameId = 0;
+        let resizeObserver: ResizeObserver | null = null;
+
+        const pinCurrentViewport = (): HTMLDivElement | null => {
+            const container = historyContentRef.current?.closest<HTMLDivElement>('[data-scrollbar="chat"]');
+            if (!container || container.clientHeight <= 0) {
+                return null;
+            }
+
+            container.scrollTop = container.scrollHeight + 4096;
+            stableScrollToBottom();
+            return container;
+        };
+
+        const settle = () => {
+            const container = pinCurrentViewport();
+            if (!container) {
+                frameId = requestAnimationFrame(settle);
+                return;
+            }
+
+            const totalSize = historyVirtualizer.getTotalSize();
+            const virtualRows = shouldVirtualizeHistory
+                ? historyVirtualizer.getVirtualItems()
+                : [];
+            const virtualRangeEnd = virtualRows[virtualRows.length - 1]?.index ?? -1;
+            if (
+                container.scrollHeight !== lastScrollHeight
+                || totalSize !== lastTotalSize
+                || virtualRangeEnd !== lastVirtualRangeEnd
+            ) {
+                lastScrollHeight = container.scrollHeight;
+                lastTotalSize = totalSize;
+                lastVirtualRangeEnd = virtualRangeEnd;
+                lastLayoutChangeAt = readNow();
+            }
+
+            const hasLastHistoryEntry = !shouldVirtualizeHistory
+                || historyEntries.length === 0
+                || virtualRangeEnd >= historyEntries.length - 1;
+            const distanceFromBottom = container.scrollHeight - container.clientHeight - container.scrollTop;
+            const now = readNow();
+            if (shouldRevealInitialLatestViewport({
+                atBottom: distanceFromBottom <= 1,
+                hasLastHistoryEntry,
+                startedAt,
+                lastLayoutChangeAt,
+                now,
+                quietPeriodMs: INITIAL_LATEST_QUIET_PERIOD_MS,
+                maxWaitMs: INITIAL_LATEST_MAX_WAIT_MS,
+            })) {
+                stableOnInitialBottomReady();
+                return;
+            }
+
+            frameId = requestAnimationFrame(settle);
+        };
+
+        if (typeof ResizeObserver !== 'undefined') {
+            resizeObserver = new ResizeObserver(() => {
+                lastLayoutChangeAt = readNow();
+                pinCurrentViewport();
+            });
+            const container = historyContentRef.current?.closest<HTMLDivElement>('[data-scrollbar="chat"]');
+            if (container) {
+                resizeObserver.observe(container);
+                const inner = container.firstElementChild;
+                if (inner instanceof Element) {
+                    resizeObserver.observe(inner);
+                }
+            }
+            const historyContent = historyContentRef.current;
+            if (historyContent) {
+                resizeObserver.observe(historyContent);
+            }
+        }
+
+        frameId = requestAnimationFrame(settle);
+
+        return () => {
+            if (frameId) {
+                cancelAnimationFrame(frameId);
+            }
+            resizeObserver?.disconnect();
+        };
+    }, [
+        allEntries.length,
+        historyEntries.length,
+        historyVirtualizer,
+        initialPinToBottom,
+        shouldVirtualizeHistory,
+        stableOnInitialBottomReady,
+        stableScrollToBottom,
+    ]);
 
     const stableHistoryContentChange = useStableEvent((reason?: ContentChangeReason) => {
         onMessageContentChange(reason);
@@ -2222,6 +2382,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
                             autoExpandedTurnIds={autoExpandedTurnIds}
                             turnUiStates={turnUiStates}
                             onToggleTurnGroup={toggleTurnGroup}
+                            onProcessFoldOverride={setTurnProcessFoldOverride}
                             chatRenderMode={chatRenderMode}
                             shouldAnimateUserMessage={shouldAnimateUserMessage}
                             onUserAnimationConsumed={onUserAnimationConsumed}
@@ -2240,7 +2401,9 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
                                 autoExpandedTurnIds={autoExpandedTurnIds}
                                 turnUiStates={turnUiStates}
                                 onToggleTurnGroup={toggleTurnGroup}
+                                onProcessFoldOverride={setTurnProcessFoldOverride}
                                 chatRenderMode={chatRenderMode}
+                                planModeEnabled={planModeEnabled}
                                 shouldAnimateUserMessage={shouldAnimateUserMessage}
                                 onUserAnimationConsumed={onUserAnimationConsumed}
                                 activeStreamingMessageId={activeStreamingMessageId}

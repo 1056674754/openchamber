@@ -365,6 +365,41 @@ describe('projectTurnRecords', () => {
         expect(projection.turns[0]?.assistantMessageIds).toEqual(['a1', 'a2', 'a3']);
     });
 
+    test('keeps compact continuation replies after the compaction divider', () => {
+        const compaction = createMessageEntry({ id: 'compact-user', role: 'user', createdAt: 1 });
+        compaction.parts = [{ id: 'compact-part', type: 'compaction', auto: true } as Part];
+        const summary = createMessageEntry({
+            id: 'compact-summary',
+            role: 'assistant',
+            parentID: 'compact-user',
+            createdAt: 2,
+        });
+        const continuation = createMessageEntry({ id: 'continuation', role: 'user', createdAt: 3 });
+        continuation.parts = [{
+            id: 'continuation-part',
+            sessionID: 'session',
+            messageID: 'continuation',
+            type: 'text',
+            text: 'Continue if you have next steps, or stop and ask for clarification if you are unsure how to proceed.',
+            synthetic: true,
+            metadata: { compaction_continue: true },
+        }];
+        const continuedReply = createMessageEntry({
+            id: 'continued-reply',
+            role: 'assistant',
+            parentID: 'continuation',
+            createdAt: 4,
+        });
+
+        const projection = projectTurnRecords([compaction, summary, continuation, continuedReply], {
+            mergeHiddenUserTurns: { planModeEnabled: false },
+        });
+
+        expect(projection.turns.map((turn) => turn.turnId)).toEqual(['compact-user', 'continuation']);
+        expect(projection.turns[0]?.assistantMessageIds).toEqual(['compact-summary']);
+        expect(projection.turns[1]?.assistantMessageIds).toEqual(['continued-reply']);
+    });
+
     test('treats compaction summary text as justification activity in sorted mode', () => {
         const user = createMessageEntry({ id: 'u1', role: 'user', createdAt: 1 });
         user.parts = [{ id: 'p1', type: 'text', text: 'prompt' } as Part];

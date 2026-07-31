@@ -5,6 +5,8 @@ import {
     getOlderHistoryPrefetchThreshold,
     isMatchingAutoScrollPosition,
     isVerticallyScrollable,
+    resolveSessionEntryScrollAction,
+    shouldRevealInitialLatestViewport,
     shouldPrefetchOlderHistory,
     shouldStartOlderHistoryPrefetch,
     shouldCompensateVirtualItemResize,
@@ -13,6 +15,104 @@ import {
     shouldPauseAutoScrollAtBoundary,
     shouldPauseAutoScrollOnWheel,
 } from './scrollIntent';
+
+describe('session entry scroll', () => {
+    test('waits for renderable history before placing the viewport', () => {
+        expect(resolveSessionEntryScrollAction({
+            hasRenderableSnapshot: false,
+            hasHashTarget: false,
+        })).toBe('wait');
+    });
+
+    test('opens a cached historical session at its latest message', () => {
+        expect(resolveSessionEntryScrollAction({
+            hasRenderableSnapshot: true,
+            hasHashTarget: false,
+        })).toBe('latest');
+    });
+
+    test('leaves hash-targeted history to message navigation', () => {
+        expect(resolveSessionEntryScrollAction({
+            hasRenderableSnapshot: true,
+            hasHashTarget: true,
+        })).toBe('hash');
+    });
+
+    test('keeps latest history hidden until the bottom range is quiet', () => {
+        const base = {
+            atBottom: true,
+            hasLastHistoryEntry: true,
+            startedAt: 100,
+            lastLayoutChangeAt: 900,
+            quietPeriodMs: 250,
+            maxWaitMs: 2000,
+        };
+
+        expect(shouldRevealInitialLatestViewport({
+            ...base,
+            now: 1000,
+        })).toBe(false);
+        expect(shouldRevealInitialLatestViewport({
+            ...base,
+            now: 1150,
+        })).toBe(true);
+        expect(shouldRevealInitialLatestViewport({
+            ...base,
+            now: 2200,
+            hasLastHistoryEntry: false,
+        })).toBe(false);
+    });
+
+    test('reveals a continuously changing live session only after the bounded wait', () => {
+        expect(shouldRevealInitialLatestViewport({
+            atBottom: true,
+            hasLastHistoryEntry: true,
+            startedAt: 100,
+            lastLayoutChangeAt: 2050,
+            now: 2100,
+            quietPeriodMs: 250,
+            maxWaitMs: 2000,
+        })).toBe(true);
+    });
+
+    test('BUG: max-wait fires while layout is still actively changing', () => {
+        const startedAt = 0;
+        const maxWaitMs = 2000;
+        const quietPeriodMs = 250;
+
+        expect(shouldRevealInitialLatestViewport({
+            atBottom: true,
+            hasLastHistoryEntry: true,
+            startedAt,
+            lastLayoutChangeAt: 1940,
+            now: 1990,
+            quietPeriodMs,
+            maxWaitMs,
+        })).toBe(false);
+
+        expect(shouldRevealInitialLatestViewport({
+            atBottom: true,
+            hasLastHistoryEntry: true,
+            startedAt,
+            lastLayoutChangeAt: 1990,
+            now: 2010,
+            quietPeriodMs,
+            maxWaitMs,
+        })).toBe(true);
+    });
+
+    test('BUG: convergence can fire on a partially-measured virtualized list', () => {
+        expect(shouldRevealInitialLatestViewport({
+            atBottom: true,
+            hasLastHistoryEntry: true,
+            startedAt: 0,
+            lastLayoutChangeAt: 1980,
+            now: 2010,
+            quietPeriodMs: 250,
+            maxWaitMs: 2000,
+        })).toBe(true);
+    });
+});
 
 describe('passive chat auto-follow', () => {
     test('runs only while a followed session is working or settling', () => {

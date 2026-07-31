@@ -53,10 +53,11 @@ import {
     useSessionStatus,
 } from '@/sync/sync-context';
 import {
-    useAllServersLiveSessions,
-    useAllServersSessionPermissions,
-    useAllServersSessionQuestions,
+    useServerLiveSessions,
+    useServerSessionPermissions,
+    useServerSessionQuestions,
 } from '@/sync/multi-server-hooks';
+import { useActiveServerId } from '@/hooks/useActiveServerId';
 import { useSync } from '@/sync/use-sync';
 import { useInputStore } from '@/sync/input-store';
 import { getSessionPrefetch, subscribeSessionPrefetch } from '@/sync/session-prefetch-cache';
@@ -70,6 +71,7 @@ import { getEmbeddedSessionChatOriginSessionId } from '@/components/layout/conte
 import { serverRegistry } from '@/lib/opencode/server-registry';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { resolveGlobalSessionDirectory, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
+import { resolveSessionEntryScrollAction } from './lib/scroll/scrollIntent';
 
 const EMPTY_MESSAGES: Array<{ info: Message; parts: Part[] }> = [];
 const IDLE_SESSION_STATUS = { type: 'idle' as const };
@@ -191,6 +193,9 @@ type ChatViewportProps = {
     timelineTurnIds: string[];
     onSelectTurn: (turnId: string) => void;
     canLoadEarlierPrompts: boolean;
+    isInitialScrollReady: boolean;
+    initialScrollAction: 'wait' | 'hash' | 'latest';
+    onInitialScrollReady: () => void;
 };
 
 const ChatViewport = React.memo(({
@@ -226,6 +231,9 @@ const ChatViewport = React.memo(({
     timelineTurnIds,
     onSelectTurn,
     canLoadEarlierPrompts,
+    isInitialScrollReady,
+    initialScrollAction,
+    onInitialScrollReady,
 }: ChatViewportProps) => {
     const promptPreviewCache = React.useRef(createPromptPreviewCache());
     const promptSourceMessages = React.useMemo(() => {
@@ -269,17 +277,62 @@ const ChatViewport = React.memo(({
         scrollRef.current?.focus({ preventScroll: true });
     }, [scrollRef]);
 
+    React.useLayoutEffect(() => {
+        if (!isInitialScrollReady && initialScrollAction === 'hash') {
+            onInitialScrollReady();
+        }
+    }, [initialScrollAction, isInitialScrollReady, onInitialScrollReady]);
+
     return (
         <div
             className={cn(
                 'relative min-h-0',
                 isDesktopExpandedInput
-                    ? 'absolute inset-0 opacity-0 pointer-events-none'
+                    ? 'absolute inset-0 pointer-events-none'
                     : 'flex-1'
             )}
-            aria-hidden={isDesktopExpandedInput}
+            aria-hidden={isDesktopExpandedInput ? true : undefined}
+            inert={isDesktopExpandedInput ? true : undefined}
         >
-            <div className="absolute inset-0">
+            {!isDesktopExpandedInput && !isInitialScrollReady ? (
+                <div
+                    className="absolute inset-0 overflow-hidden bg-background pt-6"
+                    aria-hidden="true"
+                >
+                    <div className="space-y-4">
+                        {HYDRATING_SKELETON_ITEMS.map((item) => (
+                            <div key={item.id} className="group w-full">
+                                <div className="chat-message-column">
+                                    <div className="space-y-2.5 px-4 py-3">
+                                        <div className="space-y-1.5">
+                                            {item.toolRows.map((row) => (
+                                                <div key={`${item.id}-${row.id}`} className="flex items-center gap-2">
+                                                    <Skeleton className="h-3.5 w-3.5 rounded-full flex-shrink-0" />
+                                                    <Skeleton className={cn('h-4 rounded-md', row.titleWidth)} />
+                                                    <Skeleton className={cn('h-4 rounded-md', row.detailWidth)} />
+                                                </div>
+                                            ))}
+                                        </div>
+                                        <div className="space-y-1.5 pt-1">
+                                            <Skeleton className={cn('h-4 rounded-md', item.textWidths[0])} />
+                                            <Skeleton className={cn('h-4 rounded-md', item.textWidths[1])} />
+                                            <Skeleton className={cn('h-4 rounded-md', item.textWidths[2])} />
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            ) : null}
+            <div
+                className={cn(
+                    'absolute inset-0',
+                    !isInitialScrollReady && 'opacity-0 pointer-events-none'
+                )}
+                aria-hidden={!isInitialScrollReady ? true : undefined}
+                inert={!isInitialScrollReady ? true : undefined}
+            >
                 <ScrollShadow
                     className="absolute inset-0 overflow-y-auto overflow-x-hidden z-0 chat-scroll overlay-scrollbar-target"
                     ref={scrollRef}
@@ -312,6 +365,8 @@ const ChatViewport = React.memo(({
                                 onExplicitScrollInteraction={syncPendingPrependAnchorToViewport}
                                 scrollToBottom={scrollToBottom}
                                 scrollRef={scrollRef}
+                                initialPinToBottom={!isInitialScrollReady && initialScrollAction === 'latest'}
+                                onInitialBottomReady={onInitialScrollReady}
                             />
                         </InlineBlockingRequestsContext.Provider>
                         {(sessionQuestions.length > 0 || sessionPermissions.length > 0) && (
@@ -389,7 +444,10 @@ const ChatViewport = React.memo(({
         && prev.visibleTurnIds === next.visibleTurnIds
         && prev.timelineTurnIds === next.timelineTurnIds
         && prev.onSelectTurn === next.onSelectTurn
-        && prev.canLoadEarlierPrompts === next.canLoadEarlierPrompts;
+        && prev.canLoadEarlierPrompts === next.canLoadEarlierPrompts
+        && prev.isInitialScrollReady === next.isInitialScrollReady
+        && prev.initialScrollAction === next.initialScrollAction
+        && prev.onInitialScrollReady === next.onInitialScrollReady;
 });
 
 ChatViewport.displayName = 'ChatViewport';
@@ -531,7 +589,8 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
 
     // Sessions from sync system
     const directorySessions = useSessions();
-    const sessions = useAllServersLiveSessions();
+    const activeServerId = useActiveServerId();
+    const sessions = useServerLiveSessions(activeServerId);
 
     // Plan detection - watches messages for plan creation and signals store
     usePlanDetection(currentSessionId ?? '', sessionMessages);
@@ -547,8 +606,17 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
         [sessions, currentSessionId],
     );
 
-    const sessionPermissions = useAllServersSessionPermissions(scopedSessionIds);
-    const sessionQuestions = useAllServersSessionQuestions(scopedSessionIds);
+    const scopedBlockingRequestTargets = React.useMemo(() => {
+        const sessionsById = new Map(sessions.map((session) => [session.id, session]));
+        return scopedSessionIds.flatMap((sessionId) => {
+            const directory = sessionsById.get(sessionId)?.directory
+                ?? (sessionId === currentSessionId ? currentSessionDirectory : null);
+            return directory ? [{ sessionId, directory }] : [];
+        });
+    }, [currentSessionDirectory, currentSessionId, scopedSessionIds, sessions]);
+
+    const sessionPermissions = useServerSessionPermissions(activeServerId, scopedBlockingRequestTargets);
+    const sessionQuestions = useServerSessionQuestions(activeServerId, scopedBlockingRequestTargets);
     const { isWorking: sessionActivityWorking } = useCurrentSessionActivity();
     const sessionIsWorking = React.useMemo(() => {
         if (!currentSessionId || sessionPermissions.length > 0 || sessionQuestions.length > 0) {
@@ -692,7 +760,6 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
         getAnimationHandlers,
         goToBottom,
         releaseAutoFollow,
-        restoreSnapshot,
         isPinned,
         isFollowingProgrammatically,
         showScrollButton,
@@ -888,33 +955,25 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
         };
     }, [currentSessionId, isDesktopExpandedInput, scrollRef]);
 
-    const lastScrolledSessionRef = React.useRef<string | null>(null);
+    const [initialScrollReadySessionId, setInitialScrollReadySessionId] = React.useState<string | null>(null);
 
     const isSessionHydrating =
         Boolean(currentSessionId)
         && !hasRenderableSessionSnapshot;
+    const sessionEntryScrollAction = resolveSessionEntryScrollAction({
+        hasRenderableSnapshot: hasRenderableSessionSnapshot,
+        hasHashTarget: typeof window !== 'undefined' && window.location.hash.length > 0,
+    });
+    const handleInitialScrollReady = React.useCallback(() => {
+        setInitialScrollReadySessionId(currentSessionId);
+    }, [currentSessionId]);
 
-    React.useEffect(() => {
-        if (!currentSessionId) return;
-        if (lastScrolledSessionRef.current === currentSessionId) return;
-
-        const hasHashTarget = typeof window !== 'undefined' && window.location.hash.length > 0;
-        lastScrolledSessionRef.current = currentSessionId;
-        if (hasHashTarget) {
-            // Hash navigation handler will scroll to target; we just release auto-follow.
-            releaseAutoFollow();
+    React.useLayoutEffect(() => {
+        if (!currentSessionId || sessionEntryScrollAction !== 'hash') {
             return;
         }
-
-        const run = () => {
-            void restoreSnapshot();
-        };
-        if (typeof window === 'undefined') {
-            run();
-        } else {
-            window.requestAnimationFrame(run);
-        }
-    }, [currentSessionId, releaseAutoFollow, restoreSnapshot]);
+        releaseAutoFollow();
+    }, [currentSessionId, releaseAutoFollow, sessionEntryScrollAction]);
 
     React.useEffect(() => {
         if (!currentSessionId) return;
@@ -1083,6 +1142,9 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
                 timelineTurnIds={timelineController.turnIds}
                 onSelectTurn={handleSelectPromptTurn}
                 canLoadEarlierPrompts={timelineController.historySignals.canLoadEarlier}
+                isInitialScrollReady={initialScrollReadySessionId === currentSessionId}
+                initialScrollAction={sessionEntryScrollAction}
+                onInitialScrollReady={handleInitialScrollReady}
             />
 
                 <div
