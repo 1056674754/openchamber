@@ -42,6 +42,10 @@ export type ManagedRemoteTunnelPreset = {
   hostname: string;
 };
 
+export type DesktopWindowControlsPosition = 'left' | 'right';
+export type DesktopWindowControlsSide = 'left' | 'right';
+export type DesktopWindowControlAction = 'close' | 'minimize' | 'maximize';
+
 export type DesktopSettings = {
   themeId?: string;
   useSystemTheme?: boolean;
@@ -56,6 +60,7 @@ export type DesktopSettings = {
   homeDirectory?: string;
   // Optional absolute path to `opencode` binary.
   opencodeBinary?: string;
+  agentControlToolEnabled?: boolean;
   optimizeSystemPrompt?: boolean;
   desktopLanAccessEnabled?: boolean;
   desktopMacMenuBarEnabled?: boolean;
@@ -77,6 +82,8 @@ export type DesktopSettings = {
   pinnedSessionOrderByProject?: Record<string, string[]>;
    showReasoningTraces?: boolean;
    draftStarters?: DraftStarterRef[];
+   draftStartersScheduleTaskAdded?: boolean;
+   draftStartersVisible?: boolean;
    collapsibleThinkingBlocks?: boolean;
   showDeletionDialog?: boolean;
   nativeNotificationsEnabled?: boolean;
@@ -158,6 +165,7 @@ export type DesktopSettings = {
   pwaAppName?: string;
   pwaOrientation?: 'system' | 'portrait' | 'landscape';
   mobileKeyboardMode?: MobileKeyboardMode;
+  desktopWindowControlsPosition?: DesktopWindowControlsPosition;
   inputSpellcheckEnabled?: boolean;
   showToolFileIcons?: boolean;
   showExpandedBashTools?: boolean;
@@ -243,6 +251,47 @@ const getDesktopBridge = (): OpenChamberDesktopBridge | null => {
 };
 
 export const isElectronShell = (): boolean => getElectronRuntime()?.runtime === 'electron';
+
+export const getElectronPlatform = (): string | null => {
+  if (typeof window === 'undefined') return null;
+  return typeof window.__OPENCHAMBER_PLATFORM__ === 'string'
+    ? window.__OPENCHAMBER_PLATFORM__
+    : null;
+};
+
+export const DEFAULT_DESKTOP_WINDOW_CONTROLS_POSITION: DesktopWindowControlsPosition = 'right';
+
+export const usesFramelessElectronChrome = (): boolean => {
+  if (!isElectronShell()) return false;
+  const platform = getElectronPlatform();
+  return platform === 'win32' || platform === 'linux';
+};
+
+export const normalizeDesktopWindowControlsPosition = (
+  value: unknown,
+): DesktopWindowControlsPosition | undefined => {
+  if (value === 'left' || value === 'right') {
+    return value;
+  }
+  if (value === 'auto') {
+    return DEFAULT_DESKTOP_WINDOW_CONTROLS_POSITION;
+  }
+  return undefined;
+};
+
+export const resolveDesktopWindowControlsSide = (
+  preference: DesktopWindowControlsPosition | undefined,
+): DesktopWindowControlsSide => {
+  return preference === 'left' ? 'left' : DEFAULT_DESKTOP_WINDOW_CONTROLS_POSITION;
+};
+
+export const getDesktopWindowControlsOrder = (
+  side: DesktopWindowControlsSide,
+): readonly DesktopWindowControlAction[] => {
+  return side === 'left'
+    ? ['close', 'minimize', 'maximize']
+    : ['minimize', 'maximize', 'close'];
+};
 
 export const hasDesktopInvoke = (): boolean => {
   return typeof getDesktopBridge()?.core?.invoke === 'function';

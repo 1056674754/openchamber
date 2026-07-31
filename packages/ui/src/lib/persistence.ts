@@ -138,7 +138,11 @@ const persistToLocalStorage = (settings: DesktopSettings) => {
   if (typeof settings.mobileKeyboardMode === 'string') {
     setStoredMobileKeyboardMode(settings.mobileKeyboardMode);
   }
-  if (settings.sttProvider === 'browser' || settings.sttProvider === 'server') {
+  if (
+    settings.sttProvider === 'browser'
+    || settings.sttProvider === 'server'
+    || settings.sttProvider === 'wasm'
+  ) {
     localStorage.setItem('sttProvider', settings.sttProvider);
   }
   if (typeof settings.sttServerUrl === 'string') {
@@ -146,6 +150,9 @@ const persistToLocalStorage = (settings: DesktopSettings) => {
   }
   if (typeof settings.sttModel === 'string') {
     localStorage.setItem('sttModel', settings.sttModel);
+  }
+  if (typeof settings.wasmSttModel === 'string') {
+    localStorage.setItem('wasmSttModel', settings.wasmSttModel);
   }
   if (typeof settings.sttLanguage === 'string') {
     localStorage.setItem('sttLanguage', settings.sttLanguage);
@@ -431,7 +438,10 @@ const getPersistApi = (): PersistApi | undefined => {
 
 const getRuntimeSettingsAPI = () => getRegisteredRuntimeAPIs()?.settings ?? null;
 
-const applyDesktopUiPreferences = (settings: DesktopSettings) => {
+const applyDesktopUiPreferences = (
+  settings: DesktopSettings,
+  options?: { authoritative?: boolean },
+) => {
   const store = useUIStore.getState();
   const configStore = typeof window !== 'undefined'
     ? window.__zustand_config_store__?.getState?.() ?? null
@@ -534,6 +544,12 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
   if (typeof settings.showExpandedEditTools === 'boolean' && settings.showExpandedEditTools !== store.showExpandedEditTools) {
     store.setShowExpandedEditTools(settings.showExpandedEditTools);
   }
+  if (
+    typeof settings.agentControlToolEnabled === 'boolean'
+    && settings.agentControlToolEnabled !== store.agentControlToolEnabled
+  ) {
+    store.setAgentControlToolEnabled(settings.agentControlToolEnabled);
+  }
   if (typeof settings.timeFormatPreference === 'string'
     && (settings.timeFormatPreference === 'auto' || settings.timeFormatPreference === '12h' || settings.timeFormatPreference === '24h')) {
     if (settings.timeFormatPreference !== store.timeFormatPreference) {
@@ -599,6 +615,12 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
   if (typeof settings.promptNavigatorEnabled === 'boolean' && settings.promptNavigatorEnabled !== store.promptNavigatorEnabled) {
     store.setPromptNavigatorEnabled(settings.promptNavigatorEnabled);
   }
+  if (
+    (settings.desktopWindowControlsPosition === 'left' || settings.desktopWindowControlsPosition === 'right')
+    && settings.desktopWindowControlsPosition !== store.desktopWindowControlsPosition
+  ) {
+    store.setDesktopWindowControlsPosition(settings.desktopWindowControlsPosition);
+  }
   if (typeof settings.wideChatLayoutEnabled === 'boolean' && settings.wideChatLayoutEnabled !== store.wideChatLayoutEnabled) {
     store.setWideChatLayoutEnabled(settings.wideChatLayoutEnabled);
   }
@@ -640,10 +662,38 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
     store.setFontSize(settings.fontSize);
   }
   if (Array.isArray(settings.draftStarters)) {
-    const nextStarters = sanitizeStarterRefs(settings.draftStarters);
+    let nextStarters = sanitizeStarterRefs(settings.draftStarters);
+    if (
+      settings.draftStartersScheduleTaskAdded !== true
+      && !nextStarters.some((starter) => starter.type === 'command' && starter.name === 'schedule-task')
+    ) {
+      const goalIndex = nextStarters.findIndex(
+        (starter) => starter.type === 'command' && starter.name === 'craft-goal',
+      );
+      const insertAt = goalIndex >= 0 ? goalIndex + 1 : nextStarters.length;
+      nextStarters = [
+        ...nextStarters.slice(0, insertAt),
+        { type: 'command', name: 'schedule-task' },
+        ...nextStarters.slice(insertAt),
+      ];
+    }
     if (JSON.stringify(store.globalDraftStarters) !== JSON.stringify(nextStarters)) {
       store.setGlobalDraftStarters(nextStarters);
     }
+    if (settings.draftStartersScheduleTaskAdded !== true) {
+      void updateDesktopSettings({
+        draftStarters: nextStarters,
+        draftStartersScheduleTaskAdded: true,
+      });
+    }
+  }
+  const nextDraftStartersVisible = typeof settings.draftStartersVisible === 'boolean'
+    ? settings.draftStartersVisible
+    : options?.authoritative
+      ? true
+      : store.draftStartersVisible;
+  if (nextDraftStartersVisible !== store.draftStartersVisible) {
+    store.setDraftStartersVisible(nextDraftStartersVisible);
   }
   if (typeof settings.terminalFontSize === 'number' && Number.isFinite(settings.terminalFontSize) && settings.terminalFontSize !== store.terminalFontSize) {
     store.setTerminalFontSize(settings.terminalFontSize);
@@ -674,7 +724,14 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
   }
   if (configStoreApi && configStore) {
     const nextConfigState: Partial<typeof configStore> = {};
-    if ((settings.sttProvider === 'browser' || settings.sttProvider === 'server') && settings.sttProvider !== configStore.sttProvider) {
+    if (
+      (
+        settings.sttProvider === 'browser'
+        || settings.sttProvider === 'server'
+        || settings.sttProvider === 'wasm'
+      )
+      && settings.sttProvider !== configStore.sttProvider
+    ) {
       nextConfigState.sttProvider = settings.sttProvider;
     }
     if (typeof settings.sttServerUrl === 'string' && settings.sttServerUrl !== configStore.sttServerUrl) {
@@ -682,6 +739,9 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
     }
     if (typeof settings.sttModel === 'string' && settings.sttModel !== configStore.sttModel) {
       nextConfigState.sttModel = settings.sttModel;
+    }
+    if (typeof settings.wasmSttModel === 'string' && settings.wasmSttModel !== configStore.wasmSttModel) {
+      nextConfigState.wasmSttModel = settings.wasmSttModel;
     }
     if (typeof settings.sttLanguage === 'string' && settings.sttLanguage !== configStore.sttLanguage) {
       nextConfigState.sttLanguage = settings.sttLanguage;
@@ -767,7 +827,7 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
   }
 };
 
-const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
+export const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   if (!payload || typeof payload !== 'object') {
     return null;
   }
@@ -800,6 +860,9 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   if (typeof candidate.opencodeBinary === 'string') {
     const trimmed = candidate.opencodeBinary.trim();
     result.opencodeBinary = trimmed.length > 0 ? trimmed : undefined;
+  }
+  if (typeof candidate.agentControlToolEnabled === 'boolean') {
+    result.agentControlToolEnabled = candidate.agentControlToolEnabled;
   }
   if (typeof candidate.desktopLanAccessEnabled === 'boolean') {
     result.desktopLanAccessEnabled = candidate.desktopLanAccessEnabled;
@@ -857,6 +920,12 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   }
   if (Array.isArray(candidate.draftStarters)) {
     result.draftStarters = sanitizeStarterRefs(candidate.draftStarters);
+  }
+  if (typeof candidate.draftStartersScheduleTaskAdded === 'boolean') {
+    result.draftStartersScheduleTaskAdded = candidate.draftStartersScheduleTaskAdded;
+  }
+  if (typeof candidate.draftStartersVisible === 'boolean') {
+    result.draftStartersVisible = candidate.draftStartersVisible;
   }
   if (typeof candidate.collapsibleThinkingBlocks === 'boolean') {
     result.collapsibleThinkingBlocks = candidate.collapsibleThinkingBlocks;
@@ -1179,6 +1248,12 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   if (typeof candidate.promptNavigatorEnabled === 'boolean') {
     result.promptNavigatorEnabled = candidate.promptNavigatorEnabled;
   }
+  if (
+    candidate.desktopWindowControlsPosition === 'left'
+    || candidate.desktopWindowControlsPosition === 'right'
+  ) {
+    result.desktopWindowControlsPosition = candidate.desktopWindowControlsPosition;
+  }
   if (typeof candidate.wideChatLayoutEnabled === 'boolean') {
     result.wideChatLayoutEnabled = candidate.wideChatLayoutEnabled;
   }
@@ -1340,7 +1415,11 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   if (typeof candidate.responseStyleCustomInstructions === 'string') {
     result.responseStyleCustomInstructions = candidate.responseStyleCustomInstructions;
   }
-  if (candidate.sttProvider === 'browser' || candidate.sttProvider === 'server') {
+  if (
+    candidate.sttProvider === 'browser'
+    || candidate.sttProvider === 'server'
+    || candidate.sttProvider === 'wasm'
+  ) {
     result.sttProvider = candidate.sttProvider;
   }
   if (typeof candidate.sttServerUrl === 'string') {
@@ -1348,6 +1427,9 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   }
   if (typeof candidate.sttModel === 'string') {
     result.sttModel = candidate.sttModel.trim();
+  }
+  if (typeof candidate.wasmSttModel === 'string') {
+    result.wasmSttModel = candidate.wasmSttModel.trim();
   }
   if (typeof candidate.sttLanguage === 'string') {
     result.sttLanguage = candidate.sttLanguage.trim();
@@ -1469,7 +1551,7 @@ const applySettingsAndDispatch = async (settings: DesktopSettings): Promise<void
   }
   await waitForSettingsHydration();
   try {
-    applyDesktopUiPreferences(settings);
+    applyDesktopUiPreferences(settings, { authoritative: true });
   } catch (error) {
     console.warn('applyDesktopUiPreferences failed:', error);
   }

@@ -15,8 +15,10 @@ type TestAgent = {
 
 let getConfigCalls = 0;
 let listAgentsCalls = 0;
+let checkHealthCalls = 0;
 let liveAgents: TestAgent[] = [];
 let listAgentsImpl: ((directory?: string | null) => Promise<TestAgent[]>) | null = null;
+let checkHealthImpl: () => Promise<boolean> = async () => true;
 
 const provider = (id: string, modelId = `${id}-model`) => ({
   id,
@@ -119,7 +121,10 @@ mock.module('@/lib/opencode/client', () => ({
   opencodeClient: {
     setDirectory: mock(() => undefined),
     getDirectory: mock(() => DIRECTORY),
-    checkHealth: mock(async () => true),
+    checkHealth: mock(async () => {
+      checkHealthCalls += 1;
+      return checkHealthImpl();
+    }),
     getConfig: mock(async () => {
       getConfigCalls += 1;
       return {};
@@ -205,8 +210,10 @@ describe('useConfigStore non-blocking OpenCode config', () => {
   beforeEach(() => {
     getConfigCalls = 0;
     listAgentsCalls = 0;
+    checkHealthCalls = 0;
     liveAgents = [testAgent('build')];
     listAgentsImpl = null;
+    checkHealthImpl = async () => true;
     useConfigStore.setState({
       activeDirectoryKey: DIRECTORY,
       providers: [provider('openai', 'gpt-5.5'), provider('manual', 'manual-model'), provider('default', 'default-model')],
@@ -238,6 +245,7 @@ describe('useConfigStore non-blocking OpenCode config', () => {
       isConnected: true,
       hasEverConnected: true,
       connectionPhase: 'connected',
+      lastDisconnectReason: null,
       isInitialized: false,
     });
   });
@@ -356,5 +364,56 @@ describe('useConfigStore non-blocking OpenCode config', () => {
     await useConfigStore.getState().initializeApp();
     expect(useConfigStore.getState().isInitialized).toBe(true);
     expect(getConfigCalls).toBe(before);
+  });
+
+  test('checkConnection does not let a failed health probe override a connected event stream', async () => {
+    checkHealthImpl = async () => false;
+    useConfigStore.setState({
+      isConnected: true,
+      hasEverConnected: true,
+      connectionPhase: 'connected',
+      lastDisconnectReason: null,
+    });
+
+    const isConnected = await useConfigStore.getState().checkConnection();
+
+    expect(isConnected).toBe(true);
+    expect(checkHealthCalls).toBe(1);
+    expect(useConfigStore.getState().isConnected).toBe(true);
+    expect(useConfigStore.getState().connectionPhase).toBe('connected');
+    expect(useConfigStore.getState().lastDisconnectReason).toBeNull();
+  });
+
+  test('checkConnection retries unhealthy results before declaring startup disconnected', async () => {
+    checkHealthImpl = async () => checkHealthCalls >= 3;
+    useConfigStore.setState({
+      isConnected: false,
+      hasEverConnected: false,
+      connectionPhase: 'connecting',
+      lastDisconnectReason: null,
+    });
+
+    const isConnected = await useConfigStore.getState().checkConnection();
+
+    expect(isConnected).toBe(true);
+    expect(checkHealthCalls).toBe(3);
+    expect(useConfigStore.getState().isConnected).toBe(true);
+    expect(useConfigStore.getState().connectionPhase).toBe('connected');
+  });
+
+  test('checkConnection preserves the event-stream disconnect reason after health retries fail', async () => {
+    checkHealthImpl = async () => false;
+    useConfigStore.setState({
+      isConnected: false,
+      hasEverConnected: true,
+      connectionPhase: 'reconnecting',
+      lastDisconnectReason: 'upstream_stalled',
+    });
+
+    const isConnected = await useConfigStore.getState().checkConnection();
+
+    expect(isConnected).toBe(false);
+    expect(checkHealthCalls).toBe(5);
+    expect(useConfigStore.getState().lastDisconnectReason).toBe('upstream_stalled');
   });
 });

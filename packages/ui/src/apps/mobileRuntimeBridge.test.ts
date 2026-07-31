@@ -5,6 +5,8 @@ const registerCalls: unknown[] = [];
 const unregisterCalls: string[] = [];
 
 mock.module('@/lib/runtime-switch', () => ({
+  getRuntimeApiBaseUrl: () => '',
+  getRuntimeKey: () => '',
   switchRuntimeEndpoint: (options: unknown) => {
     switchCalls.push(options);
   },
@@ -54,6 +56,7 @@ describe('mobileRuntimeBridge', () => {
     expect(switchCalls).toEqual([{
       apiBaseUrl: 'http://10.0.0.2:3000',
       clientToken: 'tok',
+      relay: null,
       runtimeKey: 'mobile:http://10.0.0.2:3000',
     }]);
     expect(registerCalls).toEqual([{

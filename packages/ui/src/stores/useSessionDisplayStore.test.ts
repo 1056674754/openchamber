@@ -18,4 +18,23 @@ describe('useSessionDisplayStore project sorting', () => {
       projectSortOrder: 'a-z',
     });
   });
+
+  test('defaults to worktree grouping with sticky zone headers', () => {
+    expect(useSessionDisplayStore.getState().sessionGroupingMode).toBe('by-worktree');
+    expect(useSessionDisplayStore.getState().stickyZoneHeaders).toBe(true);
+  });
+
+  test('preserves fork display mode while migrating new sidebar preferences', () => {
+    expect(migrateSessionDisplayState({
+      displayMode: 'minimal',
+      sessionGroupingMode: 'flat',
+      stickyZoneHeaders: false,
+      projectSortOrder: 'a-z',
+    }, 1)).toEqual({
+      displayMode: 'minimal',
+      sessionGroupingMode: 'flat',
+      stickyZoneHeaders: false,
+      projectSortOrder: 'a-z',
+    });
+  });
 });

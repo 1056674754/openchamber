@@ -64,22 +64,6 @@ button,
 
 }
 
-/* Suppress WebKit-specific hover/focus adornments on the chat textarea */
-textarea[data-chat-input="true"] {
-  -webkit-appearance: none;
-  background: transparent !important;
-  border: none;
-  box-shadow: none;
-}
-
-textarea[data-chat-input="true"]:hover,
-textarea[data-chat-input="true"]:focus,
-textarea[data-chat-input="true"]:focus-visible {
-  outline: none;
-  border: none;
-  box-shadow: none;
-}
-
 /* Ensure interactive controls consistently show pointer cursor */
 :where(
   button,
@@ -256,7 +240,7 @@ textarea[data-chat-input="true"]:focus-visible {
   color: color-mix(in srgb, var(--syntax-comment) 85%, var(--syntax-foreground) 15%);
 }
 
-:root.vscode-runtime textarea[data-chat-input="true"]::placeholder {
+:root.vscode-runtime .composer-editor .cm-placeholder {
   color: color-mix(in srgb, var(--vscode-input-placeholderForeground, var(--muted-foreground)) 65%, transparent);
 }
 

@@ -51,7 +51,7 @@ const chooseBetterOwnershipMatch = (
   return current;
 };
 
-const sessionDirectoryOf = (session: Session): string | null => {
+export const sessionDirectoryOf = (session: Session): string | null => {
   const direct = normalizePath((session as Session & { directory?: string | null }).directory ?? null);
   if (direct) return direct;
   return normalizePath(

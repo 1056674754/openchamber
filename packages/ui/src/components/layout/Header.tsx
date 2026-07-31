@@ -30,6 +30,7 @@ import { useFeatureFlagsStore } from '@/stores/useFeatureFlagsStore';
 
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
+import { useDesktopWindowControlsLayout } from '@/hooks/useDesktopWindowControlsLayout';
 import { MobileActiveInstanceChip } from '@/apps/MobileActiveInstanceChip';
 import { openMobileInstancesSheet } from '@/apps/mobileInstancesUi';
 import { useDeviceInfo, useTabletStandalonePwaRuntime } from '@/lib/device';
@@ -58,6 +59,7 @@ import {
 import type { QuotaProviderId, UsageWindow } from '@/types';
 import type { GitHubAuthStatus } from '@/lib/api/types';
 import { InstanceInfoPanel } from '@/components/desktop/InstanceInfoPanel';
+import { WindowsWindowControls } from '@/components/desktop/WindowsWindowControls';
 import { useActiveServerId } from '@/hooks/useActiveServerId';
 import { serverRegistry } from '@/lib/opencode/server-registry';
 import { OpenInAppButton } from '@/components/desktop/OpenInAppButton';
@@ -80,7 +82,7 @@ type HeaderIconActionButtonProps = {
   visible?: boolean;
   title: string;
   ariaLabel: string;
-  onClick: () => void;
+  onClick: React.MouseEventHandler<HTMLButtonElement>;
   className?: string;
   Icon: IconName;
   iconClassName?: string;
@@ -707,6 +709,7 @@ export const Header: React.FC<HeaderProps> = ({
     return isDesktopShell();
   });
   const hasElectronDesktopIPC = React.useMemo(() => canUseElectronDesktopIPC(), []);
+  const { usesFramelessChrome, side: windowControlsSide } = useDesktopWindowControlsLayout();
   const isTabletStandalonePwa = useTabletStandalonePwaRuntime();
   const [isDesktopWindowFullscreen, setIsDesktopWindowFullscreen] = React.useState(false);
 
@@ -1449,6 +1452,16 @@ export const Header: React.FC<HeaderProps> = ({
     }
   }, [isDesktopApp]);
 
+  const handleOpenAppMenu = React.useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    void invokeDesktop('desktop_show_app_menu', {
+      x: rect.left,
+      y: rect.bottom,
+    }).catch((error) => {
+      console.warn('[header] failed to open app menu', error);
+    });
+  }, []);
+
   const tabs: TabConfig[] = React.useMemo(() => {
     if (isMobile) {
       const base: TabConfig[] = [
@@ -1797,6 +1810,18 @@ export const Header: React.FC<HeaderProps> = ({
       role="tablist"
       aria-label={t('header.navigation.mainAria')}
     >
+      <WindowsWindowControls
+        visible={usesFramelessChrome && windowControlsSide === 'left'}
+        position="left"
+      />
+      <HeaderIconActionButton
+        visible={usesFramelessChrome}
+        title={t('header.actions.openAppMenu')}
+        ariaLabel={t('header.actions.openAppMenuAria')}
+        onClick={handleOpenAppMenu}
+        className={`${desktopHeaderIconButtonClass} shrink-0`}
+        Icon={'menu-2'}
+      />
       <HeaderIconActionButton
         title={t('header.actions.openSessionsWithShortcut', { shortcut: shortcutLabel('toggle_sidebar') })}
         ariaLabel={t('header.actions.openSessionsAria')}
@@ -1872,6 +1897,10 @@ export const Header: React.FC<HeaderProps> = ({
           {desktopSidebarActions}
         </div>
       </div>
+      <WindowsWindowControls
+        visible={usesFramelessChrome && windowControlsSide === 'right'}
+        position="right"
+      />
     </div>
   );
 

@@ -5,6 +5,7 @@ import { Sidebar, SIDEBAR_CONTENT_WIDTH } from './Sidebar';
 import { RightSidebar, RIGHT_SIDEBAR_CONTENT_WIDTH } from './RightSidebar';
 import { ProjectContextPanel, RightSidebarTabs } from './RightSidebarTabs';
 import { ContextPanel } from './ContextPanel';
+import { ContextPanelRail } from './ContextPanelRail';
 import { ErrorBoundary } from '../ui/ErrorBoundary';
 import { CommandPalette } from '../ui/CommandPalette';
 import { HelpDialog } from '../ui/HelpDialog';
@@ -17,6 +18,7 @@ import { DrawerProvider } from '@/contexts/DrawerContext';
 
 import { useUIStore } from '@/stores/useUIStore';
 import { useUpdateStore } from '@/stores/useUpdateStore';
+import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useDeviceInfo } from '@/lib/device';
 import { useVisualViewport } from '@/hooks/useVisualViewport';
 import { useI18n } from '@/lib/i18n';
@@ -37,7 +39,9 @@ const FilesView = lazyWithChunkRecovery(() => import('@/components/views/FilesVi
 const DiagramView = lazyWithChunkRecovery(() => import('@/components/views/DiagramView').then(m => ({ default: m.DiagramView })));
 const SettingsView = lazyWithChunkRecovery(() => import('@/components/views/SettingsView').then(m => ({ default: m.SettingsView })));
 const SettingsWindow = lazyWithChunkRecovery(() => import('@/components/views/SettingsWindow').then(m => ({ default: m.SettingsWindow })));
-const MultiRunWindow = lazyWithChunkRecovery(() => import('@/components/views/MultiRunWindow').then(m => ({ default: m.MultiRunWindow })));
+const ArchiveView = lazyWithChunkRecovery(() => import('@/components/views/ArchiveView').then(m => ({ default: m.ArchiveView })));
+const WorktreesView = lazyWithChunkRecovery(() => import('@/components/views/WorktreesView').then(m => ({ default: m.WorktreesView })));
+const ScheduledTasksView = lazyWithChunkRecovery(() => import('@/components/session/ScheduledTasksDialog').then(m => ({ default: m.ScheduledTasksDialog })));
 
 // Mobile drawer width as screen percentage
 const MOBILE_DRAWER_WIDTH_PERCENT = 100;
@@ -62,6 +66,18 @@ export const MainLayout: React.FC = () => {
     const setMultiRunLauncherOpen = useUIStore((state) => state.setMultiRunLauncherOpen);
     const multiRunLauncherPrefillPrompt = useUIStore((state) => state.multiRunLauncherPrefillPrompt);
     const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
+    const isScheduledTasksViewOpen = useUIStore((state) => state.isScheduledTasksDialogOpen);
+    const isArchivePageOpen = useUIStore((state) => state.isArchivePageOpen);
+    const worktreesPageProjectId = useUIStore((state) => state.worktreesPageProjectId);
+    const closeMainSurfaces = useUIStore((state) => state.closeMainSurfaces);
+    const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
+    const previousSessionIdRef = React.useRef(currentSessionId);
+
+    React.useEffect(() => {
+      if (previousSessionIdRef.current === currentSessionId) return;
+      previousSessionIdRef.current = currentSessionId;
+      closeMainSurfaces();
+    }, [closeMainSurfaces, currentSessionId]);
 
     const { isMobile, screenWidth } = useDeviceInfo();
     const visualViewport = useVisualViewport();
@@ -307,6 +323,12 @@ export const MainLayout: React.FC = () => {
     }, [activeMainTab]);
 
     const isChatActive = activeMainTab === 'chat';
+    const isMainSurfaceOpen = (
+      (multiRunEnabled && isMultiRunLauncherOpen)
+      || isScheduledTasksViewOpen
+      || isArchivePageOpen
+      || worktreesPageProjectId !== null
+    );
     const visibleSidebarWidth = React.useMemo(() => {
         const rawWidth = sidebarWidth || SIDEBAR_CONTENT_WIDTH;
         return Math.min(DESKTOP_SIDEBAR_MAX_WIDTH, Math.max(DESKTOP_SIDEBAR_MIN_WIDTH, rawWidth));
@@ -467,10 +489,10 @@ export const MainLayout: React.FC = () => {
                         )}
                     >
                         <main className="relative h-full min-h-0 w-full overflow-hidden bg-background" data-page-scroll-lock="true">
-                            <div className={cn('absolute inset-0', !isChatActive && 'invisible')}>
+                            <div className={cn('absolute inset-0', (!isChatActive || isMainSurfaceOpen) && 'invisible')}>
                                 <ErrorBoundary><ChatView /></ErrorBoundary>
                             </div>
-                            {secondaryView && (
+                            {secondaryView && !isMainSurfaceOpen && (
                                 <div className="absolute inset-0">
                                     <ErrorBoundary>{secondaryView}</ErrorBoundary>
                                 </div>
@@ -485,6 +507,21 @@ export const MainLayout: React.FC = () => {
                                         />
                                     </ErrorBoundary>
                                 </div>
+                            )}
+                            {isScheduledTasksViewOpen && (
+                                <ErrorBoundary>
+                                    <React.Suspense fallback={null}><ScheduledTasksView /></React.Suspense>
+                                </ErrorBoundary>
+                            )}
+                            {isArchivePageOpen && (
+                                <ErrorBoundary>
+                                    <React.Suspense fallback={null}><ArchiveView /></React.Suspense>
+                                </ErrorBoundary>
+                            )}
+                            {worktreesPageProjectId !== null && (
+                                <ErrorBoundary>
+                                    <React.Suspense fallback={null}><WorktreesView /></React.Suspense>
+                                </ErrorBoundary>
                             )}
                         </main>
                     </div>
@@ -574,16 +611,47 @@ export const MainLayout: React.FC = () => {
                                 <div className="flex flex-1 min-h-0 overflow-hidden" data-page-scroll-lock="true">
                                     <div className="relative flex flex-1 min-h-0 min-w-0 overflow-hidden" data-page-scroll-lock="true">
                                         <main className="flex-1 overflow-hidden bg-background relative" data-page-scroll-lock="true">
-                                            <div className={cn('absolute inset-0', !isChatActive && 'invisible')}>
+                                            <div className={cn('absolute inset-0', (!isChatActive || isMainSurfaceOpen) && 'invisible')}>
                                                 <ErrorBoundary><ChatView /></ErrorBoundary>
                                             </div>
-                                            {secondaryView && (
+                                            {secondaryView && !isMainSurfaceOpen && (
                                                 <div className="absolute inset-0">
                                                     <ErrorBoundary>{secondaryView}</ErrorBoundary>
                                                 </div>
                                             )}
+                                            {multiRunEnabled && isMultiRunLauncherOpen && (
+                                                <div className="absolute inset-0 z-10 bg-background">
+                                                    <ErrorBoundary>
+                                                        <MultiRunLauncher
+                                                            initialPrompt={multiRunLauncherPrefillPrompt}
+                                                            onCreated={() => setMultiRunLauncherOpen(false)}
+                                                            onCancel={() => setMultiRunLauncherOpen(false)}
+                                                        />
+                                                    </ErrorBoundary>
+                                                </div>
+                                            )}
+                                            {isScheduledTasksViewOpen && (
+                                                <ErrorBoundary>
+                                                    <React.Suspense fallback={null}><ScheduledTasksView /></React.Suspense>
+                                                </ErrorBoundary>
+                                            )}
+                                            {isArchivePageOpen && (
+                                                <ErrorBoundary>
+                                                    <React.Suspense fallback={null}><ArchiveView /></React.Suspense>
+                                                </ErrorBoundary>
+                                            )}
+                                            {worktreesPageProjectId !== null && (
+                                                <ErrorBoundary>
+                                                    <React.Suspense fallback={null}><WorktreesView /></React.Suspense>
+                                                </ErrorBoundary>
+                                            )}
                                         </main>
-                                        <ContextPanel />
+                                        {!isMainSurfaceOpen ? (
+                                          <>
+                                            <ContextPanel />
+                                            <ErrorBoundary><ContextPanelRail /></ErrorBoundary>
+                                          </>
+                                        ) : null}
                                     </div>
                                 </div>
                             </div>
@@ -603,15 +671,6 @@ export const MainLayout: React.FC = () => {
                             onOpenChange={setSettingsDialogOpen}
                         />
                     </React.Suspense>
-                    {multiRunEnabled && (
-                        <React.Suspense fallback={null}>
-                            <MultiRunWindow
-                                open={isMultiRunLauncherOpen}
-                                onOpenChange={setMultiRunLauncherOpen}
-                                initialPrompt={multiRunLauncherPrefillPrompt}
-                            />
-                        </React.Suspense>
-                    )}
                 </>
             )}
 

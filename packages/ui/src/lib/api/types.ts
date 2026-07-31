@@ -686,12 +686,15 @@ export interface SettingsPayload {
   lastDirectory?: string;
   homeDirectory?: string;
   opencodeBinary?: string;
+  agentControlToolEnabled?: boolean;
   projects?: ProjectEntry[];
   activeProjectId?: string;
   approvedDirectories?: string[];
   securityScopedBookmarks?: string[];
   pinnedDirectories?: string[];
   showReasoningTraces?: boolean;
+  draftStartersVisible?: boolean;
+  draftStartersScheduleTaskAdded?: boolean;
   collapsibleThinkingBlocks?: boolean;
   showDeletionDialog?: boolean;
   nativeNotificationsEnabled?: boolean;

@@ -6,6 +6,8 @@ import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import { SortableTabsStrip } from '@/components/ui/sortable-tabs-strip';
 import { DiffView } from '@/components/views/DiffView';
 import { FilesView } from '@/components/views/FilesView';
+import { GitView } from '@/components/views/GitView';
+import { PullRequestView } from '@/components/views/PullRequestView';
 import { PlanView } from '@/components/views/PlanView';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
@@ -28,6 +30,8 @@ import { Icon } from "@/components/icon/Icon";
 import { OpenChamberLogo } from "@/components/ui/OpenChamberLogo";
 import { invokeDesktopCommand } from '@/lib/desktopNative';
 import { buildEmbeddedSessionChatURL } from './contextPanelEmbeddedChat';
+import { ProjectContextPanel } from './RightSidebarTabs';
+import { getContextSurfaceWidthFraction } from '@/lib/surfaces/registry';
 
 const TerminalView = lazyWithChunkRecovery(() => import('@/components/views/TerminalView').then(m => ({ default: m.TerminalView })));
 
@@ -37,7 +41,7 @@ const CONTEXT_PANEL_DEFAULT_WIDTH = 600;
 const CONTEXT_TAB_LABEL_MAX_CHARS = 24;
 const CONTEXT_PANEL_SPLIT_HANDLE_HEIGHT = 3;
 type TranslateFn = ReturnType<typeof useI18n>['t'];
-type ContextPanelTabMode = 'diff' | 'file' | 'context' | 'plan' | 'chat' | 'preview' | 'terminal' | 'browser';
+type ContextPanelTabMode = 'diff' | 'file' | 'context' | 'plan' | 'chat' | 'preview' | 'terminal' | 'browser' | 'git' | 'pr' | 'notes';
 type ContextPanelTabLike = { id: string; mode: ContextPanelTabMode; targetPath: string | null; dedupeKey: string; label: string | null; readOnly: boolean };
 type SplitDropZone = 'top' | 'bottom' | 'middle';
 
@@ -50,6 +54,9 @@ const CONTEXT_PANEL_TAB_MODES = new Set<ContextPanelTabMode>([
   'preview',
   'terminal',
   'browser',
+  'git',
+  'pr',
+  'notes',
 ]);
 
 type PreviewConsoleEvent = {
@@ -243,7 +250,8 @@ const getAvailablePanelWidth = (panel: HTMLElement | null): number | null => {
     return null;
   }
 
-  return parentWidth;
+  const rail = panel?.parentElement?.querySelector<HTMLElement>('[data-context-panel-rail="true"]');
+  return Math.max(1, parentWidth - (rail?.offsetWidth ?? 0));
 };
 
 const clampWidthToAvailableSpace = (width: number, panel: HTMLElement | null): number => {
@@ -279,6 +287,9 @@ const getModeLabel = (
   if (mode === 'preview') return t('contextPanel.mode.preview');
   if (mode === 'terminal') return t('contextPanel.mode.terminal');
   if (mode === 'browser') return t('contextPanel.mode.browser');
+  if (mode === 'git') return t('layout.rightSidebar.git');
+  if (mode === 'pr') return t('contextPanel.mode.pr');
+  if (mode === 'notes') return t('contextRail.surface.notes');
   return t('contextPanel.mode.context');
 };
 
@@ -337,6 +348,18 @@ const getTabIcon = (tab: { mode: ContextPanelMode; targetPath: string | null }):
 
   if (tab.mode === 'diff') {
     return <Icon name="arrow-left-right" className="h-3.5 w-3.5" />;
+  }
+
+  if (tab.mode === 'git') {
+    return <Icon name="git-branch" className="h-3.5 w-3.5" />;
+  }
+
+  if (tab.mode === 'pr') {
+    return <Icon name="git-pull-request" className="h-3.5 w-3.5" />;
+  }
+
+  if (tab.mode === 'notes') {
+    return <Icon name="sticky-note" className="h-3.5 w-3.5" />;
   }
 
   if (tab.mode === 'plan') {
@@ -1665,6 +1688,18 @@ const ContextPanelTabContent: React.FC<{
     return <DiffView hideStackedFileSidebar stackedDefaultCollapsedAll hideFileSelector pinSelectedFileHeaderToTopOnNavigate showOpenInEditorAction />;
   }
 
+  if (tab.mode === 'git') {
+    return <GitView />;
+  }
+
+  if (tab.mode === 'pr') {
+    return <PullRequestView />;
+  }
+
+  if (tab.mode === 'notes') {
+    return <ProjectContextPanel />;
+  }
+
   if (tab.mode === 'context') {
     return <ContextPanelContent />;
   }
@@ -1740,9 +1775,16 @@ export const ContextPanel: React.FC = () => {
   const hasSplit = Boolean(splitTab && activeTab && splitTab.id !== activeTab.id);
   const isOpen = Boolean(panelState?.isOpen && activeTab);
   const isExpanded = Boolean(isOpen && panelState?.expanded);
-  const width = clampWidth(panelState?.width ?? CONTEXT_PANEL_DEFAULT_WIDTH);
+  const [availablePanelAreaWidth, setAvailablePanelAreaWidth] = React.useState<number | null>(null);
+  const activeModeForWidth = activeTab?.mode ?? null;
+  const manualWidth = activeModeForWidth ? panelState?.widthByMode?.[activeModeForWidth] : undefined;
+  const widthFraction = activeModeForWidth ? getContextSurfaceWidthFraction(activeModeForWidth) : 0.5;
+  const widthFallbackBase = availablePanelAreaWidth
+    ?? (typeof window !== 'undefined' ? window.innerWidth : CONTEXT_PANEL_DEFAULT_WIDTH * 2);
+  const width = clampWidth(manualWidth ?? Math.round(widthFraction * widthFallbackBase));
 
   const [isResizing, setIsResizing] = React.useState(false);
+  const isResizingRef = React.useRef(false);
   const [suppressWidthTransition, setSuppressWidthTransition] = React.useState(false);
   const startXRef = React.useRef(0);
   const startWidthRef = React.useRef(width);
@@ -1762,6 +1804,16 @@ export const ContextPanel: React.FC = () => {
   const wasOpenRef = React.useRef(false);
   const previousIsOpenRef = React.useRef(isOpen);
   const suppressWidthTransitionFrameRef = React.useRef<number | null>(null);
+
+  React.useLayoutEffect(() => {
+    const parent = panelRef.current?.parentElement;
+    if (!parent) return;
+    const update = () => setAvailablePanelAreaWidth(getAvailablePanelWidth(panelRef.current));
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(parent);
+    return () => observer.disconnect();
+  }, []);
 
   const suppressWidthTransitionForFrame = React.useCallback(() => {
     setSuppressWidthTransition(true);
@@ -1831,6 +1883,7 @@ export const ContextPanel: React.FC = () => {
     }
 
     activeResizePointerIDRef.current = event.pointerId;
+    isResizingRef.current = true;
     setIsResizing(true);
     startXRef.current = event.clientX;
     startWidthRef.current = width;
@@ -1840,7 +1893,7 @@ export const ContextPanel: React.FC = () => {
   }, [applyLiveWidth, directoryKey, isExpanded, isOpen, width]);
 
   const handleResizeMove = React.useCallback((event: React.PointerEvent) => {
-    if (!isResizing || activeResizePointerIDRef.current !== event.pointerId) {
+    if (!isResizingRef.current || activeResizePointerIDRef.current !== event.pointerId) {
       return;
     }
 
@@ -1852,10 +1905,10 @@ export const ContextPanel: React.FC = () => {
 
     resizingWidthRef.current = nextWidth;
     applyLiveWidth(nextWidth);
-  }, [applyLiveWidth, isResizing]);
+  }, [applyLiveWidth]);
 
   const handleResizeEnd = React.useCallback((event: React.PointerEvent) => {
-    if (activeResizePointerIDRef.current !== event.pointerId || !directoryKey) {
+    if (activeResizePointerIDRef.current !== event.pointerId || !directoryKey || !activeModeForWidth) {
       return;
     }
 
@@ -1869,10 +1922,11 @@ export const ContextPanel: React.FC = () => {
     suppressWidthTransitionForFrame();
     applyLiveWidth(finalWidth);
     resizingWidthRef.current = finalWidth;
-    setContextPanelWidth(directoryKey, finalWidth);
+    setContextPanelWidth(directoryKey, activeModeForWidth, finalWidth);
+    isResizingRef.current = false;
     setIsResizing(false);
     activeResizePointerIDRef.current = null;
-  }, [applyLiveWidth, directoryKey, setContextPanelWidth, suppressWidthTransitionForFrame, width]);
+  }, [activeModeForWidth, applyLiveWidth, directoryKey, setContextPanelWidth, suppressWidthTransitionForFrame, width]);
 
   React.useEffect(() => {
     if (!isResizing) {
@@ -2407,7 +2461,7 @@ export const ContextPanel: React.FC = () => {
       tabIndex={-1}
       inert={!isOpen || undefined}
       className={cn(
-        'flex min-h-0 flex-col overflow-hidden bg-background',
+        'flex min-h-0 flex-col overflow-hidden bg-background max-sm:hidden',
         !isExpanded && 'border-l border-border/40',
         isExpanded
           ? 'absolute inset-0 z-20 min-w-0'

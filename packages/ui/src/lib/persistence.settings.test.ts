@@ -5,6 +5,11 @@ import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
 // key deterministically controllable.
 
 let activeRuntimeKey = 'host-a';
+let draftStartersVisible = true;
+let agentControlToolEnabled = true;
+let globalDraftStarters: unknown[] = [];
+let sttProvider: 'browser' | 'server' | 'wasm' = 'browser';
+let wasmSttModel = 'whisper-tiny';
 
 mock.module('@/lib/runtime-switch', () => ({
   getRuntimeKey: () => activeRuntimeKey,
@@ -13,7 +18,22 @@ mock.module('@/lib/runtime-switch', () => ({
 }));
 
 const noopStore = {
-  getState: () => ({ collapsedModelProviders: [], modelPickerLayoutByServerId: new Map() }),
+  getState: () => ({
+    collapsedModelProviders: [],
+    modelPickerLayoutByServerId: new Map(),
+    draftStartersVisible,
+    agentControlToolEnabled,
+    globalDraftStarters,
+    setDraftStartersVisible: (value: boolean) => {
+      draftStartersVisible = value;
+    },
+    setAgentControlToolEnabled: (value: boolean) => {
+      agentControlToolEnabled = value;
+    },
+    setGlobalDraftStarters: (value: unknown[]) => {
+      globalDraftStarters = value;
+    },
+  }),
   setState: () => {},
   persist: undefined,
 };
@@ -40,7 +60,14 @@ mock.module('@/lib/modelPickerLayout', () => ({
   sanitizeModelPickerLayoutByServerId: () => ({}),
 }));
 
-const { flushPendingSettingsUpdates, invalidateSettingsCache, refreshDesktopSettingsFromHost, syncDesktopSettings, updateDesktopSettings } = await import(
+const {
+  flushPendingSettingsUpdates,
+  invalidateSettingsCache,
+  refreshDesktopSettingsFromHost,
+  sanitizeWebSettings,
+  syncDesktopSettings,
+  updateDesktopSettings,
+} = await import(
   '@/lib/persistence'
 );
 
@@ -92,6 +119,22 @@ const installWindow = () => {
       addEventListener: eventTarget.addEventListener.bind(eventTarget),
       removeEventListener: eventTarget.removeEventListener.bind(eventTarget),
       dispatchEvent: eventTarget.dispatchEvent.bind(eventTarget),
+      __zustand_config_store__: {
+        getState: () => ({
+          sttProvider,
+          sttServerUrl: '',
+          sttModel: '',
+          wasmSttModel,
+          sttLanguage: '',
+          sttSilenceThresholdDb: -45,
+          sttSilenceHoldMs: 1500,
+          sttTranscribeOnStop: false,
+        }),
+        setState: (next: { sttProvider?: 'browser' | 'server' | 'wasm'; wasmSttModel?: string }) => {
+          if (next.sttProvider) sttProvider = next.sttProvider;
+          if (next.wasmSttModel) wasmSttModel = next.wasmSttModel;
+        },
+      },
     },
   });
   Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: localStorageStub });
@@ -116,9 +159,31 @@ const handler = (event: Event) => {
   dispatched.push((event as CustomEvent).detail);
 };
 
+describe('sanitizeWebSettings voice settings', () => {
+  test('preserves the local WASM provider and model', () => {
+    // Given
+    const payload = {
+      sttProvider: 'wasm',
+      wasmSttModel: 'whisper-small',
+    };
+
+    // When
+    const settings = sanitizeWebSettings(payload);
+
+    // Then
+    expect(settings?.sttProvider).toBe('wasm');
+    expect(settings?.wasmSttModel).toBe('whisper-small');
+  });
+});
+
 describe('refreshDesktopSettingsFromHost', () => {
   beforeEach(() => {
     activeRuntimeKey = 'host-a';
+    draftStartersVisible = true;
+    agentControlToolEnabled = true;
+    globalDraftStarters = [];
+    sttProvider = 'browser';
+    wasmSttModel = 'whisper-tiny';
     calls.length = 0;
     dispatched.length = 0;
     memoryStore.clear();
@@ -127,6 +192,82 @@ describe('refreshDesktopSettingsFromHost', () => {
     installWindow();
     window.addEventListener('openchamber:settings-synced', handler as EventListener);
     installFetch();
+  });
+
+  test('applies persisted draft starter visibility from the active host', async () => {
+    responseFor = () => ({ draftStartersVisible: false });
+
+    await syncDesktopSettings();
+
+    expect(draftStartersVisible).toBe(false);
+  });
+
+  test('uses the visible default when the active host has no saved preference', async () => {
+    draftStartersVisible = false;
+    responseFor = () => ({});
+
+    await syncDesktopSettings();
+
+    expect(draftStartersVisible).toBe(true);
+  });
+
+  test('applies the persisted managed Agent tool preference from the active host', async () => {
+    // Given
+    responseFor = () => ({
+      agentControlToolEnabled: false,
+      draftStartersScheduleTaskAdded: true,
+    });
+
+    // When
+    await syncDesktopSettings();
+
+    // Then
+    expect(agentControlToolEnabled).toBe(false);
+  });
+
+  test('restores the local WASM provider and model from the active host', async () => {
+    // Given
+    responseFor = () => ({
+      sttProvider: 'wasm',
+      wasmSttModel: 'whisper-small',
+    });
+
+    // When
+    await syncDesktopSettings();
+
+    // Then
+    expect(sttProvider).toBe('wasm');
+    expect(wasmSttModel).toBe('whisper-small');
+  });
+
+  test('adds the scheduled task starter once without replacing the custom order', async () => {
+    // Given
+    responseFor = (_url, method) => method === 'GET'
+      ? {
+          draftStarters: [
+            { type: 'command', name: 'explore' },
+            { type: 'command', name: 'craft-goal' },
+            { type: 'command', name: 'debug' },
+          ],
+          draftStartersScheduleTaskAdded: false,
+        }
+      : {};
+
+    // When
+    await syncDesktopSettings();
+    await flushPendingSettingsUpdates();
+
+    // Then
+    expect(globalDraftStarters).toEqual([
+      { type: 'command', name: 'explore' },
+      { type: 'command', name: 'craft-goal' },
+      { type: 'command', name: 'schedule-task' },
+      { type: 'command', name: 'debug' },
+    ]);
+    expect(calls.find((call) => call.method === 'PUT')?.body).toEqual({
+      draftStartersScheduleTaskAdded: true,
+      draftStarters: globalDraftStarters,
+    });
   });
 
   afterEach(async () => {

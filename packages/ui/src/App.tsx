@@ -58,6 +58,7 @@ import { applyMobileKeyboardMode } from '@/lib/mobileKeyboardMode';
 import { SyncAppEffects } from '@/apps/AppEffects';
 import { useAppFontEffects } from '@/apps/useAppFontEffects';
 import { OpenCodeUpdateToast } from '@/components/update/OpenCodeUpdateToast';
+import { RuntimeFallbackApprovalDialog } from '@/components/chat/RuntimeFallbackApprovalDialog';
 import { markStartupTrace, startupTraceEnabled } from '@/lib/startupTrace';
 import {
   canPostMessageToParentFrame,
@@ -948,6 +949,7 @@ function App({ apis }: AppProps) {
                 <div className={isDesktopRuntime ? 'h-full text-foreground bg-transparent' : 'h-full text-foreground bg-background'}>
                   <SyncAppEffects embeddedBackgroundWorkEnabled={embeddedBackgroundWorkEnabled} />
                   <OpenCodeUpdateToast />
+                  <RuntimeFallbackApprovalDialog />
                   <MainLayout />
                   <Toaster />
                   {!isBootShell && (

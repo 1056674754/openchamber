@@ -5,6 +5,7 @@ import { createDeferredSafeJSONStorage } from './utils/safeStorage';
 import { SEMANTIC_TYPOGRAPHY, getTypographyVariable, type SemanticTypographyKey } from '@/lib/typography';
 import type { ShortcutCombo } from '@/lib/shortcuts';
 import type { DraftStarterRef } from '@/lib/draftStarters';
+import type { DesktopWindowControlsPosition } from '@/lib/desktop';
 import { DEFAULT_MONO_FONT, DEFAULT_UI_FONT, type MonoFontOption, type UiFontOption } from '@/lib/fontOptions';
 import { getStoredMobileKeyboardMode, type MobileKeyboardMode } from '@/lib/mobileKeyboardMode';
 import { DEFAULT_SERVER_ID } from '@/lib/opencode/server-registry';
@@ -24,7 +25,7 @@ export type MainTab = 'chat' | 'plan' | 'git' | 'diff' | 'terminal' | 'files' | 
 /** Diff navigation scope. Fork has no staged selector; `turn` is last-turn snapshot mode. */
 export type PendingDiffScope = 'working' | 'turn';
 export type RightSidebarTab = 'git' | 'files' | 'context';
-export type ContextPanelMode = 'diff' | 'file' | 'context' | 'plan' | 'chat' | 'preview' | 'terminal' | 'browser';
+export type ContextPanelMode = 'diff' | 'file' | 'context' | 'plan' | 'chat' | 'preview' | 'terminal' | 'browser' | 'git' | 'pr' | 'notes';
 export type UserMessageRenderingMode = 'markdown' | 'plain';
 export type ChatRenderMode = 'sorted' | 'live';
 export type ActivityRenderMode = 'collapsed' | 'summary';
@@ -67,6 +68,7 @@ type ContextPanelDirectoryState = {
   tabs: ContextPanelTab[];
   activeTabId: string | null;
   width: number;
+  widthByMode: Partial<Record<ContextPanelMode, number>>;
   touchedAt: number;
   splitTabId: string | null;
   splitRatio: number;
@@ -149,6 +151,26 @@ const normalizeDirectoryPath = (value: string): string => {
 
   return normalized;
 };
+
+export const normalizeContextPanelDirectoryKey = (value: string): string => normalizeDirectoryPath(value);
+
+const CONTEXT_PANEL_MODES = new Set<ContextPanelMode>([
+  'diff',
+  'file',
+  'context',
+  'plan',
+  'chat',
+  'preview',
+  'terminal',
+  'browser',
+  'git',
+  'pr',
+  'notes',
+]);
+
+const isContextPanelMode = (value: unknown): value is ContextPanelMode => (
+  typeof value === 'string' && CONTEXT_PANEL_MODES.has(value as ContextPanelMode)
+);
 
 const clampContextPanelWidth = (width: number): number => {
   if (!Number.isFinite(width)) {
@@ -307,7 +329,7 @@ const sanitizeContextPanelTabs = (tabs: unknown): ContextPanelTab[] => {
       touchedAt?: unknown;
     };
 
-    if (candidate.mode !== 'diff' && candidate.mode !== 'file' && candidate.mode !== 'context' && candidate.mode !== 'plan' && candidate.mode !== 'chat' && candidate.mode !== 'preview' && candidate.mode !== 'terminal' && candidate.mode !== 'browser') {
+    if (!isContextPanelMode(candidate.mode)) {
       continue;
     }
 
@@ -369,6 +391,7 @@ const touchContextPanelState = (prev?: ContextPanelDirectoryState): ContextPanel
     tabs: [],
     activeTabId: null,
     width: CONTEXT_PANEL_DEFAULT_WIDTH,
+    widthByMode: {},
     touchedAt: Date.now(),
     splitTabId: null,
     splitRatio: 0.5,
@@ -487,6 +510,7 @@ const sanitizeContextPanelByDirectory = (
       tabs?: unknown;
       activeTabId?: unknown;
       width?: unknown;
+      widthByMode?: unknown;
       touchedAt?: unknown;
       mode?: unknown;
       targetPath?: unknown;
@@ -499,7 +523,7 @@ const sanitizeContextPanelByDirectory = (
     let tabs = sanitizeContextPanelTabs(candidate.tabs);
     let activeTabId = typeof candidate.activeTabId === 'string' ? candidate.activeTabId : null;
 
-    if (tabs.length === 0 && (candidate.mode === 'diff' || candidate.mode === 'file' || candidate.mode === 'context' || candidate.mode === 'plan' || candidate.mode === 'chat')) {
+    if (tabs.length === 0 && isContextPanelMode(candidate.mode)) {
       tabs = [createContextPanelTab({
         mode: candidate.mode,
         targetPath: typeof candidate.targetPath === 'string' ? candidate.targetPath : null,
@@ -511,6 +535,14 @@ const sanitizeContextPanelByDirectory = (
 
     const resolvedActiveTabId = resolveActiveContextPanelTabID(tabs, activeTabId);
     const clampedTabs = clampContextPanelTabs(tabs, CONTEXT_PANEL_MAX_TABS, resolvedActiveTabId);
+    const widthByMode: Partial<Record<ContextPanelMode, number>> = {};
+    if (candidate.widthByMode && typeof candidate.widthByMode === 'object') {
+      for (const [mode, width] of Object.entries(candidate.widthByMode as Record<string, unknown>)) {
+        if (isContextPanelMode(mode) && typeof width === 'number' && Number.isFinite(width)) {
+          widthByMode[mode] = clampContextPanelWidth(width);
+        }
+      }
+    }
 
     next[directory] = {
       isOpen: candidate.isOpen === true,
@@ -518,6 +550,7 @@ const sanitizeContextPanelByDirectory = (
       tabs: clampedTabs,
       activeTabId: resolveActiveContextPanelTabID(clampedTabs, resolvedActiveTabId),
       width: clampContextPanelWidth(typeof candidate.width === 'number' ? candidate.width : CONTEXT_PANEL_DEFAULT_WIDTH),
+      widthByMode,
       touchedAt: typeof candidate.touchedAt === 'number' && Number.isFinite(candidate.touchedAt)
         ? candidate.touchedAt
         : Date.now(),
@@ -561,6 +594,7 @@ interface UIStore {
   hasManuallyResizedRightSidebar: boolean;
   rightSidebarTab: RightSidebarTab;
   contextPanelByDirectory: Record<string, ContextPanelDirectoryState>;
+  contextRailOrder: string[];
   notesPanelHeight: number;
   todoPanelHeight: number;
   isSessionSwitcherOpen: boolean;
@@ -584,6 +618,9 @@ interface UIStore {
   openCodeStatusText: string;
   isSessionCreateDialogOpen: boolean;
   isScheduledTasksDialogOpen: boolean;
+  isArchivePageOpen: boolean;
+  worktreesPageProjectId: string | null;
+  isNewWorktreeDialogOpen: boolean;
   isSettingsDialogOpen: boolean;
   isModelSelectorOpen: boolean;
   sidebarSection: SidebarSection;
@@ -612,8 +649,9 @@ interface UIStore {
   autoDeleteLastRunAt: number | null;
    messageLimit: number;
    fontSize: number;
-   // Global draft welcome starters; null = unset (use the default built-in set).
+  // Global draft welcome starters; null = unset (use the default built-in set).
   globalDraftStarters: DraftStarterRef[] | null;
+  draftStartersVisible: boolean;
   terminalFontSize: number;
   editorFontSize: number;
   uiFont: UiFontOption;
@@ -672,6 +710,7 @@ interface UIStore {
   showTerminalQuickKeysOnDesktop: boolean;
   persistChatDraft: boolean;
   showOpenCodeUpdateNotifications: boolean;
+  agentControlToolEnabled: boolean;
   inputSpellcheckEnabled: boolean;
   wideChatLayoutEnabled: boolean;
   codeBlockLineWrap: boolean;
@@ -681,6 +720,7 @@ interface UIStore {
   showExpandedEditTools: boolean;
   timeFormatPreference: TimeFormatPreference;
   weekStartPreference: WeekStartPreference;
+  desktopWindowControlsPosition: DesktopWindowControlsPosition;
   userMessageRenderingMode: UserMessageRenderingMode;
   collapsibleUserMessages: boolean;
   stickyUserHeader: boolean;
@@ -707,6 +747,8 @@ interface UIStore {
   setRightSidebarOpen: (open: boolean) => void;
   setRightSidebarWidth: (width: number) => void;
   setRightSidebarTab: (tab: RightSidebarTab) => void;
+  setContextRailOrder: (order: string[]) => void;
+  openContextSurface: (directory: string, mode: ContextPanelMode) => void;
   openContextPanelTab: (directory: string, tab: ContextPanelTabDescriptor) => void;
   openContextDiff: (directory: string, filePath: string, scope?: PendingDiffScope | null) => void;
   openContextFile: (directory: string, filePath: string) => void;
@@ -722,7 +764,7 @@ interface UIStore {
   closeContextPanelTab: (directory: string, tabID: string) => void;
   closeContextPanel: (directory: string) => void;
   toggleContextPanelExpanded: (directory: string) => void;
-  setContextPanelWidth: (directory: string, width: number) => void;
+  setContextPanelWidth: (directory: string, mode: ContextPanelMode, width: number) => void;
   setContextPanelSplit: (directory: string, splitTabId: string | null) => void;
   setContextPanelSplitRatio: (directory: string, ratio: number) => void;
   setNotesPanelHeight: (height: number) => void;
@@ -747,6 +789,10 @@ interface UIStore {
   setOpenCodeStatusText: (text: string) => void;
   setSessionCreateDialogOpen: (open: boolean) => void;
   setScheduledTasksDialogOpen: (open: boolean) => void;
+  setArchivePageOpen: (open: boolean) => void;
+  setWorktreesPageProjectId: (projectId: string | null) => void;
+  closeMainSurfaces: () => void;
+  setNewWorktreeDialogOpen: (open: boolean) => void;
   setSettingsDialogOpen: (open: boolean) => void;
   setModelSelectorOpen: (open: boolean) => void;
   applyTheme: () => void;
@@ -772,6 +818,7 @@ interface UIStore {
    setMessageLimit: (value: number) => void;
    setFontSize: (size: number) => void;
   setGlobalDraftStarters: (refs: DraftStarterRef[]) => void;
+  setDraftStartersVisible: (value: boolean) => void;
   setTerminalFontSize: (size: number) => void;
   setEditorFontSize: (size: number) => void;
   setUiFont: (font: UiFontOption) => void;
@@ -829,6 +876,7 @@ interface UIStore {
   setMaxLastMessageLength: (value: number) => void;
   setPersistChatDraft: (value: boolean) => void;
   setShowOpenCodeUpdateNotifications: (value: boolean) => void;
+  setAgentControlToolEnabled: (value: boolean) => void;
   setInputSpellcheckEnabled: (value: boolean) => void;
   setWideChatLayoutEnabled: (value: boolean) => void;
   setCodeBlockLineWrap: (value: boolean) => void;
@@ -838,6 +886,7 @@ interface UIStore {
   setShowExpandedEditTools: (value: boolean) => void;
   setTimeFormatPreference: (value: TimeFormatPreference) => void;
   setWeekStartPreference: (value: WeekStartPreference) => void;
+  setDesktopWindowControlsPosition: (value: DesktopWindowControlsPosition) => void;
   setUserMessageRenderingMode: (value: UserMessageRenderingMode) => void;
   setCollapsibleUserMessages: (value: boolean) => void;
   setStickyUserHeader: (value: boolean) => void;
@@ -880,6 +929,7 @@ export const useUIStore = create<UIStore>()(
         hasManuallyResizedRightSidebar: false,
         rightSidebarTab: 'git',
         contextPanelByDirectory: {},
+        contextRailOrder: [],
         notesPanelHeight: 112,
         todoPanelHeight: 259,
         isSessionSwitcherOpen: false,
@@ -900,6 +950,9 @@ export const useUIStore = create<UIStore>()(
         openCodeStatusText: '',
         isSessionCreateDialogOpen: false,
         isScheduledTasksDialogOpen: false,
+        isArchivePageOpen: false,
+        worktreesPageProjectId: null,
+        isNewWorktreeDialogOpen: false,
         isSettingsDialogOpen: false,
         isModelSelectorOpen: false,
         sidebarSection: 'sessions',
@@ -927,6 +980,7 @@ export const useUIStore = create<UIStore>()(
          messageLimit: 200,
          fontSize: 100,
         globalDraftStarters: null,
+        draftStartersVisible: true,
         terminalFontSize: 13,
         editorFontSize: 13,
         uiFont: DEFAULT_UI_FONT,
@@ -978,6 +1032,7 @@ export const useUIStore = create<UIStore>()(
         showTerminalQuickKeysOnDesktop: false,
         persistChatDraft: true,
         showOpenCodeUpdateNotifications: true,
+        agentControlToolEnabled: true,
         inputSpellcheckEnabled: false,
         wideChatLayoutEnabled: false,
         codeBlockLineWrap: true,
@@ -987,6 +1042,7 @@ export const useUIStore = create<UIStore>()(
         showExpandedEditTools: false,
         timeFormatPreference: 'auto',
         weekStartPreference: 'auto',
+        desktopWindowControlsPosition: 'right',
         userMessageRenderingMode: 'markdown',
         collapsibleUserMessages: true,
         stickyUserHeader: false,
@@ -1097,6 +1153,39 @@ export const useUIStore = create<UIStore>()(
 
         setRightSidebarTab: (tab) => {
           set({ rightSidebarTab: tab });
+        },
+
+        setContextRailOrder: (order) => {
+          const sanitized = Array.isArray(order)
+            ? order.filter((id, index) => typeof id === 'string' && id.trim() !== '' && order.indexOf(id) === index)
+            : [];
+          set({ contextRailOrder: sanitized });
+        },
+
+        openContextSurface: (directory, mode) => {
+          const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
+          if (!normalizedDirectory) return;
+
+          const state = get();
+          const panelState = state.contextPanelByDirectory[normalizedDirectory];
+          const tabs = panelState?.tabs ?? [];
+          const activeTab = tabs.find((tab) => tab.id === panelState?.activeTabId) ?? null;
+          if (panelState?.isOpen && activeTab?.mode === mode) {
+            state.closeContextPanel(normalizedDirectory);
+            return;
+          }
+
+          const tabsOfMode = tabs.filter((tab) => tab.mode === mode);
+          if (tabsOfMode.length > 0) {
+            const mostRecent = tabsOfMode.reduce((best, tab) => (
+              tab.touchedAt >= best.touchedAt ? tab : best
+            ));
+            state.setActiveContextPanelTab(normalizedDirectory, mostRecent.id);
+            return;
+          }
+
+          if (mode === 'preview' || mode === 'chat') return;
+          state.openContextPanelTab(normalizedDirectory, { mode });
         },
 
         openContextPanelTab: (directory, tab) => {
@@ -1374,7 +1463,7 @@ export const useUIStore = create<UIStore>()(
           });
         },
 
-        setContextPanelWidth: (directory, width) => {
+        setContextPanelWidth: (directory, mode, width) => {
           const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
           if (!normalizedDirectory) {
             return;
@@ -1388,6 +1477,10 @@ export const useUIStore = create<UIStore>()(
               [normalizedDirectory]: {
                 ...current,
                 width: clampContextPanelWidth(width),
+                widthByMode: {
+                  ...current.widthByMode,
+                  [mode]: clampContextPanelWidth(width),
+                },
               },
             };
 
@@ -1475,7 +1568,13 @@ export const useUIStore = create<UIStore>()(
           if (guard && !guard(tab)) {
             return;
           }
-          set({ activeMainTab: tab });
+          set({
+            activeMainTab: tab,
+            isScheduledTasksDialogOpen: false,
+            isArchivePageOpen: false,
+            worktreesPageProjectId: null,
+            isMultiRunLauncherOpen: false,
+          });
         },
 
         setPendingDiffFile: (filePath, scope = null) => {
@@ -1578,7 +1677,59 @@ export const useUIStore = create<UIStore>()(
         },
 
         setScheduledTasksDialogOpen: (open) => {
-          set({ isScheduledTasksDialogOpen: open });
+          set(open
+            ? {
+                isScheduledTasksDialogOpen: true,
+                isArchivePageOpen: false,
+                worktreesPageProjectId: null,
+                isMultiRunLauncherOpen: false,
+              }
+            : { isScheduledTasksDialogOpen: false });
+        },
+
+        setArchivePageOpen: (open) => {
+          set(open
+            ? {
+                isArchivePageOpen: true,
+                isScheduledTasksDialogOpen: false,
+                worktreesPageProjectId: null,
+                isMultiRunLauncherOpen: false,
+              }
+            : { isArchivePageOpen: false });
+        },
+
+        setWorktreesPageProjectId: (projectId) => {
+          set(projectId
+            ? {
+                worktreesPageProjectId: projectId,
+                isScheduledTasksDialogOpen: false,
+                isArchivePageOpen: false,
+                isMultiRunLauncherOpen: false,
+              }
+            : { worktreesPageProjectId: null });
+        },
+
+        closeMainSurfaces: () => {
+          const state = get();
+          if (
+            !state.isScheduledTasksDialogOpen
+            && !state.isArchivePageOpen
+            && !state.worktreesPageProjectId
+            && !state.isMultiRunLauncherOpen
+          ) {
+            return;
+          }
+          set({
+            isScheduledTasksDialogOpen: false,
+            isArchivePageOpen: false,
+            worktreesPageProjectId: null,
+            isMultiRunLauncherOpen: false,
+            multiRunLauncherPrefillPrompt: '',
+          });
+        },
+
+        setNewWorktreeDialogOpen: (open) => {
+          set({ isNewWorktreeDialogOpen: open });
         },
 
         setSettingsDialogOpen: (open) => {
@@ -1691,6 +1842,9 @@ export const useUIStore = create<UIStore>()(
 
         setGlobalDraftStarters: (refs) => {
           set({ globalDraftStarters: refs });
+        },
+        setDraftStartersVisible: (value) => {
+          set({ draftStartersVisible: value });
         },
 
         setTerminalFontSize: (size) => {
@@ -2061,6 +2215,13 @@ export const useUIStore = create<UIStore>()(
           set((state) => ({
             isMultiRunLauncherOpen: open,
             multiRunLauncherPrefillPrompt: open ? state.multiRunLauncherPrefillPrompt : '',
+            ...(open
+              ? {
+                  isScheduledTasksDialogOpen: false,
+                  isArchivePageOpen: false,
+                  worktreesPageProjectId: null,
+                }
+              : {}),
           }));
         },
 
@@ -2071,6 +2232,9 @@ export const useUIStore = create<UIStore>()(
             isMultiRunLauncherOpen: true,
             multiRunLauncherPrefillPrompt: '',
             isSessionSwitcherOpen: false,
+            isScheduledTasksDialogOpen: false,
+            isArchivePageOpen: false,
+            worktreesPageProjectId: null,
           });
         },
 
@@ -2081,6 +2245,9 @@ export const useUIStore = create<UIStore>()(
             isMultiRunLauncherOpen: true,
             multiRunLauncherPrefillPrompt: prompt,
             isSessionSwitcherOpen: false,
+            isScheduledTasksDialogOpen: false,
+            isArchivePageOpen: false,
+            worktreesPageProjectId: null,
           });
         },
 
@@ -2140,6 +2307,9 @@ export const useUIStore = create<UIStore>()(
         setShowOpenCodeUpdateNotifications: (value) => {
           set({ showOpenCodeUpdateNotifications: value });
         },
+        setAgentControlToolEnabled: (value) => {
+          set({ agentControlToolEnabled: value });
+        },
         setInputSpellcheckEnabled: (value) => {
           set({ inputSpellcheckEnabled: value });
         },
@@ -2168,6 +2338,9 @@ export const useUIStore = create<UIStore>()(
 
         setWeekStartPreference: (value) => {
           set({ weekStartPreference: value });
+        },
+        setDesktopWindowControlsPosition: (value) => {
+          set({ desktopWindowControlsPosition: value === 'left' ? 'left' : 'right' });
         },
         setUserMessageRenderingMode: (value) => {
           set({ userMessageRenderingMode: value });
@@ -2256,12 +2429,17 @@ export const useUIStore = create<UIStore>()(
       {
         name: 'ui-store',
         storage: createDeferredSafeJSONStorage(),
-        version: 12,
+        version: 14,
         migrate: (persistedState, version) => {
           if (!persistedState || typeof persistedState !== 'object') {
             return persistedState;
           }
           const state = persistedState as Record<string, unknown>;
+
+          if (version < 14) {
+            state.desktopWindowControlsPosition =
+              state.desktopWindowControlsPosition === 'left' ? 'left' : 'right';
+          }
 
           // v8 -> v9: initialize notes/todo panel height fields.
           if (version < 9) {
@@ -2361,6 +2539,12 @@ export const useUIStore = create<UIStore>()(
             state.isMobileSessionStatusBarCollapsed = true;
           }
 
+          if (version < 13) {
+            state.contextRailOrder = [];
+          }
+          state.contextRailOrder = Array.isArray(state.contextRailOrder)
+            ? state.contextRailOrder.filter((id) => typeof id === 'string' && id.trim() !== '')
+            : [];
           state.fileEditorKeymap = normalizeFileEditorKeymap(state.fileEditorKeymap);
 
           return state;
@@ -2373,6 +2557,7 @@ export const useUIStore = create<UIStore>()(
           rightSidebarWidth: state.rightSidebarWidth,
           rightSidebarTab: state.rightSidebarTab,
           contextPanelByDirectory: state.contextPanelByDirectory,
+          contextRailOrder: state.contextRailOrder,
           notesPanelHeight: state.notesPanelHeight,
           todoPanelHeight: state.todoPanelHeight,
           isSessionSwitcherOpen: state.isSessionSwitcherOpen,
@@ -2402,6 +2587,7 @@ export const useUIStore = create<UIStore>()(
           messageLimit: state.messageLimit,
           fontSize: state.fontSize,
           globalDraftStarters: state.globalDraftStarters,
+          draftStartersVisible: state.draftStartersVisible,
           terminalFontSize: state.terminalFontSize,
           editorFontSize: state.editorFontSize,
           uiFont: state.uiFont,
@@ -2437,6 +2623,7 @@ export const useUIStore = create<UIStore>()(
           maxLastMessageLength: state.maxLastMessageLength,
           persistChatDraft: state.persistChatDraft,
           showOpenCodeUpdateNotifications: state.showOpenCodeUpdateNotifications,
+          agentControlToolEnabled: state.agentControlToolEnabled,
           inputSpellcheckEnabled: state.inputSpellcheckEnabled,
           wideChatLayoutEnabled: state.wideChatLayoutEnabled,
           codeBlockLineWrap: state.codeBlockLineWrap,
@@ -2446,6 +2633,7 @@ export const useUIStore = create<UIStore>()(
           showExpandedEditTools: state.showExpandedEditTools,
           timeFormatPreference: state.timeFormatPreference,
           weekStartPreference: state.weekStartPreference,
+          desktopWindowControlsPosition: state.desktopWindowControlsPosition,
           userMessageRenderingMode: state.userMessageRenderingMode,
           collapsibleUserMessages: state.collapsibleUserMessages,
           stickyUserHeader: state.stickyUserHeader,
