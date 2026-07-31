@@ -88,8 +88,6 @@ export const createStartupPipelineRuntime = (dependencies) => {
     });
 
     setupProxy(app);
-    scheduleOpenCodeApiDetection();
-    void bootstrapOpenCodeAtStartup();
 
     staticRoutesRuntime.registerStaticRoutes(app);
 
@@ -119,6 +117,8 @@ export const createStartupPipelineRuntime = (dependencies) => {
       listenBacklog,
     });
     tunnelRuntimeContext.setActivePort(startupResult.activePort);
+    scheduleOpenCodeApiDetection();
+    void bootstrapOpenCodeAtStartup();
 
     serverStartupRuntime.attachProcessHandlers({ attachSignals });
 

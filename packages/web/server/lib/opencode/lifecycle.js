@@ -52,11 +52,14 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     buildAugmentedPath,
     buildManagedOpenCodePath,
     getManagedOpenCodeShellEnvSnapshot,
+    prepareManagedOpenCodeEnv = async () => ({}),
     getActiveSessionCount = () => 0,
     persistOpenCodePort = () => {},
     readPersistedOpenCodePort = () => null,
     persistManagedOpenCodeAuth = () => {},
     restoreManagedOpenCodeAuth = () => false,
+    recordLifecycleEvent = async () => {},
+    getLifecycleLogPath = () => null,
     now = Date.now,
   } = deps;
 
@@ -358,6 +361,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       pathEntryCount,
       hasShellEnv: shellEnvKeysCount > 0,
       shellEnvKeysCount,
+      lifecycleLogPath: getLifecycleLogPath(),
     };
     console.log('[OpenCode] Launching managed server', state.lastOpenCodeLaunchDiagnostics);
 
@@ -367,6 +371,35 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       env: processEnv,
       windowsHide: true,
       stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    const spawnedAt = Date.now();
+    let expectedStopReason = null;
+    let served = false;
+    void recordLifecycleEvent('process_spawn', {
+      pid: child.pid ?? null,
+      port,
+      binary,
+      wrapperType: launchWrapperType,
+    });
+    child.once('exit', (code, signal) => {
+      void recordLifecycleEvent('process_exit', {
+        pid: child.pid ?? null,
+        port,
+        code,
+        signal,
+        expected: expectedStopReason !== null,
+        stopReason: expectedStopReason,
+        served,
+        uptimeMs: Date.now() - spawnedAt,
+      });
+    });
+    child.once('error', (error) => {
+      void recordLifecycleEvent('process_error', {
+        pid: child.pid ?? null,
+        port,
+        code: error?.code ?? null,
+        message: error instanceof Error ? error.message : String(error),
+      });
     });
     if (process.env.OPENCHAMBER_RUNTIME === 'desktop' && typeof child.unref === 'function') {
       child.unref();
@@ -431,11 +464,34 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     child.stderr?.on('data', (chunk) => {
       process.stderr.write(chunk);
     });
+    served = true;
 
     return {
       url,
-      async close() {
+      get pid() {
+        return child.pid;
+      },
+      get exitCode() {
+        return child.exitCode;
+      },
+      get signalCode() {
+        return child.signalCode;
+      },
+      async close(reason = 'managed_close') {
+        expectedStopReason = reason;
+        await recordLifecycleEvent('stop_requested', {
+          pid: child.pid ?? null,
+          port,
+          reason,
+        });
         await closeManagedOpenCodeChild(child);
+        await recordLifecycleEvent('stop_completed', {
+          pid: child.pid ?? null,
+          port,
+          reason,
+          code: child.exitCode,
+          signal: child.signalCode,
+        });
       },
     };
   };
@@ -562,6 +618,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     const shellEnv = typeof getManagedOpenCodeShellEnvSnapshot === 'function'
       ? getManagedOpenCodeShellEnvSnapshot() || {}
       : {};
+    const managedOpenCodeEnv = await prepareManagedOpenCodeEnv();
 
     try {
       const serverInstance = await createManagedOpenCodeServerProcess({
@@ -573,6 +630,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
         env: {
           ...shellEnv,
           ...process.env,
+          ...managedOpenCodeEnv,
           PATH: envPath,
           OPENCODE_SERVER_PASSWORD: openCodePassword,
         },
@@ -595,12 +653,16 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
         state.isOpenCodeReady = true;
         state.lastOpenCodeError = null;
         state.openCodeNotReadySince = 0;
+        await recordLifecycleEvent('process_ready', {
+          pid: serverInstance.pid ?? null,
+          port,
+        });
 
         return serverInstance;
       }
 
       try {
-        await serverInstance.close();
+        await serverInstance.close('startup_health_timeout');
       } catch {
       }
       throw new Error('Server started but health check failed (timeout)');
@@ -641,14 +703,23 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     throw lastError;
   };
 
-  const restartOpenCode = async () => {
+  const restartOpenCode = async (reason = 'requested') => {
     if (state.isShuttingDown) return;
     if (state.currentRestartPromise) {
+      await recordLifecycleEvent('restart_joined', { reason });
       await state.currentRestartPromise;
       return;
     }
 
     state.currentRestartPromise = (async () => {
+      const previousPid = state.openCodeProcess?.pid ?? null;
+      const previousPort = state.openCodePort;
+      await recordLifecycleEvent('restart_started', {
+        reason,
+        previousPid,
+        previousPort,
+        activeSessionCount: getActiveSessionCount(),
+      });
       state.isRestartingOpenCode = true;
       state.isOpenCodeReady = false;
       state.openCodeNotReadySince = Date.now();
@@ -684,7 +755,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       if (state.openCodeProcess) {
         console.log('Stopping existing OpenCode process...');
         try {
-          await state.openCodeProcess.close();
+          await state.openCodeProcess.close(`restart:${reason}`);
         } catch (error) {
           console.warn('Error closing OpenCode process:', error);
         }
@@ -721,11 +792,22 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
         setupProxy(state.expressApp);
         ensureOpenCodeApiPrefix();
       }
+      await recordLifecycleEvent('restart_completed', {
+        reason,
+        previousPid,
+        previousPort,
+        pid: state.openCodeProcess?.pid ?? null,
+        port: state.openCodePort,
+      });
     })();
 
     try {
       await state.currentRestartPromise;
     } catch (error) {
+      await recordLifecycleEvent('restart_failed', {
+        reason,
+        message: error instanceof Error ? error.message : String(error),
+      });
       console.error(`Failed to restart OpenCode: ${error.message}`);
       state.lastOpenCodeError = error.message;
       if (!env.ENV_CONFIGURED_OPENCODE_PORT) {
@@ -841,7 +923,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       console.log(`Refreshing OpenCode after ${reason}`);
       clearResolvedOpenCodeBinary();
       await applyOpencodeBinaryFromSettings();
-      await restartOpenCode();
+      await restartOpenCode('config_change');
       const external = state.isExternalOpenCode === true;
 
       try {
@@ -1050,15 +1132,36 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       const healthy = await probeOpenCodeHealth();
       if (!healthy) {
         const processUnavailable = !state.openCodeProcess || !isManagedOpenCodeProcessAlive();
+        const listeningProcessIds = process.platform !== 'win32'
+          ? listListeningProcessIds(state.openCodePort)
+          : [];
         const managedListenerUnavailable = processUnavailable
           && process.platform !== 'win32'
-          && listListeningProcessIds(state.openCodePort).length === 0;
+          && listeningProcessIds.length === 0;
         const reachedFailureThreshold = recordHealthFailure(
           source,
           processUnavailable ? 'managed process handle unavailable' : ''
         );
+        await recordLifecycleEvent('health_failure', {
+          source,
+          consecutiveFailures: consecutiveHealthFailures,
+          failureThreshold: HEALTH_CHECK_MAX_CONSECUTIVE_FAILURES,
+          processUnavailable,
+          managedProcessAlive: !processUnavailable,
+          managedPid: state.openCodeProcess?.pid ?? null,
+          port: state.openCodePort,
+          listeningProcessIds,
+          activeSessionCount: getActiveSessionCount(),
+        });
         if (!managedListenerUnavailable && !reachedFailureThreshold) return;
-        if (!managedListenerUnavailable && shouldSkipRestartForBusySessions()) return;
+        if (!managedListenerUnavailable && shouldSkipRestartForBusySessions()) {
+          await recordLifecycleEvent('restart_deferred_busy', {
+            source,
+            consecutiveFailures: consecutiveHealthFailures,
+            activeSessionCount: getActiveSessionCount(),
+          });
+          return;
+        }
         console.log(
           managedListenerUnavailable
             ? `[lifecycle] ${source} health check found no managed OpenCode listener, restarting OpenCode...`
@@ -1069,8 +1172,18 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
           lastUnhealthyWithBusySessionsAt = 0;
         }
         lastHealthProbeResult = null;
-        await restartOpenCode();
+        await restartOpenCode(managedListenerUnavailable
+          ? `health_${source}_listener_missing`
+          : `health_${source}_threshold`);
       } else {
+        if (consecutiveHealthFailures > 0) {
+          await recordLifecycleEvent('health_recovered', {
+            source,
+            consecutiveFailures: consecutiveHealthFailures,
+            pid: state.openCodeProcess?.pid ?? null,
+            port: state.openCodePort,
+          });
+        }
         resetHealthFailureState();
       }
     })().finally(() => {

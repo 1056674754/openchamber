@@ -41,6 +41,34 @@ const createModelPrefsTestHelpers = () => createSettingsHelpers({
 });
 
 describe('settings helpers', () => {
+  it('accepts only booleans for draft starter visibility', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({ draftStartersVisible: true })).toEqual({
+      draftStartersVisible: true,
+    });
+    expect(helpers.sanitizeSettingsUpdate({ draftStartersVisible: false })).toEqual({
+      draftStartersVisible: false,
+    });
+    expect(helpers.sanitizeSettingsUpdate({ draftStartersVisible: 'false' })).toEqual({});
+  });
+
+  it('accepts only booleans for managed Agent features and the starter migration marker', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({
+      agentControlToolEnabled: false,
+      draftStartersScheduleTaskAdded: true,
+    })).toEqual({
+      agentControlToolEnabled: false,
+      draftStartersScheduleTaskAdded: true,
+    });
+    expect(helpers.sanitizeSettingsUpdate({
+      agentControlToolEnabled: 'false',
+      draftStartersScheduleTaskAdded: 1,
+    })).toEqual({});
+  });
+
   it('persists model visibility and sibling selector state', () => {
     const helpers = createModelPrefsTestHelpers();
     const payload = {
@@ -131,6 +159,18 @@ describe('settings helpers', () => {
       promptNavigatorEnabled: false,
     });
     expect(helpers.sanitizeSettingsUpdate({ promptNavigatorEnabled: 'true' })).toEqual({});
+  });
+
+  it('only accepts a supported desktop window controls position', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({ desktopWindowControlsPosition: 'left' })).toEqual({
+      desktopWindowControlsPosition: 'left',
+    });
+    expect(helpers.sanitizeSettingsUpdate({ desktopWindowControlsPosition: 'right' })).toEqual({
+      desktopWindowControlsPosition: 'right',
+    });
+    expect(helpers.sanitizeSettingsUpdate({ desktopWindowControlsPosition: 'auto' })).toEqual({});
   });
 
   it('only accepts a boolean desktopRemoteOnly preference', () => {

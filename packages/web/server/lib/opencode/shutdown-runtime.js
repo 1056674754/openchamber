@@ -101,7 +101,7 @@ export const createGracefulShutdownRuntime = (dependencies) => {
       if (openCodeProcess) {
         console.log('Stopping OpenCode process...');
         try {
-          await openCodeProcess.close();
+          await openCodeProcess.close('app_shutdown');
         } catch (error) {
           console.warn('Error closing OpenCode process:', error);
         }

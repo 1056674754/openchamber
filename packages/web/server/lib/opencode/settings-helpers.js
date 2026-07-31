@@ -559,8 +559,23 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.promptNavigatorEnabled === 'boolean') {
       result.promptNavigatorEnabled = candidate.promptNavigatorEnabled;
     }
+    if (
+      candidate.desktopWindowControlsPosition === 'left'
+      || candidate.desktopWindowControlsPosition === 'right'
+    ) {
+      result.desktopWindowControlsPosition = candidate.desktopWindowControlsPosition;
+    }
+    if (typeof candidate.agentControlToolEnabled === 'boolean') {
+      result.agentControlToolEnabled = candidate.agentControlToolEnabled;
+    }
     if (typeof candidate.optimizeSystemPrompt === 'boolean') {
       result.optimizeSystemPrompt = candidate.optimizeSystemPrompt;
+    }
+    if (typeof candidate.draftStartersVisible === 'boolean') {
+      result.draftStartersVisible = candidate.draftStartersVisible;
+    }
+    if (typeof candidate.draftStartersScheduleTaskAdded === 'boolean') {
+      result.draftStartersScheduleTaskAdded = candidate.draftStartersScheduleTaskAdded;
     }
     if (typeof candidate.showSplitAssistantMessageActions === 'boolean') {
       result.showSplitAssistantMessageActions = candidate.showSplitAssistantMessageActions;

@@ -15,6 +15,7 @@ import { registerConfigEntityRoutes } from './config-entity-routes.js';
 import { registerSettingsUtilityRoutes } from './core-routes.js';
 import { registerProjectIconRoutes } from './project-icon-routes.js';
 import { registerScheduledTaskRoutes } from '../scheduled-tasks/routes.js';
+import { registerOpenChamberControlRoutes } from '../openchamber-control/routes.js';
 import { registerSkillRoutes } from './skill-routes.js';
 import { registerPluginRoutes } from './plugin-routes.js';
 import { registerConfigRoutes } from './config-routes.js';
@@ -79,6 +80,8 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       getOpenChamberEventClients,
       writeSseEvent,
       permissionAutoAcceptRuntime,
+      openChamberControlService,
+      agentToolRuntime,
     } = routeDependencies;
 
     const { getProviderSources, removeProviderConfig } = await import('./index.js');
@@ -132,6 +135,11 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       getOpenChamberEventClients,
       writeSseEvent,
     });
+
+    registerOpenChamberControlRoutes(app, {
+      controlService: openChamberControlService,
+    });
+    agentToolRuntime.registerRoutes(app);
 
     const {
       getAgentSources,

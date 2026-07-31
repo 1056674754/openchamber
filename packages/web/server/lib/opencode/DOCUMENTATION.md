@@ -12,6 +12,7 @@ This module provides OpenCode server integration utilities for the web server ru
 - `packages/web/server/lib/opencode/routes.js`: OpenCode/provider settings and auth-related route registration.
 - `packages/web/server/lib/opencode/opencode-upgrade-runtime.js`: Direct OpenCode CLI upgrade fallback, including install-source detection and captured package-manager diagnostics.
 - `packages/web/server/lib/opencode/lifecycle.js`: OpenCode process lifecycle runtime (startup, restart, readiness, health monitoring).
+- `packages/web/server/lib/opencode/lifecycle-journal.js`: serialized, size-bounded JSONL evidence journal for managed OpenCode spawn/exit/health/restart decisions.
 - `packages/web/server/lib/opencode/config-file-watcher.js`: debounced OpenCode config-file watcher that validates JSONC and waits for managed sessions to become idle before requesting a lifecycle reload.
 - `packages/web/server/lib/opencode/interrupted-runs.js`: managed OpenCode restart recovery for stale in-flight message/tool rows in the OpenCode SQLite database.
 - `packages/web/server/lib/opencode/sqlite-runtime.js`: shared synchronous SQLite driver selection for Bun, Electron/Node `node:sqlite`, and native `better-sqlite3` fallbacks.
@@ -36,6 +37,9 @@ This module provides OpenCode server integration utilities for the web server ru
 - `packages/web/server/lib/opencode/opencode-resolution-runtime.js`: OpenCode binary resolution snapshot runtime for settings routes and diagnostics.
 - `packages/web/server/lib/opencode/tunnel-wiring-runtime.js`: tunnel service/routes composition runtime and active-port wiring for main server startup.
 - `packages/web/server/lib/opencode/startup-pipeline-runtime.js`: server startup tail orchestration runtime for terminal/proxy/static/start-listen flow.
+  - The OpenChamber listener and active port are established before managed
+    OpenCode bootstrap so generated plugins can receive a valid loopback
+    callback URL.
 - `packages/web/server/lib/opencode/server-utils-runtime.js`: shared server runtime utilities for OpenCode proxy wiring, OpenCode port/readiness helpers, and snapshot fetchers.
 - `packages/web/server/lib/opencode/openchamber-routes.js`: OpenChamber update, models metadata, and session unread state route registration.
 - `packages/web/server/lib/permission-auto-accept/runtime.js`: persisted server-side permission auto-accept policy and pending-permission reconciliation for scheduled/background sessions.
@@ -120,7 +124,7 @@ This module provides OpenCode server integration utilities for the web server ru
 - `createOpenCodeLifecycleRuntime(dependencies)`: creates lifecycle runtime for managed/external OpenCode process orchestration.
 - Returned API:
   - `startOpenCode()`
-  - `restartOpenCode()`
+  - `restartOpenCode(reason?)`
   - `waitForOpenCodeReady(timeoutMs?, intervalMs?)`
   - `waitForAgentPresence(agentName, timeoutMs?, intervalMs?)`
   - `refreshOpenCodeAfterConfigChange(reason, options?)`
@@ -132,7 +136,15 @@ This module provides OpenCode server integration utilities for the web server ru
 Configuration refreshes are single-flight across manual and automatic callers, so overlapping requests join the same restart/readiness operation.
 The composition root rebuilds the OpenChamber plugin overlay before entering that lifecycle operation, keeping user plugin changes in sync with the managed overlay.
 At desktop startup, a healthy persisted managed port is reused. If that port is still listening but fails health checks, lifecycle termination targets the listener's detached process group and waits for the port to be released before launching a replacement; it will not stack another managed server on top of an unreleased stale instance.
+Managed process wrappers retain the child `pid`, `exitCode`, and `signalCode`, and keep an exit listener after readiness. This lets health checks distinguish a live child from an exited child instead of inferring process state from port health alone.
 Transport-triggered health checks can run more frequently than the periodic monitor. Failed probes are therefore counted at most once per configured health interval, while a confirmed missing managed listener can still restart immediately. Busy-session grace and lifecycle evidence remain authoritative.
+
+## Public exports (lifecycle-journal.js)
+- `createOpenCodeLifecycleJournal(options)`: creates a failure-isolated JSONL lifecycle journal.
+- The production journal is written to `${OPENCHAMBER_DATA_DIR}/logs/opencode-lifecycle.jsonl`, defaults to `~/.config/openchamber/logs/opencode-lifecycle.jsonl`, and rotates one prior generation at 2 MB.
+- Events include managed process spawn/readiness/exit/error, requested stop reason, health failures/recovery, busy-session deferral, and restart start/completion/failure.
+- Health failure entries include the managed PID, current port, listening PIDs, consecutive failure count, and active-session count. They do not include prompts, message content, credentials, request headers, or the spawned environment.
+- Journal write failures warn once and never interrupt OpenCode startup, health checks, shutdown, or restart.
 
 ## Public exports (config-file-watcher.js)
 - `createOpenCodeConfigFileWatcherRuntime(dependencies)`: watches user and active-project `opencode.json`, `opencode.jsonc`, and legacy `config.json` files for a managed OpenCode server.
