@@ -268,6 +268,9 @@ import { INITIAL_STATE } from "./types"
 import type { DirectoryStore } from "./child-store"
 import type { Message, OpencodeClient, Part, Session } from "@opencode-ai/sdk/v2/client"
 import { DEFAULT_SERVER_ID, serverRegistry } from "@/lib/opencode/server-registry"
+import { useI18nStore } from "@/lib/i18n/store"
+import { dict as enDict } from "@/lib/i18n/messages/en"
+import { dict as zhCnDict } from "@/lib/i18n/messages/zh-CN"
 
 beforeEach(() => {
   replyCalls.length = 0
@@ -296,6 +299,11 @@ beforeEach(() => {
     hasEverConnected: true,
     lastDisconnectReason: null,
   }
+  useI18nStore.setState({
+    locale: "en",
+    dictionary: enDict,
+    loadingLocale: null,
+  })
   serverRegistry.register({ id: DEFAULT_SERVER_ID, label: "Default", baseUrl: "/api" })
   const defaultConnection = serverRegistry.get(DEFAULT_SERVER_ID)
   if (defaultConnection) {
@@ -331,6 +339,28 @@ function createChildStores(entries: Array<[string, StoreApi<DirectoryStore>]>) {
     },
   } as unknown as import("./child-store").ChildStoreManager
 }
+
+describe("waitForConnectionOrThrow", () => {
+  test("localizes an upstream stall instead of exposing an internal reason code", async () => {
+    configState = {
+      isConnected: false,
+      hasEverConnected: true,
+      lastDisconnectReason: "upstream_stalled",
+    }
+    useI18nStore.setState({
+      locale: "zh-CN",
+      dictionary: zhCnDict,
+      loadingLocale: null,
+    })
+
+    const { waitForConnectionOrThrow } = await import("./session-actions")
+
+    await expectRejectsWithMessage(
+      waitForConnectionOrThrow(),
+      "OpenCode 事件流已停止响应，OpenChamber 正在自动重连。",
+    )
+  })
+})
 
 describe("createSession", () => {
   test("preserves the upstream SDK error when session creation fails", async () => {
@@ -965,6 +995,117 @@ describe("dismissPermission passes directory", () => {
     expect(replyCalls[0].params.permissionID).toBe("perm-10")
     expect(replyCalls[0].params.response).toBe("reject")
     expect(replyCalls[0].params.directory).toBe("/test/project")
+  })
+})
+
+describe("dismissOpenPermissionsForSession", () => {
+  test("dismisses permissions for the session subtree without touching unrelated sessions", async () => {
+    const rootId = "permission-dismiss-root"
+    const childId = "permission-dismiss-child"
+    const unrelatedId = "permission-dismiss-unrelated"
+    const permission = (id: string, sessionID: string): PermissionRequest => ({
+      id,
+      sessionID,
+      permission: "edit",
+      patterns: [],
+      metadata: {},
+      always: [],
+    })
+    const store = createStore({
+      [rootId]: [permission("perm-root", rootId)],
+      [childId]: [permission("perm-child", childId)],
+      [unrelatedId]: [permission("perm-unrelated", unrelatedId)],
+    })
+    store.setState({
+      session: [
+        { id: rootId } as Session,
+        { id: childId, parentID: rootId } as Session,
+        { id: unrelatedId } as Session,
+      ],
+    })
+    const childStores = createChildStores([["/test/project", store]])
+
+    const { dismissOpenPermissionsForSession, setActionRefs } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/test/project")
+    serverRegistry.indexSession(rootId, DEFAULT_SERVER_ID)
+    serverRegistry.indexSession(childId, DEFAULT_SERVER_ID)
+
+    try {
+      expect(await dismissOpenPermissionsForSession(rootId)).toBe(true)
+      expect(replyCalls.filter((call) => call.method === "permission.respond").map((call) => call.params.permissionID).sort()).toEqual([
+        "perm-child",
+        "perm-root",
+      ])
+      expect(replyCalls.filter((call) => call.method === "permission.respond").every((call) => call.params.response === "reject")).toBe(true)
+      expect(store.getState().permission[rootId]).toBe(undefined)
+      expect(store.getState().permission[childId]).toBe(undefined)
+      expect(store.getState().permission[unrelatedId]?.[0]?.id).toBe("perm-unrelated")
+    } finally {
+      serverRegistry.forgetSession(rootId)
+      serverRegistry.forgetSession(childId)
+    }
+  })
+
+  test("uses the owning remote target and restores only a failed permission", async () => {
+    const serverId = "remote-permission-dismiss"
+    const rootId = "remote-permission-root"
+    const childId = "remote-permission-child"
+    const remoteCalls: Array<Record<string, unknown>> = []
+    const remoteClient = {
+      permission: {
+        respond: mock((params: Record<string, unknown>) => {
+          remoteCalls.push(params)
+          return Promise.resolve({ data: params.permissionID !== "perm-remote-child" })
+        }),
+        reply: mock(() => Promise.resolve({ data: false })),
+      },
+    } as unknown as OpencodeClient
+    serverRegistry.register({ id: serverId, label: "Remote permission", baseUrl: "/api/remote/permission" })
+    const connection = serverRegistry.get(serverId)
+    if (connection) {
+      ;(connection as { client: OpencodeClient }).client = remoteClient
+    }
+
+    const permission = (id: string, sessionID: string): PermissionRequest => ({
+      id,
+      sessionID,
+      permission: "bash",
+      patterns: [],
+      metadata: {},
+      always: [],
+    })
+    const store = createStore({
+      [rootId]: [permission("perm-remote-root", rootId)],
+      [childId]: [permission("perm-remote-child", childId)],
+    })
+    store.setState({
+      session: [
+        { id: rootId } as Session,
+        { id: childId, parentID: rootId } as Session,
+      ],
+    })
+    const remoteStores = createChildStores([["/remote/project", store]])
+    const { registerSyncStores } = await import("./multi-server-registry")
+    const unregisterStores = registerSyncStores(serverId, remoteStores, () => {})
+    serverRegistry.indexSession(rootId, serverId)
+    serverRegistry.indexSession(childId, serverId)
+
+    try {
+      const { dismissOpenPermissionsForSession } = await import("./session-actions")
+      expect(await dismissOpenPermissionsForSession(rootId)).toBe(true)
+      expect(remoteCalls.map((call) => call.permissionID).sort()).toEqual([
+        "perm-remote-child",
+        "perm-remote-root",
+      ])
+      expect(remoteCalls.every((call) => call.directory === "/remote/project")).toBe(true)
+      expect(store.getState().permission[rootId]).toBe(undefined)
+      expect(store.getState().permission[childId]?.[0]?.id).toBe("perm-remote-child")
+    } finally {
+      unregisterStores()
+      serverRegistry.forgetSession(rootId)
+      serverRegistry.forgetSession(childId)
+      serverRegistry.unregister(serverId)
+    }
   })
 })
 

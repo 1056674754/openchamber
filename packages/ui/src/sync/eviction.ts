@@ -23,11 +23,19 @@ export function hasPendingBlockingRequests(state: State | undefined): boolean {
   return false
 }
 
+export function hasActiveSessions(state: State | undefined): boolean {
+  if (!state) return false
+  return Object.values(state.session_status ?? {}).some((status) => (
+    status?.type === "busy" || status?.type === "retry"
+  ))
+}
+
 export function pickDirectoriesToEvict(input: EvictPlan) {
   const overflow = Math.max(0, input.stores.length - input.max)
   let pendingOverflow = overflow
   const sorted = input.stores
     .filter((dir) => !input.pins.has(dir))
+    .filter((dir) => !input.hasActiveSessions?.(dir))
     .filter((dir) => !input.hasPendingBlockingRequests?.(dir))
     .slice()
     .sort((a, b) => (input.state.get(a)?.lastAccessAt ?? 0) - (input.state.get(b)?.lastAccessAt ?? 0))
@@ -48,6 +56,7 @@ export function canDisposeDirectory(input: DisposeCheck) {
   if (input.pinned) return false
   if (input.booting) return false
   if (input.loadingSessions) return false
+  if (input.hasActiveSessions) return false
   if (input.hasPendingBlockingRequests) return false
   return true
 }

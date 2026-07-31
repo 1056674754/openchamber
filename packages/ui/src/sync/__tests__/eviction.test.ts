@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import type { Message, PermissionRequest, QuestionRequest } from "@opencode-ai/sdk/v2/client"
 import {
   canDisposeDirectory,
+  hasActiveSessions,
   hasPendingBlockingRequests,
   pickDirectoriesToEvict,
 } from "../eviction"
@@ -59,6 +60,26 @@ describe("hasPendingBlockingRequests", () => {
   test("treats empty arrays under a session key as no pending work", () => {
     const state = buildState({ question: { ses_a: [] }, permission: { ses_b: [] } })
     expect(hasPendingBlockingRequests(state)).toBe(false)
+  })
+})
+
+describe("hasActiveSessions", () => {
+  test("returns true while a directory has busy or retrying work", () => {
+    expect(hasActiveSessions(buildState({ session_status: { ses_busy: { type: "busy" } } }))).toBe(true)
+    expect(hasActiveSessions(buildState({
+      session_status: {
+        ses_retry: {
+          type: "retry",
+          attempt: 1,
+          message: "retrying",
+          next: 1,
+        },
+      },
+    }))).toBe(true)
+  })
+
+  test("returns false when every known session is idle", () => {
+    expect(hasActiveSessions(buildState({ session_status: { ses_idle: { type: "idle" } } }))).toBe(false)
   })
 })
 
@@ -123,6 +144,7 @@ describe("canDisposeDirectory", () => {
     pinned: false,
     booting: false,
     loadingSessions: false,
+    hasActiveSessions: false,
     hasPendingBlockingRequests: false,
   }
 
@@ -132,6 +154,10 @@ describe("canDisposeDirectory", () => {
 
   test("permits disposal when no blocking requests are pending", () => {
     expect(canDisposeDirectory(baseInput)).toBe(true)
+  })
+
+  test("refuses to dispose a directory with a running session", () => {
+    expect(canDisposeDirectory({ ...baseInput, hasActiveSessions: true })).toBe(false)
   })
 })
 

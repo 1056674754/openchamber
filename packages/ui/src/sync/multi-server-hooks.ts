@@ -3,7 +3,11 @@ import type { Session } from "@opencode-ai/sdk/v2";
 import type { SessionStatus } from "@opencode-ai/sdk/v2/client";
 import type { PermissionRequest } from "@/types/permission";
 import type { QuestionRequest } from "@/types/question";
-import { getAllSyncStores, subscribeSyncStoresRegistry } from "./multi-server-registry";
+import {
+  getAllSyncStores,
+  getSyncStoresForServer,
+  subscribeSyncStoresRegistry,
+} from "./multi-server-registry";
 import type { ChildStoreManager } from "./child-store";
 import { useSyncSystem } from "./sync-context";
 import { DEFAULT_SERVER_ID } from "@/lib/opencode/server-registry";
@@ -49,118 +53,194 @@ function collectExtraStatuses(): Record<string, SessionStatus> {
 
 type BlockingRequestKind = "permission" | "question";
 type BlockingRequest = PermissionRequest | QuestionRequest;
+export type BlockingRequestTarget = {
+  sessionId: string;
+  directory: string;
+};
 
-function collectChildStoreManagers(defaultChildStores: ChildStoreManager): ChildStoreManager[] {
-  const managers: ChildStoreManager[] = [];
-  const seen = new Set<ChildStoreManager>();
-  const push = (manager: ChildStoreManager) => {
-    if (seen.has(manager)) return;
-    seen.add(manager);
-    managers.push(manager);
-  };
-
-  push(defaultChildStores);
-  for (const entry of getAllSyncStores()) {
-    push(entry.childStores);
-  }
-  return managers;
-}
-
-function collectBlockingRequests<T extends BlockingRequest>(
-  kind: BlockingRequestKind,
+function resolveBlockingRequestStores(
   defaultChildStores: ChildStoreManager,
-  sessionIds: readonly string[],
-): T[] {
-  const requestedSessionIds = sessionIds.filter(Boolean);
-  if (requestedSessionIds.length === 0) return [];
-
-  const seen = new Set<string>();
-  const result: T[] = [];
-  for (const manager of collectChildStoreManagers(defaultChildStores)) {
-    for (const store of manager.children.values()) {
-      const state = store.getState();
-      const requestMap = kind === "permission" ? state.permission : state.question;
-      for (const sessionId of requestedSessionIds) {
-        const requests = requestMap[sessionId] as T[] | undefined;
-        if (!requests || requests.length === 0) continue;
-        for (const request of requests) {
-          if (!request?.id) continue;
-          const key = `${request.sessionID}:${request.id}`;
-          if (seen.has(key)) continue;
-          seen.add(key);
-          result.push(request);
-        }
-      }
-    }
-  }
-  return result;
+  serverId: string,
+): ChildStoreManager | undefined {
+  return serverId === DEFAULT_SERVER_ID
+    ? defaultChildStores
+    : getSyncStoresForServer(serverId);
 }
 
-function blockingRequestSignature(requests: readonly BlockingRequest[]): string {
-  if (requests.length === 0) return "";
-  return requests
-    .map((request) => `${request.sessionID}:${request.id}`)
-    .sort()
-    .join("|");
+export function collectServerSessions(
+  defaultChildStores: ChildStoreManager,
+  serverId: string,
+): Session[] {
+  const manager = resolveBlockingRequestStores(defaultChildStores, serverId);
+  if (!manager) return [];
+  return aggregateLiveSessions(Array.from(manager.children.values(), (store) => store.getState()));
 }
 
-function useAllServersBlockingRequests<T extends BlockingRequest>(
-  kind: BlockingRequestKind,
-  sessionIds: readonly string[],
-): T[] {
+export function useServerLiveSessions(serverId: string): Session[] {
   const { childStores } = useSyncSystem();
-  const cacheRef = useRef<{ signature: string; value: T[] } | null>(null);
+  const cacheRef = useRef<{ serverId: string; value: Session[] } | null>(null);
 
   const getSnapshot = useCallback(() => {
-    const value = collectBlockingRequests<T>(kind, childStores, sessionIds);
-    const signature = blockingRequestSignature(value);
-    if (cacheRef.current?.signature === signature) {
-      return cacheRef.current.value;
+    const value = collectServerSessions(childStores, serverId);
+    const cached = cacheRef.current;
+    if (
+      cached
+      && cached.serverId === serverId
+      && cached.value.length === value.length
+      && cached.value.every((session, index) => session === value[index])
+    ) {
+      return cached.value;
     }
-    cacheRef.current = { signature, value };
+    cacheRef.current = { serverId, value };
     return value;
-  }, [childStores, kind, sessionIds]);
+  }, [childStores, serverId]);
 
   const subscribe = useCallback((notify: () => void) => {
     let storeUnsubs: (() => void)[] = [];
+    let managerRegistryUnsub: (() => void) | undefined;
 
     const syncStoreSubscriptions = () => {
       for (const unsubscribe of storeUnsubs) unsubscribe();
       storeUnsubs = [];
-      for (const manager of collectChildStoreManagers(childStores)) {
-        for (const store of manager.children.values()) {
-          storeUnsubs.push(store.subscribe(notify));
-        }
+      managerRegistryUnsub?.();
+      managerRegistryUnsub = undefined;
+
+      const manager = resolveBlockingRequestStores(childStores, serverId);
+      if (!manager) return;
+      for (const store of manager.children.values()) {
+        storeUnsubs.push(store.subscribe(notify));
       }
+      managerRegistryUnsub = manager.subscribeRegistry(() => {
+        syncStoreSubscriptions();
+        notify();
+      });
     };
 
     syncStoreSubscriptions();
-    const unsubscribeDefaultRegistry = childStores.subscribeRegistry(() => {
-      syncStoreSubscriptions();
-      notify();
-    });
     const unsubscribeRemoteRegistry = subscribeSyncStoresRegistry(() => {
       syncStoreSubscriptions();
       notify();
     });
 
     return () => {
-      unsubscribeDefaultRegistry();
       unsubscribeRemoteRegistry();
+      managerRegistryUnsub?.();
       for (const unsubscribe of storeUnsubs) unsubscribe();
       storeUnsubs = [];
     };
-  }, [childStores]);
+  }, [childStores, serverId]);
 
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 }
 
-export function useAllServersSessionPermissions(sessionIds: readonly string[]): PermissionRequest[] {
-  return useAllServersBlockingRequests<PermissionRequest>("permission", sessionIds);
+export function collectBlockingRequests<T extends BlockingRequest>(
+  kind: BlockingRequestKind,
+  defaultChildStores: ChildStoreManager,
+  serverId: string,
+  targets: readonly BlockingRequestTarget[],
+): T[] {
+  if (targets.length === 0) return [];
+
+  const manager = resolveBlockingRequestStores(defaultChildStores, serverId);
+  if (!manager) return [];
+
+  const seen = new Set<string>();
+  const result: T[] = [];
+  for (const target of targets) {
+    if (!target.sessionId || !target.directory) continue;
+    const store = manager.getChild(target.directory);
+    if (!store) continue;
+    const state = store.getState();
+    const requestMap = kind === "permission" ? state.permission : state.question;
+    const requests = requestMap[target.sessionId] as T[] | undefined;
+    if (!requests || requests.length === 0) continue;
+    for (const request of requests) {
+      if (!request?.id) continue;
+      if (seen.has(request.id)) continue;
+      seen.add(request.id);
+      result.push(request);
+    }
+  }
+  return result;
 }
 
-export function useAllServersSessionQuestions(sessionIds: readonly string[]): QuestionRequest[] {
-  return useAllServersBlockingRequests<QuestionRequest>("question", sessionIds);
+export function isSameBlockingRequestSnapshot<T>(
+  previousServerId: string,
+  previous: readonly T[],
+  serverId: string,
+  next: readonly T[],
+): boolean {
+  return previousServerId === serverId
+    && previous.length === next.length
+    && previous.every((request, index) => request === next[index]);
+}
+
+function useServerBlockingRequests<T extends BlockingRequest>(
+  kind: BlockingRequestKind,
+  serverId: string,
+  targets: readonly BlockingRequestTarget[],
+): T[] {
+  const { childStores } = useSyncSystem();
+  const cacheRef = useRef<{ serverId: string; value: T[] } | null>(null);
+
+  const getSnapshot = useCallback(() => {
+    const value = collectBlockingRequests<T>(kind, childStores, serverId, targets);
+    const cached = cacheRef.current;
+    if (cached && isSameBlockingRequestSnapshot(cached.serverId, cached.value, serverId, value)) {
+      return cached.value;
+    }
+    cacheRef.current = { serverId, value };
+    return value;
+  }, [childStores, kind, serverId, targets]);
+
+  const subscribe = useCallback((notify: () => void) => {
+    let storeUnsubs: (() => void)[] = [];
+    let managerRegistryUnsub: (() => void) | undefined;
+
+    const syncStoreSubscriptions = () => {
+      for (const unsubscribe of storeUnsubs) unsubscribe();
+      storeUnsubs = [];
+      managerRegistryUnsub?.();
+      managerRegistryUnsub = undefined;
+
+      const manager = resolveBlockingRequestStores(childStores, serverId);
+      if (!manager) return;
+      const subscribedStores = new Set<ReturnType<ChildStoreManager["getChild"]>>();
+      for (const target of targets) {
+        const store = manager.getChild(target.directory);
+        if (!store || subscribedStores.has(store)) continue;
+        subscribedStores.add(store);
+        storeUnsubs.push(store.subscribe(notify));
+      }
+      managerRegistryUnsub = manager.subscribeRegistry(() => {
+        syncStoreSubscriptions();
+        notify();
+      });
+    };
+
+    syncStoreSubscriptions();
+    const unsubscribeRemoteRegistry = subscribeSyncStoresRegistry(() => {
+      syncStoreSubscriptions();
+      notify();
+    });
+
+    return () => {
+      unsubscribeRemoteRegistry();
+      managerRegistryUnsub?.();
+      for (const unsubscribe of storeUnsubs) unsubscribe();
+      storeUnsubs = [];
+    };
+  }, [childStores, serverId, targets]);
+
+  return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+}
+
+export function useServerSessionPermissions(serverId: string, targets: readonly BlockingRequestTarget[]): PermissionRequest[] {
+  return useServerBlockingRequests<PermissionRequest>("permission", serverId, targets);
+}
+
+export function useServerSessionQuestions(serverId: string, targets: readonly BlockingRequestTarget[]): QuestionRequest[] {
+  return useServerBlockingRequests<QuestionRequest>("question", serverId, targets);
 }
 
 export function useAllServersLiveSessions(options?: { enabled?: boolean }): Session[] {

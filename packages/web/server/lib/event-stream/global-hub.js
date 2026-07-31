@@ -74,11 +74,15 @@ export function createGlobalMessageStreamHub({
         }
       },
       getHeaders: getOpenCodeAuthHeaders,
-      onConnect() {
+      onConnect({ lastEventId }) {
         connected = true;
         const wasReady = everConnected;
         everConnected = true;
-        notifyStatus({ type: 'connect', wasReady });
+        notifyStatus({
+          type: 'connect',
+          wasReady,
+          replayGap: wasReady && !lastEventId,
+        });
       },
       onDisconnect({ reason }) {
         connected = false;

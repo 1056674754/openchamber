@@ -296,6 +296,19 @@ describe("applyDirectoryEvent", () => {
     expect(draft.question.ses_1).not.toBe(initialQuestions)
     expect(draft.question.ses_1.map((item) => item.id)).toEqual(["ques_1", "ques_2"])
 
+    const replacement = {
+      id: "ques_2",
+      sessionID: "ses_1",
+      questions: [{ header: "Updated", question: "Updated question", options: [] }],
+    } as QuestionRequest
+    applyDirectoryEvent(draft, {
+      type: "question.asked",
+      properties: replacement,
+    } as Event)
+
+    expect(draft.question.ses_1.map((item) => item.id)).toEqual(["ques_1", "ques_2"])
+    expect(draft.question.ses_1[1]).toBe(replacement)
+
     const afterAsk = draft.question.ses_1
     applyDirectoryEvent(draft, {
       type: "question.replied",

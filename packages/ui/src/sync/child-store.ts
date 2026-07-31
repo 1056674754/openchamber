@@ -1,7 +1,7 @@
 import { create, type StoreApi } from "zustand"
 import type { DirState, State } from "./types"
 import { INITIAL_STATE, MAX_DIR_STORES, DIR_IDLE_TTL_MS } from "./types"
-import { pickDirectoriesToEvict, canDisposeDirectory, hasPendingBlockingRequests } from "./eviction"
+import { pickDirectoriesToEvict, canDisposeDirectory, hasActiveSessions, hasPendingBlockingRequests } from "./eviction"
 import { readDirCache, persistVcs, persistProjectMeta, persistIcon } from "./persist-cache"
 import { normalizePath } from "@/lib/pathNormalization"
 import { DEFAULT_SERVER_ID } from "@/lib/opencode/server-registry"
@@ -139,6 +139,7 @@ export class ChildStoreManager {
         pinned: this.pinned(canonicalDirectory),
         booting: this.isBooting?.(canonicalDirectory) ?? false,
         loadingSessions: this.isLoadingSessions?.(canonicalDirectory) ?? false,
+        hasActiveSessions: this.hasActiveSessionsForDirectory(canonicalDirectory),
         hasPendingBlockingRequests: this.hasPendingBlockingRequestsForDirectory(canonicalDirectory),
       })
     ) {
@@ -167,6 +168,7 @@ export class ChildStoreManager {
       max: MAX_DIR_STORES,
       ttl: DIR_IDLE_TTL_MS,
       now: Date.now(),
+      hasActiveSessions: (dir) => this.hasActiveSessionsForDirectory(dir),
       hasPendingBlockingRequests: (dir) => this.hasPendingBlockingRequestsForDirectory(dir),
     }).filter((d) => d !== skip)
     for (const directory of list) {
@@ -176,6 +178,10 @@ export class ChildStoreManager {
 
   hasPendingBlockingRequestsForDirectory(directory: string): boolean {
     return hasPendingBlockingRequests(this.getChild(directory)?.getState())
+  }
+
+  hasActiveSessionsForDirectory(directory: string): boolean {
+    return hasActiveSessions(this.getChild(directory)?.getState())
   }
 
   /** Apply a state mutation to a directory's store */
@@ -206,6 +212,27 @@ export class ChildStoreManager {
     this.registrySubscribers.add(listener)
     return () => {
       this.registrySubscribers.delete(listener)
+    }
+  }
+
+  subscribeDirectory(directory: string, listener: () => void): () => void {
+    const canonicalDirectory = normalizePath(directory)
+    if (!canonicalDirectory) return () => undefined
+
+    let subscribedStore = this.children.get(canonicalDirectory)
+    let unsubscribeStore = subscribedStore?.subscribe(listener)
+    const unsubscribeRegistry = this.subscribeRegistry(() => {
+      const nextStore = this.children.get(canonicalDirectory)
+      if (nextStore === subscribedStore) return
+      unsubscribeStore?.()
+      subscribedStore = nextStore
+      unsubscribeStore = nextStore?.subscribe(listener)
+      listener()
+    })
+
+    return () => {
+      unsubscribeRegistry()
+      unsubscribeStore?.()
     }
   }
 

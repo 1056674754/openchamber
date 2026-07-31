@@ -1,7 +1,11 @@
 import { describe, expect, test } from "bun:test"
 import type { Message, Part, SessionStatus } from "@opencode-ai/sdk/v2/client"
 import type { Session } from "@opencode-ai/sdk/v2"
-import { getReconnectRecoveryPlan, mergeBootstrapSessions } from "./reconnect-recovery"
+import {
+  getReconnectRecoveryPlan,
+  mergeBootstrapSessions,
+  runReconnectMaterializations,
+} from "./reconnect-recovery"
 
 function createSession(id: string, overrides: Partial<Session> = {}): Session {
   return {
@@ -129,6 +133,23 @@ describe("getReconnectRecoveryPlan", () => {
       directory: "/repo-a",
       viewedSession: { directory: "/repo-b", sessionId: "active" },
     }).materializationSessionIds.sort()).not.toContain("active")
+  })
+})
+
+describe("runReconnectMaterializations", () => {
+  test("reports incomplete recovery when any candidate fails to materialize", async () => {
+    const attempts: string[] = []
+
+    const completed = await runReconnectMaterializations(
+      ["recovered", "failed"],
+      async (sessionId) => {
+        attempts.push(sessionId)
+        return sessionId === "recovered"
+      },
+    )
+
+    expect(attempts).toEqual(["recovered", "failed"])
+    expect(completed).toBe(false)
   })
 })
 

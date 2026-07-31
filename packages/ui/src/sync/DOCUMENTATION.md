@@ -37,7 +37,9 @@ So:
 - Use the **global sessions store** for cold/global session coverage (especially archived pages and unopened directories)
 - Use **aggregated child-store snapshots** for live session/status truth across already initialized directories
 
-Remote instances keep the same boundary explicitly: discovering a project or worktree loads only session summaries into the global cache. It does not create a directory child store. A full child store is materialized only when the directory is opened or receives an event that requires message or blocking-request state.
+Local and remote instances keep the same boundary explicitly: discovering a project or worktree, or receiving summary/status events for an unopened directory, updates only the global cache. It does not create a directory child store. A full child store is materialized only when the directory is opened or receives an event that requires blocking-request state. Streaming message/part events for unopened local directories are ignored because opening the directory performs an authoritative bootstrap.
+
+Directory child stores are bounded by count and idle TTL. Eviction refuses pinned, booting, loading, actively running, or blocking-request directories. After a safe eviction, the sync provider calls OpenCode's directory-scoped `instance.dispose` endpoint so directory plugins, watchers, and subprocesses do not remain alive after their UI state is gone.
 
 ## Ownership map
 
@@ -83,7 +85,6 @@ Use the sync hooks backed by aggregated child stores when the UI needs **live tr
 Current consumers:
 
 - `SessionSidebar.tsx`
-- `SessionNodeItem.tsx`
 - `Header.tsx`
 - agent/session activity surfaces using `useGlobalSessionStatus()` / `useAllSessionStatuses()`
 
@@ -106,7 +107,7 @@ Current consumers:
 
 This keeps cold/global lists responsive without requiring a refetch after every change.
 
-Resident sessions prefer child-store state. Cold remote rows can use global SSE/status summaries until the session is activated.
+Resident sessions prefer child-store state. Sidebar rows use the global session/status cache and directory-specific permission/question subscriptions so one streaming directory does not repaint every row. Cold local and remote rows can use global SSE/status summaries until the session is activated.
 
 ### Bootstrap hierarchy and catalog isolation
 

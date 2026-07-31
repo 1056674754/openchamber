@@ -4,6 +4,7 @@
  */
 
 import type { OpencodeClient, Session, Message, Part, SessionStatus } from "@opencode-ai/sdk/v2/client"
+import type { PermissionRequest } from "@/types/permission"
 import type { QuestionRequest } from "@/types/question"
 import { Binary } from "./binary"
 import { useSessionUIStore } from "./session-ui-store"
@@ -21,6 +22,7 @@ import { stripMessageDiffSnapshots } from "./sanitize"
 import { formatSdkError } from "./sdk-error"
 import { sessionEvents } from "@/lib/sessionEvents"
 import { hasTerminalMessageSignal, type TerminalMessageSignalInfo } from "@/lib/messageCompletion"
+import { formatMessage, useI18nStore } from "@/lib/i18n/store"
 import {
   getOrRegisterRemoteConnection,
   getServerIdForBaseUrl,
@@ -294,15 +296,20 @@ function storeForSession(
 function connectionLostError(serverId?: string | null): Error {
   const normalizedServerId = serverId || DEFAULT_SERVER_ID
   const { hasEverConnected, lastDisconnectReason } = useConfigStore.getState().getConnectionState(normalizedServerId)
-  const suffix = lastDisconnectReason
-    ? ` (${lastDisconnectReason})`
-    : hasEverConnected
-      ? ""
-      : " (never connected)"
-  const serverSuffix = normalizedServerId !== DEFAULT_SERVER_ID
-    ? ` for ${serverRegistry.getServerLabel(normalizedServerId)}`
-    : ""
-  return new Error(`Connection lost${serverSuffix}${suffix}. Please wait for reconnection.`)
+  const { dictionary } = useI18nStore.getState()
+
+  if (!hasEverConnected) {
+    return new Error(formatMessage(dictionary, "chat.connectionLost.neverConnected"))
+  }
+  if (lastDisconnectReason === "upstream_stalled") {
+    return new Error(formatMessage(dictionary, "chat.connectionLost.upstreamStalled"))
+  }
+  if (normalizedServerId !== DEFAULT_SERVER_ID) {
+    return new Error(formatMessage(dictionary, "chat.connectionLost.remote", {
+      server: serverRegistry.getServerLabel(normalizedServerId),
+    }))
+  }
+  return new Error(formatMessage(dictionary, "chat.connectionLost.reconnecting"))
 }
 
 function getErrorStatus(error: unknown): number | null {
@@ -558,6 +565,32 @@ function removeQuestionFromStores(
       question[sessionId] = next
     }
     store.setState({ question })
+    return true
+  }
+
+  return false
+}
+
+function removePermissionFromStores(
+  stores: ChildStoreManager | undefined,
+  sessionId: string,
+  requestId: string,
+): boolean {
+  if (!stores) return false
+
+  for (const store of stores.children.values()) {
+    const permissions = store.getState().permission[sessionId]
+    if (!permissions || permissions.length === 0) continue
+    const next = permissions.filter((permission) => permission.id !== requestId)
+    if (next.length === permissions.length) continue
+
+    const permission = { ...store.getState().permission }
+    if (next.length === 0) {
+      delete permission[sessionId]
+    } else {
+      permission[sessionId] = next
+    }
+    store.setState({ permission })
     return true
   }
 
@@ -1488,6 +1521,103 @@ export async function dismissPermission(
   await waitForConnectionOrThrow(serverRegistry.getServerForSession(sessionId))
   const directory = requireBlockingRequestDirectory("permission", sessionId, requestId)
   await sendPermissionResponse(sessionId, requestId, "reject", directory, "Permission dismissal failed")
+}
+
+type PermissionDismissalTarget = {
+  readonly sessionId: string
+  readonly requestId: string
+  readonly directory: string
+  readonly serverId: string
+  readonly permission: PermissionRequest
+  readonly stores: ChildStoreManager
+}
+
+function collectPermissionDismissalTargets(sessionId: string): PermissionDismissalTarget[] {
+  const indexedServerId = serverRegistry.getServerForSession(sessionId)
+  const managersByServer = new Map<string, Set<ChildStoreManager>>()
+  const addManager = (serverId: string, stores: ChildStoreManager | null | undefined) => {
+    if (!stores) return
+    const managers = managersByServer.get(serverId) ?? new Set<ChildStoreManager>()
+    managers.add(stores)
+    managersByServer.set(serverId, managers)
+  }
+
+  if (indexedServerId) {
+    if (indexedServerId === DEFAULT_SERVER_ID) addManager(DEFAULT_SERVER_ID, _childStores)
+    addManager(indexedServerId, getSyncStoresForServer(indexedServerId))
+  } else {
+    addManager(DEFAULT_SERVER_ID, _childStores)
+    for (const entry of getAllSyncStores()) addManager(entry.serverId, entry.childStores)
+  }
+
+  const targets: PermissionDismissalTarget[] = []
+  const seen = new Set<string>()
+  for (const [serverId, managers] of managersByServer) {
+    const sessionsById = new Map<string, Session>()
+    for (const stores of managers) {
+      for (const store of stores.children.values()) {
+        for (const session of store.getState().session) sessionsById.set(session.id, session)
+      }
+    }
+    const subtreeIds = computeSessionSubtreeIds([...sessionsById.values()], sessionId)
+
+    for (const stores of managers) {
+      for (const [directory, store] of stores.children) {
+        const permissionsBySession = store.getState().permission
+        for (const scopedSessionId of subtreeIds) {
+          for (const request of permissionsBySession[scopedSessionId] ?? []) {
+            const key = `${serverId}\0${directory}\0${scopedSessionId}\0${request.id}`
+            if (seen.has(key)) continue
+            seen.add(key)
+            targets.push({
+              sessionId: scopedSessionId,
+              requestId: request.id,
+              directory,
+              serverId,
+              permission: request,
+              stores,
+            })
+          }
+        }
+      }
+    }
+  }
+  return targets
+}
+
+export async function dismissOpenPermissionsForSession(sessionId: string): Promise<boolean> {
+  if (!sessionId) return false
+  const targets = collectPermissionDismissalTargets(sessionId)
+  if (targets.length === 0) return false
+
+  for (const target of targets) {
+    removePermissionFromStores(target.stores, target.sessionId, target.requestId)
+  }
+
+  await Promise.all(targets.map(async (target) => {
+    try {
+      await respondToPermission(target.sessionId, target.requestId, "reject", {
+        directory: target.directory,
+        serverId: target.serverId,
+      })
+    } catch (error) {
+      console.error("[session-actions] Failed to dismiss open permission on send:", error)
+      const store = target.stores.getChild(target.directory)
+      if (store) {
+        const state = store.getState()
+        const current = state.permission[target.sessionId] ?? []
+        if (!current.some((permission) => permission.id === target.requestId)) {
+          store.setState({
+            permission: {
+              ...state.permission,
+              [target.sessionId]: [...current, target.permission],
+            },
+          })
+        }
+      }
+    }
+  }))
+  return true
 }
 
 async function sendPermissionResponse(

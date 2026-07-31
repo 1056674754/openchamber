@@ -32,6 +32,14 @@ export type ReconnectRecoveryPlan = {
   materializationSessionIds: string[]
 }
 
+export async function runReconnectMaterializations(
+  sessionIds: readonly string[],
+  materialize: (sessionId: string) => Promise<boolean>,
+): Promise<boolean> {
+  const results = await Promise.all(sessionIds.map(materialize))
+  return results.every(Boolean)
+}
+
 const getParentId = (session: Session): string | null | undefined => (
   (session as Session & { parentID?: string | null }).parentID
 )

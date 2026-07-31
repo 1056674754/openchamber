@@ -16,7 +16,6 @@ import {
   areSessionListsEquivalent,
   areStatusMapsEquivalent,
   findLiveSession,
-  findLiveSessionStatus,
 } from "./live-aggregate"
 import { bootstrapGlobal, bootstrapDirectory } from "./bootstrap"
 import { retry } from "./retry"
@@ -26,12 +25,16 @@ import { setSyncRefs } from "./sync-refs"
 import { deleteShield } from "./delete-shield"
 import { stripSessionDiffSnapshots } from "./sanitize"
 import { syncDebug } from "./debug"
-import { getReconnectRecoveryPlan, mergeBootstrapSessions } from "./reconnect-recovery"
+import {
+  getReconnectRecoveryPlan,
+  mergeBootstrapSessions,
+  runReconnectMaterializations,
+} from "./reconnect-recovery"
 import { STUCK_SESSION_TIMEOUT_MS } from "@/stores/types/sessionTypes"
 import { opencodeClient } from "@/lib/opencode/client"
 import { recoverPendingMessages } from "./pending-message"
 import { DEFAULT_SERVER_ID, serverRegistry } from "@/lib/opencode/server-registry"
-import { registerSyncStores, getSyncStoresForServer, getAllSyncStores } from "./multi-server-registry"
+import { registerSyncStores, getSyncStoresForServer } from "./multi-server-registry"
 import { useProjectsStore } from "@/stores/useProjectsStore"
 import { usePermissionStore } from "@/stores/permissionStore"
 import { useConfigStore, type ConfigConnectionState } from "@/stores/useConfigStore"
@@ -59,6 +62,7 @@ import { isPageActivelyViewed } from "./session-presence"
 import { getMissingSteerSideChannelRecords, getSteerSideChannelSignature } from "./steer-side-channel"
 import { getBootstrapFailureAction } from "./bootstrap-retry-policy"
 import { findLatestRealUserMessage, isRealUserMessage } from "@/lib/messages/real-user"
+import { classifyColdDirectoryEvent } from "./cold-directory-event"
 
 // ---------------------------------------------------------------------------
 // Context
@@ -146,15 +150,9 @@ function useLiveSyncSelector<T>(selector: (states: State[]) => T, isEqual: (left
 
 /** Read status for a session across all directories */
 export function useGlobalSessionStatus(sessionId: string): SessionStatus | undefined {
-  const globalStatus = useGlobalSessionsStore(
+  return useGlobalSessionsStore(
     useCallback((state) => state.sessionStatuses.get(sessionId), [sessionId]),
   )
-
-  const liveStatus = useLiveSyncSelector(
-    useCallback((states) => findLiveSessionStatus(states, sessionId), [sessionId]),
-  )
-
-  return liveStatus ?? globalStatus
 }
 
 /** Read all session statuses (for sidebar) */
@@ -1196,7 +1194,7 @@ async function resyncDirectoryAfterReconnect(
       ? withRemoteTimeout(promise, label, REMOTE_RECONNECT_REQUEST_TIMEOUT_MS)
       : promise
   )
-  await Promise.all(materializationSessionIds.map(async (sessionId) => {
+  const materializationsSynced = await runReconnectMaterializations(materializationSessionIds, async (sessionId) => {
     const [sessionResponse, messagePage] = await Promise.all([
       withReconnectTimeout(
         scopedClient.session.get({ sessionID: sessionId, directory }),
@@ -1217,7 +1215,7 @@ async function resyncDirectoryAfterReconnect(
       }),
     ])
     const session = sessionResponse?.data
-    if (!session || !messagePage) return
+    if (!session || !messagePage) return false
     setSessionPrefetch({
       directory,
       sessionID: sessionId,
@@ -1279,7 +1277,8 @@ async function resyncDirectoryAfterReconnect(
       }))
       useTodosPersistStore.getState().setSessionTodos(sessionId, todoResult.data)
     }
-  }))
+    return true
+  })
 
   const blockingRequests = await resyncBlockingRequestsForDirectory(
     directory,
@@ -1289,7 +1288,10 @@ async function resyncDirectoryAfterReconnect(
   )
 
   ingestDirectoryStateIntoRoutingIndex(routingIndex, directory, store.getState())
-  return statusesSynced && blockingRequests.questions && blockingRequests.permissions
+  return materializationsSynced
+    && statusesSynced
+    && blockingRequests.questions
+    && blockingRequests.permissions
 }
 
 function handleEvent(
@@ -1301,69 +1303,32 @@ function handleEvent(
   sdk: OpencodeClient,
 ) {
   const directory = resolveDirectoryFromRoutingIndex(routingIndex, rawDirectory, payload, childStores)
+  let shouldMaterializeColdDirectory = false
 
-  if (directory && directory !== "global") {
-    if (serverId !== DEFAULT_SERVER_ID && !childStores.getChild(directory)) {
-      if (payload.type === "session.created" || payload.type === "session.updated") {
-        const info = (payload.properties as { info?: Session }).info
-        if (info?.id) {
-          setIndexedSessionDirectory(routingIndex, info.id, directory)
-          serverRegistry.indexSession(info.id, serverId)
-          useGlobalSessionsStore.getState().upsertSession(info)
-        }
+  if (directory && directory !== "global" && !childStores.getChild(directory)) {
+    const decision = classifyColdDirectoryEvent(payload)
+    switch (decision.kind) {
+      case "session":
+        setIndexedSessionDirectory(routingIndex, decision.info.id, directory)
+        serverRegistry.indexSession(decision.info.id, serverId)
+        useGlobalSessionsStore.getState().upsertSession(decision.info)
         return
-      }
-
-      const sessionID = getSessionIdFromPayload(payload) ?? undefined
-      if (payload.type === "session.status") {
-        const status = (payload.properties as { status?: SessionStatus }).status
-        if (sessionID && status) {
-          setIndexedSessionDirectory(routingIndex, sessionID, directory)
-          serverRegistry.indexSession(sessionID, serverId)
-          useGlobalSessionsStore.getState().upsertStatus(sessionID, status)
-        }
+      case "status":
+        setIndexedSessionDirectory(routingIndex, decision.sessionID, directory)
+        serverRegistry.indexSession(decision.sessionID, serverId)
+        useGlobalSessionsStore.getState().upsertStatus(decision.sessionID, decision.status)
         return
-      }
-      if (payload.type === "session.idle" || payload.type === "session.error") {
-        if (sessionID) {
-          setIndexedSessionDirectory(routingIndex, sessionID, directory)
-          serverRegistry.indexSession(sessionID, serverId)
-          useGlobalSessionsStore.getState().upsertStatus(sessionID, { type: "idle" })
-        }
+      case "delete":
+        useGlobalSessionsStore.getState().removeSessions([decision.sessionID])
+        removeIndexedSession(routingIndex, decision.sessionID)
+        serverRegistry.forgetSession(decision.sessionID)
         return
-      }
-      if (payload.type === "session.deleted") {
-        if (sessionID) {
-          useGlobalSessionsStore.getState().removeSessions([sessionID])
-          removeIndexedSession(routingIndex, sessionID)
-          serverRegistry.forgetSession(sessionID)
-        }
-        return
-      }
-    }
-
-    if (
-      (payload.type === "session.created" || payload.type === "session.updated")
-      && !childStores.getChild(directory)
-    ) {
-      const info = (payload.properties as { info?: Session }).info
-      if (info?.id) {
-        // [OPENCHAMBER-FORK] 2025-05-18 v1.11.1-dev-merge
-        // Don't create child stores for remote directories in the default SyncProvider.
-        // Check if any remote SyncProvider already owns this directory — no path matching needed.
-        if (serverId === DEFAULT_SERVER_ID) {
-          const allEntries = getAllSyncStores()
-          const existsInRemote = allEntries.some(
-            (e) => e.serverId !== DEFAULT_SERVER_ID && Boolean(e.childStores.getChild(directory))
-          )
-          if (existsInRemote) {
-            setIndexedSessionDirectory(routingIndex, info.id, directory)
-            return
-          }
-        }
-        setIndexedSessionDirectory(routingIndex, info.id, directory)
-        childStores.ensureChild(directory)
-      }
+      case "materialize":
+        shouldMaterializeColdDirectory = true
+        break
+      case "ignore":
+        if (serverId === DEFAULT_SERVER_ID) return
+        break
     }
   }
 
@@ -1444,7 +1409,12 @@ function handleEvent(
     }
   }
 
-  if (!store && resolvedDirectory && resolvedDirectory !== "global" && serverId !== DEFAULT_SERVER_ID) {
+  if (
+    !store
+    && resolvedDirectory
+    && resolvedDirectory !== "global"
+    && (serverId !== DEFAULT_SERVER_ID || shouldMaterializeColdDirectory)
+  ) {
     store = childStores.ensureChild(resolvedDirectory)
   }
 
@@ -1978,6 +1948,24 @@ export function SyncProvider(props: {
         loadingSessionDirs.delete(directory)
         const queueIndex = remoteBootstrapQueue.indexOf(directory)
         if (queueIndex >= 0) remoteBootstrapQueue.splice(queueIndex, 1)
+        if (serverId === DEFAULT_SERVER_ID && shouldDefaultProviderSkipDirectory(directory, projects)) return
+        void props.sdk.instance.dispose({ directory }).then(
+          (result) => {
+            if (!result.error) return
+            console.warn("[sync] failed to dispose OpenCode directory instance", {
+              directory,
+              serverId,
+              error: result.error,
+            })
+          },
+          (error: unknown) => {
+            console.warn("[sync] failed to dispose OpenCode directory instance", {
+              directory,
+              serverId,
+              error,
+            })
+          },
+        )
       },
       isBooting: (directory) => bootingDirs.has(directory) || scheduledRemoteDirs.has(directory) || queuedRemoteDirs.has(directory),
       isLoadingSessions: (directory) => loadingSessionDirs.has(directory),
@@ -2614,8 +2602,13 @@ export function useExistingSessionPermissions(sessionID: string, directory?: str
     return EMPTY_PERMISSION_REQUESTS
   }, [directory, sessionID, stores])
   const subscribe = useCallback(
-    (notify: () => void) => stores?.subscribeAll(notify) ?? (() => undefined),
-    [stores],
+    (notify: () => void) => {
+      if (!stores) return () => undefined
+      return directory
+        ? stores.subscribeDirectory(directory, notify)
+        : stores.subscribeAll(notify)
+    },
+    [directory, stores],
   )
   return React.useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
 }
@@ -2638,8 +2631,13 @@ export function useExistingSessionQuestions(sessionID: string, directory?: strin
     return EMPTY_QUESTION_REQUESTS
   }, [directory, sessionID, stores])
   const subscribe = useCallback(
-    (notify: () => void) => stores?.subscribeAll(notify) ?? (() => undefined),
-    [stores],
+    (notify: () => void) => {
+      if (!stores) return () => undefined
+      return directory
+        ? stores.subscribeDirectory(directory, notify)
+        : stores.subscribeAll(notify)
+    },
+    [directory, stores],
   )
   return React.useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
 }
@@ -2802,13 +2800,13 @@ export function useSession(sessionID?: string | null, directory?: string) {
         return () => undefined
       }
       if (directory) {
-        return remoteStores.ensureChild(directory).subscribe(notify)
+        return remoteStores.subscribeDirectory(directory, notify)
       }
       return remoteStores.subscribeAll(notify)
     }
 
     if (directory) {
-      return childStores.ensureChild(directory).subscribe(notify)
+      return childStores.subscribeDirectory(directory, notify)
     }
 
     return childStores.subscribeAll(notify)

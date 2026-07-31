@@ -101,6 +101,7 @@ export type EvictPlan = {
   max: number
   ttl: number
   now: number
+  hasActiveSessions?: (directory: string) => boolean
   hasPendingBlockingRequests?: (directory: string) => boolean
 }
 
@@ -110,6 +111,7 @@ export type DisposeCheck = {
   pinned: boolean
   booting: boolean
   loadingSessions: boolean
+  hasActiveSessions: boolean
   hasPendingBlockingRequests: boolean
 }
 

@@ -29,7 +29,7 @@ class FakeSocket extends EventEmitter {
   }
 }
 
-function createSseResponse({ blocks = [], signal, holdOpen = false }) {
+function createSseResponse({ blocks = [], signal, holdOpen = false, onAbort: handleAbort }) {
   const encoder = new TextEncoder();
   let index = 0;
 
@@ -51,6 +51,7 @@ function createSseResponse({ blocks = [], signal, holdOpen = false }) {
             return new Promise((resolve, reject) => {
               const onAbort = () => {
                 signal.removeEventListener('abort', onAbort);
+                handleAbort?.();
                 const error = new Error('Aborted');
                 error.name = 'AbortError';
                 reject(error);
@@ -609,12 +610,148 @@ describe('message stream websocket runtime', () => {
     const eventFrames = socket.sent.filter((frame) => frame.type === 'event' && frame.payload?.type === 'server.connected');
 
     expect(readyFrames).toHaveLength(2);
+    expect(readyFrames.at(-1)).toEqual({
+      type: 'ready',
+      scope: 'global',
+      replayGap: false,
+    });
     expect(eventFrames.length).toBeGreaterThanOrEqual(2);
     expect(fetchCalls.slice(0, 2)).toEqual([null, 'evt-1']);
     expect(triggerHealthCheckCalls).toBe(0);
 
     socket.close();
     await runtime.close();
+  });
+
+  it('flags a replay gap when upstream omits SSE event ids across reconnect', async () => {
+    const server = new EventEmitter();
+    const wsClients = new Set();
+    const fetchCalls = [];
+    const sourceEvents = [];
+    const directory = '/tmp/reconnect-gap';
+    const finalMessage = {
+      type: 'message.updated',
+      properties: {
+        info: {
+          id: 'msg-final',
+          sessionID: 'ses-reconnect-gap',
+          role: 'assistant',
+          finish: 'stop',
+        },
+      },
+    };
+    let upstreamAttempt = 0;
+    let resolveIdleForwarded;
+    const idleForwarded = new Promise((resolve) => {
+      resolveIdleForwarded = resolve;
+    });
+
+    const runtime = createMessageStreamWsRuntime({
+      server,
+      uiAuthController: null,
+      isRequestOriginAllowed: async () => true,
+      rejectWebSocketUpgrade() {
+        throw new Error('upgrade should not be used in this test');
+      },
+      buildOpenCodeUrl: (path) => `http://127.0.0.1:4096${path}`,
+      getOpenCodeAuthHeaders: () => ({}),
+      processForwardedEventPayload(payload) {
+        if (
+          payload.type === 'session.status'
+          && payload.properties?.sessionID === 'ses-reconnect-gap'
+          && payload.properties?.status?.type === 'idle'
+        ) {
+          resolveIdleForwarded();
+        }
+      },
+      wsClients,
+      heartbeatIntervalMs: 50,
+      upstreamStallTimeoutMs: 20,
+      upstreamReconnectDelayMs: 0,
+      fetchImpl: async (_url, options) => {
+        fetchCalls.push(options?.headers?.['Last-Event-ID'] ?? null);
+        upstreamAttempt += 1;
+
+        if (upstreamAttempt === 1) {
+          const partialMessage = {
+            type: 'message.part.updated',
+            properties: {
+              part: {
+                id: 'part-partial',
+                messageID: 'msg-final',
+                sessionID: 'ses-reconnect-gap',
+                type: 'text',
+                text: 'partial response',
+              },
+            },
+          };
+          sourceEvents.push(partialMessage);
+          return createSseResponse({
+            signal: options.signal,
+            holdOpen: true,
+            blocks: [
+              `data: ${JSON.stringify({ directory, payload: partialMessage })}\n\n`,
+            ],
+            onAbort() {
+              sourceEvents.push(finalMessage);
+            },
+          });
+        }
+
+        const idleStatus = {
+          type: 'session.status',
+          properties: {
+            sessionID: 'ses-reconnect-gap',
+            status: { type: 'idle' },
+          },
+        };
+        sourceEvents.push(idleStatus);
+        return createSseResponse({
+          signal: options.signal,
+          holdOpen: true,
+          blocks: [
+            `data: ${JSON.stringify({ directory, payload: idleStatus })}\n\n`,
+          ],
+        });
+      },
+    });
+
+    const socket = new FakeSocket();
+    runtime.wsServer.emit('connection', socket, { url: '/api/global/event/ws' });
+
+    let timeout;
+    try {
+      await Promise.race([
+        idleForwarded,
+        new Promise((_, reject) => {
+          timeout = setTimeout(() => reject(new Error('Timed out waiting for the reconnect idle event')), 250);
+        }),
+      ]);
+
+      const readyFrames = socket.sent.filter((frame) => frame.type === 'ready');
+      const finalMessageFrames = socket.sent.filter(
+        (frame) => frame.type === 'event' && frame.payload?.type === 'message.updated',
+      );
+      const idleFrames = socket.sent.filter(
+        (frame) => frame.type === 'event'
+          && frame.payload?.type === 'session.status'
+          && frame.payload?.properties?.status?.type === 'idle',
+      );
+
+      expect(sourceEvents).toContainEqual(finalMessage);
+      expect(fetchCalls.slice(0, 2)).toEqual([null, null]);
+      expect(finalMessageFrames).toEqual([]);
+      expect(idleFrames).toHaveLength(1);
+      expect(readyFrames.at(-1)).toEqual({
+        type: 'ready',
+        scope: 'global',
+        replayGap: true,
+      });
+    } finally {
+      clearTimeout(timeout);
+      socket.close();
+      await runtime.close();
+    }
   });
 
   it('keeps synthetic event processing on forwarded upstream events', async () => {

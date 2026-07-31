@@ -48,7 +48,7 @@ export function createGlobalMessageStreamWsBridge({
     return true;
   };
 
-  const markReady = (socket, requestedLastEventId) => {
+  const markReady = (socket, requestedLastEventId, forceReplayGap = false) => {
     if (socket.readyState !== 1) {
       return;
     }
@@ -62,7 +62,7 @@ export function createGlobalMessageStreamWsBridge({
     const sent = sendMessageStreamWsFrame(socket, {
       type: 'ready',
       scope: 'global',
-      replayGap: replay.gap,
+      replayGap: forceReplayGap || replay.gap,
     });
     if (!sent) {
       removeClient(socket);
@@ -164,7 +164,7 @@ export function createGlobalMessageStreamWsBridge({
     if (status.type === 'connect') {
       for (const socket of Array.from(clients)) {
         if (!readyClients.has(socket)) {
-          markReady(socket, clientLastEventIds.get(socket) ?? '');
+          markReady(socket, clientLastEventIds.get(socket) ?? '', status.replayGap === true);
         }
       }
       return;
