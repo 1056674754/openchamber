@@ -65,3 +65,6 @@ workspaces/
 # Linux build artifacts (local builds, not tracked)
 openchamber-linux
 /artifacts/
+
+# Local OpenCode temp build/cache dirs
+.tmp-oc*/
