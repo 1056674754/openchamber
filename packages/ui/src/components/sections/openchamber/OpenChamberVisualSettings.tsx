@@ -19,7 +19,14 @@ import {
     SelectValue,
 } from '@/components/ui/select';
 import { Icon } from "@/components/icon/Icon";
-import { isDesktopLocalOriginActive, isDesktopShell, isVSCodeRuntime, isWebRuntime } from '@/lib/desktop';
+import {
+    isDesktopLocalOriginActive,
+    isDesktopShell,
+    isVSCodeRuntime,
+    isWebRuntime,
+    usesFramelessElectronChrome,
+    type DesktopWindowControlsPosition,
+} from '@/lib/desktop';
 import { useDeviceInfo } from '@/lib/device';
 import { usePwaDetection } from '@/hooks/usePwaDetection';
 import { updateDesktopSettings } from '@/lib/persistence';
@@ -51,6 +58,17 @@ const THEME_MODE_OPTIONS: Array<{ value: ThemeMode; labelKey: string }> = [
     {
         value: 'dark',
         labelKey: 'settings.openchamber.visual.option.themeMode.dark',
+    },
+];
+
+const WINDOW_CONTROLS_POSITION_OPTIONS: Array<{ value: DesktopWindowControlsPosition; labelKey: string }> = [
+    {
+        value: 'left',
+        labelKey: 'settings.openchamber.desktopNetwork.option.windowControlsLeft',
+    },
+    {
+        value: 'right',
+        labelKey: 'settings.openchamber.desktopNetwork.option.windowControlsRight',
     },
 ];
 
@@ -233,7 +251,7 @@ const normalizeUserMessageRenderingMode = (mode: unknown): 'markdown' | 'plain' 
     return mode === 'markdown' ? 'markdown' : 'plain';
 };
 
-export type VisibleSetting = 'theme' | 'dockBadge' | 'pwaInstallName' | 'pwaOrientation' | 'mobileKeyboardMode' | 'timeFormat' | 'weekStart' | 'fontSize' | 'terminalFontSize' | 'editorFontSize' | 'spacing' | 'inputBarOffset' | 'userMessageRendering' | 'chatRenderMode' | 'messageTransport' | 'activityRenderMode' | 'collapsibleUserMessages' | 'stickyUserHeader' | 'promptNavigatorEnabled' | 'wideChatLayout' | 'splitAssistantMessageActions' | 'subagentPrompting' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'reasoning' | 'showToolFileIcons' | 'expandedTools' | 'queueMode' | 'terminalQuickKeys' | 'fileEditorKeymap' | 'persistDraft' | 'inputSpellcheck' | 'reportUsage' | 'multiRun' | 'sessionGoal' | 'sessionAssist';
+export type VisibleSetting = 'theme' | 'windowControlsPosition' | 'dockBadge' | 'pwaInstallName' | 'pwaOrientation' | 'mobileKeyboardMode' | 'timeFormat' | 'weekStart' | 'fontSize' | 'terminalFontSize' | 'editorFontSize' | 'spacing' | 'inputBarOffset' | 'userMessageRendering' | 'chatRenderMode' | 'messageTransport' | 'activityRenderMode' | 'collapsibleUserMessages' | 'stickyUserHeader' | 'promptNavigatorEnabled' | 'wideChatLayout' | 'splitAssistantMessageActions' | 'draftStarters' | 'subagentPrompting' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'reasoning' | 'showToolFileIcons' | 'expandedTools' | 'queueMode' | 'terminalQuickKeys' | 'fileEditorKeymap' | 'persistDraft' | 'inputSpellcheck' | 'reportUsage' | 'multiRun' | 'sessionGoal' | 'sessionAssist';
 
 interface OpenChamberVisualSettingsProps {
     /** Which settings to show. If undefined, shows all. */
@@ -263,6 +281,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const setStickyUserHeader = useUIStore(state => state.setStickyUserHeader);
     const promptNavigatorEnabled = useUIStore(state => state.promptNavigatorEnabled);
     const setPromptNavigatorEnabled = useUIStore(state => state.setPromptNavigatorEnabled);
+    const draftStartersVisible = useUIStore(state => state.draftStartersVisible);
+    const setDraftStartersVisible = useUIStore(state => state.setDraftStartersVisible);
     const wideChatLayoutEnabled = useUIStore(state => state.wideChatLayoutEnabled);
     const setWideChatLayoutEnabled = useUIStore(state => state.setWideChatLayoutEnabled);
     const chatRenderMode = useUIStore(state => state.chatRenderMode);
@@ -321,6 +341,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const setShowMobileSessionStatusBar = useUIStore(state => state.setShowMobileSessionStatusBar);
     const dockBadgeEnabled = useUIStore(state => state.dockBadgeEnabled);
     const setDockBadgeEnabled = useUIStore(state => state.setDockBadgeEnabled);
+    const desktopWindowControlsPosition = useUIStore(state => state.desktopWindowControlsPosition);
+    const setDesktopWindowControlsPosition = useUIStore(state => state.setDesktopWindowControlsPosition);
     const messageStreamTransport = useConfigStore((state) => state.settingsMessageStreamTransport);
     const setMessageStreamTransport = useConfigStore((state) => state.setSettingsMessageStreamTransport);
     const isSettingsDialogOpen = useUIStore(state => state.isSettingsDialogOpen);
@@ -355,6 +377,11 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         setReportUsage(enabled);
         void updateDesktopSettings({ reportUsage: enabled });
     }, [setReportUsage]);
+
+    const handleWindowControlsPositionChange = React.useCallback((value: DesktopWindowControlsPosition) => {
+        setDesktopWindowControlsPosition(value);
+        void updateDesktopSettings({ desktopWindowControlsPosition: value });
+    }, [setDesktopWindowControlsPosition]);
 
     const handleMultiRunEnabledChange = React.useCallback((enabled: boolean) => {
         setMultiRunEnabled(enabled);
@@ -442,6 +469,11 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         setPromptNavigatorEnabled(enabled);
         void updateDesktopSettings({ promptNavigatorEnabled: enabled });
     }, [setPromptNavigatorEnabled]);
+
+    const handleDraftStartersVisibleChange = React.useCallback((enabled: boolean) => {
+        setDraftStartersVisible(enabled);
+        void updateDesktopSettings({ draftStartersVisible: enabled });
+    }, [setDraftStartersVisible]);
 
     const handleWideChatLayoutChange = React.useCallback((enabled: boolean) => {
         setWideChatLayoutEnabled(enabled);
@@ -539,10 +571,11 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
 
     const isVSCode = isVSCodeRuntime();
     const hasThemeSettings = shouldShow('theme') && !isVSCode;
+    const showWindowControlsPositionSetting = shouldShow('windowControlsPosition') && usesFramelessElectronChrome();
     const hasLocalizationSettings = shouldShow('theme') || shouldShow('timeFormat') || shouldShow('weekStart');
     const hasAppearanceSettings = isVSCode
         ? hasLocalizationSettings
-        : (shouldShow('theme') || shouldShow('dockBadge') || shouldShow('pwaInstallName') || shouldShow('pwaOrientation') || shouldShow('timeFormat') || shouldShow('weekStart'));
+        : (shouldShow('theme') || showWindowControlsPositionSetting || shouldShow('dockBadge') || shouldShow('pwaInstallName') || shouldShow('pwaOrientation') || shouldShow('timeFormat') || shouldShow('weekStart'));
     const hasLayoutSettings = shouldShow('fontSize') || shouldShow('terminalFontSize') || shouldShow('editorFontSize') || shouldShow('spacing') || shouldShow('inputBarOffset');
     const hasNavigationSettings = (shouldShow('terminalQuickKeys') && !isMobile) || shouldShow('fileEditorKeymap');
     const hasBehaviorSettings = shouldShow('userMessageRendering')
@@ -553,6 +586,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         || (shouldShow('promptNavigatorEnabled') && !isVSCode)
         || shouldShow('wideChatLayout')
         || shouldShow('splitAssistantMessageActions')
+        || shouldShow('draftStarters')
         || shouldShow('subagentPrompting')
         || shouldShow('diffLayout')
         || (shouldShow('mobileStatusBar') && isMobile)
@@ -829,6 +863,37 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                         <span className="typography-meta text-muted-foreground">
                                             {t('settings.openchamber.visual.field.dockBadgeHint')}
                                         </span>
+                                    </div>
+                                </div>
+                            </section>
+                        )}
+
+                        {showWindowControlsPositionSetting && (
+                            <section className="px-2 pb-2 pt-0 space-y-2" data-settings-item="appearance.desktop-window-controls-position">
+                                <div className="flex min-w-0 flex-col gap-1.5">
+                                    <span className="typography-ui-header font-medium text-foreground">
+                                        {t('settings.openchamber.desktopNetwork.field.windowControlsPosition')}
+                                    </span>
+                                    <span className="typography-meta text-muted-foreground">
+                                        {t('settings.openchamber.desktopNetwork.field.windowControlsPositionDescription')}
+                                    </span>
+                                    <div
+                                        className="flex flex-wrap items-center gap-1"
+                                        role="group"
+                                        aria-label={t('settings.openchamber.desktopNetwork.field.windowControlsPositionAria')}
+                                    >
+                                        {WINDOW_CONTROLS_POSITION_OPTIONS.map((option) => (
+                                            <Button
+                                                key={option.value}
+                                                variant="chip"
+                                                size="xs"
+                                                aria-pressed={desktopWindowControlsPosition === option.value}
+                                                className="!font-normal"
+                                                onClick={() => handleWindowControlsPositionChange(option.value)}
+                                            >
+                                                {tUnsafe(option.labelKey)}
+                                            </Button>
+                                        ))}
                                     </div>
                                 </div>
                             </section>
@@ -1665,7 +1730,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                 </div>
                             )}
 
-                            {(shouldShow('collapsibleUserMessages') || shouldShow('stickyUserHeader') || (shouldShow('promptNavigatorEnabled') && !isVSCode) || shouldShow('wideChatLayout') || shouldShow('splitAssistantMessageActions') || shouldShow('subagentPrompting') || (shouldShow('mobileStatusBar') && isMobile) || shouldShow('dotfiles') || shouldShow('queueMode') || shouldShow('persistDraft') || shouldShow('showToolFileIcons') || (!isMobile && shouldShow('inputSpellcheck')) || shouldShow('reasoning') || shouldShow('multiRun') || (shouldShow('sessionGoal') && !isVSCode)) && (
+                            {(shouldShow('collapsibleUserMessages') || shouldShow('stickyUserHeader') || (shouldShow('promptNavigatorEnabled') && !isVSCode) || shouldShow('wideChatLayout') || shouldShow('splitAssistantMessageActions') || shouldShow('draftStarters') || shouldShow('subagentPrompting') || (shouldShow('mobileStatusBar') && isMobile) || shouldShow('dotfiles') || shouldShow('queueMode') || shouldShow('persistDraft') || shouldShow('showToolFileIcons') || (!isMobile && shouldShow('inputSpellcheck')) || shouldShow('reasoning') || shouldShow('multiRun') || (shouldShow('sessionGoal') && !isVSCode)) && (
                                 <section className="p-2 space-y-0.5">
                                     {shouldShow('reasoning') && (
                                         <h3 className="typography-ui-header py-1.5 font-medium text-foreground">
@@ -1891,10 +1956,33 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                         </div>
                                     )}
 
-                                    {(shouldShow('sessionAssist') || shouldShow('subagentPrompting') || shouldShow('multiRun') || (shouldShow('sessionGoal') && !isVSCode)) && (
+                                    {(shouldShow('sessionAssist') || shouldShow('draftStarters') || shouldShow('subagentPrompting') || shouldShow('multiRun') || (shouldShow('sessionGoal') && !isVSCode)) && (
                                         <h3 className="typography-ui-header mt-3 py-1.5 font-medium text-foreground">
                                             {t('settings.openchamber.visual.section.sessionAssistance')}
                                         </h3>
+                                    )}
+                                    {shouldShow('draftStarters') && (
+                                        <div
+                                            data-settings-item="chat.draft-starters-visible"
+                                            className="group flex cursor-pointer items-center gap-2 py-0.5"
+                                            role="button"
+                                            tabIndex={0}
+                                            aria-pressed={draftStartersVisible}
+                                            onClick={() => handleDraftStartersVisibleChange(!draftStartersVisible)}
+                                            onKeyDown={(event) => {
+                                                if (event.key === ' ' || event.key === 'Enter') {
+                                                    event.preventDefault();
+                                                    handleDraftStartersVisibleChange(!draftStartersVisible);
+                                                }
+                                            }}
+                                        >
+                                            <Checkbox
+                                                checked={draftStartersVisible}
+                                                onChange={handleDraftStartersVisibleChange}
+                                                ariaLabel={t('settings.openchamber.visual.field.draftStartersVisibleAria')}
+                                            />
+                                            <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.draftStartersVisible')}</span>
+                                        </div>
                                     )}
                                     {shouldShow('sessionAssist') && (
                                         <>

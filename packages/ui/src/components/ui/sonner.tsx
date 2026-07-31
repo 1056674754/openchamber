@@ -3,6 +3,7 @@
 import * as React from "react"
 import { Toaster as Sonner } from "sonner"
 import type { ToasterProps } from "sonner"
+import { observePinnedToasterStyles } from "./sonnerPinnedStyles"
 
 const SHADOW_DARK =
   "inset 0 1px 0 0 rgba(255,255,255,0.12), inset 0 0 0 1px rgba(255,255,255,0.08), 0 0 0 1px rgba(0,0,0,0.36), 0 1px 1px -0.5px rgba(0,0,0,0.22), 0 3px 3px -1.5px rgba(0,0,0,0.20), 0 6px 6px -3px rgba(0,0,0,0.16)"
@@ -36,43 +37,7 @@ function useIsDarkTheme() {
 function usePinnedToastStyles(shadow: string) {
   React.useEffect(() => {
     if (typeof document === "undefined") return
-
-    const apply = (el: HTMLElement) => {
-      el.style.setProperty("box-shadow", shadow, "important")
-      el.style.setProperty("outline", "none", "important")
-      if (el.getAttribute("tabindex") === "0") el.setAttribute("tabindex", "-1")
-    }
-
-    const applyToAll = () => {
-      document
-        .querySelectorAll<HTMLElement>("[data-sonner-toast]")
-        .forEach(apply)
-    }
-
-    applyToAll()
-
-    const observer = new MutationObserver((mutations) => {
-      for (const m of mutations) {
-        m.addedNodes.forEach((node) => {
-          if (!(node instanceof HTMLElement)) return
-          if (node.matches?.("[data-sonner-toast]")) apply(node)
-          node
-            .querySelectorAll?.<HTMLElement>("[data-sonner-toast]")
-            .forEach(apply)
-        })
-      }
-      // Re-pin in case sonner mutates style.cssText on interactions.
-      applyToAll()
-    })
-
-    observer.observe(document.body, {
-      childList: true,
-      subtree: true,
-      attributes: true,
-      attributeFilter: ["style", "tabindex", "data-expanded", "data-swiping"],
-    })
-
-    return () => observer.disconnect()
+    return observePinnedToasterStyles(document, shadow)
   }, [shadow])
 }
 

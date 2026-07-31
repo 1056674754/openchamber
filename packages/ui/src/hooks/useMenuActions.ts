@@ -9,7 +9,8 @@ import { useProjectsStore } from '@/stores/useProjectsStore';
 import { sessionEvents } from '@/lib/sessionEvents';
 import { createWorktreeSession } from '@/lib/worktreeSessionCreator';
 import { showOpenCodeStatus } from '@/lib/openCodeStatus';
-import { listenDesktopEvent } from '@/lib/desktop';
+import { canUseElectronDesktopIPC, invokeDesktop, listenDesktopEvent } from '@/lib/desktop';
+import { executeCloseAction } from '@/lib/closeTarget';
 
 const getActiveElementSelectedText = (): string => {
   if (typeof document === 'undefined') {
@@ -76,7 +77,8 @@ type MenuAction =
   | 'toggle-sidebar'
   | 'toggle-memory-debug'
   | 'help-dialog'
-  | 'download-logs';
+  | 'download-logs'
+  | 'close';
 
 const normalizeMenuDirectory = (value?: string | null): string => {
   if (typeof value !== 'string') {
@@ -137,6 +139,10 @@ export const useMenuActions = (
   const setActiveMainTab = useUIStore((s) => s.setActiveMainTab);
   const setSettingsDialogOpen = useUIStore((s) => s.setSettingsDialogOpen);
   const setAboutDialogOpen = useUIStore((s) => s.setAboutDialogOpen);
+  const setHelpDialogOpen = useUIStore((s) => s.setHelpDialogOpen);
+  const setImagePreviewOpen = useUIStore((s) => s.setImagePreviewOpen);
+  const setModelSelectorOpen = useUIStore((s) => s.setModelSelectorOpen);
+  const setMultiRunLauncherOpen = useUIStore((s) => s.setMultiRunLauncherOpen);
   const toggleRightSidebar = useUIStore((s) => s.toggleRightSidebar);
   const setRightSidebarOpen = useUIStore((s) => s.setRightSidebarOpen);
   const setRightSidebarTab = useUIStore((s) => s.setRightSidebarTab);
@@ -272,6 +278,38 @@ export const useMenuActions = (
           });
           break;
         }
+
+        case 'close': {
+          const uiState = useUIStore.getState();
+          executeCloseAction(
+            {
+              isImagePreviewOpen: uiState.isImagePreviewOpen,
+              isCommandPaletteOpen: uiState.isCommandPaletteOpen,
+              isModelSelectorOpen: uiState.isModelSelectorOpen,
+              isHelpDialogOpen: uiState.isHelpDialogOpen,
+              isAboutDialogOpen: uiState.isAboutDialogOpen,
+              isMultiRunLauncherOpen: uiState.isMultiRunLauncherOpen,
+              isSessionSwitcherOpen: uiState.isSessionSwitcherOpen,
+              isSettingsDialogOpen: uiState.isSettingsDialogOpen,
+            },
+            {
+              setSettingsDialogOpen,
+              setCommandPaletteOpen,
+              setHelpDialogOpen,
+              setAboutDialogOpen,
+              setModelSelectorOpen,
+              setImagePreviewOpen,
+              setMultiRunLauncherOpen,
+              setSessionSwitcherOpen,
+              closeDesktopWindow: () => {
+                if (canUseElectronDesktopIPC()) {
+                  void invokeDesktop('desktop_close_current_window');
+                }
+              },
+            },
+          );
+          break;
+        }
       }
     },
     [
@@ -281,10 +319,14 @@ export const useMenuActions = (
       openNewSessionDraft,
       setAboutDialogOpen,
       setActiveMainTab,
-      setSessionSwitcherOpen,
       setCommandPaletteOpen,
+      setHelpDialogOpen,
+      setImagePreviewOpen,
+      setModelSelectorOpen,
+      setMultiRunLauncherOpen,
       setRightSidebarOpen,
       setRightSidebarTab,
+      setSessionSwitcherOpen,
       setSettingsDialogOpen,
       setThemeMode,
       toggleCommandPalette,

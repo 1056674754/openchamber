@@ -17,6 +17,8 @@ export const OpenCodeCliSettings: React.FC = () => {
   const [isSaving, setIsSaving] = React.useState(false);
   const showOpenCodeUpdateNotifications = useUIStore((state) => state.showOpenCodeUpdateNotifications);
   const setShowOpenCodeUpdateNotifications = useUIStore((state) => state.setShowOpenCodeUpdateNotifications);
+  const agentControlToolEnabled = useUIStore((state) => state.agentControlToolEnabled);
+  const setAgentControlToolEnabled = useUIStore((state) => state.setAgentControlToolEnabled);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -82,6 +84,11 @@ export const OpenCodeCliSettings: React.FC = () => {
       setIsSaving(false);
     }
   }, [t, value]);
+
+  const handleAgentControlToolChange = React.useCallback((enabled: boolean) => {
+    setAgentControlToolEnabled(enabled);
+    void updateDesktopSettings({ agentControlToolEnabled: enabled });
+  }, [setAgentControlToolEnabled]);
 
   return (
     <div className="mb-8">
@@ -153,6 +160,22 @@ export const OpenCodeCliSettings: React.FC = () => {
           />
           <span className="typography-ui-label text-foreground">
             {t('settings.openchamber.opencodeCli.field.showUpdateNotifications')}
+          </span>
+        </label>
+
+        <label className="flex cursor-pointer items-start gap-2 py-1.5">
+          <Checkbox
+            checked={agentControlToolEnabled}
+            onChange={handleAgentControlToolChange}
+            ariaLabel={t('settings.openchamber.opencodeCli.field.agentControlToolAria')}
+          />
+          <span className="min-w-0">
+            <span className="typography-ui-label block text-foreground">
+              {t('settings.openchamber.opencodeCli.field.agentControlTool')}
+            </span>
+            <span className="typography-micro block text-muted-foreground/70">
+              {t('settings.openchamber.opencodeCli.field.agentControlToolInfo')}
+            </span>
           </span>
         </label>
 
