@@ -70,6 +70,7 @@ type Props = {
   setSessionSwitcherOpen: (open: boolean) => void;
   openNewSessionDraft: (options?: { directoryOverride?: string | null; selectedProjectId?: string | null }) => void;
   openNewWorktreeDialog: () => void;
+  openWorktreesPage: (projectId: string) => void;
   openProjectEditDialog: (id: string) => void;
   removeProject: (id: string) => void;
   projectHeaderSentinelRefs: React.MutableRefObject<Map<string, HTMLDivElement | null>>;
@@ -377,6 +378,7 @@ export function SidebarProjectsList(props: Props): React.ReactNode {
                   if (props.mobileVariant) props.setSessionSwitcherOpen(false);
                   props.openNewWorktreeDialog();
                 }}
+                onManageWorktrees={() => props.openWorktreesPage(projectKey)}
                 onRenameStart={() => props.openProjectEditDialog(projectKey)}
                 onClose={() => props.removeProject(projectKey)}
                 sentinelRef={(el) => { props.projectHeaderSentinelRefs.current.set(projectKey, el); }}

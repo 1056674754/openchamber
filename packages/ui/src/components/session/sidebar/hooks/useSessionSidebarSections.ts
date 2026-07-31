@@ -176,6 +176,66 @@ export const useSessionSidebarSections = (args: Args) => {
 
   const sectionsForRender = hasSessionSearchQuery ? searchableProjectSections : visibleProjectSections;
 
+  const flatSectionCacheRef = React.useRef<WeakMap<ProjectSection, { query: string; section: ProjectSection }>>(new WeakMap());
+  const flatSectionsForRender = React.useMemo<ProjectSection[]>(() => {
+    const cache = flatSectionCacheRef.current;
+    return sectionsForRender.map((section) => {
+      const cached = cache.get(section);
+      if (cached && cached.query === normalizedSessionSearchQuery) {
+        return cached.section;
+      }
+
+      const activeGroups = section.groups.filter((group) => !group.isArchivedBucket);
+      const archivedGroups = section.groups.filter((group) => group.isArchivedBucket);
+      const rootGroup = activeGroups.find((group) => group.isMain) ?? activeGroups[0] ?? null;
+      const sessions = activeGroups.flatMap((group) => (
+        hasSessionSearchQuery
+          ? (groupSearchDataByGroup.get(group)?.filteredNodes ?? [])
+          : group.sessions
+      ));
+      const folderScopes = activeGroups
+        .map((group) => ({
+          scopeKey: group.folderScopeKey ?? normalizePath(group.directory ?? null),
+          directory: group.directory ?? null,
+        }))
+        .filter((scope): scope is { scopeKey: string; directory: string | null } => Boolean(scope.scopeKey));
+
+      const flatGroup: SessionGroup = {
+        id: 'flat',
+        label: rootGroup?.label ?? '',
+        branch: rootGroup?.branch ?? null,
+        description: rootGroup?.description ?? null,
+        isMain: true,
+        isArchivedBucket: false,
+        worktree: null,
+        directory: rootGroup?.directory ?? section.project.normalizedPath,
+        folderScopeKey: rootGroup?.folderScopeKey ?? section.project.normalizedPath,
+        folderScopes,
+        sessions,
+      };
+
+      if (hasSessionSearchQuery) {
+        const mergedSearchData = activeGroups
+          .map((group) => groupSearchDataByGroup.get(group))
+          .filter((data): data is GroupSearchData => Boolean(data));
+        groupSearchDataByGroup.set(flatGroup, {
+          filteredNodes: sessions,
+          matchedSessionCount: mergedSearchData.reduce((total, data) => total + data.matchedSessionCount, 0),
+          folderNameMatchCount: mergedSearchData.reduce((total, data) => total + data.folderNameMatchCount, 0),
+          groupMatches: mergedSearchData.some((data) => data.groupMatches),
+          hasMatch: mergedSearchData.some((data) => data.hasMatch),
+        });
+      }
+
+      const flatSection = {
+        project: section.project,
+        groups: [flatGroup, ...archivedGroups],
+      };
+      cache.set(section, { query: normalizedSessionSearchQuery, section: flatSection });
+      return flatSection;
+    });
+  }, [groupSearchDataByGroup, hasSessionSearchQuery, normalizedSessionSearchQuery, sectionsForRender]);
+
   const searchMatchCount = React.useMemo(() => {
     if (!hasSessionSearchQuery) {
       return 0;
@@ -199,6 +259,7 @@ export const useSessionSidebarSections = (args: Args) => {
     groupSearchDataByGroup,
     searchableProjectSections,
     sectionsForRender,
+    flatSectionsForRender,
     searchMatchCount,
   };
 };

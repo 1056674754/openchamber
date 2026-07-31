@@ -1,15 +1,7 @@
 import * as React from 'react';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
-import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { toast } from '@/components/ui';
 import { Icon } from "@/components/icon/Icon";
 import type { IconName } from "@/components/icon/icons";
@@ -417,16 +409,16 @@ export function ScheduledTasksDialog() {
 
   const tasksContent = (
     <div className="space-y-4">
-      {!isMobile ? (
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          {projectSelector}
-          <Button onClick={openNewTaskEditor} disabled={!selectedProjectID}>
-            <Icon name="add" className="mr-1 h-4 w-4" /> {t('sessions.scheduledTasks.dialog.actions.newTask')}
-          </Button>
-        </div>
-      ) : (
-        projectSelector
-      )}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        {projectSelector}
+        <Button
+          className={isMobile ? 'w-full' : undefined}
+          onClick={openNewTaskEditor}
+          disabled={!selectedProjectID}
+        >
+          <Icon name="add" className="mr-1 h-4 w-4" /> {t('sessions.scheduledTasks.dialog.actions.newTask')}
+        </Button>
+      </div>
 
       <div className="min-h-[280px]">
       {loading ? (
@@ -585,50 +577,38 @@ export function ScheduledTasksDialog() {
     </div>
   );
 
+  if (!open) {
+    return null;
+  }
+
   return (
-    <>
-      {isMobile ? (
-        <MobileOverlayPanel
-          open={open}
-          title={t('sessions.scheduledTasks.dialog.title')}
-          onClose={() => setOpen(false)}
-          contentMaxHeightClassName="max-h-[min(80vh,640px)]"
-          renderHeader={(closeButton) => (
-            <div className="flex flex-col gap-1 border-b border-border/40 px-3 py-2">
-              <div className="flex items-center justify-between gap-2">
-                <h2 className="typography-ui-label font-semibold text-foreground">{t('sessions.scheduledTasks.dialog.title')}</h2>
-                {closeButton}
-              </div>
-              <p className="typography-micro text-muted-foreground">
-                {t('sessions.scheduledTasks.dialog.description')}
-              </p>
-            </div>
-          )}
-          footer={(
-            <Button
-              className="w-full"
-              onClick={openNewTaskEditor}
-              disabled={!selectedProjectID}
-            >
-              <Icon name="add" className="mr-1 h-4 w-4" /> {t('sessions.scheduledTasks.dialog.actions.newTask')}
-            </Button>
-          )}
+    <div className="absolute inset-0 z-10 flex min-h-0 flex-col bg-background">
+      <header className="flex items-start gap-3 border-b border-border/50 px-4 py-3 sm:px-6">
+        <button
+          type="button"
+          onClick={() => {
+            setEditorOpen(false);
+            setOpen(false);
+          }}
+          className="mt-0.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-interactive-hover/50 hover:text-foreground"
+          aria-label={t('header.actions.backAria')}
         >
+          <Icon name="arrow-left" className="h-4 w-4" />
+        </button>
+        <div className="min-w-0">
+          <h2 className="typography-ui-header font-semibold text-foreground">
+            {t('sessions.scheduledTasks.dialog.title')}
+          </h2>
+          <p className="typography-micro text-muted-foreground">
+            {t('sessions.scheduledTasks.dialog.description')}
+          </p>
+        </div>
+      </header>
+      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6">
+        <div className="mx-auto w-full max-w-4xl">
           {tasksContent}
-        </MobileOverlayPanel>
-      ) : (
-        <Dialog open={open} onOpenChange={setOpen}>
-          <DialogContent className="max-h-[85vh] max-w-2xl overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle>{t('sessions.scheduledTasks.dialog.title')}</DialogTitle>
-              <DialogDescription>{t('sessions.scheduledTasks.dialog.description')}</DialogDescription>
-            </DialogHeader>
-
-            {tasksContent}
-          </DialogContent>
-        </Dialog>
-      )}
-
+        </div>
+      </div>
       <ScheduledTaskEditorDialog
         open={editorOpen}
         task={editorTask}
@@ -636,6 +616,6 @@ export function ScheduledTasksDialog() {
         onSave={handleSaveTask}
         allowRunAsGoal={scheduledGoalSupport.supported}
       />
-    </>
+    </div>
   );
 }

@@ -39,7 +39,6 @@ import {
 } from '@/lib/sessionPinSettings';
 import { resolveGlobalPinnedSessions } from './sidebar/globalPinnedSessions';
 import { NewWorktreeDialog } from './NewWorktreeDialog';
-import { ScheduledTasksDialog } from './ScheduledTasksDialog';
 import { RegenerateTitleDialog } from './RegenerateTitleDialog';
 import { RenameSessionDialog } from './RenameSessionDialog';
 import { useSessionFoldersStore } from '@/stores/useSessionFoldersStore';
@@ -324,7 +323,8 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
 
   const [projectRepoStatus, setProjectRepoStatus] = React.useState<Map<string, boolean | null>>(new Map());
   const [visibleSessionCountByGroup, setVisibleSessionCountByGroup] = React.useState<Map<string, number>>(new Map());
-  const [newWorktreeDialogOpen, setNewWorktreeDialogOpen] = React.useState(false);
+  const newWorktreeDialogOpen = useUIStore((state) => state.isNewWorktreeDialogOpen);
+  const setNewWorktreeDialogOpen = useUIStore((state) => state.setNewWorktreeDialogOpen);
   const [updateDialogOpen, setUpdateDialogOpen] = React.useState(false);
   const [openSidebarMenuKey, setOpenSidebarMenuKey] = React.useState<string | null>(null);
   const [renamingFolderId, setRenamingFolderId] = React.useState<string | null>(null);
@@ -1250,7 +1250,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
 
   const openNewWorktreeDialog = React.useCallback(() => {
     setNewWorktreeDialogOpen(true);
-  }, []);
+  }, [setNewWorktreeDialogOpen]);
 
   const handleOpenUpdateDialog = React.useCallback(() => {
     const current = useUpdateStore.getState();
@@ -1565,6 +1565,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
     projectSections,
     groupSearchDataByGroup,
     sectionsForRender,
+    flatSectionsForRender,
     searchMatchCount,
   } = useSessionSidebarSections({
     normalizedProjects: sortedProjects,
@@ -1872,10 +1873,12 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
   const recentSessionIdsList = React.useMemo(() => [...recentSessionIds], [recentSessionIds]);
 
   const showArchivedSessions = useSessionDisplayStore((state) => state.showArchivedSessions);
+  const sessionGroupingMode = useSessionDisplayStore((state) => state.sessionGroupingMode);
   const stickyZoneHeaders = useSessionDisplayStore((state) => state.stickyZoneHeaders);
+  const showInlineArchivedSessions = isVSCode && showArchivedSessions;
 
   React.useEffect(() => {
-    if (!showArchivedSessions) return;
+    if (!showInlineArchivedSessions) return;
 
     // Avoid archived fanout across every remote listed in projects; load the
     // active/default server plus remotes that already have a live registry entry.
@@ -1894,17 +1897,20 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
     loadArchivedSessions,
     normalizedProjects,
     remoteHealthRevision,
-    showArchivedSessions,
+    showInlineArchivedSessions,
   ]);
 
   const sectionsForSidebarRender = React.useMemo(() => {
-    return showArchivedSessions
+    const sourceSections = sessionGroupingMode === 'by-worktree' && !isVSCode
       ? sectionsForRender
-      : sectionsForRender.map((section) => ({
+      : flatSectionsForRender;
+    return showInlineArchivedSessions
+      ? sourceSections
+      : sourceSections.map((section) => ({
         ...section,
         groups: section.groups.filter((group) => !group.isArchivedBucket),
       }));
-  }, [sectionsForRender, showArchivedSessions]);
+  }, [flatSectionsForRender, isVSCode, sectionsForRender, sessionGroupingMode, showInlineArchivedSessions]);
 
   const sidebarActivitySections = React.useMemo(() => {
     if (hasSessionSearchQuery) {
@@ -2682,6 +2688,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
         collapseAllProjects={collapseAllProjects}
         expandAllProjects={expandAllProjects}
         openScheduledTasksDialog={() => setScheduledTasksDialogOpen(true)}
+        openArchivePage={() => useUIStore.getState().setArchivePageOpen(true)}
         selectionModeEnabled={selectionModeEnabled}
         onToggleSelectionMode={handleToggleSelectionMode}
         onRefresh={handleRefreshSessions}
@@ -2712,6 +2719,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
         setSessionSwitcherOpen={setSessionSwitcherOpen}
         openNewSessionDraft={openNewSessionDraft}
         openNewWorktreeDialog={openNewWorktreeDialog}
+        openWorktreesPage={(projectId) => useUIStore.getState().setWorktreesPageProjectId(projectId)}
         openProjectEditDialog={setEditingProjectDialogId}
         removeProject={removeProject}
         projectHeaderSentinelRefs={projectHeaderSentinelRefs}
@@ -2807,8 +2815,6 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
           openNewSessionDraft({ directoryOverride: worktreePath, selectedProjectId: projectId });
         }}
       />
-
-      <ScheduledTasksDialog />
 
       <SessionDeleteConfirmDialog
         value={deleteSessionConfirm}

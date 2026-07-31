@@ -13,7 +13,6 @@ import { DroppableFolderWrapper, SessionFolderDndScope } from './sessionFolderDn
 import type { SortableDragHandleProps } from './sortableItems';
 import type { GroupSearchData, SessionGroup, SessionNode } from './types';
 import { compareSessionsByPinnedAndTime, isBranchDifferentFromLabel, normalizePath, partitionSessionsByRunningStatus, renderHighlightedText } from './utils';
-import type { SessionFolder } from '@/stores/useSessionFoldersStore';
 import { useSessionFoldersStore } from '@/stores/useSessionFoldersStore';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
@@ -204,9 +203,23 @@ export function SessionGroupSection(props: Props): React.ReactNode {
     [compareSessionNodes, group.sessions, searchData?.filteredNodes, shouldFilterGroupContents],
   );
   const folderScopeKey = group.folderScopeKey ?? normalizePath(group.directory ?? null);
+  const folderScopes = React.useMemo(() => {
+    if (group.folderScopes && group.folderScopes.length > 0) {
+      return group.folderScopes;
+    }
+    return folderScopeKey
+      ? [{ scopeKey: folderScopeKey, directory: group.directory ?? null }]
+      : [];
+  }, [folderScopeKey, group.directory, group.folderScopes]);
   const scopeFolders = React.useMemo(
-    () => folderScopeKey ? (foldersMap[folderScopeKey] ?? []) : [],
-    [folderScopeKey, foldersMap]
+    () => folderScopes.flatMap(({ scopeKey, directory }) => (
+      (foldersMap[scopeKey] ?? []).map((folder) => ({
+        folder,
+        scopeKey,
+        scopeDirectory: directory,
+      }))
+    )),
+    [folderScopes, foldersMap]
   );
 
   const nodeBySessionId = React.useMemo(() => {
@@ -223,12 +236,12 @@ export function SessionGroupSection(props: Props): React.ReactNode {
     return map;
   }, [sourceGroupNodes]);
 
-  const allFoldersForGroupBase = React.useMemo(() => scopeFolders.map((folder) => {
+  const allFoldersForGroupBase = React.useMemo(() => scopeFolders.map(({ folder, scopeKey, scopeDirectory }) => {
     const nodes = folder.sessionIds
       .map((sid) => nodeBySessionId.get(sid))
       .filter((n): n is SessionNode => Boolean(n))
       .sort(compareSessionNodes);
-    return { folder, nodes };
+    return { folder, scopeKey, scopeDirectory, nodes };
   }), [scopeFolders, nodeBySessionId, compareSessionNodes]);
 
   const allFoldersForGroup = React.useMemo(() => {
@@ -602,10 +615,13 @@ export function SessionGroupSection(props: Props): React.ReactNode {
     void openExternalUrl(url);
   };
 
-  const renderOneFolderItem = (folder: SessionFolder, nodes: SessionNode[], depth: number): React.ReactNode => {
+  type FolderEntry = (typeof allFoldersForGroup)[number];
+
+  const renderOneFolderItem = (entry: FolderEntry, depth: number): React.ReactNode => {
+    const { folder, nodes, scopeKey, scopeDirectory } = entry;
     const directSubFolders = allFoldersForGroup.filter(({ folder: f }) => f.parentId === folder.id);
     const subFolderItems = directSubFolders.length > 0
-      ? <>{directSubFolders.map(({ folder: sf, nodes: sn }) => renderOneFolderItem(sf, sn, depth + 1))}</>
+      ? <>{directSubFolders.map((childEntry) => renderOneFolderItem(childEntry, depth + 1))}</>
       : undefined;
     const collectFolderSessions = (targetFolderId: string): Session[] => {
       const directNodes = allFoldersForGroup.find(({ folder: candidate }) => candidate.id === targetFolderId)?.nodes ?? [];
@@ -627,7 +643,7 @@ export function SessionGroupSection(props: Props): React.ReactNode {
             isCollapsed={hasSessionSearchQuery ? false : collapsedFolderIds.has(folder.id)}
             onToggle={() => toggleFolderCollapse(folder.id)}
             onRename={(name) => {
-              if (folderScopeKey) renameFolder(folderScopeKey, folder.id, name);
+              renameFolder(scopeKey, folder.id, name);
             }}
             onDelete={() => {
               if (group.isArchivedBucket) {
@@ -641,15 +657,14 @@ export function SessionGroupSection(props: Props): React.ReactNode {
                 });
                 return;
               }
-              if (!folderScopeKey) return;
               if (!showDeletionDialog) {
-                deleteFolder(folderScopeKey, folder.id);
+                deleteFolder(scopeKey, folder.id);
                 return;
               }
               const subFolderCount = allFoldersForGroup.filter(({ folder: f }) => f.parentId === folder.id).length;
               const sessionCount = nodes.length;
               setDeleteFolderConfirm({
-                scopeKey: folderScopeKey,
+                scopeKey,
                 folderId: folder.id,
                 folderName: folder.name,
                 subFolderCount,
@@ -657,7 +672,7 @@ export function SessionGroupSection(props: Props): React.ReactNode {
               });
             }}
             renderSessionNode={(node) => renderNode(node, group.isArchivedBucket === true)}
-            groupDirectory={group.directory}
+            groupDirectory={scopeDirectory ?? group.directory}
             projectId={projectId}
             mobileVariant={mobileVariant}
             alwaysShowActions={alwaysShowActions}
@@ -666,8 +681,8 @@ export function SessionGroupSection(props: Props): React.ReactNode {
             onRenameDraftChange={(value) => setRenameFolderDraft(value)}
             onRenameSave={() => {
               const trimmed = renameFolderDraft.trim();
-              if (trimmed && folderScopeKey) {
-                renameFolder(folderScopeKey, folder.id, trimmed);
+              if (trimmed) {
+                renameFolder(scopeKey, folder.id, trimmed);
               }
               setRenamingFolderId(null);
               setRenameFolderDraft('');
@@ -683,11 +698,10 @@ export function SessionGroupSection(props: Props): React.ReactNode {
               if (projectId && projectId !== activeProjectId) setActiveProjectIdOnly(projectId);
               setActiveMainTab('chat');
               if (mobileVariant) setSessionSwitcherOpen(false);
-              openNewSessionDraft({ directoryOverride: group.directory, targetFolderId: folder.id, selectedProjectId: projectId });
+              openNewSessionDraft({ directoryOverride: scopeDirectory ?? group.directory, targetFolderId: folder.id, selectedProjectId: projectId });
             }}
             onNewSubFolder={depth === 0 ? () => {
-              if (!folderScopeKey) return;
-              createFolderAndStartRename(folderScopeKey, folder.id);
+              createFolderAndStartRename(scopeKey, folder.id);
             } : undefined}
             hideActions={false}
             archivedBucket={group.isArchivedBucket === true}
@@ -697,7 +711,7 @@ export function SessionGroupSection(props: Props): React.ReactNode {
     );
   };
 
-  const renderFolderItems = () => rootFolders.map(({ folder, nodes }) => renderOneFolderItem(folder, nodes, 0));
+  const renderFolderItems = () => rootFolders.map((entry) => renderOneFolderItem(entry, 0));
   const hasWorktreeDeleteAction = Boolean(!group.isMain && group.worktree);
   const groupHeaderRightPadding = alwaysShowActions
     ? (hasWorktreeDeleteAction ? 'pr-14' : 'pr-7')
@@ -711,10 +725,19 @@ export function SessionGroupSection(props: Props): React.ReactNode {
 
   const body = (
     <SessionFolderDndScope
-      scopeKey={folderScopeKey}
+      scopeKey={folderScopes[0]?.scopeKey ?? folderScopeKey}
       hasFolders={!mobileVariant && allFoldersForGroup.length > 0}
       onSessionDroppedOnFolder={(sessionId, folderId) => {
-        if (folderScopeKey) addSessionToFolder(folderScopeKey, folderId, sessionId);
+        const targetEntry = allFoldersForGroup.find(({ folder }) => folder.id === folderId);
+        if (!targetEntry) return;
+        const foldersStore = useSessionFoldersStore.getState();
+        for (const { scopeKey } of folderScopes) {
+          if (scopeKey === targetEntry.scopeKey) continue;
+          if (foldersStore.getSessionFolderId(scopeKey, sessionId)) {
+            foldersStore.removeSessionFromFolder(scopeKey, sessionId);
+          }
+        }
+        addSessionToFolder(targetEntry.scopeKey, folderId, sessionId);
       }}
     >
       {renderFolderItems()}

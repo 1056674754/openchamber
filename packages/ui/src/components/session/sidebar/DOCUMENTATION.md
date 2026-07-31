@@ -3,11 +3,13 @@
 ## Refactor result
 
 - `SessionSidebar.tsx` now acts mainly as orchestration; core logic moved to focused hooks/components.
-- Sidebar is now a single multi-project tree: `recent` top section, then projects, then worktrees/archived groups, then sessions.
+- Sidebar is now a single multi-project tree with persisted `by-worktree` and `flat` project grouping modes.
+- `recent`, Global Pinned, and project/worktree zones support sticky headers without changing session ownership or ordering.
 - `NavRail` is no longer part of sidebar/navigation flow.
 - Project headers now own root sessions directly; there is no separate rendered `project root` subgroup.
 - Active/hover row styling is text-first; selected sessions use primary text instead of background fills.
 - Archived groups are collapsed by default and support bulk deletion at group/folder level.
+- Web/desktop archive, worktrees, scheduled tasks, and multi-run open as full-page main surfaces. VS Code keeps its inline archived grouping.
 - Session rows support compact inline dates in minimal mode and simplified metadata in default mode.
 - New extractions in latest pass reduced local effect/callback bulk further:
   - project session list builders
@@ -18,7 +20,7 @@
 
 ### Components
 
-- `SidebarHeader.tsx`: Top header UI for add-project, session search, and display mode.
+- `SidebarHeader.tsx`: Top header UI for add-project, session search, grouping/display preferences, archive, scheduled tasks, and multi-run entry points.
 - `SidebarActivitySections.tsx`: Global Pinned and `recent` section renderer. Each rendered section instance owns its own sticky sentinel so their stuck state cannot leak across zones.
 - `SidebarFooter.tsx`: Static footer with icon-only settings, shortcuts, and about actions.
 - `SidebarProjectsList.tsx`: Main scrollable tree renderer for projects, root sessions, worktrees/groups, and empty/search states.

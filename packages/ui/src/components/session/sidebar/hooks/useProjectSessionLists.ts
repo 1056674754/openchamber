@@ -1,7 +1,7 @@
 import React from 'react';
 import type { Session } from '@opencode-ai/sdk/v2';
 import { dedupeSessionsById, normalizePath } from '../utils';
-import { getProjectIdForSession, type ProjectForOwnership } from '@/lib/sessionOwnership';
+import { getProjectIdForSession, sessionDirectoryOf, type ProjectForOwnership } from '@/lib/sessionOwnership';
 import type { WorktreeMetadata } from '@/types/worktree';
 
 type Args = {
@@ -24,6 +24,15 @@ const getParentID = (session: Session): string | null => {
 
 const hasOwnDirectory = (session: Session): boolean => {
   return Boolean(normalizePath((session as Session & { directory?: string | null }).directory ?? null));
+};
+
+/**
+ * Canonical directory resolution (directory + project.worktree).
+ * Do not merge with hasOwnDirectory — the archived memo relies on
+ * hasOwnDirectory's narrower check in an inverted condition.
+ */
+const hasResolvedDirectory = (session: Session): boolean => {
+  return Boolean(sessionDirectoryOf(session));
 };
 
 const addSessionToProjectMap = (map: Map<string, Session[]>, projectId: string | null, session: Session): void => {
@@ -88,7 +97,7 @@ export const useProjectSessionLists = (args: Args) => {
   const liveByProjectId = React.useMemo(() => {
     const result = new Map<string, Session[]>();
     sessions.forEach((session) => {
-      if (!hasOwnDirectory(session) && !isSubtaskSession(session)) return;
+      if (!hasResolvedDirectory(session) && !isSubtaskSession(session)) return;
       addSessionToProjectMap(result, projectIdBySessionId.get(session.id) ?? null, session);
     });
     return result;

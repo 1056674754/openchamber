@@ -14,6 +14,11 @@ export type SessionNode = {
   worktree: WorktreeMetadata | null;
 };
 
+export type SessionGroupFolderScope = {
+  scopeKey: string;
+  directory: string | null;
+};
+
 export type SessionGroup = {
   id: string;
   label: string;
@@ -24,6 +29,7 @@ export type SessionGroup = {
   worktree: WorktreeMetadata | null;
   directory: string | null;
   folderScopeKey?: string | null;
+  folderScopes?: SessionGroupFolderScope[];
   sessions: SessionNode[];
 };
 

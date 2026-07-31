@@ -19,7 +19,7 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { buildExportFilename, downloadAsMarkdown, formatSessionAsMarkdown, getExportRevealLabelKey, revealExportedMarkdown, saveAsMarkdownDesktop } from '@/lib/exportSession';
 import type { ChildSessionExport } from '@/lib/exportSession';
-import { buildSessionMessageRecordsSnapshot, useAllSessionStatuses, useChildStoreManager, useExistingSessionPermissions, useExistingSessionQuestions, useGlobalSessionStatus, useSession } from '@/sync/sync-context';
+import { buildSessionMessageRecordsSnapshot, useChildStoreManager, useExistingSessionPermissions, useExistingSessionQuestions, useGlobalSessionStatus } from '@/sync/sync-context';
 import { useSync } from '@/sync/use-sync';
 import { getSyncStoresForServer } from '@/sync/multi-server-registry';
 import { useViewportStore } from '@/sync/viewport-store';
@@ -435,8 +435,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
 
   const session = node.session;
   const childLoadStatus = useGlobalSessionsStore((state) => state.childLoadState.get(session.id));
-  const liveSession = useSession(session.id);
-  const resolvedSession = liveSession ?? session;
+  const resolvedSession = session;
   const sessionGoal = getSessionGoal(resolvedSession);
   const sessionGoalGlyph = sessionGoal ? (
     <span
@@ -456,7 +455,10 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
     ?? (isGlobalPinnedContext ? null : normalizePath(groupDirectory ?? null));
 
   const hasSecondaryProjectLabel = Boolean(secondaryMeta?.projectLabel);
-  const hasSecondaryBranchLabel = Boolean(secondaryMeta?.branchLabel);
+  const tooltipBranchLabel = secondaryMeta?.branchLabel ?? node.worktree?.branch ?? null;
+  const sessionGroupingMode = useSessionDisplayStore((state) => state.sessionGroupingMode);
+  const showInlineBranchMarker = Boolean(tooltipBranchLabel)
+    && (renderContext === 'recent' || sessionGroupingMode === 'flat');
 
   const projectsStore = useProjectsStore((state) => state.projects);
   const { currentTheme } = useThemeSystem();
@@ -656,23 +658,14 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
 
   const descendantIds = React.useMemo(() => collectNodeDescendantIds(node), [collectNodeDescendantIds, node]);
   const descendantCount = descendantIds.length;
-  const liveSessionStatuses = useAllSessionStatuses();
   const descendantStatusSignature = useGlobalSessionsStore(
     React.useCallback(
       (state) => descendantIds.map((id) => `${id}:${state.sessionStatuses.get(id)?.type ?? ''}`).join('|'),
       [descendantIds],
     ),
   );
-  const hasRunningChildSession = React.useMemo(() => {
-    if (descendantIds.length === 0) return false;
-    if (descendantStatusSignature.includes(':busy') || descendantStatusSignature.includes(':retry')) {
-      return true;
-    }
-    return descendantIds.some((id) => {
-      const status = liveSessionStatuses[id];
-      return status?.type === 'busy' || status?.type === 'retry';
-    });
-  }, [descendantIds, descendantStatusSignature, liveSessionStatuses]);
+  const hasRunningChildSession = descendantStatusSignature.includes(':busy')
+    || descendantStatusSignature.includes(':retry');
 
   const collectChildExports = React.useCallback(async (children: SessionNode[]): Promise<{ children: ChildSessionExport[]; skipped: number }> => {
     const results: ChildSessionExport[] = [];
@@ -1421,11 +1414,11 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
                       {secondaryMeta?.projectLabel ? <div className="min-w-0 truncate">{secondaryMeta.projectLabel}</div> : null}
                       <div className="flex-shrink-0">{sessionUpdatedLabel}</div>
                     </div>
-                    {secondaryMeta?.branchLabel || sessionDiffStats ? (
-                      <div className={cn('flex items-center gap-3 text-left text-muted-foreground', secondaryMeta?.branchLabel ? 'justify-between' : 'justify-start')}>
-                        {secondaryMeta?.branchLabel ? (
+                    {tooltipBranchLabel || sessionDiffStats ? (
+                      <div className={cn('flex items-center gap-3 text-left text-muted-foreground', tooltipBranchLabel ? 'justify-between' : 'justify-start')}>
+                        {tooltipBranchLabel ? (
                           <div className="flex min-w-0 items-center gap-1.5 overflow-hidden">
-                            <span className="inline-flex min-w-0 items-center gap-0.5"><Icon name="git-branch" className="h-3 w-3 flex-shrink-0"  /><span className="truncate">{secondaryMeta.branchLabel}</span></span>
+                            <span className="inline-flex min-w-0 items-center gap-0.5"><Icon name="git-branch" className="h-3 w-3 flex-shrink-0"  /><span className="truncate">{tooltipBranchLabel}</span></span>
                           </div>
                         ) : null}
                         {sessionDiffStats ? <span className="flex flex-shrink-0 items-center gap-0.5"><span className="text-status-success">+{sessionDiffStats.additions}</span><span className="text-status-error">-{sessionDiffStats.deletions}</span></span> : null}
@@ -1486,7 +1479,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
                       <span className="flex-shrink-0">{sessionUpdatedLabel}</span>
                       {sessionDiffStats ? <span className="flex flex-shrink-0 items-center gap-0 text-[0.92em]"><span className="text-status-success/80">+{sessionDiffStats.additions}</span><span className="text-muted-foreground/60">/</span><span className="text-status-error/65">-{sessionDiffStats.deletions}</span></span> : null}
                       {hasSecondaryProjectLabel ? <span className="truncate">{secondaryMeta?.projectLabel}</span> : null}
-                      {hasSecondaryBranchLabel ? <span className="inline-flex min-w-0 items-center gap-0.5"><Icon name="git-branch" className="h-3 w-3 flex-shrink-0 text-muted-foreground/70"  /><span className="truncate">{secondaryMeta?.branchLabel}</span></span> : null}
+                      {showInlineBranchMarker ? <span className="inline-flex min-w-0 items-center gap-0.5"><Icon name="git-branch" className="h-3 w-3 flex-shrink-0 text-muted-foreground/70"  /><span className="truncate">{tooltipBranchLabel}</span></span> : null}
                     </div>
                   </div>
                 ) : null}

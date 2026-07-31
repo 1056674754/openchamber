@@ -32,6 +32,7 @@ type Props = {
   collapseAllProjects: () => void;
   expandAllProjects: () => void;
   openScheduledTasksDialog: () => void;
+  openArchivePage: () => void;
   selectionModeEnabled: boolean;
   onToggleSelectionMode: () => void;
   onRefresh?: () => void;
@@ -58,15 +59,20 @@ export function SidebarHeader(props: Props): React.ReactNode {
     collapseAllProjects,
     expandAllProjects,
     openScheduledTasksDialog,
+    openArchivePage,
     selectionModeEnabled,
     onToggleSelectionMode,
     onRefresh,
   } = props;
 
   const displayMode = useSessionDisplayStore((state) => state.displayMode);
+  const sessionGroupingMode = useSessionDisplayStore((state) => state.sessionGroupingMode);
+  const stickyZoneHeaders = useSessionDisplayStore((state) => state.stickyZoneHeaders);
   const showRecentSection = useSessionDisplayStore((state) => state.showRecentSection);
   const showArchivedSessions = useSessionDisplayStore((state) => state.showArchivedSessions);
   const setDisplayMode = useSessionDisplayStore((state) => state.setDisplayMode);
+  const setSessionGroupingMode = useSessionDisplayStore((state) => state.setSessionGroupingMode);
+  const toggleStickyZoneHeaders = useSessionDisplayStore((state) => state.toggleStickyZoneHeaders);
   const toggleRecentSection = useSessionDisplayStore((state) => state.toggleRecentSection);
   const toggleArchivedSessions = useSessionDisplayStore((state) => state.toggleArchivedSessions);
   const projectSortOrder = useSessionDisplayStore((state) => state.projectSortOrder);
@@ -167,6 +173,20 @@ export function SidebarHeader(props: Props): React.ReactNode {
                 </button>
               </TooltipTrigger>
               <TooltipContent side="bottom" sideOffset={4}><p>{t('sessions.sidebar.header.actions.scheduledTasks')}</p></TooltipContent>
+            </Tooltip>
+
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  onClick={openArchivePage}
+                  className={headerActionButtonClass}
+                  aria-label={t('sessions.sidebar.nav.archive')}
+                >
+                  <Icon name="archive" className={headerActionIconClass} />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" sideOffset={4}><p>{t('sessions.sidebar.nav.archive')}</p></TooltipContent>
             </Tooltip>
           </div>
 
@@ -275,6 +295,28 @@ export function SidebarHeader(props: Props): React.ReactNode {
                 >
                   <span>{t('sessions.sidebar.header.displayMode.minimal')}</span>
                   {displayMode === 'minimal' ? <Icon name="check" className="h-4 w-4 text-primary" /> : null}
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  onClick={() => setSessionGroupingMode('by-worktree')}
+                  className="flex items-center justify-between"
+                >
+                  <span>{t('sessions.sidebar.header.grouping.byWorktree')}</span>
+                  {sessionGroupingMode === 'by-worktree' ? <Icon name="check" className="h-4 w-4 text-primary" /> : null}
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() => setSessionGroupingMode('flat')}
+                  className="flex items-center justify-between"
+                >
+                  <span>{t('sessions.sidebar.header.grouping.flat')}</span>
+                  {sessionGroupingMode === 'flat' ? <Icon name="check" className="h-4 w-4 text-primary" /> : null}
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={toggleStickyZoneHeaders}
+                  className="flex items-center justify-between"
+                >
+                  <span>{t('sessions.sidebar.header.displayMode.stickyHeaders')}</span>
+                  {stickyZoneHeaders ? <Icon name="check" className="h-4 w-4 text-primary" /> : null}
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
