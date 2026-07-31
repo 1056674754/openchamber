@@ -66,6 +66,26 @@ describe("useQuotaStore per-provider refresh", () => {
 		}
 	});
 
+	test("keeps a new quota provider on the selected remote instance", async () => {
+		const fetchInputs: Array<RequestInfo | URL> = [];
+		try {
+			globalThis.fetch = async (input) => {
+				fetchInputs.push(input);
+				return jsonResponse(createQuotaResult("crof"));
+			};
+
+			await useQuotaStore
+				.getState()
+				.fetchProviderQuota("crof", "/api/remote/test-server");
+
+			expect(fetchInputs).toEqual([
+				"/api/remote/test-server/quota/crof",
+			]);
+		} finally {
+			globalThis.fetch = originalFetch;
+		}
+	});
+
 	test("keeps concurrent provider loading independent from global loading", async () => {
 		// Given
 		const codexResponse = createDeferred<Response>();

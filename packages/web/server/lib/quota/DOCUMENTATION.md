@@ -19,6 +19,7 @@ These provider IDs are currently dispatchable via `fetchQuotaForProvider(provide
 | --- | --- | --- | --- |
 | `claude` | Claude | `providers/claude.js` | `anthropic`, `claude` |
 | `codex` | Codex | `providers/codex.js` | `openai`, `codex`, `chatgpt` |
+| `crof` | CrofAI | `providers/crof.js` | `crof` |
 | `cursor` | Cursor | `providers/cursor.js` | `CURSOR_TOKEN` / `CURSOR_ACCESS_TOKEN`, `CURSOR_REFRESH_TOKEN`, optional token files, or Cursor desktop SQLite DB |
 | `google` | Google | `providers/google/index.js` | `google`, `google.oauth`, Antigravity accounts file |
 | `github-copilot` | GitHub Copilot | `providers/copilot.js` | `github-copilot`, `copilot` |
@@ -30,6 +31,7 @@ These provider IDs are currently dispatchable via `fetchQuotaForProvider(provide
 | `zhipuai-coding-plan` | Zhipu AI Coding Plan | `providers/zhipuai-coding-plan.js` | `zhipuai-coding-plan`, `zhipuai`, `zhipu` |
 | `minimax-coding-plan` | MiniMax Coding Plan (minimax.io) | `providers/minimax-coding-plan.js` / `providers/minimax-shared.js` | `minimax-coding-plan` |
 | `minimax-cn-coding-plan` | MiniMax Coding Plan (minimaxi.com) | `providers/minimax-cn-coding-plan.js` / `providers/minimax-shared.js` | `minimax-cn-coding-plan` |
+| `neuralwatt` | NeuralWatt | `providers/neuralwatt.js` | `neuralwatt` |
 | `ollama-cloud` | Ollama Cloud | `providers/ollama-cloud.js` | Cookie file at `~/.config/ollama-quota/cookie` (raw session cookie string) |
 | `opencode-go` | OpenCode Go | `providers/opencode-go.js` | Managed workspace ID + dashboard auth cookie in the OpenChamber data directory |
 | `wafer` | Wafer.ai | `providers/wafer.js` | `wafer`, `wafer-ai`, `wafer_ai`, `wafer.ai` |
@@ -49,6 +51,14 @@ the Codex `credits` window with its API-provided percentage and a
 `used / limit used` value label. Zero is preserved as a real value; absent or
 empty spend-control fields do not create a quota window. The VS Code provider
 implements the same contract.
+
+NeuralWatt exposes subscription kWh, key allowance, and account credits as
+separate quota signals. Subscription windows use the plan name and the API's
+reset timestamp without fabricating a duration. Allowance usage uses the lower
+of its configured limit and the currently funded amount, and suppresses the
+standalone credits window to avoid double-counting. CrofAI exposes its dollar
+credits balance as a label-only window because the API does not provide a
+meaningful percentage or reset period.
 
 ## MiniMax M3 / Token Plan migration
 In 2025/2026 MiniMax rebranded "Coding Plan" to "Token Plan" alongside the M3 model release. The API underwent breaking changes:

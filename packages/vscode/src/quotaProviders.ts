@@ -463,6 +463,16 @@ export const listConfiguredQuotaProviders = () => {
     configured.add('wafer');
   }
 
+  const crofAuth = normalizeAuthEntry(getAuthEntry(auth, ['crof']));
+  if (asNonEmptyString(crofAuth?.key) || asNonEmptyString(crofAuth?.token)) {
+    configured.add('crof');
+  }
+
+  const neuralwattAuth = normalizeAuthEntry(getAuthEntry(auth, ['neuralwatt']));
+  if (asNonEmptyString(neuralwattAuth?.key) || asNonEmptyString(neuralwattAuth?.token)) {
+    configured.add('neuralwatt');
+  }
+
   return Array.from(configured);
 };
 
@@ -1892,6 +1902,228 @@ export const fetchWaferQuota = async (): Promise<ProviderResult> => {
   }
 };
 
+const NEURALWATT_QUOTA_URL = 'https://api.neuralwatt.com/v1/quota';
+
+const neuralwattWindowSeconds = (period: string | null): number | null => {
+  if (period === 'daily') return 86400;
+  if (period === 'weekly') return 604800;
+  if (period === 'monthly' || period === 'month') return 30 * 86400;
+  if (period === 'yearly' || period === 'year') return 365 * 86400;
+  return null;
+};
+
+const fetchNeuralwattQuota = async (): Promise<ProviderResult> => {
+  const auth = readAuthFile();
+  const entry = normalizeAuthEntry(getAuthEntry(auth, ['neuralwatt']));
+  const apiKey = asNonEmptyString(entry?.key) ?? asNonEmptyString(entry?.token);
+
+  if (!apiKey) {
+    return buildResult({
+      providerId: 'neuralwatt',
+      providerName: 'NeuralWatt',
+      ok: false,
+      configured: false,
+      error: 'Not configured',
+    });
+  }
+
+  const timeoutSignal = AbortSignal.timeout(15_000);
+
+  try {
+    const response = await fetch(NEURALWATT_QUOTA_URL, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Accept-Encoding': 'identity',
+      },
+      signal: timeoutSignal,
+    });
+
+    if (!response.ok) {
+      return buildResult({
+        providerId: 'neuralwatt',
+        providerName: 'NeuralWatt',
+        ok: false,
+        configured: true,
+        error: response.status === 401
+          ? 'Session expired — please re-authenticate with NeuralWatt'
+          : `API error: ${response.status}`,
+      });
+    }
+
+    const payload = asObject(await response.json());
+    const balance = asObject(payload?.balance);
+    const subscription = asObject(payload?.subscription);
+    const key = asObject(payload?.key);
+    const allowance = asObject(key?.allowance);
+    const creditsRemaining = toNumber(balance?.credits_remaining_usd);
+    const windows: Record<string, UsageWindow> = {};
+
+    if (subscription) {
+      const kwhIncluded = toNumber(subscription.kwh_included);
+      const kwhUsed = toNumber(subscription.kwh_used);
+      const plan = asNonEmptyString(subscription.plan);
+      const usedPercent = subscription.in_overage === true
+        ? 100
+        : (kwhIncluded !== null && kwhIncluded > 0 && kwhUsed !== null
+            ? Math.max(0, Math.min(100, (kwhUsed / kwhIncluded) * 100))
+            : null);
+      windows[plan ?? 'plan_limit'] = toUsageWindow({
+        usedPercent,
+        windowSeconds: null,
+        resetAt: toTimestamp(subscription.kwh_reset_date)
+          ?? toTimestamp(subscription.current_period_end),
+      });
+    }
+
+    if (allowance) {
+      const spent = toNumber(allowance.spent_usd);
+      const limit = toNumber(allowance.limit_usd);
+      const effectiveLimit = limit !== null && creditsRemaining !== null
+        ? Math.min(limit, creditsRemaining + (spent ?? 0))
+        : (limit ?? creditsRemaining);
+      const period = asNonEmptyString(allowance.period);
+      const usedPercent = allowance.blocked === true
+        ? 100
+        : (spent !== null && effectiveLimit !== null && effectiveLimit > 0
+            ? Math.max(0, Math.min(100, (spent / effectiveLimit) * 100))
+            : null);
+      const periodKey = (
+        period === 'daily'
+        || period === 'weekly'
+        || period === 'monthly'
+        || period === 'month'
+      )
+        ? (period === 'month' ? 'monthly' : period)
+        : 'billing_cycle';
+      const keyName = asNonEmptyString(key?.name);
+      windows[periodKey] = toUsageWindow({
+        usedPercent,
+        windowSeconds: neuralwattWindowSeconds(period),
+        resetAt: toTimestamp(allowance.reset_at),
+        ...(keyName ? { valueLabel: keyName } : {}),
+      });
+    } else if (creditsRemaining !== null) {
+      windows.credits_balance = toUsageWindow({
+        usedPercent: null,
+        windowSeconds: null,
+        resetAt: null,
+        valueLabel: `$${formatMoney(creditsRemaining)}`,
+      });
+    }
+
+    if (Object.keys(windows).length === 0) {
+      return buildResult({
+        providerId: 'neuralwatt',
+        providerName: 'NeuralWatt',
+        ok: false,
+        configured: true,
+        error: 'No quota data in response',
+      });
+    }
+
+    return buildResult({
+      providerId: 'neuralwatt',
+      providerName: 'NeuralWatt',
+      ok: true,
+      configured: true,
+      usage: { windows },
+    });
+  } catch (error) {
+    const isTimeout = error instanceof DOMException && error.name === 'AbortError' && timeoutSignal.aborted;
+    const isParseError = error instanceof SyntaxError;
+    return buildResult({
+      providerId: 'neuralwatt',
+      providerName: 'NeuralWatt',
+      ok: false,
+      configured: true,
+      error: isTimeout
+        ? 'Request timed out'
+        : isParseError
+          ? 'Invalid response from provider'
+          : (error instanceof Error ? error.message : 'Request failed'),
+    });
+  }
+};
+
+const CROF_USAGE_URL = 'https://crof.ai/usage_api/';
+
+const fetchCrofQuota = async (): Promise<ProviderResult> => {
+  const auth = readAuthFile();
+  const entry = normalizeAuthEntry(getAuthEntry(auth, ['crof']));
+  const apiKey = asNonEmptyString(entry?.key) ?? asNonEmptyString(entry?.token);
+
+  if (!apiKey) {
+    return buildResult({
+      providerId: 'crof',
+      providerName: 'CrofAI',
+      ok: false,
+      configured: false,
+      error: 'Not configured',
+    });
+  }
+
+  const timeoutSignal = AbortSignal.timeout(15_000);
+
+  try {
+    const response = await fetch(CROF_USAGE_URL, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Accept-Encoding': 'identity',
+      },
+      signal: timeoutSignal,
+    });
+
+    if (!response.ok) {
+      return buildResult({
+        providerId: 'crof',
+        providerName: 'CrofAI',
+        ok: false,
+        configured: true,
+        error: response.status === 401
+          ? 'Session expired — please re-authenticate with CrofAI'
+          : `API error: ${response.status}`,
+      });
+    }
+
+    const payload = asObject(await response.json());
+    const credits = toNumber(payload?.credits);
+    const valueLabel = credits !== null ? `$${formatMoney(credits)}` : null;
+
+    return buildResult({
+      providerId: 'crof',
+      providerName: 'CrofAI',
+      ok: true,
+      configured: true,
+      usage: {
+        windows: {
+          credits: toUsageWindow({
+            usedPercent: null,
+            windowSeconds: null,
+            resetAt: null,
+            valueLabel,
+          }),
+        },
+      },
+    });
+  } catch (error) {
+    const isTimeout = error instanceof DOMException && error.name === 'AbortError' && timeoutSignal.aborted;
+    const isParseError = error instanceof SyntaxError;
+    return buildResult({
+      providerId: 'crof',
+      providerName: 'CrofAI',
+      ok: false,
+      configured: true,
+      error: isTimeout
+        ? 'Request timed out'
+        : isParseError
+          ? 'Invalid response from provider'
+          : (error instanceof Error ? error.message : 'Request failed'),
+    });
+  }
+};
+
 export const fetchQuotaForProvider = async (providerId: string): Promise<ProviderResult> => {
   switch (providerId) {
     case 'claude':
@@ -1922,6 +2154,10 @@ export const fetchQuotaForProvider = async (providerId: string): Promise<Provide
       return fetchZhipuaiCodingPlanQuota();
     case 'wafer':
       return fetchWaferQuota();
+    case 'crof':
+      return fetchCrofQuota();
+    case 'neuralwatt':
+      return fetchNeuralwattQuota();
     case 'opencode-go': {
       const credential = readOpenCodeGoCredential();
       if (!credential) {
