@@ -52,6 +52,7 @@ import { CommitSection } from './git/CommitSection';
 import { GitEmptyState } from './git/GitEmptyState';
 import { HistorySection } from './git/HistorySection';
 import { PullRequestSection } from './git/PullRequestSection';
+import { deriveBaseBranch } from './git/baseBranch';
 import { ConflictDialog } from './git/ConflictDialog';
 import { StashDialog } from './git/StashDialog';
 import { InProgressOperationBanner } from './git/InProgressOperationBanner';
@@ -1456,59 +1457,12 @@ export const GitView: React.FC = () => {
     }));
   }, [remotes, remoteBranches, remoteUrl, status?.tracking]);
 
-  const baseBranch = React.useMemo(() => {
-    const remoteNames = new Set(effectiveRemotes.map((remote) => remote.name));
-    const normalizeBaseCandidate = (value: string): string => {
-      if (!value) {
-        return '';
-      }
-
-      let normalized = value.trim();
-      if (!normalized || normalized === 'HEAD') {
-        return '';
-      }
-
-      if (localBranches.includes(normalized)) {
-        return normalized;
-      }
-
-      if (normalized.startsWith('refs/heads/')) {
-        normalized = normalized.slice('refs/heads/'.length);
-      }
-      if (normalized.startsWith('heads/')) {
-        normalized = normalized.slice('heads/'.length);
-      }
-      if (normalized.startsWith('remotes/')) {
-        normalized = normalized.slice('remotes/'.length);
-      }
-
-      const slashIndex = normalized.indexOf('/');
-      if (slashIndex > 0) {
-        const maybeRemote = normalized.slice(0, slashIndex);
-        if (remoteNames.has(maybeRemote)) {
-          const withoutRemote = normalized.slice(slashIndex + 1).trim();
-          if (withoutRemote) {
-            normalized = withoutRemote;
-          }
-        }
-      }
-
-      return normalized;
-    };
-
-    const fromMeta = normalizeBaseCandidate(
-      typeof worktreeMetadata?.createdFromBranch === 'string' ? worktreeMetadata.createdFromBranch : ''
-    );
-    if (fromMeta) return fromMeta;
-
-    const fromHint = normalizeBaseCandidate(typeof rootBranchHint === 'string' ? rootBranchHint : '');
-    if (fromHint) return fromHint;
-
-    if (localBranches.includes('main')) return 'main';
-    if (localBranches.includes('master')) return 'master';
-    if (localBranches.includes('develop')) return 'develop';
-    return 'main';
-  }, [effectiveRemotes, localBranches, rootBranchHint, worktreeMetadata?.createdFromBranch]);
+  const baseBranch = React.useMemo(() => deriveBaseBranch({
+    remoteNames: new Set(effectiveRemotes.map((remote) => remote.name)),
+    localBranches,
+    worktreeCreatedFromBranch: worktreeMetadata?.createdFromBranch,
+    rootBranchHint,
+  }), [effectiveRemotes, localBranches, rootBranchHint, worktreeMetadata?.createdFromBranch]);
 
   const updateTargetBranch = React.useMemo(() => {
     const remoteNames = effectiveRemotes.map((remote) => remote.name);
