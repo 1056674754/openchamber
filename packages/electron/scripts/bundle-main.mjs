@@ -17,12 +17,36 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, '..');
+const buildDefines = {
+  'process.env.OPENCHAMBER_UPDATER_E2E_BUILD': JSON.stringify(
+    process.env.OPENCHAMBER_UPDATER_E2E_BUILD === '1' ? '1' : '0',
+  ),
+  'process.env.OPENCHAMBER_UPDATER_FEED_URL': JSON.stringify(
+    process.env.OPENCHAMBER_UPDATER_FEED_URL || '',
+  ),
+};
 
-const result = await Bun.build({
-  entrypoints: [path.join(root, 'main.mjs')],
-  outdir: path.join(root, 'dist-bundle'),
-  target: 'node',
-  format: 'esm',
+const buildEntry = async ({ entrypoint, external }) => {
+  const result = await Bun.build({
+    entrypoints: [path.join(root, entrypoint)],
+    outdir: path.join(root, 'dist-bundle'),
+    target: 'node',
+    format: 'esm',
+    define: buildDefines,
+    external,
+    minify: false,
+    sourcemap: 'none',
+    naming: '[name].mjs',
+  });
+
+  if (!result.success) {
+    for (const msg of result.logs) console.error(msg);
+    process.exit(1);
+  }
+};
+
+await buildEntry({
+  entrypoint: 'main.mjs',
   external: [
     'electron',
     '@openchamber/web',
@@ -31,14 +55,10 @@ const result = await Bun.build({
     'node-pty',
     'better-sqlite3',
   ],
-  minify: false,
-  sourcemap: 'none',
-  naming: '[name].mjs',
+});
+await buildEntry({
+  entrypoint: 'shell.mjs',
+  external: ['electron'],
 });
 
-if (!result.success) {
-  for (const msg of result.logs) console.error(msg);
-  process.exit(1);
-}
-
-console.log('[electron] main.mjs bundled -> dist-bundle/main.mjs');
+console.log('[electron] stable shell + runtime main bundled -> dist-bundle/');

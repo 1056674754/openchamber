@@ -87,4 +87,28 @@ describe('embedded OpenCode packaging', () => {
       version: '1.17.20-my',
     });
   });
+
+  it('stages an unsigned custom OpenCode binary for Linux AppImage packaging', () => {
+    const root = createTempDir();
+    const source = path.join(root, 'source-opencode');
+    const resources = path.join(root, 'linux-unpacked', 'resources');
+    fs.writeFileSync(source, '#!/bin/sh\necho 1.18.9-sscity\n');
+    fs.chmodSync(source, 0o755);
+    const calls = [];
+
+    const result = stageEmbeddedOpenCode({
+      source,
+      resourcesPath: resources,
+      requireSigning: false,
+      execFileSync: (command, args) => {
+        calls.push({ command, args });
+        if (command.endsWith('/opencode') && args[0] === '--version') return '1.18.9-sscity\n';
+        return '';
+      },
+    });
+
+    expect(result.version).toBe('1.18.9-sscity');
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toEqual({ command: result.binaryPath, args: ['--version'] });
+  });
 });

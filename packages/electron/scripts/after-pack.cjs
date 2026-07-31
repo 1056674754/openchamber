@@ -4,8 +4,23 @@ const {
   resolveEmbeddedOpenCodeSource,
   stageEmbeddedOpenCode,
 } = require('./embedded-opencode.cjs');
+const {
+  resolveEmbeddedBunSource,
+  stageEmbeddedBun,
+} = require('./embedded-bun.cjs');
 
 module.exports = (context) => {
+  if (context.electronPlatformName === 'linux') {
+    const resourcesPath = path.join(context.appOutDir, 'resources');
+    const embedded = stageEmbeddedOpenCode({
+      source: resolveEmbeddedOpenCodeSource(),
+      resourcesPath,
+      requireSigning: false,
+    });
+    console.log(`[electron] embedded custom OpenCode ${embedded.version} at ${embedded.binaryPath}`);
+    return;
+  }
+
   if (context.electronPlatformName !== 'darwin') return;
 
   const appName = context.packager.appInfo.productFilename;
@@ -25,4 +40,11 @@ module.exports = (context) => {
     signingIdentity: process.env.CSC_NAME,
   });
   console.log(`[electron] embedded signed OpenCode ${embedded.version} at ${embedded.binaryPath}`);
+
+  const engine = stageEmbeddedBun({
+    source: resolveEmbeddedBunSource(),
+    resourcesPath,
+    signingIdentity: process.env.CSC_NAME,
+  });
+  console.log(`[electron] embedded signed Bun engine ${engine.version} at ${engine.binaryPath}`);
 };

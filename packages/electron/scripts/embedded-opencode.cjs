@@ -36,13 +36,14 @@ const stageEmbeddedOpenCode = ({
   source,
   resourcesPath,
   signingIdentity,
+  requireSigning = true,
   execFileSync = defaultExecFileSync,
 }) => {
   if (!source || !fs.existsSync(source)) {
     throw new Error(`Embedded OpenCode source not found: ${source || '(empty)'}`);
   }
   fs.accessSync(source, fs.constants.R_OK | fs.constants.X_OK);
-  if (!signingIdentity) {
+  if (requireSigning && !signingIdentity) {
     throw new Error('Embedding OpenCode requires CSC_NAME with an Apple Development or Developer ID Application identity.');
   }
 
@@ -52,12 +53,14 @@ const stageEmbeddedOpenCode = ({
   fs.copyFileSync(source, binaryPath);
   fs.chmodSync(binaryPath, 0o755);
 
-  execFileSync('codesign', [...buildEmbeddedOpenCodeSignArgs(signingIdentity), binaryPath], {
-    stdio: 'pipe',
-  });
-  execFileSync('codesign', ['--verify', '--strict', '--verbose=4', binaryPath], {
-    stdio: 'pipe',
-  });
+  if (signingIdentity) {
+    execFileSync('codesign', [...buildEmbeddedOpenCodeSignArgs(signingIdentity), binaryPath], {
+      stdio: 'pipe',
+    });
+    execFileSync('codesign', ['--verify', '--strict', '--verbose=4', binaryPath], {
+      stdio: 'pipe',
+    });
+  }
 
   const version = String(execFileSync(binaryPath, ['--version'], {
     encoding: 'utf8',

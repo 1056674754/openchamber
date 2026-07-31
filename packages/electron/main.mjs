@@ -16,14 +16,37 @@ import { createSingleFlight } from './startup-coordinator.mjs';
 import { createTrayController } from './tray.mjs';
 import {
   buildLinuxInstalledApps,
+  buildLinuxOpenSpecs,
   fetchLinuxAppIcons,
+  filterLinuxInstalledApps,
+  readLinuxDesktopEntries,
 } from './linux-app-discovery.mjs';
+import { readLinuxAutostartEnabled, setLinuxAutostartEnabled } from './linux-autostart.mjs';
+import { assertUpdaterCapability } from './updater-capability.mjs';
+import { checkForDesktopUpdate } from './updater-check.mjs';
+import { resolveUpdaterFeed } from './updater-feed.mjs';
 
 const execFileAsync = promisify(execFile);
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const isDev = process.env.OPENCHAMBER_ELECTRON_DEV === '1' || !app.isPackaged;
+const externalRuntimeRoot = !isDev && process.env.OPENCHAMBER_RUNTIME_SOURCE === 'external'
+  ? process.env.OPENCHAMBER_RUNTIME_ROOT?.trim() || null
+  : null;
+
+const readExternalRuntimeManifest = () => {
+  if (!externalRuntimeRoot) return null;
+  try {
+    return JSON.parse(fs.readFileSync(path.join(externalRuntimeRoot, 'runtime-manifest.json'), 'utf8'));
+  } catch (error) {
+    throw new Error(
+      `Failed to read external runtime manifest: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+};
+
+const externalRuntimeManifest = readExternalRuntimeManifest();
 
 const DEEP_LINK_PROTOCOL = 'openchamber';
 const APP_USER_MODEL_ID = 'dev.openchamber.desktop';
@@ -137,6 +160,8 @@ const readAppMetadata = () => {
 
 const APP_METADATA = readAppMetadata();
 const APP_VERSION = APP_METADATA.version;
+const EMBEDDED_UPDATER_FEED_URL = process.env.OPENCHAMBER_UPDATER_FEED_URL || '';
+const UPDATER_E2E_BUILD = process.env.OPENCHAMBER_UPDATER_E2E_BUILD === '1';
 
 const clearDesktopWebCacheStorage = async () => {
   try {
@@ -162,12 +187,12 @@ const MAX_CAPTURE_PAGE_RECT_AREA = 4_000_000;
 const LOCAL_HOST_ID = 'local';
 const ENV_OVERRIDE_HOST_ID = '__env';
 const CHANGELOG_URL = 'https://raw.githubusercontent.com/openchamber/openchamber/main/CHANGELOG.md';
-const UPDATE_METADATA_URL = 'https://github.com/openchamber/openchamber/releases/latest/download/latest.json';
 const GITHUB_BUG_REPORT_URL = 'https://github.com/openchamber/openchamber/issues/new?template=bug_report.yml';
 const GITHUB_FEATURE_REQUEST_URL = 'https://github.com/openchamber/openchamber/issues/new?template=feature_request.yml';
 const DISCORD_INVITE_URL = 'https://discord.gg/ZYRSdnwwKA';
 const INSTALLED_APPS_CACHE_TTL_SECS = 60 * 60 * 24;
 const INSTALLED_APPS_CACHE_FILE = 'discovered-apps.json';
+const LINUX_DESKTOP_ENTRIES_CACHE_TTL_MS = 30_000;
 
 const { autoUpdater } = updaterPkg;
 
@@ -184,6 +209,7 @@ const state = {
   stopManagedOpenCodeOnQuit: false,
   installingUpdate: false,
   pendingUpdate: null,
+  updaterConfigured: false,
   unreachableHosts: new Set(),
   windowCounter: 1,
   focusedWindowIds: new Set(),
@@ -865,8 +891,17 @@ const isLocalRuntimeUrl = (targetUrl) => {
 
 const buildLocalUrl = (port) => `http://127.0.0.1:${port}`;
 
-const resourceRoot = () => isDev ? path.join(__dirname, 'resources') : process.resourcesPath;
+const resourceRoot = () => {
+  if (isDev) return path.join(__dirname, 'resources');
+  return externalRuntimeRoot || process.resourcesPath;
+};
 const resolveWebDistDir = () => path.join(resourceRoot(), 'web-dist');
+const resolvePreloadPath = () => {
+  if (isDev) return path.join(__dirname, 'preload.mjs');
+  return externalRuntimeRoot
+    ? path.join(externalRuntimeRoot, 'preload.mjs')
+    : path.join(app.getAppPath(), 'preload.mjs');
+};
 
 const isMacMenuBarEnabled = () => readSettingsRoot().desktopMacMenuBarEnabled !== false;
 
@@ -876,7 +911,7 @@ const isTrayEnabledForPlatform = () =>
   || process.platform === 'linux';
 
 const readDesktopMinimizeToTrayStatus = () => {
-  const supported = process.platform === 'win32';
+  const supported = process.platform === 'win32' || process.platform === 'linux';
   return {
     supported,
     enabled: supported && readSettingsRoot().desktopMinimizeToTrayEnabled === true,
@@ -884,7 +919,7 @@ const readDesktopMinimizeToTrayStatus = () => {
 };
 
 const shouldHideMainWindowToTray = (browserWindow) => {
-  if (process.platform !== 'win32') return false;
+  if (process.platform !== 'win32' && process.platform !== 'linux') return false;
   if (!state.trayController) return false;
   if (!browserWindow || browserWindow.isDestroyed()) return false;
   if (browserWindow.__ocMiniChat === true) return false;
@@ -895,9 +930,10 @@ const getWindowIconPath = () => {
   if (process.platform !== 'win32' && process.platform !== 'linux') {
     return undefined;
   }
+  const iconName = process.platform === 'linux' ? 'icon.png' : 'icon.ico';
   const iconPath = isDev
-    ? path.join(__dirname, 'resources', 'icons', 'icon.ico')
-    : path.join(process.resourcesPath, 'icons', 'icon.ico');
+    ? path.join(__dirname, 'resources', 'icons', iconName)
+    : path.join(process.resourcesPath, 'icons', iconName);
   return fs.existsSync(iconPath) ? iconPath : undefined;
 };
 
@@ -1294,6 +1330,12 @@ const spawnLocalServer = async () => {
   process.env.OPENCHAMBER_VERSION = APP_VERSION;
   process.env.OPENCHAMBER_OPENCODE_CWD = app.getPath('userData');
   process.env.OPENCHAMBER_DESKTOP_NOTIFY = 'true';
+  if (externalRuntimeManifest?.opencode?.mode === 'bun-source') {
+    process.env.OPENCHAMBER_BUN_ENGINE = path.join(process.resourcesPath, 'engine', 'bun');
+    process.env.OPENCHAMBER_OPENCODE_SOURCE_ROOT = externalRuntimeManifest.opencode.sourceRoot;
+    process.env.OPENCHAMBER_OPENCODE_VERSION = externalRuntimeManifest.opencode.version;
+    process.env.OPENCHAMBER_OPENCODE_CHANNEL = externalRuntimeManifest.opencode.channel || 'latest';
+  }
   const bundledOpenCodeBinary = path.join(
     resourceRoot(),
     'opencode',
@@ -1554,6 +1596,17 @@ const emitToAllWindows = (event, detail) => {
   }
 };
 
+const setTaskbarProgress = (value) => {
+  for (const browserWindow of BrowserWindow.getAllWindows()) {
+    if (browserWindow.isDestroyed()) continue;
+    try {
+      browserWindow.setProgressBar(value);
+    } catch (error) {
+      log.debug('[electron] failed to update taskbar progress', error);
+    }
+  }
+};
+
 const pendingDeepLinks = [];
 
 const parseDeepLink = (raw) => {
@@ -1725,6 +1778,7 @@ const createBrowserWindow = ({ label, restoreGeometry, url }) => {
   const desktopMacosMajor = String(macosMajorVersion());
   const trayEnabled = isTrayEnabledForPlatform();
   const windowIconPath = getWindowIconPath();
+  const usesFramelessChrome = process.platform === 'win32' || process.platform === 'linux';
   const options = {
     title: 'OpenChamber',
     width: useSaved ? Math.max(saved.width, MIN_RESTORE_WINDOW_WIDTH) : 1280,
@@ -1732,12 +1786,14 @@ const createBrowserWindow = ({ label, restoreGeometry, url }) => {
     minWidth: MIN_WINDOW_WIDTH,
     minHeight: MIN_WINDOW_HEIGHT,
     icon: windowIconPath,
+    frame: usesFramelessChrome ? false : undefined,
+    autoHideMenuBar: process.platform !== 'darwin',
     show: false,
     backgroundColor: '#151313',
     // The previous desktop shell used an overlay title bar with explicit traffic-light placement.
     // Electron's hiddenInset adds its own extra inset, which leaves the controls
     // visibly lower than the app header. Use a plain hidden title bar instead.
-    titleBarStyle: process.platform === 'darwin' ? 'hidden' : 'default',
+    titleBarStyle: process.platform === 'darwin' || usesFramelessChrome ? 'hidden' : 'default',
     trafficLightPosition: process.platform === 'darwin' ? { x: 16, y: 17 } : undefined,
     webPreferences: {
       additionalArguments: [
@@ -1748,7 +1804,7 @@ const createBrowserWindow = ({ label, restoreGeometry, url }) => {
         `--openchamber-tray-enabled=${trayEnabled ? '1' : '0'}`,
         `--openchamber-platform=${process.platform}`,
       ],
-      preload: isDev ? path.join(__dirname, 'preload.mjs') : path.join(app.getAppPath(), 'preload.mjs'),
+      preload: resolvePreloadPath(),
       backgroundThrottling: false,
       contextIsolation: true,
       nodeIntegration: false,
@@ -1809,6 +1865,13 @@ const createBrowserWindow = ({ label, restoreGeometry, url }) => {
   browserWindow.on('move', () => {
     debounceWindowStatePersist(browserWindow, false);
   });
+  const emitMaximizedState = () => {
+    emitToWindow(browserWindow, 'openchamber:window-maximized-changed', {
+      maximized: browserWindow.isMaximized(),
+    });
+  };
+  browserWindow.on('maximize', emitMaximizedState);
+  browserWindow.on('unmaximize', emitMaximizedState);
   browserWindow.on('minimize', (event) => {
     if (!shouldHideMainWindowToTray(browserWindow)) return;
     debounceWindowStatePersist(browserWindow, true);
@@ -1824,6 +1887,13 @@ const createBrowserWindow = ({ label, restoreGeometry, url }) => {
     }
 
     if (process.platform === 'darwin' && !state.quitRequested) {
+      const url = browserWindow.webContents.getURL();
+      if (url && (url.includes('?settings=') || url.includes('&settings='))) {
+        event.preventDefault();
+        dispatchDomEventToWindow(browserWindow, 'openchamber:menu-action', 'close');
+        return;
+      }
+
       const remainingVisible = BrowserWindow.getAllWindows().filter(
         (window) => !window.isDestroyed() && window.isVisible(),
       ).length;
@@ -2023,7 +2093,7 @@ const createMiniChatWindow = async ({ mode, sessionId = '', directory = '', proj
         `--openchamber-tray-enabled=${trayEnabled ? '1' : '0'}`,
         `--openchamber-platform=${process.platform}`,
       ],
-      preload: isDev ? path.join(__dirname, 'preload.mjs') : path.join(app.getAppPath(), 'preload.mjs'),
+      preload: resolvePreloadPath(),
       backgroundThrottling: false,
       contextIsolation: true,
       nodeIntegration: false,
@@ -2176,10 +2246,6 @@ const compareSemver = (left, right) => {
   return 0;
 };
 
-const parseGithubRepo = () => {
-  return { owner: 'openchamber', repo: 'openchamber' };
-};
-
 const setupAutoUpdater = () => {
   if (!app.isPackaged) {
     return;
@@ -2190,19 +2256,31 @@ const setupAutoUpdater = () => {
   try {
     autoUpdater.autoDownload = false;
     autoUpdater.autoInstallOnAppQuit = false;
-    autoUpdater.allowPrerelease = false;
+    autoUpdater.allowPrerelease = APP_VERSION.includes('-');
     autoUpdater.fullChangelog = true;
     autoUpdater.disableWebInstaller = false;
     autoUpdater.logger = log;
 
-    const { owner, repo } = parseGithubRepo();
-    autoUpdater.setFeedURL({
-      provider: 'github',
-      owner,
-      repo,
+    const feed = resolveUpdaterFeed({
+      productionUrl: EMBEDDED_UPDATER_FEED_URL,
+      testBuild: UPDATER_E2E_BUILD,
+    });
+    if (!feed) {
+      state.updaterConfigured = false;
+      log.info('[electron] updater disabled: no internal feed was embedded at build time');
+      return;
+    }
+    autoUpdater.setFeedURL(feed);
+    state.updaterConfigured = true;
+    log.info('[electron] updater feed configured', {
+      provider: feed.provider,
+      target: feed.provider === 'github' ? `${feed.owner}/${feed.repo}` : feed.url,
     });
 
     autoUpdater.on('download-progress', (progress) => {
+      const total = Number(progress.total || 0);
+      const transferred = Number(progress.transferred || 0);
+      setTaskbarProgress(total > 0 ? Math.max(0, Math.min(1, transferred / total)) : 0.01);
       emitToAllWindows('openchamber:update-progress', mapUpdaterProgressEvent({
         event: 'Progress',
         data: {
@@ -2215,15 +2293,18 @@ const setupAutoUpdater = () => {
 
     autoUpdater.on('update-downloaded', (info) => {
       log.info(`[electron] update-downloaded version=${info?.version || 'unknown'}`);
+      setTaskbarProgress(-1);
       if (state.pendingUpdate) {
         state.pendingUpdate.downloaded = true;
       }
     });
 
     autoUpdater.on('error', (err) => {
+      setTaskbarProgress(-1);
       log.error('[electron] autoUpdater error', err);
     });
   } catch (error) {
+    state.updaterConfigured = false;
     log.error('[electron] autoUpdater setup failed; continuing without updates', {
       version: APP_VERSION,
       error: error instanceof Error ? error.message : String(error),
@@ -2360,11 +2441,72 @@ const buildInstalledApps = async (apps) => {
   return results;
 };
 
+let linuxDesktopEntriesCache = { expiresAt: 0, entries: null };
+
+const getLinuxDesktopEntries = async () => {
+  const now = Date.now();
+  if (linuxDesktopEntriesCache.entries && linuxDesktopEntriesCache.expiresAt > now) {
+    return linuxDesktopEntriesCache.entries;
+  }
+  const entries = await readLinuxDesktopEntries();
+  linuxDesktopEntriesCache = {
+    entries,
+    expiresAt: now + LINUX_DESKTOP_ENTRIES_CACHE_TTL_MS,
+  };
+  return entries;
+};
+
 const buildPlatformInstalledApps = async (apps) => {
   if (process.platform === 'linux') {
     return buildLinuxInstalledApps(apps);
   }
   return buildInstalledApps(apps);
+};
+
+const spawnDetachedLinux = (program, args) => new Promise((resolve, reject) => {
+  const child = spawn(program, args, {
+    detached: true,
+    stdio: 'ignore',
+  });
+  let settled = false;
+  const finish = (callback, value) => {
+    if (settled) return;
+    settled = true;
+    callback(value);
+  };
+  child.once('error', (error) => finish(reject, error));
+  child.once('spawn', () => {
+    child.unref();
+    finish(resolve);
+  });
+});
+
+const runLinuxSpecChain = async (specs, appName) => {
+  if (!Array.isArray(specs) || specs.length === 0) {
+    throw new Error(`Failed to open in ${appName}: no launch candidates`);
+  }
+
+  const failures = [];
+  for (const spec of specs) {
+    if (spec.kind === 'default') {
+      if (spec.targetKind === 'file') {
+        shell.showItemInFolder(spec.targetPath);
+        return;
+      }
+      const errorMessage = await shell.openPath(spec.targetPath);
+      if (!errorMessage) return;
+      failures.push(`default opener: ${errorMessage}`);
+      continue;
+    }
+
+    try {
+      await spawnDetachedLinux(spec.program, spec.args);
+      return;
+    } catch (error) {
+      failures.push(`${spec.program}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  throw new Error(`Failed to open in ${appName}: ${failures.join('; ')}`);
 };
 
 const parseSshConfigImports = () => {
@@ -2544,12 +2686,22 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       return APP_VERSION;
 
     case 'desktop_get_launch_at_login': {
+      if (process.platform === 'linux') {
+        return { supported: true, enabled: await readLinuxAutostartEnabled() };
+      }
       if (process.platform !== 'darwin' && process.platform !== 'win32') return { supported: false, enabled: false };
       const settings = app.getLoginItemSettings(getLoginItemOptions());
       return { supported: true, enabled: settings.openAtLogin === true };
     }
 
     case 'desktop_set_launch_at_login': {
+      if (process.platform === 'linux') {
+        return setLinuxAutostartEnabled({
+          enabled: args.enabled === true,
+          appName: app.getName(),
+          backgroundArg: BACKGROUND_START_ARG,
+        });
+      }
       if (process.platform !== 'darwin' && process.platform !== 'win32') return { supported: false, enabled: false };
       const enabled = args.enabled === true;
       const settingsArgs = {
@@ -2568,7 +2720,7 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
     }
 
     case 'desktop_set_minimize_to_tray': {
-      if (process.platform !== 'win32') return { supported: false, enabled: false };
+      if (process.platform !== 'win32' && process.platform !== 'linux') return { supported: false, enabled: false };
       const enabled = args.enabled === true;
       await mutateSettingsRoot((root) => {
         root.desktopMinimizeToTrayEnabled = enabled;
@@ -2764,28 +2916,52 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
     }
 
     case 'desktop_open_in_app': {
-      if (process.platform !== 'darwin') {
-        throw new Error('desktop_open_in_app is only supported on macOS');
-      }
       const projectPath = typeof args.projectPath === 'string' ? args.projectPath.trim() : '';
       const appId = typeof args.appId === 'string' ? args.appId.trim().toLowerCase() : '';
       const appName = typeof args.appName === 'string' ? args.appName.trim() : '';
       if (!projectPath || !appId || !appName) {
         throw new Error('Project path, app id, and app name are required');
       }
+      await fsp.access(projectPath, fs.constants.R_OK);
+      if (process.platform === 'linux') {
+        const entries = await getLinuxDesktopEntries();
+        await runLinuxSpecChain(buildLinuxOpenSpecs({
+          targetPath: projectPath,
+          appId,
+          appName,
+          targetKind: 'project',
+          entries,
+        }), appName);
+        return null;
+      }
+      if (process.platform !== 'darwin') {
+        throw new Error('desktop_open_in_app is only supported on macOS and Linux');
+      }
       runSpecChain(buildOpenProjectSpecs({ projectPath, appId, appName }), appName);
       return null;
     }
 
     case 'desktop_open_file_in_app': {
-      if (process.platform !== 'darwin') {
-        throw new Error('desktop_open_file_in_app is only supported on macOS');
-      }
       const filePath = typeof args.filePath === 'string' ? args.filePath.trim() : '';
       const appId = typeof args.appId === 'string' ? args.appId.trim().toLowerCase() : '';
       const appName = typeof args.appName === 'string' ? args.appName.trim() : '';
       if (!filePath || !appId || !appName) {
         throw new Error('File path, app id, and app name are required');
+      }
+      await fsp.access(filePath, fs.constants.R_OK);
+      if (process.platform === 'linux') {
+        const entries = await getLinuxDesktopEntries();
+        await runLinuxSpecChain(buildLinuxOpenSpecs({
+          targetPath: filePath,
+          appId,
+          appName,
+          targetKind: 'file',
+          entries,
+        }), appName);
+        return null;
+      }
+      if (process.platform !== 'darwin') {
+        throw new Error('desktop_open_file_in_app is only supported on macOS and Linux');
       }
       runSpecChain(buildOpenFileSpecs({ filePath, appId, appName }), appName);
       return null;
@@ -2847,8 +3023,11 @@ end tell`;
     }
 
     case 'desktop_filter_installed_apps': {
+      if (process.platform === 'linux') {
+        return filterLinuxInstalledApps(args.apps);
+      }
       if (process.platform !== 'darwin') {
-        throw new Error('desktop_filter_installed_apps is only supported on macOS');
+        throw new Error('desktop_filter_installed_apps is only supported on macOS and Linux');
       }
       if (!Array.isArray(args.apps)) return [];
       const results = await Promise.all(
@@ -2983,31 +3162,27 @@ end tell`;
     }
 
     case 'desktop_check_for_updates': {
+      assertUpdaterCapability({ packaged: app.isPackaged });
+      if (!state.updaterConfigured) {
+        throw new Error('Desktop updates are not configured for this internal build');
+      }
       const currentVersion = APP_VERSION;
-      let payload = null;
-      try {
-        const response = await fetch(UPDATE_METADATA_URL, { signal: AbortSignal.timeout(10_000) });
-        payload = await response.json();
-      } catch {
-      }
-
-      let updateResult = null;
-      try {
-        updateResult = await autoUpdater.checkForUpdates();
-      } catch {
-      }
-
-      const updateInfo = updateResult?.updateInfo;
-      const nextVersion =
-        (typeof updateInfo?.version === 'string' && updateInfo.version) ||
-        (typeof payload?.version === 'string' && payload.version) ||
-        currentVersion;
-      const available = compareSemver(nextVersion, currentVersion) > 0;
+      const {
+        available,
+        updateInfo,
+        updateResult,
+        nextVersion,
+        pendingUpdate,
+      } = await checkForDesktopUpdate({
+        autoUpdater,
+        currentVersion,
+        pendingUpdate: state.pendingUpdate,
+        compareVersions: compareSemver,
+      });
       const body =
-        (typeof payload?.notes === 'string' && payload.notes.trim() ? payload.notes : null) ||
         (typeof updateInfo?.releaseNotes === 'string' && updateInfo.releaseNotes.trim() ? updateInfo.releaseNotes : null) ||
         await parseRelevantChangelogNotes(currentVersion, nextVersion);
-      state.pendingUpdate = available ? { version: nextVersion, metadata: payload, electronUpdate: updateResult } : null;
+      state.pendingUpdate = pendingUpdate;
       return {
         available,
         currentVersion,
@@ -3015,51 +3190,60 @@ end tell`;
         body: body || null,
         date:
           (typeof updateInfo?.releaseDate === 'string' && updateInfo.releaseDate) ||
-          (typeof payload?.pub_date === 'string' ? payload.pub_date : null),
+          null,
       };
     }
 
     case 'desktop_download_and_install_update':
+      assertUpdaterCapability({ packaged: app.isPackaged });
       if (!state.pendingUpdate) {
         throw new Error('No pending update');
       }
+      setTaskbarProgress(0.01);
       emitToAllWindows('openchamber:update-progress', mapUpdaterProgressEvent({
         event: 'Started',
         data: {
           contentLength: null,
         },
       }));
-      if (!state.pendingUpdate.electronUpdate) {
-        throw new Error('Electron updater metadata is not available for this build');
+      try {
+        if (!state.pendingUpdate.electronUpdate) {
+          throw new Error('Electron updater metadata is not available for this build');
+        }
+        if (!state.pendingUpdate.downloaded) {
+          await new Promise((resolve, reject) => {
+            let settled = false;
+            const cleanup = () => {
+              autoUpdater.off('update-downloaded', onDownloaded);
+              autoUpdater.off('error', onError);
+            };
+            const finish = (callback, value) => {
+              if (settled) return;
+              settled = true;
+              cleanup();
+              callback(value);
+            };
+            const onDownloaded = () => finish(resolve, null);
+            const onError = (error) => finish(reject, error);
+            autoUpdater.on('update-downloaded', onDownloaded);
+            autoUpdater.on('error', onError);
+            Promise.resolve(autoUpdater.downloadUpdate()).catch((error) => finish(reject, error));
+          });
+        }
+        emitToAllWindows('openchamber:update-progress', mapUpdaterProgressEvent({
+          event: 'Finished',
+          data: {},
+        }));
+        return null;
+      } finally {
+        setTaskbarProgress(-1);
       }
-      if (!state.pendingUpdate.downloaded) {
-        await new Promise((resolve, reject) => {
-          let settled = false;
-          const cleanup = () => {
-            autoUpdater.off('update-downloaded', onDownloaded);
-            autoUpdater.off('error', onError);
-          };
-          const finish = (callback, value) => {
-            if (settled) return;
-            settled = true;
-            cleanup();
-            callback(value);
-          };
-          const onDownloaded = () => finish(resolve, null);
-          const onError = (error) => finish(reject, error);
-          autoUpdater.on('update-downloaded', onDownloaded);
-          autoUpdater.on('error', onError);
-          Promise.resolve(autoUpdater.downloadUpdate()).catch((error) => finish(reject, error));
-        });
-      }
-      emitToAllWindows('openchamber:update-progress', mapUpdaterProgressEvent({
-        event: 'Finished',
-        data: {},
-      }));
-      return null;
 
     case 'desktop_restart': {
       const applyUpdate = Boolean(state.pendingUpdate?.downloaded && app.isPackaged);
+      if (applyUpdate) {
+        assertUpdaterCapability({ packaged: app.isPackaged });
+      }
       log.info(`[electron] desktop_restart applyUpdate=${applyUpdate} packaged=${app.isPackaged}`);
       if (applyUpdate && process.platform === 'darwin' && typeof app.isInApplicationsFolder === 'function') {
         try {
@@ -3173,6 +3357,43 @@ end tell`;
         browserWindow.close();
       }
       return null;
+
+    case 'desktop_minimize_current_window':
+      if (browserWindow && !browserWindow.isDestroyed()) {
+        browserWindow.minimize();
+      }
+      return null;
+
+    case 'desktop_toggle_current_window_maximized':
+      if (browserWindow && !browserWindow.isDestroyed()) {
+        if (browserWindow.isMaximized()) {
+          browserWindow.unmaximize();
+        } else {
+          browserWindow.maximize();
+        }
+        return { maximized: browserWindow.isMaximized() };
+      }
+      return { maximized: false };
+
+    case 'desktop_get_current_window_state':
+      return {
+        maximized: Boolean(
+          browserWindow
+          && !browserWindow.isDestroyed()
+          && browserWindow.isMaximized()
+        ),
+      };
+
+    case 'desktop_show_app_menu': {
+      if (!browserWindow || browserWindow.isDestroyed()) {
+        return null;
+      }
+      const menu = Menu.getApplicationMenu() || buildAutoHiddenMenu();
+      const x = Number.isFinite(Number(args.x)) ? Math.max(0, Math.round(Number(args.x))) : undefined;
+      const y = Number.isFinite(Number(args.y)) ? Math.max(0, Math.round(Number(args.y))) : undefined;
+      menu.popup({ window: browserWindow, x, y });
+      return null;
+    }
 
     case 'desktop_ssh_instances_get':
       return sshManager.readInstances();
@@ -3323,6 +3544,116 @@ const buildMacMenu = () => {
   ]);
 };
 
+const buildAutoHiddenMenu = () => {
+  const dispatchAction = (action) => dispatchMenuAction(action);
+  const handleCopyAction = () => {
+    BrowserWindow.getFocusedWindow()?.webContents.copy();
+    dispatchAction('copy');
+  };
+
+  return Menu.buildFromTemplate([
+    {
+      label: 'OpenChamber',
+      submenu: [
+        { label: 'About OpenChamber', click: () => dispatchAction('about') },
+        { label: 'Check for Updates', click: () => dispatchCheckForUpdates() },
+        { type: 'separator' },
+        { label: 'Settings', accelerator: 'Ctrl+,', click: () => dispatchAction('settings') },
+        { label: 'Reload Webview', click: () => reloadMenuTargetWindow() },
+        { label: 'Restart', click: () => relaunchFromMenu() },
+        { label: 'Command Palette', accelerator: 'Ctrl+P', click: () => dispatchAction('command-palette') },
+        { type: 'separator' },
+        { role: 'quit' },
+      ],
+    },
+    {
+      label: 'File',
+      submenu: [
+        { label: 'New Window', accelerator: 'Ctrl+Shift+Alt+N', click: () => void handleInvoke(null, 'desktop_new_window') },
+        { type: 'separator' },
+        { label: 'New Session', accelerator: 'Ctrl+N', click: () => dispatchAction('new-session') },
+        { label: 'New Worktree', accelerator: 'Ctrl+Shift+N', click: () => dispatchAction('new-worktree-session') },
+        { type: 'separator' },
+        { label: 'Add Workspace', click: () => dispatchAction('change-workspace') },
+        { type: 'separator' },
+        { role: 'quit' },
+      ],
+    },
+    {
+      label: 'Edit',
+      submenu: [
+        { role: 'undo' },
+        { role: 'redo' },
+        { type: 'separator' },
+        { role: 'cut' },
+        { label: 'Copy', accelerator: 'Ctrl+C', click: () => handleCopyAction() },
+        { role: 'paste' },
+        { role: 'selectAll' },
+      ],
+    },
+    {
+      label: 'View',
+      submenu: [
+        { role: 'reload' },
+        { role: 'forceReload' },
+        { label: 'Toggle Developer Tools', accelerator: 'Ctrl+Alt+I', click: () => openDevToolsForMenuTarget() },
+        { type: 'separator' },
+        { label: 'Toggle Right Sidebar', accelerator: 'Ctrl+B', click: () => dispatchAction('toggle-right-sidebar') },
+        { label: 'Open Git Sidebar', accelerator: 'Ctrl+Shift+G', click: () => dispatchAction('open-right-sidebar-git') },
+        { label: 'Open Files Sidebar', accelerator: 'Ctrl+Shift+F', click: () => dispatchAction('open-right-sidebar-files') },
+        { type: 'separator' },
+        { label: 'Toggle Terminal Dock', accelerator: 'Ctrl+J', click: () => dispatchAction('toggle-terminal') },
+        { label: 'Toggle Terminal Expanded', accelerator: 'Ctrl+Shift+J', click: () => dispatchAction('toggle-terminal-expanded') },
+        { type: 'separator' },
+        { label: 'Light Theme', click: () => dispatchAction('theme-light') },
+        { label: 'Dark Theme', click: () => dispatchAction('theme-dark') },
+        { label: 'System Theme', click: () => dispatchAction('theme-system') },
+        { type: 'separator' },
+        { label: 'Toggle Session Sidebar', accelerator: 'Ctrl+L', click: () => dispatchAction('toggle-sidebar') },
+        { label: 'Toggle Memory Debug', accelerator: 'Ctrl+Shift+D', click: () => dispatchAction('toggle-memory-debug') },
+        { type: 'separator' },
+        { role: 'togglefullscreen' },
+      ],
+    },
+    {
+      label: 'Go',
+      submenu: [
+        { label: 'Back', accelerator: 'Ctrl+[', click: () => dispatchAction('go-back') },
+        { label: 'Forward', accelerator: 'Ctrl+]', click: () => dispatchAction('go-forward') },
+        { type: 'separator' },
+        { label: 'Previous Session', accelerator: 'Alt+Up', click: () => dispatchAction('previous-session') },
+        { label: 'Next Session', accelerator: 'Alt+Down', click: () => dispatchAction('next-session') },
+        { type: 'separator' },
+        { label: 'Previous Project', accelerator: 'Ctrl+Alt+Up', click: () => dispatchAction('previous-project') },
+        { label: 'Next Project', accelerator: 'Ctrl+Alt+Down', click: () => dispatchAction('next-project') },
+      ],
+    },
+    {
+      label: 'Window',
+      submenu: [
+        { role: 'minimize' },
+        { role: 'togglefullscreen' },
+        { type: 'separator' },
+        { role: 'close' },
+      ],
+    },
+    {
+      label: 'Help',
+      submenu: [
+        { label: 'Keyboard Shortcuts', accelerator: 'Ctrl+.', click: () => dispatchAction('help-dialog') },
+        { label: 'Show Diagnostics', accelerator: 'Ctrl+Shift+L', click: () => dispatchAction('download-logs') },
+        { type: 'separator' },
+        { label: 'Clear Cache', click: () => void handleInvoke(null, 'desktop_clear_cache') },
+        { type: 'separator' },
+        { label: 'Report a Bug', click: () => shell.openExternal(GITHUB_BUG_REPORT_URL) },
+        { label: 'Request a Feature', click: () => shell.openExternal(GITHUB_FEATURE_REQUEST_URL) },
+        { type: 'separator' },
+        { label: 'Join Discord', click: () => shell.openExternal(DISCORD_INVITE_URL) },
+      ],
+    },
+  ]);
+};
+
 contextMenu({
   showInspectElement: isDev,
   showSaveImageAs: true,
@@ -3368,6 +3699,10 @@ const COMMANDS_SAFE_FOR_REMOTE = new Set([
   'desktop_set_window_theme',
   'desktop_is_window_fullscreen',
   'desktop_start_window_drag',
+  'desktop_minimize_current_window',
+  'desktop_toggle_current_window_maximized',
+  'desktop_close_current_window',
+  'desktop_get_current_window_state',
   'desktop_get_app_version',
   'desktop_get_lan_address',
   'desktop_capture_page_rect',
@@ -3503,6 +3838,8 @@ app.whenReady().then(async () => {
 
   if (process.platform === 'darwin') {
     Menu.setApplicationMenu(buildMacMenu());
+  } else {
+    Menu.setApplicationMenu(buildAutoHiddenMenu());
   }
 
   if ((process.platform === 'darwin' || process.platform === 'win32') && app.isPackaged) {

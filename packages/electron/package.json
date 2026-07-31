@@ -5,7 +5,7 @@
   "description": "Electron desktop runtime for OpenChamber",
   "author": "OpenChamber",
   "type": "module",
-  "main": "./dist-bundle/main.mjs",
+  "main": "./dist-bundle/shell.mjs",
   "dependencies": {
     "@openchamber/web": "workspace:*",
     "electron-context-menu": "^4.1.2",
@@ -14,6 +14,7 @@
   },
   "devDependencies": {
     "@electron/rebuild": "^3.7.0",
+    "@playwright/test": "1.62.0",
     "electron": "^41.2.1",
     "electron-builder": "^26.0.0"
   },
@@ -31,16 +32,25 @@
     "rebuild:native": "node ./scripts/rebuild-native.mjs",
     "package:app": "bun run build:web-assets && bun run bundle:main && node ./scripts/electron-builder-local-sign.mjs --dir",
     "package:app:native": "bun run build:web-assets && bun run bundle:main && bun run rebuild:native && node ./scripts/electron-builder-local-sign.mjs --dir",
+    "package:linux": "bun run build:web-assets && bun run bundle:main && bun run rebuild:native && node ./scripts/electron-builder-local-sign.mjs --linux AppImage --publish never",
     "package": "node ./scripts/electron-builder-local-sign.mjs --check-release-signing && bun run build:web-assets && bun run bundle:main && bun run rebuild:native && node ./scripts/electron-builder-local-sign.mjs",
+    "runtime:build": "bun run package:app && node ./scripts/build-runtime.mjs",
+    "runtime:install": "bun run package:app && node ./scripts/build-runtime.mjs --install",
+    "runtime:rollback": "node ./scripts/rollback-runtime.mjs",
     "verify:mac-gatekeeper": "node ./scripts/verify-mac-gatekeeper.mjs",
+    "verify:linux-appimage": "node ./scripts/verify-linux-appimage.mjs",
+    "smoke:linux-appimage-ui": "node ./scripts/smoke-linux-appimage-ui.mjs",
+    "smoke:linux-appimage-update": "node ./scripts/smoke-linux-appimage-update.mjs",
+    "test:architecture": "node --test ./scripts/target-architecture.test.mjs ./scripts/verify-linux-appimage.test.mjs ./scripts/verify-update-manifest.test.mjs",
     "finalize:latest-yml": "node ./scripts/finalize-latest-yml.mjs",
-    "type-check": "node --check ./main.mjs && node --check ./preload.mjs && node --check ./tray.mjs",
+    "type-check": "node --check ./main.mjs && node --check ./shell.mjs && node --check ./runtime-loader.mjs && node --check ./preload.mjs && node --check ./tray.mjs && node --check ./scripts/build-runtime.mjs && node --check ./scripts/rollback-runtime.mjs",
     "lint": "node -e \"process.exit(0)\""
   },
   "build": {
     "appId": "dev.openchamber.desktop",
     "productName": "OpenChamber",
     "files": [
+      "dist-bundle/shell.mjs",
       "dist-bundle/main.mjs",
       "preload.mjs"
     ],
@@ -52,6 +62,10 @@
       {
         "from": "resources/icons/icon.ico",
         "to": "icons/icon.ico"
+      },
+      {
+        "from": "resources/icons/icon.png",
+        "to": "icons/icon.png"
       },
       {
         "from": "resources/icons/tray",
@@ -96,6 +110,23 @@
       ],
       "verifyUpdateCodeSignature": false,
       "artifactName": "${productName}-${version}-win-${arch}.${ext}"
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "category": "Development",
+      "icon": "resources/icons/icon.png",
+      "executableName": "openchamber",
+      "artifactName": "${productName}-${version}-linux-${arch}.${ext}",
+      "desktop": {
+        "entry": {
+          "Name": "OpenChamber",
+          "Comment": "Desktop runtime for OpenChamber",
+          "Icon": "openchamber",
+          "StartupWMClass": "openchamber"
+        }
+      }
     },
     "dmg": {
       "sign": true,

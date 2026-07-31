@@ -105,6 +105,7 @@
       },
       "devDependencies": {
         "@electron/rebuild": "^3.7.0",
+        "@playwright/test": "1.62.0",
         "electron": "^41.2.1",
         "electron-builder": "^26.0.0",
       },
@@ -307,6 +308,7 @@
         "@fontsource/ibm-plex-mono": "^5.2.7",
         "@fontsource/ibm-plex-sans": "^5.1.1",
         "@ibm/plex": "^6.4.1",
+        "@playwright/test": "1.62.0",
         "@radix-ui/react-collapsible": "^1.1.12",
         "@radix-ui/react-dialog": "^1.1.15",
         "@radix-ui/react-dropdown-menu": "^2.1.16",
@@ -1026,6 +1028,8 @@
     "@pierre/theming": ["@pierre/theming@0.0.2", "https://registry.npmmirror.com/@pierre/theming/-/theming-0.0.2.tgz", { "peerDependencies": { "@pierre/theme": "^1.1.0", "@shikijs/themes": "^3.0.0 || ^4.0.0", "react": "^18.3.1 || ^19.0.0", "react-dom": "^18.3.1 || ^19.0.0", "shiki": "^3.0.0 || ^4.0.0" }, "optionalPeers": ["@pierre/theme", "@shikijs/themes", "react", "react-dom", "shiki"] }, "sha512-QM1M4stXfnzfaE8I8YbjXSApV8c+2dBsXJj8eYg9WTpBR/cTmCZIcfGnN4p13iRrYu2Br/R/OJfEL7uR8Qjctw=="],
 
     "@pkgjs/parseargs": ["@pkgjs/parseargs@0.11.0", "https://registry.npmmirror.com/@pkgjs/parseargs/-/parseargs-0.11.0.tgz", {}, "sha512-+1VkjdD0QBLPodGrJUeqarH8VAIvQODIbwh9XpP5Syisf7YoQgsJKPNFoqqLQlu+VQ/tVSshMR6loPMn8U+dPg=="],
+
+    "@playwright/test": ["@playwright/test@1.62.0", "https://registry.npmmirror.com/@playwright/test/-/test-1.62.0.tgz", { "dependencies": { "playwright": "1.62.0" }, "bin": { "playwright": "cli.js" } }, "sha512-9zOJ6ZQRAena31MpOH9VSzIz8Ou3YJ/wtY/eQm5T2uhfhG7/U3COrMS8xOtUrZrp9OgdmzEnIYODye3nY1VqzA=="],
 
     "@protobufjs/aspromise": ["@protobufjs/aspromise@1.1.2", "https://registry.npmmirror.com/@protobufjs/aspromise/-/aspromise-1.1.2.tgz", {}, "sha512-j+gKExEuLmKwvz3OgROXtrJ2UG2x8Ch2YZUxahh+s1F2HZ+wAceUNLkvy6zKCPVRkU++ZWQrdxsUeQXmcg4uoQ=="],
 
@@ -2923,6 +2927,10 @@
 
     "platform": ["platform@1.3.6", "https://registry.npmmirror.com/platform/-/platform-1.3.6.tgz", {}, "sha512-fnWVljUchTro6RiCFvCXBbNhJc2NijN7oIQxbwsyL0buWJPG85v81ehlHI9fXrJsMNgTofEoWIQeClKpgxFLrg=="],
 
+    "playwright": ["playwright@1.62.0", "https://registry.npmmirror.com/playwright/-/playwright-1.62.0.tgz", { "dependencies": { "playwright-core": "1.62.0" }, "optionalDependencies": { "fsevents": "2.3.2" }, "bin": { "playwright": "cli.js" } }, "sha512-Z14dG305dgaLu6foB1TXQagFiW8JfSUIUaUuPaKQ6NtBPKF1P/qXcqfh6c6K/icPqdy37JmjbiBXf6JNg6Sylw=="],
+
+    "playwright-core": ["playwright-core@1.62.0", "https://registry.npmmirror.com/playwright-core/-/playwright-core-1.62.0.tgz", { "bin": { "playwright-core": "cli.js" } }, "sha512-nsNRyq0r2zsG8AcRHWknc9QRA5XCueC7gWMrs+Gx2tlZn9hcl8zudfh00lhJPY1DE7NmZ6bDsT9g2yey8mXljA=="],
+
     "plist": ["plist@3.1.0", "https://registry.npmmirror.com/plist/-/plist-3.1.0.tgz", { "dependencies": { "@xmldom/xmldom": "^0.8.8", "base64-js": "^1.5.1", "xmlbuilder": "^15.1.1" } }, "sha512-uysumyrvkUX0rX/dEVqt8gC3sTBzd4zoWfLeS29nb53imdaXVvLINYXTI2GNqzaMuvacNx4uJQ8+b3zXR0pkgQ=="],
 
     "pluralize": ["pluralize@8.0.0", "https://registry.npmmirror.com/pluralize/-/pluralize-8.0.0.tgz", {}, "sha512-Nc3IT5yHzflTfbjgqWcCPpo7DaKy4FnpB0l/zCAW0Tc7jxAiuqSxHasntB3D7887LSrA93kDJ9IXovxJYxyLCA=="],
@@ -3920,6 +3928,8 @@
     "path-scurry/lru-cache": ["lru-cache@11.2.6", "https://registry.npmmirror.com/lru-cache/-/lru-cache-11.2.6.tgz", {}, "sha512-ESL2CrkS/2wTPfuend7Zhkzo2u0daGJ/A2VucJOgQ/C48S/zB8MMeMHSGKYpXhIjbPxfuezITkaBH1wqv00DDQ=="],
 
     "path-scurry/minipass": ["minipass@7.1.3", "https://registry.npmmirror.com/minipass/-/minipass-7.1.3.tgz", {}, "sha512-tEBHqDnIoM/1rXME1zgka9g6Q2lcoCkxHLuc7ODJ5BxbP5d4c2Z5cGgtXAku59200Cx7diuHTOYfSBD8n6mm8A=="],
+
+    "playwright/fsevents": ["fsevents@2.3.2", "https://registry.npmmirror.com/fsevents/-/fsevents-2.3.2.tgz", { "os": "darwin" }, "sha512-xiqMQR4xAeHTuB9uWm+fFRcIOgKBMiOBP+eXiyT7jsgVCq1bkVygt00oASowB7EdtpOHaaPgKt812P9ab+DDKA=="],
 
     "postject/commander": ["commander@9.5.0", "https://registry.npmmirror.com/commander/-/commander-9.5.0.tgz", {}, "sha512-KRs7WVDKg86PWiuAqhDrAQnTXZKraVcCc6vFdL14qrZ/DcWwuRo7VoiYXalXO7S5GKpqYiVEwCbgFDfxNHKJBQ=="],
 
