@@ -5,7 +5,7 @@ import path from 'path';
 import { createServer } from 'http';
 import net from 'net';
 import { spawn } from 'child_process';
-import { pathToFileURL } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 
 import { isModuleCliExecution, normalizeCliEntryPath } from './cli-entry.js';
 import {
@@ -18,6 +18,7 @@ import {
   isOpenchamberCmdline,
   isOpenchamberProcessRunning,
   parseArgs,
+  resolveControlTargetInstance,
 } from './cli.js';
 
 async function withTempOpenChamberDataDir(fn) {
@@ -170,6 +171,85 @@ describe('cli args', () => {
   it('accepts legacy daemon flags as no-ops', () => {
     expect(parseArgs(['serve', '--daemon']).removedFlagErrors).toEqual([]);
     expect(parseArgs(['serve', '-d']).removedFlagErrors).toEqual([]);
+  });
+
+  it('parses session control scope and dispatch flags', () => {
+    const parsed = parseArgs([
+      'session',
+      'send',
+      '--server',
+      'default',
+      '--dir',
+      '/tmp/project',
+      '--session',
+      'ses_test',
+      '--prompt',
+      'continue',
+      '--model',
+      'openai/gpt-5',
+      '--agent',
+      'build',
+      '--variant',
+      'high',
+      '--wait',
+      '--last-assistant',
+      '--timeout',
+      '120',
+    ]);
+
+    expect(parsed.command).toBe('session');
+    expect(parsed.controlAction).toBe('send');
+    expect(parsed.options).toMatchObject({
+      serverId: 'default',
+      directory: '/tmp/project',
+      sessionId: 'ses_test',
+      prompt: 'continue',
+      model: 'openai/gpt-5',
+      agent: 'build',
+      variant: 'high',
+      wait: true,
+      lastAssistant: true,
+      timeout: '120',
+    });
+    expect(parsed.removedFlagErrors).toEqual([]);
+  });
+
+  it('parses scheduled task creation flags without weakening policy in json mode', () => {
+    const parsed = parseArgs([
+      'schedule',
+      'create',
+      '--project',
+      'project-a',
+      '--name',
+      'Nightly review',
+      '--prompt',
+      'Review the workspace',
+      '--model',
+      'openai/gpt-5',
+      '--daily',
+      '23:00',
+      '--timezone',
+      'Asia/Shanghai',
+      '--goal',
+      '--goal-token-budget',
+      '50000',
+      '--json',
+    ]);
+
+    expect(parsed.command).toBe('schedule');
+    expect(parsed.controlAction).toBe('create');
+    expect(parsed.options).toMatchObject({
+      projectId: 'project-a',
+      name: 'Nightly review',
+      prompt: 'Review the workspace',
+      model: 'openai/gpt-5',
+      daily: '23:00',
+      timezone: 'Asia/Shanghai',
+      goal: true,
+      goalTokenBudget: '50000',
+      json: true,
+    });
+    expect(parsed.removedFlagErrors).toEqual([]);
   });
 });
 
@@ -652,6 +732,130 @@ describe('lifecycle mode policy parity', () => {
         expect(server.shutdownRequested).toBe(false);
       } finally {
         await server.close();
+      }
+    });
+  });
+});
+
+describe('control command target resolution', () => {
+  it('uses an explicit control port without requiring CLI lifecycle registration', async () => {
+    const target = await resolveControlTargetInstance({
+      options: { explicitPort: true, port: 5190 },
+    });
+
+    expect(target).toEqual({
+      port: 5190,
+      runtime: 'explicit',
+      source: 'explicit-port',
+    });
+  });
+
+  it('prefers the healthy Desktop port persisted in shared settings', async () => {
+    await withTempOpenChamberDataDir(async (dataDir) => {
+      const server = await startMockOpenChamberServer({ runtime: 'desktop' });
+      try {
+        fs.writeFileSync(
+          path.join(dataDir, 'settings.json'),
+          JSON.stringify({ desktopLocalPort: server.port }),
+          'utf8',
+        );
+
+        const target = await resolveControlTargetInstance({ options: {} });
+
+        expect(target).toEqual(expect.objectContaining({
+          port: server.port,
+          runtime: 'desktop',
+          source: 'desktop-settings+probe',
+        }));
+      } finally {
+        await server.close();
+      }
+    });
+  });
+});
+
+describe('control command CLI integration', () => {
+  it('discovers Desktop settings and authenticates an actual projects request', async () => {
+    await withTempOpenChamberDataDir(async (dataDir) => {
+      const token = 'fixture-desktop-token';
+      let receivedAuthorization = null;
+      let receivedPayload = null;
+      const server = createServer((req, res) => {
+        if (req.method === 'GET' && req.url === '/api/system/info') {
+          res.writeHead(200, { 'content-type': 'application/json' });
+          res.end(JSON.stringify({ runtime: 'desktop', pid: process.pid }));
+          return;
+        }
+
+        if (req.method === 'POST' && req.url === '/api/openchamber/control') {
+          receivedAuthorization = req.headers.authorization || null;
+          let body = '';
+          req.setEncoding('utf8');
+          req.on('data', (chunk) => {
+            body += chunk;
+          });
+          req.on('end', () => {
+            receivedPayload = JSON.parse(body);
+            res.writeHead(200, { 'content-type': 'application/json' });
+            res.end(JSON.stringify({
+              projects: [{ id: 'fixture', label: 'Fixture project', path: '/fixture' }],
+            }));
+          });
+          return;
+        }
+
+        res.writeHead(404);
+        res.end();
+      });
+
+      await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+      const address = server.address();
+      const port = typeof address === 'object' && address ? address.port : 0;
+      fs.writeFileSync(
+        path.join(dataDir, 'settings.json'),
+        JSON.stringify({
+          desktopLocalPort: port,
+          desktopLocalClientToken: token,
+        }),
+        'utf8',
+      );
+
+      try {
+        const cliPath = fileURLToPath(new URL('./cli.js', import.meta.url));
+        const child = spawn(process.execPath, [cliPath, 'projects', 'list', '--json'], {
+          env: {
+            ...process.env,
+            OPENCHAMBER_DATA_DIR: dataDir,
+          },
+          stdio: ['ignore', 'pipe', 'pipe'],
+        });
+        let stdout = '';
+        let stderr = '';
+        child.stdout.setEncoding('utf8');
+        child.stderr.setEncoding('utf8');
+        child.stdout.on('data', (chunk) => {
+          stdout += chunk;
+        });
+        child.stderr.on('data', (chunk) => {
+          stderr += chunk;
+        });
+        const exitCode = await new Promise((resolve, reject) => {
+          child.once('error', reject);
+          child.once('exit', resolve);
+        });
+
+        expect(exitCode, stderr).toBe(0);
+        expect(JSON.parse(stdout)).toEqual({
+          status: 'ok',
+          projects: [{ id: 'fixture', label: 'Fixture project', path: '/fixture' }],
+        });
+        expect(receivedAuthorization).toBe(`Bearer ${token}`);
+        expect(receivedPayload).toEqual({
+          action: 'projects.list',
+          input: { serverId: 'default' },
+        });
+      } finally {
+        await new Promise((resolve) => server.close(resolve));
       }
     });
   });

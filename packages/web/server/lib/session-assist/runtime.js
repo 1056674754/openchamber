@@ -77,6 +77,19 @@ const clampText = (value, max) => {
   return trimmed.length > max ? trimmed.slice(0, max).trim() : trimmed;
 };
 
+const messageText = (message) => {
+  const parts = Array.isArray(message?.parts) ? message.parts : [];
+  const text = parts
+    .filter((part) => part?.type === 'text' && typeof part.text === 'string')
+    .map((part) => part.text.trim())
+    .filter(Boolean)
+    .join('\n');
+  if (text) return text;
+  const infoText = message?.info?.text;
+  if (typeof infoText === 'string') return infoText;
+  return typeof message?.text === 'string' ? message.text : '';
+};
+
 export const createSessionAssistRuntime = ({
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
@@ -216,8 +229,8 @@ export const createSessionAssistRuntime = ({
       const providerID = lastAssistantInfo?.providerID || lastAssistantInfo?.providerId || null;
       const modelID = lastAssistantInfo?.modelID || lastAssistantInfo?.modelId || null;
 
-      const assistantText = lastAssistantInfo?.text ?? lastAssistant?.text ?? '';
-      const userText = parentUser?.info?.text ?? parentUser?.text ?? '';
+      const assistantText = messageText(lastAssistant);
+      const userText = messageText(parentUser);
       const transcript = userText
         ? `User: ${userText}\n\nAssistant: ${assistantText}`
         : `Assistant: ${assistantText}`;

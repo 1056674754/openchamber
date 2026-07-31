@@ -41,6 +41,7 @@ import {
 } from './lib/event-stream/index.js';
 import { createFsSearchRuntime as createFsSearchRuntimeFactory } from './lib/fs/search.js';
 import { createOpenCodeLifecycleRuntime } from './lib/opencode/lifecycle.js';
+import { createOpenCodeLifecycleJournal } from './lib/opencode/lifecycle-journal.js';
 import { createOpenCodeEnvRuntime } from './lib/opencode/env-runtime.js';
 import { resolveOpenCodeEnvConfig } from './lib/opencode/env-config.js';
 import { createHmrStateRuntime } from './lib/opencode/hmr-state-runtime.js';
@@ -75,6 +76,11 @@ import { createSessionMarkersStore } from './lib/opencode/session-markers-store.
 import { createOpenCodeWatcherRuntime } from './lib/opencode/watcher.js';
 import { createOpenCodeConfigFileWatcherRuntime } from './lib/opencode/config-file-watcher.js';
 import { createScheduledTasksRuntime } from './lib/scheduled-tasks/runtime.js';
+import { createScheduledTaskService } from './lib/scheduled-tasks/service.js';
+import { createOpenChamberSessionService } from './lib/openchamber-sessions/service.js';
+import { createOpenChamberControlService } from './lib/openchamber-control/service.js';
+import { createAgentToolRuntime } from './lib/agent-tool/runtime.js';
+import { createRuntimeFallbackApprovalService } from './lib/agent-tool/runtime-fallback-approval.js';
 import { createServerStartupRuntime } from './lib/opencode/server-startup-runtime.js';
 import { createTunnelWiringRuntime } from './lib/opencode/tunnel-wiring-runtime.js';
 import { createStartupPipelineRuntime } from './lib/opencode/startup-pipeline-runtime.js';
@@ -309,6 +315,9 @@ const getCachedZenModels = (...args) => notificationTemplateRuntime.getCachedZen
 const OPENCHAMBER_DATA_DIR = process.env.OPENCHAMBER_DATA_DIR
   ? path.resolve(process.env.OPENCHAMBER_DATA_DIR)
   : path.join(os.homedir(), '.config', 'openchamber');
+const openCodeLifecycleJournal = createOpenCodeLifecycleJournal({
+  dataDir: OPENCHAMBER_DATA_DIR,
+});
 const SETTINGS_FILE_PATH = path.join(OPENCHAMBER_DATA_DIR, 'settings.json');
 const PUSH_SUBSCRIPTIONS_FILE_PATH = path.join(OPENCHAMBER_DATA_DIR, 'push-subscriptions.json');
 const CLOUDFLARE_MANAGED_REMOTE_TUNNELS_FILE_PATH = path.join(OPENCHAMBER_DATA_DIR, 'cloudflare-managed-remote-tunnels.json');
@@ -668,6 +677,7 @@ let runtimeManagedRemoteTunnelHostname = '';
 let terminalRuntime = null;
 let messageStreamRuntime = null;
 let remoteInstancesRuntimeRef = null;
+let agentToolRuntime = null;
 const userProvidedOpenCodePassword = hmrStateRuntime.getUserProvidedOpenCodePassword(hmrState);
 const initialOpenCodeAuthState = hmrStateRuntime.resolveOpenCodeAuthFromState({
   hmrState,
@@ -1200,11 +1210,21 @@ const openCodeLifecycleRuntime = createOpenCodeLifecycleRuntime({
   buildAugmentedPath,
   buildManagedOpenCodePath,
   getManagedOpenCodeShellEnvSnapshot: getLoginShellEnvSnapshot,
+  prepareManagedOpenCodeEnv: async () => {
+    if (ENV_SKIP_OPENCODE_START || openCodeLifecycleState.isExternalOpenCode) return {};
+    const settings = await readSettingsFromDiskMigrated();
+    const managedEnv = settings?.agentControlToolEnabled === false
+      ? {}
+      : await (agentToolRuntime?.prepareManagedOpenCodeEnv() || {});
+    return managedEnv;
+  },
   getActiveSessionCount,
   persistOpenCodePort,
   readPersistedOpenCodePort,
   persistManagedOpenCodeAuth,
   restoreManagedOpenCodeAuth,
+  recordLifecycleEvent: openCodeLifecycleJournal.record,
+  getLifecycleLogPath: () => openCodeLifecycleJournal.path,
 });
 
 const restartOpenCode = (...args) => openCodeLifecycleRuntime.restartOpenCode(...args);
@@ -1303,6 +1323,54 @@ const scheduledTasksRuntime = createScheduledTasksRuntime({
     }
   },
   logger: console,
+});
+
+const scheduledTaskService = createScheduledTaskService({
+  readSettingsFromDiskMigrated,
+  sanitizeProjects,
+  projectConfigRuntime,
+  scheduledTasksRuntime,
+});
+
+const openChamberSessionService = createOpenChamberSessionService({
+  readSettingsFromDiskMigrated,
+  sanitizeProjects,
+  validateDirectoryPath,
+  buildOpenCodeUrl,
+  getOpenCodeAuthHeaders,
+  waitForOpenCodeReady,
+  emitSessionCreatedEvent: (event) => {
+    broadcastGlobalUiEvent({
+      type: 'openchamber:session-created',
+      properties: event,
+    });
+  },
+});
+
+const openChamberControlService = createOpenChamberControlService({
+  readSettingsFromDiskMigrated,
+  sanitizeProjects,
+  buildOpenCodeUrl,
+  getOpenCodeAuthHeaders,
+  waitForOpenCodeReady,
+  sessionService: openChamberSessionService,
+  scheduledTaskService,
+});
+
+const runtimeFallbackApprovalService = createRuntimeFallbackApprovalService({
+  crypto,
+  broadcastEvent: broadcastGlobalUiEvent,
+  getQuotaProviders: () => import('./lib/quota/index.js'),
+});
+
+agentToolRuntime = createAgentToolRuntime({
+  crypto,
+  fsPromises,
+  path,
+  dataDir: OPENCHAMBER_DATA_DIR,
+  getActivePort: () => Number(server?.address()?.port) || null,
+  executeAction: (...args) => openChamberControlService.execute(...args),
+  runtimeFallbackApprovalService,
 });
 
 const ensureGlobalWatcherStarted = async () => {
@@ -1666,6 +1734,8 @@ async function main(options = {}) {
     getOpenChamberEventClients: () => uiOpenChamberEventClients,
     writeSseEvent,
     permissionAutoAcceptRuntime,
+    openChamberControlService,
+    agentToolRuntime,
   });
 
   const previewProxyRuntime = createPreviewProxyRuntime({

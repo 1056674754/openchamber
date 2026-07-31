@@ -25,6 +25,7 @@ import {
   logStatus, formatProviderWithIcon as clackFormatProviderWithIcon,
 } from './cli-output.js';
 import { createCliLifecycle } from './cli-lifecycle.js';
+import { createControlCommands } from './control-commands.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -617,6 +618,35 @@ function parseArgs(argv = process.argv.slice(2)) {
     explicitUiPassword: false,
     envSnapshot: true,
     foreground: false,
+    serverId: undefined,
+    directory: undefined,
+    projectId: undefined,
+    sessionId: undefined,
+    prompt: undefined,
+    messageId: undefined,
+    model: undefined,
+    agent: undefined,
+    variant: undefined,
+    goal: false,
+    goalTokenBudget: undefined,
+    wait: false,
+    lastAssistant: false,
+    timeout: undefined,
+    worktree: undefined,
+    branch: undefined,
+    startRef: undefined,
+    setUpstream: undefined,
+    limit: undefined,
+    withStatus: false,
+    last: false,
+    role: undefined,
+    taskId: undefined,
+    daily: undefined,
+    weekly: undefined,
+    once: undefined,
+    time: undefined,
+    cron: undefined,
+    timezone: undefined,
   };
 
   const removedFlagErrors = [];
@@ -759,6 +789,146 @@ function parseArgs(argv = process.argv.slice(2)) {
         options.sessionTtl = typeof value === 'string' ? value : options.sessionTtl;
         break;
       }
+      case 'server': {
+        const { value, nextIndex } = consumeValue(i, inlineValue);
+        i = nextIndex;
+        options.serverId = typeof value === 'string' ? value : options.serverId;
+        break;
+      }
+      case 'dir':
+      case 'directory': {
+        const { value, nextIndex } = consumeValue(i, inlineValue);
+        i = nextIndex;
+        options.directory = typeof value === 'string' ? value : options.directory;
+        break;
+      }
+      case 'project': {
+        const { value, nextIndex } = consumeValue(i, inlineValue);
+        i = nextIndex;
+        options.projectId = typeof value === 'string' ? value : options.projectId;
+        break;
+      }
+      case 'session': {
+        const { value, nextIndex } = consumeValue(i, inlineValue);
+        i = nextIndex;
+        options.sessionId = typeof value === 'string' ? value : options.sessionId;
+        break;
+      }
+      case 'prompt': {
+        const { value, nextIndex } = consumeValue(i, inlineValue);
+        i = nextIndex;
+        options.prompt = typeof value === 'string' ? value : options.prompt;
+        break;
+      }
+      case 'message': {
+        const { value, nextIndex } = consumeValue(i, inlineValue);
+        i = nextIndex;
+        options.messageId = typeof value === 'string' ? value : options.messageId;
+        break;
+      }
+      case 'model': {
+        const { value, nextIndex } = consumeValue(i, inlineValue);
+        i = nextIndex;
+        options.model = typeof value === 'string' ? value : options.model;
+        break;
+      }
+      case 'agent': {
+        const { value, nextIndex } = consumeValue(i, inlineValue);
+        i = nextIndex;
+        options.agent = typeof value === 'string' ? value : options.agent;
+        break;
+      }
+      case 'variant': {
+        const { value, nextIndex } = consumeValue(i, inlineValue);
+        i = nextIndex;
+        options.variant = typeof value === 'string' ? value : options.variant;
+        break;
+      }
+      case 'goal-token-budget': {
+        const { value, nextIndex } = consumeValue(i, inlineValue);
+        i = nextIndex;
+        options.goalTokenBudget = typeof value === 'string' ? value : options.goalTokenBudget;
+        break;
+      }
+      case 'timeout': {
+        const { value, nextIndex } = consumeValue(i, inlineValue);
+        i = nextIndex;
+        options.timeout = typeof value === 'string' ? value : options.timeout;
+        break;
+      }
+      case 'worktree': {
+        const { value, nextIndex } = consumeValue(i, inlineValue);
+        i = nextIndex;
+        options.worktree = typeof value === 'string' ? value : options.worktree;
+        break;
+      }
+      case 'branch': {
+        const { value, nextIndex } = consumeValue(i, inlineValue);
+        i = nextIndex;
+        options.branch = typeof value === 'string' ? value : options.branch;
+        break;
+      }
+      case 'start-ref':
+      case 'base': {
+        const { value, nextIndex } = consumeValue(i, inlineValue);
+        i = nextIndex;
+        options.startRef = typeof value === 'string' ? value : options.startRef;
+        break;
+      }
+      case 'limit': {
+        const { value, nextIndex } = consumeValue(i, inlineValue);
+        i = nextIndex;
+        options.limit = typeof value === 'string' ? value : options.limit;
+        break;
+      }
+      case 'role': {
+        const { value, nextIndex } = consumeValue(i, inlineValue);
+        i = nextIndex;
+        options.role = typeof value === 'string' ? value : options.role;
+        break;
+      }
+      case 'task': {
+        const { value, nextIndex } = consumeValue(i, inlineValue);
+        i = nextIndex;
+        options.taskId = typeof value === 'string' ? value : options.taskId;
+        break;
+      }
+      case 'daily': {
+        const { value, nextIndex } = consumeValue(i, inlineValue);
+        i = nextIndex;
+        options.daily = typeof value === 'string' ? value : options.daily;
+        break;
+      }
+      case 'weekly': {
+        const { value, nextIndex } = consumeValue(i, inlineValue);
+        i = nextIndex;
+        options.weekly = typeof value === 'string' ? value : options.weekly;
+        break;
+      }
+      case 'once': {
+        const { value, nextIndex } = consumeValue(i, inlineValue);
+        i = nextIndex;
+        options.once = typeof value === 'string' ? value : options.once;
+        break;
+      }
+      case 'time': {
+        const { value, nextIndex } = consumeValue(i, inlineValue);
+        i = nextIndex;
+        options.time = typeof value === 'string' ? value : options.time;
+        break;
+      }
+      case 'cron': {
+        const { value, nextIndex } = consumeValue(i, inlineValue);
+        i = nextIndex;
+        options.cron = typeof value === 'string' ? value : options.cron;
+        break;
+      }
+      case 'timezone': {
+        const { value, nextIndex } = consumeValue(i, inlineValue);
+        i = nextIndex;
+        options.timezone = typeof value === 'string' ? value : options.timezone;
+        break;
+      }
       case 'json':
         options.json = true;
         break;
@@ -790,6 +960,27 @@ function parseArgs(argv = process.argv.slice(2)) {
         break;
       case 'force':
         options.force = true;
+        break;
+      case 'goal':
+        options.goal = true;
+        break;
+      case 'wait':
+        options.wait = true;
+        break;
+      case 'last-assistant':
+        options.lastAssistant = true;
+        break;
+      case 'with-status':
+        options.withStatus = true;
+        break;
+      case 'last':
+        options.last = true;
+        break;
+      case 'upstream':
+        options.setUpstream = true;
+        break;
+      case 'no-upstream':
+        options.setUpstream = false;
         break;
       case 'show-secrets':
         options.showSecrets = true;
@@ -852,12 +1043,16 @@ function parseArgs(argv = process.argv.slice(2)) {
   const subcommand = command === 'tunnel' ? (positional[1] || 'help') : null;
   const tunnelAction = command === 'tunnel' ? (positional[2] || null) : null;
   const startupAction = command === 'startup' ? (positional[1] || 'status') : null;
+  const controlAction = ['projects', 'models', 'session', 'schedule'].includes(command)
+    ? (positional[1] || (command === 'projects' ? 'list' : command === 'models' ? 'show' : 'help'))
+    : null;
 
   return {
     command,
     subcommand,
     tunnelAction,
     startupAction,
+    controlAction,
     options,
     removedFlagErrors,
     helpRequested,
@@ -881,6 +1076,10 @@ COMMANDS:
   startup        Manage launch at system startup
   logs           Tail OpenChamber logs
   update         Check for and install updates
+  projects       List projects known to the target OpenChamber instance
+  models         Show the target instance's model and agent defaults
+  session        Create, inspect, fork, and send to sessions
+  schedule       Create and manage scheduled tasks
 
 OPTIONS:
   -p, --port              Web server port (default: ${DEFAULT_PORT})
@@ -907,6 +1106,8 @@ EXAMPLES:
   openchamber startup enable     # Start OpenChamber at user login
   openchamber tunnel help        # Show tunnel lifecycle help
   openchamber logs               # Follow logs for latest running instance
+  openchamber session list --server default --dir /path/to/project
+  openchamber schedule list --server default --project <project-id>
 `);
 }
 
@@ -1194,6 +1395,17 @@ function readDesktopLocalPortFromSettings() {
       return value;
     }
     return null;
+  } catch {
+    return null;
+  }
+}
+
+function readDesktopLocalClientTokenFromSettings() {
+  try {
+    const raw = fs.readFileSync(getSettingsFilePath(), 'utf8');
+    const parsed = JSON.parse(raw);
+    const value = parsed?.desktopLocalClientToken;
+    return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null;
   } catch {
     return null;
   }
@@ -2367,13 +2579,23 @@ async function requestJson(port, endpoint, options = {}) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
+    const requestHeaders = {
+      Accept: 'application/json',
+      ...(fetchOptions.body ? { 'Content-Type': 'application/json' } : {}),
+      ...(fetchOptions.headers || {}),
+    };
+    const desktopPort = readDesktopLocalPortFromSettings();
+    const hasAuthorization = Object.keys(requestHeaders)
+      .some((key) => key.toLowerCase() === 'authorization');
+    if (port === desktopPort && !hasAuthorization) {
+      const desktopToken = readDesktopLocalClientTokenFromSettings();
+      if (desktopToken) {
+        requestHeaders.Authorization = `Bearer ${desktopToken}`;
+      }
+    }
     const response = await fetch(buildLocalUrl(port, endpoint), {
       ...fetchOptions,
-      headers: {
-        Accept: 'application/json',
-        ...(fetchOptions.body ? { 'Content-Type': 'application/json' } : {}),
-        ...(fetchOptions.headers || {}),
-      },
+      headers: requestHeaders,
       signal: controller.signal,
     });
     const body = await response.json().catch(() => null);
@@ -2652,6 +2874,27 @@ async function resolveTargetInstance({
 
   const ports = running.map((entry) => entry.port).join(', ');
   throw new Error(`Multiple OpenChamber instances found: ${ports}. Use --port <port> or --all.`);
+}
+
+async function resolveControlTargetInstance({ options }) {
+  if (options.explicitPort && Number.isFinite(options.port) && options.port > 0) {
+    return { port: options.port, runtime: 'explicit', source: 'explicit-port' };
+  }
+
+  const desktopPort = readDesktopLocalPortFromSettings();
+  if (desktopPort) {
+    const info = await fetchSystemInfoFromPort(desktopPort);
+    if (info?.runtime === 'desktop') {
+      return {
+        port: desktopPort,
+        pid: Number.isFinite(info.pid) ? info.pid : null,
+        runtime: 'desktop',
+        source: 'desktop-settings+probe',
+      };
+    }
+  }
+
+  return resolveTargetInstance({ options, allowAutoStart: false });
 }
 
 async function resolveTunnelReadEntries(options) {
@@ -5273,9 +5516,29 @@ const commands = {
   },
 };
 
+const controlCommands = createControlCommands({
+  resolveTargetInstance: resolveControlTargetInstance,
+  requestJson,
+});
+
+commands.projects = (options, action) => controlCommands.projects(options, action);
+commands.models = (options, action) => controlCommands.models(options, action);
+commands.session = (options, action) => controlCommands.session(options, action);
+commands.schedule = (options, action) => controlCommands.schedule(options, action);
+
 async function main() {
   const parsed = parseArgs();
-  const { command, subcommand, tunnelAction, startupAction, options, removedFlagErrors, helpRequested, versionRequested } = parsed;
+  const {
+    command,
+    subcommand,
+    tunnelAction,
+    startupAction,
+    controlAction,
+    options,
+    removedFlagErrors,
+    helpRequested,
+    versionRequested,
+  } = parsed;
   activeCommandOptions = options;
 
   if (versionRequested) {
@@ -5309,6 +5572,8 @@ async function main() {
       showTunnelHelp();
     } else if (command === 'startup') {
       showStartupHelp();
+    } else if (command === 'session' || command === 'schedule') {
+      await commands[command](options, 'help');
     } else {
       showHelp();
     }
@@ -5325,8 +5590,26 @@ async function main() {
     return;
   }
 
+  if (['projects', 'models', 'session', 'schedule'].includes(command)) {
+    await commands[command](options, controlAction);
+    return;
+  }
+
   if (!commands[command]) {
-    const knownCommands = ['serve', 'stop', 'restart', 'status', 'tunnel', 'startup', 'logs', 'update'];
+    const knownCommands = [
+      'serve',
+      'stop',
+      'restart',
+      'status',
+      'tunnel',
+      'startup',
+      'logs',
+      'update',
+      'projects',
+      'models',
+      'session',
+      'schedule',
+    ];
     const suggestion = findClosestMatch(command, knownCommands);
     const hint = suggestion ? ` Did you mean '${suggestion}'?` : '';
     if (isJsonMode(options)) {
@@ -5420,7 +5703,9 @@ if (isCliExecution) {
     } else {
       console.error(`Error: ${message}`);
     }
-    const exitCode = error instanceof TunnelCliError ? error.exitCode : EXIT_CODE.GENERAL_ERROR;
+    const exitCode = Number.isInteger(error?.exitCode)
+      ? error.exitCode
+      : EXIT_CODE.GENERAL_ERROR;
     process.exit(exitCode);
   });
 }
@@ -5432,6 +5717,7 @@ export {
   shouldDisplayTunnelQr,
   isValidTunnelDoctorResponse,
   readDesktopLocalPortFromSettings,
+  readDesktopLocalClientTokenFromSettings,
   getPidFilePath,
   getInstanceFilePath,
   getOpenchamberProcessState,
@@ -5444,6 +5730,7 @@ export {
   discoverLifecycleInstances,
   discoverOpenChamberInstanceOnPort,
   discoverUnconfirmedRegistryInstanceOnPort,
+  resolveControlTargetInstance,
   ensureTunnelProfilesMigrated,
   resolveToken,
   redactProfileForOutput,
