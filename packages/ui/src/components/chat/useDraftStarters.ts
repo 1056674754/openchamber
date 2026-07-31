@@ -75,6 +75,7 @@ export function useDraftStarters(): UseDraftStartersResult {
 
     const craftGoalSupport = useSessionGoalServerSupport(projectRef?.serverId);
     const allowCraftGoalStarter = !isVSCodeRuntime() && craftGoalSupport.supported;
+    const allowScheduleTaskStarter = !isVSCodeRuntime();
 
     const [projectStarters, setProjectStarters] = React.useState<DraftStarterRef[]>([]);
 
@@ -108,6 +109,7 @@ export function useDraftStarters(): UseDraftStartersResult {
     const resolve = React.useCallback((ref: DraftStarterRef, group: StarterGroup): ResolvedStarter | null => {
         if (ref.type === 'command') {
             if (ref.name === 'craft-goal' && !allowCraftGoalStarter) return null;
+            if (ref.name === 'schedule-task' && !allowScheduleTaskStarter) return null;
             const builtin = getBuiltInStarter(ref.name);
             if (builtin) {
                 return { id: chipId(group, ref), ref, group, label: t(builtin.labelKey), icon: builtin.icon, submitText: builtin.command };
@@ -117,7 +119,7 @@ export function useDraftStarters(): UseDraftStartersResult {
         }
         if (!skillNames.has(ref.name)) return null;
         return { id: chipId(group, ref), ref, group, label: normalizeStarterLabel(ref.name), icon: SKILL_FALLBACK_ICON, submitText: `/${ref.name}` };
-    }, [t, commandNames, skillNames, allowCraftGoalStarter]);
+    }, [t, commandNames, skillNames, allowCraftGoalStarter, allowScheduleTaskStarter]);
 
     const globalRefs = React.useMemo<readonly DraftStarterRef[]>(
         () => globalRaw ?? DEFAULT_GLOBAL_STARTERS,
@@ -144,6 +146,7 @@ export function useDraftStarters(): UseDraftStartersResult {
         const items: PinnableItem[] = [];
         for (const b of BUILTIN_STARTERS) {
             if (b.name === 'craft-goal' && !allowCraftGoalStarter) continue;
+            if (b.name === 'schedule-task' && !allowScheduleTaskStarter) continue;
             items.push({ type: 'command', name: b.name, label: t(b.labelKey), icon: b.icon, section: 'built-in', scope: 'user' });
         }
         for (const c of commands) {
@@ -155,7 +158,7 @@ export function useDraftStarters(): UseDraftStartersResult {
         }
         // Only offer items that are not already pinned (removed built-ins reappear here).
         return items.filter((item) => !pinnedKeys.has(`${item.type}:${item.name}`));
-    }, [t, commands, skills, pinnedKeys, allowCraftGoalStarter]);
+    }, [t, commands, skills, pinnedKeys, allowCraftGoalStarter, allowScheduleTaskStarter]);
 
     const persistGlobal = React.useCallback((next: DraftStarterRef[]) => {
         useUIStore.getState().setGlobalDraftStarters(next);
