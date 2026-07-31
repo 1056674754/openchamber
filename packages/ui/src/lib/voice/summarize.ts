@@ -1,26 +1,15 @@
 /**
  * Text summarization utility
  * 
- * Calls the server-side text summarization endpoint which uses
- * the opencode.ai zen API with gpt-5-nano.
+ * Calls the active runtime's Small Model summarization endpoint.
  */
 
+import { runtimeFetch } from '@/lib/runtime-fetch';
+import { opencodeClient } from '@/lib/opencode/client';
 import { useConfigStore } from '@/stores/useConfigStore';
 
-const resolveSummarizeUrl = (): string => {
-    if (typeof window === 'undefined') {
-        return '/api/text/summarize';
-    }
-
-    const desktopServer = (window as typeof window & {
-        __OPENCHAMBER_DESKTOP_SERVER__?: { origin: string };
-    }).__OPENCHAMBER_DESKTOP_SERVER__;
-    const baseOrigin = desktopServer?.origin || window.location.origin;
-    return new URL('/api/text/summarize', baseOrigin).toString();
-};
-
 /**
- * Summarize text using the server-side zen API endpoint
+ * Summarize text using the active runtime's Small Model endpoint.
  * 
  * @param text - The text to summarize
  * @param options - Optional configuration
@@ -42,6 +31,7 @@ export async function summarizeText(
     const maxLength = options?.maxLength ?? store.summarizeMaxLength;
     const mode = options?.mode ?? 'tts';
     const normalizedSource = text.replace(/\s+/g, ' ').trim();
+    const directory = opencodeClient.getDirectory();
     
     // Don't summarize if text is under threshold
     if (text.length <= threshold) {
@@ -52,12 +42,20 @@ export async function summarizeText(
     }
     
     try {
-         const response = await fetch(resolveSummarizeUrl(), {
+         const response = await runtimeFetch('/api/text/summarize', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
             },
-             body: JSON.stringify({ text, threshold, maxLength, mode }),
+             body: JSON.stringify({
+                 text,
+                 threshold,
+                 maxLength,
+                 mode,
+                 directory,
+                 ...(store.currentProviderId ? { preferredProviderID: store.currentProviderId } : {}),
+                 ...(store.currentModelId ? { preferredModelID: store.currentModelId } : {}),
+             }),
         });
         
         if (!response.ok) {

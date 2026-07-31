@@ -500,6 +500,10 @@ export const createNotificationTriggerRuntime = (deps) => {
       if (info?.role === 'assistant' && info?.finish === 'error' && sessionId) {
         const settings = await readSettingsFromDisk();
         if (settings.notifyOnError === false) return;
+        if (settings.notifyOnSubtasks === false) {
+          const parentID = await fetchSessionParentId(sessionId, notificationDirectory);
+          if (parentID !== null) return;
+        }
 
         const now = Date.now();
         const lastAt = lastErrorNotificationAt.get(sessionId) ?? 0;

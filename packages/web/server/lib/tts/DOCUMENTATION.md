@@ -33,10 +33,10 @@ This module provides server-side Text-to-Speech services using OpenAI's TTS API.
 - `TTS_VOICES`: Array of supported OpenAI voices: `['alloy', 'ash', 'ballad', 'coral', 'echo', 'fable', 'nova', 'onyx', 'sage', 'shimmer', 'verse', 'marin', 'cedar']`.
 
 ### Summarization defaults
-- No model request timeout is used; the summarization provider is disabled.
+- The shared Small Model runtime controls provider execution and failure handling. The route forwards the active directory and preferred provider/model so selection remains instance-scoped.
 
 ### Default values
-- `summarizeText` defaults: `threshold` = 200, `maxLength` = 500, `mode` = 'tts'. `zenModel` is ignored.
+- `summarizeText` defaults: `threshold` = 200, `maxLength` = 500, `mode` = 'tts'.
 - `generateSpeechStream` defaults: `voice` = 'coral', `model` = 'gpt-4o-mini-tts', `speed` = 1.0.
 - `generateSpeechBuffer` defaults: `voice` = 'coral', `model` = 'gpt-4o-mini-tts', `speed` = 1.0.
 
@@ -67,7 +67,7 @@ Returns object with:
 - `originalLength`: Optional number for original text length.
 - `summaryLength`: Optional number for summarized text length.
 
-The route-level text summarize API is now `/api/text/summarize`.
+The route-level text summarize API is `/api/text/summarize`. Callers should send `directory`, `preferredProviderID`, and `preferredModelID`; the UI uses the active runtime route rather than assuming the desktop-local origin.
 
 ### `sanitizeForTTS`
 Returns sanitized string with markdown, URLs, file paths, and special characters removed.
@@ -90,10 +90,10 @@ OpenAI API keys are resolved in order:
 The TTS module is used by `packages/web/server/index.js` for:
 - Generating speech streams for client playback.
 - Generating speech buffers for caching.
-- Sanitizing text before TTS synthesis. Historical summarization calls now return local fallback text.
-- Sanitizing text to remove non-speakable content.
+- Sanitizing text before TTS synthesis.
+- Routing long-form summarization through the Small Model runtime with a local fallback.
 
-The historical summarization API is shared with notifications and notes, but currently acts as a no-model fallback/stub.
+The summarization API is shared with notifications, notes, and voice playback.
 
 The server-side TTS approach bypasses mobile Safari's audio context restrictions by generating audio on the server and streaming to clients.
 
@@ -113,7 +113,7 @@ The server-side TTS approach bypasses mobile Safari's audio context restrictions
 
 ### Error handling
 - `generateSpeechStream` and `generateSpeechBuffer` throw descriptive errors for missing API keys or empty text.
-- `summarizeText` does not call Zen and returns mode-specific fallback text with `summarized: false`.
+- `summarizeText` returns a mode-specific fallback with `summarized: false` when the Small Model is unavailable.
 - All errors are logged to console with `[TTSService]` or `[Summarize]` prefix.
 
 ### API key management
@@ -125,7 +125,7 @@ The server-side TTS approach bypasses mobile Safari's audio context restrictions
 - Run `bun run type-check`, `bun run lint`, and `bun run build` before finalizing changes.
 - Test API key resolution with environment variable and auth file.
 - Test speech generation with various text lengths and voice options.
-- Test summarization stub behavior above and below threshold.
+- Test Small Model summarization and local fallback behavior above and below threshold.
 - Test sanitization with markdown, URLs, and code blocks.
 - Verify streaming and buffer generation produce valid MP3 audio.
 
@@ -136,7 +136,7 @@ The server-side TTS approach bypasses mobile Safari's audio context restrictions
 2. Test `ttsService.isAvailable()` returns true.
 3. Call `ttsService.generateSpeechStream({ text: 'Hello world' })` and verify stream is returned.
 4. Call `ttsService.generateSpeechBuffer({ text: 'Hello world' })` and verify Buffer is returned.
-5. Test `summarizeText` with text above and below threshold.
+5. Test `summarizeText` with text above and below threshold, including directory and preferred provider/model forwarding.
 6. Test `sanitizeForTTS` with markdown, URLs, and code blocks.
 
 ### API endpoint verification

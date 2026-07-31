@@ -25,6 +25,12 @@ describe('remote instance proxy timeouts', () => {
     expect(getRemoteProxyRequestTimeoutMs('/api/session/ses_123/shell', 'GET')).toBe(5_000);
   });
 
+  it('lets synchronous session compaction finish', () => {
+    expect(getRemoteProxyRequestTimeoutMs('/api/session/ses_123/summarize', 'POST')).toBe(600_000);
+    expect(getRemoteProxyRequestTimeoutMs('/api/session/ses_123/compact', 'POST')).toBe(600_000);
+    expect(getRemoteProxyRequestTimeoutMs('/api/session/ses_123/summarize', 'GET')).toBe(5_000);
+  });
+
   it('allows OpenCode upgrades to wait for package manager commands', () => {
     expect(getRemoteProxyRequestTimeoutMs('/api/opencode/upgrade', 'POST')).toBe(600_000);
     expect(getRemoteProxyRequestTimeoutMs('/api/opencode/upgrade', 'GET')).toBe(5_000);

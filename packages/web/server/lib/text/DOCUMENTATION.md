@@ -4,16 +4,16 @@
 This module provides shared text transformation helpers that are not owned by a single product surface. It previously proxied model-backed summarization through the opencode.ai Zen provider; that provider is no longer available for this use, so summarization now returns local sanitized/distilled fallback text only.
 
 ## Entrypoints and structure
-- `packages/web/server/lib/text/summarization.js`: Shared summarize stub, session-title fallback, and sanitize helpers. It performs no external model calls.
+- `packages/web/server/lib/text/summarization.js`: Shared Small Model summarization, session-title generation, and sanitize helpers.
 
 ## Public exports
 
 ### Summarization (summarization.js)
-- `summarizeText({ text, threshold, maxLength, zenModel, mode })`: Retired summarization entrypoint retained as an API-compatible stub. `zenModel` is ignored.
+- `summarizeText({ text, threshold, maxLength, mode, directory, preferredProviderID, preferredModelID })`: Uses the Small Model runtime with session directory and preferred-provider constraints, then returns a mode-specific local fallback when generation is unavailable.
 - `sanitizeForTTS(text)`: Sanitizes text for speech output.
 - `sanitizeForNotification(text)`: Sanitizes text for compact notification output.
 - `sanitizeForNote(text)`: Sanitizes text for short note/distillation output.
-- `generateSessionTitleCandidates({ text, count, maxLength, zenModel })`: Session-title candidate API retained for OpenChamber. It returns local fallback candidates with `generated: false`; `zenModel` is ignored.
+- `generateSessionTitleCandidates({ text, count, maxLength, directory, preferredProviderID, preferredModelID })`: Generates bounded title candidates through the same constrained Small Model runtime and returns an explicit failure reason instead of inventing local candidates.
 
 ## Modes
 - `tts`: Speakable summary for TTS flows.

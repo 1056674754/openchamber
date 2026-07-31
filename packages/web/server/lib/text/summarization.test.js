@@ -4,7 +4,7 @@ import { sanitizeForTTS, summarizeText, generateSessionTitleCandidates } from '.
 
 const originalFetch = globalThis.fetch;
 
-describe('text summarization stubs', () => {
+describe('text summarization', () => {
   afterEach(() => {
     globalThis.fetch = originalFetch;
   });
@@ -14,9 +14,13 @@ describe('text summarization stubs', () => {
     expect(sanitizeForTTS('Before\n```js\nconst value = 1\n```\nAfter')).toBe('Before After');
   });
 
-  it('does not call the retired zen provider', async () => {
-    const fetchMock = vi.fn();
-    globalThis.fetch = fetchMock;
+  it('uses the session-scoped small model instead of the retired zen provider', async () => {
+    const generateText = vi.fn(async () => ({
+      text: 'Templates now load before notification dispatch.',
+      providerID: 'openai',
+      modelID: 'gpt-5-nano',
+      source: 'preferred-model',
+    }));
 
     const result = await summarizeText({
       text: 'The implementation now correctly loads notification templates before dispatching the notification. It also fetches the latest assistant message when the event payload does not include message parts. This should make completion notifications match user settings.',
@@ -24,26 +28,37 @@ describe('text summarization stubs', () => {
       maxLength: 80,
       zenModel: 'gpt-5-nano',
       mode: 'notification',
+      directory: '/tmp/project',
+      preferredProviderID: 'openai',
+      preferredModelID: 'gpt-5',
+      generateText,
     });
 
-    expect(fetchMock).not.toHaveBeenCalled();
-    expect(result.summarized).toBe(false);
-    expect(result.reason).toBe('Model summarization provider unavailable');
-    expect(result.summary).toBe('The implementation now correctly loads notification templates before dispatchin…');
+    expect(generateText).toHaveBeenCalledWith(expect.objectContaining({
+      directory: '/tmp/project',
+      preferredProviderID: 'openai',
+      preferredModelID: 'gpt-5',
+      restrictToPreferredProvider: true,
+    }));
+    expect(result.summarized).toBe(true);
+    expect(result.summary).toBe('Templates now load before notification dispatch.');
   });
 
-  it('returns local note fallback while provider is unavailable', async () => {
+  it('returns a local note fallback when the small model is unavailable', async () => {
     const result = await summarizeText({
       text: 'First sentence. Second sentence with the useful insight.',
       threshold: 0,
       maxLength: 100,
       mode: 'note',
+      generateText: async () => {
+        throw new Error('No small model available within the session provider');
+      },
     });
 
     expect(result).toMatchObject({
       summary: 'First sentence.',
       summarized: false,
-      reason: 'Model summarization provider unavailable',
+      reason: 'No small model available within the session provider',
     });
   });
 });

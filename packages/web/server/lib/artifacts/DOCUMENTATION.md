@@ -13,7 +13,8 @@ switches do not remove user-facing deliverables.
   - Resolves only 64-character lowercase SHA-256 publication IDs.
   - Reads immutable content and its `manifest.json` from
     `{openchamberDataDir}/artifacts/{artifactId}/`.
-  - Serves safe image, text, and PDF MIME types inline.
+  - Serves allowlisted images, PDF, structured text, Markdown, and HTML inline.
+  - Active HTML/SVG previews run in an opaque sandbox with explicit network/resource directives.
   - Forces all other MIME types to download and applies a sandbox CSP.
 
 ## Ownership boundary

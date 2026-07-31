@@ -61,6 +61,33 @@ describe('artifact routes', () => {
     expect(response.headers['x-content-type-options']).toBe('nosniff');
   });
 
+  it('streams artifacts when the data directory has a dot-prefixed ancestor', async () => {
+    // Given
+    const tempRoot = await makeTempDir();
+    const openchamberDataDir = path.join(tempRoot, '.config', 'openchamber');
+    const id = 'e'.repeat(64);
+    await writeArtifact(openchamberDataDir, {
+      version: 1,
+      id,
+      name: 'preview.png',
+      mime: 'image/png',
+      size: 7,
+      sha256: 'f'.repeat(64),
+      kind: 'image',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      createdAt: '2026-07-23T10:00:00.000Z',
+    }, Buffer.from('preview'));
+    const app = createApp(openchamberDataDir);
+
+    // When
+    const response = await request(app).get(`/api/artifacts/${id}/content`);
+
+    // Then
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual(Buffer.from('preview'));
+  });
+
   it('uses an attachment disposition only for downloads', async () => {
     // Given
     const openchamberDataDir = await makeTempDir();
@@ -87,6 +114,56 @@ describe('artifact routes', () => {
     expect(inlineResponse.headers['content-disposition']).toBeUndefined();
     expect(downloadResponse.headers['content-disposition']).toContain('attachment');
     expect(downloadResponse.headers['content-disposition']).toContain("filename*=UTF-8''");
+  });
+
+  it('serves HTML inline in an active-content sandbox', async () => {
+    const openchamberDataDir = await makeTempDir();
+    const id = '1'.repeat(64);
+    const content = '<!doctype html><title>Artifact preview</title><script>document.body.dataset.ready = "yes"</script>';
+    await writeArtifact(openchamberDataDir, {
+      version: 1,
+      id,
+      name: 'preview.html',
+      mime: 'text/html',
+      size: Buffer.byteLength(content),
+      sha256: '2'.repeat(64),
+      kind: 'document',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      createdAt: '2026-07-23T10:00:00.000Z',
+    }, content);
+    const app = createApp(openchamberDataDir);
+
+    const response = await request(app).get(`/api/artifacts/${id}/content`);
+
+    expect(response.status).toBe(200);
+    expect(response.headers['content-type']).toContain('text/html');
+    expect(response.headers['content-disposition']).toBeUndefined();
+    expect(response.headers['content-security-policy']).toContain('sandbox allow-forms allow-scripts');
+    expect(response.headers['content-security-policy']).not.toContain('allow-same-origin');
+  });
+
+  it('continues to force unknown binary artifacts to download', async () => {
+    const openchamberDataDir = await makeTempDir();
+    const id = '3'.repeat(64);
+    await writeArtifact(openchamberDataDir, {
+      version: 1,
+      id,
+      name: 'bundle.bin',
+      mime: 'application/octet-stream',
+      size: 4,
+      sha256: '4'.repeat(64),
+      kind: 'file',
+      sessionID: 'session-1',
+      messageID: 'message-1',
+      createdAt: '2026-07-23T10:00:00.000Z',
+    }, Buffer.from('data'));
+    const app = createApp(openchamberDataDir);
+
+    const response = await request(app).get(`/api/artifacts/${id}/content`);
+
+    expect(response.status).toBe(200);
+    expect(response.headers['content-disposition']).toContain('attachment');
   });
 
   it('rejects artifact ids that could escape the store', async () => {

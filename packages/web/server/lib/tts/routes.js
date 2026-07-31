@@ -2,7 +2,7 @@ import express from 'express';
 import { normalizeCustomOpenAIBaseURL } from './base-url.js';
 import { summarizeText, sanitizeForTTS, sanitizeForNote, generateSessionTitleCandidates } from '../text/summarization.js';
 
-export function registerTtsRoutes(app, { sayTTSCapability }) {
+export function registerTtsRoutes(app, { sayTTSCapability, summarize = summarizeText }) {
   let ttsModulePromise = null;
   const getTtsModule = async () => {
     if (!ttsModulePromise) {
@@ -74,9 +74,6 @@ export function registerTtsRoutes(app, { sayTTSCapability }) {
 
       const textToSpeak = text.trim();
 
-      // Historical summarize request fields are intentionally ignored. The
-      // model-backed summarization provider is retired.
-
       const result = await ttsService.generateSpeechStream({
         text: textToSpeak,
         voice,
@@ -105,17 +102,28 @@ export function registerTtsRoutes(app, { sayTTSCapability }) {
 
   app.post('/api/text/summarize', async (req, res) => {
     try {
-      const { text, threshold = 200, maxLength = 500, mode } = req.body || {};
+      const {
+        text,
+        threshold = 200,
+        maxLength = 500,
+        mode,
+        directory,
+        preferredProviderID,
+        preferredModelID,
+      } = req.body || {};
 
       if (!text || typeof text !== 'string' || !text.trim()) {
         return res.status(400).json({ error: 'Text is required' });
       }
 
-      const result = await summarizeText({
+      const result = await summarize({
         text,
         threshold,
         maxLength,
         mode: typeof mode === 'string' ? mode : 'tts',
+        directory: typeof directory === 'string' ? directory : undefined,
+        preferredProviderID: typeof preferredProviderID === 'string' ? preferredProviderID : undefined,
+        preferredModelID: typeof preferredModelID === 'string' ? preferredModelID : undefined,
       });
 
       return res.json(result);

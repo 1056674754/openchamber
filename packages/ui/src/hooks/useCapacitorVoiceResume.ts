@@ -4,10 +4,8 @@ import React from 'react';
 import { isCapacitorApp } from '@/lib/platform';
 
 /**
- * M9 minimal: listen for Capacitor foreground resume.
- * ComposerDictation / streaming dictation is not wired yet (#11 main track);
- * this hook only emits a DOM event so a future voice owner can resume without
- * inventing a second app-state listener.
+ * Emit the shared foreground-resume event consumed by useBrowserVoice so an
+ * active dictation session can reacquire its selected STT provider.
  */
 export function useCapacitorVoiceResume(): void {
   React.useEffect(() => {

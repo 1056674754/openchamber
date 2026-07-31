@@ -1,5 +1,34 @@
 const ARTIFACT_ID_PATTERN = /^[a-f0-9]{64}$/;
-const SAFE_INLINE_MIME_PATTERN = /^(?:image\/(?:avif|bmp|gif|jpeg|png|webp)|text\/plain|application\/pdf)$/;
+const SAFE_INLINE_MIME_TYPES = new Set([
+  'application/json',
+  'application/pdf',
+  'application/xml',
+  'application/yaml',
+  'image/avif',
+  'image/bmp',
+  'image/gif',
+  'image/jpeg',
+  'image/png',
+  'image/svg+xml',
+  'image/webp',
+  'text/csv',
+  'text/html',
+  'text/markdown',
+  'text/plain',
+  'text/xml',
+]);
+const ACTIVE_DOCUMENT_MIME_TYPES = new Set(['image/svg+xml', 'text/html']);
+const PASSIVE_PREVIEW_CSP = "sandbox; default-src 'none'";
+const ACTIVE_PREVIEW_CSP = [
+  'sandbox allow-forms allow-scripts',
+  "default-src 'none'",
+  "connect-src http: https:",
+  "font-src data: http: https:",
+  "img-src blob: data: http: https:",
+  "media-src blob: data: http: https:",
+  "script-src 'unsafe-eval' 'unsafe-inline' http: https:",
+  "style-src 'unsafe-inline' http: https:",
+].join('; ');
 
 const isRecord = (value) => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 
@@ -53,15 +82,18 @@ export const registerArtifactRoutes = (app, dependencies) => {
         return res.status(500).json({ error: 'Artifact content is invalid' });
       }
 
-      const download = req.query.download === 'true' || !SAFE_INLINE_MIME_PATTERN.test(manifest.mime);
+      const download = req.query.download === 'true' || !SAFE_INLINE_MIME_TYPES.has(manifest.mime);
       res.setHeader('Cache-Control', 'private, max-age=31536000, immutable');
-      res.setHeader('Content-Security-Policy', "sandbox; default-src 'none'");
+      res.setHeader(
+        'Content-Security-Policy',
+        ACTIVE_DOCUMENT_MIME_TYPES.has(manifest.mime) ? ACTIVE_PREVIEW_CSP : PASSIVE_PREVIEW_CSP,
+      );
       res.setHeader('X-Content-Type-Options', 'nosniff');
       res.setHeader('Content-Type', manifest.mime);
       if (download) {
         res.setHeader('Content-Disposition', buildContentDisposition(path.basename(manifest.name)));
       }
-      return res.sendFile(contentPath);
+      return res.sendFile(contentPath, { dotfiles: 'allow' });
     } catch (error) {
       if (error instanceof SyntaxError) {
         return res.status(500).json({ error: 'Artifact manifest is invalid' });

@@ -180,7 +180,20 @@ export function ConfigCard({
               </Select>
             </div>
 
-            {/* Keep server running */}
+            {/* Remote Port */}
+            <div className={ROW_CLASSES}>
+              <span className={LABEL_CLASSES}>Remote Port</span>
+              <NumberInput
+                value={preferredRemotePort}
+                onValueChange={onPreferredRemotePortChange!}
+                min={1}
+                max={65535}
+                step={1}
+                onClear={() => onPreferredRemotePortChange?.(undefined)}
+                emptyLabel="Auto"
+              />
+            </div>
+
             {remoteMode === "managed" && (
               <>
                 <div className={ROW_CLASSES}>
@@ -191,20 +204,6 @@ export function ConfigCard({
                       onCheckedChange={onKeepRunningChange!}
                     />
                   </div>
-                </div>
-
-                {/* Remote Port */}
-                <div className={ROW_CLASSES}>
-                  <span className={LABEL_CLASSES}>Remote Port</span>
-                  <NumberInput
-                    value={preferredRemotePort}
-                    onValueChange={onPreferredRemotePortChange!}
-                    min={1}
-                    max={65535}
-                    step={1}
-                    onClear={() => onPreferredRemotePortChange?.(undefined)}
-                    emptyLabel="Auto"
-                  />
                 </div>
 
                 {/* Install Method */}

@@ -98,6 +98,42 @@ describe('notification trigger runtime', () => {
     expect(sendPushToAllUiSessions).not.toHaveBeenCalled();
   });
 
+  it('suppresses only subagent errors when subtask notifications are disabled', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url) => ({
+      ok: true,
+      json: async () => String(url).includes('/session/child')
+        ? { id: 'child', parentID: 'parent' }
+        : { id: 'main' },
+    })));
+    const { runtime, sendPushToAllUiSessions } = createRuntime({ notifyOnSubtasks: false });
+
+    await runtime.maybeSendPushForTrigger({
+      type: 'session.error',
+      properties: {
+        sessionID: 'child',
+        directory: '/workspace/project',
+        error: { message: 'User aborted' },
+      },
+    });
+
+    expect(sendPushToAllUiSessions).not.toHaveBeenCalled();
+
+    await runtime.maybeSendPushForTrigger({
+      type: 'session.error',
+      properties: {
+        sessionID: 'main',
+        directory: '/workspace/project',
+        error: { message: 'Connection failed' },
+      },
+    });
+
+    expect(sendPushToAllUiSessions).toHaveBeenCalledTimes(1);
+    expect(sendPushToAllUiSessions.mock.calls[0][0]).toEqual(expect.objectContaining({
+      body: 'Connection failed',
+      data: expect.objectContaining({ sessionId: 'main', type: 'error' }),
+    }));
+  });
+
   it('suppresses ready notifications while a session goal is active', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({
       ok: true,
