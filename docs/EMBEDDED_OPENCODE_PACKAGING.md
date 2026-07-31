@@ -1,6 +1,9 @@
 # Embedded OpenCode Packaging and Signing Runbook
 
-This document is the source of truth for building the custom OpenCode binary that OpenChamber embeds, packaging the Electron app, signing both code layers, notarizing release artifacts, and verifying the live runtime.
+This document is the source of truth for building the custom OpenCode fallback,
+packaging the stable Electron shell, installing mutable runtime releases,
+signing both executable layers, notarizing shell artifacts, and verifying the
+live runtime.
 
 Read this document before any of the following:
 
@@ -15,10 +18,16 @@ Read this document before any of the following:
 1. OpenChamber embeds the custom merged OpenCode build, not an official release substituted for convenience.
 2. A custom OpenCode build intended to preserve the shared history database must use `OPENCODE_CHANNEL=latest`.
 3. The OpenCode version string must identify the custom build with the `-sscity` suffix, for example `1.18.4-sscity`.
-4. The macOS packaged runtime must use `OpenChamber.app/Contents/Resources/opencode/opencode`, not the external ad-hoc binary under `~/.opencode/bin`.
-5. The nested OpenCode executable and the containing app must be signed by the same signing identity and Team ID.
+4. The notarized shell must contain a signed fallback at
+   `OpenChamber.app/Contents/Resources/opencode/opencode` and a signed Bun
+   engine at `OpenChamber.app/Contents/Resources/engine/bun`.
+5. The fallback OpenCode, Bun engine, native modules, and containing app must be
+   signed by the same signing identity and Team ID.
 6. Never modify the app bundle after signing. Replacing OpenCode, metadata, `app.asar`, or any other bundled file invalidates the outer signature.
-7. Never upgrade bundled OpenCode in place. Rebuild OpenCode and OpenChamber, then use the signing mode appropriate to the requested artifact. Notarization is required for release/distribution builds, not direct local QA or `/Applications` installation.
+7. Daily OpenChamber and OpenCode source changes deploy through the external
+   runtime. Never upgrade the fallback executable in place.
+8. A new or changed Mach-O, native `.node`, `.dylib`, Electron version, Bun
+   engine, entitlement, or shell loader requires a new notarized shell.
 
 ## Repository roles
 
@@ -27,9 +36,15 @@ Read this document before any of the following:
 - CLI OpenCode installation: `~/.opencode/bin/opencode`
 - Default OpenChamber packaging staging source: `~/.openchamber/bin/opencode`
 - Packaged OpenCode destination: `OpenChamber.app/Contents/Resources/opencode/opencode`
+- Packaged Bun engine: `OpenChamber.app/Contents/Resources/engine/bun`
+- Mutable runtime root: `~/Library/Application Support/OpenChamber/runtime`
 - Shared OpenCode database for the `latest` channel: `~/.local/share/opencode/opencode.db`
 
 OpenChamber's `packages/electron/scripts/after-pack.cjs` calls `embedded-opencode.cjs` during packaging. The hook copies the selected OpenCode binary into the app bundle, assigns executable permissions, signs it, verifies it, runs `--version`, and writes `Resources/opencode/metadata.json`. Electron Builder then performs the final recursive application signing pass.
+
+The same hook stages and signs Bun through `embedded-bun.cjs`. The stable shell
+uses that Bun executable to run the mutable OpenCode TypeScript source, while
+the compiled OpenCode binary remains an offline recovery path.
 
 OpenChamber's source version is `1.17.1-sscity` after the v1.17.1 migration audit and validation closed. Every Electron package appends its Asia/Shanghai build time and emits `1.17.1-sscity.YYYYMMDD-HHMMSS` (hyphen before time so early-morning `0HHMMSS` stays valid semver for electron-updater). This generated value is the package metadata and About-dialog version. Do not advance the baseline again until the migration table records the next upstream baseline as fully audited.
 
@@ -158,9 +173,54 @@ bun run package
 
 Do not disable timestamps for a release build. Do not use `Apple Development`, ad-hoc signing, or a local trust rule as a replacement for Developer ID signing and notarization.
 
-## 3. Embedded runtime authority
+### Stable shell and runtime-only releases
 
-Packaged desktop builds set `OPENCHAMBER_BUNDLED_OPENCODE_BINARY` before importing the web server. A valid embedded binary takes precedence over a persisted `settings.opencodeBinary` value such as `~/.opencode/bin/opencode`.
+The packaged app entrypoint is `dist-bundle/shell.mjs`. It is intentionally
+small and must remain stable. It verifies
+`~/Library/Application Support/OpenChamber/runtime/current/runtime-manifest.json`
+and loads the selected runtime. Missing, incompatible, or corrupted runtimes
+fall back to the runtime sealed into `app.asar`.
+
+For normal OpenChamber UI/server/preload changes and OpenCode TypeScript
+changes, build and activate only a runtime:
+
+```bash
+cd /Users/song/dev_ai/openchamber-merge-v1.11.0
+bun run electron:runtime:install
+```
+
+This command builds an isolated local candidate, extracts its JavaScript
+runtime, validates the OpenCode source launcher, checks the server import, and
+atomically switches `runtime/current`. It does not replace or modify
+`/Applications/OpenChamber.app`.
+
+The runtime builder first verifies every unpacked Mach-O signature, then
+compares it with the installed notarized shell by CodeDirectory hash. If a
+native executable changed or its signature is invalid, the runtime build must
+fail. Rebuild and notarize the shell instead of weakening that check.
+
+Rollback is also atomic:
+
+```bash
+bun run electron:runtime:rollback
+```
+
+The running process resolves `current` to one immutable version directory.
+Activating another runtime therefore takes effect on the next OpenChamber
+launch and cannot mutate a currently executing runtime.
+
+## 3. Runtime authority
+
+The embedded fallback and the external runtime launcher both set
+`OPENCHAMBER_BUNDLED_OPENCODE_BINARY` before importing the web server. This
+policy-controlled path takes precedence over a persisted
+`settings.opencodeBinary` value such as `~/.opencode/bin/opencode`.
+
+For an external runtime, the resolved path ends in
+`runtime/versions/<runtime-id>/opencode/opencode`. That launcher `exec`s the
+signed Bun engine from `OpenChamber.app/Contents/Resources/engine/bun` and
+imports `/Users/song/dev_ai/opencode/packages/opencode/src/index.ts`.
+`OPENCODE_CHANNEL=latest` preserves the shared database.
 
 The troubleshooting-only escape hatch is:
 
@@ -226,12 +286,16 @@ curl --noproxy '*' -sS http://127.0.0.1:57123/health
 curl --noproxy '*' -sS http://127.0.0.1:57123/api/config/opencode-resolution
 ```
 
-Required runtime evidence:
+Required runtime evidence for the stable-shell architecture:
 
 - `isOpenCodeReady` is `true`;
 - `opencodeBinarySource` or resolution `source` is `bundled`;
-- resolved and launch paths end in `OpenChamber.app/Contents/Resources/opencode/opencode`;
-- launch diagnostics identify the embedded binary.
+- resolved and launch paths end in
+  `runtime/versions/<runtime-id>/opencode/opencode`;
+- the live process command starts with
+  `OpenChamber.app/Contents/Resources/engine/bun` and includes
+  `opencode/bootstrap.mjs`;
+- `runtime/current` resolves to the manifest version reported during build.
 
 If OpenChamber reused a previously preserved managed process and the health snapshot has empty resolution fields, trigger the normal configuration reload, wait for readiness, and check again:
 
@@ -246,7 +310,7 @@ Confirm process ownership and path:
 
 ```bash
 ps -axo pid,ppid,command | \
-  rg 'OpenChamber.app/Contents/MacOS/OpenChamber|OpenChamber.app/Contents/Resources/opencode/opencode serve'
+  rg 'OpenChamber.app/Contents/MacOS/OpenChamber|OpenChamber.app/Contents/Resources/engine/bun'
 ```
 
 Verify the protected iCloud workspace through the real API:
@@ -297,7 +361,7 @@ The handoff must report separately:
 2. OpenChamber package build status;
 3. nested and outer signature status;
 4. notarization and Gatekeeper status;
-5. live embedded runtime status;
+5. live shell/runtime/OpenCode engine status;
 6. protected-directory API status;
 7. plugin status.
 
@@ -307,8 +371,12 @@ Never collapse these into a single statement such as “the build passed.”
 
 - **History appears empty:** the custom binary was built with a branch-derived channel instead of `latest`.
 - **Official OpenCode replaces the custom build:** the packaging source was not verified before embedding.
-- **Authorization keeps returning:** OpenCode was launched from an external ad-hoc binary whose code identity changes on rebuild.
+- **Authorization keeps returning:** the installed shell is not notarized, or a
+  new native executable bypassed the runtime CodeDirectory gate.
 - **Bundle signature becomes invalid:** a nested file was modified after the app was signed.
 - **Gatekeeper rejects an otherwise valid app:** the build used Apple Development or was not notarized; inspect the exact signing identity and notarization result.
 - **Upgrade endpoint returns 409:** expected for bundled OpenCode; rebuild and re-sign instead of bypassing the guard.
 - **Health reports a preserved process but no resolution:** query the resolution endpoint or perform a controlled configuration reload, then verify the new launch path.
+- **Runtime build reports a native mismatch:** dependency or engine native code
+  changed. Refresh and notarize the stable shell; do not copy the candidate
+  native binary into the active runtime.
