@@ -62,7 +62,8 @@ const readMeta = (storage: Storage): Map<string, PinnedSessionMeta> => {
 
 const persistMeta = (storage: Storage, meta: Map<string, PinnedSessionMeta>): void => {
   try {
-    const filtered = [...meta.values()].filter((m) => readPinned(storage).has(m.id)).slice(0, META_MAX_ENTRIES);
+    const pinnedIds = readPinned(storage);
+    const filtered = [...meta.values()].filter((m) => pinnedIds.has(m.id)).slice(0, META_MAX_ENTRIES);
     storage.setItem(PINNED_META_STORAGE_KEY, JSON.stringify(filtered));
   } catch {
     // ignore
@@ -112,8 +113,10 @@ export const useSessionPinnedStore = create<SessionPinnedStore>((set, get) => ({
     const current = get().ids;
     const resolved = typeof next === 'function' ? next(current) : next;
     if (resolved === current) return;
-    set({ ids: resolved });
+    const meta = pruneStaleMeta(get().metadataCache, resolved);
+    set({ ids: resolved, metadataCache: meta });
     persistPinned(safeStorage, resolved);
+    persistMeta(safeStorage, meta);
     syncPinnedSessionsToHost(resolved);
   },
   toggle: (sessionId) => {

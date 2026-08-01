@@ -1817,8 +1817,8 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
   ]);
 
   React.useEffect(() => {
-    upsertPinnedMetadata([...globalActiveSessions, ...globalArchivedSessions, ...liveSessions]);
-  }, [globalActiveSessions, globalArchivedSessions, liveSessions, pinnedSessionIds, upsertPinnedMetadata]);
+    upsertPinnedMetadata([...globalActiveSessions, ...globalArchivedSessions, ...liveSessions, ...serverSearchSessions]);
+  }, [globalActiveSessions, globalArchivedSessions, liveSessions, serverSearchSessions, pinnedSessionIds, upsertPinnedMetadata]);
 
   const globalPinnedSection = React.useMemo(() => {
     if (globalPinnedSessions.length === 0) {
