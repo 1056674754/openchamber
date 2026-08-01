@@ -528,8 +528,8 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
   const gitBranches = useGitAllBranches();
 
   const sync = useSync();
-  const liveSessions = useAllServersLiveSessions();
-  const liveSessionStatuses = useAllServersSessionStatuses();
+  const liveSessions = useAllServersLiveSessions({ enabled: sidebarActive });
+  const liveSessionStatuses = useAllServersSessionStatuses({ enabled: sidebarActive });
   const hasLoadedGlobalSessions = useGlobalSessionsStore((state) => state.hasLoaded);
   const isCompleteSessionSnapshot = useGlobalSessionsStore((state) => state.isCompleteSnapshot);
   const isScopeSnapshotComplete = useGlobalSessionsStore((state) => state.isScopeSnapshotComplete);

@@ -149,6 +149,25 @@ describe("applyDirectoryEvent", () => {
     })
   })
 
+  test("message.part.delta preserves session and session_status references (subscribe filtering invariant)", () => {
+    const draft = state({
+      session: [{ id: "ses_1", title: "Test", time: { created: 1, updated: 1 } } as Session],
+      session_status: { ses_1: { type: "busy" } as SessionStatus },
+      part: { msg_1: [{ id: "prt_1", messageID: "msg_1", type: "text", text: "" } as Part] },
+    })
+    const sessionRef = draft.session
+    const statusRef = draft.session_status
+
+    const result = applyDirectoryEvent(draft, deltaEvent())
+    expect(result).toBe(true)
+    // multi-server-hooks.ts subscribes with slice-reference filtering:
+    //   if (state.session !== prevState.session) listener()
+    // This optimization is only correct if message.part.delta never reassigns
+    // draft.session or draft.session_status. Lock that invariant here.
+    expect(draft.session).toBe(sessionRef)
+    expect(draft.session_status).toBe(statusRef)
+  })
+
   test("applies part update without materialization when owning message exists", () => {
     const draft = state({
       message: { ses_1: [{ id: "msg_1", sessionID: "ses_1", role: "assistant", time: { created: 1 } } as never] },

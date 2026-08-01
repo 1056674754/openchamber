@@ -281,7 +281,9 @@ export function useAllServersLiveSessions(options?: { enabled?: boolean }): Sess
         unsubscribe();
       }
       for (const store of childStores.children.values()) {
-        unsubs.push(store.subscribe(updateDefault));
+        unsubs.push(store.subscribe((state, prevState) => {
+          if (state.session !== prevState.session) updateDefault();
+        }));
       }
     };
 
@@ -318,7 +320,9 @@ export function useAllServersLiveSessions(options?: { enabled?: boolean }): Sess
       for (const entry of getAllSyncStores()) {
         if (entry.serverId === DEFAULT_SERVER_ID) continue;
         for (const store of entry.childStores.children.values()) {
-          storeUnsubs.push(store.subscribe(updateExtra));
+          storeUnsubs.push(store.subscribe((state, prevState) => {
+            if (state.session !== prevState.session) updateExtra();
+          }));
         }
       }
     };
@@ -364,16 +368,22 @@ export function useAllServersSessionStatuses(options?: { enabled?: boolean }): R
   const [extraStatuses, setExtraStatuses] = useState<Record<string, SessionStatus>>({});
   const defaultSigRef = useRef(statusStableSignature(defaultStatuses));
   const extraSigRef = useRef('');
+  const inflightRef = useRef(false);
 
   useEffect(() => {
     if (!enabled) return;
     const updateDefault = () => {
-      const next = getDefaultStatuses();
-      const sig = statusStableSignature(next);
-      if (sig !== defaultSigRef.current) {
-        defaultSigRef.current = sig;
-        setDefaultStatuses(next);
-      }
+      if (inflightRef.current) return;
+      inflightRef.current = true;
+      queueMicrotask(() => {
+        const next = getDefaultStatuses();
+        const sig = statusStableSignature(next);
+        if (sig !== defaultSigRef.current) {
+          defaultSigRef.current = sig;
+          setDefaultStatuses(next);
+        }
+        inflightRef.current = false;
+      });
     };
     const unsubs: (() => void)[] = [];
 
@@ -382,7 +392,9 @@ export function useAllServersSessionStatuses(options?: { enabled?: boolean }): R
         unsubscribe();
       }
       for (const store of childStores.children.values()) {
-        unsubs.push(store.subscribe(updateDefault));
+        unsubs.push(store.subscribe((state, prevState) => {
+          if (state.session_status !== prevState.session_status || state.session !== prevState.session) updateDefault();
+        }));
       }
     };
 
@@ -408,6 +420,7 @@ export function useAllServersSessionStatuses(options?: { enabled?: boolean }): R
         setExtraStatuses(next);
       }
     };
+
     const storeUnsubs: (() => void)[] = [];
 
     updateExtra();
@@ -419,11 +432,12 @@ export function useAllServersSessionStatuses(options?: { enabled?: boolean }): R
       for (const entry of getAllSyncStores()) {
         if (entry.serverId === DEFAULT_SERVER_ID) continue;
         for (const store of entry.childStores.children.values()) {
-          storeUnsubs.push(store.subscribe(updateExtra));
+          storeUnsubs.push(store.subscribe((state, prevState) => {
+            if (state.session_status !== prevState.session_status) updateExtra();
+          }));
         }
       }
     };
-
     syncExtraSubscriptions();
     const unsubRegistry = subscribeSyncStoresRegistry(() => {
       syncExtraSubscriptions();
