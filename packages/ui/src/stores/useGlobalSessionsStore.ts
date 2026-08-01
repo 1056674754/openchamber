@@ -738,12 +738,10 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
         }
       }
 
-      const nextCompleteScopes = state.completeSnapshotScopes.has(scopeKey)
+      const nextCompleteScopes = !isComplete || state.completeSnapshotScopes.has(scopeKey)
         ? state.completeSnapshotScopes
         : new Set(state.completeSnapshotScopes).add(scopeKey);
-      // Any successful scoped snapshot unlocks cleanup; per-scope flags still
-      // decide which directories may be pruned.
-      const nextIsCompleteSnapshot = true;
+      const nextIsCompleteSnapshot = isComplete ? true : state.isCompleteSnapshot;
 
       if (
         nextActiveSessions === state.activeSessions

@@ -7,6 +7,7 @@ import {
   areStringSetsEqual,
   markHostSessionPinsApplied,
 } from '@/lib/sessionPinSettings';
+import { serverRegistry } from '@/lib/opencode/server-registry';
 import { getSafeStorage } from './utils/safeStorage';
 
 export type PinnedSessionMeta = {
@@ -61,12 +62,27 @@ const readMeta = (storage: Storage): Map<string, PinnedSessionMeta> => {
 
 const persistMeta = (storage: Storage, meta: Map<string, PinnedSessionMeta>): void => {
   try {
-    const pinnedIds = readPinned(storage);
-    const filtered = [...meta.values()].filter((m) => pinnedIds.has(m.id)).slice(0, META_MAX_ENTRIES);
+    const filtered = [...meta.values()].filter((m) => readPinned(storage).has(m.id)).slice(0, META_MAX_ENTRIES);
     storage.setItem(PINNED_META_STORAGE_KEY, JSON.stringify(filtered));
   } catch {
     // ignore
   }
+};
+
+const pruneStaleMeta = (
+  meta: Map<string, PinnedSessionMeta>,
+  pinnedIds: Set<string>,
+): Map<string, PinnedSessionMeta> => {
+  if (meta.size === 0) return meta;
+  let changed = false;
+  const next = new Map(meta);
+  for (const id of next.keys()) {
+    if (!pinnedIds.has(id)) {
+      next.delete(id);
+      changed = true;
+    }
+  }
+  return changed ? next : meta;
 };
 
 type SessionPinnedStore = {
@@ -108,8 +124,10 @@ export const useSessionPinnedStore = create<SessionPinnedStore>((set, get) => ({
     } else {
       next.add(sessionId);
     }
-    set({ ids: next });
+    const meta = pruneStaleMeta(get().metadataCache, next);
+    set({ ids: next, metadataCache: meta });
     persistPinned(safeStorage, next);
+    persistMeta(safeStorage, meta);
     syncPinnedSessionsToHost(next);
   },
   replaceFromRemote: (ids) => {
@@ -121,8 +139,10 @@ export const useSessionPinnedStore = create<SessionPinnedStore>((set, get) => ({
     }
     suppressHostSync = true;
     try {
-      set({ ids: next });
+      const meta = pruneStaleMeta(get().metadataCache, next);
+      set({ ids: next, metadataCache: meta });
       persistPinned(safeStorage, next);
+      persistMeta(safeStorage, meta);
     } finally {
       suppressHostSync = false;
     }
@@ -154,6 +174,7 @@ export const useSessionPinnedStore = create<SessionPinnedStore>((set, get) => ({
         id: session.id,
         title,
         directory,
+        serverId: serverRegistry.getServerForSession(session.id) ?? existing?.serverId,
         updatedAt: session.time?.updated ?? session.time?.created ?? existing?.updatedAt ?? 0,
         cachedAt: now,
       });
