@@ -4,7 +4,7 @@ import path from 'path';
 import { readAuthFile } from '../opencode/auth.js';
 import { readConfigLayers } from '../opencode/shared.js';
 import { getModelCatalog } from './catalog.js';
-import { resolveSmallModel, parseModelRef, isUsableAuthEntry, getAuthEntryForProvider } from './resolve.js';
+import { resolveSmallModel, resolveSmallModelChain, parseModelRef, isUsableAuthEntry, getAuthEntryForProvider } from './resolve.js';
 import { callSmallModel } from './call.js';
 
 const OPENCHAMBER_SETTINGS_FILE = path.join(
@@ -57,6 +57,16 @@ const readConfiguredSmallModel = (workingDirectory) => {
   }
 };
 
+const readConfiguredSmallModelFallback = (workingDirectory) => {
+  try {
+    const { mergedConfig } = readConfigLayers(workingDirectory);
+    const value = mergedConfig?.small_model_fallback;
+    return Array.isArray(value) ? value.filter((v) => typeof v === 'string' && v.trim()) : null;
+  } catch {
+    return null;
+  }
+};
+
 /**
  * Generates text with the user's small model, resolved and authenticated
  * entirely server-side from the OpenCode config and auth store.
@@ -70,62 +80,80 @@ export async function generateSmallModelText({ prompt, system, maxOutputTokens, 
   const catalog = await getModelCatalog().catch(() => ({}));
 
   const explicit = parseModelRef(model);
-  const resolved = explicit
-    ? { ...explicit, source: 'request' }
-    : resolveSmallModel({
-      auth,
-      catalog,
-      settingsSmallModel: readSmallModelSettingsOverride(),
-      configSmallModel: readConfiguredSmallModel(directory),
-      preferredProviderID,
-      preferredModelID,
-    });
+  if (explicit) {
+    const candidates = [{ ...explicit, source: 'request' }];
+    return await tryCandidates(candidates, { auth, catalog, directory, prompt, system, maxOutputTokens, restrictToPreferredProvider, preferredProviderID });
+  }
 
-  if (!resolved) {
+  const candidates = resolveSmallModelChain({
+    auth,
+    catalog,
+    settingsSmallModel: readSmallModelSettingsOverride(),
+    configSmallModel: readConfiguredSmallModel(directory),
+    configSmallModelFallback: readConfiguredSmallModelFallback(directory),
+    preferredProviderID,
+    preferredModelID,
+  });
+
+  if (candidates.length === 0) {
     throw Object.assign(
       new Error('No small model available — no authenticated provider has a suitable model'),
       { statusCode: 404 },
     );
   }
 
-  // Callers with a session context can forbid silently switching providers:
-  // an explicit user choice (settings override, opencode config, request
-  // model) is always allowed, anything else must stay on the session's
-  // provider.
-  if (restrictToPreferredProvider
-    && !['settings', 'config', 'request'].includes(resolved.source)
-    && resolved.providerID !== preferredProviderID) {
-    throw Object.assign(
-      new Error('No small model available within the session provider'),
-      { statusCode: 404 },
-    );
+  return await tryCandidates(candidates, { auth, catalog, directory, prompt, system, maxOutputTokens, restrictToPreferredProvider, preferredProviderID });
+}
+
+async function tryCandidates(candidates, { auth, catalog, directory, prompt, system, maxOutputTokens, restrictToPreferredProvider, preferredProviderID }) {
+  const EXPLICIT_SOURCES = new Set(['settings', 'config', 'request', 'config-fallback']);
+  let lastError = null;
+
+  for (let i = 0; i < candidates.length; i++) {
+    const candidate = candidates[i];
+
+    if (restrictToPreferredProvider
+      && !EXPLICIT_SOURCES.has(candidate.source)
+      && candidate.providerID !== preferredProviderID) {
+      continue;
+    }
+
+    const clamped = clampPromptToModelLimit({
+      prompt: prompt.trim(),
+      catalog,
+      providerID: candidate.providerID,
+      modelID: candidate.modelID,
+    });
+
+    try {
+      const text = await callSmallModel({
+        auth,
+        catalog,
+        workingDirectory: directory,
+        providerID: candidate.providerID,
+        modelID: candidate.modelID,
+        prompt: clamped.prompt,
+        system: typeof system === 'string' && system.trim() ? system.trim() : undefined,
+        maxOutputTokens,
+      });
+
+      return {
+        text: text.trim(),
+        providerID: candidate.providerID,
+        modelID: candidate.modelID,
+        source: candidate.source,
+        ...(clamped.truncated ? { inputTruncated: true } : {}),
+      };
+    } catch (err) {
+      lastError = err;
+      if (i < candidates.length - 1) {
+        console.warn(`[small-model] ${candidate.providerID}/${candidate.modelID} failed, trying fallback`, err.message);
+      }
+    }
   }
 
-  const clamped = clampPromptToModelLimit({
-    prompt: prompt.trim(),
-    catalog,
-    providerID: resolved.providerID,
-    modelID: resolved.modelID,
-  });
-
-  const text = await callSmallModel({
-    auth,
-    catalog,
-    workingDirectory: directory,
-    providerID: resolved.providerID,
-    modelID: resolved.modelID,
-    prompt: clamped.prompt,
-    system: typeof system === 'string' && system.trim() ? system.trim() : undefined,
-    maxOutputTokens,
-  });
-
-  return {
-    text: text.trim(),
-    providerID: resolved.providerID,
-    modelID: resolved.modelID,
-    source: resolved.source,
-    ...(clamped.truncated ? { inputTruncated: true } : {}),
-  };
+  if (lastError) throw lastError;
+  throw Object.assign(new Error('No small model candidate passed the provider restriction'), { statusCode: 404 });
 }
 
 /**

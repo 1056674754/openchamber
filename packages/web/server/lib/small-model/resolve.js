@@ -129,3 +129,28 @@ export function resolveSmallModel({ auth, catalog, settingsSmallModel, configSma
 
   return null;
 }
+
+/**
+ * Resolves the full small-model candidate chain: primary (from
+ * resolveSmallModel) plus configured fallbacks from small_model_fallback.
+ * Each fallback entry must parse as provider/model and have a usable auth
+ * entry — unresolvable entries are silently skipped.
+ */
+export function resolveSmallModelChain({ auth, catalog, settingsSmallModel, configSmallModel, configSmallModelFallback, preferredProviderID, preferredModelID }) {
+  const candidates = [];
+
+  const primary = resolveSmallModel({ auth, catalog, settingsSmallModel, configSmallModel, preferredProviderID, preferredModelID });
+  if (primary) candidates.push(primary);
+
+  if (Array.isArray(configSmallModelFallback)) {
+    for (const entry of configSmallModelFallback) {
+      const ref = parseModelRef(entry);
+      if (!ref) continue;
+      if (!isUsableAuthEntry(getAuthEntryForProvider(auth, ref.providerID))) continue;
+      if (candidates.some((c) => c.providerID === ref.providerID && c.modelID === ref.modelID)) continue;
+      candidates.push({ ...ref, source: 'config-fallback' });
+    }
+  }
+
+  return candidates;
+}

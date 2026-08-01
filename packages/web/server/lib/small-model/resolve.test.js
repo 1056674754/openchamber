@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test';
-import { resolveSmallModel, parseModelRef, isUsableAuthEntry } from './resolve.js';
+import { resolveSmallModel, resolveSmallModelChain, parseModelRef, isUsableAuthEntry } from './resolve.js';
 
 const catalog = {
   google: {
@@ -193,5 +193,79 @@ describe('resolveSmallModel', () => {
       preferredModelID: 'mistral-large-latest',
     });
     expect(result).toEqual({ providerID: 'mistral', modelID: 'mistral-large-latest', source: 'session-model' });
+  });
+});
+
+describe('resolveSmallModelChain', () => {
+  it('returns primary plus configured fallbacks in order', () => {
+    const candidates = resolveSmallModelChain({
+      auth: {
+        anthropic: { type: 'api', key: 'sk-x' },
+        google: { type: 'api', key: 'g-key' },
+      },
+      catalog,
+      configSmallModel: 'anthropic/claude-haiku-4-5',
+      configSmallModelFallback: ['google/gemini-2.5-flash'],
+    });
+    expect(candidates.length).toBe(2);
+    expect(candidates[0]).toEqual({ providerID: 'anthropic', modelID: 'claude-haiku-4-5', source: 'config' });
+    expect(candidates[1]).toEqual({ providerID: 'google', modelID: 'gemini-2.5-flash', source: 'config-fallback' });
+  });
+
+  it('skips fallback entries whose provider has no usable auth', () => {
+    const candidates = resolveSmallModelChain({
+      auth: { anthropic: { type: 'api', key: 'sk-x' } },
+      catalog,
+      configSmallModel: 'anthropic/claude-haiku-4-5',
+      configSmallModelFallback: ['google/gemini-2.5-flash', 'anthropic/claude-sonnet-4-5'],
+    });
+    expect(candidates.length).toBe(2);
+    expect(candidates[1]).toEqual({ providerID: 'anthropic', modelID: 'claude-sonnet-4-5', source: 'config-fallback' });
+  });
+
+  it('deduplicates entries that match the primary', () => {
+    const candidates = resolveSmallModelChain({
+      auth: { anthropic: { type: 'api', key: 'sk-x' } },
+      catalog,
+      configSmallModel: 'anthropic/claude-haiku-4-5',
+      configSmallModelFallback: ['anthropic/claude-haiku-4-5', 'anthropic/claude-sonnet-4-5'],
+    });
+    expect(candidates.length).toBe(2);
+    expect(candidates[0].modelID).toBe('claude-haiku-4-5');
+    expect(candidates[1].modelID).toBe('claude-sonnet-4-5');
+  });
+
+  it('returns only the primary when no fallback config is set', () => {
+    const candidates = resolveSmallModelChain({
+      auth: { anthropic: { type: 'api', key: 'sk-x' } },
+      catalog,
+      configSmallModel: 'anthropic/claude-haiku-4-5',
+    });
+    expect(candidates.length).toBe(1);
+  });
+
+  it('returns fallbacks even when primary resolves via heuristic', () => {
+    const candidates = resolveSmallModelChain({
+      auth: {
+        google: { type: 'api', key: 'g-key' },
+        anthropic: { type: 'api', key: 'sk-x' },
+      },
+      catalog,
+      configSmallModel: null,
+      configSmallModelFallback: ['anthropic/claude-haiku-4-5'],
+    });
+    expect(candidates.length).toBe(2);
+    expect(candidates[0].source).toBe('family-scan');
+    expect(candidates[1]).toEqual({ providerID: 'anthropic', modelID: 'claude-haiku-4-5', source: 'config-fallback' });
+  });
+
+  it('returns empty array when nothing is authenticated', () => {
+    const candidates = resolveSmallModelChain({
+      auth: {},
+      catalog,
+      configSmallModel: null,
+      configSmallModelFallback: ['anthropic/claude-haiku-4-5'],
+    });
+    expect(candidates).toEqual([]);
   });
 });
