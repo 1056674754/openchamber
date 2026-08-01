@@ -1729,7 +1729,27 @@ export function SyncProvider(props: {
       childStores,
       () => {},
     )
-    return unregister
+    return () => {
+      if (serverId !== DEFAULT_SERVER_ID) {
+        const catalog = useGlobalSessionsStore.getState()
+        const existingIds = new Set(
+          [...catalog.activeSessions, ...catalog.archivedSessions].map((s) => s.id),
+        )
+        let promoted = false
+        for (const store of childStores.children.values()) {
+          for (const session of store.getState().session) {
+            if (session?.id && !existingIds.has(session.id)) {
+              catalog.upsertSession(session)
+              promoted = true
+            }
+          }
+        }
+        if (promoted) {
+          console.log(`[sync] promoted child-store sessions to global catalog before unregister: ${serverId}`)
+        }
+      }
+      unregister()
+    }
   }, [serverId, childStores])
 
   // Configure child store manager
