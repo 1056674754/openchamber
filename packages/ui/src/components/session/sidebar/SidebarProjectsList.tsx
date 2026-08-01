@@ -21,7 +21,7 @@ import { subscribeSyncStoresRegistry } from '@/sync/multi-server-registry';
 import { useDesktopSshStore } from '@/stores/useDesktopSshStore';
 import { resolveInstanceLabel } from '@/lib/desktopSsh';
 import { getMainWorkspaceSectionForRender } from './mainWorkspaceSection';
-import type { ProjectSortOrder } from '@/stores/useSessionDisplayStore';
+import { useSessionDisplayStore, type ProjectSortOrder } from '@/stores/useSessionDisplayStore';
 import {
   getRemoteProjectLoadStates,
   type RemoteProjectLoadState,
@@ -187,11 +187,15 @@ export function SidebarProjectsList(props: Props): React.ReactNode {
   // Empty sensor list: keeps SortableContext happy without attaching pointer listeners.
   const noopSensors = useSensors();
 
+  const stickyZoneHeaders = useSessionDisplayStore((state) => state.stickyZoneHeaders);
+
   // Capacitor/mobile drawer: native overflow only. OverlayScrollbar + ScrollShadow
   // observers fight 2k+ session-row DOM during touch scroll.
+  // hideTopShadow prevents the mask-image gradient from fading out stuck project headers.
   const listScrollProps = {
     useScrollShadow: !props.mobileVariant,
     scrollShadowSize: 96 as const,
+    hideTopShadow: stickyZoneHeaders && !props.mobileVariant,
     observeMutations: !props.mobileVariant,
     disableOverlayScrollbar: Boolean(props.mobileVariant),
     outerClassName: 'flex-1 min-h-0',
