@@ -2549,15 +2549,24 @@ export function useSessionParts(messageID: string, directory?: string) {
 /** Get status for a specific session */
 export function useSessionStatus(sessionID: string, directory?: string) {
   const store = useDirectoryStore(directory, useServerIdForSession(sessionID), sessionID)
-  const getSnapshot = useCallback(() => {
-    if (!sessionID) return undefined
-    return store.getState().session_status?.[sessionID]
-  }, [sessionID, store])
-  const subscribe = useCallback((notify: () => void) => {
-    if (!sessionID) return () => undefined
-    return store.subscribe(notify)
-  }, [sessionID, store])
-  return React.useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
+  const childStatus = React.useSyncExternalStore(
+    useCallback((notify: () => void) => {
+      if (!sessionID) return () => undefined
+      return store.subscribe(notify)
+    }, [sessionID, store]),
+    useCallback(() => {
+      if (!sessionID) return undefined
+      return store.getState().session_status?.[sessionID]
+    }, [sessionID, store]),
+    useCallback(() => {
+      if (!sessionID) return undefined
+      return store.getState().session_status?.[sessionID]
+    }, [sessionID, store]),
+  )
+  const globalStatus = useGlobalSessionsStore(
+    useCallback((state) => state.sessionStatuses.get(sessionID), [sessionID]),
+  )
+  return childStatus ?? globalStatus
 }
 
 /**
