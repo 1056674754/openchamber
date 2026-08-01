@@ -333,6 +333,8 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   const [bulkDeleteConfirm, setBulkDeleteConfirm] = React.useState<BulkDeleteSessionsConfirmState>(null);
   const [regenerateTitleSession, setRegenerateTitleSession] = React.useState<{ id: string; title: string } | null>(null);
   const pinnedSessionIds = useSessionPinnedStore((state) => state.ids);
+  const pinnedMetadataCache = useSessionPinnedStore((state) => state.metadataCache);
+  const upsertPinnedMetadata = useSessionPinnedStore((state) => state.upsertMetadata);
   const toggleGlobalPinnedSession = useSessionPinnedStore((state) => state.toggle);
   const setGlobalPinnedIds = useSessionPinnedStore((state) => state.setIds);
   const [pinnedSessionIdsByProject, setPinnedSessionIdsByProject] = React.useState<Map<string, Set<string>>>(() => {
@@ -1801,6 +1803,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
         serverSearchSessions,
       ],
       stubTitle: t('sessions.sidebar.activity.globalPinnedTitle'),
+      metadataCache: pinnedMetadataCache,
     });
   }, [
     globalActiveSessions,
@@ -1808,9 +1811,14 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
     liveSessions,
     pinnedOrder,
     pinnedSessionIds,
+    pinnedMetadataCache,
     serverSearchSessions,
     t,
   ]);
+
+  React.useEffect(() => {
+    upsertPinnedMetadata([...globalActiveSessions, ...globalArchivedSessions, ...liveSessions]);
+  }, [globalActiveSessions, globalArchivedSessions, liveSessions, upsertPinnedMetadata]);
 
   const globalPinnedSection = React.useMemo(() => {
     if (globalPinnedSessions.length === 0) {

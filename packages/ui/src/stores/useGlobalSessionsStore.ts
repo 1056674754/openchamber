@@ -20,6 +20,8 @@ type LoadResult = {
 export type ApplyDirectorySnapshotOptions = {
   /** Catalog revision captured before the list request started. */
   baselineRevision?: number;
+  /** When false, the snapshot may be truncated (at fetch limit) — existing scope sessions are preserved instead of pruned. */
+  isComplete?: boolean;
 };
 
 export const catalogScopeKey = (serverId: string, directory: string): string => {
@@ -662,6 +664,8 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
       return;
     }
 
+    const isComplete = options?.isComplete !== false;
+
     const current = get();
     const baselineRevision = options?.baselineRevision ?? current.catalogRevision;
     const existingById = new Map(
@@ -700,9 +704,13 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
     const scopeKey = catalogScopeKey(serverId, normalizedDirectory);
 
     set((state) => {
-      const keepExisting = (session: Session): boolean => (
-        !incomingIds.has(session.id) && !previousScopeIds.has(session.id)
-      );
+      const keepExisting = (session: Session): boolean => {
+        if (incomingIds.has(session.id)) return false;
+        if (!previousScopeIds.has(session.id)) return true;
+        // When snapshot may be truncated (at fetch limit), keep existing scope sessions
+        // instead of pruning them — they might exist beyond the first page.
+        return !isComplete;
+      };
       const incomingActive = incoming.filter((session) => !session.time?.archived);
       const incomingArchived = incoming.filter((session) => Boolean(session.time?.archived));
       let nextActiveSessions = sortSessionsByUpdated([
@@ -722,10 +730,12 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
       }
 
       let nextStatuses = state.sessionStatuses;
-      for (const id of previousScopeIds) {
-        if (incomingIds.has(id) || !nextStatuses.has(id)) continue;
-        if (nextStatuses === state.sessionStatuses) nextStatuses = new Map(state.sessionStatuses);
-        nextStatuses.delete(id);
+      if (isComplete) {
+        for (const id of previousScopeIds) {
+          if (incomingIds.has(id) || !nextStatuses.has(id)) continue;
+          if (nextStatuses === state.sessionStatuses) nextStatuses = new Map(state.sessionStatuses);
+          nextStatuses.delete(id);
+        }
       }
 
       const nextCompleteScopes = state.completeSnapshotScopes.has(scopeKey)
@@ -760,9 +770,11 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
       };
     });
 
-    for (const id of previousScopeIds) {
-      if (!incomingIds.has(id) && (serverRegistry.getServerForSession(id) ?? DEFAULT_SERVER_ID) === serverId) {
-        serverRegistry.forgetSession(id);
+    if (isComplete) {
+      for (const id of previousScopeIds) {
+        if (!incomingIds.has(id) && (serverRegistry.getServerForSession(id) ?? DEFAULT_SERVER_ID) === serverId) {
+          serverRegistry.forgetSession(id);
+        }
       }
     }
   },

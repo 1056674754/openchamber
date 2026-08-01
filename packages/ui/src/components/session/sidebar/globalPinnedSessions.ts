@@ -1,4 +1,5 @@
 import type { Session } from '@opencode-ai/sdk/v2';
+import type { PinnedSessionMeta } from '@/stores/useSessionPinnedStore';
 
 export type ResolveGlobalPinnedSessionsArgs = {
   pinnedIds: Iterable<string>;
@@ -6,23 +7,31 @@ export type ResolveGlobalPinnedSessionsArgs = {
   /** Unfiltered catalogs — do not pass project-visibility-filtered lists. */
   catalogs: ReadonlyArray<Iterable<Session>>;
   stubTitle?: string;
+  metadataCache?: Map<string, PinnedSessionMeta>;
 };
 
 /** Minimal session row so pin IDs remain visible before catalog hydrate. */
-export const createPinnedSessionStub = (id: string, title = 'Pinned session'): Session => {
+export const createPinnedSessionStub = (
+  id: string,
+  title = 'Pinned session',
+  meta?: PinnedSessionMeta,
+): Session => {
+  const effectiveTitle = meta?.title || title;
   return {
     id,
-    title,
+    title: effectiveTitle,
     time: {
-      created: 0,
-      updated: 0,
+      created: meta?.updatedAt ?? 0,
+      updated: meta?.updatedAt ?? 0,
     },
+    ...(meta?.directory ? { directory: meta.directory } : {}),
   } as Session;
 };
 
 /**
  * Resolve global pinned sessions by pin ID order from unfiltered catalogs.
  * Missing catalog entries become stubs so a synced pin list never renders empty.
+ * If metadataCache is provided, stubs use cached titles/directories instead of generic placeholders.
  */
 export const resolveGlobalPinnedSessions = (
   args: ResolveGlobalPinnedSessionsArgs,
@@ -47,5 +56,6 @@ export const resolveGlobalPinnedSessions = (
     : pinnedIds;
 
   const stubTitle = args.stubTitle ?? 'Pinned session';
-  return orderedIds.map((id) => byId.get(id) ?? createPinnedSessionStub(id, stubTitle));
+  const meta = args.metadataCache;
+  return orderedIds.map((id) => byId.get(id) ?? createPinnedSessionStub(id, stubTitle, meta?.get(id)));
 };

@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import type { Session } from '@opencode-ai/sdk/v2';
 import type { DesktopSettings } from '@/lib/desktop';
 import { updateDesktopSettings } from '@/lib/persistence';
 import {
@@ -7,6 +8,18 @@ import {
   markHostSessionPinsApplied,
 } from '@/lib/sessionPinSettings';
 import { getSafeStorage } from './utils/safeStorage';
+
+export type PinnedSessionMeta = {
+  id: string;
+  title: string;
+  directory?: string;
+  serverId?: string;
+  updatedAt: number;
+  cachedAt: number;
+};
+
+const PINNED_META_STORAGE_KEY = 'oc.sessions.pinned.meta';
+const META_MAX_ENTRIES = 200;
 
 const readPinned = (storage: Storage): Set<string> => {
   try {
@@ -28,12 +41,42 @@ const persistPinned = (storage: Storage, ids: Set<string>): void => {
   }
 };
 
+const readMeta = (storage: Storage): Map<string, PinnedSessionMeta> => {
+  try {
+    const raw = storage.getItem(PINNED_META_STORAGE_KEY);
+    if (!raw) return new Map();
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return new Map();
+    const map = new Map<string, PinnedSessionMeta>();
+    for (const entry of parsed) {
+      if (entry && typeof entry === 'object' && typeof (entry as PinnedSessionMeta).id === 'string') {
+        map.set((entry as PinnedSessionMeta).id, entry as PinnedSessionMeta);
+      }
+    }
+    return map;
+  } catch {
+    return new Map();
+  }
+};
+
+const persistMeta = (storage: Storage, meta: Map<string, PinnedSessionMeta>): void => {
+  try {
+    const pinnedIds = readPinned(storage);
+    const filtered = [...meta.values()].filter((m) => pinnedIds.has(m.id)).slice(0, META_MAX_ENTRIES);
+    storage.setItem(PINNED_META_STORAGE_KEY, JSON.stringify(filtered));
+  } catch {
+    // ignore
+  }
+};
+
 type SessionPinnedStore = {
   ids: Set<string>;
+  metadataCache: Map<string, PinnedSessionMeta>;
   setIds: (next: Set<string> | ((prev: Set<string>) => Set<string>)) => void;
   toggle: (sessionId: string) => void;
   replaceFromRemote: (ids: string[]) => void;
   rehydrate: () => void;
+  upsertMetadata: (sessions: Session[]) => void;
 };
 
 const safeStorage = getSafeStorage();
@@ -48,6 +91,7 @@ const syncPinnedSessionsToHost = (ids: Set<string>): void => {
 
 export const useSessionPinnedStore = create<SessionPinnedStore>((set, get) => ({
   ids: readPinned(safeStorage),
+  metadataCache: readMeta(safeStorage),
   setIds: (next) => {
     const current = get().ids;
     const resolved = typeof next === 'function' ? next(current) : next;
@@ -92,6 +136,32 @@ export const useSessionPinnedStore = create<SessionPinnedStore>((set, get) => ({
       set({ ids: next });
     } finally {
       suppressHostSync = false;
+    }
+  },
+  upsertMetadata: (sessions) => {
+    const pinnedIds = get().ids;
+    if (pinnedIds.size === 0) return;
+    let changed = false;
+    const next = new Map(get().metadataCache);
+    const now = Date.now();
+    for (const session of sessions) {
+      if (!session?.id || !pinnedIds.has(session.id)) continue;
+      const existing = next.get(session.id);
+      const title = session.title ?? existing?.title ?? '';
+      const directory = (session as Session & { directory?: string }).directory ?? existing?.directory;
+      if (existing && existing.title === title && existing.directory === directory) continue;
+      next.set(session.id, {
+        id: session.id,
+        title,
+        directory,
+        updatedAt: session.time?.updated ?? session.time?.created ?? existing?.updatedAt ?? 0,
+        cachedAt: now,
+      });
+      changed = true;
+    }
+    if (changed) {
+      set({ metadataCache: next });
+      persistMeta(safeStorage, next);
     }
   },
 }));

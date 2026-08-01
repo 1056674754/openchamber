@@ -53,7 +53,7 @@ import type { QuestionRequest } from "@/types/question"
 import * as sessionActions from "./session-actions"
 import { getSessionMaterializationStatus, materializeSessionSnapshots } from "./materialization"
 import { setSessionPrefetch } from "./session-prefetch-cache"
-import { listSessionsForBootstrap } from "./session-list-bootstrap"
+import { listSessionsForBootstrap, SESSION_LIST_BOOTSTRAP_LIMIT } from "./session-list-bootstrap"
 import { remoteSessionSummarySync } from "./remote-session-summaries"
 import { readRemoteSessionStatuses } from "./remote-session-status"
 import { getPageParts, type MessagePage } from "./message-page-boundary"
@@ -1870,6 +1870,7 @@ export function SyncProvider(props: {
                 }
                 useGlobalSessionsStore.getState().applyDirectorySnapshot(serverId, dir, sessions, {
                   baselineRevision,
+                  isComplete: rootSessions.length < SESSION_LIST_BOOTSTRAP_LIMIT,
                 })
                 ingestDirectoryStateIntoRoutingIndex(routingIndex, dir, store.getState())
               })
@@ -2203,6 +2204,7 @@ export function SyncProvider(props: {
       onSnapshot: (directory, sessions) => {
         useGlobalSessionsStore.getState().applyRemoteDirectorySnapshot(serverId, directory, sessions, {
           baselineRevision,
+          isComplete: sessions.length < SESSION_LIST_BOOTSTRAP_LIMIT,
         })
         for (const session of sessions) {
           if (session.id) {
