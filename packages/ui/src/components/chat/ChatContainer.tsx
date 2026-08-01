@@ -183,6 +183,7 @@ type ChatViewportProps = {
     handleLoadOlder: (options: { userInitiated: boolean }) => Promise<void>;
     syncPendingPrependAnchorToViewport: () => void;
     scrollToBottom: () => void;
+    notifyViewportStabilize: () => void;
     sessionQuestions: QuestionRequest[];
     sessionPermissions: PermissionRequest[];
     inlineBlockingRequestsByTool: ReturnType<typeof splitBlockingRequestsByVisibleTool>['inlineByTool'];
@@ -763,6 +764,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
         isPinned,
         isFollowingProgrammatically,
         showScrollButton,
+        notifyViewportStabilize,
     } = useChatAutoFollow({
         currentSessionId,
         sessionMessageCount,
@@ -1132,6 +1134,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
                 handleLoadOlder={handleLoadOlder}
                 syncPendingPrependAnchorToViewport={timelineController.syncPendingPrependAnchorToViewport}
                 scrollToBottom={resumeToLatestInstant}
+                notifyViewportStabilize={notifyViewportStabilize}
                 sessionQuestions={trailingQuestions}
                 sessionPermissions={trailingPermissions}
                 inlineBlockingRequestsByTool={inlineBlockingRequestsByTool}

@@ -271,6 +271,16 @@ export const useChatAutoFollow = ({
         writeScrollTopInstant(target);
     }, [markAuto, setStateValue, writeScrollTopInstant]);
 
+    const notifyViewportStabilize = React.useCallback(() => {
+        const container = scrollRef.current;
+        if (!container) return;
+        const distFromBottom = container.scrollHeight - container.clientHeight - container.scrollTop;
+        // Re-pin if actively following OR if near bottom (content grew during loading)
+        if (stateRef.current !== 'following' && distFromBottom > 2000) return;
+        const target = Math.max(0, container.scrollHeight - container.clientHeight);
+        writeScrollTopInstant(target);
+    }, [writeScrollTopInstant]);
+
     const flushSave = React.useCallback(() => {
         if (saveTimerRef.current !== null) {
             clearTimeout(saveTimerRef.current);
@@ -696,5 +706,6 @@ export const useChatAutoFollow = ({
         releaseAutoFollow,
         saveSnapshotNow,
         restoreSnapshot,
+        notifyViewportStabilize,
     };
 };

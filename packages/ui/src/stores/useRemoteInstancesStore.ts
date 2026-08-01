@@ -495,6 +495,7 @@ export const useRemoteInstancesStore = create<RemoteInstancesState>((set, get) =
     } catch (error) {
       set({
         loading: false,
+        initialized: true,
         error: error instanceof Error ? error.message : String(error),
       });
     }

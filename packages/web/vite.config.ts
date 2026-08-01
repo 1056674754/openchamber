@@ -16,9 +16,11 @@ export default defineConfig({
   root: path.resolve(__dirname, '.'),
   plugins: [
     react({
-      babel: {
-        plugins: ['babel-plugin-react-compiler'],
-      },
+      babel: process.env.OPENCHAMBER_DISABLE_REACT_COMPILER
+        ? {}
+        : {
+            plugins: ['babel-plugin-react-compiler'],
+          },
     }),
     {
       name: 'inject-react-scan-script',

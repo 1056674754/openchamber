@@ -73,25 +73,33 @@ export function MultiServerSyncLayer() {
 }
 
 function useLiveSyncServerList(activeServerId: string): LiveSyncServer[] {
-  const [servers, setServers] = React.useState<LiveSyncServer[]>(() => resolveLiveSyncServers(activeServerId));
-  const remoteHealthSignature = useRemoteInstancesStore((s) => (
+  const [servers, setServers] = React.useState<LiveSyncServer[]>(() =>
+    resolveLiveSyncServers(activeServerId),
+  );
+  const remoteHealthSignature = useRemoteInstancesStore((s) =>
     Object.values(s.statuses)
-      .map((status) => `${status.id}:${status.phase}:${status.healthy === true ? 1 : 0}:${status.url ?? ""}`)
+      .map((st) => `${st.id}:${st.phase}:${st.healthy === true ? 1 : 0}:${st.url ?? ""}`)
       .sort()
-      .join("|")
-  ));
+      .join("|"),
+  );
 
+  const refresh = React.useCallback(() => {
+    setServers((current) => {
+      const next = resolveLiveSyncServers(activeServerId);
+      return areLiveSyncServerListsEquivalent(current, next) ? current : next;
+    });
+  }, [activeServerId]);
+
+  // Stable interval — never torn down by health churn.
   React.useEffect(() => {
-    const refresh = () => {
-      setServers((current) => {
-        const next = resolveLiveSyncServers(activeServerId);
-        return areLiveSyncServerListsEquivalent(current, next) ? current : next;
-      });
-    };
-    refresh();
     const id = setInterval(refresh, 5000);
     return () => clearInterval(id);
-  }, [activeServerId, remoteHealthSignature]);
+  }, [refresh]);
+
+  // Prompt refresh when remote health actually changes (no interval rebuild).
+  React.useEffect(() => {
+    refresh();
+  }, [refresh, remoteHealthSignature]);
 
   return servers;
 }

@@ -491,6 +491,7 @@ interface MessageListProps {
     scrollRef?: React.RefObject<HTMLDivElement | null>;
     initialPinToBottom: boolean;
     onInitialBottomReady: () => void;
+    onViewportStabilize?: () => void;
 }
 
 export type MessageViewportAnchor = {
@@ -1354,6 +1355,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
     scrollRef,
     initialPinToBottom,
     onInitialBottomReady,
+    onViewportStabilize,
 }, ref) => {
     streamPerfCount('ui.message_list.render');
     void _disableStaging;
@@ -2338,6 +2340,18 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
             objectRef.current = null;
         };
     }, [applyViewportAnchor, clearPendingTargetScroll, clearPendingViewportAnchor, entryIndexMap, findMessageElement, historyEntries.length, historyVirtualizer, messageIndexMap, resolveScrollContainer, retainPendingTargetScroll, scrollHistoryIndexIntoView, scrollMessageElementIntoView, shouldVirtualizeHistory, trailingStreamingEntry, turnIndexMap, ref]);
+
+    const prevTotalSizeRef = React.useRef(-1);
+    const prevEntryCountRef = React.useRef(-1);
+    React.useEffect(() => {
+        const sizeChanged = prevTotalSizeRef.current >= 0 && prevTotalSizeRef.current !== historyTotalSize;
+        const countChanged = prevEntryCountRef.current >= 0 && prevEntryCountRef.current !== allEntries.length;
+        if (sizeChanged || countChanged) {
+            onViewportStabilize?.();
+        }
+        prevTotalSizeRef.current = historyTotalSize;
+        prevEntryCountRef.current = allEntries.length;
+    }, [historyTotalSize, allEntries.length]);
 
     const disableFadeIn = false;
 

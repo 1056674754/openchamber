@@ -53,9 +53,18 @@ export class ChildStoreManager {
     this.serverId = serverId || DEFAULT_SERVER_ID
   }
 
+  private notifyRegistryDepth = 0
+
   private notifyRegistrySubscribers() {
-    for (const subscriber of this.registrySubscribers) {
-      subscriber()
+    if (this.notifyRegistryDepth > 0) return
+    this.notifyRegistryDepth++
+    try {
+      const snapshot = Array.from(this.registrySubscribers)
+      for (const subscriber of snapshot) {
+        subscriber()
+      }
+    } finally {
+      this.notifyRegistryDepth--
     }
   }
 
