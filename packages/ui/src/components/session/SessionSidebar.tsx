@@ -139,7 +139,6 @@ const DEPRECATED_SESSION_EXPANDED_STORAGE_KEYS = [
   'oc.sessions.expandedParents',
 ] as const;
 const WORKTREE_DISCOVERY_CONCURRENCY = 3;
-const EMPTY_STUCK_PROJECT_HEADERS = new Set<string>();
 
 type PrVisualState = 'draft' | 'open' | 'blocked' | 'merged' | 'closed';
 
@@ -2099,7 +2098,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
     'inline-flex h-6 w-6 cursor-pointer items-center justify-center rounded-md leading-none text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 disabled:cursor-not-allowed';
   const headerActionButtonClass = mobileVariant ? mobileHeaderActionButtonClass : desktopHeaderActionButtonClass;
   const headerActionIconClass = 'h-4.5 w-4.5';
-  const stuckProjectHeaders = useStickyProjectHeaders({
+  useStickyProjectHeaders({
     enabled: stickyZoneHeaders,
     isDesktopShellRuntime,
     projectSections,
@@ -2710,7 +2709,6 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
         hideDirectoryControls={hideDirectoryControls}
         projectRepoStatus={projectRepoStatus}
         isDesktopShellRuntime={isDesktopShellRuntime}
-        stuckProjectHeaders={stickyZoneHeaders ? stuckProjectHeaders : EMPTY_STUCK_PROJECT_HEADERS}
         mobileVariant={mobileVariant}
         alwaysShowActions={alwaysShowSidebarActions}
         toggleProject={toggleProject}

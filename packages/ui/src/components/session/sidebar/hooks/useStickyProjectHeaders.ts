@@ -1,4 +1,5 @@
 import React from 'react';
+import { useStickyHeadersStore } from '../stickyHeadersStore';
 
 type Args = {
   enabled?: boolean;
@@ -10,25 +11,6 @@ type Args = {
 type StickyHeaderArgs = {
   enabled: boolean;
   isDesktopShellRuntime: boolean;
-};
-
-export const updateStuckProjectHeaders = (
-  previous: Set<string>,
-  projectId: string,
-  isStuck: boolean,
-): Set<string> => {
-  if (previous.has(projectId) === isStuck) return previous;
-  const next = new Set(previous);
-  if (isStuck) {
-    next.add(projectId);
-  } else {
-    next.delete(projectId);
-  }
-  return next;
-};
-
-export const clearStuckProjectHeaders = (previous: Set<string>): Set<string> => {
-  return previous.size === 0 ? previous : new Set();
 };
 
 export const useStickyHeader = (args: StickyHeaderArgs) => {
@@ -57,16 +39,15 @@ export const useStickyHeader = (args: StickyHeaderArgs) => {
   return { isStuck, sentinelRef };
 };
 
-export const useStickyProjectHeaders = (args: Args): Set<string> => {
+export const useStickyProjectHeaders = (args: Args): void => {
   const { enabled = true, isDesktopShellRuntime, projectSections, projectHeaderSentinelRefs } = args;
-  const [stuckProjectHeaders, setStuckProjectHeaders] = React.useState<Set<string>>(new Set());
 
   React.useEffect(() => {
     if (enabled && isDesktopShellRuntime) {
       return;
     }
 
-    setStuckProjectHeaders(clearStuckProjectHeaders);
+    useStickyHeadersStore.getState().clearAll();
   }, [enabled, isDesktopShellRuntime]);
 
   React.useEffect(() => {
@@ -76,17 +57,14 @@ export const useStickyProjectHeaders = (args: Args): Set<string> => {
 
     const observer = new IntersectionObserver(
       (entries) => {
+        const store = useStickyHeadersStore.getState();
         entries.forEach((entry) => {
           const projectId = (entry.target as HTMLElement).dataset.projectId;
           if (!projectId) {
             return;
           }
 
-          setStuckProjectHeaders((prev) => updateStuckProjectHeaders(
-            prev,
-            projectId,
-            !entry.isIntersecting,
-          ));
+          store.setStuck(projectId, !entry.isIntersecting);
         });
       },
       { threshold: 0 },
@@ -100,6 +78,4 @@ export const useStickyProjectHeaders = (args: Args): Set<string> => {
 
     return () => observer.disconnect();
   }, [enabled, isDesktopShellRuntime, projectHeaderSentinelRefs, projectSections]);
-
-  return stuckProjectHeaders;
 };

@@ -122,7 +122,7 @@ type Props = {
   compactBodyPadding?: boolean;
 };
 
-export function SessionGroupSection(props: Props): React.ReactNode {
+function SessionGroupSectionImpl(props: Props): React.ReactNode {
   const { t } = useI18n();
   const {
     group,
@@ -1065,3 +1065,5 @@ export function SessionGroupSection(props: Props): React.ReactNode {
     </div>
   );
 }
+
+export const SessionGroupSection = React.memo(SessionGroupSectionImpl);

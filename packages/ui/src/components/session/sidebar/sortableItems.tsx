@@ -14,6 +14,7 @@ import { PROJECT_COLOR_MAP, PROJECT_ICON_MAP, getProjectIconImageUrl } from '@/l
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useI18n } from '@/lib/i18n';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
+import { useStickyHeadersStore } from './stickyHeadersStore';
 import { useDesktopSshStore } from '@/stores/useDesktopSshStore';
 import { useRemoteInstancesStore } from '@/stores/useRemoteInstancesStore';
 import { resolveInstanceLabel, type DesktopSshInstanceStatus, type DesktopSshPhase } from '@/lib/desktopSsh';
@@ -33,7 +34,6 @@ export interface SortableProjectItemProps {
   isActiveProject: boolean;
   isRepo: boolean;
   isDesktopShell: boolean;
-  isStuck: boolean;
   hideDirectoryControls: boolean;
   mobileVariant: boolean;
   alwaysShowActions: boolean;
@@ -383,7 +383,6 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
   isActiveProject,
   isRepo,
   isDesktopShell,
-  isStuck,
   hideDirectoryControls,
   onToggle,
   onNewSession,
@@ -408,6 +407,7 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
   const { t } = useI18n();
   const { currentTheme } = useThemeSystem();
   const stickyZoneHeaders = useSessionDisplayStore((state) => state.stickyZoneHeaders);
+  const isStuck = useStickyHeadersStore((state) => stickyZoneHeaders && state.stuckIds.has(id));
   const registrySnapshot = useServerRegistrySnapshot(serverId);
   const sshInstance = useDesktopSshStore((state) => serverId ? state.instances.find((entry) => entry.id === serverId) : undefined);
   const sshStatus = useDesktopSshStore((state) => serverId ? state.statusesById[serverId] : undefined);
@@ -487,7 +487,7 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
   return (
     <div
       ref={setNodeRef}
-      style={{ transform: CSS.Transform.toString(transform), transition }}
+      style={{ transform: CSS.Transform.toString(transform), transition, contain: 'layout' }}
       className={cn('relative', isDragging && 'opacity-30')}
     >
       {!hideHeader ? (

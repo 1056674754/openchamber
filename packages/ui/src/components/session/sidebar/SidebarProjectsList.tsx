@@ -61,7 +61,6 @@ type Props = {
   hideDirectoryControls: boolean;
   projectRepoStatus: Map<string, boolean | null>;
   isDesktopShellRuntime: boolean;
-  stuckProjectHeaders: Set<string>;
   mobileVariant: boolean;
   alwaysShowActions: boolean;
   toggleProject: (id: string) => void;
@@ -358,7 +357,6 @@ export function SidebarProjectsList(props: Props): React.ReactNode {
                 isActiveProject={isActiveProject}
                 isRepo={Boolean(isRepo)}
                 isDesktopShell={props.isDesktopShellRuntime}
-                isStuck={props.stuckProjectHeaders.has(projectKey)}
                 hideDirectoryControls={props.hideDirectoryControls}
                 mobileVariant={props.mobileVariant}
                 alwaysShowActions={props.alwaysShowActions}
