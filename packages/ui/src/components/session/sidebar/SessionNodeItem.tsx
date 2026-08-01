@@ -324,6 +324,7 @@ const areEqual = (prev: Props, next: Props): boolean => {
     || Boolean(next.groupDirectory && next.pinnedSessionIdsByProject.get(next.groupDirectory)?.has(nextSessionId));
   if (prevIsPinned !== nextIsPinned) return false;
   if (
+    (prev.node !== next.node || prev.expandedParents !== next.expandedParents) &&
     treeContainsExpandedStateChange(
       prev.node,
       next.node,

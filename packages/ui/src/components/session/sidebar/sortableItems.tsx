@@ -35,6 +35,12 @@ export interface SortableProjectItemProps {
   isRepo: boolean;
   isDesktopShell: boolean;
   hideDirectoryControls: boolean;
+  attributes: ReturnType<typeof useSortable>['attributes'];
+  listeners: ReturnType<typeof useSortable>['listeners'];
+  setNodeRef: ReturnType<typeof useSortable>['setNodeRef'];
+  transform: ReturnType<typeof useSortable>['transform'];
+  transition: ReturnType<typeof useSortable>['transition'];
+  isDragging: boolean;
   mobileVariant: boolean;
   alwaysShowActions: boolean;
   onToggle: () => void;
@@ -370,7 +376,7 @@ function ProjectInfoTooltip({
   );
 }
 
-export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
+const ProjectItemInner: React.FC<SortableProjectItemProps> = ({
   id,
   disabled = false,
   projectLabel,
@@ -384,6 +390,12 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
   isRepo,
   isDesktopShell,
   hideDirectoryControls,
+  attributes,
+  listeners,
+  setNodeRef,
+  transform,
+  transition,
+  isDragging,
   onToggle,
   onNewSession,
   onNewWorktreeSession,
@@ -438,15 +450,6 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
       : effectiveServerHealthStatus === 'connecting'
         ? currentTheme.colors.status.warning
         : currentTheme.colors.surface.subtle;
-  const {
-    attributes,
-    listeners,
-    setNodeRef,
-    transform,
-    transition,
-    isDragging,
-  } = useSortable({ id, disabled });
-
   const [imageFailed, setImageFailed] = React.useState(false);
   const suppressNextToggleRef = React.useRef(false);
   const menuInstanceKey = `project:${id}`;
@@ -705,10 +708,39 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
         </>
       ) : null}
 
-      {children}
+      {children ? (
+        <div style={{ contentVisibility: 'auto', containIntrinsicSize: '0 400px' } as React.CSSProperties}>
+          {children}
+        </div>
+      ) : null}
     </div>
   );
 };
+
+type ProjectItemBaseProps = Omit<SortableProjectItemProps, 'attributes' | 'listeners' | 'setNodeRef' | 'transform' | 'transition' | 'isDragging'>;
+
+const ProjectItemSortable: React.FC<ProjectItemBaseProps> = (props) => {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: props.id, disabled: props.disabled });
+  return <ProjectItemInner {...props} attributes={attributes} listeners={listeners} setNodeRef={setNodeRef} transform={transform} transition={transition} isDragging={isDragging} />;
+};
+
+const PLAIN_SORTABLE = {
+  attributes: { tabIndex: 0 } as SortableProjectItemProps['attributes'],
+  listeners: undefined,
+  setNodeRef: (() => {}) as SortableProjectItemProps['setNodeRef'],
+  transform: null,
+  transition: undefined,
+  isDragging: false,
+};
+
+const ProjectItemPlain: React.FC<ProjectItemBaseProps> = (props) => (
+  <ProjectItemInner {...props} {...PLAIN_SORTABLE} />
+);
+
+export const SortableProjectItem: React.FC<ProjectItemBaseProps> = (props) =>
+  props.disabled
+    ? <ProjectItemPlain {...props} />
+    : <ProjectItemSortable {...props} />;
 
 const SortableGroupItemBase: React.FC<{
   id: string;
