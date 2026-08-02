@@ -10,6 +10,7 @@ mock.module('node:fs', () => ({
       return JSON.stringify({
         crof: { key: 'test-token' },
         neuralwatt: { key: 'test-token' },
+        'zai-coding-plan': { key: 'test-token' },
       });
     },
   },
@@ -85,6 +86,33 @@ describe('VS Code quota provider parity', () => {
     expect(result.usage?.windows.standard.usedPercent).toBe(50);
     expect(result.usage?.windows.monthly.usedPercent).toBeCloseTo((25 / 55) * 100, 4);
     expect(result.usage?.windows.monthly.valueLabel).toBe('prod-key');
+  });
+
+  it('reports every Z.ai usage window', async () => {
+    globalThis.fetch = mock(async () => response({
+      data: {
+        limits: [
+          { type: 'TOKENS_LIMIT', unit: 3, number: 5, percentage: 0 },
+          { type: 'TOKENS_LIMIT', unit: 6, number: 1, percentage: 100, nextResetTime: 1785659659993 },
+          { type: 'TIME_LIMIT', unit: 5, number: 1, percentage: 0, nextResetTime: 1787128459979 },
+        ],
+      },
+    }));
+
+    const result = await fetchQuotaForProvider('zai-coding-plan');
+
+    expect(result.ok).toBe(true);
+    expect(result.usage?.windows['5h']).toMatchObject({ usedPercent: 0, windowSeconds: 5 * 60 * 60 });
+    expect(result.usage?.windows.weekly).toMatchObject({
+      usedPercent: 100,
+      windowSeconds: 7 * 24 * 60 * 60,
+      resetAt: 1785659659993,
+    });
+    expect(result.usage?.windows['MCP Tools']).toMatchObject({
+      usedPercent: 0,
+      windowSeconds: 30 * 24 * 60 * 60,
+      resetAt: 1787128459979,
+    });
   });
 
   it('keeps provider-specific authentication errors in the extension host', async () => {

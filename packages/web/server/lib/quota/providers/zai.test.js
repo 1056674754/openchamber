@@ -1,0 +1,53 @@
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
+vi.mock('../../opencode/auth.js', () => ({
+  readAuthFile: () => ({ 'zai-coding-plan': { key: 'test-token' } }),
+}));
+
+import { fetchQuota } from './zai.js';
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
+const mockResponse = (body) => ({
+  ok: true,
+  status: 200,
+  json: async () => body,
+});
+
+describe('Z.ai quota provider', () => {
+  it('surfaces every token window and the MCP tools window', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(mockResponse({
+      data: {
+        limits: [
+          { type: 'TOKENS_LIMIT', unit: 3, number: 5, percentage: 0 },
+          { type: 'TOKENS_LIMIT', unit: 6, number: 1, percentage: 100, nextResetTime: 1785659659993 },
+          { type: 'TIME_LIMIT', unit: 5, number: 1, percentage: 0, nextResetTime: 1787128459979 },
+        ],
+      },
+    })));
+
+    const result = await fetchQuota();
+
+    expect(result.ok).toBe(true);
+    expect(result.usage.windows['5h']).toMatchObject({
+      usedPercent: 0,
+      remainingPercent: 100,
+      windowSeconds: 5 * 60 * 60,
+      resetAt: null,
+    });
+    expect(result.usage.windows.weekly).toMatchObject({
+      usedPercent: 100,
+      remainingPercent: 0,
+      windowSeconds: 7 * 24 * 60 * 60,
+      resetAt: 1785659659993,
+    });
+    expect(result.usage.windows['MCP Tools']).toMatchObject({
+      usedPercent: 0,
+      remainingPercent: 100,
+      windowSeconds: 30 * 24 * 60 * 60,
+      resetAt: 1787128459979,
+    });
+  });
+});
