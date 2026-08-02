@@ -1602,3 +1602,31 @@ VS Code worktree lock 验证：在两个真实临时 Git 仓库及 `--no-checkou
 | 故障 | 状态 | Fork 处理 |
 |---|---|---|
 | Chat 中蓝色相对 Markdown 文件链接触发 SPA reload | ✅ 已完成；Work Item [#80](https://coding.s-s.city/songsong/openchamber/-/work_items/80) | 根因是文件引用增强在 streaming / effect 尚未完成时不会标注 anchor，而常驻 capture guard 只拦截 `file://`，导致 `AGENTS.md`、`.okf/.../*.md` 等相对路径短暂保留浏览器默认导航。现将常驻 guard 与文件路径分类器统一：相对/绝对 workspace 路径始终阻止默认导航并交给 owning `serverId + directory` 文件打开链路；`http(s)`、`mailto:`、fragment、query 继续保持原生语义。目标单测 4 条、改动文件 LSP/lint、全 workspace type-check/build 通过。隔离 matching-surface QA 使用会话 `ses_0d2d201d1ffeNBX7bbbM72yzJA`，主动关闭文件引用标注模拟竞态窗口；点击未标注的 `.okf/infrastructure/server-topology.md` 后 Session URL 未改变、页面未 reload，并成功打开 `server-topology.md` 内部文件 surface |
+
+### v1.17.2 差距审计与 Work Item 拆分（2026-08-02）
+
+官方 `v1.17.1...v1.17.2` 共 43 个提交。Release notes 的 17 项用户可观察能力中，当前 fork 已等价 3 项、部分具备 6 项、未合并 8 项。GitLab Overview [#1](https://coding.s-s.city/songsong/openchamber/-/issues/1) 已重新打开并推进到 v1.17.2；所有部分具备或未合并能力均有独立 Work Item，三个已等价项不重复制造 backlog。
+
+| 官方能力 | 审计状态 | Fork 处理 / Work Item |
+|---|---|---|
+| Mobile 双抽屉导航、跨项目树、滑动操作、最近 Session 与冷启动恢复 | 🟡 部分具备 | [#93](https://coding.s-s.city/songsong/openchamber/-/work_items/93)。已有 Capacitor 薄壳、LAN/relay instance 连接和失败页；缺左右抽屉、跨项目移动树、滑动操作和权威 last-active-session 恢复。必须保留 Electron 聚合 instances、`serverId + directory` 与禁止 per-host sync fanout，不整包覆盖上游单实例 MobileApp |
+| Windows ARM64 | ❌ 未合并 | [#98](https://coding.s-s.city/songsong/openchamber/-/work_items/98)。补 Windows ARM64 release target 与 x64-baseline embedded OpenCode CLI workaround；继续遵守 custom `-sscity` binary、shared database 和双签名 runbook |
+| OpenChamber light/dark 成为默认主题 | 🟡 部分具备 | [#94](https://coding.s-s.city/songsong/openchamber/-/work_items/94)。fork 已有 `openchamber-light/dark` theme IDs，但默认仍是 Flexoki，且不等于上游 hybrid theme；迁移必须保留用户已持久化主题与 fork hot reload |
+| Active Session Header 菜单：rename/share/export/archive/delete/copy ID | 🟡 部分具备 | [#95](https://coding.s-s.city/songsong/openchamber/-/work_items/95)。侧栏已有大部分 action；Header 缺完整入口、copy ID，创建 share 后也未自动复制链接。复用既有 action，不新增第二套 Session authority |
+| 首个 Session 打开性能与 desktop startup 调度 | ✅ 已按 fork 架构移植 | [#99](https://coding.s-s.city/songsong/openchamber/-/work_items/99)。共享 background-network gate 最多并发 3 个全局 Session、Git/worktree、command/skill discovery 请求；selected Session bootstrap/message pagination 保持前台直通。Electron 仅对 `127.0.0.1,localhost` 解除 Chromium connection limit；保留 fork 多实例 bootstrap queue、timeline 与远端默认连接策略 |
+| Root Session 连同 sub-sessions 移到新 worktree | 🟡 核心已具备 | [#95](https://coding.s-s.city/songsong/openchamber/-/work_items/95)。`moveSessionTreeToQuickWorktree` 已实现父子迁移、queue/folder rewrite 与 rollback；仅补 active Header 入口，不重写核心 |
+| Symlink diff 显示 link target | ✅ 已移植 | [#100](https://coding.s-s.city/songsong/openchamber/-/work_items/100)。`lstat/readlink` 识别 symlink，untracked link 生成 Git mode `120000` patch，split diff 读取 link target 而非目标文件内容；workspace 边界仍由 Git service 权威校验 |
+| Linux Window Controls Style | ❌ 未合并 | [#101](https://coding.s-s.city/songsong/openchamber/-/work_items/101)。增加 Classic / traffic-lights 持久设置；保留现有 AppImage tray/system icons，Windows 与 macOS 行为不变 |
+| Settings → General 全局 Auto-save，排除 binary/PDF/Office | 🟡 部分具备 | [#96](https://coding.s-s.city/songsong/openchamber/-/work_items/96)。`FilesView` 已有局部 localStorage toggle；需迁入全局设置、处理 load-lag data loss，并显式执行不可自动保存类型策略 |
+| Terminal tab 切换不重建连接 | ✅ 已按多实例架构移植 | [#102](https://coding.s-s.city/songsong/openchamber/-/work_items/102)。PTY scrollback 从持久 tab metadata 拆到 `serverId + directory + tabId` hot buffer；切 tab 的健康 per-baseUrl WebSocket 保留 15 秒复用，关闭/重启仍立即执行原语义。Project Action run key 同步分域，Ghostty 增量 chunk 查找从尾部开始 |
+| Sidebar 折叠时显示 live activity | ❌ 未合并 | [#103](https://coding.s-s.city/songsong/openchamber/-/work_items/103)。按 fork 自定义多实例树适配 narrow selector；禁止引入上游单实例 sidebar 或扩大 streaming render fanout |
+| VS Code per-session Autoaccept 回复 live permission | 🟡 基础存在但未接线 | [#97](https://coding.s-s.city/songsong/openchamber/-/work_items/97)。持久 policy 和 runtime helper 已有，生产 live permission event 尚无调用；接线时保留 target routing、retry 与 dedupe |
+| Z.ai usage 显示全部窗口 | ✅ 已移植 | [#104](https://coding.s-s.city/songsong/openchamber/-/work_items/104)。Web/VS Code 遍历全部 `TOKENS_LIMIT`，显示 5 小时、周和 MCP Tools 窗口；保留零值、过滤 malformed window，并继续按 active runtime 隔离 local/remote |
+| Sticky Session Header 页面切换不闪烁/位移 | ❌ 缺 v1.17.2 增量 | [#105](https://coding.s-s.city/songsong/openchamber/-/work_items/105)。fork 已有 #79 sticky 基础；仅审计移植 `772500f91` / `f7c899a0b` 的 transition smoothing，不增加 scroll writer 或单实例顺序假设 |
+| Composer padding 点击正确放置 caret | ✅ Fork 已等价 | `ComposerEditor.handleHostMouseDown` 已通过 `posAtCoords` 设置 selection 并 focus；不重复开 Work Item |
+| `/` command 与同名 skill 去重 | ✅ Fork 已等价 | `dedupeCommandAutocompleteEntries` 以 normalized command name 去重，优先级 system → command → skill；不重复开 Work Item |
+| Tool description 显示 glob pattern | ✅ Fork 已等价 | `toolInputPresentation` 已将 `pattern` 纳入 summary priority，ProgressiveGroup 也显式展示 glob；不重复开 Work Item |
+
+**第一批执行顺序**：[#104](https://coding.s-s.city/songsong/openchamber/-/work_items/104) Z.ai 全窗口 → [#100](https://coding.s-s.city/songsong/openchamber/-/work_items/100) symlink diff → [#102](https://coding.s-s.city/songsong/openchamber/-/work_items/102) Terminal 连接保活 → [#99](https://coding.s-s.city/songsong/openchamber/-/work_items/99) 首 Session / desktop startup 性能。每项只有在 focused tests、workspace checks、matching-surface QA 和本文证据均完成后才关闭，并同步勾选 Overview #1。
+
+**第一批验证证据（2026-08-02）**：#104 的 Web/VS Code provider fixtures 已验证 5 小时、周、MCP Tools 三窗口；#100 使用真实临时 Git 仓库验证 untracked directory symlink 的 patch/split 两条路径；#102 的 store/transport driver 验证 90 次输出不改持久 Session 引用、local/remote buffer 隔离和 tab 切换复用同一 WebSocket；#99 的并发门 driver 验证最多 3 个后台请求且 FIFO 释放，Electron 参数静态进入启动路径。第一批 focused tests 共 12 条 UI/store 基线、2 条 Web feature path（另 41 条同文件测试跳过）和 5 条 VS Code provider 测试通过；全 workspace type-check、lint、完整 build、Electron 主进程 syntax check、docs validation 与 `git diff --check` 均通过。四个 matching surface 分别由 provider fixture、真实 Git 仓库、fake WebSocket/真实 Zustand store 和后台调度 driver 覆盖；未替换或重启当前 `/Applications/OpenChamber.app`。
