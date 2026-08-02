@@ -708,11 +708,7 @@ const ProjectItemInner: React.FC<SortableProjectItemProps> = ({
         </>
       ) : null}
 
-      {children ? (
-        <div style={{ contentVisibility: 'auto', containIntrinsicSize: '0 400px' } as React.CSSProperties}>
-          {children}
-        </div>
-      ) : null}
+      {children}
     </div>
   );
 };
