@@ -2351,7 +2351,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         }
         prevTotalSizeRef.current = historyTotalSize;
         prevEntryCountRef.current = allEntries.length;
-    }, [historyTotalSize, allEntries.length]);
+    }, [historyTotalSize, allEntries.length, onViewportStabilize]);
 
     const disableFadeIn = false;
 

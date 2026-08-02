@@ -378,7 +378,6 @@ function ProjectInfoTooltip({
 
 const ProjectItemInner: React.FC<SortableProjectItemProps> = ({
   id,
-  disabled = false,
   projectLabel,
   projectDescription,
   projectIcon,

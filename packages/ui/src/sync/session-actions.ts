@@ -983,7 +983,8 @@ export async function unarchiveSession(
     const existing = useGlobalSessionsStore.getState().archivedSessions.find((session) => session.id === sessionId)
       ?? useGlobalSessionsStore.getState().activeSessions.find((session) => session.id === sessionId)
     if (existing) {
-      const { archived: _archived, ...restTime } = existing.time || { created: Date.now(), updated: Date.now() }
+      const restTime = { ...(existing.time || { created: Date.now(), updated: Date.now() }) }
+      delete restTime.archived
       useGlobalSessionsStore.getState().upsertSession({
         ...existing,
         time: {

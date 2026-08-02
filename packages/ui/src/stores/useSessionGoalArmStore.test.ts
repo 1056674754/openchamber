@@ -14,10 +14,8 @@ describe('useSessionGoalArmStore', () => {
   });
 
   test('starts disarmed with no override', () => {
-    expect(useSessionGoalArmStore.getState()).toMatchObject({
-      armed: false,
-      objectiveOverride: null,
-    });
+    expect(useSessionGoalArmStore.getState().armed).toBe(false);
+    expect(useSessionGoalArmStore.getState().objectiveOverride).toBeNull();
   });
 
   test('arming without an override keeps the override null', () => {
@@ -39,14 +37,16 @@ describe('useSessionGoalArmStore', () => {
 
     expect(useSessionGoalArmStore.getState().consume()).toEqual({ armed: true, objectiveOverride: 'objective' });
     expect(useSessionGoalArmStore.getState().consume()).toEqual({ armed: false, objectiveOverride: null });
-    expect(useSessionGoalArmStore.getState()).toMatchObject({ armed: false, objectiveOverride: null });
+    expect(useSessionGoalArmStore.getState().armed).toBe(false);
+    expect(useSessionGoalArmStore.getState().objectiveOverride).toBeNull();
   });
 
   test('disarming drops any previously set override', () => {
     useSessionGoalArmStore.getState().setArmed(true, 'objective');
     useSessionGoalArmStore.getState().setArmed(false, 'ignored-when-disarming');
 
-    expect(useSessionGoalArmStore.getState()).toMatchObject({ armed: false, objectiveOverride: null });
+    expect(useSessionGoalArmStore.getState().armed).toBe(false);
+    expect(useSessionGoalArmStore.getState().objectiveOverride).toBeNull();
   });
 
   test('arming alone does not touch goal metadata — the store is local-only', () => {

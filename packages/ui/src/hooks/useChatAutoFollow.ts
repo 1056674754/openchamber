@@ -44,6 +44,7 @@ export interface UseChatAutoFollowResult {
     isFollowingProgrammatically: boolean;
     showScrollButton: boolean;
     notifyContentChange: (reason?: ContentChangeReason) => void;
+    notifyViewportStabilize: () => void;
     getAnimationHandlers: (messageId: string) => AnimationHandlers;
     goToBottom: (mode?: 'instant' | 'smooth') => void;
     releaseAutoFollow: () => void;

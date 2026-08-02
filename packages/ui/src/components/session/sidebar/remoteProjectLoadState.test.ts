@@ -1,7 +1,10 @@
 import { beforeEach, describe, expect, mock, test } from 'bun:test';
 
-const getSyncStoresForServer = mock((_serverId: string) => null as null | {
-  getChild: (path: string) => { getState: () => { status: string } } | null;
+const getSyncStoresForServer = mock((serverId: string) => {
+  void serverId;
+  return null as null | {
+    getChild: (path: string) => { getState: () => { status: string } } | null;
+  };
 });
 
 mock.module('@/sync/multi-server-registry', () => ({

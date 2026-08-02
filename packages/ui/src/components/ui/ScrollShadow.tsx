@@ -76,7 +76,6 @@ export const ScrollShadow = React.forwardRef<HTMLElement, ScrollShadowProps>(
 
     const setAttributes = React.useCallback(
       (el: HTMLElement, hasBefore: boolean, hasAfter: boolean, prefix: "top" | "left", suffix: "bottom" | "right") => {
-        const bothKey = `${prefix}${suffix.charAt(0).toUpperCase()}${suffix.slice(1)}Scroll` as const;
         const beforeAttr = `data-${prefix}-scroll`;
         const afterAttr = `data-${suffix}-scroll`;
         const bothAttr = `data-${prefix}-${suffix}-scroll`;
