@@ -38,4 +38,31 @@ describe('resolveJsonFileViewState', () => {
     // Then: the explicit source view remains editable with its parse error.
     expect(state.kind).toBe('invalid-source');
   });
+
+  test('accepts JSONC with line comments in tree view', () => {
+    // Given: a .jsonc file with // comments.
+    const source = '// header comment\n{\n  // key\n  "name": "value"\n}';
+
+    // When: the file display state is resolved.
+    const state = resolveJsonFileViewState('tree', source);
+
+    // Then: the tree view is used (not treated as invalid).
+    expect(state).toEqual({ kind: 'tree' });
+  });
+
+  test('accepts JSONC with block comments in tree view', () => {
+    const source = '{\n  /* block\n   comment */\n  "name": "value"\n}';
+
+    const state = resolveJsonFileViewState('tree', source);
+
+    expect(state).toEqual({ kind: 'tree' });
+  });
+
+  test('accepts JSONC with trailing commas in tree view', () => {
+    const source = '{\n  "a": 1,\n  "b": 2,\n}';
+
+    const state = resolveJsonFileViewState('tree', source);
+
+    expect(state).toEqual({ kind: 'tree' });
+  });
 });

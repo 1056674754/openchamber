@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Icon } from "@/components/icon/Icon";
 import { JsonTreeViewer } from './JsonTreeViewer';
 import { useI18n } from '@/lib/i18n';
+import { parseJsonLenient } from '@/components/views/jsonFileViewState';
 
 interface JsonTreeViewProps {
   jsonString: string;
@@ -29,7 +30,7 @@ const JsonTreeView = React.memo(function JsonTreeView({
         setParseError(t('jsonTreeView.error.emptyJson'));
         return null;
       }
-      const parsed = JSON.parse(trimmed);
+      const parsed = parseJsonLenient(trimmed);
       setParseError(null);
       return parsed;
     } catch (err) {

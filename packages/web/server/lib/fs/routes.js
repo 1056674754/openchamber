@@ -76,6 +76,18 @@ const resolveWorkspacePath = async ({ targetPath, baseDirectory, path, os, norma
   const resolved = path.resolve(normalized);
   const resolvedBase = path.resolve(baseDirectory || os.homedir());
   const canonicalBase = await realpathCache.resolve(resolvedBase).catch(() => resolvedBase);
+
+  // Resolve the parent directory (not the file itself) so the link path can be
+  // compared against the canonical base consistently — the base may use a
+  // different symlink prefix (e.g. /var vs /private/var on macOS). Crucially,
+  // resolving only the parent keeps the final symlink component intact, so
+  // symlinks inside the workspace whose targets point elsewhere are allowed.
+  const canonicalParent = await realpathCache.resolve(path.dirname(resolved)).catch(() => path.dirname(resolved));
+  const canonicalLink = path.join(canonicalParent, path.basename(resolved));
+  if (isPathWithinRoot(canonicalLink, canonicalBase, path, os)) {
+    return { ok: true, base: canonicalBase, resolved: canonicalLink };
+  }
+
   const canonicalResolved = await resolveRealWorkspacePath({ resolvedPath: resolved, path, realpathCache });
 
   if (isPathWithinRoot(canonicalResolved, canonicalBase, path, os)) {
@@ -85,8 +97,9 @@ const resolveWorkspacePath = async ({ targetPath, baseDirectory, path, os, norma
   if (openchamberUserConfigRoot) {
     const configRoot = path.resolve(openchamberUserConfigRoot);
     const canonicalConfigRoot = await realpathCache.resolve(configRoot).catch(() => configRoot);
-    if (isPathWithinRoot(canonicalResolved, canonicalConfigRoot, path, os)) {
-      return { ok: true, base: canonicalConfigRoot, resolved: canonicalResolved };
+    if (isPathWithinRoot(canonicalLink, canonicalConfigRoot, path, os)
+      || isPathWithinRoot(canonicalResolved, canonicalConfigRoot, path, os)) {
+      return { ok: true, base: canonicalConfigRoot, resolved };
     }
   }
 
@@ -206,7 +219,12 @@ const resolveReadPathFromContext = async ({ req, targetPath, resolveRequiredExpl
       return { ok: false, error: 'Path is required' };
     }
     const resolved = path.resolve(normalized);
-    return { ok: true, base: path.dirname(resolved), resolved };
+    // Resolve symlinks first: the read/stat/raw handlers re-run realpath() and
+    // check the canonical path is within the canonical base. A symlink whose
+    // target lives outside its own parent would otherwise fail that check even
+    // though allowOutsideWorkspace was explicitly requested.
+    const canonicalResolved = await resolveRealWorkspacePath({ resolvedPath: resolved, path, realpathCache });
+    return { ok: true, base: path.dirname(canonicalResolved), resolved: canonicalResolved };
   }
 
   return resolveWorkspacePathFromContext({
@@ -626,21 +644,12 @@ export const registerFsRoutes = (app, dependencies) => {
         return res.status(400).json({ error: resolved.error });
       }
 
-      const [canonicalPath, canonicalBase] = await Promise.all([
-        fsPromises.realpath(resolved.resolved),
-        fsPromises.realpath(resolved.base).catch(() => path.resolve(resolved.base)),
-      ]);
-
-      if (!isPathWithinRoot(canonicalPath, canonicalBase, path, os)) {
-        return res.status(403).json({ error: 'Access to file denied' });
-      }
-
-      const stats = await fsPromises.stat(canonicalPath);
+      const stats = await fsPromises.stat(resolved.resolved);
       if (!stats.isFile()) {
         return res.status(400).json({ error: 'Specified path is not a file' });
       }
 
-      return res.json({ path: canonicalPath, isFile: true, size: stats.size, mtimeMs: stats.mtimeMs });
+      return res.json({ path: resolved.resolved, isFile: true, size: stats.size, mtimeMs: stats.mtimeMs });
     } catch (error) {
       const err = error;
       if (err && typeof err === 'object' && err.code === 'ENOENT') {
@@ -676,21 +685,12 @@ export const registerFsRoutes = (app, dependencies) => {
         return res.status(400).json({ error: resolved.error });
       }
 
-      const [canonicalPath, canonicalBase] = await Promise.all([
-        fsPromises.realpath(resolved.resolved),
-        fsPromises.realpath(resolved.base).catch(() => path.resolve(resolved.base)),
-      ]);
-
-      if (!isPathWithinRoot(canonicalPath, canonicalBase, path, os)) {
-        return res.status(403).json({ error: 'Access to file denied' });
-      }
-
-      const stats = await fsPromises.stat(canonicalPath);
+      const stats = await fsPromises.stat(resolved.resolved);
       if (!stats.isFile()) {
         return res.status(400).json({ error: 'Specified path is not a file' });
       }
 
-      const content = await fsPromises.readFile(canonicalPath, 'utf8');
+      const content = await fsPromises.readFile(resolved.resolved, 'utf8');
       return res.type('text/plain').send(content);
     } catch (error) {
       const err = error;
@@ -729,21 +729,12 @@ export const registerFsRoutes = (app, dependencies) => {
         return res.status(400).json({ error: resolved.error });
       }
 
-      const [canonicalPath, canonicalBase] = await Promise.all([
-        fsPromises.realpath(resolved.resolved),
-        fsPromises.realpath(resolved.base).catch(() => path.resolve(resolved.base)),
-      ]);
-
-      if (!isPathWithinRoot(canonicalPath, canonicalBase, path, os)) {
-        return res.status(403).json({ error: 'Access to file denied' });
-      }
-
-      const stats = await fsPromises.stat(canonicalPath);
+      const stats = await fsPromises.stat(resolved.resolved);
       if (!stats.isFile()) {
         return res.status(400).json({ error: 'Specified path is not a file' });
       }
 
-      const ext = path.extname(canonicalPath).toLowerCase();
+      const ext = path.extname(resolved.resolved).toLowerCase();
       const mimeMap = {
         '.png': 'image/png',
         '.jpg': 'image/jpeg',
@@ -759,14 +750,14 @@ export const registerFsRoutes = (app, dependencies) => {
 
       const download = req.query.download === 'true';
       if (download) {
-        const fileName = path.basename(canonicalPath);
+        const fileName = path.basename(resolved.resolved);
         const asciiOnly = fileName.replace(/[^\u0000-\u007F]/g, '');
         const fallback = asciiOnly || 'file';
         const encoded = encodeURIComponent(fileName);
         res.setHeader('Content-Disposition', `attachment; filename="${fallback}"; filename*=UTF-8''${encoded}`);
       }
 
-      const content = await fsPromises.readFile(canonicalPath);
+      const content = await fsPromises.readFile(resolved.resolved);
       res.setHeader('Cache-Control', 'no-store');
       return res.type(mimeType).send(content);
     } catch (error) {

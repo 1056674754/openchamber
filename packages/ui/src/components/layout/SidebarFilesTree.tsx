@@ -260,6 +260,19 @@ const FileRow: React.FC<FileRowProps> = ({
               }}>
                 <Icon name="file-copy" className="mr-2 h-4 w-4" /> {t('sidebarFilesTree.menu.copyPath')}
               </DropdownMenuItem>
+              <DropdownMenuItem onClick={(e) => {
+                e.stopPropagation();
+                const relativePath = getRelativePath(root, node.path);
+                void copyTextToClipboard(relativePath).then((result) => {
+                  if (result.ok) {
+                    toast.success(t('sidebarFilesTree.toast.relativePathCopied'));
+                    return;
+                  }
+                  toast.error(t('sidebarFilesTree.toast.copyFailed'));
+                });
+              }}>
+                <Icon name="file-copy-2" className="mr-2 h-4 w-4" /> {t('sidebarFilesTree.menu.copyRelativePath')}
+              </DropdownMenuItem>
               {!isDir && downloadFile && (
                 <DropdownMenuItem onClick={(e) => {
                   e.stopPropagation();

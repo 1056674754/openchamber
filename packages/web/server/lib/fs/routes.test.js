@@ -143,4 +143,63 @@ describe('fs routes explicit directory policy', () => {
     expect(disposition).toContain('filename="readme.txt"');
     expect(disposition).toContain("filename*=UTF-8''readme.txt");
   });
+
+  it('reads allowOutsideWorkspace symlink whose target is outside its parent', async () => {
+    const workspace = await makeTempDir();
+    const realTarget = path.join(workspace, 'real-target.jsonc');
+    await fs.writeFile(realTarget, 'symlink-body', 'utf8');
+
+    const linkParent = await makeTempDir();
+    const linkPath = path.join(linkParent, 'link.jsonc');
+    await fs.symlink(realTarget, linkPath);
+
+    const app = createApp();
+
+    const response = await request(app)
+      .get('/api/fs/read')
+      .query({ path: linkPath, allowOutsideWorkspace: 'true' });
+
+    expect(response.status).toBe(200);
+    expect(response.text).toBe('symlink-body');
+  });
+
+  it('reads workspace-internal symlink whose target is outside the workspace', async () => {
+    // Simulates: workspace = ~/.config/opencode, file = oh-my-openagent.jsonc
+    // which is a symlink to ~/.omo/omo.jsonc (outside the workspace).
+    const workspace = await makeTempDir();
+    const outsideTarget = await makeTempDir();
+    const realFile = path.join(outsideTarget, 'real-config.jsonc');
+    await fs.writeFile(realFile, 'config-body', 'utf8');
+
+    const linkPath = path.join(workspace, 'config-link.jsonc');
+    await fs.symlink(realFile, linkPath);
+
+    const app = createApp();
+
+    const response = await request(app)
+      .get('/api/fs/read')
+      .query({ path: linkPath, directory: workspace });
+
+    expect(response.status).toBe(200);
+    expect(response.text).toBe('config-body');
+  });
+
+  it('stats workspace-internal symlink whose target is outside the workspace', async () => {
+    const workspace = await makeTempDir();
+    const outsideTarget = await makeTempDir();
+    const realFile = path.join(outsideTarget, 'real-config.json');
+    await fs.writeFile(realFile, 'x', 'utf8');
+
+    const linkPath = path.join(workspace, 'link.json');
+    await fs.symlink(realFile, linkPath);
+
+    const app = createApp();
+
+    const response = await request(app)
+      .get('/api/fs/stat')
+      .query({ path: linkPath, directory: workspace });
+
+    expect(response.status).toBe(200);
+    expect(response.body.isFile).toBe(true);
+  });
 });
