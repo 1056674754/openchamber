@@ -318,3 +318,9 @@ const useViewportStore = create(() => ({ scrollAnchor: 0 }))
 const useSelectionStore = create(() => ({ selectedModel: null }))
 const useInputStore = create(() => ({ pendingInput: "" }))
 ```
+
+## Background Network Scheduling
+
+Startup discovery and polling use `runBackgroundNetworkTask` from `lib/background-network.ts`. The shared gate admits at most three background requests at once, leaving browser connection capacity for foreground Session message loads.
+
+The gate covers global Session catalog pages, project/worktree Git discovery, root-branch probes, command discovery, and skill discovery. Selected Session bootstrap and message pagination are interactive paths and must not enter this gate. The Electron loopback runtime also removes Chromium's per-host connection cap only for `127.0.0.1` and `localhost`; remote instances retain browser defaults.

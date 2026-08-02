@@ -10,6 +10,7 @@ import {
 import { emitConfigChange, scopeMatches, subscribeToConfigChanges } from "@/lib/configSync";
 import { createDeferredSafeJSONStorage } from "./utils/safeStorage";
 import { useProjectsStore } from "@/stores/useProjectsStore";
+import { runBackgroundNetworkTask } from '@/lib/background-network';
 
 
 export type CommandScope = 'user' | 'project';
@@ -168,10 +169,10 @@ export const useCommandsStore = create<CommandsStore>()(
                 const queryParams = directory ? `?directory=${encodeURIComponent(directory)}` : '';
 
                 // Ensure the list is scoped to the same directory we use for config source detection.
-                const commands = await opencodeClient.withDirectory(
+                const commands = await runBackgroundNetworkTask(() => opencodeClient.withDirectory(
                   directory,
                   () => opencodeClient.listCommandsWithDetails()
-                );
+                ));
 
                 const configurableCommands = commands.filter((cmd) => cmd.source !== 'skill');
                 const commandsWithScope = await Promise.all(

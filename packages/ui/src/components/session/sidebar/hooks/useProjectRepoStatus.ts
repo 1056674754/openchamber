@@ -6,6 +6,7 @@ import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { DEFAULT_SERVER_ID, serverRegistry } from '@/lib/opencode/server-registry';
 import { retryProjectRepoStatusProbe } from './project-repo-status-probe';
 import { createProjectRootBranchScheduler } from './project-root-branch-scheduler';
+import { runBackgroundNetworkTask } from '@/lib/background-network';
 
 type Project = {
   id: string;
@@ -126,13 +127,13 @@ export const useProjectRepoStatus = (args: Args): void => {
 
     const controller = new AbortController();
     void mapWithConcurrency(probeProjects, PROJECT_STATUS_PROBE_CONCURRENCY, async (project) => {
-      await retryProjectRepoStatusProbe(
+      await runBackgroundNetworkTask(() => retryProjectRepoStatusProbe(
         () => ensureStatus(project.normalizedPath, git, {
           mode: 'light',
           reportErrors: false,
         }),
         { signal: controller.signal },
-      );
+      ));
     }).catch(() => {
       // Individual status fetches update the store with their own failure state.
     });
@@ -181,10 +182,10 @@ export const useProjectRepoStatus = (args: Args): void => {
       return [{
         id: project.id,
         inputKey,
-        resolve: () => getRootBranch(project.normalizedPath, {
+        resolve: () => runBackgroundNetworkTask(() => getRootBranch(project.normalizedPath, {
           ...(inputBranch ? { knownBranch: inputBranch } : {}),
           ...(baseUrl ? { baseUrl } : {}),
-        }),
+        })),
       }];
     });
     rootBranchScheduler.sync(candidates);

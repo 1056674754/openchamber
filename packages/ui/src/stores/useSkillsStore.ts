@@ -11,6 +11,7 @@ import { createDeferredSafeJSONStorage } from "./utils/safeStorage";
 
 import { opencodeClient } from '@/lib/opencode/client';
 import { resolveApiUrl } from "@/lib/api/serverUrl";
+import { runBackgroundNetworkTask } from '@/lib/background-network';
 
 const getCurrentDirectory = (): string | null => {
   const opencodeDirectory = opencodeClient.getDirectory();
@@ -223,7 +224,9 @@ export const useSkillsStore = create<SkillsStore>()(
               try {
                 const queryParams = currentDirectory ? `?directory=${encodeURIComponent(currentDirectory)}` : '';
 
-                const response = await fetch(resolveApiUrl(`/api/config/skills${queryParams}`, serverBaseUrl));
+                const response = await runBackgroundNetworkTask(() => (
+                  fetch(resolveApiUrl(`/api/config/skills${queryParams}`, serverBaseUrl), { priority: 'low' })
+                ));
                 if (!response.ok) {
                   throw new Error(`Failed to list skills: ${response.status}`);
                 }

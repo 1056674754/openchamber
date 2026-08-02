@@ -1,4 +1,5 @@
 import type { Session } from "@opencode-ai/sdk/v2";
+import { runBackgroundNetworkTask } from '@/lib/background-network';
 import { retry } from "@/sync/retry";
 
 export type GlobalSessionRecord = Session & {
@@ -103,10 +104,10 @@ const requestSessionPage = async (
     apiClient: SessionListClient,
     request: SessionListRequest,
 ): Promise<{ sessions: GlobalSessionRecord[]; response: unknown }> => {
-    const result = await retry(
+    const result = await runBackgroundNetworkTask(() => retry(
         () => apiClient.experimental.session.list(request),
         { attempts: 3, delay: 500, retryIf: () => true },
-    );
+    ));
 
     return {
         sessions: unwrapSessionList(result, "experimental.session.list"),

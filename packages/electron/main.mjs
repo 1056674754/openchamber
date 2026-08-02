@@ -93,6 +93,7 @@ if (isDev) {
 }
 app.setAppUserModelId(APP_USER_MODEL_ID);
 app.commandLine.appendSwitch('proxy-bypass-list', '<-loopback>');
+app.commandLine.appendSwitch('ignore-connections-limit', '127.0.0.1,localhost');
 
 try {
   process.chdir(os.homedir());

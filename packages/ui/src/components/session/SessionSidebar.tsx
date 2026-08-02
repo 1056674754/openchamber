@@ -91,6 +91,7 @@ import {
 } from './sidebar/activitySections';
 import { useActiveNowStore } from '@/stores/useActiveNowStore';
 import { checkIsGitRepository, isLinkedWorktree } from '@/lib/gitApi';
+import { runBackgroundNetworkTask } from '@/lib/background-network';
 import {
   compareSessions,
   dedupeSessionsById,
@@ -827,29 +828,28 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
       async (project) => {
         const projectPath = project.normalizedPath;
         try {
-          // Use store-cached isGitRepo when available; fall back to direct check for initial worktree discovery.
-          const serverId = project.serverId && project.serverId !== DEFAULT_SERVER_ID ? project.serverId : null;
-          const cachedIsGitRepo = serverId ? undefined : useGitStore.getState().directories.get(projectPath)?.isGitRepo;
-          const repoStatus = projectRepoStatus.get(project.id);
-          const isGitRepo = (cachedIsGitRepo === true || repoStatus === true)
-            ? true
-            : (cachedIsGitRepo === false && !serverId)
-              ? false
-              : await checkIsGitRepository(projectPath);
-          if (!isGitRepo) {
-            publishWorktreeResult(project, []);
-            return;
-          }
-          if (await isLinkedWorktree(projectPath).catch(() => false)) {
-            publishWorktreeResult(project, []);
-            return;
-          }
-          const worktrees = await listProjectWorktrees({
-            id: project.id,
-            path: projectPath,
-            serverId: project.serverId,
-            label: project.label,
+          const worktrees = await runBackgroundNetworkTask(async () => {
+            const serverId = project.serverId && project.serverId !== DEFAULT_SERVER_ID ? project.serverId : null;
+            const cachedIsGitRepo = serverId ? undefined : useGitStore.getState().directories.get(projectPath)?.isGitRepo;
+            const repoStatus = projectRepoStatus.get(project.id);
+            const isGitRepo = (cachedIsGitRepo === true || repoStatus === true)
+              ? true
+              : (cachedIsGitRepo === false && !serverId)
+                ? false
+                : await checkIsGitRepository(projectPath);
+            if (!isGitRepo) return null;
+            if (await isLinkedWorktree(projectPath).catch(() => false)) return null;
+            return listProjectWorktrees({
+              id: project.id,
+              path: projectPath,
+              serverId: project.serverId,
+              label: project.label,
+            });
           });
+          if (worktrees === null) {
+            publishWorktreeResult(project, []);
+            return;
+          }
           publishWorktreeResult(project, worktrees);
         } catch {
           // Keep the previous project result on transient discovery failures.
