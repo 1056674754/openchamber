@@ -490,7 +490,7 @@ const ProjectItemInner: React.FC<SortableProjectItemProps> = ({
   return (
     <div
       ref={setNodeRef}
-      style={{ transform: CSS.Transform.toString(transform), transition, contain: 'layout' }}
+      style={{ transform: CSS.Transform.toString(transform), transition }}
       className={cn('relative', isDragging && 'opacity-30')}
     >
       {!hideHeader ? (
