@@ -722,6 +722,21 @@ export async function getLatestVersion() {
 /**
  * Compare semver-like version strings.
  */
+const KNOWN_PRERELEASE_CHANNELS = [
+  'alpha', 'beta', 'canary', 'dev', 'next', 'nightly', 'pre', 'preview', 'rc',
+];
+
+/**
+ * A prerelease suffix is a meaningful semver prerelease only when its first
+ * identifier names a known release channel. Fork/build markers such as
+ * "sscity" or "merging-dev" are release-equivalent, so a forked build is never
+ * flagged as "older than" the matching upstream release.
+ */
+function isKnownReleasePrerelease(prerelease) {
+  const firstIdentifier = String(prerelease || '').split('.')[0]?.toLowerCase();
+  return KNOWN_PRERELEASE_CHANNELS.includes(firstIdentifier);
+}
+
 function parseVersionForComparison(value) {
   const normalized = String(value || '').replace(/^v/, '').split('+')[0];
   const prereleaseIndex = normalized.indexOf('-');
@@ -735,7 +750,7 @@ function parseVersionForComparison(value) {
 
   return {
     parts,
-    prerelease: prereleaseIndex >= 0 && prerelease !== 'merging-dev',
+    prerelease: prereleaseIndex >= 0 && isKnownReleasePrerelease(prerelease),
   };
 }
 

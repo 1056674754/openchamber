@@ -249,6 +249,42 @@ describe('checkForUpdates', () => {
     expect(result.version).toBe('1.13.2');
   });
 
+  it('treats a non-channel fork suffix (e.g. sscity) as equivalent to its release core', async () => {
+    fetchMock.when('api.openchamber.dev', {
+      ok: true,
+      json: async () => ({
+        latestVersion: '1.17.1',
+        updateAvailable: true,
+      }),
+    });
+
+    const result = await checkForUpdates({
+      appType: 'desktop-electron',
+      currentVersion: '1.17.1-sscity',
+    });
+
+    expect(result.available).toBe(false);
+    expect(result.version).toBe('1.17.1');
+  });
+
+  it('still reports an update when a newer core version exists for a fork-suffixed build', async () => {
+    fetchMock.when('api.openchamber.dev', {
+      ok: true,
+      json: async () => ({
+        latestVersion: '1.18.0',
+        updateAvailable: true,
+      }),
+    });
+
+    const result = await checkForUpdates({
+      appType: 'desktop-electron',
+      currentVersion: '1.17.1-sscity',
+    });
+
+    expect(result.available).toBe(true);
+    expect(result.version).toBe('1.18.0');
+  });
+
   // --- Scenario: API unreachable, npm fallback ---
 
   it('returns available=true from npm fallback when API is unreachable and npm has newer version', async () => {
