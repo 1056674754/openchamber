@@ -4,6 +4,13 @@
 
 OpenChamber provides UI runtimes (web/desktop/VS Code) for interacting with an OpenCode server (local auto-start or remote URL). UI uses HTTP + SSE via `@opencode-ai/sdk`.
 
+## Workspace scope
+
+This checkout (`openchamber-merge-v1.11.0`) is the command center. From here, two related bodies of work are managed:
+
+1. **OpenCode fork** at `../opencode` (branch `sscity`) — the customized OpenCode server that OpenChamber embeds. The two repos are tightly coupled: the fork's own `AGENTS.md` cross-references [`docs/EMBEDDED_OPENCODE_PACKAGING.md`](docs/EMBEDDED_OPENCODE_PACKAGING.md). Editing the fork — merging upstream releases, branding, and custom fixes — is expected work from here.
+2. **OMO (OhMyOpenCode) plugins** — agent skills and plugins maintained from this workspace.
+
 ## Runtime architecture (IMPORTANT)
 
 - `Desktop` (Electron) boots the web server in the same Node process as the Electron main, then loads the web UI from `http://127.0.0.1:<port>`. No sidecar subprocess.
@@ -225,7 +232,6 @@ All scripts are in `package.json`.
 
 ## Agent constraints
 
-- Do not modify `../opencode` (separate repo).
 - Do not run git/GitHub commands unless explicitly asked.
 - Keep baseline green (run `bun run type-check`, `bun run lint` before finalizing changes).
 

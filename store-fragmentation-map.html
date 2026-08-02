@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sidebar Store Fragmentation Map</title>
+<style>
+  :root {
+    --bg: #0d1117; --surface: #161b22; --border: #30363d;
+    --text: #c9d1d9; --muted: #8b949e; --accent: #58a6ff;
+    --c-layout: #d2a8ff; --c-session: #7ee787; --c-project: #ffa657;
+    --c-folder: #f0883e; --c-git: #f778ba; --c-infra: #79c0ff;
+    --c-sync: #ff7b72; --c-remote: #56d4dd; --c-other: #8b949e;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: var(--bg); color: var(--text); font-family: -apple-system, 'Segoe UI', sans-serif; padding: 24px; }
+  h1 { font-size: 18px; margin-bottom: 4px; }
+  .subtitle { color: var(--muted); font-size: 13px; margin-bottom: 20px; }
+  .stats { display: flex; gap: 16px; margin-bottom: 24px; flex-wrap: wrap; }
+  .stat { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 10px 16px; }
+  .stat-num { font-size: 22px; font-weight: 700; color: var(--accent); }
+  .stat-label { font-size: 11px; color: var(--muted); }
+  .container { display: grid; grid-template-columns: 1fr auto 1fr; gap: 0; align-items: start; }
+  .col-title { font-size: 13px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 12px; padding-left: 8px; }
+
+  /* Components column */
+  .components { display: flex; flex-direction: column; gap: 6px; }
+  .comp { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; position: relative; }
+  .comp-name { font-size: 13px; font-weight: 600; }
+  .comp-lines { font-size: 10px; color: var(--muted); }
+  .comp-count { position: absolute; top: 8px; right: 10px; font-size: 11px; font-weight: 700; color: var(--accent); background: rgba(88,166,255,0.12); padding: 2px 8px; border-radius: 10px; }
+  .comp:nth-child(1) { border-left: 3px solid var(--c-sync); }
+  .comp:nth-child(2) { border-left: 3px solid var(--c-project); }
+  .comp:nth-child(3) { border-left: 3px solid var(--c-folder); }
+  .comp:nth-child(4) { border-left: 3px solid var(--c-folder); }
+  .comp:nth-child(5) { border-left: 3px solid var(--c-layout); }
+  .comp:nth-child(6) { border-left: 3px solid var(--c-session); }
+
+  /* Center lines area */
+  .lines-col { width: 180px; min-height: 600px; position: relative; }
+  .conn-info { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; }
+  .conn-num { font-size: 32px; font-weight: 800; color: var(--accent); }
+  .conn-label { font-size: 11px; color: var(--muted); }
+
+  /* Stores column */
+  .stores { display: flex; flex-direction: column; gap: 4px; }
+  .store-group { margin-bottom: 8px; }
+  .group-label { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; padding: 2px 8px; border-radius: 4px; display: inline-block; margin-bottom: 4px; }
+  .group-layout .group-label { background: rgba(210,168,255,0.15); color: var(--c-layout); }
+  .group-session .group-label { background: rgba(126,231,135,0.15); color: var(--c-session); }
+  .group-project .group-label { background: rgba(255,166,87,0.15); color: var(--c-project); }
+  .group-folder .group-label { background: rgba(240,136,62,0.15); color: var(--c-folder); }
+  .group-git .group-label { background: rgba(247,120,186,0.15); color: var(--c-git); }
+  .group-infra .group-label { background: rgba(121,192,255,0.15); color: var(--c-infra); }
+  .group-sync .group-label { background: rgba(255,123,114,0.15); color: var(--c-sync); }
+  .group-remote .group-label { background: rgba(86,212,221,0.15); color: var(--c-remote); }
+  .group-other .group-label { background: rgba(139,148,158,0.15); color: var(--c-other); }
+
+  .store-item { display: flex; align-items: center; gap: 6px; padding: 3px 8px; font-size: 11px; font-family: 'SF Mono', monospace; }
+  .store-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .group-layout .store-dot { background: var(--c-layout); }
+  .group-session .store-dot { background: var(--c-session); }
+  .group-project .store-dot { background: var(--c-project); }
+  .group-folder .store-dot { background: var(--c-folder); }
+  .group-git .store-dot { background: var(--c-git); }
+  .group-infra .store-dot { background: var(--c-infra); }
+  .group-sync .store-dot { background: var(--c-sync); }
+  .group-remote .store-dot { background: var(--c-remote); }
+  .group-other .store-dot { background: var(--c-other); }
+  .store-uses { color: var(--muted); font-size: 10px; margin-left: auto; }
+
+  /* Matrix table */
+  .matrix-wrap { margin-top: 32px; overflow-x: auto; }
+  .matrix { border-collapse: collapse; font-size: 10px; font-family: 'SF Mono', monospace; }
+  .matrix th, .matrix td { border: 1px solid var(--border); padding: 4px 6px; text-align: center; white-space: nowrap; }
+  .matrix th { background: var(--surface); color: var(--muted); font-weight: 600; position: sticky; top: 0; }
+  .matrix th.row-h { text-align: right; min-width: 140px; }
+  .matrix .yes { background: rgba(88,166,255,0.15); color: var(--accent); font-weight: 600; }
+  .matrix .no { color: var(--border); }
+  .matrix td.row-label { text-align: right; color: var(--text); padding-right: 10px; }
+
+  .legend { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 16px; font-size: 11px; }
+  .legend-item { display: flex; align-items: center; gap: 4px; color: var(--muted); }
+  .legend-dot { width: 10px; height: 10px; border-radius: 50%; }
+</style>
+</head>
+<body>
+
+<h1>Sidebar Store Fragmentation Map</h1>
+<p class="subtitle">Session sidebar 子系统的 Zustand store 分布 — 29 个独立 store,最重组件直接碰 16 个</p>
+
+<div class="stats">
+  <div class="stat"><div class="stat-num">29</div><div class="stat-label">独立 Zustand stores</div></div>
+  <div class="stat"><div class="stat-num">16</div><div class="stat-label">SessionSidebar 直接订阅</div></div>
+  <div class="stat"><div class="stat-num">10</div><div class="stat-label">每个 SessionNodeItem 订阅</div></div>
+  <div class="stat"><div class="stat-num">84</div><div class="stat-label">SessionSidebar store hook 调用次数</div></div>
+  <div class="stat"><div class="stat-num">9</div><div class="stat-label">Store 域分类</div></div>
+</div>
+
+<div class="container">
+  <!-- Components -->
+  <div>
+    <div class="col-title">Sidebar 组件 (按渲染层级)</div>
+    <div class="components">
+      <div class="comp">
+        <div class="comp-name">SessionSidebar</div>
+        <div class="comp-lines">2857 行 · 编排器 · 84 次 hook 调用</div>
+        <div class="comp-count">16</div>
+      </div>
+      <div class="comp">
+        <div class="comp-name">SidebarProjectsList</div>
+        <div class="comp-lines">439 行 · 项目树渲染</div>
+        <div class="comp-count">2</div>
+      </div>
+      <div class="comp">
+        <div class="comp-name">SortableProjectItem</div>
+        <div class="comp-lines">~400 行 · 每个项目行</div>
+        <div class="comp-count">4</div>
+      </div>
+      <div class="comp">
+        <div class="comp-name">SessionGroupSection</div>
+        <div class="comp-lines">1067 行 · 每个 worktree 组</div>
+        <div class="comp-count">5</div>
+      </div>
+      <div class="comp">
+        <div class="comp-name">SessionNodeItem</div>
+        <div class="comp-lines">1640 行 · 每个 session 行 × N</div>
+        <div class="comp-count">10</div>
+      </div>
+      <div class="comp">
+        <div class="comp-name">SidebarActivitySections</div>
+        <div class="comp-lines">Global Pinned + Recent</div>
+        <div class="comp-count">2</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Center -->
+  <div class="lines-col">
+    <div class="conn-info">
+      <div class="conn-num">29</div>
+      <div class="conn-label">stores feed into</div>
+      <div class="conn-num" style="font-size: 22px">6</div>
+      <div class="conn-label">sidebar components</div>
+    </div>
+  </div>
+
+  <!-- Stores -->
+  <div>
+    <div class="col-title">Zustand Stores (按域分组)</div>
+    <div class="stores">
+      <div class="store-group group-layout">
+        <div class="group-label">Layout / UI 行为 (4)</div>
+        <div class="store-item"><div class="store-dot"></div>useUIStore<span class="store-uses">81 refs</span></div>
+        <div class="store-item"><div class="store-dot"></div>useSessionDisplayStore<span class="store-uses">37 refs</span></div>
+        <div class="store-item"><div class="store-dot"></div>useViewportStore<span class="store-uses">2 refs</span></div>
+        <div class="store-item"><div class="store-dot"></div>useStickyHeadersStore<span class="store-uses">6 refs · 新</span></div>
+      </div>
+      <div class="store-group group-session">
+        <div class="group-label">Session 数据 (4)</div>
+        <div class="store-item"><div class="store-dot"></div>useGlobalSessionsStore<span class="store-uses">31 refs</span></div>
+        <div class="store-item"><div class="store-dot"></div>useSessionUIStore<span class="store-uses">53 refs</span></div>
+        <div class="store-item"><div class="store-dot"></div>useSessionProjectStore<span class="store-uses">3 refs</span></div>
+        <div class="store-item"><div class="store-dot"></div>useActiveNowStore<span class="store-uses">5 refs</span></div>
+      </div>
+      <div class="store-group group-project">
+        <div class="group-label">Projects (1)</div>
+        <div class="store-item"><div class="store-dot"></div>useProjectsStore<span class="store-uses">54 refs</span></div>
+      </div>
+      <div class="store-group group-folder">
+        <div class="group-label">Folders / Pins / Markers (4)</div>
+        <div class="store-item"><div class="store-dot"></div>useSessionFoldersStore<span class="store-uses">31 refs</span></div>
+        <div class="store-item"><div class="store-dot"></div>useSessionPinnedStore<span class="store-uses">8 refs</span></div>
+        <div class="store-item"><div class="store-dot"></div>useSessionMarkersStore<span class="store-uses">6 refs</span></div>
+        <div class="store-item"><div class="store-dot"></div>useSessionMultiSelectStore<span class="store-uses">17 refs</span></div>
+      </div>
+      <div class="store-group group-git">
+        <div class="group-label">Git / GitHub (4)</div>
+        <div class="store-item"><div class="store-dot"></div>useGitStore<span class="store-uses">10 refs</span></div>
+        <div class="store-item"><div class="store-dot"></div>useGitHubAuthStore<span class="store-uses">20 refs</span></div>
+        <div class="store-item"><div class="store-dot"></div>useGitHubPrStatusStore<span class="store-uses">8 refs</span></div>
+        <div class="store-item"><div class="store-dot"></div>useGitIdentitiesStore<span class="store-uses">8 refs</span></div>
+      </div>
+      <div class="store-group group-infra">
+        <div class="group-label">Infra / Config (3)</div>
+        <div class="store-item"><div class="store-dot"></div>useConfigStore<span class="store-uses">58 refs</span></div>
+        <div class="store-item"><div class="store-dot"></div>useAgentsStore<span class="store-uses">9 refs</span></div>
+        <div class="store-item"><div class="store-dot"></div>useContextStore<span class="store-uses">10 refs</span></div>
+      </div>
+      <div class="store-group group-sync">
+        <div class="group-label">Sync / Directory (3)</div>
+        <div class="store-item"><div class="store-dot"></div>useDirectoryStore<span class="store-uses">22 refs</span></div>
+        <div class="store-item"><div class="store-dot"></div>useChildStore<span class="store-uses">2 refs</span></div>
+        <div class="store-item"><div class="store-dot"></div>useSelectionStore<span class="store-uses">6 refs</span></div>
+      </div>
+      <div class="store-group group-remote">
+        <div class="group-label">Remote / SSH (2)</div>
+        <div class="store-item"><div class="store-dot"></div>useDesktopSshStore<span class="store-uses">17 refs</span></div>
+        <div class="store-item"><div class="store-dot"></div>useRemoteInstancesStore<span class="store-uses">3 refs</span></div>
+      </div>
+      <div class="store-group group-other">
+        <div class="group-label">其他 (4)</div>
+        <div class="store-item"><div class="store-dot"></div>useNotificationStore<span class="store-uses">2 refs</span></div>
+        <div class="store-item"><div class="store-dot"></div>useUpdateStore<span class="store-uses">5 refs</span></div>
+        <div class="store-item"><div class="store-dot"></div>useInputStore<span class="store-uses">2 refs</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Subscription Matrix -->
+<div class="matrix-wrap">
+  <div class="col-title" style="margin-top: 24px">订阅矩阵 — 哪个组件碰了哪些 Store</div>
+  <table class="matrix">
+    <thead>
+      <tr>
+        <th class="row-h">Store ↓ / Component →</th>
+        <th>SessionSidebar</th>
+        <th>SidebarProjectsList</th>
+        <th>SortableProjectItem</th>
+        <th>SessionGroupSection</th>
+        <th>SessionNodeItem</th>
+        <th>SidebarActivitySections</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr><td class="row-label">useUIStore</td><td class="yes">●</td><td></td><td></td><td class="yes">●</td><td class="yes">●</td><td></td></tr>
+      <tr><td class="row-label">useSessionDisplayStore</td><td class="yes">●</td><td class="yes">●</td><td class="yes">●</td><td class="yes">●</td><td class="yes">●</td><td class="yes">●</td></tr>
+      <tr><td class="row-label">useStickyHeadersStore</td><td></td><td></td><td class="yes">●</td><td></td><td></td><td></td></tr>
+      <tr><td class="row-label">useGlobalSessionsStore</td><td class="yes">●</td><td></td><td></td><td class="yes">●</td><td class="yes">●</td><td></td></tr>
+      <tr><td class="row-label">useSessionUIStore</td><td class="yes">●</td><td></td><td></td><td class="yes">●</td><td class="yes">●</td><td class="yes">●</td></td></tr>
+      <tr><td class="row-label">useProjectsStore</td><td class="yes">●</td><td></td><td></td><td></td><td class="yes">●</td><td></td></tr>
+      <tr><td class="row-label">useSessionFoldersStore</td><td class="yes">●</td><td></td><td></td><td class="yes">●</td><td></td><td></td></tr>
+      <tr><td class="row-label">useSessionPinnedStore</td><td class="yes">●</td><td></td><td></td><td></td><td></td><td></td></tr>
+      <tr><td class="row-label">useSessionMultiSelectStore</td><td class="yes">●</td><td></td><td></td><td></td><td class="yes">●</td><td></td></tr>
+      <tr><td class="row-label">useGitStore</td><td class="yes">●</td><td></td><td></td><td></td><td></td><td></td></tr>
+      <tr><td class="row-label">useGitHubAuthStore</td><td class="yes">●</td><td></td><td></td><td></td><td></td><td></td></tr>
+      <tr><td class="row-label">useGitHubPrStatusStore</td><td class="yes">●</td><td></td><td></td><td></td><td></td><td></td></tr>
+      <tr><td class="row-label">useGlobalSessionsStore</td><td class="yes">●</td><td></td><td></td><td class="yes">●</td><td class="yes">●</td><td></td></tr>
+      <tr><td class="row-label">useNotificationStore</td><td class="yes">●</td><td></td><td></td><td></td><td></td><td></td></tr>
+      <tr><td class="row-label">useUpdateStore</td><td class="yes">●</td><td></td><td></td><td></td><td></td><td></td></tr>
+      <tr><td class="row-label">useActiveNowStore</td><td class="yes">●</td><td></td><td></td><td></td><td></td><td></td></tr>
+      <tr><td class="row-label">useDesktopSshStore</td><td></td><td></td><td class="yes">●</td><td></td><td class="yes">●</td><td></td></tr>
+      <tr><td class="row-label">useRemoteInstancesStore</td><td></td><td></td><td class="yes">●</td><td></td><td></td><td></td></tr>
+      <tr><td class="row-label">useSessionMarkersStore</td><td></td><td></td><td></td><td></td><td class="yes">●</td><td></td></tr>
+      <tr><td class="row-label">useChildStore</td><td></td><td></td><td></td><td></td><td class="yes">●</td><td></td></tr>
+      <tr><td class="row-label">useViewportStore</td><td></td><td></td><td></td><td></td><td class="yes">●</td><td></td></tr>
+      <tr style="border-top: 2px solid var(--accent)"><td class="row-label" style="font-weight:700;color:var(--accent)">合计 store 数</td><td class="yes" style="font-weight:700">16</td><td class="yes">2</td><td class="yes">4</td><td class="yes">5</td><td class="yes" style="font-weight:700">10</td><td class="yes">2</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="legend">
+  <div class="legend-item"><div class="legend-dot" style="background:var(--c-layout)"></div>Layout/UI</div>
+  <div class="legend-item"><div class="legend-dot" style="background:var(--c-session)"></div>Session 数据</div>
+  <div class="legend-item"><div class="legend-dot" style="background:var(--c-project)"></div>Projects</div>
+  <div class="legend-item"><div class="legend-dot" style="background:var(--c-folder)"></div>Folders/Pins</div>
+  <div class="legend-item"><div class="legend-dot" style="background:var(--c-git)"></div>Git/GitHub</div>
+  <div class="legend-item"><div class="legend-dot" style="background:var(--c-infra)"></div>Infra</div>
+  <div class="legend-item"><div class="legend-dot" style="background:var(--c-sync)"></div>Sync</div>
+  <div class="legend-item"><div class="legend-dot" style="background:var(--c-remote)"></div>Remote</div>
+</div>
+
+</body>
+</html>
