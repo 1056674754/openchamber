@@ -466,7 +466,9 @@ const resolveGitFileContext = async (directoryPath, git, filePath, repoRootOverr
     }
 
     const repoPath = toGitPath(path.relative(repoRoot, absolutePath));
-    const existsInWorktree = await fsp.stat(absolutePath).then((stat) => stat.isFile()).catch(() => false);
+    const worktreeEntry = await fsp.lstat(absolutePath).catch(() => null);
+    const isSymbolicLink = worktreeEntry?.isSymbolicLink() ?? false;
+    const existsInWorktree = worktreeEntry?.isFile() || isSymbolicLink;
     const existsInIndex = await git.raw(['cat-file', '-e', `:${repoPath}`]).then(() => true).catch(() => false);
     const existsInHead = await git.raw(['cat-file', '-e', `HEAD:${repoPath}`]).then(() => true).catch(() => false);
 
@@ -475,6 +477,7 @@ const resolveGitFileContext = async (directoryPath, git, filePath, repoRootOverr
         absolutePath,
         repoPath,
         repoRoot,
+        isSymbolicLink,
       };
     }
   }
@@ -1812,6 +1815,20 @@ export async function getDiff(directory, { path: filePath, staged = false, conte
       await git.raw(['ls-files', '--error-unmatch', '--', fileContext.repoPath]);
       return diff;
     } catch {
+      if (fileContext.isSymbolicLink) {
+        const target = await fsp.readlink(fileContext.absolutePath);
+        return [
+          `diff --git a/${fileContext.repoPath} b/${fileContext.repoPath}`,
+          'new file mode 120000',
+          '--- /dev/null',
+          `+++ b/${fileContext.repoPath}`,
+          '@@ -0,0 +1 @@',
+          `+${target}`,
+          '\\ No newline at end of file',
+          '',
+        ].join('\n');
+      }
+
       const noIndexArgs = ['diff', '--no-color'];
       if (typeof contextLines === 'number' && !Number.isNaN(contextLines)) {
         noIndexArgs.push(`-U${Math.max(0, contextLines)}`);
@@ -2009,9 +2026,9 @@ export async function getFileDiff(directory, { path: filePath, staged = false } 
   const { directoryPath, directoryGit, repoRoot, git } = await createRepositoryGitContext(directory);
   const isImage = isImageFile(filePath);
   const mimeType = isImage ? getImageMimeType(filePath) : null;
-  const { absolutePath, repoPath } = await resolveGitFileContext(directoryPath, directoryGit, filePath, repoRoot);
+  const { absolutePath, repoPath, isSymbolicLink } = await resolveGitFileContext(directoryPath, directoryGit, filePath, repoRoot);
 
-  if (!isImage) {
+  if (!isImage && !isSymbolicLink) {
     const isBinaryBySniff = staged ? false : await looksBinaryBySniff(absolutePath);
     const isBinary = isBinaryBySniff || (await isBinaryDiff(repoRoot, repoPath, staged));
     if (isBinary) {
@@ -2064,6 +2081,8 @@ export async function getFileDiff(directory, { path: filePath, staged = false } 
       } else {
         modified = await git.show([`:${repoPath}`]);
       }
+    } else if (isSymbolicLink) {
+      modified = await fsp.readlink(absolutePath);
     } else {
       const stat = await fsp.stat(absolutePath);
       if (stat.isFile()) {

@@ -9,6 +9,8 @@ import {
   checkoutCommit,
   cherryPick,
   fetch,
+  getDiff,
+  getFileDiff,
   getRemotes,
   getStatus,
   populateWorktreeWithLockRecovery,
@@ -219,6 +221,26 @@ describe('getRemotes', () => {
 
     const dir = createTempDir();
     await expect(getRemotes(dir)).resolves.toEqual([]);
+  });
+});
+
+describe('symlink diffs', () => {
+  it('treats an untracked directory symlink as a link in patch and split diffs', async () => {
+    if (!canRunGit() || process.platform === 'win32') return;
+    const { tmpDir } = await createTempRepo();
+    fs.mkdirSync(path.join(tmpDir, 'source'));
+    fs.symlinkSync('source', path.join(tmpDir, 'linked-source'));
+
+    const patch = await getDiff(tmpDir, { path: 'linked-source' });
+    const split = await getFileDiff(tmpDir, { path: 'linked-source' });
+
+    expect(patch).toContain('new file mode 120000');
+    expect(patch).toContain('+source');
+    expect(split).toMatchObject({
+      original: '',
+      modified: 'source',
+      isBinary: false,
+    });
   });
 });
 
