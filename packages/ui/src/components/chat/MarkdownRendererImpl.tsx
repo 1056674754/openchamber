@@ -52,6 +52,7 @@ import {
   normalizePath,
   resolveMarkdownImageReference,
   shouldInterceptMarkdownFileHref,
+  classifyMarkdownLinkClick,
   shouldPreserveMarkdownFileUrl,
 } from './markdownFileReferences';
 
@@ -111,13 +112,15 @@ const useExternalLinkInteractions = ({
       }
 
       const href = anchor.getAttribute('href') ?? '';
-      if (!isExternalHttpUrl(href)) {
+      const action = classifyMarkdownLinkClick(href);
+      if (action === 'native') {
         return;
       }
-
       event.preventDefault();
       event.stopPropagation();
-      void openExternalUrl(href);
+      if (action === 'external') {
+        void openExternalUrl(href);
+      }
     };
 
     container.addEventListener('click', handleClick);

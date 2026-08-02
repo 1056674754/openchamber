@@ -43,6 +43,16 @@ export const COMPOSER_EDITOR_THEME_SPEC = {
     // moment this module is imported.
     '&.cm-editor .cm-cursor, &.cm-editor .cm-dropCursor': {
         borderLeftColor: 'var(--surface-foreground)',
+        // CodeMirror's base theme centres the caret on the glyph boundary with
+        // `margin-left: -0.6px`, so at the start of any line the 1.2px caret
+        // renders at [-0.6px, +0.6px]. `.cm-scroller` clips horizontal overflow
+        // (`overflowX: hidden` below), and the content/line padding is zero, so
+        // the left half is clipped and the remaining 0.6px sliver is a sub-pixel
+        // the eye drops — the caret looks gone at the first column of every
+        // line. Dropping the negative margin sits the caret at the insertion
+        // point (the next glyph's left edge) instead of straddling the boundary,
+        // which is fully inside the scroller and indistinguishable to the eye.
+        marginLeft: '0',
     },
     '.cm-line': { padding: '0' },
     '.cm-scroller': {

@@ -17,6 +17,7 @@ import {
 } from '@/lib/sessionGoalMetadata';
 import { sessionGoalStatusColor, sessionGoalStatusLabelKey } from '@/lib/sessionGoalPresentation';
 import { clearSessionGoal, setSessionGoal } from '@/lib/sessionGoalActions';
+import { useSessionGoalArmStore } from '@/stores/useSessionGoalArmStore';
 import { useI18n } from '@/lib/i18n';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { useUIStore } from '@/stores/useUIStore';
@@ -88,6 +89,15 @@ export function SessionGoalDialog({ open, onOpenChange, sessionId, directory }: 
     () => setSessionGoal(sessionId, directory, { objective: trimmedObjective, tokenBudget: budgetValue }, goal),
     true,
   );
+
+  // Click only arms with the original objective preserved; the goal stays
+  // `complete` until the user sends — reactivating here would auto-fire a
+  // continuation before the user can type a correction.
+  const handleContinueWork = React.useCallback(() => {
+    const originalObjective = goal?.objectiveFile ? (objectiveContent ?? goal?.objective ?? '') : (goal?.objective ?? '');
+    useSessionGoalArmStore.getState().setArmed(true, originalObjective.trim() || null);
+    onOpenChange(false);
+  }, [goal, objectiveContent, onOpenChange]);
 
   const title = goal ? t('chat.goal.dialog.titleManage') : t('chat.goal.dialog.titleCreate');
 
@@ -195,6 +205,11 @@ export function SessionGoalDialog({ open, onOpenChange, sessionId, directory }: 
               {!isCompleted && (
                 <Button size="sm" disabled={busy || !canSave} onClick={handleSave}>
                   {goal ? t('chat.goal.action.save') : t('chat.goal.action.start')}
+                </Button>
+              )}
+              {isCompleted && (
+                <Button size="sm" disabled={busy} onClick={handleContinueWork}>
+                  {t('chat.goal.action.continue')}
                 </Button>
               )}
             </div>

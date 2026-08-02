@@ -284,6 +284,28 @@ const ChatViewport = React.memo(({
         }
     }, [initialScrollAction, isInitialScrollReady, onInitialScrollReady]);
 
+    // Collect callIDs of ALL pending questions (inline + trailing) so the
+    // question recovery mechanism in ToolPart can avoid creating a duplicate
+    // card when the question is already rendered as trailing or inline.
+    const pendingQuestionCallIDs = React.useMemo(() => {
+        const callIDs = new Set<string>();
+        for (const bucket of inlineBlockingRequestsByTool.values()) {
+            for (const question of bucket.questions) {
+                const callID = question.tool?.callID;
+                if (typeof callID === 'string' && callID.length > 0) {
+                    callIDs.add(callID);
+                }
+            }
+        }
+        for (const question of sessionQuestions) {
+            const callID = question.tool?.callID;
+            if (typeof callID === 'string' && callID.length > 0) {
+                callIDs.add(callID);
+            }
+        }
+        return callIDs;
+    }, [inlineBlockingRequestsByTool, sessionQuestions]);
+
     return (
         <div
             className={cn(
@@ -346,7 +368,7 @@ const ChatViewport = React.memo(({
                     data-scrollbar="chat"
                 >
                     <div className="relative z-0 min-h-full">
-                        <InlineBlockingRequestsContext.Provider value={inlineBlockingRequestsByTool}>
+                        <InlineBlockingRequestsContext.Provider value={{ inlineByTool: inlineBlockingRequestsByTool, pendingQuestionCallIDs }}>
                             <MessageList
                                 ref={messageListRef}
                                 sessionKey={currentSessionId}

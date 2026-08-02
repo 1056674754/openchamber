@@ -889,6 +889,17 @@ const isLocalRuntimeUrl = (targetUrl) => {
   }
 };
 
+const isSpaReloadNavigation = (currentUrl, targetUrl) => {
+  try {
+    const target = new URL(targetUrl);
+    if (target.protocol === 'about:' || target.protocol === 'devtools:') return true;
+    const current = new URL(currentUrl);
+    return target.origin === current.origin && target.pathname === current.pathname;
+  } catch {
+    return false;
+  }
+};
+
 const buildLocalUrl = (port) => `http://127.0.0.1:${port}`;
 
 const resourceRoot = () => {
@@ -1955,9 +1966,15 @@ const createBrowserWindow = ({ label, restoreGeometry, url }) => {
   });
 
   browserWindow.webContents.on('will-navigate', (event, url) => {
-    if (isAllowedNavigationUrl(url)) return;
+    // The main window is an SPA whose in-app routing uses the History API and never
+    // triggers will-navigate. Any top-level navigation here is a clicked <a> (often an
+    // agent-generated malformed href) resolved against the loopback origin — allowing it
+    // reloads the whole app. Only true reloads and reserved protocols may proceed.
+    if (isSpaReloadNavigation(browserWindow.webContents.getURL(), url)) return;
     event.preventDefault();
-    void shell.openExternal(url).catch(() => {});
+    if (!isLocalRuntimeUrl(url)) {
+      void shell.openExternal(url).catch(() => {});
+    }
   });
 
   browserWindow.webContents.setZoomFactor(1);
@@ -2142,14 +2159,12 @@ const createMiniChatWindow = async ({ mode, sessionId = '', directory = '', proj
     return { action: 'deny' };
   });
   browserWindow.webContents.on('will-navigate', (event, url) => {
-    try {
-      const target = new URL(url);
-      const local = new URL(state.localOrigin || state.sidecarUrl || '');
-      if (target.origin === local.origin) return;
-    } catch {
-    }
+    // Same SPA discipline as the main window: only reloads and reserved protocols pass.
+    if (isSpaReloadNavigation(browserWindow.webContents.getURL(), url)) return;
     event.preventDefault();
-    void shell.openExternal(url).catch(() => {});
+    if (!isLocalRuntimeUrl(url)) {
+      void shell.openExternal(url).catch(() => {});
+    }
   });
   browserWindow.webContents.on('dom-ready', () => {
     if (state.initScript) {

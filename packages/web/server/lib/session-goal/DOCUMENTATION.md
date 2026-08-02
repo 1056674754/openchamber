@@ -156,12 +156,15 @@ before touching the filesystem). Rationale: metadata rides every
    `emitGoalNotification` so the user hears about it even with the UI closed:
    desktop + UI broadcast + the standard push fanout (web-push with full
    text; APNs with a generic per-type title and the session name as body).
-   It obeys the notify-on-completion setting. Conversely, while a goal is
-   ACTIVE the notifications runtime suppresses per-turn "ready"
-   notifications on every channel — they would only echo the loop's own
-   continuations; error/question/permission notifications are untouched.
-   Pausing a goal from the UI also aborts the running turn (and vice versa —
-   an abort pauses the goal), so "stop" means stop on both axes.
+    It obeys the notify-on-completion setting. Conversely, while a goal is
+    ACTIVE the notifications runtime suppresses per-turn "ready"
+    notifications on every channel — they would only echo the loop's own
+    continuations; error/question/permission notifications are untouched.
+    Clearing or pausing a goal from the UI is a SOFT stop: it only removes
+    the goal (or stops the loop from continuing) — the agent's current turn
+    finishes naturally. The reverse still holds: an explicit abort (stop
+    button) pauses an active goal. So "stop the supervisor" and "stop the
+    work" are now separate controls.
 
 ## Continuation prompt
 

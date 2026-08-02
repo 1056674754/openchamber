@@ -62,27 +62,32 @@ export const SessionGoalButton: React.FC<SessionGoalButtonProps> = React.memo(({
 
   const colorClass = (() => {
     if (remoteUnsupported) return 'text-muted-foreground/50';
+    if (armed) return 'text-[var(--status-info)]';
     if (goal?.status === 'complete') return 'text-[var(--status-success)]';
     if (goal?.status === 'blocked' || goal?.status === 'budgetLimited') return 'text-[var(--status-error)]';
-    if (armed || goal?.status === 'active' || goal?.status === 'paused') return 'text-[var(--status-info)]';
+    if (goal?.status === 'active' || goal?.status === 'paused') return 'text-[var(--status-info)]';
     return '';
   })();
 
   const label = remoteUnsupported
     ? t('chat.goal.button.remoteUnsupportedAria')
-    : goal
+    : (armed ? t('chat.goal.button.disarmAria') : goal
       ? t('chat.goal.button.manageAria')
-      : (armed ? t('chat.goal.button.disarmAria') : t('chat.goal.button.armAria'));
+      : t('chat.goal.button.armAria'));
 
-  // Any existing goal (live or completed) opens the manage dialog — a
-  // completed goal must be removed there before a new one can be armed.
+  // Armed checks first: a reactivation arm (from "Continue working") must be
+  // disarmable even while the completed goal is still in metadata.
   const handleClick = () => {
     if (remoteUnsupported) return;
+    if (armed) {
+      setArmed(false);
+      return;
+    }
     if (goal) {
       setDialogOpen(true);
       return;
     }
-    setArmed(!armed);
+    setArmed(true);
   };
 
   const button = (

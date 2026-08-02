@@ -37,7 +37,7 @@ const GUTTER_NARROW_WIDTH_PX = 12;
 const GUTTER_RIGHT_OFFSET_PX = 6;
 // The rail shows at most a window of ticks; hovering the gutter edges
 // carousels the window through the rest of the prompts.
-const MAX_VISIBLE_TICKS = 30;
+const MAX_VISIBLE_TICKS = 90;
 const TICK_PITCH_PX = 8;
 const EDGE_ZONE_PX = 16;
 const CAROUSEL_INTERVAL_MS = 80;

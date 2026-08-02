@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  classifyMarkdownLinkClick,
   findFileReferenceTextMatches,
   getResolvedReference,
   isLikelyFilePath,
@@ -115,5 +116,35 @@ describe('markdown file reference heuristics', () => {
       end: 2 + path.length,
       raw: path,
     }]);
+  });
+});
+
+describe('markdown link click classification', () => {
+  test('routes http(s) and system-protocol links to the runtime opener', () => {
+    expect(classifyMarkdownLinkClick('https://example.com')).toBe('external');
+    expect(classifyMarkdownLinkClick('http://example.com/docs')).toBe('external');
+    expect(classifyMarkdownLinkClick('mailto:test@example.com')).toBe('external');
+    expect(classifyMarkdownLinkClick('tel:+15551234')).toBe('external');
+    expect(classifyMarkdownLinkClick('sms:12345')).toBe('external');
+  });
+
+  test('lets real in-page anchors scroll natively', () => {
+    expect(classifyMarkdownLinkClick('#section')).toBe('native');
+    expect(classifyMarkdownLinkClick('#toc-安装指南')).toBe('native');
+  });
+
+  test('blocks agent-generated and unsafe hrefs so they can never reload the SPA', () => {
+    // Regression: a link like "[报告](artifact:x.html)" rendered <a href="artifact:x.html">;
+    // the browser resolved it against the loopback origin to http://127.0.0.1:<port>/artifact:x.html,
+    // which the Electron will-navigate guard treated as "our own UI" and allowed — reloading
+    // the whole app. Bare "#" and "" also reload the current page, so they are blocked too.
+    expect(classifyMarkdownLinkClick('artifact:import_verification.html')).toBe('block');
+    expect(classifyMarkdownLinkClick('./relative/path.md')).toBe('block');
+    expect(classifyMarkdownLinkClick('javascript:alert(1)')).toBe('block');
+    expect(classifyMarkdownLinkClick('openchamber://session/abc')).toBe('block');
+    expect(classifyMarkdownLinkClick('#')).toBe('block');
+    expect(classifyMarkdownLinkClick('')).toBe('block');
+    expect(classifyMarkdownLinkClick('readme.txt')).toBe('block');
+    expect(classifyMarkdownLinkClick('?tab=preview')).toBe('block');
   });
 });

@@ -47,6 +47,25 @@ describe('composerEditorTheme', () => {
     });
 
     /**
+     * CodeMirror centres the caret with `margin-left: -0.6px`, so at the first
+     * column of every line the 1.2px caret renders at [-0.6px, +0.6px]. The
+     * scroller clips horizontal overflow and the content padding is zero, which
+     * clips the left half and leaves a sub-pixel sliver the eye drops — the
+     * caret vanishes at the start of any line. The theme must override that
+     * negative margin so the caret stays fully inside the scroller.
+     */
+    test('the caret is not clipped off the left edge of a line', () => {
+        const cursorRule = selectors.find((selector) => selector.includes('.cm-cursor'));
+        expect(cursorRule).toBeDefined();
+        const rule = (COMPOSER_EDITOR_THEME_SPEC as Record<string, Record<string, string>>)[cursorRule ?? ''];
+        // CodeMirror's default `margin-left: -0.6px` would render the caret
+        // half-outside the scroller at the first column and be clipped; the
+        // override must keep it at or right of the insertion point.
+        const margin = parseFloat(rule.marginLeft ?? '-0.6');
+        expect(Number.isFinite(margin) && margin >= 0).toBe(true);
+    });
+
+    /**
      * CodeMirror's own `.cm-cursor` rule and its `&dark` override are one and
      * two classes deep respectively; a bare `.cm-cursor` selector loses to the
      * latter. `&.cm-editor` matches it.

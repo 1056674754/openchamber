@@ -1,4 +1,4 @@
-import { abortCurrentOperation, patchSessionMetadata } from '@/sync/session-actions';
+import { patchSessionMetadata } from '@/sync/session-actions';
 import { distillGoalObjective } from '@/lib/smallModel';
 import { formatMessage, useI18nStore } from '@/lib/i18n/store';
 import { toast } from '@/components/ui';
@@ -189,12 +189,9 @@ export async function setSessionGoalStatus(
   status: Extract<SessionGoalStatus, 'active' | 'paused' | 'complete'>,
 ): Promise<void> {
   await assertSessionGoalSupported(sessionId);
-  // Pausing a goal also stops the agent's current turn — same mental model
-  // as the stop button, expressed through goal control. A no-op when the
-  // session is already idle.
-  if (status === 'paused') {
-    void abortCurrentOperation(sessionId);
-  }
+  // Soft pause: the running turn finishes naturally; the loop just stops
+  // continuing because the goal is no longer active. Use the stop button to
+  // abort the current turn.
   await writeGoal(sessionId, directory, (currentGoal) => {
     if (!currentGoal) return null;
     return {
@@ -214,15 +211,9 @@ export async function setSessionGoalStatus(
 
 export async function clearSessionGoal(sessionId: string, directory: string | undefined): Promise<void> {
   await assertSessionGoalSupported(sessionId);
-  let wasActive = false;
-  await writeGoal(sessionId, directory, (currentGoal) => {
-    wasActive = currentGoal?.status === 'active';
-    return null;
-  });
+  // Soft clear: drop the goal and objective file only. A running turn
+  // finishes naturally; the loop has no active goal to continue. Use the
+  // stop button to abort the current turn.
+  await writeGoal(sessionId, directory, () => null);
   deleteObjectiveFile(sessionId);
-  // Removing a running goal is a "stop" too — abort the current turn like
-  // pause does. A no-op when the session is idle.
-  if (wasActive) {
-    void abortCurrentOperation(sessionId);
-  }
 }

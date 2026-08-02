@@ -1,5 +1,6 @@
 import { isAbsoluteFilePath, isFilePathWithinDirectory, normalizeFilePath, toAbsoluteFilePath } from '@/lib/path-utils';
 import { resolveApiUrl } from '@/lib/api/serverUrl';
+import { isExternalHttpUrl } from '@/lib/url';
 
 export type ParsedFileReference = {
   path: string;
@@ -395,6 +396,18 @@ export const isLikelyFilePath = (value: string): boolean => {
 export const shouldInterceptMarkdownFileHref = (href: string): boolean => (
   isLikelyFilePath(href)
 );
+
+export type MarkdownLinkClickAction = 'native' | 'external' | 'block';
+
+// "native" = browser scrolls the in-page anchor; "external" = route via the runtime opener
+// (http(s)/mailto/tel); "block" = suppress default navigation, which would otherwise reload
+// the SPA when an agent-generated href (artifact:, relative path, bare "#", ...) resolves
+// against the loopback origin.
+export const classifyMarkdownLinkClick = (href: string): MarkdownLinkClickAction => {
+  if (href.startsWith('#') && href.length > 1) return 'native';
+  if (isExternalHttpUrl(href) || /^(mailto|tel|sms|callto):/i.test(href)) return 'external';
+  return 'block';
+};
 
 const overlapsExistingMatch = (start: number, end: number, matches: FileReferenceTextMatch[]): boolean => {
   return matches.some((match) => start < match.end && end > match.start);

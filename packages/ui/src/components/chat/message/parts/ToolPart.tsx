@@ -48,7 +48,7 @@ import { JsonSummaryView } from './JsonSummaryView';
 import { Icon } from "@/components/icon/Icon";
 import { PermissionCard } from '../../PermissionCard';
 import { QuestionCard } from '../../QuestionCard';
-import { useInlineBlockingRequestsForTool } from '../../InlineBlockingRequestsContext';
+import { useInlineBlockingRequestsForTool, usePendingQuestionCallIDs } from '../../InlineBlockingRequestsContext';
 import type { QuestionRequest } from '@/types/question';
 import { serializeQuestionAnswersAsMarkdown } from '../../questionSerializers';
 import { DiffViewToggle, type DiffViewMode } from '../DiffViewToggle';
@@ -2318,6 +2318,7 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
         return typeof candidate === 'string' && candidate.length > 0 ? candidate : undefined;
     }, [messageId, part]);
     const inlineBlockingRequests = useInlineBlockingRequestsForTool(partMessageId, part.callID || part.id);
+    const pendingQuestionCallIDs = usePendingQuestionCallIDs();
 
     const normalizedPartTool = normalizeToolName(part.tool);
     const isTaskTool = normalizedPartTool === 'task';
@@ -2333,13 +2334,21 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
         if (inlineBlockingRequests.questions.length > 0) {
             return null;
         }
+        // If the question is still pending on the server (tracked by callID),
+        // it will be rendered either inline (via inlineBlockingRequests) or as
+        // a trailing card at the bottom of the chat. Skip recovery to avoid
+        // creating a duplicate card.
+        const partCallID = part.callID || part.id;
+        if (typeof partCallID === 'string' && partCallID.length > 0 && pendingQuestionCallIDs.has(partCallID)) {
+            return null;
+        }
         return recoverQuestionRequestFromToolPart({
             part,
             messageID: partMessageId,
             sessionID: messageSessionId,
             normalizedToolName: normalizedPartTool,
         });
-    }, [inlineBlockingRequests.questions.length, messageSessionId, normalizedPartTool, part, partMessageId]);
+    }, [inlineBlockingRequests.questions.length, messageSessionId, normalizedPartTool, part, partMessageId, pendingQuestionCallIDs]);
     const resolveRecoveredQuestionRequestTarget = React.useCallback(async () => {
         if (!recoveredQuestionRequest) {
             throw new Error('Question reply target is not available');
@@ -2399,6 +2408,14 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
     const hasInlineBlockingRequests = inlineBlockingRequests.questions.length > 0
         || inlineBlockingRequests.permissions.length > 0
         || recoveredQuestionRequest !== null;
+    // When the interactive QuestionCard is being rendered (either from the
+    // server's pending question routed inline, or from the recovery mechanism),
+    // suppress the static question text in ToolExpandedContent to avoid
+    // showing the question content twice (static text + interactive card).
+    // The static text is only a fallback for when the QuestionCard data is
+    // unavailable (e.g. after refresh when the sync store has no question data).
+    const hasInteractiveQuestionCard = normalizedPartTool === 'question'
+        && (inlineBlockingRequests.questions.length > 0 || recoveredQuestionRequest !== null);
 
     const [activeLatched, setActiveLatched] = React.useState<boolean>(!isFinalized);
     const previousPartIdRef = React.useRef<string | undefined>(part.id);
@@ -3291,7 +3308,7 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
                         overflowAnchor: 'none',
                     }}
                 >
-                    {shouldRenderExpandedContent ? (
+                    {shouldRenderExpandedContent && !hasInteractiveQuestionCard ? (
                         <div className="relative ml-2 pl-3">
                             <span
                                 aria-hidden="true"

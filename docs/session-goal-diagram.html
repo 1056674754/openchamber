@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Session Goal 功能解析</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<style>
+  :root {
+    --bg: #0f1115;
+    --surface: #161a22;
+    --surface-2: #1d222d;
+    --border: #2a3140;
+    --text: #e6e9ef;
+    --muted: #8b94a6;
+    --accent: #6ea8fe;
+    --green: #4ade80;
+    --amber: #fbbf24;
+    --red: #f87171;
+    --blue: #60a5fa;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 32px 20px 80px;
+    background: var(--bg); color: var(--text);
+    font-family: -apple-system, "Segoe UI", system-ui, sans-serif;
+    line-height: 1.65; font-size: 15px;
+  }
+  .wrap { max-width: 1000px; margin: 0 auto; }
+  h1 { font-size: 26px; margin: 0 0 4px; letter-spacing: -0.02em; }
+  h2 { font-size: 19px; margin: 40px 0 10px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+  h2 .num { color: var(--accent); font-variant-numeric: tabular-nums; margin-right: 8px; }
+  h3 { font-size: 15px; margin: 22px 0 8px; color: var(--accent); }
+  .sub { color: var(--muted); font-size: 13px; margin-bottom: 28px; }
+  p { margin: 10px 0; }
+  code { font-family: var(--mono); font-size: 13px; background: var(--surface-2); padding: 1px 6px; border-radius: 4px; color: var(--accent); }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 18px 20px; margin: 14px 0; }
+  .card.warn { border-color: var(--amber); background: rgba(251,191,36,0.06); }
+  .card.bad { border-color: var(--red); background: rgba(248,113,113,0.06); }
+  .card.good { border-color: var(--green); background: rgba(74,222,128,0.05); }
+  .card h3 { margin-top: 0; }
+  ul { margin: 8px 0; padding-left: 22px; }
+  li { margin: 4px 0; }
+  .mermaid { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 18px; margin: 16px 0; display: flex; justify-content: center; }
+  .tag { display: inline-block; font-size: 11px; padding: 2px 8px; border-radius: 10px; font-family: var(--mono); margin-right: 4px; }
+  .t-ui { background: rgba(96,165,250,0.15); color: var(--blue); }
+  .t-srv { background: rgba(110,168,254,0.15); color: var(--accent); }
+  .t-store { background: rgba(74,222,128,0.15); color: var(--green); }
+  .legend { display: flex; gap: 14px; flex-wrap: wrap; margin: 10px 0; font-size: 12px; color: var(--muted); }
+  .kbd { font-family: var(--mono); font-size: 12px; background: var(--surface-2); border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 4px; padding: 1px 7px; }
+  .quote { border-left: 3px solid var(--accent); padding-left: 14px; color: var(--muted); font-style: italic; margin: 12px 0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>Session Goal 功能完整解析</h1>
+<div class="sub">基于 fork <code>openchamber-merge-v1.11.0</code> 源码 · 服务端控制循环 + 独立审计模型</div>
+
+<div class="legend">
+  <span><span class="tag t-ui">UI</span> 前端组件/状态</span>
+  <span><span class="tag t-srv">SRV</span> Web 服务端运行时</span>
+  <span><span class="tag t-store">DATA</span> 存储/数据源</span>
+</div>
+
+<h2><span class="num">1</span>这个功能到底是什么</h2>
+<div class="card">
+<p>一句话:<b>给某个会话挂一个"目标(objective)",然后由服务端循环驱动代理一轮一轮地干,直到独立的小模型审计认定目标完成。</b></p>
+<p>关键认知:<b>它不是 UI 插件,是一个跑在 Web 服务端的后台控制循环</b>(<code>packages/web/server/lib/session-goal/runtime.js</code>,39KB)。循环通过 OpenCode 的 <code>prompt_async</code> 自动发送"继续"提示词,靠 SSE 事件感知会话空闲。即使关掉 UI 窗口,循环仍在服务端继续跑。</p>
+<div class="quote">"Server-side control loop that keeps a session working toward a user-defined objective ... the loop lives in the web server and survives UI disconnects." — DOCUMENTATION.md</div>
+</div>
+
+<h2><span class="num">2</span>组件构成(有哪些东西)</h2>
+<div class="mermaid">
+graph LR
+  subgraph UI["前端 packages/ui"]
+    BTN["SessionGoalButton<br/>作曲家目标按钮<br/>arm/取消"]:::ui
+    ROW["SessionGoalRow<br/>目标条 暂停/恢复"]:::ui
+    DLG["SessionGoalDialog<br/>管理弹窗<br/>编辑/暂停/恢复/完成/清除"]:::ui
+    ARM["useSessionGoalArmStore<br/>'下一条消息即目标'"]:::ui
+    ACT["sessionGoalActions<br/>create/edit/pause/resume/clear"]:::ui
+    META["sessionGoalMetadata<br/>payload 解析"]:::ui
+    PRES["sessionGoalPresentation<br/>状态颜色/文案"]:::ui
+  end
+  subgraph SRV["服务端 packages/web/server"]
+    RT["runtime.js<br/>★控制循环 39KB<br/>tick/审计/续发"]:::srv
+    CRE["create.js<br/>目标创建+简介词"]:::srv
+    OBJ["objectives.js<br/>目标文件读写"]:::srv
+    ROUTES["routes.js<br/>HTTP /api/goals/objective"]:::srv
+    SM["small-model<br/>独立审计员"]:::srv
+  end
+  subgraph DATA["数据源"]
+    MD["session.metadata<br/>.openchamber.goal<br/>★唯一真相源"]:::store
+    FILE["&lt;datadir&gt;/goals/<br/>&lt;sessionId&gt;.md<br/>目标正文文件"]:::store
+  end
+  OC["OpenCode<br/>prompt_async / SSE"]:::store
+
+  BTN --> ARM
+  ARM -->|"send 时盖章"| MD
+  ACT -->|"patch metadata"| MD
+  ACT -->|"读/写目标文"| OBJ
+  DLG --> ACT
+  ROW --> ACT
+  RT -->|"读 goal"| MD
+  RT -->|"续发提示词"| OC
+  RT -->|"调用审计"| SM
+  RT -->|"结算通知"| UI
+  OBJ <--> FILE
+  MD -.->|"rides session.updated"| UI
+  OC -.->|"idle/busy 事件"| RT
+
+  classDef ui fill:#1a2333,stroke:#60a5fa,color:#dbeafe;
+  classDef srv fill:#1a2435,stroke:#6ea8fe,color:#dbeafe;
+  classDef store fill:#15281f,stroke:#4ade80,color:#dcfce7;
+</div>
+
+<div class="card">
+<p><b>真相源只有一个:</b> <code>session.metadata.openchamber.goal</code>。所有 UI 操作(创建/暂停/清除)都是 PATCH 这块 metadata;服务端循环也从这里读。目标<b>正文</b>单独放文件(避免 metadata 膨胀),metadata 里只存 <code>objectiveFile: true</code>。</p>
+</div>
+
+<h2><span class="num">3</span>状态机(5 个状态)</h2>
+<div class="mermaid">
+stateDiagram-v2
+  [*] --> none: 无目标
+  none --> active: arm + 发送消息<br/>(盖章 goal)
+  active --> active: 每轮审计 continue<br/>(自动续发 prompt_async)
+
+  active --> complete: 审计裁决 complete
+  active --> blocked: 连续3次 blocked<br/>或 轮数≥20<br/>或 审计失败×2
+  active --> budgetLimited: token≥预算
+  active --> paused: 用户暂停<br/>或 用户按停止(abort)
+
+  paused --> active: 用户恢复 Resume<br/>(立即踢一脚)
+
+  complete --> [*]: 用户清除
+  blocked --> active: 用户恢复
+  budgetLimited --> active: 用户恢复
+  paused --> [*]: 用户清除
+
+  note right of complete
+    ★ 完成后变绿并"停住"
+    没有后续动作
+    只能手动清除再开新的
+  end note
+  note right of paused
+    ★ 暂停/清除活动目标
+    会 abort 当前正在跑的轮
+    (这就是你遇到的"中断")
+  end note
+</div>
+
+<h3>状态颜色映射 <span style="color:var(--muted);font-weight:normal">(sessionGoalPresentation.ts)</span></h3>
+<table style="border-collapse:collapse;font-size:13px;width:100%">
+<tr style="color:var(--muted)"><th style="text-align:left;padding:6px;border-bottom:1px solid var(--border)">状态</th><th style="text-align:left;padding:6px;border-bottom:1px solid var(--border)">颜色 token</th><th style="text-align:left;padding:6px;border-bottom:1px solid var(--border)">含义</th></tr>
+<tr><td style="padding:6px"><span class="tag" style="background:rgba(96,165,250,.2);color:var(--blue)">●</span> active</td><td style="padding:6px"><code>var(--status-info)</code></td><td style="padding:6px">循环运行中,每轮审计后自动续发</td></tr>
+<tr><td style="padding:6px"><span class="tag" style="background:rgba(139,148,166,.2);color:var(--muted)">●</span> paused</td><td style="padding:6px"><code>surface-muted-foreground</code></td><td style="padding:6px">已暂停,不再续发</td></tr>
+<tr><td style="padding:6px"><span class="tag" style="background:rgba(251,191,36,.2);color:var(--amber)">●</span> blocked</td><td style="padding:6px"><code>var(--status-warning)</code></td><td style="padding:6px">卡住了(连续 blocked / 轮数上限 / 审计不可用)</td></tr>
+<tr><td style="padding:6px"><span class="tag" style="background:rgba(251,191,36,.2);color:var(--amber)">●</span> budgetLimited</td><td style="padding:6px"><code>var(--status-warning)</code></td><td style="padding:6px">达到 token 预算上限</td></tr>
+<tr><td style="padding:6px"><span class="tag" style="background:rgba(74,222,128,.2);color:var(--green)">●</span> complete</td><td style="padding:6px"><code>var(--status-success)</code></td><td style="padding:6px">审计认定完成(★ 不代表真的完成,见下)</td></tr>
+</table>
+
+<h2><span class="num">4</span>运行时循环(它怎么自己跑下去)</h2>
+<div class="mermaid">
+flowchart TD
+  E1["收到 session.status: idle 事件"]:::srv
+  T0["启动 15s 定时器<br/>(busy/retry 会清掉它)"]:::srv
+  TICK["★ TICK 触发"]:::srv
+  G1{"sessionGoalEnabled<br/>设置开关?"}:::srv
+  G2{"goal.status == active?"}:::srv
+  QUIESCE["静默检查:<br/>尾部是 user msg 或<br/>未完成的 assistant → bail"]:::srv
+  ACCT["token 快照记账<br/>(相对 baseline)"]:::srv
+  TERM["终端检查(最便宜的先):<br/>轮错误→blocked<br/>token≥预算→budgetLimited<br/>轮数≥20→blocked"]:::srv
+  AUDIT["★ 小模型独立审计<br/>只看 目标 + 最后一轮<br/>裁决 continue/complete/blocked"]:::srv
+  CONT["continue:<br/>先持久化记账+轮数<br/>再 prompt_async 续发"]:::srv
+  SETTLE["★ SETTLE 结算:<br/>complete/blocked/budgetLimited<br/>发桌面/UI/push 通知"]:::srv
+  WAIT["等下一个 idle 事件<br/>(不轮询,事件驱动)"]:::srv
+
+  E1 --> T0 --> TICK
+  TICK --> G1
+  G1 -->|"关"| WAIT
+  G1 -->|"开"| G2
+  G2 -->|"否/已结算"| WAIT
+  G2 -->|"active"| QUIESCE --> ACCT --> TERM
+  TERM -->|"命中硬上限"| SETTLE
+  TERM -->|"通过"| AUDIT
+  AUDIT -->|"complete"| SETTLE
+  AUDIT -->|"blocked ×3"| SETTLE
+  AUDIT -->|"continue"| CONT
+  CONT --> WAIT
+
+  classDef srv fill:#161a22,stroke:#6ea8fe,color:#e6e9ef;
+</div>
+<div class="card">
+<p><b>关键:审计员(小模型)是唯一的终止权威</b>。代理自己<b>没有</b>任何渠道宣布自己的目标完成了——只有独立审计说 <code>complete</code> 才结算。所以"绿色 complete"是<b>小模型的判断</b>,不是代理的自证,这就是你说的"绿色又不一定真的完成"。</p>
+</div>
+
+<h2><span class="num">5</span>控制语义 ★ 你遇到的两个问题</h2>
+
+<div class="card bad">
+<h3>问题一:清除/暂停活动目标 → 杀掉正在跑的轮</h3>
+<p>这是<b>故意的</b>,不是 bug。<code>sessionGoalActions.ts</code>:</p>
+<pre style="background:var(--surface-2);padding:12px;border-radius:6px;overflow:auto;font-size:12px"><code>clearSessionGoal(sessionId, directory) {
+  ...
+  if (wasActive) {
+    void <b style="color:var(--red)">abortCurrentOperation(sessionId)</b>;  // 杀当前轮
+  }
+}
+setSessionGoalStatus(..., 'paused') {
+  if (status === 'paused') {
+    void <b style="color:var(--red)">abortCurrentOperation(sessionId)</b>;  // 杀当前轮
+  }
+}</code></pre>
+<div class="quote">"Pausing a goal from the UI also aborts the running turn (and vice versa — an abort pauses the goal), so <b>'stop' means stop on both axes</b>." — DOCUMENTATION.md</div>
+<p><b>你的直觉是对的:</b> 清除"监工"≠ 停止工作。要停工作有专门的停止按钮。当前设计把两个语义绑死了。<b>软清除方案</b>:<code>clearSessionGoal</code> 里去掉 <code>abortCurrentOperation</code>,只移除 goal 元数据 + 删目标文件,服务端循环失去 active goal 自然停止续发(已有守卫:goal 改变时 drop continuation)。</p>
+</div>
+
+<div class="card warn">
+<h3>问题二:完成后变绿"停住",没后续动作</h3>
+<ul>
+<li><code>complete</code> 是<b>终态之一</b>,结算后循环不再续发(正确,不该继续跑)。</li>
+<li>但它<b>不自动消失</b>——goal 元数据保留在 session 上,目标条一直显示绿色。</li>
+<li><b>没有"标记完成 → 开新目标"的引导</b>。用户只能:点开弹窗 → Clear → 重新 arm → 发新消息。三步。</li>
+<li>而且 <code>complete</code> 是<b>小模型的判断</b>,可能误判(代理其实没做完)。误判后既不自动续跑,也不提示用户复核,就静静停在那。</li>
+</ul>
+<p><b>这确实是 UX 缺口。</b>上游目前也没有针对它的改进(见成熟度分析)。</p>
+</div>
+
+<h2><span class="num">6</span>关键文件清单</h2>
+<div class="card" style="font-size:13px">
+<table style="border-collapse:collapse;width:100%">
+<tr style="color:var(--muted)"><th style="text-align:left;padding:6px;border-bottom:1px solid var(--border)">层</th><th style="text-align:left;padding:6px;border-bottom:1px solid var(--border)">文件</th><th style="text-align:left;padding:6px;border-bottom:1px solid var(--border)">职责</th></tr>
+<tr><td style="padding:5px"><span class="tag t-srv">SRV</span></td><td style="padding:5px"><code>session-goal/runtime.js</code> (39KB)</td><td style="padding:5px">★ 控制循环:tick/审计/续发/结算</td></tr>
+<tr><td style="padding:5px"><span class="tag t-srv">SRV</span></td><td style="padding:5px"><code>session-goal/create.js</code></td><td style="padding:5px">目标创建 + system-reminder 简介词</td></tr>
+<tr><td style="padding:5px"><span class="tag t-srv">SRV</span></td><td style="padding:5px"><code>session-goal/objectives.js</code></td><td style="padding:5px">目标正文文件读写(5000字限制)</td></tr>
+<tr><td style="padding:5px"><span class="tag t-srv">SRV</span></td><td style="padding:5px"><code>session-goal/routes.js</code></td><td style="padding:5px">HTTP /api/goals/objective/:sessionId</td></tr>
+<tr><td style="padding:5px"><span class="tag t-ui">UI</span></td><td style="padding:5px"><code>lib/sessionGoalActions.ts</code></td><td style="padding:5px">create/edit/pause/resume/clear(★ 含 abort)</td></tr>
+<tr><td style="padding:5px"><span class="tag t-ui">UI</span></td><td style="padding:5px"><code>chat/SessionGoalDialog.tsx</code></td><td style="padding:5px">管理弹窗(清除按钮触发 abort)</td></tr>
+<tr><td style="padding:5px"><span class="tag t-ui">UI</span></td><td style="padding:5px"><code>chat/SessionGoalRow.tsx</code></td><td style="padding:5px">目标条 + 暂停/恢复(暂停触发 abort)</td></tr>
+<tr><td style="padding:5px"><span class="tag t-ui">UI</span></td><td style="padding:5px"><code>chat/SessionGoalButton.tsx</code></td><td style="padding:5px">作曲家 arm 按钮</td></tr>
+<tr><td style="padding:5px"><span class="tag t-ui">UI</span></td><td style="padding:5px"><code>stores/useSessionGoalArmStore.ts</code></td><td style="padding:5px">"下一条消息即目标"标志</td></tr>
+<tr><td style="padding:5px"><span class="tag t-store">DATA</span></td><td style="padding:5px"><code>session.metadata.openchamber.goal</code></td><td style="padding:5px">★ 唯一真相源(状态/记账/轮数)</td></tr>
+</table>
+</div>
+
+<div class="card good" id="recency" style="margin-top:32px">
+<h3>成熟度结论</h3>
+<p><b>仍在活跃开发,但核心已基本稳定、未冻结。</b></p>
+<ul>
+<li><b>主体</b>于 <code>2026-07-11/12</code> 一次性 ship(当天 20+ 个 commit:循环、审计、暂停、文件目标、记账、移动端 UX…)。</li>
+<li><b>clear/pause-abort 行为是 7/11 明确写死的设计</b>(commit <code>e7531675f</code> "pausing a goal also aborts the agent's current turn"、<code>c289c4d85</code> "removing an active goal aborts the running turn"、<code>f939c1100</code> "pause goal on user abort instead of blocking it")。不是遗留 bug,是有意决策。</li>
+<li><b>7/27 之后的上游改动</b>只有 3 个:<code>147a6969b</code>(7/28)、<code>34bb3a6b2</code>(7/30)、<code>5c4bb5fab</code>(7/31)——全是<b>斜杠命令目标展开 / 控制面 / 创建管线</b>的周边管线,没有动 clear/pause/complete 的 UX。</li>
+<li><b>没有上游改动</b>涉及:清除/暂停不杀轮、完成后的后续动作、绿色完成态 UX。你关心的两点上游至今没碰。</li>
+</ul>
+<p><b>结论:</b> 做软清除改动<b>不会和上游冲突</b>(上游没在动这块);也<b>不需要先 backport</b> 那 3 个周边 commit(它们不影响 clear/pause 路径)。可以直接在我们当前合并点上改 <code>sessionGoalActions.ts</code>。</p>
+</div>
+
+</div>
+
+<script>
+  mermaid.initialize({ startOnLoad: true, theme: 'dark', themeVariables: {
+    background: '#161a22', primaryColor: '#1d222d', primaryTextColor: '#e6e9ef',
+    primaryBorderColor: '#6ea8fe', lineColor: '#8b94a6', secondaryColor: '#1a2333',
+    tertiaryColor: '#15281f', fontSize: '14px'
+  }});
+</script>
+</body>
+</html>
