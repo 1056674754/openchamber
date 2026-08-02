@@ -27,7 +27,7 @@ function buildConfig(colors: MermaidThemeColors): MermaidConfig {
     suppressErrorRendering: true,
     flowchart: {
       curve: 'basis',
-      useMaxWidth: true,
+      useMaxWidth: false,
       htmlLabels: true,
     },
     themeVariables: {
@@ -82,10 +82,43 @@ export async function renderMermaidDiagram(
   await acquireSlot()
   try {
     const mermaid = await getMermaid()
-    mermaid.initialize(buildConfig(colors))
+
+    // 确保字体已加载完成:mermaid 的 dagre 布局引擎依赖 getBBox/getComputedTextLength
+    // 测量文字尺寸,如果字体还没加载完(fallback 字体正在加载),测量会返回 0,
+    // 导致所有节点塌缩到原点、viewBox 变成默认的 16x16。
+    if (typeof document !== 'undefined' && document.fonts && document.fonts.status !== 'loaded') {
+      try {
+        await document.fonts.ready
+      } catch {
+        // 字体加载失败不应阻塞渲染
+      }
+    }
+
+    const config = buildConfig(colors)
+    mermaid.initialize(config)
     await mermaid.parse(source)
     const id = `mmd-${++renderCounter}`
     const { svg } = await mermaid.render(id, source)
+
+    // 检测渲染是否塌缩:viewBox 16x16 是 mermaid 的空图表默认值。
+    // 如果布局测量失败(节点位置全为 0),viewBox 会塌缩到这个值。
+    const viewBoxMatch = svg.match(/viewBox="(-?[\d.]+)\s+(-?[\d.]+)\s+([\d.]+)\s+([\d.]+)"/)
+    if (viewBoxMatch) {
+      const vbW = parseFloat(viewBoxMatch[3])
+      const vbH = parseFloat(viewBoxMatch[4])
+      if (Number.isFinite(vbW) && Number.isFinite(vbH) && vbW <= 20 && vbH <= 20) {
+        // 渲染塌缩 — 等待字体后重试一次
+        try {
+          if (document.fonts) await document.fonts.ready
+          const retryId = `mmd-${++renderCounter}`
+          const retry = await mermaid.render(retryId, source)
+          return retry.svg
+        } catch {
+          // 重试也失败,返回原始 SVG
+        }
+      }
+    }
+
     return svg
   } finally {
     releaseSlot()
