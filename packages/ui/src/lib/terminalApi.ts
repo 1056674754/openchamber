@@ -28,6 +28,7 @@ const TAG = 1;
 const MAX_PROJECTION_BYTES = 512 * 1024;
 const SOCKET_CONNECTING = 0;
 const SOCKET_OPEN = 1;
+const IDLE_SOCKET_GRACE_MS = 15_000;
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 const GLOBAL_KEY = '__openchamberTerminalTransportStateV3';
@@ -110,7 +111,7 @@ const resolveTerminalWebSocketUrl = (baseUrl?: string): string => {
   return getRuntimeUrlResolver().websocket('/api/terminal/ws');
 };
 
-class TerminalTransport {
+export class TerminalTransport {
   private socket: WebSocket | null = null;
   private opening: Promise<void> | null = null;
   private openingGeneration: number | null = null;
@@ -118,14 +119,21 @@ class TerminalTransport {
   private projections = new Map<string, TerminalProjection>();
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private keepaliveTimer: ReturnType<typeof setInterval> | null = null;
+  private idleCloseTimer: ReturnType<typeof setTimeout> | null = null;
   private failures = 0;
   private wakeCleanup: (() => void) | null = null;
   private generation = 0;
   private disposed = false;
 
-  constructor(private readonly baseUrl?: string) {}
+  constructor(
+    private readonly baseUrl?: string,
+    private readonly openSocket: (url: string) => WebSocket = (url) => (
+      openRuntimeWebSocket(url) as unknown as WebSocket
+    ),
+  ) {}
 
   subscribe(sessionId: string, handlers: TerminalHandlers): () => void {
+    this.cancelIdleClose();
     const subscriber: Subscriber = { handlers, lastSequence: -1 };
     const set = this.subscribers.get(sessionId) ?? new Set<Subscriber>();
     const first = set.size === 0;
@@ -165,8 +173,12 @@ class TerminalTransport {
         this.send({ t: 'detach', v: 3, s: sessionId });
       }
       if (this.subscribers.size === 0) {
-        this.generation += 1;
         this.cancelReconnect();
+        if (this.socket?.readyState === SOCKET_OPEN) {
+          this.scheduleIdleClose();
+          return;
+        }
+        this.generation += 1;
         this.closeSocket();
       }
     };
@@ -190,6 +202,7 @@ class TerminalTransport {
     this.projections.clear();
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     this.reconnectTimer = null;
+    this.cancelIdleClose();
     this.wakeCleanup?.();
     this.wakeCleanup = null;
     this.closeSocket();
@@ -230,7 +243,7 @@ class TerminalTransport {
         }, 10_000);
         try {
           const socketUrl = resolveTerminalWebSocketUrl(this.baseUrl);
-          const socket = openRuntimeWebSocket(socketUrl) as unknown as WebSocket;
+          const socket = this.openSocket(socketUrl);
           pendingSocket = socket;
           socket.binaryType = 'arraybuffer';
           this.socket = socket;
@@ -434,6 +447,22 @@ class TerminalTransport {
     this.reconnectTimer = null;
     this.wakeCleanup?.();
     this.wakeCleanup = null;
+  }
+
+  private scheduleIdleClose(): void {
+    if (this.idleCloseTimer || this.disposed) return;
+    this.idleCloseTimer = setTimeout(() => {
+      this.idleCloseTimer = null;
+      if (this.disposed || this.subscribers.size > 0) return;
+      this.generation += 1;
+      this.closeSocket();
+    }, IDLE_SOCKET_GRACE_MS);
+  }
+
+  private cancelIdleClose(): void {
+    if (!this.idleCloseTimer) return;
+    clearTimeout(this.idleCloseTimer);
+    this.idleCloseTimer = null;
   }
 
   private closeSocket(): void {

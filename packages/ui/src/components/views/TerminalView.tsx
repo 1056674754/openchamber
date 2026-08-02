@@ -2,7 +2,7 @@ import React from 'react';
 import { Icon } from "@/components/icon/Icon";
 import { toast } from '@/components/ui';
 import { useSessionUIStore } from '@/sync/session-ui-store';
-import { useTerminalStore } from '@/stores/useTerminalStore';
+import { EMPTY_TERMINAL_BUFFER, useTerminalStore } from '@/stores/useTerminalStore';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { type TerminalStreamEvent } from '@/lib/api/types';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
@@ -170,8 +170,11 @@ export const TerminalView: React.FC = () => {
     }, [directoryTerminalState?.tabs, t]);
 
     const terminalSessionId = activeTab?.terminalSessionId ?? null;
-    const terminalLifecycle = activeTab?.lifecycle ?? 'idle';
-    const bufferChunks = activeTab?.bufferChunks ?? [];
+    const bufferChunks = useTerminalStore((state) => (
+        effectiveDirectory && activeTabId
+            ? state.getBuffer(effectiveDirectory, activeTabId, activeServerId).chunks
+            : EMPTY_TERMINAL_BUFFER.chunks
+    ));
     const isConnecting = activeTab?.isConnecting ?? false;
     const previewUrl = activeTab?.previewUrl ?? null;
 
@@ -557,7 +560,8 @@ export const TerminalView: React.FC = () => {
             let terminalId = tab?.terminalSessionId ?? null;
             const terminalLifecycle = tab?.lifecycle ?? 'idle';
             const isActionTab = Boolean(tab?.label?.startsWith('Action:'));
-            const hasBufferedOutput = (tab?.bufferLength ?? 0) > 0 || (tab?.bufferChunks?.length ?? 0) > 0;
+            const buffer = useTerminalStore.getState().getBuffer(directory, tabId, sId);
+            const hasBufferedOutput = buffer.byteLength > 0 || buffer.chunks.length > 0;
 
             const isRehydratedSession =
                 Boolean(terminalId) && rehydratedTerminalIdsRef.current.has(terminalId as string);
@@ -727,8 +731,7 @@ export const TerminalView: React.FC = () => {
         setConnectionError(null);
         setIsFatalError(false);
         setIsReconnectPending(false);
-        disconnectStream();
-    }, [activeServerId, createTab, disconnectStream, effectiveDirectory, setActiveTab]);
+    }, [activeServerId, createTab, effectiveDirectory, setActiveTab]);
 
     const handleSelectTab = React.useCallback(
         (tabId: string) => {
@@ -738,9 +741,8 @@ export const TerminalView: React.FC = () => {
             setConnectionError(null);
             setIsFatalError(false);
             setIsReconnectPending(false);
-            disconnectStream();
         },
-        [activeServerId, disconnectStream, effectiveDirectory, setActiveTab]
+        [activeServerId, effectiveDirectory, setActiveTab]
     );
 
     const handleCloseTab = React.useCallback(

@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { devtools, persist, createJSONStorage } from 'zustand/middleware';
+import type { PersistStorage } from 'zustand/middleware';
 
 import { DEFAULT_SERVER_ID, serverRegistry } from '@/lib/opencode/server-registry';
 import { closeTerminal } from '@/lib/terminalApi';
@@ -9,7 +10,20 @@ export interface TerminalChunk {
   id: number;
   data: string;
   replayData?: string;
+  byteLength: number;
 }
+
+export type TerminalBuffer = {
+  chunks: TerminalChunk[];
+  byteLength: number;
+  lastSequence: number;
+};
+
+export const EMPTY_TERMINAL_BUFFER: TerminalBuffer = Object.freeze({
+  chunks: Object.freeze([]) as unknown as TerminalChunk[],
+  byteLength: 0,
+  lastSequence: -1,
+});
 
 export type TerminalTabLifecycle = 'idle' | 'running' | 'exited';
 
@@ -19,9 +33,6 @@ export type TerminalTab = {
   lifecycle: TerminalTabLifecycle;
   label: string;
   iconKey: string | null;
-  bufferChunks: TerminalChunk[];
-  bufferLength: number;
-  lastSequence: number;
   isConnecting: boolean;
   createdAt: number;
   previewUrl: string | null;
@@ -37,6 +48,7 @@ export type DirectoryTerminalState = {
 export type TerminalProjectActionRun = {
   key: string;
   directory: string;
+  serverId: string;
   actionId: string;
   tabId: string;
   sessionId: string;
@@ -45,6 +57,7 @@ export type TerminalProjectActionRun = {
 
 interface TerminalStore {
   sessions: Map<string, DirectoryTerminalState>;
+  buffers: Map<string, TerminalBuffer>;
   projectActionRuns: Record<string, TerminalProjectActionRun>;
   nextChunkId: number;
   nextTabId: number;
@@ -53,6 +66,7 @@ interface TerminalStore {
   ensureDirectory: (directory: string, serverId?: string) => void;
   getDirectoryState: (directory: string, serverId?: string) => DirectoryTerminalState | undefined;
   getActiveTab: (directory: string, serverId?: string) => TerminalTab | undefined;
+  getBuffer: (directory: string, tabId: string, serverId?: string) => TerminalBuffer;
 
   createTab: (directory: string, serverId?: string) => string;
   setActiveTab: (directory: string, tabId: string, serverId?: string) => void;
@@ -77,6 +91,8 @@ interface TerminalStore {
 }
 
 const TERMINAL_BUFFER_LIMIT = 1_000_000;
+const textEncoder = new TextEncoder();
+const textDecoder = new TextDecoder();
 const TERMINAL_STORE_NAME = 'terminal-store';
 let hydrationListenerAttached = false;
 
@@ -118,6 +134,33 @@ function makeStoreKey(directory: string, serverId?: string): string {
   return `${serverId}:${normalizedDir}`;
 }
 
+const bufferKey = (directory: string, tabId: string, serverId?: string): string =>
+  `${makeStoreKey(directory, serverId)}\u0000${tabId}`;
+
+const dropBufferKeys = (
+  buffers: Map<string, TerminalBuffer>,
+  matches: (key: string) => boolean,
+): Map<string, TerminalBuffer> | null => {
+  let next: Map<string, TerminalBuffer> | null = null;
+  for (const key of buffers.keys()) {
+    if (!matches(key)) continue;
+    next ??= new Map(buffers);
+    next.delete(key);
+  }
+  return next;
+};
+
+const trimToBufferLimit = (value: string): { text: string; byteLength: number } => {
+  const bytes = textEncoder.encode(value);
+  if (bytes.byteLength <= TERMINAL_BUFFER_LIMIT) {
+    return { text: value, byteLength: bytes.byteLength };
+  }
+  let start = bytes.byteLength - TERMINAL_BUFFER_LIMIT;
+  while (start < bytes.byteLength && (bytes[start] & 0xc0) === 0x80) start += 1;
+  const retained = bytes.subarray(start);
+  return { text: textDecoder.decode(retained), byteLength: retained.byteLength };
+};
+
 function getServerBaseUrl(serverId?: string): string | undefined {
   if (!serverId || serverId === DEFAULT_SERVER_ID) {
     return undefined;
@@ -131,9 +174,6 @@ const createEmptyTab = (id: string, label: string): TerminalTab => ({
   lifecycle: 'idle',
   label,
   iconKey: null,
-  bufferChunks: [],
-  bufferLength: 0,
-  lastSequence: -1,
   isConnecting: false,
   createdAt: Date.now(),
   previewUrl: null,
@@ -149,11 +189,66 @@ const createEmptyDirectoryState = (firstTab: TerminalTab): DirectoryTerminalStat
 const findTabIndex = (state: DirectoryTerminalState, tabId: string): number =>
   state.tabs.findIndex((t) => t.id === tabId);
 
+let lastPartializeInput: { sessions: unknown; nextTabId: number } | null = null;
+let lastPartializeResult: PersistedTerminalStoreState | null = null;
+
+const partializeTerminalStore = (state: TerminalStore): PersistedTerminalStoreState => {
+  if (
+    lastPartializeResult
+    && lastPartializeInput?.sessions === state.sessions
+    && lastPartializeInput.nextTabId === state.nextTabId
+  ) {
+    return lastPartializeResult;
+  }
+
+  const result: PersistedTerminalStoreState = {
+    sessions: Array.from(state.sessions.entries()).map(([directory, dirState]) => [
+      directory,
+      {
+        activeTabId: dirState.activeTabId,
+        tabs: dirState.tabs.map((tab) => ({
+          id: tab.id,
+          label: tab.label,
+          iconKey: tab.iconKey,
+          terminalSessionId: tab.terminalSessionId,
+          lifecycle: tab.lifecycle,
+          createdAt: tab.createdAt,
+        })),
+      },
+    ]),
+    nextTabId: state.nextTabId,
+  };
+
+  lastPartializeInput = { sessions: state.sessions, nextTabId: state.nextTabId };
+  lastPartializeResult = result;
+  return result;
+};
+
+const createDedupedTerminalStorage = (): PersistStorage<PersistedTerminalStoreState> | undefined => {
+  const storage = createJSONStorage<PersistedTerminalStoreState>(() => getSafeSessionStorage());
+  if (!storage) return undefined;
+
+  let lastWrittenState: PersistedTerminalStoreState | null = null;
+  return {
+    getItem: (name) => storage.getItem(name),
+    setItem: (name, value) => {
+      if (value.state === lastWrittenState) return;
+      lastWrittenState = value.state;
+      return storage.setItem(name, value);
+    },
+    removeItem: (name) => {
+      lastWrittenState = null;
+      return storage.removeItem(name);
+    },
+  };
+};
+
 export const useTerminalStore = create<TerminalStore>()(
   devtools(
     persist(
       (set, get) => ({
         sessions: new Map(),
+        buffers: new Map(),
         projectActionRuns: {},
         nextChunkId: 1,
         nextTabId: 1,
@@ -190,6 +285,9 @@ export const useTerminalStore = create<TerminalStore>()(
           if (!activeId) return entry.tabs[0];
           return entry.tabs.find((t) => t.id === activeId) ?? entry.tabs[0];
         },
+
+        getBuffer: (directory: string, tabId: string, serverId?: string) =>
+          get().buffers.get(bufferKey(directory, tabId, serverId)) ?? EMPTY_TERMINAL_BUFFER,
 
         createTab: (directory: string, serverId?: string) => {
           const key = makeStoreKey(directory, serverId);
@@ -341,9 +439,17 @@ export const useTerminalStore = create<TerminalStore>()(
 
             const nextTabs = existing.tabs.filter((t) => t.id !== tabId);
             const nextRuns = Object.fromEntries(
-              Object.entries(state.projectActionRuns).filter(([, run]) => !(run.directory === directory && run.tabId === tabId))
+              Object.entries(state.projectActionRuns).filter(([, run]) => !(
+                run.directory === directory
+                && run.serverId === (serverId ?? DEFAULT_SERVER_ID)
+                && run.tabId === tabId
+              ))
             );
             const runsChanged = Object.keys(nextRuns).length !== Object.keys(state.projectActionRuns).length;
+            const closedBufferKey = bufferKey(directory, tabId, serverId);
+            const nextBuffers = state.buffers.has(closedBufferKey)
+              ? dropBufferKeys(state.buffers, (entryKey) => entryKey === closedBufferKey)
+              : null;
 
             if (nextTabs.length === 0) {
               const newTabId = `tab-${state.nextTabId}`;
@@ -352,6 +458,7 @@ export const useTerminalStore = create<TerminalStore>()(
               return {
                 sessions: newSessions,
                 nextTabId: state.nextTabId + 1,
+                ...(nextBuffers ? { buffers: nextBuffers } : {}),
                 ...(runsChanged ? { projectActionRuns: nextRuns } : {}),
               };
             }
@@ -370,6 +477,7 @@ export const useTerminalStore = create<TerminalStore>()(
 
             return {
               sessions: newSessions,
+              ...(nextBuffers ? { buffers: nextBuffers } : {}),
               ...(runsChanged ? { projectActionRuns: nextRuns } : {}),
             };
           });
@@ -401,13 +509,17 @@ export const useTerminalStore = create<TerminalStore>()(
               terminalSessionId: sessionId,
               lifecycle: nextLifecycle,
               isConnecting: false,
-              ...(shouldResetBuffer ? { bufferChunks: [], bufferLength: 0, lastSequence: -1 } : {}),
             };
+
+            const resetKey = bufferKey(directory, tabId, serverId);
+            const nextBuffers = shouldResetBuffer && state.buffers.has(resetKey)
+              ? dropBufferKeys(state.buffers, (entryKey) => entryKey === resetKey)
+              : null;
 
             const nextTabs = [...existing.tabs];
             nextTabs[idx] = nextTab;
             newSessions.set(key, { ...existing, tabs: nextTabs });
-            return { sessions: newSessions };
+            return { sessions: newSessions, ...(nextBuffers ? { buffers: nextBuffers } : {}) };
           });
         },
 
@@ -458,38 +570,34 @@ export const useTerminalStore = create<TerminalStore>()(
           set((state) => {
             const existing = state.sessions.get(key);
             if (!existing) return state;
-            const idx = findTabIndex(existing, tabId);
-            if (idx < 0 || existing.tabs[idx].lastSequence > sequence) return state;
-            const tab = existing.tabs[idx];
+            if (findTabIndex(existing, tabId) < 0) return state;
+            const entryKey = bufferKey(directory, tabId, serverId);
+            const buffer = state.buffers.get(entryKey) ?? EMPTY_TERMINAL_BUFFER;
+            if (buffer.lastSequence > sequence) return state;
             // Preserve painted live output when a reattach snapshot is still empty
             // (common while shells emit only CSI queries into history).
-            if (!content && tab.bufferLength > 0) {
-              if (tab.lastSequence === sequence) return state;
-              const nextTabs = [...existing.tabs];
-              nextTabs[idx] = { ...tab, lastSequence: sequence };
-              const sessions = new Map(state.sessions);
-              sessions.set(key, { ...existing, tabs: nextTabs });
-              return { sessions };
+            if (!content && buffer.byteLength > 0) {
+              if (buffer.lastSequence === sequence) return state;
+              const buffers = new Map(state.buffers);
+              buffers.set(entryKey, { ...buffer, lastSequence: sequence });
+              return { buffers };
             }
+            const retained = trimToBufferLimit(content);
             if (
-              tab.lastSequence === sequence
-              && tab.bufferLength === content.length
-              && tab.bufferChunks.map((chunk) => chunk.data).join('') === content
+              buffer.lastSequence === sequence
+              && buffer.byteLength === retained.byteLength
+              && buffer.chunks.map((chunk) => chunk.data).join('') === retained.text
             ) {
               return state;
             }
             const chunkId = state.nextChunkId;
-            const bufferChunks = content ? [{ id: chunkId, data: content }] : [];
-            const nextTabs = [...existing.tabs];
-            nextTabs[idx] = {
-              ...tab,
-              bufferChunks,
-              bufferLength: content.length,
+            const buffers = new Map(state.buffers);
+            buffers.set(entryKey, {
+              chunks: retained.text ? [{ id: chunkId, data: retained.text, byteLength: retained.byteLength }] : [],
+              byteLength: retained.byteLength,
               lastSequence: sequence,
-            };
-            const sessions = new Map(state.sessions);
-            sessions.set(key, { ...existing, tabs: nextTabs });
-            return { sessions, nextChunkId: content ? chunkId + 1 : chunkId };
+            });
+            return { buffers, nextChunkId: retained.text ? chunkId + 1 : chunkId };
           });
         },
 
@@ -507,8 +615,7 @@ export const useTerminalStore = create<TerminalStore>()(
 
           const key = makeStoreKey(directory, serverId);
           set((state) => {
-            const newSessions = new Map(state.sessions);
-            const existing = newSessions.get(key);
+            const existing = state.sessions.get(key);
             if (!existing) {
               return state;
             }
@@ -518,38 +625,42 @@ export const useTerminalStore = create<TerminalStore>()(
               return state;
             }
 
-            const tab = existing.tabs[idx];
-            if (sequence !== undefined && sequence <= tab.lastSequence) {
+            const entryKey = bufferKey(directory, tabId, serverId);
+            const buffer = state.buffers.get(entryKey) ?? EMPTY_TERMINAL_BUFFER;
+            if (sequence !== undefined && sequence <= buffer.lastSequence) {
               return state;
             }
             const chunkId = state.nextChunkId;
+            const retainedChunk = trimToBufferLimit(chunk);
+            const retainedReplayData = replayData !== undefined && replayData !== chunk
+              ? trimToBufferLimit(replayData).text
+              : undefined;
             const chunkEntry: TerminalChunk = {
               id: chunkId,
-              data: chunk,
-              ...(replayData !== undefined && replayData !== chunk ? { replayData } : {}),
+              data: retainedChunk.text,
+              ...(retainedReplayData !== undefined ? { replayData: retainedReplayData } : {}),
+              byteLength: retainedChunk.byteLength,
             };
 
-            const bufferChunks = [...tab.bufferChunks, chunkEntry];
-            let bufferLength = tab.bufferLength + chunk.length;
+            const chunks = [...buffer.chunks, chunkEntry];
+            let bufferLength = buffer.byteLength + chunkEntry.byteLength;
 
-            while (bufferLength > TERMINAL_BUFFER_LIMIT && bufferChunks.length > 1) {
-              const removed = bufferChunks.shift();
+            while (bufferLength > TERMINAL_BUFFER_LIMIT && chunks.length > 1) {
+              const removed = chunks.shift();
               if (!removed) {
                 break;
               }
-              bufferLength -= removed.data.length;
+              bufferLength -= removed.byteLength;
             }
 
-            const nextTabs = [...existing.tabs];
-            nextTabs[idx] = {
-              ...tab,
-              bufferChunks,
-              bufferLength,
-              lastSequence: sequence ?? tab.lastSequence,
-            };
-            newSessions.set(key, { ...existing, tabs: nextTabs });
+            const buffers = new Map(state.buffers);
+            buffers.set(entryKey, {
+              chunks,
+              byteLength: bufferLength,
+              lastSequence: sequence ?? buffer.lastSequence,
+            });
 
-            return { sessions: newSessions, nextChunkId: chunkId + 1 };
+            return { buffers, nextChunkId: chunkId + 1 };
           });
         },
 
@@ -617,6 +728,7 @@ export const useTerminalStore = create<TerminalStore>()(
             const existing = state.projectActionRuns[run.key];
             if (existing
               && existing.directory === run.directory
+              && existing.serverId === run.serverId
               && existing.actionId === run.actionId
               && existing.tabId === run.tabId
               && existing.sessionId === run.sessionId
@@ -654,28 +766,12 @@ export const useTerminalStore = create<TerminalStore>()(
         },
 
         clearBuffer: (directory: string, tabId: string, serverId?: string) => {
-          const key = makeStoreKey(directory, serverId);
           set((state) => {
-            const newSessions = new Map(state.sessions);
-            const existing = newSessions.get(key);
-            if (!existing) {
-              return state;
-            }
-
-            const idx = findTabIndex(existing, tabId);
-            if (idx < 0) {
-              return state;
-            }
-
-            const nextTabs = [...existing.tabs];
-            nextTabs[idx] = {
-              ...nextTabs[idx],
-              bufferChunks: [],
-              bufferLength: 0,
-              lastSequence: -1,
-            };
-            newSessions.set(key, { ...existing, tabs: nextTabs });
-            return { sessions: newSessions };
+            const entryKey = bufferKey(directory, tabId, serverId);
+            if (!state.buffers.has(entryKey)) return state;
+            const buffers = new Map(state.buffers);
+            buffers.delete(entryKey);
+            return { buffers };
           });
         },
 
@@ -684,37 +780,30 @@ export const useTerminalStore = create<TerminalStore>()(
           set((state) => {
             const newSessions = new Map(state.sessions);
             newSessions.delete(key);
+            const prefix = `${key}\u0000`;
+            const nextBuffers = dropBufferKeys(state.buffers, (entryKey) => entryKey.startsWith(prefix));
             const nextRuns = Object.fromEntries(
-              Object.entries(state.projectActionRuns).filter(([, run]) => run.directory !== key)
+              Object.entries(state.projectActionRuns).filter(([, run]) => !(
+                run.directory === normalizeDirectory(directory)
+                && run.serverId === (serverId ?? DEFAULT_SERVER_ID)
+              ))
             );
-            return { sessions: newSessions, projectActionRuns: nextRuns };
+            return {
+              sessions: newSessions,
+              ...(nextBuffers ? { buffers: nextBuffers } : {}),
+              projectActionRuns: nextRuns,
+            };
           });
         },
 
         clearAll: () => {
-          set({ sessions: new Map(), projectActionRuns: {}, nextChunkId: 1, nextTabId: 1 });
+          set({ sessions: new Map(), buffers: new Map(), projectActionRuns: {}, nextChunkId: 1, nextTabId: 1 });
         },
       }),
       {
         name: TERMINAL_STORE_NAME,
-        storage: createJSONStorage(() => getSafeSessionStorage()),
-        partialize: (state): PersistedTerminalStoreState => ({
-          sessions: Array.from(state.sessions.entries()).map(([directory, dirState]) => [
-            directory,
-            {
-              activeTabId: dirState.activeTabId,
-              tabs: dirState.tabs.map((tab) => ({
-                id: tab.id,
-                label: tab.label,
-                iconKey: tab.iconKey,
-                terminalSessionId: tab.terminalSessionId,
-                lifecycle: tab.lifecycle,
-                createdAt: tab.createdAt,
-              })),
-            },
-          ]),
-          nextTabId: state.nextTabId,
-        }),
+        storage: createDedupedTerminalStorage(),
+        partialize: partializeTerminalStore,
         merge: (persistedState, currentState) => {
           if (!isRecord(persistedState)) {
             return currentState;
@@ -772,9 +861,6 @@ export const useTerminalStore = create<TerminalStore>()(
                 terminalSessionId,
                 lifecycle,
                 createdAt: typeof rawTab.createdAt === 'number' ? rawTab.createdAt : Date.now(),
-                bufferChunks: [],
-                bufferLength: 0,
-                lastSequence: -1,
                 isConnecting: false,
                 previewUrl: null,
                 previewAutoOpened: false,
@@ -806,6 +892,7 @@ export const useTerminalStore = create<TerminalStore>()(
           return {
             ...currentState,
             sessions,
+            buffers: new Map(),
             nextChunkId: 1,
             nextTabId,
             hasHydrated: true,

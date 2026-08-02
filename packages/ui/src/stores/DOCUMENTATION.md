@@ -234,3 +234,16 @@ After meaningful Git/PR store changes, verify manually:
 4. Worktree sessions still show branch labels in header.
 5. Expanded sidebar projects/worktrees can show PR state without requiring prior selection.
 6. Hidden surfaces do not reintroduce live background work.
+
+## Terminal State
+
+Terminal tab metadata and PTY scrollback have different update rates and must remain separate:
+
+- `sessions` owns persisted tab identity, lifecycle, labels, preview state, and active selection.
+- `buffers` owns streaming chunks, UTF-8 byte length, and terminal sequence state.
+- Buffer identity is `serverId + directory + tabId`; equal paths on different instances never share output.
+- Streaming output must preserve the `sessions` Map and directory-state references.
+- Closing a tab, rebinding it to a different PTY session, removing a directory, or clearing the store removes its buffer.
+- Project Action run identity includes `serverId + directory + actionId` and reads its output through `getBuffer(...)`.
+
+The terminal WebSocket transport is still keyed by runtime base URL. A healthy socket with no subscribers is retained for 15 seconds so tab switches can detach and reattach without a new connection; explicit disposal and non-reusable connection attempts still close immediately.

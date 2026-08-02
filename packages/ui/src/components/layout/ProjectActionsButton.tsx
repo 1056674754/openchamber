@@ -60,6 +60,8 @@ const ANSI_ESCAPE_PATTERN = new RegExp(`${ANSI_ESCAPE_PREFIX}\\[[0-9;?]*[ -/]*[@
 const URL_GLOBAL_PATTERN = /https?:\/\/[^\s<>'"`]+/gi;
 const AUTO_DISCOVER_ACTION_ID = '__openchamber_auto_discover_preview__';
 const AUTO_DISCOVER_PREVIEW_WAIT_TIMEOUT_MS = 15_000;
+const toScopedProjectActionRunKey = (serverId: string, directory: string, actionId: string): string =>
+  `${serverId}\u0000${toProjectActionRunKey(directory, actionId)}`;
 
 const stripControlChars = (value: string): string => {
   let next = '';
@@ -314,7 +316,7 @@ export const ProjectActionsButton = ({
 
   React.useEffect(() => {
     for (const [key, entry] of Object.entries(projectActionRuns)) {
-      const directoryState = terminalSessions.get(entry.directory);
+      const directoryState = useTerminalStore.getState().getDirectoryState(entry.directory, entry.serverId);
       const tab = directoryState?.tabs.find((item) => item.id === entry.tabId);
       if (!tab || tab.terminalSessionId !== entry.sessionId) {
         removeProjectActionRun(key);
@@ -323,76 +325,89 @@ export const ProjectActionsButton = ({
   }, [projectActionRuns, removeProjectActionRun, terminalSessions]);
 
   React.useEffect(() => {
-    for (const [runKey, entry] of Object.entries(projectActionRuns)) {
-      const watch = urlWatchByRunKeyRef.current[runKey] ?? { lastSeenChunkId: null, openedUrl: false, tail: '', openInPreview: false };
-      urlWatchByRunKeyRef.current[runKey] = watch;
-      const action = displayActions.find((item) => item.id === entry.actionId);
-      if (!action) {
-        continue;
-      }
-
-      const directoryState = terminalSessions.get(entry.directory);
-      const tab = directoryState?.tabs.find((item) => item.id === entry.tabId);
-      if (!tab || !Array.isArray(tab.bufferChunks) || tab.bufferChunks.length === 0) {
-        continue;
-      }
-
-      const nextChunks = tab.bufferChunks.filter((chunk) => {
-        if (watch.lastSeenChunkId === null) {
-          return true;
+    const monitorRuns = () => {
+      const terminalStore = useTerminalStore.getState();
+      const currentRuns = terminalStore.projectActionRuns;
+      for (const [runKey, entry] of Object.entries(currentRuns)) {
+        const watch = urlWatchByRunKeyRef.current[runKey] ?? { lastSeenChunkId: null, openedUrl: false, tail: '', openInPreview: false };
+        urlWatchByRunKeyRef.current[runKey] = watch;
+        const action = displayActions.find((item) => item.id === entry.actionId);
+        if (!action) {
+          continue;
         }
-        return chunk.id > watch.lastSeenChunkId;
-      });
 
-      if (nextChunks.length === 0) {
-        continue;
-      }
+        const bufferChunks = terminalStore.getBuffer(entry.directory, entry.tabId, entry.serverId).chunks;
+        if (bufferChunks.length === 0) {
+          continue;
+        }
 
-      const combined = nextChunks.map((chunk) => chunk.data).join('');
-      const textForScan = `${watch.tail}${combined}`;
-      const maybeUrl = !watch.openedUrl && action.autoOpenUrl === true ? extractBestUrl(textForScan) : null;
-      const lastChunkId = nextChunks[nextChunks.length - 1]?.id ?? watch.lastSeenChunkId;
-
-      watch.lastSeenChunkId = lastChunkId;
-      watch.tail = textForScan.slice(-512);
-
-      if (maybeUrl) {
-        watch.openedUrl = true;
-        if (watch.openInPreview) {
-          const run = projectActionRuns[runKey];
-          if (run) {
-            setTabPreviewUrl(run.directory, run.tabId, maybeUrl, { locked: false, autoOpened: false });
-            if (run.status === 'waiting-for-preview') {
-              updateProjectActionRunStatus(runKey, 'running');
-            }
-            window.clearTimeout(previewWaitTimeoutByRunKeyRef.current[runKey]);
-            delete previewWaitTimeoutByRunKeyRef.current[runKey];
-            openContextPreview(run.directory, maybeUrl);
+        const nextChunks = bufferChunks.filter((chunk) => {
+          if (watch.lastSeenChunkId === null) {
+            return true;
           }
-        } else {
-          void openExternal(maybeUrl);
-          toast.success(t('projectActions.toast.openedUrlFromOutput'));
+          return chunk.id > watch.lastSeenChunkId;
+        });
+
+        if (nextChunks.length === 0) {
+          continue;
+        }
+
+        const combined = nextChunks.map((chunk) => chunk.data).join('');
+        const textForScan = `${watch.tail}${combined}`;
+        const maybeUrl = !watch.openedUrl && action.autoOpenUrl === true ? extractBestUrl(textForScan) : null;
+        const lastChunkId = nextChunks[nextChunks.length - 1]?.id ?? watch.lastSeenChunkId;
+
+        watch.lastSeenChunkId = lastChunkId;
+        watch.tail = textForScan.slice(-512);
+
+        if (maybeUrl) {
+          watch.openedUrl = true;
+          if (watch.openInPreview) {
+            const run = currentRuns[runKey];
+            if (run) {
+              setTabPreviewUrl(run.directory, run.tabId, maybeUrl, { locked: false, autoOpened: false }, run.serverId);
+              if (run.status === 'waiting-for-preview') {
+                updateProjectActionRunStatus(runKey, 'running');
+              }
+              window.clearTimeout(previewWaitTimeoutByRunKeyRef.current[runKey]);
+              delete previewWaitTimeoutByRunKeyRef.current[runKey];
+              openContextPreview(run.directory, maybeUrl);
+            }
+          } else {
+            void openExternal(maybeUrl);
+            toast.success(t('projectActions.toast.openedUrlFromOutput'));
+          }
+        }
+        urlWatchByRunKeyRef.current[runKey] = watch;
+      }
+
+      for (const runKey of Object.keys(urlWatchByRunKeyRef.current)) {
+        if (!currentRuns[runKey]) {
+          delete urlWatchByRunKeyRef.current[runKey];
+          window.clearTimeout(previewWaitTimeoutByRunKeyRef.current[runKey]);
+          delete previewWaitTimeoutByRunKeyRef.current[runKey];
         }
       }
-      urlWatchByRunKeyRef.current[runKey] = watch;
-    }
+    };
 
-    for (const runKey of Object.keys(urlWatchByRunKeyRef.current)) {
-      if (!projectActionRuns[runKey]) {
-        delete urlWatchByRunKeyRef.current[runKey];
-        window.clearTimeout(previewWaitTimeoutByRunKeyRef.current[runKey]);
-        delete previewWaitTimeoutByRunKeyRef.current[runKey];
+    monitorRuns();
+    return useTerminalStore.subscribe((state, previousState) => {
+      if (
+        state.sessions !== previousState.sessions
+        || state.buffers !== previousState.buffers
+        || state.projectActionRuns !== previousState.projectActionRuns
+      ) {
+        monitorRuns();
       }
-    }
-
-  }, [displayActions, openContextPreview, openExternal, projectActionRuns, setTabPreviewUrl, t, terminalSessions, updateProjectActionRunStatus]);
+    });
+  }, [displayActions, openContextPreview, openExternal, setTabPreviewUrl, t, updateProjectActionRunStatus]);
 
   const getOrCreateActionTab = React.useCallback(async (action: OpenChamberProjectAction, options: { revealTerminal?: boolean } = {}) => {
     if (!normalizedDirectory) {
       throw new Error(t('projectActions.error.noActiveDirectory'));
     }
 
-    const key = toProjectActionRunKey(normalizedDirectory, action.id);
+    const key = toScopedProjectActionRunKey(activeServerId, normalizedDirectory, action.id);
     ensureDirectory(normalizedDirectory, activeServerId);
 
     const currentStore = useTerminalStore.getState();
@@ -443,7 +458,7 @@ export const ProjectActionsButton = ({
       return;
     }
 
-    const runKey = toProjectActionRunKey(normalizedDirectory, action.id);
+    const runKey = toScopedProjectActionRunKey(activeServerId, normalizedDirectory, action.id);
     const existingRun = projectActionRuns[runKey];
     if (existingRun && existingRun.status === 'running') {
       return;
@@ -555,6 +570,7 @@ export const ProjectActionsButton = ({
       setProjectActionRun({
         key,
         directory: normalizedDirectory,
+        serverId: activeServerId,
         actionId: discovered.id,
         tabId,
         sessionId: activeSessionId,
@@ -633,7 +649,7 @@ export const ProjectActionsButton = ({
   ]);
 
   const stopAction = React.useCallback(async (action: OpenChamberProjectAction) => {
-    const runKey = toProjectActionRunKey(normalizedDirectory, action.id);
+    const runKey = toScopedProjectActionRunKey(activeServerId, normalizedDirectory, action.id);
     const activeRun = projectActionRuns[runKey];
     if (!activeRun) {
       return;
@@ -687,7 +703,7 @@ export const ProjectActionsButton = ({
     if (!action) {
       return;
     }
-    const runKey = toProjectActionRunKey(normalizedDirectory, action.id);
+    const runKey = toScopedProjectActionRunKey(activeServerId, normalizedDirectory, action.id);
     const runningEntry = projectActionRuns[runKey];
     if (runningEntry?.status === 'stopping') {
       return;
@@ -697,7 +713,7 @@ export const ProjectActionsButton = ({
       return;
     }
     void runAction(action);
-  }, [displayActions, normalizedDirectory, runAction, projectActionRuns, selectedAction, stopAction]);
+  }, [activeServerId, displayActions, normalizedDirectory, runAction, projectActionRuns, selectedAction, stopAction]);
 
   const handleSelectAction = React.useCallback((action: OpenChamberProjectAction, toggleStopIfRunning = false) => {
     setSelectedActionId(action.id);
@@ -707,7 +723,7 @@ export const ProjectActionsButton = ({
       return;
     }
 
-    const runKey = toProjectActionRunKey(normalizedDirectory, action.id);
+    const runKey = toScopedProjectActionRunKey(activeServerId, normalizedDirectory, action.id);
     const runningEntry = projectActionRuns[runKey];
     if (runningEntry?.status === 'stopping') {
       return;
@@ -717,7 +733,7 @@ export const ProjectActionsButton = ({
       return;
     }
     void runAction(action);
-  }, [normalizedDirectory, runAction, projectActionRuns, stopAction]);
+  }, [activeServerId, normalizedDirectory, runAction, projectActionRuns, stopAction]);
 
   const openProjectActionsSettings = React.useCallback(() => {
     if (!stableProjectRef?.id) {
@@ -741,7 +757,7 @@ export const ProjectActionsButton = ({
   const selectedIconName = resolvedSelected.id === AUTO_DISCOVER_ACTION_ID
     ? 'search'
     : PROJECT_ACTION_ICON_MAP[selectedIconKey] || 'play';
-  const selectedRunKey = toProjectActionRunKey(normalizedDirectory, resolvedSelected.id);
+  const selectedRunKey = toScopedProjectActionRunKey(activeServerId, normalizedDirectory, resolvedSelected.id);
   const selectedRunning = projectActionRuns[selectedRunKey];
   const isStoppingSelected = selectedRunning?.status === 'stopping';
   const isWaitingForSelectedPreview = selectedRunning?.status === 'waiting-for-preview';
@@ -816,7 +832,7 @@ export const ProjectActionsButton = ({
               const iconName = entry.id === AUTO_DISCOVER_ACTION_ID
                 ? 'search'
                 : PROJECT_ACTION_ICON_MAP[iconKey] || 'play';
-              const runKey = toProjectActionRunKey(normalizedDirectory, entry.id);
+              const runKey = toScopedProjectActionRunKey(activeServerId, normalizedDirectory, entry.id);
               const runState = projectActionRuns[runKey];
               const isRunning = Boolean(runState);
               const isStopping = runState?.status === 'stopping';
@@ -922,7 +938,7 @@ export const ProjectActionsButton = ({
             const iconName = entry.id === AUTO_DISCOVER_ACTION_ID
               ? 'search'
               : PROJECT_ACTION_ICON_MAP[iconKey] || 'play';
-            const runKey = toProjectActionRunKey(normalizedDirectory, entry.id);
+            const runKey = toScopedProjectActionRunKey(activeServerId, normalizedDirectory, entry.id);
             const runState = projectActionRuns[runKey];
             const isRunning = Boolean(runState);
             const isStopping = runState?.status === 'stopping';

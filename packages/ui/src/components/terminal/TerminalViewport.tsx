@@ -1230,7 +1230,15 @@ const TerminalViewport = React.forwardRef<TerminalController, TerminalViewportPr
       if (lastProcessedId === null) {
         pending = chunks;
       } else {
-        const lastProcessedIndex = chunks.findIndex((chunk) => chunk.id === lastProcessedId);
+        let lastProcessedIndex = -1;
+        for (let index = chunks.length - 1; index >= 0; index -= 1) {
+          const chunkId = chunks[index].id;
+          if (chunkId === lastProcessedId) {
+            lastProcessedIndex = index;
+            break;
+          }
+          if (chunkId < lastProcessedId) break;
+        }
         pending = lastProcessedIndex >= 0 ? chunks.slice(lastProcessedIndex + 1) : chunks;
       }
 
