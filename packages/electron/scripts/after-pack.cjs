@@ -10,6 +10,18 @@ const {
 } = require('./embedded-bun.cjs');
 
 module.exports = (context) => {
+  if (context.electronPlatformName === 'win32') {
+    const resourcesPath = path.join(context.appOutDir, 'resources');
+    const embedded = stageEmbeddedOpenCode({
+      source: resolveEmbeddedOpenCodeSource(),
+      resourcesPath,
+      binaryName: 'opencode.exe',
+      requireSigning: false,
+    });
+    console.log(`[electron] embedded custom Windows OpenCode ${embedded.version} at ${embedded.binaryPath}`);
+    return;
+  }
+
   if (context.electronPlatformName === 'linux') {
     const resourcesPath = path.join(context.appOutDir, 'resources');
     const embedded = stageEmbeddedOpenCode({

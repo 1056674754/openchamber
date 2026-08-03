@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import {
   getDesktopWindowControlsOrder,
+  normalizeDesktopWindowControlsStyle,
   normalizeDesktopWindowControlsPosition,
   resolveDesktopWindowControlsSide,
 } from './desktop';
@@ -21,5 +22,11 @@ describe('desktop window controls', () => {
 
   test('defaults controls to the right side', () => {
     expect(resolveDesktopWindowControlsSide(undefined)).toBe('right');
+  });
+
+  test('accepts only supported Linux window control styles', () => {
+    expect(normalizeDesktopWindowControlsStyle('classic')).toBe('classic');
+    expect(normalizeDesktopWindowControlsStyle('traffic-lights')).toBe('traffic-lights');
+    expect(normalizeDesktopWindowControlsStyle('native')).toBe(undefined);
   });
 });

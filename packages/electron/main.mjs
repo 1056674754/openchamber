@@ -25,6 +25,7 @@ import { readLinuxAutostartEnabled, setLinuxAutostartEnabled } from './linux-aut
 import { assertUpdaterCapability } from './updater-capability.mjs';
 import { checkForDesktopUpdate } from './updater-check.mjs';
 import { resolveUpdaterFeed } from './updater-feed.mjs';
+import { resolveUpdaterChannel } from './updater-channel.mjs';
 
 const execFileAsync = promisify(execFile);
 
@@ -2198,8 +2199,10 @@ const setMiniChatPinned = (browserWindow, pinned) => {
 };
 
 const resolveInitialUrl = async () => {
-  const localUrl = isDev && await waitForHealth('http://127.0.0.1:3901', 5_000, 100)
-    ? 'http://127.0.0.1:3901'
+  const hmrApiPort = process.env.OPENCHAMBER_HMR_API_PORT || '3901';
+  const hmrApiOrigin = `http://127.0.0.1:${hmrApiPort}`;
+  const localUrl = isDev && await waitForHealth(hmrApiOrigin, 5_000, 100)
+    ? hmrApiOrigin
     : await spawnLocalServerOnce();
 
   const hmrUiPort = process.env.OPENCHAMBER_HMR_UI_PORT || '5173';
@@ -2286,11 +2289,18 @@ const setupAutoUpdater = () => {
       log.info('[electron] updater disabled: no internal feed was embedded at build time');
       return;
     }
+    const updaterChannel = feed.provider === 'github'
+      ? resolveUpdaterChannel({ platform: process.platform, architecture: process.arch })
+      : null;
+    if (updaterChannel) {
+      autoUpdater.channel = updaterChannel;
+    }
     autoUpdater.setFeedURL(feed);
     state.updaterConfigured = true;
     log.info('[electron] updater feed configured', {
       provider: feed.provider,
       target: feed.provider === 'github' ? `${feed.owner}/${feed.repo}` : feed.url,
+      channel: updaterChannel || 'latest',
     });
 
     autoUpdater.on('download-progress', (progress) => {

@@ -35,6 +35,7 @@ const resolveEmbeddedOpenCodeSource = (env = process.env) => {
 const stageEmbeddedOpenCode = ({
   source,
   resourcesPath,
+  binaryName = 'opencode',
   signingIdentity,
   requireSigning = true,
   execFileSync = defaultExecFileSync,
@@ -48,7 +49,7 @@ const stageEmbeddedOpenCode = ({
   }
 
   const destinationDir = path.join(resourcesPath, 'opencode');
-  const binaryPath = path.join(destinationDir, 'opencode');
+  const binaryPath = path.join(destinationDir, binaryName);
   fs.mkdirSync(destinationDir, { recursive: true });
   fs.copyFileSync(source, binaryPath);
   fs.chmodSync(binaryPath, 0o755);

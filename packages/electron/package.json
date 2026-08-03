@@ -42,6 +42,7 @@
     "smoke:linux-appimage-ui": "node ./scripts/smoke-linux-appimage-ui.mjs",
     "smoke:linux-appimage-update": "node ./scripts/smoke-linux-appimage-update.mjs",
     "test:architecture": "node --test ./scripts/target-architecture.test.mjs ./scripts/verify-linux-appimage.test.mjs ./scripts/verify-update-manifest.test.mjs",
+    "test:updater": "node --test ./updater-channel.test.mjs ./scripts/finalize-latest-yml.test.mjs",
     "finalize:latest-yml": "node ./scripts/finalize-latest-yml.mjs",
     "type-check": "node --check ./main.mjs && node --check ./shell.mjs && node --check ./runtime-loader.mjs && node --check ./preload.mjs && node --check ./tray.mjs && node --check ./scripts/build-runtime.mjs && node --check ./scripts/rollback-runtime.mjs",
     "lint": "node -e \"process.exit(0)\""

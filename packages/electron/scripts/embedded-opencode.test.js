@@ -111,4 +111,27 @@ describe('embedded OpenCode packaging', () => {
     expect(calls).toHaveLength(1);
     expect(calls[0]).toEqual({ command: result.binaryPath, args: ['--version'] });
   });
+
+  it('stages the custom x64-baseline CLI as opencode.exe for Windows packages', () => {
+    const root = createTempDir();
+    const source = path.join(root, 'opencode-windows-x64-baseline.exe');
+    const resources = path.join(root, 'win-arm64-unpacked', 'resources');
+    fs.writeFileSync(source, 'custom windows binary');
+    fs.chmodSync(source, 0o755);
+
+    const result = stageEmbeddedOpenCode({
+      source,
+      resourcesPath: resources,
+      binaryName: 'opencode.exe',
+      requireSigning: false,
+      execFileSync: (command, args) => {
+        if (command.endsWith('/opencode.exe') && args[0] === '--version') return '1.18.10-sscity\n';
+        return '';
+      },
+    });
+
+    expect(path.basename(result.binaryPath)).toBe('opencode.exe');
+    expect(result.version).toBe('1.18.10-sscity');
+    expect(fs.readFileSync(result.binaryPath, 'utf8')).toBe('custom windows binary');
+  });
 });

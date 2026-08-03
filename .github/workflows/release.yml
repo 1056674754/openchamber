@@ -671,8 +671,77 @@ jobs:
           path: packages/electron/dist/latest-mac.yml
           retention-days: 1
 
+  build-desktop-electron-windows:
+    needs: create-release
+    runs-on: windows-2022
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            target: x86_64-pc-windows-msvc
+          - arch: arm64
+            target: aarch64-pc-windows-msvc
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Checkout custom OpenCode
+        uses: actions/checkout@v4
+        with:
+          repository: 1056674754/opencode
+          ref: sscity
+          path: custom-opencode
+
+      - name: Setup bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install OpenChamber dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build custom x64-baseline OpenCode
+        working-directory: custom-opencode
+        shell: bash
+        run: |
+          bun install --frozen-lockfile
+          bun run --cwd packages/opencode build --single --baseline --skip-embed-web-ui
+          ./packages/opencode/dist/opencode-windows-x64-baseline/bin/opencode.exe --version | grep -- '-sscity'
+
+      - name: Build Windows Electron app
+        working-directory: packages/electron
+        shell: bash
+        env:
+          ELECTRON_BUILDER_ARCH: ${{ matrix.arch }}
+          OPENCHAMBER_EMBEDDED_OPENCODE_SOURCE: ${{ github.workspace }}/custom-opencode/packages/opencode/dist/opencode-windows-x64-baseline/bin/opencode.exe
+        run: |
+          bun run build:web-assets
+          bun run bundle:main
+          bun run rebuild:native
+          ./node_modules/.bin/electron-builder --win --${{ matrix.arch }} --publish=never
+
+      - name: Upload Windows installer artifacts
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ needs.create-release.outputs.version }}
+          files: |
+            packages/electron/dist/*.exe
+            packages/electron/dist/*.blockmap
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload per-arch latest.yml for merge
+        uses: actions/upload-artifact@v4
+        with:
+          name: latest-yml-${{ matrix.target }}
+          path: packages/electron/dist/latest.yml
+          retention-days: 1
+
   combine-electron-manifests:
-    needs: [create-release, build-desktop-electron-macos]
+    needs: [create-release, build-desktop-electron-macos, build-desktop-electron-windows]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -682,24 +751,27 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Download per-arch latest-mac.yml
+      - name: Download per-arch update manifests
         uses: actions/download-artifact@v4
         with:
-          pattern: latest-yml-*-apple-darwin
+          pattern: latest-yml-*
           path: artifacts
 
-      - name: Finalize combined latest-mac.yml
+      - name: Finalize combined update manifests
         env:
           LATEST_YML_DIR: ${{ github.workspace }}/artifacts
           GH_REPO: ${{ github.repository }}
           OPENCHAMBER_VERSION: ${{ needs.create-release.outputs.version }}
         run: node packages/electron/scripts/finalize-latest-yml.mjs
 
-      - name: Upload combined latest-mac.yml to release
+      - name: Upload combined update manifests to release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ needs.create-release.outputs.version }}
-          files: ${{ runner.temp }}/latest-mac.yml
+          files: |
+            ${{ runner.temp }}/latest-mac.yml
+            ${{ runner.temp }}/latest.yml
+            ${{ runner.temp }}/latest-arm64.yml
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
