@@ -565,6 +565,12 @@ export const createSettingsHelpers = (dependencies) => {
     ) {
       result.desktopWindowControlsPosition = candidate.desktopWindowControlsPosition;
     }
+    if (
+      candidate.desktopWindowControlsStyle === 'classic'
+      || candidate.desktopWindowControlsStyle === 'traffic-lights'
+    ) {
+      result.desktopWindowControlsStyle = candidate.desktopWindowControlsStyle;
+    }
     if (typeof candidate.agentControlToolEnabled === 'boolean') {
       result.agentControlToolEnabled = candidate.agentControlToolEnabled;
     }

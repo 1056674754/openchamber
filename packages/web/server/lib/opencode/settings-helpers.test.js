@@ -173,6 +173,18 @@ describe('settings helpers', () => {
     expect(helpers.sanitizeSettingsUpdate({ desktopWindowControlsPosition: 'auto' })).toEqual({});
   });
 
+  it('only accepts a supported desktop window controls style', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({ desktopWindowControlsStyle: 'classic' })).toEqual({
+      desktopWindowControlsStyle: 'classic',
+    });
+    expect(helpers.sanitizeSettingsUpdate({ desktopWindowControlsStyle: 'traffic-lights' })).toEqual({
+      desktopWindowControlsStyle: 'traffic-lights',
+    });
+    expect(helpers.sanitizeSettingsUpdate({ desktopWindowControlsStyle: 'native' })).toEqual({});
+  });
+
   it('only accepts a boolean desktopRemoteOnly preference', () => {
     const helpers = createTestHelpers();
 
