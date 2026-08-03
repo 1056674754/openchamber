@@ -1400,7 +1400,11 @@ const bootstrapOpenCodeAtStartup = async (...args) => {
     startHealthMonitoring();
   }
   setTimeout(async () => {
-    await verifyOpenChamberPluginLoaded();
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      const result = await verifyOpenChamberPluginLoaded();
+      if (result?.loaded || attempt === 5) return;
+      await new Promise((resolve) => setTimeout(resolve, 5000));
+    }
   }, 5000);
   if (ENV_DESKTOP_NOTIFY) {
     void ensureGlobalWatcherStarted().catch((error) => {
