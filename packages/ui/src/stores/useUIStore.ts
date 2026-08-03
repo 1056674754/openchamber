@@ -5,7 +5,7 @@ import { createDeferredSafeJSONStorage } from './utils/safeStorage';
 import { SEMANTIC_TYPOGRAPHY, getTypographyVariable, type SemanticTypographyKey } from '@/lib/typography';
 import type { ShortcutCombo } from '@/lib/shortcuts';
 import type { DraftStarterRef } from '@/lib/draftStarters';
-import type { DesktopWindowControlsPosition } from '@/lib/desktop';
+import type { DesktopWindowControlsPosition, DesktopWindowControlsStyle } from '@/lib/desktop';
 import { DEFAULT_MONO_FONT, DEFAULT_UI_FONT, type MonoFontOption, type UiFontOption } from '@/lib/fontOptions';
 import { getStoredMobileKeyboardMode, type MobileKeyboardMode } from '@/lib/mobileKeyboardMode';
 import { DEFAULT_SERVER_ID } from '@/lib/opencode/server-registry';
@@ -644,6 +644,7 @@ interface UIStore {
   sessionGroupRecentHours: number;
   showDeletionDialog: boolean;
   autoDeleteEnabled: boolean;
+  autoSaveEnabled: boolean;
   autoDeleteAfterDays: number;
   sessionRetentionAction: SessionRetentionAction;
   autoDeleteLastRunAt: number | null;
@@ -721,6 +722,7 @@ interface UIStore {
   timeFormatPreference: TimeFormatPreference;
   weekStartPreference: WeekStartPreference;
   desktopWindowControlsPosition: DesktopWindowControlsPosition;
+  desktopWindowControlsStyle: DesktopWindowControlsStyle;
   userMessageRenderingMode: UserMessageRenderingMode;
   collapsibleUserMessages: boolean;
   stickyUserHeader: boolean;
@@ -812,6 +814,7 @@ interface UIStore {
   setSessionGroupRecentHours: (value: number) => void;
   setShowDeletionDialog: (value: boolean) => void;
   setAutoDeleteEnabled: (value: boolean) => void;
+  setAutoSaveEnabled: (value: boolean) => void;
   setAutoDeleteAfterDays: (days: number) => void;
   setSessionRetentionAction: (value: SessionRetentionAction) => void;
   setAutoDeleteLastRunAt: (timestamp: number | null) => void;
@@ -887,6 +890,7 @@ interface UIStore {
   setTimeFormatPreference: (value: TimeFormatPreference) => void;
   setWeekStartPreference: (value: WeekStartPreference) => void;
   setDesktopWindowControlsPosition: (value: DesktopWindowControlsPosition) => void;
+  setDesktopWindowControlsStyle: (value: DesktopWindowControlsStyle) => void;
   setUserMessageRenderingMode: (value: UserMessageRenderingMode) => void;
   setCollapsibleUserMessages: (value: boolean) => void;
   setStickyUserHeader: (value: boolean) => void;
@@ -974,6 +978,7 @@ export const useUIStore = create<UIStore>()(
         sessionGroupRecentHours: 48,
         showDeletionDialog: true,
         autoDeleteEnabled: false,
+        autoSaveEnabled: true,
         autoDeleteAfterDays: 30,
         sessionRetentionAction: 'archive',
         autoDeleteLastRunAt: null,
@@ -1043,6 +1048,7 @@ export const useUIStore = create<UIStore>()(
         timeFormatPreference: 'auto',
         weekStartPreference: 'auto',
         desktopWindowControlsPosition: 'right',
+        desktopWindowControlsStyle: 'classic',
         userMessageRenderingMode: 'markdown',
         collapsibleUserMessages: true,
         stickyUserHeader: false,
@@ -1815,6 +1821,10 @@ export const useUIStore = create<UIStore>()(
           set({ autoDeleteEnabled: value });
         },
 
+        setAutoSaveEnabled: (value) => {
+          set({ autoSaveEnabled: value });
+        },
+
         setAutoDeleteAfterDays: (days) => {
           const clampedDays = Math.max(1, Math.min(365, days));
           set({ autoDeleteAfterDays: clampedDays });
@@ -2342,6 +2352,9 @@ export const useUIStore = create<UIStore>()(
         setDesktopWindowControlsPosition: (value) => {
           set({ desktopWindowControlsPosition: value === 'left' ? 'left' : 'right' });
         },
+        setDesktopWindowControlsStyle: (value) => {
+          set({ desktopWindowControlsStyle: value === 'traffic-lights' ? 'traffic-lights' : 'classic' });
+        },
         setUserMessageRenderingMode: (value) => {
           set({ userMessageRenderingMode: value });
         },
@@ -2429,12 +2442,33 @@ export const useUIStore = create<UIStore>()(
       {
         name: 'ui-store',
         storage: createDeferredSafeJSONStorage(),
-        version: 14,
+        version: 16,
         migrate: (persistedState, version) => {
           if (!persistedState || typeof persistedState !== 'object') {
             return persistedState;
           }
           const state = persistedState as Record<string, unknown>;
+
+          if (version < 16) {
+            state.desktopWindowControlsStyle =
+              state.desktopWindowControlsStyle === 'traffic-lights' ? 'traffic-lights' : 'classic';
+          }
+
+          if (version < 15 && typeof state.autoSaveEnabled !== 'boolean') {
+            let legacyEnabled = true;
+            try {
+              if (typeof localStorage !== 'undefined') {
+                const legacy = localStorage.getItem('openchamber:files:auto-save-enabled');
+                if (legacy !== null) {
+                  legacyEnabled = legacy !== 'false';
+                  localStorage.removeItem('openchamber:files:auto-save-enabled');
+                }
+              }
+            } catch {
+              legacyEnabled = true;
+            }
+            state.autoSaveEnabled = legacyEnabled;
+          }
 
           if (version < 14) {
             state.desktopWindowControlsPosition =
@@ -2546,6 +2580,9 @@ export const useUIStore = create<UIStore>()(
             ? state.contextRailOrder.filter((id) => typeof id === 'string' && id.trim() !== '')
             : [];
           state.fileEditorKeymap = normalizeFileEditorKeymap(state.fileEditorKeymap);
+          if (typeof state.autoSaveEnabled !== 'boolean') {
+            state.autoSaveEnabled = true;
+          }
 
           return state;
         },
@@ -2581,6 +2618,7 @@ export const useUIStore = create<UIStore>()(
           sessionGroupRecentHours: state.sessionGroupRecentHours,
           showDeletionDialog: state.showDeletionDialog,
           autoDeleteEnabled: state.autoDeleteEnabled,
+          autoSaveEnabled: state.autoSaveEnabled,
           autoDeleteAfterDays: state.autoDeleteAfterDays,
           sessionRetentionAction: state.sessionRetentionAction,
           autoDeleteLastRunAt: state.autoDeleteLastRunAt,
@@ -2634,6 +2672,7 @@ export const useUIStore = create<UIStore>()(
           timeFormatPreference: state.timeFormatPreference,
           weekStartPreference: state.weekStartPreference,
           desktopWindowControlsPosition: state.desktopWindowControlsPosition,
+          desktopWindowControlsStyle: state.desktopWindowControlsStyle,
           userMessageRenderingMode: state.userMessageRenderingMode,
           collapsibleUserMessages: state.collapsibleUserMessages,
           stickyUserHeader: state.stickyUserHeader,

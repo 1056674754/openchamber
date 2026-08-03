@@ -45,6 +45,7 @@ export type ManagedRemoteTunnelPreset = {
 export type DesktopWindowControlsPosition = 'left' | 'right';
 export type DesktopWindowControlsSide = 'left' | 'right';
 export type DesktopWindowControlAction = 'close' | 'minimize' | 'maximize';
+export type DesktopWindowControlsStyle = 'classic' | 'traffic-lights';
 
 export type DesktopSettings = {
   themeId?: string;
@@ -128,6 +129,7 @@ export type DesktopSettings = {
     renamedGroups?: Record<string, string>;  // groupId -> custom label
   }>;  // Per-provider custom model groups configuration
   autoDeleteEnabled?: boolean;
+  autoSaveEnabled?: boolean;
   autoDeleteAfterDays?: number;
   sessionRetentionAction?: 'archive' | 'delete';
   tunnelProvider?: string;
@@ -166,6 +168,7 @@ export type DesktopSettings = {
   pwaOrientation?: 'system' | 'portrait' | 'landscape';
   mobileKeyboardMode?: MobileKeyboardMode;
   desktopWindowControlsPosition?: DesktopWindowControlsPosition;
+  desktopWindowControlsStyle?: DesktopWindowControlsStyle;
   inputSpellcheckEnabled?: boolean;
   showToolFileIcons?: boolean;
   showExpandedBashTools?: boolean;
@@ -265,6 +268,19 @@ export const usesFramelessElectronChrome = (): boolean => {
   if (!isElectronShell()) return false;
   const platform = getElectronPlatform();
   return platform === 'win32' || platform === 'linux';
+};
+
+export const supportsDesktopWindowControlsStyle = (): boolean => (
+  isElectronShell() && getElectronPlatform() === 'linux'
+);
+
+export const normalizeDesktopWindowControlsStyle = (
+  value: unknown,
+): DesktopWindowControlsStyle | undefined => {
+  if (value === 'classic' || value === 'traffic-lights') {
+    return value;
+  }
+  return undefined;
 };
 
 export const normalizeDesktopWindowControlsPosition = (

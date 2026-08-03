@@ -460,6 +460,9 @@ const applyDesktopUiPreferences = (
   if (typeof settings.autoDeleteEnabled === 'boolean' && settings.autoDeleteEnabled !== store.autoDeleteEnabled) {
     store.setAutoDeleteEnabled(settings.autoDeleteEnabled);
   }
+  if (typeof settings.autoSaveEnabled === 'boolean' && settings.autoSaveEnabled !== store.autoSaveEnabled) {
+    store.setAutoSaveEnabled(settings.autoSaveEnabled);
+  }
   if (typeof settings.autoDeleteAfterDays === 'number' && Number.isFinite(settings.autoDeleteAfterDays)) {
     const normalized = Math.max(1, Math.min(365, settings.autoDeleteAfterDays));
     if (normalized !== store.autoDeleteAfterDays) {
@@ -620,6 +623,12 @@ const applyDesktopUiPreferences = (
     && settings.desktopWindowControlsPosition !== store.desktopWindowControlsPosition
   ) {
     store.setDesktopWindowControlsPosition(settings.desktopWindowControlsPosition);
+  }
+  if (
+    (settings.desktopWindowControlsStyle === 'classic' || settings.desktopWindowControlsStyle === 'traffic-lights')
+    && settings.desktopWindowControlsStyle !== store.desktopWindowControlsStyle
+  ) {
+    store.setDesktopWindowControlsStyle(settings.desktopWindowControlsStyle);
   }
   if (typeof settings.wideChatLayoutEnabled === 'boolean' && settings.wideChatLayoutEnabled !== store.wideChatLayoutEnabled) {
     store.setWideChatLayoutEnabled(settings.wideChatLayoutEnabled);
@@ -932,6 +941,9 @@ export const sanitizeWebSettings = (payload: unknown): DesktopSettings | null =>
   }
   if (typeof candidate.autoDeleteEnabled === 'boolean') {
     result.autoDeleteEnabled = candidate.autoDeleteEnabled;
+  }
+  if (typeof candidate.autoSaveEnabled === 'boolean') {
+    result.autoSaveEnabled = candidate.autoSaveEnabled;
   }
   if (typeof candidate.autoDeleteAfterDays === 'number' && Number.isFinite(candidate.autoDeleteAfterDays)) {
     result.autoDeleteAfterDays = candidate.autoDeleteAfterDays;
@@ -1253,6 +1265,12 @@ export const sanitizeWebSettings = (payload: unknown): DesktopSettings | null =>
     || candidate.desktopWindowControlsPosition === 'right'
   ) {
     result.desktopWindowControlsPosition = candidate.desktopWindowControlsPosition;
+  }
+  if (
+    candidate.desktopWindowControlsStyle === 'classic'
+    || candidate.desktopWindowControlsStyle === 'traffic-lights'
+  ) {
+    result.desktopWindowControlsStyle = candidate.desktopWindowControlsStyle;
   }
   if (typeof candidate.wideChatLayoutEnabled === 'boolean') {
     result.wideChatLayoutEnabled = candidate.wideChatLayoutEnabled;

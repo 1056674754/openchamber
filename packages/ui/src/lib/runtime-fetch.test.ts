@@ -364,6 +364,60 @@ describe('runtimeFetch read coalescing', () => {
     }
   });
 
+  test('coalesces concurrent remote filesystem reads without caching later reads', async () => {
+    const previous = getRuntimeUrlResolver();
+    let calls = 0;
+    try {
+      configureRuntimeUrlResolver({ apiBaseUrl: 'https://api.example' });
+      globalThis.fetch = (async () => {
+        calls += 1;
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        return new Response('remote file', { status: 200 });
+      }) as typeof fetch;
+
+      const path = '/api/remote/dev3/fs/read?path=%2Froot%2Fproject%2FAGENTS.md';
+      const [first, second] = await Promise.all([
+        runtimeFetch(path),
+        runtimeFetch(path),
+      ]);
+
+      expect(calls).toBe(1);
+      expect(await first.text()).toBe('remote file');
+      expect(await second.text()).toBe('remote file');
+
+      await runtimeFetch(path);
+      expect(calls).toBe(2);
+    } finally {
+      setRuntimeUrlResolver(previous);
+      globalThis.fetch = originalFetch;
+      clearRuntimeAuthCredentialProvider();
+    }
+  });
+
+  test('does not coalesce reads for different remote filesystem paths', async () => {
+    const previous = getRuntimeUrlResolver();
+    let calls = 0;
+    try {
+      configureRuntimeUrlResolver({ apiBaseUrl: 'https://api.example' });
+      globalThis.fetch = (async () => {
+        calls += 1;
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        return new Response('{}', { status: 200 });
+      }) as typeof fetch;
+
+      await Promise.all([
+        runtimeFetch('/api/remote/dev3/fs/stat?path=%2Froot%2Fproject%2Fa.ts'),
+        runtimeFetch('/api/remote/dev3/fs/stat?path=%2Froot%2Fproject%2Fb.ts'),
+      ]);
+
+      expect(calls).toBe(2);
+    } finally {
+      setRuntimeUrlResolver(previous);
+      globalThis.fetch = originalFetch;
+      clearRuntimeAuthCredentialProvider();
+    }
+  });
+
   test('does not coalesce non-GET, non-allowlisted, or signal-bearing requests', async () => {
     const previous = getRuntimeUrlResolver();
     let calls = 0;

@@ -36,7 +36,16 @@ import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { useFileSearchStore } from '@/stores/useFileSearchStore';
 import { useDeviceInfo } from '@/lib/device';
 import { cn, getModifierLabel, getRevealLabelKey, hasModifier } from '@/lib/utils';
-import { getLanguageFromExtension, getImageMimeType, isImageFile, isDrawioFile } from '@/lib/toolHelpers';
+import {
+  getLanguageFromExtension,
+  getImageMimeType,
+  isBinaryFile,
+  isDrawioFile,
+  isImageFile,
+  isSvgFile,
+  looksLikeBinaryText,
+} from '@/lib/toolHelpers';
+import { shouldAllowFileDraftSave, shouldScheduleFileAutosave } from '@/lib/fileEditorAutosave';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { EditorView } from '@codemirror/view';
 import type { Extension } from '@codemirror/state';
@@ -63,6 +72,7 @@ import { eventMatchesShortcut, getEffectiveShortcutCombo } from '@/lib/shortcuts
 import { useI18n } from '@/lib/i18n';
 import { useActiveServerBaseUrl } from '@/hooks/useActiveServerId';
 import { resolveApiUrl } from '@/lib/api/serverUrl';
+import { statFilesViewPath } from '@/lib/filesViewFileAccess';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { resolveJsonFileViewState } from './jsonFileViewState';
 
@@ -298,19 +308,6 @@ const isFileMissingError = (error: unknown): boolean => {
 };
 
 const MAX_VIEW_CHARS = 200_000;
-const FILE_EDITOR_AUTO_SAVE_KEY = 'openchamber:files:auto-save-enabled';
-
-const getInitialAutoSaveEnabled = (): boolean => {
-  if (typeof window === 'undefined') {
-    return true;
-  }
-
-  try {
-    return window.localStorage.getItem(FILE_EDITOR_AUTO_SAVE_KEY) !== 'false';
-  } catch {
-    return true;
-  }
-};
 
 const getFileIcon = (filePath: string, extension?: string): React.ReactNode => {
   return <FileTypeIcon filePath={filePath} extension={extension} />;
@@ -785,6 +782,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
   const [fileError, setFileError] = React.useState<string | null>(null);
   const [desktopImageSrc, setDesktopImageSrc] = React.useState<string>('');
   const [runtimeImageSrc, setRuntimeImageSrc] = React.useState<string>('');
+  const [contentDetectedBinary, setContentDetectedBinary] = React.useState(false);
 
   const [loadedFilePath, setLoadedFilePath] = React.useState<string | null>(null);
 
@@ -795,7 +793,8 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
   const lastLoadedFileStatRef = React.useRef<FileStatSnapshot | null>(null);
   const activeFileLoadIdRef = React.useRef(0);
   const [autoSaveStatus, setAutoSaveStatus] = React.useState<'idle' | 'saved' | 'conflict'>('idle');
-  const [autoSaveEnabled, setAutoSaveEnabled] = React.useState(getInitialAutoSaveEnabled);
+  const autoSaveEnabled = useUIStore((state) => state.autoSaveEnabled);
+  const setAutoSaveEnabled = useUIStore((state) => state.setAutoSaveEnabled);
 
   const [confirmDiscardOpen, setConfirmDiscardOpen] = React.useState(false);
   const pendingSelectFileRef = React.useRef<FileNode | null>(null);
@@ -1429,7 +1428,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
     if (options?.optional) {
       params.set('optional', 'true');
     }
-    const response = await fetch(`${resolveApiUrl('/api/fs/read', serverBaseUrl)}?${params.toString()}`, {
+    const response = await runtimeFetch(`${resolveApiUrl('/api/fs/read', serverBaseUrl)}?${params.toString()}`, {
       // Avoid conditional requests (304 + empty body).
       cache: options?.optional ? 'no-store' : 'default',
     });
@@ -1441,42 +1440,45 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
   }, [currentDirectory, files, serverBaseUrl, t]);
 
   const readFileStat = React.useCallback(async (path: string, options?: { allowOutsideWorkspace?: boolean }): Promise<FileStatSnapshot | null> => {
-    if (files.statFile) {
-      const result = await files.statFile(path, { ...options, directory: currentDirectory });
-      return {
-        path: result.path,
-        size: result.size,
-        mtimeMs: result.mtimeMs,
-      };
-    }
-    return null;
-  }, [files, currentDirectory]);
+    const result = await statFilesViewPath(files, path, { ...options, directory: currentDirectory }, serverBaseUrl);
+    return result ? {
+      path: result.path,
+      size: result.size,
+      mtimeMs: result.mtimeMs,
+    } : null;
+  }, [currentDirectory, files, serverBaseUrl]);
 
   React.useEffect(() => {
-    if (!root || !files.statFile || openPaths.length === 0) {
+    if (!root || (!files.statFile && !serverBaseUrl) || openPaths.length === 0) {
       return;
     }
 
     let cancelled = false;
-    const paths = [...openPaths];
+    const paths = openPaths.filter((path) => path !== effectiveSelectedPath);
 
-    void Promise.all(paths.map(async (path) => {
-      try {
-        const stat = await files.statFile?.(path, { directory: root });
-        if (!cancelled && stat && !stat.isFile) {
-          removeOpenPathsByPrefix(root, path);
+    void (async () => {
+      for (const path of paths) {
+        if (cancelled) {
+          return;
         }
-      } catch (error) {
-        if (!cancelled && isFileMissingError(error)) {
-          removeOpenPathsByPrefix(root, path);
+
+        try {
+          const stat = await statFilesViewPath(files, path, { directory: root }, serverBaseUrl);
+          if (!cancelled && stat && !stat.isFile) {
+            removeOpenPathsByPrefix(root, path);
+          }
+        } catch (error) {
+          if (!cancelled && isFileMissingError(error)) {
+            removeOpenPathsByPrefix(root, path);
+          }
         }
       }
-    }));
+    })();
 
     return () => {
       cancelled = true;
     };
-  }, [files, openPaths, removeOpenPathsByPrefix, root]);
+  }, [effectiveSelectedPath, files, openPaths, removeOpenPathsByPrefix, root, serverBaseUrl]);
 
   const displayedContent = React.useMemo(() =>
     fileContent.length > MAX_VIEW_CHARS
@@ -1493,9 +1495,21 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
       return false;
     }
 
-    if (!isDirty) {
-      return true;
+    const selectedIsBinary = isBinaryFile(selectedFile.path) || contentDetectedBinary;
+    if (!shouldAllowFileDraftSave({
+      selectedFilePath: selectedFile.path,
+      loadedFilePath,
+      fileLoading,
+      isDirty,
+      isNonEditableBinary: selectedIsBinary,
+    })) {
+      if (selectedIsBinary) {
+        toast.error(t('filesView.toast.savingNotSupported'));
+      }
+      return false;
     }
+
+    if (!isDirty) return true;
 
     setIsSaving(true);
 
@@ -1525,7 +1539,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
     } finally {
       setIsSaving(false);
     }
-  }, [draftContent, files, isDirty, readFileStat, selectedFile, t]);
+  }, [contentDetectedBinary, draftContent, fileLoading, files, isDirty, loadedFilePath, readFileStat, selectedFile, t]);
 
   React.useEffect(() => {
     if (!isDirty) {
@@ -1554,14 +1568,6 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
   }, [isDirty, setMainTabGuard]);
 
   React.useEffect(() => {
-    try {
-      window.localStorage.setItem(FILE_EDITOR_AUTO_SAVE_KEY, autoSaveEnabled ? 'true' : 'false');
-    } catch {
-      // Ignore localStorage errors; the in-memory preference still applies.
-    }
-  }, [autoSaveEnabled]);
-
-  React.useEffect(() => {
     if (autoSaveEnabled) {
       return;
     }
@@ -1578,7 +1584,17 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
 
   React.useEffect(() => {
     const canWrite = Boolean(selectedFile && files.writeFile);
-    if (!autoSaveEnabled || !isDirty || !canWrite || isSaving) {
+    const selectedIsBinary = Boolean(selectedFile?.path && (isBinaryFile(selectedFile.path) || contentDetectedBinary));
+    if (!shouldScheduleFileAutosave({
+      autoSaveEnabled,
+      isDirty,
+      canWrite,
+      isSaving,
+      fileLoading,
+      selectedFilePath: selectedFile?.path,
+      loadedFilePath,
+      isNonEditableBinary: selectedIsBinary,
+    })) {
       return;
     }
 
@@ -1629,7 +1645,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
         autoSaveTimerRef.current = null;
       }
     };
-  }, [autoSaveEnabled, draftContent, isDirty, selectedFile, files.writeFile, isSaving, saveDraft, readFileStat, selectedFileReadOptions, t]);
+  }, [autoSaveEnabled, contentDetectedBinary, draftContent, fileLoading, isDirty, loadedFilePath, selectedFile, files.writeFile, isSaving, saveDraft, readFileStat, selectedFileReadOptions, t]);
 
   // Reset auto-save status when switching files
   React.useEffect(() => {
@@ -1684,9 +1700,11 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
     setDesktopImageSrc('');
     setRuntimeImageSrc('');
     setLoadedFilePath(null);
+    setContentDetectedBinary(false);
 
     const selectedIsImage = isImageFile(node.path);
-    const isSvg = node.path.toLowerCase().endsWith('.svg');
+    const isSvg = isSvgFile(node.path);
+    const selectedIsBinary = isBinaryFile(node.path);
 
     if (isMobile) {
       setShowMobilePageContent(true);
@@ -1708,6 +1726,14 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
       return;
     }
 
+    if (selectedIsBinary) {
+      setFileContent('');
+      setDraftContent('');
+      setLoadedFilePath(node.path);
+      setFileLoading(false);
+      return;
+    }
+
     setFileLoading(true);
 
     const readOptions = { allowOutsideWorkspace: mode === 'editor-only' && Boolean(root) && !isPathWithinRoot(node.path, root) };
@@ -1715,6 +1741,13 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
     await readFile(node.path, readOptions)
       .then((content) => {
         if (!isCurrentLoad()) {
+          return;
+        }
+        if (looksLikeBinaryText(content)) {
+          setContentDetectedBinary(true);
+          setFileContent('');
+          setDraftContent('');
+          setLoadedFilePath(node.path);
           return;
         }
         setFileContent(content);
@@ -2165,7 +2198,12 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
   }
 
   const isSelectedImage = Boolean(selectedFile?.path && isImageFile(selectedFile.path));
-  const isSelectedSvg = Boolean(selectedFile?.path && selectedFile.path.toLowerCase().endsWith('.svg'));
+  const isSelectedSvg = Boolean(selectedFile?.path && isSvgFile(selectedFile.path));
+  const isSelectedBinary = Boolean(
+    selectedFile?.path
+    && (isBinaryFile(selectedFile.path) || contentDetectedBinary)
+  );
+  const isUnsupportedBinary = isSelectedBinary && !isSelectedImage;
   const pendingNavigationTargetPath = React.useMemo(
     () => normalizePath(pendingFileNavigation?.path ?? ''),
     [pendingFileNavigation?.path],
@@ -2177,16 +2215,17 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
       && selectedFilePath === pendingNavigationTargetPath
       && !fileLoading
       && !fileError
-      && !isSelectedImage,
+      && !isSelectedImage
+      && !isUnsupportedBinary,
   );
 
   const displaySelectedPath = React.useMemo(() => {
     return getDisplayPath(root, selectedFilePath);
   }, [selectedFilePath, root]);
 
-  const canCopy = Boolean(selectedFile && (!isSelectedImage || isSelectedSvg) && fileContent.length > 0);
+  const canCopy = Boolean(selectedFile && (!isSelectedImage || isSelectedSvg) && !isUnsupportedBinary && fileContent.length > 0);
   const canCopyPath = Boolean(selectedFile && displaySelectedPath.length > 0);
-  const canEdit = Boolean(selectedFile && !selectedFileIsOutsideWorkspace && !isSelectedImage && files.writeFile && fileContent.length <= MAX_VIEW_CHARS);
+  const canEdit = Boolean(selectedFile && !selectedFileIsOutsideWorkspace && !isSelectedBinary && files.writeFile && fileContent.length <= MAX_VIEW_CHARS);
   const isMarkdown = Boolean(selectedFile?.path && isMarkdownFile(selectedFile.path));
   const isJson = Boolean(selectedFile?.path && isJsonFile(selectedFile.path));
   const isHtml = Boolean(selectedFile?.path && isHtmlFile(selectedFile.path));
@@ -2198,7 +2237,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
   const invalidJsonError = jsonFileViewState?.kind === 'invalid-source'
     ? jsonFileViewState.error
     : null;
-  const isTextFile = Boolean(selectedFile && !isSelectedImage);
+  const isTextFile = Boolean(selectedFile && !isSelectedImage && !isUnsupportedBinary);
   const canUseShikiFileView = isTextFile && !isMarkdown && !(isHtml && htmlViewMode === 'preview') && !isDrawio;
   const staticLanguageExtension = React.useMemo(
     () => (selectedFilePath ? languageByExtension(selectedFilePath) : null),
@@ -2399,7 +2438,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
 
   const handleDiagramChange = React.useCallback((xml: string) => {
     diagramXmlRef.current = xml;
-    if (!selectedFile?.path || drawioViewMode !== 'preview' || !files.writeFile) { return; }
+    if (!autoSaveEnabled || !selectedFile?.path || drawioViewMode !== 'preview' || !files.writeFile) { return; }
     if (diagramAutoSaveTimerRef.current) { clearTimeout(diagramAutoSaveTimerRef.current); }
     const path = selectedFile.path;
     diagramAutoSaveTimerRef.current = setTimeout(() => {
@@ -2410,7 +2449,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
         setTimeout(() => setDiagramSaved(false), 1500);
       }).catch((error) => { toast.error(error instanceof Error ? error.message : t('filesView.toast.saveFailed')); });
     }, AUTO_SAVE_DELAY);
-  }, [drawioViewMode, files.writeFile, saveDiagramXml, selectedFile?.path, t]);
+  }, [autoSaveEnabled, drawioViewMode, files.writeFile, saveDiagramXml, selectedFile?.path, t]);
 
   const diagramEditorXml = React.useMemo(() => {
     if (!isDrawio) { return fileContent; }
@@ -2926,7 +2965,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => setAutoSaveEnabled((enabled) => !enabled)}
+              onClick={() => setAutoSaveEnabled(!autoSaveEnabled)}
               className={cn(
                 'size-6 p-0 transition-opacity hover:bg-transparent focus-visible:bg-transparent active:bg-transparent',
                 autoSaveEnabled ? 'text-foreground opacity-100' : 'text-muted-foreground opacity-65 hover:opacity-100'
@@ -3451,6 +3490,29 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
                 className="max-w-full max-h-[70vh] object-contain rounded-md border border-border/30 bg-primary/10"
               />
             </div>
+          ) : isUnsupportedBinary ? (
+            <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
+              <div className="typography-ui-header text-foreground">{t('filesView.editor.cannotPreviewBinary')}</div>
+              <div className="max-w-md typography-ui text-muted-foreground">{t('filesView.editor.binaryFileDescription')}</div>
+              {files.downloadFile ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    const downloadFile = files.downloadFile;
+                    if (!downloadFile || !selectedFile) return;
+                    void downloadFile(selectedFile.path).catch((error) => {
+                      console.error('Download failed:', error);
+                      toast.error(t('sidebarFilesTree.toast.operationFailed'));
+                    });
+                  }}
+                >
+                  <Icon name="download" className="mr-2 size-4" />
+                  {t('filesView.editor.saveFile')}
+                </Button>
+              ) : null}
+            </div>
           ) : selectedFile && isDrawio && drawioViewMode === 'preview' ? (
             <div className="h-full overflow-hidden" style={{ minHeight: '400px' }}>
               <DiagramEditor
@@ -3763,6 +3825,29 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
                 alt={selectedFile.name}
                 className="max-w-full max-h-full object-contain rounded-md border border-border/30 bg-primary/10"
               />
+            </div>
+          ) : isUnsupportedBinary ? (
+            <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
+              <div className="typography-ui-header text-foreground">{t('filesView.editor.cannotPreviewBinary')}</div>
+              <div className="max-w-md typography-ui text-muted-foreground">{t('filesView.editor.binaryFileDescription')}</div>
+              {files.downloadFile ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    const downloadFile = files.downloadFile;
+                    if (!downloadFile || !selectedFile) return;
+                    void downloadFile(selectedFile.path).catch((error) => {
+                      console.error('Download failed:', error);
+                      toast.error(t('sidebarFilesTree.toast.operationFailed'));
+                    });
+                  }}
+                >
+                  <Icon name="download" className="mr-2 size-4" />
+                  {t('filesView.editor.saveFile')}
+                </Button>
+              ) : null}
             </div>
           ) : isMarkdown && getMdViewMode() === 'preview' ? (
             <div className="h-full overflow-auto p-4">

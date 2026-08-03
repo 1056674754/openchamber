@@ -231,14 +231,23 @@ const resolveRuntimeFetchInput = (input: string | URL | Request, query?: Runtime
 // as soon as the request settles, so this only ever shares overlapping in-flight
 // requests — it never serves a stale/cached response.
 // ---------------------------------------------------------------------------
-const COALESCE_READ_PATH = /\/api\/(config|path|app\/agents|agent|project|command)(\b|\/|\?|$)/;
+const COALESCE_READ_PATH = /\/api\/(config|path|app\/agents|agent|project|command|fs\/(?:read|stat))(\b|\/|\?|$)/;
 const READ_COALESCE = new Map<string, Promise<Response>>();
+
+const normalizeCoalescibleReadPath = (url: string): string => {
+  try {
+    const pathname = new URL(url, 'http://openchamber.invalid').pathname;
+    return pathname.replace(/^\/api\/remote\/[^/]+/, '/api');
+  } catch {
+    return url;
+  }
+};
 
 const coalesceReadKey = (method: string, url: string, hasSignal: boolean): string | null => {
   if (hasSignal) return null;
   if (method !== 'GET') return null;
   if (url.includes('/event')) return null;
-  if (!COALESCE_READ_PATH.test(url)) return null;
+  if (!COALESCE_READ_PATH.test(normalizeCoalescibleReadPath(url))) return null;
   return `GET ${url}`;
 };
 
