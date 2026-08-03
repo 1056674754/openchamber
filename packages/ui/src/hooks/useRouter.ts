@@ -9,6 +9,11 @@ import { isEmbeddedSessionChat } from '@/components/layout/contextPanelEmbeddedC
 import { opencodeClient } from '@/lib/opencode/client';
 import { DEFAULT_SERVER_ID, serverRegistry } from '@/lib/opencode/server-registry';
 import { normalizePath } from '@/lib/pathNormalization';
+import { getRuntimeKey } from '@/lib/runtime-switch';
+import { readLastActiveSession } from '@/sync/last-session-cache';
+import { useProjectsStore } from '@/stores/useProjectsStore';
+import { useSessionProjectStore } from '@/stores/useSessionProjectStore';
+import { getOrRegisterRemoteConnection } from '@/sync/session-routing';
 
 /**
  * Check if running in VS Code webview context.
@@ -66,10 +71,31 @@ export function useRouter(): void {
             let directoryHint = useSessionUIStore.getState().getDirectoryForSession(route.sessionId);
             let serverId = serverRegistry.getServerForSession(route.sessionId);
 
+            const boundProjectId = useSessionProjectStore.getState().getProject(route.sessionId);
+            const boundProject = boundProjectId
+              ? useProjectsStore.getState().projects.find((project) => project.id === boundProjectId)
+              : undefined;
+            if (boundProject) {
+              serverId = boundProject.serverId ?? DEFAULT_SERVER_ID;
+              serverRegistry.indexSession(route.sessionId, serverId);
+            }
+
+            const persisted = readLastActiveSession(getRuntimeKey());
+            if (
+              persisted?.sessionId === route.sessionId
+              && (!serverId || persisted.serverId === serverId)
+            ) {
+              directoryHint = directoryHint ?? normalizePath(persisted.directory);
+              serverId = serverId ?? persisted.serverId;
+              if (serverId) {
+                serverRegistry.indexSession(route.sessionId, serverId);
+              }
+            }
+
             if (!directoryHint) {
               try {
-                const client = serverId
-                  ? serverRegistry.get(serverId)?.client
+                const client = serverId && serverId !== DEFAULT_SERVER_ID
+                  ? getOrRegisterRemoteConnection(serverId, boundProject?.label).client
                   : opencodeClient.getSdkClient();
                 const response = await client?.session.get({ sessionID: route.sessionId });
                 directoryHint = normalizePath(response?.data?.directory ?? null);

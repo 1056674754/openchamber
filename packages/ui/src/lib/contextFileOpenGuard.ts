@@ -1,6 +1,7 @@
 import type { FilesAPI } from '@/lib/api/types';
 import { resolveApiUrl } from '@/lib/api/serverUrl';
 import { MAX_OPEN_FILE_LINES, countLinesWithLimit } from '@/lib/fileOpenLimits';
+import { runtimeFetch } from '@/lib/runtime-fetch';
 
 export type ContextFileOpenFailureReason = 'too-large' | 'missing' | 'unreadable';
 
@@ -26,13 +27,15 @@ const classifyReadError = (error: unknown): ContextFileOpenFailureReason => {
 };
 
 const readFileContent = async (files: FilesAPI, path: string, baseUrl: string = ''): Promise<string> => {
-  if (files.readFile) {
+  // On remote instances (baseUrl set), the runtime files.readFile reads the LOCAL filesystem
+  // and cannot reach the remote project path — route through the remote proxy via fetch.
+  if (!baseUrl && files.readFile) {
     const result = await files.readFile(path, { allowOutsideWorkspace: true, optional: true });
     return result.content ?? '';
   }
 
   const params = new URLSearchParams({ path, allowOutsideWorkspace: 'true', optional: 'true' });
-  const response = await fetch(`${resolveApiUrl('/api/fs/read', baseUrl)}?${params.toString()}`, {
+  const response = await runtimeFetch(`${resolveApiUrl('/api/fs/read', baseUrl)}?${params.toString()}`, {
     // Avoid conditional requests (304 + empty body).
     cache: 'no-store',
   });

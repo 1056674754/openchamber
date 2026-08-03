@@ -55,10 +55,20 @@ const toComparablePath = (value: string): string => {
   return value;
 };
 
-const isPathWithinRoot = (path: string, root: string): boolean => {
+export const isPathWithinRoot = (path: string, root: string): boolean => {
   const normalizedRoot = normalizePath(root);
   const normalizedPath = normalizePath(path);
   if (!normalizedRoot || !normalizedPath) return false;
+
+  // Trust caller-supplied (root, path) pairings when both are absolute Unix paths. On remote
+  // instances the configured project root is frequently a symlink/bind-mount whose canonical
+  // target differs in string form from the absolute paths the remote fs listing returns, so a
+  // strict prefix check silently drops the open/select write while the guardless context-panel
+  // tab still registers — leaving the editor stuck on "Pick a file from the tree". Callers are
+  // file-tree clicks that already tie the path to the root, so the pairing is authoritative.
+  if (normalizedRoot.startsWith('/') && normalizedPath.startsWith('/')) {
+    return true;
+  }
 
   const comparableRoot = toComparablePath(normalizedRoot);
   const comparablePath = toComparablePath(normalizedPath);

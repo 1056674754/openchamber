@@ -24,20 +24,26 @@ type RightTab = 'git' | 'files' | 'context';
 function useRightSidebarGitSync(directory: string | undefined, isSidebarOpen: boolean) {
   const { git } = useRuntimeAPIs();
   const ensureStatus = useGitStore((state) => state.ensureStatus);
+  // Hold git in a ref so the effect does not re-subscribe on every render. The runtime API
+  // object can get a fresh reference each render; listing it as a dependency retriggers
+  // ensureStatus immediately and forms a fetch loop (worst case: a git/check storm on non-git
+  // remote directories). The API surface is stable for the app lifetime, so a ref is safe here.
+  const gitRef = React.useRef(git);
+  gitRef.current = git;
 
   React.useEffect(() => {
-    if (!directory || !git || !isSidebarOpen) return;
+    if (!directory || !gitRef.current || !isSidebarOpen) return;
 
-    void ensureStatus(directory, git);
+    void ensureStatus(directory, gitRef.current);
 
     const POLL_INTERVAL = 10_000;
     const id = setInterval(() => {
       if (typeof document !== 'undefined' && document.hidden) return;
-      void ensureStatus(directory, git);
+      void ensureStatus(directory, gitRef.current);
     }, POLL_INTERVAL);
 
     return () => clearInterval(id);
-  }, [directory, git, isSidebarOpen, ensureStatus]);
+  }, [directory, isSidebarOpen, ensureStatus]);
 }
 
 export const ProjectContextPanel: React.FC = () => {

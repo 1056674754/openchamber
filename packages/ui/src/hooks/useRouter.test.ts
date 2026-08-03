@@ -20,6 +20,9 @@ mock.module('react', () => ({
 
 const targetSessionId = 'ses_direct_route';
 const targetSessionDirectory = '/repo/direct-route';
+let persistedLastSession: { sessionId: string; serverId: string; directory: string | null } | null = null;
+let boundProjectId: string | null = null;
+let projects: Array<{ id: string; path: string; label: string; serverId?: string }> = [];
 
 const setCurrentSessionCalls: Array<{
   sessionId: string | null;
@@ -92,6 +95,34 @@ mock.module('@/lib/opencode/client', () => ({
     }),
   },
 }));
+mock.module('@/lib/runtime-switch', () => ({
+  getRuntimeKey: (): string => 'local',
+}));
+mock.module('@/sync/last-session-cache', () => ({
+  readLastActiveSession: () => persistedLastSession,
+}));
+mock.module('@/stores/useSessionProjectStore', () => ({
+  useSessionProjectStore: {
+    getState: () => ({ getProject: () => boundProjectId }),
+  },
+}));
+mock.module('@/stores/useProjectsStore', () => ({
+  useProjectsStore: {
+    getState: () => ({ projects }),
+  },
+}));
+mock.module('@/sync/session-routing', () => ({
+  getOrRegisterRemoteConnection: () => ({
+    client: {
+      session: {
+        get: async () => ({
+          data: { id: targetSessionId, directory: '/root/novel_editor-worktree' },
+        }),
+      },
+    },
+  }),
+}));
+const { serverRegistry } = await import('@/lib/opencode/server-registry');
 const { useRouter } = await import('./useRouter');
 
 describe('useRouter', () => {
@@ -99,6 +130,9 @@ describe('useRouter', () => {
     effects.length = 0;
     setCurrentSessionCalls.length = 0;
     sessionState.currentSessionId = null;
+    persistedLastSession = null;
+    boundProjectId = null;
+    projects = [];
 
     useRouter();
     const initializeEffect = effects[0];
@@ -120,5 +154,64 @@ describe('useRouter', () => {
     await Promise.resolve();
 
     expect(sessionState.currentSessionId).toBe(targetSessionId);
+  });
+
+  test('restores remote ownership before applying a persisted direct session route', async () => {
+    effects.length = 0;
+    setCurrentSessionCalls.length = 0;
+    sessionState.currentSessionId = null;
+    serverRegistry.forgetSession(targetSessionId);
+    boundProjectId = null;
+    projects = [];
+    persistedLastSession = {
+      sessionId: targetSessionId,
+      serverId: 'dev3',
+      directory: '/root/novel_editor',
+    };
+
+    useRouter();
+    const initializeEffect = effects[0];
+    initializeEffect?.();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(setCurrentSessionCalls[0]).toEqual({
+      sessionId: targetSessionId,
+      directory: '/root/novel_editor',
+      options: { serverId: 'dev3' },
+    });
+    expect(serverRegistry.getServerForSession(targetSessionId)).toBe('dev3');
+  });
+
+  test('uses the persisted project binding to resolve a remote direct session route', async () => {
+    effects.length = 0;
+    setCurrentSessionCalls.length = 0;
+    sessionState.currentSessionId = null;
+    serverRegistry.forgetSession(targetSessionId);
+    persistedLastSession = {
+      sessionId: targetSessionId,
+      serverId: 'stale-dev2',
+      directory: '/root/wrong-project',
+    };
+    boundProjectId = 'project-dev3';
+    projects = [{
+      id: 'project-dev3',
+      path: '/root/novel_editor',
+      label: 'Novel Editor',
+      serverId: 'dev3',
+    }];
+
+    useRouter();
+    const initializeEffect = effects[0];
+    initializeEffect?.();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(setCurrentSessionCalls[0]).toEqual({
+      sessionId: targetSessionId,
+      directory: '/root/novel_editor-worktree',
+      options: { serverId: 'dev3' },
+    });
+    expect(serverRegistry.getServerForSession(targetSessionId)).toBe('dev3');
   });
 });

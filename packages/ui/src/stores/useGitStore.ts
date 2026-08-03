@@ -345,9 +345,14 @@ export const useGitStore = create<GitStore>()(
 
           try {
             const now = Date.now();
+            const lastRepoCheckAt = dirState.lastRepoCheckAt || 0;
+            // Probe only when the repo status is unknown, or once per REPO_CHECK_STALE_THRESHOLD.
+            // The previous `isGitRepo !== true` made every fetchStatus re-probe non-git directories
+            // (false !== true is always true), which — combined with the sidebar sync effect —
+            // produced an infinite git/check request storm on non-git remote projects.
             const shouldProbeRepository =
-              dirState.isGitRepo !== true ||
-              now - (dirState.lastRepoCheckAt || 0) > REPO_CHECK_STALE_THRESHOLD;
+              dirState.isGitRepo === null
+              || now - lastRepoCheckAt > REPO_CHECK_STALE_THRESHOLD;
 
             let isRepo = dirState.isGitRepo === true;
             if (shouldProbeRepository) {
