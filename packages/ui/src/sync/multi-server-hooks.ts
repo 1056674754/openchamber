@@ -15,6 +15,7 @@ import {
   aggregateLiveSessions,
   aggregateLiveSessionStatuses,
 } from "./live-aggregate";
+import { createSessionActivityKey } from "./session-activity-key";
 
 function collectExtraSessions(): Session[] {
   const entries = getAllSyncStores();
@@ -49,6 +50,79 @@ function collectExtraStatuses(): Record<string, SessionStatus> {
     }
   }
   return statuses;
+}
+
+function collectActiveSessionKeys(defaultChildStores: ChildStoreManager): Set<string> {
+  const managers = new Map<string, ChildStoreManager>([[DEFAULT_SERVER_ID, defaultChildStores]]);
+  for (const entry of getAllSyncStores()) {
+    managers.set(entry.serverId, entry.childStores);
+  }
+
+  const keys = new Set<string>();
+  for (const [serverId, manager] of managers) {
+    for (const [directory, store] of manager.children) {
+      for (const [sessionId, status] of Object.entries(store.getState().session_status)) {
+        if (status.type === 'idle') continue;
+        keys.add(createSessionActivityKey(serverId, directory, sessionId));
+      }
+    }
+  }
+  return keys;
+}
+
+export function useAllServersActiveSessionKeys(options?: { enabled?: boolean }): ReadonlySet<string> {
+  const enabled = options?.enabled !== false;
+  const { childStores } = useSyncSystem();
+  const cacheRef = useRef<{ signature: string; keys: Set<string> }>({ signature: '', keys: new Set() });
+
+  const getSnapshot = useCallback(() => {
+    if (!enabled) return cacheRef.current.keys;
+    const keys = collectActiveSessionKeys(childStores);
+    const signature = [...keys].sort().join('\n');
+    if (cacheRef.current.signature === signature) return cacheRef.current.keys;
+    cacheRef.current = { signature, keys };
+    return keys;
+  }, [childStores, enabled]);
+
+  const subscribe = useCallback((notify: () => void) => {
+    if (!enabled) return () => undefined;
+    let storeUnsubs: Array<() => void> = [];
+    let managerUnsubs: Array<() => void> = [];
+
+    const syncSubscriptions = () => {
+      for (const unsubscribe of storeUnsubs) unsubscribe();
+      for (const unsubscribe of managerUnsubs) unsubscribe();
+      storeUnsubs = [];
+      managerUnsubs = [];
+
+      const managers = new Map<string, ChildStoreManager>([[DEFAULT_SERVER_ID, childStores]]);
+      for (const entry of getAllSyncStores()) managers.set(entry.serverId, entry.childStores);
+      for (const manager of managers.values()) {
+        for (const store of manager.children.values()) {
+          storeUnsubs.push(store.subscribe((state, previous) => {
+            if (state.session_status !== previous.session_status) notify();
+          }));
+        }
+        managerUnsubs.push(manager.subscribeRegistry(() => {
+          syncSubscriptions();
+          notify();
+        }));
+      }
+    };
+
+    syncSubscriptions();
+    const unsubscribeRegistry = subscribeSyncStoresRegistry(() => {
+      syncSubscriptions();
+      notify();
+    });
+    return () => {
+      unsubscribeRegistry();
+      for (const unsubscribe of storeUnsubs) unsubscribe();
+      for (const unsubscribe of managerUnsubs) unsubscribe();
+    };
+  }, [childStores, enabled]);
+
+  return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 }
 
 type BlockingRequestKind = "permission" | "question";

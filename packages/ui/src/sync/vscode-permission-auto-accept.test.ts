@@ -74,4 +74,23 @@ describe("VS Code permission auto-accept runtime", () => {
     expect(await second).toBe(true)
     expect(attempts).toBe(2)
   })
+
+  test("keeps identical permission ids isolated by server and directory", async () => {
+    const repliedTargets: Array<{ directory?: string; serverId?: string }> = []
+    const runtime = createVSCodePermissionAutoAcceptRuntime({
+      getPolicy: () => ({ child: true }),
+      getSessions: () => new Map(),
+      getSession: async () => session("child"),
+      reply: async (_sessionId, _requestId, target) => {
+        repliedTargets.push(target)
+      },
+      wait: async () => undefined,
+    })
+
+    const local = { directory: "/repo", serverId: "default" }
+    const remote = { directory: "/repo", serverId: "remote-a" }
+    expect(await runtime.processPermission(permission, local)).toBe(true)
+    expect(await runtime.processPermission(permission, remote)).toBe(true)
+    expect(repliedTargets).toEqual([local, remote])
+  })
 })
