@@ -104,6 +104,16 @@ mock.module('@/lib/opencode/client', () => ({
     }),
   },
 }));
+mock.module('@opencode-ai/sdk/v2', () => ({
+  createOpencodeClient: ({ baseUrl }: { baseUrl: string }) => ({
+    baseUrl,
+    session: {
+      get: async () => ({
+        data: { id: targetSessionId, directory: '/root/novel_editor-worktree' },
+      }),
+    },
+  }),
+}));
 mock.module('@/lib/runtime-switch', () => ({
   getRuntimeKey: (): string => 'local',
 }));
@@ -119,17 +129,6 @@ mock.module('@/stores/useProjectsStore', () => ({
   useProjectsStore: {
     getState: () => ({ projects }),
   },
-}));
-mock.module('@/sync/session-routing', () => ({
-  getOrRegisterRemoteConnection: () => ({
-    client: {
-      session: {
-        get: async () => ({
-          data: { id: targetSessionId, directory: '/root/novel_editor-worktree' },
-        }),
-      },
-    },
-  }),
 }));
 const { serverRegistry } = await import('@/lib/opencode/server-registry');
 const { useRouter } = await import('./useRouter');
@@ -210,6 +209,12 @@ describe('useRouter', () => {
       label: 'Novel Editor',
       serverId: 'dev3',
     }];
+    serverRegistry.register({
+      id: 'dev3',
+      label: 'Dev3',
+      baseUrl: '/api/remote/dev3',
+    });
+    serverRegistry.setHealthStatus('dev3', 'healthy');
 
     useRouter();
     const initializeEffect = effects[0];
