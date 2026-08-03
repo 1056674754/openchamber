@@ -36,7 +36,7 @@ describe("resolveSdkForDirectory", () => {
     });
   });
 
-  test("does not route an unindexed session request through a remote child store directory match", () => {
+  test("routes an unindexed session request through the directory's remote store without local fallback", () => {
     const serverId = "remote-routing-test";
     serverRegistry.register({ id: serverId, label: "Remote", baseUrl: "/api/remote/remote-routing-test" });
     const remoteStores = new ChildStoreManager();
@@ -44,11 +44,13 @@ describe("resolveSdkForDirectory", () => {
     const unregisterStores = registerSyncStores(serverId, remoteStores, () => undefined);
 
     try {
-      const defaultClient = serverRegistry.get(DEFAULT_SERVER_ID)?.client;
       const remoteClient = serverRegistry.get(serverId)?.client;
 
       expect(resolveSdkForDirectory("/shared/path")).toBe(remoteClient);
-      expect(resolveSdkForDirectory("/shared/path", "ses_unindexed")).toBe(defaultClient);
+      // An unindexed session-scoped request routes through the directory's
+      // remote ownership instead of degrading to the default/local server
+      // (regression: remote session restored on refresh was routed to local).
+      expect(resolveSdkForDirectory("/shared/path", "ses_unindexed")).toBe(remoteClient);
 
       serverRegistry.indexSession("ses_remote", serverId);
       expect(resolveSdkForDirectory("/other/path", "ses_remote")).toBe(remoteClient);

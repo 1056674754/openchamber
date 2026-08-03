@@ -2,6 +2,7 @@ import React from 'react';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { serverRegistry, DEFAULT_SERVER_ID } from '@/lib/opencode/server-registry';
 import { useProjectsStore } from '@/stores/useProjectsStore';
+import { UNRESOLVED_SERVER_ID, resolveSessionAuthority } from '@/sync/session-authority';
 
 export function useActiveServerId(): string {
   const currentSessionId = useSessionUIStore((s) => s.currentSessionId);
@@ -17,7 +18,7 @@ export function useActiveServerId(): string {
     ),
     React.useCallback(
       () => currentSessionId
-        ? serverRegistry.getServerForSession(currentSessionId) ?? DEFAULT_SERVER_ID
+        ? serverRegistry.getServerForSession(currentSessionId) ?? UNRESOLVED_SERVER_ID
         : DEFAULT_SERVER_ID,
       [currentSessionId],
     ),
@@ -25,7 +26,13 @@ export function useActiveServerId(): string {
   );
 
   if (currentSessionId) {
-    return currentSessionServerId;
+    if (currentSessionServerId !== UNRESOLVED_SERVER_ID) {
+      return currentSessionServerId;
+    }
+    // No runtime index yet: recover from the authoritative session→project
+    // binding before declaring unresolved. A remote session must never
+    // degrade to DEFAULT_SERVER_ID.
+    return resolveSessionAuthority(currentSessionId).serverId ?? UNRESOLVED_SERVER_ID;
   }
 
   const projectId = draftProjectId || activeProjectId;
@@ -35,7 +42,7 @@ export function useActiveServerId(): string {
 
 export function useActiveServerBaseUrl(): string {
   const serverId = useActiveServerId();
-  if (serverId === DEFAULT_SERVER_ID) return '';
+  if (serverId === DEFAULT_SERVER_ID || serverId === UNRESOLVED_SERVER_ID) return '';
   const connection = serverRegistry.get(serverId);
   return connection?.config.baseUrl ?? '';
 }

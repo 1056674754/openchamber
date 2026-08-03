@@ -3,6 +3,7 @@ import type { OpencodeClient, Session } from '@opencode-ai/sdk/v2';
 import type { SessionStatus } from '@opencode-ai/sdk/v2/client';
 import { opencodeClient } from '@/lib/opencode/client';
 import { DEFAULT_SERVER_ID, serverRegistry } from '@/lib/opencode/server-registry';
+import { resolveSessionAuthority } from '@/sync/session-authority';
 import { listGlobalSessionPage, listGlobalSessionPages } from '@/stores/globalSessions';
 import { retry } from '@/sync/retry';
 import { readRemoteSessionStatuses } from '@/sync/remote-session-status';
@@ -684,7 +685,9 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
 
     const previousScopeSessions = [...current.activeSessions, ...current.archivedSessions]
       .filter((session) => (
-        (serverRegistry.getServerForSession(session.id) ?? DEFAULT_SERVER_ID) === serverId
+        (serverRegistry.getServerForSession(session.id)
+          ?? resolveSessionAuthority(session.id).serverId
+          ?? DEFAULT_SERVER_ID) === serverId
         && resolveGlobalSessionDirectory(session) === normalizedDirectory
       ));
     const previousScopeIds = new Set(previousScopeSessions.map((session) => session.id));
@@ -770,7 +773,7 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
 
     if (isComplete) {
       for (const id of previousScopeIds) {
-        if (!incomingIds.has(id) && (serverRegistry.getServerForSession(id) ?? DEFAULT_SERVER_ID) === serverId) {
+        if (!incomingIds.has(id) && (serverRegistry.getServerForSession(id) ?? resolveSessionAuthority(id).serverId ?? DEFAULT_SERVER_ID) === serverId) {
           serverRegistry.forgetSession(id);
         }
       }
@@ -891,7 +894,9 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
       });
 
       try {
-        const serverId = serverRegistry.getServerForSession(session.id) ?? DEFAULT_SERVER_ID;
+        const serverId = serverRegistry.getServerForSession(session.id)
+          ?? resolveSessionAuthority(session.id).serverId
+          ?? DEFAULT_SERVER_ID;
         const client = getClientForServer(serverId);
         const directory = resolveGlobalSessionDirectory(session);
         const result = await retry(() => client.session.children({

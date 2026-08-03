@@ -59,6 +59,8 @@ import {
   type SendDeliveryMode,
 } from "./session-actions"
 import { setSessionRoutingContextGetters } from "./session-routing"
+import { setSessionDirectoryGetter, setSessionProjectGetter } from "./session-authority"
+import { useSessionProjectStore } from "@/stores/useSessionProjectStore"
 import { serverRegistry, DEFAULT_SERVER_ID } from "@/lib/opencode/server-registry"
 import { getAllSyncStores, getSyncStoresForServer } from "./multi-server-registry"
 import {
@@ -2126,4 +2128,12 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
 setSessionRoutingContextGetters({
   getProjects: () => useProjectsStore.getState().projects,
   getAvailableWorktreesByProject: () => useSessionUIStore.getState().availableWorktreesByProject,
+})
+
+setSessionDirectoryGetter((sessionId) => useSessionUIStore.getState().getDirectoryForSession(sessionId))
+
+setSessionProjectGetter((sessionId) => {
+  const projectId = useSessionProjectStore.getState().getProject(sessionId)
+  if (!projectId) return null
+  return useProjectsStore.getState().projects.find((project) => project.id === projectId) ?? null
 })

@@ -2431,6 +2431,16 @@ export function useDirectoryStore(directory?: string, serverId?: string, session
   if (!directory && sessionID) {
     const sessionStore = findChildStoreForSession(system.childStores, sessionID)
     if (sessionStore) return sessionStore
+    // A session-scoped lookup with no directory must not fall back to the
+    // globally active directory: the session may belong to a remote server
+    // whose store has not mounted yet, and binding it to the local current
+    // directory would render the wrong project's state. Return an explicit
+    // unresolved store so consumers render loading/empty until authority
+    // resolves.
+    const indexedServerId = serverRegistry.getServerForSession(sessionID)
+    if (indexedServerId && indexedServerId !== DEFAULT_SERVER_ID) {
+      return emptyDirectoryStore
+    }
   }
 
   return system.childStores.ensureChild(dir)

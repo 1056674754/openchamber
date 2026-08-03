@@ -6,6 +6,7 @@ import { registerRemoteInstanceProxy } from "@/lib/remote-instances/registry"
 import { getWorktreesForProject } from "@/lib/worktrees/worktreeKeys"
 import { normalizePath } from "@/lib/pathNormalization"
 import { getAllSyncStores } from "./multi-server-registry"
+import { UnresolvedSessionServerError } from "./session-authority"
 
 type RoutingContextGetters = {
   getProjects: () => readonly ProjectEntry[]
@@ -35,10 +36,10 @@ export function requireExistingSessionDirectory(
   return normalizedDirectory
 }
 
-function usesDefaultConnection(project: { serverId?: string | null }): boolean {
-  return !project.serverId || project.serverId === DEFAULT_SERVER_ID
-}
-
+/** Prefer the longer project-path match. Equal-length matches keep the current
+ *  candidate: never prefer the default/local connection on a tie, because two
+ *  servers can expose identical paths and local-preference would silently
+ *  reroute remote sessions to the local filesystem. */
 function shouldPreferProjectMatch<T extends { serverId?: string | null }>(
   candidate: T,
   candidateLength: number,
@@ -46,8 +47,7 @@ function shouldPreferProjectMatch<T extends { serverId?: string | null }>(
   currentLength: number,
 ): boolean {
   if (!current) return true
-  if (candidateLength !== currentLength) return candidateLength > currentLength
-  return usesDefaultConnection(candidate) && !usesDefaultConnection(current)
+  return candidateLength > currentLength
 }
 
 function findProjectForDirectory(directory: string): ProjectEntry | null {
@@ -100,23 +100,39 @@ export function getOrRegisterRemoteConnection(serverId: string, label?: string) 
   return connection
 }
 
-const _directoryServerCache = new Map<string, string>()
+/** Directory → owning servers. A directory may legitimately belong to multiple
+ *  servers (identical paths across remote instances); queries must treat
+ *  multi-owner directories as ambiguous instead of picking one. */
+const _directoryServerCache = new Map<string, Set<string>>()
 
 export function setDirectoryServerId(directory: string, serverId: string): void {
-  _directoryServerCache.set(normalizeDirectoryKey(directory), serverId)
+  const key = normalizeDirectoryKey(directory)
+  const existing = _directoryServerCache.get(key)
+  if (existing) {
+    existing.add(serverId)
+  } else {
+    _directoryServerCache.set(key, new Set([serverId]))
+  }
 }
 
+/** Best single owner for a directory, or null when ambiguous/unresolved.
+ *  Prefix matches return the longest owned prefix; a prefix owned by multiple
+ *  servers yields null so callers fail closed rather than guess. */
 function getCachedServerIdForDirectory(directory: string): string | null {
   let best: { serverId: string; length: number } | null = null
-  for (const [cachedDirectory, serverId] of _directoryServerCache) {
+  for (const [cachedDirectory, serverIds] of _directoryServerCache) {
     if (directory !== cachedDirectory && !directory.startsWith(`${cachedDirectory}/`)) {
       continue
     }
     if (!best || cachedDirectory.length > best.length) {
-      best = { serverId, length: cachedDirectory.length }
+      if (serverIds.size === 1) {
+        best = { serverId: serverIds.values().next().value as string, length: cachedDirectory.length }
+      } else {
+        best = { serverId: "", length: cachedDirectory.length }
+      }
     }
   }
-  return best?.serverId ?? null
+  return best && best.serverId ? best.serverId : null
 }
 
 function defaultSdkClient(fallbackClient?: OpencodeClient | null): OpencodeClient {
@@ -158,10 +174,31 @@ export function resolveSdkForDirectory(
     if (sessionServerId === DEFAULT_SERVER_ID) {
       return defaultSdkClient(fallbackClient)
     }
-    // The request is session-scoped but has no authoritative server mapping.
-    // Do not downgrade to directory/remote-store matching: path collisions across
-    // remote instances are valid, and a stale remote child store can hijack local
-    // sessions. Remote sessions must be indexed or pass explicitServerId.
+    // No authoritative server index for this session yet. The directory is an
+    // explicit request context, so its ownership resolves the server: project
+    // ownership, then directory-server cache, then a mounted remote child
+    // store. Sessions without a directory ownership context route to local
+    // through the default store below — fail-closed enforcement for
+    // session-scoped mutations lives in storesForSession/sdkForSession, which
+    // require an indexed server.
+    const project = findProjectForDirectory(normalizedDir)
+    if (project?.serverId && project.serverId !== DEFAULT_SERVER_ID) {
+      return getOrRegisterRemoteConnection(project.serverId, project.label).client
+    }
+    if (project) {
+      return defaultSdkClient(fallbackClient)
+    }
+    const cachedServerId = getCachedServerIdForDirectory(normalizedDir)
+    if (cachedServerId && cachedServerId !== DEFAULT_SERVER_ID) {
+      return getOrRegisterRemoteConnection(cachedServerId).client
+    }
+    const allEntries = getAllSyncStores()
+    for (const e of allEntries) {
+      if (e.serverId === DEFAULT_SERVER_ID) continue
+      if (e.childStores.children.has(normalizedDir)) {
+        return getOrRegisterRemoteConnection(e.serverId).client
+      }
+    }
     return defaultSdkClient(fallbackClient)
   }
 
@@ -206,7 +243,7 @@ export function resolveBaseUrl(directory: string): string | undefined {
   }
 
   // Tier 2: directory-server cache populated during remote project discovery.
-  const cachedServerId = _directoryServerCache.get(normalizedDir)
+  const cachedServerId = getCachedServerIdForDirectory(normalizedDir)
   if (cachedServerId && cachedServerId !== DEFAULT_SERVER_ID) {
     return getOrRegisterRemoteConnection(cachedServerId).config.baseUrl
   }
@@ -230,6 +267,18 @@ export function resolveBaseUrlForSession(
       if (serverId === DEFAULT_SERVER_ID) return undefined
       return getOrRegisterRemoteConnection(serverId).config.baseUrl
     }
+    // Session-scoped with no authoritative server index. Directory-based
+    // routing is only acceptable as a scoped fallback when the directory
+    // itself has explicit project ownership; otherwise fail closed instead of
+    // collapsing identical remote paths to the local server.
+    if (directory) {
+      const project = findProjectForDirectory(normalizeDirectoryKey(directory))
+      if (project?.serverId && project.serverId !== DEFAULT_SERVER_ID) {
+        return getOrRegisterRemoteConnection(project.serverId, project.label).config.baseUrl
+      }
+      if (project) return undefined
+    }
+    throw new UnresolvedSessionServerError(sessionId)
   }
   return directory ? resolveBaseUrl(directory) : undefined
 }
@@ -253,7 +302,7 @@ export function resolveApiUrl(directory: string): string | undefined {
   }
 
   // Tier 2: directory-server cache populated during remote project discovery.
-  const cachedServerId = _directoryServerCache.get(normalizedDir)
+  const cachedServerId = getCachedServerIdForDirectory(normalizedDir)
   if (cachedServerId && cachedServerId !== DEFAULT_SERVER_ID) {
     return getOrRegisterRemoteConnection(cachedServerId).config.baseUrl
   }

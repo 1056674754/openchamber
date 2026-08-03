@@ -29,6 +29,11 @@ const setCurrentSessionCalls: Array<{
   directory?: string | null;
   options?: { serverId?: string };
 }> = [];
+const navigateToSessionCalls: Array<{
+  sessionId: string;
+  directory: string;
+  projectId: string;
+}> = [];
 
 const sessionState = {
   currentSessionId: null as string | null,
@@ -38,6 +43,10 @@ const sessionState = {
     options?: { serverId?: string },
   ): void => {
     setCurrentSessionCalls.push({ sessionId, directory, options });
+    sessionState.currentSessionId = sessionId;
+  },
+  navigateToSession: (sessionId: string, directory: string, projectId: string): void => {
+    navigateToSessionCalls.push({ sessionId, directory, projectId });
     sessionState.currentSessionId = sessionId;
   },
   getDirectoryForSession: (): string | null => null,
@@ -186,6 +195,7 @@ describe('useRouter', () => {
   test('uses the persisted project binding to resolve a remote direct session route', async () => {
     effects.length = 0;
     setCurrentSessionCalls.length = 0;
+    navigateToSessionCalls.length = 0;
     sessionState.currentSessionId = null;
     serverRegistry.forgetSession(targetSessionId);
     persistedLastSession = {
@@ -207,11 +217,12 @@ describe('useRouter', () => {
     await Promise.resolve();
     await Promise.resolve();
 
-    expect(setCurrentSessionCalls[0]).toEqual({
+    expect(navigateToSessionCalls[0]).toEqual({
       sessionId: targetSessionId,
       directory: '/root/novel_editor-worktree',
-      options: { serverId: 'dev3' },
+      projectId: 'project-dev3',
     });
+    expect(setCurrentSessionCalls).toHaveLength(0);
     expect(serverRegistry.getServerForSession(targetSessionId)).toBe('dev3');
   });
 });

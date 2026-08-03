@@ -5,6 +5,7 @@ import { Icon } from '@/components/icon/Icon';
 import { useSwitcherItems } from '@/components/session/sidebar/hooks/useSwitcherItems';
 import { formatSessionCompactDateLabel } from '@/components/session/sidebar/utils';
 import { DEFAULT_SERVER_ID, serverRegistry } from '@/lib/opencode/server-registry';
+import { resolveSessionAuthority } from '@/sync/session-authority';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import {
@@ -35,7 +36,9 @@ const SwitcherRow: React.FC<SwitcherRowProps> = ({
   onSelect,
 }) => {
   const { t } = useI18n();
-  const serverId = serverRegistry.getServerForSession(session.id) ?? DEFAULT_SERVER_ID;
+  const serverId = serverRegistry.getServerForSession(session.id)
+    ?? resolveSessionAuthority(session.id).serverId
+    ?? DEFAULT_SERVER_ID;
   const directory = resolveGlobalSessionDirectory(session);
   const isStreaming = activeSessionKeys.has(createSessionActivityKey(serverId, directory, session.id));
   const localUnseenCount = useSessionUnseenCount(session.id);
@@ -121,7 +124,9 @@ export const MobileSessionSwitcherPopover: React.FC<MobileSessionSwitcherPopover
           </p>
         ) : items.map((item) => {
           const session = item.node.session;
-          const serverId = serverRegistry.getServerForSession(session.id) ?? DEFAULT_SERVER_ID;
+          const serverId = serverRegistry.getServerForSession(session.id)
+            ?? resolveSessionAuthority(session.id).serverId
+            ?? null;
           const directory = resolveGlobalSessionDirectory(session);
           return (
             <SwitcherRow
@@ -133,7 +138,7 @@ export const MobileSessionSwitcherPopover: React.FC<MobileSessionSwitcherPopover
               activeSessionKeys={activeSessionKeys}
               onSelect={() => {
                 if (item.projectId) setActiveProjectIdOnly(item.projectId);
-                setCurrentSession(session.id, directory, { serverId });
+                setCurrentSession(session.id, directory, serverId ? { serverId } : undefined);
                 onClose();
               }}
             />

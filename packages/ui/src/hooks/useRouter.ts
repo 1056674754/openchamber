@@ -14,6 +14,7 @@ import { readLastActiveSession } from '@/sync/last-session-cache';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionProjectStore } from '@/stores/useSessionProjectStore';
 import { getOrRegisterRemoteConnection } from '@/sync/session-routing';
+import { resolveSessionAuthority } from '@/sync/session-authority';
 
 /**
  * Check if running in VS Code webview context.
@@ -47,6 +48,7 @@ export function useRouter(): void {
 
   // Get store actions (stable references)
   const setCurrentSession = useSessionUIStore((state) => state.setCurrentSession);
+  const navigateToSession = useSessionUIStore((state) => state.navigateToSession);
   const setActiveMainTab = useUIStore((state) => state.setActiveMainTab);
   const setSettingsDialogOpen = useUIStore((state) => state.setSettingsDialogOpen);
   const setSettingsPage = useUIStore((state) => state.setSettingsPage);
@@ -107,11 +109,15 @@ export function useRouter(): void {
               }
             }
 
-            setCurrentSession(
-              route.sessionId,
-              directoryHint,
-              serverId ? { serverId } : undefined,
-            );
+            if (directoryHint && boundProjectId) {
+              navigateToSession(route.sessionId, directoryHint, boundProjectId);
+            } else {
+              setCurrentSession(
+                route.sessionId,
+                directoryHint,
+                serverId ? { serverId } : undefined,
+              );
+            }
           }
         }
 
@@ -141,7 +147,7 @@ export function useRouter(): void {
         isApplyingRouteRef.current = false;
       }
     },
-    [setCurrentSession, setActiveMainTab, setSettingsDialogOpen, setSettingsPage, navigateToDiff]
+    [setCurrentSession, navigateToSession, setActiveMainTab, setSettingsDialogOpen, setSettingsPage, navigateToDiff]
   );
 
   /**
@@ -312,7 +318,12 @@ export function navigateToRoute(route: Partial<RouteState>): void {
   if (win.__VSCODE_CONFIG__ !== undefined) {
     // In VS Code, just apply state changes directly
     if (route.sessionId) {
-      void useSessionUIStore.getState().setCurrentSession(route.sessionId);
+      const authority = resolveSessionAuthority(route.sessionId);
+      void useSessionUIStore.getState().setCurrentSession(
+        route.sessionId,
+        authority.directory ?? undefined,
+        authority.serverId ? { serverId: authority.serverId } : undefined,
+      );
     }
     if (route.settingsPath) {
       useUIStore.getState().setSettingsPage(resolveSettingsSlug(route.settingsPath));
@@ -351,7 +362,12 @@ export function navigateToRoute(route: Partial<RouteState>): void {
 
   // Also apply to state
   if (route.sessionId) {
-    void useSessionUIStore.getState().setCurrentSession(route.sessionId);
+    const authority = resolveSessionAuthority(route.sessionId);
+    void useSessionUIStore.getState().setCurrentSession(
+      route.sessionId,
+      authority.directory ?? undefined,
+      authority.serverId ? { serverId: authority.serverId } : undefined,
+    );
   }
   if (route.settingsPath) {
     useUIStore.getState().setSettingsPage(resolveSettingsSlug(route.settingsPath));

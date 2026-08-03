@@ -10,6 +10,7 @@ import { Binary } from "./binary"
 import { useSessionUIStore } from "./session-ui-store"
 import { useInputStore } from "./input-store"
 import type { ChildStoreManager } from "./child-store"
+import { requireSessionAuthority, UnresolvedSessionServerError } from "./session-authority"
 import { useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
 import { useConfigStore } from "@/stores/useConfigStore"
 import { registerSessionDirectory } from "./sync-refs"
@@ -170,26 +171,23 @@ function sdk() {
   return _sdk
 }
 
-/** Get the SDK client for a session's indexed server. */
-function sdkForSession(sessionId?: string | null): OpencodeClient {
+/** Get the SDK client for a session's server.
+ *  sessionId with no authoritative binding fails closed (never silently local)
+ *  unless a directory context is supplied, in which case the directory's
+ *  ownership resolves the client (the directory is an explicit request scope,
+ *  not global state). */
+function sdkForSession(sessionId?: string | null, directory?: string | null): OpencodeClient {
   if (sessionId) {
-    const serverId = serverRegistry.getServerForSession(sessionId)
-    if (serverId && serverId !== DEFAULT_SERVER_ID) {
-      return getOrRegisterRemoteConnection(serverId).client
-    }
-    if (serverId === DEFAULT_SERVER_ID) {
+    if (!directory) {
+      const { serverId } = requireSessionAuthority(sessionId)
+      if (serverId && serverId !== DEFAULT_SERVER_ID) {
+        return getOrRegisterRemoteConnection(serverId).client
+      }
       const defaultConn = serverRegistry.get(DEFAULT_SERVER_ID)
       if (defaultConn) return defaultConn.client
       return sdk()
     }
-
-    const conn = serverRegistry.getClientForSession(sessionId)
-    if (conn && conn.config.id !== DEFAULT_SERVER_ID) {
-      return conn.client
-    }
-    if (conn) {
-      return conn.client
-    }
+    return resolveSdkForDirectoryFromRouting(directory, sessionId, undefined, _sdk)
   }
   const defaultConn = serverRegistry.get(DEFAULT_SERVER_ID)
   if (defaultConn) return defaultConn.client
@@ -202,13 +200,22 @@ export function resolveSdkForDirectory(directory: string, sessionID?: string, ex
   return resolveSdkForDirectoryFromRouting(directory, sessionID, explicitServerId, _sdk)
 }
 
-/** Get the child store manager for a session's server. Falls back to default. */
-function storesForSession(sessionId?: string | null): ChildStoreManager {
-  if (sessionId) {
-    const serverId = serverRegistry.getServerForSession(sessionId)
+function storesForSession(sessionId?: string | null, directory?: string | null): ChildStoreManager {
+  if (sessionId && !directory) {
+    const { serverId } = requireSessionAuthority(sessionId)
     if (serverId && serverId !== DEFAULT_SERVER_ID) {
       const stores = getSyncStoresForServer(serverId)
       if (stores) return stores
+      throw new UnresolvedSessionServerError(sessionId)
+    }
+  } else if (sessionId && directory) {
+    // Directory is an explicit scope; resolve its owning server's stores.
+    const baseUrl = resolveBaseUrl(directory)
+    const resolvedServerId = baseUrl ? getServerIdForBaseUrl(baseUrl) : DEFAULT_SERVER_ID
+    if (resolvedServerId && resolvedServerId !== DEFAULT_SERVER_ID) {
+      const stores = getSyncStoresForServer(resolvedServerId)
+      if (stores) return stores
+      throw new UnresolvedSessionServerError(sessionId)
     }
   }
   if (!_childStores) throw new Error("Child stores not initialized")
@@ -622,8 +629,19 @@ function optimisticRemoveQuestion(sessionId: string, requestId: string): void {
 function resolveBlockingRequestServerId(sessionId: string, directoryHint?: string): string | undefined {
   const indexedServerId = serverRegistry.getServerForSession(sessionId)
   if (indexedServerId) return indexedServerId
-  if (!directoryHint) return undefined
-  return getServerIdForBaseUrl(resolveBaseUrlForSession(sessionId, directoryHint)) ?? undefined
+  if (directoryHint) {
+    // Directory is an explicit request context; resolve its ownership
+    // directly rather than through the (possibly unindexed) session.
+    const baseUrl = resolveBaseUrl(directoryHint)
+    const fromBaseUrl = baseUrl ? getServerIdForBaseUrl(baseUrl) : undefined
+    if (fromBaseUrl) return fromBaseUrl
+    // Directory resolves to no remote server: the request originated on the
+    // default/local connection, so reply there. Fail-closed enforcement for
+    // session-scoped mutations lives in sdkForSession/storesForSession, which
+    // throw when a session has no binding at all.
+    return DEFAULT_SERVER_ID
+  }
+  return undefined
 }
 
 function hasSuccessfulSdkResult(result: unknown): boolean {
@@ -673,7 +691,7 @@ function reconcileSessionMove(
   sourceDirectory: string,
   destinationDirectory: string,
 ): Session {
-  const stores = storesForSession(session.id)
+  const stores = storesForSession(session.id, sourceDirectory)
   const sourceStore = stores.getChild(sourceDirectory)
   const destinationStore = stores.ensureChild(destinationDirectory, { bootstrap: false })
   const sourceState = sourceStore?.getState()
@@ -748,7 +766,7 @@ export async function moveSessionToDirectory(
   destinationDirectory: string,
   moveChanges = true,
 ): Promise<void> {
-  const client = sdkForSession(session.id)
+  const client = sdkForSession(session.id, sourceDirectory)
   const controlPlane = client.experimental?.controlPlane
   if (!controlPlane?.moveSession) {
     throw new Error("OpenCode control-plane moveSession is unavailable on this server")
@@ -904,7 +922,7 @@ export async function deleteSession(sessionId: string, _options?: Record<string,
     ui.setCurrentSession(null)
   }
   try {
-    await sdkForSession(sessionId).session.delete({ sessionID: sessionId, directory: sessionDirectory })
+    await sdkForSession(sessionId, sessionDirectory).session.delete({ sessionID: sessionId, directory: sessionDirectory })
     cleanupDeletedSession(sessionId, sessionDirectory)
     return true
   } catch (error) {
@@ -926,7 +944,7 @@ export async function deleteSessionInDirectory(sessionId: string, directory: str
   ui.markSessionDeleting(sessionId)
   if (ui.currentSessionId === sessionId) ui.setCurrentSession(null)
   try {
-    await sdkForSession(sessionId).session.delete({ sessionID: sessionId, directory })
+    await sdkForSession(sessionId, directory).session.delete({ sessionID: sessionId, directory })
     cleanupDeletedSession(sessionId, directory)
     return true
   } catch (error) {
@@ -950,7 +968,7 @@ export async function archiveSession(sessionId: string): Promise<boolean> {
   }
   try {
     const archivedAt = Date.now()
-    await sdkForSession(sessionId).session.update({ sessionID: sessionId, directory: sessionDirectory, time: { archived: archivedAt } })
+    await sdkForSession(sessionId, sessionDirectory).session.update({ sessionID: sessionId, directory: sessionDirectory, time: { archived: archivedAt } })
     useGlobalSessionsStore.getState().archiveSessions([sessionId], archivedAt)
     optimisticRemoveSession(sessionId, sessionDirectory)
     return true
@@ -970,7 +988,7 @@ export async function unarchiveSession(
     || requireSessionDirectory(sessionId, "unarchiveSession")
   registerSessionDirectory(sessionId, sessionDirectory)
   try {
-    const result = await sdkForSession(sessionId).session.update({
+    const result = await sdkForSession(sessionId, sessionDirectory).session.update({
       sessionID: sessionId,
       directory: sessionDirectory,
       // OpenCode clears archive when archived is falsy/0.
@@ -1002,7 +1020,7 @@ export async function unarchiveSession(
 
 export async function updateSessionTitle(sessionId: string, title: string): Promise<void> {
   const sessionDirectory = requireSessionDirectory(sessionId, "updateSessionTitle")
-  const result = await sdkForSession(sessionId).session.update({ sessionID: sessionId, directory: sessionDirectory, title })
+  const result = await sdkForSession(sessionId, sessionDirectory).session.update({ sessionID: sessionId, directory: sessionDirectory, title })
   if (result.data) {
     useGlobalSessionsStore.getState().upsertSession(result.data)
   }
@@ -1014,7 +1032,7 @@ export async function patchSessionMetadata(
   transform: (metadata: Record<string, unknown>) => Record<string, unknown>,
 ): Promise<Session | null> {
   const sessionDirectory = directory || requireSessionDirectory(sessionId, "patchSessionMetadata")
-  const sdk = sdkForSession(sessionId)
+  const sdk = sdkForSession(sessionId, sessionDirectory)
   const current = await sdk.session.get({ sessionID: sessionId, directory: sessionDirectory })
   const existingMetadata = (current.data && typeof (current.data as Session & { metadata?: unknown }).metadata === 'object' && (current.data as Session & { metadata?: unknown }).metadata !== null && !Array.isArray((current.data as Session & { metadata?: unknown }).metadata))
     ? (current.data as Session & { metadata?: Record<string, unknown> }).metadata as Record<string, unknown>
@@ -1048,7 +1066,7 @@ export async function summarizeSession(
   const sessionDirectory = requireSessionDirectory(sessionId, "summarizeSession")
   await waitForConnectionOrThrow(serverRegistry.getServerForSession(sessionId))
   unwrapSdkData(
-    await sdkForSession(sessionId).session.summarize({
+    await sdkForSession(sessionId, sessionDirectory).session.summarize({
       sessionID: sessionId,
       directory: sessionDirectory,
       modelID: input.modelID,
@@ -1060,7 +1078,7 @@ export async function summarizeSession(
 
 export async function shareSession(sessionId: string): Promise<Session | null> {
   const sessionDirectory = requireSessionDirectory(sessionId, "shareSession")
-  const result = await sdkForSession(sessionId).session.share({ sessionID: sessionId, directory: sessionDirectory })
+  const result = await sdkForSession(sessionId, sessionDirectory).session.share({ sessionID: sessionId, directory: sessionDirectory })
   if (result.data) {
     useGlobalSessionsStore.getState().upsertSession(result.data)
   }
@@ -1069,7 +1087,7 @@ export async function shareSession(sessionId: string): Promise<Session | null> {
 
 export async function unshareSession(sessionId: string): Promise<Session | null> {
   const sessionDirectory = requireSessionDirectory(sessionId, "unshareSession")
-  const result = await sdkForSession(sessionId).session.unshare({ sessionID: sessionId, directory: sessionDirectory })
+  const result = await sdkForSession(sessionId, sessionDirectory).session.unshare({ sessionID: sessionId, directory: sessionDirectory })
   if (result.data) {
     useGlobalSessionsStore.getState().upsertSession(result.data)
   }
@@ -1441,7 +1459,7 @@ export async function abortCurrentOperation(sessionId: string): Promise<boolean>
 
   let client: OpencodeClient
   try {
-    client = sdkForSession(sessionId)
+    client = sdkForSession(sessionId, sessionDirectory)
   } catch (error) {
     console.error("[session-actions] abort: FAILED — no client", { sessionId, error: String(error) })
     return false
@@ -1876,7 +1894,7 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
   const status = state.session_status[sessionId]
   if (status && status.type !== "idle") {
     try {
-      await sdkForSession(sessionId).session.abort({ sessionID: sessionId, directory: sessionDirectory })
+      await sdkForSession(sessionId, sessionDirectory).session.abort({ sessionID: sessionId, directory: sessionDirectory })
     } catch {
       // ignore abort errors
     }
@@ -1929,7 +1947,7 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
 
   // Call SDK and merge authoritative result into store
   try {
-    const result = await sdkForSession(sessionId).session.revert({ sessionID: sessionId, directory: sessionDirectory, messageID: messageId })
+    const result = await sdkForSession(sessionId, sessionDirectory).session.revert({ sessionID: sessionId, directory: sessionDirectory, messageID: messageId })
     const revertedSession = unwrapSdkData(result, "session.revert")
     const current = store.getState()
     const updated = [...current.session]
@@ -1961,7 +1979,7 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
 export async function refetchSessionMessages(sessionId: string): Promise<void> {
   const sessionDirectory = requireSessionDirectory(sessionId, "refetchSessionMessages")
   const store = storeForSession(sessionId)
-  const result = await sdkForSession(sessionId).session.messages({
+  const result = await sdkForSession(sessionId, sessionDirectory).session.messages({
     sessionID: sessionId,
     directory: sessionDirectory,
     limit: MESSAGE_REFETCH_LIMIT,
@@ -1998,13 +2016,13 @@ export async function unrevertSession(sessionId: string): Promise<void> {
   const status = state.session_status[sessionId]
   if (status && status.type !== "idle") {
     try {
-      await sdkForSession(sessionId).session.abort({ sessionID: sessionId, directory: sessionDirectory })
+      await sdkForSession(sessionId, sessionDirectory).session.abort({ sessionID: sessionId, directory: sessionDirectory })
     } catch {
       // ignore
     }
   }
 
-  const result = await sdkForSession(sessionId).session.unrevert({ sessionID: sessionId, directory: sessionDirectory })
+  const result = await sdkForSession(sessionId, sessionDirectory).session.unrevert({ sessionID: sessionId, directory: sessionDirectory })
   const restoredSession = unwrapSdkData(result, "session.unrevert")
   const current = store.getState()
   const sessions = [...current.session]
@@ -2068,7 +2086,7 @@ export async function forkFromMessage(sessionId: string, messageId: string): Pro
   const messageText = extractUserMessageText(parts)
   const fileParts = parts.filter((p) => p.type === "file" && !isSyntheticPart(p)) as Array<Record<string, unknown>>
 
-  const result = await sdkForSession(sessionId).session.fork({ sessionID: sessionId, directory: sessionDirectory, messageID: messageId })
+  const result = await sdkForSession(sessionId, sessionDirectory).session.fork({ sessionID: sessionId, directory: sessionDirectory, messageID: messageId })
   if (!result.data) return
 
   const forkedSession = result.data
