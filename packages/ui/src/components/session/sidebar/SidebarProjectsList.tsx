@@ -16,17 +16,24 @@ import type { SortableDragHandleProps } from './sortableItems';
 import { SortableGroupItem, SortableProjectItem } from './sortableItems';
 import { formatProjectLabel } from './utils';
 import { useI18n } from '@/lib/i18n';
-import { serverRegistry } from '@/lib/opencode/server-registry';
+import { DEFAULT_SERVER_ID, serverRegistry } from '@/lib/opencode/server-registry';
 import { subscribeSyncStoresRegistry } from '@/sync/multi-server-registry';
 import { useDesktopSshStore } from '@/stores/useDesktopSshStore';
 import { resolveInstanceLabel } from '@/lib/desktopSsh';
 import { getMainWorkspaceSectionForRender } from './mainWorkspaceSection';
 import { useSessionDisplayStore, type ProjectSortOrder } from '@/stores/useSessionDisplayStore';
+import { useStickyHeadersStore } from './stickyHeadersStore';
+import { Icon } from '@/components/icon/Icon';
 import {
   getRemoteProjectLoadStates,
   type RemoteProjectLoadState,
   type RemoteProjectRef,
 } from './remoteProjectLoadState';
+import {
+  getSessionNodesActivityState,
+  mergeCollapsedActivityStates,
+  type CollapsedActivityState,
+} from './collapsedActivityState';
 
 type ProjectSection = {
   project: {
@@ -55,7 +62,10 @@ type Props = {
   hasSessionSearchQuery: boolean;
   emptyState: React.ReactNode;
   searchEmptyState: React.ReactNode;
-  renderGroupSessions: (group: SessionGroup, groupKey: string, projectId?: string | null, hideGroupLabel?: boolean, dragHandleProps?: SortableDragHandleProps | null, compactBodyPadding?: boolean) => React.ReactNode;
+  renderGroupSessions: (group: SessionGroup, groupKey: string, projectId?: string | null, hideGroupLabel?: boolean, dragHandleProps?: SortableDragHandleProps | null, compactBodyPadding?: boolean, serverId?: string) => React.ReactNode;
+  activeActivitySessionKeys: ReadonlySet<string>;
+  unreadActivitySessionIds: ReadonlySet<string>;
+  notifyOnSubtasks: boolean;
   homeDirectory: string | null;
   collapsedProjects: Set<string>;
   hideDirectoryControls: boolean;
@@ -82,7 +92,12 @@ type Props = {
   setOpenSidebarMenuKey: (key: string | null) => void;
   onRefreshProject?: () => void;
   isInlineEditing: boolean;
+  hasLeadingActivitySections?: boolean;
 };
+
+const TOP_FADE_MAX_SIZE = 48;
+const TOP_FADE_MIN_SIZE = 32;
+const TOP_FADE_CLEAR_MAX_SIZE = 24;
 
 const getRemoteProjectSignature = (projects: RemoteProjectRef[]): string =>
   projects
@@ -188,6 +203,41 @@ export function SidebarProjectsList(props: Props): React.ReactNode {
   const noopSensors = useSensors();
 
   const stickyZoneHeaders = useSessionDisplayStore((state) => state.stickyZoneHeaders);
+  const stuckProjectIds = useStickyHeadersStore((state) => state.stuckIds);
+  const enableStickyFade = props.isDesktopShellRuntime && stickyZoneHeaders && !props.mobileVariant;
+  const scrollContainerRef = React.useRef<HTMLElement | null>(null);
+  const topFadeSizeRef = React.useRef(0);
+  const syncTopFade = React.useCallback((scroller: HTMLElement) => {
+    const topFadeSize = scroller.scrollTop > 1
+      ? Math.min(TOP_FADE_MIN_SIZE + scroller.scrollTop, TOP_FADE_MAX_SIZE)
+      : 0;
+    topFadeSizeRef.current = topFadeSize;
+    scroller.style.setProperty('--scroll-shadow-top-size', `${topFadeSize}px`);
+    scroller.style.setProperty(
+      '--scroll-shadow-top-clear-size',
+      `${Math.min(Math.max(topFadeSize - 8, 0), TOP_FADE_CLEAR_MAX_SIZE)}px`,
+    );
+  }, []);
+  const blockObscuredInteraction = React.useCallback((
+    event: React.MouseEvent<HTMLDivElement> | React.PointerEvent<HTMLDivElement>,
+  ) => {
+    if ((event.target as Element).closest('[data-overlay-scrollbar-thumb], [data-sidebar-sticky-header]')) return;
+    const eventY = event.clientY - event.currentTarget.getBoundingClientRect().top;
+    if (eventY >= topFadeSizeRef.current) return;
+    event.preventDefault();
+    event.stopPropagation();
+  }, []);
+  let stuckProject: ProjectSection['project'] | null = null;
+  for (const section of orderedSectionsForRender) {
+    if (stuckProjectIds.has(section.project.id)) stuckProject = section.project;
+  }
+  const leadingProject = stuckProject
+    ?? (props.hasLeadingActivitySections ? null : orderedSectionsForRender[0]?.project ?? null);
+  const leadingProjectLabel = leadingProject ? formatProjectLabel(
+    leadingProject.label?.trim()
+    || formatDirectoryName(leadingProject.normalizedPath, props.homeDirectory)
+    || leadingProject.normalizedPath,
+  ) : null;
 
   // Capacitor/mobile drawer: native overflow only. OverlayScrollbar + ScrollShadow
   // observers fight 2k+ session-row DOM during touch scroll.
@@ -195,12 +245,17 @@ export function SidebarProjectsList(props: Props): React.ReactNode {
   const listScrollProps = {
     useScrollShadow: !props.mobileVariant,
     scrollShadowSize: 96 as const,
-    hideTopShadow: stickyZoneHeaders && !props.mobileVariant,
+    hideTopScrollShadow: !enableStickyFade,
     observeMutations: !props.mobileVariant,
     disableOverlayScrollbar: Boolean(props.mobileVariant),
     outerClassName: 'flex-1 min-h-0',
-    className: cn('space-y-1 pb-1 pl-2.5 pr-2', props.mobileVariant ? 'overscroll-contain touch-pan-y' : ''),
+    className: cn('space-y-1 pb-1 pl-2.5 pr-2', props.mobileVariant ? 'overscroll-contain touch-pan-y' : 'oc-sidebar-scroller'),
+    style: enableStickyFade ? { '--scroll-shadow-top-size': '0px' } as React.CSSProperties : undefined,
+    onScroll: enableStickyFade ? (event: React.UIEvent<HTMLElement>) => syncTopFade(event.currentTarget) : undefined,
   };
+  React.useLayoutEffect(() => {
+    if (enableStickyFade && scrollContainerRef.current) syncTopFade(scrollContainerRef.current);
+  }, [enableStickyFade, syncTopFade]);
 
   if (props.projectSections.length === 0) {
     return (
@@ -222,7 +277,13 @@ export function SidebarProjectsList(props: Props): React.ReactNode {
   }
 
   return (
-    <ScrollableOverlay {...listScrollProps}>
+    <div
+      className="oc-sticky-fade-root relative flex min-h-0 flex-1"
+      onPointerDownCapture={enableStickyFade ? blockObscuredInteraction : undefined}
+      onClickCapture={enableStickyFade ? blockObscuredInteraction : undefined}
+      onContextMenuCapture={enableStickyFade ? blockObscuredInteraction : undefined}
+    >
+    <ScrollableOverlay ref={scrollContainerRef} {...listScrollProps}>
       {props.topContent}
       {props.showOnlyMainWorkspace ? (
         <div className="space-y-[0.6rem] py-1">
@@ -282,6 +343,19 @@ export function SidebarProjectsList(props: Props): React.ReactNode {
             const isActiveProject = projectKey === props.activeProjectId;
             const isRepo = props.projectRepoStatus.get(projectKey);
             const orderedGroups = props.getOrderedGroups(projectKey, section.groups);
+            const projectServerId = project.serverId || DEFAULT_SERVER_ID;
+            const collapsedActivityState = isCollapsed
+              ? orderedGroups.reduce<CollapsedActivityState>(
+                (state, group) => mergeCollapsedActivityStates(state, getSessionNodesActivityState(group.sessions, {
+                  serverId: projectServerId,
+                  fallbackDirectory: group.directory,
+                  activeSessionKeys: props.activeActivitySessionKeys,
+                  unreadSessionIds: props.unreadActivitySessionIds,
+                  includeUnreadSubtasks: props.notifyOnSubtasks,
+                })),
+                null,
+              )
+              : null;
             const rootGroup = orderedGroups.find((group) => group.isMain) ?? null;
             const nestedGroups = rootGroup
               ? orderedGroups.filter((group) => group.id !== rootGroup.id)
@@ -297,13 +371,13 @@ export function SidebarProjectsList(props: Props): React.ReactNode {
               props.mobileVariant ? (
                 <>
                   {rootGroup
-                    ? props.renderGroupSessions(rootGroup, `${projectKey}:${rootGroup.id}`, projectKey, nestedGroups.length === 0)
+                    ? props.renderGroupSessions(rootGroup, `${projectKey}:${rootGroup.id}`, projectKey, nestedGroups.length === 0, null, false, projectServerId)
                     : null}
                   {nestedGroups.map((group) => {
                     const groupKey = `${projectKey}:${group.id}`;
                     return (
                       <React.Fragment key={group.id}>
-                        {props.renderGroupSessions(group, groupKey, projectKey, false, null)}
+                        {props.renderGroupSessions(group, groupKey, projectKey, false, null, false, projectServerId)}
                       </React.Fragment>
                     );
                   })}
@@ -328,13 +402,13 @@ export function SidebarProjectsList(props: Props): React.ReactNode {
                     });
                   }}
                 >
-                  {rootGroup ? props.renderGroupSessions(rootGroup, `${projectKey}:${rootGroup.id}`, projectKey, nestedGroups.length === 0) : null}
+                  {rootGroup ? props.renderGroupSessions(rootGroup, `${projectKey}:${rootGroup.id}`, projectKey, nestedGroups.length === 0, null, false, projectServerId) : null}
                   <SortableContext items={nestedGroups.map((group) => group.id)} strategy={verticalListSortingStrategy}>
                     {nestedGroups.map((group) => {
                       const groupKey = `${projectKey}:${group.id}`;
                       return (
                         <SortableGroupItem key={group.id} id={group.id} disabled={props.isInlineEditing}>
-                          {(dragHandleProps) => props.renderGroupSessions(group, groupKey, projectKey, false, dragHandleProps)}
+                          {(dragHandleProps) => props.renderGroupSessions(group, groupKey, projectKey, false, dragHandleProps, false, projectServerId)}
                         </SortableGroupItem>
                       );
                     })}
@@ -367,6 +441,7 @@ export function SidebarProjectsList(props: Props): React.ReactNode {
                 serverId={project.serverId}
                 serverHealthStatus={project.serverId ? serverRegistry.get(project.serverId)?.healthStatus ?? null : undefined}
                 unavailable={project.unavailable}
+                collapsedActivityState={collapsedActivityState}
                 onToggle={() => props.toggleProject(projectKey)}
                 onNewSession={() => {
                   if (projectKey !== props.activeProjectId) props.setActiveProjectIdOnly(projectKey);
@@ -439,5 +514,19 @@ export function SidebarProjectsList(props: Props): React.ReactNode {
       )}
       {props.bottomContent}
     </ScrollableOverlay>
+      {enableStickyFade && (leadingProject || props.hasLeadingActivitySections) ? (
+        <div
+          className="oc-sticky-fade-overlay pointer-events-none absolute inset-x-0 top-0 z-30 flex items-center gap-1.5 py-1 pl-4 pr-5"
+          aria-hidden="true"
+        >
+          <Icon name={leadingProject ? 'folder' : 'history'} className="size-3.5 shrink-0 text-muted-foreground/80" />
+          <span className="truncate text-[14px] font-normal lowercase text-foreground">
+            {leadingProject && leadingProjectLabel
+              ? leadingProjectLabel
+              : t('sessions.sidebar.activity.recentTitle')}
+          </span>
+        </div>
+      ) : null}
+    </div>
   );
 }

@@ -9,7 +9,11 @@ import { formatDirectoryName, cn } from '@/lib/utils';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { countDockBadgeChats, useDesktopDockUnreadBadge } from '@/sync/desktop-dock-badge';
 import { useNotificationStore } from '@/sync/notification-store';
-import { useAllServersLiveSessions, useAllServersSessionStatuses } from '@/sync/multi-server-hooks';
+import {
+  useAllServersActiveSessionKeys,
+  useAllServersLiveSessions,
+  useAllServersSessionStatuses,
+} from '@/sync/multi-server-hooks';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useSync } from '@/sync/use-sync';
 import { useSessionMessagesRenderable } from '@/sync/sync-context';
@@ -317,6 +321,10 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   const addActiveNowSessionToStore = useActiveNowStore((state) => state.addSession);
   const pruneActiveNowEntriesInStore = useActiveNowStore((state) => state.prune);
   const sessionUnreadCounts = useNotificationStore((state) => state.index.session.unseenCount);
+  const unreadActivitySessionIds = React.useMemo(
+    () => new Set(Object.entries(sessionUnreadCounts).filter(([, count]) => count > 0).map(([id]) => id)),
+    [sessionUnreadCounts],
+  );
   const [collapsedProjects, setCollapsedProjects] = React.useState<Set<string>>(
     () => readInitialCollapsedProjects(safeStorage, useProjectsStore.getState().projects),
   );
@@ -532,6 +540,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
   const sync = useSync();
   const liveSessions = useAllServersLiveSessions({ enabled: sidebarActive });
   const liveSessionStatuses = useAllServersSessionStatuses({ enabled: sidebarActive });
+  const activeActivitySessionKeys = useAllServersActiveSessionKeys({ enabled: sidebarActive });
   const hasLoadedGlobalSessions = useGlobalSessionsStore((state) => state.hasLoaded);
   const isCompleteSessionSnapshot = useGlobalSessionsStore((state) => state.isCompleteSnapshot);
   const isScopeSnapshotComplete = useGlobalSessionsStore((state) => state.isScopeSnapshotComplete);
@@ -2247,7 +2256,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
   }, [prLookup.displayKeyByLookupKey, prVisualSummaryMap]);
 
   const renderGroupSessions = React.useCallback(
-    (group: SessionGroup, groupKey: string, projectId?: string | null, hideGroupLabel?: boolean, dragHandleProps?: SortableDragHandleProps | null, compactBodyPadding?: boolean) => (
+    (group: SessionGroup, groupKey: string, projectId?: string | null, hideGroupLabel?: boolean, dragHandleProps?: SortableDragHandleProps | null, compactBodyPadding?: boolean, serverId?: string) => (
       <SessionGroupSection
         group={group}
         groupKey={groupKey}
@@ -2291,6 +2300,10 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
         prVisualStateByDirectoryBranch={prVisualStateByDirectoryBranch}
         onToggleCollapsedGroup={(key) => toggleCollapsedGroup(key, group, projectId)}
         dragHandleProps={dragHandleProps}
+        serverId={serverId ?? (projectId ? serverIdByProjectId.get(projectId) : null) ?? DEFAULT_SERVER_ID}
+        activeActivitySessionKeys={activeActivitySessionKeys}
+        unreadActivitySessionIds={unreadActivitySessionIds}
+        notifyOnSubtasks={notifyOnSubtasks}
       />
     ),
     [
@@ -2327,6 +2340,10 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
       sessionOrderIndex,
       prVisualStateByDirectoryBranch,
       toggleCollapsedGroup,
+      serverIdByProjectId,
+      activeActivitySessionKeys,
+      unreadActivitySessionIds,
+      notifyOnSubtasks,
     ],
   );
 
@@ -2712,6 +2729,10 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
         emptyState={emptyState}
         searchEmptyState={searchEmptyState}
         renderGroupSessions={renderGroupSessions}
+        activeActivitySessionKeys={activeActivitySessionKeys}
+        unreadActivitySessionIds={unreadActivitySessionIds}
+        notifyOnSubtasks={notifyOnSubtasks}
+        hasLeadingActivitySections={sidebarActivitySections.length > 0}
         homeDirectory={homeDirectory}
         collapsedProjects={collapsedProjects}
         hideDirectoryControls={hideDirectoryControls}

@@ -20,6 +20,8 @@ import { useRemoteInstancesStore } from '@/stores/useRemoteInstancesStore';
 import { resolveInstanceLabel, type DesktopSshInstanceStatus, type DesktopSshPhase } from '@/lib/desktopSsh';
 import { serverRegistry, type ServerConnection } from '@/lib/opencode/server-registry';
 import type { RemoteInstanceStatus } from '@/lib/remote-instances/types';
+import { CollapsedActivityIndicator } from './CollapsedActivityIndicator';
+import type { CollapsedActivityState } from './collapsedActivityState';
 
 export interface SortableProjectItemProps {
   id: string;
@@ -61,6 +63,7 @@ export interface SortableProjectItemProps {
   serverId?: string;
   serverHealthStatus?: 'healthy' | 'unhealthy' | 'connecting' | null;
   unavailable?: boolean;
+  collapsedActivityState?: CollapsedActivityState;
 }
 
 export type SortableDragHandleProps = {
@@ -414,6 +417,7 @@ const ProjectItemInner: React.FC<SortableProjectItemProps> = ({
   serverId,
   serverHealthStatus,
   unavailable,
+  collapsedActivityState,
 }) => {
   const { t } = useI18n();
   const { currentTheme } = useThemeSystem();
@@ -566,6 +570,13 @@ const ProjectItemInner: React.FC<SortableProjectItemProps> = ({
                     )}>
                       {projectLabel}
                     </span>
+                    {isCollapsed && collapsedActivityState ? (
+                      <CollapsedActivityIndicator
+                        state={collapsedActivityState}
+                        activeLabel={t('sessions.sidebar.session.status.active')}
+                        unreadLabel={t('sessions.sidebar.session.status.unread')}
+                      />
+                    ) : null}
                     {serverId && (
                       <span className="inline-flex items-center gap-1 flex-shrink-0">
                         {unavailable ? (

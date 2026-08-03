@@ -35,6 +35,12 @@ import {
   shouldRenderAllUnpinnedSessions,
   shouldVirtualizeSessionGroupUnpinned,
 } from './sessionGroupVirtualization';
+import { CollapsedActivityIndicator } from './CollapsedActivityIndicator';
+import {
+  getSessionNodesActivityState,
+  mergeCollapsedActivityStates,
+  type CollapsedActivityState,
+} from './collapsedActivityState';
 
 const SESSION_GROUP_SHOW_MORE_INCREMENT = 7;
 
@@ -120,6 +126,10 @@ type Props = {
   onToggleCollapsedGroup: (groupKey: string) => void;
   dragHandleProps?: SortableDragHandleProps | null;
   compactBodyPadding?: boolean;
+  serverId: string;
+  activeActivitySessionKeys: ReadonlySet<string>;
+  unreadActivitySessionIds: ReadonlySet<string>;
+  notifyOnSubtasks: boolean;
 };
 
 function SessionGroupSectionImpl(props: Props): React.ReactNode {
@@ -166,6 +176,10 @@ function SessionGroupSectionImpl(props: Props): React.ReactNode {
     onToggleCollapsedGroup,
     dragHandleProps,
     compactBodyPadding = false,
+    serverId,
+    activeActivitySessionKeys,
+    unreadActivitySessionIds,
+    notifyOnSubtasks,
   } = props;
 
   const compareSessionNodes = React.useCallback((a: SessionNode, b: SessionNode) => {
@@ -307,6 +321,46 @@ function SessionGroupSectionImpl(props: Props): React.ReactNode {
   );
   const ungroupedSessions = React.useMemo(() => sourceGroupNodes.filter((node) => !sessionIdsInFolders.has(node.session.id)), [sourceGroupNodes, sessionIdsInFolders]);
   const rootFolders = React.useMemo(() => isSingleWorktreeArchive ? [] : allFoldersForGroup.filter(({ folder }) => !folder.parentId), [allFoldersForGroup, isSingleWorktreeArchive]);
+  const folderActivityStateById = React.useMemo(() => {
+    const result = new Map<string, CollapsedActivityState>();
+    const entriesById = new Map(allFoldersForGroup.map((entry) => [entry.folder.id, entry]));
+    const childIdsByParent = new Map<string, string[]>();
+    for (const { folder } of allFoldersForGroup) {
+      if (!folder.parentId) continue;
+      childIdsByParent.set(folder.parentId, [...(childIdsByParent.get(folder.parentId) ?? []), folder.id]);
+    }
+    const visit = (folderId: string, visiting: Set<string>): CollapsedActivityState => {
+      const cached = result.get(folderId);
+      if (cached !== undefined) return cached;
+      if (visiting.has(folderId)) return null;
+      visiting.add(folderId);
+      const entry = entriesById.get(folderId);
+      let state = entry ? getSessionNodesActivityState(entry.nodes, {
+        serverId,
+        fallbackDirectory: entry.scopeDirectory ?? group.directory,
+        activeSessionKeys: activeActivitySessionKeys,
+        unreadSessionIds: unreadActivitySessionIds,
+        includeUnreadSubtasks: notifyOnSubtasks,
+      }) : null;
+      for (const childId of childIdsByParent.get(folderId) ?? []) {
+        state = mergeCollapsedActivityStates(state, visit(childId, visiting));
+        if (state === 'active') break;
+      }
+      visiting.delete(folderId);
+      result.set(folderId, state);
+      return state;
+    };
+    for (const { folder } of allFoldersForGroup) visit(folder.id, new Set());
+    return result;
+  }, [activeActivitySessionKeys, allFoldersForGroup, group.directory, notifyOnSubtasks, serverId, unreadActivitySessionIds]);
+
+  const groupActivityState = isCollapsed ? getSessionNodesActivityState(sourceGroupNodes, {
+    serverId,
+    fallbackDirectory: group.directory,
+    activeSessionKeys: activeActivitySessionKeys,
+    unreadSessionIds: unreadActivitySessionIds,
+    includeUnreadSubtasks: notifyOnSubtasks,
+  }) : null;
 
   const sessionGroupMinVisible = useUIStore((state) => state.sessionGroupMinVisible);
   const sessionGroupRecentHours = useUIStore((state) => state.sessionGroupRecentHours);
@@ -633,6 +687,7 @@ function SessionGroupSectionImpl(props: Props): React.ReactNode {
     };
     const folderSessionsForDelete = group.isArchivedBucket ? collectFolderSessions(folder.id) : [];
 
+    const isFolderCollapsed = hasSessionSearchQuery ? false : collapsedFolderIds.has(folder.id);
     return (
       <DroppableFolderWrapper key={folder.id} folderId={folder.id}>
         {(droppableRef, isDropTarget) => (
@@ -640,7 +695,8 @@ function SessionGroupSectionImpl(props: Props): React.ReactNode {
             folder={folder}
             sessions={nodes}
             subFolderItems={subFolderItems}
-            isCollapsed={hasSessionSearchQuery ? false : collapsedFolderIds.has(folder.id)}
+            isCollapsed={isFolderCollapsed}
+            collapsedActivityState={isFolderCollapsed ? (folderActivityStateById.get(folder.id) ?? null) : null}
             onToggle={() => toggleFolderCollapse(folder.id)}
             onRename={(name) => {
               renameFolder(scopeKey, folder.id, name);
@@ -928,6 +984,13 @@ function SessionGroupSectionImpl(props: Props): React.ReactNode {
                   <span className="min-w-0 flex-1 truncate">{renderHighlightedText(group.label, normalizedSessionSearchQuery)}</span>
                 </span>
               )}
+              {groupActivityState ? (
+                <CollapsedActivityIndicator
+                  state={groupActivityState}
+                  activeLabel={t('sessions.sidebar.session.status.active')}
+                  unreadLabel={t('sessions.sidebar.session.status.unread')}
+                />
+              ) : null}
             </p>
             {showBranchSubtitle && statusLine ? (
               <span className="inline-flex min-w-0 items-center gap-1.5 leading-tight">

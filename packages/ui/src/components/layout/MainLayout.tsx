@@ -27,6 +27,8 @@ import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
 import { syncSessionSwitcherWithDrawer } from '@/components/layout/mobileLeftDrawerSync';
 import { BREAKPOINTS } from '@/lib/device';
 import { isCapacitorApp, isIPadApp } from '@/lib/platform';
+import { useLastSessionRestore } from '@/hooks/useLastSessionRestore';
+import { MobileWorkspaceDrawerContent } from './MobileWorkspaceDrawerContent';
 
 import { ChatView } from '@/components/views/ChatView';
 
@@ -101,6 +103,7 @@ export const MainLayout: React.FC = () => {
     // iPad Capacitor: persistent shared SessionSidebar (not MobileSessionsSheet).
     const useIpadSplitLayout = isIPadApp() && (screenWidth >= BREAKPOINTS.md || ipadLandscape);
     const useMobileDrawers = isMobile && !useIpadSplitLayout;
+    useLastSessionRestore(useMobileDrawers && isCapacitorApp());
 
     React.useEffect(() => {
       if (useIpadSplitLayout) {
@@ -110,8 +113,8 @@ export const MainLayout: React.FC = () => {
 
     // Mobile drawer state
     const [mobileLeftDrawerOpen, setMobileLeftDrawerOpen] = React.useState(false);
-    // Lazy-once keep-alive: first open mounts SessionSidebar; later opens reuse the tree.
     const [hasMountedLeftSidebar, setHasMountedLeftSidebar] = React.useState(false);
+    const [hasMountedRightDrawer, setHasMountedRightDrawer] = React.useState(false);
     const mobileRightDrawerOpenRef = React.useRef(false);
     const initialDrawerWidthRef = React.useRef(typeof window === 'undefined' ? 0 : window.innerWidth);
 
@@ -153,6 +156,7 @@ export const MainLayout: React.FC = () => {
     useEffect(() => {
         if (!useMobileDrawers) return;
         mobileRightDrawerOpenRef.current = isRightSidebarOpen;
+        if (isRightSidebarOpen) setHasMountedRightDrawer(true);
         const targetX = isRightSidebarOpen ? 0 : rightDrawerWidth.current;
         animate(rightDrawerX, targetX, {
             type: "spring",
@@ -470,10 +474,11 @@ export const MainLayout: React.FC = () => {
                         aria-hidden={!isRightSidebarOpen}
                     >
                         <div className="h-full overflow-hidden flex flex-col bg-background shadow-none drawer-safe-area" data-page-scroll-lock="true">
-                            {isRightSidebarOpen ? (
-                              <ErrorBoundary>
-                                  <React.Suspense fallback={null}><GitView /></React.Suspense>
-                              </ErrorBoundary>
+                            {hasMountedRightDrawer ? (
+                              <MobileWorkspaceDrawerContent
+                                open={isRightSidebarOpen}
+                                onClose={() => setRightSidebarOpen(false)}
+                              />
                             ) : null}
                         </div>
                     </motion.aside>

@@ -270,14 +270,16 @@ button,
   mask-image: linear-gradient(
     to bottom,
     transparent 0%,
-    #000 var(--dynamic-shadow-size),
+    transparent var(--scroll-shadow-top-clear-size, 0px),
+    #000 var(--scroll-shadow-top-size, var(--dynamic-shadow-size)),
     #000 calc(100% - var(--dynamic-shadow-size)),
     transparent 100%
   );
   -webkit-mask-image: linear-gradient(
     to bottom,
     transparent 0%,
-    #000 var(--dynamic-shadow-size),
+    transparent var(--scroll-shadow-top-clear-size, 0px),
+    #000 var(--scroll-shadow-top-size, var(--dynamic-shadow-size)),
     #000 calc(100% - var(--dynamic-shadow-size)),
     transparent 100%
   );
@@ -287,15 +289,26 @@ button,
   mask-image: linear-gradient(
     to bottom,
     transparent 0%,
-    #000 var(--dynamic-shadow-size),
+    transparent var(--scroll-shadow-top-clear-size, 0px),
+    #000 var(--scroll-shadow-top-size, var(--dynamic-shadow-size)),
     #000 100%
   );
   -webkit-mask-image: linear-gradient(
     to bottom,
     transparent 0%,
-    #000 var(--dynamic-shadow-size),
+    transparent var(--scroll-shadow-top-clear-size, 0px),
+    #000 var(--scroll-shadow-top-size, var(--dynamic-shadow-size)),
     #000 100%
   );
+}
+
+.oc-sticky-fade-overlay {
+  opacity: 0;
+}
+
+.oc-sticky-fade-root:has(.oc-sidebar-scroller[data-top-scroll="true"]) .oc-sticky-fade-overlay,
+.oc-sticky-fade-root:has(.oc-sidebar-scroller[data-top-bottom-scroll="true"]) .oc-sticky-fade-overlay {
+  opacity: 1;
 }
 
 [data-scroll-shadow="true"][data-orientation="vertical"][data-bottom-scroll="true"] {

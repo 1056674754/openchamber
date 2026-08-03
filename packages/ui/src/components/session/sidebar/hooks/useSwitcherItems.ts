@@ -22,6 +22,7 @@ const MAX_PARENT_SESSIONS = 7;
 
 type SwitcherItemsOptions = {
   scopeProjectId?: string | null;
+  maxParents?: number;
 };
 
 const normalize = (value: string | null | undefined): string | null => {
@@ -40,7 +41,7 @@ const formatProjectLabel = (project: { label?: string | null; path: string } | n
 };
 
 export const useSwitcherItems = (enabled: boolean, options: SwitcherItemsOptions = {}): SwitcherItem[] => {
-  const { scopeProjectId = null } = options;
+  const { scopeProjectId = null, maxParents = MAX_PARENT_SESSIONS } = options;
   const activeSessions = useGlobalSessionsStore((state) => state.activeSessions);
   const projects = useProjectsStore((state) => state.projects);
   const pinnedSessionIds = useSessionPinnedStore((state) => state.ids);
@@ -93,7 +94,7 @@ export const useSwitcherItems = (enabled: boolean, options: SwitcherItemsOptions
         return findProjectForDirectory(directory)?.id === scopeProjectId;
       })
       .sort((a, b) => compareSessionsByPinnedAndTime(a, b, pinnedSessionIds))
-      .slice(0, MAX_PARENT_SESSIONS);
+      .slice(0, maxParents);
 
     const buildNode = (session: Session): SessionNode => {
       const childSessions = childrenByParent.get(session.id) ?? [];
@@ -119,7 +120,7 @@ export const useSwitcherItems = (enabled: boolean, options: SwitcherItemsOptions
         },
       };
     });
-  }, [activeSessions, branchesByDirectory, enabled, findProjectForDirectory, pinnedSessionIds, scopeProjectId]);
+  }, [activeSessions, branchesByDirectory, enabled, findProjectForDirectory, maxParents, pinnedSessionIds, scopeProjectId]);
 
   return items;
 };

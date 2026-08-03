@@ -29,8 +29,10 @@ export const useStickyHeader = (args: StickyHeaderArgs) => {
     }
 
     const observer = new IntersectionObserver(([entry]) => {
-      setIsStuck(entry.intersectionRatio < 1);
-    }, { threshold: 1 });
+      const root = sentinel.closest<HTMLElement>('.oc-sidebar-scroller');
+      const rootTop = entry.rootBounds?.top ?? root?.getBoundingClientRect().top ?? 0;
+      setIsStuck(!entry.isIntersecting && entry.boundingClientRect.top < rootTop);
+    }, { root: sentinel.closest<HTMLElement>('.oc-sidebar-scroller'), threshold: 0 });
 
     observer.observe(sentinel);
     return () => observer.disconnect();
@@ -55,6 +57,10 @@ export const useStickyProjectHeaders = (args: Args): void => {
       return;
     }
 
+    const firstSentinel = Array.from(projectHeaderSentinelRefs.current.values()).find((element) => element !== null);
+    const root = firstSentinel?.closest<HTMLElement>('.oc-sidebar-scroller') ?? null;
+    if (!root) return;
+
     const observer = new IntersectionObserver(
       (entries) => {
         const store = useStickyHeadersStore.getState();
@@ -64,10 +70,11 @@ export const useStickyProjectHeaders = (args: Args): void => {
             return;
           }
 
-          store.setStuck(projectId, !entry.isIntersecting);
+          const rootTop = entry.rootBounds?.top ?? root.getBoundingClientRect().top;
+          store.setStuck(projectId, !entry.isIntersecting && entry.boundingClientRect.top < rootTop);
         });
       },
-      { threshold: 0 },
+      { root, threshold: 0 },
     );
 
     projectHeaderSentinelRefs.current.forEach((el) => {

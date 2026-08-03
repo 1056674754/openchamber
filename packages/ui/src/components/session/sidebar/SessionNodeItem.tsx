@@ -49,6 +49,7 @@ import { FusionIcon } from '@/components/icons/FusionIcon';
 import { Icon } from "@/components/icon/Icon";
 import type { IconName } from "@/components/icon/icons";
 import { startSessionTreeWorktreeMove, useIsSessionWorktreeMovePending } from '@/lib/worktrees/sessionWorktreeMove';
+import { MobileSwipeActionsRow } from './MobileSwipeActionsRow';
 import { getSessionGoal } from '@/lib/sessionGoalMetadata';
 import { sessionGoalStatusColor, sessionGoalStatusLabelKey } from '@/lib/sessionGoalPresentation';
 import type {
@@ -1316,6 +1317,38 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
 
   return (
     <React.Fragment key={session.id}>
+      <MobileSwipeActionsRow
+        enabled={mobileVariant && !archivedBucket && !isGlobalPinnedContext}
+        actionsWidth={144}
+        actions={(
+          <>
+            <button
+              type="button"
+              className="flex w-12 items-center justify-center bg-interactive-hover text-foreground"
+              aria-label={t('sessions.sidebar.session.menu.rename')}
+              onClick={() => onRenameSession(session.id, sessionTitle)}
+            >
+              <Icon name="pencil-ai" className="size-4" />
+            </button>
+            <button
+              type="button"
+              className="flex w-12 items-center justify-center bg-status-warning text-background"
+              aria-label={t('sessions.sidebar.bulkActions.archive')}
+              onClick={() => handleDeleteSession(session, { archivedBucket: false })}
+            >
+              <Icon name="archive" className="size-4" />
+            </button>
+            <button
+              type="button"
+              className="flex w-12 items-center justify-center bg-status-error text-background"
+              aria-label={t('sessions.sidebar.bulkActions.delete')}
+              onClick={() => handleDeleteSession(session, { archivedBucket: true })}
+            >
+              <Icon name="delete-bin" className="size-4" />
+            </button>
+          </>
+        )}
+      >
       <DraggableSessionRow sessionId={session.id} sessionDirectory={sessionDirectory ?? null} sessionTitle={sessionTitle} disabled={mobileVariant || isGlobalPinnedContext || renderContext === 'recent'}>
         <div
           data-session-row={session.id}
@@ -1570,6 +1603,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
           </DropdownMenu>
         </div>
       </DraggableSessionRow>
+      </MobileSwipeActionsRow>
       {hasChildren && isExpanded
         ? node.children.map((child) => {
           const parentExtras = renderExtras as SessionNodeRenderExtras | undefined;
