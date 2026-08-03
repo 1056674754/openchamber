@@ -24,8 +24,10 @@ import {
     isDesktopShell,
     isVSCodeRuntime,
     isWebRuntime,
+    supportsDesktopWindowControlsStyle,
     usesFramelessElectronChrome,
     type DesktopWindowControlsPosition,
+    type DesktopWindowControlsStyle,
 } from '@/lib/desktop';
 import { useDeviceInfo } from '@/lib/device';
 import { usePwaDetection } from '@/hooks/usePwaDetection';
@@ -69,6 +71,17 @@ const WINDOW_CONTROLS_POSITION_OPTIONS: Array<{ value: DesktopWindowControlsPosi
     {
         value: 'right',
         labelKey: 'settings.openchamber.desktopNetwork.option.windowControlsRight',
+    },
+];
+
+const WINDOW_CONTROLS_STYLE_OPTIONS: Array<{ value: DesktopWindowControlsStyle; labelKey: string }> = [
+    {
+        value: 'classic',
+        labelKey: 'settings.openchamber.desktopNetwork.option.windowControlsClassic',
+    },
+    {
+        value: 'traffic-lights',
+        labelKey: 'settings.openchamber.desktopNetwork.option.windowControlsTrafficLights',
     },
 ];
 
@@ -251,7 +264,7 @@ const normalizeUserMessageRenderingMode = (mode: unknown): 'markdown' | 'plain' 
     return mode === 'markdown' ? 'markdown' : 'plain';
 };
 
-export type VisibleSetting = 'theme' | 'windowControlsPosition' | 'dockBadge' | 'pwaInstallName' | 'pwaOrientation' | 'mobileKeyboardMode' | 'timeFormat' | 'weekStart' | 'fontSize' | 'terminalFontSize' | 'editorFontSize' | 'spacing' | 'inputBarOffset' | 'userMessageRendering' | 'chatRenderMode' | 'messageTransport' | 'activityRenderMode' | 'collapsibleUserMessages' | 'stickyUserHeader' | 'promptNavigatorEnabled' | 'wideChatLayout' | 'splitAssistantMessageActions' | 'draftStarters' | 'subagentPrompting' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'reasoning' | 'showToolFileIcons' | 'expandedTools' | 'queueMode' | 'terminalQuickKeys' | 'fileEditorKeymap' | 'persistDraft' | 'inputSpellcheck' | 'reportUsage' | 'multiRun' | 'sessionGoal' | 'sessionAssist';
+export type VisibleSetting = 'theme' | 'windowControlsPosition' | 'windowControlsStyle' | 'dockBadge' | 'pwaInstallName' | 'pwaOrientation' | 'mobileKeyboardMode' | 'timeFormat' | 'weekStart' | 'fontSize' | 'terminalFontSize' | 'editorFontSize' | 'spacing' | 'inputBarOffset' | 'userMessageRendering' | 'chatRenderMode' | 'messageTransport' | 'activityRenderMode' | 'collapsibleUserMessages' | 'stickyUserHeader' | 'promptNavigatorEnabled' | 'wideChatLayout' | 'splitAssistantMessageActions' | 'draftStarters' | 'subagentPrompting' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'reasoning' | 'showToolFileIcons' | 'expandedTools' | 'queueMode' | 'terminalQuickKeys' | 'fileEditorKeymap' | 'autoSaveEnabled' | 'persistDraft' | 'inputSpellcheck' | 'reportUsage' | 'multiRun' | 'sessionGoal' | 'sessionAssist';
 
 interface OpenChamberVisualSettingsProps {
     /** Which settings to show. If undefined, shows all. */
@@ -313,6 +326,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const setShowTerminalQuickKeysOnDesktop = useUIStore(state => state.setShowTerminalQuickKeysOnDesktop);
     const fileEditorKeymap = useUIStore(state => state.fileEditorKeymap);
     const setFileEditorKeymap = useUIStore(state => state.setFileEditorKeymap);
+    const autoSaveEnabled = useUIStore(state => state.autoSaveEnabled);
+    const setAutoSaveEnabled = useUIStore(state => state.setAutoSaveEnabled);
     const followUpBehavior = useMessageQueueStore(state => state.followUpBehavior);
     const setFollowUpBehavior = useMessageQueueStore(state => state.setFollowUpBehavior);
     const persistChatDraft = useUIStore(state => state.persistChatDraft);
@@ -343,6 +358,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const setDockBadgeEnabled = useUIStore(state => state.setDockBadgeEnabled);
     const desktopWindowControlsPosition = useUIStore(state => state.desktopWindowControlsPosition);
     const setDesktopWindowControlsPosition = useUIStore(state => state.setDesktopWindowControlsPosition);
+    const desktopWindowControlsStyle = useUIStore(state => state.desktopWindowControlsStyle);
+    const setDesktopWindowControlsStyle = useUIStore(state => state.setDesktopWindowControlsStyle);
     const messageStreamTransport = useConfigStore((state) => state.settingsMessageStreamTransport);
     const setMessageStreamTransport = useConfigStore((state) => state.setSettingsMessageStreamTransport);
     const isSettingsDialogOpen = useUIStore(state => state.isSettingsDialogOpen);
@@ -382,6 +399,11 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         setDesktopWindowControlsPosition(value);
         void updateDesktopSettings({ desktopWindowControlsPosition: value });
     }, [setDesktopWindowControlsPosition]);
+
+    const handleWindowControlsStyleChange = React.useCallback((value: DesktopWindowControlsStyle) => {
+        setDesktopWindowControlsStyle(value);
+        void updateDesktopSettings({ desktopWindowControlsStyle: value });
+    }, [setDesktopWindowControlsStyle]);
 
     const handleMultiRunEnabledChange = React.useCallback((enabled: boolean) => {
         setMultiRunEnabled(enabled);
@@ -572,12 +594,13 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const isVSCode = isVSCodeRuntime();
     const hasThemeSettings = shouldShow('theme') && !isVSCode;
     const showWindowControlsPositionSetting = shouldShow('windowControlsPosition') && usesFramelessElectronChrome();
+    const showWindowControlsStyleSetting = shouldShow('windowControlsStyle') && supportsDesktopWindowControlsStyle();
     const hasLocalizationSettings = shouldShow('theme') || shouldShow('timeFormat') || shouldShow('weekStart');
     const hasAppearanceSettings = isVSCode
         ? hasLocalizationSettings
-        : (shouldShow('theme') || showWindowControlsPositionSetting || shouldShow('dockBadge') || shouldShow('pwaInstallName') || shouldShow('pwaOrientation') || shouldShow('timeFormat') || shouldShow('weekStart'));
+        : (shouldShow('theme') || showWindowControlsPositionSetting || showWindowControlsStyleSetting || shouldShow('dockBadge') || shouldShow('pwaInstallName') || shouldShow('pwaOrientation') || shouldShow('timeFormat') || shouldShow('weekStart'));
     const hasLayoutSettings = shouldShow('fontSize') || shouldShow('terminalFontSize') || shouldShow('editorFontSize') || shouldShow('spacing') || shouldShow('inputBarOffset');
-    const hasNavigationSettings = (shouldShow('terminalQuickKeys') && !isMobile) || shouldShow('fileEditorKeymap');
+    const hasNavigationSettings = (shouldShow('terminalQuickKeys') && !isMobile) || shouldShow('fileEditorKeymap') || shouldShow('autoSaveEnabled');
     const hasBehaviorSettings = shouldShow('userMessageRendering')
         || shouldShow('chatRenderMode')
         || shouldShow('messageTransport')
@@ -890,6 +913,34 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                 aria-pressed={desktopWindowControlsPosition === option.value}
                                                 className="!font-normal"
                                                 onClick={() => handleWindowControlsPositionChange(option.value)}
+                                            >
+                                                {tUnsafe(option.labelKey)}
+                                            </Button>
+                                        ))}
+                                    </div>
+                                </div>
+                            </section>
+                        )}
+
+                        {showWindowControlsStyleSetting && (
+                            <section className="px-2 pb-2 pt-0 space-y-2" data-settings-item="appearance.desktop-window-controls-style">
+                                <div className="flex min-w-0 flex-col gap-1.5">
+                                    <span className="typography-ui-header font-medium text-foreground">
+                                        {t('settings.openchamber.desktopNetwork.field.windowControlsStyle')}
+                                    </span>
+                                    <div
+                                        className="flex flex-wrap items-center gap-1"
+                                        role="group"
+                                        aria-label={t('settings.openchamber.desktopNetwork.field.windowControlsStyleAria')}
+                                    >
+                                        {WINDOW_CONTROLS_STYLE_OPTIONS.map((option) => (
+                                            <Button
+                                                key={option.value}
+                                                variant="chip"
+                                                size="xs"
+                                                aria-pressed={desktopWindowControlsStyle === option.value}
+                                                className="!font-normal"
+                                                onClick={() => handleWindowControlsStyleChange(option.value)}
                                             >
                                                 {tUnsafe(option.labelKey)}
                                             </Button>
@@ -1341,6 +1392,38 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                     <div className="space-y-3">
                         <section className="px-2 pb-2 pt-0">
                             <h4 className="typography-ui-header font-medium text-foreground">{t('settings.openchamber.visual.section.navigation')}</h4>
+                            {shouldShow('autoSaveEnabled') && (
+                                <div
+                                    className="group flex cursor-pointer items-center gap-2 py-1.5"
+                                    role="button"
+                                    tabIndex={0}
+                                    aria-pressed={autoSaveEnabled}
+                                    onClick={() => setAutoSaveEnabled(!autoSaveEnabled)}
+                                    onKeyDown={(event) => {
+                                        if (event.key === ' ' || event.key === 'Enter') {
+                                            event.preventDefault();
+                                            setAutoSaveEnabled(!autoSaveEnabled);
+                                        }
+                                    }}
+                                >
+                                    <Checkbox
+                                        checked={autoSaveEnabled}
+                                        onChange={setAutoSaveEnabled}
+                                        ariaLabel={t('settings.openchamber.visual.field.autoSaveEnabled')}
+                                    />
+                                    <div className="flex min-w-0 items-center gap-1.5">
+                                        <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.autoSaveEnabled')}</span>
+                                        <Tooltip>
+                                            <TooltipTrigger asChild>
+                                                <Icon name="information" className="h-3.5 w-3.5 cursor-help text-muted-foreground/60" />
+                                            </TooltipTrigger>
+                                            <TooltipContent sideOffset={8} className="max-w-xs">
+                                                {t('settings.openchamber.visual.field.autoSaveEnabledTooltip')}
+                                            </TooltipContent>
+                                        </Tooltip>
+                                    </div>
+                                </div>
+                            )}
                             {shouldShow('fileEditorKeymap') && (
                                 <div className="flex flex-col gap-2 py-1.5 sm:flex-row sm:items-start sm:gap-8">
                                     <span className="typography-ui-label text-foreground sm:w-56 shrink-0">

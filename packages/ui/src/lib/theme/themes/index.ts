@@ -5,16 +5,22 @@ import flexokiLightRaw from './flexoki-light.json';
 import flexokiDarkRaw from './flexoki-dark.json';
 import openchamberLightRaw from './fields-of-the-shire-light.json';
 import openchamberDarkRaw from './fields-of-the-shire-dark.json';
+import openchamberHybridLightRaw from './openchamber-hybrid-light.json';
+import openchamberHybridDarkRaw from './openchamber-hybrid-dark.json';
 
 export const flexokiLightTheme = withPrColors(flexokiLightRaw as Theme);
 export const flexokiDarkTheme = withPrColors(flexokiDarkRaw as Theme);
 export const openchamberLightTheme = withPrColors(openchamberLightRaw as Theme);
 export const openchamberDarkTheme = withPrColors(openchamberDarkRaw as Theme);
+export const openchamberHybridLightTheme = withPrColors(openchamberHybridLightRaw as Theme);
+export const openchamberHybridDarkTheme = withPrColors(openchamberHybridDarkRaw as Theme);
 
-export const DEFAULT_LIGHT_THEME_ID = 'flexoki-light' as const;
-export const DEFAULT_DARK_THEME_ID = 'flexoki-dark' as const;
+export const DEFAULT_LIGHT_THEME_ID = 'openchamber-hybrid-light' as const;
+export const DEFAULT_DARK_THEME_ID = 'openchamber-hybrid-dark' as const;
 
 export const themes: Theme[] = [
+  openchamberHybridLightTheme,
+  openchamberHybridDarkTheme,
   openchamberLightTheme,
   openchamberDarkTheme,
   flexokiLightTheme,
