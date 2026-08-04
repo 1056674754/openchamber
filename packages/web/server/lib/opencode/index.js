@@ -39,6 +39,8 @@ export {
   createSkill,
   updateSkill,
   deleteSkill,
+  renameSkill,
+  isManagedSkillPath,
 } from './skills.js';
 
 export {

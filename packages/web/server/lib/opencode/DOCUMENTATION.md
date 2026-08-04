@@ -372,9 +372,11 @@ Transport-triggered health checks can run more frequently than the periodic moni
 ## Public exports (skill-routes.js)
 - `registerSkillRoutes(app, dependencies)`: registers skills-related routes:
   - Skills config CRUD and metadata under `/api/config/skills*`
+  - Skill rename via `PATCH /api/config/skills/:name` with `{ renameTo }` (directory rename preserves `SKILL.md` body and supporting files; restricted to managed skill roots under `.opencode/skills|skill`, `.claude/skills`, and `.agents/skills`)
   - Skills catalog listing/source pagination, scan, and install routes
   - Supporting skill file read/write/delete routes
-- `GET /api/config/skills` merges OpenCode's skill report with filesystem discovery scoped to the request directory. Each merged skill may include `opencodeSynced`: `true` when OpenCode reported it, `false` when it exists only on disk after a successful OpenCode fetch, and absent when the OpenCode fetch failed so synchronization state is unknown.
+- `GET /api/config/skills` merges OpenCode's skill report with filesystem discovery scoped to the request directory. Each merged skill may include `opencodeSynced`: `true` when OpenCode reported it, `false` when it exists only on disk after a successful OpenCode fetch, and absent when the OpenCode fetch failed so synchronization state is unknown. Each skill also carries an authoritative `renamable` boolean derived from the same managed-root policy used by rename.
+- Directory resolution prefers an explicit request directory, then soft-falls back to the active project / `lastDirectory` (via `resolveProjectDirectory`) so repository-local `.agents/skills` and `.opencode/skills` remain discoverable when the client omits `directory`.
 
 ## Public exports (proxy.js)
 - `registerOpenCodeProxy(app, dependencies)`: registers OpenCode proxy routes and middleware.
