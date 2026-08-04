@@ -206,6 +206,141 @@ describe('remote RPC websocket', () => {
     expect(successes).toEqual(['remote-a']);
   });
 
+  it('routes local requests through the request lane with the classified class', async () => {
+    const socket = new FakeSocket();
+    const laneCalls = [];
+    const releases = [];
+
+    const accept = createRemoteRpcConnectionAcceptor({
+      remoteInstancesRuntime: {
+        getInstanceSync: () => null,
+        isHealthy: () => false,
+        enterRequestLane: async (id, lane) => {
+          laneCalls.push({ id, lane });
+          const release = () => releases.push('released');
+          return release;
+        },
+      },
+      getLocalBaseUrl: () => 'http://127.0.0.1:45173',
+      fetchImpl: async () => new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        statusText: 'OK',
+        headers: { 'content-type': 'application/json' },
+      }),
+      logger: { warn() {} },
+    });
+
+    accept(socket);
+    socket.emit('message', JSON.stringify({
+      type: 'request',
+      id: 'local-ai',
+      target: 'local',
+      method: 'POST',
+      path: '/api/text/session-title-candidates',
+      headers: { 'Content-Type': 'application/json' },
+    }));
+
+    await new Promise((resolve) => setTimeout(resolve, 5));
+
+    expect(laneCalls).toEqual([{ id: 'local', lane: 'ai' }]);
+    expect(releases).toEqual(['released']);
+    expect(socket.sent[1]).toMatchObject({
+      type: 'response',
+      id: 'local-ai',
+      target: 'local',
+      status: 200,
+    });
+  });
+
+  it('prefers an explicit frame class over server-side classification', async () => {
+    const socket = new FakeSocket();
+    const laneCalls = [];
+
+    const accept = createRemoteRpcConnectionAcceptor({
+      remoteInstancesRuntime: {
+        getInstanceSync: () => null,
+        isHealthy: () => false,
+        enterRequestLane: async (id, lane) => {
+          laneCalls.push({ id, lane });
+          return () => {};
+        },
+      },
+      getLocalBaseUrl: () => 'http://127.0.0.1:45173',
+      fetchImpl: async () => new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        statusText: 'OK',
+        headers: { 'content-type': 'application/json' },
+      }),
+      logger: { warn() {} },
+    });
+
+    accept(socket);
+    socket.emit('message', JSON.stringify({
+      type: 'request',
+      id: 'local-override',
+      target: 'local',
+      method: 'GET',
+      path: '/api/fs/list?path=%2Ftmp',
+      class: 'io',
+      headers: { Accept: 'application/json' },
+    }));
+
+    await new Promise((resolve) => setTimeout(resolve, 5));
+
+    expect(laneCalls).toEqual([{ id: 'local', lane: 'io' }]);
+  });
+
+  it('rejects local requests when the request lane is busy', async () => {
+    const socket = new FakeSocket();
+    let fetchCalled = false;
+
+    const accept = createRemoteRpcConnectionAcceptor({
+      remoteInstancesRuntime: {
+        getInstanceSync: () => null,
+        isHealthy: () => false,
+        enterRequestLane: async () => {
+          const error = Object.assign(new Error('lane busy'), {
+            statusCode: 429,
+            code: 'REMOTE_LANE_BUSY',
+            retryAfterMs: 1_000,
+          });
+          throw error;
+        },
+      },
+      getLocalBaseUrl: () => 'http://127.0.0.1:45173',
+      fetchImpl: async () => {
+        fetchCalled = true;
+        return new Response('{}');
+      },
+      logger: { warn() {} },
+    });
+
+    accept(socket);
+    socket.emit('message', JSON.stringify({
+      type: 'request',
+      id: 'local-busy',
+      target: 'local',
+      method: 'GET',
+      path: '/api/fs/list',
+      headers: { Accept: 'application/json' },
+    }));
+
+    await new Promise((resolve) => setTimeout(resolve, 5));
+
+    expect(fetchCalled).toBe(false);
+    expect(socket.sent[1]).toMatchObject({
+      type: 'response',
+      id: 'local-busy',
+      target: 'local',
+      status: 429,
+      statusText: 'lane busy',
+    });
+    expect(decodeBody(socket.sent[1])).toMatchObject({
+      error: 'lane busy',
+      code: 'REMOTE_LANE_BUSY',
+    });
+  });
+
   it('rejects invalid remote RPC paths before calling fetch', async () => {
     const socket = new FakeSocket();
     let fetchCalled = false;

@@ -265,4 +265,49 @@ describe("remote RPC fetch bridge", () => {
     expect(nativeUrl).toBe("/api/global/event")
     expect(FakeWebSocket.instances).toHaveLength(0)
   })
+
+  test("declares the RPC class on request frames", async () => {
+    installBrowserStubs()
+    globalThis.fetch = (async () => new Response("native")) as typeof fetch
+    delete (globalThis as typeof globalThis & { [REMOTE_RPC_GLOBAL_KEY]?: unknown })[REMOTE_RPC_GLOBAL_KEY]
+    installRemoteRpcFetchBridge()
+
+    const responsePromise = globalThis.fetch("/api/remote/remote-a/text/summarize", {
+      method: "POST",
+      body: JSON.stringify({ text: "hello" }),
+    })
+    for (let attempt = 0; attempt < 5 && FakeWebSocket.instances.length === 0; attempt += 1) {
+      await Promise.resolve()
+    }
+    const socket = FakeWebSocket.instances[0]
+    expect(socket).toBeTruthy()
+    socket.emitOpen()
+    await responsePromise
+
+    const frame = socket.sent[0] as { class?: unknown; path?: unknown }
+    expect(frame.path).toBe("/api/text/summarize")
+    expect(frame.class).toBe("ai")
+  })
+
+  test("coalesces concurrent same-path fs/list requests into one WS request", async () => {
+    installBrowserStubs()
+    globalThis.fetch = (async () => new Response("native")) as typeof fetch
+    delete (globalThis as typeof globalThis & { [REMOTE_RPC_GLOBAL_KEY]?: unknown })[REMOTE_RPC_GLOBAL_KEY]
+    installRemoteRpcFetchBridge()
+
+    const first = globalThis.fetch("/api/remote/remote-a/fs/list?path=%2Ftmp")
+    const second = globalThis.fetch("/api/remote/remote-a/fs/list?path=%2Ftmp")
+    await Promise.resolve()
+    const socket = FakeWebSocket.instances[0]
+    socket.emitOpen()
+
+    const [firstResponse, secondResponse] = await Promise.all([first, second])
+
+    expect(firstResponse.ok).toBe(true)
+    expect(secondResponse.ok).toBe(true)
+    expect(await firstResponse.json()).toEqual({ ok: true })
+    expect(await secondResponse.json()).toEqual({ ok: true })
+    const frames = socket.sent.filter((frame) => (frame as { type?: string }).type === "request")
+    expect(frames).toHaveLength(1)
+  })
 })

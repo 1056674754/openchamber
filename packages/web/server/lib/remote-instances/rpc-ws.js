@@ -9,6 +9,7 @@ import {
   markRemoteProxyUnavailable,
   resolveHealthyRemoteInstance,
 } from './proxy.js';
+import { classifyRpcPath } from '@openchamber/shared';
 
 export const REMOTE_RPC_WS_PATH = '/api/remote-rpc/ws';
 export const LOCAL_RPC_TARGET = 'local';
@@ -261,9 +262,31 @@ export function createRemoteRpcConnectionAcceptor({
 
         const controller = new AbortController();
         const method = normalizeMethod(frame.method);
+        const requestClass = typeof frame.class === 'string' && frame.class.length > 0
+          ? frame.class
+          : classifyRpcPath(rpcPath, method);
         const timeoutMs = getRemoteProxyRequestTimeoutMs(rpcPath, method);
         const timeout = setTimeout(() => controller.abort(), timeoutMs);
-        activeRequests.set(id, { controller, releaseLane: null, timeout });
+
+        let releaseLane = null;
+        try {
+          releaseLane = await remoteInstancesRuntime.enterRequestLane?.('local', requestClass, {
+            queueTimeoutMs: REMOTE_RPC_QUEUE_TIMEOUT_MS,
+          });
+        } catch (error) {
+          const formatted = formatRemoteGateError(error, 'local');
+          logger?.warn?.('[remote-rpc] local request lane rejected', {
+            lane: requestClass,
+            method,
+            path: rpcPath.split('?')[0],
+            status: formatted.status,
+            code: formatted.body.code,
+          });
+          clearTimeout(timeout);
+          sendErrorResponse(socket, id, formatted.status, formatted.body, responseMeta);
+          return;
+        }
+        activeRequests.set(id, { controller, releaseLane, timeout });
 
         try {
           const headers = {
@@ -309,15 +332,18 @@ export function createRemoteRpcConnectionAcceptor({
       }
 
       let releaseLane = null;
+      const requestClass = typeof frame.class === 'string' && frame.class.length > 0
+        ? frame.class
+        : classifyRpcPath(rpcPath, normalizeMethod(frame.method));
       try {
-        releaseLane = await remoteInstancesRuntime.enterRequestLane?.(instanceId, 'normal', {
+        releaseLane = await remoteInstancesRuntime.enterRequestLane?.(instanceId, requestClass, {
           queueTimeoutMs: REMOTE_RPC_QUEUE_TIMEOUT_MS,
         });
       } catch (error) {
         const formatted = formatRemoteGateError(error, instanceId);
         logger?.warn?.('[remote-rpc] request lane rejected', {
           instanceId,
-          lane: 'normal',
+          lane: requestClass,
           method: normalizeMethod(frame.method),
           path: rpcPath.split('?')[0],
           status: formatted.status,

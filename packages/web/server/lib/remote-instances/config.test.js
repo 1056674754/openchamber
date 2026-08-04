@@ -273,7 +273,7 @@ describe('remote instances runtime config', () => {
     const { runtime } = createRuntimeWithSettings({ remoteInstances: [] });
     const releases = [];
 
-    for (let index = 0; index < 4; index += 1) {
+    for (let index = 0; index < 32; index += 1) {
       releases.push(await runtime.enterRequestLane('remote-a', 'normal'));
     }
 
@@ -287,6 +287,43 @@ describe('remote instances runtime config', () => {
     for (const release of releases) {
       release();
     }
+  });
+
+  it('keeps ai lane pressure isolated from io and normal remote API requests', async () => {
+    const { runtime } = createRuntimeWithSettings({ remoteInstances: [] });
+    const aiReleases = [];
+
+    for (let index = 0; index < 2; index += 1) {
+      aiReleases.push(await runtime.enterRequestLane('remote-a', 'ai'));
+    }
+
+    const queuedAi = runtime.enterRequestLane('remote-a', 'ai', { queueTimeoutMs: 5_000 });
+    await Promise.resolve();
+    expect(runtime.getRequestPressure('remote-a').queued.ai).toBe(1);
+
+    aiReleases.pop()();
+    const queuedAiRelease = await queuedAi;
+    queuedAiRelease();
+
+    const ioRelease = await runtime.enterRequestLane('remote-a', 'io');
+    ioRelease();
+    const normalRelease = await runtime.enterRequestLane('remote-a', 'normal');
+    normalRelease();
+    for (const release of aiReleases) {
+      release();
+    }
+  });
+
+  it('exposes the expanded lane set in request pressure snapshots', async () => {
+    const { runtime } = createRuntimeWithSettings({ remoteInstances: [] });
+    const pressure = runtime.getRequestPressure('remote-a');
+
+    expect(Object.keys(pressure.active).sort()).toEqual(
+      ['ai', 'critical', 'fast', 'health', 'io', 'normal', 'stream'],
+    );
+    expect(Object.keys(pressure.queued).sort()).toEqual(
+      ['ai', 'critical', 'fast', 'health', 'io', 'normal', 'stream'],
+    );
   });
 
   it('opens a short circuit after repeated remote transport failures', async () => {

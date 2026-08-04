@@ -5,17 +5,11 @@ import {
   shouldForwardProxyResponseHeader,
 } from '../../proxy-headers.js';
 import { buildRemoteUpstreamHeaders } from './request-headers.js';
+import { getRpcClassTimeoutMs } from '@openchamber/shared';
 
 const remoteProxyPathPrefix = '/api/remote/';
-const REMOTE_PROXY_FAST_TIMEOUT_MS = 3_000;
 const REMOTE_PROXY_DEFAULT_TIMEOUT_MS = 5_000;
-const REMOTE_PROXY_GIT_STATUS_TIMEOUT_MS = 30_000;
-const REMOTE_PROXY_MESSAGE_HISTORY_TIMEOUT_MS = 30_000;
-const REMOTE_PROXY_LONG_MUTATION_TIMEOUT_MS = 15_000;
-const REMOTE_PROXY_UPGRADE_TIMEOUT_MS = 10 * 60_000;
-const REMOTE_PROXY_SHELL_TIMEOUT_MS = REMOTE_PROXY_UPGRADE_TIMEOUT_MS;
-const REMOTE_PROXY_COMPACTION_TIMEOUT_MS = REMOTE_PROXY_UPGRADE_TIMEOUT_MS;
-const REMOTE_PROXY_MAX_TIMEOUT_MS = REMOTE_PROXY_UPGRADE_TIMEOUT_MS;
+const REMOTE_PROXY_MAX_TIMEOUT_MS = 10 * 60_000;
 const REMOTE_PROXY_QUEUE_TIMEOUT_MS = 1_000;
 
 const rejectUpgrade = (socket, statusCode, reason, rejectWebSocketUpgrade) => {
@@ -87,51 +81,8 @@ const isRemoteEventWsProxyPath = (remotePath) => {
 };
 
 export const getRemoteProxyRequestTimeoutMs = (remotePath, method = 'GET') => {
-  let parsed;
-  try {
-    parsed = new URL(remotePath || '', 'http://localhost');
-  } catch {
-    return REMOTE_PROXY_DEFAULT_TIMEOUT_MS;
-  }
-
-  const pathname = parsed.pathname;
-  const normalizedMethod = String(method || 'GET').toUpperCase();
-
-  if (
-    pathname === '/api/session'
-    || pathname === '/api/project'
-    || pathname === '/api/global/health'
-    || pathname === '/api/session/status'
-    || pathname === '/api/fs/list'
-  ) {
-    return REMOTE_PROXY_FAST_TIMEOUT_MS;
-  }
-
-  if (normalizedMethod === 'GET' && pathname === '/api/git/status') {
-    return REMOTE_PROXY_GIT_STATUS_TIMEOUT_MS;
-  }
-
-  if (normalizedMethod === 'GET' && /\/api\/session\/[^/]+\/message$/.test(pathname)) {
-    return REMOTE_PROXY_MESSAGE_HISTORY_TIMEOUT_MS;
-  }
-
-  if (normalizedMethod === 'POST' && /\/api\/session\/[^/]+\/prompt_async$/.test(pathname)) {
-    return REMOTE_PROXY_LONG_MUTATION_TIMEOUT_MS;
-  }
-
-  if (normalizedMethod === 'POST' && /\/api\/session\/[^/]+\/shell$/.test(pathname)) {
-    return REMOTE_PROXY_SHELL_TIMEOUT_MS;
-  }
-
-  if (normalizedMethod === 'POST' && /\/api\/session\/[^/]+\/(?:summarize|compact)$/.test(pathname)) {
-    return REMOTE_PROXY_COMPACTION_TIMEOUT_MS;
-  }
-
-  if (normalizedMethod === 'POST' && pathname === '/api/opencode/upgrade') {
-    return REMOTE_PROXY_UPGRADE_TIMEOUT_MS;
-  }
-
-  return REMOTE_PROXY_DEFAULT_TIMEOUT_MS;
+  const timeoutMs = getRpcClassTimeoutMs(remotePath || '', method);
+  return timeoutMs ?? REMOTE_PROXY_DEFAULT_TIMEOUT_MS;
 };
 
 /** @deprecated Prefer buildRemoteUpstreamHeaders; kept as alias for existing imports. */

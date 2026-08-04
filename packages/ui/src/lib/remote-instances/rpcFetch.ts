@@ -1,3 +1,5 @@
+import { classifyRpcPath, type RpcClass } from "@openchamber/shared"
+
 const REMOTE_RPC_WS_PATH = "/api/remote-rpc/ws"
 const REMOTE_RPC_GLOBAL_KEY = "__openchamber_remote_rpc_fetch__"
 const LOCAL_RPC_TARGET = "local"
@@ -16,6 +18,7 @@ type RemoteRpcRequestFrame = {
   path: string
   headers: Record<string, string>
   bodyBase64?: string
+  class?: RpcClass
 }
 
 type RemoteRpcResponseFrame = {
@@ -45,6 +48,8 @@ type RemoteRpcFetchState = {
   opening: Promise<WebSocket> | null
   pending: Map<string, PendingRequest>
   nextId: number
+  /** In-flight GET fs/list requests keyed by `method:path`, for request coalescing. */
+  inflightFsList: Map<string, Promise<SharedFsListResult>>
 }
 
 type RemoteRpcGlobal = typeof globalThis & {
@@ -55,6 +60,7 @@ type RemoteRpcTarget = {
   target: typeof LOCAL_RPC_TARGET | "remote"
   instanceId?: string
   path: string
+  class?: RpcClass
 }
 
 type RemoteRpcDebugRequest = {
@@ -291,6 +297,7 @@ const getState = (): RemoteRpcFetchState | null => {
       opening: null,
       pending: new Map(),
       nextId: 1,
+      inflightFsList: new Map(),
     }
   }
   ensureDebugApi(root[REMOTE_RPC_GLOBAL_KEY])
@@ -339,9 +346,11 @@ const resolveRpcTarget = (url: string): RemoteRpcTarget | null => {
     const suffix = match[2] || ""
     const remotePath = `/api${suffix}${parsed.search}`
 
+    let remotePathname = ""
     try {
       const remoteUrl = new URL(remotePath, globalThis.window.location.origin)
-      if (isRpcExcludedApiPath(remoteUrl.pathname)) {
+      remotePathname = remoteUrl.pathname
+      if (isRpcExcludedApiPath(remotePathname)) {
         return null
       }
     } catch {
@@ -352,6 +361,7 @@ const resolveRpcTarget = (url: string): RemoteRpcTarget | null => {
       target: "remote",
       instanceId,
       path: remotePath,
+      class: classifyRpcPath(remotePathname, "GET"),
     }
   }
 
@@ -359,6 +369,7 @@ const resolveRpcTarget = (url: string): RemoteRpcTarget | null => {
     return {
       target: LOCAL_RPC_TARGET,
       path: `${parsed.pathname}${parsed.search}`,
+      class: classifyRpcPath(parsed.pathname, "GET"),
     }
   }
 
@@ -533,6 +544,7 @@ const buildRequestFrame = async (
     method: request.method || "GET",
     path: target.path,
     headers: headersToRecord(request.headers),
+    class: target.class,
   }
 
   if (request.method !== "GET" && request.method !== "HEAD") {
@@ -545,7 +557,35 @@ const buildRequestFrame = async (
   return frame
 }
 
-const sendRemoteRpcFetch = async (
+type SharedFsListResult = {
+  bytes: Uint8Array
+  status: number
+  statusText: string
+  headers: Record<string, string>
+}
+
+const responseToShared = async (response: Response): Promise<SharedFsListResult> => {
+  const bytes = new Uint8Array(await response.arrayBuffer())
+  const headers: Record<string, string> = {}
+  response.headers.forEach((value, key) => {
+    headers[key] = value
+  })
+  return { bytes, status: response.status, statusText: response.statusText, headers }
+}
+
+const sharedToResponse = (shared: SharedFsListResult): Response => {
+  const init: ResponseInit = {
+    status: shared.status,
+    statusText: shared.statusText,
+    headers: shared.headers,
+  }
+  if (shared.bytes.byteLength > 0 && shared.status !== 204 && shared.status !== 205 && shared.status !== 304) {
+    return new Response(shared.bytes, init)
+  }
+  return new Response(null, init)
+}
+
+const sendRemoteRpcFetchInner = async (
   state: RemoteRpcFetchState,
   request: Request,
   target: RemoteRpcTarget,
@@ -605,6 +645,43 @@ const sendRemoteRpcFetch = async (
       reject(error)
     }
   })
+}
+
+const sendRemoteRpcFetch = async (
+  state: RemoteRpcFetchState,
+  request: Request,
+  target: RemoteRpcTarget,
+  callerStack?: string,
+): Promise<Response> => {
+  if (request.signal.aborted) {
+    throw createAbortError()
+  }
+
+  const method = (request.method || "GET").toUpperCase()
+  const frameKey = `${method}:${target.path}`
+  const isFsListGet = method === "GET" && target.path.startsWith("/api/fs/list")
+
+  // Coalesce concurrent fs/list reads of the same path into a single WS request.
+  // Each caller still gets its own Response — the shared promise only carries
+  // the resolved bytes.
+  if (isFsListGet) {
+    const existing = state.inflightFsList.get(frameKey)
+    if (existing) {
+      return existing.then(sharedToResponse)
+    }
+    const promise = sendRemoteRpcFetchInner(state, request, target, callerStack)
+      .then(responseToShared)
+    state.inflightFsList.set(frameKey, promise)
+    try {
+      return await promise.then(sharedToResponse)
+    } finally {
+      if (state.inflightFsList.get(frameKey) === promise) {
+        state.inflightFsList.delete(frameKey)
+      }
+    }
+  }
+
+  return sendRemoteRpcFetchInner(state, request, target, callerStack)
 }
 
 export function installRemoteRpcFetchBridge(): void {

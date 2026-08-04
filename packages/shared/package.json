@@ -1,0 +1,22 @@
+{
+  "name": "@openchamber/shared",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Shared runtime constants and classification for OpenChamber (RPC request classes, timeout budgets). Plain JS + adjacent .d.ts so both the Node server and TS UI can consume it.",
+  "main": "./src/rpc-classes.js",
+  "exports": {
+    ".": {
+      "types": "./src/rpc-classes.d.ts",
+      "import": "./src/rpc-classes.js"
+    }
+  },
+  "scripts": {
+    "type-check": "tsc --noEmit",
+    "lint": "eslint \"./src/**/*.js\" --config ../../eslint.config.js",
+    "test": "bun test ./src"
+  },
+  "devDependencies": {
+    "@types/node": "^24.3.1"
+  }
+}

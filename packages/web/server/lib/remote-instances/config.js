@@ -24,7 +24,11 @@ export const DEFAULT_HEALTH_PROBE_TIMEOUT_SEC = 3;
 export const MAX_HEALTH_PROBE_TIMEOUT_SEC = 5;
 const DEFAULT_REQUEST_LANE_LIMITS = {
   health: { maxActive: 1, maxQueue: 0, queueTimeoutMs: 0 },
-  normal: { maxActive: 4, maxQueue: 8, queueTimeoutMs: 1_000 },
+  critical: { maxActive: 8, maxQueue: 0, queueTimeoutMs: 0 },
+  fast: { maxActive: 32, maxQueue: 64, queueTimeoutMs: 5_000 },
+  normal: { maxActive: 32, maxQueue: 128, queueTimeoutMs: 5_000 },
+  io: { maxActive: 4, maxQueue: 16, queueTimeoutMs: 10_000 },
+  ai: { maxActive: 2, maxQueue: 4, queueTimeoutMs: 10_000 },
   stream: { maxActive: 3, maxQueue: 0, queueTimeoutMs: 0 },
 };
 const REQUEST_CIRCUIT_FAILURE_THRESHOLD = 3;
@@ -222,7 +226,15 @@ export const createRemoteInstancesRuntime = (deps) => {
   let cachedInstances = [];
 
   const normalizeRequestLane = (lane) => (
-    lane === 'health' || lane === 'stream' ? lane : 'normal'
+    lane === 'health'
+      || lane === 'critical'
+      || lane === 'fast'
+      || lane === 'normal'
+      || lane === 'io'
+      || lane === 'ai'
+      || lane === 'stream'
+      ? lane
+      : 'normal'
   );
 
   const getRequestPressureState = (id) => {
@@ -232,8 +244,8 @@ export const createRemoteInstancesRuntime = (deps) => {
     }
 
     state = {
-      active: { health: 0, normal: 0, stream: 0 },
-      queues: { health: [], normal: [], stream: [] },
+      active: { health: 0, critical: 0, fast: 0, normal: 0, io: 0, ai: 0, stream: 0 },
+      queues: { health: [], critical: [], fast: [], normal: [], io: [], ai: [], stream: [] },
       consecutiveFailures: 0,
       circuitOpenUntil: 0,
     };
@@ -425,13 +437,13 @@ export const createRemoteInstancesRuntime = (deps) => {
 
   const getRequestPressure = (id) => {
     const state = getRequestPressureState(id);
+    const queued = {};
+    for (const lane of Object.keys(DEFAULT_REQUEST_LANE_LIMITS)) {
+      queued[lane] = state.queues[lane]?.length ?? 0;
+    }
     return {
       active: { ...state.active },
-      queued: {
-        health: state.queues.health.length,
-        normal: state.queues.normal.length,
-        stream: state.queues.stream.length,
-      },
+      queued,
       circuitOpenUntil: state.circuitOpenUntil,
     };
   };

@@ -41,6 +41,35 @@
 |---|---|---|
 | GitLab backlog 集成与文档同步 | ✅ 已收口；Work Item [#30](https://coding.s-s.city/songsong/openchamber/-/work_items/30) 已关闭 | `AGENTS.md` 写入 dual-source 规则；本节补充同步清单；MERGE 延期行交叉链接 #6/#7/#9–#12/#14–#19/#23–#26/#29/#31/#32 等；已完成项 #3/#5/#13/#20/#21/#22 与总览 [#1](https://coding.s-s.city/songsong/openchamber/-/issues/1) checklist 对齐。无产品运行时代码改动 |
 
+### Fork 自研：RPC 传输重构（Work Item [#106](https://coding.s-s.city/songsong/openchamber/-/issues/106)）
+
+**日期**: 2026-08-03
+**类别**: fork 自研架构重构（非上游迁移）— 浏览器 ↔ 本地服务端 WebSocket RPC 传输从"按路径猜超时"改为"语义类别调度 + 超时安全网"。
+
+**背景**：`rpcFetch.ts` 全局替换 `fetch` 后，所有同源 `/api/*`（除 5 个 SSE/WS 排除项）都走 WebSocket RPC 中继。该机制最初是 `/api/fs/list` 高频轮询打爆系统时的临时止血（git 侧同类见 `perf(git) #1398`）。现状问题：
+1. 超时按 URL 路径 if 链猜（`proxy.js getRemoteProxyRequestTimeoutMs`），漏配落 5s 默认，60+ 路由被误杀。
+2. 本地 RPC（`target: 'local'`）`releaseLane: null`，lane 并发设施只接 remote 分支，浏览器主链路裸奔。
+3. 快慢不分流：小模型内部预算 60s vs RPC 5s → `session-title-candidates`/`summarize`/`small-model/generate` 必然随机失败（UI 报 "Local RPC request aborted"）。
+
+**实现**（全部已落地，见下方证据）：
+- 新建共享包 `packages/shared`（纯 JS + 相邻 `.d.ts`）：`classifyRpcPath(pathname, method)` 语义归类（critical/fast/normal/io/ai/stream）+ 类别→默认超时表，client/server 单一事实来源。Node（Electron 生产路径）裸跑零风险，ui 侧 tsc 拿类型。
+- `config.js` lane 3→7 类（health/critical/fast/normal/io/ai/stream），normal 并发 4→32（实测），`getRequestPressure` queued 改为按 lane 键派生。
+- `proxy.js` `getRemoteProxyRequestTimeoutMs` 删除路径 if 链，改查共享类别表（签名保留，rpc-ws 两处调用点零改动）。
+- `rpc-ws.js` 本地分支接入 lane（key `'local'`）+ frame.class 解析（客户端声明优先，服务端归类兜底）。
+- `rpcFetch.ts` frame 加 `class` 透传 + `/api/fs/list` 同 path 并发请求单飞合并（fs/list 卡死真正解法，各调用方仍拿到独立 Response）。
+
+**验证证据**（2026-08-03）：
+- `packages/shared`: type-check ✅、lint ✅、10 tests ✅（归类/超时表/查询串鲁棒性）。
+- `config.test.js` 12 ✅（新增 ai 隔离、lane 集快照；normal 4→32 用例更新）。
+- `proxy.test.js` 7 ✅（类别超时断言重写：critical 3s/fast 15s/normal 30s/io+ai 120s）。
+- `rpc-ws.test.js` 7 ✅（新增本地 lane 归类、frame.class 覆盖、lane busy 429 三用例）。
+- `rpcFetch.test.ts` 6 ✅（新增 frame.class 声明、fs/list 单飞合并）。
+- web + ui `type-check` ✅、shared/ui eslint ✅。
+- plain Node（无 flag）可 `import('@openchamber/shared')` 并正确归类 — Electron 生产路径兼容。
+- 全量 server 启动（含 embedded OpenCode）未做端到端 curl 验证（需 OpenCode 环境），传输层改动由上述单测覆盖。
+
+**同步清单状态**：WI #106 `status::backlog`（实现完成待 UI 冒烟后转 `status::done`）；总览 #1 已登记。fork 多实例 `serverId + directory` 权威未受影响（lane key 用保留 id `'local'`，与 config.js 保留 id 池一致）。
+
 ---
 
 ## Mobile 产品轨道
