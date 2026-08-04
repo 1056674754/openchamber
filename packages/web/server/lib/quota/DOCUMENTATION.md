@@ -21,6 +21,7 @@ These provider IDs are currently dispatchable via `fetchQuotaForProvider(provide
 | `codex` | Codex | `providers/codex.js` | `openai`, `codex`, `chatgpt` |
 | `crof` | CrofAI | `providers/crof.js` | `crof` |
 | `cursor` | Cursor | `providers/cursor.js` | `CURSOR_TOKEN` / `CURSOR_ACCESS_TOKEN`, `CURSOR_REFRESH_TOKEN`, optional token files, or Cursor desktop SQLite DB |
+| `deepseek` | DeepSeek | `providers/deepseek.js` | `deepseek` |
 | `google` | Google | `providers/google/index.js` | `google`, `google.oauth`, Antigravity accounts file |
 | `github-copilot` | GitHub Copilot | `providers/copilot.js` | `github-copilot`, `copilot` |
 | `github-copilot-addon` | GitHub Copilot Add-on | `providers/copilot.js` | `github-copilot`, `copilot` |
@@ -59,6 +60,10 @@ of its configured limit and the currently funded amount, and suppresses the
 standalone credits window to avoid double-counting. CrofAI exposes its dollar
 credits balance as a label-only window because the API does not provide a
 meaningful percentage or reset period.
+
+DeepSeek exposes the preferred USD balance, with CNY as a fallback, as a
+label-only credits window. Kimi accepts either `used` or `remaining` in both
+weekly and rate-limit payloads; when both are present, `used` is authoritative.
 
 ## MiniMax M3 / Token Plan migration
 In 2025/2026 MiniMax rebranded "Coding Plan" to "Token Plan" alongside the M3 model release. The API underwent breaking changes:

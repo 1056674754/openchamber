@@ -14,6 +14,17 @@ export const providerId = 'kimi-for-coding';
 export const providerName = 'Kimi for Coding';
 export const aliases = ['kimi-for-coding', 'kimi'];
 
+const computeUsedPercent = (total, used, remaining) => {
+  if (!total) return null;
+  if (used !== null) {
+    return Math.max(0, Math.min(100, (used / total) * 100));
+  }
+  if (remaining !== null) {
+    return Math.max(0, Math.min(100, 100 - (remaining / total) * 100));
+  }
+  return null;
+};
+
 export const isConfigured = () => {
   const auth = readAuthFile();
   const entry = normalizeAuthEntry(getAuthEntry(auth, aliases));
@@ -60,9 +71,8 @@ export const fetchQuota = async () => {
     if (usage) {
       const limit = toNumber(usage.limit);
       const used = toNumber(usage.used);
-      const usedPercent = limit && used !== null
-        ? Math.max(0, Math.min(100, (used / limit) * 100))
-        : null;
+      const remaining = toNumber(usage.remaining);
+      const usedPercent = computeUsedPercent(limit, used, remaining);
       windows.weekly = toUsageWindow({
         usedPercent,
         windowSeconds: null,
@@ -78,10 +88,9 @@ export const fetchQuota = async () => {
       const windowSeconds = durationToSeconds(window?.duration, window?.timeUnit);
       const label = windowSeconds === 5 * 60 * 60 ? `Rate Limit (${rawLabel})` : rawLabel;
       const total = toNumber(detail?.limit);
+      const used = toNumber(detail?.used);
       const remaining = toNumber(detail?.remaining);
-      const usedPercent = total && remaining !== null
-        ? Math.max(0, Math.min(100, 100 - (remaining / total) * 100))
-        : null;
+      const usedPercent = computeUsedPercent(total, used, remaining);
       windows[label] = toUsageWindow({
         usedPercent,
         windowSeconds,

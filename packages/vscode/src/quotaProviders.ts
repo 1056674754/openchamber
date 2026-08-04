@@ -119,6 +119,13 @@ type WaferPayload = {
   plan_tier?: string;
 };
 
+type DeepseekPayload = {
+  balance_infos?: Array<{
+    currency?: string;
+    total_balance?: number | string;
+  }>;
+};
+
 export type ProviderResult = {
   providerId: string;
   providerName: string;
@@ -474,6 +481,11 @@ export const listConfiguredQuotaProviders = () => {
   const neuralwattAuth = normalizeAuthEntry(getAuthEntry(auth, ['neuralwatt']));
   if (asNonEmptyString(neuralwattAuth?.key) || asNonEmptyString(neuralwattAuth?.token)) {
     configured.add('neuralwatt');
+  }
+
+  const deepseekAuth = normalizeAuthEntry(getAuthEntry(auth, ['deepseek']));
+  if (asNonEmptyString(deepseekAuth?.key) || asNonEmptyString(deepseekAuth?.token)) {
+    configured.add('deepseek');
   }
 
   return Array.from(configured);
@@ -1125,6 +1137,17 @@ export const fetchCopilotAddonQuota = async (): Promise<ProviderResult> => {
   }
 };
 
+const computeKimiUsedPercent = (
+  total: number | null,
+  used: number | null,
+  remaining: number | null,
+): number | null => {
+  if (!total) return null;
+  if (used !== null) return Math.max(0, Math.min(100, (used / total) * 100));
+  if (remaining !== null) return Math.max(0, Math.min(100, 100 - (remaining / total) * 100));
+  return null;
+};
+
 export const fetchKimiQuota = async (): Promise<ProviderResult> => {
   const auth = readAuthFile();
   const entry = normalizeAuthEntry(getAuthEntry(auth, ['kimi-for-coding', 'kimi'])) as Record<string, unknown> | null;
@@ -1164,10 +1187,9 @@ export const fetchKimiQuota = async (): Promise<ProviderResult> => {
     const usage = payload.usage as Record<string, unknown> | undefined;
     if (usage) {
       const limit = toNumber(usage.limit);
+      const used = toNumber(usage.used);
       const remaining = toNumber(usage.remaining);
-      const usedPercent = limit && remaining !== null
-        ? Math.max(0, Math.min(100, 100 - (remaining / limit) * 100))
-        : null;
+      const usedPercent = computeKimiUsedPercent(limit, used, remaining);
       windows.weekly = toUsageWindow({
         usedPercent,
         windowSeconds: null,
@@ -1183,10 +1205,9 @@ export const fetchKimiQuota = async (): Promise<ProviderResult> => {
       const windowSeconds = durationToSeconds(window?.duration as number | undefined, window?.timeUnit as string | undefined);
       const label = windowSeconds === 5 * 60 * 60 ? `Rate Limit (${rawLabel})` : rawLabel;
       const total = toNumber(detail?.limit);
+      const used = toNumber(detail?.used);
       const remaining = toNumber(detail?.remaining);
-      const usedPercent = total && remaining !== null
-        ? Math.max(0, Math.min(100, 100 - (remaining / total) * 100))
-        : null;
+      const usedPercent = computeKimiUsedPercent(total, used, remaining);
       windows[label] = toUsageWindow({
         usedPercent,
         windowSeconds,
@@ -2135,6 +2156,98 @@ const fetchCrofQuota = async (): Promise<ProviderResult> => {
   }
 };
 
+const fetchDeepseekQuota = async (): Promise<ProviderResult> => {
+  const auth = readAuthFile();
+  const entry = normalizeAuthEntry(getAuthEntry(auth, ['deepseek']));
+  const apiKey = asNonEmptyString(entry?.key) ?? asNonEmptyString(entry?.token);
+
+  if (!apiKey) {
+    return buildResult({
+      providerId: 'deepseek',
+      providerName: 'DeepSeek',
+      ok: false,
+      configured: false,
+      error: 'Not configured',
+    });
+  }
+
+  const timeoutSignal = AbortSignal.timeout(15_000);
+
+  try {
+    const response = await fetch('https://api.deepseek.com/user/balance', {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Accept-Encoding': 'identity' },
+      signal: timeoutSignal,
+    });
+
+    if (!response.ok) {
+      return buildResult({
+        providerId: 'deepseek',
+        providerName: 'DeepSeek',
+        ok: false,
+        configured: true,
+        error: response.status === 401 || response.status === 403
+          ? 'Session expired — please re-authenticate with DeepSeek'
+          : `API error: ${response.status}`,
+      });
+    }
+
+    const payload = await response.json() as DeepseekPayload;
+    const balanceInfos = Array.isArray(payload.balance_infos) ? payload.balance_infos : [];
+    const balanceInfo = balanceInfos.find((info) => info.currency === 'USD')
+      ?? balanceInfos.find((info) => info.currency === 'CNY')
+      ?? null;
+    const rawBalance = balanceInfo?.total_balance;
+    const totalBalance = typeof rawBalance === 'number' || (typeof rawBalance === 'string' && rawBalance.trim() !== '')
+      ? toNumber(rawBalance)
+      : null;
+
+    if (totalBalance === null) {
+      return buildResult({
+        providerId: 'deepseek',
+        providerName: 'DeepSeek',
+        ok: false,
+        configured: true,
+        error: 'No quota data in response',
+      });
+    }
+
+    const symbol = balanceInfo?.currency === 'CNY' ? '¥' : '$';
+    return buildResult({
+      providerId: 'deepseek',
+      providerName: 'DeepSeek',
+      ok: true,
+      configured: true,
+      usage: {
+        windows: {
+          credits_balance: toUsageWindow({
+            usedPercent: null,
+            windowSeconds: null,
+            resetAt: null,
+            valueLabel: `${symbol}${formatMoney(totalBalance)}`,
+          }),
+        },
+      },
+    });
+  } catch (error) {
+    const isTimeout = error instanceof DOMException && (
+      error.name === 'TimeoutError' || (error.name === 'AbortError' && timeoutSignal.aborted)
+    );
+    const isParseError = error instanceof SyntaxError;
+    return buildResult({
+      providerId: 'deepseek',
+      providerName: 'DeepSeek',
+      ok: false,
+      configured: true,
+      error: isTimeout
+        ? 'Request timed out'
+        : isParseError
+          ? 'Invalid response from provider'
+          : (error instanceof Error ? error.message : 'Request failed'),
+    });
+  }
+};
+
 export const fetchQuotaForProvider = async (providerId: string): Promise<ProviderResult> => {
   switch (providerId) {
     case 'claude':
@@ -2167,6 +2280,8 @@ export const fetchQuotaForProvider = async (providerId: string): Promise<Provide
       return fetchWaferQuota();
     case 'crof':
       return fetchCrofQuota();
+    case 'deepseek':
+      return fetchDeepseekQuota();
     case 'neuralwatt':
       return fetchNeuralwattQuota();
     case 'opencode-go': {

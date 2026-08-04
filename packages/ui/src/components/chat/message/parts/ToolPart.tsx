@@ -1858,7 +1858,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
     const stateWithData = state as ToolStateWithMetadata;
     const metadata = stateWithData.metadata;
     const input = stateWithData.input;
-    const rawOutput = getToolOutput(part.tool, stateWithData.output, metadata?.output);
+    const rawOutput = getToolOutput(part.tool, stateWithData.output, metadata?.output, state.status);
     const isStreamingBash = part.tool === 'bash' && state.status === 'running';
     const outputString = useStreamingTextThrottle({
         text: rawOutput ?? '',

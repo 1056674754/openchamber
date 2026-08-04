@@ -1665,3 +1665,35 @@ VS Code worktree lock 验证：在两个真实临时 Git 仓库及 `--no-checkou
 **第三批验证证据（2026-08-02）**：#94 将上游 OpenChamber hybrid light/dark 作为新缺省主题，同时保留 fork 原有 Fields of the Shire IDs。独立 5193 HMR 实例实际显示两套主题；OpenChamber dark 切换后使用新背景 token 并在刷新后保持，随后切回 Fields of the Shire 再刷新也仍保持旧选择。#101 的 normalization、settings store migration、Web sanitizer focused tests 覆盖合法样式与非法值回落；Linux-only capability gate 保证 Web、Windows 和 macOS 不进入 traffic-lights 分支。全 workspace type-check、lint、build、docs validation 与 diff whitespace 检查通过。未替换、重启或修改 `/Applications/OpenChamber.app`。
 
 **第四批验证证据（2026-08-02）**：#98 的 Windows release/embedded OpenCode tests 共 10 条通过，覆盖 x64/arm64 channel、ARM64 x64-baseline CLI 选择、custom `-sscity` 校验与 updater finalizer；workflow 静态检查确认两个 Windows 架构分别产物化。#103 的 activity key/折叠 indicator tests 3 条通过，覆盖 local/remote 同 ID 隔离、remote unread 不串入 local 和 idle 清除；实现只订阅 `session_status` leaf。#105 在 5195 独立 production build 实例中滚动侧栏 700px 后，`Openchamber` header 固定于 scroll root 顶部 88px，切换项目后仍为 88px，未观察到闪烁或位移。#93 的 cache/restore/swipe focused tests 8 条通过，覆盖 runtime 分桶、容量上限、重复 Session ID 的 `serverId + directory` 权威选择、stale target 拒绝和 swipe clamp/reveal；iOS 26.5 Simulator build 成功并实际连接 5195，观察到 Sessions/Workspace 双抽屉、跨项目树、最近 Session popover、Diff/Files/Terminal/Notes/MCP 五标签，以及 Terminal → Files → Terminal 返回时原 pane 保持挂载。冷启动不可达时显示保存实例与明确错误，不闪空白 draft。全 workspace type-check、lint、production build 与 iOS Simulator build 通过；未替换或重启当前 `/Applications/OpenChamber.app`。
+
+### v1.18.0 差距审计与 Work Item 拆分（2026-08-04）
+
+**比较边界**：用户给出的起点是 `1.17.1-sscity`，但本文和 GitLab 已有完整证据确认 fork 后续又完成了官方 `v1.17.2`。因此本轮不重复迁移 `v1.17.2`，实际审计区间为上游 `v1.17.2..v1.18.0`（tag `7f0d87cbeffec08a320c39fbb955664e458a4637`，121 commits）。GitLab Overview [#1](https://coding.s-s.city/songsong/openchamber/-/issues/1) 已重开并推进到 `v1.18.0`。
+
+| 官方 v1.18.0 功能 | 状态 | Fork 处理 / Work Item |
+|---|---|---|
+| Diff / branch / PR Guided Walkthrough；按界面语言生成并可切换语言 | ⬜ 待合并，高风险 | [#107](https://coding.s-s.city/songsong/openchamber/-/issues/107)。复用 fork 现有 Diff、PR 与生成能力；只允许用户显式启动，不覆盖多实例 Git/PR authority |
+| Tablet / foldable 双侧栏、旋转后保留 diff/file/terminal | ⬜ 待合并，高风险 | [#108](https://coding.s-s.city/songsong/openchamber/-/issues/108)。只在 fork 共享 `SessionSidebar` / Workspace surfaces 上适配，不恢复上游单实例 mobile drawers |
+| Android 无 Play Services QR 扫描；扩大抽屉手势起点 | ⬜ 与 tablet 批次共同审计 | [#108](https://coding.s-s.city/songsong/openchamber/-/issues/108)。需要原生 Android matching-surface 验证，不能仅由 browser `BarcodeDetector` 推断等价 |
+| Settings 添加/编辑 OpenAI-compatible provider | ⬜ 待合并，高风险 | [#109](https://coding.s-s.city/songsong/openchamber/-/issues/109)。endpoint/models/credentials/headers/scope 必须全部写入 active runtime，禁止 remote 回落 local |
+| Bun chunk 修复与重型库 lazy load | ⬜ 待合并 | [#110](https://coding.s-s.city/songsong/openchamber/-/issues/110)。当前 production build 仍观察到约 20MB Bun vendor chunk，明确不是等价实现 |
+| 大量 worktree 展开不反复拉 Session；非项目目录不刷 Git 错误 | ⬜ 待合并，高风险 | [#111](https://coding.s-s.city/songsong/openchamber/-/issues/111)。fork 已修前端重复 probe，但尚未完成上游 project-pinned discovery、directory cache 与 owner settle 全链路 |
+| 新 worktree Session 即时出现；CLI provisioning 不误报 timeout | ⬜ 与 worktree correctness 合并处理 | [#111](https://coding.s-s.city/songsong/openchamber/-/issues/111)。保留 `serverId + directory` Session authority，不向 OpenCode storage 写 fork 私有注册数据 |
+| German UI 与文档 | ⬜ 待合并 | [#112](https://coding.s-s.city/songsong/openchamber/-/issues/112)。必须补齐 fork 自有设置/功能文案，不能只复制上游基础 locale |
+| shared worktree 去重；archive/unarchive 限定当前 instance/workspace | ⬜ 待合并，高风险 | [#113](https://coding.s-s.city/songsong/openchamber/-/issues/113)。所有 query/action 需绑定 expected runtime、`serverId + directory + workspace` |
+| Diff 打开定位 header；live refresh 只刷新变化文件并保持 review position；editor save 更新 diff | ⬜ 待合并，高风险 | [#114](https://coding.s-s.city/songsong/openchamber/-/issues/114)。不得新增会与现有 timeline/diff scroll ownership 冲突的 scroll writer |
+| Terminal 在 view mount 前启动并保留 startup output | ⬜ 待合并 | [#115](https://coding.s-s.city/songsong/openchamber/-/issues/115)。叠加现有按 `serverId + directory + tabId` 的连接复用，不回退单全局 terminal |
+| Linux AppImage 清理 OpenCode / PTY shell ARGV0 | ⬜ 与 Terminal 批次处理 | [#115](https://coding.s-s.city/songsong/openchamber/-/issues/115)。必须在真实 AppImage matching surface 验证 zsh startup |
+| Bash 完成态应用 CR/backspace/cursor/erase 并清 ANSI/OSC | ✅ 已合并并验证 | [#116](https://coding.s-s.city/songsong/openchamber/-/issues/116)。只规范化完成态，运行中继续保留 fork 的 live append / rewrite 行为 |
+| queue 临时失败/中断后重试 | ✅ Fork 已等价 | `useQueuedMessageAutoSend` 已保持原 queued item、`sendConfig`、`sendTarget`，失败按 2s→4s→…→60s 退避；不重复建卡 |
+| relay 断连后避免重复回复；in-flight queue 不并入另一发送 | ✅ Fork 已等价或更强 | ambiguous send 以同一 `messageID` 沿权威 runtime 回查；queue 有 session-scoped in-flight guard，不重复建卡 |
+| active-project `.agents/skills`；rename 保留内容/支持文件并限制安全 root | ⬜ 待合并 | [#117](https://coding.s-s.city/songsong/openchamber/-/issues/117)。当前已有 rename UI，但缺上游的 repo-local discovery、server renamable authority 与完整内容保留保证 |
+| DeepSeek quota；Kimi 同时兼容 `used` / `remaining` | ✅ 已合并并验证 | [#118](https://coding.s-s.city/songsong/openchamber/-/issues/118)。Web 与 VS Code provider 同步，UI 仍从 active runtime quota route 读取 |
+| Browser export 显示 Download 且不显示 desktop reveal | ⬜ 待合并 | [#119](https://coding.s-s.city/songsong/openchamber/-/issues/119)。按 runtime capability 决策，remote 文件仍走 owning runtime |
+| Assistant messages 不渲染 active HTML | ✅ Fork 已等价 | 当前 `ReactMarkdown` 未启用 `rehypeRaw`，raw HTML 默认保持惰性且不会进入 DOM；不迁入上游 `marked + DOMPurify` 架构，只补安全回归测试时再开卡 |
+| VS Code apply_patch 每个文件打开各自路径 | ⬜ 待合并 | [#120](https://coding.s-s.city/songsong/openchamber/-/issues/120)。需验证多文件 patch 与 workspace-root 路径约束 |
+| Session title 行尾不裁切 | ✅ Fork 已等价 | `SessionNodeItem` 已使用 `min-w-0` / `overflow-hidden` / `truncate` 的稳定 flex 边界，不重复建卡 |
+
+**第一批执行顺序**：[#116](https://coding.s-s.city/songsong/openchamber/-/issues/116) Bash 完成态规范化 → [#118](https://coding.s-s.city/songsong/openchamber/-/issues/118) DeepSeek/Kimi quota。两项均是局部纯数据转换，不触碰自定义 sidebar、多实例 Session ownership 或 OpenCode embedded packaging；完成 focused tests、matching-surface driver、workspace checks 和本文证据后才关闭。
+
+**第一批验证证据（2026-08-04）**：#116 在共享 `getToolOutput` 边界只对非 running Bash 输出执行终端归一化，支持 CR、backspace、CSI cursor/erase、SGR 与 OSC；running 输出保持原字符串，继续由既有局部 throttle 处理。#118 新增 Web DeepSeek registry/provider，并在 Web 与 VS Code 的 Kimi provider 中统一采用 `used` 优先、`remaining` fallback；DeepSeek 优先 USD、回退 CNY，余额保持 label-only，不伪造百分比。focused tests：UI 6 条、Web provider/registry 7 条、VS Code provider 8 条全部通过；UI 与 VS Code 定向 type-check 通过。matching-surface driver 在临时 HOME 通过真实 Web provider registry 观察到 Bash `downloaded\nready`、DeepSeek `$7.54`、Kimi weekly 25% 和 5h 75%。全 workspace type-check、lint、production build、docs validation 与 `git diff --check` 均通过；未修改 sidebar、多实例 Session authority、embedded OpenCode 或安装 runtime。

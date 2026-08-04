@@ -9,6 +9,8 @@ mock.module('node:fs', () => ({
       }
       return JSON.stringify({
         crof: { key: 'test-token' },
+        deepseek: { key: 'test-token' },
+        kimi: { key: 'test-token' },
         neuralwatt: { key: 'test-token' },
         'zai-coding-plan': { key: 'test-token' },
       });
@@ -39,6 +41,8 @@ describe('VS Code quota provider parity', () => {
   it('discovers Crof and NeuralWatt from the extension host auth file', () => {
     expect(listConfiguredQuotaProviders()).toEqual(expect.arrayContaining([
       'crof',
+      'deepseek',
+      'kimi-for-coding',
       'neuralwatt',
     ]));
   });
@@ -112,6 +116,38 @@ describe('VS Code quota provider parity', () => {
       usedPercent: 0,
       windowSeconds: 30 * 24 * 60 * 60,
       resetAt: 1787128459979,
+    });
+  });
+
+  it('uses Kimi used values before remaining and falls back when used is absent', async () => {
+    globalThis.fetch = mock(async () => response({
+      usage: { limit: 100, used: 25, remaining: 1 },
+      limits: [{
+        window: { duration: 5, timeUnit: 'TIME_UNIT_HOUR' },
+        detail: { limit: 200, remaining: 50 },
+      }],
+    }));
+
+    const result = await fetchQuotaForProvider('kimi-for-coding');
+
+    expect(result.usage?.windows.weekly.usedPercent).toBe(25);
+    expect(result.usage?.windows['Rate Limit (5h)'].usedPercent).toBe(75);
+  });
+
+  it('reports DeepSeek account balance as a label-only window', async () => {
+    globalThis.fetch = mock(async () => response({
+      balance_infos: [
+        { currency: 'CNY', total_balance: '100.00' },
+        { currency: 'USD', total_balance: '7.54' },
+      ],
+    }));
+
+    const result = await fetchQuotaForProvider('deepseek');
+
+    expect(result.ok).toBe(true);
+    expect(result.usage?.windows.credits_balance).toMatchObject({
+      usedPercent: null,
+      valueLabel: '$7.54',
     });
   });
 
