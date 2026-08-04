@@ -121,7 +121,11 @@ function getConfigPaths(workingDirectory) {
       path.join(OPENCODE_CONFIG_DIR, 'opencode.jsonc'),
     ],
     projectPath: getProjectConfigPath(workingDirectory),
-    customPath: CUSTOM_CONFIG_FILE
+    // Resolve at call time so OPENCODE_CONFIG changes (and tests) take effect.
+    // CUSTOM_CONFIG_FILE (still exported) is a load-time snapshot only.
+    customPath: process.env.OPENCODE_CONFIG
+      ? path.resolve(process.env.OPENCODE_CONFIG)
+      : null,
   };
 }
 

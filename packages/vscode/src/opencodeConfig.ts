@@ -8,9 +8,6 @@ const OPENCODE_CONFIG_DIR = path.join(os.homedir(), '.config', 'opencode');
 const AGENT_DIR = path.join(OPENCODE_CONFIG_DIR, 'agents');
 const COMMAND_DIR = path.join(OPENCODE_CONFIG_DIR, 'commands');
 const CONFIG_FILE = path.join(OPENCODE_CONFIG_DIR, 'config.json');
-const CUSTOM_CONFIG_FILE = process.env.OPENCODE_CONFIG
-  ? path.resolve(process.env.OPENCODE_CONFIG)
-  : null;
 const PROMPT_FILE_PATTERN = /^\{file:(.+)\}$/i;
 
 // Scope types (shared by agents and commands)
@@ -327,7 +324,10 @@ const getConfigPaths = (workingDirectory?: string) => ({
     path.join(OPENCODE_CONFIG_DIR, 'opencode.jsonc'),
   ],
   projectPath: getProjectConfigPath(workingDirectory),
-  customPath: CUSTOM_CONFIG_FILE
+  // Resolve at call time so OPENCODE_CONFIG changes (and tests) take effect.
+  customPath: process.env.OPENCODE_CONFIG
+    ? path.resolve(process.env.OPENCODE_CONFIG)
+    : null,
 });
 
 const getPrimaryUserConfigPath = (userPaths: string[]): string => {
@@ -1477,6 +1477,177 @@ export const removeProviderConfig = (providerId: string, workingDirectory?: stri
 
   writeConfig(targetConfig as Record<string, unknown>, targetPath || CONFIG_FILE);
   return true;
+};
+
+const PROVIDER_ID_PATTERN = /^[a-z0-9][a-z0-9-_]*$/;
+const PROVIDER_BASE_URL_PATTERN = /^https?:\/\//;
+const OPENAI_COMPATIBLE_NPM = '@ai-sdk/openai-compatible';
+
+export type ProviderConfigScope = 'user' | 'project' | 'custom';
+
+export type ValidatedProviderConfig = {
+  npm: typeof OPENAI_COMPATIBLE_NPM;
+  name: string;
+  env?: string[];
+  options: { baseURL: string; headers?: Record<string, string> };
+  models: Record<string, { name: string }>;
+};
+
+/**
+ * Validate a custom OpenAI-compatible provider config payload before persistence.
+ * Returns { ok: true, value } or { ok: false, error }.
+ *
+ * Credentials: either config.env contains a variable name, or hasStoredAuth is true
+ * (auth.json already has a key — typically after auth.set, or when editing).
+ */
+export const validateCustomProviderConfig = (
+  providerId: string,
+  config: Record<string, unknown>,
+  options: { hasStoredAuth?: boolean } = {},
+): { ok: true; value: { providerId: string; config: ValidatedProviderConfig } } | { ok: false; error: string } => {
+  if (!providerId || typeof providerId !== 'string' || !PROVIDER_ID_PATTERN.test(providerId)) {
+    return { ok: false, error: 'Provider ID must match /^[a-z0-9][a-z0-9-_]*$/' };
+  }
+
+  const name = typeof config.name === 'string' ? config.name.trim() : '';
+  if (!name) {
+    return { ok: false, error: 'Provider name is required' };
+  }
+
+  const npm = typeof config.npm === 'string' ? config.npm.trim() : OPENAI_COMPATIBLE_NPM;
+  if (npm !== OPENAI_COMPATIBLE_NPM) {
+    return { ok: false, error: `Custom providers must use npm package ${OPENAI_COMPATIBLE_NPM}` };
+  }
+
+  const optionsBlock = isPlainObject(config.options) ? config.options : null;
+  if (!optionsBlock) {
+    return { ok: false, error: 'Provider options are required' };
+  }
+
+  const baseURL = typeof optionsBlock.baseURL === 'string' ? optionsBlock.baseURL.trim() : '';
+  if (!baseURL) {
+    return { ok: false, error: 'Base URL is required' };
+  }
+  if (!PROVIDER_BASE_URL_PATTERN.test(baseURL)) {
+    return { ok: false, error: 'Base URL must start with http:// or https://' };
+  }
+
+  const modelsRaw = isPlainObject(config.models) ? config.models as Record<string, unknown> : null;
+  if (!modelsRaw || Object.keys(modelsRaw).length === 0) {
+    return { ok: false, error: 'At least one model is required' };
+  }
+
+  const normalizedModels: Record<string, { name: string }> = {};
+  for (const [modelId, modelValue] of Object.entries(modelsRaw)) {
+    const trimmedId = typeof modelId === 'string' ? modelId.trim() : '';
+    if (!trimmedId) {
+      return { ok: false, error: 'Model id is required' };
+    }
+    if (!isPlainObject(modelValue)) {
+      return { ok: false, error: `Model "${trimmedId}" must be an object` };
+    }
+    const modelName = typeof modelValue.name === 'string' ? modelValue.name.trim() : '';
+    if (!modelName) {
+      return { ok: false, error: `Model "${trimmedId}" requires a name` };
+    }
+    normalizedModels[trimmedId] = { name: modelName };
+  }
+
+  const normalized: ValidatedProviderConfig = {
+    npm: OPENAI_COMPATIBLE_NPM,
+    name,
+    options: { baseURL },
+    models: normalizedModels,
+  };
+
+  let env: string[] = [];
+  if (Array.isArray(config.env)) {
+    env = config.env
+      .filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0)
+      .map((entry) => entry.trim());
+    if (env.length > 0) {
+      normalized.env = env;
+    }
+  }
+
+  const hasStoredAuth = Boolean(options.hasStoredAuth);
+  if (env.length === 0 && !hasStoredAuth) {
+    return { ok: false, error: 'API key or {env:VAR} credentials are required' };
+  }
+
+  if (isPlainObject(optionsBlock.headers)) {
+    const headers: Record<string, string> = {};
+    for (const [headerKey, headerValue] of Object.entries(optionsBlock.headers)) {
+      if (typeof headerKey !== 'string' || !headerKey.trim()) {
+        continue;
+      }
+      if (typeof headerValue !== 'string' || !headerValue.trim()) {
+        return { ok: false, error: `Header "${headerKey}" requires a non-empty value` };
+      }
+      headers[headerKey.trim()] = headerValue.trim();
+    }
+    if (Object.keys(headers).length > 0) {
+      normalized.options.headers = headers;
+    }
+  }
+
+  return { ok: true, value: { providerId, config: normalized } };
+};
+
+/**
+ * Persist (create or update) a custom provider block in OpenCode
+ * user/project/custom config scoped to the active runtime's working directory.
+ * Does not write secrets — API keys remain in auth.json via the OpenCode auth API.
+ */
+export const upsertProviderConfig = (
+  providerId: string,
+  config: Record<string, unknown>,
+  workingDirectory: string | undefined,
+  scope: ProviderConfigScope = 'user',
+  options: { hasStoredAuth?: boolean } = {},
+): { providerId: string; path: string; config: ValidatedProviderConfig } => {
+  const validated = validateCustomProviderConfig(providerId, config, options);
+  if (!validated.ok) {
+    const error = new Error(validated.error) as Error & { statusCode?: number };
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const layers = readConfigLayers(workingDirectory);
+  let targetPath: string | null | undefined = layers.paths.userPath;
+
+  if (scope === 'project') {
+    if (!workingDirectory) {
+      throw new Error('Working directory is required for project scope');
+    }
+    targetPath = layers.paths.projectPath ?? targetPath;
+  } else if (scope === 'custom') {
+    if (!layers.paths.customPath) {
+      throw new Error('Custom config path (OPENCODE_CONFIG) is not set');
+    }
+    targetPath = layers.paths.customPath;
+  }
+
+  const targetConfig = getConfigForPath(layers, targetPath) as Record<string, unknown>;
+  const providerConfig = isPlainObject(targetConfig.provider)
+    ? { ...targetConfig.provider as Record<string, unknown> }
+    : {};
+  providerConfig[validated.value.providerId] = validated.value.config;
+  targetConfig.provider = providerConfig;
+
+  if (Array.isArray(targetConfig.disabled_providers)) {
+    targetConfig.disabled_providers = (targetConfig.disabled_providers as unknown[])
+      .filter((entry) => entry !== validated.value.providerId);
+  }
+
+  const writePath = targetPath || CONFIG_FILE;
+  writeConfig(targetConfig, writePath);
+
+  return {
+    providerId: validated.value.providerId,
+    path: writePath,
+    config: validated.value.config,
+  };
 };
 
 export const deleteCommand = (commandName: string, workingDirectory?: string) => {

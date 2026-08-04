@@ -25,6 +25,16 @@ import { resolveApiUrl } from '@/lib/api/serverUrl';
 import { useSettingsServerBaseUrl } from '@/hooks/useSettingsServerBaseUrl';
 import { useSettingsProviders } from './useSettingsProviders';
 import { OpenCodeGoCredentials } from './OpenCodeGoCredentials';
+import { CustomProviderForm } from './CustomProviderForm';
+import {
+  buildAuthSetRequest,
+  buildProviderUpsertRequest,
+  isConfigDefinedCustomProvider,
+  providerToCustomFormState,
+  resolveProviderConfigScope,
+  type CustomProviderFormState,
+  type CustomProviderPersistPlan,
+} from './custom-provider-form';
 
 const COMPACT_NUMBER_FORMATTER = new Intl.NumberFormat('en-US', {
   notation: 'compact',
@@ -177,6 +187,12 @@ export const ProvidersPage: React.FC = () => {
   const [providerDropdownOpen, setProviderDropdownOpen] = React.useState(false);
   const [providerSources, setProviderSources] = React.useState<Record<string, ProviderSources>>({});
   const [showAuthPanel, setShowAuthPanel] = React.useState(false);
+  const [customMode, setCustomMode] = React.useState<'idle' | 'create' | 'edit'>('idle');
+  const [customInitial, setCustomInitial] = React.useState<CustomProviderFormState | null>(null);
+  const [customEditProviderId, setCustomEditProviderId] = React.useState<string | null>(null);
+  const [customAllowExistingAuth, setCustomAllowExistingAuth] = React.useState(false);
+  const [customBusy, setCustomBusy] = React.useState(false);
+  const [customAuthFailure, setCustomAuthFailure] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     if (!selectedProviderId && providers.length > 0) {
@@ -525,6 +541,99 @@ export const ProvidersPage: React.FC = () => {
 
   const isAddMode = selectedProviderId === ADD_PROVIDER_ID;
 
+  const openCreateCustomProvider = () => {
+    setCustomMode('create');
+    setCustomInitial(null);
+    setCustomEditProviderId(null);
+    setCustomAllowExistingAuth(false);
+    setCustomAuthFailure(null);
+  };
+
+  const openEditCustomProvider = (providerId: string) => {
+    const provider = providers.find((p) => p.id === providerId);
+    if (!provider) return;
+    setCustomMode('edit');
+    setCustomInitial(providerToCustomFormState(provider));
+    setCustomEditProviderId(providerId);
+    const sources = providerSources[providerId];
+    setCustomAllowExistingAuth(Boolean(sources?.auth?.exists));
+    setCustomAuthFailure(null);
+    setSelectedProvider(providerId);
+  };
+
+  const closeCustomProvider = () => {
+    setCustomMode('idle');
+    setCustomInitial(null);
+    setCustomEditProviderId(null);
+    setCustomAllowExistingAuth(false);
+    setCustomAuthFailure(null);
+    setCustomBusy(false);
+  };
+
+  const submitCustomProvider = async (plan: CustomProviderPersistPlan) => {
+    setCustomBusy(true);
+    setCustomAuthFailure(null);
+    try {
+      const isEdit = customMode === 'edit';
+      const editingId = isEdit ? customEditProviderId : null;
+      const sources = editingId ? providerSources[editingId] : null;
+      const scope = isEdit ? resolveProviderConfigScope(sources) : 'user';
+
+      const authRequest = buildAuthSetRequest(plan);
+      if (authRequest) {
+        const authResponse = await fetch(resolveApiUrl('/api/provider/auth', baseUrl), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body: JSON.stringify(authRequest),
+        });
+        if (!authResponse.ok) {
+          const payload = await authResponse.json().catch(() => null);
+          throw new Error(payload?.error || `Auth save failed (${authResponse.status})`);
+        }
+      }
+
+      let configSaveFailed = false;
+      try {
+        const upsert = buildProviderUpsertRequest(plan, { scope });
+        const response = await fetch(resolveApiUrl('/api/provider', baseUrl), {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body: JSON.stringify(upsert),
+        });
+        if (!response.ok) {
+          configSaveFailed = true;
+          const payload = await response.json().catch(() => null);
+          throw new Error(payload?.error || `Provider config save failed (${response.status})`);
+        }
+      } catch (configError) {
+        if (authRequest) {
+          setCustomAuthFailure(t('settings.providers.page.custom.authFailure.configAfterAuth'));
+          setCustomBusy(false);
+          return;
+        }
+        throw configError;
+      }
+
+      if (configSaveFailed && authRequest) {
+        setCustomAuthFailure(t('settings.providers.page.custom.authFailure.configAfterAuth'));
+        setCustomBusy(false);
+        return;
+      }
+
+      toast.success(
+        isEdit
+          ? t('settings.providers.page.toast.providerUpdated', { provider: plan.name })
+          : t('settings.providers.page.toast.providerAdded', { provider: plan.name }),
+      );
+      await reloadOpenCodeConfiguration();
+      closeCustomProvider();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : t('settings.providers.page.toast.saveFailed'));
+    } finally {
+      setCustomBusy(false);
+    }
+  };
+
   if (status === 'loading') {
     return (
       <div className="flex h-full items-center justify-center">
@@ -549,6 +658,23 @@ export const ProvidersPage: React.FC = () => {
   }
 
   if (isAddMode) {
+    if (customMode === 'create') {
+      return (
+        <ScrollableOverlay outerClassName="h-full" className="w-full">
+          <div className="mx-auto w-full max-w-3xl p-3 sm:p-6 sm:pt-8">
+            <CustomProviderForm
+              existingProviderIDs={new Set(providers.map((p) => p.id))}
+              busy={customBusy}
+              mode="create"
+              authFailureHint={customAuthFailure}
+              onSubmit={(plan) => void submitCustomProvider(plan)}
+              onCancel={closeCustomProvider}
+            />
+          </div>
+        </ScrollableOverlay>
+      );
+    }
+
     return (
       <ScrollableOverlay outerClassName="h-full" className="w-full">
         <div className="mx-auto w-full max-w-3xl p-3 sm:p-6 sm:pt-8">
@@ -648,6 +774,16 @@ export const ProvidersPage: React.FC = () => {
                    )}
               </div>
             </section>
+
+            <div className="px-2 pb-2">
+              <button
+                type="button"
+                onClick={openCreateCustomProvider}
+                className="typography-ui-label text-[var(--primary-base)] hover:underline"
+              >
+                {t('settings.providers.page.custom.optionLabel')}
+              </button>
+            </div>
           </div>
 
           {candidateProviderId && (
@@ -820,6 +956,27 @@ export const ProvidersPage: React.FC = () => {
     if (!query) return true;
     return name.toLowerCase().includes(query) || id.toLowerCase().includes(query);
   });
+
+  if (customMode === 'edit' && customEditProviderId) {
+    return (
+      <ScrollableOverlay outerClassName="h-full" className="w-full">
+        <div className="mx-auto w-full max-w-3xl p-3 sm:p-6 sm:pt-8">
+          <CustomProviderForm
+            existingProviderIDs={new Set(providers.map((p) => p.id))}
+            disabledProviders={[customEditProviderId]}
+            busy={customBusy}
+            mode="edit"
+            initialValues={customInitial ?? undefined}
+            allowExistingAuth={customAllowExistingAuth}
+            authFailureHint={customAuthFailure}
+            onSubmit={(plan) => void submitCustomProvider(plan)}
+            onCancel={closeCustomProvider}
+            onDisconnect={() => handleDisconnectProvider(customEditProviderId)}
+          />
+        </div>
+      </ScrollableOverlay>
+    );
+  }
 
   return (
     <ScrollableOverlay outerClassName="h-full" className="w-full">
@@ -1013,15 +1170,33 @@ export const ProvidersPage: React.FC = () => {
                 )}
               </div>
 
-              <Button
-                variant="ghost"
-                size="xs"
-                className="!font-normal text-[var(--status-error)] hover:text-[var(--status-error)]"
-                onClick={() => handleDisconnectProvider(selectedProvider.id)}
-                disabled={authBusyKey === `disconnect:${selectedProvider.id}`}
-              >
-                {authBusyKey === `disconnect:${selectedProvider.id}` ? t('settings.providers.page.actions.disconnecting') : t('settings.providers.page.actions.disconnect')}
-              </Button>
+              <div className="flex items-center gap-2">
+                {(() => {
+                  const selected = providers.find((p) => p.id === selectedProviderId);
+                  if (!selected || !isConfigDefinedCustomProvider(selected, selectedSources)) {
+                    return null;
+                  }
+                  return (
+                    <Button
+                      variant="ghost"
+                      size="xs"
+                      className="!font-normal"
+                      onClick={() => openEditCustomProvider(selected.id)}
+                    >
+                      {t('settings.providers.page.actions.edit')}
+                    </Button>
+                  );
+                })()}
+                <Button
+                  variant="ghost"
+                  size="xs"
+                  className="!font-normal text-[var(--status-error)] hover:text-[var(--status-error)]"
+                  onClick={() => handleDisconnectProvider(selectedProvider.id)}
+                  disabled={authBusyKey === `disconnect:${selectedProvider.id}`}
+                >
+                  {authBusyKey === `disconnect:${selectedProvider.id}` ? t('settings.providers.page.actions.disconnecting') : t('settings.providers.page.actions.disconnect')}
+                </Button>
+              </div>
             </div>
           </section>
         </div>

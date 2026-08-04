@@ -58,4 +58,35 @@ describe('core-routes', () => {
 
     expect(response.body).toEqual({ body: { content: 'Snippet body' } });
   });
+
+  it('should parse JSON bodies for custom provider upsert routes', async () => {
+    const app = express();
+    registerCommonRequestMiddleware(app, { express });
+    app.put('/api/provider', (req, res) => {
+      res.json({ body: req.body });
+    });
+
+    const response = await request(app)
+      .put('/api/provider')
+      .send({
+        providerID: 'campus-llm',
+        config: {
+          name: 'Campus LLM',
+          options: { baseURL: 'https://llm.example.edu/v1' },
+          models: { fast: { name: 'Fast' } },
+        },
+      })
+      .expect(200);
+
+    expect(response.body).toEqual({
+      body: {
+        providerID: 'campus-llm',
+        config: {
+          name: 'Campus LLM',
+          options: { baseURL: 'https://llm.example.edu/v1' },
+          models: { fast: { name: 'Fast' } },
+        },
+      },
+    });
+  });
 });
