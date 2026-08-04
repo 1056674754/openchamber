@@ -304,6 +304,7 @@ export const GitView: React.FC = () => {
   const fetchLog = useGitStore((state) => state.fetchLog);
   const fetchIdentity = useGitStore((state) => state.fetchIdentity);
   const prefetchDiffs = useGitStore((state) => state.prefetchDiffs);
+  const clearDiffCache = useGitStore((state) => state.clearDiffCache);
   const setLogMaxCount = useGitStore((state) => state.setLogMaxCount);
   const isMobile = useUIStore((state) => state.isMobile);
   const openContextDiff = useUIStore((state) => state.openContextDiff);
@@ -808,9 +809,12 @@ export const GitView: React.FC = () => {
       if (normalizePath(hint.directory) !== normalizePath(currentDirectory)) {
         return;
       }
-      void fetchStatus(currentDirectory, git);
+      if (hint.paths?.length) {
+        clearDiffCache(currentDirectory, hint.paths);
+      }
+      void fetchStatus(currentDirectory, git, { silent: true });
     });
-  }, [currentDirectory, fetchStatus, git]);
+  }, [clearDiffCache, currentDirectory, fetchStatus, git]);
 
   const refreshStatusAndBranches = React.useCallback(
     async (showErrors = true) => {

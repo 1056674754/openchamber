@@ -29,6 +29,7 @@ export const PendingChangesBar: React.FC = React.memo(() => {
     );
     const ensureStatus = useGitStore((s) => s.ensureStatus);
     const fetchStatus = useGitStore((s) => s.fetchStatus);
+    const clearDiffCache = useGitStore((s) => s.clearDiffCache);
 
     React.useEffect(() => {
         if (!isExpanded) return;
@@ -59,9 +60,12 @@ export const PendingChangesBar: React.FC = React.memo(() => {
         const git = runtime.git;
         return sessionEvents.onGitRefreshHint((hint) => {
             if (normalizePath(hint.directory) !== normalizePath(currentDirectory)) return;
-            void fetchStatus(currentDirectory, git);
+            if (hint.paths?.length) {
+                clearDiffCache(currentDirectory, hint.paths);
+            }
+            void fetchStatus(currentDirectory, git, { silent: true });
         });
-    }, [currentDirectory, runtime?.git, fetchStatus]);
+    }, [clearDiffCache, currentDirectory, runtime?.git, fetchStatus]);
 
     const gitChangedFiles = React.useMemo<GitChangedFile[]>(() => {
         if (isGitRepo !== true || !gitStatus || gitStatus.isClean) return [];

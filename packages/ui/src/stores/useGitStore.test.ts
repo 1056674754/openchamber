@@ -129,4 +129,22 @@ describe('useGitStore', () => {
 
     expect(result).toBe(true);
   });
+
+  test('clears cached file contents when a git refresh hint invalidates diffs', () => {
+    useGitStore.getState().setDiff('/repo', 'src/index.ts', { original: 'old', modified: 'stale' });
+
+    useGitStore.getState().clearDiffCache('/repo');
+
+    expect(useGitStore.getState().getDiff('/repo', 'src/index.ts')).toBe(null);
+  });
+
+  test('invalidates only the requested cached file contents', () => {
+    useGitStore.getState().setDiff('/repo', 'src/first.ts', { original: 'a', modified: 'b' });
+    useGitStore.getState().setDiff('/repo', 'src/second.ts', { original: 'c', modified: 'd' });
+
+    useGitStore.getState().clearDiffCache('/repo', ['src/first.ts']);
+
+    expect(useGitStore.getState().getDiff('/repo', 'src/first.ts')).toBe(null);
+    expect(useGitStore.getState().getDiff('/repo', 'src/second.ts')?.modified).toBe('d');
+  });
 });

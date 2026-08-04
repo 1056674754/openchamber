@@ -18,7 +18,7 @@ type DeleteListener = (request: SessionDeleteRequest) => void;
 type CreateListener = (request: SessionCreateRequest) => void;
 type DirectoryListener = () => void;
 type RemoteDirectoryListener = () => void;
-type GitRefreshHint = { directory: string };
+type GitRefreshHint = { directory: string; paths?: string[] };
 type GitRefreshListener = (hint: GitRefreshHint) => void;
 
 const deleteListeners = new Set<DeleteListener>();

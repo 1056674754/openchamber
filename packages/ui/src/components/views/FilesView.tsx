@@ -70,6 +70,7 @@ import { isBrowserClientRuntime, openDesktopFileInApp, openDesktopPath } from '@
 import { useOpenInAppsStore } from '@/stores/useOpenInAppsStore';
 import { eventMatchesShortcut, getEffectiveShortcutCombo } from '@/lib/shortcuts';
 import { useI18n } from '@/lib/i18n';
+import { sessionEvents } from '@/lib/sessionEvents';
 import { useActiveServerBaseUrl } from '@/hooks/useActiveServerId';
 import { resolveApiUrl } from '@/lib/api/serverUrl';
 import { statFilesViewPath } from '@/lib/filesViewFileAccess';
@@ -1526,6 +1527,12 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
         return false;
       }
       setFileContent(draftContent);
+      if (root && selectedFile.path && isPathWithinRoot(selectedFile.path, root)) {
+        const relativePath = getDisplayPath(root, selectedFile.path);
+        if (relativePath) {
+          sessionEvents.requestGitRefresh({ directory: root, paths: [relativePath] });
+        }
+      }
       if (selectedFile?.path && isDrawioFile(selectedFile.path)) {
         diagramXmlRef.current = draftContent;
         diagramSavedXmlRef.current = draftContent;
@@ -1545,7 +1552,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
     } finally {
       setIsSaving(false);
     }
-  }, [contentDetectedBinary, draftContent, fileLoading, files, isDirty, loadedFilePath, readFileStat, selectedFile, t]);
+  }, [contentDetectedBinary, draftContent, fileLoading, files, isDirty, loadedFilePath, readFileStat, root, selectedFile, t]);
 
   React.useEffect(() => {
     if (!isDirty) {

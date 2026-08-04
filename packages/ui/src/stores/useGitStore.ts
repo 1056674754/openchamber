@@ -72,7 +72,7 @@ interface GitStore {
 
   getDiff: (directory: string, filePath: string) => { original: string; modified: string; fetchedAt: number; isBinary?: boolean } | null;
   setDiff: (directory: string, filePath: string, diff: { original: string; modified: string; isBinary?: boolean }) => void;
-  clearDiffCache: (directory: string) => void;
+  clearDiffCache: (directory: string, filePaths?: string[]) => void;
   fetchAllDiffs: (directory: string, git: GitAPI) => Promise<void>;
   prefetchDiffs: (directory: string, git: GitAPI, filePaths: string[], options?: { maxFiles?: number }) => Promise<void>;
 
@@ -590,14 +590,24 @@ export const useGitStore = create<GitStore>()(
         set({ directories: newDirectories });
       },
 
-      clearDiffCache: (directory) => {
+      clearDiffCache: (directory, filePaths) => {
         bumpDiffFetchGeneration(directory);
         const newDirectories = new Map(get().directories);
         const dirState = newDirectories.get(directory);
-        if (dirState) {
-          newDirectories.set(directory, { ...dirState, diffCache: new Map() });
-          set({ directories: newDirectories });
+        if (!dirState || dirState.diffCache.size === 0) return;
+
+        const nextDiffCache = new Map(dirState.diffCache);
+        if (filePaths) {
+          for (const filePath of filePaths) {
+            nextDiffCache.delete(filePath);
+          }
+        } else {
+          nextDiffCache.clear();
         }
+        if (nextDiffCache.size === dirState.diffCache.size) return;
+
+        newDirectories.set(directory, { ...dirState, diffCache: nextDiffCache });
+        set({ directories: newDirectories });
       },
 
       fetchAllDiffs: async (directory, git) => {
