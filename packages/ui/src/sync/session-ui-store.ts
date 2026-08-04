@@ -42,7 +42,13 @@ import {
   registerSessionDirectory,
   getSessionDirectoryFromRoutingIndex,
   getSyncChildStores,
+  getSyncSessionDirectory,
 } from "./sync-refs"
+import {
+  resolveSessionDirectoryFromSources,
+  type SessionDirectoryResolution,
+  type SessionDirectorySources,
+} from "./session-directory-resolution"
 import { markSessionViewed } from "./notification-store"
 import { deleteShield } from "./delete-shield"
 import { setActiveSession } from "./sync-context"
@@ -423,6 +429,7 @@ export type SessionUIState = {
   debugSessionMessages: (sessionId: string) => Promise<void>
   pollForTokenUpdates: () => void
   setSessionDirectory: (sessionId: string, directory: string | null) => void
+  adoptAuthoritativeSessionDirectory: (sessionId?: string) => void
 }
 
 // ---------------------------------------------------------------------------
@@ -491,37 +498,84 @@ const getAttachmentForSession = (sessionId: string | null | undefined): SessionW
   return useSessionWorktreeStore.getState().getAttachment(sessionId)
 }
 
+const getAuthoritativeSessionDirectory = (
+  sessionId: string,
+  serverId?: string,
+): string | null => {
+  const target = serverId && serverId !== DEFAULT_SERVER_ID
+    ? (() => {
+        const remoteStores = getSyncStoresForServer(serverId)
+        if (remoteStores) {
+          for (const store of remoteStores.children.values()) {
+            const found = store.getState().session.find((s) => s.id === sessionId)
+            if (found) return found
+          }
+        }
+        return undefined
+      })()
+    : getAllSyncSessions().find((s) => s.id === sessionId)
+  const recordDirectory = target ? resolveDirectoryKey(target) : null
+  if (recordDirectory) return normalizePath(recordDirectory)
+  const owningDirectory = getSyncSessionDirectory(sessionId)
+  return owningDirectory ? normalizePath(owningDirectory) : null
+}
+
+let guessedSelectionSessionId: string | null = null
+
+const collectSessionDirectorySources = (
+  sessionId: string,
+  getWtMeta: (id: string) => WorktreeMetadata | undefined,
+  serverId?: string,
+): SessionDirectorySources => ({
+  authoritative: getAuthoritativeSessionDirectory(sessionId, serverId),
+  selected: null,
+  attachment: getAttachedSessionDirectory(getAttachmentForSession(sessionId)),
+  worktreeMetadata: normalizePath(getWtMeta(sessionId)?.path ?? null),
+  remembered: null,
+})
+
+const reportedDirectoryConflicts = new Set<string>()
+const MAX_REPORTED_DIRECTORY_CONFLICTS = 200
+
+const reportSessionDirectoryConflict = (
+  sessionId: string,
+  resolution: SessionDirectoryResolution,
+): void => {
+  if (!resolution.conflict) return
+  const conflictKey = JSON.stringify([
+    sessionId,
+    resolution.directory,
+    resolution.conflict.source,
+    resolution.conflict.directory,
+  ])
+  if (reportedDirectoryConflicts.has(conflictKey)) return
+  if (reportedDirectoryConflicts.size >= MAX_REPORTED_DIRECTORY_CONFLICTS) {
+    reportedDirectoryConflicts.clear()
+  }
+  reportedDirectoryConflicts.add(conflictKey)
+  console.warn(
+    "[session-directory] session directory sources disagree; using the higher-authority one.",
+    {
+      sessionId,
+      using: resolution.source,
+      directory: resolution.directory,
+      conflictingSource: resolution.conflict.source,
+      conflictingDirectory: resolution.conflict.directory,
+    },
+  )
+}
+
 const resolveSessionDirectory = (
   sessionId: string | null | undefined,
   getWtMeta: (id: string) => WorktreeMetadata | undefined,
   serverId?: string,
 ): string | null => {
   if (!sessionId) return null
-  const attachmentDirectory = getAttachedSessionDirectory(getAttachmentForSession(sessionId))
-  if (attachmentDirectory) return attachmentDirectory
-  const metaPath = getWtMeta(sessionId)?.path
-  if (typeof metaPath === "string" && metaPath.trim().length > 0) return normalizePath(metaPath)
-
-  // If serverId is known and remote, search ONLY that server's child stores.
-  // Never fall back to local when the session is known to be remote.
-  if (serverId && serverId !== DEFAULT_SERVER_ID) {
-    const remoteStores = getSyncStoresForServer(serverId)
-    if (remoteStores) {
-      for (const store of remoteStores.children.values()) {
-        const target = store.getState().session.find((s) => s.id === sessionId)
-        if (target) return resolveDirectoryKey(target)
-      }
-    }
-    // Remote server's stores don't contain this session yet.
-    // Do NOT fall back to local — return null and let directoryHint handle it.
-    return null
-  }
-
-  // No serverId or DEFAULT — search local child stores only (not getAllSyncSessions).
-  const sessions = getSyncSessions()
-  const target = sessions.find((s) => s.id === sessionId)
-  if (!target) return null
-  return resolveDirectoryKey(target)
+  const resolution = resolveSessionDirectoryFromSources(
+    collectSessionDirectorySources(sessionId, getWtMeta, serverId),
+  )
+  reportSessionDirectoryConflict(sessionId, resolution)
+  return resolution.directory
 }
 
 const findServerIdForLoadedSession = (
@@ -756,6 +810,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       resolvedServerId,
     )
     const resolvedDir = sessionDir ?? inferredDirectory
+    guessedSelectionSessionId = (!sessionDir && id) ? id : null
 
     if (id && resolvedServerId && resolvedServerId !== DEFAULT_SERVER_ID && !resolvedDir) {
       set({ error: `Directory for remote session ${id} on ${resolvedServerId} is not available` })
@@ -2026,15 +2081,12 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
   },
 
   getDirectoryForSession: (sessionId) => {
-    const attachmentDirectory = getAttachedSessionDirectory(getAttachmentForSession(sessionId))
-    if (attachmentDirectory) return attachmentDirectory
-
-    const metaPath = get().worktreeMetadata.get(sessionId)?.path
-    if (typeof metaPath === "string" && metaPath.trim().length > 0) return normalizePath(metaPath)
-
-    const sessions = getAllSyncSessions()
-    const session = sessions.find((s) => s.id === sessionId)
-    if (session) return resolveDirectoryKey(session)
+    const resolved = resolveSessionDirectory(
+      sessionId,
+      (sid) => get().worktreeMetadata.get(sid),
+      serverRegistry.getServerForSession(sessionId),
+    )
+    if (resolved) return resolved
 
     const globalState = useGlobalSessionsStore.getState()
     const globalSession =
@@ -2101,9 +2153,22 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     // Handled by sync system's SSE stream
   },
 
-  setSessionDirectory: () => {
-    // Session directory is owned by sync child stores via SSE events.
-    // This is now a no-op — kept for interface compatibility during migration.
+  setSessionDirectory: (sessionId) => {
+    if (sessionId === guessedSelectionSessionId) {
+      guessedSelectionSessionId = null
+    }
+  },
+
+  adoptAuthoritativeSessionDirectory: (sessionId) => {
+    const target = sessionId ?? get().currentSessionId
+    if (!target || target !== guessedSelectionSessionId) return
+
+    const serverId = serverRegistry.getServerForSession(target)
+    const authoritative = getAuthoritativeSessionDirectory(target, serverId)
+    if (!authoritative) return
+
+    guessedSelectionSessionId = null
+    registerSessionDirectory(target, authoritative)
   },
 
   // ---------------------------------------------------------------------------

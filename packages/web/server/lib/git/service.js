@@ -338,17 +338,20 @@ const createGit = async (directory) => {
   const binary = getGitBinary();
   const hasCustomBinary = typeof binary === 'string' && binary.trim() && binary !== 'git' && binary !== 'git.exe';
   const unsafe = hasCustomBinary ? { allowUnsafeCustomBinary: true } : undefined;
-  if (!directory) {
-    return simpleGit({ env, spawnOptions, binary, unsafe });
+  const baseDir = normalizeDirectoryPath(directory);
+  if (typeof baseDir !== 'string' || !baseDir.trim()) {
+    throw new Error('Git directory is required');
   }
   return simpleGit({
-    baseDir: normalizeDirectoryPath(directory),
+    baseDir,
     env,
     spawnOptions,
     binary,
     unsafe,
   });
 };
+
+const createGitForGlobalConfig = async () => createGit(os.homedir());
 
 const normalizeDirectoryPath = (value) => {
   if (typeof value !== 'string') {
@@ -442,6 +445,9 @@ const resolveGitRepositoryRoot = async (directoryPath, git) => {
 
 const createRepositoryGitContext = async (directory) => {
   const directoryPath = normalizeDirectoryPath(directory);
+  if (typeof directoryPath !== 'string' || !directoryPath.trim()) {
+    throw new Error('Git directory is required');
+  }
   const directoryGit = await createGit(directoryPath);
   const repoRoot = await resolveGitRepositoryRoot(directoryPath, directoryGit);
   const git = path.resolve(directoryPath) === repoRoot ? directoryGit : await createGit(repoRoot);
@@ -740,7 +746,8 @@ const parseGitErrorText = (error) => {
   const stderr = error?.stderr == null ? '' : String(error.stderr);
   const stdout = error?.stdout == null ? '' : String(error.stdout);
   const message = error?.message == null ? '' : String(error.message);
-  return [stderr, stdout, message]
+  const fallback = !message && error != null ? String(error) : '';
+  return [stderr, stdout, message, fallback]
     .map((chunk) => String(chunk || '').trim())
     .filter(Boolean)
     .join('\n')
@@ -1403,7 +1410,7 @@ export async function isGitRepository(directory) {
 }
 
 export async function getGlobalIdentity() {
-  const git = await createGit();
+  const git = await createGitForGlobalConfig();
 
   try {
     const userName = await git.getConfig('user.name', 'global').catch(() => null);
@@ -1527,9 +1534,17 @@ export async function setLocalIdentity(directory, profile) {
 
 export async function getStatus(directory, options = {}) {
   const lightMode = options.mode === 'light';
+  const normalizedDirectory = normalizeDirectoryPath(directory);
+  if (typeof normalizedDirectory !== 'string' || !normalizedDirectory.trim()) {
+    throw new Error('directory is required');
+  }
 
   try {
-    const { repoRoot, git } = await createRepositoryGitContext(directory);
+    if (!(await isGitRepository(normalizedDirectory))) {
+      throw new Error('fatal: not a git repository (or any of the parent directories): .git');
+    }
+
+    const { repoRoot, git } = await createRepositoryGitContext(normalizedDirectory);
 
     // Use -uall to show all untracked files individually, not just directories
     const status = await git.status(['-uall']);
@@ -1772,9 +1787,10 @@ export async function getStatus(directory, options = {}) {
       rebaseInProgress,
     };
   } catch (error) {
-    if (!isNotGitRepositoryError(error) && !isMissingDirectoryError(error)) {
-      console.error('Failed to get Git status:', error);
+    if (isNotGitRepositoryError(error) || isMissingDirectoryError(error)) {
+      throw new Error('fatal: not a git repository (or any of the parent directories): .git');
     }
+    console.error('Failed to get Git status:', error);
     throw error;
   }
 }

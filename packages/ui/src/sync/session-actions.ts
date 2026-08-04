@@ -14,6 +14,7 @@ import { requireSessionAuthority, UnresolvedSessionServerError } from "./session
 import { useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
 import { useConfigStore } from "@/stores/useConfigStore"
 import { registerSessionDirectory } from "./sync-refs"
+import { recordSendFailure } from "./send-failure-log"
 import { isSyntheticPart } from "@/lib/messages/synthetic"
 import { serverRegistry, DEFAULT_SERVER_ID } from "@/lib/opencode/server-registry"
 import { getSyncStoresForServer, getAllSyncStores } from "./multi-server-registry"
@@ -1290,6 +1291,17 @@ export async function optimisticSend(input: {
       confirmRevertedShadows()
       return
     }
+
+    const ambiguousFailure = isAmbiguousSendFailure(error)
+    recordSendFailure({
+      sessionId: input.sessionId,
+      messageId: messageID,
+      directory: targetDirectory ?? null,
+      status: getErrorStatus(error),
+      ambiguous: ambiguousFailure,
+      confirmationChecked: ambiguousFailure,
+      reason: error instanceof Error ? error.message : String(error),
+    })
 
     // Rollback via optimistic infrastructure
     _optimisticRemove({

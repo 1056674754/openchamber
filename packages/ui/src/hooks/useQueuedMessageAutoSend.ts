@@ -18,12 +18,41 @@ import {
 
 const RECENT_ABORT_WINDOW_MS = 2000;
 
-const hasRecentAbort = (sessionId: string): boolean => {
+export const createQueuedAutoSendRetryScheduler = (
+  onWake: () => void,
+  now: () => number = Date.now,
+  scheduleTimeout: (callback: () => void, delay: number) => ReturnType<typeof setTimeout> = setTimeout,
+  cancelTimeout: (timer: ReturnType<typeof setTimeout>) => void = clearTimeout,
+) => {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  let scheduledAt: number | null = null;
+
+  return {
+    schedule(retryAt: number) {
+      if (scheduledAt !== null && scheduledAt <= retryAt) return;
+      if (timer !== null) cancelTimeout(timer);
+      scheduledAt = retryAt;
+      timer = scheduleTimeout(() => {
+        timer = null;
+        scheduledAt = null;
+        onWake();
+      }, Math.max(0, retryAt - now()));
+    },
+    dispose() {
+      if (timer !== null) cancelTimeout(timer);
+      timer = null;
+      scheduledAt = null;
+    },
+  };
+};
+
+const getAbortHoldUntil = (sessionId: string): number | null => {
   const abortRecord = useSessionUIStore.getState().sessionAbortFlags.get(sessionId);
   if (!abortRecord) {
-    return false;
+    return null;
   }
-  return Date.now() - abortRecord.timestamp < RECENT_ABORT_WINDOW_MS;
+  const holdUntil = abortRecord.timestamp + RECENT_ABORT_WINDOW_MS;
+  return Date.now() < holdUntil ? holdUntil : null;
 };
 
 const resolveSessionSendConfig = (sessionId: string) => {
@@ -78,6 +107,13 @@ export function useQueuedMessageAutoSend(enabledOrOptions?: boolean | { enabled?
   const sendFailuresRef = React.useRef<Map<string, QueuedAutoSendFailure>>(new Map());
   const previousStatusRef = React.useRef<Map<string, QueuedAutoSendSessionStatus>>(new Map());
   const autoReviewBlockedSessionsRef = React.useRef<Set<string>>(new Set());
+  const [retryTick, setRetryTick] = React.useState(0);
+  const retryScheduler = React.useMemo(
+    () => createQueuedAutoSendRetryScheduler(() => setRetryTick((value) => value + 1)),
+    [],
+  );
+
+  React.useEffect(() => () => retryScheduler.dispose(), [retryScheduler]);
 
   React.useEffect(() => {
     if (!enabled) {
@@ -99,7 +135,9 @@ export function useQueuedMessageAutoSend(enabledOrOptions?: boolean | { enabled?
       if (inFlightSessionsRef.current.has(sessionId)) {
         return;
       }
-      if (hasRecentAbort(sessionId)) {
+      const abortHoldUntil = getAbortHoldUntil(sessionId);
+      if (abortHoldUntil !== null) {
+        retryScheduler.schedule(abortHoldUntil);
         return;
       }
       if (useAutoReviewStore.getState().isRunningForSession(sessionId)) {
@@ -123,7 +161,8 @@ export function useQueuedMessageAutoSend(enabledOrOptions?: boolean | { enabled?
       const failure = sendFailuresRef.current.get(sessionId);
       if (failure && failure.messageId !== payload.queuedMessageId) {
         sendFailuresRef.current.delete(sessionId);
-      } else if (isQueuedAutoSendBackedOff(failure, payload.queuedMessageId, Date.now())) {
+      } else if (failure && isQueuedAutoSendBackedOff(failure, payload.queuedMessageId, Date.now())) {
+        retryScheduler.schedule(failure.nextAttemptAt);
         return;
       }
 
@@ -133,6 +172,7 @@ export function useQueuedMessageAutoSend(enabledOrOptions?: boolean | { enabled?
         ? captured
         : resolveSessionSendConfig(sessionId);
       if (!resolved.providerID || !resolved.modelID) {
+        retryScheduler.schedule(Date.now() + getQueuedAutoSendRetryDelayMs(1));
         return;
       }
 
@@ -180,11 +220,13 @@ export function useQueuedMessageAutoSend(enabledOrOptions?: boolean | { enabled?
         useMessageQueueStore.getState().restoreMessages(sessionId, [queuedMessage]);
         const priorFailures = failure?.messageId === payload.queuedMessageId ? failure.failures : 0;
         const failures = priorFailures + 1;
+        const nextAttemptAt = Date.now() + getQueuedAutoSendRetryDelayMs(failures);
         sendFailuresRef.current.set(sessionId, {
           messageId: payload.queuedMessageId,
           failures,
-          nextAttemptAt: Date.now() + getQueuedAutoSendRetryDelayMs(failures),
+          nextAttemptAt,
         });
+        retryScheduler.schedule(nextAttemptAt);
         console.warn('[queue] queued auto-send failed:', sendError);
       } finally {
         inFlightSessionsRef.current.delete(sessionId);
@@ -228,5 +270,5 @@ export function useQueuedMessageAutoSend(enabledOrOptions?: boolean | { enabled?
     });
 
     previousStatusRef.current = nextStatusMap;
-  }, [enabled, queuedMessages, liveSessionStatuses, globalSessionStatuses, autoReviewRuns]);
+  }, [enabled, queuedMessages, liveSessionStatuses, globalSessionStatuses, autoReviewRuns, retryTick, retryScheduler]);
 }

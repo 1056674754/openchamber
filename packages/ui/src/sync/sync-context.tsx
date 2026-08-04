@@ -1934,11 +1934,11 @@ export function SyncProvider(props: {
       }
 
       runBootstrap(0).then(() => {
-        // Post-bootstrap status refresh: if SSE is already connected when
-        // bootstrap finishes, the session_status from Phase 1 may be stale
-        // (SSE could have delivered session.idle while bootstrap was in-flight
-        // but the child store didn't exist yet). Trigger a recovery resync to
-        // pick up the authoritative live status from the server.
+        if (store.getState().status === "complete") {
+          void import("./session-ui-store").then(({ useSessionUIStore }) => {
+            useSessionUIStore.getState().adoptAuthoritativeSessionDirectory()
+          })
+        }
         const { isConnected } = useConfigStore.getState().getConnectionState(serverId)
         if (isConnected && store.getState().status === "complete") {
           void resyncDirectoryAfterReconnect(directory, store, routingIndex, serverId, props.sdk).catch(() => {})

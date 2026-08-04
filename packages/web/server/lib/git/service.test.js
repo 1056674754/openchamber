@@ -209,6 +209,40 @@ describe('getStatus', () => {
       errorSpy.mockRestore();
     }
   });
+
+  it('rejects a non-git folder without using process.cwd()', async () => {
+    if (!canRunGit()) return;
+
+    const nonGit = createTempDir();
+    const previousCwd = process.cwd();
+    process.chdir(nonGit);
+    try {
+      await expect(getStatus(nonGit)).rejects.toThrow(/not a git repository/i);
+    } finally {
+      process.chdir(previousCwd);
+    }
+  });
+
+  it('reads status for a git repo when process.cwd() is elsewhere', async () => {
+    if (!canRunGit()) return;
+
+    const repo = createTempDir();
+    const neutralCwd = createTempDir();
+    runGit(repo, ['init', '-b', 'main']);
+    runGit(repo, ['config', 'user.email', 'test@example.com']);
+    runGit(repo, ['config', 'user.name', 'Test User']);
+    fs.writeFileSync(path.join(repo, 'README.md'), '# Test\n');
+    runGit(repo, ['add', 'README.md']);
+    runGit(repo, ['commit', '-m', 'Initial commit']);
+
+    const previousCwd = process.cwd();
+    process.chdir(neutralCwd);
+    try {
+      await expect(getStatus(repo)).resolves.toBeDefined();
+    } finally {
+      process.chdir(previousCwd);
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------

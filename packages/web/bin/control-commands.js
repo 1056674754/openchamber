@@ -9,6 +9,8 @@ import {
 
 const DEFAULT_SERVER_ID = 'default';
 const DEFAULT_WAIT_TIMEOUT_SECONDS = 600;
+const WAIT_HTTP_TIMEOUT_BUFFER_MS = 30_000;
+const WORKTREE_PROVISION_TIMEOUT_MS = 120_000;
 
 class ControlCliError extends Error {
   constructor(message, exitCode = 1) {
@@ -97,13 +99,21 @@ export const createControlCommands = ({ resolveTargetInstance, requestJson }) =>
       options,
       allowAutoStart: false,
     });
+    const provisionsWorktree = asNonEmptyString(input?.worktree) !== null;
     const waitSeconds = input.wait === true
       ? positiveInteger(input.timeout, DEFAULT_WAIT_TIMEOUT_SECONDS, '--timeout')
       : 0;
+    let timeoutMs;
+    if (waitSeconds > 0) {
+      timeoutMs = (waitSeconds * 1000) + WAIT_HTTP_TIMEOUT_BUFFER_MS;
+      if (provisionsWorktree) timeoutMs += WORKTREE_PROVISION_TIMEOUT_MS;
+    } else if (provisionsWorktree) {
+      timeoutMs = WORKTREE_PROVISION_TIMEOUT_MS;
+    }
     const { response, body } = await requestJson(target.port, '/api/openchamber/control', {
       method: 'POST',
       body: JSON.stringify({ action, input }),
-      ...(waitSeconds ? { timeoutMs: (waitSeconds * 1000) + 30_000 } : {}),
+      ...(timeoutMs ? { timeoutMs } : {}),
     });
     if (response?.ok) return body;
     const partial = body?.partial === true && body?.sessionId

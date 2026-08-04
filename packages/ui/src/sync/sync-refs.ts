@@ -143,6 +143,43 @@ export function getAllSyncSessions() {
   return Array.from(deduped.values())
 }
 
+/**
+ * Directory of the child store that actually holds this session.
+ *
+ * This is the authoritative session→directory mapping: a session is present in
+ * exactly the store for the directory it belongs to, regardless of whether the
+ * server populated `session.directory` on the record itself. Returns `null`
+ * when no initialized child store contains the session, which means "unknown",
+ * never "no directory".
+ *
+ * Multi-server: scans both the default child stores and all registered remote
+ * server stores so the owning directory is found regardless of which instance
+ * the session lives on.
+ */
+export function getSyncSessionDirectory(sessionId: string): string | null {
+  if (!sessionId) return null
+
+  if (_childStores) {
+    for (const [directory, store] of _childStores.children) {
+      const sessions = store.getState().session
+      for (const session of sessions) {
+        if (session?.id === sessionId) return directory
+      }
+    }
+  }
+
+  for (const entry of getAllSyncStores()) {
+    for (const [directory, store] of entry.childStores.children) {
+      const sessions = store.getState().session
+      for (const session of sessions) {
+        if (session?.id === sessionId) return directory
+      }
+    }
+  }
+
+  return null
+}
+
 /** Read messages for a session from current directory's child store */
 export function getSyncMessages(sessionId: string, directory?: string) {
   return getDirectoryState(directory)?.message[sessionId] ?? []

@@ -52,4 +52,63 @@ describe('OpenChamber control CLI policy', () => {
     expect(resolveTargetInstance).not.toHaveBeenCalled();
     expect(requestJson).not.toHaveBeenCalled();
   });
+
+  test('allows a worktree to be provisioned without waiting for the session', async () => {
+    const resolveTargetInstance = mock(async () => ({ port: 5190 }));
+    const requestJson = mock(async () => ({
+      response: { ok: true },
+      body: { sessionId: 'ses_new' },
+    }));
+    const commands = createControlCommands({ resolveTargetInstance, requestJson });
+
+    await commands.session({
+      serverId: 'default',
+      directory: '/workspace/current',
+      name: 'Feature',
+      worktree: 'feature',
+    }, 'create');
+
+    const call = requestJson.mock.calls[0];
+    expect(call[2].timeoutMs).toBe(120_000);
+  });
+
+  test('ignores a blank worktree name for timeout purposes', async () => {
+    const resolveTargetInstance = mock(async () => ({ port: 5190 }));
+    const requestJson = mock(async () => ({
+      response: { ok: true },
+      body: { sessionId: 'ses_new' },
+    }));
+    const commands = createControlCommands({ resolveTargetInstance, requestJson });
+
+    await commands.session({
+      serverId: 'default',
+      directory: '/workspace/current',
+      name: 'Feature',
+      worktree: '   ',
+    }, 'create');
+
+    const call = requestJson.mock.calls[0];
+    expect(call[2].timeoutMs).toBeUndefined();
+  });
+
+  test('covers provisioning and waiting in sequence when both are requested', async () => {
+    const resolveTargetInstance = mock(async () => ({ port: 5190 }));
+    const requestJson = mock(async () => ({
+      response: { ok: true },
+      body: { sessionId: 'ses_new' },
+    }));
+    const commands = createControlCommands({ resolveTargetInstance, requestJson });
+
+    await commands.session({
+      serverId: 'default',
+      directory: '/workspace/current',
+      name: 'Feature',
+      worktree: 'feature',
+      wait: true,
+      timeout: 30,
+    }, 'create');
+
+    const call = requestJson.mock.calls[0];
+    expect(call[2].timeoutMs).toBe(180_000);
+  });
 });

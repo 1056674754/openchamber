@@ -14,6 +14,8 @@ const { useConfigStore } = await import('@/stores/useConfigStore');
 const { useProjectsStore } = await import('@/stores/useProjectsStore');
 const { useSelectionStore } = await import('./selection-store');
 const { useSessionWorktreeStore } = await import('./session-worktree-store');
+const { ChildStoreManager } = await import('./child-store');
+const { setSyncRefs } = await import('./sync-refs');
 const {
   expandSlashCommandGoalObjective,
   materializeOpenDraftSession,
@@ -59,7 +61,7 @@ describe('slash-command goal objectives', () => {
 
 describe('session-worktree-store worktree routing', () => {
   beforeEach(() => {
-    // Clear all attachments before each test
+    setSyncRefs({}, new ChildStoreManager(), '/repo');
     const store = useSessionWorktreeStore.getState();
     const attachments = store.attachments;
     for (const sessionId of attachments.keys()) {
