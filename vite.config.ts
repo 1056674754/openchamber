@@ -33,9 +33,22 @@ export default defineConfig({
       external: ['node:child_process', 'node:fs', 'node:path', 'node:url'],
       output: {
         manualChunks(id) {
+          // Pin Vite's tiny runtime helpers to their own stable chunk. Otherwise
+          // Rollup co-locates the `__vitePreload` helper into an arbitrary vendor
+          // chunk, and since every dynamic import pulls the helper, that whole
+          // vendor gets dragged into the eager bootstrap graph.
+          if (id.includes('vite/preload-helper') || id.includes('vite/modulepreload-polyfill')) {
+            return 'vendor-vite-runtime'
+          }
           if (!id.includes('node_modules')) return undefined
 
-          const match = id.split('node_modules/')[1]
+          // Resolve the real package from the LAST `node_modules/` segment.
+          // bun's isolated install nests packages as
+          // `node_modules/.bun/<pkg>@<ver>/node_modules/<pkg>/...`, so the first
+          // `node_modules/` segment is `.bun` — using it collapses every dependency
+          // (incl. lazy-only ones) into a single giant eager `vendor-.bun` chunk.
+          const lastNodeModules = id.lastIndexOf('node_modules/')
+          const match = id.slice(lastNodeModules + 'node_modules/'.length)
           if (!match) return undefined
 
           const segments = match.split('/')
@@ -46,6 +59,8 @@ export default defineConfig({
           if (packageName === '@opencode-ai/sdk') return 'vendor-opencode-sdk'
           if (packageName.includes('remark') || packageName.includes('rehype') || packageName === 'react-markdown') return 'vendor-markdown'
           if (packageName === '@base-ui/react' || packageName.startsWith('@base-ui')) return 'vendor-base-ui'
+          // Fork keeps react-syntax-highlighter (no Shiki migration), so this rule
+          // stays — upstream dropped it because they migrated to Shiki.
           if (packageName.includes('react-syntax-highlighter') || packageName.includes('highlight.js')) return 'vendor-syntax'
 
           const sanitized = packageName.replace(/^@/, '').replace(/\//g, '-')
