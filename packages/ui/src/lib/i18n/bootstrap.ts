@@ -190,6 +190,25 @@ const JA_MESSAGES: BootstrapMessages = {
   loadingData: (providersText, agentsText) => `データを読み込み中 (${providersText}, ${agentsText})…`,
 };
 
+const DE_MESSAGES: BootstrapMessages = {
+  startingApi: 'OpenCode API wird gestartet…',
+  initializing: 'Initialisierung…',
+  connecting: 'Verbindung wird hergestellt…',
+  connected: 'Verbunden!',
+  connectionError: 'Verbindungsfehler',
+  disconnected: 'Getrennt',
+  reconnecting: 'Verbindung wird wiederhergestellt…',
+  initialDataLoadFailed: 'OpenCode verbunden, aber das Laden der Anfangsdaten ist fehlgeschlagen.',
+  cliNotFound: 'OpenCode CLI nicht gefunden. Bitte zuerst installieren.',
+  providersReady: '✓ Anbieter',
+  providersLoading: '… Anbieter',
+  agentsReady: '✓ Agenten',
+  agentsLoading: '… Agenten',
+  startingDevServer: (hostLabel) => `Webview-Entwicklungsserver wird gestartet (${hostLabel})...`,
+  waitingDevServer: (hostLabel, attempt) => `Warten auf Webview-Entwicklungsserver (${hostLabel})... Versuch ${attempt}`,
+  loadingData: (providersText, agentsText) => `Daten werden geladen (${providersText}, ${agentsText})…`,
+};
+
 const BOOTSTRAP_MESSAGES: Record<Locale, BootstrapMessages> = {
   en: EN_MESSAGES,
   'zh-CN': ZH_CN_MESSAGES,
@@ -200,6 +219,7 @@ const BOOTSTRAP_MESSAGES: Record<Locale, BootstrapMessages> = {
   ko: KO_MESSAGES,
   pl: PL_MESSAGES,
   ja: JA_MESSAGES,
+  de: DE_MESSAGES,
 };
 
 export const getBootstrapMessages = (locale: Locale): BootstrapMessages => BOOTSTRAP_MESSAGES[locale];
