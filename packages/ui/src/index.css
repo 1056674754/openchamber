@@ -838,14 +838,16 @@ html:not(.dark) .chat-scroll {
   }
 }
 
-/* Status row: collapse optional text when narrow to keep both sides in one line. */
+/* Status row: collapse optional text when narrow to keep both sides in one line.
+ * Hide the long active todo, then the secondary changed-files label, before the
+ * two sides can collide on narrow mobile (#2590). */
 @container status-row (max-width: 30rem) {
   .status-row__active-todo {
     display: none;
   }
 }
 
-@container status-row (max-width: 24rem) {
+@container status-row (max-width: 30rem) {
   .status-row__changed-label {
     display: none;
   }

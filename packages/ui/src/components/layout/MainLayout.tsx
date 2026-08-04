@@ -19,14 +19,14 @@ import { DrawerProvider } from '@/contexts/DrawerContext';
 import { useUIStore } from '@/stores/useUIStore';
 import { useUpdateStore } from '@/stores/useUpdateStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
-import { useDeviceInfo } from '@/lib/device';
+import { useDeviceInfo, useTabletLayout } from '@/lib/device';
 import { useVisualViewport } from '@/hooks/useVisualViewport';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
 import { syncSessionSwitcherWithDrawer } from '@/components/layout/mobileLeftDrawerSync';
 import { BREAKPOINTS } from '@/lib/device';
-import { isCapacitorApp, isIPadApp } from '@/lib/platform';
+import { isCapacitorApp } from '@/lib/platform';
 import { useLastSessionRestore } from '@/hooks/useLastSessionRestore';
 import { MobileWorkspaceDrawerContent } from './MobileWorkspaceDrawerContent';
 
@@ -88,28 +88,23 @@ export const MainLayout: React.FC = () => {
     const setSidebarOpen = useUIStore((state) => state.setSidebarOpen);
     const rightSidebarAutoClosedRef = React.useRef(false);
 
-    const [ipadLandscape, setIpadLandscape] = React.useState(() => (
-      typeof window !== 'undefined' && window.matchMedia('(orientation: landscape)').matches
-    ));
-    React.useEffect(() => {
-      if (!isIPadApp() || typeof window === 'undefined') return;
-      const media = window.matchMedia('(orientation: landscape)');
-      const onChange = () => setIpadLandscape(media.matches);
-      onChange();
-      media.addEventListener('change', onChange);
-      return () => media.removeEventListener('change', onChange);
-    }, []);
-
-    // iPad Capacitor: persistent shared SessionSidebar (not MobileSessionsSheet).
-    const useIpadSplitLayout = isIPadApp() && (screenWidth >= BREAKPOINTS.md || ipadLandscape);
-    const useMobileDrawers = isMobile && !useIpadSplitLayout;
+    // Tablet split layout is a live SIZE CLASS (not an iPad identity check), so
+    // Android tablets and foldables are covered by the same branch as iPad. The
+    // short viewport side >= sw600dp earns the persistent shared SessionSidebar;
+    // a fold is just a resize, so folding under the threshold drops back to the
+    // phone drawers. `roomyForPanels` (landscape + >=1000px) captures the old
+    // ipadLandscape signal without a separate orientation subscriber.
+    const tabletLayout = useTabletLayout();
+    const useTabletSplitLayout = tabletLayout.enabled
+      && (screenWidth >= BREAKPOINTS.md || tabletLayout.roomyForPanels);
+    const useMobileDrawers = isMobile && !useTabletSplitLayout;
     useLastSessionRestore(useMobileDrawers && isCapacitorApp());
 
     React.useEffect(() => {
-      if (useIpadSplitLayout) {
+      if (useTabletSplitLayout) {
         setSidebarOpen(true);
       }
-    }, [setSidebarOpen, useIpadSplitLayout]);
+    }, [setSidebarOpen, useTabletSplitLayout]);
 
     // Mobile drawer state
     const [mobileLeftDrawerOpen, setMobileLeftDrawerOpen] = React.useState(false);
