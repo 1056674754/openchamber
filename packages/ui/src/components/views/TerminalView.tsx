@@ -47,6 +47,8 @@ const MODIFIER_ARROW_SUFFIX: Record<Modifier, string> = {
     cmd: '3',
 };
 
+const FALLBACK_TERMINAL_SIZE = { cols: 80, rows: 24 } as const;
+
 
 const STREAM_OPTIONS = {
     retry: {
@@ -183,7 +185,6 @@ export const TerminalView: React.FC = () => {
     const [isReconnectPending, setIsReconnectPending] = React.useState(false);
     const [activeModifier, setActiveModifier] = React.useState<Modifier | null>(null);
     const [isRestarting, setIsRestarting] = React.useState(false);
-    const [viewportSizeVersion, setViewportSizeVersion] = React.useState(0);
 
     const streamCleanupRef = React.useRef<(() => void) | null>(null);
     const activeTerminalIdRef = React.useRef<string | null>(null);
@@ -192,7 +193,7 @@ export const TerminalView: React.FC = () => {
     const directoryRef = React.useRef<string | null>(effectiveDirectory);
     const terminalControllerRef = React.useRef<TerminalController | null>(null);
     const lastViewportSizeRef = React.useRef<{ cols: number; rows: number } | null>(null);
-    const isTerminalVisibleRef = React.useRef(false);
+    const pendingTerminalCreatesRef = React.useRef(new Set<string>());
     const rehydratedTerminalIdsRef = React.useRef<Set<string>>(new Set());
     const rehydratedSnapshotTakenRef = React.useRef(false);
     const previewScanTailRef = React.useRef('');
@@ -268,10 +269,6 @@ export const TerminalView: React.FC = () => {
         if (isTerminalVisible) {
             setHasOpenedTerminalViewport(true);
         }
-    }, [isTerminalVisible]);
-
-    React.useEffect(() => {
-        isTerminalVisibleRef.current = isTerminalVisible;
     }, [isTerminalVisible]);
 
     React.useEffect(() => {
@@ -577,10 +574,16 @@ export const TerminalView: React.FC = () => {
                     return;
                 }
 
-                const size = lastViewportSizeRef.current;
-                if (!size && isTerminalVisibleRef.current) {
+                const createKey = `${sId}\u0000${directory}\u0000${tabId}`;
+                if (pendingTerminalCreatesRef.current.has(createKey)) {
                     return;
                 }
+
+                // Launch the shell while Ghostty is still loading and fitting.
+                // The backend accepts 80x24, then receives the measured size as
+                // soon as the viewport is ready.
+                const initialSize = lastViewportSizeRef.current ?? FALLBACK_TERMINAL_SIZE;
+                pendingTerminalCreatesRef.current.add(createKey);
 
                 setConnectionError(null);
                 setIsFatalError(false);
@@ -590,8 +593,8 @@ export const TerminalView: React.FC = () => {
                     const baseUrl = serverBaseUrlRef.current || undefined;
                     const session = await terminal.createSession({
                         cwd: directory,
-                        cols: size?.cols,
-                        rows: size?.rows,
+                        cols: initialSize.cols,
+                        rows: initialSize.rows,
                         baseUrl,
                     });
 
@@ -608,6 +611,19 @@ export const TerminalView: React.FC = () => {
                     }
 
                     setTabSessionId(directory, tabId, session.sessionId, sId);
+
+                    const viewportSize = lastViewportSizeRef.current;
+                    if (
+                        viewportSize &&
+                        (viewportSize.cols !== initialSize.cols || viewportSize.rows !== initialSize.rows)
+                    ) {
+                        void terminal.resize({
+                            sessionId: session.sessionId,
+                            cols: viewportSize.cols,
+                            rows: viewportSize.rows,
+                            baseUrl,
+                        }).catch(() => {});
+                    }
                     terminalId = session.sessionId;
                 } catch (error) {
                     if (!cancelled) {
@@ -621,6 +637,8 @@ export const TerminalView: React.FC = () => {
                         toast.error(msg);
                     }
                     return;
+                } finally {
+                    pendingTerminalCreatesRef.current.delete(createKey);
                 }
             }
 
@@ -652,7 +670,6 @@ export const TerminalView: React.FC = () => {
         // Omit terminalSessionId / terminalLifecycle — create must not self-disconnect.
         activeTabId,
         hasOpenedTerminalViewport,
-        viewportSizeVersion,
         enableTabs,
         terminalHydrated,
         ensureDirectory,
@@ -809,26 +826,17 @@ export const TerminalView: React.FC = () => {
     const handleViewportResize = React.useCallback(
         (cols: number, rows: number) => {
             const previous = lastViewportSizeRef.current;
-            const sizeChanged = !previous || previous.cols !== cols || previous.rows !== rows;
-            if (sizeChanged) {
+            if (!previous || previous.cols !== cols || previous.rows !== rows) {
                 lastViewportSizeRef.current = { cols, rows };
-                // First measured size must kick ensureSession (create needs cols/rows).
-                // Later fits only resize the PTY — bumping version would tear the WS and
-                // often blank the viewport via an empty history snapshot.
-                if (!previous) {
-                    setViewportSizeVersion((version) => version + 1);
-                }
             }
-            if (!isTerminalVisibleRef.current) {
+            if (!isTerminalVisible) {
                 return;
             }
             const terminalId = terminalIdRef.current;
             if (!terminalId) return;
-            void terminal.resize({ sessionId: terminalId, cols, rows, baseUrl: serverBaseUrlRef.current || undefined }).catch(() => {
-
-            });
+            void terminal.resize({ sessionId: terminalId, cols, rows, baseUrl: serverBaseUrlRef.current || undefined }).catch(() => {});
         },
-        [terminal]
+        [isTerminalVisible, terminal]
     );
 
     const handleModifierToggle = React.useCallback(

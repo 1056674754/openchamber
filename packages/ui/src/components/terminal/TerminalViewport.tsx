@@ -19,6 +19,42 @@ function getGhostty(): Promise<Ghostty> {
   return ghosttyPromise;
 }
 
+type TerminalSize = { cols: number; rows: number };
+
+const getProvisionalTerminalSize = (
+  container: HTMLDivElement,
+  fontFamily: string,
+  fontSize: number,
+): TerminalSize | null => {
+  if (typeof window === 'undefined' || typeof document === 'undefined') return null;
+
+  const context = document.createElement('canvas').getContext('2d');
+  if (!context || container.clientWidth < 24 || container.clientHeight < 24) return null;
+
+  context.font = `${fontSize}px ${fontFamily}`;
+  const metrics = context.measureText('M');
+  const cellWidth = Math.ceil(metrics.width);
+  const cellHeight = Math.ceil(
+    (metrics.actualBoundingBoxAscent || fontSize * 0.8) +
+    (metrics.actualBoundingBoxDescent || fontSize * 0.2),
+  ) + 2;
+  if (cellWidth < 1 || cellHeight < 1) return null;
+
+  const style = window.getComputedStyle(container);
+  const horizontalPadding =
+    (Number.parseInt(style.paddingLeft, 10) || 0) +
+    (Number.parseInt(style.paddingRight, 10) || 0);
+  const verticalPadding =
+    (Number.parseInt(style.paddingTop, 10) || 0) +
+    (Number.parseInt(style.paddingBottom, 10) || 0);
+
+  // Match Ghostty FitAddon's 15px scrollbar reservation and minimum dimensions.
+  return {
+    cols: Math.max(2, Math.floor((container.clientWidth - horizontalPadding - 15) / cellWidth)),
+    rows: Math.max(1, Math.floor((container.clientHeight - verticalPadding) / cellHeight)),
+  };
+};
+
 function findScrollableViewport(container: HTMLElement): HTMLElement | null {
   if (typeof window === 'undefined') {
     return null;
@@ -104,6 +140,7 @@ const TerminalViewport = React.forwardRef<TerminalController, TerminalViewportPr
     const inputHandlerRef = React.useRef<(data: string) => void>(onInput);
     const resizeHandlerRef = React.useRef<(cols: number, rows: number) => void>(onResize);
     const lastReportedSizeRef = React.useRef<{ cols: number; rows: number } | null>(null);
+    const provisionalSizeRef = React.useRef<TerminalSize | null>(null);
     const pendingWriteRef = React.useRef('');
     const writeScheduledRef = React.useRef<number | null>(null);
     const isWritingRef = React.useRef(false);
@@ -127,6 +164,14 @@ const TerminalViewport = React.forwardRef<TerminalController, TerminalViewportPr
     const [terminalReadyVersion, bumpTerminalReady] = React.useReducer((x) => x + 1, 0);
     inputHandlerRef.current = onInput;
     resizeHandlerRef.current = onResize;
+
+    React.useLayoutEffect(() => {
+      const container = containerRef.current;
+      if (!container) return;
+      const size = getProvisionalTerminalSize(container, fontFamily, fontSize);
+      provisionalSizeRef.current = size;
+      if (size) resizeHandlerRef.current(size.cols, size.rows);
+    }, [fontFamily, fontSize]);
 
     const isAndroid = typeof navigator !== 'undefined' && (
       /Android/i.test(navigator.userAgent) ||
@@ -1036,7 +1081,10 @@ const TerminalViewport = React.forwardRef<TerminalController, TerminalViewportPr
 
           const options = getGhosttyTerminalOptions(fontFamily, fontSize, theme, ghostty, false);
 
-          const terminal = new GhosttyTerminal(options);
+          const terminal = new GhosttyTerminal({
+            ...options,
+            ...(provisionalSizeRef.current ?? {}),
+          });
           followOutputRef.current = true;
 
           if (useHiddenInputOverlay) {

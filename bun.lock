@@ -375,6 +375,7 @@
   },
   "patchedDependencies": {
     "@tanstack/virtual-core@3.17.3": "patches/@tanstack%2Fvirtual-core@3.17.3.patch",
+    "bun-pty@0.4.8": "patches/bun-pty@0.4.8.patch",
     "@capacitor-mlkit/barcode-scanning@8.1.0": "patches/@capacitor-mlkit%2Fbarcode-scanning@8.1.0.patch",
   },
   "overrides": {

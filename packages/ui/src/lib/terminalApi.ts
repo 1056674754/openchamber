@@ -161,6 +161,7 @@ export class TerminalTransport {
         }
       })
       .catch((error) => {
+        if (!set.has(subscriber)) return;
         handlers.onError?.(error instanceof Error ? error : new Error(String(error)), false);
         this.scheduleReconnect();
       });
@@ -174,11 +175,14 @@ export class TerminalTransport {
       }
       if (this.subscribers.size === 0) {
         this.cancelReconnect();
+        this.failures = 0;
         if (this.socket?.readyState === SOCKET_OPEN) {
           this.scheduleIdleClose();
           return;
         }
+        // Nothing to reuse, so abandon any dial that is still in flight.
         this.generation += 1;
+        this.opening = null;
         this.closeSocket();
       }
     };
@@ -198,6 +202,7 @@ export class TerminalTransport {
   dispose(): void {
     this.disposed = true;
     this.generation += 1;
+    this.opening = null;
     this.subscribers.clear();
     this.projections.clear();
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
@@ -408,7 +413,7 @@ export class TerminalTransport {
     this.failures += 1;
     const slow = (typeof document !== 'undefined' && document.visibilityState === 'hidden')
       || (typeof navigator !== 'undefined' && !navigator.onLine);
-    const delay = Math.min(500 * 2 ** Math.min(this.failures - 1, 10), slow ? 60_000 : 8_000);
+    const delay = slow ? 60_000 : Math.min(500 * 2 ** Math.min(this.failures - 1, 10), 8_000);
     for (const set of this.subscribers.values()) {
       for (const sub of set) {
         sub.handlers.onEvent({ type: 'reconnecting', attempt: this.failures, maxAttempts: Number.POSITIVE_INFINITY });
@@ -455,6 +460,7 @@ export class TerminalTransport {
       this.idleCloseTimer = null;
       if (this.disposed || this.subscribers.size > 0) return;
       this.generation += 1;
+      this.opening = null;
       this.closeSocket();
     }, IDLE_SOCKET_GRACE_MS);
   }
