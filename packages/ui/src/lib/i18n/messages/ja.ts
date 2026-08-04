@@ -1033,6 +1033,7 @@ export const dict: Record<I18nKey, string> = {
   'sidebarFilesTree.menu.copyPath': 'パスをコピー',
   'sidebarFilesTree.menu.copyRelativePath': '相対パスをコピー',
   'sidebarFilesTree.menu.save': '保存',
+  'sidebarFilesTree.menu.download': 'ダウンロード',
   'sidebarFilesTree.menu.newFile': '新しいファイル',
   'sidebarFilesTree.menu.newFolder': '新しいフォルダ',
   'sidebarFilesTree.menu.delete': '削除',

@@ -999,6 +999,7 @@ export const dict: Record<I18nKey, string> = {
   'sidebarFilesTree.menu.copyPath': '复制路径',
   'sidebarFilesTree.menu.copyRelativePath': '复制相对路径',
   'sidebarFilesTree.menu.save': '保存',
+  'sidebarFilesTree.menu.download': '下载',
   'sidebarFilesTree.menu.newFile': '新建文件',
   'sidebarFilesTree.menu.newFolder': '新建文件夹',
   'sidebarFilesTree.menu.delete': '删除',

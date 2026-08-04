@@ -1033,6 +1033,7 @@ export const dict = {
   'sidebarFilesTree.menu.copyPath': 'Copy Path',
   'sidebarFilesTree.menu.copyRelativePath': 'Copy Relative Path',
   'sidebarFilesTree.menu.save': 'Save',
+  'sidebarFilesTree.menu.download': 'Download',
   'sidebarFilesTree.menu.newFile': 'New File',
   'sidebarFilesTree.menu.newFolder': 'New Folder',
   'sidebarFilesTree.menu.delete': 'Delete',

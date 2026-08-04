@@ -1,4 +1,4 @@
-import type { ProjectEntry } from '@/lib/api/types';
+import type { ProjectEntry, RuntimeAPIs } from '@/lib/api/types';
 import type { MobileKeyboardMode } from '@/lib/mobileKeyboardMode';
 import type { DraftStarterRef } from '@/lib/draftStarters';
 import type { FollowUpBehavior } from '@/lib/followUpBehavior';
@@ -614,6 +614,11 @@ export const isWebRuntime = (): boolean => {
   // Default: anything that's not VSCode behaves like web (HTTP UI).
   return !isVSCodeRuntime();
 };
+
+export const isBrowserClientRuntime = (
+  platform: RuntimeAPIs['runtime']['platform'],
+  desktopShell = isDesktopShell(),
+): boolean => platform === 'web' && !desktopShell;
 
 export const getDesktopHomeDirectory = async (): Promise<string | null> => {
   if (typeof window !== 'undefined') {

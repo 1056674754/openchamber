@@ -999,6 +999,7 @@ export const dict: Record<I18nKey, string> = {
   "sidebarFilesTree.menu.copyPath": "Copiar ruta",
   "sidebarFilesTree.menu.copyRelativePath": "Copiar ruta relativa",
   "sidebarFilesTree.menu.save": "Guardar",
+  "sidebarFilesTree.menu.download": "Descargar",
   "sidebarFilesTree.menu.newFile": "Nuevo archivo",
   "sidebarFilesTree.menu.newFolder": "Nueva carpeta",
   "sidebarFilesTree.menu.delete": "Eliminar",

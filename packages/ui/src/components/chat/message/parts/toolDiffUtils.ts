@@ -3,6 +3,7 @@ import { parsePatchFiles } from '@pierre/diffs';
 export type DiffPatchEntry = {
     id: string;
     title: string;
+    filePath?: string;
     patch: string;
     renderMode: 'diff' | 'text';
 };
@@ -144,6 +145,66 @@ export const getPatchText = (value: unknown): string | undefined => {
     }
 
     return undefined;
+};
+
+export const getApplyPatchFilePath = (file: unknown): string | null => {
+    if (!isRecord(file)) {
+        return null;
+    }
+
+    return typeof file.movePath === 'string'
+        ? file.movePath
+        : typeof file.filePath === 'string'
+            ? file.filePath
+            : typeof file.relativePath === 'string'
+                ? file.relativePath
+                : null;
+};
+
+export const getPrimaryToolPath = (
+    toolName: string,
+    input: Record<string, unknown> | undefined,
+    metadata: Record<string, unknown> | undefined,
+): string | null => {
+    if (toolName === 'apply_patch') {
+        const files = Array.isArray(metadata?.files) ? metadata.files : [];
+        for (const file of files) {
+            if (!isRecord(file) || file.type === 'delete') {
+                continue;
+            }
+            const filePath = getApplyPatchFilePath(file);
+            if (filePath) {
+                return filePath;
+            }
+        }
+        return null;
+    }
+
+    if (toolName === 'edit' || toolName === 'multiedit') {
+        const fileDiff = isRecord(metadata?.filediff) ? metadata.filediff : undefined;
+        if (fileDiff && typeof fileDiff.file === 'string') {
+            return fileDiff.file;
+        }
+        return typeof input?.filePath === 'string'
+            ? input.filePath
+            : typeof input?.file_path === 'string'
+                ? input.file_path
+                : typeof input?.path === 'string'
+                    ? input.path
+                    : null;
+    }
+
+    if (toolName === 'write') {
+        return typeof input?.filePath === 'string'
+            ? input.filePath
+            : typeof input?.file_path === 'string'
+                ? input.file_path
+                : typeof input?.path === 'string'
+                    ? input.path
+                    : null;
+    }
+
+    return null;
 };
 
 const normalizeParsedPath = (path: string | undefined): string => {
@@ -293,7 +354,7 @@ const getPatchEntriesFromText = (
     }];
 };
 
-const getFilePatch = (file: unknown): { patch: string; title: string } | null => {
+const getFilePatch = (file: unknown): { filePath?: string; patch: string; title: string } | null => {
     if (!isRecord(file)) {
         return null;
     }
@@ -310,6 +371,7 @@ const getFilePatch = (file: unknown): { patch: string; title: string } | null =>
             : '';
 
     return {
+        filePath: getApplyPatchFilePath(file) ?? undefined,
         patch,
         title: rawPath,
     };
@@ -331,7 +393,7 @@ export const getDiffPatchEntries = (
             filePatch.title || `File ${index + 1}`,
             `file-${index}`,
             resolveTitle,
-        );
+        ).map((entry) => ({ ...entry, filePath: filePatch.filePath }));
     });
 
     if (fileEntries.length > 0) {

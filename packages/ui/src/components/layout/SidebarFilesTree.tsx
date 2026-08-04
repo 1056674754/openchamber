@@ -21,6 +21,7 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
+import { isBrowserClientRuntime } from '@/lib/desktop';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useFileSearchStore } from '@/stores/useFileSearchStore';
 import { useFilesViewTabsStore } from '@/stores/useFilesViewTabsStore';
@@ -125,6 +126,7 @@ interface FileRowProps {
   root: string;
   isExpanded: boolean;
   isActive: boolean;
+  isBrowserClient: boolean;
   status?: FileStatus | null;
   badge?: { modified: number; added: number } | null;
   permissions: {
@@ -148,6 +150,7 @@ const FileRow: React.FC<FileRowProps> = ({
   root,
   isExpanded,
   isActive,
+  isBrowserClient,
   status,
   badge,
   permissions,
@@ -162,12 +165,15 @@ const FileRow: React.FC<FileRowProps> = ({
   const { t } = useI18n();
   const isDir = node.type === 'directory';
   const { canRename, canCreateFile, canCreateFolder, canDelete, canReveal } = permissions;
+  const canDownload = !isDir && Boolean(downloadFile);
+  const canRevealPath = canReveal && !isBrowserClient;
+  const hasMenuActions = canRename || canCreateFile || canCreateFolder || canDelete || canDownload || canRevealPath;
 
   const handleContextMenu = React.useCallback((event?: React.MouseEvent) => {
-    if (!canRename && !canCreateFile && !canCreateFolder && !canDelete && !canReveal) return;
+    if (!hasMenuActions) return;
     event?.preventDefault();
     setContextMenuPath(node.path);
-  }, [canRename, canCreateFile, canCreateFolder, canDelete, canReveal, node.path, setContextMenuPath]);
+  }, [hasMenuActions, node.path, setContextMenuPath]);
 
   const handleInteraction = React.useCallback(() => {
     if (isDir) {
@@ -226,7 +232,7 @@ const FileRow: React.FC<FileRowProps> = ({
           </span>
         )}
       </button>
-      {(canRename || canCreateFile || canCreateFolder || canDelete || canReveal) && (
+      {hasMenuActions && (
         <div className="absolute right-1 top-1/2 -translate-y-1/2 opacity-0 focus-within:opacity-100 group-hover:opacity-100">
           <DropdownMenu
             open={contextMenuPath === node.path}
@@ -273,15 +279,15 @@ const FileRow: React.FC<FileRowProps> = ({
               }}>
                 <Icon name="file-copy-2" className="mr-2 h-4 w-4" /> {t('sidebarFilesTree.menu.copyRelativePath')}
               </DropdownMenuItem>
-              {!isDir && downloadFile && (
+              {canDownload && downloadFile && (
                 <DropdownMenuItem onClick={(e) => {
                   e.stopPropagation();
                   void downloadFile(node.path);
                 }}>
-                  <Icon name="download" className="mr-2 h-4 w-4" /> {t('sidebarFilesTree.menu.save')}
+                  <Icon name="download" className="mr-2 h-4 w-4" /> {t(isBrowserClient ? 'sidebarFilesTree.menu.download' : 'sidebarFilesTree.menu.save')}
                 </DropdownMenuItem>
               )}
-              {canReveal && (
+              {canRevealPath && (
                 <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onRevealPath(node.path); }}>
                   <Icon name="folder-received" className="mr-2 h-4 w-4" /> {t(getRevealLabelKey())}
                 </DropdownMenuItem>
@@ -325,6 +331,7 @@ const FileRow: React.FC<FileRowProps> = ({
 export const SidebarFilesTree: React.FC = () => {
   const { t } = useI18n();
   const { files, runtime } = useRuntimeAPIs();
+  const isBrowserClient = isBrowserClientRuntime(runtime.platform);
   const serverBaseUrl = useActiveServerBaseUrl();
   const currentDirectory = useEffectiveDirectory() ?? '';
   const root = normalizePath(currentDirectory.trim());
@@ -857,6 +864,7 @@ export const SidebarFilesTree: React.FC = () => {
             root={root}
             isExpanded={isExpanded}
             isActive={isActive}
+            isBrowserClient={isBrowserClient}
             status={!isDir ? getFileStatus(node.path) : undefined}
             badge={isDir ? getFolderBadge(node.path) : undefined}
             permissions={fileRowPermissions}
