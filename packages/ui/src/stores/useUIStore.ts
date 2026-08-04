@@ -25,7 +25,7 @@ export type MainTab = 'chat' | 'plan' | 'git' | 'diff' | 'terminal' | 'files' | 
 /** Diff navigation scope. Fork has no staged selector; `turn` is last-turn snapshot mode. */
 export type PendingDiffScope = 'working' | 'turn';
 export type RightSidebarTab = 'git' | 'files' | 'context';
-export type ContextPanelMode = 'diff' | 'file' | 'context' | 'plan' | 'chat' | 'preview' | 'terminal' | 'browser' | 'git' | 'pr' | 'notes';
+export type ContextPanelMode = 'diff' | 'file' | 'context' | 'plan' | 'chat' | 'preview' | 'terminal' | 'browser' | 'git' | 'pr' | 'notes' | 'walkthrough';
 export type UserMessageRenderingMode = 'markdown' | 'plain';
 export type ChatRenderMode = 'sorted' | 'live';
 export type ActivityRenderMode = 'collapsed' | 'summary';
@@ -675,6 +675,8 @@ interface UIStore {
   diffFileLayout: Record<string, 'inline' | 'side-by-side'>;
   diffWrapLines: boolean;
   diffViewMode: 'single' | 'stacked';
+  walkthroughTocWidth: number;
+  setWalkthroughTocWidth: (width: number) => void;
   gitChangesViewMode: 'flat' | 'tree';
   isTimelineDialogOpen: boolean;
   isPromptNavigatorPanelOpen: boolean;
@@ -1005,6 +1007,7 @@ export const useUIStore = create<UIStore>()(
         diffFileLayout: {},
         diffWrapLines: false,
         diffViewMode: 'stacked',
+        walkthroughTocWidth: 280,
         gitChangesViewMode: 'flat',
         isTimelineDialogOpen: false,
         isPromptNavigatorPanelOpen: false,
@@ -1964,6 +1967,10 @@ export const useUIStore = create<UIStore>()(
 
         setDiffViewMode: (mode) => {
           set({ diffViewMode: mode });
+        },
+
+        setWalkthroughTocWidth: (width) => {
+          set({ walkthroughTocWidth: width });
         },
 
         setGitChangesViewMode: (mode) => {

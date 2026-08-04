@@ -1,4 +1,5 @@
 import React from 'react';
+import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Button } from '@/components/ui/button';
@@ -28,6 +29,9 @@ import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { SimpleMarkdownRenderer } from '@/components/chat/MarkdownRenderer';
 import { Icon } from "@/components/icon/Icon";
 import { useUIStore } from '@/stores/useUIStore';
+import { useWalkthroughStore } from '@/stores/useWalkthroughStore';
+import { WALKTHROUGH_ACTION_CLASS } from '@/components/views/walkthrough/walkthroughAction';
+import { isVSCodeRuntime } from '@/lib/desktop';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
 import { useConfigStore } from '@/stores/useConfigStore';
@@ -316,7 +320,10 @@ export const PullRequestSection: React.FC<{
   const setSettingsPage = useUIStore((state) => state.setSettingsPage);
   const setActiveMainTab = useUIStore((state) => state.setActiveMainTab);
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
-  const { isMobile, hasTouchInput } = useDeviceInfo();
+  const { isMobile, hasTouchInput, screenWidth } = useDeviceInfo();
+  const openContextSurface = useUIStore((state) => state.openContextSurface);
+  const requestWalkthroughSource = useWalkthroughStore((state) => state.requestSource);
+  const showWalkthroughAction = !isMobile && screenWidth >= 768 && !isVSCodeRuntime();
 
   const openGitHubSettings = React.useCallback(() => {
     setSettingsPage('github');
@@ -1663,6 +1670,23 @@ export const PullRequestSection: React.FC<{
                         <TooltipContent><p>{t('gitView.pr.actions.shareComments')}</p></TooltipContent>
                       </Tooltip>
 
+                      {showWalkthroughAction ? (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className={cn('pr-actions__walkthrough-button h-7 shrink-0 gap-1.5 px-2', WALKTHROUGH_ACTION_CLASS)}
+                          onClick={() => {
+                            requestWalkthroughSource(directory, { kind: 'pr', number: pr.number });
+                            openContextSurface(directory, 'walkthrough');
+                          }}
+                          aria-label={t('walkthrough.action.open')}
+                        >
+                          <Icon name="route" className="size-4" />
+                          <span className="pr-actions__walkthrough-label typography-ui-label">
+                            {t('walkthrough.action.open')}
+                          </span>
+                        </Button>
+                      ) : null}
                       {canMerge && pr.draft && pr.state === 'open' ? (
                         <Tooltip>
                           <TooltipTrigger asChild>

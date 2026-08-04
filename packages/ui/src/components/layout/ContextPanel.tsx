@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import { SortableTabsStrip } from '@/components/ui/sortable-tabs-strip';
 import { DiffView } from '@/components/views/DiffView';
+import { WalkthroughView } from '@/components/views/walkthrough/WalkthroughView';
 import { FilesView } from '@/components/views/FilesView';
 import { GitView } from '@/components/views/GitView';
 import { PullRequestView } from '@/components/views/PullRequestView';
@@ -41,7 +42,7 @@ const CONTEXT_PANEL_DEFAULT_WIDTH = 600;
 const CONTEXT_TAB_LABEL_MAX_CHARS = 24;
 const CONTEXT_PANEL_SPLIT_HANDLE_HEIGHT = 3;
 type TranslateFn = ReturnType<typeof useI18n>['t'];
-type ContextPanelTabMode = 'diff' | 'file' | 'context' | 'plan' | 'chat' | 'preview' | 'terminal' | 'browser' | 'git' | 'pr' | 'notes';
+type ContextPanelTabMode = 'diff' | 'file' | 'context' | 'plan' | 'chat' | 'preview' | 'terminal' | 'browser' | 'git' | 'pr' | 'notes' | 'walkthrough';
 type ContextPanelTabLike = { id: string; mode: ContextPanelTabMode; targetPath: string | null; dedupeKey: string; label: string | null; readOnly: boolean };
 type SplitDropZone = 'top' | 'bottom' | 'middle';
 
@@ -1686,6 +1687,10 @@ const ContextPanelTabContent: React.FC<{
 
   if (tab.mode === 'diff') {
     return <DiffView hideStackedFileSidebar stackedDefaultCollapsedAll hideFileSelector pinSelectedFileHeaderToTopOnNavigate showOpenInEditorAction />;
+  }
+
+  if (tab.mode === 'walkthrough') {
+    return <WalkthroughView directory={effectiveDirectory} />;
   }
 
   if (tab.mode === 'git') {

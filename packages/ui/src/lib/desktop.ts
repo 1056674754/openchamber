@@ -150,6 +150,8 @@ export type DesktopSettings = {
   smallModelUseDefault?: boolean;
   /** Explicit utility model as `provider/model`. Empty string clears. */
   smallModelOverride?: string;
+  /** Explicit walkthrough model as `provider/model`. Empty string clears. */
+  walkthroughModelOverride?: string;
   /** Session Goals control loop (local OpenCode only in v1). */
   sessionGoalEnabled?: boolean;
   sessionGoalDefaultBudgetEnabled?: boolean;

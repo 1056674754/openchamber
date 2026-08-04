@@ -2,6 +2,7 @@ import { registerFsRoutes } from '../fs/routes.js';
 import { registerArtifactRoutes } from '../artifacts/routes.js';
 import { registerQuotaRoutes } from '../quota/routes.js';
 import { registerSmallModelRoutes } from '../small-model/routes.js';
+import { registerWalkthroughRoutes } from '../walkthrough/routes.js';
 import { registerSessionGoalRoutes } from '../session-goal/routes.js';
 import { registerSubscriptionRoutes } from '../subscriptions/routes.js';
 import { registerGitHubRoutes } from '../github/routes.js';
@@ -40,6 +41,18 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       smallModelService = await import('../small-model/index.js');
     }
     return smallModelService;
+  };
+
+  let walkthroughService = null;
+  const getWalkthroughService = async () => {
+    if (!walkthroughService) {
+      const [service, pullRequest] = await Promise.all([
+        import('../walkthrough/index.js'),
+        import('../walkthrough/pull-request.js'),
+      ]);
+      walkthroughService = { ...service, getPullRequestDiff: pullRequest.getPullRequestDiff };
+    }
+    return walkthroughService;
   };
 
   const registerRoutes = async (app, routeDependencies) => {
@@ -303,6 +316,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
 
     registerQuotaRoutes(app, { getQuotaProviders });
     registerSmallModelRoutes(app, { getSmallModelService });
+    registerWalkthroughRoutes(app, { getWalkthroughService });
     registerSessionGoalRoutes(app);
     registerSubscriptionRoutes(app, {
       fetchProvidersSnapshot,

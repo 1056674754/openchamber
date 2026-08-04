@@ -341,6 +341,7 @@ interface ModelPickerListProps {
   selectedModel?: { providerID: string; modelID: string } | null;
   hiddenModels?: HiddenModel[];
   allowedProviderIds?: string[];
+  isModelAllowed?: (providerId: string, modelId: string) => boolean;
   includeNotSelected?: boolean;
   onSelectNone?: () => void;
   selectionCount?: (entry: ModelPickerEntry) => number;
@@ -384,6 +385,7 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
   selectedModel,
   hiddenModels = [],
   allowedProviderIds,
+  isModelAllowed,
   includeNotSelected = false,
   onSelectNone,
   selectionCount,
@@ -450,16 +452,18 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
   const filteredFavorites = React.useMemo(() => favoriteModels.filter(({ model, providerID, modelID }) => {
     if (allowedProviderSet && !allowedProviderSet.has(providerID)) return false;
     if (isHidden(providerID, modelID)) return false;
+    if (isModelAllowed && !isModelAllowed(providerID, modelID)) return false;
     const providerName = providerById.get(providerID)?.name || providerID;
     return matchesQuery(getModelDisplayName(model), providerName);
-  }), [allowedProviderSet, favoriteModels, isHidden, matchesQuery, providerById]);
+  }), [allowedProviderSet, favoriteModels, isHidden, isModelAllowed, matchesQuery, providerById]);
 
   const filteredRecents = React.useMemo(() => recentModels.filter(({ model, providerID, modelID }) => {
     if (allowedProviderSet && !allowedProviderSet.has(providerID)) return false;
     if (isHidden(providerID, modelID)) return false;
+    if (isModelAllowed && !isModelAllowed(providerID, modelID)) return false;
     const providerName = providerById.get(providerID)?.name || providerID;
     return matchesQuery(getModelDisplayName(model), providerName);
-  }), [allowedProviderSet, isHidden, matchesQuery, providerById, recentModels]);
+  }), [allowedProviderSet, isHidden, isModelAllowed, matchesQuery, providerById, recentModels]);
 
   const filteredProviders = React.useMemo(() => {
     const filtered = providers

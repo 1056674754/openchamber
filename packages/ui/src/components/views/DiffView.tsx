@@ -36,6 +36,8 @@ import { ReviewFlowDialog, type ReviewFlowExecution } from '@/components/session
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { startReviewFlow } from '@/lib/reviewFlow';
 import { serverRegistry } from '@/lib/opencode/server-registry';
+import { WALKTHROUGH_ACTION_CLASS } from '@/components/views/walkthrough/walkthroughAction';
+import { useWalkthroughStore } from '@/stores/useWalkthroughStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSessionMessages } from '@/sync/sync-context';
 import {
@@ -1056,6 +1058,9 @@ export const DiffView: React.FC<DiffViewProps> = ({
     const isStackedView = diffViewMode === 'stacked';
     const isMobileLayout = isMobile || screenWidth <= 768;
     const showReviewAction = Boolean(currentSessionId) && activeDiffScope !== 'turn' && !isMobileLayout && !isVSCodeRuntime();
+    const showWalkthroughAction = activeDiffScope !== 'turn' && !isMobileLayout && !isVSCodeRuntime();
+    const openContextSurface = useUIStore((state) => state.openContextSurface);
+    const requestWalkthroughSource = useWalkthroughStore((state) => state.requestSource);
     const showFileSidebar = !hideStackedFileSidebar && !isMobileLayout && screenWidth >= 1024;
     const diffScrollRef = React.useRef<HTMLElement | null>(null);
     const fileSectionRefs = React.useRef(new Map<string, HTMLDivElement | null>());
@@ -1939,6 +1944,27 @@ export const DiffView: React.FC<DiffViewProps> = ({
                         )}
                         <span className="typography-ui-label">
                             {t('diffView.actions.review')}
+                        </span>
+                    </Button>
+                )}
+                {changedFiles.length > 0 && showWalkthroughAction && (
+                    <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                            const directory = effectiveDirectory ?? '';
+                            requestWalkthroughSource(directory, {
+                                kind: 'working-tree',
+                                scope: activeDiffScope === 'working' ? 'working' : 'all',
+                            });
+                            openContextSurface(directory, 'walkthrough');
+                        }}
+                        className={cn('diff-toolbar__walkthrough-button h-7 flex-shrink-0 gap-1.5 px-2', WALKTHROUGH_ACTION_CLASS)}
+                        aria-label={t('walkthrough.action.open')}
+                    >
+                        <Icon name="route" className="size-4" />
+                        <span className="diff-toolbar__walkthrough-label typography-ui-label">
+                            {t('walkthrough.action.open')}
                         </span>
                     </Button>
                 )}

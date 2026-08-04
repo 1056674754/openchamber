@@ -1964,6 +1964,16 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       await get().handleSlashCompact(content, sessionId)
       return true
     }
+    if (commandName === "walkthrough") {
+      const directory = getSessionDirectoryFromRoutingIndex(sessionId)
+      if (directory) {
+        const { useWalkthroughStore } = await import("@/stores/useWalkthroughStore")
+        const { useUIStore } = await import("@/stores/useUIStore")
+        useWalkthroughStore.getState().requestSource(directory, { kind: "working-tree", scope: "all" })
+        useUIStore.getState().openContextSurface(directory, "walkthrough")
+      }
+      return true
+    }
 
     return false
   },

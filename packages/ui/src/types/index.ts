@@ -70,4 +70,5 @@ export interface ModelMetadata {
   knowledge?: string;
   release_date?: string;
   last_updated?: string;
+  structured_output?: boolean;
 }

@@ -29,20 +29,35 @@ const readSmallModelSettingsOverride = () => {
   }
 };
 
-// Rough safety clamp so a huge input never blows the model's context window.
-// Token estimate is ~4 chars/token; when the catalog has no limit for the
-// model (Copilot/codex utility models are not listed) a conservative default
-// applies.
 const DEFAULT_CONTEXT_TOKENS = 64_000;
 const OUTPUT_RESERVE_TOKENS = 4_000;
 
-const clampPromptToModelLimit = ({ prompt, catalog, providerID, modelID }) => {
+export const getModelInputCharBudget = ({ catalog, providerID, modelID, outputReserveTokens }) => {
   const limit = catalog?.[providerID]?.models?.[modelID]?.limit;
-  const contextTokens = Number(limit?.context) > 0 ? Number(limit.context) : DEFAULT_CONTEXT_TOKENS;
-  const inputBudgetTokens = Math.max(1_000, contextTokens - OUTPUT_RESERVE_TOKENS);
-  const maxChars = inputBudgetTokens * 4;
+  const known = Number(limit?.context) > 0;
+  const contextTokens = known ? Number(limit.context) : DEFAULT_CONTEXT_TOKENS;
+  const reserve = Number(outputReserveTokens) > 0 ? Number(outputReserveTokens) : OUTPUT_RESERVE_TOKENS;
+  const inputBudgetTokens = Math.max(1_000, contextTokens - reserve);
+  return { maxChars: inputBudgetTokens * 4, contextTokens, contextKnown: known };
+};
+
+const resolveOutputTokens = ({ catalog, providerID, modelID, maxOutputTokens }) => {
+  const requested = Number(maxOutputTokens) > 0 ? Number(maxOutputTokens) : 0;
+  if (!requested) return undefined;
+  const limit = Number(catalog?.[providerID]?.models?.[modelID]?.limit?.output);
+  return limit > 0 ? Math.min(requested, limit) : requested;
+};
+
+const clampPromptToModelLimit = ({ prompt, catalog, providerID, modelID, onOverflow, outputReserveTokens }) => {
+  const { maxChars } = getModelInputCharBudget({ catalog, providerID, modelID, outputReserveTokens });
   if (prompt.length <= maxChars) {
     return { prompt, truncated: false };
+  }
+  if (onOverflow === 'error') {
+    throw Object.assign(
+      new Error(`Input is too large for ${providerID}/${modelID}: ${prompt.length} characters exceeds the ${maxChars} the model's context allows`),
+      { statusCode: 413, code: 'context-too-small', providerID, modelID, requiredChars: prompt.length, availableChars: maxChars },
+    );
   }
   return { prompt: `${prompt.slice(0, maxChars)}…`, truncated: true };
 };
@@ -67,11 +82,7 @@ const readConfiguredSmallModelFallback = (workingDirectory) => {
   }
 };
 
-/**
- * Generates text with the user's small model, resolved and authenticated
- * entirely server-side from the OpenCode config and auth store.
- */
-export async function generateSmallModelText({ prompt, system, maxOutputTokens, model, directory, preferredProviderID, preferredModelID, restrictToPreferredProvider = false }) {
+export async function generateSmallModelText({ prompt, system, maxOutputTokens, model, directory, preferredProviderID, preferredModelID, restrictToPreferredProvider = false, responseSchema, timeoutMs, signal, onOverflow = 'truncate' }) {
   if (typeof prompt !== 'string' || !prompt.trim()) {
     throw Object.assign(new Error('prompt is required'), { statusCode: 400 });
   }
@@ -82,7 +93,7 @@ export async function generateSmallModelText({ prompt, system, maxOutputTokens, 
   const explicit = parseModelRef(model);
   if (explicit) {
     const candidates = [{ ...explicit, source: 'request' }];
-    return await tryCandidates(candidates, { auth, catalog, directory, prompt, system, maxOutputTokens, restrictToPreferredProvider, preferredProviderID });
+    return await tryCandidates(candidates, { auth, catalog, directory, prompt, system, maxOutputTokens, restrictToPreferredProvider, preferredProviderID, responseSchema, timeoutMs, signal, onOverflow });
   }
 
   const candidates = resolveSmallModelChain({
@@ -102,10 +113,10 @@ export async function generateSmallModelText({ prompt, system, maxOutputTokens, 
     );
   }
 
-  return await tryCandidates(candidates, { auth, catalog, directory, prompt, system, maxOutputTokens, restrictToPreferredProvider, preferredProviderID });
+  return await tryCandidates(candidates, { auth, catalog, directory, prompt, system, maxOutputTokens, restrictToPreferredProvider, preferredProviderID, responseSchema, timeoutMs, signal, onOverflow });
 }
 
-async function tryCandidates(candidates, { auth, catalog, directory, prompt, system, maxOutputTokens, restrictToPreferredProvider, preferredProviderID }) {
+async function tryCandidates(candidates, { auth, catalog, directory, prompt, system, maxOutputTokens, restrictToPreferredProvider, preferredProviderID, responseSchema, timeoutMs, signal, onOverflow }) {
   const EXPLICIT_SOURCES = new Set(['settings', 'config', 'request', 'config-fallback']);
   let lastError = null;
 
@@ -118,11 +129,20 @@ async function tryCandidates(candidates, { auth, catalog, directory, prompt, sys
       continue;
     }
 
+    const outputTokens = resolveOutputTokens({
+      catalog,
+      providerID: candidate.providerID,
+      modelID: candidate.modelID,
+      maxOutputTokens,
+    });
+
     const clamped = clampPromptToModelLimit({
       prompt: prompt.trim(),
       catalog,
       providerID: candidate.providerID,
       modelID: candidate.modelID,
+      onOverflow,
+      outputReserveTokens: outputTokens,
     });
 
     try {
@@ -134,7 +154,10 @@ async function tryCandidates(candidates, { auth, catalog, directory, prompt, sys
         modelID: candidate.modelID,
         prompt: clamped.prompt,
         system: typeof system === 'string' && system.trim() ? system.trim() : undefined,
-        maxOutputTokens,
+        maxOutputTokens: outputTokens,
+        responseSchema,
+        timeoutMs,
+        signal,
       });
 
       return {
@@ -156,19 +179,12 @@ async function tryCandidates(candidates, { auth, catalog, directory, prompt, sys
   throw Object.assign(new Error('No small model candidate passed the provider restriction'), { statusCode: 404 });
 }
 
-/**
- * Provider ids with a usable OpenCode login — the set the small model can
- * actually call. Used by the settings override picker to hide providers that
- * would only ever fail (e.g. opencode free models without a token).
- */
 export function listAuthenticatedProviders() {
   try {
     const auth = readAuthFile();
     const ids = new Set(
       Object.keys(auth || {}).filter((providerID) => isUsableAuthEntry(auth[providerID])),
     );
-    // The catalog id is github-copilot while legacy auth entries may sit
-    // under the copilot alias.
     if (isUsableAuthEntry(getAuthEntryForProvider(auth, 'github-copilot'))) {
       ids.add('github-copilot');
     }
@@ -178,19 +194,36 @@ export function listAuthenticatedProviders() {
   }
 }
 
-/**
- * Reports which model would be used, without calling it.
- */
-export async function describeSmallModel({ directory, preferredProviderID, preferredModelID } = {}) {
+export async function describeSmallModel({ directory, preferredProviderID, preferredModelID, outputReserveTokens, overrideModel } = {}) {
   const auth = readAuthFile();
   const catalog = await getModelCatalog().catch(() => ({}));
-  const resolved = resolveSmallModel({
-    auth,
+  const explicit = parseModelRef(overrideModel);
+  const resolved = explicit
+    ? { ...explicit, source: 'request' }
+    : resolveSmallModel({
+      auth,
+      catalog,
+      settingsSmallModel: readSmallModelSettingsOverride(),
+      configSmallModel: readConfiguredSmallModel(directory),
+      preferredProviderID,
+      preferredModelID,
+    });
+  if (!resolved) return resolved;
+
+  const entry = catalog?.[resolved.providerID]?.models?.[resolved.modelID];
+  const { maxChars, contextTokens, contextKnown } = getModelInputCharBudget({
     catalog,
-    settingsSmallModel: readSmallModelSettingsOverride(),
-    configSmallModel: readConfiguredSmallModel(directory),
-    preferredProviderID,
-    preferredModelID,
+    providerID: resolved.providerID,
+    modelID: resolved.modelID,
+    outputReserveTokens,
   });
-  return resolved;
+
+  return {
+    ...resolved,
+    inputCharBudget: maxChars,
+    contextTokens,
+    contextKnown,
+    structuredOutput: typeof entry?.structured_output === 'boolean' ? entry.structured_output : null,
+    outputTokenLimit: Number(entry?.limit?.output) > 0 ? Number(entry.limit.output) : null,
+  };
 }

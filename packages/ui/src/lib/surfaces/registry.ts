@@ -7,6 +7,7 @@ export type ContextSurfaceId =
   | 'git'
   | 'pr'
   | 'diff'
+  | 'walkthrough'
   | 'editor'
   | 'terminal'
   | 'notes'
@@ -59,6 +60,15 @@ export const CONTEXT_SURFACES: readonly ContextSurfaceDescriptor[] = [
     icon: 'arrow-left-right',
     labelKey: 'contextPanel.mode.diff',
     descriptionKey: 'contextRail.surface.diff.description',
+    availability: 'always',
+    defaultWidthFraction: 0.6,
+  },
+  {
+    id: 'walkthrough',
+    mode: 'walkthrough',
+    icon: 'route',
+    labelKey: 'contextPanel.mode.walkthrough',
+    descriptionKey: 'contextRail.surface.walkthrough.description',
     availability: 'always',
     defaultWidthFraction: 0.6,
   },

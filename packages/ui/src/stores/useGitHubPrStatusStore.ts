@@ -693,6 +693,21 @@ export const usePrStatusForDirectoryBranch = (directory: string | null, branch: 
   });
 };
 
+export const getFreshestPrStatusForBranch = (
+  entries: Record<string, PrStatusEntry>,
+  directory: string,
+  branch: string,
+): GitHubPullRequestStatus | null => {
+  for (const [key, entry] of Object.entries(entries)) {
+    if (!entry?.status) continue;
+    const parsedKey = getGitHubPrStatusKey(directory, branch);
+    if (key === parsedKey || key.startsWith(`${parsedKey}::`)) {
+      return entry.status;
+    }
+  }
+  return null;
+};
+
 export type PrVisualSummary = {
   number: number;
   visualState: string;

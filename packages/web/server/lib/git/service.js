@@ -454,6 +454,11 @@ const createRepositoryGitContext = async (directory) => {
   return { directoryPath, directoryGit, repoRoot, git };
 };
 
+export async function getRepositoryRoot(directory) {
+  const { repoRoot } = await createRepositoryGitContext(directory);
+  return repoRoot;
+}
+
 const resolveGitInternalPath = async (repoRoot, git, gitPath) => {
   const resolved = await git.raw(['rev-parse', '--git-path', gitPath]);
   return path.resolve(repoRoot, resolved.trim());
@@ -1865,6 +1870,53 @@ export async function getDiff(directory, { path: filePath, staged = false, conte
     console.error('Failed to get Git diff:', error);
     throw error;
   }
+}
+
+export async function listUntrackedPaths(directory) {
+  const { repoRoot } = await createRepositoryGitContext(directory);
+  const result = await runGitCommand(repoRoot, [
+    'ls-files',
+    '--others',
+    '--exclude-standard',
+  ]);
+  if (!result.success) return [];
+  return String(result.stdout || '')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+export async function getUntrackedDiffs(directory, filePaths = [], { concurrency = 8, contextLines = 3 } = {}) {
+  const paths = (Array.isArray(filePaths) ? filePaths : []).filter((value) => typeof value === 'string' && value);
+  if (paths.length === 0) return [];
+
+  const { directoryPath, directoryGit, repoRoot, git } = await createRepositoryGitContext(directory);
+  const results = new Array(paths.length).fill('');
+  let cursor = 0;
+
+  const worker = async () => {
+    while (cursor < paths.length) {
+      const index = cursor++;
+      try {
+        const fileContext = await resolveGitFileContext(directoryPath, directoryGit, paths[index], repoRoot);
+        const args = ['diff', '--no-color'];
+        if (typeof contextLines === 'number' && !Number.isNaN(contextLines)) {
+          args.push(`-U${Math.max(0, contextLines)}`);
+        }
+        args.push('--no-index', '--', '/dev/null', fileContext.repoPath);
+        try {
+          results[index] = await git.raw(args);
+        } catch (error) {
+          results[index] = error?.exitCode === 1 && error?.message ? error.message : '';
+        }
+      } catch {
+        results[index] = '';
+      }
+    }
+  };
+
+  await Promise.all(Array.from({ length: Math.min(concurrency, paths.length) }, worker));
+  return results;
 }
 
 export async function getRangeDiff(directory, { base, head, path: filePath, contextLines = 3 } = {}) {
