@@ -1,4 +1,6 @@
 import { useState, useCallback, useEffect } from 'react';
+import { resolveApiUrl } from '@/lib/api/serverUrl';
+import { useSettingsServerBaseUrl } from '@/hooks/useSettingsServerBaseUrl';
 
 type LogoSource = 'local' | 'remote' | 'none';
 
@@ -57,7 +59,27 @@ for (const [path, url] of Object.entries(localLogoModules)) {
     }
 }
 
+const isVSCodeWebview =
+    typeof window !== 'undefined' &&
+    (window as { __VSCODE_CONFIG__?: unknown }).__VSCODE_CONFIG__ !== undefined;
+
+const buildRemoteLogoSrc = (
+    remoteResolvedId: string,
+    serverBaseUrl: string,
+): string => {
+    // The VS Code webview cannot load <img> from the OpenChamber server (its
+    // CSP only allows https:/data: sources), so it keeps the direct URL.
+    if (isVSCodeWebview) {
+        return `https://models.dev/logos/${remoteResolvedId}.svg`;
+    }
+    return resolveApiUrl(
+        `/api/openchamber/provider-logos/${remoteResolvedId}.svg`,
+        serverBaseUrl,
+    );
+};
+
 export function useProviderLogo(providerId: string | null | undefined): UseProviderLogoReturn {
+    const { baseUrl } = useSettingsServerBaseUrl();
     const candidates = buildLogoCandidates(providerId);
     const localResolvedId = candidates.find((candidate) => LOCAL_PROVIDER_LOGO_MAP.has(candidate)) ?? null;
     const remoteResolvedId = candidates[0] ?? null;
@@ -88,7 +110,7 @@ export function useProviderLogo(providerId: string | null | undefined): UseProvi
 
     if (source === 'remote' && remoteResolvedId) {
         return {
-            src: `https://models.dev/logos/${remoteResolvedId}.svg`,
+            src: buildRemoteLogoSrc(remoteResolvedId, baseUrl),
             onError: handleError,
             hasLogo: true,
         };

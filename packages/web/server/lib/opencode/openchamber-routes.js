@@ -306,6 +306,66 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
     }
   });
 
+  // Proxy models.dev logos through the server with a disk cache: the UI must
+  // not depend on direct browser TLS to models.dev (intermittent failures make
+  // logos flicker), and once cached a logo never needs the network again.
+  app.get('/api/openchamber/provider-logos/:name.svg', async (req, res) => {
+    const rawName = String(req.params.name || '').toLowerCase().trim();
+    const sanitizedName = rawName.replace(/[^a-z0-9_.-]/g, '');
+    if (!sanitizedName || sanitizedName.startsWith('.') || sanitizedName.includes('..')) {
+      return res.status(400).json({ error: 'Invalid provider name' });
+    }
+
+    const cacheDir = path.join(openchamberDataDir, 'provider-logos');
+    const cacheFile = path.join(cacheDir, `${sanitizedName}.svg`);
+
+    try {
+      if (fs.existsSync(cacheFile)) {
+        res.setHeader('Content-Type', 'image/svg+xml');
+        res.setHeader('Cache-Control', 'public, max-age=86400');
+        fs.createReadStream(cacheFile).pipe(res);
+        return;
+      }
+    } catch (cacheError) {
+      console.warn(`[openchamber] provider logo cache read failed for ${sanitizedName}:`, cacheError?.message || cacheError);
+    }
+
+    const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const timeout = controller ? setTimeout(() => controller.abort(), 8000) : null;
+    try {
+      const logoUrl = `https://models.dev/logos/${encodeURIComponent(sanitizedName)}.svg`;
+      const response = await fetch(logoUrl, {
+        signal: controller?.signal,
+        headers: { Accept: 'image/svg+xml,application/xml,text/xml' },
+      });
+      if (!response.ok) {
+        throw new Error(`models.dev responded with status ${response.status}`);
+      }
+      const body = await response.text();
+      if (!body || !/^\s*(<\?xml|<!DOCTYPE|<svg)/i.test(body)) {
+        throw new Error('models.dev returned an unexpected logo payload');
+      }
+      try {
+        fs.mkdirSync(cacheDir, { recursive: true });
+        const tmpFile = `${cacheFile}.${process.pid}.${Date.now()}.tmp`;
+        fs.writeFileSync(tmpFile, body, 'utf8');
+        fs.renameSync(tmpFile, cacheFile);
+      } catch (writeError) {
+        console.warn(`[openchamber] failed to persist provider logo to disk (${sanitizedName}):`, writeError?.message || writeError);
+      }
+      res.setHeader('Content-Type', 'image/svg+xml');
+      res.setHeader('Cache-Control', 'public, max-age=86400');
+      res.send(body);
+    } catch (error) {
+      console.warn(`[openchamber] provider logo fetch failed for ${sanitizedName}:`, error?.message || error);
+      res.status(error?.name === 'AbortError' ? 504 : 502).json({ error: 'Failed to fetch provider logo' });
+    } finally {
+      if (timeout) {
+        clearTimeout(timeout);
+      }
+    }
+  });
+
   app.get('/api/zen/models', async (_req, res) => {
     try {
       const models = await fetchFreeZenModels();
