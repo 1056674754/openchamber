@@ -1742,3 +1742,26 @@ VS Code worktree lock 验证：在两个真实临时 Git 仓库及 `--no-checkou
 - `/Applications/OpenChamber.app` 未修改——全部改动在 `merge/upstream` 分支工作树。
 - Markdown 渲染器保持 react-markdown（未迁 marked+shiki）；MessageList 虚拟化保持 `@tanstack/react-virtual`（未迁 virtua）。
 - SessionSidebar 保持 authoritative（未引入上游 `MobileSessionsSheet`）；drawers 保持 toggle-opened（未引入 edge-swipe）。
+
+## v1.18.1 差距审计与合并（2026-08-05）
+
+**比较边界**：上游 `v1.18.0..v1.18.1`（`ce5192197`），24 commits，92 files，+4082/-619。fork 从 v1.18.0 合并收口（`631492caf`）推进到 v1.18.1 全部合并。
+
+### 官方 v1.18.1 功能 → Fork 处理
+
+| 功能 | 状态 | Fork 处理 |
+|---|---|---|
+| Providers: OAuth-only provider 登录完成 | ✅ 已合并 | 新增 `ProviderOAuthMethods.tsx` + `provider-oauth.ts`（OAuth 方式选择、device code copy、browser callback 完成）；`ProvidersPage.tsx` 用新组件替代内联 OAuth 逻辑；`proxy.js` 加 `INTERACTIVE_OAUTH_TIMEOUT_MS`（15min）+ OAuth callback 豁免 deadline |
+| Providers: OAuth-only 隐藏 API key form | ✅ 已合并 | `shouldShowApiKeyAuth` 判断——OAuth-only provider 显示 Connect 流而非 API key form |
+| Providers: 未认证时隐藏 models | ✅ 已合并 | Provider models 在 credentials 不存在时隐藏 |
+| Sessions: archived sessions 可恢复 | ✅ 已合并 | `unarchiveSession` + `unarchiveSessions` 加 `expectedRuntimeKey` guard + fail-loudly check；`session-ui-store` 接线；`globalSessions.ts` 加 `splitGlobalSessionsByArchived` + `narrowToArchived`；`useGlobalSessionsStore` 改用 inclusive fetch + client-side split（restored sessions 在 reload 后存活）；ArchiveView / SessionNodeItem / BulkActionBar / useSessionActions 加 restore UI |
+| Walkthrough: 未认证 models 不出现 | ✅ 已合并 | `small-model` 加 `resolveProviderLogin` + `hasLogin` + 结构化 401 error；walkthrough readiness `no-provider-login` 拒绝；`ModelPickerList` 视 `[]` 为 allow-none；WalkthroughView 隐藏未认证 models + 禁用 Generate |
+| Walkthrough: "Critical" → "Key change" | ✅ 已合并 | `WalkthroughStream` importance tag 重命名 + tooltip；i18n key 改值 |
+| Walkthrough: 旧服务器友好错误 | ✅ 已合并 | `api.ts` 加 `isJsonResponse` / `looksUnsupported` / `serverUnsupported` 检测——HTML 响应 → "server needs updating" |
+| Walkthrough: disabled Generate 去掉 info tint | ✅ 已合并 | Generate button className 改为 `border-border text-muted-foreground` |
+| Chat: Ctrl/Cmd+L 发送选中文本 | ✅ 已合并 | `addSelectionToChat` 逻辑；toggle-sidebar 移到 Ctrl/Cmd+Alt+L；ChatInput 集成 |
+| Chat: 手动 model 选择在 subtask 后保持 | ✅ 已合并 | `userModelChoice` 持久化——delegated subtask 完成后不回退到 agent default |
+| Agents/CLI: 未送达 prompt 报失败 | ✅ 已合并 | `openchamber-sessions/routes.js` — dispatched prompt 未到达 session 时报 failed |
+| Desktop/Linux: Terminal launcher 不错误归属 | ✅ 已合并 | `linux-app-discovery.mjs` 加 `isTerminalEmulatorEntry`——`appId === 'terminal'` 要求 `Categories=TerminalEmulator`，不再 substring match 误匹配 |
+
+**验证**：全 workspace `bun run type-check` 0 errors、`bun run lint` 0 errors、`bun run build` 通过。focused tests 覆盖 provider-oauth、session restore、walkthrough auth、Ctrl+L 各项。

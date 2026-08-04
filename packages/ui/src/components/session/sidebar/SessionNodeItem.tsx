@@ -190,6 +190,7 @@ type Props = {
   createFolderAndStartRename: (scopeKey: string, parentId?: string | null) => { id: string } | null;
   openContextPanelTab: (directory: string, options: { mode: 'chat'; dedupeKey: string; label: string; readOnly?: boolean }) => void;
   handleDeleteSession: (session: Session, source?: { archivedBucket?: boolean }) => void;
+  handleRestoreSession: (session: Session) => void;
   onRegenerateTitle?: (sessionId: string, sessionTitle: string) => void;
   mobileVariant: boolean;
   alwaysShowActions: boolean;
@@ -412,6 +413,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
     createFolderAndStartRename,
     openContextPanelTab,
     handleDeleteSession,
+    handleRestoreSession,
     onRegenerateTitle,
     mobileVariant,
     alwaysShowActions,
@@ -1298,6 +1300,19 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
         <Icon name="eraser" className="h-4 w-4" />
         {t('sessions.sidebar.session.menu.clearAllMarkers')}
       </DropdownMenuItem>
+
+      {archivedBucket ? (
+        <>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            onClick={() => handleRestoreSession(session)}
+            className="[&>svg]:mr-1"
+          >
+            <Icon name="inbox-unarchive" className="mr-1 h-4 w-4" />
+            {t('sessions.sidebar.bulkActions.restore')}
+          </DropdownMenuItem>
+        </>
+      ) : null}
 
       {!archivedBucket ? (
         <>

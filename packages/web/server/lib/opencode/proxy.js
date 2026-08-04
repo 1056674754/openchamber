@@ -498,10 +498,11 @@ export const registerOpenCodeProxy = (app, deps) => {
   app.get('/api/event', forwardSseRequest);
 
   // Generic proxy for non-SSE OpenCode API routes.
-  const apiProxy = createProxyMiddleware({
+  const createApiProxy = (timeoutMs) => createProxyMiddleware({
     target: resolveProxyTarget(),
     changeOrigin: true,
     pathRewrite: { '^/api': '' },
+    ...(timeoutMs ? { timeout: timeoutMs, proxyTimeout: timeoutMs } : {}),
     // Dynamic target — port can change after restart
     router: () => resolveProxyTarget(),
     on: {
@@ -532,6 +533,14 @@ export const registerOpenCodeProxy = (app, deps) => {
       },
     },
   });
+
+  // A provider OAuth callback blocks upstream for as long as the user takes to
+  // sign in in their browser (device-code polling, or a loopback redirect), so
+  // it cannot share the ordinary request deadline. Bounded by the shortest
+  // upstream expiry we know of — GitHub device codes last ~15 minutes.
+  const INTERACTIVE_OAUTH_TIMEOUT_MS = 15 * 60 * 1000;
+  const apiProxy = createApiProxy();
+  const interactiveOAuthProxy = createApiProxy(INTERACTIVE_OAUTH_TIMEOUT_MS);
 
   app.use('/api', async (req, _res, next) => {
     try {
@@ -572,5 +581,6 @@ export const registerOpenCodeProxy = (app, deps) => {
     }
   });
 
+  app.post('/api/provider/:providerID/oauth/callback', interactiveOAuthProxy);
   app.use('/api', apiProxy);
 };

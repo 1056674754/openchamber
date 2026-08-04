@@ -66,6 +66,13 @@ other runtime API.
 - `routes.js` — `GET /api/small-model` (resolution preview) and
   `POST /api/small-model/generate` (`{ prompt, system?, maxOutputTokens?,
   model?, directory? }` → `{ text, providerID, modelID, source }`).
+- `describeSmallModel()` additionally reports `hasLogin`: whether the resolved
+  provider has a usable credential (`auth.json` or config
+  `provider.<id>.options.apiKey`). Settings/config overrides can name a provider
+  with none, and callers such as the walkthrough refuse before the request.
+  Missing credentials throw with `statusCode: 401` and `code: 'no-provider-login'`
+  rather than a bare `Error`, so UI callers can show a blocker instead of a raw
+  500 message.
 
 ## Registration
 

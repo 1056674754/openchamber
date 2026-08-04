@@ -5,7 +5,7 @@ import { readAuthFile } from '../opencode/auth.js';
 import { readConfigLayers } from '../opencode/shared.js';
 import { getModelCatalog } from './catalog.js';
 import { resolveSmallModel, resolveSmallModelChain, parseModelRef, isUsableAuthEntry, getAuthEntryForProvider } from './resolve.js';
-import { callSmallModel } from './call.js';
+import { callSmallModel, resolveProviderLogin } from './call.js';
 
 const OPENCHAMBER_SETTINGS_FILE = path.join(
   process.env.OPENCHAMBER_DATA_DIR
@@ -218,8 +218,17 @@ export async function describeSmallModel({ directory, preferredProviderID, prefe
     outputReserveTokens,
   });
 
+  // Settings/config/request overrides can name a provider with no usable login.
+  // Report that here so readiness can refuse before the user pays for a 401.
+  const hasLogin = Boolean(resolveProviderLogin({
+    auth,
+    workingDirectory: directory,
+    providerID: resolved.providerID,
+  }));
+
   return {
     ...resolved,
+    hasLogin,
     inputCharBudget: maxChars,
     contextTokens,
     contextKnown,

@@ -1012,42 +1012,91 @@ export async function archiveSessions(
   return { archivedIds, failedIds }
 }
 
+/**
+ * Sentinel written to `time.archived` when restoring a session.
+ *
+ * The OpenCode server has no HTTP path to clear `time.archived` back to NULL:
+ * `session.update` only applies the field when the payload carries a finite
+ * number, so omitting the key is a no-op and `null` is silently ignored.
+ * Writing `0` is the only value that makes every reader treat the session as
+ * active again: the UI, the event reducer, and the OpenCode app/TUI all
+ * classify archive state by truthiness of `time.archived`, and `0` is falsy.
+ */
+const UNARCHIVED_TIMESTAMP = 0
+
+/**
+ * Restore one archived session back to the active list.
+ *
+ * Same contract as `archiveSession`: waits for server confirmation before
+ * reconciling stores, and rejects stale runtimes so a response produced by a
+ * previous runtime cannot mutate the current runtime's state. Fails loudly
+ * (returns false) when the server keeps the session archived instead of
+ * toasting a successful no-op.
+ */
 export async function unarchiveSession(
   sessionId: string,
-  directoryHint?: string | null,
+  expectedRuntimeKey: string = getRuntimeKey(),
 ): Promise<boolean> {
-  const sessionDirectory = directoryHint?.trim()
-    || requireSessionDirectory(sessionId, "unarchiveSession")
-  registerSessionDirectory(sessionId, sessionDirectory)
+  if (isStaleRuntime(expectedRuntimeKey)) return false
+  const sessionDirectory = requireSessionDirectory(sessionId, "unarchiveSession")
   try {
     const result = await sdkForSession(sessionId, sessionDirectory).session.update({
       sessionID: sessionId,
       directory: sessionDirectory,
-      // OpenCode clears archive when archived is falsy/0.
-      time: { archived: 0 },
+      time: { archived: UNARCHIVED_TIMESTAMP },
     })
-    if (result.data) {
-      useGlobalSessionsStore.getState().upsertSession(result.data)
-      return true
+    if (isStaleRuntime(expectedRuntimeKey)) return false
+    const restored = result.data
+    if (!restored) {
+      throw new Error("session.update failed: server did not return the restored session")
     }
-    const existing = useGlobalSessionsStore.getState().archivedSessions.find((session) => session.id === sessionId)
-      ?? useGlobalSessionsStore.getState().activeSessions.find((session) => session.id === sessionId)
-    if (existing) {
-      const restTime = { ...(existing.time || { created: Date.now(), updated: Date.now() }) }
-      delete restTime.archived
-      useGlobalSessionsStore.getState().upsertSession({
-        ...existing,
-        time: {
-          ...restTime,
-          updated: Date.now(),
-        },
-      })
+    if (restored.time?.archived) {
+      throw new Error("session.update failed: server kept the session archived")
     }
+    useGlobalSessionsStore.getState().upsertSession(restored)
+    registerSessionDirectory(sessionId, sessionDirectory)
     return true
   } catch (error) {
     console.error("[session-actions] unarchiveSession failed", error)
     return false
   }
+}
+
+export type UnarchiveSessionsOptions = {
+  /**
+   * Runtime key captured when the batch was confirmed. When supplied, the batch
+   * stops as soon as the active runtime differs.
+   */
+  expectedRuntimeKey?: string
+}
+
+/**
+ * Restore several archived sessions sequentially, preserving partial results.
+ *
+ * One failed session never blocks or erases the others: it is reported in
+ * `failedIds` while the remaining IDs are still attempted. When
+ * `expectedRuntimeKey` is supplied and the runtime changes mid-batch, the
+ * already-confirmed sessions stay in `restoredIds` and every unconfirmed ID is
+ * reported in `failedIds`.
+ */
+export async function unarchiveSessions(
+  ids: string[],
+  options?: UnarchiveSessionsOptions,
+): Promise<{ restoredIds: string[]; failedIds: string[] }> {
+  const restoredIds: string[] = []
+  const failedIds: string[] = []
+  const expectedRuntimeKey = options?.expectedRuntimeKey ?? getRuntimeKey()
+
+  for (const [index, id] of ids.entries()) {
+    if (isStaleRuntime(expectedRuntimeKey)) {
+      failedIds.push(...ids.slice(index))
+      break
+    }
+    if (await unarchiveSession(id, expectedRuntimeKey)) restoredIds.push(id)
+    else failedIds.push(id)
+  }
+
+  return { restoredIds, failedIds }
 }
 
 export async function updateSessionTitle(sessionId: string, title: string): Promise<void> {

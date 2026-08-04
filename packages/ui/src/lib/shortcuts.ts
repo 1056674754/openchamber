@@ -159,8 +159,15 @@ const SHORTCUT_ACTIONS: ReadonlyArray<ShortcutAction> = [
     description: 'Toggle the files panel',
   },
   {
-    id: 'toggle_sidebar',
+    id: 'add_selection_to_chat',
     defaultCombo: 'mod+l',
+    label: 'Add selection to chat',
+    description: 'Send selected text to chat, or focus the input when nothing is selected',
+    customizable: true,
+  },
+  {
+    id: 'toggle_sidebar',
+    defaultCombo: 'mod+alt+l',
     label: 'Toggle sidebar',
     description: 'Toggle the session sidebar',
     customizable: true,

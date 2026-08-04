@@ -41,6 +41,7 @@ import { useI18n } from '@/lib/i18n';
 import { useOpenCodeReadiness } from '@/hooks/useOpenCodeReadiness';
 import { eventMatchesShortcut, getEffectiveShortcutCombo, normalizeCombo } from '@/lib/shortcuts';
 import { markStartupTrace } from '@/lib/startupTrace';
+import { shouldPreserveManualModelOverride } from '@/lib/messages/userModelChoice';
 import { useActiveServerId } from '@/hooks/useActiveServerId';
 import { DEFAULT_SERVER_ID, serverRegistry } from '@/lib/opencode/server-registry';
 import { resolveModelVariant } from '@/lib/modelVariantResolution';
@@ -942,6 +943,24 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             return;
         }
 
+        const savedSessionModel = getSessionModelSelection(currentSessionId);
+        if (shouldPreserveManualModelOverride({
+            selectionSource: useConfigStore.getState().selectionSource,
+            savedSessionModel,
+            candidate: latestLoadedUserChoice,
+        })) {
+            if (savedSessionModel) {
+                applyModelSelectionWithVariant(
+                    savedSessionModel.providerId,
+                    savedSessionModel.modelId,
+                    resolveModelVariantSelection(savedSessionModel.providerId, savedSessionModel.modelId),
+                    currentAgentName || undefined,
+                );
+            }
+            latestLoadedUserChoiceRestoreRef.current = restoreKey;
+            return;
+        }
+
         const latestChoiceAgentName = isKnownAgentName(latestLoadedUserChoice.agent)
             ? latestLoadedUserChoice.agent
             : undefined;
@@ -993,6 +1012,8 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         setAgent,
         applyModelSelectionWithVariant,
         getModelVariantOptions,
+        getSessionModelSelection,
+        resolveModelVariantSelection,
         saveSessionAgentSelection,
         saveAgentModelVariantForSession,
         saveSessionModelSelection,

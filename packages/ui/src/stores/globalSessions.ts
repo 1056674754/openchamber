@@ -140,11 +140,24 @@ export const isMissingGlobalSessionsEndpointError = (error: unknown): boolean =>
 
 const isArchivedSession = (session: GlobalSessionRecord): boolean => Boolean(session.time?.archived);
 
+export const splitGlobalSessionsByArchived = <T extends GlobalSessionRecord>(
+    sessions: T[],
+): { active: T[]; archived: T[] } => {
+    const active: T[] = [];
+    const archived: T[] = [];
+    for (const session of sessions) {
+        if (isArchivedSession(session)) archived.push(session);
+        else active.push(session);
+    }
+    return { active, archived };
+};
+
 export async function listGlobalSessionPage(
     apiClient: SessionListClient,
     options: {
         directory?: string;
         archived: boolean;
+        narrowToArchived?: boolean;
         roots?: boolean;
         search?: string;
         start?: number;
@@ -159,6 +172,10 @@ export async function listGlobalSessionPage(
         ...(options.start !== undefined ? { start: options.start } : {}),
         limit: options.pageSize,
     });
+    const narrowToArchived = options.narrowToArchived !== false;
+    if (options.archived && narrowToArchived) {
+        return sessions.filter((session) => isArchivedSession(session));
+    }
     return sessions;
 }
 
@@ -167,6 +184,7 @@ export async function listGlobalSessionPages(
     options: {
         directory?: string;
         archived: boolean;
+        narrowToArchived?: boolean;
         roots?: boolean;
         search?: string;
         start?: number;
@@ -177,6 +195,7 @@ export async function listGlobalSessionPages(
     const all: GlobalSessionRecord[] = [];
     const seenIds = new Set<string>();
     let cursor: number | undefined;
+    const narrowToArchived = options.narrowToArchived !== false;
 
     while (true) {
         const page = await requestSessionPage(apiClient, {
@@ -198,7 +217,7 @@ export async function listGlobalSessionPages(
             if (!session?.id || seenIds.has(session.id)) continue;
             seenIds.add(session.id);
             appended += 1;
-            if (options.archived && !isArchivedSession(session)) continue;
+            if (options.archived && narrowToArchived && !isArchivedSession(session)) continue;
             all.push(session);
             accepted.push(session);
         }

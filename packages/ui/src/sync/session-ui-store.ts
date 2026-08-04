@@ -57,7 +57,10 @@ import {
   deleteSession as deleteSessionAction,
   archiveSession as archiveSessionAction,
   archiveSessions as archiveSessionsAction,
+  unarchiveSession as unarchiveSessionAction,
+  unarchiveSessions as unarchiveSessionsAction,
   type ArchiveSessionsOptions,
+  type UnarchiveSessionsOptions,
   updateSessionTitle as updateSessionTitleAction,
   shareSession as shareSessionAction,
   unshareSession as unshareSessionAction,
@@ -83,6 +86,7 @@ import { getAttachedSessionDirectory } from "./session-worktree-contract"
 import { savePendingMessage, deletePendingMessage } from "./pending-message"
 import { resolveSlashRouteTarget } from "./slash-routing"
 import { findLatestRealUserMessage, isRealUserMessage } from "@/lib/messages/real-user"
+import { extractUserModelChoice } from "@/lib/messages/userModelChoice"
 import {
   applyDraftPermissionIntentAfterSessionCreation,
   createDraftPermissionIntent,
@@ -412,6 +416,8 @@ export type SessionUIState = {
   deleteSessions: (ids: string[], options?: Record<string, unknown>) => Promise<{ deletedIds: string[]; failedIds: string[] }>
   archiveSession: (id: string) => Promise<boolean>
   archiveSessions: (ids: string[], options?: ArchiveSessionsOptions) => Promise<{ archivedIds: string[]; failedIds: string[] }>
+  unarchiveSession: (id: string) => Promise<boolean>
+  unarchiveSessions: (ids: string[], options?: UnarchiveSessionsOptions) => Promise<{ restoredIds: string[]; failedIds: string[] }>
   updateSessionTitle: (sessionId: string, title: string) => Promise<void>
   shareSession: (sessionId: string) => Promise<Session | null>
   unshareSession: (sessionId: string) => Promise<Session | null>
@@ -1785,6 +1791,10 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
 
   archiveSessions: (ids, options) => archiveSessionsAction(ids, options),
 
+  unarchiveSession: (id) => unarchiveSessionAction(id),
+
+  unarchiveSessions: (ids, options) => unarchiveSessionsAction(ids, options),
+
   // ---------------------------------------------------------------------------
   // updateSessionTitle — calls SDK, SSE event updates child store
   // ---------------------------------------------------------------------------
@@ -2115,22 +2125,14 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         mode?: string
       }) | undefined
     if (!message) return null
-
-    const providerID = typeof message.model?.providerID === "string" && message.model.providerID.trim().length > 0
-      ? message.model.providerID
-      : undefined
-    const modelID = typeof message.model?.modelID === "string" && message.model.modelID.trim().length > 0
-      ? message.model.modelID
-      : undefined
-    const agent = typeof message.agent === "string" && message.agent.trim().length > 0
-      ? message.agent
-      : (typeof message.mode === "string" && message.mode.trim().length > 0 ? message.mode : undefined)
-    const variantCandidate = message.model?.variant ?? message.variant
-    const variant = typeof variantCandidate === "string" && variantCandidate.trim().length > 0
-      ? variantCandidate
-      : undefined
-
-    return { agent, providerID, modelID, variant }
+    const choice = extractUserModelChoice(message)
+    if (!choice) return null
+    return {
+      agent: choice.agent,
+      providerID: choice.providerID,
+      modelID: choice.modelID,
+      variant: choice.variant,
+    }
   },
 
   getCurrentAgent: (sessionId) => {

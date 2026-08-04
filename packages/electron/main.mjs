@@ -1743,6 +1743,11 @@ const dispatchMenuAction = (action) => {
   dispatchDomEventToWindow(target, 'openchamber:menu-action', action);
 };
 
+const dispatchAddSelectionToChat = () => {
+  const target = getMenuTargetWindow();
+  if (target) emitToWindow(target, 'openchamber:menu-action', 'add-selection-to-chat');
+};
+
 const dispatchCheckForUpdates = () => {
   emitToAllWindows('openchamber:check-for-updates');
   for (const browserWindow of BrowserWindow.getAllWindows()) {
@@ -3522,6 +3527,7 @@ const buildMacMenu = () => {
         { type: 'separator' },
         { role: 'cut' },
         { label: 'Copy', accelerator: 'Cmd+C', click: () => handleCopyAction() },
+        { label: 'Add Selection to Chat', accelerator: 'Cmd+L', registerAccelerator: false, click: () => dispatchAddSelectionToChat() },
         { role: 'paste' },
         { role: 'selectAll' },
       ],
@@ -3540,7 +3546,8 @@ const buildMacMenu = () => {
         { label: 'Dark Theme', click: () => dispatchAction('theme-dark') },
         { label: 'System Theme', click: () => dispatchAction('theme-system') },
         { type: 'separator' },
-        { label: 'Toggle Session Sidebar', accelerator: 'Cmd+L', click: () => dispatchAction('toggle-sidebar') },
+        { label: 'Add Selection to Chat', accelerator: 'Cmd+L', registerAccelerator: false, click: () => dispatchAddSelectionToChat() },
+        { label: 'Toggle Session Sidebar', accelerator: 'Cmd+Alt+L', click: () => dispatchAction('toggle-sidebar') },
         { label: 'Toggle Memory Debug', accelerator: 'Cmd+Shift+D', click: () => dispatchAction('toggle-memory-debug') },
         { type: 'separator' },
         { label: 'Developer Tools', accelerator: 'Cmd+Option+I', click: () => { BrowserWindow.getFocusedWindow()?.webContents.openDevTools(); } },
@@ -3618,6 +3625,7 @@ const buildAutoHiddenMenu = () => {
         { type: 'separator' },
         { role: 'cut' },
         { label: 'Copy', accelerator: 'Ctrl+C', click: () => handleCopyAction() },
+        { label: 'Add Selection to Chat', accelerator: 'Ctrl+L', registerAccelerator: false, click: () => dispatchAddSelectionToChat() },
         { role: 'paste' },
         { role: 'selectAll' },
       ],
@@ -3640,7 +3648,8 @@ const buildAutoHiddenMenu = () => {
         { label: 'Dark Theme', click: () => dispatchAction('theme-dark') },
         { label: 'System Theme', click: () => dispatchAction('theme-system') },
         { type: 'separator' },
-        { label: 'Toggle Session Sidebar', accelerator: 'Ctrl+L', click: () => dispatchAction('toggle-sidebar') },
+        { label: 'Add Selection to Chat', accelerator: 'Ctrl+L', registerAccelerator: false, click: () => dispatchAddSelectionToChat() },
+        { label: 'Toggle Session Sidebar', accelerator: 'Ctrl+Alt+L', click: () => dispatchAction('toggle-sidebar') },
         { label: 'Toggle Memory Debug', accelerator: 'Ctrl+Shift+D', click: () => dispatchAction('toggle-memory-debug') },
         { type: 'separator' },
         { role: 'togglefullscreen' },

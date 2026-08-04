@@ -2,6 +2,7 @@ import React from 'react';
 import type { Session } from '@opencode-ai/sdk/v2';
 import { Icon } from '@/components/icon/Icon';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { toast } from '@/components/ui';
 import { formatSessionDateLabel, normalizePath } from '@/components/session/sidebar/utils';
 import { useI18n } from '@/lib/i18n';
 import { sessionEvents } from '@/lib/sessionEvents';
@@ -28,6 +29,7 @@ export function ArchiveView(): React.ReactNode {
   const setOpen = useUIStore((state) => state.setArchivePageOpen);
   const setActiveMainTab = useUIStore((state) => state.setActiveMainTab);
   const setCurrentSession = useSessionUIStore((state) => state.setCurrentSession);
+  const unarchiveSession = useSessionUIStore((state) => state.unarchiveSession);
   const homeDirectory = useDirectoryStore((state) => state.homeDirectory);
   const projects = useProjectsStore((state) => state.projects);
   const archivedSessions = useGlobalSessionsStore(useShallow((state) => (
@@ -100,6 +102,16 @@ export function ArchiveView(): React.ReactNode {
     setActiveMainTab('chat');
     setOpen(false);
   }, [setActiveMainTab, setCurrentSession, setOpen]);
+
+  const restoreSession = React.useCallback((session: Session) => {
+    void unarchiveSession(session.id).then((success) => {
+      if (success) {
+        toast.success(t('sessions.sidebar.session.restore.success'));
+      } else {
+        toast.error(t('sessions.sidebar.session.restore.error'));
+      }
+    });
+  }, [t, unarchiveSession]);
 
   if (!open) return null;
 
@@ -207,7 +219,7 @@ export function ArchiveView(): React.ReactNode {
                 <button
                   type="button"
                   onClick={() => openSession(session)}
-                  className="flex w-full items-center gap-3 rounded-md py-1 pl-2 pr-8 text-left hover:bg-interactive-hover/40"
+                  className="flex w-full items-center gap-3 rounded-md py-1 pl-2 pr-14 text-left hover:bg-interactive-hover/40"
                 >
                   <span className="min-w-0 flex-1 truncate typography-ui-label text-foreground">
                     {session.title || t('sessions.sidebar.session.untitled')}
@@ -215,6 +227,16 @@ export function ArchiveView(): React.ReactNode {
                   <span className="typography-micro text-muted-foreground/75">
                     {formatSessionDateLabel(session.time?.archived ?? session.time?.updated ?? session.time?.created ?? Date.now())}
                   </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => restoreSession(session)}
+                  className="absolute right-7 top-1/2 inline-flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground opacity-0 hover:text-foreground group-hover/session:opacity-100 focus-visible:opacity-100"
+                  aria-label={t('sessions.archivePage.restoreSessionAria', {
+                    title: session.title || t('sessions.sidebar.session.untitled'),
+                  })}
+                >
+                  <Icon name="inbox-unarchive" className="h-3.5 w-3.5" />
                 </button>
                 <button
                   type="button"

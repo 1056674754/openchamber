@@ -2224,21 +2224,6 @@ export const useConfigStore = create<ConfigStore>()(
                         };
 
                         const agent = agents.find((candidate) => candidate.name === agentName);
-                        const agentModelSelection = agent?.model;
-                        if (agentModelSelection?.providerID && agentModelSelection?.modelID) {
-                            const { providerID, modelID } = agentModelSelection;
-                            const agentProvider = providers.find((provider) => provider.id === providerID);
-                            const agentModel = agentProvider?.models.find((model) => model.id === modelID);
-
-                            if (agentModel) {
-                                applyResolvedModelSelection(
-                                    providerID,
-                                    modelID,
-                                    resolveVariantForModel(providerID, modelID, agent?.variant),
-                                );
-                                return;
-                            }
-                        }
 
                         if (currentSessionId) {
                             const existingAgentModel = useSelectionStore.getState().getAgentModelForSession(currentSessionId, agentName);
@@ -2259,6 +2244,22 @@ export const useConfigStore = create<ConfigStore>()(
                                         resolvedVariant,
                                     );
                                 }
+                                return;
+                            }
+                        }
+
+                        const agentModelSelection = agent?.model;
+                        if (agentModelSelection?.providerID && agentModelSelection?.modelID) {
+                            const { providerID, modelID } = agentModelSelection;
+                            const agentProvider = providers.find((provider) => provider.id === providerID);
+                            const agentModel = agentProvider?.models.find((model) => model.id === modelID);
+
+                            if (agentModel) {
+                                applyResolvedModelSelection(
+                                    providerID,
+                                    modelID,
+                                    resolveVariantForModel(providerID, modelID, agent?.variant),
+                                );
                                 return;
                             }
                         }

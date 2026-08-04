@@ -1305,6 +1305,8 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
   const deleteSessions = useSessionUIStore((state) => state.deleteSessions);
   const archiveSession = useSessionUIStore((state) => state.archiveSession);
   const archiveSessions = useSessionUIStore((state) => state.archiveSessions);
+  const unarchiveSession = useSessionUIStore((state) => state.unarchiveSession);
+  const unarchiveSessions = useSessionUIStore((state) => state.unarchiveSessions);
 
   const {
     copiedSessionId,
@@ -1313,6 +1315,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
     handleCopyShareUrl,
     handleUnshareSession,
     handleDeleteSession,
+    handleRestoreSession,
     confirmDeleteSession,
   } = useSessionActions({
     activeProjectId,
@@ -1332,6 +1335,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
     deleteSessions,
     archiveSession,
     archiveSessions,
+    unarchiveSession,
     childrenMap,
     showDeletionDialog,
     setDeleteSessionConfirm,
@@ -2171,6 +2175,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
         createFolderAndStartRename={createFolderAndStartRename}
         openContextPanelTab={openContextPanelTab}
         handleDeleteSession={handleDeleteSession}
+        handleRestoreSession={handleRestoreSession}
         onRegenerateTitle={(sessionId, sessionTitle) => setRegenerateTitleSession({ id: sessionId, title: sessionTitle })}
         mobileVariant={mobileVariant}
         alwaysShowActions={alwaysShowSidebarActions}
@@ -2207,6 +2212,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
       createFolderAndStartRename,
       openContextPanelTab,
       handleDeleteSession,
+      handleRestoreSession,
       setRegenerateTitleSession,
       mobileVariant,
       alwaysShowSidebarActions,
@@ -2515,6 +2521,23 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
     await executeBulkDelete({ notifySkipped: true });
   }, [executeBulkDelete]);
 
+  const handleBulkRestore = React.useCallback(async () => {
+    if (selectedIds.size === 0 || !bulkScopeIsArchived) return;
+    const ids = Array.from(selectedIds);
+    const { restoredIds, failedIds } = await unarchiveSessions(ids);
+    if (restoredIds.length > 0) {
+      toast.success(restoredIds.length === 1
+        ? t('sessions.sidebar.bulkActions.restoredSingle', { count: restoredIds.length })
+        : t('sessions.sidebar.bulkActions.restoredPlural', { count: restoredIds.length }));
+    }
+    if (failedIds.length > 0) {
+      toast.error(failedIds.length === 1
+        ? t('sessions.sidebar.bulkActions.failedRestoreSingle', { count: failedIds.length })
+        : t('sessions.sidebar.bulkActions.failedRestorePlural', { count: failedIds.length }));
+    }
+    useSessionMultiSelectStore.getState().clear();
+  }, [bulkScopeIsArchived, selectedIds, t, unarchiveSessions]);
+
   React.useEffect(() => {
     if (!selectionModeEnabled) return;
     const isMac = typeof navigator !== 'undefined' && /Macintosh|Mac OS X/.test(navigator.userAgent || '');
@@ -2651,7 +2674,11 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
 
           if (archived) {
             const { unarchiveSession } = await import('@/sync/session-actions');
-            const ok = await unarchiveSession(sessionId, directory);
+            const { registerSessionDirectory } = await import('@/sync/sync-refs');
+            if (directory) {
+              registerSessionDirectory(sessionId, normalizePath(directory) ?? directory);
+            }
+            const ok = await unarchiveSession(sessionId);
             if (!ok) {
               toast.error(t('sessions.sidebar.tempSession.unavailable'));
               return;
@@ -2776,6 +2803,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
           onCreateFolderAndMove={handleBulkCreateFolderAndMove}
           onRemoveFromFolder={handleBulkRemoveFromFolder}
           canRemoveFromFolder={bulkCanRemoveFromFolder}
+          onRestore={handleBulkRestore}
           onDelete={handleBulkDelete}
           onDone={handleExitSelectionMode}
         />

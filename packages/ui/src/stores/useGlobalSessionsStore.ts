@@ -4,7 +4,7 @@ import type { SessionStatus } from '@opencode-ai/sdk/v2/client';
 import { opencodeClient } from '@/lib/opencode/client';
 import { DEFAULT_SERVER_ID, serverRegistry } from '@/lib/opencode/server-registry';
 import { resolveSessionAuthority } from '@/sync/session-authority';
-import { listGlobalSessionPage, listGlobalSessionPages } from '@/stores/globalSessions';
+import { listGlobalSessionPage, listGlobalSessionPages, splitGlobalSessionsByArchived } from '@/stores/globalSessions';
 import { retry } from '@/sync/retry';
 import { readRemoteSessionStatuses } from '@/sync/remote-session-status';
 import { shouldSkipStaleSessionEvent } from '@/sync/session-event-freshness';
@@ -246,7 +246,8 @@ const fetchDirectoryPages = async (
       directory,
       sessions: await listGlobalSessionPage(sdk, {
         directory,
-        archived: false,
+        archived: true,
+        narrowToArchived: false,
         roots: true,
         pageSize: PAGE_SIZE,
       }),
@@ -797,18 +798,21 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
     inflightLoad = (async () => {
       try {
         const sdk = opencodeClient.getSdkClient();
-        const roots = await listGlobalSessionPage(sdk, {
-          archived: false,
+        const allRoots = await listGlobalSessionPage(sdk, {
+          archived: true,
+          narrowToArchived: false,
           roots: true,
           pageSize: PAGE_SIZE,
         });
-        indexDefaultServerSessions(roots);
+        indexDefaultServerSessions(allRoots);
+        const { active: activeRoots, archived: archivedRoots } = splitGlobalSessionsByArchived(allRoots);
 
         set((state) => {
           const nextActiveSessions = sortSessionsByUpdated(
-            mergeSessionLists(mergeSessionLists(roots, state.activeSessions), fallbackActive),
+            mergeSessionLists(mergeSessionLists(activeRoots, state.activeSessions), fallbackActive),
           );
-          return applySnapshot(state, nextActiveSessions, state.archivedSessions, 'ready', {
+          const nextArchivedSessions = sortSessionsByUpdated(mergeSessionLists(state.archivedSessions, archivedRoots));
+          return applySnapshot(state, nextActiveSessions, nextArchivedSessions, 'ready', {
             markComplete: true,
           });
         });
@@ -840,19 +844,23 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
     }
 
     const sdk = opencodeClient.getSdkClient();
-    const active = await fetchDirectoryPages(sdk, directorySet);
+    const fetched = await fetchDirectoryPages(sdk, directorySet);
 
-    if (active.errors.length > 0) {
-      console.warn('[GlobalSessions] Failed to refresh root sessions for some directories:', active.errors[0]);
+    if (fetched.errors.length > 0) {
+      console.warn('[GlobalSessions] Failed to refresh root sessions for some directories:', fetched.errors[0]);
     }
-    indexDefaultServerSessions(active.sessions);
+    indexDefaultServerSessions(fetched.sessions);
+
+    const { active: activeDirSessions, archived: archivedDirSessions } = splitGlobalSessionsByArchived(fetched.sessions);
 
     set((state) => {
-      let nextActiveSessions = sortSessionsByUpdated(mergeSessionLists(state.activeSessions, active.sessions));
+      let nextActiveSessions = sortSessionsByUpdated(mergeSessionLists(state.activeSessions, activeDirSessions));
       nextActiveSessions = sortSessionsByUpdated(mergeSessionLists(nextActiveSessions, fallbackActive));
       if (sameSessionList(state.activeSessions, nextActiveSessions)) {
         nextActiveSessions = state.activeSessions;
       }
+
+      const nextArchivedSessions = sortSessionsByUpdated(mergeSessionLists(state.archivedSessions, archivedDirSessions));
 
       const nextSessionsByDirectory = nextActiveSessions === state.activeSessions
         ? state.sessionsByDirectory
@@ -860,6 +868,7 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
 
       if (
         nextActiveSessions === state.activeSessions
+        && nextArchivedSessions === state.archivedSessions
         && nextSessionsByDirectory === state.sessionsByDirectory
       ) {
         return state;
@@ -867,6 +876,7 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
 
       return {
         activeSessions: nextActiveSessions,
+        archivedSessions: nextArchivedSessions,
         sessionsByDirectory: nextSessionsByDirectory,
       };
     });

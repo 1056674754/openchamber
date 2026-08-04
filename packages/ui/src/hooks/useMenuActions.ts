@@ -11,6 +11,7 @@ import { createWorktreeSession } from '@/lib/worktreeSessionCreator';
 import { showOpenCodeStatus } from '@/lib/openCodeStatus';
 import { canUseElectronDesktopIPC, invokeDesktop, listenDesktopEvent } from '@/lib/desktop';
 import { executeCloseAction } from '@/lib/closeTarget';
+import { addSelectionToChat } from '@/lib/addSelectionToChat';
 
 const getActiveElementSelectedText = (): string => {
   if (typeof document === 'undefined') {
@@ -75,6 +76,7 @@ type MenuAction =
   | 'theme-dark'
   | 'theme-system'
   | 'toggle-sidebar'
+  | 'add-selection-to-chat'
   | 'toggle-memory-debug'
   | 'help-dialog'
   | 'download-logs'
@@ -262,6 +264,10 @@ export const useMenuActions = (
 
         case 'toggle-sidebar':
           toggleSidebar();
+          break;
+
+        case 'add-selection-to-chat':
+          addSelectionToChat();
           break;
 
         case 'toggle-memory-debug':

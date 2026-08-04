@@ -259,4 +259,46 @@ describe('OpenCode proxy SSE forwarding', () => {
       String(Buffer.byteLength(bodyText)),
     );
   });
+
+  it('exempts interactive provider OAuth callbacks from the ordinary proxy timeout', async () => {
+    const upstream = express();
+    // Stands in for upstream blocking until the user finishes signing in.
+    upstream.post('/provider/:providerID/oauth/callback', async (_req, res) => {
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      res.json(true);
+    });
+    upstreamServer = await listen(upstream);
+    const upstreamPort = upstreamServer.address().port;
+    const externalBaseUrl = `http://127.0.0.1:${upstreamPort}`;
+
+    const app = express();
+    registerOpenCodeProxy(app, {
+      fs: {},
+      os: {},
+      path,
+      OPEN_CODE_READY_GRACE_MS: 0,
+      getRuntime: () => ({
+        openCodePort: upstreamPort,
+        openCodeBaseUrl: externalBaseUrl,
+        isOpenCodeReady: true,
+        openCodeNotReadySince: 0,
+        isRestartingOpenCode: false,
+      }),
+      getOpenCodeAuthHeaders: () => ({}),
+      buildOpenCodeUrl: (requestPath) => `${externalBaseUrl}${requestPath}`,
+      ensureOpenCodeApiPrefix: () => {},
+    });
+    proxyServer = await listen(app);
+    const proxyPort = proxyServer.address().port;
+
+    const response = await fetch(`http://127.0.0.1:${proxyPort}/api/provider/github-copilot/oauth/callback`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ method: 0 }),
+      signal: AbortSignal.timeout(5000),
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toBe(true);
+  });
 });
