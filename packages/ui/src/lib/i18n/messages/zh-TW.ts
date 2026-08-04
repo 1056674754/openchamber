@@ -1658,6 +1658,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.revert.toast.undo': '已收回至 {preview}',
   'chat.revert.toast.redo': '已重做',
   'chat.revert.toast.restored': '已恢復全部訊息',
+  'chat.error.providerInsufficientBalance': '提供商帳戶餘額不足，請充值後重試。',
+  'chat.error.providerInsufficientBalance.topUpLink': '提供商帳戶餘額不足，請[前往儲值](https://platform.deepseek.com/usage)後重試。',
   'chat.errorBoundary.title': '聊天錯誤',
   'chat.errorBoundary.description': '聊天介面發生錯誤，可能是暫時網路問題或訊息資料損毀導致。',
   'chat.errorBoundary.sessionLabel': '會話',

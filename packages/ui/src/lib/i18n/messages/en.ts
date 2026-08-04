@@ -1808,6 +1808,8 @@ export const dict = {
   'chat.revert.toast.undo': 'Reverted to {preview}',
   'chat.revert.toast.redo': 'Redone',
   'chat.revert.toast.restored': 'Restored all messages',
+  'chat.error.providerInsufficientBalance': 'Provider account balance is insufficient. Please top up your account and try again.',
+  'chat.error.providerInsufficientBalance.topUpLink': 'Provider account balance is insufficient. [Top up your account](https://platform.deepseek.com/usage) and try again.',
   'chat.errorBoundary.title': 'Chat Error',
   'chat.errorBoundary.description': 'The chat interface encountered an error. This might be due to a temporary network issue or corrupted message data.',
   'chat.errorBoundary.sessionLabel': 'Session',

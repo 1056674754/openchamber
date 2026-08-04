@@ -1774,6 +1774,8 @@ export const dict: Record<I18nKey, string> = {
   "chat.revert.toast.undo": "Revertido para {preview}",
   "chat.revert.toast.redo": "Refeito",
   "chat.revert.toast.restored": "Todas as mensagens restauradas",
+  "chat.error.providerInsufficientBalance": "O saldo da conta do provedor é insuficiente. Recarregue sua conta e tente novamente.",
+  "chat.error.providerInsufficientBalance.topUpLink": "O saldo da conta do provedor é insuficiente. [Recarregue sua conta](https://platform.deepseek.com/usage) e tente novamente.",
   "chat.errorBoundary.title": "Erro na conversa",
   "chat.errorBoundary.description": "A interface da conversa encontrou um erro. Isso pode ter sido causado por um problema temporário de rede ou por dados de mensagem corrompidos.",
   "chat.errorBoundary.sessionLabel": "Sessão",

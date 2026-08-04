@@ -588,6 +588,9 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
     const headerProviderID = displayProviderIDValue ?? null;
     const headerModelName = displayModelName ?? undefined;
 
+    // DeepSeek has a known top-up URL; other providers keep the plain message.
+    const isDeepseek = headerProviderID?.toLowerCase().includes('deepseek') === true;
+
     const messageCompletedAt = React.useMemo(() => {
         const timeInfo = message.info.time as { completed?: number } | undefined;
         return typeof timeInfo?.completed === 'number' ? timeInfo.completed : null;
@@ -884,10 +887,19 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
             return undefined;
         }
         const errorInfo = (message.info as { error?: unknown } | undefined)?.error as
-            | { data?: { message?: unknown }; message?: unknown; name?: unknown }
+            | { data?: { message?: unknown; statusCode?: number }; message?: unknown; name?: unknown }
             | undefined;
         if (!errorInfo) {
             return undefined;
+        }
+        // 402 is checked before the detail guard: it is the strongest signal and independent of message text.
+        if (errorInfo.data?.statusCode === 402) {
+            return {
+                text: isDeepseek
+                    ? t('chat.error.providerInsufficientBalance.topUpLink')
+                    : t('chat.error.providerInsufficientBalance'),
+                variant: 'error' as const,
+            };
         }
         const dataMessage = typeof errorInfo.data?.message === 'string' ? errorInfo.data.message : undefined;
         const errorMessage = typeof errorInfo.message === 'string' ? errorInfo.message : undefined;
@@ -900,6 +912,15 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
             return {
                 text: `Opencode failed to send a message. Retry attempt info: \n\`${detail}\``,
                 variant: 'info' as const,
+            };
+        }
+        // Provider quota error — text match is a fallback since streamed errors carry no statusCode.
+        if (/insufficient balance|insufficient_quota|insufficient account balance|余额不足|欠费/i.test(detail)) {
+            return {
+                text: isDeepseek
+                    ? t('chat.error.providerInsufficientBalance.topUpLink')
+                    : t('chat.error.providerInsufficientBalance'),
+                variant: 'error' as const,
             };
         }
         if (isLikelyProviderAuthFailure(detail)) {
@@ -918,7 +939,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
             text: `Opencode failed to send message with error:\n\`${detail}\``,
             variant: 'error' as const,
         };
-    }, [isUser, message.info]);
+    }, [isUser, message.info, t, isDeepseek]);
 
     const assistantErrorText = assistantError?.text;
     const assistantErrorVariant = assistantError?.variant;
