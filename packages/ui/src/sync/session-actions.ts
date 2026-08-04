@@ -40,6 +40,7 @@ import {
   withContextObligatoryMessage,
   type ContextObligatoryMessage,
 } from "@/lib/contextObligatoryMessages"
+import { getRuntimeKey } from "@/lib/runtime-switch"
 
 export {
   resolveApiUrl,
@@ -57,6 +58,14 @@ const MESSAGE_REFETCH_SKIP_PARTS = new Set(["patch", "step-start", "step-finish"
 const UNREVERT_REFETCH_ATTEMPTS = 3
 const UNREVERT_REFETCH_RETRY_MS = 150
 const SESSION_IDLE_GRACE_MS = 3_000
+
+function isStaleRuntime(expectedRuntimeKey: string | undefined): boolean {
+  return expectedRuntimeKey !== undefined && getRuntimeKey() !== expectedRuntimeKey
+}
+
+export type ArchiveSessionsOptions = {
+  expectedRuntimeKey?: string
+}
 
 type BuildOptimisticPartsInput = {
   messageID: string
@@ -960,7 +969,8 @@ export async function deleteSessionInDirectory(sessionId: string, directory: str
   }
 }
 
-export async function archiveSession(sessionId: string): Promise<boolean> {
+export async function archiveSession(sessionId: string, expectedRuntimeKey: string = getRuntimeKey()): Promise<boolean> {
+  if (isStaleRuntime(expectedRuntimeKey)) return false
   const sessionDirectory = requireSessionDirectory(sessionId, "archiveSession")
   const ui = useSessionUIStore.getState()
   ui.markSessionDeleting(sessionId)
@@ -970,6 +980,7 @@ export async function archiveSession(sessionId: string): Promise<boolean> {
   try {
     const archivedAt = Date.now()
     await sdkForSession(sessionId, sessionDirectory).session.update({ sessionID: sessionId, directory: sessionDirectory, time: { archived: archivedAt } })
+    if (isStaleRuntime(expectedRuntimeKey)) return false
     useGlobalSessionsStore.getState().archiveSessions([sessionId], archivedAt)
     optimisticRemoveSession(sessionId, sessionDirectory)
     return true
@@ -979,6 +990,26 @@ export async function archiveSession(sessionId: string): Promise<boolean> {
   } finally {
     useSessionUIStore.getState().unmarkSessionDeleting(sessionId)
   }
+}
+
+export async function archiveSessions(
+  ids: string[],
+  options?: ArchiveSessionsOptions,
+): Promise<{ archivedIds: string[]; failedIds: string[] }> {
+  const archivedIds: string[] = []
+  const failedIds: string[] = []
+  const expectedRuntimeKey = options?.expectedRuntimeKey ?? getRuntimeKey()
+
+  for (const [index, id] of ids.entries()) {
+    if (isStaleRuntime(expectedRuntimeKey)) {
+      failedIds.push(...ids.slice(index))
+      break
+    }
+    if (await archiveSession(id, expectedRuntimeKey)) archivedIds.push(id)
+    else failedIds.push(id)
+  }
+
+  return { archivedIds, failedIds }
 }
 
 export async function unarchiveSession(
@@ -1031,15 +1062,19 @@ export async function patchSessionMetadata(
   sessionId: string,
   directory: string,
   transform: (metadata: Record<string, unknown>) => Record<string, unknown>,
+  expectedRuntimeKey?: string,
 ): Promise<Session | null> {
+  if (isStaleRuntime(expectedRuntimeKey)) throw new Error("runtime changed")
   const sessionDirectory = directory || requireSessionDirectory(sessionId, "patchSessionMetadata")
   const sdk = sdkForSession(sessionId, sessionDirectory)
   const current = await sdk.session.get({ sessionID: sessionId, directory: sessionDirectory })
+  if (isStaleRuntime(expectedRuntimeKey)) throw new Error("runtime changed")
   const existingMetadata = (current.data && typeof (current.data as Session & { metadata?: unknown }).metadata === 'object' && (current.data as Session & { metadata?: unknown }).metadata !== null && !Array.isArray((current.data as Session & { metadata?: unknown }).metadata))
     ? (current.data as Session & { metadata?: Record<string, unknown> }).metadata as Record<string, unknown>
     : {}
   const nextMetadata = transform(existingMetadata)
   const result = await sdk.session.update({ sessionID: sessionId, directory: sessionDirectory, metadata: nextMetadata })
+  if (isStaleRuntime(expectedRuntimeKey)) throw new Error("runtime changed")
   if (result.data) {
     useGlobalSessionsStore.getState().upsertSession(result.data)
   }

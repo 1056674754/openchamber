@@ -303,6 +303,67 @@ export async function listProjectWorktrees(project: ProjectRef): Promise<Worktre
   return promise;
 }
 
+export const partitionWorktreesByRegisteredProject = (
+  projects: ReadonlyArray<Pick<ProjectRef, 'path'>>,
+  worktreesByProject: ReadonlyMap<string, WorktreeMetadata[]>,
+): Map<string, WorktreeMetadata[]> => {
+  const configuredProjectOrder = new Map<string, number>();
+  projects.forEach((project, index) => {
+    const projectPath = normalizePath(project.path.trim());
+    if (projectPath && !configuredProjectOrder.has(projectPath)) {
+      configuredProjectOrder.set(projectPath, index);
+    }
+  });
+
+  type RepositorySource = {
+    projectPath: string;
+    worktrees: WorktreeMetadata[];
+    projectIndex: number;
+  };
+
+  const sourcesByRepository = new Map<string, RepositorySource[]>();
+  for (const [rawProjectPath, worktrees] of worktreesByProject) {
+    if (worktrees.length === 0) continue;
+    const projectPath = normalizePath(rawProjectPath.trim());
+    const projectIndex = configuredProjectOrder.get(projectPath);
+    if (!projectPath || projectIndex === undefined) continue;
+
+    const metadataRoot = worktrees.find((worktree) => worktree.projectDirectory?.trim())?.projectDirectory;
+    const repositoryRoot = normalizePath((metadataRoot || projectPath).trim());
+    if (!repositoryRoot) continue;
+
+    const sources = sourcesByRepository.get(repositoryRoot) ?? [];
+    sources.push({ projectPath, worktrees, projectIndex });
+    sourcesByRepository.set(repositoryRoot, sources);
+  }
+
+  const partitioned = new Map<string, WorktreeMetadata[]>();
+  for (const [repositoryRoot, sources] of sourcesByRepository) {
+    sources.sort((a, b) => a.projectIndex - b.projectIndex || a.projectPath.localeCompare(b.projectPath));
+    const firstSource = sources[0];
+    if (!firstSource) continue;
+
+    const ownerPath = configuredProjectOrder.has(repositoryRoot) ? repositoryRoot : firstSource.projectPath;
+    const topologySource = sources.find((candidate) => candidate.projectPath === ownerPath) ?? firstSource;
+
+    const seenPaths = new Set<string>();
+    const ownedWorktrees = topologySource.worktrees.filter((worktree) => {
+      const worktreePath = normalizePath(worktree.path.trim());
+      if (!worktreePath || configuredProjectOrder.has(worktreePath) || seenPaths.has(worktreePath)) {
+        return false;
+      }
+      seenPaths.add(worktreePath);
+      return true;
+    });
+
+    if (ownedWorktrees.length > 0) {
+      partitioned.set(ownerPath, ownedWorktrees);
+    }
+  }
+
+  return partitioned;
+};
+
 export type CreateWorktreeArgs = {
   preferredName?: string;
   setupCommands?: string[];

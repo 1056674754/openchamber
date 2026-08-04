@@ -138,6 +138,8 @@ export const isMissingGlobalSessionsEndpointError = (error: unknown): boolean =>
     return status === 404;
 };
 
+const isArchivedSession = (session: GlobalSessionRecord): boolean => Boolean(session.time?.archived);
+
 export async function listGlobalSessionPage(
     apiClient: SessionListClient,
     options: {
@@ -191,14 +193,17 @@ export async function listGlobalSessionPages(
         if (payload.length === 0) break;
 
         let appended = 0;
+        const accepted: GlobalSessionRecord[] = [];
         for (const session of payload) {
             if (!session?.id || seenIds.has(session.id)) continue;
             seenIds.add(session.id);
-            all.push(session);
             appended += 1;
+            if (options.archived && !isArchivedSession(session)) continue;
+            all.push(session);
+            accepted.push(session);
         }
-        if (appended > 0) {
-            options.onPage?.(payload);
+        if (accepted.length > 0) {
+            options.onPage?.(accepted);
         }
 
         // Stop on partial page — nothing more to fetch.

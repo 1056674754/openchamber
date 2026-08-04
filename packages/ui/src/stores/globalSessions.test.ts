@@ -82,3 +82,129 @@ describe('global session catalog requests', () => {
     expect(requests[2]?.cursor).toBe(10);
   });
 });
+
+const makeArchivedSession = (id: string, updated: number, archived: number): Session => ({
+  ...makeSession(id, updated),
+  time: { created: updated, updated, archived },
+});
+
+describe('listGlobalSessionPages archived boundary', () => {
+  test('returns only archived sessions when archived pages are requested', async () => {
+    const client: SessionListClient = {
+      experimental: {
+        session: {
+          list: async () => ({
+            data: [
+              makeSession('ses_active', 20),
+              makeArchivedSession('ses_archived', 10, 15),
+            ],
+            response: { headers: new Headers() },
+          }),
+        },
+      },
+    };
+
+    const sessions = await listGlobalSessionPages(client, { archived: true, pageSize: 500 });
+
+    expect(sessions.map((session) => session.id)).toEqual(['ses_archived']);
+  });
+
+  test('keeps every record when active pages are requested', async () => {
+    const client: SessionListClient = {
+      experimental: {
+        session: {
+          list: async () => ({
+            data: [
+              makeSession('ses_active_1', 20),
+              makeSession('ses_active_2', 10),
+            ],
+            response: { headers: new Headers() },
+          }),
+        },
+      },
+    };
+
+    const sessions = await listGlobalSessionPages(client, { archived: false, pageSize: 500 });
+
+    expect(sessions.map((session) => session.id)).toEqual(['ses_active_1', 'ses_active_2']);
+  });
+
+  test('keeps paginating archived pages that are full of non-archived records', async () => {
+    const calls: SessionListRequest[] = [];
+    const client: SessionListClient = {
+      experimental: {
+        session: {
+          list: async (request) => {
+            calls.push(request);
+            if (request.cursor === undefined) {
+              return {
+                data: [
+                  makeSession('ses_active_1', 30),
+                  makeSession('ses_active_2', 20),
+                ],
+                response: { headers: new Headers({ 'x-next-cursor': '20' }) },
+              };
+            }
+            return {
+              data: [makeArchivedSession('ses_archived', 10, 12)],
+              response: { headers: new Headers() },
+            };
+          },
+        },
+      },
+    };
+
+    const sessions = await listGlobalSessionPages(client, { archived: true, pageSize: 2 });
+
+    expect(calls).toHaveLength(2);
+    expect(sessions.map((session) => session.id)).toEqual(['ses_archived']);
+  });
+
+  test('reports only accepted records to onPage for archived pages', async () => {
+    const pages: string[][] = [];
+    const client: SessionListClient = {
+      experimental: {
+        session: {
+          list: async () => ({
+            data: [
+              makeSession('ses_active', 20),
+              makeArchivedSession('ses_archived', 10, 12),
+            ],
+            response: { headers: new Headers() },
+          }),
+        },
+      },
+    };
+
+    await listGlobalSessionPages(client, {
+      archived: true,
+      pageSize: 500,
+      onPage: (sessions) => pages.push(sessions.map((session) => session.id)),
+    });
+
+    expect(pages).toEqual([['ses_archived']]);
+  });
+
+  test('does not notify onPage for an archived page with no archived records', async () => {
+    const pages: string[][] = [];
+    const client: SessionListClient = {
+      experimental: {
+        session: {
+          list: async () => ({
+            data: [makeSession('ses_active', 20)],
+            response: { headers: new Headers() },
+          }),
+        },
+      },
+    };
+
+    const sessions = await listGlobalSessionPages(client, {
+      archived: true,
+      pageSize: 500,
+      onPage: (page) => pages.push(page.map((session) => session.id)),
+    });
+
+    expect(sessions).toEqual([]);
+    expect(pages).toEqual([]);
+  });
+});

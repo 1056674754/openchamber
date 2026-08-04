@@ -72,7 +72,7 @@ import { SessionNodeItem } from './sidebar/SessionNodeItem';
 import { TempSessionsSection, type TempSessionEntry } from './sidebar/TempSessionsSection';
 import { useUpdateStore } from '@/stores/useUpdateStore';
 import { useShallow } from 'zustand/react/shallow';
-import { listProjectWorktrees } from '@/lib/worktrees/worktreeManager';
+import { listProjectWorktrees, partitionWorktreesByRegisteredProject } from '@/lib/worktrees/worktreeManager';
 import type { WorktreeMetadata } from '@/types/worktree';
 import type { SortableDragHandleProps } from './sidebar/sortableItems';
 import { listTempSessions, deleteTempSession } from '@/lib/tempSessions';
@@ -804,9 +804,14 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
           return state;
         }
 
+        const partitionedByProject = partitionWorktreesByRegisteredProject(
+          projectQueue.map((entry) => ({ path: entry.normalizedPath })),
+          merged.byProject,
+        );
+
         return {
-          availableWorktrees: merged.allWorktrees,
-          availableWorktreesByProject: merged.byProject,
+          availableWorktrees: [...partitionedByProject.values()].flat(),
+          availableWorktreesByProject: partitionedByProject,
         };
       });
     };
