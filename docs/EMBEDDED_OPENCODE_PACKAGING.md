@@ -46,7 +46,7 @@ The same hook stages and signs Bun through `embedded-bun.cjs`. The stable shell
 uses that Bun executable to run the mutable OpenCode TypeScript source, while
 the compiled OpenCode binary remains an offline recovery path.
 
-OpenChamber's source version is `1.17.1-sscity` after the v1.17.1 migration audit and validation closed. Every Electron package appends its Asia/Shanghai build time and emits `1.17.1-sscity.YYYYMMDD-HHMMSS` (hyphen before time so early-morning `0HHMMSS` stays valid semver for electron-updater). This generated value is the package metadata and About-dialog version. Do not advance the baseline again until the migration table records the next upstream baseline as fully audited.
+OpenChamber's source version is `1.18.1-sscity` after the v1.18.0 + v1.18.1 migration audit and validation closed (Oracle review: SHIP, 7/7 PASS). Every Electron package appends its Asia/Shanghai build time and emits `1.18.1-sscity.YYYYMMDD-HHMMSS` (hyphen before time so early-morning `0HHMMSS` stays valid semver for electron-updater). This generated value is the package metadata and About-dialog version. Do not advance the baseline again until the migration table records the next upstream baseline as fully audited.
 
 ## 1. Build the custom OpenCode binary
 
