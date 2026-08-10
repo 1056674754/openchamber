@@ -1813,10 +1813,29 @@ export const useConfigStore = create<ConfigStore>()(
                                     defaultProviders: {},
                                 };
 
+                                // Guard the midpoint until the selection-resolution set below runs:
+                                // dropping a now-hidden currentAgentName here prevents any subscriber
+                                // from observing a hidden selection between the two sets.
+                                const visibleNamesAfterUpdate = new Set(
+                                    filterVisibleAgents(safeAgents).map((agent) => agent.name),
+                                );
+                                const isActiveDir = state.activeDirectoryKey === directoryKey;
+                                const activeCurrentAgentName = isActiveDir ? state.currentAgentName : undefined;
+                                const scopedCurrentAgentName = baseSnapshot.currentAgentName;
+                                const safeScopedAgentName =
+                                    scopedCurrentAgentName && visibleNamesAfterUpdate.has(scopedCurrentAgentName)
+                                        ? scopedCurrentAgentName
+                                        : undefined;
+                                const safeActiveAgentName =
+                                    activeCurrentAgentName && visibleNamesAfterUpdate.has(activeCurrentAgentName)
+                                        ? activeCurrentAgentName
+                                        : undefined;
+
                                 const nextSnapshot: DirectoryScopedConfig = {
                                     ...baseSnapshot,
                                     providers,
                                     agents: safeAgents,
+                                    currentAgentName: safeScopedAgentName,
                                 };
 
                                 const nextState: Partial<ConfigStore> = {
@@ -1840,8 +1859,9 @@ export const useConfigStore = create<ConfigStore>()(
                                     },
                                 };
 
-                                if (state.activeDirectoryKey === directoryKey) {
+                                if (isActiveDir) {
                                     nextState.agents = safeAgents;
+                                    nextState.currentAgentName = safeActiveAgentName;
                                 }
 
                                 return nextState;
@@ -1910,9 +1930,11 @@ export const useConfigStore = create<ConfigStore>()(
                             }
 
                             // Track invalid settings to clear and harmless corrections to persist.
+                            // resolveConfiguredAgentName runs against safeAgents (not visibleAgents)
+                            // because a hidden-but-existing defaultAgent is user intent, not invalid.
                             const settingsPatch: OpenChamberSettingsPatch = {};
                             const visibleAgents = filterVisibleAgents(safeAgents);
-                            const configuredAgent = resolveConfiguredAgentName(openChamberDefaults.defaultAgent, visibleAgents);
+                            const configuredAgent = resolveConfiguredAgentName(openChamberDefaults.defaultAgent, safeAgents);
                             if (configuredAgent.correctedName) settingsPatch.defaultAgent = configuredAgent.correctedName;
                             else if (configuredAgent.invalid) settingsPatch.defaultAgent = '';
 

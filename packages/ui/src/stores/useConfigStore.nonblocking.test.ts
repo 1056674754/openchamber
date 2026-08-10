@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, mock, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
 import type { Agent } from '@opencode-ai/sdk/v2';
 
 const DIRECTORY = '/workspace/project';
@@ -17,6 +17,7 @@ let getConfigCalls = 0;
 let listAgentsCalls = 0;
 let checkHealthCalls = 0;
 let liveAgents: TestAgent[] = [];
+let liveOpenChamberSettings: Record<string, unknown> = {};
 let listAgentsImpl: ((directory?: string | null) => Promise<TestAgent[]>) | null = null;
 let checkHealthImpl: () => Promise<boolean> = async () => true;
 
@@ -145,7 +146,7 @@ mock.module('@/contexts/runtimeAPIRegistry', () => ({
 }));
 
 mock.module('@/lib/runtime-fetch', () => ({
-  runtimeFetch: mock(async () => new Response(JSON.stringify({}), {
+  runtimeFetch: mock(async () => new Response(JSON.stringify(liveOpenChamberSettings), {
     headers: { 'Content-Type': 'application/json' },
   })),
 }));
@@ -203,6 +204,19 @@ mock.module('@/lib/opencode/server-registry', () => ({
 const { useConfigStore } = await import('./useConfigStore');
 const { emitSyncConfigChanged } = await import('@/sync/sync-refs');
 
+const originalFetch = globalThis.fetch;
+const fakeFetch = (url: string | URL | Request): Promise<Response> => {
+  const urlStr = typeof url === 'string' ? url : url.toString();
+  if (urlStr.includes('/api/config/settings')) {
+    return Promise.resolve(
+      new Response(JSON.stringify(liveOpenChamberSettings), {
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+  }
+  return Promise.resolve(new Response('{}', { headers: { 'Content-Type': 'application/json' } }));
+};
+
 const scopedKey = (directory: string, serverId: string) =>
   `__server__${encodeURIComponent(serverId)}::${encodeURIComponent(directory)}`;
 
@@ -212,8 +226,10 @@ describe('useConfigStore non-blocking OpenCode config', () => {
     listAgentsCalls = 0;
     checkHealthCalls = 0;
     liveAgents = [testAgent('build')];
+    liveOpenChamberSettings = {};
     listAgentsImpl = null;
     checkHealthImpl = async () => true;
+    globalThis.fetch = fakeFetch as unknown as typeof fetch;
     useConfigStore.setState({
       activeDirectoryKey: DIRECTORY,
       providers: [provider('openai', 'gpt-5.5'), provider('manual', 'manual-model'), provider('default', 'default-model')],
@@ -250,6 +266,10 @@ describe('useConfigStore non-blocking OpenCode config', () => {
     });
   });
 
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
   test('loadAgents does not fetch OpenCode config directly', async () => {
     await useConfigStore.getState().loadAgents({ directory: DIRECTORY, source: 'test:noConfigFetch' });
 
@@ -278,6 +298,31 @@ describe('useConfigStore non-blocking OpenCode config', () => {
 
     expect(useConfigStore.getState().currentAgentName).toBe('Sisyphus - ultraworker');
     expect(useConfigStore.getState().directoryScoped[DIRECTORY]?.currentAgentName).toBe('Sisyphus - ultraworker');
+  });
+
+  test('a hidden-but-existing defaultAgent in settings is preserved across loadAgents', async () => {
+    liveAgents = [
+      testAgent('build'),
+      testAgent('Sisyphus - ultraworker', { mode: 'subagent', hidden: true }),
+    ];
+    liveOpenChamberSettings = { defaultAgent: 'Sisyphus - ultraworker' };
+
+    await useConfigStore.getState().loadAgents({ directory: DIRECTORY, source: 'test:hiddenDefault' });
+
+    const state = useConfigStore.getState();
+    expect(state.settingsDefaultAgent).toBe('Sisyphus - ultraworker');
+    expect(state.directoryScoped[DIRECTORY]?.currentAgentName).toBe('build');
+  });
+
+  test('a defaultAgent that no longer exists in the catalog is still cleared', async () => {
+    liveAgents = [testAgent('build'), testAgent('review')];
+    liveOpenChamberSettings = { defaultAgent: 'ghost-agent' };
+
+    await useConfigStore.getState().loadAgents({ directory: DIRECTORY, source: 'test:missingDefault' });
+
+    const state = useConfigStore.getState();
+    expect(state.settingsDefaultAgent).toBe(undefined);
+    expect(state.currentAgentName).toBe('build');
   });
 
   test('manual selection survives a late sync config apply', () => {
