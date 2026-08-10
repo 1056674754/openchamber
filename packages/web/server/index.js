@@ -75,6 +75,7 @@ import { createSessionUnreadStore } from './lib/opencode/session-unread-store.js
 import { createSessionMarkersStore } from './lib/opencode/session-markers-store.js';
 import { createOpenCodeWatcherRuntime } from './lib/opencode/watcher.js';
 import { createOpenCodeConfigFileWatcherRuntime } from './lib/opencode/config-file-watcher.js';
+import { createPendingConfigRestartRuntime } from './lib/opencode/pending-config-restart.js';
 import { createScheduledTasksRuntime } from './lib/scheduled-tasks/runtime.js';
 import { createScheduledTaskService } from './lib/scheduled-tasks/service.js';
 import { createOpenChamberSessionService } from './lib/openchamber-sessions/service.js';
@@ -1226,6 +1227,13 @@ const openCodeLifecycleRuntime = createOpenCodeLifecycleRuntime({
   restoreManagedOpenCodeAuth,
   recordLifecycleEvent: openCodeLifecycleJournal.record,
   getLifecycleLogPath: () => openCodeLifecycleJournal.path,
+  onOpenCodeRestarted: () => {
+    try {
+      messageStreamRuntime?.rebindUpstream();
+    } catch (error) {
+      console.warn('Failed to rebind message stream after OpenCode restart:', error?.message ?? error);
+    }
+  },
 });
 
 const restartOpenCode = (...args) => openCodeLifecycleRuntime.restartOpenCode(...args);
@@ -1266,6 +1274,17 @@ const refreshOpenCodeAfterConfigChange = async (...args) => {
   await verifyOpenChamberPluginLoaded();
   return result;
 };
+const pendingConfigRestartRuntime = createPendingConfigRestartRuntime({
+  applyRestart: refreshOpenCodeAfterConfigChange,
+  broadcastEvent: broadcastGlobalUiEvent,
+  getSessionActivitySnapshot: sessionRuntime.getSessionActivitySnapshot,
+});
+const getPendingConfigRestart = () => pendingConfigRestartRuntime.getPendingConfigRestart();
+const markPendingConfigRestart = (reason, details) => {
+  openCodeConfigFileWatcherRuntime?.acknowledgeCurrentConfig();
+  return pendingConfigRestartRuntime.markPendingConfigRestart(reason, details);
+};
+const applyPendingConfigRestart = () => pendingConfigRestartRuntime.applyPendingConfigRestart();
 openCodeConfigFileWatcherRuntime = createOpenCodeConfigFileWatcherRuntime({
   getWorkingDirectory: () => openCodeWorkingDirectory,
   getActiveSessionCount,
@@ -1286,7 +1305,7 @@ openCodeConfigFileWatcherRuntime = createOpenCodeConfigFileWatcherRuntime({
     }
   },
   isManagedOpenCode: () => !ENV_SKIP_OPENCODE_START && !openCodeLifecycleState.isExternalOpenCode,
-  refreshOpenCodeAfterConfigChange,
+  markPendingConfigRestart,
 });
 const startHealthMonitoring = () => openCodeLifecycleRuntime.startHealthMonitoring(HEALTH_CHECK_INTERVAL);
 const triggerHealthCheck = () => openCodeLifecycleRuntime.triggerHealthCheck();
@@ -1727,6 +1746,9 @@ async function main(options = {}) {
     validateDirectoryPath,
     readCustomThemesFromDisk,
     refreshOpenCodeAfterConfigChange,
+    getPendingConfigRestart,
+    markPendingConfigRestart,
+    applyPendingConfigRestart,
     getOpenCodeResolutionSnapshot,
     getOpenCodeUpgradeCapability,
     formatSettingsResponse,
