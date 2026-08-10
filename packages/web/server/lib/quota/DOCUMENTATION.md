@@ -36,6 +36,7 @@ These provider IDs are currently dispatchable via `fetchQuotaForProvider(provide
 | `ollama-cloud` | Ollama Cloud | `providers/ollama-cloud.js` | Cookie file at `~/.config/ollama-quota/cookie` (raw session cookie string) |
 | `opencode-go` | OpenCode Go | `providers/opencode-go.js` | Managed workspace ID + dashboard auth cookie in the OpenChamber data directory |
 | `wafer` | Wafer.ai | `providers/wafer.js` | `wafer`, `wafer-ai`, `wafer_ai`, `wafer.ai` |
+| `xai` | xAI | `providers/xai.js` | `xai` OAuth (`access`/`refresh` tokens) stored in OpenCode auth file; SuperGrok billing-period usage |
 
 ## Internal-only provider module
 - `providers/openai.js` exists for logic parity/reuse but is intentionally not registered for dispatcher ID routing.

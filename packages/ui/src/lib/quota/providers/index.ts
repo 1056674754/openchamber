@@ -23,6 +23,7 @@ export const QUOTA_PROVIDERS: QuotaProviderMeta[] = [
   { id: 'opencode-go', name: 'OpenCode Go' },
   { id: 'crof', name: 'CrofAI' },
   { id: 'neuralwatt', name: 'NeuralWatt' },
+  { id: 'xai', name: 'xAI' },
 ];
 
 export const QUOTA_PROVIDER_MAP = QUOTA_PROVIDERS.reduce<
