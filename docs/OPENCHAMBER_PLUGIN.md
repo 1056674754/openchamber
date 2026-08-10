@@ -67,7 +67,7 @@ by this design are marked ⭐.
 | Hook | Purpose |
 |---|---|
 | ⭐ `experimental.chat.messages.transform` | Transform the full message list before it reaches the LLM. **This is where image parts are detected and replaced for non-vision models.** |
-| ⭐ `experimental.chat.system.transform` | Modify the system prompt. Used to inject "you have a `describe_image` tool" guidance. |
+| ⭐ `experimental.chat.system.transform` | Modify the system prompt. Native multimodal models are directed to OpenCode `read`; only text-only models receive `describe_image`/vision-fallback guidance. |
 | ⭐ `tool` | Register custom tools available to the model. Used to register `describe_image`. |
 | `chat.message` | Intercept a user message as it enters the session (mutable `parts`). |
 | `chat.params` | Modify LLM parameters (temperature, max tokens, etc.). |
@@ -126,7 +126,7 @@ User attaches image.png
            │   "[Image: screenshot.png (image/png, 1920x1080)
            │    Saved to /Users/.../openchamber/images/abc123.png
            │    Use the describe_image tool to analyze it.]"
-           └─ (System prompt already tells the model about describe_image)
+           └─ (The capability-aware system prompt tells this non-vision model about describe_image)
   → LLM receives text-only message + tool definition
   → Model may call describe_image("/Users/.../abc123.png")
       └─ Plugin tool executes: calls vision MCP / OCR → returns text description
@@ -313,7 +313,7 @@ exists. The plugin is resolved from the workspace `node_modules`.
 | Plugin over core modification | Avoids merge conflicts on upstream sync; plugin API is designed for this. |
 | Content-addressed file names (sha256) | Natural dedup; Stage 2 cache builds on this for free. |
 | No GC in Stage 1 | Simplicity. Images are small relative to disk; Stage 2 adds LRU. |
-| `describe_image` always registered | The model always has the tool available; no conditional tool gating needed. |
+| `describe_image` always registered, guidance capability-gated | Static plugin registration remains simple, while multimodal models are told to use OpenCode `read` and text-only models receive fallback tool guidance. |
 | Separate cache DB for Stage 2 | Never write to `opencode.db` — avoids corruption risk and migration drift. |
 | UI does not block sends | The plugin handles the transformation; blocking would prevent the fallback from working. |
 | File paths over base64 in fallback text | MCP vision tools need file paths; base64 in text is useless to a text model. |
