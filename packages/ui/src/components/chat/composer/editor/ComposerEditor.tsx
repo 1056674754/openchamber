@@ -129,6 +129,10 @@ function insertedTextOf(transaction: { changes: { iterChanges: (fn: (fromA: numb
     return inserted;
 }
 
+function isDeferredSyntheticEvent(event: KeyboardEvent): boolean {
+    return Boolean((event as unknown as { synthetic?: boolean }).synthetic);
+}
+
 /**
  * Compartments are configuration keys, not per-view state, so one set can serve
  * every editor. They live at module scope because a kept-alive view outlives
@@ -158,6 +162,7 @@ export const ComposerEditor = React.forwardRef<ComposerEditorHandle, ComposerEdi
 
         const hostRef = React.useRef<HTMLDivElement | null>(null);
         const viewRef = React.useRef<EditorView | null>(null);
+        const lastRealEnterShiftRef = React.useRef(false);
 
         // Callbacks reach the CodeMirror extensions through a ref: the view is
         // built once and must not be torn down when a handler identity changes,
@@ -199,7 +204,12 @@ export const ComposerEditor = React.forwardRef<ComposerEditorHandle, ComposerEdi
             }
 
             const interceptKeys: KeyBinding[] = [{
-                any: (_view, event) => handlersRef.current.onKeyDown?.(event) ?? false,
+                any: (_view, event) => {
+                    if (event.key === 'Enter' && isDeferredSyntheticEvent(event) && lastRealEnterShiftRef.current) {
+                        Object.defineProperty(event, 'shiftKey', { value: true });
+                    }
+                    return handlersRef.current.onKeyDown?.(event) ?? false;
+                },
             }];
 
             const view = new EditorView({
@@ -275,7 +285,14 @@ export const ComposerEditor = React.forwardRef<ComposerEditorHandle, ComposerEdi
             viewRef.current = view;
             if (store) store.view = view;
 
+            const trackRealEnterShift = (event: KeyboardEvent) => {
+                if (event.key !== 'Enter' || isDeferredSyntheticEvent(event)) return;
+                lastRealEnterShiftRef.current = event.shiftKey;
+            };
+            view.contentDOM.addEventListener('keydown', trackRealEnterShift);
+
             return () => {
+                view.contentDOM.removeEventListener('keydown', trackRealEnterShift);
                 viewRef.current = null;
                 // A stored view is detached, not destroyed: the store owns its
                 // lifetime now, and whoever owns the store ends it.
