@@ -143,11 +143,6 @@
     background-color: var(--background) !important;
   }
 
-  :root.desktop-runtime[data-oc-vibrancy] .oc-zone-header-backing {
-    background: var(--sidebar-stuck-bg) !important;
-    background-color: var(--sidebar-stuck-bg) !important;
-  }
-
   .font-sans {
     font-family: var(--font-sans, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif) !important;
   }

@@ -3186,17 +3186,6 @@ end tell`;
       return null;
     }
 
-    case 'desktop_set_vibrancy': {
-      // Vibrancy (macOS blur) is not supported in the Electron shell — the
-      // previous macOS shell used NSVisualEffectView, Electron has
-      // no equivalent for our titleBarStyle:'hidden' setup. Persist the
-      // disabled state so settings UI reflects it; args.enabled is ignored.
-      await mutateSettingsRoot((root) => {
-        root.desktopVibrancy = false;
-      });
-      return { enabled: false, requiresRestart: false };
-    }
-
     case 'desktop_check_for_updates': {
       assertUpdaterCapability({ packaged: app.isPackaged });
       if (!state.updaterConfigured) {
