@@ -17,12 +17,12 @@ const makeTempDir = async () => {
   return dir;
 };
 
-const createApp = (settings = {}) => {
+const createApp = (settings = {}, overrides = {}) => {
   const app = express();
   app.use(express.json());
 
   const runtime = createProjectDirectoryRuntime({
-    fsPromises: fs,
+    fsPromises: overrides.fsPromises ?? fs,
     path,
     normalizeDirectoryPath: (value) => value,
     getReadSettingsFromDiskMigrated: () => async () => settings,
@@ -32,7 +32,7 @@ const createApp = (settings = {}) => {
   registerFsRoutes(app, {
     os,
     path,
-    fsPromises: fs,
+    fsPromises: overrides.fsPromises ?? fs,
     spawn: vi.fn(),
     crypto,
     normalizeDirectoryPath: (value) => value,
@@ -202,4 +202,23 @@ describe('fs routes explicit directory policy', () => {
     expect(response.status).toBe(200);
     expect(response.body.isFile).toBe(true);
   });
+
+  for (const code of ['EACCES', 'EPERM']) {
+    it(`maps ${code} directory-list failures to the os-permission contract`, async () => {
+      const error = Object.assign(new Error('denied'), { code });
+      const protectedDirectory = await makeTempDir();
+      const app = createApp({}, {
+        fsPromises: {
+          ...fs,
+          stat: vi.fn(async () => ({ isDirectory: () => true })),
+          readdir: vi.fn(async () => { throw error; }),
+        },
+      });
+
+      const response = await request(app).get('/api/fs/list').query({ path: protectedDirectory });
+
+      expect(response.status).toBe(403);
+      expect(response.body).toEqual({ error: 'Access to directory denied', reason: 'os-permission' });
+    });
+  }
 });

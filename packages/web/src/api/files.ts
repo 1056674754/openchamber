@@ -4,6 +4,10 @@ import type {
   FileSearchResult,
   FilesAPI,
 } from '@openchamber/ui/lib/api/types';
+import {
+  FilesystemError,
+  parseFilesystemErrorReason,
+} from '@openchamber/ui/lib/api/files-errors';
 import { opencodeClient } from '@openchamber/ui/lib/opencode/client';
 import { useDirectoryStore } from '@openchamber/ui/stores/useDirectoryStore';
 
@@ -56,12 +60,16 @@ type WebDirectoryListResponse = {
 };
 
 const toDirectoryListResult = (fallbackDirectory: string, payload: WebDirectoryListResponse): DirectoryListResult => {
+  if (!payload || !Array.isArray(payload.entries)) {
+    throw new FilesystemError('Directory listing returned an invalid response', {
+      reason: 'invalid-response',
+    });
+  }
   const directory = normalizePath(payload?.directory || payload?.path || fallbackDirectory);
-  const entries = Array.isArray(payload?.entries) ? payload.entries : [];
 
   return {
     directory,
-    entries: entries
+    entries: payload.entries
       .filter((entry): entry is Required<Pick<WebDirectoryEntry, 'name' | 'path'>> & { isDirectory?: boolean } =>
         Boolean(entry && typeof entry.name === 'string' && typeof entry.path === 'string')
       )
@@ -84,8 +92,14 @@ export const createWebFilesAPI = (): FilesAPI => ({
     const response = await fetch(`/api/fs/list${params.toString() ? `?${params.toString()}` : ''}`);
 
     if (!response.ok) {
-      const error = await response.json().catch(() => ({ error: response.statusText }));
-      throw new Error((error as { error?: string }).error || 'Failed to list directory');
+      const error: unknown = await response.json().catch(() => ({ error: response.statusText }));
+      const message = error && typeof error === 'object' && typeof Reflect.get(error, 'error') === 'string'
+        ? String(Reflect.get(error, 'error'))
+        : 'Failed to list directory';
+      const reason = error && typeof error === 'object'
+        ? parseFilesystemErrorReason(Reflect.get(error, 'reason'))
+        : 'unknown';
+      throw new FilesystemError(message, { reason, status: response.status });
     }
 
     const result = (await response.json()) as WebDirectoryListResponse;

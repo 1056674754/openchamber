@@ -20,6 +20,7 @@ import { resolveSdkForDirectory, resolveBaseUrlForSession } from "@/sync/session
 import { resolveApiUrl, resolveOpenCodeProxyApiUrl } from "@/lib/api/serverUrl";
 import { buildOpenCodeHealthUrl } from "./health-url";
 import { createDirectoryListError } from "./directory-list-error";
+import { FilesystemError, parseFilesystemErrorReason } from '@/lib/api/files-errors';
 import {
   assertProviderCircuitClosed,
   recordProviderSuccess,
@@ -1770,7 +1771,9 @@ class OpencodeService {
         try {
           const result = await desktopFiles.listDirectory(directoryPath || '', options);
           if (!result || !Array.isArray(result.entries)) {
-            return [];
+            throw new FilesystemError('Directory listing returned an invalid response', {
+              reason: 'invalid-response',
+            });
           }
           const entries = result.entries.map<FilesystemEntry>((entry) => ({
             name: entry.name,
@@ -1812,14 +1815,21 @@ class OpencodeService {
         }
         const response = await fetch(`${fsBaseUrl}/fs/list${query ? `?${query}` : ''}`);
         if (!response.ok) {
-          const error = await response.json().catch(() => ({}));
-          const message = typeof error.error === 'string' ? error.error : 'Failed to list directory';
-          throw new Error(`${message} (HTTP ${response.status})`);
+          const error: unknown = await response.json().catch(() => ({}));
+          const message = error && typeof error === 'object' && typeof Reflect.get(error, 'error') === 'string'
+            ? String(Reflect.get(error, 'error'))
+            : 'Failed to list directory';
+          const reason = error && typeof error === 'object'
+            ? parseFilesystemErrorReason(Reflect.get(error, 'reason'))
+            : 'unknown';
+          throw new FilesystemError(message, { reason, status: response.status });
         }
 
         const result = await response.json();
         if (!result || !Array.isArray(result.entries)) {
-          return [];
+          throw new FilesystemError('Directory listing returned an invalid response', {
+            reason: 'invalid-response',
+          });
         }
 
         const entries = result.entries as FilesystemEntry[];

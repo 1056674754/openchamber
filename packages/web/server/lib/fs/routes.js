@@ -1,5 +1,11 @@
 import { createRealpathCache } from '../path-realpath-cache.js';
 
+const isOsPermissionError = (error) => (
+  error
+  && typeof error === 'object'
+  && (error.code === 'EACCES' || error.code === 'EPERM')
+);
+
 const EXEC_JOB_TTL_MS = 30 * 60 * 1000;
 
 const createCommandTimeoutMs = () => {
@@ -1117,7 +1123,7 @@ export const registerFsRoutes = (app, dependencies) => {
 
       const stats = await fsPromises.stat(resolvedPath);
       if (!stats.isDirectory()) {
-        return res.status(400).json({ error: 'Specified path is not a directory' });
+        return res.status(400).json({ error: 'Specified path is not a directory', reason: 'not-directory' });
       }
 
       const dirents = await fsPromises.readdir(resolvedPath, { withFileTypes: true });
@@ -1218,10 +1224,10 @@ export const registerFsRoutes = (app, dependencies) => {
         if (isPlansPath) {
           return res.json({ path: requestedPath || resolvedPath || rawPath, entries: [] });
         }
-        return res.status(404).json({ error: 'Directory not found' });
+        return res.status(404).json({ error: 'Directory not found', reason: 'not-found' });
       }
-      if (code === 'EACCES' || code === 'EPERM') {
-        return res.status(403).json({ error: 'Access to directory denied' });
+      if (isOsPermissionError(err)) {
+        return res.status(403).json({ error: 'Access to directory denied', reason: 'os-permission' });
       }
       return res.status(500).json({ error: (error && error.message) || 'Failed to list directory' });
     }

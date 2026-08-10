@@ -569,6 +569,8 @@ export const isDesktopShell = (): boolean => {
   return isElectronShell();
 };
 
+export const canRequestNativeDirectoryAccess = (): boolean => canUseDesktopNativeApi();
+
 export const startDesktopWindowDrag = async (): Promise<boolean> => {
   if (!isDesktopShell() || !hasDesktopInvoke()) {
     return false;
@@ -650,6 +652,7 @@ export const requestDirectoryAccess = async (
         directory: true,
         multiple: false,
         title: 'Select Working Directory',
+        ...(directoryPath ? { defaultPath: directoryPath } : {}),
       });
       if (!selected || typeof selected !== 'string') {
         return { success: false, error: 'Directory selection cancelled' };
@@ -661,7 +664,7 @@ export const requestDirectoryAccess = async (
     }
   }
 
-  return { success: true, path: directoryPath };
+  return { success: false, error: 'Native directory picker not available' };
 };
 
 export const requestFileAccess = async (
