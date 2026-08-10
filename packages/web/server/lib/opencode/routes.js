@@ -697,6 +697,10 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
         return res.status(400).json({ error: 'Path is required' });
       }
 
+      if (req.body?.create === true) {
+        await fs.promises.mkdir(path.resolve(requestedPath), { recursive: true });
+      }
+
       const validated = await validateDirectoryPath(requestedPath);
       if (!validated.ok) {
         return res.status(400).json({ error: validated.error });

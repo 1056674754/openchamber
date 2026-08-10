@@ -1657,7 +1657,7 @@ class OpencodeService {
   // File System Operations
   async createDirectory(
     dirPath: string,
-    options?: { allowOutsideWorkspace?: boolean }
+    options?: { allowOutsideWorkspace?: boolean; asProject?: boolean }
   ): Promise<{ success: boolean; path: string }> {
     const desktopFiles = getDesktopFilesApi();
     if (desktopFiles?.createDirectory) {
@@ -1667,6 +1667,31 @@ class OpencodeService {
         const message = error instanceof Error ? error.message : String(error);
         throw new Error(message || 'Failed to create directory');
       }
+    }
+
+    if (options?.asProject) {
+      // When adding a new project, route through the project-aware directory
+      // endpoint so the server creates the folder AND registers it as a
+      // project in one atomic step. Multi-instance routing still applies.
+      let projectBaseUrl: string = this.baseUrl;
+      for (const e of getAllSyncStores()) {
+        if (e.serverId === DEFAULT_SERVER_ID) continue;
+        if (e.childStores.getChild(dirPath)) {
+          const conn = serverRegistry.get(e.serverId);
+          if (conn) { projectBaseUrl = conn.config.baseUrl; break; }
+        }
+      }
+      const response = await fetch(`${projectBaseUrl}/opencode/directory`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: dirPath, create: true }),
+      });
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({ error: 'Failed to create project directory' }));
+        throw new Error(error.error || 'Failed to create project directory');
+      }
+      const result = await response.json();
+      return { success: true, path: result.path };
     }
 
     const payload = {
