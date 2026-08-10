@@ -50,14 +50,14 @@ function createRegistryApp(getNpmInfo) {
 }
 
 async function createEntry(spec = 'a') {
-  return request(app)
+  return request(createApp())
     .post('/api/config/plugins/entry')
     .send({ spec, scope: 'user' })
     .expect(200);
 }
 
 async function createFile(fileName = 'test.js', content = '//x') {
-  return request(app)
+  return request(createApp())
     .post('/api/config/plugins/file')
     .send({ fileName, content, scope: 'user' })
     .expect(200);
