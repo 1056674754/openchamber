@@ -13,7 +13,9 @@ This module provides OpenCode server integration utilities for the web server ru
 - `packages/web/server/lib/opencode/opencode-upgrade-runtime.js`: Direct OpenCode CLI upgrade fallback, including install-source detection and captured package-manager diagnostics.
 - `packages/web/server/lib/opencode/lifecycle.js`: OpenCode process lifecycle runtime (startup, restart, readiness, health monitoring).
 - `packages/web/server/lib/opencode/lifecycle-journal.js`: serialized, size-bounded JSONL evidence journal for managed OpenCode spawn/exit/health/restart decisions.
-- `packages/web/server/lib/opencode/config-file-watcher.js`: debounced OpenCode config-file watcher that validates JSONC and waits for managed sessions to become idle before requesting a lifecycle reload.
+- `packages/web/server/lib/opencode/config-file-watcher.js`: debounced OpenCode config-file watcher that validates JSONC and waits for managed sessions to become idle before recording a deferred restart.
+- `packages/web/server/lib/opencode/pending-config-restart.js`: process-local accumulator for configuration changes that require an OpenCode restart, including active-session impact snapshots and single-flight apply behavior.
+- `packages/web/server/lib/opencode/config-mutation-response.js`: shared deferred-restart response shape for successful configuration mutations.
 - `packages/web/server/lib/opencode/interrupted-runs.js`: managed OpenCode restart recovery for stale in-flight message/tool rows in the OpenCode SQLite database.
 - `packages/web/server/lib/opencode/sqlite-runtime.js`: shared synchronous SQLite driver selection for Bun, Electron/Node `node:sqlite`, and native `better-sqlite3` fallbacks.
 - `packages/web/server/lib/opencode/env-runtime.js`: OpenCode CLI/binary resolution and shell environment runtime.
@@ -150,8 +152,16 @@ Startup timeout (`startupTimeoutMs` dep, env `OPENCHAMBER_OPENCODE_STARTUP_TIMEO
 ## Public exports (config-file-watcher.js)
 - `createOpenCodeConfigFileWatcherRuntime(dependencies)`: watches user and active-project `opencode.json`, `opencode.jsonc`, and legacy `config.json` files for a managed OpenCode server.
 - Invalid JSONC is ignored without disturbing the running server.
-- Valid changes are debounced and held until the authoritative `/session/status` response and OpenChamber's live activity state both report no busy/retrying sessions, then applied through `refreshOpenCodeAfterConfigChange()`.
+- Valid changes are debounced and held until the authoritative `/session/status` response and OpenChamber's live activity state both report no busy/retrying sessions, then recorded in the pending-restart accumulator.
 - External or skip-start OpenCode instances are never restarted by the watcher.
+
+## Public exports (pending-config-restart.js)
+- `createPendingConfigRestartRuntime(dependencies)`: creates the deferred restart accumulator.
+- `markPendingConfigRestart(reason, details?)`: records a change and broadcasts `openchamber:pending-config-restart` with the current count, reasons, change metadata, affected busy/retrying sessions, and apply state.
+- `getPendingConfigRestart()`: returns the current accumulator snapshot.
+- `applyPendingConfigRestart()`: applies the current batch through the managed lifecycle's configuration refresh. Concurrent apply requests join one promise, and changes recorded while that promise is running remain pending afterward.
+- Successful configuration mutation routes return `requiresRestart: true`, `restartDeferred: true`, and the current `pendingRestart` snapshot. `PUT /api/config/settings` remains restart-free.
+- `GET /api/opencode/restart/pending` returns the current snapshot. `POST /api/opencode/restart/apply` applies the current batch and reports any remaining pending changes.
 
 ## Public exports (interrupted-runs.js)
 - `finalizeInterruptedOpenCodeRuns(options?)`: scans the OpenCode SQLite database for active tool parts left behind by an interrupted managed OpenCode process and marks the owning assistant message as aborted.
