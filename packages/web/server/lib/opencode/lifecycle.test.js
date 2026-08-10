@@ -1,4 +1,5 @@
 import { EventEmitter } from 'node:events';
+import net from 'node:net';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const spawnMock = vi.fn();
@@ -821,5 +822,79 @@ describe('OpenCode lifecycle', () => {
       signal: null,
       expected: false,
     }));
+  });
+
+  it('kills the spawned child on startup timeout and cleans up the allocated port (orphan prevention)', async () => {
+    delete process.env.OPENCODE_BINARY;
+    delete process.env.OPENCHAMBER_RUNTIME;
+
+    const child1 = createMockChild();
+    const child2 = createMockChild();
+    spawnMock.mockImplementationOnce(() => child1);
+    spawnMock.mockImplementationOnce(() => child2);
+    spawnSyncMock.mockImplementation(() => ({ stdout: '' }));
+
+    const runtime = createRuntime({ startupTimeoutMs: 50 });
+    await expect(runtime.startOpenCode()).rejects.toThrow('Timeout waiting for OpenCode to start');
+
+    expect(child1.kill).toHaveBeenCalledWith('SIGKILL');
+    expect(child2.kill).toHaveBeenCalledWith('SIGKILL');
+
+    const lsofCallsForSpawnPort = spawnSyncMock.mock.calls.filter(
+      ([cmd, args]) => cmd === 'lsof' && args?.some((a) => a.includes(':45678'))
+    );
+    expect(lsofCallsForSpawnPort.length).toBeGreaterThan(0);
+  });
+
+  it('records a lifecycle event when port release fails after SIGKILL escalation', async () => {
+    vi.useFakeTimers();
+    delete process.env.OPENCODE_BINARY;
+
+    const connectSpy = vi.spyOn(net, 'connect').mockImplementation(() => {
+      const socket = new EventEmitter();
+      socket.destroy = vi.fn();
+      socket.removeAllListeners = vi.fn();
+      socket.setTimeout = vi.fn();
+      queueMicrotask(() => socket.emit('connect'));
+      return socket;
+    });
+
+    const recordLifecycleEvent = vi.fn(async () => {});
+    spawnSyncMock.mockImplementation(() => ({ stdout: '' }));
+
+    const newChild = createMockChild();
+    spawnMock.mockImplementation(() => {
+      queueMicrotask(() => {
+        newChild.stdout.emit('data', 'opencode server listening on http://127.0.0.1:45678\n');
+      });
+      return newChild;
+    });
+
+    const runtime = createRuntime({
+      recordLifecycleEvent,
+      state: {
+        openCodePort: 12345,
+        openCodeProcess: {
+          pid: 11111,
+          exitCode: null,
+          signalCode: null,
+          close: vi.fn(async () => {}),
+        },
+      },
+    });
+
+    const promise = runtime.restartOpenCode('health_periodic_threshold');
+
+    await vi.advanceTimersByTimeAsync(11000);
+
+    await promise;
+
+    expect(recordLifecycleEvent).toHaveBeenCalledWith(
+      'port_release_timeout',
+      expect.objectContaining({ port: 12345 })
+    );
+
+    connectSpy.mockRestore();
+    vi.useRealTimers();
   });
 });

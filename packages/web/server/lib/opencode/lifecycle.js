@@ -19,6 +19,10 @@ const STALE_BUSY_GRACE_MS = parsePositiveInt(
   process.env.OPENCHAMBER_OPENCODE_BUSY_RESTART_GRACE_MS,
   30 * 60 * 1000
 );
+const STARTUP_TIMEOUT_MS = parsePositiveInt(
+  process.env.OPENCHAMBER_OPENCODE_STARTUP_TIMEOUT_MS,
+  30000
+);
 const OPENCODE_HEALTH_PATH = '/global/health';
 
 const formatDurationForLog = (ms) => {
@@ -62,6 +66,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     recordLifecycleEvent = async () => {},
     getLifecycleLogPath = () => null,
     now = Date.now,
+    startupTimeoutMs = STARTUP_TIMEOUT_MS,
   } = deps;
 
   const listListeningProcessIds = (port) => {
@@ -406,6 +411,21 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       child.unref();
     }
 
+    // Kill the spawned child if it never becomes ready. Without this, a startup
+    // timeout rejects the URL promise but leaves the child process alive as an
+    // orphan — it keeps its listening port and accumulates across retries.
+    const killUnresolvedChild = () => {
+      if (!child.pid || hasChildProcessExited(child)) return;
+      try {
+        if (process.env.OPENCHAMBER_RUNTIME === 'desktop') {
+          process.kill(-child.pid, 'SIGKILL');
+        } else {
+          child.kill('SIGKILL');
+        }
+      } catch {
+      }
+    };
+
     const url = await new Promise((resolve, reject) => {
       let stdout = '';
       let stderr = '';
@@ -453,6 +473,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       };
 
       const timer = setTimeout(() => {
+        killUnresolvedChild();
         finish(reject, new Error(`Timeout waiting for OpenCode to start after ${timeout}ms`));
       }, timeout);
 
@@ -625,7 +646,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       const serverInstance = await createManagedOpenCodeServerProcess({
         hostname: env.ENV_CONFIGURED_OPENCODE_HOSTNAME,
         port: spawnPort,
-        timeout: 30000,
+        timeout: startupTimeoutMs,
         cwd: state.openCodeWorkingDirectory,
         shellEnvKeysCount: Object.keys(shellEnv).length,
         env: stripAppImageArgv0Leak({
@@ -668,6 +689,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       }
       throw new Error('Server started but health check failed (timeout)');
     } catch (error) {
+      killProcessOnPort(spawnPort);
       const message = error instanceof Error ? error.message : String(error);
       state.lastOpenCodeError = message;
       state.openCodePort = null;
@@ -766,7 +788,19 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
 
       killProcessOnPort(portToKill);
       if (!(await waitForPortRelease(portToKill, 5000))) {
-        console.warn(`Timed out waiting for OpenCode port ${portToKill} to be released`);
+        killProcessOnPort(portToKill);
+        const releasedOnRetry = await waitForPortRelease(portToKill, 5000);
+        if (!releasedOnRetry) {
+          const listeningProcessIds = listListeningProcessIds(portToKill);
+          console.error(
+            `[lifecycle] Port ${portToKill} not released after SIGKILL escalation; ${listeningProcessIds.length} listener(s) may persist as orphan(s): [${listeningProcessIds.join(', ')}]`
+          );
+          await recordLifecycleEvent('port_release_timeout', {
+            port: portToKill,
+            reason: `restart:${reason}`,
+            listeningProcessIds,
+          });
+        }
       }
       finalizeInterruptedManagedOpenCodeRuns('managed OpenCode restart');
 

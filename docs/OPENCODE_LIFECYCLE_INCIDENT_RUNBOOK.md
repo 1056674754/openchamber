@@ -340,6 +340,7 @@ initiator. Record it as missing evidence, not as a negative fact.
 | `restart_joined` | Another request joined an existing restart | `reason` |
 | `restart_completed` | Replacement became ready | `reason`, `previousPid`, `previousPort`, `pid`, `port` |
 | `restart_failed` | Replacement did not become ready | `reason`, `message` |
+| `port_release_timeout` | Port not released after SIGKILL escalation during restart | `port`, `reason`, `listeningProcessIds` |
 
 Known restart reasons:
 
