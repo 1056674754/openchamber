@@ -14,6 +14,7 @@ type RequestOptions = {
 
 const statusCalls: Array<DirectoryParameters | undefined> = [];
 const connectCalls: Array<readonly [ConnectParameters, RequestOptions]> = [];
+const authenticateCalls: Array<readonly [ConnectParameters, RequestOptions]> = [];
 
 const statusMock = async (parameters?: DirectoryParameters) => {
   statusCalls.push(parameters);
@@ -27,11 +28,18 @@ const connectMock = async (parameters: ConnectParameters, options: RequestOption
   connectCalls.push([parameters, options]);
   return { data: true };
 };
+const authenticateMock = async (parameters: ConnectParameters, options: RequestOptions) => {
+  authenticateCalls.push([parameters, options]);
+  return { data: true };
+};
 
 const mcpClient = {
   mcp: {
     status: statusMock,
     connect: connectMock,
+    auth: {
+      authenticate: authenticateMock,
+    },
   },
 };
 
@@ -47,6 +55,7 @@ describe('useMcpStore directory scoping', () => {
   beforeEach(() => {
     statusCalls.length = 0;
     connectCalls.length = 0;
+    authenticateCalls.length = 0;
     useMcpStore.setState({
       byDirectory: {},
       diagnosticsByDirectory: {},
@@ -68,6 +77,16 @@ describe('useMcpStore directory scoping', () => {
     await useMcpStore.getState().connect('cognee', directory);
 
     expect(connectCalls).toEqual([[
+      { name: 'cognee', directory },
+      { throwOnError: true },
+    ]]);
+    expect(statusCalls).toEqual([{ directory }]);
+  });
+
+  test('native authentication targets the selected directory before refreshing its status', async () => {
+    await useMcpStore.getState().authenticate('cognee', directory);
+
+    expect(authenticateCalls).toEqual([[
       { name: 'cognee', directory },
       { throwOnError: true },
     ]]);

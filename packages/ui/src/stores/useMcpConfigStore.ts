@@ -16,6 +16,7 @@ export type McpScope = 'user' | 'project';
 type McpMutationResult = {
   ok: boolean;
   reloadFailed?: boolean;
+  restartDeferred?: boolean;
   message?: string;
   warning?: string;
 };
@@ -241,6 +242,7 @@ export const useMcpConfigStore = create<McpConfigStore>()(
               return {
                 ok: true,
                 reloadFailed: payload?.reloadFailed === true,
+                restartDeferred: payload?.restartDeferred === true,
                 message: payload?.message,
                 warning: payload?.warning,
               };
@@ -250,6 +252,7 @@ export const useMcpConfigStore = create<McpConfigStore>()(
             return {
               ok: true,
               reloadFailed: payload?.reloadFailed === true,
+              restartDeferred: payload?.restartDeferred === true,
               message: payload?.message,
               warning: payload?.warning,
             };
@@ -296,6 +299,7 @@ export const useMcpConfigStore = create<McpConfigStore>()(
               return {
                 ok: true,
                 reloadFailed: payload?.reloadFailed === true,
+                restartDeferred: payload?.restartDeferred === true,
                 message: payload?.message,
                 warning: payload?.warning,
               };
@@ -305,6 +309,7 @@ export const useMcpConfigStore = create<McpConfigStore>()(
             return {
               ok: true,
               reloadFailed: payload?.reloadFailed === true,
+              restartDeferred: payload?.restartDeferred === true,
               message: payload?.message,
               warning: payload?.warning,
             };
@@ -351,6 +356,7 @@ export const useMcpConfigStore = create<McpConfigStore>()(
             return {
               ok: true,
               reloadFailed: payload?.reloadFailed === true,
+              restartDeferred: payload?.restartDeferred === true,
               message: payload?.message,
               warning: payload?.warning,
             };
