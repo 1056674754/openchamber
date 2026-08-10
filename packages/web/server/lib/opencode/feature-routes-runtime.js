@@ -90,6 +90,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       buildAugmentedPath,
       projectConfigRuntime,
       scheduledTasksRuntime,
+      scheduledTaskService,
       getOpenChamberEventClients,
       writeSseEvent,
       permissionAutoAcceptRuntime,
@@ -146,6 +147,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       sanitizeProjects,
       projectConfigRuntime,
       scheduledTasksRuntime,
+      scheduledTaskService,
       getOpenChamberEventClients,
       writeSseEvent,
     });

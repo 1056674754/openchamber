@@ -1,5 +1,7 @@
+import fs from 'node:fs';
 import path from 'node:path';
 import { OpenChamberControlError } from '../openchamber-control/error.js';
+import { setLoopFileEnabled } from './loops.js';
 
 const asNonEmptyString = (value) => {
   if (typeof value !== 'string') return null;
@@ -51,7 +53,46 @@ export const createScheduledTaskService = (dependencies) => {
 
   const list = async (projectID) => {
     await findProjectByID(projectID);
-    return projectConfigRuntime.listScheduledTasks(projectID);
+    return scheduledTasksRuntime.syncProject(projectID);
+  };
+
+  const findLoopTask = async (projectID, taskID) => {
+    await findProjectByID(projectID);
+    const normalizedTaskID = asNonEmptyString(taskID);
+    if (!normalizedTaskID) throw new OpenChamberControlError('taskId is required', 400);
+    const tasks = await scheduledTasksRuntime.syncProject(projectID);
+    const task = tasks.find((entry) => entry?.id === normalizedTaskID) || null;
+    if (!task) throw new OpenChamberControlError('Task not found', 404);
+    if (!task.loopFile) throw new OpenChamberControlError('Task is not managed by a loop file', 400);
+    if (!fs.existsSync(task.loopFile)) throw new OpenChamberControlError('Loop file not found', 404);
+    return task;
+  };
+
+  const setLoopEnabled = async (projectID, taskID, enabled) => {
+    if (typeof enabled !== 'boolean') {
+      throw new OpenChamberControlError('enabled must be a boolean', 400);
+    }
+    const task = await findLoopTask(projectID, taskID);
+    try {
+      if (!setLoopFileEnabled(task.loopFile, enabled)) {
+        throw new OpenChamberControlError('Loop file must be valid before changing its enabled state', 400);
+      }
+    } catch (error) {
+      if (error instanceof OpenChamberControlError) throw error;
+      throw new OpenChamberControlError(error instanceof Error ? error.message : 'Failed to update loop file', 500);
+    }
+    const tasks = await scheduledTasksRuntime.syncProject(projectID);
+    return tasks.find((entry) => entry.id === taskID) || null;
+  };
+
+  const removeLoopFile = async (projectID, taskID) => {
+    const task = await findLoopTask(projectID, taskID);
+    try {
+      fs.unlinkSync(task.loopFile);
+    } catch (error) {
+      throw new OpenChamberControlError(error instanceof Error ? error.message : 'Failed to delete loop file', 500);
+    }
+    return scheduledTasksRuntime.syncProject(projectID);
   };
 
   const upsert = async (projectID, taskInput) => {
@@ -80,6 +121,14 @@ export const createScheduledTaskService = (dependencies) => {
     await findProjectByID(projectID);
     const normalizedTaskID = asNonEmptyString(taskID);
     if (!normalizedTaskID) throw new OpenChamberControlError('taskId is required', 400);
+    const current = await projectConfigRuntime.listScheduledTasks(projectID);
+    const existing = current.find((task) => task.id === normalizedTaskID) || null;
+    if (existing?.loopFile && fs.existsSync(existing.loopFile)) {
+      throw new OpenChamberControlError(
+        'Loop task is managed by its .agents/loops markdown file; delete the file to remove the task',
+        400,
+      );
+    }
     const result = await projectConfigRuntime.deleteScheduledTask(projectID, normalizedTaskID);
     if (!result.deleted) throw new OpenChamberControlError('Task not found', 404);
     await scheduledTasksRuntime.syncProject(projectID);
@@ -131,5 +180,16 @@ export const createScheduledTaskService = (dependencies) => {
     };
   };
 
-  return { listProjects, resolveProjectID, list, upsert, remove, run, setEnabled, status };
+  return {
+    listProjects,
+    resolveProjectID,
+    list,
+    upsert,
+    remove,
+    run,
+    setEnabled,
+    setLoopEnabled,
+    removeLoopFile,
+    status,
+  };
 };

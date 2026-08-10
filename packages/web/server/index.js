@@ -98,6 +98,7 @@ import { createContextObligatoryRuntime } from './lib/context-obligatory/runtime
 import { createProjectConfigRuntime } from './lib/projects/project-config.js';
 import { createPreviewProxyRuntime } from './lib/preview/proxy-runtime.js';
 import { createRemoteInstancesRuntime } from './lib/remote-instances/config.js';
+import { waitForActiveWorktreeBootstrap } from './lib/git/service.js';
 import { createRemoteGlobalEventFanout } from './lib/remote-instances/global-event-fanout.js';
 import { registerRemoteInstanceRoutes } from './lib/remote-instances/routes.js';
 import { registerRemoteProxy } from './lib/remote-instances/proxy.js';
@@ -1298,6 +1299,7 @@ const scheduledTasksRuntime = createScheduledTasksRuntime({
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
   waitForOpenCodeReady,
+  waitForWorktreeBootstrap: waitForActiveWorktreeBootstrap,
   setSessionAutoAccept: (sessionId, enabled, directory) =>
     permissionAutoAcceptRuntime.setSessionPolicy(sessionId, enabled, directory),
   emitTaskRunEvent: (event) => {
@@ -1735,6 +1737,7 @@ async function main(options = {}) {
     buildAugmentedPath,
     projectConfigRuntime,
     scheduledTasksRuntime,
+    scheduledTaskService,
     getOpenChamberEventClients: () => uiOpenChamberEventClients,
     writeSseEvent,
     permissionAutoAcceptRuntime,

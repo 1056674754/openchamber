@@ -1,10 +1,15 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import os from 'node:os';
+import path from 'node:path';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import {
   computeNextRunAt,
+  createScheduledTasksRuntime,
   expandCommandGoalObjective,
   formatScheduledSessionTitle,
   parseScheduledCommandPrompt,
 } from './runtime.js';
+import { createProjectConfigRuntime } from '../projects/project-config.js';
 
 describe('scheduled-tasks runtime helpers', () => {
   it('computes next daily run in timezone', () => {
@@ -112,5 +117,82 @@ describe('scheduled-tasks runtime helpers', () => {
     expect(expandCommandGoalObjective('Move $1 to $2', '"src old" dist extra')).toBe('Move src old to dist extra');
     expect(expandCommandGoalObjective('Review the requested scope.', 'auth module'))
       .toBe('Review the requested scope.\n\nauth module');
+  });
+});
+
+describe('scheduled-tasks markdown loop wiring', () => {
+  const createFixture = async () => {
+    const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'oc-runtime-loop-'));
+    const projectPath = path.join(tempRoot, 'repo');
+    await mkdir(path.join(projectPath, '.agents', 'loops'), { recursive: true });
+    await writeFile(path.join(projectPath, '.agents', 'loops', 'daily.md'), `---
+name: daily
+schedule: "0 9 * * *"
+enabled: true
+model: openai/gpt-5
+---
+Run daily.
+`, 'utf8');
+    const projectConfigRuntime = createProjectConfigRuntime({
+      fsPromises: await import('node:fs/promises'),
+      path,
+      projectsDirPath: path.join(tempRoot, 'config'),
+    });
+    return {
+      projectPath,
+      projectConfigRuntime,
+      cleanup: () => rm(tempRoot, { recursive: true, force: true }),
+    };
+  };
+
+  it('discovers and reconciles loop files on project sync', async () => {
+    const fixture = await createFixture();
+    try {
+      const runtime = createScheduledTasksRuntime({
+        projectConfigRuntime: fixture.projectConfigRuntime,
+        listProjects: async () => [{ id: 'project-test', path: fixture.projectPath }],
+        buildOpenCodeUrl: () => 'http://127.0.0.1:1',
+        getOpenCodeAuthHeaders: () => ({}),
+      });
+
+      await runtime.syncProject('project-test');
+
+      const tasks = await fixture.projectConfigRuntime.listScheduledTasks('project-test');
+      expect(tasks).toHaveLength(1);
+      expect(tasks[0].id).toBe('loop:project:daily');
+      expect(tasks[0].state.nextRunAt).toBeGreaterThan(0);
+    } finally {
+      await fixture.cleanup();
+    }
+  });
+
+  it('waits for pending worktree bootstrap before a loop creates a session', async () => {
+    const fixture = await createFixture();
+    const waitForWorktreeBootstrap = vi.fn(async () => {
+      throw new Error('bootstrap failed');
+    });
+    const waitForOpenCodeReady = vi.fn(async () => undefined);
+    try {
+      const runtime = createScheduledTasksRuntime({
+        projectConfigRuntime: fixture.projectConfigRuntime,
+        listProjects: async () => [{ id: 'project-test', path: fixture.projectPath }],
+        buildOpenCodeUrl: () => 'http://127.0.0.1:1',
+        getOpenCodeAuthHeaders: () => ({}),
+        waitForWorktreeBootstrap,
+        waitForOpenCodeReady,
+        logger: { info: vi.fn(), warn: vi.fn() },
+      });
+      await runtime.syncProject('project-test');
+      const [task] = await fixture.projectConfigRuntime.listScheduledTasks('project-test');
+
+      const result = await runtime.runNow('project-test', task.id);
+
+      expect(result.ok).toBe(false);
+      expect(result.error).toContain('bootstrap failed');
+      expect(waitForWorktreeBootstrap).toHaveBeenCalledWith(fixture.projectPath);
+      expect(waitForOpenCodeReady).not.toHaveBeenCalled();
+    } finally {
+      await fixture.cleanup();
+    }
   });
 });

@@ -5,6 +5,7 @@ Server-owned scheduled task runtime and routes for OpenChamber-only automation.
 ## Scope
 
 - Per-project scheduled task persistence is owned by `packages/web/server/lib/projects/project-config.js`.
+- Markdown loop discovery and parsing is owned by `loops.js`.
 - Runtime orchestration and execution is owned by this module.
 - This module is OpenChamber feature logic; it is intentionally separate from OpenCode proxy/runtime internals.
 
@@ -21,10 +22,14 @@ Server-owned scheduled task runtime and routes for OpenChamber-only automation.
 
 Permission auto-accept enrollment is delegated to `packages/web/server/lib/permission-auto-accept/runtime.js`. Enrollment failure is reported but does not prevent the scheduled task from running; the task then waits for normal user approval.
 
+Loop-driven runs wait for an active worktree bootstrap before creating their session. Discovery is server-local: the local server reads local loop files, while remote instances expose loops through their own scheduled-task routes.
+
 When `goalEnabled` is set, `createTaskGoal` writes the expanded prompt via `session-goal/objectives.js` (inline fallback if the write fails), patches `metadata.openchamber.goal`, then the host session-goal runtime continues the loop from session events. Oversized prompts may be distilled with Small Model for the auditor objective.
 
 - `packages/web/server/lib/scheduled-tasks/routes.js`
   - Scheduled task CRUD endpoints
+  - Listing reconciles loop additions, edits, and removals without restart
+  - Loop-file endpoints update `enabled` frontmatter or delete the authoritative file
   - Manual run endpoint
   - OpenChamber events SSE stream endpoint
 
@@ -45,6 +50,26 @@ When `goalEnabled` is set, `createTaskGoal` writes the expanded prompt via `sess
   - `GET /api/projects/:projectId/scheduled-tasks`
   - `PUT /api/projects/:projectId/scheduled-tasks`
   - `DELETE /api/projects/:projectId/scheduled-tasks/:taskId`
+  - `PATCH /api/projects/:projectId/scheduled-tasks/:taskId/loop-file`
+  - `DELETE /api/projects/:projectId/scheduled-tasks/:taskId/loop-file`
   - `POST /api/projects/:projectId/scheduled-tasks/:taskId/run`
   - `GET /api/openchamber/scheduled-tasks/status`
   - `GET /api/openchamber/events`
+
+## Markdown loop format
+
+```markdown
+---
+name: daily-digest
+schedule: "0 9 * * *"
+enabled: true
+model: anthropic/claude-sonnet-4-5
+agent: plan
+timezone: Europe/Kyiv
+---
+Summarize repository changes since yesterday.
+```
+
+Loops are discovered from `.agents/loops/*.md` in the project and its ancestors up to the worktree root, plus `~/.agents/loops/*.md`. Project scope shadows user scope by name. New loops default to disabled unless `enabled: true` is explicit.
+
+Reconciliation runs under the existing per-project write lock on the server that owns the project. Loop-owned tasks adopt by file path, JSON tasks by name; IDs, runtime state, and UI-only execution fields survive adoption. Malformed existing files retain their last good task, removed files unschedule their tasks, and runtime state is never written to markdown.

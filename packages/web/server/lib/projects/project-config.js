@@ -6,6 +6,16 @@ const MAX_TASK_NAME_LENGTH = 80;
 const MAX_TASK_PROMPT_LENGTH = 20_000;
 const MAX_CRON_LENGTH = 200;
 const MAX_LAST_ERROR_LENGTH = 2_000;
+const LEGACY_TIMEZONE_ALIASES = {
+  'Europe/Kiev': 'Europe/Kyiv',
+  'Asia/Calcutta': 'Asia/Kolkata',
+  'Asia/Saigon': 'Asia/Ho_Chi_Minh',
+  'Asia/Rangoon': 'Asia/Yangon',
+  'Asia/Katmandu': 'Asia/Kathmandu',
+  'America/Godthab': 'America/Nuuk',
+  'Atlantic/Faeroe': 'Atlantic/Faroe',
+  'Pacific/Enderbury': 'Pacific/Kanton',
+};
 
 const asNonEmptyString = (value) => {
   if (typeof value !== 'string') {
@@ -125,7 +135,10 @@ const normalizeTimezone = (value, fallback = resolveDefaultTimezone()) => {
   if (!timezone) {
     return fallback;
   }
-  return IANAZone.isValidZone(timezone) ? timezone : null;
+  if (!IANAZone.isValidZone(timezone)) {
+    return null;
+  }
+  return LEGACY_TIMEZONE_ALIASES[timezone] ?? timezone;
 };
 
 const validateCronExpression = (expression, timezone) => {
@@ -312,6 +325,7 @@ const normalizeTaskForStorage = (value, options) => {
 
   const schedule = normalizeSchedule(value.schedule, existingTask?.schedule);
   const execution = normalizeExecution(value.execution);
+  const loopFile = asNonEmptyString(value.loopFile) ?? asNonEmptyString(existingTask?.loopFile);
 
   const nowMs = Math.max(0, Math.round(now));
   const baseState = normalizeState(value.state, existingTask?.state);
@@ -328,6 +342,7 @@ const normalizeTaskForStorage = (value, options) => {
     schedule,
     execution,
     state,
+    ...(loopFile ? { loopFile } : {}),
   };
 };
 
@@ -559,11 +574,93 @@ export const createProjectConfigRuntime = (deps) => {
     });
   };
 
+  const reconcileLoopTasks = async (projectID, loops) => {
+    return withProjectWriteLock(projectID, async () => {
+      const now = Date.now();
+      const current = await readProjectConfigFromDisk(projectID);
+      const activeLoopFiles = new Set();
+      const pendingByName = new Map();
+      const validByFile = new Map();
+
+      for (const loop of Array.isArray(loops) ? loops : []) {
+        if (!loop || typeof loop.filePath !== 'string' || !loop.filePath) continue;
+        activeLoopFiles.add(loop.filePath);
+        if (!loop.definition || typeof loop.definition !== 'object') continue;
+        pendingByName.set(loop.definition.name, loop);
+        validByFile.set(loop.filePath, loop);
+      }
+
+      const consumedFiles = new Set();
+      const nextTasks = [];
+      for (const task of current.scheduledTasks) {
+        if (task.loopFile && !activeLoopFiles.has(task.loopFile)) continue;
+
+        const loop = task.loopFile
+          ? validByFile.get(task.loopFile) ?? null
+          : pendingByName.get(task.name) ?? null;
+        if (loop) {
+          try {
+            const adopted = normalizeTaskForStorage({
+              ...task,
+              ...loop.definition,
+              execution: { ...task.execution, ...loop.definition.execution },
+              loopFile: loop.filePath,
+            }, {
+              now,
+              createId: taskIDFactory,
+              existingTask: task,
+              allowCreate: false,
+              refreshUpdatedAt: false,
+            });
+            nextTasks.push(adopted);
+            pendingByName.delete(loop.definition.name);
+            consumedFiles.add(loop.filePath);
+            validByFile.delete(loop.filePath);
+          } catch (error) {
+            console.warn(`[scheduled-tasks] skipped loop ${loop.filePath}:`, error instanceof Error ? error.message : error);
+            nextTasks.push(task);
+          }
+          continue;
+        }
+
+        if (task.loopFile && consumedFiles.has(task.loopFile)) continue;
+        nextTasks.push(task);
+      }
+
+      for (const loop of pendingByName.values()) {
+        if (consumedFiles.has(loop.filePath)) continue;
+        try {
+          nextTasks.push(normalizeTaskForStorage({
+            id: `loop:${loop.scope}:${loop.definition.name}`,
+            ...loop.definition,
+            loopFile: loop.filePath,
+          }, {
+            now,
+            createId: taskIDFactory,
+            existingTask: null,
+            allowCreate: true,
+            refreshUpdatedAt: false,
+          }));
+          consumedFiles.add(loop.filePath);
+        } catch (error) {
+          console.warn(`[scheduled-tasks] skipped loop ${loop.filePath}:`, error instanceof Error ? error.message : error);
+        }
+      }
+
+      await writeProjectConfigToDisk(projectID, {
+        version: PROJECT_CONFIG_VERSION,
+        scheduledTasks: nextTasks,
+      });
+      return nextTasks;
+    });
+  };
+
   return {
     listScheduledTasks,
     upsertScheduledTask,
     deleteScheduledTask,
     updateScheduledTaskState,
+    reconcileLoopTasks,
     resolveProjectConfigPath,
   };
 };

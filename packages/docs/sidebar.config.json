@@ -6,7 +6,8 @@
         { "label": "Overview", "link": "/" },
         { "label": "Install", "link": "/install/" },
         { "label": "Quickstart", "link": "/quickstart/" },
-        { "label": "Tunnels", "link": "/tunnels/" }
+        { "label": "Tunnels", "link": "/tunnels/" },
+        { "label": "Scheduled Tasks", "link": "/scheduled-tasks/" }
       ]
     },
     {

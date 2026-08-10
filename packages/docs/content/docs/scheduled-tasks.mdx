@@ -1,0 +1,53 @@
+---
+title: Scheduled Tasks
+description: Run prompts automatically from the UI or portable markdown loops.
+---
+
+# Scheduled Tasks
+
+A scheduled task starts a new OpenChamber session and sends a prompt on a daily, weekly, one-time, or cron schedule. Open Scheduled Tasks from the session sidebar. You can edit, enable, disable, delete, or run any task immediately.
+
+## Loops: scheduled tasks as markdown files
+
+A loop is a portable scheduled task that can be committed with a repository. Create `.agents/loops/daily-digest.md`, then open Scheduled Tasks to discover it without restarting the server:
+
+```markdown
+---
+name: daily-digest
+schedule: "0 9 * * *"
+enabled: true
+model: anthropic/claude-sonnet-4-5
+agent: plan
+timezone: Europe/Kyiv
+---
+Summarize repository changes since yesterday and post the digest.
+```
+
+### Where files live
+
+- **Project scope**: `.agents/loops/*.md` in the project directory or an ancestor up to the git worktree root.
+- **User scope**: `~/.agents/loops/*.md` applies to each project opened by that server.
+
+Project loops shadow user loops with the same name. Remote instances discover their own files on their own OpenChamber server.
+
+### Fields
+
+| Field | Meaning |
+|---|---|
+| `name` | Required task name, up to 80 characters. |
+| `schedule` | Required cron expression. Loop files are cron-only. |
+| `enabled` | Set `true` to run. Loops are off by default. |
+| `model` | Required `provider/model`, such as `anthropic/claude-sonnet-4-5`. |
+| `agent` | Optional agent name. |
+| `timezone` | Optional IANA timezone; defaults to the server timezone. |
+| body | Required execution prompt; slash commands are supported. |
+
+### How loops behave
+
+- The markdown file is authoritative. Edit opens it in the file editor, the enabled toggle updates its frontmatter, and Delete removes the file after confirmation.
+- Runtime state stays in project configuration and is never written into markdown.
+- Renaming `name` renames the task without losing runtime state.
+- A temporarily malformed file keeps its last valid task; removing the file unschedules it.
+- Run now remains available for enabled loops.
+
+Tasks run only while their owning OpenChamber server is running.

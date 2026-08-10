@@ -179,3 +179,86 @@ describe('project-config runtime', () => {
     }
   });
 });
+
+describe('project-config loop reconciliation', () => {
+  const loop = (name, filePath = `/repo/.agents/loops/${name}.md`) => ({
+    scope: 'project',
+    filePath,
+    definition: {
+      name,
+      enabled: true,
+      schedule: { kind: 'cron', cron: '0 9 * * *', timezone: 'Europe/Kiev' },
+      execution: { prompt: `Run ${name}`, providerID: 'openai', modelID: 'gpt-5' },
+    },
+  });
+
+  it('adopts by name then by file identity while preserving runtime and UI-only state', async () => {
+    const { runtime, cleanup } = await createRuntime();
+    try {
+      const created = await runtime.upsertScheduledTask('project-test', {
+        name: 'daily-digest',
+        enabled: false,
+        schedule: { kind: 'daily', time: '08:00', timezone: 'UTC' },
+        execution: {
+          prompt: 'JSON prompt',
+          providerID: 'openai',
+          modelID: 'gpt-4.1',
+          permissionAutoAccept: true,
+        },
+      });
+      await runtime.updateScheduledTaskState('project-test', created.task.id, {
+        lastRunAt: 123,
+        lastStatus: 'success',
+      });
+
+      await runtime.reconcileLoopTasks('project-test', [loop('daily-digest')]);
+      const renamed = await runtime.reconcileLoopTasks('project-test', [loop('renamed', '/repo/.agents/loops/daily-digest.md')]);
+
+      expect(renamed).toHaveLength(1);
+      expect(renamed[0].id).toBe(created.task.id);
+      expect(renamed[0].name).toBe('renamed');
+      expect(renamed[0].schedule.timezone).toBe('Europe/Kyiv');
+      expect(renamed[0].execution.permissionAutoAccept).toBe(true);
+      expect(renamed[0].state.lastRunAt).toBe(123);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('serializes reconciliation with other writes for the same project', async () => {
+    const { runtime, cleanup } = await createRuntime();
+    try {
+      await Promise.all([
+        runtime.reconcileLoopTasks('project-test', [loop('loop-task')]),
+        runtime.upsertScheduledTask('project-test', {
+          id: 'json-task',
+          name: 'json-task',
+          enabled: true,
+          schedule: { kind: 'daily', time: '08:00', timezone: 'UTC' },
+          execution: { prompt: 'JSON prompt', providerID: 'openai', modelID: 'gpt-4.1' },
+        }),
+      ]);
+
+      expect((await runtime.listScheduledTasks('project-test')).map((task) => task.name).sort())
+        .toEqual(['json-task', 'loop-task']);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('keeps malformed loop files but removes tasks whose file disappeared', async () => {
+    const { runtime, cleanup } = await createRuntime();
+    try {
+      const filePath = '/repo/.agents/loops/daily.md';
+      const first = await runtime.reconcileLoopTasks('project-test', [loop('daily', filePath)]);
+      expect(first).toHaveLength(1);
+
+      const malformed = await runtime.reconcileLoopTasks('project-test', [{ scope: 'project', filePath, definition: null }]);
+      expect(malformed).toHaveLength(1);
+
+      expect(await runtime.reconcileLoopTasks('project-test', [])).toEqual([]);
+    } finally {
+      await cleanup();
+    }
+  });
+});

@@ -15,6 +15,7 @@ export const registerScheduledTaskRoutes = (app, dependencies) => {
     sanitizeProjects,
     projectConfigRuntime,
     scheduledTasksRuntime,
+    scheduledTaskService,
     getOpenChamberEventClients,
     writeSseEvent,
   } = dependencies;
@@ -37,7 +38,7 @@ export const registerScheduledTaskRoutes = (app, dependencies) => {
         return res.status(404).json({ error: 'Project not found' });
       }
 
-      const tasks = await projectConfigRuntime.listScheduledTasks(projectID);
+      const tasks = await scheduledTaskService.list(projectID);
       return res.json({ tasks });
     } catch (error) {
       console.error('[ScheduledTasks] failed to load tasks:', error);
@@ -62,14 +63,11 @@ export const registerScheduledTaskRoutes = (app, dependencies) => {
         return res.status(404).json({ error: 'Project not found' });
       }
 
-      const upserted = await projectConfigRuntime.upsertScheduledTask(projectID, taskInput);
-      await scheduledTasksRuntime.syncProject(projectID);
-      const freshTasks = await projectConfigRuntime.listScheduledTasks(projectID);
-      const freshTask = freshTasks.find((task) => task.id === upserted.task.id) || upserted.task;
+      const upserted = await scheduledTaskService.upsert(projectID, taskInput);
 
       return res.json({
-        tasks: freshTasks,
-        task: freshTask,
+        tasks: upserted.tasks,
+        task: upserted.task,
         created: upserted.created,
       });
     } catch (error) {
@@ -100,14 +98,9 @@ export const registerScheduledTaskRoutes = (app, dependencies) => {
         return res.status(404).json({ error: 'Project not found' });
       }
 
-      const result = await projectConfigRuntime.deleteScheduledTask(projectID, taskID);
-      if (!result.deleted) {
-        return res.status(404).json({ error: 'Task not found' });
-      }
-      await scheduledTasksRuntime.syncProject(projectID);
-      const freshTasks = await projectConfigRuntime.listScheduledTasks(projectID);
-      return res.json({ tasks: freshTasks });
+      return res.json({ tasks: await scheduledTaskService.remove(projectID, taskID) });
     } catch (error) {
+      if (error?.statusCode) return res.status(error.statusCode).json({ error: error.message });
       console.error('[ScheduledTasks] failed to delete task:', error);
       return res.status(500).json({ error: 'Failed to delete scheduled task' });
     }
@@ -129,28 +122,45 @@ export const registerScheduledTaskRoutes = (app, dependencies) => {
         return res.status(404).json({ error: 'Project not found' });
       }
 
-      const result = await scheduledTasksRuntime.runNow(projectID, taskID);
-      if (result.running || result.queued) {
-        return res.status(409).json({ error: result.error || 'Task already running' });
-      }
-      if (result.skipped) {
-        return res.status(404).json({ error: 'Task not found or disabled' });
-      }
-      if (!result.ok) {
-        return res.status(500).json({
-          error: result.error || 'Task run failed',
-          task: result.task,
-        });
-      }
+      const result = await scheduledTaskService.run(projectID, taskID);
 
       return res.json({
         ok: true,
         task: result.task,
-        sessionId: result.sessionID,
+        sessionId: result.sessionId,
       });
     } catch (error) {
+      if (error?.statusCode) return res.status(error.statusCode).json({ error: error.message, ...(error.details || {}) });
       console.error('[ScheduledTasks] failed to run task:', error);
       return res.status(500).json({ error: 'Failed to run scheduled task' });
+    }
+  });
+
+  app.patch('/api/projects/:projectId/scheduled-tasks/:taskId/loop-file', async (req, res) => {
+    const projectID = parseProjectID(req);
+    const taskID = parseTaskID(req);
+    if (!projectID) return res.status(400).json({ error: 'projectId is required' });
+    if (!taskID) return res.status(400).json({ error: 'taskId is required' });
+    try {
+      return res.json({ task: await scheduledTaskService.setLoopEnabled(projectID, taskID, req.body?.enabled) });
+    } catch (error) {
+      if (error?.statusCode) return res.status(error.statusCode).json({ error: error.message });
+      console.error('[ScheduledTasks] failed to update loop file:', error);
+      return res.status(500).json({ error: 'Failed to update loop file' });
+    }
+  });
+
+  app.delete('/api/projects/:projectId/scheduled-tasks/:taskId/loop-file', async (req, res) => {
+    const projectID = parseProjectID(req);
+    const taskID = parseTaskID(req);
+    if (!projectID) return res.status(400).json({ error: 'projectId is required' });
+    if (!taskID) return res.status(400).json({ error: 'taskId is required' });
+    try {
+      return res.json({ tasks: await scheduledTaskService.removeLoopFile(projectID, taskID) });
+    } catch (error) {
+      if (error?.statusCode) return res.status(error.statusCode).json({ error: error.message });
+      console.error('[ScheduledTasks] failed to delete loop file:', error);
+      return res.status(500).json({ error: 'Failed to delete loop file' });
     }
   });
 

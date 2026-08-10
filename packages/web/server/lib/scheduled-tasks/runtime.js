@@ -2,6 +2,7 @@ import { createOpencodeClient } from '@opencode-ai/sdk/v2';
 import { DateTime } from 'luxon';
 import parser from 'cron-parser';
 import { expandSnippets } from '../opencode/snippets.js';
+import { discoverLoops } from './loops.js';
 
 const DEFAULT_GLOBAL_CONCURRENCY = 4;
 const DEFAULT_PROJECT_CONCURRENCY = 2;
@@ -250,6 +251,7 @@ export const createScheduledTasksRuntime = (deps) => {
     buildOpenCodeUrl,
     getOpenCodeAuthHeaders,
     waitForOpenCodeReady,
+    waitForWorktreeBootstrap,
     emitTaskRunEvent,
     setSessionAutoAccept,
     logger = console,
@@ -380,9 +382,10 @@ export const createScheduledTasksRuntime = (deps) => {
   };
 
   const syncProject = async (projectID) => {
-    await ensureProjectPath(projectID);
-
-    const tasks = await projectConfigRuntime.listScheduledTasks(projectID);
+    const projectPath = await ensureProjectPath(projectID);
+    const tasks = projectPath
+      ? await projectConfigRuntime.reconcileLoopTasks(projectID, discoverLoops(projectPath))
+      : await projectConfigRuntime.listScheduledTasks(projectID);
     setProjectTasks(projectID, tasks);
 
     for (const task of tasks) {
@@ -601,6 +604,10 @@ export const createScheduledTasksRuntime = (deps) => {
     const projectPath = projectPathByID.get(projectID);
     if (!projectPath) {
       throw new Error('project path is unavailable');
+    }
+
+    if (task.loopFile && typeof waitForWorktreeBootstrap === 'function') {
+      await waitForWorktreeBootstrap(projectPath);
     }
 
     if (typeof waitForOpenCodeReady === 'function') {

@@ -71,10 +71,12 @@ import { useOpenInAppsStore } from '@/stores/useOpenInAppsStore';
 import { eventMatchesShortcut, getEffectiveShortcutCombo } from '@/lib/shortcuts';
 import { useI18n } from '@/lib/i18n';
 import { sessionEvents } from '@/lib/sessionEvents';
-import { useActiveServerBaseUrl } from '@/hooks/useActiveServerId';
+import { useActiveServerBaseUrl, useActiveServerId } from '@/hooks/useActiveServerId';
 import { resolveApiUrl } from '@/lib/api/serverUrl';
 import { statFilesViewPath } from '@/lib/filesViewFileAccess';
 import { runtimeFetch } from '@/lib/runtime-fetch';
+import { syncScheduledTaskLoops } from '@/lib/scheduledTasksApi';
+import { useProjectsStore } from '@/stores/useProjectsStore';
 import { resolveJsonFileViewState } from './jsonFileViewState';
 
 type FileNode = {
@@ -623,6 +625,7 @@ interface FilesViewProps {
 export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = true }) => {
   const { t } = useI18n();
   const { files, runtime } = useRuntimeAPIs();
+  const activeServerId = useActiveServerId();
   const serverBaseUrl = useActiveServerBaseUrl();
   const { currentTheme, availableThemes, lightThemeId, darkThemeId } = useThemeSystem();
   const { isMobile, isTablet, screenWidth } = useDeviceInfo();
@@ -1533,6 +1536,19 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
           sessionEvents.requestGitRefresh({ directory: root, paths: [relativePath] });
         }
       }
+      if (root && /(?:^|\/)\.agents\/loops\/[^/]+\.md$/i.test(normalizePath(selectedFile.path))) {
+        const project = useProjectsStore.getState().projects.find((entry) => (
+          normalizePath(entry.path) === root
+          && (entry.serverId || 'default') === activeServerId
+        ));
+        if (project) {
+          try {
+            await syncScheduledTaskLoops(project.id, serverBaseUrl);
+          } catch (error) {
+            toast.error(error instanceof Error ? error.message : t('sessions.scheduledTasks.dialog.toast.updateFailed'));
+          }
+        }
+      }
       if (selectedFile?.path && isDrawioFile(selectedFile.path)) {
         diagramXmlRef.current = draftContent;
         diagramSavedXmlRef.current = draftContent;
@@ -1552,7 +1568,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
     } finally {
       setIsSaving(false);
     }
-  }, [contentDetectedBinary, draftContent, fileLoading, files, isDirty, loadedFilePath, readFileStat, root, selectedFile, t]);
+  }, [activeServerId, contentDetectedBinary, draftContent, fileLoading, files, isDirty, loadedFilePath, readFileStat, root, selectedFile, serverBaseUrl, t]);
 
   React.useEffect(() => {
     if (!isDirty) {
