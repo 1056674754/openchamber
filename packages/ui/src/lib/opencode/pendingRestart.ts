@@ -6,9 +6,18 @@ export type PendingRestartSession = {
   readonly status: 'busy' | 'retry';
 };
 
+export type PendingRestartChange = {
+  readonly id: number;
+  readonly reason: string;
+  readonly recordedAt: number;
+  readonly scope?: string;
+  readonly entityId?: string;
+};
+
 export type PendingRestartSnapshot = {
   readonly count: number;
   readonly reasons: readonly string[];
+  readonly changes: readonly PendingRestartChange[];
   readonly affectedSessions: readonly PendingRestartSession[];
   readonly isApplying: boolean;
 };
@@ -25,6 +34,7 @@ export type ApplyPendingRestartResult = {
 export const EMPTY_PENDING_RESTART: PendingRestartSnapshot = {
   count: 0,
   reasons: [],
+  changes: [],
   affectedSessions: [],
   isApplying: false,
 };
@@ -39,6 +49,19 @@ export function parsePendingRestartSnapshot(value: unknown): PendingRestartSnaps
   }
 
   const reasons = value.reasons.filter((reason): reason is string => typeof reason === 'string');
+  const changes = Array.isArray(value.changes)
+    ? value.changes.flatMap((entry): PendingRestartChange[] => {
+      if (!isRecord(entry) || typeof entry.id !== 'number') return [];
+      if (typeof entry.reason !== 'string' || typeof entry.recordedAt !== 'number') return [];
+      return [{
+        id: entry.id,
+        reason: entry.reason,
+        recordedAt: entry.recordedAt,
+        ...(typeof entry.scope === 'string' ? { scope: entry.scope } : {}),
+        ...(typeof entry.entityId === 'string' ? { entityId: entry.entityId } : {}),
+      }];
+    })
+    : [];
   const affectedSessions = Array.isArray(value.affectedSessions)
     ? value.affectedSessions.flatMap((entry): PendingRestartSession[] => {
       if (!isRecord(entry) || typeof entry.sessionId !== 'string') return [];
@@ -50,6 +73,7 @@ export function parsePendingRestartSnapshot(value: unknown): PendingRestartSnaps
   return {
     count: Math.max(0, Math.floor(value.count)),
     reasons,
+    changes,
     affectedSessions,
     isApplying: value.isApplying === true,
   };

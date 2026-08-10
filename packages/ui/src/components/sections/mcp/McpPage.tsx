@@ -22,7 +22,20 @@ import { useMcpStore } from '@/stores/useMcpStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { cn } from '@/lib/utils';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
-import { MCP_OAUTH_CALLBACK_PATH, parseMcpOAuthCallbackContext, parseMcpOAuthCallbackStateKey } from '@/components/sections/mcp/mcpOAuth';
+import { parseMcpOAuthCallbackContext, parseMcpOAuthCallbackStateKey } from '@/components/sections/mcp/mcpOAuth';
+import { buildMcpAuthorizationRedirectUri, startMcpAuthorization } from './startMcpAuthorization';
+import { useSettingsServerBaseUrl } from '@/hooks/useSettingsServerBaseUrl';
+import { DEFAULT_SERVER_ID } from '@/lib/opencode/server-registry';
+import { subscribeOpenchamberEventEnvelopes } from '@/lib/openchamberEvents';
+import {
+  EMPTY_PENDING_RESTART,
+  fetchPendingRestart,
+  parsePendingRestartSnapshot,
+  type PendingRestartSnapshot,
+} from '@/lib/opencode/pendingRestart';
+import { useInstanceContextStore } from '@/stores/useInstanceContextStore';
+import { getActiveRelayTunnel } from '@/lib/runtime-switch';
+import { runtimeFetch } from '@/lib/runtime-fetch';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import {
   Dialog,
@@ -436,6 +449,7 @@ const StatusBadge: React.FC<{
     failed: { text: 'text-[var(--status-error)]', bg: 'bg-[var(--status-error)]/10' },
     needs_auth: { text: 'text-[var(--status-warning)]', bg: 'bg-[var(--status-warning)]/10' },
     needs_client_registration: { text: 'text-[var(--status-warning)]', bg: 'bg-[var(--status-warning)]/10' },
+    awaiting_restart: { text: 'text-[var(--status-warning)]', bg: 'bg-[var(--status-warning)]/10' },
   };
 
   const colors = colorClassMap[status] ?? { text: 'text-muted-foreground', bg: '' };
@@ -496,44 +510,9 @@ const shouldShowFullStatusCard = (status: string | undefined, authUrl: string | 
   return false;
 };
 
-const buildMcpOAuthRedirectUri = (name?: string | null, directory?: string | null): string | null => {
-  if (typeof window === 'undefined') {
-    return null;
-  }
-
-  const url = new URL(MCP_OAUTH_CALLBACK_PATH, window.location.origin);
-  if (typeof name === 'string' && name.trim()) {
-    url.searchParams.set('server', name.trim());
-  }
-  if (typeof directory === 'string' && directory.trim()) {
-    url.searchParams.set('directory', directory.trim());
-  }
-  return url.toString();
-};
-
-const queuePendingMcpAuthContext = async (input: {
-  state: string;
-  name: string;
-  directory?: string | null;
-}): Promise<void> => {
-  const response = await fetch('/api/mcp/auth/pending', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      state: input.state,
-      name: input.name,
-      directory: typeof input.directory === 'string' && input.directory.trim() ? input.directory.trim() : null,
-    }),
-  });
-
-  if (!response.ok) {
-    const payload = await response.json().catch(() => null);
-    throw new Error(payload?.error || 'Failed to prepare MCP authorization callback');
-  }
-};
-
 const getPendingMcpAuthContext = async (stateKey: string): Promise<{ name: string; directory: string | null } | null> => {
-  const response = await fetch(`/api/mcp/auth/pending?state=${encodeURIComponent(stateKey)}`);
+  const request = getActiveRelayTunnel() ? fetch : runtimeFetch;
+  const response = await request(`/api/mcp/auth/pending?state=${encodeURIComponent(stateKey)}`);
   if (!response.ok) {
     return null;
   }
@@ -554,7 +533,8 @@ const clearPendingMcpAuthContext = async (stateKey: string | null | undefined): 
     return;
   }
 
-  await fetch(`/api/mcp/auth/pending?state=${encodeURIComponent(stateKey.trim())}`, { method: 'DELETE' }).catch(() => undefined);
+  const request = getActiveRelayTunnel() ? fetch : runtimeFetch;
+  await request(`/api/mcp/auth/pending?state=${encodeURIComponent(stateKey.trim())}`, { method: 'DELETE' }).catch(() => undefined);
 };
 
 const normalizeMcpAuthErrorMessage = (
@@ -569,11 +549,11 @@ const normalizeMcpAuthErrorMessage = (
   return message;
 };
 
-const buildMcpRuntimeActionKey = (name: string | null, directory?: string | null): string => {
+const buildMcpRuntimeActionKey = (serverId: string, name: string | null, directory?: string | null): string => {
   const normalizedDirectory = typeof directory === 'string' && directory.trim()
     ? directory.trim()
     : '__global__';
-  return `${name ?? '__none__'}::${normalizedDirectory}`;
+  return `${serverId}::${name ?? '__none__'}::${normalizedDirectory}`;
 };
 
 // ─────────────────────────────────────────────────────────────
@@ -608,13 +588,15 @@ export const McpPage: React.FC = () => {
   })));
 
   const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
+  const currentInstance = useInstanceContextStore((state) => state.currentInstance);
+  const settingsServerBase = useSettingsServerBaseUrl();
+  const serverId = currentInstance?.type === 'remote' ? currentInstance.id : DEFAULT_SERVER_ID;
   const isVSCodeAuthRuntime = React.useMemo(() => isVSCodeRuntime(), []);
   const mcpStatus = useMcpStore((state) => state.getStatusForDirectory(currentDirectory ?? null));
   const mcpDiagnostics = useMcpStore((state) => state.getDiagnosticForDirectory(currentDirectory ?? null));
   const refreshStatus = useMcpStore((state) => state.refresh);
   const connectMcp = useMcpStore((state) => state.connect);
   const disconnectMcp = useMcpStore((state) => state.disconnect);
-  const startAuthMcp = useMcpStore((state) => state.startAuth);
   const completeAuthMcp = useMcpStore((state) => state.completeAuth);
   const clearAuthMcp = useMcpStore((state) => state.clearAuth);
   const testConnectionMcp = useMcpStore((state) => state.testConnection);
@@ -656,9 +638,10 @@ export const McpPage: React.FC = () => {
   const [showImportDialog, setShowImportDialog] = React.useState(false);
   const [importJsonText, setImportJsonText] = React.useState('');
   const [importError, setImportError] = React.useState<string | null>(null);
+  const [pendingRestart, setPendingRestart] = React.useState<PendingRestartSnapshot>(EMPTY_PENDING_RESTART);
   const runtimeActionKey = React.useMemo(
-    () => buildMcpRuntimeActionKey(selectedMcpName, currentDirectory),
-    [currentDirectory, selectedMcpName],
+    () => buildMcpRuntimeActionKey(serverId, selectedMcpName, currentDirectory),
+    [currentDirectory, selectedMcpName, serverId],
   );
   const runtimeActionKeyRef = React.useRef(runtimeActionKey);
 
@@ -1012,6 +995,24 @@ export const McpPage: React.FC = () => {
   }, [handleRefreshRuntimeStatus]);
 
   React.useEffect(() => {
+    if (settingsServerBase.status !== 'ready') return;
+    let cancelled = false;
+    void fetchPendingRestart(settingsServerBase.baseUrl)
+      .then((snapshot) => {
+        if (!cancelled) setPendingRestart(snapshot);
+      }, () => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [settingsServerBase.baseUrl, settingsServerBase.status]);
+
+  React.useEffect(() => subscribeOpenchamberEventEnvelopes((event) => {
+    if (event.type !== 'openchamber:pending-config-restart' || event.serverId !== serverId) return;
+    const snapshot = parsePendingRestartSnapshot(event.properties);
+    if (snapshot) setPendingRestart(snapshot);
+  }), [serverId]);
+
+  React.useEffect(() => {
     runtimeActionKeyRef.current = runtimeActionKey;
     setIsConnecting(false);
     setIsTestingConnection(false);
@@ -1028,66 +1029,45 @@ export const McpPage: React.FC = () => {
       const currentStatus = useMcpStore.getState().getStatusForDirectory(currentDirectory ?? null)[selectedMcpName]?.status;
       authPollStartsFromNeedsAuthRef.current = currentStatus === 'needs_auth' || currentStatus === 'needs_client_registration';
 
-      const redirectUri = buildMcpOAuthRedirectUri(selectedMcpName, currentDirectory);
-      if (!redirectUri) {
-        throw new Error(t('settings.mcp.page.toast.oauthRedirectUrlBuildFailed'));
-      }
-
-      if (!oauthRedirectUri.trim() && !isVSCodeAuthRuntime) {
-        const saved = await updateMcp(selectedMcpName, {
-          oauthEnabled,
-          oauthClientId,
-          oauthClientSecret,
-          oauthScope,
-          oauthRedirectUri: redirectUri,
-        });
-
-        if (!saved.ok) {
-          throw new Error(t('settings.mcp.page.toast.oauthBrowserCallbackSaveFailed'));
-        }
-
-        if (saved.reloadFailed) {
-          throw new Error(saved.warning || saved.message || t('settings.mcp.page.toast.openCodeReloadFailedAfterCallbackSave'));
-        }
-
-        if (runtimeActionKeyRef.current !== actionKey) {
-          return;
-        }
-
-        setOauthRedirectUri(redirectUri);
-        initialRef.current = initialRef.current
-          ? { ...initialRef.current, oauthRedirectUri: redirectUri }
-          : initialRef.current;
-      }
-
-      const nextAuthUrl = await startAuthMcp(selectedMcpName, currentDirectory);
-      const stateKey = parseMcpOAuthCallbackStateKey(new URL(nextAuthUrl).searchParams);
-      if (stateKey) {
-        queuedStateKey = stateKey;
-        await queuePendingMcpAuthContext({
-          state: stateKey,
-          name: selectedMcpName,
-          directory: currentDirectory,
-        });
-      }
+      const { authorizationUrl: nextAuthUrl, opened, nativeFlow, completion } = await startMcpAuthorization({
+        name: selectedMcpName,
+        directory: currentDirectory,
+      });
+      const stateKey = nextAuthUrl
+        ? parseMcpOAuthCallbackStateKey(new URL(nextAuthUrl).searchParams)
+        : null;
+      queuedStateKey = stateKey;
 
       if (runtimeActionKeyRef.current !== actionKey) {
         return;
       }
 
-      setAuthUrl(nextAuthUrl);
+      setAuthUrl(nativeFlow ? null : nextAuthUrl);
       setAuthStateKey(stateKey ?? null);
       setIsAuthPolling(true);
       authPollAttemptsRef.current = 0;
 
-      const opened = await openExternalUrl(nextAuthUrl);
-      if (runtimeActionKeyRef.current !== actionKey) {
-        return;
+      if (completion) {
+        void completion
+          .then(() => {
+            if (runtimeActionKeyRef.current !== actionKey) return;
+            setIsAuthPolling(false);
+            authPollAttemptsRef.current = 0;
+            authPollStartsFromNeedsAuthRef.current = false;
+            toast.success(t('settings.mcp.page.toast.authorizationCompleted'));
+          })
+          .catch((completionError: unknown) => {
+            if (runtimeActionKeyRef.current !== actionKey) return;
+            setIsAuthPolling(false);
+            authPollAttemptsRef.current = 0;
+            authPollStartsFromNeedsAuthRef.current = false;
+            toast.error(normalizeMcpAuthErrorMessage(completionError, t('settings.mcp.page.toast.authorizationFailed'), tUnsafe));
+          });
       }
 
       if (opened) {
         toast.message(
-          isVSCodeAuthRuntime
+          isVSCodeAuthRuntime && !nativeFlow
             ? t('settings.mcp.page.toast.completeAuthorizationInBrowserWithPaste')
             : t('settings.mcp.page.toast.completeAuthorizationInBrowser'),
         );
@@ -1104,7 +1084,7 @@ export const McpPage: React.FC = () => {
         setIsAuthorizing(false);
       }
     }
-  }, [currentDirectory, isVSCodeAuthRuntime, mcpType, oauthClientId, oauthClientSecret, oauthEnabled, oauthRedirectUri, oauthScope, requireSavedConfig, runtimeActionKey, selectedMcpName, startAuthMcp, t, tUnsafe, updateMcp]);
+  }, [currentDirectory, isVSCodeAuthRuntime, mcpType, requireSavedConfig, runtimeActionKey, selectedMcpName, t, tUnsafe]);
 
   const handleClearAuthorization = React.useCallback(async () => {
     if (!selectedMcpName || !requireSavedConfig()) return;
@@ -1297,9 +1277,11 @@ export const McpPage: React.FC = () => {
   const runtimeStatus = mcpStatus[selectedMcpName];
   const runtimeDiagnostic = selectedMcpName ? mcpDiagnostics[selectedMcpName] : undefined;
   const effectiveRuntimeStatus = runtimeStatus ?? runtimeDiagnostic;
+  const isAwaitingRestart = !isNewServer && !effectiveRuntimeStatus
+    && pendingRestart.changes.some((change) => change.scope === 'mcp' && change.entityId === selectedMcpName);
   const isConnected = runtimeStatus?.status === 'connected';
   const needsAuthorization = runtimeStatus?.status === 'needs_auth' || runtimeStatus?.status === 'needs_client_registration';
-  const suggestedRedirectUri = isVSCodeAuthRuntime ? null : buildMcpOAuthRedirectUri(selectedMcpName, currentDirectory);
+  const suggestedRedirectUri = isVSCodeAuthRuntime ? null : buildMcpAuthorizationRedirectUri(selectedMcpName);
   const runtimeDescription = getStatusDescription(
     effectiveRuntimeStatus?.status,
     tUnsafe,
@@ -1315,6 +1297,8 @@ export const McpPage: React.FC = () => {
         return t('settings.mcp.page.status.label.needsAuth');
       case 'needs_client_registration':
         return t('settings.mcp.page.status.label.needsRegistration');
+      case 'awaiting_restart':
+        return t('settings.mcp.page.status.label.awaitingRestart');
       default:
         return status;
     }
@@ -1332,7 +1316,7 @@ export const McpPage: React.FC = () => {
             ) : (
               <div className="flex items-center gap-2 min-w-0">
                 <h2 className="typography-ui-header font-semibold text-foreground truncate">{selectedMcpName}</h2>
-                <StatusBadge status={effectiveRuntimeStatus?.status} enabled={enabled} getStatusLabel={getStatusLabel} variant="pill" />
+                <StatusBadge status={isAwaitingRestart ? 'awaiting_restart' : effectiveRuntimeStatus?.status} enabled={enabled} getStatusLabel={getStatusLabel} variant="pill" />
               </div>
             )}
             <div className="flex items-center gap-2 mt-0.5">
@@ -1341,7 +1325,7 @@ export const McpPage: React.FC = () => {
                   ? t('settings.mcp.page.header.configureNewServer')
                   : t('settings.mcp.page.header.transport', { type: mcpType === 'local' ? t('settings.mcp.page.transport.local') : t('settings.mcp.page.transport.remote') })}
               </p>
-              {!isNewServer && (
+              {!isNewServer && !isAwaitingRestart && (
                 <>
                   <Button
                     variant={isConnected ? 'outline' : 'default'}
@@ -1350,7 +1334,13 @@ export const McpPage: React.FC = () => {
                     onClick={handleToggleConnect}
                     disabled={isConnecting || !enabled}
                     >
-                      {isConnecting ? t('settings.mcp.page.actions.working') : isConnected ? t('settings.mcp.page.actions.disconnect') : t('settings.mcp.page.actions.connect')}
+                      {isConnecting
+                        ? t('settings.mcp.page.actions.working')
+                        : isConnected
+                          ? t('settings.mcp.page.actions.disconnect')
+                          : effectiveRuntimeStatus?.status === 'failed'
+                            ? t('settings.mcp.page.actions.retry')
+                            : t('settings.mcp.page.actions.connect')}
                     </Button>
                   {mcpType === 'remote' && (
                     <>
@@ -1363,9 +1353,9 @@ export const McpPage: React.FC = () => {
                       >
                         {isAuthorizing
                           ? t('settings.mcp.page.actions.starting')
-                          : needsAuthorization
-                            ? t('settings.mcp.page.actions.authorize')
-                            : t('settings.mcp.page.actions.reauthorize')}
+                          : isConnected
+                            ? t('settings.mcp.page.actions.reauthorize')
+                            : t('settings.mcp.page.actions.authorize')}
                       </Button>
                       <Button
                         variant="ghost"
@@ -1395,8 +1385,22 @@ export const McpPage: React.FC = () => {
           </div>
         </div>
 
+        {isAwaitingRestart && (
+          <div className="mb-6 px-2">
+            <div className="rounded-lg border border-[var(--status-warning-border)] bg-[var(--status-warning-background)] p-3">
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                <span className="typography-ui-label text-foreground">{t('settings.mcp.page.status.runtimeStatus')}</span>
+                <StatusBadge status="awaiting_restart" enabled={enabled} getStatusLabel={getStatusLabel} />
+              </div>
+              <p className="mt-1 typography-meta text-muted-foreground">
+                {t('settings.mcp.page.status.description.awaitingRestart')}
+              </p>
+            </div>
+          </div>
+        )}
+
         {/* Runtime Status - Simplified for connected, expanded for errors */}
-        {!isNewServer && shouldShowFullStatusCard(effectiveRuntimeStatus?.status, authUrl, needsAuthorization, isAuthPolling) && (
+        {!isNewServer && !isAwaitingRestart && shouldShowFullStatusCard(effectiveRuntimeStatus?.status, authUrl, needsAuthorization, isAuthPolling) && (
           <div className="mb-6 px-2">
             <div className={cn('rounded-lg border p-3', statusCardClass(effectiveRuntimeStatus?.status))}>
               <div className="space-y-4">
