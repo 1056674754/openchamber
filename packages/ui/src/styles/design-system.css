@@ -17,6 +17,10 @@
     --oc-scrollbar-thumb: oklch(0.32 0.03 50 / 0.4);
     --oc-scrollbar-thumb-hover: oklch(0.32 0.03 50 / 0.6);
     --padding-scale: 1;
+    --oc-glass-blur: 22px;
+    --oc-glass-saturation: 1.2;
+    --oc-glass-popover-opacity: 72%;
+    --oc-glass-tooltip-opacity: 82%;
 
     /* Semantic typography defaults (must match SEMANTIC_TYPOGRAPHY) */
     --text-markdown: 0.875rem;
@@ -192,6 +196,46 @@
   *:focus-visible:not(input):not(textarea):not([data-slot="dropdown-menu-content"]):not([data-slot="dropdown-menu-sub-content"]):not([data-slot="select-content"]) {
     outline: none !important;
     box-shadow: none !important;
+  }
+}
+
+@layer components {
+  .oc-glass-popover,
+  .oc-glass-tooltip {
+    background-color: color-mix(in srgb, var(--surface-elevated) var(--oc-glass-opacity), transparent);
+    -webkit-backdrop-filter: blur(var(--oc-glass-blur)) saturate(var(--oc-glass-saturation));
+    backdrop-filter: blur(var(--oc-glass-blur)) saturate(var(--oc-glass-saturation));
+  }
+
+  .oc-glass-popover {
+    --oc-glass-opacity: var(--oc-glass-popover-opacity);
+  }
+
+  .oc-glass-tooltip {
+    --oc-glass-opacity: var(--oc-glass-tooltip-opacity);
+  }
+
+  .oc-glass-floating {
+    box-shadow:
+      inset 0 1px 0 color-mix(in srgb, var(--surface-foreground) 10%, transparent),
+      0 0 0 1px color-mix(in srgb, var(--interactive-border) 70%, transparent),
+      0 12px 20px -4px color-mix(in srgb, var(--surface-foreground) 10%, transparent);
+  }
+
+  @supports not ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
+    .oc-glass-popover,
+    .oc-glass-tooltip {
+      background-color: var(--surface-elevated);
+    }
+  }
+
+  @media (prefers-reduced-transparency: reduce) {
+    .oc-glass-popover,
+    .oc-glass-tooltip {
+      background-color: var(--surface-elevated);
+      -webkit-backdrop-filter: none;
+      backdrop-filter: none;
+    }
   }
 }
 
