@@ -9,13 +9,18 @@ export type ScheduledTaskRanEvent = {
 
 type OpenChamberEvent = ScheduledTaskRanEvent;
 type Listener = (event: OpenChamberEvent) => void;
-type Envelope = { type?: unknown; properties?: unknown };
+export type OpenChamberEventEnvelope = {
+  readonly type?: unknown;
+  readonly properties?: unknown;
+  readonly serverId?: string;
+};
+type Envelope = OpenChamberEventEnvelope;
 type EnvelopeListener = (event: Envelope) => void;
 
 const listeners = new Set<Listener>();
 const envelopeListeners = new Set<EnvelopeListener>();
 
-const normalizeEnvelope = (raw: Envelope): { type: string; properties: unknown } | null => {
+const normalizeEnvelope = (raw: Envelope): { type: string; properties: unknown; serverId?: string } | null => {
   if (!raw || typeof raw !== 'object') {
     return null;
   }
@@ -25,7 +30,11 @@ const normalizeEnvelope = (raw: Envelope): { type: string; properties: unknown }
     return null;
   }
 
-  return { type, properties: raw.properties };
+  return {
+    type,
+    properties: raw.properties,
+    ...(typeof raw.serverId === 'string' ? { serverId: raw.serverId } : {}),
+  };
 };
 
 const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) => {
@@ -66,8 +75,9 @@ const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) =
   }
 };
 
-export const dispatchOpenchamberEventEnvelope = (raw: Envelope) => {
-  const envelope = normalizeEnvelope(raw);
+export const dispatchOpenchamberEventEnvelope = (raw: Envelope, serverId?: string) => {
+  const routed = serverId ? { ...raw, serverId } : raw;
+  const envelope = normalizeEnvelope(routed);
   if (!envelope) {
     return;
   }

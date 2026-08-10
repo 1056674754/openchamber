@@ -2094,7 +2094,7 @@ export function SyncProvider(props: {
 
     const applyIncomingEvent = (directory: string, payload: Event) => {
       dispatchVSCodeRuntimeNotificationEvent(directory, payload, serverId)
-      dispatchOpenchamberEventEnvelope(payload as { type?: unknown; properties?: unknown })
+      dispatchOpenchamberEventEnvelope(payload as { type?: unknown; properties?: unknown }, serverId)
       if (payload.type === "installation.update-available") {
         const version = typeof (payload.properties as { version?: unknown })?.version === "string"
           ? (payload.properties as { version: string }).version
