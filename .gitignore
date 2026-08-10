@@ -68,4 +68,5 @@ openchamber-linux
 
 # Local OpenCode temp build/cache dirs
 .tmp-oc*/
+/tmp/
 packages/electron/dist-*
