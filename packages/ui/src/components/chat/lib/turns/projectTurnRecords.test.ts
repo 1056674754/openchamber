@@ -145,6 +145,44 @@ describe('projectTurnRecords', () => {
         expect(projection.ungroupedMessageIds.size).toBe(0);
     });
 
+    test('keeps a synthetic OMO continuation visible when hidden-turn merging is enabled', () => {
+        const user = createMessageEntry({
+            id: 'u1',
+            role: 'user',
+            createdAt: 1,
+            parts: [{ type: 'text', text: 'Inspect the simulator' } as Part],
+        });
+        const assistant = createMessageEntry({ id: 'a1', role: 'assistant', parentID: 'u1', createdAt: 2 });
+        const continuation = createMessageEntry({
+            id: 'd1',
+            role: 'user',
+            createdAt: 3,
+            parts: [{
+                id: 'p-continuation',
+                sessionID: 'session-1',
+                messageID: 'd1',
+                type: 'text',
+                text: '[SYSTEM DIRECTIVE: OH-MY-OPENCODE - TODO CONTINUATION]\nContinue working.\n<!-- OMO_INTERNAL_INITIATOR -->',
+                synthetic: true,
+                metadata: { compaction_continue: true },
+            } as Part],
+        });
+        const continuedAssistant = createMessageEntry({
+            id: 'a2',
+            role: 'assistant',
+            parentID: 'd1',
+            createdAt: 4,
+        });
+
+        const projection = projectTurnRecords([user, assistant, continuation, continuedAssistant], {
+            mergeHiddenUserTurns: { planModeEnabled: false },
+        });
+
+        expect(projection.turns.map((turn) => turn.turnId)).toEqual(['u1', 'd1']);
+        expect(projection.turns[1]?.isDirectiveTurn).toBe(true);
+        expect(projection.turns[1]?.assistantMessageIds).toEqual(['a2']);
+    });
+
     test('skill instruction directive creates a directive turn with grouped assistant', () => {
         const user1 = createMessageEntry({ id: 'u1', role: 'user', createdAt: 1 });
         const skillDirective = createMessageEntry({

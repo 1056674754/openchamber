@@ -1,5 +1,6 @@
 import type { Message, Part } from '@opencode-ai/sdk/v2';
 
+import { getAuxiliaryUserMessageKind } from '@/lib/messages/real-user';
 import { deriveMessageRole } from './messageRole';
 import { filterVisibleParts, normalizeParts } from './partUtils';
 import { normalizeUserDisplayParts } from './normalizeUserDisplayParts';
@@ -20,6 +21,11 @@ export const isHiddenUserMessage = (
 ): boolean => {
     if (!entry) return false;
     if (!deriveMessageRole(entry.info).isUser) return false;
+
+    const auxiliaryKind = getAuxiliaryUserMessageKind(entry.parts, entry.info);
+    if (auxiliaryKind === 'system-directive' || auxiliaryKind === 'live-steer') {
+        return false;
+    }
 
     const cache = options.planModeEnabled ? hiddenByPartsPlanMode : hiddenByPartsNoPlanMode;
     const cached = cache.get(entry.parts);
