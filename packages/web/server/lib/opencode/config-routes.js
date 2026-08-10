@@ -12,13 +12,12 @@ import {
   writePermissionRule,
   writeBulkPermissions,
 } from './config-writer.js';
+import { buildDeferredRestartResponse } from './config-mutation-response.js';
 
 export const registerConfigRoutes = (app, dependencies) => {
   const {
     resolveProjectDirectory,
-    resolveOptionalProjectDirectory,
-    refreshOpenCodeAfterConfigChange,
-    clientReloadDelayMs,
+    markPendingConfigRestart,
   } = dependencies;
 
   const resolveDir = async (req) => {
@@ -26,25 +25,12 @@ export const registerConfigRoutes = (app, dependencies) => {
     return { directory, error };
   };
 
-  const reload = async (res, label) => {
-    try {
-      await refreshOpenCodeAfterConfigChange(label);
-      return res.json({
-        success: true,
-        requiresReload: true,
-        message: `${label} updated. Reloading OpenCode…`,
-        reloadDelayMs: clientReloadDelayMs,
-      });
-    } catch (err) {
-      console.error(`[API:Config ${label}] Reload failed:`, err);
-      return res.json({
-        success: true,
-        requiresReload: false,
-        reloadFailed: true,
-        message: `${label} updated, but OpenCode reload failed.`,
-        warning: err.message || 'Unknown error',
-      });
-    }
+  const deferRestart = (res, label) => {
+    const pendingRestart = markPendingConfigRestart(label, { scope: 'config' });
+    return res.json(buildDeferredRestartResponse(
+      `${label} updated. Restart OpenCode to apply.`,
+      pendingRestart,
+    ));
   };
 
   // GET /api/config/full — full merged config with layer attribution
@@ -94,9 +80,9 @@ export const registerConfigRoutes = (app, dependencies) => {
       if (!directory) return res.status(400).json({ error });
 
       const { global, agents, scope } = req.body || {};
-      const result = writeBulkPermissions(directory, global || {}, agents || {}, scope || 'user');
+      writeBulkPermissions(directory, global || {}, agents || {}, scope || 'user');
 
-      return reload(res, 'Permissions');
+      return deferRestart(res, 'Permissions');
     } catch (err) {
       console.error('[API:Config permissions PUT] Error:', err);
       return res.status(500).json({ error: err.message });
@@ -116,9 +102,9 @@ export const registerConfigRoutes = (app, dependencies) => {
         return res.status(400).json({ error: 'Missing "rule" in request body' });
       }
 
-      const result = writePermissionRule(directory, toolName, rule, scope || 'user', agentName || null);
+      writePermissionRule(directory, toolName, rule, scope || 'user', agentName || null);
 
-      return reload(res, `Permission "${toolName}"`);
+      return deferRestart(res, `Permission "${toolName}"`);
     } catch (err) {
       console.error('[API:Config permissions tool PUT] Error:', err);
       return res.status(500).json({ error: err.message });
@@ -134,9 +120,9 @@ export const registerConfigRoutes = (app, dependencies) => {
       const sectionKey = req.params.key;
       const { value, scope } = req.body || {};
 
-      const result = writeConfigSection(directory, sectionKey, value, scope || 'user');
+      writeConfigSection(directory, sectionKey, value, scope || 'user');
 
-      return reload(res, `Config section "${sectionKey}"`);
+      return deferRestart(res, `Config section "${sectionKey}"`);
     } catch (err) {
       console.error('[API:Config section PUT] Error:', err);
       return res.status(500).json({ error: err.message });
