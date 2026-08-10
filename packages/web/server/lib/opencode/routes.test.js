@@ -8,7 +8,6 @@ const createApp = (overrides = {}) => {
   app.use(express.json());
   registerOpenCodeRoutes(app, {
     crypto,
-    clientReloadDelayMs: 0,
     getOpenCodeResolutionSnapshot: () => null,
     getOpenCodeUpgradeCapability: () => ({
       supported: true,
@@ -24,7 +23,7 @@ const createApp = (overrides = {}) => {
     resolveProjectDirectory: () => '',
     getProviderSources: async () => ({}),
     removeProviderConfig: async () => {},
-    refreshOpenCodeAfterConfigChange: async () => {},
+    markPendingConfigRestart: () => ({ count: 1, reasons: ['provider change'] }),
     executeDirectOpenCodeUpgrade: async () => ({ success: false, error: 'not configured' }),
     buildOpenCodeUrl: (pathname) => `http://opencode.test${pathname}`,
     getOpenCodeAuthHeaders: () => ({ Authorization: 'Bearer test-token' }),
@@ -72,6 +71,20 @@ describe('opencode routes', () => {
     );
   });
 
+  test('persists ordinary OpenChamber settings without marking an OpenCode restart', async () => {
+    const persistSettings = mock(async (settings) => settings);
+    const markPendingConfigRestart = mock(() => ({ count: 1 }));
+
+    const response = await request(createApp({ persistSettings, markPendingConfigRestart }))
+      .put('/api/config/settings')
+      .send({ autoSaveEnabled: false })
+      .expect(200);
+
+    expect(response.body).toEqual({ autoSaveEnabled: false });
+    expect(persistSettings).toHaveBeenCalledWith({ autoSaveEnabled: false });
+    expect(markPendingConfigRestart).not.toHaveBeenCalled();
+  });
+
   test('keeps provider source response shape while reading auth from the adapter', async () => {
     const response = await request(createApp({
       getProviderSources: () => ({
@@ -106,18 +119,20 @@ describe('opencode routes', () => {
 
   test('proxies provider auth deletion to OpenCode without changing the response shape', async () => {
     const fetchMock = useFetchMock(mock(async () => jsonResponse(true)));
-    const refreshOpenCodeAfterConfigChange = mock(async () => {});
+    const markPendingConfigRestart = mock(() => ({ count: 1, reasons: ['provider change'] }));
 
-    const response = await request(createApp({ refreshOpenCodeAfterConfigChange }))
+    const response = await request(createApp({ markPendingConfigRestart }))
       .delete('/api/provider/anthropic/auth')
       .expect(200);
 
     expect(response.body).toEqual({
       success: true,
       removed: true,
-      requiresReload: true,
-      message: 'Provider disconnected successfully',
-      reloadDelayMs: 0,
+      requiresReload: false,
+      requiresRestart: true,
+      restartDeferred: true,
+      pendingRestart: { count: 1, reasons: ['provider change'] },
+      message: 'Provider disconnected successfully. Restart OpenCode to apply.',
     });
     expect(fetchMock).toHaveBeenCalledWith(
       'http://opencode.test/auth/anthropic',
@@ -126,7 +141,7 @@ describe('opencode routes', () => {
         headers: expect.objectContaining({ Authorization: 'Bearer test-token' }),
       }),
     );
-    expect(refreshOpenCodeAfterConfigChange).toHaveBeenCalled();
+    expect(markPendingConfigRestart).toHaveBeenCalled();
   });
 
   test('returns the normalized OpenCode version from global health', async () => {
