@@ -73,6 +73,7 @@ export function createMessageStreamWsRuntime({
   const wsServer = new WebSocketServer({
     noServer: true,
   });
+  const directorySockets = new Set();
 
   const ownsGlobalHub = !globalEventHub;
   const globalHub = globalEventHub ?? createGlobalMessageStreamHub({
@@ -116,6 +117,11 @@ export function createMessageStreamWsRuntime({
       });
       return;
     }
+
+    directorySockets.add(socket);
+    socket.on('close', () => {
+      directorySockets.delete(socket);
+    });
 
     acceptDirectoryMessageStreamWsConnection({
       socket,
@@ -223,6 +229,16 @@ export function createMessageStreamWsRuntime({
 
   return {
     wsServer,
+    rebindUpstream() {
+      globalHub.stop();
+      globalHub.start();
+      for (const socket of Array.from(directorySockets)) {
+        try {
+          socket.close(1012, 'OpenCode upstream restarted');
+        } catch {
+        }
+      }
+    },
     async close() {
       server.off('upgrade', upgradeHandler);
       globalBridge.close();

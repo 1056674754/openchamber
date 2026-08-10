@@ -2,6 +2,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import net from 'node:net';
 import { stripAppImageArgv0Leak } from '../inherited-env.js';
 import { finalizeInterruptedOpenCodeRuns } from './interrupted-runs.js';
+import { applyProviderEnvAliases } from './provider-env-aliases.js';
 
 const parsePositiveInt = (value, fallback) => {
   const parsed = Number.parseInt(String(value ?? ''), 10);
@@ -65,6 +66,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     restoreManagedOpenCodeAuth = () => false,
     recordLifecycleEvent = async () => {},
     getLifecycleLogPath = () => null,
+    onOpenCodeRestarted = null,
     now = Date.now,
     startupTimeoutMs = STARTUP_TIMEOUT_MS,
   } = deps;
@@ -649,13 +651,13 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
         timeout: startupTimeoutMs,
         cwd: state.openCodeWorkingDirectory,
         shellEnvKeysCount: Object.keys(shellEnv).length,
-        env: stripAppImageArgv0Leak({
+        env: stripAppImageArgv0Leak(applyProviderEnvAliases({
           ...shellEnv,
           ...process.env,
           ...managedOpenCodeEnv,
           PATH: envPath,
           OPENCODE_SERVER_PASSWORD: openCodePassword,
-        }),
+        })),
       });
 
       if (!serverInstance || !serverInstance.url) {
@@ -826,6 +828,11 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       if (state.expressApp) {
         setupProxy(state.expressApp);
         ensureOpenCodeApiPrefix();
+      }
+      try {
+        onOpenCodeRestarted?.();
+      } catch (error) {
+        console.warn('Failed to rebind event stream after OpenCode restart:', error?.message ?? error);
       }
       await recordLifecycleEvent('restart_completed', {
         reason,
