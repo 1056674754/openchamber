@@ -74,6 +74,9 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       validateDirectoryPath,
       readCustomThemesFromDisk,
       refreshOpenCodeAfterConfigChange,
+      getPendingConfigRestart,
+      markPendingConfigRestart,
+      applyPendingConfigRestart,
       getOpenCodeResolutionSnapshot,
       getOpenCodeUpgradeCapability,
       formatSettingsResponse,
@@ -103,6 +106,8 @@ export const createFeatureRoutesRuntime = (dependencies) => {
     registerSettingsUtilityRoutes(app, {
       readCustomThemesFromDisk,
       refreshOpenCodeAfterConfigChange,
+      getPendingConfigRestart,
+      applyPendingConfigRestart,
       clientReloadDelayMs,
     });
 
@@ -123,7 +128,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       getProviderSources,
       removeProviderConfig,
       upsertProviderConfig,
-      refreshOpenCodeAfterConfigChange,
+      markPendingConfigRestart,
       buildOpenCodeUrl,
       getOpenCodeAuthHeaders,
       fetchProvidersSnapshot,
@@ -183,8 +188,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
     registerConfigEntityRoutes(app, {
       resolveProjectDirectory,
       resolveOptionalProjectDirectory,
-      refreshOpenCodeAfterConfigChange,
-      clientReloadDelayMs,
+      markPendingConfigRestart,
       getAgentSources,
       getAgentConfig,
       createAgent,
@@ -246,8 +250,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       readSettingsFromDisk,
       sanitizeSkillCatalogs,
       isUnsafeSkillRelativePath,
-      refreshOpenCodeAfterConfigChange,
-      clientReloadDelayMs,
+      markPendingConfigRestart,
       buildOpenCodeUrl,
       getOpenCodeAuthHeaders,
       getOpenCodePort,
@@ -294,8 +297,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
 
     registerPluginRoutes(app, {
       resolveOptionalProjectDirectory,
-      refreshOpenCodeAfterConfigChange,
-      clientReloadDelayMs,
+      markPendingConfigRestart,
       listPluginEntries,
       getPluginEntry,
       createPluginEntry,
@@ -311,9 +313,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
 
     registerConfigRoutes(app, {
       resolveProjectDirectory,
-      resolveOptionalProjectDirectory,
-      refreshOpenCodeAfterConfigChange,
-      clientReloadDelayMs,
+      markPendingConfigRestart,
     });
 
     registerQuotaRoutes(app, { getQuotaProviders });
