@@ -493,6 +493,8 @@ export const registerSettingsUtilityRoutes = (app, dependencies) => {
   const {
     readCustomThemesFromDisk,
     refreshOpenCodeAfterConfigChange,
+    getPendingConfigRestart,
+    applyPendingConfigRestart,
     clientReloadDelayMs,
   } = dependencies;
 
@@ -523,6 +525,31 @@ export const registerSettingsUtilityRoutes = (app, dependencies) => {
       res.status(500).json({
         error: error.message || 'Failed to reload configuration',
         success: false,
+      });
+    }
+  });
+
+  app.get('/api/opencode/restart/pending', (_req, res) => {
+    res.json(getPendingConfigRestart());
+  });
+
+  app.post('/api/opencode/restart/apply', async (_req, res) => {
+    try {
+      const result = await applyPendingConfigRestart();
+      const external = result.restart?.external === true;
+      res.json({
+        success: true,
+        appliedCount: result.appliedCount,
+        pending: result.pending,
+        requiresReload: result.appliedCount > 0 && !external,
+        requiresManualRestart: result.appliedCount > 0 && external,
+        reloadDelayMs: result.appliedCount > 0 && !external ? clientReloadDelayMs : undefined,
+      });
+    } catch (error) {
+      console.error('[Server] Failed to apply pending OpenCode configuration restart:', error);
+      res.status(500).json({
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to restart OpenCode',
       });
     }
   });

@@ -1,7 +1,11 @@
 import { describe, it, expect, vi } from 'vitest';
 import express from 'express';
 import request from 'supertest';
-import { registerCommonRequestMiddleware, registerServerStatusRoutes } from './core-routes.js';
+import {
+  registerCommonRequestMiddleware,
+  registerServerStatusRoutes,
+  registerSettingsUtilityRoutes,
+} from './core-routes.js';
 
 describe('core-routes', () => {
   it('should call gracefulShutdown with exitProcess: true on /api/system/shutdown', async () => {
@@ -87,6 +91,42 @@ describe('core-routes', () => {
           models: { fast: { name: 'Fast' } },
         },
       },
+    });
+  });
+
+  it('should expose and apply pending OpenCode config restarts', async () => {
+    const app = express();
+    const pending = {
+      count: 2,
+      reasons: ['agent update', 'plugin update'],
+      changes: [],
+      affectedSessions: [{ sessionId: 'session-1', status: 'busy' }],
+      isApplying: false,
+    };
+    const applyPendingConfigRestart = vi.fn(async () => ({
+      appliedCount: 2,
+      restart: { reloaded: true, external: false },
+      pending: { ...pending, count: 0, reasons: [], affectedSessions: [] },
+    }));
+
+    registerSettingsUtilityRoutes(app, {
+      readCustomThemesFromDisk: async () => [],
+      refreshOpenCodeAfterConfigChange: vi.fn(async () => ({ reloaded: true, external: false })),
+      getPendingConfigRestart: () => pending,
+      applyPendingConfigRestart,
+      clientReloadDelayMs: 25,
+    });
+
+    const getResponse = await request(app).get('/api/opencode/restart/pending').expect(200);
+    expect(getResponse.body).toEqual(pending);
+
+    const applyResponse = await request(app).post('/api/opencode/restart/apply').expect(200);
+    expect(applyPendingConfigRestart).toHaveBeenCalledTimes(1);
+    expect(applyResponse.body).toMatchObject({
+      success: true,
+      appliedCount: 2,
+      requiresReload: true,
+      reloadDelayMs: 25,
     });
   });
 });
