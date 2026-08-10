@@ -2018,6 +2018,14 @@ export const ContextPanel: React.FC = () => {
       return;
     }
 
+    const target = event.target;
+    if (target instanceof Element && Boolean(
+      target.closest('.terminal-viewport-container')
+      || target.getAttribute('data-terminal-hidden-input') === 'true'
+    )) {
+      return;
+    }
+
     event.preventDefault();
     event.stopPropagation();
     handleClose();
