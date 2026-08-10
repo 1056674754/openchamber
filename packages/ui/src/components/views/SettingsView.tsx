@@ -64,7 +64,6 @@ import { hasDesktopInvoke, isDesktopShell, isVSCodeRuntime, isWebRuntime } from 
 import { useI18n } from '@/lib/i18n';
 import { toast } from '@/components/ui';
 import { Icon } from "@/components/icon/Icon";
-import type { IconName } from "@/components/icon/icons";
 import { reloadOpenCodeConfiguration } from '@/stores/useAgentsStore';
 import { useInstanceContextStore } from '@/stores/useInstanceContextStore';
 import { useDesktopSshStore } from '@/stores/useDesktopSshStore';
@@ -160,64 +159,8 @@ function isPageAvailable(page: SettingsPageMeta, ctx: SettingsRuntimeContext): b
 }
 
 // eslint-disable-next-line react-refresh/only-export-components
-export function getSettingsNavIcon(slug: SettingsPageSlug): IconName | null {
-  switch (slug) {
-    case 'projects':
-      return 'folders';
-    case 'remote-instances':
-      return 'server';
-    case 'appearance':
-      return 'palette';
-    case 'chat':
-      return 'chat-ai-3';
-    case 'magic-prompts':
-      return 'ai-generate-2';
-    case 'snippets':
-      return 'chat-thread';
-    case 'notifications':
-      return 'notification-3';
-    case 'shortcuts':
-      return 'command';
-    case 'sessions':
-      return 'chat-history';
-
-    case 'providers':
-      return 'cloud';
-    case 'agents':
-      return 'ai-agent';
-    case 'behavior':
-      return 'brain';
-    case 'commands':
-      return 'slash-commands-2';
-    case 'mcp':
-      return 'plug-2';
-    case 'plugins':
-      return 'code-box';
-
-    case 'skills.installed':
-      return 'book-open';
-    case 'skills.catalog':
-      return 'book';
-
-    case 'git':
-      return 'git-branch';
-
-    case 'usage':
-      return 'bar-chart-2';
-    case 'subscriptions':
-      return 'shield-keyhole';
-    case 'voice':
-      return 'mic';
-    case 'tunnel':
-      return 'global';
-    case 'pairing':
-      return 'smartphone';
-    case 'home':
-      return null;
-    default:
-      return 'robot-2';
-  }
-}
+export { getSettingsNavIcon } from '@/lib/settings/navIcons';
+import { getSettingsNavIcon as _getSettingsNavIcon } from '@/lib/settings/navIcons';
 
 const SettingsHome: React.FC<{ onOpen: (slug: SettingsPageSlug) => void }> = ({ onOpen }) => {
   const { t } = useI18n();
@@ -820,7 +763,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
           <div className="flex flex-col gap-0.5 pt-4 pb-2 px-2">
             {sortedFilteredPages.map((page) => {
               const selected = effectiveSettingsSlug === page.slug;
-              const iconName = getSettingsNavIcon(page.slug);
+              const iconName = _getSettingsNavIcon(page.slug);
               if (!iconName) return null;
 
               return (

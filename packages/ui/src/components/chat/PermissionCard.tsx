@@ -9,9 +9,19 @@ import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { generateSyntaxTheme } from '@/lib/theme/syntaxThemeGenerator';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { Icon } from "@/components/icon/Icon";
-import { DiffPreview, WritePreview } from './DiffPreview';
 import { useI18n } from '@/lib/i18n';
 import { getVisiblePermissionPatterns } from './permissionCardPatterns';
+
+// DiffPreview/WritePreview import react-syntax-highlighter + diff parsing, and
+// are only conditionally rendered (when a permission request carries file
+// changes). Lazy-loading keeps the prism stack out of the cold-start eager
+// graph; PermissionCard is reached eagerly via ChatContainer.
+const DiffPreview = React.lazy(() =>
+  import('./DiffPreview').then((m) => ({ default: m.DiffPreview })),
+);
+const WritePreview = React.lazy(() =>
+  import('./DiffPreview').then((m) => ({ default: m.WritePreview })),
+);
 
 const PERMISSION_BASH_CUSTOM_STYLE: React.CSSProperties = {
   margin: 0,
@@ -205,7 +215,9 @@ export const PermissionCard: React.FC<PermissionCardProps> = ({
           )}
           {changes && (
             <ScrollableOverlay outerClassName="max-h-[60vh]" className="tool-output-surface p-1 rounded-xl border border-border/20 bg-transparent">
-              <DiffPreview diff={changes} syntaxTheme={syntaxTheme} filePath={filePath} />
+              <React.Suspense fallback={null}>
+                <DiffPreview diff={changes} syntaxTheme={syntaxTheme} filePath={filePath} />
+              </React.Suspense>
             </ScrollableOverlay>
           )}
         </>
@@ -219,7 +231,9 @@ export const PermissionCard: React.FC<PermissionCardProps> = ({
       if (content) {
         return (
           <ScrollableOverlay outerClassName="max-h-[60vh]" className="tool-output-surface p-1 rounded-xl border border-border/20 bg-transparent">
-            <WritePreview content={content} syntaxTheme={syntaxTheme} filePath={filePath} />
+            <React.Suspense fallback={null}>
+              <WritePreview content={content} syntaxTheme={syntaxTheme} filePath={filePath} />
+            </React.Suspense>
           </ScrollableOverlay>
         );
       }
