@@ -1,4 +1,5 @@
 import { createOpencodeClient } from '@opencode-ai/sdk/v2';
+import { buildDeferredRestartResponse } from './config-mutation-response.js';
 
 export const registerSkillRoutes = (app, dependencies) => {
   const {
@@ -10,8 +11,7 @@ export const registerSkillRoutes = (app, dependencies) => {
     readSettingsFromDisk,
     sanitizeSkillCatalogs,
     isUnsafeSkillRelativePath,
-    refreshOpenCodeAfterConfigChange,
-    clientReloadDelayMs,
+    markPendingConfigRestart,
     buildOpenCodeUrl,
     getOpenCodeAuthHeaders,
     getOpenCodePort,
@@ -479,19 +479,18 @@ export const registerSkillRoutes = (app, dependencies) => {
 
         const installed = result.installed || [];
         const skipped = result.skipped || [];
-        const requiresReload = installed.length > 0;
-
-        if (requiresReload) {
-          await refreshOpenCodeAfterConfigChange('skills install');
-        }
+        const requiresRestart = installed.length > 0;
+        const pendingRestart = requiresRestart
+          ? markPendingConfigRestart('skills install', { scope: 'skills' })
+          : null;
 
         return res.json({
           ok: true,
           installed,
           skipped,
-          requiresReload,
-          message: requiresReload ? 'Skills installed successfully. Reloading interface…' : 'No skills were installed',
-          reloadDelayMs: requiresReload ? clientReloadDelayMs : undefined,
+          ...(requiresRestart
+            ? buildDeferredRestartResponse('Skills installed successfully. Restart OpenCode to apply.', pendingRestart)
+            : { requiresReload: false, message: 'No skills were installed' }),
         });
       }
 
@@ -530,19 +529,18 @@ export const registerSkillRoutes = (app, dependencies) => {
 
       const installed = result.installed || [];
       const skipped = result.skipped || [];
-      const requiresReload = installed.length > 0;
-
-      if (requiresReload) {
-        await refreshOpenCodeAfterConfigChange('skills install');
-      }
+      const requiresRestart = installed.length > 0;
+      const pendingRestart = requiresRestart
+        ? markPendingConfigRestart('skills install', { scope: 'skills' })
+        : null;
 
       res.json({
         ok: true,
         installed,
         skipped,
-        requiresReload,
-        message: requiresReload ? 'Skills installed successfully. Reloading interface…' : 'No skills were installed',
-        reloadDelayMs: requiresReload ? clientReloadDelayMs : undefined,
+        ...(requiresRestart
+          ? buildDeferredRestartResponse('Skills installed successfully. Restart OpenCode to apply.', pendingRestart)
+          : { requiresReload: false, message: 'No skills were installed' }),
       });
     } catch (error) {
       console.error('Failed to install skills:', error);
@@ -623,14 +621,14 @@ export const registerSkillRoutes = (app, dependencies) => {
       console.log('[Server] Scope:', scope, 'Working directory:', directory);
 
       createSkill(skillName, { ...config, source: skillSource }, directory, scope);
-      await refreshOpenCodeAfterConfigChange('skill creation');
-
-      res.json({
-        success: true,
-        requiresReload: true,
-        message: `Skill ${skillName} created successfully. Reloading interface…`,
-        reloadDelayMs: clientReloadDelayMs,
+      const pendingRestart = markPendingConfigRestart('skill creation', {
+        scope: 'skills',
+        entityId: skillName,
       });
+      res.json(buildDeferredRestartResponse(
+        `Skill ${skillName} created successfully. Restart OpenCode to apply.`,
+        pendingRestart,
+      ));
     } catch (error) {
       console.error('Failed to create skill:', error);
       res.status(500).json({ error: error.message || 'Failed to create skill' });
@@ -651,14 +649,17 @@ export const registerSkillRoutes = (app, dependencies) => {
         console.log(`[Server] Renaming skill: ${skillName} -> ${newName}`);
         console.log('[Server] Working directory:', directory);
         renameSkill(skillName, newName, directory);
-        await refreshOpenCodeAfterConfigChange('skill rename');
+        const pendingRestart = markPendingConfigRestart('skill rename', {
+          scope: 'skills',
+          entityId: newName,
+        });
 
         return res.json({
-          success: true,
           name: newName,
-          requiresReload: true,
-          message: `Skill renamed to ${newName} successfully. Reloading interface…`,
-          reloadDelayMs: clientReloadDelayMs,
+          ...buildDeferredRestartResponse(
+            `Skill renamed to ${newName} successfully. Restart OpenCode to apply.`,
+            pendingRestart,
+          ),
         });
       }
 
@@ -666,14 +667,14 @@ export const registerSkillRoutes = (app, dependencies) => {
       console.log('[Server] Working directory:', directory);
 
       updateSkill(skillName, updates, directory, updates?.targetPath);
-      await refreshOpenCodeAfterConfigChange('skill update');
-
-      res.json({
-        success: true,
-        requiresReload: true,
-        message: `Skill ${skillName} updated successfully. Reloading interface…`,
-        reloadDelayMs: clientReloadDelayMs,
+      const pendingRestart = markPendingConfigRestart('skill update', {
+        scope: 'skills',
+        entityId: skillName,
       });
+      res.json(buildDeferredRestartResponse(
+        `Skill ${skillName} updated successfully. Restart OpenCode to apply.`,
+        pendingRestart,
+      ));
     } catch (error) {
       console.error('[Server] Failed to update skill:', error);
       res.status(500).json({ error: error.message || 'Failed to update skill' });
@@ -758,14 +759,14 @@ export const registerSkillRoutes = (app, dependencies) => {
       }
 
       deleteSkill(skillName, directory);
-      await refreshOpenCodeAfterConfigChange('skill deletion');
-
-      res.json({
-        success: true,
-        requiresReload: true,
-        message: `Skill ${skillName} deleted successfully. Reloading interface…`,
-        reloadDelayMs: clientReloadDelayMs,
+      const pendingRestart = markPendingConfigRestart('skill deletion', {
+        scope: 'skills',
+        entityId: skillName,
       });
+      res.json(buildDeferredRestartResponse(
+        `Skill ${skillName} deleted successfully. Restart OpenCode to apply.`,
+        pendingRestart,
+      ));
     } catch (error) {
       console.error('Failed to delete skill:', error);
       res.status(500).json({ error: error.message || 'Failed to delete skill' });
