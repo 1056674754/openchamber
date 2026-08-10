@@ -1,3 +1,4 @@
+import express from 'express';
 import { createProjectIdFromPath } from '../projects/project-id.js';
 import fs from 'fs';
 import os from 'os';
@@ -49,6 +50,41 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
     const trimmed = value.trim();
     return trimmed || null;
   };
+
+  const escapeHtml = (value) => String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+
+  const renderMcpOAuthCallbackPage = ({ title, message, desktopReturn }) => `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${escapeHtml(title)} — OpenChamber</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
+         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+         background: Canvas; color: CanvasText; }
+  main { max-width: 34rem; padding: 2.5rem 2rem; text-align: center; }
+  h1 { font-size: 1.25rem; margin: 0 0 0.75rem; }
+  p { margin: 0; line-height: 1.5; opacity: 0.85; }
+  a.return { display: inline-block; margin-top: 1.5rem; padding: 0.5rem 1.25rem; border-radius: 0.5rem;
+             border: 1px solid color-mix(in srgb, CanvasText 25%, transparent); color: inherit; text-decoration: none; }
+</style>
+</head>
+<body>
+<main>
+<h1>${escapeHtml(title)}</h1>
+<p>${escapeHtml(message)}</p>
+${desktopReturn ? `<a class="return" href="openchamber://focus/mcp-auth">Return to OpenChamber</a>
+<script>window.location.href = 'openchamber://focus/mcp-auth';</script>` : ''}
+</main>
+</body>
+</html>`;
 
   const parseVersionForComparison = (value) => {
     const normalized = String(value || '').replace(/^v/, '');
@@ -441,7 +477,7 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
     }
   });
 
-  app.post('/api/mcp/auth/pending', async (req, res) => {
+  app.post('/api/mcp/auth/pending', express.json({ limit: '16kb' }), async (req, res) => {
     try {
       pruneExpiredPendingMcpAuthContexts();
 
@@ -458,6 +494,8 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
       const entry = {
         name,
         directory: normalizePendingString(req.body?.directory),
+        origin: normalizePendingString(req.body?.origin),
+        completionMode: req.body?.completionMode === 'client' ? 'client' : 'server',
         expiresAt: Date.now() + PENDING_MCP_AUTH_TTL_MS,
       };
       pendingMcpAuthContextByState.set(state, entry);
@@ -467,6 +505,8 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
         context: {
           name: entry.name,
           directory: entry.directory,
+          origin: entry.origin,
+          completionMode: entry.completionMode,
         },
       });
     } catch (error) {
@@ -508,6 +548,91 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
     } catch (error) {
       console.error('Failed to clear pending MCP auth context:', error);
       return res.status(500).json({ error: error.message || 'Failed to clear pending MCP auth context' });
+    }
+  });
+
+  app.get('/mcp/oauth/callback', async (req, res) => {
+    const queryValue = (key) => normalizePendingString(
+      Array.isArray(req.query?.[key]) ? req.query[key][0] : req.query?.[key],
+    );
+    const state = queryValue('state');
+    const code = queryValue('code');
+    const providerError = queryValue('error');
+    const providerErrorDescription = queryValue('error_description');
+
+    pruneExpiredPendingMcpAuthContexts();
+    const context = state ? pendingMcpAuthContextByState.get(state) ?? null : null;
+    const startedFromDesktop = context?.origin === 'desktop';
+
+    const finish = (status, { title, message, retainContext = false }) => {
+      if (state && !retainContext) pendingMcpAuthContextByState.delete(state);
+      res.status(status).type('html').send(renderMcpOAuthCallbackPage({
+        title,
+        message,
+        desktopReturn: startedFromDesktop,
+      }));
+    };
+
+    if (!context?.name) {
+      return finish(400, {
+        title: 'Authorization Failed',
+        message: 'This authorization session has expired or is unknown to the running app. Return to OpenChamber and click Authorize again.',
+      });
+    }
+
+    if (providerError) {
+      if (context.completionMode === 'client') {
+        pendingMcpAuthContextByState.set(state, {
+          ...context,
+          error: providerErrorDescription || providerError,
+        });
+      }
+      return finish(400, {
+        title: 'Authorization Failed',
+        message: providerErrorDescription || providerError,
+        retainContext: context.completionMode === 'client',
+      });
+    }
+    if (!code) {
+      return finish(400, {
+        title: 'Authorization Failed',
+        message: 'The provider did not return an authorization code. Start authorization again from MCP Settings.',
+      });
+    }
+
+    if (context.completionMode === 'client') {
+      pendingMcpAuthContextByState.set(state, { ...context, code });
+      return finish(200, {
+        title: 'Authorization Complete',
+        message: 'Return to OpenChamber to finish connecting this MCP server.',
+        retainContext: true,
+      });
+    }
+
+    try {
+      const callbackUrl = new URL(buildOpenCodeUrl(`/mcp/${encodeURIComponent(context.name)}/auth/callback`, ''));
+      if (context.directory) callbackUrl.searchParams.set('directory', context.directory);
+      const upstream = await fetch(callbackUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json', ...getOpenCodeAuthHeaders() },
+        body: JSON.stringify({ code }),
+      });
+      if (!upstream.ok) {
+        const payload = await upstream.json().catch(() => null);
+        return finish(502, {
+          title: 'Authorization Failed',
+          message: payload?.error || payload?.message || `OpenCode rejected the authorization code (${upstream.status}). Start authorization again from MCP Settings.`,
+        });
+      }
+      return finish(200, {
+        title: 'Authorization Complete',
+        message: 'You can close this tab and return to OpenChamber.',
+      });
+    } catch (error) {
+      return finish(502, {
+        title: 'Authorization Failed',
+        message: error?.message || 'Failed to complete MCP authorization.',
+      });
     }
   });
 

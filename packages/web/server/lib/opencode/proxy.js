@@ -582,5 +582,6 @@ export const registerOpenCodeProxy = (app, deps) => {
   });
 
   app.post('/api/provider/:providerID/oauth/callback', interactiveOAuthProxy);
+  app.post('/api/mcp/:name/auth/authenticate', interactiveOAuthProxy);
   app.use('/api', apiProxy);
 };

@@ -32,6 +32,29 @@ const createApp = (overrides = {}) => {
   return app;
 };
 
+const createMcpOAuthApp = (overrides = {}) => {
+  const app = express();
+  registerOpenCodeRoutes(app, {
+    crypto,
+    getOpenCodeResolutionSnapshot: () => null,
+    getOpenCodeUpgradeCapability: () => ({ supported: false, manager: null, reason: 'external' }),
+    formatSettingsResponse: (settings) => settings,
+    readSettingsFromDisk: async () => ({}),
+    readSettingsFromDiskMigrated: async () => ({}),
+    persistSettings: async (settings) => settings,
+    sanitizeProjects: (projects) => projects,
+    validateDirectoryPath: async () => ({ ok: true }),
+    resolveProjectDirectory: () => '',
+    getProviderSources: async () => ({}),
+    removeProviderConfig: async () => {},
+    markPendingConfigRestart: () => ({ count: 0, reasons: [] }),
+    buildOpenCodeUrl: (pathname) => `http://opencode.test${pathname}`,
+    getOpenCodeAuthHeaders: () => ({ Authorization: 'Bearer test-token' }),
+    ...overrides,
+  });
+  return app;
+};
+
 const jsonResponse = (payload, init = {}) =>
   new Response(JSON.stringify(payload), {
     headers: { 'Content-Type': 'application/json' },
@@ -383,5 +406,91 @@ describe('opencode routes', () => {
       },
     });
     expect(refreshOpenCodeAfterConfigChange).not.toHaveBeenCalled();
+  });
+});
+
+describe('MCP OAuth browser callback', () => {
+  test('forwards a parked code to the owning directory and clears the state', async () => {
+    const fetchMock = useFetchMock(mock(async () => jsonResponse({ success: true })));
+    const app = createMcpOAuthApp();
+
+    await request(app)
+      .post('/api/mcp/auth/pending')
+      .send({ state: 'state-1', name: 'linear', directory: '/projects/demo', origin: 'desktop' })
+      .expect(200);
+
+    const response = await request(app)
+      .get('/mcp/oauth/callback')
+      .query({ state: 'state-1', code: 'auth-code' })
+      .expect(200);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [callbackUrl, callbackInit] = fetchMock.mock.calls[0];
+    expect(String(callbackUrl)).toBe('http://opencode.test/mcp/linear/auth/callback?directory=%2Fprojects%2Fdemo');
+    expect(callbackInit).toEqual(
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({ Authorization: 'Bearer test-token' }),
+        body: JSON.stringify({ code: 'auth-code' }),
+      }),
+    );
+    expect(response.text).toContain('Authorization Complete');
+    expect(response.text).toContain('openchamber://focus/mcp-auth');
+    await request(app).get('/api/mcp/auth/pending').query({ state: 'state-1' }).expect(404);
+  });
+
+  test('rejects an unknown state without forwarding its code', async () => {
+    const fetchMock = useFetchMock(mock(async () => jsonResponse({ success: true })));
+
+    const response = await request(createMcpOAuthApp())
+      .get('/mcp/oauth/callback')
+      .query({ state: 'forged', code: 'attacker-code' })
+      .expect(400);
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(response.text).toContain('Authorization Failed');
+  });
+
+  test('parks a relay callback for completion by the connected client', async () => {
+    const fetchMock = useFetchMock(mock(async () => jsonResponse({ success: true })));
+    const app = createMcpOAuthApp();
+
+    await request(app)
+      .post('/api/mcp/auth/pending')
+      .send({ state: 'state-relay', name: 'linear', directory: '/remote/demo', completionMode: 'client' })
+      .expect(200);
+
+    await request(app)
+      .get('/mcp/oauth/callback')
+      .query({ state: 'state-relay', code: 'relay-code' })
+      .expect(200);
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    const pending = await request(app)
+      .get('/api/mcp/auth/pending')
+      .query({ state: 'state-relay' })
+      .expect(200);
+    expect(pending.body).toEqual(expect.objectContaining({
+      name: 'linear',
+      directory: '/remote/demo',
+      code: 'relay-code',
+    }));
+  });
+
+  test('escapes provider errors and never forwards them', async () => {
+    const fetchMock = useFetchMock(mock(async () => jsonResponse({ success: true })));
+    const app = createMcpOAuthApp();
+    await request(app)
+      .post('/api/mcp/auth/pending')
+      .send({ state: 'state-error', name: 'linear' })
+      .expect(200);
+
+    const response = await request(app)
+      .get('/mcp/oauth/callback')
+      .query({ state: 'state-error', error: 'access_denied', error_description: 'User <denied> access' })
+      .expect(400);
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(response.text).toContain('User &lt;denied&gt; access');
   });
 });
