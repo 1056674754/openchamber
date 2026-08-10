@@ -372,13 +372,15 @@ export async function handleSystemBridgeMessage(
     case 'editor:openFile': {
       const { path: filePath, line, column } = payload as { path: string; line?: number; column?: number };
       try {
-        const doc = await vscode.workspace.openTextDocument(filePath);
         const options: vscode.TextDocumentShowOptions = {};
         if (typeof line === 'number') {
           const pos = new vscode.Position(Math.max(0, line - 1), column || 0);
           options.selection = new vscode.Range(pos, pos);
         }
-        await vscode.window.showTextDocument(doc, options);
+        // Use `vscode.open` command instead of openTextDocument + showTextDocument
+        // so VS Code can select the notebook editor for .ipynb files when a
+        // compatible extension is installed.
+        await vscode.commands.executeCommand('vscode.open', vscode.Uri.file(filePath), options);
         return { id, type, success: true };
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);

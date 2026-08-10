@@ -18,6 +18,8 @@ type ScrollableOverlayProps = React.HTMLAttributes<HTMLElement> & {
   preventOverscroll?: boolean;
   useScrollShadow?: boolean;
   hideTopScrollShadow?: boolean;
+  /** Suppress the bottom fade while retaining scroll-state tracking. */
+  hideBottomScrollShadow?: boolean;
   scrollShadowSize?: number;
   userIntentOnly?: boolean;
   /** Skip custom thumb overlay (prefer native scroll on Capacitor lists). */
@@ -43,6 +45,7 @@ export const ScrollableOverlay = React.forwardRef<HTMLElement, ScrollableOverlay
     preventOverscroll = false,
     useScrollShadow = false,
     hideTopScrollShadow = false,
+    hideBottomScrollShadow = false,
     scrollShadowSize,
     userIntentOnly = false,
     disableOverlayScrollbar = false,
@@ -68,6 +71,7 @@ export const ScrollableOverlay = React.forwardRef<HTMLElement, ScrollableOverlay
             ref={containerRef as React.Ref<HTMLElement>}
             size={scrollShadowSize}
             hideTopShadow={hideTopScrollShadow}
+            hideBottomShadow={hideBottomScrollShadow}
             className={cn(
               "overlay-scrollbar-target overlay-scrollbar-container",
               preventOverscroll && "overscroll-none",
