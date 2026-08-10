@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { devtools } from 'zustand/middleware';
-import { getSafeStorage } from './utils/safeStorage';
+import { getSafeStorage, registerSafeStorageRehydrate } from './utils/safeStorage';
 import { isVSCodeRuntime } from '@/lib/desktop';
 
 // --- Types ---
@@ -653,3 +653,12 @@ const bootstrapSessionFoldersDiskHydration = (): void => {
 };
 
 bootstrapSessionFoldersDiskHydration();
+
+// Stores initialize before host settings arrive; re-read after hydrate.
+registerSafeStorageRehydrate(() => {
+  useSessionFoldersStore.setState({
+    foldersMap: readPersistedFolders(),
+    collapsedFolderIds: readPersistedCollapsed(),
+    archivedAutoCollapsedScopes: readPersistedArchivedAutoCollapsed(),
+  });
+});

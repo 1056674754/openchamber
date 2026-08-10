@@ -30,6 +30,7 @@ import {
   subscribeRuntimeEndpointChanged,
   subscribeRuntimeEndpointWillChange,
 } from '@/lib/runtime-switch';
+import { hydrateLocalStore } from '@/stores/utils/safeStorage';
 
 const persistToLocalStorage = (settings: DesktopSettings) => {
   if (typeof window === 'undefined') {
@@ -1566,6 +1567,11 @@ const applySettingsAndDispatch = async (settings: DesktopSettings): Promise<void
     persistToLocalStorage(settings);
   } catch (error) {
     console.warn('persistToLocalStorage failed:', error);
+  }
+  try {
+    hydrateLocalStore(settings.localStore ?? {});
+  } catch (error) {
+    console.warn('hydrateLocalStore failed:', error);
   }
   await waitForSettingsHydration();
   try {

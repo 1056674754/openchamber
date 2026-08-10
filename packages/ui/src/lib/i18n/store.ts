@@ -2,6 +2,7 @@ import { create } from 'zustand';
 
 import { dict as enDict, type I18nKey } from './messages/en';
 import { DEFAULT_LOCALE, detectInitialLocale, type Locale, writeStoredLocale } from './runtime';
+import { registerSafeStorageRehydrate } from '@/stores/utils/safeStorage';
 
 export type I18nParams = Record<string, string | number | boolean | null | undefined>;
 export type I18nDictionary = Record<I18nKey, string>;
@@ -89,6 +90,11 @@ export const useI18nStore = create<I18nState>()((set, get) => ({
 export function initializeLocale(): void {
   useI18nStore.getState().setLocale(detectInitialLocale());
 }
+
+// Locale is read at store init before host settings arrive; re-read after hydrate.
+registerSafeStorageRehydrate(() => {
+  initializeLocale();
+});
 
 export function formatMessage(dictionary: I18nDictionary, key: I18nKey, params?: I18nParams): string {
   const template = dictionary[key] ?? enDict[key] ?? key;

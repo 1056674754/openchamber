@@ -1765,3 +1765,175 @@ VS Code worktree lock 验证：在两个真实临时 Git 仓库及 `--no-checkou
 | Desktop/Linux: Terminal launcher 不错误归属 | ✅ 已合并 | `linux-app-discovery.mjs` 加 `isTerminalEmulatorEntry`——`appId === 'terminal'` 要求 `Categories=TerminalEmulator`，不再 substring match 误匹配 |
 
 **验证**：全 workspace `bun run type-check` 0 errors、`bun run lint` 0 errors、`bun run build` 通过。focused tests 覆盖 provider-oauth、session restore、walkthrough auth、Ctrl+L 各项。
+
+---
+
+## v1.18.2 差距审计（2026-08-11）
+
+**比较边界**：上游 `v1.18.1..v1.18.2`（`da4a61ad8`），114 commits，316 files，+19366/-2655。
+**Fork 起点**：`1.18.1-sscity`（commit `5f99f1b8d`，分支 `merge/upstream`）。
+**当前状态**：仅完成 release-note feature inventory + 关键 fork-state recon（vite chunk、Apply & Restart 链、work-status panel 组件覆盖）；尚未逐 commit / file diff 落地。后续按 Tier 顺序逐批合并，**禁止整批套 patch**。
+
+### 上游 Changelog → Fork 处理总表
+
+按官方 changelog 出现顺序，对照 fork 当前实现给出初判。状态图例：✅ 已等价 / 🟡 部分或需逐文件合 / 🔴 缺失或高风险 / ⛔ 保留 fork 分歧。
+
+| Changelog 项 | 对应关键 commit | 状态 | Fork 处理 / 备注 |
+|---|---|---|---|
+| Observability panel（active goal / tasks / subagents / pinned context / MCP / context usage 统一视图）；session list 显示 agent 工作时长 | `f2523d0cf` (#2776) | 🔴 高风险 | fork 各组件已分散存在（goal row、todo renderer、TaskSessionMaterializer、McpSidebar/Page、ContextSidebarTab/ContextUsageDisplay），但**统一面板、pinned-context、session work-duration 是 net-new**。详见 Tier 3 |
+| Scheduled Tasks: `.agents/loops/*.md` 文件式循环任务，免重启发现文件变化；可编辑/启用/禁用/删除/运行 | `0ba330c77`、`bac56fc79`、`96c8d4775`、`d1bb9d3af`、`8a367382f`、`ffef080bc`、`3bbde9af4` | 🟡 中风险 | 新功能。需保护 `serverId + directory`、scheduled runtime 现有 permission auto-accept。详见 Tier 2 |
+| Settings: Apply & Restart 累加 config 变更 | `6626d642c` + 12 commit 链 (#2585) | 🔴 高风险 | fork 当前每次 OpenCode config mutation（agent/MCP/command/skill/provider/plugin/permission/外部 watcher）**立即** restart managed OpenCode。改为 server-side pending 累加 + Settings footer 单一 Apply & Restart。详见 Tier 3 |
+| Remote access: relay 设备无浏览器连接或 state 加载失败时不再失去 relay | `e04e34a2d` | 🟡 中风险 | fork 已实现 #16 relay/pairing v2，按多 transport + `expectedServerId` probe；需对照 fork `packages/web/server/lib/relay/*` 的 host-keepalive 路径 |
+| Performance: 初始 web 下载 -58%，启动内存 -22%；heavy Settings 和 syntax-highlighting 延迟加载 | `fdcf5c272` (#2742) | 🔴 高风险 | fork v1.18.0 #110 已做基础：Bun chunk 解析 + Vite preload 隔离 + `html-to-image` lazy。**剩余缺口**：`CommandPalette` 静态 import `SettingsView` 把整组 settings 拉入主图；`PermissionCard`、`DiffPreview` 静态 import `react-syntax-highlighter`。详见 Tier 3 |
+| Git/Worktrees: prompt 等待新 worktree checkout 完成；session 解析到所属 worktree | `7e8838486` (#2708) | ✅ 已等价 | fork v1.18.0 #111 已落地：`session-directory-resolution.ts` precedence 模块、`session-ui-store` record-first authoritative、worktree bootstrap gate |
+| Git/Worktrees: worktree 创建后运行 repo 的 post-checkout hook；Windows 深嵌套 worktree "Filename too long" | `955e72312` (#2721)、`58e6e704b` (#2746) | 🟡 中风险 | post-checkout hook 需在 fork `git/service.js` worktree bootstrap 接入；`core.longpaths` Windows-only，平台分支 |
+| Projects: 新项目目录可创建在当前 workspace 外；add/create/clone 打开 new-session draft | `4ef9ce1c5` | 🟡 中风险 | 需保护 fork 的多实例 `serverId + directory` 权威；新 draft 已用 frozen snapshot |
+| Chat: 切换 session 前提交的消息留在原 session/workspace 并取消（不跨实例） | `1c9ca82b3` (#2424) | ✅ 已等价 | fork queue item 已冻结 `sendTarget`（directory + serverId）；切换 session 不改写已排队消息 |
+| Chat: queue 不再 send 到仍在 streaming 的 turn；中断响应遗留 tool 卡片 settle | `fcf0622e1` (#2642)、`0f52a9be1` | ✅ 已等价 | fork v1.16 queue idle dispatch + 失败指数退避；materialization 无变化返回原 store state |
+| Chat: shell 命令输出默认展开；add to context 后焦点回 composer | `294552b0e` (#2492)、`687cc17da` | 🟢 低风险 | 独立小修，Tier 1 |
+| Chat: 已显示消息不再 replay 进入动画；iOS Shift+Enter 换行恢复 | `015741391` (#2124)、`287d6b878` | 🟢 低风险 | 独立 CSS/事件修复 |
+| Chat: composer caret 更易见 | `721525e6f` | 🟢 低风险 | CSS 调整 |
+| MCP: OAuth 浏览器 callback 更可靠；available/unavailable 区分；失败连接 retry action | `622b8bb66`、`f2523d0cf` 部分 | 🟡 中风险 | MCP OAuth 跨 runtime 重写（部分嵌在 #2776）；依赖 Tier-3 Apply & Restart 状态；fork McpPage 已有 status badges |
+| Usage: xAI quota reporting | `b215036e1` (#2628)、`4df7439f6` | 🟡 中风险 | 新增 quota provider；按 fork 现有 provider 注册模式（multi-instance + `runtimeFetch`） |
+| Terminal: 默认 tab 名在关闭后保持唯一；Escape 到达 terminal app 而非关闭 context panel；后台连接更少 keepalive | `10728dbf5` (#2718)、`a5c413b98`、`8702c6d5c` | 🟢 低风险 | 独立小修 |
+| Desktop/macOS: 拒绝文件夹访问后选目录可恢复 | `dac56e31b`、`1a00c1fa8` (#2744) | 🟡 中风险 | Electron main.mjs 恢复逻辑；需保护 fork `OPENCHAMBER_OPENCODE_CWD` + managed OpenCode spawn path |
+| Desktop/Windows: 任务栏最小化保持 native；app 自身最小化仍可到 tray | `f2b3c50af` (#2494) | 🟢 低风险 | Windows-only；fork #17 Windows tray 已落地，需复核 minimize 路由 |
+| Desktop: overlay scrollbars 滚动后再次 auto-hide | `cc6c5db30`、`d3a90e408` (#2581) | 🟢 低风险 | 上游先加再 revert，最终态为 auto-hide。fork 需对齐最终态 |
+| Mobile/Android: pairing QR 在错误读 `openchamber://` 的旧 WebView 中可用 | `24b44f71d` (#2611) | 🟡 中风险 | fork #16 pairing v2 已落地；需对照 fork `pairingLinkParse` 加 fallback |
+| Mobile: 冷启动后 pending agent questions 重现 | `1198a11cf` | 🟡 中风险 | fork SessionNodeItem 已有 pending-question indicator；冷启动 hydration 路径需补 |
+| Files: 移除 Office/OpenDocument 附件同时移除提取的图片；Linux reveal 失败 surface error | `2ffb9415c` (#2432)、`6599891d0` (#2490) | 🟡 中风险 | 与 v1.16.3 #25 tool/office 标准化相关；attachment cascade + Linux 错误提示 |
+| VSCode: notebook 链接在已装兼容扩展时打开 notebook editor | `d1e9aa5ff` (#2373) | 🟢 低风险 | VS Code 单文件改动 |
+| Settings: 通知模板快速编辑不再互相覆盖；collapsed-user-message 偏好持久化 | `f498fad34` (#2300)、`228e5c8b2` | 🟢 / ✅ | 通知模板 debounce 修复；collapsed-user-message fork 已有 `collapsibleUserMessages` |
+| Walkthrough: 分支比较使用 repo 实际 remote default branch | `4ca0f6cdd`、`c9ab916cb` | 🟢 低风险 | fork #107 walkthrough 已落地 |
+| Server: 用户 systemd service 启动的 foreground install 通过独立 transient service 更新 | `e0255cacf` (#2542) | 🟡 中风险 | server-side systemd 启动；fork 在 Linux Dev boxes 用 system unit（见 AGENTS.md），需对照路径 |
+| Security: archive 解压更新（GHSA-xcpc-8h2w-3j85） | `ebb02b43e` (#2643) | 🟢 低风险 | `adm-zip` 0.5.16 → 0.6.0 依赖升级 |
+| UI: dialog/dropdown/popover/tooltip 统一 glass 样式；移除 macOS vibrancy | `384810349`、`c67e846f1` | 🔴 高风险 | fork 已强制 `desktopVibrancy=false`（v1.12.4 Tier1），与上游方向一致；但 glass surface 统一会触及大量 popup 组件，需配合 fork theme token（见 `/theme-system` skill）。详见 Tier 3 |
+
+### Tier 1 — 🟢 低风险 / 独立小修
+
+每项 <1h，独立 commit，几乎无冲突。
+
+| # | 功能 | 上游 commit | 关键文件 | 备注 |
+|---|---|---|---|---|
+| 1 | Model picker scroll shadows 调整 | `2d61984bd` | `ModelPickerList`/scroll-shadow primitive | 视觉微调 |
+| 2 | Diff action container shadow 软化 | `bd52e3788` | CSS | 视觉微调 |
+| 3 | Composer caret 更易见 | `721525e6f` | ChatInput CSS | 视觉 |
+| 4 | Permission error color 可读 | `c1ae4e3e6` | `PermissionCard` | theme token |
+| 5 | Overlay scrollbars 恢复 auto-hide（最终态） | `cc6c5db30`、`d3a90e408` | 全局 CSS | 上游 revert 后最终态；对齐即可 |
+| 6 | Windows taskbar minimize native | `f2b3c50af` (#2494) | `electron/main.mjs` Windows | Windows-only；复核 #17 tray |
+| 7 | Rail surface git activity dots 只在 git surface 显示 | `16e03d134` | sidebar rail | 视觉 |
+| 8 | 已显示消息不再 replay 进入动画 | `015741391` (#2124) | `MessageBody`/FadeIn | latch |
+| 9 | Shell 输出默认展开 | `294552b0e` (#2492) | `ToolPart` shell state | 默认值 |
+| 10 | iOS Shift+Enter 换行恢复 | `287d6b878` | ChatInput key handler | iOS-only |
+| 11 | Add-to-context 后焦点回 composer | `687cc17da` | ChatInput effect | 焦点 |
+| 12 | Session activity spinner 改 dot + turn timer | `faa9c2433` | `SessionNodeItem` / status row | 视觉 + 信息 |
+| 13 | Terminal default tab 名关闭后保持唯一 | `10728dbf5` (#2718) | terminal tab store | 命名 |
+| 14 | Terminal keepalive 20s → 45s | `8702c6d5c` | terminal transport | perf |
+| 15 | Escape 到达 terminal PTY 而非关闭 context panel | `a5c413b98` | `ContextPanel`/TerminalView 键路由 | 键盘 |
+| 16 | Git worktree Windows longpaths | `58e6e704b` (#2746) | `git/service.js` Windows | `core.longpaths true` |
+| 17 | fs list 路径通过 symlink 保持 requested space | `9f58b4c98` | `fs/routes.js` | 路径规范化 |
+| 18 | Linux reveal launcher 失败 surface error | `6599891d0` (#2490) | FilesView / electron shell | Linux 错误提示 |
+| 19 | Walkthrough base branch 从 repo 解析 | `c9ab916cb`、`4ca0f6cdd` | walkthrough git | #107 补丁 |
+| 20 | VS Code notebook 链接打开 notebook editor | `d1e9aa5ff` (#2373) | VS Code link handler | VS Code |
+| 21 | adm-zip 0.6.0 安全升级（GHSA-xcpc-8h2w-3j85） | `ebb02b43e` (#2643) | `packages/web/package.json` | 依赖升级 |
+| 22 | Project add → open new-session draft | `4ef9ce1c5` | projects store | draft |
+| 23 | pending-restart applying label i18n shorten | `1368a4a90` (#2791) | locale files | 依赖 Tier-3 Apply & Restart（最后合） |
+| 24 | Rail badge background via surface theme tokens | `cd803dc83` (#2790) | theme token | 主题 |
+| 25 | Test/CI/chore（无运行时影响） | `15fcfed3e`、`1fd80b91a`、`7e95dfab8`、`d34ee0642`、`a743739aa`、merge/release commits | — | 直接 adopt 或忽略 |
+
+### Tier 2 — 🟡 中风险 / 需逐文件合并
+
+每项 1–4h，单组件或单 store 改动，需保护 fork 多实例权威。
+
+| # | 功能 | 上游 commit | 关键文件 | Fork 注意 |
+|---|---|---|---|---|
+| 26 | xAI quota provider | `b215036e1` (#2628)、`4df7439f6` | 新 `packages/web/server/lib/quota/providers/xai.js`、UI `quota.ts` types、registry、locale | 按 fork 现有 provider 模板（Crof/NeuralWatt #66）；active-instance base URL + VS Code parity |
+| 27 | Markdown loops 调度任务 | `0ba330c77` + 6 commit | 新 `scheduled-tasks/loops.js`、`project-config.js`、UI dialog | fork scheduled runtime 已有 permission auto-accept + 时区；reconcileLoopTasks 必须按 `serverId + directory` 锁，不能写全局 |
+| 28 | MCP OAuth 跨 runtime 可靠 + 可用/不可用区分 + retry | `622b8bb66` + #2776 部分 | `McpPage`、`startMcpAuthorization.ts`、`McpOAuthCallbackPage`、`useMcpStore` | 部分依赖 Tier-3 Apply & Restart；fork 已有 MCP status badges，需逐文件合 |
+| 29 | Relay host 对实际使用设备保持 alive | `e04e34a2d` | `packages/web/server/lib/relay/*` | fork #16 已实现 multi-transport + `expectedServerId` probe；对照 keepalive 触发条件 |
+| 30 | Mobile 冷启动后 pending question 重现 | `1198a11cf` | hydration / SessionNodeItem | fork SessionNodeItem 已有 pending-question indicator；hydration 路径需补 |
+| 31 | macOS 文件夹访问拒绝后恢复 | `dac56e31b`、`1a00c1fa8` (#2744) | `electron/main.mjs` dialog flow | 保护 fork `OPENCHAMBER_OPENCODE_CWD` 与 managed OpenCode spawn path |
+| 32 | Worktree 创建后运行 post-checkout hook | `955e72312` (#2721) | `git/service.js` worktree bootstrap | hook 必须在 fork worktree project ensure 之后运行 |
+| 33 | Server: OPENCHAMBER_OPENCODE_HOSTNAME bind hostname 校验 | `94a165d31` | `env-runtime.js` / server bootstrap | fork 已有类似 env 处理 |
+| 34 | CLI: bare `--ui-password` daemon/serve 自动生成密码 | `375363ff1` | `packages/web/bin/cli.js` | fork CLI 5452 行，按 helper port |
+| 35 | managed OpenCode restart 后重绑 message-stream upstreams | `66f35bc26` | `server/index.js`、lifecycle | 依赖 Tier-3 Apply & Restart；fork 已有 in-process UI/proxy |
+| 36 | 前台 systemd 服务安全更新（transient service） | `e0255cacf` (#2542) | server systemd 启动 | fork Linux Dev boxes 用 system unit（AGENTS.md），需对照路径 |
+| 37 | Pairing QR 旧 Android WebView fallback parse | `24b44f71d` (#2611) | `pairingLinkParse` | fork #16 已有 mobile QR，加 fallback |
+| 38 | Office/OpenDocument 附件级联删除提取图片 | `2ffb9415c` (#2432) | input-store、materializer | 与 v1.16.3 #25 tool/office 标准化相关 |
+| 39 | 通知模板快速编辑互不覆盖 | `f498fad34` (#2300) | notification template store debounce | 设置层 |
+| 40 | Active instance service URLs 在 About 显示 | `8303b3cb9` (#2669) | AboutSettings、server `/api/system/info` | fork 已有 About settings + `/api/system/info`；补 active instance URLs |
+| 41 | Numbered context-panel surface switching | `8274dd82f` | surface registry、keyboard | fork #62 已有 surface rail；补编号 |
+| 42 | Git rail surface changed-files count badge | `d7e82eead` | rail surface | 视觉 + 数据 |
+| 43 | Chat work-status 从 git hints 刷新 | `630ac299c` | work-status / status row | 依赖 Tier-3 work-status panel；可先合 status row 部分 |
+| 44 | Agent frontmatter lenient 解析（与 OpenCode 一致） | `dee6305b9` | server agent parser | fork 已有 agent YAML 保真（v1.16 小批次） |
+| 45 | Provider OAuth methods 在 reconnect 时也加载 | `557e867fa` | provider OAuth flow | 补 v1.18.1 OAuth-only provider |
+| 46 | Google API key env aliases 镜像到 managed OpenCode | `b18ec4422` | lifecycle env、provider-env-aliases | managed OpenCode spawn env |
+| 47 | sync: 无 directory 的 todo 更新路由 | `1a58c2b13` | sync-context todo routing | fork 多实例路由权威保持 |
+| 48 | sync: 中断 turn 后 settle 时 finalize 孤立 tool parts | `0f52a9be1` | event-pipeline / sync | fork 已有 queue/materialization guard；补 finalize |
+| 49 | Stale running UI 修复 | `0dfde287b` (#2577) | sidebar / sync status | 视觉 + sync |
+| 50 | Chat refresh work status from git hints | `630ac299c` | status row | 与 #43 相关 |
+
+> 已等价项（不再开卡）：worktree bootstrap wait（#111）、session directory send/fork（#111）、queue 不 send 到 streaming turn（fork queue 退避）、collapsed-user-message persist（fork `collapsibleUserMessages`）、pending-question indicator（fork SessionNodeItem 已有）、SDK bump 1.18.15（fork lock 1.18.4）。
+
+### Tier 3 — 🔴 高风险 / 大规模重写或深度架构改动
+
+每个独立 milestone，禁止互相混批。
+
+| # | 功能 | 上游 commit | 规模 | Fork 状态 + 风险点 |
+|---|---|---|---|---|
+| 51 | **Work-status panel**（统一 observability） | `f2523d0cf` (#2776) | 69 files, +5777/-894 | **Fork 组件分散已有**：goal row、todo renderer、TaskSessionMaterializer、McpSidebar/Page、ContextSidebarTab、ContextUsageDisplay。**Net-new**：统一面板组件（`packages/ui/src/components/chat/work-status/*` 10+ 文件）、pinned-context 数据契约、session work-duration 计时；同时改 Header（-514 行重构）、ChatContainer、ChatInput、MCP OAuth 重写。**风险**：fork 多实例 session sidebar、surface registry（#62）、context panel、Header 已有自定义结构，需选择"统一面板"还是"分散保留"。**建议先开 Work Item 设计 pinned-context 数据契约 + duration 计时（无 UI），再决定面板集成路径** |
+| 52 | **Apply & Restart accumulator** | `6626d642c` + 12 commit 链 (#2585) | 55 files, +1525/-530 | **Fork 当前**：每次 OpenCode config mutation（agent/MCP/command/skill/provider/plugin/permission/外部 watcher）**立即** restart managed OpenCode（10+ 路由点：`config-entity-routes.js`、`config-routes.js`、`routes.js`、`plugin-routes.js`、`skill-routes.js`、`config-file-watcher.js`）。Settings footer 当前是手动 "Reload OpenCode"（`SettingsView.tsx:857-880`）。**改为**：server-side pending 累加 + Settings footer 单一 Apply & Restart + 确认对话框（警告 active chat 会停止）。**必须保护**：fork managed OpenCode detach/shared database 约束、`/api/config/settings` 普通设置不 restart 的现有契约、外部 config-file watcher 行为 |
+| 53 | **Cold-start perf 58%/22%** | `fdcf5c272` (#2742) | 21 files, +585/-380 | **Fork v1.18.0 #110 已做基础**：Bun chunk 解析、Vite preload 隔离、`html-to-image` lazy。**剩余缺口**（recon 确认）：(a) `CommandPalette.tsx:35-36` 静态 import `getSettingsNavIcon` from `SettingsView`，把整组 Settings 拉入主图；(b) `PermissionCard.tsx:7`、`DiffPreview.tsx:2` 静态 import `react-syntax-highlighter`；(c) `VirtualizedCodeBlock.tsx:14-45` 静态 import Prism + 多 language grammars；(d) `SettingsView.tsx` 22-61 静态 import 各 section。**风险**：fork Markdown 渲染器仍用 react-markdown（未迁 Shiki），与上游 `markdownTheme.ts`/`markdownSyntaxVars.ts` 不通用，需 fork-specific lazy 边界 |
+| 54 | **移除 macOS vibrancy + 统一 glass surfaces** | `384810349`、`c67e846f1` | refactor | Fork 已在 v1.12.4 Tier1 决定强制 `desktopVibrancy=false`，与上游方向一致；但 glass surface 统一触及大量 popup 组件（dialog/dropdown/popover/tooltip）。**必须按 fork theme token + `/theme-system` skill 处理**，不能直接套上游硬编码值；上游最终用 solid background 替换 glass 也需评估与 fork theme 一致性 |
+
+### Fork 约束保持（合并时必须遵守）
+
+- `serverId + directory` 是 session/file/permission/terminal/worktree/quota/loop 的权威键——全部新增 surface 保持。
+- custom embedded OpenCode `-sscity` binary spawn 路径不受 Apply & Restart 累加影响（binary 来自 `OPENCODE_BINARY`/settings）。
+- `/Applications/OpenChamber.app` 未修改——全部改动在 `merge/upstream` 分支工作树。
+- Markdown 渲染器保持 react-markdown（未迁 marked+shiki）；MessageList 虚拟化保持 `@tanstack/react-virtual`（未迁 virtua）。
+- SessionSidebar 保持 authoritative（未引入上游 `MobileSessionsSheet`）。
+- managed OpenCode detach/shared database 约束——Apply & Restart 仍走现有 lifecycle restart，不改为退出即杀。
+- 普通设置（`PUT /api/config/settings`）继续不 restart；只有 OpenCode config 文件变更才进 accumulator。
+- 用户 PATH CLI 优先策略不采用（custom embedded binary 权威）。
+
+### 合并顺序建议
+
+```
+Phase 1 — Tier 1（#1-25）：每项 <1h，可批量合；先合 #21 (adm-zip 安全)、#16 (longpaths)
+Phase 2 — Tier 2 独立项（#26 xAI, #27 markdown loops, #33-#46 等独立小项）
+Phase 3 — Tier 2 relay/MCP/worktree/mobile（#28-32, #37-39）逐文件合
+Phase 4 — Tier 3 perf（#53）：先 lazy `SettingsView` 与 `react-syntax-highlighter` import，独立可验
+Phase 5 — Tier 3 Apply & Restart（#52）：最大架构改动；先 server-side accumulator，再 UI footer
+Phase 6 — Tier 3 work-status panel（#51）：最大 feature；先 pinned-context + duration 计时数据契约，再决定面板集成路径
+Phase 7 — Tier 3 vibrancy/glass（#54）：theme 统一，配合 fork theme token skill
+Phase 8 — 版本号 + CHANGELOG：发布收尾
+```
+
+**Work Item 已开**（GitLab 已建，2026-08-11）：
+
+| Tier | WI | 标题 |
+|---|---|---|
+| 3 | [#122](https://coding.s-s.city/songsong/openchamber/-/issues/122) | [1.18.2][High risk] Unified work-status observability panel |
+| 3 | [#123](https://coding.s-s.city/songsong/openchamber/-/issues/123) | [1.18.2][High risk] Apply & Restart accumulator for OpenCode config changes |
+| 3 | [#124](https://coding.s-s.city/songsong/openchamber/-/issues/124) | [1.18.2][High risk] Cold-start perf 58%/22% — finish lazy-loading gaps |
+| 3 | [#125](https://coding.s-s.city/songsong/openchamber/-/issues/125) | [1.18.2][High risk] Remove macOS vibrancy + unify glass surfaces via theme tokens |
+| 2 | [#126](https://coding.s-s.city/songsong/openchamber/-/issues/126) | [1.18.2] xAI quota provider |
+| 2 | [#127](https://coding.s-s.city/songsong/openchamber/-/issues/127) | [1.18.2] Scheduled tasks markdown loops (.agents/loops/*.md) |
+| 2 | [#128](https://coding.s-s.city/songsong/openchamber/-/issues/128) | [1.18.2] MCP OAuth reliability (depends on #123) |
+| 2 | [#129](https://coding.s-s.city/songsong/openchamber/-/issues/129) | [1.18.2] Relay host keepalive for actually-using devices |
+| 2 | [#130](https://coding.s-s.city/songsong/openchamber/-/issues/130) | [1.18.2] Mobile cold-start pending question recovery |
+| 2 | [#131](https://coding.s-s.city/songsong/openchamber/-/issues/131) | [1.18.2] macOS folder permission denial recovery |
+| 2 | [#132](https://coding.s-s.city/songsong/openchamber/-/issues/132) | [1.18.2] Run repo post-checkout hook after worktree bootstrap |
+| 1 | [#133](https://coding.s-s.city/songsong/openchamber/-/issues/133) | [1.18.2] Tier 1 batch — UI/CSS/test/chore independent fixes |
+
+依赖关系：#128 → #123（Apply & Restart 先行）；#133 的 i18n shorten 项也 → #123。其余 WI 独立可并行。建议合并顺序：Phase 1 = #133；Phase 2 = #126/#127/#129/#130/#131/#132（独立）；Phase 3 = #128（依赖 #123）；Phase 4 = #124（perf）；Phase 5 = #123（Apply & Restart）；Phase 6 = #122（work-status panel）；Phase 7 = #125（vibrancy/glass）。
+
+**双源规则**：每个延期或新发现的运行时能力先在 GitLab 建 WI（milestone `v1.18.2` + labels），挂到总览 [#1](https://coding.s-s.city/songsong/openchamber/-/issues/1)；本文档同步加 ⏸️/🟡/🟠 状态并链到 WI。已完成项 ✅ 并链到 WI，再在 #1 checklist 勾选。
+
+**已完成 recon 证据**：
+- vite chunk 状态：`vite.config.ts:35-67`（Bun parsing + vendor chunks + Vite preload isolation）；`MainLayout.tsx:35-46`（SettingsView lazy）；`CommandPalette.tsx:35-36`（静态 import SettingsView 拉入主图——剩余缺口）；`PermissionCard.tsx:7` / `DiffPreview.tsx:2`（静态 Prism import——剩余缺口）；`MessageBody.tsx:1528-1531`（html-to-image lazy ✅）。
+- Apply & Restart 现状：`lifecycle.js:948-986` `refreshOpenCodeAfterConfigChange` → `restartOpenCode('config_change')`；10+ 路由点立即调用（`config-entity-routes.js:47-68, 111-186, 309-390`、`config-routes.js:29-47, 90-143`、`routes.js:555-611, 619-686`、`plugin-routes.js:61`、`skill-routes.js:485, 536, 626, 654, 669, 761`、`config-file-watcher.js:94-143`）；`SettingsView.tsx:857-880` 当前是手动 Reload；`PUT /api/config/settings` 不 restart（`routes.js:431-442`）。
+- Work-status 组件覆盖：goal（`SessionGoalRow.tsx:18-105`）、todo（`toolRenderers.tsx:371-504`、`ProgressiveGroup.tsx:145-213`）、subagent（`ToolPart.tsx:1768-1807, 2626-2700`）、MCP（`McpSidebar.tsx:32-59`、`McpPage.tsx:425-497`）、context usage（`ContextSidebarTab.tsx:426-516`、`ContextUsageDisplay.tsx:9-46`）；**缺失**：pinned-context 数据契约、session work-duration 计时（`SessionNodeItem.tsx:648-650` 只有 timestamp）。
+
+**未启动项**：本审计仅完成 release-note feature inventory + 关键 recon；尚未逐 commit / file diff。后续每个 WI 关闭前必须完成实现、定向测试、全仓 type-check/lint/build、对应运行面 matching-surface QA，并把验证证据回写到本节。

@@ -35,6 +35,9 @@ export const createSettingsHelpers = (dependencies) => {
   const MODEL_PICKER_LAYOUT_MAX_SERVERS = 64;
   const MODEL_PICKER_LAYOUT_MAX_ORDER = 256;
   const MODEL_PICKER_LAYOUT_MAX_COLLAPSED = 256;
+  const LOCAL_STORE_MAX_ENTRIES = 512;
+  const LOCAL_STORE_MAX_KEY_LENGTH = 256;
+  const LOCAL_STORE_MAX_VALUE_LENGTH = 256 * 1024;
 
   const normalizeStringRecordOfStringArrays = (value) => {
     if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -875,6 +878,21 @@ export const createSettingsHelpers = (dependencies) => {
     }
     if (typeof candidate.sttTranscribeOnStop === 'boolean') {
       result.sttTranscribeOnStop = candidate.sttTranscribeOnStop;
+    }
+
+    // UI safeStorage bag — hosts non-DesktopSettings preferences (display mode, locale, sidebar state) so they survive origin/port changes.
+    if (candidate.localStore && typeof candidate.localStore === 'object' && !Array.isArray(candidate.localStore)) {
+      const sanitized = {};
+      let entryCount = 0;
+      for (const [key, value] of Object.entries(candidate.localStore)) {
+        if (entryCount >= LOCAL_STORE_MAX_ENTRIES) break;
+        if (typeof key !== 'string' || key.length === 0 || key.length > LOCAL_STORE_MAX_KEY_LENGTH) continue;
+        if (typeof value !== 'string') continue;
+        if (value.length > LOCAL_STORE_MAX_VALUE_LENGTH) continue;
+        sanitized[key] = value;
+        entryCount += 1;
+      }
+      result.localStore = sanitized;
     }
 
     if (Array.isArray(candidate.remoteInstances)) {

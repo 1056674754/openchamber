@@ -745,6 +745,8 @@ export interface SettingsPayload {
   pwaAppName?: string;
   mobileKeyboardMode?: 'native' | 'resize-content';
 
+  localStore?: Record<string, string>;
+
   [key: string]: unknown;
 }
 

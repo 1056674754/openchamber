@@ -1,4 +1,4 @@
-import { LOCALE_STORAGE_KEY, normalizeLocale, type Locale } from './runtime';
+import { type Locale, readStoredLocale } from './runtime';
 
 export type BootstrapMessages = {
   startingApi: string;
@@ -228,16 +228,5 @@ export const readStoredLocaleForBootstrap = (): Locale => {
   if (typeof window === 'undefined') {
     return 'en';
   }
-
-  try {
-    const raw = window.localStorage.getItem(LOCALE_STORAGE_KEY);
-    if (!raw) {
-      return 'en';
-    }
-
-    const parsed = JSON.parse(raw) as { locale?: unknown };
-    return typeof parsed.locale === 'string' ? normalizeLocale(parsed.locale) : 'en';
-  } catch {
-    return 'en';
-  }
+  return readStoredLocale() ?? 'en';
 };

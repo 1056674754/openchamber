@@ -1,5 +1,7 @@
 export type Locale = 'en' | 'zh-CN' | 'zh-TW' | 'uk' | 'es' | 'pt-BR' | 'ko' | 'pl' | 'ja' | 'de';
 
+import { getSafeStorage } from '@/stores/utils/safeStorage';
+
 export const LOCALES = ['en', 'zh-CN', 'zh-TW', 'uk', 'es', 'pt-BR', 'ko', 'pl', 'ja', 'de'] as const satisfies readonly Locale[];
 
 export const DEFAULT_LOCALE: Locale = 'en';
@@ -65,13 +67,21 @@ export function normalizeLocale(value: string | undefined | null): Locale {
   return DEFAULT_LOCALE;
 }
 
-export function readStoredLocale(): Locale | undefined {
+const getLocaleStorage = (): { getItem: (k: string) => string | null; setItem: (k: string, v: string) => void } | null => {
   if (typeof window === 'undefined') {
+    return null;
+  }
+  return getSafeStorage();
+};
+
+export function readStoredLocale(): Locale | undefined {
+  const storage = getLocaleStorage();
+  if (!storage) {
     return undefined;
   }
 
   try {
-    const raw = window.localStorage.getItem(LOCALE_STORAGE_KEY);
+    const raw = storage.getItem(LOCALE_STORAGE_KEY);
     if (!raw) {
       return undefined;
     }
@@ -83,12 +93,13 @@ export function readStoredLocale(): Locale | undefined {
 }
 
 export function writeStoredLocale(locale: Locale): void {
-  if (typeof window === 'undefined') {
+  const storage = getLocaleStorage();
+  if (!storage) {
     return;
   }
 
   try {
-    window.localStorage.setItem(LOCALE_STORAGE_KEY, JSON.stringify({ locale }));
+    storage.setItem(LOCALE_STORAGE_KEY, JSON.stringify({ locale }));
   } catch {
     return;
   }

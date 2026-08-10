@@ -1,6 +1,10 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { ProjectSortOrder } from '@/lib/projectSorting';
+import {
+  createDeferredSafeJSONStorage,
+  registerSafeStorageRehydrate,
+} from '@/stores/utils/safeStorage';
 
 export type SessionDisplayMode = 'default' | 'minimal';
 export type SessionGroupingMode = 'by-worktree' | 'flat';
@@ -56,6 +60,12 @@ export const useSessionDisplayStore = create<SessionDisplayStore>()(
       name: 'session-display-mode',
       version: 2,
       migrate: migrateSessionDisplayState,
+      storage: createDeferredSafeJSONStorage(),
     },
   ),
 );
+
+// Stores initialize before host settings arrive; re-read after hydrate.
+registerSafeStorageRehydrate(() => {
+  void useSessionDisplayStore.persist.rehydrate();
+});

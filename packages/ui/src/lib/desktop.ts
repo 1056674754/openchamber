@@ -238,6 +238,13 @@ export type DesktopSettings = {
   sttSilenceThresholdDb?: number;
   sttSilenceHoldMs?: number;
   sttTranscribeOnStop?: boolean;
+
+  /**
+   * UI safeStorage bag (display mode, locale, sidebar state, etc.).
+   * Lives in the host file because Desktop's loopback port changes
+   * per launch, which would scope `localStorage` to a different origin.
+   */
+  localStore?: Record<string, string>;
 };
 
 type ElectronRuntimeGlobal = {

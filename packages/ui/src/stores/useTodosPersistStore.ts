@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { devtools, persist } from 'zustand/middleware';
 import type { Todo } from '@opencode-ai/sdk/v2/client';
-import { createDeferredSafeJSONStorage } from './utils/safeStorage';
+import { createDeferredSafeJSONStorage, registerSafeStorageRehydrate } from './utils/safeStorage';
 
 const MAX_SESSIONS = 50;
 
@@ -62,3 +62,8 @@ export const useTodosPersistStore = create<TodosPersistState>()(
         { name: 'TodosPersistStore' },
     ),
 );
+
+// Stores initialize before host settings arrive; re-read after hydrate.
+registerSafeStorageRehydrate(() => {
+    void useTodosPersistStore.persist.rehydrate();
+});

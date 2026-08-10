@@ -1,13 +1,12 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test, mock } from 'bun:test';
 
-const importSafeStorage = async () => {
+const importSafeStorage = async (): Promise<typeof import('./safeStorage')> => {
     return await import(`./safeStorage.ts?test=${Date.now()}-${Math.random()}`) as typeof import('./safeStorage');
 };
 
-const createMockBaseStorage = (store: Map<string, string>, shouldThrowOnSet = false): Storage => ({
+const createMockBaseStorage = (store: Map<string, string>): Storage => ({
     getItem: (key: string) => store.get(key) ?? null,
     setItem: (key: string, value: string) => {
-        if (shouldThrowOnSet) throw new Error('QuotaExceededError');
         store.set(key, value);
     },
     removeItem: (key: string) => {
@@ -22,265 +21,187 @@ const createMockBaseStorage = (store: Map<string, string>, shouldThrowOnSet = fa
     },
 } as Storage);
 
+const withMockWindow = <T>(
+    mockWindow: Partial<Window> & { addEventListener?: typeof window.addEventListener },
+    fn: () => Promise<T>,
+): Promise<T> => {
+    const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: mockWindow });
+    return fn().finally(() => {
+        if (previousWindow) {
+            Object.defineProperty(globalThis, 'window', previousWindow);
+        } else {
+            delete (globalThis as { window?: unknown }).window;
+        }
+    });
+};
+
 describe('safeStorage', () => {
-    test('falls back to memory when storage getters throw', async () => {
-        const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
-        const throwingWindow = {};
-
-        Object.defineProperties(throwingWindow, {
-            localStorage: {
-                get() {
-                    throw new Error('localStorage blocked');
-                },
-            },
-            sessionStorage: {
-                get() {
-                    throw new Error('sessionStorage blocked');
-                },
-            },
+    test('reads return null on a fresh module instance', async () => {
+        await withMockWindow({ addEventListener: () => {} }, async () => {
+            const { getSafeStorage } = await importSafeStorage();
+            const storage = getSafeStorage();
+            expect(storage.getItem('missing')).toBeNull();
+            expect(storage.length).toBe(0);
         });
+    });
 
-        Object.defineProperty(globalThis, 'window', {
-            configurable: true,
-            value: throwingWindow,
+    test('writes are visible synchronously to subsequent reads', async () => {
+        await withMockWindow({ addEventListener: () => {} }, async () => {
+            const { getSafeStorage } = await importSafeStorage();
+            const storage = getSafeStorage();
+
+            storage.setItem('a', '1');
+            storage.setItem('b', '2');
+            expect(storage.getItem('a')).toBe('1');
+            expect(storage.getItem('b')).toBe('2');
+            expect(storage.length).toBe(2);
+            const keys = [storage.key(0), storage.key(1)].sort();
+            expect(keys).toEqual(['a', 'b']);
+            expect(storage.key(2)).toBeNull();
         });
-
-        try {
-            const { getSafeSessionStorage, getSafeStorage } = await importSafeStorage();
-            const storage = getSafeStorage();
-            const sessionStorage = getSafeSessionStorage();
-
-            storage.setItem('local-key', 'local-value');
-            sessionStorage.setItem('session-key', 'session-value');
-
-            expect(storage.getItem('local-key')).toBe('local-value');
-            expect(sessionStorage.getItem('session-key')).toBe('session-value');
-        } finally {
-            if (previousWindow) {
-                Object.defineProperty(globalThis, 'window', previousWindow);
-            } else {
-                delete (globalThis as { window?: unknown }).window;
-            }
-        }
     });
 
-    test('write failure preserves existing value in baseStorage', async () => {
-        const baseStore = new Map([['key-1', 'old-value']]);
-        const mockWindow = {
-            localStorage: createMockBaseStorage(baseStore, true),
-            sessionStorage: createMockBaseStorage(new Map()),
-        };
-        const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
-        Object.defineProperty(globalThis, 'window', { configurable: true, value: mockWindow });
-
-        try {
+    test('removeItem clears the in-memory entry', async () => {
+        await withMockWindow({ addEventListener: () => {} }, async () => {
             const { getSafeStorage } = await importSafeStorage();
             const storage = getSafeStorage();
+            storage.setItem('a', '1');
+            storage.setItem('b', '2');
 
-            storage.setItem('key-1', 'new-value');
-
-            expect(baseStore.get('key-1')).toBe('old-value');
-            expect(storage.getItem('key-1')).toBe('new-value');
-        } finally {
-            if (previousWindow) {
-                Object.defineProperty(globalThis, 'window', previousWindow);
-            } else {
-                delete (globalThis as { window?: unknown }).window;
-            }
-        }
-    });
-
-    test('subsequent writes retry baseStorage after a failure', async () => {
-        const baseStore = new Map<string, string>();
-        let setThrowing = true;
-        const baseStorage: Storage = {
-            getItem: (key) => baseStore.get(key) ?? null,
-            setItem: (key, value) => {
-                if (setThrowing) throw new Error('quota');
-                baseStore.set(key, value);
-            },
-            removeItem: (key) => { baseStore.delete(key); },
-            clear: () => { baseStore.clear(); },
-            key: (i) => Array.from(baseStore.keys())[i] ?? null,
-            get length() { return baseStore.size; },
-        } as Storage;
-
-        const mockWindow = { localStorage: baseStorage, sessionStorage: createMockBaseStorage(new Map()) };
-        const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
-        Object.defineProperty(globalThis, 'window', { configurable: true, value: mockWindow });
-
-        try {
-            const { getSafeStorage } = await importSafeStorage();
-            const storage = getSafeStorage();
-
-            storage.setItem('k', 'v1');
-            expect(baseStore.has('k')).toBe(false);
-
-            setThrowing = false;
-            storage.setItem('k', 'v2');
-            expect(baseStore.get('k')).toBe('v2');
-        } finally {
-            if (previousWindow) {
-                Object.defineProperty(globalThis, 'window', previousWindow);
-            } else {
-                delete (globalThis as { window?: unknown }).window;
-            }
-        }
-    });
-
-    test('fallback value takes read priority over stale baseStorage value', async () => {
-        const baseStore = new Map([['k', 'stale']]);
-        let setThrowing = true;
-        const baseStorage: Storage = {
-            getItem: (key) => baseStore.get(key) ?? null,
-            setItem: (key, value) => {
-                if (setThrowing) throw new Error('quota');
-                baseStore.set(key, value);
-            },
-            removeItem: (key) => { baseStore.delete(key); },
-            clear: () => { baseStore.clear(); },
-            key: (i) => Array.from(baseStore.keys())[i] ?? null,
-            get length() { return baseStore.size; },
-        } as Storage;
-
-        const mockWindow = { localStorage: baseStorage, sessionStorage: createMockBaseStorage(new Map()) };
-        const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
-        Object.defineProperty(globalThis, 'window', { configurable: true, value: mockWindow });
-
-        try {
-            const { getSafeStorage } = await importSafeStorage();
-            const storage = getSafeStorage();
-
-            expect(storage.getItem('k')).toBe('stale');
-
-            storage.setItem('k', 'fresh');
-            expect(storage.getItem('k')).toBe('fresh');
-
-            setThrowing = false;
-            storage.setItem('k', 'persisted');
-            expect(baseStore.get('k')).toBe('persisted');
-            expect(storage.getItem('k')).toBe('persisted');
-        } finally {
-            if (previousWindow) {
-                Object.defineProperty(globalThis, 'window', previousWindow);
-            } else {
-                delete (globalThis as { window?: unknown }).window;
-            }
-        }
-    });
-
-    test('removeItem clears both baseStorage and fallback', async () => {
-        const baseStore = new Map<string, string>([['a', 'base'], ['b', 'base']]);
-        const setThrowing = true;
-        const baseStorage: Storage = {
-            getItem: (key) => baseStore.get(key) ?? null,
-            setItem: (key, value) => {
-                if (setThrowing) throw new Error('quota');
-                baseStore.set(key, value);
-            },
-            removeItem: (key) => { baseStore.delete(key); },
-            clear: () => { baseStore.clear(); },
-            key: (i) => Array.from(baseStore.keys())[i] ?? null,
-            get length() { return baseStore.size; },
-        } as Storage;
-
-        const mockWindow = { localStorage: baseStorage, sessionStorage: createMockBaseStorage(new Map()) };
-        const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
-        Object.defineProperty(globalThis, 'window', { configurable: true, value: mockWindow });
-
-        try {
-            const { getSafeStorage } = await importSafeStorage();
-            const storage = getSafeStorage();
-
-            storage.setItem('c', 'fallback-only');
             storage.removeItem('a');
-            storage.removeItem('c');
 
-            expect(baseStore.has('a')).toBe(false);
             expect(storage.getItem('a')).toBeNull();
-            expect(storage.getItem('c')).toBeNull();
-            expect(baseStore.has('b')).toBe(true);
-        } finally {
-            if (previousWindow) {
-                Object.defineProperty(globalThis, 'window', previousWindow);
-            } else {
-                delete (globalThis as { window?: unknown }).window;
-            }
-        }
+            expect(storage.getItem('b')).toBe('2');
+            expect(storage.length).toBe(1);
+        });
     });
 
-    test('defers JSON serialization while preserving read-after-write', async () => {
-        const baseStore = new Map<string, string>();
-        const mockWindow = {
-            localStorage: createMockBaseStorage(baseStore),
-            sessionStorage: createMockBaseStorage(new Map()),
-            addEventListener: () => {},
-        };
-        const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
-        const previousStringify = JSON.stringify;
-        const stringifyCalls: unknown[] = [];
-        Object.defineProperty(globalThis, 'window', { configurable: true, value: mockWindow });
+    test('clear empties the in-memory map', async () => {
+        await withMockWindow({ addEventListener: () => {} }, async () => {
+            const { getSafeStorage } = await importSafeStorage();
+            const storage = getSafeStorage();
+            storage.setItem('a', '1');
+            storage.setItem('b', '2');
 
-        try {
+            storage.clear();
+
+            expect(storage.length).toBe(0);
+            expect(storage.getItem('a')).toBeNull();
+        });
+    });
+
+    test('hydrateLocalStore replaces the in-memory state and notifies subscribers', async () => {
+        await withMockWindow({ addEventListener: () => {} }, async () => {
+            const { getSafeStorage, hydrateLocalStore, registerSafeStorageRehydrate } = await importSafeStorage();
+            const storage = getSafeStorage();
+            storage.setItem('stale', 'value');
+
+            let rehydrated = 0;
+            registerSafeStorageRehydrate(() => { rehydrated += 1; });
+
+            hydrateLocalStore({ fresh: 'host', multi: 'yes' });
+
+            expect(storage.getItem('stale')).toBeNull();
+            expect(storage.getItem('fresh')).toBe('host');
+            expect(storage.getItem('multi')).toBe('yes');
+            expect(rehydrated).toBe(1);
+        });
+    });
+
+    test('hydrateLocalStore ignores non-string values and empty keys', async () => {
+        await withMockWindow({ addEventListener: () => {} }, async () => {
+            const { getSafeStorage, hydrateLocalStore } = await importSafeStorage();
+            const storage = getSafeStorage();
+
+            hydrateLocalStore({
+                good: 'value',
+                '': 'empty-key',
+                bad: 123 as unknown as string,
+            } as Record<string, string>);
+
+            expect(storage.getItem('good')).toBe('value');
+            expect(storage.length).toBe(1);
+        });
+    });
+
+    test('writes schedule a coalesced flush that forwards the snapshot to updateDesktopSettings', async () => {
+        const calls: Array<{ localStore?: Record<string, string> }> = [];
+        const updateDesktopSettings = (changes: { localStore?: Record<string, string> }): Promise<void> => {
+            calls.push(changes);
+            return Promise.resolve();
+        };
+        await mock.module('@/lib/persistence', () => ({
+            updateDesktopSettings: mock(updateDesktopSettings),
+            flushPendingSettingsUpdates: () => Promise.resolve(true),
+            invalidateSettingsCache: () => {},
+        }));
+
+        await withMockWindow({ addEventListener: () => {} }, async () => {
+            const { getSafeStorage, flushSafeStorage } = await importSafeStorage();
+            const storage = getSafeStorage();
+
+            storage.setItem('a', '1');
+            storage.setItem('b', '2');
+            storage.setItem('a', '3');
+
+            await flushSafeStorage();
+        });
+
+        expect(calls.length).toBeGreaterThan(0);
+        const lastCall = calls[calls.length - 1];
+        expect(lastCall?.localStore).toEqual({ a: '3', b: '2' });
+    });
+
+    test('createDeferredSafeJSONStorage preserves read-after-write and batches serialization', async () => {
+        const calls: Array<{ localStore?: Record<string, string> }> = [];
+        const updateDesktopSettings = (changes: { localStore?: Record<string, string> }): Promise<void> => {
+            calls.push(changes);
+            return Promise.resolve();
+        };
+        const stringifyCalls: unknown[] = [];
+        const previousStringify = JSON.stringify;
+        await mock.module('@/lib/persistence', () => ({ updateDesktopSettings: mock(updateDesktopSettings) }));
+
+        await withMockWindow({ addEventListener: () => {} }, async () => {
             JSON.stringify = ((value: unknown, replacer?: Parameters<typeof JSON.stringify>[1], space?: Parameters<typeof JSON.stringify>[2]) => {
                 stringifyCalls.push(value);
                 return previousStringify(value, replacer, space);
             }) as typeof JSON.stringify;
 
-            const { createDeferredSafeJSONStorage } = await importSafeStorage();
+            const { createDeferredSafeJSONStorage, flushSafeStorage } = await importSafeStorage();
             const storage = createDeferredSafeJSONStorage<{ value: string }>();
             if (!storage) throw new Error('storage unavailable');
 
             storage.setItem('key', { state: { value: 'first' } });
             storage.setItem('key', { state: { value: 'latest' } });
 
-            expect(stringifyCalls).toHaveLength(0);
-            expect(baseStore.has('key')).toBe(false);
+            const before = calls.length;
             expect(storage.getItem('key')).toEqual({ state: { value: 'latest' } });
 
             await new Promise((resolve) => setTimeout(resolve, 10));
+            await flushSafeStorage();
 
-            expect(stringifyCalls).toEqual([{ state: { value: 'latest' } }]);
-            expect(baseStore.get('key')).toBe('{"state":{"value":"latest"}}');
-        } finally {
-            JSON.stringify = previousStringify;
-            if (previousWindow) {
-                Object.defineProperty(globalThis, 'window', previousWindow);
-            } else {
-                delete (globalThis as { window?: unknown }).window;
-            }
-        }
+            expect(calls.length).toBeGreaterThan(before);
+            expect(stringifyCalls.filter((v) => v && typeof v === 'object' && 'state' in (v as object))).toEqual([{ state: { value: 'latest' } }]);
+        });
+
+        JSON.stringify = previousStringify;
     });
 
-    test('flushes deferred direct writes on pagehide', async () => {
-        const baseStore = new Map<string, string>();
-        const listeners = new Map<string, Array<() => void>>();
+    test('session storage still wraps window.sessionStorage with fallback', async () => {
+        const sessionStore = new Map<string, string>();
         const mockWindow = {
-            localStorage: createMockBaseStorage(baseStore),
-            sessionStorage: createMockBaseStorage(new Map()),
-            addEventListener: (event: string, listener: () => void) => {
-                listeners.set(event, [...(listeners.get(event) ?? []), listener]);
-            },
+            sessionStorage: createMockBaseStorage(sessionStore),
+            addEventListener: () => {},
         };
-        const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
-        Object.defineProperty(globalThis, 'window', { configurable: true, value: mockWindow });
+        await withMockWindow(mockWindow, async () => {
+            const { getSafeSessionStorage } = await importSafeStorage();
+            const storage = getSafeSessionStorage();
 
-        try {
-            const { getDeferredSafeStorage } = await importSafeStorage();
-            const storage = getDeferredSafeStorage();
-            storage.setItem('key', 'value');
-
-            expect(baseStore.has('key')).toBe(false);
-            expect(storage.getItem('key')).toBe('value');
-
-            for (const listener of listeners.get('pagehide') ?? []) listener();
-            expect(baseStore.get('key')).toBe('value');
-        } finally {
-            if (previousWindow) {
-                Object.defineProperty(globalThis, 'window', previousWindow);
-            } else {
-                delete (globalThis as { window?: unknown }).window;
-            }
-        }
+            storage.setItem('k', 'v');
+            expect(sessionStore.get('k')).toBe('v');
+            expect(storage.getItem('k')).toBe('v');
+        });
     });
 });
