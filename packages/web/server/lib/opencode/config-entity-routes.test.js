@@ -4,14 +4,13 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { registerConfigEntityRoutes } from './config-entity-routes.js';
 
-const createApp = ({ refreshResult }) => {
+const createApp = () => {
   const app = express();
   app.use(express.json());
   registerConfigEntityRoutes(app, {
     resolveProjectDirectory: vi.fn(async () => ({ directory: '/tmp/project', error: null })),
     resolveOptionalProjectDirectory: vi.fn(async () => ({ directory: '/tmp/project', error: null })),
-    refreshOpenCodeAfterConfigChange: vi.fn(async () => refreshResult),
-    clientReloadDelayMs: 250,
+    markPendingConfigRestart: vi.fn(() => ({ count: 1, reasons: ['agent creation'] })),
     getAgentSources: vi.fn(),
     getAgentConfig: vi.fn(),
     createAgent: vi.fn(),
@@ -37,8 +36,8 @@ const createApp = ({ refreshResult }) => {
 };
 
 describe('agent config mutation responses', () => {
-  it('requires a manual restart when the connected OpenCode server is external', async () => {
-    const app = createApp({ refreshResult: { reloaded: false, external: true } });
+  it('defers restart and returns the authoritative pending snapshot', async () => {
+    const app = createApp();
 
     const response = await request(app)
       .post('/api/config/agents/build')
@@ -48,7 +47,9 @@ describe('agent config mutation responses', () => {
     expect(response.body).toMatchObject({
       success: true,
       requiresReload: false,
-      requiresManualRestart: true,
+      requiresRestart: true,
+      restartDeferred: true,
+      pendingRestart: { count: 1, reasons: ['agent creation'] },
     });
     expect(response.body).not.toHaveProperty('reloadDelayMs');
   });
