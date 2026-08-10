@@ -12,7 +12,7 @@ let projectDir;
 let userConfigPath;
 let rootDir;
 let plugins;
-let refreshOpenCodeAfterConfigChange;
+let markPendingConfigRestart;
 let app;
 let cleanupPaths;
 
@@ -27,8 +27,7 @@ function createApp(overrides = {}) {
   testApp.use(express.json());
   registerPluginRoutes(testApp, {
     resolveOptionalProjectDirectory: async () => ({ directory: projectDir, error: null }),
-    refreshOpenCodeAfterConfigChange,
-    clientReloadDelayMs: 25,
+    markPendingConfigRestart,
     listPluginEntries: plugins.listPluginEntries,
     getPluginEntry: plugins.getPluginEntry,
     createPluginEntry: plugins.createPluginEntry,
@@ -78,7 +77,7 @@ describe('opencode plugin routes', () => {
     projectDir = fs.mkdtempSync(path.join(rootDir, 'project-'));
     fs.rmSync(userConfigPath, { force: true });
     fs.rmSync(path.join(rootDir, 'plugins'), { recursive: true, force: true });
-    refreshOpenCodeAfterConfigChange = mock(async () => undefined);
+    markPendingConfigRestart = mock(() => ({ count: 1, reasons: ['plugin change'] }));
     cleanupPaths = [];
     app = createApp();
   });
@@ -268,8 +267,13 @@ describe('opencode plugin routes', () => {
   test('POST /entry creates entry and requires reload', async () => {
     const response = await createEntry('a');
 
-    expect(response.body).toMatchObject({ success: true, requiresReload: true, reloadDelayMs: 25 });
-    expect(refreshOpenCodeAfterConfigChange).toHaveBeenCalledWith('plugin entry creation');
+    expect(response.body).toMatchObject({
+      success: true,
+      requiresReload: false,
+      requiresRestart: true,
+      restartDeferred: true,
+    });
+    expect(markPendingConfigRestart).toHaveBeenCalledWith('plugin entry creation', { scope: 'plugins' });
   });
 
   test('GET after POST returns created entry', async () => {
@@ -304,7 +308,7 @@ describe('opencode plugin routes', () => {
     expect(response.body.success).toBe(true);
     const after = await request(app).get('/api/config/plugins').expect(200);
     expect(after.body.entries[0]).toEqual(expect.objectContaining({ spec: 'b', scope: 'user' }));
-    expect(refreshOpenCodeAfterConfigChange).toHaveBeenCalledWith('plugin entry update');
+    expect(markPendingConfigRestart).toHaveBeenCalledWith('plugin entry update', { scope: 'plugins' });
   });
 
   test('DELETE /entry/:id removes entry and prunes plugin key', async () => {
@@ -317,15 +321,20 @@ describe('opencode plugin routes', () => {
     const after = await request(app).get('/api/config/plugins').expect(200);
     expect(after.body.entries).toEqual([]);
     expect(readJson(userConfigPath).plugin).toBeUndefined();
-    expect(refreshOpenCodeAfterConfigChange).toHaveBeenCalledWith('plugin entry deletion');
+    expect(markPendingConfigRestart).toHaveBeenCalledWith('plugin entry deletion', { scope: 'plugins' });
   });
 
   test('POST /file writes plugin dir file', async () => {
     const response = await createFile('test.js', '//x');
 
-    expect(response.body).toMatchObject({ success: true, requiresReload: true });
+    expect(response.body).toMatchObject({
+      success: true,
+      requiresReload: false,
+      requiresRestart: true,
+      restartDeferred: true,
+    });
     expect(fs.readFileSync(path.join(rootDir, 'plugins', 'test.js'), 'utf8')).toBe('//x');
-    expect(refreshOpenCodeAfterConfigChange).toHaveBeenCalledWith('plugin file creation');
+    expect(markPendingConfigRestart).toHaveBeenCalledWith('plugin file creation', { scope: 'plugins' });
   });
 
   test('POST duplicate file returns 409', async () => {
@@ -350,7 +359,7 @@ describe('opencode plugin routes', () => {
       .expect(200);
 
     expect(fs.readFileSync(path.join(rootDir, 'plugins', 'test.js'), 'utf8')).toBe('//y');
-    expect(refreshOpenCodeAfterConfigChange).toHaveBeenCalledWith('plugin file update');
+    expect(markPendingConfigRestart).toHaveBeenCalledWith('plugin file update', { scope: 'plugins' });
   });
 
   test('DELETE /file/:id unlinks file', async () => {
@@ -361,7 +370,7 @@ describe('opencode plugin routes', () => {
     await request(app).delete(`/api/config/plugins/file/${encodeURIComponent(id)}`).expect(200);
 
     expect(fs.existsSync(path.join(rootDir, 'plugins', 'test.js'))).toBe(false);
-    expect(refreshOpenCodeAfterConfigChange).toHaveBeenCalledWith('plugin file deletion');
+    expect(markPendingConfigRestart).toHaveBeenCalledWith('plugin file deletion', { scope: 'plugins' });
   });
 
   test('PATCH unknown entry id returns 404', async () => {
