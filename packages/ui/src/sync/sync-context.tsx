@@ -1010,24 +1010,24 @@ const updateRoutingIndexFromEvent = (
  * recovery paths only; normal session switches rely on primary SSE reducer
  * state for `question.asked` / `permission.asked` events. When
  * `candidateSessionIds` is omitted, every session known to the directory store
- * is treated as a candidate.
+ * is treated as a candidate; when provided, recovery is limited to those IDs.
  */
 export async function resyncBlockingRequestsForDirectory(
   directory: string,
   store: StoreApi<DirectoryStore>,
   candidateSessionIds?: string[],
-  options?: { serverId?: string; sdk?: OpencodeClient },
+  options?: { serverId?: string; sdk?: OpencodeClient; includePermissions?: boolean },
 ) {
   const serverId = options?.serverId ?? DEFAULT_SERVER_ID
   const before = store.getState()
-  const knownSessionIds = new Set<string>([
+  const candidateIds = new Set<string>(candidateSessionIds ?? [
     ...before.session.map((session) => session.id),
     ...Object.keys(before.message ?? {}),
     ...Object.keys(before.session_status ?? {}),
     ...Object.keys(before.question ?? {}),
     ...Object.keys(before.permission ?? {}),
   ])
-  const candidates = candidateSessionIds ?? Array.from(knownSessionIds)
+  const candidates = Array.from(candidateIds)
   if (candidates.length === 0) return { questions: true, permissions: true }
   let questionsSynced = true
   let permissionsSynced = true
@@ -1042,7 +1042,7 @@ export async function resyncBlockingRequestsForDirectory(
     const grouped: Record<string, QuestionRequest[]> = {}
     for (const q of pendingQuestions) {
       if (!q?.id || !q.sessionID) continue
-      if (!knownSessionIds.has(q.sessionID)) continue
+      if (!candidateIds.has(q.sessionID)) continue
       const list = grouped[q.sessionID]
       if (list) list.push(q)
       else grouped[q.sessionID] = [q]
@@ -1092,6 +1092,10 @@ export async function resyncBlockingRequestsForDirectory(
     questionsSynced = false
   }
 
+  if (options?.includePermissions === false) {
+    return { questions: questionsSynced, permissions: true }
+  }
+
   // Re-fetch pending permissions — same rationale as questions.
   try {
     const beforeSignatures = new Map(
@@ -1101,7 +1105,7 @@ export async function resyncBlockingRequestsForDirectory(
     const grouped: Record<string, PermissionRequest[]> = {}
     for (const permission of pendingPermissions) {
       if (!permission?.id || !permission.sessionID) continue
-      if (!knownSessionIds.has(permission.sessionID)) continue
+      if (!candidateIds.has(permission.sessionID)) continue
       const list = grouped[permission.sessionID]
       if (list) list.push(permission)
       else grouped[permission.sessionID] = [permission]

@@ -8,7 +8,7 @@ import {
   mergeOptimisticPage,
   type OptimisticItem,
 } from "./optimistic"
-import { dropCachedSessionMessageRecordsSnapshots, useDirectoryStore, useSyncDirectory, useChildStoreManager } from "./sync-context"
+import { dropCachedSessionMessageRecordsSnapshots, resyncBlockingRequestsForDirectory, useDirectoryStore, useSyncDirectory, useChildStoreManager } from "./sync-context"
 import { resolveSdkForDirectory } from "./session-actions"
 import { requireExistingSessionDirectory } from "./session-routing"
 import { useSessionUIStore } from "./session-ui-store"
@@ -856,6 +856,27 @@ export function useSync() {
     [getMetaFor, resolveSessionTarget],
   )
 
+  const recoverPendingQuestions = useCallback(
+    async (input: { readonly sessionID: string; readonly directory: string; readonly serverId: string }): Promise<boolean> => {
+      const indexedServerId = serverRegistry.getServerForSession(input.sessionID)
+      const targetServerId = indexedServerId ?? input.serverId
+      const indexedDirectory = useSessionUIStore.getState().getDirectoryForSession(input.sessionID)
+      const targetDirectory = indexedDirectory ?? input.directory
+      const targetStore = targetServerId === DEFAULT_SERVER_ID
+        ? (targetDirectory === directory ? store : childStores.ensureChild(targetDirectory))
+        : getSyncStoresForServer(targetServerId)?.ensureChild(targetDirectory)
+      if (!targetStore) return false
+
+      const result = await resyncBlockingRequestsForDirectory(targetDirectory, targetStore, [input.sessionID], {
+        serverId: targetServerId,
+        sdk: serverRegistry.get(targetServerId)?.client,
+        includePermissions: false,
+      })
+      return result.questions && (targetStore.getState().question[input.sessionID]?.length ?? 0) > 0
+    },
+    [childStores, directory, store],
+  )
+
   const resolveOptimisticTarget = useCallback(
     (input: { sessionID: string; directory?: string | null; serverId?: string | null }) => {
       const hintedDirectory = input.directory || undefined
@@ -955,12 +976,13 @@ export function useSync() {
       hasMore,
       isLoading,
       isComplete,
+      recoverPendingQuestions,
       optimistic: {
         add: optimisticAdd,
         remove: optimisticRemove,
         confirm: optimisticConfirm,
       },
     }),
-    [syncSession, forceRefreshSession, loadMore, loadThroughMessage, hasMore, isLoading, isComplete, optimisticAdd, optimisticRemove, optimisticConfirm],
+    [syncSession, forceRefreshSession, loadMore, loadThroughMessage, hasMore, isLoading, isComplete, recoverPendingQuestions, optimisticAdd, optimisticRemove, optimisticConfirm],
   )
 }

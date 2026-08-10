@@ -10,6 +10,7 @@ import type { ResolvedStarter } from './useDraftStarters';
 import MessageList, { type MessageListHandle } from './MessageList';
 import { PermissionCard } from './PermissionCard';
 import { QuestionCard } from './QuestionCard';
+import { hasActiveQuestionToolInCurrentTurn, recoverPendingQuestionWithRetry } from '@/sync/question-recovery';
 import { SessionRecapNote } from './SessionRecapNote';
 import { StatusRowContainer } from './StatusRowContainer';
 import ScrollToBottomButton from './components/ScrollToBottomButton';
@@ -642,6 +643,30 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
 
     const sessionPermissions = useServerSessionPermissions(activeServerId, scopedBlockingRequestTargets);
     const sessionQuestions = useServerSessionQuestions(activeServerId, scopedBlockingRequestTargets);
+    const hasUnreconciledQuestionTool = React.useMemo(
+        () => !sessionQuestions.some((question) => question.sessionID === currentSessionId)
+            && hasActiveQuestionToolInCurrentTurn(sessionMessages),
+        [currentSessionId, sessionMessages, sessionQuestions],
+    );
+
+    React.useEffect(() => {
+        if (!currentSessionId || !currentSessionDirectory || !hasUnreconciledQuestionTool) return;
+        let cancelled = false;
+
+        void recoverPendingQuestionWithRetry(
+            () => sync.recoverPendingQuestions({
+                sessionID: currentSessionId,
+                directory: currentSessionDirectory,
+                serverId: activeServerId,
+            }),
+            { isCancelled: () => cancelled },
+        );
+
+        return () => {
+            cancelled = true;
+        };
+    }, [activeServerId, currentSessionDirectory, currentSessionId, hasUnreconciledQuestionTool, sync]);
+
     const { isWorking: sessionActivityWorking } = useCurrentSessionActivity();
     const sessionIsWorking = React.useMemo(() => {
         if (!currentSessionId || sessionPermissions.length > 0 || sessionQuestions.length > 0) {

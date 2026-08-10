@@ -140,6 +140,33 @@ describe("resyncBlockingRequestsForDirectory", () => {
     expect(store.getState().permission["ses_a"]?.[0]?.id).toBe("perm_1")
   })
 
+  test("recovers an explicit session before directory bootstrap materializes it", async () => {
+    const store = createDirectoryStore({ session: [] })
+    pendingQuestionsResponse = [buildQuestion()]
+
+    await resyncBlockingRequestsForDirectory("/repo", store, ["ses_a"], { includePermissions: false })
+
+    expect(scopedQuestionListCalls).toEqual(["/repo"])
+    expect(scopedPermissionListCalls).toHaveLength(0)
+    expect(store.getState().question["ses_a"]?.[0]?.id).toBe("que_1")
+  })
+
+  test("limits explicit question recovery to the requested session", async () => {
+    const store = createDirectoryStore({
+      session: [
+        { id: "ses_a", title: "ses_a", time: { created: 1, updated: 1 }, version: "1" },
+        { id: "ses_b", title: "ses_b", time: { created: 1, updated: 1 }, version: "1" },
+      ] as State["session"],
+    })
+    pendingQuestionsResponse = [buildQuestion(), buildQuestion({ id: "que_b", sessionID: "ses_b" })]
+
+    await resyncBlockingRequestsForDirectory("/repo", store, ["ses_a"], { includePermissions: false })
+
+    expect(store.getState().question["ses_a"]?.[0]?.id).toBe("que_1")
+    expect(store.getState().question["ses_b"]).toBe(undefined)
+    expect(scopedPermissionListCalls).toHaveLength(0)
+  })
+
   test("preserves an in-flight SSE-delivered question whose signature changed during the fetch", async () => {
     const store = createDirectoryStore({
       question: { ses_a: [{ ...buildQuestion(), id: "que_initial" }] },
