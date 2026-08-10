@@ -43,6 +43,13 @@ export const COMPOSER_EDITOR_THEME_SPEC = {
     // moment this module is imported.
     '&.cm-editor .cm-cursor, &.cm-editor .cm-dropCursor': {
         borderLeftColor: 'var(--surface-foreground)',
+        // A 2px stroke makes the insertion point remain visible against every
+        // composer surface without relying on a fixed colour. A slight vertical
+        // scale makes it extend beyond the glyphs without changing CodeMirror's
+        // line geometry.
+        borderLeftWidth: '2px',
+        transform: 'scaleY(1.15)',
+        transformOrigin: 'center',
         // CodeMirror's base theme centres the caret on the glyph boundary with
         // `margin-left: -0.6px`, so at the start of any line the 1.2px caret
         // renders at [-0.6px, +0.6px]. `.cm-scroller` clips horizontal overflow

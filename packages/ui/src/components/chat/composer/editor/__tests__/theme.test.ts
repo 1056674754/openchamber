@@ -47,6 +47,19 @@ describe('composerEditorTheme', () => {
     });
 
     /**
+     * A 1.2px caret is a sub-pixel the eye drops on most displays. The stroke
+     * is widened to 2px and given a slight vertical scale so the insertion
+     * point remains visible without changing CodeMirror's line geometry.
+     */
+    test('the caret stroke is widened so the insertion point stays visible', () => {
+        const cursorRule = selectors.find((selector) => selector.includes('.cm-cursor'));
+        expect(cursorRule).toBeDefined();
+        const rule = (COMPOSER_EDITOR_THEME_SPEC as Record<string, Record<string, string>>)[cursorRule ?? ''];
+        expect(parseFloat(rule.borderLeftWidth ?? '0')).toBeGreaterThanOrEqual(2);
+        expect(rule.transform).toBeTruthy();
+    });
+
+    /**
      * CodeMirror centres the caret with `margin-left: -0.6px`, so at the first
      * column of every line the 1.2px caret renders at [-0.6px, +0.6px]. The
      * scroller clips horizontal overflow and the content padding is zero, which
