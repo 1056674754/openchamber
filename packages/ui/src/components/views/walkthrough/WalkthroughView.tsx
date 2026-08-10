@@ -176,10 +176,13 @@ export const WalkthroughView = ({ directory }: WalkthroughViewProps) => {
         .map((name) => name.slice('remotes/'.length).split('/')[0])
         .filter(Boolean)
     );
-    const baseRef = deriveBaseBranch({ remoteNames, localBranches });
+    const trackingRemote = status?.tracking?.split('/')[0];
+    const defaultBranch = (trackingRemote && branches?.defaultBranches?.[trackingRemote])
+      ?? branches?.defaultBranches?.origin;
+    const baseRef = deriveBaseBranch({ remoteNames, localBranches, defaultBranch, headBranch: headRef });
     if (!baseRef || baseRef === headRef) return null;
     return { kind: 'branch', baseRef, headRef };
-  }, [branches, currentBranch]);
+  }, [branches, currentBranch, status?.tracking]);
 
   // The pull request for this branch used to appear only after visiting the PR
   // panel, because nothing else asked GitHub about it. Ask here too: the status

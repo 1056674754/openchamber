@@ -8,8 +8,11 @@ export const deriveBaseBranch = (options: {
   localBranches: readonly string[];
   worktreeCreatedFromBranch?: string | null;
   rootBranchHint?: string | null;
+  defaultBranch?: string | null;
+  headBranch?: string | null;
 }): string => {
-  const { remoteNames, localBranches, worktreeCreatedFromBranch, rootBranchHint } = options;
+  const { remoteNames, localBranches, worktreeCreatedFromBranch, rootBranchHint, defaultBranch, headBranch } = options;
+  const head = typeof headBranch === 'string' ? headBranch.trim() : '';
 
   const normalizeBaseCandidate = (value: string): string => {
     if (!value) {
@@ -49,13 +52,21 @@ export const deriveBaseBranch = (options: {
     return normalized;
   };
 
-  const fromMeta = normalizeBaseCandidate(
+  const candidate = (value: unknown): string => {
+    const normalized = normalizeBaseCandidate(typeof value === 'string' ? value : '');
+    return normalized && normalized !== head ? normalized : '';
+  };
+
+  const fromMeta = candidate(
     typeof worktreeCreatedFromBranch === 'string' ? worktreeCreatedFromBranch : ''
   );
   if (fromMeta) return fromMeta;
 
-  const fromHint = normalizeBaseCandidate(typeof rootBranchHint === 'string' ? rootBranchHint : '');
+  const fromHint = candidate(rootBranchHint);
   if (fromHint) return fromHint;
+
+  const fromDefault = candidate(defaultBranch);
+  if (fromDefault) return fromDefault;
 
   if (localBranches.includes('main')) return 'main';
   if (localBranches.includes('master')) return 'master';
