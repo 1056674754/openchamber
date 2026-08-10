@@ -94,6 +94,46 @@ describe('remote client auth runtime', () => {
     }
   });
 
+  it('self-heals relay demand when a request arrives through the relay tunnel', async () => {
+    const { dir, runtime } = await createRuntime();
+    try {
+      const created = await runtime.createClient({ label: 'Phone' });
+      expect(created.client.usesRelay).toBe(false);
+      expect(await runtime.hasActiveRelayClients()).toBe(false);
+
+      const authenticated = await runtime.authenticateBearerToken(created.token, {
+        headers: { 'x-openchamber-relay-connection': 'conn-1' },
+      });
+      expect(authenticated?.ok).toBe(true);
+      expect(authenticated?.client.usesRelay).toBe(true);
+      expect(await runtime.hasActiveRelayClients()).toBe(true);
+
+      await runtime.authenticateBearerToken(created.token, { headers: {} });
+      const listed = await runtime.listClients();
+      expect(listed[0].usesRelay).toBe(true);
+      expect(listed[0].lastTransport).toBe('direct');
+      expect(await runtime.hasActiveRelayClients()).toBe(true);
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('counts an observed relay transport as relay demand without the pairing flag', async () => {
+    const { dir, runtime } = await createRuntime();
+    try {
+      const created = await runtime.createClient({ label: 'Tablet' });
+      const storePath = path.join(dir, 'remote-clients.json');
+      const store = JSON.parse(await fs.readFile(storePath, 'utf8'));
+      store.clients[0].lastTransport = 'relay';
+      await fs.writeFile(storePath, JSON.stringify(store));
+
+      expect(created.client.usesRelay).toBe(false);
+      expect(await runtime.hasActiveRelayClients()).toBe(true);
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it('does not resurrect revoked clients after concurrent auth traffic', async () => {
     const { dir, runtime } = await createRuntime();
     try {
