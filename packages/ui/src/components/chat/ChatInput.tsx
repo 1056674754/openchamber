@@ -35,6 +35,7 @@ import { CommandAutocomplete, type CommandAutocompleteHandle, type CommandInfo }
 import { SkillAutocomplete, type SkillAutocompleteHandle } from './SkillAutocomplete';
 import { SnippetAutocomplete, type SnippetAutocompleteHandle } from './SnippetAutocomplete';
 import { cn, formatDirectoryName, isMacOS } from '@/lib/utils';
+import { copyTextToClipboard } from '@/lib/clipboard';
 import { ModelControls } from './ModelControls';
 import { SessionGoalRow } from '@/components/chat/SessionGoalRow';
 import { SessionGoalButton, SessionGoalObjectiveCounter } from '@/components/chat/SessionGoalButton';
@@ -1059,6 +1060,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const [snippetQuery, setSnippetQuery] = React.useState('');
     const [mobileControlsPanel, setMobileControlsPanel] = React.useState<MobileControlsPanel>(null);
     const [unsyncedSkillError, setUnsyncedSkillError] = React.useState<string | null>(null);
+    const [composerError, setComposerError] = React.useState<{ message: string; name: string } | null>(null);
     // Message history navigation state (up/down arrow to recall previous messages)
     const [historyIndex, setHistoryIndex] = React.useState(-1); // -1 = not browsing, 0+ = index from most recent
     const [draftMessage, setDraftMessage] = React.useState(''); // Preserves input when entering history mode
@@ -1094,7 +1096,14 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         Promise.resolve((useSessionUIStore.getState().sendMessage as (...a: unknown[]) => unknown)(...args))
             .then((result) => {
                 setUnsyncedSkillError(null);
+                setComposerError(null);
                 return result;
+            })
+            .catch((error: unknown) => {
+                const name = error instanceof Error ? error.name : typeof error === "object" && error !== null && "name" in error ? String((error as { name: unknown }).name) : "Error";
+                const message = error instanceof Error ? error.message : String(error);
+                setComposerError({ name, message });
+                throw error;
             }),
     ).current;
     const currentSessionId = useSessionUIStore((s) => s.currentSessionId);
@@ -4433,6 +4442,45 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                             }}
                         >
                             {unsyncedSkillError}
+                        </div>
+                    ) : null}
+                    {composerError ? (
+                        <div
+                            role="alert"
+                            className="typography-meta mx-3 mb-1 break-words rounded-xl border p-2"
+                            style={{
+                                backgroundColor: 'var(--status-error-background)',
+                                color: 'var(--status-error)',
+                                borderColor: 'var(--status-error-border)',
+                            }}
+                        >
+                            <div className="flex items-start justify-between gap-2">
+                                <div className="min-w-0 flex-1">
+                                    <div className="font-semibold">{composerError.name}</div>
+                                    <div className="mt-0.5 whitespace-pre-wrap break-all opacity-90">{composerError.message}</div>
+                                </div>
+                                <div className="flex flex-shrink-0 items-center gap-1">
+                                    <button
+                                        type="button"
+                                        className="rounded px-1.5 py-0.5 text-xs opacity-70 hover:opacity-100"
+                                        onClick={() => {
+                                            const text = `${composerError.name}: ${composerError.message}`;
+                                            void copyTextToClipboard(text).then((result) => {
+                                                if (!result.ok) console.error('Failed to copy composer error:', result.error);
+                                            });
+                                        }}
+                                    >
+                                        Copy
+                                    </button>
+                                    <button
+                                        type="button"
+                                        className="rounded px-1.5 py-0.5 text-xs opacity-70 hover:opacity-100"
+                                        onClick={() => setComposerError(null)}
+                                    >
+                                        Dismiss
+                                    </button>
+                                </div>
+                            </div>
                         </div>
                     ) : null}
                     <div

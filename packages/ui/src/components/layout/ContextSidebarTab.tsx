@@ -4,6 +4,7 @@ import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 
 import { deriveMessageRole } from '@/components/chat/message/messageRole';
 import { Icon } from "@/components/icon/Icon";
+import { SessionStallDiagnostic } from '@/components/layout/SessionStallDiagnostic';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { generateSyntaxTheme } from '@/lib/theme/syntaxThemeGenerator';
 import { useConfigStore } from '@/stores/useConfigStore';
@@ -511,6 +512,8 @@ export const ContextPanelContent: React.FC = () => {
             })}
           </div>
         </div>
+
+        <SessionStallDiagnostic sessionId={currentSessionId} />
 
         {/* ── Raw messages ── */}
         <div>

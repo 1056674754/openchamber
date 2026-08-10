@@ -302,6 +302,20 @@ Client API methods that feed authoritative state (bootstrap, reconnect resync, r
 - Retry loops must see a failure signal; a retry around a method that swallows to `[]` will run once and incorrectly treat the empty result as success.
 - Verify the consumer preserves state on failure and only runs "delete missing" logic after a known-successful fetch.
 
+### Never silent-fail user-facing operations (信达雅 priority)
+
+A user-initiated operation that fails must surface the failure to the user, ordered by 信达雅:
+
+- **信 (fidelity, mandatory)**: the raw error reaches the UI. No `.then` without `.catch`. No swallowed rejection that becomes "nothing happened". No state clean-up that hides the original error. The composer must never stay silent by design — a misrouted or refused prompt must be distinguishable from "nothing happened".
+- **达 (fluency, secondary)**: the raw error is translated into human-readable context next to or below the raw form. The raw form stays available (copyable, expandable).
+- **雅 (elegance, tertiary)**: actionable controls (retry, reset with confirmation, copy diagnostics) layered on top of 达 — never replacing it.
+
+Concrete applications:
+
+- `sendMessage` wrappers (ChatInput, queue auto-send, plan/todo send, PR section) must `.catch` and surface the error to a visible UI state. Throwing onward to let upstream handlers also see it is fine; swallowing is not.
+- Session-status watchdogs (`useSessionStatusWatchdog`) detect stuck `busy`/`retry` states. They **record and display** the stall. They never silently reset `session_status` to `idle` — silent self-healing is the same class of bug as the original silent failure.
+- Optimistic updates that fail must roll back AND show the failure. Rolling back silently makes the user think their input was never accepted.
+
 ### Reconnect-loop pacing
 
 The SSE/WebSocket reconnect loop in `packages/ui/src/sync/event-pipeline.ts` retries indefinitely, so it must respect browser/network signals:

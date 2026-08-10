@@ -65,6 +65,7 @@ import { usePlanDetection } from '@/hooks/usePlanDetection';
 import { getAllSyncSessions } from '@/sync/sync-refs';
 import { useI18n } from '@/lib/i18n';
 import { useCurrentSessionActivity } from '@/hooks/useSessionActivity';
+import { useSessionStatusWatchdog } from '@/hooks/useSessionStatusWatchdog';
 import { CHAT_BOTTOM_SPACER_DESKTOP_PX, CHAT_BOTTOM_SPACER_MOBILE_PX } from './lib/scroll/bottomSpacing';
 import { resolvePromptReadOnly } from '@/lib/subagentPrompting';
 import { getEmbeddedSessionChatOriginSessionId } from '@/components/layout/contextPanelEmbeddedChat';
@@ -236,6 +237,7 @@ const ChatViewport = React.memo(({
     initialScrollAction,
     onInitialScrollReady,
 }: ChatViewportProps) => {
+    useSessionStatusWatchdog(currentSessionId);
     const promptPreviewCache = React.useRef(createPromptPreviewCache());
     const promptSourceMessages = React.useMemo(() => {
         if (promptHistoryRecords.length === 0) return renderedMessages;
