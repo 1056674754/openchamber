@@ -16,7 +16,7 @@ export const createOpenCodeConfigFileWatcherRuntime = (dependencies = {}) => {
     getActiveSessionCount = () => 0,
     isOpenCodeIdle = async () => getActiveSessionCount() === 0,
     isManagedOpenCode = () => true,
-    refreshOpenCodeAfterConfigChange,
+    markPendingConfigRestart,
     logger = console,
     debounceMs = 500,
     idlePollIntervalMs = 1000,
@@ -124,9 +124,9 @@ export const createOpenCodeConfigFileWatcherRuntime = (dependencies = {}) => {
 
     waitingForIdle = false;
     reloadPromise = (async () => {
-      await refreshOpenCodeAfterConfigChange('configuration file change');
+      markPendingConfigRestart('configuration file change', { scope: 'external-config' });
       appliedFingerprint = snapshot.fingerprint;
-      logger.log('[OpenCode Config] Configuration file change applied');
+      logger.log('[OpenCode Config] Configuration file change queued for Apply & Restart');
       return true;
     })();
 

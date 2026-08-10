@@ -17,19 +17,19 @@ const createFixture = (overrides = {}) => {
   fs.mkdirSync(project, { recursive: true });
   const configPath = path.join(configDir, 'opencode.jsonc');
   fs.writeFileSync(configPath, '{ "model": "test/one" }');
-  const refreshOpenCodeAfterConfigChange = vi.fn(async () => {});
+  const markPendingConfigRestart = vi.fn(() => ({}));
   const state = { activeSessions: 0 };
   const runtime = createOpenCodeConfigFileWatcherRuntime({
     osModule: { homedir: () => home },
     getWorkingDirectory: () => project,
     getActiveSessionCount: () => state.activeSessions,
-    refreshOpenCodeAfterConfigChange,
+    markPendingConfigRestart,
     logger: { log: vi.fn(), warn: vi.fn(), error: vi.fn() },
     debounceMs: 20,
     idlePollIntervalMs: 20,
     ...overrides,
   });
-  return { runtime, configPath, refreshOpenCodeAfterConfigChange, state };
+  return { runtime, configPath, markPendingConfigRestart, state };
 };
 
 const waitFor = async (condition, timeoutMs = 2000) => {
@@ -55,11 +55,11 @@ describe('OpenCode config file watcher', () => {
     fs.writeFileSync(fixture.configPath, '{ "model": "test/two" }');
 
     expect(await fixture.runtime.checkNow()).toBe(false);
-    expect(fixture.refreshOpenCodeAfterConfigChange).not.toHaveBeenCalled();
+    expect(fixture.markPendingConfigRestart).not.toHaveBeenCalled();
 
     fixture.state.activeSessions = 0;
     expect(await fixture.runtime.checkNow()).toBe(true);
-    expect(fixture.refreshOpenCodeAfterConfigChange).toHaveBeenCalledTimes(1);
+    expect(fixture.markPendingConfigRestart).toHaveBeenCalledTimes(1);
     fixture.runtime.stop();
   });
 
@@ -70,12 +70,12 @@ describe('OpenCode config file watcher', () => {
     fs.writeFileSync(fixture.configPath, '{ "model": }');
 
     expect(await fixture.runtime.checkNow()).toBe(false);
-    expect(fixture.refreshOpenCodeAfterConfigChange).not.toHaveBeenCalled();
+    expect(fixture.markPendingConfigRestart).not.toHaveBeenCalled();
     expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('Ignoring invalid configuration change'));
 
     fs.writeFileSync(fixture.configPath, '{ "model": "test/valid" }');
     expect(await fixture.runtime.checkNow()).toBe(true);
-    expect(fixture.refreshOpenCodeAfterConfigChange).toHaveBeenCalledTimes(1);
+    expect(fixture.markPendingConfigRestart).toHaveBeenCalledTimes(1);
     fixture.runtime.stop();
   });
 
@@ -85,8 +85,11 @@ describe('OpenCode config file watcher', () => {
     await new Promise((resolve) => setTimeout(resolve, 30));
     fs.writeFileSync(fixture.configPath, '{ "model": "test/automatic" }');
 
-    await waitFor(() => fixture.refreshOpenCodeAfterConfigChange.mock.calls.length === 1);
-    expect(fixture.refreshOpenCodeAfterConfigChange).toHaveBeenCalledWith('configuration file change');
+    await waitFor(() => fixture.markPendingConfigRestart.mock.calls.length === 1);
+    expect(fixture.markPendingConfigRestart).toHaveBeenCalledWith(
+      'configuration file change',
+      { scope: 'external-config' },
+    );
     fixture.runtime.stop();
   });
 
@@ -104,7 +107,7 @@ describe('OpenCode config file watcher', () => {
     fixture.runtime.acknowledgeCurrentConfig();
 
     expect(await fixture.runtime.checkNow()).toBe(false);
-    expect(fixture.refreshOpenCodeAfterConfigChange).not.toHaveBeenCalled();
+    expect(fixture.markPendingConfigRestart).not.toHaveBeenCalled();
     fixture.runtime.stop();
   });
 });
