@@ -314,6 +314,7 @@ export const registerFsRoutes = (app, dependencies) => {
     path,
     fsPromises,
     spawn,
+    platform = process.platform,
     crypto,
     normalizeDirectoryPath,
     resolveRequiredExplicitProjectDirectory,
@@ -323,6 +324,27 @@ export const registerFsRoutes = (app, dependencies) => {
   } = dependencies;
   const realpathCache = createRealpathCache({
     realpath: fsPromises.realpath.bind(fsPromises),
+  });
+
+  const spawnDetached = (command, args) => new Promise((resolve, reject) => {
+    let child;
+    try {
+      child = spawn(command, args, { windowsHide: true, stdio: 'ignore', detached: true });
+    } catch (error) {
+      reject(new Error('Failed to launch file browser', { cause: error }));
+      return;
+    }
+    const onError = (error) => {
+      child.removeListener('spawn', onSpawn);
+      reject(new Error('Failed to launch file browser', { cause: error }));
+    };
+    const onSpawn = () => {
+      child.removeListener('error', onError);
+      child.unref();
+      resolve();
+    };
+    child.once('error', onError);
+    child.once('spawn', onSpawn);
   });
 
   const execJobs = new Map();
@@ -937,13 +959,12 @@ export const registerFsRoutes = (app, dependencies) => {
       const resolved = path.resolve(targetPath.trim());
       await fsPromises.access(resolved);
 
-      const platform = process.platform;
       if (platform === 'darwin') {
         const stat = await fsPromises.stat(resolved);
         if (stat.isDirectory()) {
-          spawn('open', [resolved], { windowsHide: true, stdio: 'ignore', detached: true }).unref();
+          await spawnDetached('open', [resolved]);
         } else {
-          spawn('open', ['-R', resolved], { windowsHide: true, stdio: 'ignore', detached: true }).unref();
+          await spawnDetached('open', ['-R', resolved]);
         }
       } else if (platform === 'win32') {
         const stat = await fsPromises.stat(resolved);
@@ -967,7 +988,7 @@ export const registerFsRoutes = (app, dependencies) => {
       } else {
         const stat = await fsPromises.stat(resolved);
         const dir = stat.isDirectory() ? resolved : path.dirname(resolved);
-        spawn('xdg-open', [dir], { windowsHide: true, stdio: 'ignore', detached: true }).unref();
+        await spawnDetached('xdg-open', [dir]);
       }
 
       return res.json({ success: true, path: resolved });
@@ -1081,6 +1102,7 @@ export const registerFsRoutes = (app, dependencies) => {
       ? req.query.path.trim()
       : os.homedir();
     const respectGitignore = req.query.respectGitignore === 'true';
+    let requestedPath = '';
     let resolvedPath = '';
 
     const isPlansDirectory = (value) => {
@@ -1090,7 +1112,8 @@ export const registerFsRoutes = (app, dependencies) => {
     };
 
     try {
-      resolvedPath = await realpathCache.resolve(path.resolve(normalizeDirectoryPath(rawPath)));
+      requestedPath = path.resolve(normalizeDirectoryPath(rawPath));
+      resolvedPath = await realpathCache.resolve(requestedPath);
 
       const stats = await fsPromises.stat(resolvedPath);
       if (!stats.isDirectory()) {
@@ -1149,8 +1172,8 @@ export const registerFsRoutes = (app, dependencies) => {
 
       const entries = await Promise.all(
         dirents.map(async (dirent) => {
-          const entryPath = path.join(resolvedPath, dirent.name);
-          if (respectGitignore && ignoredPaths.has(entryPath)) {
+          const physicalEntryPath = path.join(resolvedPath, dirent.name);
+          if (respectGitignore && ignoredPaths.has(physicalEntryPath)) {
             return null;
           }
 
@@ -1159,7 +1182,7 @@ export const registerFsRoutes = (app, dependencies) => {
 
           if (!isDirectory && isSymbolicLink) {
             try {
-              const linkStats = await fsPromises.stat(entryPath);
+              const linkStats = await fsPromises.stat(physicalEntryPath);
               isDirectory = linkStats.isDirectory();
             } catch {
               isDirectory = false;
@@ -1168,7 +1191,7 @@ export const registerFsRoutes = (app, dependencies) => {
 
           return {
             name: dirent.name,
-            path: entryPath,
+            path: path.join(requestedPath, dirent.name),
             isDirectory,
             isFile: dirent.isFile(),
             isSymbolicLink,
@@ -1177,19 +1200,23 @@ export const registerFsRoutes = (app, dependencies) => {
       );
 
       return res.json({
-        path: resolvedPath,
+        path: requestedPath,
         entries: entries.filter(Boolean),
       });
     } catch (error) {
       const err = error;
       const code = err && typeof err === 'object' && 'code' in err ? err.code : undefined;
-      const isPlansPath = code === 'ENOENT' && (isPlansDirectory(resolvedPath) || isPlansDirectory(rawPath));
+      const isPlansPath = code === 'ENOENT' && (
+        isPlansDirectory(resolvedPath)
+        || isPlansDirectory(requestedPath)
+        || isPlansDirectory(rawPath)
+      );
       if (code !== 'ENOENT') {
         console.error('Failed to list directory:', error);
       }
       if (code === 'ENOENT') {
         if (isPlansPath) {
-          return res.json({ path: resolvedPath || rawPath, entries: [] });
+          return res.json({ path: requestedPath || resolvedPath || rawPath, entries: [] });
         }
         return res.status(404).json({ error: 'Directory not found' });
       }
