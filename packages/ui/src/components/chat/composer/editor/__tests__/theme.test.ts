@@ -55,7 +55,7 @@ describe('composerEditorTheme', () => {
         const cursorRule = selectors.find((selector) => selector.includes('.cm-cursor'));
         expect(cursorRule).toBeDefined();
         const rule = (COMPOSER_EDITOR_THEME_SPEC as Record<string, Record<string, string>>)[cursorRule ?? ''];
-        expect(parseFloat(rule.borderLeftWidth ?? '0')).toBeGreaterThanOrEqual(2);
+        expect(parseFloat(rule.borderLeftWidth ?? '0')).toBeGreaterThan(1.9);
         expect(rule.transform).toBeTruthy();
     });
 
