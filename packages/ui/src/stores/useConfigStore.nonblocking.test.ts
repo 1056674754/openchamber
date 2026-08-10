@@ -257,6 +257,29 @@ describe('useConfigStore non-blocking OpenCode config', () => {
     expect(getConfigCalls).toBe(0);
   });
 
+  test('a refreshed catalog replaces a hidden native selection with a visible primary agent', async () => {
+    liveAgents = [
+      testAgent('build', { mode: 'subagent', hidden: true }),
+      testAgent('plan', { mode: 'subagent', hidden: true }),
+      testAgent('Sisyphus - ultraworker'),
+    ];
+    useConfigStore.setState((state) => ({
+      selectionSource: 'manual',
+      directoryScoped: {
+        ...state.directoryScoped,
+        [DIRECTORY]: {
+          ...state.directoryScoped[DIRECTORY],
+          selectionSource: 'manual',
+        },
+      },
+    }));
+
+    await useConfigStore.getState().loadAgents({ directory: DIRECTORY, source: 'test:pluginReady' });
+
+    expect(useConfigStore.getState().currentAgentName).toBe('Sisyphus - ultraworker');
+    expect(useConfigStore.getState().directoryScoped[DIRECTORY]?.currentAgentName).toBe('Sisyphus - ultraworker');
+  });
+
   test('manual selection survives a late sync config apply', () => {
     useConfigStore.setState({
       currentProviderId: 'manual',

@@ -7,6 +7,7 @@ import {
     resolveOpenChamberPluginStatusDecision,
     type OpenChamberPluginStatus,
 } from './openChamberPluginStatus';
+import { useConfigStore } from '@/stores/useConfigStore';
 
 const PLUGIN_STATUS_TOAST_ID = 'openchamber-plugin-status';
 const INITIAL_CHECK_DELAY_MS = 1_000;
@@ -41,6 +42,9 @@ export const OpenChamberPluginStatusToast: React.FC = () => {
 
         const showLoaded = () => {
             statusToastShown = true;
+            void useConfigStore.getState().loadAgents({ source: 'pluginStatus:loaded' }).catch((error: unknown) => {
+                console.warn('Failed to refresh agents after OpenChamber plugin loaded', error);
+            });
             toast.success(t('openchamberPlugin.toast.loaded.title'), {
                 id: PLUGIN_STATUS_TOAST_ID,
                 description: t('openchamberPlugin.toast.loaded.description'),

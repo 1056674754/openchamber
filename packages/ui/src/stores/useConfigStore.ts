@@ -219,7 +219,7 @@ const resolveSelectionWithManualGuard = ({
     resolvedModelId: string | undefined;
     resolvedVariant: string | undefined;
 }) => {
-    const manualAgentName = currentAgentName && agents.some((agent) => agent.name === currentAgentName)
+    const manualAgentName = currentAgentName && filterVisibleAgents(agents).some((agent) => agent.name === currentAgentName)
         ? currentAgentName
         : undefined;
     const manualModelValid = !!currentProviderId
@@ -262,7 +262,8 @@ const resolveDefaultAgentModelSelection = ({
     opencodeDefaultAgent?: string;
     opencodeDefaultModel?: string;
 }): DefaultAgentModelSelection => {
-    if (agents.length === 0) {
+    const visibleAgents = filterVisibleAgents(agents);
+    if (visibleAgents.length === 0) {
         return { agentName: undefined };
     }
 
@@ -276,19 +277,19 @@ const resolveDefaultAgentModelSelection = ({
             : undefined;
     };
 
-    const primaryAgents = agents.filter((agent) => isPrimaryMode(agent.mode));
+    const primaryAgents = visibleAgents.filter((agent) => isPrimaryMode(agent.mode));
     let resolvedAgent: Agent | undefined;
     if (settingsDefaultAgent) {
-        resolvedAgent = agents.find((agent) => agent.name === settingsDefaultAgent);
+        resolvedAgent = visibleAgents.find((agent) => agent.name === settingsDefaultAgent);
     }
     if (!resolvedAgent && opencodeDefaultAgent) {
-        const candidate = agents.find((agent) => agent.name === opencodeDefaultAgent);
-        if (candidate && isPrimaryMode(candidate.mode) && candidate.hidden !== true) {
+        const candidate = visibleAgents.find((agent) => agent.name === opencodeDefaultAgent);
+        if (candidate && isPrimaryMode(candidate.mode)) {
             resolvedAgent = candidate;
         }
     }
     if (!resolvedAgent) {
-        resolvedAgent = primaryAgents.find((agent) => agent.name === "build") || primaryAgents[0] || agents[0];
+        resolvedAgent = primaryAgents.find((agent) => agent.name === "build") || primaryAgents[0] || visibleAgents[0];
     }
     if (!resolvedAgent) {
         return { agentName: undefined };
@@ -1910,7 +1911,8 @@ export const useConfigStore = create<ConfigStore>()(
 
                             // Track invalid settings to clear and harmless corrections to persist.
                             const settingsPatch: OpenChamberSettingsPatch = {};
-                            const configuredAgent = resolveConfiguredAgentName(openChamberDefaults.defaultAgent, safeAgents);
+                            const visibleAgents = filterVisibleAgents(safeAgents);
+                            const configuredAgent = resolveConfiguredAgentName(openChamberDefaults.defaultAgent, visibleAgents);
                             if (configuredAgent.correctedName) settingsPatch.defaultAgent = configuredAgent.correctedName;
                             else if (configuredAgent.invalid) settingsPatch.defaultAgent = '';
 
@@ -1945,7 +1947,7 @@ export const useConfigStore = create<ConfigStore>()(
                                 opencodeDefaultAgent,
                                 opencodeDefaultModel,
                             });
-                            const resolvedAgentName = resolvedDefault.agentName ?? safeAgents[0].name;
+                            const resolvedAgentName = resolvedDefault.agentName ?? visibleAgents[0]?.name;
                             const resolvedProviderId = resolvedDefault.providerId;
                             const resolvedModelId = resolvedDefault.modelId;
                             const resolvedVariant = resolvedDefault.variant;
