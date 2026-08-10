@@ -36,3 +36,36 @@ describe('terminal buffer isolation', () => {
     expect(useTerminalStore.getState().getBuffer('/repo', remoteTab, 'remote-a').chunks[0]?.data).toBe('remote');
   });
 });
+
+describe('default terminal tab labels', () => {
+  afterEach(() => useTerminalStore.getState().clearAll());
+
+  const labels = () => useTerminalStore.getState().getDirectoryState('/repo')!.tabs.map((tab) => tab.label);
+
+  test('does not reuse the number of a closed tab', () => {
+    const first = setup();
+    useTerminalStore.getState().createTab('/repo');
+    expect(labels()).toEqual(['Terminal', 'Terminal 2']);
+
+    useTerminalStore.getState().closeTab('/repo', first);
+    useTerminalStore.getState().createTab('/repo');
+
+    expect(labels()).toEqual(['Terminal 2', 'Terminal 3']);
+  });
+
+  test('numbers past a user-renamed Terminal label', () => {
+    const first = setup();
+    useTerminalStore.getState().setTabLabel('/repo', first, 'Terminal 5');
+    useTerminalStore.getState().createTab('/repo');
+
+    expect(labels()).toEqual(['Terminal 5', 'Terminal 6']);
+  });
+
+  test('starts at Terminal when no default labels remain', () => {
+    const first = setup();
+    useTerminalStore.getState().setTabLabel('/repo', first, 'build');
+    useTerminalStore.getState().createTab('/repo');
+
+    expect(labels()).toEqual(['build', 'Terminal']);
+  });
+});

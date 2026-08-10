@@ -181,6 +181,19 @@ const createEmptyTab = (id: string, label: string): TerminalTab => ({
   previewUrlLocked: false,
 });
 
+const DEFAULT_TAB_LABEL_PATTERN = /^Terminal(?: (\d+))?$/;
+
+const nextDefaultTabLabel = (tabs: readonly TerminalTab[]): string => {
+  let highest = 0;
+  for (const tab of tabs) {
+    const match = DEFAULT_TAB_LABEL_PATTERN.exec(tab.label);
+    if (!match) continue;
+    const value = match[1] ? Number.parseInt(match[1], 10) : 1;
+    if (Number.isSafeInteger(value)) highest = Math.max(highest, value);
+  }
+  return highest === 0 ? 'Terminal' : `Terminal ${highest + 1}`;
+};
+
 const createEmptyDirectoryState = (firstTab: TerminalTab): DirectoryTerminalState => ({
   tabs: [firstTab],
   activeTabId: firstTab.id,
@@ -302,8 +315,7 @@ export const useTerminalStore = create<TerminalStore>()(
             const existing = newSessions.get(key);
 
             const nextTabId = state.nextTabId + 1;
-            const labelIndex = (existing?.tabs.length ?? 0) + 1;
-            const label = `Terminal ${labelIndex}`;
+            const label = nextDefaultTabLabel(existing?.tabs ?? []);
             const tab = createEmptyTab(tabId, label);
 
             if (!existing) {
