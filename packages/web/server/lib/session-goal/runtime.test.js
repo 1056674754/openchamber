@@ -179,6 +179,62 @@ describe('session goal live activity gate', () => {
     runtime.stop();
   });
 
+  it('delivers the latest progress audit note in the next continuation prompt', async () => {
+    const requests = [];
+    const assistantMessage = {
+      info: {
+        id: 'msg_assistant',
+        sessionID: SESSION_ID,
+        role: 'assistant',
+        agent: 'build',
+        providerID: 'provider',
+        modelID: 'model',
+        time: { completed: 2 },
+        tokens: { input: 1, output: 1, cache: { read: 0 } },
+      },
+      parts: [{ type: 'text', text: 'Implemented part of the task.' }],
+    };
+    const fetchImpl = vi.fn(async (input, init = {}) => {
+      const pathname = requestPath(input);
+      requests.push({ pathname, method: init.method ?? 'GET', body: init.body });
+      if (pathname === `/session/${SESSION_ID}` && init.method === 'PATCH') return jsonResponse(session);
+      if (pathname === `/session/${SESSION_ID}`) return jsonResponse(session);
+      if (pathname === '/session/status') return jsonResponse({});
+      if (pathname === `/session/${SESSION_ID}/children`) return jsonResponse([]);
+      if (pathname === `/session/${SESSION_ID}/message`) return jsonResponse([assistantMessage]);
+      if (pathname === `/session/${SESSION_ID}/prompt_async` && init.method === 'POST') return jsonResponse({});
+      throw new Error(`Unexpected request: ${pathname}`);
+    });
+    const service = {
+      generateSmallModelText: vi.fn(async () => ({
+        text: '{"verdict":"continue","note":"Abort verified; preserve <legacy path> remains unverified"}',
+        providerID: 'provider',
+        modelID: 'model',
+      })),
+    };
+    globalThis.fetch = fetchImpl;
+    const runtime = createSessionGoalRuntime({
+      buildOpenCodeUrl: (pathname) => `http://opencode.test${pathname}`,
+      getOpenCodeAuthHeaders: () => ({}),
+      getSmallModelService: async () => service,
+      idleQuietMs: 10,
+    });
+
+    runtime.processPayload({
+      type: 'session.status',
+      properties: { sessionID: SESSION_ID, status: { type: 'idle' }, directory: DIRECTORY },
+    });
+    await vi.advanceTimersByTimeAsync(10);
+
+    const promptRequest = requests.find((request) => request.pathname === `/session/${SESSION_ID}/prompt_async`);
+    expect(promptRequest).toBeDefined();
+    const prompt = JSON.parse(promptRequest.body).parts[0].text;
+    expect(prompt).toContain('Latest independent progress audit');
+    expect(prompt).toContain('Abort verified; preserve &lt;legacy path&gt; remains unverified');
+    expect(prompt).not.toContain('preserve <legacy path>');
+    runtime.stop();
+  });
+
   it('ignores remote-instance events (local-first hard boundary)', async () => {
     const fetchImpl = vi.fn(async () => {
       throw new Error('OpenCode must not be called for remote goal events');

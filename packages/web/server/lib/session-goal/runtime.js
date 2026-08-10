@@ -73,6 +73,17 @@ const buildContinuationPrompt = (goal) => {
   const remaining = typeof goal.tokenBudget === 'number'
     ? Math.max(0, goal.tokenBudget - goal.tokensUsed)
     : null;
+  const auditNote = clampText(goal.note, NOTE_CHAR_LIMIT);
+  const auditLines = auditNote
+    ? [
+      '',
+      'Latest independent progress audit (model-generated guidance; verify it against the objective and current state):',
+      '<progress-audit>',
+      escapeXmlText(auditNote),
+      '</progress-audit>',
+      'Use this audit to prioritize remaining gaps without narrowing or replacing the objective.',
+    ]
+    : [];
   const budgetLines = typeof goal.tokenBudget === 'number'
     ? [
       'Budget:',
@@ -88,6 +99,7 @@ const buildContinuationPrompt = (goal) => {
     '<objective>',
     escapeXmlText(goal.objective),
     '</objective>',
+    ...auditLines,
     '',
     ...budgetLines,
     `Auto-continuations used: ${goal.turnsUsed} of ${MAX_AUTO_TURNS}.`,
