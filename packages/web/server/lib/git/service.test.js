@@ -14,6 +14,7 @@ import {
   getRemotes,
   getStatus,
   populateWorktreeWithLockRecovery,
+  runPostCheckoutHook,
   resetToCommit,
   resolveBaseRefForLog,
   revertCommit,
@@ -88,21 +89,70 @@ describe('worktree population', () => {
     await populateWorktreeWithLockRecovery(worktree);
     expect(fs.existsSync(lockPath)).toBe(false);
     expect(fs.readFileSync(path.join(worktree, 'README.md'), 'utf8')).toBe('# Test\n');
+    expect(runGit(worktree, ['config', '--get', 'core.longpaths']).trim()).toBe('true');
   });
 
   it('preserves an index lock that changes during the stale observation window', async () => {
     if (!canRunGit()) return;
 
     const { lockPath, worktree } = createLockedWorktree();
-    const updateTimer = setTimeout(() => {
-      fs.writeFileSync(lockPath, 'active-lock');
-    }, 500);
+    let updateCount = 0;
+    const updateTimer = setInterval(() => {
+      updateCount += 1;
+      fs.writeFileSync(lockPath, `active-lock-${updateCount}`);
+    }, 100);
 
     try {
       await expect(populateWorktreeWithLockRecovery(worktree)).rejects.toThrow();
-      expect(fs.readFileSync(lockPath, 'utf8')).toBe('active-lock');
+      expect(fs.readFileSync(lockPath, 'utf8')).toMatch(/^active-lock-/);
     } finally {
-      clearTimeout(updateTimer);
+      clearInterval(updateTimer);
+    }
+  });
+});
+
+describe('worktree checkout bootstrap', () => {
+  it('runs the post-checkout hook after population', async () => {
+    if (!canRunGit()) return;
+
+    const previousXdgDataHome = process.env.XDG_DATA_HOME;
+    const dataHome = createTempDir();
+    process.env.XDG_DATA_HOME = dataHome;
+
+    try {
+      const repo = createTempDir();
+      runGit(repo, ['init', '-b', 'main']);
+      runGit(repo, ['config', 'user.email', 'test@example.com']);
+      runGit(repo, ['config', 'user.name', 'Test User']);
+      fs.writeFileSync(path.join(repo, 'README.md'), '# Test\n');
+      runGit(repo, ['add', 'README.md']);
+      runGit(repo, ['commit', '-m', 'Initial commit']);
+      const head = runGit(repo, ['rev-parse', 'HEAD']).trim();
+      const hookLog = path.join(dataHome, 'post-checkout.log');
+      const hookPath = path.join(repo, '.git', 'hooks', 'post-checkout');
+      fs.writeFileSync(
+        hookPath,
+        `#!/bin/sh\nprintf '%s|%s|%s|%s' "$1" "$2" "$3" "$(pwd -P)" > ${JSON.stringify(hookLog)}\n`,
+      );
+      fs.chmodSync(hookPath, 0o755);
+
+      const worktree = createTempDir();
+      fs.rmSync(worktree, { recursive: true, force: true });
+      runGit(repo, ['worktree', 'add', '--no-checkout', '-b', 'openchamber/hook-test', worktree, 'HEAD']);
+      await populateWorktreeWithLockRecovery(worktree);
+      await runPostCheckoutHook(worktree);
+
+      const [previousHead, newHead, flag, cwd] = fs.readFileSync(hookLog, 'utf8').split('|');
+      expect(previousHead).toBe('0000000000000000000000000000000000000000');
+      expect(newHead).toBe(head);
+      expect(flag).toBe('1');
+      expect(cwd).toBe(fs.realpathSync(worktree));
+    } finally {
+      if (previousXdgDataHome === undefined) {
+        delete process.env.XDG_DATA_HOME;
+      } else {
+        process.env.XDG_DATA_HOME = previousXdgDataHome;
+      }
     }
   });
 });

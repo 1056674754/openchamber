@@ -21,6 +21,8 @@ const WORKTREE_BOOTSTRAP_FAILED = 'failed';
 const WORKTREE_BOOTSTRAP_PHASE_DIRECTORY_CREATED = 'directory-created';
 const WORKTREE_BOOTSTRAP_PHASE_GIT_READY = 'git-ready';
 const WORKTREE_BOOTSTRAP_PHASE_SETUP_READY = 'setup-ready';
+const GIT_NULL_REF = '0'.repeat(40);
+const WORKTREE_POPULATE_RESET_ARGS = ['-c', 'core.longpaths=true', 'reset', '--hard'];
 const WORKTREE_INDEX_LOCK_RETRY_DELAY_MS = 250;
 const WORKTREE_INDEX_LOCK_STALE_DELAY_MS = 750;
 
@@ -872,7 +874,9 @@ const isIndexLockError = async (result, directory) => {
 };
 
 export const populateWorktreeWithLockRecovery = async (directory) => {
-  let result = await runGitCommand(directory, ['reset', '--hard']);
+  await ensureWorktreeLongpaths(directory);
+
+  let result = await runGitCommand(directory, WORKTREE_POPULATE_RESET_ARGS);
   if (result.success) {
     return;
   }
@@ -881,7 +885,7 @@ export const populateWorktreeWithLockRecovery = async (directory) => {
   }
 
   await wait(WORKTREE_INDEX_LOCK_RETRY_DELAY_MS);
-  result = await runGitCommand(directory, ['reset', '--hard']);
+  result = await runGitCommand(directory, WORKTREE_POPULATE_RESET_ARGS);
   if (result.success) {
     return;
   }
@@ -893,7 +897,7 @@ export const populateWorktreeWithLockRecovery = async (directory) => {
   const identity = lockPath ? await getFileIdentity(lockPath) : null;
   await wait(WORKTREE_INDEX_LOCK_STALE_DELAY_MS);
 
-  result = await runGitCommand(directory, ['reset', '--hard']);
+  result = await runGitCommand(directory, WORKTREE_POPULATE_RESET_ARGS);
   if (result.success) {
     return;
   }
@@ -906,7 +910,54 @@ export const populateWorktreeWithLockRecovery = async (directory) => {
       throw error;
     }
   });
-  await runGitCommandOrThrow(directory, ['reset', '--hard'], 'Failed to populate worktree');
+  await runGitCommandOrThrow(directory, WORKTREE_POPULATE_RESET_ARGS, 'Failed to populate worktree');
+};
+
+export const ensureWorktreeLongpaths = async (directory) => {
+  const current = await runGitCommand(directory, ['config', '--get', 'core.longpaths']);
+  if (String(current.stdout || '').trim().toLowerCase() === 'true') return;
+  await runGitCommand(directory, ['config', 'core.longpaths', 'true']);
+};
+
+// --no-checkout plus reset does not trigger Git's normal post-checkout hook.
+// Run it explicitly before the bootstrap can advance to git-ready/setup-ready.
+export const runPostCheckoutHook = async (directory) => {
+  const hookResult = await runGitCommand(directory, ['rev-parse', '--git-path', 'hooks']);
+  if (!hookResult.success) return;
+  const hookDirectory = normalizeDirectoryPath(String(hookResult.stdout || '').trim());
+  if (!hookDirectory) return;
+
+  const hookPath = path.join(hookDirectory, 'post-checkout');
+  try {
+    const stat = await fsp.stat(hookPath);
+    if (!stat.isFile()) return;
+    if (process.platform !== 'win32') await fsp.access(hookPath, fs.constants.X_OK);
+  } catch {
+    return;
+  }
+
+  const [headResult, gitDirResult] = await Promise.all([
+    runGitCommand(directory, ['rev-parse', 'HEAD']),
+    runGitCommand(directory, ['rev-parse', '--absolute-git-dir']),
+  ]);
+  if (!headResult.success || !gitDirResult.success) return;
+  const head = String(headResult.stdout || '').trim();
+  const gitDir = String(gitDirResult.stdout || '').trim();
+  if (!head || !gitDir) return;
+
+  try {
+    await execFileAsync(hookPath, [GIT_NULL_REF, head, '1'], {
+      cwd: directory,
+      env: {
+        ...(await buildGitEnv()),
+        GIT_DIR: gitDir,
+        GIT_WORK_TREE: path.resolve(directory),
+      },
+      windowsHide: true,
+    });
+  } catch (error) {
+    console.warn(`Post-checkout hook failed in worktree ${directory}: ${error instanceof Error ? error.message : String(error)}`);
+  }
 };
 
 const ensureOpenCodeProjectId = async (primaryWorktree) => {
@@ -1249,6 +1300,7 @@ const queueWorktreeBootstrap = (args) => {
   const task = new Promise((resolve) => setTimeout(resolve, 0))
     .then(async () => {
       await populateWorktreeWithLockRecovery(directory);
+      await runPostCheckoutHook(directory);
       setWorktreeBootstrapState(
         directory,
         WORKTREE_BOOTSTRAP_PENDING,
