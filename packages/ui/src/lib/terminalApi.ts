@@ -439,7 +439,7 @@ export class TerminalTransport {
 
   private startKeepalive(): void {
     this.stopKeepalive();
-    this.keepaliveTimer = setInterval(() => this.send({ t: 'ping', v: 3 }), 20_000);
+    this.keepaliveTimer = setInterval(() => this.send({ t: 'ping', v: 3 }), 45_000);
   }
 
   private stopKeepalive(): void {
