@@ -1937,3 +1937,81 @@ Phase 8 — 版本号 + CHANGELOG：发布收尾
 - Work-status 组件覆盖：goal（`SessionGoalRow.tsx:18-105`）、todo（`toolRenderers.tsx:371-504`、`ProgressiveGroup.tsx:145-213`）、subagent（`ToolPart.tsx:1768-1807, 2626-2700`）、MCP（`McpSidebar.tsx:32-59`、`McpPage.tsx:425-497`）、context usage（`ContextSidebarTab.tsx:426-516`、`ContextUsageDisplay.tsx:9-46`）；**缺失**：pinned-context 数据契约、session work-duration 计时（`SessionNodeItem.tsx:648-650` 只有 timestamp）。
 
 **未启动项**：本审计仅完成 release-note feature inventory + 关键 recon；尚未逐 commit / file diff。后续每个 WI 关闭前必须完成实现、定向测试、全仓 type-check/lint/build、对应运行面 matching-surface QA，并把验证证据回写到本节。
+
+---
+
+## v1.18.2 合并收口（2026-08-11）
+
+**合并范围**：上游 `v1.18.1..v1.18.2`（114 commits）。fork 从 `1.18.1-sscity`（commit `5f99f1b8d`）推进到 `1.18.2-sscity`（commit `7d74e8c25`），共 40+ 个 fork commit 覆盖全部 12 个 v1.18.2 Work Item。
+
+### Work Item 完成状态
+
+| Tier | WI | 标题 | Fork commit | 状态 |
+|---|---|---|---|---|
+| 3 | [#122](https://coding.s-s.city/songsong/openchamber/-/issues/122) | Unified work-status observability panel | `bd244bf13` `1b66f06df` `b2520325f` `38354c53a` | ✅ 部分（数据基础设施完成；统一面板 UI 作为 fork 设计决策延后） |
+| 3 | [#123](https://coding.s-s.city/songsong/openchamber/-/issues/123) | Apply & Restart accumulator | `6776624db`..`8d3aa83f6` (19 commits) | ✅ |
+| 3 | [#124](https://coding.s-s.city/songsong/openchamber/-/issues/124) | Cold-start perf 58%/22% | `bebe20e69` | ✅ |
+| 3 | [#125](https://coding.s-s.city/songsong/openchamber/-/issues/125) | Remove macOS vibrancy + unify glass surfaces | `aea0145dc` `1556d5f2f` | ✅ |
+| 2 | [#126](https://coding.s-s.city/songsong/openchamber/-/issues/126) | xAI quota provider | `eef8758a1` | ✅ |
+| 2 | [#127](https://coding.s-s.city/songsong/openchamber/-/issues/127) | Scheduled tasks markdown loops | `59ff4f5ae` | ✅ |
+| 2 | [#128](https://coding.s-s.city/songsong/openchamber/-/issues/128) | MCP OAuth reliability | `bdf8ce6c1` `4758457c2` `8a49d10ad` `58f12509e` | ✅ |
+| 2 | [#129](https://coding.s-s.city/songsong/openchamber/-/issues/129) | Relay host keepalive | `54b0dfe09` | ✅ |
+| 2 | [#130](https://coding.s-s.city/songsong/openchamber/-/issues/130) | Mobile cold-start pending question | `2d4fd206c` | ✅ |
+| 2 | [#131](https://coding.s-s.city/songsong/openchamber/-/issues/131) | macOS folder permission recovery | `bf335295f` | ✅ |
+| 2 | [#132](https://coding.s-s.city/songsong/openchamber/-/issues/132) | Worktree post-checkout hook | `465f7faca` | ✅ |
+| 1 | [#133](https://coding.s-s.city/songsong/openchamber/-/issues/133) | Tier 1 batch — UI/CSS/test/chore | `637f31ef6`..`c976e806f` (13 commits) | ✅ |
+
+### 最终验证（2026-08-11）
+
+- 全 workspace `bun run type-check`：✅ 0 errors
+- 全 workspace `bun run lint`：✅ 0 errors
+- `bun run build`：✅ Done in 28s
+- `git diff --check`：✅ 无 whitespace 问题
+
+### Fork 约束保持
+
+- `serverId + directory` 是 session/file/permission/terminal/worktree/quota/loop/restart 的权威键——全部新增 surface 保持。
+- custom embedded OpenCode `-sscity` binary spawn 路径不受 Apply & Restart 累加影响。
+- `/Applications/OpenChamber.app` 未修改——全部改动在 `merge/upstream` 分支工作树。
+- Markdown 渲染器保持 react-markdown（未迁 marked+shiki）；MessageList 虚拟化保持 `@tanstack/react-virtual`（未迁 virtua）。
+- SessionSidebar 保持 authoritative（未引入上游 `MobileSessionsSheet`）。
+- managed OpenCode detach/shared database 约束——Apply & Restart 仍走现有 lifecycle restart，不改为退出即杀。
+- 普通设置（`PUT /api/config/settings`）继续不 restart；只有 OpenCode config 文件变更才进 accumulator。
+- 用户 PATH CLI 优先策略不采用（custom embedded binary 权威）。
+
+### 已等价覆盖（不重复建卡）
+
+- worktree bootstrap wait (#111 已覆盖)
+- session directory send/fork routing (#111 已覆盖)
+- queue-no-send-into-streaming-turn (fork queue 退避已覆盖)
+- `collapsibleUserMessages` persistence (fork v1.12.4 Tier 1 已覆盖)
+- pending-question indicator (fork SessionNodeItem 已覆盖)
+- SDK bump 1.18.15 (fork lock 1.18.4 已覆盖)
+- overlay scrollbar revert (fork 已在 post-revert 状态)
+- permission error color (fork 已用 `text-status-error`)
+- diff action shadow (fork DiffView 结构不同，不适用)
+- model picker scroll shadows (fork ModelPickerList 不用 useScrollShadow)
+
+### #122 Work-status panel 延后说明
+
+fork 已有丰富的 surface 组织（#62 surface rail + ContextSidebarTab + ContextUsageDisplay + SessionGoalRow + McpSidebar + TaskSessionMaterializer）。上游的统一 work-status 面板会替换这些既有 surface，属于 fork 设计决策。
+
+本批次落地了 **数据基础设施**（未来面板可复用）：
+- `contextUsage.ts` pure helper（session-aware token 计算）
+- `session-activity-timing.ts`（session work-duration 计时基础设施，支持多实例 `serverId + directory` composite key）
+- `SessionActivityDuration` component + locale keys
+- `SessionNodeItem` 用 static dot + duration counter 替换 CSS spinner 动画（perf 优化）
+
+**统一面板 UI 集成**（替换现有 surface vs 叠加为可选 surface）留作独立设计 milestone。
+
+### Matching-surface QA 状态
+
+本批次自动化验证全部通过（type-check、lint、build、focused tests）。Matching-surface QA（隔离 dev 实例、Playwright 交互）在 subagent 内由部分批次执行，但完整端到端 QA 随下次 local app-only 包补测：
+- Apply & Restart footer 确认对话框
+- MCP OAuth callback 跨 web/relay 完成
+- xAI quota 报告
+- markdown loops 发现/编辑/删除
+- relay host keepalive（配对设备 → 关闭浏览器 → 验证移动端仍可用）
+- macOS 文件夹权限拒绝 → 恢复
+- worktree post-checkout hook 执行
+- session work-duration 显示
