@@ -61,7 +61,7 @@ import {
     buildToolResultSummary,
     matchesToolInputSummary,
 } from './toolInputPresentation';
-import { useDurationTickerNow } from './useDurationTicker';
+import { useDurationTickerNow } from '@/hooks/useDurationTicker';
 import { resolveFallbackTaskSessionId } from './resolveFallbackTaskSessionId';
 import { readTaskTagSessionIdFromOutput } from './taskSessionIdParser';
 import {

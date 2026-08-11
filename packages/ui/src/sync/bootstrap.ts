@@ -1,8 +1,10 @@
 import type { OpencodeClient, PermissionRequest, Project, QuestionRequest } from "@opencode-ai/sdk/v2/client"
+import type { SessionStatus } from "@opencode-ai/sdk/v2/client"
 import { retry } from "./retry"
 import type { GlobalState, State } from "./types"
 import { formatSdkError } from "./sdk-error"
 import { emitSyncConfigChanged } from "./sync-refs"
+import { reconcileSessionActivityTiming } from "./session-activity-timing"
 
 const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0)
 const BOOTSTRAP_REQUEST_TIMEOUT_MS = 8_000
@@ -160,6 +162,7 @@ export async function bootstrapGlobal(
 
 export async function bootstrapDirectory(input: {
   directory: string
+  serverId: string
   sdk: OpencodeClient
   getState: () => State
   set: (patch: Partial<State>) => void
@@ -171,7 +174,7 @@ export async function bootstrapDirectory(input: {
   loadSessions: (directory: string) => Promise<unknown> | unknown
   loadMetadata?: boolean
 }): Promise<boolean> {
-  const { directory, sdk, getState, set, global: g } = input
+  const { directory, serverId, sdk, getState, set, global: g } = input
   const state = getState()
   const loading = state.status !== "complete"
 
@@ -210,9 +213,11 @@ export async function bootstrapDirectory(input: {
           }),
         ),
         retry(() =>
-          withTimeout(sdk.session.status({ directory }), "session.status").then((x) =>
-            set({ session_status: unwrap(x, "session.status") })
-          ),
+          withTimeout(sdk.session.status({ directory }), "session.status").then((x) => {
+            const sessionStatus = unwrap(x, "session.status")
+            set({ session_status: sessionStatus })
+            reconcileTimingFromSnapshot(serverId, directory, sessionStatus, getState)
+          }),
         ),
       ]
     : []
@@ -347,4 +352,25 @@ export async function bootstrapDirectory(input: {
   })
 
   return true
+}
+
+function reconcileTimingFromSnapshot(
+  serverId: string,
+  directory: string,
+  sessionStatus: Record<string, SessionStatus>,
+  getState: () => State,
+): void {
+  const activeIds = new Set<string>()
+  for (const [id, status] of Object.entries(sessionStatus)) {
+    if (status?.type !== "idle") activeIds.add(id)
+  }
+  const knownSessions = new Set(
+    getState().session.map((s) => s.id).filter(Boolean),
+  )
+  reconcileSessionActivityTiming(
+    serverId,
+    directory,
+    activeIds,
+    (sessionId) => knownSessions.has(sessionId) || sessionId in sessionStatus,
+  )
 }

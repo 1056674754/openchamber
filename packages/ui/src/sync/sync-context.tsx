@@ -35,6 +35,11 @@ import { opencodeClient } from "@/lib/opencode/client"
 import { recoverPendingMessages } from "./pending-message"
 import { DEFAULT_SERVER_ID, serverRegistry } from "@/lib/opencode/server-registry"
 import { registerSyncStores, getSyncStoresForServer } from "./multi-server-registry"
+import {
+  observeSessionActivityTiming,
+  removeSessionActivityTiming,
+  removeSessionActivityTimingForServer,
+} from "./session-activity-timing"
 import { useProjectsStore } from "@/stores/useProjectsStore"
 import { usePermissionStore } from "@/stores/permissionStore"
 import { useConfigStore, type ConfigConnectionState } from "@/stores/useConfigStore"
@@ -1670,6 +1675,29 @@ function handleEvent(
     }
   }
 
+  // Session activity timing — must see every busy event to maintain liveness,
+  // even if the reducer treated the status as unchanged (repeated busy).
+  // `retry` is still a running turn, so the elapsed counter keeps going.
+  if (resolvedDirectory && resolvedDirectory !== "global") {
+    if (payload.type === "session.status") {
+      const statusProps = payload.properties as { sessionID: string; status: SessionStatus }
+      if (statusProps.sessionID && statusProps.status) {
+        const phase = statusProps.status.type === "idle" ? "settled" : "active"
+        observeSessionActivityTiming(serverId, resolvedDirectory, statusProps.sessionID, phase)
+      }
+    } else if (payload.type === "session.idle" || payload.type === "session.error") {
+      const idleSessionID = getSessionIdFromPayload(payload)
+      if (idleSessionID) {
+        observeSessionActivityTiming(serverId, resolvedDirectory, idleSessionID, "settled")
+      }
+    } else if (payload.type === "session.deleted") {
+      const deletedSessionID = getSessionIdFromPayload(payload)
+      if (deletedSessionID) {
+        removeSessionActivityTiming(serverId, resolvedDirectory, deletedSessionID)
+      }
+    }
+  }
+
   // Snapshot materialization is driven by typed reducer outcomes, not by
   // inferring meaning from a generic false/no-change result.
   if (materializationResult) {
@@ -1752,6 +1780,7 @@ export function SyncProvider(props: {
           console.log(`[sync] promoted child-store sessions to global catalog before unregister: ${serverId}`)
         }
       }
+      removeSessionActivityTimingForServer(serverId)
       unregister()
     }
   }, [serverId, childStores])
@@ -1823,6 +1852,7 @@ export function SyncProvider(props: {
         const globalState = useGlobalSyncStore.getState()
         const bootstrapped = await bootstrapDirectory({
           directory,
+          serverId,
           sdk: props.sdk,
           getState: () => store.getState(),
           set: (patch) => {

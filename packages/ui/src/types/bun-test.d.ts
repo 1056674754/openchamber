@@ -9,9 +9,11 @@ declare module "bun:test" {
     toBeFalsy(): void;
     toBeNull(): void;
     toBeDefined(): void;
+    toBeUndefined(): void;
     toThrow(expected?: string | RegExp | (new (...args: never[]) => Error)): void;
     toContain(expected: unknown): void;
     toBeGreaterThan(expected: number): void;
+    toBeGreaterThanOrEqual(expected: number): void;
     toBeLessThan(expected: number): void;
     toHaveLength(expected: number): void;
     toBeInstanceOf(expected: unknown): void;
@@ -23,6 +25,8 @@ declare module "bun:test" {
       toBe(expected: unknown): void;
       toContain(expected: unknown): void;
       toBeNull(): void;
+      toBeDefined(): void;
+      toBeUndefined(): void;
     };
   };
 
