@@ -35,6 +35,8 @@ import { formatSessionCompactDateLabel, formatSessionDateLabel, normalizePath, r
 import { resolveGlobalSessionDirectory, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { useSessionUnseenCount } from '@/sync/notification-store';
+import { useHasSessionActivityDuration } from '@/sync/session-activity-timing';
+import { SessionActivityDuration } from '@/components/session/SessionActivityDuration';
 import { useSessionMultiSelectStore } from '@/stores/useSessionMultiSelectStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useDesktopSshStore } from '@/stores/useDesktopSshStore';
@@ -781,9 +783,21 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
 
   const statusType = sessionStatus?.type ?? 'idle';
   const isStreaming = statusType === 'busy' || statusType === 'retry';
+  const hasActivityDuration = useHasSessionActivityDuration(
+    sessionServerId ?? DEFAULT_SERVER_ID,
+    sessionDirectory ?? '',
+    session.id,
+    isStreaming,
+  );
   const pendingPermissionCount = sessionPermissions.length;
   const pendingQuestionCount = sessionQuestions.length;
   const showUnreadStatus = !isMovingToWorktree && needsAttention;
+
+  // When the session itself is running a turn (not a worktree move or aggregate),
+  // the leading indicator is a static dot — the elapsed counter on the right
+  // carries the motion that a pulsing spinner used to, at 1fps instead of 60.
+  const isSessionStreaming = isStreaming && !isMovingToWorktree;
+  const showActivityDuration = (isStreaming || showUnreadStatus) && hasActivityDuration && !isMovingToWorktree;
 
   const spinnerState = (() => {
     if (isMovingToWorktree) return 'streaming' as const;
@@ -805,16 +819,30 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
     />
   );
 
-  const renderSpinner = () => (
-    <SidebarSpinner
-      state={spinnerState}
-      aria-label={
-        isMovingToWorktree
-          ? t('sessions.sidebar.session.status.movingToWorktree')
-          : t('sessions.sidebar.session.status.active')
-      }
-    />
-  );
+  const renderSpinner = () => {
+    if (isSessionStreaming) {
+      return (
+        <span
+          className={cn(
+            'block h-1.5 w-1.5 rounded-full',
+            isSubtaskSession ? 'bg-[var(--status-warning)]' : 'bg-[var(--status-info)]',
+          )}
+          aria-label={t('sessions.sidebar.session.status.active')}
+          title={t('sessions.sidebar.session.status.active')}
+        />
+      );
+    }
+    return (
+      <SidebarSpinner
+        state={spinnerState}
+        aria-label={
+          isMovingToWorktree
+            ? t('sessions.sidebar.session.status.movingToWorktree')
+            : t('sessions.sidebar.session.status.active')
+        }
+      />
+    );
+  };
 
   const renderAlternating = () => (
     <span className="relative inline-flex h-4 w-4 items-center justify-center">
@@ -1437,8 +1465,19 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
                       {remoteIndicator}
                       {alwaysShowActions ? (
                         <span className="ml-2 inline-flex flex-shrink-0 items-center gap-1 text-[0.72rem] text-muted-foreground/75">
-                          {sessionGoalGlyph}
-                          {sessionCompactUpdatedLabel}
+                          {showActivityDuration ? (
+                            <SessionActivityDuration
+                              serverId={sessionServerId ?? DEFAULT_SERVER_ID}
+                              directory={sessionDirectory ?? ''}
+                              sessionId={session.id}
+                              running={isStreaming}
+                            />
+                          ) : (
+                            <>
+                              {sessionGoalGlyph}
+                              {sessionCompactUpdatedLabel}
+                            </>
+                          )}
                         </span>
                       ) : null}
                       {!alwaysShowActions ? (
@@ -1449,8 +1488,20 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
                               ? 'opacity-0'
                               : hideOnHoverClass,
                           )}>
-                            {sessionGoalGlyph}
-                            {sessionCompactUpdatedLabel}
+                            {showActivityDuration ? (
+                              <SessionActivityDuration
+                                serverId={sessionServerId ?? DEFAULT_SERVER_ID}
+                                directory={sessionDirectory ?? ''}
+                                sessionId={session.id}
+                                running={isStreaming}
+                                className="text-[0.72rem]"
+                              />
+                            ) : (
+                              <>
+                                {sessionGoalGlyph}
+                                {sessionCompactUpdatedLabel}
+                              </>
+                            )}
                           </span>
                         </div>
                       ) : null}
