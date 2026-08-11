@@ -95,6 +95,13 @@ if (isDev) {
 app.setAppUserModelId(APP_USER_MODEL_ID);
 app.commandLine.appendSwitch('proxy-bypass-list', '<-loopback>');
 app.commandLine.appendSwitch('ignore-connections-limit', '127.0.0.1,localhost');
+// Workaround for upstream Electron 41 + macOS 26.5 V8/Oilpan GC crash
+// (fontations_ffi / rust_png / cppgc::CollectGarbageInYoungGenerationForTesting
+// + brk 0). Disabling the Rust fontations backend avoids a font-rasterisation
+// path into the unstable GC code. See electron/electron#49522 and related
+// upstream issues. This is a partial mitigation; the full fix requires Electron
+// 42.4.1+, which needs a new notarised shell.
+app.commandLine.appendSwitch('disable-features', 'FontationsFontBackend');
 
 try {
   process.chdir(os.homedir());
@@ -2007,6 +2014,44 @@ const createBrowserWindow = ({ label, restoreGeometry, url }) => {
       if (typeof timer?.unref === 'function') timer.unref();
     }
   });
+
+  // Auto-reload on renderer crash. Upstream Electron 41 + macOS 26.5 has a V8
+  // Oilpan GC bug that deterministically crashes the renderer every ~1-2h under
+  // SSE/stream load (fontations_ffi / cppgc::CollectGarbageInYoungGenerationForTesting
+  // + brk 0). Without this handler the user sees a black window with
+  // "DevTools disconnected from the page" and must reload manually.
+  // Crash-loop guard prevents infinite reload if a deeper problem exists.
+  {
+    let crashCountInWindow = 0;
+    let crashWindowStart = 0;
+    const CRASH_WINDOW_MS = 60_000;
+    const CRASH_LOOP_THRESHOLD = 5;
+    browserWindow.webContents.on('render-process-gone', (event, details) => {
+      const now = Date.now();
+      if (now - crashWindowStart > CRASH_WINDOW_MS) {
+        crashCountInWindow = 0;
+        crashWindowStart = now;
+      }
+      crashCountInWindow += 1;
+      log.error('renderer-process-gone', {
+        windowId: browserWindow.id,
+        windowLabel: label,
+        reason: details?.reason,
+        exitCode: details?.exitCode,
+        crashCountInWindow,
+      });
+      if (crashCountInWindow > CRASH_LOOP_THRESHOLD) {
+        log.error('renderer crash loop detected, not reloading', { crashCountInWindow });
+        return;
+      }
+      const reloadTimer = setTimeout(() => {
+        if (!browserWindow.isDestroyed()) {
+          browserWindow.webContents.reload();
+        }
+      }, 250);
+      if (typeof reloadTimer?.unref === 'function') reloadTimer.unref();
+    });
+  }
 
   browserWindow.once('ready-to-show', () => {
     browserWindow.show();
