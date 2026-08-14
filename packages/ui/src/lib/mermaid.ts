@@ -107,9 +107,8 @@ export async function renderMermaidDiagram(
       const vbW = parseFloat(viewBoxMatch[3])
       const vbH = parseFloat(viewBoxMatch[4])
       if (Number.isFinite(vbW) && Number.isFinite(vbH) && vbW <= 20 && vbH <= 20) {
-        // 渲染塌缩 — 等待字体后重试一次
+        // 渲染塌缩 — 重试一次（此时字体已在上方 await 完毕）
         try {
-          if (document.fonts) await document.fonts.ready
           const retryId = `mmd-${++renderCounter}`
           const retry = await mermaid.render(retryId, source)
           return retry.svg

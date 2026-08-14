@@ -1431,7 +1431,8 @@ html:not(.dark) .chat-scroll {
 [data-markdown="mermaid-block"] [data-markdown="mermaid"] {
   width: max-content;
   min-width: 100%;
-  display: block;
+  display: flex;
+  justify-content: center;
 }
 
 [data-markdown="mermaid-block"] [data-markdown="mermaid-ascii"] {
