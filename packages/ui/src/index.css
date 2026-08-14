@@ -1447,7 +1447,6 @@ html:not(.dark) .chat-scroll {
 [data-markdown="mermaid-block"] [data-markdown="mermaid"] svg {
   width: auto !important;
   height: auto !important;
-  max-width: 100% !important;
   max-height: 320px !important;
 }
 
