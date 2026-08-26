@@ -100,19 +100,36 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, sessionId, messageId,
     React.useEffect(() => {
         const el = textRef.current;
         if (!el) return;
+        if (!collapsibleUserMessages || isExpanded) return;
 
         const checkTruncation = () => {
-            if (collapsibleUserMessages && !isExpanded) {
-                setIsTruncated(el.scrollHeight > el.clientHeight);
-            }
+            setIsTruncated(el.scrollHeight > el.clientHeight);
         };
 
         checkTruncation();
+        const initialFrame = window.requestAnimationFrame(checkTruncation);
 
         const resizeObserver = new ResizeObserver(checkTruncation);
         resizeObserver.observe(el);
 
-        return () => resizeObserver.disconnect();
+        const observeChildren = () => {
+            for (const child of Array.from(el.children)) {
+                resizeObserver.observe(child);
+            }
+        };
+        observeChildren();
+
+        const mutationObserver = new MutationObserver(() => {
+            observeChildren();
+            checkTruncation();
+        });
+        mutationObserver.observe(el, { childList: true, subtree: true });
+
+        return () => {
+            window.cancelAnimationFrame(initialFrame);
+            mutationObserver.disconnect();
+            resizeObserver.disconnect();
+        };
     }, [collapsibleUserMessages, displayContent, isExpanded]);
 
     React.useEffect(() => {
@@ -143,10 +160,11 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, sessionId, messageId,
             return;
         }
 
-        if (collapsibleUserMessages && !isExpanded && isTruncated) {
+        if (collapsibleUserMessages && !isExpanded && element.scrollHeight > element.clientHeight) {
+            setIsTruncated(true);
             setIsExpanded(true);
         }
-    }, [collapsibleUserMessages, hasActiveSelectionInElement, isExpanded, isTruncated, openSkill]);
+    }, [collapsibleUserMessages, hasActiveSelectionInElement, isExpanded, openSkill]);
 
     const handleCollapse = React.useCallback((event: React.MouseEvent) => {
         event.stopPropagation();

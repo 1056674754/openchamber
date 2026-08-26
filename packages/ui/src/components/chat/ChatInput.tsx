@@ -1078,6 +1078,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const pendingDroppedAbsolutePathsRef = React.useRef<string[]>([]);
     const suppressNextFileMentionPasteRef = React.useRef(false);
     const suppressNextFileMentionPasteTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+    const shellTriggerNormalizationRef = React.useRef(false);
     const mentionRef = React.useRef<FileMentionHandle>(null);
     const commandRef = React.useRef<CommandAutocompleteHandle>(null);
     const skillRef = React.useRef<SkillAutocompleteHandle>(null);
@@ -2610,6 +2611,19 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         // Uses keyCode === 229 fallback for WebKit where compositionend fires before keydown.
         if (isIMECompositionEvent(e)) return;
 
+        if (inputMode === 'normal' && e.key === '!') {
+            const selection = composerRef.current?.getSelection();
+            if (selection?.start === 0 && selection.end === 0) {
+                e.preventDefault();
+                setInputMode('shell');
+                setShowCommandAutocomplete(false);
+                setShowSkillAutocomplete(false);
+                setShowSnippetAutocomplete(false);
+                setShowFileMention(false);
+                return;
+            }
+        }
+
         if (inputMode === 'shell' && e.key === 'Escape') {
             e.preventDefault();
             setInputMode('normal');
@@ -3053,6 +3067,12 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     }, []);
 
     const handleComposerChange = ({ value, selection, fromPaste, insertedText }: ComposerChange) => {
+        if (shellTriggerNormalizationRef.current) {
+            shellTriggerNormalizationRef.current = false;
+            setMessage(value);
+            return;
+        }
+
         if (isVSCodeRuntime() && suppressNextFileDropTextInsertRef.current) {
             const candidateAbsolutePaths = pendingDroppedAbsolutePathsRef.current;
             if (candidateAbsolutePaths.some((path) => path.length > 0 && value.includes(path))) {
@@ -3074,12 +3094,17 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             const shellCommand = value.slice(1);
             const nextCursor = Math.max(0, selection.start - 1);
             setInputMode('shell');
-            setMessage(shellCommand);
             setShowCommandAutocomplete(false);
             setShowSkillAutocomplete(false);
             setShowSnippetAutocomplete(false);
             setShowFileMention(false);
-            requestAnimationFrame(() => composerRef.current?.setSelection(nextCursor));
+            const editor = composerRef.current;
+            if (editor) {
+                shellTriggerNormalizationRef.current = true;
+                editor.replaceRange(0, 1, '', nextCursor);
+            } else {
+                setMessage(shellCommand);
+            }
             return;
         }
 

@@ -2015,3 +2015,79 @@ fork 已有丰富的 surface 组织（#62 surface rail + ContextSidebarTab + Con
 - macOS 文件夹权限拒绝 → 恢复
 - worktree post-checkout hook 执行
 - session work-duration 显示
+
+---
+
+## v1.18.3 → v1.20.0 差距审计与迁移启动（2026-08-27）
+
+### 上游边界
+
+| 版本 | tag / release commit | 非 merge commits | diff 规模 |
+|---|---|---:|---:|
+| `v1.18.3` | `249d5deca` | 43 | 321 files, +15557/-9806 |
+| `v1.18.4` | `f0c23d3da` | 6 | 50 files, +1846/-382 |
+| `v1.19.0` | `4c8acf3c7` | 85 | 344 files, +24486/-2703 |
+| `v1.20.0` | `52ee87866` | 68 | 334 files, +13228/-3591 |
+
+审计方法继续遵守本文件顶部规则：只逐功能手工移植，不执行上游 merge，不覆盖 fork 未提交代码；`serverId + directory`、自研 sidebar、多实例 Electron host 聚合、稳定壳 / runtime 分离均为硬边界。
+
+### 现有 fork 等价 / 部分等价
+
+- **Browser**：fork 自 2026-05 已有 ContextPanel webview、元素/区域标注、截图与本地 dev server surface；上游 v1.18.3 的多页 Browser workspace、持久 history/device controls、remote dev tunnel 和 agent Web tool 尚未完整等价，统一由 [#135](https://coding.s-s.city/songsong/openchamber/-/issues/135) 收口。
+- **Markdown images**：fork 已有 session-directory-aware 本地图片解析、全屏预览和 gallery 导航；上游 completed-reply compact thumbnail/mobile layout 尚未对齐，见 [#136](https://coding.s-s.city/songsong/openchamber/-/issues/136)。
+- **Electron 43**：fork commit `831801e44` 已升级 Electron 43.3.0，Linux rounded-corner 前置已覆盖；其他 shell parity 集中 [#159](https://coding.s-s.city/songsong/openchamber/-/issues/159)。
+- **SSH config import**：当前工作区已有 `ImportCard` / SSH config 解析及未提交的 ssh-manager/settings WIP，但未完成 v1.20.0 生命周期验收，不计为 done，见 [#151](https://coding.s-s.city/songsong/openchamber/-/issues/151)。
+- **Settings lock / atomic persistence**：当前未提交 WIP 与 v1.19/v1.20 config safety 有重叠；迁移不得覆盖，完成后按 [#144](https://coding.s-s.city/songsong/openchamber/-/issues/144) 独立审计。
+
+### 第一批：Tier 1 independent fixes（Work Item [#134](https://coding.s-s.city/songsong/openchamber/-/issues/134)）
+
+| 上游能力 | commit | Fork 处理 | 状态 |
+|---|---|---|---|
+| Shell `!` 在 CodeMirror 插入前切换模式，paste/mobile transaction 同步移除触发符；重复 `!` 保留 | `70a3b33c6`, `8202292dd` | 手工适配当前 `ChatInput` autocomplete state；不复制上游已变化的 helper | ✅ |
+| 三位数以上代码行号不换行 | `a7db40153` | `data-md-code-line-number` 增加 `white-space: nowrap` | ✅ |
+| CJK IME composition 期间禁止 controlled value 全量 writeback | `1a48de769` | `ComposerEditor` 使用 CodeMirror `compositionStarted`；附回归测试 | ✅ |
+| Dialog 默认关闭按钮扩大为稳定 `28×28` 热区 | `527c9aafb` | 沿用 theme tokens，仅补尺寸/居中/z-index | ✅ |
+| 流式 Bash 输出随内容增长至 `46vh`，再进入滚动 | `3e7fe4ff9` | 去除 streaming-only 固定 `h-[46vh]`，保留 follow-at-bottom | ✅ |
+| 长用户消息晚布局后仍可检测截断并展开 | `e937b1757` | 观察自然高度 children + subtree，点击时重新测量 | ✅ |
+| Skills Catalog 展示名 `ClawdHub` → `ClawHub` | `1d0723b97` | 保留协议/内部 ID `clawdhub`，修 UI/Web/VS Code label 与文档 | ✅ |
+
+验证（2026-08-27）：
+
+- focused tests：IME writeback、UserText content、Bash output helpers、UI/Web ClawHub labels ✅
+- isolated production web build：`bun run build:web` ✅
+- isolated browser QA（临时 data dir + ports 3902/5190；未启动/终止 managed OpenCode）：Shell trigger/repeated prefix ✅；Dialog close hit area `28×28` 且可关闭 ✅；Skills Catalog 仅显示 `ClawHub` ✅
+- 隔离 backend 指向受 Basic auth 保护的 external OpenCode，因此 console 中存在预期 401 bootstrap/SSE 错误；页面、composer、settings 和被测交互仍正常挂载。该 401 不是本批回归。
+- full workspace lint ✅；docs validation ✅；`git diff --check` ✅。
+- full workspace type-check 被本批开始前已存在的未提交 WIP 阻塞：`ChatMessage.tsx` / `MessageBody.tsx` 使用 `chat.messageBody.actions.continueFailed|continuing|continue`，但当前 locale key union 尚未包含它们。上述文件及 locale 文件在本批前已 modified，本批未触碰对应逻辑；[#134](https://coding.s-s.city/songsong/openchamber/-/issues/134) 保持 `status::in_progress`，待该 WIP 收口后复跑并关闭。
+
+### GitLab executable backlog（#135–#159）
+
+| WI | 范围 | 风险 / 当前判断 |
+|---|---|---|
+| [#135](https://coding.s-s.city/songsong/openchamber/-/issues/135) | Browser workspace + agent Web tool | 🔴 与 fork Browser/Electron/remote tunnel 深度重叠 |
+| [#136](https://coding.s-s.city/songsong/openchamber/-/issues/136) | compact Markdown image galleries | 🟡 fork 已有 preview/gallery 基础 |
+| [#137](https://coding.s-s.city/songsong/openchamber/-/issues/137) | pairing / relay / mobile reconnect / browser tunnel | 🔴 多 transport 生命周期 |
+| [#138](https://coding.s-s.city/songsong/openchamber/-/issues/138) | Usage refresh + OpenCode Go/Claude/Command/Z.ai | 🟡 instance-scoped quota parity |
+| [#139](https://coding.s-s.city/songsong/openchamber/-/issues/139) | scheduled occurrence single-dispatch | 🟡 多 server claim authority |
+| [#140](https://coding.s-s.city/songsong/openchamber/-/issues/140) | draft work status + active-only context chats | 🟡 与 fork work-status/surfaces 对齐 |
+| [#141](https://coding.s-s.city/songsong/openchamber/-/issues/141) | ID rollover chronology + isolated server exception survival | 🔴 event ordering / process lifecycle |
+| [#142](https://coding.s-s.city/songsong/openchamber/-/issues/142) | installable Integrations settings | 🟡 需接 Apply & Restart + instance scope |
+| [#143](https://coding.s-s.city/songsong/openchamber/-/issues/143) | Project knowledge | 🔴 surface / persistence / context pins |
+| [#144](https://coding.s-s.city/songsong/openchamber/-/issues/144) | config parse + atomic write safety | 🔴 当前 settings WIP 重叠，禁止覆盖 |
+| [#145](https://coding.s-s.city/songsong/openchamber/-/issues/145) | Shiki churn + proxy connection reuse | 🔴 renderer hot path + proxy lifecycle |
+| [#146](https://coding.s-s.city/songsong/openchamber/-/issues/146) | Git PR/worktree/branch diff/generated text | 🟡 逐子能力移植 |
+| [#147](https://coding.s-s.city/songsong/openchamber/-/issues/147) | file upload + path authority | 🔴 session `serverId + directory` 必须贯穿 |
+| [#148](https://coding.s-s.city/songsong/openchamber/-/issues/148) | drafts / embedded chats / context usage / attachment bounds | 🔴 sync 与历史恢复 |
+| [#149](https://coding.s-s.city/songsong/openchamber/-/issues/149) | `/btw` side-question sessions | 🔴 temporary fork lifecycle |
+| [#150](https://coding.s-s.city/songsong/openchamber/-/issues/150) | projectless Chats | 🔴 新 session ownership 模型 |
+| [#151](https://coding.s-s.city/songsong/openchamber/-/issues/151) | SSH remote setup/lifecycle | 🔴 当前 WIP 重叠 + multi-instance host authority |
+| [#152](https://coding.s-s.city/songsong/openchamber/-/issues/152) | curated GitHub Skills catalog | 🟡 catalog/source scope |
+| [#153](https://coding.s-s.city/songsong/openchamber/-/issues/153) | post-recording dictation | 🟡 web/Capacitor/desktop voice parity |
+| [#154](https://coding.s-s.city/songsong/openchamber/-/issues/154) | Settings selector/default ownership | 🔴 不能切换整个 app context |
+| [#155](https://coding.s-s.city/songsong/openchamber/-/issues/155) | custom providers + Small Model resolution | 🟡 running-OpenCode provider authority |
+| [#156](https://coding.s-s.city/songsong/openchamber/-/issues/156) | focused-project sidebar + external sessions | 🔴 fork sidebar authoritative |
+| [#157](https://coding.s-s.city/songsong/openchamber/-/issues/157) | restart/reconnect/queue reconciliation | 🔴 live state 与 remote identity |
+| [#158](https://coding.s-s.city/songsong/openchamber/-/issues/158) | external app deep-link confirmation | 🟡 security + per-device trust |
+| [#159](https://coding.s-s.city/songsong/openchamber/-/issues/159) | desktop/mobile shell parity | 🟢/🟡 先核验已有等价实现 |
+
+建议顺序：`#134` 收口 → `#136/#138/#139/#140/#152/#155/#158/#159` 独立中低风险 → `#141/#144/#145/#147/#148/#157` correctness/perf → `#135/#143/#149/#150/#151/#154/#156` 大功能与架构适配。

@@ -86,7 +86,7 @@ export const CURATED_SOURCES: CuratedSource[] = [
   },
   {
     id: 'clawdhub',
-    label: 'ClawdHub',
+    label: 'ClawHub',
     description: 'Community skill registry with vector search',
     source: 'clawdhub:registry',
   },

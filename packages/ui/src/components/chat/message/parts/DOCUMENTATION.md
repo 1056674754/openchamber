@@ -80,6 +80,7 @@ Why: in current pipeline Perplexity is static/grouped, so `StaticToolRow` is the
 - Do not duplicate icon logic; keep it in `toolPresentation.tsx`.
 - For static tool copy changes, prefer `ProgressiveGroup.tsx` first.
 - For expanded output changes, edit `ToolPart.tsx`.
+- Running Bash output grows with its content up to `46vh`, then scrolls while preserving follow-at-bottom behavior.
 - After edits run:
   - `bun run type-check`
   - `bun run lint`

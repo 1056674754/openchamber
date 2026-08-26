@@ -315,6 +315,7 @@ export const ComposerEditor = React.forwardRef<ComposerEditorHandle, ComposerEdi
             if (!view) return;
             const current = view.state.doc.toString();
             if (current === value) return;
+            if (view.compositionStarted) return;
             view.dispatch({
                 changes: { from: 0, to: current.length, insert: value },
                 // An external rewrite (draft restore, history navigation,
