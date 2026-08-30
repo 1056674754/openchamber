@@ -2419,6 +2419,16 @@ fork 已有丰富的 surface 组织（#62 surface rail + ContextSidebarTab + Con
 
 验证：managed Chats source 3/3 + Chats i18n 1/1、UI type-check/lint ✅。隔离 Electron dev matching-surface QA：空 Chats section + create action ✅；专用 Chats composer target ✅；临时 managed Chat live insert ✅；搜索 `Chats` 命中并显示该 Session ✅；清空搜索后只出现一次、未重复进入 Recent ✅；测试 Session 已删除，隔离 dev/OpenCode 已停止。控制台仅见启动 503 fallback、测试 Session 删除后的预取 404，以及既有 TempSessions/ModelControls Base UI button 语义警告，均非 Chats 代码路径回归。[#150](https://coding.s-s.city/songsong/openchamber/-/issues/150) 保持 open：App/Mini Chat parity、真实 remote multi-instance 与 Capacitor mobile matching-surface QA 待续。
 
+### #150 Phase 7：Main/Mini Chat + Context parity（2026-08-30）
+
+- 空配置 Electron Mini Chat 与其快捷键现在显式创建 `target=chat`；有 directory/project 参数时才创建 project draft。Mini Chat 返回主窗口时沿用同一判定，不再把空参数恢复成活动项目草稿。
+- 修复 Mini Chat 双自动建草稿竞态：`MiniChatBootstrap` 是唯一 draft bootstrap；`ChatContainer autoOpenDraft` 不再抢先按旧默认创建 project draft。
+- Mini Chat/Header 在 Chat context 隐藏 project、branch 与 git status；打开/返回 Mini Chat 时，既有 Session 使用 Session 自身 directory，Chat draft 不再回退到活动项目路径。
+- Right Context panel 在已知 Chats root 时使用 `CHAT_DRAFT_PROJECT_ID + root + serverId`，保持 Memory/Notes owner 与实例一致；远程空白 draft 在远端 home 尚未知时 fail closed，不用本机 Chats root 代替。
+- 对应提交：`ef9b0d64a feat(chats): align mini chat surfaces`、`0b773e67b fix(chats): restore draft target from mini chat`、`4490a72dd fix(chats): serialize mini chat draft bootstrap`。
+
+验证：UI type-check/lint ✅。隔离 HMR `/mini-chat.html?mode=draft` 首轮复现 project draft 竞态（Header/composer 显示 `song`），修复后重载只显示 New session、无 project/branch/target path ✅；无新增控制台错误，既有 ModelControls Base UI warning 单独保留；QA backend/OpenCode 已停止。[#150](https://coding.s-s.city/songsong/openchamber/-/issues/150) 保持 open：真实 remote Mini Chat/Sidebar multi-instance 与 Capacitor mobile matching-surface QA。
+
 ### #141 Phase 1：Isolated server exception survival（2026-08-30）
 
 上游来源：`71a538b77`。fork 的 embedded server 没有外部 supervisor，单个 Node/socket stray exception 不应让整个 OpenChamber instance 离线：
