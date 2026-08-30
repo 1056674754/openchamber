@@ -2134,3 +2134,13 @@ fork 已有丰富的 surface 组织（#62 surface rail + ContextSidebarTab + Con
 - fork 原有 60s 可配置 auto-refresh、Header/VS Code/Usage 三 surface 挂载和 UI request single-flight 已覆盖上游 3 分钟刷新目标，不降级为上游固定实现。
 
 验证：Web provider/registry/formatter 4 files / 19 tests ✅；VS Code quota parity 9 tests ✅；full type-check ✅。[#138](https://coding.s-s.city/songsong/openchamber/-/issues/138) 保持 open，下一 phase 处理 Claude Code credential/quota 与 OpenCode Go API-key migration。
+
+### #138 Phase 2：Claude Code + OpenCode Go API-key migration（2026-08-30）
+
+- Claude Web/desktop/mobile 从 Claude Code macOS Keychain、`~/.claude/.credentials.json`、OpenCode auth、`CLAUDE_CODE_OAUTH_TOKEN` 依次只读发现 OAuth；VS Code extension host 使用同一优先级。
+- Claude quota 解析新 `limits` 数组与 legacy fallback，保留 5h/7d duration、model-scoped weekly limits、enabled extra-usage spend label 和 Claude Code subscription plan；429 期间只回放同 credential fingerprint 的 last-good 数据。
+- Web registry、Claude provider 和 VS Code dispatcher 都合并同一 provider 的并发刷新；不同 provider / active runtime 仍使用各自 key，不引入全局实例状态。
+- OpenCode Go 停用 workspace dashboard cookie scraping，改读 owning OpenCode `auth.json` 的标准 `opencode-go` API key，并调用 `/zen/go/v1/usage` JSON API；旧 cookie file 仅删除，旧写入 route 明确返回 HTTP 410，不静默接受失效凭据。
+- Usage 页面显示 Claude plan，model-scoped Claude limits 默认全部选中；旧 OpenCode Go credential form 从 Providers 页面移除。Command Code、Z.ai credits 和 fork 既有 60s configurable auto-refresh 保持 Phase 1 语义。
+
+验证：Claude Web Vitest 4 files / 15 tests ✅；OpenCode Go Web 2 files / 5 Bun tests ✅；VS Code quota parity 12 Bun tests ✅；UI quota focused tests 10 条 ✅；full workspace type-check/lint ✅；Web production build 与 VS Code production build ✅；`git diff --check` ✅。

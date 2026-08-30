@@ -1,7 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { fetchOpenCodeGoUsage, readOpenCodeGoCredential } from './opencodeGoQuota';
+import { execFileSync } from 'node:child_process';
+import { deleteLegacyOpenCodeGoCredential, fetchOpenCodeGoUsage } from './opencodeGoQuota';
 import { fetchCommandCodeUsage } from './commandCodeQuota';
 
 type AuthEntry = Record<string, unknown> | string;
@@ -129,6 +130,13 @@ type DeepseekPayload = {
     currency?: string;
     total_balance?: number | string;
   }>;
+};
+
+type ClaudeCredential = {
+  accessToken: string;
+  refreshToken: string | null;
+  planLabel: string | null;
+  source: 'keychain' | 'credentials-file' | 'opencode-auth' | 'env';
 };
 
 export type ProviderResult = {
@@ -267,6 +275,62 @@ const readTextFile = (filePath: string): string | null => {
     console.warn(`Failed to read text file: ${filePath}`, error);
     return null;
   }
+};
+
+const parseClaudeCodeCredential = (
+  value: Record<string, unknown> | null,
+  source: ClaudeCredential['source'],
+): ClaudeCredential | null => {
+  const oauth = asObject(value?.claudeAiOauth);
+  const accessToken = asNonEmptyString(oauth?.accessToken);
+  if (!accessToken) return null;
+  return {
+    accessToken,
+    refreshToken: asNonEmptyString(oauth?.refreshToken),
+    planLabel: asNonEmptyString(oauth?.subscriptionType),
+    source,
+  };
+};
+
+const loadClaudeCredential = (): ClaudeCredential | null => {
+  if (process.platform === 'darwin') {
+    try {
+      const raw = execFileSync('security', ['find-generic-password', '-s', 'Claude Code-credentials', '-w'], {
+        encoding: 'utf8',
+        timeout: 10_000,
+        stdio: ['ignore', 'pipe', 'ignore'],
+      });
+      const keychain = parseClaudeCodeCredential(JSON.parse(raw.trim()) as Record<string, unknown>, 'keychain');
+      if (keychain) return keychain;
+    } catch {
+      // Fall through to the remaining read-only credential sources.
+    }
+  }
+
+  const claudeDirectory = process.env.CLAUDE_CONFIG_DIR?.trim()
+    ? path.resolve(process.env.CLAUDE_CONFIG_DIR)
+    : path.join(os.homedir(), '.claude');
+  const credentialsFile = parseClaudeCodeCredential(
+    readJsonFile(path.join(claudeDirectory, '.credentials.json')),
+    'credentials-file',
+  );
+  if (credentialsFile) return credentialsFile;
+
+  const entry = normalizeAuthEntry(getAuthEntry(readAuthFile(), ['anthropic', 'claude']));
+  const accessToken = asNonEmptyString(entry?.access) ?? asNonEmptyString(entry?.token);
+  if (accessToken) {
+    return {
+      accessToken,
+      refreshToken: asNonEmptyString(entry?.refresh),
+      planLabel: null,
+      source: 'opencode-auth',
+    };
+  }
+
+  const environmentToken = process.env.CLAUDE_CODE_OAUTH_TOKEN?.trim();
+  return environmentToken
+    ? { accessToken: environmentToken, refreshToken: null, planLabel: null, source: 'env' }
+    : null;
 };
 
 const getAuthEntry = (auth: AuthFile, aliases: string[]) => {
@@ -427,7 +491,11 @@ const durationToSeconds = (duration?: number, unit?: string) => {
 export const listConfiguredQuotaProviders = () => {
   const auth = readAuthFile();
   const configured = new Set<string>();
-  if (readOpenCodeGoCredential()) configured.add('opencode-go');
+  const openCodeGoAuth = normalizeAuthEntry(getAuthEntry(auth, ['opencode-go']));
+  if (openCodeGoAuth && (
+    typeof openCodeGoAuth.key === 'string'
+    || typeof openCodeGoAuth.token === 'string'
+  )) configured.add('opencode-go');
   const commandCodeAuth = normalizeAuthEntry(getAuthEntry(auth, ['command-code']));
   if (commandCodeAuth && (
     typeof commandCodeAuth.key === 'string'
@@ -436,10 +504,7 @@ export const listConfiguredQuotaProviders = () => {
   )) configured.add('command-code');
   if (process.env.COMMAND_CODE_API_KEY?.trim()) configured.add('command-code');
 
-  const anthropicAuth = normalizeAuthEntry(getAuthEntry(auth, ['anthropic', 'claude']));
-  if (anthropicAuth && ((anthropicAuth as Record<string, unknown>).access || (anthropicAuth as Record<string, unknown>).token)) {
-    configured.add('claude');
-  }
+  if (loadClaudeCredential()) configured.add('claude');
 
   const openaiAuth = normalizeAuthEntry(getAuthEntry(auth, ['openai', 'codex', 'chatgpt']));
   if (openaiAuth && ((openaiAuth as Record<string, unknown>).access || (openaiAuth as Record<string, unknown>).token)) {
@@ -933,89 +998,141 @@ export const fetchGoogleQuota = async (): Promise<ProviderResult> => {
   });
 };
 
-export const fetchClaudeQuota = async (): Promise<ProviderResult> => {
-  const auth = readAuthFile();
-  const entry = normalizeAuthEntry(getAuthEntry(auth, ['anthropic', 'claude'])) as Record<string, unknown> | null;
-  const accessToken = (entry?.access as string | undefined) ?? (entry?.token as string | undefined);
+const CLAUDE_SESSION_SECONDS = 5 * 60 * 60;
+const CLAUDE_WEEK_SECONDS = 7 * 24 * 60 * 60;
+let claudeCredentialFingerprint: string | null = null;
+let claudeCachedUsage: ProviderUsage | null = null;
+let claudeCachedPlanLabel: string | null = null;
+let claudeCooldownUntil = 0;
 
-  if (!accessToken) {
-    return buildResult({
-      providerId: 'claude',
-      providerName: 'Claude',
-      ok: false,
-      configured: false,
-      error: 'Not configured',
+const claudeFingerprint = (credential: ClaudeCredential) =>
+  `${credential.accessToken}\0${credential.refreshToken ?? ''}`;
+
+const claudeRateLimitResult = (planLabel: string | null): ProviderResult => claudeCachedUsage
+  ? buildResult({
+      providerId: 'claude', providerName: 'Claude', ok: true, configured: true,
+      usage: claudeCachedUsage, planLabel: planLabel ?? claudeCachedPlanLabel,
+    })
+  : buildResult({
+      providerId: 'claude', providerName: 'Claude', ok: false, configured: true,
+      error: 'Rate limited by Anthropic. Retrying shortly.',
     });
+
+const claudeCooldownFromResponse = (response: Response) => {
+  const raw = response.headers.get('retry-after');
+  const seconds = Number(raw);
+  if (Number.isFinite(seconds) && seconds > 0) return Math.min(seconds * 1000, 60 * 60 * 1000);
+  const retryAt = raw ? Date.parse(raw) : Number.NaN;
+  if (Number.isFinite(retryAt) && retryAt > Date.now()) return Math.min(retryAt - Date.now(), 60 * 60 * 1000);
+  return 5 * 60 * 1000;
+};
+
+const buildClaudeUsage = (payload: Record<string, unknown>): ProviderUsage => {
+  const windows: Record<string, UsageWindow> = {};
+  const models: Record<string, ProviderUsage> = {};
+  const addWindow = (
+    target: Record<string, UsageWindow>,
+    key: string,
+    usedPercent: number | null,
+    resetAt: number | null,
+    windowSeconds: number | null,
+    valueLabel?: string | null,
+  ) => {
+    if (usedPercent === null && !valueLabel) return;
+    target[key] = toUsageWindow({ usedPercent, resetAt, windowSeconds, valueLabel });
+  };
+
+  const limits = Array.isArray(payload.limits) ? payload.limits : [];
+  if (limits.length > 0) {
+    for (const rawLimit of limits) {
+      const limit = asObject(rawLimit);
+      if (!limit) continue;
+      const percent = toNumber(limit.percent);
+      const resetAt = toTimestamp(limit.resets_at);
+      if (limit.kind === 'session') {
+        addWindow(windows, '5h', percent, resetAt, CLAUDE_SESSION_SECONDS);
+      } else if (limit.kind === 'weekly_all') {
+        addWindow(windows, '7d', percent, resetAt, CLAUDE_WEEK_SECONDS);
+      } else if (limit.kind === 'weekly_scoped') {
+        const modelName = asNonEmptyString(asObject(asObject(limit.scope)?.model)?.display_name);
+        if (!modelName) continue;
+        const modelWindows: Record<string, UsageWindow> = {};
+        addWindow(modelWindows, '7d', percent, resetAt, CLAUDE_WEEK_SECONDS);
+        if (Object.keys(modelWindows).length > 0) models[modelName] = { windows: modelWindows };
+      }
+    }
+  } else {
+    const fiveHour = asObject(payload.five_hour);
+    const sevenDay = asObject(payload.seven_day);
+    if (fiveHour) addWindow(windows, '5h', toNumber(fiveHour.utilization), toTimestamp(fiveHour.resets_at), CLAUDE_SESSION_SECONDS);
+    if (sevenDay) addWindow(windows, '7d', toNumber(sevenDay.utilization), toTimestamp(sevenDay.resets_at), CLAUDE_WEEK_SECONDS);
   }
+
+  const spend = asObject(payload.spend);
+  if (spend?.enabled === true) {
+    const used = asObject(spend.used);
+    const limit = asObject(spend.limit);
+    const exponent = toNumber(used?.exponent) ?? 2;
+    const usedAmount = toNumber(used?.amount_minor);
+    const limitAmount = toNumber(limit?.amount_minor);
+    const currency = asNonEmptyString(used?.currency);
+    const prefix = currency === 'USD' || !currency ? '$' : `${currency} `;
+    const valueLabel = usedAmount === null
+      ? null
+      : limitAmount === null
+        ? `${prefix}${formatMoney(usedAmount / 10 ** exponent)}`
+        : `${prefix}${formatMoney(usedAmount / 10 ** exponent)} / ${prefix}${formatMoney(limitAmount / 10 ** (toNumber(limit?.exponent) ?? 2))}`;
+    addWindow(windows, 'extra_usage', toNumber(spend.percent), null, null, valueLabel);
+  }
+
+  return Object.keys(models).length > 0 ? { windows, models } : { windows };
+};
+
+export const fetchClaudeQuota = async (): Promise<ProviderResult> => {
+  const credential = loadClaudeCredential();
+  if (!credential) {
+    return buildResult({ providerId: 'claude', providerName: 'Claude', ok: false, configured: false, error: 'Not configured' });
+  }
+
+  const fingerprint = claudeFingerprint(credential);
+  if (claudeCredentialFingerprint !== fingerprint) {
+    claudeCredentialFingerprint = fingerprint;
+    claudeCachedUsage = null;
+    claudeCachedPlanLabel = null;
+    claudeCooldownUntil = 0;
+  }
+  if (Date.now() < claudeCooldownUntil) return claudeRateLimitResult(credential.planLabel);
 
   try {
     const response = await fetch('https://api.anthropic.com/api/oauth/usage', {
-      method: 'GET',
       headers: {
-        Authorization: `Bearer ${accessToken}`,
+        Authorization: `Bearer ${credential.accessToken}`,
         'anthropic-beta': 'oauth-2025-04-20',
       },
     });
-
-    if (!response.ok) {
+    if (response.status === 429) {
+      claudeCooldownUntil = Date.now() + claudeCooldownFromResponse(response);
+      return claudeRateLimitResult(credential.planLabel);
+    }
+    if (response.status === 401 || response.status === 403) {
       return buildResult({
-        providerId: 'claude',
-        providerName: 'Claude',
-        ok: false,
-        configured: true,
-        error: `API error: ${response.status}`,
+        providerId: 'claude', providerName: 'Claude', ok: false, configured: true,
+        error: 'Claude session expired. Open Claude Code to sign in again.',
       });
     }
-
-    const payload = await response.json() as Record<string, unknown>;
-    const windows: Record<string, UsageWindow> = {};
-    const fiveHour = (payload as Record<string, unknown>).five_hour as Record<string, unknown> | undefined;
-    const sevenDay = (payload as Record<string, unknown>).seven_day as Record<string, unknown> | undefined;
-    const sevenDaySonnet = (payload as Record<string, unknown>).seven_day_sonnet as Record<string, unknown> | undefined;
-    const sevenDayOpus = (payload as Record<string, unknown>).seven_day_opus as Record<string, unknown> | undefined;
-
-    if (fiveHour) {
-      windows['5h'] = toUsageWindow({
-        usedPercent: toNumber(fiveHour.utilization),
-        windowSeconds: null,
-        resetAt: toTimestamp(fiveHour.resets_at),
-      });
+    if (!response.ok) {
+      return buildResult({ providerId: 'claude', providerName: 'Claude', ok: false, configured: true, error: `API error: ${response.status}` });
     }
-    if (sevenDay) {
-      windows['7d'] = toUsageWindow({
-        usedPercent: toNumber(sevenDay.utilization),
-        windowSeconds: null,
-        resetAt: toTimestamp(sevenDay.resets_at),
-      });
-    }
-    if (sevenDaySonnet) {
-      windows['7d-sonnet'] = toUsageWindow({
-        usedPercent: toNumber(sevenDaySonnet.utilization),
-        windowSeconds: null,
-        resetAt: toTimestamp(sevenDaySonnet.resets_at),
-      });
-    }
-    if (sevenDayOpus) {
-      windows['7d-opus'] = toUsageWindow({
-        usedPercent: toNumber(sevenDayOpus.utilization),
-        windowSeconds: null,
-        resetAt: toTimestamp(sevenDayOpus.resets_at),
-      });
-    }
-
+    const usage = buildClaudeUsage(await response.json() as Record<string, unknown>);
+    claudeCachedUsage = usage;
+    claudeCachedPlanLabel = credential.planLabel;
     return buildResult({
-      providerId: 'claude',
-      providerName: 'Claude',
-      ok: true,
-      configured: true,
-      usage: { windows },
+      providerId: 'claude', providerName: 'Claude', ok: true, configured: true,
+      usage, planLabel: credential.planLabel,
     });
   } catch (error) {
     return buildResult({
-      providerId: 'claude',
-      providerName: 'Claude',
-      ok: false,
-      configured: true,
+      providerId: 'claude', providerName: 'Claude', ok: false, configured: true,
       error: error instanceof Error ? error.message : 'Request failed',
     });
   }
@@ -2277,7 +2394,7 @@ const fetchDeepseekQuota = async (): Promise<ProviderResult> => {
   }
 };
 
-export const fetchQuotaForProvider = async (providerId: string): Promise<ProviderResult> => {
+const fetchQuotaForProviderUncoalesced = async (providerId: string): Promise<ProviderResult> => {
   switch (providerId) {
     case 'claude':
       return fetchClaudeQuota();
@@ -2314,8 +2431,14 @@ export const fetchQuotaForProvider = async (providerId: string): Promise<Provide
     case 'neuralwatt':
       return fetchNeuralwattQuota();
     case 'opencode-go': {
-      const credential = readOpenCodeGoCredential();
-      if (!credential) {
+      deleteLegacyOpenCodeGoCredential();
+      const entry = normalizeAuthEntry(getAuthEntry(readAuthFile(), ['opencode-go']));
+      const apiKey = typeof entry?.key === 'string'
+        ? entry.key.trim()
+        : typeof entry?.token === 'string'
+          ? entry.token.trim()
+          : '';
+      if (!apiKey) {
         return buildResult({
           providerId,
           providerName: 'OpenCode Go',
@@ -2330,7 +2453,7 @@ export const fetchQuotaForProvider = async (providerId: string): Promise<Provide
           providerName: 'OpenCode Go',
           ok: true,
           configured: true,
-          usage: { windows: await fetchOpenCodeGoUsage(credential) },
+          usage: { windows: await fetchOpenCodeGoUsage(apiKey) },
         });
       } catch (error) {
         return buildResult({
@@ -2382,4 +2505,17 @@ export const fetchQuotaForProvider = async (providerId: string): Promise<Provide
         error: 'Unsupported provider',
       });
   }
+};
+
+const pendingQuotaFetches = new Map<string, Promise<ProviderResult>>();
+
+export const fetchQuotaForProvider = (providerId: string): Promise<ProviderResult> => {
+  const existing = pendingQuotaFetches.get(providerId);
+  if (existing) return existing;
+  const request = fetchQuotaForProviderUncoalesced(providerId);
+  const pending = request.finally(() => {
+    if (pendingQuotaFetches.get(providerId) === pending) pendingQuotaFetches.delete(providerId);
+  });
+  pendingQuotaFetches.set(providerId, pending);
+  return pending;
 };

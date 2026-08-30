@@ -4,6 +4,7 @@ import {
   calculateExpectedUsageMarkerPercent,
   clampPercent,
   formatPercent,
+  formatWindowLabel,
 } from './utils';
 
 describe('quota utils', () => {
@@ -37,5 +38,9 @@ describe('quota utils', () => {
 
     // Then the progress bar remains unmarked
     expect(marker).toBeNull();
+  });
+
+  test('labels Claude extra usage as a spend window', () => {
+    expect(formatWindowLabel('extra_usage')).toBe('Extra Usage');
   });
 });

@@ -20,6 +20,19 @@ afterAll(() => {
 });
 
 describe('OpenCode Go credential routes', () => {
+  test('rejects legacy cookie credential writes when no compatibility validator is installed', async () => {
+    const app = express();
+    registerQuotaRoutes(app, {
+      getQuotaProviders: async () => ({}),
+      openCodeGoCredentials: credentials,
+    });
+
+    await request(app)
+      .put('/api/quota/credentials/opencode-go')
+      .send({ workspaceId: 'wrk_test', authCookie: 'secret' })
+      .expect(410);
+  });
+
   test('validates and stores a normalized credential without returning the secret', async () => {
     const app = express();
     registerQuotaRoutes(app, {

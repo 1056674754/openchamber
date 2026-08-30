@@ -1139,6 +1139,7 @@ export const settingsDict = {
   'settings.usage.page.header.providerUsage': '{provider} 用量',
   'settings.usage.page.header.refreshing': '正在刷新用量...',
   'settings.usage.page.header.lastUpdated': '最后更新：{time}',
+  'settings.usage.page.header.lastUpdatedWithPlan': '套餐：{plan} · 最后更新：{time}',
   'settings.usage.page.options.showInHeaderAria': '在页眉菜单显示',
   'settings.usage.page.options.showInHeader': '在页眉菜单显示',
   'settings.usage.page.options.showInHeaderTooltip': '启用后，该提供商的用量会显示在应用页眉的快速访问下拉菜单中。',

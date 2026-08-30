@@ -1151,6 +1151,7 @@ export const settingsDict = {
   'settings.usage.page.header.providerUsage': '{provider} Nutzung',
   'settings.usage.page.header.refreshing': 'Aktualisiere Nutzung...',
   'settings.usage.page.header.lastUpdated': 'Zuletzt aktualisiert: {time}',
+  'settings.usage.page.header.lastUpdatedWithPlan': 'Tarif: {plan} · Zuletzt aktualisiert: {time}',
   'settings.usage.page.options.showInHeaderAria': 'Im Kopfmenü anzeigen',
   'settings.usage.page.options.showInHeader': 'Im Kopfmenü anzeigen',
   'settings.usage.page.options.showInHeaderTooltip': 'Wenn aktiviert, ist die Nutzung dieses Anbieters im Schnellzugriff-Menü in der App-Kopfzeile sichtbar.',

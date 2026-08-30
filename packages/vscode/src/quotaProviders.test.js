@@ -1,9 +1,22 @@
 import { afterEach, describe, expect, it, mock } from 'bun:test';
 
+mock.module('node:child_process', () => ({
+  execFileSync: () => { throw new Error('No Keychain fixture'); },
+}));
+
 mock.module('node:fs', () => ({
   default: {
-    existsSync: (filePath) => filePath.endsWith('/auth.json'),
+    existsSync: (filePath) => filePath.endsWith('/auth.json') || filePath.endsWith('/.claude/.credentials.json'),
     readFileSync: (filePath) => {
+      if (filePath.endsWith('/.claude/.credentials.json')) {
+        return JSON.stringify({
+          claudeAiOauth: {
+            accessToken: 'claude-code-token',
+            refreshToken: 'claude-code-refresh',
+            subscriptionType: 'max',
+          },
+        });
+      }
       if (!filePath.endsWith('/auth.json')) {
         throw new Error(`Unexpected fixture read: ${filePath}`);
       }
@@ -14,8 +27,10 @@ mock.module('node:fs', () => ({
         neuralwatt: { key: 'test-token' },
         'zai-coding-plan': { key: 'test-token' },
         'command-code': { key: 'command-token' },
+        'opencode-go': { key: 'go-token' },
       });
     },
+    unlinkSync: () => undefined,
   },
 }));
 
@@ -46,7 +61,38 @@ describe('VS Code quota provider parity', () => {
       'kimi-for-coding',
       'neuralwatt',
       'command-code',
+      'opencode-go',
+      'claude',
     ]));
+  });
+
+  it('reads Claude Code credentials, plan limits, and model-scoped usage', async () => {
+    globalThis.fetch = mock(async () => response({
+      limits: [
+        { kind: 'session', percent: 11, resets_at: '2026-08-30T12:00:00Z' },
+        { kind: 'weekly_scoped', percent: 22, resets_at: '2026-09-01T12:00:00Z', scope: { model: { display_name: 'Fable' } } },
+      ],
+    }));
+
+    const result = await fetchQuotaForProvider('claude');
+
+    expect(result).toMatchObject({ ok: true, configured: true, planLabel: 'max' });
+    expect(result.usage?.windows['5h']).toMatchObject({ usedPercent: 11, windowSeconds: 5 * 60 * 60 });
+    expect(result.usage?.models?.Fable.windows['7d'].usedPercent).toBe(22);
+  });
+
+  it('coalesces simultaneous provider refreshes', async () => {
+    let calls = 0;
+    globalThis.fetch = mock(async () => {
+      calls += 1;
+      await Promise.resolve();
+      return response({ organization: { id: 'org-test' }, credits: { balance: 10 } });
+    });
+    const first = fetchQuotaForProvider('command-code');
+    const second = fetchQuotaForProvider('command-code');
+    expect(first).toBe(second);
+    await first;
+    expect(calls).toBe(2);
   });
 
   it('reports Crof credits without a fabricated percentage', async () => {
@@ -158,6 +204,26 @@ describe('VS Code quota provider parity', () => {
     expect(result.usage?.windows.monthly_credits.valueLabel).toBe('80');
     expect(result.usage?.windows['5h']).toMatchObject({ usedPercent: 20, valueLabel: '20 / 100' });
     expect(result.usage?.windows.weekly).toMatchObject({ usedPercent: 20, valueLabel: '40 / 200' });
+  });
+
+  it('uses the OpenCode Go API key and JSON usage endpoint', async () => {
+    let authorization = '';
+    globalThis.fetch = mock(async (_input, init) => {
+      authorization = String(init?.headers?.Authorization ?? '');
+      return response({
+        usage: {
+          rolling: { percent: 12, resetsAt: '2026-08-30T12:00:00Z' },
+          weekly: { percent: 34, resetsAt: '2026-09-01T12:00:00Z' },
+        },
+      });
+    });
+
+    const result = await fetchQuotaForProvider('opencode-go');
+
+    expect(result.ok).toBe(true);
+    expect(authorization).toBe('Bearer go-token');
+    expect(result.usage?.windows['5h'].usedPercent).toBe(12);
+    expect(result.usage?.windows.weekly.usedPercent).toBe(34);
   });
 
   it('uses Kimi used values before remaining and falls back when used is absent', async () => {

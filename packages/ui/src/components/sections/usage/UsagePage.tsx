@@ -182,6 +182,11 @@ export const UsagePage: React.FC = () => {
               <p className="typography-meta text-muted-foreground truncate">
                 {isLoading || isFetchingSelectedProvider ? (
                   <span className="animate-pulse">{t('settings.usage.page.header.refreshing')}</span>
+                ) : selectedResult?.planLabel ? (
+                  t('settings.usage.page.header.lastUpdatedWithPlan', {
+                    plan: selectedResult.planLabel,
+                    time: formatTime(lastUpdated),
+                  })
                 ) : (
                   t('settings.usage.page.header.lastUpdated', { time: formatTime(lastUpdated) })
                 )}

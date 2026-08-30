@@ -3,12 +3,11 @@ import {
   normalizeOpenCodeGoCredential,
   openCodeGoCredentialStore,
 } from './opencode-go-credentials.js';
-import { fetchOpenCodeGoUsage } from './providers/opencode-go.js';
 
 export function registerQuotaRoutes(app, {
   getQuotaProviders,
   openCodeGoCredentials = openCodeGoCredentialStore,
-  validateOpenCodeGoCredential = fetchOpenCodeGoUsage,
+  validateOpenCodeGoCredential = null,
 }) {
   app.get('/api/quota/providers', async (_req, res) => {
     try {
@@ -26,6 +25,9 @@ export function registerQuotaRoutes(app, {
   });
 
   app.put('/api/quota/credentials/opencode-go', express.json({ limit: '16kb' }), async (req, res) => {
+    if (typeof validateOpenCodeGoCredential !== 'function') {
+      return res.status(410).json({ error: 'OpenCode Go now uses the opencode-go API key from OpenCode authentication' });
+    }
     const credential = normalizeOpenCodeGoCredential(req.body);
     if (!credential) {
       return res.status(400).json({ error: 'Workspace ID and auth cookie are required' });
@@ -41,6 +43,9 @@ export function registerQuotaRoutes(app, {
   });
 
   app.post('/api/quota/credentials/opencode-go/validate', async (_req, res) => {
+    if (typeof validateOpenCodeGoCredential !== 'function') {
+      return res.status(410).json({ error: 'OpenCode Go now uses the opencode-go API key from OpenCode authentication' });
+    }
     const credential = openCodeGoCredentials.read();
     if (!credential) return res.status(404).json({ error: 'Not configured' });
     try {

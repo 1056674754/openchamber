@@ -1140,6 +1140,7 @@ export const settingsDict = {
   "settings.usage.page.header.providerUsage": "Uso de {provider}",
   "settings.usage.page.header.refreshing": "Atualizando uso...",
   "settings.usage.page.header.lastUpdated": "Última atualização: {time}",
+  "settings.usage.page.header.lastUpdatedWithPlan": "Plano: {plan} · Última atualização: {time}",
   "settings.usage.page.options.showInHeaderAria": "Mostrar em menu de cabeçalho",
   "settings.usage.page.options.showInHeader": "Mostrar no menu do cabeçalho",
   "settings.usage.page.options.showInHeaderTooltip": "Quando habilitado, o uso deste provedor ficará visível no menu de acesso rápido do cabeçalho do aplicativo.",

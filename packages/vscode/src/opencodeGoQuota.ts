@@ -66,65 +66,59 @@ export const deleteOpenCodeGoCredential = () => {
     if ((error as { code?: string }).code !== 'ENOENT') throw error;
   }
 };
+export const deleteLegacyOpenCodeGoCredential = deleteOpenCodeGoCredential;
 
-const toWindow = (usedPercent: number, resetInSec: number) => {
+const toWindow = (usedPercent: number, resetAt: string) => {
   const normalizedPercent = Math.min(100, Math.max(0, usedPercent));
-  const normalizedReset = Math.max(0, resetInSec);
+  const resetTimestamp = new Date(resetAt).getTime();
   return {
     usedPercent: normalizedPercent,
     remainingPercent: 100 - normalizedPercent,
     windowSeconds: null,
-    resetAfterSeconds: normalizedReset,
-    resetAt: Date.now() + normalizedReset * 1000,
+    resetAfterSeconds: Math.max(0, Math.floor((resetTimestamp - Date.now()) / 1000)),
+    resetAt: resetTimestamp,
     resetAtFormatted: null,
     resetAfterFormatted: null,
   };
 };
 
-export const parseOpenCodeGoUsage = (html: string) => {
-  const normalized = html
-    .replaceAll('&quot;', '"')
-    .replaceAll('&#34;', '"')
-    .replaceAll('\\u0022', '"')
-    .replaceAll('\\"', '"');
+export const parseOpenCodeGoUsage = (payload: unknown) => {
+  const root = payload && typeof payload === 'object' ? payload as Record<string, unknown> : null;
+  const usage = root?.usage && typeof root.usage === 'object' ? root.usage as Record<string, unknown> : null;
+  if (!usage) return {};
   const windows: Record<string, ReturnType<typeof toWindow>> = {};
 
   for (const [key, field] of Object.entries({
-    '5h': 'rollingUsage',
-    weekly: 'weeklyUsage',
-    monthly: 'monthlyUsage',
+    '5h': 'rolling',
+    weekly: 'weekly',
+    monthly: 'monthly',
   })) {
-    const body = normalized.match(
-      new RegExp(`["']?${field}["']?\\s*:\\s*(?:\\$R\\[\\d+\\]\\s*=\\s*)?\\{([^{}]*)\\}`, 's'),
-    )?.[1];
-    if (!body) continue;
-    const used = Number(body.match(/usagePercent\s*:\s*["']?(-?\d+(?:\.\d+)?)/)?.[1]);
-    const reset = Number(body.match(/resetInSec\s*:\s*["']?(-?\d+(?:\.\d+)?)/)?.[1]);
-    if (Number.isFinite(used) && Number.isFinite(reset)) {
-      windows[key] = toWindow(used, reset);
-    }
+    const entry = usage[field];
+    if (!entry || typeof entry !== 'object') continue;
+    const record = entry as Record<string, unknown>;
+    const used = record.percent;
+    const resetAt = record.resetsAt;
+    if (typeof used !== 'number' || !Number.isFinite(used)) continue;
+    if (typeof resetAt !== 'string' || !Number.isFinite(new Date(resetAt).getTime())) continue;
+    windows[key] = toWindow(used, resetAt);
   }
   return windows;
 };
 
-export const fetchOpenCodeGoUsage = async (credential: OpenCodeGoCredential) => {
-  const response = await fetch(
-    `https://opencode.ai/workspace/${encodeURIComponent(credential.workspaceId)}/go`,
-    {
-      headers: {
-        Accept: 'text/html,application/xhtml+xml',
-        Cookie: `auth=${credential.authCookie}`,
-        'User-Agent': 'OpenChamber quota provider',
-      },
-      redirect: 'manual',
-      signal: AbortSignal.timeout(15_000),
+export const fetchOpenCodeGoUsage = async (apiKey: string) => {
+  const response = await fetch('https://opencode.ai/zen/go/v1/usage', {
+    headers: {
+      Accept: 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+      'User-Agent': 'OpenChamber quota provider',
     },
-  );
-  if (response.status === 401 || response.status === 403 || (response.status >= 300 && response.status < 400)) {
+    signal: AbortSignal.timeout(15_000),
+  });
+  if (response.status === 401 || response.status === 403) {
     throw new Error('OpenCode Go authentication failed');
   }
-  if (!response.ok) throw new Error(`OpenCode Go dashboard returned HTTP ${response.status}`);
-  const windows = parseOpenCodeGoUsage(await response.text());
+  if (!response.ok) throw new Error(`OpenCode Go usage API returned HTTP ${response.status}`);
+  const windows = parseOpenCodeGoUsage(await response.json().catch(() => null));
   if (Object.keys(windows).length === 0) {
     throw new Error('OpenCode Go usage data could not be parsed');
   }

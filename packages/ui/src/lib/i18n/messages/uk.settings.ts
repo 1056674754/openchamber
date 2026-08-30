@@ -1140,6 +1140,7 @@ export const settingsDict = {
   "settings.usage.page.header.providerUsage": "Використання {provider}",
   "settings.usage.page.header.refreshing": "Оновлення використання...",
   "settings.usage.page.header.lastUpdated": "Останнє оновлення: {time}",
+  "settings.usage.page.header.lastUpdatedWithPlan": "План: {plan} · Останнє оновлення: {time}",
   "settings.usage.page.options.showInHeaderAria": "Показати в меню заголовка",
   "settings.usage.page.options.showInHeader": "Показати в меню заголовка",
   "settings.usage.page.options.showInHeaderTooltip": "Якщо ввімкнути, використання цього провайдера буде видно в спадному меню швидкого доступу в заголовку програми.",

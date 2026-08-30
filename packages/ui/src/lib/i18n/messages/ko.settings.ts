@@ -1140,6 +1140,7 @@ export const settingsDict = {
   'settings.usage.page.header.providerUsage': '{provider} 사용량',
   'settings.usage.page.header.refreshing': '사용량 새로고침 중...',
   'settings.usage.page.header.lastUpdated': '마지막 업데이트: {time}',
+  'settings.usage.page.header.lastUpdatedWithPlan': '플랜: {plan} · 마지막 업데이트: {time}',
   'settings.usage.page.options.showInHeaderAria': '헤더 메뉴에 표시',
   'settings.usage.page.options.showInHeader': '헤더 메뉴에 표시',
   'settings.usage.page.options.showInHeaderTooltip': '활성화하면 이 프로바이더의 사용량이 앱 헤더의 빠른 접근 메뉴에 표시됩니다.',

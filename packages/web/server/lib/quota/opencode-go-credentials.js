@@ -81,3 +81,4 @@ export const readOpenCodeGoCredential = () => openCodeGoCredentialStore.read();
 export const getOpenCodeGoCredentialStatus = () => openCodeGoCredentialStore.getStatus();
 export const writeOpenCodeGoCredential = (value) => openCodeGoCredentialStore.write(value);
 export const deleteOpenCodeGoCredential = () => openCodeGoCredentialStore.remove();
+export const deleteLegacyOpenCodeGoCredential = deleteOpenCodeGoCredential;

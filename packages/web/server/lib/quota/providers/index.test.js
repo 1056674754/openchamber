@@ -24,4 +24,11 @@ describe('quota provider registry', () => {
       error: 'Unsupported provider',
     });
   });
+
+  it('coalesces simultaneous refreshes for the same provider', async () => {
+    const first = fetchQuotaForProvider('unsupported-test-provider');
+    const second = fetchQuotaForProvider('unsupported-test-provider');
+    expect(first).toBe(second);
+    await expect(first).resolves.toMatchObject({ error: 'Unsupported provider' });
+  });
 });

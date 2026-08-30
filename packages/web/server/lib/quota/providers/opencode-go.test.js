@@ -1,30 +1,52 @@
-import { describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, mock, test } from 'bun:test';
 import { fetchOpenCodeGoUsage, parseOpenCodeGoUsage } from './opencode-go.js';
 
+mock.module('../../opencode/auth.js', () => ({
+  readAuthFile: () => ({ 'opencode-go': { key: 'api-key' } }),
+}));
+
+mock.module('../opencode-go-credentials.js', () => ({
+  deleteLegacyOpenCodeGoCredential: () => undefined,
+}));
+
+const originalFetch = globalThis.fetch;
+
+afterEach(() => {
+  globalThis.fetch = originalFetch;
+});
+
 describe('OpenCode Go quota provider', () => {
-  test('parses partial usage windows regardless of field order', () => {
-    const windows = parseOpenCodeGoUsage(
-      'rollingUsage:$R[1]={usagePercent:25,resetInSec:60} weeklyUsage:$R[2]={resetInSec:120,usagePercent:40}',
-      1_000,
-    );
+  test('parses partial API usage windows', () => {
+    const windows = parseOpenCodeGoUsage({
+      usage: {
+        rolling: { percent: 25, resetsAt: '2026-08-30T12:00:00Z' },
+        weekly: { percent: 40, resetsAt: '2026-09-01T12:00:00Z' },
+      },
+    });
 
     expect(windows['5h'].usedPercent).toBe(25);
-    expect(windows['5h'].resetAt).toBe(61_000);
+    expect(windows['5h'].resetAt).toBe(Date.parse('2026-08-30T12:00:00Z'));
     expect(windows.weekly.usedPercent).toBe(40);
     expect(windows.monthly).toBeUndefined();
   });
 
-  test('rejects redirects without forwarding credentials', async () => {
-    const credential = { workspaceId: 'wrk_test', authCookie: 'secret' };
+  test('uses the OpenCode Go JSON API with bearer auth', async () => {
+    let capturedUrl = '';
+    let capturedAuthorization = '';
     await expect(
-      fetchOpenCodeGoUsage(credential, async () => new Response('', { status: 302 })),
-    ).rejects.toThrow('authentication failed');
+      fetchOpenCodeGoUsage('api-key', async (url, init) => {
+        capturedUrl = String(url);
+        capturedAuthorization = String(init?.headers?.Authorization ?? '');
+        return Response.json({ usage: { rolling: { percent: 10, resetsAt: '2026-08-30T12:00:00Z' } } });
+      }),
+    ).resolves.toHaveProperty('5h');
+    expect(capturedUrl).toBe('https://opencode.ai/zen/go/v1/usage');
+    expect(capturedAuthorization).toBe('Bearer api-key');
   });
 
-  test('rejects pages without recognizable usage data', async () => {
-    const credential = { workspaceId: 'wrk_test', authCookie: 'secret' };
+  test('rejects responses without recognizable usage data', async () => {
     await expect(
-      fetchOpenCodeGoUsage(credential, async () => new Response('<html></html>')),
+      fetchOpenCodeGoUsage('api-key', async () => Response.json({})),
     ).rejects.toThrow('could not be parsed');
   });
 });

@@ -9,11 +9,7 @@ import { fetchQuotaForProvider, listConfiguredQuotaProviders } from './quotaProv
 import { aggregateSubscriptions, fetchOpenCodeProviderSnapshot } from './subscriptions';
 import {
   deleteOpenCodeGoCredential,
-  fetchOpenCodeGoUsage,
   getOpenCodeGoCredentialStatus,
-  normalizeOpenCodeGoCredential,
-  readOpenCodeGoCredential,
-  writeOpenCodeGoCredential,
 } from './opencodeGoQuota';
 import { getSessionActivitySnapshot } from './sessionActivityWatcher';
 import { getOpenCodeUpgradeStatus, upgradeManagedOpenCode } from './opencode-upgrade-runtime';
@@ -514,9 +510,8 @@ export async function handleSystemBridgeMessage(
     }
 
     case 'api:quota:opencode-go-credentials': {
-      const { method, credential: input } = (payload || {}) as {
+      const { method } = (payload || {}) as {
         method?: string;
-        credential?: unknown;
       };
       try {
         if (method === 'GET') {
@@ -527,18 +522,10 @@ export async function handleSystemBridgeMessage(
           return { id, type, success: true, data: { configured: false } };
         }
         if (method === 'PUT') {
-          const credential = normalizeOpenCodeGoCredential(input);
-          if (!credential) {
-            return { id, type, success: false, error: 'Workspace ID and auth cookie are required' };
-          }
-          await fetchOpenCodeGoUsage(credential);
-          return { id, type, success: true, data: writeOpenCodeGoCredential(credential) };
+          return { id, type, success: false, error: 'OpenCode Go now uses the opencode-go API key from OpenCode authentication' };
         }
         if (method === 'VALIDATE') {
-          const credential = readOpenCodeGoCredential();
-          if (!credential) return { id, type, success: false, error: 'Not configured' };
-          await fetchOpenCodeGoUsage(credential);
-          return { id, type, success: true, data: { valid: true } };
+          return { id, type, success: false, error: 'OpenCode Go now uses the opencode-go API key from OpenCode authentication' };
         }
         return { id, type, success: false, error: 'Unsupported method' };
       } catch (error) {

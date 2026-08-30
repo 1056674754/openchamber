@@ -1030,6 +1030,7 @@
   'settings.usage.page.header.providerUsage': '{provider} 用量',
   'settings.usage.page.header.refreshing': '正在重新整理用量...',
   'settings.usage.page.header.lastUpdated': '最後更新：{time}',
+  'settings.usage.page.header.lastUpdatedWithPlan': '方案：{plan} · 最後更新：{time}',
   'settings.usage.page.options.showInHeaderAria': '在頁首選單顯示',
   'settings.usage.page.options.showInHeader': '在頁首選單顯示',
   'settings.usage.page.options.showInHeaderTooltip': '啟用後，該供應商的用量會顯示在應用程式頁首的快速存取下拉選單中。',

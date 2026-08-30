@@ -134,6 +134,7 @@ export function getDefaultModels(
   availableModels: string[]
 ): string[] {
   return availableModels.filter((model) => {
+    if (providerId === 'claude') return true;
     const lower = model.toLowerCase();
     // Handle gemini/ and antigravity/ prefixes
     const modelName = lower.includes('/') ? lower.split('/')[1] : lower;

@@ -1160,6 +1160,7 @@ export const settingsDict = {
   'settings.usage.page.header.providerUsage': '{provider} Usage',
   'settings.usage.page.header.refreshing': 'Refreshing usage...',
   'settings.usage.page.header.lastUpdated': 'Last updated: {time}',
+  'settings.usage.page.header.lastUpdatedWithPlan': 'Plan: {plan} · Last updated: {time}',
   'settings.usage.page.options.showInHeaderAria': 'Show in header menu',
   'settings.usage.page.options.showInHeader': 'Show in Header Menu',
   'settings.usage.page.options.showInHeaderTooltip': 'When enabled, this provider\'s usage will be visible in the quick access dropdown menu in the app header.',
