@@ -2219,6 +2219,17 @@ fork 已有丰富的 surface 组织（#62 surface rail + ContextSidebarTab + Con
 
 至此 [#140](https://coding.s-s.city/songsong/openchamber/-/issues/140) 的 active-only embedded chat、draft target project/MCP/usage 与 subagent read-only/prompt sync 均已覆盖，可在 matching-surface 通过后关闭。
 
+### #142 Phase 1：Instance-scoped Integrations catalog contract（2026-08-30）
+
+上游最终范围：`f5823ccad` 到 `5486d472e`。v1.19 初版曾列 Claude Code、Command Code、Cursor，v1.20 发布前已撤下不可安装的 Command Code；最终 installable catalog 只有 `@openchamber/opencode-claude` 与 `@openchamber/opencode-cursor`，Command Code 只保留 quota provider。本 fork 不恢复被上游主动删除的入口。
+
+- 新增纯 catalog state machine：精确匹配 package/version spec，区分 user/project entries、重复 user entry、install/update/setup/manage 与 restart/registry/provider unavailable 展示状态。
+- 新增 `integrationCatalogApi`，所有 list/registry/install/update/remove 都要求 Settings-selected instance 的显式 `baseUrl`；direct local、aggregated remote 与 relay 继续走 `runtimeFetch + resolveApiUrl`，不读取 active Session、active project 或 `opencodeClient.getDirectory()`。
+- registry lookup 失败与 plugin list 成功明确区分：保留已安装状态并标记 npm unavailable，不把暂时网络失败伪装成空 catalog。
+- mutation 保留后端 `restartDeferred / requiresManualRestart / reloadFailed` contract，后续 UI 直接接现有 server-side Apply & Restart accumulator，不复制上游已删除的 client-only pending store。
+
+验证：catalog/API Bun 2 files / 10 tests ✅；UI type-check/lint ✅；`git diff --check` ✅。[#142](https://coding.s-s.city/songsong/openchamber/-/issues/142) 保持 open，下一 phase 接 Settings 页面、Provider setup、remove confirmation、11 locale 和 matching-surface QA。
+
 ### #141 Phase 1：Isolated server exception survival（2026-08-30）
 
 上游来源：`71a538b77`。fork 的 embedded server 没有外部 supervisor，单个 Node/socket stray exception 不应让整个 OpenChamber instance 离线：
