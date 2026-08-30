@@ -2,11 +2,13 @@ import type { I18nKey } from './en';
 import { settingsDict } from './ja.settings';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 import { projectKnowledgeI18n } from './project-knowledge.i18n';
+import { btwI18n } from './btw.i18n';
 
 export const dict: Record<I18nKey, string> = {
   ...settingsDict,
   ...thirdPartyIntegrationI18n.ja,
   ...projectKnowledgeI18n.ja,
+  ...btwI18n.ja,
   'planView.error.loadFailed': 'この計画を読み込めませんでした',
   'common.loading': '読み込み中...',
   'common.unavailable': '利用できません',

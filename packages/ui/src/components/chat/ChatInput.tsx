@@ -52,7 +52,7 @@ import {
   resolveComposerHistoryArrowDown,
   resolveComposerHistoryArrowUp,
 } from './composerHistoryNavigation';
-import { useCurrentSessionActivity } from '@/hooks/useSessionActivity';
+import { useCurrentSessionActivity, useSessionActivity } from '@/hooks/useSessionActivity';
 import { useVisualViewport } from '@/hooks/useVisualViewport';
 import { setKeyboardInsetCssVar } from '@/hooks/nativeMobileChrome';
 import { isCapacitorApp } from '@/lib/platform';
@@ -98,6 +98,14 @@ import { wrapSystemReminder } from '@/lib/systemReminder';
 import { eventMatchesShortcut, getEffectiveShortcutCombo, normalizeCombo } from '@/lib/shortcuts';
 import { getSyncMessages, getSyncParts } from '@/sync/sync-refs';
 import { isSyntheticPart } from '@/lib/messages/synthetic';
+import { BtwPanel } from './btw/BtwPanel';
+import { useBtwPanelState } from './btw/useBtwPanelState';
+import {
+    destroyBtwSession,
+    getBtwSyntheticParts,
+    startBtwSession,
+    type BtwSessionRef,
+} from '@/lib/btw';
 import { isRealUserMessage } from '@/lib/messages/real-user';
 import { messagesFrom } from '@/sync/message-ordering';
 import { serverRegistry } from '@/lib/opencode/server-registry';
@@ -1114,6 +1122,17 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         React.useCallback((s) => currentSessionId ? s.getDirectoryForSession(currentSessionId) : null, [currentSessionId]),
     );
     const composerDirectoryContext = currentSessionDirectoryForSync ?? currentDirectory;
+    const btwPanel = useBtwPanelState(currentSessionId, composerDirectoryContext ?? undefined);
+    const btwSessionRef = React.useMemo<BtwSessionRef | null>(() => (
+        currentSessionId && btwPanel.btwSessionId && btwPanel.btwDirectory
+            ? {
+                parentSessionId: currentSessionId,
+                btwSessionId: btwPanel.btwSessionId,
+                directory: btwPanel.btwDirectory,
+            }
+            : null
+    ), [btwPanel.btwDirectory, btwPanel.btwSessionId, currentSessionId]);
+    const isBtwActive = btwSessionRef !== null && !btwPanel.collapsed;
     React.useEffect(() => {
         setUnsyncedSkillError(null);
     }, [composerDirectoryContext, currentSessionId]);
@@ -1370,6 +1389,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             'redo',
             'timeline',
             'compact',
+            'btw',
             'summary',
             'workspace-review',
             ...Object.keys(GUIDED_SESSION_COMMANDS),
@@ -1735,8 +1755,11 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         };
     }, [clearPendingDraftPersist, persistChatDraft, persistDraftImmediately]);
 
-    // Session activity for queue availability and controls
-    const { phase: sessionPhase } = useCurrentSessionActivity();
+    // Expanded btw mode routes the composer and stop button to the fork. A
+    // collapsed panel keeps the fork alive but restores the main composer.
+    const { phase: parentSessionPhase } = useCurrentSessionActivity();
+    const { phase: btwSessionPhase } = useSessionActivity(btwPanel.btwSessionId, btwPanel.btwDirectory ?? undefined);
+    const sessionPhase = isBtwActive ? btwSessionPhase : parentSessionPhase;
     const autoReviewRunning = useAutoReviewStore(React.useCallback((state) => {
         if (!currentSessionId) return false;
         return state.isRunningForSession(currentSessionId);
@@ -1934,6 +1957,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             }
             : getCurrentInputSnapshot();
         const submittedSessionId = currentSessionId;
+        const routedSessionId = isBtwActive ? btwPanel.btwSessionId : submittedSessionId;
         const submittedNewSessionDraftOpen = newSessionDraftOpen;
         const submittedDraftSnapshot = submittedNewSessionDraftOpen ? { ...newSessionDraft } : null;
         const submittedDirectory = submittedSessionId
@@ -1947,18 +1971,21 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                 ?? submittedDraftSnapshot?.directoryOverride
                 ?? currentDirectory,
             );
-        const submittedProject = submittedDirectory
-            ? resolveProjectForSessionDirectory(projects, availableWorktreesByProject, submittedDirectory)
+        const routedDirectory = isBtwActive
+            ? normalizePath(btwPanel.btwDirectory)
+            : submittedDirectory;
+        const submittedProject = routedDirectory
+            ? resolveProjectForSessionDirectory(projects, availableWorktreesByProject, routedDirectory)
             : null;
         const submittedDraftProject = submittedDraftSnapshot?.selectedProjectId
             ? projects.find((project) => project.id === submittedDraftSnapshot.selectedProjectId)
             : null;
-        const submittedServerId = submittedSessionId
-            ? (serverRegistry.getServerForSession(submittedSessionId) ?? submittedProject?.serverId)
+        const submittedServerId = routedSessionId
+            ? (serverRegistry.getServerForSession(routedSessionId) ?? submittedProject?.serverId)
             : (submittedDraftProject?.serverId ?? submittedProject?.serverId);
         const submittedSendTarget: SendMessageTarget = {
-            sessionId: submittedSessionId,
-            directory: submittedDirectory,
+            sessionId: routedSessionId,
+            directory: routedDirectory,
             serverId: submittedServerId,
             draft: submittedDraftSnapshot,
         };
@@ -2006,12 +2033,12 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 
         // While an auto-review loop owns the implementer session, queue user
         // input instead of racing the loop's forwarded turns.
-        if (currentSessionId && !queuedOnly && autoReviewRunning) {
+        if (currentSessionId && !queuedOnly && autoReviewRunning && !isBtwActive) {
             handleQueueMessage();
             return;
         }
 
-        if (currentSessionId && !queuedOnly) {
+        if (currentSessionId && !queuedOnly && !isBtwActive) {
             const [deniedPermissions, dismissedQuestions] = await Promise.all([
                 sessionActions.dismissOpenPermissionsForSession(currentSessionId),
                 sessionActions.dismissOpenQuestionsForSession(currentSessionId),
@@ -2128,6 +2155,11 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                     synthetic: true,
                 });
             }
+        }
+
+        const routedBtwSession = isBtwActive ? btwPanel.btwSession : btwPanel.parentSession;
+        for (const part of getBtwSyntheticParts(routedBtwSession)) {
+            additionalParts.push(part);
         }
 
         // Add linked issue as synthetic part (only the parts with synthetic: true)
@@ -2253,6 +2285,36 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                     });
                 } catch (error) {
                     toast.error(error instanceof Error ? error.message : t('chat.chatInput.toast.compactFailed'));
+                }
+                return;
+            }
+            else if (commandName === 'btw' && submittedSessionId) {
+                const invocation = parseSlashInvocation(normalizedCommand);
+                const question = invocation?.arguments?.trim() ?? '';
+                if (!question || !submittedDirectory) {
+                    setMessage(normalizedCommand);
+                    messageRef.current = normalizedCommand;
+                    toast.error(t(question ? 'chat.btw.toast.createFailed' : 'chat.btw.toast.emptyArgument'));
+                    return;
+                }
+                try {
+                    if (btwSessionRef) {
+                        const destroyed = await destroyBtwSession(btwSessionRef);
+                        if (!destroyed) throw new Error(t('chat.btw.toast.destroyFailed'));
+                    }
+                    await startBtwSession({
+                        parentSessionId: submittedSessionId,
+                        question,
+                        directory: submittedDirectory,
+                        providerID: providerIdToSend,
+                        modelID: modelIdToSend,
+                        agent: agentNameToSend,
+                        variant: variantToSend,
+                    });
+                } catch (error) {
+                    setMessage(normalizedCommand);
+                    messageRef.current = normalizedCommand;
+                    toast.error(error instanceof Error ? error.message : t('chat.btw.toast.createFailed'));
                 }
                 return;
             }
@@ -2436,12 +2498,15 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             }
         }
 
-        const currentSessionDirectory = submittedDirectory;
-        if (submittedSessionId && !currentSessionDirectory) {
-            throw new Error(`Cannot send message: directory for session ${submittedSessionId} is not available`);
+        const currentSessionDirectory = routedDirectory;
+        if (routedSessionId && !currentSessionDirectory) {
+            throw new Error(`Cannot send message: directory for session ${routedSessionId} is not available`);
         }
         const sendDirectory = currentSessionDirectory ?? undefined;
-        const shouldAddResponseStyle = submittedNewSessionDraftOpen || (submittedSessionId ? !hasUserMessages(submittedSessionId, sendDirectory) : false);
+        const shouldAddResponseStyle = !isBtwActive && (
+            submittedNewSessionDraftOpen
+            || (routedSessionId ? !hasUserMessages(routedSessionId, sendDirectory) : false)
+        );
         if (shouldAddResponseStyle) {
             const responseStyleInstruction = await fetchResponseStyleInstruction().catch(() => null);
             if (responseStyleInstruction) {
@@ -2591,7 +2656,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 
     const handlePrimaryAction = React.useCallback(() => {
         const inputSnapshot = getCurrentInputSnapshot();
-        const canQueue = inputMode === 'normal' && inputSnapshot.hasContent && currentSessionId && (sessionPhase !== 'idle' || autoReviewRunning);
+        const canQueue = !isBtwActive && inputMode === 'normal' && inputSnapshot.hasContent && currentSessionId && (sessionPhase !== 'idle' || autoReviewRunning);
         const action = resolveFollowUpAction({
             behavior: followUpBehavior,
             canQueue: Boolean(canQueue),
@@ -2601,7 +2666,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             return handleQueueMessage();
         }
         void handleSubmitRef.current({ deliveryMode: action });
-    }, [inputMode, getCurrentInputSnapshot, currentSessionId, sessionPhase, autoReviewRunning, followUpBehavior, handleQueueMessage]);
+    }, [inputMode, getCurrentInputSnapshot, currentSessionId, sessionPhase, autoReviewRunning, followUpBehavior, handleQueueMessage, isBtwActive]);
 
     const handleSendNow = React.useCallback(() => {
         void handleSubmitRef.current({ deliveryMode: 'steer' });
@@ -2833,7 +2898,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             e.preventDefault();
 
             const isCtrlEnter = e.ctrlKey || e.metaKey;
-            const canQueue = inputMode === 'normal' && hasContent && currentSessionId && (sessionPhase !== 'idle' || autoReviewRunning);
+            const canQueue = !isBtwActive && inputMode === 'normal' && hasContent && currentSessionId && (sessionPhase !== 'idle' || autoReviewRunning);
             const action = resolveFollowUpAction({
                 behavior: followUpBehavior,
                 canQueue: Boolean(canQueue),
@@ -2883,7 +2948,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 
     const handleAbort = React.useCallback(() => {
         clearAbortPrompt();
-        const sessionId = currentSessionId;
+        const sessionId = isBtwActive ? btwPanel.btwSessionId : currentSessionId;
         if (!sessionId) return;
 
         void abortCurrentOperation(sessionId).then((sent) => {
@@ -2893,7 +2958,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         }).catch((error) => {
             console.error('[ChatInput] abort failed', error);
         });
-    }, [abortCurrentOperation, clearAbortPrompt, currentSessionId, startAbortFeedback]);
+    }, [abortCurrentOperation, btwPanel.btwSessionId, clearAbortPrompt, currentSessionId, isBtwActive, startAbortFeedback]);
 
     const handleCycleAgent = React.useCallback((direction: 1 | -1 = 1) => {
         const nextAgentName = getCycledPrimaryAgentName(agents, currentAgentName, direction);
@@ -3404,10 +3469,11 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     }, [isMobile]);
 
     React.useEffect(() => {
-        if (abortPromptSessionId && abortPromptSessionId !== currentSessionId) {
+        const activeAbortSessionId = isBtwActive ? btwPanel.btwSessionId : currentSessionId;
+        if (abortPromptSessionId && abortPromptSessionId !== activeAbortSessionId) {
             clearAbortPrompt();
         }
-    }, [abortPromptSessionId, currentSessionId, clearAbortPrompt]);
+    }, [abortPromptSessionId, btwPanel.btwSessionId, currentSessionId, clearAbortPrompt, isBtwActive]);
 
     const addVSCodeDroppedUrisAsMentions = React.useCallback((uris: string[]) => {
         if (uris.length === 0) return;
@@ -4003,6 +4069,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             style={isMobile && inputBarOffset > 0 ? { marginBottom: `${inputBarOffset}px` } : undefined}
         >
             <div className={cn('chat-input-column relative overflow-visible', isDesktopExpanded && 'flex flex-1 min-h-0 flex-col')}>
+                {currentSessionId ? <BtwPanel parentSessionId={currentSessionId} panel={btwPanel} /> : null}
                 {showImageFallbackNotice && (
                     <div className="mb-2 flex items-center gap-2 rounded-lg border border-border bg-surface-elevated px-3 py-1.5">
                         <Icon name="file-image" className="size-3.5 shrink-0 text-muted-foreground" />
@@ -4435,7 +4502,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                     updateAutocompleteOverlayPosition();
                                 }}
                                 placeholder={currentSessionId || newSessionDraftOpen
-                                    ? inputMode === 'shell'
+                                    ? isBtwActive
+                                        ? t('chat.btw.inputPlaceholder')
+                                        : inputMode === 'shell'
                                         ? t('chat.chatInput.placeholder.shell')
                                         : t(useCompactChatPlaceholder ? 'chat.chatInput.placeholder.chatCompact' : 'chat.chatInput.placeholder.chat')
                                     : t('chat.chatInput.placeholder.selectSession')}

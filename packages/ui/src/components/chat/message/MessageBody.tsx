@@ -465,8 +465,8 @@ const UserMessageBody = React.memo(({ sessionId, messageId, parts, isMobile, alw
         [hasCopyableText, isTouchContext, onCopyMessage, revealCopyHint]
     );
 
-    const effectiveOnFork = chatSurfaceMode === 'mini-chat' ? undefined : onFork;
-    const actionsBlock = ((canCopyMessage && hasCopyableText) || onRevert || effectiveOnFork || (onToggleContextPin && hasCopyableText)) && showUserActions ? (
+    const effectiveOnFork = chatSurfaceMode === 'mini-chat' || chatSurfaceMode === 'peek' ? undefined : onFork;
+    const actionsBlock = chatSurfaceMode !== 'peek' && ((canCopyMessage && hasCopyableText) || onRevert || effectiveOnFork || (onToggleContextPin && hasCopyableText)) && showUserActions ? (
         <div className={cn(
             'group/user-actions',
             isMobile
@@ -1643,8 +1643,9 @@ const AssistantMessageBody = React.memo(({
     const shouldDeferSortedInlineText = isSortedRenderMode && !hasStopFinish;
     const showErrorMessage = Boolean(errorMessage);
     const errorIconName = errorVariant === 'info' ? 'information' : 'error-warning';
-    const shouldShowMessageActions = hasCopyableText;
-    const shouldShowTurnFooter = isLastAssistantInTurn && hasTextContent && (hasStopFinish || Boolean(errorMessage));
+    const isPeekSurface = chatSurfaceMode === 'peek';
+    const shouldShowMessageActions = hasCopyableText && !isPeekSurface;
+    const shouldShowTurnFooter = isLastAssistantInTurn && hasTextContent && (hasStopFinish || Boolean(errorMessage)) && !isPeekSurface;
     const shouldRenderActionsInActivity = isSortedRenderMode;
     const shouldShowStandaloneMessageActions = showSplitAssistantMessageActions && shouldShowMessageActions && !shouldShowTurnFooter && !shouldRenderActionsInActivity;
 

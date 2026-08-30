@@ -40,6 +40,7 @@ import { truncatePathMiddle } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 import { sessionEvents } from '@/lib/sessionEvents';
 import { useProjectsStore } from '@/stores/useProjectsStore';
+import { isBtwSession } from '@/lib/sessionBtwMetadata';
 
 type CommandEntry = {
   id: string;
@@ -296,7 +297,9 @@ export const CommandPalette: React.FC = () => {
     const getUpdated = (s: Session) =>
       (typeof s.time?.updated === 'number' ? s.time.updated : 0) ||
       (typeof s.time?.created === 'number' ? s.time.created : 0);
-    return [...activeSessions].sort((a, b) => getUpdated(b) - getUpdated(a));
+    return activeSessions
+      .filter((session) => !isBtwSession(session))
+      .sort((a, b) => getUpdated(b) - getUpdated(a));
   }, [activeSessions]);
 
   const allBranches = useGitAllBranches();

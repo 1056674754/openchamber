@@ -2,11 +2,13 @@ import type { I18nKey } from "./en";
 import { settingsDict } from "./tr.settings";
 import { thirdPartyIntegrationI18n } from "./third-party-integrations.i18n";
 import { projectKnowledgeI18n } from "./project-knowledge.i18n";
+import { btwI18n } from "./btw.i18n";
 
 export const dict: Record<I18nKey, string> = {
   ...settingsDict,
   ...thirdPartyIntegrationI18n.tr,
   ...projectKnowledgeI18n.tr,
+  ...btwI18n.tr,
   "planView.error.loadFailed": "Bu plan yüklenemedi",
   "common.loading": "Yükleniyor...",
   "common.unavailable": "Kullanılamıyor",

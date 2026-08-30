@@ -1,0 +1,61 @@
+const en = {
+  'chat.commandAutocomplete.command.btwDescription': 'Ask a side question in a temporary fork of this conversation',
+  'chat.btw.titleFallback': 'Side question',
+  'chat.btw.loading': 'Starting side conversation...',
+  'chat.btw.working': 'Working...',
+  'chat.btw.expandAria': 'Expand side conversation',
+  'chat.btw.collapseAria': 'Collapse side conversation',
+  'chat.btw.promoteAria': 'Keep as a full session',
+  'chat.btw.destroyAria': 'Discard side conversation',
+  'chat.btw.inputPlaceholder': 'Ask a follow-up in this side conversation',
+  'chat.btw.toast.emptyArgument': 'Add a question after /btw.',
+  'chat.btw.toast.createFailed': 'Could not start the side conversation',
+  'chat.btw.toast.destroyFailed': 'Could not discard the side conversation',
+  'chat.btw.toast.promoteFailed': 'Could not keep the side conversation',
+} as const;
+
+const zhCN = {
+  'chat.commandAutocomplete.command.btwDescription': '在当前对话的临时分叉中询问一个旁支问题',
+  'chat.btw.titleFallback': '旁支问题',
+  'chat.btw.loading': '正在创建旁支对话...',
+  'chat.btw.working': '处理中...',
+  'chat.btw.expandAria': '展开旁支对话',
+  'chat.btw.collapseAria': '折叠旁支对话',
+  'chat.btw.promoteAria': '保留为完整会话',
+  'chat.btw.destroyAria': '丢弃旁支对话',
+  'chat.btw.inputPlaceholder': '在这个旁支对话中继续提问',
+  'chat.btw.toast.emptyArgument': '请在 /btw 后面填写问题。',
+  'chat.btw.toast.createFailed': '创建旁支对话失败',
+  'chat.btw.toast.destroyFailed': '丢弃旁支对话失败',
+  'chat.btw.toast.promoteFailed': '保留旁支对话失败',
+} as const;
+
+const zhTW = {
+  'chat.commandAutocomplete.command.btwDescription': '在目前對話的暫時分支中詢問旁支問題',
+  'chat.btw.titleFallback': '旁支問題',
+  'chat.btw.loading': '正在建立旁支對話...',
+  'chat.btw.working': '處理中...',
+  'chat.btw.expandAria': '展開旁支對話',
+  'chat.btw.collapseAria': '收合旁支對話',
+  'chat.btw.promoteAria': '保留為完整工作階段',
+  'chat.btw.destroyAria': '捨棄旁支對話',
+  'chat.btw.inputPlaceholder': '在這個旁支對話中繼續提問',
+  'chat.btw.toast.emptyArgument': '請在 /btw 後面填寫問題。',
+  'chat.btw.toast.createFailed': '建立旁支對話失敗',
+  'chat.btw.toast.destroyFailed': '捨棄旁支對話失敗',
+  'chat.btw.toast.promoteFailed': '保留旁支對話失敗',
+} as const;
+
+export const btwI18n = {
+  en,
+  de: en,
+  es: en,
+  ja: en,
+  ko: en,
+  pl: en,
+  'pt-BR': en,
+  tr: en,
+  uk: en,
+  'zh-CN': zhCN,
+  'zh-TW': zhTW,
+} as const;

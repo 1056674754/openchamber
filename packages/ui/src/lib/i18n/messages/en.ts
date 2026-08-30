@@ -1,11 +1,13 @@
 import { settingsDict } from './en.settings';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 import { projectKnowledgeI18n } from './project-knowledge.i18n';
+import { btwI18n } from './btw.i18n';
 
 export const dict = {
   ...settingsDict,
   ...thirdPartyIntegrationI18n.en,
   ...projectKnowledgeI18n.en,
+  ...btwI18n.en,
   'planView.error.loadFailed': 'Could not load this plan',
   'common.loading': 'Loading...',
   'common.unavailable': 'Unavailable',

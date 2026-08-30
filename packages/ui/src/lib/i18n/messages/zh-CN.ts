@@ -2,11 +2,13 @@ import type { I18nKey } from './en';
 import { settingsDict } from './zh-CN.settings';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 import { projectKnowledgeI18n } from './project-knowledge.i18n';
+import { btwI18n } from './btw.i18n';
 
 export const dict: Record<I18nKey, string> = {
   ...settingsDict,
   ...thirdPartyIntegrationI18n['zh-CN'],
   ...projectKnowledgeI18n['zh-CN'],
+  ...btwI18n['zh-CN'],
   'planView.error.loadFailed': '无法加载此计划',
   'common.loading': '加载中...',
   'common.unavailable': '不可用',

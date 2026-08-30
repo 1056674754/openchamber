@@ -8,6 +8,7 @@ export type CommandAutocompleteDescriptions = {
   readonly redo: string;
   readonly timeline: string;
   readonly compact: string;
+  readonly btw: string;
   readonly summary: string;
   readonly workspaceReview: string;
   readonly handoffReview: string;
@@ -81,6 +82,10 @@ const createBuiltInCommands = ({
     : []
   ),
   { id: 'openchamber:compact', name: 'compact', source: 'openchamber' as const, description: descriptions.compact, isBuiltIn: true },
+  ...(hasSession
+    ? [{ id: 'openchamber:btw', name: 'btw', source: 'openchamber' as const, description: descriptions.btw, isOpenChamber: true }]
+    : []
+  ),
   ...(hasSession
     ? [{ id: 'openchamber:summary', name: 'summary', source: 'openchamber' as const, description: descriptions.summary, isOpenChamber: true }]
     : []

@@ -81,6 +81,7 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
     redo: t('chat.commandAutocomplete.command.redoDescription'),
     timeline: t('chat.commandAutocomplete.command.timelineDescription'),
     compact: t('chat.commandAutocomplete.command.compactDescription'),
+    btw: t('chat.commandAutocomplete.command.btwDescription'),
     summary: t('chat.commandAutocomplete.command.summaryDescription'),
     workspaceReview: t('chat.commandAutocomplete.command.workspaceReviewDescription'),
     handoffReview: t('chat.commandAutocomplete.command.handoffReviewDescription'),

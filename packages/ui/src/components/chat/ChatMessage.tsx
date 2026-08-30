@@ -16,6 +16,7 @@ import { generateSyntaxTheme } from '@/lib/theme/syntaxThemeGenerator';
 import { cn } from '@/lib/utils';
 import type { AgentColorSource } from '@/lib/agentColors';
 import { serverRegistry } from '@/lib/opencode/server-registry';
+import { useChatSurfaceMode } from './useChatSurfaceMode';
 
 import type { AnimationHandlers, ContentChangeReason } from '@/hooks/useChatAutoFollow';
 import MessageBody from './message/MessageBody';
@@ -383,6 +384,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
         return auxiliaryUserMessageKind !== null;
     }, [auxiliaryUserMessageKind, messageRole.isUser]);
     const isUser = messageRole.isUser && !shouldRenderAsAssistant;
+    const chatSurfaceMode = useChatSurfaceMode();
     const useExternalUserActionsRow = isUser && (isMobile || !stickyUserHeader);
     const showStickyInlineHoverRow = isUser && !isMobile && stickyUserHeader && !useExternalUserActionsRow;
 
@@ -1366,7 +1368,11 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                                 respectReducedMotion
                             >
                                 <div className={cn('relative flex justify-end', !isMobile ? 'group/user-shell' : undefined)}>
-                                    <div className={cn('max-w-[85%]', showStickyInlineHoverRow ? 'pb-5' : undefined)}>
+                                    <div className={cn(
+                                        'max-w-[85%]',
+                                        showStickyInlineHoverRow ? 'pb-5' : undefined,
+                                        chatSurfaceMode === 'peek' ? 'pb-3' : undefined,
+                                    )}>
                                         <div
                                             style={{
                                                 backgroundColor: 'var(--chat-user-message-bg)',

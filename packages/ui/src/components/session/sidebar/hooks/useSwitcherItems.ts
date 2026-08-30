@@ -7,6 +7,7 @@ import { useSessionPinnedStore } from '@/stores/useSessionPinnedStore';
 import { useGitAllBranches } from '@/stores/useGitStore';
 import type { SessionNode } from '../types';
 import { compareSessionsByPinnedAndTime, isPathWithinProject } from '../utils';
+import { isBtwSession } from '@/lib/sessionBtwMetadata';
 
 export type SwitcherItem = {
   node: SessionNode;
@@ -70,6 +71,7 @@ export const useSwitcherItems = (enabled: boolean, options: SwitcherItemsOptions
 
     const childrenByParent = new Map<string, Session[]>();
     for (const session of activeSessions) {
+      if (isBtwSession(session)) continue;
       const parentId = (session as Session & { parentID?: string | null }).parentID;
       if (!parentId) continue;
       if (session.time?.archived) continue;
@@ -86,6 +88,7 @@ export const useSwitcherItems = (enabled: boolean, options: SwitcherItemsOptions
     });
 
     const parents = activeSessions
+      .filter((session) => !isBtwSession(session))
       .filter((session) => !session.time?.archived)
       .filter((session) => !(session as Session & { parentID?: string | null }).parentID)
       .filter((session) => {

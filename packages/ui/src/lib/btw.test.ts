@@ -28,6 +28,9 @@ const sessionFork = mock(async (input: unknown) => {
   forkCalls.push(input);
   return { data: forkResponse };
 });
+const sessionMessages = mock(async () => ({
+  data: [{ info: message('cloned-boundary', 'user', 19), parts: [] }],
+}));
 
 mock.module('@/lib/opencode/server-registry', () => ({
   DEFAULT_SERVER_ID: 'default',
@@ -55,7 +58,7 @@ mock.module('@/sync/sync-refs', () => ({
 
 mock.module('@/sync/session-actions', () => ({
   waitForConnectionOrThrow: mock(async () => undefined),
-  resolveSdkForDirectory: mock(() => ({ session: { fork: sessionFork } })),
+  resolveSdkForDirectory: mock(() => ({ session: { fork: sessionFork, messages: sessionMessages } })),
   patchSessionMetadata: mock(async (
     sessionId: string,
     targetDirectory: string,
@@ -182,7 +185,7 @@ describe('startBtwSession', () => {
       openchamber: {
         kind: 'btw',
         originalSessionID: parentId,
-        btwBoundaryMessageID: 'assistant-complete',
+        btwBoundaryMessageID: 'cloned-boundary',
       },
     });
     expect(metadataBySession.get(parentId)).toEqual({ openchamber: { btwSessionID: forkId } });

@@ -12,6 +12,7 @@ const descriptions: CommandAutocompleteDescriptions = {
   redo: 'redo',
   timeline: 'timeline',
   compact: 'compact',
+  btw: 'btw',
   summary: 'summary',
   workspaceReview: 'workspaceReview',
   handoffReview: 'handoffReview',
@@ -35,6 +36,21 @@ const commonOptions = {
 };
 
 describe('command autocomplete built-ins', () => {
+  test('includes btw only when a parent session exists', () => {
+    const withSession = buildFallbackCommandAutocompleteEntries({
+      ...commonOptions,
+      canUseScheduleTask: true,
+    });
+    const withoutSession = buildFallbackCommandAutocompleteEntries({
+      ...commonOptions,
+      hasSession: false,
+      canUseScheduleTask: true,
+    });
+
+    expect(withSession.some((entry) => entry.name === 'btw')).toBe(true);
+    expect(withoutSession.some((entry) => entry.name === 'btw')).toBe(false);
+  });
+
   test('includes schedule-task when the current runtime supports it', () => {
     // Given
     const options = {

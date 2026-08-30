@@ -130,10 +130,21 @@ export const startBtwSession = async (input: StartBtwInput): Promise<Session> =>
     registerSessionDirectory(forked.id, sessionDirectory);
     if (serverId) serverRegistry.indexSession(forked.id, serverId);
 
+    const inherited = await client.session.messages({
+      sessionID: forked.id,
+      directory: sessionDirectory,
+      limit: 1,
+    });
+    const inheritedRecords = Array.isArray(inherited.data) ? inherited.data : [];
+    const boundaryMessageID = inheritedRecords[inheritedRecords.length - 1]?.info?.id ?? null;
+    if (forkPointMessageID && !boundaryMessageID) {
+      throw new Error('Failed to resolve the inherited-history boundary');
+    }
+
     const marked = await sessionActions.patchSessionMetadata(
       forked.id,
       sessionDirectory,
-      (metadata) => withBtwSessionMarker(metadata, input.parentSessionId, forkPointMessageID),
+      (metadata) => withBtwSessionMarker(metadata, input.parentSessionId, boundaryMessageID),
     );
     if (!marked) throw new Error('Failed to mark the side session');
     insertFork(marked, sessionDirectory, serverId);
