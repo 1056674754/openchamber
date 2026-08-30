@@ -478,7 +478,7 @@ export const SidebarFilesTree: React.FC = () => {
   const canRename = Boolean(files.rename);
   const canDelete = Boolean(files.delete);
   const canReveal = Boolean(files.revealPath);
-  const canUpload = !runtime.isVSCode;
+  const canUpload = Boolean(root);
 
   const fileRowPermissions = React.useMemo(
     () => ({ canRename, canCreateFile, canCreateFolder, canDelete, canReveal }),
@@ -603,6 +603,7 @@ export const SidebarFilesTree: React.FC = () => {
       loadedDirsRef.current = new Set(loadedDirsRef.current);
       for (const path of pathsToRefresh) {
         loadedDirsRef.current.delete(path);
+        opencodeClient.invalidateDirectoryListCache(path);
       }
 
       setLoadErrorsByDir((prev) => {
@@ -641,6 +642,7 @@ export const SidebarFilesTree: React.FC = () => {
       return;
     }
     const normalized = normalizePath(dirPath);
+    opencodeClient.invalidateDirectoryListCache(normalized);
     loadedDirsRef.current = new Set(loadedDirsRef.current);
     loadedDirsRef.current.delete(normalized);
     inFlightDirsRef.current = new Set(inFlightDirsRef.current);

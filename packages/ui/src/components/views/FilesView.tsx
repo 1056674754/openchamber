@@ -625,9 +625,10 @@ const Dialogs: React.FC<DialogsProps> = ({
 interface FilesViewProps {
   mode?: 'full' | 'editor-only';
   active?: boolean;
+  directory?: string;
 }
 
-export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = true }) => {
+export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = true, directory }) => {
   const { t } = useI18n();
   const { files, runtime } = useRuntimeAPIs();
   const activeServerId = useActiveServerId();
@@ -639,7 +640,8 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
   const showHidden = useDirectoryShowHidden();
   const showGitignored = useFilesViewShowGitignored();
 
-  const currentDirectory = useEffectiveDirectory() ?? '';
+  const effectiveDirectory = useEffectiveDirectory() ?? '';
+  const currentDirectory = directory ?? effectiveDirectory;
   const root = normalizePath(currentDirectory.trim());
   const showEditorTabsRow = isMobile || mode !== 'editor-only';
   const suppressFileLoadingIndicator = mode === 'editor-only' && !isMobile;

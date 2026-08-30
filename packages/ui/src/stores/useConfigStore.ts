@@ -2,7 +2,7 @@ import { create } from "zustand";
 import type { StoreApi, UseBoundStore } from "zustand";
 import { devtools, persist } from "zustand/middleware";
 import type { Config, Provider, Agent } from "@opencode-ai/sdk/v2";
-import { opencodeClient } from "@/lib/opencode/client";
+import { getOpencodeDirectory } from '@/lib/opencode/directoryBridge';
 import { scopeMatches, subscribeToConfigChanges } from "@/lib/configSync";
 import type { ModelMetadata } from "@/types";
 import { createDeferredSafeJSONStorage } from "./utils/safeStorage";
@@ -639,8 +639,10 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const CONNECTION_PROBE_TIMEOUT_MS = 800;
 
 const probeOpenCodeHealth = async (timeoutMs = CONNECTION_PROBE_TIMEOUT_MS): Promise<boolean> => {
+    const healthCheck = import('@/lib/opencode/client')
+        .then(({ opencodeClient }) => opencodeClient.checkHealth());
     return Promise.race([
-        opencodeClient.checkHealth().catch(() => false),
+        healthCheck.catch(() => false),
         sleep(Math.max(1, timeoutMs)).then(() => false),
     ]);
 };
@@ -722,7 +724,7 @@ const resolveInitialDirectoryKey = (): string => {
         return DIRECTORY_KEY_GLOBAL;
     }
 
-    const directory = opencodeClient.getDirectory() ?? useDirectoryStore.getState().currentDirectory;
+    const directory = getOpencodeDirectory() ?? useDirectoryStore.getState().currentDirectory;
     return toDirectoryKey(directory);
 };
 
@@ -1295,7 +1297,7 @@ export const useConfigStore = create<ConfigStore>()(
                     const serverId = resolveConfigServerId(targetDirectory, options?.serverId, get().activeDirectoryKey);
                     const directoryKey = toDirectoryKey(targetDirectory, serverId);
                     const source = options?.source ?? 'unknown';
-                    const effectiveDirectory = targetDirectory ?? opencodeClient.getDirectory() ?? null;
+                    const effectiveDirectory = targetDirectory ?? getOpencodeDirectory();
                     markStartupTrace('loadProviders:called', { directoryKey, serverId, source, requestedDirectory: targetDirectory, effectiveDirectory });
 
                     // Dedup: if a load is already in-flight for this directory, reuse it
@@ -1763,7 +1765,7 @@ export const useConfigStore = create<ConfigStore>()(
                     const serverId = resolveConfigServerId(targetDirectory, options?.serverId, get().activeDirectoryKey);
                     const directoryKey = toDirectoryKey(targetDirectory, serverId);
                     const source = options?.source ?? 'unknown';
-                    const effectiveDirectory = targetDirectory ?? opencodeClient.getDirectory() ?? null;
+                    const effectiveDirectory = targetDirectory ?? getOpencodeDirectory();
                     markStartupTrace('loadAgents:called', { directoryKey, serverId, source, requestedDirectory: targetDirectory, effectiveDirectory });
 
                     // Dedup: if a load is already in-flight for this directory, reuse it
@@ -2891,7 +2893,8 @@ export const useConfigStore = create<ConfigStore>()(
                             markStartupTrace('checkConnection:attempt', { attempt: attempt + 1 });
                             isHealthy = await measureStartupTrace(
                                 'checkConnection:health',
-                                () => opencodeClient.checkHealth(),
+                                () => import('@/lib/opencode/client')
+                                    .then(({ opencodeClient }) => opencodeClient.checkHealth()),
                                 { attempt: attempt + 1 },
                             );
                         } catch (error) {

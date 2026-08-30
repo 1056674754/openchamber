@@ -27,6 +27,7 @@ import {
   recordProviderError,
 } from "./provider-tracker";
 import { markStartupTrace } from "@/lib/startupTrace";
+import { registerOpencodeDirectorySetter } from './directoryBridge';
 
 // Use relative path by default (works with both dev and nginx proxy server)
 // Can be overridden with VITE_OPENCODE_URL for absolute URLs in special deployments
@@ -1852,6 +1853,25 @@ class OpencodeService {
     return trackedTask;
   }
 
+  invalidateDirectoryListCache(directoryPath?: string | null): void {
+    const normalizedDirectoryPath = typeof directoryPath === 'string'
+      ? normalizeFsPath(directoryPath.trim())
+      : '';
+    if (!normalizedDirectoryPath) {
+      this.listDirectoryCache.clear();
+      this.listDirectoryInFlight.clear();
+      return;
+    }
+
+    const prefix = `${normalizedDirectoryPath}|`;
+    for (const key of this.listDirectoryCache.keys()) {
+      if (key.startsWith(prefix)) this.listDirectoryCache.delete(key);
+    }
+    for (const key of this.listDirectoryInFlight.keys()) {
+      if (key.startsWith(prefix)) this.listDirectoryInFlight.delete(key);
+    }
+  }
+
   async searchFiles(
     query: string,
     options?: {
@@ -2051,6 +2071,9 @@ class OpencodeService {
 
 // Exported singleton instance
 export const opencodeClient = new OpencodeService();
+const unregisterDirectorySetter = registerOpencodeDirectorySetter((directory) => {
+  opencodeClient.setDirectory(directory);
+});
 
 import { serverRegistry, DEFAULT_SERVER_ID } from "./server-registry";
 import { getAllSyncStores } from "@/sync/multi-server-registry";
@@ -2068,6 +2091,7 @@ serverRegistry.startHealthPolling(30_000);
 if (import.meta.hot) {
   import.meta.hot.accept();
   import.meta.hot.dispose(() => {
+    unregisterDirectorySetter();
     serverRegistry.stopHealthPolling();
   });
 }

@@ -2077,7 +2077,7 @@ const ContextPanelTabContent: React.FC<{
   const { t } = useI18n();
 
   if (tab.mode === 'file') {
-    return <FilesView mode="editor-only" active={active} />;
+    return <FilesView mode="editor-only" active={active} directory={directory} />;
   }
 
   if (tab.mode === 'chat') {
@@ -2977,7 +2977,7 @@ export const ContextPanel: React.FC = () => {
           <>
             {hasFileTabs ? (
               <div className={cn('absolute inset-0', isFileTabActive ? 'block' : 'hidden')}>
-                <FilesView mode="editor-only" active={isOpen && isFileTabActive} />
+                <FilesView mode="editor-only" active={isOpen && isFileTabActive} directory={directoryKey} />
               </div>
             ) : null}
             {activeChatTab ? (
