@@ -21,6 +21,7 @@ mock.module('@/lib/runtime-url', () => ({ getRuntimeUrlResolver: () => resolver 
 const {
   extractMarkdownImageCandidates,
   prepareLocalMarkdownImages,
+  prepareVSCodeMarkdownImages,
   resolveMarkdownImageSource,
 } = await import('./markdownImageAssets');
 
@@ -55,5 +56,30 @@ describe('Markdown image gallery assets', () => {
     expect(requestCount).toBe(1);
     expect(prepared.size).toBe(2);
     expect(resolveMarkdownImageSource('one.png', prepared.get('one.png'), '/repo')).toContain('/api/fs/raw?');
+  });
+
+  test('prepares VS Code images through the binary bridge only inside the session directory', async () => {
+    let statCount = 0;
+    let binaryReadCount = 0;
+    const statFile = async () => {
+      statCount += 1;
+      return { path: '/repo/images/one.png', isFile: true, size: 3 };
+    };
+    const readFileBinary = async () => {
+      binaryReadCount += 1;
+      return { path: '/repo/images/one.png', dataUrl: 'data:image/png;base64,cG5n' };
+    };
+    const prepared = await prepareVSCodeMarkdownImages({
+      sources: ['images/one.png', '/other/secret.png'],
+      directory: '/repo',
+      files: { statFile, readFileBinary } as never,
+    });
+
+    expect(prepared.get('images/one.png')?.status).toBe('ready');
+    expect(resolveMarkdownImageSource('images/one.png', prepared.get('images/one.png'), '/repo'))
+      .toBe('data:image/png;base64,cG5n');
+    expect(prepared.get('/other/secret.png')).toEqual({ status: 'error' });
+    expect(statCount).toBe(1);
+    expect(binaryReadCount).toBe(1);
   });
 });

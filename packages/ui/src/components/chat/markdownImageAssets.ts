@@ -1,6 +1,11 @@
 import { marked, type Token, type Tokens } from 'marked';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { getRuntimeUrlResolver, type RuntimeUrlResolver } from '@/lib/runtime-url';
+import type { FilesAPI } from '@/lib/api/types';
+import {
+  isResolvedFileReferenceWithinDirectory,
+  resolveMarkdownImageReference,
+} from './markdownFileReferences';
 
 const MAX_MARKDOWN_IMAGE_BYTES = 10 * 1024 * 1024;
 const MAX_PREPARE_CACHE_ENTRIES = 1024;
@@ -12,7 +17,7 @@ export type MarkdownImageCandidate = {
 };
 
 export type PreparedMarkdownImage =
-  | { status: 'ready'; path: string; outsideFileGrant?: string; expiresAt?: number }
+  | { status: 'ready'; path: string; dataUrl?: string; outsideFileGrant?: string; expiresAt?: number }
   | { status: 'missing' | 'error' };
 
 const visitTokens = (tokens: Token[], visit: (token: Token) => void): void => {
@@ -28,6 +33,38 @@ const visitTokens = (tokens: Token[], visit: (token: Token) => void): void => {
       for (const cell of [...table.header, ...table.rows.flat()]) visitTokens(cell.tokens, visit);
     }
   }
+};
+
+export const prepareVSCodeMarkdownImages = async ({
+  sources,
+  directory,
+  files,
+}: {
+  sources: readonly string[];
+  directory: string;
+  files: FilesAPI;
+}): Promise<Map<string, PreparedMarkdownImage>> => {
+  const prepared = new Map<string, PreparedMarkdownImage>();
+  for (const source of sources) {
+    const reference = resolveMarkdownImageReference(source, directory);
+    if (!reference || !isResolvedFileReferenceWithinDirectory(reference.resolvedPath, directory)) {
+      prepared.set(source, { status: 'error' });
+      continue;
+    }
+    try {
+      if (!files.readFileBinary || !files.statFile) throw new Error('Binary file reads are unavailable');
+      const stat = await files.statFile(reference.resolvedPath);
+      if (!stat.isFile || stat.size > MAX_MARKDOWN_IMAGE_BYTES) throw new Error('Image is too large');
+      const result = await files.readFileBinary(reference.resolvedPath);
+      if (!/^data:image\/(?:png|jpeg|gif|webp|svg\+xml);base64,/i.test(result.dataUrl)) {
+        throw new Error('Unsupported image data');
+      }
+      prepared.set(source, { status: 'ready', path: result.path, dataUrl: result.dataUrl });
+    } catch {
+      prepared.set(source, { status: 'error' });
+    }
+  }
+  return prepared;
 };
 
 export const extractMarkdownImageCandidates = (contents: readonly string[], limit = 12): MarkdownImageCandidate[] => {
@@ -130,6 +167,7 @@ export const resolveMarkdownImageSource = (
   if (/^(?:https?:)?\/\//i.test(source)) return source;
   if (/^data:image\/(?:png|jpeg|gif|webp);base64,/i.test(source)) return validateDataImage(source);
   if (prepared?.status !== 'ready') throw new Error('Local image has not been prepared');
+  if (prepared.dataUrl) return validateDataImage(prepared.dataUrl);
   return getRuntimeUrlResolver().authenticatedAsset('/api/fs/raw', {
     path: prepared.path,
     directory,

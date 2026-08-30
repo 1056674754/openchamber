@@ -273,6 +273,33 @@ export async function handleFsBridgeMessage(
       }
     }
 
+    case 'api:fs:read-binary': {
+      const target = (payload as { path: string })?.path;
+      if (!target) {
+        return { id, type, success: false, error: 'Path is required' };
+      }
+      const resolution = await deps.resolveFileReadPath(target);
+      if (!resolution.ok) {
+        return { id, type, success: false, error: resolution.error };
+      }
+      const result = await deps.readUriAsAttachment(
+        vscode.Uri.file(resolution.resolvedPath),
+        path.basename(resolution.resolvedPath),
+      );
+      if ('skipped' in result) {
+        return { id, type, success: false, error: result.skipped.reason };
+      }
+      return {
+        id,
+        type,
+        success: true,
+        data: {
+          dataUrl: result.file.dataUrl,
+          path: deps.normalizeFsPath(resolution.resolvedPath),
+        },
+      };
+    }
+
     case 'api:fs:stat': {
       const target = (payload as { path: string })?.path;
       if (!target) {

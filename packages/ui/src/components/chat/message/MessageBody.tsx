@@ -2292,7 +2292,7 @@ const AssistantMessageBody = React.memo(({
                     )}
                 </div>
                 <MessageFilesDisplay files={parts} onShowPopup={onShowPopup} />
-                {!isVSCodeRuntime() && sessionId && effectiveDirectory && finalizedAssistantMarkdownContents.length > 0 ? (
+                {sessionId && effectiveDirectory && finalizedAssistantMarkdownContents.length > 0 ? (
                     <MarkdownImageGallery
                         sessionId={sessionId}
                         messageId={messageId}

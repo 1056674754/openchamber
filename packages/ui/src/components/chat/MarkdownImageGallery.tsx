@@ -1,11 +1,13 @@
 import React from 'react';
 import { Icon } from '@/components/icon/Icon';
 import { subscribeRuntimeUrlAuthToken } from '@/lib/runtime-auth';
+import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import type { ToolPopupContent } from './message/types';
 import {
   extractMarkdownImageCandidates,
   isLocalMarkdownImageSource,
   prepareLocalMarkdownImages,
+  prepareVSCodeMarkdownImages,
   resolveMarkdownImageSource,
   type PreparedMarkdownImage,
 } from './markdownImageAssets';
@@ -86,6 +88,9 @@ export const MarkdownImageGallery: React.FC<{
   contents: readonly string[];
   onShowPopup?: (content: ToolPopupContent) => void;
 }> = ({ sessionId, messageId, directory, contents, onShowPopup }) => {
+  const runtimeAPIs = getRegisteredRuntimeAPIs();
+  const isVSCode = runtimeAPIs?.runtime.isVSCode === true;
+  const files = runtimeAPIs?.files;
   const galleryRef = React.useRef<HTMLDivElement>(null);
   const [shouldPrepare, setShouldPrepare] = React.useState(false);
   const [prepared, setPrepared] = React.useState<Map<string, PreparedMarkdownImage> | null>(null);
@@ -122,7 +127,21 @@ export const MarkdownImageGallery: React.FC<{
   React.useEffect(() => {
     if (!shouldPrepare || localSources.length === 0) return;
     const controller = new AbortController();
-    void prepareLocalMarkdownImages({ sources: localSources, directory, sessionId, messageId, signal: controller.signal })
+    let request: Promise<Map<string, PreparedMarkdownImage>>;
+    if (isVSCode) {
+      request = files
+        ? prepareVSCodeMarkdownImages({ sources: localSources, directory, files })
+        : Promise.reject(new Error('VS Code Files API is unavailable'));
+    } else {
+      request = prepareLocalMarkdownImages({
+        sources: localSources,
+        directory,
+        sessionId,
+        messageId,
+        signal: controller.signal,
+      });
+    }
+    void request
       .then((result) => {
         if (!controller.signal.aborted) setPrepared(result);
       })
@@ -132,7 +151,7 @@ export const MarkdownImageGallery: React.FC<{
         }
       });
     return () => controller.abort();
-  }, [directory, localSources, messageId, prepareEpoch, sessionId, shouldPrepare]);
+  }, [directory, files, isVSCode, localSources, messageId, prepareEpoch, sessionId, shouldPrepare]);
 
   React.useEffect(() => {
     const expiries = Array.from(prepared?.values() ?? [])

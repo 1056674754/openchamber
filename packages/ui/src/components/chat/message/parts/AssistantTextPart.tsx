@@ -11,7 +11,6 @@ import type { ThinkingSegment } from '@/lib/thinkingTagParser';
 import { ReasoningTimelineBlock } from './ReasoningPart';
 import { GeneratedJsonResultCard } from './GeneratedJsonResultCard';
 import { parseGeneratedJsonResult } from './generatedJsonResult';
-import { isVSCodeRuntime } from '@/lib/desktop';
 
 type PartWithText = Part & { text?: string; content?: string; value?: string; time?: { start?: number; end?: number } };
 
@@ -119,7 +118,7 @@ const AssistantTextPart: React.FC<AssistantTextPartProps> = ({
                     disableStreamAnimation={chatRenderMode === 'sorted'}
                     variant={part.type === 'reasoning' ? 'reasoning' : 'assistant'}
                     enableFileReferences={isFinalized}
-                    compactImages={!isVSCodeRuntime() && isMessageCompleted && !isStreaming && part.type === 'text'}
+                    compactImages={isMessageCompleted && !isStreaming && part.type === 'text'}
                     onShowPopup={onShowPopup}
                 />
             </div>
@@ -158,7 +157,7 @@ const AssistantTextPart: React.FC<AssistantTextPartProps> = ({
                         disableStreamAnimation={chatRenderMode === 'sorted'}
                         variant="assistant"
                         enableFileReferences={isFinalized}
-                        compactImages={!isVSCodeRuntime() && isMessageCompleted && !isStreaming}
+                        compactImages={isMessageCompleted && !isStreaming}
                         onShowPopup={onShowPopup}
                     />
                 );

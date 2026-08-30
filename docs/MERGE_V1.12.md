@@ -2323,6 +2323,16 @@ fork 已有丰富的 surface 组织（#62 surface rail + ContextSidebarTab + Con
 
 QA 事故记录：HMR server 复用了安装版 managed OpenCode `54185`，退出时向共享 PID `47219` 发出 `SIGKILL`；安装版随后卡在 restart path。已按 incident runbook 保存 lifecycle/listener/OpenChamber sample 到 `~/Desktop/openchamber-opencode-incident-20260830T074340Z`，随后只重启 OpenChamber app（未替换 shell/runtime），恢复为 healthy OpenCode `65246`；配置 API 再次确认 active project、root/local lastDirectory、draft target 均为原值且测试 base override 不存在。后续 HMR QA 禁止复用安装版 managed OpenCode。
 
+### #136 Phase 2：VS Code compact gallery parity（2026-08-30）
+
+- VS Code `FilesAPI.readFileBinary` 接通 extension bridge `api:fs:read-binary`，复用现有 `resolveFileReadPath(realpath)` 与 workspace canonical containment；symlink 指向 workspace 外会拒绝。
+- completed assistant 在 VS Code 同样启用 compact inline image label + message-tail gallery，不再保留大图 inline 特例。
+- VS Code local image prepare 只解析 session directory 内 image reference；stat 必须是 regular file 且 ≤10MiB，再通过 binary bridge 读取 data URL。absolute outside path 不发 bridge request。
+- remote/data images 沿用现有 lazy thumbnail；local data URL 仍经 MIME/size validator。Web/Desktop 的 message-bound grant、temp-root 和 path-bound outsideFileGrant 不变。
+- bridge failure、unsupported MIME、oversize、outside path 都留下稳定 disabled thumbnail slot，不静默改走无授权 `/api/fs/raw`。
+
+验证：gallery assets + SSR slots + VS Code binary bridge 3 files / 9 tests ✅；UI/VS Code type-check/lint ✅；`git diff --check` ✅。结合 Phase 1 的 18 条 client/server safety tests 与完整 builds，[#136](https://coding.s-s.city/songsong/openchamber/-/issues/136) 已实现 Desktop/Web/VS Code parity，可关闭；未再启动共享 HMR，避免重复 managed OpenCode 生命周期事故。
+
 ### #135 Phase 1：Browser agent control plane（2026-08-30）
 
 上游来源：`cc9249d93`。先移植不依赖 dirty Electron main 的 server/control/tool 边界：

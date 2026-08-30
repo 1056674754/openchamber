@@ -122,3 +122,28 @@ describe('bridge fs exec git read cache', () => {
     expect(localDeps.execGit).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('bridge binary file reads', () => {
+  it('returns a data URL through the same authorized path resolver', async () => {
+    const localDeps = {
+      ...deps,
+      resolveFileReadPath: mock(async () => ({ ok: true, resolvedPath: '/workspace/image.png' })),
+      readUriAsAttachment: mock(async () => ({
+        file: { name: 'image.png', mimeType: 'image/png', size: 3, dataUrl: 'data:image/png;base64,cG5n' },
+      })),
+    };
+
+    const result = await handleFsBridgeMessage(
+      { id: 'binary-1', type: 'api:fs:read-binary', payload: { path: '/workspace/image.png' } },
+      localDeps,
+    );
+
+    expect(result).toEqual({
+      id: 'binary-1',
+      type: 'api:fs:read-binary',
+      success: true,
+      data: { dataUrl: 'data:image/png;base64,cG5n', path: '/workspace/image.png' },
+    });
+    expect(localDeps.resolveFileReadPath).toHaveBeenCalledWith('/workspace/image.png');
+  });
+});

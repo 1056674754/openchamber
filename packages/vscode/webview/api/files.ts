@@ -105,6 +105,15 @@ export const createVSCodeFilesAPI = (): FilesAPI => ({
     };
   },
 
+  async readFileBinary(path: string): Promise<{ dataUrl: string; path: string }> {
+    const target = normalizePath(path);
+    const data = await sendBridgeMessage<{ dataUrl: string; path: string }>('api:fs:read-binary', { path: target });
+    return {
+      dataUrl: typeof data?.dataUrl === 'string' ? data.dataUrl : '',
+      path: typeof data?.path === 'string' ? normalizePath(data.path) : target,
+    };
+  },
+
   async writeFile(path: string, content: string): Promise<{ success: boolean; path: string }> {
     const target = normalizePath(path);
     const data = await sendBridgeMessage<{ success: boolean; path: string }>('api:fs:write', { path: target, content });
