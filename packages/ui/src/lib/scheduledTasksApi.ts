@@ -153,7 +153,11 @@ export const syncScheduledTaskLoops = async (projectID: string, baseUrl?: string
   await fetchScheduledTasks(projectID, baseUrl);
 };
 
-export const runScheduledTaskNow = async (projectID: string, taskID: string, baseUrl?: string): Promise<{ sessionId?: string }> => {
+export const runScheduledTaskNow = async (
+  projectID: string,
+  taskID: string,
+  baseUrl?: string,
+): Promise<{ sessionId?: string; persistError?: string }> => {
   const safeProjectID = ensureProjectID(projectID);
   const safeTaskID = ensureProjectID(taskID);
   const response = await fetch(projectUrl(safeProjectID, `/scheduled-tasks/${encodeURIComponent(safeTaskID)}/run`, baseUrl), {
@@ -168,5 +172,8 @@ export const runScheduledTaskNow = async (projectID: string, taskID: string, bas
   const parsed = await response.json().catch(() => null);
   return {
     sessionId: typeof parsed?.sessionId === 'string' && parsed.sessionId.length > 0 ? parsed.sessionId : undefined,
+    persistError: typeof parsed?.persistError === 'string' && parsed.persistError.trim().length > 0
+      ? parsed.persistError.trim()
+      : undefined,
   };
 };

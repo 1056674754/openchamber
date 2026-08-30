@@ -2058,7 +2058,7 @@ fork 已有丰富的 surface 组织（#62 surface rail + ContextSidebarTab + Con
 - isolated browser QA（临时 data dir + ports 3902/5190；未启动/终止 managed OpenCode）：Shell trigger/repeated prefix ✅；Dialog close hit area `28×28` 且可关闭 ✅；Skills Catalog 仅显示 `ClawHub` ✅
 - 隔离 backend 指向受 Basic auth 保护的 external OpenCode，因此 console 中存在预期 401 bootstrap/SSE 错误；页面、composer、settings 和被测交互仍正常挂载。该 401 不是本批回归。
 - full workspace lint ✅；docs validation ✅；`git diff --check` ✅。
-- full workspace type-check 被本批开始前已存在的未提交 WIP 阻塞：`ChatMessage.tsx` / `MessageBody.tsx` 使用 `chat.messageBody.actions.continueFailed|continuing|continue`，但当前 locale key union 尚未包含它们。上述文件及 locale 文件在本批前已 modified，本批未触碰对应逻辑；[#134](https://coding.s-s.city/songsong/openchamber/-/issues/134) 保持 `status::in_progress`，待该 WIP 收口后复跑并关闭。
+- 2026-08-30 补齐现有 interrupted-continue WIP 的 locale key 后，full workspace type-check ✅；[#134](https://coding.s-s.city/songsong/openchamber/-/issues/134) 验证闭环，可关闭。
 
 ### GitLab executable backlog（#135–#159）
 
@@ -2091,3 +2091,20 @@ fork 已有丰富的 surface 组织（#62 surface rail + ContextSidebarTab + Con
 | [#159](https://coding.s-s.city/songsong/openchamber/-/issues/159) | desktop/mobile shell parity | 🟢/🟡 先核验已有等价实现 |
 
 建议顺序：`#134` 收口 → `#136/#138/#139/#140/#152/#155/#158/#159` 独立中低风险 → `#141/#144/#145/#147/#148/#157` correctness/perf → `#135/#143/#149/#150/#151/#154/#156` 大功能与架构适配。
+
+### #139：Scheduled occurrence cross-instance claim（2026-08-30）
+
+上游来源：`807a42662`。fork 手工移植完整 correctness 语义，不引入全局 active-directory fallback：
+
+- project config state 新增 `lastScheduledFor`；scheduled timer 把其权威 `nextRunAt` 作为 occurrence identity 传入 queue。
+- 每个 project config 写入先经过进程内 promise chain，再获取跨进程 `<project>.json.lock`；stale PID、stale age、partial lock 均可恢复，release 前验证 ownership。
+- `updateScheduledTaskStateIf` 在锁内重新读取磁盘并条件 patch；两个 OpenChamber 进程同时触发同一 occurrence 时只有一个能创建 Session。
+- claim/start/completion 写入失败都通过 `finally` 释放 running slot；只 re-arm future timestamp，避免 once task delay-zero 自旋。
+- Session 已执行但 completion state 保存失败时，runtime 保持终态并返回 `persistError`；service/API/UI surface warning，而不是错误地宣称整次 dispatch 失败。
+- fork 原有 loops discovery、worktree bootstrap、goal metadata/objective、permission auto-accept、explicit project path 均保留。
+
+验证：
+
+- scheduled/project-config Vitest：5 files / 53 tests ✅，含两个 runtime 共用真实 on-disk config 的 daily/weekly/cron/once claim、锁 timeout/recovery/ownership、queue rejection、completion retry。
+- full workspace type-check ✅；full workspace lint ✅；`bun run build:web` ✅；`git diff --check` ✅。
+- authority audit：新增 persistence/dispatch 均以显式 `projectID` 和该 project 的 path 为键；未使用 `activeProjectId`、`currentDirectory`、`lastDirectory` 或 `opencodeClient.getDirectory()` 作为既有任务 fallback。

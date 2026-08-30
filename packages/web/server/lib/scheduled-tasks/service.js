@@ -145,7 +145,13 @@ export const createScheduledTaskService = (dependencies) => {
     }
     if (result.skipped) throw new OpenChamberControlError('Task not found or disabled', 404);
     if (!result.ok) throw new OpenChamberControlError(result.error || 'Task run failed', 500, { task: result.task });
-    return { task: result.task, sessionId: result.sessionID };
+    return {
+      task: result.task,
+      sessionId: result.sessionID,
+      ...(typeof result.persistError === 'string' && result.persistError.trim()
+        ? { persistError: result.persistError.trim() }
+        : {}),
+    };
   };
 
   const setEnabled = async (projectID, taskID, enabled) => {

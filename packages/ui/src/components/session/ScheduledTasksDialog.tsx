@@ -384,12 +384,16 @@ export function ScheduledTasksDialog() {
     }
     setMutatingTaskID(task.id);
     try {
-      await runScheduledTaskNow(selectedProjectID, task.id, scheduledTasksBaseUrl);
+      const { persistError } = await runScheduledTaskNow(selectedProjectID, task.id, scheduledTasksBaseUrl);
       await Promise.all([
         reloadTasks(selectedProjectID, { silent: true }),
         refreshGlobalSessions(),
       ]);
-      toast.success(t('sessions.scheduledTasks.dialog.toast.started'));
+      if (persistError) {
+        toast.warning(t('sessions.scheduledTasks.dialog.toast.startedPersistWarning'));
+      } else {
+        toast.success(t('sessions.scheduledTasks.dialog.toast.started'));
+      }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : t('sessions.scheduledTasks.dialog.toast.runFailed'));
     } finally {

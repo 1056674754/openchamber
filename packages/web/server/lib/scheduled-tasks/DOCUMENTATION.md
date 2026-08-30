@@ -9,6 +9,24 @@ Server-owned scheduled task runtime and routes for OpenChamber-only automation.
 - Runtime orchestration and execution is owned by this module.
 - This module is OpenChamber feature logic; it is intentionally separate from OpenCode proxy/runtime internals.
 
+## Cross-instance occurrence claiming
+
+Multiple OpenChamber processes can share one project config while keeping
+independent timers. Before a scheduled run creates a session, the runtime
+claims its exact `nextRunAt` occurrence under the project write lock and stores
+it as `state.lastScheduledFor`.
+
+- The project lock combines the in-process promise chain with a cross-process
+  `<project>.json.lock` file.
+- The winner advances `nextRunAt`; another process seeing the same claimed
+  occurrence skips session creation and rearms from persisted state.
+- Manual `runNow` does not claim a scheduled occurrence.
+- Lock, claim, and completion-write failures always release the running slot.
+- Only future timestamps are armed, preventing consumed once tasks from
+  spinning delay-zero retries.
+- A run that completed but could not persist terminal state remains a successful
+  dispatch and returns `persistError`, which the UI surfaces as a warning.
+
 ## Files
 
 - `packages/web/server/lib/scheduled-tasks/runtime.js`
