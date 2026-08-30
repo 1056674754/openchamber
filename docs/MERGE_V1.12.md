@@ -2731,6 +2731,25 @@ v1.20.0-sscity 尚未宣布完成：当前未关闭 `#135/#140/#142-#151/#154/#1
 
 验证：Browser URL/tunnel/dev-server/history/crash focused 5 files / 18 tests ✅；Electron tunnel/certificate authority Node 2 files / 6 tests ✅；main syntax、全 workspace type-check/lint/build ✅，build 仅有既有 chunk/import warnings。`main.mjs` 使用 temporary index 精确提交，其他 agent WIP 仍为 23/5。[#135](https://coding.s-s.city/songsong/openchamber/-/issues/135) 保持 open：需要真实 SSH instance + remote dev server + Electron webview/HMR/cross-port matching-surface QA；private relay dev tunnel 仍归 #137。
 
+### #135 Phase 11：Real Dev3 HTTP/WebSocket tunnel QA（2026-08-31）
+
+- 从 current HEAD 建 detached clean worktree，安装 frozen dependencies并运行 Docker linux/amd64 build；产物为 139 MiB glibc x86_64 binary，SHA-256 `b1cb4e31441db22b0b23dd89d903a51c5c2bd8a9e11223bada91d828b899ab47`。
+- binary 仅上传 Dev3 `/tmp`，使用独立 data dir 与 loopback port 3099；system `/opt/openchamber`、systemd 与 2999 未修改。QA host 正确发现临时 HTTP 18765 与 WebSocket 18766。
+- 独立 `ElectronSshManager` 通过 `ssh Dev3` 建立 3099→local 60244 forward，并在 remote UI password disabled 情况下获得 paired client token。真实 dev-tunnel 分别绑定 local 51891/54151。
+- HTTP `/tmp` directory response local/remote SHA-256 均为 `89e2de329637455b3c2d12541e438d536e3e793ac5922da964c87f96a4f4a652`；WebSocket 完成 upgrade，发送 `hmr` 得到 `echo:hmr`，证明 HMR 所需 raw bidirectional transport。
+- cleanup 后 local listeners与 remote 18765/18766/3099/44243 全部关闭；Dev3 system 2999 保持 healthy、managed OpenCode port 38247 未变化。临时 QA OpenCode 426780 曾短暂 D-state，按 incident runbook采集 lifecycle/process/kernel evidence到本机 `/tmp/openchamber-dev3-qa-opencode-426780`；TERM 最终生效，无 orphan listener。
+- v1.21 capture wait/reveal/background-open 与下一次 shell refresh 后的 installed webview QA 拆至 [#175](https://coding.s-s.city/songsong/openchamber/-/issues/175)。
+
+验证：真实 Dev3 discovery + paired auth + HTTP + WebSocket/HMR + cleanup ✅；clean HEAD Linux build ✅。[#135](https://coding.s-s.city/songsong/openchamber/-/issues/135) v1.20 scope 完成。
+
+### #151 Phase 1：No-password SSH paired-client authority（2026-08-31）
+
+- `ElectronSshManager.issueClientToken` 不再在 remote UI password为空时直接返回空 token；改为调用受 remote server auth policy保护的 client-create endpoint。
+- client 使用 `clientKind=desktop-ssh` 与 instance-scoped `dedupeKey=desktop-ssh:<instanceId>`，reconnect 不会无限累积 token record。有 password 时保留 login-return token优先与 cookie fallback。
+- 对应提交：`7f78ccad9 fix(ssh): pair no-password remote instances`，通过 temporary index提交，原 ssh-manager WIP恢复 61/52。
+
+验证：SSH manager + dev-tunnel authority 11/11 ✅；真实 Dev3 password-disabled instance生成 token并完成 Phase 11 transport QA。[#151](https://coding.s-s.city/songsong/openchamber/-/issues/151) 保持 open：继续完整 SSH setup/lifecycle redesign 与对应 UI/settings migration。
+
 ### #137 Phase 10：Loss-safe relay request-body delivery（2026-08-30）
 
 上游来源：`d634cd232`、`aaf397e68`、`854a0db92`，保持 TS client / JS host wire backward compatibility：
