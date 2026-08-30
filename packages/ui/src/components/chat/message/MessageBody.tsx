@@ -61,6 +61,8 @@ import {
     sendReviewFeedbackToOriginal,
 } from '@/lib/reviewFlow';
 import { isEmbeddedSessionChat } from '@/components/layout/contextPanelEmbeddedChat';
+import { isCapacitorApp } from '@/lib/platform';
+import { shareDataUrlAsFile } from '@/lib/mobileShare';
 
 const CONTAIN_LAYOUT_STYLE = { contain: 'layout' as const, transform: 'translateZ(0)' };
 const MESSAGE_FOOTER_CONTAINER_STYLE = { containerType: 'inline-size' as const, containerName: 'message-footer' };
@@ -1559,6 +1561,8 @@ const AssistantMessageBody = React.memo(({
                         }
                         throw new Error(payload.error || 'Failed to save image in VS Code');
                     }
+                } else if (isCapacitorApp()) {
+                    await shareDataUrlAsFile(dataUrl, fileName);
                 } else {
                     const link = document.createElement('a');
                     link.download = fileName;

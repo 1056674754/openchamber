@@ -2446,3 +2446,11 @@ QA 事故记录：HMR server 复用了安装版 managed OpenCode `54185`，退�
 - 当前 fork 将 resume orchestration 保持在独立 `useMobileConnectionResume` hook，没有复制上游旧 MobileApp 大块生命周期代码。
 
 验证：mobile storage/probe + resume ladder 2 files / 18 tests ✅；UI type-check/lint ✅；`git diff --check` ✅。`#137` 保持 open：connection diagnostics panel、mobile export parity 与 private-relay dev tunnel 仍需收口。
+
+### #137 Phase 13：Native mobile sharing for exported message images（2026-08-30）
+
+- VS Code 继续走 extension `saveImage`；Web/Desktop 继续走 download anchor；仅 Capacitor runtime 将生成的 PNG data URL 转为具名 `File` 并调用系统 `navigator.share`。
+- 调用前用 `navigator.canShare({ files })` 明确验证 file-share capability；不支持或 share 失败进入现有可见 error toast，不静默创建移动端无法访问的 download link。
+- 转换/分享逻辑抽为独立 `mobileShare.ts`，MessageBody 不持有 platform-specific blob 细节。
+
+验证：mobile share 2/2 ✅；UI type-check/lint ✅；`git diff --check` ✅。`#137` 保持 open：connection diagnostics 与 private-relay dev tunnel；FilesView mobile preview/download 已由 fork 的 runtime Files API / binary reader 等价覆盖，且当前该文件无本批改动。
