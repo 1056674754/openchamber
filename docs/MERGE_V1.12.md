@@ -2774,8 +2774,9 @@ v1.20.0-sscity 尚未宣布完成：当前未关闭 `#135/#140/#142-#151/#154/#1
 - Plugin list 使用同样的 per-layer isolation；坏 project plugin config 不再遮住有效 user/custom plugin。显式 config context 与 fork 的多实例进程隔离保持不变。
 - VS Code MCP mutation 获得同等 fail-closed 行为；有效 custom layer 可在坏 project layer 存在时继续更新，且绝不触碰坏文件。
 - 对应提交：`bae7ffd64 fix(config): reject partial JSONC layers`；Web OpenCode module docs 与 VS Code backend docs 已同步。
+- 上游 `2af17e843` 的 retention sanitizer 缺口另以 temporary index 精确提交为 `85cd06462 fix(settings): persist retention action`：`archive/delete` 可穿过服务端 settings sanitizer，其他值拒绝；现有 `localStorePatch` WIP 原样留在工作区。
 
-验证：Web shared config + plugin data layer + VS Code config 3 files / 21 tests ✅；full workspace type-check ✅；full workspace lint ✅；`git diff --check` ✅。[#144](https://coding.s-s.city/songsong/openchamber/-/issues/144) 保持 open：继续审计 `sessionRetentionAction` sanitizer、跨 runtime settings write serialization、orphan temp cleanup、Windows replacement retry 与 CLI relay-key atomicity；当前相关 dirty WIP 未被本阶段提交。
+验证：Web shared config + plugin data layer + VS Code config 3 files / 21 tests ✅；settings helpers 1 file / 32 tests ✅；full workspace type-check ✅；full workspace lint ✅；`git diff --check` ✅。[#144](https://coding.s-s.city/songsong/openchamber/-/issues/144) 保持 open：继续审计跨 runtime settings write serialization、orphan temp cleanup、Windows replacement retry 与 CLI relay-key atomicity；当前相关 dirty WIP 未被本阶段提交。
 
 ### #137 Phase 10：Loss-safe relay request-body delivery（2026-08-30）
 
