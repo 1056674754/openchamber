@@ -2539,3 +2539,15 @@ v1.20.0-sscity 尚未宣布完成：当前未关闭 `#135/#140/#142-#151/#154/#1
 - remote 名按长度降序匹配，避免 prefix remote name 错认 ownership。
 
 验证：真实临时 bare remote 的 Git service Vitest 57/57 ✅（新增 6 条 checkout 分支场景）；全 workspace `bun run type-check` ✅、`bun run lint` ✅、`bun run build` ✅；`git diff --check` ✅。[#166](https://coding.s-s.city/songsong/openchamber/-/issues/166) 保持 open，下一 phase 仍需 multi-project directory selection 与对应 Desktop/VS Code add-project parity。
+
+### #166 Phase 2：Desktop/Web multi-project directory selection（2026-08-30）
+
+上游来源：`33caa4925`、`a2f7954ed`，按 fork multi-instance project registry 改写：
+
+- local directory picker 的目录行增加 checkbox；Space 仅在 browse 状态切换高亮目录选择，路径输入状态仍可输入空格。切换目录或 clone mode 会清空 batch，避免隐藏选择跨目录提交。
+- 有 batch 时主按钮明确变为“Add selected”；一次加入所有有效目录、跳过 batch 内重复项与已存在 local 项目、激活第一项并显示实际成功数量。
+- remote project 不能压制同路径 local 项目：去重只比较 default/local connection，保留 fork 的 `serverId + directory` ownership。
+- Finder 选择显式使用 `ignoreBatch` 提交；不依赖 `setState` 同 tick 生效，修掉上游“旧 selection 闭包覆盖 Finder target”的 race。
+- 三个新增 UI key 已补齐 en/de/es/ja/ko/pl/pt-BR/tr/uk/zh-CN/zh-TW。
+
+验证：Projects store Bun 4/4 ✅（批量、normalize、duplicate、remote/local 同路径、invalid）；i18n focused 4/4 ✅；UI type-check/lint ✅。完整 workspace build/检查见本 phase 提交验证。[#166](https://coding.s-s.city/songsong/openchamber/-/issues/166) 保持 open：fork VS Code 当前是 single-workspace bootstrap，且其 runtime API 类型正被并行 remote-namespace WIP 修改；不能把 upstream multi-folder bridge 静默套入或假称 parity。
