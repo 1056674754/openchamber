@@ -42,4 +42,24 @@ describe("ConfigCard", () => {
     // Then the configured port remains editable in the rendered form.
     expect(markup).toContain('value="41234"');
   });
+
+  test("shows remote network publishing only for managed servers", () => {
+    const markup = renderToStaticMarkup(
+      <I18nProvider>
+        <ConfigCard
+          {...baseProps}
+          remoteMode="managed"
+          keepRunning={true}
+          onKeepRunningChange={noop}
+          installMethod="auto"
+          onInstallMethodChange={noop}
+          remoteBindHost="127.0.0.1"
+          onRemoteBindHostChange={noop}
+        />
+      </I18nProvider>,
+    );
+
+    expect(markup).toContain("Reachable on the remote network");
+    expect(markup).toContain("A UI password is required");
+  });
 });

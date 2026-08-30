@@ -8,6 +8,20 @@ import { spawn } from 'node:child_process';
 const LOCAL_HOST_ID = 'local';
 const DEFAULT_CONNECTION_TIMEOUT_SEC = 60;
 const DEFAULT_LOCAL_BIND_HOST = '127.0.0.1';
+const REMOTE_USER_PREFIX = '$HOME/.openchamber/npm-global';
+const REMOTE_BUN_CANDIDATE = '"${BUN_INSTALL:-$HOME/.bun}/bin/bun"';
+const REMOTE_OPENCODE_CANDIDATES = [
+  '"$HOME/.opencode/bin/opencode"',
+  '"${BUN_INSTALL:-$HOME/.bun}/bin/opencode"',
+  '"$HOME/.local/bin/opencode"',
+  '"$HOME/.openchamber/npm-global/bin/opencode"',
+];
+const REMOTE_PATH_PREFIX = '$HOME/.opencode/bin:${BUN_INSTALL:-$HOME/.bun}/bin:$HOME/.local/bin:$HOME/.openchamber/npm-global/bin';
+const REMOTE_BIN_CANDIDATES = [
+  '"$HOME/.openchamber/npm-global/bin/openchamber"',
+  '"${BUN_INSTALL:-$HOME/.bun}/bin/openchamber"',
+  '"$HOME/.local/bin/openchamber"',
+];
 const DEFAULT_CONTROL_PERSIST_SEC = 300;
 const DEFAULT_READY_TIMEOUT_SEC = 30;
 const DEFAULT_RECONNECT_MAX_ATTEMPTS = 5;
@@ -854,10 +868,14 @@ export class ElectronSshManager {
         mode: instance?.remoteOpenchamber?.mode === 'external' ? 'external' : 'managed',
         keepRunning: instance?.remoteOpenchamber?.keepRunning !== false,
         ...(Number.isFinite(instance?.remoteOpenchamber?.preferredPort) ? { preferredPort: Number(instance.remoteOpenchamber.preferredPort) } : {}),
-        installMethod: ['npm', 'bun', 'download_release', 'upload_bundle'].includes(instance?.remoteOpenchamber?.installMethod)
+        installMethod: ['auto', 'npm', 'bun', 'download_release', 'upload_bundle'].includes(instance?.remoteOpenchamber?.installMethod)
           ? instance.remoteOpenchamber.installMethod
-          : 'bun',
+          : 'auto',
+        bindHost: instance?.remoteOpenchamber?.bindHost === '0.0.0.0' ? '0.0.0.0' : '127.0.0.1',
         uploadBundleOverSsh: Boolean(instance?.remoteOpenchamber?.uploadBundleOverSsh),
+        ...(typeof instance?.remoteOpenchamber?.releaseDownloadUrl === 'string' && instance.remoteOpenchamber.releaseDownloadUrl.trim()
+          ? { releaseDownloadUrl: instance.remoteOpenchamber.releaseDownloadUrl.trim() }
+          : {}),
       },
       localForward: {
         bindHost: sanitizeBindHost(instance?.localForward?.bindHost),
@@ -1042,33 +1060,62 @@ export class ElectronSshManager {
     return secret?.enabled && typeof secret.value === 'string' && secret.value.trim() ? secret.value.trim() : null;
   }
 
-  async remoteCommandExists(parsed, controlPath, commandName) {
-    try {
-      const output = await this.runRemoteCommand(parsed, controlPath, `command -v ${commandName} >/dev/null 2>&1 && echo yes || echo no`);
-      return output.trim() === 'yes';
-    } catch {
-      return false;
-    }
-  }
+  async resolveRemoteTool(parsed, controlPath, commandName, extraCandidates = []) {
+    const candidates = [...extraCandidates, `"$(command -v ${commandName} 2>/dev/null)"`].join(' ');
+    const script = [
+      `for candidate in ${candidates}; do`,
+      '  [ -n "$candidate" ] || continue;',
+      '  [ -x "$candidate" ] || continue;',
+      '  printf \'%s\' "$candidate";',
+      '  exit 0;',
+      'done',
+    ].join(' ');
 
-  async currentRemoteOpenChamberVersion(parsed, controlPath) {
     try {
-      const output = await this.runRemoteCommand(parsed, controlPath, 'PATH=$HOME/.local/bin:$PATH openchamber --version 2>/dev/null || $HOME/.local/bin/openchamber --version 2>/dev/null || true');
-      return parseVersionToken(output);
+      const output = await this.runRemoteCommand(parsed, controlPath, script);
+      return output.trim() || null;
     } catch {
       return null;
     }
   }
 
-  async remoteOpenCodeExists(parsed, controlPath) {
+  async remoteCommandExists(parsed, controlPath, commandName) {
+    return Boolean(await this.resolveRemoteTool(parsed, controlPath, commandName));
+  }
+
+  async remoteOpenChamberCandidates(parsed, controlPath) {
+    const script = [
+      `for candidate in ${REMOTE_BIN_CANDIDATES.join(' ')} "$(command -v openchamber 2>/dev/null)"; do`,
+      '  [ -n "$candidate" ] || continue;',
+      '  [ -x "$candidate" ] || continue;',
+      '  printf \'%s\\t%s\\n\' "$candidate" "$("$candidate" --version 2>/dev/null | head -n 1)";',
+      'done',
+    ].join(' ');
+
+    let output = '';
     try {
-      // opencode may be installed to various locations depending on the method used:
-      //   ~/.opencode/bin/opencode  (official install script)
-      //   ~/.local/bin/opencode     (npm/bun)
-      //   /usr/local/bin/opencode   (brew, manual)
-      const output = await this.runRemoteCommand(parsed, controlPath, 'PATH=$HOME/.opencode/bin:$HOME/.local/bin:$PATH command -v opencode >/dev/null 2>&1 && opencode --version 2>/dev/null || echo "NOT_FOUND"');
-      const trimmed = output.trim();
-      if (trimmed === 'NOT_FOUND' || !trimmed) return null;
+      output = await this.runRemoteCommand(parsed, controlPath, script);
+    } catch {
+      return [];
+    }
+
+    const candidates = [];
+    const seen = new Set();
+    for (const line of output.split(/\r?\n/)) {
+      const [binPath, versionRaw] = line.split('\t');
+      const trimmed = (binPath || '').trim();
+      if (!trimmed || seen.has(trimmed)) continue;
+      seen.add(trimmed);
+      candidates.push({ binPath: trimmed, version: parseVersionToken(versionRaw || '') });
+    }
+    return candidates;
+  }
+
+  async remoteOpenCodeExists(parsed, controlPath) {
+    const binPath = await this.resolveRemoteTool(parsed, controlPath, 'opencode', REMOTE_OPENCODE_CANDIDATES);
+    if (!binPath) return null;
+    try {
+      const output = await this.runRemoteCommand(parsed, controlPath, `${shellQuote(binPath)} --version 2>/dev/null || true`);
       return parseVersionToken(output);
     } catch {
       return null;
@@ -1076,9 +1123,9 @@ export class ElectronSshManager {
   }
 
   async installOpenCodeManaged(parsed, controlPath) {
-    const hasNpm = await this.remoteCommandExists(parsed, controlPath, 'npm');
-    const hasBun = await this.remoteCommandExists(parsed, controlPath, 'bun');
-    const hasBrew = await this.remoteCommandExists(parsed, controlPath, 'brew');
+    const npmPath = await this.resolveRemoteTool(parsed, controlPath, 'npm');
+    const bunPath = await this.resolveRemoteTool(parsed, controlPath, 'bun', [REMOTE_BUN_CANDIDATE]);
+    const brewPath = await this.resolveRemoteTool(parsed, controlPath, 'brew');
     const hasCurl = await this.remoteCommandExists(parsed, controlPath, 'curl');
     const hasWget = await this.remoteCommandExists(parsed, controlPath, 'wget');
 
@@ -1088,9 +1135,9 @@ export class ElectronSshManager {
     //   3. curl/wget the official install script (catch-all)
     const commands = [];
 
-    if (hasBun) commands.push('bun add -g opencode-ai@latest');
-    if (hasNpm) commands.push('npm install -g opencode-ai@latest');
-    if (hasBrew) commands.push('brew install anomalyco/tap/opencode 2>/dev/null || brew install opencode');
+    if (bunPath) commands.push(`${shellQuote(bunPath)} add -g opencode-ai@latest`);
+    if (npmPath) commands.push(`mkdir -p "${REMOTE_USER_PREFIX}" && ${shellQuote(npmPath)} install -g --prefix "${REMOTE_USER_PREFIX}" opencode-ai@latest`);
+    if (brewPath) commands.push(`${shellQuote(brewPath)} install anomalyco/tap/opencode 2>/dev/null || ${shellQuote(brewPath)} install opencode`);
 
     if (commands.length === 0 && (hasCurl || hasWget)) {
       // Fall back to the official install script.
@@ -1111,21 +1158,6 @@ export class ElectronSshManager {
     for (const command of commands) {
       try {
         await this.runRemoteCommand(parsed, controlPath, command, 120);
-        // The official install script puts the binary in ~/.opencode/bin/
-        // which may not be on the PATH that openchamber uses when spawning opencode.
-        // Create a symlink in /usr/local/bin (system-wide) or ~/.local/bin as fallback
-        // so that openchamber can find the opencode binary without sourcing .bashrc.
-        const ensureSymlink = [
-          'OPENCODE_BIN="$(PATH=$HOME/.opencode/bin:$HOME/.local/bin:$PATH command -v opencode 2>/dev/null || true)"',
-          'if [ -n "$OPENCODE_BIN" ] && [ "$OPENCODE_BIN" != "/usr/local/bin/opencode" ] && [ "$OPENCODE_BIN" != "$HOME/.local/bin/opencode" ]; then',
-          '  mkdir -p $HOME/.local/bin',
-          '  ln -sf "$OPENCODE_BIN" $HOME/.local/bin/opencode',
-          '  echo "Symlinked $OPENCODE_BIN -> $HOME/.local/bin/opencode"',
-          'fi',
-        ].join(' ');
-        await this.runRemoteCommand(parsed, controlPath, ensureSymlink, 10);
-
-        // Verify installation succeeded
         const version = await this.remoteOpenCodeExists(parsed, controlPath);
         if (version) {
           this.appendLogWithLevel(null, 'INFO', `Installed opencode ${version} on remote host via: ${command}`);
@@ -1164,19 +1196,23 @@ export class ElectronSshManager {
       throw new Error('upload_bundle install method is not yet implemented');
     }
 
-    const hasBun = await this.remoteCommandExists(parsed, controlPath, 'bun');
-    const hasNpm = await this.remoteCommandExists(parsed, controlPath, 'npm');
+    const bunPath = await this.resolveRemoteTool(parsed, controlPath, 'bun', [REMOTE_BUN_CANDIDATE]);
+    const npmPath = await this.resolveRemoteTool(parsed, controlPath, 'npm');
+    const bunCommand = bunPath ? `${shellQuote(bunPath)} add -g @openchamber/web@${version}` : null;
+    const npmCommand = npmPath
+      ? `mkdir -p "${REMOTE_USER_PREFIX}" && ${shellQuote(npmPath)} install -g --prefix "${REMOTE_USER_PREFIX}" @openchamber/web@${version}`
+      : null;
     const commands = [];
 
     if (preferred === 'bun') {
-      if (hasBun) commands.push(`bun add -g @openchamber/web@${version}`);
-      if (hasNpm) commands.push(`npm install -g @openchamber/web@${version}`);
+      if (bunCommand) commands.push(bunCommand);
+      if (npmCommand) commands.push(npmCommand);
     } else if (preferred === 'npm') {
-      if (hasNpm) commands.push(`npm install -g @openchamber/web@${version}`);
-      if (hasBun) commands.push(`bun add -g @openchamber/web@${version}`);
+      if (npmCommand) commands.push(npmCommand);
+      if (bunCommand) commands.push(bunCommand);
     } else {
-      if (hasBun) commands.push(`bun add -g @openchamber/web@${version}`);
-      if (hasNpm) commands.push(`npm install -g @openchamber/web@${version}`);
+      if (bunCommand) commands.push(bunCommand);
+      if (npmCommand) commands.push(npmCommand);
     }
 
     if (commands.length === 0) {
@@ -1236,36 +1272,38 @@ export class ElectronSshManager {
     }
   }
 
-  async startRemoteServerManaged(parsed, controlPath, instance, desiredPort) {
-    let envPrefix = 'OPENCHAMBER_RUNTIME=ssh-remote';
+  async startRemoteServerManaged(parsed, controlPath, instance, desiredPort, binPath) {
+    const opencodePath = await this.resolveRemoteTool(parsed, controlPath, 'opencode', REMOTE_OPENCODE_CANDIDATES);
+    if (!opencodePath) {
+      throw new Error('The opencode CLI is not installed on the remote machine. Install it there, then connect again');
+    }
+
     const secret = this.configuredOpenChamberPassword(instance);
+    const remoteBindHost = instance.remoteOpenchamber?.bindHost === '0.0.0.0' ? '0.0.0.0' : '127.0.0.1';
+    if (remoteBindHost === '0.0.0.0' && !secret) {
+      throw new Error('Exposing the remote server to its network requires a UI password');
+    }
+
+    let envPrefix = `PATH="${REMOTE_PATH_PREFIX}:$PATH" OPENCODE_BINARY=${shellQuote(opencodePath)} OPENCHAMBER_RUNTIME=ssh-remote`;
     if (secret) {
       envPrefix += ` OPENCHAMBER_UI_PASSWORD=${shellQuote(secret)}`;
     }
-    const cmd = `PATH=$HOME/.opencode/bin:$HOME/.local/bin:$PATH nohup env ${envPrefix} openchamber --port ${desiredPort} > /dev/null 2>&1 &`;
-    await this.runRemoteCommand(parsed, controlPath, cmd);
-
-    // Poll until server is reachable (up to ~15s)
-    const deadline = Date.now() + 15000;
-    let pollMs = 500;
-    while (Date.now() < deadline) {
-      if (await this.remoteServerRunning(parsed, controlPath, desiredPort, secret)) {
-        this.appendLogWithLevel(instance.id, 'INFO', `Managed server reachable on remote port ${desiredPort}`);
-        return desiredPort;
-      }
-      await new Promise((r) => setTimeout(r, pollMs));
-      pollMs = Math.min(pollMs * 2, 2000);
-    }
-    throw new Error(`Managed OpenChamber server failed to become reachable on port ${desiredPort}`);
+    const output = await this.runRemoteCommand(
+      parsed,
+      controlPath,
+      `${envPrefix} ${shellQuote(binPath)} serve --hostname ${remoteBindHost} --port ${desiredPort}`,
+    );
+    const port = output
+      .split(/\s+/)
+      .map((token) => Number.parseInt(token, 10))
+      .find((value) => Number.isFinite(value));
+    return port || desiredPort;
   }
 
-  async stopRemoteServerBestEffort(parsed, controlPath, remotePort) {
+  async stopRemoteServerBestEffort(parsed, controlPath, remotePort, remoteBinPath) {
+    if (!remoteBinPath) return;
     try {
-      await this.runRemoteCommand(
-        parsed,
-        controlPath,
-        `if command -v curl >/dev/null 2>&1; then curl -fsS -X POST http://127.0.0.1:${remotePort}/api/system/shutdown >/dev/null 2>&1 || true; elif command -v wget >/dev/null 2>&1; then wget -qO- --method=POST http://127.0.0.1:${remotePort}/api/system/shutdown >/dev/null 2>&1 || true; fi`,
-      );
+      await this.runRemoteCommand(parsed, controlPath, `${shellQuote(remoteBinPath)} stop --port ${remotePort}`);
     } catch {
     }
   }
@@ -1319,17 +1357,27 @@ export class ElectronSshManager {
       const port = instance.remoteOpenchamber.preferredPort;
       this.setStatus(instance.id, 'server_detecting', 'Probing external OpenChamber server', null, null, port, false, 0, false);
       await this.probeRemoteSystemInfo(parsed, controlPath, port, this.configuredOpenChamberPassword(instance));
-      return { remotePort: port, startedByUs: false };
+      return { remotePort: port, startedByUs: false, remoteBinPath: null };
     }
 
     this.setStatus(instance.id, 'remote_probe', 'Checking remote OpenChamber installation');
-    const installedVersion = await this.currentRemoteOpenChamberVersion(parsed, controlPath);
-    if (!installedVersion) {
-      this.setStatus(instance.id, 'installing', 'Installing OpenChamber on remote host');
+    const installed = await this.remoteOpenChamberCandidates(parsed, controlPath);
+    let binary = installed.find((candidate) => candidate.version === this.appVersion) || null;
+    if (!binary) {
+      const existing = installed[0] || null;
+      this.setStatus(
+        instance.id,
+        existing ? 'updating' : 'installing',
+        existing
+          ? `Updating remote OpenChamber from ${existing.version || 'unknown'} to ${this.appVersion}`
+          : 'Installing OpenChamber on remote host',
+      );
       await this.installOpenChamberManaged(parsed, controlPath, this.appVersion, instance.remoteOpenchamber);
-    } else if (installedVersion !== this.appVersion) {
-      this.setStatus(instance.id, 'updating', `Updating remote OpenChamber from ${installedVersion} to ${this.appVersion}`);
-      await this.installOpenChamberManaged(parsed, controlPath, this.appVersion, instance.remoteOpenchamber);
+      const afterInstall = await this.remoteOpenChamberCandidates(parsed, controlPath);
+      binary = afterInstall.find((candidate) => candidate.version === this.appVersion) || afterInstall[0] || existing;
+      if (!binary) {
+        throw new Error('OpenChamber was installed on the remote host but no openchamber binary could be found');
+      }
     }
 
     this.setStatus(instance.id, 'installing_opencode', 'Checking OpenCode CLI on remote host');
@@ -1350,13 +1398,13 @@ export class ElectronSshManager {
     if (!remotePort) {
       this.setStatus(instance.id, 'server_starting', 'Starting managed OpenChamber server');
       const desiredPort = instance.remoteOpenchamber.preferredPort || randomPortCandidate(instance.id);
-      remotePort = await this.startRemoteServerManaged(parsed, controlPath, instance, desiredPort);
+      remotePort = await this.startRemoteServerManaged(parsed, controlPath, instance, desiredPort, binary.binPath);
       startedByUs = true;
     }
     if (!(await this.remoteServerRunning(parsed, controlPath, remotePort, this.configuredOpenChamberPassword(instance)))) {
       throw new Error('Managed OpenChamber server failed to become reachable');
     }
-    return { remotePort, startedByUs };
+    return { remotePort, startedByUs, remoteBinPath: binary.binPath };
   }
 
   async disconnectInternal(id, reportIdle) {
@@ -1377,7 +1425,7 @@ export class ElectronSshManager {
 
     if (session) {
       if (session.startedByUs && session.remotePort && session.instance.remoteOpenchamber.mode === 'managed' && !session.instance.remoteOpenchamber.keepRunning) {
-        await this.stopRemoteServerBestEffort(session.parsed, session.controlPath, session.remotePort);
+        await this.stopRemoteServerBestEffort(session.parsed, session.controlPath, session.remotePort, session.remoteBinPath);
       }
       await this.stopControlMasterBestEffort(session.parsed, session.controlPath);
       const auth = this.sshAuth.get(session.parsed);
@@ -1438,6 +1486,7 @@ export class ElectronSshManager {
       askpassCleanupPaths,
       localPort: null,
       remotePort: null,
+      remoteBinPath: null,
       startedByUs: false,
       master: null,
       mainForward: null,
@@ -1458,8 +1507,9 @@ export class ElectronSshManager {
       throw new Error(`Unsupported remote OS: ${remoteOs}`);
     }
 
-    const { remotePort, startedByUs } = await this.ensureRemoteServer(instance, parsed, controlPath);
+    const { remotePort, startedByUs, remoteBinPath } = await this.ensureRemoteServer(instance, parsed, controlPath);
     session.remotePort = remotePort;
+    session.remoteBinPath = remoteBinPath;
     session.startedByUs = startedByUs;
     this.setStatus(id, 'forwarding', 'Setting up port forwards', null, null, remotePort, startedByUs, 0, false);
 

@@ -162,6 +162,7 @@ const normalizeForSave = (instance: DesktopSshInstance): DesktopSshInstance => {
     },
     remoteOpenchamber: {
       ...instance.remoteOpenchamber,
+      bindHost: instance.remoteOpenchamber.bindHost === '0.0.0.0' ? '0.0.0.0' : '127.0.0.1',
       preferredPort: typeof instance.remoteOpenchamber.preferredPort === 'number' ? Math.max(1, Math.min(65535, Math.round(instance.remoteOpenchamber.preferredPort))) : undefined,
     },
     portForwards: forwards,
@@ -566,6 +567,14 @@ export const RemoteInstancesPage: React.FC = () => {
     if (normalized.localForward.bindHost === '0.0.0.0') {
       if (!window.confirm(t('settings.remoteInstances.page.confirm.bindAllInterfaces'))) return;
     }
+    if (
+      normalized.remoteOpenchamber.mode === 'managed' &&
+      normalized.remoteOpenchamber.bindHost === '0.0.0.0' &&
+      !normalized.auth.openchamberPassword?.value?.trim()
+    ) {
+      toast.error(t('settings.remoteInstances.page.validation.remoteLanNeedsPassword'));
+      return;
+    }
     if (normalized.auth.sshPassword?.enabled && normalized.auth.sshPassword.value?.trim() && normalized.auth.sshPassword.store !== 'settings') {
       const store = window.confirm(t('settings.remoteInstances.page.confirm.storeSshPasswordPlaintext'));
       normalized.auth.sshPassword.store = store ? 'settings' : 'never';
@@ -957,10 +966,18 @@ export const RemoteInstancesPage: React.FC = () => {
           installMethod={draft.remoteOpenchamber.installMethod}
           onInstallMethodChange={(v) => updateDraft((d) => ({
             ...d,
-            remoteOpenchamber: { ...d.remoteOpenchamber, installMethod: v === 'npm' || v === 'download_release' || v === 'upload_bundle' ? v : 'bun' },
+            remoteOpenchamber: {
+              ...d.remoteOpenchamber,
+              installMethod: v === 'npm' || v === 'bun' || v === 'download_release' || v === 'upload_bundle' ? v : 'auto',
+            },
           }))}
           releaseDownloadUrl={draft.remoteOpenchamber.releaseDownloadUrl}
           onReleaseDownloadUrlChange={(v) => updateDraft((d) => ({ ...d, remoteOpenchamber: { ...d.remoteOpenchamber, releaseDownloadUrl: v } }))}
+          remoteBindHost={draft.remoteOpenchamber.bindHost}
+          onRemoteBindHostChange={(v) => updateDraft((d) => ({
+            ...d,
+            remoteOpenchamber: { ...d.remoteOpenchamber, bindHost: v },
+          }))}
           bindHost={draft.localForward.bindHost}
           onBindHostChange={(v) => {
             if (v === '0.0.0.0' && !window.confirm(t('settings.remoteInstances.page.confirm.bindAllInterfaces'))) return;

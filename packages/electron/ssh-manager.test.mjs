@@ -317,4 +317,118 @@ describe('ElectronSshManager', () => {
       dedupeKey: 'desktop-ssh:dev3',
     });
   });
+
+  test('installs OpenChamber into a home-owned npm prefix', async () => {
+    const commands = [];
+    const manager = new ElectronSshManager({
+      settingsFilePath: path.join(os.tmpdir(), 'unused-settings.json'),
+      appVersion: '1.2.3',
+      emit: () => undefined,
+    });
+    manager.resolveRemoteTool = async (_parsed, _controlPath, name) => (name === 'npm' ? '/usr/bin/npm' : null);
+    manager.runRemoteCommand = async (_parsed, _controlPath, script) => {
+      commands.push(script);
+      return '';
+    };
+
+    await manager.installOpenChamberManaged(
+      { destination: 'user@example.test', args: [] },
+      '/tmp/control.sock',
+      '1.2.3',
+      { installMethod: 'auto' },
+    );
+
+    expect(commands).toHaveLength(1);
+    expect(commands[0]).toContain('--prefix "$HOME/.openchamber/npm-global"');
+    expect(commands[0]).not.toMatch(/npm install -g @openchamber/);
+  });
+
+  test('lists every remote OpenChamber binary with its reported version', async () => {
+    const manager = new ElectronSshManager({
+      settingsFilePath: path.join(os.tmpdir(), 'unused-settings.json'),
+      appVersion: '1.2.3',
+      emit: () => undefined,
+    });
+    manager.runRemoteCommand = async () => [
+      '/home/pi/.openchamber/npm-global/bin/openchamber\t1.2.3',
+      '/usr/bin/openchamber\t0.9.0',
+      '',
+    ].join('\n');
+
+    const candidates = await manager.remoteOpenChamberCandidates(
+      { destination: 'user@example.test', args: [] },
+      '/tmp/control.sock',
+    );
+
+    expect(candidates).toEqual([
+      { binPath: '/home/pi/.openchamber/npm-global/bin/openchamber', version: '1.2.3' },
+      { binPath: '/usr/bin/openchamber', version: '0.9.0' },
+    ]);
+  });
+
+  test('starts and stops the resolved OpenChamber binary', async () => {
+    const commands = [];
+    const manager = new ElectronSshManager({
+      settingsFilePath: path.join(os.tmpdir(), 'unused-settings.json'),
+      appVersion: '1.2.3',
+      emit: () => undefined,
+    });
+    manager.resolveRemoteTool = async () => '/home/pi/.opencode/bin/opencode';
+    manager.runRemoteCommand = async (_parsed, _controlPath, script) => {
+      commands.push(script);
+      return '4321\n';
+    };
+    const parsed = { destination: 'user@example.test', args: [] };
+    const binPath = '/home/pi/.openchamber/npm-global/bin/openchamber';
+
+    const port = await manager.startRemoteServerManaged(
+      parsed,
+      '/tmp/control.sock',
+      { id: 'ssh-1', auth: {}, remoteOpenchamber: { mode: 'managed' } },
+      4321,
+      binPath,
+    );
+    await manager.stopRemoteServerBestEffort(parsed, '/tmp/control.sock', 4321, binPath);
+
+    expect(port).toBe(4321);
+    expect(commands[0]).toContain(`'${binPath}' serve`);
+    expect(commands[0]).toContain("OPENCODE_BINARY='/home/pi/.opencode/bin/opencode'");
+    expect(commands[0]).toContain('$HOME/.opencode/bin:');
+    expect(commands[1]).toBe(`'${binPath}' stop --port 4321`);
+  });
+
+  test('requires a UI password before publishing the remote server', async () => {
+    const manager = new ElectronSshManager({
+      settingsFilePath: path.join(os.tmpdir(), 'unused-settings.json'),
+      appVersion: '1.2.3',
+      emit: () => undefined,
+    });
+    manager.resolveRemoteTool = async () => '/home/pi/.opencode/bin/opencode';
+    let started = '';
+    manager.runRemoteCommand = async (_parsed, _controlPath, script) => {
+      started = script;
+      return '4321\n';
+    };
+    const parsed = { destination: 'user@example.test', args: [] };
+    const exposed = {
+      id: 'ssh-1',
+      auth: {},
+      remoteOpenchamber: { mode: 'managed', bindHost: '0.0.0.0' },
+    };
+
+    await expect(manager.startRemoteServerManaged(parsed, '/tmp/control.sock', exposed, 4321, '/bin/openchamber'))
+      .rejects.toThrow(/requires a UI password/);
+
+    await manager.startRemoteServerManaged(
+      parsed,
+      '/tmp/control.sock',
+      {
+        ...exposed,
+        auth: { openchamberPassword: { enabled: true, value: 'remote-secret', store: 'settings' } },
+      },
+      4321,
+      '/bin/openchamber',
+    );
+    expect(started).toContain('--hostname 0.0.0.0');
+  });
 });

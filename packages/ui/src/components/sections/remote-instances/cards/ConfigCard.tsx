@@ -66,6 +66,8 @@ export function ConfigCard({
   onInstallMethodChange,
   releaseDownloadUrl,
   onReleaseDownloadUrlChange,
+  remoteBindHost,
+  onRemoteBindHostChange,
 
   // Main Tunnel
   bindHost,
@@ -214,17 +216,31 @@ export function ConfigCard({
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
+                      <SelectItem value="auto">{t("settings.remoteInstances.page.field.installMethodAuto")}</SelectItem>
                       <SelectItem value="bun">Bun</SelectItem>
-                      <SelectItem value="node">Node</SelectItem>
-                      <SelectItem value="binary">Binary</SelectItem>
+                      <SelectItem value="npm">npm</SelectItem>
+                      <SelectItem value="download_release">{t("settings.remoteInstances.page.field.installMethodDownloadRelease")}</SelectItem>
                     </SelectContent>
                   </Select>
+                </div>
+
+                <div className={ROW_CLASSES}>
+                  <span className={LABEL_CLASSES}>{t("settings.remoteInstances.page.field.remoteLanAccess")}</span>
+                  <div className="flex items-center gap-2">
+                    <Switch
+                      checked={remoteBindHost === "0.0.0.0"}
+                      onCheckedChange={(checked) => onRemoteBindHostChange?.(checked ? "0.0.0.0" : "127.0.0.1")}
+                    />
+                    <span className="typography-meta text-muted-foreground">
+                      {t("settings.remoteInstances.page.field.remoteLanAccessHint")}
+                    </span>
+                  </div>
                 </div>
               </>
             )}
 
             {/* Release URL — managed mode, download_release */}
-            {remoteMode === "managed" && installMethod === "binary" && (
+            {remoteMode === "managed" && installMethod === "download_release" && (
               <div className={ROW_CLASSES}>
                 <span className={LABEL_CLASSES}>Release URL</span>
                 <Input

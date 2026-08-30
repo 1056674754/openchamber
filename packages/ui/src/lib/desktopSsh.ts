@@ -3,7 +3,7 @@ import { hasDesktopInvoke, invokeDesktop, listenDesktopEvent } from '@/lib/deskt
 type DesktopInvoke = (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
 
 export type DesktopSshRemoteMode = 'managed' | 'external';
-export type DesktopSshInstallMethod = 'npm' | 'bun' | 'download_release' | 'upload_bundle';
+export type DesktopSshInstallMethod = 'auto' | 'npm' | 'bun' | 'download_release' | 'upload_bundle';
 export type DesktopSshSecretStore = 'never' | 'settings';
 
 export type DesktopSshStoredSecret = {
@@ -37,6 +37,7 @@ export type DesktopSshInstance = {
     mode: DesktopSshRemoteMode;
     keepRunning: boolean;
     preferredPort?: number;
+    bindHost: '127.0.0.1' | '0.0.0.0';
     installMethod: DesktopSshInstallMethod;
     uploadBundleOverSsh: boolean;
     /** URL template for download_release install method. {version} is replaced with app version. */
@@ -211,11 +212,13 @@ const parseInstance = (value: unknown): DesktopSshInstance | null => {
 
   const rawInstallMethod = readString(remoteRaw, 'installMethod') || readString(remoteRaw, 'install_method');
   const installMethod: DesktopSshInstallMethod =
+    rawInstallMethod === 'auto' ||
     rawInstallMethod === 'npm' ||
+    rawInstallMethod === 'bun' ||
     rawInstallMethod === 'download_release' ||
     rawInstallMethod === 'upload_bundle'
       ? rawInstallMethod
-      : 'bun';
+      : 'auto';
 
   const bindHostRaw =
     readString(localRaw, 'bindHost') ||
@@ -235,6 +238,8 @@ const parseInstance = (value: unknown): DesktopSshInstance | null => {
     .filter((item): item is DesktopSshPortForward => Boolean(item));
 
   const preferredPort = readNumber(remoteRaw, 'preferredPort') ?? readNumber(remoteRaw, 'preferred_port');
+  const rawRemoteBindHost = readString(remoteRaw, 'bindHost') || readString(remoteRaw, 'bind_host');
+  const remoteBindHost: '127.0.0.1' | '0.0.0.0' = rawRemoteBindHost === '0.0.0.0' ? '0.0.0.0' : '127.0.0.1';
   const preferredLocalPort =
     readNumber(localRaw, 'preferredLocalPort') ?? readNumber(localRaw, 'preferred_local_port');
   const sshPassword = parseStoredSecret(authRaw.sshPassword || authRaw.ssh_password);
@@ -252,6 +257,7 @@ const parseInstance = (value: unknown): DesktopSshInstance | null => {
     remoteOpenchamber: {
       mode,
       keepRunning: readBoolean(remoteRaw, 'keepRunning') ?? readBoolean(remoteRaw, 'keep_running') ?? true,
+      bindHost: remoteBindHost,
       ...(preferredPort ? { preferredPort } : {}),
       installMethod,
       uploadBundleOverSsh:
@@ -344,7 +350,8 @@ export const createDesktopSshInstance = (id: string, sshCommand: string): Deskto
     remoteOpenchamber: {
       mode: 'managed',
       keepRunning: true,
-      installMethod: 'bun',
+      bindHost: '127.0.0.1',
+      installMethod: 'auto',
       uploadBundleOverSsh: false,
       releaseDownloadUrl: 'https://github.com/1056674754/openchamber',
     },

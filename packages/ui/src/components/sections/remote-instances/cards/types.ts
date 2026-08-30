@@ -137,6 +137,8 @@ export interface ConfigCardProps {
   onInstallMethodChange?: (value: string) => void;
   releaseDownloadUrl?: string;
   onReleaseDownloadUrlChange?: (value: string) => void;
+  remoteBindHost?: "127.0.0.1" | "0.0.0.0";
+  onRemoteBindHostChange?: (value: "127.0.0.1" | "0.0.0.0") => void;
 
   // Main Tunnel (desktop only)
   bindHost?: string;
