@@ -1,10 +1,13 @@
 import type { I18nKey } from './en';
 import { settingsDict } from './pt-BR.settings';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
+import { projectKnowledgeI18n } from './project-knowledge.i18n';
 
 export const dict: Record<I18nKey, string> = {
  ...settingsDict,
  ...thirdPartyIntegrationI18n['pt-BR'],
+ ...projectKnowledgeI18n['pt-BR'],
+ "planView.error.loadFailed": "Não foi possível carregar este plano",
   "common.loading": "Carregando...",
   "common.unavailable": "Indisponível",
   "common.language.english": "Inglês",

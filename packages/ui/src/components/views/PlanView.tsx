@@ -35,7 +35,8 @@ import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { EditorView } from '@codemirror/view';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { generateBranchName } from '@/lib/git/branchNameGenerator';
-import { parseProjectPlanMarkdown } from '@/lib/openchamberConfig';
+import { fetchProjectPlan, parsePlanMarkdown } from '@/lib/projectContextApi';
+import { useProjectContextStore } from '@/stores/useProjectContextStore';
 import { createWorktreeSessionForNewBranch } from '@/lib/worktreeSessionCreator';
 import { TodoSendDialog, type TodoSendExecution } from '@/components/session/TodoSendDialog';
 import { Icon } from "@/components/icon/Icon";
@@ -47,6 +48,7 @@ import { useSessionGoalServerSupport } from '@/hooks/useSessionGoalServerSupport
 
 type PlanViewProps = {
   targetPath?: string | null;
+  projectPlanId?: string | null;
 };
 
 type PlanSendAction = 'improve' | 'implement';
@@ -156,7 +158,7 @@ type SelectedLineRange = {
   end: number;
 };
 
-export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
+export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null, projectPlanId = null }) => {
   const { t } = useI18n();
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
   const createSession = useSessionUIStore((state) => state.createSession);
@@ -203,6 +205,9 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
   const [isPlanSendSubmitting, setIsPlanSendSubmitting] = React.useState(false);
 
   const [resolvedPath, setResolvedPath] = React.useState<string | null>(null);
+  const [loadedProjectPlanId, setLoadedProjectPlanId] = React.useState<string | null>(null);
+  const saveProjectPlan = useProjectContextStore((state) => state.savePlan);
+  const hasDocument = Boolean(resolvedPath) || Boolean(loadedProjectPlanId);
   const displayPath = React.useMemo(() => {
     if (!resolvedPath || !sessionDirectory || !homeDirectory) {
       return resolvedPath;
@@ -220,7 +225,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
     if (!content.trim()) {
       return t('planView.title.default');
     }
-    return parseProjectPlanMarkdown(content).title || t('planView.title.default');
+    return parsePlanMarkdown(content, t('planView.title.default')).title;
   }, [content, t]);
   const sendPromptTitle = React.useMemo(() => parsedTitle.trim() || t('planView.title.default'), [parsedTitle, t]);
   const [loading, setLoading] = React.useState(false);
@@ -366,8 +371,9 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
 
   React.useEffect(() => {
     // Saved project plans opened via context panel should work even when session plan mode is off.
-    if (!planModeEnabled && !targetPath) {
+    if (!planModeEnabled && !targetPath && !projectPlanId) {
       setResolvedPath(null);
+      setLoadedProjectPlanId(null);
       setContent('');
       setLoading(false);
       return;
@@ -403,8 +409,31 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
 
     const run = async () => {
       setResolvedPath(null);
+      setLoadedProjectPlanId(null);
       setContent('');
       setSaveError(null);
+
+      if (projectPlanId) {
+        if (!currentProjectRef) return;
+        setLoading(true);
+        try {
+          const plan = await fetchProjectPlan(currentProjectRef, projectPlanId);
+          if (cancelled) return;
+          if (!plan) {
+            setSaveError(t('planView.error.loadFailed'));
+            return;
+          }
+          setContent(plan.raw);
+          setLoadedProjectPlanId(projectPlanId);
+        } catch (error) {
+          if (!cancelled) {
+            setSaveError(error instanceof Error ? error.message : t('planView.error.loadFailed'));
+          }
+        } finally {
+          if (!cancelled) setLoading(false);
+        }
+        return;
+      }
 
       if (targetPath) {
         setLoading(true);
@@ -478,17 +507,25 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
     return () => {
       cancelled = true;
     };
-  }, [homeDirectory, planModeEnabled, runtimeApis.files, sessionDirectory, session?.slug, session?.time?.created, targetPath]);
+  }, [currentProjectRef, homeDirectory, planModeEnabled, projectPlanId, runtimeApis.files, sessionDirectory, session?.slug, session?.time?.created, t, targetPath]);
 
   React.useEffect(() => {
-    if (!resolvedPath) {
-      setSaveError(null);
+    if (!resolvedPath && !loadedProjectPlanId) {
       return;
     }
 
     const controller = window.setTimeout(async () => {
       setSaveError(null);
       try {
+        if (loadedProjectPlanId) {
+          if (!currentProjectRef) throw new Error(t('planView.error.writeFailed'));
+          const saved = await saveProjectPlan(currentProjectRef, loadedProjectPlanId, content);
+          if (!saved) throw new Error(t('planView.error.writeFailed'));
+          return;
+        }
+
+        if (!resolvedPath) return;
+
         if (runtimeApis.files?.writeFile) {
           const result = await runtimeApis.files.writeFile(resolvedPath, content);
           if (!result?.success) {
@@ -516,7 +553,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
     return () => {
       window.clearTimeout(controller);
     };
-  }, [content, resolvedPath, runtimeApis.files, sessionDirectory, t]);
+  }, [content, currentProjectRef, loadedProjectPlanId, resolvedPath, runtimeApis.files, saveProjectPlan, sessionDirectory, t]);
 
   React.useEffect(() => {
     return () => {
@@ -661,7 +698,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
             </div>
           ) : null}
         </div>
-        {resolvedPath ? (
+        {hasDocument ? (
           <div className="flex items-center gap-1">
             <DropdownMenu>
               <Tooltip>

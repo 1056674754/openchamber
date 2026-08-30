@@ -1,10 +1,13 @@
 import type { I18nKey } from './en';
 import { settingsDict } from './pl.settings';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
+import { projectKnowledgeI18n } from './project-knowledge.i18n';
 
 export const dict: Record<I18nKey, string> = {
   ...settingsDict,
   ...thirdPartyIntegrationI18n.pl,
+  ...projectKnowledgeI18n.pl,
+  'planView.error.loadFailed': 'Nie udało się wczytać tego planu',
 
   'common.loading': 'Ładowanie...',
   'common.unavailable': 'Niedostępne',

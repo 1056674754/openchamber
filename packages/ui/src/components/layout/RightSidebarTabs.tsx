@@ -1,7 +1,7 @@
 import React from 'react';
 
 import { SortableTabsStrip } from '@/components/ui/sortable-tabs-strip';
-import { ProjectNotesTodoPanel } from '@/components/session/ProjectNotesTodoPanel';
+import { ProjectNotesTodoPanel } from '@/components/session/project-context/ProjectNotesTodoPanel';
 import { GitView } from '@/components/views/GitView';
 import { Icon } from "@/components/icon/Icon";
 import { useGitStore } from '@/stores/useGitStore';
@@ -12,6 +12,8 @@ import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { formatDirectoryName } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
+import { resolveProjectForSessionDirectory } from '@/lib/projectResolution';
+import { useSessionUIStore } from '@/sync/session-ui-store';
 import { SidebarFilesTree } from './SidebarFilesTree';
 
 type RightTab = 'git' | 'files' | 'context';
@@ -49,15 +51,25 @@ function useRightSidebarGitSync(directory: string | undefined, isSidebarOpen: bo
 export const ProjectContextPanel: React.FC = () => {
   const activeProjectId = useProjectsStore((state) => state.activeProjectId);
   const projects = useProjectsStore((state) => state.projects);
+  const availableWorktreesByProject = useSessionUIStore((state) => state.availableWorktreesByProject);
   const homeDirectory = useDirectoryStore((state) => state.homeDirectory);
   const gitDirectories = useGitStore((state) => state.directories);
+  const effectiveDirectory = useEffectiveDirectory();
 
   const activeProject = React.useMemo(() => {
-    if (activeProjectId) {
-      return projects.find((project) => project.id === activeProjectId) ?? projects[0] ?? null;
+    if (effectiveDirectory) {
+      const owner = resolveProjectForSessionDirectory(
+        projects,
+        availableWorktreesByProject,
+        effectiveDirectory,
+      );
+      if (owner) return owner;
     }
-    return projects[0] ?? null;
-  }, [activeProjectId, projects]);
+    if (!effectiveDirectory && activeProjectId) {
+      return projects.find((project) => project.id === activeProjectId) ?? null;
+    }
+    return null;
+  }, [activeProjectId, availableWorktreesByProject, effectiveDirectory, projects]);
 
   const projectRef = React.useMemo(() => {
     if (!activeProject) {
@@ -66,6 +78,7 @@ export const ProjectContextPanel: React.FC = () => {
     return {
       id: activeProject.id,
       path: activeProject.path,
+      serverId: activeProject.serverId,
     };
   }, [activeProject]);
 
@@ -86,7 +99,7 @@ export const ProjectContextPanel: React.FC = () => {
   }, [activeProject, gitDirectories]);
 
   return (
-    <div className="h-full min-h-0 overflow-auto bg-sidebar">
+    <div className="h-full min-h-0 overflow-hidden bg-sidebar">
       <ProjectNotesTodoPanel
         projectRef={projectRef}
         projectLabel={projectLabel}

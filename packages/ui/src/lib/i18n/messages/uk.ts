@@ -1,10 +1,13 @@
 import type { I18nKey } from './en';
 import { settingsDict } from './uk.settings';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
+import { projectKnowledgeI18n } from './project-knowledge.i18n';
 
 export const dict: Record<I18nKey, string> = {
   ...settingsDict,
   ...thirdPartyIntegrationI18n.uk,
+  ...projectKnowledgeI18n.uk,
+  "planView.error.loadFailed": "Не вдалося завантажити цей план",
   "common.loading": "Завантаження...",
   "common.unavailable": "Недоступно",
   "common.language.english": "англійська",

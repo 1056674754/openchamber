@@ -2265,6 +2265,20 @@ fork 已有丰富的 surface 组织（#62 surface rail + ContextSidebarTab + Con
 
 验证：project-context store + authority Bun 2 files / 35 tests ✅（另有 Phase 1 server 75 tests）；UI type-check ✅；lint/diff check 在本 phase 提交前复跑。[#143](https://coding.s-s.city/songsong/openchamber/-/issues/143) 保持 open，下一 phase 切换 Project Notes surface。
 
+### #143 Phase 3：Fork Project Notes surface → Project knowledge（2026-08-30）
+
+- 右侧 Notes/Context surface 从旧单列 `ProjectNotesTodoPanel` 切到 server-backed Project knowledge：Notes / Todo / Plans 三段右侧导航、统一搜索和计数、可拖动 section 宽度。
+- Project owner 不再取全局 `activeProjectId/projects[0]`：以 `useEffectiveDirectory` 的当前 Session/draft/worktree 目录，通过 `resolveProjectForSessionDirectory`（含 sibling worktree map）解析 owning project，并把 `serverId` 写入 `ProjectRef`。找不到 owner 时显示 missing-project，不偷用本地项目。
+- Notes 变为独立卡片：新增、三行折叠、单项展开编辑、400ms debounce、空正文不保存、外部更新只在本地 draft 未改时采纳；失败显示 store raw error。
+- Todos 保留 add/toggle/delete/clear/reorder 与发送到 current/new/worktree Session，但 storage 改为独立 todos route；optimistic failure 回滚，筛选时仍对完整 list 写入。
+- Plans 通过 id 导入/删除并在原 panel 内懒加载 `PlanView`；PlanView 增加 `projectPlanId`，从 project-context route 读取/350ms 保存 raw markdown，不暴露/重建 storage path，标题由保存后的 markdown 重新派生。
+- 本 phase 暂不显示 pin 控件：上游最终语义是 **session/draft scoped pin**，不是 project-level `pinned`。在 session-knowledge runtime 到位前隐藏，比先写成错误的全项目 pin 再迁移更安全。
+- 新增 Project knowledge locale fragment（11 runtime locales）和 Plan load failure 文案；UI 仅使用现有 theme tokens。
+
+验证：Project context store/authority/i18n Bun 3 files / 36 tests ✅；Phase 1 server 75 tests ✅；full workspace type-check/lint/build ✅；`git diff --check` ✅。隔离 `HOME + OPENCHAMBER_DATA_DIR` Web QA（不接 installed OpenCode）确认 Project notes surface 显示 Notes/Todo/Plans、没有提前出现 Memory/Pin；UI 新建 note 后生成独立 `.../projects/<path-id>/context.json` version 2，刷新页面后 note 与 `Notes 1` 仍在，且真实 `$HOME` 项目数据未读写。
+
+[#143](https://coding.s-s.city/songsong/openchamber/-/issues/143) 保持 open：session knowledge pins + compaction/scheduled/agent-dispatched delivery、Agent memory 尚未移植。
+
 ### #141 Phase 1：Isolated server exception survival（2026-08-30）
 
 上游来源：`71a538b77`。fork 的 embedded server 没有外部 supervisor，单个 Node/socket stray exception 不应让整个 OpenChamber instance 离线：

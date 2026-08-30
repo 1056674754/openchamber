@@ -1,10 +1,13 @@
 import type { I18nKey } from './en';
 import { settingsDict } from './ko.settings';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
+import { projectKnowledgeI18n } from './project-knowledge.i18n';
 
 export const dict: Record<I18nKey, string> = {
   ...settingsDict,
   ...thirdPartyIntegrationI18n.ko,
+  ...projectKnowledgeI18n.ko,
+  'planView.error.loadFailed': '이 계획을 불러오지 못했습니다',
   'common.loading': '로딩 중...',
   'common.unavailable': '사용할 수 없음',
   'common.language.english': '영어',
