@@ -23,8 +23,13 @@ import {
   EMPTY_PROJECT_CONTEXT_ENTRY,
   useProjectContextStore,
 } from '@/stores/useProjectContextStore';
+import {
+  EMPTY_AGENT_MEMORY_STORE_ENTRY,
+  useAgentMemoryStore,
+} from '@/stores/useAgentMemoryStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 
+import { AgentMemorySection } from './AgentMemorySection';
 import { NotesSection } from './NotesSection';
 import { PlansSection } from './PlansSection';
 import { TodosSection } from './TodosSection';
@@ -32,7 +37,7 @@ import { useProjectTodoSend } from './useProjectTodoSend';
 
 const PlanView = React.lazy(() => import('@/components/views/PlanView').then((module) => ({ default: module.PlanView })));
 
-type ProjectContextTab = 'notes' | 'todos' | 'plans';
+type ProjectContextTab = 'notes' | 'todos' | 'plans' | 'memory';
 
 type ProjectNotesTodoPanelProps = {
   projectRef: ProjectRef | null;
@@ -73,6 +78,13 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
   );
   const loadProjectContext = useProjectContextStore((state) => state.load);
   const saveTodos = useProjectContextStore((state) => state.saveTodos);
+  const memoryEntry = useAgentMemoryStore(
+    React.useCallback(
+      (state) => (projectContextId ? state.entries[projectContextId] : undefined) ?? EMPTY_AGENT_MEMORY_STORE_ENTRY,
+      [projectContextId],
+    ),
+  );
+  const loadAgentMemory = useAgentMemoryStore((state) => state.load);
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
   const draftOpen = useSessionUIStore((state) => state.newSessionDraft.open);
   const draftPins = useSessionUIStore((state) => state.newSessionDraft.projectContextPins);
@@ -88,6 +100,7 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
   const trimmedQuery = query.trim().toLowerCase();
   const todos = React.useMemo(() => sortTodosWithCompletedLast(contextEntry.todos), [contextEntry.todos]);
   const isLoading = contextEntry.loading && !contextEntry.loaded;
+  const memoryAvailable = memoryEntry.available === true;
 
   const counts = React.useMemo(() => {
     if (!trimmedQuery) {
@@ -95,14 +108,18 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
         notes: contextEntry.notes.length,
         todos: todos.length,
         plans: contextEntry.plans.length,
+        memory: memoryEntry.global.length + memoryEntry.project.length,
       };
     }
     return {
       notes: contextEntry.notes.filter((note) => matches(note.body, trimmedQuery)).length,
       todos: todos.filter((todo) => matches(todo.text, trimmedQuery)).length,
       plans: contextEntry.plans.filter((plan) => matches(plan.title, trimmedQuery)).length,
+      memory: [...memoryEntry.project, ...memoryEntry.global].filter((entry) => (
+        matches(`${entry.title}\n${entry.body}\n${entry.type}`, trimmedQuery)
+      )).length,
     };
-  }, [contextEntry.notes, contextEntry.plans, todos, trimmedQuery]);
+  }, [contextEntry.notes, contextEntry.plans, memoryEntry.global, memoryEntry.project, todos, trimmedQuery]);
 
   const send = useProjectTodoSend({ projectRef, canCreateWorktree, onActionComplete });
 
@@ -160,6 +177,10 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
   }, [loadProjectContext, projectRef]);
 
   React.useEffect(() => {
+    if (projectRef) void loadAgentMemory(projectRef);
+  }, [loadAgentMemory, projectRef]);
+
+  React.useEffect(() => {
     setQuery('');
     setOpenPlan(null);
     setActiveTab('notes');
@@ -167,9 +188,16 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
 
   React.useEffect(() => {
     if (!trimmedQuery || counts[activeTab] > 0) return;
-    const next = (['notes', 'todos', 'plans'] as const).find((tab) => counts[tab] > 0);
+    const candidates: ProjectContextTab[] = memoryAvailable
+      ? ['notes', 'todos', 'plans', 'memory']
+      : ['notes', 'todos', 'plans'];
+    const next = candidates.find((tab) => counts[tab] > 0);
     if (next) setActiveTab(next);
-  }, [activeTab, counts, trimmedQuery]);
+  }, [activeTab, counts, memoryAvailable, trimmedQuery]);
+
+  React.useEffect(() => {
+    if (activeTab === 'memory' && memoryEntry.available === false) setActiveTab('notes');
+  }, [activeTab, memoryEntry.available]);
 
   const reportedErrorRef = React.useRef<string | null>(null);
   React.useEffect(() => {
@@ -226,6 +254,12 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
     { id: 'notes', icon: 'sticky-note', label: t('rightSidebar.contextNotesTodo.tabs.notes'), count: counts.notes },
     { id: 'todos', icon: 'checkbox-circle', label: t('rightSidebar.contextNotesTodo.tabs.todos'), count: counts.todos },
     { id: 'plans', icon: 'file-text', label: t('rightSidebar.contextNotesTodo.tabs.plans'), count: counts.plans },
+    ...(memoryAvailable ? [{
+      id: 'memory' as const,
+      icon: 'brain-ai-3' as IconName,
+      label: t('rightSidebar.contextNotesTodo.tabs.memory'),
+      count: counts.memory,
+    }] : []),
   ];
 
   return (
@@ -306,6 +340,9 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
             <React.Suspense fallback={null}>
               <PlanView projectPlanId={openPlan.id} />
             </React.Suspense>
+          ) : null}
+          {activeTab === 'memory' && memoryAvailable ? (
+            <AgentMemorySection projectRef={projectRef} projectKey={projectContextId} query={query} />
           ) : null}
         </div>
 

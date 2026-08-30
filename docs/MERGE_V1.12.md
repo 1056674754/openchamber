@@ -2314,6 +2314,16 @@ fork 已有丰富的 surface 组织（#62 surface rail + ContextSidebarTab + Con
 
 验证：Agent tool + HTTP routes Vitest 2 files / 25 tests ✅；Agent Memory actions/runtime/flag/resolver/threat Bun 5 files / 88 tests ✅。[#143](https://coding.s-s.city/songsong/openchamber/-/issues/143) 保持 open：UI Memory tab/settings 与 matching-surface QA 尚未完成。
 
+### #143 Phase 7：Project Knowledge Memory review surface（2026-08-30）
+
+- 新增显式 `ProjectRef(serverId + path)` Agent Memory client。local、aggregated/direct remote 通过 project owning server 路由；projectId 始终从 path 派生，不信任 mutable project id。
+- 窄 Zustand store 区分 disabled、enabled-empty、fetch failure；失败刷新保留 last-known-good global/project lists，不把断线解释成记忆被清空。update/delete 只替换目标 scope。
+- Project Knowledge 只在 server 明确 enabled 后显示第四个 Memory 页签；默认 feature flag 关闭时完全不可见。项目/全局分区同时展示，可搜索、刷新、编辑 title/body/type；flagged 内容明确说明已从 agent context 排除。
+- 删除采用两步确认，不会首次点击即丢数据。UI 不提供 create：记忆创建仍只属于受约束的 managed Agent tool，用户界面用于 review/correct/delete。
+- Memory 文案进入 11-locale key contract；中文简繁有本地化，其余 locale 先使用 English fallback，保证无裸 key 并等待后续翻译贡献。
+
+验证：Agent Memory API/store/i18n Bun 3 files / 7 tests ✅；full workspace type-check/lint/build ✅；隔离 `HOME + OPENCHAMBER_DATA_DIR + OPENCHAMBER_MEMORY_ENABLE=1` matching-surface QA 验证 `Memory 2`、global/project read、project edit persisted、global unchanged、delete first click only enters confirm。正式 runtime 未替换。[#143](https://coding.s-s.city/songsong/openchamber/-/issues/143) 保持 open：`agentMemoryToolEnabled` Settings/persistence wiring 与 managed OpenCode reload QA 尚未完成。
+
 ### #141 Phase 1：Isolated server exception survival（2026-08-30）
 
 上游来源：`71a538b77`。fork 的 embedded server 没有外部 supervisor，单个 Node/socket stray exception 不应让整个 OpenChamber instance 离线：

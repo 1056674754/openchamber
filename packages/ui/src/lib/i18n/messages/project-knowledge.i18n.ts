@@ -1,6 +1,69 @@
 /** Project knowledge strings added by the v1.20 migration. */
+const agentMemoryEnglish = {
+  "rightSidebar.contextNotesTodo.tabs.memory": "Memory",
+  "rightSidebar.agentMemory.description": "Durable context the agent learned across sessions. Review and correct it here.",
+  "rightSidebar.agentMemory.scope.project": "Project memory",
+  "rightSidebar.agentMemory.scope.global": "Global memory",
+  "rightSidebar.agentMemory.scopeFailed": "This memory scope could not be read. Existing data was not replaced.",
+  "rightSidebar.agentMemory.empty": "No memories in this scope.",
+  "rightSidebar.agentMemory.flagged": "Excluded from agent context because it resembles instructions to the model.",
+  "rightSidebar.agentMemory.actions.edit": "Edit memory",
+  "rightSidebar.agentMemory.actions.delete": "Delete memory",
+  "rightSidebar.agentMemory.actions.confirmDelete": "Confirm delete",
+  "rightSidebar.agentMemory.actions.refresh": "Refresh memory",
+  "rightSidebar.agentMemory.field.title": "Memory title",
+  "rightSidebar.agentMemory.field.body": "Memory details",
+  "rightSidebar.agentMemory.type.fact": "Fact",
+  "rightSidebar.agentMemory.type.preference": "Preference",
+  "rightSidebar.agentMemory.type.reference": "Reference",
+  "rightSidebar.agentMemory.toast.updateFailed": "Failed to update memory",
+  "rightSidebar.agentMemory.toast.deleteFailed": "Failed to delete memory",
+} as const;
+
+const agentMemoryZhCN = {
+  "rightSidebar.contextNotesTodo.tabs.memory": "记忆",
+  "rightSidebar.agentMemory.description": "智能体跨对话保留的持久上下文。你可以在这里检查和纠正。",
+  "rightSidebar.agentMemory.scope.project": "项目记忆",
+  "rightSidebar.agentMemory.scope.global": "全局记忆",
+  "rightSidebar.agentMemory.scopeFailed": "无法读取这一记忆范围，现有数据没有被覆盖。",
+  "rightSidebar.agentMemory.empty": "这个范围还没有记忆。",
+  "rightSidebar.agentMemory.flagged": "内容疑似在向模型下指令，已从智能体上下文中排除。",
+  "rightSidebar.agentMemory.actions.edit": "编辑记忆",
+  "rightSidebar.agentMemory.actions.delete": "删除记忆",
+  "rightSidebar.agentMemory.actions.confirmDelete": "确认删除",
+  "rightSidebar.agentMemory.actions.refresh": "刷新记忆",
+  "rightSidebar.agentMemory.field.title": "记忆标题",
+  "rightSidebar.agentMemory.field.body": "记忆详情",
+  "rightSidebar.agentMemory.type.fact": "事实",
+  "rightSidebar.agentMemory.type.preference": "偏好",
+  "rightSidebar.agentMemory.type.reference": "参考",
+  "rightSidebar.agentMemory.toast.updateFailed": "更新记忆失败",
+  "rightSidebar.agentMemory.toast.deleteFailed": "删除记忆失败",
+} as const;
+
+const agentMemoryZhTW = {
+  ...agentMemoryEnglish,
+  "rightSidebar.contextNotesTodo.tabs.memory": "記憶",
+  "rightSidebar.agentMemory.description": "代理跨對話保留的持久脈絡。你可以在這裡檢查與修正。",
+  "rightSidebar.agentMemory.scope.project": "專案記憶",
+  "rightSidebar.agentMemory.scope.global": "全域記憶",
+  "rightSidebar.agentMemory.empty": "此範圍尚無記憶。",
+  "rightSidebar.agentMemory.actions.edit": "編輯記憶",
+  "rightSidebar.agentMemory.actions.delete": "刪除記憶",
+  "rightSidebar.agentMemory.actions.confirmDelete": "確認刪除",
+  "rightSidebar.agentMemory.actions.refresh": "重新整理記憶",
+  "rightSidebar.agentMemory.field.title": "記憶標題",
+  "rightSidebar.agentMemory.field.body": "記憶詳情",
+  "rightSidebar.agentMemory.type.fact": "事實",
+  "rightSidebar.agentMemory.type.preference": "偏好",
+  "rightSidebar.agentMemory.type.reference": "參考",
+  "rightSidebar.agentMemory.toast.updateFailed": "更新記憶失敗",
+  "rightSidebar.agentMemory.toast.deleteFailed": "刪除記憶失敗",
+} as const;
+
 export const projectKnowledgeI18n = {
   "en": {
+    ...agentMemoryEnglish,
     "rightSidebar.contextNotesTodo.notes.actions.collapse": 'Collapse note',
     "rightSidebar.contextNotesTodo.notes.actions.delete": 'Delete note',
     "rightSidebar.contextNotesTodo.notes.actions.expand": 'Expand note',
@@ -24,6 +87,7 @@ export const projectKnowledgeI18n = {
     "rightSidebar.contextNotesTodo.toast.updatePlanFailed": 'Failed to update plan',
   },
   "de": {
+    ...agentMemoryEnglish,
     "rightSidebar.contextNotesTodo.notes.actions.collapse": 'Notiz zuklappen',
     "rightSidebar.contextNotesTodo.notes.actions.delete": 'Notiz löschen',
     "rightSidebar.contextNotesTodo.notes.actions.expand": 'Notiz aufklappen',
@@ -47,6 +111,7 @@ export const projectKnowledgeI18n = {
     "rightSidebar.contextNotesTodo.toast.updatePlanFailed": 'Plan konnte nicht aktualisiert werden',
   },
   "es": {
+    ...agentMemoryEnglish,
     "rightSidebar.contextNotesTodo.notes.actions.collapse": "Contraer nota",
     "rightSidebar.contextNotesTodo.notes.actions.delete": "Eliminar nota",
     "rightSidebar.contextNotesTodo.notes.actions.expand": "Expandir nota",
@@ -70,6 +135,7 @@ export const projectKnowledgeI18n = {
     "rightSidebar.contextNotesTodo.toast.updatePlanFailed": "No se pudo actualizar el plan",
   },
   "ja": {
+    ...agentMemoryEnglish,
     "rightSidebar.contextNotesTodo.notes.actions.collapse": 'ノートを折りたたむ',
     "rightSidebar.contextNotesTodo.notes.actions.delete": 'ノートを削除',
     "rightSidebar.contextNotesTodo.notes.actions.expand": 'ノートを展開',
@@ -93,6 +159,7 @@ export const projectKnowledgeI18n = {
     "rightSidebar.contextNotesTodo.toast.updatePlanFailed": '計画を更新できませんでした',
   },
   "ko": {
+    ...agentMemoryEnglish,
     "rightSidebar.contextNotesTodo.notes.actions.collapse": '노트 접기',
     "rightSidebar.contextNotesTodo.notes.actions.delete": '노트 삭제',
     "rightSidebar.contextNotesTodo.notes.actions.expand": '노트 펼치기',
@@ -116,6 +183,7 @@ export const projectKnowledgeI18n = {
     "rightSidebar.contextNotesTodo.toast.updatePlanFailed": '계획을 업데이트하지 못했습니다',
   },
   "pl": {
+    ...agentMemoryEnglish,
     "rightSidebar.contextNotesTodo.notes.actions.collapse": 'Zwiń notatkę',
     "rightSidebar.contextNotesTodo.notes.actions.delete": 'Usuń notatkę',
     "rightSidebar.contextNotesTodo.notes.actions.expand": 'Rozwiń notatkę',
@@ -139,6 +207,7 @@ export const projectKnowledgeI18n = {
     "rightSidebar.contextNotesTodo.toast.updatePlanFailed": 'Nie udało się zaktualizować planu',
   },
   "pt-BR": {
+    ...agentMemoryEnglish,
     "rightSidebar.contextNotesTodo.notes.actions.collapse": "Recolher nota",
     "rightSidebar.contextNotesTodo.notes.actions.delete": "Excluir nota",
     "rightSidebar.contextNotesTodo.notes.actions.expand": "Expandir nota",
@@ -162,6 +231,7 @@ export const projectKnowledgeI18n = {
     "rightSidebar.contextNotesTodo.toast.updatePlanFailed": "Falha ao atualizar o plano",
   },
   "uk": {
+    ...agentMemoryEnglish,
     "rightSidebar.contextNotesTodo.notes.actions.collapse": "Згорнути нотатку",
     "rightSidebar.contextNotesTodo.notes.actions.delete": "Видалити нотатку",
     "rightSidebar.contextNotesTodo.notes.actions.expand": "Розгорнути нотатку",
@@ -185,6 +255,8 @@ export const projectKnowledgeI18n = {
     "rightSidebar.contextNotesTodo.toast.updatePlanFailed": "Не вдалося оновити план",
   },
   "zh-CN": {
+    ...agentMemoryEnglish,
+    ...agentMemoryZhCN,
     "rightSidebar.contextNotesTodo.notes.actions.collapse": '折叠笔记',
     "rightSidebar.contextNotesTodo.notes.actions.delete": '删除笔记',
     "rightSidebar.contextNotesTodo.notes.actions.expand": '展开笔记',
@@ -208,6 +280,7 @@ export const projectKnowledgeI18n = {
     "rightSidebar.contextNotesTodo.toast.updatePlanFailed": '更新计划失败',
   },
   "zh-TW": {
+    ...agentMemoryZhTW,
     "rightSidebar.contextNotesTodo.notes.actions.collapse": '收合筆記',
     "rightSidebar.contextNotesTodo.notes.actions.delete": '刪除筆記',
     "rightSidebar.contextNotesTodo.notes.actions.expand": '展開筆記',
@@ -231,6 +304,7 @@ export const projectKnowledgeI18n = {
     "rightSidebar.contextNotesTodo.toast.updatePlanFailed": '更新計畫失敗',
   },
   tr: {
+    ...agentMemoryEnglish,
     "rightSidebar.contextNotesTodo.notes.actions.collapse": "Notu daralt",
     "rightSidebar.contextNotesTodo.notes.actions.delete": "Notu sil",
     "rightSidebar.contextNotesTodo.notes.actions.expand": "Notu genişlet",
@@ -254,4 +328,3 @@ export const projectKnowledgeI18n = {
     "rightSidebar.contextNotesTodo.toast.updatePlanFailed": "Plan güncellenemedi",
   },
 } as const;
-

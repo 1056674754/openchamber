@@ -21,7 +21,7 @@ const requireProjectId = (project: ProjectRef): string => {
   return projectId;
 };
 
-const resolveProjectServerBaseUrl = (project: ProjectRef): string => {
+export const resolveProjectServerBaseUrl = (project: ProjectRef): string => {
   const serverId = project.serverId?.trim();
   if (!serverId || serverId === DEFAULT_SERVER_ID) return '';
   const connection = serverRegistry.get(serverId) ?? registerRemoteInstanceProxy({
@@ -32,6 +32,11 @@ const resolveProjectServerBaseUrl = (project: ProjectRef): string => {
   if (!connection?.config.baseUrl) throw new Error(`Project server ${serverId} is unavailable`);
   return connection.config.baseUrl;
 };
+
+/** Route any project-owned API call through the project's explicit instance. */
+export const resolveProjectApiUrl = (project: ProjectRef, route: string): string => (
+  resolveApiUrl(route, resolveProjectServerBaseUrl(project))
+);
 
 export const resolveProjectContextApiBasePath = (project: ProjectRef): string => resolveApiUrl(
   `/api/project-context/${encodeURIComponent(requireProjectId(project))}`,
