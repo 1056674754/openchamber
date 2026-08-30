@@ -6,6 +6,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { toast } from '@/components/ui';
 import { selectAgentsForDirectory, useAgentsStore, type AgentConfig, type AgentMutationResult, type AgentScope, type AgentWithExtras } from '@/stores/useAgentsStore';
 import { useSettingsProjectTarget } from '@/hooks/useSettingsProjectTarget';
+import { useSettingsServerBaseUrl } from '@/hooks/useSettingsServerBaseUrl';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useShallow } from 'zustand/react/shallow';
 import { useDirectorySync } from '@/sync/sync-context';
@@ -235,9 +236,16 @@ export const AgentsPage: React.FC = () => {
   })));
 
   const settingsTarget = useSettingsProjectTarget();
-  const agents = useAgentsStore((state) => selectAgentsForDirectory(state, settingsTarget.directory));
+  const settingsServerBase = useSettingsServerBaseUrl();
+  const agents = useAgentsStore((state) => selectAgentsForDirectory(
+    state,
+    settingsTarget.directory,
+    settingsTarget.serverId,
+  ));
 
-  const selectedAgent = selectedAgentName ? getAgentByName(selectedAgentName, settingsTarget.directory) : null;
+  const selectedAgent = selectedAgentName
+    ? getAgentByName(selectedAgentName, settingsTarget.directory, settingsTarget.serverId)
+    : null;
   const isNewAgent = Boolean(agentDraft && agentDraft.name === selectedAgentName && !selectedAgent);
 
   const [draftName, setDraftName] = React.useState('');
@@ -633,12 +641,12 @@ export const AgentsPage: React.FC = () => {
 
       let result: AgentMutationResult;
       if (isNewAgent) {
-        result = await createAgent(config, settingsTarget.directory);
+        result = await createAgent(config, settingsTarget.directory, settingsServerBase.baseUrl, settingsTarget.serverId);
         if (result.ok) {
           setAgentDraft(null); // Clear draft after successful creation
         }
       } else {
-        result = await updateAgent(agentName, config, settingsTarget.directory);
+        result = await updateAgent(agentName, config, settingsTarget.directory, settingsServerBase.baseUrl, settingsTarget.serverId);
       }
 
       if (result.ok) {

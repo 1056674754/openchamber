@@ -19,6 +19,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { selectAgentsForDirectory, useAgentsStore, isAgentBuiltIn, isAgentHidden, type AgentScope, type AgentDraft } from '@/stores/useAgentsStore';
 import { useSettingsProjectTarget } from '@/hooks/useSettingsProjectTarget';
+import { useSettingsServerBaseUrl } from '@/hooks/useSettingsServerBaseUrl';
 import { useShallow } from 'zustand/react/shallow';
 import { cn } from '@/lib/utils';
 import type { Agent } from '@opencode-ai/sdk/v2';
@@ -127,11 +128,12 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
   })));
 
   const settingsTarget = useSettingsProjectTarget();
-  const agents = useAgentsStore((state) => selectAgentsForDirectory(state, settingsTarget.directory));
+  const settingsServerBase = useSettingsServerBaseUrl();
+  const agents = useAgentsStore((state) => selectAgentsForDirectory(state, settingsTarget.directory, settingsTarget.serverId));
 
   React.useEffect(() => {
-    void loadAgents(settingsTarget.directory);
-  }, [loadAgents, settingsTarget.directory]);
+    void loadAgents(settingsTarget.directory, settingsServerBase.baseUrl, settingsTarget.serverId);
+  }, [loadAgents, settingsServerBase.baseUrl, settingsTarget.directory, settingsTarget.serverId]);
 
   const bgClass = 'bg-background';
 
@@ -187,6 +189,8 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
         confirmActionAgent.name,
         (confirmActionAgent as Agent & { scope?: AgentScope }).scope,
         settingsTarget.directory,
+        settingsServerBase.baseUrl,
+        settingsTarget.serverId,
       );
 
       if (result.ok) {
@@ -293,11 +297,17 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
       permission: rulesetToPermissionConfig(renameDialogAgent.permission),
       disable: renameExt.disable,
       scope: renameExt.scope,
-    }, settingsTarget.directory);
+    }, settingsTarget.directory, settingsServerBase.baseUrl, settingsTarget.serverId);
 
     if (createResult.ok) {
       // Delete old agent
-      const deleteResult = await deleteAgent(renameDialogAgent.name, renameExt.scope, settingsTarget.directory);
+      const deleteResult = await deleteAgent(
+        renameDialogAgent.name,
+        renameExt.scope,
+        settingsTarget.directory,
+        settingsServerBase.baseUrl,
+        settingsTarget.serverId,
+      );
       if (deleteResult.ok) {
         if (createResult.requiresManualRestart || deleteResult.requiresManualRestart) {
           toast.warning(t('settings.agents.page.toast.savedManualRestart'));

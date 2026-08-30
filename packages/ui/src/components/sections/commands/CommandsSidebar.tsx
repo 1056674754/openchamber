@@ -58,7 +58,7 @@ export const CommandsSidebar: React.FC<CommandsSidebarProps> = ({ onItemSelect }
   })));
   const settingsTarget = useSettingsProjectTarget();
   const settingsServerBase = useSettingsServerBaseUrl();
-  const commands = useCommandsStore((state) => selectCommandsForDirectory(state, settingsTarget.directory));
+  const commands = useCommandsStore((state) => selectCommandsForDirectory(state, settingsTarget.directory, settingsTarget.serverId));
   const skills = useSkillsStore((state) => selectSkillsForTarget(
     state,
     settingsTarget.directory,
@@ -67,9 +67,9 @@ export const CommandsSidebar: React.FC<CommandsSidebarProps> = ({ onItemSelect }
   const loadSkills = useSkillsStore((s) => s.loadSkills);
 
   React.useEffect(() => {
-    void loadCommands(settingsTarget.directory);
+    void loadCommands(settingsTarget.directory, settingsServerBase.baseUrl, settingsTarget.serverId);
     void loadSkills(settingsServerBase.baseUrl, settingsTarget.directory);
-  }, [loadCommands, loadSkills, settingsServerBase.baseUrl, settingsTarget.directory]);
+  }, [loadCommands, loadSkills, settingsServerBase.baseUrl, settingsTarget.directory, settingsTarget.serverId]);
 
   const skillNames = React.useMemo(() => new Set(skills.map((skill) => skill.name)), [skills]);
   const commandOnlyItems = React.useMemo(
@@ -136,7 +136,7 @@ export const CommandsSidebar: React.FC<CommandsSidebarProps> = ({ onItemSelect }
     }
 
     setIsConfirmActionPending(true);
-    const success = await deleteCommand(confirmActionCommand.name, settingsTarget.directory);
+    const success = await deleteCommand(confirmActionCommand.name, settingsTarget.directory, settingsServerBase.baseUrl, settingsTarget.serverId);
 
     if (success) {
       if (confirmActionType === 'delete') {
@@ -209,11 +209,16 @@ export const CommandsSidebar: React.FC<CommandsSidebarProps> = ({ onItemSelect }
       template: renameDialogCommand.template,
       agent: renameDialogCommand.agent,
       model: renameDialogCommand.model,
-    }, settingsTarget.directory);
+    }, settingsTarget.directory, settingsServerBase.baseUrl, settingsTarget.serverId);
 
     if (success) {
       // Delete old command
-      const deleteSuccess = await deleteCommand(renameDialogCommand.name, settingsTarget.directory);
+      const deleteSuccess = await deleteCommand(
+        renameDialogCommand.name,
+        settingsTarget.directory,
+        settingsServerBase.baseUrl,
+        settingsTarget.serverId,
+      );
       if (deleteSuccess) {
         toast.success(`Command renamed to "${sanitizedName}"`);
         setSelectedCommand(sanitizedName);

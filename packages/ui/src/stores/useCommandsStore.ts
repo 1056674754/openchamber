@@ -11,6 +11,8 @@ import { emitConfigChange, scopeMatches, subscribeToConfigChanges } from "@/lib/
 import { createDeferredSafeJSONStorage } from "./utils/safeStorage";
 import { useProjectsStore } from "@/stores/useProjectsStore";
 import { runBackgroundNetworkTask } from '@/lib/background-network';
+import { resolveSdkForDirectory } from '@/sync/session-actions';
+import { resolveApiUrl as resolveServerApiUrl } from '@/lib/api/serverUrl';
 
 
 export type CommandScope = 'user' | 'project';
@@ -43,12 +45,12 @@ const DEFAULT_COMMANDS_CACHE_KEY = '__default__';
 const commandsLastLoadedAt = new Map<string, number>();
 const commandsLoadInFlight = new Map<string, Promise<boolean>>();
 
-const getCommandsCacheKey = (directory: string | null): string => {
-  return directory?.trim() || DEFAULT_COMMANDS_CACHE_KEY;
+const getCommandsCacheKey = (directory: string | null, serverKey?: string | null): string => {
+  return `${serverKey?.trim() || '__local__'}::${directory?.trim() || DEFAULT_COMMANDS_CACHE_KEY}`;
 };
 
-export const invalidateCommandsLoadCache = (directory: string | null = getRequestDirectory()) => {
-  commandsLastLoadedAt.delete(getCommandsCacheKey(directory));
+export const invalidateCommandsLoadCache = (directory: string | null = getRequestDirectory(), serverKey?: string | null) => {
+  commandsLastLoadedAt.delete(getCommandsCacheKey(directory, serverKey));
 };
 
 const buildCommandsSignature = (commands: Command[]): string => {
@@ -117,20 +119,21 @@ interface CommandsStore {
 
   setSelectedCommand: (name: string | null) => void;
   setCommandDraft: (draft: CommandDraft | null) => void;
-  loadCommands: (directory?: string | null) => Promise<boolean>;
-  createCommand: (config: CommandConfig, directory?: string | null) => Promise<boolean>;
-  updateCommand: (name: string, config: Partial<CommandConfig>, directory?: string | null) => Promise<boolean>;
-  deleteCommand: (name: string, directory?: string | null) => Promise<boolean>;
-  getCommandByName: (name: string, directory?: string | null) => Command | undefined;
+  loadCommands: (directory?: string | null, serverBaseUrl?: string, serverId?: string | null) => Promise<boolean>;
+  createCommand: (config: CommandConfig, directory?: string | null, serverBaseUrl?: string, serverId?: string | null) => Promise<boolean>;
+  updateCommand: (name: string, config: Partial<CommandConfig>, directory?: string | null, serverBaseUrl?: string, serverId?: string | null) => Promise<boolean>;
+  deleteCommand: (name: string, directory?: string | null, serverBaseUrl?: string, serverId?: string | null) => Promise<boolean>;
+  getCommandByName: (name: string, directory?: string | null, serverKey?: string | null) => Command | undefined;
 }
 
 const EMPTY_COMMANDS: Command[] = [];
 export const selectCommandsForDirectory = (
   state: Pick<CommandsStore, 'commands' | 'commandsByDirectory'>,
   directory?: string | null,
+  serverKey?: string | null,
 ): Command[] => directory === undefined
   ? state.commands
-  : state.commandsByDirectory[getCommandsCacheKey(resolveDirectory(directory))] ?? EMPTY_COMMANDS;
+  : state.commandsByDirectory[getCommandsCacheKey(resolveDirectory(directory), serverKey)] ?? EMPTY_COMMANDS;
 
 declare global {
   interface Window {
@@ -157,9 +160,10 @@ export const useCommandsStore = create<CommandsStore>()(
           set({ commandDraft: draft });
         },
 
-        loadCommands: async (requestedDirectory) => {
+        loadCommands: async (requestedDirectory, serverBaseUrl, serverId) => {
           const directory = resolveDirectory(requestedDirectory);
-          const cacheKey = getCommandsCacheKey(directory);
+          const serverKey = serverId || serverBaseUrl;
+          const cacheKey = getCommandsCacheKey(directory, serverKey);
           const now = Date.now();
           const loadedAt = commandsLastLoadedAt.get(cacheKey) ?? 0;
           const cachedCommands = get().commandsByDirectory[cacheKey];
@@ -186,17 +190,26 @@ export const useCommandsStore = create<CommandsStore>()(
                 const queryParams = directory ? `?directory=${encodeURIComponent(directory)}` : '';
 
                 // Ensure the list is scoped to the same directory we use for config source detection.
-                const commands = await runBackgroundNetworkTask(() => opencodeClient.withDirectory(
-                  directory,
-                  () => opencodeClient.listCommandsWithDetails()
+                const targetSdk = resolveSdkForDirectory(directory ?? '', serverBaseUrl, serverId ?? undefined);
+                const commandResponse = await runBackgroundNetworkTask(() => targetSdk.command.list(
+                  directory ? { directory } : undefined,
                 ));
+                if (commandResponse.error) throw new Error('Failed to list commands');
+                const commands = (commandResponse.data ?? []).map((command) => ({
+                  name: command.name,
+                  description: command.description,
+                  agent: command.agent,
+                  model: command.model,
+                  source: command.source,
+                  template: command.template,
+                }));
 
                 const configurableCommands = commands.filter((cmd) => cmd.source !== 'skill');
                 const commandsWithScope = await Promise.all(
                   configurableCommands.map(async (cmd) => {
                     try {
                       // Force no-cache
-                      const response = await fetch(`/api/config/commands/${encodeURIComponent(cmd.name)}${queryParams}`, {
+                      const response = await fetch(resolveServerApiUrl(`/api/config/commands/${encodeURIComponent(cmd.name)}${queryParams}`, serverBaseUrl), {
                         headers: {
                           'Cache-Control': 'no-cache',
                           ...(directory ? { 'x-opencode-directory': directory } : {}),
@@ -262,7 +275,7 @@ export const useCommandsStore = create<CommandsStore>()(
           }
         },
 
-        createCommand: async (config: CommandConfig, requestedDirectory) => {
+        createCommand: async (config: CommandConfig, requestedDirectory, serverBaseUrl, serverId) => {
           startConfigUpdate("Creating command configuration…");
           let requiresReload = false;
           try {
@@ -282,7 +295,7 @@ export const useCommandsStore = create<CommandsStore>()(
             const directory = resolveDirectory(requestedDirectory);
             const queryParams = directory ? `?directory=${encodeURIComponent(directory)}` : '';
 
-            const response = await fetch(`/api/config/commands/${encodeURIComponent(config.name)}${queryParams}`, {
+            const response = await fetch(resolveServerApiUrl(`/api/config/commands/${encodeURIComponent(config.name)}${queryParams}`, serverBaseUrl), {
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',
@@ -300,7 +313,7 @@ export const useCommandsStore = create<CommandsStore>()(
             console.log('[CommandsStore] Command created successfully');
 
             const needsReload = payload?.requiresReload ?? true;
-            invalidateCommandsLoadCache(directory);
+            invalidateCommandsLoadCache(directory, serverId || serverBaseUrl);
             if (needsReload) {
               requiresReload = true;
               await performFullConfigRefresh({
@@ -310,7 +323,7 @@ export const useCommandsStore = create<CommandsStore>()(
               return true;
             }
 
-            const loaded = await get().loadCommands(directory);
+            const loaded = await get().loadCommands(directory, serverBaseUrl, serverId);
             if (loaded) {
               emitConfigChange("commands", { source: CONFIG_EVENT_SOURCE });
             }
@@ -325,7 +338,7 @@ export const useCommandsStore = create<CommandsStore>()(
           }
         },
 
-        updateCommand: async (name: string, config: Partial<CommandConfig>, requestedDirectory) => {
+        updateCommand: async (name: string, config: Partial<CommandConfig>, requestedDirectory, serverBaseUrl, serverId) => {
           startConfigUpdate("Updating command configuration…");
           let requiresReload = false;
           try {
@@ -344,7 +357,7 @@ export const useCommandsStore = create<CommandsStore>()(
             const directory = resolveDirectory(requestedDirectory);
             const queryParams = directory ? `?directory=${encodeURIComponent(directory)}` : '';
 
-            const response = await fetch(`/api/config/commands/${encodeURIComponent(name)}${queryParams}`, {
+            const response = await fetch(resolveServerApiUrl(`/api/config/commands/${encodeURIComponent(name)}${queryParams}`, serverBaseUrl), {
               method: 'PATCH',
               headers: {
                 'Content-Type': 'application/json',
@@ -362,7 +375,7 @@ export const useCommandsStore = create<CommandsStore>()(
             console.log('[CommandsStore] Command updated successfully');
 
             const needsReload = payload?.requiresReload ?? true;
-            invalidateCommandsLoadCache(directory);
+            invalidateCommandsLoadCache(directory, serverId || serverBaseUrl);
             if (needsReload) {
               requiresReload = true;
               await performFullConfigRefresh({
@@ -372,7 +385,7 @@ export const useCommandsStore = create<CommandsStore>()(
               return true;
             }
 
-            const loaded = await get().loadCommands(directory);
+            const loaded = await get().loadCommands(directory, serverBaseUrl, serverId);
             if (loaded) {
               emitConfigChange("commands", { source: CONFIG_EVENT_SOURCE });
             }
@@ -387,7 +400,7 @@ export const useCommandsStore = create<CommandsStore>()(
           }
         },
 
-        deleteCommand: async (name: string, requestedDirectory) => {
+        deleteCommand: async (name: string, requestedDirectory, serverBaseUrl, serverId) => {
           startConfigUpdate("Deleting command configuration…");
           let requiresReload = false;
           try {
@@ -395,7 +408,7 @@ export const useCommandsStore = create<CommandsStore>()(
             const directory = resolveDirectory(requestedDirectory);
             const queryParams = directory ? `?directory=${encodeURIComponent(directory)}` : '';
 
-            const response = await fetch(`/api/config/commands/${encodeURIComponent(name)}${queryParams}`, {
+            const response = await fetch(resolveServerApiUrl(`/api/config/commands/${encodeURIComponent(name)}${queryParams}`, serverBaseUrl), {
               method: 'DELETE',
               headers: directory ? { 'x-opencode-directory': directory } : undefined,
             });
@@ -409,7 +422,7 @@ export const useCommandsStore = create<CommandsStore>()(
             console.log('[CommandsStore] Command deleted successfully');
 
             const needsReload = payload?.requiresReload ?? true;
-            invalidateCommandsLoadCache(directory);
+            invalidateCommandsLoadCache(directory, serverId || serverBaseUrl);
             if (needsReload) {
               requiresReload = true;
               await performFullConfigRefresh({
@@ -419,7 +432,7 @@ export const useCommandsStore = create<CommandsStore>()(
               return true;
             }
 
-            const loaded = await get().loadCommands(directory);
+            const loaded = await get().loadCommands(directory, serverBaseUrl, serverId);
             if (loaded) {
               emitConfigChange("commands", { source: CONFIG_EVENT_SOURCE });
             }
@@ -439,8 +452,8 @@ export const useCommandsStore = create<CommandsStore>()(
           }
         },
 
-        getCommandByName: (name: string, directory?: string | null) => {
-          return selectCommandsForDirectory(get(), directory).find((command) => command.name === name);
+        getCommandByName: (name: string, directory?: string | null, serverKey?: string | null) => {
+          return selectCommandsForDirectory(get(), directory, serverKey).find((command) => command.name === name);
         },
       }),
       {

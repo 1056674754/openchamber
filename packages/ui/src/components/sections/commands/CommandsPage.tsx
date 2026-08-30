@@ -5,6 +5,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { toast } from '@/components/ui';
 import { selectCommandsForDirectory, useCommandsStore, type CommandConfig, type CommandScope } from '@/stores/useCommandsStore';
 import { useSettingsProjectTarget } from '@/hooks/useSettingsProjectTarget';
+import { useSettingsServerBaseUrl } from '@/hooks/useSettingsServerBaseUrl';
 import { useShallow } from 'zustand/react/shallow';
 import { ModelSelector } from '../agents/ModelSelector';
 import { AgentSelector } from './AgentSelector';
@@ -38,9 +39,12 @@ export const CommandsPage: React.FC = () => {
     setCommandDraft: s.setCommandDraft,
   })));
   const settingsTarget = useSettingsProjectTarget();
-  const commands = useCommandsStore((state) => selectCommandsForDirectory(state, settingsTarget.directory));
+  const settingsServerBase = useSettingsServerBaseUrl();
+  const commands = useCommandsStore((state) => selectCommandsForDirectory(state, settingsTarget.directory, settingsTarget.serverId));
 
-  const selectedCommand = selectedCommandName ? getCommandByName(selectedCommandName, settingsTarget.directory) : null;
+  const selectedCommand = selectedCommandName
+    ? getCommandByName(selectedCommandName, settingsTarget.directory, settingsTarget.serverId)
+    : null;
   const isNewCommand = Boolean(commandDraft && commandDraft.name === selectedCommandName && !selectedCommand);
 
   const [draftName, setDraftName] = React.useState('');
@@ -156,12 +160,12 @@ export const CommandsPage: React.FC = () => {
 
       let success: boolean;
       if (isNewCommand) {
-        success = await createCommand(config, settingsTarget.directory);
+        success = await createCommand(config, settingsTarget.directory, settingsServerBase.baseUrl, settingsTarget.serverId);
         if (success) {
           setCommandDraft(null); 
         }
       } else {
-        success = await updateCommand(commandName, config, settingsTarget.directory);
+        success = await updateCommand(commandName, config, settingsTarget.directory, settingsServerBase.baseUrl, settingsTarget.serverId);
       }
 
       if (success) {

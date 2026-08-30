@@ -453,11 +453,19 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
       return;
     }
     if (effectiveSettingsSlug === 'agents') {
-      void useAgentsStore.getState().loadAgents(settingsTarget.directory);
+      void useAgentsStore.getState().loadAgents(
+        settingsTarget.directory,
+        settingsServer.baseUrl,
+        settingsTarget.serverId,
+      );
       return;
     }
     if (effectiveSettingsSlug === 'commands') {
-      void useCommandsStore.getState().loadCommands(settingsTarget.directory);
+      void useCommandsStore.getState().loadCommands(
+        settingsTarget.directory,
+        settingsServer.baseUrl,
+        settingsTarget.serverId,
+      );
       return;
     }
     if (effectiveSettingsSlug === 'mcp') {
