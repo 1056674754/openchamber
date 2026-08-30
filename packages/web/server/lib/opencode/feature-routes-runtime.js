@@ -12,6 +12,7 @@ import { registerMagicPromptRoutes } from '../magic-prompts/routes.js';
 import { registerSessionFoldersRoutes } from '../session-folders/routes.js';
 import { registerProjectContextRoutes } from '../project-context/routes.js';
 import { registerSessionKnowledgeRoutes } from '../session-knowledge/routes.js';
+import { registerAgentMemoryRoutes } from '../agent-memory/routes.js';
 import { registerPendingMessagesRoutes } from '../pending-messages/routes.js';
 import { registerTempSessionRoutes, setOpenCodeDeps } from '../temp-sessions/routes.js';
 import { registerPermissionAutoAcceptRoutes } from '../permission-auto-accept/runtime.js';
@@ -99,6 +100,8 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       buildAugmentedPath,
       projectConfigRuntime,
       projectContextRuntime,
+      agentMemoryRuntime,
+      isAgentMemoryEnabled,
       sessionKnowledgeRuntime,
       scheduledTasksRuntime,
       scheduledTaskService,
@@ -352,6 +355,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       openchamberDataDir,
     });
     registerProjectContextRoutes(app, { projectContextRuntime });
+    registerAgentMemoryRoutes(app, { agentMemoryRuntime, isAgentMemoryEnabled });
     registerSessionKnowledgeRoutes(app, { sessionKnowledgeRuntime });
     registerSessionFoldersRoutes(app, {
       fsPromises,

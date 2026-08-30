@@ -2294,6 +2294,17 @@ fork 已有丰富的 surface 组织（#62 surface rail + ContextSidebarTab + Con
 
 [#143](https://coding.s-s.city/songsong/openchamber/-/issues/143) 保持 open，仅余 feature-gated Agent Memory 与 v1.21 owning-project follow-ups。
 
+### #143 Phase 5：Feature-gated Agent Memory storage/routes（2026-08-30）
+
+- 新增 global (`<userConfigRoot>/memory.json`) 与 project (`<projectsDir>/<projectId>/memory.json`) 两个独立 store；global 上限 60、project 上限 200，title/body/type/provenance 有长度与 shape 约束。
+- create 对 exact title 与 >=75% meaningful-token overlap 做 restatement replacement，避免同一事实换句话后无限堆积；concurrent writes 有 scope-level lock，满 store 仍允许更正已有 entry。
+- read 每次重跑 prompt-injection threat patterns；命中项保留并 `flagged`，但 session knowledge index 排除。既不静默删除证据，也不把可疑指令带给 Agent。
+- routes 只提供 panel read/update/delete；Agent create 仍留给下一 phase 的 managed tool。scope 缺失、project scope 无 projectId 必须 400，绝不回退 global。
+- 双门控：build-level `OPENCHAMBER_MEMORY_ENABLE` + settings `agentMemoryToolEnabled`。任一关闭时 routes 返回 `{disabled:true}` 404，未知 setting 503；session knowledge 也不读取 memory。
+- memory project resolver 已覆盖 configured worktree、linked sibling worktree、managed Chats root、非 git fallback 与无目录 fail closed。当前 routes/runtime 已注册，但默认 feature flag unset，运行面完全不可见。
+
+验证：Agent Memory runtime/feature/resolver/threat Bun 4 files / 59 tests ✅；HTTP routes Vitest 20 tests ✅；session knowledge memory filtering 20 tests ✅；Web type-check/lint ✅；`git diff --check` ✅。[#143](https://coding.s-s.city/songsong/openchamber/-/issues/143) 保持 open：managed Agent tool/actions、UI Memory tab/settings 与 v1.21 follow-ups 尚未完成。
+
 ### #141 Phase 1：Isolated server exception survival（2026-08-30）
 
 上游来源：`71a538b77`。fork 的 embedded server 没有外部 supervisor，单个 Node/socket stray exception 不应让整个 OpenChamber instance 离线：

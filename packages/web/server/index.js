@@ -107,6 +107,8 @@ import { resolveProjectKnowledgeOwnerPath } from './lib/session-knowledge/projec
 import { createProjectConfigRuntime } from './lib/projects/project-config.js';
 import { createProjectIdFromPath } from './lib/projects/project-id.js';
 import { createProjectContextRuntime } from './lib/project-context/runtime.js';
+import { createAgentMemoryRuntime } from './lib/agent-memory/runtime.js';
+import { isAgentMemoryFeatureAvailable } from './lib/agent-memory/feature-flag.js';
 import { createPreviewProxyRuntime } from './lib/preview/proxy-runtime.js';
 import { createRemoteInstancesRuntime } from './lib/remote-instances/config.js';
 import { resolvePrimaryWorktreeRoot, waitForActiveWorktreeBootstrap } from './lib/git/service.js';
@@ -631,6 +633,19 @@ const projectContextRuntime = createProjectContextRuntime({
   projectsDirPath: OPENCHAMBER_PROJECTS_CONFIG_DIR,
 });
 
+const agentMemoryRuntime = createAgentMemoryRuntime({
+  fsPromises,
+  path,
+  projectsDirPath: OPENCHAMBER_PROJECTS_CONFIG_DIR,
+  userConfigRoot: OPENCHAMBER_USER_CONFIG_ROOT,
+});
+
+const isAgentMemoryEnabled = async () => {
+  if (!isAgentMemoryFeatureAvailable()) return false;
+  const settings = await readSettingsFromDiskMigrated().catch(() => null);
+  return settings?.agentMemoryToolEnabled === true;
+};
+
 // HMR-persistent state via globalThis
 // These values survive Vite HMR reloads to prevent zombie OpenCode processes
 const hmrStateRuntime = createHmrStateRuntime({
@@ -972,11 +987,9 @@ const resolveProjectKnowledgeId = async (directory) => {
 
 const sessionKnowledgeRuntime = createSessionKnowledgeRuntime({
   projectContextRuntime,
-  agentMemoryRuntime: {
-    readAll: async () => ({ global: [], project: [], globalFailed: false, projectFailed: false }),
-  },
+  agentMemoryRuntime,
   resolveProjectId: resolveProjectKnowledgeId,
-  isAgentMemoryEnabled: async () => false,
+  isAgentMemoryEnabled,
   openCodeFetch: async (fetchPath, { directory, method = 'GET', body } = {}) => {
     const params = new URLSearchParams();
     if (directory) params.set('directory', directory);
@@ -1898,6 +1911,8 @@ async function main(options = {}) {
     buildAugmentedPath,
     projectConfigRuntime,
     projectContextRuntime,
+    agentMemoryRuntime,
+    isAgentMemoryEnabled,
     sessionKnowledgeRuntime,
     scheduledTasksRuntime,
     scheduledTaskService,
