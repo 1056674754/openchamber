@@ -2307,3 +2307,18 @@ fork 已有丰富的 surface 组织（#62 surface rail + ContextSidebarTab + Con
 验证：Git service 51/51 ✅（含真实 reflog 与含空格 rename destination）；branch scope pure helpers 4/4 ✅；full workspace type-check/lint ✅；完整 Web + VS Code + mobile assets build ✅；`git diff --check` ✅。独立 HMR 匹配界面 QA：Openchamber `merge/upstream` 显示 Branch 菜单和 unknown-base picker；`feature/chat-density-tweaks` 自动检测 `merge/upstream` 并显示“无相对更改”终态；API 对有共同祖先的 range 返回结构化文件列表。测试实例曾因只设 `XDG_DATA_HOME` 写到真实 settings，停止实例后已通过运行中 OpenChamber 配置 API 精确恢复 `activeProjectId`、root/local `lastDirectory`、draft target、测试 context panels 和测试 base override，并逐项 GET 验证。
 
 [#146](https://coding.s-s.city/songsong/openchamber/-/issues/146) 的 generated text、fork PR worktree、open/history PR status 与 branch Context Diff 已全部完成，可关闭。
+
+### #136 Phase 1：Completed-assistant compact Markdown image gallery（2026-08-30）
+
+上游来源：`10d0ee973`、`7b8e3a561`、`e37fd63be`、`d0712d45d`、`8ac5e553a`、`763a0f474`、`56077a25e`。fork 不引入上游 marked worker renderer，直接适配现有 ReactMarkdown + ToolOutputDialog gallery：
+
+- completed assistant 的 Markdown image syntax 在正文显示小型 image+filename label，不再插入大图；消息尾部汇总最多 12 个 unique candidates 为稳定 `100×100`（窄屏 `88×88`）缩略图，复用 fork 现有全屏预览、键盘/前后导航和 mobile overlay。
+- candidate extraction 使用 fork 已依赖的 `marked.lexer` token tree，支持 inline/reference images，跳过 fenced/inline code；persisted text part 缺 `time.end` 时以 message completed authority 决定 compact，不回退大图。
+- gallery 接近 viewport 才发一次 message-level local prepare；每个 thumbnail 自身接近 viewport 才设置 `<img src>`。prepare cache 按 resolver + session + message + directory + sources 隔离，最多 1024 项，non-ready 30s，grant 过期前 5s 刷新。
+- 新增 message-bound grant route：server 从 owning directory 的 OpenCode message API 反查 assistant message，只批准实际 image syntax 中出现的 source。workspace image 必须 canonical path 在 directory 内；外部 image 仅允许 OpenCode 专用 temp root，拒绝 symlink escape、非普通文件、>10 MiB 和签名不匹配。
+- FS 新增 path-bound `outsideFileGrant`：gallery 外部图只获 `raw` scope、10 分钟、canonical exact-path；现有 fork `allowOutsideWorkspace` 调用不带 token 时维持兼容，不在本批破坏普通文件链接。
+- VS Code 暂保留既有 inline image path，不启用 gallery/compact label；上游最终通过 workspace FS bridge 支持 VS Code，fork 对应 parity 仍需 matching-surface 独立移植。
+
+验证：client extraction/prepare/SSR compact slots 2 files / 4 tests ✅；server message-source/grant + FS path binding 2 files / 14 tests ✅；UI/Web focused type-check ✅；`git diff --check` ✅。HMR 实界面 QA 被当前另一 agent 的 sidebar/bootstrap WIP 阻断（direct `?session=` 未恢复目标 Session，页面停在空 draft），因此 [#136](https://coding.s-s.city/songsong/openchamber/-/issues/136) 保持 open，待本批完整 build 后在不共享 managed OpenCode 生命周期的隔离方式或下一次 runtime QA 中确认 thumbnail/preview 交互。
+
+QA 事故记录：HMR server 复用了安装版 managed OpenCode `54185`，退出时向共享 PID `47219` 发出 `SIGKILL`；安装版随后卡在 restart path。已按 incident runbook 保存 lifecycle/listener/OpenChamber sample 到 `~/Desktop/openchamber-opencode-incident-20260830T074340Z`，随后只重启 OpenChamber app（未替换 shell/runtime），恢复为 healthy OpenCode `65246`；配置 API 再次确认 active project、root/local lastDirectory、draft target 均为原值且测试 base override 不存在。后续 HMR QA 禁止复用安装版 managed OpenCode。

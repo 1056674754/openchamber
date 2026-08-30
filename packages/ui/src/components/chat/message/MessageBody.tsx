@@ -6,6 +6,7 @@ import ToolPart from './parts/ToolPart';
 import AssistantTextPart from './parts/AssistantTextPart';
 import ReasoningPart, { MergedReasoningPart } from './parts/ReasoningPart';
 import { MessageFilesDisplay } from '../FileAttachment';
+import { MarkdownImageGallery } from '../MarkdownImageGallery';
 import { TurnChangedFilesDropdown } from '../TurnChangedFilesDropdown';
 import TurnActivity from '../components/TurnActivity';
 import type { ToolPart as ToolPartType } from '@opencode-ai/sdk/v2';
@@ -1193,6 +1194,13 @@ const AssistantMessageBody = React.memo(({
     const openMultiRunLauncherWithPrompt = useUIStore((state) => state.openMultiRunLauncherWithPrompt);
     const projects = useProjectsStore((state) => state.projects);
     const effectiveDirectory = useEffectiveDirectory();
+    const finalizedAssistantMarkdownContents = React.useMemo(() => {
+        if (!isMessageCompleted) return [];
+        return parts
+            .filter((part) => part.type === 'text')
+            .map((part) => extractTextContent(part))
+            .filter((content) => content.trim().length > 0);
+    }, [isMessageCompleted, parts]);
     const currentReviewTransferDirection = getReviewTransferDirection(currentSession);
     const isReviewSessionView = currentReviewTransferDirection === 'review-to-original';
     const reviewTransferDirection = (!isMobile && !isVSCode) ? currentReviewTransferDirection : null;
@@ -1853,6 +1861,7 @@ const AssistantMessageBody = React.memo(({
                             part={part}
                             sessionId={sessionId}
                             messageId={messageId}
+                            isMessageCompleted={isMessageCompleted}
                             streamPhase={effectiveStreamPhase}
                             chatRenderMode={chatRenderMode}
                             onContentChange={onContentChange}
@@ -1887,6 +1896,7 @@ const AssistantMessageBody = React.memo(({
                                 part={part}
                                 sessionId={sessionId}
                                 messageId={messageId}
+                                isMessageCompleted={isMessageCompleted}
                                 streamPhase={effectiveStreamPhase}
                                 chatRenderMode={chatRenderMode}
                                 onContentChange={onContentChange}
@@ -2077,6 +2087,7 @@ const AssistantMessageBody = React.memo(({
         createFlatToolActivity,
         expandedTools,
         groupReasoningBlocks,
+        isMessageCompleted,
         isMobile,
         isActivityOwnerMessage,
         isSortedRenderMode,
@@ -2277,6 +2288,15 @@ const AssistantMessageBody = React.memo(({
                     )}
                 </div>
                 <MessageFilesDisplay files={parts} onShowPopup={onShowPopup} />
+                {!isVSCodeRuntime() && sessionId && effectiveDirectory && finalizedAssistantMarkdownContents.length > 0 ? (
+                    <MarkdownImageGallery
+                        sessionId={sessionId}
+                        messageId={messageId}
+                        directory={effectiveDirectory}
+                        contents={finalizedAssistantMarkdownContents}
+                        onShowPopup={onShowPopup}
+                    />
+                ) : null}
                 {shouldRenderStandaloneActionsAfterContent && (
                     <div className={INLINE_MESSAGE_ACTIONS_CLASS_NAME} data-message-actions="true">
                         <div className="flex items-center gap-1" data-message-action-group="true">

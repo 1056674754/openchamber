@@ -6,7 +6,7 @@ import express from 'express';
 import request from 'supertest';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { registerFsRoutes } from './routes.js';
+import { mintOutsideFileGrant, registerFsRoutes } from './routes.js';
 import { createProjectDirectoryRuntime } from '../opencode/project-directory-runtime.js';
 
 const tempRoots = [];
@@ -50,6 +50,28 @@ afterEach(async () => {
 });
 
 describe('fs routes explicit directory policy', () => {
+  it('binds outside-workspace grants to one canonical path and scope', async () => {
+    const workspace = await makeTempDir();
+    const outside = await makeTempDir();
+    const imagePath = path.join(outside, 'image.png');
+    const otherPath = path.join(outside, 'other.png');
+    await fs.writeFile(imagePath, Buffer.from('89504e470d0a1a0a00000000', 'hex'));
+    await fs.writeFile(otherPath, Buffer.from('89504e470d0a1a0a00000000', 'hex'));
+    const grant = await mintOutsideFileGrant(imagePath, { scopes: ['raw'], fsPromises: fs, path, crypto });
+    const app = createApp({ projects: [{ id: 'workspace', path: workspace }] });
+
+    const allowed = await request(app)
+      .get('/api/fs/raw')
+      .query({ path: imagePath, allowOutsideWorkspace: 'true', outsideFileGrant: grant.outsideFileGrant });
+    const mismatched = await request(app)
+      .get('/api/fs/raw')
+      .query({ path: otherPath, allowOutsideWorkspace: 'true', outsideFileGrant: grant.outsideFileGrant });
+
+    expect(allowed.status).toBe(200);
+    expect(mismatched.status).toBe(400);
+    expect(mismatched.body.error).toContain('does not match');
+  });
+
   it('rejects workspace-bound writes when directory is missing', async () => {
     const workspace = await makeTempDir();
     const target = path.join(workspace, 'notes.txt');

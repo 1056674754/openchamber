@@ -1130,6 +1130,7 @@ const buildMarkdownComponents = ({
   previewTitle,
   localImageContext,
   onShowPopup,
+  compactImages,
 }: {
   syntaxTheme: { [key: string]: React.CSSProperties };
   onPreviewLoopback?: (url: string) => void;
@@ -1140,6 +1141,7 @@ const buildMarkdownComponents = ({
     fileReferenceBaseUrl?: string;
   };
   onShowPopup?: (content: ToolPopupContent) => void;
+  compactImages?: boolean;
 }): Components => ({
   table({ children, ...props }) {
     return <TableWrapper className={props.className}>{children}</TableWrapper>;
@@ -1229,6 +1231,15 @@ const buildMarkdownComponents = ({
     const accessibleName = typeof alt === 'string' && alt.trim()
       ? `${imageActionLabel}: ${alt.trim()}`
       : imageActionLabel;
+    if (compactImages) {
+      const filename = imageFilename || getFileNameFromPath(rawSrc) || (typeof alt === 'string' && alt.trim() ? alt.trim() : 'Image');
+      return (
+        <span className="inline-flex max-w-full items-center gap-1.5 rounded bg-[var(--surface-elevated)] px-1.5 py-0.5 align-middle typography-meta text-muted-foreground">
+          <Icon name="image-download" className="size-3.5 shrink-0" />
+          <span className="truncate">{filename}</span>
+        </span>
+      );
+    }
     const localImageProps = localImage
       ? {
           role: 'button' as const,
@@ -1379,6 +1390,7 @@ interface MarkdownRendererProps {
   variant?: MarkdownVariant;
   onShowPopup?: (content: ToolPopupContent) => void;
   enableFileReferences?: boolean;
+  compactImages?: boolean;
 }
 
 const MERMAID_BLOCK_SELECTOR = '[data-markdown="mermaid-block"]';
@@ -2350,6 +2362,7 @@ const MarkdownRendererImpl: React.FC<MarkdownRendererProps> = ({
   variant = 'assistant',
   onShowPopup,
   enableFileReferences = true,
+  compactImages = false,
 }) => {
   const currentTheme = useCurrentMermaidTheme();
   const { editor, runtime } = useRuntimeAPIs();
@@ -2401,8 +2414,9 @@ const MarkdownRendererImpl: React.FC<MarkdownRendererProps> = ({
           }
         : undefined,
       onShowPopup,
+      compactImages,
     }),
-    [syntaxTheme, effectiveDirectory, fileReferenceBaseUrl, fileReferencesEnabled, handlePreviewLoopback, onShowPopup, previewLabel, previewTitle],
+    [compactImages, syntaxTheme, effectiveDirectory, fileReferenceBaseUrl, fileReferencesEnabled, handlePreviewLoopback, onShowPopup, previewLabel, previewTitle],
   );
   const componentKey = `markdown-${MARKDOWN_RENDERER_VERSION}-${part?.id ? `part-${part.id}` : `message-${messageId}`}`;
   const markdownBlocks = useStableMarkdownBlocks(content, isStreaming && !disableStreamAnimation, componentKey);
@@ -2445,7 +2459,8 @@ export const MarkdownRenderer = React.memo(MarkdownRendererImpl, (prev, next) =>
     && prev.sessionId === next.sessionId
 	    && prev.messageId === next.messageId
 	    && prev.onShowPopup === next.onShowPopup
-	    && prev.enableFileReferences === next.enableFileReferences
+    && prev.enableFileReferences === next.enableFileReferences
+    && prev.compactImages === next.compactImages
     && prev.part?.id === next.part?.id;
 });
 

@@ -56,6 +56,7 @@ Use this doc when you ask an agent to change tool/header/description behavior.
 - `bash/edit/write/question/task` are **expandable tools** and render via `ToolPart`.
 - `perplexity` is currently treated as static and grouped into search/web-search style rows (through static grouping + short description extraction).
 - Thinking/Justification duration is hidden in `sorted` mode (handled in `ReasoningPart.tsx` + `JustificationBlock.tsx`).
+- Completed assistant Markdown renders image syntax as a compact filename label and collects up to 12 unique images into a 100px thumbnail gallery above the turn footer. The gallery reuses the existing full-screen preview/navigation overlay. Local images are prepared once per message and thumbnails load only near the viewport; workspace-external images require a message-bound temporary-file grant.
 
 ## "I want to change description for Perplexity" (example recipe)
 

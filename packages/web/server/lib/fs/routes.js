@@ -1,4 +1,47 @@
 import { createRealpathCache } from '../path-realpath-cache.js';
+import nodeFsPromises from 'node:fs/promises';
+import nodePath from 'node:path';
+
+const OUTSIDE_FILE_GRANT_TTL_MS = 10 * 60 * 1000;
+const outsideFileGrants = new Map();
+
+const pruneOutsideFileGrants = () => {
+  const now = Date.now();
+  for (const [token, grant] of outsideFileGrants.entries()) {
+    if (!grant || grant.expiresAt <= now) outsideFileGrants.delete(token);
+  }
+};
+
+export const mintOutsideFileGrant = async (targetPath, {
+  scopes = ['stat', 'read', 'raw'],
+  fsPromises = nodeFsPromises,
+  path = nodePath,
+  crypto = globalThis.crypto,
+} = {}) => {
+  const raw = typeof targetPath === 'string' ? targetPath.trim() : '';
+  if (!raw) throw new Error('Path is required');
+  const canonicalPath = await fsPromises.realpath(path.resolve(raw));
+  const token = typeof crypto?.randomUUID === 'function'
+    ? crypto.randomUUID()
+    : Buffer.from(crypto.getRandomValues(new Uint8Array(24))).toString('base64url');
+  const expiresAt = Date.now() + OUTSIDE_FILE_GRANT_TTL_MS;
+  outsideFileGrants.set(token, {
+    canonicalPath,
+    scopes: new Set(scopes),
+    expiresAt,
+  });
+  return { path: canonicalPath, outsideFileGrant: token, expiresAt };
+};
+
+const resolveOutsideFileGrant = async ({ token, targetPath, scope, fsPromises }) => {
+  pruneOutsideFileGrants();
+  const grant = typeof token === 'string' ? outsideFileGrants.get(token.trim()) : null;
+  if (!grant) return { ok: false, error: 'Outside workspace file grant is invalid or expired' };
+  if (!grant.scopes.has(scope)) return { ok: false, error: 'Outside workspace file grant does not allow this operation' };
+  const canonicalPath = await fsPromises.realpath(targetPath);
+  if (canonicalPath !== grant.canonicalPath) return { ok: false, error: 'Outside workspace file grant does not match this path' };
+  return { ok: true, base: nodePath.dirname(canonicalPath), resolved: canonicalPath };
+};
 
 const isOsPermissionError = (error) => (
   error
@@ -218,13 +261,21 @@ const escapeCloneSshKeyPath = (sshKeyPath) => {
   return `'${normalized.replace(/'/g, "'\\''")}'`;
 };
 
-const resolveReadPathFromContext = async ({ req, targetPath, resolveRequiredExplicitProjectDirectory, path, os, normalizeDirectoryPath, openchamberUserConfigRoot, realpathCache }) => {
+const resolveReadPathFromContext = async ({ req, targetPath, scope, resolveRequiredExplicitProjectDirectory, path, os, fsPromises, normalizeDirectoryPath, openchamberUserConfigRoot, realpathCache }) => {
   if (req.query?.allowOutsideWorkspace === 'true') {
     const normalized = normalizeDirectoryPath(targetPath);
     if (!normalized || typeof normalized !== 'string') {
       return { ok: false, error: 'Path is required' };
     }
     const resolved = path.resolve(normalized);
+    if (req.query?.outsideFileGrant) {
+      return resolveOutsideFileGrant({
+        token: req.query.outsideFileGrant,
+        targetPath: resolved,
+        scope,
+        fsPromises,
+      });
+    }
     // Resolve symlinks first: the read/stat/raw handlers re-run realpath() and
     // check the canonical path is within the canonical base. A symlink whose
     // target lives outside its own parent would otherwise fail that check even
@@ -661,9 +712,11 @@ export const registerFsRoutes = (app, dependencies) => {
       const resolved = await resolveReadPathFromContext({
         req,
         targetPath: filePath,
+        scope: 'stat',
         resolveRequiredExplicitProjectDirectory,
         path,
         os,
+        fsPromises,
         normalizeDirectoryPath,
         openchamberUserConfigRoot,
         realpathCache,
@@ -702,9 +755,11 @@ export const registerFsRoutes = (app, dependencies) => {
       const resolved = await resolveReadPathFromContext({
         req,
         targetPath: filePath,
+        scope: 'read',
         resolveRequiredExplicitProjectDirectory,
         path,
         os,
+        fsPromises,
         normalizeDirectoryPath,
         openchamberUserConfigRoot,
         realpathCache,
@@ -746,9 +801,11 @@ export const registerFsRoutes = (app, dependencies) => {
       const resolved = await resolveReadPathFromContext({
         req,
         targetPath: filePath,
+        scope: 'raw',
         resolveRequiredExplicitProjectDirectory,
         path,
         os,
+        fsPromises,
         normalizeDirectoryPath,
         openchamberUserConfigRoot,
         realpathCache,

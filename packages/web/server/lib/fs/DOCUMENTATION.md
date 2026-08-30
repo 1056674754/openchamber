@@ -23,6 +23,7 @@ Own filesystem API behavior for the web server runtime, including workspace-boun
     - `GET /api/fs/list`
   - Owns exec job queue state (`execJobs`) and lifecycle/TTL pruning.
   - Enforces workspace boundary checks with an explicit request directory + worktree fallback support.
+  - Supports path-bound `outsideFileGrant` tokens. Markdown galleries mint `raw`-only grants with a 10-minute lifetime; existing explicit `allowOutsideWorkspace` behavior remains for fork file-reference compatibility.
 - `createFsSearchRuntime({ fsPromises, path, spawn, resolveGitBinaryForSpawn })` from `search.js`
   - Returns `{ searchFilesystemFiles(rootPath, options) }`.
   - Supports fuzzy matching, hidden-file handling, and optional `git check-ignore` filtering.

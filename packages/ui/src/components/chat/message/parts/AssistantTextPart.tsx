@@ -11,6 +11,7 @@ import type { ThinkingSegment } from '@/lib/thinkingTagParser';
 import { ReasoningTimelineBlock } from './ReasoningPart';
 import { GeneratedJsonResultCard } from './GeneratedJsonResultCard';
 import { parseGeneratedJsonResult } from './generatedJsonResult';
+import { isVSCodeRuntime } from '@/lib/desktop';
 
 type PartWithText = Part & { text?: string; content?: string; value?: string; time?: { start?: number; end?: number } };
 
@@ -18,6 +19,7 @@ interface AssistantTextPartProps {
     part: Part;
     sessionId?: string;
     messageId: string;
+    isMessageCompleted: boolean;
     streamPhase: StreamPhase;
     chatRenderMode?: 'sorted' | 'live';
     onContentChange?: (reason?: ContentChangeReason, messageId?: string) => void;
@@ -28,6 +30,7 @@ const AssistantTextPart: React.FC<AssistantTextPartProps> = ({
     part,
     sessionId,
     messageId,
+    isMessageCompleted,
     streamPhase,
     chatRenderMode = 'live',
     onContentChange,
@@ -116,6 +119,7 @@ const AssistantTextPart: React.FC<AssistantTextPartProps> = ({
                     disableStreamAnimation={chatRenderMode === 'sorted'}
                     variant={part.type === 'reasoning' ? 'reasoning' : 'assistant'}
                     enableFileReferences={isFinalized}
+                    compactImages={!isVSCodeRuntime() && isMessageCompleted && !isStreaming && part.type === 'text'}
                     onShowPopup={onShowPopup}
                 />
             </div>
@@ -154,6 +158,7 @@ const AssistantTextPart: React.FC<AssistantTextPartProps> = ({
                         disableStreamAnimation={chatRenderMode === 'sorted'}
                         variant="assistant"
                         enableFileReferences={isFinalized}
+                        compactImages={!isVSCodeRuntime() && isMessageCompleted && !isStreaming}
                         onShowPopup={onShowPopup}
                     />
                 );
