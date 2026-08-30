@@ -2750,6 +2750,20 @@ v1.20.0-sscity 尚未宣布完成：当前未关闭 `#135/#140/#142-#151/#154/#1
 
 验证：SSH manager + dev-tunnel authority 11/11 ✅；真实 Dev3 password-disabled instance生成 token并完成 Phase 11 transport QA。[#151](https://coding.s-s.city/songsong/openchamber/-/issues/151) 保持 open：继续完整 SSH setup/lifecycle redesign 与对应 UI/settings migration。
 
+### #151 Phase 2：Home-owned install discovery + managed lifecycle（2026-08-31）
+
+上游来源：`55acca26b`。按 fork 的多实例和自定义分发能力手工适配，没有覆盖并行 settings-lock WIP：
+
+- SSH login shell 不再假定用户安装目录已进入 `PATH`；显式发现 `~/.bun`、`~/.opencode`、`~/.local` 与 OpenChamber npm user prefix 中的 bun、OpenCode、OpenChamber。
+- npm 安装固定使用 `$HOME/.openchamber/npm-global`，避免普通 SSH 用户因系统 global prefix 为 root 所有而 EACCES；bun 仍优先写入其用户目录。本 fork 的 `download_release` 分发路径继续保留。
+- 同一远端存在多份 OpenChamber 时，按实际 `--version` 选择与桌面版本匹配的 binary；managed start 显式传入该 binary 和 `OPENCODE_BINARY`，不再信任登录 shell 的 PATH 顺序。
+- `keepRunning=false` 改由已解析的 `openchamber stop --port` 管理 daemon；不再调用受 UI authentication 保护、可能静默失败的 HTTP shutdown route。
+- managed remote 可选择监听 `0.0.0.0`，但 core 与 UI 保存入口都强制要求 OpenChamber UI password；默认仍为 remote loopback。local SSH forward 的 bind host 保持独立字段，二者不再混淆。
+- Remote Instances 类型、持久化解析、默认值、安装方式 selector 和远程 LAN toggle 已接通；新增文案覆盖现有 11 种 locale。SSH-config import、状态卡与 remediation surface 继续沿用 fork 已有分层组件。
+- 对应提交：`2fe44f695 feat(ssh): harden remote lifecycle`。`ssh-manager.mjs` 使用 temporary index 精确提交；并行 settings-lock WIP 仍为 `61/52`，其他 agent 的 staged changes 未改变。
+
+验证：SSH manager + dev-tunnel authority + ConfigCard 3 files / 17 tests ✅；full workspace type-check ✅；full workspace lint ✅；`git diff --check` ✅。[#151](https://coding.s-s.city/songsong/openchamber/-/issues/151) 保持 open：仍需在实际 Desktop Settings surface 完成 SSH-config create、managed install/update、remote-LAN password gate、disconnect-stop/reconnect-start 与日志/remediation matching-surface QA。
+
 ### #137 Phase 10：Loss-safe relay request-body delivery（2026-08-30）
 
 上游来源：`d634cd232`、`aaf397e68`、`854a0db92`，保持 TS client / JS host wire backward compatibility：
