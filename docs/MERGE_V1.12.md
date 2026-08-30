@@ -2335,6 +2335,16 @@ fork 已有丰富的 surface 组织（#62 surface rail + ContextSidebarTab + Con
 
 验证：Session btw metadata + UI store Bun 2 files / 7 tests ✅；UI type-check/lint ✅。[#149](https://coding.s-s.city/songsong/openchamber/-/issues/149) 保持 open：下一 phase 接 completed-turn fork/send lifecycle、tail filter、panel/command/sidebar hiding 与 matching-surface QA。
 
+### #149 Phase 2：Completed-turn fork + isolated send lifecycle（2026-08-30）
+
+- `/btw` 从 parent Session 的 authoritative `serverId + directory` 解析 SDK；fork 注册同一 server、使用 server canonicalized directory，并在进入 child/global store 前完成 marker mutation，避免 sidebar 短暂闪现未标记 fork。
+- parent messages 先走 shared chronology contract，定位最后一个 `time.completed` assistant；mid-turn `/btw` 不继承正在 streaming 的半截 turn。无 completed assistant 时保留 upstream fork-at-HEAD fallback，但首条消息仍立即携带 boundary instruction。
+- boundary instruction 将继承历史降为 reference，禁止继续 parent plan/approval/tool、禁止 subagent，并默认禁止 workspace mutation；每次 btw send 都必须携带。promoted Session 每次 send 改携带 revocation notice，因为已落 transcript 的 boundary parts 无法删除。
+- 首次 send 失败：compare-and-unlink parent 后删除 fork；marker/link/insert 任一步失败也清理 fork。destroy 先 unlink 再 delete，promote unlink parent + `btwPromoted` marker + 按 fork directory/server 导航。
+- tail records 用 `time.created` + shared tie-break 排序，按 boundary identity 的实际 index 后 slice。marker 缺失时 fail closed 返回空；ID rollover 后的 lexical-small later message 仍正常显示。
+
+验证：btw chronology/instructions/lifecycle + metadata/store Bun 3 files / 12 tests ✅；UI type-check/lint ✅。[#149](https://coding.s-s.city/songsong/openchamber/-/issues/149) 保持 open：ChatInput `/btw` dispatch、panel、session-list hiding、delete/archive cleanup 与 matching-surface QA 待续。
+
 ### #141 Phase 1：Isolated server exception survival（2026-08-30）
 
 上游来源：`71a538b77`。fork 的 embedded server 没有外部 supervisor，单个 Node/socket stray exception 不应让整个 OpenChamber instance 离线：
