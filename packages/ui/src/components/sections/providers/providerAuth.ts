@@ -58,4 +58,18 @@ export const getOAuthAuthMethods = (methods: AuthMethod[]): OAuthAuthMethodEntry
     .map((method, methodIndex) => ({ method, methodIndex }))
     .filter(({ method }) => normalizeAuthType(method) === 'oauth');
 
+export interface ProviderCredentialInput {
+  key?: string | null;
+  authSourceExists?: boolean | null;
+  optionsApiKey?: string | null;
+  envDeclared?: boolean;
+}
+
+export const providerHasCredentials = (input: ProviderCredentialInput): boolean => (
+  (typeof input.key === 'string' && input.key.trim().length > 0)
+  || (typeof input.optionsApiKey === 'string' && input.optionsApiKey.trim().length > 0)
+  || input.authSourceExists === true
+  || input.envDeclared === true
+);
+
 export const requiresOpenCodeReloadAfterOAuth = (providerId: string): boolean => providerId !== 'claude-code';

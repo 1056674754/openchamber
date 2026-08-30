@@ -97,6 +97,16 @@ const fetchLatestVersion = async (): Promise<string> => {
   return versions.sort((left, right) => compareVersionCore(right, left))[0];
 };
 
+const readUpgradeErrorMessage = (
+  payload: { error?: unknown; message?: unknown; data?: { message?: unknown } } | null,
+  response: Response,
+): string => {
+  for (const value of [payload?.error, payload?.message, payload?.data?.message]) {
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+  return response.statusText || 'Failed to upgrade OpenCode';
+};
+
 export const getOpenCodeUpgradeStatus = async (
   manager?: OpenCodeUpgradeManager,
 ): Promise<Record<string, unknown>> => {
@@ -167,8 +177,23 @@ export const upgradeManagedOpenCode = async (
       },
     };
   }
-  const targetVersion = typeof target === 'string' ? target.trim() : '';
+  const requestedTarget = typeof target === 'string' ? target.trim() : '';
   const operation = (async (): Promise<UpgradeResult> => {
+    let targetVersion = requestedTarget;
+    if (!targetVersion) {
+      try {
+        targetVersion = await fetchLatestVersion();
+      } catch (error) {
+        return {
+          status: 502,
+          body: {
+            success: false,
+            code: 'OPENCODE_UPGRADE_TARGET_UNRESOLVED',
+            error: `Could not determine which OpenCode version to install: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        };
+      }
+    }
     try {
       const response = await fetch(new URL('global/upgrade', apiUrl).toString(), {
         method: 'POST',
@@ -177,17 +202,19 @@ export const upgradeManagedOpenCode = async (
           Accept: 'application/json',
           ...manager.getOpenCodeAuthHeaders(),
         },
-        body: JSON.stringify(targetVersion ? { target: targetVersion } : {}),
+        body: JSON.stringify({ target: targetVersion }),
       });
-      const payload = await response.json().catch(() => null) as { error?: unknown } | null;
+      const payload = await response.json().catch(() => null) as {
+        error?: unknown;
+        message?: unknown;
+        data?: { message?: unknown };
+      } | null;
       if (!response.ok) {
         return {
           status: response.status,
           body: {
             success: false,
-            error: typeof payload?.error === 'string'
-              ? payload.error
-              : response.statusText || 'Failed to upgrade OpenCode',
+            error: readUpgradeErrorMessage(payload, response),
           },
         };
       }

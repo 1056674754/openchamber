@@ -77,14 +77,70 @@ describe('VS Code OpenCode upgrades', () => {
 
   test('upgrades then restarts the extension-owned OpenCode process', async () => {
     const { manager, getRestartCount } = createManager();
-    globalThis.fetch = (async () => (
-      new Response(JSON.stringify({ success: true, version: '1.18.9' }))
-    )) as typeof fetch;
+    globalThis.fetch = (async (input, init) => {
+      assert.equal(String(input), 'http://127.0.0.1:4096/global/upgrade');
+      assert.equal(init?.body, JSON.stringify({ target: '1.18.9' }));
+      return new Response(JSON.stringify({ success: true, version: '1.18.9' }));
+    }) as typeof fetch;
 
     assert.deepEqual(await upgradeManagedOpenCode(manager, '1.18.9'), {
       status: 200,
       body: { success: true, version: '1.18.9', restarted: true },
     });
     assert.equal(getRestartCount(), 1);
+  });
+
+  test('resolves the latest release before an untargeted upgrade', async () => {
+    const { manager, getRestartCount } = createManager();
+    let upgradeBody: string | undefined;
+    globalThis.fetch = (async (input, init) => {
+      const url = String(input);
+      if (url === 'https://registry.npmjs.org/opencode-ai/latest') {
+        return new Response(JSON.stringify({ version: '1.18.9' }));
+      }
+      if (url === 'https://api.github.com/repos/anomalyco/opencode/releases/latest') {
+        return new Response(JSON.stringify({ tag_name: 'v1.19.0' }));
+      }
+      upgradeBody = typeof init?.body === 'string' ? init.body : undefined;
+      return new Response(JSON.stringify({ success: true, version: '1.19.0' }));
+    }) as typeof fetch;
+
+    const result = await upgradeManagedOpenCode(manager);
+
+    assert.equal(upgradeBody, JSON.stringify({ target: '1.19.0' }));
+    assert.deepEqual(result, {
+      status: 200,
+      body: { success: true, version: '1.19.0', restarted: true },
+    });
+    assert.equal(getRestartCount(), 1);
+  });
+
+  test('reports a target lookup failure without contacting OpenCode', async () => {
+    const { manager, getRestartCount } = createManager();
+    let openCodeRequestCount = 0;
+    globalThis.fetch = (async (input) => {
+      if (String(input).startsWith('http://127.0.0.1:4096/')) openCodeRequestCount += 1;
+      return new Response('{}', { status: 503 });
+    }) as typeof fetch;
+
+    const result = await upgradeManagedOpenCode(manager);
+
+    assert.equal(result.status, 502);
+    assert.equal(result.body.code, 'OPENCODE_UPGRADE_TARGET_UNRESOLVED');
+    assert.equal(openCodeRequestCount, 0);
+    assert.equal(getRestartCount(), 0);
+  });
+
+  test('surfaces nested OpenCode upgrade failure details', async () => {
+    const { manager, getRestartCount } = createManager();
+    globalThis.fetch = (async () => new Response(JSON.stringify({
+      data: { message: 'Requested release is not available' },
+    }), { status: 422 })) as typeof fetch;
+
+    assert.deepEqual(await upgradeManagedOpenCode(manager, '9.9.9'), {
+      status: 422,
+      body: { success: false, error: 'Requested release is not available' },
+    });
+    assert.equal(getRestartCount(), 0);
   });
 });

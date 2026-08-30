@@ -303,13 +303,20 @@ describe('opencode routes', () => {
     });
   });
 
-  test('does not restart managed OpenCode after an upstream upgrade succeeds', async () => {
-    const fetchMock = useFetchMock(mock(async () => jsonResponse({ success: true, version: '1.2.4' })));
+  test('sends an explicit target and does not restart managed OpenCode after success', async () => {
+    const fetchMock = useFetchMock(mock(async (url, init) => {
+      expect(String(url)).toBe('http://opencode.test/global/upgrade');
+      expect(init).toEqual(expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ target: '1.2.4' }),
+      }));
+      return jsonResponse({ success: true, version: '1.2.4' });
+    }));
     const refreshOpenCodeAfterConfigChange = mock(async () => {});
 
     const response = await request(createApp({ refreshOpenCodeAfterConfigChange }))
       .post('/api/opencode/upgrade')
-      .send({})
+      .send({ target: '1.2.4' })
       .expect(200);
 
     expect(response.body).toMatchObject({
@@ -320,6 +327,67 @@ describe('opencode routes', () => {
     });
     expect(fetchMock).toHaveBeenCalled();
     expect(refreshOpenCodeAfterConfigChange).not.toHaveBeenCalled();
+  });
+
+  test('resolves the latest release before sending an untargeted upgrade', async () => {
+    const fetchMock = useFetchMock(mock(async (url, init) => {
+      const requestUrl = String(url);
+      if (requestUrl === 'https://registry.npmjs.org/opencode-ai/latest') {
+        return jsonResponse({ version: '1.20.1' });
+      }
+      if (requestUrl === 'https://api.github.com/repos/anomalyco/opencode/releases/latest') {
+        return jsonResponse({ tag_name: 'v1.20.2' });
+      }
+      expect(requestUrl).toBe('http://opencode.test/global/upgrade');
+      expect(init?.body).toBe(JSON.stringify({ target: '1.20.2' }));
+      return jsonResponse({ success: true, version: '1.20.2' });
+    }));
+
+    const response = await request(createApp())
+      .post('/api/opencode/upgrade')
+      .send({})
+      .expect(200);
+
+    expect(response.body).toMatchObject({
+      success: true,
+      version: '1.20.2',
+      requiresReload: true,
+      restarted: false,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  test('reports a target lookup failure without starting an upgrade', async () => {
+    const fetchMock = useFetchMock(mock(async () => jsonResponse({}, { status: 503 })));
+    const executeDirectOpenCodeUpgrade = mock(async () => ({ success: true }));
+
+    const response = await request(createApp({ executeDirectOpenCodeUpgrade }))
+      .post('/api/opencode/upgrade')
+      .send({})
+      .expect(502);
+
+    expect(response.body).toMatchObject({
+      success: false,
+      code: 'OPENCODE_UPGRADE_TARGET_UNRESOLVED',
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(executeDirectOpenCodeUpgrade).not.toHaveBeenCalled();
+  });
+
+  test('surfaces nested OpenCode upgrade failures for an explicit target', async () => {
+    useFetchMock(mock(async () => jsonResponse({
+      data: { message: 'Requested release is not available' },
+    }, { status: 422 })));
+
+    const response = await request(createApp())
+      .post('/api/opencode/upgrade')
+      .send({ target: '9.9.9' })
+      .expect(422);
+
+    expect(response.body).toEqual({
+      success: false,
+      error: 'Requested release is not available',
+    });
   });
 
   test('refuses to mutate a signed bundled OpenCode binary in place', async () => {
@@ -374,7 +442,14 @@ describe('opencode routes', () => {
   });
 
   test('falls back to direct OpenCode upgrade when upstream closes the connection', async () => {
-    const fetchMock = useFetchMock(mock(async () => {
+    const fetchMock = useFetchMock(mock(async (url) => {
+      const requestUrl = String(url);
+      if (requestUrl === 'https://registry.npmjs.org/opencode-ai/latest') {
+        return jsonResponse({ version: '1.20.2' });
+      }
+      if (requestUrl === 'https://api.github.com/repos/anomalyco/opencode/releases/latest') {
+        return jsonResponse({ tag_name: 'v1.20.2' });
+      }
       throw new TypeError('fetch failed');
     }));
     const executeDirectOpenCodeUpgrade = mock(async () => ({
@@ -415,7 +490,16 @@ describe('opencode routes', () => {
   });
 
   test('returns direct upgrade diagnostics when the fallback command fails', async () => {
-    useFetchMock(mock(async () => jsonResponse({ error: 'upstream failed' }, { status: 500 })));
+    useFetchMock(mock(async (url) => {
+      const requestUrl = String(url);
+      if (requestUrl === 'https://registry.npmjs.org/opencode-ai/latest') {
+        return jsonResponse({ version: '1.20.2' });
+      }
+      if (requestUrl === 'https://api.github.com/repos/anomalyco/opencode/releases/latest') {
+        return jsonResponse({ tag_name: 'v1.20.2' });
+      }
+      return jsonResponse({ error: 'upstream failed' }, { status: 500 });
+    }));
     const executeDirectOpenCodeUpgrade = mock(async () => ({
       success: false,
       source: 'homebrew',

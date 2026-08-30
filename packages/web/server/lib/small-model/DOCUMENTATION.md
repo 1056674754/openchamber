@@ -55,6 +55,11 @@ other runtime API.
      endpoint, or (3) the provider's `api` field from the models.dev catalog.
     Configured API keys honor OpenCode's `{env:NAME}` and `{file:path}`
     substitutions; file contents and resolved credentials remain server-side.
+    `provider.<id>.options.headers` are forwarded with the same substitutions.
+    Header names merge case-insensitively so a configured `authorization`
+    replaces the generated `Authorization` header instead of duplicating it.
+    Relative `{file:path}` header values resolve against the config layer that
+    defines that header, matching layered OpenCode configuration semantics.
   - `[small-model:diagnostic]` logs record provider/model, input character
     counts, output budget, thinking toggle, HTTP/finish status, and
     content/reasoning lengths without logging prompts, response text, or

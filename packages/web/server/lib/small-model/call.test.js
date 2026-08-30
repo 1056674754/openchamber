@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 vi.mock('../opencode/shared.js', () => ({
   readConfig: vi.fn(),
   readConfigLayers: vi.fn(),
+  isPlainObject: (value) => Boolean(value && typeof value === 'object' && !Array.isArray(value)),
 }));
 
 const { callSmallModel } = await import('./call.js');
@@ -63,6 +64,7 @@ describe('callSmallModel — custom provider config', () => {
     globalThis.fetch = originalFetch;
     vi.restoreAllMocks();
     delete process.env.OPENCHAMBER_TEST_PROVIDER_KEY;
+    delete process.env.OPENCHAMBER_TEST_GATEWAY_KEY;
   });
 
   it('uses a plugin credential and endpoint from the running OpenCode', async () => {
@@ -170,6 +172,65 @@ describe('callSmallModel — custom provider config', () => {
       expect(url).not.toContain('api.openai.com');
       // Config apiKey becomes the bearer credential.
       expect(init.headers.Authorization).toBe('Bearer test-key');
+    });
+
+    it('sends resolved configured headers and allows case-insensitive auth override', async () => {
+      process.env.OPENCHAMBER_TEST_GATEWAY_KEY = 'sub-key';
+      readConfig.mockReturnValue({
+        provider: {
+          custom: {
+            options: {
+              apiKey: 'sk-config',
+              baseURL: 'https://proxy.example.test/v1',
+              headers: {
+                'Ocp-Apim-Subscription-Key': '{env:OPENCHAMBER_TEST_GATEWAY_KEY}',
+                authorization: 'Basic gateway-token',
+              },
+            },
+          },
+        },
+      });
+      fetchMock.mockResolvedValue(ok('hello'));
+
+      await callSmallModel({
+        auth: {}, catalog: {}, workingDirectory: '/proj', providerID: 'custom', modelID: 'model', prompt: 'hi',
+      });
+
+      const headers = lastCall(fetchMock).init.headers;
+      expect(headers['Ocp-Apim-Subscription-Key']).toBe('sub-key');
+      expect(headers.authorization).toBe('Basic gateway-token');
+      expect(headers.Authorization).toBeUndefined();
+    });
+
+    it('resolves a relative header file from the config layer that defines it', async () => {
+      const provider = {
+        custom: {
+          options: {
+            apiKey: 'sk-config',
+            baseURL: 'https://proxy.example.test/v1',
+            headers: { 'x-gateway-key': '{file:./gateway-key}' },
+          },
+        },
+      };
+      readConfig.mockReturnValue({ provider });
+      readConfigLayers.mockReturnValue({
+        customConfig: {},
+        projectConfig: {},
+        userConfig: { provider },
+        paths: { customPath: null, projectPath: '/project/opencode.json', userPath: '/config/opencode.json' },
+      });
+      const originalReadFileSync = fs.readFileSync;
+      vi.spyOn(fs, 'readFileSync').mockImplementation((filePath, ...args) => {
+        if (filePath === '/config/gateway-key') return 'sub-key\n';
+        return originalReadFileSync(filePath, ...args);
+      });
+      fetchMock.mockResolvedValue(ok('hello'));
+
+      await callSmallModel({
+        auth: {}, catalog: {}, workingDirectory: '/project', providerID: 'custom', modelID: 'model', prompt: 'hi',
+      });
+      expect(lastCall(fetchMock).init.headers['x-gateway-key']).toBe('sub-key');
+      expect(fs.readFileSync).toHaveBeenCalledWith('/config/gateway-key', 'utf8');
     });
 
     it('trims a trailing slash from the configured baseURL', async () => {

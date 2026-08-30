@@ -28,6 +28,7 @@ import { ProviderOAuthMethods, type ProviderOAuthMethod } from './ProviderOAuthM
 import {
   getOAuthAuthMethods,
   parseAuthPayload,
+  providerHasCredentials,
   requiresOpenCodeReloadAfterOAuth,
   shouldShowApiKeyAuth,
   type AuthMethod,
@@ -50,6 +51,10 @@ const COMPACT_NUMBER_FORMATTER = new Intl.NumberFormat('en-US', {
   maximumFractionDigits: 1,
   minimumFractionDigits: 0,
 });
+
+const providerDeclaresEnv = (provider: { env?: string[] } | undefined): boolean => (
+  Array.isArray(provider?.env) && provider.env.some((name) => typeof name === 'string' && name.trim().length > 0)
+);
 
 const formatTokens = (value?: number | null) => {
   if (typeof value !== 'number' || Number.isNaN(value)) {
@@ -306,10 +311,12 @@ export const ProvidersPage: React.FC = () => {
       return;
     }
     const provider = providers.find((entry) => entry.id === selectedProviderId);
-    const envEntries = Array.isArray(provider?.env)
-      ? provider.env.filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0)
-      : [];
-    const hasCreds = Boolean(sources.auth.exists) || envEntries.length > 0;
+    const hasCreds = providerHasCredentials({
+      key: provider?.key,
+      authSourceExists: sources.auth.exists,
+      optionsApiKey: (provider as { options?: { apiKey?: string | null } } | undefined)?.options?.apiKey,
+      envDeclared: providerDeclaresEnv(provider),
+    });
     const isCustomProvider = Boolean(provider && isConfigDefinedCustomProvider(provider, sources));
     if (requiresProviderAuth(true, hasCreds, isCustomProvider)) {
       setShowAuthPanel(true);
@@ -780,12 +787,12 @@ export const ProvidersPage: React.FC = () => {
   );
   const showApiKeyAuth = shouldShowApiKeyAuth(providerAuthMethods);
   const sourcesLoaded = Boolean(selectedSources);
-  const providerEnv = Array.isArray(selectedProvider.env)
-    ? selectedProvider.env.filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0)
-    : [];
-  const hasStoredAuth = Boolean(selectedSources?.auth.exists);
-  const hasEnvCredentials = providerEnv.length > 0;
-  const hasCredentials = hasStoredAuth || hasEnvCredentials;
+  const hasCredentials = providerHasCredentials({
+    key: selectedProvider.key,
+    authSourceExists: selectedSources?.auth.exists,
+    optionsApiKey: (selectedProvider as { options?: { apiKey?: string | null } }).options?.apiKey,
+    envDeclared: providerDeclaresEnv(selectedProvider),
+  });
   const isEditableCustomProvider = isConfigDefinedCustomProvider(selectedProvider, selectedSources);
   const authStatusIncomplete = requiresProviderAuth(sourcesLoaded, hasCredentials, isEditableCustomProvider);
   const showModelsSection = providerModels.length > 0 && !authStatusIncomplete;

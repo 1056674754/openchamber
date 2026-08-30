@@ -35,6 +35,7 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
   } = dependencies;
 
   let authLibrary = null;
+  let openCodeUpgradePromise = null;
   const pendingMcpAuthContextByState = new Map();
   const PENDING_MCP_AUTH_TTL_MS = 30 * 60 * 1000;
   const getAuthLibrary = async () => {
@@ -225,6 +226,9 @@ ${desktopReturn ? `<a class="return" href="openchamber://focus/mcp-auth">Return 
     if (typeof payload.message === 'string' && payload.message.trim()) {
       return payload.message.trim();
     }
+    if (typeof payload.data?.message === 'string' && payload.data.message.trim()) {
+      return payload.data.message.trim();
+    }
     return fallback;
   };
 
@@ -307,65 +311,105 @@ ${desktopReturn ? `<a class="return" href="openchamber://focus/mcp-auth">Return 
   });
 
   app.post('/api/opencode/upgrade', async (req, res) => {
-    const target = typeof req.body?.target === 'string' && req.body.target.trim().length > 0
+    const requestedTarget = typeof req.body?.target === 'string' && req.body.target.trim().length > 0
       ? req.body.target.trim()
       : undefined;
-    try {
-      const capability = getOpenCodeUpgradeCapability();
-      if (!capability.supported) {
-        return res.status(409).json({
-          success: false,
-          code: capability.reason === 'bundled'
-            ? 'OPENCODE_UPGRADE_MANAGED_BY_OPENCHAMBER'
-            : 'OPENCODE_UPGRADE_UNSUPPORTED',
-          error: capability.reason === 'bundled'
-            ? 'OpenCode is bundled with OpenChamber Desktop and updates with the app.'
-            : 'This OpenCode runtime cannot be upgraded by OpenChamber.',
-        });
-      }
-
-      const response = await fetch(buildOpenCodeUrl('/global/upgrade', ''), {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Accept: 'application/json',
-          ...getOpenCodeAuthHeaders(),
-        },
-        body: JSON.stringify(target ? { target } : {}),
-      });
-      const payload = await response.json().catch(() => null);
-      if (!response.ok) {
-        const upstream = {
-          success: false,
-          error: resolveOpenCodeUpgradeError(payload, response.statusText || 'Failed to upgrade OpenCode'),
-          status: response.status,
-          ...pickOpenCodeUpgradeDiagnostics(payload),
-        };
-        if (!target) {
-          const fallback = await runDirectOpenCodeUpgrade(upstream);
-          return res.status(fallback.status).json(fallback.body);
-        }
-        return res.status(response.status).json({
-          success: false,
-          error: upstream.error,
-          ...pickOpenCodeUpgradeDiagnostics(payload),
-        });
-      }
-
-      return res.json({ ...(payload ?? { success: true }), requiresReload: true, restarted: false });
-    } catch (error) {
-      if (!target) {
-        const fallback = await runDirectOpenCodeUpgrade({
-          success: false,
-          error: error instanceof Error ? error.message : 'Failed to upgrade OpenCode',
-        });
-        return res.status(fallback.status).json(fallback.body);
-      }
-      console.error('Failed to upgrade OpenCode:', error);
-      return res.status(500).json({
+    const capability = getOpenCodeUpgradeCapability();
+    if (!capability.supported) {
+      return res.status(409).json({
         success: false,
-        error: error instanceof Error ? error.message : 'Failed to upgrade OpenCode',
+        code: capability.reason === 'bundled'
+          ? 'OPENCODE_UPGRADE_MANAGED_BY_OPENCHAMBER'
+          : 'OPENCODE_UPGRADE_UNSUPPORTED',
+        error: capability.reason === 'bundled'
+          ? 'OpenCode is bundled with OpenChamber Desktop and updates with the app.'
+          : 'This OpenCode runtime cannot be upgraded by OpenChamber.',
       });
+    }
+    if (openCodeUpgradePromise) {
+      return res.status(409).json({
+        success: false,
+        code: 'OPENCODE_UPGRADE_IN_PROGRESS',
+        error: 'An OpenCode upgrade is already in progress.',
+      });
+    }
+
+    const operation = (async () => {
+      let target = requestedTarget;
+      if (!target) {
+        try {
+          target = await fetchLatestOpenCodeVersion();
+        } catch (error) {
+          return {
+            status: 502,
+            body: {
+              success: false,
+              code: 'OPENCODE_UPGRADE_TARGET_UNRESOLVED',
+              error: `Could not determine which OpenCode version to install: ${error instanceof Error ? error.message : String(error)}`,
+            },
+          };
+        }
+      }
+
+      try {
+        const response = await fetch(buildOpenCodeUrl('/global/upgrade', ''), {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Accept: 'application/json',
+            ...getOpenCodeAuthHeaders(),
+          },
+          body: JSON.stringify({ target }),
+        });
+        const payload = await response.json().catch(() => null);
+        if (!response.ok) {
+          const upstream = {
+            success: false,
+            error: resolveOpenCodeUpgradeError(payload, response.statusText || 'Failed to upgrade OpenCode'),
+            status: response.status,
+            ...pickOpenCodeUpgradeDiagnostics(payload),
+          };
+          if (!requestedTarget) {
+            return runDirectOpenCodeUpgrade(upstream);
+          }
+          return {
+            status: response.status,
+            body: {
+              success: false,
+              error: upstream.error,
+              ...pickOpenCodeUpgradeDiagnostics(payload),
+            },
+          };
+        }
+
+        return {
+          status: 200,
+          body: { ...(payload ?? { success: true }), requiresReload: true, restarted: false },
+        };
+      } catch (error) {
+        if (!requestedTarget) {
+          return runDirectOpenCodeUpgrade({
+            success: false,
+            error: error instanceof Error ? error.message : 'Failed to upgrade OpenCode',
+          });
+        }
+        console.error('Failed to upgrade OpenCode:', error);
+        return {
+          status: 500,
+          body: {
+            success: false,
+            error: error instanceof Error ? error.message : 'Failed to upgrade OpenCode',
+          },
+        };
+      }
+    })();
+
+    openCodeUpgradePromise = operation;
+    try {
+      const result = await operation;
+      return res.status(result.status).json(result.body);
+    } finally {
+      if (openCodeUpgradePromise === operation) openCodeUpgradePromise = null;
     }
   });
 

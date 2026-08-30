@@ -2,7 +2,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { readAuthFile, writeAuthFile } from '../opencode/auth.js';
-import { readConfig, readConfigLayers } from '../opencode/shared.js';
+import { readConfig, readConfigLayers, isPlainObject } from '../opencode/shared.js';
 import { getCatalogProvider } from './catalog.js';
 import { getAuthEntryForProvider } from './resolve.js';
 import { getRuntimeProvider } from './runtime-providers.js';
@@ -18,6 +18,16 @@ const COPILOT_MODELS_TIMEOUT_MS = 5_000;
 const DEFAULT_MAX_OUTPUT_TOKENS = 4_000;
 
 const USER_AGENT = 'opencode/1.0 openchamber';
+
+const mergeHeadersCaseInsensitive = (base, overrides) => {
+  const merged = { ...base };
+  for (const [name, value] of Object.entries(overrides || {})) {
+    const existingName = Object.keys(merged).find((key) => key.toLowerCase() === name.toLowerCase());
+    if (existingName) delete merged[existingName];
+    merged[name] = value;
+  }
+  return merged;
+};
 
 const CODEX_TOKEN_URL = 'https://auth.openai.com/oauth/token';
 const CODEX_CLIENT_ID = 'app_EMoamEEZ73f0CkXaXp7hrann';
@@ -150,11 +160,10 @@ const callOpenaiCompatible = async ({ baseURL, headers, modelID, prompt, system,
   });
   const response = await fetch(`${trimmedBase}/chat/completions`, {
     method: 'POST',
-    headers: {
+    headers: mergeHeadersCaseInsensitive({
       'Content-Type': 'application/json',
       Accept: 'application/json',
-      ...headers,
-    },
+    }, headers),
     body: JSON.stringify({
       model: modelID,
       messages: [
@@ -496,7 +505,7 @@ const callCodexResponses = async ({ accessToken, accountId, modelID, prompt, sys
 // Custom provider configuration support
 // ---------------------------------------------------------------------------
 
-const resolveConfigApiKey = (value, workingDirectory, providerID) => {
+const resolveConfigValue = (value, workingDirectory, providerID, headerName = null) => {
   const envMatch = value.match(/^\{env:([^}]+)\}$/i);
   if (envMatch) {
     return process.env[envMatch[1].trim()]?.trim() || null;
@@ -517,7 +526,12 @@ const resolveConfigApiKey = (value, workingDirectory, providerID) => {
       { config: layers.customConfig, filePath: layers.paths.customPath },
       { config: layers.projectConfig, filePath: layers.paths.projectPath },
       { config: layers.userConfig, filePath: layers.paths.userPath },
-    ].find(({ config }) => config?.provider?.[providerID]?.options?.apiKey === value);
+    ].find(({ config }) => {
+      const options = config?.provider?.[providerID]?.options;
+      return headerName
+        ? options?.headers?.[headerName] === value
+        : options?.apiKey === value;
+    });
     resolvedPath = path.resolve(source?.filePath ? path.dirname(source.filePath) : workingDirectory || process.cwd(), configuredPath);
   }
 
@@ -526,8 +540,20 @@ const resolveConfigApiKey = (value, workingDirectory, providerID) => {
     if (!key) throw new Error('empty file');
     return key;
   } catch {
-    throw new Error(`Failed to resolve configured apiKey file for provider "${providerID}"`);
+    throw new Error(`Failed to resolve configured ${headerName ? `header "${headerName}"` : 'apiKey'} file for provider "${providerID}"`);
   }
+};
+
+const readConfiguredHeaders = (providerCfg, workingDirectory, providerID) => {
+  const configured = providerCfg?.options?.headers;
+  if (!isPlainObject(configured)) return null;
+  const headers = {};
+  for (const [name, value] of Object.entries(configured)) {
+    if (typeof value !== 'string' || !name.trim()) continue;
+    const resolved = resolveConfigValue(value.trim(), workingDirectory, providerID, name);
+    if (resolved) headers[name] = resolved;
+  }
+  return Object.keys(headers).length > 0 ? headers : null;
 };
 
 const readProviderConfig = (workingDirectory, providerID) => {
@@ -537,9 +563,10 @@ const readProviderConfig = (workingDirectory, providerID) => {
     if (!providerCfg || typeof providerCfg !== 'object') return null;
     const baseURL = typeof providerCfg?.options?.baseURL === 'string' ? providerCfg.options.baseURL.trim() : null;
     const rawApiKey = typeof providerCfg?.options?.apiKey === 'string' ? providerCfg.options.apiKey.trim() : null;
-    const apiKey = rawApiKey ? resolveConfigApiKey(rawApiKey, workingDirectory, providerID) : null;
+    const apiKey = rawApiKey ? resolveConfigValue(rawApiKey, workingDirectory, providerID) : null;
     return {
       baseURL,
+      headers: readConfiguredHeaders(providerCfg, workingDirectory, providerID),
       // Shape the config-supplied key as a regular api-key auth entry so it
       // can win the precedence check below and flow through the dispatch's
       // `entry.type === 'api' ? entry.key : ...` branch unchanged.
@@ -718,7 +745,7 @@ export async function callSmallModel({ auth, catalog, workingDirectory, provider
 
   return callOpenaiCompatible({
     baseURL,
-    headers: { Authorization: `Bearer ${apiKey}` },
+    headers: mergeHeadersCaseInsensitive({ Authorization: `Bearer ${apiKey}` }, providerConfig?.headers),
     modelID,
     prompt,
     system,
