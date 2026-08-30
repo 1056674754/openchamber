@@ -2194,6 +2194,16 @@ fork 已有丰富的 surface 组织（#62 surface rail + ContextSidebarTab + Con
 
 验证：Node syntax ✅、Electron type-check/lint ✅、certificate policy 3/3 ✅；full workspace type-check/lint/build 已在同轮通过。此变更属于 immutable shell，不通过 runtime install 发布。[#159](https://coding.s-s.city/songsong/openchamber/-/issues/159) 保持 open：需要下次显式 shell refresh 后用真实 self-signed loopback page 做 installed QA，并保留 iOS 真机 selection QA。
 
+### #159 Phase 4：v1.20 shell scope closeout + explicit device/shell deferral（2026-08-31）
+
+- v1.20实现范围已完整：Electron 43；minimize保留任务栏、close才进 tray；Windows右侧 close alignment/theme token；Linux frameless rounded-corner前置；CodeMirror 6.43.9 iOS native handles与非iOS fallback；严格 loopback authority-invalid policy及专用 Browser partition hook。
+- self-signed Browser handler属于 immutable shell，不能通过常规 runtime install验证。下一次用户明确要求 shell refresh后的 installed self-signed loopback + remote HTTP/WebSocket/HMR QA已在 [#175](https://coding.s-s.city/songsong/openchamber/-/issues/175)，不重复建项。
+- iPhone/iPad WKWebView handle drag、CJK IME与keyboard resize必须使用实体设备，已拆至 [#177](https://coding.s-s.city/songsong/openchamber/-/issues/177)；不把 simulator或单测冒充真机证据。
+- v1.21 renderer crash recovery、update-install failure、stale shell UI prevention及Windows/Linux/macOS packaged shell矩阵已拆至 [#178](https://coding.s-s.city/songsong/openchamber/-/issues/178)。该范围来自 issue note中的v1.21扩展，不再反向阻塞v1.20 milestone。
+- 本 closeout不修改代码、不替换 `/Applications/OpenChamber.app`、不发起签名/公证；只是把已经完成的版本范围与必须等待外部设备/显式 shell refresh的验收边界分开。
+
+验证：v1.20 implementation commits与既有 focused/full checks见 Phase 1-3及本文件后续 iOS CodeMirror evidence；未声称 installed-shell或iOS真机已验证。至此 [#159](https://coding.s-s.city/songsong/openchamber/-/issues/159) 的 v1.18.3-v1.20代码迁移范围完成，可按 intentional deferral关闭；剩余工作由 #175/#177/#178继续追踪。
+
 ### #155 Phase 1：Config-defined custom provider auth gate（2026-08-30）
 
 上游来源：`ddd4b5ed8`。fork 已有 config-defined custom provider CRUD、scope/source 识别和 models/baseURL，因此只修真实缺口：
