@@ -2826,6 +2826,16 @@ v1.20.0-sscity 尚未宣布完成：当前未关闭 `#135/#140/#142-#151/#154/#1
 
 验证：target resolver + provider ownership/nonblocking config 3 files / 21 tests ✅；full workspace type-check/lint/build ✅；build 仅有既有 dynamic-import/chunk/eval warnings；`git diff --check` ✅。真实 Dev3 read-only matching transport QA：SSH forward 到现有 2999，不重启/不写配置；给 registry 注册临时 server 后，`/root/novel_editor` 的 remote SDK 返回 Agents 16、Commands 21，`/api/config/agents/build` 与 `/api/config/commands/init` 在同一 directory 下均为 HTTP 200，随后关闭 forward并注销 registry。独立 `electron:dev` UI QA：Providers Settings project 从“青浦协和Dev Suisqp Web”切换到 `openchamber` 后，Settings button 更新为 `openchamber`，主 composer project combobox 仍为“青浦协和Dev Suisqp Web”，证明不再移动 app context。开发脚本原先通过 `npx electron` 触发 npm `EOVERRIDE`；`f228088db` 改为 workspace Electron 43 binary 后真实启动成功，未替换 runtime、未停止正式 OpenChamber。[#154](https://coding.s-s.city/songsong/openchamber/-/issues/154) 保持 open：开发实例没有载入 remote Settings instance，仍需在已连接 remote instance 的 Settings UI 点击项目并核验列表/编辑 target 后关闭。
 
+### #154 Phase 4：Web remote instance picker + Dev3 matching-surface QA（2026-08-31）
+
+- Settings instance picker 原先只从 Electron `useDesktopSshStore` 建表，因此 Web/PWA 即使已有 healthy `useRemoteInstancesStore` connection、sidebar 也能显示 remote project，picker 仍只有 `My Mac / Add Remote Instance`。现在 Desktop 继续以 native SSH store 为 authority；Web/PWA 改从 configured remote store建表和读取 health phase。
+- `InstanceDescriptor.transport` 只负责 presentation：SSH instance保留 `SSH` 标签，explicit URL remote不伪装成 SSH。selected server base URL仍只由 `serverRegistry` 解析，不从 active Session或 path猜测。
+- Remote Settings 只开放已具备完整 target routing 的 Providers、Agents、Commands、MCP、Installed Skills；Plugins、Permissions、Presets、Skills Catalog等 local-only mutation页面继续隐藏，避免 UI 可见后静默写到默认实例。对应提交：`6b998a192 fix(settings): expose connected web instances`。
+- 使用隔离 local OpenChamber + SSH forward 到现有 Dev3 2999，配置 `QA Dev3` 和 `/root/novel_editor` remote project。Settings picker成功出现并切换 `QA Dev3`；Providers显示远端 7 个 provider，Agents显示 11 个 agent并包含 `Sisyphus - ultraworker`，Commands载入远端命令，MCP显示 5 项，Skills显示 4 项并包含 project skill `story-creator`。所有页面 project selector均为 `QA Remote Project`。
+- 测试全程只读；主 composer仍显示 local `QA Local`，没有被 Settings instance/project切换；浏览器无 error，仅有空 local project bootstrap retry warning。测试 tab、local parent/OpenCode child、SSH forward与临时目录均已清理，正式 runtime和 Dev3配置未修改。
+
+验证：settings instance/metadata/context focused 4 files / 15 tests ✅；full workspace type-check/lint ✅；Web production build ✅；Dev3 Providers/Agents/Commands/MCP/Skills matching-surface read-only QA ✅；`git diff --check` ✅。至此 [#154](https://coding.s-s.city/songsong/openchamber/-/issues/154) 的 default ownership、per-project thinking、Settings-local project selection与 multi-instance target routing范围完成，可关闭。
+
 ### #156 Phase 1：Focused-project sidebar + external-session refresh（2026-08-31）
 
 上游来源：`1f6e22cdf`、`61f096ab3`，按 fork 现有 multi-instance sidebar / activity sections / `showOnlyMainWorkspace` 基础适配：
