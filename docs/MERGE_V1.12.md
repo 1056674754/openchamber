@@ -2965,6 +2965,18 @@ v1.20.0-sscity 尚未宣布完成：当前未关闭 `#135/#140/#142-#151/#154/#1
 
 验证：Projects store Bun 4/4 ✅（批量、normalize、duplicate、remote/local 同路径、invalid）；i18n focused 4/4 ✅；UI type-check/lint ✅。完整 workspace build/检查见本 phase 提交验证。[#166](https://coding.s-s.city/songsong/openchamber/-/issues/166) 保持 open：fork VS Code 当前是 single-workspace bootstrap，且其 runtime API 类型正被并行 remote-namespace WIP 修改；不能把 upstream multi-folder bridge 静默套入或假称 parity。
 
+### #166 Phase 3：VS Code workspace-folder add + live folder sync（2026-08-31）
+
+上游来源：`9ec9e73e6`，按当前 remote-namespace/selection WIP精确适配：
+
+- extension host新增`api:workspace:addFolder`：untrusted payload必须有path；Windows drive letter双向normalize；已有folder不重复；`updateWorkspaceFolders`拒绝时返回可见bridge error；成功返回完整、deduped、稳定排序的folder列表。
+- webview VSCodeAPI把该bridge暴露为`addWorkspaceFolder`。ProjectsStore在VS Code runtime不再固定返回null；单个/批量Add Project均经host加入workspace，再以host返回列表重建project state。
+- bootstrap config由单一`workspaceFolder`扩展为完整`workspaceFolders`，Chat/Session editor/Agent Manager三种webview一致。`onDidChangeWorkspaceFolders`实时推送；webview更新config并调用`syncVSCodeWorkspaceFolders`，reload与外部workspace变更不丢第二个项目。
+- VS Code project state继续以workspace folders为authority；remove/rename等不能脱离VS Code workspace自行改registry。active path切换同步directory，但不引入global remote path fallback。
+- 对应提交：`b4f4d1de6 fix(vscode): add projects as workspace folders`。`App.tsx`、`api/types.ts`、Chat/Session providers、extension和webview main均以temporary index只提交本批hunks；remote namespace、selection attachment与settings failure WIP继续保持未提交。
+
+验证：workspace resolver + extension bridge + local/VSCode Projects store 4 files / 12 tests ✅；UI/VS Code type-check/lint ✅；VSIX production build ✅。真实独立VS Code Extension Host：从单folder `one`调用真实webview runtime API加入`two`，host返回两项，workbench切为`Untitled (Workspace)`并显示“added 1 folder”，webview `__VSCODE_CONFIG__.workspaceFolders`实时同步one+two ✅；临时VSIX/user-data/extensions/workspace与debug port均清理。至此 [#166](https://coding.s-s.city/songsong/openchamber/-/issues/166) 的 remote tracking checkout、Desktop/Web batch add与VS Code workspace-folder parity全部完成，可关闭。
+
 ### #159 Phase 1：iOS CodeMirror selection handles（2026-08-30）
 
 上游来源：`26b0ad5bd`（官方 dependency set，不是自行追 npm latest）：
