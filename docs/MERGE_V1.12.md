@@ -2801,6 +2801,18 @@ v1.20.0-sscity 尚未宣布完成：当前未关闭 `#135/#140/#142-#151/#154/#1
 
 验证：manual model ownership 1 file / 3 tests ✅；provider selection + nonblocking config 2 files / 17 tests ✅；full workspace type-check/lint ✅；`git diff --check` ✅。[#154](https://coding.s-s.city/songsong/openchamber/-/issues/154) 保持 open：继续把 Settings project selector 改为 fork-authoritative `settings serverId + project id + directory` target，并接通 Agents/Commands/MCP/Skills/Providers 与 per-project thinking default。
 
+### #154 Phase 2：Per-project thinking default（2026-08-31）
+
+上游来源：`5bce4742a`，按 fork 当前单文件 Projects Settings 与桌面/移动 ProjectEditDialog 双入口适配：
+
+- `ProjectEntry.defaultVariant` 只在同一 entry 有合法 `defaultModel` 时持久化；清除/切换 model 同步清除旧 variant，防止把旧模型的 thinking 名称带到新模型。
+- Projects Settings 与 desktop/mobile project edit dialog 根据当前 provider model 的 `variants` 动态显示思考强度 Select；默认项表示沿用模型默认值。新增文案覆盖现有 11 种 locale。
+- 新建 draft 与切换 draft project 都把 `projectDefaultModel + projectDefaultVariant` 一起传入 `serverId + directory` 对应 config slot；project variant 优先于 global settings variant，且通过实际 model variants 校验。
+- Web settings sanitizer 同样拒绝没有 model 的孤立 variant。`api/types.ts` 与 dirty `SessionSidebar.tsx` 使用 temporary index 精确提交，remote namespace/sidebar WIP 保持未提交。
+- 对应提交：`6cf238ad7 feat(projects): persist default thinking`。
+
+验证：model variants + project hydration + config default cascade + Web normalization 4 files / 22 tests ✅；full workspace type-check/lint ✅；`git diff --check` ✅。[#154](https://coding.s-s.city/songsong/openchamber/-/issues/154) 继续处理 Settings project target 与跨 Settings store routing。
+
 ### #137 Phase 10：Loss-safe relay request-body delivery（2026-08-30）
 
 上游来源：`d634cd232`、`aaf397e68`、`854a0db92`，保持 TS client / JS host wire backward compatibility：
