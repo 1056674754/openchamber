@@ -118,6 +118,7 @@ import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
 import { subscribeOpenchamberEvents } from '@/lib/openchamberEvents';
 import { DEFAULT_SERVER_ID, serverRegistry } from '@/lib/opencode/server-registry';
+import { isBtwSession } from '@/lib/sessionBtwMetadata';
 import { getWorktreesForProject } from '@/lib/worktrees/worktreeKeys';
 import { mapWithConcurrency } from '@/lib/concurrency';
 import {
@@ -596,6 +597,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
     const mergedById = new Map(merged.map((session) => [session.id, session]));
     const visibilityCache = new Map<string, boolean>();
     const isVisible = (session: Session, visiting = new Set<string>()): boolean => {
+      if (isBtwSession(session)) return false;
       const cached = visibilityCache.get(session.id);
       if (cached !== undefined) return cached;
 
