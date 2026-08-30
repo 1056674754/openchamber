@@ -3024,12 +3024,62 @@ export async function createBranch(directory, branchName, options = {}) {
   }
 }
 
+// Do not pass --quiet here: simple-git can resolve a quiet non-zero result as
+// success, while the echoed ref gives us an unambiguous existence check.
+const gitRefExists = async (git, ref) => {
+  try {
+    const output = await git.raw(['show-ref', '--verify', ref]);
+    return String(output).trim().length > 0;
+  } catch {
+    return false;
+  }
+};
+
+const resolveBranchCheckoutTarget = async (git, branchName) => {
+  const requested = String(branchName || '').trim();
+  if (!requested) {
+    throw new Error('Branch name is required');
+  }
+
+  const asRequested = { branch: requested, remoteRef: null };
+  if (await gitRefExists(git, `refs/heads/${requested}`)) {
+    return asRequested;
+  }
+
+  const remoteRef = requested.replace(/^remotes\//, '');
+  if (!(await gitRefExists(git, `refs/remotes/${remoteRef}`))) {
+    return asRequested;
+  }
+
+  const remotes = (await git.getRemotes())
+    .map((entry) => entry?.name)
+    .filter(Boolean)
+    .sort((left, right) => right.length - left.length);
+  const remote = remotes.find((name) => remoteRef.startsWith(`${name}/`));
+  if (!remote) {
+    return asRequested;
+  }
+
+  const localBranch = remoteRef.slice(remote.length + 1);
+  if (!localBranch || localBranch === 'HEAD') {
+    return asRequested;
+  }
+
+  const localExists = await gitRefExists(git, `refs/heads/${localBranch}`);
+  return { branch: localBranch, remoteRef: localExists ? null : remoteRef };
+};
+
 export async function checkoutBranch(directory, branchName) {
   const { git } = await createRepositoryGitContext(directory);
 
   try {
-    await git.checkout(branchName);
-    return { success: true, branch: branchName };
+    const target = await resolveBranchCheckoutTarget(git, branchName);
+    if (target.remoteRef) {
+      await git.raw(['checkout', '-b', target.branch, '--track', target.remoteRef]);
+    } else {
+      await git.checkout(target.branch);
+    }
+    return { success: true, branch: target.branch };
   } catch (error) {
     console.error('Failed to checkout branch:', error);
     throw error;

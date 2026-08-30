@@ -1390,8 +1390,8 @@ export const GitView: React.FC = () => {
     }
 
     try {
-      await git.checkoutBranch(currentDirectory, normalized);
-      toast.success(t('gitView.toast.checkedOut', { name: normalized }));
+      const result = await git.checkoutBranch(currentDirectory, normalized);
+      toast.success(t('gitView.toast.checkedOut', { name: result?.branch || normalized }));
       await refreshStatusAndBranches();
       await refreshLog();
     } catch (err) {

@@ -42,7 +42,7 @@ The following functions are exported and used by the web server:
 ### Branch Operations
 - `getBranches(directory)`: Get list of local and remote branches (filtered to active remote branches).
 - `createBranch(directory, branchName, options)`: Create and checkout a new branch.
-- `checkoutBranch(directory, branchName)`: Checkout an existing branch.
+- `checkoutBranch(directory, branchName)`: Checkout an existing local branch. Selecting a remote-tracking ref creates the corresponding local tracking branch instead of detaching HEAD.
 - `deleteBranch(directory, branch, options)`: Delete a branch (supports force flag).
 - `renameBranch(directory, oldName, newName)`: Rename a branch and preserve upstream tracking.
 - `getRemotes(directory)`: Get list of configured remotes.

@@ -2528,3 +2528,14 @@ v1.20.0-sscity 尚未宣布完成：当前未关闭 `#135/#140/#142-#151/#154/#1
 - Web 与 VS Code 构建均产生独立 lazy `tr` chunk（374,615 bytes），未并入初始 English bundle。
 
 验证：Bun i18n 3 files / 6 tests ✅；Walkthrough language Vitest 4/4 ✅；全 workspace `bun run type-check` ✅、`bun run lint` ✅、`bun run build` ✅；`git diff --check` ✅。[#171](https://coding.s-s.city/songsong/openchamber/-/issues/171) 可关闭。
+
+### #166 Phase 1：Remote-tracking branch checkout（2026-08-30）
+
+上游来源：`599f5dc5d`，同时保持 fork Web / VS Code Git contract 一致：
+
+- branch picker 选择 `origin/feature` 或 `remotes/origin/feature` 时，不再直接 checkout remote ref 进入 detached HEAD；若本地 `feature` 不存在，创建并 tracking `origin/feature`，若已存在则直接切换本地分支。
+- 本地同名分支优先。例如真实存在 `refs/heads/origin/feature` 时，不会误判为 remote ref。未知 ref 与 `origin/HEAD` 继续交由 Git 自身处理并保留原始错误语义。
+- Web service 与 VS Code extension 返回 repository 实际落到的本地 branch；Git UI toast 使用该返回值，避免仍显示 remote ref。
+- remote 名按长度降序匹配，避免 prefix remote name 错认 ownership。
+
+验证：真实临时 bare remote 的 Git service Vitest 57/57 ✅（新增 6 条 checkout 分支场景）；全 workspace `bun run type-check` ✅、`bun run lint` ✅、`bun run build` ✅；`git diff --check` ✅。[#166](https://coding.s-s.city/songsong/openchamber/-/issues/166) 保持 open，下一 phase 仍需 multi-project directory selection 与对应 Desktop/VS Code add-project parity。
