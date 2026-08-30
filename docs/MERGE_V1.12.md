@@ -3092,3 +3092,14 @@ v1.20.0-sscity 尚未宣布完成：当前未关闭 `#135/#140/#142-#151/#154/#1
 - 新CLI module docs明确规定relay identity必须在transaction内创建。对应提交：`1f85851f2 feat(cli): serialize standalone settings access`。
 
 验证：CLI settings accessor Bun 4/4 ✅（missing-vs-corrupt、atomic/mode/temp cleanup、8-way concurrent RMW、lock timeout不进入operation）；Web type-check/lint ✅；`git diff --check` ✅。[#176](https://coding.s-s.city/songsong/openchamber/-/issues/176) 保持 open：下一phase接入relay identity transaction与monolith `connect-url` parsing/help/output parity。
+
+## v1.21.1 `#176` Phase 2：Monolith `connect-url` + relay identity transaction（2026-08-31）
+
+- 新`commands-connect-url.js`只从legacy monolith注入serve/lifecycle/network helper，没有为一个命令复制upstream整套CLI模块化。`cli.js`增加command dispatch、help、completion-facing command列表与`--server/--relay/--qr/--name/--quiet/--json` parsing。
+- policy-first：port与public URL在discover/auto-start前验证；实测修掉invalid `ftp://`先启动实例再报错的副作用顺序。invalid URL在JSON mode稳定exit 2。
+- direct candidate优先级10；relay candidate优先级30，仅在`--relay`或stored relay enabled时加入。pairing-v2 payload、single-use secret、fingerprint/expiry与UI协议一致。
+- relay URL解析顺序与host一致：env → stored setting → default。signing/encryption key读取、生成与两次写入全部在`withSettingsTransaction`同一shared lock内；两个命令不会得到不同serverId。
+- quiet只输出connect URL；JSON输出server/connect URL、pairing identity、candidates与autoStarted；human模式显示direct/relay状态和可达性warning，`--qr`按需动态加载terminal QR。
+- 对应提交：`04c99e7e9 feat(cli): add atomic connect-url command`。
+
+验证：CLI parse/lifecycle + accessor + connect-url 3 files / 43 tests ✅；真实`connect-url --help` ✅；isolated invalid URL JSON/exit 2且未启动server ✅；relay identity首次生成、第二次serverId复用、corrupt settings不覆盖 ✅；full workspace type-check/lint ✅；`git diff --check` ✅。至此 [#176](https://coding.s-s.city/songsong/openchamber/-/issues/176) 完成，可关闭。
