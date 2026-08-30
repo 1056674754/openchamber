@@ -2562,3 +2562,15 @@ v1.20.0-sscity 尚未宣布完成：当前未关闭 `#135/#140/#142-#151/#154/#1
 - composer 模块文档同步记录平台分流与真机 QA 边界。
 
 验证：composer Bun 13 files / 232 tests ✅（selection/theme 25 条）；CodeMirror forced reinstall 后确认 `language-data` 依赖统一解析到 6.12.4/6.7.1；UI type-check ✅。全 workspace type/lint/build 与 diff check 见本 phase 最终验证。WKWebView selection drag/IME 必须留作真机 matching-surface QA，不能用单测冒充。[#159](https://coding.s-s.city/songsong/openchamber/-/issues/159) 保持 open：self-signed loopback Browser 仍需接 dirty Electron main，其他 shell parity 也需最终 installed-runtime QA。
+
+### #147 Phase 1：Bounded atomic file-upload route（2026-08-30）
+
+上游来源：`7b92bf347`、`853e0d43b`，先落不依赖 dirty shared `FilesAPI` type 的 server authority：
+
+- 新增 `POST /api/fs/upload?path&directory&overwrite`，只接受 raw `application/octet-stream`；必须携带 explicit owning directory，不读取 persisted active/last directory。
+- 默认 100 MiB 上限，可由正数 `OPENCHAMBER_FS_UPLOAD_MAX_BYTES` 覆盖；Content-Length 预检和实际 streaming byte counter 双重限制。
+- 数据先写同目录随机临时文件。非 overwrite 用 hard-link commit，目标在检查后并发出现时仍返回 `409 already-exists`；overwrite 使用 rename。任何失败都清理 temp，reader 不会看到半文件。
+- target、parent、existing symlink 均经过 canonical workspace boundary；workspace 内 symlink 指向外部文件不能借 overwrite 修改外部内容，worktree fallback 与现有 FS contract 不变。
+- 400/403/404/409/413/415 与 `reason` 语义明确，OS permission 继续走既有 `os-permission` contract。
+
+验证：FS route Vitest 20/20 ✅，其中新增 8 条覆盖 explicit authority、binary fidelity、conflict preservation、overwrite、MIME、size、missing parent/temp cleanup、outside symlink denial。全 workspace type/lint/build 与 diff check 见本 phase 最终验证。[#147](https://coding.s-s.city/songsong/openchamber/-/issues/147) 保持 open：下一 phase 接 Web client、Sidebar drop UI、conflict confirmation、cache invalidation 与 remote runtime parity；当前 dirty `api/types.ts` 不被本 phase 覆盖。

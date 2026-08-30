@@ -15,6 +15,7 @@ Own filesystem API behavior for the web server runtime, including workspace-boun
     - `GET /api/fs/read`
     - `GET /api/fs/raw`
     - `POST /api/fs/write`
+    - `POST /api/fs/upload?path&overwrite` (raw `application/octet-stream`, bounded and atomically committed)
     - `POST /api/fs/delete`
     - `POST /api/fs/rename`
     - `POST /api/fs/reveal`
@@ -31,6 +32,14 @@ Own filesystem API behavior for the web server runtime, including workspace-boun
 ## Composition contract with `index.js`
 - `index.js` provides composition-time dependencies only (platform primitives + callbacks such as `resolveRequiredExplicitProjectDirectory`, `normalizeDirectoryPath`, and `buildAugmentedPath`).
 - `index.js` no longer owns FS route handlers or FS exec job state.
+
+## Upload contract
+
+- `POST /api/fs/upload?path=<absolute>&directory=<owner>&overwrite=true|false` accepts a raw `application/octet-stream` body.
+- The request must carry its explicit owning project directory; persisted active/last-directory state is never used as authority.
+- Uploads default to a 100 MiB maximum. `OPENCHAMBER_FS_UPLOAD_MAX_BYTES` may set a positive byte limit.
+- Data is streamed to a same-directory temporary file. Non-overwrite commits with a hard link so a target created during the upload returns `409 already-exists`; overwrite commits with rename. Failures remove the temporary file.
+- Existing symlinks and symlinked parents are canonicalized before writing and cannot escape the owning workspace.
 
 ## Notes for contributors
 - Keep filesystem policy (workspace root checks, error mapping, exec timeout behavior) inside this module, not in the composition root.

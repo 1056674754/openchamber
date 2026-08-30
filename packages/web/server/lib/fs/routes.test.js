@@ -244,3 +244,125 @@ describe('fs routes explicit directory policy', () => {
     });
   }
 });
+
+describe('fs upload route', () => {
+  const upload = (app, target, directory, body, overwrite = false) => request(app)
+    .post('/api/fs/upload')
+    .query({ path: target, directory, ...(overwrite ? { overwrite: 'true' } : {}) })
+    .set('Content-Type', 'application/octet-stream')
+    .send(Buffer.from(body));
+
+  it('requires explicit workspace authority', async () => {
+    const workspace = await makeTempDir();
+    const target = path.join(workspace, 'upload.bin');
+    const app = createApp({ projects: [{ id: 'workspace', path: workspace }] });
+
+    const response = await request(app)
+      .post('/api/fs/upload')
+      .query({ path: target })
+      .set('Content-Type', 'application/octet-stream')
+      .send(Buffer.from('content'));
+
+    expect(response.status).toBe(400);
+    expect(response.body).toEqual({ error: 'Directory parameter is required' });
+    await expect(fs.stat(target)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('streams a binary file into the owning workspace', async () => {
+    const workspace = await makeTempDir();
+    const target = path.join(workspace, 'upload.bin');
+    const app = createApp();
+
+    const response = await upload(app, target, workspace, Buffer.from([0, 1, 2, 255]));
+
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({ success: true, path: await fs.realpath(target) });
+    await expect(fs.readFile(target)).resolves.toEqual(Buffer.from([0, 1, 2, 255]));
+  });
+
+  it('preserves an existing file unless overwrite is explicit', async () => {
+    const workspace = await makeTempDir();
+    const target = path.join(workspace, 'upload.bin');
+    await fs.writeFile(target, 'original');
+    const app = createApp();
+
+    const response = await upload(app, target, workspace, 'replacement');
+
+    expect(response.status).toBe(409);
+    expect(response.body.reason).toBe('already-exists');
+    await expect(fs.readFile(target, 'utf8')).resolves.toBe('original');
+  });
+
+  it('atomically replaces an existing file when overwrite is explicit', async () => {
+    const workspace = await makeTempDir();
+    const target = path.join(workspace, 'upload.bin');
+    await fs.writeFile(target, 'original');
+    const app = createApp();
+
+    const response = await upload(app, target, workspace, 'replacement', true);
+
+    expect(response.status).toBe(200);
+    await expect(fs.readFile(target, 'utf8')).resolves.toBe('replacement');
+  });
+
+  it('rejects non-binary content types before touching the filesystem', async () => {
+    const workspace = await makeTempDir();
+    const target = path.join(workspace, 'upload.txt');
+    const app = createApp();
+
+    const response = await request(app)
+      .post('/api/fs/upload')
+      .query({ path: target, directory: workspace })
+      .set('Content-Type', 'text/plain')
+      .send('content');
+
+    expect(response.status).toBe(415);
+    await expect(fs.stat(target)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('rejects declared uploads above the configured limit', async () => {
+    const previous = process.env.OPENCHAMBER_FS_UPLOAD_MAX_BYTES;
+    process.env.OPENCHAMBER_FS_UPLOAD_MAX_BYTES = '3';
+    try {
+      const workspace = await makeTempDir();
+      const target = path.join(workspace, 'upload.bin');
+      const app = createApp();
+
+      const response = await upload(app, target, workspace, 'four');
+
+      expect(response.status).toBe(413);
+      await expect(fs.stat(target)).rejects.toMatchObject({ code: 'ENOENT' });
+    } finally {
+      if (previous === undefined) delete process.env.OPENCHAMBER_FS_UPLOAD_MAX_BYTES;
+      else process.env.OPENCHAMBER_FS_UPLOAD_MAX_BYTES = previous;
+    }
+  });
+
+  it('rejects a missing destination directory without leaving temp files', async () => {
+    const workspace = await makeTempDir();
+    const missing = path.join(workspace, 'missing');
+    const target = path.join(missing, 'upload.bin');
+    const app = createApp();
+
+    const response = await upload(app, target, workspace, 'content');
+
+    expect(response.status).toBe(404);
+    expect(response.body.reason).toBe('not-found');
+    expect(await fs.readdir(workspace)).toEqual([]);
+  });
+
+  it('does not follow an existing workspace symlink to overwrite an outside file', async () => {
+    const workspace = await makeTempDir();
+    const outside = await makeTempDir();
+    const outsideTarget = path.join(outside, 'outside.bin');
+    const linkPath = path.join(workspace, 'link.bin');
+    await fs.writeFile(outsideTarget, 'outside');
+    await fs.symlink(outsideTarget, linkPath);
+    const app = createApp();
+
+    const response = await upload(app, linkPath, workspace, 'replacement', true);
+
+    expect(response.status).toBe(403);
+    await expect(fs.readFile(outsideTarget, 'utf8')).resolves.toBe('outside');
+  });
+});
