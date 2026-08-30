@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
 let activeRuntimeKey = 'host-a';
 let draftStartersVisible = true;
 let agentControlToolEnabled = true;
+let agentMemoryToolEnabled = false;
 let globalDraftStarters: unknown[] = [];
 let sttProvider: 'browser' | 'server' | 'wasm' = 'browser';
 let wasmSttModel = 'whisper-tiny';
@@ -23,12 +24,16 @@ const noopStore = {
     modelPickerLayoutByServerId: new Map(),
     draftStartersVisible,
     agentControlToolEnabled,
+    agentMemoryToolEnabled,
     globalDraftStarters,
     setDraftStartersVisible: (value: boolean) => {
       draftStartersVisible = value;
     },
     setAgentControlToolEnabled: (value: boolean) => {
       agentControlToolEnabled = value;
+    },
+    setAgentMemoryToolEnabled: (value: boolean) => {
+      agentMemoryToolEnabled = value;
     },
     setGlobalDraftStarters: (value: unknown[]) => {
       globalDraftStarters = value;
@@ -181,6 +186,7 @@ describe('refreshDesktopSettingsFromHost', () => {
     activeRuntimeKey = 'host-a';
     draftStartersVisible = true;
     agentControlToolEnabled = true;
+    agentMemoryToolEnabled = false;
     globalDraftStarters = [];
     sttProvider = 'browser';
     wasmSttModel = 'whisper-tiny';
@@ -223,6 +229,14 @@ describe('refreshDesktopSettingsFromHost', () => {
 
     // Then
     expect(agentControlToolEnabled).toBe(false);
+  });
+
+  test('applies the persisted Agent Memory tool preference from the active host', async () => {
+    responseFor = () => ({ agentMemoryToolEnabled: true });
+
+    await syncDesktopSettings();
+
+    expect(agentMemoryToolEnabled).toBe(true);
   });
 
   test('restores the local WASM provider and model from the active host', async () => {

@@ -554,6 +554,12 @@ const applyDesktopUiPreferences = (
   ) {
     store.setAgentControlToolEnabled(settings.agentControlToolEnabled);
   }
+  if (
+    typeof settings.agentMemoryToolEnabled === 'boolean'
+    && settings.agentMemoryToolEnabled !== store.agentMemoryToolEnabled
+  ) {
+    store.setAgentMemoryToolEnabled(settings.agentMemoryToolEnabled);
+  }
   if (typeof settings.timeFormatPreference === 'string'
     && (settings.timeFormatPreference === 'auto' || settings.timeFormatPreference === '12h' || settings.timeFormatPreference === '24h')) {
     if (settings.timeFormatPreference !== store.timeFormatPreference) {
@@ -873,6 +879,9 @@ export const sanitizeWebSettings = (payload: unknown): DesktopSettings | null =>
   }
   if (typeof candidate.agentControlToolEnabled === 'boolean') {
     result.agentControlToolEnabled = candidate.agentControlToolEnabled;
+  }
+  if (typeof candidate.agentMemoryToolEnabled === 'boolean') {
+    result.agentMemoryToolEnabled = candidate.agentMemoryToolEnabled;
   }
   if (typeof candidate.desktopLanAccessEnabled === 'boolean') {
     result.desktopLanAccessEnabled = candidate.desktopLanAccessEnabled;

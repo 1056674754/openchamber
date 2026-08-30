@@ -58,13 +58,16 @@ describe('settings helpers', () => {
 
     expect(helpers.sanitizeSettingsUpdate({
       agentControlToolEnabled: false,
+      agentMemoryToolEnabled: true,
       draftStartersScheduleTaskAdded: true,
     })).toEqual({
       agentControlToolEnabled: false,
+      agentMemoryToolEnabled: true,
       draftStartersScheduleTaskAdded: true,
     });
     expect(helpers.sanitizeSettingsUpdate({
       agentControlToolEnabled: 'false',
+      agentMemoryToolEnabled: 'true',
       draftStartersScheduleTaskAdded: 1,
     })).toEqual({});
   });

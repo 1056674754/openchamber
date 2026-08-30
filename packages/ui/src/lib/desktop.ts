@@ -62,6 +62,7 @@ export type DesktopSettings = {
   // Optional absolute path to `opencode` binary.
   opencodeBinary?: string;
   agentControlToolEnabled?: boolean;
+  agentMemoryToolEnabled?: boolean;
   optimizeSystemPrompt?: boolean;
   desktopLanAccessEnabled?: boolean;
   desktopMacMenuBarEnabled?: boolean;

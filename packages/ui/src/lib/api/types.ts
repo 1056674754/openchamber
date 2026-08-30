@@ -688,6 +688,8 @@ export interface SettingsPayload {
   homeDirectory?: string;
   opencodeBinary?: string;
   agentControlToolEnabled?: boolean;
+  agentMemoryToolEnabled?: boolean;
+  agentMemoryAvailable?: boolean;
   projects?: ProjectEntry[];
   activeProjectId?: string;
   approvedDirectories?: string[];
