@@ -27,6 +27,7 @@ import { checkForDesktopUpdate } from './updater-check.mjs';
 import { resolveUpdaterFeed } from './updater-feed.mjs';
 import { resolveUpdaterChannel } from './updater-channel.mjs';
 import { shouldAllowBrowserPanelCertificateError } from './browser-panel-security.mjs';
+import { resolveDesktopDevTunnelAuthority } from './dev-tunnel-authority.mjs';
 
 const execFileAsync = promisify(execFile);
 
@@ -709,6 +710,49 @@ const writeDesktopHostsConfig = async (config) => {
 const readWindowState = () => {
   const stateValue = readSettingsRoot().desktopWindowState;
   return stateValue && typeof stateValue === 'object' ? stateValue : null;
+};
+
+let devTunnelClientPromise = null;
+const devTunnelTargetByKey = new Map();
+
+const getDevTunnelClient = async () => {
+  if (!devTunnelClientPromise) {
+    devTunnelClientPromise = import('@openchamber/web/server/lib/dev-tunnel/client.js')
+      .then(({ createDevTunnelClient }) => createDevTunnelClient({ logger: log }))
+      .catch((error) => {
+        devTunnelClientPromise = null;
+        throw error;
+      });
+  }
+  return devTunnelClientPromise;
+};
+
+const resolveDevTunnelTarget = (serverId) => {
+  const id = typeof serverId === 'string' ? serverId.trim() : '';
+  return resolveDesktopDevTunnelAuthority({
+    serverId: id,
+    status: sshManager.statusSnapshotForInstance(id),
+    hosts: readDesktopHostsConfig().hosts,
+    localHostId: LOCAL_HOST_ID,
+  });
+};
+
+const closeDevTunnelsForServer = async (serverId) => {
+  if (!devTunnelClientPromise) return;
+  const client = await getDevTunnelClient();
+  for (const [key, target] of [...devTunnelTargetByKey.entries()]) {
+    if (target.serverId !== serverId) continue;
+    client.close({ baseUrl: target.baseUrl, port: target.port });
+    devTunnelTargetByKey.delete(key);
+  }
+};
+
+const closeAllDevTunnels = () => {
+  devTunnelTargetByKey.clear();
+  if (!devTunnelClientPromise) return;
+  const pending = devTunnelClientPromise;
+  devTunnelClientPromise = null;
+  pending.then((client) => client.closeAll()).catch(() => {});
 };
 
 const writeWindowState = async (browserWindow) => {
@@ -2840,6 +2884,44 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       return { supported: true, enabled, active };
     }
 
+    case 'desktop_dev_tunnel_open': {
+      const port = Number.parseInt(String(args.port || ''), 10);
+      if (!Number.isInteger(port) || port <= 0 || port > 65535) {
+        throw new Error('A valid remote port is required');
+      }
+      const target = resolveDevTunnelTarget(args.serverId);
+      const key = `${target.id}|${port}`;
+      const previous = devTunnelTargetByKey.get(key);
+      const client = await getDevTunnelClient();
+      if (previous && previous.baseUrl !== target.baseUrl) {
+        client.close({ baseUrl: previous.baseUrl, port });
+        devTunnelTargetByKey.delete(key);
+      }
+      const result = await client.open({
+        baseUrl: target.baseUrl,
+        port,
+        headers: { Authorization: `Bearer ${target.clientToken}` },
+      });
+      devTunnelTargetByKey.set(key, { serverId: target.id, baseUrl: target.baseUrl, port });
+      return {
+        localPort: result.localPort,
+        reused: result.reused,
+        url: `http://127.0.0.1:${result.localPort}/`,
+      };
+    }
+
+    case 'desktop_dev_tunnel_close': {
+      const serverId = typeof args.serverId === 'string' ? args.serverId.trim() : '';
+      const port = Number.parseInt(String(args.port || ''), 10);
+      const key = `${serverId}|${port}`;
+      const target = devTunnelTargetByKey.get(key);
+      if (!target || !devTunnelClientPromise) return { closed: false };
+      const client = await getDevTunnelClient();
+      const closed = client.close({ baseUrl: target.baseUrl, port: target.port });
+      devTunnelTargetByKey.delete(key);
+      return { closed };
+    }
+
     case 'desktop_browser_capture_page': {
       const wcId = Number.isFinite(args.webContentsId) ? Math.trunc(args.webContentsId) : null;
       if (wcId === null || wcId < 0) throw new Error('webContentsId is required');
@@ -3502,6 +3584,7 @@ end tell`;
 
     case 'desktop_ssh_disconnect': {
       const id = String(args.id || '').trim();
+      await closeDevTunnelsForServer(id);
       await sshManager.disconnect(id);
       state.serverHandle?.remoteInstances?.setHealthStatus?.(id, {
         healthy: false,
@@ -3853,6 +3936,7 @@ app.on('window-all-closed', async () => {
   }
 
   if (!state.installingUpdate) {
+    closeAllDevTunnels();
     await killSidecar();
     void sshManager.shutdownAll();
   }
