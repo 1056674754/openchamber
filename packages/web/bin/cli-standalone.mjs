@@ -2,14 +2,13 @@
 // Standalone binary entrypoint — extracts embedded assets and starts OpenChamber server.
 
 import 'reflect-metadata';
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { createHash } from 'node:crypto';
 import { EMBEDDED_ASSETS } from './embedded-assets.generated.mjs';
 import { EMBEDDED_OPENCHAMBER_PLUGIN } from './embedded-plugin.generated.mjs';
-
-const STANDALONE_VERSION = '1.17.1-sscity';
+import { STANDALONE_VERSION } from './standalone-version.mjs';
 
 // Derive assets version from binary content hash to avoid stale caches
 const ASSETS_HASH = createHash('sha256')
@@ -53,6 +52,7 @@ process.env.OPENCHAMBER_DIST_DIR = ASSETS_DIR;
 // Parse CLI args — supports both standalone mode and `serve` subcommand compatibility
 const rawArgs = process.argv.slice(2);
 const isServe = rawArgs[0] === 'serve';
+const isStop = rawArgs[0] === 'stop';
 const args = isServe ? rawArgs.slice(1) : rawArgs;
 
 // --version
@@ -67,10 +67,33 @@ const hostIdx = args.indexOf('--host');
 const hostnameIdx = args.indexOf('--hostname');
 const host = hostIdx >= 0 ? args[hostIdx + 1] : (hostnameIdx >= 0 ? args[hostnameIdx + 1] : undefined);
 const port = portIdx >= 0 ? parseInt(args[portIdx + 1], 10) : (process.env.OPENCHAMBER_PORT ? parseInt(process.env.OPENCHAMBER_PORT, 10) : 3000);
+const runtimeDir = join(OPENCHAMBER_DATA_DIR, 'standalone');
+const pidFile = join(runtimeDir, `openchamber-${port}.pid`);
+
+if (isStop) {
+  if (existsSync(pidFile)) {
+    const pid = Number.parseInt(readFileSync(pidFile, 'utf8').trim(), 10);
+    if (Number.isInteger(pid) && pid > 0) {
+      try {
+        process.kill(pid, 'SIGTERM');
+      } catch (error) {
+        if (error?.code !== 'ESRCH') throw error;
+      }
+    }
+    try {
+      unlinkSync(pidFile);
+    } catch (error) {
+      if (error?.code !== 'ENOENT') throw error;
+    }
+  }
+  console.log(`Stopped OpenChamber on port ${port}`);
+  process.exit(0);
+}
 
 // `serve` subcommand: print port and exit.
-// Daemonization is handled by `nohup ... &` in ssh-manager's startRemoteServerManaged.
-if (isServe) {
+// Managed SSH starts `serve --foreground` under nohup and owns its lifecycle.
+const foregroundServe = isServe && (args.includes('--foreground') || args.includes('--no-daemon'));
+if (isServe && !foregroundServe) {
   console.log(port);
   process.exit(0);
 }
@@ -82,7 +105,28 @@ process.argv[1] = '/dev/null/not-a-match';
 const { startWebUiServer } = await import('../server/index.js');
 const handle = await startWebUiServer({ port, host });
 
+mkdirSync(runtimeDir, { recursive: true });
+writeFileSync(pidFile, `${process.pid}\n`, 'utf8');
+
 console.log(`OpenChamber running on port ${handle.getPort()}`);
 
-process.on('SIGINT', () => { process.exit(0); });
-process.on('SIGTERM', () => { process.exit(0); });
+let shuttingDown = false;
+const cleanupPidFile = () => {
+  try {
+    if (existsSync(pidFile) && readFileSync(pidFile, 'utf8').trim() === String(process.pid)) {
+      unlinkSync(pidFile);
+    }
+  } catch {
+  }
+};
+const shutdown = async () => {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  cleanupPidFile();
+  await handle.stop().catch(() => undefined);
+  process.exit(0);
+};
+
+process.on('exit', cleanupPidFile);
+process.on('SIGINT', () => { void shutdown(); });
+process.on('SIGTERM', () => { void shutdown(); });

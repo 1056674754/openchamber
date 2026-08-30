@@ -350,7 +350,7 @@ describe('ElectronSshManager', () => {
       emit: () => undefined,
     });
     manager.runRemoteCommand = async () => [
-      '/home/pi/.openchamber/npm-global/bin/openchamber\t1.2.3',
+      '/home/pi/.openchamber/npm-global/bin/openchamber\t1.18.2-sscity',
       '/usr/bin/openchamber\t0.9.0',
       '',
     ].join('\n');
@@ -361,7 +361,7 @@ describe('ElectronSshManager', () => {
     );
 
     expect(candidates).toEqual([
-      { binPath: '/home/pi/.openchamber/npm-global/bin/openchamber', version: '1.2.3' },
+      { binPath: '/home/pi/.openchamber/npm-global/bin/openchamber', version: '1.18.2-sscity' },
       { binPath: '/usr/bin/openchamber', version: '0.9.0' },
     ]);
   });
@@ -391,10 +391,81 @@ describe('ElectronSshManager', () => {
     await manager.stopRemoteServerBestEffort(parsed, '/tmp/control.sock', 4321, binPath);
 
     expect(port).toBe(4321);
-    expect(commands[0]).toContain(`'${binPath}' serve`);
+    expect(commands[0]).toContain(`nohup '${binPath}' serve --foreground`);
     expect(commands[0]).toContain("OPENCODE_BINARY='/home/pi/.opencode/bin/opencode'");
     expect(commands[0]).toContain('$HOME/.opencode/bin:');
+    expect(commands[0]).toContain('managed-4321.log');
+    expect(commands[0]).toContain("printf '%s\\n' 4321");
     expect(commands[1]).toBe(`'${binPath}' stop --port 4321`);
+  });
+
+  test('waits for a newly started remote server to become healthy', async () => {
+    const manager = new ElectronSshManager({
+      settingsFilePath: path.join(os.tmpdir(), 'unused-settings.json'),
+      appVersion: '1.2.3',
+      emit: () => undefined,
+    });
+    let attempts = 0;
+    manager.remoteServerRunning = async () => {
+      attempts += 1;
+      return attempts >= 3;
+    };
+
+    await expect(manager.waitForRemoteServerRunning(
+      { destination: 'user@example.test', args: [] },
+      '/tmp/control.sock',
+      4321,
+      null,
+      { timeoutMs: 100, initialPollMs: 1 },
+    )).resolves.toBe(true);
+    expect(attempts).toBe(3);
+  });
+
+  test('uses the latest persisted keepRunning policy when disconnecting', async () => {
+    const settingsFilePath = path.join(os.tmpdir(), `openchamber-ssh-policy-${Date.now()}.json`);
+    await fsp.writeFile(settingsFilePath, JSON.stringify({
+      desktopSshInstances: [{
+        id: 'ssh-policy',
+        sshCommand: 'ssh user@example.test',
+        connectionTimeoutSec: 60,
+        remoteOpenchamber: {
+          mode: 'managed',
+          keepRunning: false,
+          bindHost: '127.0.0.1',
+          installMethod: 'auto',
+          uploadBundleOverSsh: false,
+        },
+        localForward: { bindHost: '127.0.0.1' },
+        auth: {},
+        portForwards: [],
+      }],
+    }));
+    const manager = new ElectronSshManager({
+      settingsFilePath,
+      appVersion: '1.2.3',
+      emit: () => undefined,
+    });
+    const stopped = [];
+    manager.stopRemoteServerBestEffort = async (...args) => { stopped.push(args); };
+    manager.stopControlMasterBestEffort = async () => undefined;
+    manager.sessions.set('ssh-policy', {
+      instance: {
+        id: 'ssh-policy',
+        remoteOpenchamber: { mode: 'managed', keepRunning: true },
+      },
+      parsed: { destination: 'user@example.test', args: [] },
+      controlPath: '/tmp/control.sock',
+      remotePort: 4321,
+      remoteBinPath: '/bin/openchamber',
+      startedByUs: true,
+      extraForwards: [],
+      askpassCleanupPaths: [],
+    });
+
+    await manager.disconnectInternal('ssh-policy', true);
+    expect(stopped).toHaveLength(1);
+    expect(stopped[0]?.slice(2)).toEqual([4321, '/bin/openchamber']);
+    await fsp.rm(settingsFilePath, { force: true });
   });
 
   test('requires a UI password before publishing the remote server', async () => {
@@ -430,5 +501,6 @@ describe('ElectronSshManager', () => {
       '/bin/openchamber',
     );
     expect(started).toContain('--hostname 0.0.0.0');
+    expect(started).toContain('OPENCHAMBER_UI_PASSWORD=');
   });
 });

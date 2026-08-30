@@ -383,8 +383,7 @@ const parseVersionToken = (raw) => {
   for (const token of String(raw).split(/\s+/)) {
     let candidate = token.trim().replace(/^v/, '');
     candidate = candidate.replace(/[,)]+$/g, '');
-    const parts = candidate.split('.');
-    if (parts.length >= 2 && parts.every((part) => /^\d+$/.test(part))) {
+    if (/^\d+\.\d+(?:\.\d+)?(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(candidate)) {
       return candidate;
     }
   }
@@ -1288,6 +1287,20 @@ export class ElectronSshManager {
     }
   }
 
+  async waitForRemoteServerRunning(parsed, controlPath, port, openchamberPassword, options = {}) {
+    const timeoutMs = Number.isFinite(options.timeoutMs) ? Math.max(1, options.timeoutMs) : 30_000;
+    const deadline = Date.now() + timeoutMs;
+    let pollMs = Number.isFinite(options.initialPollMs) ? Math.max(1, options.initialPollMs) : 250;
+    while (Date.now() < deadline) {
+      if (await this.remoteServerRunning(parsed, controlPath, port, openchamberPassword)) {
+        return true;
+      }
+      await new Promise((resolve) => setTimeout(resolve, pollMs));
+      pollMs = Math.min(pollMs * 2, 2_000);
+    }
+    return false;
+  }
+
   async startRemoteServerManaged(parsed, controlPath, instance, desiredPort, binPath) {
     const opencodePath = await this.resolveRemoteTool(parsed, controlPath, 'opencode', REMOTE_OPENCODE_CANDIDATES);
     if (!opencodePath) {
@@ -1304,10 +1317,11 @@ export class ElectronSshManager {
     if (secret) {
       envPrefix += ` OPENCHAMBER_UI_PASSWORD=${shellQuote(secret)}`;
     }
+    const logPath = `$HOME/.openchamber/managed-${desiredPort}.log`;
     const output = await this.runRemoteCommand(
       parsed,
       controlPath,
-      `${envPrefix} ${shellQuote(binPath)} serve --hostname ${remoteBindHost} --port ${desiredPort}`,
+      `mkdir -p "$HOME/.openchamber"; ${envPrefix} nohup ${shellQuote(binPath)} serve --foreground --hostname ${remoteBindHost} --port ${desiredPort} > "${logPath}" 2>&1 < /dev/null & printf '%s\\n' ${desiredPort}`,
     );
     const port = output
       .split(/\s+/)
@@ -1417,7 +1431,13 @@ export class ElectronSshManager {
       remotePort = await this.startRemoteServerManaged(parsed, controlPath, instance, desiredPort, binary.binPath);
       startedByUs = true;
     }
-    if (!(await this.remoteServerRunning(parsed, controlPath, remotePort, this.configuredOpenChamberPassword(instance)))) {
+    const remoteReady = startedByUs
+      ? await this.waitForRemoteServerRunning(parsed, controlPath, remotePort, this.configuredOpenChamberPassword(instance))
+      : await this.remoteServerRunning(parsed, controlPath, remotePort, this.configuredOpenChamberPassword(instance));
+    if (!remoteReady) {
+      if (startedByUs) {
+        await this.stopRemoteServerBestEffort(parsed, controlPath, remotePort, binary.binPath);
+      }
       throw new Error('Managed OpenChamber server failed to become reachable');
     }
     return { remotePort, startedByUs, remoteBinPath: binary.binPath };
@@ -1440,7 +1460,13 @@ export class ElectronSshManager {
     this.sessions.delete(id);
 
     if (session) {
-      if (session.startedByUs && session.remotePort && session.instance.remoteOpenchamber.mode === 'managed' && !session.instance.remoteOpenchamber.keepRunning) {
+      let lifecycleInstance = session.instance;
+      try {
+        const persisted = this.readInstances().instances.find((instance) => instance?.id === id);
+        if (persisted) lifecycleInstance = this.sanitizeInstance(persisted);
+      } catch {
+      }
+      if (session.startedByUs && session.remotePort && lifecycleInstance.remoteOpenchamber.mode === 'managed' && !lifecycleInstance.remoteOpenchamber.keepRunning) {
         await this.stopRemoteServerBestEffort(session.parsed, session.controlPath, session.remotePort, session.remoteBinPath);
       }
       await this.stopControlMasterBestEffort(session.parsed, session.controlPath);
