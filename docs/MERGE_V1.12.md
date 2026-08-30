@@ -3081,3 +3081,14 @@ v1.20.0-sscity 尚未宣布完成：当前未关闭 `#135/#140/#142-#151/#154/#1
 - 本阶段没有执行 `electron:runtime:install`、没有修改 `/Applications/OpenChamber.app`、没有签名/公证。版本身份完成不等于已部署；用户明确要求更新 runtime时再按 immutable-shell runbook执行。
 
 结论：fork已正式到达 `1.20.0-sscity`。后续迁移从 upstream `v1.21.0..v1.21.1` executable backlog继续，不再把 v1.20已完成项重新打开。
+
+## v1.21.1 `#176` Phase 1：Transactional standalone CLI settings access（2026-08-31）
+
+上游来源：`2b0f39bdf` / `b9be2cb9e`。fork仍使用 monolithic `packages/web/bin/cli.js`，因此不复制依赖整套 upstream CLI模块化的 command文件；先建立可独立验证的安全数据层：
+
+- strict reader仅把 `ENOENT`解释为首次运行；corrupt JSON、array/scalar root与其他I/O错误均抛出带settings path的明确错误，不能触发relay key regeneration。
+- atomic write使用同目录0600 temp、replace、最终0600权限与failure cleanup；Windows transient replace保持bounded retry/copy fallback语义。
+- public write与`withSettingsTransaction`均使用`@openchamber/shared/settings-lock`。transaction把read/generate/write整个critical section持锁；只锁最后write仍可能让两个`connect-url`进程各自生成不同serverId。
+- 新CLI module docs明确规定relay identity必须在transaction内创建。对应提交：`1f85851f2 feat(cli): serialize standalone settings access`。
+
+验证：CLI settings accessor Bun 4/4 ✅（missing-vs-corrupt、atomic/mode/temp cleanup、8-way concurrent RMW、lock timeout不进入operation）；Web type-check/lint ✅；`git diff --check` ✅。[#176](https://coding.s-s.city/songsong/openchamber/-/issues/176) 保持 open：下一phase接入relay identity transaction与monolith `connect-url` parsing/help/output parity。
