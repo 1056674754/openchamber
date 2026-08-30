@@ -2249,3 +2249,14 @@ fork 已有丰富的 surface 组织（#62 surface rail + ContextSidebarTab + Con
 - agent 通过 getter 在 request time 懒解析；proxy 在 managed OpenCode 启动前注册时可先得到 HTTP fallback，后续 external HTTPS runtime 会使用独立 `https.Agent`，不会错误复用 plaintext pool。
 - factory/resolver 2 tests + middleware wiring 2 tests 覆盖 keepalive options、per-scheme memo、API/OAuth share 和 cold→HTTPS；full type-check/lint/diff check ✅。
 - Shiki churn 子项对本 fork 明确 N/A：当前 Markdown 主 renderer 是 ReactMarkdown + `react-syntax-highlighter` Prism，不存在上游 `markdownCore.ts`、`markdown-shiki.worker.ts`、`HighlightResultCache` 三层。迁入上游 cache/worker 会引入第二套 renderer；保留此前 MERGE 决策“不迁 marked+shiki”，不创建无调用方性能代码。
+
+### #146 Phase 1：Repository-aware generated commit / PR text（2026-08-30）
+
+上游来源：`f70834598`、`e920e52e4`：
+
+- commit generation 读取当前 branch 最近 10 条 subject（每条最多 200 chars），要求 Small Model 匹配仓库现有语言、prefix/scope、capitalization 与长度；无 history/读取失败时给显式 fallback，不伪造样本。
+- PR generation 依 GitHub 优先级与 GitLab `Default.md` 路径探测首个 template；本地/remote/VS Code 均先走 active runtime Files API，再走 `runtimeFetch`，带 owning directory 且 optional read。
+- template 截断至 8,000 chars，并用 BEGIN/END marker 声明“复用结构而非执行指令”；additional context 和 template 前各有两个换行，不再与 changed-file list/Markdown heading 粘连。
+- pure formatting + real magic-prompt render 4 Bun tests / 9 assertions ✅；full workspace type-check/lint/diff check ✅。
+
+[#146](https://coding.s-s.city/songsong/openchamber/-/issues/146) 保持 open：后续仍需 branch-vs-base Context Diff、fork PR worktree fallback 和 merged/open PR history correctness。
