@@ -2849,6 +2849,15 @@ v1.20.0-sscity 尚未宣布完成：当前未关闭 `#135/#140/#142-#151/#154/#1
 
 验证：upload client + invalidation + filesystem reason Bun 3 files / 7 tests ✅；UI type-check/lint ✅。全 workspace type/lint/build 与 diff check 见本 phase 最终验证。[#147](https://coding.s-s.city/songsong/openchamber/-/issues/147) 保持 open：VS Code extension 没有 `/api/fs/upload` server surface，需在其 bridge/type WIP 收口后补二进制 upload parity；installed runtime drag/drop matching-surface QA 也尚未执行。
 
+### #147 Phase 3：VS Code atomic binary upload parity（2026-08-31）
+
+- VS Code webview fetch shim 拦截共享 `POST /api/fs/upload`，复用现有 binary body encoder，向 extension bridge 发送 explicit `directory + path + overwrite + bodyBase64`；backend 的 200/403/409/413 status/body 原样恢复为 Response，共享 Sidebar conflict/Replace UX 不分叉。
+- extension host 只接受 current VS Code workspace root 内的 owning directory；atomic runtime 再以 realpath 校验 parent boundary，拒绝 outside/symlink target，保持 100 MiB 上限、same-directory temp、no-overwrite hard-link commit 与 explicit overwrite rename。
+- bridge payload error 与 HTTP conflict 分离：缺字段是 bridge contract failure；workspace/outside/conflict/size 是成功 transport 上的结构化 HTTP result，避免 `sendBridgeMessage` 丢失 `reason`。
+- 对应提交：`f729cf51a feat(vscode): add atomic file upload bridge`、`841ea4307 feat(vscode): proxy binary file uploads`。`webview/main.tsx` 用 temporary index 精确提交，原 selection-attachment staged diff 恢复为 58/22。
+
+验证：VS Code atomic runtime 4/4 + bridge FS 6/6 ✅；VS Code type-check/lint/build ✅，build 仅有既有 chunk/import warnings。[#147](https://coding.s-s.city/songsong/openchamber/-/issues/147) 保持 open：仍需真实 VS Code Extension Host 与 Desktop/Web installed runtime drag/drop + 409 Replace matching-surface QA。
+
 ### #148 Phase 1：Deleted-worktree draft recovery（2026-08-30）
 
 上游来源：`3d15b09d0`、`f26ad5d35`、`5693e5ff9`，按 fork multi-instance authority 重写，不修改 dirty `opencode/client.ts`：
