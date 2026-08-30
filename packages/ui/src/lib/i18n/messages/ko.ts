@@ -258,6 +258,8 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.header.displayMode.label': '표시 모드',
   'sessions.sidebar.header.displayMode.default': '기본값',
   'sessions.sidebar.header.displayMode.minimal': '최소',
+  'sessions.sidebar.header.projectDisplay.all': '모든 프로젝트',
+  'sessions.sidebar.header.projectDisplay.single': '프로젝트 하나',
   'sessions.sidebar.header.displayMode.showRecent': '최근 섹션 표시',
   'sessions.sidebar.header.displayMode.stickyHeaders': '프로젝트 헤더 고정',
   'sessions.sidebar.header.grouping.byWorktree': '워크트리별 그룹',

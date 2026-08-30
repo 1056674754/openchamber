@@ -257,6 +257,8 @@ export const dict = {
   'sessions.sidebar.header.displayMode.label': 'Display mode',
   'sessions.sidebar.header.displayMode.default': 'Default',
   'sessions.sidebar.header.displayMode.minimal': 'Minimal',
+  'sessions.sidebar.header.projectDisplay.all': 'All projects',
+  'sessions.sidebar.header.projectDisplay.single': 'One project',
   'sessions.sidebar.header.displayMode.showRecent': 'Show recent section',
   'sessions.sidebar.header.displayMode.stickyHeaders': 'Sticky project headers',
   'sessions.sidebar.header.grouping.byWorktree': 'Group by worktree',

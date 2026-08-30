@@ -258,6 +258,8 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.header.displayMode.label': '表示モード',
   'sessions.sidebar.header.displayMode.default': 'デフォルト',
   'sessions.sidebar.header.displayMode.minimal': 'ミニマル',
+  'sessions.sidebar.header.projectDisplay.all': 'すべてのプロジェクト',
+  'sessions.sidebar.header.projectDisplay.single': '1 つのプロジェクト',
   'sessions.sidebar.header.displayMode.showRecent': '最近のセクションを表示',
   'sessions.sidebar.header.displayMode.stickyHeaders': 'プロジェクト見出しを固定',
   'sessions.sidebar.header.grouping.byWorktree': 'ワークツリー別',

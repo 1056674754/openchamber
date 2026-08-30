@@ -67,6 +67,8 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.header.displayMode.label': 'Tryb wyświetlania',
   'sessions.sidebar.header.displayMode.default': 'Domyślny',
   'sessions.sidebar.header.displayMode.minimal': 'Minimalny',
+  'sessions.sidebar.header.projectDisplay.all': 'Wszystkie projekty',
+  'sessions.sidebar.header.projectDisplay.single': 'Jeden projekt',
   'sessions.sidebar.header.displayMode.showRecent': 'Pokaż sekcję ostatnich',
   'sessions.sidebar.header.displayMode.stickyHeaders': 'Przyklej nagłówki projektów',
   'sessions.sidebar.header.grouping.byWorktree': 'Grupuj według worktree',

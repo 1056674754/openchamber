@@ -38,3 +38,21 @@ describe('useSessionDisplayStore project sorting', () => {
     });
   });
 });
+
+describe('useSessionDisplayStore project display', () => {
+  test('stores focused-project mode independently from row density and grouping', () => {
+    useSessionDisplayStore.setState({
+      displayMode: 'minimal',
+      sessionGroupingMode: 'flat',
+      projectDisplayMode: 'single',
+      singleProjectId: 'project-a',
+    });
+
+    expect(useSessionDisplayStore.getState().projectDisplayMode).toBe('single');
+    expect(useSessionDisplayStore.getState().singleProjectId).toBe('project-a');
+    expect(useSessionDisplayStore.getState().displayMode).toBe('minimal');
+    expect(useSessionDisplayStore.getState().sessionGroupingMode).toBe('flat');
+
+    useSessionDisplayStore.setState({ projectDisplayMode: 'all', singleProjectId: null });
+  });
+});

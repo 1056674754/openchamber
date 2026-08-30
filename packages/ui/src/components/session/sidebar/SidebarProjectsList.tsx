@@ -25,6 +25,13 @@ import { useSessionDisplayStore, type ProjectSortOrder } from '@/stores/useSessi
 import { useStickyHeadersStore } from './stickyHeadersStore';
 import { Icon } from '@/components/icon/Icon';
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import {
   getRemoteProjectLoadStates,
   type RemoteProjectLoadState,
   type RemoteProjectRef,
@@ -57,7 +64,11 @@ type Props = {
   bottomContent?: React.ReactNode;
   sectionsForRender: ProjectSection[];
   projectSections: ProjectSection[];
+  projectPickerSections: ProjectSection[];
   activeProjectId: string | null;
+  singleProjectMode: boolean;
+  singleProjectId: string | null;
+  setSingleProjectId: (id: string) => void;
   showOnlyMainWorkspace: boolean;
   hasSessionSearchQuery: boolean;
   emptyState: React.ReactNode;
@@ -239,6 +250,47 @@ export function SidebarProjectsList(props: Props): React.ReactNode {
     || formatDirectoryName(leadingProject.normalizedPath, props.homeDirectory)
     || leadingProject.normalizedPath,
   ) : null;
+  const selectedSingleProject = props.singleProjectMode
+    ? props.projectPickerSections.find((section) => section.project.id === props.singleProjectId)?.project ?? null
+    : null;
+  const singleProjectPicker = props.singleProjectMode && selectedSingleProject ? (
+    <div className="px-0 pb-1 pt-0.5">
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button
+            type="button"
+            className="flex h-8 w-full min-w-0 items-center gap-2 rounded-md border border-border/70 px-2 text-left hover:bg-interactive-hover"
+            aria-label={t('sessions.sidebar.header.projectDisplay.single')}
+          >
+            <Icon name="folder" className="size-4 shrink-0 text-muted-foreground" />
+            <span className="min-w-0 flex-1 truncate typography-ui-label">
+              {formatProjectLabel(
+                selectedSingleProject.label?.trim()
+                || formatDirectoryName(selectedSingleProject.normalizedPath, props.homeDirectory)
+                || selectedSingleProject.normalizedPath,
+              )}
+            </span>
+            <Icon name="arrow-down-s" className="size-4 shrink-0 text-muted-foreground" />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start" className="max-h-80 min-w-[240px] overflow-y-auto">
+          <DropdownMenuRadioGroup value={props.singleProjectId ?? ''} onValueChange={props.setSingleProjectId}>
+            {props.projectPickerSections.map((section) => (
+              <DropdownMenuRadioItem key={section.project.id} value={section.project.id}>
+                <span className="truncate">
+                  {formatProjectLabel(
+                    section.project.label?.trim()
+                    || formatDirectoryName(section.project.normalizedPath, props.homeDirectory)
+                    || section.project.normalizedPath,
+                  )}
+                </span>
+              </DropdownMenuRadioItem>
+            ))}
+          </DropdownMenuRadioGroup>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
+  ) : null;
 
   // Capacitor/mobile drawer: native overflow only. OverlayScrollbar + ScrollShadow
   // observers fight 2k+ session-row DOM during touch scroll.
@@ -262,6 +314,7 @@ export function SidebarProjectsList(props: Props): React.ReactNode {
     return (
       <ScrollableOverlay {...listScrollProps}>
         {props.topContent}
+        {singleProjectPicker}
         {!props.hasStandaloneContent
           ? (props.hasSessionSearchQuery ? props.searchEmptyState : props.emptyState)
           : null}
@@ -274,6 +327,7 @@ export function SidebarProjectsList(props: Props): React.ReactNode {
     return (
       <ScrollableOverlay {...listScrollProps}>
         {props.topContent}
+        {singleProjectPicker}
         {props.searchEmptyState}
         {props.bottomContent}
       </ScrollableOverlay>
@@ -289,6 +343,7 @@ export function SidebarProjectsList(props: Props): React.ReactNode {
     >
     <ScrollableOverlay ref={scrollContainerRef} {...listScrollProps}>
       {props.topContent}
+      {singleProjectPicker}
       {props.showOnlyMainWorkspace ? (
         <div className="space-y-[0.6rem] py-1">
           {(() => {

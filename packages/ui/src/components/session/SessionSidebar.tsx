@@ -471,6 +471,9 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   const reorderProjectsById = useProjectsStore((state) => state.reorderProjectsById);
   const toggleProjectPin = useProjectsStore((state) => state.toggleProjectPin);
   const projectSortOrder = useSessionDisplayStore((state) => state.projectSortOrder);
+  const projectDisplayMode = useSessionDisplayStore((state) => state.projectDisplayMode);
+  const singleProjectId = useSessionDisplayStore((state) => state.singleProjectId);
+  const setSingleProjectId = useSessionDisplayStore((state) => state.setSingleProjectId);
   const setActiveMainTab = useUIStore((state) => state.setActiveMainTab);
   const openContextPanelTab = useUIStore((state) => state.openContextPanelTab);
   const setSettingsDialogOpen = useUIStore((state) => state.setSettingsDialogOpen);
@@ -754,6 +757,14 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
     void refreshDesktopSettingsFromHost();
     void refreshGlobalSessions(syncSessionsSnapshotRef.current);
   }, []);
+
+  React.useEffect(() => {
+    if (!sidebarActive) return;
+    const interval = window.setInterval(() => {
+      if (document.visibilityState === 'visible') void refreshGlobalSessions();
+    }, 45_000);
+    return () => window.clearInterval(interval);
+  }, [sidebarActive]);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -1859,19 +1870,29 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
   }, [availableWorktreesByProject, gitBranches, homeDirectory, normalizedProjects, projectRootBranches]);
 
   const showRecentSection = useSessionDisplayStore((state) => state.showRecentSection);
+  const supportsSingleProjectMode = !isVSCode && !mobileVariant && !showOnlyMainWorkspace;
+  const isSingleProjectMode = supportsSingleProjectMode && projectDisplayMode === 'single';
+  const effectiveSingleProjectId = React.useMemo(() => {
+    if (!isSingleProjectMode) return null;
+    if (singleProjectId && projectSections.some((section) => section.project.id === singleProjectId)) return singleProjectId;
+    if (activeProjectId && projectSections.some((section) => section.project.id === activeProjectId)) return activeProjectId;
+    return projectSections[0]?.project.id ?? null;
+  }, [activeProjectId, isSingleProjectMode, projectSections, singleProjectId]);
+  const effectiveShowRecentSection = showRecentSection && !isSingleProjectMode;
+  const effectiveShowOnlyMainWorkspace = showOnlyMainWorkspace || isSingleProjectMode;
 
   const activeNowSessions = React.useMemo(() => {
-    if (!showRecentSection) {
+    if (!effectiveShowRecentSection) {
       return [];
     }
 
     const projectSessions = sessions.filter((session) => !isChatDirectoryPath(session.directory));
     return deriveActiveNowSessions(activeNowEntries, new Map(projectSessions.map((session) => [session.id, session])))
       .sort((a, b) => compareSessions(a, b, effectivePinnedSessionIds, sessionSortMode));
-  }, [activeNowEntries, effectivePinnedSessionIds, sessions, sessionSortMode, showRecentSection]);
+  }, [activeNowEntries, effectivePinnedSessionIds, effectiveShowRecentSection, sessions, sessionSortMode]);
 
   const liveActiveSessions = React.useMemo(() => {
-    if (!showRecentSection) {
+    if (!effectiveShowRecentSection) {
       return [];
     }
 
@@ -1879,18 +1900,18 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
       sessions.filter((session) => !isChatDirectoryPath(session.directory)),
       liveSessionStatuses,
     );
-  }, [liveSessionStatuses, sessions, showRecentSection]);
+  }, [effectiveShowRecentSection, liveSessionStatuses, sessions]);
 
   React.useEffect(() => {
-    if (!showRecentSection || liveActiveSessions.length === 0) {
+    if (!effectiveShowRecentSection || liveActiveSessions.length === 0) {
       return;
     }
 
     liveActiveSessions.forEach((session) => addActiveNowSessionToStore(session.id));
-  }, [addActiveNowSessionToStore, liveActiveSessions, showRecentSection]);
+  }, [addActiveNowSessionToStore, effectiveShowRecentSection, liveActiveSessions]);
 
   React.useEffect(() => {
-    if (!showRecentSection) {
+    if (!effectiveShowRecentSection) {
       return;
     }
 
@@ -1900,7 +1921,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
     });
 
     pruneActiveNowEntriesInStore(allKnownSessionsById);
-  }, [archivedSessions, pruneActiveNowEntriesInStore, sessions, showRecentSection]);
+  }, [archivedSessions, effectiveShowRecentSection, pruneActiveNowEntriesInStore, sessions]);
 
   const globalPinnedSessions = React.useMemo(() => {
     // Use unfiltered catalogs — project-visibility `sessions` can omit pinned IDs
@@ -1989,13 +2010,13 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
         title: t('sessions.sidebar.activity.chatsTitle'),
         items: chatItems,
       }] : []),
-      ...(showRecentSection ? [{
+      ...(effectiveShowRecentSection ? [{
         key: 'active-now' as const,
         title: t('sessions.sidebar.activity.recentTitle'),
         items: activeNowSessions.map(toItem),
       }] : []),
     ];
-  }, [activeNowSessions, isVSCode, managedChatGroups, sessionSidebarMetaById, showRecentSection, t]);
+  }, [activeNowSessions, effectiveShowRecentSection, isVSCode, managedChatGroups, sessionSidebarMetaById, t]);
 
   const recentSessionIds = React.useMemo(() => {
     return new Set(activeNowSessions.map((session) => session.id));
@@ -2070,7 +2091,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
     activitySections: sidebarActivitySections,
     sectionsForRender: sectionsForSidebarRender,
     activeProjectId,
-    showOnlyMainWorkspace,
+    showOnlyMainWorkspace: effectiveShowOnlyMainWorkspace,
     hasSessionSearchQuery,
     normalizedSessionSearchQuery,
     groupSearchDataByGroup,
@@ -2105,7 +2126,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
     sessionGroupMinVisible,
     sessionGroupRecentHours,
     sessionOrderIndex,
-    showOnlyMainWorkspace,
+    effectiveShowOnlyMainWorkspace,
     sidebarActivitySections,
     visibleSessionCountByGroup,
   ]);
@@ -2860,6 +2881,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
     >
       <SidebarHeader
         hideDirectoryControls={hideDirectoryControls}
+        showProjectDisplayControls={supportsSingleProjectMode}
         mobileVariant={mobileVariant}
         handleOpenDirectoryDialog={handleOpenDirectoryDialog}
         openNewSessionDraft={handleOpenNewSessionDraftFromHeader}
@@ -2888,8 +2910,12 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
         bottomContent={mobileVariant ? tempSessionsSection : null}
         sectionsForRender={sectionsForSidebarRender}
         projectSections={projectSections}
-        activeProjectId={activeProjectId}
-        showOnlyMainWorkspace={showOnlyMainWorkspace}
+        projectPickerSections={projectSections}
+        activeProjectId={effectiveSingleProjectId ?? activeProjectId}
+        singleProjectMode={isSingleProjectMode}
+        singleProjectId={effectiveSingleProjectId}
+        setSingleProjectId={setSingleProjectId}
+        showOnlyMainWorkspace={effectiveShowOnlyMainWorkspace}
         hasSessionSearchQuery={hasSessionSearchQuery}
         emptyState={emptyState}
         searchEmptyState={searchEmptyState}

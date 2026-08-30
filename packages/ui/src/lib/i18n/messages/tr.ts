@@ -258,6 +258,8 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.header.displayMode.label": "Görüntüleme modu",
   "sessions.sidebar.header.displayMode.default": "Varsayılan",
   "sessions.sidebar.header.displayMode.minimal": "Minimal",
+  "sessions.sidebar.header.projectDisplay.all": "Tüm projeler",
+  "sessions.sidebar.header.projectDisplay.single": "Tek proje",
   "sessions.sidebar.header.displayMode.showRecent": "Son kullanılanlar bölümünü göster",
   "sessions.sidebar.header.displayMode.stickyHeaders": "Yapışkan proje başlıkları",
   "sessions.sidebar.header.grouping.byWorktree": "Worktree'ye göre",

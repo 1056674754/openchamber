@@ -15,6 +15,7 @@ import { Icon } from "@/components/icon/Icon";
 
 type Props = {
   hideDirectoryControls: boolean;
+  showProjectDisplayControls: boolean;
   mobileVariant: boolean;
   handleOpenDirectoryDialog: () => void;
   openNewSessionDraft: () => void;
@@ -42,6 +43,7 @@ export function SidebarHeader(props: Props): React.ReactNode {
   const { t } = useI18n();
   const {
     hideDirectoryControls,
+    showProjectDisplayControls,
     mobileVariant,
     handleOpenDirectoryDialog,
     openNewSessionDraft,
@@ -77,6 +79,9 @@ export function SidebarHeader(props: Props): React.ReactNode {
   const toggleArchivedSessions = useSessionDisplayStore((state) => state.toggleArchivedSessions);
   const projectSortOrder = useSessionDisplayStore((state) => state.projectSortOrder);
   const setProjectSortOrder = useSessionDisplayStore((state) => state.setProjectSortOrder);
+  const projectDisplayMode = useSessionDisplayStore((state) => state.projectDisplayMode);
+  const setProjectDisplayMode = useSessionDisplayStore((state) => state.setProjectDisplayMode);
+  const isSingleProjectMode = projectDisplayMode === 'single';
 
   if (hideDirectoryControls) {
     return null;
@@ -297,6 +302,25 @@ export function SidebarHeader(props: Props): React.ReactNode {
                   {displayMode === 'minimal' ? <Icon name="check" className="h-4 w-4 text-primary" /> : null}
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
+                {showProjectDisplayControls ? (
+                  <>
+                    <DropdownMenuItem
+                      onClick={() => setProjectDisplayMode('all')}
+                      className="flex items-center justify-between"
+                    >
+                      <span>{t('sessions.sidebar.header.projectDisplay.all')}</span>
+                      {projectDisplayMode === 'all' ? <Icon name="check" className="h-4 w-4 text-primary" /> : null}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onClick={() => setProjectDisplayMode('single')}
+                      className="flex items-center justify-between"
+                    >
+                      <span>{t('sessions.sidebar.header.projectDisplay.single')}</span>
+                      {projectDisplayMode === 'single' ? <Icon name="check" className="h-4 w-4 text-primary" /> : null}
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                  </>
+                ) : null}
                 <DropdownMenuItem
                   onClick={() => setSessionGroupingMode('by-worktree')}
                   className="flex items-center justify-between"
@@ -319,13 +343,15 @@ export function SidebarHeader(props: Props): React.ReactNode {
                   {stickyZoneHeaders ? <Icon name="check" className="h-4 w-4 text-primary" /> : null}
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  onClick={toggleRecentSection}
-                  className="flex items-center justify-between"
-                >
-                  <span>{t('sessions.sidebar.header.displayMode.showRecent')}</span>
-                  {showRecentSection ? <Icon name="check" className="h-4 w-4 text-primary" /> : null}
-                </DropdownMenuItem>
+                {!isSingleProjectMode ? (
+                  <DropdownMenuItem
+                    onClick={toggleRecentSection}
+                    className="flex items-center justify-between"
+                  >
+                    <span>{t('sessions.sidebar.header.displayMode.showRecent')}</span>
+                    {showRecentSection ? <Icon name="check" className="h-4 w-4 text-primary" /> : null}
+                  </DropdownMenuItem>
+                ) : null}
                 <DropdownMenuItem
                   onClick={toggleArchivedSessions}
                   className="flex items-center justify-between"
@@ -333,15 +359,19 @@ export function SidebarHeader(props: Props): React.ReactNode {
                   <span>{t('sessions.sidebar.header.displayMode.showArchived')}</span>
                   {showArchivedSessions ? <Icon name="check" className="h-4 w-4 text-primary" /> : null}
                 </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={collapseAllProjects} className="flex items-center gap-2">
-                  <Icon name="contract-up-down" className="h-4 w-4" />
-                  <span>{t('sessions.sidebar.header.displayMode.collapseAll')}</span>
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={expandAllProjects} className="flex items-center gap-2">
-                  <Icon name="expand-up-down" className="h-4 w-4" />
-                  <span>{t('sessions.sidebar.header.displayMode.expandAll')}</span>
-                </DropdownMenuItem>
+                {!isSingleProjectMode ? (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem onClick={collapseAllProjects} className="flex items-center gap-2">
+                      <Icon name="contract-up-down" className="h-4 w-4" />
+                      <span>{t('sessions.sidebar.header.displayMode.collapseAll')}</span>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={expandAllProjects} className="flex items-center gap-2">
+                      <Icon name="expand-up-down" className="h-4 w-4" />
+                      <span>{t('sessions.sidebar.header.displayMode.expandAll')}</span>
+                    </DropdownMenuItem>
+                  </>
+                ) : null}
               </DropdownMenuContent>
             </DropdownMenu>
           </div>

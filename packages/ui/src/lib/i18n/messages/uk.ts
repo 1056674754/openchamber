@@ -258,6 +258,8 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.header.displayMode.label": "Режим відображення",
   "sessions.sidebar.header.displayMode.default": "За замовчуванням",
   "sessions.sidebar.header.displayMode.minimal": "Мінімальний",
+  "sessions.sidebar.header.projectDisplay.all": "Усі проєкти",
+  "sessions.sidebar.header.projectDisplay.single": "Один проєкт",
   "sessions.sidebar.header.displayMode.showRecent": "Показувати нещодавні",
   "sessions.sidebar.header.displayMode.stickyHeaders": "Закріпити заголовки проєктів",
   "sessions.sidebar.header.grouping.byWorktree": "Групувати за worktree",

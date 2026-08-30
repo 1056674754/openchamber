@@ -8,16 +8,21 @@ import {
 
 export type SessionDisplayMode = 'default' | 'minimal';
 export type SessionGroupingMode = 'by-worktree' | 'flat';
+export type ProjectDisplayMode = 'all' | 'single';
 export type { ProjectSortOrder } from '@/lib/projectSorting';
 
 type SessionDisplayStore = {
   displayMode: SessionDisplayMode;
+  projectDisplayMode: ProjectDisplayMode;
+  singleProjectId: string | null;
   sessionGroupingMode: SessionGroupingMode;
   stickyZoneHeaders: boolean;
   showRecentSection: boolean;
   showArchivedSessions: boolean;
   projectSortOrder: ProjectSortOrder;
   setDisplayMode: (mode: SessionDisplayMode) => void;
+  setProjectDisplayMode: (mode: ProjectDisplayMode) => void;
+  setSingleProjectId: (projectId: string | null) => void;
   setSessionGroupingMode: (mode: SessionGroupingMode) => void;
   toggleStickyZoneHeaders: () => void;
   setShowRecentSection: (show: boolean) => void;
@@ -42,12 +47,16 @@ export const useSessionDisplayStore = create<SessionDisplayStore>()(
   persist(
     (set) => ({
       displayMode: 'default',
+      projectDisplayMode: 'all',
+      singleProjectId: null,
       sessionGroupingMode: 'by-worktree',
       stickyZoneHeaders: true,
       showRecentSection: false,
       showArchivedSessions: false,
       projectSortOrder: 'manual',
       setDisplayMode: (mode) => set({ displayMode: mode }),
+      setProjectDisplayMode: (mode) => set({ projectDisplayMode: mode }),
+      setSingleProjectId: (projectId) => set({ singleProjectId: projectId }),
       setSessionGroupingMode: (mode) => set({ sessionGroupingMode: mode }),
       toggleStickyZoneHeaders: () => set((state) => ({ stickyZoneHeaders: !state.stickyZoneHeaders })),
       setShowRecentSection: (show) => set({ showRecentSection: show }),
@@ -58,7 +67,7 @@ export const useSessionDisplayStore = create<SessionDisplayStore>()(
     }),
     {
       name: 'session-display-mode',
-      version: 2,
+      version: 3,
       migrate: migrateSessionDisplayState,
       storage: createDeferredSafeJSONStorage(),
     },

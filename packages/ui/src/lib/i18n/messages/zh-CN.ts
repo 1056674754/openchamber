@@ -258,6 +258,8 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.header.displayMode.label': '显示模式',
   'sessions.sidebar.header.displayMode.default': '默认',
   'sessions.sidebar.header.displayMode.minimal': '精简',
+  'sessions.sidebar.header.projectDisplay.all': '所有项目',
+  'sessions.sidebar.header.projectDisplay.single': '单个项目',
   'sessions.sidebar.header.displayMode.showRecent': '显示最近部分',
   'sessions.sidebar.header.displayMode.stickyHeaders': '固定项目标题',
   'sessions.sidebar.header.grouping.byWorktree': '按工作树分组',

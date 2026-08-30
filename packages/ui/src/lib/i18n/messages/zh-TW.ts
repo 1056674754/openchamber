@@ -254,6 +254,8 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.header.displayMode.label': '顯示模式',
   'sessions.sidebar.header.displayMode.default': '預設',
   'sessions.sidebar.header.displayMode.minimal': '精簡',
+  'sessions.sidebar.header.projectDisplay.all': '所有專案',
+  'sessions.sidebar.header.projectDisplay.single': '單一專案',
   'sessions.sidebar.header.displayMode.showRecent': '顯示最近部分',
   'sessions.sidebar.header.displayMode.stickyHeaders': '固定專案標題',
   'sessions.sidebar.header.grouping.byWorktree': '依工作樹分組',
