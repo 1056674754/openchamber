@@ -2,6 +2,8 @@ import { describe, expect, test } from 'bun:test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { spawn } from 'node:child_process';
+import { pathToFileURL } from 'node:url';
 import { withSettingsLock, defaultSettingsLockPath } from './settings-lock';
 
 const tmpDir = () => fs.mkdtempSync(path.join(os.tmpdir(), 'settings-lock-test-'));
@@ -100,6 +102,44 @@ describe('settings-lock', () => {
     expect(maxActive).toBe(1);
     expect(fs.existsSync(lock)).toBe(false);
     expect(fs.existsSync(`${lock}.cleanup`)).toBe(false);
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  test('preserves independent keys across separate writer processes', async () => {
+    const dir = tmpDir();
+    const lock = path.join(dir, 'settings.json.lock');
+    const settings = path.join(dir, 'settings.json');
+    const moduleUrl = pathToFileURL(path.join(import.meta.dir, 'settings-lock.js')).href;
+    const worker = `
+      import fs from 'node:fs/promises';
+      import { withSettingsLock } from ${JSON.stringify(moduleUrl)};
+      const [lockPath, settingsPath, key] = process.argv.slice(-3);
+      for (let index = 0; index < 10; index += 1) {
+        await withSettingsLock(lockPath, async () => {
+          let current = {};
+          try { current = JSON.parse(await fs.readFile(settingsPath, 'utf8')); } catch {}
+          await new Promise((resolve) => setTimeout(resolve, 2));
+          current[key] = index;
+          const tmp = settingsPath + '.tmp-' + process.pid + '-' + index;
+          await fs.writeFile(tmp, JSON.stringify(current));
+          await fs.rename(tmp, settingsPath);
+        }, { timeoutMs: 5000 });
+      }
+    `;
+    const run = (key) => new Promise((resolve, reject) => {
+      const child = spawn(process.execPath, ['-e', worker, lock, settings, key], { stdio: 'pipe' });
+      let stderr = '';
+      child.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
+      child.on('error', reject);
+      child.on('exit', (code) => code === 0 ? resolve() : reject(new Error(stderr || `worker exited ${code}`)));
+    });
+
+    await Promise.all([run('electron'), run('vscode')]);
+
+    expect(JSON.parse(await fs.promises.readFile(settings, 'utf8'))).toEqual({
+      electron: 9,
+      vscode: 9,
+    });
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
