@@ -108,6 +108,20 @@ describe('opencode routes', () => {
     expect(markPendingConfigRestart).not.toHaveBeenCalled();
   });
 
+  test('reports Agent Memory feature availability separately from its stored toggle', async () => {
+    const response = await request(createApp({
+      readSettingsFromDiskMigrated: async () => ({ agentMemoryToolEnabled: false }),
+      isAgentMemoryAvailable: () => true,
+    }))
+      .get('/api/config/settings')
+      .expect(200);
+
+    expect(response.body).toEqual({
+      agentMemoryToolEnabled: false,
+      agentMemoryAvailable: true,
+    });
+  });
+
   test('keeps provider source response shape while reading auth from the adapter', async () => {
     const response = await request(createApp({
       getProviderSources: () => ({

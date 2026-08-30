@@ -1943,6 +1943,7 @@ async function main(options = {}) {
     projectContextRuntime,
     agentMemoryRuntime,
     isAgentMemoryEnabled,
+    isAgentMemoryAvailable: isAgentMemoryFeatureAvailable,
     sessionKnowledgeRuntime,
     scheduledTasksRuntime,
     scheduledTaskService,

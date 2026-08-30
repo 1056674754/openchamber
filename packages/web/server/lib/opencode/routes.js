@@ -30,6 +30,7 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
     buildOpenCodeUrl,
     getOpenCodeAuthHeaders,
     fetchProvidersSnapshot,
+    isAgentMemoryAvailable = () => false,
     executeDirectOpenCodeUpgrade = defaultExecuteDirectOpenCodeUpgrade,
   } = dependencies;
 
@@ -284,7 +285,10 @@ ${desktopReturn ? `<a class="return" href="openchamber://focus/mcp-auth">Return 
   app.get('/api/config/settings', async (_req, res) => {
     try {
       const settings = await readSettingsFromDiskMigrated();
-      res.json(formatSettingsResponse(settings));
+      res.json({
+        ...formatSettingsResponse(settings),
+        agentMemoryAvailable: isAgentMemoryAvailable() === true,
+      });
     } catch (error) {
       console.error('Failed to read settings:', error);
       res.status(500).json({ error: 'Failed to read settings' });

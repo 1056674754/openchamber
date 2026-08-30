@@ -102,6 +102,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       projectContextRuntime,
       agentMemoryRuntime,
       isAgentMemoryEnabled,
+      isAgentMemoryAvailable,
       sessionKnowledgeRuntime,
       scheduledTasksRuntime,
       scheduledTaskService,
@@ -143,6 +144,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       buildOpenCodeUrl,
       getOpenCodeAuthHeaders,
       fetchProvidersSnapshot,
+      isAgentMemoryAvailable,
     });
 
     registerProjectIconRoutes(app, {
