@@ -40,25 +40,34 @@ describe('settings page instance visibility', () => {
   test('keeps server and workflow configuration pages visible in the remote instance scope', () => {
     for (const slug of [
       'sessions',
-      'git',
       'magic-prompts',
       'snippets',
       'providers',
-      'usage',
       'subscriptions',
       'agents',
-      'behavior',
       'commands',
       'mcp',
-      'plugins',
-      'permissions',
-      'config-presets',
       'skills.installed',
-      'skills.catalog',
     ]) {
       const page = meta(slug);
       expect(isSettingsPageVisibleForInstance(page, 'default')).toBe(true);
       expect(isSettingsPageVisibleForInstance(page, 'remote')).toBe(true);
+    }
+  });
+
+  test('keeps settings with local-only mutations out of the remote scope', () => {
+    for (const slug of [
+      'git',
+      'usage',
+      'behavior',
+      'plugins',
+      'permissions',
+      'config-presets',
+      'skills.catalog',
+    ]) {
+      const page = meta(slug);
+      expect(isSettingsPageVisibleForInstance(page, 'default')).toBe(true);
+      expect(isSettingsPageVisibleForInstance(page, 'remote')).toBe(false);
     }
   });
 

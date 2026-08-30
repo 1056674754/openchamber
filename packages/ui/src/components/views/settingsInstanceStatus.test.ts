@@ -13,4 +13,10 @@ describe('settingsInstanceStatusDotClass', () => {
     expect(settingsInstanceStatusDotClass({ type: 'remote' }, 'error')).toContain('bg-[var(--status-error)]');
     expect(settingsInstanceStatusDotClass({ type: 'remote' })).toBe('bg-muted-foreground/40');
   });
+
+  test('maps web remote phases without pretending disconnected instances are healthy', () => {
+    expect(settingsInstanceStatusDotClass({ type: 'remote' }, 'connected')).toContain('bg-[var(--status-success)]');
+    expect(settingsInstanceStatusDotClass({ type: 'remote' }, 'connecting')).toContain('bg-[var(--status-warning)]');
+    expect(settingsInstanceStatusDotClass({ type: 'remote' }, 'disconnected')).toBe('bg-muted-foreground/40');
+  });
 });

@@ -72,7 +72,11 @@ import { OpenCodeReloadFooterAction } from '@/components/views/OpenCodeReloadFoo
 import { useInstanceContextStore } from '@/stores/useInstanceContextStore';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useDesktopSshStore } from '@/stores/useDesktopSshStore';
-import { resolveInstanceLabel } from '@/lib/desktopSsh';
+import { useRemoteInstancesStore } from '@/stores/useRemoteInstancesStore';
+import {
+  buildSettingsInstanceDescriptors,
+  resolveSettingsInstancePhase,
+} from './settingsInstances';
 import { settingsInstanceStatusDotClass } from './settingsInstanceStatus';
 import {
   SETTINGS_PAGE_METADATA,
@@ -283,17 +287,26 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
   const sshInstances = useDesktopSshStore((s) => s.instances);
   const sshStatusesById = useDesktopSshStore(useShallow((s) => s.statusesById));
   const createSshInstanceFromCommand = useDesktopSshStore((s) => s.createFromCommand);
+  const webRemoteInstances = useRemoteInstancesStore(useShallow((s) => s.instances));
+  const webRemoteStatusesById = useRemoteInstancesStore(useShallow((s) => s.statuses));
+  const desktopInvokeAvailable = hasDesktopInvoke();
   React.useEffect(() => {
-    const deviceList = sshInstances.map((inst) => ({
-      id: inst.id,
-      type: 'remote' as const,
-      label: resolveInstanceLabel(inst),
-      directory: '',
-      sshCommand: inst.sshCommand,
-      instanceLabel: resolveInstanceLabel(inst),
-    }));
+    const deviceList = buildSettingsInstanceDescriptors({
+      desktopInvokeAvailable,
+      sshInstances,
+      webInstances: webRemoteInstances,
+    });
     setInstances(deviceList);
-  }, [sshInstances, setInstances]);
+  }, [desktopInvokeAvailable, setInstances, sshInstances, webRemoteInstances]);
+
+  const settingsInstancePhase = React.useCallback((instanceId: string) => (
+    resolveSettingsInstancePhase(
+      instanceId,
+      desktopInvokeAvailable,
+      sshStatusesById,
+      webRemoteStatusesById,
+    )
+  ), [desktopInvokeAvailable, sshStatusesById, webRemoteStatusesById]);
 
   const [mobileStage, setMobileStage] = React.useState<MobileStage>('nav');
   const autoNavSlugRef = React.useRef<string | null>(null);
@@ -1024,7 +1037,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
                       'h-2 w-2 shrink-0 rounded-full',
                       settingsInstanceStatusDotClass(
                         currentInstance ?? { type: 'default' },
-                        currentInstance?.id ? sshStatusesById[currentInstance.id]?.phase : undefined,
+                        currentInstance?.id ? settingsInstancePhase(currentInstance.id) : undefined,
                       ),
                     )}
                   />
@@ -1047,13 +1060,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
                       <span
                         className={cn(
                           'h-2 w-2 shrink-0 rounded-full',
-                          settingsInstanceStatusDotClass(inst, sshStatusesById[inst.id]?.phase),
+                          settingsInstanceStatusDotClass(inst, settingsInstancePhase(inst.id)),
                         )}
                       />
                       <span className="truncate">
                         {inst.type === 'default' ? t('settings.instance.selector.defaultLabel') : inst.label}
                       </span>
-                      {inst.type === 'remote' && (
+                      {inst.type === 'remote' && inst.transport === 'ssh' && (
                         <span className="typography-micro text-muted-foreground shrink-0">SSH</span>
                       )}
                     </div>

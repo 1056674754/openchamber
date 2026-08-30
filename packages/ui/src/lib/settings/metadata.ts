@@ -186,7 +186,7 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
     title: 'Agents',
     group: 'opencode',
     kind: 'split',
-    showOn: 'default',
+    showOn: 'both',
     keywords: ['agent', 'agents', 'prompts', 'tools', 'permissions'],
   },
   {
@@ -202,7 +202,7 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
     title: 'Commands',
     group: 'opencode',
     kind: 'split',
-    showOn: 'default',
+    showOn: 'both',
     keywords: ['command', 'commands', 'slash', 'macros', 'automation'],
   },
   {
@@ -210,7 +210,7 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
     title: 'MCP',
     group: 'opencode',
     kind: 'split',
-    showOn: 'default',
+    showOn: 'both',
     keywords: ['mcp', 'model context protocol', 'servers', 'tools', 'remote', 'stdio'],
   },
   {
@@ -251,7 +251,7 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
     title: 'Skills',
     group: 'skills',
     kind: 'split',
-    showOn: 'default',
+    showOn: 'both',
     keywords: ['skill', 'skills', 'instructions', 'install', 'catalog'],
   },
   {

@@ -24,6 +24,8 @@ export interface InstanceDescriptor {
   id: string;
   type: InstanceType;
   label: string;
+  /** Remote transport, used only for transport-specific presentation. */
+  transport?: 'ssh' | 'url';
   /** Working directory used as OpenCode context (local or remote path). */
   directory: string;
   /** remote-only: SSH connection command. */
@@ -78,6 +80,7 @@ function sameInstanceDescriptor(
   return left.id === right.id
     && left.type === right.type
     && left.label === right.label
+    && left.transport === right.transport
     && left.directory === right.directory
     && left.sshCommand === right.sshCommand
     && left.instanceLabel === right.instanceLabel;
