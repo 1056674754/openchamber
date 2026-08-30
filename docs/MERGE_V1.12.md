@@ -2414,3 +2414,15 @@ QA 事故记录：HMR server 复用了安装版 managed OpenCode `54185`，退�
 - OpenCode global events 与 OpenChamber synthetic events 保持两条明确 ownership channel，未把 synthetic event 注入 OpenCode history/replay buffer。
 
 验证：remote synthetic fanout + global capability bridge + event runtime Vitest 3 files / 17 tests ✅；control client Bun 1 file / 5 tests ✅；UI/Web type-check/lint ✅；`git diff --check` ✅。`#135` 仅剩 dirty Electron main 中的 dev-tunnel IPC/shell lifecycle；private relay 下的 tunnel-virtual endpoint 仍由 [#137](https://coding.s-s.city/songsong/openchamber/-/issues/137) 后续处理。
+
+### #137 Phase 10：Loss-safe relay request-body delivery（2026-08-30）
+
+上游来源：`d634cd232`、`aaf397e68`、`854a0db92`，保持 TS client / JS host wire backward compatibility：
+
+- `TunnelHttpRequestPayload` 新增 optional `hasBody`。client 有 body source 时声明 true；source 即使 0 chunks 也发送一个 explicit empty `HttpBody` frame，再发送 `StreamEnd`。
+- host 对 ≤512 KiB body 先完整 buffer，只在收到 `StreamEnd` 后一次性 forward loopback；relay reconnect/丢 frame 时不会把 empty/truncated chunked body 发给 OpenCode 后得到裸 400。
+- `hasBody=true` 但 0 body frames 属于 ambiguous transport failure，发送 `StreamAbort` 让 client 既有 retry/unknown-outcome 语义处理。旧 client 未带 hasBody 的 bodyless POST 与显式 empty frame 都保持可用。
+- buffered delivery 15 秒 deadline；超时只 abort 一次、释放 buffer/call frame，late `StreamEnd` 不会复活请求。>512 KiB 切换 live stream，避免大上传全量占内存。
+- response path、E2EE framing、batch negotiation、frame counters 与 WebSocket path 均未变化。
+
+验证：tunnel client + host body + JS/TS cross-compat 3 files / 24 tests ✅；UI/Web type-check/lint ✅；Node syntax ✅。`#137` 保持 open，继续审计 pairing origin、mobile reconnect/tokenless resume、ngrok 与 private-relay dev tunnel。

@@ -95,4 +95,13 @@ Relay mode plugs into the existing client transport layer rather than a parallel
 - The tunnel is transparent to the app: adding relay support to a feature should not require the feature to know the relay exists — it goes through the shared runtime transport helpers.
 - The two implementations stay byte-compatible and the wire format is versioned/negotiated so mixed client/host app versions degrade gracefully rather than break.
 
+## Request-body delivery
+
+- `TunnelHttpRequestPayload.hasBody` declares whether the client had a body source. It is optional for compatibility with older clients.
+- A body source that yields no chunks still emits one empty `HttpBody` frame before `StreamEnd`.
+- The host buffers bodies through 512 KiB and forwards only after `StreamEnd`; incomplete/lost bodies therefore never reach loopback as empty or truncated requests.
+- A declared body with zero delivered body frames is aborted as an ambiguous transport failure. A legacy/bodyless request remains compatible and an explicit empty frame forwards a real empty body.
+- Buffered bodies have a 15-second delivery deadline. Timeout releases buffered chunks, aborts once, and does not accept a late `StreamEnd`.
+- Bodies larger than 512 KiB switch to bounded live streaming so uploads are not fully retained in memory.
+
 For the operational rules that keep future changes (new WebSocket endpoints, transport refactors, terminal/voice porting) from breaking this, load the `relay-transport` skill.

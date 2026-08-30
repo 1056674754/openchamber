@@ -10,7 +10,7 @@ import {
   type FrameEncryptor,
 } from './crypto';
 import { createHostHandshake } from './handshake';
-import { TunnelFrameType } from './protocol';
+import { TunnelFrameType, type TunnelHttpRequestPayload } from './protocol';
 import {
   createFragmentAssembler,
   decodeFrameBatch,
@@ -309,6 +309,28 @@ describe('createRelayTunnelClient', () => {
     expect(b.status).toBe(200);
     expect(await b.text()).toBe(await new Response('{"ok":true}').text());
     expect(await c.text()).toBe('payload-xyz');
+  });
+
+  test('declares body presence and sends one explicit frame for an empty body stream', async () => {
+    const frames: TunnelFrame[] = [];
+    const { client } = await setupClient({ recordFrame: (frame) => frames.push(frame) });
+    track(client);
+    const request = new Request('http://tunnel.invalid/echo-body', {
+      method: 'POST',
+      body: new ReadableStream({ start(controller) { controller.close(); } }),
+      duplex: 'half',
+    } as RequestInit);
+
+    const response = await client.fetch(request);
+    expect(await response.text()).toBe('');
+
+    const head = frames.find((frame) => frame.frameType === TunnelFrameType.HttpRequest);
+    expect(head).toBeDefined();
+    const payload = decodeJsonPayload(head!.payload, isHttpRequestPayload) as TunnelHttpRequestPayload;
+    expect(payload.hasBody).toBe(true);
+    const bodyFrames = frames.filter((frame) => frame.frameType === TunnelFrameType.HttpBody);
+    expect(bodyFrames.length).toBe(1);
+    expect(bodyFrames[0]?.payload.length).toBe(0);
   });
 
   test('streams a response body incrementally', async () => {

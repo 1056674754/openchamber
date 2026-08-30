@@ -61,6 +61,8 @@ export interface TunnelHttpRequestPayload {
   path: string;
   query: string;
   headers: Record<string, string>;
+  /** Distinguishes a genuine bodyless request from one whose body frames were lost. */
+  hasBody?: boolean;
 }
 
 export interface TunnelHttpResponsePayload {
@@ -125,4 +127,3 @@ export const RelayCloseCode = {
   RekeyMismatch: 1008,
   ChannelFailure: 1011,
 } as const;
-

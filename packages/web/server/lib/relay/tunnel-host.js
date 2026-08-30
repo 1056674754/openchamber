@@ -61,6 +61,8 @@ const STRIPPED_RESPONSE_HEADERS = new Set([
 // relay socket has more than this buffered.
 const BACKPRESSURE_LIMIT_BYTES = 4 * 1024 * 1024;
 const BACKPRESSURE_POLL_MS = 20;
+const BODY_BUFFER_MAX_BYTES = 512 * 1024;
+const BODY_DELIVERY_TIMEOUT_MS = 15_000;
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -85,10 +87,17 @@ const isWsClosePayload = (parsed) => Boolean(parsed && typeof parsed === 'object
  *   getLocalPort: () => number,
  *   sendFrame: (plaintextFrame: Uint8Array) => void | Promise<void>,
  *   getBufferedAmount: () => number,
+ *   bodyDeliveryTimeoutMs?: number,
  * }} deps
  */
-export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBufferedAmount }) => {
-  /** @type {Map<number, { kind: 'http', abort: AbortController, body: ReadableStreamDefaultController | null } | { kind: 'ws', socket: WebSocket, opened: boolean }>} */
+export const createTunnelHost = ({
+  connectionId,
+  getLocalPort,
+  sendFrame,
+  getBufferedAmount,
+  bodyDeliveryTimeoutMs = BODY_DELIVERY_TIMEOUT_MS,
+}) => {
+  /** @type {Map<number, { kind: 'http', abort: AbortController, body: { enqueue(payload: Uint8Array): void, close(): void, error(error: Error): void } | null, noBody: boolean } | { kind: 'ws', socket: WebSocket, opened: boolean }>} */
   const streams = new Map();
   const assembler = createFragmentAssembler();
   let closed = false;
@@ -168,39 +177,14 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
     await send(encodeTunnelFrame(TunnelFrameType.StreamEnd, streamId, new Uint8Array(0)));
   };
 
-  const runHttpStream = async (streamId, request) => {
-    const method = request.method.toUpperCase();
-    if (!isAllowedHttpPath(request.path)) {
-      dropStream(streamId);
-      await syntheticResponse(streamId, 403, 'Path is not allowed through the relay');
-      return;
-    }
-
-    const stream = streams.get(streamId);
-    if (!stream || stream.kind !== 'http') return;
-
-    const hasBody = method !== 'GET' && method !== 'HEAD';
-    let requestBody;
-    if (hasBody) {
-      requestBody = new ReadableStream({
-        start(controller) {
-          stream.body = controller;
-        },
-      });
-    } else {
-      stream.body = null;
-      stream.noBody = true;
-    }
-
-    const loopbackOrigin = `http://127.0.0.1:${getLocalPort()}`;
-    const url = `${loopbackOrigin}${request.path}${request.query ? `?${request.query}` : ''}`;
+  const forwardRequest = async (streamId, stream, url, method, request, body, loopbackOrigin) => {
     let response;
     try {
       response = await fetch(url, {
         method,
         headers: buildRequestHeaders(request.headers, loopbackOrigin),
-        body: requestBody,
-        duplex: hasBody ? 'half' : undefined,
+        body,
+        duplex: body ? 'half' : undefined,
         signal: stream.abort.signal,
       });
     } catch (error) {
@@ -240,6 +224,115 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
         await sendAbort(streamId, error?.message ?? 'loopback response failed');
       }
     }
+  };
+
+  const runHttpStream = async (streamId, request) => {
+    const method = request.method.toUpperCase();
+    if (!isAllowedHttpPath(request.path)) {
+      dropStream(streamId);
+      await syntheticResponse(streamId, 403, 'Path is not allowed through the relay');
+      return;
+    }
+
+    const stream = streams.get(streamId);
+    if (!stream || stream.kind !== 'http') return;
+
+    const hasBody = method !== 'GET' && method !== 'HEAD';
+    const loopbackOrigin = `http://127.0.0.1:${getLocalPort()}`;
+    const url = `${loopbackOrigin}${request.path}${request.query ? `?${request.query}` : ''}`;
+    if (!hasBody) {
+      stream.noBody = true;
+      await forwardRequest(streamId, stream, url, method, request, null, loopbackOrigin);
+      return;
+    }
+
+    const buffered = [];
+    let bufferedBytes = 0;
+    let bodyFrameCount = 0;
+    let liveStream = null;
+    let liveController = null;
+    let completed = false;
+    let bodyFailure = null;
+    let resolveBodyEnd;
+    const bodyEnded = new Promise((resolve) => { resolveBodyEnd = resolve; });
+
+    const finishBody = (error) => {
+      if (completed) return;
+      completed = true;
+      bodyFailure = error ?? null;
+      if (liveController) {
+        try {
+          if (error) liveController.error(error);
+          else liveController.close();
+        } catch {
+          // stream already settled
+        }
+      }
+      resolveBodyEnd();
+    };
+
+    let deliveryDeadline = null;
+    const switchToLive = () => {
+      liveStream = new ReadableStream({
+        start(controller) {
+          liveController = controller;
+          stream.body = controller;
+        },
+      });
+      for (const chunk of buffered) {
+        try { liveController.enqueue(chunk); } catch { break; }
+      }
+      buffered.length = 0;
+      if (deliveryDeadline) clearTimeout(deliveryDeadline);
+      resolveBodyEnd();
+      void forwardRequest(streamId, stream, url, method, request, liveStream, loopbackOrigin);
+    };
+
+    stream.body = {
+      enqueue(payload) {
+        if (completed) return;
+        bodyFrameCount += 1;
+        if (liveController) {
+          try { liveController.enqueue(payload); } catch { /* stream settled */ }
+          return;
+        }
+        buffered.push(payload);
+        bufferedBytes += payload.length;
+        if (bufferedBytes > BODY_BUFFER_MAX_BYTES) switchToLive();
+      },
+      close() {
+        finishBody(null);
+      },
+      error(error) {
+        finishBody(error);
+      },
+    };
+
+    deliveryDeadline = setTimeout(() => {
+      if (streams.get(streamId) !== stream || completed || liveStream) return;
+      dropStream(streamId);
+      void sendAbort(streamId, 'tunnel request body was not delivered in time');
+      finishBody(new Error('tunnel request body was not delivered in time'));
+    }, bodyDeliveryTimeoutMs);
+    deliveryDeadline.unref?.();
+
+    await bodyEnded;
+    if (deliveryDeadline) clearTimeout(deliveryDeadline);
+    if (streams.get(streamId) !== stream) return;
+    if (bodyFailure) {
+      dropStream(streamId);
+      await sendAbort(streamId, bodyFailure.message ?? 'tunnel request body failed');
+      return;
+    }
+    if (liveStream) return;
+    if (request.hasBody === true && bodyFrameCount === 0) {
+      dropStream(streamId);
+      await sendAbort(streamId, 'tunnel request body frames were lost');
+      return;
+    }
+
+    stream.body = null;
+    await forwardRequest(streamId, stream, url, method, request, Buffer.concat(buffered), loopbackOrigin);
   };
 
   const handleHttpRequest = (streamId, payload) => {
