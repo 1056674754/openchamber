@@ -2341,6 +2341,16 @@ fork 已有丰富的 surface 组织（#62 surface rail + ContextSidebarTab + Con
 
 验证：Agent Memory API/store/i18n Bun 3 files / 7 tests ✅；full workspace type-check/lint/build ✅；隔离 `HOME + OPENCHAMBER_DATA_DIR + OPENCHAMBER_MEMORY_ENABLE=1` matching-surface QA 验证 `Memory 2`、global/project read、project edit persisted、global unchanged、delete first click only enters confirm。正式 runtime 未替换。[#143](https://coding.s-s.city/songsong/openchamber/-/issues/143) 保持 open：`agentMemoryToolEnabled` Settings/persistence wiring 与 managed OpenCode reload QA 尚未完成。
 
+### #143 Phase 8：Agent Memory Settings + managed restart（2026-08-31）
+
+- `/api/config/settings` 增加只读 `agentMemoryAvailable`，来自 server env feature gate；stored `agentMemoryToolEnabled` 独立返回。feature unavailable 时 Settings 不显示开关，不让用户启用无调用方功能。
+- `agentMemoryToolEnabled` 加入 UI store、Desktop/Web settings contract、host sync/sanitize 与 11-locale Settings 文案；默认 false。toggle PUT 失败时回滚，PUT 成功但 restart 失败时保留已持久化意图并显示原始错误，Footer 可继续 Apply & Restart。
+- toggle 显式 flush debounced settings PUT 后才 apply pending restart，避免 accumulator 仍为 0 的 race。server 只在布尔值真实变化时登记 `scope=agent-memory`，普通 settings PUT 不触发 restart。
+- Agent Memory scope 强制 process restart，不走默认 config hot reload：managed plugin 工具集合只在 process start 的 `prepareManagedOpenCodeEnv` 生成，hot reload 无法可靠增加/移除 `openchamber_memory`。
+- 对应提交：`b3bcab886 feat(memory): expose feature availability`、`b057f0758 feat(memory): persist tool preference`、`356838997 feat(memory): add managed tool setting`、`776b199be fix(memory): force managed plugin restart`。
+
+验证：Settings/persistence/routes/restart/i18n focused 4 files / 62 tests + restart focused 2 files / 24 tests ✅；full workspace type-check/lint/build ✅。隔离 `OPENCHAMBER_DATA_DIR + OPENCHAMBER_MEMORY_ENABLE=1` matching-surface QA：开关只在 available 时出现；首次测试复现并修复 debounce/apply race 与 hot-reload 假重启；最终 enable 从 port `63110` 强制重启到 `65221`，lifecycle 有完整 stop/spawn/ready/restart_completed，pending=0，settings=true，generated plugin 含 `openchamber_memory`，页面 reload 后 checkbox 仍 checked/enabled。隔离 UI/server/OpenCode 已停止，正式 runtime 未替换。[#143](https://coding.s-s.city/songsong/openchamber/-/issues/143) v1.20 scope 完成；跨实例 Settings mutation 归 [#154](https://coding.s-s.city/songsong/openchamber/-/issues/154)。
+
 ### #149 Phase 1：`/btw` metadata authority + transient panel state（2026-08-30）
 
 上游来源：`0d51d52c0`、`c5877c28a`，先落不触碰 dirty ChatInput/Sidebar 的基础合同：
