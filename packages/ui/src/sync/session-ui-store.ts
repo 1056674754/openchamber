@@ -102,6 +102,11 @@ import { formatMessage, useI18nStore } from "@/lib/i18n/store"
 import { getRuntimeKey } from "@/lib/runtime-switch"
 import { probeWorkspaceDirectoryAvailability } from "@/lib/directoryAvailability"
 import { contextTokensFromBreakdown } from "@/stores/utils/tokenUtils"
+import {
+  fetchSessionKnowledge,
+  reportSessionKnowledgeDelivered,
+  type SessionProjectContextPins,
+} from "@/lib/sessionKnowledgeApi"
 
 export type { AttachedFile }
 
@@ -305,6 +310,7 @@ export type NewSessionDraftState = {
   initialPrompt?: string
   syntheticParts?: SyntheticContextPart[]
   targetFolderId?: string
+  projectContextPins?: SessionProjectContextPins
 }
 
 export type SendMessageTarget = {
@@ -374,6 +380,7 @@ export type SessionUIState = {
   setNewSessionDraftTarget: (target: { projectId?: string | null; selectedProjectId?: string | null; directoryOverride?: string | null }, options?: { force?: boolean }) => void
   setDraftPreserveDirectoryOverride: (value: boolean) => void
   setDraftPermissionAutoAccept: (enabled: boolean) => void
+  setDraftProjectContextPin: (kind: "note" | "plan", id: string, pinned: boolean) => void
   acknowledgeSessionAbort: (sessionId: string) => void
   clearAbortPrompt: () => void
   armAbortPrompt: (durationMs?: number) => number | null
@@ -755,6 +762,12 @@ const DEFAULT_DRAFT: NewSessionDraftState = {
   parentID: null,
 }
 
+const draftKnowledgeMetadata = (draft: NewSessionDraftState): Record<string, unknown> | undefined => {
+  const pins = draft.projectContextPins ?? { notes: [], plans: [] }
+  if (pins.notes.length === 0 && pins.plans.length === 0) return undefined
+  return { openchamber: { project_context_pins: pins } }
+}
+
 export type MaterializedDraftSession = {
   readonly sessionId: string
   readonly directory: string
@@ -817,7 +830,14 @@ export async function materializeOpenDraftSession(selection: {
   let createError: unknown = null
   for (let attempt = 0; attempt < 3; attempt += 1) {
     try {
-      created = await store.createSession(draft.title, directory, draft.parentID ?? null, serverId, { select: true })
+      created = await store.createSession(
+        draft.title,
+        directory,
+        draft.parentID ?? null,
+        serverId,
+        { select: true },
+        draftKnowledgeMetadata(draft),
+      )
     } catch (error) {
       createError = error
     }
@@ -1076,6 +1096,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         initialPrompt: options?.initialPrompt,
         syntheticParts: options?.syntheticParts,
         targetFolderId: options?.targetFolderId,
+        projectContextPins: options?.projectContextPins,
       },
       currentSessionId: null,
       error: null,
@@ -1123,6 +1144,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         initialPrompt: undefined,
         syntheticParts: undefined,
         targetFolderId: undefined,
+        projectContextPins: undefined,
       },
     })
   },
@@ -1171,6 +1193,22 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         newSessionDraft: {
           ...s.newSessionDraft,
           permissionIntent: createDraftPermissionIntent(enabled),
+        },
+      }
+    }),
+
+  setDraftProjectContextPin: (kind, id, pinned) =>
+    set((state) => {
+      if (!state.newSessionDraft.open) return state
+      const pins = state.newSessionDraft.projectContextPins ?? { notes: [], plans: [] }
+      const key = kind === "note" ? "notes" : "plans"
+      const next = new Set(pins[key])
+      if (pinned) next.add(id)
+      else next.delete(id)
+      return {
+        newSessionDraft: {
+          ...state.newSessionDraft,
+          projectContextPins: { ...pins, [key]: [...next] },
         },
       }
     }),
@@ -1644,9 +1682,14 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       let createError: unknown = null
       for (let attempt = 0; attempt < 3; attempt++) {
         try {
-          created = await get().createSession(draft.title, draftDirectoryOverride, draft.parentID ?? null, draftServerId, {
-            select: !isCapturedDraftSend,
-          })
+          created = await get().createSession(
+            draft.title,
+            draftDirectoryOverride,
+            draft.parentID ?? null,
+            draftServerId,
+            { select: !isCapturedDraftSend },
+            draftKnowledgeMetadata(draft),
+          )
         } catch (error) {
           createError = error
         }
@@ -1700,8 +1743,12 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         }
       }
 
-      const mergedAdditionalParts = draftSyntheticParts?.length
-        ? [...(additionalParts || []), ...draftSyntheticParts]
+      const draftKnowledge = await fetchSessionKnowledge(createdDirectory, created.id, createdServerId)
+      const knowledgeParts: Array<{ text: string; attachments?: AttachedFile[]; synthetic?: boolean }> = draftKnowledge.text
+        ? [{ text: draftKnowledge.text, synthetic: true }]
+        : []
+      const mergedAdditionalParts = knowledgeParts.length > 0 || draftSyntheticParts?.length
+        ? [...knowledgeParts, ...(additionalParts || []), ...(draftSyntheticParts || [])]
         : additionalParts
 
       notifyMessageSent(created.id, createdDirectory)
@@ -1760,6 +1807,14 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         get().setCurrentSession(created.id, createdDirectory, { serverId: createdServerId })
       }
       await routePromise
+      if (draftKnowledge.text) {
+        void reportSessionKnowledgeDelivered(
+          createdDirectory,
+          created.id,
+          draftKnowledge.signature,
+          createdServerId,
+        )
+      }
       await deletePendingMessage(created.id)
       return
     } catch (error) {
@@ -1817,6 +1872,15 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     markPendingUserSendAnimation(currentSessionId)
     await applyArmedGoal(currentSessionId, currentSessionDirectory)
 
+    const knowledge = await fetchSessionKnowledge(
+      currentSessionDirectory,
+      currentSessionId,
+      currentSessionServerId,
+    )
+    const additionalPartsWithKnowledge = knowledge.text
+      ? [{ text: knowledge.text, synthetic: true }, ...(additionalParts || [])]
+      : additionalParts
+
     const files = attachments?.map((a) => ({
       type: "file" as const,
       mime: a.mimeType,
@@ -1837,7 +1901,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       directory: currentSessionDirectory,
       serverId: currentSessionServerId,
       deliveryMode,
-      additionalParts: additionalParts?.map((p) => ({
+      additionalParts: additionalPartsWithKnowledge?.map((p) => ({
         text: p.text,
         synthetic: p.synthetic,
         files: p.attachments?.map((a) => ({
@@ -1848,6 +1912,14 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         })),
       })),
     })
+    if (knowledge.text) {
+      void reportSessionKnowledgeDelivered(
+        currentSessionDirectory,
+        currentSessionId,
+        knowledge.signature,
+        currentSessionServerId,
+      )
+    }
   },
 
   // ---------------------------------------------------------------------------

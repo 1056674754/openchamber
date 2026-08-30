@@ -65,13 +65,17 @@ with a lazy `PlanView` in the same panel. `PlanView.projectPlanId` reads and
 saves raw markdown through the project-context routes; it never exposes or
 reconstructs the underlying path.
 
+## Session-scoped pins
+
+Note and plan pin controls attach ids to the current Session metadata, or to a
+new draft until its Session is created. The server assembles and signs the
+knowledge block; the UI only carries the returned synthetic part and reports
+delivery after the prompt is accepted. Scheduled tasks, agent-dispatched
+Sessions and post-compaction restoration call the same server runtime.
+
 ## Deferred v1.20 scope
 
-Session/draft-scoped note and plan pins are intentionally hidden until the
-`session-knowledge` runtime is connected. Using the `pinned` field directly
-would create project-global injection, which is not the upstream behavior.
-
-Agent Memory is also deferred. It remains feature-gated upstream and requires
+Agent Memory remains deferred. It is feature-gated upstream and requires
 its server runtime, tool actions and project-owner resolution together; this
 panel must not show a Memory tab before those pieces exist.
 

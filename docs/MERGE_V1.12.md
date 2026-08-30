@@ -2279,6 +2279,21 @@ fork 已有丰富的 surface 组织（#62 surface rail + ContextSidebarTab + Con
 
 [#143](https://coding.s-s.city/songsong/openchamber/-/issues/143) 保持 open：session knowledge pins + compaction/scheduled/agent-dispatched delivery、Agent memory 尚未移植。
 
+### #143 Phase 4：Session-scoped pins + uniform knowledge delivery（2026-08-30）
+
+- 新增 server-owned `session-knowledge`：pins 存在 `session.metadata.openchamber.project_context_pins`，delivery signature 存在同一 Session metadata；note edit/plan title change 会改变 signature 并触发下次重发。
+- assembled block 只含当前 Session/draft pinned note 与 plan body；总预算 8,000 chars 且截断显式标记。单个 plan 读失败显示 `(plan content unavailable)`，不会静默把 attachment 丢掉。
+- regular UI send、draft first send、scheduled task、OpenChamber Agent-dispatched Session 均在 prompt 前从同一 runtime 获取知识，在 prompt 被接受后才记录 delivered；失败 send 下次仍携带。
+- compaction 与 context-obligatory 合并成同一个 synthetic turn，避免连续两条系统恢复消息；cursor 与 knowledge signature 同一次 metadata patch。aggregated remote compaction 不读本机知识：由 remote OpenChamber 自身 runtime 处理，防止 Dev3 目录落进 local storage。
+- server owner 以最长 registered project path 解析，linked sibling worktree 通过 `git rev-parse --absolute-git-dir/--git-common-dir` 回到 primary checkout；无法解析时返回 empty，不取 projects[0]。
+- UI `sessionKnowledgeApi` 显式接受 serverId；local 与 `/api/remote/:id/session-knowledge` 分流。draft pins 随 create metadata 一起 materialize；现有 Session pin mutation 清空 delivered signature。
+- Project Knowledge Note/Plan pin controls现已启用；draft 使用 draft-local pins，Session 使用 server summary/pin routes。Agent Memory 仍显式 disabled，不混入 knowledge block。
+- 修复 `openchamber-sessions/service.test.js` 的旧 mock：prompt accepted 后返回新增 user message，使测试覆盖真正的 landed contract，而不是固定历史导致 5s timeout。
+
+验证：session runtime/project owner/service 3 Bun files / 24 tests ✅；scheduled runtime 11 tests ✅；UI pin authority/store 2 files / 35 tests ✅；context-obligatory Vitest 7 tests ✅；full workspace type-check/lint/build ✅；`git diff --check` ✅。隔离 `HOME + OPENCHAMBER_DATA_DIR` Web QA 新建 note 后确认 draft 显示 `Pin to agent context`，点击切换为 pressed 的 `Unpin from agent context`；未 materialize Session（external OpenCode 故意不可达），metadata/delivery 由 runtime/service tests 覆盖。
+
+[#143](https://coding.s-s.city/songsong/openchamber/-/issues/143) 保持 open，仅余 feature-gated Agent Memory 与 v1.21 owning-project follow-ups。
+
 ### #141 Phase 1：Isolated server exception survival（2026-08-30）
 
 上游来源：`71a538b77`。fork 的 embedded server 没有外部 supervisor，单个 Node/socket stray exception 不应让整个 OpenChamber instance 离线：

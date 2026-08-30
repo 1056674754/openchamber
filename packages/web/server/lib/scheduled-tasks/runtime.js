@@ -254,6 +254,7 @@ export const createScheduledTasksRuntime = (deps) => {
     waitForWorktreeBootstrap,
     emitTaskRunEvent,
     setSessionAutoAccept,
+    sessionKnowledgeRuntime = null,
     logger = console,
     maxGlobalConcurrency = DEFAULT_GLOBAL_CONCURRENCY,
     maxProjectConcurrency = DEFAULT_PROJECT_CONCURRENCY,
@@ -456,7 +457,7 @@ export const createScheduledTasksRuntime = (deps) => {
       + '\n</system-reminder>';
   };
 
-  const buildPromptAsyncPayload = (task, projectPath) => ({
+  const buildPromptAsyncPayload = (task, projectPath, knowledgeText = '') => ({
     model: {
       providerID: task.execution.providerID,
       modelID: task.execution.modelID,
@@ -464,6 +465,7 @@ export const createScheduledTasksRuntime = (deps) => {
     ...(task.execution.agent ? { agent: task.execution.agent } : {}),
     ...(task.execution.variant ? { variant: task.execution.variant } : {}),
     parts: [
+      ...(knowledgeText ? [{ type: 'text', text: knowledgeText, synthetic: true }] : []),
       {
         type: 'text',
         text: expandSnippets(task.execution.prompt, projectPath),
@@ -554,6 +556,10 @@ export const createScheduledTasksRuntime = (deps) => {
   };
 
   const runPromptAsync = async ({ baseUrl, authHeaders, sessionID, projectPath, task }) => {
+    const knowledge = sessionKnowledgeRuntime
+      ? await sessionKnowledgeRuntime.resolvePendingForSession(sessionID, projectPath)
+        .catch(() => ({ text: '', signature: '' }))
+      : { text: '', signature: '' };
     const promptUrl = new URL(`${baseUrl}/session/${encodeURIComponent(sessionID)}/prompt_async`);
     promptUrl.searchParams.set('directory', projectPath);
     const response = await fetch(promptUrl.toString(), {
@@ -563,12 +569,16 @@ export const createScheduledTasksRuntime = (deps) => {
         'content-type': 'application/json',
         accept: 'application/json',
       },
-      body: JSON.stringify(buildPromptAsyncPayload(task, projectPath)),
+      body: JSON.stringify(buildPromptAsyncPayload(task, projectPath, knowledge.text)),
     });
 
     if (!response.ok) {
       const body = await response.text().catch(() => '');
       throw new Error(`prompt_async failed (${response.status})${body ? `: ${body}` : ''}`);
+    }
+    if (knowledge.text && sessionKnowledgeRuntime) {
+      await sessionKnowledgeRuntime.recordDelivered(sessionID, projectPath, knowledge.signature)
+        .catch(() => undefined);
     }
   };
 

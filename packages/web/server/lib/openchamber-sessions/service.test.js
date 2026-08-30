@@ -38,17 +38,24 @@ describe('OpenChamber Session selection inheritance', () => {
         },
       },
     ];
+    let promptAccepted = false;
     const client = {
       session: {
-        messages: mock(async () => ({ data: messages })),
+        messages: mock(async () => ({
+          data: promptAccepted
+            ? [...messages, { info: { id: 'msg_user_sent', role: 'user', time: { created: 5 } } }]
+            : messages,
+        })),
       },
       command: {
         list: mock(async () => ({ data: [] })),
       },
     };
     let dispatchedBody = null;
+    const recordDelivered = mock(async () => undefined);
     globalThis.fetch = mock(async (_input, init) => {
       dispatchedBody = JSON.parse(String(init?.body));
+      promptAccepted = true;
       return {
         ok: true,
         text: async () => '',
@@ -61,6 +68,10 @@ describe('OpenChamber Session selection inheritance', () => {
       buildOpenCodeUrl: (pathname) => `http://127.0.0.1:4096${pathname}`,
       getOpenCodeAuthHeaders: () => ({}),
       createClient: () => client,
+      sessionKnowledgeRuntime: {
+        resolvePendingForSession: mock(async () => ({ text: 'Pinned project knowledge', signature: 'knowledge-v1' })),
+        recordDelivered,
+      },
     });
 
     // When
@@ -75,7 +86,10 @@ describe('OpenChamber Session selection inheritance', () => {
       model: { providerID: 'selected-provider', modelID: 'selected-model' },
       agent: 'selected-agent',
       variant: 'high',
-      parts: [{ type: 'text', text: 'Continue the task' }],
+      parts: [
+        { type: 'text', text: 'Pinned project knowledge', synthetic: true },
+        { type: 'text', text: 'Continue the task' },
+      ],
     });
     expect(result).toMatchObject({
       serverId: 'default',
@@ -85,5 +99,6 @@ describe('OpenChamber Session selection inheritance', () => {
       agent: 'selected-agent',
       variant: 'high',
     });
+    expect(recordDelivered).toHaveBeenCalledWith('ses_existing', '/workspace/current', 'knowledge-v1');
   });
 });

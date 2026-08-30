@@ -259,6 +259,7 @@ export const createOpenChamberSessionService = (dependencies) => {
     waitForOpenCodeReady,
     emitSessionCreatedEvent,
     createSessionGoal: createSessionGoalOverride,
+    sessionKnowledgeRuntime = null,
     createClient = createOpencodeClient,
     createWorktree: createWorktreeOverride = createWorktree,
     localServerId = 'default',
@@ -454,6 +455,10 @@ export const createOpenChamberSessionService = (dependencies) => {
     }
     if (!dispatchedAsCommand) {
       const baseline = await latestUserMessageID({ client, sessionID, directory });
+      const knowledge = sessionKnowledgeRuntime
+        ? await sessionKnowledgeRuntime.resolvePendingForSession(sessionID, directory)
+          .catch(() => ({ text: '', signature: '' }))
+        : { text: '', signature: '' };
       try {
         await runPromptAsync({
           baseUrl,
@@ -465,6 +470,7 @@ export const createOpenChamberSessionService = (dependencies) => {
             ...(agent ? { agent } : {}),
             ...(variant ? { variant } : {}),
             parts: [
+              ...(knowledge.text ? [{ type: 'text', text: knowledge.text, synthetic: true }] : []),
               { type: 'text', text: expandedPrompt },
               ...(goalInput.enabled
                 ? [{ type: 'text', text: buildGoalIntroText(goalInput.tokenBudget), synthetic: true }]
@@ -474,6 +480,10 @@ export const createOpenChamberSessionService = (dependencies) => {
         });
       } catch (error) {
         throw markGoalPartial(error);
+      }
+      if (knowledge.text && sessionKnowledgeRuntime) {
+        await sessionKnowledgeRuntime.recordDelivered(sessionID, directory, knowledge.signature)
+          .catch(() => undefined);
       }
       const landed = await waitForPromptLanded({
         client,

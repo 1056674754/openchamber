@@ -102,11 +102,14 @@ import { createGracefulShutdownRuntime } from './lib/opencode/shutdown-runtime.j
 import { createSessionGoalRuntime } from './lib/session-goal/runtime.js';
 import { createSessionAssistRuntime } from './lib/session-assist/runtime.js';
 import { createContextObligatoryRuntime } from './lib/context-obligatory/runtime.js';
+import { createSessionKnowledgeRuntime } from './lib/session-knowledge/runtime.js';
+import { resolveProjectKnowledgeOwnerPath } from './lib/session-knowledge/project-resolution.js';
 import { createProjectConfigRuntime } from './lib/projects/project-config.js';
+import { createProjectIdFromPath } from './lib/projects/project-id.js';
 import { createProjectContextRuntime } from './lib/project-context/runtime.js';
 import { createPreviewProxyRuntime } from './lib/preview/proxy-runtime.js';
 import { createRemoteInstancesRuntime } from './lib/remote-instances/config.js';
-import { waitForActiveWorktreeBootstrap } from './lib/git/service.js';
+import { resolvePrimaryWorktreeRoot, waitForActiveWorktreeBootstrap } from './lib/git/service.js';
 import { createRemoteGlobalEventFanout } from './lib/remote-instances/global-event-fanout.js';
 import { registerRemoteInstanceRoutes } from './lib/remote-instances/routes.js';
 import { registerRemoteProxy } from './lib/remote-instances/proxy.js';
@@ -956,9 +959,47 @@ const sessionAssistRuntime = createSessionAssistRuntime({
   readSettings: () => readSettingsFromDisk(),
 });
 
+const resolveProjectKnowledgeId = async (directory) => {
+  const settings = await readSettingsFromDiskMigrated().catch(() => null);
+  const projects = sanitizeProjects(settings?.projects || []);
+  const ownerPath = await resolveProjectKnowledgeOwnerPath({
+    directory,
+    projects,
+    resolvePrimaryWorktreeRoot,
+  });
+  return ownerPath ? createProjectIdFromPath(ownerPath) : '';
+};
+
+const sessionKnowledgeRuntime = createSessionKnowledgeRuntime({
+  projectContextRuntime,
+  agentMemoryRuntime: {
+    readAll: async () => ({ global: [], project: [], globalFailed: false, projectFailed: false }),
+  },
+  resolveProjectId: resolveProjectKnowledgeId,
+  isAgentMemoryEnabled: async () => false,
+  openCodeFetch: async (fetchPath, { directory, method = 'GET', body } = {}) => {
+    const params = new URLSearchParams();
+    if (directory) params.set('directory', directory);
+    const search = params.toString();
+    const response = await fetch(`${buildOpenCodeUrl(fetchPath, '')}${search ? `?${search}` : ''}`, {
+      method,
+      headers: {
+        Accept: 'application/json',
+        ...(body ? { 'Content-Type': 'application/json' } : {}),
+        ...getOpenCodeAuthHeaders(),
+      },
+      ...(body ? { body: JSON.stringify(body) } : {}),
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!response.ok) throw new Error(`OpenCode ${method} ${fetchPath} failed with ${response.status}`);
+    return response.json().catch(() => null);
+  },
+});
+
 const contextObligatoryRuntime = createContextObligatoryRuntime({
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
+  sessionKnowledgeRuntime,
   resolveRemoteUpstream: (serverId) => {
     const instance = remoteInstancesRuntimeRef?.getInstanceSync?.(serverId);
     if (!instance?.url) return null;
@@ -1359,6 +1400,7 @@ const scheduledTasksRuntime = createScheduledTasksRuntime({
   getOpenCodeAuthHeaders,
   waitForOpenCodeReady,
   waitForWorktreeBootstrap: waitForActiveWorktreeBootstrap,
+  sessionKnowledgeRuntime,
   setSessionAutoAccept: (sessionId, enabled, directory) =>
     permissionAutoAcceptRuntime.setSessionPolicy(sessionId, enabled, directory),
   emitTaskRunEvent: (event) => {
@@ -1400,6 +1442,7 @@ const openChamberSessionService = createOpenChamberSessionService({
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
   waitForOpenCodeReady,
+  sessionKnowledgeRuntime,
   emitSessionCreatedEvent: (event) => {
     broadcastGlobalUiEvent({
       type: 'openchamber:session-created',
@@ -1855,6 +1898,7 @@ async function main(options = {}) {
     buildAugmentedPath,
     projectConfigRuntime,
     projectContextRuntime,
+    sessionKnowledgeRuntime,
     scheduledTasksRuntime,
     scheduledTaskService,
     getOpenChamberEventClients: () => uiOpenChamberEventClients,

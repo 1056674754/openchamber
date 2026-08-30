@@ -6,6 +6,8 @@ import { TodoSendDialog } from '@/components/session/TodoSendDialog';
 import { Input } from '@/components/ui/input';
 import { toast } from '@/components/ui';
 import { useI18n } from '@/lib/i18n';
+import { useActiveServerId } from '@/hooks/useActiveServerId';
+import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import {
   resolveProjectContextId,
   type ProjectRef,
@@ -13,9 +15,15 @@ import {
 } from '@/lib/projectContextApi';
 import { cn } from '@/lib/utils';
 import {
+  fetchSessionKnowledgeSummary,
+  setSessionProjectContextPin,
+  type SessionProjectContextPins,
+} from '@/lib/sessionKnowledgeApi';
+import {
   EMPTY_PROJECT_CONTEXT_ENTRY,
   useProjectContextStore,
 } from '@/stores/useProjectContextStore';
+import { useSessionUIStore } from '@/sync/session-ui-store';
 
 import { NotesSection } from './NotesSection';
 import { PlansSection } from './PlansSection';
@@ -65,6 +73,13 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
   );
   const loadProjectContext = useProjectContextStore((state) => state.load);
   const saveTodos = useProjectContextStore((state) => state.saveTodos);
+  const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
+  const draftOpen = useSessionUIStore((state) => state.newSessionDraft.open);
+  const draftPins = useSessionUIStore((state) => state.newSessionDraft.projectContextPins);
+  const setDraftProjectContextPin = useSessionUIStore((state) => state.setDraftProjectContextPin);
+  const sessionDirectory = useEffectiveDirectory() ?? null;
+  const serverId = useActiveServerId();
+  const [sessionPins, setSessionPins] = React.useState<SessionProjectContextPins>({ notes: [], plans: [] });
   const [activeTab, setActiveTab] = React.useState<ProjectContextTab>('notes');
   const [query, setQuery] = React.useState('');
   const [openPlan, setOpenPlan] = React.useState<{ id: string; title: string } | null>(null);
@@ -90,6 +105,55 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
   }, [contextEntry.notes, contextEntry.plans, todos, trimmedQuery]);
 
   const send = useProjectTodoSend({ projectRef, canCreateWorktree, onActionComplete });
+
+  React.useEffect(() => {
+    if (draftOpen) {
+      setSessionPins(draftPins ?? { notes: [], plans: [] });
+      return undefined;
+    }
+    if (!currentSessionId || !sessionDirectory) {
+      setSessionPins({ notes: [], plans: [] });
+      return undefined;
+    }
+    let cancelled = false;
+    void fetchSessionKnowledgeSummary(sessionDirectory, currentSessionId, serverId).then((summary) => {
+      if (!cancelled) {
+        setSessionPins({
+          notes: summary.notes.map((note) => note.id),
+          plans: summary.plans.map((plan) => plan.id),
+        });
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [currentSessionId, draftOpen, draftPins, serverId, sessionDirectory]);
+
+  const toggleSessionPin = React.useCallback(async (
+    kind: 'note' | 'plan',
+    id: string,
+    pinned: boolean,
+  ): Promise<boolean> => {
+    if (draftOpen) {
+      setDraftProjectContextPin(kind, id, pinned);
+      return true;
+    }
+    if (!currentSessionId || !sessionDirectory) return false;
+    const next = await setSessionProjectContextPin(
+      sessionDirectory,
+      currentSessionId,
+      kind,
+      id,
+      pinned,
+      serverId,
+    );
+    if (!next) return false;
+    setSessionPins(next);
+    return true;
+  }, [currentSessionId, draftOpen, serverId, sessionDirectory, setDraftProjectContextPin]);
+
+  const pinnedNoteIds = React.useMemo(() => new Set(sessionPins.notes), [sessionPins.notes]);
+  const pinnedPlanIds = React.useMemo(() => new Set(sessionPins.plans), [sessionPins.plans]);
 
   React.useEffect(() => {
     if (projectRef) void loadProjectContext(projectRef);
@@ -211,6 +275,8 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
               notes={contextEntry.notes}
               disabled={isLoading}
               query={query}
+              pinnedNoteIds={pinnedNoteIds}
+              onTogglePinned={(noteId, pinned) => toggleSessionPin('note', noteId, pinned)}
             />
           ) : null}
           {activeTab === 'todos' ? (
@@ -232,6 +298,8 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
               plans={contextEntry.plans}
               query={query}
               onOpenPlan={setOpenPlan}
+              pinnedPlanIds={pinnedPlanIds}
+              onTogglePinned={(planId, pinned) => toggleSessionPin('plan', planId, pinned)}
             />
           ) : null}
           {activeTab === 'plans' && openPlan ? (

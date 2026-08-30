@@ -45,6 +45,7 @@ export const createContextObligatoryRuntime = ({
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
   resolveRemoteUpstream = null,
+  sessionKnowledgeRuntime = null,
 }) => {
   const inflight = new Set();
   let stopped = false;
@@ -96,7 +97,12 @@ export const createContextObligatoryRuntime = ({
     const session = await openCodeFetch(serverId, `/session/${encodeURIComponent(sessionId)}`, { directory });
     if (session?.parentID) return;
     const state = readContextState(session);
-    if (state.messages.length === 0) return;
+    const knowledge = serverId === LOCAL_SERVER_ID && sessionKnowledgeRuntime
+      ? await sessionKnowledgeRuntime
+        .resolvePending(directory, sessionKnowledgeRuntime.readDeliveredSignature(session), sessionKnowledgeRuntime.readPins(session))
+        .catch(() => ({ text: '', signature: '' }))
+      : { text: '', signature: '' };
+    if (state.messages.length === 0 && !knowledge.text) return;
 
     const recent = await openCodeFetch(serverId, `/session/${encodeURIComponent(sessionId)}/message`, {
       directory,
@@ -124,7 +130,7 @@ export const createContextObligatoryRuntime = ({
       .filter((result) => result.status === 'fulfilled' && result.value.text)
       .map((result) => result.value)
       .sort((left, right) => left.pinned.createdAt - right.pinned.createdAt);
-    if (entries.length === 0) return;
+    if (entries.length === 0 && !knowledge.text) return;
 
     const executionInfo = recent.toReversed().find((message) =>
       message?.info?.role === 'assistant' && message.info.summary !== true)?.info;
@@ -138,7 +144,13 @@ export const createContextObligatoryRuntime = ({
       body: {
         model: { providerID, modelID },
         ...(typeof agent === 'string' && agent ? { agent } : {}),
-        parts: [{ type: 'text', text: buildContextPrompt(entries), synthetic: true }],
+        parts: [{
+          type: 'text',
+          text: [knowledge.text, entries.length > 0 ? buildContextPrompt(entries) : '']
+            .filter(Boolean)
+            .join('\n\n---\n\n'),
+          synthetic: true,
+        }],
       },
     });
 
@@ -153,6 +165,9 @@ export const createContextObligatoryRuntime = ({
           openchamber: {
             ...freshState.openchamber,
             context_obligatory_last_compaction_message_id: summary.id,
+            ...(knowledge.signature
+              ? { [sessionKnowledgeRuntime.metadataKey]: knowledge.signature }
+              : {}),
           },
         },
       },

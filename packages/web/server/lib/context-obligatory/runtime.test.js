@@ -41,6 +41,12 @@ describe('context obligatory runtime', () => {
     const runtime = createContextObligatoryRuntime({
       buildOpenCodeUrl: (path) => `http://opencode.test${path}`,
       getOpenCodeAuthHeaders: () => ({}),
+      sessionKnowledgeRuntime: {
+        resolvePending: vi.fn(async () => ({ text: 'Pinned project knowledge', signature: 'knowledge-v1' })),
+        readDeliveredSignature: () => '',
+        readPins: () => ({ notes: ['note-1'], plans: [] }),
+        metadataKey: 'knowledge_context_delivered',
+      },
     });
 
     await runtime.processPayload(
@@ -58,12 +64,14 @@ describe('context obligatory runtime', () => {
       parts: [{ type: 'text', synthetic: true }],
     });
     expect(payload.parts[0].text.indexOf('First')).toBeLessThan(payload.parts[0].text.indexOf('Second'));
+    expect(payload.parts[0].text).toContain('Pinned project knowledge');
     expect(payload.parts[0].text).toContain('continuing the pre-compaction work');
     expect(payload.parts[0].text).toContain('use it silently as background context');
     expect(payload.parts[0].text).toContain('Only if no tasks or next steps remain');
     expect(payload.parts[0].text).toContain('no more than one short paragraph');
     const patch = requests.find((request) => request.method === 'PATCH');
     expect(JSON.parse(patch.body).metadata.openchamber.context_obligatory_last_compaction_message_id).toBe('msg_summary');
+    expect(JSON.parse(patch.body).metadata.openchamber.knowledge_context_delivered).toBe('knowledge-v1');
     expect(sessionReads).toBe(2);
     runtime.stop();
   });

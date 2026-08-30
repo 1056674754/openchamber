@@ -1022,6 +1022,35 @@ const resolveWorktreeProjectContext = async (directory) => {
   };
 };
 
+const derivePrimaryWorktreeRootFromGitDir = (gitDir) => {
+  const normalized = normalizeDirectoryPath(gitDir);
+  if (!normalized) return null;
+  const resolved = path.resolve(normalized);
+  if (resolved.endsWith(`${path.sep}.git`)) {
+    return resolved.slice(0, -`${path.sep}.git`.length) || null;
+  }
+  const marker = `${path.sep}.git${path.sep}worktrees${path.sep}`;
+  const markerIndex = resolved.indexOf(marker);
+  return markerIndex > 0 ? resolved.slice(0, markerIndex) || null : null;
+};
+
+/** Resolve a linked worktree back to the primary checkout that owns it. */
+export async function resolvePrimaryWorktreeRoot(directory) {
+  const result = await runGitCommand(directory, ['rev-parse', '--absolute-git-dir', '--git-common-dir']);
+  if (!result.success) return { root: directory };
+  const lines = String(result.stdout || '').split('\n').map((line) => line.trim()).filter(Boolean);
+  const rootFromGitDir = derivePrimaryWorktreeRootFromGitDir(lines[0] || '');
+  if (rootFromGitDir) return { root: rootFromGitDir };
+
+  const rawCommonDir = normalizeDirectoryPath(lines[1] || '');
+  if (rawCommonDir) {
+    const commonDir = path.isAbsolute(rawCommonDir) ? rawCommonDir : path.resolve(directory, rawCommonDir);
+    const rootFromCommonDir = derivePrimaryWorktreeRootFromGitDir(commonDir);
+    if (rootFromCommonDir) return { root: rootFromCommonDir };
+  }
+  return { root: directory };
+}
+
 const listWorktreeEntries = async (directory) => {
   const rawResult = await runGitCommandOrThrow(
     directory,
