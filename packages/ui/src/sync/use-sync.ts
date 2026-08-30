@@ -40,6 +40,7 @@ import { formatSdkError } from "./sdk-error"
 import { readRemoteSessionStatuses } from "./remote-session-status"
 import { KeyedSingleFlight } from "./keyed-single-flight"
 import { beginSyncSessionGeneration } from "./sync-session-generation"
+import { findMessageIndex, insertMessageChronologically } from './message-ordering'
 
 const SKIP_PARTS = new Set(["patch", "step-start", "step-finish"])
 const MESSAGE_PAGE_SIZE = 30
@@ -47,7 +48,6 @@ const VSCODE_MESSAGE_PAGE_SIZE = 30
 const VSCODE_INITIAL_PAGE_EXPANSION_LIMITS = [50, 80, 120] as const
 const MAX_SEEN_DIRS = 30
 const VSCODE_SESSION_CACHE_LIMIT = 4
-const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0)
 
 // Shared across useSync() instances so cache eviction is based on app-level
 // session recency, not whichever component happened to call sync first.
@@ -100,7 +100,7 @@ function getPrefetchMeta(directory: string, sessionID: string): SyncMeta | undef
 }
 
 function sortParts(parts: Part[]) {
-  return parts.filter((p) => !!p?.id).sort((a, b) => cmp(a.id, b.id))
+  return parts.filter((p) => !!p?.id)
 }
 
 function isHeavyVSCodeSessionCache(state: Pick<State, "message" | "part">, sessionID: string): boolean {
@@ -919,8 +919,7 @@ export function useSync() {
 
       // Insert message
       const messages = message[input.sessionID] ? [...message[input.sessionID]] : []
-      const result = Binary.search(messages, input.message.id, (m) => m.id)
-      if (!result.found) messages.splice(result.index, 0, input.message)
+      if (findMessageIndex(messages, input.message.id) < 0) insertMessageChronologically(messages, input.message)
       message[input.sessionID] = messages
 
       // Insert parts
@@ -945,9 +944,9 @@ export function useSync() {
       const messages = message[input.sessionID]
       if (messages) {
         const next = [...messages]
-        const result = Binary.search(next, input.messageID, (m) => m.id)
-        if (result.found) {
-          next.splice(result.index, 1)
+        const messageIndex = findMessageIndex(next, input.messageID)
+        if (messageIndex >= 0) {
+          next.splice(messageIndex, 1)
           message[input.sessionID] = next
         }
       }

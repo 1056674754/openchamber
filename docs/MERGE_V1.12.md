@@ -2217,3 +2217,14 @@ fork 已有丰富的 surface 组织（#62 surface rail + ContextSidebarTab + Con
 - 上游 dev-tunnel invalid base URL 子修复当前无对应模块：fork 尚未合并 Browser workspace/dev-tunnel（[#135](https://coding.s-s.city/songsong/openchamber/-/issues/135)），不创建无调用方 client。
 
 [#141](https://coding.s-s.city/songsong/openchamber/-/issues/141) 保持 open：Phase 2 需要将 `538309528` 的 message chronology contract 贯穿 event reducer、history/page loader、materialization、optimistic、revert/redo 和 side-channel merge；当前仍存在多处 message/part ID 排序，不能只加 comparator 就宣称完成。
+
+### #141 Phase 2：Message chronology across ID rollover（2026-08-30）
+
+上游来源：`538309528`，适配 fork 的 cursor pagination、side-channel、optimistic shadow 和 inline reverted dock：
+
+- 新增单一 `message-ordering.ts`：`time.created` 为 chronology，ID 只作 equal-time tie-break；marker slice 按当前数组位置，不做 lexical 大小比较。
+- event reducer 的 message update/insert/remove 改为 identity lookup + chronological insertion；part update/remove/delta 改为 identity lookup并保留 authoritative arrival order。
+- raw history loader、page boundary merge、prompt history、materialization、optimistic page/store、useSync optimistic bridge、side-channel records、Prompt Navigator source 和 latest assistant completion 统一使用 chronology contract。
+- revert/new-branch/rollback 与 ChatInput reverted dock 使用 marker position；post-rollover `msg_000...` 不会被误当成旧消息，失败 rollback 仍恢复正确顺序与 parts。
+- 集中 rollover integration 覆盖 reducer、part arrival、page merge、materialization 和 optimistic merge；focused suite 8 files / 108 tests ✅，full workspace type-check/lint/diff check ✅。
+- 剩余 ID 排序点逐项确认属于 Session、Question、Permission，或 assistant status 已先比较 `time.created` 再以 ID tie-break；未将 message chronology 修复扩散到不同实体契约。

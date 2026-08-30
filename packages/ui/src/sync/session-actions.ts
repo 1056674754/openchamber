@@ -42,6 +42,7 @@ import {
 } from "@/lib/contextObligatoryMessages"
 import { getRuntimeKey } from "@/lib/runtime-switch"
 import { runtimeFetch } from "@/lib/runtime-fetch"
+import { messagesBefore, messagesFrom, sortMessagesChronologically } from './message-ordering'
 
 export {
   resolveApiUrl,
@@ -1253,9 +1254,8 @@ export async function optimisticSend(input: {
   const stateBeforeSend = store.getState()
   const sessionBeforeSend = stateBeforeSend.session.find((session) => session.id === input.sessionId)
   const revertMessageID = sessionBeforeSend?.revert?.messageID
-  const revertedMessages = revertMessageID
-    ? (stateBeforeSend.message[input.sessionId] ?? []).filter((message) => message.id >= revertMessageID)
-    : []
+  const sessionMessages = stateBeforeSend.message[input.sessionId] ?? []
+  const revertedMessages = messagesFrom(sessionMessages, revertMessageID)
   const revertedParts = new Map(
     revertedMessages.map((message) => [message.id, stateBeforeSend.part[message.id] ?? []] as const),
   )
@@ -1266,8 +1266,7 @@ export async function optimisticSend(input: {
     ))
     const message = {
       ...stateBeforeSend.message,
-      [input.sessionId]: (stateBeforeSend.message[input.sessionId] ?? [])
-        .filter((candidate) => candidate.id < revertMessageID),
+      [input.sessionId]: messagesBefore(sessionMessages, revertMessageID),
     }
     const part = { ...stateBeforeSend.part }
     for (const revertedMessage of revertedMessages) delete part[revertedMessage.id]
@@ -1405,8 +1404,7 @@ export async function optimisticSend(input: {
       ))
       message = {
         ...s.message,
-        [input.sessionId]: [...(s.message[input.sessionId] ?? []), ...revertedMessages]
-          .sort((left, right) => left.id < right.id ? -1 : left.id > right.id ? 1 : 0),
+        [input.sessionId]: sortMessagesChronologically([...(s.message[input.sessionId] ?? []), ...revertedMessages]),
       }
       part = { ...s.part }
       for (const [revertedMessageId, parts] of revertedParts) {

@@ -99,6 +99,7 @@ import { eventMatchesShortcut, getEffectiveShortcutCombo, normalizeCombo } from 
 import { getSyncMessages, getSyncParts } from '@/sync/sync-refs';
 import { isSyntheticPart } from '@/lib/messages/synthetic';
 import { isRealUserMessage } from '@/lib/messages/real-user';
+import { messagesFrom } from '@/sync/message-ordering';
 import { serverRegistry } from '@/lib/opencode/server-registry';
 import {
     assignImageAttachmentFilenames,
@@ -362,8 +363,7 @@ const RevertedMessageDock: React.FC<RevertedMessageDockProps> = React.memo(({ se
     const noTextContent = t('chat.revertPopover.noTextContent');
     const items = React.useMemo(() => {
         if (!revertMessageID) return [];
-        return userMessages
-            .filter((message) => message.id >= revertMessageID)
+        return messagesFrom(userMessages, revertMessageID)
             .map((message) => ({
                 id: message.id,
                 text: getRevertedPreview(partsByMessage[message.id] ?? [], noTextContent),
@@ -379,7 +379,8 @@ const RevertedMessageDock: React.FC<RevertedMessageDockProps> = React.memo(({ se
         if (!sessionId || restoringId) return;
         setRestoringId(messageId);
         try {
-            const nextMessage = userMessages.find((message) => message.id > messageId);
+            const messageIndex = userMessages.findIndex((message) => message.id === messageId);
+            const nextMessage = messageIndex >= 0 ? userMessages[messageIndex + 1] : undefined;
             if (nextMessage) {
                 await revertToMessage(sessionId, nextMessage.id, { skipRedoPush: true });
             } else {

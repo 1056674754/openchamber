@@ -1,8 +1,7 @@
 import type { Message, Part } from "@opencode-ai/sdk/v2/client"
 
 import { isRealUserMessage } from "@/lib/messages/real-user"
-
-const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0)
+import { sortMessagesChronologically } from './message-ordering'
 
 export const MESSAGE_USER_BOUNDARY_EXTRA_PAGE_LIMIT = 4
 export const MESSAGE_USER_BOUNDARY_RECORD_LIMIT = 600
@@ -44,7 +43,7 @@ const getUserBoundaryIndexes = (page: Pick<MessagePage, "session" | "part">): nu
 }
 
 export const mergeOlderMessagePage = (page: MessagePage, older: MessagePage): MessagePage => ({
-  session: [...older.session, ...page.session].sort((left, right) => cmp(left.id, right.id)),
+  session: sortMessagesChronologically([...older.session, ...page.session]),
   part: [...older.part, ...page.part],
   cursor: older.cursor,
   complete: older.complete,

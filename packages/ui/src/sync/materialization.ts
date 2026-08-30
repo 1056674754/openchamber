@@ -2,8 +2,8 @@ import type { Message, Part } from "@opencode-ai/sdk/v2/client"
 import { mergeMessages } from "./optimistic"
 import { getMessageFinishReason } from "@/lib/messageCompletion"
 import { sanitizePartPayload } from "./sanitize"
+import { compareMessagesChronologically } from './message-ordering'
 
-const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0)
 const STREAMING_PART_FIELDS = ["text", "output"] as const
 
 export type MaterializedMessageRecord = {
@@ -39,7 +39,6 @@ function sortParts(parts: Part[], skipPartTypes: ReadonlySet<string>) {
   return parts
     .filter((part) => !!part?.id && !skipPartTypes.has(part.type))
     .map(sanitizePartPayload)
-    .sort((a, b) => cmp(a.id, b.id))
 }
 
 function normalizeMaterializedMessageInfo(info: Message, parts: Part[]): Message {
@@ -199,7 +198,7 @@ function mergeMaterializedParts(
   )
   if (missingLiveParts.length === 0) return mergedParts
 
-  return [...mergedParts, ...missingLiveParts].sort((a, b) => cmp(a.id, b.id))
+  return [...mergedParts, ...missingLiveParts]
 }
 
 export function materializeSessionSnapshots(
@@ -215,7 +214,7 @@ export function materializeSessionSnapshots(
       ...record,
       info: normalizeMaterializedMessageInfo(record.info, record.parts ?? []),
     }))
-    .sort((left, right) => cmp(left.info.id, right.info.id))
+  snapshots.sort((left, right) => compareMessagesChronologically(left.info, right.info))
   const nextMessages = snapshots.map((record) => record.info)
   const currentMessages = state.message[sessionID] ?? []
   const isReplace = options.mode === "replace"

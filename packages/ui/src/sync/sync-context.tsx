@@ -58,6 +58,7 @@ import type { QuestionRequest } from "@/types/question"
 import * as sessionActions from "./session-actions"
 import { getSessionMaterializationStatus, materializeSessionSnapshots } from "./materialization"
 import { setSessionPrefetch } from "./session-prefetch-cache"
+import { messagesBefore, sortMessagesChronologically } from './message-ordering'
 import { listSessionsForBootstrap, SESSION_LIST_BOOTSTRAP_LIMIT } from "./session-list-bootstrap"
 import { remoteSessionSummarySync } from "./remote-session-summaries"
 import { readRemoteSessionStatuses } from "./remote-session-status"
@@ -3230,7 +3231,7 @@ function getVisibleMessagesForSession(state: State, sessionID: string, previous?
 
   return {
     sourceMessages,
-    visibleMessages: revertMessageID ? sourceMessages.filter((message) => message.id < revertMessageID) : sourceMessages,
+    visibleMessages: messagesBefore(sourceMessages, revertMessageID),
     revertMessageID,
   }
 }
@@ -3248,7 +3249,7 @@ export function buildSessionMessageRecordsSnapshot(
   const sideChannelParts = new Map(sideChannelRecords.map((record) => [record.info.id, record.parts] as const))
   const effectiveMessages = sideChannelRecords.length === 0
     ? visibleMessages
-    : [...visibleMessages, ...sideChannelRecords.map((record) => record.info)].sort((left, right) => left.id.localeCompare(right.id))
+    : sortMessagesChronologically([...visibleMessages, ...sideChannelRecords.map((record) => record.info)])
   const nextById = new Map<string, SessionMessageRecord>()
   const nextList = effectiveMessages.map((message) => {
     const previousRecord = previous?.byId.get(message.id)

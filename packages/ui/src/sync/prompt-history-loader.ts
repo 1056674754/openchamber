@@ -6,6 +6,7 @@ import {
   type MessageHistoryPageInput,
 } from "./message-history-loader"
 import { mergeOlderMessagePage, type MessagePage } from "./message-page-boundary"
+import { compareMessagesChronologically } from './message-ordering'
 
 export type UserPromptHistoryRecord = {
   readonly info: Message
@@ -22,7 +23,6 @@ export type CompleteUserPromptHistoryInput = MessageHistoryPageInput & {
   readonly onProgress?: (result: CompleteUserPromptHistoryResult) => void
 }
 
-const compareIDs = (left: string, right: string): number => left < right ? -1 : left > right ? 1 : 0
 
 const collectUserPrompts = (
   page: MessagePage,
@@ -40,7 +40,7 @@ const toCompleteResult = (
   records: Map<string, UserPromptHistoryRecord>,
   complete: boolean,
 ): CompleteUserPromptHistoryResult => ({
-  records: [...records.values()].sort((left, right) => compareIDs(left.info.id, right.info.id)),
+  records: [...records.values()].sort((left, right) => compareMessagesChronologically(left.info, right.info)),
   complete,
 })
 

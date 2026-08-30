@@ -4,9 +4,9 @@ import { fetchMessagePageToUserBoundary, type MessagePage } from "./message-page
 import { retry } from "./retry"
 import { sanitizePartPayload, stripMessageDiffSnapshots } from "./sanitize"
 import { formatSdkError } from "./sdk-error"
+import { sortMessagesChronologically } from './message-ordering'
 
 const DECODED_PAYLOAD_LENGTH_HEADER = "x-openchamber-decoded-content-length"
-const compareIDs = (left: string, right: string) => left < right ? -1 : left > right ? 1 : 0
 
 export type MessageHistoryRecord = {
   readonly info: Message
@@ -137,14 +137,10 @@ export async function fetchMessageHistoryPage(input: MessageHistoryPageInput): P
   const cursor = result.response?.headers?.get("x-next-cursor") || undefined
 
   return {
-    session: records
-      .map((record) => stripMessageDiffSnapshots(record.info))
-      .sort((left, right) => compareIDs(left.id, right.id)),
+    session: sortMessagesChronologically(records.map((record) => stripMessageDiffSnapshots(record.info))),
     part: records.map((record) => ({
       id: record.info.id,
-      part: (record.parts ?? [])
-        .map(sanitizePartPayload)
-        .sort((left, right) => compareIDs(left.id, right.id)),
+      part: (record.parts ?? []).map(sanitizePartPayload),
     })),
     cursor,
     complete: !cursor,

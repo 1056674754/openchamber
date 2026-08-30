@@ -74,6 +74,7 @@ import { serverRegistry } from '@/lib/opencode/server-registry';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { resolveGlobalSessionDirectory, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { resolveSessionEntryScrollAction } from './lib/scroll/scrollIntent';
+import { compareMessagesChronologically } from '@/sync/message-ordering';
 
 const EMPTY_MESSAGES: Array<{ info: Message; parts: Part[] }> = [];
 const IDLE_SESSION_STATUS = { type: 'idle' as const };
@@ -245,7 +246,7 @@ const ChatViewport = React.memo(({
         const byMessageID = new Map<string, SessionMessageRecord>();
         for (const record of promptHistoryRecords) byMessageID.set(record.info.id, record);
         for (const record of renderedMessages) byMessageID.set(record.info.id, record);
-        return [...byMessageID.values()].sort((left, right) => left.info.id.localeCompare(right.info.id));
+        return [...byMessageID.values()].sort((left, right) => compareMessagesChronologically(left.info, right.info));
     }, [promptHistoryRecords, renderedMessages]);
     const promptPreviewsByTurnId = React.useMemo(
         () => buildPromptPreviews(promptSourceMessages, promptPreviewCache.current),
