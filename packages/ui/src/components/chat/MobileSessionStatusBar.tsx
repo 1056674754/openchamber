@@ -1137,6 +1137,7 @@ function ProjectBar({
     color: string | null;
     iconBackground: string | null;
     defaultModel: string | null;
+    defaultVariant: string | null;
   }) => {
     if (editingProject) {
       updateProjectMeta(editingProject.id, {
@@ -1145,6 +1146,7 @@ function ProjectBar({
         color: data.color,
         iconBackground: data.iconBackground,
         defaultModel: data.defaultModel,
+        defaultVariant: data.defaultVariant,
       });
     }
     setEditingProject(null);
@@ -1297,6 +1299,7 @@ function ProjectBar({
           initialColor={editingProject.color}
           initialIconBackground={editingProject.iconBackground}
           initialDefaultModel={editingProject.defaultModel}
+          initialDefaultVariant={editingProject.defaultVariant}
           onSave={handleSaveProjectEdit}
         />
       )}

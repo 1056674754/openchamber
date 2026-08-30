@@ -248,6 +248,8 @@ type DefaultAgentModelSelection = {
 const resolveDefaultAgentModelSelection = ({
     agents,
     providers,
+    projectDefaultModel,
+    projectDefaultVariant,
     settingsDefaultAgent,
     settingsDefaultModel,
     settingsDefaultVariant,
@@ -256,6 +258,8 @@ const resolveDefaultAgentModelSelection = ({
 }: {
     agents: Agent[];
     providers: ProviderWithModelList[];
+    projectDefaultModel?: string;
+    projectDefaultVariant?: string;
     settingsDefaultAgent?: string;
     settingsDefaultModel?: string;
     settingsDefaultVariant?: string;
@@ -299,12 +303,13 @@ const resolveDefaultAgentModelSelection = ({
     let modelId: string | undefined;
     let variant: string | undefined;
 
-    if (settingsDefaultModel) {
-        const parsed = parseModelString(settingsDefaultModel);
+    const preferredModel = projectDefaultModel || settingsDefaultModel;
+    if (preferredModel) {
+        const parsed = parseModelString(preferredModel);
         if (parsed && hasProviderModel(providers, parsed.providerId, parsed.modelId)) {
             providerId = parsed.providerId;
             modelId = parsed.modelId;
-            variant = resolveVariant(providerId, modelId, settingsDefaultVariant);
+            variant = resolveVariant(providerId, modelId, projectDefaultModel ? projectDefaultVariant : settingsDefaultVariant);
         }
     }
 
@@ -875,7 +880,7 @@ interface ConfigStore {
      * Re-apply draft defaults for the active directory snapshot.
      * Model cascade: project.defaultModel → settings.defaultModel → agent pin → fallback.
      */
-    applyDefaultModelAgentSelection: (options?: { projectDefaultModel?: string }) => void;
+    applyDefaultModelAgentSelection: (options?: { projectDefaultModel?: string; projectDefaultVariant?: string }) => void;
     applyOpenCodeConfigDefaults: (directory?: string | null, source?: string, config?: Config, serverId?: string | null) => void;
     setSelectedProvider: (providerId: string) => void;
     setSettingsDefaultModel: (model: string | undefined) => void;
@@ -2351,9 +2356,11 @@ export const useConfigStore = create<ConfigStore>()(
                     const resolved = resolveDefaultAgentModelSelection({
                         agents,
                         providers,
+                        projectDefaultModel: options?.projectDefaultModel,
+                        projectDefaultVariant: options?.projectDefaultVariant,
                         settingsDefaultAgent,
-                        settingsDefaultModel: options?.projectDefaultModel || settingsDefaultModel,
-                        settingsDefaultVariant: options?.projectDefaultModel ? undefined : settingsDefaultVariant,
+                        settingsDefaultModel,
+                        settingsDefaultVariant,
                         opencodeDefaultAgent,
                         opencodeDefaultModel,
                     });

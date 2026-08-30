@@ -50,4 +50,17 @@ describe("projects settings hydration", () => {
     expect(useProjectsStore.getState().projects[1]?.path).toBe("/remote/project");
     expect(useProjectsStore.getState().projects[1]?.serverId).toBe("remote-a");
   });
+
+  test("keeps a thinking default only beside its project model", () => {
+    useProjectsStore.getState().synchronizeFromSettings({
+      projects: [
+        { id: "with-model", path: "/local/one", defaultModel: "openai/gpt-5", defaultVariant: "high" },
+        { id: "without-model", path: "/local/two", defaultVariant: "high" },
+      ],
+    });
+
+    expect(useProjectsStore.getState().projects[0]?.defaultModel).toBe("openai/gpt-5");
+    expect(useProjectsStore.getState().projects[0]?.defaultVariant).toBe("high");
+    expect(useProjectsStore.getState().projects[1]?.defaultVariant).toBeUndefined();
+  });
 });

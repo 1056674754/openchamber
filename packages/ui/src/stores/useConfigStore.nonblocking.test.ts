@@ -22,7 +22,7 @@ let liveOpenChamberSettings: Record<string, unknown> = {};
 let listAgentsImpl: ((directory?: string | null) => Promise<TestAgent[]>) | null = null;
 let checkHealthImpl: () => Promise<boolean> = async () => true;
 
-const provider = (id: string, modelId = `${id}-model`) => ({
+const provider = (id: string, modelId = `${id}-model`, variants?: Record<string, Record<string, unknown>>) => ({
   id,
   name: id,
   source: 'config' as const,
@@ -49,6 +49,7 @@ const provider = (id: string, modelId = `${id}-model`) => ({
       release_date: '',
       status: 'active' as const,
       headers: {},
+      ...(variants ? { variants } : {}),
       attachment: false,
       reasoning: false,
       temperature: true,
@@ -441,6 +442,37 @@ describe('useConfigStore non-blocking OpenCode config', () => {
     expect(state.currentProviderId).toBe('anthropic');
     expect(state.selectedProviderId).toBe('openai');
     expect(state.directoryScoped[DIRECTORY]?.selectedProviderId).toBe('openai');
+  });
+
+  test('applies a project thinking level only with its project model', () => {
+    const projectProvider = provider('openai', 'gpt-5.5', { low: {}, high: {} });
+    useConfigStore.setState((state) => ({
+      providers: [projectProvider],
+      currentProviderId: 'openai',
+      currentModelId: 'gpt-5.5',
+      currentVariant: undefined,
+      selectionSource: 'auto',
+      settingsDefaultVariant: 'low',
+      directoryScoped: {
+        ...state.directoryScoped,
+        [DIRECTORY]: {
+          ...state.directoryScoped[DIRECTORY],
+          providers: [projectProvider],
+          currentProviderId: 'openai',
+          currentModelId: 'gpt-5.5',
+          currentVariant: undefined,
+          selectionSource: 'auto',
+        },
+      },
+    }));
+
+    useConfigStore.getState().applyDefaultModelAgentSelection({
+      projectDefaultModel: 'openai/gpt-5.5',
+      projectDefaultVariant: 'high',
+    });
+
+    expect(useConfigStore.getState().currentVariant).toBe('high');
+    expect(useConfigStore.getState().directoryScoped[DIRECTORY]?.currentVariant).toBe('high');
   });
 
   test('manual selection survives an in-flight loadAgents refresh', async () => {

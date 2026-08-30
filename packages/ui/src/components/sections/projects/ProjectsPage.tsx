@@ -13,10 +13,16 @@ import { Icon } from "@/components/icon/Icon";
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useI18n } from '@/lib/i18n';
 import { ModelSelector } from '@/components/sections/agents/ModelSelector';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { useConfigStore } from '@/stores/useConfigStore';
+import { modelVariantNames } from '@/lib/modelVariants';
 import {
   formatProjectDefaultModel,
   parseProjectDefaultModel,
 } from '@/lib/projectDefaultModel';
+
+const NO_VARIANT_VALUE = '__default__';
+const formatVariantLabel = (variant: string): string => variant.charAt(0).toUpperCase() + variant.slice(1);
 
 export const ProjectsPage: React.FC = () => {
   const { t } = useI18n();
@@ -28,6 +34,7 @@ export const ProjectsPage: React.FC = () => {
   const selectedId = useUIStore((state) => state.settingsProjectsSelectedId);
   const setSelectedId = useUIStore((state) => state.setSettingsProjectsSelectedId);
   const { currentTheme } = useThemeSystem();
+  const providers = useConfigStore((state) => state.providers);
 
   const selectedProject = React.useMemo(() => {
     if (!selectedId) return null;
@@ -51,6 +58,7 @@ export const ProjectsPage: React.FC = () => {
   const [iconBackground, setIconBackground] = React.useState<string | null>(null);
   const [defaultProviderId, setDefaultProviderId] = React.useState('');
   const [defaultModelId, setDefaultModelId] = React.useState('');
+  const [defaultVariant, setDefaultVariant] = React.useState<string | undefined>();
   const [isUploadingIcon, setIsUploadingIcon] = React.useState(false);
   const [isRemovingCustomIcon, setIsRemovingCustomIcon] = React.useState(false);
   const [isDiscoveringIcon, setIsDiscoveringIcon] = React.useState(false);
@@ -90,6 +98,7 @@ export const ProjectsPage: React.FC = () => {
       setIconBackground(null);
       setDefaultProviderId('');
       setDefaultModelId('');
+      setDefaultVariant(undefined);
       return;
     }
     setName(selectedProject.label ?? '');
@@ -99,6 +108,7 @@ export const ProjectsPage: React.FC = () => {
     const parsed = parseProjectDefaultModel(selectedProject.defaultModel);
     setDefaultProviderId(parsed?.providerId ?? '');
     setDefaultModelId(parsed?.modelId ?? '');
+    setDefaultVariant(selectedProject.defaultVariant);
     setPendingRemoveImageIcon(false);
     clearPendingUploadIcon();
     setPreviewImageFailed(false);
@@ -115,6 +125,8 @@ export const ProjectsPage: React.FC = () => {
     || icon !== (selectedProject?.icon ?? null)
     || color !== (selectedProject?.color ?? null)
     || iconBackground !== (selectedProject?.iconBackground ?? null)
+    || formatProjectDefaultModel(defaultProviderId, defaultModelId) !== (selectedProject?.defaultModel ?? undefined)
+    || defaultVariant !== selectedProject?.defaultVariant
     || pendingRemoveImageIcon
     || Boolean(pendingUploadIconFile)
   );
@@ -156,11 +168,13 @@ export const ProjectsPage: React.FC = () => {
       color,
       iconBackground: willRemoveImageIcon ? null : iconBackground,
       defaultModel: formatProjectDefaultModel(defaultProviderId, defaultModelId) ?? null,
+      defaultVariant: defaultProviderId && defaultModelId ? defaultVariant ?? null : null,
     });
   }, [
     color,
     defaultModelId,
     defaultProviderId,
+    defaultVariant,
     icon,
     iconBackground,
     name,
@@ -173,6 +187,14 @@ export const ProjectsPage: React.FC = () => {
     t,
     updateProjectMeta,
   ]);
+
+  const availableVariants = React.useMemo(() => {
+    if (!defaultProviderId || !defaultModelId) return [];
+    const model = providers
+      .find((provider) => provider.id === defaultProviderId)
+      ?.models.find((entry) => entry.id === defaultModelId);
+    return modelVariantNames(model);
+  }, [defaultModelId, defaultProviderId, providers]);
 
   const currentColorVar = color ? (COLOR_MAP[color] ?? null) : null;
   const hasStoredImageIcon = Boolean(selectedProject?.iconImage);
@@ -316,12 +338,42 @@ export const ProjectsPage: React.FC = () => {
                   onChange={(nextProviderId, nextModelId) => {
                     setDefaultProviderId(nextProviderId);
                     setDefaultModelId(nextModelId);
+                    setDefaultVariant(undefined);
                   }}
                   placeholder={t('projectEditDialog.field.defaultModelPlaceholder')}
                   className="h-7 min-w-0 w-full sm:max-w-[19rem]"
                 />
               </div>
             </div>
+
+            {availableVariants.length > 0 ? (
+              <div className="py-1.5">
+                <div className="flex min-w-0 flex-col">
+                  <span className="typography-ui-label text-foreground">{t('projectEditDialog.field.defaultThinking')}</span>
+                  <span className="typography-meta text-muted-foreground">
+                    {t('projectEditDialog.field.defaultThinkingDescription')}
+                  </span>
+                </div>
+                <div className="mt-1.5 flex min-w-0 items-center gap-2">
+                  <Select
+                    value={defaultVariant ?? NO_VARIANT_VALUE}
+                    onValueChange={(value) => setDefaultVariant(value === NO_VARIANT_VALUE ? undefined : value)}
+                  >
+                    <SelectTrigger className="h-7 min-w-0 w-full sm:max-w-[19rem]" aria-label={t('projectEditDialog.field.defaultThinking')}>
+                      <SelectValue>
+                        {defaultVariant ? formatVariantLabel(defaultVariant) : t('projectEditDialog.field.defaultThinkingDefault')}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={NO_VARIANT_VALUE}>{t('projectEditDialog.field.defaultThinkingDefault')}</SelectItem>
+                      {availableVariants.map((variant) => (
+                        <SelectItem key={variant} value={variant}>{formatVariantLabel(variant)}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            ) : null}
 
             {/* Color */}
             <div className="py-1.5">

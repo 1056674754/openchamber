@@ -131,6 +131,7 @@ export const createSettingsNormalizationRuntime = (dependencies) => {
       const iconBackground = normalizeIconBackground(candidate.iconBackground);
       const color = typeof candidate.color === 'string' ? candidate.color.trim() : '';
       const defaultModel = typeof candidate.defaultModel === 'string' ? candidate.defaultModel.trim() : '';
+      const defaultVariant = typeof candidate.defaultVariant === 'string' ? candidate.defaultVariant.trim() : '';
       const addedAt = Number.isFinite(candidate.addedAt) ? Number(candidate.addedAt) : null;
       const lastOpenedAt = Number.isFinite(candidate.lastOpenedAt)
         ? Number(candidate.lastOpenedAt)
@@ -151,6 +152,7 @@ export const createSettingsNormalizationRuntime = (dependencies) => {
         ...(iconBackground ? { iconBackground } : {}),
         ...(color ? { color } : {}),
         ...(defaultModel && defaultModel.includes('/') ? { defaultModel } : {}),
+        ...(defaultModel && defaultModel.includes('/') && defaultVariant ? { defaultVariant } : {}),
         ...(Number.isFinite(addedAt) && addedAt >= 0 ? { addedAt } : {}),
         ...(Number.isFinite(lastOpenedAt) && lastOpenedAt >= 0 ? { lastOpenedAt } : {}),
       };

@@ -70,6 +70,7 @@ interface ProjectsStore {
     color?: string | null;
     iconBackground?: string | null;
     defaultModel?: string | null;
+    defaultVariant?: string | null;
   }) => void;
   uploadProjectIcon: (id: string, file: File) => Promise<{ ok: boolean; error?: string }>;
   removeProjectIcon: (id: string) => Promise<{ ok: boolean; error?: string }>;
@@ -294,6 +295,9 @@ const sanitizeProjects = (value: unknown): ProjectEntry[] => {
     const defaultModel = normalizeProjectDefaultModel(candidate.defaultModel);
     if (defaultModel) {
       project.defaultModel = defaultModel;
+      if (typeof candidate.defaultVariant === 'string' && candidate.defaultVariant.trim()) {
+        project.defaultVariant = candidate.defaultVariant.trim();
+      }
     }
     result.push(project);
   }
@@ -648,6 +652,7 @@ export const useProjectsStore = create<ProjectsStore>()(
       color?: string | null;
       iconBackground?: string | null;
       defaultModel?: string | null;
+      defaultVariant?: string | null;
     }) => {
       if (vscodeWorkspace) {
         return;
@@ -673,6 +678,12 @@ export const useProjectsStore = create<ProjectsStore>()(
             delete updated.defaultModel;
           }
         }
+        if (meta.defaultVariant !== undefined) {
+          const trimmed = meta.defaultVariant?.trim();
+          if (trimmed) updated.defaultVariant = trimmed;
+          else delete updated.defaultVariant;
+        }
+        if (!updated.defaultModel) delete updated.defaultVariant;
         return updated;
       });
       set({ projects: nextProjects });

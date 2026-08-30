@@ -16,6 +16,9 @@ import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useI18n } from '@/lib/i18n';
 import { Icon } from "@/components/icon/Icon";
 import { ModelSelector } from '@/components/sections/agents/ModelSelector';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { useConfigStore } from '@/stores/useConfigStore';
+import { modelVariantNames } from '@/lib/modelVariants';
 import {
   formatProjectDefaultModel,
   parseProjectDefaultModel,
@@ -31,16 +34,20 @@ interface ProjectEditDialogProps {
   initialColor?: string | null;
   initialIconBackground?: string | null;
   initialDefaultModel?: string | null;
+  initialDefaultVariant?: string | null;
   onSave: (data: {
     label: string;
     icon: string | null;
     color: string | null;
     iconBackground: string | null;
     defaultModel: string | null;
+    defaultVariant: string | null;
   }) => void;
 }
 
 const HEX_COLOR_PATTERN = /^#(?:[\da-fA-F]{3}|[\da-fA-F]{6})$/;
+const NO_VARIANT_VALUE = '__default__';
+const formatVariantLabel = (variant: string): string => variant.charAt(0).toUpperCase() + variant.slice(1);
 
 const normalizeIconBackground = (value: string | null): string | null => {
   if (!value) {
@@ -63,9 +70,11 @@ export const ProjectEditDialog: React.FC<ProjectEditDialogProps> = ({
   initialColor = null,
   initialIconBackground = null,
   initialDefaultModel = null,
+  initialDefaultVariant = null,
   onSave,
 }) => {
   const { t } = useI18n();
+  const providers = useConfigStore((state) => state.providers);
   const uploadProjectIcon = useProjectsStore((state) => state.uploadProjectIcon);
   const removeProjectIcon = useProjectsStore((state) => state.removeProjectIcon);
   const discoverProjectIcon = useProjectsStore((state) => state.discoverProjectIcon);
@@ -78,6 +87,7 @@ export const ProjectEditDialog: React.FC<ProjectEditDialogProps> = ({
   const initialParsedDefaultModel = parseProjectDefaultModel(initialDefaultModel);
   const [defaultProviderId, setDefaultProviderId] = React.useState(initialParsedDefaultModel?.providerId ?? '');
   const [defaultModelId, setDefaultModelId] = React.useState(initialParsedDefaultModel?.modelId ?? '');
+  const [defaultVariant, setDefaultVariant] = React.useState<string | undefined>(initialDefaultVariant ?? undefined);
   const [isUploadingIcon, setIsUploadingIcon] = React.useState(false);
   const [isRemovingCustomIcon, setIsRemovingCustomIcon] = React.useState(false);
   const [isDiscoveringIcon, setIsDiscoveringIcon] = React.useState(false);
@@ -106,11 +116,20 @@ export const ProjectEditDialog: React.FC<ProjectEditDialogProps> = ({
       const parsed = parseProjectDefaultModel(initialDefaultModel);
       setDefaultProviderId(parsed?.providerId ?? '');
       setDefaultModelId(parsed?.modelId ?? '');
+      setDefaultVariant(initialDefaultVariant ?? undefined);
       setPendingRemoveImageIcon(false);
       clearPendingUploadIcon();
       setPreviewImageFailed(false);
     }
-  }, [open, projectName, initialIcon, initialColor, initialIconBackground, initialDefaultModel, clearPendingUploadIcon]);
+  }, [open, projectName, initialIcon, initialColor, initialIconBackground, initialDefaultModel, initialDefaultVariant, clearPendingUploadIcon]);
+
+  const availableVariants = React.useMemo(() => {
+    if (!defaultProviderId || !defaultModelId) return [];
+    const model = providers
+      .find((provider) => provider.id === defaultProviderId)
+      ?.models.find((entry) => entry.id === defaultModelId);
+    return modelVariantNames(model);
+  }, [defaultModelId, defaultProviderId, providers]);
 
   React.useEffect(() => {
     return () => {
@@ -156,6 +175,7 @@ export const ProjectEditDialog: React.FC<ProjectEditDialogProps> = ({
       color,
       iconBackground: normalizeIconBackground(willRemoveImageIcon ? null : iconBackground),
       defaultModel: formatProjectDefaultModel(defaultProviderId, defaultModelId) ?? null,
+      defaultVariant: defaultProviderId && defaultModelId ? defaultVariant ?? null : null,
     });
     onOpenChange(false);
   };
@@ -294,10 +314,38 @@ export const ProjectEditDialog: React.FC<ProjectEditDialogProps> = ({
               onChange={(nextProviderId, nextModelId) => {
                 setDefaultProviderId(nextProviderId);
                 setDefaultModelId(nextModelId);
+                setDefaultVariant(undefined);
               }}
               placeholder={t('projectEditDialog.field.defaultModelPlaceholder')}
             />
           </div>
+
+          {availableVariants.length > 0 ? (
+            <div className="min-w-0 space-y-1.5">
+              <label className="typography-ui-label font-medium text-foreground">
+                {t('projectEditDialog.field.defaultThinking')}
+              </label>
+              <p className="typography-meta text-muted-foreground">
+                {t('projectEditDialog.field.defaultThinkingDescription')}
+              </p>
+              <Select
+                value={defaultVariant ?? NO_VARIANT_VALUE}
+                onValueChange={(value) => setDefaultVariant(value === NO_VARIANT_VALUE ? undefined : value)}
+              >
+                <SelectTrigger aria-label={t('projectEditDialog.field.defaultThinking')}>
+                  <SelectValue>
+                    {defaultVariant ? formatVariantLabel(defaultVariant) : t('projectEditDialog.field.defaultThinkingDefault')}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={NO_VARIANT_VALUE}>{t('projectEditDialog.field.defaultThinkingDefault')}</SelectItem>
+                  {availableVariants.map((variant) => (
+                    <SelectItem key={variant} value={variant}>{formatVariantLabel(variant)}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          ) : null}
 
           {/* Color */}
           <div className="min-w-0 space-y-2">

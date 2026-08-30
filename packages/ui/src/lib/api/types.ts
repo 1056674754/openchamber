@@ -670,6 +670,8 @@ export interface ProjectEntry {
   color?: string | null;
   /** Per-project default model for new drafts: `"providerID/modelID"`. */
   defaultModel?: string;
+  /** Optional thinking level pinned to the per-project default model. */
+  defaultVariant?: string;
   addedAt?: number;
   lastOpenedAt?: number;
   sidebarCollapsed?: boolean;

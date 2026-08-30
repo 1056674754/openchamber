@@ -1269,6 +1269,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
     color: string | null;
     iconBackground: string | null;
     defaultModel: string | null;
+    defaultVariant: string | null;
   }) => {
     if (!editingProjectDialogId) {
       return;
@@ -1279,6 +1280,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
       color: data.color,
       iconBackground: data.iconBackground,
       defaultModel: data.defaultModel,
+      defaultVariant: data.defaultVariant,
     });
     setEditingProjectDialogId(null);
   }, [editingProjectDialogId, updateProjectMeta]);
@@ -2980,6 +2982,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
           initialColor={editingProject.color}
           initialIconBackground={editingProject.iconBackground}
           initialDefaultModel={editingProject.defaultModel}
+          initialDefaultVariant={editingProject.defaultVariant}
           onSave={handleSaveProjectEdit}
         />
       ) : null}

@@ -1165,6 +1165,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       void activateConfigForDirectory(configDirectory, configServerId).then(() => {
         useConfigStore.getState().applyDefaultModelAgentSelection({
           projectDefaultModel: selectedProject?.defaultModel,
+          projectDefaultVariant: selectedProject?.defaultVariant,
         })
       })
     }
@@ -1237,6 +1238,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     let nextDirectory: string | null = null
     let nextServerId: string | null | undefined
     let nextProjectDefaultModel: string | undefined
+    let nextProjectDefaultVariant: string | undefined
     let configDirectory: string | null = null
     const previousDraft = get().newSessionDraft
     const nextIsChat = target.projectId === CHAT_DRAFT_PROJECT_ID || target.selectedProjectId === CHAT_DRAFT_PROJECT_ID
@@ -1251,6 +1253,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         : null
       nextServerId = nextIsChat ? normalizeProjectServerId(target.serverId ?? s.newSessionDraft.chatServerId) : nextProject?.serverId
       nextProjectDefaultModel = nextProject?.defaultModel
+      nextProjectDefaultVariant = nextProject?.defaultVariant
       configDirectory = normalizePath(nextProject?.path ?? null) ?? nextDirectory
       return {
         newSessionDraft: {
@@ -1267,6 +1270,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       void activateConfigForDirectory(configDirectory, nextServerId).then(() => {
         useConfigStore.getState().applyDefaultModelAgentSelection({
           projectDefaultModel: nextProjectDefaultModel,
+          projectDefaultVariant: nextProjectDefaultVariant,
         })
       })
     }
