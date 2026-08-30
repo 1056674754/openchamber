@@ -38,6 +38,13 @@ import { getContextFileOpenFailureMessage, validateContextFileOpen } from '@/lib
 import { useI18n } from '@/lib/i18n';
 import { useActiveServerBaseUrl } from '@/hooks/useActiveServerId';
 import { resolveApiUrl } from '@/lib/api/serverUrl';
+import { isFilesystemError } from '@/lib/api/files-errors';
+import { getRuntimeKey } from '@/lib/runtime-switch';
+import { uploadWorkspaceFile } from '@/lib/workspaceFileUpload';
+import {
+  createFileContentScopeKey,
+  notifyFileContentInvalidated,
+} from '@/lib/fileContentInvalidation';
 
 type FileNode = {
   name: string;
@@ -45,6 +52,41 @@ type FileNode = {
   type: 'file' | 'directory';
   extension?: string;
   relativePath?: string;
+};
+
+type UploadConflicts = {
+  directory: string;
+  files: File[];
+  scopeKey: string;
+  workspaceRoot: string;
+  serverBaseUrl: string;
+};
+
+type UploadOutcome = 'uploaded' | 'conflict' | 'failed';
+
+const MAX_PARALLEL_UPLOADS = 3;
+
+const hasExternalFiles = (dataTransfer: DataTransfer): boolean => (
+  Array.from(dataTransfer.types).includes('Files')
+);
+
+const getExternalFiles = (dataTransfer: DataTransfer): File[] => {
+  const items = Array.from(dataTransfer.items);
+  if (items.length === 0) return Array.from(dataTransfer.files);
+
+  return items.flatMap((item) => {
+    if (item.kind !== 'file' || item.webkitGetAsEntry()?.isDirectory) return [];
+    const file = item.getAsFile();
+    return file ? [file] : [];
+  });
+};
+
+const getUploadName = (file: File): string | null => {
+  const name = file.name;
+  if (!name || name === '.' || name === '..' || name.includes('/') || name.includes('\\')) {
+    return null;
+  }
+  return name;
 };
 
 const sortNodes = (items: FileNode[]) =>
@@ -84,6 +126,13 @@ const getRelativePath = (root: string, path: string): string => {
     return normalizedPath;
   }
   return normalizedPath.slice(normalizedRoot.length + 1);
+};
+
+const getParentPath = (value: string): string => {
+  const normalized = normalizePath(value);
+  const separator = normalized.lastIndexOf('/');
+  if (separator <= 0) return normalized.startsWith('/') ? '/' : '';
+  return normalized.slice(0, separator);
 };
 
 const isAbsolutePath = (value: string): boolean => {
@@ -136,6 +185,8 @@ interface FileRowProps {
     canDelete: boolean;
     canReveal: boolean;
   };
+  canUpload: boolean;
+  isDropTarget: boolean;
   downloadFile?: (path: string) => Promise<void>;
   contextMenuPath: string | null;
   setContextMenuPath: (path: string | null) => void;
@@ -143,6 +194,8 @@ interface FileRowProps {
   onToggle: (path: string) => void;
   onRevealPath: (path: string) => void;
   onOpenDialog: (type: 'createFile' | 'createFolder' | 'rename' | 'delete', data: { path: string; name?: string; type?: 'file' | 'directory' }) => void;
+  onSetDropTarget: (path: string | null) => void;
+  onDropFiles: (directory: string, dataTransfer: DataTransfer) => void;
 }
 
 const FileRow: React.FC<FileRowProps> = ({
@@ -154,6 +207,8 @@ const FileRow: React.FC<FileRowProps> = ({
   status,
   badge,
   permissions,
+  canUpload,
+  isDropTarget,
   downloadFile,
   contextMenuPath,
   setContextMenuPath,
@@ -161,12 +216,15 @@ const FileRow: React.FC<FileRowProps> = ({
   onToggle,
   onRevealPath,
   onOpenDialog,
+  onSetDropTarget,
+  onDropFiles,
 }) => {
   const { t } = useI18n();
   const isDir = node.type === 'directory';
   const { canRename, canCreateFile, canCreateFolder, canDelete, canReveal } = permissions;
   const canDownload = !isDir && Boolean(downloadFile);
   const canRevealPath = canReveal && !isBrowserClient;
+  const uploadDirectory = isDir ? node.path : getParentPath(node.path);
   const hasMenuActions = canRename || canCreateFile || canCreateFolder || canDelete || canDownload || canRevealPath;
 
   const handleContextMenu = React.useCallback((event?: React.MouseEvent) => {
@@ -195,10 +253,39 @@ const FileRow: React.FC<FileRowProps> = ({
     e.dataTransfer.effectAllowed = 'copy';
   }, [node.path, root]);
 
+  const handleExternalDragOver = React.useCallback((event: React.DragEvent) => {
+    if (!canUpload || !uploadDirectory || !hasExternalFiles(event.dataTransfer)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.dataTransfer.dropEffect = 'copy';
+    onSetDropTarget(uploadDirectory);
+  }, [canUpload, onSetDropTarget, uploadDirectory]);
+
+  const handleExternalDragLeave = React.useCallback((event: React.DragEvent) => {
+    if (!hasExternalFiles(event.dataTransfer)) return;
+    if (event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)) return;
+    event.stopPropagation();
+    onSetDropTarget(null);
+  }, [onSetDropTarget]);
+
+  const handleExternalDrop = React.useCallback((event: React.DragEvent) => {
+    if (!canUpload || !uploadDirectory || !hasExternalFiles(event.dataTransfer)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    onSetDropTarget(null);
+    onDropFiles(uploadDirectory, event.dataTransfer);
+  }, [canUpload, onDropFiles, onSetDropTarget, uploadDirectory]);
+
   return (
     <div
-      className="group relative flex items-center"
+      className={cn(
+        'group relative flex items-center rounded-md',
+        isDropTarget && 'ring-1 ring-primary bg-interactive-hover/40',
+      )}
       onContextMenu={handleContextMenu}
+      onDragOver={handleExternalDragOver}
+      onDragLeave={handleExternalDragLeave}
+      onDrop={handleExternalDrop}
     >
       <button
         type="button"
@@ -377,12 +464,21 @@ export const SidebarFilesTree: React.FC = () => {
   const [dialogData, setDialogData] = React.useState<{ path: string; name?: string; type?: 'file' | 'directory' } | null>(null);
   const [dialogInputValue, setDialogInputValue] = React.useState('');
   const [isDialogSubmitting, setIsDialogSubmitting] = React.useState(false);
+  const [dropTarget, setDropTarget] = React.useState<string | null>(null);
+  const [isUploading, setIsUploading] = React.useState(false);
+  const [uploadConflicts, setUploadConflicts] = React.useState<UploadConflicts | null>(null);
+  const uploadingRef = React.useRef(false);
+  const rootRef = React.useRef(root);
+  const serverBaseUrlRef = React.useRef(serverBaseUrl);
+  rootRef.current = root;
+  serverBaseUrlRef.current = serverBaseUrl;
 
   const canCreateFile = Boolean(files.writeFile);
   const canCreateFolder = Boolean(files.createDirectory);
   const canRename = Boolean(files.rename);
   const canDelete = Boolean(files.delete);
   const canReveal = Boolean(files.revealPath);
+  const canUpload = !runtime.isVSCode;
 
   const fileRowPermissions = React.useMemo(
     () => ({ canRename, canCreateFile, canCreateFolder, canDelete, canReveal }),
@@ -708,6 +804,116 @@ export const SidebarFilesTree: React.FC = () => {
     }
   }, [loadDirectory, root, toggleExpandedPath]);
 
+  const uploadDroppedFiles = React.useCallback(async (
+    directory: string,
+    droppedFiles: File[],
+    overwrite = false,
+  ) => {
+    if (!canUpload || droppedFiles.length === 0 || uploadingRef.current || !root) return;
+
+    const operationRoot = root;
+    const operationBaseUrl = serverBaseUrl;
+    const operationScopeKey = createFileContentScopeKey(getRuntimeKey(), operationBaseUrl);
+    uploadingRef.current = true;
+    setIsUploading(true);
+    setDropTarget(directory);
+    if (overwrite) setUploadConflicts(null);
+
+    const outcomes: UploadOutcome[] = [];
+    for (let index = 0; index < droppedFiles.length; index += MAX_PARALLEL_UPLOADS) {
+      const batch = droppedFiles.slice(index, index + MAX_PARALLEL_UPLOADS);
+      const batchOutcomes = await Promise.all(batch.map(async (file): Promise<UploadOutcome> => {
+        const name = getUploadName(file);
+        if (!name) return 'failed';
+
+        const targetPath = normalizePath(`${directory === '/' ? '' : directory}/${name}`);
+        try {
+          const result = await uploadWorkspaceFile({
+            serverBaseUrl: operationBaseUrl,
+            directory: operationRoot,
+            path: targetPath,
+            file,
+            overwrite,
+          });
+          return result.success ? 'uploaded' : 'failed';
+        } catch (error) {
+          if (!overwrite && isFilesystemError(error) && error.reason === 'already-exists') {
+            return 'conflict';
+          }
+          return 'failed';
+        }
+      }));
+      outcomes.push(...batchOutcomes);
+    }
+
+    const uploadedCount = outcomes.filter((outcome) => outcome === 'uploaded').length;
+    const failedCount = outcomes.filter((outcome) => outcome === 'failed').length;
+    const conflictingFiles = droppedFiles.filter((_, index) => outcomes[index] === 'conflict');
+    const uploadedPaths = droppedFiles.flatMap((file, index) => {
+      const name = getUploadName(file);
+      return outcomes[index] === 'uploaded' && name
+        ? [normalizePath(`${directory === '/' ? '' : directory}/${name}`)]
+        : [];
+    });
+    const currentScopeKey = createFileContentScopeKey(getRuntimeKey(), serverBaseUrlRef.current);
+    const isCurrentDestination = rootRef.current === operationRoot && currentScopeKey === operationScopeKey;
+
+    try {
+      if (uploadedPaths.length > 0) {
+        notifyFileContentInvalidated({ scopeKey: operationScopeKey, paths: uploadedPaths });
+      }
+      if (uploadedCount > 0 && isCurrentDestination) {
+        await refreshDirectory(directory);
+      }
+      if (uploadedCount > 0) {
+        toast.success(t(conflictingFiles.length > 0
+          ? 'sidebarFilesTree.toast.uploadedWithoutConflicts'
+          : 'sidebarFilesTree.toast.uploaded'));
+      }
+      if (failedCount > 0) {
+        toast.error(t('sidebarFilesTree.toast.uploadFailed'));
+      }
+      if (conflictingFiles.length > 0 && isCurrentDestination) {
+        setUploadConflicts({
+          directory,
+          files: conflictingFiles,
+          scopeKey: operationScopeKey,
+          workspaceRoot: operationRoot,
+          serverBaseUrl: operationBaseUrl,
+        });
+      }
+    } finally {
+      uploadingRef.current = false;
+      setIsUploading(false);
+      setDropTarget(null);
+    }
+  }, [canUpload, refreshDirectory, root, serverBaseUrl, t]);
+
+  const handleDropFiles = React.useCallback((directory: string, dataTransfer: DataTransfer) => {
+    const droppedFiles = getExternalFiles(dataTransfer);
+    if (droppedFiles.length === 0) return;
+    void uploadDroppedFiles(directory, droppedFiles);
+  }, [uploadDroppedFiles]);
+
+  const handleRootDragOver = React.useCallback((event: React.DragEvent) => {
+    if (!canUpload || uploadingRef.current || !root || !hasExternalFiles(event.dataTransfer)) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'copy';
+    setDropTarget(root);
+  }, [canUpload, root]);
+
+  const handleRootDragLeave = React.useCallback((event: React.DragEvent) => {
+    if (!hasExternalFiles(event.dataTransfer)) return;
+    if (event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)) return;
+    setDropTarget(null);
+  }, []);
+
+  const handleRootDrop = React.useCallback((event: React.DragEvent) => {
+    if (!canUpload || uploadingRef.current || !root || !hasExternalFiles(event.dataTransfer)) return;
+    event.preventDefault();
+    handleDropFiles(root, event.dataTransfer);
+  }, [canUpload, handleDropFiles, root]);
+
   // --- Dialog submit (matching FilesView) ---
 
   const handleDialogSubmit = React.useCallback(async (e?: React.FormEvent) => {
@@ -868,6 +1074,8 @@ export const SidebarFilesTree: React.FC = () => {
             status={!isDir ? getFileStatus(node.path) : undefined}
             badge={isDir ? getFolderBadge(node.path) : undefined}
             permissions={fileRowPermissions}
+            canUpload={canUpload && !uploadingRef.current}
+            isDropTarget={dropTarget === (isDir ? node.path : getParentPath(node.path))}
             downloadFile={files.downloadFile}
             contextMenuPath={contextMenuPath}
             setContextMenuPath={setContextMenuPath}
@@ -875,6 +1083,8 @@ export const SidebarFilesTree: React.FC = () => {
             onToggle={toggleDirectory}
             onRevealPath={handleRevealPath}
             onOpenDialog={handleOpenDialog}
+            onSetDropTarget={setDropTarget}
+            onDropFiles={handleDropFiles}
           />
           {isDir && isExpanded && (
             <ul className="flex flex-col gap-1 ml-3 pl-3 border-l border-border/40 relative">
@@ -901,7 +1111,12 @@ export const SidebarFilesTree: React.FC = () => {
   const rootLoadError = root ? loadErrorsByDir[root] : null;
 
   return (
-    <section className="flex h-full min-h-0 flex-col overflow-hidden bg-sidebar">
+    <section
+      className="relative flex h-full min-h-0 flex-col overflow-hidden bg-sidebar"
+      onDragOver={handleRootDragOver}
+      onDragLeave={handleRootDragLeave}
+      onDrop={handleRootDrop}
+    >
       <div className="flex items-center gap-2 border-b border-border/40 px-3 py-2">
         <div className="relative min-w-0 flex-1">
           <Icon name="search" className="pointer-events-none absolute left-2 top-2 h-4 w-4 text-muted-foreground" />
@@ -1007,6 +1222,58 @@ export const SidebarFilesTree: React.FC = () => {
           )}
         </ul>
       </ScrollableOverlay>
+
+      {dropTarget ? (
+        <div className="pointer-events-none absolute left-2 right-2 top-12 z-50 flex items-center gap-2 rounded-md border border-primary bg-background/95 px-2 py-1.5 shadow-sm">
+          <Icon name={isUploading ? 'loader-4' : 'folder-received'} className={cn('size-4 flex-shrink-0', isUploading && 'animate-spin')} />
+          <span className="min-w-0 truncate typography-meta" title={getRelativePath(root, dropTarget)}>
+            {t(isUploading ? 'sidebarFilesTree.drop.uploading' : 'sidebarFilesTree.drop.target', {
+              path: getRelativePath(root, dropTarget),
+            })}
+          </span>
+        </div>
+      ) : null}
+
+      <Dialog open={Boolean(uploadConflicts)} onOpenChange={(open) => !open && setUploadConflicts(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t('sidebarFilesTree.dialog.uploadConflicts.title')}</DialogTitle>
+            <DialogDescription>
+              {t('sidebarFilesTree.dialog.uploadConflicts.description', { path: uploadConflicts?.directory ?? '' })}
+            </DialogDescription>
+          </DialogHeader>
+          <ScrollableOverlay outerClassName="max-h-52" className="flex flex-col gap-1 pr-2">
+            {uploadConflicts?.files.map((file, index) => (
+              <div key={`${file.name}-${file.size}-${index}`} className="truncate rounded-md bg-muted px-2 py-1 typography-meta" title={file.name}>
+                {file.name}
+              </div>
+            ))}
+          </ScrollableOverlay>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setUploadConflicts(null)} disabled={isUploading}>
+              {t('sidebarFilesTree.dialog.cancel')}
+            </Button>
+            <Button
+              onClick={() => {
+                if (!uploadConflicts) return;
+                const currentScopeKey = createFileContentScopeKey(getRuntimeKey(), serverBaseUrlRef.current);
+                if (
+                  uploadConflicts.scopeKey !== currentScopeKey
+                  || uploadConflicts.workspaceRoot !== rootRef.current
+                  || uploadConflicts.serverBaseUrl !== serverBaseUrlRef.current
+                ) {
+                  setUploadConflicts(null);
+                  return;
+                }
+                void uploadDroppedFiles(uploadConflicts.directory, uploadConflicts.files, true);
+              }}
+              disabled={isUploading}
+            >
+              {t('sidebarFilesTree.dialog.uploadConflicts.replace')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* CRUD dialogs (matching FilesView) */}
       <Dialog open={!!activeDialog} onOpenChange={(open) => !open && setActiveDialog(null)}>

@@ -22,6 +22,7 @@ describe('FilesystemError', () => {
 
   test('normalizes unsupported response reasons to unknown', () => {
     expect(parseFilesystemErrorReason('os-permission')).toBe('os-permission');
+    expect(parseFilesystemErrorReason('already-exists')).toBe('already-exists');
     expect(parseFilesystemErrorReason('made-up')).toBe('unknown');
     expect(parseFilesystemErrorReason(undefined)).toBe('unknown');
   });

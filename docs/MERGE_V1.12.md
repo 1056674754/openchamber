@@ -2574,3 +2574,14 @@ v1.20.0-sscity 尚未宣布完成：当前未关闭 `#135/#140/#142-#151/#154/#1
 - 400/403/404/409/413/415 与 `reason` 语义明确，OS permission 继续走既有 `os-permission` contract。
 
 验证：FS route Vitest 20/20 ✅，其中新增 8 条覆盖 explicit authority、binary fidelity、conflict preservation、overwrite、MIME、size、missing parent/temp cleanup、outside symlink denial。全 workspace type/lint/build 与 diff check 见本 phase 最终验证。[#147](https://coding.s-s.city/songsong/openchamber/-/issues/147) 保持 open：下一 phase 接 Web client、Sidebar drop UI、conflict confirmation、cache invalidation 与 remote runtime parity；当前 dirty `api/types.ts` 不被本 phase 覆盖。
+
+### #147 Phase 2：Scoped Sidebar drop upload + conflict recovery（2026-08-30）
+
+- 新增不依赖 shared dirty `FilesAPI` type 的 `uploadWorkspaceFile`：每次调用显式捕获 `serverBaseUrl + owningDirectory + targetPath`，通过 `runtimeFetch` 支持 local、direct remote、aggregated `/api/remote/:id` 与 relay transport；缺 owning directory 在 fetch 前 fail closed。
+- Sidebar root、folder 和 file row（file 使用 parent）接收外部文件 drop；目录 item 被过滤，文件名拒绝空值、`.`/`..`、slash/backslash。每批最多并行 3 个上传，避免大量文件制造请求风暴。
+- 默认不覆盖；409 conflict 收集到确认 dialog，用户显式 Replace 后只重传冲突文件。切 Session/server/runtime 后旧 dialog fail closed，不会把确认操作路由到新实例。
+- upload operation 捕获 `runtimeKey + serverBaseUrl + root`。完成后仅在仍处于同一 authority 时刷新树；缓存 invalidation 使用 `runtimeKey + serverBaseUrl` scope，比上游仅 runtimeKey 更严格，不会让 Dev1/Dev3 同路径互相刷新。
+- FilesView 对同 scope、同 selected path 且无 dirty draft 的 invalidation 立即重载 text/image/HTML；有未保存编辑时不覆盖用户内容。
+- upload/error/drop/conflict 文案补齐全部 11 个 runtime locales。
+
+验证：upload client + invalidation + filesystem reason Bun 3 files / 7 tests ✅；UI type-check/lint ✅。全 workspace type/lint/build 与 diff check 见本 phase 最终验证。[#147](https://coding.s-s.city/songsong/openchamber/-/issues/147) 保持 open：VS Code extension 没有 `/api/fs/upload` server surface，需在其 bridge/type WIP 收口后补二进制 upload parity；installed runtime drag/drop matching-surface QA 也尚未执行。

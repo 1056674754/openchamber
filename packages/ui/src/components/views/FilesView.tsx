@@ -75,6 +75,11 @@ import { useActiveServerBaseUrl, useActiveServerId } from '@/hooks/useActiveServ
 import { resolveApiUrl } from '@/lib/api/serverUrl';
 import { statFilesViewPath } from '@/lib/filesViewFileAccess';
 import { runtimeFetch } from '@/lib/runtime-fetch';
+import { getRuntimeKey } from '@/lib/runtime-switch';
+import {
+  createFileContentScopeKey,
+  subscribeToFileContentInvalidation,
+} from '@/lib/fileContentInvalidation';
 import { syncScheduledTaskLoops } from '@/lib/scheduledTasksApi';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { resolveJsonFileViewState } from './jsonFileViewState';
@@ -795,6 +800,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
   const [contentDetectedBinary, setContentDetectedBinary] = React.useState(false);
 
   const [loadedFilePath, setLoadedFilePath] = React.useState<string | null>(null);
+  const [fileContentRevision, setFileContentRevision] = React.useState(0);
 
   const [draftContent, setDraftContent] = React.useState('');
   const [isSaving, setIsSaving] = React.useState(false);
@@ -1931,12 +1937,32 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
 
     // Selection changes are guarded; this effect is also what restores persisted tabs on mount.
     void loadSelectedFile(selectedFile);
-  }, [loadSelectedFile, loadedFilePath, selectedFile]);
+  }, [fileContentRevision, loadSelectedFile, loadedFilePath, selectedFile]);
 
   // Sync isDirty to a ref so the polling interval can read the latest value
   // without isDirty in its dependency array (avoids interval restart on every edit/save).
   const isDirtyRef = React.useRef(isDirty);
   isDirtyRef.current = isDirty;
+
+  React.useEffect(() => subscribeToFileContentInvalidation(({ scopeKey, paths }) => {
+    const selectedPath = selectedFile?.path;
+    if (
+      scopeKey !== createFileContentScopeKey(getRuntimeKey(), serverBaseUrl)
+      || !selectedPath
+      || isDirtyRef.current
+      || !paths.includes(normalizePath(selectedPath))
+    ) {
+      return;
+    }
+
+    activeFileLoadIdRef.current += 1;
+    lastLoadedFileStatRef.current = null;
+    setDesktopImageSrc('');
+    setRuntimeImageSrc('');
+    setFileError(null);
+    setLoadedFilePath(null);
+    setFileContentRevision((revision) => revision + 1);
+  }), [selectedFile?.path, serverBaseUrl]);
 
   // Poll open file for external changes.
   // When a change is detected, reset loadedFilePath so the effect above
@@ -2855,7 +2881,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
     return () => {
       cancelled = true;
     };
-  }, [currentDirectory, files, isSelectedImage, isSelectedSvg, runtime.isDesktop, selectedFile?.path, selectedFileReadOptions, serverBaseUrl, t]);
+  }, [currentDirectory, fileContentRevision, files, isSelectedImage, isSelectedSvg, runtime.isDesktop, selectedFile?.path, selectedFileReadOptions, serverBaseUrl, t]);
 
   React.useEffect(() => {
     if (runtime.isDesktop || !selectedFile?.path || !isSelectedImage || isSelectedSvg) {
@@ -2907,7 +2933,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
         URL.revokeObjectURL(objectUrl);
       }
     };
-  }, [currentDirectory, isSelectedImage, isSelectedSvg, runtime.isDesktop, selectedFile?.path, selectedFileReadOptions, serverBaseUrl, t]);
+  }, [currentDirectory, fileContentRevision, isSelectedImage, isSelectedSvg, runtime.isDesktop, selectedFile?.path, selectedFileReadOptions, serverBaseUrl, t]);
 
   const blockWidgets = React.useMemo(() => {
     return buildCodeMirrorCommentWidgets({
