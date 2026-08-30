@@ -2764,6 +2764,20 @@ v1.20.0-sscity 尚未宣布完成：当前未关闭 `#135/#140/#142-#151/#154/#1
 
 验证：SSH manager + dev-tunnel authority + ConfigCard 3 files / 17 tests ✅；full workspace type-check ✅；full workspace lint ✅；`git diff --check` ✅。[#151](https://coding.s-s.city/songsong/openchamber/-/issues/151) 保持 open：仍需在实际 Desktop Settings surface 完成 SSH-config create、managed install/update、remote-LAN password gate、disconnect-stop/reconnect-start 与日志/remediation matching-surface QA。
 
+### #151 Phase 3：Isolated Desktop managed lifecycle closeout（2026-08-31）
+
+- 现场预检发现 Linux standalone仍硬编码 `1.17.1-sscity`，而 workspace/Electron/Web已是 `1.18.2-sscity`，导致 manager版本匹配永远失败。standalone版本现在直接来自 `packages/web/package.json`，focused test约束二者一致；重新编译的 amd64 release binary实际输出 `1.18.2-sscity`。
+- SSH manager版本 parser从仅纯数字扩展为 semver prerelease/build，正式 `1.18.2-sscity`不再被解析成 unknown并反复 update。
+- managed start统一为 `nohup openchamber serve --foreground`；standalone foreground写 instance/port PID文件，`stop --port`发送 TERM并只清理自己持有的 PID。解决旧实现 `serve`只打印端口退出、`stop`反而启动 server的问题。
+- `nohup`返回后用250ms起步、2s cap、30s总预算轮询 remote health；失败会 stop本次刚启动的 server，避免快速 retry制造多个 orphan。现场首轮正是由单次60ms health probe复现并定位。
+- Disconnect不再使用 connect时的 stale instance snapshot；重新读取 persisted instance后执行最新 `keepRunning` policy。现场复现“连接后改为 false仍不停止”，修复后 `stop --port`终止进程且 PID文件消失。
+- matching surface使用隔离 `HOME/OPENCHAMBER_DATA_DIR` Electron dev、一次性 SSH容器与本地 release endpoint；Settings完成 Quick Add/SSH command/nickname/download-release保存。开启 remote LAN但无 UI password时保存被拒绝并显示明确 warning；关闭后保存成功。
+- 一次性容器先验证真实 OpenCode installer可安装 `1.18.25`；Docker Desktop运行完整 OpenCode会拖慢容器，最终 lifecycle重验使用只实现 health的临时 OpenCode stub。该 stub只替代 QA载体，真实 Dev3 OpenCode/HTTP/WebSocket已由 #135 Phase 11验证。
+- 最终日志为 `remote_probe → installing_opencode → server_starting → forwarding → ready`；local forward `/health` HTTP 200。`keepRunning=false` Disconnect后 remote OpenChamber与 PID均不存在；再次 Connect不再 update同版本binary，并重新到 `ready`。临时 Electron/HMR/release server/SSH container/data全部清理，Dev3与正式 runtime未触碰。
+- 对应提交：`3ca7c20ec fix(ssh): complete managed remote lifecycle`。
+
+验证：SSH manager + standalone version 2 files / 15 tests ✅；full workspace type-check/lint ✅；amd64 Linux binary build + version/sha校验 ✅；隔离 Desktop Settings LAN gate/install/version/start/forward/log/remediation/disconnect-stop/reconnect-start matching-surface QA ✅；`git diff --check` ✅。至此 [#151](https://coding.s-s.city/songsong/openchamber/-/issues/151) 的 v1.20 SSH setup与managed lifecycle范围完成，可关闭。
+
 ### #144 Phase 1：Fail-closed JSONC layer parsing（2026-08-31）
 
 上游来源：`f6e054abc`、`998bcf3d6`、`d784e7075`、`538f57ca3`。本阶段只修改与并行 settings-lock WIP 无重叠的 Web / VS Code OpenCode config data layer：
