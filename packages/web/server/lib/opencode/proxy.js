@@ -1,3 +1,5 @@
+import http from 'node:http';
+import https from 'node:https';
 import { createProxyMiddleware } from 'http-proxy-middleware';
 
 import {
@@ -13,6 +15,41 @@ import { DEFAULT_UPSTREAM_STALL_TIMEOUT_MS } from '../event-stream/upstream-read
 const MAX_MESSAGE_HISTORY_DIFFS = 500;
 const MAX_MESSAGE_HISTORY_PATCH_LENGTH = 100_000;
 const DEFAULT_SSE_HEARTBEAT_INTERVAL_MS = 20_000;
+const PROXY_AGENT_OPTIONS = {
+  keepAlive: true,
+  keepAliveMsecs: 30_000,
+  maxSockets: Infinity,
+  maxFreeSockets: 256,
+  timeout: 60_000,
+};
+
+const isHttpsProxyTarget = (target) => {
+  try {
+    return new URL(target).protocol === 'https:';
+  } catch {
+    return /^https:/i.test(String(target ?? '').trim());
+  }
+};
+
+export const createOpenCodeProxyAgent = (target) => (
+  isHttpsProxyTarget(target)
+    ? new https.Agent(PROXY_AGENT_OPTIONS)
+    : new http.Agent(PROXY_AGENT_OPTIONS)
+);
+
+export const createOpenCodeProxyAgentResolver = (resolveTarget) => {
+  const agents = new Map();
+  return () => {
+    const target = resolveTarget();
+    const scheme = isHttpsProxyTarget(target) ? 'https:' : 'http:';
+    let agent = agents.get(scheme);
+    if (!agent) {
+      agent = createOpenCodeProxyAgent(target);
+      agents.set(scheme, agent);
+    }
+    return agent;
+  };
+};
 
 export const projectMessageHistoryPayload = (payload) => {
   if (!Array.isArray(payload)) {
@@ -498,8 +535,12 @@ export const registerOpenCodeProxy = (app, deps) => {
   app.get('/api/event', forwardSseRequest);
 
   // Generic proxy for non-SSE OpenCode API routes.
+  const resolveOpenCodeProxyAgent = createOpenCodeProxyAgentResolver(resolveProxyTarget);
   const createApiProxy = (timeoutMs) => createProxyMiddleware({
     target: resolveProxyTarget(),
+    get agent() {
+      return resolveOpenCodeProxyAgent();
+    },
     changeOrigin: true,
     pathRewrite: { '^/api': '' },
     ...(timeoutMs ? { timeout: timeoutMs, proxyTimeout: timeoutMs } : {}),

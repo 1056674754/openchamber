@@ -398,9 +398,10 @@ Startup timeout (`startupTimeoutMs` dep, env `OPENCHAMBER_OPENCODE_STARTUP_TIMEO
   - Upstream-only SSE stall detection; proxy-generated downstream heartbeats do not mask a silent OpenCode stream, which is closed so clients can reconnect
   - Session message forwarder: `POST /api/session/:sessionId/message`
   - Generic `/api/*` forwarding with hop-by-hop header filtering
+  - One lazily selected keep-alive agent per HTTP/HTTPS scheme, shared by generic API and interactive OAuth proxies; a cold loopback fallback can later switch to an external HTTPS pool safely
   - Decoded payload accounting via `x-openchamber-decoded-content-length`; the proxy only derives it from an identity-encoded upstream `content-length`, before browser-facing compression
   - Windows `/session` merge fallback path behavior
-  - OpenCode readiness gate for proxied `/api` requests
+- OpenCode readiness gate for proxied `/api` requests
 
 ## Public exports (watcher.js)
 - `createOpenCodeWatcherRuntime(dependencies)`: creates global event watcher runtime backed by the shared upstream SSE reader.

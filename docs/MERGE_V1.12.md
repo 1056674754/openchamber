@@ -2240,3 +2240,12 @@ fork 已有丰富的 surface 组织（#62 surface rail + ContextSidebarTab + Con
 - 浏览器原生 WebSpeech 不提供受控音频帧/MediaRecorder，继续作为实时 fallback；选择 Server 或 WASM provider 时获得完整 post-recording 语义。
 
 验证：segmentation/join + fake MediaRecorder 4 Bun tests ✅（录音中 0 次 fetch、finish 后 1 次、单 final callback）；full workspace type-check/lint ✅；Web production build ✅；`git diff --check` ✅。
+
+### #145：OpenCode proxy connection reuse；Shiki architecture N/A（2026-08-30）
+
+上游来源：`3c93190c9`、`a5492d5dc`、`79cbc1e9f`、`7657c5455`：
+
+- API proxy 与 interactive OAuth proxy 共享 per-scheme keep-alive pool：30s TCP keepalive、60s idle retirement、256 free sockets、unbounded active sockets；避免每请求 `Connection: close` 导致 TIME_WAIT/ephemeral-port 耗尽。
+- agent 通过 getter 在 request time 懒解析；proxy 在 managed OpenCode 启动前注册时可先得到 HTTP fallback，后续 external HTTPS runtime 会使用独立 `https.Agent`，不会错误复用 plaintext pool。
+- factory/resolver 2 tests + middleware wiring 2 tests 覆盖 keepalive options、per-scheme memo、API/OAuth share 和 cold→HTTPS；full type-check/lint/diff check ✅。
+- Shiki churn 子项对本 fork 明确 N/A：当前 Markdown 主 renderer 是 ReactMarkdown + `react-syntax-highlighter` Prism，不存在上游 `markdownCore.ts`、`markdown-shiki.worker.ts`、`HighlightResultCache` 三层。迁入上游 cache/worker 会引入第二套 renderer；保留此前 MERGE 决策“不迁 marked+shiki”，不创建无调用方性能代码。
