@@ -22,7 +22,7 @@ import { markStartupTrace, measureStartupTrace } from "@/lib/startupTrace";
 import { normalizePath } from "@/lib/pathNormalization";
 import { SdkRequestError } from "@/sync/sdk-error";
 import { resolveModelVariant } from "@/lib/modelVariantResolution";
-import { preserveAddProviderSelection, sanitizePersistedProviderSelection } from "./configProviderSelection";
+import { resolveSettingsProviderSelection, sanitizePersistedProviderSelection } from "./configProviderSelection";
 import { getSyncConfig, subscribeToSyncConfigChanges } from "@/sync/sync-refs";
 
 const MODELS_DEV_API_URL = "https://models.dev/api.json";
@@ -1348,11 +1348,26 @@ export const useConfigStore = create<ConfigStore>()(
                                     agentModelSelections: {},
                                     defaultProviders: {},
                                 };
+                                const configuredDefaultProviderId = state.settingsDefaultModel
+                                    ? parseModelString(state.settingsDefaultModel)?.providerId
+                                    : undefined;
+                                const preferredProviderId = processedProviders.some((provider) => provider.id === configuredDefaultProviderId)
+                                    ? configuredDefaultProviderId
+                                    : undefined;
+                                const currentSettingsSelection = state.activeDirectoryKey === directoryKey
+                                    ? state.selectedProviderId
+                                    : baseSnapshot.selectedProviderId;
+                                const selectedProviderId = resolveSettingsProviderSelection(
+                                    currentSettingsSelection,
+                                    preferredProviderId,
+                                    processedProviders[0]?.id,
+                                );
 
                                 const nextSnapshot: DirectoryScopedConfig = {
                                     ...baseSnapshot,
                                     providers: processedProviders,
                                     defaultProviders: defaults,
+                                    selectedProviderId,
                                 };
 
                                 const nextState: Partial<ConfigStore> = {
@@ -1365,6 +1380,7 @@ export const useConfigStore = create<ConfigStore>()(
                                 if (state.activeDirectoryKey === directoryKey) {
                                     nextState.providers = processedProviders;
                                     nextState.defaultProviders = defaults;
+                                    nextState.selectedProviderId = selectedProviderId;
 
                                     if (!state.currentProviderId && !state.currentModelId && state.settingsDefaultModel) {
                                         const parsed = parseModelString(state.settingsDefaultModel);
@@ -1379,12 +1395,10 @@ export const useConfigStore = create<ConfigStore>()(
                                                 nextState.currentProviderId = parsed.providerId;
                                                 nextState.currentModelId = parsed.modelId;
                                                 nextState.currentVariant = currentVariant;
-                                                nextState.selectedProviderId = preserveAddProviderSelection(state.selectedProviderId, parsed.providerId);
 
                                                 nextSnapshot.currentProviderId = parsed.providerId;
                                                 nextSnapshot.currentModelId = parsed.modelId;
                                                 nextSnapshot.currentVariant = currentVariant;
-                                                nextSnapshot.selectedProviderId = preserveAddProviderSelection(baseSnapshot.selectedProviderId, parsed.providerId);
                                             }
                                         }
                                     }
@@ -1452,11 +1466,26 @@ export const useConfigStore = create<ConfigStore>()(
                             agentModelSelections: {},
                             defaultProviders: {},
                         };
+                        const configuredDefaultProviderId = state.settingsDefaultModel
+                            ? parseModelString(state.settingsDefaultModel)?.providerId
+                            : undefined;
+                        const preferredProviderId = previousProviders.some((provider) => provider.id === configuredDefaultProviderId)
+                            ? configuredDefaultProviderId
+                            : undefined;
+                        const currentSettingsSelection = state.activeDirectoryKey === directoryKey
+                            ? state.selectedProviderId
+                            : baseSnapshot.selectedProviderId;
+                        const selectedProviderId = resolveSettingsProviderSelection(
+                            currentSettingsSelection,
+                            preferredProviderId,
+                            previousProviders[0]?.id,
+                        );
 
                         const nextSnapshot: DirectoryScopedConfig = {
                             ...baseSnapshot,
                             providers: previousProviders,
                             defaultProviders: previousDefaults,
+                            selectedProviderId,
                         };
 
                         const nextState: Partial<ConfigStore> = {
@@ -1469,6 +1498,7 @@ export const useConfigStore = create<ConfigStore>()(
                         if (state.activeDirectoryKey === directoryKey) {
                             nextState.providers = previousProviders;
                             nextState.defaultProviders = previousDefaults;
+                            nextState.selectedProviderId = selectedProviderId;
 
                             if (!state.currentProviderId && !state.currentModelId && state.settingsDefaultModel) {
                                 const parsed = parseModelString(state.settingsDefaultModel);
@@ -1483,12 +1513,10 @@ export const useConfigStore = create<ConfigStore>()(
                                         nextState.currentProviderId = parsed.providerId;
                                         nextState.currentModelId = parsed.modelId;
                                         nextState.currentVariant = currentVariant;
-                                        nextState.selectedProviderId = preserveAddProviderSelection(state.selectedProviderId, parsed.providerId);
 
                                         nextSnapshot.currentProviderId = parsed.providerId;
                                         nextSnapshot.currentModelId = parsed.modelId;
                                         nextSnapshot.currentVariant = currentVariant;
-                                        nextSnapshot.selectedProviderId = preserveAddProviderSelection(baseSnapshot.selectedProviderId, parsed.providerId);
                                     }
                                 }
                             }
@@ -1531,13 +1559,11 @@ export const useConfigStore = create<ConfigStore>()(
                             ...baseSnapshot,
                             currentProviderId: providerId,
                             currentModelId: newModelId,
-                            selectedProviderId: providerId,
                         };
 
                         return {
                             currentProviderId: providerId,
                             currentModelId: newModelId,
-                            selectedProviderId: providerId,
                             selectionSource: "manual",
                             directoryScoped: {
                                 ...state.directoryScoped,
@@ -2205,14 +2231,12 @@ export const useConfigStore = create<ConfigStore>()(
                                     currentProviderId: providerId,
                                     currentModelId: modelId,
                                     currentVariant: variant,
-                                    selectedProviderId: providerId,
                                 };
 
                                 return {
                                     currentProviderId: providerId,
                                     currentModelId: modelId,
                                     currentVariant: variant,
-                                    selectedProviderId: providerId,
                                     directoryScoped: {
                                         ...state.directoryScoped,
                                         [directoryKey]: nextSnapshot,
@@ -2364,7 +2388,6 @@ export const useConfigStore = create<ConfigStore>()(
                                     currentProviderId: nextSelection.providerId,
                                     currentModelId: nextSelection.modelId,
                                     currentVariant: nextSelection.variant,
-                                    selectedProviderId: nextSelection.providerId,
                                 }
                                 : {}),
                         };
@@ -2381,7 +2404,6 @@ export const useConfigStore = create<ConfigStore>()(
                                     currentProviderId: nextSelection.providerId,
                                     currentModelId: nextSelection.modelId,
                                     currentVariant: nextSelection.variant,
-                                    selectedProviderId: nextSelection.providerId,
                                 }
                                 : {}),
                         };
@@ -2494,7 +2516,6 @@ export const useConfigStore = create<ConfigStore>()(
                                     currentProviderId: nextSelection.providerId,
                                     currentModelId: nextSelection.modelId,
                                     currentVariant: nextSelection.variant,
-                                    selectedProviderId: nextSelection.providerId,
                                 }
                                 : {}),
                         };
@@ -2530,7 +2551,6 @@ export const useConfigStore = create<ConfigStore>()(
                                 nextState.currentProviderId = nextSelection.providerId;
                                 nextState.currentModelId = nextSelection.modelId;
                                 nextState.currentVariant = nextSelection.variant;
-                                nextState.selectedProviderId = nextSelection.providerId;
                             }
                         }
 

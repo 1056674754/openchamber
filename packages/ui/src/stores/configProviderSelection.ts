@@ -1,12 +1,11 @@
 export const ADD_PROVIDER_SELECTION_ID = '__add_provider__';
 
-export const preserveAddProviderSelection = (
+export const resolveSettingsProviderSelection = (
     currentSelection: string | undefined,
-    nextProviderId: string,
+    preferredProviderId: string | undefined,
+    firstProviderId: string | undefined,
 ): string => {
-    return currentSelection === ADD_PROVIDER_SELECTION_ID
-        ? ADD_PROVIDER_SELECTION_ID
-        : nextProviderId;
+    return currentSelection || preferredProviderId || firstProviderId || '';
 };
 
 export const sanitizePersistedProviderSelection = (providerId: string | undefined): string => {

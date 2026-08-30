@@ -57,6 +57,8 @@ const provider = (id: string, modelId = `${id}-model`) => ({
   ],
 });
 
+let liveProviders = [provider('openai', 'gpt-5.5')];
+
 const testAgent = (name: string, options?: Partial<TestAgent>): Agent => ({
   name,
   mode: options?.mode ?? 'primary',
@@ -94,7 +96,7 @@ const fakeSdk = {
     }),
     providers: mock(async () => ({
       data: {
-        providers: [],
+        providers: liveProviders,
         default: {},
       },
     })),
@@ -230,6 +232,7 @@ describe('useConfigStore non-blocking OpenCode config', () => {
     lastAgentsDirectory = null;
     checkHealthCalls = 0;
     liveAgents = [testAgent('build')];
+    liveProviders = [provider('openai', 'gpt-5.5')];
     liveOpenChamberSettings = {};
     listAgentsImpl = null;
     checkHealthImpl = async () => true;
@@ -375,6 +378,69 @@ describe('useConfigStore non-blocking OpenCode config', () => {
     expect(state.currentProviderId).toBe('manual');
     expect(state.currentModelId).toBe('manual-model');
     expect(state.opencodeDefaultModel).toBe('openai/gpt-5.5');
+  });
+
+  test('provider refresh preserves a settings selection missing from the live catalog', async () => {
+    liveProviders = [provider('live')];
+    useConfigStore.setState((state) => ({
+      selectedProviderId: 'plugin-provider',
+      directoryScoped: {
+        ...state.directoryScoped,
+        [DIRECTORY]: {
+          ...state.directoryScoped[DIRECTORY],
+          selectedProviderId: 'plugin-provider',
+        },
+      },
+    }));
+
+    await useConfigStore.getState().loadProviders({ directory: DIRECTORY, source: 'test:missingSettingsSelection' });
+
+    const state = useConfigStore.getState();
+    expect(state.providers.map((entry) => entry.id)).toEqual(['live']);
+    expect(state.selectedProviderId).toBe('plugin-provider');
+    expect(state.directoryScoped[DIRECTORY]?.selectedProviderId).toBe('plugin-provider');
+  });
+
+  test('provider refresh fills only an empty settings selection', async () => {
+    liveProviders = [provider('live')];
+    useConfigStore.setState((state) => ({
+      selectedProviderId: '',
+      directoryScoped: {
+        ...state.directoryScoped,
+        [DIRECTORY]: {
+          ...state.directoryScoped[DIRECTORY],
+          selectedProviderId: '',
+        },
+      },
+    }));
+
+    await useConfigStore.getState().loadProviders({ directory: DIRECTORY, source: 'test:emptySettingsSelection' });
+
+    expect(useConfigStore.getState().selectedProviderId).toBe('live');
+  });
+
+  test('changing the chat provider leaves the settings provider selection alone', () => {
+    useConfigStore.setState((state) => ({
+      providers: [provider('anthropic'), provider('openai')],
+      currentProviderId: 'anthropic',
+      currentModelId: 'anthropic-model',
+      selectedProviderId: 'openai',
+      directoryScoped: {
+        ...state.directoryScoped,
+        [DIRECTORY]: {
+          ...state.directoryScoped[DIRECTORY],
+          providers: [provider('anthropic'), provider('openai')],
+          selectedProviderId: 'openai',
+        },
+      },
+    }));
+
+    useConfigStore.getState().setProvider('anthropic');
+
+    const state = useConfigStore.getState();
+    expect(state.currentProviderId).toBe('anthropic');
+    expect(state.selectedProviderId).toBe('openai');
+    expect(state.directoryScoped[DIRECTORY]?.selectedProviderId).toBe('openai');
   });
 
   test('manual selection survives an in-flight loadAgents refresh', async () => {
