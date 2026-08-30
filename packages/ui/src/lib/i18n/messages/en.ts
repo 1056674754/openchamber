@@ -66,6 +66,7 @@ export const dict = {
   'sessions.scheduledTasks.dialog.toast.deleted': 'Scheduled task deleted',
   'sessions.scheduledTasks.dialog.toast.deleteFailed': 'Failed to delete task',
   'sessions.scheduledTasks.dialog.toast.started': 'Task started',
+  'sessions.scheduledTasks.dialog.toast.startedPersistWarning': 'Task started, but its status could not be saved. It may still show as running until the next successful run.',
   'sessions.scheduledTasks.dialog.toast.runFailed': 'Failed to run task',
   'sessions.scheduledTasks.dialog.confirm.deleteTask': 'Delete scheduled task "{taskName}"?',
   'sessions.scheduledTasks.dialog.confirm.deleteLoopFile': 'Delete loop task "{taskName}" and its markdown file?',
@@ -1928,6 +1929,9 @@ export const dict = {
   'chat.messageBody.actions.openPreviewAria': 'Open preview',
   'chat.messageBody.actions.openPreview': 'Open preview',
   'chat.messageBody.actions.copyAnswer': 'Copy answer',
+  'chat.messageBody.actions.continue': 'Continue',
+  'chat.messageBody.actions.continuing': 'Continuing...',
+  'chat.messageBody.actions.continueFailed': 'Failed to continue',
   'chat.messageBody.actions.savingImage': 'Saving image...',
   'chat.messageBody.actions.saveAsImage': 'Save as image',
   'chat.messageBody.actions.saveAsPlan': 'Save as plan',
@@ -2923,6 +2927,11 @@ export const dict = {
   'walkthrough.blocked.serverUnsupported.description': 'The OpenChamber server this app is connected to did not answer the walkthrough API, which means it is older than the app. Update the server to 1.18 or newer, then refresh.',
   'walkthrough.blocked.contextTooSmall.descriptionUnknownModel': 'The small model fits about {available}K characters and this diff needs about {required}K. Nothing gets truncated — pick a model with a larger context instead.',
   'walkthrough.blocked.structuredOutput.descriptionUnknownModel': 'The small model does not support the structured responses a walkthrough needs.',
+'settings.saveFailed.title': 'Settings save failed',
+'settings.saveFailed.lockTimeoutDescription': 'Another process is holding the settings lock. Try again in a moment.',
+'settings.saveFailed.networkDescription': 'Network error while saving settings. Check your connection and retry.',
+'settings.saveFailed.httpDescription': 'The server rejected the settings update. Copy the error and retry.',
+'settings.saveFailed.retry': 'Retry',
 } as const;
 
 export type I18nKey = keyof typeof dict;
