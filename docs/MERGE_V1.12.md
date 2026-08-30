@@ -3127,3 +3127,15 @@ v1.20.0-sscity 尚未宣布完成：当前未关闭 `#135/#140/#142-#151/#154/#1
 - upgrade error支持 `error`、`message`、`data.message`，原始可用信息继续进入现有copyable diagnostics UI。对应实现提交：`9788eea27 feat(providers): harden credentials and upgrades`。
 
 验证：provider auth Bun 2/2 ✅；Small Model Vitest 27/27 ✅；VS Code upgrade Bun 7/7 ✅；Web upgrade focused Bun 7/7 + target focused 4/4 ✅；full workspace type-check/lint ✅；`git diff --check` ✅。完整 `routes.test.js` 另有两个不经过upgrade path的并行 settings/remote-namespace WIP基线失败（settings save 503、relay pending 401），未由本批覆盖或误报为通过。至此 [#168](https://coding.s-s.city/songsong/openchamber/-/issues/168) 的 credential signals、configured headers与OpenCode requested-release/error UX范围完成，可关闭。
+
+## v1.21.1 `#164`：Runtime-scoped auth expiry recovery + relay-default boot（2026-08-31）
+
+上游来源：`fc192dc01`、`97a4e1a11`，按 fork multi-instance runtime authority加强：
+
+- `runtimeFetch`与全局SDK fetch bridge都观察当前runtime response；只有当前runtime的API/auth 401才进入15秒single-flight确认，随后以同一`runtimeKey`请求`/auth/session`。provider-side 401、login/pairing自身401、第三方absolute `/api/*`、切换实例后迟到response与transport failure均不会误判为UI session expiry。
+- expiry state携带owning `runtimeKey`；只有active runtime的成功认证能清除blocker。Web/Desktop继续显示当前工作并给出非阻塞登录banner；点击后复用现有password/passkey gate。composer在auth恢复前保留draft/queue且明确提示，不能把send烧在必然401上；恢复后当前Session强制重抓消息，清除认证失败留下的stranded hydration。
+- Capacitor不闪shared banner：确认过期后回到现有connection/login screen并标记`auth-required`；mobile web仍使用shared in-place banner。新增3个key覆盖de/en/es/ja/ko/pl/pt-BR/tr/uk/zh-CN/zh-TW全部runtime locales。
+- relay-paired default desktop host若stored direct URL缺失、loopback/unreachable或指向wrong service，不再停在recovery wall：Electron先落local UI substrate，让renderer用保存的relay descriptor恢复transport。direct-only host继续2s→10s probe与原有recovery；auth response继续进入main由SessionAuthGate处理。
+- 对应实现提交：`69f37f538 feat(auth): recover expired runtime sessions`。`main.mjs`属于desktop shell source变化；本阶段没有执行runtime install、没有修改`/Applications/OpenChamber.app`。后续shell release/installed relay smoke仍按[#178](https://coding.s-s.city/songsong/openchamber/-/issues/178)的signed-shell矩阵处理。
+
+验证：auth classifier + relay boot + runtime-fetch + desktop boot + i18n focused 6 files / 73 tests ✅；full workspace type-check/lint/build ✅；Electron Node syntax ✅；`git diff --check` ✅。隔离production Web matching-surface：独立data/HOME/39291、password登录200 → clear cookie →真实settings API 401 → expiry banner visible → Log in进入password form，page error 0；隔离server与port均已清理。至此 [#164](https://coding.s-s.city/songsong/openchamber/-/issues/164) 的live auth expiry和relay-default source范围完成，可关闭；signed installed-shell QA不隐藏，继续由#178追踪。
