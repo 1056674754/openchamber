@@ -2786,9 +2786,9 @@ v1.20.0-sscity 尚未宣布完成：当前未关闭 `#135/#140/#142-#151/#154/#1
 - Electron shell、内嵌 Web settings runtime、SSH manager 与 VS Code extension host 对同一 `settings.json.lock` 协调 RMW；Electron 内部 shell/server 共用一条 in-process chain，standalone Web 保持独立 chain，避免合法 key 在跨 runtime 并发保存时丢失。
 - Web/Electron/SSH/VS Code 的 atomic write 失败均清除本次 temp；Web startup migration 一次性删除遗留 `settings.json.tmp-*`，保留无关文件。
 - Electron settings replace 采用 bounded Windows `EPERM/EACCES/EBUSY` retry；非 Windows 或非 transient error 立即保留原错误。
-- `packages/vscode/package.json` 仅精确提交 shared dependency；同文件 selection/remote namespace WIP 保持未提交。对应提交：`477fc2d87 fix(settings): serialize cross-runtime writes`。
+- `packages/vscode/package.json` 仅精确提交 shared dependency；同文件 selection/remote namespace WIP 保持未提交。对应提交：`477fc2d87 fix(settings): serialize cross-runtime writes`；`18b03b924 test(settings): verify cross-process writes` 用两个独立 Bun process 对同一临时 settings 执行交错 RMW，最终双方 key 均保持最新值。
 
-验证：shared lock + Electron replace/SSH + Web settings runtime/helpers 5 files / 59 tests ✅；live-old-owner、8-way stale reclaim、failed temp cleanup与 orphan cleanup均有回归覆盖；full workspace type-check/lint/build ✅；build 仅有既有 dynamic-import/chunk/eval warnings；`git diff --check` ✅。[#144](https://coding.s-s.city/songsong/openchamber/-/issues/144) 保持 open：仅剩 CLI `connect-url` relay-key 的 atomic settings accessor / regeneration gate 审计。
+验证：shared lock + Electron replace/SSH + Web settings runtime/helpers 5 files / 59 tests ✅；shared lock 追加双进程 RMW 后 10/10 ✅；live-old-owner、8-way stale reclaim、failed temp cleanup与 orphan cleanup均有回归覆盖；full workspace type-check/lint/build ✅；build 仅有既有 dynamic-import/chunk/eval warnings；`git diff --check` ✅。v1.20 范围完成，可关闭 [#144](https://coding.s-s.city/songsong/openchamber/-/issues/144)。CLI `connect-url` atomic accessor 来自 v1.21.1（`2b0f39bdf` / `b9be2cb9e`），当前 v1.20 fork 尚无该 command，已按正确版本边界拆至 [#176](https://coding.s-s.city/songsong/openchamber/-/issues/176)。
 
 ### #137 Phase 10：Loss-safe relay request-body delivery（2026-08-30）
 
