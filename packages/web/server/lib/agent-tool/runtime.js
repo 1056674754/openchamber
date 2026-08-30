@@ -4,14 +4,17 @@ import express from 'express';
 import {
   OPENCHAMBER_AGENT_TOOL_ACTION_DEFINITIONS,
   OPENCHAMBER_AGENT_TOOL_ACTIONS,
+  OPENCHAMBER_MEMORY_ACTION_DEFINITIONS,
+  OPENCHAMBER_MEMORY_ACTIONS,
+  resolveAgentToolAction,
   OPENCHAMBER_WEB_ACTION_DEFINITIONS,
   OPENCHAMBER_WEB_ACTIONS,
 } from '../openchamber-control/actions.js';
 
 const TOOL_SCHEMA_VERSION = 1;
-const ACTIONS = new Set([...OPENCHAMBER_AGENT_TOOL_ACTIONS, ...OPENCHAMBER_WEB_ACTIONS]);
+const ACTIONS = new Set([...OPENCHAMBER_AGENT_TOOL_ACTIONS, ...OPENCHAMBER_WEB_ACTIONS, ...OPENCHAMBER_MEMORY_ACTIONS]);
 const AGENT_TOOL_ACTION_TITLES = Object.fromEntries(
-  [...OPENCHAMBER_AGENT_TOOL_ACTION_DEFINITIONS, ...OPENCHAMBER_WEB_ACTION_DEFINITIONS]
+  [...OPENCHAMBER_AGENT_TOOL_ACTION_DEFINITIONS, ...OPENCHAMBER_WEB_ACTION_DEFINITIONS, ...OPENCHAMBER_MEMORY_ACTION_DEFINITIONS]
     .map(({ action, title }) => [action, title]),
 );
 
@@ -60,6 +63,14 @@ const WEB_PLUGIN_PARAMETER_PROPERTIES = {
   viewport: { type: 'string', enum: ['mobile', 'tablet', 'desktop', 'fill'] },
   label: { type: 'string', description: 'Short screenshot label' },
   directory: { type: 'string', description: 'Project directory for browser.capture; defaults to current session directory' },
+};
+
+const MEMORY_PLUGIN_PARAMETER_PROPERTIES = {
+  title: { type: 'string', description: "Memory title exactly as listed in the session index" },
+  body: { type: 'string', description: 'Durable full text that still makes sense outside this conversation' },
+  scope: { type: 'string', enum: ['global', 'project', 'both'], description: 'global is about the user; project is about this codebase; both is list-only' },
+  memoryId: { type: 'string', description: 'Memory ID returned by list or read' },
+  type: { type: 'string', enum: ['fact', 'preference', 'reference'] },
 };
 
 const asNonEmptyString = (value) => {
@@ -115,9 +126,43 @@ const createWebToolEntry = () => String.raw`
     },
 `;
 
-const createPluginSource = () => String.raw`
+const createMemoryToolEntry = () => String.raw`
+    openchamber_memory: {
+      description: "Keep durable facts, preferences, decisions, and hard-won references across sessions. Read a listed memory before acting on its abbreviated title. Never store secrets, one-off task state, facts already obvious from the code, or anything the user asked you not to keep. Choose global only for facts about the user; project is for this codebase.",
+      args: {
+        action: { type: "string", enum: ${JSON.stringify(OPENCHAMBER_MEMORY_ACTIONS)}, oneOf: ${JSON.stringify(OPENCHAMBER_MEMORY_ACTION_DEFINITIONS.map(({ action, description }) => ({ const: action, description })))}, description: "Memory action" },
+        parameters: { type: "object", properties: ${JSON.stringify(MEMORY_PLUGIN_PARAMETER_PROPERTIES)}, additionalProperties: false, description: "Inputs for the memory action" },
+      },
+      async execute(input, context) {
+        const { action, parameters, ...flattened } = input ?? {}
+        const args = { ...flattened, ...(parameters ?? {}), action }
+        const title = ${JSON.stringify(AGENT_TOOL_ACTION_TITLES)}[args.action] ?? args.action
+        context.metadata({ title, metadata: { openchamber_memory: { schemaVersion: ${TOOL_SCHEMA_VERSION}, action: args.action, description: title } } })
+        const endpoint = process.env.OPENCHAMBER_AGENT_TOOL_URL
+        const token = process.env.OPENCHAMBER_AGENT_TOOL_TOKEN
+        const failure = (payload) => ({ title, output: JSON.stringify(payload), metadata: { openchamber_memory: { schemaVersion: ${TOOL_SCHEMA_VERSION}, action: args.action, description: title, ok: false } } })
+        if (!endpoint || !token) return failure({ schemaVersion: ${TOOL_SCHEMA_VERSION}, ok: false, action: args.action, error: { message: "OpenChamber managed tool connection is unavailable" } })
+        try {
+          const response = await fetch(endpoint, { method: "POST", headers: { authorization: "Bearer " + token, "content-type": "application/json" }, body: JSON.stringify({ input: args, contextDirectory: context.directory, tool: "openchamber_memory" }), signal: context.abort })
+          const output = await response.text()
+          let result = null
+          try { result = JSON.parse(output) } catch {}
+          const valid = result?.schemaVersion === ${TOOL_SCHEMA_VERSION} && typeof result?.ok === "boolean" && typeof result?.action === "string"
+          context.metadata({ title, metadata: { openchamber_memory: { schemaVersion: ${TOOL_SCHEMA_VERSION}, action: args.action, description: title, ok: valid && result.ok === true } } })
+          if (valid) return { title, output, metadata: { openchamber_memory: { schemaVersion: ${TOOL_SCHEMA_VERSION}, action: args.action, description: title, ok: result.ok === true } } }
+          return failure({ schemaVersion: ${TOOL_SCHEMA_VERSION}, ok: false, action: args.action, error: { message: "OpenChamber returned an invalid response", kind: "runtime", status: response.status } })
+        } catch (error) {
+          if (context.abort.aborted) throw error
+          return failure({ schemaVersion: ${TOOL_SCHEMA_VERSION}, ok: false, action: args.action, error: { message: error instanceof Error ? error.message : String(error), kind: "runtime" } })
+        }
+      },
+    },
+`;
+
+const createPluginSource = ({ includeControl = true, includeWeb = true, includeMemory = false } = {}) => String.raw`
 export const OpenChamberPlugin = async () => ({
   tool: {
+${includeControl ? String.raw`
     openchamber: {
       description: "Control OpenChamber projects, sessions, and scheduled tasks on the user's behalf. Sessions and scheduled tasks you create are for the user to follow and interact with; never use this tool to delegate parts of your own current task. Use one action per call. Scope with projectId or directory; omit both to use the current session directory. Session dispatches return immediately by default. To inspect a completed result later, use session.messages; session.send always sends a new prompt. Session and worktree deletion are unavailable.",
       args: {
@@ -197,7 +242,9 @@ export const OpenChamberPlugin = async () => ({
         }
       },
     },
-${createWebToolEntry()}
+` : ''}
+${includeWeb ? createWebToolEntry() : ''}
+${includeMemory ? createMemoryToolEntry() : ''}
   },
 })
 `;
@@ -237,13 +284,13 @@ export const createAgentToolRuntime = (dependencies) => {
   const pluginPath = path.join(pluginDirectory, 'openchamber-plugin.js');
   let activeToken = null;
 
-  const prepareManagedOpenCodeEnv = async () => {
+  const prepareManagedOpenCodeEnv = async ({ includeControl = true, includeWeb = true, includeMemory = false } = {}) => {
     const port = getActivePort();
     if (!Number.isInteger(port) || port <= 0) {
       throw new Error('OpenChamber listener port is unavailable for managed tool injection');
     }
     await fsPromises.mkdir(pluginDirectory, { recursive: true });
-    await fsPromises.writeFile(pluginPath, createPluginSource(), { mode: 0o600 });
+    await fsPromises.writeFile(pluginPath, createPluginSource({ includeControl, includeWeb, includeMemory }), { mode: 0o600 });
     activeToken = crypto.randomBytes(32).toString('base64url');
     const pluginUrl = pathToFileURL(pluginPath).href;
     return {
@@ -264,13 +311,18 @@ export const createAgentToolRuntime = (dependencies) => {
   };
 
   const execute = async (payload = {}, options = {}) => {
-    const action = asNonEmptyString(payload.input?.action);
-    if (!action || !ACTIONS.has(action)) {
+    const requested = asNonEmptyString(payload.input?.action);
+    const resolution = resolveAgentToolAction(requested, asNonEmptyString(payload.tool));
+    if (resolution.error) {
       return createResult({
         ok: false,
-        action,
-        error: { message: `Unsupported OpenChamber action: ${action || 'missing'}`, kind: 'usage' },
+        action: requested,
+        error: { message: resolution.error, kind: 'usage' },
       });
+    }
+    const action = resolution.action;
+    if (!ACTIONS.has(action)) {
+      return createResult({ ok: false, action, error: { message: `Unsupported OpenChamber action: ${action}`, kind: 'usage' } });
     }
     if (typeof executeAction !== 'function') {
       return createResult({
@@ -284,6 +336,7 @@ export const createAgentToolRuntime = (dependencies) => {
     const explicitProject = asNonEmptyString(payload.input?.projectId);
     const input = {
       ...payload.input,
+      action,
       serverId: localServerId,
       ...(!explicitDirectory && !explicitProject && contextDirectory ? { directory: contextDirectory } : {}),
     };
@@ -291,7 +344,7 @@ export const createAgentToolRuntime = (dependencies) => {
       return createResult({
         ok: true,
         action,
-        data: await executeAction(action, input, undefined, options),
+        data: await executeAction(action, input, contextDirectory, options),
       });
     } catch (error) {
       return createResult({

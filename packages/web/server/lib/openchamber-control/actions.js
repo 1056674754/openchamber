@@ -44,7 +44,50 @@ export const OPENCHAMBER_WEB_ACTIONS = Object.freeze(
   OPENCHAMBER_WEB_ACTION_DEFINITIONS.map(({ action }) => action),
 );
 
+export const OPENCHAMBER_MEMORY_ACTION_DEFINITIONS = Object.freeze([
+  { action: 'memory.read', title: 'Read a stored memory', description: 'Read one full memory by title or memoryId; scope is optional' },
+  { action: 'memory.list', title: 'List stored memories', description: 'List memory titles in global, project, or both scopes' },
+  { action: 'memory.save', title: 'Remember something', description: 'Store a durable fact, preference, or reference in global or project scope' },
+  { action: 'memory.delete', title: 'Forget a memory', description: 'Delete a memory by memoryId and scope' },
+]);
+
+export const OPENCHAMBER_MEMORY_ACTIONS = Object.freeze(
+  OPENCHAMBER_MEMORY_ACTION_DEFINITIONS.map(({ action }) => action),
+);
+
+const ACTIONS_BY_TOOL = Object.freeze({
+  openchamber: OPENCHAMBER_AGENT_TOOL_ACTIONS,
+  openchamber_web: OPENCHAMBER_WEB_ACTIONS,
+  openchamber_memory: OPENCHAMBER_MEMORY_ACTIONS,
+});
+
+const bareActionName = (action) => {
+  const separator = action.indexOf('.');
+  return separator === -1 ? action : action.slice(separator + 1);
+};
+
+const uniqueBareMatch = (candidates, requested) => {
+  const matches = candidates.filter((candidate) => bareActionName(candidate) === requested);
+  return matches.length === 1 ? matches[0] : null;
+};
+
+export const resolveAgentToolAction = (requested, toolName) => {
+  const value = typeof requested === 'string' ? requested.trim() : '';
+  const scoped = ACTIONS_BY_TOOL[toolName] ?? null;
+  const known = scoped ?? OPENCHAMBER_ALL_ACTIONS;
+  if (value && known.includes(value)) return { action: value };
+  if (value) {
+    const resolved = uniqueBareMatch(known, value)
+      ?? (scoped ? null : uniqueBareMatch(OPENCHAMBER_ALL_ACTIONS, value));
+    if (resolved) return { action: resolved };
+  }
+  return {
+    error: `Unsupported OpenChamber action: ${value || 'missing'}. Use one of: ${known.join(', ')}`,
+  };
+};
+
 export const OPENCHAMBER_ALL_ACTIONS = Object.freeze([
   ...OPENCHAMBER_CONTROL_ACTIONS,
   ...OPENCHAMBER_WEB_ACTIONS,
+  ...OPENCHAMBER_MEMORY_ACTIONS,
 ]);

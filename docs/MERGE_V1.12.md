@@ -2305,6 +2305,15 @@ fork 已有丰富的 surface 组织（#62 surface rail + ContextSidebarTab + Con
 
 验证：Agent Memory runtime/feature/resolver/threat Bun 4 files / 59 tests ✅；HTTP routes Vitest 20 tests ✅；session knowledge memory filtering 20 tests ✅；Web type-check/lint ✅；`git diff --check` ✅。[#143](https://coding.s-s.city/songsong/openchamber/-/issues/143) 保持 open：managed Agent tool/actions、UI Memory tab/settings 与 v1.21 follow-ups 尚未完成。
 
+### #143 Phase 6：Scoped managed Agent Memory tool（2026-08-30）
+
+- 新增 `memory.list/read/save/delete` core actions；project scope 只从当前 Session directory 经 memory project resolver 解析，模型提供的 projectId 不取得写入权威。global/project 不明、setting 关闭、store 读取失败均显式报错。
+- managed plugin 将 `openchamber`、`openchamber_web`、`openchamber_memory` 分开生成。Memory 默认不存在；只有 build-level feature gate 与 persisted setting 同时开启时注入。仅开 Memory 不会把控制/浏览器工具一并带回。
+- Memory tool 只接受 `title/body/scope/memoryId/type`，不能调用 browser/session action。工具内可使用简写 `read/list/save/delete`，loopback bridge 在进入 core service 前归一为 canonical `memory.*`，payload 也同步 canonicalize。
+- 写入成功广播 `openchamber:agent-memory-changed`；UI 后续可据此刷新，不需要轮询。managed local authority、loopback bearer 与 external OpenCode no-injection 约束保持不变。
+
+验证：Agent tool + HTTP routes Vitest 2 files / 25 tests ✅；Agent Memory actions/runtime/flag/resolver/threat Bun 5 files / 88 tests ✅。[#143](https://coding.s-s.city/songsong/openchamber/-/issues/143) 保持 open：UI Memory tab/settings 与 matching-surface QA 尚未完成。
+
 ### #141 Phase 1：Isolated server exception survival（2026-08-30）
 
 上游来源：`71a538b77`。fork 的 embedded server 没有外部 supervisor，单个 Node/socket stray exception 不应让整个 OpenChamber instance 离线：
@@ -2727,3 +2736,12 @@ v1.20.0-sscity 尚未宣布完成：当前未关闭 `#135/#140/#142-#151/#154/#1
 - embedded chat 恢复审计为 fork 等价且更适合现有 split panel：仅 active/split chat iframe 挂载；iframe `onLoad` 同步 theme/settings/visibility，App 初始 visible 并启动 history/bootstrap；关闭 panel 时卸载。现有 #140 active-only focused tests 覆盖 tab/null/missing，故不复制上游早期“全部隐藏 iframe 挂载”方案。
 
 验证：attachment/document Bun 2 files / 20 tests ✅，覆盖 DOCX/PPTX/XLSX/ODF、dense/sparse/TSV、zip bounds、unsafe paths、image bounds/signatures、text citation truncation。全 workspace type/lint/build 与 diff check 见本 phase 最终验证。[#148](https://coding.s-s.city/songsong/openchamber/-/issues/148) 的 v1.20 runtime 范围已完成并关闭；原先追加的 v1.21 large-text paste / virtual preview 已迁到 [#172](https://coding.s-s.city/songsong/openchamber/-/issues/172)，避免跨 milestone 阻塞 v1.20 closeout。
+
+### v1.20 regression：Directory activation agent-catalog revalidation（2026-08-30）
+
+- 现场证据：当前 managed OpenCode `1.18.16-sscity` 对 `/Users/song/dev_entertainment` 的 `/api/agent` 响应包含 `Sisyphus - ultraworker`，但 OpenChamber 可继续显示持久化的原生 `Build / Plan`；因此不是 OMO 未加载，而是 UI 把旧 agent snapshot 当成永久 authoritative state。
+- `activateDirectory(serverId + directory)` 继续先同步恢复 persisted providers/agents，避免切目录时闪空；随后无条件向 owning server 重新加载 agent catalog。缓存只负责 first paint，不能跳过 plugin/project config/OpenCode restart 后的 authoritative reconciliation。
+- 不扩大 provider 请求：已有 provider snapshot 仍可跳过；本次只修复会受 plugin/config 热变化影响的 agents。
+- 独立 Electron dev 验证切换到 `/Users/song/dev_entertainment` 后 composer 显示 `Sisyphus - ultraworker`；测试产生的 `activeProjectId` 已恢复，正式 OpenChamber 未终止、runtime 未替换。
+
+验证：`useConfigStore.nonblocking.test.ts` 12/12 ✅（新增 stale `Build / Plan` → live OMO catalog、directory authority 回归）；全 workspace `bun run type-check` ✅、`bun run lint` ✅。

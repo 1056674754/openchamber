@@ -82,6 +82,7 @@ import { createScheduledTasksRuntime } from './lib/scheduled-tasks/runtime.js';
 import { createScheduledTaskService } from './lib/scheduled-tasks/service.js';
 import { createOpenChamberSessionService } from './lib/openchamber-sessions/service.js';
 import { createOpenChamberControlService } from './lib/openchamber-control/service.js';
+import { OpenChamberControlError } from './lib/openchamber-control/error.js';
 import { createAgentToolRuntime } from './lib/agent-tool/runtime.js';
 import { createBrowserControlBroker } from './lib/browser-control/broker.js';
 import { registerBrowserControlRoutes } from './lib/browser-control/routes.js';
@@ -108,6 +109,8 @@ import { createProjectConfigRuntime } from './lib/projects/project-config.js';
 import { createProjectIdFromPath } from './lib/projects/project-id.js';
 import { createProjectContextRuntime } from './lib/project-context/runtime.js';
 import { createAgentMemoryRuntime } from './lib/agent-memory/runtime.js';
+import { createAgentMemoryActions } from './lib/agent-memory/actions.js';
+import { createMemoryProjectResolver } from './lib/agent-memory/project-resolution.js';
 import { isAgentMemoryFeatureAvailable } from './lib/agent-memory/feature-flag.js';
 import { createPreviewProxyRuntime } from './lib/preview/proxy-runtime.js';
 import { createRemoteInstancesRuntime } from './lib/remote-instances/config.js';
@@ -985,6 +988,14 @@ const resolveProjectKnowledgeId = async (directory) => {
   return ownerPath ? createProjectIdFromPath(ownerPath) : '';
 };
 
+const resolveMemoryProjectId = createMemoryProjectResolver({
+  listProjectPaths: async () => {
+    const settings = await readSettingsFromDiskMigrated().catch(() => null);
+    return sanitizeProjects(settings?.projects || []).map((project) => project.path);
+  },
+  resolvePrimaryWorktreeRoot,
+});
+
 const sessionKnowledgeRuntime = createSessionKnowledgeRuntime({
   projectContextRuntime,
   agentMemoryRuntime,
@@ -1291,9 +1302,16 @@ const openCodeLifecycleRuntime = createOpenCodeLifecycleRuntime({
   prepareManagedOpenCodeEnv: async () => {
     if (ENV_SKIP_OPENCODE_START || openCodeLifecycleState.isExternalOpenCode) return {};
     const settings = await readSettingsFromDiskMigrated();
-    const managedEnv = settings?.agentControlToolEnabled === false
+    const includeControlTools = settings?.agentControlToolEnabled !== false;
+    const includeMemory = isAgentMemoryFeatureAvailable()
+      && settings?.agentMemoryToolEnabled === true;
+    const managedEnv = !includeControlTools && !includeMemory
       ? {}
-      : await (agentToolRuntime?.prepareManagedOpenCodeEnv() || {});
+      : await (agentToolRuntime?.prepareManagedOpenCodeEnv({
+        includeControl: includeControlTools,
+        includeWeb: includeControlTools,
+        includeMemory,
+      }) || {});
     return managedEnv;
   },
   getActiveSessionCount,
@@ -1506,6 +1524,18 @@ const openChamberControlService = createOpenChamberControlService({
   sessionService: openChamberSessionService,
   scheduledTaskService,
   browserControl: browserControlBroker,
+  agentMemoryActions: createAgentMemoryActions({
+    agentMemoryRuntime,
+    createError: (message, status) => new OpenChamberControlError(message, status),
+    resolveProjectId: resolveMemoryProjectId,
+    isAgentMemoryEnabled,
+    onMemoryChanged: (event) => {
+      broadcastGlobalUiEvent({
+        type: 'openchamber:agent-memory-changed',
+        properties: event,
+      });
+    },
+  }),
 });
 
 const runtimeFallbackApprovalService = createRuntimeFallbackApprovalService({
