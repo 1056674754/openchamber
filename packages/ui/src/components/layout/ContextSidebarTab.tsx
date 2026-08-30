@@ -13,6 +13,7 @@ import { useSessions, useSessionMessageRecords } from '@/sync/sync-context';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { useI18n } from '@/lib/i18n';
 import { contextTokensFromBreakdown } from '@/stores/utils/tokenUtils';
+import { DraftContextOverview } from '@/components/chat/work-status/DraftContextOverview';
 
 type SessionMessage = { info: Message; parts: Part[] };
 
@@ -288,6 +289,7 @@ export const ContextPanelContent: React.FC = () => {
   const [copiedRawMessageId, setCopiedRawMessageId] = React.useState<string | null>(null);
   const copyResetTimeoutRef = React.useRef<number | null>(null);
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
+  const draftOpen = useSessionUIStore((state) => state.newSessionDraft?.open === true);
   const sessions = useSessions();
   const sessionMessages = useSessionMessageRecords(currentSessionId ?? '');
   const providers = useConfigStore((state) => state.providers);
@@ -400,6 +402,9 @@ export const ContextPanelContent: React.FC = () => {
   }, [currentSessionId, providers, sessionMessages, sessions, t]);
 
   if (!currentSessionId) {
+    if (draftOpen) {
+      return <DraftContextOverview />;
+    }
     return (
         <div className="flex h-full items-center justify-center p-6 text-center typography-ui-label text-muted-foreground">
         {t('contextSidebar.empty.openSession')}

@@ -11,6 +11,8 @@ const STALL = {
   lastActivityAt: 1_700_000_000_000,
   detectedAt: 1_700_000_030_000,
 };
+let currentSessionId: string | null = SESSION_ID;
+let draftOpen = false;
 
 mock.module('@/contexts/useThemeSystem', () => ({
   useThemeSystem: () => ({ currentTheme: {} }),
@@ -31,8 +33,15 @@ mock.module('@/stores/useSessionStallStore', () => ({
   },
 }));
 
+mock.module('@/components/chat/work-status/DraftContextOverview', () => ({
+  DraftContextOverview: () => <div data-testid="draft-context-overview">Draft context</div>,
+}));
+
 mock.module('@/sync/session-ui-store', () => ({
-  useSessionUIStore: (selector: (state: { currentSessionId: string }) => unknown) => selector({ currentSessionId: SESSION_ID }),
+  useSessionUIStore: (selector: (state: { currentSessionId: string | null; newSessionDraft: { open: boolean } }) => unknown) => selector({
+    currentSessionId,
+    newSessionDraft: { open: draftOpen },
+  }),
 }));
 
 mock.module('@/sync/sync-context', () => ({
@@ -42,8 +51,10 @@ mock.module('@/sync/sync-context', () => ({
 
 const { ContextPanelContent } = await import('./ContextSidebarTab');
 
-describe('ContextPanelContent session stall diagnostics', () => {
+describe('ContextPanelContent', () => {
   test('shows the current session stall before raw messages', () => {
+    currentSessionId = SESSION_ID;
+    draftOpen = false;
     const markup = renderToStaticMarkup(
       <I18nProvider>
         <ContextPanelContent />
@@ -56,5 +67,19 @@ describe('ContextPanelContent session stall diagnostics', () => {
     expect(diagnosticIndex).toBeGreaterThan(-1);
     expect(rawMessagesIndex).toBeGreaterThan(diagnosticIndex);
     expect(markup).toContain(SESSION_ID);
+  });
+
+  test('shows the draft overview when no session has materialized yet', () => {
+    currentSessionId = null;
+    draftOpen = true;
+
+    const markup = renderToStaticMarkup(
+      <I18nProvider>
+        <ContextPanelContent />
+      </I18nProvider>,
+    );
+
+    expect(markup).toContain('data-testid="draft-context-overview"');
+    expect(markup).toContain('Draft context');
   });
 });

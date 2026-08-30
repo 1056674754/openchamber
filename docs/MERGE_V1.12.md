@@ -2205,7 +2205,19 @@ fork 已有丰富的 surface 组织（#62 surface rail + ContextSidebarTab + Con
 - split pane 打开时只允许 active + split 两个可见 chat，各自仍保留 read-only、directory、runtime bootstrap 与 viewed-state 语义；panel 关闭时 `active=false` guard 同样卸载。
 - `getActiveEmbeddedSessionChatTab` pure helper 覆盖 active/null/missing；ContextPanel focused test 5 条 ✅；full workspace type-check/lint 与 diff check ✅。
 
-[#140](https://coding.s-s.city/songsong/openchamber/-/issues/140) 保持 open：`222057abc / 83c4c75ff / 5ef828f38` 依赖上游统一 WorkStatusPanel，而 fork 在 #122 明确只落数据基础设施并延期该 UI。后续需在 fork 的 surface rail / ContextSidebarTab 设计内决定 draft project/MCP/usage 呈现，不能直接复制上游侧栏。
+### #140 Phase 2：Draft status in the fork Context surface（2026-08-30）
+
+上游来源：`222057abc`、`83c4c75ff`、`5ef828f38`。不恢复 #122 已明确延期的独立 WorkStatusPanel，而把草稿状态接入 fork 已有的 Context surface：
+
+- Context tab 在 Session 尚未 materialize、但草稿已打开时，不再只显示“打开一个会话”；改为显示草稿实际目标的项目、目录、实例、MCP health 与所选用量提供商摘要，pending worktree 有明确状态。
+- 权威解析优先草稿显式 `selectedProjectId`，再按目录/已发现 worktree 解析 owning project；同路径 local/remote 项目不会串实例，兄弟 worktree 仍归属原项目。显式项目已删除时保留目标目录但 `serverId=null` fail closed，不静默请求本地实例。
+- MCP status 请求把 draft directory 与 resolved serverId 一起传给 SDK。用量数据按 resolved server base URL 独立读取并在组件内汇总，没有复用全局 quota results，因此打开 Dev3 草稿不会把本地/Header 的用量快照误当成 Dev3 数据。
+- active/split embedded chat 已在 Phase 1 保证只挂可见 iframe；现有 `tab.readOnly`、`allowPromptingSubagentSessions` settings sync、directory/runtime bootstrap 和 viewed-state bridge 经复核保留，不需要复制上游面板内的另一套子智能体导航。
+- 上游“所有 WorkStatus sections 被隐藏后恢复入口”只修复其独立 panel 的持久化 sections dialog；fork 没有该 panel/setting，Context rail/tab 始终可达，因此按架构不适用，而非遗漏。
+
+验证：draft authority/quota + Context wiring + context usage Bun 3 files / 16 tests ✅；i18n runtime 4 files / 8 tests ✅；full workspace type-check/lint/build ✅；`git diff --check` ✅。隔离 `OPENCHAMBER_DATA_DIR` Web QA（未启动/终止 installed OpenCode）确认 Context rail 在 draft 上显示 `OpenChamber QA / Local / owning directory`，quota 从 Loading 收敛为 `63% remaining · 4 providers`，无布局溢出；MCP 因隔离 external OpenCode 故意不可达而显示 `Unavailable`。控制台仅有预期的 external OpenCode 400 bootstrap/SSE 错误。
+
+至此 [#140](https://coding.s-s.city/songsong/openchamber/-/issues/140) 的 active-only embedded chat、draft target project/MCP/usage 与 subagent read-only/prompt sync 均已覆盖，可在 matching-surface 通过后关闭。
 
 ### #141 Phase 1：Isolated server exception survival（2026-08-30）
 
