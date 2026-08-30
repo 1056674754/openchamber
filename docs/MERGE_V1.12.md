@@ -2408,6 +2408,17 @@ fork 已有丰富的 surface 组织（#62 surface rail + ContextSidebarTab + Con
 
 验证：managed Chats sidebar source 2/2 ✅（project/archived exclusion、remote root authority、multi-date folder scopes）；UI type-check/lint ✅。[#150](https://coding.s-s.city/songsong/openchamber/-/issues/150) 保持 open：把 source 接入 dedicated Sidebar section/default new-chat entry、search、App/Mini Chat parity，并完成 matching-surface QA。
 
+### #150 Phase 6：Dedicated Chats sidebar + search（2026-08-30）
+
+- Sidebar catalog 允许 managed Chats 进入非 VS Code runtime，但 project/worktree ownership 仍由原有路径规则决定；Chats 不伪装成项目，也从 Recent activity 中排除，避免重复行。
+- Chats 按 `serverRegistry` 的 Session ownership 分实例；每个实例使用独立 root、folder scopes 与 `serverId`，远程 Chats 不会借用本机 home。父子 Session 由纯 helper 构建，BTW 临时 fork 继续隐藏。
+- dedicated Chats section 使用共享 `SessionGroupSection`，因此 folder drag/drop、folder 内新建、Session actions、父子展开与 pinned 行保持一致；folder/group 新建会显式传递 `target=chat + chatServerId`。
+- Chats section 空时仍保留创建入口；点击后 composer target 为 `Chats / openchamber:chats`。Sidebar 搜索同时覆盖 Chat title、子 Session、instance label、Chats root 和 folder name，并将命中数合入统一计数。
+- 没有 project 或 project 搜索无结果时，独立 Chats 内容仍能渲染；VS Code 保持 project-only。
+- 对应提交：`9866e6961 feat(chats): partition sidebar sources by instance`、`625635b6e feat(chats): add sidebar activity surface`、`6029c8bea feat(chats): preserve folder draft target`、`e4a3a02e1 feat(chats): wire managed sidebar sessions`。
+
+验证：managed Chats source 3/3 + Chats i18n 1/1、UI type-check/lint ✅。隔离 Electron dev matching-surface QA：空 Chats section + create action ✅；专用 Chats composer target ✅；临时 managed Chat live insert ✅；搜索 `Chats` 命中并显示该 Session ✅；清空搜索后只出现一次、未重复进入 Recent ✅；测试 Session 已删除，隔离 dev/OpenCode 已停止。控制台仅见启动 503 fallback、测试 Session 删除后的预取 404，以及既有 TempSessions/ModelControls Base UI button 语义警告，均非 Chats 代码路径回归。[#150](https://coding.s-s.city/songsong/openchamber/-/issues/150) 保持 open：App/Mini Chat parity、真实 remote multi-instance 与 Capacitor mobile matching-surface QA 待续。
+
 ### #141 Phase 1：Isolated server exception survival（2026-08-30）
 
 上游来源：`71a538b77`。fork 的 embedded server 没有外部 supervisor，单个 Node/socket stray exception 不应让整个 OpenChamber instance 离线：
