@@ -61,6 +61,24 @@ describe('Browser control client', () => {
     expect(runCount).toBe(0);
   });
 
+  test('returns claim and result to the request envelope server', async () => {
+    let listener: (value: OpenChamberEventEnvelope) => void = () => {};
+    const serverIds: string[] = [];
+    const client = createBrowserControlClient({
+      subscribe: (next) => { listener = next; return () => {}; },
+      fetchServer: async (serverId, path) => {
+        serverIds.push(serverId);
+        return path.endsWith('/claim') ? response({ granted: true }) : response({ matched: true });
+      },
+    });
+    client.registerController('remote-a', { run: async () => ({ title: 'Remote page' }) });
+
+    listener(event('req-remote', 'browser.snapshot', 'remote-a'));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(serverIds).toEqual(['remote-a', 'remote-a']);
+  });
+
   test('reports controller failures instead of timing out silently', async () => {
     let listener: (value: OpenChamberEventEnvelope) => void = () => {};
     const outcomes: Record<string, unknown>[] = [];

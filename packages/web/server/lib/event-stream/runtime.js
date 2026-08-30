@@ -3,6 +3,7 @@ import { WebSocketServer } from 'ws';
 import { parseRequestPathname } from '../terminal/index.js';
 import { parseRemoteWsPath, pipeRemoteWs } from '../remote-instances/sse-relay.js';
 import { createRemoteGlobalEventFanout } from '../remote-instances/global-event-fanout.js';
+import { createRemoteOpenChamberEventFanout } from '../remote-instances/openchamber-event-fanout.js';
 import {
   MESSAGE_STREAM_DIRECTORY_WS_PATH,
   MESSAGE_STREAM_GLOBAL_WS_PATH,
@@ -101,6 +102,14 @@ export function createMessageStreamWsRuntime({
       upstreamReconnectDelayMs,
     })
     : null;
+  const remoteOpenChamberEventFanout = remoteInstancesRuntime
+    ? createRemoteOpenChamberEventFanout({
+      remoteInstancesRuntime,
+      fetchImpl,
+      upstreamStallTimeoutMs,
+      upstreamReconnectDelayMs,
+    })
+    : null;
 
   const globalBridge = createGlobalMessageStreamWsBridge({
     globalHub,
@@ -110,6 +119,7 @@ export function createMessageStreamWsRuntime({
     triggerHealthCheck,
     heartbeatIntervalMs,
     remoteGlobalEventFanout,
+    remoteOpenChamberEventFanout,
   });
 
   wsServer.on('connection', (socket, req) => {
@@ -255,6 +265,7 @@ export function createMessageStreamWsRuntime({
       server.off('upgrade', upgradeHandler);
       globalBridge.close();
       remoteGlobalEventFanout?.close?.();
+      remoteOpenChamberEventFanout?.close?.();
 
       try {
         for (const client of wsServer.clients) {

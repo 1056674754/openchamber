@@ -147,6 +147,12 @@ Authenticated raw-byte transport for browsing a development server on a remote O
 
 - Module docs: `packages/web/server/lib/dev-tunnel/DOCUMENTATION.md`
 
+##### remote-instances
+
+Remote instance configuration, request lanes/proxying, health, and OpenCode/OpenChamber event fan-in.
+
+- Module docs: `packages/web/server/lib/remote-instances/DOCUMENTATION.md`
+
 ##### terminal
 
 WebSocket protocol utilities for terminal input handling including message normalization, control frame parsing, and rate limiting.

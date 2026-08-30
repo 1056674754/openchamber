@@ -2404,3 +2404,13 @@ QA 事故记录：HMR server 复用了安装版 managed OpenCode `54185`，退�
 - crash/error/reload 文案使用现有 theme tokens，新增错误文案补齐全部 10 个 locale。
 
 验证：crash recovery + history 2 files / 5 tests ✅；UI type-check/lint ✅；`git diff --check` ✅。`#135` 仍 open：Electron dev-tunnel IPC 与 aggregated remote synthetic-event bridge 未完成。
+
+### #135/#137 Phase 9：Capability-gated aggregated remote synthetic-event bridge（2026-08-30）
+
+- local global WS 只有 Electron client 以 `browser=1` 声明 capability；global bridge 仅在至少一个 capable socket 存活时，为每个 healthy aggregated remote 启动 `/api/openchamber/events?browser=1` fan-in。
+- synthetic stream 使用独立 remote `stream` lane，停止/失联/最后 capable client 退出时立即 abort、stop、release；普通 Web client 不启动额外连接，也不会让远端 broker 误以为能控制页面。
+- remote event 转发只投递给 capable global sockets，并保留 envelope `serverId`。renderer 仅由相同 serverId 的 active Browser controller claim；claim/result 经该 registry base URL + auth token 返回事件来源实例。
+- 旧 remote 对可选 endpoint 返回 404/405/410 时视为 capability unsupported：立即释放 lane，不 fast retry、不把 remote 标 unhealthy。真实 network/auth/5xx 才记录 request failure。
+- OpenCode global events 与 OpenChamber synthetic events 保持两条明确 ownership channel，未把 synthetic event 注入 OpenCode history/replay buffer。
+
+验证：remote synthetic fanout + global capability bridge + event runtime Vitest 3 files / 17 tests ✅；control client Bun 1 file / 5 tests ✅；UI/Web type-check/lint ✅；`git diff --check` ✅。`#135` 仅剩 dirty Electron main 中的 dev-tunnel IPC/shell lifecycle；private relay 下的 tunnel-virtual endpoint 仍由 [#137](https://coding.s-s.city/songsong/openchamber/-/issues/137) 后续处理。

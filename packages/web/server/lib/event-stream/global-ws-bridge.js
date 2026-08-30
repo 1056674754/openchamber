@@ -20,17 +20,20 @@ export function createGlobalMessageStreamWsBridge({
   triggerHealthCheck,
   heartbeatIntervalMs,
   remoteGlobalEventFanout = null,
+  remoteOpenChamberEventFanout = null,
 }) {
   const clients = new Set();
   const clientLastEventIds = new Map();
   const readyClients = new Set();
   let unsubscribeRemoteGlobalEventFanout = null;
+  let unsubscribeRemoteOpenChamberEventFanout = null;
 
   const removeClient = (socket) => {
     clients.delete(socket);
     clientLastEventIds.delete(socket);
     readyClients.delete(socket);
     wsClients.delete(socket);
+    reconcileRemoteOpenChamberEventFanout();
   };
 
   const replayEvents = (socket, events) => {
@@ -78,6 +81,36 @@ export function createGlobalMessageStreamWsBridge({
       unsubscribeRemoteGlobalEventFanout();
       unsubscribeRemoteGlobalEventFanout = null;
     }
+    if (clients.size === 0 && unsubscribeRemoteOpenChamberEventFanout) {
+      unsubscribeRemoteOpenChamberEventFanout();
+      unsubscribeRemoteOpenChamberEventFanout = null;
+    }
+  };
+
+  const reconcileRemoteOpenChamberEventFanout = () => {
+    const hasBrowserClient = Array.from(clients).some((socket) => (
+      socket.openchamberBrowserCapable === true && wsClients.has(socket)
+    ));
+    if (!hasBrowserClient) {
+      if (unsubscribeRemoteOpenChamberEventFanout) {
+        unsubscribeRemoteOpenChamberEventFanout();
+        unsubscribeRemoteOpenChamberEventFanout = null;
+      }
+      return;
+    }
+    if (!remoteOpenChamberEventFanout || unsubscribeRemoteOpenChamberEventFanout) return;
+    unsubscribeRemoteOpenChamberEventFanout = remoteOpenChamberEventFanout.subscribe((event) => {
+      if (!event?.serverId || !event.payload) return;
+      for (const socket of Array.from(clients)) {
+        if (socket.openchamberBrowserCapable !== true || !wsClients.has(socket)) continue;
+        const sent = sendMessageStreamWsEvent(socket, event.payload, {
+          directory: 'global',
+          serverId: event.serverId,
+        });
+        if (!sent) removeClient(socket);
+      }
+      stopHubIfUnused();
+    });
   };
 
   const startRemoteGlobalEventFanout = () => {
@@ -251,6 +284,7 @@ export function createGlobalMessageStreamWsBridge({
     }
     wsClients.add(socket);
     startRemoteGlobalEventFanout();
+    reconcileRemoteOpenChamberEventFanout();
     globalHub.start();
 
     if (globalHub.isConnected()) {
@@ -265,7 +299,12 @@ export function createGlobalMessageStreamWsBridge({
       unsubscribeRemoteGlobalEventFanout();
       unsubscribeRemoteGlobalEventFanout = null;
     }
+    if (unsubscribeRemoteOpenChamberEventFanout) {
+      unsubscribeRemoteOpenChamberEventFanout();
+      unsubscribeRemoteOpenChamberEventFanout = null;
+    }
     remoteGlobalEventFanout?.close?.();
+    remoteOpenChamberEventFanout?.close?.();
     if (ownsGlobalHub) {
       globalHub.stop();
     }

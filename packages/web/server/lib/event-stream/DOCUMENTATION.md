@@ -42,6 +42,7 @@ This module contains the OpenChamber message-stream WebSocket protocol and runti
 - OpenChamber still fetches OpenCode upstream event streams over SSE.
 - The web server creates one shared global message-stream hub. OpenCode watcher side effects and global WS clients subscribe to that hub, so there is one upstream `/global/event` SSE reader for both server-side processing and browser fan-out.
 - When remote instances are configured, the global WS bridge also subscribes to a server-side remote fan-in. Remote events are sent over the same browser WS with `serverId` metadata, avoiding one browser global WS connection per remote instance.
+- OpenChamber synthetic events use a separate capability-gated remote fan-in. It exists only while at least one Electron global socket advertises `browser=1`, and forwards only to those capable sockets.
 - The global hub keeps a bounded replay buffer keyed by SSE `eventId` so reconnecting browser clients can receive buffered events after their requested `Last-Event-ID`.
 - The global browser protocol distinguishes local transport liveness from upstream readiness:
   - `transport-ready` means the browser WebSocket reached the local OpenChamber bridge.

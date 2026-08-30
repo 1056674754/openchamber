@@ -22,4 +22,4 @@ Browser address history is persisted by the renderer under `runtimeKey + serverI
 
 Guest renderer crashes use a bounded recovery policy: three reloads in a 30-second window with 250/500/1000ms delay. Exhaustion produces a visible terminal state and leaves manual reload available; it never restarts OpenChamber or OpenCode.
 
-Remote-instance fan-in currently carries OpenCode events only; an aggregated remote does not claim Browser capability until its OpenChamber event channel is bridged explicitly.
+Aggregated remote instances use a capability-gated `/api/openchamber/events?browser=1` fan-in. The envelope keeps its remote `serverId`, and claim/result requests return through that registry connection rather than the active default runtime.

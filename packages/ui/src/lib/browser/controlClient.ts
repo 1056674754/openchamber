@@ -1,4 +1,5 @@
-import { DEFAULT_SERVER_ID } from '@/lib/opencode/server-registry';
+import { resolveApiUrl } from '@/lib/api/serverUrl';
+import { DEFAULT_SERVER_ID, serverRegistry } from '@/lib/opencode/server-registry';
 import {
   subscribeOpenchamberEventEnvelopes,
   type OpenChamberEventEnvelope,
@@ -46,10 +47,13 @@ const parseRequest = (event: OpenChamberEventEnvelope): BrowserControlRequest | 
 };
 
 const defaultServerFetch: ServerFetch = async (serverId, path, init) => {
-  if (serverId !== DEFAULT_SERVER_ID) {
-    throw new Error(`Browser control transport is unavailable for aggregated server '${serverId}'`);
-  }
-  return runtimeFetch(path, init);
+  if (serverId === DEFAULT_SERVER_ID) return runtimeFetch(path, init);
+  const connection = serverRegistry.get(serverId);
+  const baseUrl = connection?.config.baseUrl?.trim();
+  if (!connection || !baseUrl) throw new Error(`Browser control server '${serverId}' is unavailable`);
+  const headers = new Headers(init.headers);
+  if (connection.config.authToken) headers.set('Authorization', `Bearer ${connection.config.authToken}`);
+  return fetch(resolveApiUrl(path, baseUrl), { ...init, headers });
 };
 
 export const createBrowserControlClient = ({
