@@ -15,6 +15,7 @@ type TestAgent = {
 
 let getConfigCalls = 0;
 let listAgentsCalls = 0;
+let lastAgentsDirectory: string | null = null;
 let checkHealthCalls = 0;
 let liveAgents: TestAgent[] = [];
 let liveOpenChamberSettings: Record<string, unknown> = {};
@@ -78,10 +79,11 @@ const deferred = <T,>() => {
 
 const fakeSdk = {
   app: {
-    agents: mock(async () => {
+    agents: mock(async (options?: { directory?: string }) => {
       listAgentsCalls += 1;
+      lastAgentsDirectory = options?.directory ?? null;
       const impl = listAgentsImpl;
-      const agents = impl ? await impl(DIRECTORY) : liveAgents;
+      const agents = impl ? await impl(options?.directory) : liveAgents;
       return { data: agents };
     }),
   },
@@ -146,6 +148,7 @@ mock.module('@/contexts/runtimeAPIRegistry', () => ({
 }));
 
 mock.module('@/lib/runtime-fetch', () => ({
+  buildRuntimeFetchUrl: (input: string) => input,
   runtimeFetch: mock(async () => new Response(JSON.stringify(liveOpenChamberSettings), {
     headers: { 'Content-Type': 'application/json' },
   })),
@@ -224,6 +227,7 @@ describe('useConfigStore non-blocking OpenCode config', () => {
   beforeEach(() => {
     getConfigCalls = 0;
     listAgentsCalls = 0;
+    lastAgentsDirectory = null;
     checkHealthCalls = 0;
     liveAgents = [testAgent('build')];
     liveOpenChamberSettings = {};
@@ -275,6 +279,26 @@ describe('useConfigStore non-blocking OpenCode config', () => {
 
     expect(listAgentsCalls).toBe(1);
     expect(getConfigCalls).toBe(0);
+  });
+
+  test('activateDirectory reconciles a persisted native catalog with the live plugin catalog', async () => {
+    liveAgents = [
+      testAgent('build', { mode: 'subagent', hidden: true }),
+      testAgent('plan', { mode: 'subagent', hidden: true }),
+      testAgent('Sisyphus - ultraworker'),
+    ];
+
+    await useConfigStore.getState().activateDirectory(DIRECTORY);
+
+    const state = useConfigStore.getState();
+    expect(listAgentsCalls).toBe(1);
+    expect(lastAgentsDirectory).toBe(DIRECTORY);
+    expect(state.agents.map((agent) => agent.name)).toEqual([
+      'build',
+      'plan',
+      'Sisyphus - ultraworker',
+    ]);
+    expect(state.currentAgentName).toBe('Sisyphus - ultraworker');
   });
 
   test('a refreshed catalog replaces a hidden native selection with a visible primary agent', async () => {

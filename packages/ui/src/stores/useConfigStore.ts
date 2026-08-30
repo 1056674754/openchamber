@@ -1217,13 +1217,11 @@ export const useConfigStore = create<ConfigStore>()(
                     const serverId = normalizeConfigServerId(options?.serverId);
                     const directoryKey = toDirectoryKey(directory, serverId);
                     let snapshotHadProviders = false;
-                    let snapshotHadAgents = false;
 
                     set((state) => {
                         const snapshot = state.directoryScoped[directoryKey];
                         if (snapshot) {
                             snapshotHadProviders = snapshot.providers.length > 0;
-                            snapshotHadAgents = snapshot.agents.length > 0;
                             return {
                                 activeDirectoryKey: directoryKey,
                                 providers: snapshot.providers,
@@ -1269,11 +1267,11 @@ export const useConfigStore = create<ConfigStore>()(
                         await get().loadProviders({ directory: dir, serverId, source: 'activateDirectory' });
                     }
 
-                    if (snapshotHadAgents) {
-                        markStartupTrace('activateDirectory:skipAgents', { directoryKey, serverId });
-                    } else {
-                        await get().loadAgents({ directory: dir, serverBaseUrl: remoteBaseUrl, serverId, source: 'activateDirectory' });
-                    }
+                    // Persisted agents are only a fast first-paint cache. Plugin startup,
+                    // project config, or an OpenCode restart can change the authoritative
+                    // catalog while OpenChamber is closed, so every directory activation
+                    // must reconcile it against the owning server.
+                    await get().loadAgents({ directory: dir, serverBaseUrl: remoteBaseUrl, serverId, source: 'activateDirectory' });
                 },
 
                 loadProviders: async (options) => {
