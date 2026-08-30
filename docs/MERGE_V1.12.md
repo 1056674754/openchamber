@@ -2389,6 +2389,16 @@ fork 已有丰富的 surface 组织（#62 surface rail + ContextSidebarTab + Con
 
 验证：managed Chats cache 2/2 + global session paging 7/7（分文件），UI type-check/lint ✅。[#150](https://coding.s-s.city/songsong/openchamber/-/issues/150) 保持 open：folder root ownership、Sidebar/Mobile/Search 入口、default target 与 matching-surface QA 待续。
 
+### #150 Phase 4：Composer Chats target + folder root ownership（2026-08-30）
+
+- Desktop/Web composer 的 draft project selector 增加 Chats；选择后 `target=chat`、project sentinel 仅用于 UI，branch/worktree selector 隐藏。serverId 继承当前实例，切回项目触发 prepared directory cleanup。
+- 仍保留现有“新会话”默认 project，防止 Sidebar/App 入口尚未接完时半切默认；最终入口收口后再按 upstream 改为 Chats default。VS Code 不显示该 selector，继续 project-only。
+- Chat Session 加入 folder 时 scope 从 daily/session directory 归一到 Chats root；不同日期的 Chats 共用一套 folder tree，不产生每 Session 一个 folder scope。
+- mobile/desktop switcher 使用 global catalog；projectless Chat 的 projectId 为 null，在 unscoped mobile sheet 可见，在 project-scoped dropdown 不泄漏。
+- Chats label 进入 11-locale contract；简繁中文本地化，其余 English fallback。
+
+验证：Chats i18n 1/1、session UI store 21/21、cache 2/2；UI type-check/lint ✅。[#150](https://coding.s-s.city/songsong/openchamber/-/issues/150) 保持 open：Sidebar dedicated Chats section/default new-chat entry、search、App/Mini Chat parity 与 matching-surface QA 待续。
+
 ### #141 Phase 1：Isolated server exception survival（2026-08-30）
 
 上游来源：`71a538b77`。fork 的 embedded server 没有外部 supervisor，单个 Node/socket stray exception 不应让整个 OpenChamber instance 离线：
