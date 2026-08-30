@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { createOpencodeClient } from '@opencode-ai/sdk/v2';
-import { buildRuntimeFetchUrl, isLatin1Safe, runtimeFetch, sanitizeHeadersForBrowser } from './runtime-fetch';
+import { addRuntimeProxyHeaders, buildRuntimeFetchUrl, isLatin1Safe, runtimeFetch, sanitizeHeadersForBrowser } from './runtime-fetch';
 import { clearRuntimeAuthCredentialProvider, setRuntimeBearerToken } from './runtime-auth';
 import { configureRuntimeUrlResolver, getRuntimeUrlResolver, setRuntimeUrlResolver } from './runtime-url';
 import { adoptRelayTunnel, deactivateRelayTunnel } from './relay/runtime-tunnel';
@@ -46,6 +46,36 @@ describe('buildRuntimeFetchUrl', () => {
       Object.defineProperty(globalThis, 'window', { configurable: true, value: originalWindow });
       globalThis.fetch = originalFetch;
       clearRuntimeAuthCredentialProvider();
+    }
+  });
+});
+
+describe('runtime proxy headers', () => {
+  test('bypasses the interstitial only for official ngrok hosts', () => {
+    expect(addRuntimeProxyHeaders('https://demo.ngrok-free.app/health', new Headers()).get('ngrok-skip-browser-warning'))
+      .toBe('openchamber');
+    expect(addRuntimeProxyHeaders('https://api.ngrok.io/health', new Headers()).get('ngrok-skip-browser-warning'))
+      .toBe('openchamber');
+    expect(addRuntimeProxyHeaders('https://ngrok-free.app.evil.example/health', new Headers()).has('ngrok-skip-browser-warning'))
+      .toBe(false);
+    expect(addRuntimeProxyHeaders('https://runtime.example/health', new Headers()).has('ngrok-skip-browser-warning'))
+      .toBe(false);
+  });
+
+  test('adds the bypass header to direct runtime requests', async () => {
+    const previous = getRuntimeUrlResolver();
+    let captured = new Headers();
+    try {
+      configureRuntimeUrlResolver({ apiBaseUrl: 'https://demo.ngrok-free.app' });
+      globalThis.fetch = (async (_input, init) => {
+        captured = new Headers(init?.headers);
+        return new Response(null, { status: 204 });
+      }) as typeof fetch;
+      await runtimeFetch('/health');
+      expect(captured.get('ngrok-skip-browser-warning')).toBe('openchamber');
+    } finally {
+      setRuntimeUrlResolver(previous);
+      globalThis.fetch = originalFetch;
     }
   });
 });

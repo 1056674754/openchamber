@@ -87,6 +87,8 @@ The E2EE and framing logic exists twice: TypeScript in `packages/ui/src/lib/rela
 
 Relay mode plugs into the existing client transport layer rather than a parallel path: `runtime-switch` activates the tunnel singleton, `runtime-fetch` routes runtime requests through it, `runtime-url`/`runtime-socket` yield tunnel-backed URLs and sockets, and `runtime-auth` mints the URL-scoped token through the tunnel. Direct-URL connections and the Electron realtime-proxy path are unaffected.
 
+Direct requests to official `*.ngrok.app`, `*.ngrok-free.app`, `*.ngrok.dev`, and `*.ngrok.io` runtime hosts add `ngrok-skip-browser-warning: openchamber` in both browser fetch and Capacitor native HTTP. Lookalike hosts never receive it; relay-virtual paths do not need it.
+
 ## Design invariants (do not regress)
 
 - The relay never sees plaintext application traffic; it sees only routing metadata (routing id, connection identifiers, timestamps, coarse counts).

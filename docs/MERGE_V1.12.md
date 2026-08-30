@@ -2426,3 +2426,13 @@ QA 事故记录：HMR server 复用了安装版 managed OpenCode `54185`，退�
 - response path、E2EE framing、batch negotiation、frame counters 与 WebSocket path 均未变化。
 
 验证：tunnel client + host body + JS/TS cross-compat 3 files / 24 tests ✅；UI/Web type-check/lint ✅；Node syntax ✅。`#137` 保持 open，继续审计 pairing origin、mobile reconnect/tokenless resume、ngrok 与 private-relay dev tunnel。
+
+### #137 Phase 11：Ngrok interstitial bypass across direct transports（2026-08-30）
+
+- `runtimeFetch`、installed window fetch bridge 与 Capacitor `nativeHttpRequest` 对官方 ngrok runtime host 添加 `ngrok-skip-browser-warning: openchamber`，防止 `/health`/`auth/session` 被浏览器提示 HTML 替代后误判连接失败。
+- host matcher 仅允许 `ngrok.app`、`ngrok-free.app`、`ngrok.dev`、`ngrok.io` 及其 subdomain；`ngrok-free.app.evil.example` 等 lookalike 不获得 header。
+- 已存在用户 header 不覆盖。relay transport 使用 tunnel path，不添加无意义 proxy header。
+- fork CORS 已动态回显 `Access-Control-Request-Headers`，等价覆盖上游静态 allowlist 增项，无需降级现有行为。
+- pairing public request-origin candidate 已在 fork `client-auth/pairing-routes.js` 等价且更严格：preferred/LAN/request-origin 全部去重，过滤 localhost、完整 127/8、0.0.0.0/::，故不重复移植 `9aa98df24`。
+
+验证：runtime fetch 1 file / 26 tests ✅（含 official/lookalike/direct fetch）；UI type-check/lint ✅；`git diff --check` ✅。`#137` 保持 open，下一 phase 处理 tokenless cold launch/resume 与 transient reconnect ladder。

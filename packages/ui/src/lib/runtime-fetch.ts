@@ -30,6 +30,21 @@ const isCurrentWindowUrl = (url: URL): boolean => {
 
 const isAbsoluteUrl = (value: string): boolean => /^[a-z][a-z\d+.-]*:\/\//i.test(value);
 
+const isNgrokHost = (hostname: string): boolean => (
+  /(^|\.)ngrok(?:-free)?\.(?:app|dev|io)$/i.test(hostname)
+);
+
+export const addRuntimeProxyHeaders = (url: string, headers: Headers): Headers => {
+  try {
+    if (isNgrokHost(new URL(url).hostname) && !headers.has('ngrok-skip-browser-warning')) {
+      headers.set('ngrok-skip-browser-warning', 'openchamber');
+    }
+  } catch {
+    // Relative and tunnel-virtual paths do not need proxy-specific headers.
+  }
+  return headers;
+};
+
 const appendRuntimeQuery = (url: URL, query?: RuntimeUrlQuery): void => {
   if (!query) return;
   const entries = query instanceof URLSearchParams ? Array.from(query.entries()) : Object.entries(query);
@@ -275,13 +290,16 @@ export const runtimeFetch = async (input: string | URL | Request, init: RuntimeF
     const resolvedInput = resolveRuntimeFetchInput(input, query);
     const inputHeaders = resolvedInput instanceof Request ? resolvedInput.headers : undefined;
     const headers = await mergeHeaders(inputHeaders, requestInit.headers, shouldAttachRuntimeAuth(resolvedInput));
+    const resolvedUrl = resolvedInput instanceof Request
+      ? resolvedInput.url
+      : resolvedInput instanceof URL
+        ? resolvedInput.toString()
+        : String(resolvedInput);
+    addRuntimeProxyHeaders(resolvedUrl, headers);
     doFetch = resolvedInput instanceof Request
       ? () => fetch(new Request(resolvedInput, { ...requestInit, headers }))
       : () => fetch(resolvedInput, { ...requestInit, headers });
-    url =
-      resolvedInput instanceof Request ? resolvedInput.url
-      : resolvedInput instanceof URL ? resolvedInput.toString()
-      : String(resolvedInput);
+    url = resolvedUrl;
     method = String(
       requestInit.method ?? (resolvedInput instanceof Request ? resolvedInput.method : 'GET'),
     ).toUpperCase();
@@ -322,6 +340,7 @@ export const installRuntimeFetchBridge = (): void => {
           const url = new URL(input);
           if (isActiveRuntimeServiceUrl(url)) {
             const headers = await mergeHeaders(undefined, init?.headers);
+            addRuntimeProxyHeaders(url.toString(), headers);
             return nativeFetch(input, { ...init, headers });
           }
         } catch {
@@ -330,7 +349,9 @@ export const installRuntimeFetchBridge = (): void => {
         return nativeFetch(input, init);
       }
       const headers = await mergeHeaders(undefined, init?.headers);
-      return nativeFetch(buildRuntimeFetchUrl(input), { ...init, headers });
+      const target = buildRuntimeFetchUrl(input);
+      addRuntimeProxyHeaders(target, headers);
+      return nativeFetch(target, { ...init, headers });
     }
 
     if (input instanceof URL) {
@@ -338,12 +359,15 @@ export const installRuntimeFetchBridge = (): void => {
       if (!shouldResolveFetchInput(raw)) {
         if (isActiveRuntimeServiceUrl(input)) {
           const headers = await mergeHeaders(undefined, init?.headers);
+          addRuntimeProxyHeaders(input.toString(), headers);
           return nativeFetch(input, { ...init, headers });
         }
         return nativeFetch(input, init);
       }
       const headers = await mergeHeaders(undefined, init?.headers);
-      return nativeFetch(buildRuntimeFetchUrl(raw), { ...init, headers });
+      const target = buildRuntimeFetchUrl(raw);
+      addRuntimeProxyHeaders(target, headers);
+      return nativeFetch(target, { ...init, headers });
     }
 
     if (input instanceof Request) {
@@ -352,6 +376,7 @@ export const installRuntimeFetchBridge = (): void => {
           const url = new URL(input.url);
           if (isActiveRuntimeServiceUrl(url)) {
             const headers = await mergeHeaders(input.headers, init?.headers);
+            addRuntimeProxyHeaders(url.toString(), headers);
             return nativeFetch(new Request(input, { ...init, headers }));
           }
         } catch {
@@ -361,6 +386,7 @@ export const installRuntimeFetchBridge = (): void => {
       }
       const headers = await mergeHeaders(input.headers, init?.headers);
       const target = buildRuntimeFetchUrl(input.url);
+      addRuntimeProxyHeaders(target, headers);
       const request = target === input.url ? input : new Request(target, input);
       return nativeFetch(new Request(request, { ...init, headers }));
     }

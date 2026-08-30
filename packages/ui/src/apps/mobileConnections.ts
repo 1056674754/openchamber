@@ -23,7 +23,7 @@ import type { PairingConnectionPayload, PairingEndpointCandidate } from '@/lib/c
 import { isCapacitorApp } from '@/lib/platform';
 import { adoptRelayTunnel, isRelayModeActive } from '@/lib/relay/runtime-tunnel';
 import { createRelayTunnelClient } from '@/lib/relay/tunnel-client';
-import { runtimeFetch } from '@/lib/runtime-fetch';
+import { addRuntimeProxyHeaders, runtimeFetch } from '@/lib/runtime-fetch';
 import { getRuntimeApiBaseUrl, getRuntimeKey, switchRuntimeEndpoint } from '@/lib/runtime-switch';
 
 const MOBILE_CONNECTIONS_STORAGE_KEY = 'openchamber.mobile.connections.v1';
@@ -419,7 +419,7 @@ const nativeHttpRequest = async (url: string, init?: RequestInit): Promise<Mobil
   if (!isCapacitorApp()) return null;
   try {
     const { CapacitorHttp } = await import('@capacitor/core');
-    const headers = Object.fromEntries(new Headers(init?.headers).entries());
+    const headers = Object.fromEntries(addRuntimeProxyHeaders(url, new Headers(init?.headers)).entries());
     const response = await CapacitorHttp.request({
       url,
       method: init?.method || 'GET',
