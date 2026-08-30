@@ -2228,3 +2228,15 @@ fork 已有丰富的 surface 组织（#62 surface rail + ContextSidebarTab + Con
 - revert/new-branch/rollback 与 ChatInput reverted dock 使用 marker position；post-rollover `msg_000...` 不会被误当成旧消息，失败 rollback 仍恢复正确顺序与 parts。
 - 集中 rollover integration 覆盖 reducer、part arrival、page merge、materialization 和 optimistic merge；focused suite 8 files / 108 tests ✅，full workspace type-check/lint/diff check ✅。
 - 剩余 ID 排序点逐项确认属于 Session、Question、Permission，或 assistant status 已先比较 `time.created` 再以 ID tie-break；未将 message chronology 修复扩散到不同实体契约。
+
+### #153：Post-recording dictation + waveform + pause segmentation（2026-08-30）
+
+上游来源：`4c9e6fceb`。fork 保留现有 `/api/stt/transcribe` 和 local WASM Whisper，不引入第二套 dictation WebSocket server：
+
+- Server/OpenAI-compatible STT 与 WASM STT 录音期间只本地排队，不再在每次短静音时转写；用户点击完成后才顺序处理所有 segments，并合并成一个 final transcript callback，避免 1.2s final settle 覆盖前段文本。
+- 长录音在 60 秒后优先于自然停顿切段，连续讲话 90 秒硬切；短停顿和短录音不切。Cancel 丢弃本地队列，不上传、不推断。
+- `AudioStreamService` 与 `WasmSttService` 共用 segmentation contract；stop/restart promise 避免用户恰好在自动切段时点击完成而丢尾段。
+- Composer dictation 在 Web、Capacitor、desktop 共用 live waveform 与秒级计时；音量 listener 直接更新 28 个 bar DOM，不把约 12Hz 音频 level 放入 React state，processing 状态显示统一文案。
+- 浏览器原生 WebSpeech 不提供受控音频帧/MediaRecorder，继续作为实时 fallback；选择 Server 或 WASM provider 时获得完整 post-recording 语义。
+
+验证：segmentation/join + fake MediaRecorder 4 Bun tests ✅（录音中 0 次 fetch、finish 后 1 次、单 final callback）；full workspace type-check/lint ✅；Web production build ✅；`git diff --check` ✅。

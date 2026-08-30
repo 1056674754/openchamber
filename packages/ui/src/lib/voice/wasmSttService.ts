@@ -3,11 +3,13 @@
  *
  * Local Whisper transcription via Transformers.js (ONNX Runtime Web).
  * Captures microphone audio, detects utterance boundaries via silence-based
- * VAD, then transcribes each utterance locally — no cloud API required.
+ * VAD, queues long segments, then transcribes locally after recording stops.
  *
  * Works in Electron and all modern browsers that support Web Audio API.
  * First use downloads a Whisper model (~40–166 MB, cached).
  */
+
+import { joinSegmentTranscripts, shouldSplitRecordingSegment, type AudioLevelListener } from './audioStreamService';
 
 export type WasmModelStatus =
   | { state: 'unloaded' }
@@ -79,6 +81,11 @@ class WasmSttService {
   private onResult: SpeechResultCallback | null = null;
   private onError: ErrorCallback | null = null;
   private finishResolver: (() => void) | null = null;
+  private currentStopPromise: Promise<void> | null = null;
+  private queuedSegments: Blob[] = [];
+  private restartAfterStop = false;
+  private discardCurrentRecording = false;
+  private levelListeners = new Set<AudioLevelListener>();
   private lang = 'en';
 
   private cfg: Required<WasmSttConfig> = {
@@ -90,6 +97,15 @@ class WasmSttService {
 
   configure(config: WasmSttConfig): void {
     this.cfg = { ...this.cfg, ...config };
+  }
+
+  subscribeLevel(listener: AudioLevelListener): () => void {
+    this.levelListeners.add(listener);
+    return () => this.levelListeners.delete(listener);
+  }
+
+  private _emitLevel(level: number): void {
+    for (const listener of this.levelListeners) listener(level);
   }
 
   isSupported(): boolean {
@@ -235,6 +251,8 @@ class WasmSttService {
     this.onResult = onResult;
     this.onError = onError ?? null;
     this.isActive = true;
+    this.queuedSegments = [];
+    this.discardCurrentRecording = false;
 
     try {
       this.stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
@@ -251,6 +269,9 @@ class WasmSttService {
   }
 
   stopListening(): void {
+    this.isActive = false;
+    this.discardCurrentRecording = true;
+    this.restartAfterStop = false;
     this._stopVAD();
     if (this.mediaRecorder && this.mediaRecorder.state === 'recording') {
       try { this.mediaRecorder.stop(); } catch { /* ignore */ }
@@ -265,15 +286,17 @@ class WasmSttService {
     this.isSpeaking = false;
     this.silenceSince = null;
 
-    if (!this.mediaRecorder || this.mediaRecorder.state === 'inactive') {
-      this._cleanupAfterStop(true);
-      return;
-    }
+    if (this.currentStopPromise) await this.currentStopPromise;
+    if (this.mediaRecorder?.state === 'recording') await this._finaliseUtterance(false);
 
-    await new Promise<void>((resolve) => {
-      this.finishResolver = resolve;
-      this._finaliseUtterance(false);
-    });
+    const transcripts: string[] = [];
+    for (const blob of this.queuedSegments.splice(0)) {
+      if (!this.isActive) break;
+      const transcript = await this._transcribe(blob);
+      if (transcript) transcripts.push(transcript);
+    }
+    const finalTranscript = joinSegmentTranscripts(transcripts);
+    if (finalTranscript) this.onResult?.(finalTranscript, true);
 
     this._cleanupAfterStop(true);
   }
@@ -310,6 +333,7 @@ class WasmSttService {
     this.mediaRecorder = new MediaRecorder(this.stream, options);
     this.chunks = [];
     this.recordingStartMs = Date.now();
+    this.discardCurrentRecording = false;
 
     this.mediaRecorder.ondataavailable = (e) => {
       if (e.data && e.data.size > 0) {
@@ -320,17 +344,17 @@ class WasmSttService {
     this.mediaRecorder.onstop = () => {
       const blobs = this.chunks.splice(0);
       const durationMs = Date.now() - this.recordingStartMs;
-      if (blobs.length === 0 || durationMs < MIN_UTTERANCE_MS) {
-        this.finishResolver?.();
-        this.finishResolver = null;
-        return;
+      if (!this.discardCurrentRecording && blobs.length > 0 && durationMs >= MIN_UTTERANCE_MS) {
+        const mType = blobs[0].type || mimeType || 'audio/webm';
+        this.queuedSegments.push(new Blob(blobs, { type: mType }));
       }
-      const mType = blobs[0].type || mimeType || 'audio/webm';
-      const blob = new Blob(blobs, { type: mType });
-      void this._transcribe(blob).finally(() => {
-        this.finishResolver?.();
-        this.finishResolver = null;
-      });
+      const restart = this.restartAfterStop;
+      this.restartAfterStop = false;
+      const resolveStop = this.finishResolver;
+      this.finishResolver = null;
+      this.currentStopPromise = null;
+      resolveStop?.();
+      if (restart && this.isActive && this.stream) this._startRecorder();
     };
 
     this.mediaRecorder.start(250);
@@ -354,25 +378,32 @@ class WasmSttService {
       if (!this.isActive || !this.analyser) return;
       const db = this._getRmsDb();
       const isSilent = db < this.cfg.silenceThresholdDb;
+      this._emitLevel(Number.isFinite(db) ? Math.min(1, Math.max(0, 10 ** (db / 20) * 2)) : 0);
+      const segmentDuration = Date.now() - this.recordingStartMs;
 
       if (!isSilent) {
         this.silenceSince = null;
         if (!this.isSpeaking) {
           this.isSpeaking = true;
-          if (this.mediaRecorder?.state === 'recording') {
-            this.recordingStartMs = Date.now();
-          }
         }
       } else {
         if (this.isSpeaking) {
           if (this.silenceSince === null) {
             this.silenceSince = Date.now();
-          } else if (Date.now() - this.silenceSince >= this.cfg.silenceHoldMs) {
+          } else if (
+            Date.now() - this.silenceSince >= this.cfg.silenceHoldMs
+            && shouldSplitRecordingSegment(segmentDuration, true)
+          ) {
             this.isSpeaking = false;
             this.silenceSince = null;
             this._finaliseUtterance(true);
           }
         }
+      }
+      if (shouldSplitRecordingSegment(segmentDuration, false)) {
+        this.isSpeaking = false;
+        this.silenceSince = null;
+        void this._finaliseUtterance(true);
       }
     }, VAD_POLL_MS);
   }
@@ -387,11 +418,16 @@ class WasmSttService {
   private _cleanupAfterStop(clearChunks: boolean): void {
     const pendingResolver = this.finishResolver;
     this.isActive = false;
+    this._emitLevel(0);
     this.finishResolver = null;
+    this.currentStopPromise = null;
     this.mediaRecorder = null;
     this._teardownAudioContext();
     this._releaseStream();
-    if (clearChunks) this.chunks = [];
+    if (clearChunks) {
+      this.chunks = [];
+      this.queuedSegments = [];
+    }
     this.isSpeaking = false;
     this.silenceSince = null;
     this.onResult = null;
@@ -399,17 +435,17 @@ class WasmSttService {
     pendingResolver?.();
   }
 
-  private _finaliseUtterance(restart: boolean): void {
-    if (!this.isActive) return;
+  private _finaliseUtterance(restart: boolean): Promise<void> {
+    if (!this.isActive) return Promise.resolve();
     if (this.mediaRecorder && this.mediaRecorder.state === 'recording') {
+      this.restartAfterStop = restart;
+      this.currentStopPromise = new Promise<void>((resolve) => {
+        this.finishResolver = resolve;
+      });
       this.mediaRecorder.stop();
+      return this.currentStopPromise;
     }
-    if (!restart) return;
-    setTimeout(() => {
-      if (this.isActive && this.stream) {
-        this._startRecorder();
-      }
-    }, 100);
+    return this.currentStopPromise ?? Promise.resolve();
   }
 
   private _getRmsDb(): number {
@@ -424,18 +460,18 @@ class WasmSttService {
 
   // ── Transcription ────────────────────────────────────────────────────
 
-  private async _transcribe(blob: Blob): Promise<void> {
-    if (!this.onResult) return;
+  private async _transcribe(blob: Blob): Promise<string> {
+    if (!this.onResult) return '';
     if (!this.transcriber && !this.worker) {
       this.onError?.('Model not loaded');
-      return;
+      return '';
     }
 
     try {
       const audioData = await this._decodeToFloat32(blob);
       if (!audioData || audioData.length === 0) {
         this.onError?.(`Failed to decode audio (${blob.size} bytes)`);
-        return;
+        return '';
       }
 
       const langHint = this._resolveLanguageHint();
@@ -445,13 +481,12 @@ class WasmSttService {
         ? await this._transcribeViaWorker(audioData, langHint)
         : await this._transcribeMainThread(audioData, langHint);
 
-      if (transcript) {
-        this.onResult(transcript, true);
-      }
+      return transcript;
     } catch (err) {
-      if (!this.isActive) return;
+      if (!this.isActive) return '';
       const msg = err instanceof Error ? err.message : 'Local transcription failed';
       this.onError?.(msg);
+      return '';
     }
   }
 

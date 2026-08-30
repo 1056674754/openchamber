@@ -6,6 +6,7 @@ import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 import { toast } from '@/components/ui/toast';
 import type { UseBrowserVoiceReturn } from '@/hooks/useBrowserVoice';
+import { DictationWaveform } from './DictationWaveform';
 
 export interface ComposerDictationProps {
     open: boolean;
@@ -31,7 +32,26 @@ export const ComposerDictation: React.FC<ComposerDictationProps> = ({
         conversationMode,
         toggleConversationMode,
         error,
+        subscribeLevel,
     } = voice;
+    const [durationSeconds, setDurationSeconds] = React.useState(0);
+    const recordingStartedAtRef = React.useRef<number | null>(null);
+
+    useEffect(() => {
+        if (status !== 'listening') {
+            if (status === 'idle') {
+                recordingStartedAtRef.current = null;
+                setDurationSeconds(0);
+            }
+            return;
+        }
+        const startedAt = recordingStartedAtRef.current ?? Date.now();
+        recordingStartedAtRef.current = startedAt;
+        const timer = window.setInterval(() => {
+            setDurationSeconds(Math.max(0, Math.floor((Date.now() - startedAt) / 1000)));
+        }, 1000);
+        return () => window.clearInterval(timer);
+    }, [status]);
 
     const lastToastedErrorRef = useRef<string | null>(null);
 
@@ -115,6 +135,16 @@ export const ComposerDictation: React.FC<ComposerDictationProps> = ({
             }
         >
             <div className="oc-dictation-body flex min-h-[120px] flex-col gap-3 px-1 py-2">
+                {(status === 'listening' || status === 'processing') && (
+                    <div className="space-y-1">
+                        <DictationWaveform subscribeLevel={subscribeLevel} active={status === 'listening'} />
+                        <div className="text-center typography-micro tabular-nums text-[var(--surface-muted-foreground)]">
+                            {status === 'processing'
+                                ? t('voice.status.processing')
+                                : `${Math.floor(durationSeconds / 60)}:${String(durationSeconds % 60).padStart(2, '0')}`}
+                        </div>
+                    </div>
+                )}
                 {isError ? (
                     <div className="flex items-start gap-2 rounded-lg bg-[var(--status-error-background)] p-3 text-[var(--status-error)]">
                         <Icon name="error-warning" className="mt-0.5 h-4 w-4 flex-shrink-0" />

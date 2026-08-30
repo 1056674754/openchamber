@@ -68,6 +68,8 @@ export interface UseBrowserVoiceReturn {
   voiceProvider: 'browser' | 'openai' | 'openai-compatible' | 'say';
   /** Live interim (non-final) speech transcript; cleared on start/stop and on each final. */
   interimTranscript: string;
+  /** Subscribe to normalized microphone level without repainting the composer. */
+  subscribeLevel: (listener: (level: number) => void) => () => void;
 }
 
 // Storage key for persisting language preference
@@ -1024,6 +1026,14 @@ export function useBrowserVoice(): UseBrowserVoiceReturn {
     };
   }, []);
   
+  const subscribeLevel = useCallback((listener: (level: number) => void) => (
+    sttProvider === 'server'
+      ? audioStreamService.subscribeLevel(listener)
+      : sttProvider === 'wasm'
+        ? wasmSttService.subscribeLevel(listener)
+        : () => undefined
+  ), [sttProvider]);
+
   return {
     status,
     isSupported,
@@ -1039,5 +1049,6 @@ export function useBrowserVoice(): UseBrowserVoiceReturn {
     isMobile,
     voiceProvider,
     interimTranscript,
+    subscribeLevel,
   };
 }

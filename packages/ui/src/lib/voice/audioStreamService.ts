@@ -1,9 +1,8 @@
 /**
  * Audio Stream Service
  *
- * Captures microphone audio using MediaRecorder, detects utterance boundaries
- * via an AnalyserNode-based silence detector (VAD), then POSTs each utterance
- * as a raw audio blob to the OpenChamber server's /api/stt/transcribe endpoint.
+ * Captures microphone audio using MediaRecorder, queues long-recording segments
+ * at natural pauses, then transcribes every segment only after recording stops.
  *
  * Mimics the BrowserVoiceService.startListening interface so useBrowserVoice
  * can swap providers without changing its internal logic.
@@ -47,6 +46,18 @@ export interface AudioStreamConfig {
 const VAD_POLL_MS = 80;
 // Minimum audio duration (ms) to bother uploading (avoids blank clips)
 const MIN_UTTERANCE_MS = 300;
+export const RECORDING_SEGMENT_MIN_MS = 60_000;
+export const RECORDING_SEGMENT_MAX_MS = 90_000;
+
+export const shouldSplitRecordingSegment = (durationMs: number, isSilent: boolean): boolean => (
+  durationMs >= RECORDING_SEGMENT_MAX_MS
+  || (durationMs >= RECORDING_SEGMENT_MIN_MS && isSilent)
+);
+
+export const joinSegmentTranscripts = (transcripts: readonly string[]): string =>
+  transcripts.map((text) => text.trim()).filter(Boolean).join(' ');
+
+export type AudioLevelListener = (level: number) => void;
 
 class AudioStreamService {
   private stream: MediaStream | null = null;
@@ -62,6 +73,11 @@ class AudioStreamService {
   private onResult: SpeechResultCallback | null = null;
   private onError: ErrorCallback | null = null;
   private finishResolver: (() => void) | null = null;
+  private currentStopPromise: Promise<void> | null = null;
+  private queuedSegments: Array<{ blob: Blob; mimeType: string }> = [];
+  private restartAfterStop = false;
+  private discardCurrentRecording = false;
+  private levelListeners = new Set<AudioLevelListener>();
   private lang = 'en';
 
   // Configurable parameters
@@ -84,6 +100,15 @@ class AudioStreamService {
       ...config,
     };
     this.cfg.apiKey = config.apiKey ?? '';
+  }
+
+  subscribeLevel(listener: AudioLevelListener): () => void {
+    this.levelListeners.add(listener);
+    return () => this.levelListeners.delete(listener);
+  }
+
+  private _emitLevel(level: number): void {
+    for (const listener of this.levelListeners) listener(level);
   }
 
   /** Whether the browser supports the required APIs. */
@@ -114,6 +139,8 @@ class AudioStreamService {
     this.onResult = onResult;
     this.onError = onError ?? null;
     this.isActive = true;
+    this.queuedSegments = [];
+    this.discardCurrentRecording = false;
 
     try {
       this.stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
@@ -131,6 +158,9 @@ class AudioStreamService {
 
   /** Stop listening and clean up all resources. */
   stopListening(): void {
+    this.isActive = false;
+    this.discardCurrentRecording = true;
+    this.restartAfterStop = false;
     this._stopVAD();
     this._stopRecorder();
     this._cleanupAfterStop(true);
@@ -143,15 +173,20 @@ class AudioStreamService {
     this.isSpeaking = false;
     this.silenceSince = null;
 
-    if (!this.mediaRecorder || this.mediaRecorder.state === 'inactive') {
-      this._cleanupAfterStop(true);
-      return;
+    if (this.currentStopPromise) await this.currentStopPromise;
+    if (this.mediaRecorder?.state === 'recording') {
+      await this._finaliseUtterance(false);
     }
 
-    await new Promise<void>((resolve) => {
-      this.finishResolver = resolve;
-      this._finaliseUtterance(false);
-    });
+    const segments = this.queuedSegments.splice(0);
+    const transcripts: string[] = [];
+    for (const segment of segments) {
+      if (!this.isActive) break;
+      const transcript = await this._upload(segment.blob, segment.mimeType);
+      if (transcript) transcripts.push(transcript);
+    }
+    const finalTranscript = joinSegmentTranscripts(transcripts);
+    if (finalTranscript) this.onResult?.(finalTranscript, true);
 
     this._cleanupAfterStop(true);
   }
@@ -195,6 +230,7 @@ class AudioStreamService {
     this.mediaRecorder = new MediaRecorder(this.stream, options);
     this.chunks = [];
     this.recordingStartMs = Date.now();
+    this.discardCurrentRecording = false;
 
     this.mediaRecorder.ondataavailable = (e) => {
       if (e.data && e.data.size > 0) {
@@ -205,18 +241,17 @@ class AudioStreamService {
     this.mediaRecorder.onstop = () => {
       const blobs = this.chunks.splice(0);
       const durationMs = Date.now() - this.recordingStartMs;
-      if (blobs.length === 0 || durationMs < MIN_UTTERANCE_MS) {
-        this.finishResolver?.();
-        this.finishResolver = null;
-        return;
+      if (!this.discardCurrentRecording && blobs.length > 0 && durationMs >= MIN_UTTERANCE_MS) {
+        const mType = blobs[0].type || mimeType || 'audio/webm';
+        this.queuedSegments.push({ blob: new Blob(blobs, { type: mType }), mimeType: mType });
       }
-
-      const mType = blobs[0].type || mimeType || 'audio/webm';
-      const blob = new Blob(blobs, { type: mType });
-      void this._upload(blob, mType).finally(() => {
-        this.finishResolver?.();
-        this.finishResolver = null;
-      });
+      const restart = this.restartAfterStop;
+      this.restartAfterStop = false;
+      const resolveStop = this.finishResolver;
+      this.finishResolver = null;
+      this.currentStopPromise = null;
+      resolveStop?.();
+      if (restart && this.isActive && this.stream) this._startRecorder();
     };
 
     // Collect data every 250 ms so we don't lose the tail on stop()
@@ -230,6 +265,7 @@ class AudioStreamService {
       } catch {
         this.finishResolver?.();
         this.finishResolver = null;
+        this.currentStopPromise = null;
         // ignore
       }
     }
@@ -252,29 +288,34 @@ class AudioStreamService {
       if (!this.isActive || !this.analyser) return;
       const db = this._getRmsDb();
       const isSilent = db < this.cfg.silenceThresholdDb;
+      this._emitLevel(Number.isFinite(db) ? Math.min(1, Math.max(0, 10 ** (db / 20) * 2)) : 0);
+      const segmentDuration = Date.now() - this.recordingStartMs;
 
       if (!isSilent) {
         // Audio detected
         this.silenceSince = null;
         if (!this.isSpeaking) {
           this.isSpeaking = true;
-          // Restart recorder to capture from the start of speech
-          if (this.mediaRecorder?.state === 'recording') {
-            this.recordingStartMs = Date.now();
-          }
         }
       } else {
         // Silence detected
         if (this.isSpeaking) {
           if (this.silenceSince === null) {
             this.silenceSince = Date.now();
-          } else if (Date.now() - this.silenceSince >= this.cfg.silenceHoldMs) {
-            // End of utterance — stop recorder (triggers onstop → upload)
+          } else if (
+            Date.now() - this.silenceSince >= this.cfg.silenceHoldMs
+            && shouldSplitRecordingSegment(segmentDuration, true)
+          ) {
             this.isSpeaking = false;
             this.silenceSince = null;
             this._finaliseUtterance(true);
           }
         }
+      }
+      if (shouldSplitRecordingSegment(segmentDuration, false)) {
+        this.isSpeaking = false;
+        this.silenceSince = null;
+        this._finaliseUtterance(true);
       }
     }, VAD_POLL_MS);
   }
@@ -289,12 +330,15 @@ class AudioStreamService {
   private _cleanupAfterStop(clearChunks: boolean): void {
     const pendingResolver = this.finishResolver;
     this.isActive = false;
+    this._emitLevel(0);
     this.finishResolver = null;
+    this.currentStopPromise = null;
     this.mediaRecorder = null;
     this._teardownAudioContext();
     this._releaseStream();
     if (clearChunks) {
       this.chunks = [];
+      this.queuedSegments = [];
     }
     this.isSpeaking = false;
     this.silenceSince = null;
@@ -304,20 +348,17 @@ class AudioStreamService {
   }
 
   /** Stop the current recorder to flush the utterance, optionally restarting for the next one. */
-  private _finaliseUtterance(restart: boolean): void {
-    if (!this.isActive) return;
+  private _finaliseUtterance(restart: boolean): Promise<void> {
+    if (!this.isActive) return Promise.resolve();
     if (this.mediaRecorder && this.mediaRecorder.state === 'recording') {
+      this.restartAfterStop = restart;
+      this.currentStopPromise = new Promise<void>((resolve) => {
+        this.finishResolver = resolve;
+      });
       this.mediaRecorder.stop();
+      return this.currentStopPromise;
     }
-    if (!restart) return;
-
-    // Restart recorder for the next utterance after a short delay
-    // (MediaRecorder.onstop fires asynchronously; we wait for it to complete)
-    setTimeout(() => {
-      if (this.isActive && this.stream) {
-        this._startRecorder();
-      }
-    }, 100);
+    return this.currentStopPromise ?? Promise.resolve();
   }
 
   /** Compute RMS of current analyser frame in dBFS. */
@@ -331,9 +372,9 @@ class AudioStreamService {
     return rms === 0 ? -Infinity : 20 * Math.log10(rms);
   }
 
-  /** POST utterance blob to server, call onResult with transcript. */
-  private async _upload(blob: Blob, mimeType: string): Promise<void> {
-    if (!this.onResult) return;
+  /** POST one queued segment and return its transcript. */
+  private async _upload(blob: Blob, mimeType: string): Promise<string> {
+    if (!this.onResult) return '';
 
     try {
       const headers: Record<string, string> = {
@@ -365,14 +406,13 @@ class AudioStreamService {
 
       const data = await response.json();
       const transcript: string = (data.transcript ?? '').trim();
-      if (transcript) {
-        this.onResult(transcript, true);
-      }
+      return transcript;
     } catch (err) {
-      if (!this.isActive) return; // Stopped — ignore
+      if (!this.isActive) return ''; // Stopped — ignore
       const msg = err instanceof Error ? err.message : 'Transcription upload failed';
       console.error('[AudioStreamService] Upload error:', msg);
       this.onError?.(msg);
+      return '';
     }
   }
 
