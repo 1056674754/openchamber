@@ -2256,6 +2256,15 @@ fork 已有丰富的 surface 组织（#62 surface rail + ContextSidebarTab + Con
 
 验证：project-context runtime + HTTP Bun 2 files / 75 tests ✅；Web type-check/lint ✅；`git diff --check` ✅。[#143](https://coding.s-s.city/songsong/openchamber/-/issues/143) 保持 open：下一 phase 接 fork Notes UI store/API 与旧 panel 迁移，随后是 session knowledge pins 和 feature-gated Agent memory。
 
+### #143 Phase 2：Project context client cache + remote authority（2026-08-30）
+
+- 新增 `projectContextApi`，UI 只使用 note/todo/plan id 与 HTTP contract，不拼接 `~/.config/openchamber` 或绝对 plan storage path；所有失败抛出，authoritative load 不返回伪 empty。
+- `ProjectRef` 扩展 `serverId`；request base 由显式 project server 解析为 local 或 `/api/remote/:serverId/project-context/:pathDerivedId`。同一路径 local/Dev3 得到不同 transport，且 storage id 仍只由路径派生，避免 settings project id 版本变更造成“数据消失”。
+- 新增 `useProjectContextStore`：按 path-derived project id 缓存；load failure 保留 last-known-good，note/todo/plan 分组 mutation flags 防止慢 load 覆盖新写入。
+- 每项目 write chain 串行化 optimistic mutations；失败回滚并保留 error，server 404 会删除已不存在的 note/plan，不复活 phantom row。create 等待 server id/timestamp，不插入打不开的假 row。
+
+验证：project-context store + authority Bun 2 files / 35 tests ✅（另有 Phase 1 server 75 tests）；UI type-check ✅；lint/diff check 在本 phase 提交前复跑。[#143](https://coding.s-s.city/songsong/openchamber/-/issues/143) 保持 open，下一 phase 切换 Project Notes surface。
+
 ### #141 Phase 1：Isolated server exception survival（2026-08-30）
 
 上游来源：`71a538b77`。fork 的 embedded server 没有外部 supervisor，单个 Node/socket stray exception 不应让整个 OpenChamber instance 离线：
