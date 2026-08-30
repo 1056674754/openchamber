@@ -3159,3 +3159,15 @@ v1.20.0-sscity 尚未宣布完成：当前未关闭 `#135/#140/#142-#151/#154/#1
 - 对应提交：`736c3061f fix(mobile): materialize SDK request bodies`。
 
 验证：runtime fetch 28/28 ✅；UI type-check/lint ✅；Web build + Capacitor assets copy ✅；真实iPhone 17 Pro simulator从new draft创建Session、POST JSON mutation、stream reply全部成功，并解除#173 panel QA blocker。该transport phase完成；[#174](https://coding.s-s.city/songsong/openchamber/-/issues/174)仍保持open，其Chats mobile/remote/directory autocomplete其余范围继续审计。
+
+## v1.21.1 `#174` Phase 2：Session-owned autocomplete + multi-instance Chats closeout（2026-08-31）
+
+上游来源：`e6c8d2479`、`86cb6eaf6`、`07f6d2a31`，按fork shared Sidebar / multi-server registry适配：
+
+- `resolveChatSearchDirectory`以attachment/worktree/session live directory为现有Session authority。Chat draft只接受bootstrap/prepared managed Chat path；local draft可由local home推导root，remote draft未prepare时返回undefined，绝不回退active project。普通project draft仍使用其selected project。
+- active server hook识别`draft.chatServerId`。Command与Skill autocomplete按`directory + serverId/baseUrl`选择各自cache并刷新owning runtime；不再读取全局最后一次store snapshot。
+- File mention/recent root优先chat/session directory而非active project；FileSearch cache key加入server authority，remote请求用owning server SDK client。Default client不能仅凭一个remote path字符串访问本地runtime。
+- fork mobile没有上游旧`MobileSessionsSheet`：Desktop/Web/Capacitor共用`SessionSidebar`。现有HEAD的`deriveInstanceManagedChatsSources`按serverId拆root、隐藏archived和temporary `/btw`，Sidebar搜索已把managed Chats纳入match count/render；因此不复制两套mobile列表。
+- 对应提交：`8773ffb1b fix(chat): scope autocomplete to session authority`。Phase 1 transport提交仍为`736c3061f`。
+
+验证：chat directory resolver 5/5、file-search stale/cache 4/4、managed Chats 3/3、runtime fetch 28/28 ✅；UI type-check/lint ✅；真实Dev3 + local双实例QA：Command、Skill、File请求全部命中Dev3 `39321`，directory均为`/root/.config/openchamber/chats/...`；Sidebar同时显示`QA Dev3`与`Local` Chats group，搜索remote标题显示`1 match`且不显示local项；Mini Chat以`qa-dev3` serverId打开remote Session并渲染`DEV3 MINI CHAT QA`真实问答。Capacitor new Session与`/btw`窄屏流程见#173最终证据。local/Dev3临时Session与目录、SSH tunnel、Vite、browser、isolated backend均已清理。至此[#174](https://coding.s-s.city/songsong/openchamber/-/issues/174)完成，可关闭。
