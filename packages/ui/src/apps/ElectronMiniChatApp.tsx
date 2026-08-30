@@ -35,6 +35,7 @@ import {
   sameWorktreeList,
   sameWorktreesByProject,
 } from '@/components/session/sidebar/worktreeDiscovery';
+import { CHAT_DRAFT_PROJECT_ID } from '@/lib/chatDirectories';
 
 const MINI_CHAT_PRESENCE_CHANNEL = 'openchamber:mini-chat-presence';
 const WORKTREE_DISCOVERY_CONCURRENCY = 3;
@@ -206,9 +207,11 @@ const MiniChatBootstrap: React.FC<{ config: MiniChatConfig }> = ({ config }) => 
 
   React.useEffect(() => {
     if (config.mode !== 'draft' || draftOpen || currentSessionId) return;
+    const hasProjectTarget = Boolean(config.projectId || config.directory);
     openNewSessionDraft({
-      selectedProjectId: config.projectId,
-      directoryOverride: config.directory,
+      target: hasProjectTarget ? 'project' : 'chat',
+      selectedProjectId: hasProjectTarget ? config.projectId : CHAT_DRAFT_PROJECT_ID,
+      directoryOverride: hasProjectTarget ? config.directory : null,
       preserveDirectoryOverride: Boolean(config.directory),
     });
   }, [config, currentSessionId, draftOpen, openNewSessionDraft]);
@@ -220,9 +223,11 @@ const MiniChatBootstrap: React.FC<{ config: MiniChatConfig }> = ({ config }) => 
       const detail = (event as CustomEvent<{ sessionId?: string; directory?: string; serverId?: string }>).detail;
       const sessionId = typeof detail?.sessionId === 'string' ? detail.sessionId.trim() : '';
       if (!sessionId) return;
-      const directory = typeof detail?.directory === 'string' && detail.directory.trim().length > 0
-        ? detail.directory.trim()
-        : null;
+      const sessionDirectory = (sessions.find((entry) => entry.id === sessionId) as { directory?: string | null } | undefined)?.directory?.trim();
+      const directory = sessionDirectory
+        || (typeof detail?.directory === 'string' && detail.directory.trim().length > 0
+          ? detail.directory.trim()
+          : null);
       const serverId = typeof detail?.serverId === 'string' && detail.serverId.trim().length > 0
         ? detail.serverId.trim()
         : null;
@@ -234,7 +239,7 @@ const MiniChatBootstrap: React.FC<{ config: MiniChatConfig }> = ({ config }) => 
 
     window.addEventListener('openchamber:open-session', handler as EventListener);
     return () => window.removeEventListener('openchamber:open-session', handler as EventListener);
-  }, [setCurrentSession]);
+  }, [sessions, setCurrentSession]);
 
   React.useEffect(() => {
     if (projects.length === 0) return;
@@ -374,11 +379,12 @@ const MiniChatPresencePublisher: React.FC = () => {
 const useSessionUnavailable = (config: MiniChatConfig): boolean => {
   const sessions = useSessions();
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
+  const draftOpen = useSessionUIStore((state) => state.newSessionDraft.open);
   const targetDirectoryServerReady = useDirectoryServerReady(config.directory);
   const [timedOut, setTimedOut] = React.useState(false);
 
   React.useEffect(() => {
-    if (config.mode !== 'session' || !config.sessionId || currentSessionId === config.sessionId || !targetDirectoryServerReady) {
+    if (draftOpen || config.mode !== 'session' || !config.sessionId || currentSessionId || !targetDirectoryServerReady) {
       setTimedOut(false);
       return;
     }
@@ -388,7 +394,7 @@ const useSessionUnavailable = (config: MiniChatConfig): boolean => {
     }
     const timeout = window.setTimeout(() => setTimedOut(true), 5000);
     return () => window.clearTimeout(timeout);
-  }, [config.mode, config.sessionId, currentSessionId, sessions, targetDirectoryServerReady]);
+  }, [config.mode, config.sessionId, currentSessionId, draftOpen, sessions, targetDirectoryServerReady]);
 
   return timedOut;
 };

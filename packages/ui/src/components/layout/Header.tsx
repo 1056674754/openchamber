@@ -63,6 +63,7 @@ import { InstanceInfoPanel } from '@/components/desktop/InstanceInfoPanel';
 import { WindowsWindowControls } from '@/components/desktop/WindowsWindowControls';
 import { useActiveServerId } from '@/hooks/useActiveServerId';
 import { serverRegistry } from '@/lib/opencode/server-registry';
+import { isChatDirectoryPath } from '@/lib/chatDirectories';
 import { OpenInAppButton } from '@/components/desktop/OpenInAppButton';
 import { forceKillTerminal } from '@/lib/terminalApi';
 import { useTerminalStore } from '@/stores/useTerminalStore';
@@ -1034,6 +1035,8 @@ export const Header: React.FC<HeaderProps> = ({
     }
     return normalize(state.newSessionDraft.bootstrapPendingDirectory ?? state.newSessionDraft.directoryOverride ?? '');
   });
+  const draftTarget = useSessionUIStore((state) => state.newSessionDraft.target);
+  const draftProjectId = useSessionUIStore((state) => state.newSessionDraft.selectedProjectId);
 
   const openDirectory = React.useMemo(() => {
     return worktreeDirectory || sessionDirectory || draftDirectory;
@@ -1058,6 +1061,10 @@ export const Header: React.FC<HeaderProps> = ({
 
   const gitBranchForDirectory = useGitBranchLabel(openDirectory || null);
   const currentBranchLabel = gitBranchForDirectory || currentSessionWorktreeBranch || catalogWorktreeBranch;
+  const isChatContext = isNewSessionDraftOpen
+    ? draftTarget === 'chat'
+    : isChatDirectoryPath(sessionDirectory);
+
 
   const currentSessionTitle = React.useMemo(() => {
     if (!currentSessionId) {
@@ -1391,12 +1398,12 @@ export const Header: React.FC<HeaderProps> = ({
 
   const handleOpenDraftMiniChat = React.useCallback(() => {
     void invokeDesktop('desktop_open_draft_mini_chat_window', {
-      directory: normalize(openDirectory || activeProject?.path || ''),
-      projectId: activeProject?.id ?? null,
+      directory: isChatContext ? '' : draftDirectory,
+      projectId: isChatContext ? null : draftProjectId,
     }).catch((error) => {
       console.warn('[header] failed to open draft mini chat window', error);
     });
-  }, [activeProject?.id, activeProject?.path, openDirectory]);
+  }, [draftDirectory, draftProjectId, isChatContext]);
 
   const handleOpenCurrentMiniChat = React.useCallback(() => {
     if (isNewSessionDraftOpen) {
@@ -1409,11 +1416,11 @@ export const Header: React.FC<HeaderProps> = ({
     }
     void invokeDesktop('desktop_open_session_mini_chat_window', {
       sessionId: currentSessionId,
-      directory: normalize(openDirectory || activeProject?.path || ''),
+      directory: sessionDirectory || worktreeDirectory,
     }).catch((error) => {
       console.warn('[header] failed to open session mini chat window', error);
     });
-  }, [activeProject?.path, currentSessionId, handleOpenDraftMiniChat, isNewSessionDraftOpen, openDirectory]);
+  }, [currentSessionId, handleOpenDraftMiniChat, isNewSessionDraftOpen, sessionDirectory, worktreeDirectory]);
 
   const handleOpenContextPlan = React.useCallback(() => {
     const directory = normalize(openDirectory || '');
@@ -2077,7 +2084,7 @@ export const Header: React.FC<HeaderProps> = ({
                 {isNewSessionDraftOpen ? t('sessions.switcher.draftTitle') : currentSessionTitle}
               </span>
             )}
-            {(activeProjectLabel || currentBranchLabel || (!isNewSessionDraftOpen && (hasNonZeroSessionChanges || worktreeBadgeKind))) ? (
+            {!isChatContext && (activeProjectLabel || currentBranchLabel || (!isNewSessionDraftOpen && (hasNonZeroSessionChanges || worktreeBadgeKind))) ? (
               <span className="flex min-w-0 max-w-full items-center gap-1.5 truncate typography-micro text-[10.5px] font-normal leading-tight text-muted-foreground/75">
                 {activeProjectLabel ? <span className="truncate">{activeProjectLabel}</span> : null}
                 {currentBranchLabel ? (

@@ -15,6 +15,13 @@ import { useI18n } from '@/lib/i18n';
 import { resolveProjectForSessionDirectory } from '@/lib/projectResolution';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { SidebarFilesTree } from './SidebarFilesTree';
+import {
+  CHAT_DRAFT_PROJECT_ID,
+  getChatsRootForHome,
+  getChatsRootFromDirectory,
+  isChatDirectoryPath,
+} from '@/lib/chatDirectories';
+import { DEFAULT_SERVER_ID, serverRegistry } from '@/lib/opencode/server-registry';
 
 type RightTab = 'git' | 'files' | 'context';
 
@@ -49,14 +56,28 @@ function useRightSidebarGitSync(directory: string | undefined, isSidebarOpen: bo
 }
 
 export const ProjectContextPanel: React.FC = () => {
+  const { t } = useI18n();
   const activeProjectId = useProjectsStore((state) => state.activeProjectId);
   const projects = useProjectsStore((state) => state.projects);
   const availableWorktreesByProject = useSessionUIStore((state) => state.availableWorktreesByProject);
   const homeDirectory = useDirectoryStore((state) => state.homeDirectory);
   const gitDirectories = useGitStore((state) => state.directories);
   const effectiveDirectory = useEffectiveDirectory();
+  const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
+  const draftOpen = useSessionUIStore((state) => state.newSessionDraft.open);
+  const draftTarget = useSessionUIStore((state) => state.newSessionDraft.target);
+  const draftChatServerId = useSessionUIStore((state) => state.newSessionDraft.chatServerId);
+  const isChatContext = draftOpen
+    ? draftTarget === 'chat'
+    : isChatDirectoryPath(effectiveDirectory);
+  const chatServerId = draftOpen
+    ? (draftChatServerId ?? DEFAULT_SERVER_ID)
+    : (currentSessionId ? serverRegistry.getServerForSession(currentSessionId) ?? DEFAULT_SERVER_ID : DEFAULT_SERVER_ID);
+  const chatsRoot = getChatsRootFromDirectory(effectiveDirectory)
+    ?? (chatServerId === DEFAULT_SERVER_ID ? getChatsRootForHome(homeDirectory) : null);
 
   const activeProject = React.useMemo(() => {
+    if (isChatContext) return null;
     if (effectiveDirectory) {
       const owner = resolveProjectForSessionDirectory(
         projects,
@@ -69,9 +90,16 @@ export const ProjectContextPanel: React.FC = () => {
       return projects.find((project) => project.id === activeProjectId) ?? null;
     }
     return null;
-  }, [activeProjectId, availableWorktreesByProject, effectiveDirectory, projects]);
+  }, [activeProjectId, availableWorktreesByProject, effectiveDirectory, isChatContext, projects]);
 
   const projectRef = React.useMemo(() => {
+    if (isChatContext && chatsRoot) {
+      return {
+        id: CHAT_DRAFT_PROJECT_ID,
+        path: chatsRoot,
+        serverId: chatServerId,
+      };
+    }
     if (!activeProject) {
       return null;
     }
@@ -80,16 +108,17 @@ export const ProjectContextPanel: React.FC = () => {
       path: activeProject.path,
       serverId: activeProject.serverId,
     };
-  }, [activeProject]);
+  }, [activeProject, chatServerId, chatsRoot, isChatContext]);
 
   const projectLabel = React.useMemo(() => {
+    if (isChatContext) return t('sessions.sidebar.activity.chatsTitle');
     if (!activeProject) {
       return null;
     }
     return activeProject.label?.trim()
       || formatDirectoryName(activeProject.path, homeDirectory)
       || activeProject.path;
-  }, [activeProject, homeDirectory]);
+  }, [activeProject, homeDirectory, isChatContext, t]);
 
   const canCreateWorktree = React.useMemo(() => {
     if (!activeProject) {
