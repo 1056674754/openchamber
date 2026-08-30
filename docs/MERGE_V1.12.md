@@ -2176,3 +2176,13 @@ fork 已有丰富的 surface 组织（#62 surface rail + ContextSidebarTab + Con
 - `desktop_minimize_current_window` 当前始终调用 `browserWindow.minimize()`，close path 才走 tray；补齐 10 locale 文案为“关闭到托盘，最小化保留任务栏”，对齐 `c020e1554`，保留 persisted key `desktopMinimizeToTrayEnabled`。
 - Windows 右侧 controls 去除多余 header padding，close hover 改用 status error theme tokens，对齐 `57c9ec2fd`；fork Mini Chat 当前没有该上游 frameless-controls 结构，因此不造无调用方样式。
 - `bcab6d68a` self-signed loopback Browser panel certificate exception 尚未落地：需要接入当前由其他 agent 修改中的 `packages/electron/main.mjs`。为避免把 settings-lock/SSH WIP 一并提交，本项保持 open，待 main WIP 收口后补 helper + hook + shell test。
+
+### #155 Phase 1：Config-defined custom provider auth gate（2026-08-30）
+
+上游来源：`ddd4b5ed8`。fork 已有 config-defined custom provider CRUD、scope/source 识别和 models/baseURL，因此只修真实缺口：
+
+- provider 存在于 user/project/custom config layer 且符合 custom OpenAI-compatible contract 时，不再因 auth.json/env 为空自动展开未认证 panel，也不再隐藏其 models。
+- 普通内置 provider 仍必须有 auth/env credential；source 尚未加载时不提前判失败。
+- pure gate 1 Bun test / 4 assertions ✅；full workspace type-check/lint 与 diff check ✅。
+
+[#155](https://coding.s-s.city/songsong/openchamber/-/issues/155) 保持 open：下一 phase 仍需移植 `f1b602019` running OpenCode `/provider` snapshot，使 plugin-registered endpoint/key 参与 Small Model resolution，并独立审计 `109e957fe` Claude CLI provider state。
