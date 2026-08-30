@@ -2335,3 +2335,12 @@ QA 事故记录：HMR server 复用了安装版 managed OpenCode `54185`，退�
 - renderer control client、real Chromium BrowserPane、dev-server tunnel 和 Electron webview lifecycle 未移植，所以当前没有 client 宣告 `browser=1`，动作诚实 fail fast。
 
 验证：broker + generated plugin Vitest 2 files / 6 tests ✅；control authority + SSE capability Bun 2 files / 6 tests ✅；Web type-check ✅；`git diff --check` ✅。[#135](https://coding.s-s.city/songsong/openchamber/-/issues/135) 保持 open。
+
+### #135 Phase 2：Authoritative dev-server discovery（2026-08-30）
+
+- 新增 cross-platform listener scanner：macOS/Linux `lsof -F pcn`、Windows netstat、无 lsof 的 Linux/container 使用 `/proc/net/tcp{,6}` fallback。
+- 只保留 loopback/wildcard bind；排除 LAN-only（localhost 无法访问）、OpenChamber/OpenCode own ports、当前 scanner PID 和短 infrastructure denylist。
+- 成功扫描 3s cache；失败不 cache，并由 `/api/dev-servers` 返回 503，明确区分“没有 server”和“扫描失败”。
+- scanner 在 feature route composition 中单实例复用，为后续 Browser address suggestions 与 remote tunnel allowlist 提供同一权威集合。
+
+验证：parser Bun 1 file / 4 tests ✅；Web type/lint ✅；真实 macOS lsof 只读扫描发现 254 个候选并确认排除安装版 `57123` 与 OpenCode `65246`。下一 phase 接 UI BrowserPane/address suggestions，再将同一 scanner 接 dev tunnel。

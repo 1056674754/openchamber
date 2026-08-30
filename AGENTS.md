@@ -135,6 +135,12 @@ First-claim request/result broker for agent-driven in-app Browser actions.
 
 - Module docs: `packages/web/server/lib/browser-control/DOCUMENTATION.md`
 
+##### dev-servers
+
+Cross-platform discovery of locally reachable listening development servers.
+
+- Module docs: `packages/web/server/lib/dev-servers/DOCUMENTATION.md`
+
 ##### terminal
 
 WebSocket protocol utilities for terminal input handling including message normalization, control frame parsing, and rate limiting.

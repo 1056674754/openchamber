@@ -84,6 +84,7 @@ import { createOpenChamberControlService } from './lib/openchamber-control/servi
 import { createAgentToolRuntime } from './lib/agent-tool/runtime.js';
 import { createBrowserControlBroker } from './lib/browser-control/broker.js';
 import { registerBrowserControlRoutes } from './lib/browser-control/routes.js';
+import { createDevServerScanner } from './lib/dev-servers/routes.js';
 import { createRuntimeFallbackApprovalService } from './lib/agent-tool/runtime-fallback-approval.js';
 import { createServerStartupRuntime } from './lib/opencode/server-startup-runtime.js';
 import { createTunnelWiringRuntime } from './lib/opencode/tunnel-wiring-runtime.js';
@@ -1622,6 +1623,7 @@ async function main(options = {}) {
   console.log(`Starting OpenChamber on port ${port === 0 ? 'auto' : port}`);
 
   const sayTTSCapability = await detectSayTtsCapability(process);
+  const devServerScanner = createDevServerScanner({ spawn, platform: process.platform });
 
   const app = express();
   const serverStartedAt = new Date().toISOString();
@@ -1819,6 +1821,8 @@ async function main(options = {}) {
     buildOpenCodeUrl,
     getOpenCodeAuthHeaders,
     getOpenCodePort: () => openCodePort,
+    getOwnPorts: () => [port, openCodePort].filter((value) => Number.isInteger(value) && value > 0),
+    devServerScanner,
     fetchProvidersSnapshot,
     buildAugmentedPath,
     projectConfigRuntime,

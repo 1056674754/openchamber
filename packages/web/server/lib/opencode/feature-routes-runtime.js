@@ -7,6 +7,7 @@ import { registerSessionGoalRoutes } from '../session-goal/routes.js';
 import { registerSubscriptionRoutes } from '../subscriptions/routes.js';
 import { registerGitHubRoutes } from '../github/routes.js';
 import { registerGitRoutes } from '../git/routes.js';
+import { registerDevServerRoutes } from '../dev-servers/routes.js';
 import { registerMagicPromptRoutes } from '../magic-prompts/routes.js';
 import { registerSessionFoldersRoutes } from '../session-folders/routes.js';
 import { registerPendingMessagesRoutes } from '../pending-messages/routes.js';
@@ -90,6 +91,8 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       buildOpenCodeUrl,
       getOpenCodeAuthHeaders,
       getOpenCodePort,
+      getOwnPorts,
+      devServerScanner,
       fetchProvidersSnapshot,
       buildAugmentedPath,
       projectConfigRuntime,
@@ -338,6 +341,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
     });
     registerGitHubRoutes(app);
     registerGitRoutes(app);
+    registerDevServerRoutes(app, { scanner: devServerScanner, getOwnPorts });
     registerMagicPromptRoutes(app, {
       fsPromises,
       path,
