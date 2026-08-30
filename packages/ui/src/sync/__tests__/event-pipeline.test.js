@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { createEventPipeline } from '../event-pipeline';
+import { buildGlobalEventWsUrl, createEventPipeline } from '../event-pipeline';
 
 const originalDocument = globalThis.document;
 const originalWindow = globalThis.window;
@@ -627,6 +627,7 @@ describe('createEventPipeline', () => {
 
     const socket = FakeWebSocket.instances[0];
     expect(socket?.url).toContain('/api/global/event/ws');
+    expect(socket?.url).not.toContain('browser=1');
 
     socket.emitOpen();
     socket.emitMessage({ type: 'ready', scope: 'global' });
@@ -655,6 +656,15 @@ describe('createEventPipeline', () => {
         },
       },
     ]);
+  });
+
+  it('advertises Browser control only from an Electron global stream', async () => {
+    installDomStubs();
+    globalThis.window.__OPENCHAMBER_ELECTRON__ = { runtime: 'electron' };
+
+    expect(buildGlobalEventWsUrl('/api/')).toContain('browser=1');
+    delete globalThis.window.__OPENCHAMBER_ELECTRON__;
+    expect(buildGlobalEventWsUrl('/api/')).not.toContain('browser=1');
   });
 
   it('retries websocket when it closes before ready in auto mode', async () => {

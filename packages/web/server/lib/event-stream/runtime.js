@@ -53,6 +53,15 @@ export function createGlobalUiEventBroadcaster({
   };
 }
 
+export const parseMessageStreamClientCapabilities = (rawUrl) => {
+  try {
+    const url = new URL(String(rawUrl || ''), 'http://127.0.0.1');
+    return { browser: url.searchParams.get('browser') === '1' };
+  } catch {
+    return { browser: false };
+  }
+};
+
 export function createMessageStreamWsRuntime({
   server,
   uiAuthController,
@@ -112,6 +121,9 @@ export function createMessageStreamWsRuntime({
     const requestedDirectory = requestUrl.searchParams.get('directory')?.trim() || '';
 
     if (isGlobalStream) {
+      const capabilities = parseMessageStreamClientCapabilities(rawUrl);
+      socket.openchamberGlobalStream = true;
+      socket.openchamberBrowserCapable = capabilities.browser;
       globalBridge.accept(socket, {
         requestedLastEventId,
       });

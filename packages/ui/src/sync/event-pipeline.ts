@@ -277,11 +277,14 @@ function toWebSocketUrl(candidate: string): string {
   return url.toString()
 }
 
-function buildGlobalEventWsUrl(baseUrl: string, lastEventId?: string): string {
+export function buildGlobalEventWsUrl(baseUrl: string, lastEventId?: string): string {
   const normalizedBase = baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`
   const httpUrl = new URL("global/event/ws", resolveAbsoluteUrl(normalizedBase))
   if (lastEventId && lastEventId.length > 0) {
     httpUrl.searchParams.set("lastEventId", lastEventId)
+  }
+  if (typeof window !== "undefined" && Boolean(window.__OPENCHAMBER_ELECTRON__)) {
+    httpUrl.searchParams.set("browser", "1")
   }
   return toWebSocketUrl(httpUrl.toString())
 }

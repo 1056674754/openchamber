@@ -38,6 +38,8 @@ declare global {
     loadURL(url: string): void;
     goBack(): void;
     goForward(): void;
+    canGoBack(): boolean;
+    canGoForward(): boolean;
     reload(): void;
     getURL(): string;
     getTitle(): string;

@@ -2356,3 +2356,15 @@ QA 事故记录：HMR server 复用了安装版 managed OpenCode `54185`，退�
 - 当前未接 dirty Electron main / Browser renderer，因此还没有 `desktop_dev_tunnel_open` 调用方。private relay virtual endpoint 也不能直接给 Node `ws` client 使用，归 [#137](https://coding.s-s.city/songsong/openchamber/-/issues/137) 的 relay/browser-tunnel parity，不虚报支持。
 
 验证：dev tunnel + discovery + shutdown 3 files / 17 tests ✅，含真实 HTTP host→WebSocket→local TCP 透传、allowlist/auth/origin 拒绝、stalled handshake bound 与 shutdown ordering。下一 phase 接 clean UI browser contract/control client；Electron main 需等待另一 agent WIP 收口。
+
+### #135 Phase 4：Agent control connected to the fork Browser pane（2026-08-30）
+
+- 修复 Phase 1 transport 断链：fork 已移除常驻 OpenChamber EventSource 并把 synthetic events 合入 global message WS，但 broker 仍只写旧 SSE。Electron global WS 现在以 query `browser=1` 声明 ephemeral capability，server 只向 capable global socket 投递 control request。
+- capability 只记在 global socket；directory stream、普通 browser、notification client 不会收到 action。旧 `/api/openchamber/events` capable SSE 保持兼容，但不是 fork 主路径。
+- renderer control client 解析 envelope 后按 `serverId` 匹配 active controller/opener，匹配前不 claim；claim 成功后才触碰页面，成功/原始失败都回传 `/result`。聚合 remote event 不会误发给 default page。
+- ContextPanel 在当前 authoritative active server 注册 opener；无 Browser tab 的 `browser.open` 先创建现有 fork Browser tab，再等待 controller attach。split 时 primary active Browser 拥有 controller，第二个可见 pane 不抢占。
+- 复用 fork 已有 Electron `<webview>`，实现 `open/snapshot/click/type/scroll/back/forward/inspect/capture`。snapshot 最多 6,000 text chars / 120 interactive elements并报告 truncation；selector/text/value 全部作为 JSON data 嵌入，不能形成脚本注入。
+- back/forward 无历史时明确失败；click/submit 等待 navigation settle；capture 复用现有 shell screenshot command，再由 Phase 1 server 写入 authoritative directory。
+- `browser.resize` 尚无 fork viewport/device bar，当前明确返回 unsupported，不假称已应用。aggregated remote 的 `/api/openchamber/events` fan-in 和 private relay parity 仍归 [#137](https://coding.s-s.city/songsong/openchamber/-/issues/137)。
+
+验证：page actions + control client Bun 2 files / 8 tests ✅；Electron capability focused Bun 1/1 ✅；event-stream + broker Vitest 2 files / 17 tests ✅；UI/Web type-check 与 lint ✅。未启动共享 HMR，避免再次复用并终止安装版 managed OpenCode。

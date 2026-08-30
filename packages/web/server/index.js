@@ -36,6 +36,7 @@ import {
   createGlobalUiEventBroadcaster,
   createGlobalMessageStreamHub,
   createMessageStreamWsRuntime,
+  sendMessageStreamWsEvent,
   DEFAULT_UPSTREAM_STALL_TIMEOUT_MS,
   UPSTREAM_STALL_TIMEOUT_CONCURRENT_MS,
 } from './lib/event-stream/index.js';
@@ -1403,15 +1404,27 @@ const openChamberSessionService = createOpenChamberSessionService({
 const browserControlBroker = createBrowserControlBroker({
   createId: () => `browser-${crypto.randomUUID()}`,
   emitRequest: (request) => {
-    const needsBrowserView = request.action !== 'browser.open';
+    const capableGlobalClients = Array.from(uiNotificationWsClients).filter((client) => (
+      client.openchamberGlobalStream === true && client.openchamberBrowserCapable === true
+    ));
+    const capableLegacyClients = Array.from(uiOpenChamberEventClients).filter((client) => (
+      client.openchamberBrowserCapable === true
+    ));
+    const payload = {
+      type: 'openchamber:browser-control-request',
+      properties: request,
+    };
     let delivered = 0;
-    for (const client of uiOpenChamberEventClients) {
-      if (needsBrowserView && client.openchamberBrowserCapable !== true) continue;
+    for (const client of capableGlobalClients) {
+      if (sendMessageStreamWsEvent(client, payload, { directory: 'global' })) {
+        delivered += 1;
+      } else {
+        uiNotificationWsClients.delete(client);
+      }
+    }
+    for (const client of capableLegacyClients) {
       try {
-        writeSseEvent(client, {
-          type: 'openchamber:browser-control-request',
-          properties: request,
-        });
+        writeSseEvent(client, payload);
         delivered += 1;
       } catch {
         uiOpenChamberEventClients.delete(client);

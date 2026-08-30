@@ -1,7 +1,11 @@
 import { EventEmitter } from 'node:events';
 import { describe, expect, it } from 'vitest';
 
-import { createGlobalUiEventBroadcaster, createMessageStreamWsRuntime } from './runtime.js';
+import {
+  createGlobalUiEventBroadcaster,
+  createMessageStreamWsRuntime,
+  parseMessageStreamClientCapabilities,
+} from './runtime.js';
 
 class FakeSocket extends EventEmitter {
   constructor() {
@@ -66,6 +70,12 @@ function createSseResponse({ blocks = [], signal, holdOpen = false, onAbort: han
 }
 
 describe('event stream broadcaster', () => {
+  it('parses ephemeral browser control capability from the connection URL', () => {
+    expect(parseMessageStreamClientCapabilities('/api/global/event/ws?browser=1')).toEqual({ browser: true });
+    expect(parseMessageStreamClientCapabilities('/api/global/event/ws?browser=0')).toEqual({ browser: false });
+    expect(parseMessageStreamClientCapabilities('not a url')).toEqual({ browser: false });
+  });
+
   it('fans out synthetic events to SSE and WS clients', () => {
     const sseEvents = [];
     const wsPayloads = [];

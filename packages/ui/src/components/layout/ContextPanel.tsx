@@ -15,6 +15,7 @@ import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
 import { openExternalUrl } from '@/lib/url';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
+import { useActiveServerId } from '@/hooks/useActiveServerId';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 import { resolvePreviewHeaderDisplayUrl } from '@/lib/previewDisplayUrl';
@@ -30,6 +31,15 @@ import { toast } from '@/components/ui';
 import { Icon } from "@/components/icon/Icon";
 import { OpenChamberLogo } from "@/components/ui/OpenChamberLogo";
 import { invokeDesktopCommand } from '@/lib/desktopNative';
+import { registerBrowserController, registerBrowserOpener } from '@/lib/browser/controlClient';
+import {
+  buildClickScript,
+  buildInspectScript,
+  buildScrollScript,
+  buildSnapshotScript,
+  buildTypeScript,
+} from '@/lib/browser/pageActions';
+import { UNRESOLVED_SERVER_ID } from '@/sync/session-authority';
 import { buildEmbeddedSessionChatURL, getActiveEmbeddedSessionChatTab } from './contextPanelEmbeddedChat';
 import { ProjectContextPanel } from './RightSidebarTabs';
 import { getContextSurfaceWidthFraction } from '@/lib/surfaces/registry';
@@ -1378,9 +1388,17 @@ type DesktopBrowserPaneProps = {
   initialUrl: string;
   directory: string;
   tabID: string;
+  serverId: string;
+  controllerActive: boolean;
 };
 
-const DesktopBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, directory, tabID }) => {
+const DesktopBrowserPane: React.FC<DesktopBrowserPaneProps> = ({
+  initialUrl,
+  directory,
+  tabID,
+  serverId,
+  controllerActive,
+}) => {
   const { t } = useI18n();
   const webviewRef = React.useRef<WebviewElement | null>(null);
   const setContextPanelTabTargetPath = useUIStore((state) => state.setContextPanelTabTargetPath);
@@ -1515,6 +1533,113 @@ const DesktopBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dir
     try { webview.loadURL(nextUrl); } catch { /* webview may not be ready */ }
   }, []);
 
+  const waitForIdle = React.useCallback(async (timeoutMs = 8_000): Promise<boolean> => {
+    const startedAt = Date.now();
+    for (;;) {
+      const webview = webviewRef.current;
+      if (!webview) return false;
+      try {
+        if (!webview.isLoading()) return true;
+      } catch {
+        return false;
+      }
+      if (Date.now() - startedAt >= timeoutMs) return false;
+      await new Promise((resolve) => setTimeout(resolve, 120));
+    }
+  }, []);
+
+  const runControlAction = React.useCallback(async (
+    action: string,
+    parameters: Record<string, unknown>,
+  ): Promise<unknown> => {
+    const webview = webviewRef.current;
+    if (!webview) throw new Error('The browser panel is not ready');
+
+    if (action === 'browser.open') {
+      const requestedUrl = typeof parameters.url === 'string' ? parameters.url : '';
+      const nextUrl = normalizeBrowserUrl(requestedUrl);
+      if (nextUrl === 'about:blank') throw new Error('A valid absolute HTTP(S) URL is required');
+      loadUrl(nextUrl);
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      const settled = await waitForIdle(25_000);
+      return { url: webview.getURL() || nextUrl, title: webview.getTitle() || '', opened: true, settled };
+    }
+
+    if (action === 'browser.back' || action === 'browser.forward') {
+      const goingBack = action === 'browser.back';
+      if (goingBack ? !webview.canGoBack() : !webview.canGoForward()) {
+        throw new Error(goingBack
+          ? 'There is nothing to go back to in this tab'
+          : 'There is nothing to go forward to in this tab');
+      }
+      if (goingBack) webview.goBack();
+      else webview.goForward();
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      await waitForIdle();
+      return { url: webview.getURL(), title: webview.getTitle() || '' };
+    }
+
+    if (action === 'browser.capture') {
+      await waitForIdle();
+      const webContentsId = webview.getWebContentsId();
+      if (!Number.isFinite(webContentsId)) throw new Error('The browser page cannot be captured');
+      const capture = await invokeDesktopCommand<{ mime: string; base64: string; width: number; height: number }>(
+        'desktop_browser_capture_page',
+        { webContentsId },
+      );
+      return { ...capture, url: webview.getURL(), title: webview.getTitle() || '' };
+    }
+
+    if (action === 'browser.resize') {
+      throw new Error('Viewport presets are not available in this Browser surface yet');
+    }
+
+    await waitForIdle();
+    const optionalString = (value: unknown): string | undefined => (
+      typeof value === 'string' && value.length > 0 ? value : undefined
+    );
+    let script: string | null = null;
+    if (action === 'browser.snapshot') {
+      script = buildSnapshotScript({ selector: optionalString(parameters.selector) });
+    } else if (action === 'browser.click') {
+      script = buildClickScript({
+        selector: optionalString(parameters.selector),
+        text: optionalString(parameters.text),
+      });
+    } else if (action === 'browser.type') {
+      script = buildTypeScript({
+        selector: String(parameters.selector ?? ''),
+        value: String(parameters.value ?? ''),
+        submit: parameters.submit === true,
+      });
+    } else if (action === 'browser.scroll') {
+      script = buildScrollScript({
+        selector: optionalString(parameters.selector),
+        direction: optionalString(parameters.direction),
+      });
+    } else if (action === 'browser.inspect') {
+      script = buildInspectScript({ selector: String(parameters.selector ?? '') });
+    }
+    if (!script) throw new Error(`Unsupported browser action: ${action}`);
+
+    const result = await webview.executeJavaScript(script, true);
+    if (!result || typeof result !== 'object') throw new Error('The page returned no result');
+    const record = result as Record<string, unknown>;
+    if (record.ok !== true) {
+      throw new Error(typeof record.error === 'string' && record.error ? record.error : 'Browser action failed');
+    }
+    if (action === 'browser.click' || (action === 'browser.type' && parameters.submit === true)) {
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      await waitForIdle();
+    }
+    return record;
+  }, [loadUrl, waitForIdle]);
+
+  React.useEffect(() => {
+    if (!controllerActive || serverId === UNRESOLVED_SERVER_ID) return;
+    return registerBrowserController(serverId, { run: runControlAction });
+  }, [controllerActive, runControlAction, serverId]);
+
   const handleInspect = React.useCallback(() => {
     const webview = webviewRef.current;
     if (!webview) return;
@@ -1643,6 +1768,8 @@ const ContextPanelTabContent: React.FC<{
   active: boolean;
   directory: string;
   effectiveDirectory: string;
+  serverId: string;
+  controllerActive: boolean;
   postEmbeddedVisibilityToChats: () => void;
   postChatSettingsSyncToEmbeddedChats: () => void;
   postThemeSyncToEmbeddedChat: () => void;
@@ -1652,6 +1779,8 @@ const ContextPanelTabContent: React.FC<{
   active,
   directory,
   effectiveDirectory,
+  serverId,
+  controllerActive,
   postEmbeddedVisibilityToChats,
   postChatSettingsSyncToEmbeddedChats,
   postThemeSyncToEmbeddedChat,
@@ -1743,7 +1872,13 @@ const ContextPanelTabContent: React.FC<{
 
   if (tab.mode === 'browser') {
     return (
-      <DesktopBrowserPane initialUrl={tab.targetPath ?? ''} directory={directory} tabID={tab.id} />
+      <DesktopBrowserPane
+        initialUrl={tab.targetPath ?? ''}
+        directory={directory}
+        tabID={tab.id}
+        serverId={serverId}
+        controllerActive={controllerActive}
+      />
     );
   }
 
@@ -1758,10 +1893,12 @@ const ContextPanelTabContent: React.FC<{
 export const ContextPanel: React.FC = () => {
   const { t } = useI18n();
   const effectiveDirectory = useEffectiveDirectory() ?? '';
+  const activeServerId = useActiveServerId();
   const directoryKey = React.useMemo(() => normalizeDirectoryKey(effectiveDirectory), [effectiveDirectory]);
 
   const panelState = useUIStore((state) => (directoryKey ? state.contextPanelByDirectory[directoryKey] : undefined));
   const closeContextPanel = useUIStore((state) => state.closeContextPanel);
+  const openContextBrowser = useUIStore((state) => state.openContextBrowser);
   const closeContextPanelTab = useUIStore((state) => state.closeContextPanelTab);
   const toggleContextPanelExpanded = useUIStore((state) => state.toggleContextPanelExpanded);
   const setContextPanelWidth = useUIStore((state) => state.setContextPanelWidth);
@@ -2351,18 +2488,29 @@ export const ContextPanel: React.FC = () => {
     postEmbeddedVisibilityToChats();
   }, [darkThemeId, lightThemeId, postChatSettingsSyncToEmbeddedChats, postEmbeddedVisibilityToChats, postThemeSyncToEmbeddedChat, tabs, themeMode]);
 
-  const renderTabPaneContent = React.useCallback((tab: ContextPanelTabLike, active: boolean) => (
+  React.useEffect(() => {
+    if (!directoryKey || activeServerId === UNRESOLVED_SERVER_ID) return;
+    return registerBrowserOpener(activeServerId, (url) => openContextBrowser(directoryKey, url));
+  }, [activeServerId, directoryKey, openContextBrowser]);
+
+  const renderTabPaneContent = React.useCallback((
+    tab: ContextPanelTabLike,
+    active: boolean,
+    controllerActive = active,
+  ) => (
     <ContextPanelTabContent
       tab={tab}
       active={active}
       directory={directoryKey}
       effectiveDirectory={effectiveDirectory}
+      serverId={activeServerId}
+      controllerActive={controllerActive}
       postEmbeddedVisibilityToChats={postEmbeddedVisibilityToChats}
       postChatSettingsSyncToEmbeddedChats={postChatSettingsSyncToEmbeddedChats}
       postThemeSyncToEmbeddedChat={postThemeSyncToEmbeddedChat}
       setChatFrameRef={setChatFrameRef}
     />
-  ), [directoryKey, effectiveDirectory, postChatSettingsSyncToEmbeddedChats, postEmbeddedVisibilityToChats, postThemeSyncToEmbeddedChat, setChatFrameRef]);
+  ), [activeServerId, directoryKey, effectiveDirectory, postChatSettingsSyncToEmbeddedChats, postEmbeddedVisibilityToChats, postThemeSyncToEmbeddedChat, setChatFrameRef]);
 
   const tabItems = React.useMemo(() => tabs.map((tab) => {
     const rawLabel = getTabLabel(tab, t);
@@ -2506,7 +2654,7 @@ export const ContextPanel: React.FC = () => {
         {hasSplit && activeTab && splitTab ? (
           <div className="absolute inset-0 flex min-h-0 flex-col">
             <div className="relative min-h-0 overflow-hidden" style={{ height: `calc((100% - ${CONTEXT_PANEL_SPLIT_HANDLE_HEIGHT}px) * ${splitRatio})` }}>
-              <div className="absolute inset-0">{renderTabPaneContent(activeTab, isOpen)}</div>
+              <div className="absolute inset-0">{renderTabPaneContent(activeTab, isOpen, true)}</div>
             </div>
             <div
               className="flex h-[3px] shrink-0 cursor-row-resize items-center justify-end bg-[var(--interactive-border)]/60 transition-colors hover:bg-[var(--interactive-border)]"
@@ -2534,7 +2682,7 @@ export const ContextPanel: React.FC = () => {
               </Button>
             </div>
             <div className="relative min-h-0 flex-1 overflow-hidden">
-              <div className="absolute inset-0">{renderTabPaneContent(splitTab, isOpen)}</div>
+              <div className="absolute inset-0">{renderTabPaneContent(splitTab, isOpen, false)}</div>
             </div>
           </div>
         ) : (
