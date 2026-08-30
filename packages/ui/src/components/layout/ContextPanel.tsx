@@ -39,6 +39,14 @@ import {
   buildSnapshotScript,
   buildTypeScript,
 } from '@/lib/browser/pageActions';
+import {
+  FILL_VIEWPORT,
+  fitViewport,
+  isViewportMode,
+  viewportForMode,
+  viewportSummary,
+  type BrowserViewport,
+} from '@/lib/browser/viewport';
 import { UNRESOLVED_SERVER_ID } from '@/sync/session-authority';
 import { buildEmbeddedSessionChatURL, getActiveEmbeddedSessionChatTab } from './contextPanelEmbeddedChat';
 import { ProjectContextPanel } from './RightSidebarTabs';
@@ -1401,6 +1409,7 @@ const DesktopBrowserPane: React.FC<DesktopBrowserPaneProps> = ({
 }) => {
   const { t } = useI18n();
   const webviewRef = React.useRef<WebviewElement | null>(null);
+  const viewportHostRef = React.useRef<HTMLDivElement | null>(null);
   const setContextPanelTabTargetPath = useUIStore((state) => state.setContextPanelTabTargetPath);
   const normalized = normalizeBrowserUrl(initialUrl);
   const startUrl = normalized !== 'about:blank' ? normalized : '';
@@ -1409,8 +1418,34 @@ const DesktopBrowserPane: React.FC<DesktopBrowserPaneProps> = ({
   const [currentUrl, setCurrentUrl] = React.useState(startUrl);
   const [isInspecting, setIsInspecting] = React.useState(false);
   const [isLoading, setIsLoading] = React.useState(true);
+  const [viewport, setViewport] = React.useState<BrowserViewport>(FILL_VIEWPORT);
+  const viewportRef = React.useRef<BrowserViewport>(FILL_VIEWPORT);
+  const [viewportArea, setViewportArea] = React.useState({ width: 0, height: 0 });
   const loadingTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const showLoading = isLoading;
+  const viewportLayout = viewportArea.width > 0 && viewportArea.height > 0
+    ? fitViewport(viewport, viewportArea)
+    : null;
+  const applyViewport = React.useCallback((next: BrowserViewport) => {
+    viewportRef.current = next;
+    setViewport(next);
+  }, []);
+
+  React.useLayoutEffect(() => {
+    const host = viewportHostRef.current;
+    if (!host) return;
+    const update = () => {
+      const rect = host.getBoundingClientRect();
+      setViewportArea((previous) => {
+        const next = { width: Math.round(rect.width), height: Math.round(rect.height) };
+        return previous.width === next.width && previous.height === next.height ? previous : next;
+      });
+    };
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(host);
+    return () => observer.disconnect();
+  }, []);
 
   const persistUrl = React.useCallback((url: string) => {
     if (!url || url === 'about:blank' || !directory || !tabID) return;
@@ -1559,10 +1594,20 @@ const DesktopBrowserPane: React.FC<DesktopBrowserPaneProps> = ({
       const requestedUrl = typeof parameters.url === 'string' ? parameters.url : '';
       const nextUrl = normalizeBrowserUrl(requestedUrl);
       if (nextUrl === 'about:blank') throw new Error('A valid absolute HTTP(S) URL is required');
+      const requestedViewport = isViewportMode(parameters.viewport)
+        ? viewportForMode(parameters.viewport)
+        : viewportRef.current;
+      if (isViewportMode(parameters.viewport)) applyViewport(requestedViewport);
       loadUrl(nextUrl);
       await new Promise((resolve) => setTimeout(resolve, 150));
       const settled = await waitForIdle(25_000);
-      return { url: webview.getURL() || nextUrl, title: webview.getTitle() || '', opened: true, settled };
+      return {
+        url: webview.getURL() || nextUrl,
+        title: webview.getTitle() || '',
+        opened: true,
+        settled,
+        viewport: viewportSummary(requestedViewport),
+      };
     }
 
     if (action === 'browser.back' || action === 'browser.forward') {
@@ -1587,11 +1632,21 @@ const DesktopBrowserPane: React.FC<DesktopBrowserPaneProps> = ({
         'desktop_browser_capture_page',
         { webContentsId },
       );
-      return { ...capture, url: webview.getURL(), title: webview.getTitle() || '' };
+      return {
+        ...capture,
+        url: webview.getURL(),
+        title: webview.getTitle() || '',
+        viewport: viewportSummary(viewportRef.current),
+      };
     }
 
     if (action === 'browser.resize') {
-      throw new Error('Viewport presets are not available in this Browser surface yet');
+      if (!isViewportMode(parameters.viewport)) throw new Error('viewport is required');
+      const nextViewport = viewportForMode(parameters.viewport);
+      applyViewport(nextViewport);
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      await waitForIdle();
+      return { viewport: viewportSummary(nextViewport) };
     }
 
     await waitForIdle();
@@ -1628,12 +1683,15 @@ const DesktopBrowserPane: React.FC<DesktopBrowserPaneProps> = ({
     if (record.ok !== true) {
       throw new Error(typeof record.error === 'string' && record.error ? record.error : 'Browser action failed');
     }
+    if (action === 'browser.snapshot') {
+      return { ...record, viewport: viewportSummary(viewportRef.current) };
+    }
     if (action === 'browser.click' || (action === 'browser.type' && parameters.submit === true)) {
       await new Promise((resolve) => setTimeout(resolve, 150));
       await waitForIdle();
     }
     return record;
-  }, [loadUrl, waitForIdle]);
+  }, [applyViewport, loadUrl, waitForIdle]);
 
   React.useEffect(() => {
     if (!controllerActive || serverId === UNRESOLVED_SERVER_ID) return;
@@ -1739,13 +1797,30 @@ const DesktopBrowserPane: React.FC<DesktopBrowserPaneProps> = ({
           <Icon name="external-link" className="h-3.5 w-3.5" />
         </Button>
       </div>
-      <div className="relative min-h-0 flex-1 bg-background">
-        <webview
-          ref={webviewRef}
-          src={initialWebviewSrcRef.current}
-          partition="persist:openchamber-browser"
-          style={{ width: '100%', height: '100%', border: 'none' }}
-        />
+      <div ref={viewportHostRef} className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden bg-background">
+        <div
+          className="shrink-0 overflow-hidden bg-background"
+          style={viewportLayout
+            ? {
+              width: viewportLayout.width,
+              height: viewportLayout.height,
+              transform: `scale(${viewportLayout.scale})`,
+              transformOrigin: 'center center',
+            }
+            : { width: '100%', height: '100%' }}
+        >
+          <webview
+            ref={webviewRef}
+            src={initialWebviewSrcRef.current}
+            partition="persist:openchamber-browser"
+            style={{ width: '100%', height: '100%', border: 'none' }}
+          />
+        </div>
+        {viewportLayout ? (
+          <div className="pointer-events-none absolute bottom-2 left-2 rounded-md bg-[var(--surface-elevated)]/90 px-2 py-1 typography-micro tabular-nums text-muted-foreground shadow-sm">
+            {viewportLayout.width} x {viewportLayout.height} @ {Math.round(viewportLayout.scale * 100)}%
+          </div>
+        ) : null}
         {(!currentUrl || currentUrl === 'about:blank') && !isLoading ? (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-6 bg-background p-6 text-center">
             <OpenChamberLogo width={140} height={140} className="opacity-20" />

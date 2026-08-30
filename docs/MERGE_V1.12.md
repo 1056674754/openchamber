@@ -2368,3 +2368,12 @@ QA 事故记录：HMR server 复用了安装版 managed OpenCode `54185`，退�
 - `browser.resize` 尚无 fork viewport/device bar，当前明确返回 unsupported，不假称已应用。aggregated remote 的 `/api/openchamber/events` fan-in 和 private relay parity 仍归 [#137](https://coding.s-s.city/songsong/openchamber/-/issues/137)。
 
 验证：page actions + control client Bun 2 files / 8 tests ✅；Electron capability focused Bun 1/1 ✅；event-stream + broker Vitest 2 files / 17 tests ✅；UI/Web type-check 与 lint ✅。未启动共享 HMR，避免再次复用并终止安装版 managed OpenCode。
+
+### #135 Phase 5：Real viewport presets for agent Browser actions（2026-08-30）
+
+- `browser.open` 与 `browser.resize` 接受 upstream vocabulary `mobile/tablet/desktop/fill`；分别映射 390x844、768x1024、1440x900 与 panel fill。
+- fixed viewport 以选定 CSS width/height 真实参与页面 layout，只通过 transform 向下缩放适配 panel，绝不放大；因此 media query、element bounds、capture 与 snapshot 都描述 agent 指定的布局。
+- snapshot/open/capture/resize result 回传同一 `{ mode, width, height }`，避免模型误把 mobile snapshot 当 desktop。当前尺寸和视觉 scale 在页面角落以紧凑状态显示。
+- viewport state 使用 ref + narrow React state；agent resize 不会重建 controller 或中断已 claim request。ContextPanel ResizeObserver 只在 panel 尺寸真正变化时更新。
+
+验证：viewport + page actions + control client Bun 3 files / 13 tests ✅；UI type-check/lint ✅；`git diff --check` ✅。`#135` 仍保持 open：dev-server suggestions/history/crash recovery、Electron dev-tunnel IPC 与 aggregated remote event bridge 未完成。
