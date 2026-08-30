@@ -11,6 +11,12 @@ import { useConfigStore } from '@/stores/useConfigStore';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { serverRegistry } from '@/lib/opencode/server-registry';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
+import type {
+  GetGitRangeDiffOptions,
+  GetGitRangeFilesOptions,
+  GitBranchBaseResponse,
+  GitRangeFileEntry,
+} from './gitBranchScopeApi';
 
 export type {
   GitStatus,
@@ -119,6 +125,33 @@ export async function getGitDiff(directory: string, options: import('./api/types
   const runtime = getRuntimeGit();
   if (runtime) return runtime.getGitDiff(directory, options);
   return gitHttp.getGitDiff(directory, options);
+}
+
+export async function getGitRangeDiff(
+  directory: string,
+  options: GetGitRangeDiffOptions
+): Promise<import('./api/types').GitDiffResponse> {
+  const runtime = getRuntimeGit();
+  if (runtime?.getGitRangeDiff) return runtime.getGitRangeDiff(directory, options);
+  return gitHttp.getGitRangeDiff(directory, options);
+}
+
+export async function getGitRangeFiles(
+  directory: string,
+  options: GetGitRangeFilesOptions
+): Promise<GitRangeFileEntry[]> {
+  const runtime = getRuntimeGit();
+  if (runtime?.getGitRangeFiles) return runtime.getGitRangeFiles(directory, options);
+  return gitHttp.getGitRangeFiles(directory, options);
+}
+
+export async function getBranchBase(
+  directory: string,
+  branch: string
+): Promise<GitBranchBaseResponse> {
+  const runtime = getRuntimeGit();
+  if (runtime?.getBranchBase) return runtime.getBranchBase(directory, branch);
+  return gitHttp.getBranchBase(directory, branch);
 }
 
 export async function getGitFileDiff(

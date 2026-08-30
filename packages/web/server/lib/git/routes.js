@@ -458,6 +458,43 @@ export function registerGitRoutes(app) {
     }
   });
 
+  app.get('/api/git/branch-base', async (req, res) => {
+    const { getBranchBase } = await getGitLibraries();
+    try {
+      const directory = resolveDirectoryQuery(req.query.directory);
+      const branch = resolveDirectoryQuery(req.query.branch);
+      if (!directory) {
+        return res.status(400).json({ error: 'directory parameter is required' });
+      }
+      if (!branch) {
+        return res.status(400).json({ error: 'branch parameter is required' });
+      }
+      res.json(await getBranchBase(directory, branch));
+    } catch (error) {
+      console.error('Failed to get branch base:', error);
+      res.status(500).json({ error: error.message || 'Failed to get branch base' });
+    }
+  });
+
+  app.get('/api/git/range-files', async (req, res) => {
+    const { getRangeFiles } = await getGitLibraries();
+    try {
+      const directory = resolveDirectoryQuery(req.query.directory);
+      const base = resolveDirectoryQuery(req.query.base);
+      const head = resolveDirectoryQuery(req.query.head);
+      if (!directory) {
+        return res.status(400).json({ error: 'directory parameter is required' });
+      }
+      if (!base || !head) {
+        return res.status(400).json({ error: 'base and head parameters are required' });
+      }
+      res.json({ files: await getRangeFiles(directory, { base, head }) });
+    } catch (error) {
+      console.error('Failed to get git range files:', error);
+      res.status(500).json({ error: error.message || 'Failed to get git range files' });
+    }
+  });
+
   app.get('/api/git/file-diff', async (req, res) => {
     const { getFileDiff } = await getGitLibraries();
     try {

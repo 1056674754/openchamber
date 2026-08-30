@@ -31,6 +31,12 @@ import type {
   DiscoveredGitCredential,
   MergeConflictDetails,
 } from './api/types';
+import type {
+  GetGitRangeDiffOptions,
+  GetGitRangeFilesOptions,
+  GitBranchBaseResponse,
+  GitRangeFileEntry,
+} from './gitBranchScopeApi';
 import { resolveApiUrl } from '@/lib/api/serverUrl';
 import { resolveBaseUrl } from '@/sync/session-actions';
 
@@ -193,6 +199,60 @@ export async function getGitDiff(directory: string, options: GetGitDiffOptions):
   }
 
   return response.json();
+}
+
+export async function getGitRangeDiff(
+  directory: string,
+  options: GetGitRangeDiffOptions
+): Promise<GitDiffResponse> {
+  if (!options.base || !options.head) {
+    throw new Error('base and head are required to fetch git range diff');
+  }
+  const response = await fetch(buildUrl(`${API_BASE}/range-diff`, directory, {
+    base: options.base,
+    head: options.head,
+    path: options.path,
+    context: options.contextLines,
+  }));
+  if (!response.ok) {
+    throw new Error(`Failed to get git range diff: ${response.statusText}`);
+  }
+  return response.json();
+}
+
+export async function getGitRangeFiles(
+  directory: string,
+  options: GetGitRangeFilesOptions
+): Promise<GitRangeFileEntry[]> {
+  if (!options.base || !options.head) {
+    throw new Error('base and head are required to fetch git range files');
+  }
+  const response = await fetch(buildUrl(`${API_BASE}/range-files`, directory, {
+    base: options.base,
+    head: options.head,
+  }));
+  if (!response.ok) {
+    throw new Error(`Failed to get git range files: ${response.statusText}`);
+  }
+  const payload = (await response.json()) as { files?: unknown };
+  if (!Array.isArray(payload.files)) return [];
+  return payload.files.filter((entry): entry is GitRangeFileEntry => {
+    if (!entry || typeof entry !== 'object') return false;
+    const candidate = entry as { path?: unknown; status?: unknown };
+    return typeof candidate.path === 'string' && typeof candidate.status === 'string';
+  });
+}
+
+export async function getBranchBase(directory: string, branch: string): Promise<GitBranchBaseResponse> {
+  if (!branch) {
+    throw new Error('branch is required to get branch base');
+  }
+  const response = await fetch(buildUrl(`${API_BASE}/branch-base`, directory, { branch }));
+  if (!response.ok) {
+    throw new Error(`Failed to get branch base: ${response.statusText}`);
+  }
+  const payload = (await response.json()) as { base?: unknown };
+  return { base: typeof payload.base === 'string' ? payload.base : null };
 }
 
 export async function getGitFileDiff(directory: string, options: GetGitFileDiffOptions): Promise<GitFileDiffResponse> {

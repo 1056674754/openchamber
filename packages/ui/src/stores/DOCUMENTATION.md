@@ -194,6 +194,7 @@ Expected model:
 - explicit Git actions refresh status/branches/log as needed
 - successful file-mutating tools can issue a one-shot Git refresh hint
 - no root-level background Git polling
+- branch-diff base overrides live in `useGitBaseBranchStore`, keyed by runtime + directory + branch and capped at 100 entries; they are used only when reflog detection has no authoritative base
 
 ### PR
 

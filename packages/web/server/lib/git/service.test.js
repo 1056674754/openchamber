@@ -15,6 +15,9 @@ import {
   getRemotes,
   getStatus,
   getWorktreeBootstrapStatus,
+  getBranchBase,
+  getRangeFiles,
+  parseBranchCreationSource,
   populateWorktreeWithLockRecovery,
   runPostCheckoutHook,
   resetToCommit,
@@ -281,6 +284,51 @@ describe('fork PR worktree sources', () => {
       expect(() => runGit(created.path, ['config', '--get', 'branch.feature/tracking.remote'])).toThrow();
     });
   }, 30_000);
+});
+
+describe('branch diff source', () => {
+  it('parses only authoritative named refs from branch creation reflogs', () => {
+    expect(parseBranchCreationSource('commit: later\nbranch: Created from origin/main')).toBe('origin/main');
+    expect(parseBranchCreationSource('branch: Created from HEAD@{0}')).toBeNull();
+    expect(parseBranchCreationSource('branch: Created from 9a3b2c1d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b')).toBeNull();
+    expect(parseBranchCreationSource('reset: moving to HEAD')).toBeNull();
+  });
+
+  it('detects the base branch from a real reflog', async () => {
+    if (!canRunGit()) return;
+
+    const repository = createTempDir();
+    runGit(repository, ['init', '-b', 'main']);
+    runGit(repository, ['config', 'user.email', 'test@example.com']);
+    runGit(repository, ['config', 'user.name', 'Test User']);
+    fs.writeFileSync(path.join(repository, 'README.md'), '# Test\n');
+    runGit(repository, ['add', 'README.md']);
+    runGit(repository, ['commit', '-m', 'initial']);
+    runGit(repository, ['branch', 'feature']);
+
+    expect(await getBranchBase(repository, 'feature')).toEqual({ base: 'main' });
+  });
+
+  it('returns rename destination paths and status letters for branch ranges', async () => {
+    if (!canRunGit()) return;
+
+    const repository = createTempDir();
+    runGit(repository, ['init', '-b', 'main']);
+    runGit(repository, ['config', 'user.email', 'test@example.com']);
+    runGit(repository, ['config', 'user.name', 'Test User']);
+    fs.writeFileSync(path.join(repository, 'old name.md'), '# Test\n');
+    runGit(repository, ['add', 'old name.md']);
+    runGit(repository, ['commit', '-m', 'initial']);
+    runGit(repository, ['checkout', '-b', 'feature']);
+    fs.renameSync(path.join(repository, 'old name.md'), path.join(repository, 'new name.md'));
+    runGit(repository, ['add', '-A']);
+    runGit(repository, ['commit', '-m', 'rename']);
+
+    const files = await getRangeFiles(repository, { base: 'main', head: 'feature' });
+
+    expect(files).toContainEqual({ path: 'new name.md', status: 'R' });
+    expect(files.some((file) => file.path === 'old name.md')).toBe(false);
+  });
 });
 
 /**

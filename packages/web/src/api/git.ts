@@ -4,11 +4,15 @@ import type {
   CreateGitCommitOptions,
   GitLogOptions,
 } from '@openchamber/ui/lib/api/types';
+import type {} from '@openchamber/ui/lib/gitBranchScopeApi';
 
 export const createWebGitAPI = (): GitAPI => ({
   checkIsGitRepository: gitApiHttp.checkIsGitRepository,
   getGitStatus: gitApiHttp.getGitStatus,
   getGitDiff: gitApiHttp.getGitDiff,
+  getGitRangeDiff: gitApiHttp.getGitRangeDiff,
+  getGitRangeFiles: gitApiHttp.getGitRangeFiles,
+  getBranchBase: gitApiHttp.getBranchBase,
   getGitFileDiff: gitApiHttp.getGitFileDiff,
   revertGitFile: gitApiHttp.revertGitFile,
   isLinkedWorktree: gitApiHttp.isLinkedWorktree,

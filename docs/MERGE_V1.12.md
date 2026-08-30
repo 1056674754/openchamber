@@ -2290,3 +2290,20 @@ fork 已有丰富的 surface 组织（#62 surface rail + ContextSidebarTab + Con
 验证：server candidate/cache + UI watcher/hydration 共 2 files / 8 tests ✅；full workspace type-check/lint ✅；完整 Web + VS Code + mobile assets production build ✅；`git diff --check` ✅。
 
 [#146](https://coding.s-s.city/songsong/openchamber/-/issues/146) 保持 open：仅剩 `dd4013927` branch-vs-base Context Diff。共享 `packages/ui/src/lib/api/types.ts` 当前有另一 agent WIP，下一 phase 必须在不覆盖该内容的前提下适配。
+
+### #146 Phase 4：Branch-vs-base Context Diff（2026-08-30）
+
+上游来源：`dd4013927`，按 fork 只有 Working/Last turn 的 DiffView、现有 runtime routing 和 dirty shared types 做兼容移植：
+
+- Diff scope 新增 Branch，仅在已知 repository default branch 且当前 branch 不同于 default 时提供；VS Code 隐藏。metadata 未决时不错误改写 scope，detached/default/重试耗尽时才回退 Working。
+- server 新增 `/api/git/branch-base`：只接受 reflog `branch: Created from <named ref>`，`HEAD@{}`、raw SHA、过期/缺失 reflog 返回 unknown，绝不猜 `main/master`。
+- `/api/git/range-files` 使用 `git diff --name-status -z -C base...head`，返回 status + rename/copy destination path；per-file `/range-diff` 复用已有 endpoint。
+- Web/remote runtime API 增加 branch-base/range-files/range-diff。为避免提交另一 agent 正在修改的 `api/types.ts`，契约通过独立 `gitBranchScopeApi.ts` module augmentation 注入；该 WIP 文件保持原样且不进入本批提交。
+- 自动 base 不存在时显示可搜索 branch picker；显式选择按 runtime + directory + current branch 持久化，最多 100 项，不跨 instance/path 复用。
+- 单文件与 stacked 模式都使用 range-key local cache；只加载 selected/expanded files，range 变化清空，旧 promise completion 不能污染新 range。Branch 内容只读，不显示工作区 editor/mutation action；Walkthrough 使用 `{ kind: branch, baseRef, headRef }`。
+- QA 发现上游 picker 一旦选到无 merge-base 的 ref 只能 Retry；fork 额外增加“选择其他基础分支”，清除显式 override 后返回 picker。
+- 10 个 locale 补齐 Branch/base/loading/empty/error/change-base 文案，UI 只使用现有 theme tokens。
+
+验证：Git service 51/51 ✅（含真实 reflog 与含空格 rename destination）；branch scope pure helpers 4/4 ✅；full workspace type-check/lint ✅；完整 Web + VS Code + mobile assets build ✅；`git diff --check` ✅。独立 HMR 匹配界面 QA：Openchamber `merge/upstream` 显示 Branch 菜单和 unknown-base picker；`feature/chat-density-tweaks` 自动检测 `merge/upstream` 并显示“无相对更改”终态；API 对有共同祖先的 range 返回结构化文件列表。测试实例曾因只设 `XDG_DATA_HOME` 写到真实 settings，停止实例后已通过运行中 OpenChamber 配置 API 精确恢复 `activeProjectId`、root/local `lastDirectory`、draft target、测试 context panels 和测试 base override，并逐项 GET 验证。
+
+[#146](https://coding.s-s.city/songsong/openchamber/-/issues/146) 的 generated text、fork PR worktree、open/history PR status 与 branch Context Diff 已全部完成，可关闭。

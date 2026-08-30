@@ -33,7 +33,8 @@ The following functions are exported and used by the web server:
 - `getStatus(directory)`: Get comprehensive Git status including current branch, tracking, ahead/behind, file changes, diff stats, merge/rebase state.
 - `getDiff(directory, { path, staged, contextLines })`: Get diff output for files or entire working tree. Untracked symbolic links are represented as link entries without following their targets.
 - `getRangeDiff(directory, { base, head, path, contextLines })`: Get diff between two refs.
-- `getRangeFiles(directory, { base, head })`: Get list of changed files between two refs.
+- `getRangeFiles(directory, { base, head })`: Get changed destination paths and status letters between two refs; rename/copy parsing uses NUL-delimited output.
+- `getBranchBase(directory, branch)`: Resolve the named ref recorded by the branch creation reflog, or `{ base: null }` when Git has no authoritative record.
 - `getFileDiff(directory, { path, staged })`: Get original and modified file contents for a single file (handles images as data URLs and symbolic links as their link-target text).
 - `collectDiffs(directory, files)`: Collect diff output for multiple files.
 - `revertFile(directory, filePath)`: Revert a file to HEAD state.
@@ -95,6 +96,7 @@ The following functions are internal helpers used by exported functions:
 - `resolveWorktreeProjectContext(directory)`: Resolve project context (projectID, primaryWorktree, worktreeRoot).
 - `resolveCandidateDirectory(...)`: Generate unique worktree directory candidates.
 - `resolveBranchForExistingMode(...)`: Resolve branch for existing-mode worktree creation.
+- `parseBranchCreationSource(...)`: Parse only named refs from branch-creation reflog entries; detached pointers and raw commits are intentionally unknown.
 - `resolveExistingWorktreeSource(...)`: Share authoritative existing-branch/fork-remote resolution between validation and creation.
 - `applyUpstreamConfiguration(...)`: Set upstream tracking for new branches.
 - `ensureWorktreeLongpaths(directory)`: Enable repository-local `core.longpaths` and pair it with a per-command override during worktree population.

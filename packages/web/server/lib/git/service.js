@@ -2095,6 +2095,47 @@ export async function getRangeDiff(directory, { base, head, path: filePath, cont
   return diff;
 }
 
+const BRANCH_CREATION_SOURCE_RE = /^branch: Created from (.+)$/;
+
+export function parseBranchCreationSource(reflogText) {
+  const lines = String(reflogText || '')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    const match = lines[index].match(BRANCH_CREATION_SOURCE_RE);
+    if (!match) continue;
+    const source = match[1].trim();
+    if (!source || /^HEAD@/.test(source) || /^[0-9a-f]{7,40}$/i.test(source)) {
+      return null;
+    }
+    return source;
+  }
+  return null;
+}
+
+export async function getBranchBase(directory, branch) {
+  const branchName = String(branch || '').trim();
+  if (!branchName) {
+    throw new Error('branch is required');
+  }
+
+  const { git } = await createRepositoryGitContext(directory);
+  const reflog = await git
+    .raw(['reflog', 'show', '--format=%gs', branchName])
+    .catch(() => '');
+  const source = parseBranchCreationSource(reflog);
+  if (!source || source === branchName) {
+    return { base: null };
+  }
+
+  const resolves = await git
+    .raw(['rev-parse', '--verify', '--quiet', source])
+    .then((value) => Boolean(String(value || '').trim()))
+    .catch(() => false);
+  return { base: resolves ? source : null };
+}
+
 export async function getRangeFiles(directory, { base, head } = {}) {
   const { git } = await createRepositoryGitContext(directory);
   const baseRef = typeof base === 'string' ? base.trim() : '';
@@ -2114,11 +2155,22 @@ export async function getRangeFiles(directory, { base, head } = {}) {
     // ignore
   }
 
-  const raw = await git.raw(['diff', '--name-only', `${resolvedBase}...${headRef}`]);
-  return String(raw || '')
-    .split('\n')
-    .map((l) => l.trim())
-    .filter(Boolean);
+  const raw = await git.raw(['diff', '--name-status', '-z', '-C', `${resolvedBase}...${headRef}`]);
+  const tokens = String(raw || '').split('\0');
+  const files = [];
+  for (let index = 0; index < tokens.length; index += 1) {
+    const status = (tokens[index] || '').trim();
+    if (!status) continue;
+    const isRenameOrCopy = status.startsWith('R') || status.startsWith('C');
+    const path = isRenameOrCopy
+      ? (tokens[index + 2] || '').trim()
+      : (tokens[index + 1] || '').trim();
+    index += isRenameOrCopy ? 2 : 1;
+    if (path) {
+      files.push({ path, status: status.charAt(0) });
+    }
+  }
+  return files;
 }
 
 const IMAGE_EXTENSIONS = ['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'ico', 'bmp', 'avif'];
