@@ -18,4 +18,6 @@ Routes: `POST /api/browser-control/claim` and `POST /api/browser-control/result`
 
 The fork's global WebSocket event pipeline carries requests to the renderer. Electron advertises `browser=1` in the connection URL; the broker sends only to capable global sockets. The current fork Browser pane implements open/snapshot/click/type/scroll/back/forward/inspect/capture/resize. Named viewport modes lay the page out at real CSS dimensions and only scale presentation down to fit the panel.
 
+Browser address history is persisted by the renderer under `runtimeKey + serverId + directory`. Completed navigations record URL/title; input typing only filters a leaf subscription and does not update shared state.
+
 Remote-instance fan-in currently carries OpenCode events only; an aggregated remote does not claim Browser capability until its OpenChamber event channel is bridged explicitly.

@@ -2386,3 +2386,12 @@ QA 事故记录：HMR server 复用了安装版 managed OpenCode `54185`，退�
 - 空状态 server 列表保持 panel 本身不滚动，仅候选列表滚动；按钮使用现有 theme tokens。新增标题/失败文案已补齐 de/en/es/ja/ko/pl/pt-BR/uk/zh-CN/zh-TW 全量 locale contract。
 
 验证：dev-server client 3/3 ✅（validation、empty-vs-failure、default transport）；UI type-check/lint ✅。`#135` 仍 open：history/crash recovery、Electron dev-tunnel IPC、aggregated remote synthetic-event bridge 未完成。
+
+### #135 Phase 7：Scoped Browser address history + URL normalization（2026-08-30）
+
+- 浏览完成后记录 normalized URL、page title 与 visit time；相同 URL revisit 只移动到顶部，不复制，最多 50 entries / project、20 project scopes。
+- scope key 为 `runtimeKey + serverId + normalized directory`，同一路径位于 local/Dev1/Dev3 不会串历史；direct remote top-level runtime 也由 runtimeKey 隔离。
+- address bar 使用原生 datalist 提示最近/匹配 URL；typing 只过滤当前 scope 的 leaf array，不向 shared store 写高频输入状态。历史写入使用 deferred safe storage。
+- URL normalizer 补齐 upstream loopback 语义：`localhost:5173`、`127.0.0.1:3000` 默认 HTTP；公网 schemeless host 默认 HTTPS；file/javascript/data 与非法 URL 统一拒绝为 blank。
+
+验证：URL/history/dev-server 3 files / 9 tests ✅；UI type-check/lint ✅；Web production build ✅；`git diff --check` ✅。`#135` 仍 open：crash recovery、Electron dev-tunnel IPC、aggregated remote synthetic-event bridge 未完成。

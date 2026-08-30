@@ -48,10 +48,13 @@ import {
   type BrowserViewport,
 } from '@/lib/browser/viewport';
 import { fetchDevServers, type DevServerDiscovery } from '@/lib/browser/devServers';
+import { suggestFromHistory } from '@/lib/browser/history';
+import { normalizeBrowserUrl } from '@/lib/browser/url';
 import { UNRESOLVED_SERVER_ID } from '@/sync/session-authority';
 import { buildEmbeddedSessionChatURL, getActiveEmbeddedSessionChatTab } from './contextPanelEmbeddedChat';
 import { ProjectContextPanel } from './RightSidebarTabs';
 import { getContextSurfaceWidthFraction } from '@/lib/surfaces/registry';
+import { selectBrowserHistory, useBrowserHistoryStore } from '@/stores/useBrowserHistoryStore';
 
 const TerminalView = lazyWithChunkRecovery(() => import('@/components/views/TerminalView').then(m => ({ default: m.TerminalView })));
 
@@ -564,18 +567,6 @@ const DESKTOP_BROWSER_CANCEL_INSPECT_SCRIPT = `(() => {
   const overlay = document.getElementById('__openchamber_desktop_browser_overlay');
   if (overlay) overlay.remove();
 })()`;
-
-const normalizeBrowserUrl = (value: string): string => {
-  const trimmed = value.trim();
-  if (!trimmed) return 'about:blank';
-  try {
-    const parsed = new URL(trimmed.includes('://') ? trimmed : `https://${trimmed}`);
-    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return 'about:blank';
-    return parsed.toString();
-  } catch {
-    return 'about:blank';
-  }
-};
 
 const desktopAnnotationToFile = async (
   base64: string,
@@ -1425,6 +1416,20 @@ const DesktopBrowserPane: React.FC<DesktopBrowserPaneProps> = ({
   const [devServers, setDevServers] = React.useState<DevServerDiscovery>({ kind: 'loading' });
   const loadingTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const showLoading = isLoading;
+  const historySelector = React.useMemo(
+    () => selectBrowserHistory(serverId, directory),
+    [directory, serverId],
+  );
+  const historyEntries = useBrowserHistoryStore(historySelector);
+  const recordBrowserVisit = useBrowserHistoryStore((state) => state.recordVisit);
+  const historySuggestions = React.useMemo(
+    () => suggestFromHistory(historyEntries, urlInput, 8),
+    [historyEntries, urlInput],
+  );
+  const historyListId = React.useMemo(
+    () => `browser-history-${tabID.replace(/[^a-zA-Z0-9_-]/g, '-')}`,
+    [tabID],
+  );
   const viewportLayout = viewportArea.width > 0 && viewportArea.height > 0
     ? fitViewport(viewport, viewportArea)
     : null;
@@ -1488,9 +1493,12 @@ const DesktopBrowserPane: React.FC<DesktopBrowserPaneProps> = ({
       try {
         const url = webview.getURL();
         if (url && url !== 'about:blank') {
+          let title = '';
+          try { title = webview.getTitle() || ''; } catch { /* title may lag navigation */ }
           setCurrentUrl(url);
           setUrlInput(url);
           persistUrl(url);
+          recordBrowserVisit(serverId, directory, { url, title });
         }
       } catch { /* webview not ready */ }
     };
@@ -1547,7 +1555,7 @@ const DesktopBrowserPane: React.FC<DesktopBrowserPaneProps> = ({
       webview.removeEventListener('did-stop-loading', onStopLoading);
       webview.removeEventListener('new-window', onNewWindow);
     };
-  }, [persistUrl]);
+  }, [directory, persistUrl, recordBrowserVisit, serverId]);
 
   // Safety timeout: hide loading overlay after 30s even if events fire late
   React.useEffect(() => {
@@ -1801,9 +1809,15 @@ const DesktopBrowserPane: React.FC<DesktopBrowserPaneProps> = ({
           <input
             value={urlInput}
             onChange={(event) => setUrlInput(event.target.value)}
+            list={historyListId}
             className="h-7 w-full rounded-md border border-border/50 bg-[var(--surface-elevated)] px-2 typography-micro text-foreground outline-none focus:border-[var(--interactive-focus-ring)]"
             aria-label={t('contextPanel.browser.addressAria')}
           />
+          <datalist id={historyListId}>
+            {historySuggestions.map((entry) => (
+              <option key={entry.url} value={entry.url}>{entry.title}</option>
+            ))}
+          </datalist>
         </form>
         <Button
           type="button"
