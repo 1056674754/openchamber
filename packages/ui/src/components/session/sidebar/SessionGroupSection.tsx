@@ -90,7 +90,7 @@ type Props = {
   setActiveProjectIdOnly: (id: string) => void;
   setActiveMainTab: (tab: MainTab) => void;
   setSessionSwitcherOpen: (open: boolean) => void;
-  openNewSessionDraft: (options?: { directoryOverride?: string | null; targetFolderId?: string; selectedProjectId?: string | null }) => void;
+  openNewSessionDraft: (options?: { directoryOverride?: string | null; targetFolderId?: string; selectedProjectId?: string | null; target?: 'chat' | 'project'; chatServerId?: string | null }) => void;
   addSessionToFolder: (scopeKey: string, folderId: string, sessionId: string) => void;
   createFolderAndStartRename: (scopeKey: string, parentId?: string | null) => { id: string } | null;
   renamingFolderId: string | null;
@@ -754,7 +754,13 @@ function SessionGroupSectionImpl(props: Props): React.ReactNode {
               if (projectId && projectId !== activeProjectId) setActiveProjectIdOnly(projectId);
               setActiveMainTab('chat');
               if (mobileVariant) setSessionSwitcherOpen(false);
-              openNewSessionDraft({ directoryOverride: scopeDirectory ?? group.directory, targetFolderId: folder.id, selectedProjectId: projectId });
+              openNewSessionDraft({
+                directoryOverride: scopeDirectory ?? group.directory,
+                targetFolderId: folder.id,
+                selectedProjectId: projectId,
+                target: group.draftTarget,
+                chatServerId: group.draftTarget === 'chat' ? serverId : null,
+              });
             }}
             onNewSubFolder={depth === 0 ? () => {
               createFolderAndStartRename(scopeKey, folder.id);
@@ -1111,7 +1117,12 @@ function SessionGroupSectionImpl(props: Props): React.ReactNode {
                     if (projectId && projectId !== activeProjectId) setActiveProjectIdOnly(projectId);
                     setActiveMainTab('chat');
                     if (mobileVariant) setSessionSwitcherOpen(false);
-                    openNewSessionDraft({ directoryOverride: group.directory, selectedProjectId: projectId });
+                    openNewSessionDraft({
+                      directoryOverride: group.directory,
+                      selectedProjectId: projectId,
+                      target: group.draftTarget,
+                      chatServerId: group.draftTarget === 'chat' ? serverId : null,
+                    });
                   }}
                   className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
                   aria-label={t('sessions.sidebar.group.actions.newDraftInGroupAria', { label: group.label })}
