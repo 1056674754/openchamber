@@ -60,6 +60,12 @@ import { buildEmbeddedSessionChatURL, getActiveEmbeddedSessionChatTab } from './
 import { ProjectContextPanel } from './RightSidebarTabs';
 import { getContextSurfaceWidthFraction } from '@/lib/surfaces/registry';
 import { selectBrowserHistory, useBrowserHistoryStore } from '@/stores/useBrowserHistoryStore';
+import {
+  DevTunnelUnavailableError,
+  resolveBrowsableUrl,
+  shouldTunnelLoopbackUrl,
+  toDisplayUrl,
+} from '@/lib/browser/devTunnel';
 
 const TerminalView = lazyWithChunkRecovery(() => import('@/components/views/TerminalView').then(m => ({ default: m.TerminalView })));
 
@@ -1410,12 +1416,14 @@ const DesktopBrowserPane: React.FC<DesktopBrowserPaneProps> = ({
   const setContextPanelTabTargetPath = useUIStore((state) => state.setContextPanelTabTargetPath);
   const normalized = normalizeBrowserUrl(initialUrl);
   const startUrl = normalized !== 'about:blank' ? normalized : '';
-  const initialWebviewSrcRef = React.useRef(normalized);
+  const initialNeedsTunnel = shouldTunnelLoopbackUrl(normalized, serverId);
+  const initialWebviewSrcRef = React.useRef(initialNeedsTunnel ? 'about:blank' : normalized);
   const [urlInput, setUrlInput] = React.useState(startUrl);
   const [currentUrl, setCurrentUrl] = React.useState(startUrl);
   const [isInspecting, setIsInspecting] = React.useState(false);
   const [isLoading, setIsLoading] = React.useState(true);
   const [browserCrashed, setBrowserCrashed] = React.useState(false);
+  const [tunnelFailedUrl, setTunnelFailedUrl] = React.useState<string | null>(null);
   const [viewport, setViewport] = React.useState<BrowserViewport>(FILL_VIEWPORT);
   const viewportRef = React.useRef<BrowserViewport>(FILL_VIEWPORT);
   const [viewportArea, setViewportArea] = React.useState({ width: 0, height: 0 });
@@ -1491,6 +1499,45 @@ const DesktopBrowserPane: React.FC<DesktopBrowserPaneProps> = ({
   const newSessionDraftOpen = useSessionUIStore((state) => state.newSessionDraft?.open);
   const addInlineCommentDraft = useInlineCommentDraftStore((state) => state.addDraft);
   const addAttachedFile = useInputStore((state) => state.addAttachedFile);
+  const retunneledUrlsRef = React.useRef(new Set<string>());
+
+  const loadUrl = React.useCallback(async (value: string): Promise<string> => {
+    const nextUrl = normalizeBrowserUrl(value);
+    if (nextUrl === 'about:blank') return nextUrl;
+    setCurrentUrl(nextUrl);
+    setUrlInput(nextUrl);
+    setTunnelFailedUrl(null);
+    setIsLoading(true);
+    try {
+      const target = await resolveBrowsableUrl(nextUrl, serverId);
+      const webview = webviewRef.current;
+      if (typeof webview?.loadURL !== 'function') {
+        throw new Error('The browser panel is not ready');
+      }
+      webview.loadURL(target);
+      return target;
+    } catch (error) {
+      setIsLoading(false);
+      if (error instanceof DevTunnelUnavailableError) setTunnelFailedUrl(nextUrl);
+      throw error;
+    }
+  }, [serverId]);
+
+  const loadUrlFromUser = React.useCallback((value: string) => {
+    retunneledUrlsRef.current.clear();
+    void loadUrl(value).catch(() => {
+      toast.error(t('contextPanel.browser.devServers.unavailable'));
+    });
+  }, [loadUrl, t]);
+
+  React.useEffect(() => {
+    if (!startUrl || !initialNeedsTunnel) return;
+    let active = true;
+    void loadUrl(startUrl).catch(() => {
+      if (active) setTunnelFailedUrl(startUrl);
+    });
+    return () => { active = false; };
+  }, [initialNeedsTunnel, loadUrl, startUrl]);
 
   // Listen to webview navigation events
   React.useEffect(() => {
@@ -1501,12 +1548,13 @@ const DesktopBrowserPane: React.FC<DesktopBrowserPaneProps> = ({
       try {
         const url = webview.getURL();
         if (url && url !== 'about:blank') {
+          const displayUrl = toDisplayUrl(url);
           let title = '';
           try { title = webview.getTitle() || ''; } catch { /* title may lag navigation */ }
-          setCurrentUrl(url);
-          setUrlInput(url);
-          persistUrl(url);
-          recordBrowserVisit(serverId, directory, { url, title });
+          setCurrentUrl(displayUrl);
+          setUrlInput(displayUrl);
+          persistUrl(displayUrl);
+          recordBrowserVisit(serverId, directory, { url: displayUrl, title });
         }
       } catch { /* webview not ready */ }
     };
@@ -1514,9 +1562,10 @@ const DesktopBrowserPane: React.FC<DesktopBrowserPaneProps> = ({
     const onNavigate = (event: Event) => {
       const detail = (event as CustomEvent<{ url: string }>).detail;
       if (typeof detail?.url === 'string' && detail.url) {
-        setCurrentUrl(detail.url);
-        setUrlInput(detail.url);
-        persistUrl(detail.url);
+        const displayUrl = toDisplayUrl(detail.url);
+        setCurrentUrl(displayUrl);
+        setUrlInput(displayUrl);
+        persistUrl(displayUrl);
       }
     };
 
@@ -1557,11 +1606,30 @@ const DesktopBrowserPane: React.FC<DesktopBrowserPaneProps> = ({
       const detail = (event as CustomEvent<{ url: string; disposition: string }>).detail;
       if (detail?.disposition === 'new-window' || detail?.disposition === 'foreground-tab' || detail?.disposition === 'background-tab') {
         event.preventDefault();
-        const w = webviewRef.current;
-        if (typeof w?.loadURL === 'function' && detail.url) {
-          w.loadURL(detail.url);
-        }
+        if (detail.url) loadUrlFromUser(detail.url);
       }
+    };
+
+    const onWillNavigate = (event: Event) => {
+      const detail = (event as CustomEvent<{ url?: string }>).detail;
+      const target = typeof detail?.url === 'string' ? detail.url : '';
+      if (!target || !shouldTunnelLoopbackUrl(target, serverId)) return;
+      event.preventDefault();
+      void loadUrl(target).catch(() => setTunnelFailedUrl(target));
+    };
+
+    const onFailLoad = (event: Event) => {
+      const detail = (event as CustomEvent<{
+        errorCode?: number;
+        validatedURL?: string;
+        isMainFrame?: boolean;
+      }>).detail;
+      if (detail?.isMainFrame === false || detail?.errorCode === -3) return;
+      const target = typeof detail?.validatedURL === 'string' ? detail.validatedURL : '';
+      if (!target || !shouldTunnelLoopbackUrl(target, serverId)) return;
+      if (retunneledUrlsRef.current.has(target)) return;
+      retunneledUrlsRef.current.add(target);
+      void loadUrl(target).catch(() => setTunnelFailedUrl(target));
     };
 
     webview.addEventListener('did-navigate', onNavigate);
@@ -1571,6 +1639,8 @@ const DesktopBrowserPane: React.FC<DesktopBrowserPaneProps> = ({
     webview.addEventListener('render-process-gone', onCrashed);
     webview.addEventListener('crashed', onCrashed);
     webview.addEventListener('new-window', onNewWindow);
+    webview.addEventListener('will-navigate', onWillNavigate);
+    webview.addEventListener('did-fail-load', onFailLoad);
 
     // Check current loading state imperatively — we may have missed the event
     try {
@@ -1590,8 +1660,10 @@ const DesktopBrowserPane: React.FC<DesktopBrowserPaneProps> = ({
       webview.removeEventListener('render-process-gone', onCrashed);
       webview.removeEventListener('crashed', onCrashed);
       webview.removeEventListener('new-window', onNewWindow);
+      webview.removeEventListener('will-navigate', onWillNavigate);
+      webview.removeEventListener('did-fail-load', onFailLoad);
     };
-  }, [directory, persistUrl, recordBrowserVisit, serverId]);
+  }, [directory, loadUrl, loadUrlFromUser, persistUrl, recordBrowserVisit, serverId]);
 
   // Safety timeout: hide loading overlay after 30s even if events fire late
   React.useEffect(() => {
@@ -1621,19 +1693,12 @@ const DesktopBrowserPane: React.FC<DesktopBrowserPaneProps> = ({
       try {
         const url = webview?.getURL?.();
         if (url && url !== 'about:blank') {
-          setContextPanelTabTargetPath(directory, tabID, url);
+          setContextPanelTabTargetPath(directory, tabID, toDisplayUrl(url));
         }
       } catch { /* webview not ready */ }
       try { webview?.executeJavaScript?.(DESKTOP_BROWSER_CANCEL_INSPECT_SCRIPT).catch(() => {}); } catch { /* webview not ready */ }
     };
   }, [directory, tabID, setContextPanelTabTargetPath]);
-
-  const loadUrl = React.useCallback((value: string) => {
-    const webview = webviewRef.current;
-    if (typeof webview?.loadURL !== 'function') return;
-    const nextUrl = normalizeBrowserUrl(value);
-    try { webview.loadURL(nextUrl); } catch { /* webview may not be ready */ }
-  }, []);
 
   const reloadBrowser = React.useCallback(() => {
     crashRecoveryStateRef.current = INITIAL_CRASH_RECOVERY_STATE;
@@ -1672,11 +1737,11 @@ const DesktopBrowserPane: React.FC<DesktopBrowserPaneProps> = ({
         ? viewportForMode(parameters.viewport)
         : viewportRef.current;
       if (isViewportMode(parameters.viewport)) applyViewport(requestedViewport);
-      loadUrl(nextUrl);
+      await loadUrl(nextUrl);
       await new Promise((resolve) => setTimeout(resolve, 150));
       const settled = await waitForIdle(25_000);
       return {
-        url: webview.getURL() || nextUrl,
+        url: toDisplayUrl(webview.getURL() || nextUrl),
         title: webview.getTitle() || '',
         opened: true,
         settled,
@@ -1695,7 +1760,7 @@ const DesktopBrowserPane: React.FC<DesktopBrowserPaneProps> = ({
       else webview.goForward();
       await new Promise((resolve) => setTimeout(resolve, 150));
       await waitForIdle();
-      return { url: webview.getURL(), title: webview.getTitle() || '' };
+      return { url: toDisplayUrl(webview.getURL()), title: webview.getTitle() || '' };
     }
 
     if (action === 'browser.capture') {
@@ -1708,7 +1773,7 @@ const DesktopBrowserPane: React.FC<DesktopBrowserPaneProps> = ({
       );
       return {
         ...capture,
-        url: webview.getURL(),
+        url: toDisplayUrl(webview.getURL()),
         title: webview.getTitle() || '',
         viewport: viewportSummary(viewportRef.current),
       };
@@ -1848,7 +1913,7 @@ const DesktopBrowserPane: React.FC<DesktopBrowserPaneProps> = ({
         <Button type="button" variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={reloadBrowser}>
           <Icon name="refresh" className="h-3.5 w-3.5" />
         </Button>
-        <form className="min-w-0 flex-1" onSubmit={(event) => { event.preventDefault(); loadUrl(urlInput); }}>
+        <form className="min-w-0 flex-1" onSubmit={(event) => { event.preventDefault(); loadUrlFromUser(urlInput); }}>
           <input
             value={urlInput}
             onChange={(event) => setUrlInput(event.target.value)}
@@ -1873,7 +1938,17 @@ const DesktopBrowserPane: React.FC<DesktopBrowserPaneProps> = ({
         >
           <Icon name="cursor" className="h-3.5 w-3.5" />
         </Button>
-        <Button type="button" variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => void openExternalUrl(currentUrl)}>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="h-7 w-7 p-0"
+          onClick={() => {
+            void resolveBrowsableUrl(currentUrl, serverId)
+              .then((target) => openExternalUrl(target))
+              .catch(() => toast.error(t('contextPanel.browser.devServers.unavailable')));
+          }}
+        >
           <Icon name="external-link" className="h-3.5 w-3.5" />
         </Button>
       </div>
@@ -1922,7 +1997,7 @@ const DesktopBrowserPane: React.FC<DesktopBrowserPaneProps> = ({
                       size="sm"
                       className="w-full shrink-0 justify-start gap-2"
                       title={server.url}
-                      onClick={() => loadUrl(server.url)}
+                      onClick={() => loadUrlFromUser(server.url)}
                     >
                       <Icon name="global" className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
                       <span className="truncate">localhost:{server.port}</span>
@@ -1941,6 +2016,18 @@ const DesktopBrowserPane: React.FC<DesktopBrowserPaneProps> = ({
                 {t('contextPanel.browser.devServers.unavailable')}
               </span>
             ) : null}
+          </div>
+        ) : null}
+        {tunnelFailedUrl && !isLoading ? (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-background p-6 text-center">
+            <Icon name="error-warning" className="h-8 w-8 text-status-error" aria-hidden="true" />
+            <span className="max-w-sm typography-ui-label text-foreground">
+              {t('contextPanel.browser.devServers.unavailable')}
+            </span>
+            <Button type="button" variant="outline" size="sm" onClick={() => loadUrlFromUser(tunnelFailedUrl)}>
+              <Icon name="refresh" className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
+              {t('contextPanel.preview.actions.reload')}
+            </Button>
           </div>
         ) : null}
         {browserCrashed ? (

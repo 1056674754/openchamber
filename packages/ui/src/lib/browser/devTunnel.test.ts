@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
 
 let tunnelResult: unknown = { localPort: 52418, reused: false };
-const invoke = mock(async () => {
+let invokeCalls: Array<{ command: string; args: unknown }> = [];
+const invoke = mock(async (command: string, args: unknown) => {
+  invokeCalls.push({ command, args });
   if (tunnelResult instanceof Error) throw tunnelResult;
   return tunnelResult;
 });
@@ -24,7 +26,7 @@ const asDesktop = (value: boolean) => {
 describe('instance-scoped remote dev tunnels', () => {
   beforeEach(() => {
     tunnelResult = { localPort: 52418, reused: false };
-    invoke.mockClear();
+    invokeCalls = [];
     asDesktop(true);
   });
 
@@ -35,14 +37,17 @@ describe('instance-scoped remote dev tunnels', () => {
   test('rewrites remote loopback through an authority-resolved shell tunnel', async () => {
     const tunneled = await resolveBrowsableUrl('http://localhost:3010/docs?q=1', 'dev3');
     expect(tunneled).toBe('http://127.0.0.1:52418/docs?q=1');
-    expect(invoke).toHaveBeenCalledWith('desktop_dev_tunnel_open', { serverId: 'dev3', port: 3010 });
+    expect(invokeCalls).toEqual([{
+      command: 'desktop_dev_tunnel_open',
+      args: { serverId: 'dev3', port: 3010 },
+    }]);
     expect(toDisplayUrl(tunneled)).toBe('http://localhost:3010/docs?q=1');
   });
 
   test('reuses a tunnel per instance and port', async () => {
     await resolveBrowsableUrl('http://localhost:3000/', 'dev3');
     await resolveBrowsableUrl('http://127.0.0.1:3000/next', 'dev3');
-    expect(invoke).toHaveBeenCalledTimes(1);
+    expect(invokeCalls.length).toBe(1);
   });
 
   test('keeps other loopback ports on the remote host', () => {
@@ -59,12 +64,20 @@ describe('instance-scoped remote dev tunnels', () => {
 
   test('uses implicit protocol ports', async () => {
     await resolveBrowsableUrl('https://localhost/', 'dev2');
-    expect(invoke).toHaveBeenCalledWith('desktop_dev_tunnel_open', { serverId: 'dev2', port: 443 });
+    expect(invokeCalls).toEqual([{
+      command: 'desktop_dev_tunnel_open',
+      args: { serverId: 'dev2', port: 443 },
+    }]);
   });
 
   test('fails closed instead of loading this machine loopback', async () => {
     tunnelResult = new Error('remote unavailable');
-    await expect(resolveBrowsableUrl('http://localhost:3100/', 'dev3'))
-      .rejects.toBeInstanceOf(DevTunnelUnavailableError);
+    let error: unknown = null;
+    try {
+      await resolveBrowsableUrl('http://localhost:3100/', 'dev3');
+    } catch (caught) {
+      error = caught;
+    }
+    expect(error instanceof DevTunnelUnavailableError).toBe(true);
   });
 });
