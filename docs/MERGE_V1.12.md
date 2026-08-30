@@ -2357,6 +2357,17 @@ fork 已有丰富的 surface 组织（#62 surface rail + ContextSidebarTab + Con
 
 验证：btw metadata/core/policy/command/i18n 6 files / 19 tests ✅；full workspace type-check/lint/build ✅。隔离 `HOME + OPENCHAMBER_DATA_DIR + OpenCode 1.18.23-sscity` QA：创建 completed parent → `/btw` → side answer → sidebar hidden → collapse 恢复 parent composer → expand 恢复 fork → Promote 显示正式 Session → 后续 user message 含 `BTW_PROMOTION_NOTICE` synthetic part；测试 Sessions 全部删除，正式数据/runtime 未触碰。[#149](https://coding.s-s.city/songsong/openchamber/-/issues/149) 保持 open：补 375px mobile viewport matching-surface QA 后再关闭。
 
+### #150 Phase 1：Multi-instance managed Chats directory authority（2026-08-30）
+
+上游来源：`26ee335ff`。不移植其 process-global `opencodeClient` 目录解析：
+
+- managed projectless Chat 存放在 owning instance home 下的 `.config/openchamber/chats/YYYY-MM-DD/session-<uuid>`；`CHAT_DRAFT_PROJECT_ID=openchamber:chats` 仅是 UI identity，不伪造项目。
+- `createChatDirectory({serverId})` 先通过该实例 `/api/fs/home` 获取 authoritative home，再用同一 base URL `/api/fs/mkdir`；remote aggregated/direct/relay 均由 `runtimeFetch + resolveApiUrl` 路由。cache key 为 `runtimeKey + serverId`，不同实例不会共用 home。
+- delete 重新解析同一 server root，只允许 root descendant；项目路径和其他实例 path 不执行删除。mkdir/delete 显式标注 outside-workspace，但 target 必须先由 server home 派生或通过 root boundary。
+- helper 可识别 POSIX/Windows home、从 session directory 回推出 Chats root，并按 runtime authority 预热。
+
+验证：chatDirectories Bun 3/3 ✅（local date scope、remote home/mkdir/delete same-instance、project path refusal）；UI type-check/lint ✅。[#150](https://coding.s-s.city/songsong/openchamber/-/issues/150) 保持 open：draft materialization、server/session ownership、Chats sidebar/mobile/search、folder/action cleanup 与 matching-surface QA 待续。
+
 ### #141 Phase 1：Isolated server exception survival（2026-08-30）
 
 上游来源：`71a538b77`。fork 的 embedded server 没有外部 supervisor，单个 Node/socket stray exception 不应让整个 OpenChamber instance 离线：
