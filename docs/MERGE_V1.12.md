@@ -2358,12 +2358,13 @@ QA 事故记录：HMR server 复用了安装版 managed OpenCode `54185`，退�
 | [#166](https://coding.s-s.city/songsong/openchamber/-/issues/166) | Multi-project directory selection + remote tracking branch checkout | 🟡 Desktop/VS Code/Git parity |
 | [#168](https://coding.s-s.city/songsong/openchamber/-/issues/168) | Provider headers/credential signals + OpenCode upgrade UX | 🟡 provider/runtime authority |
 | [#171](https://coding.s-s.city/songsong/openchamber/-/issues/171) | Turkish runtime localization | 🟢 locale completeness |
+| [#172](https://coding.s-s.city/songsong/openchamber/-/issues/172) | Large-text paste attachments + virtual large-file previews | 🔴 attachment/memory bounds |
 
 ### 追加到既有 work items（不重复建卡）
 
 - `#135`：Browser capture reveal/wait (`7ffb7d6f5`, `e2dab1417`)；`browser.open` background-only (`4bed3589d`)。
 - `#143`：saved plan owning-project route (`fa5446593`)；agent memory project-context owner (`1309403af`)。
-- `#148`：large-text paste attachment 与 virtualized large-file previews。
+- `#172`：从已完成的 `#148` 拆出 large-text paste attachment 与 virtualized large-file previews，归属 v1.21 milestone。
 - `#149`：`/btw` completed-turn boundary、inherited reference、boundary cleanup、promoted authority。
 - `#150`：managed Chats mobile sessions sheet + sidebar search。
 - `#159`：renderer-window recovery、update-install error visibility、stale shell UI prevention。
@@ -2627,4 +2628,4 @@ v1.20.0-sscity 尚未宣布完成：当前未关闭 `#135/#140/#142-#151/#154/#1
 - `isDocumentAttachmentFilename` 成为 Office/OpenDocument filename 判定入口，大小写路径一致。
 - embedded chat 恢复审计为 fork 等价且更适合现有 split panel：仅 active/split chat iframe 挂载；iframe `onLoad` 同步 theme/settings/visibility，App 初始 visible 并启动 history/bootstrap；关闭 panel 时卸载。现有 #140 active-only focused tests 覆盖 tab/null/missing，故不复制上游早期“全部隐藏 iframe 挂载”方案。
 
-验证：attachment/document Bun 2 files / 20 tests ✅，覆盖 DOCX/PPTX/XLSX/ODF、dense/sparse/TSV、zip bounds、unsafe paths、image bounds/signatures、text citation truncation。全 workspace type/lint/build 与 diff check 见本 phase 最终验证。[#148](https://coding.s-s.city/songsong/openchamber/-/issues/148) 的 v1.20 runtime 子项已收口；issue 保持 open 仅因已追加 v1.21 large-text paste 与 virtual large-file preview follow-up。
+验证：attachment/document Bun 2 files / 20 tests ✅，覆盖 DOCX/PPTX/XLSX/ODF、dense/sparse/TSV、zip bounds、unsafe paths、image bounds/signatures、text citation truncation。全 workspace type/lint/build 与 diff check 见本 phase 最终验证。[#148](https://coding.s-s.city/songsong/openchamber/-/issues/148) 的 v1.20 runtime 范围已完成并关闭；原先追加的 v1.21 large-text paste / virtual preview 已迁到 [#172](https://coding.s-s.city/songsong/openchamber/-/issues/172)，避免跨 milestone 阻塞 v1.20 closeout。
