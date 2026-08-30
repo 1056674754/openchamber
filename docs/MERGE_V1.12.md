@@ -2243,6 +2243,19 @@ fork 已有丰富的 surface 组织（#62 surface rail + ContextSidebarTab + Con
 
 至此 [#142](https://coding.s-s.city/songsong/openchamber/-/issues/142) 的最终 v1.20 catalog、local/remote instance routing、install/update/setup/remove、Apply & Restart 恢复、11 locale 与 matching-surface 均已覆盖，可关闭。
 
+### #143 Phase 1：Server-owned Project context storage（2026-08-30）
+
+上游来源：`889456d5b` 的 `project-context` 子域。先迁数据唯一写者与 routes，不提前覆盖 fork 现有 Notes surface：
+
+- 新增 `<projectsDir>/<projectId>/context.json`（version 2）与 `plans/*.md`；notes/todos/plan manifest 不再与 scheduled tasks、project actions、draft starters 等六类数据共写 `<projectId>.json`。
+- 所有写入采用同目录临时文件 + rename，projectId 级 promise lock 串行化 read-modify-write；note patch、todo replace、plan edit/pin/delete 只修改各自字段，不能互相回滚。
+- 区分 missing / malformed / I/O failure：missing 是 authoritative empty，malformed 显式 500，不把损坏文件伪装为空数据并覆盖。
+- legacy `projectNotes/projectTodos/projectPlanFiles` 首次读取时幂等迁移；先持久化新 context，再删除旧 key。绝对 plan path 会恢复到新 plans 目录；丢失 markdown 的死链接不写入 manifest。
+- HTTP routes 覆盖 note/todo/plan CRUD、pin、inline raw plan save；body shape、project traversal、unknown item 与 malformed storage 有明确 400/404/500。
+- runtime 通过 `feature-routes-runtime` 注册并由默认/remote OpenChamber server 自身承载；客户端后续只需针对所选实例使用 `/api/project-context/:projectId`，不再读取本机 home path。
+
+验证：project-context runtime + HTTP Bun 2 files / 75 tests ✅；Web type-check/lint ✅；`git diff --check` ✅。[#143](https://coding.s-s.city/songsong/openchamber/-/issues/143) 保持 open：下一 phase 接 fork Notes UI store/API 与旧 panel 迁移，随后是 session knowledge pins 和 feature-gated Agent memory。
+
 ### #141 Phase 1：Isolated server exception survival（2026-08-30）
 
 上游来源：`71a538b77`。fork 的 embedded server 没有外部 supervisor，单个 Node/socket stray exception 不应让整个 OpenChamber instance 离线：

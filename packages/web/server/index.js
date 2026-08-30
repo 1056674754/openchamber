@@ -103,6 +103,7 @@ import { createSessionGoalRuntime } from './lib/session-goal/runtime.js';
 import { createSessionAssistRuntime } from './lib/session-assist/runtime.js';
 import { createContextObligatoryRuntime } from './lib/context-obligatory/runtime.js';
 import { createProjectConfigRuntime } from './lib/projects/project-config.js';
+import { createProjectContextRuntime } from './lib/project-context/runtime.js';
 import { createPreviewProxyRuntime } from './lib/preview/proxy-runtime.js';
 import { createRemoteInstancesRuntime } from './lib/remote-instances/config.js';
 import { waitForActiveWorktreeBootstrap } from './lib/git/service.js';
@@ -616,6 +617,12 @@ const getUpstreamStallTimeoutMs = () => (
 );
 
 const projectConfigRuntime = createProjectConfigRuntime({
+  fsPromises,
+  path,
+  projectsDirPath: OPENCHAMBER_PROJECTS_CONFIG_DIR,
+});
+
+const projectContextRuntime = createProjectContextRuntime({
   fsPromises,
   path,
   projectsDirPath: OPENCHAMBER_PROJECTS_CONFIG_DIR,
@@ -1847,6 +1854,7 @@ async function main(options = {}) {
     fetchProvidersSnapshot,
     buildAugmentedPath,
     projectConfigRuntime,
+    projectContextRuntime,
     scheduledTasksRuntime,
     scheduledTaskService,
     getOpenChamberEventClients: () => uiOpenChamberEventClients,
