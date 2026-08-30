@@ -136,10 +136,9 @@ export const startBtwSession = async (input: StartBtwInput): Promise<Session> =>
       limit: 1,
     });
     const inheritedRecords = Array.isArray(inherited.data) ? inherited.data : [];
-    const boundaryMessageID = inheritedRecords[inheritedRecords.length - 1]?.info?.id ?? null;
-    if (forkPointMessageID && !boundaryMessageID) {
-      throw new Error('Failed to resolve the inherited-history boundary');
-    }
+    const boundaryMessageID = inheritedRecords[inheritedRecords.length - 1]?.info?.id
+      ?? forkPointMessageID
+      ?? null;
 
     const marked = await sessionActions.patchSessionMetadata(
       forked.id,

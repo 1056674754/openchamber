@@ -8,6 +8,7 @@ let sessionServerId: string | null = 'default';
 let parentMessages: Message[] = [];
 let forkResponse: Session | null = null;
 let sendError: Error | null = null;
+let inheritedRecords: Array<{ info: Message; parts: [] }> = [];
 const forkCalls: unknown[] = [];
 const patchCalls: Array<{ sessionId: string; directory: string }> = [];
 const deleteCalls: string[] = [];
@@ -29,7 +30,7 @@ const sessionFork = mock(async (input: unknown) => {
   return { data: forkResponse };
 });
 const sessionMessages = mock(async () => ({
-  data: [{ info: message('cloned-boundary', 'user', 19), parts: [] }],
+  data: inheritedRecords,
 }));
 
 mock.module('@/lib/opencode/server-registry', () => ({
@@ -113,6 +114,7 @@ beforeEach(() => {
   parentMessages = [];
   forkResponse = { id: forkId, directory: '/workspace/canonical' } as Session;
   sendError = null;
+  inheritedRecords = [{ info: message('cloned-boundary', 'user', 19), parts: [] }];
   forkCalls.length = 0;
   patchCalls.length = 0;
   deleteCalls.length = 0;
@@ -197,6 +199,28 @@ describe('startBtwSession', () => {
       directory: '/workspace/canonical',
       serverId: 'default',
     });
+  });
+
+  test('uses the completed fork point when the inherited-tail probe is temporarily empty', async () => {
+    parentMessages = [message('assistant-complete', 'assistant', 20, 21)];
+    inheritedRecords = [];
+
+    const result = await startBtwSession({
+      parentSessionId: parentId,
+      question: 'What does this API do?',
+      directory,
+      providerID: 'openai',
+      modelID: 'gpt-5.6-sol',
+    });
+
+    expect(result.metadata).toEqual({
+      openchamber: {
+        kind: 'btw',
+        originalSessionID: parentId,
+        btwBoundaryMessageID: 'assistant-complete',
+      },
+    });
+    expect(deleteCalls).toEqual([]);
   });
 
   test('unlinks and deletes a fork whose first send fails', async () => {
