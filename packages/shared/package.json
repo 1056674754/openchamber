@@ -9,6 +9,10 @@
     ".": {
       "types": "./src/rpc-classes.d.ts",
       "import": "./src/rpc-classes.js"
+    },
+    "./settings-lock": {
+      "types": "./src/settings-lock.d.ts",
+      "import": "./src/settings-lock.js"
     }
   },
   "scripts": {

@@ -1,4 +1,6 @@
 import { createProjectIdFromPath } from '../projects/project-id.js';
+import { withSettingsLock as withCrossProcessSettingsLock, defaultSettingsLockPath } from '@openchamber/shared/settings-lock';
+import path from 'node:path';
 
 const DEFAULT_NOTIFICATION_TEMPLATES = {
   completion: { title: '{agent_name} is ready', message: '{model_name} completed the task' },
@@ -47,6 +49,10 @@ export const createSettingsRuntime = (deps) => {
   } = deps;
 
   let persistSettingsLock = Promise.resolve();
+  let externalSettingsWriter = null;
+  const setSettingsWriter = (writer) => {
+    externalSettingsWriter = typeof writer === 'function' ? writer : null;
+  };
 
   // Orphan recovery is a one-shot best-effort scan: when orphans can't be
   // matched on first pass they stay on disk and every subsequent settings
@@ -438,17 +444,30 @@ export const createSettingsRuntime = (deps) => {
     }
   };
 
-  const writeSettingsToDisk = async (settings) => {
+  const cleanupOrphanedSettingsTempFiles = async (directory) => {
     try {
-      await fsPromises.mkdir(path.dirname(SETTINGS_FILE_PATH), { recursive: true });
+      const entries = await fsPromises.readdir(directory, { withFileTypes: true });
+      await Promise.all(entries
+        .filter((entry) => entry.isFile() && entry.name.startsWith('settings.json.tmp-'))
+        .map((entry) => fsPromises.rm(path.join(directory, entry.name), { force: true }).catch(() => {})));
+    } catch {
+      // Best-effort startup cleanup must not make settings unavailable.
+    }
+  };
+
+  const writeSettingsToDisk = async (settings) => {
+    const settingsDirectory = path.dirname(SETTINGS_FILE_PATH);
+    await fsPromises.mkdir(settingsDirectory, { recursive: true });
+    const tmp = `${SETTINGS_FILE_PATH}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    try {
       // Atomic write: Electron main and ssh-manager read this file via plain
       // readFile + JSON.parse and silently coerce parse errors to {}. A
       // partial read during a non-atomic writeFile would make their next
       // read-modify-write wipe the settings file.
-      const tmp = `${SETTINGS_FILE_PATH}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       await fsPromises.writeFile(tmp, JSON.stringify(settings, null, 2), 'utf8');
       await fsPromises.rename(tmp, SETTINGS_FILE_PATH);
     } catch (error) {
+      await fsPromises.rm(tmp, { force: true }).catch(() => {});
       console.warn('Failed to write settings file:', error);
       throw error;
     }
@@ -737,7 +756,13 @@ export const createSettingsRuntime = (deps) => {
     return { settings: changed ? next : settings, changed };
   };
 
+  let hasCleanedOrphanedTempFiles = false;
+
   const readSettingsFromDiskMigrated = async () => {
+    if (!hasCleanedOrphanedTempFiles) {
+      hasCleanedOrphanedTempFiles = true;
+      await cleanupOrphanedSettingsTempFiles(path.dirname(SETTINGS_FILE_PATH));
+    }
     const current = await readSettingsFromDisk();
     const migration1 = await migrateSettingsFromLegacyLastDirectory(current);
     const migration2 = await migrateSettingsFromLegacyThemePreferences(migration1.settings);
@@ -753,7 +778,7 @@ export const createSettingsRuntime = (deps) => {
   };
 
   const persistSettings = async (changes) => {
-    persistSettingsLock = persistSettingsLock.then(async () => {
+    const doPersist = async () => {
       console.log('[persistSettings] Called with changes:', JSON.stringify(changes, null, 2));
       const current = await readSettingsFromDisk();
       console.log('[persistSettings] Current projects count:', Array.isArray(current.projects) ? current.projects.length : 'N/A');
@@ -818,9 +843,23 @@ export const createSettingsRuntime = (deps) => {
       await writeSettingsToDisk(next);
       console.log(`[persistSettings] Successfully saved ${next.projects?.length || 0} projects to disk`);
       return formatSettingsResponse(next);
-    });
+    };
 
-    return persistSettingsLock;
+    if (externalSettingsWriter) {
+      return externalSettingsWriter(doPersist);
+    }
+
+    // Standalone mode: in-process chain stays as fast-path; cross-process
+    // lock coordinates with VS Code / other server instances.
+    const runWithCrossProcessLock = () => withCrossProcessSettingsLock(
+      defaultSettingsLockPath(SETTINGS_FILE_PATH),
+      doPersist,
+    );
+    // Swallow the rejection for chain health so one failed save doesn't
+    // poison every subsequent save; caller still sees real outcome via current.
+    const current = persistSettingsLock.then(runWithCrossProcessLock);
+    persistSettingsLock = current.catch(() => {});
+    return current;
   };
 
   return {
@@ -828,5 +867,6 @@ export const createSettingsRuntime = (deps) => {
     readSettingsFromDiskMigrated,
     writeSettingsToDisk,
     persistSettings,
+    setSettingsWriter,
   };
 };

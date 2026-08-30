@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
+import { withSettingsLock as withCrossProcessSettingsLock, defaultSettingsLockPath } from '@openchamber/shared/settings-lock';
 import { BUILT_IN_SKILL_LOCATION, type DiscoveredSkill, type SkillScope, type SkillSource } from './opencodeConfig';
 import type { BridgeContext } from './bridge';
 
@@ -173,18 +174,21 @@ const readSharedSettingsFromDisk = (): Record<string, unknown> => {
 };
 
 const writeSharedSettingsToDisk = async (changes: Record<string, unknown>): Promise<void> => {
-  try {
-    await fs.promises.mkdir(path.dirname(OPENCHAMBER_SHARED_SETTINGS_PATH), { recursive: true });
-    const current = readSharedSettingsFromDisk();
-    const next: Record<string, unknown> = { ...current, ...changes };
-    // Atomic write: tmp file + rename. Readers never see a partial/truncated
-    // JSON that would fail to parse and silently get coerced to {}.
-    const tmp = `${OPENCHAMBER_SHARED_SETTINGS_PATH}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    await fs.promises.writeFile(tmp, JSON.stringify(next, null, 2), 'utf8');
-    await fs.promises.rename(tmp, OPENCHAMBER_SHARED_SETTINGS_PATH);
-  } catch {
-    // ignore
-  }
+  await withCrossProcessSettingsLock(defaultSettingsLockPath(OPENCHAMBER_SHARED_SETTINGS_PATH), async () => {
+    let tmp: string | null = null;
+    try {
+      await fs.promises.mkdir(path.dirname(OPENCHAMBER_SHARED_SETTINGS_PATH), { recursive: true });
+      const current = readSharedSettingsFromDisk();
+      const next: Record<string, unknown> = { ...current, ...changes };
+      // Atomic write: tmp file + rename. Readers never see a partial/truncated
+      // JSON that would fail to parse and silently get coerced to {}.
+      tmp = `${OPENCHAMBER_SHARED_SETTINGS_PATH}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      await fs.promises.writeFile(tmp, JSON.stringify(next, null, 2), 'utf8');
+      await fs.promises.rename(tmp, OPENCHAMBER_SHARED_SETTINGS_PATH);
+    } catch {
+      if (tmp) await fs.promises.rm(tmp, { force: true }).catch(() => {});
+    }
+  });
 };
 
 // Fields derived from runtime context — never persisted, always recomputed.

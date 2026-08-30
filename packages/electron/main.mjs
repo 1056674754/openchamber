@@ -11,6 +11,7 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import updaterPkg from 'electron-updater';
 import { ElectronSshManager } from './ssh-manager.mjs';
+import { replaceFileWithRetry } from './windows-file-replace.mjs';
 import { hasSameHttpOrigin, loginRemotePasswordAndPersistSession } from './remote-password-login.mjs';
 import { createSingleFlight } from './startup-coordinator.mjs';
 import { createTrayController } from './tray.mjs';
@@ -497,6 +498,8 @@ const settingsFilePath = () => {
 const sshManager = new ElectronSshManager({
   settingsFilePath: settingsFilePath(),
   appVersion: APP_VERSION,
+  // Thunk: withSettingsLock is defined later in this module.
+  settingsWriter: (fn) => withSettingsLock(fn),
   emit: (event, detail) => emitToAllWindows(event, detail),
   onStatusChanged: async (status) => {
     const remoteRuntime = state.serverHandle?.remoteInstances;
@@ -537,8 +540,13 @@ const writeJsonFile = async (filePath, data) => {
   // Atomic: write to a temp file then rename. Readers never see a partial
   // JSON file that could parse-error and get coerced to {}.
   const tmp = `${filePath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  await fsp.writeFile(tmp, JSON.stringify(data, null, 2));
-  await fsp.rename(tmp, filePath);
+  try {
+    await fsp.writeFile(tmp, JSON.stringify(data, null, 2));
+    await replaceFileWithRetry(tmp, filePath);
+  } catch (error) {
+    await fsp.rm(tmp, { force: true }).catch(() => {});
+    throw error;
+  }
 };
 
 const readSettingsRoot = () => {
@@ -551,17 +559,32 @@ const readSettingsRoot = () => {
 // preference saves, ssh manager imports, etc.) would otherwise have their
 // RMW pairs interleave across awaits, letting one writer's stale copy
 // overwrite another writer's just-persisted changes.
-let settingsMutationChain = Promise.resolve();
+//
+// The lock is shared with the embedded web server's `persistSettings` via
+// the `settingsWriter` callback passed to `startWebUiServer`. Without a
+// shared lock, the web server's read-merge-write and Electron's
+// read-modify-write can interleave and silently drop keys neither side
+// knows about (e.g. `desktopSshInstances` written by Electron gets
+// overwritten when the web server writes `localStore`).
+//
+// Outer layer acquires a cross-process file lock so VS Code (separate
+// extension host) and standalone server instances can't interleave their
+// RMW with ours either.
+import { withSettingsLock as withCrossProcessSettingsLock, defaultSettingsLockPath } from '@openchamber/shared/settings-lock';
+let sharedSettingsLock = Promise.resolve();
+const withSettingsLock = (fn) => {
+  const next = sharedSettingsLock.then(() => withCrossProcessSettingsLock(defaultSettingsLockPath(settingsFilePath()), fn));
+  sharedSettingsLock = next.catch(() => {});
+  return next;
+};
 const mutateSettingsRoot = (mutator) => {
-  const next = settingsMutationChain.then(async () => {
+  return withSettingsLock(async () => {
     const current = readSettingsRoot();
     const result = await mutator(current);
     const nextRoot = result ?? current;
     await writeJsonFile(settingsFilePath(), nextRoot);
+    return nextRoot;
   });
-  // Keep the chain alive even if one mutator throws.
-  settingsMutationChain = next.catch(() => {});
-  return next;
 };
 
 const writeSettingsRoot = async (root) => writeJsonFile(settingsFilePath(), root);
@@ -1457,6 +1480,7 @@ const spawnLocalServer = async () => {
     exitOnShutdown: false,
     onDesktopNotification: (payload) => maybeShowNativeNotification(payload),
     getIsWindowFocused: isAnyWindowFocused,
+    settingsWriter: withSettingsLock,
   });
 
   const port = handle.getPort();

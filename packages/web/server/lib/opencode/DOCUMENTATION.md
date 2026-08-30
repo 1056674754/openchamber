@@ -49,6 +49,8 @@ This module provides OpenCode server integration utilities for the web server ru
 - `packages/web/server/lib/opencode/project-icon-routes.js`: project icon upload/read/discovery route registration and icon storage orchestration.
 - `packages/web/server/lib/opencode/skill-routes.js`: route registration for skill config CRUD, supporting files, and skills catalog scan/install flows.
 - `packages/web/server/lib/opencode/settings-runtime.js`: Settings persistence runtime (disk IO, migrations, normalization, project validation, and persisted update serialization).
+  - Standalone Web instances serialize through the shared cross-process settings lock; embedded Electron injects the same lock boundary so shell and server read-modify-write operations cannot lose each other's keys.
+  - Atomic writes remove failed temp files, and startup migration removes orphaned `settings.json.tmp-*` files without touching unrelated files.
 - `packages/web/server/lib/opencode/settings-helpers.js`: Settings payload sanitization/format helpers runtime for response shaping and persisted merge prep.
 - `packages/web/server/lib/opencode/settings-normalization-runtime.js`: path/settings/tunnel normalization and sanitization helpers runtime used by settings/routes/config wiring.
 - `packages/web/server/lib/opencode/theme-runtime.js`: custom theme JSON validation and theme directory loading runtime for settings utility routes.

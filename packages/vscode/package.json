@@ -242,6 +242,7 @@
     "vite": "^7.1.2"
   },
   "dependencies": {
+    "@openchamber/shared": "workspace:*",
     "@openchamber/ui": "workspace:*",
     "@opencode-ai/sdk": "^1.17.9",
     "adm-zip": "^0.6.0",

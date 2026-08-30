@@ -52,6 +52,7 @@ Keep `bridge.ts` as a thin orchestration layer that delegates message handling t
 
 - `bridge-settings-runtime.ts`
   - Settings read/write and OpenCode skills discovery via API for bridge consumers.
+  - Shared settings updates use the same cross-process lock as Electron/Web and clean failed atomic-write temp files.
 
 - `bridge-system-runtime.ts`
   - System/editor/provider/quota/update-check message handlers.

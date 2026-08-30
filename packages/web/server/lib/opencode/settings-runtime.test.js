@@ -82,4 +82,63 @@ describe('settings runtime', () => {
       await cleanup();
     }
   });
+
+  it('cleans orphaned settings temp files during startup migration', async () => {
+    const { runtime, settingsFilePath, tempRoot, cleanup } = await createRuntime();
+    try {
+      const orphan = path.join(tempRoot, 'settings.json.tmp-1234-11111-abc');
+      const unrelated = path.join(tempRoot, 'other-file.json');
+      await fsPromises.writeFile(orphan, '{"broken":true}', 'utf8');
+      await fsPromises.writeFile(unrelated, '{"keep":true}', 'utf8');
+      await fsPromises.writeFile(settingsFilePath, '{"theme":"light"}', 'utf8');
+
+      await runtime.readSettingsFromDiskMigrated();
+
+      const files = await fsPromises.readdir(tempRoot);
+      expect(files).toContain('settings.json');
+      expect(files).toContain('other-file.json');
+      expect(files).not.toContain(path.basename(orphan));
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('removes its temp file when atomic replacement fails', async () => {
+    const tempRoot = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'oc-settings-runtime-'));
+    const settingsFilePath = path.join(tempRoot, 'settings.json');
+    let capturedTmp = null;
+    const wrappedFs = {
+      ...fsPromises,
+      rename: async (source) => {
+        capturedTmp = source;
+        throw Object.assign(new Error('unexpected disk failure'), { code: 'EIO' });
+      },
+    };
+    const runtime = createSettingsRuntime({
+      fsPromises: wrappedFs,
+      path,
+      crypto,
+      SETTINGS_FILE_PATH: settingsFilePath,
+      sanitizeProjects: (projects) => Array.isArray(projects) ? projects : [],
+      sanitizeSettingsUpdate: (settings) => settings,
+      mergePersistedSettings: (_current, changes) => changes,
+      normalizeSettingsPaths: (settings) => ({ settings, changed: false }),
+      normalizeStringArray: (values) => Array.isArray(values) ? values.filter((value) => typeof value === 'string') : [],
+      formatSettingsResponse: (settings) => settings,
+      resolveDirectoryCandidate: (value) => value,
+      normalizeManagedRemoteTunnelHostname: (value) => value,
+      normalizeManagedRemoteTunnelPresets: (value) => value,
+      normalizeManagedRemoteTunnelPresetTokens: (value) => value,
+      syncManagedRemoteTunnelConfigWithPresets: async () => {},
+      upsertManagedRemoteTunnelToken: async () => {},
+    });
+
+    try {
+      await expect(runtime.writeSettingsToDisk({ theme: 'dark' })).rejects.toThrow('unexpected disk failure');
+      expect(capturedTmp).toBeTruthy();
+      expect((await fsPromises.readdir(tempRoot)).some((file) => file.startsWith('settings.json.tmp-'))).toBe(false);
+    } finally {
+      await fsPromises.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
 });
