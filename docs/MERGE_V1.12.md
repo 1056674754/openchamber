@@ -2708,6 +2708,19 @@ v1.20.0-sscity 尚未宣布完成：当前未关闭 `#135/#140/#142-#151/#154/#1
 
 验证：remote synthetic fanout + global capability bridge + event runtime Vitest 3 files / 17 tests ✅；control client Bun 1 file / 5 tests ✅；UI/Web type-check/lint ✅；`git diff --check` ✅。`#135` 仅剩 dirty Electron main 中的 dev-tunnel IPC/shell lifecycle；private relay 下的 tunnel-virtual endpoint 仍由 [#137](https://coding.s-s.city/songsong/openchamber/-/issues/137) 后续处理。
 
+### #135 Phase 10：Instance-authoritative Electron dev tunnel（2026-08-30）
+
+上游来源：`dd642b1d8`，按 fork aggregated multi-instance 改写：
+
+- Browser loopback URL resolution 显式接收 owning `serverId`；只有 Electron + non-default instance + parsed loopback HTTP(S) 才 tunnel。local/default、public URL 与 Web/Mobile 保持原 URL。
+- renderer 只向 IPC 发送 `serverId + port`，不能提交 base URL、token 或任意 headers。Electron main 从 SSH ready status + persisted host registry 解析 forward base URL，要求两者同源且 paired client token 存在，再发送 bearer 打开 tunnel。
+- tunnel 按 `serverId + remotePort` 缓存；SSH forward URL 改变时关闭旧 listener。显式 close、SSH disconnect 与 app window shutdown 都释放 listener/socket。
+- webview 实际加载 `127.0.0.1:<random>`，address/history/tab target 与 agent result 通过 reverse map 保留原远端 `localhost:<port>`；随机 tunnel port 不持久化。
+- link/script 跨到另一 loopback port 在 `will-navigate` 前 retunnel；server redirect 的 failed load 最多按 URL 恢复一次。失败显示 unavailable 并抛原始 tool failure，绝不回退本机同端口。
+- 对应提交：`6cad928cb feat(browser): resolve remote loopback tunnels`、`a0522c6a6 feat(browser): validate tunnel instance authority`、`0cd6d1b81 feat(browser): bridge SSH dev tunnels`、`515896256 feat(browser): load remote dev tunnels`。
+
+验证：Browser URL/tunnel/dev-server/history/crash focused 5 files / 18 tests ✅；Electron tunnel/certificate authority Node 2 files / 6 tests ✅；UI type-check/lint、Electron type-check/lint、main syntax ✅。`main.mjs` 使用 temporary index 精确提交，其他 agent WIP 仍为 23/5。[#135](https://coding.s-s.city/songsong/openchamber/-/issues/135) 保持 open：需要真实 SSH instance + remote dev server + Electron webview/HMR/cross-port matching-surface QA；private relay dev tunnel 仍归 #137。
+
 ### #137 Phase 10：Loss-safe relay request-body delivery（2026-08-30）
 
 上游来源：`d634cd232`、`aaf397e68`、`854a0db92`，保持 TS client / JS host wire backward compatibility：
