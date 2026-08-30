@@ -119,6 +119,8 @@ import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
 import { subscribeOpenchamberEvents } from '@/lib/openchamberEvents';
 import { DEFAULT_SERVER_ID, serverRegistry } from '@/lib/opencode/server-registry';
 import { isBtwSession } from '@/lib/sessionBtwMetadata';
+import { isChatDirectoryPath } from '@/lib/chatDirectories';
+import { deriveInstanceManagedChatsSources } from './sidebar/managedChats';
 import { getWorktreesForProject } from '@/lib/worktrees/worktreeKeys';
 import { mapWithConcurrency } from '@/lib/concurrency';
 import {
@@ -305,6 +307,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   showOnlyMainWorkspace = false,
 }) => {
   const { t } = useI18n();
+  const isVSCode = React.useMemo(() => isVSCodeRuntime(), []);
   const [isSessionSearchOpen, setIsSessionSearchOpen] = React.useState(false);
   const [sessionSearchQuery, setSessionSearchQuery] = React.useState('');
   const [serverSearchSessions, setServerSearchSessions] = React.useState<Session[]>([]);
@@ -577,7 +580,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
     [availableWorktreesByProject, projects],
   );
 
-  const sessions = React.useMemo(() => {
+  const sidebarSessionCatalog = React.useMemo(() => {
     const liveById = new Map(liveSessions.map((session) => [session.id, session]));
     const searchedActiveSessions = serverSearchSessions.filter((session) => !session.time?.archived);
     const catalogSessions = dedupeSessionsById([...globalActiveSessions, ...searchedActiveSessions]);
@@ -594,10 +597,14 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
       merged.push(session);
     });
 
-    const mergedById = new Map(merged.map((session) => [session.id, session]));
+    return merged.filter((session) => !isBtwSession(session));
+  }, [globalActiveSessions, liveSessions, serverSearchSessions]);
+
+  const sessions = React.useMemo(() => {
+    const mergedById = new Map(sidebarSessionCatalog.map((session) => [session.id, session]));
     const visibilityCache = new Map<string, boolean>();
     const isVisible = (session: Session, visiting = new Set<string>()): boolean => {
-      if (isBtwSession(session)) return false;
+      if (!isVSCode && isChatDirectoryPath(session.directory)) return true;
       const cached = visibilityCache.get(session.id);
       if (cached !== undefined) return cached;
 
@@ -620,8 +627,20 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
       return visible;
     };
 
-    return merged.filter((session) => isVisible(session));
-  }, [globalActiveSessions, knownSessionDirectoryScopes, liveSessions, serverSearchSessions]);
+    return sidebarSessionCatalog.filter((session) => isVisible(session));
+  }, [isVSCode, knownSessionDirectoryScopes, sidebarSessionCatalog]);
+
+  const managedChatSources = React.useMemo(() => {
+    if (isVSCode) return [];
+    return deriveInstanceManagedChatsSources(
+      sidebarSessionCatalog,
+      (session) => serverRegistry.getServerForSession(session.id)
+        ?? (session as Session & { openchamberServerId?: string }).openchamberServerId
+        ?? DEFAULT_SERVER_ID,
+      homeDirectory,
+      DEFAULT_SERVER_ID,
+    );
+  }, [homeDirectory, isVSCode, sidebarSessionCatalog]);
 
   const archivedSessions = React.useMemo(
     () => dedupeSessionsById([
@@ -922,7 +941,6 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
     return () => clearInterval(interval);
   }, [sidebarActive]);
 
-  const isVSCode = React.useMemo(() => isVSCodeRuntime(), []);
   const { isTablet } = useDeviceInfo();
   const alwaysShowSidebarActions = mobileVariant || isTablet;
 
@@ -1587,7 +1605,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
     groupSearchDataByGroup,
     sectionsForRender,
     flatSectionsForRender,
-    searchMatchCount,
+    searchMatchCount: projectSearchMatchCount,
   } = useSessionSidebarSections({
     normalizedProjects: sortedProjects,
     getSessionsForProject,
@@ -1603,7 +1621,75 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
     foldersMap,
   });
 
-  const searchEmptyState = (
+  const managedChatGroups = React.useMemo(() => {
+    const countNodes = (nodes: SessionNode[]): number => nodes.reduce(
+      (total, node) => total + 1 + countNodes(node.children),
+      0,
+    );
+    const multipleInstances = managedChatSources.length > 1;
+
+    return managedChatSources.flatMap((source) => {
+      const group: SessionGroup = {
+        id: `managed-chats:${source.serverId}`,
+        label: multipleInstances ? serverRegistry.getServerLabel(source.serverId) : '',
+        branch: null,
+        description: multipleInstances ? source.root : null,
+        isMain: true,
+        isArchivedBucket: false,
+        worktree: null,
+        directory: source.root,
+        folderScopeKey: source.root,
+        folderScopes: source.folderScopes,
+        draftTarget: 'chat',
+        sessions: source.rootNodes,
+      };
+
+      if (!hasSessionSearchQuery) {
+        return [{ serverId: source.serverId, group, matchCount: 0 }];
+      }
+
+      const filteredNodes = filterSessionNodesForSearch(
+        group.sessions,
+        normalizedSessionSearchQuery,
+      );
+      const groupMatches = [
+        t('sessions.sidebar.activity.chatsTitle'),
+        group.label,
+        source.root,
+      ].join(' ').toLowerCase().includes(normalizedSessionSearchQuery);
+      const folderNameMatchCount = source.folderScopes.reduce((total, scope) => (
+        total + (foldersMap[scope.scopeKey] ?? []).filter((folder) => (
+          folder.name.toLowerCase().includes(normalizedSessionSearchQuery)
+        )).length
+      ), 0);
+      const matchedSessionCount = countNodes(filteredNodes);
+      const matchCount = matchedSessionCount + folderNameMatchCount + (groupMatches ? 1 : 0);
+      groupSearchDataByGroup.set(group, {
+        filteredNodes,
+        matchedSessionCount,
+        folderNameMatchCount,
+        groupMatches,
+        hasMatch: matchCount > 0,
+      });
+      return matchCount > 0 ? [{ serverId: source.serverId, group, matchCount }] : [];
+    });
+  }, [
+    filterSessionNodesForSearch,
+    foldersMap,
+    groupSearchDataByGroup,
+    hasSessionSearchQuery,
+    managedChatSources,
+    normalizedSessionSearchQuery,
+    t,
+  ]);
+
+  const managedChatSearchMatchCount = React.useMemo(
+    () => managedChatGroups.reduce((total, entry) => total + entry.matchCount, 0),
+    [managedChatGroups],
+  );
+  const searchMatchCount = projectSearchMatchCount + managedChatSearchMatchCount;
+
+  const searchEmptyState = managedChatSearchMatchCount > 0 ? null : (
     <div className="py-6 text-center text-muted-foreground">
       <p className="typography-ui-label font-semibold">{t('sessions.sidebar.empty.noMatches.title')}</p>
       <p className="typography-meta mt-1">{t('sessions.sidebar.empty.noMatches.description')}</p>
@@ -1777,7 +1863,8 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
       return [];
     }
 
-    return deriveActiveNowSessions(activeNowEntries, new Map(sessions.map((session) => [session.id, session])))
+    const projectSessions = sessions.filter((session) => !isChatDirectoryPath(session.directory));
+    return deriveActiveNowSessions(activeNowEntries, new Map(projectSessions.map((session) => [session.id, session])))
       .sort((a, b) => compareSessions(a, b, effectivePinnedSessionIds, sessionSortMode));
   }, [activeNowEntries, effectivePinnedSessionIds, sessions, sessionSortMode, showRecentSection]);
 
@@ -1786,7 +1873,10 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
       return [];
     }
 
-    return deriveLiveActiveNowSessions(sessions, liveSessionStatuses);
+    return deriveLiveActiveNowSessions(
+      sessions.filter((session) => !isChatDirectoryPath(session.directory)),
+      liveSessionStatuses,
+    );
   }, [liveSessionStatuses, sessions, showRecentSection]);
 
   React.useEffect(() => {
@@ -1872,10 +1962,6 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
   // Prefetch is wired below, after recentSessionIds is computed.
 
   const activitySections = React.useMemo(() => {
-    if (!showRecentSection) {
-      return [];
-    }
-
     const toItem = (session: Session) => {
       const existing = sessionSidebarMetaById.get(session.id);
       const sessionDirectory = resolveGlobalSessionDirectory(session);
@@ -1888,10 +1974,26 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
       };
     };
 
+    const chatItems = managedChatGroups.flatMap(({ group }) => group.sessions.map((node) => ({
+      node,
+      projectId: null,
+      groupDirectory: group.directory,
+      secondaryMeta: null,
+    })));
+
     return [
-      { key: 'active-now' as const, title: t('sessions.sidebar.activity.recentTitle'), items: activeNowSessions.map(toItem) },
+      ...(!isVSCode ? [{
+        key: 'chats' as const,
+        title: t('sessions.sidebar.activity.chatsTitle'),
+        items: chatItems,
+      }] : []),
+      ...(showRecentSection ? [{
+        key: 'active-now' as const,
+        title: t('sessions.sidebar.activity.recentTitle'),
+        items: activeNowSessions.map(toItem),
+      }] : []),
     ];
-  }, [activeNowSessions, sessionSidebarMetaById, showRecentSection, t]);
+  }, [activeNowSessions, isVSCode, managedChatGroups, sessionSidebarMetaById, showRecentSection, t]);
 
   const recentSessionIds = React.useMemo(() => {
     return new Set(activeNowSessions.map((session) => session.id));
@@ -1940,14 +2042,15 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
   }, [flatSectionsForRender, isVSCode, sectionsForRender, sessionGroupingMode, showInlineArchivedSessions]);
 
   const sidebarActivitySections = React.useMemo(() => {
-    if (hasSessionSearchQuery) {
-      return [];
-    }
+    const chatsSection = activitySections.find((section) => section.key === 'chats');
     return [
-      ...(globalPinnedSection ? [globalPinnedSection] : []),
-      ...(showRecentSection ? activitySections : []),
+      ...(!hasSessionSearchQuery && globalPinnedSection ? [globalPinnedSection] : []),
+      ...(chatsSection ? [chatsSection] : []),
+      ...(!hasSessionSearchQuery
+        ? activitySections.filter((section) => section.key !== 'chats')
+        : []),
     ];
-  }, [activitySections, globalPinnedSection, hasSessionSearchQuery, showRecentSection]);
+  }, [activitySections, globalPinnedSection, hasSessionSearchQuery]);
 
   const dockUnreadCount = React.useMemo(() => countDockBadgeChats({
     sessions,
@@ -2360,27 +2463,53 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
     ],
   );
 
-  const topContent = hasSessionSearchQuery ? null : (
-    <>
-      {globalPinnedSection ? (
-        <SidebarActivitySections
-          sections={[globalPinnedSection]}
-          renderSessionNode={renderSessionNode}
-          openSidebarMenuKey={openSidebarMenuKey}
-          onReorderGlobalPinned={reorderGlobalPinned}
-          isDesktopShellRuntime={isDesktopShellRuntime}
-        />
-      ) : null}
-      {showRecentSection ? (
-        <SidebarActivitySections
-          sections={activitySections}
-          renderSessionNode={renderSessionNode}
-          openSidebarMenuKey={openSidebarMenuKey}
-          isDesktopShellRuntime={isDesktopShellRuntime}
-        />
-      ) : null}
-    </>
-  );
+  const defaultChatServerId = React.useMemo(() => {
+    const currentSessionServerId = currentSessionId
+      ? serverRegistry.getServerForSession(currentSessionId)
+      : null;
+    if (currentSessionServerId) return currentSessionServerId;
+    return projects.find((project) => project.id === activeProjectId)?.serverId
+      ?? DEFAULT_SERVER_ID;
+  }, [activeProjectId, currentSessionId, projects]);
+
+  const handleOpenManagedChatDraft = React.useCallback(() => {
+    setActiveMainTab('chat');
+    if (mobileVariant) setSessionSwitcherOpen(false);
+    openNewSessionDraft({
+      target: 'chat',
+      chatServerId: defaultChatServerId,
+    });
+  }, [defaultChatServerId, mobileVariant, openNewSessionDraft, setActiveMainTab, setSessionSwitcherOpen]);
+
+  const renderChatsSection = React.useCallback(() => {
+    const hideInstanceLabel = managedChatGroups.length <= 1;
+    return managedChatGroups.map(({ serverId, group }) => (
+      <React.Fragment key={group.id}>
+        {renderGroupSessions(
+          group,
+          group.id,
+          null,
+          hideInstanceLabel,
+          null,
+          false,
+          serverId,
+        )}
+      </React.Fragment>
+    ));
+  }, [managedChatGroups, renderGroupSessions]);
+
+  const topContent = sidebarActivitySections.length > 0 ? (
+    <SidebarActivitySections
+      sections={sidebarActivitySections}
+      renderSessionNode={renderSessionNode}
+      openSidebarMenuKey={openSidebarMenuKey}
+      onReorderGlobalPinned={reorderGlobalPinned}
+      isDesktopShellRuntime={isDesktopShellRuntime}
+      onNewChat={hasSessionSearchQuery ? undefined : handleOpenManagedChatDraft}
+      alwaysShowActions={alwaysShowSidebarActions}
+      renderChatsSection={renderChatsSection}
+    />
+  ) : null;
   const isInlineEditing = Boolean(renamingFolderId || editingProjectDialogId);
 
   const selectionModeEnabled = useSessionMultiSelectStore((state) => state.enabled);
@@ -2767,6 +2896,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
         unreadActivitySessionIds={unreadActivitySessionIds}
         notifyOnSubtasks={notifyOnSubtasks}
         hasLeadingActivitySections={sidebarActivitySections.length > 0}
+        hasStandaloneContent={!isVSCode && (!hasSessionSearchQuery || managedChatGroups.length > 0)}
         homeDirectory={homeDirectory}
         collapsedProjects={collapsedProjects}
         hideDirectoryControls={hideDirectoryControls}
