@@ -24,6 +24,14 @@ export const normalizeBrowserUrl = (value: string): string => {
   }
 };
 
+export const isLoopbackUrl = (value: string): boolean => {
+  try {
+    return LOOPBACK_HOSTNAMES.has(new URL(value).hostname.toLowerCase());
+  } catch {
+    return false;
+  }
+};
+
 export const browserUrlLabel = (value: string): string => {
   if (!value || value === BLANK_URL) return '';
   try {

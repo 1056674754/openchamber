@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { BLANK_URL, browserUrlLabel, normalizeBrowserUrl } from './url';
+import { BLANK_URL, browserUrlLabel, isLoopbackUrl, normalizeBrowserUrl } from './url';
 
 describe('Browser URL handling', () => {
   test('defaults public hosts to HTTPS and loopback development servers to HTTP', () => {
@@ -17,5 +17,12 @@ describe('Browser URL handling', () => {
 
   test('uses host and port as the compact label', () => {
     expect(browserUrlLabel('http://localhost:5173/path')).toBe('localhost:5173');
+  });
+
+  test('recognizes only parsed loopback hosts', () => {
+    expect(isLoopbackUrl('https://localhost:5173/')).toBe(true);
+    expect(isLoopbackUrl('http://[::1]:3000/')).toBe(true);
+    expect(isLoopbackUrl('https://localhost.example.com/')).toBe(false);
+    expect(isLoopbackUrl('not a url')).toBe(false);
   });
 });
