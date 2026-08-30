@@ -2379,6 +2379,16 @@ fork 已有丰富的 surface 组织（#62 surface rail + ContextSidebarTab + Con
 
 验证：session UI store 21/21（含 remote prepare/cancel/materialize/no-success-delete）+ chatDirectories 3/3，需分文件运行以避免 Bun module mock 污染；full workspace type-check/lint ✅。[#150](https://coding.s-s.city/songsong/openchamber/-/issues/150) 保持 open：Chats source/cache/folder ownership、Sidebar/Mobile/Search 入口、default target 切换与 matching-surface QA 待续。
 
+### #150 Phase 3：Managed Chats cold-start catalog（2026-08-30）
+
+- 当前 fork 已移除通用 Session localStorage cache，故不恢复 upstream `persist-cache` 方案；新增独立 `managed-chats-cache`，最多 50 条，只保存 `.config/openchamber/chats/` Session。
+- cache key 按 runtime endpoint hash 隔离；remote Chat 副本携带 `openchamberServerId`，读取时重建 `sessionId → serverId` registry，避免 Dev3 Chat 被当成本地同路径 Session。
+- global Sessions store 首屏从 cache 恢复 Chats；随后 root/session snapshots 仍是 authoritative source。active list 变化时只重写 managed subset，项目 Sessions 永不进入该 cache。
+- VS Code runtime 的 snapshot apply 与 live upsert 都过滤 managed Chats，保持上游 project-only 合同；Desktop/Web/Mobile 保留。
+- malformed/cross-runtime cache fail closed，不清理或替换 server state。
+
+验证：managed Chats cache 2/2 + global session paging 7/7（分文件），UI type-check/lint ✅。[#150](https://coding.s-s.city/songsong/openchamber/-/issues/150) 保持 open：folder root ownership、Sidebar/Mobile/Search 入口、default target 与 matching-surface QA 待续。
+
 ### #141 Phase 1：Isolated server exception survival（2026-08-30）
 
 上游来源：`71a538b77`。fork 的 embedded server 没有外部 supervisor，单个 Node/socket stray exception 不应让整个 OpenChamber instance 离线：
