@@ -26,6 +26,7 @@ import { assertUpdaterCapability } from './updater-capability.mjs';
 import { checkForDesktopUpdate } from './updater-check.mjs';
 import { resolveUpdaterFeed } from './updater-feed.mjs';
 import { resolveUpdaterChannel } from './updater-channel.mjs';
+import { shouldAllowBrowserPanelCertificateError } from './browser-panel-security.mjs';
 
 const execFileAsync = promisify(execFile);
 
@@ -52,6 +53,23 @@ const externalRuntimeManifest = readExternalRuntimeManifest();
 const DEEP_LINK_PROTOCOL = 'openchamber';
 const APP_USER_MODEL_ID = 'dev.openchamber.desktop';
 const BACKGROUND_START_ARG = '--background';
+const BROWSER_PANEL_PARTITION = 'persist:openchamber-browser';
+
+let browserPanelSessionHardened = false;
+const hardenBrowserPanelSession = () => {
+  if (browserPanelSessionHardened) return;
+  browserPanelSessionHardened = true;
+  const panelSession = session.fromPartition(BROWSER_PANEL_PARTITION);
+
+  app.on('certificate-error', (event, contents, url, error, _certificate, callback) => {
+    if (contents.session === panelSession && shouldAllowBrowserPanelCertificateError({ url, error })) {
+      event.preventDefault();
+      callback(true);
+      return;
+    }
+    callback(false);
+  });
+};
 
 const getLoginItemOptions = () => {
   if (process.platform === 'win32') {
@@ -3905,6 +3923,7 @@ app.whenReady().then(async () => {
   await session.defaultSession.setProxy({
     proxyBypassRules: 'localhost,127.0.0.1,::1,<local>',
   });
+  hardenBrowserPanelSession();
   await clearDesktopWebCacheStorage();
 
   nativeTheme.themeSource = readThemeSource();
