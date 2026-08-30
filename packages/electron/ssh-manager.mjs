@@ -892,9 +892,33 @@ export class ElectronSshManager {
     await writeJsonRoot(this.settingsFilePath, root);
   }
 
-  async issueClientToken(localUrl, openchamberPassword) {
+  async issueClientToken(localUrl, openchamberPassword, instanceId = '') {
     const password = typeof openchamberPassword === 'string' ? openchamberPassword.trim() : '';
-    if (!password) return '';
+    const clientLabel = 'OpenChamber Desktop SSH';
+    const dedupeKey = typeof instanceId === 'string' && instanceId.trim()
+      ? `desktop-ssh:${instanceId.trim()}`
+      : undefined;
+    const createClientToken = async (cookie = '') => {
+      const tokenResponse = await fetch(new URL('/api/client-auth/clients', `${localUrl}/`).toString(), {
+        method: 'POST',
+        signal: AbortSignal.timeout(10_000),
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+          ...(cookie ? { Cookie: cookie } : {}),
+        },
+        body: JSON.stringify({
+          label: clientLabel,
+          clientKind: 'desktop-ssh',
+          ...(dedupeKey ? { dedupeKey } : {}),
+        }),
+      });
+      if (!tokenResponse.ok) return '';
+      const tokenPayload = await tokenResponse.json().catch(() => null);
+      return typeof tokenPayload?.token === 'string' ? tokenPayload.token.trim() : '';
+    };
+
+    if (!password) return createClientToken();
 
     const loginResponse = await fetch(new URL('/auth/session', `${localUrl}/`).toString(), {
       method: 'POST',
@@ -907,7 +931,7 @@ export class ElectronSshManager {
         password,
         trustDevice: true,
         issueClientToken: true,
-        clientLabel: 'OpenChamber Desktop SSH',
+        clientLabel,
       }),
     });
     if (!loginResponse.ok) {
@@ -920,20 +944,7 @@ export class ElectronSshManager {
 
     const cookie = this.extractCookieHeader(loginResponse);
     if (!cookie) return '';
-
-    const tokenResponse = await fetch(new URL('/api/client-auth/clients', `${localUrl}/`).toString(), {
-      method: 'POST',
-      signal: AbortSignal.timeout(10_000),
-      headers: {
-        Accept: 'application/json',
-        'Content-Type': 'application/json',
-        Cookie: cookie,
-      },
-      body: JSON.stringify({ label: 'OpenChamber Desktop SSH' }),
-    });
-    if (!tokenResponse.ok) return '';
-    const tokenPayload = await tokenResponse.json().catch(() => null);
-    return typeof tokenPayload?.token === 'string' ? tokenPayload.token.trim() : '';
+    return createClientToken(cookie);
   }
 
   extractCookieHeader(response) {
@@ -1496,7 +1507,7 @@ export class ElectronSshManager {
 
     const localUrl = `http://127.0.0.1:${localPort}`;
     const label = instance.nickname?.trim() || parsed.destination || id;
-    const clientToken = await this.issueClientToken(localUrl, this.configuredOpenChamberPassword(instance));
+    const clientToken = await this.issueClientToken(localUrl, this.configuredOpenChamberPassword(instance), id);
     await this.updateHostRuntime(id, label, localUrl, clientToken);
     if (instance.localForward?.preferredLocalPort !== localPort) {
       await this.persistLocalPort(id, localPort);

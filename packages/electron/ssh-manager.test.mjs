@@ -289,4 +289,32 @@ describe('ElectronSshManager', () => {
     });
     expect(settings.desktopHosts).toEqual([{ id: 'ssh-1', label: 'SSH Host', url: localUrl, apiUrl: localUrl, clientToken: 'ssh-client-token' }]);
   });
+
+  test('creates a deduplicated client token when remote UI password is disabled', async () => {
+    let clientPayload = null;
+    const server = http.createServer(async (req, res) => {
+      if (req.method === 'POST' && req.url === '/api/client-auth/clients') {
+        clientPayload = JSON.parse(await readBody(req));
+        res.writeHead(201, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ token: 'no-password-client-token' }));
+        return;
+      }
+      res.writeHead(404).end();
+    });
+    const localUrl = await listen(server);
+    const manager = new ElectronSshManager({
+      settingsFilePath: path.join(os.tmpdir(), 'unused-settings.json'),
+      appVersion: '0.0.0-test',
+      emit: () => undefined,
+    });
+
+    const token = await manager.issueClientToken(localUrl, '', 'dev3');
+
+    expect(token).toBe('no-password-client-token');
+    expect(clientPayload).toEqual({
+      label: 'OpenChamber Desktop SSH',
+      clientKind: 'desktop-ssh',
+      dedupeKey: 'desktop-ssh:dev3',
+    });
+  });
 });
