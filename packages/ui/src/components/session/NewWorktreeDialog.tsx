@@ -162,10 +162,14 @@ const resolvePrWorktreeConfig = (pr: GitHubPullRequestSummary, localBranches: st
   const ownerFromLabel = String(pr.headLabel || '').split(':')[0]?.trim();
   const remoteSeed = pr.headRepo?.owner || ownerFromLabel || 'pr-head';
   const remoteName = `pr-${sanitizeRemoteName(remoteSeed)}`;
-  const remoteUrl = pr.headRepo?.sshUrl || pr.headRepo?.cloneUrl || '';
+  // Prefer HTTPS so public fork heads do not require local SSH agent setup.
+  const remoteUrl = pr.headRepo?.cloneUrl || pr.headRepo?.sshUrl || '';
 
   if (!remoteUrl) {
-    throw new Error('PR head repository URL is unavailable');
+    throw new Error(
+      'PR head repository URL is unavailable. The fork may have been deleted; '
+      + 'push the branch to a reachable repository and try again.'
+    );
   }
 
   return {

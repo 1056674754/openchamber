@@ -2260,3 +2260,17 @@ fork 已有丰富的 surface 组织（#62 surface rail + ContextSidebarTab + Con
 - pure formatting + real magic-prompt render 4 Bun tests / 9 assertions ✅；full workspace type-check/lint/diff check ✅。
 
 [#146](https://coding.s-s.city/songsong/openchamber/-/issues/146) 保持 open：后续仍需 branch-vs-base Context Diff、fork PR worktree fallback 和 merged/open PR history correctness。
+
+### #146 Phase 2：Fork PR worktree authoritative source（2026-08-30）
+
+上游来源：`83eb0802a`，按 fork 当前异步 worktree bootstrap 结构手工移植：
+
+- GitHub PR head 同时提供 HTTPS/SSH URL 时优先 HTTPS，公开 fork 不再无谓依赖本机 SSH agent；head repository 已删除或不可用时显示可操作错误。
+- 新增 `resolveExistingWorktreeSource(primaryWorktree, input, intent)`，validate/create 以相同的显式 project primary worktree、fork remote name/URL 和 branch 解析 source；不读取 active project/current directory。
+- validate 对 provisioned fork URL 执行 `ls-remote --heads`；create 先确保 remote URL，再抓取该 fork 的权威 branch。网络、凭据或 branch 缺失会在创建 worktree 前明确失败，不留下半创建目录。
+- upstream remote/branch 优先采用共享 resolver 的推导结果；若目标 ref 抓取失败，bootstrap 保持 tracking unset，不再手写指向不存在 ref 的 `branch.*.remote/merge`。branch rename 的同类 fallback 也移除。
+- 普通本地 branch、已配置 remote branch、异步 population/post-checkout/start-command 与 OpenCode sandbox metadata 流程保持原样。
+
+验证：真实临时 Git repository/bare fork 测试 `service.test.js` 48/48 ✅，新增覆盖 validate/create 同源、不可达 fork 无 worktree 残留、upstream fetch 失败无伪 tracking；full workspace type-check/lint ✅；完整 Web + VS Code + mobile assets production build ✅；`git diff --check` ✅。
+
+[#146](https://coding.s-s.city/songsong/openchamber/-/issues/146) 保持 open：仍需 branch-vs-base Context Diff 与 merged/open PR history correctness。
