@@ -44,6 +44,7 @@ import { getRuntimeKey } from "@/lib/runtime-switch"
 import { runtimeFetch } from "@/lib/runtime-fetch"
 import { messagesBefore, messagesFrom, sortMessagesChronologically } from './message-ordering'
 import { cleanupBtwBeforeSessionRemoval } from '@/lib/sessionBtwLifecycle'
+import { deleteChatDirectory, isChatDirectoryPath } from '@/lib/chatDirectories'
 
 export {
   resolveApiUrl,
@@ -904,6 +905,7 @@ function optimisticRemoveSession(sessionId: string, directory?: string): Session
 }
 
 function cleanupDeletedSession(sessionId: string, directory: string): void {
+  const chatServerId = serverRegistry.getServerForSession(sessionId)
   if (!optimisticRemoveSession(sessionId, directory) && _childStores) {
     for (const [, store] of _childStores.children.entries()) {
       const current = store.getState()
@@ -917,6 +919,11 @@ function cleanupDeletedSession(sessionId: string, directory: string): void {
   }
   useGlobalSessionsStore.getState().removeSessions([sessionId])
   useSessionUIStore.getState().setWorktreeMetadata(sessionId, null)
+  if (isChatDirectoryPath(directory)) {
+    void deleteChatDirectory(directory, chatServerId).catch((error) => {
+      console.warn("[session-actions] failed to delete managed Chat directory", error)
+    })
+  }
 }
 
 function isSessionNotFound(error: unknown): boolean {

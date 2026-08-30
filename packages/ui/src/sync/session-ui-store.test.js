@@ -2,6 +2,23 @@ import { beforeEach, describe, expect, mock, test } from 'bun:test';
 
 const directoryAvailabilityResults = [];
 const directoryAvailabilityCalls = [];
+const createdChatDirectories = [];
+const deletedChatDirectories = [];
+const warmedChatServers = [];
+let nextChatDirectory = '/remote/home/.config/openchamber/chats/2026-08-30/session-test';
+
+mock.module('@/lib/chatDirectories', () => ({
+  CHAT_DRAFT_PROJECT_ID: 'openchamber:chats',
+  createChatDirectory: mock(async ({ serverId } = {}) => {
+    createdChatDirectories.push({ directory: nextChatDirectory, serverId });
+    return nextChatDirectory;
+  }),
+  deleteChatDirectory: mock(async (directory, serverId) => {
+    deletedChatDirectories.push({ directory, serverId });
+  }),
+  isChatDirectoryPath: (directory) => typeof directory === 'string' && directory.includes('/.config/openchamber/chats/'),
+  warmChatsRootDirectory: mock((serverId) => warmedChatServers.push(serverId)),
+}));
 
 mock.module('@/lib/directoryAvailability', () => ({
   probeWorkspaceDirectoryAvailability: mock(async (options) => {
@@ -268,6 +285,10 @@ describe('new-session draft permission intent', () => {
   beforeEach(() => {
     directoryAvailabilityResults.length = 0;
     directoryAvailabilityCalls.length = 0;
+    createdChatDirectories.length = 0;
+    deletedChatDirectories.length = 0;
+    warmedChatServers.length = 0;
+    nextChatDirectory = '/remote/home/.config/openchamber/chats/2026-08-30/session-test';
     useSessionUIStore.getState().closeNewSessionDraft();
   });
 
@@ -339,6 +360,87 @@ describe('new-session draft permission intent', () => {
 
     expect(useSessionUIStore.getState().newSessionDraft.directoryOverride).toBe('/repo/explicit-worktree');
     expect(directoryAvailabilityCalls).toEqual([]);
+  });
+
+  test('prepares and cancels an instance-scoped projectless Chat draft', async () => {
+    useProjectsStore.setState({
+      projects: [{ id: 'remote-project', path: '/remote/project', label: 'Remote', serverId: 'remote-a' }],
+      activeProjectId: 'remote-project',
+    });
+
+    useSessionUIStore.getState().openNewSessionDraft({ target: 'chat', chatServerId: 'remote-a' });
+    const first = await useSessionUIStore.getState().prepareChatDraftDirectory();
+    const second = await useSessionUIStore.getState().prepareChatDraftDirectory();
+
+    expect(first).toBe(nextChatDirectory);
+    expect(second).toBe(nextChatDirectory);
+    expect(createdChatDirectories).toEqual([{ directory: nextChatDirectory, serverId: 'remote-a' }]);
+    expect(warmedChatServers).toEqual(['remote-a']);
+    expect(useSessionUIStore.getState().newSessionDraft).toMatchObject({
+      target: 'chat',
+      chatServerId: 'remote-a',
+      selectedProjectId: 'openchamber:chats',
+      directoryOverride: null,
+      preparedChatDirectory: nextChatDirectory,
+    });
+
+    useSessionUIStore.getState().closeNewSessionDraft();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(deletedChatDirectories).toEqual([{ directory: nextChatDirectory, serverId: 'remote-a' }]);
+  });
+
+  test('materializes a projectless Chat on its explicit instance without deleting the owned directory', async () => {
+    const original = useSessionUIStore.getState();
+    const originalConfig = useConfigStore.getState();
+    const createCalls = [];
+    useConfigStore.setState({ currentAgentName: 'build', agents: [], activateDirectory: async () => {} });
+    useSessionUIStore.setState({
+      currentSessionId: null,
+      newSessionDraft: {
+        draftId: 42,
+        open: true,
+        target: 'chat',
+        chatServerId: 'remote-a',
+        preparedChatDirectory: null,
+        selectedProjectId: 'openchamber:chats',
+        directoryOverride: null,
+        permissionIntent: { autoAccept: false },
+        parentID: null,
+      },
+      createSession: async (...args) => {
+        createCalls.push(args);
+        return { id: 'ses_chat', title: '', directory: nextChatDirectory, time: { created: 1, updated: 1 } };
+      },
+      initializeNewOpenChamberSession: () => {},
+      setCurrentSession: (sessionId) => useSessionUIStore.setState({ currentSessionId: sessionId }),
+    });
+
+    try {
+      const result = await materializeOpenDraftSession({ providerID: 'provider-a', modelID: 'model-a' });
+
+      expect(result).toEqual({
+        sessionId: 'ses_chat',
+        directory: nextChatDirectory,
+        serverId: 'remote-a',
+        agent: 'build',
+      });
+      expect(createCalls[0]?.[1]).toBe(nextChatDirectory);
+      expect(createCalls[0]?.[3]).toBe('remote-a');
+      expect(deletedChatDirectories).toEqual([]);
+      expect(useSessionUIStore.getState().newSessionDraft.open).toBe(false);
+    } finally {
+      useSessionUIStore.setState({
+        createSession: original.createSession,
+        initializeNewOpenChamberSession: original.initializeNewOpenChamberSession,
+        setCurrentSession: original.setCurrentSession,
+      });
+      useConfigStore.setState({
+        currentAgentName: originalConfig.currentAgentName,
+        agents: originalConfig.agents,
+        activateDirectory: originalConfig.activateDirectory,
+      });
+      serverRegistry.forgetSession('ses_chat');
+    }
   });
 
   test('materializes a confirmed stale implicit draft in the fallback project', async () => {
