@@ -19,6 +19,7 @@ import { resolveSessionDiffStats } from '@/components/session/sidebar/utils';
 import { Icon } from "@/components/icon/Icon";
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import type { SessionContextUsage } from '@/stores/types/sessionTypes';
+import { contextTokensFromBreakdown } from '@/stores/utils/tokenUtils';
 
 type MiniChatMode = 'session' | 'draft';
 
@@ -161,7 +162,7 @@ const MiniChatHeader: React.FC<{ mode: MiniChatMode }> = ({ mode }) => {
       return null;
     }
 
-    type AssistantTokens = { input: number; output: number; reasoning: number; cache: { read: number; write: number } };
+    type AssistantTokens = { total?: number; input: number; output: number; reasoning: number; cache: { read: number; write: number } };
     let lastTokens: AssistantTokens | undefined;
     let lastMessageId: string | undefined;
 
@@ -170,7 +171,7 @@ const MiniChatHeader: React.FC<{ mode: MiniChatMode }> = ({ mode }) => {
       if (message.role !== 'assistant') continue;
       const tokens = (message as { tokens?: AssistantTokens }).tokens;
       if (!tokens) continue;
-      const total = tokens.input + tokens.output + tokens.reasoning + (tokens.cache?.read ?? 0) + (tokens.cache?.write ?? 0);
+      const total = contextTokensFromBreakdown(tokens);
       if (total > 0) {
         lastTokens = tokens;
         lastMessageId = message.id;
@@ -182,7 +183,7 @@ const MiniChatHeader: React.FC<{ mode: MiniChatMode }> = ({ mode }) => {
       return null;
     }
 
-    const totalTokens = lastTokens.input + lastTokens.output + lastTokens.reasoning + (lastTokens.cache?.read ?? 0) + (lastTokens.cache?.write ?? 0);
+    const totalTokens = contextTokensFromBreakdown(lastTokens);
     const thresholdLimit = contextLimit > 0 ? contextLimit : 200000;
     const percentage = contextLimit > 0 ? Math.round((totalTokens / contextLimit) * 100) : 0;
     const normalizedOutput = outputLimit > 0 ? Math.round((lastTokens.output / outputLimit) * 100) : undefined;

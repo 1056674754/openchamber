@@ -2596,3 +2596,13 @@ v1.20.0-sscity 尚未宣布完成：当前未关闭 `#135/#140/#142-#151/#154/#1
 - create/session-folder/pending-message/routeMessage 使用恢复后的 directory 和 serverId；同一 in-flight proactive rewrite 到相同 fallback 被接受，不误判为用户改目标；失败恢复 snapshot 也保持已恢复目录。
 
 验证：directory availability + session UI Bun 2 files / 22 tests ✅，覆盖 missing/unknown/explicit target/materialize remote authority。全 workspace type/lint/build 与 diff check 见本 phase 最终验证。[#148](https://coding.s-s.city/songsong/openchamber/-/issues/148) 保持 open：context-meter server totals、Office extraction bounds、embedded restoration与 v1.21 large-text/virtual preview follow-up 仍需逐项收口。
+
+### #148 Phase 2：Server-total context-window accounting（2026-08-30）
+
+上游来源：`438360868`。OpenCode 多工具 turn 的 `input/cache.read` 是每次内部 API round-trip 的累计量，直接求和会把真实 232,872 / 1M 显示成 3,306,479 / 1M（330.6%）：
+
+- `contextTokensFromBreakdown` 成为唯一窗口 token 规则：有限正数 `tokens.total` 优先；旧服务器没有 total、total=0/NaN 时才回退 breakdown sum。plain numeric token payload 保持兼容。
+- `contextStore.extractTokensFromMessage`、session UI getter、work-status helper、Context Sidebar、VS Code Header、Mini Chat 全部改用同一 helper；不再保留各 surface 的 inline sum。
+- Context Sidebar 仍分别展示 input/output/reasoning/cache buckets，但总数使用 server final-round total，细项与总数不强行相加，因为细项表达累计成本、total 表达当前窗口。
+
+验证：token/session/context surfaces Bun 4 files / 32 tests ✅，含真实 multi-step payload regression（23.2872% 而非 330.6%）、older-server fallback、part-level tokens。UI type-check/lint ✅；全 workspace build 与 diff check 见本 phase 最终验证。[#148](https://coding.s-s.city/songsong/openchamber/-/issues/148) 保持 open：Office extraction bounds、embedded restoration审计与 large-text/virtual preview follow-up 尚未完成。

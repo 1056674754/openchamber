@@ -12,6 +12,7 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSessions, useSessionMessageRecords } from '@/sync/sync-context';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { useI18n } from '@/lib/i18n';
+import { contextTokensFromBreakdown } from '@/stores/utils/tokenUtils';
 
 type SessionMessage = { info: Message; parts: Part[] };
 
@@ -85,6 +86,7 @@ const extractTokenBreakdown = (message: SessionMessage): TokenBreakdown => {
   }
 
   const breakdown = source as {
+    total?: unknown;
     input?: unknown;
     output?: unknown;
     reasoning?: unknown;
@@ -96,6 +98,7 @@ const extractTokenBreakdown = (message: SessionMessage): TokenBreakdown => {
   const reasoning = toNonNegativeNumber(breakdown.reasoning);
   const cacheRead = toNonNegativeNumber(breakdown.cache?.read);
   const cacheWrite = toNonNegativeNumber(breakdown.cache?.write);
+  const reportedTotal = toNonNegativeNumber(breakdown.total);
 
   return {
     input,
@@ -103,7 +106,13 @@ const extractTokenBreakdown = (message: SessionMessage): TokenBreakdown => {
     reasoning,
     cacheRead,
     cacheWrite,
-    total: input + output + reasoning + cacheRead + cacheWrite,
+    total: contextTokensFromBreakdown({
+      total: reportedTotal,
+      input,
+      output,
+      reasoning,
+      cache: { read: cacheRead, write: cacheWrite },
+    }),
   };
 };
 

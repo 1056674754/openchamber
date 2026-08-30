@@ -36,6 +36,7 @@ import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
 import { serverRegistry } from '@/lib/opencode/server-registry';
 import type { QuotaProviderId, UsageWindow } from '@/types';
 import type { SessionContextUsage } from '@/stores/types/sessionTypes';
+import { contextTokensFromBreakdown } from '@/stores/utils/tokenUtils';
 
 const SettingsView = lazyWithChunkRecovery(() => import('@/components/views/SettingsView').then(m => ({ default: m.SettingsView })));
 
@@ -620,7 +621,7 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
 
   const currentModel = getCurrentModel();
   const headerMessageSummary = React.useMemo(() => {
-    type AssistantTokens = { input: number; output: number; reasoning: number; cache: { read: number; write: number } };
+    type AssistantTokens = { total?: number; input: number; output: number; reasoning: number; cache: { read: number; write: number } };
     let latestAssistantModel: ReturnType<typeof getCurrentModel> | undefined;
     let lastTokens: AssistantTokens | undefined;
     let lastMessageId: string | undefined;
@@ -637,7 +638,7 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
       }
 
       if (!lastTokens && message.tokens) {
-        const total = message.tokens.input + message.tokens.output + message.tokens.reasoning + (message.tokens.cache?.read ?? 0) + (message.tokens.cache?.write ?? 0);
+        const total = contextTokensFromBreakdown(message.tokens);
         if (total > 0) {
           lastTokens = message.tokens;
           lastMessageId = (currentSessionMessages[i] as { id?: string }).id;
@@ -665,7 +666,7 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
     }
 
     const lastTokens = headerMessageSummary.lastTokens;
-    const totalTokens = lastTokens.input + lastTokens.output + lastTokens.reasoning + (lastTokens.cache?.read ?? 0) + (lastTokens.cache?.write ?? 0);
+    const totalTokens = contextTokensFromBreakdown(lastTokens);
     const thresholdLimit = contextLimit > 0 ? contextLimit : 200000;
     const percentage = contextLimit > 0 ? Math.round((totalTokens / contextLimit) * 100) : 0;
     const normalizedOutput = outputLimit > 0 ? Math.round((lastTokens.output / outputLimit) * 100) : undefined;

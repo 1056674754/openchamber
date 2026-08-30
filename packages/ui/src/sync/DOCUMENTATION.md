@@ -146,6 +146,10 @@ Regular new-chat drafts may inherit a persisted current directory that was a wor
 - Runtime switches and concurrent user target changes abort the recovery. A concurrent rewrite of the same implicit draft to the same fallback is accepted.
 - The visible draft, persisted draft target, config owner, materialization path, send path, and created Session server all move together. Recovery must not update only the UI while the create call keeps the stale path.
 
+### Context-window token authority
+
+Assistant token breakdown fields can accumulate across internal tool-call round trips; summing input/output/reasoning/cache can therefore exceed the actual context window several times over. Context meters use `tokens.total` when it is a finite positive value because OpenCode reports the final round-trip window there. Older servers without `total` retain the breakdown-sum fallback. The same helper must feed contextStore, composer, Context tab, work status, VS Code, and Mini Chat so surfaces cannot disagree.
+
 ## Remote read admission
 
 Remote summary and status reads share one scheduler per remote server. The scheduler admits at most three reads concurrently, leaving one slot in the server's four-request normal lane for user operations. Interactive status reads take precedence over queued background discovery, and identical status/list keys share one in-flight promise.

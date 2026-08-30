@@ -1,6 +1,7 @@
 import type { Message, Part } from "@opencode-ai/sdk/v2";
 
 type TokenBreakdown = {
+    total?: number;
     input?: number;
     output?: number;
     reasoning?: number;
@@ -10,7 +11,7 @@ type TokenBreakdown = {
     };
 };
 
-const sumTokenBreakdown = (breakdown: TokenBreakdown | null | undefined): number => {
+export const sumTokenBreakdown = (breakdown: TokenBreakdown | null | undefined): number => {
     if (!breakdown || typeof breakdown !== 'object') {
         return 0;
     }
@@ -24,6 +25,16 @@ const sumTokenBreakdown = (breakdown: TokenBreakdown | null | undefined): number
     return inputTokens + outputTokens + reasoningTokens + cacheReadTokens + cacheWriteTokens;
 };
 
+/** Prefer the server's final-round-trip window over accumulated tool-round fields. */
+export const contextTokensFromBreakdown = (breakdown: TokenBreakdown | null | undefined): number => {
+    if (!breakdown || typeof breakdown !== 'object') return 0;
+    const reportedTotal = breakdown.total;
+    if (typeof reportedTotal === 'number' && Number.isFinite(reportedTotal) && reportedTotal > 0) {
+        return reportedTotal;
+    }
+    return sumTokenBreakdown(breakdown);
+};
+
 export const extractTokensFromMessage = (message: { info: Message; parts: Part[] }): number => {
     const tokens = (message.info as { tokens?: number | TokenBreakdown }).tokens;
 
@@ -32,7 +43,7 @@ export const extractTokensFromMessage = (message: { info: Message; parts: Part[]
     }
 
     if (tokens && typeof tokens === 'object') {
-        return sumTokenBreakdown(tokens);
+        return contextTokensFromBreakdown(tokens);
     }
 
     const tokenPart = message.parts.find(
@@ -47,5 +58,5 @@ export const extractTokensFromMessage = (message: { info: Message; parts: Part[]
         return tokenPart.tokens;
     }
 
-    return sumTokenBreakdown(tokenPart.tokens);
+    return contextTokensFromBreakdown(tokenPart.tokens);
 };

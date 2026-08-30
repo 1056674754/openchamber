@@ -101,6 +101,7 @@ import { toast } from "@/components/ui"
 import { formatMessage, useI18nStore } from "@/lib/i18n/store"
 import { getRuntimeKey } from "@/lib/runtime-switch"
 import { probeWorkspaceDirectoryAvailability } from "@/lib/directoryAvailability"
+import { contextTokensFromBreakdown } from "@/stores/utils/tokenUtils"
 
 export type { AttachedFile }
 
@@ -1248,7 +1249,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     })()
     if (messages.length === 0) return null
 
-    type AssistantTokens = { input: number; output: number; reasoning: number; cache: { read: number; write: number } }
+    type AssistantTokens = { total?: number; input: number; output: number; reasoning: number; cache: { read: number; write: number } }
     let lastTokens: AssistantTokens | undefined
     let lastMessageId: string | undefined
     for (let i = messages.length - 1; i >= 0; i--) {
@@ -1256,7 +1257,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       if (msg.role !== "assistant") continue
       const tokens = (msg as { tokens?: AssistantTokens }).tokens
       if (!tokens) continue
-      const total = tokens.input + tokens.output + tokens.reasoning + (tokens.cache?.read ?? 0) + (tokens.cache?.write ?? 0)
+      const total = contextTokensFromBreakdown(tokens)
       if (total > 0) {
         lastTokens = tokens
         lastMessageId = msg.id
@@ -1266,7 +1267,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
 
     if (!lastTokens) return null
 
-    const totalTokens = lastTokens.input + lastTokens.output + lastTokens.reasoning + (lastTokens.cache?.read ?? 0) + (lastTokens.cache?.write ?? 0)
+    const totalTokens = contextTokensFromBreakdown(lastTokens)
     const thresholdLimit = contextLimit > 0 ? contextLimit : 200000
     const percentage = contextLimit > 0 ? Math.round((totalTokens / contextLimit) * 100) : 0
     const normalizedOutput = outputLimit > 0 ? Math.round((lastTokens.output / outputLimit) * 100) : undefined

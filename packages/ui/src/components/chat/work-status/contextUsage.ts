@@ -13,7 +13,10 @@
  * global read to race with.
  */
 
+import { contextTokensFromBreakdown } from '@/stores/utils/tokenUtils';
+
 type MessageTokens = {
+  total?: number;
   input?: number;
   output?: number;
   reasoning?: number;
@@ -37,14 +40,6 @@ type WorkStatusContextUsage = {
 /** The store's own fallback when a model exposes no context limit. */
 export const DEFAULT_CONTEXT_LIMIT = 200_000;
 
-const sumTokens = (tokens: MessageTokens): number => (
-  (tokens.input ?? 0)
-  + (tokens.output ?? 0)
-  + (tokens.reasoning ?? 0)
-  + (tokens.cache?.read ?? 0)
-  + (tokens.cache?.write ?? 0)
-);
-
 /**
  * Usage from the newest assistant message that reported a non-zero token count.
  * Each assistant turn reports the whole window it saw, so the latest one is the
@@ -60,7 +55,7 @@ export const computeContextUsage = (
     const message = messages[index];
     if (message?.role !== 'assistant' || !message.tokens) continue;
 
-    const totalTokens = sumTokens(message.tokens);
+    const totalTokens = contextTokensFromBreakdown(message.tokens);
     if (totalTokens <= 0) continue;
 
     const limit = contextLimit > 0 ? contextLimit : DEFAULT_CONTEXT_LIMIT;

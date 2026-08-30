@@ -61,4 +61,13 @@ describe('computeContextUsage', () => {
     const usage = computeContextUsage([assistant({ input: 10 })], 100);
     expect(usage?.totalTokens).toBe(10);
   });
+
+  test('prefers the server total over accumulated internal round trips', () => {
+    const usage = computeContextUsage(
+      [assistant({ total: 232_872, input: 0, output: 14_523, cache: { read: 3_291_956, write: 0 } })],
+      1_000_000,
+    );
+    expect(usage?.totalTokens).toBe(232_872);
+    expect(usage?.percent.toFixed(4)).toBe('23.2872');
+  });
 });
