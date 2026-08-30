@@ -2177,6 +2177,15 @@ fork 已有丰富的 surface 组织（#62 surface rail + ContextSidebarTab + Con
 - Windows 右侧 controls 去除多余 header padding，close hover 改用 status error theme tokens，对齐 `57c9ec2fd`；fork Mini Chat 当前没有该上游 frameless-controls 结构，因此不造无调用方样式。
 - `bcab6d68a` self-signed loopback Browser panel certificate exception 尚未落地：需要接入当前由其他 agent 修改中的 `packages/electron/main.mjs`。为避免把 settings-lock/SSH WIP 一并提交，本项保持 open，待 main WIP 收口后补 helper + hook + shell test。
 
+### #159 Phase 2：Loopback certificate policy boundary（2026-08-30）
+
+- 新增独立 `browser-panel-security.mjs`，只允许 `https:` 的 `localhost`、`127.0.0.1`、`[::1]`，且 Electron 错误必须精确为 `net::ERR_CERT_AUTHORITY_INVALID`。
+- 公网域名、localhost suffix 欺骗、`0.0.0.0`、畸形 URL、过期证书等其他错误继续 fail closed；没有使用通配 host、私网网段或全局 `ignore-certificate-errors`。
+- 对应提交：`8db21bd59 fix(browser): constrain loopback certificate bypass`。
+- 当前 fork 的 Electron main 尚无上游 `BROWSER_PANEL_PARTITION / hardenBrowserPanelSession`；这是 [#135](https://coding.s-s.city/songsong/openchamber/-/issues/135) Browser workspace 的前置，不只是 main 文件脏。现在把 handler 挂到全局 session 会扩大证书绕过范围，因此有意不接无 owner hook。`#135` 建立专用 partition 后再绑定 `contents.session === panelSession`。
+
+验证：Node test 3/3 ✅（loopback allow、non-loopback deny、other-error/malformed deny）；全 workspace type-check/lint/build ✅，build 仅有既有 chunk/import warnings。[#159](https://coding.s-s.city/songsong/openchamber/-/issues/159) 保持 open：等待 `#135` 专用 Browser partition 后接 handler，并完成 installed shell + iOS 真机 QA。
+
 ### #155 Phase 1：Config-defined custom provider auth gate（2026-08-30）
 
 上游来源：`ddd4b5ed8`。fork 已有 config-defined custom provider CRUD、scope/source 识别和 models/baseURL，因此只修真实缺口：
