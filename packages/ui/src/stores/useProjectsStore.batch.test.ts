@@ -69,4 +69,12 @@ describe('useProjectsStore.addProjects', () => {
     expect(added).toEqual([]);
     expect(useProjectsStore.getState().projects.map((project) => project.path)).toEqual(['/one']);
   });
+
+  test('derives labels exactly from folder names and preserves manual labels', () => {
+    const added = useProjectsStore.getState().addProjects(['/repo/.ssh', '/repo/opencode-claude']);
+    const manual = useProjectsStore.getState().addProject('/repo/custom_name', { label: 'My custom project' });
+
+    expect(added.map((project) => project.label)).toEqual(['.ssh', 'opencode-claude']);
+    expect(manual?.label).toBe('My custom project');
+  });
 });

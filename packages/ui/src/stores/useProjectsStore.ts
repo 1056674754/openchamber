@@ -135,8 +135,12 @@ const deriveProjectLabel = (path: string): string => {
     return 'Root';
   }
   const segments = normalized.split('/').filter(Boolean);
-  const raw = segments[segments.length - 1] || normalized;
-  return raw.replace(/[-_]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+  return segments[segments.length - 1] || normalized;
+};
+
+const legacyAutoProjectLabel = (path: string): string => {
+  const derived = deriveProjectLabel(path);
+  return derived.replace(/[-_]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 };
 
 const isUnsupportedRemoteProjectPath = (path: string): boolean => {
@@ -242,7 +246,10 @@ const sanitizeProjects = (value: unknown): ProjectEntry[] => {
     };
 
     if (typeof candidate.label === 'string' && candidate.label.trim().length > 0) {
-      project.label = candidate.label.trim();
+      const storedLabel = candidate.label.trim();
+      project.label = storedLabel === legacyAutoProjectLabel(normalizedPath)
+        ? deriveProjectLabel(normalizedPath)
+        : storedLabel;
     }
     if (typeof candidate.icon === 'string' && candidate.icon.trim().length > 0) {
       project.icon = candidate.icon.trim();

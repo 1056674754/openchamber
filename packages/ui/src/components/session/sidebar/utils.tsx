@@ -313,9 +313,7 @@ export const resolveSessionDiffStats = (summary?: SessionSummaryMeta): { additio
 };
 
 export const formatProjectLabel = (label: string): string => {
-  return label
-    .replace(/[-_]/g, ' ')
-    .replace(/\b\w/g, (char) => char.toUpperCase());
+  return label.trim();
 };
 
 export const renderHighlightedText = (text: string, query: string): React.ReactNode => {

@@ -4,7 +4,13 @@ mock.module('@opencode-ai/sdk/v2', () => ({
   createOpencodeClient: ({ baseUrl }: { baseUrl: string }) => ({ baseUrl }),
 }));
 
-const { isPathWithinProject, resolveRemoteIndicatorProject } = await import('./utils');
+const { formatProjectLabel, isPathWithinProject, resolveRemoteIndicatorProject } = await import('./utils');
+
+test('project labels preserve the exact folder spelling', () => {
+  expect(formatProjectLabel(' .ssh ')).toBe('.ssh');
+  expect(formatProjectLabel('opencode-claude')).toBe('opencode-claude');
+  expect(formatProjectLabel('custom_name')).toBe('custom_name');
+});
 
 describe('isPathWithinProject', () => {
   test('matches child directories for root projects', () => {

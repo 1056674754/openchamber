@@ -27,6 +27,15 @@ describe('notification template runtime zen models', () => {
   });
 });
 
+describe('notification project labels', () => {
+  it('preserves exact folder spelling', () => {
+    const runtime = createRuntime();
+
+    expect(runtime.formatProjectLabel(' .ssh ')).toBe('.ssh');
+    expect(runtime.formatProjectLabel('opencode-claude')).toBe('opencode-claude');
+  });
+});
+
 describe('notification template message extraction', () => {
   afterEach(() => {
     globalThis.fetch = originalFetch;

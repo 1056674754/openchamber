@@ -2606,3 +2606,14 @@ v1.20.0-sscity 尚未宣布完成：当前未关闭 `#135/#140/#142-#151/#154/#1
 - Context Sidebar 仍分别展示 input/output/reasoning/cache buckets，但总数使用 server final-round total，细项与总数不强行相加，因为细项表达累计成本、total 表达当前窗口。
 
 验证：token/session/context surfaces Bun 4 files / 32 tests ✅，含真实 multi-step payload regression（23.2872% 而非 330.6%）、older-server fallback、part-level tokens。UI type-check/lint ✅；全 workspace build 与 diff check 见本 phase 最终验证。[#148](https://coding.s-s.city/songsong/openchamber/-/issues/148) 保持 open：Office extraction bounds、embedded restoration审计与 large-text/virtual preview follow-up 尚未完成。
+
+### #148 Phase 3：Exact folder-derived project labels（2026-08-30）
+
+上游来源：`75bd5ac6a`：
+
+- 自动 label 直接使用目录 basename，`.ssh`、`opencode-claude`、`custom_name` 不再被改写成 `.Ssh`、`Opencode Claude`、`Custom Name`。
+- persisted label 仅在它精确等于旧版本自动 title-case 结果时迁回真实 folder name；用户手动 rename 的 label 保留。
+- Sidebar、Settings project selector、window title 和 notification `project_name` 使用同一“trim only”显示规则，避免一个项目在不同 surface 有多个名字。
+- local/remote project ID、serverId/path ownership 与用户自定义 label 不变。
+
+验证：Project/sidebar Bun 15/15 ✅；notification template Vitest 6/6 ✅；覆盖 dot folder、dash/underscore 和 manual label。全 workspace type/lint/build 与 diff check 见本 phase 最终验证。[#148](https://coding.s-s.city/songsong/openchamber/-/issues/148) 保持 open：Office extraction bounds、embedded restoration审计与 large-text/virtual preview follow-up 尚未完成。
