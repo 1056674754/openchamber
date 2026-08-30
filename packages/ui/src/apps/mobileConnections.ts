@@ -25,6 +25,7 @@ import { adoptRelayTunnel, isRelayModeActive } from '@/lib/relay/runtime-tunnel'
 import { createRelayTunnelClient } from '@/lib/relay/tunnel-client';
 import { addRuntimeProxyHeaders, runtimeFetch } from '@/lib/runtime-fetch';
 import { getRuntimeApiBaseUrl, getRuntimeKey, switchRuntimeEndpoint } from '@/lib/runtime-switch';
+import { recordMobileConnectDebug } from './mobileConnectionDebug';
 
 const MOBILE_CONNECTIONS_STORAGE_KEY = 'openchamber.mobile.connections.v1';
 const MOBILE_SECURE_STORAGE_PREFIX = 'openchamber.mobile.';
@@ -390,11 +391,19 @@ const logDetail = (detail: Record<string, unknown>): string => {
 };
 
 const logConnect = (step: string, detail: Record<string, unknown> = {}): void => {
-  console.info('[mobile-connect]', step, logDetail(detail));
+  const serialized = logDetail(detail);
+  console.info('[mobile-connect]', step, serialized);
+  recordMobileConnectDebug(step, serialized);
 };
 
 const logStorage = (step: string, detail: Record<string, unknown> = {}): void => {
-  console.info('[mobile-storage]', step, logDetail(detail));
+  const serialized = logDetail(detail);
+  console.info('[mobile-storage]', step, serialized);
+  recordMobileConnectDebug(step, serialized);
+};
+
+export const logMobileConnectEvent = (step: string, detail: Record<string, unknown> = {}): void => {
+  logConnect(step, detail);
 };
 
 const parseMaybeJson = (value: unknown): unknown => {

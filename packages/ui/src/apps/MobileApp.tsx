@@ -17,11 +17,14 @@ import {
   getAutoConnectTargetLabel,
   isActiveRuntimeConnection,
   mobileTransportCapability,
+  logMobileConnectEvent,
   useMobileConnection,
   type MobileConnectPhase,
   type MobileSavedConnection,
   type MobileTransportCapability,
 } from '@/apps/mobileConnections';
+import { MobileConnectionDebugPanel } from '@/apps/MobileConnectionDebugPanel';
+import { useDebugPanelLongPress } from '@/apps/mobileConnectionDebug';
 import { cancelActiveQrScan, scanConnectionQr } from '@/apps/mobileQrScan';
 import { parsePairingConnectionPayload } from '@/lib/connectionPayload';
 import { isCapacitorApp } from '@/lib/platform';
@@ -99,6 +102,8 @@ export const MobileApp: React.FC<MobileAppProps> = ({ apis }) => {
   const [runtimeUrl, setRuntimeUrl] = React.useState(() => getRuntimeApiBaseUrl());
   const [autoConnectTried, setAutoConnectTried] = React.useState(false);
   const [autoConnectLabel, setAutoConnectLabel] = React.useState<string | null>(null);
+  const [debugOpen, setDebugOpen] = React.useState(false);
+  const debugLongPress = useDebugPanelLongPress(React.useCallback(() => setDebugOpen(true), []));
 
   const onConnected = React.useCallback(() => {
     setRuntimeUrl(getRuntimeApiBaseUrl());
@@ -127,6 +132,11 @@ export const MobileApp: React.FC<MobileAppProps> = ({ apis }) => {
   React.useEffect(() => {
     markAppBootReady();
     return subscribeRuntimeEndpointChanged((detail) => {
+      logMobileConnectEvent('endpoint:changed', {
+        runtimeKey: detail.runtimeKey || 'none',
+        previousRuntimeKey: detail.previousRuntimeKey || 'none',
+        connected: Boolean(detail.apiBaseUrl),
+      });
       setRuntimeUrl(detail.apiBaseUrl);
     });
   }, []);
@@ -305,7 +315,9 @@ export const MobileApp: React.FC<MobileAppProps> = ({ apis }) => {
             await conn.removeConnection(saved.id);
           }}
           onDisconnected={onDisconnected}
+          onOpenDiagnostics={() => setDebugOpen(true)}
         />
+        {debugOpen ? <MobileConnectionDebugPanel onClose={() => setDebugOpen(false)} /> : null}
       </div>
     );
   }
@@ -314,13 +326,14 @@ export const MobileApp: React.FC<MobileAppProps> = ({ apis }) => {
     return (
       <RuntimeAPIProvider apis={apis}>
         <div className="flex min-h-[100dvh] flex-col items-center justify-center gap-4 bg-background px-6 text-center header-safe-area bottom-safe-area">
-          <span className="typography-ui-label font-semibold tracking-tight">OpenChamber</span>
+          <span className="typography-ui-label font-semibold tracking-tight" {...debugLongPress}>OpenChamber</span>
           <div className="flex items-center gap-2">
             <Icon name="loader-4" className="size-4 animate-spin text-muted-foreground" />
             <span className="typography-meta text-muted-foreground">
               {t('mobile.connect.connectingTo', { label: autoConnectLabel ?? '' })}
             </span>
           </div>
+          {debugOpen ? <MobileConnectionDebugPanel onClose={() => setDebugOpen(false)} /> : null}
         </div>
       </RuntimeAPIProvider>
     );
@@ -339,7 +352,7 @@ export const MobileApp: React.FC<MobileAppProps> = ({ apis }) => {
       ) : null}
       <div className="flex min-h-[100dvh] flex-col bg-background text-foreground header-safe-area">
         <header className="flex items-center px-3 py-3">
-          <span className="typography-ui-label font-semibold tracking-tight">OpenChamber</span>
+          <span className="typography-ui-label font-semibold tracking-tight" {...debugLongPress}>OpenChamber</span>
         </header>
         <div className="mx-auto flex w-full max-w-md flex-1 flex-col gap-4 px-3 pb-4 bottom-safe-area">
           {conn.connections.length > 0 ? (
@@ -460,6 +473,7 @@ export const MobileApp: React.FC<MobileAppProps> = ({ apis }) => {
             </form>
           </div>
         </div>
+        {debugOpen ? <MobileConnectionDebugPanel onClose={() => setDebugOpen(false)} /> : null}
       </div>
     </RuntimeAPIProvider>
   );

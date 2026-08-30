@@ -12,6 +12,7 @@ import {
   useMobileInstancesSheetOpen,
 } from '@/apps/mobileInstancesUi';
 import { Button } from '@/components/ui/button';
+import { Icon } from '@/components/icon/Icon';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { isRelayModeActive } from '@/lib/relay/runtime-tunnel';
@@ -27,6 +28,7 @@ type MobileInstancesSheetProps = {
   onSelect: (connection: MobileSavedConnection) => Promise<SelectResult>;
   onRemove: (connection: MobileSavedConnection) => void | Promise<void>;
   onDisconnected?: () => void;
+  onOpenDiagnostics?: () => void;
 };
 
 const transportLabelKey = (capability: MobileTransportCapability): I18nKey => {
@@ -51,6 +53,7 @@ export const MobileInstancesSheet: React.FC<MobileInstancesSheetProps> = ({
   onSelect,
   onRemove,
   onDisconnected,
+  onOpenDiagnostics,
 }) => {
   const open = useMobileInstancesSheetOpen();
   const { t } = useI18n();
@@ -79,6 +82,19 @@ export const MobileInstancesSheet: React.FC<MobileInstancesSheetProps> = ({
       onClose={onClose}
       footer={(
         <div className="flex gap-2 px-3 pb-3">
+          {onOpenDiagnostics ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              className="h-9 w-9 shrink-0"
+              aria-label={t('mobile.connectionDebug.title')}
+              title={t('mobile.connectionDebug.title')}
+              onClick={onOpenDiagnostics}
+            >
+              <Icon name="information" className="h-4 w-4" />
+            </Button>
+          ) : null}
           <Button
             type="button"
             variant="destructive"

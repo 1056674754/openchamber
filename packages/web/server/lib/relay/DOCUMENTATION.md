@@ -81,6 +81,8 @@ belong to a different machine.
 
 Mobile cold launch first uses fast transport probes, releases the splash on that verdict, then performs one full-budget background retry that cannot override a manual connection. Resume probes use a 4s/10s grace ladder and finish with the full 8-second direct/relay budget. Tokenless saved connections remain valid when server auth was disabled; only metadata that says a token exists while secure storage cannot provide it is treated as missing credential.
 
+Mobile connection diagnostics mirror the already-sanitized probe/storage lifecycle into an in-memory, current-launch-only ring of 300 entries. The connect title supports a 700ms movement-cancelled long press; the connected instances sheet exposes a diagnostics icon. The panel snapshots entries on open and offers one-tap copy. Tokens and raw secrets are never passed to the recorder.
+
 ## Two implementations, kept in sync
 
 The E2EE and framing logic exists twice: TypeScript in `packages/ui/src/lib/relay/` (shared by the client and the normative reference) and a JavaScript mirror in this module (the host, which is plain JS ESM). They **must stay byte-compatible** — a client encrypted by one must decrypt on the other. A cross-compatibility test (`cross-compat.test.js`) imports the TS modules directly and exercises a full TS-client ↔ JS-host exchange. Any change to the wire format, frame codec, handshake, or batching must update both sides and keep that test green.

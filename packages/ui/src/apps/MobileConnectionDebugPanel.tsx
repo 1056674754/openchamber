@@ -1,0 +1,50 @@
+import React from 'react';
+
+import { Icon } from '@/components/icon/Icon';
+import { Button } from '@/components/ui/button';
+import { copyTextToClipboard } from '@/lib/clipboard';
+import { useI18n } from '@/lib/i18n';
+import {
+  formatMobileConnectDebugEntry,
+  getMobileConnectDebugEntries,
+  getMobileConnectDebugText,
+} from './mobileConnectionDebug';
+
+export const MobileConnectionDebugPanel: React.FC<{ onClose: () => void }> = ({ onClose }) => {
+  const { t } = useI18n();
+  const [copied, setCopied] = React.useState(false);
+  const entries = React.useMemo(() => getMobileConnectDebugEntries(), []);
+  const handleCopy = React.useCallback(() => {
+    void copyTextToClipboard(getMobileConnectDebugText()).then((result) => {
+      if (!result.ok) return;
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2_000);
+    });
+  }, []);
+
+  return (
+    <div className="fixed inset-0 z-[70] flex flex-col bg-background pb-[var(--safe-area-inset-bottom,env(safe-area-inset-bottom,0px))] pt-[var(--safe-area-inset-top,env(safe-area-inset-top,0px))] text-foreground">
+      <div className="flex items-center justify-between gap-2 border-b border-border/70 px-4 py-2.5">
+        <h2 className="min-w-0 truncate typography-ui-label text-foreground">{t('mobile.connectionDebug.title')}</h2>
+        <div className="flex shrink-0 items-center gap-1.5">
+          <Button type="button" variant="outline" size="sm" onClick={handleCopy} disabled={entries.length === 0}>
+            <Icon name={copied ? 'check' : 'file-copy'} className="h-4 w-4" />
+            {copied ? t('mobile.connectionDebug.copied') : t('mobile.connectionDebug.copy')}
+          </Button>
+          <Button type="button" variant="ghost" size="icon" aria-label={t('mobile.connectionDebug.close')} onClick={onClose}>
+            <Icon name="close" className="h-[18px] w-[18px]" />
+          </Button>
+        </div>
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-4 py-3">
+        {entries.length === 0 ? (
+          <p className="typography-small text-muted-foreground">{t('mobile.connectionDebug.empty')}</p>
+        ) : (
+          <pre className="whitespace-pre-wrap break-words typography-code text-muted-foreground">
+            {entries.map(formatMobileConnectDebugEntry).join('\n')}
+          </pre>
+        )}
+      </div>
+    </div>
+  );
+};

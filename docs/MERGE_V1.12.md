@@ -2454,3 +2454,13 @@ QA 事故记录：HMR server 复用了安装版 managed OpenCode `54185`，退�
 - 转换/分享逻辑抽为独立 `mobileShare.ts`，MessageBody 不持有 platform-specific blob 细节。
 
 验证：mobile share 2/2 ✅；UI type-check/lint ✅；`git diff --check` ✅。`#137` 保持 open：connection diagnostics 与 private-relay dev tunnel；FilesView mobile preview/download 已由 fork 的 runtime Files API / binary reader 等价覆盖，且当前该文件无本批改动。
+
+### #137 Phase 14：On-device mobile connection diagnostics（2026-08-30）
+
+- 现有 `logConnect/logStorage` 的已序列化、无 token detail 同步写入 current-launch-only in-memory ring，最多 300 entries；启动时删除上游早期遗留持久化 key，不跨启动积累敏感/陈旧信息。
+- connect 页 OpenChamber 标题 700ms 长按打开诊断，移动超过 10px 取消，触发后吞掉 synthetic click；已连接的 Instances sheet 同时提供 familiar information icon。
+- panel open 时 snapshot 当前日志，避免复制过程中 live update 抖动；显示毫秒时间、step/detail，并使用 shared clipboard helper 一键复制。
+- title/copy/copied/close/empty 文案补齐全部 10 个 locale；只使用现有 theme/status tokens。
+- 上游 v1.18.4 `dev-tunnel/client.js` 明确拒绝 relay/custom-scheme base URL，因此 private-relay dev tunnel 并非 v1.20 capability；本轮不创建超出上游的 transport。direct HTTP(S) remote dev tunnel 已由 #135 Phase 3 完成。
+
+验证：mobile diagnostics + connection storage 2 files / 17 tests ✅；UI type-check/lint ✅；`git diff --check` ✅。至此 [#137](https://coding.s-s.city/songsong/openchamber/-/issues/137) 的 pairing origin、relay body、transient reconnect、tokenless resume、ngrok、mobile share/download 与 diagnostics 均已等价，可关闭。
