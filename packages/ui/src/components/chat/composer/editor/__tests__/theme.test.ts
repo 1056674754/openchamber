@@ -1,15 +1,28 @@
 import { describe, expect, test } from 'bun:test';
-import { EditorState } from '@codemirror/state';
+import { EditorState, type Extension } from '@codemirror/state';
 
 import {
     COMPOSER_EDITOR_THEME_SPEC,
+    IOS_SELECTION_THEME_SPEC,
     NATIVE_SELECTION_THEME_SPEC,
     composerEditorTheme,
+    composerIOSSelectionExtension,
     composerNativeSelectionExtension,
+    composerSelectionExtension,
+    isCodeMirrorIOSNavigator,
 } from '../theme';
 
 const selectors = Object.keys(COMPOSER_EDITOR_THEME_SPEC);
 const declarations = JSON.stringify(COMPOSER_EDITOR_THEME_SPEC);
+
+function installationError(extension: Extension): string | null {
+    try {
+        EditorState.create({ extensions: [extension] });
+        return null;
+    } catch (error) {
+        return String(error);
+    }
+}
 
 describe('composerEditorTheme', () => {
     /**
@@ -125,6 +138,10 @@ describe('composerEditorTheme', () => {
             expect(rule.background.includes('transparent')).toBe(true);
         }
     });
+
+    test('the common theme does not re-show the native selection', () => {
+        expect(selectors.some((selector) => selector.includes('::selection'))).toBe(false);
+    });
 });
 
 describe('composerNativeSelectionTheme', () => {
@@ -217,5 +234,75 @@ describe('composerNativeSelectionTheme', () => {
         const tokens = [...nativeDeclarations.matchAll(/var\((--[A-Za-z-]+)/g)].map((m) => m[1]);
         expect(tokens.length > 0).toBe(true);
         expect(tokens.filter((token) => /[A-Z]/.test(token))).toEqual([]);
+    });
+});
+
+describe('composerIOSSelectionExtension', () => {
+    const layerRule = IOS_SELECTION_THEME_SPEC['& .cm-scroller > .cm-selectionLayer'];
+    const scrollerRule = IOS_SELECTION_THEME_SPEC['& .cm-scroller'];
+    const selectionBackgroundRule = IOS_SELECTION_THEME_SPEC['& .cm-selectionBackground'];
+
+    test('it compiles and can be installed', () => {
+        expect(installationError(composerIOSSelectionExtension)).toBeNull();
+    });
+
+    test('raises CodeMirror selection handles above token backgrounds', () => {
+        expect(layerRule.zIndex).toBe('100 !important');
+    });
+
+    test('does not intercept touch gestures', () => {
+        expect(layerRule.pointerEvents).toBe('none');
+    });
+
+    test('reserves unclipped room for both handles without moving text', () => {
+        expect(scrollerRule.paddingBlock).toBe('8px');
+        expect(scrollerRule.marginBlock).toBe('-8px');
+    });
+
+    test('does not stack a synthetic fill over the iOS system highlight', () => {
+        expect(selectionBackgroundRule.background).toBe('transparent !important');
+    });
+
+    test('does not add a second selection implementation', () => {
+        expect(Object.keys(IOS_SELECTION_THEME_SPEC)).toEqual([
+            '& .cm-scroller',
+            '& .cm-scroller > .cm-selectionLayer',
+            '& .cm-selectionBackground',
+        ]);
+    });
+});
+
+describe('composerSelectionExtension', () => {
+    test('uses CodeMirror handles only on its exact iOS branch', () => {
+        expect(composerSelectionExtension(true)).toBe(composerIOSSelectionExtension);
+        expect(composerSelectionExtension(false)).toBe(composerNativeSelectionExtension);
+    });
+
+    test('matches CodeMirror 6.43.9 platform detection', () => {
+        expect(isCodeMirrorIOSNavigator(
+            'Mozilla/5.0 (iPhone; CPU iPhone OS 18_6) Mobile/15E148 Safari/604.1',
+            'Apple Computer, Inc.',
+            5,
+        )).toBe(true);
+        expect(isCodeMirrorIOSNavigator(
+            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15)',
+            'Apple Computer, Inc.',
+            5,
+        )).toBe(true);
+        expect(isCodeMirrorIOSNavigator(
+            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15)',
+            'Google Inc.',
+            5,
+        )).toBe(false);
+        expect(isCodeMirrorIOSNavigator(
+            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15)',
+            'Apple Computer, Inc.',
+            0,
+        )).toBe(false);
+        expect(isCodeMirrorIOSNavigator(
+            'Mozilla/5.0 (Windows NT 10.0; Trident/7.0; rv:11.0)',
+            'Apple Computer, Inc.',
+            5,
+        )).toBe(false);
     });
 });

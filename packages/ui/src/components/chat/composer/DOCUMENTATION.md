@@ -64,20 +64,22 @@ question of design, not of feasibility.
 Selection rendering: every device runs CodeMirror's `drawSelection()` — it
 keeps typing on the drawn-selection code path, and removing it makes
 CodeMirror enforce cursor association on the native selection, which iOS
-answers with severe input lag. Every device also layers
-`composerNativeSelectionExtension` (`editor/theme.ts`) on top: it re-shows
-the native selection, and — only while a range is selected — the native caret,
-hiding the painted layers those replace. The native selection is the one that
-shows for two reasons: the painted layer sits behind the content, so tokens
-with their own background (inline code, fences) cover it completely; and
-iOS's selection drag handles attach to the visible native selection and take
-their colour from the caret, so a transparent caret means invisible handles.
-The range-only caret scoping is load-bearing — a native caret visible while
-typing makes WebKit re-render its caret UI after every keystroke, felt as
-severe input lag. The selection tint comes from `--primary`, not the selection
-token:
-themes define `--interactive-selection` with its own alpha, so a translucent
-mix of it is nearly invisible.
+answers with severe input lag. What differs is who paints the selection;
+`composerSelectionExtension` (`editor/theme.ts`) picks once per editor.
+
+Outside CodeMirror 6.43.9's exact iOS predicate,
+`composerNativeSelectionExtension` re-shows the native selection and, only
+while a range is selected, the native caret. The range-only caret scoping is
+load-bearing: a native caret visible while typing makes WebKit repaint its
+caret UI after every decoration update.
+
+On CodeMirror's iOS branch, `composerIOSSelectionExtension` keeps the built-in
+selection-handle geometry. It raises CodeMirror's existing selection layer
+above opaque token backgrounds, expands the clipping area by the handles' 8px
+overhang without moving text, and leaves the layer transparent to touch. The
+synthetic selection rectangle is transparent because iOS still paints its
+system highlight; drawing both produces visibly different stacked geometry.
+Do not add custom handles or restore native selection paint on this branch.
 
 `composerLanguage.ts` retokenizes the whole document on every change. The
 composer holds a prompt, not a source file: it is short enough that a full pass

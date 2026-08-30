@@ -2551,3 +2551,14 @@ v1.20.0-sscity 尚未宣布完成：当前未关闭 `#135/#140/#142-#151/#154/#1
 - 三个新增 UI key 已补齐 en/de/es/ja/ko/pl/pt-BR/tr/uk/zh-CN/zh-TW。
 
 验证：Projects store Bun 4/4 ✅（批量、normalize、duplicate、remote/local 同路径、invalid）；i18n focused 4/4 ✅；UI type-check/lint ✅。完整 workspace build/检查见本 phase 提交验证。[#166](https://coding.s-s.city/songsong/openchamber/-/issues/166) 保持 open：fork VS Code 当前是 single-workspace bootstrap，且其 runtime API 类型正被并行 remote-namespace WIP 修改；不能把 upstream multi-folder bridge 静默套入或假称 parity。
+
+### #159 Phase 1：iOS CodeMirror selection handles（2026-08-30）
+
+上游来源：`26b0ad5bd`（官方 dependency set，不是自行追 npm latest）：
+
+- CodeMirror 兼容组升级到 `view 6.43.9`、`state 6.7.1`、`language 6.12.4` 及上游配套 autocomplete/commands/lang/lint/search/vim versions；root overrides 固定同一实例，避免私有 Facet/Language 类型跨版本。
+- 所有平台继续安装 `drawSelection()`，保留 wrapped input / IME 的低延迟路径。非 iOS 继续使用 native-selection fallback；只有与 CodeMirror 6.43.9 完全相同的 iOS predicate 命中时，才切换到 CodeMirror 自带 handles。
+- iOS 只抬高既有 selection layer、为 8px handles 扩展 clip area、保持 pointer-events none，并隐藏与系统 selection overlay 重叠的 synthetic fill；不再恢复会让 WebKit 每次 decoration redraw 重排的 native caret/selection。
+- composer 模块文档同步记录平台分流与真机 QA 边界。
+
+验证：composer Bun 13 files / 232 tests ✅（selection/theme 25 条）；CodeMirror forced reinstall 后确认 `language-data` 依赖统一解析到 6.12.4/6.7.1；UI type-check ✅。全 workspace type/lint/build 与 diff check 见本 phase 最终验证。WKWebView selection drag/IME 必须留作真机 matching-surface QA，不能用单测冒充。[#159](https://coding.s-s.city/songsong/openchamber/-/issues/159) 保持 open：self-signed loopback Browser 仍需接 dirty Electron main，其他 shell parity 也需最终 installed-runtime QA。

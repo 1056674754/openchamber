@@ -5,6 +5,7 @@
  * language layer emits, so the composer and the message list stay in step.
  */
 
+import type { Extension } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 
 /**
@@ -89,20 +90,13 @@ export const COMPOSER_EDITOR_THEME_SPEC = {
     '&.cm-editor.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground': {
         background: 'color-mix(in srgb, var(--interactive-selection) 55%, transparent)',
     },
-    // The native selection still shows through in places CodeMirror does not
-    // draw over, such as the placeholder. Same colour as the native-selection
-    // theme below, for the same reason: the selection token carries its own
-    // alpha and reads as nearly invisible when mixed down again.
-    '& ::selection': {
-        background: 'color-mix(in srgb, var(--primary) 25%, transparent)',
-    },
 };
 
 export const composerEditorTheme = EditorView.theme(COMPOSER_EDITOR_THEME_SPEC);
 
 /**
- * Every device keeps `drawSelection()` but shows the NATIVE selection through
- * it, for two independent reasons:
+ * Outside CodeMirror's iOS branch, devices keep `drawSelection()` but show the
+ * NATIVE selection through it, for two independent reasons:
  *
  * - iOS attaches its selection handles (the draggable pins after a
  *   double-tap) to the *visible* native selection, and `drawSelection()`
@@ -172,8 +166,59 @@ export const composerNativeSelectionTheme = EditorView.theme(NATIVE_SELECTION_TH
  * re-evaluates on every update, so the class follows the selection with no
  * listener of its own.
  */
-export const composerNativeSelectionExtension = [
+export const composerNativeSelectionExtension: Extension = [
     composerNativeSelectionTheme,
     EditorView.editorAttributes.of((view) =>
         view.state.selection.main.empty ? null : { class: 'oc-native-range' }),
 ];
+
+export const IOS_SELECTION_THEME_SPEC = {
+    '& .cm-scroller': {
+        marginBlock: '-8px',
+        paddingBlock: '8px',
+    },
+    '& .cm-scroller > .cm-selectionLayer': {
+        // CodeMirror writes z-index inline; important is required to raise the
+        // built-in iOS handles above opaque inline-code backgrounds.
+        zIndex: '100 !important',
+        pointerEvents: 'none',
+    },
+    '& .cm-selectionBackground': {
+        // iOS keeps its system selection overlay. A second synthetic fill has
+        // different geometry, so leave only CodeMirror's handles visible.
+        background: 'transparent !important',
+    },
+};
+
+export const composerIOSSelectionExtension: Extension = EditorView.theme(IOS_SELECTION_THEME_SPEC);
+
+export function composerSelectionExtension(
+    useCodeMirrorIOSHandles: boolean = usesCodeMirrorIOSSelectionHandles(),
+): Extension {
+    return useCodeMirrorIOSHandles
+        ? composerIOSSelectionExtension
+        : composerNativeSelectionExtension;
+}
+
+/** Mirrors @codemirror/view 6.43.9's iOS feature predicate. */
+export function isCodeMirrorIOSNavigator(
+    userAgent: string,
+    vendor: string,
+    maxTouchPoints: number,
+): boolean {
+    const isIE = /Edge\/(\d+)/.test(userAgent)
+        || /MSIE \d/.test(userAgent)
+        || /Trident\/(?:[7-9]|\d{2,})\..*rv:(\d+)/.test(userAgent);
+    if (isIE || !/Apple Computer/.test(vendor)) return false;
+    return /Mobile\/\w+/.test(userAgent) || maxTouchPoints > 2;
+}
+
+function usesCodeMirrorIOSSelectionHandles(): boolean {
+    const nav = globalThis.navigator;
+    if (!nav) return false;
+    return isCodeMirrorIOSNavigator(
+        nav.userAgent || '',
+        nav.vendor || '',
+        nav.maxTouchPoints ?? 0,
+    );
+}
