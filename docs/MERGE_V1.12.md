@@ -2230,6 +2230,19 @@ fork 已有丰富的 surface 组织（#62 surface rail + ContextSidebarTab + Con
 
 验证：catalog/API Bun 2 files / 10 tests ✅；UI type-check/lint ✅；`git diff --check` ✅。[#142](https://coding.s-s.city/songsong/openchamber/-/issues/142) 保持 open，下一 phase 接 Settings 页面、Provider setup、remove confirmation、11 locale 和 matching-surface QA。
 
+### #142 Phase 2：Installable Integrations Settings surface（2026-08-30）
+
+- 新增 local/remote 都可见的 Settings → Integrations 单页，并标为 experimental；Claude Code / Cursor 使用原生 Collapsible、Provider logo、状态 badge 与 install/update/setup/docs/remove actions。
+- 页面 catalog state 只属于当前 Settings instance；切换实例会 abort 旧请求并清空 entries、registry、pending action、展开状态与 remove target，迟到响应不能覆盖新实例。
+- install/update/remove 固定写 user scope，保留原始后端错误到 toast；remove 必须经过确认。重复 user entries 转到完整 Plugins 管理页，不猜测应该删除哪一个。
+- setup 在 provider 真正出现在所选实例的 `/api/config/providers` 后才跳到 Providers；remote 同样检查 remote provider list，不用 local configStore 冒充。
+- 服务端 pending restart snapshot 与 `openchamber:pending-config-restart` 实时事件接入页面；切页/重开仍显示 Apply & Restart 提示，pending 时禁止过早进入 provider setup，Apply 完成后清除本地 restart flag。
+- Integrations metadata、导航 icon、beta badge 与 11 runtime locale 全部接入；翻译 fragment 以 English key contract 做 parity test，且明确没有已被上游撤下的 Command Code 安装文案。
+
+验证：catalog/API/metadata/i18n Bun 4 files / 13 tests ✅；full workspace type-check/lint/build ✅；`git diff --check` ✅。隔离 `OPENCHAMBER_DATA_DIR` local Web QA（不启动/终止 installed OpenCode）确认 Settings nav 出现 `Integrations beta`，页面只显示 Claude Code/Cursor、没有 Command Code；展开 Claude 显示 Install + Docs 且未安装时不显示 Remove，布局无溢出。aggregated remote URL contract 由 API test 固定为 `/api/remote/:id/config/plugins[/registry|/entry]`；本轮未对真实 Dev 实例执行安装 mutation。
+
+至此 [#142](https://coding.s-s.city/songsong/openchamber/-/issues/142) 的最终 v1.20 catalog、local/remote instance routing、install/update/setup/remove、Apply & Restart 恢复、11 locale 与 matching-surface 均已覆盖，可关闭。
+
 ### #141 Phase 1：Isolated server exception survival（2026-08-30）
 
 上游来源：`71a538b77`。fork 的 embedded server 没有外部 supervisor，单个 Node/socket stray exception 不应让整个 OpenChamber instance 离线：

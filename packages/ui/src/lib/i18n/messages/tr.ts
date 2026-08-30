@@ -1,8 +1,10 @@
 import type { I18nKey } from "./en";
 import { settingsDict } from "./tr.settings";
+import { thirdPartyIntegrationI18n } from "./third-party-integrations.i18n";
 
 export const dict: Record<I18nKey, string> = {
   ...settingsDict,
+  ...thirdPartyIntegrationI18n.tr,
   "common.loading": "Yükleniyor...",
   "common.unavailable": "Kullanılamıyor",
   "common.language.english": "İngilizce",

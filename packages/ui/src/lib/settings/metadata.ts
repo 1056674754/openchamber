@@ -29,6 +29,7 @@ export type SettingsPageSlug =
   | 'snippets'
   | 'notifications'
   | 'voice'
+  | 'integrations'
   | 'tunnel'
   | 'pairing';
 
@@ -171,6 +172,14 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
     showOn: 'both',
     description: 'Read-only view of provider credentials, quota linkage, and conflicts.',
     keywords: ['subscription', 'subscriptions', 'auth', 'credentials', 'api key', 'oauth', 'quota', 'egress', 'conflicts'],
+  },
+  {
+    slug: 'integrations',
+    title: 'Integrations',
+    group: 'general',
+    kind: 'single',
+    showOn: 'both',
+    keywords: ['integration', 'plugin', 'provider', 'oauth', 'claude', 'cursor', 'subscription'],
   },
   {
     slug: 'agents',

@@ -57,15 +57,19 @@ import { MagicPromptsPage } from '@/components/sections/magic-prompts/MagicPromp
 import { SnippetsSidebar } from '@/components/sections/snippets/SnippetsSidebar';
 import { SnippetsPage } from '@/components/sections/snippets/SnippetsPage';
 import { GitPage } from '@/components/sections/git-identities/GitPage';
+import { IntegrationsPage } from '@/components/sections/integrations/IntegrationsPage';
 import type { OpenChamberSection } from '@/components/sections/openchamber/types';
 import { OpenChamberPage } from '@/components/sections/openchamber/OpenChamberPage';
 import { useDeviceInfo } from '@/lib/device';
 import { hasDesktopInvoke, isDesktopShell, isVSCodeRuntime, isWebRuntime } from '@/lib/desktop';
 import { useI18n } from '@/lib/i18n';
+import { useSettingsServerBaseUrl } from '@/hooks/useSettingsServerBaseUrl';
+import { resolveApiUrl } from '@/lib/api/serverUrl';
 import { toast } from '@/components/ui';
 import { Icon } from "@/components/icon/Icon";
 import { OpenCodeReloadFooterAction } from '@/components/views/OpenCodeReloadFooterAction';
 import { useInstanceContextStore } from '@/stores/useInstanceContextStore';
+import { useConfigStore } from '@/stores/useConfigStore';
 import { useDesktopSshStore } from '@/stores/useDesktopSshStore';
 import { resolveInstanceLabel } from '@/lib/desktopSsh';
 import { settingsInstanceStatusDotClass } from './settingsInstanceStatus';
@@ -138,6 +142,7 @@ const pageOrder: SettingsPageSlug[] = [
   'providers',
   'usage',
   'subscriptions',
+  'integrations',
   'skills.installed',
   'skills.catalog',
   'voice',
@@ -260,6 +265,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
   const setSettingsPage = useUIStore((state) => state.setSettingsPage);
   const settingsSlug = resolveSettingsSlug(settingsPageRaw);
   const setRemoteInstancesSelectedId = useUIStore((state) => state.setSettingsRemoteInstancesSelectedId);
+  const settingsServer = useSettingsServerBaseUrl();
 
   const {
     currentInstance,
@@ -488,6 +494,35 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
     setMobileStage(getMobileStageForSettingsPage(targetMeta));
   }, [fallbackPageSlug, isMobile, isPageVisibleInCurrentContext, setSettingsPage]);
 
+  const openThirdPartyProviderSetup = React.useCallback(async (providerId: string): Promise<boolean> => {
+    if (settingsServer.status !== 'ready') return false;
+
+    let providerAvailable = false;
+    if (settingsServer.baseUrl) {
+      const response = await fetch(resolveApiUrl('/api/config/providers', settingsServer.baseUrl), {
+        headers: { Accept: 'application/json' },
+        cache: 'no-store',
+      }).catch(() => null);
+      const payload = response?.ok ? await response.json().catch(() => null) : null;
+      providerAvailable = Array.isArray(payload?.providers)
+        && payload.providers.some((provider: unknown) => (
+          provider !== null
+          && typeof provider === 'object'
+          && (provider as { id?: unknown }).id === providerId
+        ));
+    } else {
+      const configStore = useConfigStore.getState();
+      await configStore.loadProviders({ source: 'settings:third-party-provider-setup' });
+      providerAvailable = useConfigStore.getState().providers.some((provider) => provider.id === providerId);
+    }
+
+    if (!providerAvailable) return false;
+    useConfigStore.getState().setSelectedProvider(providerId);
+    openPage('providers');
+    if (isMobile) setMobileStage('page-content');
+    return true;
+  }, [isMobile, openPage, settingsServer.baseUrl, settingsServer.status]);
+
   const openNewRemoteInstance = React.useCallback(() => {
     const id = makeRemoteInstanceId();
     setCurrentInstance('default');
@@ -557,6 +592,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
         return t('settings.page.usage.title');
       case 'subscriptions':
         return t('settings.page.subscriptions.title');
+      case 'integrations':
+        return t('settings.page.integrations.title');
       case 'agents':
         return t('settings.page.agents.title');
       case 'behavior':
@@ -702,6 +739,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
         return <UsagePage />;
       case 'subscriptions':
         return <SubscriptionsPage />;
+      case 'integrations':
+        return (
+          <IntegrationsPage
+            onOpenProviderSetup={openThirdPartyProviderSetup}
+            onOpenPluginManager={() => openPage('plugins')}
+          />
+        );
       case 'magic-prompts':
         return <MagicPromptsPage />;
       case 'snippets':
@@ -721,7 +765,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
       default:
         return <SettingsHome onOpen={openPage} />;
     }
-  }, [isPageVisibleInCurrentContext, openChamberSectionBySlug, openPage, renderUnavailable]);
+  }, [isPageVisibleInCurrentContext, openChamberSectionBySlug, openPage, openThirdPartyProviderSetup, renderUnavailable]);
 
   // Mobile: if opened via deep-link / palette to a non-home page, jump into it once.
   React.useEffect(() => {
@@ -783,7 +827,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
                       <Icon name={iconName} className="h-4 w-4 shrink-0" />
                       <span className="flex items-center gap-1.5 whitespace-nowrap overflow-hidden transition-opacity duration-150 opacity-100">
                         <span className="typography-ui-label font-normal truncate">{getPageTitle(page.slug)}</span>
-                        {(page.slug === 'voice' || page.slug === 'tunnel' || page.slug === 'pairing') && (
+                        {(page.slug === 'voice' || page.slug === 'tunnel' || page.slug === 'pairing' || page.slug === 'integrations') && (
                           <span className="shrink-0 typography-micro px-1 rounded leading-none pb-px text-[var(--status-warning)] bg-[var(--status-warning)]/10">
                             {t('settings.view.badge.beta')}
                           </span>

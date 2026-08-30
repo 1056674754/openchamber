@@ -1,8 +1,10 @@
 import type { I18nKey } from './en';
 import { settingsDict } from './zh-TW.settings';
+import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 
 export const dict: Record<I18nKey, string> = {
   ...settingsDict,
+  ...thirdPartyIntegrationI18n['zh-TW'],
   'common.loading': '載入中...',
   'common.unavailable': '無法使用',
   'common.language.english': 'English',

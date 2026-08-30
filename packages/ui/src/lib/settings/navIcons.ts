@@ -54,6 +54,8 @@ export function getSettingsNavIcon(slug: SettingsPageSlug): IconName | null {
       return 'bar-chart-2';
     case 'subscriptions':
       return 'shield-keyhole';
+    case 'integrations':
+      return 'plug';
     case 'voice':
       return 'mic';
     case 'tunnel':
