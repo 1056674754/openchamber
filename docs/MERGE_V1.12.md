@@ -2826,6 +2826,18 @@ v1.20.0-sscity 尚未宣布完成：当前未关闭 `#135/#140/#142-#151/#154/#1
 
 验证：target resolver + provider ownership/nonblocking config 3 files / 21 tests ✅；full workspace type-check/lint/build ✅；build 仅有既有 dynamic-import/chunk/eval warnings；`git diff --check` ✅。真实 Dev3 read-only matching transport QA：SSH forward 到现有 2999，不重启/不写配置；给 registry 注册临时 server 后，`/root/novel_editor` 的 remote SDK 返回 Agents 16、Commands 21，`/api/config/agents/build` 与 `/api/config/commands/init` 在同一 directory 下均为 HTTP 200，随后关闭 forward并注销 registry。独立 `electron:dev` UI QA：Providers Settings project 从“青浦协和Dev Suisqp Web”切换到 `openchamber` 后，Settings button 更新为 `openchamber`，主 composer project combobox 仍为“青浦协和Dev Suisqp Web”，证明不再移动 app context。开发脚本原先通过 `npx electron` 触发 npm `EOVERRIDE`；`f228088db` 改为 workspace Electron 43 binary 后真实启动成功，未替换 runtime、未停止正式 OpenChamber。[#154](https://coding.s-s.city/songsong/openchamber/-/issues/154) 保持 open：开发实例没有载入 remote Settings instance，仍需在已连接 remote instance 的 Settings UI 点击项目并核验列表/编辑 target 后关闭。
 
+### #156 Phase 1：Focused-project sidebar + external-session refresh（2026-08-31）
+
+上游来源：`1f6e22cdf`、`61f096ab3`，按 fork 现有 multi-instance sidebar / activity sections / `showOnlyMainWorkspace` 基础适配：
+
+- Session display store 新增独立 `all/single` project mode 与 remembered project id，不与 row density (`default/minimal`) 或 worktree grouping 混用；VS Code、mobile drawer和已有 embedded main-workspace mode不开放该控制。
+- single mode 沿用 fork 已验证的 main-workspace rendering/prefetch path，但把有效 project id解析为 remembered → active → first；Recent section、collapse-all/expand-all 在 single mode 隐藏，Global Pinned 与 Chats 仍保留。
+- sidebar 内提供项目 picker，切换只改变 focused project，不调用 app active-project mutation。新增文案覆盖现有 11 种 locale。
+- sidebar active 且 document visible 时每 45 秒调用 authoritative `refreshGlobalSessions()`；global store 已是 leaf subscription，因此 OpenCode/CLI 等外部创建的 Session 会进入 sidebar/Recent，而不是只在组件 mount 时抓快照。
+- `SessionSidebar.tsx` 使用 temporary index 精确提交；pin reorder、spinner和 localStore persistence WIP保持未提交。对应提交：`b6d2ae0a3 feat(sidebar): add focused project mode`。
+
+验证：session display store 1 file / 6 tests ✅；full UI type-check/lint ✅；`git diff --check` ✅。独立 electron dev matching-surface QA：显示模式菜单包含“所有项目/单个项目”；进入 single 后出现 picker且只渲染选中项目；picker从“青浦协和Dev Suisqp Web”切到 `openchamber`，主 composer仍保持“青浦协和Dev Suisqp Web”；最后恢复 all mode并停止 dev。[#156](https://coding.s-s.city/songsong/openchamber/-/issues/156) 保持 open：还需用隔离 OpenCode data dir 创建一个外部 Session，等待/触发 refresh并确认 sidebar + Recent 自动出现后关闭。
+
 ### #137 Phase 10：Loss-safe relay request-body delivery（2026-08-30）
 
 上游来源：`d634cd232`、`aaf397e68`、`854a0db92`，保持 TS client / JS host wire backward compatibility：
