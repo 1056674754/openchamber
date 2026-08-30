@@ -82,6 +82,8 @@ import { createScheduledTaskService } from './lib/scheduled-tasks/service.js';
 import { createOpenChamberSessionService } from './lib/openchamber-sessions/service.js';
 import { createOpenChamberControlService } from './lib/openchamber-control/service.js';
 import { createAgentToolRuntime } from './lib/agent-tool/runtime.js';
+import { createBrowserControlBroker } from './lib/browser-control/broker.js';
+import { registerBrowserControlRoutes } from './lib/browser-control/routes.js';
 import { createRuntimeFallbackApprovalService } from './lib/agent-tool/runtime-fallback-approval.js';
 import { createServerStartupRuntime } from './lib/opencode/server-startup-runtime.js';
 import { createTunnelWiringRuntime } from './lib/opencode/tunnel-wiring-runtime.js';
@@ -1395,6 +1397,27 @@ const openChamberSessionService = createOpenChamberSessionService({
   },
 });
 
+const browserControlBroker = createBrowserControlBroker({
+  createId: () => `browser-${crypto.randomUUID()}`,
+  emitRequest: (request) => {
+    const needsBrowserView = request.action !== 'browser.open';
+    let delivered = 0;
+    for (const client of uiOpenChamberEventClients) {
+      if (needsBrowserView && client.openchamberBrowserCapable !== true) continue;
+      try {
+        writeSseEvent(client, {
+          type: 'openchamber:browser-control-request',
+          properties: request,
+        });
+        delivered += 1;
+      } catch {
+        uiOpenChamberEventClients.delete(client);
+      }
+    }
+    return delivered;
+  },
+});
+
 const openChamberControlService = createOpenChamberControlService({
   readSettingsFromDiskMigrated,
   sanitizeProjects,
@@ -1403,6 +1426,7 @@ const openChamberControlService = createOpenChamberControlService({
   waitForOpenCodeReady,
   sessionService: openChamberSessionService,
   scheduledTaskService,
+  browserControl: browserControlBroker,
 });
 
 const runtimeFallbackApprovalService = createRuntimeFallbackApprovalService({
@@ -1736,6 +1760,7 @@ async function main(options = {}) {
   });
   relayServiceInstance = relayService;
   relayService.registerRoutes(app);
+  registerBrowserControlRoutes(app, { express, broker: browserControlBroker });
 
   registerClientAuthPairingRoutes(app, {
     uiAuthController,

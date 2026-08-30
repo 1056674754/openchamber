@@ -4,12 +4,15 @@ import express from 'express';
 import {
   OPENCHAMBER_AGENT_TOOL_ACTION_DEFINITIONS,
   OPENCHAMBER_AGENT_TOOL_ACTIONS,
+  OPENCHAMBER_WEB_ACTION_DEFINITIONS,
+  OPENCHAMBER_WEB_ACTIONS,
 } from '../openchamber-control/actions.js';
 
 const TOOL_SCHEMA_VERSION = 1;
-const ACTIONS = new Set(OPENCHAMBER_AGENT_TOOL_ACTIONS);
+const ACTIONS = new Set([...OPENCHAMBER_AGENT_TOOL_ACTIONS, ...OPENCHAMBER_WEB_ACTIONS]);
 const AGENT_TOOL_ACTION_TITLES = Object.fromEntries(
-  OPENCHAMBER_AGENT_TOOL_ACTION_DEFINITIONS.map(({ action, title }) => [action, title]),
+  [...OPENCHAMBER_AGENT_TOOL_ACTION_DEFINITIONS, ...OPENCHAMBER_WEB_ACTION_DEFINITIONS]
+    .map(({ action, title }) => [action, title]),
 );
 
 const PLUGIN_PARAMETER_PROPERTIES = {
@@ -47,6 +50,18 @@ const PLUGIN_PARAMETER_PROPERTIES = {
   disabled: { type: 'boolean', description: 'true disables and false enables; required for schedule.toggle' },
 };
 
+const WEB_PLUGIN_PARAMETER_PROPERTIES = {
+  url: { type: 'string', description: 'Absolute http(s) URL for browser.open' },
+  selector: { type: 'string', description: 'CSS selector returned by browser.snapshot' },
+  text: { type: 'string', description: 'Visible link or button text for browser.click' },
+  value: { type: 'string', description: 'Text for browser.type' },
+  submit: { type: 'boolean', description: 'Press Enter after typing' },
+  direction: { type: 'string', enum: ['up', 'down', 'top', 'bottom'] },
+  viewport: { type: 'string', enum: ['mobile', 'tablet', 'desktop', 'fill'] },
+  label: { type: 'string', description: 'Short screenshot label' },
+  directory: { type: 'string', description: 'Project directory for browser.capture; defaults to current session directory' },
+};
+
 const asNonEmptyString = (value) => {
   if (typeof value !== 'string') return null;
   const trimmed = value.trim();
@@ -66,6 +81,39 @@ const isLoopbackAddress = (value) => {
   const address = typeof value === 'string' ? value.toLowerCase() : '';
   return address === '127.0.0.1' || address === '::1' || address === '::ffff:127.0.0.1';
 };
+
+const createWebToolEntry = () => String.raw`
+    openchamber_web: {
+      description: "Look at and interact with a live page in OpenChamber's browser panel. Open a page, snapshot it, then click, type, scroll, inspect, resize, or capture using one action per call. The page may contain the user's real login session.",
+      args: {
+        action: { type: "string", enum: ${JSON.stringify(OPENCHAMBER_WEB_ACTIONS)}, oneOf: ${JSON.stringify(OPENCHAMBER_WEB_ACTION_DEFINITIONS.map(({ action, description }) => ({ const: action, description })))}, description: "Browser action" },
+        parameters: { type: "object", properties: ${JSON.stringify(WEB_PLUGIN_PARAMETER_PROPERTIES)}, additionalProperties: false, description: "Inputs for the action" },
+      },
+      async execute(input, context) {
+        const { action, parameters, ...flattened } = input ?? {}
+        const args = { ...flattened, ...(parameters ?? {}), action }
+        const title = ${JSON.stringify(AGENT_TOOL_ACTION_TITLES)}[args.action] ?? args.action
+        context.metadata({ title, metadata: { openchamber_web: { schemaVersion: ${TOOL_SCHEMA_VERSION}, action: args.action, description: title } } })
+        const endpoint = process.env.OPENCHAMBER_AGENT_TOOL_URL
+        const token = process.env.OPENCHAMBER_AGENT_TOOL_TOKEN
+        const failure = (payload) => ({ title, output: JSON.stringify(payload), metadata: { openchamber_web: { schemaVersion: ${TOOL_SCHEMA_VERSION}, action: args.action, description: title, ok: false } } })
+        if (!endpoint || !token) return failure({ schemaVersion: ${TOOL_SCHEMA_VERSION}, ok: false, action: args.action, error: { message: "OpenChamber managed tool connection is unavailable" } })
+        try {
+          const response = await fetch(endpoint, { method: "POST", headers: { authorization: "Bearer " + token, "content-type": "application/json" }, body: JSON.stringify({ input: args, contextDirectory: context.directory }), signal: context.abort })
+          const output = await response.text()
+          let result = null
+          try { result = JSON.parse(output) } catch {}
+          const valid = result?.schemaVersion === ${TOOL_SCHEMA_VERSION} && typeof result?.ok === "boolean" && typeof result?.action === "string"
+          context.metadata({ title, metadata: { openchamber_web: { schemaVersion: ${TOOL_SCHEMA_VERSION}, action: args.action, description: title, ok: valid && result.ok === true } } })
+          if (valid) return { title, output, metadata: { openchamber_web: { schemaVersion: ${TOOL_SCHEMA_VERSION}, action: args.action, description: title, ok: result.ok === true } } }
+          return failure({ schemaVersion: ${TOOL_SCHEMA_VERSION}, ok: false, action: args.action, error: { message: "OpenChamber returned an invalid response", kind: "runtime", status: response.status } })
+        } catch (error) {
+          if (context.abort.aborted) throw error
+          return failure({ schemaVersion: ${TOOL_SCHEMA_VERSION}, ok: false, action: args.action, error: { message: error instanceof Error ? error.message : String(error), kind: "runtime" } })
+        }
+      },
+    },
+`;
 
 const createPluginSource = () => String.raw`
 export const OpenChamberPlugin = async () => ({
@@ -149,6 +197,7 @@ export const OpenChamberPlugin = async () => ({
         }
       },
     },
+${createWebToolEntry()}
   },
 })
 `;

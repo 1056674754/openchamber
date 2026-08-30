@@ -24,6 +24,26 @@ const createService = (overrides = {}) => createOpenChamberControlService({
 });
 
 describe('OpenChamber control authority', () => {
+  test('validates and forwards browser actions to the broker', async () => {
+    const request = async (action, parameters) => ({ action, parameters, title: 'Page' });
+    const service = createService({ browserControl: { request } });
+
+    await expect(service.execute('browser.open', {
+      serverId: 'default',
+      url: 'file:///tmp/page.html',
+    })).rejects.toMatchObject({ statusCode: 400 });
+
+    await expect(service.execute('browser.open', {
+      serverId: 'default',
+      url: 'https://example.com/path',
+      viewport: 'mobile',
+    })).resolves.toEqual({
+      action: 'browser.open',
+      parameters: { url: 'https://example.com/path', viewport: 'mobile' },
+      title: 'Page',
+    });
+  });
+
   test('rejects session actions without an explicit serverId', async () => {
     const service = createService();
 

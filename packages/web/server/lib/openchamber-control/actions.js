@@ -15,7 +15,7 @@ export const OPENCHAMBER_CONTROL_ACTION_DEFINITIONS = Object.freeze([
   { action: 'schedule.toggle', title: 'Enable or disable a scheduled task', description: 'Enable or disable taskId; requires disabled' },
 ]);
 
-export const OPENCHAMBER_CONTROL_ACTIONS = Object.freeze(
+const OPENCHAMBER_CONTROL_ACTIONS = Object.freeze(
   OPENCHAMBER_CONTROL_ACTION_DEFINITIONS.map(({ action }) => action),
 );
 
@@ -26,3 +26,25 @@ export const OPENCHAMBER_AGENT_TOOL_ACTION_DEFINITIONS = Object.freeze(
 export const OPENCHAMBER_AGENT_TOOL_ACTIONS = Object.freeze(
   OPENCHAMBER_AGENT_TOOL_ACTION_DEFINITIONS.map(({ action }) => action),
 );
+
+export const OPENCHAMBER_WEB_ACTION_DEFINITIONS = Object.freeze([
+  { action: 'browser.open', title: 'Open a page in the browser panel', description: 'Open absolute http(s) url; optional viewport' },
+  { action: 'browser.snapshot', title: 'Read the open page', description: 'Read URL, title, visible text, interactive selectors, and page errors; optional selector' },
+  { action: 'browser.click', title: 'Click on the open page', description: 'Click selector or visible text' },
+  { action: 'browser.type', title: 'Type into the open page', description: 'Type value into selector; optional submit' },
+  { action: 'browser.scroll', title: 'Scroll the open page', description: 'Scroll direction or selector into view' },
+  { action: 'browser.back', title: 'Go back in the browser panel', description: 'Navigate back; no parameters' },
+  { action: 'browser.forward', title: 'Go forward in the browser panel', description: 'Navigate forward; no parameters' },
+  { action: 'browser.inspect', title: 'Read how an element renders', description: 'Read computed styles for selector' },
+  { action: 'browser.capture', title: 'Save a screenshot of the page', description: 'Capture the visible page into the project; optional label' },
+  { action: 'browser.resize', title: 'Change the page viewport', description: 'Set viewport to mobile, tablet, desktop, or fill' },
+]);
+
+export const OPENCHAMBER_WEB_ACTIONS = Object.freeze(
+  OPENCHAMBER_WEB_ACTION_DEFINITIONS.map(({ action }) => action),
+);
+
+export const OPENCHAMBER_ALL_ACTIONS = Object.freeze([
+  ...OPENCHAMBER_CONTROL_ACTIONS,
+  ...OPENCHAMBER_WEB_ACTIONS,
+]);

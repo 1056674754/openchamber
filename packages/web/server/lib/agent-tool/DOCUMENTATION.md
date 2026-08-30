@@ -2,8 +2,7 @@
 
 ## Purpose
 
-This module injects an `openchamber` tool into the OpenCode process managed by
-OpenChamber. The tool calls the same policy-first control service as the CLI.
+This module injects `openchamber` for Session/schedule control and `openchamber_web` for Browser actions into managed OpenCode. Both call the same policy-first control service, while their action schemas and parameters remain separate.
 
 ## Startup
 

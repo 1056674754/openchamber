@@ -210,6 +210,8 @@ export const registerScheduledTaskRoutes = (app, dependencies) => {
     res.setHeader('X-Accel-Buffering', 'no');
     res.flushHeaders?.();
 
+    res.openchamberBrowserCapable = req.query?.browser === '1';
+
     const clients = getOpenChamberEventClients();
     clients.add(res);
 

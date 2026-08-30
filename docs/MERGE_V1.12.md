@@ -2322,3 +2322,16 @@ fork 已有丰富的 surface 组织（#62 surface rail + ContextSidebarTab + Con
 验证：client extraction/prepare/SSR compact slots 2 files / 4 tests ✅；server message-source/grant + FS path binding 2 files / 14 tests ✅；UI/Web focused type-check ✅；`git diff --check` ✅。HMR 实界面 QA 被当前另一 agent 的 sidebar/bootstrap WIP 阻断（direct `?session=` 未恢复目标 Session，页面停在空 draft），因此 [#136](https://coding.s-s.city/songsong/openchamber/-/issues/136) 保持 open，待本批完整 build 后在不共享 managed OpenCode 生命周期的隔离方式或下一次 runtime QA 中确认 thumbnail/preview 交互。
 
 QA 事故记录：HMR server 复用了安装版 managed OpenCode `54185`，退出时向共享 PID `47219` 发出 `SIGKILL`；安装版随后卡在 restart path。已按 incident runbook 保存 lifecycle/listener/OpenChamber sample 到 `~/Desktop/openchamber-opencode-incident-20260830T074340Z`，随后只重启 OpenChamber app（未替换 shell/runtime），恢复为 healthy OpenCode `65246`；配置 API 再次确认 active project、root/local lastDirectory、draft target 均为原值且测试 base override 不存在。后续 HMR QA 禁止复用安装版 managed OpenCode。
+
+### #135 Phase 1：Browser agent control plane（2026-08-30）
+
+上游来源：`cc9249d93`。先移植不依赖 dirty Electron main 的 server/control/tool 边界：
+
+- first-claim broker 将 request 广播到 live SSE client；`browser.open` 可由任一 client 创建 view，其余 action 只投递给声明 `browser=1` 的 connection。第一个 claim 获准，其他 client 必须不执行。
+- 无 capable client 立即 503；claim 后无结果为 20s（open 45s）明确 timeout；abort、late result 和 reject-all 均有确定语义。
+- control service 增加 open/snapshot/click/type/scroll/back/forward/inspect/capture/resize 参数校验，仍要求 managed-local `serverId`；只允许 absolute HTTP(S)。
+- capture base64 不回传模型，由 server 写入 authoritative context/explicit directory 的 `.openchamber/screenshots/`，返回相对路径和 Markdown hint；label 不能形成 traversal。
+- managed plugin 增加独立 `openchamber_web` tool，与 `openchamber` 分离 action enum、参数和 metadata；callback transport 与 ephemeral loopback token 共用。当前 control 开启时两者一起注入，独立 toggle 留到 settings phase。
+- renderer control client、real Chromium BrowserPane、dev-server tunnel 和 Electron webview lifecycle 未移植，所以当前没有 client 宣告 `browser=1`，动作诚实 fail fast。
+
+验证：broker + generated plugin Vitest 2 files / 6 tests ✅；control authority + SSE capability Bun 2 files / 6 tests ✅；Web type-check ✅；`git diff --check` ✅。[#135](https://coding.s-s.city/songsong/openchamber/-/issues/135) 保持 open。

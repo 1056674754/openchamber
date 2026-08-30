@@ -17,6 +17,9 @@ const createRouteRegistry = () => {
       put(path, handler) {
         routes.set(`PUT ${path}`, handler);
       },
+      patch(path, handler) {
+        routes.set(`PATCH ${path}`, handler);
+      },
       delete(path, handler) {
         routes.set(`DELETE ${path}`, handler);
       },
@@ -27,11 +30,12 @@ const createRouteRegistry = () => {
   };
 };
 
-const createMockRequest = () => {
+const createMockRequest = (query = {}) => {
   const listeners = new Map();
 
   return {
     headers: {},
+    query,
     on(event, handler) {
       listeners.set(event, handler);
       return this;
@@ -132,7 +136,7 @@ describe('local SSE routes', () => {
     });
 
     const handler = getRoute('GET', '/api/openchamber/events');
-    const req = createMockRequest();
+    const req = createMockRequest({ browser: '1' });
     const res = createMockResponse();
 
     handler(req, res);
@@ -145,6 +149,7 @@ describe('local SSE routes', () => {
     expect(res.flushed).toBe(true);
     expect(res.body).toContain('openchamber:event-stream-ready');
     expect(clients.has(res)).toBe(true);
+    expect(res.openchamberBrowserCapable).toBe(true);
 
     req.emit('close');
     expect(clients.has(res)).toBe(false);

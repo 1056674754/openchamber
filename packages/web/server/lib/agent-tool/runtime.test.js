@@ -88,6 +88,7 @@ describe('agent tool runtime', () => {
         openchamber: expect.objectContaining({ ok: true }),
       },
     }));
+    expect(plugin.tool.openchamber_web).toBeDefined();
   });
 
   it('passes a runtime fallback request to the approval service with the current directory', async () => {

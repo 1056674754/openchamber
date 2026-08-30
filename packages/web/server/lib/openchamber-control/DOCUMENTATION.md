@@ -4,7 +4,7 @@
 
 This module is the policy-first control plane shared by the OpenChamber CLI and
 the managed OpenCode Agent tool. It exposes projects, model preferences,
-Sessions, worktrees, and scheduled tasks without coupling callers to UI state.
+Sessions, worktrees, scheduled tasks, and brokered browser actions without coupling callers to global UI state.
 
 ## Authority
 
@@ -40,3 +40,5 @@ the surviving Session ID and directory instead of hiding the partial outcome.
 
 Waiting is opt-in. `timeout` and `lastAssistant` require `wait`; otherwise
 Session dispatches return immediately.
+
+Browser actions validate URL/selector/value/direction/viewport here. `browser.capture` writes returned bytes under `.openchamber/screenshots/` in the explicit/context Session directory and returns a relative Markdown-ready path.

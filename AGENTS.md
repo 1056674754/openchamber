@@ -129,6 +129,12 @@ Message-bound authorization for completed-assistant Markdown image galleries.
 
 - Module docs: `packages/web/server/lib/markdown-image-grants/DOCUMENTATION.md`
 
+##### browser-control
+
+First-claim request/result broker for agent-driven in-app Browser actions.
+
+- Module docs: `packages/web/server/lib/browser-control/DOCUMENTATION.md`
+
 ##### terminal
 
 WebSocket protocol utilities for terminal input handling including message normalization, control frame parsing, and rate limiting.
