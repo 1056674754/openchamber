@@ -2517,3 +2517,14 @@ v1.20.0-sscity 尚未宣布完成：当前未关闭 `#135/#140/#142-#151/#154/#1
 - 上游 v1.18.4 `dev-tunnel/client.js` 明确拒绝 relay/custom-scheme base URL，因此 private-relay dev tunnel 并非 v1.20 capability；本轮不创建超出上游的 transport。direct HTTP(S) remote dev tunnel 已由 #135 Phase 3 完成。
 
 验证：mobile diagnostics + connection storage 2 files / 17 tests ✅；UI type-check/lint ✅；`git diff --check` ✅。至此 [#137](https://coding.s-s.city/songsong/openchamber/-/issues/137) 的 pairing origin、relay body、transient reconnect、tokenless resume、ngrok、mobile share/download 与 diagnostics 均已等价，可关闭。
+
+### #171：Turkish runtime localization（2026-08-30）
+
+上游来源：`fa981251a`。以 fork 当前 `en.ts` / `en.settings.ts` 为 authoritative key contract，而不是直接覆盖上游词典：
+
+- 新增 `tr` locale、语言选择标签、`tr-*` 归一化、异步 dictionary chunk、bootstrap 文案和 Walkthrough prompt language；UI 与 server 语言表继续由双向 parity test 约束。
+- `tr.ts` / `tr.settings.ts` 机械对齐 fork 当前 5,079 个 key。复用上游 4,251 个真实 Turkish 翻译；828 个上游尚不存在的 fork-only key 明确回退当前 English 文案，因此不会出现缺键、空白或裸 i18n key。
+- 其余 10 个现有 locale 均增加各自语言的 Turkish 标签。土耳其语文档站不属于 runtime migration scope，按 work item 约定不移植。
+- Web 与 VS Code 构建均产生独立 lazy `tr` chunk（374,615 bytes），未并入初始 English bundle。
+
+验证：Bun i18n 3 files / 6 tests ✅；Walkthrough language Vitest 4/4 ✅；全 workspace `bun run type-check` ✅、`bun run lint` ✅、`bun run build` ✅；`git diff --check` ✅。[#171](https://coding.s-s.city/songsong/openchamber/-/issues/171) 可关闭。

@@ -209,6 +209,25 @@ const DE_MESSAGES: BootstrapMessages = {
   loadingData: (providersText, agentsText) => `Daten werden geladen (${providersText}, ${agentsText})…`,
 };
 
+const TR_MESSAGES: BootstrapMessages = {
+  startingApi: 'OpenCode API başlatılıyor…',
+  initializing: 'Başlatılıyor…',
+  connecting: 'Bağlanıyor…',
+  connected: 'Bağlandı!',
+  connectionError: 'Bağlantı hatası',
+  disconnected: 'Bağlantı kesildi',
+  reconnecting: 'Yeniden bağlanıyor…',
+  initialDataLoadFailed: 'OpenCode bağlandı ancak ilk veri yükleme başarısız oldu.',
+  cliNotFound: 'OpenCode CLI bulunamadı. Lütfen önce kurun.',
+  providersReady: '✓ Sağlayıcılar',
+  providersLoading: '… Sağlayıcılar',
+  agentsReady: '✓ Agent\'ler',
+  agentsLoading: '… Agent\'ler',
+  startingDevServer: (hostLabel) => `Webview dev sunucusu başlatılıyor (${hostLabel})...`,
+  waitingDevServer: (hostLabel, attempt) => `Webview dev sunucusu bekleniyor (${hostLabel})... deneme ${attempt}`,
+  loadingData: (providersText, agentsText) => `Veriler yükleniyor (${providersText}, ${agentsText})…`,
+};
+
 const BOOTSTRAP_MESSAGES: Record<Locale, BootstrapMessages> = {
   en: EN_MESSAGES,
   'zh-CN': ZH_CN_MESSAGES,
@@ -220,6 +239,7 @@ const BOOTSTRAP_MESSAGES: Record<Locale, BootstrapMessages> = {
   pl: PL_MESSAGES,
   ja: JA_MESSAGES,
   de: DE_MESSAGES,
+  tr: TR_MESSAGES,
 };
 
 export const getBootstrapMessages = (locale: Locale): BootstrapMessages => BOOTSTRAP_MESSAGES[locale];

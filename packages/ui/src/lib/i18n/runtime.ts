@@ -1,12 +1,12 @@
-export type Locale = 'en' | 'zh-CN' | 'zh-TW' | 'uk' | 'es' | 'pt-BR' | 'ko' | 'pl' | 'ja' | 'de';
+export type Locale = 'en' | 'zh-CN' | 'zh-TW' | 'uk' | 'es' | 'pt-BR' | 'ko' | 'pl' | 'ja' | 'de' | 'tr';
 
 import { getSafeStorage } from '@/stores/utils/safeStorage';
 
-export const LOCALES = ['en', 'zh-CN', 'zh-TW', 'uk', 'es', 'pt-BR', 'ko', 'pl', 'ja', 'de'] as const satisfies readonly Locale[];
+export const LOCALES = ['en', 'zh-CN', 'zh-TW', 'uk', 'es', 'pt-BR', 'ko', 'pl', 'ja', 'de', 'tr'] as const satisfies readonly Locale[];
 
 export const DEFAULT_LOCALE: Locale = 'en';
 
-export const LOCALE_LABEL_KEYS: Record<Locale, 'common.language.english' | 'common.language.simplifiedChinese' | 'common.language.traditionalChinese' | 'common.language.ukrainian' | 'common.language.spanish' | 'common.language.brazilianPortuguese' | 'common.language.korean' | 'common.language.polish' | 'common.language.japanese' | 'common.language.german'> = {
+export const LOCALE_LABEL_KEYS: Record<Locale, 'common.language.english' | 'common.language.simplifiedChinese' | 'common.language.traditionalChinese' | 'common.language.ukrainian' | 'common.language.spanish' | 'common.language.brazilianPortuguese' | 'common.language.korean' | 'common.language.polish' | 'common.language.japanese' | 'common.language.german' | 'common.language.turkish'> = {
   en: 'common.language.english',
   'zh-CN': 'common.language.simplifiedChinese',
   'zh-TW': 'common.language.traditionalChinese',
@@ -17,6 +17,7 @@ export const LOCALE_LABEL_KEYS: Record<Locale, 'common.language.english' | 'comm
   pl: 'common.language.polish',
   ja: 'common.language.japanese',
   de: 'common.language.german',
+  tr: 'common.language.turkish',
 };
 
 export const LOCALE_STORAGE_KEY = 'openchamber.i18n.v1';
@@ -63,6 +64,9 @@ export function normalizeLocale(value: string | undefined | null): Locale {
   }
   if (normalized === 'de' || normalized.startsWith('de-')) {
     return 'de';
+  }
+  if (normalized === 'tr' || normalized.startsWith('tr-')) {
+    return 'tr';
   }
   return DEFAULT_LOCALE;
 }

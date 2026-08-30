@@ -18,5 +18,6 @@ describe('bootstrap messages', () => {
     expect(getBootstrapMessages('zh-CN').startingApi).toBe('正在启动 OpenCode API…');
     expect(getBootstrapMessages('es').connectionError).toBe('Error de conexión');
     expect(getBootstrapMessages('ja').startingApi).toBe('OpenCode API を起動中…');
+    expect(getBootstrapMessages('tr').connectionError).toBe('Bağlantı hatası');
   });
 });

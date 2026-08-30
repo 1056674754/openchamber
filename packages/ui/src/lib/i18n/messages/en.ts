@@ -13,6 +13,7 @@ export const dict = {
   'common.language.polish': 'Polish',
   'common.language.japanese': 'Japanese',
   'common.language.german': 'German',
+  'common.language.turkish': 'Turkish',
   'common.language.traditionalChinese': 'Chinese (Traditional)',
   'common.revealPath.finder': 'Reveal in Finder',
   'common.revealPath.fileExplorer': 'Open in File Explorer',

@@ -23,6 +23,7 @@ const LANGUAGE_NAMES = {
   pl: 'Polish',
   ja: 'Japanese',
   de: 'German',
+  tr: 'Turkish',
 };
 
 export function normalizeLanguage(value) {

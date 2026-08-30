@@ -42,4 +42,12 @@ describe('i18n store', () => {
       resetStore();
     }
   });
+
+  test('loads the Turkish dictionary', async () => {
+    useI18nStore.getState().setLocale('tr');
+
+    expect(useI18nStore.getState().loadingLocale).toBe('tr');
+    await waitForLocaleLoadToSettle('tr');
+    expect(useI18nStore.getState().dictionary['common.language.turkish']).toBe('Türkçe');
+  });
 });

@@ -14,6 +14,7 @@ export const dict: Record<I18nKey, string> = {
   "common.language.polish": "Польська",
   "common.language.japanese": "Японська",
   "common.language.german": "Німецька",
+  "common.language.turkish": "Турецька",
 "common.language.traditionalChinese": "Китайська (Традиційна)",
   "common.revealPath.finder": "Показати у Finder",
   "common.revealPath.fileExplorer": "Відкрити у File Explorer",
