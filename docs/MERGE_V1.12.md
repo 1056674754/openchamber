@@ -2778,6 +2778,18 @@ v1.20.0-sscity 尚未宣布完成：当前未关闭 `#135/#140/#142-#151/#154/#1
 
 验证：Web shared config + plugin data layer + VS Code config 3 files / 21 tests ✅；settings helpers 1 file / 32 tests ✅；full workspace type-check ✅；full workspace lint ✅；`git diff --check` ✅。[#144](https://coding.s-s.city/songsong/openchamber/-/issues/144) 保持 open：继续审计跨 runtime settings write serialization、orphan temp cleanup、Windows replacement retry 与 CLI relay-key atomicity；当前相关 dirty WIP 未被本阶段提交。
 
+### #144 Phase 2：Cross-runtime settings serialization + atomic cleanup（2026-08-31）
+
+上游来源：`dfb231521`、`153149ff2`，并收口 fork 中已存在但尚未提交的 Electron/Web/VS Code settings serialization WIP：
+
+- 新增 `@openchamber/shared/settings-lock`：同目录 temp + hard-link 原子获取、owner token release、typed timeout、父目录 bootstrap，以及 dead-owner stale recovery。审查 WIP 时修正两处竞争缺陷：live PID 绝不因 age 被误抢；stale reclaim 使用独占 cleanup guard并在删除前重检 owner snapshot，多个 contender 不会互相删除新锁。
+- Electron shell、内嵌 Web settings runtime、SSH manager 与 VS Code extension host 对同一 `settings.json.lock` 协调 RMW；Electron 内部 shell/server 共用一条 in-process chain，standalone Web 保持独立 chain，避免合法 key 在跨 runtime 并发保存时丢失。
+- Web/Electron/SSH/VS Code 的 atomic write 失败均清除本次 temp；Web startup migration 一次性删除遗留 `settings.json.tmp-*`，保留无关文件。
+- Electron settings replace 采用 bounded Windows `EPERM/EACCES/EBUSY` retry；非 Windows 或非 transient error 立即保留原错误。
+- `packages/vscode/package.json` 仅精确提交 shared dependency；同文件 selection/remote namespace WIP 保持未提交。对应提交：`477fc2d87 fix(settings): serialize cross-runtime writes`。
+
+验证：shared lock + Electron replace/SSH + Web settings runtime/helpers 5 files / 59 tests ✅；live-old-owner、8-way stale reclaim、failed temp cleanup与 orphan cleanup均有回归覆盖；full workspace type-check/lint/build ✅；build 仅有既有 dynamic-import/chunk/eval warnings；`git diff --check` ✅。[#144](https://coding.s-s.city/songsong/openchamber/-/issues/144) 保持 open：仅剩 CLI `connect-url` relay-key 的 atomic settings accessor / regeneration gate 审计。
+
 ### #137 Phase 10：Loss-safe relay request-body delivery（2026-08-30）
 
 上游来源：`d634cd232`、`aaf397e68`、`854a0db92`，保持 TS client / JS host wire backward compatibility：
