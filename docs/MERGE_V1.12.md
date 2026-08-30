@@ -2764,6 +2764,19 @@ v1.20.0-sscity 尚未宣布完成：当前未关闭 `#135/#140/#142-#151/#154/#1
 
 验证：SSH manager + dev-tunnel authority + ConfigCard 3 files / 17 tests ✅；full workspace type-check ✅；full workspace lint ✅；`git diff --check` ✅。[#151](https://coding.s-s.city/songsong/openchamber/-/issues/151) 保持 open：仍需在实际 Desktop Settings surface 完成 SSH-config create、managed install/update、remote-LAN password gate、disconnect-stop/reconnect-start 与日志/remediation matching-surface QA。
 
+### #144 Phase 1：Fail-closed JSONC layer parsing（2026-08-31）
+
+上游来源：`f6e054abc`、`998bcf3d6`、`d784e7075`、`538f57ca3`。本阶段只修改与并行 settings-lock WIP 无重叠的 Web / VS Code OpenCode config data layer：
+
+- Web 与 VS Code 不再忽略 `jsonc-parser` errors 后接受 `$schema` 等 partial tree；syntax error、array/scalar root、YAML/plain text 和 no-value content 统一抛 `INVALID_JSONC`。空白与纯注释文件仍按合法空 config 处理。
+- user/project/custom 三层分别解析。坏掉的非目标 layer 记录到 `layerErrors` 并从 merge 中隔离，因此有效的其他 layer 仍可读取；mutation 选择 authoritative target 时会重新抛该层原始 coded error。
+- `writeConfig` 在创建 backup 之前重新验证磁盘上的现有内容；损坏 config 不会被残缺内存对象覆盖，也不会生成误导性的 backup。
+- Plugin list 使用同样的 per-layer isolation；坏 project plugin config 不再遮住有效 user/custom plugin。显式 config context 与 fork 的多实例进程隔离保持不变。
+- VS Code MCP mutation 获得同等 fail-closed 行为；有效 custom layer 可在坏 project layer 存在时继续更新，且绝不触碰坏文件。
+- 对应提交：`bae7ffd64 fix(config): reject partial JSONC layers`；Web OpenCode module docs 与 VS Code backend docs 已同步。
+
+验证：Web shared config + plugin data layer + VS Code config 3 files / 21 tests ✅；full workspace type-check ✅；full workspace lint ✅；`git diff --check` ✅。[#144](https://coding.s-s.city/songsong/openchamber/-/issues/144) 保持 open：继续审计 `sessionRetentionAction` sanitizer、跨 runtime settings write serialization、orphan temp cleanup、Windows replacement retry 与 CLI relay-key atomicity；当前相关 dirty WIP 未被本阶段提交。
+
 ### #137 Phase 10：Loss-safe relay request-body delivery（2026-08-30）
 
 上游来源：`d634cd232`、`aaf397e68`、`854a0db92`，保持 TS client / JS host wire backward compatibility：
