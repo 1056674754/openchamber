@@ -1315,6 +1315,7 @@ export const dict: Record<I18nKey, string> = {
   'contextPanel.browser.emptyHint': 'Wprowadź adres powyżej, aby rozpocząć przeglądanie',
   'contextPanel.browser.devServers.title': 'Uruchomione serwery deweloperskie',
   'contextPanel.browser.devServers.unavailable': 'Wykrywanie serwerów deweloperskich jest niedostępne.',
+  'contextPanel.browser.crashed': 'Strona przeglądarki wielokrotnie uległa awarii. Automatyczne odzyskiwanie zostało zatrzymane.',
   'contextPanel.preview.actions.openExternal': 'Otwórz w przeglądarce',
   'contextPanel.preview.actions.reload': 'Odśwież podgląd',
   'contextPanel.preview.actions.retry': 'Ponów',

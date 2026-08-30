@@ -50,6 +50,11 @@ import {
 import { fetchDevServers, type DevServerDiscovery } from '@/lib/browser/devServers';
 import { suggestFromHistory } from '@/lib/browser/history';
 import { normalizeBrowserUrl } from '@/lib/browser/url';
+import {
+  INITIAL_CRASH_RECOVERY_STATE,
+  planCrashRecovery,
+  type CrashRecoveryState,
+} from '@/lib/browser/crashRecovery';
 import { UNRESOLVED_SERVER_ID } from '@/sync/session-authority';
 import { buildEmbeddedSessionChatURL, getActiveEmbeddedSessionChatTab } from './contextPanelEmbeddedChat';
 import { ProjectContextPanel } from './RightSidebarTabs';
@@ -1410,11 +1415,14 @@ const DesktopBrowserPane: React.FC<DesktopBrowserPaneProps> = ({
   const [currentUrl, setCurrentUrl] = React.useState(startUrl);
   const [isInspecting, setIsInspecting] = React.useState(false);
   const [isLoading, setIsLoading] = React.useState(true);
+  const [browserCrashed, setBrowserCrashed] = React.useState(false);
   const [viewport, setViewport] = React.useState<BrowserViewport>(FILL_VIEWPORT);
   const viewportRef = React.useRef<BrowserViewport>(FILL_VIEWPORT);
   const [viewportArea, setViewportArea] = React.useState({ width: 0, height: 0 });
   const [devServers, setDevServers] = React.useState<DevServerDiscovery>({ kind: 'loading' });
   const loadingTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const crashRecoveryTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const crashRecoveryStateRef = React.useRef<CrashRecoveryState>(INITIAL_CRASH_RECOVERY_STATE);
   const showLoading = isLoading;
   const historySelector = React.useMemo(
     () => selectBrowserHistory(serverId, directory),
@@ -1513,13 +1521,36 @@ const DesktopBrowserPane: React.FC<DesktopBrowserPaneProps> = ({
     };
 
     const onStartLoading = () => {
+      setBrowserCrashed(false);
       if (loadingTimerRef.current) clearTimeout(loadingTimerRef.current);
       loadingTimerRef.current = setTimeout(() => setIsLoading(true), 200);
     };
     const onStopLoading = () => {
+      setBrowserCrashed(false);
       if (loadingTimerRef.current) clearTimeout(loadingTimerRef.current);
       setIsLoading(false);
       syncUrl();
+    };
+
+    const onCrashed = () => {
+      if (crashRecoveryTimerRef.current) clearTimeout(crashRecoveryTimerRef.current);
+      const plan = planCrashRecovery(crashRecoveryStateRef.current, Date.now());
+      if (!plan) {
+        setIsLoading(false);
+        setBrowserCrashed(true);
+        return;
+      }
+      crashRecoveryStateRef.current = plan.state;
+      setIsLoading(true);
+      crashRecoveryTimerRef.current = setTimeout(() => {
+        crashRecoveryTimerRef.current = null;
+        try {
+          webview.reload();
+        } catch {
+          setIsLoading(false);
+          setBrowserCrashed(true);
+        }
+      }, plan.delayMs);
     };
 
     const onNewWindow = (event: Event) => {
@@ -1537,6 +1568,8 @@ const DesktopBrowserPane: React.FC<DesktopBrowserPaneProps> = ({
     webview.addEventListener('did-navigate-in-page', onNavigate);
     webview.addEventListener('did-start-loading', onStartLoading);
     webview.addEventListener('did-stop-loading', onStopLoading);
+    webview.addEventListener('render-process-gone', onCrashed);
+    webview.addEventListener('crashed', onCrashed);
     webview.addEventListener('new-window', onNewWindow);
 
     // Check current loading state imperatively — we may have missed the event
@@ -1549,10 +1582,13 @@ const DesktopBrowserPane: React.FC<DesktopBrowserPaneProps> = ({
 
     return () => {
       if (loadingTimerRef.current) clearTimeout(loadingTimerRef.current);
+      if (crashRecoveryTimerRef.current) clearTimeout(crashRecoveryTimerRef.current);
       webview.removeEventListener('did-navigate', onNavigate);
       webview.removeEventListener('did-navigate-in-page', onNavigate);
       webview.removeEventListener('did-start-loading', onStartLoading);
       webview.removeEventListener('did-stop-loading', onStopLoading);
+      webview.removeEventListener('render-process-gone', onCrashed);
+      webview.removeEventListener('crashed', onCrashed);
       webview.removeEventListener('new-window', onNewWindow);
     };
   }, [directory, persistUrl, recordBrowserVisit, serverId]);
@@ -1597,6 +1633,13 @@ const DesktopBrowserPane: React.FC<DesktopBrowserPaneProps> = ({
     if (typeof webview?.loadURL !== 'function') return;
     const nextUrl = normalizeBrowserUrl(value);
     try { webview.loadURL(nextUrl); } catch { /* webview may not be ready */ }
+  }, []);
+
+  const reloadBrowser = React.useCallback(() => {
+    crashRecoveryStateRef.current = INITIAL_CRASH_RECOVERY_STATE;
+    setBrowserCrashed(false);
+    setIsLoading(true);
+    try { webviewRef.current?.reload?.(); } catch { setIsLoading(false); }
   }, []);
 
   const waitForIdle = React.useCallback(async (timeoutMs = 8_000): Promise<boolean> => {
@@ -1802,7 +1845,7 @@ const DesktopBrowserPane: React.FC<DesktopBrowserPaneProps> = ({
         <Button type="button" variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => { try { webviewRef.current?.goForward?.(); } catch { /* webview not ready */ } }}>
           <Icon name="arrow-right" className="h-3.5 w-3.5" />
         </Button>
-        <Button type="button" variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => { try { webviewRef.current?.reload?.(); } catch { /* webview not ready */ } }}>
+        <Button type="button" variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={reloadBrowser}>
           <Icon name="refresh" className="h-3.5 w-3.5" />
         </Button>
         <form className="min-w-0 flex-1" onSubmit={(event) => { event.preventDefault(); loadUrl(urlInput); }}>
@@ -1900,7 +1943,17 @@ const DesktopBrowserPane: React.FC<DesktopBrowserPaneProps> = ({
             ) : null}
           </div>
         ) : null}
-        {showLoading ? (
+        {browserCrashed ? (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-background p-6 text-center">
+            <Icon name="error-warning" className="h-8 w-8 text-status-error" aria-hidden="true" />
+            <span className="max-w-sm typography-ui-label text-foreground">{t('contextPanel.browser.crashed')}</span>
+            <Button type="button" variant="outline" size="sm" onClick={reloadBrowser}>
+              <Icon name="refresh" className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
+              {t('contextPanel.preview.actions.reload')}
+            </Button>
+          </div>
+        ) : null}
+        {showLoading && !browserCrashed ? (
           <div className="absolute inset-0 flex items-center justify-center bg-background/70 typography-micro text-muted-foreground">
             {t('common.loading')}
           </div>

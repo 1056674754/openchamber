@@ -2395,3 +2395,12 @@ QA 事故记录：HMR server 复用了安装版 managed OpenCode `54185`，退�
 - URL normalizer 补齐 upstream loopback 语义：`localhost:5173`、`127.0.0.1:3000` 默认 HTTP；公网 schemeless host 默认 HTTPS；file/javascript/data 与非法 URL 统一拒绝为 blank。
 
 验证：URL/history/dev-server 3 files / 9 tests ✅；UI type-check/lint ✅；Web production build ✅；`git diff --check` ✅。`#135` 仍 open：crash recovery、Electron dev-tunnel IPC、aggregated remote synthetic-event bridge 未完成。
+
+### #135 Phase 8：Bounded Browser guest renderer crash recovery（2026-08-30）
+
+- 监听 Electron `render-process-gone` 与 legacy `crashed`；30 秒窗口最多自动 reload 三次，按 250ms → 500ms → 1000ms 退避，避免 crash-on-load 无限循环拖垮整个 OpenChamber。
+- recovery budget 保存在 Browser pane ref，重新 render 不会重置。窗口过期后新的首次崩溃获得新 budget。
+- budget 耗尽后停止自动动作，显示明确错误和手动 Reload；手动操作重置 budget。该流程只重载 guest page，不重启 Electron shell、OpenChamber server 或 managed OpenCode。
+- crash/error/reload 文案使用现有 theme tokens，新增错误文案补齐全部 10 个 locale。
+
+验证：crash recovery + history 2 files / 5 tests ✅；UI type-check/lint ✅；`git diff --check` ✅。`#135` 仍 open：Electron dev-tunnel IPC 与 aggregated remote synthetic-event bridge 未完成。

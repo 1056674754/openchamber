@@ -20,4 +20,6 @@ The fork's global WebSocket event pipeline carries requests to the renderer. Ele
 
 Browser address history is persisted by the renderer under `runtimeKey + serverId + directory`. Completed navigations record URL/title; input typing only filters a leaf subscription and does not update shared state.
 
+Guest renderer crashes use a bounded recovery policy: three reloads in a 30-second window with 250/500/1000ms delay. Exhaustion produces a visible terminal state and leaves manual reload available; it never restarts OpenChamber or OpenCode.
+
 Remote-instance fan-in currently carries OpenCode events only; an aggregated remote does not claim Browser capability until its OpenChamber event channel is bridged explicitly.
