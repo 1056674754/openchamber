@@ -445,7 +445,7 @@ const ElectronMiniChatContent: React.FC<{ config: MiniChatConfig }> = ({ config 
       <MiniChatBootstrap config={config} />
       <MiniChatPresencePublisher />
       <SyncRuntimeEffects embeddedBackgroundWorkEnabled={true} />
-      <MiniChatLayout mode={config.mode} autoOpenDraft={config.mode === 'draft'} unavailable={sessionUnavailable} />
+      <MiniChatLayout mode={config.mode} unavailable={sessionUnavailable} />
     </>
   );
 };
