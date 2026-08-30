@@ -173,6 +173,32 @@ describe('cli args', () => {
     expect(parseArgs(['serve', '-d']).removedFlagErrors).toEqual([]);
   });
 
+  it('parses connect-url relay and output flags without prompts', () => {
+    const parsed = parseArgs([
+      'connect-url',
+      '--port',
+      '4321',
+      '--server',
+      'https://openchamber.example.test',
+      '--name',
+      'Dev host',
+      '--relay',
+      '--qr',
+      '--quiet',
+    ]);
+
+    expect(parsed.command).toBe('connect-url');
+    expect(parsed.options).toMatchObject({
+      port: 4321,
+      serverId: 'https://openchamber.example.test',
+      name: 'Dev host',
+      relay: true,
+      qr: true,
+      quiet: true,
+    });
+    expect(parsed.removedFlagErrors).toEqual([]);
+  });
+
   it('parses session control scope and dispatch flags', () => {
     const parsed = parseArgs([
       'session',

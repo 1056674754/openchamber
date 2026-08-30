@@ -26,6 +26,7 @@ import {
 } from './cli-output.js';
 import { createCliLifecycle } from './cli-lifecycle.js';
 import { createControlCommands } from './control-commands.js';
+import { createConnectUrlCommand } from './lib/commands-connect-url.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -647,6 +648,7 @@ function parseArgs(argv = process.argv.slice(2)) {
     time: undefined,
     cron: undefined,
     timezone: undefined,
+    relay: false,
   };
 
   const removedFlagErrors = [];
@@ -954,6 +956,9 @@ function parseArgs(argv = process.argv.slice(2)) {
         options.qr = true;
         options.explicitQr = true;
         break;
+      case 'relay':
+        options.relay = true;
+        break;
       case 'no-qr':
         options.qr = false;
         options.explicitQr = true;
@@ -1069,6 +1074,7 @@ USAGE:
 
 COMMANDS:
   serve          Start the web server (daemon default)
+  connect-url    Create a single-use client pairing link
   stop           Stop running instance(s)
   restart        Stop and start the server
   status         Show server status
@@ -1103,11 +1109,32 @@ EXAMPLES:
   openchamber                    # Start in daemon mode on default port 3000 (or free port)
   openchamber --port 8080        # Start on port 8080 (daemon)
   openchamber serve --foreground # Start in foreground (for systemd Type=simple)
+  openchamber connect-url --server https://openchamber.example.com --relay
   openchamber startup enable     # Start OpenChamber at user login
   openchamber tunnel help        # Show tunnel lifecycle help
   openchamber logs               # Follow logs for latest running instance
   openchamber session list --server default --dir /path/to/project
   openchamber schedule list --server default --project <project-id>
+`);
+}
+
+function showConnectUrlHelp() {
+  console.log(`
+ OpenChamber Connect URL
+
+USAGE:
+  openchamber connect-url [OPTIONS]
+
+OPTIONS:
+  -p, --port <port>       Target/start an OpenChamber instance (default: ${DEFAULT_PORT})
+  --host <host>           Bind host used when auto-starting
+  --server <http(s)://>   Public or reachable direct server URL
+  --name <label>          Label stored with the pairing session
+  --relay                 Include the private relay fallback candidate
+  --qr                    Render a terminal QR code
+  --quiet                 Print only the connect URL
+  --json                  Print structured pairing details
+  -h, --help              Show this help
 `);
 }
 
@@ -5521,6 +5548,19 @@ const controlCommands = createControlCommands({
   requestJson,
 });
 
+commands['connect-url'] = createConnectUrlCommand({
+  serveCommand: commands.serve.bind(commands),
+  discoverRunningInstances,
+  getInstanceFilePath,
+  readInstanceOptions,
+  assertSafeBrowserPort,
+  resolveConfiguredBindHost,
+  buildLocalUrl,
+  formatHostForUrl,
+  getDataDir,
+  usageError: (message) => new TunnelCliError(message, EXIT_CODE.USAGE_ERROR),
+});
+
 commands.projects = (options, action) => controlCommands.projects(options, action);
 commands.models = (options, action) => controlCommands.models(options, action);
 commands.session = (options, action) => controlCommands.session(options, action);
@@ -5572,6 +5612,8 @@ async function main() {
       showTunnelHelp();
     } else if (command === 'startup') {
       showStartupHelp();
+    } else if (command === 'connect-url') {
+      showConnectUrlHelp();
     } else if (command === 'session' || command === 'schedule') {
       await commands[command](options, 'help');
     } else {
@@ -5590,6 +5632,11 @@ async function main() {
     return;
   }
 
+  if (command === 'connect-url') {
+    await commands['connect-url'](options);
+    return;
+  }
+
   if (['projects', 'models', 'session', 'schedule'].includes(command)) {
     await commands[command](options, controlAction);
     return;
@@ -5598,6 +5645,7 @@ async function main() {
   if (!commands[command]) {
     const knownCommands = [
       'serve',
+      'connect-url',
       'stop',
       'restart',
       'status',
