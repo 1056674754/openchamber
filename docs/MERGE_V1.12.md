@@ -3070,3 +3070,14 @@ v1.20.0-sscity 尚未宣布完成：当前未关闭 `#135/#140/#142-#151/#154/#1
 - 独立 Electron dev 验证切换到 `/Users/song/dev_entertainment` 后 composer 显示 `Sisyphus - ultraworker`；测试产生的 `activeProjectId` 已恢复，正式 OpenChamber 未终止、runtime 未替换。
 
 验证：`useConfigStore.nonblocking.test.ts` 12/12 ✅（新增 stale `Build / Plan` → live OMO catalog、directory authority 回归）；全 workspace `bun run type-check` ✅、`bun run lint` ✅。
+
+## v1.20.0-sscity closeout（2026-08-31）
+
+- GitLab milestone `Upstream 1.18.3-1.20.0` 的 open work item为 0；overview `#134-#159`全部完成。跨版本/外部设备验收没有隐藏在 closed issue内，分别由 `#172-#178`等 v1.21 follow-up继续追踪。
+- root、Electron、Web、UI、Mobile、VS Code package identity与 `bun.lock` workspace metadata统一提升为 `1.20.0-sscity`；Electron build-version prefix同步，timestamp prerelease仍保持 updater-valid格式。
+- Linux standalone不再维护独立硬编码版本，直接读取 Web package identity；SSH remote exact-version selection因此与 Desktop release一致。
+- 对应版本提交：`f020e0b95 chore(release): mark v1.20.0-sscity`。所有版本文件通过 temporary index精确提交；`packages/vscode/package.json` 的 selection/remote namespace并行 WIP继续保持未提交。
+- closeout focused：build-version + standalone-version 4/4 ✅；全 workspace type-check/lint ✅；`git diff --check` ✅。此前每个 work item的 runtime/build/matching-surface证据见本 ledger对应 section和 GitLab notes。
+- 本阶段没有执行 `electron:runtime:install`、没有修改 `/Applications/OpenChamber.app`、没有签名/公证。版本身份完成不等于已部署；用户明确要求更新 runtime时再按 immutable-shell runbook执行。
+
+结论：fork已正式到达 `1.20.0-sscity`。后续迁移从 upstream `v1.21.0..v1.21.1` executable backlog继续，不再把 v1.20已完成项重新打开。
