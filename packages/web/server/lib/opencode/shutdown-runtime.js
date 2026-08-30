@@ -19,6 +19,8 @@ export const createGracefulShutdownRuntime = (dependencies) => {
     setTerminalRuntime,
     getMessageStreamRuntime,
     setMessageStreamRuntime,
+    getDevTunnelRuntime,
+    setDevTunnelRuntime,
     shouldSkipOpenCodeStop,
     getOpenCodePort,
     getOpenCodeProcess,
@@ -81,6 +83,16 @@ export const createGracefulShutdownRuntime = (dependencies) => {
       } catch {
       } finally {
         setMessageStreamRuntime(null);
+      }
+    }
+
+    const devTunnelRuntime = getDevTunnelRuntime?.();
+    if (devTunnelRuntime) {
+      try {
+        devTunnelRuntime.dispose();
+      } catch {
+      } finally {
+        setDevTunnelRuntime?.(null);
       }
     }
 

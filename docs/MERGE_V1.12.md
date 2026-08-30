@@ -2344,3 +2344,15 @@ QA 事故记录：HMR server 复用了安装版 managed OpenCode `54185`，退�
 - scanner 在 feature route composition 中单实例复用，为后续 Browser address suggestions 与 remote tunnel allowlist 提供同一权威集合。
 
 验证：parser Bun 1 file / 4 tests ✅；Web type/lint ✅；真实 macOS lsof 只读扫描发现 254 个候选并确认排除安装版 `57123` 与 OpenCode `65246`。下一 phase 接 UI BrowserPane/address suggestions，再将同一 scanner 接 dev tunnel。
+
+### #135 Phase 3：Remote dev-server raw tunnel（2026-08-30）
+
+- host 新增 `/api/dev-tunnel?port=` WebSocket raw-byte bridge，只能连接同一 authoritative scanner 当前报告的 loopback/wildcard listener；不是任意 loopback proxy。
+- OpenChamber own-port 集合改为 request-time 读取 `tunnelRuntimeContext.getActivePort()`，随机端口启动时也不会把自身错误列入 discovery/tunnel allowlist。
+- 有 Origin 的 browser caller 保留正常 Origin gate；无 Origin 的 desktop caller 必须是 paired-client bearer auth，普通 UI session 无权绕过 CSRF 边界。URL token 不允许替代 desktop client auth。
+- desktop-side client 为每个 `baseUrl + remotePort` 复用一个随机本地 loopback listener；每条 TCP connection 使用独立 WebSocket，首包 buffer 256 KiB、handshake 15s、host connect 5s、host sockets 64 条上限。
+- close/error/shutdown 使用强制对称 teardown；graceful shutdown 在关闭 HTTP server 前 dispose dev tunnel，避免半开 socket 阻塞 runtime 切换或退出。
+- non-http(s) base URL 在暴露 listener 前失败，并捕获 WebSocket constructor synchronous throw，覆盖上游 v1.18.4 invalid-base crash fix。
+- 当前未接 dirty Electron main / Browser renderer，因此还没有 `desktop_dev_tunnel_open` 调用方。private relay virtual endpoint 也不能直接给 Node `ws` client 使用，归 [#137](https://coding.s-s.city/songsong/openchamber/-/issues/137) 的 relay/browser-tunnel parity，不虚报支持。
+
+验证：dev tunnel + discovery + shutdown 3 files / 17 tests ✅，含真实 HTTP host→WebSocket→local TCP 透传、allowlist/auth/origin 拒绝、stalled handshake bound 与 shutdown ordering。下一 phase 接 clean UI browser contract/control client；Electron main 需等待另一 agent WIP 收口。

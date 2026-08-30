@@ -18,6 +18,8 @@ const createRuntime = (server, overrides = {}) => createGracefulShutdownRuntime(
   setTerminalRuntime: vi.fn(),
   getMessageStreamRuntime: () => null,
   setMessageStreamRuntime: vi.fn(),
+  getDevTunnelRuntime: () => null,
+  setDevTunnelRuntime: vi.fn(),
   shouldSkipOpenCodeStop: () => true,
   getOpenCodePort: () => null,
   getOpenCodeProcess: () => null,
@@ -66,6 +68,22 @@ describe('graceful shutdown runtime', () => {
     await runtime.gracefulShutdown({ exitProcess: false });
 
     expect(openCodeConfigFileWatcherRuntime.stop).toHaveBeenCalledTimes(1);
+  });
+
+  it('disposes the dev tunnel before closing the HTTP server', async () => {
+    const order = [];
+    const devTunnelRuntime = { dispose: vi.fn(() => order.push('tunnel')) };
+    const setDevTunnelRuntime = vi.fn();
+    const server = { close: vi.fn((callback) => { order.push('server'); callback(); }) };
+    const runtime = createRuntime(server, {
+      getDevTunnelRuntime: () => devTunnelRuntime,
+      setDevTunnelRuntime,
+    });
+
+    await runtime.gracefulShutdown({ exitProcess: false });
+
+    expect(order).toEqual(['tunnel', 'server']);
+    expect(setDevTunnelRuntime).toHaveBeenCalledWith(null);
   });
 
   it('stops every tracked managed OpenCode port when shutdown explicitly stops OpenCode', async () => {

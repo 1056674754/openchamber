@@ -141,6 +141,12 @@ Cross-platform discovery of locally reachable listening development servers.
 
 - Module docs: `packages/web/server/lib/dev-servers/DOCUMENTATION.md`
 
+##### dev-tunnel
+
+Authenticated raw-byte transport for browsing a development server on a remote OpenChamber host through a local loopback origin.
+
+- Module docs: `packages/web/server/lib/dev-tunnel/DOCUMENTATION.md`
+
 ##### terminal
 
 WebSocket protocol utilities for terminal input handling including message normalization, control frame parsing, and rate limiting.

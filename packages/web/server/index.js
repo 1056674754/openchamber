@@ -85,6 +85,7 @@ import { createAgentToolRuntime } from './lib/agent-tool/runtime.js';
 import { createBrowserControlBroker } from './lib/browser-control/broker.js';
 import { registerBrowserControlRoutes } from './lib/browser-control/routes.js';
 import { createDevServerScanner } from './lib/dev-servers/routes.js';
+import { createDevTunnelRuntime } from './lib/dev-tunnel/runtime.js';
 import { createRuntimeFallbackApprovalService } from './lib/agent-tool/runtime-fallback-approval.js';
 import { createServerStartupRuntime } from './lib/opencode/server-startup-runtime.js';
 import { createTunnelWiringRuntime } from './lib/opencode/tunnel-wiring-runtime.js';
@@ -685,6 +686,7 @@ let runtimeManagedRemoteTunnelToken = '';
 let runtimeManagedRemoteTunnelHostname = '';
 let terminalRuntime = null;
 let messageStreamRuntime = null;
+let devTunnelRuntime = null;
 let remoteInstancesRuntimeRef = null;
 let agentToolRuntime = null;
 const userProvidedOpenCodePassword = hmrStateRuntime.getUserProvidedOpenCodePassword(hmrState);
@@ -1517,6 +1519,10 @@ const gracefulShutdownRuntime = createGracefulShutdownRuntime({
   setMessageStreamRuntime: (value) => {
     messageStreamRuntime = value;
   },
+  getDevTunnelRuntime: () => devTunnelRuntime,
+  setDevTunnelRuntime: (value) => {
+    devTunnelRuntime = value;
+  },
   shouldSkipOpenCodeStop: (shutdownOptions = {}) => {
     if (ENV_SKIP_OPENCODE_START || isExternalOpenCode) return true;
     if (shutdownOptions.stopOpenCode === false) return true;
@@ -1726,6 +1732,8 @@ async function main(options = {}) {
 
   const tunnelRuntimeContext = tunnelWiringRuntime.initialize(app, port);
   const { tunnelService, startTunnelWithNormalizedRequest } = tunnelRuntimeContext;
+  const getOwnServerPorts = () => [tunnelRuntimeContext.getActivePort(), port, openCodePort]
+    .filter((value) => Number.isInteger(value) && value > 0);
 
   const bindHost = typeof host === 'string' && host.length > 0 ? host : '127.0.0.1';
   const { resolvePairingTransports, resolveDirectLanUrls } = createPairingLanHelpers({
@@ -1821,7 +1829,7 @@ async function main(options = {}) {
     buildOpenCodeUrl,
     getOpenCodeAuthHeaders,
     getOpenCodePort: () => openCodePort,
-    getOwnPorts: () => [port, openCodePort].filter((value) => Number.isInteger(value) && value > 0),
+    getOwnPorts: getOwnServerPorts,
     devServerScanner,
     fetchProvidersSnapshot,
     buildAugmentedPath,
@@ -1844,6 +1852,14 @@ async function main(options = {}) {
   previewProxyRuntime.attach(app, {
     server,
     express,
+    uiAuthController,
+    isRequestOriginAllowed,
+    rejectWebSocketUpgrade,
+  });
+
+  devTunnelRuntime = createDevTunnelRuntime({
+    server,
+    discoverDevServers: () => devServerScanner.discover({ ownPorts: getOwnServerPorts() }),
     uiAuthController,
     isRequestOriginAllowed,
     rejectWebSocketUpgrade,
