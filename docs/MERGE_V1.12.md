@@ -2382,7 +2382,7 @@ fork 已有丰富的 surface 组织（#62 surface rail + ContextSidebarTab + Con
 - `/btw` i18n key contract 覆盖 11 locales；简繁中文本地化，其余暂用 English fallback。
 - 现场修复 fork boundary：OpenCode 会为 cloned messages 生成新 ID，因此 fork 后、首发前从 fork 自己的 `session.messages(limit=1)` 读取最后继承消息 ID。继续使用 parent fork-point ID 会导致 marker 在 fork transcript 中不存在，panel 正确 fail closed 但永久 Loading。
 
-验证：btw metadata/core/policy/command/i18n 6 files / 19 tests ✅；full workspace type-check/lint/build ✅。隔离 `HOME + OPENCHAMBER_DATA_DIR + OpenCode 1.18.23-sscity` QA：创建 completed parent → `/btw` → side answer → sidebar hidden → collapse 恢复 parent composer → expand 恢复 fork → Promote 显示正式 Session → 后续 user message 含 `BTW_PROMOTION_NOTICE` synthetic part；测试 Sessions 全部删除，正式数据/runtime 未触碰。[#149](https://coding.s-s.city/songsong/openchamber/-/issues/149) 保持 open：补 375px mobile viewport matching-surface QA 后再关闭。
+验证：btw metadata/core/policy/command/i18n 6 files / 19 tests ✅；full workspace type-check/lint/build ✅。隔离 `HOME + OPENCHAMBER_DATA_DIR + OpenCode 1.18.23-sscity` QA：创建 completed parent → `/btw` → side answer → sidebar hidden → collapse 恢复 parent composer → expand 恢复 fork → Promote 显示正式 Session → 后续 user message 含 `BTW_PROMOTION_NOTICE` synthetic part；测试 Sessions 全部删除，正式数据/runtime 未触碰。[#149](https://coding.s-s.city/songsong/openchamber/-/issues/149) v1.20 scope 完成。v1.21 completed-turn/reference/boundary/panel-authority follow-ups与真实 Capacitor narrow-screen QA 已拆至 [#173](https://coding.s-s.city/songsong/openchamber/-/issues/173)，不再阻塞 v1.20 closeout。
 
 ### #150 Phase 1：Multi-instance managed Chats directory authority（2026-08-30）
 
