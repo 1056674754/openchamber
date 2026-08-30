@@ -2206,3 +2206,14 @@ fork 已有丰富的 surface 组织（#62 surface rail + ContextSidebarTab + Con
 - `getActiveEmbeddedSessionChatTab` pure helper 覆盖 active/null/missing；ContextPanel focused test 5 条 ✅；full workspace type-check/lint 与 diff check ✅。
 
 [#140](https://coding.s-s.city/songsong/openchamber/-/issues/140) 保持 open：`222057abc / 83c4c75ff / 5ef828f38` 依赖上游统一 WorkStatusPanel，而 fork 在 #122 明确只落数据基础设施并延期该 UI。后续需在 fork 的 surface rail / ContextSidebarTab 设计内决定 draft project/MCP/usage 呈现，不能直接复制上游侧栏。
+
+### #141 Phase 1：Isolated server exception survival（2026-08-30）
+
+上游来源：`71a538b77`。fork 的 embedded server 没有外部 supervisor，单个 Node/socket stray exception 不应让整个 OpenChamber instance 离线：
+
+- `uncaughtException` 现在记录并继续服务；滚动 60 秒窗口内超过 10 次才执行既有 graceful shutdown，避免真正异常风暴下半失效运行。
+- `unhandledRejection` 保持既有非致命日志策略；SIGTERM/SIGINT/SIGQUIT graceful path 不变。
+- 3 Vitest tests 覆盖单次异常、11 次风暴和 rejection，full type-check/lint/diff check ✅。
+- 上游 dev-tunnel invalid base URL 子修复当前无对应模块：fork 尚未合并 Browser workspace/dev-tunnel（[#135](https://coding.s-s.city/songsong/openchamber/-/issues/135)），不创建无调用方 client。
+
+[#141](https://coding.s-s.city/songsong/openchamber/-/issues/141) 保持 open：Phase 2 需要将 `538309528` 的 message chronology contract 贯穿 event reducer、history/page loader、materialization、optimistic、revert/redo 和 side-channel merge；当前仍存在多处 message/part ID 排序，不能只加 comparator 就宣称完成。

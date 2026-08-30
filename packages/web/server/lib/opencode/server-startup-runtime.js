@@ -1,3 +1,6 @@
+const UNCAUGHT_STORM_LIMIT = 10;
+const UNCAUGHT_STORM_WINDOW_MS = 60_000;
+
 export const createServerStartupRuntime = (dependencies) => {
   const {
     process,
@@ -147,9 +150,18 @@ export const createServerStartupRuntime = (dependencies) => {
       console.error('Unhandled Rejection at:', promise, 'reason:', reason);
     });
 
+    const exceptionTimes = [];
     process.on('uncaughtException', (error) => {
       console.error('Uncaught Exception:', error);
-      gracefulShutdown();
+      const now = Date.now();
+      exceptionTimes.push(now);
+      while (exceptionTimes.length > 0 && now - exceptionTimes[0] > UNCAUGHT_STORM_WINDOW_MS) {
+        exceptionTimes.shift();
+      }
+      if (exceptionTimes.length > UNCAUGHT_STORM_LIMIT) {
+        console.error(`More than ${UNCAUGHT_STORM_LIMIT} uncaught exceptions within a minute; shutting down.`);
+        gracefulShutdown();
+      }
     });
   };
 
