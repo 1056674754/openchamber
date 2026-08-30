@@ -681,7 +681,7 @@ function App({ apis }: AppProps) {
       if (existing) {
         projectsStore.setActiveProject(existing.id);
       } else {
-        projectsStore.addProject(projectPath);
+        void projectsStore.addProject(projectPath);
       }
     };
 

@@ -1,6 +1,17 @@
 import { beforeEach, describe, expect, mock, test } from 'bun:test';
 
 const executeCommand = mock(async () => undefined);
+let currentWorkspaceFolders = [];
+const updateWorkspaceFolders = mock((start, _deleteCount, ...foldersToAdd) => {
+  currentWorkspaceFolders = [
+    ...currentWorkspaceFolders.slice(0, start),
+    ...foldersToAdd.map((folder) => ({
+      name: folder.uri.fsPath.replace(/[\\/]+$/, '').split(/[\\/]/).pop(),
+      uri: { ...folder.uri, fsPath: folder.uri.fsPath.replace(/[\\/]+$/, '') },
+    })),
+  ];
+  return true;
+});
 
 class Position {
   constructor(line, character) {
@@ -19,7 +30,10 @@ class Range {
 mock.module('vscode', () => ({
   commands: { executeCommand },
   workspace: {
-    workspaceFolders: [],
+    get workspaceFolders() {
+      return currentWorkspaceFolders;
+    },
+    updateWorkspaceFolders,
   },
   Uri: {
     file: (fsPath) => ({ scheme: 'file', fsPath }),
@@ -72,6 +86,8 @@ const deps = {
 describe('VS Code system bridge editor:openFile', () => {
   beforeEach(() => {
     executeCommand.mockClear();
+    updateWorkspaceFolders.mockClear();
+    currentWorkspaceFolders = [];
   });
 
   test('uses vscode.open so VS Code can select the notebook editor', async () => {
@@ -102,5 +118,52 @@ describe('VS Code system bridge editor:openFile', () => {
       { scheme: 'file', fsPath: '/workspace/source.ts' },
       { selection: new Range(position, position) },
     );
+  });
+});
+
+describe('VS Code system bridge api:workspace:addFolder', () => {
+  beforeEach(() => {
+    updateWorkspaceFolders.mockClear();
+    currentWorkspaceFolders = [{ name: 'one', uri: { fsPath: '/workspace/one' } }];
+  });
+
+  test('adds and returns the complete normalized workspace folder list', async () => {
+    const response = await handleSystemBridgeMessage({
+      id: 'add-folder',
+      type: 'api:workspace:addFolder',
+      payload: { path: '/workspace/two/' },
+    }, undefined, deps);
+
+    expect(response).toEqual({
+      id: 'add-folder',
+      type: 'api:workspace:addFolder',
+      success: true,
+      data: {
+        workspaceFolders: [
+          { name: 'one', path: '/workspace/one' },
+          { name: 'two', path: '/workspace/two' },
+        ],
+      },
+    });
+    expect(updateWorkspaceFolders).toHaveBeenCalledWith(1, null, {
+      uri: { scheme: 'file', fsPath: '/workspace/two/' },
+    });
+  });
+
+  test('dedupes Windows drive letters and rejects missing paths', async () => {
+    currentWorkspaceFolders = [{ name: 'one', uri: { fsPath: 'd:\\work\\one' } }];
+    const existing = await handleSystemBridgeMessage({
+      id: 'existing',
+      type: 'api:workspace:addFolder',
+      payload: { path: 'D:\\work\\one' },
+    }, undefined, deps);
+    expect(existing.success).toBe(true);
+    expect(updateWorkspaceFolders).not.toHaveBeenCalled();
+
+    await expect(handleSystemBridgeMessage({
+      id: 'missing',
+      type: 'api:workspace:addFolder',
+      payload: {},
+    }, undefined, deps)).resolves.toMatchObject({ success: false, error: 'Directory path is required' });
   });
 });

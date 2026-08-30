@@ -26,6 +26,7 @@ declare global {
     __VSCODE_CONFIG__?: {
       apiUrl?: string;
       workspaceFolder: string;
+      workspaceFolders?: Array<{ name?: string; path: string }>;
       theme: string;
       connectionStatus: string;
       cliAvailable?: boolean;
@@ -1393,6 +1394,25 @@ onCommand('newSession', () => {
   
   // Also dispatch event to navigate to chat view in VSCodeLayout
   window.dispatchEvent(new CustomEvent('openchamber:navigate', { detail: { view: 'chat' } }));
+});
+
+onCommand('workspaceFoldersChanged', (payload) => {
+  const raw = (payload as { workspaceFolders?: unknown } | undefined)?.workspaceFolders;
+  const workspaceFolders = Array.isArray(raw)
+    ? raw.flatMap((entry) => {
+        if (!entry || typeof entry !== 'object') return [];
+        const candidate = entry as { name?: unknown; path?: unknown };
+        if (typeof candidate.path !== 'string' || !candidate.path.trim()) return [];
+        return [{
+          name: typeof candidate.name === 'string' ? candidate.name : undefined,
+          path: candidate.path,
+        }];
+      })
+    : [];
+  if (window.__VSCODE_CONFIG__) window.__VSCODE_CONFIG__.workspaceFolders = workspaceFolders;
+  void import('@/stores/useProjectsStore').then(({ useProjectsStore }) => {
+    useProjectsStore.getState().syncVSCodeWorkspaceFolders(workspaceFolders);
+  });
 });
 
 // Listen for showSettings command from extension title bar button

@@ -823,6 +823,7 @@ export interface VSCodeAPI {
   executeCommand(command: string, ...args: unknown[]): Promise<unknown>;
   openAgentManager(): Promise<void>;
   openExternalUrl(url: string): Promise<void>;
+  addWorkspaceFolder?(path: string): Promise<Array<{ name: string; path: string }>>;
   saveImage?(payload: { fileName: string; dataUrl: string }): Promise<{ saved?: boolean; canceled?: boolean; error?: string }>;
 }
 

@@ -2,6 +2,7 @@ import type { RuntimeAPIs } from '@/lib/api/types';
 
 export interface VSCodeBootstrapConfig {
   workspaceFolder?: unknown;
+  workspaceFolders?: unknown;
 }
 
 export const getVSCodeBootstrapConfig = (): VSCodeBootstrapConfig | null => {

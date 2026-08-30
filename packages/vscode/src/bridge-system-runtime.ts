@@ -13,6 +13,8 @@ import {
 } from './opencodeGoQuota';
 import { getSessionActivitySnapshot } from './sessionActivityWatcher';
 import { getOpenCodeUpgradeStatus, upgradeManagedOpenCode } from './opencode-upgrade-runtime';
+import { normalizeWindowsDriveLetter } from './pathUtils';
+import { resolveWorkspaceFolders } from './workspaceResolver';
 import type { BridgeContext, BridgeResponse } from './bridge';
 
 type BridgeMessageInput = {
@@ -583,6 +585,36 @@ export async function handleSystemBridgeMessage(
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
         return { id, type, success: false, error: errorMessage };
+      }
+    }
+
+    case 'api:workspace:addFolder': {
+      try {
+        const targetPath = typeof (payload as { path?: unknown } | undefined)?.path === 'string'
+          ? (payload as { path: string }).path.trim()
+          : '';
+        if (!targetPath) {
+          return { id, type, success: false, error: 'Directory path is required' };
+        }
+        const folders = vscode.workspace.workspaceFolders ?? [];
+        const uri = vscode.Uri.file(normalizeWindowsDriveLetter(targetPath));
+        const alreadyAdded = folders.some(
+          (folder) => normalizeWindowsDriveLetter(folder.uri.fsPath) === uri.fsPath,
+        );
+        if (!alreadyAdded) {
+          const updated = vscode.workspace.updateWorkspaceFolders(folders.length, null, { uri });
+          if (!updated) {
+            return { id, type, success: false, error: 'Failed to add workspace folder' };
+          }
+        }
+        return {
+          id,
+          type,
+          success: true,
+          data: { workspaceFolders: resolveWorkspaceFolders(vscode.workspace.workspaceFolders ?? []) },
+        };
+      } catch (error) {
+        return { id, type, success: false, error: error instanceof Error ? error.message : String(error) };
       }
     }
 
