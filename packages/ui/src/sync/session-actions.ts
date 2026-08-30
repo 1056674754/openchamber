@@ -43,6 +43,7 @@ import {
 import { getRuntimeKey } from "@/lib/runtime-switch"
 import { runtimeFetch } from "@/lib/runtime-fetch"
 import { messagesBefore, messagesFrom, sortMessagesChronologically } from './message-ordering'
+import { cleanupBtwBeforeSessionRemoval } from '@/lib/sessionBtwLifecycle'
 
 export {
   resolveApiUrl,
@@ -924,6 +925,32 @@ function isSessionNotFound(error: unknown): boolean {
   return candidate.status === 404 || candidate.response?.status === 404
 }
 
+async function cleanupBtwLinksBeforeRemoval(sessionId: string, directory: string): Promise<void> {
+  await cleanupBtwBeforeSessionRemoval(sessionId, {
+    getSession: async (targetSessionId) => {
+      const result = await sdkForSession(targetSessionId, directory).session.get({
+        sessionID: targetSessionId,
+        directory,
+      })
+      return result.data ?? null
+    },
+    patchMetadata: async (targetSessionId, transform) => {
+      await patchSessionMetadata(targetSessionId, directory, transform)
+    },
+    deleteTemporarySession: async (targetSessionId) => {
+      try {
+        await sdkForSession(targetSessionId, directory).session.delete({
+          sessionID: targetSessionId,
+          directory,
+        })
+      } catch (error) {
+        if (!isSessionNotFound(error)) throw error
+      }
+      cleanupDeletedSession(targetSessionId, directory)
+    },
+  })
+}
+
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 export async function deleteSession(sessionId: string, _options?: Record<string, unknown>): Promise<boolean> {
   const sessionDirectory = requireSessionDirectory(sessionId, "deleteSession")
@@ -934,6 +961,7 @@ export async function deleteSession(sessionId: string, _options?: Record<string,
     ui.setCurrentSession(null)
   }
   try {
+    await cleanupBtwLinksBeforeRemoval(sessionId, sessionDirectory)
     await sdkForSession(sessionId, sessionDirectory).session.delete({ sessionID: sessionId, directory: sessionDirectory })
     cleanupDeletedSession(sessionId, sessionDirectory)
     return true
@@ -956,6 +984,7 @@ export async function deleteSessionInDirectory(sessionId: string, directory: str
   ui.markSessionDeleting(sessionId)
   if (ui.currentSessionId === sessionId) ui.setCurrentSession(null)
   try {
+    await cleanupBtwLinksBeforeRemoval(sessionId, directory)
     await sdkForSession(sessionId, directory).session.delete({ sessionID: sessionId, directory })
     cleanupDeletedSession(sessionId, directory)
     return true
@@ -980,6 +1009,7 @@ export async function archiveSession(sessionId: string, expectedRuntimeKey: stri
     ui.setCurrentSession(null)
   }
   try {
+    await cleanupBtwLinksBeforeRemoval(sessionId, sessionDirectory)
     const archivedAt = Date.now()
     await sdkForSession(sessionId, sessionDirectory).session.update({ sessionID: sessionId, directory: sessionDirectory, time: { archived: archivedAt } })
     if (isStaleRuntime(expectedRuntimeKey)) return false
