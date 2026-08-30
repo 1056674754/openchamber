@@ -2984,6 +2984,17 @@ v1.20.0-sscity 尚未宣布完成：当前未关闭 `#135/#140/#142-#151/#154/#1
 
 验证：VS Code atomic runtime 4/4 + bridge FS 6/6 ✅；VS Code type-check/lint/build ✅，build 仅有既有 chunk/import warnings。[#147](https://coding.s-s.city/songsong/openchamber/-/issues/147) 保持 open：仍需真实 VS Code Extension Host 与 Desktop/Web installed runtime drag/drop + 409 Replace matching-surface QA。
 
+### #147 Phase 4：Web drop + packaged VS Code matching-surface closeout（2026-08-31）
+
+- 真实 Web Files tree drop 首轮发现 upload 已写盘但 tree 不更新：component cache虽失效，`opencodeClient.listLocalDirectory` 的 400ms TTL仍返回旧列表。`refreshDirectory/refreshRoot` 现在同步失效 SDK list cache和 in-flight key后再读取；create/rename/delete/manual refresh同样受益。
+- ContextPanel 从 Sidebar tree打开文件时显式把 tab owning directory传给 `FilesView`，不再由 editor-only view重新读取 global effective directory。解决项目树 path正确但 read/stat/raw请求携带另一个 workspace、报 `Path is outside of active workspace` 的同类 context-authority错误。
+- 真实 Web production build + Playwright drop：新 `fresh.bin` binary内容精确写入且 tree即时出现；同名 drop返回 conflict并在确认前保持旧内容；点击 Replace后替换成功；已打开 `preview.txt` 被替换后自动刷新为新内容；console error为 0。
+- VS Code source虽已存在 upload bridge，但 shared tree保留旧 `!runtime.isVSCode` gate；移除后 transport可由未来 Files surface复用。当前 VSCodeLayout没有 Files tree surface，因此 UI drop不伪装成可验收；改在真实 packaged VSIX / 独立 Extension Host webview内直接执行同一 `/api/fs/upload` contract，验证 200 binary写入、409不覆盖、`overwrite=true`替换均通过。
+- packaged webview首轮真实启动发现 production-only `Cannot access ... before initialization`：`useDirectoryStore/useConfigStore` 与 `opencodeClient` 静态环在 Vite minified chunk进入 TDZ。新增无依赖 directory bridge，store同步保存/转发 directory，client构造后注册 setter并接收 pending value；health/home等需要 client的方法改为异步加载。重新打 VSIX后真实 webview正常渲染。
+- 对应提交：`c02df4858 fix(files): complete cross-runtime upload flow`。`opencode/client.ts` 通过 temporary index只提交 list invalidation + bridge registration，既有 `continueMessage`并行 WIP继续保持未提交。
+
+验证：upload/invalidation/config/directory bridge focused 4 files / 22 tests ✅；full workspace type-check/lint ✅；Web production build ✅；Web Playwright drop/409/Replace/open-preview refresh ✅；packaged VSIX build + isolated VS Code Extension Host startup ✅；真实 VS Code bridge 200/409/overwrite及磁盘内容验证 ✅；`git diff --check` ✅。至此 [#147](https://coding.s-s.city/songsong/openchamber/-/issues/147) 的 v1.20 atomic upload、conflict recovery、preview invalidation与 session-scoped path authority范围完成，可关闭。
+
 ### #148 Phase 1：Deleted-worktree draft recovery（2026-08-30）
 
 上游来源：`3d15b09d0`、`f26ad5d35`、`5693e5ff9`，按 fork multi-instance authority 重写，不修改 dirty `opencode/client.ts`：
