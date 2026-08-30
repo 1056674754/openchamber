@@ -68,6 +68,9 @@ import { getMissingSteerSideChannelRecords, getSteerSideChannelSignature } from 
 import { getBootstrapFailureAction } from "./bootstrap-retry-policy"
 import { findLatestRealUserMessage, isRealUserMessage } from "@/lib/messages/real-user"
 import { classifyColdDirectoryEvent } from "./cold-directory-event"
+import { settleInterruptedTurn } from "./interrupted-turn"
+import { formatMessage } from "@/lib/i18n"
+import { useI18nStore } from "@/lib/i18n/store"
 
 // ---------------------------------------------------------------------------
 // Context
@@ -478,9 +481,25 @@ async function reconcileSessionStatusCandidates(
 
   for (const [sessionId, status] of Object.entries(relevantStatuses)) {
     useGlobalSessionsStore.getState().upsertStatus(sessionId, status)
+    if (status.type === "idle") {
+      applyInterruptedTurnSettlement(store, sessionId)
+    }
   }
 
   return true
+}
+
+const applyInterruptedTurnSettlement = (store: StoreApi<DirectoryStore>, sessionID: string) => {
+  store.setState((state) => {
+    const settlement = settleInterruptedTurn(state, sessionID)
+    if (!settlement) return state
+    return {
+      message: { ...state.message, [sessionID]: settlement.messages },
+      ...(settlement.parts
+        ? { part: { ...state.part, [settlement.messageID]: settlement.parts } }
+        : {}),
+    }
+  })
 }
 
 async function listPendingQuestionsForServer(
@@ -1344,10 +1363,56 @@ function handleEvent(
   // Global events
   if (directory === "global" || !directory) {
     const globalPayload = payload as { type?: string; properties?: unknown }
+    if (globalPayload.type === "openchamber:notification") {
+      const properties = typeof globalPayload.properties === "object" && globalPayload.properties !== null
+        ? globalPayload.properties as Record<string, unknown>
+        : null
+      if (properties?.kind === "opencode-restart-interrupted") {
+        const dictionary = useI18nStore.getState().dictionary
+        const title = formatMessage(dictionary, "chat.toast.opencodeRestartInterrupted.title")
+        const sessionID = typeof properties.sessionId === "string" ? properties.sessionId : ""
+        const eventDirectory = typeof properties.directory === "string" ? properties.directory : ""
+        const indexedDirectory = sessionID
+          ? findSessionInChildStores(sessionID, childStores, routingIndex) ?? ""
+          : ""
+        const targetDirectory = eventDirectory || indexedDirectory
+        const options = {
+          id: "opencode-restart-interrupted",
+          description: formatMessage(dictionary, "chat.toast.opencodeRestartInterrupted.description"),
+          duration: Infinity,
+        }
+        if (sessionID && targetDirectory) {
+          toast.info(title, {
+            ...options,
+            action: {
+              label: formatMessage(dictionary, "chat.toast.opencodeRestartInterrupted.openSession"),
+              onClick: () => openSessionFromToast(sessionID, targetDirectory),
+            },
+          })
+        } else {
+          toast.info(title, options)
+        }
+      }
+    }
     if (globalPayload.type === "openchamber:session-unread") {
       const properties = typeof globalPayload.properties === "object" && globalPayload.properties !== null
         ? globalPayload.properties
         : null
+      // Skip unread state for subtask (subagent) sessions — they are child
+      // sessions spawned by the Task/agent tool and should not generate
+      // user-facing unread indicators.
+      const unreadProps = properties as { sessionId?: string } | null
+      if (unreadProps?.sessionId) {
+        let isSubtask = false
+        for (const childStore of childStores.children.values()) {
+          const session = childStore.getState().session.find((s) => s.id === unreadProps.sessionId)
+          if (session) {
+            isSubtask = Boolean((session as Session & { parentID?: string | null }).parentID)
+            break
+          }
+        }
+        if (isSubtask) return
+      }
       applyUnreadEventPayload(properties)
       return
     }
@@ -1673,6 +1738,11 @@ function handleEvent(
         useGlobalSessionsStore.getState().upsertStatus(sessionID, { type: "idle" })
       }
     }
+  }
+
+  if (payload.type === "session.idle" || payload.type === "session.error") {
+    const sessionID = getSessionIdFromPayload(payload)
+    if (sessionID) applyInterruptedTurnSettlement(store, sessionID)
   }
 
   // Session activity timing — must see every busy event to maintain liveness,

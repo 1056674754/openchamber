@@ -41,6 +41,7 @@ import {
   type ContextObligatoryMessage,
 } from "@/lib/contextObligatoryMessages"
 import { getRuntimeKey } from "@/lib/runtime-switch"
+import { runtimeFetch } from "@/lib/runtime-fetch"
 
 export {
   resolveApiUrl,
@@ -1607,6 +1608,44 @@ export async function abortCurrentOperation(sessionId: string): Promise<boolean>
   })
 
   return sent > 0
+}
+
+// ---------------------------------------------------------------------------
+// Continue interrupted message
+// ---------------------------------------------------------------------------
+
+export async function continueInterruptedMessage(
+  sessionId: string,
+  messageId: string,
+): Promise<boolean> {
+  const directory = useSessionUIStore.getState().getDirectoryForSession(sessionId) ?? undefined
+
+  const remoteBase = resolveBaseUrlForSession(sessionId, directory, undefined)
+  const base = (remoteBase ?? '/api').replace(/\/+$/, '')
+  const path = `/session/${encodeURIComponent(sessionId)}/message/${encodeURIComponent(messageId)}/continue`
+  const query = directory ? `?directory=${encodeURIComponent(directory)}` : ''
+  const url = `${base}${path}${query}`
+
+  const response = await runtimeFetch(url, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      accept: 'application/json',
+    },
+  })
+
+  if (!response.ok) {
+    let detail = ''
+    try {
+      detail = await response.text()
+    } catch {
+      // ignore
+    }
+    const suffix = detail && detail.trim().length > 0 ? `: ${detail.trim()}` : ''
+    throw new Error(`Failed to continue message (${response.status})${suffix}`)
+  }
+
+  return true
 }
 
 // ---------------------------------------------------------------------------

@@ -637,6 +637,9 @@ let openCodeApiPrefixDetected = true;
 let openCodeApiDetectionTimer = null;
 let lastOpenCodeError = null;
 let lastOpenCodeLaunchDiagnostics = null;
+let lastOpenCodeHealthFailure = null;
+let lastManagedOpenCodeProcess = null;
+let lastOpenCodeRestartDiagnostics = null;
 let isOpenCodeReady = false;
 let openCodeNotReadySince = 0;
 let isExternalOpenCode = false;
@@ -1173,6 +1176,9 @@ Object.defineProperties(openCodeLifecycleState, {
   openCodeApiDetectionTimer: { get: () => openCodeApiDetectionTimer, set: (value) => { openCodeApiDetectionTimer = value; } },
   lastOpenCodeError: { get: () => lastOpenCodeError, set: (value) => { lastOpenCodeError = value; } },
   lastOpenCodeLaunchDiagnostics: { get: () => lastOpenCodeLaunchDiagnostics, set: (value) => { lastOpenCodeLaunchDiagnostics = value; } },
+  lastOpenCodeHealthFailure: { get: () => lastOpenCodeHealthFailure, set: (value) => { lastOpenCodeHealthFailure = value; } },
+  lastManagedOpenCodeProcess: { get: () => lastManagedOpenCodeProcess, set: (value) => { lastManagedOpenCodeProcess = value; } },
+  lastOpenCodeRestartDiagnostics: { get: () => lastOpenCodeRestartDiagnostics, set: (value) => { lastOpenCodeRestartDiagnostics = value; } },
   isOpenCodeReady: { get: () => isOpenCodeReady, set: (value) => { isOpenCodeReady = value; } },
   openCodeNotReadySince: { get: () => openCodeNotReadySince, set: (value) => { openCodeNotReadySince = value; } },
   isExternalOpenCode: { get: () => isExternalOpenCode, set: (value) => { isExternalOpenCode = value; } },
@@ -1232,6 +1238,23 @@ const openCodeLifecycleRuntime = createOpenCodeLifecycleRuntime({
       messageStreamRuntime?.rebindUpstream();
     } catch (error) {
       console.warn('Failed to rebind message stream after OpenCode restart:', error?.message ?? error);
+    }
+    try {
+      const { sessionIds } = sessionRuntime.interruptBusySessionsAfterRestart();
+      if (sessionIds.length > 0) {
+        const multiple = sessionIds.length > 1;
+        broadcastUiNotification({
+          title: multiple ? 'Chats interrupted' : 'Chat interrupted',
+          body: multiple
+            ? 'OpenCode restarted during running responses. Send a message in each chat to continue.'
+            : 'OpenCode restarted during a running response. Send a message to continue.',
+          tag: 'opencode-restart-interrupted',
+          kind: 'opencode-restart-interrupted',
+          sessionId: sessionIds[0],
+        });
+      }
+    } catch (error) {
+      console.warn('Failed to reconcile sessions after OpenCode restart:', error?.message ?? error);
     }
   },
 });
@@ -1564,6 +1587,9 @@ async function main(options = {}) {
   if (typeof options.getIsWindowFocused === 'function') {
     notificationTriggerRuntime.setGetIsWindowFocused(options.getIsWindowFocused);
   }
+  if (typeof options.settingsWriter === 'function') {
+    settingsRuntime.setSettingsWriter(options.settingsWriter);
+  }
 
   console.log(`Starting OpenChamber on port ${port === 0 ? 'auto' : port}`);
 
@@ -1613,6 +1639,9 @@ async function main(options = {}) {
         isOpenCodeReady,
         lastOpenCodeError,
         lastOpenCodeLaunchDiagnostics,
+        lastOpenCodeHealthFailure,
+        lastManagedOpenCodeProcess,
+        lastOpenCodeRestartDiagnostics,
         opencodeBinaryResolved: resolvedOpencodeBinary || null,
         opencodeBinarySource: resolvedOpencodeBinarySource || null,
         opencodeLaunchBinary: launchSpec?.binary || null,

@@ -149,6 +149,57 @@ describe('session runtime', () => {
     }
   });
 
+  it('interrupts busy sessions after restart and broadcasts terminal events once', () => {
+    const events = [];
+    const runtime = createSessionRuntime({
+      writeSseEvent() {},
+      getNotificationClients: () => new Set(),
+      broadcastEvent: (event) => events.push(event),
+    });
+    runtimes.push(runtime);
+    const status = (sessionID, type) => runtime.processOpenCodeSsePayload({
+      type: 'session.status',
+      properties: { sessionID, status: { type } },
+    });
+
+    status('session-busy-1', 'busy');
+    status('session-busy-2', 'retry');
+    status('session-idle', 'idle');
+    expect(runtime.getActiveSessionCount()).toBe(2);
+    events.length = 0;
+
+    expect(runtime.interruptBusySessionsAfterRestart()).toEqual({
+      sessionIds: ['session-busy-1', 'session-busy-2'],
+    });
+
+    expect(runtime.getActiveSessionCount()).toBe(0);
+    const terminalEvents = events.filter((event) => (
+      event.type === 'openchamber:session-status' || event.type === 'session.error'
+    ));
+    expect(terminalEvents).toHaveLength(4);
+    for (const sessionId of ['session-busy-1', 'session-busy-2']) {
+      expect(terminalEvents).toContainEqual({
+        type: 'openchamber:session-status',
+        properties: expect.objectContaining({ sessionID: sessionId, status: 'idle' }),
+      });
+      expect(terminalEvents).toContainEqual({
+        type: 'session.error',
+        properties: {
+          sessionID: sessionId,
+          error: {
+            name: 'MessageAbortedError',
+            message: 'The running turn was interrupted when OpenCode restarted.',
+          },
+        },
+      });
+    }
+    expect(terminalEvents.some((event) => event.properties.sessionID === 'session-idle')).toBe(false);
+
+    events.length = 0;
+    expect(runtime.interruptBusySessionsAfterRestart()).toEqual({ sessionIds: [] });
+    expect(events).toEqual([]);
+  });
+
   it('suppresses unread while viewed and records it after the view is cleared', () => {
     const unreadStore = {
       recordActivity: vi.fn(),
@@ -178,6 +229,7 @@ describe('session runtime', () => {
     expect(unreadStore.recordActivity).not.toHaveBeenCalled();
 
     runtime.markSessionUnviewed('session-viewed', 'client-1');
+    runtime.markUserMessageSent('session-viewed');
     runtime.processOpenCodeSsePayload({
       type: 'session.status',
       properties: { sessionID: 'session-viewed', status: { type: 'busy' } },
@@ -210,6 +262,7 @@ describe('session runtime', () => {
 
     try {
       runtime.markSessionViewed('session-expired', 'client-1');
+      runtime.markUserMessageSent('session-expired');
       runtime.processOpenCodeSsePayload({
         type: 'session.status',
         properties: { sessionID: 'session-expired', status: { type: 'busy' } },

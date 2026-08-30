@@ -338,6 +338,8 @@ interface MessageBodyProps {
     onToggleContextPin?: () => void;
     errorMessage?: string;
     errorVariant?: 'error' | 'info';
+    onContinue?: () => void;
+    isContinuing?: boolean;
     userActionsMode?: 'inline' | 'external-content' | 'external-actions';
     stickyUserHeaderEnabled?: boolean;
     footerProviderID?: string | null;
@@ -1016,6 +1018,8 @@ const AssistantMessageBody = React.memo(({
     onToggleContextPin,
     errorMessage,
     errorVariant = 'error',
+    onContinue,
+    isContinuing = false,
     footerProviderID,
     footerModelName,
     footerAgentName,
@@ -2251,6 +2255,22 @@ const AssistantMessageBody = React.memo(({
                                             className="[&_.markdown-content>*:first-child]:mt-0 [&_.markdown-content>*:last-child]:mb-0"
                                         />
                                     </div>
+                                    {onContinue && (
+                                        <button
+                                            type="button"
+                                            disabled={isContinuing}
+                                            onClick={onContinue}
+                                            className={cn(
+                                                'shrink-0 rounded-md px-3 py-1.5 text-sm font-medium transition-colors',
+                                                isContinuing
+                                                    ? 'cursor-not-allowed opacity-50'
+                                                    : 'hover:opacity-80',
+                                                'bg-[var(--status-info)] text-white',
+                                            )}
+                                        >
+                                            {isContinuing ? t('chat.messageBody.actions.continuing') : t('chat.messageBody.actions.continue')}
+                                        </button>
+                                    )}
                                 </div>
                             </div>
                         </FadeInOnReveal>

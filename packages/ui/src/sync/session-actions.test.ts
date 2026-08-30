@@ -49,6 +49,15 @@ let inputStoreState = {
 
 let moveSessionResult: MockSdkResult = { response: { status: 204 } }
 const globalUpsertedSessions: Array<{ id: string; directory?: string }> = []
+const runtimeFetchCalls: Array<{ input: string; init?: RequestInit }> = []
+let runtimeFetchResponse = new Response('true', { status: 200 })
+
+mock.module("@/lib/runtime-fetch", () => ({
+  runtimeFetch: mock((input: string, init?: RequestInit) => {
+    runtimeFetchCalls.push({ input, init })
+    return Promise.resolve(runtimeFetchResponse)
+  }),
+}))
 
 const mockScopedClient = {
   experimental: {
@@ -310,6 +319,8 @@ beforeEach(() => {
     ;(defaultConnection as { client: OpencodeClient }).client = mockSdk as unknown as OpencodeClient
   }
   serverRegistry.clearSessionServerIndexDebugEntries()
+  runtimeFetchCalls.length = 0
+  runtimeFetchResponse = new Response('true', { status: 200 })
 })
 
 function createStore(
@@ -1389,6 +1400,32 @@ describe("abortCurrentOperation", () => {
 
     expect(aborted).toBe(false)
     expect(sessionCalls.filter((call) => call.method === "session.abort")).toHaveLength(0)
+  })
+})
+
+describe("continueInterruptedMessage", () => {
+  test("routes through the owning session directory", async () => {
+    const { continueInterruptedMessage } = await import("./session-actions")
+    serverRegistry.indexSession("session-a", DEFAULT_SERVER_ID)
+
+    expect(await continueInterruptedMessage("session-a", "msg-aborted")).toBe(true)
+    expect(runtimeFetchCalls).toEqual([{
+      input: "/api/session/session-a/message/msg-aborted/continue?directory=%2Ftest%2Fproject",
+      init: {
+        method: "POST",
+        headers: { "content-type": "application/json", accept: "application/json" },
+      },
+    }])
+  })
+
+  test("surfaces the raw server failure", async () => {
+    const { continueInterruptedMessage } = await import("./session-actions")
+    runtimeFetchResponse = new Response("upstream refused continuation", { status: 409 })
+
+    await expectRejectsWithMessage(
+      continueInterruptedMessage("session-a", "msg-aborted"),
+      "upstream refused continuation",
+    )
   })
 })
 

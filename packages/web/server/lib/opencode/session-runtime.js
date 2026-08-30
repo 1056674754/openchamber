@@ -151,7 +151,8 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
     const now = Date.now();
     const existing = sessionStates.get(sessionId);
     const existingAttentionState = sessionAttentionStates.get(sessionId);
-    if (existing && existing.lastUpdateAt > now - 5000 && status === existing.status) {
+    const isRestartInterruption = metadata.reason === 'opencode-restart';
+    if (existing && existing.lastUpdateAt > now - 5000 && status === existing.status && !isRestartInterruption) {
       return;
     }
 
@@ -166,10 +167,12 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
 
     // Record unread only on genuine transition to idle/error (not on startup reports).
     // Skip when a client is actively viewing this session — they saw the turn complete.
+    // Skip sessions without lastUserMessageAt — subagent (Task tool) sessions never
+    // receive direct user messages, so they should not generate unread indicators.
     if (unreadStore && prevStatus && prevStatus !== status) {
       if (status === 'idle' && (prevStatus === 'busy' || prevStatus === 'retry')) {
         const attention = sessionAttentionStates.get(sessionId);
-        if (!hasActiveViewers(attention)) {
+        if (attention?.lastUserMessageAt && !hasActiveViewers(attention)) {
           unreadStore.recordActivity(sessionId, { hasError: false });
         }
       }
@@ -179,7 +182,7 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
     const attentionState = sessionAttentionStates.get(sessionId);
     const attentionChanged = !!attentionState && existingAttentionState?.needsAttention !== attentionState.needsAttention;
     const clients = getNotificationClients();
-    if (!existing || existing.status !== status || attentionChanged) {
+    if (!existing || existing.status !== status || attentionChanged || isRestartInterruption) {
       const state = sessionStates.get(sessionId);
       const syntheticPayload = {
         type: 'openchamber:session-status',
@@ -330,6 +333,41 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
     }
   };
 
+  const interruptBusySessionsAfterRestart = () => {
+    const interruptedSessionIds = new Set();
+    for (const [sessionId, state] of sessionStates) {
+      if (state.status === 'busy' || state.status === 'retry') {
+        interruptedSessionIds.add(sessionId);
+      }
+    }
+    for (const [sessionId, activity] of sessionActivityPhases) {
+      if (activity.phase === 'busy') {
+        interruptedSessionIds.add(sessionId);
+      }
+    }
+
+    const eventId = `opencode-restart-${Date.now()}`;
+    for (const sessionId of interruptedSessionIds) {
+      updateSessionState(sessionId, 'idle', eventId, {
+        message: 'Interrupted by OpenCode restart',
+        reason: 'opencode-restart',
+      });
+      broadcastEvent?.({
+        type: 'session.error',
+        properties: {
+          sessionID: sessionId,
+          error: {
+            name: 'MessageAbortedError',
+            message: 'The running turn was interrupted when OpenCode restarted.',
+          },
+        },
+      });
+    }
+
+    resetAllSessionActivityToIdle();
+    return { sessionIds: [...interruptedSessionIds] };
+  };
+
   const cleanupOldSessionStates = () => {
     const now = Date.now();
     for (const [sessionId, data] of sessionStates) {
@@ -368,7 +406,8 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
       const sessionId = typeof props.sessionID === 'string' ? props.sessionID.trim() : '';
       if (sessionId) {
         const attention = sessionAttentionStates.get(sessionId);
-        if (!hasActiveViewers(attention)) {
+        // Skip subagent sessions — they don't receive direct user messages.
+        if (attention?.lastUserMessageAt && !hasActiveViewers(attention)) {
           unreadStore.recordActivity(sessionId, { hasError: true });
         }
       }
@@ -387,17 +426,27 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
     }
   };
 
+  const getActiveSessionCount = () => {
+    let count = 0;
+    for (const state of sessionStates.values()) {
+      if (state.status === 'busy' || state.status === 'retry') count += 1;
+    }
+    return count;
+  };
+
   return {
     processOpenCodeSsePayload,
     getSessionActivitySnapshot,
     getSessionStateSnapshot,
     getSessionAttentionSnapshot,
     getSessionState,
+    getActiveSessionCount,
     getSessionAttentionState,
     markSessionViewed,
     markSessionUnviewed,
     markUserMessageSent,
     resetAllSessionActivityToIdle,
+    interruptBusySessionsAfterRestart,
     dispose,
   };
 };

@@ -247,3 +247,9 @@ Terminal tab metadata and PTY scrollback have different update rates and must re
 - Project Action run identity includes `serverId + directory + actionId` and reads its output through `getBuffer(...)`.
 
 The terminal WebSocket transport is still keyed by runtime base URL. A healthy socket with no subscribers is retained for 15 seconds so tab switches can detach and reattach without a new connection; explicit disposal and non-reusable connection attempts still close immediately.
+
+## Queue Runtime Identity
+
+Desktop queues use the configured host id as runtime identity, not the current
+API URL. An SSH reconnect can allocate a new local forwarding port without
+changing the remote host that owns queued messages.

@@ -2108,3 +2108,20 @@ fork 已有丰富的 surface 组织（#62 surface rail + ContextSidebarTab + Con
 - scheduled/project-config Vitest：5 files / 53 tests ✅，含两个 runtime 共用真实 on-disk config 的 daily/weekly/cron/once claim、锁 timeout/recovery/ownership、queue rejection、completion retry。
 - full workspace type-check ✅；full workspace lint ✅；`bun run build:web` ✅；`git diff --check` ✅。
 - authority audit：新增 persistence/dispatch 均以显式 `projectID` 和该 project 的 path 为键；未使用 `activeProjectId`、`currentDirectory`、`lastDirectory` 或 `opencodeClient.getDirectory()` 作为既有任务 fallback。
+
+### #157：Managed restart / reconnect / queue reconciliation（2026-08-30）
+
+上游来源：`2db90f74d`、`ea248f08e`、`20f3c5945`。按 fork event reducer、多实例 registry 和 runtime transport 适配：
+
+- successful managed restart 会从 server-side live state 找出 busy/retry Sessions，逐个广播 authoritative idle + `MessageAbortedError`，并发送一次可定位 Session 的 interruption notification。
+- `settleInterruptedTurn` 只在权威 idle、无 pending question/permission、尾部 assistant 未完成时执行；同时终止 pending/running tool parts，不修改已完成 parts。
+- reconnect materialization 若收到同 message ID 的权威 completed assistant，会替换本地 aborted copy，避免 OpenCode 实际完成但 UI 永久显示中断。
+- web runtime 的 queue identity 使用 Electron boot outcome 中稳定的 `hostId`，不再以每次 SSH reconnect 都会变化的 local-forward URL 为键。
+- 现有 Continue 操作按 owning Session 的 directory/server route，并通过 `runtimeFetch` 保持 direct/remote/relay transport 一致；原始 HTTP 失败内容可见。
+- lifecycle 保留 32 KiB credential-redacted stderr tail，分类 health failure，并在 `/health` 暴露 last health/process/restart snapshots；实时 child stderr 也先清洗再写日志。
+
+验证：
+
+- UI sync/session-actions：58 tests ✅（interrupted settle、completed reconciliation、directory routing、raw failure）。
+- web lifecycle/runtime identity：4 files / 34 tests ✅（restart settle、single notification、stable host identity、diagnostic redaction/tail）。
+- full workspace type-check ✅；full workspace lint ✅；build/web 与 diff check 在本批最终提交前复跑。

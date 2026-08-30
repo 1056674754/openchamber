@@ -22,7 +22,11 @@ vi.mock('./interrupted-runs.js', () => ({
   finalizeInterruptedOpenCodeRuns: finalizeInterruptedOpenCodeRunsMock,
 }));
 
-const { createOpenCodeLifecycleRuntime } = await import('./lifecycle.js');
+const {
+  classifyLifecycleHealthError,
+  createOpenCodeLifecycleRuntime,
+  sanitizeLifecycleDiagnosticText,
+} = await import('./lifecycle.js');
 
 const originalOpencodeBinary = process.env.OPENCODE_BINARY;
 const originalOpenChamberRuntime = process.env.OPENCHAMBER_RUNTIME;
@@ -137,6 +141,43 @@ const createRuntime = (overrides = {}) => {
 };
 
 describe('OpenCode lifecycle', () => {
+  it('classifies health failures and redacts credentials', () => {
+    expect(classifyLifecycleHealthError(new DOMException('timed out', 'TimeoutError')).class).toBe('timeout');
+    expect(classifyLifecycleHealthError(Object.assign(new Error('refused'), { code: 'ECONNREFUSED' })).class).toBe('connection');
+    const sanitized = sanitizeLifecycleDiagnosticText(
+      'Authorization: Basic dXNlcjpwYXNz Bearer token-value https://user:pass@example.com/path',
+    );
+    expect(sanitized).not.toContain('dXNlcjpwYXNz');
+    expect(sanitized).not.toContain('token-value');
+    expect(sanitized).not.toContain('user:pass');
+  });
+
+  it('retains a bounded redacted stderr tail after startup', async () => {
+    const stderrWrite = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    const child = createMockChild();
+    spawnMock.mockImplementationOnce(() => {
+      queueMicrotask(() => {
+        child.stdout.emit('data', 'opencode server listening on http://127.0.0.1:45678\n');
+      });
+      return child;
+    });
+    const runtime = createRuntime();
+    const server = await runtime.startOpenCode();
+
+    child.stderr.emit('data', 'Authorization: Basic dXNlcjpwYXNz\nruntime worker failed\n');
+    child.exitCode = 7;
+    child.emit('exit', 7, null);
+
+    expect(server.stderrTail).toContain('runtime worker failed');
+    expect(server.stderrTail).not.toContain('dXNlcjpwYXNz');
+    expect(runtime.testState.lastManagedOpenCodeProcess).toEqual(expect.objectContaining({
+      pid: 12345,
+      exitCode: 7,
+      stderrTail: expect.stringContaining('runtime worker failed'),
+    }));
+    expect(stderrWrite).not.toHaveBeenCalledWith(expect.stringContaining('dXNlcjpwYXNz'));
+  });
+
   it('joins overlapping configuration refreshes into one lifecycle operation', async () => {
     let rejectApply;
     const applyOpencodeBinaryFromSettings = vi.fn(() => new Promise((_resolve, reject) => {

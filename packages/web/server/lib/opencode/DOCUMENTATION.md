@@ -139,6 +139,7 @@ Configuration refreshes are single-flight across manual and automatic callers, s
 The composition root rebuilds the OpenChamber plugin overlay before entering that lifecycle operation, keeping user plugin changes in sync with the managed overlay.
 At desktop startup, a healthy persisted managed port is reused. If that port is still listening but fails health checks, lifecycle termination targets the listener's detached process group and waits for the port to be released before launching a replacement; it will not stack another managed server on top of an unreleased stale instance.
 Managed process wrappers retain the child `pid`, `exitCode`, and `signalCode`, and keep an exit listener after readiness. This lets health checks distinguish a live child from an exited child instead of inferring process state from port health alone.
+They also retain a bounded, credential-redacted stderr tail. Health failures are classified (`timeout`, `connection`, `invalid_response`, or `error`), and the last process/health/restart snapshots are exposed through `/health` for incident correlation without storing prompts or authorization values.
 Transport-triggered health checks can run more frequently than the periodic monitor. Failed probes are therefore counted at most once per configured health interval, while a confirmed missing managed listener can still restart immediately. Busy-session grace and lifecycle evidence remain authoritative.
 Startup timeout (`startupTimeoutMs` dep, env `OPENCHAMBER_OPENCODE_STARTUP_TIMEOUT_MS`, default 30 s) kills the spawned child if it never becomes ready, preventing orphan accumulation across retry attempts. A failed attempt also cleans up any stale listener on its allocated port before the retry begins. When `restartOpenCode` cannot release the old port after SIGKILL escalation, it records a `port_release_timeout` lifecycle event instead of silently proceeding.
 
@@ -146,6 +147,7 @@ Startup timeout (`startupTimeoutMs` dep, env `OPENCHAMBER_OPENCODE_STARTUP_TIMEO
 - `createOpenCodeLifecycleJournal(options)`: creates a failure-isolated JSONL lifecycle journal.
 - The production journal is written to `${OPENCHAMBER_DATA_DIR}/logs/opencode-lifecycle.jsonl`, defaults to `~/.config/openchamber/logs/opencode-lifecycle.jsonl`, and rotates one prior generation at 2 MB.
 - Events include managed process spawn/readiness/exit/error, requested stop reason, health failures/recovery, busy-session deferral, and restart start/completion/failure.
+- After a successful managed restart, every locally tracked busy/retry Session is authoritatively settled to idle and receives a synthetic `MessageAbortedError`; one UI notification identifies the interrupted chat set.
 - Health failure entries include the managed PID, current port, listening PIDs, consecutive failure count, and active-session count. They do not include prompts, message content, credentials, request headers, or the spawned environment.
 - Journal write failures warn once and never interrupt OpenCode startup, health checks, shutdown, or restart.
 

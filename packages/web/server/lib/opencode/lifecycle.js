@@ -25,6 +25,36 @@ const STARTUP_TIMEOUT_MS = parsePositiveInt(
   30000
 );
 const OPENCODE_HEALTH_PATH = '/global/health';
+const MANAGED_STDERR_TAIL_MAX_BYTES = 32 * 1024;
+const HEALTH_FAILURE_DETAIL_MAX_LENGTH = 1000;
+
+const getBoundedTextTail = (value, maxBytes) => {
+  const buffer = Buffer.from(String(value ?? ''));
+  if (buffer.byteLength <= maxBytes) return buffer.toString();
+  return buffer.subarray(buffer.byteLength - maxBytes).toString();
+};
+
+export const sanitizeLifecycleDiagnosticText = (value) => String(value ?? '')
+  .replace(/(https?:\/\/)[^/\s:@]+:[^/\s@]+@/gi, '$1[redacted]@')
+  .replace(/\b(Bearer)\s+[^\s,;]+/gi, '$1 [redacted]')
+  .replace(/\b(Authorization\s*:\s*(?:Basic|Digest|Token))\s+[^\s,;]+/gi, '$1 [redacted]')
+  .replace(/\b(authorization\s*=\s*(?:Basic|Digest|Token))\s+[^\s,;]+/gi, '$1 [redacted]')
+  .replace(/\b(password|passwd|token|secret|api[_-]?key|authorization)\s*[:=]\s*([^\s,;]+)/gi, '$1=[redacted]');
+
+export const classifyLifecycleHealthError = (error) => {
+  const name = String(error?.name || '');
+  const code = String(error?.code || error?.cause?.code || '');
+  const message = String(error?.message || error || 'Unknown error');
+  const detail = sanitizeLifecycleDiagnosticText(`${name || 'Error'}: ${message}`)
+    .slice(0, HEALTH_FAILURE_DETAIL_MAX_LENGTH);
+  if (name === 'TimeoutError' || name === 'AbortError' || /timed?\s*out/i.test(message)) {
+    return { class: 'timeout', detail };
+  }
+  if (/ECONNREFUSED|ECONNRESET|EHOSTUNREACH|ENETUNREACH|ENOTFOUND/i.test(code)) {
+    return { class: 'connection', detail };
+  }
+  return { class: 'error', detail };
+};
 
 const formatDurationForLog = (ms) => {
   if (ms >= 60 * 1000 && ms % (60 * 1000) === 0) {
@@ -154,6 +184,37 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     } catch {
       return false;
     }
+  };
+
+  const snapshotManagedOpenCodeProcess = (child = state.openCodeProcess) => {
+    if (!child) return null;
+    const snapshot = {
+      pid: child.pid || null,
+      exitCode: child.exitCode ?? null,
+      signalCode: child.signalCode ?? null,
+      stderrTail: getBoundedTextTail(
+        sanitizeLifecycleDiagnosticText(child.stderrTail ?? ''),
+        MANAGED_STDERR_TAIL_MAX_BYTES,
+      ),
+    };
+    state.lastManagedOpenCodeProcess = snapshot;
+    return snapshot;
+  };
+
+  const captureRestartDiagnostics = (reason) => {
+    const processSnapshot = snapshotManagedOpenCodeProcess();
+    const diagnostics = {
+      reason: sanitizeLifecycleDiagnosticText(String(reason || 'managed-restart'))
+        .slice(0, HEALTH_FAILURE_DETAIL_MAX_LENGTH),
+      healthFailure: state.lastOpenCodeHealthFailure ? { ...state.lastOpenCodeHealthFailure } : null,
+      process: processSnapshot
+        ? { ...processSnapshot, alive: isManagedOpenCodeProcessAlive() }
+        : null,
+      busySessionCount: getActiveSessionCount(),
+      at: new Date(now()).toISOString(),
+    };
+    state.lastOpenCodeRestartDiagnostics = diagnostics;
+    console.warn('[lifecycle] managed OpenCode restart diagnostics', diagnostics);
   };
 
   const waitForChildProcessClose = (child, timeoutMs) => new Promise((resolve) => {
@@ -380,6 +441,24 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       windowsHide: true,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
+    let runtimeStderrTail = '';
+    let observedExitCode = null;
+    let observedSignalCode = null;
+    const appendRuntimeStderr = (chunk) => {
+      runtimeStderrTail = getBoundedTextTail(
+        `${runtimeStderrTail}${String(chunk ?? '')}`,
+        MANAGED_STDERR_TAIL_MAX_BYTES,
+      );
+    };
+    const getManagedProcessSnapshot = () => ({
+      pid: child.pid || null,
+      exitCode: observedExitCode ?? child.exitCode ?? null,
+      signalCode: observedSignalCode ?? child.signalCode ?? null,
+      stderrTail: getBoundedTextTail(
+        sanitizeLifecycleDiagnosticText(runtimeStderrTail),
+        MANAGED_STDERR_TAIL_MAX_BYTES,
+      ),
+    });
     const spawnedAt = Date.now();
     let expectedStopReason = null;
     let served = false;
@@ -390,6 +469,9 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       wrapperType: launchWrapperType,
     });
     child.once('exit', (code, signal) => {
+      if (code !== null && code !== undefined) observedExitCode = code;
+      if (signal !== null && signal !== undefined) observedSignalCode = signal;
+      state.lastManagedOpenCodeProcess = getManagedProcessSnapshot();
       void recordLifecycleEvent('process_exit', {
         pid: child.pid ?? null,
         port,
@@ -459,6 +541,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       };
 
       const onStderr = (chunk) => {
+        appendRuntimeStderr(chunk);
         stderr += chunk.toString();
       };
 
@@ -486,7 +569,8 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     });
 
     child.stderr?.on('data', (chunk) => {
-      process.stderr.write(chunk);
+      appendRuntimeStderr(chunk);
+      process.stderr.write(sanitizeLifecycleDiagnosticText(chunk));
     });
     served = true;
 
@@ -496,10 +580,13 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
         return child.pid;
       },
       get exitCode() {
-        return child.exitCode;
+        return observedExitCode ?? child.exitCode;
       },
       get signalCode() {
-        return child.signalCode;
+        return observedSignalCode ?? child.signalCode;
+      },
+      get stderrTail() {
+        return getManagedProcessSnapshot().stderrTail;
       },
       async close(reason = 'managed_close') {
         expectedStopReason = reason;
@@ -554,9 +641,12 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     });
   };
 
-  const isOpenCodeProcessHealthy = async () => {
+  const probeOpenCodeHealthDetailed = async () => {
     if (!state.openCodePort || (!state.openCodeProcess && state.isExternalOpenCode)) {
-      return false;
+      return {
+        healthy: false,
+        failure: { class: 'error', detail: 'Managed OpenCode process or port is unavailable' },
+      };
     }
 
     try {
@@ -568,12 +658,42 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
         },
         signal: AbortSignal.timeout(HEALTH_CHECK_TIMEOUT_MS),
       });
-      if (!response.ok) return false;
-      const body = await response.json().catch(() => null);
-      return body?.healthy === true;
-    } catch {
-      return false;
+      if (!response.ok) {
+        return {
+          healthy: false,
+          failure: { class: 'invalid_response', detail: `Health endpoint returned HTTP ${response.status ?? 'unknown'}` },
+        };
+      }
+      let body;
+      try {
+        body = await response.json();
+      } catch {
+        return {
+          healthy: false,
+          failure: { class: 'invalid_response', detail: 'Health endpoint returned invalid JSON' },
+        };
+      }
+      if (body?.healthy !== true) {
+        return {
+          healthy: false,
+          failure: { class: 'invalid_response', detail: 'Health endpoint did not report healthy=true' },
+        };
+      }
+      return { healthy: true, failure: null };
+    } catch (error) {
+      return { healthy: false, failure: classifyLifecycleHealthError(error) };
     }
+  };
+
+  const isOpenCodeProcessHealthy = async () => {
+    const result = await probeOpenCodeHealthDetailed();
+    if (!result.healthy) {
+      state.lastOpenCodeHealthFailure = {
+        ...result.failure,
+        at: new Date(now()).toISOString(),
+      };
+    }
+    return result.healthy;
   };
 
   const probeExternalOpenCode = async (port, origin) => {
@@ -775,6 +895,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
         return;
       }
 
+      captureRestartDiagnostics(reason);
       const portToKill = state.openCodePort;
 
       if (state.openCodeProcess) {
@@ -965,7 +1086,18 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       console.log(`Refreshing OpenCode after ${reason}`);
       clearResolvedOpenCodeBinary();
       await applyOpencodeBinaryFromSettings();
-      await restartOpenCode('config_change');
+
+      // Config-watcher in opencode invalidates per-instance caches (tools/MCP/skills)
+      // on file changes, so running sessions pick up fresh config at their next turn
+      // boundary without a process restart. Set OPENCHAMBER_CONFIG_HOT_RELOAD=false
+      // to fall back to the legacy full-restart behavior.
+      const useHotReload = process.env.OPENCHAMBER_CONFIG_HOT_RELOAD !== 'false';
+      if (useHotReload) {
+        console.log(`[openchamber] Config hot-reload: skipping process restart for ${reason}`);
+      } else {
+        await restartOpenCode('config_change');
+      }
+
       const external = state.isExternalOpenCode === true;
 
       try {
@@ -1180,9 +1312,17 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
         const managedListenerUnavailable = processUnavailable
           && process.platform !== 'win32'
           && listeningProcessIds.length === 0;
+        const diagnosticDetail = state.lastOpenCodeHealthFailure?.detail || '';
+        state.lastOpenCodeHealthFailure = {
+          ...(state.lastOpenCodeHealthFailure || { class: 'error', detail: diagnosticDetail }),
+          source,
+          at: new Date(now()).toISOString(),
+        };
         const reachedFailureThreshold = recordHealthFailure(
           source,
-          processUnavailable ? 'managed process handle unavailable' : ''
+          [processUnavailable ? 'managed process handle unavailable' : '', diagnosticDetail]
+            .filter(Boolean)
+            .join('; ')
         );
         await recordLifecycleEvent('health_failure', {
           source,

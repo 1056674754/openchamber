@@ -154,6 +154,8 @@ The browser event pipeline treats connection recovery as two separate facts:
 
 After every upstream `ready`, each initialized directory reconciles authoritative live state. Cold summary-only directories are not materialized during reconnect. A replay gap forces the same reconciliation path for resident directories; replay alone is not allowed to claim convergence when the requested cursor is no longer buffered.
 
+When a managed restart or authoritative reconnect settles a Session whose trailing assistant message never completed, `interrupted-turn.ts` marks that message with `MessageAbortedError` and finalizes only pending/running tool parts. Pending questions/permissions block this recovery. A later authoritative completed snapshot replaces the local aborted copy, so reconnect cannot preserve a false interruption after OpenCode actually accepted and finished the turn.
+
 Reconnect recovery deliberately uses two session sets:
 
 - **Authority sessions** are every session represented by the directory store's session, status, message, question, or permission state. Statuses and pending questions/permissions are reconciled for this complete set.

@@ -8,6 +8,7 @@ import {
 import { installRuntimeFetchBridge } from '@openchamber/ui/lib/runtime-fetch';
 import { initializeRuntimeEndpoint } from '@openchamber/ui/lib/runtime-switch';
 import { configureRuntimeUrlResolver } from '@openchamber/ui/lib/runtime-url';
+import { getInjectedBootOutcome } from '@openchamber/ui/lib/desktopBoot';
 import { createWebAPIs } from './api';
 
 const sameOrigin = (left: string, right: string): boolean => {
@@ -41,6 +42,8 @@ export const createConfiguredWebAPIs = () => {
   const localOrigin = typeof window.__OPENCHAMBER_LOCAL_ORIGIN__ === 'string'
     ? window.__OPENCHAMBER_LOCAL_ORIGIN__.trim()
     : '';
+  const bootOutcome = getInjectedBootOutcome();
+  const desktopHostId = bootOutcome?.target === 'remote' ? bootOutcome.hostId : '';
 
   configureRuntimeUrlResolver({
     apiBaseUrl: apiBaseUrl || undefined,
@@ -48,7 +51,7 @@ export const createConfiguredWebAPIs = () => {
   });
   initializeRuntimeEndpoint({
     apiBaseUrl,
-    runtimeKey: sameOrigin(apiBaseUrl, localOrigin) ? 'local' : null,
+    runtimeKey: sameOrigin(apiBaseUrl, localOrigin) ? 'local' : (desktopHostId ? `host:${desktopHostId}` : null),
   });
   setRuntimeBearerToken(clientToken || null);
   setRuntimeExtraHeaders(window.__OPENCHAMBER_RUNTIME_HEADERS__ || null);

@@ -52,7 +52,7 @@ import { useI18n } from '@/lib/i18n';
 import { shouldHideAssistantMessageShell } from './messageVisibility';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { getContextObligatoryMessages } from '@/lib/contextObligatoryMessages';
-import { setContextObligatoryMessage } from '@/sync/session-actions';
+import { continueInterruptedMessage, setContextObligatoryMessage } from '@/sync/session-actions';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { focusChatInput } from './composer/editor/dom';
 
@@ -935,6 +935,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
             return {
                 text: 'The running turn was stopped before OpenCode could send the next message.',
                 variant: 'info' as const,
+                isAborted: true as const,
             };
         }
         return {
@@ -1015,6 +1016,24 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
         if (!sessionId || !message.info.id) return;
         forkFromMessage(sessionId, message.info.id);
     }, [sessionId, message.info.id, forkFromMessage]);
+
+    const [isContinuing, setIsContinuing] = React.useState(false);
+    const handleContinueInterrupted = React.useCallback(async () => {
+        if (!sessionId || !message.info.id || isContinuing) return;
+        setIsContinuing(true);
+        try {
+            await continueInterruptedMessage(sessionId, message.info.id);
+        } catch (error) {
+            toast.error(
+                t('chat.messageBody.actions.continueFailed'),
+                { description: error instanceof Error ? error.message : String(error) },
+            );
+        } finally {
+            setIsContinuing(false);
+        }
+    }, [sessionId, message.info.id, isContinuing, t]);
+
+    const isAbortedMessage = Boolean(assistantError?.isAborted);
 
     const handleToggleTool = React.useCallback((toolId: string) => {
         const isDefaultOpen = defaultOpenToolIds.has(toolId);
@@ -1389,6 +1408,8 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                                                 onToggleContextPin={canPinIntoContext && messageCreatedAt ? handleToggleContextPin : undefined}
                                                 errorMessage={assistantErrorText}
                                                 errorVariant={assistantErrorVariant}
+                                                onContinue={isAbortedMessage ? handleContinueInterrupted : undefined}
+                                                isContinuing={isContinuing}
                                                 userActionsMode={useExternalUserActionsRow ? 'external-content' : 'inline'}
                                                 stickyUserHeaderEnabled={stickyUserHeader}
                                             />
@@ -1427,6 +1448,8 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                                                 onToggleContextPin={canPinIntoContext && messageCreatedAt ? handleToggleContextPin : undefined}
                                                 errorMessage={assistantErrorText}
                                                 errorVariant={assistantErrorVariant}
+                                                onContinue={isAbortedMessage ? handleContinueInterrupted : undefined}
+                                                isContinuing={isContinuing}
                                                 userActionsMode="external-actions"
                                                 stickyUserHeaderEnabled={stickyUserHeader}
                                             />
