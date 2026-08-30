@@ -9,6 +9,7 @@ import { openExternalUrl } from '@/lib/url';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import {
   useMcpConfigStore,
+  selectMcpServersForTarget,
   envRecordToArray,
   type McpDraft,
   type McpScope,
@@ -19,12 +20,12 @@ import {
   applyImportedMcpToDraft,
 } from './mcpImport';
 import { useMcpStore } from '@/stores/useMcpStore';
-import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { cn } from '@/lib/utils';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { parseMcpOAuthCallbackContext, parseMcpOAuthCallbackStateKey } from '@/components/sections/mcp/mcpOAuth';
 import { buildMcpAuthorizationRedirectUri, startMcpAuthorization } from './startMcpAuthorization';
 import { useSettingsServerBaseUrl } from '@/hooks/useSettingsServerBaseUrl';
+import { useSettingsProjectTarget } from '@/hooks/useSettingsProjectTarget';
 import { DEFAULT_SERVER_ID } from '@/lib/opencode/server-registry';
 import { subscribeOpenchamberEventEnvelopes } from '@/lib/openchamberEvents';
 import {
@@ -567,29 +568,31 @@ export const McpPage: React.FC = () => {
   );
   const {
     selectedMcpName,
-    mcpServers,
     mcpDraft,
     setMcpDraft,
     setSelectedMcp,
-    getMcpByName,
     createMcp,
     updateMcp,
     deleteMcp,
   } = useMcpConfigStore(useShallow((s) => ({
     selectedMcpName: s.selectedMcpName,
-    mcpServers: s.mcpServers,
     mcpDraft: s.mcpDraft,
     setMcpDraft: s.setMcpDraft,
     setSelectedMcp: s.setSelectedMcp,
-    getMcpByName: s.getMcpByName,
     createMcp: s.createMcp,
     updateMcp: s.updateMcp,
     deleteMcp: s.deleteMcp,
   })));
 
-  const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
+  const settingsTarget = useSettingsProjectTarget();
+  const currentDirectory = settingsTarget.directory;
   const currentInstance = useInstanceContextStore((state) => state.currentInstance);
   const settingsServerBase = useSettingsServerBaseUrl();
+  const mcpServers = useMcpConfigStore((state) => selectMcpServersForTarget(
+    state,
+    settingsTarget.directory,
+    settingsServerBase.baseUrl,
+  ));
   const serverId = currentInstance?.type === 'remote' ? currentInstance.id : DEFAULT_SERVER_ID;
   const isVSCodeAuthRuntime = React.useMemo(() => isVSCodeRuntime(), []);
   const mcpStatus = useMcpStore((state) => state.getStatusForDirectory(currentDirectory ?? null));
@@ -601,7 +604,7 @@ export const McpPage: React.FC = () => {
   const clearAuthMcp = useMcpStore((state) => state.clearAuth);
   const testConnectionMcp = useMcpStore((state) => state.testConnection);
 
-  const selectedServer = selectedMcpName ? getMcpByName(selectedMcpName) : null;
+  const selectedServer = selectedMcpName ? mcpServers.find((server) => server.name === selectedMcpName) ?? null : null;
   const isNewServer = Boolean(mcpDraft && mcpDraft.name === selectedMcpName && !selectedServer);
 
   // ── form state ──
@@ -889,7 +892,9 @@ export const McpPage: React.FC = () => {
     };
     setIsSaving(true);
     try {
-      const result = isNewServer ? await createMcp(draft) : await updateMcp(name, draft);
+      const result = isNewServer
+        ? await createMcp(draft, settingsServerBase.baseUrl, settingsTarget.directory)
+        : await updateMcp(name, draft, settingsServerBase.baseUrl, settingsTarget.directory);
       if (result.ok) {
         await clearPendingMcpAuthContext(authStateKey);
         resetTransientAuthState();
@@ -919,7 +924,7 @@ export const McpPage: React.FC = () => {
   const handleDelete = async () => {
     if (!selectedMcpName) return;
     setIsDeleting(true);
-    const result = await deleteMcp(selectedMcpName);
+    const result = await deleteMcp(selectedMcpName, settingsServerBase.baseUrl, settingsTarget.directory);
     if (result.ok) {
       await clearPendingMcpAuthContext(authStateKey);
       resetTransientAuthState();

@@ -145,24 +145,34 @@ export interface SkillDetail {
 interface SkillsStore {
   selectedSkillName: string | null;
   skills: DiscoveredSkill[];
+  skillsByTarget: Record<string, DiscoveredSkill[]>;
   isLoading: boolean;
   skillDraft: SkillDraft | null;
 
   setSelectedSkill: (name: string | null) => void;
   setSkillDraft: (draft: SkillDraft | null) => void;
-  loadSkills: () => Promise<boolean>;
-  getSkillDetail: (name: string) => Promise<SkillDetail | null>;
-  createSkill: (config: SkillConfig) => Promise<boolean>;
-  updateSkill: (name: string, config: Partial<SkillConfig>) => Promise<boolean>;
-  renameSkill: (name: string, newName: string) => Promise<boolean>;
-  deleteSkill: (name: string) => Promise<boolean>;
-  getSkillByName: (name: string) => DiscoveredSkill | undefined;
+  loadSkills: (serverBaseUrl?: string, directory?: string | null) => Promise<boolean>;
+  getSkillDetail: (name: string, serverBaseUrl?: string, directory?: string | null) => Promise<SkillDetail | null>;
+  createSkill: (config: SkillConfig, serverBaseUrl?: string, directory?: string | null) => Promise<boolean>;
+  updateSkill: (name: string, config: Partial<SkillConfig>, serverBaseUrl?: string, directory?: string | null) => Promise<boolean>;
+  renameSkill: (name: string, newName: string, serverBaseUrl?: string, directory?: string | null) => Promise<boolean>;
+  deleteSkill: (name: string, serverBaseUrl?: string, directory?: string | null) => Promise<boolean>;
+  getSkillByName: (name: string, directory?: string | null, serverBaseUrl?: string) => DiscoveredSkill | undefined;
   
   // Supporting files
-  readSupportingFile: (skillName: string, filePath: string, serverBaseUrl?: string) => Promise<string | null>;
-  writeSupportingFile: (skillName: string, filePath: string, content: string, serverBaseUrl?: string) => Promise<boolean>;
-  deleteSupportingFile: (skillName: string, filePath: string, serverBaseUrl?: string) => Promise<boolean>;
+  readSupportingFile: (skillName: string, filePath: string, serverBaseUrl?: string, directory?: string | null) => Promise<string | null>;
+  writeSupportingFile: (skillName: string, filePath: string, content: string, serverBaseUrl?: string, directory?: string | null) => Promise<boolean>;
+  deleteSupportingFile: (skillName: string, filePath: string, serverBaseUrl?: string, directory?: string | null) => Promise<boolean>;
 }
+
+const skillsTargetKey = (directory: string | null, serverBaseUrl?: string): string =>
+  `${serverBaseUrl?.trim() || '__local__'}::${getSkillsCacheKey(directory)}`;
+const EMPTY_SKILLS: DiscoveredSkill[] = [];
+export const selectSkillsForTarget = (
+  state: Pick<SkillsStore, 'skills' | 'skillsByTarget'>,
+  directory: string | null,
+  serverBaseUrl?: string,
+): DiscoveredSkill[] => state.skillsByTarget[skillsTargetKey(directory, serverBaseUrl)] ?? EMPTY_SKILLS;
 
 declare global {
   interface Window {
@@ -181,8 +191,8 @@ const getSkillsCacheKey = (directory: string | null): string => {
   return directory?.trim() || DEFAULT_SKILLS_CACHE_KEY;
 };
 
-export const invalidateSkillsLoadCache = (directory: string | null = getRequestDirectory()) => {
-  skillsLastLoadedAt.delete(getSkillsCacheKey(directory));
+export const invalidateSkillsLoadCache = (directory: string | null = getRequestDirectory(), serverBaseUrl?: string) => {
+  skillsLastLoadedAt.delete(skillsTargetKey(directory, serverBaseUrl));
 };
 
 const MAX_HEALTH_WAIT_MS = 20000;
@@ -198,6 +208,7 @@ export const useSkillsStore = create<SkillsStore>()(
       (set, get) => ({
         selectedSkillName: null,
         skills: [],
+        skillsByTarget: {},
         isLoading: false,
         skillDraft: null,
 
@@ -209,14 +220,16 @@ export const useSkillsStore = create<SkillsStore>()(
           set({ skillDraft: draft });
         },
 
-        loadSkills: async (serverBaseUrl?: string) => {
-          const currentDirectory = getRequestDirectory();
-          const cacheKey = getSkillsCacheKey(currentDirectory);
+        loadSkills: async (serverBaseUrl?: string, requestedDirectory?: string | null) => {
+          const currentDirectory = requestedDirectory !== undefined ? requestedDirectory?.trim() || null : getRequestDirectory();
+          const cacheKey = skillsTargetKey(currentDirectory, serverBaseUrl);
           const now = Date.now();
           const loadedAt = skillsLastLoadedAt.get(cacheKey) ?? 0;
-          const hasCachedSkills = get().skills.length > 0;
+          const cachedSkills = get().skillsByTarget[cacheKey];
+          const hasCachedSkills = Boolean(cachedSkills?.length);
 
           if (hasCachedSkills && now - loadedAt < SKILLS_LOAD_CACHE_TTL_MS) {
+            if (get().skills !== cachedSkills) set({ skills: cachedSkills });
             return true;
           }
 
@@ -227,7 +240,7 @@ export const useSkillsStore = create<SkillsStore>()(
 
           const request = (async () => {
             set({ isLoading: true });
-            const previousSkills = get().skills;
+            const previousSkills = get().skillsByTarget[cacheKey] ?? [];
             let lastError: unknown = null;
 
             for (let attempt = 0; attempt < 3; attempt++) {
@@ -254,7 +267,11 @@ export const useSkillsStore = create<SkillsStore>()(
                   renamable: s.renamable === true,
                 }));
 
-                set({ skills: configSkills, isLoading: false });
+                set((state) => ({
+                  skills: configSkills,
+                  skillsByTarget: { ...state.skillsByTarget, [cacheKey]: configSkills },
+                  isLoading: false,
+                }));
                 skillsLastLoadedAt.set(cacheKey, Date.now());
                 return true;
               } catch (error) {
@@ -277,9 +294,9 @@ export const useSkillsStore = create<SkillsStore>()(
           }
         },
 
-        getSkillDetail: async (name: string, serverBaseUrl?: string) => {
+        getSkillDetail: async (name: string, serverBaseUrl?: string, requestedDirectory?: string | null) => {
           try {
-            const currentDirectory = getRequestDirectory();
+            const currentDirectory = requestedDirectory !== undefined ? requestedDirectory?.trim() || null : getRequestDirectory();
             const queryParams = currentDirectory ? `?directory=${encodeURIComponent(currentDirectory)}` : '';
             
             const response = await fetch(resolveApiUrl(`/api/config/skills/${encodeURIComponent(name)}${queryParams}`, serverBaseUrl));
@@ -293,7 +310,7 @@ export const useSkillsStore = create<SkillsStore>()(
           }
         },
 
-        createSkill: async (config: SkillConfig, serverBaseUrl?: string) => {
+        createSkill: async (config: SkillConfig, serverBaseUrl?: string, requestedDirectory?: string | null) => {
           startConfigUpdate("Creating skill...");
           let requiresReload = false;
           try {
@@ -307,7 +324,7 @@ export const useSkillsStore = create<SkillsStore>()(
             if (config.source) skillConfig.source = config.source;
             if (config.supportingFiles) skillConfig.supportingFiles = config.supportingFiles;
 
-            const currentDirectory = getRequestDirectory();
+            const currentDirectory = requestedDirectory !== undefined ? requestedDirectory?.trim() || null : getRequestDirectory();
             const queryParams = currentDirectory ? `?directory=${encodeURIComponent(currentDirectory)}` : '';
 
             const response = await fetch(resolveApiUrl(`/api/config/skills/${encodeURIComponent(config.name)}${queryParams}`, serverBaseUrl), {
@@ -323,7 +340,7 @@ export const useSkillsStore = create<SkillsStore>()(
             }
 
             const needsReload = payload?.requiresReload ?? false;
-            invalidateSkillsLoadCache(currentDirectory);
+            invalidateSkillsLoadCache(currentDirectory, serverBaseUrl);
             if (needsReload) {
               requiresReload = true;
               await refreshSkillsAfterOpenCodeRestart({
@@ -333,7 +350,7 @@ export const useSkillsStore = create<SkillsStore>()(
               return true;
             }
 
-            const loaded = await get().loadSkills();
+            const loaded = await get().loadSkills(serverBaseUrl, currentDirectory);
             if (loaded) {
               emitConfigChange("skills", { source: CONFIG_EVENT_SOURCE });
             }
@@ -347,7 +364,7 @@ export const useSkillsStore = create<SkillsStore>()(
           }
         },
 
-        updateSkill: async (name: string, config: Partial<SkillConfig>, serverBaseUrl?: string) => {
+        updateSkill: async (name: string, config: Partial<SkillConfig>, serverBaseUrl?: string, requestedDirectory?: string | null) => {
           startConfigUpdate("Updating skill...");
           let requiresReload = false;
           try {
@@ -358,7 +375,7 @@ export const useSkillsStore = create<SkillsStore>()(
             if (config.supportingFiles !== undefined) skillConfig.supportingFiles = config.supportingFiles;
             if (config.targetPath !== undefined) skillConfig.targetPath = config.targetPath;
 
-            const currentDirectory = getRequestDirectory();
+            const currentDirectory = requestedDirectory !== undefined ? requestedDirectory?.trim() || null : getRequestDirectory();
             const queryParams = currentDirectory ? `?directory=${encodeURIComponent(currentDirectory)}` : '';
 
             const response = await fetch(resolveApiUrl(`/api/config/skills/${encodeURIComponent(name)}${queryParams}`, serverBaseUrl), {
@@ -374,7 +391,7 @@ export const useSkillsStore = create<SkillsStore>()(
             }
 
             const needsReload = payload?.requiresReload ?? false;
-            invalidateSkillsLoadCache(currentDirectory);
+            invalidateSkillsLoadCache(currentDirectory, serverBaseUrl);
             if (needsReload) {
               requiresReload = true;
               await refreshSkillsAfterOpenCodeRestart({
@@ -384,7 +401,7 @@ export const useSkillsStore = create<SkillsStore>()(
               return true;
             }
 
-            const loaded = await get().loadSkills();
+            const loaded = await get().loadSkills(serverBaseUrl, currentDirectory);
             if (loaded) {
               emitConfigChange("skills", { source: CONFIG_EVENT_SOURCE });
             }
@@ -398,11 +415,11 @@ export const useSkillsStore = create<SkillsStore>()(
           }
         },
 
-        renameSkill: async (name: string, newName: string, serverBaseUrl?: string) => {
+        renameSkill: async (name: string, newName: string, serverBaseUrl?: string, requestedDirectory?: string | null) => {
           startConfigUpdate("Renaming skill...");
           let requiresReload = false;
           try {
-            const directory = getRequestDirectory();
+            const directory = requestedDirectory !== undefined ? requestedDirectory?.trim() || null : getRequestDirectory();
             const queryParams = directory ? `?directory=${encodeURIComponent(directory)}` : '';
 
             const response = await fetch(resolveApiUrl(`/api/config/skills/${encodeURIComponent(name)}${queryParams}`, serverBaseUrl), {
@@ -418,7 +435,7 @@ export const useSkillsStore = create<SkillsStore>()(
             }
 
             const needsReload = payload?.requiresReload ?? false;
-            invalidateSkillsLoadCache(directory);
+            invalidateSkillsLoadCache(directory, serverBaseUrl);
             if (needsReload) {
               requiresReload = true;
               await refreshSkillsAfterOpenCodeRestart({
@@ -428,7 +445,7 @@ export const useSkillsStore = create<SkillsStore>()(
               return true;
             }
 
-            const loaded = await get().loadSkills();
+            const loaded = await get().loadSkills(serverBaseUrl, directory);
             if (loaded) {
               emitConfigChange("skills", { source: CONFIG_EVENT_SOURCE });
             }
@@ -442,11 +459,11 @@ export const useSkillsStore = create<SkillsStore>()(
           }
         },
 
-        deleteSkill: async (name: string, serverBaseUrl?: string) => {
+        deleteSkill: async (name: string, serverBaseUrl?: string, requestedDirectory?: string | null) => {
           startConfigUpdate("Deleting skill...");
           let requiresReload = false;
           try {
-            const currentDirectory = getRequestDirectory();
+            const currentDirectory = requestedDirectory !== undefined ? requestedDirectory?.trim() || null : getRequestDirectory();
             const queryParams = currentDirectory ? `?directory=${encodeURIComponent(currentDirectory)}` : '';
 
             const response = await fetch(resolveApiUrl(`/api/config/skills/${encodeURIComponent(name)}${queryParams}`, serverBaseUrl), {
@@ -460,7 +477,7 @@ export const useSkillsStore = create<SkillsStore>()(
             }
 
             const needsReload = payload?.requiresReload ?? false;
-            invalidateSkillsLoadCache(currentDirectory);
+            invalidateSkillsLoadCache(currentDirectory, serverBaseUrl);
             if (needsReload) {
               requiresReload = true;
               await refreshSkillsAfterOpenCodeRestart({
@@ -470,7 +487,7 @@ export const useSkillsStore = create<SkillsStore>()(
               return true;
             }
 
-            const loaded = await get().loadSkills();
+            const loaded = await get().loadSkills(serverBaseUrl, currentDirectory);
             if (loaded) {
               emitConfigChange("skills", { source: CONFIG_EVENT_SOURCE });
             }
@@ -489,14 +506,13 @@ export const useSkillsStore = create<SkillsStore>()(
           }
         },
 
-        getSkillByName: (name: string) => {
-          const { skills } = get();
-          return skills.find((s) => s.name === name);
+        getSkillByName: (name: string, directory?: string | null, serverBaseUrl?: string) => {
+          return selectSkillsForTarget(get(), directory ?? getRequestDirectory(), serverBaseUrl).find((skill) => skill.name === name);
         },
 
-        readSupportingFile: async (skillName: string, filePath: string, serverBaseUrl?: string) => {
+        readSupportingFile: async (skillName: string, filePath: string, serverBaseUrl?: string, requestedDirectory?: string | null) => {
           try {
-            const currentDirectory = getRequestDirectory();
+            const currentDirectory = requestedDirectory !== undefined ? requestedDirectory?.trim() || null : getRequestDirectory();
             const queryParams = currentDirectory ? `&directory=${encodeURIComponent(currentDirectory)}` : '';
             
             const response = await fetch(
@@ -513,9 +529,9 @@ export const useSkillsStore = create<SkillsStore>()(
           }
         },
 
-        writeSupportingFile: async (skillName: string, filePath: string, content: string, serverBaseUrl?: string) => {
+        writeSupportingFile: async (skillName: string, filePath: string, content: string, serverBaseUrl?: string, requestedDirectory?: string | null) => {
           try {
-            const currentDirectory = getRequestDirectory();
+            const currentDirectory = requestedDirectory !== undefined ? requestedDirectory?.trim() || null : getRequestDirectory();
             const queryParams = currentDirectory ? `?directory=${encodeURIComponent(currentDirectory)}` : '';
             
             const response = await fetch(
@@ -533,9 +549,9 @@ export const useSkillsStore = create<SkillsStore>()(
           }
         },
 
-        deleteSupportingFile: async (skillName: string, filePath: string, serverBaseUrl?: string) => {
+        deleteSupportingFile: async (skillName: string, filePath: string, serverBaseUrl?: string, requestedDirectory?: string | null) => {
           try {
-            const currentDirectory = getRequestDirectory();
+            const currentDirectory = requestedDirectory !== undefined ? requestedDirectory?.trim() || null : getRequestDirectory();
             const queryParams = currentDirectory ? `?directory=${encodeURIComponent(currentDirectory)}` : '';
             
             const response = await fetch(

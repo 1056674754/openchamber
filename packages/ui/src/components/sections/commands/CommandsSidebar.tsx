@@ -17,8 +17,10 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { useCommandsStore, isCommandBuiltIn, type Command } from '@/stores/useCommandsStore';
-import { useSkillsStore } from '@/stores/useSkillsStore';
+import { selectCommandsForDirectory, useCommandsStore, isCommandBuiltIn, type Command } from '@/stores/useCommandsStore';
+import { useSettingsProjectTarget } from '@/hooks/useSettingsProjectTarget';
+import { useSettingsServerBaseUrl } from '@/hooks/useSettingsServerBaseUrl';
+import { selectSkillsForTarget, useSkillsStore } from '@/stores/useSkillsStore';
 import { useShallow } from 'zustand/react/shallow';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { cn } from '@/lib/utils';
@@ -41,7 +43,6 @@ export const CommandsSidebar: React.FC<CommandsSidebarProps> = ({ onItemSelect }
 
   const {
     selectedCommandName,
-    commands,
     setSelectedCommand,
     setCommandDraft,
     createCommand,
@@ -49,20 +50,26 @@ export const CommandsSidebar: React.FC<CommandsSidebarProps> = ({ onItemSelect }
     loadCommands,
   } = useCommandsStore(useShallow((s) => ({
     selectedCommandName: s.selectedCommandName,
-    commands: s.commands,
     setSelectedCommand: s.setSelectedCommand,
     setCommandDraft: s.setCommandDraft,
     createCommand: s.createCommand,
     deleteCommand: s.deleteCommand,
     loadCommands: s.loadCommands,
   })));
-  const skills = useSkillsStore((s) => s.skills);
+  const settingsTarget = useSettingsProjectTarget();
+  const settingsServerBase = useSettingsServerBaseUrl();
+  const commands = useCommandsStore((state) => selectCommandsForDirectory(state, settingsTarget.directory));
+  const skills = useSkillsStore((state) => selectSkillsForTarget(
+    state,
+    settingsTarget.directory,
+    settingsServerBase.baseUrl,
+  ));
   const loadSkills = useSkillsStore((s) => s.loadSkills);
 
   React.useEffect(() => {
-    loadCommands();
-    loadSkills();
-  }, [loadCommands, loadSkills]);
+    void loadCommands(settingsTarget.directory);
+    void loadSkills(settingsServerBase.baseUrl, settingsTarget.directory);
+  }, [loadCommands, loadSkills, settingsServerBase.baseUrl, settingsTarget.directory]);
 
   const skillNames = React.useMemo(() => new Set(skills.map((skill) => skill.name)), [skills]);
   const commandOnlyItems = React.useMemo(
@@ -129,7 +136,7 @@ export const CommandsSidebar: React.FC<CommandsSidebarProps> = ({ onItemSelect }
     }
 
     setIsConfirmActionPending(true);
-    const success = await deleteCommand(confirmActionCommand.name);
+    const success = await deleteCommand(confirmActionCommand.name, settingsTarget.directory);
 
     if (success) {
       if (confirmActionType === 'delete') {
@@ -202,11 +209,11 @@ export const CommandsSidebar: React.FC<CommandsSidebarProps> = ({ onItemSelect }
       template: renameDialogCommand.template,
       agent: renameDialogCommand.agent,
       model: renameDialogCommand.model,
-    });
+    }, settingsTarget.directory);
 
     if (success) {
       // Delete old command
-      const deleteSuccess = await deleteCommand(renameDialogCommand.name);
+      const deleteSuccess = await deleteCommand(renameDialogCommand.name, settingsTarget.directory);
       if (deleteSuccess) {
         toast.success(`Command renamed to "${sanitizedName}"`);
         setSelectedCommand(sanitizedName);

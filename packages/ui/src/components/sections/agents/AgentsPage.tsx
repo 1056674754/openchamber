@@ -4,7 +4,8 @@ import { Input } from '@/components/ui/input';
 import { NumberInput } from '@/components/ui/number-input';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from '@/components/ui';
-import { useAgentsStore, type AgentConfig, type AgentMutationResult, type AgentScope, type AgentWithExtras } from '@/stores/useAgentsStore';
+import { selectAgentsForDirectory, useAgentsStore, type AgentConfig, type AgentMutationResult, type AgentScope, type AgentWithExtras } from '@/stores/useAgentsStore';
+import { useSettingsProjectTarget } from '@/hooks/useSettingsProjectTarget';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useShallow } from 'zustand/react/shallow';
 import { useDirectorySync } from '@/sync/sync-context';
@@ -222,7 +223,6 @@ export const AgentsPage: React.FC = () => {
     getAgentByName,
     createAgent,
     updateAgent,
-    agents,
     agentDraft,
     setAgentDraft,
   } = useAgentsStore(useShallow((s) => ({
@@ -230,12 +230,14 @@ export const AgentsPage: React.FC = () => {
     getAgentByName: s.getAgentByName,
     createAgent: s.createAgent,
     updateAgent: s.updateAgent,
-    agents: s.agents,
     agentDraft: s.agentDraft,
     setAgentDraft: s.setAgentDraft,
   })));
 
-  const selectedAgent = selectedAgentName ? getAgentByName(selectedAgentName) : null;
+  const settingsTarget = useSettingsProjectTarget();
+  const agents = useAgentsStore((state) => selectAgentsForDirectory(state, settingsTarget.directory));
+
+  const selectedAgent = selectedAgentName ? getAgentByName(selectedAgentName, settingsTarget.directory) : null;
   const isNewAgent = Boolean(agentDraft && agentDraft.name === selectedAgentName && !selectedAgent);
 
   const [draftName, setDraftName] = React.useState('');
@@ -269,6 +271,7 @@ export const AgentsPage: React.FC = () => {
   } | null>(null);
 
   const currentDirectory = useDirectoryStore((state) => state.currentDirectory ?? null);
+  const settingsDirectory = settingsTarget.directory ?? currentDirectory;
   const [toolIds, setToolIds] = React.useState<string[]>([]);
   const variantOptions = React.useMemo(() => getVariantOptionsForModel(providers, model), [model, providers]);
   const selectedVariantValue = variant && variantOptions.includes(variant) ? variant : '__default';
@@ -280,7 +283,7 @@ export const AgentsPage: React.FC = () => {
     let cancelled = false;
 
     const fetchToolIds = async () => {
-      const ids = await opencodeClient.listToolIds({ directory: currentDirectory });
+      const ids = await opencodeClient.listToolIds({ directory: settingsDirectory });
       if (cancelled) {
         return;
       }
@@ -304,7 +307,7 @@ export const AgentsPage: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [currentDirectory]);
+  }, [settingsDirectory]);
 
   const knownPermissionNames = React.useMemo(() => {
     const names = new Set<string>();
@@ -630,12 +633,12 @@ export const AgentsPage: React.FC = () => {
 
       let result: AgentMutationResult;
       if (isNewAgent) {
-        result = await createAgent(config);
+        result = await createAgent(config, settingsTarget.directory);
         if (result.ok) {
           setAgentDraft(null); // Clear draft after successful creation
         }
       } else {
-        result = await updateAgent(agentName, config);
+        result = await updateAgent(agentName, config, settingsTarget.directory);
       }
 
       if (result.ok) {

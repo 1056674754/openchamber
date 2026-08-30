@@ -21,6 +21,7 @@ import type { ModelMetadata } from '@/types';
 import { useI18n, type I18nKey, type I18nParams } from '@/lib/i18n';
 import { resolveApiUrl } from '@/lib/api/serverUrl';
 import { useSettingsServerBaseUrl } from '@/hooks/useSettingsServerBaseUrl';
+import { useSettingsProjectTarget } from '@/hooks/useSettingsProjectTarget';
 import { useSettingsProviders } from './useSettingsProviders';
 import { CustomProviderForm } from './CustomProviderForm';
 import { ProviderOAuthMethods, type ProviderOAuthMethod } from './ProviderOAuthMethods';
@@ -151,6 +152,7 @@ export const ProvidersPage: React.FC = () => {
   const showAllModels = useUIStore((state) => state.showAllModels);
 
   const { status, baseUrl } = useSettingsServerBaseUrl();
+  const settingsTarget = useSettingsProjectTarget();
   // Model visibility (hide/show) is a local UI preference. It must not be
   // applied to, or mutated for, a remote instance whose model set differs.
   const isRemote = status === 'ready' && Boolean(baseUrl);
@@ -324,7 +326,8 @@ export const ProvidersPage: React.FC = () => {
 
     const loadSources = async () => {
       try {
-        const response = await fetch(resolveApiUrl(`/api/provider/${encodeURIComponent(selectedProviderId)}/source`, baseUrl), {
+        const query = settingsTarget.directory ? `?directory=${encodeURIComponent(settingsTarget.directory)}` : '';
+        const response = await fetch(resolveApiUrl(`/api/provider/${encodeURIComponent(selectedProviderId)}/source${query}`, baseUrl), {
           method: 'GET',
           headers: { Accept: 'application/json' },
         });
@@ -353,7 +356,7 @@ export const ProvidersPage: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [selectedProviderId, t, status, baseUrl]);
+  }, [selectedProviderId, settingsTarget.directory, t, status, baseUrl]);
 
   const selectedProvider = providers.find((provider) => provider.id === selectedProviderId);
   const selectedSources = selectedProviderId ? providerSources[selectedProviderId] : undefined;
@@ -407,7 +410,8 @@ export const ProvidersPage: React.FC = () => {
     setAuthBusyKey(busyKey);
 
     try {
-      const response = await fetch(resolveApiUrl(`/api/provider/${encodeURIComponent(providerId)}/auth?scope=all`, baseUrl), {
+      const directoryQuery = settingsTarget.directory ? `&directory=${encodeURIComponent(settingsTarget.directory)}` : '';
+      const response = await fetch(resolveApiUrl(`/api/provider/${encodeURIComponent(providerId)}/auth?scope=all${directoryQuery}`, baseUrl), {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
       });
@@ -484,7 +488,8 @@ export const ProvidersPage: React.FC = () => {
       let configSaveFailed = false;
       try {
         const upsert = buildProviderUpsertRequest(plan, { scope });
-        const response = await fetch(resolveApiUrl('/api/provider', baseUrl), {
+        const query = settingsTarget.directory ? `?directory=${encodeURIComponent(settingsTarget.directory)}` : '';
+        const response = await fetch(resolveApiUrl(`/api/provider${query}`, baseUrl), {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
           body: JSON.stringify(upsert),

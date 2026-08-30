@@ -3,7 +3,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from '@/components/ui';
-import { useCommandsStore, type CommandConfig, type CommandScope } from '@/stores/useCommandsStore';
+import { selectCommandsForDirectory, useCommandsStore, type CommandConfig, type CommandScope } from '@/stores/useCommandsStore';
+import { useSettingsProjectTarget } from '@/hooks/useSettingsProjectTarget';
 import { useShallow } from 'zustand/react/shallow';
 import { ModelSelector } from '../agents/ModelSelector';
 import { AgentSelector } from './AgentSelector';
@@ -26,7 +27,6 @@ export const CommandsPage: React.FC = () => {
     getCommandByName,
     createCommand,
     updateCommand,
-    commands,
     commandDraft,
     setCommandDraft,
   } = useCommandsStore(useShallow((s) => ({
@@ -34,12 +34,13 @@ export const CommandsPage: React.FC = () => {
     getCommandByName: s.getCommandByName,
     createCommand: s.createCommand,
     updateCommand: s.updateCommand,
-    commands: s.commands,
     commandDraft: s.commandDraft,
     setCommandDraft: s.setCommandDraft,
   })));
+  const settingsTarget = useSettingsProjectTarget();
+  const commands = useCommandsStore((state) => selectCommandsForDirectory(state, settingsTarget.directory));
 
-  const selectedCommand = selectedCommandName ? getCommandByName(selectedCommandName) : null;
+  const selectedCommand = selectedCommandName ? getCommandByName(selectedCommandName, settingsTarget.directory) : null;
   const isNewCommand = Boolean(commandDraft && commandDraft.name === selectedCommandName && !selectedCommand);
 
   const [draftName, setDraftName] = React.useState('');
@@ -155,12 +156,12 @@ export const CommandsPage: React.FC = () => {
 
       let success: boolean;
       if (isNewCommand) {
-        success = await createCommand(config);
+        success = await createCommand(config, settingsTarget.directory);
         if (success) {
           setCommandDraft(null); 
         }
       } else {
-        success = await updateCommand(commandName, config);
+        success = await updateCommand(commandName, config, settingsTarget.directory);
       }
 
       if (success) {

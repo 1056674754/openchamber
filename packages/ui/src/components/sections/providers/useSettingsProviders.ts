@@ -1,7 +1,8 @@
 import React from 'react';
 import type { Provider } from '@opencode-ai/sdk/v2';
-import { useConfigStore } from '@/stores/useConfigStore';
+import { selectProvidersForDirectory, useConfigStore } from '@/stores/useConfigStore';
 import { useSettingsServerBaseUrl } from '@/hooks/useSettingsServerBaseUrl';
+import { useSettingsProjectTarget } from '@/hooks/useSettingsProjectTarget';
 import { resolveApiUrl } from '@/lib/api/serverUrl';
 
 type ProviderModel = Provider['models'][string];
@@ -29,7 +30,12 @@ function transformRemoteProviders(raw: RemoteProvidersPayload['providers']): Pro
  * than the local one.
  */
 export function useSettingsProviders(): { providers: ProviderWithModelList[]; isLoading: boolean } {
-  const storeProviders = useConfigStore((state) => state.providers);
+  const settingsTarget = useSettingsProjectTarget();
+  const storeProviders = useConfigStore((state) => selectProvidersForDirectory(
+    state,
+    settingsTarget.directory,
+    settingsTarget.serverId,
+  ));
   const { status, baseUrl } = useSettingsServerBaseUrl();
   const [remoteProviders, setRemoteProviders] = React.useState<ProviderWithModelList[] | null>(null);
   const [isLoading, setIsLoading] = React.useState(false);
@@ -47,9 +53,13 @@ export function useSettingsProviders(): { providers: ProviderWithModelList[]; is
     }
     let cancelled = false;
     setIsLoading(true);
-    fetch(resolveApiUrl('/api/config/providers', baseUrl), {
+    const query = settingsTarget.directory ? `?directory=${encodeURIComponent(settingsTarget.directory)}` : '';
+    fetch(resolveApiUrl(`/api/config/providers${query}`, baseUrl), {
       method: 'GET',
-      headers: { Accept: 'application/json' },
+      headers: {
+        Accept: 'application/json',
+        ...(settingsTarget.directory ? { 'x-opencode-directory': settingsTarget.directory } : {}),
+      },
       cache: 'no-store',
     })
       .then((response) => (response.ok ? response.json() : null))
@@ -66,7 +76,7 @@ export function useSettingsProviders(): { providers: ProviderWithModelList[]; is
     return () => {
       cancelled = true;
     };
-  }, [status, baseUrl]);
+  }, [status, baseUrl, settingsTarget.directory]);
 
   const providers = status === 'loading' ? [] : baseUrl ? (remoteProviders ?? []) : storeProviders;
   return { providers, isLoading };

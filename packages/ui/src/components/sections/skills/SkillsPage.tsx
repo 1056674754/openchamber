@@ -3,7 +3,9 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from '@/components/ui';
-import { useSkillsStore, type SkillConfig, type SkillScope, type SupportingFile, type PendingFile } from '@/stores/useSkillsStore';
+import { selectSkillsForTarget, useSkillsStore, type SkillConfig, type SkillScope, type SupportingFile, type PendingFile } from '@/stores/useSkillsStore';
+import { useSettingsProjectTarget } from '@/hooks/useSettingsProjectTarget';
+import { useSettingsServerBaseUrl } from '@/hooks/useSettingsServerBaseUrl';
 import { useShallow } from 'zustand/react/shallow';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import {
@@ -46,7 +48,6 @@ const SkillsInstalledPage: React.FC = () => {
     getSkillDetail,
     createSkill,
     updateSkill,
-    skills,
     skillDraft,
     setSkillDraft,
     setSelectedSkill,
@@ -56,13 +57,21 @@ const SkillsInstalledPage: React.FC = () => {
     getSkillDetail: s.getSkillDetail,
     createSkill: s.createSkill,
     updateSkill: s.updateSkill,
-    skills: s.skills,
     skillDraft: s.skillDraft,
     setSkillDraft: s.setSkillDraft,
     setSelectedSkill: s.setSelectedSkill,
   })));
+  const settingsTarget = useSettingsProjectTarget();
+  const settingsServerBase = useSettingsServerBaseUrl();
+  const skills = useSkillsStore((state) => selectSkillsForTarget(
+    state,
+    settingsTarget.directory,
+    settingsServerBase.baseUrl,
+  ));
 
-  const selectedSkill = selectedSkillName ? getSkillByName(selectedSkillName) : null;
+  const selectedSkill = selectedSkillName
+    ? getSkillByName(selectedSkillName, settingsTarget.directory, settingsServerBase.baseUrl)
+    : null;
   const isNewSkill = Boolean(skillDraft && skillDraft.name === selectedSkillName && !selectedSkill);
   const hasStaleSelection = Boolean(selectedSkillName && !selectedSkill && !skillDraft);
   const isReadOnlySkill = selectedSkill?.path === '<built-in>';
@@ -154,7 +163,7 @@ const SkillsInstalledPage: React.FC = () => {
       } else if (selectedSkillName && selectedSkill) {
         setIsLoading(true);
         try {
-          const detail = await getSkillDetail(selectedSkillName);
+          const detail = await getSkillDetail(selectedSkillName, settingsServerBase.baseUrl, settingsTarget.directory);
           if (detail) {
             const md = detail.sources.md;
             setDescription(md.description || '');
@@ -172,7 +181,7 @@ const SkillsInstalledPage: React.FC = () => {
     };
 
     loadSkillDetails();
-  }, [selectedSkill, isNewSkill, selectedSkillName, skills, skillDraft, getSkillDetail]);
+  }, [selectedSkill, isNewSkill, selectedSkillName, skills, skillDraft, getSkillDetail, settingsServerBase.baseUrl, settingsTarget.directory]);
 
   const handleSave = async () => {
     const skillName = isNewSkill ? draftName.trim().replace(/\s+/g, '-').toLowerCase() : selectedSkillName?.trim();
@@ -212,14 +221,14 @@ const SkillsInstalledPage: React.FC = () => {
 
       let success: boolean;
       if (isNewSkill) {
-        success = await createSkill(config);
+        success = await createSkill(config, settingsServerBase.baseUrl, settingsTarget.directory);
         if (success) {
           setSkillDraft(null);
           setPendingFiles([]);
           setSelectedSkill(skillName);
         }
       } else {
-        success = await updateSkill(skillName, config);
+        success = await updateSkill(skillName, config, settingsServerBase.baseUrl, settingsTarget.directory);
         if (success) {
           setOriginalDescription(description.trim());
           setOriginalInstructions(instructions.trim());
@@ -267,7 +276,7 @@ const SkillsInstalledPage: React.FC = () => {
     
     try {
       const { readSupportingFile } = useSkillsStore.getState();
-      const content = await readSupportingFile(selectedSkillName, filePath);
+      const content = await readSupportingFile(selectedSkillName, filePath, settingsServerBase.baseUrl, settingsTarget.directory);
       setNewFileContent(content || '');
       setOriginalFileContent(content || '');
     } catch {
@@ -313,13 +322,13 @@ const SkillsInstalledPage: React.FC = () => {
     }
 
     const { writeSupportingFile } = useSkillsStore.getState();
-    const success = await writeSupportingFile(selectedSkillName, filePath, newFileContent);
+    const success = await writeSupportingFile(selectedSkillName, filePath, newFileContent, settingsServerBase.baseUrl, settingsTarget.directory);
     
     if (success) {
       toast.success(isEditing ? t('settings.skills.page.toast.fileUpdated', { path: filePath }) : t('settings.skills.page.toast.fileCreated', { path: filePath }));
       setIsFileDialogOpen(false);
       setEditingFilePath(null);
-      const detail = await getSkillDetail(selectedSkillName);
+      const detail = await getSkillDetail(selectedSkillName, settingsServerBase.baseUrl, settingsTarget.directory);
       if (detail) {
         setSupportingFiles(detail.sources.md.supportingFiles || []);
       }
@@ -349,11 +358,11 @@ const SkillsInstalledPage: React.FC = () => {
 
     setIsDeletingFile(true);
     const { deleteSupportingFile } = useSkillsStore.getState();
-    const success = await deleteSupportingFile(selectedSkillName, deleteFilePath);
+    const success = await deleteSupportingFile(selectedSkillName, deleteFilePath, settingsServerBase.baseUrl, settingsTarget.directory);
 
     if (success) {
       toast.success(t('settings.skills.page.toast.fileDeleted', { path: deleteFilePath }));
-      const detail = await getSkillDetail(selectedSkillName);
+      const detail = await getSkillDetail(selectedSkillName, settingsServerBase.baseUrl, settingsTarget.directory);
       if (detail) {
         setSupportingFiles(detail.sources.md.supportingFiles || []);
       }

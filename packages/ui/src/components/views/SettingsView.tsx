@@ -2,6 +2,7 @@ import React from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { cn, getModifierLabel } from '@/lib/utils';
 import { useUIStore } from '@/stores/useUIStore';
+import { useSettingsProjectTarget } from '@/hooks/useSettingsProjectTarget';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useAgentsStore } from '@/stores/useAgentsStore';
 import { useCommandsStore } from '@/stores/useCommandsStore';
@@ -373,6 +374,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
   const effectivePageMeta = activePageMeta ?? fallbackPageMeta;
 
   const activeProjectId = useProjectsStore((state) => state.activeProjectId);
+  const settingsTarget = useSettingsProjectTarget();
 
   React.useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -442,16 +444,27 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
       return;
     }
 
+    if (effectiveSettingsSlug === 'providers') {
+      void useConfigStore.getState().loadProviders({
+        directory: settingsTarget.directory,
+        serverId: settingsTarget.serverId,
+        source: 'settings:providers',
+      });
+      return;
+    }
     if (effectiveSettingsSlug === 'agents') {
-      void useAgentsStore.getState().loadAgents();
+      void useAgentsStore.getState().loadAgents(settingsTarget.directory);
       return;
     }
     if (effectiveSettingsSlug === 'commands') {
-      void useCommandsStore.getState().loadCommands();
+      void useCommandsStore.getState().loadCommands(settingsTarget.directory);
       return;
     }
     if (effectiveSettingsSlug === 'mcp') {
-      void useMcpConfigStore.getState().loadMcpConfigs();
+      void useMcpConfigStore.getState().loadMcpConfigs({
+        directory: settingsTarget.directory,
+        serverBaseUrl: settingsServer.baseUrl,
+      });
       return;
     }
     if (effectiveSettingsSlug === 'plugins') {
@@ -471,13 +484,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
       return;
     }
     if (effectiveSettingsSlug === 'skills.installed' || effectiveSettingsSlug === 'skills.catalog') {
-      void useSkillsStore.getState().loadSkills();
+      void useSkillsStore.getState().loadSkills(settingsServer.baseUrl, settingsTarget.directory);
       void useSkillsCatalogStore.getState().loadCatalog();
     }
     if (effectiveSettingsSlug === 'snippets') {
       void useSnippetsStore.getState().loadSnippets();
     }
-  }, [activeProjectId, effectiveSettingsSlug, isSettingsDialogOpen, isWindowed, runtimeCtx.isVSCode]);
+  }, [activeProjectId, effectiveSettingsSlug, isSettingsDialogOpen, isWindowed, runtimeCtx.isVSCode, settingsServer.baseUrl, settingsTarget.directory, settingsTarget.serverId]);
 
   const openPage = React.useCallback((slug: SettingsPageSlug) => {
     const requested = getSettingsPageMeta(slug);

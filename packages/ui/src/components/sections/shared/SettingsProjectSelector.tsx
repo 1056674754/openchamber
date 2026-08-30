@@ -7,7 +7,8 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Icon } from "@/components/icon/Icon";
-import { useProjectsStore } from '@/stores/useProjectsStore';
+import { useUIStore } from '@/stores/useUIStore';
+import { useSettingsProjectTarget } from '@/hooks/useSettingsProjectTarget';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
@@ -16,22 +17,21 @@ const formatProjectLabel = (label: string): string => label.trim();
 
 export const SettingsProjectSelector: React.FC<{ className?: string }> = ({ className }) => {
   const { t } = useI18n();
-  const projects = useProjectsStore((state) => state.projects);
-  const activeProjectId = useProjectsStore((state) => state.activeProjectId);
-  const setActiveProject = useProjectsStore((state) => state.setActiveProject);
+  const target = useSettingsProjectTarget();
+  const setSettingsConfigProjectId = useUIStore((state) => state.setSettingsConfigProjectId);
 
   const isVSCode = React.useMemo(() => isVSCodeRuntime(), []);
 
   const sortedProjects = React.useMemo(() => {
-    return [...projects].sort((a, b) => (a.label || a.path).localeCompare(b.label || b.path));
-  }, [projects]);
+    return [...target.projects].sort((a, b) => (a.label || a.path).localeCompare(b.label || b.path));
+  }, [target.projects]);
 
   const activeProject = React.useMemo(() => {
     if (sortedProjects.length === 0) {
       return null;
     }
-    return sortedProjects.find((p) => p.id === activeProjectId) ?? sortedProjects[0];
-  }, [activeProjectId, sortedProjects]);
+    return sortedProjects.find((p) => p.id === target.projectId) ?? sortedProjects[0];
+  }, [sortedProjects, target.projectId]);
 
   if (isVSCode || sortedProjects.length === 0) {
     return null;
@@ -67,7 +67,7 @@ export const SettingsProjectSelector: React.FC<{ className?: string }> = ({ clas
             value={activeProject?.id ?? ''}
             onValueChange={(value) => {
               if (!value) return;
-              setActiveProject(value);
+              setSettingsConfigProjectId(target.serverId, value);
             }}
           >
             {sortedProjects.map((project) => {

@@ -17,7 +17,9 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { useSkillsStore, type DiscoveredSkill } from '@/stores/useSkillsStore';
+import { selectSkillsForTarget, useSkillsStore, type DiscoveredSkill } from '@/stores/useSkillsStore';
+import { useSettingsProjectTarget } from '@/hooks/useSettingsProjectTarget';
+import { useSettingsServerBaseUrl } from '@/hooks/useSettingsServerBaseUrl';
 import { useShallow } from 'zustand/react/shallow';
 import { cn } from '@/lib/utils';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
@@ -47,7 +49,6 @@ export const SkillsSidebar: React.FC<SkillsSidebarProps> = ({ onItemSelect }) =>
 
   const {
     selectedSkillName,
-    skills,
     setSelectedSkill,
     setSkillDraft,
     deleteSkill,
@@ -55,13 +56,19 @@ export const SkillsSidebar: React.FC<SkillsSidebarProps> = ({ onItemSelect }) =>
     getSkillDetail,
   } = useSkillsStore(useShallow((s) => ({
     selectedSkillName: s.selectedSkillName,
-    skills: s.skills,
     setSelectedSkill: s.setSelectedSkill,
     setSkillDraft: s.setSkillDraft,
     deleteSkill: s.deleteSkill,
     renameSkill: s.renameSkill,
     getSkillDetail: s.getSkillDetail,
   })));
+  const settingsTarget = useSettingsProjectTarget();
+  const settingsServerBase = useSettingsServerBaseUrl();
+  const skills = useSkillsStore((state) => selectSkillsForTarget(
+    state,
+    settingsTarget.directory,
+    settingsServerBase.baseUrl,
+  ));
 
   // Skills are loaded by the Settings shell when this page is active.
 
@@ -99,7 +106,7 @@ export const SkillsSidebar: React.FC<SkillsSidebarProps> = ({ onItemSelect }) =>
     }
 
     setIsDeletePending(true);
-    const success = await deleteSkill(deleteDialogSkill.name);
+    const success = await deleteSkill(deleteDialogSkill.name, settingsServerBase.baseUrl, settingsTarget.directory);
     if (success) {
       toast.success(t('settings.skills.sidebar.toast.skillDeleted', { name: deleteDialogSkill.name }));
       setDeleteDialogSkill(null);
@@ -122,7 +129,7 @@ export const SkillsSidebar: React.FC<SkillsSidebarProps> = ({ onItemSelect }) =>
     }
 
     // Get full skill detail to copy
-    const detail = await getSkillDetail(skill.name);
+    const detail = await getSkillDetail(skill.name, settingsServerBase.baseUrl, settingsTarget.directory);
     if (!detail) {
       toast.error(t('settings.skills.sidebar.toast.duplicateLoadFailed'));
       return;
@@ -170,7 +177,12 @@ export const SkillsSidebar: React.FC<SkillsSidebarProps> = ({ onItemSelect }) =>
       return;
     }
 
-    const success = await renameSkill(renameDialogSkill.name, sanitizedName);
+    const success = await renameSkill(
+      renameDialogSkill.name,
+      sanitizedName,
+      settingsServerBase.baseUrl,
+      settingsTarget.directory,
+    );
     if (success) {
       toast.success(t('settings.skills.sidebar.toast.skillRenamed', { name: sanitizedName }));
       setSelectedSkill(sanitizedName);

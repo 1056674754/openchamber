@@ -61,6 +61,14 @@ const getConfigDirectory = (): string | null => {
   return null;
 };
 
+const resolveDirectory = (directory?: string | null): string | null => {
+  if (directory !== undefined) {
+    const trimmed = directory?.trim();
+    return trimmed || null;
+  }
+  return getConfigDirectory();
+};
+
 const AGENTS_LOAD_CACHE_TTL_MS = 5000;
 const DEFAULT_AGENTS_CACHE_KEY = '__default__';
 const agentsLastLoadedAt = new Map<string, number>();
@@ -193,18 +201,19 @@ interface AgentsStore {
 
   selectedAgentName: string | null;
   agents: Agent[];
+  agentsByDirectory: Record<string, Agent[]>;
   isLoading: boolean;
   agentDraft: AgentDraft | null;
 
   setSelectedAgent: (name: string | null) => void;
   setAgentDraft: (draft: AgentDraft | null) => void;
-  loadAgents: () => Promise<boolean>;
-  createAgent: (config: AgentConfig) => Promise<AgentMutationResult>;
-  updateAgent: (name: string, config: Partial<AgentConfig>) => Promise<AgentMutationResult>;
-  deleteAgent: (name: string, scope?: AgentScope) => Promise<AgentMutationResult>;
-  getAgentByName: (name: string) => Agent | undefined;
+  loadAgents: (directory?: string | null) => Promise<boolean>;
+  createAgent: (config: AgentConfig, directory?: string | null) => Promise<AgentMutationResult>;
+  updateAgent: (name: string, config: Partial<AgentConfig>, directory?: string | null) => Promise<AgentMutationResult>;
+  deleteAgent: (name: string, scope?: AgentScope, directory?: string | null) => Promise<AgentMutationResult>;
+  getAgentByName: (name: string, directory?: string | null) => Agent | undefined;
   // Returns only visible agents (excludes hidden internal agents)
-  getVisibleAgents: () => Agent[];
+  getVisibleAgents: (directory?: string | null) => Agent[];
 }
 
 declare global {
@@ -213,6 +222,16 @@ declare global {
   }
 }
 
+const EMPTY_AGENTS: Agent[] = [];
+
+export const selectAgentsForDirectory = (
+  state: Pick<AgentsStore, 'agents' | 'agentsByDirectory'>,
+  directory?: string | null,
+): Agent[] => {
+  if (directory === undefined) return state.agents;
+  return state.agentsByDirectory[getAgentsCacheKey(resolveDirectory(directory))] ?? EMPTY_AGENTS;
+};
+
 export const useAgentsStore = create<AgentsStore>()(
   devtools(
     persist(
@@ -220,6 +239,7 @@ export const useAgentsStore = create<AgentsStore>()(
 
         selectedAgentName: null,
         agents: [],
+        agentsByDirectory: {},
         isLoading: false,
         agentDraft: null,
 
@@ -231,14 +251,16 @@ export const useAgentsStore = create<AgentsStore>()(
           set({ agentDraft: draft });
         },
 
-        loadAgents: async () => {
-          const configDirectory = getConfigDirectory();
+        loadAgents: async (requestedDirectory) => {
+          const configDirectory = resolveDirectory(requestedDirectory);
           const cacheKey = getAgentsCacheKey(configDirectory);
           const now = Date.now();
           const loadedAt = agentsLastLoadedAt.get(cacheKey) ?? 0;
-          const hasCachedAgents = get().agents.length > 0;
+          const cachedAgents = get().agentsByDirectory[cacheKey];
+          const hasCachedAgents = Boolean(cachedAgents?.length);
 
           if (hasCachedAgents && now - loadedAt < AGENTS_LOAD_CACHE_TTL_MS) {
+            if (get().agents !== cachedAgents) set({ agents: cachedAgents });
             return true;
           }
 
@@ -249,7 +271,7 @@ export const useAgentsStore = create<AgentsStore>()(
 
           const request = (async () => {
             set({ isLoading: true });
-            const previousAgents = get().agents;
+            const previousAgents = get().agentsByDirectory[cacheKey] ?? [];
             const previousSignature = buildAgentsSignature(previousAgents);
 
             for (let attempt = 0; attempt < 3; attempt++) {
@@ -304,11 +326,13 @@ export const useAgentsStore = create<AgentsStore>()(
                 );
 
                 const nextSignature = buildAgentsSignature(agentsWithScope);
-                if (previousSignature !== nextSignature) {
-                  set({ agents: agentsWithScope, isLoading: false });
-                } else {
-                  set({ isLoading: false });
-                }
+                set((state) => ({
+                  agents: agentsWithScope,
+                  agentsByDirectory: previousSignature !== nextSignature
+                    ? { ...state.agentsByDirectory, [cacheKey]: agentsWithScope }
+                    : state.agentsByDirectory,
+                  isLoading: false,
+                }));
                 agentsLastLoadedAt.set(cacheKey, Date.now());
                 return true;
               } catch {
@@ -328,7 +352,7 @@ export const useAgentsStore = create<AgentsStore>()(
           }
         },
 
-        createAgent: async (config: AgentConfig) => {
+        createAgent: async (config: AgentConfig, requestedDirectory) => {
           startConfigUpdate("Creating agent configuration…");
           let requiresReload = false;
           try {
@@ -350,7 +374,7 @@ export const useAgentsStore = create<AgentsStore>()(
 
             console.log('[AgentsStore] Agent config to save:', agentConfig);
 
-            const configDirectory = getConfigDirectory();
+            const configDirectory = resolveDirectory(requestedDirectory);
             const queryParams = configDirectory ? `?directory=${encodeURIComponent(configDirectory)}` : '';
 
             const response = await fetch(`/api/config/agents/${encodeURIComponent(config.name)}${queryParams}`, {
@@ -385,7 +409,7 @@ export const useAgentsStore = create<AgentsStore>()(
               return { ok: true };
             }
 
-            const loaded = await get().loadAgents();
+            const loaded = await get().loadAgents(configDirectory);
             if (loaded) {
               emitConfigChange("agents", { source: CONFIG_EVENT_SOURCE });
             }
@@ -400,7 +424,7 @@ export const useAgentsStore = create<AgentsStore>()(
           }
         },
 
-        updateAgent: async (name: string, config: Partial<AgentConfig>) => {
+        updateAgent: async (name: string, config: Partial<AgentConfig>, requestedDirectory) => {
           startConfigUpdate("Updating agent configuration…");
           let requiresReload = false;
           try {
@@ -417,7 +441,7 @@ export const useAgentsStore = create<AgentsStore>()(
             if (config.disable !== undefined) agentConfig.disable = config.disable;
 
             // Use active project root for project-level agent support.
-            const configDirectory = getConfigDirectory();
+            const configDirectory = resolveDirectory(requestedDirectory);
             const queryParams = configDirectory ? `?directory=${encodeURIComponent(configDirectory)}` : '';
 
             const response = await fetch(`/api/config/agents/${encodeURIComponent(name)}${queryParams}`, {
@@ -452,7 +476,7 @@ export const useAgentsStore = create<AgentsStore>()(
               return { ok: true };
             }
 
-            const loaded = await get().loadAgents();
+            const loaded = await get().loadAgents(configDirectory);
             if (loaded) {
               emitConfigChange("agents", { source: CONFIG_EVENT_SOURCE });
             }
@@ -467,12 +491,12 @@ export const useAgentsStore = create<AgentsStore>()(
           }
         },
 
-        deleteAgent: async (name: string, scope?: AgentScope) => {
+        deleteAgent: async (name: string, scope?: AgentScope, requestedDirectory?: string | null) => {
           startConfigUpdate("Deleting agent configuration…");
           let requiresReload = false;
           try {
             // Use active project root for project-level agent support.
-            const configDirectory = getConfigDirectory();
+            const configDirectory = resolveDirectory(requestedDirectory);
             const queryParams = configDirectory ? `?directory=${encodeURIComponent(configDirectory)}` : '';
 
             const response = await fetch(`/api/config/agents/${encodeURIComponent(name)}${queryParams}`, {
@@ -512,7 +536,7 @@ export const useAgentsStore = create<AgentsStore>()(
               return { ok: true };
             }
 
-            const loaded = await get().loadAgents();
+            const loaded = await get().loadAgents(configDirectory);
             if (loaded) {
               emitConfigChange("agents", { source: CONFIG_EVENT_SOURCE });
             }
@@ -529,14 +553,12 @@ export const useAgentsStore = create<AgentsStore>()(
         },
 
 
-        getAgentByName: (name: string) => {
-          const { agents } = get();
-          return agents.find((a) => a.name === name);
+        getAgentByName: (name: string, directory?: string | null) => {
+          return selectAgentsForDirectory(get(), directory).find((agent) => agent.name === name);
         },
 
-        getVisibleAgents: () => {
-          const { agents } = get();
-          return filterVisibleAgents(agents);
+        getVisibleAgents: (directory?: string | null) => {
+          return filterVisibleAgents(selectAgentsForDirectory(get(), directory));
         },
       }),
       {

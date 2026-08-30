@@ -919,6 +919,17 @@ const _inFlightProviders = new Map<string, Promise<void>>();
 const _inFlightAgents = new Map<string, Promise<boolean>>();
 let _initializeAppInFlight: Promise<void> | null = null;
 
+const EMPTY_PROVIDERS: ProviderWithModelList[] = [];
+export const selectProvidersForDirectory = (
+    state: Pick<ConfigStore, "providers" | "directoryScoped" | "activeDirectoryKey">,
+    directory?: string | null,
+    serverId?: string | null,
+): ProviderWithModelList[] => {
+    const key = toDirectoryKey(directory, serverId);
+    if (key === state.activeDirectoryKey) return state.providers;
+    return state.directoryScoped[key]?.providers ?? EMPTY_PROVIDERS;
+};
+
 const disconnectedConnectionState: ConfigConnectionState = {
     isConnected: false,
     hasEverConnected: false,

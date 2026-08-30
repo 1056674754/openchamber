@@ -3,13 +3,12 @@ import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { Button } from '@/components/ui/button';
 import { useConfigStore } from '@/stores/useConfigStore';
-import { useProjectsStore } from '@/stores/useProjectsStore';
 import { cn } from '@/lib/utils';
 import { SettingsProjectSelector } from '@/components/sections/shared/SettingsProjectSelector';
 import { Icon } from "@/components/icon/Icon";
-import { opencodeClient } from '@/lib/opencode/client';
 import { resolveApiUrl } from '@/lib/api/serverUrl';
 import { useSettingsServerBaseUrl } from '@/hooks/useSettingsServerBaseUrl';
+import { useSettingsProjectTarget } from '@/hooks/useSettingsProjectTarget';
 import { useSettingsProviders } from './useSettingsProviders';
 import { useI18n } from '@/lib/i18n';
 
@@ -27,14 +26,6 @@ interface ProviderSources {
   custom?: ProviderSourceInfo;
 }
 
-const getCurrentDirectory = (): string | null => {
-  const dir = opencodeClient.getDirectory();
-  if (typeof dir === 'string' && dir.trim().length > 0) {
-    return dir.trim();
-  }
-  return null;
-};
-
 interface ProvidersSidebarProps {
   onItemSelect?: () => void;
 }
@@ -44,14 +35,10 @@ export const ProvidersSidebar: React.FC<ProvidersSidebarProps> = ({ onItemSelect
   const { providers, isLoading: providersLoading } = useSettingsProviders();
   const selectedProviderId = useConfigStore((state) => state.selectedProviderId);
   const setSelectedProvider = useConfigStore((state) => state.setSelectedProvider);
-  const activeProjectId = useProjectsStore((s) => s.activeProjectId);
+  const settingsTarget = useSettingsProjectTarget();
   const [sourcesByProvider, setSourcesByProvider] = React.useState<Record<string, ProviderSources>>({});
   const { status, baseUrl } = useSettingsServerBaseUrl();
-  const directory = React.useMemo(() => {
-    // tie refresh to active project changes (directory is stored in the client)
-    void activeProjectId;
-    return getCurrentDirectory();
-  }, [activeProjectId]);
+  const directory = settingsTarget.directory;
 
   React.useEffect(() => {
     if (status === 'loading') {

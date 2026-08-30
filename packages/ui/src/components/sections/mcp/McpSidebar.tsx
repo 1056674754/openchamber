@@ -8,10 +8,11 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { useMcpConfigStore, type McpDraft, type McpServerConfig } from '@/stores/useMcpConfigStore';
+import { selectMcpServersForTarget, useMcpConfigStore, type McpDraft, type McpServerConfig } from '@/stores/useMcpConfigStore';
+import { useSettingsProjectTarget } from '@/hooks/useSettingsProjectTarget';
+import { useSettingsServerBaseUrl } from '@/hooks/useSettingsServerBaseUrl';
 import { useShallow } from 'zustand/react/shallow';
 import { useMcpStore } from '@/stores/useMcpStore';
-import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { isMobileDeviceViaCSS } from '@/lib/device';
 import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui';
@@ -63,17 +64,23 @@ export const McpSidebar: React.FC<McpSidebarProps> = ({ onItemSelect }) => {
   const { t } = useI18n();
   const bgClass = 'bg-background';
 
-  const { mcpServers, selectedMcpName, setSelectedMcp, setMcpDraft, loadMcpConfigs, deleteMcp } =
+  const { selectedMcpName, setSelectedMcp, setMcpDraft, loadMcpConfigs, deleteMcp } =
     useMcpConfigStore(useShallow((s) => ({
-      mcpServers: s.mcpServers,
       selectedMcpName: s.selectedMcpName,
       setSelectedMcp: s.setSelectedMcp,
       setMcpDraft: s.setMcpDraft,
       loadMcpConfigs: s.loadMcpConfigs,
       deleteMcp: s.deleteMcp,
     })));
+  const settingsTarget = useSettingsProjectTarget();
+  const settingsServerBase = useSettingsServerBaseUrl();
+  const mcpServers = useMcpConfigStore((state) => selectMcpServersForTarget(
+    state,
+    settingsTarget.directory,
+    settingsServerBase.baseUrl,
+  ));
 
-  const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
+  const currentDirectory = settingsTarget.directory;
   const mcpStatus = useMcpStore((state) => state.getStatusForDirectory(currentDirectory ?? null));
   const refreshStatus = useMcpStore((state) => state.refresh);
   const getErrorForDirectory = useMcpStore((state) => state.getErrorForDirectory);
@@ -93,8 +100,8 @@ export const McpSidebar: React.FC<McpSidebarProps> = ({ onItemSelect }) => {
   );
 
   React.useEffect(() => {
-    void loadMcpConfigs();
-  }, [loadMcpConfigs]);
+    void loadMcpConfigs({ directory: settingsTarget.directory, serverBaseUrl: settingsServerBase.baseUrl });
+  }, [loadMcpConfigs, settingsServerBase.baseUrl, settingsTarget.directory]);
 
   const handleRefresh = React.useCallback(() => {
     if (isRefreshingStatus) return;
@@ -148,7 +155,7 @@ export const McpSidebar: React.FC<McpSidebarProps> = ({ onItemSelect }) => {
   const handleDelete = async () => {
     if (!deleteTarget) return;
     setIsDeleting(true);
-    const result = await deleteMcp(deleteTarget.name);
+    const result = await deleteMcp(deleteTarget.name, settingsServerBase.baseUrl, settingsTarget.directory);
     if (result.ok) {
       if (result.reloadFailed) {
         toast.warning(result.message || `MCP server "${deleteTarget.name}" deleted, but OpenCode reload failed`, {

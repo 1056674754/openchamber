@@ -629,6 +629,7 @@ interface UIStore {
   settingsPage: string;
   settingsHasOpenedOnce: boolean;
   settingsProjectsSelectedId: string | null;
+  settingsConfigProjectIdByServer: Record<string, string>;
   settingsRemoteInstancesSelectedId: string | null;
   eventStreamStatus: EventStreamStatus;
   eventStreamHint: string | null;
@@ -804,6 +805,7 @@ interface UIStore {
   setSidebarSection: (section: SidebarSection) => void;
   setSettingsPage: (slug: string) => void;
   setSettingsProjectsSelectedId: (projectId: string | null) => void;
+  setSettingsConfigProjectId: (serverId: string, projectId: string | null) => void;
   setSettingsRemoteInstancesSelectedId: (instanceId: string | null) => void;
   setEventStreamStatus: (status: EventStreamStatus, hint?: string | null) => void;
   setShowReasoningTraces: (value: boolean) => void;
@@ -967,6 +969,7 @@ export const useUIStore = create<UIStore>()(
         settingsPage: 'home',
         settingsHasOpenedOnce: false,
         settingsProjectsSelectedId: null,
+        settingsConfigProjectIdByServer: {},
         settingsRemoteInstancesSelectedId: null,
         eventStreamStatus: 'idle',
         eventStreamHint: null,
@@ -1770,6 +1773,17 @@ export const useUIStore = create<UIStore>()(
 
         setSettingsProjectsSelectedId: (projectId) => {
           set({ settingsProjectsSelectedId: projectId });
+        },
+
+        setSettingsConfigProjectId: (serverId, projectId) => {
+          const normalizedServerId = serverId.trim();
+          if (!normalizedServerId) return;
+          set((state) => {
+            const next = { ...state.settingsConfigProjectIdByServer };
+            if (projectId?.trim()) next[normalizedServerId] = projectId.trim();
+            else delete next[normalizedServerId];
+            return { settingsConfigProjectIdByServer: next };
+          });
         },
 
         setSettingsRemoteInstancesSelectedId: (instanceId) => {

@@ -86,6 +86,11 @@ const getRequestDirectory = (): string | null => {
   return null;
 };
 
+const resolveDirectory = (directory?: string | null): string | null => {
+  if (directory !== undefined) return directory?.trim() || null;
+  return getRequestDirectory();
+};
+
 const MAX_HEALTH_WAIT_MS = 20000;
 const FAST_HEALTH_POLL_INTERVAL_MS = 300;
 const FAST_HEALTH_POLL_ATTEMPTS = 4;
@@ -106,17 +111,26 @@ interface CommandsStore {
 
   selectedCommandName: string | null;
   commands: Command[];
+  commandsByDirectory: Record<string, Command[]>;
   isLoading: boolean;
   commandDraft: CommandDraft | null;
 
   setSelectedCommand: (name: string | null) => void;
   setCommandDraft: (draft: CommandDraft | null) => void;
-  loadCommands: () => Promise<boolean>;
-  createCommand: (config: CommandConfig) => Promise<boolean>;
-  updateCommand: (name: string, config: Partial<CommandConfig>) => Promise<boolean>;
-  deleteCommand: (name: string) => Promise<boolean>;
-  getCommandByName: (name: string) => Command | undefined;
+  loadCommands: (directory?: string | null) => Promise<boolean>;
+  createCommand: (config: CommandConfig, directory?: string | null) => Promise<boolean>;
+  updateCommand: (name: string, config: Partial<CommandConfig>, directory?: string | null) => Promise<boolean>;
+  deleteCommand: (name: string, directory?: string | null) => Promise<boolean>;
+  getCommandByName: (name: string, directory?: string | null) => Command | undefined;
 }
+
+const EMPTY_COMMANDS: Command[] = [];
+export const selectCommandsForDirectory = (
+  state: Pick<CommandsStore, 'commands' | 'commandsByDirectory'>,
+  directory?: string | null,
+): Command[] => directory === undefined
+  ? state.commands
+  : state.commandsByDirectory[getCommandsCacheKey(resolveDirectory(directory))] ?? EMPTY_COMMANDS;
 
 declare global {
   interface Window {
@@ -131,6 +145,7 @@ export const useCommandsStore = create<CommandsStore>()(
 
         selectedCommandName: null,
         commands: [],
+        commandsByDirectory: {},
         isLoading: false,
         commandDraft: null,
 
@@ -142,14 +157,16 @@ export const useCommandsStore = create<CommandsStore>()(
           set({ commandDraft: draft });
         },
 
-        loadCommands: async () => {
-          const directory = getRequestDirectory();
+        loadCommands: async (requestedDirectory) => {
+          const directory = resolveDirectory(requestedDirectory);
           const cacheKey = getCommandsCacheKey(directory);
           const now = Date.now();
           const loadedAt = commandsLastLoadedAt.get(cacheKey) ?? 0;
-          const hasCachedCommands = get().commands.length > 0;
+          const cachedCommands = get().commandsByDirectory[cacheKey];
+          const hasCachedCommands = Boolean(cachedCommands?.length);
 
           if (hasCachedCommands && now - loadedAt < COMMANDS_LOAD_CACHE_TTL_MS) {
+            if (get().commands !== cachedCommands) set({ commands: cachedCommands });
             return true;
           }
 
@@ -160,7 +177,7 @@ export const useCommandsStore = create<CommandsStore>()(
 
           const request = (async () => {
             set({ isLoading: true });
-            const previousCommands = get().commands;
+            const previousCommands = get().commandsByDirectory[cacheKey] ?? [];
             const previousSignature = buildCommandsSignature(previousCommands);
             let lastError: unknown = null;
 
@@ -216,11 +233,13 @@ export const useCommandsStore = create<CommandsStore>()(
                 );
 
                 const nextSignature = buildCommandsSignature(commandsWithScope);
-                if (previousSignature !== nextSignature) {
-                  set({ commands: commandsWithScope, isLoading: false });
-                } else {
-                  set({ isLoading: false });
-                }
+                set((state) => ({
+                  commands: commandsWithScope,
+                  commandsByDirectory: previousSignature !== nextSignature
+                    ? { ...state.commandsByDirectory, [cacheKey]: commandsWithScope }
+                    : state.commandsByDirectory,
+                  isLoading: false,
+                }));
                 commandsLastLoadedAt.set(cacheKey, Date.now());
                 return true;
               } catch (error) {
@@ -243,7 +262,7 @@ export const useCommandsStore = create<CommandsStore>()(
           }
         },
 
-        createCommand: async (config: CommandConfig) => {
+        createCommand: async (config: CommandConfig, requestedDirectory) => {
           startConfigUpdate("Creating command configuration…");
           let requiresReload = false;
           try {
@@ -260,7 +279,7 @@ export const useCommandsStore = create<CommandsStore>()(
 
             console.log('[CommandsStore] Command config to save:', commandConfig);
 
-            const directory = getRequestDirectory();
+            const directory = resolveDirectory(requestedDirectory);
             const queryParams = directory ? `?directory=${encodeURIComponent(directory)}` : '';
 
             const response = await fetch(`/api/config/commands/${encodeURIComponent(config.name)}${queryParams}`, {
@@ -291,7 +310,7 @@ export const useCommandsStore = create<CommandsStore>()(
               return true;
             }
 
-            const loaded = await get().loadCommands();
+            const loaded = await get().loadCommands(directory);
             if (loaded) {
               emitConfigChange("commands", { source: CONFIG_EVENT_SOURCE });
             }
@@ -306,7 +325,7 @@ export const useCommandsStore = create<CommandsStore>()(
           }
         },
 
-        updateCommand: async (name: string, config: Partial<CommandConfig>) => {
+        updateCommand: async (name: string, config: Partial<CommandConfig>, requestedDirectory) => {
           startConfigUpdate("Updating command configuration…");
           let requiresReload = false;
           try {
@@ -322,7 +341,7 @@ export const useCommandsStore = create<CommandsStore>()(
 
             console.log('[CommandsStore] Command config to update:', commandConfig);
 
-            const directory = getRequestDirectory();
+            const directory = resolveDirectory(requestedDirectory);
             const queryParams = directory ? `?directory=${encodeURIComponent(directory)}` : '';
 
             const response = await fetch(`/api/config/commands/${encodeURIComponent(name)}${queryParams}`, {
@@ -353,7 +372,7 @@ export const useCommandsStore = create<CommandsStore>()(
               return true;
             }
 
-            const loaded = await get().loadCommands();
+            const loaded = await get().loadCommands(directory);
             if (loaded) {
               emitConfigChange("commands", { source: CONFIG_EVENT_SOURCE });
             }
@@ -368,12 +387,12 @@ export const useCommandsStore = create<CommandsStore>()(
           }
         },
 
-        deleteCommand: async (name: string) => {
+        deleteCommand: async (name: string, requestedDirectory) => {
           startConfigUpdate("Deleting command configuration…");
           let requiresReload = false;
           try {
             // Use active project root for project-level command support
-            const directory = getRequestDirectory();
+            const directory = resolveDirectory(requestedDirectory);
             const queryParams = directory ? `?directory=${encodeURIComponent(directory)}` : '';
 
             const response = await fetch(`/api/config/commands/${encodeURIComponent(name)}${queryParams}`, {
@@ -400,7 +419,7 @@ export const useCommandsStore = create<CommandsStore>()(
               return true;
             }
 
-            const loaded = await get().loadCommands();
+            const loaded = await get().loadCommands(directory);
             if (loaded) {
               emitConfigChange("commands", { source: CONFIG_EVENT_SOURCE });
             }
@@ -420,9 +439,8 @@ export const useCommandsStore = create<CommandsStore>()(
           }
         },
 
-        getCommandByName: (name: string) => {
-          const { commands } = get();
-          return commands.find((c) => c.name === name);
+        getCommandByName: (name: string, directory?: string | null) => {
+          return selectCommandsForDirectory(get(), directory).find((command) => command.name === name);
         },
       }),
       {
