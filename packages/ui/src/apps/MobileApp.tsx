@@ -116,10 +116,10 @@ export const MobileApp: React.FC<MobileAppProps> = ({ apis }) => {
   useMobileConnectionResume({
     enabled: Boolean(runtimeUrl),
     onOutcome: (outcome) => {
-      if (outcome === 'unreachable' || outcome === 'no-connection') {
+      if (outcome === 'unreachable' || outcome === 'no-connection' || outcome === 'needs-login') {
         disconnectRuntime();
         setRuntimeUrl('');
-        setFailureRef.current('unreachable');
+        setFailureRef.current(outcome === 'needs-login' ? 'auth-required' : 'unreachable');
       }
     },
   });
@@ -143,13 +143,14 @@ export const MobileApp: React.FC<MobileAppProps> = ({ apis }) => {
     setAutoConnectLabel(label);
     setPhaseRef.current('auto-connecting');
     setBootResolved(true);
-    void autoConnectLastInstance().then((ok) => {
+    void autoConnectLastInstance({ fast: true }).then((ok) => {
       if (ok) {
         setRuntimeUrl(getRuntimeApiBaseUrl());
         setPhaseRef.current('connected');
       } else {
         setPhaseRef.current('idle');
         setFailureRef.current('unreachable');
+        void autoConnectLastInstance({ fast: false, skipIfConnected: true }).catch(() => false);
       }
     }).catch(() => {
       setPhaseRef.current('idle');

@@ -2,6 +2,7 @@ import { describe, expect, mock, test } from 'bun:test';
 
 import {
   failureReasonMessageKey,
+  isExpectedMobileTokenMissing,
   loadMobileConnections,
   mapPairingRedeemFailure,
   migrateLegacyInlineTokenRecords,
@@ -50,6 +51,13 @@ const testRelay: MobileRelayConfig = {
 };
 
 describe('mobile connection storage', () => {
+  test('distinguishes a valid tokenless connection from a missing expected token', () => {
+    expect(isExpectedMobileTokenMissing(false, undefined)).toBe(false);
+    expect(isExpectedMobileTokenMissing(undefined, undefined)).toBe(false);
+    expect(isExpectedMobileTokenMissing(true, undefined)).toBe(true);
+    expect(isExpectedMobileTokenMissing(true, 'token')).toBe(false);
+  });
+
   test('removes inline tokens only after each secure migration succeeds', async () => {
     const result = await migrateLegacyInlineTokenRecords([
       { id: 'ok', url: 'http://ok.example', clientToken: 'token-ok' },

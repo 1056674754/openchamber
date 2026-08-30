@@ -2436,3 +2436,13 @@ QA 事故记录：HMR server 复用了安装版 managed OpenCode `54185`，退�
 - pairing public request-origin candidate 已在 fork `client-auth/pairing-routes.js` 等价且更严格：preferred/LAN/request-origin 全部去重，过滤 localhost、完整 127/8、0.0.0.0/::，故不重复移植 `9aa98df24`。
 
 验证：runtime fetch 1 file / 26 tests ✅（含 official/lookalike/direct fetch）；UI type-check/lint ✅；`git diff --check` ✅。`#137` 保持 open，下一 phase 处理 tokenless cold launch/resume 与 transient reconnect ladder。
+
+### #137 Phase 12：Tokenless persistence + transient cold-launch/resume retries（2026-08-30）
+
+- 保存记录 `hasToken=false/undefined` 表示上次成功连接的 server auth disabled，cold launch/resume 允许 tokenless probe 与 runtime switch；只有 `hasToken=true` 但 secure storage/inline token 缺失才判 credential unavailable。
+- cold launch 先 fast probe 并立即释放 splash/显示 connect UI；fast false-negative 后后台执行一次 full-budget retry。`skipIfConnected` 在 probe 前后双重检查，不能覆盖用户期间手动建立的新连接；unused relay tunnel 会关闭。
+- Resume 初次 fast probe 为 unreachable 时等待 4s 再 fast probe，仍失败后等待 10s 做最后一次 full-budget probe。`needs-login` 与 `no-connection` 立即终止，不浪费 ladder；auth rejection 显示 `auth-required` 而非 unreachable。
+- full relay probe 显式限制为共享 8s connect budget，不继承 15s relay session default；direct 同样使用完整 connect budget。
+- 当前 fork 将 resume orchestration 保持在独立 `useMobileConnectionResume` hook，没有复制上游旧 MobileApp 大块生命周期代码。
+
+验证：mobile storage/probe + resume ladder 2 files / 18 tests ✅；UI type-check/lint ✅；`git diff --check` ✅。`#137` 保持 open：connection diagnostics panel、mobile export parity 与 private-relay dev tunnel 仍需收口。

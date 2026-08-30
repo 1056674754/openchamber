@@ -10,6 +10,30 @@ type UseMobileConnectionResumeOptions = {
   onOutcome: (outcome: ReprobeOutcome) => void;
 };
 
+export const MOBILE_RESUME_RETRY_DELAYS_MS = [4_000, 10_000] as const;
+
+export const runMobileResumeProbeLadder = async ({
+  probe,
+  wait,
+  isCancelled = () => false,
+}: {
+  probe: (options: { fast: boolean }) => Promise<ReprobeOutcome>;
+  wait: (delayMs: number) => Promise<void>;
+  isCancelled?: () => boolean;
+}): Promise<ReprobeOutcome | null> => {
+  let outcome = await probe({ fast: true });
+  if (outcome !== 'unreachable') return outcome;
+
+  for (let index = 0; index < MOBILE_RESUME_RETRY_DELAYS_MS.length; index += 1) {
+    await wait(MOBILE_RESUME_RETRY_DELAYS_MS[index]);
+    if (isCancelled()) return null;
+    const isLast = index === MOBILE_RESUME_RETRY_DELAYS_MS.length - 1;
+    outcome = await probe({ fast: !isLast });
+    if (outcome !== 'unreachable') return outcome;
+  }
+  return outcome;
+};
+
 /**
  * On Capacitor foreground resume, re-select LAN vs relay for the active
  * saved device. Unreachable / no-connection outcomes must send the user back
@@ -30,9 +54,13 @@ export function useMobileConnectionResume(options: UseMobileConnectionResumeOpti
     void App.addListener('appStateChange', (state) => {
       if (!state.isActive || inFlightRef.current) return;
       inFlightRef.current = true;
-      void reprobeActiveConnection()
+      void runMobileResumeProbeLadder({
+        probe: reprobeActiveConnection,
+        wait: (delayMs) => new Promise((resolve) => window.setTimeout(resolve, delayMs)),
+        isCancelled: () => disposed,
+      })
         .then((outcome) => {
-          if (!disposed) onOutcomeRef.current(outcome);
+          if (!disposed && outcome) onOutcomeRef.current(outcome);
         })
         .catch(() => {
           if (!disposed) onOutcomeRef.current('unreachable');

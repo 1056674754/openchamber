@@ -955,7 +955,7 @@ const probeConnectionCandidates = async (
       relayCandidate.relay,
       token,
       undefined,
-      options?.fast ? MOBILE_FAST_PROBE_TIMEOUT_MS : undefined,
+      options?.fast ? MOBILE_FAST_PROBE_TIMEOUT_MS : MOBILE_CONNECT_TIMEOUT_MS,
       { keepTunnel: true },
     );
     if (outcome === 'ok') return { status: 'ok', transport: { kind: 'relay', relay: relayCandidate.relay, tunnel } };
@@ -1073,8 +1073,17 @@ const isLoopbackDirectUrl = (url: string): boolean => {
   }
 };
 
-export const autoConnectLastInstance = async (): Promise<boolean> => {
+export const isExpectedMobileTokenMissing = (
+  hasToken: boolean | undefined,
+  token: string | undefined,
+): boolean => hasToken === true && !token;
+
+export const autoConnectLastInstance = async (options?: {
+  fast?: boolean;
+  skipIfConnected?: boolean;
+}): Promise<boolean> => {
   await migrateLegacyInlineTokens();
+  if (options?.skipIfConnected && getRuntimeApiBaseUrl()) return true;
   const candidate = readConnections()[0]; // sorted most-recent-first
   if (!candidate) return false;
 
@@ -1089,20 +1098,27 @@ export const autoConnectLastInstance = async (): Promise<boolean> => {
     return false;
   }
 
-  // The runtime transport needs a bearer token; only auto-connect when one is
-  // already saved. A missing/expired token must go through the login UI.
+  // Tokenless is valid when the server had auth disabled. Fail only when the
+  // saved metadata says a token exists but its secure value cannot be read.
   let token: string | undefined;
   if (isCapacitorApp()) {
-    if (!candidate.hasToken) return false;
-    token = await readSecureToken(secureTokenKeyOf(candidate));
-    if (!token) return false;
+    if (candidate.hasToken) {
+      token = await readSecureToken(secureTokenKeyOf(candidate));
+      if (isExpectedMobileTokenMissing(candidate.hasToken, token)) return false;
+    }
   } else {
     token = candidate.clientToken;
-    if (!token) return false;
+    if (isExpectedMobileTokenMissing(candidate.hasToken, token)) return false;
   }
 
-  const result = await probeConnectionCandidates(candidate.candidates, token);
+  const result = await probeConnectionCandidates(candidate.candidates, token, {
+    fast: options?.fast !== false,
+  });
   if (result.status !== 'ok') return false;
+  if (options?.skipIfConnected && getRuntimeApiBaseUrl()) {
+    if (result.transport.kind === 'relay') result.transport.tunnel?.close();
+    return true;
+  }
   // Refuse a "success" that landed on loopback from a native device — same
   // false-positive as above when a mixed candidate set somehow resolves local.
   if (
@@ -1113,7 +1129,7 @@ export const autoConnectLastInstance = async (): Promise<boolean> => {
     return false;
   }
   await upsertMobileConnection({ id: candidate.id, label: candidate.label, candidates: candidate.candidates }); // bump lastUsedAt (keeps token)
-  switchToTransport(result.transport, token, { runtimeKey: secureTokenKeyOf(candidate) });
+  switchToTransport(result.transport, token ?? null, { runtimeKey: secureTokenKeyOf(candidate) });
   return true;
 };
 
@@ -1321,7 +1337,7 @@ export const isActiveRuntimeConnection = (connection: MobileSavedConnection): bo
   return Boolean(runtimeKey) && secureTokenKeyOf(connection) === runtimeKey;
 };
 
-export type ReprobeOutcome = 'switched' | 'unchanged' | 'unreachable' | 'no-connection';
+export type ReprobeOutcome = 'switched' | 'unchanged' | 'unreachable' | 'needs-login' | 'no-connection';
 
 // App-resume re-probe: when the app wakes (Capacitor `isActive`), the network may
 // have changed while it slept, so re-select the active device's transport and
@@ -1331,7 +1347,7 @@ export type ReprobeOutcome = 'switched' | 'unchanged' | 'unreachable' | 'no-conn
 // validates the current transport over its live channel; only if that is dead does
 // it fall through to the lower-priority candidates. 'unchanged' → keep the runtime
 // and just refresh; 'unreachable'/'no-connection' → show the connect screen.
-export const reprobeActiveConnection = async (): Promise<ReprobeOutcome> => {
+export const reprobeActiveConnection = async (options?: { fast?: boolean }): Promise<ReprobeOutcome> => {
   const active = findActiveConnection();
   if (!active) return 'no-connection';
 
@@ -1341,7 +1357,8 @@ export const reprobeActiveConnection = async (): Promise<ReprobeOutcome> => {
   } else {
     token = active.clientToken;
   }
-  if (!token) return 'unreachable';
+  if (isExpectedMobileTokenMissing(active.hasToken, token)) return 'unreachable';
+  const fast = options?.fast !== false;
 
   const currentIndex = active.candidates.findIndex(
     (candidate) => transportMatchesCurrentRuntime(candidate.kind === 'relay' ? { kind: 'relay', relay: candidate.relay } : { kind: 'direct', url: candidate.url }),
@@ -1349,17 +1366,17 @@ export const reprobeActiveConnection = async (): Promise<ReprobeOutcome> => {
 
   // 1. A higher-priority transport becoming reachable means "came home" (relay → LAN).
   const higher = currentIndex >= 0 ? active.candidates.slice(0, currentIndex) : active.candidates;
-  const better = await probeConnectionCandidates(higher, token, { fast: true });
+  const better = await probeConnectionCandidates(higher, token, { fast });
   if (better.status === 'ok') {
     await upsertMobileConnection({ id: active.id, label: active.label, candidates: active.candidates });
-    switchToTransport(better.transport, token, { runtimeKey: secureTokenKeyOf(active) });
+    switchToTransport(better.transport, token ?? null, { runtimeKey: secureTokenKeyOf(active) });
     return 'switched';
   }
-  if (better.status === 'needs-login') return 'unreachable';
+  if (better.status === 'needs-login') return 'needs-login';
 
   // 2. No better transport — is the current one still alive on its live channel?
   if (currentIndex >= 0) {
-    const stillValid = await validateActiveRuntimeSession({ url: getRuntimeApiBaseUrl(), clientToken: token }, { fast: true });
+    const stillValid = await validateActiveRuntimeSession({ url: getRuntimeApiBaseUrl(), clientToken: token }, { fast });
     if (stillValid) {
       // Still on the same transport (typically: woke up on the relay, old LAN
       // candidate dead). Ask the server for its current LAN addresses in the
@@ -1372,13 +1389,13 @@ export const reprobeActiveConnection = async (): Promise<ReprobeOutcome> => {
 
   // 3. Current transport is dead — fall through to lower-priority candidates.
   const lower = currentIndex >= 0 ? active.candidates.slice(currentIndex + 1) : [];
-  const fallback = await probeConnectionCandidates(lower, token, { fast: true });
+  const fallback = await probeConnectionCandidates(lower, token, { fast });
   if (fallback.status === 'ok') {
     await upsertMobileConnection({ id: active.id, label: active.label, candidates: active.candidates });
-    switchToTransport(fallback.transport, token, { runtimeKey: secureTokenKeyOf(active) });
+    switchToTransport(fallback.transport, token ?? null, { runtimeKey: secureTokenKeyOf(active) });
     return 'switched';
   }
-  return 'unreachable';
+  return fallback.status === 'needs-login' ? 'needs-login' : 'unreachable';
 };
 
 // ---------------------------------------------------------------------------
