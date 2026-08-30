@@ -4,6 +4,7 @@ import {
   ATTACHMENT_ACCEPT,
   getAttachmentInputModality,
   getUnsupportedAttachmentInputs,
+  isDocumentAttachmentFilename,
   prepareAttachmentFile,
 } from "./attachment-files"
 
@@ -14,6 +15,11 @@ mock.module("heic2any", () => ({
 const prepare = (file: File) => Promise.resolve(prepareAttachmentFile(file))
 
 describe("attachment file preparation", () => {
+  test("identifies Office and OpenDocument filenames case-insensitively", () => {
+    expect(isDocumentAttachmentFilename("reports/BUDGET.XLSX")).toBe(true)
+    expect(isDocumentAttachmentFilename("notes.txt")).toBe(false)
+  })
+
   test("maps normalized attachment MIME types to model input modalities", () => {
     expect(getAttachmentInputModality("text/plain;charset=utf-8")).toBe("text")
     expect(getAttachmentInputModality("image/jpeg")).toBe("image")

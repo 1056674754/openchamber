@@ -129,6 +129,7 @@ Local pick/drop/paste attachments go through `prepareAttachmentFiles` before ent
 - Shared allowlist (`ATTACHMENT_ACCEPT` / `ACCEPTED_ATTACHMENT_EXTENSIONS`) filters picker MIME/extensions.
 - HEIC/HEIF converts to JPEG; notebooks/HAR sanitize to `text/plain`; other text-like formats normalize MIME.
 - Office/ODF (`docx`/`pptx`/`xlsx`/`odt`/`odp`/`ods`) expand via `extractDocumentAttachments` (`fflate`) into extracted text plus embedded images, attached atomically.
+- Office extraction rejects unsafe/oversized archives, entries, XML, image sets, and path traversal before retaining output. Dense XLSX ranges use quoted TSV; pathologically sparse rows keep coordinate/value pairs so a single `XFD` cell cannot allocate thousands of empty columns.
 - Files outside the allowlist are rejected (not attached as opaque binaries).
 - VS Code `file://` path attachments and server mentions stay path references and skip Office zip extraction.
 - Composer compares prepared MIME modalities with the selected model’s `modalities.input` and shows a non-blocking warning when incompatible.

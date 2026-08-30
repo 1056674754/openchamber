@@ -2617,3 +2617,14 @@ v1.20.0-sscity 尚未宣布完成：当前未关闭 `#135/#140/#142-#151/#154/#1
 - local/remote project ID、serverId/path ownership 与用户自定义 label 不变。
 
 验证：Project/sidebar Bun 15/15 ✅；notification template Vitest 6/6 ✅；覆盖 dot folder、dash/underscore 和 manual label。全 workspace type/lint/build 与 diff check 见本 phase 最终验证。[#148](https://coding.s-s.city/songsong/openchamber/-/issues/148) 保持 open：Office extraction bounds、embedded restoration审计与 large-text/virtual preview follow-up 尚未完成。
+
+### #148 Phase 4：Compact bounded Office extraction + embedded-chat equivalence audit（2026-08-30）
+
+上游来源：`e84653383`，保留 fork stronger bounds：
+
+- fork 已有 20 MiB archive、100 MiB expanded、25 MiB entry、8 MiB XML、5,000 entries、50 images/20 MiB single/40 MiB aggregate、safe archive path、image signature、ODF expanded-space 与 2M extracted-text limits；不回退上游 500k text cap。
+- XLSX 稠密连续 rows 输出一次 `Range: A1:B2` + quoted TSV，省去每格重复坐标；含 tab/newline/quote 的值按 TSV escaping。跨度异常大的 sparse row 输出 `Cells: A2\tvalue | XFD2\tvalue`，不分配 16,384 个空 column。
+- `isDocumentAttachmentFilename` 成为 Office/OpenDocument filename 判定入口，大小写路径一致。
+- embedded chat 恢复审计为 fork 等价且更适合现有 split panel：仅 active/split chat iframe 挂载；iframe `onLoad` 同步 theme/settings/visibility，App 初始 visible 并启动 history/bootstrap；关闭 panel 时卸载。现有 #140 active-only focused tests 覆盖 tab/null/missing，故不复制上游早期“全部隐藏 iframe 挂载”方案。
+
+验证：attachment/document Bun 2 files / 20 tests ✅，覆盖 DOCX/PPTX/XLSX/ODF、dense/sparse/TSV、zip bounds、unsafe paths、image bounds/signatures、text citation truncation。全 workspace type/lint/build 与 diff check 见本 phase 最终验证。[#148](https://coding.s-s.city/songsong/openchamber/-/issues/148) 的 v1.20 runtime 子项已收口；issue 保持 open 仅因已追加 v1.21 large-text paste 与 virtual large-file preview follow-up。
