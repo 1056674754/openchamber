@@ -5,7 +5,10 @@ import { readAuthFile } from '../opencode/auth.js';
 import { readConfigLayers } from '../opencode/shared.js';
 import { getModelCatalog } from './catalog.js';
 import { resolveSmallModel, resolveSmallModelChain, parseModelRef, isUsableAuthEntry, getAuthEntryForProvider } from './resolve.js';
-import { callSmallModel, resolveProviderLogin } from './call.js';
+import { DEDICATED_WIRE_FORMAT_PROVIDERS, callSmallModel, resolveProviderLogin } from './call.js';
+import { getRuntimeProviderSnapshot } from './runtime-providers.js';
+
+const CLAUDE_CODE_PROVIDER = 'claude-code';
 
 const OPENCHAMBER_SETTINGS_FILE = path.join(
   process.env.OPENCHAMBER_DATA_DIR
@@ -123,6 +126,14 @@ async function tryCandidates(candidates, { auth, catalog, directory, prompt, sys
   for (let i = 0; i < candidates.length; i++) {
     const candidate = candidates[i];
 
+    if (candidate.providerID === CLAUDE_CODE_PROVIDER) {
+      lastError = Object.assign(
+        new Error('Claude Code cannot be used for background small-model actions. Choose another Small Model in Settings → Sessions.'),
+        { statusCode: 422, code: 'small-model-provider-unsupported' },
+      );
+      continue;
+    }
+
     if (restrictToPreferredProvider
       && !EXPLICIT_SOURCES.has(candidate.source)
       && candidate.providerID !== preferredProviderID) {
@@ -179,7 +190,7 @@ async function tryCandidates(candidates, { auth, catalog, directory, prompt, sys
   throw Object.assign(new Error('No small model candidate passed the provider restriction'), { statusCode: 404 });
 }
 
-export function listAuthenticatedProviders() {
+export async function listAuthenticatedProviders() {
   try {
     const auth = readAuthFile();
     const ids = new Set(
@@ -188,10 +199,29 @@ export function listAuthenticatedProviders() {
     if (isUsableAuthEntry(getAuthEntryForProvider(auth, 'github-copilot'))) {
       ids.add('github-copilot');
     }
+    try {
+      for (const providerID of await listRuntimeCallableProviders()) ids.add(providerID);
+    } catch {
+      // File-backed authentication remains available if OpenCode is unreachable.
+    }
+    ids.delete(CLAUDE_CODE_PROVIDER);
     return Array.from(ids);
   } catch {
     return [];
   }
+}
+
+async function listRuntimeCallableProviders() {
+  const current = await getRuntimeProviderSnapshot();
+  if (!current) return [];
+  const ids = [];
+  for (const id of current.connected) {
+    const provider = current.providers.get(id);
+    if (!provider?.apiKey || !provider.baseURL) continue;
+    if (DEDICATED_WIRE_FORMAT_PROVIDERS.has(id)) continue;
+    ids.push(id);
+  }
+  return ids;
 }
 
 export async function describeSmallModel({ directory, preferredProviderID, preferredModelID, outputReserveTokens, overrideModel } = {}) {
@@ -220,7 +250,7 @@ export async function describeSmallModel({ directory, preferredProviderID, prefe
 
   // Settings/config/request overrides can name a provider with no usable login.
   // Report that here so readiness can refuse before the user pays for a 401.
-  const hasLogin = Boolean(resolveProviderLogin({
+  const hasLogin = Boolean(await resolveProviderLogin({
     auth,
     workingDirectory: directory,
     providerID: resolved.providerID,

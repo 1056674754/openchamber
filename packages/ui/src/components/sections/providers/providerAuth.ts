@@ -57,3 +57,5 @@ export const getOAuthAuthMethods = (methods: AuthMethod[]): OAuthAuthMethodEntry
   methods
     .map((method, methodIndex) => ({ method, methodIndex }))
     .filter(({ method }) => normalizeAuthType(method) === 'oauth');
+
+export const requiresOpenCodeReloadAfterOAuth = (providerId: string): boolean => providerId !== 'claude-code';

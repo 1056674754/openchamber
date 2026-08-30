@@ -16,6 +16,7 @@ import {
   firstUnansweredPrompt,
   parseAuthPrompts,
   parseAuthorization,
+  shouldOpenAuthorizationUrl,
   visiblePrompts,
   type AuthPrompt,
   type OAuthAuthorization,
@@ -189,7 +190,7 @@ export const ProviderOAuthMethods: React.FC<ProviderOAuthMethodsProps> = ({
       return;
     }
 
-    if (authorization.url) {
+    if (authorization.url && shouldOpenAuthorizationUrl(providerId, authorization.url)) {
       void openExternalUrl(authorization.url);
     }
 

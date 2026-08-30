@@ -7,6 +7,7 @@ import {
   isPromptVisible,
   parseAuthPrompts,
   parseAuthorization,
+  shouldOpenAuthorizationUrl,
   visiblePrompts,
   type AuthPrompt,
   type ProviderOAuthTranslator,
@@ -142,6 +143,11 @@ describe('prompt answers', () => {
 });
 
 describe('parseAuthorization', () => {
+  test('does not open the Claude CLI authorization URL a second time', () => {
+    expect(shouldOpenAuthorizationUrl('claude-code', 'https://claude.ai/oauth')).toBe(false);
+    expect(shouldOpenAuthorizationUrl('github-copilot', 'https://github.com/login/device')).toBe(true);
+  });
+
   test('reads a device-code authorization and recovers the code from instructions', () => {
     const authorization = parseAuthorization({
       url: 'https://github.com/login/device',

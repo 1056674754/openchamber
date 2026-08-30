@@ -9,6 +9,7 @@ import {
   removeProviderAuth as removeProviderAuthWithAdapter,
 } from '../subscriptions/auth-adapter.js';
 import { buildDeferredRestartResponse } from './config-mutation-response.js';
+import { getClaudeCliAuthStatus } from './claude-cli-auth.js';
 
 export const registerOpenCodeRoutes = (app, dependencies) => {
   const {
@@ -665,7 +666,9 @@ ${desktopReturn ? `<a class="return" href="openchamber://focus/mcp-auth">Return 
         getOpenCodeAuthHeaders,
         listProviderAuths,
       });
-      sources.sources.auth.exists = authResult.states[providerId]?.configured === true;
+      sources.sources.auth.exists = providerId === 'claude-code'
+        ? getClaudeCliAuthStatus().connected
+        : authResult.states[providerId]?.configured === true;
 
       return res.json({
         providerId,

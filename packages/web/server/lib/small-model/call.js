@@ -5,6 +5,7 @@ import { readAuthFile, writeAuthFile } from '../opencode/auth.js';
 import { readConfig, readConfigLayers } from '../opencode/shared.js';
 import { getCatalogProvider } from './catalog.js';
 import { getAuthEntryForProvider } from './resolve.js';
+import { getRuntimeProvider } from './runtime-providers.js';
 
 // Direct, non-streaming text generation against the provider APIs, replicating
 // how OpenCode authenticates each of them (see the plugin auth loaders in the
@@ -560,17 +561,31 @@ const readProviderConfig = (workingDirectory, providerID) => {
  * Callers that need to refuse before spending a request (walkthrough readiness)
  * must use this rather than inventing a second rule.
  */
-export function resolveProviderLogin({ auth, workingDirectory, providerID }) {
+export const DEDICATED_WIRE_FORMAT_PROVIDERS = new Set(['github-copilot', 'copilot', 'openai', 'anthropic', 'google']);
+
+const runtimeCredential = (providerID, runtime) => (
+  !DEDICATED_WIRE_FORMAT_PROVIDERS.has(providerID) && runtime?.apiKey
+    ? { type: 'api', key: runtime.apiKey }
+    : null
+);
+
+export async function resolveProviderLogin({ auth, workingDirectory, providerID }) {
   const providerConfig = readProviderConfig(workingDirectory, providerID);
-  return providerConfig?.auth || getAuthEntryForProvider(auth, providerID) || null;
+  return providerConfig?.auth
+    || runtimeCredential(providerID, await getRuntimeProvider(providerID))
+    || getAuthEntryForProvider(auth, providerID)
+    || null;
 }
 
 export async function callSmallModel({ auth, catalog, workingDirectory, providerID, modelID, prompt, system, maxOutputTokens, responseSchema, timeoutMs, signal }) {
   const tokens = Number(maxOutputTokens) > 0 ? Number(maxOutputTokens) : DEFAULT_MAX_OUTPUT_TOKENS;
   const providerConfig = readProviderConfig(workingDirectory, providerID);
+  const runtimeProvider = await getRuntimeProvider(providerID);
   // Match OpenCode's resolveSDK precedence:
   // config provider.<id>.options.apiKey wins; the auth.json entry is only a fallback.
-  const entry = providerConfig?.auth || getAuthEntryForProvider(auth, providerID);
+  const entry = providerConfig?.auth
+    || runtimeCredential(providerID, runtimeProvider)
+    || getAuthEntryForProvider(auth, providerID);
   if (!entry) {
     // Structured so the walkthrough (and any other caller) can show a blocker
     // instead of a raw 500 banner with this developer-oriented sentence.
@@ -680,9 +695,10 @@ export async function callSmallModel({ auth, catalog, workingDirectory, provider
     ? providerConfigUrl
     : providerID === 'openai'
       ? defaultOpenaiUrl
-      : typeof provider?.api === 'string' && provider.api
-        ? provider.api
-        : null;
+      : runtimeProvider?.baseURL
+        ?? (typeof provider?.api === 'string' && provider.api
+          ? provider.api
+          : null);
   if (!baseURL) {
     throw new Error(`Provider "${providerID}" has no known API base URL`);
   }

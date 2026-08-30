@@ -60,6 +60,9 @@ other runtime API.
     content/reasoning lengths without logging prompts, response text, or
     credentials. Goal audit parsing similarly emits
     `[session-goal:diagnostic]` structural verdict metadata.
+- `runtime-providers.js` — a 30-second, single-flight snapshot of the running
+  OpenCode `/provider` endpoint. Plugin-registered API keys/base URLs exist only
+  here; transient fetch failure preserves the last-known-good snapshot.
 - `catalog.js` — models.dev catalog via the shared in-process cache
   (`../opencode/models-metadata.js`, also serving
   `/api/openchamber/models-metadata`).
@@ -73,6 +76,14 @@ other runtime API.
   Missing credentials throw with `statusCode: 401` and `code: 'no-provider-login'`
   rather than a bare `Error`, so UI callers can show a blocker instead of a raw
   500 message.
+
+Credential precedence is config provider options, then the running OpenCode
+snapshot for OpenAI-compatible plugin providers, then `auth.json`. Endpoint
+precedence is config baseURL, the OpenAI default where applicable, runtime
+provider baseURL, then models.dev. Dedicated transports (Copilot, OpenAI OAuth,
+Anthropic, Google) never consume the generic runtime key. Anonymous OpenCode
+Zen's `public` sentinel is not a credential, and Claude Code remains excluded
+from background Small Model calls.
 
 ## Registration
 

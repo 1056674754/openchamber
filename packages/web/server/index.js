@@ -71,6 +71,7 @@ import { createOpenCodeResolutionRuntime } from './lib/opencode/opencode-resolut
 import { resolveOpenCodeUpgradeCapability } from './lib/opencode/upgrade-capability.js';
 import { createBootstrapRuntime } from './lib/opencode/bootstrap-runtime.js';
 import { createSessionRuntime } from './lib/opencode/session-runtime.js';
+import { configureOpenCodeRuntimeProviders, resetOpenCodeRuntimeProviders } from './lib/small-model/runtime-providers.js';
 import { createSessionUnreadStore } from './lib/opencode/session-unread-store.js';
 import { createSessionMarkersStore } from './lib/opencode/session-markers-store.js';
 import { createOpenCodeWatcherRuntime } from './lib/opencode/watcher.js';
@@ -796,6 +797,8 @@ const buildOpenCodeUrl = (...args) => openCodeNetworkRuntime.buildOpenCodeUrl(..
 const ensureOpenCodeApiPrefix = (...args) => openCodeNetworkRuntime.ensureOpenCodeApiPrefix(...args);
 const scheduleOpenCodeApiDetection = (...args) => openCodeNetworkRuntime.scheduleOpenCodeApiDetection(...args);
 
+configureOpenCodeRuntimeProviders({ buildOpenCodeUrl, getOpenCodeAuthHeaders });
+
 const ENV_CONFIGURED_API_PREFIX = normalizeApiPrefix(
   process.env.OPENCODE_API_PREFIX || process.env.OPENCHAMBER_API_PREFIX || ''
 );
@@ -1234,6 +1237,7 @@ const openCodeLifecycleRuntime = createOpenCodeLifecycleRuntime({
   recordLifecycleEvent: openCodeLifecycleJournal.record,
   getLifecycleLogPath: () => openCodeLifecycleJournal.path,
   onOpenCodeRestarted: () => {
+    resetOpenCodeRuntimeProviders();
     try {
       messageStreamRuntime?.rebindUpstream();
     } catch (error) {

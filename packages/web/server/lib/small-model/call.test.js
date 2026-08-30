@@ -14,6 +14,7 @@ vi.mock('../opencode/shared.js', () => ({
 
 const { callSmallModel } = await import('./call.js');
 const { readConfig, readConfigLayers } = await import('../opencode/shared.js');
+const { configureOpenCodeRuntimeProviders } = await import('./runtime-providers.js');
 
 // Minimal catalog fragment used by the catalog-based base URL resolution case.
 const CATALOG = {
@@ -58,9 +59,34 @@ describe('callSmallModel — custom provider config', () => {
   });
 
   afterEach(() => {
+    configureOpenCodeRuntimeProviders(null);
     globalThis.fetch = originalFetch;
     vi.restoreAllMocks();
     delete process.env.OPENCHAMBER_TEST_PROVIDER_KEY;
+  });
+
+  it('uses a plugin credential and endpoint from the running OpenCode', async () => {
+    readConfig.mockReturnValue({});
+    configureOpenCodeRuntimeProviders({
+      buildOpenCodeUrl: (pathname) => `http://127.0.0.1:4096${pathname}`,
+      getOpenCodeAuthHeaders: () => ({ Authorization: 'Basic test' }),
+    });
+    fetchMock.mockImplementation(async (url) => {
+      if (String(url).endsWith('/provider')) {
+        return Response.json({
+          all: [{ id: 'plugin', options: { apiKey: 'runtime-key', baseURL: 'https://plugin.test/v1' }, models: {} }],
+          connected: ['plugin'],
+        });
+      }
+      return ok('runtime response');
+    });
+
+    await expect(callSmallModel({
+      auth: {}, catalog: {}, workingDirectory: '/proj', providerID: 'plugin', modelID: 'small', prompt: 'hi',
+    })).resolves.toBe('runtime response');
+
+    expect(lastCall(fetchMock).url).toBe('https://plugin.test/v1/chat/completions');
+    expect(lastCall(fetchMock).init.headers.Authorization).toBe('Bearer runtime-key');
   });
 
   describe('config-supplied credentials (no auth.json entry)', () => {

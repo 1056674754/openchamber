@@ -27,6 +27,7 @@ import { ProviderOAuthMethods, type ProviderOAuthMethod } from './ProviderOAuthM
 import {
   getOAuthAuthMethods,
   parseAuthPayload,
+  requiresOpenCodeReloadAfterOAuth,
   shouldShowApiKeyAuth,
   type AuthMethod,
   type OAuthAuthMethodEntry,
@@ -394,7 +395,9 @@ export const ProvidersPage: React.FC = () => {
   };
 
   const handleOAuthConnected = async (providerId: string) => {
-    await reloadOpenCodeConfiguration({ scopes: ["providers"], mode: "active" });
+    if (requiresOpenCodeReloadAfterOAuth(providerId)) {
+      await reloadOpenCodeConfiguration({ scopes: ["providers"], mode: "active" });
+    }
     setSelectedProvider(providerId);
   };
 

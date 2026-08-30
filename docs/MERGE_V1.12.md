@@ -2186,3 +2186,13 @@ fork 已有丰富的 surface 组织（#62 surface rail + ContextSidebarTab + Con
 - pure gate 1 Bun test / 4 assertions ✅；full workspace type-check/lint 与 diff check ✅。
 
 [#155](https://coding.s-s.city/songsong/openchamber/-/issues/155) 保持 open：下一 phase 仍需移植 `f1b602019` running OpenCode `/provider` snapshot，使 plugin-registered endpoint/key 参与 Small Model resolution，并独立审计 `109e957fe` Claude CLI provider state。
+
+### #155 Phase 2：Running OpenCode provider authority + Claude CLI state（2026-08-30）
+
+- 新增 `runtime-providers.js`：从 owning managed OpenCode 的 `/provider` 读取 plugin-registered provider key/baseURL，30s TTL、同请求 single-flight；OpenCode 短暂不可达时返回 last-known-good，未配置时返回 unknown 而非 empty。
+- credential precedence 为 config options → runtime plugin credential → auth.json；endpoint precedence 为 config baseURL → OpenAI default → runtime baseURL → models.dev。Copilot/OpenAI OAuth/Anthropic/Google dedicated wire format 不误用 runtime OAuth token。
+- Zen 匿名 `apiKey: public` 永不视作可调用 credential；`claude-code` 即使 plugin 暴露 OpenAI-compatible facade 也不进入后台 Small Model，避免标题/摘要启动 Claude CLI 并消耗订阅。
+- managed OpenCode restart 清空 runtime provider snapshot；Small Model/Walkthrough authenticated provider list 改为 async runtime-aware，Defaults picker 从 active runtime 获取并 fail closed。
+- Claude Code provider source 通过 `claude auth status --json` 识别 CLI login，调用时移除环境 credential override；CLI 已自行发起授权 URL，不重复打开，也不为成功登录强制 reload OpenCode。
+
+验证：Small Model runtime/call/index + Claude CLI 4 Vitest files / 33 tests ✅；provider OAuth/auth/custom gate 3 Bun files / 25 tests ✅；full workspace type-check/lint ✅；Web production build ✅；`git diff --check` ✅。
