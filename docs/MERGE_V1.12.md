@@ -2368,6 +2368,17 @@ fork 已有丰富的 surface 组织（#62 surface rail + ContextSidebarTab + Con
 
 验证：chatDirectories Bun 3/3 ✅（local date scope、remote home/mkdir/delete same-instance、project path refusal）；UI type-check/lint ✅。[#150](https://coding.s-s.city/songsong/openchamber/-/issues/150) 保持 open：draft materialization、server/session ownership、Chats sidebar/mobile/search、folder/action cleanup 与 matching-surface QA 待续。
 
+### #150 Phase 2：Projectless Chat draft materialization + cleanup（2026-08-30）
+
+- `NewSessionDraftState` 增加 `target=project|chat`、monotonic `draftId`、`chatServerId` 与 `preparedChatDirectory`。现有入口默认仍为 project，显式 `target:'chat'` / `CHAT_DRAFT_PROJECT_ID` 才启用，等待 Sidebar/App 入口完成后再切 upstream 默认。
+- prepare 以 `runtimeKey + serverId + draftId` single-flight；late completion 会核对 runtime、draft identity、target、server，任一变化即删除刚创建目录。重复 materialize 复用 prepared directory。
+- close、Chat→project target switch、create 失败清理 prepared directory；successful create 在 close 前解除 prepared ownership，避免把已归 Session 所有的目录误删。
+- `materializeOpenDraftSession` 与 ChatInput first-send 两条路径都跳过 project/worktree fallback，使用 Chat 显式 serverId 和 managed directory；projectId 保持 null，不持久化成 last project target。
+- Session 创建后仍继承 permission intent、model/agent selection、pending-message recovery、knowledge delivery 与 normal routeMessage；不继承 project/worktree identity。
+- server-confirmed delete 识别 managed Chat directory 并在 session state 清理后异步删除同实例目录；archive 保留目录，因为 Session 仍可恢复。
+
+验证：session UI store 21/21（含 remote prepare/cancel/materialize/no-success-delete）+ chatDirectories 3/3，需分文件运行以避免 Bun module mock 污染；full workspace type-check/lint ✅。[#150](https://coding.s-s.city/songsong/openchamber/-/issues/150) 保持 open：Chats source/cache/folder ownership、Sidebar/Mobile/Search 入口、default target 切换与 matching-surface QA 待续。
+
 ### #141 Phase 1：Isolated server exception survival（2026-08-30）
 
 上游来源：`71a538b77`。fork 的 embedded server 没有外部 supervisor，单个 Node/socket stray exception 不应让整个 OpenChamber instance 离线：
