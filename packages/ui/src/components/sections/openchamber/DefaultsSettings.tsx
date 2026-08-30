@@ -7,10 +7,13 @@ import { NumberInput } from '@/components/ui/number-input';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
+import { useSelectionStore } from '@/sync/selection-store';
+import { useSessionUIStore } from '@/sync/session-ui-store';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 import { parseModelIdentifier } from '@/lib/modelIdentifier';
+import { shouldPreserveManualModelOverride } from '@/lib/messages/userModelChoice';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 
 const getDisplayModel = (
@@ -33,6 +36,20 @@ export const DefaultsSettings: React.FC = () => {
   const setSettingsDefaultModel = useConfigStore((state) => state.setSettingsDefaultModel);
   const setSettingsDefaultVariant = useConfigStore((state) => state.setSettingsDefaultVariant);
   const setSettingsDefaultAgent = useConfigStore((state) => state.setSettingsDefaultAgent);
+  const selectionSource = useConfigStore((state) => state.selectionSource);
+  const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
+  const savedSessionModel = useSelectionStore((state) => (
+    currentSessionId ? state.sessionModelSelections.get(currentSessionId) ?? null : null
+  ));
+  const savedSessionAgent = useSelectionStore((state) => (
+    currentSessionId ? state.sessionAgentSelections.get(currentSessionId) ?? null : null
+  ));
+  const chatHasOwnModel = shouldPreserveManualModelOverride({
+    selectionSource,
+    savedSessionModel,
+    candidate: null,
+  });
+  const chatHasOwnAgent = Boolean(selectionSource === 'manual' && currentSessionId && savedSessionAgent);
   const setSettingsDefaultFileViewerPreview = useConfigStore((state) => state.setSettingsDefaultFileViewerPreview);
   const settingsDefaultFileViewerPreview = useConfigStore((state) => state.settingsDefaultFileViewerPreview);
   const configDefaultModel = useConfigStore((state) => state.settingsDefaultModel);
@@ -161,14 +178,16 @@ export const DefaultsSettings: React.FC = () => {
       setDefaultModel(newValue);
       setDefaultVariant(undefined);
       setSettingsDefaultVariant(undefined);
-      setCurrentVariant(undefined);
       setSettingsDefaultModel(newValue);
 
-      if (providerId && modelId) {
-        const provider = providers.find((p) => p.id === providerId);
-        if (provider) {
-          setProvider(providerId);
-          setModel(modelId);
+      if (!chatHasOwnModel) {
+        setCurrentVariant(undefined);
+        if (providerId && modelId) {
+          const provider = providers.find((p) => p.id === providerId);
+          if (provider) {
+            setProvider(providerId);
+            setModel(modelId);
+          }
         }
       }
 
@@ -186,7 +205,7 @@ export const DefaultsSettings: React.FC = () => {
         console.warn('Failed to save default model:', error);
       }
     },
-    [providers, setCurrentVariant, setModel, setProvider, setSettingsDefaultModel, setSettingsDefaultVariant]
+    [chatHasOwnModel, providers, setCurrentVariant, setModel, setProvider, setSettingsDefaultModel, setSettingsDefaultVariant]
   );
 
   const DEFAULT_VARIANT_VALUE = '__default__';
@@ -203,7 +222,9 @@ export const DefaultsSettings: React.FC = () => {
       const newValue = variant === DEFAULT_VARIANT_VALUE ? undefined : variant || undefined;
       setDefaultVariant(newValue);
       setSettingsDefaultVariant(newValue);
-      setCurrentVariant(newValue);
+      if (!chatHasOwnModel) {
+        setCurrentVariant(newValue);
+      }
 
       try {
         await updateDesktopSettings({ defaultVariant: newValue ?? '' });
@@ -211,7 +232,7 @@ export const DefaultsSettings: React.FC = () => {
         console.warn('Failed to save default variant:', error);
       }
     },
-    [setCurrentVariant, setSettingsDefaultVariant]
+    [chatHasOwnModel, setCurrentVariant, setSettingsDefaultVariant]
   );
 
   const handleAgentChange = React.useCallback(
@@ -220,7 +241,7 @@ export const DefaultsSettings: React.FC = () => {
       setDefaultAgent(newValue);
       setSettingsDefaultAgent(newValue);
 
-      if (agentName) {
+      if (agentName && !chatHasOwnAgent) {
         setAgent(agentName);
       }
 
@@ -230,7 +251,7 @@ export const DefaultsSettings: React.FC = () => {
         console.warn('Failed to save default agent:', error);
       }
     },
-    [setAgent, setSettingsDefaultAgent]
+    [chatHasOwnAgent, setAgent, setSettingsDefaultAgent]
   );
 
   const handleToggleFileViewerPreview = React.useCallback(() => {
@@ -296,12 +317,14 @@ export const DefaultsSettings: React.FC = () => {
     if (!supportsVariants && defaultVariant) {
       setDefaultVariant(undefined);
       setSettingsDefaultVariant(undefined);
-      setCurrentVariant(undefined);
+      if (!chatHasOwnModel) {
+        setCurrentVariant(undefined);
+      }
       updateDesktopSettings({ defaultVariant: '' }).catch(() => {
         // best effort
       });
     }
-  }, [defaultVariant, setCurrentVariant, setSettingsDefaultVariant, supportsVariants]);
+  }, [chatHasOwnModel, defaultVariant, setCurrentVariant, setSettingsDefaultVariant, supportsVariants]);
 
   if (isLoading) {
     return null;
