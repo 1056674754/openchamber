@@ -2345,6 +2345,18 @@ fork 已有丰富的 surface 组织（#62 surface rail + ContextSidebarTab + Con
 
 验证：btw chronology/instructions/lifecycle + metadata/store Bun 3 files / 12 tests ✅；UI type-check/lint ✅。[#149](https://coding.s-s.city/songsong/openchamber/-/issues/149) 保持 open：ChatInput `/btw` dispatch、panel、session-list hiding、delete/archive cleanup 与 matching-surface QA 待续。
 
+### #149 Phase 3：Side-conversation panel + lifecycle completion（2026-08-30）
+
+- ChatInput 注册 `/btw` built-in command；expanded panel 时普通 send/stop 路由到 fork，collapsed 时 composer 回 parent。Queue/steer 和 parent blocking-request dismissal 不会误作用到 fork；response-style first-message instruction 不进入 btw。
+- panel identity 只来自 parent metadata link + fork live record；支持 streaming tail、Question/Permission、Working row、ResizeObserver stick-to-bottom、Esc collapse、移动端 visualViewport 高度钳制、Destroy 和 Promote。
+- `peek` chat surface 隐藏 user copy/fork/pin actions、assistant actions 与 turn footer，保留消息本体；panel 不是第二个完整 chat 页面。
+- temporary fork 在 Sidebar、desktop/mobile switcher 和 Command Palette 中隐藏；Promote 去 marker 后恢复正常可见。Sidebar 文件已有并发 WIP，本轮用独立 temporary Git index 只提交 2 行过滤，未纳入其余 58 行工作树改动。
+- delete/archive 统一执行 linked-session cleanup：移除 fork compare-and-unlink parent；移除 parent 先 unlink 再删除 temporary fork；迟到 cleanup 不能清除 newer link。单删、指定目录删除、批量归档（经单项 archive）均覆盖。
+- `/btw` i18n key contract 覆盖 11 locales；简繁中文本地化，其余暂用 English fallback。
+- 现场修复 fork boundary：OpenCode 会为 cloned messages 生成新 ID，因此 fork 后、首发前从 fork 自己的 `session.messages(limit=1)` 读取最后继承消息 ID。继续使用 parent fork-point ID 会导致 marker 在 fork transcript 中不存在，panel 正确 fail closed 但永久 Loading。
+
+验证：btw metadata/core/policy/command/i18n 6 files / 19 tests ✅；full workspace type-check/lint/build ✅。隔离 `HOME + OPENCHAMBER_DATA_DIR + OpenCode 1.18.23-sscity` QA：创建 completed parent → `/btw` → side answer → sidebar hidden → collapse 恢复 parent composer → expand 恢复 fork → Promote 显示正式 Session → 后续 user message 含 `BTW_PROMOTION_NOTICE` synthetic part；测试 Sessions 全部删除，正式数据/runtime 未触碰。[#149](https://coding.s-s.city/songsong/openchamber/-/issues/149) 保持 open：补 375px mobile viewport matching-surface QA 后再关闭。
+
 ### #141 Phase 1：Isolated server exception survival（2026-08-30）
 
 上游来源：`71a538b77`。fork 的 embedded server 没有外部 supervisor，单个 Node/socket stray exception 不应让整个 OpenChamber instance 离线：
