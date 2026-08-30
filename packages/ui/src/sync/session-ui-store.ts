@@ -99,6 +99,8 @@ import { wrapSystemReminder } from "@/lib/systemReminder"
 import { useUIStore } from "@/stores/useUIStore"
 import { toast } from "@/components/ui"
 import { formatMessage, useI18nStore } from "@/lib/i18n/store"
+import { getRuntimeKey } from "@/lib/runtime-switch"
+import { probeWorkspaceDirectoryAvailability } from "@/lib/directoryAvailability"
 
 export type { AttachedFile }
 
@@ -501,6 +503,97 @@ const projectOwnsDirectory = (
   return resolveProjectForSessionDirectory([project], availableWorktreesByProject, directory)?.id === project.id
 }
 
+const resolveDraftFallbackProject = (draft: NewSessionDraftState): ProjectEntry | null => {
+  const projectsState = useProjectsStore.getState()
+  const selected = draft.selectedProjectId
+    ? projectsState.projects.find((project) => project.id === draft.selectedProjectId) ?? null
+    : null
+  return selected ?? projectsState.getActiveProject()
+}
+
+type CreatableDraftDirectoryResult =
+  | { status: "ok"; directory: string | null | undefined; project: ProjectEntry | null }
+  | { status: "aborted" }
+
+/**
+ * Only an implicit regular draft may recover from a deleted worktree. Explicit
+ * worktree targets and unknown/offline probes retain their captured authority.
+ */
+const resolveCreatableDraftDirectory = async (
+  draft: NewSessionDraftState,
+  requestedDirectory: string | null | undefined,
+): Promise<CreatableDraftDirectoryResult> => {
+  const directory = normalizePath(requestedDirectory ?? opencodeClient.getDirectory() ?? null)
+  const fallbackProject = resolveDraftFallbackProject(draft)
+  const fallbackDirectory = normalizePath(fallbackProject?.path ?? null)
+  const recoverable = draft.open
+    && draft.preserveDirectoryOverride !== true
+    && draft.preserveDirectoryOverride !== false
+    && !draft.pendingWorktreeRequestId
+    && !draft.bootstrapPendingDirectory
+    && normalizePath(draft.directoryOverride) === directory
+
+  if (!recoverable || !directory || !fallbackProject || !fallbackDirectory || directory === fallbackDirectory) {
+    return { status: "ok", directory, project: fallbackProject }
+  }
+
+  const fallbackServerId = normalizeProjectServerId(fallbackProject.serverId)
+  const serverBaseUrl = fallbackServerId === DEFAULT_SERVER_ID
+    ? ""
+    : serverRegistry.get(fallbackServerId)?.config.baseUrl
+  if (serverBaseUrl === undefined) {
+    return { status: "ok", directory, project: fallbackProject }
+  }
+
+  const capturedRuntimeKey = getRuntimeKey()
+  const capturedDirectory = normalizePath(draft.directoryOverride)
+  const capturedProjectId = draft.selectedProjectId ?? null
+  const availability = await probeWorkspaceDirectoryAvailability({ directory, serverBaseUrl })
+  const currentDraft = useSessionUIStore.getState().newSessionDraft
+  const currentDirectory = normalizePath(currentDraft.directoryOverride)
+  const recoveredToFallback = currentDirectory === fallbackDirectory
+    && currentDraft.selectedProjectId === fallbackProject.id
+    && capturedDirectory !== fallbackDirectory
+  const draftChanged = !currentDraft.open
+    || currentDraft.preserveDirectoryOverride !== draft.preserveDirectoryOverride
+    || currentDraft.pendingWorktreeRequestId !== draft.pendingWorktreeRequestId
+    || (
+      (currentDirectory !== capturedDirectory || (currentDraft.selectedProjectId ?? null) !== capturedProjectId)
+      && !recoveredToFallback
+    )
+
+  if (getRuntimeKey() !== capturedRuntimeKey || draftChanged) {
+    return { status: "aborted" }
+  }
+  if (recoveredToFallback || availability === "missing") {
+    return { status: "ok", directory: fallbackDirectory, project: fallbackProject }
+  }
+  return { status: "ok", directory, project: fallbackProject }
+}
+
+const recoverStaleDraftDirectory = async (openedDraft: NewSessionDraftState): Promise<void> => {
+  const resolved = await resolveCreatableDraftDirectory(openedDraft, openedDraft.directoryOverride)
+  if (resolved.status !== "ok") return
+  const recovered = normalizePath(resolved.directory)
+  const original = normalizePath(openedDraft.directoryOverride)
+  if (!recovered || recovered === original || !resolved.project) return
+
+  const currentDraft = useSessionUIStore.getState().newSessionDraft
+  if (!currentDraft.open) return
+  if (currentDraft.preserveDirectoryOverride === true || currentDraft.preserveDirectoryOverride === false) return
+  if (currentDraft.pendingWorktreeRequestId || currentDraft.bootstrapPendingDirectory) return
+  if (normalizePath(currentDraft.directoryOverride) !== original) return
+
+  const nextDraft: NewSessionDraftState = {
+    ...currentDraft,
+    selectedProjectId: resolved.project.id,
+    directoryOverride: recovered,
+  }
+  useSessionUIStore.setState({ newSessionDraft: nextDraft })
+  persistDraftTarget({ projectId: resolved.project.id, directory: recovered })
+  void activateConfigForDirectory(recovered, resolved.project.serverId)
+}
+
 const getAttachmentForSession = (sessionId: string | null | undefined): SessionWorktreeAttachment | undefined => {
   if (!sessionId) return undefined
   return useSessionWorktreeStore.getState().getAttachment(sessionId)
@@ -688,6 +781,9 @@ export async function materializeOpenDraftSession(selection: {
     directory = normalizePath(await waitForPendingDraftWorktreeRequest(pendingWorktreeRequestId))
     store.resolvePendingDraftWorktreeTarget(pendingWorktreeRequestId, directory)
   }
+  const resolvedDraftDirectory = await resolveCreatableDraftDirectory(draft, directory)
+  if (resolvedDraftDirectory.status === "aborted") return null
+  directory = normalizePath(resolvedDraftDirectory.directory)
   if (!directory) {
     throw new Error("Draft session directory is not available")
   }
@@ -702,8 +798,9 @@ export async function materializeOpenDraftSession(selection: {
   }
 
   const projectsState = useProjectsStore.getState()
-  const selectedProject = draft.selectedProjectId
-    ? projectsState.projects.find((project) => project.id === draft.selectedProjectId)
+  const effectiveProjectId = resolvedDraftDirectory.project?.id ?? draft.selectedProjectId
+  const selectedProject = effectiveProjectId
+    ? projectsState.projects.find((project) => project.id === effectiveProjectId)
     : null
   const directoryProject = resolveProjectForSessionDirectory(
     projectsState.projects,
@@ -735,7 +832,7 @@ export async function materializeOpenDraftSession(selection: {
   if (!createdDirectory) {
     throw new Error("Created session directory is not available")
   }
-  persistDraftTarget({ projectId: draft.selectedProjectId ?? null, directory: createdDirectory })
+  persistDraftTarget({ projectId: effectiveProjectId ?? null, directory: createdDirectory })
 
   const createdServerId = serverId ?? serverRegistry.getServerForSession(created.id)
   if (createdServerId) serverRegistry.indexSession(created.id, createdServerId)
@@ -982,6 +1079,8 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       currentSessionId: null,
       error: null,
     })
+
+    void recoverStaleDraftDirectory(useSessionUIStore.getState().newSessionDraft)
 
     // Switch into the draft attachment bucket, then clear it.
     // Previous session attachments stay stashed under their session key.
@@ -1378,9 +1477,10 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     if (draft?.open) {
       const draftTargetFolderId = draft.targetFolderId
       let draftDirectoryOverride = draft.bootstrapPendingDirectory ?? draft.directoryOverride ?? null
-      const draftProjectId = draft.selectedProjectId ?? null
+      let draftProjectId = draft.selectedProjectId ?? null
+      let draftServerId = targetServerId
       const isTempDraft = draft.preserveDirectoryOverride === false
-      const draftSnap = { ...draft }
+      let draftSnap = { ...draft }
       const isCapturedDraftSend = sendTarget.draft != null
       const isLiveDraftStillTarget = () => {
         if (!isCapturedDraftSend) return true
@@ -1407,6 +1507,29 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       if (draft.pendingWorktreeRequestId) {
         draftDirectoryOverride = await waitForPendingDraftWorktreeRequest(draft.pendingWorktreeRequestId)
         get().resolvePendingDraftWorktreeTarget(draft.pendingWorktreeRequestId, draftDirectoryOverride)
+      }
+
+      if (!isTempDraft) {
+        const resolvedDraftDirectory = await resolveCreatableDraftDirectory(draft, draftDirectoryOverride)
+        if (resolvedDraftDirectory.status === "aborted") {
+          throw new Error("Draft target changed while validating its directory")
+        }
+        draftDirectoryOverride = normalizePath(resolvedDraftDirectory.directory)
+        if (!draftDirectoryOverride) {
+          throw new Error("Draft session directory is not available")
+        }
+        if (resolvedDraftDirectory.project) {
+          draftProjectId = resolvedDraftDirectory.project.id
+          draftServerId ??= normalizeOptionalServerId(resolvedDraftDirectory.project.serverId)
+        }
+        const liveDraft = get().newSessionDraft
+        if (
+          liveDraft.open
+          && normalizePath(liveDraft.directoryOverride) === draftDirectoryOverride
+        ) {
+          draftProjectId = liveDraft.selectedProjectId ?? draftProjectId
+          draftSnap = { ...liveDraft }
+        }
       }
 
       // For temp sessions: use zen API to generate topic, create directory + OpenCode session
@@ -1455,7 +1578,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
             }
             get().initializeNewOpenChamberSession(serverSession.id, configState.agents ?? [])
             get().markSessionAsOpenChamberCreated(serverSession.id)
-            const createdServerId = targetServerId ?? serverRegistry.getServerForSession(serverSession.id)
+            const createdServerId = draftServerId ?? serverRegistry.getServerForSession(serverSession.id)
             if (createdServerId) {
               serverRegistry.indexSession(serverSession.id, createdServerId)
             }
@@ -1520,7 +1643,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       let createError: unknown = null
       for (let attempt = 0; attempt < 3; attempt++) {
         try {
-          created = await get().createSession(draft.title, draftDirectoryOverride, draft.parentID ?? null, targetServerId, {
+          created = await get().createSession(draft.title, draftDirectoryOverride, draft.parentID ?? null, draftServerId, {
             select: !isCapturedDraftSend,
           })
         } catch (error) {
@@ -1542,7 +1665,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       }
 
       const draftSyntheticParts = draft.syntheticParts
-      const createdServerId = targetServerId ?? serverRegistry.getServerForSession(created.id)
+      const createdServerId = draftServerId ?? serverRegistry.getServerForSession(created.id)
       if (createdServerId) {
         serverRegistry.indexSession(created.id, createdServerId)
       }

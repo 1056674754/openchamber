@@ -137,6 +137,15 @@ Local pick/drop/paste attachments go through `prepareAttachmentFiles` before ent
 
 Sending still uses the owning session’s `serverId + directory`; preparation only produces `data:` / `text/plain` parts in the UI.
 
+### Deleted-worktree draft recovery
+
+Regular new-chat drafts may inherit a persisted current directory that was a worktree and has since been deleted. `session-ui-store.ts` probes that implicit target through the selected project's owning server and falls back to the selected/active project root only when the server explicitly reports `missing`.
+
+- Probe results are `available`, `missing`, or `unknown`; offline, permission, malformed, and unavailable remote responses are never treated as deletion.
+- Explicit targets (`preserveDirectoryOverride`), temp drafts, pending worktree requests, and bootstrap-pending directories are never rewritten.
+- Runtime switches and concurrent user target changes abort the recovery. A concurrent rewrite of the same implicit draft to the same fallback is accepted.
+- The visible draft, persisted draft target, config owner, materialization path, send path, and created Session server all move together. Recovery must not update only the UI while the create call keeps the stale path.
+
 ## Remote read admission
 
 Remote summary and status reads share one scheduler per remote server. The scheduler admits at most three reads concurrently, leaving one slot in the server's four-request normal lane for user operations. Interactive status reads take precedence over queued background discovery, and identical status/list keys share one in-flight promise.

@@ -2585,3 +2585,14 @@ v1.20.0-sscity 尚未宣布完成：当前未关闭 `#135/#140/#142-#151/#154/#1
 - upload/error/drop/conflict 文案补齐全部 11 个 runtime locales。
 
 验证：upload client + invalidation + filesystem reason Bun 3 files / 7 tests ✅；UI type-check/lint ✅。全 workspace type/lint/build 与 diff check 见本 phase 最终验证。[#147](https://coding.s-s.city/songsong/openchamber/-/issues/147) 保持 open：VS Code extension 没有 `/api/fs/upload` server surface，需在其 bridge/type WIP 收口后补二进制 upload parity；installed runtime drag/drop matching-surface QA 也尚未执行。
+
+### #148 Phase 1：Deleted-worktree draft recovery（2026-08-30）
+
+上游来源：`3d15b09d0`、`f26ad5d35`、`5693e5ff9`，按 fork multi-instance authority 重写，不修改 dirty `opencode/client.ts`：
+
+- 新增 `probeWorkspaceDirectoryAvailability` 三态探测，经 draft selected project 的 `serverId` 解析 local/direct/aggregated remote base URL。只有 404、`not-found/not-directory` 或明确 ENOENT/ENOTDIR 属于 missing；offline、403、invalid response 都是 unknown。
+- 仅普通 implicit draft 可恢复；explicit preserve target、temp Session、pending/bootstrap worktree 均跳过。runtime key 或 draft project/directory 在 probe 中途变化时 abort，不把迟到结果覆盖用户选择。
+- missing 时 visible draft、selected project、persisted target 与 active config 一起改到 selected/active project root；open 时 proactive recovery，materialize 与真正 send 前再次验证，覆盖“立即发送”race。
+- create/session-folder/pending-message/routeMessage 使用恢复后的 directory 和 serverId；同一 in-flight proactive rewrite 到相同 fallback 被接受，不误判为用户改目标；失败恢复 snapshot 也保持已恢复目录。
+
+验证：directory availability + session UI Bun 2 files / 22 tests ✅，覆盖 missing/unknown/explicit target/materialize remote authority。全 workspace type/lint/build 与 diff check 见本 phase 最终验证。[#148](https://coding.s-s.city/songsong/openchamber/-/issues/148) 保持 open：context-meter server totals、Office extraction bounds、embedded restoration与 v1.21 large-text/virtual preview follow-up 仍需逐项收口。

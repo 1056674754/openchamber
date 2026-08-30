@@ -1,5 +1,15 @@
 import { beforeEach, describe, expect, mock, test } from 'bun:test';
 
+const directoryAvailabilityResults = [];
+const directoryAvailabilityCalls = [];
+
+mock.module('@/lib/directoryAvailability', () => ({
+  probeWorkspaceDirectoryAvailability: mock(async (options) => {
+    directoryAvailabilityCalls.push(options);
+    return directoryAvailabilityResults.shift() ?? 'unknown';
+  }),
+}));
+
 mock.module('@/lib/opencode/client', () => ({
   opencodeClient: {
     setDirectory: () => {},
@@ -12,6 +22,7 @@ mock.module('@/lib/opencode/client', () => ({
 const { serverRegistry } = await import('@/lib/opencode/server-registry');
 const { useConfigStore } = await import('@/stores/useConfigStore');
 const { useProjectsStore } = await import('@/stores/useProjectsStore');
+const { useDirectoryStore } = await import('@/stores/useDirectoryStore');
 const { useSelectionStore } = await import('./selection-store');
 const { useSessionWorktreeStore } = await import('./session-worktree-store');
 const { ChildStoreManager } = await import('./child-store');
@@ -255,6 +266,8 @@ describe('session-worktree-store worktree routing', () => {
 
 describe('new-session draft permission intent', () => {
   beforeEach(() => {
+    directoryAvailabilityResults.length = 0;
+    directoryAvailabilityCalls.length = 0;
     useSessionUIStore.getState().closeNewSessionDraft();
   });
 
@@ -276,6 +289,103 @@ describe('new-session draft permission intent', () => {
     useSessionUIStore.getState().setDraftPermissionAutoAccept(true);
 
     expect(useSessionUIStore.getState().newSessionDraft.permissionIntent.autoAccept).toBe(false);
+  });
+
+  test('rewrites an implicit draft only when its deleted worktree is confirmed missing', async () => {
+    useProjectsStore.setState({
+      projects: [{ id: 'project', path: '/repo', label: 'Project' }],
+      activeProjectId: 'project',
+    });
+    useDirectoryStore.setState({ currentDirectory: '/repo/deleted-worktree' });
+    directoryAvailabilityResults.push('missing');
+
+    useSessionUIStore.getState().openNewSessionDraft();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(useSessionUIStore.getState().newSessionDraft).toMatchObject({
+      open: true,
+      selectedProjectId: 'project',
+      directoryOverride: '/repo',
+    });
+    expect(directoryAvailabilityCalls).toHaveLength(1);
+  });
+
+  test('does not rewrite an implicit draft when the directory probe is unavailable', async () => {
+    useProjectsStore.setState({
+      projects: [{ id: 'project', path: '/repo', label: 'Project' }],
+      activeProjectId: 'project',
+    });
+    useDirectoryStore.setState({ currentDirectory: '/repo/offline-worktree' });
+    directoryAvailabilityResults.push('unknown');
+
+    useSessionUIStore.getState().openNewSessionDraft();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(useSessionUIStore.getState().newSessionDraft.directoryOverride).toBe('/repo/offline-worktree');
+  });
+
+  test('does not probe or rewrite an explicit worktree target', async () => {
+    useProjectsStore.setState({
+      projects: [{ id: 'project', path: '/repo', label: 'Project' }],
+      activeProjectId: 'project',
+    });
+
+    useSessionUIStore.getState().openNewSessionDraft({
+      selectedProjectId: 'project',
+      directoryOverride: '/repo/explicit-worktree',
+      preserveDirectoryOverride: true,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(useSessionUIStore.getState().newSessionDraft.directoryOverride).toBe('/repo/explicit-worktree');
+    expect(directoryAvailabilityCalls).toEqual([]);
+  });
+
+  test('materializes a confirmed stale implicit draft in the fallback project', async () => {
+    const original = useSessionUIStore.getState();
+    const originalConfig = useConfigStore.getState();
+    const createCalls = [];
+    useProjectsStore.setState({
+      projects: [{ id: 'project', path: '/repo', label: 'Project' }],
+      activeProjectId: 'project',
+    });
+    useConfigStore.setState({ currentAgentName: 'build', agents: [], activateDirectory: async () => {} });
+    directoryAvailabilityResults.push('missing');
+    useSessionUIStore.setState({
+      currentSessionId: null,
+      newSessionDraft: {
+        open: true,
+        selectedProjectId: 'project',
+        directoryOverride: '/repo/deleted-worktree',
+        permissionIntent: { autoAccept: false },
+        parentID: null,
+      },
+      createSession: async (...args) => {
+        createCalls.push(args);
+        return { id: 'ses_recovered', title: '', directory: '/repo', time: { created: 1, updated: 1 } };
+      },
+      initializeNewOpenChamberSession: () => {},
+      setCurrentSession: (sessionId) => useSessionUIStore.setState({ currentSessionId: sessionId }),
+    });
+
+    try {
+      const result = await materializeOpenDraftSession({ providerID: 'provider-a', modelID: 'model-a' });
+
+      expect(result?.directory).toBe('/repo');
+      expect(createCalls[0]?.[1]).toBe('/repo');
+    } finally {
+      useSessionUIStore.setState({
+        createSession: original.createSession,
+        initializeNewOpenChamberSession: original.initializeNewOpenChamberSession,
+        setCurrentSession: original.setCurrentSession,
+      });
+      useConfigStore.setState({
+        currentAgentName: originalConfig.currentAgentName,
+        agents: originalConfig.agents,
+        activateDirectory: originalConfig.activateDirectory,
+      });
+      serverRegistry.forgetSession('ses_recovered');
+    }
   });
 
   test('materializes a draft in its selected remote project', async () => {
