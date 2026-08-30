@@ -3,12 +3,14 @@ import { settingsDict } from './pl.settings';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 import { projectKnowledgeI18n } from './project-knowledge.i18n';
 import { btwI18n } from './btw.i18n';
+import { chatsI18n } from './chats.i18n';
 
 export const dict: Record<I18nKey, string> = {
   ...settingsDict,
   ...thirdPartyIntegrationI18n.pl,
   ...projectKnowledgeI18n.pl,
   ...btwI18n.pl,
+  ...chatsI18n.pl,
   'planView.error.loadFailed': 'Nie udało się wczytać tego planu',
 
   'common.loading': 'Ładowanie...',

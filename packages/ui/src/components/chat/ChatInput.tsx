@@ -98,6 +98,7 @@ import { wrapSystemReminder } from '@/lib/systemReminder';
 import { eventMatchesShortcut, getEffectiveShortcutCombo, normalizeCombo } from '@/lib/shortcuts';
 import { getSyncMessages, getSyncParts } from '@/sync/sync-refs';
 import { isSyntheticPart } from '@/lib/messages/synthetic';
+import { CHAT_DRAFT_PROJECT_ID } from '@/lib/chatDirectories';
 import { BtwPanel } from './btw/BtwPanel';
 import { useBtwPanelState } from './btw/useBtwPanelState';
 import {
@@ -3712,6 +3713,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const showDraftTargetSelectors = newSessionDraftOpen && !isVSCode && newSessionDraft?.preserveDirectoryOverride !== false;
 
     const selectedDraftProject = React.useMemo(() => {
+        if (newSessionDraft?.target === 'chat') return null;
         if (newSessionDraft?.preserveDirectoryOverride === false) {
             return null;
         }
@@ -3737,7 +3739,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         }
 
         return projects[0] ?? null;
-    }, [activeProjectId, availableWorktreesByProject, newSessionDraft?.bootstrapPendingDirectory, newSessionDraft?.directoryOverride, newSessionDraft?.preserveDirectoryOverride, newSessionDraft?.selectedProjectId, projects]);
+    }, [activeProjectId, availableWorktreesByProject, newSessionDraft?.bootstrapPendingDirectory, newSessionDraft?.directoryOverride, newSessionDraft?.preserveDirectoryOverride, newSessionDraft?.selectedProjectId, newSessionDraft?.target, projects]);
 
     const selectedDraftProjectPath = React.useMemo(
         () => normalizePath(selectedDraftProject?.path ?? null),
@@ -3920,6 +3922,17 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const handleDraftProjectChange = React.useCallback((projectId: string) => {
         const draft = useSessionUIStore.getState().newSessionDraft;
         if (draft?.pendingWorktreeRequestId || draft?.bootstrapPendingDirectory || draft?.preserveDirectoryOverride) {
+            return;
+        }
+        if (projectId === CHAT_DRAFT_PROJECT_ID) {
+            const activeProject = activeProjectId
+                ? projects.find((entry) => entry.id === activeProjectId) ?? null
+                : null;
+            setNewSessionDraftTarget({
+                projectId: CHAT_DRAFT_PROJECT_ID,
+                directoryOverride: null,
+                serverId: activeProject?.serverId,
+            }, { force: true });
             return;
         }
         const project = projects.find((entry) => entry.id === projectId);
@@ -4263,10 +4276,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                     showTodos
                     leftAccessory={newSessionDraftOpen || !hasPendingChanges ? null : <PendingChangesBar />}
                 />
-                {showDraftTargetSelectors && selectedDraftProject ? (
+                {showDraftTargetSelectors && (selectedDraftProject || newSessionDraft?.target === 'chat') ? (
                     <div className="mb-1.5 flex min-w-0 items-center gap-1.5 px-0.5">
                         <Select
-                            value={selectedDraftProject.id}
+                            value={newSessionDraft?.target === 'chat' ? CHAT_DRAFT_PROJECT_ID : selectedDraftProject?.id}
                             onValueChange={handleDraftProjectChange}
                         >
                             <SelectTrigger
@@ -4274,10 +4287,22 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                 className="h-7 min-w-0 w-fit max-w-[42vw] sm:max-w-[18rem] border-transparent bg-transparent px-1.5 hover:bg-transparent data-[popup-open]:bg-transparent"
                             >
                                 <SelectValue>
-                                    {renderProjectLabelWithIcon(selectedDraftProject)}
+                                    {newSessionDraft?.target === 'chat' ? (
+                                        <span className="inline-flex items-center gap-1.5">
+                                            <Icon name="chat-ai-3" className="size-3.5" />
+                                            <span>{t('chat.chatInput.chats')}</span>
+                                        </span>
+                                    ) : selectedDraftProject ? renderProjectLabelWithIcon(selectedDraftProject) : null}
                                 </SelectValue>
                             </SelectTrigger>
                             <SelectContent fitContent>
+                                <SelectItem value={CHAT_DRAFT_PROJECT_ID}>
+                                    <span className="inline-flex items-center gap-1.5">
+                                        <Icon name="chat-ai-3" className="size-3.5" />
+                                        <span>{t('chat.chatInput.chats')}</span>
+                                    </span>
+                                </SelectItem>
+                                <SelectSeparator />
                                 {projects.map((project) => (
                                     <SelectItem key={project.id} value={project.id} className="max-w-[24rem] truncate">
                                         {renderProjectLabelWithIcon(project)}
@@ -4286,7 +4311,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                             </SelectContent>
                         </Select>
 
-                        {shouldShowDraftBranchSelector ? (
+                        {selectedDraftProject && shouldShowDraftBranchSelector ? (
                             <Select
                                 value={selectedDraftDirectory ?? draftBranchItems[0]?.value ?? normalizePath(selectedDraftProject.path) ?? ''}
                                 onValueChange={handleDraftDirectoryChange}

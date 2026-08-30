@@ -3,12 +3,14 @@ import { settingsDict } from './pt-BR.settings';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 import { projectKnowledgeI18n } from './project-knowledge.i18n';
 import { btwI18n } from './btw.i18n';
+import { chatsI18n } from './chats.i18n';
 
 export const dict: Record<I18nKey, string> = {
  ...settingsDict,
  ...thirdPartyIntegrationI18n['pt-BR'],
   ...projectKnowledgeI18n['pt-BR'],
   ...btwI18n['pt-BR'],
+  ...chatsI18n['pt-BR'],
  "planView.error.loadFailed": "Não foi possível carregar este plano",
   "common.loading": "Carregando...",
   "common.unavailable": "Indisponível",

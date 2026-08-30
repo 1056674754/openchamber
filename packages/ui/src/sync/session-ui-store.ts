@@ -106,6 +106,7 @@ import {
   CHAT_DRAFT_PROJECT_ID,
   createChatDirectory,
   deleteChatDirectory,
+  getChatsRootFromDirectory,
   warmChatsRootDirectory,
 } from "@/lib/chatDirectories"
 import {
@@ -898,7 +899,8 @@ export async function materializeOpenDraftSession(selection: {
 
   store.initializeNewOpenChamberSession(created.id, configState.agents ?? [])
   if (draft.targetFolderId) {
-    useSessionFoldersStore.getState().addSessionToFolder(createdDirectory, draft.targetFolderId, created.id)
+    const folderScope = getChatsRootFromDirectory(createdDirectory) ?? createdDirectory
+    useSessionFoldersStore.getState().addSessionToFolder(folderScope, draft.targetFolderId, created.id)
   }
   if (isChatDraft) {
     const current = useSessionUIStore.getState().newSessionDraft
@@ -1848,7 +1850,8 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       if (draftTargetFolderId) {
         const scopeKey = created.directory || draftDirectoryOverride || null
         if (scopeKey) {
-          useSessionFoldersStore.getState().addSessionToFolder(scopeKey, draftTargetFolderId, created.id)
+          const folderScope = getChatsRootFromDirectory(scopeKey) ?? scopeKey
+          useSessionFoldersStore.getState().addSessionToFolder(folderScope, draftTargetFolderId, created.id)
         }
       }
 
