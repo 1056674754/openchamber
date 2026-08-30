@@ -2790,6 +2790,17 @@ v1.20.0-sscity 尚未宣布完成：当前未关闭 `#135/#140/#142-#151/#154/#1
 
 验证：shared lock + Electron replace/SSH + Web settings runtime/helpers 5 files / 59 tests ✅；shared lock 追加双进程 RMW 后 10/10 ✅；live-old-owner、8-way stale reclaim、failed temp cleanup与 orphan cleanup均有回归覆盖；full workspace type-check/lint/build ✅；build 仅有既有 dynamic-import/chunk/eval warnings；`git diff --check` ✅。v1.20 范围完成，可关闭 [#144](https://coding.s-s.city/songsong/openchamber/-/issues/144)。CLI `connect-url` atomic accessor 来自 v1.21.1（`2b0f39bdf` / `b9be2cb9e`），当前 v1.20 fork 尚无该 command，已按正确版本边界拆至 [#176](https://coding.s-s.city/songsong/openchamber/-/issues/176)。
 
+### #154 Phase 1：Default/chat ownership + Providers selection owner（2026-08-31）
+
+上游来源：`32bfb7e92`、`bb6ef6042`，先收口不依赖 Settings project selector 重构的 ownership correctness：
+
+- 修改默认 model / variant / agent 仍持久化为新 Session 默认值，但当前 Session 若有 `selectionSource=manual` 且保存了 session model/agent selection，不再同步改写聊天控制项。没有当前 Session 手动选择时保留原 convenience 行为。
+- Providers Settings 的 `selectedProviderId` 只由 Settings 用户动作或空 selection 初始化拥有；chat `setProvider`、agent model resolve、OpenCode defaults sync 和目录 defaults 不再把 Providers 页面导航到别处。
+- provider refresh 即使暂时缺少 plugin-registered provider，也保留用户选中的 Settings provider；只有 selection 为空时才取有效 configured default 或刷新列表第一项。directory-scoped snapshot 与 active leaf 同步更新，remote/local 目录不串 selection。
+- 对应提交：`e70ee97c4 fix(settings): preserve chat selections`、`8a2eaef30 fix(providers): preserve settings selection`。
+
+验证：manual model ownership 1 file / 3 tests ✅；provider selection + nonblocking config 2 files / 17 tests ✅；full workspace type-check/lint ✅；`git diff --check` ✅。[#154](https://coding.s-s.city/songsong/openchamber/-/issues/154) 保持 open：继续把 Settings project selector 改为 fork-authoritative `settings serverId + project id + directory` target，并接通 Agents/Commands/MCP/Skills/Providers 与 per-project thinking default。
+
 ### #137 Phase 10：Loss-safe relay request-body delivery（2026-08-30）
 
 上游来源：`d634cd232`、`aaf397e68`、`854a0db92`，保持 TS client / JS host wire backward compatibility：
