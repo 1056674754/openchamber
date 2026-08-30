@@ -2822,7 +2822,9 @@ v1.20.0-sscity 尚未宣布完成：当前未关闭 `#135/#140/#142-#151/#154/#1
 - Providers、Agents、Commands、MCP、Skills 的 Settings load/mutation 均接收 target directory；stores 用稳定 target key 保存列表，切回近期目录不会误用另一个项目的数组。Providers/MCP/Skills 同时按 selected settings server base URL 路由和分区。
 - Provider source/custom upsert/auth-delete、MCP CRUD、Skill CRUD/supporting files 都携带目标 directory；Settings shell page activation使用相同 target。对应提交：`0864c9552 feat(settings): scope project target`。
 
-验证：target resolver + provider ownership/nonblocking config 3 files / 21 tests ✅；full workspace type-check/lint/build ✅；build 仅有既有 dynamic-import/chunk/eval warnings；`git diff --check` ✅。[#154](https://coding.s-s.city/songsong/openchamber/-/issues/154) 保持 open：remote Agents/Commands 的 SDK list 与 reload lifecycle 仍需改为 selected settings server authority，并完成真实 local/remote Settings matching-surface QA 后才可关闭。
+后续提交 `ba4052cb8 fix(settings): route remote config stores` 将 Agents/Commands 的 SDK list 改为 `resolveSdkForDirectory(directory, explicitServerId)`，config source/CRUD URL 使用 selected Settings server base URL，cache key 纳入 server；不再借用默认 `opencodeClient`。reload 后重新加载同一 target。
+
+验证：target resolver + provider ownership/nonblocking config 3 files / 21 tests ✅；full workspace type-check/lint/build ✅；build 仅有既有 dynamic-import/chunk/eval warnings；`git diff --check` ✅。真实 Dev3 read-only matching transport QA：SSH forward 到现有 2999，不重启/不写配置；给 registry 注册临时 server 后，`/root/novel_editor` 的 remote SDK 返回 Agents 16、Commands 21，`/api/config/agents/build` 与 `/api/config/commands/init` 在同一 directory 下均为 HTTP 200，随后关闭 forward并注销 registry。[#154](https://coding.s-s.city/songsong/openchamber/-/issues/154) 保持 open：还需在真实 Settings UI 点击 local/remote instance + project selector，核验列表切换、编辑 target 和主聊天/文件/Git 均不移动后关闭。
 
 ### #137 Phase 10：Loss-safe relay request-body delivery（2026-08-30）
 
