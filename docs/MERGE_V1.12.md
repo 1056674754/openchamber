@@ -2399,6 +2399,15 @@ fork 已有丰富的 surface 组织（#62 surface rail + ContextSidebarTab + Con
 
 验证：Chats i18n 1/1、session UI store 21/21、cache 2/2；UI type-check/lint ✅。[#150](https://coding.s-s.city/songsong/openchamber/-/issues/150) 保持 open：Sidebar dedicated Chats section/default new-chat entry、search、App/Mini Chat parity 与 matching-surface QA 待续。
 
+### #150 Phase 5：Sidebar managed Chats source（2026-08-30）
+
+- 新增纯数据源 helper，从 Session 自身的 authoritative directory 识别 active managed Chats；归档 Chat 与普通 project Session 不进入 Chats section。
+- Chats root 优先由当前实例的 Session 路径反推；本机 home 仅在与该实例推导根一致时采用，避免远程 Session 被本地 `.config/openchamber/chats` 覆盖。
+- source 同时提供统一 Chats root 与各 daily/session directory scope，供后续 dedicated Sidebar section、folder lookup 与 search 共用；不同日期仍归入同一 Chats 根。
+- 对应提交：`cc4b0b9ae feat(chats): derive sidebar source`。
+
+验证：managed Chats sidebar source 2/2 ✅（project/archived exclusion、remote root authority、multi-date folder scopes）；UI type-check/lint ✅。[#150](https://coding.s-s.city/songsong/openchamber/-/issues/150) 保持 open：把 source 接入 dedicated Sidebar section/default new-chat entry、search、App/Mini Chat parity，并完成 matching-surface QA。
+
 ### #141 Phase 1：Isolated server exception survival（2026-08-30）
 
 上游来源：`71a538b77`。fork 的 embedded server 没有外部 supervisor，单个 Node/socket stray exception 不应让整个 OpenChamber instance 离线：
