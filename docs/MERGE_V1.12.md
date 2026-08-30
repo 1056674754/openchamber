@@ -2144,3 +2144,15 @@ fork 已有丰富的 surface 组织（#62 surface rail + ContextSidebarTab + Con
 - Usage 页面显示 Claude plan，model-scoped Claude limits 默认全部选中；旧 OpenCode Go credential form 从 Providers 页面移除。Command Code、Z.ai credits 和 fork 既有 60s configurable auto-refresh 保持 Phase 1 语义。
 
 验证：Claude Web Vitest 4 files / 15 tests ✅；OpenCode Go Web 2 files / 5 Bun tests ✅；VS Code quota parity 12 Bun tests ✅；UI quota focused tests 10 条 ✅；full workspace type-check/lint ✅；Web production build 与 VS Code production build ✅；`git diff --check` ✅。
+
+### #152：Curated GitHub Skills Catalog（2026-08-30）
+
+上游来源：`1c205c879`、`6a46649b4`。按 fork 能力做加法移植，没有照搬上游删除 ClawHub：
+
+- curated source 扩展为 Anthropic、OpenAI、Cursor `pstack/skills`、Matt Pocock；Web 与 VS Code fallback 清单一致，ClawHub 继续作为第五个分页 registry source。
+- catalog source 卡片显示已加载 skill 数、GitHub stars 和最近 push 日期；搜索在所有已加载 GitHub/custom source 中聚合，ClawHub 仍只按用户选中后的分页数据参与，不做无界全量抓取。
+- GitHub skill 行提供仓库路径链接；自定义 source 的删除、refresh、install/conflict flow 和 ClawHub metadata/install selection 均保留。
+- GitHub metadata 使用 1.5s best-effort fetch、3h 成功缓存、5min 失败缓存；scan 以 `repo + subpath + gitIdentity` 为 key 去重，最多两个并发，并用 owner-only atomic disk cache 跨重启保留。
+- UI 所有 catalog 请求改经 `runtimeFetch`，source-load single-flight key 包含 resolved runtime identity 与当前 project directory；同路径的两个 remote instance 不会共享请求，且未回退到全局 active server/directory。
+
+验证：skills catalog Web modules 3 files / 7 Vitest tests ✅；真实 Express catalog route 1 test ✅（metadata + ClawHub coexistence）；UI store 4 Bun tests ✅（curated+ClawHub coexistence、active-runtime transport、同 source 去重、跨 runtime 隔离）；full type-check/lint 与 Web/VS Code production build ✅。隔离 server 在现有 managed OpenCode/SQLite startup scan 中阻塞，连 `/health` 都未就绪，因此没有虚报浏览器 QA；该隔离 PID 已单独终止，未触碰用户运行中的 OpenChamber。

@@ -30,11 +30,11 @@ export const registerSkillRoutes = (app, dependencies) => {
     SKILL_DIR,
     getCuratedSkillsSources,
     getCacheKey,
-    getCachedScan,
-    setCachedScan,
+    scanWithCache,
     parseSkillRepoSource,
     scanSkillsRepository,
     installSkillsFromRepository,
+    fetchGitHubRepoMetas,
     scanClawdHubPage,
     installSkillsFromClawdHub,
     isClawdHubSource,
@@ -284,7 +284,22 @@ export const registerSkillRoutes = (app, dependencies) => {
       }));
 
       const sources = [...curatedSources, ...customSources];
-      const sourcesForUi = sources.map(({ gitIdentityId, ...rest }) => rest);
+      const githubRepos = sources
+        .map((source) => parseSkillRepoSource(source.source))
+        .filter((parsed) => parsed.ok && parsed.host === 'github.com')
+        .map((parsed) => parsed.normalizedRepo);
+      const repoMetas = await fetchGitHubRepoMetas(githubRepos);
+      const sourcesForUi = sources.map(({ gitIdentityId, ...rest }) => {
+        const parsed = parseSkillRepoSource(rest.source);
+        const meta = parsed.ok && parsed.host === 'github.com'
+          ? repoMetas[parsed.normalizedRepo] ?? {}
+          : {};
+        return {
+          ...rest,
+          stars: typeof meta.stars === 'number' ? meta.stars : null,
+          repoUpdatedAt: typeof meta.repoUpdatedAt === 'string' ? meta.repoUpdatedAt : null,
+        };
+      });
 
       res.json({ ok: true, sources: sourcesForUi, itemsBySource: {}, pageInfoBySource: {} });
     } catch (error) {
@@ -363,21 +378,19 @@ export const registerSkillRoutes = (app, dependencies) => {
         identityId: src.gitIdentityId || '',
       });
 
-      let scanResult = !refresh ? getCachedScan(cacheKey) : null;
-      if (!scanResult) {
-        const scanned = await scanSkillsRepository({
+      const scanResult = await scanWithCache(
+        cacheKey,
+        () => scanSkillsRepository({
           source: src.source,
           subpath: src.defaultSubpath,
           defaultSubpath: src.defaultSubpath,
           identity: resolveGitIdentity(src.gitIdentityId),
-        });
+        }),
+        { refresh },
+      );
 
-        if (!scanned.ok) {
-          return res.status(500).json({ ok: false, error: scanned.error });
-        }
-
-        scanResult = scanned;
-        setCachedScan(cacheKey, scanResult);
+      if (!scanResult.ok) {
+        return res.status(500).json({ ok: false, error: scanResult.error });
       }
 
       const items = (scanResult.items || []).map((item) => {

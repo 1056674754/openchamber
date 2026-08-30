@@ -85,6 +85,26 @@ export const CURATED_SOURCES: CuratedSource[] = [
     defaultSubpath: 'skills',
   },
   {
+    id: 'openai',
+    label: 'OpenAI',
+    description: "OpenAI's curated skills",
+    source: 'openai/skills',
+    defaultSubpath: 'skills/.curated',
+  },
+  {
+    id: 'cursor',
+    label: 'Cursor',
+    description: "Cursor's plugin skills",
+    source: 'cursor/plugins',
+    defaultSubpath: 'pstack/skills',
+  },
+  {
+    id: 'mattpocock',
+    label: 'Matt Pocock',
+    description: 'Matt Pocock skills collection',
+    source: 'mattpocock/skills',
+  },
+  {
     id: 'clawdhub',
     label: 'ClawHub',
     description: 'Community skill registry with vector search',

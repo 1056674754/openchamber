@@ -12,19 +12,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import { Icon } from "@/components/icon/Icon";
 
 import { useSkillsCatalogStore } from '@/stores/useSkillsCatalogStore';
 import { useShallow } from 'zustand/react/shallow';
 import { cn } from '@/lib/utils';
-import type { SkillsCatalogItem } from '@/lib/api/types';
+import type { SkillsCatalogItem, SkillsCatalogSource } from '@/lib/api/types';
 
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { updateDesktopSettings } from '@/lib/persistence';
@@ -41,6 +34,62 @@ interface SkillsCatalogPageProps {
   onModeChange: (mode: SkillsMode) => void;
   showModeTabs?: boolean;
 }
+
+type SkillsCatalogSourceWithMeta = SkillsCatalogSource & {
+  stars?: number | null;
+  repoUpdatedAt?: string | null;
+};
+
+const getRepoUrl = (source: string): string | null => (
+  /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(source.trim())
+    ? `https://github.com/${source.trim()}`
+    : null
+);
+
+const getSkillUrl = (item: SkillsCatalogItem): string | null => {
+  const repoUrl = getRepoUrl(item.repoSource);
+  if (!repoUrl) return null;
+  const skillPath = [item.repoSubpath, item.skillDir].filter(Boolean).join('/');
+  return skillPath ? `${repoUrl}/tree/HEAD/${skillPath}` : repoUrl;
+};
+
+const SourceCard: React.FC<{
+  source: SkillsCatalogSourceWithMeta;
+  active: boolean;
+  loading: boolean;
+  count: number | null;
+  onSelect: () => void;
+}> = ({ source, active, loading, count, onSelect }) => (
+  <button
+    type="button"
+    aria-pressed={active}
+    onClick={onSelect}
+    className={cn(
+      'min-h-24 w-full rounded-lg border bg-[var(--surface-elevated)] p-3.5 text-left transition-colors',
+      'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+      active ? 'border-primary' : 'border-[var(--interactive-border)] hover:border-[var(--interactive-border-hover)]',
+    )}
+  >
+    <span className="flex items-center gap-2">
+      <Icon name={source.sourceType === 'clawdhub' ? 'sparkling' : 'github'} className="h-4 w-4 shrink-0 text-muted-foreground" />
+      <span className="typography-ui-label min-w-0 flex-1 truncate font-medium text-foreground">{source.label}</span>
+      {loading ? (
+        <Icon name="refresh" className="h-3 w-3 shrink-0 animate-spin text-muted-foreground" />
+      ) : count !== null ? (
+        <span className="typography-micro shrink-0 text-muted-foreground">{count}</span>
+      ) : null}
+    </span>
+    <span className="typography-micro mt-1 block truncate font-mono text-muted-foreground">{source.source}</span>
+    <span className="typography-micro mt-2 flex items-center gap-3 text-muted-foreground">
+      {typeof source.stars === 'number' && (
+        <span className="flex items-center gap-1"><Icon name="star" className="h-3 w-3" />{source.stars.toLocaleString()}</span>
+      )}
+      {source.repoUpdatedAt && (
+        <span className="flex items-center gap-1"><Icon name="time" className="h-3 w-3" />{new Date(source.repoUpdatedAt).toLocaleDateString()}</span>
+      )}
+    </span>
+  </button>
+);
 
 const loadSettings = async (): Promise<DesktopSettings | null> => {
   try {
@@ -117,26 +166,41 @@ export const SkillsCatalogPage: React.FC<SkillsCatalogPageProps> = ({ mode, onMo
     }
   }, [selectedSourceId, loadedSourceIds, loadSource]);
 
-  const items = React.useMemo(() => {
-    if (!selectedSourceId) return [];
-    return itemsBySource[selectedSourceId] || [];
-  }, [itemsBySource, selectedSourceId]);
+  React.useEffect(() => {
+    let cancelled = false;
+    const loadGitSources = async () => {
+      for (const source of sources) {
+        if (cancelled) return;
+        if (source.sourceType === 'clawdhub' || loadedSourceIds[source.id]) continue;
+        await loadSource(source.id);
+      }
+    };
+    void loadGitSources();
+    return () => { cancelled = true; };
+  }, [sources, loadedSourceIds, loadSource]);
 
   const filtered = React.useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return items;
-    return items.filter((item) => {
+    const candidates = q
+      ? sources.flatMap((source) => itemsBySource[source.id] ?? [])
+      : selectedSourceId ? itemsBySource[selectedSourceId] ?? [] : [];
+    if (!q) return candidates;
+    return candidates.filter((item) => {
       const name = item.skillName.toLowerCase();
       const desc = (item.description || '').toLowerCase();
       const fm = (item.frontmatterName || '').toLowerCase();
       return name.includes(q) || desc.includes(q) || fm.includes(q);
     });
-  }, [items, search]);
+  }, [itemsBySource, search, selectedSourceId, sources]);
 
   const selectedSource = React.useMemo(() => sources.find((s) => s.id === selectedSourceId) || null, [sources, selectedSourceId]);
 
   const isCustomSource = Boolean(selectedSourceId && selectedSourceId.startsWith('custom:'));
   const isClawdHubSource = selectedSource?.source === 'clawdhub:registry' || selectedSource?.sourceType === 'clawdhub';
+  const isSelectedSourceLoading = !search.trim()
+    && selectedSourceId !== null
+    && !loadedSourceIds[selectedSourceId]
+    && (isLoadingSource || isLoadingCatalog);
   const hasMoreClawdHub = Boolean(
     selectedSourceId && (clawdhubHasMoreBySource[selectedSourceId] ?? true)
   );
@@ -192,81 +256,43 @@ export const SkillsCatalogPage: React.FC<SkillsCatalogPageProps> = ({ mode, onMo
             <h3 className="typography-ui-header font-medium text-foreground">{t('settings.skills.catalog.page.section.sourceRepository')}</h3>
           </div>
 
-          <section className="px-2 pb-2 pt-0 space-y-0">
-            <div className="flex flex-wrap items-center gap-2 py-1.5">
-              <Select
-                value={selectedSourceId || ''}
-                onValueChange={(v) => setSelectedSource(v)}
-              >
-                <SelectTrigger className="w-fit">
-                  <SelectValue placeholder={t('settings.skills.catalog.page.field.selectSourcePlaceholder')}>
-                    {selectedSource?.label}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent align="start">
-                  {sources.map((src) => (
-                    <SelectItem key={src.id} value={src.id}>
-                      {src.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-
-              <Button
-                variant="outline"
-                size="xs"
-                className="!font-normal h-6 w-6 px-0"
-                onClick={() => {
-                  if (selectedSourceId) {
-                    void loadSource(selectedSourceId, { refresh: true });
-                  } else {
-                    void loadCatalog({ refresh: true });
-                  }
-                }}
-                disabled={isLoadingCatalog || isLoadingSource}
-                title={t('settings.skills.catalog.page.actions.refreshTitle')}
-              >
-                <Icon name="refresh" className={cn("h-3.5 w-3.5", (isLoadingCatalog || isLoadingSource) && "animate-spin")} />
-              </Button>
-
-              {isCustomSource && (
-                <Button
-                  variant="ghost"
-                  size="xs"
-                  className="!font-normal h-6 w-6 px-0 text-[var(--status-error)] hover:text-[var(--status-error)]"
-                  onClick={() => setIsRemoveCatalogDialogOpen(true)}
-                  disabled={isRemovingCatalog}
-                  title={t('settings.skills.catalog.page.actions.removeCatalogTitle')}
-                >
-                  <Icon name="delete-bin" className="h-3.5 w-3.5" />
-                </Button>
-              )}
-
-              <Button
-                size="xs"
-                className="!font-normal gap-1"
+          <section className="space-y-3 px-2 pb-2 pt-0">
+            <div className="grid grid-cols-1 gap-3 py-1.5 sm:grid-cols-2">
+              {sources.map((source) => (
+                <SourceCard
+                  key={source.id}
+                  source={source as SkillsCatalogSourceWithMeta}
+                  active={source.id === selectedSourceId}
+                  loading={isLoadingSource && !loadedSourceIds[source.id]}
+                  count={loadedSourceIds[source.id] ? (itemsBySource[source.id] ?? []).length : null}
+                  onSelect={() => setSelectedSource(source.id)}
+                />
+              ))}
+              <button
+                type="button"
                 onClick={() => setAddCatalogOpen(true)}
+                className="min-h-24 rounded-lg border border-dashed border-[var(--interactive-border)] p-3.5 text-left text-muted-foreground transition-colors hover:border-[var(--interactive-border-hover)] hover:bg-[var(--surface-muted)]"
               >
-                <Icon name="add" className="h-3.5 w-3.5" /> {t('settings.skills.catalog.page.actions.addCatalog')}
-              </Button>
+                <span className="flex items-center gap-2"><Icon name="add" className="h-4 w-4" /><span className="typography-ui-label">{t('settings.skills.catalog.page.actions.addCatalog')}</span></span>
+              </button>
             </div>
 
-            <div className="py-1.5">
-              <div className="relative">
+            <div className="flex items-start gap-2 py-1.5">
+              <div className="relative min-w-0 flex-1">
                 <Icon name="search" className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
                 <Input
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                   placeholder={t('settings.skills.catalog.shared.field.searchSkillsPlaceholder')}
-                  className="h-7 pl-8 w-full sm:w-64"
+                  className="h-7 w-full pl-8"
                 />
               </div>
-              <span className="typography-meta text-muted-foreground mt-1 block">
-                {isLoadingCatalog
-                  ? t('settings.skills.catalog.page.loading.catalog')
-                  : t('settings.skills.catalog.page.foundCount', { count: filtered.length })}
-              </span>
+              <Button variant="ghost" size="xs" className="h-7 w-7 px-0" onClick={() => selectedSourceId ? void loadSource(selectedSourceId, { refresh: true }) : void loadCatalog({ refresh: true })} title={t('settings.skills.catalog.page.actions.refreshTitle')}>
+                <Icon name="refresh" className={cn('h-3.5 w-3.5', (isLoadingCatalog || isLoadingSource) && 'animate-spin')} />
+              </Button>
+              {isCustomSource && <Button variant="ghost" size="xs" className="h-7 w-7 px-0 text-[var(--status-error)]" onClick={() => setIsRemoveCatalogDialogOpen(true)} title={t('settings.skills.catalog.page.actions.removeCatalogTitle')}><Icon name="delete-bin" className="h-3.5 w-3.5" /></Button>}
             </div>
+            <span className="typography-meta block text-muted-foreground">{isLoadingCatalog ? t('settings.skills.catalog.page.loading.catalog') : t('settings.skills.catalog.page.foundCount', { count: filtered.length })}</span>
           </section>
         </div>
 
@@ -281,12 +307,12 @@ export const SkillsCatalogPage: React.FC<SkillsCatalogPageProps> = ({ mode, onMo
         {/* Skills List */}
         <div className="mb-8">
           <section className="px-2 pb-2 pt-0">
-            {filtered.length === 0 && !isLoadingSource ? (
+            {filtered.length === 0 && !isSelectedSourceLoading ? (
               <div className="py-8 text-center text-muted-foreground">
                 <p className="typography-body">{t('settings.skills.catalog.page.empty.noSkillsTitle')}</p>
                 <p className="typography-meta mt-1 opacity-75">{t('settings.skills.catalog.page.empty.noSkillsDescription')}</p>
               </div>
-            ) : isLoadingSource ? (
+            ) : isSelectedSourceLoading ? (
               <div className="py-8 text-center text-muted-foreground">
                 <Icon name="refresh" className="mx-auto mb-3 h-5 w-5 animate-spin opacity-50" />
                 <p className="typography-meta">{t('settings.skills.catalog.page.loading.skills')}</p>
@@ -296,6 +322,7 @@ export const SkillsCatalogPage: React.FC<SkillsCatalogPageProps> = ({ mode, onMo
                 {filtered.map((item) => {
                   const installed = item.installed?.isInstalled;
                   const installedScope = item.installed?.scope;
+                  const skillUrl = getSkillUrl(item);
 
                   return (
                     <div key={`${item.sourceId}:${item.skillDir}`} className="py-2">
@@ -319,6 +346,12 @@ export const SkillsCatalogPage: React.FC<SkillsCatalogPageProps> = ({ mode, onMo
                             <div className="typography-meta text-muted-foreground mt-0.5 line-clamp-2">{item.description}</div>
                           ) : (
                             <div className="typography-meta text-muted-foreground/50 mt-0.5 italic">{t('settings.skills.catalog.shared.noDescription')}</div>
+                          )}
+
+                          {skillUrl && (
+                            <a href={skillUrl} target="_blank" rel="noreferrer" className="typography-micro mt-1 inline-flex max-w-full items-center gap-1 truncate font-mono text-muted-foreground hover:underline">
+                              <Icon name="github" className="h-3 w-3 shrink-0" />{item.repoSource}/{item.skillDir}
+                            </a>
                           )}
 
                           {item.clawdhub && (
@@ -367,7 +400,7 @@ export const SkillsCatalogPage: React.FC<SkillsCatalogPageProps> = ({ mode, onMo
             )}
           </section>
 
-          {isClawdHubSource && hasMoreClawdHub && !isLoadingSource && filtered.length > 0 && (
+          {isClawdHubSource && hasMoreClawdHub && !isSelectedSourceLoading && filtered.length > 0 && (
             <div className="flex justify-center mt-2 px-2">
               <Button
                 variant="outline"

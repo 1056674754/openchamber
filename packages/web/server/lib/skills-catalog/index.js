@@ -13,8 +13,11 @@ export {
   getCacheKey,
   getCachedScan,
   setCachedScan,
+  scanWithCache,
   clearCache,
 } from './cache.js';
+
+export { fetchGitHubRepoMetas } from './github-meta.js';
 
 export {
   parseSkillRepoSource,

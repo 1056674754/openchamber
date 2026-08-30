@@ -17,6 +17,7 @@ import { invalidateSkillsLoadCache, refreshSkillsAfterOpenCodeRestart, useSkills
 import { opencodeClient } from '@/lib/opencode/client';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { startConfigUpdate, finishConfigUpdate, updateConfigUpdateMessage } from '@/lib/configUpdate';
+import { buildRuntimeFetchUrl, runtimeFetch } from '@/lib/runtime-fetch';
 
 const FALLBACK_SOURCES: SkillsCatalogSource[] = [
   {
@@ -25,6 +26,29 @@ const FALLBACK_SOURCES: SkillsCatalogSource[] = [
     description: "Anthropic's public skills repository",
     source: 'anthropics/skills',
     defaultSubpath: 'skills',
+    sourceType: 'github',
+  },
+  {
+    id: 'openai',
+    label: 'OpenAI',
+    description: "OpenAI's curated skills",
+    source: 'openai/skills',
+    defaultSubpath: 'skills/.curated',
+    sourceType: 'github',
+  },
+  {
+    id: 'cursor',
+    label: 'Cursor',
+    description: "Cursor's plugin skills",
+    source: 'cursor/plugins',
+    defaultSubpath: 'pstack/skills',
+    sourceType: 'github',
+  },
+  {
+    id: 'mattpocock',
+    label: 'Matt Pocock',
+    description: 'Matt Pocock skills collection',
+    source: 'mattpocock/skills',
     sourceType: 'github',
   },
   {
@@ -40,9 +64,12 @@ const SKILLS_CATALOG_LOAD_CACHE_TTL_MS = 5000;
 const DEFAULT_SKILLS_CATALOG_CACHE_KEY = '__default__';
 const skillsCatalogLastLoadedAt = new Map<string, number>();
 const skillsCatalogLoadInFlight = new Map<string, Promise<boolean>>();
+const sourceLoadInFlight = new Map<string, Promise<boolean>>();
+let activeSourceLoads = 0;
 
 const getSkillsCatalogCacheKey = (directory: string | null): string => {
-  return directory?.trim() || DEFAULT_SKILLS_CATALOG_CACHE_KEY;
+  const runtimeIdentity = buildRuntimeFetchUrl('/api');
+  return `${runtimeIdentity}::${directory?.trim() || DEFAULT_SKILLS_CATALOG_CACHE_KEY}`;
 };
 
 const getRequestDirectory = (): string | null => {
@@ -152,7 +179,7 @@ export const useSkillsCatalogStore = create<SkillsCatalogState>()(
             const timeoutId = window.setTimeout(() => controller.abort(), 3000);
 
             try {
-              const response = await fetch(`/api/config/skills/catalog${refresh}`, {
+              const response = await runtimeFetch(`/api/config/skills/catalog${refresh}`, {
                 method: 'GET',
                 headers: { Accept: 'application/json' },
                 signal: controller.signal,
@@ -220,16 +247,23 @@ export const useSkillsCatalogStore = create<SkillsCatalogState>()(
           return false;
         }
 
-        set({ isLoadingSource: true, lastCatalogError: null });
+        const currentDirectory = getRequestDirectory();
+        const requestKey = `${getSkillsCatalogCacheKey(currentDirectory)}::${sourceId}`;
+        if (!options?.refresh) {
+          const existing = sourceLoadInFlight.get(requestKey);
+          if (existing) return existing;
+        }
 
+        activeSourceLoads += 1;
+        set({ isLoadingSource: true, lastCatalogError: null });
+        const request = (async () => {
         try {
-          const currentDirectory = getRequestDirectory();
           const refresh = options?.refresh ? '&refresh=true' : '';
           const queryParams = currentDirectory
             ? `?directory=${encodeURIComponent(currentDirectory)}&sourceId=${encodeURIComponent(sourceId)}${refresh}`
             : `?sourceId=${encodeURIComponent(sourceId)}${refresh}`;
 
-          const response = await fetch(`/api/config/skills/catalog/source${queryParams}`, {
+          const response = await runtimeFetch(`/api/config/skills/catalog/source${queryParams}`, {
             method: 'GET',
             headers: { Accept: 'application/json' },
           });
@@ -237,7 +271,7 @@ export const useSkillsCatalogStore = create<SkillsCatalogState>()(
           const payload = (await response.json().catch(() => null)) as SkillsCatalogSourceResponse | null;
           const hasItems = Array.isArray((payload as SkillsCatalogSourceResponse | null)?.items);
           if (!response.ok || (!payload?.ok && !hasItems)) {
-            const fallback = await fetch(`/api/config/skills/catalog${queryParams}`, {
+            const fallback = await runtimeFetch(`/api/config/skills/catalog${queryParams}`, {
               method: 'GET',
               headers: { Accept: 'application/json' },
             });
@@ -279,7 +313,16 @@ export const useSkillsCatalogStore = create<SkillsCatalogState>()(
           });
           return false;
         } finally {
-          set({ isLoadingSource: false });
+          activeSourceLoads -= 1;
+          if (activeSourceLoads === 0) set({ isLoadingSource: false });
+        }
+        })();
+
+        sourceLoadInFlight.set(requestKey, request);
+        try {
+          return await request;
+        } finally {
+          if (sourceLoadInFlight.get(requestKey) === request) sourceLoadInFlight.delete(requestKey);
         }
       },
 
@@ -304,7 +347,7 @@ export const useSkillsCatalogStore = create<SkillsCatalogState>()(
           }
           const queryParams = `?${parts.join('&')}`;
 
-          const response = await fetch(`/api/config/skills/catalog/source${queryParams}`, {
+          const response = await runtimeFetch(`/api/config/skills/catalog/source${queryParams}`, {
             method: 'GET',
             headers: { Accept: 'application/json' },
           });
@@ -359,7 +402,7 @@ export const useSkillsCatalogStore = create<SkillsCatalogState>()(
           const currentDirectory = getRequestDirectory();
           const queryParams = currentDirectory ? `?directory=${encodeURIComponent(currentDirectory)}` : '';
 
-          const response = await fetch(`/api/config/skills/scan${queryParams}`, {
+          const response = await runtimeFetch(`/api/config/skills/scan${queryParams}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
             body: JSON.stringify(request),
@@ -395,7 +438,7 @@ export const useSkillsCatalogStore = create<SkillsCatalogState>()(
           const currentDirectory = directoryOverride ?? getRequestDirectory();
           const queryParams = currentDirectory ? `?directory=${encodeURIComponent(currentDirectory)}` : '';
 
-          const response = await fetch(`/api/config/skills/install${queryParams}`, {
+          const response = await runtimeFetch(`/api/config/skills/install${queryParams}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
             body: JSON.stringify(request),

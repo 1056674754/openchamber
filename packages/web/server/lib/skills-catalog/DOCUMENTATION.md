@@ -1,12 +1,14 @@
 # Skills Catalog Module Documentation
 
 ## Purpose
-This module provides skill discovery, scanning, and installation capabilities for OpenCode. It supports multiple skill sources including git repositories and the ClawHub registry, with caching and conflict resolution for skill installation.
+This module provides skill discovery, scanning, and installation capabilities for OpenCode. It supports curated and custom Git repositories plus the fork-preserved ClawHub registry, with caching and conflict resolution for skill installation.
 
 ## Entrypoints and structure
 - `packages/web/server/lib/skills-catalog/`: Skills catalog module directory containing all skill-related functionality.
-  - `cache.js`: In-memory cache for scan results with TTL support.
-  - `curated-sources.js`: Predefined skill sources (Anthropic, ClawHub).
+  - `cache.js`: Deduplicated, concurrency-limited scan cache with memory and disk persistence.
+  - `curated-sources.js`: Predefined skill sources (Anthropic, OpenAI, Cursor, Matt Pocock, ClawHub).
+  - `disk-cache.js`: Owner-only atomic persistence for best-effort catalog caches.
+  - `github-meta.js`: Best-effort GitHub stars and last-push metadata with failure backoff.
   - `git.js`: Git operations helpers for cloning and auth error detection.
   - `install.js`: Skills installation from git repositories.
   - `scan.js`: Skills scanning from git repositories.
@@ -24,11 +26,12 @@ The following functions are exported and used by the web server:
 ### Cache (`cache.js`)
 - `getCacheKey({ normalizedRepo, subpath, identityId })`: Generate cache key for scan results.
 - `getCachedScan(key)`: Retrieve cached scan result if not expired.
-- `setCachedScan(key, value, ttlMs)`: Store scan result with TTL (default 30 minutes).
+- `setCachedScan(key, value, ttlMs)`: Store scan result with TTL (default 3 hours).
 - `clearCache()`: Clear all cached scan results.
+- `scanWithCache(key, loader, { refresh })`: Deduplicate scans, cap concurrent git scans at two, and persist successful results.
 
 ### Curated Sources (`curated-sources.js`)
-- `getCuratedSkillsSources()`: Return list of curated skill sources (Anthropic, ClawHub).
+- `getCuratedSkillsSources()`: Return curated GitHub collections plus the fork-preserved ClawHub source.
 - `CURATED_SKILLS_SOURCES`: Constant array of predefined sources.
 
 ### Source Parsing (`source.js`)
