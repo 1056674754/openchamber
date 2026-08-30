@@ -12,3 +12,5 @@ Discovers listening loopback/wildcard TCP sockets instead of guessing from packa
 - The dev tunnel uses the same scanner result as its connection allowlist; discovery is therefore a security boundary as well as UI data.
 
 `GET /api/dev-servers` returns `{ servers: [{ port, pid, command, url }] }`.
+
+The Browser empty state polls this route every two seconds while no page is open. A successful empty response and an unavailable scan remain distinct in the UI. Client routing is explicit: default runtime uses the shared runtime transport; an aggregated instance uses that server registry entry's base URL and auth.

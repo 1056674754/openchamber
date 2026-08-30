@@ -996,6 +996,8 @@ export const dict = {
   'contextPanel.browser.addressAria': 'Browser address',
   'contextPanel.browser.empty': 'Web browser',
   'contextPanel.browser.emptyHint': 'Enter an address above to start browsing the web',
+  'contextPanel.browser.devServers.title': 'Running development servers',
+  'contextPanel.browser.devServers.unavailable': 'Development server discovery is unavailable.',
   'contextPanel.tab.closeTabAria': 'Close {label} tab',
   'contextPanel.actions.collapsePanel': 'Collapse panel',
   'contextPanel.actions.expandPanel': 'Expand panel',

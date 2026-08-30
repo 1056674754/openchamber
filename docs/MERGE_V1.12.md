@@ -2377,3 +2377,12 @@ QA 事故记录：HMR server 复用了安装版 managed OpenCode `54185`，退�
 - viewport state 使用 ref + narrow React state；agent resize 不会重建 controller 或中断已 claim request。ContextPanel ResizeObserver 只在 panel 尺寸真正变化时更新。
 
 验证：viewport + page actions + control client Bun 3 files / 13 tests ✅；UI type-check/lint ✅；`git diff --check` ✅。`#135` 仍保持 open：dev-server suggestions/history/crash recovery、Electron dev-tunnel IPC 与 aggregated remote event bridge 未完成。
+
+### #135 Phase 6：Authoritative dev-server suggestions in Browser empty state（2026-08-30）
+
+- Browser 未打开页面时每 2 秒读取 `/api/dev-servers`，显示真实正在监听的候选 URL、port 与 process command；打开页面后立即停止 poll/abort request，不在后台持续扫描。
+- payload validator 拒绝非法 port/URL，按 port 去重并稳定排序。成功空列表显示正常空状态；HTTP/shape/network failure 显示独立 unavailable 文案，避免把扫描失败谎报成“没有 server”。
+- client route 显式接收 Browser 所属 `serverId`：default 使用 `runtimeFetch`（保留 direct/relay transport），aggregated remote 使用该 registry connection 的 base URL 与 auth token；不读取全局 active directory 推断 ownership。
+- 空状态 server 列表保持 panel 本身不滚动，仅候选列表滚动；按钮使用现有 theme tokens。新增标题/失败文案已补齐 de/en/es/ja/ko/pl/pt-BR/uk/zh-CN/zh-TW 全量 locale contract。
+
+验证：dev-server client 3/3 ✅（validation、empty-vs-failure、default transport）；UI type-check/lint ✅。`#135` 仍 open：history/crash recovery、Electron dev-tunnel IPC、aggregated remote synthetic-event bridge 未完成。

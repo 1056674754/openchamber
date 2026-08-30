@@ -987,6 +987,8 @@ export const dict: Record<I18nKey, string> = {
   'contextPanel.browser.addressAria': '브라우저 주소',
   'contextPanel.browser.empty': '웹 브라우저',
   'contextPanel.browser.emptyHint': '위에 주소를 입력하여 탐색을 시작하세요',
+  'contextPanel.browser.devServers.title': '실행 중인 개발 서버',
+  'contextPanel.browser.devServers.unavailable': '개발 서버를 검색할 수 없습니다.',
   'contextPanel.preview.actions.reload': '미리보기 새로고침',
   'contextPanel.preview.actions.openExternal': '브라우저에서 열기',
   'contextPanel.preview.actions.retry': '다시 시도',

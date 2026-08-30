@@ -989,6 +989,8 @@ export const dict: Record<I18nKey, string> = {
   'contextPanel.browser.addressAria': 'Browser-Adresse',
   'contextPanel.browser.empty': 'Webbrowser',
   'contextPanel.browser.emptyHint': 'Geben Sie oben eine Adresse ein, um mit dem Surfen im Web zu beginnen',
+  'contextPanel.browser.devServers.title': 'Laufende Entwicklungsserver',
+  'contextPanel.browser.devServers.unavailable': 'Die Entwicklungsserver konnten nicht ermittelt werden.',
   'contextPanel.tab.closeTabAria': '{label}-Registerkarte schließen',
   'contextPanel.actions.collapsePanel': 'Panel einklappen',
   'contextPanel.actions.expandPanel': 'Panel ausklappen',

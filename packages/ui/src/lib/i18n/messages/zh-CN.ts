@@ -987,6 +987,8 @@ export const dict: Record<I18nKey, string> = {
   'contextPanel.browser.addressAria': '浏览器地址',
   'contextPanel.browser.empty': '网页浏览器',
   'contextPanel.browser.emptyHint': '在上方输入网址开始浏览',
+  'contextPanel.browser.devServers.title': '正在运行的开发服务器',
+  'contextPanel.browser.devServers.unavailable': '暂时无法获取开发服务器列表。',
   'contextPanel.tab.closeTabAria': '关闭 {label} 标签',
   'contextPanel.actions.collapsePanel': '折叠面板',
   'contextPanel.actions.expandPanel': '展开面板',

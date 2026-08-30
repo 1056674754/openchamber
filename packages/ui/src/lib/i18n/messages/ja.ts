@@ -987,6 +987,8 @@ export const dict: Record<I18nKey, string> = {
   'contextPanel.browser.addressAria': 'ブラウザアドレス',
   'contextPanel.browser.empty': 'ウェブブラウザ',
   'contextPanel.browser.emptyHint': '上のアドレスバーにURLを入力してウェブを閲覧',
+  'contextPanel.browser.devServers.title': '実行中の開発サーバー',
+  'contextPanel.browser.devServers.unavailable': '開発サーバーを検出できません。',
   'contextPanel.tab.closeTabAria': '{label}タブを閉じる',
   'contextPanel.actions.collapsePanel': 'パネルを折りたたむ',
   'contextPanel.actions.expandPanel': 'パネルを展開',

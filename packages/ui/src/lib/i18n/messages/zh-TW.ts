@@ -923,6 +923,8 @@ export const dict: Record<I18nKey, string> = {
   'contextPanel.browser.addressAria': '瀏覽器網址',
   'contextPanel.browser.empty': '網頁瀏覽器',
   'contextPanel.browser.emptyHint': '在上方輸入網址開始瀏覽',
+  'contextPanel.browser.devServers.title': '執行中的開發伺服器',
+  'contextPanel.browser.devServers.unavailable': '暫時無法取得開發伺服器清單。',
   'contextPanel.tab.closeTabAria': '關閉 {label} 分頁',
   'contextPanel.actions.collapsePanel': '摺疊面板',
   'contextPanel.actions.expandPanel': '展開面板',

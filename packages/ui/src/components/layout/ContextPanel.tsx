@@ -47,6 +47,7 @@ import {
   viewportSummary,
   type BrowserViewport,
 } from '@/lib/browser/viewport';
+import { fetchDevServers, type DevServerDiscovery } from '@/lib/browser/devServers';
 import { UNRESOLVED_SERVER_ID } from '@/sync/session-authority';
 import { buildEmbeddedSessionChatURL, getActiveEmbeddedSessionChatTab } from './contextPanelEmbeddedChat';
 import { ProjectContextPanel } from './RightSidebarTabs';
@@ -1421,6 +1422,7 @@ const DesktopBrowserPane: React.FC<DesktopBrowserPaneProps> = ({
   const [viewport, setViewport] = React.useState<BrowserViewport>(FILL_VIEWPORT);
   const viewportRef = React.useRef<BrowserViewport>(FILL_VIEWPORT);
   const [viewportArea, setViewportArea] = React.useState({ width: 0, height: 0 });
+  const [devServers, setDevServers] = React.useState<DevServerDiscovery>({ kind: 'loading' });
   const loadingTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const showLoading = isLoading;
   const viewportLayout = viewportArea.width > 0 && viewportArea.height > 0
@@ -1446,6 +1448,27 @@ const DesktopBrowserPane: React.FC<DesktopBrowserPaneProps> = ({
     observer.observe(host);
     return () => observer.disconnect();
   }, []);
+
+  React.useEffect(() => {
+    if (startUrl || currentUrl) return;
+    let active = true;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const controller = new AbortController();
+    const poll = () => {
+      void fetchDevServers({ serverId, signal: controller.signal }).then((result) => {
+        if (!active) return;
+        setDevServers(result);
+        timer = setTimeout(poll, 2_000);
+      });
+    };
+    setDevServers({ kind: 'loading' });
+    poll();
+    return () => {
+      active = false;
+      if (timer) clearTimeout(timer);
+      controller.abort();
+    };
+  }, [currentUrl, serverId, startUrl]);
 
   const persistUrl = React.useCallback((url: string) => {
     if (!url || url === 'about:blank' || !directory || !tabID) return;
@@ -1822,9 +1845,45 @@ const DesktopBrowserPane: React.FC<DesktopBrowserPaneProps> = ({
           </div>
         ) : null}
         {(!currentUrl || currentUrl === 'about:blank') && !isLoading ? (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-6 bg-background p-6 text-center">
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-5 overflow-hidden bg-background p-6 text-center">
             <OpenChamberLogo width={140} height={140} className="opacity-20" />
-            <span className="typography-ui-header text-muted-foreground">{t('contextPanel.browser.empty')}</span>
+            <div className="flex shrink-0 flex-col gap-1">
+              <span className="typography-ui-header text-foreground">{t('contextPanel.browser.empty')}</span>
+              <span className="typography-micro text-muted-foreground">{t('contextPanel.browser.emptyHint')}</span>
+            </div>
+            {devServers.kind === 'ready' && devServers.servers.length > 0 ? (
+              <div className="flex min-h-0 w-full max-w-sm flex-col gap-1 text-left">
+                <span className="shrink-0 typography-micro text-muted-foreground">
+                  {t('contextPanel.browser.devServers.title')}
+                </span>
+                <div className="flex min-h-0 flex-col gap-1 overflow-y-auto pr-0.5">
+                  {devServers.servers.map((server) => (
+                    <Button
+                      key={server.port}
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="w-full shrink-0 justify-start gap-2"
+                      title={server.url}
+                      onClick={() => loadUrl(server.url)}
+                    >
+                      <Icon name="global" className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                      <span className="truncate">localhost:{server.port}</span>
+                      {server.command ? (
+                        <span className="ml-auto max-w-[45%] truncate typography-micro text-muted-foreground">
+                          {server.command}
+                        </span>
+                      ) : null}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+            {devServers.kind === 'unavailable' ? (
+              <span className="typography-micro text-muted-foreground">
+                {t('contextPanel.browser.devServers.unavailable')}
+              </span>
+            ) : null}
           </div>
         ) : null}
         {showLoading ? (

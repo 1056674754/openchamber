@@ -1313,6 +1313,8 @@ export const dict: Record<I18nKey, string> = {
   'contextPanel.browser.addressAria': 'Adres przeglądarki',
   'contextPanel.browser.empty': 'Przeglądarka internetowa',
   'contextPanel.browser.emptyHint': 'Wprowadź adres powyżej, aby rozpocząć przeglądanie',
+  'contextPanel.browser.devServers.title': 'Uruchomione serwery deweloperskie',
+  'contextPanel.browser.devServers.unavailable': 'Wykrywanie serwerów deweloperskich jest niedostępne.',
   'contextPanel.preview.actions.openExternal': 'Otwórz w przeglądarce',
   'contextPanel.preview.actions.reload': 'Odśwież podgląd',
   'contextPanel.preview.actions.retry': 'Ponów',

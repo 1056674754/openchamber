@@ -987,6 +987,8 @@ export const dict: Record<I18nKey, string> = {
   "contextPanel.browser.addressAria": "Адреса браузера",
   "contextPanel.browser.empty": "Веб-браузер",
   "contextPanel.browser.emptyHint": "Введіть адресу вище, щоб почати перегляд",
+  'contextPanel.browser.devServers.title': 'Запущені сервери розробки',
+  'contextPanel.browser.devServers.unavailable': 'Не вдалося виявити сервери розробки.',
   "contextPanel.tab.closeTabAria": "Закрити вкладку {label}",
   "contextPanel.actions.collapsePanel": "Згорнути панель",
   "contextPanel.actions.expandPanel": "Розгорнути панель",
