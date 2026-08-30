@@ -2324,6 +2324,17 @@ fork 已有丰富的 surface 组织（#62 surface rail + ContextSidebarTab + Con
 
 验证：Agent Memory API/store/i18n Bun 3 files / 7 tests ✅；full workspace type-check/lint/build ✅；隔离 `HOME + OPENCHAMBER_DATA_DIR + OPENCHAMBER_MEMORY_ENABLE=1` matching-surface QA 验证 `Memory 2`、global/project read、project edit persisted、global unchanged、delete first click only enters confirm。正式 runtime 未替换。[#143](https://coding.s-s.city/songsong/openchamber/-/issues/143) 保持 open：`agentMemoryToolEnabled` Settings/persistence wiring 与 managed OpenCode reload QA 尚未完成。
 
+### #149 Phase 1：`/btw` metadata authority + transient panel state（2026-08-30）
+
+上游来源：`0d51d52c0`、`c5877c28a`，先落不触碰 dirty ChatInput/Sidebar 的基础合同：
+
+- parent metadata 的 `btwSessionID` 是 panel identity；fork metadata 的 `kind=btw + originalSessionID + btwBoundaryMessageID` 是隐藏/ownership/boundary authority。UI store 只保存 collapsed/creating/destroying，不保存 fork identity。
+- fork marker 替换继承来的整个 `openchamber` namespace，防止 review/btw link 从 parent 泄漏；unlink 仅删除仍指向 expected fork 的 link，迟到 cleanup 不会清掉后来创建的新 fork。
+- promote 删除 live marker 并保留 `btwPromoted=true`。旧 side-session boundary parts 已进入 transcript，后续正式 Session 必须据此持续发送 revocation notice，不能假设 metadata 清除会删除历史 instruction。
+- `btwBoundaryMessageID` 只作为 identity marker。当前 fork 的 message chronology 已支持 ID rollover，后续 tail filter 必须在 authoritative chronological array 中定位 marker 后 slice；明确拒绝上游原始 `message.id > boundaryId` 字典序比较。
+
+验证：Session btw metadata + UI store Bun 2 files / 7 tests ✅；UI type-check/lint ✅。[#149](https://coding.s-s.city/songsong/openchamber/-/issues/149) 保持 open：下一 phase 接 completed-turn fork/send lifecycle、tail filter、panel/command/sidebar hiding 与 matching-surface QA。
+
 ### #141 Phase 1：Isolated server exception survival（2026-08-30）
 
 上游来源：`71a538b77`。fork 的 embedded server 没有外部 supervisor，单个 Node/socket stray exception 不应让整个 OpenChamber instance 离线：
