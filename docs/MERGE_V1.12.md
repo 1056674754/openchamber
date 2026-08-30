@@ -2333,6 +2333,49 @@ QA 事故记录：HMR server 复用了安装版 managed OpenCode `54185`，退�
 
 验证：gallery assets + SSR slots + VS Code binary bridge 3 files / 9 tests ✅；UI/VS Code type-check/lint ✅；`git diff --check` ✅。结合 Phase 1 的 18 条 client/server safety tests 与完整 builds，[#136](https://coding.s-s.city/songsong/openchamber/-/issues/136) 已实现 Desktop/Web/VS Code parity，可关闭；未再启动共享 HMR，避免重复 managed OpenCode 生命周期事故。
 
+---
+
+## v1.21.0 → v1.21.1 差距审计启动（2026-08-30）
+
+### 上游边界
+
+| 版本 | tag / release commit | diff 规模 |
+|---|---|---:|
+| `v1.21.0` | `ad7fd3563` | 相对 v1.20.0：376 files, +23650/-12014 |
+| `v1.21.1` | `6801186bb` | 相对 v1.21.0：457 files, +26427/-2354 |
+
+本轮继续只做 capability-level 手工移植，不 merge/cherry-pick release。纯 docs、CI、maintainer triage/reviewer agent 指令和上游内部 cleanup 不建 runtime backlog。
+
+### 新建 GitLab executable backlog
+
+| WI | Runtime scope | 风险 |
+|---|---|---|
+| [#160](https://coding.s-s.city/songsong/openchamber/-/issues/160) | Session tabs + centralized shortcut registry | 🔴 多窗口/Session ownership |
+| [#161](https://coding.s-s.city/songsong/openchamber/-/issues/161) | Anchored chat scrolling + streaming follow performance | 🔴 fork scroll/fold/prompt navigator |
+| [#162](https://coding.s-s.city/songsong/openchamber/-/issues/162) | Bounded settings mutation + auto-follow preference | 🟡 当前 settings WIP 需先收口 |
+| [#163](https://coding.s-s.city/songsong/openchamber/-/issues/163) | Move Session tree to existing worktree + dirty safety | 🔴 rollback/partial failure |
+| [#164](https://coding.s-s.city/songsong/openchamber/-/issues/164) | Live auth expiry recovery + relay-default boot | 🔴 auth/transport lifecycle |
+| [#166](https://coding.s-s.city/songsong/openchamber/-/issues/166) | Multi-project directory selection + remote tracking branch checkout | 🟡 Desktop/VS Code/Git parity |
+| [#168](https://coding.s-s.city/songsong/openchamber/-/issues/168) | Provider headers/credential signals + OpenCode upgrade UX | 🟡 provider/runtime authority |
+| [#171](https://coding.s-s.city/songsong/openchamber/-/issues/171) | Turkish runtime localization | 🟢 locale completeness |
+
+### 追加到既有 work items（不重复建卡）
+
+- `#135`：Browser capture reveal/wait (`7ffb7d6f5`, `e2dab1417`)；`browser.open` background-only (`4bed3589d`)。
+- `#143`：saved plan owning-project route (`fa5446593`)；agent memory project-context owner (`1309403af`)。
+- `#148`：large-text paste attachment 与 virtualized large-file previews。
+- `#149`：`/btw` completed-turn boundary、inherited reference、boundary cleanup、promoted authority。
+- `#150`：managed Chats mobile sessions sheet + sidebar search。
+- `#159`：renderer-window recovery、update-install error visibility、stale shell UI prevention。
+
+### 已审计为现有 fork 等价 / 不重复
+
+- Prompt Navigator quote-only user messages：fork navigator source 已从 chronology-normalized user records生成；实现时随 #161 focused regression 复核。
+- Context tab close menu和 rail visibility属于现有 #62 surface rail后续，不单独建新架构卡；分别归 #161/#160 的 navigation QA。
+- v1.21 内 `/btw`、Project knowledge、projectless Chats 的修复必须等待对应 v1.20 parent feature，不能先移植无调用方 patch。
+
+v1.20.0-sscity 尚未宣布完成：当前未关闭 `#135/#140/#142-#151/#154/#156/#159`，其中多项与并行 settings/sidebar/SSH/input WIP 重叠。版本号保持 `1.18.2-sscity`，直到 v1.20 closeout gate 真正满足。
+
 ### #135 Phase 1：Browser agent control plane（2026-08-30）
 
 上游来源：`cc9249d93`。先移植不依赖 dirty Electron main 的 server/control/tool 边界：
