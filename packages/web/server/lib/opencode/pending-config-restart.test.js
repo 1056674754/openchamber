@@ -70,6 +70,25 @@ describe('pending OpenCode config restart runtime', () => {
     expect(first).toEqual(second);
   });
 
+  test('forces a process restart for managed Agent Memory tool changes', async () => {
+    const applyRestart = mock(async () => ({ reloadDelayMs: 25 }));
+    const runtime = createPendingConfigRestartRuntime({
+      applyRestart,
+      broadcastEvent: mock(() => undefined),
+      getSessionActivitySnapshot: () => ({}),
+    });
+    runtime.markPendingConfigRestart('Agent Memory tool setting changed', {
+      scope: 'agent-memory',
+    });
+
+    await runtime.applyPendingConfigRestart();
+
+    expect(applyRestart).toHaveBeenCalledWith(
+      'pending configuration changes',
+      { forceRestart: true },
+    );
+  });
+
   test('failed apply preserves pending changes', async () => {
     const runtime = createPendingConfigRestartRuntime({
       applyRestart: mock(async () => {

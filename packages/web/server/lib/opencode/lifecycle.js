@@ -1091,7 +1091,8 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       // on file changes, so running sessions pick up fresh config at their next turn
       // boundary without a process restart. Set OPENCHAMBER_CONFIG_HOT_RELOAD=false
       // to fall back to the legacy full-restart behavior.
-      const useHotReload = process.env.OPENCHAMBER_CONFIG_HOT_RELOAD !== 'false';
+      const useHotReload = options.forceRestart !== true
+        && process.env.OPENCHAMBER_CONFIG_HOT_RELOAD !== 'false';
       if (useHotReload) {
         console.log(`[openchamber] Config hot-reload: skipping process restart for ${reason}`);
       } else {

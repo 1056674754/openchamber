@@ -122,6 +122,36 @@ describe('opencode routes', () => {
     });
   });
 
+  test('marks a restart only when the Agent Memory tool preference changes', async () => {
+    const markPendingConfigRestart = mock(() => ({ count: 1 }));
+    const persistSettings = mock(async (settings) => ({ ...settings }));
+
+    await request(createApp({
+      readSettingsFromDiskMigrated: async () => ({ agentMemoryToolEnabled: false }),
+      persistSettings,
+      markPendingConfigRestart,
+    }))
+      .put('/api/config/settings')
+      .send({ agentMemoryToolEnabled: true })
+      .expect(200);
+
+    expect(markPendingConfigRestart).toHaveBeenCalledWith(
+      'Agent Memory tool setting changed',
+      { scope: 'agent-memory' },
+    );
+
+    markPendingConfigRestart.mockClear();
+    await request(createApp({
+      readSettingsFromDiskMigrated: async () => ({ agentMemoryToolEnabled: true }),
+      persistSettings,
+      markPendingConfigRestart,
+    }))
+      .put('/api/config/settings')
+      .send({ agentMemoryToolEnabled: true })
+      .expect(200);
+    expect(markPendingConfigRestart).not.toHaveBeenCalled();
+  });
+
   test('keeps provider source response shape while reading auth from the adapter', async () => {
     const response = await request(createApp({
       getProviderSources: () => ({

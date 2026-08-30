@@ -5,11 +5,12 @@ import { Input } from '@/components/ui/input';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Icon } from "@/components/icon/Icon";
 import { canUseDesktopNativeApi, isDesktopShell, requestFileAccess } from '@/lib/desktop';
-import { updateDesktopSettings } from '@/lib/persistence';
-import { reloadOpenCodeConfiguration } from '@/stores/useAgentsStore';
+import { flushPendingSettingsUpdates, updateDesktopSettings } from '@/lib/persistence';
+import { refreshAfterOpenCodeRestart, reloadOpenCodeConfiguration } from '@/stores/useAgentsStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useI18n } from '@/lib/i18n';
 import { toast } from '@/components/ui';
+import { applyPendingRestart } from '@/lib/opencode/pendingRestart';
 
 export const OpenCodeCliSettings: React.FC = () => {
   const { t } = useI18n();
@@ -105,17 +106,31 @@ export const OpenCodeCliSettings: React.FC = () => {
 
   const handleAgentMemoryToolChange = React.useCallback(async (enabled: boolean) => {
     const previous = agentMemoryToolEnabled;
+    let persisted = false;
     setAgentMemoryToolEnabled(enabled);
     setIsAgentMemorySaving(true);
     try {
       await updateDesktopSettings({ agentMemoryToolEnabled: enabled });
-      await reloadOpenCodeConfiguration({
-        message: t('settings.openchamber.opencodeCli.actions.restartingOpenCode'),
-        mode: 'projects',
-        scopes: ['all'],
-      });
+      const flushed = await flushPendingSettingsUpdates();
+      if (!flushed) throw new Error('Failed to save the Agent Memory tool setting');
+      persisted = true;
+      const result = await applyPendingRestart('');
+      if (result.appliedCount < 1) {
+        throw new Error('OpenCode restart was not scheduled');
+      }
+      if (result.requiresManualRestart) {
+        throw new Error('OpenCode must be restarted outside OpenChamber');
+      }
+      if (result.requiresReload) {
+        await refreshAfterOpenCodeRestart({
+          message: t('settings.openchamber.opencodeCli.actions.restartingOpenCode'),
+          delayMs: result.reloadDelayMs,
+          mode: 'projects',
+          scopes: ['all'],
+        });
+      }
     } catch (error) {
-      setAgentMemoryToolEnabled(previous);
+      if (!persisted) setAgentMemoryToolEnabled(previous);
       toast.error(t('settings.openchamber.opencodeCli.field.agentMemoryToolSaveFailed'), {
         description: error instanceof Error ? error.message : String(error),
       });

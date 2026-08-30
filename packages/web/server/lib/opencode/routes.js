@@ -472,7 +472,19 @@ ${desktopReturn ? `<a class="return" href="openchamber://focus/mcp-auth">Return 
   app.put('/api/config/settings', async (req, res) => {
     console.log('[API:PUT /api/config/settings] Received request');
     try {
+      const previous = typeof req.body?.agentMemoryToolEnabled === 'boolean'
+        ? await readSettingsFromDiskMigrated()
+        : null;
       const updated = await persistSettings(req.body ?? {});
+      if (
+        previous
+        && typeof req.body.agentMemoryToolEnabled === 'boolean'
+        && previous.agentMemoryToolEnabled !== updated.agentMemoryToolEnabled
+      ) {
+        markPendingConfigRestart('Agent Memory tool setting changed', {
+          scope: 'agent-memory',
+        });
+      }
       console.log(`[API:PUT /api/config/settings] Success, returning ${updated.projects?.length || 0} projects`);
       res.json(updated);
     } catch (error) {

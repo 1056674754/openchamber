@@ -63,11 +63,14 @@ export function createPendingConfigRestartRuntime({
     }
 
     const appliedIds = new Set(changes.map((change) => change.id));
+    const forceProcessRestart = changes.some((change) => change.scope === 'agent-memory');
     const appliedCount = appliedIds.size;
     applyPromise = (async () => {
       broadcastSnapshot();
       try {
-        const restart = await applyRestart('pending configuration changes');
+        const restart = forceProcessRestart
+          ? await applyRestart('pending configuration changes', { forceRestart: true })
+          : await applyRestart('pending configuration changes');
         changes = changes.filter((change) => !appliedIds.has(change.id));
         return {
           appliedCount,
