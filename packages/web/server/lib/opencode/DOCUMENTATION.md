@@ -58,6 +58,9 @@ This module provides OpenCode server integration utilities for the web server ru
 - Managed startup never probes or attaches to an arbitrary server on port `4096`. External attachment requires explicit host/port/skip-start configuration; reconnecting a port persisted by this OpenChamber runtime remains a separate managed path.
 - `packages/web/server/lib/opencode/watcher.js`: global SSE watcher runtime for push/session event fanout.
 - `packages/web/server/lib/opencode/shared.js`: shared utilities for config, markdown, skills, and git helpers.
+  - JSONC reads reject parser errors, partial trees, arrays, scalars, and content that yields no JSON value; comment-only files remain valid empty layers.
+  - `readConfigLayers()` isolates an invalid user/project/custom layer and reports it through `layerErrors`, so unrelated valid layers remain readable. Mutations fail closed when their authoritative target layer is invalid.
+  - `writeConfig()` validates existing content before creating a backup or replacing it, preventing a mutation from overwriting an unparseable config with a partial object.
 - `packages/web/server/lib/ui-auth/ui-auth.js`: UI session authentication runtime (outside OpenCode module).
 - `packages/web/server/lib/ui-auth/ui-passkeys.js`: UI passkey storage and WebAuthn registration/authentication helpers (outside OpenCode module).
 

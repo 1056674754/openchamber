@@ -1,0 +1,98 @@
+import { afterEach, beforeEach, describe, test } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+
+import { updateMcpConfig } from './opencodeConfig';
+
+const PARTIAL_PARSE_CONFIG = [
+  '{',
+  '  "$schema": "https://opencode.ai/config.json",',
+  '  plugin: ["opencode-see-image"],',
+  '  mcp: {',
+  '    openproject: {',
+  '      type: "remote",',
+  '      url: "https://openproject.example.com/mcp",',
+  '      enabled: true',
+  '    }',
+  '  }',
+  '}',
+  '',
+].join('\n');
+
+const VALID_CONFIG = [
+  '{',
+  '  "$schema": "https://opencode.ai/config.json",',
+  '  "plugin": ["opencode-see-image"],',
+  '  "mcp": {',
+  '    "openproject": {',
+  '      "type": "remote",',
+  '      "url": "https://openproject.example.com/mcp",',
+  '      "enabled": true',
+  '    }',
+  '  }',
+  '}',
+  '',
+].join('\n');
+
+const isInvalidJsoncError = (error: unknown): boolean => {
+  if (!(error instanceof Error) || !/cannot be loaded safely/.test(error.message)) return false;
+  return (error as Error & { code?: string }).code === 'INVALID_JSONC';
+};
+
+describe('opencodeConfig JSONC parse safety', () => {
+  let tempDir: string;
+  let previousOpenCodeConfig: string | undefined;
+
+  beforeEach(() => {
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-vscode-config-parse-'));
+    previousOpenCodeConfig = process.env.OPENCODE_CONFIG;
+  });
+
+  afterEach(() => {
+    if (previousOpenCodeConfig === undefined) delete process.env.OPENCODE_CONFIG;
+    else process.env.OPENCODE_CONFIG = previousOpenCodeConfig;
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  test('refuses MCP updates that would overwrite a partial-parse config', () => {
+    const configPath = path.join(tempDir, 'opencode.jsonc');
+    fs.writeFileSync(configPath, PARTIAL_PARSE_CONFIG, 'utf8');
+    process.env.OPENCODE_CONFIG = configPath;
+
+    assert.throws(() => updateMcpConfig('openproject', { enabled: true }), isInvalidJsoncError);
+    assert.equal(fs.readFileSync(configPath, 'utf8'), PARTIAL_PARSE_CONFIG);
+    assert.equal(fs.existsSync(`${configPath}.openchamber.backup`), false);
+  });
+
+  test('preserves unrelated keys when updating a valid config', () => {
+    const configPath = path.join(tempDir, 'opencode.jsonc');
+    fs.writeFileSync(configPath, VALID_CONFIG, 'utf8');
+    process.env.OPENCODE_CONFIG = configPath;
+
+    updateMcpConfig('openproject', { enabled: false });
+
+    const rewritten = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    assert.deepEqual(rewritten.plugin, ['opencode-see-image']);
+    assert.equal(rewritten.mcp.openproject.enabled, false);
+    assert.equal(fs.readFileSync(`${configPath}.openchamber.backup`, 'utf8'), VALID_CONFIG);
+  });
+
+  test('keeps a valid custom layer writable when the project layer is invalid', () => {
+    const customPath = path.join(tempDir, 'custom.jsonc');
+    const projectDir = path.join(tempDir, 'project');
+    const projectFile = path.join(projectDir, '.opencode', 'opencode.jsonc');
+    fs.writeFileSync(customPath, VALID_CONFIG, 'utf8');
+    fs.mkdirSync(path.dirname(projectFile), { recursive: true });
+    fs.writeFileSync(projectFile, PARTIAL_PARSE_CONFIG, 'utf8');
+    process.env.OPENCODE_CONFIG = customPath;
+
+    updateMcpConfig('openproject', { enabled: false }, projectDir);
+
+    const rewritten = JSON.parse(fs.readFileSync(customPath, 'utf8'));
+    assert.equal(rewritten.mcp.openproject.enabled, false);
+    assert.equal(fs.readFileSync(projectFile, 'utf8'), PARTIAL_PARSE_CONFIG);
+    assert.equal(fs.existsSync(`${projectFile}.openchamber.backup`), false);
+  });
+});

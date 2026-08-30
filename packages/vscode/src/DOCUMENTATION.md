@@ -62,6 +62,10 @@ Keep `bridge.ts` as a thin orchestration layer that delegates message handling t
 - `opencode-upgrade-runtime.ts`
   - Owns managed-versus-external capability decisions, latest-version checks, serialized upgrades, custom-build-aware version comparison, and restart-after-upgrade behavior.
 
+- `opencodeConfig.ts`
+  - Reads layered OpenCode JSON/JSONC for VS Code-owned agent, command, MCP, provider, and skill operations.
+  - Rejects partial/invalid parser results before mutation, isolates unrelated broken layers for read surfaces, and validates existing content before backup/write so configuration is never silently truncated.
+
 - `bridge-permission-auto-accept-runtime.ts`
   - Owns the persisted VS Code permission auto-accept policy and its GET/SET bridge contract.
   - Broadcasts authoritative snapshots to every active OpenChamber webview after a successful write.
