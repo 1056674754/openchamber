@@ -1,6 +1,8 @@
 import { create } from 'zustand';
 import { devtools } from 'zustand/middleware';
 import { opencodeClient, type ProjectFileSearchHit } from '@/lib/opencode/client';
+import { createOpencodeClient } from '@opencode-ai/sdk/v2';
+import { DEFAULT_SERVER_ID, serverRegistry } from '@/lib/opencode/server-registry';
 
 const CACHE_TTL_MS = 30_000;
 const MAX_CACHE_ENTRIES = 40;
@@ -19,7 +21,13 @@ interface FileSearchStoreState {
     directory: string,
     query: string,
     limit?: number,
-    options?: { includeHidden?: boolean; respectGitignore?: boolean; type?: 'file' | 'directory' }
+    options?: {
+      includeHidden?: boolean;
+      respectGitignore?: boolean;
+      type?: 'file' | 'directory';
+      serverId?: string | null;
+      serverBaseUrl?: string;
+    }
   ) => Promise<ProjectFileSearchHit[]>;
   invalidateDirectory: (directory?: string | null) => void;
 }
@@ -30,11 +38,12 @@ const buildCacheKey = (
   limit: number,
   includeHidden: boolean,
   respectGitignore: boolean,
-  type: 'file' | 'directory'
+  type: 'file' | 'directory',
+  serverKey: string,
 ) => {
   const normalizedDirectory = directory.trim();
   const normalizedQuery = query.trim().toLowerCase();
-  return JSON.stringify([normalizedDirectory, normalizedQuery, limit, includeHidden, respectGitignore, type]);
+  return JSON.stringify([normalizedDirectory, normalizedQuery, limit, includeHidden, respectGitignore, type, serverKey]);
 };
 
 const cacheKeyMatchesDirectory = (cacheKey: string, directory: string) => {
@@ -62,7 +71,10 @@ export const useFileSearchStore = create<FileSearchStoreState>()(
         const includeHidden = Boolean(options?.includeHidden);
         const respectGitignore = options?.respectGitignore ?? true;
         const type = options?.type === 'directory' ? 'directory' : 'file';
-        const key = buildCacheKey(normalizedDirectory, normalizedQuery, limit, includeHidden, respectGitignore, type);
+        const serverId = options?.serverId?.trim() || DEFAULT_SERVER_ID;
+        const serverBaseUrl = options?.serverBaseUrl?.trim() || '';
+        const serverKey = serverId !== DEFAULT_SERVER_ID ? serverId : (serverBaseUrl || DEFAULT_SERVER_ID);
+        const key = buildCacheKey(normalizedDirectory, normalizedQuery, limit, includeHidden, respectGitignore, type, serverKey);
         const now = Date.now();
         const cached = get().cache[key];
 
@@ -75,15 +87,39 @@ export const useFileSearchStore = create<FileSearchStoreState>()(
           return inflight;
         }
 
-        const searchPromise = opencodeClient
-          .searchFiles(normalizedQuery, {
-            directory: normalizedDirectory,
+        const searchPromise = (async () => {
+          if (serverId === DEFAULT_SERVER_ID && !serverBaseUrl) {
+            return opencodeClient.searchFiles(normalizedQuery, {
+              directory: normalizedDirectory,
+              limit,
+              includeHidden,
+              respectGitignore,
+              dirs: type !== 'file',
+              type,
+            });
+          }
+
+          const baseUrl = serverBaseUrl || serverRegistry.get(serverId)?.config.baseUrl;
+          if (!baseUrl) throw new Error(`File search server ${serverId} is not connected`);
+          const client = createOpencodeClient({ baseUrl, directory: normalizedDirectory });
+          const response = await client.find.files({
+            query: normalizedQuery,
             limit,
-            includeHidden,
-            respectGitignore,
-            dirs: type !== 'file',
+            dirs: type === 'directory' ? 'true' : 'false',
             type,
-          })
+          });
+          if (response.error) throw new Error('Failed to search remote files');
+          return (response.data ?? []).map<ProjectFileSearchHit>((relativePath) => {
+            const normalizedRelativePath = relativePath.replace(/\\/g, '/').replace(/^\/+/, '');
+            const name = normalizedRelativePath.split('/').filter(Boolean).pop() || normalizedRelativePath;
+            return {
+              name,
+              path: `${normalizedDirectory.replace(/\/+$/, '')}/${normalizedRelativePath}`,
+              relativePath: normalizedRelativePath,
+              extension: name.includes('.') ? name.split('.').pop()?.toLowerCase() : undefined,
+            };
+          });
+        })()
           .then((files) => {
             set((state) => {
               if (state.inFlight[key] !== searchPromise) {

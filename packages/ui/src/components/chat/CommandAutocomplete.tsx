@@ -2,8 +2,8 @@ import React from 'react';
 import { cn } from '@/lib/utils';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSessionMessages } from '@/sync/sync-context';
-import { useCommandsStore } from '@/stores/useCommandsStore';
-import { useSkillsStore } from '@/stores/useSkillsStore';
+import { selectCommandsForDirectory, useCommandsStore } from '@/stores/useCommandsStore';
+import { selectSkillsForTarget, useSkillsStore } from '@/stores/useSkillsStore';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
@@ -19,6 +19,8 @@ import {
   type CommandAutocompleteDescriptions,
 } from './commandAutocompleteCommands';
 import type { AutocompleteTab, CommandAutocompleteHandle, CommandInfo } from './commandAutocompleteTypes';
+import { useChatSearchDirectory } from '@/hooks/useChatSearchDirectory';
+import { useActiveServerBaseUrl, useActiveServerId } from '@/hooks/useActiveServerId';
 
 export type { AutocompleteTab, CommandAutocompleteHandle, CommandInfo } from './commandAutocompleteTypes';
 
@@ -66,10 +68,21 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
 
   const [commands, setCommands] = React.useState<CommandInfo[]>([]);
   const [loading, setLoading] = React.useState(false);
-  const commandsWithMetadata = useCommandsStore((s) => s.commands);
-  const refreshCommands = useCommandsStore((s) => s.loadCommands);
-  const skills = useSkillsStore((s) => s.skills);
-  const refreshSkills = useSkillsStore((s) => s.loadSkills);
+  const effectiveDirectory = useChatSearchDirectory();
+  const serverId = useActiveServerId();
+  const serverBaseUrl = useActiveServerBaseUrl();
+  const commandsWithMetadata = useCommandsStore((s) => selectCommandsForDirectory(s, effectiveDirectory ?? null, serverId));
+  const loadCommands = useCommandsStore((s) => s.loadCommands);
+  const skills = useSkillsStore((s) => selectSkillsForTarget(s, effectiveDirectory ?? null, serverBaseUrl));
+  const loadSkills = useSkillsStore((s) => s.loadSkills);
+  const refreshCommands = React.useCallback(
+    () => loadCommands(effectiveDirectory ?? null, serverBaseUrl, serverId),
+    [effectiveDirectory, loadCommands, serverBaseUrl, serverId],
+  );
+  const refreshSkills = React.useCallback(
+    () => loadSkills(serverBaseUrl, effectiveDirectory ?? null),
+    [effectiveDirectory, loadSkills, serverBaseUrl],
+  );
   const [selectedIndex, setSelectedIndex] = React.useState(0);
   const selectedIndexRef = React.useRef(0);
   const itemRefs = React.useRef<(HTMLDivElement | null)[]>([]);

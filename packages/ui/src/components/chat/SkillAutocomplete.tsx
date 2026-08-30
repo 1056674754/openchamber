@@ -1,8 +1,10 @@
 import React from 'react';
 import { cn, fuzzyMatch } from '@/lib/utils';
-import { useSkillsStore } from '@/stores/useSkillsStore';
+import { selectSkillsForTarget, useSkillsStore } from '@/stores/useSkillsStore';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { Icon } from '@/components/icon/Icon';
+import { useChatSearchDirectory } from '@/hooks/useChatSearchDirectory';
+import { useActiveServerBaseUrl } from '@/hooks/useActiveServerId';
 
 interface SkillInfo {
   name: string;
@@ -36,13 +38,14 @@ export const SkillAutocomplete = React.forwardRef<SkillAutocompleteHandle, Skill
   const keyboardNavigationRef = React.useRef(false);
   const [filteredSkills, setFilteredSkills] = React.useState<SkillInfo[]>([]);
   const itemRefs = React.useRef<(HTMLDivElement | null)[]>([]);
-  const skills = useSkillsStore((s) => s.skills);
+  const effectiveDirectory = useChatSearchDirectory();
+  const serverBaseUrl = useActiveServerBaseUrl();
+  const skills = useSkillsStore((s) => selectSkillsForTarget(s, effectiveDirectory ?? null, serverBaseUrl));
   const loadSkills = useSkillsStore((s) => s.loadSkills);
 
   React.useEffect(() => {
-    // Always trigger loadSkills when autocomplete opens to ensure project context is fresh
-    void loadSkills();
-  }, [loadSkills]);
+    void loadSkills(serverBaseUrl, effectiveDirectory ?? null);
+  }, [effectiveDirectory, loadSkills, serverBaseUrl]);
 
   React.useEffect(() => {
     const normalizedQuery = searchQuery.trim();

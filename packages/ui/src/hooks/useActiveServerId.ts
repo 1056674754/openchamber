@@ -6,7 +6,8 @@ import { UNRESOLVED_SERVER_ID, resolveSessionAuthority } from '@/sync/session-au
 
 export function useActiveServerId(): string {
   const currentSessionId = useSessionUIStore((s) => s.currentSessionId);
-  const draftProjectId = useSessionUIStore((s) => s.newSessionDraft?.selectedProjectId ?? null);
+  const draft = useSessionUIStore((s) => s.newSessionDraft);
+  const draftProjectId = draft?.selectedProjectId ?? null;
   const activeProjectId = useProjectsStore((s) => s.activeProjectId);
   const projects = useProjectsStore((s) => s.projects);
   const currentSessionServerId = React.useSyncExternalStore(
@@ -33,6 +34,10 @@ export function useActiveServerId(): string {
     // binding before declaring unresolved. A remote session must never
     // degrade to DEFAULT_SERVER_ID.
     return resolveSessionAuthority(currentSessionId).serverId ?? UNRESOLVED_SERVER_ID;
+  }
+
+  if (draft?.open && draft.target === 'chat') {
+    return draft.chatServerId || DEFAULT_SERVER_ID;
   }
 
   const projectId = draftProjectId || activeProjectId;

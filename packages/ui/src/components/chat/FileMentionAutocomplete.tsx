@@ -12,6 +12,7 @@ import { Icon } from "@/components/icon/Icon";
 import { useDirectoryShowHidden } from '@/lib/directoryShowHidden';
 import { useFilesViewShowGitignored } from '@/lib/filesViewShowGitignored';
 import { useI18n } from '@/lib/i18n';
+import { useActiveServerBaseUrl, useActiveServerId } from '@/hooks/useActiveServerId';
 
 type FileInfo = ProjectFileSearchHit;
 type AgentInfo = {
@@ -51,6 +52,8 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
 }, ref) => {
   const { t } = useI18n();
   const currentDirectory = useChatSearchDirectory() ?? '';
+  const activeServerId = useActiveServerId();
+  const activeServerBaseUrl = useActiveServerBaseUrl();
   const activeProjectId = useProjectsStore((state) => state.activeProjectId);
   const activeProjectPath = useProjectsStore(
     React.useCallback(
@@ -59,7 +62,7 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
     ),
   );
   const projectRoot = React.useMemo(() => {
-    const candidate = activeProjectPath || currentDirectory;
+    const candidate = currentDirectory || activeProjectPath;
     return candidate ? candidate.replace(/\\/g, '/').replace(/\/+$/, '') : null;
   }, [activeProjectPath, currentDirectory]);
   const projectTabs = useFilesViewTabsStore(
@@ -180,6 +183,8 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
       includeHidden: showHidden,
       respectGitignore: !showGitignored,
       type: 'file',
+      serverId: activeServerId,
+      serverBaseUrl: activeServerBaseUrl,
     })
       .then((hits) => {
         if (cancelled) {
@@ -211,7 +216,7 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
         setLoading(false);
       }
     };
-  }, [currentDirectory, debouncedQuery, recentFiles, searchFiles, showHidden, showGitignored]);
+  }, [activeServerBaseUrl, activeServerId, currentDirectory, debouncedQuery, recentFiles, searchFiles, showHidden, showGitignored]);
 
   React.useEffect(() => {
     if (!currentDirectory) {
@@ -238,6 +243,8 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
       includeHidden: showHidden,
       respectGitignore: !showGitignored,
       type: 'directory',
+      serverId: activeServerId,
+      serverBaseUrl: activeServerBaseUrl,
     })
       .then((hits) => {
         if (!cancelled) {
@@ -266,7 +273,7 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
         setLoading(false);
       }
     };
-  }, [currentDirectory, debouncedQuery, searchFiles, showHidden, showGitignored]);
+  }, [activeServerBaseUrl, activeServerId, currentDirectory, debouncedQuery, searchFiles, showHidden, showGitignored]);
 
   React.useEffect(() => {
     const visibleAgents = getVisibleAgents();
