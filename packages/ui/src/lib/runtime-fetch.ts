@@ -4,10 +4,73 @@ import { buildRuntimeAuthHeaders } from './runtime-auth';
 import { observeRuntimeAuthResponse } from './runtime-auth-expiry';
 import { getRuntimeKey } from './runtime-switch';
 import { getRuntimeUrlResolver, type RuntimeUrlQuery } from './runtime-url';
+import { isCapacitorApp } from './platform';
 
 export interface RuntimeFetchOptions extends RequestInit {
   query?: RuntimeUrlQuery;
 }
+
+const CAPACITOR_REQUEST_BODY_MAX_BYTES = 16 * 1024 * 1024;
+
+const readBoundedRequestBody = async (
+  request: Request,
+  maxBytes: number = CAPACITOR_REQUEST_BODY_MAX_BYTES,
+): Promise<Uint8Array | undefined> => {
+  if (!request.body || request.method === 'GET' || request.method === 'HEAD') return undefined;
+  const declaredLength = Number(request.headers.get('content-length'));
+  if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
+    throw new Error(`Capacitor request body exceeds ${maxBytes} bytes`);
+  }
+
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    const chunk = value instanceof Uint8Array ? value : new Uint8Array(value);
+    size += chunk.byteLength;
+    if (size > maxBytes) {
+      await reader.cancel();
+      throw new Error(`Capacitor request body exceeds ${maxBytes} bytes`);
+    }
+    chunks.push(chunk);
+  }
+
+  const body = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) {
+    body.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return body;
+};
+
+export const prepareCapacitorRequestForFetch = async (
+  request: Request,
+  target: string,
+  init: RequestInit | undefined,
+  headers: Headers,
+): Promise<{ target: string; init: RequestInit }> => {
+  const body = init?.body ?? await readBoundedRequestBody(request);
+  return {
+    target,
+    init: {
+      method: init?.method ?? request.method,
+      headers,
+      body,
+      cache: init?.cache ?? request.cache,
+      credentials: init?.credentials ?? request.credentials,
+      integrity: init?.integrity ?? request.integrity,
+      keepalive: init?.keepalive ?? request.keepalive,
+      mode: init?.mode ?? request.mode,
+      redirect: init?.redirect ?? request.redirect,
+      referrer: init?.referrer ?? request.referrer,
+      referrerPolicy: init?.referrerPolicy ?? request.referrerPolicy,
+      signal: init?.signal ?? request.signal,
+    },
+  };
+};
 
 const shouldResolveApiPath = (input: string): boolean => {
   return input.startsWith('/api/') || input === '/api' || input.startsWith('/auth/') || input === '/auth' || input === '/health';
@@ -414,6 +477,10 @@ export const installRuntimeFetchBridge = (): void => {
         const headers = await mergeHeaders(input.headers, init?.headers);
         const target = buildRuntimeFetchUrl(input.url);
         addRuntimeProxyHeaders(target, headers);
+        if (isCapacitorApp()) {
+          const prepared = await prepareCapacitorRequestForFetch(input, target, init, headers);
+          return nativeFetch(prepared.target, prepared.init);
+        }
         const request = target === input.url ? input : new Request(target, input);
         return nativeFetch(new Request(request, { ...init, headers }));
       }

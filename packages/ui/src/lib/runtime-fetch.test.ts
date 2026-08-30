@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { createOpencodeClient } from '@opencode-ai/sdk/v2';
-import { addRuntimeProxyHeaders, buildRuntimeFetchUrl, isLatin1Safe, runtimeFetch, sanitizeHeadersForBrowser } from './runtime-fetch';
+import { addRuntimeProxyHeaders, buildRuntimeFetchUrl, isLatin1Safe, prepareCapacitorRequestForFetch, runtimeFetch, sanitizeHeadersForBrowser } from './runtime-fetch';
 import { clearRuntimeAuthCredentialProvider, setRuntimeBearerToken } from './runtime-auth';
 import { configureRuntimeUrlResolver, getRuntimeUrlResolver, setRuntimeUrlResolver } from './runtime-url';
 import { adoptRelayTunnel, deactivateRelayTunnel } from './relay/runtime-tunnel';
@@ -82,6 +82,43 @@ describe('runtime proxy headers', () => {
 });
 
 describe('runtimeFetch transport contract', () => {
+  test('materializes SDK Request bodies for Capacitor without changing JSON bytes', async () => {
+    const request = new Request('https://app.example/api/session', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ title: 'Mobile Session' }),
+    });
+    const headers = new Headers(request.headers);
+    headers.set('authorization', 'Bearer mobile');
+
+    const prepared = await prepareCapacitorRequestForFetch(
+      request,
+      'http://127.0.0.1:39301/api/session',
+      undefined,
+      headers,
+    );
+
+    expect(prepared.target).toBe('http://127.0.0.1:39301/api/session');
+    expect(prepared.init.method).toBe('POST');
+    expect(new Headers(prepared.init.headers).get('authorization')).toBe('Bearer mobile');
+    expect(new TextDecoder().decode(prepared.init.body as Uint8Array)).toBe('{"title":"Mobile Session"}');
+  });
+
+  test('rejects oversized Capacitor Request bodies before forwarding', async () => {
+    const request = new Request('https://app.example/api/session', {
+      method: 'POST',
+      headers: { 'content-length': String(17 * 1024 * 1024) },
+      body: '{}',
+    });
+
+    await expect(prepareCapacitorRequestForFetch(
+      request,
+      'http://127.0.0.1:39301/api/session',
+      undefined,
+      new Headers(request.headers),
+    )).rejects.toThrow('exceeds 16777216 bytes');
+  });
+
   test('preserves bodies from actual SDK mutation requests on same-origin runtimes', async () => {
     const previous = getRuntimeUrlResolver();
     const originalWindow = globalThis.window;
