@@ -3139,3 +3139,14 @@ v1.20.0-sscity 尚未宣布完成：当前未关闭 `#135/#140/#142-#151/#154/#1
 - 对应实现提交：`69f37f538 feat(auth): recover expired runtime sessions`。`main.mjs`属于desktop shell source变化；本阶段没有执行runtime install、没有修改`/Applications/OpenChamber.app`。后续shell release/installed relay smoke仍按[#178](https://coding.s-s.city/songsong/openchamber/-/issues/178)的signed-shell矩阵处理。
 
 验证：auth classifier + relay boot + runtime-fetch + desktop boot + i18n focused 6 files / 73 tests ✅；full workspace type-check/lint/build ✅；Electron Node syntax ✅；`git diff --check` ✅。隔离production Web matching-surface：独立data/HOME/39291、password登录200 → clear cookie →真实settings API 401 → expiry banner visible → Log in进入password form，page error 0；隔离server与port均已清理。至此 [#164](https://coding.s-s.city/songsong/openchamber/-/issues/164) 的live auth expiry和relay-default source范围完成，可关闭；signed installed-shell QA不隐藏，继续由#178追踪。
+
+## v1.21.1 `#173` Phase 1：`/btw` source equivalence + resilient inherited boundary（2026-08-31）
+
+上游来源：`61e6cf8e6`、`9b188f26f`、`c5877c28a`、`92d67450f`。审计确认fork在先前[#149](https://coding.s-s.city/songsong/openchamber/-/issues/149)已等价实现绝大部分follow-up：
+
+- `findLastCompletedAssistantMessageID`按shared chronology选择最后completed assistant，mid-stream `/btw`不继承未完成turn；boundary按message identity在chronological records中定位，marker丢失fail closed，不让parent transcript泄进side output。
+- inherited history通过每次send附带的synthetic boundary明确标记为reference-only；promotion清理live `kind/original/boundary`并留下`btwPromoted`，后续send附带revocation notice，旧constraint不会继续控制normal Session。
+- composer只读取`useBtwPanelState.parentSession/btwSession`这一条panel authority，不再订阅第二份Session；delayed destroy只移除仍指向expected fork的parent link，boundary metadata不会越过所属Session。
+- 本phase补齐唯一runtime缺口：fork已在known completed message成功，但`messages(limit=1)`短暂返回empty时，使用fork point作为安全boundary，不再删除本可用fork。fork后产生的消息时间更晚，因此仍只显示side tail。对应提交：`2c19d87ef fix(btw): preserve completed fork boundaries`。
+
+验证：btw core/metadata focused 2 files / 11 tests ✅；UI type-check/lint ✅；full Web + iOS simulator build ✅；`git diff --check` ✅。真实iPhone 17 Pro Capacitor QA连接隔离39301实例、加载`BTW QA`项目与真实completed Session成功，但native composer创建Session被现有transport错误`session.create failed: ReadableStream uploading is not supported`阻断，无法进入side panel完成touch/narrow-screen验收。隔离app/server/OpenCode已终止，Pod lock漂移已恢复。故[#173](https://coding.s-s.city/songsong/openchamber/-/issues/173)保持open；阻塞归属[#174](https://coding.s-s.city/songsong/openchamber/-/issues/174) mobile request-body parity，修复后必须回到physical Capacitor surface完成panel expand/collapse/promote QA。
