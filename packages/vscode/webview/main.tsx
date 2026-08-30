@@ -609,6 +609,27 @@ const handleLocalApiRequest = async (url: URL, init?: RequestInit) => {
     return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
   }
 
+  if (pathname === '/api/fs/upload' && method === 'POST') {
+    const directory = url.searchParams.get('directory') || '';
+    const targetPath = url.searchParams.get('path') || '';
+    const bodyBase64 = await extractBodyBase64(url, init, method) ?? '';
+    const data = await sendBridgeMessage<{
+      status?: number;
+      body?: unknown;
+    }>('api:fs:upload', {
+      directory,
+      path: targetPath,
+      bodyBase64,
+      overwrite: url.searchParams.get('overwrite') === 'true',
+    });
+    const status = typeof data?.status === 'number' ? data.status : 500;
+    const body = data?.body ?? { error: 'Invalid VS Code upload response', reason: 'io-error' };
+    return new Response(JSON.stringify(body), {
+      status,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
   if (pathname.startsWith('/api/fs/home')) {
     const data = await sendBridgeMessage('api:fs/home');
     return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
