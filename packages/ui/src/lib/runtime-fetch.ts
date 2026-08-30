@@ -1,6 +1,8 @@
 import { getActiveRelayTunnel } from './relay/runtime-tunnel';
 import { TUNNEL_PARSE_BASE } from './relay/tunnel-payloads';
 import { buildRuntimeAuthHeaders } from './runtime-auth';
+import { observeRuntimeAuthResponse } from './runtime-auth-expiry';
+import { getRuntimeKey } from './runtime-switch';
 import { getRuntimeUrlResolver, type RuntimeUrlQuery } from './runtime-url';
 
 export interface RuntimeFetchOptions extends RequestInit {
@@ -278,6 +280,7 @@ export const runtimeFetch = async (input: string | URL | Request, init: RuntimeF
   let doFetch: () => Promise<Response>;
   let url: string;
   let method: string;
+  let observesRuntimeAuth = false;
   if (relay && relayPath !== null) {
     const inputHeaders = input instanceof Request ? input.headers : undefined;
     const headers = await mergeHeaders(inputHeaders, requestInit.headers, true);
@@ -286,10 +289,12 @@ export const runtimeFetch = async (input: string | URL | Request, init: RuntimeF
       : () => relay.fetch(relayPath, { ...requestInit, headers });
     url = relayPath;
     method = String(requestInit.method ?? (input instanceof Request ? input.method : 'GET')).toUpperCase();
+    observesRuntimeAuth = true;
   } else {
     const resolvedInput = resolveRuntimeFetchInput(input, query);
     const inputHeaders = resolvedInput instanceof Request ? resolvedInput.headers : undefined;
-    const headers = await mergeHeaders(inputHeaders, requestInit.headers, shouldAttachRuntimeAuth(resolvedInput));
+    observesRuntimeAuth = shouldAttachRuntimeAuth(resolvedInput);
+    const headers = await mergeHeaders(inputHeaders, requestInit.headers, observesRuntimeAuth);
     const resolvedUrl = resolvedInput instanceof Request
       ? resolvedInput.url
       : resolvedInput instanceof URL
@@ -303,6 +308,15 @@ export const runtimeFetch = async (input: string | URL | Request, init: RuntimeF
     method = String(
       requestInit.method ?? (resolvedInput instanceof Request ? resolvedInput.method : 'GET'),
     ).toUpperCase();
+  }
+
+  if (observesRuntimeAuth) {
+    const requestRuntimeKey = getRuntimeKey();
+    const rawFetch = doFetch;
+    doFetch = () => rawFetch().then((response) => {
+      observeRuntimeAuthResponse(url, response.status, requestRuntimeKey);
+      return response;
+    });
   }
 
   // A Request always carries a (possibly default) signal; treat any Request, or
@@ -332,65 +346,84 @@ export const installRuntimeFetchBridge = (): void => {
 
   const nativeFetch = window.fetch.bind(window);
   window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
-    const relayResponse = await tryRelayFetch(input, init ?? {});
-    if (relayResponse) return relayResponse;
-    if (typeof input === 'string') {
-      if (!shouldResolveFetchInput(input)) {
+    const requestRuntimeKey = getRuntimeKey();
+    const rawInput = input instanceof Request ? input.url : input.toString();
+    const observesRuntimeAuth = getActiveRelayTunnel() !== null
+      || shouldResolveFetchInput(rawInput)
+      || (() => {
         try {
-          const url = new URL(input);
-          if (isActiveRuntimeServiceUrl(url)) {
+          return isActiveRuntimeServiceUrl(new URL(rawInput));
+        } catch {
+          return false;
+        }
+      })();
+
+    const response = await (async () => {
+      const relayResponse = await tryRelayFetch(input, init ?? {});
+      if (relayResponse) return relayResponse;
+      if (typeof input === 'string') {
+        if (!shouldResolveFetchInput(input)) {
+          try {
+            const url = new URL(input);
+            if (isActiveRuntimeServiceUrl(url)) {
+              const headers = await mergeHeaders(undefined, init?.headers);
+              addRuntimeProxyHeaders(url.toString(), headers);
+              return nativeFetch(input, { ...init, headers });
+            }
+          } catch {
+            // Non-URL fetch inputs should fall through unchanged.
+          }
+          return nativeFetch(input, init);
+        }
+        const headers = await mergeHeaders(undefined, init?.headers);
+        const target = buildRuntimeFetchUrl(input);
+        addRuntimeProxyHeaders(target, headers);
+        return nativeFetch(target, { ...init, headers });
+      }
+
+      if (input instanceof URL) {
+        const raw = input.toString();
+        if (!shouldResolveFetchInput(raw)) {
+          if (isActiveRuntimeServiceUrl(input)) {
             const headers = await mergeHeaders(undefined, init?.headers);
-            addRuntimeProxyHeaders(url.toString(), headers);
+            addRuntimeProxyHeaders(input.toString(), headers);
             return nativeFetch(input, { ...init, headers });
           }
-        } catch {
-          // Non-URL fetch inputs should fall through unchanged.
+          return nativeFetch(input, init);
         }
-        return nativeFetch(input, init);
+        const headers = await mergeHeaders(undefined, init?.headers);
+        const target = buildRuntimeFetchUrl(raw);
+        addRuntimeProxyHeaders(target, headers);
+        return nativeFetch(target, { ...init, headers });
       }
-      const headers = await mergeHeaders(undefined, init?.headers);
-      const target = buildRuntimeFetchUrl(input);
-      addRuntimeProxyHeaders(target, headers);
-      return nativeFetch(target, { ...init, headers });
-    }
 
-    if (input instanceof URL) {
-      const raw = input.toString();
-      if (!shouldResolveFetchInput(raw)) {
-        if (isActiveRuntimeServiceUrl(input)) {
-          const headers = await mergeHeaders(undefined, init?.headers);
-          addRuntimeProxyHeaders(input.toString(), headers);
-          return nativeFetch(input, { ...init, headers });
-        }
-        return nativeFetch(input, init);
-      }
-      const headers = await mergeHeaders(undefined, init?.headers);
-      const target = buildRuntimeFetchUrl(raw);
-      addRuntimeProxyHeaders(target, headers);
-      return nativeFetch(target, { ...init, headers });
-    }
-
-    if (input instanceof Request) {
-      if (!shouldResolveFetchInput(input.url)) {
-        try {
-          const url = new URL(input.url);
-          if (isActiveRuntimeServiceUrl(url)) {
-            const headers = await mergeHeaders(input.headers, init?.headers);
-            addRuntimeProxyHeaders(url.toString(), headers);
-            return nativeFetch(new Request(input, { ...init, headers }));
+      if (input instanceof Request) {
+        if (!shouldResolveFetchInput(input.url)) {
+          try {
+            const url = new URL(input.url);
+            if (isActiveRuntimeServiceUrl(url)) {
+              const headers = await mergeHeaders(input.headers, init?.headers);
+              addRuntimeProxyHeaders(url.toString(), headers);
+              return nativeFetch(new Request(input, { ...init, headers }));
+            }
+          } catch {
+            // Non-URL request inputs should fall through unchanged.
           }
-        } catch {
-          // Non-URL request inputs should fall through unchanged.
+          return nativeFetch(input, init);
         }
-        return nativeFetch(input, init);
+        const headers = await mergeHeaders(input.headers, init?.headers);
+        const target = buildRuntimeFetchUrl(input.url);
+        addRuntimeProxyHeaders(target, headers);
+        const request = target === input.url ? input : new Request(target, input);
+        return nativeFetch(new Request(request, { ...init, headers }));
       }
-      const headers = await mergeHeaders(input.headers, init?.headers);
-      const target = buildRuntimeFetchUrl(input.url);
-      addRuntimeProxyHeaders(target, headers);
-      const request = target === input.url ? input : new Request(target, input);
-      return nativeFetch(new Request(request, { ...init, headers }));
-    }
 
-    return nativeFetch(input, init);
+      return nativeFetch(input, init);
+    })();
+
+    if (observesRuntimeAuth) {
+      observeRuntimeAuthResponse(rawInput, response.status, requestRuntimeKey);
+    }
+    return response;
   };
 };

@@ -8,11 +8,14 @@ import { isDesktopLocalOriginActive, isDesktopShell, isVSCodeRuntime, loginDeskt
 import { isCapacitorApp } from '@/lib/platform';
 import { syncDesktopSettings, initializeAppearancePreferences } from '@/lib/persistence';
 import { applyPersistedDirectoryPreferences } from '@/lib/directoryPersistence';
-import { subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
+import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 import { DesktopHostSwitcherInline } from '@/components/desktop/DesktopHostSwitcher';
 import { OpenChamberLogo } from '@/components/ui/OpenChamberLogo';
 import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
+import { runtimeFetch } from '@/lib/runtime-fetch';
+import { installAuthSessionFocusWatch, useAuthSessionStore } from '@/lib/runtime-auth-expiry';
+import { AuthExpiredBanner } from './AuthExpiredBanner';
 import {
   authenticateWithPasskey,
   cancelPasskeyCeremony,
@@ -31,7 +34,7 @@ const shouldUseDesktopRemotePasswordFallback = (): boolean => {
 };
 
 const fetchSessionStatus = async (): Promise<Response> => {
-  const response = await fetch(STATUS_CHECK_ENDPOINT, {
+  const response = await runtimeFetch(STATUS_CHECK_ENDPOINT, {
     method: 'GET',
     credentials: 'include',
     headers: {
@@ -49,7 +52,7 @@ const readStoredTrustDevice = (): boolean => {
 };
 
 const submitPassword = async (password: string, trustDevice: boolean): Promise<Response> => {
-  const response = await fetch(STATUS_CHECK_ENDPOINT, {
+  const response = await runtimeFetch(STATUS_CHECK_ENDPOINT, {
     method: 'POST',
     credentials: 'include',
     headers: {
@@ -237,6 +240,7 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({ children }) =>
       const responseText = await response.text();
       
         if (response.ok) {
+          useAuthSessionStore.getState().markAuthenticated(getRuntimeKey());
           setState('authenticated');
           setIsTunnelLocked(false);
           setErrorMessage('');
@@ -283,12 +287,30 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({ children }) =>
     }
   }, [refreshPasskeyStatus, skipAuth]);
 
+  const authSessionState = useAuthSessionStore((store) => store.state);
+
+  React.useEffect(() => {
+    if (!skipAuth) installAuthSessionFocusWatch();
+  }, [skipAuth]);
+
+  React.useEffect(() => {
+    if (!skipAuth && authSessionState === 'reauthenticating') {
+      void checkStatus();
+    }
+  }, [authSessionState, checkStatus, skipAuth]);
+
+  React.useEffect(() => {
+    if (!skipAuth && state === 'authenticated') {
+      useAuthSessionStore.getState().markAuthenticated(getRuntimeKey());
+    }
+  }, [skipAuth, state]);
+
   React.useEffect(() => {
     if (skipAuth) {
       return;
     }
     void checkStatus();
-  }, [checkStatus, skipAuth]);
+  }, [checkStatus, endpointEpoch, skipAuth]);
 
   React.useEffect(() => {
     if (!skipAuth && state === 'locked') {
@@ -641,5 +663,10 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({ children }) =>
     );
   }
 
-  return <>{children}</>;
+  return (
+    <>
+      {skipAuth || isCapacitorApp() ? null : <AuthExpiredBanner />}
+      {children}
+    </>
+  );
 };

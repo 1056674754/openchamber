@@ -98,6 +98,7 @@ import { wrapSystemReminder } from '@/lib/systemReminder';
 import { eventMatchesShortcut, getEffectiveShortcutCombo, normalizeCombo } from '@/lib/shortcuts';
 import { getSyncMessages, getSyncParts } from '@/sync/sync-refs';
 import { isSyntheticPart } from '@/lib/messages/synthetic';
+import { isRuntimeAuthBlocked } from '@/lib/runtime-auth-expiry';
 import { CHAT_DRAFT_PROJECT_ID } from '@/lib/chatDirectories';
 import { BtwPanel } from './btw/BtwPanel';
 import { useBtwPanelState } from './btw/useBtwPanelState';
@@ -1999,6 +2000,11 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         if (queuedOnly) {
             if (queuedMessagesToSend.length === 0 || !currentSessionId) return;
         } else if ((!inputSnapshot.hasContent && !hasQueuedMessages) || (!currentSessionId && !newSessionDraftOpen)) {
+            return;
+        }
+
+        if (isRuntimeAuthBlocked()) {
+            toast.error(t('sessionAuth.expired.sendBlocked'));
             return;
         }
 

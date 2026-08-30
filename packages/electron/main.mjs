@@ -13,6 +13,11 @@ import updaterPkg from 'electron-updater';
 import { ElectronSshManager } from './ssh-manager.mjs';
 import { replaceFileWithRetry } from './windows-file-replace.mjs';
 import { hasSameHttpOrigin, loginRemotePasswordAndPersistSession } from './remote-password-login.mjs';
+import {
+  resolveDefaultHostBootStatus,
+  shouldRetryDefaultHostProbe,
+  shouldUseLocalSubstrateForDefaultHost,
+} from './relay-default-boot.mjs';
 import { createSingleFlight } from './startup-coordinator.mjs';
 import { createTrayController } from './tray.mjs';
 import {
@@ -1570,8 +1575,9 @@ const computeBootOutcome = ({
     return { target: 'remote', status: 'missing', hostId: defaultId, ...availability };
   }
 
-  const status = probe && probe.status === 'unreachable' ? 'unreachable' : 'ok';
-  return { target: 'remote', status, hostId: host.id, url: host.url, ...availability };
+  const relayCapable = Boolean(sanitizeHostRelayForStorage(host.relay));
+  const status = resolveDefaultHostBootStatus(probe?.status, relayCapable);
+  return { target: 'remote', status, hostId: host.id, url: host.apiUrl || host.url, ...availability };
 };
 
 const buildStartupSplashHtml = () => {
@@ -2363,21 +2369,24 @@ const resolveInitialUrl = async () => {
 
   const envTarget = normalizeHostUrl(process.env.OPENCHAMBER_SERVER_URL || '');
   const config = readDesktopHostsConfig();
+  const defaultHost = config.defaultHostId && config.defaultHostId !== LOCAL_HOST_ID
+    ? config.hosts.find((entry) => entry.id === config.defaultHostId)
+    : null;
+  const defaultHostRelayCapable = Boolean(sanitizeHostRelayForStorage(defaultHost?.relay));
   if (envTarget) {
     initialUrl = envTarget;
-  } else if (config.defaultHostId && config.defaultHostId !== LOCAL_HOST_ID) {
-    const host = config.hosts.find((entry) => entry.id === config.defaultHostId);
-    if (host?.url) {
-      initialUrl = host.url;
-    }
+  } else if (defaultHost) {
+    initialUrl = normalizeHostUrl(defaultHost.apiUrl || defaultHost.url) || localUiUrl;
   }
 
   if (initialUrl !== localUiUrl) {
     remoteProbe = await probeHostWithTimeout(initialUrl, 2_000);
-    if (remoteProbe.status === 'unreachable') {
+    if (shouldRetryDefaultHostProbe(remoteProbe.status, defaultHostRelayCapable)) {
       remoteProbe = await probeHostWithTimeout(initialUrl, 10_000);
     }
-    if (remoteProbe.status === 'unreachable') {
+    if (shouldUseLocalSubstrateForDefaultHost(remoteProbe.status, defaultHostRelayCapable)) {
+      initialUrl = localUiUrl;
+    } else if (remoteProbe.status === 'unreachable' || remoteProbe.status === 'wrong-service') {
       state.unreachableHosts.add(initialUrl);
       // Keep UI on local origin for chooser/recovery; do not mutate remote catalogs.
       initialUrl = localUiUrl;

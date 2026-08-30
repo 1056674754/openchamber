@@ -75,6 +75,7 @@ import { isVSCodeRuntime } from '@/lib/desktop';
 import { resolveGlobalSessionDirectory, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { resolveSessionEntryScrollAction } from './lib/scroll/scrollIntent';
 import { compareMessagesChronologically } from '@/sync/message-ordering';
+import { useAuthSessionStore } from '@/lib/runtime-auth-expiry';
 
 const EMPTY_MESSAGES: Array<{ info: Message; parts: Part[] }> = [];
 const IDLE_SESSION_STATUS = { type: 'idle' as const };
@@ -596,6 +597,8 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
         suspendPartUpdatesForMessageId: streamingMessageId,
     });
     const sessionMessages = currentSessionId ? sessionMessageRecords : EMPTY_MESSAGES;
+    const authSessionState = useAuthSessionStore((store) => store.state);
+    const wasAuthExpiredRef = React.useRef(false);
     const sessionPrefetchDirectory = React.useMemo(() => {
         if (!currentSessionId) return syncDirectory;
         return currentSessionDirectory ?? useSessionUIStore.getState().getDirectoryForSession(currentSessionId) ?? syncDirectory;
@@ -1033,6 +1036,16 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
         if (hasRenderableSessionSnapshot) return;
         void ensureSessionRenderable(currentSessionId);
     }, [currentSessionDirectory, currentSessionId, ensureSessionRenderable, hasRenderableSessionSnapshot]);
+
+    React.useEffect(() => {
+        if (authSessionState !== 'ok') {
+            wasAuthExpiredRef.current = true;
+            return;
+        }
+        if (!wasAuthExpiredRef.current || !currentSessionId) return;
+        wasAuthExpiredRef.current = false;
+        void sync.ensureSessionRenderable(currentSessionId, true);
+    }, [authSessionState, currentSessionId, sync]);
 
 	if (!currentSessionId && !draftOpen) {
 		return (

@@ -34,6 +34,7 @@ import { useNativeMobileChrome } from '@/hooks/useNativeMobileChrome';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { isRelayModeActive } from '@/lib/relay/runtime-tunnel';
 import { getRuntimeApiBaseUrl, subscribeRuntimeEndpointChanged, switchRuntimeEndpoint } from '@/lib/runtime-switch';
+import { useAuthSessionStore } from '@/lib/runtime-auth-expiry';
 
 type MobileAppProps = {
   apis: RuntimeAPIs;
@@ -128,6 +129,17 @@ export const MobileApp: React.FC<MobileAppProps> = ({ apis }) => {
       }
     },
   });
+
+  React.useEffect(() => {
+    if (!isCapacitorApp()) return;
+    return useAuthSessionStore.subscribe((store, previous) => {
+      if (store.state !== 'expired' || previous.state === 'expired') return;
+      useAuthSessionStore.getState().markAuthenticated(store.runtimeKey);
+      disconnectRuntime();
+      setRuntimeUrl('');
+      setFailureRef.current('auth-required');
+    });
+  }, []);
 
   React.useEffect(() => {
     markAppBootReady();

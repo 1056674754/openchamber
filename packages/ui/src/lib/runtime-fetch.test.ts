@@ -4,6 +4,7 @@ import { addRuntimeProxyHeaders, buildRuntimeFetchUrl, isLatin1Safe, runtimeFetc
 import { clearRuntimeAuthCredentialProvider, setRuntimeBearerToken } from './runtime-auth';
 import { configureRuntimeUrlResolver, getRuntimeUrlResolver, setRuntimeUrlResolver } from './runtime-url';
 import { adoptRelayTunnel, deactivateRelayTunnel } from './relay/runtime-tunnel';
+import { resetRuntimeAuthExpiryForTests, useAuthSessionStore } from './runtime-auth-expiry';
 import type { RelayTunnelClient } from './relay/tunnel-client';
 
 const originalFetch = globalThis.fetch;
@@ -318,22 +319,27 @@ describe('runtimeFetch transport contract', () => {
     const calls: Array<{ input: RequestInfo | URL; init?: RequestInit }> = [];
 
     try {
+      resetRuntimeAuthExpiryForTests();
       configureRuntimeUrlResolver({ apiBaseUrl: 'https://runtime.example' });
       setRuntimeBearerToken('runtime-token');
 
       globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
         calls.push({ input, init });
-        return new Response(null, { status: 204 });
+        return new Response(null, { status: 401 });
       }) as typeof fetch;
 
       await runtimeFetch('https://old-runtime.example/api/config/settings');
 
       expect(String(calls[0].input)).toBe('https://old-runtime.example/api/config/settings');
       expect(new Headers(calls[0].init?.headers).has('authorization')).toBe(false);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(calls).toHaveLength(1);
+      expect(useAuthSessionStore.getState().state).toBe('ok');
     } finally {
       setRuntimeUrlResolver(previous);
       globalThis.fetch = originalFetch;
       clearRuntimeAuthCredentialProvider();
+      resetRuntimeAuthExpiryForTests();
     }
   });
 
