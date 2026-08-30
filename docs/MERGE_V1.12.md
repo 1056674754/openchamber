@@ -2719,7 +2719,7 @@ v1.20.0-sscity 尚未宣布完成：当前未关闭 `#135/#140/#142-#151/#154/#1
 - link/script 跨到另一 loopback port 在 `will-navigate` 前 retunnel；server redirect 的 failed load 最多按 URL 恢复一次。失败显示 unavailable 并抛原始 tool failure，绝不回退本机同端口。
 - 对应提交：`6cad928cb feat(browser): resolve remote loopback tunnels`、`a0522c6a6 feat(browser): validate tunnel instance authority`、`0cd6d1b81 feat(browser): bridge SSH dev tunnels`、`515896256 feat(browser): load remote dev tunnels`。
 
-验证：Browser URL/tunnel/dev-server/history/crash focused 5 files / 18 tests ✅；Electron tunnel/certificate authority Node 2 files / 6 tests ✅；UI type-check/lint、Electron type-check/lint、main syntax ✅。`main.mjs` 使用 temporary index 精确提交，其他 agent WIP 仍为 23/5。[#135](https://coding.s-s.city/songsong/openchamber/-/issues/135) 保持 open：需要真实 SSH instance + remote dev server + Electron webview/HMR/cross-port matching-surface QA；private relay dev tunnel 仍归 #137。
+验证：Browser URL/tunnel/dev-server/history/crash focused 5 files / 18 tests ✅；Electron tunnel/certificate authority Node 2 files / 6 tests ✅；main syntax、全 workspace type-check/lint/build ✅，build 仅有既有 chunk/import warnings。`main.mjs` 使用 temporary index 精确提交，其他 agent WIP 仍为 23/5。[#135](https://coding.s-s.city/songsong/openchamber/-/issues/135) 保持 open：需要真实 SSH instance + remote dev server + Electron webview/HMR/cross-port matching-surface QA；private relay dev tunnel 仍归 #137。
 
 ### #137 Phase 10：Loss-safe relay request-body delivery（2026-08-30）
 
