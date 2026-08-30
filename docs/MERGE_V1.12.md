@@ -2168,3 +2168,11 @@ fork 已有丰富的 surface 组织（#62 surface rail + ContextSidebarTab + Con
 - HTTP(S) 继续走原有 `openExternalUrl`；custom scheme 只有在 classifier + confirmation 后才进入 `openConfirmedAppLinkUrl`，不会放宽普通 URL opener。
 
 验证：URL classifier、trust store、confirmation queue、click/auxclick/drag interaction 共 4 files / 13 Bun tests ✅；full workspace type-check/lint ✅；Web/VS Code production build ✅；`git diff --check` ✅。
+
+### #159 Phase 1：Desktop/mobile shell parity audit（2026-08-30）
+
+- Electron 已为 43.3.0（fork `831801e44`），Linux frameless rounded-corner 前置等价，无重复升级。
+- iOS CodeMirror 已有 native selection + visible handles 的 fork 实现与 focused tests，等价覆盖上游 `26b0ad5bd`，不替换现有低延迟 composer theme。
+- `desktop_minimize_current_window` 当前始终调用 `browserWindow.minimize()`，close path 才走 tray；补齐 10 locale 文案为“关闭到托盘，最小化保留任务栏”，对齐 `c020e1554`，保留 persisted key `desktopMinimizeToTrayEnabled`。
+- Windows 右侧 controls 去除多余 header padding，close hover 改用 status error theme tokens，对齐 `57c9ec2fd`；fork Mini Chat 当前没有该上游 frameless-controls 结构，因此不造无调用方样式。
+- `bcab6d68a` self-signed loopback Browser panel certificate exception 尚未落地：需要接入当前由其他 agent 修改中的 `packages/electron/main.mjs`。为避免把 settings-lock/SSH WIP 一并提交，本项保持 open，待 main WIP 收口后补 helper + hook + shell test。
