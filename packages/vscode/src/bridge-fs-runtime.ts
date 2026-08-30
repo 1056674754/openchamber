@@ -3,6 +3,7 @@ import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs';
 import type { BridgeResponse } from './bridge';
+import { writeVSCodeUploadedFile } from './fs-upload-runtime';
 
 type BridgeMessageInput = {
   id: string;
@@ -59,6 +60,11 @@ const createGitCheckIgnoreTimeoutMs = () => {
 
 const normalizeCommand = (command: unknown): string =>
   typeof command === 'string' ? command.trim().replace(/\s+/g, ' ') : '';
+
+const isPathWithin = (root: string, target: string): boolean => {
+  const relative = path.relative(path.resolve(root), path.resolve(target));
+  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+};
 
 const isCacheableGitReadCommand = (command: string): boolean => {
   const normalized = normalizeCommand(command);
@@ -247,6 +253,53 @@ export async function handleFsBridgeMessage(
       const resolvedPath = deps.resolveUserPath(target, workspaceRoot);
       await vscode.workspace.fs.createDirectory(vscode.Uri.file(resolvedPath));
       return { id, type, success: true, data: { success: true, path: deps.normalizeFsPath(resolvedPath) } };
+    }
+
+    case 'api:fs:upload': {
+      const input = (payload || {}) as {
+        directory?: unknown;
+        path?: unknown;
+        bodyBase64?: unknown;
+        overwrite?: unknown;
+      };
+      const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
+      const directory = typeof input.directory === 'string'
+        ? deps.resolveUserPath(input.directory, workspaceRoot)
+        : '';
+      const targetPath = typeof input.path === 'string'
+        ? deps.resolveUserPath(input.path, directory || workspaceRoot)
+        : '';
+      if (!workspaceRoot || !directory || !targetPath || typeof input.bodyBase64 !== 'string') {
+        return { id, type, success: false, error: 'directory, path, and upload body are required' };
+      }
+      if (!isPathWithin(workspaceRoot, directory)) {
+        return {
+          id,
+          type,
+          success: true,
+          data: {
+            status: 403,
+            body: { error: 'Owning directory is outside the VS Code workspace', reason: 'outside-workspace' },
+          },
+        };
+      }
+      const result = await writeVSCodeUploadedFile({
+        directory,
+        targetPath,
+        bodyBase64: input.bodyBase64,
+        overwrite: input.overwrite === true,
+      });
+      return {
+        id,
+        type,
+        success: true,
+        data: {
+          ...result,
+          body: result.body.path
+            ? { ...result.body, path: deps.normalizeFsPath(result.body.path) }
+            : result.body,
+        },
+      };
     }
 
     case 'api:fs/home': {

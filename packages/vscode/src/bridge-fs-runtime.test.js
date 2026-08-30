@@ -36,6 +36,14 @@ mock.module('vscode', () => ({
   window: {},
 }));
 
+const uploadCalls = [];
+mock.module('./fs-upload-runtime', () => ({
+  writeVSCodeUploadedFile: mock(async (input) => {
+    uploadCalls.push(input);
+    return { status: 200, body: { success: true, path: input.targetPath } };
+  }),
+}));
+
 const { clearGitReadCacheForTests, handleFsBridgeMessage } = await import('./bridge-fs-runtime');
 
 afterAll(() => {
@@ -145,5 +153,61 @@ describe('bridge binary file reads', () => {
       data: { dataUrl: 'data:image/png;base64,cG5n', path: '/workspace/image.png' },
     });
     expect(localDeps.resolveFileReadPath).toHaveBeenCalledWith('/workspace/image.png');
+  });
+});
+
+describe('bridge binary uploads', () => {
+  beforeEach(() => {
+    uploadCalls.length = 0;
+  });
+
+  it('forwards explicit workspace authority and bytes to the atomic runtime', async () => {
+    const result = await handleFsBridgeMessage({
+      id: 'upload-1',
+      type: 'api:fs:upload',
+      payload: {
+        directory: '/workspace/project',
+        path: '/workspace/project/image.png',
+        bodyBase64: 'cG5n',
+        overwrite: true,
+      },
+    }, deps);
+
+    expect(uploadCalls).toEqual([{
+      directory: '/workspace/project',
+      targetPath: '/workspace/project/image.png',
+      bodyBase64: 'cG5n',
+      overwrite: true,
+    }]);
+    expect(result).toEqual({
+      id: 'upload-1',
+      type: 'api:fs:upload',
+      success: true,
+      data: {
+        status: 200,
+        body: { success: true, path: '/workspace/project/image.png' },
+      },
+    });
+  });
+
+  it('rejects an owning directory outside the VS Code workspace', async () => {
+    const result = await handleFsBridgeMessage({
+      id: 'upload-2',
+      type: 'api:fs:upload',
+      payload: {
+        directory: '/outside',
+        path: '/outside/image.png',
+        bodyBase64: 'cG5n',
+      },
+    }, deps);
+
+    expect(uploadCalls).toEqual([]);
+    expect(result).toMatchObject({
+      success: true,
+      data: {
+        status: 403,
+        body: { reason: 'outside-workspace' },
+      },
+    });
   });
 });
