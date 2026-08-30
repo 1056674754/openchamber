@@ -2838,6 +2838,15 @@ v1.20.0-sscity 尚未宣布完成：当前未关闭 `#135/#140/#142-#151/#154/#1
 
 验证：session display store 1 file / 6 tests ✅；full UI type-check/lint ✅；`git diff --check` ✅。独立 electron dev matching-surface QA：显示模式菜单包含“所有项目/单个项目”；进入 single 后出现 picker且只渲染选中项目；picker从“青浦协和Dev Suisqp Web”切到 `openchamber`，主 composer仍保持“青浦协和Dev Suisqp Web”；最后恢复 all mode并停止 dev。[#156](https://coding.s-s.city/songsong/openchamber/-/issues/156) 保持 open：还需用隔离 OpenCode data dir 创建一个外部 Session，等待/触发 refresh并确认 sidebar + Recent 自动出现后关闭。
 
+### #156 Phase 2：External Session live discovery matching-surface QA（2026-08-31）
+
+- 使用全新的临时 `HOME`、`XDG_DATA_HOME`、`XDG_CONFIG_HOME`、`OPENCHAMBER_DATA_DIR` 和 project directory 启动独立 Web/OpenCode 实例；正式 OpenChamber、用户 Session 数据库和安装 runtime 均未参与。
+- 页面 bootstrap 完成并显示 `External Session QA` 项目后，绕过 OpenChamber UI，直接向该实例管理的 OpenCode `POST /session` 创建 `Externally created QA session`。过程中没有点击 sidebar refresh，也没有 reload 页面。
+- 约 2.5 秒后，当前页面 sidebar 自动出现该 Session；说明 OpenCode live event/authoritative refresh 能把外部创建的 Session 合入现有 multi-instance global store，不依赖组件 mount snapshot或全局 current directory。
+- 测试 tab、OpenChamber parent、managed OpenCode child 与临时目录均已清理；清理前确认 parent/child process ownership，未终止任何正式 runtime。
+
+验证：当前 `packages/web/dist` production build ✅；隔离 OpenChamber `/health` ready（managed OpenCode ready）✅；direct OpenCode Session create HTTP 200 ✅；无手动刷新 sidebar 自动出现 Session ✅；进程/临时数据 cleanup ✅。至此 [#156](https://coding.s-s.city/songsong/openchamber/-/issues/156) 的 focused-project sidebar、项目作用域隔离和 external-session discovery 均已完成，可关闭。
+
 ### #137 Phase 10：Loss-safe relay request-body delivery（2026-08-30）
 
 上游来源：`d634cd232`、`aaf397e68`、`854a0db92`，保持 TS client / JS host wire backward compatibility：
