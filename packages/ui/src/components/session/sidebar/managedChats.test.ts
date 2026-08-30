@@ -1,7 +1,10 @@
 import { describe, expect, test } from 'bun:test';
 import type { Session } from '@opencode-ai/sdk/v2';
 
-import { deriveManagedChatsSource } from './managedChats';
+import {
+  deriveInstanceManagedChatsSources,
+  deriveManagedChatsSource,
+} from './managedChats';
 
 const session = (id: string, directory: string, archived = false): Session => ({
   id,
@@ -20,6 +23,7 @@ describe('managed Chats sidebar source', () => {
 
     expect(source?.root).toBe('/Users/tester/.config/openchamber/chats');
     expect(source?.sessions.map((item) => item.id)).toEqual(['a', 'b']);
+    expect(source?.rootNodes.map((item) => item.session.id)).toEqual(['a', 'b']);
     expect(source?.folderScopes.map((item) => item.directory)).toEqual([
       '/Users/tester/.config/openchamber/chats',
       '/Users/tester/.config/openchamber/chats/2026-08-30/session-a',
@@ -35,5 +39,24 @@ describe('managed Chats sidebar source', () => {
 
     expect(source?.root).toBe('/home/remote/.config/openchamber/chats');
     expect(source?.sessions.map((item) => item.id)).toEqual(['remote']);
+  });
+
+  test('builds parent-child trees and keeps instance roots separate', () => {
+    const parent = session('parent', '/Users/tester/.config/openchamber/chats/2026-08-30/session-a');
+    const child = {
+      ...session('child', '/Users/tester/.config/openchamber/chats/2026-08-30/session-a'),
+      parentID: 'parent',
+    } as Session;
+    const remote = session('remote', '/home/remote/.config/openchamber/chats/2026-08-30/session-b');
+    const sources = deriveInstanceManagedChatsSources(
+      [parent, child, remote],
+      (item) => item.id === 'remote' ? 'dev3' : 'default',
+      '/Users/tester',
+    );
+
+    expect(sources.map((source) => source.serverId)).toEqual(['default', 'dev3']);
+    expect(sources[0]?.rootNodes.map((node) => node.session.id)).toEqual(['parent']);
+    expect(sources[0]?.rootNodes[0]?.children.map((node) => node.session.id)).toEqual(['child']);
+    expect(sources[1]?.root).toBe('/home/remote/.config/openchamber/chats');
   });
 });
