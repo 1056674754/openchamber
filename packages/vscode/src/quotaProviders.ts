@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { fetchOpenCodeGoUsage, readOpenCodeGoCredential } from './opencodeGoQuota';
+import { fetchCommandCodeUsage } from './commandCodeQuota';
 
 type AuthEntry = Record<string, unknown> | string;
 type AuthFile = Record<string, AuthEntry>;
@@ -69,6 +70,9 @@ type ZaiLimit = {
   type?: string;
   number?: number;
   unit?: number;
+  usage?: number;
+  currentValue?: number;
+  remaining?: number;
   nextResetTime?: number;
   percentage?: number;
 };
@@ -76,6 +80,7 @@ type ZaiLimit = {
 type ZaiPayload = {
   data?: {
     limits?: ZaiLimit[];
+    level?: string;
   };
 };
 
@@ -134,6 +139,19 @@ export type ProviderResult = {
   usage: ProviderUsage | null;
   fetchedAt: number;
   error?: string;
+  planLabel?: string | null;
+};
+
+const formatZaiCreditAmount = (value: number): string => {
+  if (value < 1000) return value.toLocaleString('en-US');
+  return `${Math.round(value / 100) / 10}k`;
+};
+
+const formatZaiCreditValueLabel = (limit: ZaiLimit): string | null => {
+  const used = toNumber(limit.currentValue);
+  const total = toNumber(limit.usage);
+  if (used === null || total === null) return null;
+  return `${formatZaiCreditAmount(used)} / ${formatZaiCreditAmount(total)} credits`;
 };
 
 const OPENCODE_CONFIG_DIR = path.join(os.homedir(), '.config', 'opencode');
@@ -373,6 +391,7 @@ const buildResult = (data: {
   configured: boolean;
   usage?: ProviderUsage | null;
   error?: string;
+  planLabel?: string | null;
 }): ProviderResult => ({
   providerId: data.providerId,
   providerName: data.providerName,
@@ -380,6 +399,7 @@ const buildResult = (data: {
   configured: data.configured,
   usage: data.usage ?? null,
   ...(data.error ? { error: data.error } : {}),
+  ...(data.planLabel ? { planLabel: data.planLabel } : {}),
   fetchedAt: Date.now(),
 });
 
@@ -408,6 +428,13 @@ export const listConfiguredQuotaProviders = () => {
   const auth = readAuthFile();
   const configured = new Set<string>();
   if (readOpenCodeGoCredential()) configured.add('opencode-go');
+  const commandCodeAuth = normalizeAuthEntry(getAuthEntry(auth, ['command-code']));
+  if (commandCodeAuth && (
+    typeof commandCodeAuth.key === 'string'
+    || typeof commandCodeAuth.access === 'string'
+    || typeof commandCodeAuth.token === 'string'
+  )) configured.add('command-code');
+  if (process.env.COMMAND_CODE_API_KEY?.trim()) configured.add('command-code');
 
   const anthropicAuth = normalizeAuthEntry(getAuthEntry(auth, ['anthropic', 'claude']));
   if (anthropicAuth && ((anthropicAuth as Record<string, unknown>).access || (anthropicAuth as Record<string, unknown>).token)) {
@@ -1592,16 +1619,17 @@ export const fetchZaiQuota = async (): Promise<ProviderResult> => {
     const payload = await response.json() as ZaiPayload;
     const limits = Array.isArray(payload?.data?.limits) ? payload.data.limits : [];
     const windows: Record<string, UsageWindow> = {};
-    for (const tokensLimit of limits.filter((limit) => limit?.type === 'TOKENS_LIMIT')) {
-      const windowSeconds = resolveWindowSeconds(tokensLimit as Record<string, unknown>);
+    for (const limit of limits.filter((entry) => entry?.type === 'TOKENS_LIMIT' || entry?.type === 'CREDIT_LIMIT')) {
+      const windowSeconds = resolveWindowSeconds(limit as Record<string, unknown>);
       const windowLabel = resolveWindowLabel(windowSeconds);
-      const resetAt = tokensLimit.nextResetTime ? normalizeTimestamp(tokensLimit.nextResetTime) : null;
-      const usedPercent = typeof tokensLimit.percentage === 'number' ? tokensLimit.percentage : null;
+      const resetAt = limit.nextResetTime ? normalizeTimestamp(limit.nextResetTime) : null;
+      const usedPercent = typeof limit.percentage === 'number' ? limit.percentage : null;
 
       windows[windowLabel] = toUsageWindow({
         usedPercent,
         windowSeconds,
         resetAt,
+        valueLabel: formatZaiCreditValueLabel(limit),
       });
     }
 
@@ -1620,6 +1648,7 @@ export const fetchZaiQuota = async (): Promise<ProviderResult> => {
       ok: true,
       configured: true,
       usage: { windows },
+      planLabel: payload?.data?.level || null,
     });
   } catch (error) {
     return buildResult({
@@ -2307,6 +2336,37 @@ export const fetchQuotaForProvider = async (providerId: string): Promise<Provide
         return buildResult({
           providerId,
           providerName: 'OpenCode Go',
+          ok: false,
+          configured: true,
+          error: error instanceof Error ? error.message : 'Request failed',
+        });
+      }
+    }
+    case 'command-code': {
+      const entry = normalizeAuthEntry(getAuthEntry(readAuthFile(), ['command-code']));
+      const stored = typeof entry?.key === 'string'
+        ? entry.key
+        : typeof entry?.access === 'string'
+          ? entry.access
+          : typeof entry?.token === 'string'
+            ? entry.token
+            : null;
+      const apiKey = stored?.trim() || process.env.COMMAND_CODE_API_KEY?.trim() || null;
+      if (!apiKey) {
+        return buildResult({ providerId, providerName: 'Command Code', ok: false, configured: false, error: 'Not configured' });
+      }
+      try {
+        return buildResult({
+          providerId,
+          providerName: 'Command Code',
+          ok: true,
+          configured: true,
+          usage: { windows: await fetchCommandCodeUsage(apiKey) },
+        });
+      } catch (error) {
+        return buildResult({
+          providerId,
+          providerName: 'Command Code',
           ok: false,
           configured: true,
           error: error instanceof Error ? error.message : 'Request failed',

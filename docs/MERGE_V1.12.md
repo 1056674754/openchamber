@@ -2125,3 +2125,12 @@ fork 已有丰富的 surface 组织（#62 surface rail + ContextSidebarTab + Con
 - UI sync/session-actions：58 tests ✅（interrupted settle、completed reconciliation、directory routing、raw failure）。
 - web lifecycle/runtime identity：4 files / 34 tests ✅（restart settle、single notification、stable host identity、diagnostic redaction/tail）。
 - full workspace type-check ✅；full workspace lint ✅；build/web 与 diff check 在本批最终提交前复跑。
+
+### #138 Phase 1：Command Code + Z.ai credits（2026-08-30）
+
+- 新增 Command Code Web/VS Code provider：标准 `command-code` auth entry 或 `COMMAND_CODE_API_KEY`；先以 `/alpha/whoami` 解析个人/组织 scope，再读取 credits 与 5h/weekly limits。
+- UI quota registry/type/logo 同步加入 `command-code`；monthly/purchased/free credit labels 补齐全 locale。
+- Z.ai 同时接受 `TOKENS_LIMIT` 与新 `CREDIT_LIMIT`，显示 `used / total credits`，并保留 API `level` 为 plan label；Web/VS Code parity。
+- fork 原有 60s 可配置 auto-refresh、Header/VS Code/Usage 三 surface 挂载和 UI request single-flight 已覆盖上游 3 分钟刷新目标，不降级为上游固定实现。
+
+验证：Web provider/registry/formatter 4 files / 19 tests ✅；VS Code quota parity 9 tests ✅；full type-check ✅。[#138](https://coding.s-s.city/songsong/openchamber/-/issues/138) 保持 open，下一 phase 处理 Claude Code credential/quota 与 OpenCode Go API-key migration。

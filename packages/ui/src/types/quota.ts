@@ -1,6 +1,7 @@
 export type QuotaProviderId =
   | 'openai'
   | 'codex'
+  | 'command-code'
   | 'cursor'
   | 'claude'
   | 'github-copilot'
@@ -47,4 +48,5 @@ export interface ProviderResult {
   error?: string;
   usage: ProviderUsage | null;
   fetchedAt: number;
+  planLabel?: string | null;
 }

@@ -19,6 +19,7 @@ These provider IDs are currently dispatchable via `fetchQuotaForProvider(provide
 | --- | --- | --- | --- |
 | `claude` | Claude | `providers/claude.js` | `anthropic`, `claude` |
 | `codex` | Codex | `providers/codex.js` | `openai`, `codex`, `chatgpt` |
+| `command-code` | Command Code | `providers/command-code.js` | `command-code` auth entry or `COMMAND_CODE_API_KEY` |
 | `crof` | CrofAI | `providers/crof.js` | `crof` |
 | `cursor` | Cursor | `providers/cursor.js` | `CURSOR_TOKEN` / `CURSOR_ACCESS_TOKEN`, `CURSOR_REFRESH_TOKEN`, optional token files, or Cursor desktop SQLite DB |
 | `deepseek` | DeepSeek | `providers/deepseek.js` | `deepseek` |
@@ -65,6 +66,10 @@ meaningful percentage or reset period.
 DeepSeek exposes the preferred USD balance, with CNY as a fallback, as a
 label-only credits window. Kimi accepts either `used` or `remaining` in both
 weekly and rate-limit payloads; when both are present, `used` is authoritative.
+
+Command Code resolves account scope through `/alpha/whoami`, then reads credit
+balances plus five-hour/weekly limits from `/alpha/billing/credits`. Credentials
+stay in the owning runtime and are never returned to shared UI.
 
 ## MiniMax M3 / Token Plan migration
 In 2025/2026 MiniMax rebranded "Coding Plan" to "Token Plan" alongside the M3 model release. The API underwent breaking changes:

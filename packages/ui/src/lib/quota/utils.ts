@@ -77,6 +77,9 @@ export const formatWindowLabel = (label: string): string => {
   if (label === 'daily') return 'Daily';
   if (label === 'monthly') return 'Monthly Limit';
   if (label === 'credits') return 'Credits';
+  if (label === 'monthly_credits') return 'Monthly Credits';
+  if (label === 'purchased_credits') return 'Purchased Credits';
+  if (label === 'free_credits') return 'Free Credits';
   if (label === 'billing_cycle') return 'Billing Cycle';
   if (label === 'auto') return 'Auto';
   if (label === 'api') return 'API';

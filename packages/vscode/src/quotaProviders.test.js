@@ -13,6 +13,7 @@ mock.module('node:fs', () => ({
         kimi: { key: 'test-token' },
         neuralwatt: { key: 'test-token' },
         'zai-coding-plan': { key: 'test-token' },
+        'command-code': { key: 'command-token' },
       });
     },
   },
@@ -44,6 +45,7 @@ describe('VS Code quota provider parity', () => {
       'deepseek',
       'kimi-for-coding',
       'neuralwatt',
+      'command-code',
     ]));
   });
 
@@ -117,6 +119,45 @@ describe('VS Code quota provider parity', () => {
       windowSeconds: 30 * 24 * 60 * 60,
       resetAt: 1787128459979,
     });
+  });
+
+  it('reports Z.ai credit limits and plan level', async () => {
+    globalThis.fetch = mock(async () => response({
+      data: {
+        limits: [
+          { type: 'CREDIT_LIMIT', unit: 3, number: 5, usage: 12000, currentValue: 65, percentage: 1 },
+          { type: 'CREDIT_LIMIT', unit: 6, number: 1, usage: 60000, currentValue: 65, percentage: 1 },
+        ],
+        level: 'pro',
+      },
+    }));
+
+    const result = await fetchQuotaForProvider('zai-coding-plan');
+
+    expect(result.planLabel).toBe('pro');
+    expect(result.usage?.windows['5h'].valueLabel).toBe('65 / 12k credits');
+    expect(result.usage?.windows.weekly.valueLabel).toBe('65 / 60k credits');
+  });
+
+  it('reports Command Code credits and rolling limits', async () => {
+    globalThis.fetch = mock(async (input) => {
+      const url = String(input);
+      if (url.endsWith('/alpha/whoami')) return response({ org: { id: 'org-1' } });
+      return response({
+        credits: { monthlyCredits: 80, purchasedCredits: 12.5, freeCredits: 3 },
+        windowLimits: {
+          fiveHour: { used: 20, cap: 100, resetAt: 1785659659 },
+          weekly: { used: 40, cap: 200, resetAt: 1787128459 },
+        },
+      });
+    });
+
+    const result = await fetchQuotaForProvider('command-code');
+
+    expect(result.ok).toBe(true);
+    expect(result.usage?.windows.monthly_credits.valueLabel).toBe('80');
+    expect(result.usage?.windows['5h']).toMatchObject({ usedPercent: 20, valueLabel: '20 / 100' });
+    expect(result.usage?.windows.weekly).toMatchObject({ usedPercent: 20, valueLabel: '40 / 200' });
   });
 
   it('uses Kimi used values before remaining and falls back when used is absent', async () => {
