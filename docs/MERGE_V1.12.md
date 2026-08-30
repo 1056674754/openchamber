@@ -2813,6 +2813,17 @@ v1.20.0-sscity 尚未宣布完成：当前未关闭 `#135/#140/#142-#151/#154/#1
 
 验证：model variants + project hydration + config default cascade + Web normalization 4 files / 22 tests ✅；full workspace type-check/lint ✅；`git diff --check` ✅。[#154](https://coding.s-s.city/songsong/openchamber/-/issues/154) 继续处理 Settings project target 与跨 Settings store routing。
 
+### #154 Phase 3：Settings-only `serverId + project + directory` target（2026-08-31）
+
+上游来源：`06abbe3c8`，但 fork 不采用 path-only selector：
+
+- 新 target authority 先由 Settings instance selector 确定 `serverId`，再从该 server 的 projects 中解析独立 remembered project id 和 directory。本地/远端相同 path 不冲突；remembered project 删除后只在同 server 内回退 active/first project。
+- `SettingsProjectSelector` 不再调用 `setActiveProject`，因此切换配置项目不会移动 chat、session sidebar、Files 或 Git。选择按 server 分开保存在 UI store，不伪装成 app active project。
+- Providers、Agents、Commands、MCP、Skills 的 Settings load/mutation 均接收 target directory；stores 用稳定 target key 保存列表，切回近期目录不会误用另一个项目的数组。Providers/MCP/Skills 同时按 selected settings server base URL 路由和分区。
+- Provider source/custom upsert/auth-delete、MCP CRUD、Skill CRUD/supporting files 都携带目标 directory；Settings shell page activation使用相同 target。对应提交：`0864c9552 feat(settings): scope project target`。
+
+验证：target resolver + provider ownership/nonblocking config 3 files / 21 tests ✅；full workspace type-check/lint/build ✅；build 仅有既有 dynamic-import/chunk/eval warnings；`git diff --check` ✅。[#154](https://coding.s-s.city/songsong/openchamber/-/issues/154) 保持 open：remote Agents/Commands 的 SDK list 与 reload lifecycle 仍需改为 selected settings server authority，并完成真实 local/remote Settings matching-surface QA 后才可关闭。
+
 ### #137 Phase 10：Loss-safe relay request-body delivery（2026-08-30）
 
 上游来源：`d634cd232`、`aaf397e68`、`854a0db92`，保持 TS client / JS host wire backward compatibility：
