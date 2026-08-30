@@ -4,11 +4,13 @@ import type { SessionStatus } from '@opencode-ai/sdk/v2/client';
 import { opencodeClient } from '@/lib/opencode/client';
 import { DEFAULT_SERVER_ID, serverRegistry } from '@/lib/opencode/server-registry';
 import { resolveSessionAuthority } from '@/sync/session-authority';
-import { listGlobalSessionPage, listGlobalSessionPages, splitGlobalSessionsByArchived } from '@/stores/globalSessions';
+import { filterManagedChatsForRuntime, listGlobalSessionPage, listGlobalSessionPages, splitGlobalSessionsByArchived } from '@/stores/globalSessions';
 import { retry } from '@/sync/retry';
 import { readRemoteSessionStatuses } from '@/sync/remote-session-status';
 import { shouldSkipStaleSessionEvent } from '@/sync/session-event-freshness';
 import { normalizePath } from '@/lib/pathNormalization';
+import { isVSCodeRuntime } from '@/lib/desktop';
+import { persistManagedChatSessions, readManagedChatSessions } from '@/sync/managed-chats-cache';
 
 type GlobalSessionsStatus = 'idle' | 'loading' | 'ready' | 'error';
 type DemandLoadStatus = 'loading' | 'loaded' | 'error';
@@ -575,6 +577,10 @@ const applySnapshot = (
   status: GlobalSessionsStatus,
   options?: { markComplete?: boolean },
 ): Partial<GlobalSessionsState> | GlobalSessionsState => {
+  if (isVSCodeRuntime()) {
+    activeSessions = filterManagedChatsForRuntime(activeSessions, true);
+    archivedSessions = filterManagedChatsForRuntime(archivedSessions, true);
+  }
   const nextActiveSessions = sameSessionList(state.activeSessions, activeSessions)
     ? state.activeSessions
     : activeSessions;
@@ -635,10 +641,12 @@ const bumpDeletedRevisions = (
   return { catalogRevision, sessionDeletedRevision };
 };
 
+const initialManagedChatSessions = readManagedChatSessions();
+
 export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => ({
-  activeSessions: [],
+  activeSessions: initialManagedChatSessions,
   archivedSessions: [],
-  sessionsByDirectory: new Map(),
+  sessionsByDirectory: buildSessionsByDirectory(initialManagedChatSessions),
   sessionStatuses: new Map(),
   childLoadState: new Map(),
   archivedLoadState: new Map(),
@@ -991,6 +999,7 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
   },
 
   upsertSession: (session) => {
+    if (isVSCodeRuntime() && filterManagedChatsForRuntime([session], true).length === 0) return;
     set((state) => {
       const existingSession = state.activeSessions.find((candidate) => candidate.id === session.id)
         ?? state.archivedSessions.find((candidate) => candidate.id === session.id)
@@ -1199,6 +1208,12 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
     }
   },
 }));
+
+useGlobalSessionsStore.subscribe((state, previous) => {
+  if (state.activeSessions !== previous.activeSessions && (state.status !== 'idle' || state.activeSessions.length > 0)) {
+    persistManagedChatSessions(state.activeSessions);
+  }
+});
 
 export const ensureGlobalSessionsLoaded = async (fallbackActive?: Session[]): Promise<LoadResult> => {
   const state = useGlobalSessionsStore.getState();

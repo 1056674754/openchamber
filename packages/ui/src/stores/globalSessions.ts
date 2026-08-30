@@ -1,6 +1,7 @@
 import type { Session } from "@opencode-ai/sdk/v2";
 import { runBackgroundNetworkTask } from '@/lib/background-network';
 import { retry } from "@/sync/retry";
+import { isChatDirectoryPath } from '@/lib/chatDirectories';
 
 export type GlobalSessionRecord = Session & {
     project?: {
@@ -9,6 +10,10 @@ export type GlobalSessionRecord = Session & {
         worktree?: string;
     } | null;
 };
+
+export const filterManagedChatsForRuntime = (sessions: Session[], vscode: boolean): Session[] => (
+    vscode ? sessions.filter((session) => !isChatDirectoryPath(session.directory)) : sessions
+);
 
 export type SessionListRequest = {
     directory?: string;
