@@ -2186,6 +2186,14 @@ fork 已有丰富的 surface 组织（#62 surface rail + ContextSidebarTab + Con
 
 验证：Node test 3/3 ✅（loopback allow、non-loopback deny、other-error/malformed deny）；全 workspace type-check/lint/build ✅，build 仅有既有 chunk/import warnings。[#159](https://coding.s-s.city/songsong/openchamber/-/issues/159) 保持 open：等待 `#135` 专用 Browser partition 后接 handler，并完成 installed shell + iOS 真机 QA。
 
+### #159 Phase 3：Browser partition certificate hook（2026-08-30）
+
+- 复核发现 fork Browser `<webview>` 已使用 `partition="persist:openchamber-browser"`；无需等待新的 Browser 架构。Electron ready 时只对该 partition 注册一次 `certificate-error` handler。
+- handler 同时要求 `contents.session === panelSession` 与 Phase 2 policy allow；其他 Electron window/session 即使访问 loopback self-signed HTTPS 也不会获得 bypass。
+- 对应提交：`2bb0a05f4 fix(browser): scope loopback certificate errors`。使用 temporary index 从 dirty `main.mjs` 精确提交；提交后其他 agent 的 main WIP 仍保持 `23 insertions / 5 deletions` 未提交。
+
+验证：Node syntax ✅、Electron type-check/lint ✅、certificate policy 3/3 ✅；full workspace type-check/lint/build 已在同轮通过。此变更属于 immutable shell，不通过 runtime install 发布。[#159](https://coding.s-s.city/songsong/openchamber/-/issues/159) 保持 open：需要下次显式 shell refresh 后用真实 self-signed loopback page 做 installed QA，并保留 iOS 真机 selection QA。
+
 ### #155 Phase 1：Config-defined custom provider auth gate（2026-08-30）
 
 上游来源：`ddd4b5ed8`。fork 已有 config-defined custom provider CRUD、scope/source 识别和 models/baseURL，因此只修真实缺口：
