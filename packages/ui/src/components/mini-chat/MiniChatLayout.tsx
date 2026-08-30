@@ -1,6 +1,7 @@
 import React from 'react';
 import { Button } from '@/components/ui/button';
 import { ChatContainer } from '@/components/chat/ChatContainer';
+import { AppLinkConfirmDialog } from '@/components/chat/AppLinkConfirmDialog';
 import { ChatSurfaceProvider } from '@/components/chat/ChatSurfaceContext';
 import { ContextUsageDisplay } from '@/components/ui/ContextUsageDisplay';
 import { SessionSwitcherDropdown } from '@/components/session/SessionSwitcherDropdown';
@@ -351,6 +352,7 @@ export const MiniChatLayout: React.FC<MiniChatLayoutProps> = ({ mode, autoOpenDr
           </ChatSurfaceProvider>
         )}
       </main>
+      <AppLinkConfirmDialog />
     </div>
   );
 };

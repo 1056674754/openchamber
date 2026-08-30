@@ -18,7 +18,9 @@ import { copyTextToClipboard } from '@/lib/clipboard';
 import { useI18n } from '@/lib/i18n';
 import { updateDesktopSettings } from '@/lib/persistence';
 
-import { getExternalFaviconUrl, isExternalHttpUrl, isLoopbackHttpUrl, normalizeHttpUrlCandidate, openExternalUrl } from '@/lib/url';
+import { getExternalFaviconUrl, isAppLinkUrl, isExternalHttpUrl, isLoopbackHttpUrl, normalizeHttpUrlCandidate, openExternalUrl } from '@/lib/url';
+import { openAppLinkWithConfirmation } from './appLinkConfirmation';
+import { attachAppLinkInteractions } from './appLinkInteractions';
 import {
   buildAgentMentionUrl,
   parseAgentHref,
@@ -52,7 +54,6 @@ import {
   normalizePath,
   resolveMarkdownImageReference,
   shouldInterceptMarkdownFileHref,
-  classifyMarkdownLinkClick,
   shouldPreserveMarkdownFileUrl,
 } from './markdownFileReferences';
 
@@ -71,6 +72,9 @@ const markdownUrlTransform = (url: string, key: string): string => {
   if (shouldPreserveMarkdownFileUrl(url, key)) {
     return url;
   }
+  if (key === 'href' && isAppLinkUrl(url)) {
+    return url;
+  }
 
   return defaultUrlTransform(url);
 };
@@ -83,50 +87,16 @@ const useExternalLinkInteractions = ({
   enabled?: boolean;
 }) => {
   React.useEffect(() => {
-    if (enabled === false) {
-      return;
-    }
-
     const container = containerRef.current;
     if (!container) {
       return;
     }
 
-    const handleClick = (event: MouseEvent) => {
-      if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) {
-        return;
-      }
-
-      const target = event.target;
-      if (!(target instanceof Element)) {
-        return;
-      }
-
-      const anchor = target.closest('a[href]');
-      if (!(anchor instanceof HTMLAnchorElement)) {
-        return;
-      }
-
-      if (anchor.getAttribute('data-openchamber-file-link') === 'true') {
-        return;
-      }
-
-      const href = anchor.getAttribute('href') ?? '';
-      const action = classifyMarkdownLinkClick(href);
-      if (action === 'native') {
-        return;
-      }
-      event.preventDefault();
-      event.stopPropagation();
-      if (action === 'external') {
-        void openExternalUrl(href);
-      }
-    };
-
-    container.addEventListener('click', handleClick);
-    return () => {
-      container.removeEventListener('click', handleClick);
-    };
+    return attachAppLinkInteractions(container, {
+      allowExternalHttp: enabled !== false,
+      openAppLink: (href) => void openAppLinkWithConfirmation(href),
+      openExternalHttp: (href) => void openExternalUrl(href),
+    });
   }, [containerRef, enabled]);
 };
 

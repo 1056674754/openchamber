@@ -3,6 +3,7 @@ import { ErrorBoundary } from '../ui/ErrorBoundary';
 import { SessionSidebar } from '@/components/session/SessionSidebar';
 import { SessionDialogs } from '@/components/session/SessionDialogs';
 import { ChatView } from '@/components/views/ChatView';
+import { AppLinkConfirmDialog } from '@/components/chat/AppLinkConfirmDialog';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useViewportStore } from '@/sync/viewport-store';
 import { useDirectorySync, useSessionMessages, useSessionMessagesResolved } from '@/sync/sync-context';
@@ -575,6 +576,7 @@ export const VSCodeLayout: React.FC = () => {
         </>
       )}
       <SessionDialogs />
+      <AppLinkConfirmDialog />
     </div>
   );
 };

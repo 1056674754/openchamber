@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { getExternalFaviconUrl, isExternalHttpUrl, isLoopbackHttpUrl, normalizeHttpUrlCandidate } from './url';
+import { getExternalFaviconUrl, getUrlScheme, isAppLinkUrl, isExternalHttpUrl, isLoopbackHttpUrl, normalizeHttpUrlCandidate } from './url';
 
 describe('normalizeHttpUrlCandidate', () => {
   test('removes adjacent CJK explanatory text from loopback URLs', () => {
@@ -19,6 +19,23 @@ describe('normalizeHttpUrlCandidate', () => {
 
   test('keeps valid URL paths and query strings intact', () => {
     expect(normalizeHttpUrlCandidate('http://localhost:8081/app/(tabs)?page=1#top')).toBe('http://localhost:8081/app/(tabs)?page=1#top');
+  });
+});
+
+describe('application link classification', () => {
+  test('accepts normal custom application schemes', () => {
+    expect(getUrlScheme('Spotify://track/123')).toBe('spotify');
+    expect(isAppLinkUrl('spotify://track/123')).toBe(true);
+    expect(isAppLinkUrl('obsidian://open?vault=Notes')).toBe(true);
+  });
+
+  test('rejects scriptable, local, network, and self-deep-link schemes', () => {
+    for (const url of [
+      'javascript:alert(1)', 'data:text/html,test', 'file:///tmp/a', 'intent://open',
+      'ws://example.com', 'openchamber://connect?host=x', 'capacitor://localhost',
+    ]) {
+      expect(isAppLinkUrl(url)).toBe(false);
+    }
   });
 });
 

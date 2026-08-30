@@ -2156,3 +2156,15 @@ fork 已有丰富的 surface 组织（#62 surface rail + ContextSidebarTab + Con
 - UI 所有 catalog 请求改经 `runtimeFetch`，source-load single-flight key 包含 resolved runtime identity 与当前 project directory；同路径的两个 remote instance 不会共享请求，且未回退到全局 active server/directory。
 
 验证：skills catalog Web modules 3 files / 7 Vitest tests ✅；真实 Express catalog route 1 test ✅（metadata + ClawHub coexistence）；UI store 4 Bun tests ✅（curated+ClawHub coexistence、active-runtime transport、同 source 去重、跨 runtime 隔离）；full type-check/lint 与 Web/VS Code production build ✅。隔离 server 在现有 managed OpenCode/SQLite startup scan 中阻塞，连 `/health` 都未就绪，因此没有虚报浏览器 QA；该隔离 PID 已单独终止，未触碰用户运行中的 OpenChamber。
+
+### #158：External app deep-link confirmation（2026-08-30）
+
+上游来源：`486c66b0c`。适配 fork 的 ReactMarkdown renderer 和多 runtime shell：
+
+- chat Markdown 允许 `spotify://`、`obsidian://`、`linear://` 等受分类的 app scheme 保留 href；primary/modifier/middle click 与 drag 都先被统一 interaction layer 截获，不能绕过确认。
+- `javascript/data/vbscript/blob/file/intent/ms-msdt/search-ms/shell`、WebView/internal protocols、network protocols 与 `openchamber/openchamber-ui/capacitor` 自 deep-link 永久拒绝，不进入 trust store。
+- 首次打开提供取消、打开一次、信任并打开；取消默认聚焦。信任按 normalized scheme 存入 deferred per-device safe storage，最多 64 项，不写 server settings，也不跨设备同步。
+- trusted scheme 可在 Settings → Chat 中逐项移除；MainLayout、VS Code layout、Mini Chat 各只挂载一个 dialog，避免 nested runtime provider 产生重复确认框。
+- HTTP(S) 继续走原有 `openExternalUrl`；custom scheme 只有在 classifier + confirmation 后才进入 `openConfirmedAppLinkUrl`，不会放宽普通 URL opener。
+
+验证：URL classifier、trust store、confirmation queue、click/auxclick/drag interaction 共 4 files / 13 Bun tests ✅；full workspace type-check/lint ✅；Web/VS Code production build ✅；`git diff --check` ✅。

@@ -14,6 +14,7 @@ import { DesktopNetworkSettings } from './DesktopNetworkSettings';
 import { DesktopOpenCodeSettings } from './DesktopOpenCodeSettings';
 import { KeyboardShortcutsSettings } from './KeyboardShortcutsSettings';
 import { OpenCodeServerInfoSettings } from './OpenCodeServerInfoSettings';
+import { AppLinkSecuritySettings } from './AppLinkSecuritySettings';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { useDeviceInfo } from '@/lib/device';
 import { isDesktopLocalOriginActive, isDesktopShell, isVSCodeRuntime, isWebRuntime } from '@/lib/desktop';
@@ -143,7 +144,12 @@ const VisualSectionContent: React.FC = () => {
 
 // Chat section: User message rendering, Diff layout, Mobile status bar, Show reasoning traces, Queue mode, Persist draft
 const ChatSectionContent: React.FC = () => {
-    return <OpenChamberVisualSettings visibleSettings={['chatRenderMode', 'messageTransport', 'activityRenderMode', 'userMessageRendering', 'reasoning', 'showToolFileIcons', 'expandedTools', 'collapsibleUserMessages', 'stickyUserHeader', 'promptNavigatorEnabled', 'wideChatLayout', 'splitAssistantMessageActions', 'draftStarters', 'subagentPrompting', 'diffLayout', 'mobileStatusBar', 'dotfiles', 'queueMode', 'persistDraft', 'inputSpellcheck', 'multiRun']} />;
+    return (
+        <div className="space-y-6">
+            <OpenChamberVisualSettings visibleSettings={['chatRenderMode', 'messageTransport', 'activityRenderMode', 'userMessageRendering', 'reasoning', 'showToolFileIcons', 'expandedTools', 'collapsibleUserMessages', 'stickyUserHeader', 'promptNavigatorEnabled', 'wideChatLayout', 'splitAssistantMessageActions', 'draftStarters', 'subagentPrompting', 'diffLayout', 'mobileStatusBar', 'dotfiles', 'queueMode', 'persistDraft', 'inputSpellcheck', 'multiRun']} />
+            <div className="border-t border-border/40 pt-6"><AppLinkSecuritySettings /></div>
+        </div>
+    );
 };
 
 // Sessions section: Default model & agent, Session retention

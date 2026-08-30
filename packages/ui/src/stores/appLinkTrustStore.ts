@@ -1,0 +1,42 @@
+import { create } from 'zustand';
+import { persist } from 'zustand/middleware';
+
+import { createDeferredSafeJSONStorage } from '@/stores/utils/safeStorage';
+
+export const MAX_TRUSTED_SCHEMES = 64;
+
+interface AppLinkTrustState {
+  trustedSchemes: string[];
+  trustScheme: (scheme: string) => void;
+  removeTrustedScheme: (scheme: string) => void;
+  isSchemeTrusted: (scheme: string) => boolean;
+}
+
+const normalizeScheme = (scheme: string) => scheme.trim().toLowerCase();
+
+export const useAppLinkTrustStore = create<AppLinkTrustState>()(
+  persist(
+    (set, get) => ({
+      trustedSchemes: [],
+      trustScheme: (scheme) => {
+        const normalized = normalizeScheme(scheme);
+        if (!normalized) return;
+        set((state) => ({
+          trustedSchemes: [normalized, ...state.trustedSchemes.filter((entry) => entry !== normalized)]
+            .slice(0, MAX_TRUSTED_SCHEMES),
+        }));
+      },
+      removeTrustedScheme: (scheme) => {
+        const normalized = normalizeScheme(scheme);
+        set((state) => ({ trustedSchemes: state.trustedSchemes.filter((entry) => entry !== normalized) }));
+      },
+      isSchemeTrusted: (scheme) => get().trustedSchemes.includes(normalizeScheme(scheme)),
+    }),
+    {
+      name: 'app-link-trust-store',
+      storage: createDeferredSafeJSONStorage(),
+      version: 1,
+      partialize: (state) => ({ trustedSchemes: state.trustedSchemes }),
+    },
+  ),
+);

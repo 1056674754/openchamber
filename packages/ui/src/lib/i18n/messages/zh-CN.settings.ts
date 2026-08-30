@@ -2123,5 +2123,9 @@ export const settingsDict = {
   'settings.providers.page.auth.oauth.error.invalidInput': 'The details you entered were rejected.',
   'settings.providers.page.actions.continue': 'Continue',
   'settings.providers.page.actions.cancel': 'Cancel',
+  'settings.openchamber.appLinks.title': '受信任的应用链接',
+  'settings.openchamber.appLinks.info': '此列表中的链接在本设备上打开时不再询问。其他应用链接在打开前始终需要确认。',
+  'settings.openchamber.appLinks.empty': '本设备上暂无受信任的应用链接。打开链接时选择“信任并打开”即可添加到这里。',
+  'settings.openchamber.appLinks.removeAria': '移除受信任的 {scheme} 链接',
   'settings.providers.page.actions.tryAgain': 'Try again',
 } as const;

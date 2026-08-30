@@ -2115,5 +2115,9 @@ export const settingsDict = {
   'settings.providers.page.auth.oauth.error.invalidInput': 'The details you entered were rejected.',
   'settings.providers.page.actions.continue': 'Continue',
   'settings.providers.page.actions.cancel': 'Cancel',
+  'settings.openchamber.appLinks.title': 'Vertrauenswürdige App-Links',
+  'settings.openchamber.appLinks.info': 'Hier aufgeführte Links öffnen sich auf diesem Gerät ohne erneute Nachfrage. Bei anderen App-Links wird vor dem Öffnen immer nachgefragt.',
+  'settings.openchamber.appLinks.empty': 'Keine vertrauenswürdigen App-Links auf diesem Gerät. Wähle beim Öffnen eines Links „Vertrauen und öffnen“, um ihn hier hinzuzufügen.',
+  'settings.openchamber.appLinks.removeAria': 'Vertraute {scheme}-Links entfernen',
   'settings.providers.page.actions.tryAgain': 'Try again',
 } as const;

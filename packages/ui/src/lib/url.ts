@@ -70,6 +70,32 @@ export const isExternalHttpUrl = (url: string): boolean => {
   return parsed.protocol === 'http:' || parsed.protocol === 'https:';
 };
 
+export const getUrlScheme = (url: string): string | null => {
+  const parsed = parseUrlSafely(url.trim());
+  return parsed ? parsed.protocol.replace(/:$/, '').toLowerCase() : null;
+};
+
+const BROWSER_HANDLED_SCHEMES = new Set([
+  'http', 'https', 'mailto', 'tel', 'sms', 'callto', 'cid', 'xmpp', 'irc', 'news', 'nntp', 'feed', 'webcal',
+]);
+const BLOCKED_APP_LINK_SCHEMES = new Set([
+  'javascript', 'data', 'vbscript', 'blob', 'filesystem', 'about',
+  'chrome', 'chrome-extension', 'devtools', 'moz-extension', 'ms-browser-extension',
+  'file', 'ws', 'wss', 'ftp', 'ftps', 'intent', 'ms-msdt', 'search-ms', 'shell',
+  'openchamber', 'openchamber-ui', 'capacitor',
+]);
+const APP_LINK_SCHEME_RE = /^[a-z][a-z0-9+.-]{1,31}$/;
+
+export const isAppLinkUrl = (url: string): boolean => {
+  const scheme = getUrlScheme(url);
+  return Boolean(
+    scheme
+    && APP_LINK_SCHEME_RE.test(scheme)
+    && !BROWSER_HANDLED_SCHEMES.has(scheme)
+    && !BLOCKED_APP_LINK_SCHEMES.has(scheme)
+  );
+};
+
 export const getExternalFaviconUrl = (url: string): string | null => {
   const parsed = parseUrlSafely(normalizeHttpUrlCandidate(url));
   if (!parsed || (parsed.protocol !== 'http:' && parsed.protocol !== 'https:')) {
@@ -138,7 +164,7 @@ export const extractLoopbackUrls = (text: string): string[] => {
  * @param url - The URL to open
  * @returns Promise<boolean> - true if the URL was opened successfully
  */
-export const openExternalUrl = async (url: string): Promise<boolean> => {
+const openValidatedExternalUrl = async (url: string): Promise<boolean> => {
   if (typeof window === 'undefined') {
     return false;
   }
@@ -150,10 +176,6 @@ export const openExternalUrl = async (url: string): Promise<boolean> => {
 
   const parsed = parseUrlSafely(target);
   if (!parsed) {
-    return false;
-  }
-
-  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
     return false;
   }
 
@@ -186,3 +208,11 @@ export const openExternalUrl = async (url: string): Promise<boolean> => {
     return false;
   }
 };
+
+export const openExternalUrl = (url: string): Promise<boolean> => (
+  isExternalHttpUrl(url) ? openValidatedExternalUrl(url) : Promise.resolve(false)
+);
+
+export const openConfirmedAppLinkUrl = (url: string): Promise<boolean> => (
+  isAppLinkUrl(url) ? openValidatedExternalUrl(url) : Promise.resolve(false)
+);

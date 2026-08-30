@@ -11,6 +11,7 @@ import { CommandPalette } from '../ui/CommandPalette';
 import { HelpDialog } from '../ui/HelpDialog';
 import { OpenCodeStatusDialog } from '../ui/OpenCodeStatusDialog';
 import { SessionSidebar } from '@/components/session/SessionSidebar';
+import { AppLinkConfirmDialog } from '@/components/chat/AppLinkConfirmDialog';
 import { SessionDialogs } from '@/components/session/SessionDialogs';
 import { DiffWorkerProvider } from '@/contexts/DiffWorkerProvider';
 import { MultiRunLauncher } from '@/components/multirun';
@@ -673,6 +674,8 @@ export const MainLayout: React.FC = () => {
                     </React.Suspense>
                 </>
             )}
+
+            <AppLinkConfirmDialog />
 
         </div>
     </DiffWorkerProvider>
