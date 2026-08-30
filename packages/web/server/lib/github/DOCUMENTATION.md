@@ -76,8 +76,9 @@
 - It resolves those remotes into GitHub repos.
 - It expands each repo through `parent` and `source` so PRs in upstream repos can still be found.
 - It skips PR lookup when the current branch matches that repo's default branch.
-- It first searches for PRs by likely source owner plus exact head branch.
-- If that fails, it falls back to broader GitHub search for the branch name.
+- It searches every target in the fork network for an open PR before considering branch history, so a merged fork PR cannot hide a newer open upstream PR.
+- Closed/merged history is queried only for the branch's primary repo/name association and cached separately; it is returned only when no target has an open PR.
+- If exact open-PR lookup is not authoritative, it falls back to broader GitHub search for the branch name. Search fallback never spends quota on historical PRs.
 - `403` and `404` during repo lookups are treated as expected gaps, not hard errors.
 
 ## Shared client state model
@@ -93,7 +94,7 @@
 - Persisted fields include status, timestamps, identity, and resolved remote.
 - Runtime-only details are not persisted.
 - Persisted entries expire after 12 hours.
-- On reload, users get last known state first, then background refresh resumes.
+- On reload, users get last known state first, then background refresh resumes. Restored closed/merged history resets its discovery timestamp so it cannot act as live authority.
 
 ## Polling and refresh model
 
@@ -109,7 +110,7 @@
 - Open PR with pending checks -> refresh about every `1m`.
 - Open PR with non-pending checks -> refresh about every `5m`.
 - Open PR without a stable checks signal -> refresh about every `2m`.
-- Closed or merged PR -> stop regular polling.
+- Closed or merged PR -> retain as branch history and re-enter the `5m` discovery cadence so a newer open PR or authoritative empty result replaces it.
 - Hidden tab -> skip polling.
 - Non-forced refreshes use a `90s` TTL.
 - Client PR-status calls share a global concurrency limit of `2`, preserving browser connections for bootstrap, diffs, and message sends.

@@ -855,6 +855,8 @@ export const dict = {
   'gitView.pr.comments.title': 'Comments',
   'gitView.pr.comments.unknownAuthor': 'Unknown author',
   'gitView.pr.createTitle': 'Create pull request',
+  'gitView.pr.history.merged': 'PR #{number} was merged into {base}.',
+  'gitView.pr.history.closed': 'PR #{number} was closed.',
   'gitView.pr.draftMustBeReady': 'Draft PR must be marked ready before merge.',
   'gitView.pr.field.baseBranch': 'Base branch',
   'gitView.pr.field.description': 'Description',

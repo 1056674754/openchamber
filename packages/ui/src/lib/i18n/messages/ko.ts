@@ -848,6 +848,8 @@ export const dict: Record<I18nKey, string> = {
   'gitView.pr.comments.title': '댓글',
   'gitView.pr.comments.unknownAuthor': '알 수 없는 작성자',
   'gitView.pr.createTitle': 'PR 생성',
+  'gitView.pr.history.merged': 'PR #{number}이(가) {base}에 병합되었습니다.',
+  'gitView.pr.history.closed': 'PR #{number}이(가) 닫혔습니다.',
   'gitView.pr.draftMustBeReady': '드래프트 PR은 병합 전에 리뷰 준비 상태로 바꿔야 합니다.',
   'gitView.pr.field.baseBranch': '기본 브랜치',
   'gitView.pr.field.description': '설명',

@@ -848,6 +848,8 @@ export const dict: Record<I18nKey, string> = {
   'gitView.pr.comments.title': 'コメント',
   'gitView.pr.comments.unknownAuthor': '不明な作成者',
   'gitView.pr.createTitle': 'プルリクエストを作成',
+  'gitView.pr.history.merged': 'PR #{number} は {base} にマージされました。',
+  'gitView.pr.history.closed': 'PR #{number} はクローズされました。',
   'gitView.pr.draftMustBeReady': 'マージ前に下書きPRを準備完了にする必要があります。',
   'gitView.pr.field.baseBranch': 'ベースブランチ',
   'gitView.pr.field.description': '説明',

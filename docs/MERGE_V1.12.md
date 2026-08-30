@@ -2274,3 +2274,19 @@ fork 已有丰富的 surface 组织（#62 surface rail + ContextSidebarTab + Con
 验证：真实临时 Git repository/bare fork 测试 `service.test.js` 48/48 ✅，新增覆盖 validate/create 同源、不可达 fork 无 worktree 残留、upstream fetch 失败无伪 tracking；full workspace type-check/lint ✅；完整 Web + VS Code + mobile assets production build ✅；`git diff --check` ✅。
 
 [#146](https://coding.s-s.city/songsong/openchamber/-/issues/146) 保持 open：仍需 branch-vs-base Context Diff 与 merged/open PR history correctness。
+
+### #146 Phase 3：Open PR authority + merged/closed branch history（2026-08-30）
+
+上游来源：`773691141`、`dd4a2015e`，适配 fork 当前 `directory::branch` shared PR store 与现有 Git panel：
+
+- server 对 fork network 的每个 target 先完整寻找 open PR；只有全部 target 都无 open PR 时，才返回主 remote + 原始 branch 的最新 closed/merged PR。已合并 fork PR 不再遮住仍 open 的 upstream PR。
+- repo-level open list 45s 缓存并 coalesce in-flight；complete first page 的 miss 作为权威结果。只有不完整覆盖才使用 Search API，且 Search 只查 open、miss 按 repo+branch 退避，避免耗尽低配额。
+- history 只查主关联，found 缓存 6h、absent 缓存 10m、最多 500 项；OpenChamber 内 create/merge 会失效 repo open/history/search cache。
+- closed/merged route 不再请求 checks 和 collaborator merge permission；这些结果不可操作。
+- UI 将 terminal PR 作为 branch history：显示紧凑历史提示和 GitHub 链接，同时保留下一个 PR 的创建表单；不再加载历史 PR 的 body/context/checks/comments。
+- watcher 对 terminal history 使用 5m discovery cadence；focus/visibility 从 store 读取事件发生时的 freshness。持久化 history 在 hydrate 时把 discovery timestamp 归零，立即核验新 open PR 或权威 empty。
+- 10 个现有 locale 均补齐 merged/closed history 文案；样式只使用现有 border/surface/PR status theme tokens。
+
+验证：server candidate/cache + UI watcher/hydration 共 2 files / 8 tests ✅；full workspace type-check/lint ✅；完整 Web + VS Code + mobile assets production build ✅；`git diff --check` ✅。
+
+[#146](https://coding.s-s.city/songsong/openchamber/-/issues/146) 保持 open：仅剩 `dd4013927` branch-vs-base Context Diff。共享 `packages/ui/src/lib/api/types.ts` 当前有另一 agent WIP，下一 phase 必须在不覆盖该内容的前提下适配。

@@ -446,6 +446,7 @@ export function registerGitHubRoutes(app) {
           directory,
           branch,
           remoteName: remote,
+          force,
         }),
         PR_STATUS_RESOLVE_TIMEOUT_MS,
         'resolveGitHubPrStatus'
@@ -466,10 +467,14 @@ export function registerGitHubRoutes(app) {
         return res.json({ connected: true, repo: searchRepo, branch, pr: null, checks: null, canMerge: false });
       }
 
+      const isMerged = Boolean(prData.merged || prData.merged_at);
+      const mergedState = isMerged ? 'merged' : (prData.state === 'closed' ? 'closed' : 'open');
+      const isHistorical = mergedState !== 'open';
+
       // Checks summary: prefer check-runs (Actions), fallback to classic statuses.
       let checks = null;
       const sha = prData.head?.sha;
-      if (sha) {
+      if (sha && !isHistorical) {
         try {
           const runs = await octokit.rest.checks.listForRef({
             owner: searchRepo.owner,
@@ -534,24 +539,23 @@ export function registerGitHubRoutes(app) {
 
       // Permission check (best-effort)
       let canMerge = false;
-      try {
-        const auth = getGitHubAuth();
-        const username = auth?.user?.login;
-        if (username) {
-          const perm = await octokit.rest.repos.getCollaboratorPermissionLevel({
-            owner: searchRepo.owner,
-            repo: searchRepo.repo,
-            username,
-          });
-          const level = perm?.data?.permission;
-          canMerge = level === 'admin' || level === 'maintain' || level === 'write';
+      if (!isHistorical) {
+        try {
+          const auth = getGitHubAuth();
+          const username = auth?.user?.login;
+          if (username) {
+            const perm = await octokit.rest.repos.getCollaboratorPermissionLevel({
+              owner: searchRepo.owner,
+              repo: searchRepo.repo,
+              username,
+            });
+            const level = perm?.data?.permission;
+            canMerge = level === 'admin' || level === 'maintain' || level === 'write';
+          }
+        } catch {
+          canMerge = false;
         }
-      } catch {
-        canMerge = false;
       }
-
-       const isMerged = Boolean(prData.merged || prData.merged_at);
-       const mergedState = isMerged ? 'merged' : (prData.state === 'closed' ? 'closed' : 'open');
 
       return res.json({
         connected: true,
@@ -778,6 +782,10 @@ export function registerGitHubRoutes(app) {
       const headBranch = head.includes(':') ? head.split(':')[1] || head : head;
       const createCacheKey = `${directory}::${headBranch}::${remote}`;
       prStatusCache.delete(createCacheKey);
+      if (repo?.owner && repo?.repo) {
+        const { invalidateRepoPullsCache } = await import('./pr-status.js');
+        invalidateRepoPullsCache(repo.owner, repo.repo);
+      }
 
       return res.json({
         number: pr.number,
@@ -916,6 +924,8 @@ export function registerGitHubRoutes(app) {
           pull_number: number,
           merge_method: method,
         });
+        const { invalidateRepoPullsCache } = await import('./pr-status.js');
+        invalidateRepoPullsCache(repo.owner, repo.repo);
         return res.json({ merged: Boolean(result?.data?.merged), message: result?.data?.message });
       } catch (error) {
         if (error?.status === 403) {

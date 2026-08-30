@@ -500,21 +500,23 @@ export const PullRequestSection: React.FC<{
   }, [useDetectedUpstream, detectedUpstream?.defaultBranch]);
 
   const pr = status?.pr ?? null;
-  const currentPrBodyHydrationKey = pr ? `${directory}#${pr.number}` : null;
+  const isHistoricalPr = pr?.state === 'merged' || pr?.state === 'closed';
+  const livePr = isHistoricalPr ? null : pr;
+  const currentPrBodyHydrationKey = livePr ? `${directory}#${livePr.number}` : null;
   const isHydratingCurrentPrBody = Boolean(
     currentPrBodyHydrationKey && hydratingPrBodyKey === currentPrBodyHydrationKey,
   );
 
   React.useEffect(() => {
-    if (!github?.prContext || !pr) {
+    if (!github?.prContext || !livePr) {
       return;
     }
 
-    if (typeof pr.body === 'string' && pr.body.length > 0) {
+    if (typeof livePr.body === 'string' && livePr.body.length > 0) {
       return;
     }
 
-    const hydrationKey = `${directory}#${pr.number}`;
+    const hydrationKey = `${directory}#${livePr.number}`;
     if (attemptedBodyHydrationRef.current.has(hydrationKey)) {
       return;
     }
@@ -522,7 +524,7 @@ export const PullRequestSection: React.FC<{
     setHydratingPrBodyKey(hydrationKey);
 
     let cancelled = false;
-    void github.prContext(directory, pr.number, { includeDiff: false, includeCheckDetails: false, sourceRepo: status?.repo ?? null })
+    void github.prContext(directory, livePr.number, { includeDiff: false, includeCheckDetails: false, sourceRepo: status?.repo ?? null })
       .then((ctx) => {
         if (cancelled) {
           return;
@@ -532,7 +534,7 @@ export const PullRequestSection: React.FC<{
           return;
         }
         updatePrStatus(prStatusKey, (prev) => {
-          if (!prev?.pr || prev.pr.number !== pr.number) {
+          if (!prev?.pr || prev.pr.number !== livePr.number) {
             return prev;
           }
           return {
@@ -555,7 +557,7 @@ export const PullRequestSection: React.FC<{
     return () => {
       cancelled = true;
     };
-  }, [directory, github, pr, prStatusKey, status?.repo, updatePrStatus]);
+  }, [directory, github, livePr, prStatusKey, status?.repo, updatePrStatus]);
 
   React.useEffect(() => {
     if (!pr) {
@@ -1122,31 +1124,25 @@ export const PullRequestSection: React.FC<{
   }, [remotes, status?.resolvedRemoteName]);
 
   React.useEffect(() => {
-    const isTerminal = status?.pr?.state === 'closed' || status?.pr?.state === 'merged';
-    const lastRefreshAt = statusEntry?.lastRefreshAt ?? 0;
-    const isStale = Date.now() - lastRefreshAt > 60_000;
-    const shouldRefresh = !isTerminal && isStale;
-
-    const onFocus = () => {
-      if (shouldRefresh) {
+    const refreshWhenStale = () => {
+      const lastRefreshAt = useGitHubPrStatusStore.getState().entries[prStatusKey]?.lastRefreshAt ?? 0;
+      if (Date.now() - lastRefreshAt > 60_000) {
         void refresh({ force: true, silent: true });
       }
     };
     const onVisibility = () => {
       if (document.visibilityState === 'visible') {
-        if (shouldRefresh) {
-          void refresh({ force: true, silent: true });
-        }
+        refreshWhenStale();
       }
     };
 
-    window.addEventListener('focus', onFocus);
+    window.addEventListener('focus', refreshWhenStale);
     document.addEventListener('visibilitychange', onVisibility);
     return () => {
-      window.removeEventListener('focus', onFocus);
+      window.removeEventListener('focus', refreshWhenStale);
       document.removeEventListener('visibilitychange', onVisibility);
     };
-  }, [refresh, status?.pr?.state, statusEntry?.lastRefreshAt]);
+  }, [prStatusKey, refresh]);
 
   React.useEffect(() => {
     if (githubAuthChecked && githubAuthStatus?.connected === false) {
@@ -1499,7 +1495,7 @@ export const PullRequestSection: React.FC<{
                 <Icon name="loader-4" className="size-4 animate-spin" />
                 {t('gitView.pr.checkingStatus')}
               </div>
-            ) : pr ? (
+            ) : pr && !isHistoricalPr ? (
               <div className="flex flex-col gap-2">
                 <div className="flex flex-col gap-3">
                   <div className="min-w-0">
@@ -1745,6 +1741,30 @@ export const PullRequestSection: React.FC<{
               </div>
             ) : (
               <div className="flex flex-col gap-3">
+                {pr && isHistoricalPr ? (
+                  <div className="flex min-w-0 items-center gap-2 rounded-md border border-border/60 bg-surface-muted/40 px-2.5 py-2">
+                    <Icon
+                      name={pr.state === 'merged' ? 'git-merge' : 'git-close-pull-request'}
+                      className="size-4 shrink-0"
+                      style={{ color: prColorVar }}
+                    />
+                    <div className="min-w-0 flex-1 typography-micro text-muted-foreground">
+                      {pr.state === 'merged'
+                        ? t('gitView.pr.history.merged', { number: pr.number, base: pr.base || targetBaseBranch })
+                        : t('gitView.pr.history.closed', { number: pr.number })}
+                    </div>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="xs"
+                      className="shrink-0"
+                      onClick={() => void openExternal(pr.url)}
+                      aria-label={t('gitView.pr.actions.openOnGitHubAria')}
+                    >
+                      <Icon name="external-link" className="size-3.5" />
+                    </Button>
+                  </div>
+                ) : null}
                 <div className="flex items-center justify-between gap-2">
                   <div className="min-w-0">
                     <div className="typography-ui-label text-foreground">{t('gitView.pr.createTitle')}</div>

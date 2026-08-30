@@ -848,6 +848,8 @@ export const dict: Record<I18nKey, string> = {
   "gitView.pr.comments.title": "Comentarios",
   "gitView.pr.comments.unknownAuthor": "Autor desconocido",
   "gitView.pr.createTitle": "Crear PR",
+  "gitView.pr.history.merged": "La PR #{number} se fusionó en {base}.",
+  "gitView.pr.history.closed": "La PR #{number} se cerró.",
   "gitView.pr.draftMustBeReady": "La PR en borrador debe marcarse como lista antes de hacer merge.",
   "gitView.pr.field.baseBranch": "Rama base",
   "gitView.pr.field.description": "Descripción",

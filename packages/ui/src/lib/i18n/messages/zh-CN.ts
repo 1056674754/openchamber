@@ -848,6 +848,8 @@ export const dict: Record<I18nKey, string> = {
   'gitView.pr.comments.title': '评论',
   'gitView.pr.comments.unknownAuthor': '未知作者',
   'gitView.pr.createTitle': '创建拉取请求',
+  'gitView.pr.history.merged': 'PR #{number} 已合并到 {base}。',
+  'gitView.pr.history.closed': 'PR #{number} 已关闭。',
   'gitView.pr.draftMustBeReady': '草稿 PR 必须先标记为可审查才能合并。',
   'gitView.pr.field.baseBranch': '基准分支',
   'gitView.pr.field.description': '描述',

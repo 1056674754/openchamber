@@ -848,6 +848,8 @@ export const dict: Record<I18nKey, string> = {
   "gitView.pr.comments.title": "Коментарі",
   "gitView.pr.comments.unknownAuthor": "Невідомий автор",
   "gitView.pr.createTitle": "Створити PR",
+  "gitView.pr.history.merged": "PR #{number} злито в {base}.",
+  "gitView.pr.history.closed": "PR #{number} закрито.",
   "gitView.pr.draftMustBeReady": "Перед злиттям чернетку PR необхідно позначити як готову.",
   "gitView.pr.field.baseBranch": "Базова гілка",
   "gitView.pr.field.description": "Опис",

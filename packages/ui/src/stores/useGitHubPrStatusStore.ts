@@ -245,15 +245,20 @@ const toPersistedEntry = (entry: PrStatusEntry): PersistedPrStatusEntry => ({
   resolvedRemoteName: entry.resolvedRemoteName ?? entry.status?.resolvedRemoteName ?? null,
 });
 
-const hydrateEntry = (entry: PersistedPrStatusEntry | undefined): PrStatusEntry => ({
-  ...createEntry(),
-  status: entry?.status ?? null,
-  isInitialStatusResolved: entry?.isInitialStatusResolved ?? false,
-  lastRefreshAt: entry?.lastRefreshAt ?? 0,
-  lastDiscoveryPollAt: entry?.lastDiscoveryPollAt ?? 0,
-  identity: entry?.identity ?? null,
-  resolvedRemoteName: entry?.resolvedRemoteName ?? entry?.status?.resolvedRemoteName ?? null,
-});
+const hydrateEntry = (entry: PersistedPrStatusEntry | undefined): PrStatusEntry => {
+  const hasHistoricalPr = isTerminalPrState(entry?.status?.pr?.state);
+  return {
+    ...createEntry(),
+    status: entry?.status ?? null,
+    isInitialStatusResolved: entry?.isInitialStatusResolved ?? false,
+    lastRefreshAt: entry?.lastRefreshAt ?? 0,
+    // Historical PRs are display continuity, not live authority. Revalidate
+    // immediately so a newer open PR or authoritative empty result replaces it.
+    lastDiscoveryPollAt: hasHistoricalPr ? 0 : (entry?.lastDiscoveryPollAt ?? 0),
+    identity: entry?.identity ?? null,
+    resolvedRemoteName: entry?.resolvedRemoteName ?? entry?.status?.resolvedRemoteName ?? null,
+  };
+};
 
 export const useGitHubPrStatusStore = create<GitHubPrStatusStore>()(
   persist(
@@ -349,7 +354,8 @@ export const useGitHubPrStatusStore = create<GitHubPrStatusStore>()(
           }
 
           const hasPr = Boolean(entry.status?.pr);
-          if (!hasPr) {
+          const isHistorical = isTerminalPrState(entry.status?.pr?.state);
+          if (!hasPr || isHistorical) {
             const now = Date.now();
             if (now - entry.lastDiscoveryPollAt < PR_DISCOVERY_INTERVAL_MS) {
               return;
@@ -370,10 +376,6 @@ export const useGitHubPrStatusStore = create<GitHubPrStatusStore>()(
               };
             });
             void get().refresh(key, { force: true, silent: true, markInitialResolved: true });
-            return;
-          }
-
-          if (isTerminalPrState(entry.status?.pr?.state)) {
             return;
           }
 

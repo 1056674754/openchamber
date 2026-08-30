@@ -200,6 +200,7 @@ Expected model:
 Expected model:
 
 - `PullRequestSection` is the only true live PR watcher
+- closed/merged PRs are display history, not live authority; watchers keep them on discovery cadence and restored history revalidates immediately
 - `SessionSidebar` may do one-shot bootstrap for expanded visible project/worktree groups if PR info is missing
 - no live PR work for header
 - no background PR sweeps outside visible demand

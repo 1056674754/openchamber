@@ -1893,6 +1893,8 @@ export const dict: Record<I18nKey, string> = {
   'gitView.pr.comments.title': 'Komentarze',
   'gitView.pr.comments.unknownAuthor': 'Nieznany autor',
   'gitView.pr.createTitle': 'Utwórz pull request',
+  'gitView.pr.history.merged': 'PR #{number} został scalony do {base}.',
+  'gitView.pr.history.closed': 'PR #{number} został zamknięty.',
   'gitView.pr.draftMustBeReady': 'Szkic PR musi zostać oznaczony jako gotowy przed scaleniem.',
   'gitView.pr.field.baseBranch': 'Gałąź bazowa',
   'gitView.pr.field.description': 'Opis',
