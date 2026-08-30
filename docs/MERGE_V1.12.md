@@ -3115,3 +3115,15 @@ v1.20.0-sscity 尚未宣布完成：当前未关闭 `#135/#140/#142-#151/#154/#1
 - 对应提交：`04c99e7e9 feat(cli): add atomic connect-url command`。
 
 验证：CLI parse/lifecycle + accessor + connect-url 3 files / 43 tests ✅；真实`connect-url --help` ✅；isolated invalid URL JSON/exit 2且未启动server ✅；relay identity首次生成、第二次serverId复用、corrupt settings不覆盖 ✅；full workspace type-check/lint ✅；`git diff --check` ✅。至此 [#176](https://coding.s-s.city/songsong/openchamber/-/issues/176) 完成，可关闭。
+
+## v1.21.1 `#168`：Provider credential/header parity + explicit OpenCode upgrade target（2026-08-31）
+
+上游来源：`96edb4796`、`ff34cfd4c`、`48b081b62`、`27a72b338`、`c98555a39`、`eb13c7cad`、`ac96d1099`、`ff2349204`、`3aa5bca8f`。按 fork Web/Desktop/VS Code ownership 手工移植：
+
+- Providers 页面把运行时 resolved `provider.key`、配置 `provider.options.apiKey`、auth provenance 与已声明 env 名统一视为 credential signal；custom provider 无 auth 的既有豁免保持不变。API key/OAuth 保存后 fork 现有 `reloadOpenCodeConfiguration({ scopes: ['providers'], mode: 'active' })` 已覆盖上游 credentials refresh，不再复制第二套 reload path。
+- Small Model 的 OpenAI-compatible transport转发 `provider.<id>.options.headers`，支持 `{env:NAME}` / `{file:path}`；relative file按定义该 header 的 config layer解析。header merge大小写不敏感，配置 `authorization` 可替换默认 bearer，不产生两个 Authorization；密钥/header value仍只在server进程解析。
+- Web 与 VS Code upgrade 都把 requested release变成显式 contract：用户给 target时原样发送；未给 target时先并行读取npm/GitHub latest并选较新版本，再向 OpenCode发送 `{ target }`。无法解析时返回 `OPENCODE_UPGRADE_TARGET_UNRESOLVED`，不启动含糊的升级；并发请求返回 `OPENCODE_UPGRADE_IN_PROGRESS`。
+- Web 保留 fork原有策略：无显式 target且OpenCode upgrade transport失败时，仍可走direct package-manager fallback；显式 target绝不降级为“安装任意latest”。VS Code继续在升级成功后重启 extension-owned OpenCode；Web继续返回 `requiresReload`而不主动杀 managed runtime。
+- upgrade error支持 `error`、`message`、`data.message`，原始可用信息继续进入现有copyable diagnostics UI。对应实现提交：`9788eea27 feat(providers): harden credentials and upgrades`。
+
+验证：provider auth Bun 2/2 ✅；Small Model Vitest 27/27 ✅；VS Code upgrade Bun 7/7 ✅；Web upgrade focused Bun 7/7 + target focused 4/4 ✅；full workspace type-check/lint ✅；`git diff --check` ✅。完整 `routes.test.js` 另有两个不经过upgrade path的并行 settings/remote-namespace WIP基线失败（settings save 503、relay pending 401），未由本批覆盖或误报为通过。至此 [#168](https://coding.s-s.city/songsong/openchamber/-/issues/168) 的 credential signals、configured headers与OpenCode requested-release/error UX范围完成，可关闭。
