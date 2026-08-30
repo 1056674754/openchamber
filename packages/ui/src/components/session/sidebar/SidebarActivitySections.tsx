@@ -21,6 +21,7 @@ import {
   type SidebarRenderContext,
 } from './sessionNodeItemUtils';
 import { useStickyHeader } from './hooks/useStickyProjectHeaders';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 
 export type ActivityItem = {
   node: SessionNode;
@@ -33,7 +34,7 @@ export type ActivityItem = {
 };
 
 export type ActivitySection = {
-  key: 'active-now' | 'global-pinned';
+  key: 'active-now' | 'global-pinned' | 'chats';
   title: string;
   items: ActivityItem[];
 };
@@ -53,6 +54,9 @@ type Props = {
   openSidebarMenuKey?: string | null;
   onReorderGlobalPinned?: (fromIndex: number, toIndex: number) => void;
   isDesktopShellRuntime: boolean;
+  onNewChat?: () => void;
+  alwaysShowActions?: boolean;
+  renderChatsSection?: (items: ActivityItem[]) => React.ReactNode;
 };
 
 const MAX_VISIBLE_RECENT_SESSIONS = 7;
@@ -80,6 +84,9 @@ export function SidebarActivitySections({
   openSidebarMenuKey = null,
   onReorderGlobalPinned,
   isDesktopShellRuntime,
+  onNewChat,
+  alwaysShowActions = false,
+  renderChatsSection,
 }: Props): React.ReactNode {
   const { t } = useI18n();
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
@@ -139,7 +146,9 @@ export function SidebarActivitySections({
     });
   }, []);
 
-  const visibleSections = sections.filter((section) => section.items.length > 0);
+  const visibleSections = sections.filter((section) => (
+    section.items.length > 0 || (section.key === 'chats' && onNewChat)
+  ));
   if (visibleSections.length === 0) {
     return null;
   }
@@ -186,6 +195,10 @@ export function SidebarActivitySections({
       );
     }
 
+    if (section.key === 'chats' && renderChatsSection) {
+      return renderChatsSection(section.items);
+    }
+
     return visibleItems.map((item) => renderItem(item));
   };
 
@@ -193,6 +206,7 @@ export function SidebarActivitySections({
     <div className="space-y-2 pb-2 pt-1">
       {visibleSections.map((section) => {
         const isGlobalPinned = section.key === 'global-pinned';
+        const isChats = section.key === 'chats';
         const isCollapsed = collapsed.has(section.key);
         const isExpanded = expandedSections.has(section.key);
         const visibleItems = isExpanded || isGlobalPinned ? section.items : section.items.slice(0, MAX_VISIBLE_RECENT_SESSIONS);
@@ -226,25 +240,59 @@ export function SidebarActivitySections({
               aria-hidden="true"
             />
             <div className={cn(
+              'relative group/chats',
               stickyZoneHeaders && 'sticky top-0 z-20 bg-sidebar',
               stickyZoneHeaders && isActivityHeaderStuck && 'oc-zone-header-backing',
             )}>
               <button
                 type="button"
                 onClick={() => toggleSection(section.key)}
-                className="group flex w-full items-center gap-1 rounded-md px-0.5 py-0.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+                className={cn(
+                  'group flex w-full items-center gap-1 rounded-md py-0.5 pl-0.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50',
+                  isChats && onNewChat ? 'pr-7' : 'pr-0.5',
+                )}
                 aria-expanded={!isCollapsed}
               >
                 <span className="inline-flex h-4 w-4 items-center justify-center text-muted-foreground">
-                  {isCollapsed ? <Icon name="arrow-right-s" className="h-3.5 w-3.5" /> : <Icon name="arrow-down-s" className="h-3.5 w-3.5" />}
+                  <Icon name={isChats ? 'chat-4' : 'history'} className="h-3.5 w-3.5 group-hover:hidden" />
+                  <span className="hidden group-hover:inline-flex">
+                    {isCollapsed ? <Icon name="arrow-right-s" className="h-3.5 w-3.5" /> : <Icon name="arrow-down-s" className="h-3.5 w-3.5" />}
+                  </span>
                 </span>
                 <span className="text-[14px] font-normal text-foreground/95">{section.title}</span>
               </button>
+              {isChats && onNewChat ? (
+                <div className="absolute right-0.5 top-1/2 z-10 -translate-y-1/2">
+                  <Tooltip delayDuration={500}>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onNewChat();
+                        }}
+                        className={cn(
+                          'inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground transition-opacity hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50',
+                          alwaysShowActions
+                            ? 'opacity-100'
+                            : 'pointer-events-none opacity-0 group-hover/chats:pointer-events-auto group-hover/chats:opacity-100 group-focus-within/chats:pointer-events-auto group-focus-within/chats:opacity-100',
+                        )}
+                        aria-label={t('sessions.sidebar.header.actions.newSession')}
+                      >
+                        <Icon name="add" className="h-4 w-4" />
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom" sideOffset={4}>
+                      <p>{t('sessions.sidebar.header.actions.newSession')}</p>
+                    </TooltipContent>
+                  </Tooltip>
+                </div>
+              ) : null}
             </div>
             {!isCollapsed ? (
-              <div className={cn('space-y-0.5 pl-7')}>
+              <div className={cn('space-y-0.5', isChats ? '' : 'pl-7')}>
                 {renderItems(section, visibleItems)}
-                {remainingCount > 0 && !isExpanded ? (
+                {!isChats && remainingCount > 0 && !isExpanded ? (
                   <button
                     type="button"
                     onClick={() => toggleSectionLimit(section.key)}
@@ -255,7 +303,7 @@ export function SidebarActivitySections({
                       : t('sessions.sidebar.group.showMorePlural', { count: remainingCount })}
                   </button>
                 ) : null}
-                {isExpanded && section.items.length > MAX_VISIBLE_RECENT_SESSIONS ? (
+                {!isChats && isExpanded && section.items.length > MAX_VISIBLE_RECENT_SESSIONS ? (
                   <button
                     type="button"
                     onClick={() => toggleSectionLimit(section.key)}

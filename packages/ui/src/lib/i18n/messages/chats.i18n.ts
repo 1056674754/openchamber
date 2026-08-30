@@ -1,4 +1,7 @@
-const en = { 'chat.chatInput.chats': 'Chats' } as const;
+const en = {
+  'chat.chatInput.chats': 'Chats',
+  'sessions.sidebar.activity.chatsTitle': 'Chats',
+} as const;
 
 export const chatsI18n = {
   en,
@@ -10,6 +13,12 @@ export const chatsI18n = {
   'pt-BR': en,
   tr: en,
   uk: en,
-  'zh-CN': { 'chat.chatInput.chats': '对话' },
-  'zh-TW': { 'chat.chatInput.chats': '對話' },
+  'zh-CN': {
+    'chat.chatInput.chats': '对话',
+    'sessions.sidebar.activity.chatsTitle': '对话',
+  },
+  'zh-TW': {
+    'chat.chatInput.chats': '對話',
+    'sessions.sidebar.activity.chatsTitle': '對話',
+  },
 } as const;

@@ -30,6 +30,7 @@ export type SessionGroup = {
   directory: string | null;
   folderScopeKey?: string | null;
   folderScopes?: SessionGroupFolderScope[];
+  draftTarget?: 'chat' | 'project';
   sessions: SessionNode[];
 };
 

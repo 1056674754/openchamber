@@ -93,6 +93,7 @@ type Props = {
   onRefreshProject?: () => void;
   isInlineEditing: boolean;
   hasLeadingActivitySections?: boolean;
+  hasStandaloneContent?: boolean;
 };
 
 const TOP_FADE_MAX_SIZE = 48;
@@ -261,7 +262,9 @@ export function SidebarProjectsList(props: Props): React.ReactNode {
     return (
       <ScrollableOverlay {...listScrollProps}>
         {props.topContent}
-        {props.emptyState}
+        {!props.hasStandaloneContent
+          ? (props.hasSessionSearchQuery ? props.searchEmptyState : props.emptyState)
+          : null}
         {props.bottomContent}
       </ScrollableOverlay>
     );
@@ -270,6 +273,7 @@ export function SidebarProjectsList(props: Props): React.ReactNode {
   if (props.sectionsForRender.length === 0) {
     return (
       <ScrollableOverlay {...listScrollProps}>
+        {props.topContent}
         {props.searchEmptyState}
         {props.bottomContent}
       </ScrollableOverlay>
