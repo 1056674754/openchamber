@@ -4,6 +4,7 @@ import {
   buildEmbeddedSessionChatURL,
   canPostMessageToParentFrame,
   getEmbeddedSessionChatOriginSessionId,
+  getActiveEmbeddedSessionChatTab,
   isEmbeddedSessionChat,
   parseEmbeddedSessionChatLocation,
   resetEmbeddedSessionChatLocationCache,
@@ -34,6 +35,13 @@ const withWindowLocation = (href: string, run: () => void): void => {
 };
 
 describe('embedded session chat location', () => {
+  test('selects only the active saved chat tab', () => {
+    const tabs = [{ id: 'chat-1' }, { id: 'chat-2' }, { id: 'chat-3' }];
+    expect(getActiveEmbeddedSessionChatTab(tabs, 'chat-2')).toEqual(tabs[1]);
+    expect(getActiveEmbeddedSessionChatTab(tabs, null)).toBeNull();
+    expect(getActiveEmbeddedSessionChatTab(tabs, 'missing')).toBeNull();
+  });
+
   test('requires a real parent frame before posting embedded chat settings', () => {
     const topLevelWindow: { parent?: unknown } = {};
     topLevelWindow.parent = topLevelWindow;

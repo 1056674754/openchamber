@@ -2196,3 +2196,13 @@ fork 已有丰富的 surface 组织（#62 surface rail + ContextSidebarTab + Con
 - Claude Code provider source 通过 `claude auth status --json` 识别 CLI login，调用时移除环境 credential override；CLI 已自行发起授权 URL，不重复打开，也不为成功登录强制 reload OpenCode。
 
 验证：Small Model runtime/call/index + Claude CLI 4 Vitest files / 33 tests ✅；provider OAuth/auth/custom gate 3 Bun files / 25 tests ✅；full workspace type-check/lint ✅；Web production build ✅；`git diff --check` ✅。
+
+### #140 Phase 1：Active-only embedded context chats（2026-08-30）
+
+上游来源：`7a04dd5c4`，适配 fork 支持 split pane 的 ContextPanel：
+
+- persisted chat tabs 不再全部映射成隐藏的全应用 iframe；非 split 只挂 active chat，关闭 panel 时所有 chat iframe 卸载。
+- split pane 打开时只允许 active + split 两个可见 chat，各自仍保留 read-only、directory、runtime bootstrap 与 viewed-state 语义；panel 关闭时 `active=false` guard 同样卸载。
+- `getActiveEmbeddedSessionChatTab` pure helper 覆盖 active/null/missing；ContextPanel focused test 5 条 ✅；full workspace type-check/lint 与 diff check ✅。
+
+[#140](https://coding.s-s.city/songsong/openchamber/-/issues/140) 保持 open：`222057abc / 83c4c75ff / 5ef828f38` 依赖上游统一 WorkStatusPanel，而 fork 在 #122 明确只落数据基础设施并延期该 UI。后续需在 fork 的 surface rail / ContextSidebarTab 设计内决定 draft project/MCP/usage 呈现，不能直接复制上游侧栏。

@@ -53,3 +53,8 @@ export const buildEmbeddedSessionChatURL = (
   if (directory?.trim()) url.searchParams.set('directory', directory);
   return url.toString();
 };
+
+export const getActiveEmbeddedSessionChatTab = <T extends { id: string }>(
+  tabs: T[],
+  activeTabID: string | null,
+): T | null => activeTabID ? tabs.find((tab) => tab.id === activeTabID) ?? null : null;

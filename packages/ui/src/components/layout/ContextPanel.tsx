@@ -30,7 +30,7 @@ import { toast } from '@/components/ui';
 import { Icon } from "@/components/icon/Icon";
 import { OpenChamberLogo } from "@/components/ui/OpenChamberLogo";
 import { invokeDesktopCommand } from '@/lib/desktopNative';
-import { buildEmbeddedSessionChatURL } from './contextPanelEmbeddedChat';
+import { buildEmbeddedSessionChatURL, getActiveEmbeddedSessionChatTab } from './contextPanelEmbeddedChat';
 import { ProjectContextPanel } from './RightSidebarTabs';
 import { getContextSurfaceWidthFraction } from '@/lib/surfaces/registry';
 
@@ -1664,6 +1664,7 @@ const ContextPanelTabContent: React.FC<{
   }
 
   if (tab.mode === 'chat') {
+    if (!active) return null;
     const sessionID = getSessionIDFromDedupeKey(tab.dedupeKey);
     const src = sessionID ? buildEmbeddedSessionChatURL(sessionID, directory || null, tab.readOnly) : '';
     if (!sessionID || !src) {
@@ -2152,7 +2153,11 @@ export const ContextPanel: React.FC = () => {
     }
   }, [activeTab, directoryKey, setPendingDiffFile, setSelectedFilePath]);
 
-  const activeChatTabID = activeTab?.mode === 'chat' ? activeTab.id : null;
+  const activeChatTabID = isOpen && activeTab?.mode === 'chat' ? activeTab.id : null;
+  const activeChatTab = React.useMemo(
+    () => getActiveEmbeddedSessionChatTab(tabs.filter((tab) => tab.mode === 'chat'), activeChatTabID),
+    [activeChatTabID, tabs],
+  );
   const splitChatTabID = hasSplit && splitTab?.mode === 'chat' ? splitTab.id : null;
   const viewedChatSessionIDs = React.useMemo(() => {
     const sessionIDs = [
@@ -2372,10 +2377,6 @@ export const ContextPanel: React.FC = () => {
     };
   }), [effectiveDirectory, t, tabs]);
 
-  const chatTabs = React.useMemo(
-    () => tabs.filter((tab) => tab.mode === 'chat'),
-    [tabs],
-  );
   const hasFileTabs = React.useMemo(
     () => tabs.some((tab) => tab.mode === 'file'),
     [tabs],
@@ -2543,11 +2544,11 @@ export const ContextPanel: React.FC = () => {
                 <FilesView mode="editor-only" active={isOpen && isFileTabActive} />
               </div>
             ) : null}
-            {chatTabs.map((tab) => (
-              <div key={tab.id} className={cn('absolute inset-0', activeChatTabID === tab.id ? 'block' : 'hidden')}>
-                {renderTabPaneContent(tab, activeChatTabID === tab.id)}
+            {activeChatTab ? (
+              <div key={activeChatTab.id} className="absolute inset-0">
+                {renderTabPaneContent(activeChatTab, true)}
               </div>
-            ))}
+            ) : null}
             {activeTab && activeTab.mode !== 'chat' && !isFileTabActive ? (
               <div className="absolute inset-0">{renderTabPaneContent(activeTab, true)}</div>
             ) : null}
