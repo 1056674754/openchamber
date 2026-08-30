@@ -2454,7 +2454,7 @@ fork 已有丰富的 surface 组织（#62 surface rail + ContextSidebarTab + Con
 - Right Context panel 在已知 Chats root 时使用 `CHAT_DRAFT_PROJECT_ID + root + serverId`，保持 Memory/Notes owner 与实例一致；远程空白 draft 在远端 home 尚未知时 fail closed，不用本机 Chats root 代替。
 - 对应提交：`ef9b0d64a feat(chats): align mini chat surfaces`、`0b773e67b fix(chats): restore draft target from mini chat`、`4490a72dd fix(chats): serialize mini chat draft bootstrap`。
 
-验证：UI type-check/lint ✅。隔离 HMR `/mini-chat.html?mode=draft` 首轮复现 project draft 竞态（Header/composer 显示 `song`），修复后重载只显示 New session、无 project/branch/target path ✅；无新增控制台错误，既有 ModelControls Base UI warning 单独保留；QA backend/OpenCode 已停止。[#150](https://coding.s-s.city/songsong/openchamber/-/issues/150) 保持 open：真实 remote Mini Chat/Sidebar multi-instance 与 Capacitor mobile matching-surface QA。
+验证：UI type-check/lint ✅。隔离 HMR `/mini-chat.html?mode=draft` 首轮复现 project draft 竞态（Header/composer 显示 `song`），修复后重载只显示 New session、无 project/branch/target path ✅；无新增控制台错误，既有 ModelControls Base UI warning 单独保留；QA backend/OpenCode 已停止。[#150](https://coding.s-s.city/songsong/openchamber/-/issues/150) v1.20 scope 完成。v1.21 Chat-own-directory autocomplete、真实 remote multi-instance 与 Capacitor sessions surface QA 已拆至 [#174](https://coding.s-s.city/songsong/openchamber/-/issues/174)，不再阻塞 v1.20 closeout。
 
 ### #141 Phase 1：Isolated server exception survival（2026-08-30）
 
