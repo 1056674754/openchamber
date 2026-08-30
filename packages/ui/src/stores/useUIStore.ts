@@ -714,6 +714,7 @@ interface UIStore {
   persistChatDraft: boolean;
   showOpenCodeUpdateNotifications: boolean;
   agentControlToolEnabled: boolean;
+  agentMemoryToolEnabled: boolean;
   inputSpellcheckEnabled: boolean;
   wideChatLayoutEnabled: boolean;
   codeBlockLineWrap: boolean;
@@ -882,6 +883,7 @@ interface UIStore {
   setPersistChatDraft: (value: boolean) => void;
   setShowOpenCodeUpdateNotifications: (value: boolean) => void;
   setAgentControlToolEnabled: (value: boolean) => void;
+  setAgentMemoryToolEnabled: (value: boolean) => void;
   setInputSpellcheckEnabled: (value: boolean) => void;
   setWideChatLayoutEnabled: (value: boolean) => void;
   setCodeBlockLineWrap: (value: boolean) => void;
@@ -1041,6 +1043,7 @@ export const useUIStore = create<UIStore>()(
         persistChatDraft: true,
         showOpenCodeUpdateNotifications: true,
         agentControlToolEnabled: true,
+        agentMemoryToolEnabled: false,
         inputSpellcheckEnabled: false,
         wideChatLayoutEnabled: false,
         codeBlockLineWrap: true,
@@ -2327,6 +2330,9 @@ export const useUIStore = create<UIStore>()(
         setAgentControlToolEnabled: (value) => {
           set({ agentControlToolEnabled: value });
         },
+        setAgentMemoryToolEnabled: (value) => {
+          set({ agentMemoryToolEnabled: value });
+        },
         setInputSpellcheckEnabled: (value) => {
           set({ inputSpellcheckEnabled: value });
         },
@@ -2669,6 +2675,7 @@ export const useUIStore = create<UIStore>()(
           persistChatDraft: state.persistChatDraft,
           showOpenCodeUpdateNotifications: state.showOpenCodeUpdateNotifications,
           agentControlToolEnabled: state.agentControlToolEnabled,
+          agentMemoryToolEnabled: state.agentMemoryToolEnabled,
           inputSpellcheckEnabled: state.inputSpellcheckEnabled,
           wideChatLayoutEnabled: state.wideChatLayoutEnabled,
           codeBlockLineWrap: state.codeBlockLineWrap,

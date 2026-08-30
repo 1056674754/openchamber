@@ -1,5 +1,9 @@
 /** Project knowledge strings added by the v1.20 migration. */
 const agentMemoryEnglish = {
+  "settings.openchamber.opencodeCli.field.agentMemoryTool": "Agent Memory tool",
+  "settings.openchamber.opencodeCli.field.agentMemoryToolInfo": "Let agents save durable facts and preferences for later sessions. Changing this restarts OpenCode.",
+  "settings.openchamber.opencodeCli.field.agentMemoryToolAria": "Enable the Agent Memory tool",
+  "settings.openchamber.opencodeCli.field.agentMemoryToolSaveFailed": "Failed to update the Agent Memory tool",
   "rightSidebar.contextNotesTodo.tabs.memory": "Memory",
   "rightSidebar.agentMemory.description": "Durable context the agent learned across sessions. Review and correct it here.",
   "rightSidebar.agentMemory.scope.project": "Project memory",
@@ -21,6 +25,10 @@ const agentMemoryEnglish = {
 } as const;
 
 const agentMemoryZhCN = {
+  "settings.openchamber.opencodeCli.field.agentMemoryTool": "智能体记忆工具",
+  "settings.openchamber.opencodeCli.field.agentMemoryToolInfo": "允许智能体保存供后续对话使用的持久事实和偏好。更改后会重启 OpenCode。",
+  "settings.openchamber.opencodeCli.field.agentMemoryToolAria": "启用智能体记忆工具",
+  "settings.openchamber.opencodeCli.field.agentMemoryToolSaveFailed": "更新智能体记忆工具失败",
   "rightSidebar.contextNotesTodo.tabs.memory": "记忆",
   "rightSidebar.agentMemory.description": "智能体跨对话保留的持久上下文。你可以在这里检查和纠正。",
   "rightSidebar.agentMemory.scope.project": "项目记忆",
@@ -43,6 +51,10 @@ const agentMemoryZhCN = {
 
 const agentMemoryZhTW = {
   ...agentMemoryEnglish,
+  "settings.openchamber.opencodeCli.field.agentMemoryTool": "代理記憶工具",
+  "settings.openchamber.opencodeCli.field.agentMemoryToolInfo": "允許代理儲存供後續對話使用的持久事實與偏好。變更後會重新啟動 OpenCode。",
+  "settings.openchamber.opencodeCli.field.agentMemoryToolAria": "啟用代理記憶工具",
+  "settings.openchamber.opencodeCli.field.agentMemoryToolSaveFailed": "更新代理記憶工具失敗",
   "rightSidebar.contextNotesTodo.tabs.memory": "記憶",
   "rightSidebar.agentMemory.description": "代理跨對話保留的持久脈絡。你可以在這裡檢查與修正。",
   "rightSidebar.agentMemory.scope.project": "專案記憶",

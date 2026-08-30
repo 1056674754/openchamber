@@ -9,16 +9,21 @@ import { updateDesktopSettings } from '@/lib/persistence';
 import { reloadOpenCodeConfiguration } from '@/stores/useAgentsStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useI18n } from '@/lib/i18n';
+import { toast } from '@/components/ui';
 
 export const OpenCodeCliSettings: React.FC = () => {
   const { t } = useI18n();
   const [value, setValue] = React.useState('');
   const [isLoading, setIsLoading] = React.useState(true);
   const [isSaving, setIsSaving] = React.useState(false);
+  const [agentMemoryAvailable, setAgentMemoryAvailable] = React.useState(false);
+  const [isAgentMemorySaving, setIsAgentMemorySaving] = React.useState(false);
   const showOpenCodeUpdateNotifications = useUIStore((state) => state.showOpenCodeUpdateNotifications);
   const setShowOpenCodeUpdateNotifications = useUIStore((state) => state.setShowOpenCodeUpdateNotifications);
   const agentControlToolEnabled = useUIStore((state) => state.agentControlToolEnabled);
   const setAgentControlToolEnabled = useUIStore((state) => state.setAgentControlToolEnabled);
+  const agentMemoryToolEnabled = useUIStore((state) => state.agentMemoryToolEnabled);
+  const setAgentMemoryToolEnabled = useUIStore((state) => state.setAgentMemoryToolEnabled);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -31,12 +36,20 @@ export const OpenCodeCliSettings: React.FC = () => {
         if (!response.ok) {
           return;
         }
-        const data = (await response.json().catch(() => null)) as null | { opencodeBinary?: unknown };
+        const data = (await response.json().catch(() => null)) as null | {
+          opencodeBinary?: unknown;
+          agentMemoryAvailable?: unknown;
+          agentMemoryToolEnabled?: unknown;
+        };
         if (cancelled || !data) {
           return;
         }
         const next = typeof data.opencodeBinary === 'string' ? data.opencodeBinary.trim() : '';
         setValue(next);
+        setAgentMemoryAvailable(data.agentMemoryAvailable === true);
+        if (typeof data.agentMemoryToolEnabled === 'boolean') {
+          setAgentMemoryToolEnabled(data.agentMemoryToolEnabled);
+        }
       } catch {
         // ignore
       } finally {
@@ -48,7 +61,7 @@ export const OpenCodeCliSettings: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [setAgentMemoryToolEnabled]);
 
   const handleBrowse = React.useCallback(async () => {
     if (typeof window === 'undefined') {
@@ -89,6 +102,27 @@ export const OpenCodeCliSettings: React.FC = () => {
     setAgentControlToolEnabled(enabled);
     void updateDesktopSettings({ agentControlToolEnabled: enabled });
   }, [setAgentControlToolEnabled]);
+
+  const handleAgentMemoryToolChange = React.useCallback(async (enabled: boolean) => {
+    const previous = agentMemoryToolEnabled;
+    setAgentMemoryToolEnabled(enabled);
+    setIsAgentMemorySaving(true);
+    try {
+      await updateDesktopSettings({ agentMemoryToolEnabled: enabled });
+      await reloadOpenCodeConfiguration({
+        message: t('settings.openchamber.opencodeCli.actions.restartingOpenCode'),
+        mode: 'projects',
+        scopes: ['all'],
+      });
+    } catch (error) {
+      setAgentMemoryToolEnabled(previous);
+      toast.error(t('settings.openchamber.opencodeCli.field.agentMemoryToolSaveFailed'), {
+        description: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      setIsAgentMemorySaving(false);
+    }
+  }, [agentMemoryToolEnabled, setAgentMemoryToolEnabled, t]);
 
   return (
     <div className="mb-8">
@@ -178,6 +212,25 @@ export const OpenCodeCliSettings: React.FC = () => {
             </span>
           </span>
         </label>
+
+        {agentMemoryAvailable ? (
+          <label className="flex cursor-pointer items-start gap-2 py-1.5">
+            <Checkbox
+              checked={agentMemoryToolEnabled}
+              onChange={(enabled) => { void handleAgentMemoryToolChange(enabled); }}
+              disabled={isAgentMemorySaving}
+              ariaLabel={t('settings.openchamber.opencodeCli.field.agentMemoryToolAria')}
+            />
+            <span className="min-w-0">
+              <span className="typography-ui-label block text-foreground">
+                {t('settings.openchamber.opencodeCli.field.agentMemoryTool')}
+              </span>
+              <span className="typography-micro block text-muted-foreground/70">
+                {t('settings.openchamber.opencodeCli.field.agentMemoryToolInfo')}
+              </span>
+            </span>
+          </label>
+        ) : null}
 
         <div className="flex justify-start py-1.5">
           <Button
