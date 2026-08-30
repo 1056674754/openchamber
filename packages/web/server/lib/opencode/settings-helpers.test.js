@@ -492,4 +492,17 @@ describe('settings helpers', () => {
     });
     expect(helpers.sanitizeSettingsUpdate({ optimizeSystemPrompt: 'true' })).toEqual({});
   });
+
+  it('persists only supported session retention actions', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({ sessionRetentionAction: 'archive' })).toEqual({
+      sessionRetentionAction: 'archive',
+    });
+    expect(helpers.sanitizeSettingsUpdate({ sessionRetentionAction: 'delete' })).toEqual({
+      sessionRetentionAction: 'delete',
+    });
+    expect(helpers.sanitizeSettingsUpdate({ sessionRetentionAction: 'remove' })).toEqual({});
+    expect(helpers.sanitizeSettingsUpdate({ sessionRetentionAction: true })).toEqual({});
+  });
 });
