@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi, afterEach } from 'vitest';
 import crypto from 'crypto';
 import fsPromises from 'fs/promises';
 import os from 'os';
@@ -16,7 +16,9 @@ const createRuntime = async () => {
     SETTINGS_FILE_PATH: settingsFilePath,
     sanitizeProjects: (projects) => Array.isArray(projects) ? projects : [],
     sanitizeSettingsUpdate: (settings) => settings,
-    mergePersistedSettings: (_current, changes) => changes,
+    // Real merge semantics: a regression where reads lose on-disk keys (the
+    // historical wipe) must be observable as lost keys after a persist.
+    mergePersistedSettings: (current, changes) => ({ ...current, ...changes }),
     normalizeSettingsPaths: (settings) => ({ settings, changed: false }),
     normalizeStringArray: (values) => Array.isArray(values) ? values.filter((value) => typeof value === 'string') : [],
     formatSettingsResponse: (settings) => settings,
@@ -139,6 +141,152 @@ describe('settings runtime', () => {
       expect((await fsPromises.readdir(tempRoot)).some((file) => file.startsWith('settings.json.tmp-'))).toBe(false);
     } finally {
       await fsPromises.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses to persist over an existing settings file that fails to parse', async () => {
+    const { runtime, settingsFilePath, cleanup } = await createRuntime();
+    try {
+      await fsPromises.writeFile(settingsFilePath, '{corrupted');
+
+      await expect(runtime.persistSettings({ themeId: 'dark' })).rejects.toThrow(/Refusing to write settings/);
+
+      // The corrupted file must remain untouched on disk so the data stays recoverable.
+      expect(await fsPromises.readFile(settingsFilePath, 'utf8')).toBe('{corrupted');
+
+      // Repair by rewrite clears the guard and persistence works again.
+      await fsPromises.writeFile(settingsFilePath, JSON.stringify({ themeId: 'light' }, null, 2));
+      await runtime.persistSettings({ themeId: 'dark' });
+      const saved = JSON.parse(await fsPromises.readFile(settingsFilePath, 'utf8'));
+      expect(saved.themeId).toBe('dark');
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('recovers via repair-by-delete: removing the corrupt file re-enables persistence', async () => {
+    const { runtime, settingsFilePath, cleanup } = await createRuntime();
+    try {
+      await fsPromises.writeFile(settingsFilePath, '{corrupted');
+      await expect(runtime.persistSettings({ themeId: 'dark' })).rejects.toThrow(/Refusing to write settings/);
+
+      await fsPromises.rm(settingsFilePath);
+      await runtime.persistSettings({ themeId: 'dark' });
+      const saved = JSON.parse(await fsPromises.readFile(settingsFilePath, 'utf8'));
+      expect(saved.themeId).toBe('dark');
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('blocks direct writeSettingsToDisk calls while the settings file is unreadable', async () => {
+    const { runtime, settingsFilePath, cleanup } = await createRuntime();
+    try {
+      await fsPromises.writeFile(settingsFilePath, '{corrupted');
+      await runtime.readSettingsFromDisk();
+
+      await expect(runtime.writeSettingsToDisk({ themeId: 'dark' })).rejects.toThrow(/Refusing to write settings/);
+      expect(await fsPromises.readFile(settingsFilePath, 'utf8')).toBe('{corrupted');
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('treats array-root and primitive-root settings files as unreadable', async () => {
+    const { runtime, settingsFilePath, cleanup } = await createRuntime();
+    try {
+      for (const corruptRoot of ['[]', '"settings"', '42']) {
+        await fsPromises.writeFile(settingsFilePath, corruptRoot);
+        await expect(runtime.persistSettings({ themeId: 'dark' })).rejects.toThrow(/Refusing to write settings/);
+        expect(await fsPromises.readFile(settingsFilePath, 'utf8')).toBe(corruptRoot);
+      }
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('keeps unrelated on-disk settings keys across a persist (wipe regression guard)', async () => {
+    const { runtime, settingsFilePath, cleanup } = await createRuntime();
+    try {
+      await fsPromises.writeFile(settingsFilePath, JSON.stringify({
+        themeId: 'light',
+        desktopSshInstances: [{ id: 'ssh-1773445565164-e132cb04b5e51', nickname: 'SUIS-QP-TX-CLOUD' }],
+      }, null, 2));
+
+      await runtime.persistSettings({ themeId: 'dark' });
+
+      const saved = JSON.parse(await fsPromises.readFile(settingsFilePath, 'utf8'));
+      expect(saved.themeId).toBe('dark');
+      expect(saved.desktopSshInstances).toEqual([{ id: 'ssh-1773445565164-e132cb04b5e51', nickname: 'SUIS-QP-TX-CLOUD' }]);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('degrades migrated reads to defaults without rewriting an unreadable settings file', async () => {
+    const { runtime, settingsFilePath, cleanup } = await createRuntime();
+    try {
+      await fsPromises.writeFile(settingsFilePath, '{corrupted');
+      const settings = await runtime.readSettingsFromDiskMigrated();
+      // Migrations ran against the lenient {} read: defaults are present.
+      expect(settings.lightThemeId).toBe('flexoki-light');
+      expect(settings.darkThemeId).toBe('flexoki-dark');
+      expect(await fsPromises.readFile(settingsFilePath, 'utf8')).toBe('{corrupted');
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('warns at most once per corruption span and resets after repair', async () => {
+    const { runtime, settingsFilePath, cleanup } = await createRuntime();
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      await fsPromises.writeFile(settingsFilePath, '{corrupted');
+      // Repeated reads over the corrupt file must not flood the log.
+      await runtime.readSettingsFromDisk();
+      await runtime.readSettingsFromDisk();
+      await runtime.readSettingsFromDiskMigrated();
+      const unreadableWarns = warnSpy.mock.calls.filter((call) => String(call[0]).includes('not a JSON object') || String(call[0]).includes('Failed to read settings file'));
+      expect(unreadableWarns).toHaveLength(1);
+      // The refused migration write warns once as well.
+      const skippedWarns = warnSpy.mock.calls.filter((call) => String(call[0]).includes('Skipped settings migration write'));
+      expect(skippedWarns).toHaveLength(1);
+
+      // After repair, the warn gate resets: a fresh corruption warns again.
+      await fsPromises.writeFile(settingsFilePath, JSON.stringify({ themeId: 'light' }, null, 2));
+      await runtime.readSettingsFromDisk();
+      await fsPromises.writeFile(settingsFilePath, '{corrupted-again');
+      await runtime.readSettingsFromDisk();
+      expect(warnSpy.mock.calls.filter((call) => String(call[0]).includes('not a JSON object') || String(call[0]).includes('Failed to read settings file'))).toHaveLength(2);
+    } finally {
+      warnSpy.mockRestore();
+      await cleanup();
+    }
+  });
+
+  it('keeps a .prev copy of the previous settings generation on write', async () => {
+    const { runtime, settingsFilePath, cleanup } = await createRuntime();
+    try {
+      await fsPromises.writeFile(settingsFilePath, JSON.stringify({ themeId: 'light' }, null, 2));
+      await runtime.writeSettingsToDisk({ themeId: 'dark' });
+      const prev = JSON.parse(await fsPromises.readFile(`${settingsFilePath}.prev`, 'utf8'));
+      expect(prev.themeId).toBe('light');
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('still completes the write when the best-effort .prev copy fails', async () => {
+    const { runtime, settingsFilePath, cleanup } = await createRuntime();
+    try {
+      await fsPromises.writeFile(settingsFilePath, JSON.stringify({ themeId: 'light' }, null, 2));
+      // A directory at the .prev path makes copyFile fail with EISDIR.
+      await fsPromises.mkdir(`${settingsFilePath}.prev`);
+      await runtime.writeSettingsToDisk({ themeId: 'dark' });
+      const saved = JSON.parse(await fsPromises.readFile(settingsFilePath, 'utf8'));
+      expect(saved.themeId).toBe('dark');
+    } finally {
+      await cleanup();
     }
   });
 });

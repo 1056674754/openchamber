@@ -81,12 +81,28 @@ const expandSshIncludeToken = (token, baseDir) => {
 };
 
 const readJsonRoot = (settingsFilePath) => {
+  let raw;
   try {
-    const parsed = JSON.parse(fs.readFileSync(settingsFilePath, 'utf8'));
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
-  } catch {
-    return {};
+    raw = fs.readFileSync(settingsFilePath, 'utf8');
+  } catch (error) {
+    if (error && typeof error === 'object' && error.code === 'ENOENT') return {};
+    throw error;
   }
+  // Fail closed on corruption: silently returning {} here would make the next
+  // read-modify-write persist only the desktop-ssh keys and wipe every other
+  // section of the shared settings file (the historical desktopSshInstances /
+  // remoteInstances data loss). Surface the error instead so callers refuse
+  // to write until the file is repaired.
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (error) {
+    throw new Error(`Settings file is not valid JSON (${settingsFilePath}): ${error?.message || error}`);
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error(`Settings file is not a JSON object (${settingsFilePath})`);
+  }
+  return parsed;
 };
 
 const writeJsonRoot = async (settingsFilePath, root) => {
@@ -97,6 +113,8 @@ const writeJsonRoot = async (settingsFilePath, root) => {
   const tmp = `${settingsFilePath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   try {
     await fsp.writeFile(tmp, JSON.stringify(root, null, 2));
+    // Keep one previous generation as a local recovery point (best-effort).
+    await fsp.copyFile(settingsFilePath, `${settingsFilePath}.prev`).catch(() => {});
     await replaceFileWithRetry(tmp, settingsFilePath);
   } catch (error) {
     await fsp.rm(tmp, { force: true }).catch(() => {});

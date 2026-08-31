@@ -547,6 +547,8 @@ const writeJsonFile = async (filePath, data) => {
   const tmp = `${filePath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   try {
     await fsp.writeFile(tmp, JSON.stringify(data, null, 2));
+    // Keep one previous generation as a local recovery point (best-effort).
+    await copyPreviousGeneration(filePath);
     await replaceFileWithRetry(tmp, filePath);
   } catch (error) {
     await fsp.rm(tmp, { force: true }).catch(() => {});
@@ -576,6 +578,7 @@ const readSettingsRoot = () => {
 // extension host) and standalone server instances can't interleave their
 // RMW with ours either.
 import { withSettingsLock as withCrossProcessSettingsLock, defaultSettingsLockPath } from '@openchamber/shared/settings-lock';
+import { assertJsonFileReadableForWrite, copyPreviousGeneration } from '@openchamber/shared/settings-file';
 let sharedSettingsLock = Promise.resolve();
 const withSettingsLock = (fn) => {
   const next = sharedSettingsLock.then(() => withCrossProcessSettingsLock(defaultSettingsLockPath(settingsFilePath()), fn));
@@ -584,6 +587,12 @@ const withSettingsLock = (fn) => {
 };
 const mutateSettingsRoot = (mutator) => {
   return withSettingsLock(async () => {
+    // Fail-closed write guard, re-verified at write time: readSettingsRoot()
+    // is lenient ({} on corrupt content), so persisting the mutated root
+    // without this check would wipe every key absent from the write (the
+    // historical desktopSshInstances loss). Reads stay lenient; writers
+    // refuse until the file is repaired or removed.
+    await assertJsonFileReadableForWrite(settingsFilePath(), 'settings');
     const current = readSettingsRoot();
     const result = await mutator(current);
     const nextRoot = result ?? current;
@@ -592,7 +601,10 @@ const mutateSettingsRoot = (mutator) => {
   });
 };
 
-const writeSettingsRoot = async (root) => writeJsonFile(settingsFilePath(), root);
+const writeSettingsRoot = async (root) => {
+  await assertJsonFileReadableForWrite(settingsFilePath(), 'settings');
+  await writeJsonFile(settingsFilePath(), root);
+};
 
 const normalizeHostUrl = (raw) => {
   const trimmed = typeof raw === 'string' ? raw.trim() : '';
@@ -682,11 +694,13 @@ const getOrCreateDesktopInstallId = async () => {
   const existing = readSettingsRoot().desktopInstallId;
   if (typeof existing === 'string' && existing.trim()) return existing.trim();
   const generated = globalThis.crypto.randomUUID();
+  // Best-effort persist: if the settings file is unreadable the write is
+  // refused; fall back to the generated id for this process lifetime.
   await mutateSettingsRoot((root) => {
     if (typeof root.desktopInstallId === 'string' && root.desktopInstallId.trim()) return root;
     root.desktopInstallId = generated;
     return root;
-  });
+  }).catch((error) => log.warn?.('[electron] failed to persist desktopInstallId', error));
   const after = readSettingsRoot().desktopInstallId;
   return typeof after === 'string' && after.trim() ? after.trim() : generated;
 };
@@ -809,7 +823,9 @@ const debounceWindowStatePersist = (browserWindow, immediate = false) => {
 
   const persist = async () => {
     if (state.windowGeometryRevisions.get(key) !== revision) return;
-    await writeWindowState(browserWindow);
+    // Best-effort: a refused write (unreadable settings file) must not turn
+    // every window move/resize into an unhandled rejection.
+    await writeWindowState(browserWindow).catch((error) => log.warn?.('[electron] failed to persist window state', error));
   };
 
   if (immediate) {
@@ -1496,7 +1512,7 @@ const spawnLocalServer = async () => {
 
   await mutateSettingsRoot((root) => {
     root.desktopLocalPort = port;
-  });
+  }).catch((error) => log.warn?.('[electron] failed to persist desktopLocalPort', error));
 
   return url;
 };

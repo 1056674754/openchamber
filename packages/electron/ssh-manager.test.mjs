@@ -503,4 +503,57 @@ describe('ElectronSshManager', () => {
     expect(started).toContain('--hostname 0.0.0.0');
     expect(started).toContain('OPENCHAMBER_UI_PASSWORD=');
   });
+
+  test('refuses to rewrite the shared settings file when it is not valid JSON', async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-ssh-manager-test-'));
+    tempDirs.push(tempDir);
+    const settingsFilePath = path.join(tempDir, 'settings.json');
+    fs.writeFileSync(settingsFilePath, '{corrupted');
+    const manager = new ElectronSshManager({
+      settingsFilePath,
+      appVersion: '0.0.0-test',
+      emit: () => undefined,
+    });
+
+    await expect(manager.setInstances({ instances: [] })).rejects.toThrow(/not valid JSON/);
+
+    // The corrupted file must remain untouched so the rest of the settings stay recoverable.
+    expect(fs.readFileSync(settingsFilePath, 'utf8')).toBe('{corrupted');
+  });
+
+  test('refuses non-object settings roots (array) without rewriting the file', async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-ssh-manager-test-'));
+    tempDirs.push(tempDir);
+    const settingsFilePath = path.join(tempDir, 'settings.json');
+    fs.writeFileSync(settingsFilePath, '[]');
+    const manager = new ElectronSshManager({
+      settingsFilePath,
+      appVersion: '0.0.0-test',
+      emit: () => undefined,
+    });
+
+    await expect(manager.setInstances({ instances: [] })).rejects.toThrow(/not a JSON object/);
+    expect(fs.readFileSync(settingsFilePath, 'utf8')).toBe('[]');
+  });
+
+  test('keeps a .prev copy of the previous settings generation on write', async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-ssh-manager-test-'));
+    tempDirs.push(tempDir);
+    const settingsFilePath = path.join(tempDir, 'settings.json');
+    fs.writeFileSync(settingsFilePath, JSON.stringify({ existing: true }, null, 2));
+    const manager = new ElectronSshManager({
+      settingsFilePath,
+      appVersion: '0.0.0-test',
+      emit: () => undefined,
+    });
+
+    await manager.setInstances({ instances: [{ id: 'ssh-1', nickname: 'Host', sshCommand: 'ssh host' }] });
+
+    const prev = JSON.parse(fs.readFileSync(`${settingsFilePath}.prev`, 'utf8'));
+    expect(prev.existing).toBe(true);
+    const next = JSON.parse(fs.readFileSync(settingsFilePath, 'utf8'));
+    expect(next.desktopSshInstances).toHaveLength(1);
+    // Unrelated on-disk keys must survive the read-modify-write (wipe regression guard).
+    expect(next.existing).toBe(true);
+  });
 });

@@ -3,6 +3,7 @@ import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { withSettingsLock as withCrossProcessSettingsLock, defaultSettingsLockPath } from '@openchamber/shared/settings-lock';
+import { assertJsonFileReadableForWrite, copyPreviousGeneration } from '@openchamber/shared/settings-file';
 import { BUILT_IN_SKILL_LOCATION, type DiscoveredSkill, type SkillScope, type SkillSource } from './opencodeConfig';
 import type { BridgeContext } from './bridge';
 
@@ -177,6 +178,11 @@ const writeSharedSettingsToDisk = async (changes: Record<string, unknown>): Prom
   await withCrossProcessSettingsLock(defaultSettingsLockPath(OPENCHAMBER_SHARED_SETTINGS_PATH), async () => {
     let tmp: string | null = null;
     try {
+      // Fail-closed write guard, re-verified at write time: the lenient {}
+      // read below must never be persisted back over a corrupt file, or the
+      // merge would wipe every key absent from `changes` (the historical
+      // desktopSshInstances loss).
+      await assertJsonFileReadableForWrite(OPENCHAMBER_SHARED_SETTINGS_PATH);
       await fs.promises.mkdir(path.dirname(OPENCHAMBER_SHARED_SETTINGS_PATH), { recursive: true });
       const current = readSharedSettingsFromDisk();
       const next: Record<string, unknown> = { ...current, ...changes };
@@ -184,9 +190,12 @@ const writeSharedSettingsToDisk = async (changes: Record<string, unknown>): Prom
       // JSON that would fail to parse and silently get coerced to {}.
       tmp = `${OPENCHAMBER_SHARED_SETTINGS_PATH}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       await fs.promises.writeFile(tmp, JSON.stringify(next, null, 2), 'utf8');
+      // Keep one previous generation as a local recovery point (best-effort).
+      await copyPreviousGeneration(OPENCHAMBER_SHARED_SETTINGS_PATH);
       await fs.promises.rename(tmp, OPENCHAMBER_SHARED_SETTINGS_PATH);
-    } catch {
+    } catch (error) {
       if (tmp) await fs.promises.rm(tmp, { force: true }).catch(() => {});
+      throw error;
     }
   });
 };
@@ -263,7 +272,11 @@ const readPersistedSettings = (ctx?: BridgeContext): Record<string, unknown> => 
     }
     if (Object.keys(missingFromDisk).length > 0) {
       // Fire-and-forget; readers already have an in-memory merged view.
-      void writeSharedSettingsToDisk(missingFromDisk);
+      // Keep a diagnostic trail for refused/failed writes (corrupt file,
+      // lock timeout, IO errors) instead of dropping them silently.
+      void writeSharedSettingsToDisk(missingFromDisk).catch((error) => {
+        console.warn('[openchamber] deferred settings migration to disk failed:', error);
+      });
     }
   }
 

@@ -427,19 +427,36 @@ export const createSettingsRuntime = (deps) => {
     }
   };
 
+  // Warn-once gate: while the settings file stays corrupt, every read would
+  // otherwise repeat these warnings across the ~90 readSettingsFromDiskMigrated
+  // call sites (per-request and polling paths) and flood the log.
+  let hasWarnedSettingsUnreadable = false;
+
   const readSettingsFromDisk = async () => {
     try {
       const raw = await fsPromises.readFile(SETTINGS_FILE_PATH, 'utf8');
       const parsed = JSON.parse(raw);
-      if (parsed && typeof parsed === 'object') {
+      // Arrays and JSON primitives are corrupt states for a settings root:
+      // treating them as readable would let the next persist rewrite the
+      // file from empty defaults (the historical wipe) with no guard tripped.
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        hasWarnedSettingsUnreadable = false;
         return parsed;
+      }
+      if (!hasWarnedSettingsUnreadable) {
+        hasWarnedSettingsUnreadable = true;
+        console.warn(`Settings file is not a JSON object; refusing to overwrite ${SETTINGS_FILE_PATH} until it is repaired`);
       }
       return {};
     } catch (error) {
       if (error && typeof error === 'object' && error.code === 'ENOENT') {
+        hasWarnedSettingsUnreadable = false;
         return {};
       }
-      console.warn('Failed to read settings file:', error);
+      if (!hasWarnedSettingsUnreadable) {
+        hasWarnedSettingsUnreadable = true;
+        console.warn('Failed to read settings file:', error);
+      }
       return {};
     }
   };
@@ -455,11 +472,41 @@ export const createSettingsRuntime = (deps) => {
     }
   };
 
+  // Point-in-time fail-closed guard, re-verified immediately before every
+  // write. A read's verdict must not be cached across the read-to-write
+  // window (concurrent readers share no state with this write), because
+  // persisting a merge base derived from an unreadable file would wipe every
+  // key absent from the write — the historical desktopSshInstances loss.
+  // Reads stay lenient so the UI keeps working; every writer refuses until
+  // the file is repaired (or removed).
+  const assertSettingsFileReadableForWrite = async () => {
+    let raw;
+    try {
+      raw = await fsPromises.readFile(SETTINGS_FILE_PATH, 'utf8');
+    } catch (error) {
+      if (error && typeof error === 'object' && error.code === 'ENOENT') return;
+      throw new Error(`Refusing to write settings: ${SETTINGS_FILE_PATH} could not be read (${error && error.message ? error.message : error}); repair or remove the file first`);
+    }
+    let parsed;
+    try {
+      parsed = JSON.parse(raw);
+    } catch (error) {
+      throw new Error(`Refusing to write settings: ${SETTINGS_FILE_PATH} is not valid JSON (${error && error.message ? error.message : error}); repair or remove the file first`);
+    }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new Error(`Refusing to write settings: ${SETTINGS_FILE_PATH} is not a JSON object; repair or remove the file first`);
+    }
+  };
+
   const writeSettingsToDisk = async (settings) => {
+    await assertSettingsFileReadableForWrite();
     const settingsDirectory = path.dirname(SETTINGS_FILE_PATH);
     await fsPromises.mkdir(settingsDirectory, { recursive: true });
     const tmp = `${SETTINGS_FILE_PATH}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     try {
+      // Keep one previous generation around as a local recovery point for any
+      // future corruption or data loss (best-effort; absence is fine).
+      await fsPromises.copyFile(SETTINGS_FILE_PATH, `${SETTINGS_FILE_PATH}.prev`).catch(() => {});
       // Atomic write: Electron main and ssh-manager read this file via plain
       // readFile + JSON.parse and silently coerce parse errors to {}. A
       // partial read during a non-atomic writeFile would make their next
@@ -758,6 +805,8 @@ export const createSettingsRuntime = (deps) => {
 
   let hasCleanedOrphanedTempFiles = false;
 
+  let hasWarnedMigrationWriteSkipped = false;
+
   const readSettingsFromDiskMigrated = async () => {
     if (!hasCleanedOrphanedTempFiles) {
       hasCleanedOrphanedTempFiles = true;
@@ -772,7 +821,17 @@ export const createSettingsRuntime = (deps) => {
     const migration6 = normalizeSettingsPaths(migration5.settings);
     const migration7 = await migrateSettingsToDeterministicProjectIds(migration6.settings);
     if (migration1.changed || migration2.changed || migration3.changed || migration4.changed || migration5.changed || migration6.changed || migration7.changed) {
-      await writeSettingsToDisk(migration7.settings);
+      // Degrade to read-only when the migration write is refused (corrupt
+      // settings file): serving empty defaults keeps every reader working,
+      // while the unreadable-file guard still blocks all persistence until
+      // the file is repaired. Throwing here would surface as uncaught
+      // rejections across the ~90 readSettingsFromDiskMigrated call sites.
+      await writeSettingsToDisk(migration7.settings).catch((error) => {
+        if (!hasWarnedMigrationWriteSkipped) {
+          hasWarnedMigrationWriteSkipped = true;
+          console.warn('Skipped settings migration write:', error && error.message ? error.message : error);
+        }
+      });
     }
     return migration7.settings;
   };

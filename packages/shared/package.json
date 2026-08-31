@@ -13,6 +13,10 @@
     "./settings-lock": {
       "types": "./src/settings-lock.d.ts",
       "import": "./src/settings-lock.js"
+    },
+    "./settings-file": {
+      "types": "./src/settings-file.d.ts",
+      "import": "./src/settings-file.js"
     }
   },
   "scripts": {
