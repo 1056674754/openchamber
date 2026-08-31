@@ -3307,3 +3307,16 @@ v1.20.0-sscity 尚未宣布完成：当前未关闭 `#135/#140/#142-#151/#154/#1
 - 不移植：shortcuts surface 数字切换传 `linearConnected`（fork 无该功能）；MobileApp linear bootstrap（本轮未动 mobile surfaces）。
 
 验证：linear server 76/76（vitest，bun 下 vi.stubGlobal 不可用需按既有约定跑 vitest）✅；UI linear libs + i18n + router 39/39 ✅；settings metadata 7/7 ✅；全 workspace type-check/lint ✅；production build ✅；`git diff --check` ✅。并行 agent 的 plugin/TaskCard WIP 未混入。实机 OAuth（真实 Linear workspace 连接、issue 浏览、session 回写）建议在下一次桌面 QA 附带。至此 [#180](https://coding.s-s.city/songsong/openchamber/-/issues/180) 完成，可关闭。
+
+## v1.21.x `#160` Phase 1：Session tabs strip + alt+w close（2026-08-31）
+
+上游来源：`23d88cced`..`c74917387`（session tabs 簇终态）。对应实现提交：`592fee221`。
+
+- `useSessionTabsStore`：持久化 tab id 列表（soft cap 10）。tabs 是 per-client 工作集投影——关 tab 只从 strip 移除、永不触及 session 本身；未知 id 保留（部分加载的 session 列表不得破坏工作集）。
+- `SessionTabsStrip`：拖拽重排、busy/unread 状态点、hover 关闭；一个 session 菜单同时支撑 "..." dropdown 与右键 context menu（fork 版菜单：rename、copy id、close others、archive、delete——archive/delete 走 Header 既有 retention 流程）。活动 session 标题作为 strip 的 children 渲染其中。
+- Header：opt-in 标志（`sessionTabsEnabled`，默认关、persist）开启时以 strip 包裹既有标题块；VS Code 不启用。
+- `close_session_tab`（alt+w，可自定义）经 fork 既有 shortcut 系统接入 `useKeyboardShortcuts`：关闭活动 tab 并激活右邻（fallback 左邻）；关最后一个 tab 开 new-session draft；session 本身不受影响。
+- 设置 → General appearance 新增 Session tabs 开关；i18n 8 key × 11 locale；新 `dropdown-menu.styles.ts` 承载菜单 class 常量。
+- 明确留待 #160 后续 phase：centralized `shortcuts/` registry 迁移（schema/dispatcher/mod+k leader/held-modifier 数字切 tab——需对 fork 8 个消费者做专门迁移批）；`removeTabs` 接入删除流程。
+
+验证：useSessionTabsStore 5/5 ✅；UI/全 workspace type-check/lint ✅；`git diff --check` ✅。strip 的 matching-surface 交互（拖拽重排、右键菜单、alt+w）建议随下次桌面 QA 验证。[#160](https://coding.s-s.city/songsong/openchamber/-/issues/160) 保持 open。
