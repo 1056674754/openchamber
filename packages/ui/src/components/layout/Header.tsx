@@ -1516,11 +1516,19 @@ export const Header: React.FC<HeaderProps> = ({
   }, [onToggleRightDrawer, rightDrawerOpen]);
 
   const desktopPaddingClass = React.useMemo(() => {
+    // Custom in-window controls (frameless Electron, right side) own the right
+    // edge: no inline padding, so the pr-0 class applies and the close button
+    // sits flush with the window corner per Windows conventions. Only the
+    // browser's native window-controls overlay reserves padding + right inset.
+    if (usesFramelessChrome && windowControlsSide === 'right') {
+      return undefined;
+    }
+
     if ((isDesktopApp && isMacPlatform && !isDesktopWindowFullscreen) || isTabletStandalonePwa) {
       return 'pl-[5.5rem]';
     }
     return 'pl-3';
-  }, [isDesktopApp, isDesktopWindowFullscreen, isMacPlatform, isTabletStandalonePwa]);
+  }, [isDesktopApp, isDesktopWindowFullscreen, isMacPlatform, isTabletStandalonePwa, usesFramelessChrome, windowControlsSide]);
 
   useEffect(() => {
     if (!isDesktopApp || !isMacPlatform) {
