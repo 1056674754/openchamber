@@ -814,6 +814,9 @@ interface ConfigStore {
     speechPitch: number;
     speechVolume: number;
     sayVoice: string;
+    /** Local and macOS voices follow the language of the text being read. */
+    ttsFollowTextLanguage: boolean;
+    setTtsFollowTextLanguage: (enabled: boolean) => void;
     browserVoice: string;
     openaiVoice: string;
     openaiApiKey: string;
@@ -1042,6 +1045,14 @@ export const useConfigStore = create<ConfigStore>()(
                         if (saved) return saved;
                     }
                     return 'Samantha';
+                })(),
+                // Voice follows the text's language - default on, like upstream
+                ttsFollowTextLanguage: (() => {
+                    if (typeof window !== 'undefined') {
+                        const saved = localStorage.getItem('ttsFollowTextLanguage');
+                        if (saved !== null) return saved === 'true';
+                    }
+                    return true;
                 })(),
                 // Browser voice - load from localStorage or default to empty (auto-select)
                 browserVoice: (() => {
@@ -2653,6 +2664,13 @@ export const useConfigStore = create<ConfigStore>()(
                     set({ sayVoice: voice });
                     if (typeof window !== 'undefined') {
                         localStorage.setItem('sayVoice', voice);
+                    }
+                },
+
+                setTtsFollowTextLanguage: (enabled: boolean) => {
+                    set({ ttsFollowTextLanguage: enabled });
+                    if (typeof window !== 'undefined') {
+                        localStorage.setItem('ttsFollowTextLanguage', String(enabled));
                     }
                 },
 

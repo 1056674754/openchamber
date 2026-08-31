@@ -160,6 +160,8 @@ export const VoiceSettings: React.FC = () => {
     const openaiCompatibleTtsModel = useConfigStore((state) => state.openaiCompatibleTtsModel);
     const setOpenaiCompatibleTtsModel = useConfigStore((state) => state.setOpenaiCompatibleTtsModel);
     const showMessageTTSButtons = useConfigStore((state) => state.showMessageTTSButtons);
+    const ttsFollowTextLanguage = useConfigStore((state) => state.ttsFollowTextLanguage);
+    const setTtsFollowTextLanguage = useConfigStore((state) => state.setTtsFollowTextLanguage);
     const ttsInputMode = useConfigStore((state) => state.ttsInputMode);
     const setTtsInputMode = useConfigStore((state) => state.setTtsInputMode);
     // STT settings
@@ -1053,6 +1055,23 @@ export const VoiceSettings: React.FC = () => {
                         <Checkbox checked={showMessageTTSButtons} onChange={setShowMessageTTSButtons} ariaLabel={t('settings.voice.page.field.messageReadAloudButtonAria')} />
                         <span className="typography-ui-label text-foreground">{t('settings.voice.page.field.messageReadAloudButton')}</span>
                     </div>
+
+                    {voiceProvider === 'say' && (
+                        <>
+                            <div
+                                className="group flex cursor-pointer items-center gap-2 py-1.5"
+                                role="button"
+                                tabIndex={0}
+                                aria-pressed={ttsFollowTextLanguage}
+                                onClick={() => setTtsFollowTextLanguage(!ttsFollowTextLanguage)}
+                                onKeyDown={(e) => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); setTtsFollowTextLanguage(!ttsFollowTextLanguage); } }}
+                            >
+                                <Checkbox checked={ttsFollowTextLanguage} onChange={setTtsFollowTextLanguage} ariaLabel={t('settings.voice.page.field.followTextLanguageAria')} />
+                                <span className="typography-ui-label text-foreground">{t('settings.voice.page.field.followTextLanguage')}</span>
+                            </div>
+                            <p className="typography-meta px-1 pb-1 text-muted-foreground">{t('settings.voice.page.field.followTextLanguageInfo')}</p>
+                        </>
+                    )}
 
                     <div className="pb-1.5 pt-0.5">
                         <div className="flex min-w-0 flex-col gap-1.5">
