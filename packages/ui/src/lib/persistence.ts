@@ -1472,6 +1472,16 @@ export const sanitizeWebSettings = (payload: unknown): DesktopSettings | null =>
     result.sttTranscribeOnStop = candidate.sttTranscribeOnStop;
   }
 
+  if (candidate.localStore && typeof candidate.localStore === 'object' && !Array.isArray(candidate.localStore)) {
+    const localStore: Record<string, string> = {};
+    for (const [key, value] of Object.entries(candidate.localStore as Record<string, unknown>)) {
+      if (typeof key === 'string' && key.length > 0 && key.length <= 256 && typeof value === 'string' && value.length <= 256 * 1024) {
+        localStore[key] = value;
+      }
+    }
+    result.localStore = localStore;
+  }
+
   return result;
 };
 
@@ -1635,6 +1645,70 @@ let _settingsFlushChain: Promise<boolean> | null = null;
 let _localSettingsMutationGeneration = 0;
 const SETTINGS_DEBOUNCE_MS = 200;
 
+export type SettingsSaveFailureKind = 'lock-timeout' | 'network' | 'http' | 'unknown';
+export type SettingsSaveFailure = {
+  kind: SettingsSaveFailureKind;
+  message: string;
+  status?: number;
+  waitedMs?: number;
+  ownerPid?: number;
+};
+
+let _failedSettingsChanges: Partial<DesktopSettings> | null = null;
+let _failedSettingsError: SettingsSaveFailure | null = null;
+
+const classifySettingsError = (error: unknown, httpStatus?: number): SettingsSaveFailure => {
+  if (httpStatus !== undefined) {
+    return { kind: 'http', message: `HTTP ${httpStatus}`, status: httpStatus };
+  }
+  if (error && typeof error === 'object' && 'code' in error) {
+    const code = (error as { code?: unknown }).code;
+    if (code === 'SETTINGS_LOCK_TIMEOUT') {
+      const e = error as { message?: string; waitedMs?: number; ownerPid?: number };
+      return {
+        kind: 'lock-timeout',
+        message: e.message ?? 'settings lock timeout',
+        waitedMs: e.waitedMs,
+        ownerPid: e.ownerPid,
+      };
+    }
+  }
+  const message = error instanceof Error ? error.message : String(error);
+  const isNetwork = message.toLowerCase().includes('fetch')
+    || message.toLowerCase().includes('network')
+    || message.toLowerCase().includes('failed to fetch');
+  return { kind: isNetwork ? 'network' : 'unknown', message };
+};
+
+const recordFailedSettings = (changes: Partial<DesktopSettings>, failure: SettingsSaveFailure): void => {
+  _failedSettingsChanges = { ...(_failedSettingsChanges ?? {}), ...changes };
+  _failedSettingsError = failure;
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent<SettingsSaveFailure>('openchamber:settings-save-failed', { detail: failure }));
+  }
+};
+
+const clearFailedSettings = (): void => {
+  if (_failedSettingsChanges || _failedSettingsError) {
+    _failedSettingsChanges = null;
+    _failedSettingsError = null;
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('openchamber:settings-save-recovered'));
+    }
+  }
+};
+
+export const getFailedSettingsInfo = (): SettingsSaveFailure | null => _failedSettingsError;
+
+export const retryFailedSettingsUpdate = async (): Promise<boolean> => {
+  if (!_failedSettingsChanges) return true;
+  const changes = _failedSettingsChanges;
+  _failedSettingsChanges = null;
+  _failedSettingsError = null;
+  await updateDesktopSettings(changes);
+  return _failedSettingsError === null;
+};
+
 const _flushSettingsUpdate = async (): Promise<boolean> => {
   const changes = _pendingSettingsChanges;
   _pendingSettingsChanges = null;
@@ -1652,9 +1726,11 @@ const _flushSettingsUpdate = async (): Promise<boolean> => {
         // Invalidate GET cache so the next read sees the fresh data
         _settingsCache = null;
       }
+      clearFailedSettings();
       return true;
     } catch (error) {
       console.warn('Failed to update settings via runtime settings API:', error);
+      recordFailedSettings(changes, classifySettingsError(error));
       return false;
     }
   }
@@ -1671,6 +1747,7 @@ const _flushSettingsUpdate = async (): Promise<boolean> => {
 
     if (!response.ok) {
       console.warn('Failed to update shared settings via API:', response.status, response.statusText);
+      recordFailedSettings(changes, classifySettingsError(null, response.status));
       return false;
     }
 
@@ -1682,9 +1759,11 @@ const _flushSettingsUpdate = async (): Promise<boolean> => {
       // Invalidate GET cache so next read sees the fresh data
       _settingsCache = null;
     }
+    clearFailedSettings();
     return true;
   } catch (error) {
     console.warn('Failed to update shared settings via API:', error);
+    recordFailedSettings(changes, classifySettingsError(error));
     return false;
   }
 };

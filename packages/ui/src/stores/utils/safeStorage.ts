@@ -15,16 +15,25 @@ import type { PersistStorage, StateStorage, StorageValue } from 'zustand/middlew
 // `registerSafeStorageRehydrate` so zustand-persist stores that initialized
 // with defaults before hydration can re-read.
 //
-// Writes update the in-memory map synchronously and schedule a coalesced
-// flush that forwards the full snapshot to the host file via
-// `updateDesktopSettings({ localStore })`.
+// Writes update the in-memory map synchronously and queue per-key mutations.
+// Mutations wait for the initial host snapshot, then flush as patches so one
+// renderer cannot replace unrelated preferences written by another client.
 
 const memoryStore = new Map<string, string>();
 const rehydrateSubscribers = new Set<() => void>();
 
+type PendingMutation = {
+    readonly value: string | null;
+    readonly revision: number;
+};
+
+const pendingMutations = new Map<string, PendingMutation>();
+
 let flushScheduled = false;
 let flushInFlight: Promise<void> | null = null;
 let runFlush: (() => void) | null = null;
+let hydrationComplete = false;
+let nextMutationRevision = 0;
 
 const triggerRehydrateSubscribers = (): void => {
     for (const fn of rehydrateSubscribers) {
@@ -37,28 +46,60 @@ const triggerRehydrateSubscribers = (): void => {
 };
 
 const flushToHostSettings = async (): Promise<void> => {
-    if (typeof window === 'undefined') return;
+    if (typeof window === 'undefined' || !hydrationComplete || pendingMutations.size === 0) return;
 
-    const snapshot: Record<string, string> = {};
-    for (const [key, value] of memoryStore) {
-        snapshot[key] = value;
+    const batch = new Map(pendingMutations);
+    const set: Record<string, string> = {};
+    const remove: string[] = [];
+    for (const [key, mutation] of batch) {
+        if (mutation.value === null) {
+            remove.push(key);
+        } else {
+            set[key] = mutation.value;
+        }
     }
 
     try {
-        const { updateDesktopSettings } = await import('@/lib/persistence');
-        await updateDesktopSettings({ localStore: snapshot });
+        const { flushPendingSettingsUpdates, updateDesktopSettings } = await import('@/lib/persistence');
+        await updateDesktopSettings({
+            localStorePatch: {
+                ...(Object.keys(set).length > 0 ? { set } : {}),
+                ...(remove.length > 0 ? { remove } : {}),
+            },
+        });
+        const flushed = await flushPendingSettingsUpdates();
+        if (!flushed) return;
+
+        for (const [key, mutation] of batch) {
+            if (pendingMutations.get(key)?.revision === mutation.revision) {
+                pendingMutations.delete(key);
+            }
+        }
     } catch (error) {
         console.error('safeStorage host flush failed', error);
     }
 };
 
 const scheduleFlush = (): void => {
-    if (typeof window === 'undefined' || flushScheduled) return;
+    if (
+        typeof window === 'undefined'
+        || !hydrationComplete
+        || pendingMutations.size === 0
+        || flushScheduled
+        || flushInFlight
+    ) return;
+
     flushScheduled = true;
+    let hasRun = false;
     const run = (): void => {
+        if (hasRun) return;
+        hasRun = true;
         flushScheduled = false;
+        if (runFlush === run) runFlush = null;
+        const startRevision = nextMutationRevision;
         const promise = flushToHostSettings().finally(() => {
             if (flushInFlight === promise) flushInFlight = null;
+            if (nextMutationRevision > startRevision) scheduleFlush();
         });
         flushInFlight = promise;
     };
@@ -98,14 +139,26 @@ const createPersistentStorage = (): Storage => {
     return {
         getItem: (key: string): string | null => memoryStore.get(key) ?? null,
         setItem: (key: string, value: string): void => {
-            memoryStore.set(key, String(value));
+            const nextValue = String(value);
+            if (memoryStore.get(key) === nextValue) return;
+            memoryStore.set(key, nextValue);
+            nextMutationRevision += 1;
+            pendingMutations.set(key, { value: nextValue, revision: nextMutationRevision });
             scheduleFlush();
         },
         removeItem: (key: string): void => {
+            if (!memoryStore.has(key)) return;
             memoryStore.delete(key);
+            nextMutationRevision += 1;
+            pendingMutations.set(key, { value: null, revision: nextMutationRevision });
             scheduleFlush();
         },
         clear: (): void => {
+            if (memoryStore.size === 0) return;
+            for (const key of memoryStore.keys()) {
+                nextMutationRevision += 1;
+                pendingMutations.set(key, { value: null, revision: nextMutationRevision });
+            }
             memoryStore.clear();
             scheduleFlush();
         },
@@ -140,15 +193,40 @@ export const getDeferredSafeStorage = (): Storage => {
  * Called from `applySettingsAndDispatch` whenever host settings arrive.
  */
 export const hydrateLocalStore = (record: Record<string, string> | undefined): void => {
-    memoryStore.clear();
+    const nextStore = new Map<string, string>();
     if (record && typeof record === 'object') {
         for (const [key, value] of Object.entries(record)) {
             if (typeof key === 'string' && key.length > 0 && typeof value === 'string') {
-                memoryStore.set(key, value);
+                nextStore.set(key, value);
             }
         }
     }
+
+    if (!hydrationComplete) {
+        for (const [key, mutation] of pendingMutations) {
+            if (nextStore.has(key) || mutation.value === null) {
+                pendingMutations.delete(key);
+                continue;
+            }
+            nextStore.set(key, mutation.value);
+        }
+        hydrationComplete = true;
+    } else {
+        for (const [key, mutation] of pendingMutations) {
+            if (mutation.value === null) {
+                nextStore.delete(key);
+            } else {
+                nextStore.set(key, mutation.value);
+            }
+        }
+    }
+
+    memoryStore.clear();
+    for (const [key, value] of nextStore) {
+        memoryStore.set(key, value);
+    }
     triggerRehydrateSubscribers();
+    scheduleFlush();
 };
 
 /**
@@ -156,14 +234,26 @@ export const hydrateLocalStore = (record: Record<string, string> | undefined): v
  * in-memory state. Persist-backed stores use this to re-read storage and
  * pick up host-file values that arrived after the store initialized.
  */
-export const registerSafeStorageRehydrate = (fn: () => void): void => {
+export const registerSafeStorageRehydrate = (fn: () => void): (() => void) => {
     rehydrateSubscribers.add(fn);
+    return () => {
+        rehydrateSubscribers.delete(fn);
+    };
 };
 
 /** Force any scheduled flush to start now and await any in-flight flush. */
 export const flushSafeStorage = async (): Promise<void> => {
-    if (runFlush) runFlush();
-    if (flushInFlight) await flushInFlight;
+    for (const flushDeferredStorage of deferredFlushers) {
+        flushDeferredStorage();
+    }
+    scheduleFlush();
+
+    while (runFlush || flushInFlight) {
+        const scheduledFlush = runFlush;
+        if (scheduledFlush) scheduledFlush();
+        const activeFlush = flushInFlight;
+        if (activeFlush) await activeFlush;
+    }
 };
 
 // ---------------------------------------------------------------------------

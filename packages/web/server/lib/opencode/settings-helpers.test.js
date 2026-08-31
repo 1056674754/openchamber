@@ -417,6 +417,47 @@ describe('settings helpers', () => {
     expect(merged.remoteInstances[0].auth).toEqual({ type: 'password', value: 'open-sesame' });
   });
 
+  it('applies localStore patches without replacing unrelated persisted keys', () => {
+    const helpers = createTestHelpers();
+    const changes = helpers.sanitizeSettingsUpdate({
+      localStorePatch: {
+        set: {
+          'session-display-mode': 'minimal',
+          'openchamber.i18n.v1': 'zh-CN',
+        },
+        remove: ['oc.tempSessions.collapsed'],
+      },
+    });
+
+    expect(changes).toEqual({
+      localStorePatch: {
+        set: {
+          'session-display-mode': 'minimal',
+          'openchamber.i18n.v1': 'zh-CN',
+        },
+        remove: ['oc.tempSessions.collapsed'],
+      },
+    });
+
+    const merged = helpers.mergePersistedSettings(
+      {
+        localStore: {
+          'session-display-mode': 'default',
+          'oc.tempSessions.collapsed': 'true',
+          'unrelated.preference': 'keep',
+        },
+      },
+      changes,
+    );
+
+    expect(merged.localStore).toEqual({
+      'session-display-mode': 'minimal',
+      'openchamber.i18n.v1': 'zh-CN',
+      'unrelated.preference': 'keep',
+    });
+    expect(merged).not.toHaveProperty('localStorePatch');
+  });
+
   it('redacts and preserves remote instance requestHeaders', () => {
     const helpers = createTestHelpers();
 

@@ -751,6 +751,10 @@ export interface SettingsPayload {
   mobileKeyboardMode?: 'native' | 'resize-content';
 
   localStore?: Record<string, string>;
+  localStorePatch?: {
+    set?: Record<string, string>;
+    remove?: string[];
+  };
 
   [key: string]: unknown;
 }

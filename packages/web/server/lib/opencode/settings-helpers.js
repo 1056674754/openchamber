@@ -900,6 +900,37 @@ export const createSettingsHelpers = (dependencies) => {
       }
       result.localStore = sanitized;
     }
+    if (candidate.localStorePatch && typeof candidate.localStorePatch === 'object' && !Array.isArray(candidate.localStorePatch)) {
+      const patch = {};
+      const patchSet = candidate.localStorePatch.set;
+      if (patchSet && typeof patchSet === 'object' && !Array.isArray(patchSet)) {
+        const sanitizedSet = {};
+        let entryCount = 0;
+        for (const [key, value] of Object.entries(patchSet)) {
+          if (entryCount >= LOCAL_STORE_MAX_ENTRIES) break;
+          if (key.length === 0 || key.length > LOCAL_STORE_MAX_KEY_LENGTH) continue;
+          if (typeof value !== 'string' || value.length > LOCAL_STORE_MAX_VALUE_LENGTH) continue;
+          sanitizedSet[key] = value;
+          entryCount += 1;
+        }
+        if (entryCount > 0) {
+          patch.set = sanitizedSet;
+        }
+      }
+
+      if (Array.isArray(candidate.localStorePatch.remove)) {
+        const remove = Array.from(new Set(candidate.localStorePatch.remove
+          .filter((key) => typeof key === 'string' && key.length > 0 && key.length <= LOCAL_STORE_MAX_KEY_LENGTH)))
+          .slice(0, LOCAL_STORE_MAX_ENTRIES);
+        if (remove.length > 0) {
+          patch.remove = remove;
+        }
+      }
+
+      if (patch.set || patch.remove) {
+        result.localStorePatch = patch;
+      }
+    }
 
     if (Array.isArray(candidate.remoteInstances)) {
       const instances = candidate.remoteInstances
@@ -1004,6 +1035,7 @@ export const createSettingsHelpers = (dependencies) => {
   };
 
   const mergePersistedSettings = (current, changes) => {
+    const { localStorePatch, ...persistedChanges } = changes;
     const baseApproved = Array.isArray(changes.approvedDirectories)
       ? changes.approvedDirectories
       : Array.isArray(current.approvedDirectories)
@@ -1044,7 +1076,7 @@ export const createSettingsHelpers = (dependencies) => {
 
     const next = {
       ...current,
-      ...changes,
+      ...persistedChanges,
       approvedDirectories: Array.from(
         new Set(
           approvedSource.filter((entry) => typeof entry === 'string' && entry.length > 0)
@@ -1058,6 +1090,20 @@ export const createSettingsHelpers = (dependencies) => {
       typographySizes: nextTypographySizes
     };
 
+    if (localStorePatch) {
+      const localStore = {
+        ...(current.localStore || {}),
+        ...(persistedChanges.localStore || {}),
+      };
+      for (const [key, value] of Object.entries(localStorePatch.set || {})) {
+        localStore[key] = value;
+      }
+      for (const key of localStorePatch.remove || []) {
+        delete localStore[key];
+      }
+      next.localStore = localStore;
+    }
+
     if (Array.isArray(changes.remoteInstances)) {
       next.remoteInstances = preserveRemoteInstanceAuthValues(current.remoteInstances, changes.remoteInstances);
     }
@@ -1068,6 +1114,7 @@ export const createSettingsHelpers = (dependencies) => {
   const formatSettingsResponse = (settings) => {
     const sanitized = sanitizeSettingsUpdate(settings);
     delete sanitized.managedRemoteTunnelToken;
+    delete sanitized.localStorePatch;
     const remoteInstances = redactRemoteInstancesForResponse(sanitized.remoteInstances);
     const approved = normalizeStringArray(settings.approvedDirectories);
     const bookmarks = normalizeStringArray(settings.securityScopedBookmarks);

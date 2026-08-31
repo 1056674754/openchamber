@@ -47,6 +47,11 @@ export type DesktopWindowControlsSide = 'left' | 'right';
 export type DesktopWindowControlAction = 'close' | 'minimize' | 'maximize';
 export type DesktopWindowControlsStyle = 'classic' | 'traffic-lights';
 
+export type LocalStorePatch = {
+  set?: Record<string, string>;
+  remove?: string[];
+};
+
 export type DesktopSettings = {
   themeId?: string;
   useSystemTheme?: boolean;
@@ -246,6 +251,7 @@ export type DesktopSettings = {
    * per launch, which would scope `localStorage` to a different origin.
    */
   localStore?: Record<string, string>;
+  localStorePatch?: LocalStorePatch;
 };
 
 type ElectronRuntimeGlobal = {

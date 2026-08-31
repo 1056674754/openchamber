@@ -95,7 +95,7 @@ describe('safeStorage', () => {
         await withMockWindow({ addEventListener: () => {} }, async () => {
             const { getSafeStorage, hydrateLocalStore, registerSafeStorageRehydrate } = await importSafeStorage();
             const storage = getSafeStorage();
-            storage.setItem('stale', 'value');
+            hydrateLocalStore({ stale: 'value' });
 
             let rehydrated = 0;
             registerSafeStorageRehydrate(() => { rehydrated += 1; });
@@ -125,9 +125,87 @@ describe('safeStorage', () => {
         });
     });
 
-    test('writes schedule a coalesced flush that forwards the snapshot to updateDesktopSettings', async () => {
+    test('does not flush startup defaults before host hydration and keeps the host value', async () => {
         const calls: Array<{ localStore?: Record<string, string> }> = [];
         const updateDesktopSettings = (changes: { localStore?: Record<string, string> }): Promise<void> => {
+            calls.push(changes);
+            return Promise.resolve();
+        };
+        await mock.module('@/lib/persistence', () => ({
+            updateDesktopSettings: mock(updateDesktopSettings),
+            flushPendingSettingsUpdates: () => Promise.resolve(true),
+        }));
+
+        await withMockWindow({ addEventListener: () => {} }, async () => {
+            const { flushSafeStorage, getSafeStorage, hydrateLocalStore } = await importSafeStorage();
+            const storage = getSafeStorage();
+
+            await new Promise((resolve) => setTimeout(resolve, 0));
+            calls.length = 0;
+
+            storage.setItem('session-display-mode', 'default');
+            await flushSafeStorage();
+
+            expect(calls).toEqual([]);
+
+            hydrateLocalStore({
+                'session-display-mode': 'minimal',
+                'openchamber.i18n.v1': 'zh-CN',
+            });
+            await flushSafeStorage();
+
+            expect(storage.getItem('session-display-mode')).toBe('minimal');
+            expect(storage.getItem('openchamber.i18n.v1')).toBe('zh-CN');
+            expect(calls).toEqual([]);
+        });
+    });
+
+    test('flushes a new startup key as a patch after host hydration', async () => {
+        const calls: Array<{
+            localStorePatch?: { set?: Record<string, string>; remove?: string[] };
+        }> = [];
+        const updateDesktopSettings = (changes: {
+            localStorePatch?: { set?: Record<string, string>; remove?: string[] };
+        }): Promise<void> => {
+            calls.push(changes);
+            return Promise.resolve();
+        };
+        await mock.module('@/lib/persistence', () => ({
+            updateDesktopSettings: mock(updateDesktopSettings),
+            flushPendingSettingsUpdates: () => Promise.resolve(true),
+        }));
+
+        await withMockWindow({ addEventListener: () => {} }, async () => {
+            const { flushSafeStorage, getSafeStorage, hydrateLocalStore } = await importSafeStorage();
+            const storage = getSafeStorage();
+
+            await new Promise((resolve) => setTimeout(resolve, 0));
+            calls.length = 0;
+
+            storage.setItem('new.preference', 'created-at-startup');
+            await flushSafeStorage();
+            expect(calls).toEqual([]);
+
+            hydrateLocalStore({ 'existing.preference': 'host-value' });
+            await flushSafeStorage();
+
+            expect(storage.getItem('existing.preference')).toBe('host-value');
+            expect(storage.getItem('new.preference')).toBe('created-at-startup');
+            expect(calls).toEqual([{
+                localStorePatch: {
+                    set: { 'new.preference': 'created-at-startup' },
+                },
+            }]);
+        });
+    });
+
+    test('writes schedule a coalesced flush that forwards a key patch to updateDesktopSettings', async () => {
+        const calls: Array<{
+            localStorePatch?: { set?: Record<string, string>; remove?: string[] };
+        }> = [];
+        const updateDesktopSettings = (changes: {
+            localStorePatch?: { set?: Record<string, string>; remove?: string[] };
+        }): Promise<void> => {
             calls.push(changes);
             return Promise.resolve();
         };
@@ -138,8 +216,9 @@ describe('safeStorage', () => {
         }));
 
         await withMockWindow({ addEventListener: () => {} }, async () => {
-            const { getSafeStorage, flushSafeStorage } = await importSafeStorage();
+            const { flushSafeStorage, getSafeStorage, hydrateLocalStore } = await importSafeStorage();
             const storage = getSafeStorage();
+            hydrateLocalStore({});
 
             storage.setItem('a', '1');
             storage.setItem('b', '2');
@@ -150,18 +229,62 @@ describe('safeStorage', () => {
 
         expect(calls.length).toBeGreaterThan(0);
         const lastCall = calls[calls.length - 1];
-        expect(lastCall?.localStore).toEqual({ a: '3', b: '2' });
+        expect(lastCall?.localStorePatch).toEqual({ set: { a: '3', b: '2' } });
+    });
+
+    test('retries a retained patch on a later explicit flush', async () => {
+        const calls: Array<{
+            localStorePatch?: { set?: Record<string, string>; remove?: string[] };
+        }> = [];
+        let flushAttempts = 0;
+        await mock.module('@/lib/persistence', () => ({
+            updateDesktopSettings: mock((changes: {
+                localStorePatch?: { set?: Record<string, string>; remove?: string[] };
+            }): Promise<void> => {
+                calls.push(changes);
+                return Promise.resolve();
+            }),
+            flushPendingSettingsUpdates: () => {
+                flushAttempts += 1;
+                return Promise.resolve(flushAttempts > 1);
+            },
+        }));
+
+        await withMockWindow({ addEventListener: () => {} }, async () => {
+            const { flushSafeStorage, getSafeStorage, hydrateLocalStore } = await importSafeStorage();
+            const storage = getSafeStorage();
+
+            await new Promise((resolve) => setTimeout(resolve, 0));
+            calls.length = 0;
+            hydrateLocalStore({});
+            storage.setItem('retry.preference', 'pending');
+
+            await flushSafeStorage();
+            await flushSafeStorage();
+        });
+
+        expect(calls).toEqual([
+            { localStorePatch: { set: { 'retry.preference': 'pending' } } },
+            { localStorePatch: { set: { 'retry.preference': 'pending' } } },
+        ]);
     });
 
     test('createDeferredSafeJSONStorage preserves read-after-write and batches serialization', async () => {
-        const calls: Array<{ localStore?: Record<string, string> }> = [];
-        const updateDesktopSettings = (changes: { localStore?: Record<string, string> }): Promise<void> => {
+        const calls: Array<{
+            localStorePatch?: { set?: Record<string, string>; remove?: string[] };
+        }> = [];
+        const updateDesktopSettings = (changes: {
+            localStorePatch?: { set?: Record<string, string>; remove?: string[] };
+        }): Promise<void> => {
             calls.push(changes);
             return Promise.resolve();
         };
         const stringifyCalls: unknown[] = [];
         const previousStringify = JSON.stringify;
-        await mock.module('@/lib/persistence', () => ({ updateDesktopSettings: mock(updateDesktopSettings) }));
+        await mock.module('@/lib/persistence', () => ({
+            updateDesktopSettings: mock(updateDesktopSettings),
+            flushPendingSettingsUpdates: () => Promise.resolve(true),
+        }));
 
         await withMockWindow({ addEventListener: () => {} }, async () => {
             JSON.stringify = ((value: unknown, replacer?: Parameters<typeof JSON.stringify>[1], space?: Parameters<typeof JSON.stringify>[2]) => {
@@ -169,9 +292,10 @@ describe('safeStorage', () => {
                 return previousStringify(value, replacer, space);
             }) as typeof JSON.stringify;
 
-            const { createDeferredSafeJSONStorage, flushSafeStorage } = await importSafeStorage();
+            const { createDeferredSafeJSONStorage, flushSafeStorage, hydrateLocalStore } = await importSafeStorage();
             const storage = createDeferredSafeJSONStorage<{ value: string }>();
             if (!storage) throw new Error('storage unavailable');
+            hydrateLocalStore({});
 
             storage.setItem('key', { state: { value: 'first' } });
             storage.setItem('key', { state: { value: 'latest' } });
