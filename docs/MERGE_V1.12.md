@@ -3295,3 +3295,15 @@ v1.20.0-sscity 尚未宣布完成：当前未关闭 `#135/#140/#142-#151/#154/#1
 - i18n：4 个 `gitView.empty.*` key × 11 locale。
 
 验证：fs routes 28/28（真实文件系统，含边界/跳过/symlink/权限映射）、useGitStore.nested 9/9、NestedRepoResolutionStates 7/7、gitGraph 14/14 ✅；UI/Web type-check/lint ✅；全 workspace type-check/lint ✅；`git diff --check` ✅。实机 matching-surface（真实多仓项目目录的 picker 切换与各 surface 跟随）建议随下次桌面 QA 附带。至此 [#179](https://coding.s-s.city/songsong/openchamber/-/issues/179) 完成，可关闭。
+
+## v1.22.0 `#180`：Linear integration（2026-08-31）
+
+上游来源：`86cbbe3e2`（OPE-296 / PR #3235，118 files）。对应实现提交：`e0bce6f5a`。
+
+- Server：自包含 `lib/linear` 模块（OAuth authorization code + 可选 broker handoff、多 workspace auth 存储、GraphQL client、issues/teams/mapping/status service），76 vitest 全绿；路由经 fork 的 feature-route composition 注册（`registerLinearRoutes(app)`），SPA fallback 排除 `/linear`，全局事件 hub 驱动 `linearSessionStatusRuntime` 把 session 状态镜像回 Linear。
+- Web client：类型化 `LinearAPI`；`LinearSettings` 卡片（device flow、workspace 切换、per-project repo mapping、session comments 开关）进 Integrations first-party 区；`LinearIssuesView` 挂在 rail 的 linear surface 后（status/team/assignee 过滤器由 useUIStore 新增 list-filter 状态承载），rail 图标与 PR surface 一样按连接 gating、断连自动关面板。
+- 会话发起链路：`LinearIssuePickerDialog` 喂 ChatInput 的 Link Linear Issue（synthetic context parts，发送后清除）与 NewWorktreeDialog 的 issue→worktree flow（`issueGet` → `postLinearSessionStarted` → `linear.issue.review.*` magic prompts → 首条消息 + issue JSON 上下文）；`session-actions.setLinkedIssue` + 新 `linkedIssues` 模块把 GitHub/Linear issue 快照写进 session metadata；`/?session=` 打开改走可复用的 `openSessionFromRoute`（global snapshot 落地后以权威 directory 重选）。
+- i18n：linear-integration / linear-issue-picker / linear-panel 三个 feature 模块 × 11 locale，主字典 spread 接线；settings 新增 `settings.common.infoAria`；sprite 新增 `linear`/`team` 图标。
+- 不移植：shortcuts surface 数字切换传 `linearConnected`（fork 无该功能）；MobileApp linear bootstrap（本轮未动 mobile surfaces）。
+
+验证：linear server 76/76（vitest，bun 下 vi.stubGlobal 不可用需按既有约定跑 vitest）✅；UI linear libs + i18n + router 39/39 ✅；settings metadata 7/7 ✅；全 workspace type-check/lint ✅；production build ✅；`git diff --check` ✅。并行 agent 的 plugin/TaskCard WIP 未混入。实机 OAuth（真实 Linear workspace 连接、issue 浏览、session 回写）建议在下一次桌面 QA 附带。至此 [#180](https://coding.s-s.city/songsong/openchamber/-/issues/180) 完成，可关闭。
