@@ -33,7 +33,12 @@ type DeviceFlowCompleteResponse =
   | { connected: true; user: GitHubUser; scope?: string }
   | { connected: false; status?: string; error?: string };
 
-export const GitHubSettings: React.FC = () => {
+type GitHubSettingsProps = {
+  /** Rendered inside the Integrations card: no section chrome of its own. */
+  embedded?: boolean;
+};
+
+export const GitHubSettings: React.FC<GitHubSettingsProps> = ({ embedded = false }) => {
   const { t } = useI18n();
   const { isMobile } = useDeviceInfo();
   const runtimeGitHub = getRegisteredRuntimeAPIs()?.github;
@@ -269,20 +274,22 @@ export const GitHubSettings: React.FC = () => {
     : t('settings.github.page.accountSource.oauth');
 
   return (
-    <div className="mb-8">
-      <div className="mb-3 px-1 flex items-start justify-between gap-4">
-        <div className="flex items-center gap-2">
-          <h3 className="typography-ui-header font-semibold text-foreground">{t('settings.github.page.oauth.title')}</h3>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Icon name="information" className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
-            </TooltipTrigger>
-            <TooltipContent sideOffset={8} className="max-w-xs">
-              {t('settings.github.page.tooltip.connectAccount')}
-            </TooltipContent>
-          </Tooltip>
+    <div className={embedded ? undefined : 'mb-8'}>
+      {embedded ? null : (
+        <div className="mb-3 px-1 flex items-start justify-between gap-4">
+          <div className="flex items-center gap-2">
+            <h3 className="typography-ui-header font-semibold text-foreground">{t('settings.github.page.oauth.title')}</h3>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Icon name="information" className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
+              </TooltipTrigger>
+              <TooltipContent sideOffset={8} className="max-w-xs">
+                {t('settings.github.page.tooltip.connectAccount')}
+              </TooltipContent>
+            </Tooltip>
+          </div>
         </div>
-      </div>
+      )}
 
       <div className="rounded-lg bg-[var(--surface-elevated)]/70 overflow-hidden flex flex-col">
         {connected ? (

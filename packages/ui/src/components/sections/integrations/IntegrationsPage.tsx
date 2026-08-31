@@ -2,8 +2,11 @@ import React from 'react';
 
 import { Icon } from '@/components/icon/Icon';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
+import { SettingsSection } from '@/components/sections/shared/SettingsSection';
+import { isVSCodeRuntime } from '@/lib/desktop';
 import { useI18n } from '@/lib/i18n';
 
+import { GitHubIntegration } from './GitHubIntegration';
 import { ThirdPartyIntegrationsSection } from './ThirdPartyIntegrationsSection';
 
 type IntegrationsPageProps = {
@@ -16,6 +19,10 @@ export const IntegrationsPage: React.FC<IntegrationsPageProps> = ({
   onOpenPluginManager,
 }) => {
   const { t } = useI18n();
+
+  // GitHub sign-in is an OpenChamber server feature; the VS Code extension
+  // uses the editor's own GitHub session instead.
+  const hasGitHub = !isVSCodeRuntime();
 
   return (
     <SettingsPageLayout>
@@ -34,6 +41,17 @@ export const IntegrationsPage: React.FC<IntegrationsPageProps> = ({
           </p>
         </div>
       </div>
+      {hasGitHub ? (
+        <SettingsSection
+          title={t('settings.integrations.firstParty.title')}
+          description={t('settings.integrations.firstParty.info')}
+          divider={false}
+        >
+          <div className="space-y-3">
+            <GitHubIntegration />
+          </div>
+        </SettingsSection>
+      ) : null}
       <ThirdPartyIntegrationsSection
         onOpenProviderSetup={onOpenProviderSetup}
         onOpenPluginManager={onOpenPluginManager}

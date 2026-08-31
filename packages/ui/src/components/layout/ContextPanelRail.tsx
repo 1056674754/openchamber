@@ -21,6 +21,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useI18n } from '@/lib/i18n';
 import { sortContextSurfaces, type ContextSurfaceDescriptor } from '@/lib/surfaces/registry';
+import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
 import { cn } from '@/lib/utils';
 import { useFeatureFlagsStore } from '@/stores/useFeatureFlagsStore';
 import { useGitStatus } from '@/stores/useGitStore';
@@ -99,7 +100,10 @@ export const ContextPanelRail: React.FC = () => {
   const contextRailOrder = useUIStore((state) => state.contextRailOrder);
   const setContextRailOrder = useUIStore((state) => state.setContextRailOrder);
   const openContextSurface = useUIStore((state) => state.openContextSurface);
+  const closeContextPanel = useUIStore((state) => state.closeContextPanel);
   const planModeEnabled = useFeatureFlagsStore((state) => state.planModeEnabled);
+  const githubAuthChecked = useGitHubAuthStore((state) => state.hasChecked);
+  const githubConnected = useGitHubAuthStore((state) => state.status?.connected === true);
   const gitStatus = useGitStatus(directoryKey || null);
   const sensors = useSensors(
     useSensor(MouseSensor, { activationConstraint: { distance: 8 } }),
@@ -112,12 +116,25 @@ export const ContextPanelRail: React.FC = () => {
   const surfaces = React.useMemo(() => (
     sortContextSurfaces(contextRailOrder).filter((surface) => {
       if (surface.id === 'plan' && !planModeEnabled) return false;
+      // The pull-request rail icon stays off until GitHub is connected (OAuth
+      // or a detected `gh` CLI login); GitHub is connected from Settings, so
+      // hiding the surface removes no entry point.
+      if (surface.id === 'pr' && !githubConnected) return false;
       if (surface.availability === 'has-content') {
         return tabs.some((tab) => tab.mode === surface.mode);
       }
       return true;
     })
-  ), [contextRailOrder, planModeEnabled, tabs]);
+  ), [contextRailOrder, githubConnected, planModeEnabled, tabs]);
+
+  // A surface whose integration disconnected closes rather than lingering as
+  // an active panel with no rail icon.
+  React.useEffect(() => {
+    if (!directoryKey || !githubAuthChecked || githubConnected || activeMode !== 'pr') {
+      return;
+    }
+    closeContextPanel(directoryKey);
+  }, [activeMode, closeContextPanel, directoryKey, githubAuthChecked, githubConnected]);
 
   const handleDragEnd = React.useCallback((event: DragEndEvent) => {
     const { active, over } = event;

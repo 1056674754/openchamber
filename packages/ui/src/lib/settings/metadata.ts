@@ -179,7 +179,7 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
     group: 'general',
     kind: 'single',
     showOn: 'both',
-    keywords: ['integration', 'plugin', 'provider', 'oauth', 'claude', 'cursor', 'subscription'],
+    keywords: ['integration', 'plugin', 'provider', 'oauth', 'claude', 'cursor', 'subscription', 'github'],
   },
   {
     slug: 'agents',
@@ -268,7 +268,7 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
     group: 'git',
     kind: 'single',
     showOn: 'default',
-    keywords: ['git', 'github', 'identity', 'identities', 'ssh', 'profiles', 'credentials', 'keys', 'commit', 'gitmoji', 'oauth', 'prs', 'issues'],
+    keywords: ['git', 'identity', 'identities', 'ssh', 'profiles', 'credentials', 'keys', 'commit', 'gitmoji'],
     isAvailable: (ctx) => !ctx.isVSCode,
   },
   {

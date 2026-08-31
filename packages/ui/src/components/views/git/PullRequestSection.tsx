@@ -1,3 +1,4 @@
+import { GitHubAccountControl } from '@/components/github/GitHubAccountControl';
 import React from 'react';
 import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui';
@@ -326,7 +327,7 @@ export const PullRequestSection: React.FC<{
   const showWalkthroughAction = !isMobile && screenWidth >= 768 && !isVSCodeRuntime();
 
   const openGitHubSettings = React.useCallback(() => {
-    setSettingsPage('github');
+    setSettingsPage('integrations');
     setSettingsDialogOpen(true);
   }, [setSettingsDialogOpen, setSettingsPage]);
 
@@ -1357,7 +1358,10 @@ export const PullRequestSection: React.FC<{
     return (
       <section className="border-0 bg-transparent rounded-none">
         <div className="space-y-1 pt-3">
-          <div className="typography-ui-header font-semibold text-foreground">{t('gitView.pullRequest.title')}</div>
+          <div className="flex items-center justify-between gap-2">
+            <div className="typography-ui-header font-semibold text-foreground">{t('gitView.pullRequest.title')}</div>
+            <GitHubAccountControl />
+          </div>
           <div className="typography-micro text-muted-foreground">
             {t('gitView.pullRequest.availableOnFeatureBranches')}
           </div>
@@ -1427,6 +1431,7 @@ export const PullRequestSection: React.FC<{
             ) : null}
           </div>
           <div className="flex shrink-0 items-center gap-1">
+            <GitHubAccountControl />
             {isLoading ? <Icon name="loader-4" className="size-4 animate-spin text-muted-foreground" /> : null}
             <Tooltip>
               <TooltipTrigger asChild>
