@@ -3219,3 +3219,25 @@ v1.20.0-sscity 尚未宣布完成：当前未关闭 `#135/#140/#142-#151/#154/#1
 ### 与既有 work item 的排程关系
 
 - `#182` 与 open `#161`（anchored scrolling / streaming follow）共同重塑 MessageList 渲染路径：#161 收口前不并行移植 #182，避免两次返工。
+
+## v1.22.0 `#187`：Small-surface parity batch（2026-08-31）
+
+上游来源：`92217ee58`（v1.21.1 漏项 parent）、`91e1e6a67`、`0a6276a77`（v1.21.1 漏项）、`7a8370af9`。对应实现提交：`4671c7aa5`。
+
+- Markdown 预览内置查找栏整体移植（`92217ee58` + `91e1e6a67`）：`MarkdownPreviewSearch` 组件 + `markdownPreviewFind` 匹配逻辑 + FilesView 双容器（普通/全屏）接线；容器可聚焦（tabIndex -1、点击/打开时聚焦且不抢输入焦点），Ctrl/Cmd+F 经 fork 既有全局键处理分支在"事件目标位于可见预览容器内"时改开预览查找栏，否则维持编辑器搜索；工具栏新增查找按钮；11 locale 各 +6 key（tr 自译）。
+- git graph 复用 merge parent 车道直通修复（`0a6276a77`）：`extraParentIsNew` 区分新建/复用 parent lane，复用 lane 在 merge 行保留垂直直通段；上游双合并 criss-cross 与 lane 复用两条回归测试一并移植。
+- Win/Linux 关闭按钮贴边（`7a8370af9`）：frameless 右侧控件时 Header 不加内边距使关闭钮贴窗口角；关闭钮 hover 改用 `--status-error` 实色 + 配套前景；macOS 圆点风格右侧保留 inset。
+- 审计为不适用（无 fork 对应 surface，不强行移植）：context-preview 删除图标（fork composer 无 context-chips 行，该 surface 属上游 v1.17 composer 重构的未采纳部分）；sidebar tooltip 节奏调优（fork sidebar 无共享 TooltipProvider/delayDuration 模式）。`7a8370af9` 捆绑的 issue-2903 测试基建与本卡无关，未纳入。
+
+验证：MarkdownPreviewSearch 3/3、gitGraph 14/14、project-config 19/19 ✅；UI/Web type-check/lint ✅；全 workspace type-check/lint ✅；`git diff --check` ✅。至此 [#187](https://coding.s-s.city/songsong/openchamber/-/issues/187) 完成，可关闭。
+
+## v1.22.0 `#185`：Scheduled-task 字段跨 server 版本保留（2026-08-31）
+
+上游来源：`63074bac2`。对应实现提交：`70cd90788`。
+
+- `readProjectConfigFromDisk` 同时保留每个 task 的原始 on-disk 记录（`rawTasksByID`）；新增 `toStoredTasks`：未改动的 task 按原样字节写回（本 build 未知的字段一并保留），state 更新只把 `state` 换到原记录上，仅被刻意替换的 task（upsert、loop adoption）才以规范化形态序列化。
+- fork 的 loop-reconcile 结构与上游略异（`pendingByName`/`consumedFiles`）：adopted task 计入 `replacedIDs`，语义等价。
+- 直接命中 fork 场景：多个 OpenChamber/OpenCode 版本共享同一 project config 时，旧 server 在 task 运行后不会再剥掉新版本写入的 goal/auto-accept 等字段。
+- 上游顺带的 scheduled-tasks DOCUMENTATION bullet：fork 无该文档文件，契约说明由 `project-config.js` 内注释承载，不为此单建文件。
+
+验证：project-config 19/19（含 3 条新增 foreign-field 保留回归）✅；Web type-check/lint ✅；全 workspace type-check/lint ✅。至此 [#185](https://coding.s-s.city/songsong/openchamber/-/issues/185) 完成，可关闭。
