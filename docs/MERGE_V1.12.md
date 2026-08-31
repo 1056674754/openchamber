@@ -3185,3 +3185,37 @@ v1.20.0-sscity 尚未宣布完成：当前未关闭 `#135/#140/#142-#151/#154/#1
 - 对应实现提交：`eee29a55b feat(worktrees): move sessions to existing worktrees`。`SessionSidebar.tsx`/`SessionNodeItem.tsx` 与并行 settings/sidebar WIP 同文件，提交经 temporary index 只包含本卡 hunk，WIP 完整保留未提交。
 
 验证：sessionWorktreeMove 32/32、sessionWorktreeMoveMigrations 2/2、worktreeManager.list 5/5、sessionWorktreeMenu 13/13、SessionWorktreeMoveConfirmDialog 3/3、sessionNodeItemUtils 7/7 ✅（worktreeManager.list 与 sessionWorktreeMove 因 mock.module 同名模块需分进程跑）；UI 与全 workspace type-check/lint ✅；staged 树在独立 worktree 验证 type-check + focused tests ✅；`git diff --check` ✅。本阶段未启动 HMR/隔离 backend，未触碰安装版 OpenChamber/OpenCode。至此 [#163](https://coding.s-s.city/songsong/openchamber/-/issues/163) 的 existing-worktree move、dirty-source 确认、preflight、ambiguous-failure 保护和多实例 authority 范围完成，可关闭。
+
+## v1.21.1 → v1.22.0 差距审计启动（2026-08-31）
+
+### 上游边界
+
+| 版本 | tag / release commit | diff 规模 |
+|---|---|---|
+| `v1.22.0` | `b58158b59` | 相对 v1.21.1：41 commits（30 runtime / 11 docs/chore/merge），236 files，+17497/-1066 |
+
+沿用既有约定：只做 capability-level 手工移植，不 merge/cherry-pick release；纯 docs、CI、maintainer triage/reviewer 指令与上游内部 perf 工具（`scripts/profile-switch.mjs`、`.agents/skills/performance-engineering`）不建 runtime backlog。GitLab milestone：`Upstream 1.22.0`。
+
+### 新建 GitLab executable backlog
+
+| WI | Runtime scope | 风险 |
+|---|---|---|
+| [#179](https://coding.s-s.city/songsong/openchamber/-/issues/179) | Nested git repositories across git surfaces（PR #2767 全链） | 🔴 fork git authority 适配 |
+| [#180](https://coding.s-s.city/songsong/openchamber/-/issues/180) | Linear integration（PR #3235，118 files +11.9k） | 🔴 大型 additive |
+| [#181](https://coding.s-s.city/songsong/openchamber/-/issues/181) | Per-instance scoped themes（PR #2897） | 🟡 fork 自研主题系统适配 |
+| [#182](https://coding.s-s.city/songsong/openchamber/-/issues/182) | Chat session-switch stability + failed-turn diagnostics | 🔴 与 open #161 同一渲染路径，需排程 |
+| [#183](https://coding.s-s.city/songsong/openchamber/-/issues/183) | GitHub 账户并入 Integrations + PR surface gating | 🟡 |
+| [#184](https://coding.s-s.city/songsong/openchamber/-/issues/184) | Header 项目动作放置 | 🟢 fork 布局差异需先审计 |
+| [#185](https://coding.s-s.city/songsong/openchamber/-/issues/185) | Scheduled-task 字段跨 server 版本保留 | 🟢 对 fork 多版本共存直接有用 |
+| [#186](https://coding.s-s.city/songsong/openchamber/-/issues/186) | Voice 语言匹配（29 files，server TTS + picker） | 🟡 |
+| [#187](https://coding.s-s.city/songsong/openchamber/-/issues/187) | 小件批次：preview find bar、context 删除图标、sidebar tooltip 节奏、Win/Linux 关闭按钮、`0a6276a77` lane-gap（v1.21.1 范围漏项，fork `gitGraph.ts` 无 `extraParentIsNew`） | 🟢 |
+
+### 已审计为现有 fork 等价 / 不重复
+
+- `e6c8d2479`（autocomplete 按聊天目录限定）：#174 已从分支尖端提前移植并实测，v1.22.0 仅是正式发版收录。
+- 上游 changelog 提到的 commit-graph 双合并车道修复即 `0a6276a77`，属 v1.21.1 审计范围且未建卡——已补入 #187，避免二次漏项。
+- `03589622e` 的 Integrations 落点：fork 已有 `sections/integrations`（IntegrationsPage + 三方集成目录），Linear 与 GitHub 账户按 #180/#183 落在该面，不复制上游页面结构。
+
+### 与既有 work item 的排程关系
+
+- `#182` 与 open `#161`（anchored scrolling / streaming follow）共同重塑 MessageList 渲染路径：#161 收口前不并行移植 #182，避免两次返工。
