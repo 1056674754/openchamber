@@ -3269,3 +3269,15 @@ v1.20.0-sscity 尚未宣布完成：当前未关闭 `#135/#140/#142-#151/#154/#1
 - 不移植（parent feature 不存在）：本地 on-device TTS 全栈（`dictation/local` 模型目录、sherpa-tts、模型下载、`useLocalTTS`、localTtsModelId 与本地模型 picker、localTts tooltip 改写）——fork 无本地 TTS provider，仅保留远程与 say 路径的语言跟随。
 
 验证：language-detect + tts routes 30/30（含 darwin 真实合成）✅；useConfigStore 16/16 ✅；UI/Web type-check/lint ✅；`git diff --check` ✅。工作区并行 agent 的 plugin 工具 WIP 未混入本提交。至此 [#186](https://coding.s-s.city/songsong/openchamber/-/issues/186) 完成，可关闭。
+
+## v1.22.0 `#183`：GitHub 账户并入 Integrations + PR surface gating（2026-08-31）
+
+上游来源：`03589622e`。对应实现提交：`db0f1ce94`。
+
+- GitHub 登录迁入 Settings → Integrations 的 first-party 卡片（新 `GitHubIntegration`，body 内嵌 `GitHubSettings embedded`；fork 的 GitHubSettings 为自定义结构，`embedded` 按语义跳过页级标题块而非上游的 SettingsSection 重组装）。VS Code 隐藏该卡（扩展用编辑器自身 GitHub 会话）。
+- PR context-rail 图标仅在 GitHub 已连接（OAuth 或检出 gh CLI 登录）时出现——沿 fork rail 既有内联 filter 模式（与 plan gating 同型）加 `pr` 分支；断连时关闭已打开的 PR panel 而非留无 rail 图标的悬空面板。fork `App.tsx` 已在应用级引导 auth status，gating 立即生效。
+- `GitHubAccountControl`（新）：头像 + 多账户 dropdown（OAuth/CLI 标注），未连接时不渲染；挂在 PR 面板标题行（替代原 Header 的 DesktopGitHubControl——Header 已零 GitHub 引用，订阅/派生/切换回调全部摘除）。
+- 顺带修复 fork 既有断链：4 处 `setSettingsPage('github')` 指向不存在的 slug（落 Home），改指 `integrations`；`OpenChamberSection` 移除不可达的 `'github'` 成员；GitPage 移除账户块；settings 搜索关键词 github 从 git-identities 移到 integrations。
+- 不移植：shortcuts 的 surface 数字切换传 `githubConnected`（fork shortcut hook 无 surface 数字切换功能）；Linear 卡片归 #180。i18n 新增 `header.github.accountSource.*` 与 5 个 first-party/github 键 × 11 locale（tr 自译）。
+
+验证：UI/全 workspace type-check/lint ✅；settings metadata 7/7 ✅；`git diff --check` ✅。实机 matching-surface（连接 GitHub 后 rail 图标出现、断连关闭面板、PR 面板账户切换）建议随下次桌面 QA 附带。至此 [#183](https://coding.s-s.city/songsong/openchamber/-/issues/183) 完成，可关闭。
