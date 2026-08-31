@@ -1,4 +1,5 @@
 import type { SessionNode } from './types';
+import { isChatDirectoryPath } from '@/lib/chatDirectories';
 
 /**
  * Per-row render extras precomputed once per group render and threaded down to
@@ -150,3 +151,34 @@ export const buildSessionNodeRenderExtras = (
     childRenderExtrasFor,
   };
 };
+
+/**
+ * Whether the session context menu may show the worktree-move submenu at all.
+ * Managed-chat directories live outside any project's git repository, so a
+ * move there has no source repository to move from — the actions stay hidden,
+ * not merely disabled.
+ */
+export const canShowSessionWorktreeMenu = ({
+  isSubtaskSession,
+  archivedBucket,
+  isVSCode,
+  sessionDirectory,
+}: {
+  isSubtaskSession: boolean;
+  archivedBucket: boolean;
+  isVSCode: boolean;
+  sessionDirectory: string | null;
+}): boolean => !isSubtaskSession
+  && !archivedBucket
+  && !isVSCode
+  && !isChatDirectoryPath(sessionDirectory);
+
+export const getSessionWorktreeMenuDisabled = ({
+  sessionDirectory,
+  isStreaming,
+  isMovingToWorktree,
+}: {
+  sessionDirectory: string | null;
+  isStreaming: boolean;
+  isMovingToWorktree: boolean;
+}): boolean => !sessionDirectory || isStreaming || isMovingToWorktree;

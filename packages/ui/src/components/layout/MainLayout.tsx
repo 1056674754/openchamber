@@ -13,6 +13,12 @@ import { OpenCodeStatusDialog } from '../ui/OpenCodeStatusDialog';
 import { SessionSidebar } from '@/components/session/SessionSidebar';
 import { AppLinkConfirmDialog } from '@/components/chat/AppLinkConfirmDialog';
 import { SessionDialogs } from '@/components/session/SessionDialogs';
+import { SessionWorktreeMoveConfirmDialog } from '@/components/session/sidebar/SessionWorktreeMoveConfirmDialog';
+import {
+  cancelSessionTreeMove,
+  confirmSessionTreeMove,
+  useSessionTreeMoveConfirmation,
+} from '@/lib/worktrees/sessionWorktreeMove';
 import { DiffWorkerProvider } from '@/contexts/DiffWorkerProvider';
 import { MultiRunLauncher } from '@/components/multirun';
 import { DrawerProvider } from '@/contexts/DrawerContext';
@@ -191,6 +197,7 @@ export const MainLayout: React.FC = () => {
 
     // Trigger initial update check shortly after mount, then repeat using server-suggested cadence.
     const checkForUpdates = useUpdateStore((state) => state.checkForUpdates);
+    const sessionTreeMoveConfirmation = useSessionTreeMoveConfirmation();
     React.useEffect(() => {
         const initialDelayMs = 3000;
         const defaultIntervalMs = 60 * 60 * 1000;
@@ -360,6 +367,12 @@ export const MainLayout: React.FC = () => {
                 <HelpDialog />
                 <OpenCodeStatusDialog />
                 <SessionDialogs />
+                <SessionWorktreeMoveConfirmDialog
+                    value={sessionTreeMoveConfirmation}
+                    onMoveSessionOnly={() => confirmSessionTreeMove(false)}
+                    onMoveAllChanges={() => confirmSessionTreeMove(true)}
+                    onCancel={cancelSessionTreeMove}
+                />
 
                 {useMobileDrawers ? (
                 <DrawerProvider value={{

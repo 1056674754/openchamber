@@ -232,27 +232,48 @@ const toCreatePayload = (args: {
   };
 };
 
-// Cache worktree listings to avoid repeated git worktree list + rev-parse calls
+// Cache worktree listings to avoid repeated git worktree list + rev-parse calls.
+// The generation counter separates a forced refresh from an older in-flight
+// listing: a forced read starts a new request instead of joining the previous
+// one, and a stale completion can neither satisfy the caller nor overwrite the
+// forced result.
 const _worktreeListCache = new Map<string, { value: WorktreeMetadata[]; at: number }>();
-const _worktreeListInflight = new Map<string, Promise<WorktreeMetadata[]>>();
+const _worktreeListInflight = new Map<string, { generation: number; promise: Promise<WorktreeMetadata[]> }>();
+const _worktreeListGeneration = new Map<string, number>();
 const WORKTREE_LIST_CACHE_TTL = 30_000; // 30 seconds
 
-export async function listProjectWorktrees(project: ProjectRef): Promise<WorktreeMetadata[]> {
+const getWorktreeListGeneration = (cacheKey: string): number => _worktreeListGeneration.get(cacheKey) ?? 0;
+
+const invalidateWorktreeList = (cacheKey: string): void => {
+  _worktreeListGeneration.set(cacheKey, getWorktreeListGeneration(cacheKey) + 1);
+  _worktreeListCache.delete(cacheKey);
+};
+
+export async function listProjectWorktrees(project: ProjectRef, options?: { force?: boolean }): Promise<WorktreeMetadata[]> {
   const projectDirectory = normalizePath(project.path);
   const baseUrl = getProjectBaseUrl(project);
   const cacheKey = getProjectWorktreeKey(projectDirectory, project.serverId);
+  const force = options?.force === true;
+
+  if (force) {
+    invalidateWorktreeList(cacheKey);
+  }
+
+  const generation = getWorktreeListGeneration(cacheKey);
 
   // Return cached if fresh
   const cached = _worktreeListCache.get(cacheKey);
-  if (cached && Date.now() - cached.at < WORKTREE_LIST_CACHE_TTL) {
+  if (!force && cached && Date.now() - cached.at < WORKTREE_LIST_CACHE_TTL) {
     return cached.value;
   }
 
-  // Dedup in-flight requests
+  // Dedup in-flight requests. A forced refresh (or any call made after an
+  // invalidation) must not join a request started before it: that request's
+  // result predates whatever prompted the refresh.
   const inflight = _worktreeListInflight.get(cacheKey);
-  if (inflight) return inflight;
+  if (inflight && inflight.generation === generation) return inflight.promise;
 
-  const promise = (async (): Promise<WorktreeMetadata[]> => {
+  const readProjectWorktrees = async (): Promise<WorktreeMetadata[]> => {
     const metadataProjectDirectory = await resolvePrimaryWorktreeDirectory(projectDirectory, baseUrl).catch(() => projectDirectory);
     const normalizedProjectDirectory = normalizePath(projectDirectory);
     const serverId = project.serverId && project.serverId !== DEFAULT_SERVER_ID ? project.serverId : undefined;
@@ -260,7 +281,7 @@ export async function listProjectWorktrees(project: ProjectRef): Promise<Worktre
     const worktrees = await (baseUrl
       ? gitHttp.listGitWorktrees(projectDirectory, baseUrl)
       : git.worktree.list(projectDirectory)
-    ).catch(() => []);
+    );
     const results: WorktreeMetadata[] = worktrees
       .filter((entry) => typeof entry.path === 'string' && entry.path.trim().length > 0)
       .map((entry) => {
@@ -287,19 +308,37 @@ export async function listProjectWorktrees(project: ProjectRef): Promise<Worktre
       })
       .filter((entry) => normalizePath(entry.path) !== normalizedProjectDirectory);
 
-    const sorted = dedupeWorktreesByPath(results, project.serverId).sort((a, b) => {
+    return dedupeWorktreesByPath(results, project.serverId).sort((a, b) => {
       const aLabel = (a.label || a.branch || a.path).toLowerCase();
       const bLabel = (b.label || b.branch || b.path).toLowerCase();
       return aLabel.localeCompare(bLabel);
     });
+  };
 
+  const readStableProjectWorktrees = async (minimumGeneration: number): Promise<WorktreeMetadata[]> => {
+    while (true) {
+      const observedGeneration = getWorktreeListGeneration(cacheKey);
+      const worktrees = await readProjectWorktrees();
+
+      // A concurrent invalidation (worktree create/remove or a forced refresh)
+      // moved the generation while the listing ran: retry so the returned
+      // topology never predates the invalidation.
+      if (observedGeneration >= minimumGeneration && observedGeneration === getWorktreeListGeneration(cacheKey)) {
+        return worktrees;
+      }
+    }
+  };
+
+  const promise = readStableProjectWorktrees(generation).then((sorted) => {
     _worktreeListCache.set(cacheKey, { value: sorted, at: Date.now() });
     return sorted;
-  })().finally(() => {
-    _worktreeListInflight.delete(cacheKey);
+  }).finally(() => {
+    if (_worktreeListInflight.get(cacheKey)?.promise === promise) {
+      _worktreeListInflight.delete(cacheKey);
+    }
   });
 
-  _worktreeListInflight.set(cacheKey, promise);
+  _worktreeListInflight.set(cacheKey, { generation, promise });
   return promise;
 }
 
@@ -418,7 +457,7 @@ export async function createWorktree(project: ProjectRef, args: CreateWorktreeAr
     markWorktreeBootstrapPending(metadata.path);
   }
 
-  _worktreeListCache.delete(getProjectWorktreeKey(projectDirectory, project.serverId));
+  invalidateWorktreeList(getProjectWorktreeKey(projectDirectory, project.serverId));
   invalidateResolvedProjectRootCache();
 
   // Update sidebar store so new worktree appears immediately
@@ -470,7 +509,7 @@ export async function removeProjectWorktree(project: ProjectRef, worktree: Workt
 
   clearWorktreeBootstrapState(worktree.path);
 
-  _worktreeListCache.delete(getProjectWorktreeKey(project.path, project.serverId));
+  invalidateWorktreeList(getProjectWorktreeKey(project.path, project.serverId));
   invalidateResolvedProjectRootCache();
 
   // Update sidebar store so removed worktree disappears immediately

@@ -125,11 +125,15 @@ import { getWorktreesForProject } from '@/lib/worktrees/worktreeKeys';
 import { mapWithConcurrency } from '@/lib/concurrency';
 import {
   buildWorktreeDiscoveryQueue,
+  computePublishedProjectWorktrees,
   mergeProjectWorktreeResult,
   pruneWorktreesForDiscoveryQueue,
   sameWorktreeList,
   sameWorktreesByProject,
 } from './sidebar/worktreeDiscovery';
+import { startSessionWorktreeMenuLoad } from './sidebar/sessionWorktreeMenu';
+import { resolveProjectRef } from '@/lib/worktreeSessionCreator';
+import { getRuntimeKey } from '@/lib/runtime-switch';
 import {
   buildTransientSessionExpansionKeys,
   getNextSessionExpansionKeys,
@@ -907,6 +911,49 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
       cancelled = true;
     };
   }, [mobileVariant, projectsStructureSignature, projectRepoStatus, remoteHealthRevision]);
+
+  // Worktree-move submenu loader: cached targets render immediately, the
+  // forced refresh republishes one project's worktrees through the same
+  // merge/partition authority the discovery effect above uses.
+  const handleSessionWorktreeMenuLoad = React.useCallback(
+    (args: {
+      projectId: string | null;
+      sourceDirectory: string | null;
+      currentWorktree: WorktreeMetadata | null;
+    }) =>
+      startSessionWorktreeMenuLoad(args, {
+        getProjects: () => useProjectsStore.getState().projects,
+        getPublishedWorktreesByProject: () => useSessionUIStore.getState().availableWorktreesByProject,
+        getPublishedWorktrees: () => useSessionUIStore.getState().availableWorktrees,
+        getProjectWorktrees: getWorktreesForProject,
+        resolveProject: (directory) => resolveProjectRef(directory),
+        listProjectWorktrees,
+        publishProjectWorktrees: ({ project, worktrees }) => {
+          const projectQueue = buildWorktreeDiscoveryQueue(useProjectsStore.getState().projects)
+            .filter((entry) => {
+              const serverId = entry.serverId && entry.serverId !== DEFAULT_SERVER_ID ? entry.serverId : null;
+              if (!serverId) return true;
+              return serverRegistry.get(serverId)?.healthStatus === 'healthy';
+            });
+          const queueEntry = projectQueue.find(
+            (entry) => entry.id === project.id && normalizePath(entry.path) === normalizePath(project.path),
+          );
+          if (!queueEntry) return;
+          useSessionUIStore.setState((state) => {
+            const next = computePublishedProjectWorktrees({
+              currentByProject: state.availableWorktreesByProject,
+              currentAllWorktrees: state.availableWorktrees,
+              projectQueue,
+              project: queueEntry,
+              worktrees,
+            });
+            return next ?? state;
+          });
+        },
+        getRuntimeKey,
+      }),
+    [],
+  );
 
   React.useEffect(() => {
     let refreshTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -2304,6 +2351,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
         openContextPanelTab={openContextPanelTab}
         handleDeleteSession={handleDeleteSession}
         handleRestoreSession={handleRestoreSession}
+        startSessionWorktreeMenuLoad={handleSessionWorktreeMenuLoad}
         onRegenerateTitle={(sessionId, sessionTitle) => setRegenerateTitleSession({ id: sessionId, title: sessionTitle })}
         mobileVariant={mobileVariant}
         alwaysShowActions={alwaysShowSidebarActions}
@@ -2341,6 +2389,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
       openContextPanelTab,
       handleDeleteSession,
       handleRestoreSession,
+      handleSessionWorktreeMenuLoad,
       setRegenerateTitleSession,
       mobileVariant,
       alwaysShowSidebarActions,

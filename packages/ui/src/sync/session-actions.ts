@@ -22,6 +22,8 @@ import { materializeSessionSnapshots } from "./materialization"
 import { persistSteerSideChannelMessage } from "./steer-side-channel"
 import { stripMessageDiffSnapshots } from "./sanitize"
 import { formatSdkError } from "./sdk-error"
+import { getErrorStatus, isAmbiguousSendFailure } from "./send-failure-classification"
+import { markAmbiguousTransportFailure } from "@/lib/relay/transport-error"
 import { sessionEvents } from "@/lib/sessionEvents"
 import { hasTerminalMessageSignal, type TerminalMessageSignalInfo } from "@/lib/messageCompletion"
 import { formatMessage, useI18nStore } from "@/lib/i18n/store"
@@ -333,40 +335,6 @@ function connectionLostError(serverId?: string | null): Error {
   return new Error(formatMessage(dictionary, "chat.connectionLost.reconnecting"))
 }
 
-function getErrorStatus(error: unknown): number | null {
-  if (typeof error !== "object" || error === null) return null
-  const directStatus = Reflect.get(error, "status")
-  if (typeof directStatus === "number") return directStatus
-  const response = Reflect.get(error, "response")
-  if (typeof response !== "object" || response === null) return null
-  const responseStatus = Reflect.get(response, "status")
-  return typeof responseStatus === "number" ? responseStatus : null
-}
-
-function isAmbiguousSendFailure(error: unknown): boolean {
-  const status = getErrorStatus(error)
-  if (status === 408 || status === 503 || status === 504) return true
-  if (error instanceof TypeError) return true
-  if (typeof DOMException !== "undefined" && error instanceof DOMException) {
-    if (error.name === "AbortError" || error.name === "TimeoutError") return true
-  }
-
-  const message = error instanceof Error
-    ? error.message.toLowerCase()
-    : typeof error === "string"
-      ? error.toLowerCase()
-      : ""
-
-  return message.includes("timeout")
-    || message.includes("timed out")
-    || message.includes("failed to fetch")
-    || message.includes("networkerror")
-    || message.includes("network error")
-    || message.includes("gateway timeout")
-    || message.includes("econnreset")
-    || message.includes("socket hang up")
-}
-
 // Wait briefly for the pipeline to re-establish connection before failing a
 // send. Transient reconnects (heartbeat race, WS→SSE fallback, brief network
 // blip) otherwise surface as a hard "Connection lost" toast even though the
@@ -434,6 +402,63 @@ function requireSessionDirectory(sessionId: string, operation: string): string {
     throw new Error(`${operation}: directory for session ${sessionId} is not available`)
   }
   return sessionDirectory
+}
+
+/** "unknown" means no live source covers this session right now, so no caller
+ *  may treat it as idle on this answer. "idle" requires positive coverage. */
+export type SessionLiveActivity = "unknown" | "idle" | "active"
+
+/**
+ * A session's live status can live in a child store of ANY server — including
+ * a directory other than the one that wins the directory dedup — so every
+ * server's child stores are scanned, and any store reporting a non-idle status
+ * counts. Read at the moment of use: a descendant can start working after the
+ * subtree snapshot was taken.
+ *
+ * Absence of a non-idle status is not proof of idleness. Child stores are
+ * evicted for background directories, so "no report" and "idle" are different
+ * answers: report "idle" only when a child store actually covers the session
+ * (it holds the session's records) or the global status index still tracks it.
+ * The global index is fed by the SSE pipeline and survives child-store
+ * eviction; unlike upstream's non-idle-only index it also retains idle
+ * entries, which is exactly what makes it usable as coverage evidence here.
+ */
+export function getSessionLiveActivity(sessionId: string): SessionLiveActivity {
+  const serverManagers: Array<ChildStoreManager> = []
+  if (_childStores) serverManagers.push(_childStores)
+  for (const entry of getAllSyncStores()) {
+    if (entry.childStores && entry.childStores !== _childStores) {
+      serverManagers.push(entry.childStores)
+    }
+  }
+
+  let covered = false
+  for (const stores of serverManagers) {
+    for (const [, store] of stores.children) {
+      const state = store.getState()
+      const status = state.session_status?.[sessionId]
+      if (status && status.type !== "idle") return "active"
+      if (
+        !covered
+        && (Object.prototype.hasOwnProperty.call(state.session_status ?? {}, sessionId)
+          || state.session.some((session) => session.id === sessionId))
+      ) {
+        covered = true
+      }
+    }
+  }
+
+  const globalStatus = useGlobalSessionsStore.getState().sessionStatuses.get(sessionId)
+  if (globalStatus) {
+    if (globalStatus.type !== "idle") return "active"
+    covered = true
+  }
+
+  return covered ? "idle" : "unknown"
+}
+
+export function isSessionBusyNow(sessionId: string): boolean {
+  return getSessionLiveActivity(sessionId) === "active"
 }
 
 function getDirectoryStore(directory?: string) {
@@ -795,11 +820,17 @@ export async function moveSessionToDirectory(
   if (result && typeof result === "object" && "error" in result && result.error) {
     const status = getSdkResultStatus(result)
     const message = formatSdkError(result.error)
-    const error = new Error(`Move session failed${status ? ` (${status})` : ""}: ${message}`)
+    const error = new Error(`Move session failed${status ? ` (${status})` : ""}: ${message}`) as Error & { status?: number }
     if (status !== undefined) {
-      ;(error as Error & { status?: number }).status = status
+      error.status = status
     }
-    throw error
+    // Wrapping loses the original error's identity: the transport's
+    // "dispatched, outcome unknown" tag, a DOMException abort, a TypeError
+    // from fetch. Re-tag the wrapper so `isAmbiguousSendFailure` still
+    // classifies it as ambiguous instead of reading it as a definite server
+    // rejection — a rolled-back move whose changes actually transferred is
+    // how user edits get duplicated or lost.
+    throw isAmbiguousSendFailure(result.error) ? markAmbiguousTransportFailure(error) : error
   }
 
   const status = getSdkResultStatus(result)

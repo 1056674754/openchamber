@@ -3,8 +3,10 @@ import type { Session } from "@opencode-ai/sdk/v2/client"
 import type { SessionNode } from "./types"
 import {
   buildSessionNodeRenderExtras,
+  canShowSessionWorktreeMenu,
   collectSubtreeContainingId,
   computeNodeStructureKey,
+  getSessionWorktreeMenuDisabled,
   resolveMenuOpenSessionId,
 } from "./sessionNodeItemUtils"
 
@@ -53,5 +55,39 @@ describe("sessionNodeItemUtils", () => {
 
     const parentExtras = extras.childRenderExtrasFor?.(roots[0]!)
     expect(parentExtras?.nodeStructureKey).toBe("child")
+  })
+})
+
+describe("canShowSessionWorktreeMenu", () => {
+  const baseArgs = {
+    isSubtaskSession: false,
+    archivedBucket: false,
+    isVSCode: false,
+    sessionDirectory: "/work/project",
+  }
+
+  test("shows the menu for a regular idle project session", () => {
+    expect(canShowSessionWorktreeMenu(baseArgs)).toBe(true)
+  })
+
+  test("hides the menu for subagents, archived buckets, VS Code, and managed chats", () => {
+    expect(canShowSessionWorktreeMenu({ ...baseArgs, isSubtaskSession: true })).toBe(false)
+    expect(canShowSessionWorktreeMenu({ ...baseArgs, archivedBucket: true })).toBe(false)
+    expect(canShowSessionWorktreeMenu({ ...baseArgs, isVSCode: true })).toBe(false)
+    expect(
+      canShowSessionWorktreeMenu({
+        ...baseArgs,
+        sessionDirectory: "/root/.config/openchamber/chats/some-chat",
+      }),
+    ).toBe(false)
+  })
+})
+
+describe("getSessionWorktreeMenuDisabled", () => {
+  test("requires a directory and an idle, non-moving session", () => {
+    expect(getSessionWorktreeMenuDisabled({ sessionDirectory: "/repo", isStreaming: false, isMovingToWorktree: false })).toBe(false)
+    expect(getSessionWorktreeMenuDisabled({ sessionDirectory: null, isStreaming: false, isMovingToWorktree: false })).toBe(true)
+    expect(getSessionWorktreeMenuDisabled({ sessionDirectory: "/repo", isStreaming: true, isMovingToWorktree: false })).toBe(true)
+    expect(getSessionWorktreeMenuDisabled({ sessionDirectory: "/repo", isStreaming: false, isMovingToWorktree: true })).toBe(true)
   })
 })

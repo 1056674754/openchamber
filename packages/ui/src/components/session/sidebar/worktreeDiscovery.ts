@@ -1,6 +1,7 @@
 import type { WorktreeMetadata } from '@/types/worktree';
 import { DEFAULT_SERVER_ID } from '@/lib/opencode/server-registry';
 import { getProjectWorktreeKey } from '@/lib/worktrees/worktreeKeys';
+import { partitionWorktreesByRegisteredProject } from '@/lib/worktrees/worktreeManager';
 
 type WorktreeDiscoveryProjectInput = {
   readonly id: string;
@@ -189,5 +190,51 @@ export const pruneWorktreesForDiscoveryQueue = (
   return {
     byProject,
     allWorktrees: flattenWorktreesByProject(byProject, orderedProjectKeys),
+  };
+};
+
+/**
+ * Merge one project's freshly discovered worktrees into the published topology
+ * and re-partition by registered project. Returns null when the result is
+ * identical to what is already published, so callers can skip the setState.
+ * Shared by the sidebar's background discovery and the worktree-move submenu's
+ * forced refresh so both write through the same authority.
+ */
+export const computePublishedProjectWorktrees = (args: {
+  currentByProject: Map<string, WorktreeMetadata[]>;
+  currentAllWorktrees: readonly WorktreeMetadata[];
+  projectQueue: readonly WorktreeDiscoveryProject[];
+  project: WorktreeDiscoveryProject;
+  worktrees: WorktreeMetadata[];
+}): { availableWorktrees: WorktreeMetadata[]; availableWorktreesByProject: Map<string, WorktreeMetadata[]> } | null => {
+  const orderedProjectKeys = args.projectQueue.map((entry) => entry.discoveryKey);
+  const currentProjectWorktrees = args.currentByProject.get(args.project.discoveryKey) ?? [];
+  const legacyProjectHasWorktrees = args.project.legacyDiscoveryKey !== args.project.discoveryKey
+    && args.currentByProject.has(args.project.legacyDiscoveryKey);
+
+  const merged = mergeProjectWorktreeResult({
+    currentByProject: args.currentByProject,
+    projectKey: args.project.discoveryKey,
+    legacyProjectKey: args.project.legacyDiscoveryKey,
+    worktrees: args.worktrees,
+    orderedProjectKeys,
+  });
+
+  if (
+    !legacyProjectHasWorktrees
+    && sameWorktreeList(currentProjectWorktrees, args.worktrees)
+    && sameWorktreeList(args.currentAllWorktrees, merged.allWorktrees)
+  ) {
+    return null;
+  }
+
+  const partitionedByProject = partitionWorktreesByRegisteredProject(
+    args.projectQueue.map((entry) => ({ path: entry.normalizedPath })),
+    merged.byProject,
+  );
+
+  return {
+    availableWorktrees: [...partitionedByProject.values()].flat(),
+    availableWorktreesByProject: partitionedByProject,
   };
 };
