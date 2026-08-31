@@ -3253,3 +3253,9 @@ v1.20.0-sscity 尚未宣布完成：当前未关闭 `#135/#140/#142-#151/#154/#1
 - fork 差异说明：上游 `receivesParentThemeSync`（embedded 窗口接收父主题）依赖 fork 未采纳的 embedded-params 特性，本移植不含该 flag（fork 恒 false 等价）；上游 `persistence.ts` 删除的 theme localStorage 写入在 fork 的 settings mirror 中本就不存在，无需变更。
 
 验证：theme-storage 23/23 ✅；UI/全 workspace type-check/lint ✅；`git diff --check` ✅。未做双实例实机主题验证（需两个 runtime endpoint 同源并存的 UI 场景），如需可在下次桌面双实例 QA 中附带。至此 [#181](https://coding.s-s.city/songsong/openchamber/-/issues/181) 完成，可关闭。
+
+## v1.22.0 `#184`：Header project actions placement 审计为已等价（2026-08-31）
+
+上游来源：`f84b1337c`。审计结论：fork 已处于上游改动的终态——`ProjectActionsButton` 早已在 Header 内渲染（desktop 与另一布局两处，均位于 session 标题/"Open in" 区块之前，`mr-2` 与上游一致），fork 从未采用上游的 TitlebarLeftControls/SidebarTopBar titlebar overlay 布局，因此不存在"从 overlay 迁入 header"的动作。上游顺带的 `useProjectActionsContext` hook 抽取在 fork 无第二消费方（fork 的 sticky 解析逻辑内联于 Header，仅此一处），纯重构无功能收益，不移植。无实现提交。
+
+至此 [#184](https://coding.s-s.city/songsong/openchamber/-/issues/184) 以等价审计关闭。
