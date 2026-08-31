@@ -1123,6 +1123,40 @@ class OpencodeService {
     return Boolean(response.data);
   }
 
+  async continueMessage(id: string, messageID: string): Promise<boolean> {
+    const requestDirectory = this.currentDirectory;
+    const remoteBaseUrl = id
+      ? resolveBaseUrlForSession(id, requestDirectory ?? undefined, undefined)
+      : undefined;
+    const effectiveBase = remoteBaseUrl ?? this.baseUrl;
+    const url = buildApiFetchUrl(
+      effectiveBase,
+      `/session/${encodeURIComponent(id)}/message/${encodeURIComponent(messageID)}/continue`,
+      requestDirectory ? { directory: requestDirectory } : undefined,
+    );
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        accept: 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      let detail = '';
+      try {
+        detail = await response.text();
+      } catch {
+        // ignore
+      }
+      const suffix = detail && detail.trim().length > 0 ? `: ${detail.trim()}` : '';
+      throw new Error(`Failed to continue message (${response.status})${suffix}`);
+    }
+
+    return Boolean(await response.json().catch(() => true));
+  }
+
   async revertSession(sessionId: string, messageId: string, partId?: string): Promise<Session> {
     const response = await this.client.session.revert({
       sessionID: sessionId,
