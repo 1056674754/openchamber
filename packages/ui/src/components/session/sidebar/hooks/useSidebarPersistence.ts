@@ -1,31 +1,37 @@
 import React from 'react';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { useProjectsStore } from '@/stores/useProjectsStore';
+import { registerSafeStorageRehydrate } from '@/stores/utils/safeStorage';
+import {
+  readSidebarStorageState,
+  type SidebarStorageKeys,
+  type SidebarStorageReader,
+} from './sidebarStorageState';
 
-type SafeStorageLike = {
-  getItem: (key: string) => string | null;
+type SafeStorageLike = SidebarStorageReader & {
   setItem: (key: string, value: string) => void;
   removeItem?: (key: string) => void;
 };
 
-type Keys = {
-  sessionExpanded: string;
-  sessionExpandedDeprecated: readonly string[];
-  projectCollapse: string;
-  groupOrder: string;
-  projectActiveSession: string;
-  groupCollapse: string;
+type Keys = SidebarStorageKeys & {
+  readonly sessionExpandedDeprecated: readonly string[];
 };
 
 type Args = {
   isVSCode: boolean;
   safeStorage: SafeStorageLike;
   keys: Keys;
+  expandedParents: Set<string>;
   groupOrderByProject: Map<string, string[]>;
   activeSessionByProject: Map<string, string>;
   collapsedGroups: Set<string>;
+  tempSessionsCollapsed: boolean;
   setExpandedParents: React.Dispatch<React.SetStateAction<Set<string>>>;
   setCollapsedProjects: React.Dispatch<React.SetStateAction<Set<string>>>;
+  setGroupOrderByProject: React.Dispatch<React.SetStateAction<Map<string, string[]>>>;
+  setActiveSessionByProject: React.Dispatch<React.SetStateAction<Map<string, string>>>;
+  setCollapsedGroups: React.Dispatch<React.SetStateAction<Set<string>>>;
+  setTempSessionsCollapsed: React.Dispatch<React.SetStateAction<boolean>>;
 };
 
 export const useSidebarPersistence = (args: Args) => {
@@ -33,12 +39,26 @@ export const useSidebarPersistence = (args: Args) => {
     isVSCode,
     safeStorage,
     keys,
+    expandedParents,
     groupOrderByProject,
     activeSessionByProject,
     collapsedGroups,
+    tempSessionsCollapsed,
     setExpandedParents,
     setCollapsedProjects,
+    setGroupOrderByProject,
+    setActiveSessionByProject,
+    setCollapsedGroups,
+    setTempSessionsCollapsed,
   } = args;
+  const {
+    groupCollapse: groupCollapseKey,
+    groupOrder: groupOrderKey,
+    projectActiveSession: projectActiveSessionKey,
+    projectCollapse: projectCollapseKey,
+    sessionExpanded: sessionExpandedKey,
+    tempSessionsCollapse: tempSessionsCollapseKey,
+  } = keys;
 
   const persistCollapsedProjectsTimer = React.useRef<number | null>(null);
   const pendingCollapsedProjects = React.useRef<Set<string> | null>(null);
@@ -96,6 +116,43 @@ export const useSidebarPersistence = (args: Args) => {
       pendingCollapsedProjects.current = null;
     };
   }, []);
+
+  React.useEffect(() => {
+    const applyStoredState = () => {
+      const stored = readSidebarStorageState(safeStorage, {
+        groupCollapse: groupCollapseKey,
+        groupOrder: groupOrderKey,
+        projectActiveSession: projectActiveSessionKey,
+        projectCollapse: projectCollapseKey,
+        sessionExpanded: sessionExpandedKey,
+        tempSessionsCollapse: tempSessionsCollapseKey,
+      });
+      setExpandedParents(stored.expandedParents ?? new Set());
+      hasHydratedProjectCollapseRef.current = false;
+      setCollapsedProjects(stored.collapsedProjects ?? new Set());
+      setGroupOrderByProject(stored.groupOrderByProject ?? new Map());
+      setActiveSessionByProject(stored.activeSessionByProject ?? new Map());
+      setCollapsedGroups(stored.collapsedGroups ?? new Set());
+      setTempSessionsCollapsed(stored.tempSessionsCollapsed ?? false);
+    };
+
+    applyStoredState();
+    return registerSafeStorageRehydrate(applyStoredState);
+  }, [
+    groupCollapseKey,
+    groupOrderKey,
+    projectActiveSessionKey,
+    projectCollapseKey,
+    safeStorage,
+    sessionExpandedKey,
+    setActiveSessionByProject,
+    setCollapsedGroups,
+    setCollapsedProjects,
+    setExpandedParents,
+    setGroupOrderByProject,
+    setTempSessionsCollapsed,
+    tempSessionsCollapseKey,
+  ]);
 
   React.useEffect(() => {
     try {
@@ -206,6 +263,22 @@ export const useSidebarPersistence = (args: Args) => {
       // ignored
     }
   }, [collapsedGroups, keys.groupCollapse, safeStorage]);
+
+  React.useEffect(() => {
+    try {
+      safeStorage.setItem(sessionExpandedKey, JSON.stringify(Array.from(expandedParents)));
+    } catch {
+      // ignored
+    }
+  }, [expandedParents, sessionExpandedKey, safeStorage]);
+
+  React.useEffect(() => {
+    try {
+      safeStorage.setItem(tempSessionsCollapseKey, String(tempSessionsCollapsed));
+    } catch {
+      // ignored
+    }
+  }, [tempSessionsCollapsed, tempSessionsCollapseKey, safeStorage]);
 
   return { scheduleCollapsedProjectsPersist, markProjectCollapseUserTouched };
 };

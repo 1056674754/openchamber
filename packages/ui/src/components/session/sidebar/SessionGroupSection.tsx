@@ -1,5 +1,16 @@
 import React from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
+import {
+  DndContext,
+  PointerSensor,
+  KeyboardSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from '@dnd-kit/core';
+import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import type { Session } from '@opencode-ai/sdk/v2';
 import { toast } from '@/components/ui';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -130,6 +141,24 @@ type Props = {
   activeActivitySessionKeys: ReadonlySet<string>;
   unreadActivitySessionIds: ReadonlySet<string>;
   notifyOnSubtasks: boolean;
+  onReorderProjectPinned?: (fromIndex: number, toIndex: number) => void;
+};
+
+const SortablePinnedNode: React.FC<{ id: string; children: React.ReactNode }> = ({ id, children }) => {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
+  return (
+    <div
+      ref={setNodeRef}
+      style={{ transform: CSS.Transform.toString(transform), transition }}
+      className="relative cursor-grab active:cursor-grabbing"
+      {...attributes}
+      {...listeners}
+    >
+      <div style={{ opacity: isDragging ? 0.4 : undefined }}>
+        {children}
+      </div>
+    </div>
+  );
 };
 
 function SessionGroupSectionImpl(props: Props): React.ReactNode {
@@ -177,9 +206,10 @@ function SessionGroupSectionImpl(props: Props): React.ReactNode {
     dragHandleProps,
     compactBodyPadding = false,
     serverId,
-    activeActivitySessionKeys,
-    unreadActivitySessionIds,
-    notifyOnSubtasks,
+  activeActivitySessionKeys,
+  unreadActivitySessionIds,
+  notifyOnSubtasks,
+  onReorderProjectPinned,
   } = props;
 
   const compareSessionNodes = React.useCallback((a: SessionNode, b: SessionNode) => {
@@ -203,6 +233,11 @@ function SessionGroupSectionImpl(props: Props): React.ReactNode {
     }
     return compareSessionsByPinnedAndTime(a.session, b.session, pinnedSessionIds);
   }, [pinnedSessionIds, projectPinnedSessionIds, sessionOrderIndex]);
+
+  const pinnedDndSensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
 
   const searchData = hasSessionSearchQuery ? groupSearchDataByGroup.get(group) : null;
   const displayMode = useSessionDisplayStore((state) => state.displayMode);
@@ -378,6 +413,16 @@ function SessionGroupSectionImpl(props: Props): React.ReactNode {
     }
     return { pinnedNodes: pinned, unpinnedNodes: unpinned };
   }, [ungroupedSessions, pinnedSessionIds, projectPinnedSessionIds]);
+
+  const handlePinnedDragEnd = React.useCallback((event: DragEndEvent) => {
+    if (!onReorderProjectPinned) return;
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const oldIndex = pinnedNodes.findIndex((node) => node.session.id === active.id);
+    const newIndex = pinnedNodes.findIndex((node) => node.session.id === over.id);
+    if (oldIndex === -1 || newIndex === -1) return;
+    onReorderProjectPinned(oldIndex, newIndex);
+  }, [onReorderProjectPinned, pinnedNodes]);
 
   const baseVisibleCount = React.useMemo(() => {
     if (hideDirectoryControls) return 10;
@@ -803,7 +848,26 @@ function SessionGroupSectionImpl(props: Props): React.ReactNode {
       }}
     >
       {renderFolderItems()}
-      {pinnedNodes.map((node) => renderNode(node, group.isArchivedBucket === true))}
+      {onReorderProjectPinned && pinnedNodes.length > 1 ? (
+        <DndContext
+          sensors={pinnedDndSensors}
+          collisionDetection={closestCenter}
+          onDragEnd={handlePinnedDragEnd}
+        >
+          <SortableContext
+            items={pinnedNodes.map((node) => node.session.id)}
+            strategy={verticalListSortingStrategy}
+          >
+            {pinnedNodes.map((node) => (
+              <SortablePinnedNode key={node.session.id} id={node.session.id}>
+                {renderNode(node, group.isArchivedBucket === true)}
+              </SortablePinnedNode>
+            ))}
+          </SortableContext>
+        </DndContext>
+      ) : (
+        pinnedNodes.map((node) => renderNode(node, group.isArchivedBucket === true))
+      )}
       {pinnedNodes.length > 0 && unpinnedNodes.length > 0 ? (
         <div className="mx-0.5 my-0.5 h-px bg-[var(--surface-subtle)]" />
       ) : null}

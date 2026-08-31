@@ -1,5 +1,5 @@
 import React from 'react';
-import { cn } from '@/lib/utils';
+import { Icon } from '@/components/icon/Icon';
 import type { CollapsedActivityState } from './collapsedActivityState';
 
 export const CollapsedActivityIndicator = ({
@@ -10,13 +10,8 @@ export const CollapsedActivityIndicator = ({
   state: Exclude<CollapsedActivityState, null>;
   activeLabel: string;
   unreadLabel: string;
-}): React.ReactNode => (
-  <span
-    className={cn(
-      'size-1.5 shrink-0 rounded-full',
-      state === 'active' ? 'bg-status-info' : 'bg-status-info',
-    )}
-    aria-label={state === 'active' ? activeLabel : unreadLabel}
-    title={state === 'active' ? activeLabel : unreadLabel}
-  />
+}): React.ReactNode => state === 'active' ? (
+  <Icon name="loader-4" className="size-3 shrink-0 animate-spin text-primary" aria-label={activeLabel} />
+) : (
+  <span className="size-1.5 shrink-0 rounded-full bg-status-info" aria-label={unreadLabel} title={unreadLabel} />
 );

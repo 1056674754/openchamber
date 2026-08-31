@@ -853,10 +853,6 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
   const pendingQuestionCount = sessionQuestions.length;
   const showUnreadStatus = !isMovingToWorktree && needsAttention;
 
-  // When the session itself is running a turn (not a worktree move or aggregate),
-  // the leading indicator is a static dot — the elapsed counter on the right
-  // carries the motion that a pulsing spinner used to, at 1fps instead of 60.
-  const isSessionStreaming = isStreaming && !isMovingToWorktree;
   const showActivityDuration = (isStreaming || showUnreadStatus) && hasActivityDuration && !isMovingToWorktree;
 
   const spinnerState = (() => {
@@ -879,30 +875,16 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
     />
   );
 
-  const renderSpinner = () => {
-    if (isSessionStreaming) {
-      return (
-        <span
-          className={cn(
-            'block h-1.5 w-1.5 rounded-full',
-            isSubtaskSession ? 'bg-[var(--status-warning)]' : 'bg-[var(--status-info)]',
-          )}
-          aria-label={t('sessions.sidebar.session.status.active')}
-          title={t('sessions.sidebar.session.status.active')}
-        />
-      );
-    }
-    return (
-      <SidebarSpinner
-        state={spinnerState}
-        aria-label={
-          isMovingToWorktree
-            ? t('sessions.sidebar.session.status.movingToWorktree')
-            : t('sessions.sidebar.session.status.active')
-        }
-      />
-    );
-  };
+  const renderSpinner = () => (
+    <SidebarSpinner
+      state={spinnerState}
+      aria-label={
+        isMovingToWorktree
+          ? t('sessions.sidebar.session.status.movingToWorktree')
+          : t('sessions.sidebar.session.status.active')
+      }
+    />
+  );
 
   const renderAlternating = () => (
     <span className="relative inline-flex h-4 w-4 items-center justify-center">

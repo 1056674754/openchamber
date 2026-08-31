@@ -1,6 +1,7 @@
 import React from 'react';
 import type { Session } from '@opencode-ai/sdk/v2';
 
+import { Icon } from '@/components/icon/Icon';
 import { SessionActivityDuration } from '@/components/session/SessionActivityDuration';
 import { useSwitcherItems } from '@/components/session/sidebar/hooks/useSwitcherItems';
 import { formatSessionCompactDateLabel } from '@/components/session/sidebar/utils';
@@ -63,14 +64,10 @@ const SwitcherRow: React.FC<SwitcherRowProps> = ({
         <span className="truncate typography-ui-label">{title}</span>
         {meta ? <span className="truncate typography-micro text-muted-foreground">{meta}</span> : null}
       </span>
-      {isStreaming || showUnread ? (
-        <span
-          className={cn(
-            'size-1.5 shrink-0 rounded-full',
-            isStreaming ? 'bg-primary' : 'bg-status-info',
-          )}
-          aria-hidden
-        />
+      {isStreaming ? (
+        <Icon name="loader-4" className="size-3.5 shrink-0 animate-spin text-primary" />
+      ) : showUnread ? (
+        <span className="size-1.5 shrink-0 rounded-full bg-status-info" />
       ) : null}
       {showActivityDuration ? (
         <SessionActivityDuration

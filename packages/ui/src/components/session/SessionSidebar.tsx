@@ -142,6 +142,7 @@ import {
 const PROJECT_COLLAPSE_STORAGE_KEY = 'oc.sessions.projectCollapse';
 const GROUP_ORDER_STORAGE_KEY = 'oc.sessions.groupOrder';
 const GROUP_COLLAPSE_STORAGE_KEY = 'oc.sessions.groupCollapse';
+const TEMP_SESSIONS_COLLAPSE_STORAGE_KEY = 'oc.tempSessions.collapsed';
 const ARCHIVED_GROUP_INIT_STORAGE_KEY = 'oc.sessions.archivedGroupInit';
 const PROJECT_ACTIVE_SESSION_STORAGE_KEY = 'oc.sessions.activeSessionByProject';
 // duplicate session rows in different contexts keep independent expand state.
@@ -417,7 +418,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   const [tempSessions, setTempSessions] = React.useState<TempSessionEntry[]>([]);
   const [tempSessionsCollapsed, setTempSessionsCollapsed] = React.useState(() => {
     try {
-      const raw = getSafeStorage().getItem('oc.tempSessions.collapsed');
+      const raw = getSafeStorage().getItem(TEMP_SESSIONS_COLLAPSE_STORAGE_KEY);
       return raw === 'true';
     } catch {
       return false;
@@ -1030,12 +1031,19 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
       groupOrder: GROUP_ORDER_STORAGE_KEY,
       projectActiveSession: PROJECT_ACTIVE_SESSION_STORAGE_KEY,
       groupCollapse: GROUP_COLLAPSE_STORAGE_KEY,
+      tempSessionsCollapse: TEMP_SESSIONS_COLLAPSE_STORAGE_KEY,
     },
     groupOrderByProject,
     activeSessionByProject,
     collapsedGroups,
+    expandedParents,
+    tempSessionsCollapsed,
     setExpandedParents,
     setCollapsedProjects,
+    setGroupOrderByProject,
+    setActiveSessionByProject,
+    setCollapsedGroups,
+    setTempSessionsCollapsed,
   });
 
   const isInitialProjectPinsSync = React.useRef(true);
@@ -1246,6 +1254,17 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
           return changed ? next : prev;
         });
       }
+      // Atomically update global pin order alongside the set so the sort
+      // comparator never sees a stale/empty order array between renders.
+      // New pins go to the END → bottom of the pinned group.
+      setPinnedOrder((prev) => {
+        if (pinnedSessionIds.has(sessionId)) {
+          // Unpinning
+          return prev.filter((id) => id !== sessionId);
+        }
+        // Pinning: append to end
+        return prev.includes(sessionId) ? prev : [...prev, sessionId];
+      });
       toggleGlobalPinnedSession(sessionId);
     } else {
       if (pinnedSessionIds.has(sessionId)) {
@@ -1256,6 +1275,25 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
           return next;
         });
       }
+      // Atomically update project pin order alongside the set.
+      // New pins go to the END → bottom of the pinned group.
+      setPinnedOrderByProject((prev) => {
+        const next = new Map(prev);
+        const existing = prev.get(scope) ?? [];
+        if (existing.includes(sessionId)) {
+          // Unpinning
+          const filtered = existing.filter((id) => id !== sessionId);
+          if (filtered.length === 0) {
+            next.delete(scope);
+          } else {
+            next.set(scope, filtered);
+          }
+        } else {
+          // Pinning: append to end
+          next.set(scope, [...existing, sessionId]);
+        }
+        return next;
+      });
       setPinnedSessionIdsByProject((prev) => {
         const next = new Map(prev);
         const existing = next.get(scope) ?? new Set<string>();
@@ -1281,6 +1319,19 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
       const next = [...prev];
       const [removed] = next.splice(fromIndex, 1);
       next.splice(toIndex, 0, removed);
+      return next;
+    });
+  }, []);
+
+  const reorderProjectPinned = React.useCallback((projectPath: string, fromIndex: number, toIndex: number) => {
+    setPinnedOrderByProject((prev) => {
+      const currentOrder = prev.get(projectPath) ?? [];
+      if (fromIndex < 0 || fromIndex >= currentOrder.length || toIndex < 0 || toIndex >= currentOrder.length) return prev;
+      const nextArr = [...currentOrder];
+      const [removed] = nextArr.splice(fromIndex, 1);
+      nextArr.splice(toIndex, 0, removed);
+      const next = new Map(prev);
+      next.set(projectPath, nextArr);
       return next;
     });
   }, []);
@@ -2492,6 +2543,10 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
         activeActivitySessionKeys={activeActivitySessionKeys}
         unreadActivitySessionIds={unreadActivitySessionIds}
         notifyOnSubtasks={notifyOnSubtasks}
+        onReorderProjectPinned={group.directory ? (fromIndex: number, toIndex: number) => {
+          const dir = normalizePath(group.directory);
+          if (dir) reorderProjectPinned(dir, fromIndex, toIndex);
+        } : undefined}
       />
     ),
     [
@@ -2532,6 +2587,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
       activeActivitySessionKeys,
       unreadActivitySessionIds,
       notifyOnSubtasks,
+      reorderProjectPinned,
     ],
   );
 
@@ -2908,7 +2964,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
         setTempSessionsCollapsed((prev) => {
           const next = !prev;
           try {
-            getSafeStorage().setItem('oc.tempSessions.collapsed', String(next));
+            getSafeStorage().setItem(TEMP_SESSIONS_COLLAPSE_STORAGE_KEY, String(next));
           } catch {
             void 0;
           }
