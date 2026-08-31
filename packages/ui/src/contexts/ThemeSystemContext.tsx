@@ -3,6 +3,7 @@ import React, {
   useMemo,
   useCallback,
   useState,
+  useRef,
 } from 'react';
 import { flushSync } from 'react-dom';
 import type { Theme, ThemeMode } from '@/types/theme';
@@ -18,6 +19,13 @@ import {
   DEFAULT_LIGHT_THEME_ID,
   DEFAULT_DARK_THEME_ID,
 } from '@/lib/theme/themes';
+import {
+  adoptThemePreferencesForRuntime,
+  resolveThemePreferencesForRuntime,
+  resolveThemePreferencesFromStorageEvent,
+  writeThemePreferencesForRuntime,
+} from './theme-storage';
+import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 import { ThemeSystemContext, type ThemeContextValue } from './theme-system-context';
 import type { VSCodeThemePayload } from '@/lib/theme/vscode/adapter';
 
@@ -144,41 +152,15 @@ const buildInitialPreferences = (defaultThemeId?: string): ThemePreferences => {
   let themeMode: ThemeMode = 'system';
 
   if (typeof window !== 'undefined') {
-    const storedMode = localStorage.getItem('themeMode');
-    const storedLightId = localStorage.getItem('lightThemeId');
-    const storedDarkId = localStorage.getItem('darkThemeId');
-    const legacyUseSystem = localStorage.getItem('useSystemTheme');
-    const legacyThemeId = localStorage.getItem('selectedThemeId');
-    const legacyVariant = localStorage.getItem('selectedThemeVariant');
-
-    if (storedMode === 'light' || storedMode === 'dark' || storedMode === 'system') {
-      themeMode = storedMode;
-    } else if (legacyUseSystem !== null) {
-      const useSystem = legacyUseSystem === 'true';
-      if (useSystem) {
-        themeMode = 'system';
-      } else if (legacyThemeId) {
-        const legacyTheme = getThemeById(legacyThemeId);
-        if (legacyTheme) {
-          themeMode = legacyTheme.metadata.variant === 'dark' ? 'dark' : 'light';
-          if (legacyTheme.metadata.variant === 'dark') {
-            darkThemeId = legacyTheme.metadata.id;
-          } else {
-            lightThemeId = legacyTheme.metadata.id;
-          }
-        }
-      }
-    } else if (legacyVariant === 'light' || legacyVariant === 'dark') {
-      themeMode = legacyVariant;
-    }
-
-    if (typeof storedLightId === 'string' && storedLightId.trim().length > 0) {
-      lightThemeId = storedLightId.trim();
-    }
-
-    if (typeof storedDarkId === 'string' && storedDarkId.trim().length > 0) {
-      darkThemeId = storedDarkId.trim();
-    }
+    // Scoped per-runtime entry when present; otherwise a one-time seed from
+    // the superseded global keys (see resolveThemePreferencesForRuntime), so
+    // the first scoped write carries the last-known theme instead of defaults
+    // and windows pointing at different instances never adopt each other's
+    // theme through shared localStorage.
+    const resolvedPreferences = resolveThemePreferencesForRuntime(getRuntimeKey());
+    themeMode = resolvedPreferences.themeMode;
+    lightThemeId = resolvedPreferences.lightThemeId;
+    darkThemeId = resolvedPreferences.darkThemeId;
   }
 
   if (defaultThemeId) {
@@ -210,6 +192,7 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
   const [systemPrefersDark, setSystemPrefersDark] = useState<boolean>(() => getSystemPreference());
   const [customThemes, setCustomThemes] = useState<Theme[]>([]);
   const [customThemesLoading, setCustomThemesLoading] = useState(false);
+  const customThemesRequestRef = useRef(0);
   const [vscodeTheme, setVSCodeTheme] = useState<Theme | null>(() => {
     if (typeof window === 'undefined' || !isVSCodeRuntime()) {
       return null;
@@ -281,6 +264,11 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
       return;
     }
 
+    // Both a request generation and a runtime-key check: a reload started for
+    // one instance must not populate custom themes after the endpoint has
+    // already switched to another.
+    const runtimeKey = getRuntimeKey();
+    const request = ++customThemesRequestRef.current;
     setCustomThemesLoading(true);
     try {
       const res = await fetch('/api/config/themes', {
@@ -301,15 +289,29 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
       }
 
       const payload = await res.json();
+      if (request !== customThemesRequestRef.current || runtimeKey !== getRuntimeKey()) return;
       const incoming = Array.isArray(payload?.themes) ? payload.themes : [];
       const normalized = incoming.filter(isValidCustomTheme);
       setCustomThemes(normalized);
     } catch {
       // ignore
     } finally {
-      setCustomThemesLoading(false);
+      if (request === customThemesRequestRef.current && runtimeKey === getRuntimeKey()) {
+        setCustomThemesLoading(false);
+      }
     }
   }, [isLocalDesktopOrigin, isVSCode]);
+
+  useEffect(() => subscribeRuntimeEndpointChanged((detail) => {
+    if (detail.runtimeKey === detail.previousRuntimeKey || isVSCode) return;
+    customThemesRequestRef.current += 1;
+    setCustomThemes([]);
+    setCustomThemesLoading(false);
+    // Adopt the new instance's last-known theme immediately; the incoming
+    // settings sync refines it with the server's authoritative value.
+    setPreferences((prev) => adoptThemePreferencesForRuntime(detail.runtimeKey, prev));
+    void reloadCustomThemes();
+  }), [isVSCode, reloadCustomThemes]);
 
   useEffect(() => {
     void reloadCustomThemes();
@@ -415,6 +417,15 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
       return;
     }
 
+    // Scoped entry is the per-instance authority; the global keys below are
+    // cosmetic last-writer-wins hints for the pre-React splash shells and the
+    // Android status bar, which run before the scoped key can be read.
+    writeThemePreferencesForRuntime(getRuntimeKey(), {
+      themeMode: preferences.themeMode,
+      lightThemeId: preferences.lightThemeId,
+      darkThemeId: preferences.darkThemeId,
+    });
+
     localStorage.setItem('themeMode', preferences.themeMode);
     localStorage.setItem('lightThemeId', preferences.lightThemeId);
     localStorage.setItem('darkThemeId', preferences.darkThemeId);
@@ -446,37 +457,7 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
         return;
       }
 
-      if (event.key !== 'themeMode' && event.key !== 'lightThemeId' && event.key !== 'darkThemeId') {
-        return;
-      }
-
-      setPreferences((prev) => {
-        const nextModeRaw = localStorage.getItem('themeMode');
-        const nextMode: ThemeMode =
-          nextModeRaw === 'light' || nextModeRaw === 'dark' || nextModeRaw === 'system'
-            ? nextModeRaw
-            : prev.themeMode;
-
-        const nextLightRaw = localStorage.getItem('lightThemeId');
-        const nextLight = typeof nextLightRaw === 'string' && nextLightRaw.trim().length > 0
-          ? nextLightRaw.trim()
-          : prev.lightThemeId;
-
-        const nextDarkRaw = localStorage.getItem('darkThemeId');
-        const nextDark = typeof nextDarkRaw === 'string' && nextDarkRaw.trim().length > 0
-          ? nextDarkRaw.trim()
-          : prev.darkThemeId;
-
-        if (nextMode === prev.themeMode && nextLight === prev.lightThemeId && nextDark === prev.darkThemeId) {
-          return prev;
-        }
-
-        return {
-          themeMode: nextMode,
-          lightThemeId: nextLight,
-          darkThemeId: nextDark,
-        };
-      });
+      setPreferences((prev) => resolveThemePreferencesFromStorageEvent(event.key, getRuntimeKey(), prev) ?? prev);
     };
 
     window.addEventListener('storage', handleStorage);

@@ -33,7 +33,7 @@ import { useMobileConnectionResume } from '@/hooks/useMobileConnectionResume';
 import { useNativeMobileChrome } from '@/hooks/useNativeMobileChrome';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { isRelayModeActive } from '@/lib/relay/runtime-tunnel';
-import { getRuntimeApiBaseUrl, subscribeRuntimeEndpointChanged, switchRuntimeEndpoint } from '@/lib/runtime-switch';
+import { getRuntimeApiBaseUrl, subscribeRuntimeEndpointChanged, switchRuntimeEndpoint, MOBILE_DISCONNECTED_RUNTIME_KEY } from '@/lib/runtime-switch';
 import { useAuthSessionStore } from '@/lib/runtime-auth-expiry';
 
 type MobileAppProps = {
@@ -41,7 +41,7 @@ type MobileAppProps = {
 };
 
 const disconnectRuntime = (): void => {
-  switchRuntimeEndpoint({ apiBaseUrl: '', clientToken: null, runtimeKey: 'mobile-disconnected' });
+  switchRuntimeEndpoint({ apiBaseUrl: '', clientToken: null, runtimeKey: MOBILE_DISCONNECTED_RUNTIME_KEY });
 };
 
 const transportLabelKey = (capability: MobileTransportCapability): I18nKey => {
