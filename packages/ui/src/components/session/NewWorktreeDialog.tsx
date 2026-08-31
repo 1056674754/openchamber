@@ -26,6 +26,7 @@ import {
 import { cn } from '@/lib/utils';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
+import { useLinearAuthStore } from '@/stores/useLinearAuthStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
@@ -40,11 +41,13 @@ import { getRootBranch } from '@/lib/worktrees/worktreeStatus';
 import { generateBranchSlug } from '@/lib/git/branchNameGenerator';
 import { opencodeClient } from '@/lib/opencode/client';
 import { renderMagicPrompt } from '@/lib/magicPrompts';
+import { postLinearSessionStarted } from '@/lib/linearSessionStatus';
 import { parseModelIdentifier } from '@/lib/modelIdentifier';
 import { rankBranchesForQuery } from '@/lib/worktrees/branchSearch';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useGitBranches, useGitStore, useGitLoadingBranches } from '@/stores/useGitStore';
 import { GitHubIntegrationDialog } from './GitHubIntegrationDialog';
+import { LinearIssuePickerDialog } from './LinearIssuePickerDialog';
 import { SortableTabsStrip } from '@/components/ui/sortable-tabs-strip';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { Icon } from "@/components/icon/Icon";
@@ -67,6 +70,13 @@ interface ValidationState {
   touched: boolean;
 }
 
+type LinkedLinearWorktreeIssue = {
+  identifier: string;
+  title: string;
+  url: string;
+  author?: { login: string; avatarUrl?: string };
+};
+
 // State for New Branch mode
 interface NewBranchState {
   branchName: string;
@@ -74,6 +84,7 @@ interface NewBranchState {
   isSyncingWorktreeName: boolean;
   sourceBranch: string;
   linkedIssue: GitHubIssue | null;
+  linkedLinearIssue: LinkedLinearWorktreeIssue | null;
   linkedPr: GitHubPullRequestSummary | null;
   includePrDiff: boolean;
 }
@@ -212,9 +223,12 @@ export function NewWorktreeDialog({
   onWorktreeCreated,
 }: NewWorktreeDialogProps) {
   const { t } = useI18n();
-  const { github, git } = useRuntimeAPIs();
+  const { github, git, linear } = useRuntimeAPIs();
   const isMobile = useUIStore((state) => state.isMobile);
   const githubAuthStatus = useGitHubAuthStore((state) => state.status);
+  const linearAuthStatus = useLinearAuthStore((state) => state.status);
+  const linearAuthChecked = useLinearAuthStore((state) => state.hasChecked);
+  const [linearPickerOpen, setLinearPickerOpen] = React.useState(false);
   const githubAuthChecked = useGitHubAuthStore((state) => state.hasChecked);
   const activeProject = useProjectsStore((state) => state.getActiveProject());
   
@@ -241,6 +255,7 @@ export function NewWorktreeDialog({
     isSyncingWorktreeName: true,
     sourceBranch: '',
     linkedIssue: null,
+      linkedLinearIssue: null,
     linkedPr: null,
     includePrDiff: false,
   });
@@ -525,9 +540,63 @@ export function NewWorktreeDialog({
   const sendLinkedContextMessage = React.useCallback(async (args: {
     sessionId: string;
     issue: GitHubIssue | null;
+    linearIssue: LinkedLinearWorktreeIssue | null;
     pr: GitHubPullRequestSummary | null;
     includeDiff: boolean;
   }) => {
+    if (args.linearIssue) {
+      if (!linear?.issueGet) {
+        return;
+      }
+
+      const issueRes = await linear.issueGet(args.linearIssue.identifier);
+      if (issueRes.connected === false || !issueRes.issue) {
+        throw new Error('Failed to load issue context');
+      }
+
+      const issue = issueRes.issue;
+      const comments = issue.comments ?? [];
+      const visiblePromptText = await renderMagicPrompt('linear.issue.review.visible', {
+        identifier: issue.identifier,
+      });
+      const instructionsText = await renderMagicPrompt('linear.issue.review.instructions');
+      const contextText = `Linear issue context (JSON)\n${JSON.stringify({ issue, comments }, null, 2)}`;
+
+      postLinearSessionStarted(linear, {
+        sessionId: args.sessionId,
+        issueIdentifier: issue.identifier,
+      });
+
+      const configState = useConfigStore.getState();
+      const lastUsedProvider = useSelectionStore.getState().lastUsedProvider;
+      const defaultModel = resolveDefaultModelSelection();
+      const providerID = defaultModel?.providerID || configState.currentProviderId || lastUsedProvider?.providerID;
+      const modelID = defaultModel?.modelID || configState.currentModelId || lastUsedProvider?.modelID;
+      const agentName = resolveDefaultAgentName() || configState.currentAgentName || undefined;
+
+      if (!providerID || !modelID) {
+        toast.error(t('session.newWorktree.error.noModelSelected'));
+        return;
+      }
+      const variant = resolveDefaultVariant(providerID, modelID);
+
+      await opencodeClient.sendMessage({
+        id: args.sessionId,
+        providerID,
+        modelID,
+        agent: agentName,
+        variant,
+        text: visiblePromptText,
+        additionalParts: [
+          { text: instructionsText, synthetic: true },
+          { text: contextText, synthetic: true },
+        ],
+      });
+
+      toast.success(t('session.newWorktree.toast.sessionFromIssue'));
+      return;
+    }
+
     if (!projectDirectory || !github) {
       return;
     }
@@ -706,6 +775,7 @@ export function NewWorktreeDialog({
       isSyncingWorktreeName: true,
       sourceBranch: '',
       linkedIssue: null,
+      linkedLinearIssue: null,
       linkedPr: null,
       includePrDiff: false,
     });
@@ -905,17 +975,20 @@ export function NewWorktreeDialog({
       const metadata = await createWorktree(projectRef, resolvedArgs);
 
       const linkedIssue = mode === 'new-branch' ? newBranchState.linkedIssue : null;
+      const linkedLinearIssueState = mode === 'new-branch' ? newBranchState.linkedLinearIssue : null;
       const linkedPrState = mode === 'new-branch' ? newBranchState.linkedPr : null;
       const includePrDiff = mode === 'new-branch' ? newBranchState.includePrDiff : false;
 
       let createdSessionId: string | null = null;
 
-      if (linkedIssue || linkedPrState) {
+      if (linkedIssue || linkedLinearIssueState || linkedPrState) {
         const sessionTitle = linkedIssue
           ? `#${linkedIssue.number} ${linkedIssue.title}`.trim()
-          : linkedPrState
-            ? `#${linkedPrState.number} ${linkedPrState.title}`.trim()
-            : t('session.newWorktree.newSessionTitle');
+          : linkedLinearIssueState
+            ? `${linkedLinearIssueState.identifier} ${linkedLinearIssueState.title}`.trim()
+            : linkedPrState
+              ? `#${linkedPrState.number} ${linkedPrState.title}`.trim()
+              : t('session.newWorktree.newSessionTitle');
 
         const session = await sessionActions.createSession(sessionTitle, metadata.path, null);
         if (!session?.id) {
@@ -950,11 +1023,12 @@ export function NewWorktreeDialog({
         void sendLinkedContextMessage({
           sessionId: createdSessionId,
           issue: linkedIssue,
+          linearIssue: linkedLinearIssueState,
           pr: linkedPrState,
           includeDiff: includePrDiff,
         }).catch((error) => {
-          const message = error instanceof Error ? error.message : t('session.newWorktree.error.sendGitHubContextFailed');
-          toast.error(t('session.newWorktree.error.sendGitHubContextFailed'), { description: message });
+          const message = error instanceof Error ? error.message : t('session.newWorktree.error.sendLinearContextFailed');
+          toast.error(t('session.newWorktree.error.sendLinearContextFailed'), { description: message });
         });
       } else {
         onWorktreeCreated?.(metadata.path, { projectPath: metadata.projectDirectory });
@@ -983,6 +1057,7 @@ export function NewWorktreeDialog({
       setNewBranchState(prev => ({
         ...prev,
         linkedIssue: null,
+      linkedLinearIssue: null,
         linkedPr: null,
         includePrDiff: false,
         branchName: '',
@@ -1008,6 +1083,7 @@ export function NewWorktreeDialog({
         ...prev,
         linkedPr: pr,
         linkedIssue: null,
+      linkedLinearIssue: null,
         includePrDiff: result.includeDiff ?? false,
         branchName: pr.head,
         worktreeName: slugifyWorktreeName(pr.head),
@@ -1016,8 +1092,40 @@ export function NewWorktreeDialog({
     }
   };
 
+  // Handle Linear issue selection: the branch name follows the issue slug.
+  const handleLinearSelect = (issue: {
+    identifier: string;
+    title: string;
+    url: string;
+    author?: { login: string; avatarUrl?: string } | null;
+  } | null) => {
+    if (!issue) {
+      setNewBranchState(prev => ({ ...prev, linkedLinearIssue: null }));
+      return;
+    }
+    const newBranchName = `issue-${issue.identifier}-${generateBranchSlug()}`;
+    setNewBranchState(prev => ({
+      ...prev,
+      linkedLinearIssue: {
+        identifier: issue.identifier,
+        title: issue.title,
+        url: issue.url,
+        author: issue.author ?? undefined,
+      },
+      linkedIssue: null,
+      linkedPr: null,
+      includePrDiff: false,
+      branchName: newBranchName,
+      worktreeName: slugifyWorktreeName(newBranchName),
+      isSyncingWorktreeName: true,
+    }));
+  };
+
   // GitHub connection check
   const isGitHubConnected = githubAuthChecked && githubAuthStatus?.connected === true;
+
+  // Linear availability check: the runtime exposes the integration and an account is connected.
+  const isLinearAvailable = Boolean(linear?.issueGet) && linearAuthChecked && linearAuthStatus?.connected === true;
 
   // Check if form is valid for submission
   const isFormValid = mode === 'existing-branch'
@@ -1030,6 +1138,7 @@ export function NewWorktreeDialog({
     setNewBranchState(prev => ({
       ...prev,
       linkedIssue: null,
+      linkedLinearIssue: null,
       linkedPr: null,
       branchName: '',
       includePrDiff: false,
@@ -1277,6 +1386,17 @@ export function NewWorktreeDialog({
                         {newBranchState.linkedIssue || newBranchState.linkedPr ? t('session.newWorktree.actions.change') : t('session.newWorktree.actions.startFromGitHubIssuePr')}
                     </Button>
                   )}
+                  {mode === 'new-branch' && isLinearAvailable && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setLinearPickerOpen(true)}
+                      className="gap-1.5 h-7"
+                    >
+                      <Icon name="linear" className="size-4" />
+                      {newBranchState.linkedLinearIssue ? t('session.newWorktree.actions.change') : t('chat.chatInput.actions.linkLinearIssue')}
+                    </Button>
+                  )}
                 </div>
                 <Input
                   value={newBranchState.branchName}
@@ -1286,6 +1406,7 @@ export function NewWorktreeDialog({
                       branchName: e.target.value,
                       isSyncingWorktreeName: true,
                       linkedIssue: null,
+      linkedLinearIssue: null,
                       linkedPr: null,
                     }));
                   }}
@@ -1743,6 +1864,17 @@ export function NewWorktreeDialog({
                       {newBranchState.linkedIssue || newBranchState.linkedPr ? t('session.newWorktree.actions.change') : t('session.newWorktree.actions.startFromGitHubIssuePr')}
                       </Button>
                     )}
+                    {mode === 'new-branch' && isLinearAvailable && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setLinearPickerOpen(true)}
+                        className="gap-1.5 h-7"
+                      >
+                        <Icon name="linear" className="size-4" />
+                        {newBranchState.linkedLinearIssue ? t('session.newWorktree.actions.change') : t('chat.chatInput.actions.linkLinearIssue')}
+                      </Button>
+                    )}
                   </div>
                   <Input
                     value={newBranchState.branchName}
@@ -1752,6 +1884,7 @@ export function NewWorktreeDialog({
                         branchName: e.target.value,
                         isSyncingWorktreeName: true,
                         linkedIssue: null,
+      linkedLinearIssue: null,
                         linkedPr: null,
                       }));
                     }}
@@ -2048,6 +2181,14 @@ export function NewWorktreeDialog({
         onOpenChange={setGithubDialogOpen}
         onSelect={handleGitHubSelect}
       />
+      {isLinearAvailable ? (
+        <LinearIssuePickerDialog
+          open={linearPickerOpen}
+          onOpenChange={setLinearPickerOpen}
+          mode="select"
+          onSelect={handleLinearSelect}
+        />
+      ) : null}
     </>
   );
 }

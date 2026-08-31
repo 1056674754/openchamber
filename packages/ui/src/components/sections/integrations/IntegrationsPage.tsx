@@ -6,7 +6,9 @@ import { SettingsSection } from '@/components/sections/shared/SettingsSection';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { useI18n } from '@/lib/i18n';
 
+import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { GitHubIntegration } from './GitHubIntegration';
+import { LinearSettings } from './LinearSettings';
 import { ThirdPartyIntegrationsSection } from './ThirdPartyIntegrationsSection';
 
 type IntegrationsPageProps = {
@@ -21,8 +23,11 @@ export const IntegrationsPage: React.FC<IntegrationsPageProps> = ({
   const { t } = useI18n();
 
   // GitHub sign-in is an OpenChamber server feature; the VS Code extension
-  // uses the editor's own GitHub session instead.
+  // uses the editor's own GitHub session instead. Linear is available when
+  // the connected runtime exposes the integration API.
   const hasGitHub = !isVSCodeRuntime();
+  const hasLinear = Boolean(getRegisteredRuntimeAPIs()?.linear);
+  const hasBuiltIn = hasGitHub || hasLinear;
 
   return (
     <SettingsPageLayout>
@@ -41,14 +46,15 @@ export const IntegrationsPage: React.FC<IntegrationsPageProps> = ({
           </p>
         </div>
       </div>
-      {hasGitHub ? (
+      {hasBuiltIn ? (
         <SettingsSection
           title={t('settings.integrations.firstParty.title')}
           description={t('settings.integrations.firstParty.info')}
           divider={false}
         >
           <div className="space-y-3">
-            <GitHubIntegration />
+            {hasGitHub ? <GitHubIntegration /> : null}
+            {hasLinear ? <LinearSettings /> : null}
           </div>
         </SettingsSection>
       ) : null}

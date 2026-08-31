@@ -1,3 +1,4 @@
+import type { LinearIssueListAssignee, LinearIssueListPriority, LinearIssueListStatus } from '@/lib/api/types';
 import { create } from 'zustand';
 import { devtools, persist } from 'zustand/middleware';
 import type { SidebarSection } from '@/constants/sidebar';
@@ -25,7 +26,7 @@ export type MainTab = 'chat' | 'plan' | 'git' | 'diff' | 'terminal' | 'files' | 
 /** Diff navigation scope. Fork has no staged selector; `turn` is last-turn snapshot mode. */
 export type PendingDiffScope = 'working' | 'turn' | 'branch';
 export type RightSidebarTab = 'git' | 'files' | 'context';
-export type ContextPanelMode = 'diff' | 'file' | 'context' | 'plan' | 'chat' | 'preview' | 'terminal' | 'browser' | 'git' | 'pr' | 'notes' | 'walkthrough';
+export type ContextPanelMode = 'diff' | 'file' | 'context' | 'plan' | 'chat' | 'preview' | 'terminal' | 'browser' | 'git' | 'pr' | 'notes' | 'walkthrough' | 'linear';
 export type UserMessageRenderingMode = 'markdown' | 'plain';
 export type ChatRenderMode = 'sorted' | 'live';
 export type ActivityRenderMode = 'collapsed' | 'summary';
@@ -581,6 +582,38 @@ const clampContextPanelRoots = (
   return next;
 };
 
+
+export const LINEAR_ISSUE_LIST_ALL_TEAMS = 'all';
+
+function sanitizeLinearIssueListStatus(value: unknown): LinearIssueListStatus {
+  return value === 'all'
+    || value === 'backlog'
+    || value === 'todo'
+    || value === 'started'
+    || value === 'inReview'
+    || value === 'completed'
+    || value === 'canceled'
+    || value === 'duplicate'
+    ? value
+    : 'all';
+}
+
+function sanitizeLinearIssueListAssignee(value: unknown): LinearIssueListAssignee {
+  return value === 'me' || value === 'any' ? value : 'any';
+}
+
+function sanitizeLinearIssueListTeamId(value: unknown): string {
+  if (typeof value !== 'string') return LINEAR_ISSUE_LIST_ALL_TEAMS;
+  const teamId = value.trim();
+  return teamId || LINEAR_ISSUE_LIST_ALL_TEAMS;
+}
+
+function sanitizeLinearIssueListPriority(value: unknown): LinearIssueListPriority {
+  return value === 'none' || value === 'urgent' || value === 'high' || value === 'medium' || value === 'low' || value === 'all'
+    ? value
+    : 'all';
+}
+
 interface UIStore {
 
   theme: 'light' | 'dark' | 'system';
@@ -778,6 +811,17 @@ interface UIStore {
   setSessionSwitcherOpen: (open: boolean) => void;
   setSessionDropdownOpen: (open: boolean) => void;
   setActiveMainTab: (tab: MainTab) => void;
+  linearIssueListStatus: LinearIssueListStatus;
+  linearIssueListAssignee: LinearIssueListAssignee;
+  linearIssueListTeamId: string;
+  linearIssueListPriority: LinearIssueListPriority;
+  linearIssueFocus: string | null;
+  setLinearIssueListStatus: (status: LinearIssueListStatus) => void;
+  setLinearIssueListAssignee: (assignee: LinearIssueListAssignee) => void;
+  setLinearIssueListTeamId: (teamId: string) => void;
+  setLinearIssueListPriority: (priority: LinearIssueListPriority) => void;
+  resetLinearIssueListFilters: () => void;
+  setLinearIssueFocus: (identifier: string | null) => void;
   setMainTabGuard: (guard: MainTabGuard | null) => void;
   setPendingDiffFile: (filePath: string | null, scope?: PendingDiffScope | null) => void;
   setPendingFileNavigation: (navigation: PendingFileNavigation | null) => void;
@@ -1576,6 +1620,42 @@ export const useUIStore = create<UIStore>()(
             return;
           }
           set({ mainTabGuard: guard });
+        },
+
+        linearIssueListStatus: 'all',
+        linearIssueListAssignee: 'any',
+        linearIssueListTeamId: LINEAR_ISSUE_LIST_ALL_TEAMS,
+        linearIssueListPriority: 'all',
+        linearIssueFocus: null,
+
+        setLinearIssueListStatus: (status) => {
+          set({ linearIssueListStatus: sanitizeLinearIssueListStatus(status) });
+        },
+
+        setLinearIssueListAssignee: (assignee) => {
+          set({ linearIssueListAssignee: sanitizeLinearIssueListAssignee(assignee) });
+        },
+
+        setLinearIssueListTeamId: (teamId) => {
+          set({ linearIssueListTeamId: sanitizeLinearIssueListTeamId(teamId) });
+        },
+
+        setLinearIssueListPriority: (priority) => {
+          set({ linearIssueListPriority: sanitizeLinearIssueListPriority(priority) });
+        },
+
+        resetLinearIssueListFilters: () => {
+          set({
+            linearIssueListStatus: 'all',
+            linearIssueListAssignee: 'any',
+            linearIssueListTeamId: LINEAR_ISSUE_LIST_ALL_TEAMS,
+            linearIssueListPriority: 'all',
+          });
+        },
+
+        setLinearIssueFocus: (identifier) => {
+          const trimmed = typeof identifier === 'string' ? identifier.trim() : '';
+          set({ linearIssueFocus: trimmed || null });
         },
 
         setActiveMainTab: (tab) => {

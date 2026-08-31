@@ -14,7 +14,8 @@ export type ContextSurfaceId =
   | 'plan'
   | 'browser'
   | 'preview'
-  | 'chat';
+  | 'chat'
+  | 'linear';
 
 export type ContextSurfaceDescriptor = {
   id: ContextSurfaceId;

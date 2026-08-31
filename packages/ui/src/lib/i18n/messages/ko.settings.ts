@@ -1,4 +1,6 @@
+import { linearIntegrationI18n } from './linear-integration.i18n';
 export const settingsDict = {
+  ...linearIntegrationI18n.ko,
   'settings.providers.page.openCodeGo.title': 'OpenCode Go 사용량 추적',
   'settings.providers.page.openCodeGo.description': 'OpenCode Go 대시보드를 연결하여 롤링, 주간 및 월간 할당량을 표시합니다.',
   'settings.providers.page.openCodeGo.workspaceId': '워크스페이스 ID',
@@ -1703,6 +1705,7 @@ export const settingsDict = {
   'settings.github.page.oauth.title': 'GitHub OAuth 토큰',
   'settings.github.page.accountSource.oauth': 'OAuth',
   'settings.github.page.accountSource.cli': 'CLI',
+  'settings.common.infoAria': '자세한 정보',
   'settings.integrations.github.title': 'GitHub',
   'settings.integrations.github.description': '풀 리퀘스트와 이슈를 위해 GitHub 계정을 연결합니다.',
   'settings.integrations.github.status.notConnected': '연결되지 않음',

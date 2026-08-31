@@ -75,6 +75,8 @@ import {
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectSeparator, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { GitHubIssuePickerDialog } from '@/components/session/GitHubIssuePickerDialog';
+import { LinearIssuePickerDialog } from '@/components/session/LinearIssuePickerDialog';
+import { useLinearAuthStore } from '@/stores/useLinearAuthStore';
 import { GitHubPrPickerDialog } from '@/components/session/GitHubPrPickerDialog';
 import { Icon } from "@/components/icon/Icon";
 import { useChatSearchDirectory } from '@/hooks/useChatSearchDirectory';
@@ -488,6 +490,8 @@ type ComposerAttachmentControlsProps = {
     handleOpenCommandMenu: () => void;
     openIssuePicker: () => void;
     openPrPicker: () => void;
+    /** Present only when the connected runtime exposes the Linear integration. */
+    openLinearPicker?: () => void;
     onOpenSettings?: () => void;
 };
 
@@ -504,6 +508,7 @@ const ComposerAttachmentControls = React.memo(function ComposerAttachmentControl
         handleOpenCommandMenu,
         openIssuePicker,
         openPrPicker,
+        openLinearPicker,
         onOpenSettings,
     } = props;
 
@@ -598,6 +603,16 @@ const ComposerAttachmentControls = React.memo(function ComposerAttachmentControl
                                 <Icon name="git-pull-request"/>
                                 {t('chat.chatInput.actions.linkGithubPr')}
                             </DropdownMenuItem>
+                            {openLinearPicker ? (
+                                <DropdownMenuItem
+                                    onSelect={() => {
+                                        requestAnimationFrame(openLinearPicker);
+                                    }}
+                                >
+                                    <Icon name="linear"/>
+                                    {t('chat.chatInput.actions.linkLinearIssue')}
+                                </DropdownMenuItem>
+                            ) : null}
                         </DropdownMenuContent>
                     </DropdownMenu>
                 )}
@@ -622,6 +637,7 @@ const ComposerAttachmentControls = React.memo(function ComposerAttachmentControl
     && prev.footerIconButtonClass === next.footerIconButtonClass
     && prev.iconSizeClass === next.iconSizeClass
     && prev.onOpenSettings === next.onOpenSettings
+    && prev.openLinearPicker === next.openLinearPicker
 ));
 
 type PermissionAutoAcceptButtonProps = {
@@ -1520,6 +1536,14 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     // Issue linking state
     const [issuePickerOpen, setIssuePickerOpen] = React.useState(false);
     const [prPickerOpen, setPrPickerOpen] = React.useState(false);
+    const [linearPickerOpen, setLinearPickerOpen] = React.useState(false);
+    const [linkedLinearIssue, setLinkedLinearIssue] = React.useState<{
+        identifier: string;
+        title: string;
+        url: string;
+        contextText: string;
+        author?: { login: string; avatarUrl?: string };
+    } | null>(null);
     const [linkedIssue, setLinkedIssue] = React.useState<{ 
         number: number; 
         title: string; 
@@ -1944,6 +1968,13 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         setIssuePickerOpen(true);
     }, []);
 
+    const linearConnected = useLinearAuthStore((state) => state.status?.connected === true);
+    const linearAvailable = linearConnected;
+
+    const openLinearPicker = React.useCallback(() => {
+        setLinearPickerOpen(true);
+    }, []);
+
     const openPrPicker = React.useCallback(() => {
         setPrPickerOpen(true);
     }, []);
@@ -2174,6 +2205,13 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         if (linkedIssue) {
             additionalParts.push({
                 text: linkedIssue.contextText,
+                synthetic: true,
+            });
+        }
+
+        if (linkedLinearIssue) {
+            additionalParts.push({
+                text: linkedLinearIssue.contextText,
                 synthetic: true,
             });
         }
@@ -2565,6 +2603,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             }
             if (linkedPr) {
                 setLinkedPr(null);
+            }
+            if (linkedLinearIssue) {
+                setLinkedLinearIssue(null);
             }
         }).catch((error: unknown) => {
             const rawMessage =
@@ -4215,6 +4256,47 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                         </div>
                     </div>
                 )}
+                {linkedLinearIssue && !isVSCode && (
+                    <div className="pb-2 w-full px-1">
+                        <div className="flex w-full items-center gap-1.5 text-sm h-5 px-1">
+                            <button
+                                type="button"
+                                onClick={() => setLinearPickerOpen(true)}
+                                className="flex min-w-0 flex-1 items-center gap-1.5 text-left hover:opacity-80 transition-opacity"
+                            >
+                                <Icon name="linear" className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
+                                <span className="text-muted-foreground flex-shrink-0 font-mono">
+                                    {linkedLinearIssue.identifier}
+                                </span>
+                                <span className="text-foreground truncate">
+                                    {linkedLinearIssue.title}
+                                </span>
+                            </button>
+                            <span className="flex items-center gap-0.5 flex-shrink-0">
+                                <a
+                                    href={linkedLinearIssue.url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="flex items-center justify-center h-6 w-6 hover:bg-[var(--interactive-hover)] rounded-full transition-colors"
+                                    aria-label={t('chat.chatInput.linked.linearIssue.openInBrowserAria')}
+                                >
+                                    <Icon name="external-link" className="h-4 w-4 text-muted-foreground" />
+                                </a>
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setLinkedLinearIssue(null);
+                                    }}
+                                    className="flex items-center justify-center h-6 w-6 hover:bg-[var(--interactive-hover)] rounded-full transition-colors"
+                                    aria-label={t('chat.chatInput.linked.linearIssue.removeAria')}
+                                    title={t('chat.chatInput.linked.linearIssue.removeAria')}
+                                >
+                                    <Icon name="close" className="h-4 w-4 text-muted-foreground" />
+                                </button>
+                            </span>
+                        </div>
+                    </div>
+                )}
                 {linkedPr && !isVSCode && (
                     <div className="pb-2 w-full px-1">
                         <div className="flex w-full items-center gap-1.5 text-sm h-5 px-1">
@@ -4636,6 +4718,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                             handleOpenCommandMenu={handleOpenCommandMenu}
                                             openIssuePicker={openIssuePicker}
                                             openPrPicker={openPrPicker}
+                                            openLinearPicker={linearAvailable ? openLinearPicker : undefined}
                                             onOpenSettings={onOpenSettings}
                                         />
                                         <PermissionAutoAcceptButton
@@ -4727,6 +4810,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                         handleOpenCommandMenu={handleOpenCommandMenu}
                                         openIssuePicker={openIssuePicker}
                                         openPrPicker={openPrPicker}
+                                        openLinearPicker={linearAvailable ? openLinearPicker : undefined}
                                         onOpenSettings={onOpenSettings}
                                     />
                                     <FocusModeButton
@@ -4827,6 +4911,16 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             onSelect={(pr) => {
                 setLinkedPr(pr);
                 setLinkedIssue(null);
+            }}
+        />
+        <LinearIssuePickerDialog
+            open={linearPickerOpen}
+            onOpenChange={setLinearPickerOpen}
+            mode="select"
+            onSelect={(issue) => {
+                setLinkedLinearIssue(issue);
+                setLinkedIssue(null);
+                setLinkedPr(null);
             }}
         />
         </>

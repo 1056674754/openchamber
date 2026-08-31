@@ -22,6 +22,7 @@ import { materializeSessionSnapshots } from "./materialization"
 import { persistSteerSideChannelMessage } from "./steer-side-channel"
 import { stripMessageDiffSnapshots } from "./sanitize"
 import { formatSdkError } from "./sdk-error"
+import { withLinkedIssue, type LinkedIssue } from "@/lib/linkedIssues"
 import { getErrorStatus, isAmbiguousSendFailure } from "./send-failure-classification"
 import { markAmbiguousTransportFailure } from "@/lib/relay/transport-error"
 import { sessionEvents } from "@/lib/sessionEvents"
@@ -1198,6 +1199,18 @@ export async function patchSessionMetadata(
     useGlobalSessionsStore.getState().upsertSession(result.data)
   }
   return result.data ?? null
+}
+
+export async function setLinkedIssue(
+  sessionId: string,
+  directory: string | null | undefined,
+  issue: LinkedIssue,
+  linked: boolean,
+): Promise<Session | null> {
+  const resolvedDirectory = directory ?? getSessionDirectory(sessionId)
+  if (!resolvedDirectory) return null
+  return patchSessionMetadata(sessionId, resolvedDirectory, (metadata) =>
+    withLinkedIssue(metadata, issue, linked))
 }
 
 export async function setContextObligatoryMessage(

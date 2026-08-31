@@ -1,4 +1,6 @@
+import { linearIntegrationI18n } from './linear-integration.i18n';
 export const settingsDict = {
+  ...linearIntegrationI18n.pl,
   'settings.providers.page.openCodeGo.title': 'Śledzenie użycia OpenCode Go',
   'settings.providers.page.openCodeGo.description': 'Połącz panel OpenCode Go, aby wyświetlać limity kroczące, tygodniowe i miesięczne.',
   'settings.providers.page.openCodeGo.workspaceId': 'ID przestrzeni roboczej',
@@ -320,6 +322,7 @@ export const settingsDict = {
   'settings.github.page.oauth.title': 'Token OAuth GitHub',
   'settings.github.page.accountSource.oauth': 'OAuth',
   'settings.github.page.accountSource.cli': 'CLI',
+  'settings.common.infoAria': 'Więcej informacji',
   'settings.integrations.github.title': 'GitHub',
   'settings.integrations.github.description': 'Połącz konto GitHub dla pull requestów i issues.',
   'settings.integrations.github.status.notConnected': 'Nie połączono',

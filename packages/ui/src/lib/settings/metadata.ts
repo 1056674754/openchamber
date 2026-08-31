@@ -179,7 +179,7 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
     group: 'general',
     kind: 'single',
     showOn: 'both',
-    keywords: ['integration', 'plugin', 'provider', 'oauth', 'claude', 'cursor', 'subscription', 'github'],
+    keywords: ['integration', 'plugin', 'provider', 'oauth', 'claude', 'cursor', 'subscription', 'github', 'linear'],
   },
   {
     slug: 'agents',

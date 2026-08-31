@@ -1,4 +1,6 @@
+import { linearIntegrationI18n } from './linear-integration.i18n';
 export const settingsDict = {
+  ...linearIntegrationI18n["zh-CN"],
   'settings.providers.page.openCodeGo.title': 'OpenCode Go 用量跟踪',
   'settings.providers.page.openCodeGo.description': '连接 OpenCode Go 控制面板以显示滚动、每周和每月配额。',
   'settings.providers.page.openCodeGo.workspaceId': '工作区 ID',
@@ -1702,6 +1704,7 @@ export const settingsDict = {
   'settings.github.page.oauth.title': 'GitHub OAuth 令牌',
   'settings.github.page.accountSource.oauth': 'OAuth',
   'settings.github.page.accountSource.cli': 'CLI',
+  'settings.common.infoAria': '更多信息',
   'settings.integrations.github.title': 'GitHub',
   'settings.integrations.github.description': '连接 GitHub 账号以处理拉取请求和议题。',
   'settings.integrations.github.status.notConnected': '未连接',

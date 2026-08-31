@@ -4,7 +4,13 @@ import { projectKnowledgeI18n } from './project-knowledge.i18n';
 import { btwI18n } from './btw.i18n';
 import { chatsI18n } from './chats.i18n';
 
+import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
+import { linearIntegrationI18n } from './linear-integration.i18n';
+import { linearPanelI18n } from './linear-panel.i18n';
 export const dict = {
+  ...linearIssuePickerI18n.en,
+  ...linearIntegrationI18n.en,
+  ...linearPanelI18n.en,
   ...settingsDict,
   ...thirdPartyIntegrationI18n.en,
   ...projectKnowledgeI18n.en,

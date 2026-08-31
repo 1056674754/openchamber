@@ -103,6 +103,7 @@ import { createGracefulShutdownRuntime } from './lib/opencode/shutdown-runtime.j
 import { createSessionGoalRuntime } from './lib/session-goal/runtime.js';
 import { createSessionAssistRuntime } from './lib/session-assist/runtime.js';
 import { createContextObligatoryRuntime } from './lib/context-obligatory/runtime.js';
+import { createLinearSessionStatusRuntime } from './lib/linear/status-runtime.js';
 import { createSessionKnowledgeRuntime } from './lib/session-knowledge/runtime.js';
 import { resolveProjectKnowledgeOwnerPath } from './lib/session-knowledge/project-resolution.js';
 import { createProjectConfigRuntime } from './lib/projects/project-config.js';
@@ -1034,6 +1035,8 @@ const contextObligatoryRuntime = createContextObligatoryRuntime({
   },
 });
 
+const linearSessionStatusRuntime = createLinearSessionStatusRuntime();
+
 console.log('[session-goal] listening for local OpenCode session events');
 globalMessageStreamHub.subscribeEvent((event) => {
   const raw = event?.payload;
@@ -1046,6 +1049,7 @@ globalMessageStreamHub.subscribeEvent((event) => {
   sessionGoalRuntime.processPayload(payload, directory, 'default');
   sessionAssistRuntime.processPayload(payload, directory, 'default');
   contextObligatoryRuntime.processPayload(payload, directory, 'default');
+  linearSessionStatusRuntime.processPayload(payload);
 });
 
 const permissionAutoAcceptRuntime = createPermissionAutoAcceptRuntime({

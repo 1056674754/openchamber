@@ -22,6 +22,7 @@ import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useI18n } from '@/lib/i18n';
 import { sortContextSurfaces, type ContextSurfaceDescriptor } from '@/lib/surfaces/registry';
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
+import { useLinearAuthStore } from '@/stores/useLinearAuthStore';
 import { cn } from '@/lib/utils';
 import { useFeatureFlagsStore } from '@/stores/useFeatureFlagsStore';
 import { useGitStatus } from '@/stores/useGitStore';
@@ -104,6 +105,8 @@ export const ContextPanelRail: React.FC = () => {
   const planModeEnabled = useFeatureFlagsStore((state) => state.planModeEnabled);
   const githubAuthChecked = useGitHubAuthStore((state) => state.hasChecked);
   const githubConnected = useGitHubAuthStore((state) => state.status?.connected === true);
+  const linearAuthChecked = useLinearAuthStore((state) => state.hasChecked);
+  const linearConnected = useLinearAuthStore((state) => state.status?.connected === true);
   const gitStatus = useGitStatus(directoryKey || null);
   const sensors = useSensors(
     useSensor(MouseSensor, { activationConstraint: { distance: 8 } }),
@@ -120,12 +123,13 @@ export const ContextPanelRail: React.FC = () => {
       // or a detected `gh` CLI login); GitHub is connected from Settings, so
       // hiding the surface removes no entry point.
       if (surface.id === 'pr' && !githubConnected) return false;
+      if (surface.id === 'linear' && !linearConnected) return false;
       if (surface.availability === 'has-content') {
         return tabs.some((tab) => tab.mode === surface.mode);
       }
       return true;
     })
-  ), [contextRailOrder, githubConnected, planModeEnabled, tabs]);
+  ), [contextRailOrder, githubConnected, linearConnected, planModeEnabled, tabs]);
 
   // A surface whose integration disconnected closes rather than lingering as
   // an active panel with no rail icon.
@@ -135,6 +139,13 @@ export const ContextPanelRail: React.FC = () => {
     }
     closeContextPanel(directoryKey);
   }, [activeMode, closeContextPanel, directoryKey, githubAuthChecked, githubConnected]);
+
+  React.useEffect(() => {
+    if (!directoryKey || !linearAuthChecked || linearConnected || activeMode !== 'linear') {
+      return;
+    }
+    closeContextPanel(directoryKey);
+  }, [activeMode, closeContextPanel, directoryKey, linearAuthChecked, linearConnected]);
 
   const handleDragEnd = React.useCallback((event: DragEndEvent) => {
     const { active, over } = event;
