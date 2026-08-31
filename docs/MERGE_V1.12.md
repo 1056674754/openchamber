@@ -3281,3 +3281,17 @@ v1.20.0-sscity 尚未宣布完成：当前未关闭 `#135/#140/#142-#151/#154/#1
 - 不移植：shortcuts 的 surface 数字切换传 `githubConnected`（fork shortcut hook 无 surface 数字切换功能）；Linear 卡片归 #180。i18n 新增 `header.github.accountSource.*` 与 5 个 first-party/github 键 × 11 locale（tr 自译）。
 
 验证：UI/全 workspace type-check/lint ✅；settings metadata 7/7 ✅；`git diff --check` ✅。实机 matching-surface（连接 GitHub 后 rail 图标出现、断连关闭面板、PR 面板账户切换）建议随下次桌面 QA 附带。至此 [#183](https://coding.s-s.city/songsong/openchamber/-/issues/183) 完成，可关闭。
+
+## v1.22.0 `#179`：Nested git repositories across git surfaces（2026-08-31）
+
+上游来源：PR #2767 全链（`06c9ebaa2`、`7b5d2091f`、`3a088f140`、`837e1ba2e`、`0ed62a1b6`、`36312845e`、`84a8e9c9c`、`903201c1f`、`3cd4363ca`、`7fc179b17`），按 v1.22.0 终态手工移植。对应实现提交：`7cba44e75`。
+
+- 服务端：`GET /api/fs/git-dirs` 有界浅层扫描（深度 3 / 100 目录 / junk skip-list），`.git` 目录、worktree 指针文件、symlink 均算 repo 边界且停止下探；repo 内嵌 repo 不上报。fork 适配：目标路径经既有 `?directory=` workspace 契约（`resolveWorkspacePathFromContext`）授权——远程实例路径同样按 owning server 解析。顺带修复 fork 潜在 bug：`sendOsPermissionDenied` 此前被引用但从未定义（权限错误路径必 ReferenceError），补齐定义。
+- 客户端：`listGitDirectories` 走 fork `buildUrl`（自动带 directory、按目录解析 server base），路径 normalize，501 → `GitDirectoriesUnsupportedError`。
+- store：per-root 发现三态（列表/`null` 失败/`'unsupported'`）、选择、stale-cleared 记忆、并发去重；unsupported/失败不覆盖既有成功结果。fork 适配：与 fork git store 其余状态一致按目录键控，不引入上游 runtime-scoped 选择持久化（选择仅会话内有效）。
+- `useNestedGitDirectory` 拥有完整解析流：root 探测→发现→自动选首个（跳过探测失败过的 repo，防止坏 repo 死循环）→ 选中 repo 失效时清除并强制重扫。
+- surfaces：GitView 全量切换到 effective directory（152 处），root 语义（worktree bootstrap、panel 作用域、openContextDiff）保留 root；GitHeader 增加仓库 picker；PullRequestView、WalkthroughView（自带 picker）、聊天 PendingChangesBar 同一解析；discovering/failed/unsupported/empty 状态统一走 `NestedRepoResolutionStates`。
+- 不移植：上游 MobileChangesSurface（fork 移动端共用桌面 GitView）；上游 per-runtime 选择持久化。
+- i18n：4 个 `gitView.empty.*` key × 11 locale。
+
+验证：fs routes 28/28（真实文件系统，含边界/跳过/symlink/权限映射）、useGitStore.nested 9/9、NestedRepoResolutionStates 7/7、gitGraph 14/14 ✅；UI/Web type-check/lint ✅；全 workspace type-check/lint ✅；`git diff --check` ✅。实机 matching-surface（真实多仓项目目录的 picker 切换与各 surface 跟随）建议随下次桌面 QA 附带。至此 [#179](https://coding.s-s.city/songsong/openchamber/-/issues/179) 完成，可关闭。
