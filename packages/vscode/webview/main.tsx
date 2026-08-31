@@ -1273,24 +1273,6 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
   return originalFetch(input as RequestInfo, init);
 };
 
-onCommand('addContextSelection', (payload) => {
-  const { filePath, filename, text } = payload as { filePath?: unknown; filename?: unknown; text?: unknown };
-  if (typeof filePath !== 'string' || typeof filename !== 'string' || typeof text !== 'string') {
-    return;
-  }
-
-  const trimmedPath = filePath.trim();
-  const trimmedFilename = filename.trim();
-  if (!trimmedPath || !trimmedFilename || !text.trim()) {
-    return;
-  }
-
-  import('@/sync/input-store').then(({ useInputStore }) => {
-    const file = new File([new Blob([text], { type: 'text/plain' })], trimmedFilename, { type: 'text/plain' });
-    void useInputStore.getState().addVSCodeSelectionAttachment(trimmedPath, file);
-  });
-});
-
 // Listen for addToContext command from older extension hosts.
 onCommand('addToContext', (payload) => {
   const { text } = payload as { text: string };
@@ -1347,9 +1329,48 @@ onCommand('addFileAttachments', (payload) => {
   });
 });
 
+type SelectionAttachmentCommand = {
+  path: string;
+  fileName: string;
+  startLine: number;
+  endLine: number;
+};
+
+const parseSelectionAttachment = (payload: unknown): SelectionAttachmentCommand | null => {
+  if (typeof payload !== 'object' || payload === null) return null;
+  const { path, fileName, startLine, endLine } = payload as Record<string, unknown>;
+  if (typeof path !== 'string' || typeof fileName !== 'string') return null;
+  if (typeof startLine !== 'number' || typeof endLine !== 'number') return null;
+  if (!Number.isInteger(startLine) || !Number.isInteger(endLine)) return null;
+  if (startLine < 1 || endLine < startLine) return null;
+  return {
+    path,
+    fileName,
+    startLine,
+    endLine,
+  };
+};
+
+onCommand('addSelectionAttachment', (payload) => {
+  const selection = parseSelectionAttachment(payload);
+  if (!selection) return;
+
+  import('@/sync/input-store').then(({ useInputStore }) => {
+    useInputStore.getState().addVSCodeSelectionAttachment(
+      selection.path,
+      selection.fileName,
+      selection.startLine,
+      selection.endLine
+    );
+  });
+
+  window.dispatchEvent(new CustomEvent('openchamber:navigate', { detail: { view: 'chat' } }));
+});
+
 // Listen for createSessionWithPrompt command from extension (Explain, Improve Code)
 onCommand('createSessionWithPrompt', (payload) => {
-  const { prompt } = payload as { prompt: string };
+  const { prompt, selection: rawSelection } = payload as { prompt: string; selection?: unknown };
+  const selection = parseSelectionAttachment(rawSelection);
 
   Promise.all([
     import('@/sync/session-ui-store'),
@@ -1358,6 +1379,17 @@ onCommand('createSessionWithPrompt', (payload) => {
   ]).then(([{ useSessionUIStore }, { useConfigStore }, { useInputStore }]) => {
     const sessionStore = useSessionUIStore.getState();
     const configStore = useConfigStore.getState();
+    const inputStore = useInputStore.getState();
+
+    if (selection) {
+      inputStore.addVSCodeSelectionAttachment(
+        selection.path,
+        selection.fileName,
+        selection.startLine,
+        selection.endLine
+      );
+    }
+    const attachments = selection ? useInputStore.getState().attachedFiles : undefined;
 
     // Get current provider/model/agent configuration
     const { currentProviderId, currentModelId, currentAgentName } = configStore;
@@ -1373,15 +1405,19 @@ onCommand('createSessionWithPrompt', (payload) => {
         currentProviderId,
         currentModelId,
         currentAgentName ?? undefined,
-        undefined, // attachments
+        attachments,
         undefined, // agentMentionName
         undefined  // additionalParts
-      ).catch((error: unknown) => {
+      ).then(() => {
+        if (selection) {
+          useInputStore.getState().clearAttachedFiles();
+        }
+      }).catch((error: unknown) => {
         console.error('[OpenChamber] Failed to send prompt:', error);
       });
     } else {
       // If no provider/model configured, just set the text and let user send manually
-      useInputStore.getState().setPendingInputText(prompt);
+      inputStore.setPendingInputText(prompt);
     }
   });
 });

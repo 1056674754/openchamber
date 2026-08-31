@@ -7,6 +7,7 @@ import { getWebviewHtml } from './webviewHtml';
 import { openSseProxy } from './sseProxy';
 import { resolveWebviewDevServerUrl } from './webviewDevServer';
 import { normalizeWindowsDriveLetter } from './pathUtils';
+import { namespacePathForUri } from './remoteNamespace';
 import { resolveWorkspaceFolders, type WorkspaceFolderCandidate } from './workspaceResolver';
 
 type ActiveEditorFilePayload = {
@@ -15,6 +16,13 @@ type ActiveEditorFilePayload = {
   relativePath: string;
   fileSize: number | null;
   selection: { startLine: number; endLine: number; text: string } | null;
+};
+
+export type SelectionAttachmentPayload = {
+  path: string;
+  fileName: string;
+  startLine: number;
+  endLine: number;
 };
 
 const isSameActiveEditorFilePayload = (a: ActiveEditorFilePayload | null, b: ActiveEditorFilePayload | null): boolean => {
@@ -200,19 +208,6 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  public addContextSelection(selection: { filePath: string; filename: string; text: string }) {
-    if (!this._view) {
-      return;
-    }
-
-    this._view.show(true);
-    this._view.webview.postMessage({
-      type: 'command',
-      command: 'addContextSelection',
-      payload: selection,
-    });
-  }
-
   public addFileAttachments(files: Array<{ filePath: string; fileName: string; fileSize: number | null }>) {
     if (!this._view) {
       return;
@@ -252,15 +247,28 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     });
   }
 
-  public createNewSessionWithPrompt(prompt: string) {
+  public addSelectionAttachment(payload: SelectionAttachmentPayload) {
+    if (!this._view) {
+      return;
+    }
+
+    this._view.show(true);
+    this._view.webview.postMessage({
+      type: 'command',
+      command: 'addSelectionAttachment',
+      payload,
+    });
+  }
+
+  public createNewSessionWithPrompt(prompt: string, selection?: SelectionAttachmentPayload) {
     if (this._view) {
       // Reveal the webview panel
       this._view.show(true);
-      
+
       this._view.webview.postMessage({
         type: 'command',
         command: 'createSessionWithPrompt',
-        payload: { prompt }
+        payload: selection ? { prompt, selection } : { prompt }
       });
     }
   }
@@ -452,7 +460,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 
     const view = this._view;
     const editor = vscode.window.activeTextEditor;
-    if (!editor || editor.document.uri.scheme !== 'file') {
+    const namespace = editor ? namespacePathForUri(editor.document.uri) : null;
+    if (!editor || (editor.document.uri.scheme !== 'file' && !namespace)) {
       this._scheduleClearActiveEditorFile();
       return;
     }
@@ -465,7 +474,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       this._clearActiveEditorFileTimer = undefined;
     }
 
-    const filePath = normalizeWindowsDriveLetter(editorUri.fsPath);
+    const filePath = namespace ? namespace.nsPath : normalizeWindowsDriveLetter(editorUri.fsPath);
     const rawFileName = editorUri.fsPath;
     const fileName = rawFileName.replace(/\\/g, '/').split('/').pop() || '';
     const relativePath = vscode.workspace.asRelativePath(editorUri, false);

@@ -9,6 +9,7 @@ import { spawn } from 'child_process';
 import { randomBytes } from 'crypto';
 import { normalizeWindowsDriveLetter } from './pathUtils';
 import { applyProviderEnvAliases } from './provider-env-aliases';
+import { namespacePathForUri, remoteSessionForWorkspace, isUnsupportedRemoteWorkspace, ensureNamespaceMounted, getRemoteConfigDir } from './remoteNamespace';
 
 const READY_CHECK_TIMEOUT_MS = 30000;
 const WINDOWS_EXECUTABLE_EXTENSIONS = (process.env.PATHEXT || '.EXE;.CMD;.BAT;.COM')
@@ -638,14 +639,15 @@ async function waitForReady(
 async function spawnManagedOpenCodeServer(
   workingDirectory: string,
   port: number,
-  timeoutMs: number
+  timeoutMs: number,
+  extraEnv?: Record<string, string>
 ): Promise<{ url: string; close: () => void }> {
   const binary = stripWrappingQuotes(process.env.OPENCODE_BINARY || 'opencode') || 'opencode';
   const args = ['serve', '--hostname', '127.0.0.1', '--port', String(port)];
   const launch = resolveWindowsLaunchSpec(binary, args);
   const child = spawn(launch.binary, launch.args, {
     cwd: workingDirectory,
-    env: applyProviderEnvAliases({ ...process.env }),
+    env: applyProviderEnvAliases({ ...process.env, ...extraEnv }),
     stdio: ['ignore', 'pipe', 'pipe'],
     windowsHide: true,
   });
@@ -758,8 +760,12 @@ export function createOpenCodeManager(_context: vscode.ExtensionContext): OpenCo
   let status: ConnectionStatus = 'disconnected';
   let lastError: string | undefined;
   const listeners = new Set<(status: ConnectionStatus, error?: string) => void>();
-  const workspaceDirectory = (): string =>
-    normalizeWindowsDriveLetter(vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || os.homedir());
+  const workspaceDirectory = (): string => {
+    const folder = vscode.workspace.workspaceFolders?.[0];
+    const namespace = folder ? namespacePathForUri(folder.uri) : null;
+    if (namespace) return namespace.nsPath;
+    return normalizeWindowsDriveLetter(folder?.uri.fsPath || os.homedir());
+  };
   let workingDirectory: string = workspaceDirectory();
   let startCount = 0;
   let restartCount = 0;
@@ -879,6 +885,27 @@ export function createOpenCodeManager(_context: vscode.ExtensionContext): OpenCo
       return;
     }
 
+    if (isUnsupportedRemoteWorkspace()) {
+      setStatus('error', 'OpenChamber local-engine mode supports ssh-remote workspaces only (this window uses a different remote authority).');
+      return;
+    }
+
+    const remoteSession = remoteSessionForWorkspace();
+    let remoteEnv: Record<string, string> | undefined;
+    if (remoteSession) {
+      setStatus('connecting');
+      try {
+        await ensureNamespaceMounted(remoteSession);
+      } catch (mountError) {
+        setStatus('error', mountError instanceof Error ? mountError.message : String(mountError));
+        return;
+      }
+      const configDir = getRemoteConfigDir();
+      if (configDir) {
+        remoteEnv = { OPENCODE_CONFIG_DIR: configDir };
+      }
+    }
+
     // If server already running, don't spawn another
     if (server) {
       if (status !== 'connected') {
@@ -925,7 +952,7 @@ export function createOpenCodeManager(_context: vscode.ExtensionContext): OpenCo
       try {
         process.chdir(workingDirectory);
         const port = await allocateManagedOpenCodePort();
-        server = await spawnManagedOpenCodeServer(workingDirectory, port, READY_CHECK_TIMEOUT_MS);
+        server = await spawnManagedOpenCodeServer(workingDirectory, port, READY_CHECK_TIMEOUT_MS, remoteEnv);
       } finally {
         try {
           process.chdir(originalCwd);

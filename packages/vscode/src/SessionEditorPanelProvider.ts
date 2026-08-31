@@ -7,6 +7,7 @@ import { getWebviewHtml } from './webviewHtml';
 import { openSseProxy } from './sseProxy';
 import { resolveWebviewDevServerUrl } from './webviewDevServer';
 import { normalizeWindowsDriveLetter } from './pathUtils';
+import type { SelectionAttachmentPayload } from './ChatViewProvider';
 import { resolveWorkspaceFolders } from './workspaceResolver';
 
 type SessionPanelState = {
@@ -227,8 +228,8 @@ export class SessionEditorPanelProvider {
     return this._panels.get(panelId) ?? null;
   }
 
-  public addContextSelectionToActivePanel(selection: { filePath: string; filename: string; text: string }): boolean {
-    if (!selection.filePath.trim() || !selection.filename.trim() || !selection.text.trim()) {
+  public addSelectionToActivePanel(payload: SelectionAttachmentPayload): boolean {
+    if (!payload.path.trim() || !payload.fileName.trim()) {
       return false;
     }
 
@@ -240,13 +241,13 @@ export class SessionEditorPanelProvider {
     entry.panel.reveal(entry.panel.viewColumn ?? vscode.ViewColumn.Active, true);
     void entry.panel.webview.postMessage({
       type: 'command',
-      command: 'addContextSelection',
-      payload: selection,
+      command: 'addSelectionAttachment',
+      payload,
     });
     return true;
   }
 
-  public createSessionWithPromptInActivePanel(prompt: string): boolean {
+  public createSessionWithPromptInActivePanel(prompt: string, selection?: SelectionAttachmentPayload): boolean {
     if (!prompt.trim()) {
       return false;
     }
@@ -260,7 +261,7 @@ export class SessionEditorPanelProvider {
     void entry.panel.webview.postMessage({
       type: 'command',
       command: 'createSessionWithPrompt',
-      payload: { prompt },
+      payload: selection ? { prompt, selection } : { prompt },
     });
     return true;
   }

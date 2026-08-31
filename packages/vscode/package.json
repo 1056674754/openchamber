@@ -14,6 +14,9 @@
   "engines": {
     "vscode": "^1.85.0"
   },
+  "extensionKind": [
+    "ui"
+  ],
   "categories": [
     "Programming Languages",
     "Machine Learning",
@@ -36,6 +39,7 @@
   "activationEvents": [
     "onCommand:openchamber.openSidebar",
     "onCommand:openchamber.attachExplorerToChat",
+    "onCommand:openchamber.addSelectionToChat",
     "onView:openchamber.chatView"
   ],
   "contributes": {
@@ -140,6 +144,11 @@
         "command": "openchamber.attachExplorerToChat",
         "category": "OpenChamber",
         "title": "Attach to OpenChamber Chat"
+      },
+      {
+        "command": "openchamber.addSelectionToChat",
+        "category": "OpenChamber",
+        "title": "Add Selection to Chat"
       }
     ],
     "submenus": [
@@ -192,6 +201,10 @@
       ],
       "openchamber.submenu": [
         {
+          "command": "openchamber.addSelectionToChat",
+          "when": "editorHasSelection"
+        },
+        {
           "command": "openchamber.explain"
         },
         {
@@ -202,6 +215,14 @@
         }
       ]
     },
+    "keybindings": [
+      {
+        "command": "openchamber.addSelectionToChat",
+        "key": "ctrl+l",
+        "mac": "cmd+l",
+        "when": "editorTextFocus"
+      }
+    ],
     "configuration": {
       "title": "OpenChamber",
       "properties": {

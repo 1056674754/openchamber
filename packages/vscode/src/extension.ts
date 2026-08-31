@@ -1,9 +1,10 @@
 import * as vscode from 'vscode';
-import { ChatViewProvider } from './ChatViewProvider';
+import { ChatViewProvider, type SelectionAttachmentPayload } from './ChatViewProvider';
 import { AgentManagerPanelProvider } from './AgentManagerPanelProvider';
 import { SessionEditorPanelProvider } from './SessionEditorPanelProvider';
 import { createOpenCodeManager, type OpenCodeManager } from './opencode';
 import { startGlobalEventWatcher, stopGlobalEventWatcher, setChatViewProvider } from './sessionActivityWatcher';
+import { initRemoteConfigDir, namespacePathForUri } from './remoteNamespace';
 import { resolveWorkspaceFolders } from './workspaceResolver';
 
 let chatViewProvider: ChatViewProvider | undefined;
@@ -19,6 +20,27 @@ const SETTINGS_KEY = 'openchamber.settings';
 const CHAT_VIEW_BOOTSTRAP_DELAY_MS = 80;
 
 const waitForChatViewBootstrap = () => new Promise<void>((resolve) => setTimeout(resolve, CHAT_VIEW_BOOTSTRAP_DELAY_MS));
+
+const buildSelectionTarget = (editor: vscode.TextEditor): SelectionAttachmentPayload | null => {
+  if (editor.selection.isEmpty) {
+    return null;
+  }
+  const namespace = namespacePathForUri(editor.document.uri);
+  const filePath = namespace ? namespace.nsPath : (editor.document.uri.scheme === 'file' ? editor.document.uri.fsPath : null);
+  if (!filePath) {
+    return null;
+  }
+  const startLine = editor.selection.start.line + 1;
+  const endLine = editor.selection.end.line + 1;
+  const lineRange = startLine === endLine ? `${startLine}` : `${startLine}-${endLine}`;
+  const baseName = filePath.split(/[\\/]/).pop() ?? filePath;
+  return {
+    path: filePath,
+    fileName: `${baseName}:${lineRange}`,
+    startLine,
+    endLine,
+  };
+};
 
 const formatIso = (value: number | null | undefined) => {
   if (typeof value !== 'number' || !Number.isFinite(value)) return '(none)';
@@ -37,6 +59,12 @@ const formatDurationMs = (value: number | null | undefined) => {
 
 export async function activate(context: vscode.ExtensionContext) {
   outputChannel = vscode.window.createOutputChannel('OpenChamber');
+
+  try {
+    await initRemoteConfigDir(context);
+  } catch (error) {
+    outputChannel?.appendLine(`[OpenChamber] Failed to stage remote namespace config: ${error instanceof Error ? error.message : String(error)}`);
+  }
 
   let moveToRightSidebarScheduled = false;
 
@@ -280,6 +308,43 @@ export async function activate(context: vscode.ExtensionContext) {
   );
 
   context.subscriptions.push(
+    vscode.commands.registerCommand('openchamber.addSelectionToChat', async () => {
+      const editor = vscode.window.activeTextEditor;
+      if (!editor) {
+        vscode.window.showWarningMessage('OpenChamber [Add Selection]: No active editor');
+        return;
+      }
+
+      const target = buildSelectionTarget(editor);
+
+      if (target) {
+        if (!sessionEditorProvider?.addSelectionToActivePanel(target)) {
+          if (!(await revealChatViewForPayload())) {
+            return;
+          }
+          chatViewProvider?.addSelectionAttachment(target);
+        }
+        return;
+      }
+
+      // No selection: attach the whole file instead
+      const relativePath = vscode.workspace.asRelativePath(editor.document.uri, false).replace(/\\/g, '/').trim();
+      if (!relativePath) {
+        vscode.window.showWarningMessage('OpenChamber [Add Selection]: Nothing to attach');
+        return;
+      }
+      const baseName = editor.document.uri.fsPath.replace(/\\/g, '/').split('/').pop() || relativePath;
+      const filePayload = [{ filePath: editor.document.uri.fsPath, fileName: baseName, fileSize: null }];
+      if (!sessionEditorProvider?.addFileAttachmentsToActivePanel(filePayload)) {
+        if (!(await revealChatViewForPayload())) {
+          return;
+        }
+        chatViewProvider?.addFileAttachments(filePayload);
+      }
+    })
+  );
+
+  context.subscriptions.push(
     vscode.commands.registerCommand('openchamber.addToContext', async () => {
       const editor = vscode.window.activeTextEditor;
       if (!editor) {
@@ -287,35 +352,46 @@ export async function activate(context: vscode.ExtensionContext) {
         return;
       }
 
-      const selection = editor.selection;
-      const selectedText = editor.document.getText(selection);
+      const target = buildSelectionTarget(editor);
 
+      if (target) {
+        if (!sessionEditorProvider?.addSelectionToActivePanel(target)) {
+          if (!(await revealChatViewForPayload())) {
+            return;
+          }
+          chatViewProvider?.addSelectionAttachment(target);
+        }
+        return;
+      }
+
+      if (editor.document.uri.scheme === 'file') {
+        const relativePath = vscode.workspace.asRelativePath(editor.document.uri, false).replace(/\\/g, '/').trim();
+        if (!relativePath) {
+          vscode.window.showWarningMessage('OpenChamber [Add to Context]: No text selected');
+          return;
+        }
+        const baseName = editor.document.uri.fsPath.replace(/\\/g, '/').split('/').pop() || relativePath;
+        const filePayload = [{ filePath: editor.document.uri.fsPath, fileName: baseName, fileSize: null }];
+        if (!sessionEditorProvider?.addFileAttachmentsToActivePanel(filePayload)) {
+          if (!(await revealChatViewForPayload())) {
+            return;
+          }
+          chatViewProvider?.addFileAttachments(filePayload);
+        }
+        return;
+      }
+
+      // Non-file documents (untitled, output, ...): embed the text directly
+      const selectedText = editor.document.getText(editor.selection);
       if (!selectedText) {
         vscode.window.showWarningMessage('OpenChamber [Add to Context]: No text selected');
         return;
       }
-
-      // Get file info for context
-      const filePath = vscode.workspace.asRelativePath(editor.document.uri, false);
-
-      // Get line numbers (1-based for display)
-      const startLine = selection.start.line + 1;
-      const endLine = selection.end.line + 1;
-      const lineRange = startLine === endLine ? `${startLine}` : `${startLine}-${endLine}`;
-
-      const filename = `${filePath}:${lineRange}`;
-      const contextSelection = {
-        filePath: editor.document.uri.fsPath,
-        filename,
-        text: selectedText,
-      };
-
-      if (!sessionEditorProvider?.addContextSelectionToActivePanel(contextSelection)) {
-        if (!(await revealChatViewForPayload())) {
-          return;
-        }
-        chatViewProvider?.addContextSelection(contextSelection);
+      if (!(await revealChatViewForPayload())) {
+        return;
       }
+      const contextText = `${editor.document.languageId}\n\`\`\`\n${selectedText}\n\`\`\``;
+      chatViewProvider?.addTextToInput(contextText);
     })
   );
 
@@ -340,7 +416,8 @@ export async function activate(context: vscode.ExtensionContext) {
       const skippedEntries: string[] = [];
 
       for (const uri of uniqueUris) {
-        if (uri.scheme !== 'file') {
+        const namespace = namespacePathForUri(uri);
+        if (uri.scheme !== 'file' && !namespace) {
           skippedEntries.push(uri.toString());
           continue;
         }
@@ -356,7 +433,7 @@ export async function activate(context: vscode.ExtensionContext) {
           continue;
         }
 
-        const filePath = uri.fsPath.trim();
+        const filePath = (namespace ? namespace.nsPath : uri.fsPath).trim();
         const fileName = uri.fsPath.replace(/\\/g, '/').split('/').pop() || vscode.workspace.asRelativePath(uri, false).replace(/\\/g, '/').trim();
         if (!filePath || !fileName) {
           skippedEntries.push(uri.fsPath || uri.toString());
@@ -398,29 +475,26 @@ export async function activate(context: vscode.ExtensionContext) {
         return;
       }
 
-      const selection = editor.selection;
-      const selectedText = editor.document.getText(selection);
-      const filePath = vscode.workspace.asRelativePath(editor.document.uri);
-      const languageId = editor.document.languageId;
-
+      const target = buildSelectionTarget(editor);
       let prompt: string;
 
-      if (selectedText) {
-        // Selection exists - explain the selected code
-        const startLine = selection.start.line + 1;
-        const endLine = selection.end.line + 1;
-        const lineRange = startLine === endLine ? `${startLine}` : `${startLine}-${endLine}`;
-        prompt = `Explain the following Code / Text:\n\n${filePath}:${lineRange}\n\`\`\`${languageId}\n${selectedText}\n\`\`\``;
-      } else {
-        // No selection - explain the entire file
+      if (target) {
+        prompt = 'Explain the selected code.';
+      } else if (editor.selection.isEmpty && editor.document.uri.scheme === 'file') {
+        const filePath = vscode.workspace.asRelativePath(editor.document.uri);
         prompt = `Explain the following Code / Text:\n\n${filePath}`;
+      } else {
+        const selectedText = editor.document.getText(editor.selection);
+        const languageId = editor.document.languageId;
+        const filePath = vscode.workspace.asRelativePath(editor.document.uri);
+        prompt = `Explain the following Code / Text:\n\n${filePath}\n\`\`\`${languageId}\n${selectedText}\n\`\`\``;
       }
 
-      if (!sessionEditorProvider?.createSessionWithPromptInActivePanel(prompt)) {
+      if (!sessionEditorProvider?.createSessionWithPromptInActivePanel(prompt, target ?? undefined)) {
         if (!(await revealChatViewForPayload())) {
           return;
         }
-        chatViewProvider?.createNewSessionWithPrompt(prompt);
+        chatViewProvider?.createNewSessionWithPrompt(prompt, target ?? undefined);
       }
     })
   );
@@ -433,27 +507,28 @@ export async function activate(context: vscode.ExtensionContext) {
         return;
       }
 
-      const selection = editor.selection;
-      const selectedText = editor.document.getText(selection);
-
-      if (!selectedText) {
+      if (editor.selection.isEmpty) {
         vscode.window.showWarningMessage('OpenChamber [Improve Code]: No text selected');
         return;
       }
 
-      const filePath = vscode.workspace.asRelativePath(editor.document.uri);
-      const languageId = editor.document.languageId;
-      const startLine = selection.start.line + 1;
-      const endLine = selection.end.line + 1;
-      const lineRange = startLine === endLine ? `${startLine}` : `${startLine}-${endLine}`;
+      const target = buildSelectionTarget(editor);
+      let prompt: string;
 
-      const prompt = `Improve the following Code:\n\n${filePath}:${lineRange}\n\`\`\`${languageId}\n${selectedText}\n\`\`\``;
+      if (target) {
+        prompt = 'Improve the selected code.';
+      } else {
+        const selectedText = editor.document.getText(editor.selection);
+        const filePath = vscode.workspace.asRelativePath(editor.document.uri);
+        const languageId = editor.document.languageId;
+        prompt = `Improve the following Code:\n\n${filePath}\n\`\`\`${languageId}\n${selectedText}\n\`\`\``;
+      }
 
-      if (!sessionEditorProvider?.createSessionWithPromptInActivePanel(prompt)) {
+      if (!sessionEditorProvider?.createSessionWithPromptInActivePanel(prompt, target ?? undefined)) {
         if (!(await revealChatViewForPayload())) {
           return;
         }
-        chatViewProvider?.createNewSessionWithPrompt(prompt);
+        chatViewProvider?.createNewSessionWithPrompt(prompt, target ?? undefined);
       }
     })
   );

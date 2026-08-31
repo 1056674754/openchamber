@@ -106,18 +106,29 @@ describe("input-store attachments", () => {
     expect(useInputStore.getState().attachedFiles.map((file) => file.filename)).toEqual(["restored.txt"])
   })
 
-  testWithMockFileReader("does not attach a VS Code selection that finishes reading after attachments are cleared", async () => {
-    const addPromise = useInputStore.getState().addVSCodeSelectionAttachment(
-      "/workspace/hello.txt",
-      new File(["hello"], "hello.txt", { type: "text/plain" })
-    )
-    expect(pendingReaders).toHaveLength(1)
+  test("adds a VS Code selection as a structured file reference", () => {
+    useInputStore.getState().addVSCodeSelectionAttachment("/workspace/hello.txt", "hello.txt:37-42", 37, 42)
 
-    useInputStore.getState().clearAttachedFiles()
-    resolveReader(pendingReaders[0], "data:text/plain;base64,aGVsbG8=")
-    await addPromise
+    const attached = useInputStore.getState().attachedFiles
+    expect(attached).toHaveLength(1)
+    expect(attached[0].source).toBe("vscode")
+    expect(attached[0].vscodeSource).toBe("selection")
+    expect(attached[0].vscodePath).toBe("/workspace/hello.txt")
+    expect(attached[0].filename).toBe("hello.txt:37-42")
+    expect(attached[0].dataUrl).toBe("file:///workspace/hello.txt?start=37&end=42")
+  })
 
-    expect(useInputStore.getState().attachedFiles).toEqual([])
+  test("ignores a duplicate VS Code selection attachment", () => {
+    useInputStore.getState().addVSCodeSelectionAttachment("/workspace/hello.txt", "hello.txt:37-42", 37, 42)
+    useInputStore.getState().addVSCodeSelectionAttachment("/workspace/hello.txt", "hello.txt:37-42", 37, 42)
+
+    expect(useInputStore.getState().attachedFiles).toHaveLength(1)
+  })
+
+  test("encodes spaces in VS Code selection file paths", () => {
+    useInputStore.getState().addVSCodeSelectionAttachment("/workspace/my file.txt", "my file.txt:1-2", 1, 2)
+
+    expect(useInputStore.getState().attachedFiles[0].dataUrl).toBe("file:///workspace/my%20file.txt?start=1&end=2")
   })
 
   test("does not leave local file reads pending after a reader error", async () => {
@@ -128,22 +139,6 @@ describe("input-store attachments", () => {
     await addPromise
 
     expect(useInputStore.getState().attachedFiles).toEqual([])
-  })
-
-  test("cleans up pending VS Code selection keys after a reader error", async () => {
-    const file = new File(["hello"], "hello.txt", { type: "text/plain" })
-    const firstAdd = useInputStore.getState().addVSCodeSelectionAttachment("/workspace/hello.txt", file)
-    expect(pendingReaders).toHaveLength(1)
-
-    rejectReader(pendingReaders[0])
-    await firstAdd
-
-    const secondAdd = useInputStore.getState().addVSCodeSelectionAttachment("/workspace/hello.txt", file)
-    expect(pendingReaders).toHaveLength(2)
-    resolveReader(pendingReaders[1], "data:text/plain;base64,aGVsbG8=")
-    await secondAdd
-
-    expect(useInputStore.getState().attachedFiles.map((attached) => attached.filename)).toEqual(["hello.txt"])
   })
 })
 

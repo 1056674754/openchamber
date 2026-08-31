@@ -435,11 +435,9 @@ export const ActiveEditorFileSuggestion = memo(() => {
     addVSCodeFileAttachment(filePath, fileName, fileSize);
   };
 
-  const handlePinSelection = async () => {
+  const handlePinSelection = () => {
     if (!selection) return;
-    const blob = new Blob([selection.text], { type: 'text/plain' });
-    const file = new File([blob], selectionLabel, { type: 'text/plain' });
-    await addVSCodeSelectionAttachment(filePath, file);
+    addVSCodeSelectionAttachment(filePath, selectionLabel, selection.startLine, selection.endLine);
   };
 
   // If there is a selection, prefer showing the pin-selection UI only.
@@ -460,7 +458,7 @@ export const ActiveEditorFileSuggestion = memo(() => {
             type="button"
             title={t('chat.fileAttachment.activeEditor.pinSelection')}
             aria-label={t('chat.fileAttachment.activeEditor.pinSelection')}
-            onClick={() => { void handlePinSelection(); }}
+            onClick={() => handlePinSelection()}
             className="flex items-center justify-center h-5 w-5 flex-shrink-0 hover:bg-[var(--interactive-hover)] rounded-full transition-colors cursor-pointer"
           >
             <Icon name="pushpin-2" className="h-4 w-4" />

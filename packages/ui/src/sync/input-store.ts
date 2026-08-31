@@ -13,7 +13,6 @@ import { prepareAttachmentFiles } from "./attachment-files"
 
 const FILE_URI_PREFIX = "file://"
 const MAX_ATTACHMENT_PREPARATION_ATTEMPTS = 3
-const pendingVSCodeSelectionKeys = new Set<string>()
 let attachmentReadGeneration = 0
 
 /** Composer attachment bucket for the new-session draft (no session id yet). */
@@ -40,8 +39,6 @@ const toFileUrl = (filepath: string): string => {
   }
   return `${FILE_URI_PREFIX}${encodeFilePath(normalized)}`
 }
-
-const getVSCodeSelectionKey = (path: string, filename: string): string => `${path}\u0000${filename}`
 
 const hasGeneratedFilenameCollision = (filenames: string[], attachedFiles: AttachedFile[]): boolean => {
   if (filenames.length === 0) return false
@@ -158,7 +155,7 @@ export type InputState = {
   setAttachedFilesForSession: (sessionKey: string, files: AttachedFile[]) => void
   clearAttachedFiles: () => void
   addVSCodeFileAttachment: (path: string, name: string, fileSize: number | null) => void
-  addVSCodeSelectionAttachment: (path: string, file: File) => Promise<void>
+  addVSCodeSelectionAttachment: (path: string, label: string, startLine: number, endLine: number) => void
   setActiveEditorFile: (file: VSCodeActiveEditorFile | null) => void
   addRestoredAttachment: (file: { url: string; mimeType: string; filename: string }) => void
 }
@@ -364,35 +361,28 @@ export const useInputStore = create<InputState>()((set, get) => ({
     })
   },
 
-  addVSCodeSelectionAttachment: async (path: string, file: File) => {
+  addVSCodeSelectionAttachment: (path, label, startLine, endLine) => {
     const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`
     const targetKey = get().attachmentSessionKey
-    const generation = attachmentReadGeneration
-    const selectionKey = getVSCodeSelectionKey(path, file.name)
-    const activeFiles = get().attachmentSessionKey === targetKey
-      ? get().attachedFiles
-      : (targetKey ? (get().attachedBySession[targetKey] ?? []) : get().attachedFiles)
+    const activeFiles = targetKey
+      ? (get().attachmentSessionKey === targetKey
+        ? get().attachedFiles
+        : (get().attachedBySession[targetKey] ?? []))
+      : get().attachedFiles
     const isDuplicate = activeFiles.some(
-      (f) => f.source === 'vscode' && f.vscodeSource === 'selection' && f.filename === file.name && f.vscodePath === path
+      (f) => f.source === 'vscode' && f.vscodeSource === 'selection' && f.filename === label && f.vscodePath === path
     )
-    if (isDuplicate || pendingVSCodeSelectionKeys.has(selectionKey)) return
-    pendingVSCodeSelectionKeys.add(selectionKey)
-    let dataUrl: string
-    try {
-      dataUrl = await readFileAsDataUrl(file, file.type || "text/plain")
-    } catch {
-      return
-    } finally {
-      pendingVSCodeSelectionKeys.delete(selectionKey)
-    }
-    if (generation !== attachmentReadGeneration) return
+    if (isDuplicate) return
+    // The OpenCode server resolves `file://path?start=N&end=M` natively
+    // (1-based lines), keeping the prompt a compact, traceable reference.
+    const dataUrl = `${toFileUrl(path)}?start=${startLine}&end=${endLine}`
     const attached: AttachedFile = {
       id,
-      file,
+      file: new File([], label, { type: 'text/plain' }),
       dataUrl,
-      mimeType: file.type,
-      filename: file.name,
-      size: file.size,
+      mimeType: 'text/plain',
+      filename: label,
+      size: 0,
       source: 'vscode',
       vscodePath: path,
       vscodeSource: 'selection',

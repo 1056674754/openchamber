@@ -9,3 +9,5 @@ vite.config.ts
 *.map
 **/*.ts
 !dist/**
+!remote-config/plugin/remote-namespace.ts
+!remote-config/opencode.json
