@@ -365,4 +365,115 @@ describe('fs upload route', () => {
     expect(response.status).toBe(403);
     await expect(fs.readFile(outsideTarget, 'utf8')).resolves.toBe('outside');
   });
+
+describe('fs git-dirs (nested repository discovery)', () => {
+  const createGitDirsApp = async (tempRoot) =>
+    createApp({ projects: [{ id: 'git-dirs-root', path: tempRoot }] });
+
+  it('finds nested repositories and stops at repository boundaries', async () => {
+    const tempRoot = await fs.realpath(await makeTempDir());
+    await fs.mkdir(path.join(tempRoot, 'proj-a/.git'), { recursive: true });
+    await fs.mkdir(path.join(tempRoot, 'proj-a/src'), { recursive: true });
+    // A repo inside a repo is behind the boundary and must not be reported.
+    await fs.mkdir(path.join(tempRoot, 'proj-a/inner/.git'), { recursive: true });
+    await fs.mkdir(path.join(tempRoot, 'proj-b/.git'), { recursive: true });
+    await fs.writeFile(path.join(tempRoot, 'readme.txt'), 'x');
+
+    const res = await request(await createGitDirsApp(tempRoot))
+      .get('/api/fs/git-dirs')
+      .query({ path: tempRoot, directory: tempRoot });
+
+    expect(res.status).toBe(200);
+    expect(res.body.repositories).toEqual([
+      { path: path.join(tempRoot, 'proj-a'), name: 'proj-a' },
+      { path: path.join(tempRoot, 'proj-b'), name: 'proj-b' },
+    ]);
+  });
+
+  it('returns an empty list when the root itself is a repository', async () => {
+    const tempRoot = await fs.realpath(await makeTempDir());
+    await fs.mkdir(path.join(tempRoot, '.git'), { recursive: true });
+    await fs.mkdir(path.join(tempRoot, 'proj-a/.git'), { recursive: true });
+
+    const res = await request(await createGitDirsApp(tempRoot))
+      .get('/api/fs/git-dirs')
+      .query({ path: tempRoot, directory: tempRoot });
+
+    expect(res.status).toBe(200);
+    expect(res.body.repositories).toEqual([]);
+  });
+
+  it('treats a .git file (linked worktree) as a repository boundary', async () => {
+    const tempRoot = await fs.realpath(await makeTempDir());
+    await fs.mkdir(path.join(tempRoot, 'worktree'), { recursive: true });
+    await fs.writeFile(path.join(tempRoot, 'worktree/.git'), 'gitdir: /elsewhere');
+
+    const res = await request(await createGitDirsApp(tempRoot))
+      .get('/api/fs/git-dirs')
+      .query({ path: tempRoot, directory: tempRoot });
+
+    expect(res.status).toBe(200);
+    expect(res.body.repositories).toEqual([
+      { path: path.join(tempRoot, 'worktree'), name: 'worktree' },
+    ]);
+  });
+
+  it('skips junk directories and never descends into symlinks', async () => {
+    const tempRoot = await fs.realpath(await makeTempDir());
+    await fs.mkdir(path.join(tempRoot, 'node_modules/dep/.git'), { recursive: true });
+    await fs.mkdir(path.join(tempRoot, 'real/.git'), { recursive: true });
+    await fs.symlink(path.join(tempRoot, 'real'), path.join(tempRoot, 'link'));
+
+    const res = await request(await createGitDirsApp(tempRoot))
+      .get('/api/fs/git-dirs')
+      .query({ path: tempRoot, directory: tempRoot });
+
+    expect(res.status).toBe(200);
+    expect(res.body.repositories).toEqual([
+      { path: path.join(tempRoot, 'real'), name: 'real' },
+    ]);
+  });
+
+  it('returns repositories in deterministic sorted order', async () => {
+    const tempRoot = await fs.realpath(await makeTempDir());
+    await fs.mkdir(path.join(tempRoot, 'zebra/.git'), { recursive: true });
+    await fs.mkdir(path.join(tempRoot, 'alpha/.git'), { recursive: true });
+
+    const res = await request(await createGitDirsApp(tempRoot))
+      .get('/api/fs/git-dirs')
+      .query({ path: tempRoot, directory: tempRoot });
+
+    expect(res.body.repositories.map((repo) => repo.name)).toEqual(['alpha', 'zebra']);
+  });
+
+  it('returns 400 when path is missing', async () => {
+    const res = await request(createApp()).get('/api/fs/git-dirs');
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('Path is required');
+  });
+
+  it('returns 400 when the path is not a directory', async () => {
+    const tempRoot = await fs.realpath(await makeTempDir());
+    const filePath = path.join(tempRoot, 'file.txt');
+    await fs.writeFile(filePath, 'x');
+
+    const res = await request(await createGitDirsApp(tempRoot))
+      .get('/api/fs/git-dirs')
+      .query({ path: filePath, directory: tempRoot });
+
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({ error: 'Specified path is not a directory', reason: 'not-directory' });
+  });
+
+  it('rejects paths outside the active workspace', async () => {
+    const res = await request(createApp())
+      .get('/api/fs/git-dirs')
+      .query({ path: '/definitely/not/a/workspace' });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBeTruthy();
+  });
+});
+
 });

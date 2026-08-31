@@ -1,6 +1,7 @@
 import React from 'react';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useGitStore, useIsGitRepo } from '@/stores/useGitStore';
+import { useNestedGitDirectory } from '@/hooks/useNestedGitDirectory';
 import { useUIStore } from '@/stores/useUIStore';
 import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
 import { sessionEvents } from '@/lib/sessionEvents';
@@ -23,9 +24,15 @@ export const PendingChangesBar: React.FC = React.memo(() => {
     const popoverRef = React.useRef<HTMLDivElement>(null);
     const currentDirectory = useDirectoryStore((s) => s.currentDirectory);
     const runtime = React.useContext(RuntimeAPIContext);
-    const isGitRepo = useIsGitRepo(currentDirectory);
+    // The repository the readouts describe. Same resolution as the Git tab: the
+    // session directory itself when it is a repository, otherwise the nested
+    // repository selected (or auto-selected) for it, so a session in a plain
+    // folder of repositories still reports the branch and changes the Git tab
+    // shows.
+    const { gitDirectory } = useNestedGitDirectory(currentDirectory ?? null);
+    const isGitRepo = useIsGitRepo(gitDirectory);
     const gitStatus = useGitStore((s) =>
-        currentDirectory ? s.directories.get(currentDirectory)?.status ?? null : null,
+        gitDirectory ? s.directories.get(gitDirectory)?.status ?? null : null,
     );
     const ensureStatus = useGitStore((s) => s.ensureStatus);
     const fetchStatus = useGitStore((s) => s.fetchStatus);
@@ -48,29 +55,29 @@ export const PendingChangesBar: React.FC = React.memo(() => {
     // DiffView/GitView/right-sidebar mounting. ensureStatus has a 5s staleness
     // gate and inFlightStatusFetchesByDirectory dedupes against concurrent callers.
     React.useEffect(() => {
-        if (!currentDirectory || !runtime?.git) return;
-        void ensureStatus(currentDirectory, runtime.git);
-    }, [currentDirectory, runtime?.git, ensureStatus]);
+        if (!gitDirectory || !runtime?.git) return;
+        void ensureStatus(gitDirectory, runtime.git);
+    }, [gitDirectory, runtime?.git, ensureStatus]);
 
     // Mirror the onGitRefreshHint listener that lives in DiffView/GitView so the
     // bar refreshes after mutating tools (edit/write/apply_patch/bash/...) even
     // when neither of those views is open — e.g. VS Code runtime.
     React.useEffect(() => {
-        if (!currentDirectory || !runtime?.git) return;
+        if (!gitDirectory || !runtime?.git) return;
         const git = runtime.git;
         return sessionEvents.onGitRefreshHint((hint) => {
-            if (normalizePath(hint.directory) !== normalizePath(currentDirectory)) return;
+            if (normalizePath(hint.directory) !== normalizePath(gitDirectory)) return;
             if (hint.paths?.length) {
-                clearDiffCache(currentDirectory, hint.paths);
+                clearDiffCache(gitDirectory, hint.paths);
             }
-            void fetchStatus(currentDirectory, git, { silent: true });
+            void fetchStatus(gitDirectory, git, { silent: true });
         });
-    }, [clearDiffCache, currentDirectory, runtime?.git, fetchStatus]);
+    }, [clearDiffCache, gitDirectory, runtime?.git, fetchStatus]);
 
     const gitChangedFiles = React.useMemo<GitChangedFile[]>(() => {
         if (isGitRepo !== true || !gitStatus || gitStatus.isClean) return [];
-        return extractGitChangedFiles(gitStatus.files, gitStatus.diffStats, currentDirectory);
-    }, [isGitRepo, gitStatus, currentDirectory]);
+        return gitDirectory ? extractGitChangedFiles(gitStatus.files, gitStatus.diffStats, gitDirectory) : [];
+    }, [isGitRepo, gitStatus, gitDirectory]);
 
     const { totalAdded, totalRemoved } = React.useMemo(() => {
         let added = 0;

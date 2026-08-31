@@ -1,6 +1,7 @@
 import React from 'react';
 import { create } from 'zustand';
 import { devtools } from 'zustand/middleware';
+import { GitDirectoriesUnsupportedError, listGitDirectories } from '@/lib/gitApiHttp';
 import type {
   GitStatus,
   GitBranch,
@@ -79,7 +80,30 @@ interface GitStore {
   setLogMaxCount: (directory: string, maxCount: number) => void;
 
   refresh: (git: GitAPI, options?: { force?: boolean }) => Promise<void>;
+
+  // Nested repository discovery: when the root directory is not itself a git
+  // repository, these hold the discovered repositories and the user's pick.
+  // `nestedReposByRoot` values are `null` when discovery failed — never a
+  // valid empty result — `'unsupported'` when the runtime has no discovery
+  // route, and absent when discovery has not run yet.
+  nestedReposByRoot: Map<string, NestedRepoDiscovery>;
+  nestedRepoSelection: Map<string, string>;
+  /**
+   * Repositories whose selection was dropped because their probe reported
+   * them as no longer a repository (corrupt or missing gitdir). Session-only
+   * memory so auto-select does not immediately re-pick the same broken path
+   * and loop walk+probe. Not persisted: the next launch re-probes honestly.
+   */
+  staleClearedSelections: Map<string, Set<string>>;
+  ensureNestedRepos: (root: string, options?: { force?: boolean }) => Promise<void>;
+  selectNestedRepo: (root: string, repository: string) => void;
+  clearNestedRepoSelection: (root: string) => void;
 }
+
+// Discovery outcome for a root that is not itself a git repository. The three
+// states are mutually exclusive: a repository list (possibly empty), a failed
+// scan (`null`), or a runtime without the discovery route (`'unsupported'`).
+export type NestedRepoDiscovery = string[] | null | 'unsupported';
 
 interface GitFileDiffResponse {
   original: string;
@@ -101,6 +125,7 @@ const inFlightDiffFetchesByDirectory = new Map<string, Set<string>>();
 const diffFetchGenerationByDirectory = new Map<string, number>();
 const inFlightStatusFetches = new Map<string, Promise<boolean | null>>();
 const inFlightEnsureAllByDirectory = new Map<string, Promise<void>>();
+const inFlightNestedRepoDiscovery = new Map<string, Promise<void>>();
 
 const getStatusFetchKey = (directory: string, mode: GitStatusFetchMode): string => `${mode}:${directory}`;
 
@@ -793,7 +818,82 @@ export const useGitStore = create<GitStore>()(
         return promise;
       },
 
-      refresh: async (git, options = {}) => {
+
+      ensureNestedRepos: async (root, options = {}) => {
+        if (!root) return;
+        const { force = false } = options;
+        const current = get().nestedReposByRoot.get(root);
+        if (!force && (current !== undefined || inFlightNestedRepoDiscovery.has(root))) {
+          return;
+        }
+
+        const existing = inFlightNestedRepoDiscovery.get(root);
+        if (existing) {
+          await existing;
+          return;
+        }
+
+        const discovery = (async () => {
+          let repositories: string[] | null = null;
+          let unsupported = false;
+          try {
+            repositories = await listGitDirectories(root);
+          } catch (error) {
+            if (error instanceof GitDirectoriesUnsupportedError) {
+              unsupported = true;
+            } else {
+              console.error('Failed to discover nested git repositories:', error);
+            }
+            repositories = null;
+          }
+
+          const previous = get().nestedReposByRoot.get(root);
+          // An authoritative "unsupported" answer replaces only unknown or
+          // failed state; like a failed retry, it must not clobber an earlier
+          // successful discovery.
+          const nextValue: NestedRepoDiscovery = unsupported
+            ? (previous ?? 'unsupported')
+            : (repositories ?? previous ?? null);
+          const next = new Map(get().nestedReposByRoot);
+          next.set(root, nextValue);
+          set({ nestedReposByRoot: next });
+        })();
+
+        inFlightNestedRepoDiscovery.set(root, discovery);
+        try {
+          await discovery;
+        } finally {
+          if (inFlightNestedRepoDiscovery.get(root) === discovery) {
+            inFlightNestedRepoDiscovery.delete(root);
+          }
+        }
+      },
+
+      selectNestedRepo: (root, repository) => {
+        if (!root || !repository) return;
+        const next = new Map(get().nestedRepoSelection);
+        next.set(root, repository);
+        set({ nestedRepoSelection: next });
+      },
+
+      clearNestedRepoSelection: (root) => {
+        if (!root) return;
+        const cleared = get().nestedRepoSelection.get(root);
+        if (cleared === undefined) return;
+        const next = new Map(get().nestedRepoSelection);
+        next.delete(root);
+        set({ nestedRepoSelection: next });
+        // Remember the drop so auto-select does not re-pick the same path
+        // before its probe can tell the difference. Only stale-probe
+        // recovery clears, so every clear here is a failed selection.
+        const nextStale = new Map(get().staleClearedSelections);
+        const forRoot = new Set(nextStale.get(root));
+        forRoot.add(cleared);
+        nextStale.set(root, forRoot);
+        set({ staleClearedSelections: nextStale });
+      },
+
+    refresh: async (git, options = {}) => {
         const { activeDirectory } = get();
         if (!activeDirectory) return;
         await get().fetchAll(activeDirectory, git, options);
@@ -956,5 +1056,45 @@ export const useGitLoadingIdentity = (directory: string | null) => {
   return useGitStore((state) => {
     if (!directory) return false;
     return state.directories.get(directory)?.isLoadingIdentity ?? false;
+  });
+};
+
+// Resolves the directory a git surface operates on. A root that is itself a git
+// repository is always used directly; otherwise a per-root nested-repo
+// selection (when present) becomes the effective directory.
+export const useEffectiveGitDirectory = (root: string | null) => {
+  return useGitStore((state) => {
+    if (!root) return null;
+    if (state.directories.get(root)?.isGitRepo === true) {
+      return root;
+    }
+    return state.nestedRepoSelection.get(root) ?? root;
+  });
+};
+
+// `undefined` = discovery not run yet, `null` = discovery failed,
+// `'unsupported'` = the runtime has no discovery route, otherwise the
+// discovered nested repository paths (possibly empty).
+export const useNestedRepos = (root: string | null) => {
+  return useGitStore((state) => {
+    if (!root) return undefined;
+    return state.nestedReposByRoot.get(root);
+  });
+};
+
+export const useNestedRepoSelection = (root: string | null) => {
+  return useGitStore((state) => {
+    if (!root) return null;
+    return state.nestedRepoSelection.get(root) ?? null;
+  });
+};
+
+// Repositories of this root whose selection already failed its probe. Auto-
+// select skips them; the picker does not (a manual re-pick is a user decision
+// and gets probed like any other).
+export const useStaleClearedSelections = (root: string | null) => {
+  return useGitStore((state) => {
+    if (!root) return null;
+    return state.staleClearedSelections.get(root) ?? null;
   });
 };

@@ -8,6 +8,12 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+} from '@/components/ui/select';
 import { Icon } from "@/components/icon/Icon";
 import type { IconName } from "@/components/icon/icons";
 import { BranchSelector } from './BranchSelector';
@@ -42,6 +48,13 @@ interface GitHeaderProps {
   actionTabItems?: SortableTabsStripItem[];
   activeActionTab?: string;
   onSelectActionTab?: (tabID: string) => void;
+  // Nested repository picker: shown when the Git tab operates on a repository
+  // nested inside a non-repository root. Options are absolute repository
+  // paths; `repositoryRoot` is the root those paths are relative to.
+  repositoryOptions?: string[];
+  selectedRepository?: string | null;
+  onSelectRepository?: (repository: string) => void;
+  repositoryRoot?: string;
 }
 
 const IDENTITY_ICON_MAP: Record<string, IconName> = {
@@ -198,6 +211,10 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
   isApplyingIdentity,
   isWorktreeMode,
   onOpenHistory,
+  repositoryOptions,
+  selectedRepository,
+  onSelectRepository,
+  repositoryRoot,
   onOpenGraph,
   actionTabItems,
   activeActionTab,
@@ -274,10 +291,45 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
     />
   );
 
+  const repositoryOptionsForPicker = (repositoryOptions ?? []).filter(Boolean);
+  const repositoryRelativePath = (repository: string): string => {
+    const rootPrefix = `${repositoryRoot ?? ''}/`;
+    return repository.startsWith(rootPrefix) ? repository.slice(rootPrefix.length) : repository;
+  };
+  const repositoryLabel = selectedRepository ? repositoryRelativePath(selectedRepository) : '';
+
   return (
     <header className="@container/git-header px-3 py-2 bg-transparent">
       <div className="flex items-center justify-between gap-2 min-w-0">
-        <div className="min-w-0 flex-1">
+        <div className="flex min-w-0 flex-1 items-center gap-1">
+          {repositoryOptionsForPicker.length > 0 ? (
+            <Select
+              value={selectedRepository ?? undefined}
+              onValueChange={(value) => {
+                if (value && onSelectRepository) {
+                  onSelectRepository(value);
+                }
+              }}
+            >
+              <SelectTrigger
+                size="sm"
+                className="max-w-[13rem] gap-1.5 px-2 py-1"
+                aria-label={t('gitView.empty.selectRepositoryPlaceholder')}
+              >
+                <Icon name="folder-3" className="size-4 text-muted-foreground" />
+                <span className="min-w-0 truncate font-medium text-left">
+                  {repositoryLabel}
+                </span>
+              </SelectTrigger>
+              <SelectContent align="start">
+                {repositoryOptionsForPicker.map((repository) => (
+                  <SelectItem key={repository} value={repository}>
+                    <span className="truncate">{repositoryRelativePath(repository)}</span>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          ) : null}
           {isWorktreeMode ? (
             <WorktreeBranchDisplay
               currentBranch={status.current}

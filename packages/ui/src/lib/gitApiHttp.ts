@@ -39,6 +39,7 @@ import type {
 } from './gitBranchScopeApi';
 import { resolveApiUrl } from '@/lib/api/serverUrl';
 import { resolveBaseUrl } from '@/sync/session-actions';
+import { normalizePath } from './pathNormalization';
 
 declare global {
   interface Window {
@@ -1190,4 +1191,35 @@ export async function resetToCommit(
     throw new Error(error.error || 'Failed to reset to commit');
   }
   return response.json();
+}
+
+export class GitDirectoriesUnsupportedError extends Error {
+  constructor() {
+    super('Nested git repository discovery is not supported by this runtime');
+    this.name = 'GitDirectoriesUnsupportedError';
+  }
+}
+
+export async function listGitDirectories(root: string, baseUrl?: string): Promise<string[]> {
+  const response = await fetch(buildUrl('/api/fs/git-dirs', root, { path: root }, baseUrl), {
+    headers: { Accept: 'application/json' },
+  });
+  if (response.status === 501) {
+    throw new GitDirectoriesUnsupportedError();
+  }
+  if (!response.ok) {
+    throw new Error(`Failed to list git directories: ${response.statusText}`);
+  }
+  // SAFETY: the route is ours (`GET /api/fs/git-dirs`) and answers this exact
+  // shape on every 2xx; a malformed body fails the array check below.
+  const data = await response.json() as { repositories?: Array<{ path?: string | null }> };
+  if (!Array.isArray(data?.repositories)) {
+    throw new Error('Unexpected git directories response');
+  }
+  // The server joins paths with the platform separator; every other git
+  // directory key in the UI is normalized, so match that here or a Windows
+  // repository never equals its own selection or root prefix.
+  return data.repositories
+    .map((entry) => normalizePath(entry?.path ?? null))
+    .filter((path): path is string => path !== null);
 }
