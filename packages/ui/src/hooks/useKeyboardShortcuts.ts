@@ -13,6 +13,7 @@ import { eventMatchesShortcut, getEffectiveShortcutCombo, normalizeCombo } from 
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
+import { closeSessionTabAndActivateNeighbour } from '@/lib/sessionTabs';
 import { getCycledPrimaryAgentName } from '@/components/chat/mobileControlsUtils';
 import { focusChatInput } from '@/components/chat/composer/editor/dom';
 import { addSelectionToChat } from '@/lib/addSelectionToChat';
@@ -40,6 +41,7 @@ export const useKeyboardShortcuts = () => {
   const togglePromptNavigatorPanel = useUIStore((s) => s.togglePromptNavigatorPanel);
   const toggleExpandedInput = useUIStore((s) => s.toggleExpandedInput);
   const shortcutOverrides = useUIStore((s) => s.shortcutOverrides);
+  const sessionTabsEnabled = useUIStore((s) => s.sessionTabsEnabled);
   const currentDirectory = useDirectoryStore((s) => s.currentDirectory);
   const activeProject = useProjectsStore((s) => s.getActiveProject());
   const { themeMode, setThemeMode } = useThemeSystem();
@@ -92,6 +94,14 @@ export const useKeyboardShortcuts = () => {
 
     const handleKeyDown = (e: KeyboardEvent) => {
       if (isTerminalEventTarget(e.target)) {
+        return;
+      }
+
+      if (eventMatchesShortcut(e, combo('close_session_tab'))) {
+        if (sessionTabsEnabled && currentSessionId) {
+          e.preventDefault();
+          closeSessionTabAndActivateNeighbour(currentSessionId);
+        }
         return;
       }
 
@@ -586,7 +596,7 @@ export const useKeyboardShortcuts = () => {
     currentDirectory,
     activeProject?.id,
     activeProject?.path,
-    shortcutOverrides,
+    sessionTabsEnabled, shortcutOverrides,
   ]);
 
   React.useEffect(() => {

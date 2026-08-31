@@ -264,7 +264,7 @@ const normalizeUserMessageRenderingMode = (mode: unknown): 'markdown' | 'plain' 
     return mode === 'markdown' ? 'markdown' : 'plain';
 };
 
-export type VisibleSetting = 'theme' | 'windowControlsPosition' | 'windowControlsStyle' | 'dockBadge' | 'pwaInstallName' | 'pwaOrientation' | 'mobileKeyboardMode' | 'timeFormat' | 'weekStart' | 'fontSize' | 'terminalFontSize' | 'editorFontSize' | 'spacing' | 'inputBarOffset' | 'userMessageRendering' | 'chatRenderMode' | 'messageTransport' | 'activityRenderMode' | 'collapsibleUserMessages' | 'stickyUserHeader' | 'promptNavigatorEnabled' | 'wideChatLayout' | 'splitAssistantMessageActions' | 'draftStarters' | 'subagentPrompting' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'reasoning' | 'showToolFileIcons' | 'expandedTools' | 'queueMode' | 'terminalQuickKeys' | 'fileEditorKeymap' | 'autoSaveEnabled' | 'persistDraft' | 'inputSpellcheck' | 'reportUsage' | 'multiRun' | 'sessionGoal' | 'sessionAssist';
+export type VisibleSetting = 'theme' | 'windowControlsPosition' | 'windowControlsStyle' | 'dockBadge' | 'pwaInstallName' | 'pwaOrientation' | 'mobileKeyboardMode' | 'timeFormat' | 'weekStart' | 'fontSize' | 'terminalFontSize' | 'editorFontSize' | 'spacing' | 'inputBarOffset' | 'userMessageRendering' | 'chatRenderMode' | 'messageTransport' | 'activityRenderMode' | 'collapsibleUserMessages' | 'stickyUserHeader' | 'promptNavigatorEnabled' | 'wideChatLayout' | 'splitAssistantMessageActions' | 'draftStarters' | 'subagentPrompting' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'reasoning' | 'showToolFileIcons' | 'expandedTools' | 'queueMode' | 'terminalQuickKeys' | 'fileEditorKeymap' | 'autoSaveEnabled' | 'persistDraft' | 'inputSpellcheck' | 'reportUsage' | 'multiRun' | 'sessionGoal' | 'sessionAssist' | 'sessionTabs';
 
 interface OpenChamberVisualSettingsProps {
     /** Which settings to show. If undefined, shows all. */
@@ -324,6 +324,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const setDiffViewMode = useUIStore(state => state.setDiffViewMode);
     const showTerminalQuickKeysOnDesktop = useUIStore(state => state.showTerminalQuickKeysOnDesktop);
     const setShowTerminalQuickKeysOnDesktop = useUIStore(state => state.setShowTerminalQuickKeysOnDesktop);
+    const sessionTabsEnabled = useUIStore(state => state.sessionTabsEnabled);
+    const setSessionTabsEnabled = useUIStore(state => state.setSessionTabsEnabled);
     const fileEditorKeymap = useUIStore(state => state.fileEditorKeymap);
     const setFileEditorKeymap = useUIStore(state => state.setFileEditorKeymap);
     const autoSaveEnabled = useUIStore(state => state.autoSaveEnabled);
@@ -600,7 +602,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         ? hasLocalizationSettings
         : (shouldShow('theme') || showWindowControlsPositionSetting || showWindowControlsStyleSetting || shouldShow('dockBadge') || shouldShow('pwaInstallName') || shouldShow('pwaOrientation') || shouldShow('timeFormat') || shouldShow('weekStart'));
     const hasLayoutSettings = shouldShow('fontSize') || shouldShow('terminalFontSize') || shouldShow('editorFontSize') || shouldShow('spacing') || shouldShow('inputBarOffset');
-    const hasNavigationSettings = (shouldShow('terminalQuickKeys') && !isMobile) || shouldShow('fileEditorKeymap') || shouldShow('autoSaveEnabled');
+    const hasNavigationSettings = (shouldShow('terminalQuickKeys') && !isMobile) || shouldShow('fileEditorKeymap') || shouldShow('autoSaveEnabled') || shouldShow('sessionTabs');
     const hasBehaviorSettings = shouldShow('userMessageRendering')
         || shouldShow('chatRenderMode')
         || shouldShow('messageTransport')
@@ -1493,6 +1495,38 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                             </TooltipTrigger>
                                             <TooltipContent sideOffset={8} className="max-w-xs">
                                                 {t('settings.openchamber.visual.field.terminalQuickKeysTooltip')}
+                                            </TooltipContent>
+                                        </Tooltip>
+                                    </div>
+                                </div>
+                            )}
+                            {shouldShow('sessionTabs') && !isMobile && (
+                                <div
+                                    className="group flex cursor-pointer items-center gap-2 py-1.5"
+                                    role="button"
+                                    tabIndex={0}
+                                    aria-pressed={sessionTabsEnabled}
+                                    onClick={() => setSessionTabsEnabled(!sessionTabsEnabled)}
+                                    onKeyDown={(event) => {
+                                        if (event.key === ' ' || event.key === 'Enter') {
+                                            event.preventDefault();
+                                            setSessionTabsEnabled(!sessionTabsEnabled);
+                                        }
+                                    }}
+                                >
+                                    <Checkbox
+                                        checked={sessionTabsEnabled}
+                                        onChange={setSessionTabsEnabled}
+                                        ariaLabel={t('settings.openchamber.visual.field.sessionTabsAria')}
+                                    />
+                                    <div className="flex min-w-0 items-center gap-1.5">
+                                        <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.sessionTabs')}</span>
+                                        <Tooltip>
+                                            <TooltipTrigger asChild>
+                                                <Icon name="information" className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
+                                            </TooltipTrigger>
+                                            <TooltipContent sideOffset={8} className="max-w-xs">
+                                                {t('settings.openchamber.visual.field.sessionTabsInfo')}
                                             </TooltipContent>
                                         </Tooltip>
                                     </div>

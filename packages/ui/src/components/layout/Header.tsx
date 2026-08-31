@@ -57,6 +57,7 @@ import {
 import type { QuotaProviderId, UsageWindow } from '@/types';
 import { InstanceInfoPanel } from '@/components/desktop/InstanceInfoPanel';
 import { WindowsWindowControls } from '@/components/desktop/WindowsWindowControls';
+import { SessionTabsStrip, type SessionTabMenuArgs } from './SessionTabsStrip';
 import { useActiveServerId } from '@/hooks/useActiveServerId';
 import { serverRegistry } from '@/lib/opencode/server-registry';
 import { isChatDirectoryPath } from '@/lib/chatDirectories';
@@ -957,6 +958,7 @@ export const Header: React.FC<HeaderProps> = ({
   const archiveSessions = useSessionUIStore((state) => state.archiveSessions);
   const deleteSessions = useSessionUIStore((state) => state.deleteSessions);
   const [isRenamingHeaderSession, setIsRenamingHeaderSession] = React.useState(false);
+  const sessionTabsEnabled = useUIStore((state) => state.sessionTabsEnabled);
   const [isHeaderSessionMenuOpen, setIsHeaderSessionMenuOpen] = React.useState(false);
   const pendingHeaderRenameRef = React.useRef(false);
   const [headerSessionTitleDraft, setHeaderSessionTitleDraft] = React.useState('');
@@ -1836,6 +1838,42 @@ export const Header: React.FC<HeaderProps> = ({
     </>
   );
 
+  // One session menu backs both the tab "..." dropdown and the right-click
+  // context menu. Mirrors the header session dropdown's actions; close-others
+  // is tab-specific.
+  const renderSessionTabMenu = React.useCallback((args: SessionTabMenuArgs) => {
+    const { closeOtherTabs } = args;
+    return (
+      <>
+        <DropdownMenuItem onClick={() => { pendingHeaderRenameRef.current = true; }}>
+          <Icon name="pencil-ai" className="mr-2 size-4" />
+          {t('sessions.sidebar.session.menu.rename')}
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={copyCurrentSessionId}>
+          <Icon name="file-copy" className="mr-2 size-4" />
+          {t('sessions.sidebar.session.menu.copyId')}
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onClick={() => closeOtherTabs()}>
+          <Icon name="close-circle" className="mr-2 size-4" />
+          {t('header.sessionTabs.closeOtherTabs')}
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onClick={() => beginHeaderRetentionAction('archive')}>
+          <Icon name="inbox-archive" className="mr-2 size-4" />
+          {t('sessions.sidebar.bulkActions.archive')}
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          className="text-destructive focus:text-destructive"
+          onClick={() => beginHeaderRetentionAction('delete')}
+        >
+          <Icon name="delete-bin" className="mr-2 size-4" />
+          {t('sessions.sidebar.bulkActions.delete')}
+        </DropdownMenuItem>
+      </>
+    );
+  }, [beginHeaderRetentionAction, copyCurrentSessionId, t]);
+
   const showMiniChatHeaderAction = hasElectronDesktopIPC && (isNewSessionDraftOpen || Boolean(currentSessionId));
 
   const renderDesktop = () => (
@@ -1880,6 +1918,17 @@ export const Header: React.FC<HeaderProps> = ({
           />
         )}
         <div className="app-region-no-drag mr-3 flex min-w-0 max-w-full items-center gap-0.5 py-0.5 -my-0.5 text-left">
+                        {sessionTabsEnabled && !isVSCode ? (
+                        <SessionTabsStrip
+                            renderMenu={renderSessionTabMenu}
+                            suppressActiveTabControls={isRenamingHeaderSession}
+                            onMenuOpenChangeComplete={(open) => {
+                                if (!open && pendingHeaderRenameRef.current) {
+                                    pendingHeaderRenameRef.current = false;
+                                    beginHeaderSessionRename();
+                                }
+                            }}
+                        >
           <div className="flex min-w-0 flex-col justify-center px-1">
             {isRenamingHeaderSession ? (
               <form
@@ -1952,6 +2001,81 @@ export const Header: React.FC<HeaderProps> = ({
               </span>
             ) : null}
           </div>
+                        </SessionTabsStrip>
+                        ) : (
+          <div className="flex min-w-0 flex-col justify-center px-1">
+            {isRenamingHeaderSession ? (
+              <form
+                ref={headerRenameFormRef}
+                className="flex w-full min-w-0 items-center gap-2 leading-tight"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  void saveHeaderSessionRename();
+                }}
+              >
+                <input
+                  value={headerSessionTitleDraft}
+                  onChange={(event) => setHeaderSessionTitleDraft(event.target.value)}
+                  autoFocus
+                  onKeyDown={(event) => {
+                    event.stopPropagation();
+                    if (event.key === 'Escape') setIsRenamingHeaderSession(false);
+                  }}
+                  placeholder={t('sessions.sidebar.session.menu.rename')}
+                  className="min-w-0 flex-1 bg-transparent typography-ui-label text-[14px] font-normal leading-tight outline-none placeholder:text-muted-foreground"
+                />
+                <button
+                  type="submit"
+                  aria-label={t('sessions.sidebar.session.rename.save')}
+                  title={t('sessions.sidebar.session.rename.save')}
+                  className="shrink-0 text-muted-foreground hover:text-foreground"
+                >
+                  <Icon name="check" className="size-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsRenamingHeaderSession(false)}
+                  aria-label={t('sessions.sidebar.session.rename.cancel')}
+                  title={t('sessions.sidebar.session.rename.cancel')}
+                  className="shrink-0 text-muted-foreground hover:text-foreground"
+                >
+                  <Icon name="close" className="size-4" />
+                </button>
+              </form>
+            ) : (
+              <span className="truncate typography-ui-label text-[14px] font-normal leading-tight text-foreground max-w-full">
+                {isNewSessionDraftOpen ? t('sessions.switcher.draftTitle') : currentSessionTitle}
+              </span>
+            )}
+            {!isChatContext && (activeProjectLabel || currentBranchLabel || (!isNewSessionDraftOpen && (hasNonZeroSessionChanges || worktreeBadgeKind))) ? (
+              <span className="flex min-w-0 max-w-full items-center gap-1.5 truncate typography-micro text-[10.5px] font-normal leading-tight text-muted-foreground/75">
+                {activeProjectLabel ? <span className="truncate">{activeProjectLabel}</span> : null}
+                {currentBranchLabel ? (
+                  <span className="inline-flex min-w-0 items-center gap-0.5">
+                    <Icon name="git-branch" className="h-3 w-3 flex-shrink-0 text-muted-foreground/70" />
+                    <span className="truncate">{currentBranchLabel}</span>
+                  </span>
+                ) : null}
+                {!isNewSessionDraftOpen && hasNonZeroSessionChanges ? (
+                  <span className="inline-flex flex-shrink-0 items-center gap-0 text-[0.92em]">
+                    <span className="text-status-success/80">+{currentSessionChanges.additions}</span>
+                    <span className="text-muted-foreground/60">/</span>
+                    <span className="text-status-error/65">-{currentSessionChanges.deletions}</span>
+                  </span>
+                ) : null}
+                {!isNewSessionDraftOpen && worktreeBadgeKind ? (
+                  <span className={cn(
+                    "inline-flex min-w-0 items-center gap-0.5",
+                    worktreeBadgeKind === 'attention' || worktreeBadgeKind === 'invalid' || worktreeBadgeKind === 'missing' ? 'text-status-warning' : 'text-muted-foreground/60'
+                  )}>
+                    <Icon name="alert" className="h-3 w-3 flex-shrink-0" />
+                    <span className="truncate">{worktreeBadge}</span>
+                  </span>
+                ) : null}
+              </span>
+            ) : null}
+          </div>
+                        )}
           <div className="flex h-[18px] shrink-0 items-center justify-center self-start">
             {currentSessionId && currentSession && !isNewSessionDraftOpen && !isRenamingHeaderSession ? (
               <DropdownMenu

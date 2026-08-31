@@ -173,6 +173,13 @@ const SHORTCUT_ACTIONS: ReadonlyArray<ShortcutAction> = [
     customizable: true,
   },
   {
+    id: 'close_session_tab',
+    defaultCombo: 'alt+w',
+    label: 'Close session tab',
+    description: 'Close the active session tab in the header (the session itself stays)',
+    customizable: true,
+  },
+  {
     id: 'open_timeline_dialog',
     defaultCombo: 'mod+t',
     label: 'Open conversation timeline',
