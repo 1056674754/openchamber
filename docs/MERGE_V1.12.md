@@ -3259,3 +3259,13 @@ v1.20.0-sscity 尚未宣布完成：当前未关闭 `#135/#140/#142-#151/#154/#1
 上游来源：`f84b1337c`。审计结论：fork 已处于上游改动的终态——`ProjectActionsButton` 早已在 Header 内渲染（desktop 与另一布局两处，均位于 session 标题/"Open in" 区块之前，`mr-2` 与上游一致），fork 从未采用上游的 TitlebarLeftControls/SidebarTopBar titlebar overlay 布局，因此不存在"从 overlay 迁入 header"的动作。上游顺带的 `useProjectActionsContext` hook 抽取在 fork 无第二消费方（fork 的 sticky 解析逻辑内联于 Header，仅此一处），纯重构无功能收益，不移植。无实现提交。
 
 至此 [#184](https://coding.s-s.city/songsong/openchamber/-/issues/184) 以等价审计关闭。
+
+## v1.22.0 `#186`：Voice 语言匹配（fork 适用子集）（2026-08-31）
+
+上游来源：`a32d0ef32`。对应实现提交：`b6ea6bfc0`。
+
+- 服务端：`language-detect.js`（无依赖语言检测：书写系统直判 + Latin 标记字母/功能词启发）与其测试整体移植；`/api/tts/say/speak` 支持 `language: 'auto'`——检测文本语言，当前 voice 的 locale 不匹配时切换到会讲该语言的已安装 macOS voice；无对应 voice 时保留所选 voice（带口音朗读）而非失败；`X-Speech-Voice`/`X-Speech-Language` 响应头回报实际使用。路由测试在本机 darwin 分支跑真实 say 合成验证乌克兰语切换。
+- 客户端：`ttsFollowTextLanguage` 偏好（localStorage 持久化，默认开）+ VoiceSettings say 区开关（fork checkbox 行模式）；`useMessageTTS` 按偏好发送 `language: 'auto'`；`.settings.ts` 3 个新 key × 11 locale（es/pt-BR/tr/uk 双引号风格转换）。
+- 不移植（parent feature 不存在）：本地 on-device TTS 全栈（`dictation/local` 模型目录、sherpa-tts、模型下载、`useLocalTTS`、localTtsModelId 与本地模型 picker、localTts tooltip 改写）——fork 无本地 TTS provider，仅保留远程与 say 路径的语言跟随。
+
+验证：language-detect + tts routes 30/30（含 darwin 真实合成）✅；useConfigStore 16/16 ✅；UI/Web type-check/lint ✅；`git diff --check` ✅。工作区并行 agent 的 plugin 工具 WIP 未混入本提交。至此 [#186](https://coding.s-s.city/songsong/openchamber/-/issues/186) 完成，可关闭。
