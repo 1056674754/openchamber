@@ -3,6 +3,7 @@ import type { Message, Part } from '@opencode-ai/sdk/v2';
 import {
     deriveAutoExpandedTurnIds,
     deriveProcessFoldState,
+    resolveDefaultActivityExpanded,
     resolveProcessFoldExpansion,
     setProcessFoldOverride,
     turnHasStopSummary,
@@ -65,6 +66,11 @@ function createTurn({ withStop = false }: { withStop?: boolean } = {}): TurnReco
 }
 
 describe('process fold state', () => {
+    test('uses the activity preference as the completed-turn expansion default', () => {
+        expect(resolveDefaultActivityExpanded('summary')).toBe(true);
+        expect(resolveDefaultActivityExpanded('collapsed')).toBe(false);
+    });
+
     test('detects a stop summary on the final assistant message', () => {
         expect(turnHasStopSummary(createTurn({ withStop: true }))).toBe(true);
         expect(turnHasStopSummary(createTurn())).toBe(false);

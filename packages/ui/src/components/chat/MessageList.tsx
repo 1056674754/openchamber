@@ -15,6 +15,7 @@ import { applyRetryOverlay } from './lib/turns/applyRetryOverlay';
 import {
     deriveAutoExpandedTurnIds,
     deriveProcessFoldState,
+    resolveDefaultActivityExpanded,
     setProcessFoldOverride,
     turnContainsMessageId,
     turnHasStopSummary,
@@ -1363,7 +1364,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
     const { isMobile } = useDeviceInfo();
     const chatRenderMode = useUIStore((state) => state.chatRenderMode);
     const activityRenderMode = useUIStore((state) => state.activityRenderMode);
-    const defaultActivityExpanded = false;
+    const defaultActivityExpanded = resolveDefaultActivityExpanded(activityRenderMode);
     const [turnUiStates, setTurnUiStates] = React.useState<Map<string, TurnUiState>>(() => new Map());
     const [autoExpandedTurnIds, setAutoExpandedTurnIds] = React.useState<Set<string>>(() => new Set());
     const userAnimationRef = React.useRef<{

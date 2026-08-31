@@ -1,9 +1,13 @@
 import type { ChatMessageEntry, TurnRecord } from './types';
 import { getMessageFinishReason } from '@/lib/messageCompletion';
+import type { ActivityRenderMode } from '@/stores/useUIStore';
 
 const getMessageFinish = (message: ChatMessageEntry | undefined): string | undefined => {
     return getMessageFinishReason(message?.info, message?.parts);
 };
+
+/** Completed turns follow this preference; live incomplete turns are force-opened below. */
+export const resolveDefaultActivityExpanded = (mode: ActivityRenderMode): boolean => mode === 'summary';
 
 export const turnHasStopSummary = (turn: TurnRecord): boolean => {
     const lastAssistant = turn.assistantMessages[turn.assistantMessages.length - 1];
