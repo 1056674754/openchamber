@@ -508,11 +508,20 @@ export const createProjectConfigRuntime = (deps) => {
     }
   };
 
+  // Normalized tasks for reading, plus the raw on-disk record of each one for
+  // writing back. Normalization only keeps the fields THIS build knows, so a
+  // write that re-serialized normalized tasks would strip every field added
+  // by a newer build (or a newer UI) the moment an older server touched the
+  // file — a goal or auto-accept setting silently lost after a task ran.
+  // Writers therefore persist untouched tasks from `rawTasksByID` verbatim and
+  // only serialize a normalized task where the task itself was deliberately
+  // replaced.
   const readProjectConfigFromDisk = async (projectID) => {
     const parsed = await readRawProjectConfigFromDisk(projectID);
     const tasksRaw = Array.isArray(parsed.scheduledTasks) ? parsed.scheduledTasks : [];
     const now = Date.now();
     const scheduledTasks = [];
+    const rawTasksByID = new Map();
     for (const task of tasksRaw) {
       try {
         const normalized = normalizeTaskForStorage(task, {
@@ -523,14 +532,30 @@ export const createProjectConfigRuntime = (deps) => {
           refreshUpdatedAt: false,
         });
         scheduledTasks.push(normalized);
+        rawTasksByID.set(normalized.id, task);
       } catch {
       }
     }
     return {
       version: PROJECT_CONFIG_VERSION,
       scheduledTasks,
+      rawTasksByID,
     };
   };
+
+  // The list to write: tasks this write replaced go out normalized; every
+  // other task goes out exactly as stored, fields unknown to this build
+  // included. A state-only update counts as untouched — only its `state` is
+  // swapped onto the stored record. Callers keep working with (and returning)
+  // the normalized tasks; only the bytes on disk differ.
+  const toStoredTasks = (config, tasks, { replacedIDs = new Set(), stateUpdatedID = null } = {}) => (
+    tasks.map((task) => {
+      if (replacedIDs.has(task.id)) return task;
+      const stored = config.rawTasksByID.get(task.id);
+      if (!stored) return task;
+      return task.id === stateUpdatedID ? { ...stored, state: task.state } : stored;
+    })
+  );
 
   const writeProjectConfigToDisk = async (projectID, config) => {
     const filePath = resolveProjectConfigPath(projectID);
@@ -611,7 +636,7 @@ export const createProjectConfigRuntime = (deps) => {
 
       const nextConfig = {
         version: PROJECT_CONFIG_VERSION,
-        scheduledTasks: nextTasks,
+        scheduledTasks: toStoredTasks(current, nextTasks, { replacedIDs: new Set([normalizedTask.id]) }),
       };
       await writeProjectConfigToDisk(projectID, nextConfig);
 
@@ -637,7 +662,7 @@ export const createProjectConfigRuntime = (deps) => {
       if (deleted) {
         await writeProjectConfigToDisk(projectID, {
           version: PROJECT_CONFIG_VERSION,
-          scheduledTasks: nextTasks,
+          scheduledTasks: toStoredTasks(current, nextTasks),
         });
       }
 
@@ -680,7 +705,7 @@ export const createProjectConfigRuntime = (deps) => {
 
       await writeProjectConfigToDisk(projectID, {
         version: PROJECT_CONFIG_VERSION,
-        scheduledTasks: nextTasks,
+        scheduledTasks: toStoredTasks(current, nextTasks, { stateUpdatedID: nextTask.id }),
       });
 
       return {
@@ -741,7 +766,7 @@ export const createProjectConfigRuntime = (deps) => {
 
       await writeProjectConfigToDisk(projectID, {
         version: PROJECT_CONFIG_VERSION,
-        scheduledTasks: nextTasks,
+        scheduledTasks: toStoredTasks(current, nextTasks, { stateUpdatedID: nextTask.id }),
       });
 
       return {
@@ -759,6 +784,7 @@ export const createProjectConfigRuntime = (deps) => {
       const activeLoopFiles = new Set();
       const pendingByName = new Map();
       const validByFile = new Map();
+      const replacedIDs = new Set();
 
       for (const loop of Array.isArray(loops) ? loops : []) {
         if (!loop || typeof loop.filePath !== 'string' || !loop.filePath) continue;
@@ -791,6 +817,9 @@ export const createProjectConfigRuntime = (deps) => {
               refreshUpdatedAt: false,
             });
             nextTasks.push(adopted);
+            // Adopted tasks were deliberately re-serialized from the loop
+            // definition; every other task in this write stays verbatim.
+            replacedIDs.add(adopted.id);
             pendingByName.delete(loop.definition.name);
             consumedFiles.add(loop.filePath);
             validByFile.delete(loop.filePath);
@@ -827,7 +856,7 @@ export const createProjectConfigRuntime = (deps) => {
 
       await writeProjectConfigToDisk(projectID, {
         version: PROJECT_CONFIG_VERSION,
-        scheduledTasks: nextTasks,
+        scheduledTasks: toStoredTasks(current, nextTasks, { replacedIDs }),
       });
       return nextTasks;
     });
