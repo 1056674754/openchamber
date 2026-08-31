@@ -3241,3 +3241,15 @@ v1.20.0-sscity 尚未宣布完成：当前未关闭 `#135/#140/#142-#151/#154/#1
 - 上游顺带的 scheduled-tasks DOCUMENTATION bullet：fork 无该文档文件，契约说明由 `project-config.js` 内注释承载，不为此单建文件。
 
 验证：project-config 19/19（含 3 条新增 foreign-field 保留回归）✅；Web type-check/lint ✅；全 workspace type-check/lint ✅。至此 [#185](https://coding.s-s.city/songsong/openchamber/-/issues/185) 完成，可关闭。
+
+## v1.22.0 `#181`：Per-instance scoped themes（2026-08-31）
+
+上游来源：`b86a00908`（PR #2897）、`efb0a886d`。对应实现提交：`8d1676335`。
+
+- 主题偏好从共享全局 localStorage key 迁移到按 runtime endpoint 的 scoped entry（`openchamber.theme.v2:<runtimeKey>`，fork 的实例身份即 `getRuntimeKey()`：`local`/`url:` key/mobile-disconnected）。scoped entry 是唯一权威；被取代的全局 key 保留为 pre-React splash shell 与 Android 状态栏的 cosmetic last-writer-wins 提示（上游同款注释与语义）。
+- `theme-storage` 模块整体移植：边界 parser（坏 payload 判失败不判默认）、legacy 全局 key 一次性 seed、跨窗口 storage-event resolver（忽略他 runtime 的 key、相同偏好返回 null 防采纳循环）、runtime 切换时 adopt 新实例最后已知主题（server settings sync 随后细化）。
+- `runtime-switch` 新增 `MOBILE_DISCONNECTED_RUNTIME_KEY`/`isTransientRuntimeKey`（fork 已有 mobile-disconnected 语义，仅缺导出）；transient key 永不读写 scoped entry；`MobileApp` 改用常量。
+- custom themes 重载加 request-generation + runtimeKey 双守卫：实例切换后旧实例的 in-flight fetch 不会回填。
+- fork 差异说明：上游 `receivesParentThemeSync`（embedded 窗口接收父主题）依赖 fork 未采纳的 embedded-params 特性，本移植不含该 flag（fork 恒 false 等价）；上游 `persistence.ts` 删除的 theme localStorage 写入在 fork 的 settings mirror 中本就不存在，无需变更。
+
+验证：theme-storage 23/23 ✅；UI/全 workspace type-check/lint ✅；`git diff --check` ✅。未做双实例实机主题验证（需两个 runtime endpoint 同源并存的 UI 场景），如需可在下次桌面双实例 QA 中附带。至此 [#181](https://coding.s-s.city/songsong/openchamber/-/issues/181) 完成，可关闭。
