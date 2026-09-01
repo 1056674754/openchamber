@@ -3320,3 +3320,14 @@ v1.20.0-sscity 尚未宣布完成：当前未关闭 `#135/#140/#142-#151/#154/#1
 - 明确留待 #160 后续 phase：centralized `shortcuts/` registry 迁移（schema/dispatcher/mod+k leader/held-modifier 数字切 tab——需对 fork 8 个消费者做专门迁移批）；`removeTabs` 接入删除流程。
 
 验证：useSessionTabsStore 5/5 ✅；UI/全 workspace type-check/lint ✅；`git diff --check` ✅。strip 的 matching-surface 交互（拖拽重排、右键菜单、alt+w）建议随下次桌面 QA 验证。[#160](https://coding.s-s.city/songsong/openchamber/-/issues/160) 保持 open。
+
+## v1.21.x `#161` Phase 1：streaming auto-follow toggle（2026-08-31）
+
+上游来源：`6b1b7e4ed`、`5f6cb6159`。对应实现提交：`5027efb15`。这同时是 `#162` 的 auto-follow preference 半区。
+
+- 设置 → General appearance 新增 "Follow new content while streaming"（默认开、persist）；i18n 4 key × 11 locale。
+- off 语义（按 `5f6cb6159`）：流式增长与发送都不再移动视口——fork `useChatAutoFollow` 的四条自动跟随路径全部 gate（passive-follow gate、working 状态切换钉底、近底部 re-arm、stabilize re-pin）；pill 仍可一次性跳到底部但**不**重新武装 live following。
+- on：行为与原来完全一致。fork 引擎（tanstack virtual + useChatAutoFollow 状态机）不动。
+- fork 现状审计（对照上游 42 提交）：fork 已具备 4 种手势释放（wheel/touch/keyboard/scrollbar thumb）、重返底部 re-arm、scroll pill、session entry 锚定策略——上游 follow 语义的大部分 fork 已有等价；真正的缺口是 auto-follow 开关（本轮已补）与 **anchored-new-turn**（发送消息 park 视口顶部 + 回复在预留空间展开，`566568c7a` 的核心语义）。
+
+验证：UI/全 workspace type-check/lint ✅；`git diff --check` ✅。实机验证（关开关后发消息视口不动、pill 跳转正常）建议随下次桌面 QA。[​#161](https://coding.s-s.city/songsong/openchamber/-/issues/161) 保持 open：Phase 2（anchored-new-turn + 三模式状态机，需在 fork tanstack 引擎上适配上游 `timelineScrollAnchoring` 纯几何模型）需要专门一轮。
