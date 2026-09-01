@@ -13,6 +13,8 @@ import {
 } from '@/components/chat/lib/scroll/scrollIntent';
 import { useViewportStore, type SessionMemoryState } from '@/sync/viewport-store';
 import { CHAT_BOTTOM_ZONE_DESKTOP_PX, CHAT_BOTTOM_ZONE_MOBILE_PX } from '@/components/chat/lib/scroll/bottomSpacing';
+import { getAnchoredTurnOverflow, resolveAnchoredScrollTop } from '@/components/chat/lib/scroll/anchoredTurn';
+import { CHAT_BOTTOM_ZONE_DESKTOP_PX as SPACER_DESKTOP, CHAT_BOTTOM_ZONE_MOBILE_PX as SPACER_MOBILE } from '@/components/chat/lib/scroll/bottomSpacing';
 
 export type AutoFollowState = 'following' | 'released';
 
@@ -127,6 +129,11 @@ export const useChatAutoFollow = ({
     sessionIsWorkingRef.current = sessionIsWorking;
     const streamingAutoFollowRef = React.useRef(streamingAutoFollow);
     streamingAutoFollowRef.current = streamingAutoFollow;
+    // Anchored-new-turn: while set and working, the viewport stays parked at
+    // the sent message until the turn outgrows the usable viewport, after
+    // which following the end takes over. Cleared on release, explicit jump,
+    // working end, and session change.
+    const anchoredTurnActiveRef = React.useRef(false);
     const previousWorkingStateRef = React.useRef({
         sessionId: currentSessionId,
         isWorking: sessionIsWorking,
@@ -233,6 +240,35 @@ export const useChatAutoFollow = ({
         container.scrollTop = clamped;
     }, [markAuto]);
 
+    // The composer stack sits below the scroll container (not overlaying),
+    // so the content end correction here is only the trailing bottom spacer;
+    // the ZONE constants add the status gutter that also lives inside it.
+    const trailingSpacerHeight = (): number =>
+        (isMobileRef.current ? SPACER_MOBILE : SPACER_DESKTOP);
+
+    /** The last turn row in the container, with its top relative to content. */
+    const measureLastTurnRow = (container: HTMLDivElement): { anchorTop: number } | null => {
+        const rows = container.querySelectorAll<HTMLElement>('[data-turn-entry]');
+        const anchorEl = rows[rows.length - 1];
+        if (!anchorEl) return null;
+        const anchorTop =
+            anchorEl.getBoundingClientRect().top - container.getBoundingClientRect().top + container.scrollTop;
+        return { anchorTop };
+    };
+
+    // Anchored-new-turn: park the just-sent user turn near the top of the
+    // viewport so the reply streams into the space below it. Returns false
+    // when there is nothing measurable (caller falls back to pinning).
+    const beginAnchoredTurn = React.useCallback((): boolean => {
+        const container = scrollRef.current;
+        if (!container) return false;
+        const measurement = measureLastTurnRow(container);
+        if (!measurement) return false;
+        writeScrollTopInstant(resolveAnchoredScrollTop(measurement.anchorTop));
+        anchoredTurnActiveRef.current = true;
+        return true;
+    }, [measureLastTurnRow, writeScrollTopInstant]);
+
     const stickToBottomIfFollowing = React.useCallback(() => {
         const container = scrollRef.current;
         if (!container || stateRef.current !== 'following') {
@@ -240,6 +276,30 @@ export const useChatAutoFollow = ({
         }
         if (isProcessFoldTransitionActive()) {
             return;
+        }
+
+        // Anchored-new-turn: while the turn (sent message + growing reply)
+        // still fits the usable viewport, the viewport stays parked and the
+        // content grows into the space below. Once it overflows, following
+        // the end takes over permanently for the rest of the turn.
+        if (anchoredTurnActiveRef.current) {
+            if (!sessionIsWorkingRef.current) {
+                anchoredTurnActiveRef.current = false;
+            } else {
+                const measurement = measureLastTurnRow(container);
+                if (measurement) {
+                    const overflow = getAnchoredTurnOverflow({
+                        anchorTop: measurement.anchorTop,
+                        contentEnd: container.scrollHeight - trailingSpacerHeight(),
+                        scrollLength: container.clientHeight,
+                        scroll: container.scrollTop,
+                    });
+                    if (!overflow.overflows) {
+                        return;
+                    }
+                }
+                anchoredTurnActiveRef.current = false;
+            }
         }
 
         // Always re-pin, even within tolerance, so sub-pixel growth during
@@ -253,6 +313,7 @@ export const useChatAutoFollow = ({
     }, [setStateValue]);
 
     const releaseFromUserIntent = React.useCallback(() => {
+        anchoredTurnActiveRef.current = false;
         if (stateRef.current === 'following') {
             setStateValue('released');
         }
@@ -262,6 +323,7 @@ export const useChatAutoFollow = ({
         const container = scrollRef.current;
         // An explicit jump is honored with auto-follow off too — it scrolls to
         // the end once but does not re-arm live following.
+        anchoredTurnActiveRef.current = false;
         if (streamingAutoFollowRef.current) {
             setStateValue('following');
         }
@@ -402,6 +464,11 @@ export const useChatAutoFollow = ({
         };
 
         settlingRef.current = false;
+        // A turn that was anchored keeps the parked viewport through its end:
+        // the user is reading at the anchor, and snapping to the bottom would
+        // yank them away from it.
+        const wasAnchoredTurn = anchoredTurnActiveRef.current;
+        anchoredTurnActiveRef.current = false;
         if (settleTimerRef.current !== null) {
             clearTimeout(settleTimerRef.current);
             settleTimerRef.current = null;
@@ -409,13 +476,23 @@ export const useChatAutoFollow = ({
 
         if (sessionIsWorking) {
             if (streamingAutoFollowRef.current && stateRef.current === 'following' && !isProcessFoldTransitionActive()) {
-                stickToBottomIfFollowing();
+                // Anchor the just-sent turn once its row has rendered; fall
+                // back to pinning when there is nothing measurable yet.
+                requestAnimationFrame(() => {
+                    requestAnimationFrame(() => {
+                        if (!anchoredTurnActiveRef.current && stateRef.current === 'following' && sessionIsWorkingRef.current) {
+                            if (!beginAnchoredTurn()) {
+                                stickToBottomIfFollowing();
+                            }
+                        }
+                    });
+                });
             }
             return;
         }
 
         settlingRef.current = true;
-        if (streamingAutoFollowRef.current && shouldPinFollowedViewportOnWorkingChange({
+        if (!wasAnchoredTurn && streamingAutoFollowRef.current && shouldPinFollowedViewportOnWorkingChange({
             state: stateRef.current,
             sameSession: previousWorkingState.sessionId === currentSessionId,
             wasWorking: previousWorkingState.isWorking,
@@ -427,7 +504,7 @@ export const useChatAutoFollow = ({
             settlingRef.current = false;
             settleTimerRef.current = null;
         }, PASSIVE_FOLLOW_SETTLE_MS);
-    }, [currentSessionId, sessionIsWorking, stickToBottomIfFollowing]);
+    }, [beginAnchoredTurn, currentSessionId, sessionIsWorking, stickToBottomIfFollowing]);
 
     React.useEffect(() => {
         setIsFollowingProgrammatically(state === 'following' && sessionIsWorking);
