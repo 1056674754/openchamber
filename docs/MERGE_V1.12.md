@@ -3366,3 +3366,10 @@ v1.20.0-sscity 尚未宣布完成：当前未关闭 `#135/#140/#142-#151/#154/#1
 - 明确留待 Phase 3：held-modifier 数字切 tab/context surface（需 held-prefix dispatcher 路由）、fork 剩余单键 action 迁入 schema、新动作的自定义绑定设置 UI。上游 config.ts 的完整 action 清单随模块落库可直接扩展。
 
 验证：shortcuts-registry 51/51 ✅；chat scroll lib 30/30 ✅；UI/全 workspace type-check/lint ✅；production build ✅；`git diff --check` ✅。[​#160](https://coding.s-s.city/songsong/openchamber/-/issues/160) 保持 open（Phase 3）。
+
+## v1.21.x `#162` 收口（2026-09-01）
+
+两部分均有结论，可关闭：
+
+1. **streaming auto-follow preference**：✅ 已随 #161 Phase 1 完成（`5027efb15`，见对应 section）。
+2. **bounded settings mutation tracking**（`22c5582ff` + `7f1b9e013`）：审计为**架构不适用**。上游 bug 的前提是 syncDesktopSettings（GET）与 debounced flush（PUT）并行竞争、以 mutations 数组 + operations 集合做 revision 调停。fork 的 persistence.ts 是自己演化的实现：`_settingsFlushChain` 串行化全部 settings 写、runtime context 检查防跨 runtime 污染、失败存档（`recordFailedSettings`）走独立通道——不存在无界的 mutations 历史数组，上游的 history-bound 修复在 fork 结构下无对应物可修。上游两提交仅是对其自身实现的封装重构 + bug fix，不构成 fork 的移植项。
