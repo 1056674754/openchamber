@@ -5,9 +5,12 @@ import { getSyncSessionMaterializationStatus } from '@/sync/sync-refs';
 import { isVSCodeRuntime } from '@/lib/desktop';
 
 const SESSION_PREFETCH_HOVER_DELAY_MS = 180;
-const SESSION_PREFETCH_SETTLE_MS = 600;
-const SESSION_PREFETCH_CONCURRENCY = 1;
-const SESSION_PREFETCH_PENDING_LIMIT = 6;
+const SESSION_PREFETCH_SETTLE_MS = 150;
+const SESSION_PREFETCH_CONCURRENCY = 2;
+const SESSION_PREFETCH_PENDING_LIMIT = 8;
+// Nearest first: the rows right next to the open session are the likeliest
+// next click.
+const NEIGHBOR_PREFETCH_OFFSETS = [-1, 1, -2, 2];
 
 type Args = {
   enabled?: boolean;
@@ -146,8 +149,7 @@ export const useSessionPrefetch = ({
     const timer = window.setTimeout(() => {
       const currentIndex = sortedSessions.findIndex((session) => session.id === currentSessionId);
       if (currentIndex < 0) return;
-      scheduleSessionPrefetch(sortedSessions[currentIndex - 1]?.id);
-      scheduleSessionPrefetch(sortedSessions[currentIndex + 1]?.id);
+      for (const offset of NEIGHBOR_PREFETCH_OFFSETS) scheduleSessionPrefetch(sortedSessions[currentIndex + offset]?.id);
     }, SESSION_PREFETCH_SETTLE_MS);
     return () => window.clearTimeout(timer);
   }, [currentSessionId, prefetchDisabled, scheduleSessionPrefetch, sortedSessions]);
@@ -173,8 +175,7 @@ export const useSessionPrefetch = ({
     const timer = window.setTimeout(() => {
       const currentIndex = recentSessionIds.indexOf(currentSessionId);
       if (currentIndex < 0) return;
-      scheduleSessionPrefetch(recentSessionIds[currentIndex - 1]);
-      scheduleSessionPrefetch(recentSessionIds[currentIndex + 1]);
+      for (const offset of NEIGHBOR_PREFETCH_OFFSETS) scheduleSessionPrefetch(recentSessionIds[currentIndex + offset]);
     }, SESSION_PREFETCH_SETTLE_MS);
     return () => window.clearTimeout(timer);
   }, [currentSessionId, prefetchDisabled, recentSessionIds, scheduleSessionPrefetch]);

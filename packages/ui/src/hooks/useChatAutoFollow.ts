@@ -134,6 +134,7 @@ export const useChatAutoFollow = ({
     // which following the end takes over. Cleared on release, explicit jump,
     // working end, and session change.
     const anchoredTurnActiveRef = React.useRef(false);
+    const anchorRafRef = React.useRef<number | null>(null);
     const previousWorkingStateRef = React.useRef({
         sessionId: currentSessionId,
         isWorking: sessionIsWorking,
@@ -149,7 +150,7 @@ export const useChatAutoFollow = ({
     const autoRef = React.useRef<{ top: number; time: number } | null>(null);
     const autoTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
     const saveTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
-    const pendingSaveRef = React.useRef<{ sessionId: string; anchor: number } | null>(null);
+    const pendingSaveRef = React.useRef<{ sessionId: string; anchor: number; metrics: { scrollTop: number; scrollHeight: number; clientHeight: number } } | null>(null);
     // When restoreSnapshot is invoked while ChatViewport is still hydrating
     // (skeleton rendered, no scroll container yet), we record the session here
     // so a follow-up effect can replay the restore once the container mounts.
@@ -364,17 +365,22 @@ export const useChatAutoFollow = ({
         }
         const pending = pendingSaveRef.current;
         if (!pending) return;
-        const container = scrollRef.current;
-        if (!container) {
-            pendingSaveRef.current = null;
+        pendingSaveRef.current = null;
+        // A switch re-pointed scrollRef at the new container before this
+        // debounced flush ran: the captured metrics describe the old session,
+        // but reading the container now would capture the NEW one's pixels.
+        // Keep the captured values; just attribute them correctly.
+        if (pending.sessionId !== currentSessionIdRef.current) {
+            updateViewportAnchor(pending.sessionId, pending.anchor, pending.metrics);
             return;
         }
+        const container = scrollRef.current;
+        if (!container) return;
         updateViewportAnchor(pending.sessionId, pending.anchor, {
             scrollTop: container.scrollTop,
             scrollHeight: container.scrollHeight,
             clientHeight: container.clientHeight,
         });
-        pendingSaveRef.current = null;
     }, [updateViewportAnchor]);
 
     const queueSave = React.useCallback(() => {
@@ -389,7 +395,11 @@ export const useChatAutoFollow = ({
             : 0;
         const anchor = Math.floor(anchorRatio * sessionMessageCountRef.current);
 
-        pendingSaveRef.current = { sessionId, anchor };
+        // Snapshot the metrics NOW: the debounced flush can land after a
+        // session switch re-pointed scrollRef at the new container, and
+        // reading it there would write the new session's pixels under the
+        // old session's key.
+        pendingSaveRef.current = { sessionId, anchor, metrics: { scrollTop, scrollHeight, clientHeight } };
         if (saveTimerRef.current !== null) return;
         saveTimerRef.current = setTimeout(() => {
             saveTimerRef.current = null;
@@ -477,16 +487,27 @@ export const useChatAutoFollow = ({
         if (sessionIsWorking) {
             if (streamingAutoFollowRef.current && stateRef.current === 'following' && !isProcessFoldTransitionActive()) {
                 // Anchor the just-sent turn once its row has rendered; fall
-                // back to pinning when there is nothing measurable yet.
-                requestAnimationFrame(() => {
-                    requestAnimationFrame(() => {
-                        if (!anchoredTurnActiveRef.current && stateRef.current === 'following' && sessionIsWorkingRef.current) {
+                // back to pinning when there is nothing measurable yet. The
+                // rAF chain is session-scoped and cancellable: a switch that
+                // lands inside the two frames must not anchor the new
+                // session's container for the old one's send.
+                const scheduledSessionId = currentSessionId;
+                const first = requestAnimationFrame(() => {
+                    const second = requestAnimationFrame(() => {
+                        if (
+                            !anchoredTurnActiveRef.current
+                            && stateRef.current === 'following'
+                            && sessionIsWorkingRef.current
+                            && currentSessionIdRef.current === scheduledSessionId
+                        ) {
                             if (!beginAnchoredTurn()) {
                                 stickToBottomIfFollowing();
                             }
                         }
                     });
+                    anchorRafRef.current = second;
                 });
+                anchorRafRef.current = first;
             }
             return;
         }
@@ -505,6 +526,15 @@ export const useChatAutoFollow = ({
             settleTimerRef.current = null;
         }, PASSIVE_FOLLOW_SETTLE_MS);
     }, [beginAnchoredTurn, currentSessionId, sessionIsWorking, stickToBottomIfFollowing]);
+
+    React.useEffect(() => {
+        return () => {
+            if (anchorRafRef.current !== null) {
+                cancelAnimationFrame(anchorRafRef.current);
+                anchorRafRef.current = null;
+            }
+        };
+    }, []);
 
     React.useEffect(() => {
         setIsFollowingProgrammatically(state === 'following' && sessionIsWorking);
