@@ -747,6 +747,8 @@ interface UIStore {
   showTerminalQuickKeysOnDesktop: boolean;
   /** Header session tabs (web/desktop), opt-in. Off keeps the plain session title. */
   sessionTabsEnabled: boolean;
+  /** While a reply streams, glide the view to the newest content. Off keeps the view still for manual scrolling. */
+  streamingAutoFollow: boolean;
   persistChatDraft: boolean;
   showOpenCodeUpdateNotifications: boolean;
   agentControlToolEnabled: boolean;
@@ -916,6 +918,7 @@ interface UIStore {
   setNotificationMode: (mode: 'always' | 'hidden-only') => void;
   setShowTerminalQuickKeysOnDesktop: (value: boolean) => void;
   setSessionTabsEnabled: (value: boolean) => void;
+  setStreamingAutoFollow: (value: boolean) => void;
   setNotifyOnSubtasks: (value: boolean) => void;
   setDockBadgeEnabled: (value: boolean) => void;
   setDoubleClickRenameSession: (value: boolean) => void;
@@ -1091,6 +1094,7 @@ export const useUIStore = create<UIStore>()(
 
         showTerminalQuickKeysOnDesktop: false,
         sessionTabsEnabled: false,
+        streamingAutoFollow: true,
         persistChatDraft: true,
         showOpenCodeUpdateNotifications: true,
         agentControlToolEnabled: true,
@@ -2401,6 +2405,10 @@ export const useUIStore = create<UIStore>()(
           set({ sessionTabsEnabled: value });
         },
 
+        setStreamingAutoFollow: (value) => {
+          set({ streamingAutoFollow: value });
+        },
+
         setNotifyOnSubtasks: (value) => {
           set({ notifyOnSubtasks: value });
         },
@@ -2762,6 +2770,7 @@ export const useUIStore = create<UIStore>()(
           notificationMode: state.notificationMode,
           showTerminalQuickKeysOnDesktop: state.showTerminalQuickKeysOnDesktop,
           sessionTabsEnabled: state.sessionTabsEnabled,
+          streamingAutoFollow: state.streamingAutoFollow,
           notifyOnSubtasks: state.notifyOnSubtasks,
           dockBadgeEnabled: state.dockBadgeEnabled,
           doubleClickRenameSession: state.doubleClickRenameSession,

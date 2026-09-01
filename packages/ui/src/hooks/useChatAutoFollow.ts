@@ -33,6 +33,9 @@ interface UseChatAutoFollowOptions {
     sessionMessageCount: number;
     sessionIsWorking: boolean;
     isMobile: boolean;
+    /** Off: streaming growth never moves the viewport; only explicit user
+     *  scroll actions (pill, drag) move it, and they do not re-arm following. */
+    streamingAutoFollow?: boolean;
     onActiveTurnChange?: (turnId: string | null, visibleTurnIds: string[]) => void;
 }
 
@@ -105,6 +108,7 @@ export const useChatAutoFollow = ({
     sessionMessageCount,
     sessionIsWorking,
     isMobile,
+    streamingAutoFollow = true,
     onActiveTurnChange,
 }: UseChatAutoFollowOptions): UseChatAutoFollowResult => {
     const scrollRef = React.useRef<HTMLDivElement | null>(null);
@@ -121,6 +125,8 @@ export const useChatAutoFollow = ({
     isMobileRef.current = isMobile;
     const sessionIsWorkingRef = React.useRef(sessionIsWorking);
     sessionIsWorkingRef.current = sessionIsWorking;
+    const streamingAutoFollowRef = React.useRef(streamingAutoFollow);
+    streamingAutoFollowRef.current = streamingAutoFollow;
     const previousWorkingStateRef = React.useRef({
         sessionId: currentSessionId,
         isWorking: sessionIsWorking,
@@ -200,6 +206,8 @@ export const useChatAutoFollow = ({
     }, [clearAutoMarker]);
 
     const isPassiveFollowActive = React.useCallback((): boolean => {
+        // With auto-follow off, streaming growth never moves the viewport.
+        if (!streamingAutoFollowRef.current) return false;
         return shouldApplyPassiveAutoFollow({
             state: stateRef.current,
             sessionIsWorking: sessionIsWorkingRef.current,
@@ -252,7 +260,11 @@ export const useChatAutoFollow = ({
 
     const goToBottom = React.useCallback((mode: 'instant' | 'smooth' = 'instant') => {
         const container = scrollRef.current;
-        setStateValue('following');
+        // An explicit jump is honored with auto-follow off too — it scrolls to
+        // the end once but does not re-arm live following.
+        if (streamingAutoFollowRef.current) {
+            setStateValue('following');
+        }
         settlingRef.current = true;
         if (settleTimerRef.current !== null) {
             clearTimeout(settleTimerRef.current);
@@ -277,6 +289,7 @@ export const useChatAutoFollow = ({
         if (!container) return;
         const distFromBottom = container.scrollHeight - container.clientHeight - container.scrollTop;
         // Re-pin if actively following OR if near bottom (content grew during loading)
+        if (!streamingAutoFollowRef.current && stateRef.current !== 'following') return;
         if (stateRef.current !== 'following' && distFromBottom > 2000) return;
         const target = Math.max(0, container.scrollHeight - container.clientHeight);
         writeScrollTopInstant(target);
@@ -395,14 +408,14 @@ export const useChatAutoFollow = ({
         }
 
         if (sessionIsWorking) {
-            if (stateRef.current === 'following' && !isProcessFoldTransitionActive()) {
+            if (streamingAutoFollowRef.current && stateRef.current === 'following' && !isProcessFoldTransitionActive()) {
                 stickToBottomIfFollowing();
             }
             return;
         }
 
         settlingRef.current = true;
-        if (shouldPinFollowedViewportOnWorkingChange({
+        if (streamingAutoFollowRef.current && shouldPinFollowedViewportOnWorkingChange({
             state: stateRef.current,
             sameSession: previousWorkingState.sessionId === currentSessionId,
             wasWorking: previousWorkingState.isWorking,
@@ -463,7 +476,11 @@ export const useChatAutoFollow = ({
         }
 
         if (isNearBottom(container, isMobileRef.current)) {
-            setStateValue('following');
+            // With auto-follow off, being at the bottom does not re-arm
+            // following — streaming growth still leaves the view alone.
+            if (streamingAutoFollowRef.current) {
+                setStateValue('following');
+            }
             queueSave();
             return;
         }

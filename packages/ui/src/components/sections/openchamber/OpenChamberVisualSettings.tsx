@@ -326,6 +326,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const setShowTerminalQuickKeysOnDesktop = useUIStore(state => state.setShowTerminalQuickKeysOnDesktop);
     const sessionTabsEnabled = useUIStore(state => state.sessionTabsEnabled);
     const setSessionTabsEnabled = useUIStore(state => state.setSessionTabsEnabled);
+    const streamingAutoFollow = useUIStore(state => state.streamingAutoFollow);
+    const setStreamingAutoFollow = useUIStore(state => state.setStreamingAutoFollow);
     const fileEditorKeymap = useUIStore(state => state.fileEditorKeymap);
     const setFileEditorKeymap = useUIStore(state => state.setFileEditorKeymap);
     const autoSaveEnabled = useUIStore(state => state.autoSaveEnabled);
@@ -1527,6 +1529,38 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                             </TooltipTrigger>
                                             <TooltipContent sideOffset={8} className="max-w-xs">
                                                 {t('settings.openchamber.visual.field.sessionTabsInfo')}
+                                            </TooltipContent>
+                                        </Tooltip>
+                                    </div>
+                                </div>
+                            )}
+                            {shouldShow('sessionTabs') && !isMobile && (
+                                <div
+                                    className="group flex cursor-pointer items-center gap-2 py-1.5"
+                                    role="button"
+                                    tabIndex={0}
+                                    aria-pressed={streamingAutoFollow}
+                                    onClick={() => setStreamingAutoFollow(!streamingAutoFollow)}
+                                    onKeyDown={(event) => {
+                                        if (event.key === ' ' || event.key === 'Enter') {
+                                            event.preventDefault();
+                                            setStreamingAutoFollow(!streamingAutoFollow);
+                                        }
+                                    }}
+                                >
+                                    <Checkbox
+                                        checked={streamingAutoFollow}
+                                        onChange={setStreamingAutoFollow}
+                                        ariaLabel={t('settings.openchamber.visual.field.streamingAutoFollowAria')}
+                                    />
+                                    <div className="flex min-w-0 items-center gap-1.5">
+                                        <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.streamingAutoFollow')}</span>
+                                        <Tooltip>
+                                            <TooltipTrigger asChild>
+                                                <Icon name="information" className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
+                                            </TooltipTrigger>
+                                            <TooltipContent sideOffset={8} className="max-w-xs">
+                                                {t('settings.openchamber.visual.field.streamingAutoFollowInfo')}
                                             </TooltipContent>
                                         </Tooltip>
                                     </div>

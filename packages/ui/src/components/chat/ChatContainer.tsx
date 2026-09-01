@@ -557,6 +557,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
 
     // UI store
     const isExpandedInput = useUIStore((state) => state.isExpandedInput);
+    const streamingAutoFollow = useUIStore((state) => state.streamingAutoFollow);
     const stickyUserHeader = useUIStore((state) => state.stickyUserHeader);
     const promptNavigatorEnabled = useUIStore((state) => state.promptNavigatorEnabled);
     const allowPromptingSubagentSessions = useUIStore((state) => state.allowPromptingSubagentSessions);
@@ -823,6 +824,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
         sessionMessageCount,
         sessionIsWorking,
         isMobile,
+        streamingAutoFollow,
         onActiveTurnChange: handleActiveTurnChange,
     });
 
