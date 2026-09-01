@@ -1097,3 +1097,12 @@ export const clearDesktopCache = async (): Promise<boolean> => {
     return false;
   }
 };
+
+export const focusDesktopWindow = async (): Promise<boolean> => {
+  if (!isDesktopShell()) return false;
+  try {
+    return Boolean(await invokeDesktop('desktop_focus_window'));
+  } catch {
+    return false;
+  }
+};

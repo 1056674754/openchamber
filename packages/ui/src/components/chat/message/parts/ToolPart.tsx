@@ -86,6 +86,8 @@ import { isEmbeddedSessionChat } from '@/components/layout/contextPanelEmbeddedC
 import { shouldMaterializeTaskDetails } from './taskToolVisibility';
 import { ArtifactCard } from './ArtifactCard';
 import { parsePublishedArtifactToolPart } from './artifactMetadata';
+import { TaskCard } from './TaskCard';
+import { parseOfferedTaskToolPart } from './taskCardMetadata';
 import { useStreamingTextThrottle } from '../../hooks/useStreamingTextThrottle';
 import {
     formatToolDuration,
@@ -2488,6 +2490,10 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
         () => parsePublishedArtifactToolPart(part),
         [part],
     );
+    const offeredTask = React.useMemo(
+        () => parseOfferedTaskToolPart(part),
+        [part],
+    );
     const partMetadata = (part as unknown as { metadata?: unknown }).metadata;
     const time = stateWithData.time;
 
@@ -3286,6 +3292,9 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
 
             {publishedArtifact ? (
                 <ArtifactCard artifact={publishedArtifact} sessionId={messageSessionId} />
+            ) : null}
+            {offeredTask ? (
+                <TaskCard card={offeredTask} sessionId={messageSessionId} />
             ) : null}
             {(materializeTaskDetails || taskSessionId) && (taskSummaryEntries.length > 0 || isActive || shouldTreatAsFinalized || taskSessionId) ? (
                 <TaskToolSummary

@@ -1899,3 +1899,14 @@ export const initializeAppearancePreferences = async (): Promise<void> => {
     console.warn('Failed to load appearance preferences:', error);
   }
 };
+
+/** Quiet save-state signal for settings widgets that manage their own saves
+ *  (e.g. Linear preferences): 'saved' is the normal case and reports nothing;
+ *  only in-flight saves and failures surface in the UI. */
+export const reportSettingsSaveState = (state: 'saving' | 'saved' | 'error'): void => {
+  if (state === 'error') {
+    window.dispatchEvent(new CustomEvent<SettingsSaveFailure>('openchamber:settings-save-failed', {
+      detail: { kind: 'unknown', message: 'Settings save failed' },
+    }));
+  }
+};

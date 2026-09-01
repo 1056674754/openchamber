@@ -30,6 +30,11 @@ type ApiProxyResponsePayload = {
 const DECODED_PAYLOAD_LENGTH_HEADER = 'x-openchamber-decoded-content-length';
 const MAX_MESSAGE_HISTORY_DIFFS = 500;
 const MAX_MESSAGE_HISTORY_PATCH_LENGTH = 100_000;
+// The webview bridge disables its own timeout for api:proxy ("let the extension
+// host control timeout"), so this fetch is the only bound on the request. Without
+// it, a hung upstream request pends forever and webview bootstraps that depend on
+// it (providers/agents) never complete.
+const API_PROXY_TIMEOUT_MS = 60_000;
 
 export function projectMessageHistoryResponseText(bodyText: string): string {
   try {
@@ -168,6 +173,7 @@ export async function handleProxyBridgeMessage(
             typeof bodyBase64 === 'string' && bodyBase64.length > 0 && normalizedMethod !== 'GET' && normalizedMethod !== 'HEAD'
               ? Buffer.from(bodyBase64, 'base64')
               : undefined,
+          signal: AbortSignal.timeout(API_PROXY_TIMEOUT_MS),
         });
 
         const responseHeaders = collectProxyResponseHeaders(response.headers, deps);
@@ -198,11 +204,17 @@ export async function handleProxyBridgeMessage(
 
         return { id, type, success: true, data };
       } catch (error) {
+        const isTimeout =
+          error instanceof Error &&
+          ((error as Error & { name?: string }).name === 'TimeoutError' ||
+            (error as Error & { name?: string }).name === 'AbortError');
         const body = JSON.stringify({
-          error: error instanceof Error ? error.message : 'Failed to reach OpenCode API',
+          error: isTimeout
+            ? `OpenCode API request timed out after ${Math.round(API_PROXY_TIMEOUT_MS / 1000)}s: ${normalizedMethod} ${normalizedPath}`
+            : error instanceof Error ? error.message : 'Failed to reach OpenCode API',
         });
         const data: ApiProxyResponsePayload = {
-          status: 502,
+          status: isTimeout ? 504 : 502,
           headers: { 'content-type': 'application/json' },
           bodyText: body,
         };

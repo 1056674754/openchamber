@@ -8,6 +8,7 @@
  */
 
 import type { Plugin, PluginInput, Hooks } from "@opencode-ai/plugin"
+import { createOpencodeClient } from "@opencode-ai/sdk/v2"
 
 import { createCompactionFocusHandler } from "./compaction-focus.js"
 import { createImageTransformHandler } from "./image-transform.js"
@@ -18,6 +19,9 @@ import { createDescribeImageTool } from "./tools/describe-image.js"
 import { createSearchImagesTool } from "./tools/search-images.js"
 import { createSaveImageAnalysisTool } from "./tools/save-image-analysis.js"
 import { createPublishArtifactTool } from "./tools/publish-artifact.js"
+import { createSessionListTool } from "./tools/session-list.js"
+import { createSessionSendTool } from "./tools/session-send.js"
+import { createOfferTaskTool } from "./tools/offer-task.js"
 import { createModelCapabilityChecker } from "./model-capability.js"
 import { createImageStore } from "./image-store.js"
 import { openCacheDb, type CacheDb } from "./cache/database.js"
@@ -59,6 +63,12 @@ export function createPlugin(
     imageDirectory: imageStore.getDirectory(),
   })
   const publishArtifact = createPublishArtifactTool()
+  // v2 client for cross-session messaging tools — same server that loaded the
+  // plugin, so session ids from session_list resolve through it.
+  const sessionsClient = createOpencodeClient({ baseUrl: input.serverUrl.toString() })
+  const sessionList = createSessionListTool({ client: sessionsClient })
+  const sessionSend = createSessionSendTool({ client: sessionsClient })
+  const offerTask = createOfferTaskTool()
 
   const hooks: Hooks = {
     "chat.message": systemPromptOptimizer.chatMessage,
@@ -80,6 +90,9 @@ export function createPlugin(
       search_images: searchImages,
       save_image_analysis: saveAnalysis,
       publish_artifact: publishArtifact,
+      session_list: sessionList,
+      session_send: sessionSend,
+      offer_task: offerTask,
     },
     dispose: async () => {
       cacheDb?.close()

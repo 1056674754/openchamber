@@ -525,8 +525,9 @@ export async function createWorktreeSessionForNewBranch(
     ensureRemoteName?: string;
     ensureRemoteUrl?: string;
     createdFromBranch?: string;
+    returnAfterDirectoryCreated?: boolean;
   }
-): Promise<{ id: string; branch: string } | null> {
+): Promise<{ id: string; branch: string; path: string } | null> {
   if (isCreatingWorktreeSession) {
     return null;
   }
@@ -575,6 +576,7 @@ export async function createWorktreeSessionForNewBranch(
         upstreamBranch: options?.upstreamBranch,
         ensureRemoteName: options?.ensureRemoteName,
         ensureRemoteUrl: options?.ensureRemoteUrl,
+        returnAfterDirectoryCreated: options?.returnAfterDirectoryCreated,
         setupCommands,
       });
       const createdMetadata = {
@@ -594,7 +596,7 @@ export async function createWorktreeSessionForNewBranch(
 
       initializeSessionForWorktree(session.id, createdMetadata);
 
-      return { id: session.id, branch: metadata.branch || base };
+      return { id: session.id, branch: metadata.branch || base, path: metadata.path };
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to create worktree session';
       toast.error('Failed to create worktree', { description: message });

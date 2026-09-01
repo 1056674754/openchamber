@@ -112,6 +112,25 @@ const setLoadingStatusText = (text: string, variant: 'normal' | 'error' = 'norma
   }
 };
 
+// The bootstrap overlay must never wedge: a hung bridge request (webview ->
+// extension host -> OpenCode server) produces no response, so neither
+// recordBootstrapFetch nor maybeHideLoadingOverlay would ever run again and the
+// overlay would sit on its last status text forever. Bound the wait explicitly.
+const BOOTSTRAP_DATA_TIMEOUT_MS = 45000;
+let bootstrapWatchdogArmed = false;
+
+const armBootstrapWatchdog = () => {
+  if (bootstrapWatchdogArmed) return;
+  bootstrapWatchdogArmed = true;
+  setTimeout(() => {
+    if (bootstrapProvidersReady && bootstrapAgentsReady) return;
+    if (window.__OPENCHAMBER_CONNECTION__?.status !== 'connected') return;
+    if (!document.getElementById('initial-loading')) return;
+    setLoadingStatusText(bootstrapMessages.initialDataLoadFailed, 'error');
+    fadeOutLoadingScreen();
+  }, BOOTSTRAP_DATA_TIMEOUT_MS);
+};
+
 const waitForUiMount = (timeoutMs = 8000): Promise<boolean> => {
   if (typeof document === 'undefined') return Promise.resolve(false);
   const root = document.getElementById('root');
@@ -1966,6 +1985,7 @@ import('@openchamber/ui/apps/renderVSCodeApp')
     renderVSCodeApp(window.__OPENCHAMBER_RUNTIME_APIS__ ?? createVSCodeAPIs());
     await waitForUiMount();
     uiMounted = true;
+    armBootstrapWatchdog();
     maybeHideLoadingOverlay();
   })
   .catch((error) => {

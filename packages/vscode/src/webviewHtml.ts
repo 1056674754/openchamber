@@ -221,6 +221,22 @@ export function getWebviewHtml(options: WebviewHtmlOptions): string {
     };
 
     if (!devServerUrl) {
+      // Watchdog: if the production bundle never executes (script load failure or a
+      // top-level crash), the inline handlers keep updating this text (e.g. to
+      // "Connected!") but nothing can ever dismiss the overlay. Surface an
+      // actionable error instead of hanging on a stale status line.
+      window.setTimeout(function() {
+        var overlay = document.getElementById('initial-loading');
+        var rootEl = document.getElementById('root');
+        if (!overlay || (rootEl && rootEl.childElementCount > 0)) {
+          return;
+        }
+        var stalledStatus = document.getElementById('loading-status');
+        if (stalledStatus) {
+          stalledStatus.textContent = 'OpenChamber UI failed to start. Run "Developer: Reload Window"; if it persists, check the webview console (Developer: Open Webview Developer Tools) for errors.';
+          stalledStatus.classList.add('error-text');
+        }
+      }, 20000);
       loadProductionBundle();
     } else {
       const baseUrl = devServerUrl;

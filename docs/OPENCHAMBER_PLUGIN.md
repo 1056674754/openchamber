@@ -268,6 +268,36 @@ Files inside the active worktree publish directly. Publishing a path outside the
 worktree triggers an `artifact_publish` permission request before any content is
 copied.
 
+## Cross-Session Messaging And Task Cards
+
+The plugin registers three more tools, all served through the same OpenCode
+process that loaded the plugin (a v2 SDK client built from `input.serverUrl`):
+
+```
+session_list(search?, limit?)    → recent root sessions (id, title, directory, running)
+session_send(session_id, message, delivery?) → deliver a user turn to another root session
+offer_task(title, prompt, tldr?, agent?)     → emit a clickable task card
+```
+
+`session_send` is peer-to-peer between **root** sessions (no `parentID`); child
+subagent sessions are refused as targets, and self-sends are refused. The
+message is framed with the source session's id/title and a reply hint, then
+admitted through the v2 `POST /api/session/:id/prompt` endpoint —
+`delivery: "queue"` (default) waits durably if the target loop is busy,
+`"steer"` injects mid-run. The server resolves the target session's directory
+automatically, so targets may live in other directories served by the same
+process.
+
+`offer_task` never creates a session. It stores a versioned
+`metadata.openchamberTaskCard` record (title, tldr, self-contained prompt,
+optional agent, source session/directory) on the tool part; OpenChamber's
+shared UI renders it as a card (mirroring `openchamberArtifact`). Clicking
+"Start conversation" creates a new **root** session in the source directory
+via `useSessionUIStore.createSession`, sends the card prompt as the first
+message with the source session's last-used provider/agent, and navigates
+there atomically. Starting stays the user's choice — the model is told not to
+assume the conversation began.
+
 ## Package Layout
 
 ```
