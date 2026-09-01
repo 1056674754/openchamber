@@ -3343,3 +3343,16 @@ v1.20.0-sscity 尚未宣布完成：当前未关闭 `#135/#140/#142-#151/#154/#1
 - 明确留待后续（若需要）：上游 LegendList 引擎本身的 `maintainVisibleContentPosition`/`anchoredEndSpace`（长会话读位置保持）——fork 的 prepend anchor 管线 + virtual-core clamp patch 已覆盖读位置保持的主路径；迁移属于独立的引擎升级决策，不再阻塞 #161 语义完整性。
 
 验证：anchoredTurn 8/8、useSessionTabsStore 5/5 ✅；UI/全 workspace type-check/lint ✅；`git diff --check` ✅。实机验证（发消息后视口钉在发送消息顶部、长回复溢出后跟随到底、滚上释放、pill 回底）建议随下次桌面 QA。[​#161](https://coding.s-s.city/songsong/openchamber/-/issues/161) 的 v1.21 语义范围（auto-follow opt-out、anchored-new-turn、follow-release 手势、re-arm、pill、completed-turn settling）至此完成，可关闭；LegendList 引擎迁移与 #182（v1.22 chat 切换稳定性）的合并审计单独立项跟踪。
+
+## v1.22 `#182` Phase 1：deferred session switching + stabilization（2026-09-01）
+
+上游来源：`88295e35e`、`c982fa682`（chat 簇）。对应实现提交：deferred 块随本轮前置提交进入，稳定化修复 `14b4cd562`。经 workflow 多 agent 测绘（5 readers + 综合 + adversarial review）后实施。
+
+- **Deferred selection**：ChatContainer 改为 `liveSessionId → liveSelection → React.useDeferredValue` 的三层结构——sidebar/URL/tab 等"廉价反应"在点击的 commit 立即生效，timeline 在 deferred 提交时整体切换（id+directory 作为单值传递，永不跨 commit 混搭）。
+- **Hold**：目标 session 消息未在内存时保持旧 timeline（`SESSION_SWITCH_HOLD_MS=400`，renderable 或过期先到者结束 hold；无展示内容时不适用），替代原来"两个会话之间闪 skeleton"。
+- **revealWaited**：点击时不内存的 session 淡入（180ms），warm 切换同帧出现。
+- **稳定化**（adversarial review 发现的三个缺陷修复）：① session activity 改键到 deferred 选择（live 读会在 hold 期间用旧视图配新会话的 working 标志，误触 anchored-turn）；② working-start 双 rAF 锚定改为 session-scoped + 可取消（切进两帧内不再用旧发送锚定新容器）；③ debounced viewport save 在 queue 时捕获 metrics、flush 按 session 归属（切换期间 re-point 的 scrollRef 不再把新 session 的像素写进旧 key）。
+- **Prefetch retune**：settle 600→150ms、并发 2、limit 8、邻居 ±1/±2——冷 session 更可能点击前已在内存，hold 成为例外路径。
+- 未移植（后续 phase）：`timelineRevealGate`（fork 的 skeleton + initialScrollReady 门已实现"打开即在末尾"，叠加会双门控）；ChatColumnSession context（composer/status 的 deferred 感知）；failed-turns 诊断；sync-context currentDirectory source 重构（fork 的 sync 层结构不同）。
+
+验证：anchoredTurn 8/8、scrollIntent + sessionTabs 30/30 ✅；UI/全 workspace type-check/lint ✅；`git diff --check` ✅。实机 QA（冷切换 hold、warm 切换同帧、流式中切换不误锚定）随下次桌面验证。[#182](https://coding.s-s.city/songsong/openchamber/-/issues/182) 保持 open：Phase 2（revert/fork 上下文恢复、failed-turns 诊断、ChatColumnSession）待续。
