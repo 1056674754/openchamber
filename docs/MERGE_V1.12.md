@@ -3356,3 +3356,13 @@ v1.20.0-sscity 尚未宣布完成：当前未关闭 `#135/#140/#142-#151/#154/#1
 - 未移植（后续 phase）：`timelineRevealGate`（fork 的 skeleton + initialScrollReady 门已实现"打开即在末尾"，叠加会双门控）；ChatColumnSession context（composer/status 的 deferred 感知）；failed-turns 诊断；sync-context currentDirectory source 重构（fork 的 sync 层结构不同）。
 
 验证：anchoredTurn 8/8、scrollIntent + sessionTabs 30/30 ✅；UI/全 workspace type-check/lint ✅；`git diff --check` ✅。实机 QA（冷切换 hold、warm 切换同帧、流式中切换不误锚定）随下次桌面验证。[#182](https://coding.s-s.city/songsong/openchamber/-/issues/182) 保持 open：Phase 2（revert/fork 上下文恢复、failed-turns 诊断、ChatColumnSession）待续。
+
+## v1.21.x `#160` Phase 2：mod+k leader registry（2026-09-01）
+
+上游来源：`9eff5c8b4`、`0c64009bf`（centralized shortcuts core）、`58df9dbf9`（部分动作语义）。对应实现提交：`3253db38e`。
+
+- 上游 shortcuts core（bindings/registry/dispatcher/config/schema，51 测试）以 `lib/shortcuts-registry/` 模块落库——路径刻意避开 `@/lib/shortcuts`（fork 现有 shortcut 系统的 8 个消费者继续由旧系统服务，避免一次性迁移风险）。
+- mod+k "open/go" leader 序列接入 fork 的 useKeyboardShortcuts 键处理头部：mod+k t（timeline）、mod+k p（command palette）、mod+k g（git tab）、mod+k n（new chat）。dispatcher 拥有两 chord 序列状态机（mod+k 武装 → 完成键或 3s 过期 → Escape 取消），且先于单键处理，武装后的完成键优先消费。
+- 明确留待 Phase 3：held-modifier 数字切 tab/context surface（需 held-prefix dispatcher 路由）、fork 剩余单键 action 迁入 schema、新动作的自定义绑定设置 UI。上游 config.ts 的完整 action 清单随模块落库可直接扩展。
+
+验证：shortcuts-registry 51/51 ✅；chat scroll lib 30/30 ✅；UI/全 workspace type-check/lint ✅；production build ✅；`git diff --check` ✅。[​#160](https://coding.s-s.city/songsong/openchamber/-/issues/160) 保持 open（Phase 3）。
