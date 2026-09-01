@@ -1799,3 +1799,24 @@ input[aria-label="Terminal input"] {
     animation: none;
   }
 }
+
+/* Session switch: a session the user waited for (not in memory at the click)
+   fades its timeline in once it is ready; warm switches appear same-frame. */
+@keyframes oc-chat-session-reveal-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.oc-chat-session-reveal {
+  animation: oc-chat-session-reveal-in 180ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .oc-chat-session-reveal {
+    animation: none;
+  }
+}
