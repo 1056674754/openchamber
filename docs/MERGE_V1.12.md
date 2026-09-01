@@ -3331,3 +3331,15 @@ v1.20.0-sscity 尚未宣布完成：当前未关闭 `#135/#140/#142-#151/#154/#1
 - fork 现状审计（对照上游 42 提交）：fork 已具备 4 种手势释放（wheel/touch/keyboard/scrollbar thumb）、重返底部 re-arm、scroll pill、session entry 锚定策略——上游 follow 语义的大部分 fork 已有等价；真正的缺口是 auto-follow 开关（本轮已补）与 **anchored-new-turn**（发送消息 park 视口顶部 + 回复在预留空间展开，`566568c7a` 的核心语义）。
 
 验证：UI/全 workspace type-check/lint ✅；`git diff --check` ✅。实机验证（关开关后发消息视口不动、pill 跳转正常）建议随下次桌面 QA。[​#161](https://coding.s-s.city/songsong/openchamber/-/issues/161) 保持 open：Phase 2（anchored-new-turn + 三模式状态机，需在 fork tanstack 引擎上适配上游 `timelineScrollAnchoring` 纯几何模型）需要专门一轮。
+
+## v1.21.x `#161` Phase 2：anchored-new-turn scrolling（2026-08-31）
+
+上游来源：`566568c7a`（anchored-turn 语义核心）+ `timelineScrollAnchoring` 纯几何模型。对应实现提交：`95435a68d`。
+
+- 跟随引擎（useChatAutoFollow）新增 anchored-new-turn 模式：发送时（working 开始、following、auto-follow 开）**不再钉底**，而是把刚发送的 user turn 钉在视口顶部（`CHAT_LIST_ANCHOR_OFFSET=16`，双 rAF 等行渲染后测量），回复在下方空间流式展开。
+- 视口在 turn（发送消息 + 流式回复）总高度 ≤ 可用视口时完全静止；溢出后 end-following 永久接管至 turn 结束。几何判定抽为纯模块 `anchoredTurn.ts`（overflow 边界、reveal 目标、park 位置）+ 8 条测试。
+- 锚定清除：用户手势释放、显式跳底（pill）、近底部 re-arm、session 切换；**anchored turn 结束时保持当前视口**（用户正在锚定处阅读，不突兀跳底）——与上游 completed-turn settling 一致。
+- fork 引擎（tanstack virtual）不动：流式 tail 在 virtualizer 外渲染，行 resize 补偿的 isAtEnd 条件与锚定自然兼容；测量走 DOM `data-turn-entry` 标记。
+- 明确留待后续（若需要）：上游 LegendList 引擎本身的 `maintainVisibleContentPosition`/`anchoredEndSpace`（长会话读位置保持）——fork 的 prepend anchor 管线 + virtual-core clamp patch 已覆盖读位置保持的主路径；迁移属于独立的引擎升级决策，不再阻塞 #161 语义完整性。
+
+验证：anchoredTurn 8/8、useSessionTabsStore 5/5 ✅；UI/全 workspace type-check/lint ✅；`git diff --check` ✅。实机验证（发消息后视口钉在发送消息顶部、长回复溢出后跟随到底、滚上释放、pill 回底）建议随下次桌面 QA。[​#161](https://coding.s-s.city/songsong/openchamber/-/issues/161) 的 v1.21 语义范围（auto-follow opt-out、anchored-new-turn、follow-release 手势、re-arm、pill、completed-turn settling）至此完成，可关闭；LegendList 引擎迁移与 #182（v1.22 chat 切换稳定性）的合并审计单独立项跟踪。
