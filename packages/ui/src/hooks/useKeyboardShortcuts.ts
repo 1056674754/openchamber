@@ -10,6 +10,8 @@ import { useConfigStore } from '@/stores/useConfigStore';
 import { canUseElectronDesktopIPC, invokeDesktop, isVSCodeRuntime } from '@/lib/desktop';
 import { showOpenCodeStatus } from '@/lib/openCodeStatus';
 import { eventMatchesShortcut, getEffectiveShortcutCombo, normalizeCombo } from '@/lib/shortcuts';
+import { ShortcutDispatcher } from '@/lib/shortcuts-registry/dispatcher';
+import { ShortcutRegistry as LeaderRegistry } from '@/lib/shortcuts-registry/registry';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
@@ -54,6 +56,45 @@ export const useKeyboardShortcuts = () => {
     themeModeRef.current = themeMode;
   }, [themeMode]);
 
+  // mod+k leader registry (upstream shortcuts-registry): "open/go" sequences
+  // for actions the fork exposes. Registered once; the dispatcher owns the
+  // two-chord sequence state machine (arm on mod+k, complete or expire).
+  const leaderHandlersInitializedRef = React.useRef(false);
+  const leaderHandlerRef = React.useRef<Record<string, () => void>>({});
+  if (!leaderHandlersInitializedRef.current) {
+    leaderHandlersInitializedRef.current = true;
+    leaderHandlerRef.current = {
+      t: () => setTimelineDialogOpen(true),
+      p: () => toggleCommandPalette(),
+      g: () => setActiveMainTab('git'),
+      n: () => setActiveMainTab('chat'),
+    };
+  }
+  const leaderHandler = leaderHandlerRef.current;
+
+  const dispatcherRef = React.useRef<ShortcutDispatcher | null>(null);
+  if (!dispatcherRef.current) {
+    const registry = new LeaderRegistry();
+    registry.register('open_timeline_dialog', () => { leaderHandler.t?.(); });
+    registry.register('open_draft_project_picker', () => { leaderHandler.p?.(); });
+    registry.register('open_draft_worktree_picker', () => { leaderHandler.g?.(); });
+    registry.register('new_chat', () => { leaderHandler.n?.(); });
+    dispatcherRef.current = new ShortcutDispatcher({
+      registry,
+      // Fork bindings for the leader actions (mod+k + mnemonic).
+      getBinding: (actionId) => {
+        const bindings: Record<string, string> = {
+          open_timeline_dialog: 'mod+k t',
+          open_draft_project_picker: 'mod+k p',
+          open_draft_worktree_picker: 'mod+k g',
+          new_chat: 'mod+k n',
+        };
+        return bindings[actionId] ?? '';
+      },
+    });
+  }
+  const leaderDispatcher = dispatcherRef.current;
+
   const resetAbortPriming = React.useCallback(() => {
     if (abortPrimedTimeoutRef.current) {
       clearTimeout(abortPrimedTimeoutRef.current);
@@ -94,6 +135,13 @@ export const useKeyboardShortcuts = () => {
 
     const handleKeyDown = (e: KeyboardEvent) => {
       if (isTerminalEventTarget(e.target)) {
+        return;
+      }
+
+      // mod+k leader sequences first: an armed leader consumes the next
+      // chord even when it would also match a single-chord binding below.
+      if (leaderDispatcher.dispatch(e)) {
+        e.preventDefault();
         return;
       }
 
