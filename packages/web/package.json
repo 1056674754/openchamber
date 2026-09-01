@@ -1,6 +1,6 @@
 {
   "name": "@openchamber/web",
-  "version": "1.20.0-sscity",
+  "version": "1.20.1-sscity",
   "private": false,
   "type": "module",
   "main": "./server/index.js",

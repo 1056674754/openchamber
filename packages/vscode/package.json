@@ -2,7 +2,7 @@
   "name": "openchamber",
   "displayName": "OpenChamber",
   "description": "AI coding assistant powered by OpenCode",
-  "version": "1.20.0-sscity",
+  "version": "1.20.1-sscity",
   "publisher": "fedaykindev",
   "private": true,
   "repository": {
