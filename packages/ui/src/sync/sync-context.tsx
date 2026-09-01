@@ -1,4 +1,5 @@
 /* eslint-disable react-refresh/only-export-components */
+import { recordSessionError } from './session-error-log'
 import React, { createContext, useContext, useEffect, useRef, useCallback, useMemo } from "react"
 import type { Event, Message, Part, SessionStatus } from "@opencode-ai/sdk/v2/client"
 import type { Session } from "@opencode-ai/sdk/v2"
@@ -1578,8 +1579,18 @@ function handleEvent(
   // Notification dispatch for session turn-complete and error events.
   // These are NOT handled by the event reducer — only the notification store.
   if (payload.type === "session.idle" || payload.type === "session.error") {
-    const props = payload.properties as { sessionID?: string; error?: { message?: string; code?: string } }
+    const props = payload.properties as { sessionID?: string; error?: { name?: string | null; message?: string | null } }
     const sessionID = props.sessionID
+    // Diagnostics buffer: a failed turn's only account of what went wrong,
+    // kept for the status report and __opencodeDebug.
+    if (payload.type === "session.error" && sessionID) {
+      recordSessionError({
+        sessionId: sessionID,
+        directory: resolvedDirectory,
+        name: props.error?.name ?? null,
+        message: props.error?.message ?? null,
+      })
+    }
     // Skip subtask sessions — only top-level sessions generate notifications
     const storeState = store.getState()
     const session = storeState.session.find((s) => s.id === sessionID)
@@ -1592,7 +1603,7 @@ function handleEvent(
         time: Date.now(),
         viewed: isViewedInCurrentSession(resolvedDirectory, sessionID),
         ...(payload.type === "session.error"
-          ? { type: "error" as const, error: props.error }
+          ? { type: "error" as const, error: { name: props.error?.name ?? null, message: props.error?.message ?? null } }
           : { type: "turn-complete" as const }),
       })
     }

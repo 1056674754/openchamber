@@ -12,6 +12,7 @@ import { PermissionCard } from './PermissionCard';
 import { QuestionCard } from './QuestionCard';
 import { hasActiveQuestionToolInCurrentTurn, recoverPendingQuestionWithRetry } from '@/sync/question-recovery';
 import { SessionRecapNote } from './SessionRecapNote';
+import { SessionErrorNotice } from '@/components/chat/SessionErrorNotice';
 import { StatusRowContainer } from './StatusRowContainer';
 import ScrollToBottomButton from './components/ScrollToBottomButton';
 import { ScrollShadow } from '@/components/ui/ScrollShadow';
@@ -416,6 +417,10 @@ const ChatViewport = React.memo(({
                                     <PermissionCard key={permission.id} permission={permission} />
                                 ))}
                             </div>
+                        )}
+
+                        {currentSessionId && (
+                            <SessionErrorNotice sessionId={currentSessionId} directory={sessionDirectory ?? undefined} />
                         )}
 
                         {currentSessionId && (
