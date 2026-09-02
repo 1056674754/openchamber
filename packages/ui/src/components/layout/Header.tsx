@@ -29,6 +29,7 @@ import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useFeatureFlagsStore } from '@/stores/useFeatureFlagsStore';
 
 import { useDesktopWindowControlsLayout } from '@/hooks/useDesktopWindowControlsLayout';
+import { useContextPanelKey } from '@/hooks/useContextPanelKey';
 import { MobileActiveInstanceChip } from '@/apps/MobileActiveInstanceChip';
 import { openMobileInstancesSheet } from '@/apps/mobileInstancesUi';
 import { useDeviceInfo, useTabletStandalonePwaRuntime } from '@/lib/device';
@@ -539,6 +540,7 @@ export const Header: React.FC<HeaderProps> = ({
   const openContextBrowser = useUIStore((state) => state.openContextBrowser);
   const closeContextPanel = useUIStore((state) => state.closeContextPanel);
   const contextPanelByDirectory = useUIStore((state) => state.contextPanelByDirectory);
+  const contextPanelKey = useContextPanelKey();
   const activeMainTab = useUIStore((state) => state.activeMainTab);
   const setActiveMainTab = useUIStore((state) => state.setActiveMainTab);
   const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
@@ -1267,51 +1269,51 @@ export const Header: React.FC<HeaderProps> = ({
 
   const handleOpenContextPlan = React.useCallback(() => {
     const directory = normalize(openDirectory || '');
-    if (!directory) {
+    if (!directory || !contextPanelKey) {
       return;
     }
 
-    const panelState = contextPanelByDirectory[directory];
+    const panelState = contextPanelByDirectory[contextPanelKey];
     if (getActiveContextMode(panelState) === 'plan') {
-      closeContextPanel(directory);
+      closeContextPanel(contextPanelKey);
       return;
     }
 
-    openContextPlan(directory);
-  }, [closeContextPanel, contextPanelByDirectory, openContextPlan, openDirectory]);
+    openContextPlan(contextPanelKey);
+  }, [closeContextPanel, contextPanelByDirectory, contextPanelKey, openContextPlan, openDirectory]);
 
   const handleOpenContextBrowser = React.useCallback(() => {
     const directory = normalize(openDirectory || '');
-    if (!directory) {
+    if (!directory || !contextPanelKey) {
       return;
     }
 
-    const panelState = contextPanelByDirectory[directory];
+    const panelState = contextPanelByDirectory[contextPanelKey];
     if (getActiveContextMode(panelState) === 'browser') {
-      closeContextPanel(directory);
+      closeContextPanel(contextPanelKey);
       return;
     }
 
-    openContextBrowser(directory);
-  }, [closeContextPanel, contextPanelByDirectory, openContextBrowser, openDirectory]);
+    openContextBrowser(contextPanelKey);
+  }, [closeContextPanel, contextPanelByDirectory, contextPanelKey, openContextBrowser, openDirectory]);
 
   const isContextPlanActive = React.useMemo(() => {
     const directory = normalize(openDirectory || '');
-    if (!directory) {
+    if (!directory || !contextPanelKey) {
       return false;
     }
-    const panelState = contextPanelByDirectory[directory];
+    const panelState = contextPanelByDirectory[contextPanelKey];
     return getActiveContextMode(panelState) === 'plan';
-  }, [contextPanelByDirectory, openDirectory]);
+  }, [contextPanelByDirectory, contextPanelKey, openDirectory]);
 
   const isContextBrowserActive = React.useMemo(() => {
     const directory = normalize(openDirectory || '');
-    if (!directory) {
+    if (!directory || !contextPanelKey) {
       return false;
     }
-    const panelState = contextPanelByDirectory[directory];
+    const panelState = contextPanelByDirectory[contextPanelKey];
     return getActiveContextMode(panelState) === 'browser';
-  }, [contextPanelByDirectory, openDirectory]);
+  }, [contextPanelByDirectory, contextPanelKey, openDirectory]);
 
   const desktopHeaderIconButtonClass = DESKTOP_HEADER_ICON_BUTTON_CLASS;
   const mobileHeaderIconButtonClass = MOBILE_HEADER_ICON_BUTTON_CLASS;

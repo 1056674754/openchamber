@@ -80,6 +80,7 @@ import { useLinearAuthStore } from '@/stores/useLinearAuthStore';
 import { GitHubPrPickerDialog } from '@/components/session/GitHubPrPickerDialog';
 import { Icon } from "@/components/icon/Icon";
 import { useChatSearchDirectory } from '@/hooks/useChatSearchDirectory';
+import { useContextPanelKey } from '@/hooks/useContextPanelKey';
 import { opencodeClient } from '@/lib/opencode/client';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { PROJECT_COLOR_MAP, PROJECT_ICON_MAP, getProjectIconImageUrl } from '@/lib/projectMeta';
@@ -1239,10 +1240,11 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const [isNarrowComposer, setIsNarrowComposer] = React.useState(false);
     const currentSessionMessagesResolved = useSessionMessagesResolved(currentSessionId ?? '');
     const [stableComposerContextUsage, setStableComposerContextUsage] = React.useState<SessionContextUsage | null>(null);
+    const composerContextPanelKey = useContextPanelKey();
     const currentComposerContextPanelState = useUIStore(
         React.useCallback(
-            (state) => (currentSessionDirectoryForSync ? state.contextPanelByDirectory[currentSessionDirectoryForSync] : undefined),
-            [currentSessionDirectoryForSync],
+            (state) => (composerContextPanelKey ? state.contextPanelByDirectory[composerContextPanelKey] : undefined),
+            [composerContextPanelKey],
         ),
     );
 
@@ -1279,17 +1281,17 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     }, [currentComposerContextPanelState]);
 
     const handleOpenComposerContextPanel = React.useCallback(() => {
-        if (!currentSessionDirectoryForSync) {
+        if (!composerContextPanelKey) {
             return;
         }
 
         if (getActiveContextMode(currentComposerContextPanelState) === 'context') {
-            closeContextPanel(currentSessionDirectoryForSync);
+            closeContextPanel(composerContextPanelKey);
             return;
         }
 
-        openContextOverview(currentSessionDirectoryForSync);
-    }, [closeContextPanel, currentComposerContextPanelState, currentSessionDirectoryForSync, openContextOverview]);
+        openContextOverview(composerContextPanelKey);
+    }, [closeContextPanel, composerContextPanelKey, currentComposerContextPanelState, openContextOverview]);
 
     const shouldShowComposerContextUsage = !isMobile && !isVSCodeRuntime() && !!stableComposerContextUsage && stableComposerContextUsage.totalTokens > 0;
     const composerContextUsagePercentage = stableComposerContextUsage && stableComposerContextUsage.contextLimit > 0

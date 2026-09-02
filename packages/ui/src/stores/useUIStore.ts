@@ -131,6 +131,10 @@ const CONTEXT_PANEL_MIN_WIDTH = 380;
 const CONTEXT_PANEL_MAX_WIDTH = 1400;
 const CONTEXT_PANEL_MAX_TABS = 12;
 const CONTEXT_PANEL_MAX_LABEL_LENGTH = 120;
+// Panel-state entries live per storage key (directory, or conversation under
+// the session scope). Conversations multiply faster than projects, so the
+// bounded record keeps headroom over the per-directory era.
+const CONTEXT_PANEL_MAX_ROOT_ENTRIES = 32;
 const LEFT_SIDEBAR_MIN_WIDTH = 280;
 const RIGHT_SIDEBAR_MIN_WIDTH = 360;
 
@@ -154,6 +158,48 @@ const normalizeDirectoryPath = (value: string): string => {
 };
 
 export const normalizeContextPanelDirectoryKey = (value: string): string => normalizeDirectoryPath(value);
+
+export type ContextPanelScope = 'directory' | 'session';
+export const CONTEXT_PANEL_SESSION_KEY_PREFIX = 'session:';
+
+export const isSessionContextPanelKey = (value: string): boolean =>
+  value.startsWith(CONTEXT_PANEL_SESSION_KEY_PREFIX);
+
+/**
+ * Resolves the record key for context-panel state.
+ *
+ * 'directory' scope (default) keys by the normalized project directory — one
+ * panel per project. 'session' scope gives every conversation its own panel
+ * state (key `session:<id>`), falling back to the directory key while no
+ * conversation is active (cold start / draft). Directory keys are left
+ * untouched so both scopes can coexist in the persisted record and switching
+ * the scope never loses state.
+ */
+export const resolveContextPanelStorageKey = (
+  directory: string | null | undefined,
+  scope: ContextPanelScope,
+  sessionId: string | null | undefined,
+): string => {
+  if (scope === 'session') {
+    const id = typeof sessionId === 'string' ? sessionId.trim() : '';
+    if (id) {
+      return `${CONTEXT_PANEL_SESSION_KEY_PREFIX}${id}`;
+    }
+  }
+  return normalizeContextPanelDirectoryKey((directory || '').trim());
+};
+
+// Live source of the active conversation id, injected at app bootstrap so the
+// panel state can follow the session scope without a static import cycle
+// between useUIStore and the session store.
+let contextPanelSessionIdProvider: (() => string | null) | null = null;
+
+export const setContextPanelSessionIdProvider = (provider: (() => string | null) | null): void => {
+  contextPanelSessionIdProvider = provider;
+};
+
+const readContextPanelSessionId = (): string | null =>
+  contextPanelSessionIdProvider ? contextPanelSessionIdProvider() : null;
 
 const CONTEXT_PANEL_MODES = new Set<ContextPanelMode>([
   'diff',
@@ -626,7 +672,13 @@ interface UIStore {
   rightSidebarWidth: number;
   hasManuallyResizedRightSidebar: boolean;
   rightSidebarTab: RightSidebarTab;
+  /**
+   * Panel state keyed by panel-storage key: the normalized directory under
+   * the default 'directory' scope, or `session:<id>` while the 'session'
+   * scope (per-conversation panels) is active. See resolveContextPanelStorageKey.
+   */
   contextPanelByDirectory: Record<string, ContextPanelDirectoryState>;
+  contextPanelScope: ContextPanelScope;
   contextRailOrder: string[];
   notesPanelHeight: number;
   todoPanelHeight: number;
@@ -791,6 +843,7 @@ interface UIStore {
   setRightSidebarWidth: (width: number) => void;
   setRightSidebarTab: (tab: RightSidebarTab) => void;
   setContextRailOrder: (order: string[]) => void;
+  setContextPanelScope: (scope: ContextPanelScope) => void;
   openContextSurface: (directory: string, mode: ContextPanelMode) => void;
   openContextPanelTab: (directory: string, tab: ContextPanelTabDescriptor) => void;
   openContextDiff: (directory: string, filePath: string, scope?: PendingDiffScope | null) => void;
@@ -989,6 +1042,7 @@ export const useUIStore = create<UIStore>()(
         hasManuallyResizedRightSidebar: false,
         rightSidebarTab: 'git',
         contextPanelByDirectory: {},
+        contextPanelScope: 'directory',
         contextRailOrder: [],
         notesPanelHeight: 112,
         todoPanelHeight: 259,
@@ -1230,15 +1284,15 @@ export const useUIStore = create<UIStore>()(
         },
 
         openContextSurface: (directory, mode) => {
-          const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
-          if (!normalizedDirectory) return;
+          const panelKey = resolveContextPanelStorageKey(directory, get().contextPanelScope, readContextPanelSessionId());
+          if (!panelKey) return;
 
           const state = get();
-          const panelState = state.contextPanelByDirectory[normalizedDirectory];
+          const panelState = state.contextPanelByDirectory[panelKey];
           const tabs = panelState?.tabs ?? [];
           const activeTab = tabs.find((tab) => tab.id === panelState?.activeTabId) ?? null;
           if (panelState?.isOpen && activeTab?.mode === mode) {
-            state.closeContextPanel(normalizedDirectory);
+            state.closeContextPanel(panelKey);
             return;
           }
 
@@ -1247,29 +1301,29 @@ export const useUIStore = create<UIStore>()(
             const mostRecent = tabsOfMode.reduce((best, tab) => (
               tab.touchedAt >= best.touchedAt ? tab : best
             ));
-            state.setActiveContextPanelTab(normalizedDirectory, mostRecent.id);
+            state.setActiveContextPanelTab(panelKey, mostRecent.id);
             return;
           }
 
           if (mode === 'preview' || mode === 'chat') return;
-          state.openContextPanelTab(normalizedDirectory, { mode });
+          state.openContextPanelTab(panelKey, { mode });
         },
 
         openContextPanelTab: (directory, tab) => {
-          const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
-          if (!normalizedDirectory) {
+          const panelKey = resolveContextPanelStorageKey(directory, get().contextPanelScope, readContextPanelSessionId());
+          if (!panelKey) {
             return;
           }
 
           set((state) => {
-            const prev = state.contextPanelByDirectory[normalizedDirectory];
+            const prev = state.contextPanelByDirectory[panelKey];
             const current = touchContextPanelState(prev);
-            const byDirectory = {
+            const byKey = {
               ...state.contextPanelByDirectory,
-              [normalizedDirectory]: upsertContextPanelTab(current, tab),
+              [panelKey]: upsertContextPanelTab(current, tab),
             };
 
-            return { contextPanelByDirectory: clampContextPanelRoots(byDirectory, 20) };
+            return { contextPanelByDirectory: clampContextPanelRoots(byKey, CONTEXT_PANEL_MAX_ROOT_ENTRIES) };
           });
         },
 
@@ -1373,17 +1427,17 @@ export const useUIStore = create<UIStore>()(
         },
 
         setContextPanelTabTargetPath: (directory, tabID, targetPath) => {
-          const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
+          const panelKey = resolveContextPanelStorageKey(directory, get().contextPanelScope, readContextPanelSessionId());
           const normalizedTabID = (tabID || '').trim();
-          if (!normalizedDirectory || !normalizedTabID) return;
+          if (!panelKey || !normalizedTabID) return;
           set((state) => {
-            const prev = state.contextPanelByDirectory[normalizedDirectory];
+            const prev = state.contextPanelByDirectory[panelKey];
             if (!prev) return state;
             const current = touchContextPanelState(prev);
             return {
               contextPanelByDirectory: {
                 ...state.contextPanelByDirectory,
-                [normalizedDirectory]: setContextPanelTabTargetPath(current, normalizedTabID, targetPath),
+                [panelKey]: setContextPanelTabTargetPath(current, normalizedTabID, targetPath),
               },
             };
           });
@@ -1399,14 +1453,14 @@ export const useUIStore = create<UIStore>()(
         },
 
         setActiveContextPanelTab: (directory, tabID) => {
-          const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
+          const panelKey = resolveContextPanelStorageKey(directory, get().contextPanelScope, readContextPanelSessionId());
           const normalizedTabID = (tabID || '').trim();
-          if (!normalizedDirectory || !normalizedTabID) {
+          if (!panelKey || !normalizedTabID) {
             return;
           }
 
           set((state) => {
-            const prev = state.contextPanelByDirectory[normalizedDirectory];
+            const prev = state.contextPanelByDirectory[panelKey];
             const current = touchContextPanelState(prev);
             if (!current.tabs.some((tab) => tab.id === normalizedTabID)) {
               return state;
@@ -1416,9 +1470,9 @@ export const useUIStore = create<UIStore>()(
               return state;
             }
 
-            const byDirectory = {
+            const byKey = {
               ...state.contextPanelByDirectory,
-              [normalizedDirectory]: {
+              [panelKey]: {
                 ...current,
                 isOpen: true,
                 activeTabId: normalizedTabID,
@@ -1429,20 +1483,20 @@ export const useUIStore = create<UIStore>()(
               },
             };
 
-            return { contextPanelByDirectory: clampContextPanelRoots(byDirectory, 20) };
+            return { contextPanelByDirectory: clampContextPanelRoots(byKey, CONTEXT_PANEL_MAX_ROOT_ENTRIES) };
           });
         },
 
         reorderContextPanelTabs: (directory, activeTabID, overTabID) => {
-          const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
+          const panelKey = resolveContextPanelStorageKey(directory, get().contextPanelScope, readContextPanelSessionId());
           const normalizedActiveTabID = (activeTabID || '').trim();
           const normalizedOverTabID = (overTabID || '').trim();
-          if (!normalizedDirectory || !normalizedActiveTabID || !normalizedOverTabID) {
+          if (!panelKey || !normalizedActiveTabID || !normalizedOverTabID) {
             return;
           }
 
           set((state) => {
-            const prev = state.contextPanelByDirectory[normalizedDirectory];
+            const prev = state.contextPanelByDirectory[panelKey];
             const current = touchContextPanelState(prev);
             if (!current.tabs.some((tab) => tab.id === normalizedActiveTabID) || !current.tabs.some((tab) => tab.id === normalizedOverTabID)) {
               return state;
@@ -1453,95 +1507,95 @@ export const useUIStore = create<UIStore>()(
               return state;
             }
 
-            const byDirectory = {
+            const byKey = {
               ...state.contextPanelByDirectory,
-              [normalizedDirectory]: next,
+              [panelKey]: next,
             };
 
-            return { contextPanelByDirectory: clampContextPanelRoots(byDirectory, 20) };
+            return { contextPanelByDirectory: clampContextPanelRoots(byKey, CONTEXT_PANEL_MAX_ROOT_ENTRIES) };
           });
         },
 
         closeContextPanelTab: (directory, tabID) => {
-          const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
+          const panelKey = resolveContextPanelStorageKey(directory, get().contextPanelScope, readContextPanelSessionId());
           const normalizedTabID = (tabID || '').trim();
-          if (!normalizedDirectory || !normalizedTabID) {
+          if (!panelKey || !normalizedTabID) {
             return;
           }
 
           set((state) => {
-            const prev = state.contextPanelByDirectory[normalizedDirectory];
+            const prev = state.contextPanelByDirectory[panelKey];
             const current = touchContextPanelState(prev);
             if (!current.tabs.some((tab) => tab.id === normalizedTabID)) {
               return state;
             }
 
-            const byDirectory = {
+            const byKey = {
               ...state.contextPanelByDirectory,
-              [normalizedDirectory]: closeContextPanelTab(current, normalizedTabID),
+              [panelKey]: closeContextPanelTab(current, normalizedTabID),
             };
 
-            return { contextPanelByDirectory: clampContextPanelRoots(byDirectory, 20) };
+            return { contextPanelByDirectory: clampContextPanelRoots(byKey, CONTEXT_PANEL_MAX_ROOT_ENTRIES) };
           });
         },
 
         closeContextPanel: (directory) => {
-          const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
-          if (!normalizedDirectory) {
+          const panelKey = resolveContextPanelStorageKey(directory, get().contextPanelScope, readContextPanelSessionId());
+          if (!panelKey) {
             return;
           }
 
           set((state) => {
-            const prev = state.contextPanelByDirectory[normalizedDirectory];
+            const prev = state.contextPanelByDirectory[panelKey];
             if (!prev || !prev.isOpen) {
               return state;
             }
 
-            const byDirectory = {
+            const byKey = {
               ...state.contextPanelByDirectory,
-              [normalizedDirectory]: {
+              [panelKey]: {
                 ...touchContextPanelState(prev),
                 isOpen: false,
               },
             };
 
-            return { contextPanelByDirectory: clampContextPanelRoots(byDirectory, 20) };
+            return { contextPanelByDirectory: clampContextPanelRoots(byKey, CONTEXT_PANEL_MAX_ROOT_ENTRIES) };
           });
         },
 
         toggleContextPanelExpanded: (directory) => {
-          const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
-          if (!normalizedDirectory) {
+          const panelKey = resolveContextPanelStorageKey(directory, get().contextPanelScope, readContextPanelSessionId());
+          if (!panelKey) {
             return;
           }
 
           set((state) => {
-            const prev = state.contextPanelByDirectory[normalizedDirectory];
+            const prev = state.contextPanelByDirectory[panelKey];
             const current = touchContextPanelState(prev);
-            const byDirectory = {
+            const byKey = {
               ...state.contextPanelByDirectory,
-              [normalizedDirectory]: {
+              [panelKey]: {
                 ...current,
                 expanded: !current.expanded,
               },
             };
 
-            return { contextPanelByDirectory: clampContextPanelRoots(byDirectory, 20) };
+            return { contextPanelByDirectory: clampContextPanelRoots(byKey, CONTEXT_PANEL_MAX_ROOT_ENTRIES) };
           });
         },
 
         setContextPanelWidth: (directory, mode, width) => {
-          const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
-          if (!normalizedDirectory) {
+          const panelKey = resolveContextPanelStorageKey(directory, get().contextPanelScope, readContextPanelSessionId());
+          if (!panelKey) {
             return;
           }
 
           set((state) => {
-            const prev = state.contextPanelByDirectory[normalizedDirectory];
+            const prev = state.contextPanelByDirectory[panelKey];
             const current = touchContextPanelState(prev);
-            const byDirectory = {
+            const byKey = {
               ...state.contextPanelByDirectory,
-              [normalizedDirectory]: {
+              [panelKey]: {
                 ...current,
                 width: clampContextPanelWidth(width),
                 widthByMode: {
@@ -1551,54 +1605,62 @@ export const useUIStore = create<UIStore>()(
               },
             };
 
-            return { contextPanelByDirectory: clampContextPanelRoots(byDirectory, 20) };
+            return { contextPanelByDirectory: clampContextPanelRoots(byKey, CONTEXT_PANEL_MAX_ROOT_ENTRIES) };
           });
         },
 
         setContextPanelSplit: (directory, splitTabId) => {
-          const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
-          if (!normalizedDirectory) {
+          const panelKey = resolveContextPanelStorageKey(directory, get().contextPanelScope, readContextPanelSessionId());
+          if (!panelKey) {
             return;
           }
 
           set((state) => {
-            const prev = state.contextPanelByDirectory[normalizedDirectory];
+            const prev = state.contextPanelByDirectory[panelKey];
             const current = touchContextPanelState(prev);
             const nextSplitTabId = typeof splitTabId === 'string' && current.tabs.some((tab) => tab.id === splitTabId)
               ? splitTabId
               : null;
-            const byDirectory = {
+            const byKey = {
               ...state.contextPanelByDirectory,
-              [normalizedDirectory]: {
+              [panelKey]: {
                 ...current,
                 splitTabId: nextSplitTabId,
               },
             };
 
-            return { contextPanelByDirectory: clampContextPanelRoots(byDirectory, 20) };
+            return { contextPanelByDirectory: clampContextPanelRoots(byKey, CONTEXT_PANEL_MAX_ROOT_ENTRIES) };
           });
         },
 
         setContextPanelSplitRatio: (directory, ratio) => {
-          const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
-          if (!normalizedDirectory) {
+          const panelKey = resolveContextPanelStorageKey(directory, get().contextPanelScope, readContextPanelSessionId());
+          if (!panelKey) {
             return;
           }
 
           const clamped = Math.min(0.9, Math.max(0.1, ratio));
           set((state) => {
-            const prev = state.contextPanelByDirectory[normalizedDirectory];
+            const prev = state.contextPanelByDirectory[panelKey];
             const current = touchContextPanelState(prev);
-            const byDirectory = {
+            const byKey = {
               ...state.contextPanelByDirectory,
-              [normalizedDirectory]: {
+              [panelKey]: {
                 ...current,
                 splitRatio: clamped,
               },
             };
 
-            return { contextPanelByDirectory: clampContextPanelRoots(byDirectory, 20) };
+            return { contextPanelByDirectory: clampContextPanelRoots(byKey, CONTEXT_PANEL_MAX_ROOT_ENTRIES) };
           });
+        },
+
+        setContextPanelScope: (scope) => {
+          const next: ContextPanelScope = scope === 'session' ? 'session' : 'directory';
+          if (get().contextPanelScope === next) {
+            return;
+          }
+          set({ contextPanelScope: next });
         },
 
         setNotesPanelHeight: (height) => {
@@ -2651,6 +2713,7 @@ export const useUIStore = create<UIStore>()(
           // v9 -> v10: re-sanitize context panel state after a bad tab array
           // could be persisted with null entries and crash startup render.
           state.contextPanelByDirectory = sanitizeContextPanelByDirectory(state.contextPanelByDirectory);
+          state.contextPanelScope = state.contextPanelScope === 'session' ? 'session' : 'directory';
 
           if (version < 5) {
             if (!state.shortcutOverrides || typeof state.shortcutOverrides !== 'object') {
@@ -2717,6 +2780,7 @@ export const useUIStore = create<UIStore>()(
           rightSidebarWidth: state.rightSidebarWidth,
           rightSidebarTab: state.rightSidebarTab,
           contextPanelByDirectory: state.contextPanelByDirectory,
+          contextPanelScope: state.contextPanelScope,
           contextRailOrder: state.contextRailOrder,
           notesPanelHeight: state.notesPanelHeight,
           todoPanelHeight: state.todoPanelHeight,

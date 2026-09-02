@@ -13,10 +13,16 @@ import { initializeLocale, I18nProvider } from '@/lib/i18n';
 import { initializeAppearancePreferences, syncDesktopSettings } from '@/lib/persistence';
 import { startModelPrefsAutoSave } from '@/lib/modelPrefsAutoSave';
 import { startTypographyWatcher } from '@/lib/typographyWatcher';
+import { setContextPanelSessionIdProvider } from '@/stores/useUIStore';
+import { useSessionUIStore } from '@/sync/session-ui-store';
 import { ElectronMiniChatApp } from './ElectronMiniChatApp';
 
 const initializeSharedPreferences = () => {
   initializeLocale();
+
+  // Keep panel-state resolution consistent with the main window realm even
+  // though the mini chat renders no context panel itself.
+  setContextPanelSessionIdProvider(() => useSessionUIStore.getState().currentSessionId);
 
   void initializeAppearancePreferences().then(() => {
     void Promise.all([

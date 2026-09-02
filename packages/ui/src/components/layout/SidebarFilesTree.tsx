@@ -23,6 +23,7 @@ import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { isBrowserClientRuntime } from '@/lib/desktop';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
+import { useContextPanelKey } from '@/hooks/useContextPanelKey';
 import { useFileSearchStore } from '@/stores/useFileSearchStore';
 import { useFilesViewTabsStore } from '@/stores/useFilesViewTabsStore';
 import { useUIStore } from '@/stores/useUIStore';
@@ -448,7 +449,8 @@ export const SidebarFilesTree: React.FC = () => {
   const addOpenPath = useFilesViewTabsStore((state) => state.addOpenPath);
   const removeOpenPathsByPrefix = useFilesViewTabsStore((state) => state.removeOpenPathsByPrefix);
   const toggleExpandedPath = useFilesViewTabsStore((state) => state.toggleExpandedPath);
-  const contextTabs = useUIStore((state) => (root ? (state.contextPanelByDirectory[root]?.tabs ?? EMPTY_CONTEXT_TABS) : EMPTY_CONTEXT_TABS));
+  const contextPanelKey = useContextPanelKey();
+  const contextTabs = useUIStore((state) => (contextPanelKey ? (state.contextPanelByDirectory[contextPanelKey]?.tabs ?? EMPTY_CONTEXT_TABS) : EMPTY_CONTEXT_TABS));
   const openContextFilePaths = React.useMemo(() => new Set(
     contextTabs
       .map((tab) => (tab.mode === 'file' ? tab.targetPath : null))

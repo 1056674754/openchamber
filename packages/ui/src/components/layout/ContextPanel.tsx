@@ -16,11 +16,13 @@ import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
 import { openExternalUrl } from '@/lib/url';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
+import { useContextPanelKey } from '@/hooks/useContextPanelKey';
 import { useActiveServerId } from '@/hooks/useActiveServerId';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 import { resolvePreviewHeaderDisplayUrl } from '@/lib/previewDisplayUrl';
 import { useFilesViewTabsStore } from '@/stores/useFilesViewTabsStore';
+import { resolveGlobalSessionDirectory, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useUIStore, type ContextPanelMode } from '@/stores/useUIStore';
 import { useInlineCommentDraftStore } from '@/stores/useInlineCommentDraftStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
@@ -2077,6 +2079,21 @@ const ContextPanelTabContent: React.FC<{
   setChatFrameRef,
 }) => {
   const { t } = useI18n();
+  // A chat tab pins one specific session; its embedded iframe must render
+  // that session's own project even when the panel record belongs to a
+  // different directory or conversation (cross-project "Open in side panel").
+  const chatSessionID = tab.mode === 'chat' ? getSessionIDFromDedupeKey(tab.dedupeKey) : null;
+  const chatSessionDirectory = useGlobalSessionsStore((state) => {
+    if (!chatSessionID) return null;
+    const findIn = (list: typeof state.activeSessions) => list.find((session) => session.id === chatSessionID);
+    const session = findIn(state.activeSessions) ?? findIn(state.archivedSessions);
+    if (session) return resolveGlobalSessionDirectory(session);
+    for (const list of state.sessionsByDirectory.values()) {
+      const hit = findIn(list);
+      if (hit) return resolveGlobalSessionDirectory(hit);
+    }
+    return null;
+  });
 
   if (tab.mode === 'file') {
     return <FilesView mode="editor-only" active={active} directory={directory} />;
@@ -2085,7 +2102,7 @@ const ContextPanelTabContent: React.FC<{
   if (tab.mode === 'chat') {
     if (!active) return null;
     const sessionID = getSessionIDFromDedupeKey(tab.dedupeKey);
-    const src = sessionID ? buildEmbeddedSessionChatURL(sessionID, directory || null, tab.readOnly) : '';
+    const src = sessionID ? buildEmbeddedSessionChatURL(sessionID, chatSessionDirectory || directory || null, tab.readOnly) : '';
     if (!sessionID || !src) {
       return null;
     }
@@ -2189,8 +2206,11 @@ export const ContextPanel: React.FC = () => {
   const effectiveDirectory = useEffectiveDirectory() ?? '';
   const activeServerId = useActiveServerId();
   const directoryKey = React.useMemo(() => normalizeDirectoryKey(effectiveDirectory), [effectiveDirectory]);
+  // Panel-state key: the directory, or the active conversation under the
+  // per-conversation scope. Content props keep using directoryKey.
+  const panelKey = useContextPanelKey();
 
-  const panelState = useUIStore((state) => (directoryKey ? state.contextPanelByDirectory[directoryKey] : undefined));
+  const panelState = useUIStore((state) => (panelKey ? state.contextPanelByDirectory[panelKey] : undefined));
   const closeContextPanel = useUIStore((state) => state.closeContextPanel);
   const openContextBrowser = useUIStore((state) => state.openContextBrowser);
   const closeContextPanelTab = useUIStore((state) => state.closeContextPanelTab);

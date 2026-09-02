@@ -328,6 +328,9 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const setSessionTabsEnabled = useUIStore(state => state.setSessionTabsEnabled);
     const streamingAutoFollow = useUIStore(state => state.streamingAutoFollow);
     const setStreamingAutoFollow = useUIStore(state => state.setStreamingAutoFollow);
+    const contextPanelScope = useUIStore(state => state.contextPanelScope);
+    const setContextPanelScope = useUIStore(state => state.setContextPanelScope);
+    const sessionPanelScopeEnabled = contextPanelScope === 'session';
     const fileEditorKeymap = useUIStore(state => state.fileEditorKeymap);
     const setFileEditorKeymap = useUIStore(state => state.setFileEditorKeymap);
     const autoSaveEnabled = useUIStore(state => state.autoSaveEnabled);
@@ -1561,6 +1564,38 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                             </TooltipTrigger>
                                             <TooltipContent sideOffset={8} className="max-w-xs">
                                                 {t('settings.openchamber.visual.field.streamingAutoFollowInfo')}
+                                            </TooltipContent>
+                                        </Tooltip>
+                                    </div>
+                                </div>
+                            )}
+                            {shouldShow('sessionTabs') && !isMobile && (
+                                <div
+                                    className="group flex cursor-pointer items-center gap-2 py-1.5"
+                                    role="button"
+                                    tabIndex={0}
+                                    aria-pressed={sessionPanelScopeEnabled}
+                                    onClick={() => setContextPanelScope(sessionPanelScopeEnabled ? 'directory' : 'session')}
+                                    onKeyDown={(event) => {
+                                        if (event.key === ' ' || event.key === 'Enter') {
+                                            event.preventDefault();
+                                            setContextPanelScope(sessionPanelScopeEnabled ? 'directory' : 'session');
+                                        }
+                                    }}
+                                >
+                                    <Checkbox
+                                        checked={sessionPanelScopeEnabled}
+                                        onChange={(checked) => setContextPanelScope(checked ? 'session' : 'directory')}
+                                        ariaLabel={t('settings.openchamber.visual.field.sessionPanelScopeAria')}
+                                    />
+                                    <div className="flex min-w-0 items-center gap-1.5">
+                                        <span className="typography-ui-label text-foreground">{t('settings.openchamber.visual.field.sessionPanelScope')}</span>
+                                        <Tooltip>
+                                            <TooltipTrigger asChild>
+                                                <Icon name="information" className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
+                                            </TooltipTrigger>
+                                            <TooltipContent sideOffset={8} className="max-w-xs">
+                                                {t('settings.openchamber.visual.field.sessionPanelScopeInfo')}
                                             </TooltipContent>
                                         </Tooltip>
                                     </div>

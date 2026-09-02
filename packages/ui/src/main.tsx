@@ -13,6 +13,8 @@ import { applyPersistedDirectoryPreferences } from './lib/directoryPersistence'
 import { startTypographyWatcher } from './lib/typographyWatcher'
 import { startModelPrefsAutoSave } from './lib/modelPrefsAutoSave'
 import { initializeLocale, I18nProvider } from './lib/i18n'
+import { setContextPanelSessionIdProvider } from './stores/useUIStore'
+import { useSessionUIStore } from './sync/session-ui-store'
 import type { RuntimeAPIs } from './lib/api/types'
 
 declare global {
@@ -26,6 +28,10 @@ const runtimeAPIs = (typeof window !== 'undefined' && window.__OPENCHAMBER_RUNTI
 })();
 
 initializeLocale();
+
+// Context-panel session scope resolves the active conversation at call time
+// (kept as an injected provider to avoid an import cycle into useUIStore).
+setContextPanelSessionIdProvider(() => useSessionUIStore.getState().currentSessionId);
 
 // Initialize settings asynchronously — the app renders with defaults first
 // and hydrates once persisted preferences are applied. Users with non-default

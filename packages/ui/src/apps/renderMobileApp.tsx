@@ -18,9 +18,15 @@ import { markAppBootReady } from '@/apps/appBootReady';
 import { RuntimeAPIProvider } from '@/contexts/RuntimeAPIProvider';
 import { applyCapacitorRootClass } from '@/hooks/nativeMobileChrome';
 import { isCapacitorApp } from '@/lib/platform';
+import { setContextPanelSessionIdProvider } from '@/stores/useUIStore';
+import { useSessionUIStore } from '@/sync/session-ui-store';
 
 const initializeSharedPreferences = () => {
   initializeLocale();
+
+  // Context-panel session scope resolves the active conversation at call time
+  // (kept as an injected provider to avoid an import cycle into useUIStore).
+  setContextPanelSessionIdProvider(() => useSessionUIStore.getState().currentSessionId);
 
   void initializeAppearancePreferences().then(() => {
     void Promise.all([

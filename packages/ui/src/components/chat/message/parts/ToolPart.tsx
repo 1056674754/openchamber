@@ -1418,7 +1418,10 @@ const TaskToolSummary: React.FC<{
     const handleOpenSession = (event: React.MouseEvent) => {
         event.stopPropagation();
         if (sessionId && currentDirectory) {
-            if (isMobile || runtime?.runtime.isVSCode) {
+            // Inside the panel's embedded chat iframe the panel-state write
+            // would land in a foreign realm — switch the session instead
+            // (same guard as handleOpenLinkedSubagent / MessageBody).
+            if (isEmbeddedSessionChat() || isMobile || runtime?.runtime.isVSCode) {
                 setCurrentSession(
                     sessionId,
                     currentDirectory,

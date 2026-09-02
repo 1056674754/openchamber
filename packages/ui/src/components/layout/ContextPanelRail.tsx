@@ -19,6 +19,7 @@ import { CSS } from '@dnd-kit/utilities';
 import { Icon } from '@/components/icon/Icon';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
+import { useContextPanelKey } from '@/hooks/useContextPanelKey';
 import { useI18n } from '@/lib/i18n';
 import { sortContextSurfaces, type ContextSurfaceDescriptor } from '@/lib/surfaces/registry';
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
@@ -95,8 +96,10 @@ export const ContextPanelRail: React.FC = () => {
   const { t } = useI18n();
   const effectiveDirectory = useEffectiveDirectory();
   const directoryKey = effectiveDirectory ? normalizeContextPanelDirectoryKey(effectiveDirectory) : '';
+  // Panel-state key follows the scope setting; git status stays directory-keyed.
+  const panelKey = useContextPanelKey();
   const panelState = useUIStore((state) => (
-    directoryKey ? state.contextPanelByDirectory[directoryKey] : undefined
+    panelKey ? state.contextPanelByDirectory[panelKey] : undefined
   ));
   const contextRailOrder = useUIStore((state) => state.contextRailOrder);
   const setContextRailOrder = useUIStore((state) => state.setContextRailOrder);
@@ -137,15 +140,15 @@ export const ContextPanelRail: React.FC = () => {
     if (!directoryKey || !githubAuthChecked || githubConnected || activeMode !== 'pr') {
       return;
     }
-    closeContextPanel(directoryKey);
-  }, [activeMode, closeContextPanel, directoryKey, githubAuthChecked, githubConnected]);
+    closeContextPanel(panelKey);
+  }, [activeMode, closeContextPanel, directoryKey, githubAuthChecked, githubConnected, panelKey]);
 
   React.useEffect(() => {
     if (!directoryKey || !linearAuthChecked || linearConnected || activeMode !== 'linear') {
       return;
     }
-    closeContextPanel(directoryKey);
-  }, [activeMode, closeContextPanel, directoryKey, linearAuthChecked, linearConnected]);
+    closeContextPanel(panelKey);
+  }, [activeMode, closeContextPanel, directoryKey, linearAuthChecked, linearConnected, panelKey]);
 
   const handleDragEnd = React.useCallback((event: DragEndEvent) => {
     const { active, over } = event;

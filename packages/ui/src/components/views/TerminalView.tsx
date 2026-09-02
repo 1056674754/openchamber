@@ -4,6 +4,7 @@ import { toast } from '@/components/ui';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { EMPTY_TERMINAL_BUFFER, useTerminalStore } from '@/stores/useTerminalStore';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
+import { useContextPanelKey } from '@/hooks/useContextPanelKey';
 import { type TerminalStreamEvent } from '@/lib/api/types';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useFontPreferences } from '@/hooks/useFontPreferences';
@@ -246,14 +247,15 @@ export const TerminalView: React.FC = () => {
 
     const activeMainTab = useUIStore((state) => state.activeMainTab);
     const contextPanelByDirectory = useUIStore((state) => state.contextPanelByDirectory);
+    const contextPanelKey = useContextPanelKey();
     const isTerminalMainTab = activeMainTab === 'terminal';
     const isTerminalInContextPanel = React.useMemo(() => {
-        if (!effectiveDirectory) return false;
-        const panelState = contextPanelByDirectory[effectiveDirectory];
+        if (!contextPanelKey) return false;
+        const panelState = contextPanelByDirectory[contextPanelKey];
         if (!panelState?.isOpen || !panelState.activeTabId) return false;
         const activeTab = panelState.tabs.find(t => t.id === panelState.activeTabId);
         return activeTab?.mode === 'terminal';
-    }, [contextPanelByDirectory, effectiveDirectory]);
+    }, [contextPanelByDirectory, contextPanelKey]);
     const isTerminalVisible = isTerminalMainTab || isTerminalInContextPanel;
     const [hasOpenedTerminalViewport, setHasOpenedTerminalViewport] = React.useState(isTerminalVisible);
 
