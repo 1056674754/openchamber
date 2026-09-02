@@ -1,4 +1,4 @@
-const BUILD_VERSION_PREFIX = '1.20.0-sscity';
+const BUILD_VERSION_PREFIX = '1.22.0-sscity';
 
 export const createBuildVersion = (sourceVersion, builtAt = new Date(), timeZone = 'Asia/Shanghai') => {
   if (sourceVersion !== BUILD_VERSION_PREFIX) {
