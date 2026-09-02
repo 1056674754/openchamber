@@ -316,6 +316,9 @@ export const useGitStore = create<GitStore>()(
     (set, get) => ({
       directories: new Map(),
       activeDirectory: null,
+      nestedReposByRoot: new Map(),
+      nestedRepoSelection: new Map(),
+      staleClearedSelections: new Map(),
 
       setActiveDirectory: (directory) => {
         const { activeDirectory, directories } = get();
