@@ -3388,3 +3388,25 @@ v1.20.0-sscity 尚未宣布完成：当前未关闭 `#135/#140/#142-#151/#154/#1
 ## 修复：nested-repo 初始 state 字段丢失（2026-09-02）
 
 `7cba44e75`（nested git repositories）落库时，`useGitStore` 的 `nestedReposByRoot` / `nestedRepoSelection` / `staleClearedSelections` 三个字段**只在 actions/selectors 层生效，初始 state 声明丢失**——自动化替换脚本命中了错误的锚点。type-check 无法捕获（selectors 经 useSyncExternalStore 运行时访问字段），首帧渲染 `useEffectiveGitDirectory` 即抛 `Cannot read properties of undefined (reading 'get')`，runtime install 后的实机首启暴露。修复：`86f2bec95` 补回三个 Map() 初始字段；runtime 已重建重装（`1.22.0-sscity.20260902-200542`）。教训：新增 store 字段时初始 state 与 interface 必须同处校验，或为 selector 增加直接的字段存在性测试。
+
+## v1.22.x [Custom]：会话级侧栏作用域（per-conversation context panel scope）（2026-09-02）
+
+用户需求：右侧 ContextPanel 此前按项目目录共享面板状态（`contextPanelByDirectory` 以 normalize 后目录为 key），同一项目下切换会话时面板内容互相踩踏；对标 Codex/Claude 桌面端"每个对话独立侧栏"的体验，要求做成设置可切换。
+
+实现要点：
+
+- **作用域解析集中在 store 内部**：新增持久化设置 `contextPanelScope: 'directory'（默认）| 'session'`。11 个直接写 `contextPanelByDirectory` 的 action 统一改经 `resolveContextPanelStorageKey(directory, scope, sessionId)` 解析记录 key——session 作用域且当前有会话时 key 为 `session:<id>`，否则回退目录 key。委托型 action（openContextDiff/File/Overview/Plan/Preview/Browser/Terminal）零改动（最终都走 `openContextPanelTab` 单一写入口）。**向 action 传 key 是幂等的**（session key 在 session 作用域下重解析为自身），调用方无需感知作用域。
+- **会话 id 由注入 provider 提供**（`setContextPanelSessionIdProvider`，main.tsx / renderMobileApp.tsx / renderElectronMiniChatApp.tsx 三个入口注册）——避免 useUIStore 静态反向依赖 session store（后者本就 import useUIStore），provider 运行时读 `currentSessionId`，无同步漂移面。
+- **读侧**：新增 `useContextPanelKey()` hook，6 个直接读记录的组件换用（ContextPanel 的 panelState、Rail、Header 的 4 处查找、ChatInput 的 composer context 选择器、TerminalView 的 isTerminalInContextPanel、SidebarFilesTree 的已打开文件指示）。ContextPanel 内容类 props（FilesView directory、embedded chat 等）继续用目录 key。
+- **两种作用域状态共存**：记录 key 自描述（`session:` 前缀 vs 目录路径），`sanitizeContextPanelByDirectory` 的 `normalizeDirectoryPath` 对 session key 恒等通过，切换作用域互不覆盖、随时切回。条目上限 20→`CONTEXT_PANEL_MAX_ROOT_ENTRIES`(32)。persist partialize/migrate 增加 `contextPanelScope` sanitize。
+- **设置入口**：OpenChamberVisualSettings 会话区新增开关（复用 `shouldShow('sessionTabs')` 门），i18n 11 个语言 settings 文件各 3 条（`sessionPanelScope`/`Aria`/`Info`，按各文件引号风格插入）。
+- **跨项目 chat tab 修复**（审查发现）：chat 标签的 embedded iframe 目录用 tab 自身会话的项目目录（`useGlobalSessionsStore` 解析）而非面板目录 key——session 作用域下从 global pinned/recent 区对其他项目会话 "Open in side panel" 时，原实现会把该会话注册到错误项目。
+
+多镜头审查（4 lens + 逐条 adversarial verify，15 agents）确认并已修复：① ChatInput composer context chip 读 panelKey 但 handler 写 `currentSessionDirectoryForSync`（worktree attach 目录与 session 目录分歧时 toggle 失灵）→ handler 统一走 panelKey；② Header plan/browser 切换同类读写 key 分歧 → action 参数统一 panelKey；③ 跨项目 chat tab 目录错配（见上）；④ ToolPart TaskToolSummary `handleOpenSession` 缺 `isEmbeddedSessionChat()` 卫语句（embedded iframe realm 内写面板状态）→ 与两个兄弟调用点对齐。
+
+记录在案的设计决策（不改动）：
+
+- **draft 期回退目录 key**：`openNewSessionDraft` 置空 `currentSessionId` 后面板切到目录记录。这是"会话级面板"语义的自然延伸——草稿还没有会话；目录记录充当项目级草稿面，期间的开签在下次无会话状态可见，不跨会话泄漏。draft→session 创建瞬间新会话面板为空，即特性本身。
+- **面板 key 先于 timeline 切换**：会话切换时 panel key 在 urgent commit 生效、chat timeline 走 deferred/hold（#182）——面板略先于时间线呈现目标会话状态，方向一致，可接受。
+
+验证：useUIStore.contextPanel 16/16（含 session 作用域 8 例新测试）✅；全 workspace type-check（7/7）/UI lint（0 error）✅；`git diff --check` ✅。实机 QA（会话间面板隔离、作用域切换即时生效、设置开关、rail 图标、跨项目 open-in-side-panel）随下次桌面验证。
