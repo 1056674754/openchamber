@@ -3373,3 +3373,14 @@ v1.20.0-sscity 尚未宣布完成：当前未关闭 `#135/#140/#142-#151/#154/#1
 
 1. **streaming auto-follow preference**：✅ 已随 #161 Phase 1 完成（`5027efb15`，见对应 section）。
 2. **bounded settings mutation tracking**（`22c5582ff` + `7f1b9e013`）：审计为**架构不适用**。上游 bug 的前提是 syncDesktopSettings（GET）与 debounced flush（PUT）并行竞争、以 mutations 数组 + operations 集合做 revision 调停。fork 的 persistence.ts 是自己演化的实现：`_settingsFlushChain` 串行化全部 settings 写、runtime context 检查防跨 runtime 污染、失败存档（`recordFailedSettings`）走独立通道——不存在无界的 mutations 历史数组，上游的 history-bound 修复在 fork 结构下无对应物可修。上游两提交仅是对其自身实现的封装重构 + bug fix，不构成 fork 的移植项。
+
+## v1.22.0 后的 upstream/main 增量（2026-09-01）
+
+上游 v1.22.0 tag 后、v1.22.1 发版前 main 上有 4 个提交（上游作者随后进入 README 休假通知）。逐项处置：
+
+- `85a95bb8e`（proxy origin）：✅ 已移植（`46bb27326`）。TLS 在边缘终结、HTTP 转发的部署中 Origin 比较不再 403——forwarded external host 直接比较（host 仍须匹配，不信任任意 origin）。含上游测试文件 4 例。移植后修正一处：packaged client origins 按 raw header 检查（URL.origin 对 openchamber-ui:// 等非特殊 scheme 返回 "null"）。
+- `0e3aff884`（resize pinning）：审计为**引擎不适用**——修复的是上游 LegendList 引擎的 pin 行为；fork 引擎（tanstack + useChatAutoFollow）无"空闲会话 resize 后强制回底"路径（re-pin 仅 working/settling，pill 兜底），修复后的语义 fork 已天然满足。
+- `2c8ae9adc`（sidebar 按钮 hover 空间）：审计为**不适用**——fork 的按钮结构（pr-12/pr-8 + transition-[padding]）已预留 hover 动作空间，与上游修复后的形态等价。
+- `16046a98d`（README 休假通知）：文档，不移植。
+
+验证：request-security 4/4 ✅；全 workspace type-check/lint ✅；`git diff --check` ✅。至此 fork 与 upstream/main（`85a95bb8e`）完全对齐；上游作者休假期间预期无新增。
