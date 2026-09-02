@@ -3384,3 +3384,7 @@ v1.20.0-sscity 尚未宣布完成：当前未关闭 `#135/#140/#142-#151/#154/#1
 - `16046a98d`（README 休假通知）：文档，不移植。
 
 验证：request-security 4/4 ✅；全 workspace type-check/lint ✅；`git diff --check` ✅。至此 fork 与 upstream/main（`85a95bb8e`）完全对齐；上游作者休假期间预期无新增。
+
+## 修复：nested-repo 初始 state 字段丢失（2026-09-02）
+
+`7cba44e75`（nested git repositories）落库时，`useGitStore` 的 `nestedReposByRoot` / `nestedRepoSelection` / `staleClearedSelections` 三个字段**只在 actions/selectors 层生效，初始 state 声明丢失**——自动化替换脚本命中了错误的锚点。type-check 无法捕获（selectors 经 useSyncExternalStore 运行时访问字段），首帧渲染 `useEffectiveGitDirectory` 即抛 `Cannot read properties of undefined (reading 'get')`，runtime install 后的实机首启暴露。修复：`86f2bec95` 补回三个 Map() 初始字段；runtime 已重建重装（`1.22.0-sscity.20260902-200542`）。教训：新增 store 字段时初始 state 与 interface 必须同处校验，或为 selector 增加直接的字段存在性测试。
