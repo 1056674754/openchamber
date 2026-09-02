@@ -61,7 +61,6 @@ import {
 import { UNRESOLVED_SERVER_ID } from '@/sync/session-authority';
 import { buildEmbeddedSessionChatURL, getActiveEmbeddedSessionChatTab } from './contextPanelEmbeddedChat';
 import { ProjectContextPanel } from './RightSidebarTabs';
-import { getContextSurfaceWidthFraction } from '@/lib/surfaces/registry';
 import { selectBrowserHistory, useBrowserHistoryStore } from '@/stores/useBrowserHistoryStore';
 import {
   DevTunnelUnavailableError,
@@ -2232,15 +2231,10 @@ export const ContextPanel: React.FC = () => {
   const hasSplit = Boolean(splitTab && activeTab && splitTab.id !== activeTab.id);
   const isOpen = Boolean(panelState?.isOpen && activeTab);
   const isExpanded = Boolean(isOpen && panelState?.expanded);
-  const [availablePanelAreaWidth, setAvailablePanelAreaWidth] = React.useState<number | null>(null);
-  const activeModeForWidth = activeTab?.mode ?? null;
-  const manualWidth = activeModeForWidth ? panelState?.widthByMode?.[activeModeForWidth] : undefined;
-  const widthFraction = activeModeForWidth ? getContextSurfaceWidthFraction(activeModeForWidth) : 0.5;
-  const widthFallbackBase = availablePanelAreaWidth
-    ?? (typeof window !== 'undefined' ? window.innerWidth : CONTEXT_PANEL_DEFAULT_WIDTH * 2);
-  const width = clampWidth(manualWidth ?? Math.round(widthFraction * widthFallbackBase));
-
   const [isResizing, setIsResizing] = React.useState(false);
+  const activeModeForWidth = activeTab?.mode ?? null;
+  // One width for the whole panel — switching tabs never resizes it.
+  const width = clampWidth(panelState?.width ?? CONTEXT_PANEL_DEFAULT_WIDTH);
   const isResizingRef = React.useRef(false);
   const [suppressWidthTransition, setSuppressWidthTransition] = React.useState(false);
   const startXRef = React.useRef(0);
@@ -2261,16 +2255,6 @@ export const ContextPanel: React.FC = () => {
   const wasOpenRef = React.useRef(false);
   const previousIsOpenRef = React.useRef(isOpen);
   const suppressWidthTransitionFrameRef = React.useRef<number | null>(null);
-
-  React.useLayoutEffect(() => {
-    const parent = panelRef.current?.parentElement;
-    if (!parent) return;
-    const update = () => setAvailablePanelAreaWidth(getAvailablePanelWidth(panelRef.current));
-    update();
-    const observer = new ResizeObserver(update);
-    observer.observe(parent);
-    return () => observer.disconnect();
-  }, []);
 
   const suppressWidthTransitionForFrame = React.useCallback(() => {
     setSuppressWidthTransition(true);
@@ -2379,7 +2363,7 @@ export const ContextPanel: React.FC = () => {
     suppressWidthTransitionForFrame();
     applyLiveWidth(finalWidth);
     resizingWidthRef.current = finalWidth;
-    setContextPanelWidth(directoryKey, activeModeForWidth, finalWidth);
+    setContextPanelWidth(directoryKey, finalWidth);
     isResizingRef.current = false;
     setIsResizing(false);
     activeResizePointerIDRef.current = null;

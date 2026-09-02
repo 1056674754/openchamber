@@ -49,14 +49,14 @@ describe('useUIStore context panel file tabs', () => {
     expect(useUIStore.getState().contextPanelByDirectory['/root/remote/project']).toBe(undefined);
   });
 
-  test('persists widths independently per surface mode', () => {
+  test('keeps one width across surface modes', () => {
     const store = useUIStore.getState();
-    store.setContextPanelWidth('/root/remote/project', 'git', 480);
-    store.setContextPanelWidth('/root/remote/project', 'diff', 760);
+    store.setContextPanelWidth('/root/remote/project', 480);
+    store.setContextPanelWidth('/root/remote/project', 760);
 
     const panel = useUIStore.getState().contextPanelByDirectory['/root/remote/project'];
-    expect(panel?.widthByMode.git).toBe(480);
-    expect(panel?.widthByMode.diff).toBe(760);
+    expect(panel?.width).toBe(760);
+    expect((panel as { widthByMode?: unknown } | undefined)?.widthByMode).toBeUndefined();
   });
 
   test('deduplicates persisted rail order', () => {

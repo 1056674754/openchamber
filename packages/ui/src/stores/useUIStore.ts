@@ -69,7 +69,6 @@ type ContextPanelDirectoryState = {
   tabs: ContextPanelTab[];
   activeTabId: string | null;
   width: number;
-  widthByMode: Partial<Record<ContextPanelMode, number>>;
   touchedAt: number;
   splitTabId: string | null;
   splitRatio: number;
@@ -438,7 +437,6 @@ const touchContextPanelState = (prev?: ContextPanelDirectoryState): ContextPanel
     tabs: [],
     activeTabId: null,
     width: CONTEXT_PANEL_DEFAULT_WIDTH,
-    widthByMode: {},
     touchedAt: Date.now(),
     splitTabId: null,
     splitRatio: 0.5,
@@ -557,7 +555,6 @@ const sanitizeContextPanelByDirectory = (
       tabs?: unknown;
       activeTabId?: unknown;
       width?: unknown;
-      widthByMode?: unknown;
       touchedAt?: unknown;
       mode?: unknown;
       targetPath?: unknown;
@@ -582,14 +579,6 @@ const sanitizeContextPanelByDirectory = (
 
     const resolvedActiveTabId = resolveActiveContextPanelTabID(tabs, activeTabId);
     const clampedTabs = clampContextPanelTabs(tabs, CONTEXT_PANEL_MAX_TABS, resolvedActiveTabId);
-    const widthByMode: Partial<Record<ContextPanelMode, number>> = {};
-    if (candidate.widthByMode && typeof candidate.widthByMode === 'object') {
-      for (const [mode, width] of Object.entries(candidate.widthByMode as Record<string, unknown>)) {
-        if (isContextPanelMode(mode) && typeof width === 'number' && Number.isFinite(width)) {
-          widthByMode[mode] = clampContextPanelWidth(width);
-        }
-      }
-    }
 
     next[directory] = {
       isOpen: candidate.isOpen === true,
@@ -597,7 +586,6 @@ const sanitizeContextPanelByDirectory = (
       tabs: clampedTabs,
       activeTabId: resolveActiveContextPanelTabID(clampedTabs, resolvedActiveTabId),
       width: clampContextPanelWidth(typeof candidate.width === 'number' ? candidate.width : CONTEXT_PANEL_DEFAULT_WIDTH),
-      widthByMode,
       touchedAt: typeof candidate.touchedAt === 'number' && Number.isFinite(candidate.touchedAt)
         ? candidate.touchedAt
         : Date.now(),
@@ -860,7 +848,7 @@ interface UIStore {
   closeContextPanelTab: (directory: string, tabID: string) => void;
   closeContextPanel: (directory: string) => void;
   toggleContextPanelExpanded: (directory: string) => void;
-  setContextPanelWidth: (directory: string, mode: ContextPanelMode, width: number) => void;
+  setContextPanelWidth: (directory: string, width: number) => void;
   setContextPanelSplit: (directory: string, splitTabId: string | null) => void;
   setContextPanelSplitRatio: (directory: string, ratio: number) => void;
   setNotesPanelHeight: (height: number) => void;
@@ -1584,7 +1572,7 @@ export const useUIStore = create<UIStore>()(
           });
         },
 
-        setContextPanelWidth: (directory, mode, width) => {
+        setContextPanelWidth: (directory, width) => {
           const panelKey = resolveContextPanelStorageKey(directory, get().contextPanelScope, readContextPanelSessionId());
           if (!panelKey) {
             return;
@@ -1598,10 +1586,6 @@ export const useUIStore = create<UIStore>()(
               [panelKey]: {
                 ...current,
                 width: clampContextPanelWidth(width),
-                widthByMode: {
-                  ...current.widthByMode,
-                  [mode]: clampContextPanelWidth(width),
-                },
               },
             };
 
