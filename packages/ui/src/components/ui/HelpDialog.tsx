@@ -140,30 +140,6 @@ export const HelpDialog: React.FC = () => {
       categoryKey: "helpDialog.section.panels",
       items: [
         {
-          id: 'toggle_right_sidebar',
-          descriptionKey: 'helpDialog.item.toggleRightSidebar',
-          icon: "layout-right",
-          keys: '',
-        },
-        {
-          id: 'open_right_sidebar_git',
-          descriptionKey: 'helpDialog.item.openRightSidebarGitTab',
-          icon: "git-branch",
-          keys: '',
-        },
-        {
-          id: 'open_right_sidebar_files',
-          descriptionKey: 'helpDialog.item.openRightSidebarFilesTab',
-          icon: "layout-right",
-          keys: '',
-        },
-        {
-          id: 'cycle_right_sidebar_tab',
-          descriptionKey: 'helpDialog.item.cycleRightSidebarTab',
-          icon: "layout-right",
-          keys: '',
-        },
-        {
           id: 'toggle_terminal',
           descriptionKey: 'helpDialog.item.toggleTerminalDock',
           icon: "window",

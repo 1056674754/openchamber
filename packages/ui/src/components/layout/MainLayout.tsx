@@ -2,8 +2,7 @@ import React, { useRef, useEffect } from 'react';
 import { motion, useMotionValue, animate } from 'motion/react';
 import { Header } from './Header';
 import { Sidebar, SIDEBAR_CONTENT_WIDTH } from './Sidebar';
-import { RightSidebar, RIGHT_SIDEBAR_CONTENT_WIDTH } from './RightSidebar';
-import { ProjectContextPanel, RightSidebarTabs } from './RightSidebarTabs';
+import { ProjectContextPanel } from './RightSidebarTabs';
 import { ContextPanel } from './ContextPanel';
 import { ContextPanelRail } from './ContextPanelRail';
 import { ErrorBoundary } from '../ui/ErrorBoundary';
@@ -56,13 +55,9 @@ const ScheduledTasksView = lazyWithChunkRecovery(() => import('@/components/sess
 const MOBILE_DRAWER_WIDTH_PERCENT = 100;
 const DESKTOP_SIDEBAR_MIN_WIDTH = 280;
 const DESKTOP_SIDEBAR_MAX_WIDTH = 500;
-const DESKTOP_RIGHT_SIDEBAR_MIN_WIDTH = 360;
-const DESKTOP_RIGHT_SIDEBAR_MAX_WIDTH = 860;
 
 export const MainLayout: React.FC = () => {
     const { t } = useI18n();
-    const RIGHT_SIDEBAR_AUTO_CLOSE_WIDTH = 1140;
-    const RIGHT_SIDEBAR_AUTO_OPEN_WIDTH = 1220;
     const isSidebarOpen = useUIStore((state) => state.isSidebarOpen);
     const isRightSidebarOpen = useUIStore((state) => state.isRightSidebarOpen);
     const setRightSidebarOpen = useUIStore((state) => state.setRightSidebarOpen);
@@ -91,9 +86,7 @@ export const MainLayout: React.FC = () => {
     const { isMobile, screenWidth } = useDeviceInfo();
     const visualViewport = useVisualViewport();
     const sidebarWidth = useUIStore((state) => state.sidebarWidth);
-    const rightSidebarWidth = useUIStore((state) => state.rightSidebarWidth);
     const setSidebarOpen = useUIStore((state) => state.setSidebarOpen);
-    const rightSidebarAutoClosedRef = React.useRef(false);
 
     // Tablet split layout is a live SIZE CLASS (not an iPad identity check), so
     // Android tablets and foldables are covered by the same branch as iPad. The
@@ -239,75 +232,6 @@ export const MainLayout: React.FC = () => {
         }
     }, [isMobile, setIsMobile]);
 
-    React.useEffect(() => {
-        if (typeof window === 'undefined') {
-            return;
-        }
-
-        let frameId: number | undefined;
-
-         const handleResponsivePanels = () => {
-             const state = useUIStore.getState();
-             const width = window.innerWidth;
-
-             if (!isMobile) {
-                 const shouldCloseRightSidebar = width < RIGHT_SIDEBAR_AUTO_CLOSE_WIDTH;
-                 const canAutoOpenRightSidebar = width >= RIGHT_SIDEBAR_AUTO_OPEN_WIDTH;
-
-                 if (shouldCloseRightSidebar) {
-                     if (state.isRightSidebarOpen) {
-                         setRightSidebarOpen(false);
-                         rightSidebarAutoClosedRef.current = true;
-                     }
-                 } else if (canAutoOpenRightSidebar && rightSidebarAutoClosedRef.current) {
-                     setRightSidebarOpen(true);
-                     rightSidebarAutoClosedRef.current = false;
-                 }
-             }
-         };
-
-        const handleResize = () => {
-            if (frameId !== undefined) {
-                return;
-            }
-
-            frameId = window.requestAnimationFrame(() => {
-                frameId = undefined;
-                handleResponsivePanels();
-            });
-        };
-
-        handleResponsivePanels();
-        window.addEventListener('resize', handleResize);
-
-        return () => {
-            window.removeEventListener('resize', handleResize);
-            if (frameId !== undefined) {
-                window.cancelAnimationFrame(frameId);
-            }
-        };
-    }, [isMobile, setRightSidebarOpen]);
-
-    React.useEffect(() => {
-        if (typeof window === 'undefined') {
-            return;
-        }
-
-        const unsubscribe = useUIStore.subscribe((state, prevState) => {
-            const width = window.innerWidth;
-
-            const rightCanAutoOpen = width >= RIGHT_SIDEBAR_AUTO_OPEN_WIDTH;
-
-            if (state.isRightSidebarOpen !== prevState.isRightSidebarOpen && rightCanAutoOpen) {
-                rightSidebarAutoClosedRef.current = false;
-            }
-        });
-
-        return () => {
-            unsubscribe();
-        };
-    }, []);
-
     const secondaryView = React.useMemo(() => {
         switch (activeMainTab) {
             case 'plan':
@@ -340,10 +264,6 @@ export const MainLayout: React.FC = () => {
         const rawWidth = sidebarWidth || SIDEBAR_CONTENT_WIDTH;
         return Math.min(DESKTOP_SIDEBAR_MAX_WIDTH, Math.max(DESKTOP_SIDEBAR_MIN_WIDTH, rawWidth));
     }, [sidebarWidth]);
-    const visibleRightSidebarWidth = React.useMemo(() => {
-        const rawWidth = rightSidebarWidth || RIGHT_SIDEBAR_CONTENT_WIDTH;
-        return Math.min(DESKTOP_RIGHT_SIDEBAR_MAX_WIDTH, Math.max(DESKTOP_RIGHT_SIDEBAR_MIN_WIDTH, rawWidth));
-    }, [rightSidebarWidth]);
 
     return (
         <DiffWorkerProvider>
@@ -556,7 +476,7 @@ export const MainLayout: React.FC = () => {
                 </DrawerProvider>
             ) : (
                 <>
-                    {/* Desktop: full-width Header above [Sidebar | chat-frame | RightSidebar] row */}
+                    {/* Desktop: full-width Header above [Sidebar | chat-frame] row */}
                     <div className="flex flex-1 flex-col overflow-hidden">
                         <Header />
                         <div className="relative flex flex-1 min-h-0 overflow-hidden bg-sidebar" data-page-scroll-lock="true">
@@ -584,30 +504,6 @@ export const MainLayout: React.FC = () => {
                                     maskImage: 'radial-gradient(circle at 100% 0%, transparent calc(10px - 1px), black 10px)',
                                 }}
                             />
-                            <div
-                                aria-hidden
-                                className="pointer-events-none absolute top-0 z-0 bg-sidebar transition-[right,opacity] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none"
-                                style={{
-                                    right: `${isRightSidebarOpen ? visibleRightSidebarWidth : 0}px`,
-                                    opacity: isRightSidebarOpen ? 1 : 0,
-                                    width: '10px',
-                                    height: '10px',
-                                    WebkitMaskImage: 'radial-gradient(circle at 0 100%, transparent calc(10px - 1px), black 10px)',
-                                    maskImage: 'radial-gradient(circle at 0 100%, transparent calc(10px - 1px), black 10px)',
-                                }}
-                            />
-                            <div
-                                aria-hidden
-                                className="pointer-events-none absolute bottom-0 z-0 bg-sidebar transition-[right,opacity] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none"
-                                style={{
-                                    right: `${isRightSidebarOpen ? visibleRightSidebarWidth : 0}px`,
-                                    opacity: isRightSidebarOpen ? 1 : 0,
-                                    width: '10px',
-                                    height: '10px',
-                                    WebkitMaskImage: 'radial-gradient(circle at 0 0, transparent calc(10px - 1px), black 10px)',
-                                    maskImage: 'radial-gradient(circle at 0 0, transparent calc(10px - 1px), black 10px)',
-                                }}
-                            />
                             <Sidebar
                                 isOpen={isSidebarOpen}
                                 isMobile={false}
@@ -619,8 +515,7 @@ export const MainLayout: React.FC = () => {
                                 'relative flex flex-1 min-w-0 flex-col overflow-hidden',
                                 'bg-background',
                                 'border border-border/50 rounded-[10px]',
-                                !isSidebarOpen && 'border-l-transparent',
-                                !isRightSidebarOpen && 'border-r-transparent'
+                                !isSidebarOpen && 'border-l-transparent'
                             )} data-page-scroll-lock="true">
                                 <div className="flex flex-1 min-h-0 overflow-hidden" data-page-scroll-lock="true">
                                     <div className="relative flex flex-1 min-h-0 min-w-0 overflow-hidden" data-page-scroll-lock="true">
@@ -669,12 +564,6 @@ export const MainLayout: React.FC = () => {
                                     </div>
                                 </div>
                             </div>
-                            <RightSidebar
-                                isOpen={isRightSidebarOpen}
-                                className="border-0"
-                            >
-                                <ErrorBoundary><RightSidebarTabs /></ErrorBoundary>
-                            </RightSidebar>
                         </div>
                     </div>
 

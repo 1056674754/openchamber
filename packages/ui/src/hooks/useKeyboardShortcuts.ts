@@ -29,9 +29,6 @@ export const useKeyboardShortcuts = () => {
   const toggleCommandPalette = useUIStore((s) => s.toggleCommandPalette);
   const toggleHelpDialog = useUIStore((s) => s.toggleHelpDialog);
   const toggleSidebar = useUIStore((s) => s.toggleSidebar);
-  const toggleRightSidebar = useUIStore((s) => s.toggleRightSidebar);
-  const setRightSidebarOpen = useUIStore((s) => s.setRightSidebarOpen);
-  const setRightSidebarTab = useUIStore((s) => s.setRightSidebarTab);
   const openContextTerminal = useUIStore((s) => s.openContextTerminal);
   const effectiveDirectory = useEffectiveDirectory() ?? '';
   const isMobile = useUIStore((s) => s.isMobile);
@@ -335,54 +332,6 @@ export const useKeyboardShortcuts = () => {
         return;
       }
 
-      if (eventMatchesShortcut(e, combo('toggle_right_sidebar'))) {
-        const { isMobile } = useUIStore.getState();
-        if (isMobile) {
-          return;
-        }
-        e.preventDefault();
-        toggleRightSidebar();
-        return;
-      }
-
-      if (eventMatchesShortcut(e, combo('open_right_sidebar_git'))) {
-        const { isMobile } = useUIStore.getState();
-        if (isMobile) {
-          return;
-        }
-        e.preventDefault();
-        setRightSidebarOpen(true);
-        setRightSidebarTab('git');
-        return;
-      }
-
-      if (eventMatchesShortcut(e, combo('open_right_sidebar_files'))) {
-        const { isMobile } = useUIStore.getState();
-        if (isMobile) {
-          return;
-        }
-        e.preventDefault();
-        setRightSidebarOpen(true);
-        setRightSidebarTab('files');
-        return;
-      }
-
-      if (eventMatchesShortcut(e, combo('cycle_right_sidebar_tab'))) {
-        const { isMobile, rightSidebarTab } = useUIStore.getState();
-        if (isMobile) {
-          return;
-        }
-
-        const tabs = ['git', 'files', 'context'] as const;
-        const currentIndex = tabs.indexOf(rightSidebarTab);
-        const nextTab = tabs[(currentIndex + 1) % tabs.length];
-
-        e.preventDefault();
-        setRightSidebarOpen(true);
-        setRightSidebarTab(nextTab);
-        return;
-      }
-
       if (eventMatchesShortcut(e, combo('toggle_terminal'))) {
         const { isMobile } = useUIStore.getState();
         if (isMobile) {
@@ -623,9 +572,6 @@ export const useKeyboardShortcuts = () => {
     toggleCommandPalette,
     toggleHelpDialog,
     toggleSidebar,
-    toggleRightSidebar,
-    setRightSidebarOpen,
-    setRightSidebarTab,
     openContextTerminal,
     effectiveDirectory,
     isMobile,

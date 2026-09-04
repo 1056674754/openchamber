@@ -3410,3 +3410,17 @@ v1.20.0-sscity 尚未宣布完成：当前未关闭 `#135/#140/#142-#151/#154/#1
 - **面板 key 先于 timeline 切换**：会话切换时 panel key 在 urgent commit 生效、chat timeline 走 deferred/hold（#182）——面板略先于时间线呈现目标会话状态，方向一致，可接受。
 
 验证：useUIStore.contextPanel 16/16（含 session 作用域 8 例新测试）✅；全 workspace type-check（7/7）/UI lint（0 error）✅；`git diff --check` ✅。实机 QA（会话间面板隔离、作用域切换即时生效、设置开关、rail 图标、跨项目 open-in-side-panel）随下次桌面验证。
+
+## v1.22.x [Custom]：拆除桌面旧 RightSidebar（2026-09-04）
+
+问题：fork 在移植上游 `ContextPanel + ContextPanelRail` 后仍保留 v1.11 时代的 `RightSidebar + RightSidebarTabs`。宽窗口会自动打开旧栏，导致桌面同时显示两套重复的 Git / Files / Context 面板。[#188](https://coding.s-s.city/songsong/openchamber/-/issues/188) 收口该残留。
+
+实现：
+
+- `MainLayout` 删除桌面 `<RightSidebar>` 挂载、360–860px 宽度计算、1140/1220px 自动关闭/重开逻辑和右侧圆角补片；新 `ContextPanel + ContextPanelRail` 保持唯一桌面右侧工作区。
+- Header、Command Palette、Help Dialog、keyboard shortcut registry/handler、Electron macOS 与 Windows/Linux View 菜单删除旧栏入口；`Cmd/Ctrl+B`、`Cmd/Ctrl+Shift+G`、`Cmd/Ctrl+Shift+F` 和 tab-cycle 不再触发旧栏。
+- `useUIStore` 删除 `rightSidebarWidth`、`hasManuallyResizedRightSidebar`、`rightSidebarTab`、toggle/resize/tab actions；persist 升级到 v17，迁移时同时清除旧字段和四个旧 shortcut override。
+- **移动端契约保留**：`isRightSidebarOpen` / `setRightSidebarOpen` 继续作为 `MobileWorkspaceDrawerContent` 的开合状态；`RightSidebarTabs.tsx` 仅保留 `ProjectContextPanel` 导出，供 ContextPanel Notes surface、桌面 `context` 主视图和移动抽屉复用。
+- 删除无调用者的 `RightSidebar.tsx`、`SidebarFilesTree.tsx` 与 22 个 locale 文件中的 154 条旧栏孤儿键；`layout.rightSidebar.git` 和 `sidebarFilesTree.*` 因仍被新 ContextPanel / FilesView 使用而保留。
+
+验证：`useUIStore.contextPanel` 18/18（含移动抽屉开合与 v17 migration）✅；project knowledge i18n 11 locale 对齐 1/1 ✅；全 workspace type-check 7/7 ✅；全 workspace lint 0 error（4 条既有 warning）✅；docs validation ✅；`git diff --check` ✅。隔离 HMR matching-surface：1440px 桌面仅 1 个 `ContextPanelRail`、无旧 Header/command/side panel；新 Git surface 可展开为 380px panel 并收起；`Cmd+B` / `Cmd+Shift+G` / `Cmd+Shift+F` 执行前后布局不变。390×844 + touch 输入模拟进入 `device-mobile`，右抽屉可打开/关闭，Changes / Files / Terminal / Notes / MCP 五个 tab 完整。隔离服务已停止。

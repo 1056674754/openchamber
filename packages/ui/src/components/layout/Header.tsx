@@ -535,7 +535,6 @@ export const Header: React.FC<HeaderProps> = ({
   const setSessionSwitcherOpen = useUIStore((state) => state.setSessionSwitcherOpen);
   const toggleSidebar = useUIStore((state) => state.toggleSidebar);
   const openContextTerminal = useUIStore((state) => state.openContextTerminal);
-  const toggleRightSidebar = useUIStore((state) => state.toggleRightSidebar);
   const openContextPlan = useUIStore((state) => state.openContextPlan);
   const openContextBrowser = useUIStore((state) => state.openContextBrowser);
   const closeContextPanel = useUIStore((state) => state.closeContextPanel);
@@ -1831,12 +1830,6 @@ export const Header: React.FC<HeaderProps> = ({
           Icon={'global'}
         />
       ) : null}
-      <HeaderIconActionButton
-        title={t('header.actions.rightSidebarWithShortcut', { shortcut: shortcutLabel('toggle_right_sidebar') })}
-        ariaLabel={t('header.actions.toggleRightSidebarAria')}
-        onClick={toggleRightSidebar}
-        Icon={'layout-right'}
-      />
     </>
   );
 

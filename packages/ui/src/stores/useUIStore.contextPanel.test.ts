@@ -166,3 +166,42 @@ describe('useUIStore context panel session scope', () => {
     expect(useUIStore.getState().contextPanelScope).toBe('directory');
   });
 });
+
+describe('useUIStore mobile workspace drawer state', () => {
+  beforeEach(() => {
+    useUIStore.setState({ isRightSidebarOpen: false });
+  });
+
+  test('keeps the mobile right drawer open state after desktop sidebar removal', () => {
+    useUIStore.getState().setRightSidebarOpen(true);
+    expect(useUIStore.getState().isRightSidebarOpen).toBe(true);
+
+    useUIStore.getState().setRightSidebarOpen(false);
+    expect(useUIStore.getState().isRightSidebarOpen).toBe(false);
+  });
+
+  test('removes legacy desktop right sidebar state during v17 migration', async () => {
+    const migrate = useUIStore.persist.getOptions().migrate;
+    expect(typeof migrate).toBe('function');
+
+    const migrated = await migrate?.({
+      isRightSidebarOpen: true,
+      rightSidebarWidth: 520,
+      hasManuallyResizedRightSidebar: true,
+      rightSidebarTab: 'files',
+      shortcutOverrides: {
+        toggle_right_sidebar: 'mod+b',
+        open_right_sidebar_git: 'mod+shift+g',
+        open_right_sidebar_files: 'mod+shift+f',
+        cycle_right_sidebar_tab: 'mod+shift+]',
+        toggle_terminal: 'mod+j',
+      },
+    }, 16) as Record<string, unknown>;
+
+    expect(migrated.isRightSidebarOpen).toBe(true);
+    expect('rightSidebarWidth' in migrated).toBe(false);
+    expect('hasManuallyResizedRightSidebar' in migrated).toBe(false);
+    expect('rightSidebarTab' in migrated).toBe(false);
+    expect(migrated.shortcutOverrides).toEqual({ toggle_terminal: 'mod+j' });
+  });
+});

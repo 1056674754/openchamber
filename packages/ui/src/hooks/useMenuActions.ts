@@ -66,9 +66,6 @@ type MenuAction =
   | 'new-session'
   | 'new-worktree-session'
   | 'change-workspace'
-  | 'toggle-right-sidebar'
-  | 'open-right-sidebar-git'
-  | 'open-right-sidebar-files'
   | 'toggle-terminal'
   | 'toggle-terminal-expanded'
   | 'copy'
@@ -145,9 +142,6 @@ export const useMenuActions = (
   const setImagePreviewOpen = useUIStore((s) => s.setImagePreviewOpen);
   const setModelSelectorOpen = useUIStore((s) => s.setModelSelectorOpen);
   const setMultiRunLauncherOpen = useUIStore((s) => s.setMultiRunLauncherOpen);
-  const toggleRightSidebar = useUIStore((s) => s.toggleRightSidebar);
-  const setRightSidebarOpen = useUIStore((s) => s.setRightSidebarOpen);
-  const setRightSidebarTab = useUIStore((s) => s.setRightSidebarTab);
   const openContextTerminal = useUIStore((s) => s.openContextTerminal);
   const checkForUpdates = useUpdateStore((state) => state.checkForUpdates);
   const { setThemeMode } = useThemeSystem();
@@ -215,20 +209,6 @@ export const useMenuActions = (
 
         case 'change-workspace':
           handleChangeWorkspace();
-          break;
-
-        case 'toggle-right-sidebar':
-          toggleRightSidebar();
-          break;
-
-        case 'open-right-sidebar-git':
-          setRightSidebarOpen(true);
-          setRightSidebarTab('git');
-          break;
-
-        case 'open-right-sidebar-files':
-          setRightSidebarOpen(true);
-          setRightSidebarTab('files');
           break;
 
         case 'toggle-terminal':
@@ -330,14 +310,11 @@ export const useMenuActions = (
       setImagePreviewOpen,
       setModelSelectorOpen,
       setMultiRunLauncherOpen,
-      setRightSidebarOpen,
-      setRightSidebarTab,
       setSessionSwitcherOpen,
       setSettingsDialogOpen,
       setThemeMode,
       toggleCommandPalette,
       toggleHelpDialog,
-      toggleRightSidebar,
       toggleSidebar,
     ]
   );

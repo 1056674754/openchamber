@@ -25,7 +25,6 @@ import {
 export type MainTab = 'chat' | 'plan' | 'git' | 'diff' | 'terminal' | 'files' | 'context' | 'diagram';
 /** Diff navigation scope. Fork has no staged selector; `turn` is last-turn snapshot mode. */
 export type PendingDiffScope = 'working' | 'turn' | 'branch';
-export type RightSidebarTab = 'git' | 'files' | 'context';
 export type ContextPanelMode = 'diff' | 'file' | 'context' | 'plan' | 'chat' | 'preview' | 'terminal' | 'browser' | 'git' | 'pr' | 'notes' | 'walkthrough' | 'linear';
 export type UserMessageRenderingMode = 'markdown' | 'plain';
 export type ChatRenderMode = 'sorted' | 'live';
@@ -135,7 +134,6 @@ const CONTEXT_PANEL_MAX_LABEL_LENGTH = 120;
 // bounded record keeps headroom over the per-directory era.
 const CONTEXT_PANEL_MAX_ROOT_ENTRIES = 32;
 const LEFT_SIDEBAR_MIN_WIDTH = 280;
-const RIGHT_SIDEBAR_MIN_WIDTH = 360;
 
 const normalizeDirectoryPath = (value: string): string => {
   if (!value) return '';
@@ -657,9 +655,6 @@ interface UIStore {
   sidebarWidth: number;
   hasManuallyResizedLeftSidebar: boolean;
   isRightSidebarOpen: boolean;
-  rightSidebarWidth: number;
-  hasManuallyResizedRightSidebar: boolean;
-  rightSidebarTab: RightSidebarTab;
   /**
    * Panel state keyed by panel-storage key: the normalized directory under
    * the default 'directory' scope, or `session:<id>` while the 'session'
@@ -826,10 +821,7 @@ interface UIStore {
   toggleSidebar: () => void;
   setSidebarOpen: (open: boolean) => void;
   setSidebarWidth: (width: number) => void;
-  toggleRightSidebar: () => void;
   setRightSidebarOpen: (open: boolean) => void;
-  setRightSidebarWidth: (width: number) => void;
-  setRightSidebarTab: (tab: RightSidebarTab) => void;
   setContextRailOrder: (order: string[]) => void;
   setContextPanelScope: (scope: ContextPanelScope) => void;
   openContextSurface: (directory: string, mode: ContextPanelMode) => void;
@@ -1026,9 +1018,6 @@ export const useUIStore = create<UIStore>()(
         sidebarWidth: LEFT_SIDEBAR_MIN_WIDTH,
         hasManuallyResizedLeftSidebar: false,
         isRightSidebarOpen: false,
-        rightSidebarWidth: RIGHT_SIDEBAR_MIN_WIDTH,
-        hasManuallyResizedRightSidebar: false,
-        rightSidebarTab: 'git',
         contextPanelByDirectory: {},
         contextPanelScope: 'directory',
         contextRailOrder: [],
@@ -1218,50 +1207,8 @@ export const useUIStore = create<UIStore>()(
           set({ sidebarWidth: width, hasManuallyResizedLeftSidebar: true });
         },
 
-        toggleRightSidebar: () => {
-          set((state) => {
-            const newOpen = !state.isRightSidebarOpen;
-
-            if (newOpen && !state.hasManuallyResizedRightSidebar) {
-              return {
-                isRightSidebarOpen: newOpen,
-                rightSidebarWidth: RIGHT_SIDEBAR_MIN_WIDTH,
-              };
-            }
-            return { isRightSidebarOpen: newOpen };
-          });
-        },
-
         setRightSidebarOpen: (open) => {
-          set((state) => {
-            if (state.isRightSidebarOpen === open) {
-              if (!open) {
-                return state;
-              }
-              if (!state.hasManuallyResizedRightSidebar && state.rightSidebarWidth !== RIGHT_SIDEBAR_MIN_WIDTH) {
-                return {
-                  isRightSidebarOpen: open,
-                  rightSidebarWidth: RIGHT_SIDEBAR_MIN_WIDTH,
-                };
-              }
-              return state;
-            }
-            if (open && !state.hasManuallyResizedRightSidebar) {
-              return {
-                isRightSidebarOpen: open,
-                rightSidebarWidth: RIGHT_SIDEBAR_MIN_WIDTH,
-              };
-            }
-            return { isRightSidebarOpen: open };
-          });
-        },
-
-        setRightSidebarWidth: (width) => {
-          set({ rightSidebarWidth: width, hasManuallyResizedRightSidebar: true });
-        },
-
-        setRightSidebarTab: (tab) => {
-          set({ rightSidebarTab: tab });
+          set((state) => state.isRightSidebarOpen === open ? state : { isRightSidebarOpen: open });
         },
 
         setContextRailOrder: (order) => {
@@ -2611,12 +2558,26 @@ export const useUIStore = create<UIStore>()(
       {
         name: 'ui-store',
         storage: createDeferredSafeJSONStorage(),
-        version: 16,
+        version: 17,
         migrate: (persistedState, version) => {
           if (!persistedState || typeof persistedState !== 'object') {
             return persistedState;
           }
           const state = persistedState as Record<string, unknown>;
+
+          if (version < 17) {
+            delete state.rightSidebarWidth;
+            delete state.hasManuallyResizedRightSidebar;
+            delete state.rightSidebarTab;
+
+            if (state.shortcutOverrides && typeof state.shortcutOverrides === 'object') {
+              const shortcutOverrides = state.shortcutOverrides as Record<string, unknown>;
+              delete shortcutOverrides.toggle_right_sidebar;
+              delete shortcutOverrides.open_right_sidebar_git;
+              delete shortcutOverrides.open_right_sidebar_files;
+              delete shortcutOverrides.cycle_right_sidebar_tab;
+            }
+          }
 
           if (version < 16) {
             state.desktopWindowControlsStyle =
@@ -2687,13 +2648,6 @@ export const useUIStore = create<UIStore>()(
             delete state.memoryLimitActiveSession;
           }
 
-          if (
-            typeof state.rightSidebarTab !== 'string'
-            || (state.rightSidebarTab !== 'git' && state.rightSidebarTab !== 'files' && state.rightSidebarTab !== 'context')
-          ) {
-            state.rightSidebarTab = 'git';
-          }
-
           // v9 -> v10: re-sanitize context panel state after a bad tab array
           // could be persisted with null entries and crash startup render.
           state.contextPanelByDirectory = sanitizeContextPanelByDirectory(state.contextPanelByDirectory);
@@ -2761,8 +2715,6 @@ export const useUIStore = create<UIStore>()(
           isSidebarOpen: state.isSidebarOpen,
           sidebarWidth: state.sidebarWidth,
           isRightSidebarOpen: state.isRightSidebarOpen,
-          rightSidebarWidth: state.rightSidebarWidth,
-          rightSidebarTab: state.rightSidebarTab,
           contextPanelByDirectory: state.contextPanelByDirectory,
           contextPanelScope: state.contextPanelScope,
           contextRailOrder: state.contextRailOrder,

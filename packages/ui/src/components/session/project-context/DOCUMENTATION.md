@@ -1,8 +1,8 @@
 # Project Knowledge panel
 
 Project-owned Notes, Todo and saved Plans for the directory currently shown by
-the chat. The desktop Context rail, legacy right sidebar and mobile workspace
-drawer all render this same panel through `ProjectContextPanel`.
+the chat. The desktop Context rail and mobile workspace drawer both render this
+same panel through `ProjectContextPanel`.
 
 ## Authority
 
