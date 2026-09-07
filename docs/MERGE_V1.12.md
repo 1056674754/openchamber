@@ -3495,3 +3495,15 @@ v1.20.0-sscity 尚未宣布完成：当前未关闭 `#135/#140/#142-#151/#154/#1
 修复（`0cdad3e65`）：extension.ts 注入 recreate 钩子——**注销 provider 注册并重新注册**，VS Code 随之销毁 iframe 并对可见视图重新 `resolveWebviewView`，与用户手动重开面板完全等效，全自动执行。熔断改为快速失败计数（60s 内连续 3 次恢复再失败即放弃并明示，成功启动即重置）；恢复后 boot 看门狗缩短为 15s（SW 已热），首次 resolve 保持 45s。
 
 验证：12/12 ✅ type-check ✅ eslint 0 error ✅ `git diff --check` ✅ VSIX 重打包（入口 `index-Bibf3gK0.js`）。
+
+## v1.22.x [Custom]：VS Code 插件灰屏第六轮——秒灰现场 + 启动分段追踪（2026-09-08 凌晨）
+
+用户装第五轮 VSIX 后"秒灰"。window3 日志全程：23:51:43 `bridge ready (123ms)` → **t+8s 主线程冻结**（ack_timeout + 诊断超时，用户在场盯着看到）→ 23:51:53 re-registration 恢复触发 → **此后无 resolve**（dispose 与 re-register 同 tick 竞态，VS Code 视图描述符移除吞掉了新注册）。无崩溃转储 → 非 OOM 崩溃，是**永不解冻的单任务阻塞**（PerformanceObserver 在单任务内永不回调，看门狗失明）。重新解读历次 bootedMs（290s/465s 为检测时刻非冻结时刻）：真实冻结可能一直发生在启动后数秒——"1-2 分钟"其实是发现延迟。
+
+跟进（`<commit>`）：
+
+- webview 启动分段追踪：entry-eval / app-import-resolved / render-fn-enter / locale-init / appearance-prefs-done / settings-sync-done / react-render-scheduled / vscodeapp-mounted / ui-mounted，全部上报宿主 error 级日志；下次冻结由"最后一个到达的步骤"锁定阻塞段。
+- re-registration 改异步：dispose 后 250ms 再重注册，消除同 tick 竞态。
+- 本轮起 VSIX 由 agent 直接 `code --install-extension` 安装。
+
+验证：vscode 12/12 + ui type-check ✅ eslint 0 error ✅ `git diff --check` ✅；已安装（23:58 目录，含 bootTrace 产物）。
