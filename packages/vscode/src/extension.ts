@@ -154,13 +154,22 @@ export async function activate(context: vscode.ExtensionContext) {
   // The webview will show a loading state until OpenCode is ready
   chatViewProvider = new ChatViewProvider(context, context.extensionUri, openCodeManager);
 
-  context.subscriptions.push(
-    vscode.window.registerWebviewViewProvider(
-      ChatViewProvider.viewType,
-      chatViewProvider,
-      { webviewOptions: { retainContextWhenHidden: true } }
-    )
+  // Re-registrable so ChatViewProvider can force a full view teardown when
+  // the webview renderer wedges: html reassignment does not recreate a
+  // frozen iframe, but disposing the provider registration does (VS Code
+  // then re-resolves the visible view against the fresh registration).
+  const provider = chatViewProvider;
+  const registerChatView = () => vscode.window.registerWebviewViewProvider(
+    ChatViewProvider.viewType,
+    provider,
+    { webviewOptions: { retainContextWhenHidden: true } }
   );
+  let chatViewRegistration = registerChatView();
+  provider.setRecreateView(() => {
+    chatViewRegistration.dispose();
+    chatViewRegistration = registerChatView();
+  });
+  context.subscriptions.push({ dispose: () => chatViewRegistration.dispose() });
 
   // Register sidebar/focus commands AFTER the webview view provider is registered
   context.subscriptions.push(

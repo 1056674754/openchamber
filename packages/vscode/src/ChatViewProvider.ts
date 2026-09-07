@@ -27,13 +27,16 @@ type WebviewDiagnosticsResponse = {
 
 const WEBVIEW_PROBE_INTERVAL_MS = 15_000;
 const WEBVIEW_PROBE_TIMEOUT_MS = 5_000;
-const WEBVIEW_RELOAD_COOLDOWN_MS = 30_000;
 // A (re)loaded webview announces itself via `webview:bridgeReady`; if it never
-// does within this window the bundle failed to boot and a reload is warranted.
+// does within this window the bundle failed to boot and recovery is warranted.
 const WEBVIEW_BOOT_TIMEOUT_MS = 45_000;
-// Consecutive probe-triggered reloads without a bridgeReady in between: give
-// up (and say so) instead of destroying webview state forever.
-const MAX_CONSECUTIVE_WEBVIEW_RECOVERIES = 3;
+// After a recovery the bundle should boot fast (service worker is warm);
+// a shorter watchdog detects a failed recovery quickly.
+const WEBVIEW_RECOVERY_BOOT_TIMEOUT_MS = 15_000;
+// Rapid-fire recoveries (each failing again within a minute) mean the
+// environment cannot sustain the webview; stop churning and say so.
+const WEBVIEW_RAPID_RECOVERY_WINDOW_MS = 60_000;
+const MAX_RAPID_WEBVIEW_RECOVERIES = 3;
 
 export type SelectionAttachmentPayload = {
   path: string;
@@ -67,6 +70,17 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     return this._view !== undefined;
   }
 
+  // Injected by extension.ts: disposes the provider registration and
+  // re-registers it, which tears down the wedged iframe and makes VS Code
+  // re-run resolveWebviewView for the visible view. WebviewView itself has no
+  // dispose() in the supported API range, so this is the only programmatic
+  // equivalent of the user reopening the panel.
+  private _recreateView: (() => void) | null = null;
+
+  public setRecreateView(recreate: (() => void) | null): void {
+    this._recreateView = recreate;
+  }
+
   // Cache latest status/URL for when webview is resolved after connection is ready
   private _cachedStatus: ConnectionStatus = 'connecting';
   private _cachedError?: string;
@@ -83,10 +97,10 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   private readonly _MESSAGE_TIMEOUT = 5000; // 5 seconds
   private readonly _MAX_RETRIES = 3;
   private _webviewProbeMessageId: string | undefined;
-  private _lastWebviewReloadAt = 0;
   private _webviewResolvedAt = 0;
   private _webviewBootedAt = 0;
-  private _consecutiveWebviewRecoveries = 0;
+  private _lastWebviewRecoveryAt = 0;
+  private _rapidWebviewRecoveries = 0;
   private _webviewRecoveryAbandoned = false;
   private _pendingDiagnostics = new Map<string, {
     resolve: (value: unknown) => void;
@@ -136,15 +150,12 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     return new Promise((resolve) => {
       const timeout = setTimeout(() => {
         this._pendingDiagnostics.delete(requestId);
-        const recoveryTriggered = this._view === view && view.visible;
-        if (recoveryTriggered) {
-          this._reloadUnresponsiveWebview(view);
-        }
+        // Recovery is owned by the probe failure path; this timeout only
+        // reports (and must not recurse into it through the promise chain).
         resolve({
           available: false,
           reason: 'webview_diagnostics_timeout',
           visible: view.visible,
-          recoveryTriggered,
         });
       }, timeoutMs);
       this._pendingDiagnostics.set(requestId, { resolve, timeout });
@@ -203,9 +214,6 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     this._view = webviewView;
     this._webviewResolvedAt = Date.now();
     this._webviewBootedAt = 0;
-    this._consecutiveWebviewRecoveries = 0;
-    this._webviewRecoveryAbandoned = false;
-    this._lastWebviewReloadAt = 0;
 
     const distUri = vscode.Uri.joinPath(this._extensionUri, 'dist');
 
@@ -261,7 +269,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       if (message.type === 'webview:bridgeReady') {
         const bootedInMs = this._webviewResolvedAt > 0 ? Date.now() - this._webviewResolvedAt : 0;
         this._webviewBootedAt = Date.now();
-        this._consecutiveWebviewRecoveries = 0;
+        this._rapidWebviewRecoveries = 0;
         this._webviewRecoveryAbandoned = false;
         // console.error because VS Code only forwards that level to renderer.log.
         console.error(`[ChatView] webview bridge ready (booted in ${bootedInMs}ms)`);
@@ -602,7 +610,10 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       // The webview announces itself via `webview:bridgeReady`; probing before
       // that would false-positive against a document whose listeners are still
       // loading. Only intervene if the boot itself appears wedged.
-      if (this._webviewResolvedAt > 0 && Date.now() - this._webviewResolvedAt > WEBVIEW_BOOT_TIMEOUT_MS) {
+      const bootTimeoutMs = this._lastWebviewRecoveryAt > 0
+        ? WEBVIEW_RECOVERY_BOOT_TIMEOUT_MS
+        : WEBVIEW_BOOT_TIMEOUT_MS;
+      if (this._webviewResolvedAt > 0 && Date.now() - this._webviewResolvedAt > bootTimeoutMs) {
         this._handleWebviewProbeFailure(view, 'boot_timeout', false);
       }
       return;
@@ -642,58 +653,74 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 
   private _handleWebviewProbeFailure(view: vscode.WebviewView, reason: string, delivered: boolean): void {
     if (this._view !== view) return;
-    if (this._consecutiveWebviewRecoveries >= MAX_CONSECUTIVE_WEBVIEW_RECOVERIES) {
-      if (!this._webviewRecoveryAbandoned) {
+    if (this._webviewRecoveryAbandoned) return;
+    const now = Date.now();
+    if (now - this._lastWebviewRecoveryAt < WEBVIEW_RAPID_RECOVERY_WINDOW_MS) {
+      if (this._rapidWebviewRecoveries >= MAX_RAPID_WEBVIEW_RECOVERIES) {
         this._webviewRecoveryAbandoned = true;
         console.error(
-          `[ChatView] webview recovery abandoned after ${this._consecutiveWebviewRecoveries} consecutive reloads (reason=${reason});`
-          + ' close and reopen the panel, or run "Developer: Reload Window".',
+          `[ChatView] webview recovery abandoned: ${this._rapidWebviewRecoveries} recoveries failed again within ${WEBVIEW_RAPID_RECOVERY_WINDOW_MS / 1000}s (last reason=${reason});`
+          + ' run "Developer: Reload Window" or reinstall the extension.',
         );
+        return;
       }
-      return;
+      this._rapidWebviewRecoveries += 1;
+    } else {
+      this._rapidWebviewRecoveries = 0;
     }
     const bootedMs = this._webviewBootedAt > 0 ? Date.now() - this._webviewBootedAt : 0;
     console.error(
       `[ChatView] webview unresponsive: reason=${reason} delivered=${delivered}`
       + ` visible=${view.visible} focused=${vscode.window.state.focused}`
-      + ` bootedMs=${bootedMs} consecutiveRecoveries=${this._consecutiveWebviewRecoveries}`,
+      + ` bootedMs=${bootedMs} rapidRecoveries=${this._rapidWebviewRecoveries}`,
     );
     // Snapshot the webview DOM before rebuilding so gray screens self-triage.
-    // The snapshot must settle first — the reload clears pending diagnostics.
+    // The snapshot must settle first — the recovery clears pending diagnostics.
     void this._requestDiagnosticsOnce(view, 1_500)
       .catch(() => ({ available: false, reason: 'webview_diagnostics_error' }))
       .then((snapshot) => {
         console.error('[ChatView] webview DOM diagnostics at failure:', snapshot);
-        this._reloadUnresponsiveWebview(view, reason);
+        this._disposeUnresponsiveWebview(view, reason);
       });
   }
 
-  private _reloadUnresponsiveWebview(view: vscode.WebviewView, reason = 'probe_timeout'): void {
-    if (this._view !== view || !view.visible) return;
-    const now = Date.now();
-    if (now - this._lastWebviewReloadAt < WEBVIEW_RELOAD_COOLDOWN_MS) {
-      console.error(`[ChatView] webview reload suppressed by cooldown (reason=${reason})`);
+  // Reassigning webview.html does NOT recreate a wedged renderer — the frozen
+  // iframe survives the html swap (observed live: reload attempt logged, no
+  // bridgeReady ever arrived, panel stayed gray). Disposing and re-registering
+  // the provider is the only programmatic equivalent of the user reopening
+  // the panel: VS Code tears the iframe down and re-runs resolveWebviewView.
+  private _disposeUnresponsiveWebview(view: vscode.WebviewView, reason: string): void {
+    if (this._view !== view) return;
+    this._lastWebviewRecoveryAt = Date.now();
+    const recreate = this._recreateView;
+    if (!recreate) {
+      console.error('[ChatView] webview recovery unavailable: no recreate hook installed');
       return;
     }
-    this._lastWebviewReloadAt = now;
-    this._consecutiveWebviewRecoveries += 1;
-    console.error(`[ChatView] reloading webview (reason=${reason}, attempt ${this._consecutiveWebviewRecoveries}/${MAX_CONSECUTIVE_WEBVIEW_RECOVERIES})`);
+    console.error(`[ChatView] recreating wedged webview via provider re-registration (reason=${reason})`);
 
+    // Manual teardown mirroring the view's onDidDispose cleanup: abort this
+    // view's SSE streams, drop pending messages, forget the view.
     for (const [streamId, stream] of this._sseStreams) {
       if (stream.view !== view) continue;
       stream.controller.abort();
       this._sseStreams.delete(streamId);
     }
     this._clearPendingMessages();
-    this._webviewResolvedAt = Date.now();
+    this._view = undefined;
+    this._webviewResolvedAt = 0;
     this._webviewBootedAt = 0;
-    this._lastActiveEditorFilePayload = null;
-    view.webview.html = this._getHtmlForWebview(view.webview);
+
+    try {
+      recreate();
+    } catch (error) {
+      console.error('[ChatView] webview recreate failed:', error);
+      return;
+    }
+    // If the view was visible, the fresh registration resolves it on its own;
+    // focusing guarantees the reveal in case it does not.
     setTimeout(() => {
-      if (this._view !== view) return;
-      this._sendCachedState();
-      this._scheduleCachedStateRetries(view);
-      void this._broadcastActiveEditorFile();
+      vscode.commands.executeCommand(`${ChatViewProvider.viewType}.focus`).then(undefined, () => {});
     }, 250);
   }
 

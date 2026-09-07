@@ -68,9 +68,9 @@ Keep `bridge.ts` as a thin orchestration layer that delegates message handling t
   - Distinguishes owner-requested shutdown from unexpected exit for connection-state cleanup and automatic recovery.
 
 - `ChatViewProvider.ts`
-  - Arms its health probe only after the webview announces `webview:bridgeReady` (fired by the webview bridge when its listeners are live), so a still-loading document is never mistaken for a dead one; a 45s boot watchdog covers bundles that never announce.
-  - Rebuilds the webview only after an ACK timeout, with SSE cleanup, a 30s reload cooldown, and a 3-consecutive-recovery cap that abandons (loudly) instead of destroying webview state forever.
-  - Logs every probe failure (reason, delivered flag, boot age, recovery count), snapshots DOM/root/covering-element diagnostics automatically before rebuilding, and re-delivers cached state plus theme over the bridgeReady round trip so nothing races document load.
+  - Arms its health probe only after the webview announces `webview:bridgeReady` (fired by the webview bridge when its listeners are live), so a still-loading document is never mistaken for a dead one; a 45s boot watchdog (15s after a recovery) covers bundles that never announce.
+  - Recovers a wedged webview by disposing the WebviewView — reassigning `webview.html` does not recreate a frozen renderer, while dispose + re-resolve is the programmatic equivalent of the user reopening the panel. A rapid-recovery cap (3 failures each within a minute) abandons loudly instead of churning forever.
+  - Logs every probe failure (reason, delivered flag, boot age, recovery count), snapshots DOM/root/covering-element diagnostics automatically before recovering, and re-delivers cached state plus theme over the bridgeReady round trip so nothing races document load.
   - Supplies the same read-only DOM diagnostics to `Show OpenCode Status` so a healthy backend can be distinguished from a stale overlay or renderer presentation issue.
 
 - `webviewCachedStateRetry.ts`
