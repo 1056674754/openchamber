@@ -2479,3 +2479,23 @@ export const renameSkill = (oldName: string, newName: string, workingDirectory?:
     throw error;
   }
 };
+
+// Union of provider ids configured across custom/project/user layers. The
+// VS Code webview proxy uses this to strip the models.dev catalog (200+
+// providers / ~7.5k models / ~5MB JSON) down to providers the user can
+// actually run before the payload crosses postMessage into the webview.
+export const getConfiguredProviderIds = (workingDirectory?: string): Set<string> => {
+  const layers = readConfigLayers(workingDirectory);
+  const ids = new Set<string>();
+  for (const layer of [layers.customConfig, layers.projectConfig, layers.userConfig]) {
+    if (!isPlainObject(layer)) continue;
+    for (const key of ['provider', 'providers'] as const) {
+      const block = layer[key];
+      if (!isPlainObject(block)) continue;
+      for (const id of Object.keys(block)) {
+        ids.add(id);
+      }
+    }
+  }
+  return ids;
+};

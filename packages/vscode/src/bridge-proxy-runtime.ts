@@ -1,5 +1,8 @@
 import type { BridgeContext, BridgeResponse } from './bridge';
 import { waitForApiUrl } from './opencode-ready';
+import { getConfiguredProviderIds } from './opencodeConfig';
+import { readSettings } from './bridge-settings-runtime';
+import { projectProviderCatalogResponse, providerPrefixOf, collectReferencedProviderIds } from './provider-catalog-filter';
 
 type BridgeMessageInput = {
   id: string;
@@ -184,16 +187,45 @@ export async function handleProxyBridgeMessage(
           const bodyText = response.ok && isMessageHistoryRequest
             ? projectMessageHistoryResponseText(upstreamBodyText)
             : upstreamBodyText;
-          setDecodedPayloadLengthHeader(responseHeaders, Buffer.byteLength(bodyText));
-          if (bodyText.length > 1_000_000) {
+
+          let effectiveBodyText = bodyText;
+          if (normalizedMethod === 'GET' && /^\/provider(?:\/|\?|$)/.test(normalizedPath)) {
+            const keepProviderIds = getConfiguredProviderIds();
+            try {
+              const directoryParam = new URLSearchParams(normalizedPath.split('?')[1] ?? '').get('directory');
+              if (directoryParam) {
+                for (const id of getConfiguredProviderIds(directoryParam)) keepProviderIds.add(id);
+              }
+            } catch {
+              // Malformed directory query — global config ids still apply.
+            }
+            try {
+              const settings = readSettings(ctx);
+              collectReferencedProviderIds(settings.favoriteModels, keepProviderIds);
+              collectReferencedProviderIds(settings.hiddenModels, keepProviderIds);
+              const defaultModelPrefix = providerPrefixOf(settings.model);
+              if (defaultModelPrefix) keepProviderIds.add(defaultModelPrefix);
+            } catch {
+              // Settings unavailable — config-based keep-set still applies.
+            }
+            effectiveBodyText = projectProviderCatalogResponse(bodyText, keepProviderIds);
+            if (effectiveBodyText.length < bodyText.length) {
+              console.error(
+                `[api:proxy] provider catalog filtered for webview: ${(bodyText.length / 1_048_576).toFixed(1)}MB → ${(effectiveBodyText.length / 1024).toFixed(0)}KB (${keepProviderIds.size} providers kept)`,
+              );
+            }
+          }
+
+          if (effectiveBodyText.length > 1_000_000) {
             // Multi-MB proxied bodies are the main-thread gray-screen suspect;
             // correlate payload size with webview freeze reports in the log.
-            console.error(`[api:proxy] large response: ${normalizedPath} → ${(bodyText.length / 1_048_576).toFixed(1)}MB`);
+            console.error(`[api:proxy] large response: ${normalizedPath} → ${(effectiveBodyText.length / 1_048_576).toFixed(1)}MB`);
           }
+          setDecodedPayloadLengthHeader(responseHeaders, Buffer.byteLength(effectiveBodyText));
           const data: ApiProxyResponsePayload = {
             status: response.status,
             headers: responseHeaders,
-            bodyText,
+            bodyText: effectiveBodyText,
           };
 
           return { id, type, success: true, data };
