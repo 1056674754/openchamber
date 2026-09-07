@@ -77,6 +77,16 @@ window.addEventListener('message', (event: MessageEvent<BridgeResponse>) => {
   }
 });
 
+// Announce that this document's bridge is live. The extension host uses this
+// to arm its health probe and to (re)deliver state over a round trip — safe
+// because by the time the host's reply arrives, every module-scope listener
+// in this file has registered, unlike pushes sent right after `webview.html`.
+try {
+  getVSCodeAPI().postMessage({ id: 'bridge-ready', type: 'webview:bridgeReady', success: true });
+} catch {
+  // No VS Code API (e.g. plain web preview); the host simply never arms.
+}
+
 export function sendBridgeMessage<T = unknown>(type: string, payload?: unknown): Promise<T> {
   return sendBridgeMessageWithOptions<T>(type, payload);
 }

@@ -9,6 +9,7 @@ import { resolveWebviewDevServerUrl } from './webviewDevServer';
 import { normalizeWindowsDriveLetter } from './pathUtils';
 import { namespacePathForUri } from './remoteNamespace';
 import { resolveWorkspaceFolders, type WorkspaceFolderCandidate } from './workspaceResolver';
+import { scheduleCachedStateRetries } from './webviewCachedStateRetry';
 
 type ActiveEditorFilePayload = {
   filePath: string;
@@ -26,8 +27,13 @@ type WebviewDiagnosticsResponse = {
 
 const WEBVIEW_PROBE_INTERVAL_MS = 15_000;
 const WEBVIEW_PROBE_TIMEOUT_MS = 5_000;
-const WEBVIEW_STARTUP_GRACE_MS = 15_000;
 const WEBVIEW_RELOAD_COOLDOWN_MS = 30_000;
+// A (re)loaded webview announces itself via `webview:bridgeReady`; if it never
+// does within this window the bundle failed to boot and a reload is warranted.
+const WEBVIEW_BOOT_TIMEOUT_MS = 45_000;
+// Consecutive probe-triggered reloads without a bridgeReady in between: give
+// up (and say so) instead of destroying webview state forever.
+const MAX_CONSECUTIVE_WEBVIEW_RECOVERIES = 3;
 
 export type SelectionAttachmentPayload = {
   path: string;
@@ -76,10 +82,12 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   private readonly _messageTimeouts = new Map<string, NodeJS.Timeout>();
   private readonly _MESSAGE_TIMEOUT = 5000; // 5 seconds
   private readonly _MAX_RETRIES = 3;
-  private _webviewHasResponded = false;
   private _webviewProbeMessageId: string | undefined;
   private _lastWebviewReloadAt = 0;
   private _webviewResolvedAt = 0;
+  private _webviewBootedAt = 0;
+  private _consecutiveWebviewRecoveries = 0;
+  private _webviewRecoveryAbandoned = false;
   private _pendingDiagnostics = new Map<string, {
     resolve: (value: unknown) => void;
     timeout: ReturnType<typeof setTimeout>;
@@ -193,8 +201,11 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   ) {
     this._clearPendingMessages('webview_replaced');
     this._view = webviewView;
-    this._webviewHasResponded = false;
     this._webviewResolvedAt = Date.now();
+    this._webviewBootedAt = 0;
+    this._consecutiveWebviewRecoveries = 0;
+    this._webviewRecoveryAbandoned = false;
+    this._lastWebviewReloadAt = 0;
 
     const distUri = vscode.Uri.joinPath(this._extensionUri, 'dist');
 
@@ -209,6 +220,9 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 
     // Send cached connection status and API URL (may have been set before webview was resolved)
     this._sendCachedState();
+    // VS Code drops postMessage sent before the webview bridge is ready, which
+    // would leave the loading overlay up forever; keep re-sending.
+    this._scheduleCachedStateRetries(webviewView);
 
     // Send current active editor file state to the new webview
     this._lastActiveEditorFilePayload = null;
@@ -237,14 +251,28 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         this._clearActiveEditorFileTimer = undefined;
       }
       this._lastActiveEditorFilePayload = null;
-      this._webviewHasResponded = false;
       this._webviewResolvedAt = 0;
+      this._webviewBootedAt = 0;
       this._clearPendingMessages();
       this._view = undefined;
     });
 
-    webviewView.webview.onDidReceiveMessage(async (message: (BridgeRequest & { _msgId?: string }) | { type: 'bridge:ack'; _msgId: string } | WebviewDiagnosticsResponse) => {
-      this._webviewHasResponded = true;
+    webviewView.webview.onDidReceiveMessage(async (message: (BridgeRequest & { _msgId?: string }) | { type: 'bridge:ack'; _msgId: string } | { type: 'webview:bridgeReady' } | { type: 'ui:chunkReload'; payload?: unknown } | WebviewDiagnosticsResponse) => {
+      if (message.type === 'webview:bridgeReady') {
+        const bootedInMs = this._webviewResolvedAt > 0 ? Date.now() - this._webviewResolvedAt : 0;
+        this._webviewBootedAt = Date.now();
+        this._consecutiveWebviewRecoveries = 0;
+        this._webviewRecoveryAbandoned = false;
+        console.log(`[ChatView] webview bridge ready (booted in ${bootedInMs}ms)`);
+        // Delivered over a round trip, so every webview-side listener is live.
+        this._sendCachedState();
+        void this.updateTheme(vscode.window.activeColorTheme.kind);
+        return;
+      }
+      if (message.type === 'ui:chunkReload') {
+        console.error('[ChatView] webview reloaded itself after a failed dynamic import:', message.payload);
+        return;
+      }
       if (
         message.type === 'webview:diagnostics'
         && 'requestId' in message
@@ -311,9 +339,16 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     // Cache the latest state
     this._cachedStatus = status;
     this._cachedError = error;
-    
+
     // Send to webview if it exists
     this._sendCachedState();
+
+    // When we become connected, keep re-sending at staggered delays so the
+    // webview cannot miss the transition (postMessage is dropped if the
+    // webview bridge is not ready yet) and get stuck on its loading screen.
+    if (status === 'connected') {
+      this._scheduleCachedStateRetries(this._view);
+    }
   }
 
   public addTextToInput(text: string) {
@@ -554,13 +589,17 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 
   private async _probeWebviewHealth(): Promise<void> {
     const view = this._view;
-    if (
-      !view
-      || !view.visible
-      || !vscode.window.state.focused
-      || Date.now() - this._webviewResolvedAt < WEBVIEW_STARTUP_GRACE_MS
-      || this._webviewProbeMessageId
-    ) {
+    if (!view || !view.visible || !vscode.window.state.focused || this._webviewProbeMessageId) {
+      return;
+    }
+
+    if (this._webviewBootedAt === 0) {
+      // The webview announces itself via `webview:bridgeReady`; probing before
+      // that would false-positive against a document whose listeners are still
+      // loading. Only intervene if the boot itself appears wedged.
+      if (this._webviewResolvedAt > 0 && Date.now() - this._webviewResolvedAt > WEBVIEW_BOOT_TIMEOUT_MS) {
+        this._handleWebviewProbeFailure(view, 'boot_timeout', false);
+      }
       return;
     }
 
@@ -581,7 +620,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     if (this._view !== view || this._webviewProbeMessageId !== messageId) return;
     if (!delivered) {
       this._webviewProbeMessageId = undefined;
-      this._reloadUnresponsiveWebview(view);
+      this._handleWebviewProbeFailure(view, 'post_rejected', false);
       return;
     }
 
@@ -591,16 +630,46 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       this._pendingMessages.delete(messageId);
       this._messageTimeouts.delete(messageId);
       this._webviewProbeMessageId = undefined;
-      this._reloadUnresponsiveWebview(view);
+      this._handleWebviewProbeFailure(view, 'ack_timeout', true);
     }, WEBVIEW_PROBE_TIMEOUT_MS);
     this._messageTimeouts.set(messageId, timeout);
   }
 
-  private _reloadUnresponsiveWebview(view: vscode.WebviewView): void {
+  private _handleWebviewProbeFailure(view: vscode.WebviewView, reason: string, delivered: boolean): void {
+    if (this._view !== view) return;
+    if (this._consecutiveWebviewRecoveries >= MAX_CONSECUTIVE_WEBVIEW_RECOVERIES) {
+      if (!this._webviewRecoveryAbandoned) {
+        this._webviewRecoveryAbandoned = true;
+        console.error(
+          `[ChatView] webview recovery abandoned after ${this._consecutiveWebviewRecoveries} consecutive reloads (reason=${reason});`
+          + ' close and reopen the panel, or run "Developer: Reload Window".',
+        );
+      }
+      return;
+    }
+    const bootedMs = this._webviewBootedAt > 0 ? Date.now() - this._webviewBootedAt : 0;
+    console.warn(
+      `[ChatView] webview unresponsive: reason=${reason} delivered=${delivered}`
+      + ` visible=${view.visible} focused=${vscode.window.state.focused}`
+      + ` bootedMs=${bootedMs} consecutiveRecoveries=${this._consecutiveWebviewRecoveries}`,
+    );
+    // Snapshot the webview DOM before rebuilding so gray screens self-triage.
+    void this._requestDiagnosticsOnce(view, 2_000).then((snapshot) => {
+      console.warn('[ChatView] webview DOM diagnostics at failure:', snapshot);
+    });
+    this._reloadUnresponsiveWebview(view, reason);
+  }
+
+  private _reloadUnresponsiveWebview(view: vscode.WebviewView, reason = 'probe_timeout'): void {
     if (this._view !== view || !view.visible) return;
     const now = Date.now();
-    if (now - this._lastWebviewReloadAt < WEBVIEW_RELOAD_COOLDOWN_MS) return;
+    if (now - this._lastWebviewReloadAt < WEBVIEW_RELOAD_COOLDOWN_MS) {
+      console.warn(`[ChatView] webview reload suppressed by cooldown (reason=${reason})`);
+      return;
+    }
     this._lastWebviewReloadAt = now;
+    this._consecutiveWebviewRecoveries += 1;
+    console.warn(`[ChatView] reloading webview (reason=${reason}, attempt ${this._consecutiveWebviewRecoveries}/${MAX_CONSECUTIVE_WEBVIEW_RECOVERIES})`);
 
     for (const [streamId, stream] of this._sseStreams) {
       if (stream.view !== view) continue;
@@ -608,16 +677,25 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       this._sseStreams.delete(streamId);
     }
     this._clearPendingMessages();
-    this._webviewHasResponded = false;
     this._webviewResolvedAt = Date.now();
+    this._webviewBootedAt = 0;
     this._lastActiveEditorFilePayload = null;
     view.webview.html = this._getHtmlForWebview(view.webview);
-    void this.updateTheme(vscode.window.activeColorTheme.kind);
     setTimeout(() => {
       if (this._view !== view) return;
       this._sendCachedState();
+      this._scheduleCachedStateRetries(view);
       void this._broadcastActiveEditorFile();
     }, 250);
+  }
+
+  private _scheduleCachedStateRetries(view: vscode.WebviewView | undefined): void {
+    scheduleCachedStateRetries({
+      target: view,
+      getCurrent: () => this._view,
+      isConnected: () => this._cachedStatus === 'connected',
+      send: () => this._sendCachedState(),
+    });
   }
 
   private _scheduleBroadcast(): void {

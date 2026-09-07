@@ -88,6 +88,13 @@ window.addEventListener('openchamber:connection-status', () => {
   maybeHideLoadingOverlay();
 });
 
+// The UI's chunk loader announces self-reloads so the extension host log can
+// correlate them with gray screens (see chunkLoadRecovery.ts).
+window.addEventListener('openchamber:chunk-import-reload', (event) => {
+  const detail = (event as CustomEvent<{ signature?: string; timestamp?: number }>).detail;
+  vscode.postMessage({ type: 'ui:chunkReload', payload: detail });
+});
+
 const fadeOutLoadingScreen = () => {
   const loadingEl = document.getElementById('initial-loading');
   if (!loadingEl) return;
@@ -1048,6 +1055,22 @@ const handleLocalApiRequest = async (url: URL, init?: RequestInit) => {
     const body = init?.body ? JSON.parse(init.body as string) : {};
     const result = await sendBridgeMessage('api:opencode/directory', { path: body.path });
     return new Response(JSON.stringify(result), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  }
+
+  // opencodeClient.checkHealth() probes /api/opencode/health (the OpenChamber web
+  // server route). Serve it here, translated to the managed OpenCode server's
+  // /global/health, so bootstrap health checks don't 404 through the generic proxy.
+  if (pathname === '/api/opencode/health' && method === 'GET') {
+    const data = await sendBridgeMessage<{ healthy?: boolean; error?: string }>('api:opencode/health').catch(
+      (error: unknown) => ({
+        healthy: false,
+        error: error instanceof Error ? error.message : String(error),
+      }),
+    );
+    return new Response(JSON.stringify(data), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
   }
 
   if (pathname === '/api/opencode/upgrade-status' && method === 'GET') {

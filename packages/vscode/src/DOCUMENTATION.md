@@ -68,9 +68,13 @@ Keep `bridge.ts` as a thin orchestration layer that delegates message handling t
   - Distinguishes owner-requested shutdown from unexpected exit for connection-state cleanup and automatic recovery.
 
 - `ChatViewProvider.ts`
-  - Probes a visible sidebar webview after a bounded startup grace period, including newly recreated documents that never reached their first response.
-  - Rebuilds the webview only after an ACK timeout, with SSE cleanup and reload cooldown to avoid a permanent blank/gray sidebar.
-  - Supplies read-only DOM/root/covering-element diagnostics to `Show OpenCode Status` so a healthy backend can be distinguished from a stale overlay or renderer presentation issue.
+  - Arms its health probe only after the webview announces `webview:bridgeReady` (fired by the webview bridge when its listeners are live), so a still-loading document is never mistaken for a dead one; a 45s boot watchdog covers bundles that never announce.
+  - Rebuilds the webview only after an ACK timeout, with SSE cleanup, a 30s reload cooldown, and a 3-consecutive-recovery cap that abandons (loudly) instead of destroying webview state forever.
+  - Logs every probe failure (reason, delivered flag, boot age, recovery count), snapshots DOM/root/covering-element diagnostics automatically before rebuilding, and re-delivers cached state plus theme over the bridgeReady round trip so nothing races document load.
+  - Supplies the same read-only DOM diagnostics to `Show OpenCode Status` so a healthy backend can be distinguished from a stale overlay or renderer presentation issue.
+
+- `webviewCachedStateRetry.ts`
+  - Re-sends cached state at staggered delays (500ms–20s) on resolve and on the `connected` transition; VS Code drops postMessage made before the webview bridge is ready, and a lost `connectionStatus` leaves the loading overlay (the gray screen) up permanently.
 
 - `webview-diagnostics-client.ts`
   - Provides the request/response timeout bridge used to collect the same read-only DOM diagnostics from the sidebar, session editor panels, and Agent Manager panel.

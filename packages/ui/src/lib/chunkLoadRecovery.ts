@@ -71,6 +71,18 @@ function scheduleReloadOnce(error: unknown): void {
     return;
   }
 
+  // Surface the recovery so a gray screen caused by a reload loop is visible
+  // in webview console and in the extension host log (forwarded by the
+  // VS Code webview entry when it hears this event).
+  console.warn('[openchamber] dynamic import failed; reloading webview', signature);
+  try {
+    window.dispatchEvent(new CustomEvent('openchamber:chunk-import-reload', {
+      detail: { signature, timestamp: now },
+    }));
+  } catch {
+    // Non-fatal; the reload itself still proceeds.
+  }
+
   window.setTimeout(() => {
     window.location.reload();
   }, 0);

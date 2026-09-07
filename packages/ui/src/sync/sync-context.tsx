@@ -1813,7 +1813,10 @@ export function SyncProvider(props: {
   const serverId = props.serverId ?? DEFAULT_SERVER_ID
   const eventSource = props.eventSource ?? "pipeline"
   const configuredMessageStreamTransport = useConfigStore((state) => state.settingsMessageStreamTransport)
-  const messageStreamTransport = configuredMessageStreamTransport === "sse"
+  // The VS Code webview cannot open raw WebSockets (its origin is
+  // vscode-webview://, unreachable for a direct ws connection); the bridge
+  // already proxies the SSE stream over postMessage, so force it there.
+  const messageStreamTransport = configuredMessageStreamTransport === "sse" || isVSCodeRuntime()
     ? "sse"
     : "ws"
   const projects = useProjectsStore((state) => state.projects)
