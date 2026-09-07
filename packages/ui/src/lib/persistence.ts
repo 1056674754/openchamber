@@ -1724,6 +1724,13 @@ export const retryFailedSettingsUpdate = async (): Promise<boolean> => {
   return _failedSettingsError === null;
 };
 
+// When the last local settings PUT completed. The webview's synced handler
+// uses this to ignore echo broadcasts shortly after its own save — the PUT
+// response already carried the freshest state, and re-syncing it is what
+// fed the apply → save → broadcast → sync ping-pong.
+let _lastLocalSettingsSaveCompletedAt = 0;
+export const getLastLocalSettingsSaveCompletedAt = (): number => _lastLocalSettingsSaveCompletedAt;
+
 const _flushSettingsUpdate = async (): Promise<boolean> => {
   const changes = _pendingSettingsChanges;
   _pendingSettingsChanges = null;
@@ -1742,6 +1749,7 @@ const _flushSettingsUpdate = async (): Promise<boolean> => {
         _settingsCache = null;
       }
       clearFailedSettings();
+      _lastLocalSettingsSaveCompletedAt = Date.now();
       return true;
     } catch (error) {
       console.warn('Failed to update settings via runtime settings API:', error);
@@ -1775,6 +1783,7 @@ const _flushSettingsUpdate = async (): Promise<boolean> => {
       _settingsCache = null;
     }
     clearFailedSettings();
+    _lastLocalSettingsSaveCompletedAt = Date.now();
     return true;
   } catch (error) {
     console.warn('Failed to update shared settings via API:', error);

@@ -2145,9 +2145,16 @@ window.addEventListener('openchamber:vscode-notification-event', (event) => {
   });
 });
 
-// Listen for settings sync command from extension (broadcast to all VS Code webviews)
+// Listen for settings sync command from extension (broadcast to all VS Code webviews).
+// Echo suppression: right after our own save the PUT response already applied
+// the freshest state — re-syncing from a broadcast here is what fed the
+// apply → save → broadcast → sync ping-pong that pegged the main thread.
 onCommand('settingsSynced', () => {
-  import('@openchamber/ui/lib/persistence').then(({ syncDesktopSettings }) => {
+  import('@openchamber/ui/lib/persistence').then(({ syncDesktopSettings, getLastLocalSettingsSaveCompletedAt }) => {
+    const lastSaveAt = getLastLocalSettingsSaveCompletedAt();
+    if (typeof lastSaveAt === 'number' && Date.now() - lastSaveAt < 5_000) {
+      return;
+    }
     void syncDesktopSettings();
   });
 });
