@@ -25,6 +25,13 @@ export default defineConfig(({ mode }) => ({
   },
   worker: {
     format: 'es',
+    // VS Code webviews cannot load module imports from inside a web worker.
+    // Keep the Shiki worker self-contained instead of emitting grammar chunks.
+    rollupOptions: {
+      output: {
+        inlineDynamicImports: true,
+      },
+    },
   },
   define: {
     'process.env.NODE_ENV': JSON.stringify(mode === 'production' ? 'production' : 'development'),
@@ -52,6 +59,15 @@ export default defineConfig(({ mode }) => ({
   build: {
     outDir: path.resolve(__dirname, 'dist/webview'),
     emptyOutDir: true,
+    // Webview resource loads funnel through the VS Code service worker; a
+    // dynamic-import burst fanning out hundreds of modulepreload links trips
+    // its concurrency cap and every subsequent fetch fails permanently
+    // (microsoft/vscode#326500, same failure as the Codex extension). Let
+    // JS chunks load on demand instead; CSS preloads stay.
+    modulePreload: {
+      polyfill: false,
+      resolveDependencies: (_filename, deps) => deps.filter((dep) => !dep.endsWith('.js')),
+    },
     rollupOptions: {
       input: path.resolve(__dirname, 'webview/index.html'),
       external: ['node:child_process', 'node:fs', 'node:path', 'node:url'],
