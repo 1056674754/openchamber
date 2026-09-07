@@ -8,6 +8,7 @@ import { openSseProxy } from './sseProxy';
 import { resolveWebviewDevServerUrl } from './webviewDevServer';
 import { normalizeWindowsDriveLetter } from './pathUtils';
 import { resolveWorkspaceFolders } from './workspaceResolver';
+import { WebviewDiagnosticsClient, type WebviewDiagnosticsResponse } from './webview-diagnostics-client';
 
 export class AgentManagerPanelProvider {
   public static readonly viewType = 'openchamber.agentManager';
@@ -20,6 +21,7 @@ export class AgentManagerPanelProvider {
   private _sseCounter = 0;
   private _sseStreams = new Map<string, AbortController>();
   private readonly _webviewDevServerUrl: string | null;
+  private readonly _diagnostics = new WebviewDiagnosticsClient();
 
   constructor(
     private readonly _context: vscode.ExtensionContext,
@@ -75,7 +77,9 @@ export class AgentManagerPanelProvider {
     }, null, this._context.subscriptions);
 
     // Handle messages
-    this._panel.webview.onDidReceiveMessage(async (message: BridgeRequest) => {
+    this._panel.webview.onDidReceiveMessage(async (message: BridgeRequest | WebviewDiagnosticsResponse) => {
+      if (this._diagnostics.handle(message)) return;
+      if (!('id' in message) || typeof message.id !== 'string') return;
       if (message.type === 'restartApi') {
         await this._openCodeManager?.restart();
         return;
@@ -103,6 +107,15 @@ export class AgentManagerPanelProvider {
         void vscode.commands.executeCommand('openchamber.internal.settingsSynced', response.data);
       }
     }, null, this._context.subscriptions);
+  }
+
+  public requestDiagnostics(): Promise<unknown> {
+    const panel = this._panel;
+    return this._diagnostics.request(panel?.webview, {
+      surface: 'agentManager',
+      active: panel?.active ?? false,
+      visible: panel?.visible ?? false,
+    });
   }
 
   public updateTheme(kind: vscode.ColorThemeKind) {

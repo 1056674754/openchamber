@@ -18,6 +18,17 @@ type ActiveEditorFilePayload = {
   selection: { startLine: number; endLine: number; text: string } | null;
 };
 
+type WebviewDiagnosticsResponse = {
+  type: 'webview:diagnostics';
+  requestId: string;
+  payload: unknown;
+};
+
+const WEBVIEW_PROBE_INTERVAL_MS = 15_000;
+const WEBVIEW_PROBE_TIMEOUT_MS = 5_000;
+const WEBVIEW_STARTUP_GRACE_MS = 15_000;
+const WEBVIEW_RELOAD_COOLDOWN_MS = 30_000;
+
 export type SelectionAttachmentPayload = {
   path: string;
   fileName: string;
@@ -65,17 +76,98 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   private readonly _messageTimeouts = new Map<string, NodeJS.Timeout>();
   private readonly _MESSAGE_TIMEOUT = 5000; // 5 seconds
   private readonly _MAX_RETRIES = 3;
+  private _webviewHasResponded = false;
+  private _webviewProbeMessageId: string | undefined;
+  private _lastWebviewReloadAt = 0;
+  private _webviewResolvedAt = 0;
+  private _pendingDiagnostics = new Map<string, {
+    resolve: (value: unknown) => void;
+    timeout: ReturnType<typeof setTimeout>;
+  }>();
 
   private _createMessageId(): string {
     return `msg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
   }
 
-  private _clearPendingMessages(): void {
+  private _clearPendingMessages(reason = 'webview_disposed'): void {
     for (const timeout of this._messageTimeouts.values()) {
       clearTimeout(timeout);
     }
     this._messageTimeouts.clear();
     this._pendingMessages.clear();
+    this._webviewProbeMessageId = undefined;
+    for (const pending of this._pendingDiagnostics.values()) {
+      clearTimeout(pending.timeout);
+      pending.resolve({ available: false, reason });
+    }
+    this._pendingDiagnostics.clear();
+  }
+
+  public async requestDiagnostics(timeoutMs = 3000): Promise<unknown> {
+    const firstView = this._view;
+    const firstResult = await this._requestDiagnosticsOnce(firstView, timeoutMs);
+    if (
+      firstResult
+      && typeof firstResult === 'object'
+      && !Array.isArray(firstResult)
+      && (firstResult as { reason?: unknown }).reason === 'webview_replaced'
+      && this._view
+      && this._view !== firstView
+    ) {
+      return this._requestDiagnosticsOnce(this._view, timeoutMs);
+    }
+    return firstResult;
+  }
+
+  private _requestDiagnosticsOnce(view: vscode.WebviewView | undefined, timeoutMs: number): Promise<unknown> {
+    if (!view) {
+      return Promise.resolve({ available: false, reason: 'webview_not_resolved' });
+    }
+
+    const requestId = `webview_diagnostics_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    return new Promise((resolve) => {
+      const timeout = setTimeout(() => {
+        this._pendingDiagnostics.delete(requestId);
+        const recoveryTriggered = this._view === view && view.visible;
+        if (recoveryTriggered) {
+          this._reloadUnresponsiveWebview(view);
+        }
+        resolve({
+          available: false,
+          reason: 'webview_diagnostics_timeout',
+          visible: view.visible,
+          recoveryTriggered,
+        });
+      }, timeoutMs);
+      this._pendingDiagnostics.set(requestId, { resolve, timeout });
+
+      void view.webview.postMessage({
+        type: 'command',
+        command: 'collectWebviewDiagnostics',
+        payload: { requestId },
+      }).then((delivered) => {
+        if (delivered) return;
+        const pending = this._pendingDiagnostics.get(requestId);
+        if (!pending) return;
+        clearTimeout(pending.timeout);
+        this._pendingDiagnostics.delete(requestId);
+        pending.resolve({
+          available: false,
+          reason: 'webview_message_not_delivered',
+          visible: view.visible,
+        });
+      }, () => {
+        const pending = this._pendingDiagnostics.get(requestId);
+        if (!pending) return;
+        clearTimeout(pending.timeout);
+        this._pendingDiagnostics.delete(requestId);
+        pending.resolve({
+          available: false,
+          reason: 'webview_message_failed',
+          visible: view.visible,
+        });
+      });
+    });
   }
 
   constructor(
@@ -89,13 +181,20 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       vscode.window.onDidChangeActiveTextEditor(() => void this._broadcastActiveEditorFile()),
       vscode.window.onDidChangeTextEditorSelection(() => this._scheduleBroadcast()),
     );
+
+    const healthCheckTimer = setInterval(() => {
+      void this._probeWebviewHealth();
+    }, WEBVIEW_PROBE_INTERVAL_MS);
+    this._context.subscriptions.push({ dispose: () => clearInterval(healthCheckTimer) });
   }
 
   public resolveWebviewView(
     webviewView: vscode.WebviewView
   ) {
-    this._clearPendingMessages();
+    this._clearPendingMessages('webview_replaced');
     this._view = webviewView;
+    this._webviewHasResponded = false;
+    this._webviewResolvedAt = Date.now();
 
     const distUri = vscode.Uri.joinPath(this._extensionUri, 'dist');
 
@@ -115,7 +214,14 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     this._lastActiveEditorFilePayload = null;
     void this._broadcastActiveEditorFile();
 
+    const visibilitySubscription = webviewView.onDidChangeVisibility(() => {
+      if (this._view !== webviewView || !webviewView.visible) return;
+      this._sendCachedState();
+      void this._probeWebviewHealth();
+    });
+
     webviewView.onDidDispose(() => {
+      visibilitySubscription.dispose();
       for (const [streamId, stream] of this._sseStreams) {
         if (stream.view !== webviewView) continue;
         stream.controller.abort();
@@ -131,11 +237,26 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         this._clearActiveEditorFileTimer = undefined;
       }
       this._lastActiveEditorFilePayload = null;
+      this._webviewHasResponded = false;
+      this._webviewResolvedAt = 0;
       this._clearPendingMessages();
       this._view = undefined;
     });
 
-    webviewView.webview.onDidReceiveMessage(async (message: (BridgeRequest & { _msgId?: string }) | { type: 'bridge:ack'; _msgId: string }) => {
+    webviewView.webview.onDidReceiveMessage(async (message: (BridgeRequest & { _msgId?: string }) | { type: 'bridge:ack'; _msgId: string } | WebviewDiagnosticsResponse) => {
+      this._webviewHasResponded = true;
+      if (
+        message.type === 'webview:diagnostics'
+        && 'requestId' in message
+        && typeof message.requestId === 'string'
+      ) {
+        const pending = this._pendingDiagnostics.get(message.requestId);
+        if (!pending) return;
+        clearTimeout(pending.timeout);
+        this._pendingDiagnostics.delete(message.requestId);
+        pending.resolve(message.payload);
+        return;
+      }
       if (message.type === 'bridge:ack' && typeof message._msgId === 'string') {
         this._confirmMessage(message._msgId);
         return;
@@ -341,10 +462,16 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       command: 'windowFocusChanged',
       payload: { focused },
     });
+    if (focused && this._view.visible) {
+      void this._probeWebviewHealth();
+    }
   }
 
   // Message delivery confirmation
   private _confirmMessage(messageId: string) {
+    if (this._webviewProbeMessageId === messageId) {
+      this._webviewProbeMessageId = undefined;
+    }
     this._pendingMessages.delete(messageId);
 
     const timeout = this._messageTimeouts.get(messageId);
@@ -423,6 +550,74 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       error: this._cachedError,
     });
     this.notifyWindowFocusChanged(vscode.window.state.focused);
+  }
+
+  private async _probeWebviewHealth(): Promise<void> {
+    const view = this._view;
+    if (
+      !view
+      || !view.visible
+      || !vscode.window.state.focused
+      || Date.now() - this._webviewResolvedAt < WEBVIEW_STARTUP_GRACE_MS
+      || this._webviewProbeMessageId
+    ) {
+      return;
+    }
+
+    const messageId = this._createMessageId();
+    this._webviewProbeMessageId = messageId;
+    let delivered = false;
+    try {
+      delivered = await view.webview.postMessage({
+        id: `webview_probe_${Date.now()}`,
+        type: 'webview:probe',
+        success: true,
+        _msgId: messageId,
+      });
+    } catch {
+      delivered = false;
+    }
+
+    if (this._view !== view || this._webviewProbeMessageId !== messageId) return;
+    if (!delivered) {
+      this._webviewProbeMessageId = undefined;
+      this._reloadUnresponsiveWebview(view);
+      return;
+    }
+
+    this._pendingMessages.add(messageId);
+    const timeout = setTimeout(() => {
+      if (this._view !== view || this._webviewProbeMessageId !== messageId) return;
+      this._pendingMessages.delete(messageId);
+      this._messageTimeouts.delete(messageId);
+      this._webviewProbeMessageId = undefined;
+      this._reloadUnresponsiveWebview(view);
+    }, WEBVIEW_PROBE_TIMEOUT_MS);
+    this._messageTimeouts.set(messageId, timeout);
+  }
+
+  private _reloadUnresponsiveWebview(view: vscode.WebviewView): void {
+    if (this._view !== view || !view.visible) return;
+    const now = Date.now();
+    if (now - this._lastWebviewReloadAt < WEBVIEW_RELOAD_COOLDOWN_MS) return;
+    this._lastWebviewReloadAt = now;
+
+    for (const [streamId, stream] of this._sseStreams) {
+      if (stream.view !== view) continue;
+      stream.controller.abort();
+      this._sseStreams.delete(streamId);
+    }
+    this._clearPendingMessages();
+    this._webviewHasResponded = false;
+    this._webviewResolvedAt = Date.now();
+    this._lastActiveEditorFilePayload = null;
+    view.webview.html = this._getHtmlForWebview(view.webview);
+    void this.updateTheme(vscode.window.activeColorTheme.kind);
+    setTimeout(() => {
+      if (this._view !== view) return;
+      this._sendCachedState();
+      void this._broadcastActiveEditorFile();
+    }, 250);
   }
 
   private _scheduleBroadcast(): void {

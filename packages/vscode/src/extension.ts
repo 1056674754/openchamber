@@ -352,6 +352,22 @@ export async function activate(context: vscode.ExtensionContext) {
         return;
       }
 
+      const docName = editor.document.uri.path.split('/').pop() ?? '';
+      if (docName.startsWith('.web-lens-ref-')) {
+        // Web Lens (collectiveai.web-lens) delivers browser context by writing
+        // @-file references to a temp ".web-lens-ref-*" file, selecting all,
+        // and invoking this command. The references must land as input text so
+        // @-mention parsing attaches the real context files as chips.
+        const refs = editor.document.getText(editor.selection).trim();
+        if (refs) {
+          if (!(await revealChatViewForPayload())) {
+            return;
+          }
+          chatViewProvider?.addTextToInput(refs);
+        }
+        return;
+      }
+
       const target = buildSelectionTarget(editor);
 
       if (target) {
@@ -656,6 +672,19 @@ export async function activate(context: vscode.ExtensionContext) {
             })
           )
         : [];
+      const [sidebarDiagnostics, sessionEditorDiagnostics, agentManagerDiagnostics] = await Promise.all([
+        chatViewProvider
+          ? chatViewProvider.requestDiagnostics()
+          : Promise.resolve({ available: false, reason: 'chat_view_provider_unavailable' }),
+        sessionEditorProvider?.requestDiagnostics() ?? Promise.resolve([]),
+        agentManagerProvider?.requestDiagnostics()
+          ?? Promise.resolve({ surface: 'agentManager', available: false, reason: 'provider_unavailable' }),
+      ]);
+      const webviewDiagnostics = {
+        sidebar: sidebarDiagnostics,
+        sessionEditors: sessionEditorDiagnostics,
+        agentManager: agentManagerDiagnostics,
+      };
 
       const storedSettings = context.globalState.get<Record<string, unknown>>(SETTINGS_KEY) || {};
       const settingsKeys = Object.keys(storedSettings).filter((key) => key !== 'lastDirectory');
@@ -726,6 +755,9 @@ export async function activate(context: vscode.ExtensionContext) {
               }),
             ]
           : []),
+        '',
+        'OpenChamber webview diagnostics:',
+        JSON.stringify(webviewDiagnostics, null, 2),
         '',
       ];
 

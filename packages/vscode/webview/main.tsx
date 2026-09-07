@@ -1,5 +1,5 @@
 import { createVSCodeAPIs } from './api';
-import { onCommand, onThemeChange, proxyApiRequest, proxySessionMessageRequest, sendBridgeMessage, startSseProxy, stopSseProxy } from './api/bridge';
+import { onCommand, onThemeChange, proxyApiRequest, proxySessionMessageRequest, sendBridgeMessage, startSseProxy, stopSseProxy, vscode } from './api/bridge';
 import { vscodeStreamPerfCount, vscodeStreamPerfMeasure, vscodeStreamPerfObserve } from './api/streamPerf';
 import type { RuntimeAPIs } from '@openchamber/ui/lib/api/types';
 import {
@@ -1586,6 +1586,95 @@ onCommand('windowFocusChanged', (payload) => {
   if (typeof payload === 'object' && payload && typeof (payload as { focused?: unknown }).focused === 'boolean') {
     window.__OPENCHAMBER_VSCODE_WINDOW_FOCUSED__ = (payload as { focused: boolean }).focused;
   }
+});
+
+const describeDiagnosticElement = (element: Element | null) => {
+  if (!(element instanceof HTMLElement)) return null;
+  const style = window.getComputedStyle(element);
+  const rect = element.getBoundingClientRect();
+  return {
+    tag: element.tagName.toLowerCase(),
+    id: element.id || null,
+    className: typeof element.className === 'string' ? element.className.slice(0, 500) : null,
+    dataSlot: element.getAttribute('data-slot'),
+    dataState: element.getAttribute('data-state'),
+    role: element.getAttribute('role'),
+    ariaModal: element.getAttribute('aria-modal'),
+    position: style.position,
+    zIndex: style.zIndex,
+    display: style.display,
+    visibility: style.visibility,
+    opacity: style.opacity,
+    pointerEvents: style.pointerEvents,
+    backgroundColor: style.backgroundColor,
+    filter: style.filter,
+    backdropFilter: style.backdropFilter,
+    rect: {
+      x: Math.round(rect.x),
+      y: Math.round(rect.y),
+      width: Math.round(rect.width),
+      height: Math.round(rect.height),
+    },
+  };
+};
+
+const collectWebviewDiagnostics = () => {
+  const viewportArea = Math.max(1, window.innerWidth * window.innerHeight);
+  const coveringElements = Array.from(document.querySelectorAll<HTMLElement>('body *'))
+    .map((element) => ({ element, style: window.getComputedStyle(element), rect: element.getBoundingClientRect() }))
+    .filter(({ style, rect }) => {
+      if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0) return false;
+      if (rect.width * rect.height < viewportArea * 0.75) return false;
+      return style.position === 'fixed' || style.position === 'absolute';
+    })
+    .slice(-20)
+    .map(({ element }) => describeDiagnosticElement(element));
+
+  const centerStack = document.elementsFromPoint(
+    Math.max(0, Math.floor(window.innerWidth / 2)),
+    Math.max(0, Math.floor(window.innerHeight / 2)),
+  ).slice(0, 12).map(describeDiagnosticElement);
+  const initialLoading = document.getElementById('initial-loading');
+
+  return {
+    available: true,
+    capturedAt: new Date().toISOString(),
+    readyState: document.readyState,
+    visibilityState: document.visibilityState,
+    documentHasFocus: document.hasFocus(),
+    viewport: { width: window.innerWidth, height: window.innerHeight, devicePixelRatio: window.devicePixelRatio },
+    rootChildCount: document.getElementById('root')?.childElementCount ?? null,
+    body: describeDiagnosticElement(document.body),
+    html: describeDiagnosticElement(document.documentElement),
+    initialLoading: describeDiagnosticElement(initialLoading),
+    dialogOverlayCount: document.querySelectorAll('[data-slot="dialog-overlay"]').length,
+    dialogContentCount: document.querySelectorAll('[data-slot="dialog-content"]').length,
+    coveringElements,
+    centerStack,
+  };
+};
+
+onCommand('collectWebviewDiagnostics', (payload) => {
+  const requestId = typeof payload === 'object' && payload
+    ? (payload as { requestId?: unknown }).requestId
+    : undefined;
+  if (typeof requestId !== 'string' || requestId.length === 0) return;
+
+  let diagnosticPayload: unknown;
+  try {
+    diagnosticPayload = collectWebviewDiagnostics();
+  } catch (error) {
+    diagnosticPayload = {
+      available: false,
+      reason: 'webview_diagnostics_failed',
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+  vscode.postMessage({
+    type: 'webview:diagnostics',
+    requestId,
+    payload: diagnosticPayload,
+  });
 });
 
 const readyNotificationCooldowns = new Map<string, number>();

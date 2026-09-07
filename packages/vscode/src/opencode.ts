@@ -10,8 +10,11 @@ import { randomBytes } from 'crypto';
 import { normalizeWindowsDriveLetter } from './pathUtils';
 import { applyProviderEnvAliases } from './provider-env-aliases';
 import { namespacePathForUri, remoteSessionForWorkspace, isUnsupportedRemoteWorkspace, ensureNamespaceMounted, getRemoteConfigDir } from './remoteNamespace';
+import { observeManagedProcess, type ManagedProcessExit } from './managed-process-lifecycle';
 
 const READY_CHECK_TIMEOUT_MS = 30000;
+const MAX_AUTOMATIC_RECOVERY_ATTEMPTS = 3;
+const AUTOMATIC_RECOVERY_STABLE_MS = 60_000;
 const WINDOWS_EXECUTABLE_EXTENSIONS = (process.env.PATHEXT || '.EXE;.CMD;.BAT;.COM')
   .split(';')
   .map((ext) => ext.trim().toLowerCase())
@@ -641,7 +644,7 @@ async function spawnManagedOpenCodeServer(
   port: number,
   timeoutMs: number,
   extraEnv?: Record<string, string>
-): Promise<{ url: string; close: () => void }> {
+): Promise<{ url: string; close: () => void; exited: Promise<ManagedProcessExit> }> {
   const binary = stripWrappingQuotes(process.env.OPENCODE_BINARY || 'opencode') || 'opencode';
   const args = ['serve', '--hostname', '127.0.0.1', '--port', String(port)];
   const launch = resolveWindowsLaunchSpec(binary, args);
@@ -651,6 +654,7 @@ async function spawnManagedOpenCodeServer(
     stdio: ['ignore', 'pipe', 'pipe'],
     windowsHide: true,
   });
+  const lifecycle = observeManagedProcess(child);
 
   const url = await new Promise<string>((resolve, reject) => {
     let output = '';
@@ -713,13 +717,8 @@ async function spawnManagedOpenCodeServer(
 
   return {
     url,
-    close: () => {
-      try {
-        child.kill('SIGTERM');
-      } catch {
-        // ignore
-      }
-    },
+    close: lifecycle.close,
+    exited: lifecycle.exited,
   };
 }
 
@@ -749,7 +748,7 @@ async function allocateManagedOpenCodePort(): Promise<number> {
 
 export function createOpenCodeManager(_context: vscode.ExtensionContext): OpenCodeManager {
   void _context;
-  let server: { url: string; close: () => void } | null = null;
+  let server: { url: string; close: () => void; exited: Promise<ManagedProcessExit> } | null = null;
   let managedApiUrlOverride: string | null = null;
   let managedPassword: string | null = null;
   let managedPasswordSource: 'user-env' | 'generated' | 'rotated' | null = null;
@@ -782,6 +781,10 @@ export function createOpenCodeManager(_context: vscode.ExtensionContext): OpenCo
   let cliPath: string | null = null;
 
   let pendingOperation: Promise<void> | null = null;
+  let automaticRecoveryAllowed = true;
+  let automaticRecovery: Promise<void> | null = null;
+  let automaticRecoveryAttempts = 0;
+  let automaticRecoveryResetTimer: ReturnType<typeof setTimeout> | undefined;
 
   const config = vscode.workspace.getConfiguration('openchamber');
   const configuredApiUrl = config.get<string>('apiUrl') || '';
@@ -805,9 +808,59 @@ export function createOpenCodeManager(_context: vscode.ExtensionContext): OpenCo
       lastError = error;
       if (newStatus === 'connected') {
         lastConnectedAt = Date.now();
+        if (automaticRecoveryResetTimer !== undefined) {
+          clearTimeout(automaticRecoveryResetTimer);
+        }
+        automaticRecoveryResetTimer = setTimeout(() => {
+          automaticRecoveryAttempts = 0;
+          automaticRecoveryResetTimer = undefined;
+        }, AUTOMATIC_RECOVERY_STABLE_MS);
       }
       listeners.forEach(cb => cb(status, error));
     }
+  };
+
+  const describeProcessExit = (exit: ManagedProcessExit): string => {
+    if (exit.code !== null) return `OpenCode process exited with code ${exit.code}`;
+    if (exit.signal) return `OpenCode process exited after signal ${exit.signal}`;
+    return 'OpenCode process exited unexpectedly';
+  };
+
+  const watchManagedServer = (ownedServer: NonNullable<typeof server>): void => {
+    void ownedServer.exited.then((exit) => {
+      if (exit.intentional || server !== ownedServer) return;
+
+      server = null;
+      managedApiUrlOverride = null;
+      detectedPort = null;
+      version = null;
+      lastExitCode = exit.code;
+      if (automaticRecoveryResetTimer !== undefined) {
+        clearTimeout(automaticRecoveryResetTimer);
+        automaticRecoveryResetTimer = undefined;
+      }
+      const exitMessage = describeProcessExit(exit);
+      setStatus('disconnected', exitMessage);
+
+      if (!automaticRecoveryAllowed || automaticRecovery) return;
+      if (automaticRecoveryAttempts >= MAX_AUTOMATIC_RECOVERY_ATTEMPTS) {
+        setStatus('error', `${exitMessage}. Automatic recovery stopped after ${MAX_AUTOMATIC_RECOVERY_ATTEMPTS} attempts.`);
+        return;
+      }
+      automaticRecoveryAttempts += 1;
+      const recoveryDelayMs = 250 * automaticRecoveryAttempts;
+      automaticRecovery = (async () => {
+        const activeOperation = pendingOperation;
+        if (activeOperation) {
+          await activeOperation.catch(() => undefined);
+        }
+        await new Promise((resolve) => setTimeout(resolve, recoveryDelayMs));
+        if (!automaticRecoveryAllowed || server) return;
+        await start(undefined, { automaticRecovery: true });
+      })().finally(() => {
+        automaticRecovery = null;
+      });
+    });
   };
 
   const getApiUrl = (): string | null => {
@@ -952,7 +1005,9 @@ export function createOpenCodeManager(_context: vscode.ExtensionContext): OpenCo
       try {
         process.chdir(workingDirectory);
         const port = await allocateManagedOpenCodePort();
-        server = await spawnManagedOpenCodeServer(workingDirectory, port, READY_CHECK_TIMEOUT_MS, remoteEnv);
+        const startedServer = await spawnManagedOpenCodeServer(workingDirectory, port, READY_CHECK_TIMEOUT_MS, remoteEnv);
+        server = startedServer;
+        watchManagedServer(startedServer);
       } finally {
         try {
           process.chdir(originalCwd);
@@ -963,7 +1018,18 @@ export function createOpenCodeManager(_context: vscode.ExtensionContext): OpenCo
 
       if (server && server.url) {
         // Validate readiness for the current workspace context.
-        const ready = await waitForReady(server.url, READY_CHECK_TIMEOUT_MS, getOpenCodeAuthHeaders());
+        const ownedServer = server;
+        const readiness = await Promise.race([
+          waitForReady(ownedServer.url, READY_CHECK_TIMEOUT_MS, getOpenCodeAuthHeaders()).then((result) => ({
+            type: 'ready' as const,
+            result,
+          })),
+          ownedServer.exited.then((exit) => ({ type: 'exit' as const, exit })),
+        ]);
+        if (readiness.type === 'exit') {
+          throw new Error(describeProcessExit(readiness.exit));
+        }
+        const ready = readiness.result;
         lastReadyElapsedMs = ready.elapsedMs;
         lastReadyAttempts = ready.attempts;
         if (ready.ok) {
@@ -1055,7 +1121,18 @@ export function createOpenCodeManager(_context: vscode.ExtensionContext): OpenCo
     await startInternal(undefined, { rotateManaged: true });
   }
 
-  async function start(workdir?: string): Promise<void> {
+  async function start(
+    workdir?: string,
+    options: { automaticRecovery?: boolean } = {}
+  ): Promise<void> {
+    automaticRecoveryAllowed = true;
+    if (!options.automaticRecovery) {
+      automaticRecoveryAttempts = 0;
+      if (automaticRecoveryResetTimer !== undefined) {
+        clearTimeout(automaticRecoveryResetTimer);
+        automaticRecoveryResetTimer = undefined;
+      }
+    }
     if (pendingOperation) {
       await pendingOperation;
       if (server) {
@@ -1072,6 +1149,12 @@ export function createOpenCodeManager(_context: vscode.ExtensionContext): OpenCo
   }
 
   async function stop(): Promise<void> {
+    automaticRecoveryAllowed = false;
+    automaticRecoveryAttempts = 0;
+    if (automaticRecoveryResetTimer !== undefined) {
+      clearTimeout(automaticRecoveryResetTimer);
+      automaticRecoveryResetTimer = undefined;
+    }
     if (pendingOperation) {
       await pendingOperation;
     }
@@ -1088,6 +1171,12 @@ export function createOpenCodeManager(_context: vscode.ExtensionContext): OpenCo
   }
 
   async function restart(): Promise<void> {
+    automaticRecoveryAllowed = true;
+    automaticRecoveryAttempts = 0;
+    if (automaticRecoveryResetTimer !== undefined) {
+      clearTimeout(automaticRecoveryResetTimer);
+      automaticRecoveryResetTimer = undefined;
+    }
     if (pendingOperation) {
       await pendingOperation;
     }

@@ -63,6 +63,18 @@ Keep `bridge.ts` as a thin orchestration layer that delegates message handling t
 - `opencode-upgrade-runtime.ts`
   - Owns managed-versus-external capability decisions, latest-version checks, serialized upgrades, custom-build-aware version comparison, and restart-after-upgrade behavior.
 
+- `managed-process-lifecycle.ts`
+  - Keeps managed OpenCode stdout/stderr pipes drained after startup so child logging cannot block on pipe backpressure.
+  - Distinguishes owner-requested shutdown from unexpected exit for connection-state cleanup and automatic recovery.
+
+- `ChatViewProvider.ts`
+  - Probes a visible sidebar webview after a bounded startup grace period, including newly recreated documents that never reached their first response.
+  - Rebuilds the webview only after an ACK timeout, with SSE cleanup and reload cooldown to avoid a permanent blank/gray sidebar.
+  - Supplies read-only DOM/root/covering-element diagnostics to `Show OpenCode Status` so a healthy backend can be distinguished from a stale overlay or renderer presentation issue.
+
+- `webview-diagnostics-client.ts`
+  - Provides the request/response timeout bridge used to collect the same read-only DOM diagnostics from the sidebar, session editor panels, and Agent Manager panel.
+
 - `opencodeConfig.ts`
   - Reads layered OpenCode JSON/JSONC for VS Code-owned agent, command, MCP, provider, and skill operations.
   - Rejects partial/invalid parser results before mutation, isolates unrelated broken layers for read surfaces, and validates existing content before backup/write so configuration is never silently truncated.

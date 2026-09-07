@@ -9,6 +9,7 @@ import { resolveWebviewDevServerUrl } from './webviewDevServer';
 import { normalizeWindowsDriveLetter } from './pathUtils';
 import type { SelectionAttachmentPayload } from './ChatViewProvider';
 import { resolveWorkspaceFolders } from './workspaceResolver';
+import { WebviewDiagnosticsClient, type WebviewDiagnosticsResponse } from './webview-diagnostics-client';
 
 type SessionPanelState = {
   panel: vscode.WebviewPanel;
@@ -47,6 +48,7 @@ export class SessionEditorPanelProvider {
   private _clearActiveEditorFileTimer: ReturnType<typeof setTimeout> | undefined;
   private _lastActiveEditorFilePayload: ActiveEditorFilePayload | null = null;
   private readonly _webviewDevServerUrl: string | null;
+  private readonly _diagnostics = new WebviewDiagnosticsClient();
 
   constructor(
     private readonly _context: vscode.ExtensionContext,
@@ -82,6 +84,21 @@ export class SessionEditorPanelProvider {
     }
 
     this._createPanel(sessionId, sessionTitle, sessionId);
+  }
+
+  public requestDiagnostics(): Promise<unknown[]> {
+    if (this._panels.size === 0) {
+      return Promise.resolve([]);
+    }
+    return Promise.all(Array.from(this._panels.entries()).map(([panelId, entry]) => (
+      this._diagnostics.request(entry.panel.webview, {
+        surface: 'sessionEditor',
+        panelId,
+        title: entry.panel.title,
+        active: entry.panel.active,
+        visible: entry.panel.visible,
+      })
+    )));
   }
 
   private _createPanel(panelId: string, title: string, initialSessionId: string | null): void {
@@ -127,7 +144,9 @@ export class SessionEditorPanelProvider {
       }
     }, null, this._context.subscriptions);
 
-    panel.webview.onDidReceiveMessage(async (message: BridgeRequest) => {
+    panel.webview.onDidReceiveMessage(async (message: BridgeRequest | WebviewDiagnosticsResponse) => {
+      if (this._diagnostics.handle(message)) return;
+      if (!('id' in message) || typeof message.id !== 'string') return;
       if (message.type === 'restartApi') {
         await this._openCodeManager?.restart();
         return;
