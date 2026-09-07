@@ -37,6 +37,10 @@ const WEBVIEW_RECOVERY_BOOT_TIMEOUT_MS = 15_000;
 // environment cannot sustain the webview; stop churning and say so.
 const WEBVIEW_RAPID_RECOVERY_WINDOW_MS = 60_000;
 const MAX_RAPID_WEBVIEW_RECOVERIES = 3;
+// Terminal fallback when every recovery path has failed: reload the window
+// (the only action proven to clear a wedged webview). Rate-limited so a
+// hostile freeze-on-boot pattern cannot loop the user's window.
+const AUTO_WINDOW_RELOAD_MIN_INTERVAL_MS = 10 * 60_000;
 
 export type SelectionAttachmentPayload = {
   path: string;
@@ -102,6 +106,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   private _lastWebviewRecoveryAt = 0;
   private _rapidWebviewRecoveries = 0;
   private _webviewRecoveryAbandoned = false;
+  private _lastAutoWindowReloadAt = 0;
   private _pendingDiagnostics = new Map<string, {
     resolve: (value: unknown) => void;
     timeout: ReturnType<typeof setTimeout>;
@@ -666,8 +671,17 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         this._webviewRecoveryAbandoned = true;
         console.error(
           `[ChatView] webview recovery abandoned: ${this._rapidWebviewRecoveries} recoveries failed again within ${WEBVIEW_RAPID_RECOVERY_WINDOW_MS / 1000}s (last reason=${reason});`
-          + ' run "Developer: Reload Window" or reinstall the extension.',
+          + ' reloading the window to clear the wedged webview.',
         );
+        if (now - this._lastAutoWindowReloadAt > AUTO_WINDOW_RELOAD_MIN_INTERVAL_MS) {
+          this._lastAutoWindowReloadAt = now;
+          void vscode.commands.executeCommand('workbench.action.reloadWindow').then(
+            undefined,
+            (error) => console.error('[ChatView] automatic window reload failed:', error),
+          );
+        } else {
+          console.error('[ChatView] automatic window reload skipped (rate-limited); run "Developer: Reload Window".');
+        }
         return;
       }
       this._rapidWebviewRecoveries += 1;
@@ -724,10 +738,11 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       return;
     }
     // If the view was visible, the fresh registration resolves it on its own;
-    // focusing guarantees the reveal in case it does not.
+    // focusing guarantees the reveal. Must run AFTER the deferred
+    // re-registration (250ms) lands, not alongside it.
     setTimeout(() => {
       vscode.commands.executeCommand(`${ChatViewProvider.viewType}.focus`).then(undefined, () => {});
-    }, 250);
+    }, 700);
   }
 
   private _scheduleCachedStateRetries(view: vscode.WebviewView | undefined): void {

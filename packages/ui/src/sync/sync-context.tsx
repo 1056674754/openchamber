@@ -201,7 +201,13 @@ const requestSignature = (items: Array<{ id: string }> | undefined): string => {
 
 const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0)
 
-const syncSnapshotSignature = (value: unknown): string => JSON.stringify(value)
+const syncSnapshotSignature = (value: unknown): string => {
+  const serialized = JSON.stringify(value)
+  if (serialized.length > 100_000) {
+    window.__openchamberBootTrace?.(`op:sync-signature len=${serialized.length}`)
+  }
+  return serialized
+}
 
 function haveEquivalentSyncSnapshots(left: unknown, right: unknown): boolean {
   return syncSnapshotSignature(left) === syncSnapshotSignature(right)

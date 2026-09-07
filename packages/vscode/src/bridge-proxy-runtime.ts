@@ -185,6 +185,11 @@ export async function handleProxyBridgeMessage(
             ? projectMessageHistoryResponseText(upstreamBodyText)
             : upstreamBodyText;
           setDecodedPayloadLengthHeader(responseHeaders, Buffer.byteLength(bodyText));
+          if (bodyText.length > 1_000_000) {
+            // Multi-MB proxied bodies are the main-thread gray-screen suspect;
+            // correlate payload size with webview freeze reports in the log.
+            console.error(`[api:proxy] large response: ${normalizedPath} → ${(bodyText.length / 1_048_576).toFixed(1)}MB`);
+          }
           const data: ApiProxyResponsePayload = {
             status: response.status,
             headers: responseHeaders,

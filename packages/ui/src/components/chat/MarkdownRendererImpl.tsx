@@ -2490,6 +2490,18 @@ const SimpleMarkdownRendererImpl: React.FC<{
   fileReferenceBaseUrl: explicitFileReferenceBaseUrl,
 }) => {
   const { editor, runtime } = useRuntimeAPIs();
+  // Heavy-render bracket for the VS Code webview tracer: a giant message whose
+  // "done" never lands names the blocking parse. Only traces large content so
+  // normal chats stay quiet.
+  const traceHeavyRender = content.length > 20_000;
+  if (traceHeavyRender) {
+    window.__openchamberBootTrace?.(`op:md-render:start len=${content.length}`);
+  }
+  React.useEffect(() => {
+    if (traceHeavyRender) {
+      window.__openchamberBootTrace?.('op:md-render:done');
+    }
+  }, [traceHeavyRender]);
   const renderedContent = React.useMemo(
     () => (stripFrontmatter ? stripLeadingFrontmatter(content) : content),
     [content, stripFrontmatter],
