@@ -88,6 +88,23 @@ window.addEventListener('openchamber:connection-status', () => {
   maybeHideLoadingOverlay();
 });
 
+// Boot-phase tracer: the extension host logs every step, so the next
+// main-thread freeze (which cannot report anything by itself) is bracketed
+// by the last step that made it out.
+declare global {
+  interface Window {
+    __openchamberBootTrace?: (step: string) => void;
+  }
+}
+const bootTraceOrigin = Date.now();
+window.__openchamberBootTrace = (step: string) => {
+  try {
+    vscode.postMessage({ type: 'ui:bootTrace', payload: { step, ms: Date.now() - bootTraceOrigin } });
+  } catch {
+    // Bridge unavailable; tracing is best-effort.
+  }
+};
+
 // Main-thread freeze watchdog. A frozen webview is the gray screen: the
 // extension host's probe reports ack_timeout while our event loop is stuck.
 // Report long tasks (with script attribution when available) and heartbeat
@@ -2152,10 +2169,14 @@ onCommand('activeEditorFile', (payload) => {
   });
 });
 
+window.__openchamberBootTrace?.('entry-eval');
 import('@openchamber/ui/apps/renderVSCodeApp')
   .then(async ({ renderVSCodeApp }) => {
+    window.__openchamberBootTrace?.('app-import-resolved');
     renderVSCodeApp(window.__OPENCHAMBER_RUNTIME_APIS__ ?? createVSCodeAPIs());
+    window.__openchamberBootTrace?.('render-issued');
     await waitForUiMount();
+    window.__openchamberBootTrace?.('ui-mounted');
     uiMounted = true;
     armBootstrapWatchdog();
     maybeHideLoadingOverlay();

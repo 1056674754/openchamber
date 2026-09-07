@@ -167,7 +167,12 @@ export async function activate(context: vscode.ExtensionContext) {
   let chatViewRegistration = registerChatView();
   provider.setRecreateView(() => {
     chatViewRegistration.dispose();
-    chatViewRegistration = registerChatView();
+    // Re-register on a later tick: disposing and re-registering in the same
+    // tick raced VS Code's view-descriptor removal and left the view
+    // unresolved (observed live: no resolve after recovery at 23:51:53).
+    setTimeout(() => {
+      chatViewRegistration = registerChatView();
+    }, 250);
   });
   context.subscriptions.push({ dispose: () => chatViewRegistration.dispose() });
 

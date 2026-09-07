@@ -15,16 +15,23 @@ import { startModelPrefsAutoSave } from '@/lib/modelPrefsAutoSave';
 import { startTypographyWatcher } from '@/lib/typographyWatcher';
 import { VSCodeApp } from './VSCodeApp';
 
+const bootTrace = (step: string) => {
+  window.__openchamberBootTrace?.(step);
+};
+
 const initializeSharedPreferences = () => {
+  bootTrace('locale-init');
   initializeLocale();
 
   void initializeAppearancePreferences().then(() => {
+    bootTrace('appearance-prefs-done');
     void Promise.all([
       syncDesktopSettings(),
       applyPersistedDirectoryPreferences(),
-    ]).catch((err) => {
-      console.error('[vscode-main] settings init failed:', err);
-    });
+    ]).then(() => bootTrace('settings-sync-done'))
+      .catch((err) => {
+        console.error('[vscode-main] settings init failed:', err);
+      });
 
     startAppearanceAutoSave();
     startModelPrefsAutoSave();
@@ -35,6 +42,7 @@ const initializeSharedPreferences = () => {
 };
 
 export function renderVSCodeApp(apis: RuntimeAPIs) {
+  bootTrace('render-fn-enter');
   initializeSharedPreferences();
 
   const rootElement = document.getElementById('root');
@@ -55,4 +63,5 @@ export function renderVSCodeApp(apis: RuntimeAPIs) {
       </I18nProvider>
     </StrictMode>,
   );
+  bootTrace('react-render-scheduled');
 }

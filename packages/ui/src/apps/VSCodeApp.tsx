@@ -27,6 +27,8 @@ type VSCodePanelType = 'chat' | 'agentManager';
 declare global {
   interface Window {
     __OPENCHAMBER_PANEL_TYPE__?: VSCodePanelType;
+    /** Installed by the VS Code webview entry; no-ops elsewhere. */
+    __openchamberBootTrace?: (step: string) => void;
   }
 }
 
@@ -46,6 +48,7 @@ export function VSCodeApp({ apis }: VSCodeAppProps) {
     : 'chat';
 
   React.useEffect(() => {
+    window.__openchamberBootTrace?.('vscodeapp-mounted');
     registerRuntimeAPIs(apis);
     return () => registerRuntimeAPIs(null);
   }, [apis]);
