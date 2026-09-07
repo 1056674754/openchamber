@@ -105,6 +105,38 @@ window.__openchamberBootTrace = (step: string) => {
   }
 };
 
+// Forward every uncaught JS error to the extension host log. The webview
+// console is invisible to the host, and a React crash that unmounts the root
+// (the gray screen) leaves no other trace.
+declare global {
+  interface Window {
+    __openchamberReportJSError?: (payload: Record<string, unknown>) => void;
+  }
+}
+window.__openchamberReportJSError = (payload: Record<string, unknown>) => {
+  try {
+    vscode.postMessage({ type: 'ui:jsError', payload });
+  } catch {
+    // Best-effort.
+  }
+};
+window.addEventListener('error', (event) => {
+  window.__openchamberReportJSError?.({
+    kind: 'error',
+    message: String(event.message).slice(0, 500),
+    source: `${event.filename}:${event.lineno}:${event.colno}`,
+    stack: event.error instanceof Error ? String(event.error.stack ?? '').slice(0, 2000) : undefined,
+  });
+});
+window.addEventListener('unhandledrejection', (event) => {
+  const reason: unknown = event.reason;
+  window.__openchamberReportJSError?.({
+    kind: 'unhandledrejection',
+    message: String(reason).slice(0, 500),
+    stack: reason instanceof Error ? String(reason.stack ?? '').slice(0, 2000) : undefined,
+  });
+});
+
 // Main-thread freeze watchdog. A frozen webview is the gray screen: the
 // extension host's probe reports ack_timeout while our event loop is stuck.
 // Report long tasks (with script attribution when available) and heartbeat

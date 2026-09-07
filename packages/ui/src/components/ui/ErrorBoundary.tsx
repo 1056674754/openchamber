@@ -46,6 +46,15 @@ class InnerErrorBoundary extends React.Component<InnerErrorBoundaryProps, ErrorB
     this.setState({ error, errorInfo, copied: false });
 
     console.error('Error caught by boundary:', error, errorInfo);
+    // VS Code webview entry installs this hook so the crash (and its stack)
+    // lands in the extension host log — the webview console is invisible there.
+    (window as Window & { __openchamberReportJSError?: (payload: Record<string, unknown>) => void })
+      .__openchamberReportJSError?.({
+        kind: 'error_boundary',
+        message: String(error).slice(0, 500),
+        stack: String(error.stack ?? '').slice(0, 2000),
+        componentStack: String(errorInfo.componentStack ?? '').slice(0, 2000),
+      });
   }
 
   handleReset = () => {

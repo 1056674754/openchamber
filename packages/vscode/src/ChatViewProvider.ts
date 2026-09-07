@@ -270,7 +270,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       this._view = undefined;
     });
 
-    webviewView.webview.onDidReceiveMessage(async (message: (BridgeRequest & { _msgId?: string }) | { type: 'bridge:ack'; _msgId: string } | { type: 'webview:bridgeReady' } | { type: 'ui:chunkReload'; payload?: unknown } | { type: 'ui:freezeReport'; payload?: unknown } | { type: 'ui:bootTrace'; payload?: unknown } | WebviewDiagnosticsResponse) => {
+    webviewView.webview.onDidReceiveMessage(async (message: (BridgeRequest & { _msgId?: string }) | { type: 'bridge:ack'; _msgId: string } | { type: 'webview:bridgeReady' } | { type: 'ui:chunkReload'; payload?: unknown } | { type: 'ui:freezeReport'; payload?: unknown } | { type: 'ui:bootTrace'; payload?: unknown } | { type: 'ui:jsError'; payload?: unknown } | WebviewDiagnosticsResponse) => {
       if (message.type === 'webview:bridgeReady') {
         const bootedInMs = this._webviewResolvedAt > 0 ? Date.now() - this._webviewResolvedAt : 0;
         this._webviewBootedAt = Date.now();
@@ -295,6 +295,10 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         const step = (message.payload as { step?: unknown; ms?: unknown } | undefined)?.step;
         const ms = (message.payload as { ms?: unknown } | undefined)?.ms;
         console.error(`[ChatView] boot trace: ${String(step)} (+${typeof ms === 'number' ? ms : '?'}ms)`);
+        return;
+      }
+      if (message.type === 'ui:jsError') {
+        console.error('[ChatView] webview JS error:', JSON.stringify(message.payload));
         return;
       }
       if (
