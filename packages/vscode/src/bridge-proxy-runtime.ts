@@ -208,12 +208,13 @@ export async function handleProxyBridgeMessage(
             } catch {
               // Settings unavailable — config-based keep-set still applies.
             }
-            effectiveBodyText = projectProviderCatalogResponse(bodyText, keepProviderIds);
-            if (effectiveBodyText.length < bodyText.length) {
-              console.error(
-                `[api:proxy] provider catalog filtered for webview: ${(bodyText.length / 1_048_576).toFixed(1)}MB → ${(effectiveBodyText.length / 1024).toFixed(0)}KB (${keepProviderIds.size} providers kept)`,
-              );
-            }
+            const filterResult = projectProviderCatalogResponse(bodyText, keepProviderIds);
+            effectiveBodyText = filterResult.bodyText;
+            console.error(
+              `[api:proxy] provider catalog: ${filterResult.reason}`
+              + ` ${filterResult.keptProviders}/${filterResult.totalProviders} providers`
+              + ` ${(bodyText.length / 1_048_576).toFixed(1)}MB → ${(effectiveBodyText.length / 1024).toFixed(0)}KB`,
+            );
           }
 
           if (effectiveBodyText.length > 1_000_000) {
