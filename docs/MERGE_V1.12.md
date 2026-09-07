@@ -3487,3 +3487,11 @@ v1.20.0-sscity 尚未宣布完成：当前未关闭 `#135/#140/#142-#151/#154/#1
 - webview 冻结看门狗：PerformanceObserver longtask（≥200ms，script 归因）+ 1s 心跳检测 ≥3s 事件循环间隙，经 `ui:freezeReport` 上报宿主 error 级日志。下次冻结会自动指认阻塞来源。
 
 验证：12/12 ✅ type-check ✅ eslint 0 error ✅ `git diff --check` ✅ VSIX 重打包（入口 `index-oUIhEzAP.js`）。
+
+## v1.22.x [Custom]：VS Code 插件灰屏第五轮——恢复改走 dispose 重建（2026-09-07 深夜四）
+
+用户证伪第四轮推断：`ack_timeout` 后的 html 重赋值重载**没有**治好灰屏（重载后无 bridgeReady 日志，面板保持灰）。平台事实：对冻结的 iframe，`webview.html = ...` 不会重建渲染器；且本 API 版本 `WebviewView` 无 `dispose()`。
+
+修复（`0cdad3e65`）：extension.ts 注入 recreate 钩子——**注销 provider 注册并重新注册**，VS Code 随之销毁 iframe 并对可见视图重新 `resolveWebviewView`，与用户手动重开面板完全等效，全自动执行。熔断改为快速失败计数（60s 内连续 3 次恢复再失败即放弃并明示，成功启动即重置）；恢复后 boot 看门狗缩短为 15s（SW 已热），首次 resolve 保持 45s。
+
+验证：12/12 ✅ type-check ✅ eslint 0 error ✅ `git diff --check` ✅ VSIX 重打包（入口 `index-Bibf3gK0.js`）。
