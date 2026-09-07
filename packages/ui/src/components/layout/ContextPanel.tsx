@@ -1904,6 +1904,49 @@ const DesktopBrowserPane: React.FC<DesktopBrowserPaneProps> = ({
       .catch(() => setIsInspecting(false));
   }, [addAttachedFile, addInlineCommentDraft, currentSessionId, currentUrl, isInspecting, newSessionDraftOpen, t]);
 
+  // VS Code's native webview "Add Element to Chat" context-menu item is
+  // hardwired to Copilot Chat and cannot be redirected; intercept the
+  // right-click on our browser surface and offer the OpenChamber path instead.
+  const [browserContextMenu, setBrowserContextMenu] = React.useState<{ x: number; y: number } | null>(null);
+
+  React.useEffect(() => {
+    if (!browserContextMenu) return;
+    const close = () => setBrowserContextMenu(null);
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        setBrowserContextMenu(null);
+      }
+    };
+    window.addEventListener('blur', close);
+    window.addEventListener('keydown', onKey, true);
+    return () => {
+      window.removeEventListener('blur', close);
+      window.removeEventListener('keydown', onKey, true);
+    };
+  }, [browserContextMenu]);
+
+  const handleBrowserContextMenu = React.useCallback((event: React.MouseEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setBrowserContextMenu({ x: event.clientX, y: event.clientY });
+  }, []);
+
+  const runBrowserContextMenuAction = React.useCallback((action: 'addElement' | 'reload' | 'openExternal') => {
+    setBrowserContextMenu(null);
+    if (action === 'addElement') {
+      handleInspect();
+      return;
+    }
+    if (action === 'reload') {
+      reloadBrowser();
+      return;
+    }
+    void resolveBrowsableUrl(currentUrl, serverId)
+      .then((target) => openExternalUrl(target))
+      .catch(() => toast.error(t('contextPanel.browser.devServers.unavailable')));
+  }, [currentUrl, handleInspect, reloadBrowser, serverId, t]);
+
   return (
     <div className="absolute inset-0 flex flex-col bg-background">
       <div className="flex items-center gap-1 border-b border-border/40 bg-[var(--surface-background)] px-2 py-1">
@@ -1972,7 +2015,48 @@ const DesktopBrowserPane: React.FC<DesktopBrowserPaneProps> = ({
             src={initialWebviewSrcRef.current}
             partition="persist:openchamber-browser"
             style={{ width: '100%', height: '100%', border: 'none' }}
+            onContextMenu={handleBrowserContextMenu}
           />
+          {browserContextMenu ? (
+            <div
+              className="fixed z-[2147483647] min-w-48 overflow-hidden rounded-md border border-border/60 bg-[var(--surface-elevated)] py-1 shadow-lg"
+              style={{
+                left: Math.min(browserContextMenu.x, (typeof window !== 'undefined' ? window.innerWidth : 0) - 200),
+                top: Math.min(browserContextMenu.y, (typeof window !== 'undefined' ? window.innerHeight : 0) - 120),
+              }}
+              role="menu"
+              onClick={(event) => event.stopPropagation()}
+              onContextMenu={(event) => event.preventDefault()}
+            >
+              <button
+                type="button"
+                role="menuitem"
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-left typography-ui-label text-foreground transition-colors hover:bg-[var(--interactive-hover)]"
+                onClick={() => runBrowserContextMenuAction('addElement')}
+              >
+                <Icon name="cursor" className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                {t('contextPanel.browser.menuAddElementToChat')}
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-left typography-ui-label text-foreground transition-colors hover:bg-[var(--interactive-hover)]"
+                onClick={() => runBrowserContextMenuAction('reload')}
+              >
+                <Icon name="refresh" className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                {t('contextPanel.browser.menuReload')}
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-left typography-ui-label text-foreground transition-colors hover:bg-[var(--interactive-hover)]"
+                onClick={() => runBrowserContextMenuAction('openExternal')}
+              >
+                <Icon name="external-link" className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                {t('contextPanel.browser.menuOpenExternal')}
+              </button>
+            </div>
+          ) : null}
         </div>
         {viewportLayout ? (
           <div className="pointer-events-none absolute bottom-2 left-2 rounded-md bg-[var(--surface-elevated)]/90 px-2 py-1 typography-micro tabular-nums text-muted-foreground shadow-sm">
