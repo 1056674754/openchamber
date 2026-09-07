@@ -3476,3 +3476,14 @@ v1.20.0-sscity 尚未宣布完成：当前未关闭 `#135/#140/#142-#151/#154/#1
 - `bridge-settings-runtime`：persisted blob 逐字节相同则跳过整套写入（跨进程文件锁 + globalState IPC + 跨窗口广播）；`readPersistedSettings` 每次重读共享文件，外部进程改动仍会被吸收。
 
 验证：vite 守卫测试 6 断言（worker 内联/modulePreload 过滤/三段哈希/manifest）✅；vscode 包 12/12 ✅；type-check（双 tsconfig）✅；eslint 0 error ✅；`git diff --check` ✅；VSIX 内 manifest 与产物一致性核验（entry 1.5MB 在包内、无未哈希 JS 残留）✅。遗留（已记 WI 方向）：UI 侧每 8s 仍会序列化 311KB settings 发宿主（守卫只挡了写侧）、localStore 镜像整体进出同步设置的设计本身值得重构。
+
+## v1.22.x [Custom]：VS Code 插件灰屏第四轮——自愈生效 + 冻结看门狗（2026-09-07 深夜三）
+
+第三轮修复实测：23:24:40 `bridge ready (booted in 143ms)`（哈希资产 + manifest + SW 全部生效），闲置 4m50s 后 webview 主线程冻结（`ack_timeout delivered=true`，23:29:30 探针捕获），**自动重载自愈**（attempt 1/3，无 abandoned）。用户体验从"永久灰屏"变为"回来时最多灰十几秒然后自己恢复"。
+
+残余层：闲置 ~5 分钟时冻住主线程的元凶未定（嫌疑：闲置期 SSE 事件补偿风暴、大会话 GC、markdown 渲染）。两项跟进（`249673fc3`）：
+
+- 修仪表 bug：DOM 诊断快照被紧随的重载 `_clearPendingMessages` 提前以 `webview_disposed` 结案——现改为快照（1.5s 上限）落定后才重载。
+- webview 冻结看门狗：PerformanceObserver longtask（≥200ms，script 归因）+ 1s 心跳检测 ≥3s 事件循环间隙，经 `ui:freezeReport` 上报宿主 error 级日志。下次冻结会自动指认阻塞来源。
+
+验证：12/12 ✅ type-check ✅ eslint 0 error ✅ `git diff --check` ✅ VSIX 重打包（入口 `index-oUIhEzAP.js`）。
