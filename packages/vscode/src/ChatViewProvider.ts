@@ -257,7 +257,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       this._view = undefined;
     });
 
-    webviewView.webview.onDidReceiveMessage(async (message: (BridgeRequest & { _msgId?: string }) | { type: 'bridge:ack'; _msgId: string } | { type: 'webview:bridgeReady' } | { type: 'ui:chunkReload'; payload?: unknown } | WebviewDiagnosticsResponse) => {
+    webviewView.webview.onDidReceiveMessage(async (message: (BridgeRequest & { _msgId?: string }) | { type: 'bridge:ack'; _msgId: string } | { type: 'webview:bridgeReady' } | { type: 'ui:chunkReload'; payload?: unknown } | { type: 'ui:freezeReport'; payload?: unknown } | WebviewDiagnosticsResponse) => {
       if (message.type === 'webview:bridgeReady') {
         const bootedInMs = this._webviewResolvedAt > 0 ? Date.now() - this._webviewResolvedAt : 0;
         this._webviewBootedAt = Date.now();
@@ -272,6 +272,10 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       }
       if (message.type === 'ui:chunkReload') {
         console.error('[ChatView] webview reloaded itself after a failed dynamic import:', message.payload);
+        return;
+      }
+      if (message.type === 'ui:freezeReport') {
+        console.error('[ChatView] webview main-thread freeze report:', message.payload);
         return;
       }
       if (
@@ -655,10 +659,13 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       + ` bootedMs=${bootedMs} consecutiveRecoveries=${this._consecutiveWebviewRecoveries}`,
     );
     // Snapshot the webview DOM before rebuilding so gray screens self-triage.
-    void this._requestDiagnosticsOnce(view, 2_000).then((snapshot) => {
-      console.error('[ChatView] webview DOM diagnostics at failure:', snapshot);
-    });
-    this._reloadUnresponsiveWebview(view, reason);
+    // The snapshot must settle first — the reload clears pending diagnostics.
+    void this._requestDiagnosticsOnce(view, 1_500)
+      .catch(() => ({ available: false, reason: 'webview_diagnostics_error' }))
+      .then((snapshot) => {
+        console.error('[ChatView] webview DOM diagnostics at failure:', snapshot);
+        this._reloadUnresponsiveWebview(view, reason);
+      });
   }
 
   private _reloadUnresponsiveWebview(view: vscode.WebviewView, reason = 'probe_timeout'): void {

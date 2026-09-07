@@ -88,6 +88,66 @@ window.addEventListener('openchamber:connection-status', () => {
   maybeHideLoadingOverlay();
 });
 
+// Main-thread freeze watchdog. A frozen webview is the gray screen: the
+// extension host's probe reports ack_timeout while our event loop is stuck.
+// Report long tasks (with script attribution when available) and heartbeat
+// gaps to the host log so the next freeze names its culprit.
+(() => {
+  const LONG_TASK_MIN_MS = 200;
+  const HEARTBEAT_INTERVAL_MS = 1_000;
+  const HEARTBEAT_GAP_REPORT_MS = 3_000;
+  let lastTickAt = Date.now();
+  let reportedFreezeAt = 0;
+
+  const report = (payload: Record<string, unknown>) => {
+    try {
+      vscode.postMessage({ type: 'ui:freezeReport', payload: { ...payload, at: new Date().toISOString() } });
+    } catch {
+      // Bridge unavailable; nothing useful to do.
+    }
+  };
+
+  setInterval(() => {
+    const now = Date.now();
+    const gap = now - lastTickAt;
+    lastTickAt = now;
+    if (gap > HEARTBEAT_GAP_REPORT_MS && now - reportedFreezeAt > 15_000) {
+      reportedFreezeAt = now;
+      report({ kind: 'heartbeat_gap', gapMs: gap });
+    }
+  }, HEARTBEAT_INTERVAL_MS);
+
+  if (typeof PerformanceObserver === 'undefined') return;
+  try {
+    let lastLongTaskReportAt = 0;
+    const observer = new PerformanceObserver((list) => {
+      const now = Date.now();
+      if (now - lastLongTaskReportAt < 10_000) return;
+      for (const entry of list.getEntries() as unknown as Array<{
+        duration: number;
+        name: string;
+        attribution?: Array<{ name?: string; containerName?: string; containerSrc?: string }>;
+      }>) {
+        if (entry.duration < LONG_TASK_MIN_MS) continue;
+        lastLongTaskReportAt = now;
+        report({
+          kind: 'long_task',
+          durationMs: Math.round(entry.duration),
+          attribution: (entry.attribution ?? []).slice(0, 3).map((item) => ({
+            name: item.name,
+            containerName: item.containerName,
+            containerSrc: item.containerSrc,
+          })),
+        });
+        break;
+      }
+    });
+    observer.observe({ entryTypes: ['longtask'] } as PerformanceObserverInit);
+  } catch {
+    // Long Task API unavailable; heartbeat reporting above still covers freezes.
+  }
+})();
+
 // The UI's chunk loader announces self-reloads so the extension host log can
 // correlate them with gray screens (see chunkLoadRecovery.ts).
 window.addEventListener('openchamber:chunk-import-reload', (event) => {
