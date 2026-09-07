@@ -3515,3 +3515,11 @@ v1.20.0-sscity 尚未宣布完成：当前未关闭 `#135/#140/#142-#151/#154/#1
 修复（`<auto>`）：恢复链终极兜底改为**自动 `workbench.action.reloadWindow`**（rapid 恢复耗尽后触发，10 分钟限频防窗口循环 reload）——即用户每次手动的动作；re-register(250ms) 与 focus(700ms) 分离。运行期追踪三处同步重操作（>20k 字符 markdown 渲染 / >100KB 快照签名 / 宿主侧 >1MB 代理响应日志），下次冻结"只有 start 没有 done"的那条即凶手。
 
 已由 agent 经 `code` CLI 安装（含 reloadWindow 代码确认）。待用户 reload 窗口后观察：预期最坏行为 = 灰屏 ≤ ~1 分钟后窗口自动 reload 恢复，同时日志点名阻塞操作。
+
+## v1.22.x [Custom]：VS Code 插件灰屏第八轮——5.5MB 模型目录过滤（2026-09-08 凌晨二）
+
+00:21 会话追踪器落网重大嫌疑：启动 +3s 内 `/provider` 响应 **5.5MB × 2 次**。定量验证：`~/.cache/opencode/models.json` = 4.5MB / **213 provider / 7561 模型**（models.dev 全量目录），而用户实际配置仅 10 个 provider。7.5K 模型常驻 webview store，任何 O(n²) 级模型遍历（选择器、收藏/隐藏扫描）都是分钟级主线程卡死——与历次"永久冻结、attribution unknown"完全吻合。桌面端同吃此数据但窗口常驻未被对照。
+
+修复（`<commit>`）：扩展代理层过滤 `GET /provider` 响应——仅保留 opencode 配置层（全局+请求目录）里的 provider + 同步设置引用的 provider（收藏/隐藏/默认模型前缀）；异常结构回退原文（选择器永不空白）；过滤结果打日志（MB→KB）。纯函数拆 `provider-catalog-filter.ts`（不 import vscode，3 例单测）。预期 5.5MB→~200KB，模型目录相关卡死面直接消除。
+
+验证：15/15 ✅ type-check ✅ eslint 0 error ✅ `git diff --check` ✅；已由 agent 安装（过滤代码确认在 extension.js）。待实机：reload 后模型选择器正常显示已配置 provider，且不再灰屏；若仍灰，`op:` 追踪会点名残余段。
