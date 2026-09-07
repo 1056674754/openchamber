@@ -1,9 +1,36 @@
-import { defineConfig } from 'vite';
+import { defineConfig, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+// Locally built VSIXs get reinstalled in place over the same versioned
+// directory, but the webview service worker caches vscode-webview://
+// resources by URL. Without content hashes in filenames, a rebuilt bundle
+// keeps the same URLs and the worker happily serves stale chunks to the new
+// html forever (microsoft/vscode#325767). Hashed names make every rebuild
+// load fresh; the extension host resolves the hashed entry via the emitted
+// build-manifest.json.
+const writeEntryManifest = (): Plugin => ({
+  name: 'write-webview-entry-manifest',
+  apply: 'build',
+  generateBundle(_options, bundle) {
+    for (const chunk of Object.values(bundle)) {
+      // chunk.fileName already carries the `assets/` output prefix; pick the
+      // html entry explicitly because hashed names also appear on other
+      // `index-*` chunks (e.g. worker-factory entries).
+      if (chunk.type === 'chunk' && chunk.isEntry && chunk.name === 'index') {
+        this.emitFile({
+          type: 'asset',
+          fileName: 'build-manifest.json',
+          source: JSON.stringify({ entry: chunk.fileName }),
+        });
+        return;
+      }
+    }
+  },
+});
 
 export default defineConfig(({ mode }) => ({
   root: path.resolve(__dirname, 'webview'),
@@ -14,6 +41,7 @@ export default defineConfig(({ mode }) => ({
         plugins: ['babel-plugin-react-compiler'],
       },
     }),
+    writeEntryManifest(),
   ],
   resolve: {
     alias: [
@@ -72,9 +100,9 @@ export default defineConfig(({ mode }) => ({
       input: path.resolve(__dirname, 'webview/index.html'),
       external: ['node:child_process', 'node:fs', 'node:path', 'node:url'],
       output: {
-        entryFileNames: 'assets/[name].js',
-        chunkFileNames: 'assets/[name].js',
-        assetFileNames: 'assets/[name].[ext]',
+        entryFileNames: 'assets/[name]-[hash].js',
+        chunkFileNames: 'assets/[name]-[hash].js',
+        assetFileNames: 'assets/[name]-[hash].[ext]',
       },
     },
   },

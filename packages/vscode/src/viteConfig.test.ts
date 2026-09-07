@@ -15,3 +15,16 @@ describe('VS Code webview module preload policy', () => {
     assert.match(source, /modulePreload:\s*\{[\s\S]*?resolveDependencies:[\s\S]*?endsWith\('\.js'\)/);
   });
 });
+
+describe('VS Code webview content-addressed assets', () => {
+  test('hashes entry, chunk, and asset filenames', () => {
+    assert.match(source, /entryFileNames:\s*'assets\/\[name\]-\[hash\]\.js'/);
+    assert.match(source, /chunkFileNames:\s*'assets\/\[name\]-\[hash\]\.js'/);
+    assert.match(source, /assetFileNames:\s*'assets\/\[name\]-\[hash\]\.\[ext\]'/);
+  });
+
+  test('emits a build manifest for the hashed entry', () => {
+    assert.match(source, /writeEntryManifest/);
+    assert.match(source, /build-manifest\.json/);
+  });
+});

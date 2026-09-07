@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import * as fs from 'fs';
 import * as os from 'os';
 import { getThemeKindName } from './theme';
 import type { ConnectionStatus } from './opencode';
@@ -43,6 +44,28 @@ const uniqueTokens = (values: Array<string | null | undefined>): string => {
   return Array.from(new Set(values.map(asCspToken).filter((value): value is string => Boolean(value)))).join(' ');
 };
 
+let cachedEntryFileName: string | null = null;
+
+// Built assets carry content hashes (see vite.config.ts) so the webview
+// service worker can never serve a previous build's chunks after an in-place
+// reinstall. The hashed entry filename is emitted in build-manifest.json and
+// resolved here once; unhashed fallback covers packaging without a manifest.
+const readWebviewEntryFileName = (extensionUri: vscode.Uri): string => {
+  if (cachedEntryFileName === null) {
+    cachedEntryFileName = 'index.js';
+    try {
+      const manifestPath = vscode.Uri.joinPath(extensionUri, 'dist', 'webview', 'build-manifest.json').fsPath;
+      const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as { entry?: unknown };
+      if (typeof manifest.entry === 'string' && /^assets\/[A-Za-z0-9._-]+\.js$/.test(manifest.entry)) {
+        cachedEntryFileName = manifest.entry.slice('assets/'.length);
+      }
+    } catch {
+      // Manifest missing or unreadable: fall back to the unhashed entry name.
+    }
+  }
+  return cachedEntryFileName;
+};
+
 export function getWebviewHtml(options: WebviewHtmlOptions): string {
   const {
     webview,
@@ -58,7 +81,7 @@ export function getWebviewHtml(options: WebviewHtmlOptions): string {
     extensionVersion = '',
   } = options;
 
-  const scriptPath = vscode.Uri.joinPath(extensionUri, 'dist', 'webview', 'assets', 'index.js');
+  const scriptPath = vscode.Uri.joinPath(extensionUri, 'dist', 'webview', 'assets', readWebviewEntryFileName(extensionUri));
   const workspaceFoldersJson = JSON.stringify(workspaceFolders).replace(/</g, '\\u003c');
   const scriptUri = webview.asWebviewUri(scriptPath);
   const normalizedDevServerUrl = asCspToken(devServerUrl)?.replace(/\/$/, '') ?? null;

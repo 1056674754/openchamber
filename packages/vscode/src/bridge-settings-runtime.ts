@@ -248,6 +248,7 @@ const stripDerived = (source: Record<string, unknown>): Record<string, unknown> 
 };
 
 let eagerMigrationAttempted = false;
+let lastPersistedSettingsJson: string | null = null;
 
 // Read the merged persisted settings: shared file is canonical (synced with
 // Desktop and Web clients), globalState is kept as a migration fallback for
@@ -344,11 +345,21 @@ export const persistSettings = async (changes: Record<string, unknown>, ctx?: Br
     delete persistable[key];
   }
 
-  // Write to the shared file (canonical, cross-client). Also mirror into
-  // globalState so older builds can still read recent values if a user
-  // downgrades the extension.
-  await writeSharedSettingsToDisk(persistable);
-  await ctx?.context?.globalState.update(SETTINGS_KEY, persistable);
+  // The synced settings blob can approach 1MB (it mirrors the UI localStore),
+  // and idle clients re-save it every few seconds — through a cross-process
+  // file lock, a globalState IPC write, and a broadcast to every window. Skip
+  // the whole write when nothing changed. readPersistedSettings re-reads the
+  // shared file on every save, so changes made by other processes are still
+  // picked up and written.
+  const persistableJson = JSON.stringify(persistable);
+  if (persistableJson !== lastPersistedSettingsJson) {
+    lastPersistedSettingsJson = persistableJson;
+    // Write to the shared file (canonical, cross-client). Also mirror into
+    // globalState so older builds can still read recent values if a user
+    // downgrades the extension.
+    await writeSharedSettingsToDisk(persistable);
+    await ctx?.context?.globalState.update(SETTINGS_KEY, persistable);
+  }
 
   // Return the same shape as readSettings (with derived fields re-applied).
   return {

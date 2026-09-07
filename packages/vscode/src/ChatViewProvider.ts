@@ -263,7 +263,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         this._webviewBootedAt = Date.now();
         this._consecutiveWebviewRecoveries = 0;
         this._webviewRecoveryAbandoned = false;
-        console.log(`[ChatView] webview bridge ready (booted in ${bootedInMs}ms)`);
+        // console.error because VS Code only forwards that level to renderer.log.
+        console.error(`[ChatView] webview bridge ready (booted in ${bootedInMs}ms)`);
         // Delivered over a round trip, so every webview-side listener is live.
         this._sendCachedState();
         void this.updateTheme(vscode.window.activeColorTheme.kind);
@@ -648,14 +649,14 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       return;
     }
     const bootedMs = this._webviewBootedAt > 0 ? Date.now() - this._webviewBootedAt : 0;
-    console.warn(
+    console.error(
       `[ChatView] webview unresponsive: reason=${reason} delivered=${delivered}`
       + ` visible=${view.visible} focused=${vscode.window.state.focused}`
       + ` bootedMs=${bootedMs} consecutiveRecoveries=${this._consecutiveWebviewRecoveries}`,
     );
     // Snapshot the webview DOM before rebuilding so gray screens self-triage.
     void this._requestDiagnosticsOnce(view, 2_000).then((snapshot) => {
-      console.warn('[ChatView] webview DOM diagnostics at failure:', snapshot);
+      console.error('[ChatView] webview DOM diagnostics at failure:', snapshot);
     });
     this._reloadUnresponsiveWebview(view, reason);
   }
@@ -664,12 +665,12 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     if (this._view !== view || !view.visible) return;
     const now = Date.now();
     if (now - this._lastWebviewReloadAt < WEBVIEW_RELOAD_COOLDOWN_MS) {
-      console.warn(`[ChatView] webview reload suppressed by cooldown (reason=${reason})`);
+      console.error(`[ChatView] webview reload suppressed by cooldown (reason=${reason})`);
       return;
     }
     this._lastWebviewReloadAt = now;
     this._consecutiveWebviewRecoveries += 1;
-    console.warn(`[ChatView] reloading webview (reason=${reason}, attempt ${this._consecutiveWebviewRecoveries}/${MAX_CONSECUTIVE_WEBVIEW_RECOVERIES})`);
+    console.error(`[ChatView] reloading webview (reason=${reason}, attempt ${this._consecutiveWebviewRecoveries}/${MAX_CONSECUTIVE_WEBVIEW_RECOVERIES})`);
 
     for (const [streamId, stream] of this._sseStreams) {
       if (stream.view !== view) continue;
