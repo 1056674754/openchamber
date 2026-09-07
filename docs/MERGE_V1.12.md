@@ -3441,3 +3441,24 @@ v1.20.0-sscity 尚未宣布完成：当前未关闭 `#135/#140/#142-#151/#154/#1
 - `13f469c68 fix(vscode): recover stalled webview and managed server exit` — 接手另一 agent 的 WIP 作为纵深防御：`managed-process-lifecycle.ts` 排空受管 OpenCode 进程管道并在异常退出时自动重连（3 次退避）；`ChatViewProvider` 每 15s 对可见侧栏 webview 发探针（15s 启动宽限，5s ACK 超时，30s 冷却），确认死亡后重建 HTML 并清理 SSE；三个 surface 共享 `webview-diagnostics-client.ts` 只读 DOM 诊断，输出进 `Show OpenCode Status`。探针 ACK 走 bridge.ts 全局 `_msgId` 监听（先于命令分发），无未知命令误报路径。
 
 验证：`managed-process-lifecycle` 4/4 ✅；vscode 包 bun test 与 HEAD 基线逐项对齐（18 fail / 26 errors 全部为既有 bridge-* mock 环境问题，经临时 worktree 在 HEAD 复跑确认非本次引入）✅；type-check（extension + webview 两个 tsconfig）✅；eslint 0 error ✅；`git diff --check` ✅。VSIX 已按新身份打包（`sscity.openchamber` 1.22.0-sscity，594 files / 8.64 MB）。实机验收（安装新 VSIX 后连续 ≥10 分钟不灰屏）待用户执行：`code --uninstall-extension fedaykindev.openchamber && code --install-extension packages/vscode/openchamber-1.22.0-sscity.vsix` 后重载窗口。
+
+## v1.22.x [Custom]：VS Code 插件灰屏第二轮（2026-09-07 深夜）
+
+首轮 Identity 修复（234a56bad）后用户完整重启复测**仍灰屏**。21:57-22:00 会话日志给出新证据：激活后 105 秒一条 bridge 响应 delivered=true 但 3×5s 零 ack，**无 dispose、无 ext host 重启、无任何错误**。四镜头并行调查（上游对比/UI 冻结追踪/探针状态机审计/平台已知问题）定位出多层叠加机制：
+
+1. **resource 并发崩溃类**：fork webview 580 文件 + Vite modulepreload JS 扇出，触发 VS Code webview service worker FetchEvent 并发上限后全部资源永久 `ERR_FAILED`（microsoft/vscode#326500；Codex 扩展同款死法 openai/codex#34103，VS Code ~1.103 才内置 32 并发限制）。t+90-120s 恰逢 opencode server 就绪后的 bootstrap/会话恢复 chunk 爆发。
+2. **静默自重载**：`chunkLoadRecovery.ts` 任何动态 import 失败 → 零日志 `window.location.reload()` → 新文档卡在 `#initial-loading` 遮罩（**灰屏实体**）→ bridge 监听器不存在 → 与零 ack 完全吻合。
+3. **fork 丢弃的上游保护**（合并时被删）：`worker.inlineDynamicImports`（85b2d2322，webview 内 worker 无法加载模块 import）与 `webviewCachedStateRetry`（VS Code 丢 bridge 未就绪期 postMessage → 遮罩永久滞留）。
+4. **实锤 bug**：事件管线默认 `ws` 传输在 webview 里对 `vscode-webview://` 源开裸 WebSocket，2s 超时永久重试。
+5. 探针只认 focus+visible 且 15s 盲宽限赛跑 31MB bundle、重载无上限零日志。
+
+修复（`a1569cae3` + `8cd1a95af`）：
+
+- vite：恢复 worker 内联 + `modulePreload.resolveDependencies` 过滤 JS（按需分波加载）；`viteConfig.test.ts` 双守卫；产物 580→507 JS，worker 自包含。
+- `bridgeReady` 握手：bridge 监听器注册即宣告；宿主据此布防探针（替代盲宽限）、记录启动耗时、经往返重推 state+theme（无竞态）。
+- 恢复 `webviewCachedStateRetry`（resolve + connected 两处接线）。
+- 探针失败路径：记录 reason/delivered/bootMs/recovery 计数 → 自动抓 DOM 诊断 → 冷却 30s 内重载；连续 3 次恢复失败即放弃并 error（不再无限破坏状态）；45s boot 看门狗兜底永不启动的 bundle。
+- `chunkLoadRecovery` 自重载上报宿主日志。
+- VS Code 运行时强制 SSE 传输（走既有 fetch 补丁桥接流）。
+
+验证：vscode 包 10/10（lifecycle 4 + retry 4 + vite 守卫 2）✅；全 workspace type-check 7/7 ✅；双包 lint 0 error ✅；`git diff --check` ✅；VSIX 重新打包。待实机复测 ≥10 分钟。已知未修（后续 WI）：api:proxy 响应无上限 base64+JSON.parse 主线程阻塞、会话记录无虚拟化同步 markdown 渲染、syncSnapshotSignature 全量 stringify。
