@@ -3424,3 +3424,20 @@ v1.20.0-sscity 尚未宣布完成：当前未关闭 `#135/#140/#142-#151/#154/#1
 - 删除无调用者的 `RightSidebar.tsx`、`SidebarFilesTree.tsx` 与 22 个 locale 文件中的 154 条旧栏孤儿键；`layout.rightSidebar.git` 和 `sidebarFilesTree.*` 因仍被新 ContextPanel / FilesView 使用而保留。
 
 验证：`useUIStore.contextPanel` 18/18（含移动抽屉开合与 v17 migration）✅；project knowledge i18n 11 locale 对齐 1/1 ✅；全 workspace type-check 7/7 ✅；全 workspace lint 0 error（4 条既有 warning）✅；docs validation ✅；`git diff --check` ✅。隔离 HMR matching-surface：1440px 桌面仅 1 个 `ContextPanelRail`、无旧 Header/command/side panel；新 Git surface 可展开为 380px panel 并收起；`Cmd+B` / `Cmd+Shift+G` / `Cmd+Shift+F` 执行前后布局不变。390×844 + touch 输入模拟进入 `device-mobile`，右抽屉可打开/关闭，Changes / Files / Terminal / Notes / MCP 五个 tab 完整。隔离服务已停止。
+
+## v1.22.x [Custom]：修复 VS Code 插件灰屏（2026-09-07）
+
+问题：fork 构建的 VS Code 插件（`openchamber-1.22.0-sscity.vsix`）打开聊天侧栏 1-2 分钟后 webview 整片变灰，需重开面板恢复。[#189](https://coding.s-s.city/songsong/openchamber/-/issues/189)。
+
+根因（日志实证，非猜测）：
+
+- **扩展身份与上游 marketplace 冲突**。fork 的 `package.json` 保留了上游 `publisher: fedaykindev`，扩展 ID `fedaykindev.openchamber` 与上游发布条目相同（市场最新 `1.22.2`，2026-09-05 更新），而本地 `1.22.0-sscity` 按 semver 是 `1.22.0` 的 prerelease、永远"过期"。
+- VS Code 每次窗口加载都自动"更新"该扩展（9/4–9/6 日志中 16 次 `Auto updating outdated extensions. fedaykindev.openchamber`，且每次激活后 1–5 秒内触发）。下载约 85 秒完成后原地替换并重启扩展 → 运行中的 `WebviewView` 被 dispose → 灰屏。时间线逐毫秒对齐：20:28:29.722 自动更新 → 20:29:53.663 renderer "出现未知错误" toast 与 exthost `Error: Webview is disposed`（extension.js 抛出）同毫秒 → 20:30:15 Message Retry 3 次失败。窗口重载后 21:02:59 再激活、21:03:00 立即再次自动更新，循环复现。
+- 排除项：上游 v1.22.1/v1.22.2 无对症修复；`retainContextWhenHidden` 三处早已为 true；window43 的 ext host 崩溃循环（Crashpad 转储为 extensionHost V8 OOM，~20 分钟一次）发生在未安装本插件的窗口，属其他 AI 扩展的独立问题。
+
+修复（两笔提交）：
+
+- `234a56bad fix(vscode): decouple extension identity from upstream marketplace` — publisher 改为 `sscity`（新 ID `sscity.openchamber`），repository 指向 fork GitLab；README 安装指引改为本地 VSIX 并警告勿从 Marketplace 安装。ID 不在市场 → VS Code 永远不再"更新"它。视图/命令 ID 字符串（`openchamber.*`）不受 publisher 影响，激活事件与按键绑定无变化；唯一代价是旧 ID 的 `globalState` 设置不迁移（仅 lastDirectory 等，可接受）。
+- `13f469c68 fix(vscode): recover stalled webview and managed server exit` — 接手另一 agent 的 WIP 作为纵深防御：`managed-process-lifecycle.ts` 排空受管 OpenCode 进程管道并在异常退出时自动重连（3 次退避）；`ChatViewProvider` 每 15s 对可见侧栏 webview 发探针（15s 启动宽限，5s ACK 超时，30s 冷却），确认死亡后重建 HTML 并清理 SSE；三个 surface 共享 `webview-diagnostics-client.ts` 只读 DOM 诊断，输出进 `Show OpenCode Status`。探针 ACK 走 bridge.ts 全局 `_msgId` 监听（先于命令分发），无未知命令误报路径。
+
+验证：`managed-process-lifecycle` 4/4 ✅；vscode 包 bun test 与 HEAD 基线逐项对齐（18 fail / 26 errors 全部为既有 bridge-* mock 环境问题，经临时 worktree 在 HEAD 复跑确认非本次引入）✅；type-check（extension + webview 两个 tsconfig）✅；eslint 0 error ✅；`git diff --check` ✅。VSIX 已按新身份打包（`sscity.openchamber` 1.22.0-sscity，594 files / 8.64 MB）。实机验收（安装新 VSIX 后连续 ≥10 分钟不灰屏）待用户执行：`code --uninstall-extension fedaykindev.openchamber && code --install-extension packages/vscode/openchamber-1.22.0-sscity.vsix` 后重载窗口。
