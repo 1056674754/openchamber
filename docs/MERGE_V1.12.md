@@ -3507,3 +3507,11 @@ v1.20.0-sscity 尚未宣布完成：当前未关闭 `#135/#140/#142-#151/#154/#1
 - 本轮起 VSIX 由 agent 直接 `code --install-extension` 安装。
 
 验证：vscode 12/12 + ui type-check ✅ eslint 0 error ✅ `git diff --check` ✅；已安装（23:58 目录，含 bootTrace 产物）。
+
+## v1.22.x [Custom]：VS Code 插件灰屏第七轮——自动 reload 兜底 + 运行期追踪（2026-09-08 凌晨）
+
+用户反馈（愤怒，合理）："看门狗工不工作无所谓，就不应该断"。00:02 事件：00:01:27 boot 全链 +1ms~+1058ms 干净完成 → t+51s 一条 239ms longtask（attribution unknown）→ **t+76s 主线程永久阻塞** → 00:02:44 re-registration 再次未触发 resolve（focus 与延迟重注册同在 250ms 竞速）→ 灰屏保持。冻结时刻可变（t+8s/t+76s/数分钟），启动本身无恙。
+
+修复（`<auto>`）：恢复链终极兜底改为**自动 `workbench.action.reloadWindow`**（rapid 恢复耗尽后触发，10 分钟限频防窗口循环 reload）——即用户每次手动的动作；re-register(250ms) 与 focus(700ms) 分离。运行期追踪三处同步重操作（>20k 字符 markdown 渲染 / >100KB 快照签名 / 宿主侧 >1MB 代理响应日志），下次冻结"只有 start 没有 done"的那条即凶手。
+
+已由 agent 经 `code` CLI 安装（含 reloadWindow 代码确认）。待用户 reload 窗口后观察：预期最坏行为 = 灰屏 ≤ ~1 分钟后窗口自动 reload 恢复，同时日志点名阻塞操作。
