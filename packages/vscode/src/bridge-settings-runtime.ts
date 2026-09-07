@@ -249,6 +249,26 @@ const stripDerived = (source: Record<string, unknown>): Record<string, unknown> 
 
 let eagerMigrationAttempted = false;
 let lastPersistedSettingsJson: string | null = null;
+// Save-frequency telemetry: a client echo loop (apply → save → broadcast →
+// apply) shows up as a steady stream of settings:save calls. Warn once per
+// burst so the log names the loop without flooding.
+let settingsSaveBurstWindowStart = 0;
+let settingsSaveBurstCount = 0;
+const SETTINGS_SAVE_BURST_LIMIT = 10;
+
+const recordSettingsSaveForTelemetry = (): void => {
+  const now = Date.now();
+  if (now - settingsSaveBurstWindowStart > 60_000) {
+    settingsSaveBurstWindowStart = now;
+    settingsSaveBurstCount = 0;
+  }
+  settingsSaveBurstCount += 1;
+  if (settingsSaveBurstCount === SETTINGS_SAVE_BURST_LIMIT) {
+    console.error(
+      `[settings] save burst: ${settingsSaveBurstCount} settings:save calls in ${Math.round((now - settingsSaveBurstWindowStart) / 1000)}s — client echo loop suspected`,
+    );
+  }
+};
 
 // Read the merged persisted settings: shared file is canonical (synced with
 // Desktop and Web clients), globalState is kept as a migration fallback for
@@ -352,6 +372,7 @@ export const persistSettings = async (changes: Record<string, unknown>, ctx?: Br
   // shared file on every save, so changes made by other processes are still
   // picked up and written.
   const persistableJson = JSON.stringify(persistable);
+  recordSettingsSaveForTelemetry();
   if (persistableJson !== lastPersistedSettingsJson) {
     lastPersistedSettingsJson = persistableJson;
     // Write to the shared file (canonical, cross-client). Also mirror into

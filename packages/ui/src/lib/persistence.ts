@@ -1581,7 +1581,22 @@ const waitForSettingsHydration = (): Promise<void> => {
 // Each step is wrapped in try/catch so a failure in one side-effect (e.g.
 // a TypeError from writing to a contextBridge-protected global) doesn't
 // prevent server settings from reaching the Zustand store.
+// Echo guard: values learned from a remote settings apply must never be
+// re-saved as local edits. Without this, apply → store subscriber →
+// updateDesktopSettings → host broadcast → apply … forms a giant-payload
+// ping-pong that pegs the main thread (the VS Code gray-screen freeze).
+let _remoteApplyDepth = 0;
+
 const applySettingsAndDispatch = async (settings: DesktopSettings): Promise<void> => {
+  _remoteApplyDepth += 1;
+  try {
+    await _applySettingsAndDispatchInner(settings);
+  } finally {
+    _remoteApplyDepth -= 1;
+  }
+};
+
+const _applySettingsAndDispatchInner = async (settings: DesktopSettings): Promise<void> => {
   try {
     persistToLocalStorage(settings);
   } catch (error) {
@@ -1808,6 +1823,12 @@ export const flushPendingSettingsUpdates = async (): Promise<boolean> => {
 
 export const updateDesktopSettings = async (changes: Partial<DesktopSettings>): Promise<void> => {
   if (typeof window === 'undefined') {
+    return;
+  }
+
+  if (_remoteApplyDepth > 0) {
+    // Remote-apply echo: these values came from the host response we are
+    // applying right now; re-saving them would loop the sync forever.
     return;
   }
 
