@@ -3523,3 +3523,13 @@ v1.20.0-sscity 尚未宣布完成：当前未关闭 `#135/#140/#142-#151/#154/#1
 修复（`<commit>`）：扩展代理层过滤 `GET /provider` 响应——仅保留 opencode 配置层（全局+请求目录）里的 provider + 同步设置引用的 provider（收藏/隐藏/默认模型前缀）；异常结构回退原文（选择器永不空白）；过滤结果打日志（MB→KB）。纯函数拆 `provider-catalog-filter.ts`（不 import vscode，3 例单测）。预期 5.5MB→~200KB，模型目录相关卡死面直接消除。
 
 验证：15/15 ✅ type-check ✅ eslint 0 error ✅ `git diff --check` ✅；已由 agent 安装（过滤代码确认在 extension.js）。待实机：reload 后模型选择器正常显示已配置 provider，且不再灰屏；若仍灰，`op:` 追踪会点名残余段。
+
+## v1.22.x [Custom]：VS Code 插件灰屏终局——设置回声乒乓（2026-09-08 凌晨三，结案待长测）
+
+用户发现可看 workbench console 后诊断闭环。三重证据定案：macOS `sample` 冻结三小时的活体 webview 渲染进程（89% 样本在 `v8::String::NewFromUtf8` + `ValueSerializer::WriteRawBytes` + `mach_msg`）；保存风暴探测器实录（1 秒 10 次 settings:save）；globalState 812↔838KB 交替写入。
+
+**根因**：设置同步回声乒乓——webview 自动保存 → 宿主广播 settingsSynced 给所有面板（含刚保存者）→ webview 全量 GET 311KB → 应用到 store → 订阅者再保存 → 循环。每圈 ~600KB structured clone 过桥，主线程被灌满后探针 ack 不出（灰屏）；另一形态为巨型 payload GC 压力下彻底僵死（21:59 标本空转三小时）。启动后第一次设置同步点燃（t+51s 高度一致）。
+
+**修复栈**（分三轮落地）：`966498b79` 同步回声守卫（apply 调用栈内的保存丢弃）+ 保存风暴探测器；`1833f3679` 结构性断路——settingsSynced 处理器在自身保存后 5s 内忽略广播（PUT 响应即最新态，回声无从生长）；辅以 `4e1928c90` JS 错误转发（window.onerror/unhandledrejection/ErrorBoundary 上报宿主日志）。日志验证：风暴探测器仅启动时响一次（10 次/3s 后收敛），3 分钟仅 1 次写入（原为每几秒交替不休），零冻结报告——用户确认"撑了很久"。
+
+本轮配套：provider 目录过滤修正（`06fa4dd50`，真实响应 `{all,default,connected}` 结构，5.79MB→78KB，13/218）；恢复链（dispose 重建 + 自动 reload 兜底 10 分钟限频）保留作为纵深。结案标准：连续使用 ≥1 天无灰屏后关 #189。遗留（后续 WI）：启动期回声爆发仍存在（3s 内 10 次，收敛但吵）；boot trace/provider 过滤日志每启动 ~13 行 error 级噪音可降噪；809KB localStore 镜像整体进同步设置的设计待重构。
