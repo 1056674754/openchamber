@@ -3462,3 +3462,17 @@ v1.20.0-sscity 尚未宣布完成：当前未关闭 `#135/#140/#142-#151/#154/#1
 - VS Code 运行时强制 SSE 传输（走既有 fetch 补丁桥接流）。
 
 验证：vscode 包 10/10（lifecycle 4 + retry 4 + vite 守卫 2）✅；全 workspace type-check 7/7 ✅；双包 lint 0 error ✅；`git diff --check` ✅；VSIX 重新打包。待实机复测 ≥10 分钟。已知未修（后续 WI）：api:proxy 响应无上限 base64+JSON.parse 主线程阻塞、会话记录无虚拟化同步 markdown 渲染、syncSnapshotSignature 全量 stringify。
+
+## v1.22.x [Custom]：VS Code 插件灰屏第三轮——SW 缓存陈旧 chunk（2026-09-07 深夜二）
+
+第二轮修复后用户同版本原地重装（`sscity.openchamber-1.22.0-sscity` 目录 mtime 23:00 证实）再测：23:08:33 扩展宿主打出新探针日志 `recovery abandoned after 3 consecutive reloads (reason=boot_timeout)`——webview bundle 连续 3×45s 未完成启动（bridgeReady 从未到达）。
+
+根因（microsoft/vscode#325767 同款）：fork 的 vite 产物文件名无内容哈希（`assets/[name].js`），本地 VSIX 同版本原地重装后 URL 不变，webview service worker 把**上一构建的 chunk 原样喂给新 html**；旧 bundle 的 bridge.ts 没有 bridgeReady 信号（那是本轮新增），宿主等不到 → boot 看门狗 → 重载 → SW 继续喂旧 chunk → ×3 → 放弃 → 加载遮罩永久滞留（灰屏）。上游不受影响：marketplace 更新装入新版本号目录，路径变即 SW origin 变。次要发现：探针的 console.warn 不被 VS Code 转发进 renderer.log（只有 error 级转发），导致 3 次重载的中间日志不可见；另外 `openchamber.settings`（含 276KB 的 UI localStore 镜像，UTF-8 后 ~809KB）被双窗口以每几秒一次的频率重写 globalState（808.9/838.7KB 交替），共享文件 `~/.config/openchamber/settings.json`（318KB）同被波及。
+
+修复（`6a5dbb278`）：
+
+- vite：entry/chunk/asset 全部 `[name]-[hash]`；构建时 emit `dist/webview/build-manifest.json`（精确选 html 主入口，worker 等其他 entry 同名不误选）；`webviewHtml.ts` 从 manifest 解析入口（正则校验 + 无 manifest 时回退旧名）。每次重装必是新 URL，SW 缓存自动失效，无需清缓存。
+- `ChatViewProvider` 探针/重载/诊断日志全部升为 console.error（renderer.log 可见）。
+- `bridge-settings-runtime`：persisted blob 逐字节相同则跳过整套写入（跨进程文件锁 + globalState IPC + 跨窗口广播）；`readPersistedSettings` 每次重读共享文件，外部进程改动仍会被吸收。
+
+验证：vite 守卫测试 6 断言（worker 内联/modulePreload 过滤/三段哈希/manifest）✅；vscode 包 12/12 ✅；type-check（双 tsconfig）✅；eslint 0 error ✅；`git diff --check` ✅；VSIX 内 manifest 与产物一致性核验（entry 1.5MB 在包内、无未哈希 JS 残留）✅。遗留（已记 WI 方向）：UI 侧每 8s 仍会序列化 311KB settings 发宿主（守卫只挡了写侧）、localStore 镜像整体进出同步设置的设计本身值得重构。
