@@ -89,7 +89,7 @@
 Download from [Releases](https://github.com/btriapitsyn/openchamber/releases).
 
 ### **VS Code**
-Install from [Marketplace](https://marketplace.visualstudio.com/items?itemName=fedaykindev.openchamber) or search "OpenChamber" in Extensions.
+Fork builds install the local VSIX (`packages/vscode/openchamber-*.vsix`) — do NOT install `fedaykindev.openchamber` from the Marketplace; VS Code would auto-"update" and replace this fork with stock upstream.
 
 ### **CLI (Web + PWA)**
 _requires Node.js 20+_

@@ -3,11 +3,11 @@
   "displayName": "OpenChamber",
   "description": "AI coding assistant powered by OpenCode",
   "version": "1.22.0-sscity",
-  "publisher": "fedaykindev",
+  "publisher": "sscity",
   "private": true,
   "repository": {
     "type": "git",
-    "url": "https://github.com/btriapitsyn/openchamber.git"
+    "url": "https://coding.s-s.city/songsong/openchamber.git"
   },
   "qna": "https://discord.gg/ZYRSdnwwKA",
   "license": "MIT",
