@@ -6,6 +6,7 @@ import { createOpenCodeManager, type OpenCodeManager } from './opencode';
 import { startGlobalEventWatcher, stopGlobalEventWatcher, setChatViewProvider } from './sessionActivityWatcher';
 import { initRemoteConfigDir, namespacePathForUri } from './remoteNamespace';
 import { resolveWorkspaceFolders } from './workspaceResolver';
+import { registerOpenChamberChatParticipant } from './chatParticipant';
 
 let chatViewProvider: ChatViewProvider | undefined;
 let agentManagerProvider: AgentManagerPanelProvider | undefined;
@@ -175,6 +176,18 @@ export async function activate(context: vscode.ExtensionContext) {
     }, 250);
   });
   context.subscriptions.push({ dispose: () => chatViewRegistration.dispose() });
+
+  // Native chat participant (@openchamber): routes prompts and integrated-
+  // browser element attachments into the active OpenChamber conversation (#200).
+  const participantManager = openCodeManager;
+  if (participantManager) {
+    registerOpenChamberChatParticipant({
+      context,
+      manager: participantManager,
+      getCurrentSessionId: () => chatViewProvider?.getCurrentSessionId() ?? null,
+      getWorkingDirectory: () => participantManager.getWorkingDirectory(),
+    });
+  }
 
   // Register sidebar/focus commands AFTER the webview view provider is registered
   context.subscriptions.push(

@@ -88,6 +88,27 @@ window.addEventListener('openchamber:connection-status', () => {
   maybeHideLoadingOverlay();
 });
 
+// Report the active conversation to the extension host so the native chat
+// participant (@openchamber) routes prompts to the session the user sees.
+void import('@/sync/session-ui-store').then(({ useSessionUIStore }) => {
+  let lastReported: string | null | undefined;
+  const notify = (sessionId: string | null) => {
+    if (sessionId === lastReported) return;
+    lastReported = sessionId;
+    try {
+      vscode.postMessage({ type: 'session:currentChanged', payload: { sessionId } });
+    } catch {
+      // Bridge unavailable; the next change retries.
+    }
+  };
+  notify(useSessionUIStore.getState().currentSessionId);
+  useSessionUIStore.subscribe((state: { currentSessionId: string | null }) => {
+    notify(state.currentSessionId);
+  });
+}).catch(() => {
+  // Store unavailable (e.g. minimal surfaces); participant falls back to creating sessions.
+});
+
 // Boot-phase tracer: the extension host logs every step, so the next
 // main-thread freeze (which cannot report anything by itself) is bracketed
 // by the last step that made it out.
@@ -1177,6 +1198,93 @@ const handleLocalApiRequest = async (url: URL, init?: RequestInit) => {
       }),
     );
     return new Response(JSON.stringify(data), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  // OpenChamber web-server routes with no OpenCode equivalent. Left unhandled
+  // they fall through to the generic proxy, and the OpenCode server answers
+  // unknown GETs with its dashboard HTML (status 200) — callers then fail
+  // parsing "<!doctype" as JSON. Serve them locally instead.
+  if (pathname === '/api/pending-messages') {
+    if (method === 'GET') {
+      const messages = await sendBridgeMessage<unknown[]>('api:pending-messages:list')
+        .catch(() => [] as unknown[]);
+      return new Response(JSON.stringify({ messages: Array.isArray(messages) ? messages : [] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    if (method === 'POST') {
+      const body = init?.body ? JSON.parse(init.body as string) : {};
+      await sendBridgeMessage('api:pending-messages:save', { message: body }).catch(() => undefined);
+      return new Response(JSON.stringify({ success: true }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+  }
+
+  const pendingMessageMatch = pathname.match(/^\/api\/pending-messages\/([^/]+)$/);
+  if (pendingMessageMatch && method === 'DELETE') {
+    await sendBridgeMessage('api:pending-messages:delete', {
+      sessionId: decodeURIComponent(pendingMessageMatch[1] ?? ''),
+    }).catch(() => undefined);
+    return new Response(JSON.stringify({ success: true }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  if (pathname === '/api/openchamber/sessions/markers' && method === 'GET') {
+    return new Response(JSON.stringify({ version: 0, sessions: {} }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  const sessionMarkersMatch = pathname.match(/^\/api\/openchamber\/sessions\/([^/]+)\/markers$/);
+  if (sessionMarkersMatch) {
+    const sessionId = decodeURIComponent(sessionMarkersMatch[1] ?? '');
+    if (method === 'PUT') {
+      const body = init?.body ? JSON.parse(init.body as string) : {};
+      return new Response(JSON.stringify({ sessionId, markers: body }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    if (method === 'DELETE') {
+      return new Response(JSON.stringify({ success: true }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+  }
+
+  if (pathname === '/api/openchamber/sessions/unread' && method === 'GET') {
+    return new Response(JSON.stringify({ sessions: {} }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  if (pathname === '/api/text/summarize' && method === 'POST') {
+    return new Response(JSON.stringify({ summary: null }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  if (pathname === '/api/text/session-title-candidates' && method === 'POST') {
+    return new Response(JSON.stringify({ candidates: [], generated: false }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  if (pathname === '/api/compact-focus' && method === 'POST') {
+    return new Response(JSON.stringify({ success: true }), {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
     });

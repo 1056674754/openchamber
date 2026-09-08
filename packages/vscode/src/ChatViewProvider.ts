@@ -74,6 +74,10 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     return this._view !== undefined;
   }
 
+  public getCurrentSessionId(): string | null {
+    return this._currentSessionId;
+  }
+
   // Injected by extension.ts: disposes the provider registration and
   // re-registers it, which tears down the wedged iframe and makes VS Code
   // re-run resolveWebviewView for the visible view. WebviewView itself has no
@@ -107,6 +111,9 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   private _rapidWebviewRecoveries = 0;
   private _webviewRecoveryAbandoned = false;
   private _lastAutoWindowReloadAt = 0;
+  // The webview reports its active conversation so the native chat
+  // participant routes prompts to the session the user is looking at.
+  private _currentSessionId: string | null = null;
   private _pendingDiagnostics = new Map<string, {
     resolve: (value: unknown) => void;
     timeout: ReturnType<typeof setTimeout>;
@@ -270,7 +277,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       this._view = undefined;
     });
 
-    webviewView.webview.onDidReceiveMessage(async (message: (BridgeRequest & { _msgId?: string }) | { type: 'bridge:ack'; _msgId: string } | { type: 'webview:bridgeReady' } | { type: 'ui:chunkReload'; payload?: unknown } | { type: 'ui:freezeReport'; payload?: unknown } | { type: 'ui:bootTrace'; payload?: unknown } | { type: 'ui:jsError'; payload?: unknown } | WebviewDiagnosticsResponse) => {
+    webviewView.webview.onDidReceiveMessage(async (message: (BridgeRequest & { _msgId?: string }) | { type: 'bridge:ack'; _msgId: string } | { type: 'webview:bridgeReady' } | { type: 'ui:chunkReload'; payload?: unknown } | { type: 'ui:freezeReport'; payload?: unknown } | { type: 'ui:bootTrace'; payload?: unknown } | { type: 'ui:jsError'; payload?: unknown } | { type: 'session:currentChanged'; payload?: { sessionId?: string | null } } | WebviewDiagnosticsResponse) => {
       if (message.type === 'webview:bridgeReady') {
         const bootedInMs = this._webviewResolvedAt > 0 ? Date.now() - this._webviewResolvedAt : 0;
         this._webviewBootedAt = Date.now();
@@ -299,6 +306,11 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       }
       if (message.type === 'ui:jsError') {
         console.error('[ChatView] webview JS error:', JSON.stringify(message.payload));
+        return;
+      }
+      if (message.type === 'session:currentChanged') {
+        const sessionId = (message.payload as { sessionId?: unknown } | undefined)?.sessionId;
+        this._currentSessionId = typeof sessionId === 'string' && sessionId.length > 0 ? sessionId : null;
         return;
       }
       if (

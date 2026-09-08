@@ -43,6 +43,15 @@
     "onView:openchamber.chatView"
   ],
   "contributes": {
+    "chatParticipants": [
+      {
+        "id": "sscity.openchamber",
+        "name": "openchamber",
+        "displayName": "OpenChamber",
+        "description": "Route prompts and integrated-browser element context to your OpenChamber conversation",
+        "isSticky": false
+      }
+    ],
     "viewsContainers": {
       "activitybar": [
         {

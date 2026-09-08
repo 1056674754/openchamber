@@ -76,6 +76,11 @@ Keep `bridge.ts` as a thin orchestration layer that delegates message handling t
 - `webviewCachedStateRetry.ts`
   - Re-sends cached state at staggered delays (500ms–20s) on resolve and on the `connected` transition; VS Code drops postMessage made before the webview bridge is ready, and a lost `connectionStatus` leaves the loading overlay (the gray screen) up permanently.
 
+- `chatParticipant.ts` + `chat-participant-protocol.ts`
+  - Registers the `@openchamber` native chat participant (#200): prompts (and integrated-browser element attachments that surface as chat references) route into the sidebar's active OpenChamber session, or a new one when none is active.
+  - Talks to the managed OpenCode server directly (POST `/api/session`, POST `/session/{id}/prompt_async?directory=`) and streams the reply from the directory event stream (SSE `GET /event?directory=`) — the only stream that carries assistant message parts and `session.idle`; `/api/event` carries a subset.
+  - `chat-participant-protocol.ts` holds the pure parts (SSE frame parser, reference formatting, assistant-only text accumulator with role gating) so they stay unit-testable without the vscode API.
+
 - `webview-diagnostics-client.ts`
   - Provides the request/response timeout bridge used to collect the same read-only DOM diagnostics from the sidebar, session editor panels, and Agent Manager panel.
 
