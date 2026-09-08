@@ -48,7 +48,7 @@
         "id": "sscity.openchamber",
         "name": "openchamber",
         "displayName": "OpenChamber",
-        "description": "Route prompts and integrated-browser element context to your OpenChamber conversation",
+        "description": "Route prompts and element context to OpenChamber (requires a chat model selected in the panel)",
         "isSticky": false
       }
     ],
