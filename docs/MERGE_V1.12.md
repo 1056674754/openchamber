@@ -3533,3 +3533,16 @@ v1.20.0-sscity 尚未宣布完成：当前未关闭 `#135/#140/#142-#151/#154/#1
 **修复栈**（分三轮落地）：`966498b79` 同步回声守卫（apply 调用栈内的保存丢弃）+ 保存风暴探测器；`1833f3679` 结构性断路——settingsSynced 处理器在自身保存后 5s 内忽略广播（PUT 响应即最新态，回声无从生长）；辅以 `4e1928c90` JS 错误转发（window.onerror/unhandledrejection/ErrorBoundary 上报宿主日志）。日志验证：风暴探测器仅启动时响一次（10 次/3s 后收敛），3 分钟仅 1 次写入（原为每几秒交替不休），零冻结报告——用户确认"撑了很久"。
 
 本轮配套：provider 目录过滤修正（`06fa4dd50`，真实响应 `{all,default,connected}` 结构，5.79MB→78KB，13/218）；恢复链（dispose 重建 + 自动 reload 兜底 10 分钟限频）保留作为纵深。结案标准：连续使用 ≥1 天无灰屏后关 #189。遗留（后续 WI）：启动期回声爆发仍存在（3s 内 10 次，收敛但吵）；boot trace/provider 过滤日志每启动 ~13 行 error 级噪音可降噪；809KB localStore 镜像整体进同步设置的设计待重构。
+
+## v1.22.x [Custom]：@openchamber 原生 Chat Participant（#200）（2026-09-08）
+
+需求：VS Code 集成浏览器的"将元素添加到聊天"硬编码进原生聊天输入框（Copilot 专属，扩展无法重定向，livepreview#737）；唯一接入方式是注册 Chat Participant。实现（`<commit>`）：
+
+- `contributes.chatParticipants`（`sscity.openchamber` / 显示名 `@openchamber`）+ `chatParticipant.ts` 注册处理器。
+- 会话路由：webview 订阅 `session-ui-store.currentSessionId` 变化并经 `session:currentChanged` 上报宿主；participant 优先用侧栏当前会话，无会话则 POST `/api/session` 新建（`{data:{id}}` 包装）。
+- 发送：POST `/session/{id}/prompt_async?directory=`（part id 必须 `prt` 前缀——400 实测得出）；文本 = prompt + 引用/附件（元素上下文经 `references` 到达时格式化附加）。
+- 回流：SSE `GET /event?directory=`（实测唯一携带 assistant `message.part.updated/delta` 与 `session.idle` 的事件流；`/api/event` 只有子集）；`AssistantTextStream` 按 `message.updated` 的 role 门控只流 assistant 文本，idle+输出确认结束，10 分钟兜底。
+- 全链路已对运行中的 managed server 实测通过（建会话→发送→流式收到回复→idle；测试会话已清理）；participant UI 侧待用户 reload 后实测（`@openchamber`）。
+- 已知边界：元素截图（imageData）是否随 references 转发给扩展端 participant 未经证实——首次实测若只见文本，截图维度后续补（可走宿主侧直接抓 webContents 截图）。
+
+验证：vscode 包 25/25（新增 protocol 7 例）✅ type-check ✅ eslint 0 error ✅ `git diff --check` ✅ VSIX 已安装。
