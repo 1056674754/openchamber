@@ -37,6 +37,7 @@
   "icon": "assets/app-icon.png",
   "main": "./dist/extension.js",
   "activationEvents": [
+    "onStartupFinished",
     "onCommand:openchamber.openSidebar",
     "onCommand:openchamber.attachExplorerToChat",
     "onCommand:openchamber.addSelectionToChat",

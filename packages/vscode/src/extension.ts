@@ -189,6 +189,27 @@ export async function activate(context: vscode.ExtensionContext) {
     });
   }
 
+  // VS Code resolves a language model for EVERY participant request in THIS
+  // extension host, and each host's model cache only contains vendors this
+  // extension has explicitly queried — an unwarmed cache throws "Language
+  // model unavailable" before our handler runs. Warm the known vendors at
+  // startup, with delayed retries for providers that register late or load
+  // their model lists asynchronously.
+  const warmLanguageModelCache = async () => {
+    for (const vendor of ['copilot', 'glm', 'codex-for-copilot', 'customendpoint']) {
+      try {
+        await vscode.lm.selectChatModels({ vendor });
+      } catch {
+        // Vendor absent in this setup; ignore.
+      }
+    }
+  };
+  void warmLanguageModelCache();
+  const warmTimers = [10_000, 30_000].map((delay) =>
+    setTimeout(() => void warmLanguageModelCache(), delay)
+  );
+  context.subscriptions.push({ dispose: () => warmTimers.forEach(clearTimeout) });
+
   // Register sidebar/focus commands AFTER the webview view provider is registered
   context.subscriptions.push(
     vscode.commands.registerCommand('openchamber.openSidebar', async () => {
