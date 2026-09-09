@@ -228,7 +228,11 @@ export async function activate(context: vscode.ExtensionContext) {
         parts.push(`Text: ${data.innerText.slice(0, 2000)}`);
       }
       const md = ['**Element context (integrated browser)**', ...parts].join('\n\n');
-      chatViewProvider?.addTextToInput(md);
+      if (chatViewProvider?.hasResolvedView()) {
+        chatViewProvider.addNativeElementContext({ fileLabel: data.url ?? 'browser', code: md, language: 'markdown' });
+      } else {
+        vscode.window.showInformationMessage('OpenChamber: open the sidebar to receive element context');
+      }
       outputChannel?.appendLine(`[OpenChamber] native element context delivered (${md.length} chars)`);
     })
   );

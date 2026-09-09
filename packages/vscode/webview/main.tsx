@@ -1541,6 +1541,34 @@ onCommand('addToContext', (payload) => {
   });
 });
 
+// Element context from the patched integrated browser: land it as an inline
+// comment draft so the composer renders it as a code chip, not raw text.
+onCommand('nativeElementContext', (payload) => {
+  const { fileLabel, code, language } = (payload ?? {}) as { fileLabel?: string; code?: string; language?: string };
+  if (!code) return;
+
+  void Promise.all([
+    import('@/sync/session-ui-store'),
+    import('@/stores/useInlineCommentDraftStore'),
+  ]).then(([{ useSessionUIStore }, { useInlineCommentDraftStore }]) => {
+    const sessionKey = useSessionUIStore.getState().currentSessionId ?? 'draft';
+    useInlineCommentDraftStore.getState().addDraft({
+      sessionKey,
+      source: 'preview-annotation',
+      fileLabel: fileLabel ?? 'browser',
+      startLine: 1,
+      endLine: 1,
+      code,
+      language: language ?? 'markdown',
+      text: '',
+    });
+  }).catch(() => {
+    import('@/sync/input-store').then(({ useInputStore }) => {
+      useInputStore.getState().setPendingInputText(code, 'append');
+    });
+  });
+});
+
 onCommand('addFileMentions', (payload) => {
   const rawPaths = Array.isArray((payload as { paths?: unknown[] })?.paths)
     ? (payload as { paths: unknown[] }).paths

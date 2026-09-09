@@ -395,13 +395,25 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     if (this._view) {
       // Reveal the webview panel
       this._view.show(true);
-      
+
       this._view.webview.postMessage({
         type: 'command',
         command: 'addToContext',
         payload: { text }
       });
     }
+  }
+
+  public addNativeElementContext(payload: { fileLabel: string; code: string; language: string }) {
+    if (!this._view) {
+      return;
+    }
+    this._view.show(true);
+    this._view.webview.postMessage({
+      type: 'command',
+      command: 'nativeElementContext',
+      payload,
+    });
   }
 
   public addFileAttachments(files: Array<{ filePath: string; fileName: string; fileSize: number | null }>) {
