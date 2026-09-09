@@ -3546,3 +3546,13 @@ v1.20.0-sscity 尚未宣布完成：当前未关闭 `#135/#140/#142-#151/#154/#1
 - 已知边界：元素截图（imageData）是否随 references 转发给扩展端 participant 未经证实——首次实测若只见文本，截图维度后续补（可走宿主侧直接抓 webContents 截图）。
 
 验证：vscode 包 25/25（新增 protocol 7 例）✅ type-check ✅ eslint 0 error ✅ `git diff --check` ✅ VSIX 已安装。
+
+## v1.22.x [Custom]：集成浏览器元素直通 OpenChamber（#200 后续，机器补丁层）（2026-09-09）
+
+用户明确否决经由原生聊天的 participant 路径（UI bug 多、不想用），原始需求即"集成浏览器右键元素 → OpenChamber"。方案改为机器层二进制补丁 + 扩展命令配对：
+
+- **VS Code 侧**（`~/.local/share/openchamber-vscode-patch/patch.sh`，不进仓库）：`workbench.desktop.main.js` 两处注入——集成浏览器聊天集成类的构造函数保存 `instantiationService` 字段；`_attachElementDataToChat` 入口处调用 `openchamber.nativeElement` 命令（载荷：outerHTML/ancestors/attributes/computedStyles/dimensions/url/innerText）后**提前 return**，原生聊天附加与确认对话框完全跳过。ICommandService 压缩符号经 `createDecorator("commandService")` 动态解析；`node --check` 语法校验；`.oc-orig` 备份 + ad-hoc 重签名。模型门补丁（extensionHostProcess.js）保留。
+- **扩展侧**（`<commit>`）：注册 `openchamber.nativeElement` 命令，把元素格式化为 markdown 上下文块（选择器路径/属性/CSS/HTML 上限 50KB/文本）经 `addTextToInput` 写入 OpenChamber 输入框。
+- 回滚：`cp <file>.oc-orig <file>` + 重签名 + 重启。VS Code 更新后重跑脚本；若上游改名锚点失配，脚本明确记录 no-anchor 并跳过（安全失败）。
+
+验证：两目标补丁标记确认在位（gate relaxed / element routing ×1）✅；`node --check` ✅；25/25 ✅ type-check ✅ eslint ✅；VSIX 重装。待实机：集成浏览器右键元素 → OpenChamber 输入框出现上下文块，原生聊天全程不出现。
