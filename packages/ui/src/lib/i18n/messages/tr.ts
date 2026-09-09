@@ -2174,6 +2174,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.chatInput.devServerLogs": "Dev Server logs:",
   "chat.chatInput.devServerLogsRemove": "Remove Dev Server logs",
   "chat.chatInput.previewAnnotations": "Önizleme ek açıklamaları:",
+  "chat.chatInput.browserElements": "Tarayıcı öğeleri:",
   "chat.chatInput.previewContext": "Önizleme bağlamı:",
   "chat.chatInput.previewContextRemove": "Önizleme bağlamını kaldır",
   "chat.chatInput.projectRoot": "Proje kök dizini",

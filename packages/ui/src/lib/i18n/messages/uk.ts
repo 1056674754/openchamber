@@ -2130,6 +2130,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.chatInput.devServerLogs": "Логи Dev Server:",
   "chat.chatInput.devServerLogsRemove": "Прибрати логи Dev Server",
   "chat.chatInput.previewAnnotations": "Анотації перегляду:",
+  "chat.chatInput.browserElements": "Елементи браузера:",
   "chat.chatInput.previewContext": "Контекст перегляду:",
   "chat.chatInput.previewContextRemove": "Прибрати контекст перегляду",
   "chat.chatInput.projectRoot": "Корінь проєкту",

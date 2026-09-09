@@ -2002,6 +2002,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.chatInput.devServerLogs': 'Dev Server 日誌：',
   'chat.chatInput.devServerLogsRemove': '移除 Dev Server 日誌',
   'chat.chatInput.previewAnnotations': '預覽註釋：',
+  'chat.chatInput.browserElements': '瀏覽器元素:',
   'chat.chatInput.previewContext': '預覽上下文：',
   'chat.chatInput.previewContextRemove': '移除預覽上下文',
   'chat.chatInput.projectRoot': '專案根目錄',

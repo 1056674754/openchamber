@@ -1598,13 +1598,15 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                 const drafts = sessionKey ? (state.drafts[sessionKey] ?? []) : [];
                 let previewConsole = 0;
                 let previewAnnotation = 0;
+                let browserElement = 0;
                 let review = 0;
                 for (const draft of drafts) {
                     if (draft.source === 'preview-console') previewConsole += 1;
                     else if (draft.source === 'preview-annotation') previewAnnotation += 1;
+                    else if (draft.source === 'browser-element') browserElement += 1;
                     else review += 1;
                 }
-                return `${previewConsole}:${previewAnnotation}:${review}`;
+                return `${previewConsole}:${previewAnnotation}:${review}:${browserElement}`;
             },
             [currentSessionId, newSessionDraftOpen]
         )
@@ -1613,7 +1615,21 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const removeInlineCommentDraft = useInlineCommentDraftStore((state) => state.removeDraft);
     const hasDrafts = draftCount > 0;
     const [previewConsoleCount, previewAnnotationCount, reviewCount] = draftSourceKey.split(':').map((entry) => Number(entry) || 0);
-    const removePreviewDrafts = React.useCallback((source: 'preview-console' | 'preview-annotation') => {
+    const browserElementNames = useInlineCommentDraftStore(
+        React.useCallback(
+            (state) => {
+                const sessionKey = currentSessionId ?? (newSessionDraftOpen ? 'draft' : '');
+                const drafts = sessionKey ? (state.drafts[sessionKey] ?? []) : [];
+                return drafts
+                    .filter((draft) => draft.source === 'browser-element')
+                    .map((draft) => draft.fileLabel)
+                    .slice(0, 3)
+                    .join(', ');
+            },
+            [currentSessionId, newSessionDraftOpen]
+        )
+    );
+    const removePreviewDrafts = React.useCallback((source: 'preview-console' | 'preview-annotation' | 'browser-element') => {
         const sessionKey = currentSessionId ?? (newSessionDraftOpen ? 'draft' : '');
         if (!sessionKey) return;
         const drafts = useInlineCommentDraftStore.getState().drafts[sessionKey] ?? [];
@@ -1981,6 +1997,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         setPrPickerOpen(true);
     }, []);
 
+    const lastSoftNetworkErrorToastAtRef = React.useRef(0);
+
     const handleSubmit = async (options?: SubmitOptions) => {
         const queuedOnly = options?.queuedOnly ?? false;
         const queuedMessageId = options?.queuedMessageId;
@@ -2064,6 +2082,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 
         if (!providerIdToSend || !modelIdToSend) {
             console.warn('Cannot send message: provider or model not selected');
+            toast.error(t('chat.chatInput.toast.messageSendFailed'), {
+                description: 'Provider or model not selected',
+            });
             return;
         }
 
@@ -2687,8 +2708,17 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             }
 
             if (isSoftNetworkError) {
-                if (composerAttachmentsSnapshot.length > 0) {
-                    toast.error(t('chat.chatInput.toast.sendAttachmentsFailed'));
+                // The stream may still deliver the message, but swallowing the
+                // error entirely reads as "input disappeared" when the request
+                // actually died. Surface it once per burst instead.
+                const now = Date.now();
+                if (now - lastSoftNetworkErrorToastAtRef.current > 5000) {
+                    lastSoftNetworkErrorToastAtRef.current = now;
+                    toast.error(
+                        composerAttachmentsSnapshot.length > 0
+                            ? t('chat.chatInput.toast.sendAttachmentsFailed')
+                            : (rawMessage || t('chat.chatInput.toast.messageSendFailed')),
+                    );
                 }
                 return;
             }
@@ -4197,6 +4227,27 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                     type="button"
                                     className="ml-1 inline-flex h-4 w-4 items-center justify-center rounded-full text-muted-foreground hover:bg-interactive-hover hover:text-foreground"
                                     onClick={() => removePreviewDrafts('preview-annotation')}
+                                    aria-label={t('chat.chatInput.previewContextRemove')}
+                                    title={t('chat.chatInput.previewContextRemove')}
+                                >
+                                    <Icon name="close" className="h-3 w-3" />
+                                </button>
+                            </div>
+                        ) : null}
+                        {browserElementNames ? (
+                            <div
+                                className="inline-flex items-center gap-1.5 rounded-xl border px-2.5 py-1 max-w-full"
+                                style={{
+                                    backgroundColor: currentTheme?.colors?.surface?.elevated,
+                                    borderColor: currentTheme?.colors?.interactive?.border,
+                                }}
+                            >
+                                <Icon name="cursor" className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                                <span className="text-xs font-semibold truncate" style={{ color: currentTheme?.colors?.status?.info }} title={browserElementNames}>{browserElementNames}</span>
+                                <button
+                                    type="button"
+                                    className="ml-1 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-interactive-hover hover:text-foreground"
+                                    onClick={() => removePreviewDrafts('browser-element')}
                                     aria-label={t('chat.chatInput.previewContextRemove')}
                                     title={t('chat.chatInput.previewContextRemove')}
                                 >

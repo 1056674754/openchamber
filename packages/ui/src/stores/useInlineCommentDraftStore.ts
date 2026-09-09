@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { devtools, persist } from 'zustand/middleware';
 import { createDeferredSafeJSONStorage } from './utils/safeStorage';
 
-export type InlineCommentSource = 'diff' | 'plan' | 'file' | 'preview-console' | 'preview-annotation';
+export type InlineCommentSource = 'diff' | 'plan' | 'file' | 'preview-console' | 'preview-annotation' | 'browser-element';
 
 export interface InlineCommentDraft {
   id: string;
@@ -36,7 +36,7 @@ interface InlineCommentDraftActions {
 type InlineCommentDraftStore = InlineCommentDraftState & InlineCommentDraftActions;
 
 const isValidSource = (value: unknown): value is InlineCommentSource =>
-  value === 'diff' || value === 'plan' || value === 'file' || value === 'preview-console' || value === 'preview-annotation';
+  value === 'diff' || value === 'plan' || value === 'file' || value === 'preview-console' || value === 'preview-annotation' || value === 'browser-element';
 
 const isValidSide = (value: unknown): value is 'original' | 'modified' =>
   value === 'original' || value === 'modified';

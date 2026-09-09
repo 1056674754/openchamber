@@ -2165,6 +2165,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.chatInput.devServerLogs': 'Entwicklungsserver-Protokolle:',
   'chat.chatInput.devServerLogsRemove': 'Entwicklungsserver-Protokolle entfernen',
   'chat.chatInput.previewAnnotations': 'Vorschau-Anmerkungen:',
+  'chat.chatInput.browserElements': 'Browser-Elemente:',
   'chat.chatInput.previewContext': 'Vorschau-Kontext:',
   'chat.chatInput.previewContextRemove': 'Vorschau-Kontext entfernen',
   'chat.chatInput.projectRoot': 'Projektstamm',

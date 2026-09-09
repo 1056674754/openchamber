@@ -1115,6 +1115,7 @@ export const dict: Record<I18nKey, string> = {
   'snippets.source.global': 'globalny',
   'snippets.source.project': 'projekt',
   'chat.chatInput.previewAnnotations': 'Adnotacje podglądu:',
+  'chat.chatInput.browserElements': 'Elementy przeglądarki:',
   'chat.chatInput.previewContext': 'Kontekst podglądu:',
   'chat.chatInput.previewContextRemove': 'Usuń kontekst podglądu',
   'chat.chatInput.projectRoot': 'Katalog główny projektu',

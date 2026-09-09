@@ -2165,6 +2165,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.chatInput.devServerLogs': 'Dev Server 로그:',
   'chat.chatInput.devServerLogsRemove': 'Dev Server 로그 제거',
   'chat.chatInput.previewAnnotations': '미리보기 주석:',
+  'chat.chatInput.browserElements': '브라우저 요소:',
   'chat.chatInput.previewContext': '미리보기 컨텍스트:',
   'chat.chatInput.previewContextRemove': '미리보기 컨텍스트 제거',
   'chat.chatInput.projectRoot': '프로젝트 루트',

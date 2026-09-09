@@ -2131,6 +2131,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.chatInput.devServerLogs': 'Dev Server 日志：',
   'chat.chatInput.devServerLogsRemove': '移除 Dev Server 日志',
   'chat.chatInput.previewAnnotations': '预览注释：',
+  'chat.chatInput.browserElements': '浏览器元素:',
   'chat.chatInput.previewContext': '预览上下文：',
   'chat.chatInput.previewContextRemove': '移除预览上下文',
   'chat.chatInput.projectRoot': '项目根目录',

@@ -2175,6 +2175,7 @@ export const dict = {
   'chat.chatInput.devServerLogs': 'Dev Server logs:',
   'chat.chatInput.devServerLogsRemove': 'Remove Dev Server logs',
   'chat.chatInput.previewAnnotations': 'Preview annotations:',
+  'chat.chatInput.browserElements': 'Browser elements:',
   'chat.chatInput.previewContext': 'Preview context:',
   'chat.chatInput.previewContextRemove': 'Remove preview context',
   'chat.chatInput.projectRoot': 'Project root',

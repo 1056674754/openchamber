@@ -2163,6 +2163,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.chatInput.devServerLogs': '開発サーバーログ:',
   'chat.chatInput.devServerLogsRemove': '開発サーバーログを削除',
   'chat.chatInput.previewAnnotations': 'プレビュー注釈:',
+  'chat.chatInput.browserElements': 'ブラウザー要素:',
   'chat.chatInput.previewContext': 'プレビューコンテキスト:',
   'chat.chatInput.previewContextRemove': 'プレビューコンテキストを削除',
   'chat.chatInput.projectRoot': 'プロジェクトルート',
