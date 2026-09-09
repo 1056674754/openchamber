@@ -189,6 +189,50 @@ export async function activate(context: vscode.ExtensionContext) {
     });
   }
 
+  // Receives element payloads from the patched integrated browser (VS Code
+  // binary patch injects this call into _attachElementDataToChat) and drops
+  // the element into the OpenChamber composer as markdown context.
+  context.subscriptions.push(
+    vscode.commands.registerCommand('openchamber.nativeElement', (data: {
+      outerHTML?: string;
+      innerText?: string;
+      url?: string;
+      ancestors?: Array<{ tag?: string; id?: string; className?: string; selectorPart?: string }>;
+      attributes?: Record<string, string>;
+      computedStyles?: Record<string, string>;
+      dimensions?: { width?: number; height?: number };
+    }) => {
+      if (!data || typeof data !== 'object') {
+        return;
+      }
+      const parts: string[] = [];
+      const path = Array.isArray(data.ancestors)
+        ? data.ancestors.map((a) => a?.selectorPart ?? a?.tag ?? '').filter(Boolean).join(' > ')
+        : '';
+      if (data.url) parts.push(`Page: ${data.url}`);
+      if (path) parts.push(`Selector: \`${path}\``);
+      if (data.dimensions?.width) {
+        parts.push(`Size: ${Math.round(data.dimensions.width)} x ${Math.round(data.dimensions.height ?? 0)}`);
+      }
+      const attrs = data.attributes ?? {};
+      const attrLines = Object.entries(attrs).slice(0, 12).map(([k, v]) => `${k}="${String(v).slice(0, 120)}"`);
+      if (attrLines.length > 0) parts.push(`Attributes: ${attrLines.join(' ')}`);
+      if (data.computedStyles && Object.keys(data.computedStyles).length > 0) {
+        const css = Object.entries(data.computedStyles).map(([k, v]) => `${k}: ${v};`).join(' ');
+        parts.push(`CSS:\n\`\`\`css\n${css.slice(0, 2000)}\n\`\`\``);
+      }
+      if (data.outerHTML) {
+        parts.push(`HTML:\n\`\`\`html\n${data.outerHTML.slice(0, 50_000)}\n\`\`\``);
+      }
+      if (data.innerText) {
+        parts.push(`Text: ${data.innerText.slice(0, 2000)}`);
+      }
+      const md = ['**Element context (integrated browser)**', ...parts].join('\n\n');
+      chatViewProvider?.addTextToInput(md);
+      outputChannel?.appendLine(`[OpenChamber] native element context delivered (${md.length} chars)`);
+    })
+  );
+
   // VS Code resolves a language model for EVERY participant request in THIS
   // extension host, and each host's model cache only contains vendors this
   // extension has explicitly queried — an unwarmed cache throws "Language
