@@ -1586,10 +1586,12 @@ void Promise.all([
         'browser.back': 'openchamber.browser.back',
         'browser.forward': 'openchamber.browser.forward',
         'browser.reload': 'openchamber.browser.reload',
+        'browser.selectedText': 'openchamber.browser.selectedText',
+        'browser.logs': 'openchamber.browser.logs',
       };
       const command = map[action];
       if (!command) {
-        throw new Error(`action '${action}' is not supported for the integrated browser (supported: capture/snapshot/open/status/back/forward/reload)`);
+        throw new Error(`action '${action}' is not supported for the integrated browser (supported: capture/snapshot/open/status/back/forward/reload/selectedText/logs)`);
       }
       return await sendBridgeMessage('browser:control', { command, args: parameters ?? {} });
     },
