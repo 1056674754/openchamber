@@ -205,6 +205,32 @@ export async function activate(context: vscode.ExtensionContext) {
       if (!data || typeof data !== 'object') {
         return;
       }
+      // Mirror VS Code's own element displayName: ancestors entries are
+      // { tagName, id?, classNames?: string[] } with an optional trailing
+      // '::pseudo' entry.
+      const ancestors = Array.isArray(data.ancestors)
+        ? data.ancestors as Array<{ tagName?: unknown; id?: unknown; classNames?: unknown }>
+        : [];
+      let last = ancestors.length > 0 ? ancestors[ancestors.length - 1] : undefined;
+      let pseudo = '';
+      if (last && typeof last.tagName === 'string' && last.tagName.startsWith('::') && ancestors.length > 1) {
+        pseudo = last.tagName;
+        last = ancestors[ancestors.length - 2];
+      }
+      let elementName = '';
+      if (last && typeof last.tagName === 'string') {
+        elementName = last.tagName.toLowerCase()
+          + (typeof last.id === 'string' && last.id ? `#${last.id}` : '')
+          + (Array.isArray(last.classNames) && last.classNames.length > 0
+            ? `.${last.classNames.map(String).join('.')}`
+            : '')
+          + pseudo;
+      }
+      if (!elementName && typeof data.outerHTML === 'string') {
+        const tagMatch = /^\s*<([a-zA-Z][\w-]*)/.exec(data.outerHTML);
+        if (tagMatch) elementName = tagMatch[1].toLowerCase();
+      }
+      elementName = (elementName || 'element').slice(0, 120);
       const parts: string[] = [];
       const path = Array.isArray(data.ancestors)
         ? data.ancestors.map((a) => a?.selectorPart ?? a?.tag ?? '').filter(Boolean).join(' > ')
@@ -229,7 +255,7 @@ export async function activate(context: vscode.ExtensionContext) {
       }
       const md = ['**Element context (integrated browser)**', ...parts].join('\n\n');
       if (chatViewProvider?.hasResolvedView()) {
-        chatViewProvider.addNativeElementContext({ fileLabel: data.url ?? 'browser', code: md, language: 'markdown' });
+        chatViewProvider.addNativeElementContext({ fileLabel: elementName, code: md, language: 'markdown' });
       } else {
         vscode.window.showInformationMessage('OpenChamber: open the sidebar to receive element context');
       }
