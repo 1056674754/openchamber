@@ -277,7 +277,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       this._view = undefined;
     });
 
-    webviewView.webview.onDidReceiveMessage(async (message: (BridgeRequest & { _msgId?: string }) | { type: 'bridge:ack'; _msgId: string } | { type: 'webview:bridgeReady' } | { type: 'ui:chunkReload'; payload?: unknown } | { type: 'ui:freezeReport'; payload?: unknown } | { type: 'ui:bootTrace'; payload?: unknown } | { type: 'ui:jsError'; payload?: unknown } | { type: 'session:currentChanged'; payload?: { sessionId?: string | null } } | WebviewDiagnosticsResponse) => {
+    webviewView.webview.onDidReceiveMessage(async (message: (BridgeRequest & { _msgId?: string }) | { type: 'bridge:ack'; _msgId: string } | { type: 'webview:bridgeReady' } | { type: 'ui:chunkReload'; payload?: unknown } | { type: 'ui:freezeReport'; payload?: unknown } | { type: 'ui:bootTrace'; payload?: unknown } | { type: 'ui:jsError'; payload?: unknown } | { type: 'session:currentChanged'; payload?: { sessionId?: string | null } } | { type: 'browser:control'; id?: string; payload?: { command?: string; args?: unknown } } | WebviewDiagnosticsResponse) => {
       if (message.type === 'webview:bridgeReady') {
         const bootedInMs = this._webviewResolvedAt > 0 ? Date.now() - this._webviewResolvedAt : 0;
         this._webviewBootedAt = Date.now();
@@ -306,6 +306,26 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       }
       if (message.type === 'ui:jsError') {
         console.error('[ChatView] webview JS error:', JSON.stringify(message.payload));
+        return;
+      }
+      if (message.type === 'browser:control') {
+        // The webview's browser-control controller forwards agent actions to
+        // the patched integrated-browser commands (workbench renderer).
+        const payload = (message as { payload?: { command?: unknown; args?: unknown } }).payload ?? {};
+        const command = (payload as { command?: unknown }).command;
+        if (typeof command !== 'string' || command.length === 0) return;
+        const requestId = typeof (message as { id?: unknown }).id === 'string' ? (message as { id: string }).id : this._createMessageId();
+        try {
+          const data = await vscode.commands.executeCommand(command, (payload as { args?: unknown }).args);
+          void this._sendMessageWithRetry({ id: requestId, type: 'browser:control', success: true, data });
+        } catch (error) {
+          void this._sendMessageWithRetry({
+            id: requestId,
+            type: 'browser:control',
+            success: false,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
         return;
       }
       if (message.type === 'session:currentChanged') {
@@ -351,7 +371,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         return;
       }
 
-      const response = await handleBridgeMessage(message, {
+      const response = await handleBridgeMessage(message as BridgeRequest, {
         manager: this._openCodeManager,
         context: this._context,
       });

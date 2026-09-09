@@ -1542,7 +1542,8 @@ onCommand('addToContext', (payload) => {
 });
 
 // Element context from the patched integrated browser: land it as an inline
-// comment draft so the composer renders it as a code chip, not raw text.
+// comment draft so the composer renders it as an element chip (tag name),
+// not raw text.
 onCommand('nativeElementContext', (payload) => {
   const { fileLabel, code, language } = (payload ?? {}) as { fileLabel?: string; code?: string; language?: string };
   if (!code) return;
@@ -1554,8 +1555,8 @@ onCommand('nativeElementContext', (payload) => {
     const sessionKey = useSessionUIStore.getState().currentSessionId ?? 'draft';
     useInlineCommentDraftStore.getState().addDraft({
       sessionKey,
-      source: 'preview-annotation',
-      fileLabel: fileLabel ?? 'browser',
+      source: 'browser-element',
+      fileLabel: fileLabel ?? 'element',
       startLine: 1,
       endLine: 1,
       code,
@@ -1567,6 +1568,34 @@ onCommand('nativeElementContext', (payload) => {
       useInputStore.getState().setPendingInputText(code, 'append');
     });
   });
+});
+
+// VS Code integrated browser as the agent's browser controller (machine patch
+// exposes openchamber.browser.* workbench commands).
+void Promise.all([
+  import('@/lib/browser/controlClient'),
+  import('@/lib/opencode/server-registry'),
+]).then(([{ registerBrowserController }, { DEFAULT_SERVER_ID }]) => {
+  registerBrowserController(DEFAULT_SERVER_ID, {
+    run: async (action: string, parameters: Record<string, unknown>) => {
+      const map: Record<string, string> = {
+        'browser.capture': 'openchamber.browser.capture',
+        'browser.snapshot': 'openchamber.browser.capture',
+        'browser.open': 'openchamber.browser.navigate',
+        'browser.status': 'openchamber.browser.status',
+        'browser.back': 'openchamber.browser.back',
+        'browser.forward': 'openchamber.browser.forward',
+        'browser.reload': 'openchamber.browser.reload',
+      };
+      const command = map[action];
+      if (!command) {
+        throw new Error(`action '${action}' is not supported for the integrated browser (supported: capture/snapshot/open/status/back/forward/reload)`);
+      }
+      return await sendBridgeMessage('browser:control', { command, args: parameters ?? {} });
+    },
+  });
+}).catch(() => {
+  // Control client unavailable; the agent's browser tools will yield 503.
 });
 
 onCommand('addFileMentions', (payload) => {
