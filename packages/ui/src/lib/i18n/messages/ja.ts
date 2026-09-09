@@ -2810,6 +2810,8 @@ export const dict: Record<I18nKey, string> = {
   'vscodeLayout.actions.newSessionAria': '新しいセッション',
   'vscodeLayout.actions.openAgentManagerAria': 'エージェントマネージャーを開く',
   'vscodeLayout.actions.resizeSessionsSidebarAria': 'セッションサイドバーのサイズを調整',
+  'vscodeLayout.actions.toggleLayout': 'サイドバイサイドレイアウトを切り替え',
+  'vscodeLayout.actions.toggleLayoutAria': 'サイドバイサイドレイアウトを切り替え',
   'vscodeLayout.actions.settingsAria': '設定',
   'vscodeLayout.quota.title': 'レート制限',
   'vscodeLayout.quota.mode.used': '使用済み',

@@ -54,14 +54,22 @@ const formatTime = (timestamp: number | null) => {
 
 // Width threshold for mobile vs desktop layout in settings
 const MOBILE_WIDTH_THRESHOLD = 550;
-// Width threshold for expanded layout (sidebar + chat side by side)
-const EXPANDED_LAYOUT_THRESHOLD = 1400;
+// Expanded (side-by-side) layout applies when the resulting CHAT area —
+// container minus the sessions sidebar — stays above this width. Deciding on
+// chat width (not container width) lets narrow windows opt in by dragging the
+// sessions sidebar slimmer, and wide windows stay side-by-side with a wide
+// sidebar.
+const EXPANDED_CHAT_MIN_WIDTH = 520;
+// Exit hysteresis so live-dragging near the boundary does not flip layouts.
+const LAYOUT_EXIT_HYSTERESIS = 24;
+const LAYOUT_OVERRIDE_STORAGE_KEY = 'openchamber.vscode.layoutOverride';
 // Sessions sidebar width in expanded layout
 const SESSIONS_SIDEBAR_WIDTH = 280;
 const SESSIONS_SIDEBAR_MIN_WIDTH = Math.round(SESSIONS_SIDEBAR_WIDTH * 0.7);
 const SESSIONS_SIDEBAR_MAX_WIDTH = 520;
 
 type VSCodeView = 'sessions' | 'chat' | 'settings';
+type LayoutOverride = 'auto' | 'expanded' | 'compact';
 
 export const VSCodeLayout: React.FC = () => {
   const { t } = useI18n();
@@ -136,6 +144,19 @@ export const VSCodeLayout: React.FC = () => {
   const viewBeforeSettingsRef = React.useRef<VSCodeView | null>(null);
   const [containerWidth, setContainerWidth] = React.useState<number>(0);
   const [expandedSidebarWidth, setExpandedSidebarWidth] = React.useState<number>(SESSIONS_SIDEBAR_WIDTH);
+  const [autoExpanded, setAutoExpanded] = React.useState(false);
+  const autoExpandedRef = React.useRef(false);
+  React.useEffect(() => {
+    autoExpandedRef.current = autoExpanded;
+  }, [autoExpanded]);
+  const [layoutOverride, setLayoutOverrideState] = React.useState<LayoutOverride>(() => {
+    try {
+      const stored = window.localStorage.getItem(LAYOUT_OVERRIDE_STORAGE_KEY);
+      return stored === 'expanded' || stored === 'compact' ? stored : 'auto';
+    } catch {
+      return 'auto';
+    }
+  });
   const [isResizingExpandedSidebar, setIsResizingExpandedSidebar] = React.useState(false);
   const containerRef = React.useRef<HTMLDivElement>(null);
   const expandedSidebarResizeStartXRef = React.useRef(0);
@@ -414,7 +435,27 @@ export const VSCodeLayout: React.FC = () => {
   }, []);
 
   const usesMobileLayout = containerWidth > 0 && containerWidth < MOBILE_WIDTH_THRESHOLD;
-  const usesExpandedLayout = containerWidth >= EXPANDED_LAYOUT_THRESHOLD;
+  const chatAreaWidth = containerWidth - expandedSidebarWidth;
+  React.useEffect(() => {
+    if (containerWidth <= 0) return;
+    const threshold = autoExpanded ? EXPANDED_CHAT_MIN_WIDTH - LAYOUT_EXIT_HYSTERESIS : EXPANDED_CHAT_MIN_WIDTH;
+    const next = chatAreaWidth >= threshold;
+    if (next !== autoExpanded) setAutoExpanded(next);
+  }, [chatAreaWidth, autoExpanded, containerWidth]);
+  const usesExpandedLayout = !usesMobileLayout && (
+    layoutOverride === 'expanded' || (layoutOverride !== 'compact' && autoExpanded)
+  );
+  const toggleLayoutOverride = React.useCallback(() => {
+    setLayoutOverrideState((current) => {
+      const effective = current === 'expanded' || (current !== 'compact' && autoExpandedRef.current)
+        ? 'compact'
+        : 'expanded';
+      try {
+        window.localStorage.setItem(LAYOUT_OVERRIDE_STORAGE_KEY, effective);
+      } catch { /* storage unavailable; override lives for the session */ }
+      return effective;
+    });
+  }, []);
 
   const clampExpandedSidebarWidth = React.useCallback((value: number) => {
     return Math.min(SESSIONS_SIDEBAR_MAX_WIDTH, Math.max(SESSIONS_SIDEBAR_MIN_WIDTH, value));
@@ -529,6 +570,8 @@ export const VSCodeLayout: React.FC = () => {
               showContextUsage
               showRateLimits
               enableSessionSwitcher
+              layoutOverride={layoutOverride}
+              onToggleLayout={toggleLayoutOverride}
             />
             <div className="flex-1 overflow-hidden">
               <ErrorBoundary>
@@ -567,6 +610,8 @@ export const VSCodeLayout: React.FC = () => {
               showContextUsage
               showRateLimits
               enableSessionSwitcher
+              layoutOverride={layoutOverride}
+              onToggleLayout={toggleLayoutOverride}
             />
             <div className="flex-1 overflow-hidden">
               <ErrorBoundary>
@@ -593,9 +638,11 @@ interface VSCodeHeaderProps {
   showContextUsage?: boolean;
   showRateLimits?: boolean;
   enableSessionSwitcher?: boolean;
+  layoutOverride?: LayoutOverride;
+  onToggleLayout?: () => void;
 }
 
-const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, onNewSession, onSettings, onAgentManager, showMcp, showContextUsage, showRateLimits, enableSessionSwitcher }) => {
+const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, onNewSession, onSettings, onAgentManager, showMcp, showContextUsage, showRateLimits, enableSessionSwitcher, layoutOverride, onToggleLayout }) => {
   const { t } = useI18n();
   const getCurrentModel = useConfigStore((state) => state.getCurrentModel);
   const providers = useConfigStore((state) => state.providers);
@@ -773,6 +820,18 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
         <h1 className="text-sm font-medium truncate flex-1" title={title}>{title}</h1>
       )}
       <div className="min-w-0 flex-1" />
+      {onToggleLayout && (
+        <button
+          type="button"
+          onClick={onToggleLayout}
+          className="inline-flex h-9 w-9 items-center justify-center p-2 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary rounded-full"
+          style={{ color: layoutOverride && layoutOverride !== 'auto' ? 'var(--interactive-accent, var(--interactive-focus-ring))' : undefined }}
+          aria-label={t('vscodeLayout.actions.toggleLayoutAria')}
+          title={t('vscodeLayout.actions.toggleLayout')}
+        >
+          <Icon name="layout-column" className="h-5 w-5" />
+        </button>
+      )}
       {onNewSession && (
         <button
           onClick={onNewSession}

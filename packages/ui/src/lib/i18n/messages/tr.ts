@@ -2821,6 +2821,8 @@ export const dict: Record<I18nKey, string> = {
   "vscodeLayout.actions.newSessionAria": "Yeni session",
   "vscodeLayout.actions.openAgentManagerAria": "Agent Manager'ı Aç",
   "vscodeLayout.actions.resizeSessionsSidebarAria": "Session'lar kenar çubuğunu yeniden boyutlandır",
+  "vscodeLayout.actions.toggleLayout": "Yan yana oturum düzenini değiştir",
+  "vscodeLayout.actions.toggleLayoutAria": "Yan yana oturum düzenini değiştir",
   "vscodeLayout.actions.settingsAria": "Ayarlar",
   "vscodeLayout.quota.title": "Hız limitleri",
   "vscodeLayout.quota.mode.used": "Kullanılan",

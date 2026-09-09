@@ -2812,6 +2812,8 @@ export const dict: Record<I18nKey, string> = {
   'vscodeLayout.actions.newSessionAria': '새 세션',
   'vscodeLayout.actions.openAgentManagerAria': '에이전트 관리자 열기',
   'vscodeLayout.actions.resizeSessionsSidebarAria': '세션 사이드바 크기 조정',
+  'vscodeLayout.actions.toggleLayout': '나란히 세션 레이아웃 전환',
+  'vscodeLayout.actions.toggleLayoutAria': '나란히 세션 레이아웃 전환',
   'vscodeLayout.actions.settingsAria': '설정',
   'vscodeLayout.quota.title': '레이트 리밋',
   'vscodeLayout.quota.mode.used': '사용됨',

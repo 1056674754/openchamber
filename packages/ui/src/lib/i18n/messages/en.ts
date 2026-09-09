@@ -2822,6 +2822,8 @@ export const dict = {
   'vscodeLayout.actions.newSessionAria': 'New session',
   'vscodeLayout.actions.openAgentManagerAria': 'Open Agent Manager',
   'vscodeLayout.actions.resizeSessionsSidebarAria': 'Resize sessions sidebar',
+  'vscodeLayout.actions.toggleLayout': 'Toggle side-by-side sessions layout',
+  'vscodeLayout.actions.toggleLayoutAria': 'Toggle side-by-side sessions layout',
   'vscodeLayout.actions.settingsAria': 'Settings',
   'vscodeLayout.quota.title': 'Rate limits',
   'vscodeLayout.quota.mode.used': 'Used',

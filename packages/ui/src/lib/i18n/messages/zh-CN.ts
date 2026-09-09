@@ -2778,6 +2778,8 @@ export const dict: Record<I18nKey, string> = {
   'vscodeLayout.actions.newSessionAria': '新建会话',
   'vscodeLayout.actions.openAgentManagerAria': '打开智能体管理器',
   'vscodeLayout.actions.resizeSessionsSidebarAria': '调整会话侧边栏大小',
+  'vscodeLayout.actions.toggleLayout': '切换会话并排布局',
+  'vscodeLayout.actions.toggleLayoutAria': '切换会话并排布局',
   'vscodeLayout.actions.settingsAria': '设置',
   'vscodeLayout.quota.title': '速率限制',
   'vscodeLayout.quota.mode.used': '已用',

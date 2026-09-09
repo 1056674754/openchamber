@@ -2648,6 +2648,8 @@ export const dict: Record<I18nKey, string> = {
   'vscodeLayout.actions.newSessionAria': '新增會話',
   'vscodeLayout.actions.openAgentManagerAria': '開啟 Agent 管理器',
   'vscodeLayout.actions.resizeSessionsSidebarAria': '調整會話側邊欄大小',
+  'vscodeLayout.actions.toggleLayout': '切換會話並排佈局',
+  'vscodeLayout.actions.toggleLayoutAria': '切換會話並排佈局',
   'vscodeLayout.actions.settingsAria': '設定',
   'vscodeLayout.quota.title': '速率限制',
   'vscodeLayout.quota.mode.used': '已用',

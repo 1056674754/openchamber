@@ -2726,6 +2726,8 @@ export const dict: Record<I18nKey, string> = {
   'vscodeLayout.actions.newSessionAria': 'Nowa sesja',
   'vscodeLayout.actions.openAgentManagerAria': 'Otwórz menedżer agentów',
   'vscodeLayout.actions.resizeSessionsSidebarAria': 'Zmień rozmiar panelu sesji',
+  'vscodeLayout.actions.toggleLayout': 'Przełącz układ obok siebie',
+  'vscodeLayout.actions.toggleLayoutAria': 'Przełącz układ obok siebie',
   'vscodeLayout.actions.settingsAria': 'Ustawienia',
   'vscodeLayout.quota.actions.rateLimitsAria': 'Limity użycia',
   'vscodeLayout.quota.actions.refreshAria': 'Odśwież limity użycia',

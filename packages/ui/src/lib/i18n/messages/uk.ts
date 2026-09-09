@@ -2777,6 +2777,8 @@ export const dict: Record<I18nKey, string> = {
   "vscodeLayout.actions.newSessionAria": "Нова сесія",
   "vscodeLayout.actions.openAgentManagerAria": "Відкрити менеджер агентів",
   "vscodeLayout.actions.resizeSessionsSidebarAria": "Змінити розмір бічної панелі сесій",
+  "vscodeLayout.actions.toggleLayout": "Перемкнути бок-о-бок розкладку сеансів",
+  "vscodeLayout.actions.toggleLayoutAria": "Перемкнути бок-о-бок розкладку сеансів",
   "vscodeLayout.actions.settingsAria": "Налаштування",
   "vscodeLayout.quota.title": "Ліміти запитів",
   "vscodeLayout.quota.mode.used": "використано",
