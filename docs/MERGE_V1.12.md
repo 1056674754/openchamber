@@ -3556,3 +3556,13 @@ v1.20.0-sscity 尚未宣布完成：当前未关闭 `#135/#140/#142-#151/#154/#1
 - 回滚：`cp <file>.oc-orig <file>` + 重签名 + 重启。VS Code 更新后重跑脚本；若上游改名锚点失配，脚本明确记录 no-anchor 并跳过（安全失败）。
 
 验证：两目标补丁标记确认在位（gate relaxed / element routing ×1）✅；`node --check` ✅；25/25 ✅ type-check ✅ eslint ✅；VSIX 重装。待实机：集成浏览器右键元素 → OpenChamber 输入框出现上下文块，原生聊天全程不出现。
+
+## v1.22.x [Custom]：VS Code 集成浏览器 agent 控制面（#201）（2026-09-09）
+
+用户需求升级：不仅元素直通，还要 agent 能操控 VS Code 集成浏览器（截图/导航等）。集成浏览器无公开扩展 API，沿用机器补丁管线（[#201](https://coding.s-s.city/songsong/openchamber/-/issues/201)）：
+
+- **workbench 补丁**（三特征幂等）：`onModelAttached` 注入活跃模型全局跟踪；ctor 注册 `openchamber.browser.capture/navigate/status/back/forward/reload` 六命令（CommandsRegistry 符号经 `registerCommand("workbench.*")` 动态解析；capture 截图 VSBuffer→分块 btoa base64 + url/title）。`node --check` 校验入脚本。
+- **扩展端**：`browser:control` 桥接命令（ChatViewProvider 转发 `vscode.commands.executeCommand`）；webview 注册 browser-control controller（DEFAULT server），把 agent 的 openchamber_web 动作映射到上述命令——agent 的浏览器工具首次在纯 VS Code 会话可用。
+- v1 能力面：capture/snapshot、open、status、back、forward、reload + 已有元素直通。click/type/scroll/inspect/resize 无模型面（需 CDP，后续）。
+
+验证：25/25 ✅ type-check ✅ eslint ✅ `git diff --check` ✅；三补丁标记确认在位 + `node --check` ✅；VSIX 已安装。待实机：重启 VS Code → 集成浏览器开页面 → agent 会话发 browser.capture → 返回该页面 JPEG + url/title。
