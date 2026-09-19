@@ -91,8 +91,8 @@ const AuthShell: React.FC<{ children: React.ReactNode }> = ({ children }) => (
 const LoadingScreen: React.FC = () => {
   const { t } = useI18n();
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-background text-foreground">
-      <OpenChamberLogo width={120} height={120} />
+    <div className="flex min-h-dvh flex-col items-center justify-center gap-4 bg-[var(--splash-background,var(--surface-background))] text-foreground">
+      <OpenChamberLogo width={120} height={120} variant="splash" />
       {isCapacitorApp() ? (
         <div className="flex items-center gap-2">
           <Icon name="loader-4" className="size-4 animate-spin text-muted-foreground" />

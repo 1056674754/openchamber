@@ -21,6 +21,7 @@ interface OpenChamberLogoProps {
   width?: number;
   height?: number;
   isAnimated?: boolean;
+  variant?: 'default' | 'splash';
 }
 
 // Generate grid cells for a face (4x4 grid)
@@ -82,6 +83,7 @@ export const OpenChamberLogo: React.FC<OpenChamberLogoProps> = ({
   className = '',
   width = 70,
   height = 70,
+  variant = 'default',
 }) => {
   const { t } = useI18n();
   const themeContext = useOptionalThemeSystem();
@@ -94,6 +96,10 @@ export const OpenChamberLogo: React.FC<OpenChamberLogoProps> = ({
   }
 
   const strokeColor = useMemo(() => {
+    // Startup stages share the pre-paint palette while the app theme hydrates.
+    if (variant === 'splash') {
+      return 'var(--splash-stroke, var(--surface-foreground))';
+    }
     if (themeContext) {
       return themeContext.currentTheme.colors.surface.foreground;
     }
@@ -104,7 +110,7 @@ export const OpenChamberLogo: React.FC<OpenChamberLogoProps> = ({
       }
     }
     return isDark ? 'white' : 'black';
-  }, [themeContext, isDark]);
+  }, [themeContext, isDark, variant]);
 
   const supportsColorMix = useMemo(() => {
     if (typeof window === 'undefined' || typeof CSS === 'undefined' || typeof CSS.supports !== 'function') {
@@ -114,6 +120,9 @@ export const OpenChamberLogo: React.FC<OpenChamberLogoProps> = ({
   }, []);
 
   const fillColor = useMemo(() => {
+    if (variant === 'splash') {
+      return `var(--splash-face-fill, color-mix(in srgb, ${strokeColor} 15%, transparent))`;
+    }
     if (themeContext) {
       if (supportsColorMix) {
         return `color-mix(in srgb, ${strokeColor} 15%, transparent)`;
@@ -127,9 +136,12 @@ export const OpenChamberLogo: React.FC<OpenChamberLogoProps> = ({
       }
     }
     return isDark ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.15)';
-  }, [themeContext, supportsColorMix, strokeColor, isDark]);
+  }, [themeContext, supportsColorMix, strokeColor, isDark, variant]);
 
   const cellHighlightColor = useMemo(() => {
+    if (variant === 'splash') {
+      return `var(--splash-cell-fill, color-mix(in srgb, ${strokeColor} 35%, transparent))`;
+    }
     if (themeContext) {
       if (supportsColorMix) {
         return `color-mix(in srgb, ${strokeColor} 35%, transparent)`;
@@ -143,7 +155,7 @@ export const OpenChamberLogo: React.FC<OpenChamberLogoProps> = ({
       }
     }
     return isDark ? 'rgba(255,255,255,0.35)' : 'rgba(0,0,0,0.4)';
-  }, [themeContext, supportsColorMix, strokeColor, isDark]);
+  }, [themeContext, supportsColorMix, strokeColor, isDark, variant]);
 
   const logoFillColor = strokeColor;
 

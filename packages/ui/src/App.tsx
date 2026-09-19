@@ -1,4 +1,5 @@
 import React from 'react';
+import { AppStartupOverlay } from '@/components/ui/AppStartupOverlay';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ChatView } from '@/components/views/ChatView';
 import { FireworksProvider } from '@/contexts/FireworksContext';
@@ -959,6 +960,7 @@ function App({ apis }: AppProps) {
                   <OpenCodeUpdateToast />
                   <RuntimeFallbackApprovalDialog />
                   <MainLayout />
+                  <AppStartupOverlay ready={isInitialized && (!isDesktopRuntime || (bootOutcomeKnown && bootViewIsMain))} />
                   <Toaster />
                   {!isBootShell && (
                     <>
