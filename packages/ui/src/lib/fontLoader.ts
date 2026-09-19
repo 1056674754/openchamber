@@ -30,6 +30,10 @@ interface CodeFontDiagnostics {
 }
 
 const buildFontUrl = (source: FontFaceSource, weight: number) => {
+  if ('urls' in source) {
+    return source.urls[weight];
+  }
+
   const packageName = encodeURIComponent(source.packageName).replace('%40', '@').replace('%2F', '/');
   return `https://cdn.jsdelivr.net/npm/${packageName}/files/${source.filePrefix}-latin-${weight}-normal.woff2`;
 };
