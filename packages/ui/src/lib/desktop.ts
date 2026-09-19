@@ -74,10 +74,27 @@ export type DesktopSettings = {
   desktopMinimizeToTrayEnabled?: boolean;
   desktopKeepAwakeEnabled?: boolean;
   desktopKeepManagedOpenCodeAliveOnQuit?: boolean;
+  /** Fork-only: the desktop shell refuses remote (non-local) connections. */
+  desktopRemoteOnly?: boolean;
   projects?: ProjectEntry[];
   activeProjectId?: string;
   approvedDirectories?: string[];
   securityScopedBookmarks?: string[];
+  /** Per-session permission auto-accept map (fork: the server still round-trips it). */
+  permissionAutoAccept?: {
+    sessions: Record<string, boolean>;
+    revision: number;
+  };
+  /** Fork-only: remote instances configured on this host (server-sanitized shape). */
+  remoteInstances?: Array<{
+    id: string;
+    label: string;
+    url: string;
+    auth: { type: 'none' | 'password' | 'bearer'; value?: string };
+    requestHeaders?: Record<string, string>;
+    connectionTimeoutSec: number;
+    enabled: boolean;
+  }>;
    pinnedDirectories?: string[];
   /** Global session pins — shared via host settings (desktop ↔ mobile). */
   pinnedSessions?: string[];

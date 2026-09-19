@@ -10,6 +10,7 @@ import {
 } from '../subscriptions/auth-adapter.js';
 import { buildDeferredRestartResponse } from './config-mutation-response.js';
 import { getClaudeCliAuthStatus } from './claude-cli-auth.js';
+import { settingsSurfaceOf } from './settings-files.js';
 
 export const registerOpenCodeRoutes = (app, dependencies) => {
   const {
@@ -286,9 +287,10 @@ ${desktopReturn ? `<a class="return" href="openchamber://focus/mcp-auth">Return 
     }
   };
 
-  app.get('/api/config/settings', async (_req, res) => {
+  app.get('/api/config/settings', async (req, res) => {
     try {
-      const settings = await readSettingsFromDiskMigrated();
+      // The surface kind resolves the per-surface profile keys; absent means base.
+      const settings = await readSettingsFromDiskMigrated({ surface: settingsSurfaceOf(req) });
       res.json({
         ...formatSettingsResponse(settings),
         agentMemoryAvailable: isAgentMemoryAvailable() === true,
@@ -519,7 +521,7 @@ ${desktopReturn ? `<a class="return" href="openchamber://focus/mcp-auth">Return 
       const previous = typeof req.body?.agentMemoryToolEnabled === 'boolean'
         ? await readSettingsFromDiskMigrated()
         : null;
-      const updated = await persistSettings(req.body ?? {});
+      const updated = await persistSettings(req.body ?? {}, { surface: settingsSurfaceOf(req) });
       if (
         previous
         && typeof req.body.agentMemoryToolEnabled === 'boolean'

@@ -90,6 +90,12 @@
         "desktop"
       ]
     },
+    "desktopRemoteOnly": {
+      "scope": "instance",
+      "surfaces": [
+        "desktop"
+      ]
+    },
     "projects": {
       "scope": "instance"
     },
@@ -105,6 +111,12 @@
       "surfaces": [
         "desktop"
       ]
+    },
+    "permissionAutoAccept": {
+      "scope": "instance"
+    },
+    "remoteInstances": {
+      "scope": "instance"
     },
     "pinnedDirectories": {
       "scope": "instance"
@@ -134,13 +146,16 @@
       "scope": "profile"
     },
     "sessionSortMode": {
-      "scope": "profile"
+      "scope": "device",
+      "local": true
     },
     "sessionGroupMinVisible": {
-      "scope": "profile"
+      "scope": "device",
+      "local": true
     },
     "sessionGroupRecentHours": {
-      "scope": "profile"
+      "scope": "device",
+      "local": true
     },
     "userMessageRenderingMode": {
       "scope": "profile"
@@ -343,8 +358,7 @@
       "scope": "instance"
     },
     "managedRemoteTunnelPresetTokens": {
-      "scope": "instance",
-      "secret": true
+      "scope": "instance"
     },
     "defaultModel": {
       "scope": "profile"

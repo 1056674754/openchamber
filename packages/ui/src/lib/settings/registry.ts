@@ -261,10 +261,59 @@ export const SETTINGS_REGISTRY: { readonly [K in keyof DesktopSettings]-?: Setti
   desktopKeepAwakeEnabled: field({ scope: 'instance', surfaces: ['desktop'], parse: parseBoolean }),
   // Fork-only: keeps the managed OpenCode process alive after the shell quits.
   desktopKeepManagedOpenCodeAliveOnQuit: field({ scope: 'instance', surfaces: ['desktop'], parse: parseBoolean }),
+  // Fork-only: the Electron main refuses remote (non-local) connections when
+  // this is set; upstream does not have the key.
+  desktopRemoteOnly: field({ scope: 'instance', surfaces: ['desktop'], parse: parseBoolean }),
   projects: field({ scope: 'instance', parse: parseProjects }),
   activeProjectId: field({ scope: 'instance', adopt: 'bootstrap-only', parse: parseNonEmptyString }),
   approvedDirectories: field({ scope: 'instance', parse: parseStringList }),
   securityScopedBookmarks: field({ scope: 'instance', surfaces: ['desktop'], parse: parseStringList }),
+  permissionAutoAccept: field({
+    scope: 'instance',
+    parse: fromSchema(z.object({
+      sessions: z.record(z.string().min(1), z.boolean()).catch({}),
+      revision: z.number().int().nonnegative().catch(0),
+    })),
+  }),
+  // Fork-only: remote instances configured on this host (the server sanitizes
+  // the entries; the parser mirrors its shape).
+  remoteInstances: field({
+    scope: 'instance',
+    parse: fromSchema(
+      z.array(z.unknown()).transform((entries) => {
+        const result: NonNullable<DesktopSettings['remoteInstances']> = [];
+        const seen = new Set<string>();
+        for (const entry of entries) {
+          if (result.length >= 64) break;
+          if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue;
+          const raw = entry as Record<string, unknown>;
+          const id = typeof raw.id === 'string' ? raw.id.trim() : '';
+          const url = typeof raw.url === 'string' ? raw.url.trim().replace(/\/+$/, '') : '';
+          if (!id || id.length > 128 || !url) continue;
+          if (seen.has(id)) continue;
+          try { new URL(url); } catch { continue; }
+          const authType = (raw as { auth?: { type?: unknown } }).auth?.type;
+          seen.add(id);
+          result.push({
+            id,
+            label: typeof raw.label === 'string' ? raw.label.trim().slice(0, 256) || id : id,
+            url,
+            auth: {
+              type: authType === 'password' || authType === 'bearer' ? authType : 'none',
+              ...(typeof (raw as { auth?: { value?: unknown } }).auth?.value === 'string'
+                ? { value: (raw as { auth: { value: string } }).auth.value }
+                : {}),
+            },
+            connectionTimeoutSec: typeof raw.connectionTimeoutSec === 'number' && Number.isFinite(raw.connectionTimeoutSec)
+              ? Math.max(5, Math.min(300, Math.round(raw.connectionTimeoutSec)))
+              : 30,
+            enabled: typeof raw.enabled === 'boolean' ? raw.enabled : true,
+          });
+        }
+        return result;
+      }).refine((entries) => entries.length > 0),
+    ),
+  }),
   pinnedDirectories: field({ scope: 'instance', parse: parseStringSet }),
   // Fork-only: session pins shared desktop ↔ mobile through the host settings.
   pinnedSessions: field({ scope: 'profile', parse: parseStringList }),
@@ -277,9 +326,11 @@ export const SETTINGS_REGISTRY: { readonly [K in keyof DesktopSettings]-?: Setti
   collapsibleThinkingBlocks: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('collapsibleThinkingBlocks', (v) => useUIStore.getState().setCollapsibleThinkingBlocks(v)) }),
   chatRenderMode: field({ scope: 'profile', parse: parseOneOf(['sorted', 'live']), ui: uiStore('chatRenderMode', (v) => useUIStore.getState().setChatRenderMode(v)) }),
   activityRenderMode: field({ scope: 'profile', parse: parseOneOf(['collapsed', 'summary']), ui: uiStore('activityRenderMode', (v) => useUIStore.getState().setActivityRenderMode(v)) }),
-  sessionSortMode: field({ scope: 'profile', parse: parseOneOf(['updated-desc', 'created-desc']), ui: uiStore('sessionSortMode', (v) => useUIStore.getState().setSessionSortMode(v)) }),
-  sessionGroupMinVisible: field({ scope: 'profile', parse: parseIntegerAtLeast(1), ui: uiStore('sessionGroupMinVisible', (v) => useUIStore.getState().setSessionGroupMinVisible(v)) }),
-  sessionGroupRecentHours: field({ scope: 'profile', parse: parseIntegerAtLeast(1), ui: uiStore('sessionGroupRecentHours', (v) => useUIStore.getState().setSessionGroupRecentHours(v)) }),
+  // Fork-only sidebar grouping knobs: the fork server never persisted them,
+  // so they stay store-local until the upstream sidebar grouping feature lands.
+  sessionSortMode: field({ scope: 'device', local: true, parse: parseOneOf(['updated-desc', 'created-desc']), ui: uiStore('sessionSortMode', (v) => useUIStore.getState().setSessionSortMode(v), { autoSave: false }) }),
+  sessionGroupMinVisible: field({ scope: 'device', local: true, parse: parseIntegerAtLeast(1), ui: uiStore('sessionGroupMinVisible', (v) => useUIStore.getState().setSessionGroupMinVisible(v), { autoSave: false }) }),
+  sessionGroupRecentHours: field({ scope: 'device', local: true, parse: parseIntegerAtLeast(1), ui: uiStore('sessionGroupRecentHours', (v) => useUIStore.getState().setSessionGroupRecentHours(v), { autoSave: false }) }),
   userMessageRenderingMode: field({ scope: 'profile', parse: parseOneOf(['markdown', 'plain']), ui: uiStore('userMessageRenderingMode', (v) => useUIStore.getState().setUserMessageRenderingMode(v)) }),
   collapsibleUserMessages: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('collapsibleUserMessages', (v) => useUIStore.getState().setCollapsibleUserMessages(v)) }),
   stickyUserHeader: field({ scope: 'profile', perSurface: true, parse: parseBoolean, ui: uiStore('stickyUserHeader', (v) => useUIStore.getState().setStickyUserHeader(v)) }),
@@ -363,7 +414,10 @@ export const SETTINGS_REGISTRY: { readonly [K in keyof DesktopSettings]-?: Setti
   hasManagedRemoteTunnelToken: field({ scope: 'instance', computed: true, parse: parseBoolean }),
   managedRemoteTunnelPresets: field<ManagedRemoteTunnelPreset[]>({ scope: 'instance', parse: parseManagedRemoteTunnelPresets }),
   managedRemoteTunnelSelectedPresetId: field({ scope: 'instance', parse: parseTrimmedString }),
-  managedRemoteTunnelPresetTokens: field({ scope: 'instance', secret: true, parse: parseManagedRemoteTunnelPresetTokens }),
+  // Fork: not `secret` — the fork's tunnel page still reads the tokens back
+  // from the settings document; upstream moved that to the tunnel status
+  // endpoint before making the key write-only.
+  managedRemoteTunnelPresetTokens: field({ scope: 'instance', parse: parseManagedRemoteTunnelPresetTokens }),
 
   // ── Models and agents ──
   defaultModel: field({ scope: 'profile', parse: parseNonEmptyString }),

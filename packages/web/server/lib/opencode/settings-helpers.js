@@ -1,8 +1,36 @@
+import { createRequire } from 'node:module';
+
 import {
   normalizeRemoteRequestHeadersDraft,
   preserveRemoteRequestHeaderValues,
   redactRemoteRequestHeadersForApi,
 } from '../remote-instances/request-headers.js';
+
+// Generated from packages/ui/src/lib/settings/registry.ts by
+// `bun run settings-registry:generate`; `registry.test.ts` fails when stale.
+// The server is plain ESM without a bundler, so the snapshot is read with
+// `createRequire` (import attributes differ across the Node versions we run on).
+const settingsRegistry = createRequire(import.meta.url)('./settings-registry.json');
+
+/**
+ * Whether a client may persist this key through PUT /api/config/settings:
+ * it must be a registry key, not a server-computed flag, not a device field
+ * that only lives in the browser, and not one the desktop shell writes itself.
+ */
+const isPersistableSettingsKey = (key) => {
+  const field = settingsRegistry.fields[key];
+  if (!field) return false;
+  if (field.computed || field.local) return false;
+  if (field.owner === 'desktop-shell') return false;
+  return true;
+};
+
+/** Keys accepted on write but never returned by a read. */
+const SECRET_SETTINGS_KEYS = Object.freeze(
+  Object.entries(settingsRegistry.fields)
+    .filter(([, field]) => field.secret === true)
+    .map(([key]) => key),
+);
 
 export const createSettingsHelpers = (dependencies) => {
   const {
@@ -16,7 +44,6 @@ export const createSettingsHelpers = (dependencies) => {
     normalizeManagedRemoteTunnelHostname,
     normalizeManagedRemoteTunnelPresets,
     normalizeManagedRemoteTunnelPresetTokens,
-    sanitizeTypographySizesPartial,
     normalizeStringArray,
     sanitizeModelRefs,
     sanitizeSkillCatalogs,
@@ -397,6 +424,9 @@ export const createSettingsHelpers = (dependencies) => {
     if (candidate.sessionRetentionAction === 'archive' || candidate.sessionRetentionAction === 'delete') {
       result.sessionRetentionAction = candidate.sessionRetentionAction;
     }
+    if (typeof candidate.autoSaveEnabled === 'boolean') {
+      result.autoSaveEnabled = candidate.autoSaveEnabled;
+    }
     if (candidate.tunnelBootstrapTtlMs === null) {
       result.tunnelBootstrapTtlMs = null;
     } else if (typeof candidate.tunnelBootstrapTtlMs === 'number' && Number.isFinite(candidate.tunnelBootstrapTtlMs)) {
@@ -442,11 +472,6 @@ export const createSettingsHelpers = (dependencies) => {
       result.managedRemoteTunnelSelectedPresetId = id || undefined;
     }
 
-    const typography = sanitizeTypographySizesPartial(candidate.typographySizes);
-    if (typography) {
-      result.typographySizes = typography;
-    }
-
     if (typeof candidate.defaultModel === 'string') {
       const trimmed = candidate.defaultModel.trim();
       result.defaultModel = trimmed.length > 0 ? trimmed : undefined;
@@ -481,6 +506,10 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.zenModel === 'string') {
       const trimmed = candidate.zenModel.trim();
       result.zenModel = trimmed.length > 0 ? trimmed : undefined;
+    }
+    if (typeof candidate.walkthroughModelOverride === 'string') {
+      const trimmed = candidate.walkthroughModelOverride.trim();
+      result.walkthroughModelOverride = trimmed.length > 0 ? trimmed : undefined;
     }
     if (typeof candidate.gitProviderId === 'string') {
       const trimmed = candidate.gitProviderId.trim();
@@ -559,6 +588,9 @@ export const createSettingsHelpers = (dependencies) => {
         result.userMessageRenderingMode = mode;
       }
     }
+    if (typeof candidate.collapsibleUserMessages === 'boolean') {
+      result.collapsibleUserMessages = candidate.collapsibleUserMessages;
+    }
     if (typeof candidate.stickyUserHeader === 'boolean') {
       result.stickyUserHeader = candidate.stickyUserHeader;
     }
@@ -586,6 +618,21 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.optimizeSystemPrompt === 'boolean') {
       result.optimizeSystemPrompt = candidate.optimizeSystemPrompt;
     }
+    if (Array.isArray(candidate.draftStarters)) {
+      const seenStarters = new Set();
+      const starters = [];
+      for (const entry of candidate.draftStarters) {
+        if (!entry || typeof entry !== 'object') continue;
+        const type = entry.type === 'command' || entry.type === 'skill' ? entry.type : null;
+        const name = typeof entry.name === 'string' ? entry.name.trim() : '';
+        if (!type || !name) continue;
+        const key = `${type}:${name}`;
+        if (seenStarters.has(key)) continue;
+        seenStarters.add(key);
+        starters.push({ type, name });
+      }
+      result.draftStarters = starters;
+    }
     if (typeof candidate.draftStartersVisible === 'boolean') {
       result.draftStartersVisible = candidate.draftStartersVisible;
     }
@@ -594,6 +641,9 @@ export const createSettingsHelpers = (dependencies) => {
     }
     if (typeof candidate.showSplitAssistantMessageActions === 'boolean') {
       result.showSplitAssistantMessageActions = candidate.showSplitAssistantMessageActions;
+    }
+    if (typeof candidate.wideChatLayoutEnabled === 'boolean') {
+      result.wideChatLayoutEnabled = candidate.wideChatLayoutEnabled;
     }
     if (typeof candidate.allowPromptingSubagentSessions === 'boolean') {
       result.allowPromptingSubagentSessions = candidate.allowPromptingSubagentSessions;
@@ -960,6 +1010,16 @@ export const createSettingsHelpers = (dependencies) => {
       result.remoteInstances = instances;
     }
 
+    // The registry is the last word on what a client may persist: a key the
+    // code above still names but the registry no longer lists is dropped here,
+    // so the two cannot drift apart silently (settings-helpers.test.js checks
+    // the other direction).
+    for (const key of Object.keys(result)) {
+      if (!isPersistableSettingsKey(key)) {
+        delete result[key];
+      }
+    }
+
     return result;
   };
 
@@ -1067,13 +1127,6 @@ export const createSettingsHelpers = (dependencies) => {
         ? current.securityScopedBookmarks
         : [];
 
-    const nextTypographySizes = changes.typographySizes
-      ? {
-          ...(current.typographySizes || {}),
-          ...changes.typographySizes
-        }
-      : current.typographySizes;
-
     const next = {
       ...current,
       ...persistedChanges,
@@ -1086,8 +1139,7 @@ export const createSettingsHelpers = (dependencies) => {
         new Set(
           baseBookmarks.filter((entry) => typeof entry === 'string' && entry.length > 0)
         )
-      ),
-      typographySizes: nextTypographySizes
+      )
     };
 
     if (localStorePatch) {
@@ -1113,7 +1165,9 @@ export const createSettingsHelpers = (dependencies) => {
 
   const formatSettingsResponse = (settings) => {
     const sanitized = sanitizeSettingsUpdate(settings);
-    delete sanitized.managedRemoteTunnelToken;
+    for (const key of SECRET_SETTINGS_KEYS) {
+      delete sanitized[key];
+    }
     delete sanitized.localStorePatch;
     const remoteInstances = redactRemoteInstancesForResponse(sanitized.remoteInstances);
     const approved = normalizeStringArray(settings.approvedDirectories);
@@ -1158,7 +1212,6 @@ export const createSettingsHelpers = (dependencies) => {
               normalizeStringRecordOfStringArrays(settings.pinnedSessionOrderByProject) || {},
           }
         : {}),
-      typographySizes: sanitizeTypographySizesPartial(settings.typographySizes),
       showReasoningTraces:
         typeof settings.showReasoningTraces === 'boolean'
           ? settings.showReasoningTraces

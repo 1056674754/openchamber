@@ -108,6 +108,7 @@ import { createLinearSessionStatusRuntime } from './lib/linear/status-runtime.js
 import { createSessionKnowledgeRuntime } from './lib/session-knowledge/runtime.js';
 import { resolveProjectKnowledgeOwnerPath } from './lib/session-knowledge/project-resolution.js';
 import { createProjectConfigRuntime } from './lib/projects/project-config.js';
+import { migrateLegacyUserDirs } from './lib/data-dir-migration.js';
 import { createProjectIdFromPath } from './lib/projects/project-id.js';
 import { createProjectContextRuntime } from './lib/project-context/runtime.js';
 import { createAgentMemoryRuntime } from './lib/agent-memory/runtime.js';
@@ -293,14 +294,20 @@ const normalizeManagedRemoteTunnelPresets = (...args) =>
 const normalizeManagedRemoteTunnelPresetTokens = (...args) =>
   settingsNormalizationRuntime.normalizeManagedRemoteTunnelPresetTokens(...args);
 const isUnsafeSkillRelativePath = (...args) => settingsNormalizationRuntime.isUnsafeSkillRelativePath(...args);
-const sanitizeTypographySizesPartial = (...args) =>
-  settingsNormalizationRuntime.sanitizeTypographySizesPartial(...args);
 const normalizeStringArray = (...args) => settingsNormalizationRuntime.normalizeStringArray(...args);
 const sanitizeModelRefs = (...args) => settingsNormalizationRuntime.sanitizeModelRefs(...args);
 const sanitizeSkillCatalogs = (...args) => settingsNormalizationRuntime.sanitizeSkillCatalogs(...args);
 const sanitizeProjects = (...args) => settingsNormalizationRuntime.sanitizeProjects(...args);
 
-const OPENCHAMBER_USER_CONFIG_ROOT = path.join(os.homedir(), '.config', 'openchamber');
+// Every OpenChamber-owned file and folder hangs off one root: the default
+// `~/.config/openchamber`, or `OPENCHAMBER_DATA_DIR` when set. The user
+// folders (`projects/`, `themes/`, `speech-models/`) are copied into a custom
+// root once at startup (`migrateLegacyUserDirs`), because they used to ignore
+// the variable.
+const OPENCHAMBER_DEFAULT_CONFIG_ROOT = path.join(os.homedir(), '.config', 'openchamber');
+const OPENCHAMBER_USER_CONFIG_ROOT = process.env.OPENCHAMBER_DATA_DIR
+  ? path.resolve(process.env.OPENCHAMBER_DATA_DIR)
+  : OPENCHAMBER_DEFAULT_CONFIG_ROOT;
 const OPENCHAMBER_USER_THEMES_DIR = path.join(OPENCHAMBER_USER_CONFIG_ROOT, 'themes');
 const OPENCHAMBER_PROJECTS_CONFIG_DIR = path.join(OPENCHAMBER_USER_CONFIG_ROOT, 'projects');
 
@@ -331,9 +338,7 @@ const maybeCacheSessionInfoFromEvent = (...args) => notificationTemplateRuntime.
 const buildTemplateVariables = (...args) => notificationTemplateRuntime.buildTemplateVariables(...args);
 const getCachedZenModels = (...args) => notificationTemplateRuntime.getCachedZenModels(...args);
 
-const OPENCHAMBER_DATA_DIR = process.env.OPENCHAMBER_DATA_DIR
-  ? path.resolve(process.env.OPENCHAMBER_DATA_DIR)
-  : path.join(os.homedir(), '.config', 'openchamber');
+const OPENCHAMBER_DATA_DIR = OPENCHAMBER_USER_CONFIG_ROOT;
 const openCodeLifecycleJournal = createOpenCodeLifecycleJournal({
   dataDir: OPENCHAMBER_DATA_DIR,
 });
@@ -479,7 +484,6 @@ const settingsHelpers = createSettingsHelpers({
   normalizeManagedRemoteTunnelHostname,
   normalizeManagedRemoteTunnelPresets,
   normalizeManagedRemoteTunnelPresetTokens,
-  sanitizeTypographySizesPartial,
   normalizeStringArray,
   sanitizeModelRefs,
   sanitizeSkillCatalogs,
@@ -626,6 +630,17 @@ const getUpstreamStallTimeoutMs = () => (
     : DEFAULT_UPSTREAM_STALL_TIMEOUT_MS
 );
 
+const movedUserDirs = await migrateLegacyUserDirs({
+  fsPromises,
+  path,
+  dataDir: OPENCHAMBER_USER_CONFIG_ROOT,
+  legacyRoot: OPENCHAMBER_DEFAULT_CONFIG_ROOT,
+  warn: (message) => console.warn(`[data-dir] ${message}`),
+});
+if (movedUserDirs.length > 0) {
+  console.log(`[data-dir] Copied ${movedUserDirs.join(', ')} into ${OPENCHAMBER_USER_CONFIG_ROOT}`);
+}
+
 const projectConfigRuntime = createProjectConfigRuntime({
   fsPromises,
   path,
@@ -636,6 +651,7 @@ const projectContextRuntime = createProjectContextRuntime({
   fsPromises,
   path,
   projectsDirPath: OPENCHAMBER_PROJECTS_CONFIG_DIR,
+  resolveSharedPlansDir: (projectId) => projectConfigRuntime.resolveSharedPlansDir(projectId),
 });
 
 const agentMemoryRuntime = createAgentMemoryRuntime({

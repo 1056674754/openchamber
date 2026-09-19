@@ -225,10 +225,18 @@ Startup timeout (`startupTimeoutMs` dep, env `OPENCHAMBER_OPENCODE_STARTUP_TIMEO
 ## Public exports (settings-runtime.js)
 - `createSettingsRuntime(dependencies)`: creates settings lifecycle runtime for read/migrate/persist concerns.
 - Returned API:
-  - `readSettingsFromDisk()`
-  - `readSettingsFromDiskMigrated()`
-  - `writeSettingsToDisk(settings)`
-  - `persistSettings(changes)`
+  - `readSettingsFromDisk({ surface? })`
+  - `readSettingsFromDiskMigrated({ surface? })`
+  - `writeSettingsToDisk(settings, { surface?, changedKeys? })`
+  - `persistSettings(changes, { surface? })`
+
+## Two settings files (settings-files.js)
+- `settings.json` holds instance facts and any legacy or unknown keys; `preferences.json` beside it holds every key the generated registry snapshot (`settings-registry.json`) marks `profile`, as `{ version: 1, fields: { key: { value, updatedAt, surfaces? } } }`. Keys the snapshot marks `perSurface` are stored per surface kind: `GET`/`PUT /api/config/settings` read the client's kind from the `surface` query parameter (`settingsSurfaceOf`), `persistSettings(changes, { surface })` writes a changed per-surface key under `surfaces[surface]` and never touches its base, and `readSettingsFromDisk({ surface })` resolves that kind's value first, the base otherwise. Callers without a surface (migrations, the seed, server-side feature writers) read and write the base. `readSettingsFromDisk()` returns the merged document and seeds `preferences.json` once from an existing `settings.json` (which it leaves intact). An existing `preferences.json` that fails to parse is a failure, not an empty profile: it is never seeded or overwritten, the merged read serves the instance part, and `persistSettings` drops profile keys with a warning until the file is fixed or removed. `writeSettingsToDisk(document)` splits by scope and writes `settings.json` as the instance part plus a copy of the profile's base values (`legacySettingsDocumentOf`): a build from before the split reads only that file, so a rollback keeps the user's preferences, while current builds ignore the copy because `preferences.json` wins in the merge. Fork: device keys this fork still round-trips (window controls, mobile keyboard mode, input bar offset) stay in `settings.json`; only `local` device keys are refused, by the registry gate in `settings-helpers.js`.
+- Modules that read one profile key off the disk on a hot path use `readMergedSettingsSync`.
+
+## Public exports (settings-files.js)
+- `parsePreferencesDocument(raw)`, `serializePreferencesDocument(fields)`, `flattenPreferences(fields)`, `buildPreferencesFields(previousFields, document, now)`, `instancePartOf(document)`, `seedPreferencesFrom(document, now)`, `readMergedSettingsSync({ fs, path, settingsFilePath })`, `isProfileSettingsKey(key)`, `isDeviceSettingsKey(key)`, `normalizeSettingsSurface(value)`, `settingsSurfaceOf(req)`, `preferencesFilePathFor(settingsFilePath, path)`.
+- The VS Code extension host writes the same two files with the same shape (`packages/vscode/src/settings-files.ts`); format changes go to both.
 
 ## Public exports (settings-helpers.js)
 - `createSettingsHelpers(dependencies)`: creates settings helper runtime for settings request/response shaping.

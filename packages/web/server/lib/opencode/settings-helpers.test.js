@@ -1,6 +1,11 @@
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 import { createSettingsHelpers } from './settings-helpers.js';
+
+const testFilePath = fileURLToPath(import.meta.url);
 
 const createTestHelpers = () => createSettingsHelpers({
   normalizePathForPersistence: (value) => value,
@@ -545,5 +550,122 @@ describe('settings helpers', () => {
     });
     expect(helpers.sanitizeSettingsUpdate({ sessionRetentionAction: 'remove' })).toEqual({});
     expect(helpers.sanitizeSettingsUpdate({ sessionRetentionAction: true })).toEqual({});
+  });
+});
+
+describe('settings registry gate', () => {
+  const registryPath = join(dirname(testFilePath), 'settings-registry.json');
+  const registry = JSON.parse(readFileSync(registryPath, 'utf8'));
+  const persistableKeys = Object.entries(registry.fields)
+    .filter(([, field]) => !field.computed && !field.local && field.owner !== 'desktop-shell')
+    .map(([key]) => key);
+
+  // One valid value per persistable registry key. The test below fails when a
+  // key is added to the registry without a line here, and when the sanitizer
+  // stops accepting a key the registry still lists — that is the drift the
+  // registry exists to end.
+  const validValues = {
+    themeId: 'openchamber-dark', useSystemTheme: true, themeVariant: 'dark', lightThemeId: 'openchamber-light', darkThemeId: 'openchamber-dark',
+    splashBgLight: '#fff', splashFgLight: '#000', splashBgDark: '#000', splashFgDark: '#fff',
+    lastDirectory: '/home/testuser/project', homeDirectory: '/home/testuser', opencodeBinary: '/usr/local/bin/opencode',
+    projects: [{ id: 'p', path: '/home/testuser/project' }], activeProjectId: 'p',
+    approvedDirectories: ['/home/testuser/project'], securityScopedBookmarks: ['bookmark'],
+    permissionAutoAccept: { sessions: { s: true }, revision: 1 },
+    remoteInstances: [{ id: 'r', url: 'https://r.example' }],
+    pinnedDirectories: ['/home/testuser/project'], pinnedSessions: ['s1'],
+    pinnedSessionsByProject: { p: ['s1'] }, pinnedSessionOrder: ['s1'], pinnedSessionOrderByProject: { p: ['s1'] },
+    desktopLanAccessEnabled: true, desktopKeepAwakeEnabled: true, desktopMinimizeToTrayEnabled: true, desktopMacMenuBarEnabled: true,
+    desktopKeepManagedOpenCodeAliveOnQuit: true, desktopRemoteOnly: true,
+    skillCatalogs: [{ id: 'c', label: 'C', source: 'https://x' }],
+    defaultGitIdentityId: 'global',
+    agentControlToolEnabled: true, agentMemoryToolEnabled: true,
+    autoDeleteEnabled: true, autoDeleteAfterDays: 30, sessionRetentionAction: 'archive', autoSaveEnabled: true,
+    openInAppId: 'vscode',
+    sttProvider: 'server', sttServerUrl: 'http://localhost:8001/v1', sttModel: 'm', wasmSttModel: 'm', sttLanguage: 'en',
+    sttSilenceThresholdDb: -40, sttSilenceHoldMs: 500, sttTranscribeOnStop: true,
+    tunnelProvider: 'cloudflare', tunnelMode: 'quick', tunnelBootstrapTtlMs: 600000, tunnelSessionTtlMs: 86400000,
+    managedLocalTunnelConfigPath: '/tmp/x', managedRemoteTunnelHostname: 'x.example', managedRemoteTunnelToken: 'token',
+    managedRemoteTunnelPresets: [{ id: 'a', name: 'A', hostname: 'a.example' }],
+    managedRemoteTunnelSelectedPresetId: 'a', managedRemoteTunnelPresetTokens: { a: 'token' },
+    showReasoningTraces: true, collapsibleThinkingBlocks: true,
+    chatRenderMode: 'live', activityRenderMode: 'summary',
+    userMessageRenderingMode: 'markdown', collapsibleUserMessages: true,
+    stickyUserHeader: true, promptNavigatorEnabled: true, wideChatLayoutEnabled: true,
+    showSplitAssistantMessageActions: true, showToolFileIcons: true, codeBlockLineWrap: true,
+    showExpandedBashTools: true, showExpandedEditTools: true,
+    timeFormatPreference: '24h', weekStartPreference: 'monday', messageStreamTransport: 'ws',
+    diffLayoutPreference: 'inline', diffViewMode: 'single', gitChangesViewMode: 'tree',
+    gitmojiEnabled: true, defaultFileViewerPreview: true, directoryShowHidden: true, filesViewShowGitignored: true,
+    allowPromptingSubagentSessions: true, inputSpellcheckEnabled: true,
+    followUpBehavior: 'steer', queueModeEnabled: true,
+    draftStarters: [{ type: 'command', name: 'plan-feature' }],
+    draftStartersScheduleTaskAdded: true, draftStartersVisible: true,
+    fontSize: 100, terminalFontSize: 14, editorFontSize: 14, uiFont: 'inter', monoFont: 'jetbrains-mono', padding: 100, cornerRadius: 8,
+    globalBehaviorPrompt: 'Be brief.', responseStyleEnabled: true, responseStylePreset: 'concise', responseStyleCustomInstructions: 'x',
+    optimizeSystemPrompt: true,
+    defaultModel: 'anthropic/claude', defaultVariant: 'high', defaultAgent: 'build',
+    smallModelUseDefault: false, smallModelOverride: 'anthropic/haiku', walkthroughModelOverride: 'anthropic/claude', zenModel: 'zen/model',
+    gitProviderId: 'anthropic', gitModelId: 'claude',
+    favoriteModels: [{ providerID: 'anthropic', modelID: 'claude' }], hiddenModels: [{ providerID: 'openai', modelID: 'gpt' }],
+    collapsedModelProviders: ['provider:openai'],
+    modelPickerLayoutByServerId: { srv: { providerOrder: ['anthropic'], collapsedProviders: ['provider:openai'] } },
+    recentModels: [{ providerID: 'anthropic', modelID: 'claude' }], recentAgents: ['build'], recentEfforts: { 'anthropic/claude': ['high'] },
+    sessionRecapEnabled: true, sessionSuggestionEnabled: true, sessionGoalEnabled: true,
+    sessionGoalDefaultBudgetEnabled: true, sessionGoalDefaultBudget: 5,
+    showDeletionDialog: true, autoCreateWorktree: true,
+    nativeNotificationsEnabled: true, notificationMode: 'always', notifyOnSubtasks: true,
+    notifyOnCompletion: true, notifyOnError: true, notifyOnQuestion: true,
+    notificationTemplates: { completion: { title: 't', message: 'm' } }, reportUsage: true,
+    summarizeLastMessage: true, summaryThreshold: 100, summaryLength: 50, maxLastMessageLength: 200,
+    usageAutoRefresh: true, usageRefreshIntervalMs: 60000, usageDisplayMode: 'usage', usageShowPredValues: true,
+    usageDropdownProviders: ['anthropic'], usageSelectedModels: { anthropic: ['claude'] },
+    usageCollapsedFamilies: { anthropic: ['f'] }, usageExpandedFamilies: { anthropic: ['f'] },
+    usageModelGroups: { anthropic: { customGroups: [{ id: 'g', label: 'G', models: ['claude'], order: 0 }] } },
+    pwaAppName: 'OpenChamber', pwaOrientation: 'portrait',
+    messageLimit: 100, localStore: { k: 'v' }, localStorePatch: { set: { k: 'v' } },
+    mobileKeyboardMode: 'native', desktopWindowControlsPosition: 'left', desktopWindowControlsStyle: 'classic', inputBarOffset: 10,
+  };
+
+  it('accepts a valid value for every persistable registry key (no server-side drift)', () => {
+    // The shared test helpers stub the injected list sanitizers to `undefined`
+    // (they are covered by their own suites); here they must pass values through
+    // so a key is judged by the sanitizer's own branch, not by a stub.
+    const helpers = createSettingsHelpers({
+      normalizePathForPersistence: (value) => value,
+      normalizeDirectoryPath: (value) => value,
+      normalizeTunnelBootstrapTtlMs: (value) => value,
+      normalizeTunnelSessionTtlMs: (value) => value,
+      normalizeTunnelProvider: (value) => value,
+      normalizeTunnelMode: (value) => value,
+      normalizeOptionalPath: (value) => value,
+      normalizeManagedRemoteTunnelHostname: (value) => value,
+      normalizeManagedRemoteTunnelPresets: (value) => value,
+      normalizeManagedRemoteTunnelPresetTokens: (value) => value,
+      normalizeStringArray: (input) => input,
+      sanitizeModelRefs: (value) => value,
+      sanitizeSkillCatalogs: (value) => value,
+      sanitizeProjects: (value) => value,
+    });
+    const missingFixture = persistableKeys.filter((key) => !(key in validValues));
+    expect(missingFixture).toEqual([]);
+
+    const rejected = persistableKeys.filter((key) => {
+      const result = helpers.sanitizeSettingsUpdate({ [key]: validValues[key] });
+      return result[key] === undefined;
+    });
+    expect(rejected).toEqual([]);
+  });
+
+  it('drops keys the registry does not list, computed flags, and desktop-shell-owned keys', () => {
+    const helpers = createTestHelpers();
+    const sanitized = helpers.sanitizeSettingsUpdate({
+      markdownDisplayMode: 'x',
+      typographySizes: { md: 16 },
+      hasManagedRemoteTunnelToken: true,
+      desktopHosts: [],
+      desktopInstallId: 'x',
+      localStore: { a: 'b' },
+    });
+    expect(sanitized).toEqual({ localStore: { a: 'b' } });
   });
 });
