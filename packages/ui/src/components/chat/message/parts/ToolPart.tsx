@@ -77,6 +77,7 @@ import {
     getPatchText,
     getPrimaryToolPath,
 } from './toolDiffUtils';
+import { getToolDiffPreviewText, isToolDiffPreviewOversized } from './toolDiffPreview';
 import {
     findPendingQuestionRequestForRecoveredTool,
     recoverQuestionRequestFromToolPart,
@@ -1606,17 +1607,21 @@ const TOOL_NORMAL_ICON_STYLE: React.CSSProperties = { color: 'var(--tools-icon)'
 const TOOL_ERROR_TITLE_STYLE: React.CSSProperties = { color: 'var(--status-error)' };
 const TOOL_NORMAL_TITLE_STYLE: React.CSSProperties = { color: 'var(--tools-title)' };
 
-const PlainDiffFallback: React.FC<{ diff: string }> = ({ diff }) => (
-    <pre
-        className="m-0 overflow-auto whitespace-pre-wrap break-words rounded-lg p-2 typography-code"
-        style={{
-            backgroundColor: 'var(--syntax-base-background)',
-            color: 'var(--syntax-base-foreground)',
-        }}
-    >
-        {diff}
-    </pre>
-);
+const PlainDiffFallback: React.FC<{ diff: string }> = ({ diff }) => {
+    const preview = React.useMemo(() => getToolDiffPreviewText(diff), [diff]);
+
+    return (
+        <pre
+            className="m-0 overflow-auto whitespace-pre-wrap break-words rounded-lg p-2 typography-code"
+            style={{
+                backgroundColor: 'var(--syntax-base-background)',
+                color: 'var(--syntax-base-foreground)',
+            }}
+        >
+            {preview}
+        </pre>
+    );
+};
 
 class DiffPreviewErrorBoundary extends React.Component<{
     resetKey: string;
@@ -1751,6 +1756,10 @@ const DiffPreview: React.FC<DiffPreviewProps> = React.memo(({ diff, pierreTheme,
         }),
         [diffViewMode, pierreTheme, pierreThemeType]
     );
+
+    // An oversized patch would freeze the rich renderer; show the bounded
+    // plain preview instead of feeding it to PatchDiff.
+    if (isToolDiffPreviewOversized(diff)) return <PlainDiffFallback diff={diff} />;
 
     const fallback = <PlainDiffFallback diff={diff} />;
 
