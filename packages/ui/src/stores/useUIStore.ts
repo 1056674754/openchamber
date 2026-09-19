@@ -476,10 +476,27 @@ const closeContextPanelTab = (
   current: ContextPanelDirectoryState,
   tabID: string,
 ): ContextPanelDirectoryState => {
+  const closedTab = current.tabs.find((tab) => tab.id === tabID) ?? null;
   const nextTabs = current.tabs.filter((tab) => tab.id !== tabID);
   const nextActiveTabId = current.activeTabId === tabID
     ? (nextTabs[nextTabs.length - 1]?.id ?? null)
     : resolveActiveContextPanelTabID(nextTabs, current.activeTabId);
+
+  // The file surface outlives its files: closing the last real file tab leaves
+  // the same empty file tab the rail opens, so the surface falls back to it
+  // instead of taking the whole panel down with it. Closing the empty tab
+  // itself still closes the surface.
+  const fileTabsRemain = nextTabs.some((tab) => tab.mode === 'file');
+  if (closedTab?.mode === 'file' && closedTab.targetPath && !fileTabsRemain) {
+    const placeholder = createContextPanelTab({ mode: 'file' });
+    return {
+      ...current,
+      tabs: [...nextTabs, placeholder],
+      activeTabId: placeholder.id,
+      isOpen: current.isOpen,
+      touchedAt: Date.now(),
+    };
+  }
 
   return {
     ...current,

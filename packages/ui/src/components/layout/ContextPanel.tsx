@@ -2538,6 +2538,12 @@ export const ContextPanel: React.FC = () => {
       return;
     }
 
+    // Portalled menus and dialogs own Escape even though their React events
+    // still pass through this panel's capture handler.
+    if (event.target instanceof Node && !event.currentTarget.contains(event.target)) {
+      return;
+    }
+
     const target = event.target;
     if (target instanceof Element && Boolean(
       target.closest('.terminal-viewport-container')

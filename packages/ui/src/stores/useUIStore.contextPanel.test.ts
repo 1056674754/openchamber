@@ -65,6 +65,57 @@ describe('useUIStore context panel file tabs', () => {
   });
 });
 
+describe('useUIStore closeContextPanelTab file surface stability', () => {
+  const directory = '/root/remote/project';
+
+  beforeEach(() => {
+    useUIStore.setState({ contextPanelByDirectory: {}, contextRailOrder: [] });
+  });
+
+  test('closing the last file tab keeps the file surface on its empty file tab', () => {
+    useUIStore.getState().openContextPanelTab(directory, { mode: 'terminal' });
+    useUIStore.getState().openContextFile(directory, `${directory}/a.ts`);
+
+    const stateBefore = useUIStore.getState().contextPanelByDirectory[directory];
+    const fileTabId = stateBefore?.tabs.find((tab) => tab.mode === 'file')?.id;
+    if (!fileTabId) throw new Error('expected a file tab');
+    useUIStore.getState().closeContextPanelTab(directory, fileTabId);
+
+    const state = useUIStore.getState().contextPanelByDirectory[directory];
+    const activeTab = state?.tabs.find((tab) => tab.id === state.activeTabId);
+    expect(state?.isOpen).toBe(true);
+    expect(activeTab?.mode).toBe('file');
+    expect(activeTab?.targetPath).toBe(null);
+    expect(state?.tabs.map((tab) => tab.mode)).toEqual(['terminal', 'file']);
+  });
+
+  test('closing the empty file tab itself still closes the surface', () => {
+    useUIStore.getState().openContextSurface(directory, 'file');
+
+    const stateBefore = useUIStore.getState().contextPanelByDirectory[directory];
+    const fileTabId = stateBefore?.tabs.find((tab) => tab.mode === 'file')?.id;
+    if (!fileTabId) throw new Error('expected a file tab');
+    useUIStore.getState().closeContextPanelTab(directory, fileTabId);
+
+    const state = useUIStore.getState().contextPanelByDirectory[directory];
+    expect(state?.isOpen).toBe(false);
+    expect(state?.tabs).toHaveLength(0);
+  });
+
+  test('closing the last tab of a non-file surface still closes the panel', () => {
+    useUIStore.getState().openContextPanelTab(directory, { mode: 'terminal' });
+
+    const stateBefore = useUIStore.getState().contextPanelByDirectory[directory];
+    const terminalTabId = stateBefore?.activeTabId;
+    if (!terminalTabId) throw new Error('expected a terminal tab');
+    useUIStore.getState().closeContextPanelTab(directory, terminalTabId);
+
+    const state = useUIStore.getState().contextPanelByDirectory[directory];
+    expect(state?.isOpen).toBe(false);
+    expect(state?.tabs).toHaveLength(0);
+  });
+});
+
 describe('context panel storage key resolution', () => {
   test('directory scope keys by the normalized directory', () => {
     expect(resolveContextPanelStorageKey('/root/proj/', 'directory', 'sess-1')).toBe('/root/proj');
