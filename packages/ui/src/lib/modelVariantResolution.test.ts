@@ -39,4 +39,20 @@ describe('resolveModelVariant', () => {
       defaultVariant: 'none',
     })).toBe(undefined);
   });
+
+  test('an explicit "Default" (null saved choice) stops the agent and settings fallbacks', () => {
+    expect(resolveModelVariant({
+      variants,
+      savedVariant: null,
+      agentVariant: 'medium',
+      defaultVariant: 'high',
+    })).toBe(undefined);
+  });
+
+  test('an explicit "Default" (null saved choice) wins even with no other fallbacks', () => {
+    expect(resolveModelVariant({
+      variants,
+      savedVariant: null,
+    })).toBe(undefined);
+  });
 });

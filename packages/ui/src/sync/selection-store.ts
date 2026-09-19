@@ -10,7 +10,8 @@ import { createDeferredSafeJSONStorage } from "@/stores/utils/safeStorage"
 type ModelSelection = { providerId: string; modelId: string }
 type LastUsedProvider = { providerID: string; modelID: string }
 type AgentModelSelectionEntries = [string, [string, ModelSelection][]][]
-type AgentModelVariantEntries = [string, [string, [string, string][]][]][]
+/** Per model: an effort name, or `null` for an explicit "Default". */
+type AgentModelVariantEntries = [string, [string, [string, string | null][]][]][]
 type PersistedSelectionState = {
   sessionModelSelections?: [string, ModelSelection][]
   sessionAgentSelections?: [string, string][]
@@ -23,7 +24,7 @@ export type SelectionState = {
   sessionModelSelections: Map<string, ModelSelection>
   sessionAgentSelections: Map<string, string>
   sessionAgentModelSelections: Map<string, Map<string, ModelSelection>>
-  sessionAgentModelVariantSelections: Map<string, Map<string, Map<string, string>>>
+  sessionAgentModelVariantSelections: Map<string, Map<string, Map<string, string | null>>>
   lastUsedProvider: LastUsedProvider | null
 
   saveSessionModelSelection: (sessionId: string, providerId: string, modelId: string) => void
@@ -32,8 +33,9 @@ export type SelectionState = {
   getSessionAgentSelection: (sessionId: string) => string | null
   saveAgentModelForSession: (sessionId: string, agentName: string, providerId: string, modelId: string) => void
   getAgentModelForSession: (sessionId: string, agentName: string) => { providerId: string; modelId: string } | null
-  saveAgentModelVariantForSession: (sessionId: string, agentName: string, providerId: string, modelId: string, variant: string | undefined) => void
-  getAgentModelVariantForSession: (sessionId: string, agentName: string, providerId: string, modelId: string) => string | undefined
+  /** `variant`: an effort name, `null` for an explicit "Default", `undefined` to clear. */
+  saveAgentModelVariantForSession: (sessionId: string, agentName: string, providerId: string, modelId: string, variant: string | null | undefined) => void
+  getAgentModelVariantForSession: (sessionId: string, agentName: string, providerId: string, modelId: string) => string | null | undefined
 }
 
 const isPersistedSelectionState = (state: unknown): state is PersistedSelectionState => (
@@ -90,13 +92,17 @@ export const useSelectionStore = create<SelectionState>()(
       getAgentModelForSession: (sessionId, agentName) =>
         get().sessionAgentModelSelections.get(sessionId)?.get(agentName) ?? null,
 
+      // Three states, matching the picker: an effort name, `null` for an
+      // explicit "Default", and `undefined` to clear the record. Collapsing
+      // `null` into `undefined` would turn "picked Default" back into "no
+      // choice" and let inherited efforts override it.
       saveAgentModelVariantForSession: (sessionId, agentName, providerId, modelId, variant) =>
         set((s) => {
           const key = `${providerId}/${modelId}`
           const outer = new Map(s.sessionAgentModelVariantSelections)
           let agentMap = outer.get(sessionId)
           if (!agentMap) {
-            if (!variant) return s
+            if (variant === undefined) return s
             agentMap = new Map()
           } else {
             agentMap = new Map(agentMap)
@@ -104,7 +110,7 @@ export const useSelectionStore = create<SelectionState>()(
 
           let modelMap = agentMap.get(agentName)
           if (!modelMap) {
-            if (!variant) {
+            if (variant === undefined) {
               outer.set(sessionId, agentMap)
               return { sessionAgentModelVariantSelections: outer }
             }
@@ -113,7 +119,7 @@ export const useSelectionStore = create<SelectionState>()(
             modelMap = new Map(modelMap)
           }
 
-          if (!variant) {
+          if (variant === undefined) {
             modelMap.delete(key)
           } else {
             modelMap.set(key, variant)
@@ -177,10 +183,10 @@ export const useSelectionStore = create<SelectionState>()(
           })
         }
 
-        const agentModelVariantSelections = new Map<string, Map<string, Map<string, string>>>()
+        const agentModelVariantSelections = new Map<string, Map<string, Map<string, string | null>>>()
         if (Array.isArray(persisted?.sessionAgentModelVariantSelections)) {
           persisted.sessionAgentModelVariantSelections.forEach(([sessionId, agentArray]) => {
-            const agentMap = new Map<string, Map<string, string>>()
+            const agentMap = new Map<string, Map<string, string | null>>()
             agentArray.forEach(([agentName, modelArray]) => {
               agentMap.set(agentName, new Map(modelArray))
             })

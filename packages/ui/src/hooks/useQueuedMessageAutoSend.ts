@@ -85,7 +85,9 @@ const resolveSessionSendConfig = (sessionId: string) => {
   const variant =
     selectedAgent && providerID && modelID
       ? (selection.getAgentModelVariantForSession(sessionId, selectedAgent, providerID, modelID)
-        ?? context.getAgentModelVariantForSession(sessionId, selectedAgent, providerID, modelID))
+        ?? context.getAgentModelVariantForSession(sessionId, selectedAgent, providerID, modelID)
+        // An explicit "Default" (null) sends without an effort, like no choice.
+        ?? undefined)
       : undefined;
 
   return {

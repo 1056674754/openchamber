@@ -1971,7 +1971,14 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
 
     if (currentSessionId && effectiveAgent) {
       useSelectionStore.getState().saveSessionAgentSelection(currentSessionId, effectiveAgent)
-      useSelectionStore.getState().saveAgentModelVariantForSession(currentSessionId, effectiveAgent, providerID, modelID, variant)
+      // A send carries `undefined` both when no effort was ever chosen and
+      // when the user explicitly picked "Default". The record was only ever
+      // written by the picker, so an existing explicit "Default" (null) is
+      // kept rather than cleared by the effort-less send; a concrete effort
+      // in the send overwrites it as usual.
+      const recordedVariant = useSelectionStore.getState().getAgentModelVariantForSession(currentSessionId, effectiveAgent, providerID, modelID)
+      const variantToRecord = variant ?? (recordedVariant === null ? null : undefined)
+      useSelectionStore.getState().saveAgentModelVariantForSession(currentSessionId, effectiveAgent, providerID, modelID, variantToRecord)
     }
 
     if (currentSessionId) {

@@ -296,8 +296,8 @@ export interface SessionStore {
     saveAgentModelForSession: (sessionId: string, agentName: string, providerId: string, modelId: string) => void;
     getAgentModelForSession: (sessionId: string, agentName: string) => { providerId: string; modelId: string } | null;
 
-    saveAgentModelVariantForSession: (sessionId: string, agentName: string, providerId: string, modelId: string, variant: string | undefined) => void;
-    getAgentModelVariantForSession: (sessionId: string, agentName: string, providerId: string, modelId: string) => string | undefined;
+    saveAgentModelVariantForSession: (sessionId: string, agentName: string, providerId: string, modelId: string, variant: string | null | undefined) => void;
+    getAgentModelVariantForSession: (sessionId: string, agentName: string, providerId: string, modelId: string) => string | null | undefined;
 
 
     isOpenChamberCreatedSession: (sessionId: string) => boolean;
