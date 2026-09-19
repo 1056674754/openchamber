@@ -8,6 +8,7 @@ import { initRemoteConfigDir, namespacePathForUri } from './remoteNamespace';
 import { resolveWorkspaceFolders } from './workspaceResolver';
 import { registerOpenChamberChatParticipant } from './chatParticipant';
 import { applyConnectAttemptTimeout } from './networkDefaults';
+import { stopGitProcesses } from './bridge-git-process-runtime';
 
 let chatViewProvider: ChatViewProvider | undefined;
 let agentManagerProvider: AgentManagerPanelProvider | undefined;
@@ -940,7 +941,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
 export async function deactivate() {
   stopGlobalEventWatcher();
-  await openCodeManager?.stop();
+  await Promise.all([openCodeManager?.stop(), stopGitProcesses()]);
   openCodeManager = undefined;
   chatViewProvider = undefined;
   agentManagerProvider = undefined;
