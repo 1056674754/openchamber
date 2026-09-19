@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 
 import { bootstrapDirectory, shouldLogBootstrapFailureAsInfo } from "./bootstrap"
 import { formatSdkError, SdkRequestError } from "./sdk-error"
+import { INITIAL_STATE } from "./types"
 
 describe("shouldLogBootstrapFailureAsInfo", () => {
   test("treats bootstrap 503 responses as retry noise", () => {
@@ -101,11 +102,7 @@ describe("bootstrapDirectory", () => {
       permission: { list: () => (requestedPaths.push("permission.list"), ok([])) },
     }
 
-    let state = {
-      status: "loading" as const,
-      provider: { all: [] as unknown[], connected: [] as unknown[], default: {} },
-      config: {},
-    }
+    let state = { ...INITIAL_STATE }
     const bootstrapped = await bootstrapDirectory({
       directory: "/tmp/project",
       serverId: "default",
