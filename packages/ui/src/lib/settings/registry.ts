@@ -254,6 +254,14 @@ export const SETTINGS_REGISTRY: { readonly [K in keyof DesktopSettings]-?: Setti
   opencodeBinary: field({ scope: 'instance', parse: parseTrimmedString }),
   agentControlToolEnabled: field({ scope: 'instance', parse: parseBoolean, ui: uiStore('agentControlToolEnabled', (v) => useUIStore.getState().setAgentControlToolEnabled(v)) }),
   agentMemoryToolEnabled: field({ scope: 'instance', parse: parseBoolean, ui: uiStore('agentMemoryToolEnabled', (v) => useUIStore.getState().setAgentMemoryToolEnabled(v)) }),
+  // Emitted by the server for this build (OPENCHAMBER_ROUTING_ENABLE); never
+  // accepted on a write, never persisted.
+  routingFeatureAvailable: field({
+    scope: 'instance',
+    computed: true,
+    parse: parseBoolean,
+    ui: uiStore('routingFeatureAvailable', (v) => useUIStore.getState().setRoutingFeatureAvailable(v), { autoSave: false }),
+  }),
   optimizeSystemPrompt: field({ scope: 'profile', parse: parseBoolean }),
   desktopLanAccessEnabled: field({ scope: 'instance', surfaces: ['desktop'], parse: parseBoolean }),
   desktopMacMenuBarEnabled: field({ scope: 'instance', surfaces: ['desktop'], parse: parseBoolean }),

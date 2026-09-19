@@ -100,6 +100,7 @@ import { createPushRuntime } from './lib/notifications/push-runtime.js';
 import { createNotificationTemplateRuntime } from './lib/notifications/template-runtime.js';
 import { createPermissionAutoAcceptRuntime } from './lib/permission-auto-accept/runtime.js';
 import { createMessageQueueRuntime } from './lib/message-queue/runtime.js';
+import { createRoutingRuntime } from './lib/routing/runtime.js';
 import { createGracefulShutdownRuntime } from './lib/opencode/shutdown-runtime.js';
 import { createSessionGoalRuntime } from './lib/session-goal/runtime.js';
 import { createSessionAssistRuntime } from './lib/session-assist/runtime.js';
@@ -1075,6 +1076,16 @@ globalMessageStreamHub.subscribeEvent((event) => {
   linearSessionStatusRuntime.processPayload(payload);
 });
 
+// Jev model routing and the permission safety net. Dark unless
+// OPENCHAMBER_ROUTING_ENABLE is set; every failure keeps the user's own model
+// or the auto-accept reply it was asked about.
+const routingRuntime = createRoutingRuntime({
+  dataDir: OPENCHAMBER_DATA_DIR,
+  buildOpenCodeUrl,
+  getOpenCodeAuthHeaders,
+  broadcastGlobalUiEvent,
+});
+
 const permissionAutoAcceptRuntime = createPermissionAutoAcceptRuntime({
   globalEventHub: globalMessageStreamHub,
   buildOpenCodeUrl,
@@ -1082,6 +1093,8 @@ const permissionAutoAcceptRuntime = createPermissionAutoAcceptRuntime({
   readSettingsFromDiskMigrated,
   persistSettings,
   broadcastGlobalUiEvent,
+  evaluatePermission: (permission, directory) => routingRuntime.evaluatePermission(permission, directory),
+  onPermissionReplied: (permissionId) => routingRuntime.forgetPermission(permissionId),
 });
 permissionAutoAcceptRuntime.start();
 notificationTriggerRuntime.setGetIsSessionAutoAccepting(
@@ -1096,6 +1109,7 @@ const messageQueueRuntime = createMessageQueueRuntime({
   getOpenCodeAuthHeaders,
   sessionKnowledgeRuntime,
   broadcastGlobalUiEvent,
+  resolvePromptBody: (body, target) => routingRuntime.resolvePromptBody(body, target),
   onPromptSent: (sessionId) => sessionRuntime.markUserMessageSent(sessionId),
   dataDir: OPENCHAMBER_DATA_DIR,
 });
@@ -1994,6 +2008,7 @@ async function main(options = {}) {
     writeSseEvent,
     permissionAutoAcceptRuntime,
     messageQueueRuntime,
+    routingRuntime,
     openChamberControlService,
     openChamberSessionService,
     agentToolRuntime,

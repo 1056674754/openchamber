@@ -339,6 +339,12 @@ interface ModelPickerListProps {
     costPerMillion?: string;
   };
   selectedModel?: { providerID: string; modelID: string } | null;
+  /**
+   * A row pinned above favorites and providers: the Auto routing entry. It is
+   * not one of `providers`, takes part in keyboard navigation like any row,
+   * and is filtered by the search query on its display name.
+   */
+  leadingEntry?: ModelPickerEntry | null;
   hiddenModels?: HiddenModel[];
   allowedProviderIds?: string[];
   isModelAllowed?: (providerId: string, modelId: string) => boolean;
@@ -383,6 +389,7 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
   onSelect,
   labels,
   selectedModel,
+  leadingEntry = null,
   hiddenModels = [],
   allowedProviderIds,
   isModelAllowed,
@@ -484,8 +491,14 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
     return sortProvidersByOrder(filtered, providerOrder);
   }, [allowedProviderSet, isHidden, matchesQuery, providerOrder, providers]);
 
+  const visibleLeadingEntry = React.useMemo(() => {
+    if (!leadingEntry) return null;
+    return matchesQuery(getModelDisplayName(leadingEntry.model), leadingEntry.providerID) ? leadingEntry : null;
+  }, [leadingEntry, matchesQuery]);
+
   const flatModelList = React.useMemo(() => {
     const items: ModelPickerEntry[] = [];
+    if (visibleLeadingEntry) items.push(visibleLeadingEntry);
     if (!collapsedSections.has('favorites')) filteredFavorites.forEach((entry) => items.push(entry));
     if (!collapsedSections.has('recent')) filteredRecents.forEach((entry) => items.push(entry));
     filteredProviders.forEach((provider) => {
@@ -493,7 +506,7 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
       provider.models.forEach((model) => items.push({ model, providerID: provider.id, modelID: model.id as string }));
     });
     return items;
-  }, [collapsedSections, filteredFavorites, filteredProviders, filteredRecents]);
+  }, [collapsedSections, filteredFavorites, filteredProviders, filteredRecents, visibleLeadingEntry]);
 
   const hasResults = flatModelList.length > 0;
   const favoriteSortingEnabled = Boolean(onReorderFavorite) && searchQuery.trim().length === 0 && filteredFavorites.length > 1;
@@ -617,6 +630,7 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
                     <Icon name="draggable" className="size-3.5" />
                   </button>
                 ) : null}
+                {keyPrefix === 'leading' ? <Icon name="openchamber" className="h-3.5 w-3.5 flex-shrink-0" /> : null}
                 {showProviderLogo ? <ProviderLogo providerId={entry.providerID} className="h-3.5 w-3.5 flex-shrink-0" /> : null}
                 <span className="font-medium truncate">{getModelDisplayName(entry.model)}</span>
                 {contextTokens ? <span className="typography-micro text-muted-foreground flex-shrink-0">{contextTokens}</span> : null}
@@ -624,7 +638,7 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
               {count > 0 ? <span className="typography-micro text-muted-foreground flex-shrink-0">x{count}</span> : null}
               {renderRowEnd?.(entry, { isHighlighted, isSelected })}
               {isSelected ? <Icon name="check" className="h-4 w-4 text-primary flex-shrink-0" /> : null}
-              {onToggleFavorite ? (
+              {onToggleFavorite && keyPrefix !== 'leading' ? (
                 <button type="button" disabled={disabled} onClick={(event) => { event.preventDefault(); event.stopPropagation(); onToggleFavorite(entry); }} className={cn('model-favorite-button flex h-4 w-4 items-center justify-center hover:text-primary/80 flex-shrink-0 disabled:pointer-events-none', favorite ? 'text-primary' : 'text-muted-foreground')} aria-label={favorite ? labels.unfavorite : labels.favorite} title={favorite ? labels.unfavorite : labels.favorite}>
                   <Icon name={favorite ? 'star-fill' : 'star'} className="h-3.5 w-3.5" />
                 </button>
@@ -762,6 +776,13 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
 
           {!hasResults ? (
             <div className="px-2 py-4 text-center typography-meta text-muted-foreground">{labels.noResults}</div>
+          ) : null}
+
+          {visibleLeadingEntry ? (
+            <>
+              {renderRow(visibleLeadingEntry, 'leading', false, currentFlatIndex++)}
+              {filteredFavorites.length > 0 || filteredRecents.length > 0 || filteredProviders.length > 0 ? <div className="h-px bg-border/40 my-1" /> : null}
+            </>
           ) : null}
 
           {filteredFavorites.length > 0 ? (

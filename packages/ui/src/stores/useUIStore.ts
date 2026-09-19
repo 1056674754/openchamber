@@ -813,6 +813,11 @@ interface UIStore {
   showOpenCodeUpdateNotifications: boolean;
   agentControlToolEnabled: boolean;
   agentMemoryToolEnabled: boolean;
+  /**
+   * Whether this build has Jev model routing. Server-owned and not persisted,
+   * same as the other feature-availability flags.
+   */
+  routingFeatureAvailable: boolean;
   inputSpellcheckEnabled: boolean;
   wideChatLayoutEnabled: boolean;
   codeBlockLineWrap: boolean;
@@ -997,6 +1002,7 @@ interface UIStore {
   setShowOpenCodeUpdateNotifications: (value: boolean) => void;
   setAgentControlToolEnabled: (value: boolean) => void;
   setAgentMemoryToolEnabled: (value: boolean) => void;
+  setRoutingFeatureAvailable: (value: boolean) => void;
   setInputSpellcheckEnabled: (value: boolean) => void;
   setWideChatLayoutEnabled: (value: boolean) => void;
   setCodeBlockLineWrap: (value: boolean) => void;
@@ -1161,6 +1167,7 @@ export const useUIStore = create<UIStore>()(
         showOpenCodeUpdateNotifications: true,
         agentControlToolEnabled: true,
         agentMemoryToolEnabled: false,
+        routingFeatureAvailable: false,
         inputSpellcheckEnabled: false,
         wideChatLayoutEnabled: false,
         codeBlockLineWrap: true,
@@ -2481,6 +2488,9 @@ export const useUIStore = create<UIStore>()(
         },
         setAgentMemoryToolEnabled: (value) => {
           set({ agentMemoryToolEnabled: value });
+        },
+        setRoutingFeatureAvailable: (value) => {
+          set({ routingFeatureAvailable: value });
         },
         setInputSpellcheckEnabled: (value) => {
           set({ inputSpellcheckEnabled: value });

@@ -46,6 +46,7 @@ import {
 } from "./session-activity-timing"
 import { useProjectsStore } from "@/stores/useProjectsStore"
 import { usePermissionStore } from "@/stores/permissionStore"
+import { useRoutingStore } from "@/stores/useRoutingStore"
 import { applyMessageQueueUpdatedEvent } from "@/stores/messageQueueStore"
 import { useConfigStore, type ConfigConnectionState } from "@/stores/useConfigStore"
 import { useTodosPersistStore } from "@/stores/useTodosPersistStore"
@@ -1561,6 +1562,8 @@ function handleEvent(
 
   if (payload.type === "permission.replied") {
     const props = payload.properties as { sessionID?: string; requestID?: string }
+    // A request the routing safety net was holding is settled either way.
+    if (props.requestID) useRoutingStore.getState().releasePermission(props.requestID)
     const toastKey = getPermissionToastKey(props.sessionID, props.requestID)
     if (toastKey) {
       pendingPermissionToastIds.delete(toastKey)

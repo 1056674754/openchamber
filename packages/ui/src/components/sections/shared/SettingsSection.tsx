@@ -95,10 +95,84 @@ export const SETTINGS_FIELD_LABEL_CLASS =
 
 const SETTINGS_TRIGGER_WIDTH_CLASS = 'w-full min-w-[22ch] max-w-[40ch]';
 export const SETTINGS_SELECT_TRIGGER_CLASS = SETTINGS_TRIGGER_WIDTH_CLASS;
-export const SETTINGS_SELECT_SIZE = 'settings' as const;
+export const SETTINGS_SELECT_SIZE = 'sm' as const;
 export const SETTINGS_SELECT_ROW_TRIGGER_CLASS = SETTINGS_TRIGGER_WIDTH_CLASS;
 export const SETTINGS_FIELDS_STACK_CLASS = 'space-y-4';
 export const SETTINGS_HELPER_CLASS = 'typography-meta text-muted-foreground';
+
+/** Custom dropdown triggers (ModelSelector / AgentSelector) in settings pages. */
+// eslint-disable-next-line react-refresh/only-export-components
+export const SETTINGS_CUSTOM_TRIGGER_CLASS = 'w-full';
+
+/** Compact checkbox / radio list stack. */
+export const SETTINGS_OPTION_STACK_CLASS = 'space-y-1.5';
+
+/** Supporting copy under page or section titles. */
+export const SETTINGS_DESCRIPTION_CLASS = 'typography-meta text-muted-foreground';
+
+interface SettingsTwoColumnProps {
+  children: React.ReactNode;
+  className?: string;
+}
+
+/** Responsive two-column settings grid used when space allows. */
+export const SettingsTwoColumn: React.FC<SettingsTwoColumnProps> = ({
+  children,
+  className,
+}) => {
+  return (
+    <div className={cn('grid grid-cols-1 gap-6 @3xl:grid-cols-2 @3xl:gap-10', className)}>
+      {children}
+    </div>
+  );
+};
+
+interface SettingsStackedFieldProps {
+  label: React.ReactNode;
+  description?: React.ReactNode;
+  /** Helper text hidden behind an info icon next to the label. */
+  info?: React.ReactNode;
+  /** Where helper text sits relative to the control. @default 'before' */
+  descriptionPlacement?: 'before' | 'after';
+  children: React.ReactNode;
+  settingsItem?: string;
+  className?: string;
+  controlClassName?: string;
+}
+
+/**
+ * Label (+ optional description) above a control — for two-column cells.
+ * Prefer this over SettingsFieldRow inside SettingsTwoColumn (FieldRow overflows half-width columns).
+ */
+export const SettingsStackedField: React.FC<SettingsStackedFieldProps> = ({
+  label,
+  description,
+  info,
+  descriptionPlacement = 'before',
+  children,
+  settingsItem,
+  className,
+  controlClassName,
+}) => {
+  const descriptionNode =
+    description != null ? (
+      <p className={SETTINGS_HELPER_CLASS}>{description}</p>
+    ) : null;
+
+  return (
+    <div data-settings-item={settingsItem} className={cn('space-y-2', className)}>
+      <div className="space-y-0.5">
+        <div className="flex items-center gap-1.5">
+          <div className={SETTINGS_FIELD_LABEL_CLASS}>{label}</div>
+          {info != null ? <SettingsInfoHint>{info}</SettingsInfoHint> : null}
+        </div>
+        {descriptionPlacement === 'before' ? descriptionNode : null}
+      </div>
+      <div className={cn('flex min-w-0 max-w-[24rem] items-center gap-2', controlClassName)}>{children}</div>
+      {descriptionPlacement === 'after' ? descriptionNode : null}
+    </div>
+  );
+};
 interface SettingsFieldRowProps {
   label: React.ReactNode;
   description?: React.ReactNode;

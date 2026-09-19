@@ -16,6 +16,7 @@ import { usePushVisibilityBeacon } from '@/hooks/usePushVisibilityBeacon';
 import { useWebNotificationStream } from '@/hooks/useWebNotificationStream';
 import { useSettingsSaveFailureToast } from '@/hooks/useSettingsSaveFailureToast';
 import { usePwaInstallPrompt } from '@/hooks/usePwaInstallPrompt';
+import { useRoutingSync } from '@/hooks/useRoutingSync';
 import { useWindowTitle } from '@/hooks/useWindowTitle';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { hasModifier } from '@/lib/utils';
@@ -712,6 +713,7 @@ function App({ apis }: AppProps) {
   usePushVisibilityBeacon({ enabled: embeddedBackgroundWorkEnabled });
   useWebNotificationStream({ enabled: embeddedBackgroundWorkEnabled });
   usePwaInstallPrompt();
+  useRoutingSync();
 
   useWindowTitle();
 

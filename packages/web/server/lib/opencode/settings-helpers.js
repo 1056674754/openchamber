@@ -5,6 +5,7 @@ import {
   preserveRemoteRequestHeaderValues,
   redactRemoteRequestHeadersForApi,
 } from '../remote-instances/request-headers.js';
+import { isRoutingFeatureAvailable } from '../routing/feature-flag.js';
 
 // Generated from packages/ui/src/lib/settings/registry.ts by
 // `bun run settings-registry:generate`; `registry.test.ts` fails when stale.
@@ -1196,6 +1197,9 @@ export const createSettingsHelpers = (dependencies) => {
       pwaOrientation,
       mobileKeyboardMode,
       ...(hasPersistedFollowUpBehavior ? { followUpBehavior } : {}),
+      // Tells the client whether Jev routing exists in this build at all, so
+      // the Auto row and the Settings page can be absent rather than merely off.
+      routingFeatureAvailable: isRoutingFeatureAvailable(),
       approvedDirectories: approved,
       securityScopedBookmarks: bookmarks,
       pinnedDirectories: normalizeStringArray(settings.pinnedDirectories),

@@ -25,6 +25,7 @@ export type SettingsPageSlug =
   | 'chat'
   | 'shortcuts'
   | 'sessions'
+  | 'routing'
   | 'magic-prompts'
   | 'snippets'
   | 'notifications'
@@ -55,6 +56,8 @@ export interface SettingsRuntimeContext {
   /** True when the server was started by the Desktop app (Electron), even if the
    *  client is a plain browser accessing it via tunnel from a phone/iPad. */
   isDesktopServer: boolean;
+  /** Whether this server build has Jev routing (`OPENCHAMBER_ROUTING_ENABLE`). */
+  routingAvailable: boolean;
 }
 
 export interface SettingsPageMeta {
@@ -303,6 +306,16 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
     kind: 'single',
     showOn: 'both',
     keywords: ['defaults', 'default agent', 'default model', 'retention', 'memory', 'limits', 'zen'],
+  },
+  {
+    slug: 'routing',
+    title: 'Routing',
+    group: 'general',
+    kind: 'single',
+    showOn: 'default',
+    description: 'Pick the right model for each message automatically, and get asked before risky actions in auto-accepted sessions.',
+    keywords: ['routing', 'auto', 'jev', 'typesafe', 'model routing', 'categories', 'safety net', 'auto-accept', 'fallback'],
+    isAvailable: (ctx) => !ctx.isVSCode && ctx.routingAvailable,
   },
   {
     slug: 'magic-prompts',

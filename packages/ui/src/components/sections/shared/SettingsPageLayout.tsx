@@ -5,6 +5,13 @@ import { cn } from '@/lib/utils';
 interface SettingsPageLayoutProps {
   /** Page content */
   children: React.ReactNode;
+  /** Optional page title shown above settings content. */
+  title?: React.ReactNode;
+  /** Optional supporting description under the page title. */
+  description?: React.ReactNode;
+  /** Accepted for upstream parity: save failures already surface app-wide
+   *  through the settings-save-failed toast (`useSettingsSaveFailureToast`). */
+  showSaveStatus?: boolean;
   /** Additional className for the content container */
   className?: string;
   /** Additional className for the outer ScrollableOverlay */
@@ -29,6 +36,8 @@ export const SettingsPageLayout: React.FC<SettingsPageLayoutProps> = ({
   children,
   className,
   outerClassName,
+  title,
+  description,
 }) => {
   return (
     <ScrollableOverlay
@@ -41,6 +50,12 @@ export const SettingsPageLayout: React.FC<SettingsPageLayoutProps> = ({
           className
         )}
       >
+        {title != null || description != null ? (
+          <div className="space-y-1">
+            {title != null ? <h1 className="typography-ui-header font-semibold text-foreground">{title}</h1> : null}
+            {description != null ? <p className="typography-meta text-muted-foreground">{description}</p> : null}
+          </div>
+        ) : null}
         {children}
       </div>
     </ScrollableOverlay>

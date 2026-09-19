@@ -7,6 +7,7 @@ import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 import { projectKnowledgeI18n } from './project-knowledge.i18n';
 import { btwI18n } from './btw.i18n';
 import { chatsI18n } from './chats.i18n';
+import { routingI18n } from './routing.i18n';
 
 export const dict: Record<I18nKey, string> = {
   ...linearIssuePickerI18n.ko,
@@ -17,6 +18,7 @@ export const dict: Record<I18nKey, string> = {
   ...projectKnowledgeI18n.ko,
   ...btwI18n.ko,
   ...chatsI18n.ko,
+  ...routingI18n.ko,
   'planView.error.loadFailed': '이 계획을 불러오지 못했습니다',
   'common.loading': '로딩 중...',
   'common.unavailable': '사용할 수 없음',

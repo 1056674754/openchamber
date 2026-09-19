@@ -86,6 +86,7 @@ describe('settings page instance visibility', () => {
         isWeb: false,
         isDesktop: true,
         isDesktopServer: true,
+        routingAvailable: false,
       })).toBe(false);
     }
   });
@@ -98,6 +99,7 @@ describe('settings page instance visibility', () => {
       isWeb: false,
       isDesktop: true,
       isDesktopServer: true,
+      routingAvailable: false,
     })).toBe(false);
   });
 });

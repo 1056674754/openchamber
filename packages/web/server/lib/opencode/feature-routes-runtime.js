@@ -19,6 +19,7 @@ import { registerPendingMessagesRoutes } from '../pending-messages/routes.js';
 import { registerTempSessionRoutes, setOpenCodeDeps } from '../temp-sessions/routes.js';
 import { registerPermissionAutoAcceptRoutes } from '../permission-auto-accept/runtime.js';
 import { registerMessageQueueRoutes } from '../message-queue/runtime.js';
+import { registerRoutingPromptRewrite, registerRoutingRoutes } from '../routing/routes.js';
 import { registerConfigEntityRoutes } from './config-entity-routes.js';
 import { registerSettingsUtilityRoutes } from './core-routes.js';
 import { registerProjectIconRoutes } from './project-icon-routes.js';
@@ -116,6 +117,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       writeSseEvent,
       permissionAutoAcceptRuntime,
       messageQueueRuntime,
+      routingRuntime,
       openChamberControlService,
       openChamberSessionService,
       agentToolRuntime,
@@ -135,6 +137,9 @@ export const createFeatureRoutesRuntime = (dependencies) => {
 
     registerPermissionAutoAcceptRoutes(app, permissionAutoAcceptRuntime);
     registerMessageQueueRoutes(app, messageQueueRuntime);
+    registerRoutingRoutes(app, routingRuntime);
+    // Before the generic OpenCode proxy: turns `openchamber/auto` into a real model.
+    registerRoutingPromptRewrite(app, routingRuntime);
 
     registerOpenCodeRoutes(app, {
       crypto,

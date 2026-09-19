@@ -7,6 +7,7 @@ import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 import { projectKnowledgeI18n } from './project-knowledge.i18n';
 import { btwI18n } from './btw.i18n';
 import { chatsI18n } from './chats.i18n';
+import { routingI18n } from './routing.i18n';
 
 export const dict: Record<I18nKey, string> = {
   ...linearIssuePickerI18n.ja,
@@ -17,6 +18,7 @@ export const dict: Record<I18nKey, string> = {
   ...projectKnowledgeI18n.ja,
   ...btwI18n.ja,
   ...chatsI18n.ja,
+  ...routingI18n.ja,
   'planView.error.loadFailed': 'この計画を読み込めませんでした',
   'common.loading': '読み込み中...',
   'common.unavailable': '利用できません',

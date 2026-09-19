@@ -7,6 +7,7 @@ import { Toaster } from '@/components/ui/sonner';
 import { MiniChatLayout } from '@/components/mini-chat/MiniChatLayout';
 import { usePushVisibilityBeacon } from '@/hooks/usePushVisibilityBeacon';
 import { useSessionPresenceBeacon } from '@/hooks/useSessionPresenceBeacon';
+import { useRoutingSync } from '@/hooks/useRoutingSync';
 import { useWindowTitle } from '@/hooks/useWindowTitle';
 import { opencodeClient } from '@/lib/opencode/client';
 import { DEFAULT_SERVER_ID, serverRegistry } from '@/lib/opencode/server-registry';
@@ -417,6 +418,7 @@ export function ElectronMiniChatApp({ apis }: ElectronMiniChatAppProps) {
   useMiniChatKeyboardShortcuts();
   usePushVisibilityBeacon({ enabled: true });
   useWindowTitle();
+  useRoutingSync();
 
   return (
     <ErrorBoundary>

@@ -3,6 +3,7 @@ import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 import { projectKnowledgeI18n } from './project-knowledge.i18n';
 import { btwI18n } from './btw.i18n';
 import { chatsI18n } from './chats.i18n';
+import { routingI18n } from './routing.i18n';
 
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { linearIntegrationI18n } from './linear-integration.i18n';
@@ -16,6 +17,7 @@ export const dict = {
   ...projectKnowledgeI18n.en,
   ...btwI18n.en,
   ...chatsI18n.en,
+  ...routingI18n.en,
   'planView.error.loadFailed': 'Could not load this plan',
   'common.loading': 'Loading...',
   'common.unavailable': 'Unavailable',

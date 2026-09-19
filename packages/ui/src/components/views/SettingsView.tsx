@@ -59,6 +59,7 @@ import { SnippetsSidebar } from '@/components/sections/snippets/SnippetsSidebar'
 import { SnippetsPage } from '@/components/sections/snippets/SnippetsPage';
 import { GitPage } from '@/components/sections/git-identities/GitPage';
 import { IntegrationsPage } from '@/components/sections/integrations/IntegrationsPage';
+import { RoutingPage } from '@/components/sections/routing/RoutingPage';
 import type { OpenChamberSection } from '@/components/sections/openchamber/types';
 import { OpenChamberPage } from '@/components/sections/openchamber/OpenChamberPage';
 import { useDeviceInfo } from '@/lib/device';
@@ -127,6 +128,7 @@ const pageOrder: SettingsPageSlug[] = [
   'chat',
   'notifications',
   'sessions',
+  'routing',
   'shortcuts',
   'git',
   'magic-prompts',
@@ -155,10 +157,10 @@ const pageOrder: SettingsPageSlug[] = [
   'pairing',
 ];
 
-function buildRuntimeContext(isDesktop: boolean): SettingsRuntimeContext {
+function buildRuntimeContext(isDesktop: boolean, routingAvailable: boolean): SettingsRuntimeContext {
   const isVSCode = isVSCodeRuntime();
   const isWeb = !isDesktop && isWebRuntime();
-  return { isVSCode, isWeb, isDesktop, isDesktopServer: isDesktop };
+  return { isVSCode, isWeb, isDesktop, isDesktopServer: isDesktop, routingAvailable };
 }
 
 function isPageAvailable(page: SettingsPageMeta, ctx: SettingsRuntimeContext): boolean {
@@ -322,9 +324,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
     return isDesktopShell();
   }, []);
 
+  const routingAvailable = useUIStore((state) => state.routingFeatureAvailable);
   const [runtimeCtx, setRuntimeCtx] = React.useState<SettingsRuntimeContext>(
-    () => buildRuntimeContext(isDesktopApp),
+    () => buildRuntimeContext(isDesktopApp, routingAvailable),
   );
+  // The routing flag arrives through the settings snapshot after mount.
+  React.useEffect(() => {
+    setRuntimeCtx((prev) => (prev.routingAvailable === routingAvailable ? prev : { ...prev, routingAvailable }));
+  }, [routingAvailable]);
 
   React.useEffect(() => {
     if (isDesktopApp) return;
@@ -652,6 +659,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
         return t('settings.page.shortcuts.title');
       case 'sessions':
         return t('settings.page.sessions.title');
+      case 'routing':
+        return t('settings.page.routing.title');
       case 'magic-prompts':
         return t('settings.page.magicPrompts.title');
       case 'snippets':
@@ -786,6 +795,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
         return <SnippetsPage />;
       case 'git':
         return <GitPage />;
+      case 'routing':
+        return <RoutingPage />;
       case 'appearance':
       case 'chat':
       case 'shortcuts':

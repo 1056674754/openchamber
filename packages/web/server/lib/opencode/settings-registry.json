@@ -57,6 +57,10 @@
     "agentMemoryToolEnabled": {
       "scope": "instance"
     },
+    "routingFeatureAvailable": {
+      "scope": "instance",
+      "computed": true
+    },
     "optimizeSystemPrompt": {
       "scope": "profile"
     },
@@ -583,11 +587,11 @@
       "scope": "device",
       "local": true
     },
-    "messageQueueExpanded": {
+    "todoPanelHeight": {
       "scope": "device",
       "local": true
     },
-    "todoPanelHeight": {
+    "messageQueueExpanded": {
       "scope": "device",
       "local": true
     },

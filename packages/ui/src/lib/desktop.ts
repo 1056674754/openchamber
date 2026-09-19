@@ -69,6 +69,8 @@ export type DesktopSettings = {
   opencodeBinary?: string;
   agentControlToolEnabled?: boolean;
   agentMemoryToolEnabled?: boolean;
+  /** Server-computed: this build has Jev routing (`OPENCHAMBER_ROUTING_ENABLE`). */
+  routingFeatureAvailable?: boolean;
   optimizeSystemPrompt?: boolean;
   desktopLanAccessEnabled?: boolean;
   desktopMacMenuBarEnabled?: boolean;

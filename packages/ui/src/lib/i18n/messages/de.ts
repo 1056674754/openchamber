@@ -7,6 +7,7 @@ import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 import { projectKnowledgeI18n } from './project-knowledge.i18n';
 import { btwI18n } from './btw.i18n';
 import { chatsI18n } from './chats.i18n';
+import { routingI18n } from './routing.i18n';
 
 export const dict: Record<I18nKey, string> = {
   ...linearIssuePickerI18n.de,
@@ -17,6 +18,7 @@ export const dict: Record<I18nKey, string> = {
   ...projectKnowledgeI18n.de,
   ...btwI18n.de,
   ...chatsI18n.de,
+  ...routingI18n.de,
   'planView.error.loadFailed': 'Plan konnte nicht geladen werden',
   'common.loading': 'Wird geladen...',
   'common.unavailable': 'Nicht verfügbar',
