@@ -127,7 +127,11 @@ export const QueuedMessageChips = memo(({ onEditMessage, onSendMessage }: Queued
         React.useCallback(
             (state) => {
                 if (!currentSessionId) return EMPTY_QUEUE;
-                return state.queuedMessages[currentSessionId] ?? EMPTY_QUEUE;
+                // A message already being delivered leaves the editable queue.
+                const queue = state.queuedMessages[currentSessionId] ?? EMPTY_QUEUE;
+                const sending = state.sendingIds[currentSessionId];
+                if (!sending || sending.length === 0) return queue;
+                return queue.filter((message) => !sending.includes(message.id));
             },
             [currentSessionId]
         )
@@ -147,15 +151,16 @@ export const QueuedMessageChips = memo(({ onEditMessage, onSendMessage }: Queued
 
     const handleEdit = React.useCallback((message: QueuedMessage) => {
         if (!currentSessionId) return;
-        
-        const popped = popToInput(currentSessionId, message.id);
-        if (popped) {
-            if (popped.attachments && popped.attachments.length > 0) {
-                const currentAttachments = useInputStore.getState().attachedFiles;
-                useInputStore.getState().setAttachedFiles([...currentAttachments, ...popped.attachments]);
+
+        void popToInput(currentSessionId, message.id).then((popped) => {
+            if (popped) {
+                if (popped.attachments && popped.attachments.length > 0) {
+                    const currentAttachments = useInputStore.getState().attachedFiles;
+                    useInputStore.getState().setAttachedFiles([...currentAttachments, ...popped.attachments]);
+                }
+                onEditMessage(popped.content, popped.attachments);
             }
-            onEditMessage(popped.content, popped.attachments);
-        }
+        });
     }, [currentSessionId, popToInput, onEditMessage]);
 
     const handleSend = React.useCallback((message: QueuedMessage) => {

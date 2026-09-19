@@ -17,11 +17,13 @@ import { registerAgentMemoryRoutes } from '../agent-memory/routes.js';
 import { registerPendingMessagesRoutes } from '../pending-messages/routes.js';
 import { registerTempSessionRoutes, setOpenCodeDeps } from '../temp-sessions/routes.js';
 import { registerPermissionAutoAcceptRoutes } from '../permission-auto-accept/runtime.js';
+import { registerMessageQueueRoutes } from '../message-queue/runtime.js';
 import { registerConfigEntityRoutes } from './config-entity-routes.js';
 import { registerSettingsUtilityRoutes } from './core-routes.js';
 import { registerProjectIconRoutes } from './project-icon-routes.js';
 import { registerScheduledTaskRoutes } from '../scheduled-tasks/routes.js';
 import { registerOpenChamberControlRoutes } from '../openchamber-control/routes.js';
+import { registerOpenChamberSessionRoutes } from '../openchamber-sessions/routes.js';
 import { registerMarkdownImageGrantRoutes } from '../markdown-image-grants/routes.js';
 import { registerSkillRoutes } from './skill-routes.js';
 import { registerPluginRoutes } from './plugin-routes.js';
@@ -110,7 +112,9 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       getOpenChamberEventClients,
       writeSseEvent,
       permissionAutoAcceptRuntime,
+      messageQueueRuntime,
       openChamberControlService,
+      openChamberSessionService,
       agentToolRuntime,
     } = routeDependencies;
 
@@ -125,6 +129,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
     });
 
     registerPermissionAutoAcceptRoutes(app, permissionAutoAcceptRuntime);
+    registerMessageQueueRoutes(app, messageQueueRuntime);
 
     registerOpenCodeRoutes(app, {
       crypto,
@@ -173,6 +178,10 @@ export const createFeatureRoutesRuntime = (dependencies) => {
 
     registerOpenChamberControlRoutes(app, {
       controlService: openChamberControlService,
+    });
+
+    registerOpenChamberSessionRoutes(app, {
+      sessionService: openChamberSessionService,
     });
 
     registerMarkdownImageGrantRoutes(app, {

@@ -5,7 +5,7 @@ import { useBrowserVoice } from '@/hooks/useBrowserVoice';
 // sessionStore removed — currentSessionId comes from useSessionUIStore
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
-import { useMessageQueueStore, type QueuedMessage } from '@/stores/messageQueueStore';
+import { useMessageQueueStore, type QueuedContextPart, type QueuedMessage } from '@/stores/messageQueueStore';
 import { useSessionUIStore, type SendMessageTarget } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
 import { resolveAttachmentSessionKey, useInputStore } from '@/sync/input-store';
@@ -55,7 +55,7 @@ import {
 import { useCurrentSessionActivity, useSessionActivity } from '@/hooks/useSessionActivity';
 import { useVisualViewport } from '@/hooks/useVisualViewport';
 import { setKeyboardInsetCssVar } from '@/hooks/nativeMobileChrome';
-import { isCapacitorApp } from '@/lib/platform';
+import { isNativeShellApp } from '@/lib/platform';
 import { toast } from '@/components/ui';
 import { Button } from '@/components/ui/button';
 // useMessageStore removed — messages now come from sync system
@@ -1206,7 +1206,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     // (Keyboard plugin + single visualViewport fallback). Do not dual-write here.
     const { keyboardHeight } = useVisualViewport();
     React.useEffect(() => {
-        if (!isMobile || typeof document === 'undefined' || isCapacitorApp()) {
+        if (!isMobile || typeof document === 'undefined' || isNativeShellApp()) {
             return;
         }
         const root = document.documentElement;
@@ -1571,7 +1571,12 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         React.useCallback(
             (state) => {
                 if (!currentSessionId) return EMPTY_QUEUE;
-                return state.queuedMessages[currentSessionId] ?? EMPTY_QUEUE;
+                // Skip items already being delivered (the server's in-flight
+                // projection): a composer submit must not merge them in again.
+                const queue = state.queuedMessages[currentSessionId] ?? EMPTY_QUEUE;
+                const sending = state.sendingIds[currentSessionId];
+                if (!sending || sending.length === 0) return queue;
+                return queue.filter((message) => !sending.includes(message.id));
             },
             [currentSessionId]
         )
@@ -1901,7 +1906,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const handleSubmitRef = React.useRef<(options?: SubmitOptions) => Promise<void>>(async () => {});
 
     // Add message to queue instead of sending
-    const handleQueueMessage = React.useCallback(() => {
+    const handleQueueMessage = React.useCallback(async () => {
         const inputSnapshot = getCurrentInputSnapshot();
         if (!inputSnapshot.hasContent || !currentSessionId) return;
 
@@ -1916,7 +1921,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 
         const drafts = consumeDrafts(currentSessionId);
 
-        let messageToQueue = inputSnapshot.message.replace(/^\n+|\n+$/g, '');
+        const originalMessage = inputSnapshot.message.replace(/^\n+|\n+$/g, '');
+        let messageToQueue = originalMessage;
         if (drafts.length > 0) {
             messageToQueue = appendInlineComments(messageToQueue, drafts);
         }
@@ -1933,20 +1939,37 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             ?? queueProject?.serverId
             ?? undefined;
 
-        addToQueue(currentSessionId, {
-            content: messageToQueue,
-            attachments: attachmentsToQueue.length > 0 ? attachmentsToQueue : undefined,
-            sendTarget: queueDirectory || queueServerId ? {
-                directory: queueDirectory ?? undefined,
-                serverId: queueServerId,
-            } : undefined,
-            sendConfig: currentProviderId && currentModelId ? {
-                providerID: currentProviderId,
-                modelID: currentModelId,
-                agent: currentAgentName ?? undefined,
-                variant: currentVariant ?? undefined,
-            } : undefined,
-        });
+        // Context handed to the composer by another surface rides the queued
+        // message instead of leaking into the next composer send.
+        const pendingSyntheticParts = consumePendingSyntheticParts();
+        const queuedContext: QueuedContextPart[] = (pendingSyntheticParts ?? [])
+            .filter((part) => part.text.trim().length > 0)
+            .map((part) => ({ kind: 'synthetic' as const, text: part.text }));
+
+        try {
+            await addToQueue(currentSessionId, {
+                content: messageToQueue,
+                attachments: attachmentsToQueue.length > 0 ? attachmentsToQueue : undefined,
+                context: queuedContext.length > 0 ? queuedContext : undefined,
+                sendTarget: queueDirectory || queueServerId ? {
+                    directory: queueDirectory ?? undefined,
+                    serverId: queueServerId,
+                } : undefined,
+                sendConfig: currentProviderId && currentModelId ? {
+                    providerID: currentProviderId,
+                    modelID: currentModelId,
+                    agent: currentAgentName ?? undefined,
+                    variant: currentVariant ?? undefined,
+                } : undefined,
+            });
+        } catch (error) {
+            if (pendingSyntheticParts && pendingSyntheticParts.length > 0) {
+                const inputState = useInputStore.getState();
+                inputState.setPendingSyntheticParts([...(inputState.pendingSyntheticParts ?? []), ...pendingSyntheticParts]);
+            }
+            toast.error(error instanceof Error ? error.message : 'Failed to queue message');
+            return;
+        }
 
         // Clear input and attachments
         // Note: confirmedMentionsRef is NOT cleared here because queued messages
@@ -1961,7 +1984,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         if (!isMobile) {
             composerRef.current?.focus();
         }
-    }, [getCurrentInputSnapshot, currentSessionId, inputMode, availableCommands, availableSkills, agents, t, currentSessionDirectoryForSync, currentDirectory, projects, availableWorktreesByProject, sendableAttachedFiles, sanitizeAttachmentsForSend, addToQueue, clearAttachedFiles, isMobile, consumeDrafts, currentProviderId, currentModelId, currentAgentName, currentVariant]);
+    }, [getCurrentInputSnapshot, currentSessionId, inputMode, availableCommands, availableSkills, agents, t, currentSessionDirectoryForSync, currentDirectory, projects, availableWorktreesByProject, sendableAttachedFiles, sanitizeAttachmentsForSend, addToQueue, clearAttachedFiles, isMobile, consumeDrafts, consumePendingSyntheticParts, currentProviderId, currentModelId, currentAgentName, currentVariant]);
 
     const handleQueuedMessageEdit = React.useCallback((content: string) => {
         setMessage(content);

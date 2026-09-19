@@ -74,7 +74,7 @@ describe("attachment + queue session isolation", () => {
     expect(useInputStore.getState().attachedFiles.map((file) => file.filename)).toEqual(["pending.png"])
   })
 
-  test("pop-to-edit from queue writes into the active session bucket only", () => {
+  test("pop-to-edit from queue writes into the active session bucket only", async () => {
     const queued: QueuedMessage = {
       id: "queued-1",
       content: "edit me",
@@ -86,7 +86,7 @@ describe("attachment + queue session isolation", () => {
     })
 
     useInputStore.getState().setAttachmentSessionKey("ses_a")
-    const popped = useMessageQueueStore.getState().popToInput("ses_a", "queued-1")
+    const popped = await useMessageQueueStore.getState().popToInput("ses_a", "queued-1")
     expect(popped?.attachments?.[0]?.filename).toBe("edit.png")
 
     const current = useInputStore.getState().attachedFiles

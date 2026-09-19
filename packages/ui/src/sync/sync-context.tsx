@@ -8,6 +8,7 @@ import { useStore } from "zustand"
 import type { OpencodeClient } from "@opencode-ai/sdk/v2/client"
 import { createEventPipeline } from "./event-pipeline"
 import { isVSCodeRuntime } from "@/lib/desktop"
+import { isOhosApp } from "@/lib/platform"
 import { reduceGlobalEvent, applyGlobalProject, applyDirectoryEvent } from "./event-reducer"
 import { useGlobalSyncStore, type GlobalSyncStore } from "./global-sync-store"
 import { ChildStoreManager, type DirectoryStore } from "./child-store"
@@ -22,6 +23,8 @@ import { bootstrapGlobal, bootstrapDirectory } from "./bootstrap"
 import { retry } from "./retry"
 import { updateStreamingState } from "./streaming"
 import { setActionRefs, resolveBaseUrl, resolveSdkForDirectory } from "./session-actions"
+import { shouldConsumeBulkArchiveEcho } from "./bulk-archive-echo"
+import { getRuntimeKey } from "@/lib/runtime-switch"
 import { setSyncRefs } from "./sync-refs"
 import { deleteShield } from "./delete-shield"
 import { stripSessionDiffSnapshots } from "./sanitize"
@@ -43,6 +46,7 @@ import {
 } from "./session-activity-timing"
 import { useProjectsStore } from "@/stores/useProjectsStore"
 import { usePermissionStore } from "@/stores/permissionStore"
+import { applyMessageQueueUpdatedEvent } from "@/stores/messageQueueStore"
 import { useConfigStore, type ConfigConnectionState } from "@/stores/useConfigStore"
 import { useTodosPersistStore } from "@/stores/useTodosPersistStore"
 import { useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
@@ -1341,6 +1345,11 @@ function handleEvent(
   const directory = resolveDirectoryFromRoutingIndex(routingIndex, rawDirectory, payload, childStores)
   let shouldMaterializeColdDirectory = false
 
+  // A batch archive already reconciled the stores from the server's own batch
+  // response; the per-session SSE echo of the same write is redundant and is
+  // swallowed so it does not notify every subscriber once per session.
+  if (shouldConsumeBulkArchiveEcho(payload, getRuntimeKey())) return
+
   if (directory && directory !== "global" && !childStores.getChild(directory)) {
     const decision = classifyColdDirectoryEvent(payload)
     switch (decision.kind) {
@@ -1822,7 +1831,9 @@ export function SyncProvider(props: {
   // The VS Code webview cannot open raw WebSockets (its origin is
   // vscode-webview://, unreachable for a direct ws connection); the bridge
   // already proxies the SSE stream over postMessage, so force it there.
-  const messageStreamTransport = configuredMessageStreamTransport === "sse" || isVSCodeRuntime()
+  // The HarmonyOS ArkWeb shell also locks SSE (same conservative choice as the
+  // Capacitor shells — WebView-native streaming is the proven path there).
+  const messageStreamTransport = configuredMessageStreamTransport === "sse" || isVSCodeRuntime() || isOhosApp()
     ? "sse"
     : "ws"
   const projects = useProjectsStore((state) => state.projects)
@@ -2216,6 +2227,10 @@ export function SyncProvider(props: {
     const applyIncomingEvent = (directory: string, payload: Event) => {
       dispatchVSCodeRuntimeNotificationEvent(directory, payload, serverId)
       dispatchOpenchamberEventEnvelope(payload as { type?: unknown; properties?: unknown }, serverId)
+      if ((payload as { type?: unknown }).type === "openchamber:message-queue.updated") {
+        applyMessageQueueUpdatedEvent(payload)
+        return
+      }
       if (payload.type === "installation.update-available") {
         const version = typeof (payload.properties as { version?: unknown })?.version === "string"
           ? (payload.properties as { version: string }).version

@@ -13,6 +13,7 @@ export const createGracefulShutdownRuntime = (dependencies) => {
     sessionGoalRuntime,
     sessionAssistRuntime,
     contextObligatoryRuntime,
+    messageQueueRuntime,
     getHealthCheckInterval,
     clearHealthCheckInterval,
     getTerminalRuntime,
@@ -53,6 +54,7 @@ export const createGracefulShutdownRuntime = (dependencies) => {
     sessionGoalRuntime?.stop?.();
     sessionAssistRuntime?.stop?.();
     contextObligatoryRuntime?.stop?.();
+    messageQueueRuntime?.stop?.();
 
     const remoteInstancesRuntime = getRemoteInstancesRuntime?.();
     if (remoteInstancesRuntime) {

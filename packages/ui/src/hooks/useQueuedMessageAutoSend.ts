@@ -207,7 +207,7 @@ export function useQueuedMessageAutoSend(enabledOrOptions?: boolean | { enabled?
           resolved.agent,
           payload.primaryAttachments,
           payload.agentMentionName,
-          undefined,
+          payload.additionalParts.length > 0 ? payload.additionalParts : undefined,
           resolved.variant,
           'normal',
           {

@@ -99,6 +99,7 @@ import { createNotificationTriggerRuntime } from './lib/notifications/runtime.js
 import { createPushRuntime } from './lib/notifications/push-runtime.js';
 import { createNotificationTemplateRuntime } from './lib/notifications/template-runtime.js';
 import { createPermissionAutoAcceptRuntime } from './lib/permission-auto-accept/runtime.js';
+import { createMessageQueueRuntime } from './lib/message-queue/runtime.js';
 import { createGracefulShutdownRuntime } from './lib/opencode/shutdown-runtime.js';
 import { createSessionGoalRuntime } from './lib/session-goal/runtime.js';
 import { createSessionAssistRuntime } from './lib/session-assist/runtime.js';
@@ -1065,6 +1066,19 @@ notificationTriggerRuntime.setGetIsSessionAutoAccepting(
   (sessionId, directory) => permissionAutoAcceptRuntime.isSessionAutoAccepting(sessionId, directory),
 );
 
+// Queued follow-up messages are delivered by the server so a closed tab or a
+// dropped connection no longer strands them (VS Code keeps its UI-side queue).
+const messageQueueRuntime = createMessageQueueRuntime({
+  globalEventHub: globalMessageStreamHub,
+  buildOpenCodeUrl,
+  getOpenCodeAuthHeaders,
+  sessionKnowledgeRuntime,
+  broadcastGlobalUiEvent,
+  onPromptSent: (sessionId) => sessionRuntime.markUserMessageSent(sessionId),
+  dataDir: OPENCHAMBER_DATA_DIR,
+});
+messageQueueRuntime.start();
+
 const openCodeWatcherRuntime = createOpenCodeWatcherRuntime({
   waitForOpenCodePort: (...args) => waitForOpenCodePort(...args),
   buildOpenCodeUrl,
@@ -1619,6 +1633,7 @@ const gracefulShutdownRuntime = createGracefulShutdownRuntime({
   sessionGoalRuntime,
   sessionAssistRuntime,
   contextObligatoryRuntime,
+  messageQueueRuntime,
   getHealthCheckInterval: () => healthCheckInterval,
   clearHealthCheckInterval: (value) => clearInterval(value),
   getTerminalRuntime: () => terminalRuntime,
@@ -1954,7 +1969,9 @@ async function main(options = {}) {
     getOpenChamberEventClients: () => uiOpenChamberEventClients,
     writeSseEvent,
     permissionAutoAcceptRuntime,
+    messageQueueRuntime,
     openChamberControlService,
+    openChamberSessionService,
     agentToolRuntime,
   });
 
