@@ -2529,6 +2529,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
         projectRepoStatus={projectRepoStatus}
         showMoreGroupSessions={showMoreGroupSessions}
         resetGroupSessionLimit={resetGroupSessionLimit}
+        onSessionDroppedOnFolder={handleSessionDroppedOnFolder}
         mobileVariant={mobileVariant}
         alwaysShowActions={alwaysShowSidebarActions}
         activeProjectId={activeProjectId}
@@ -3038,6 +3039,29 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
     [renderGroupSessions, serverIdByProjectId],
   );
 
+  // [fork-port] Flat-list folder drops: the folder lives in exactly one scope;
+  // drop semantics match the old per-group scope handler — remove the session
+  // from any other folder it belongs to, then add it to the target folder.
+  const handleSessionDroppedOnFolder = React.useCallback((sessionId: string, folderId: string) => {
+    const foldersStore = useSessionFoldersStore.getState();
+    let targetScopeKey: string | null = null;
+    for (const [scopeKey, folders] of Object.entries(foldersStore.foldersMap)) {
+      const folder = folders.find((entry) => entry.id === folderId);
+      if (folder) {
+        targetScopeKey = scopeKey;
+        break;
+      }
+    }
+    if (!targetScopeKey) return;
+    for (const [scopeKey] of Object.entries(foldersStore.foldersMap)) {
+      if (scopeKey === targetScopeKey) continue;
+      if (foldersStore.getSessionFolderId(scopeKey, sessionId)) {
+        foldersStore.removeSessionFromFolder(scopeKey, sessionId);
+      }
+    }
+    foldersStore.addSessionToFolder(targetScopeKey, folderId, sessionId);
+  }, []);
+
   const renderFolderItem = React.useCallback((args: {
     folder: import('@/stores/useSessionFoldersStore').SessionFolder;
     scopeKey: string;
@@ -3178,6 +3202,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
         setOpenSidebarMenuKey={setOpenSidebarMenuKey}
         showMoreGroupSessions={showMoreGroupSessions}
         resetGroupSessionLimit={resetGroupSessionLimit}
+        onSessionDroppedOnFolder={handleSessionDroppedOnFolder}
         onRefreshProject={handleRefreshSessions}
         isInlineEditing={isInlineEditing}
       />

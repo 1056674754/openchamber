@@ -25,7 +25,7 @@ import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useDeviceInfo } from '@/lib/device';
-import { isCapacitorApp } from '@/lib/platform';
+import { isNativeShellApp } from '@/lib/platform';
 import { sessionEvents } from '@/lib/sessionEvents';
 import { useI18n } from '@/lib/i18n';
 
@@ -135,7 +135,7 @@ export const SessionDialogs: React.FC = () => {
         // Native mobile connects to a desktop that already has projects; the
         // projects store often hydrates after isHomeReady, so a zero-length
         // snapshot falsely opens "Add project directory" and covers the chat.
-        if (isCapacitorApp()) {
+        if (isNativeShellApp()) {
             return;
         }
 

@@ -32,6 +32,7 @@ import type { SessionNode, SessionSummaryMeta } from './types';
 import type { SessionNodeChildRenderExtras, SessionNodeRenderExtras } from './sessionNodeItemUtils';
 import { canShowSessionWorktreeMenu, getSessionWorktreeMenuDisabled } from './sessionNodeItemUtils';
 import { shouldRenderSessionExpanded } from './sessionExpansion';
+import { useSessionRowMenuState } from './sessions/useSessionRowMenuState';
 import { formatSessionCompactDateLabel, formatSessionDateLabel, normalizePath, renderHighlightedText, resolveRemoteIndicatorProject, resolveSessionDiffStats } from './utils';
 import { resolveGlobalSessionDirectory, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
@@ -717,7 +718,21 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
   const sessionTimestamp = resolvedSession.time?.updated || resolvedSession.time?.created || Date.now();
   const sessionUpdatedLabel = formatSessionDateLabel(sessionTimestamp);
   const sessionCompactUpdatedLabel = formatSessionCompactDateLabel(sessionTimestamp);
-  const isMenuOpen = openSidebarMenuKey === menuInstanceKey;
+  // [fork-port] 6a76e0732: menu open state flows through useSessionRowMenuState
+  // so a close request hides the menu while the shared key can stay pinned by
+  // the virtualizer. The fork's rename runs through a dialog, so there is no
+  // deferred inline-rename work today; the hook keeps that extension point.
+  const {
+    isMenuOpen,
+    handleMenuOpenChange: handleRowMenuOpenChange,
+  } = useSessionRowMenuState({
+    menuInstanceKey,
+    contextMenuInstanceKey: null,
+    openSidebarMenuKey,
+    setOpenSidebarMenuKey,
+    hasDeferredCloseWork: () => false,
+    onCloseComplete: () => undefined,
+  });
   const isMultiRunLikeSession = React.useMemo(() => parseMultiRunSessionTitle(resolvedSession.title) !== null, [resolvedSession.title]);
   const [fusionDialogOpen, setFusionDialogOpen] = React.useState(false);
   const [menuPosition, setMenuPosition] = React.useState<{ x: number; y: number } | null>(null);
@@ -1043,9 +1058,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
     ? <Icon name="error-warning" className="h-4 w-4 text-status-warning"  />
     : null;
 
-  const handleMenuOpenChange = (open: boolean) => {
-    setOpenSidebarMenuKey(open ? menuInstanceKey : null);
-  };
+  const handleMenuOpenChange = handleRowMenuOpenChange;
 
   const handleRowSelect = (event?: React.MouseEvent<HTMLButtonElement>) => {
     if (isDeleting) return;

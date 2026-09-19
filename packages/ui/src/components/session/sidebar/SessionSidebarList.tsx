@@ -233,6 +233,8 @@ type SessionSidebarListProps = {
   setOpenSidebarMenuKey: (key: string | null) => void;
   showMoreGroupSessions: (containerKey: string, nextVisibleCount: number) => void;
   resetGroupSessionLimit: (containerKey: string) => void;
+  /** Session dropped on a folder row (row-model flat dnd; [fork-port]). */
+  onSessionDroppedOnFolder: (sessionId: string, folderId: string) => void;
   onRefreshProject?: () => void;
   isInlineEditing: boolean;
   hasLeadingActivitySections?: boolean;
@@ -643,19 +645,46 @@ export function SessionSidebarList(props: SessionSidebarListProps): React.ReactN
     [props.sectionsForRender],
   );
   const [isProjectDragging, setIsProjectDragging] = React.useState(false);
+  // [fork-port] One flat DndContext owns every drag kind: project/group
+  // reorder, and session→folder drops (the old per-group
+  // SessionFolderDndScope cannot wrap a virtualized flat list). The session
+  // drag preview is preserved through the DragOverlay below.
+  const [activeSessionDrag, setActiveSessionDrag] = React.useState<{ id: string; title: string; width: number | null; height: number | null } | null>(null);
 
   const rowsTree = (
     <DndContext
       sensors={props.mobileVariant ? noopSensors : projectSensors}
       collisionDetection={closestCenter}
       onDragStart={(event) => {
+        const data = event.active.data.current as { type?: string; sessionId?: string; sessionTitle?: string } | undefined;
+        if (data?.type === 'session' && data.sessionId) {
+          const width = event.active.rect.current.initial?.width;
+          const height = event.active.rect.current.initial?.height;
+          setActiveSessionDrag({
+            id: data.sessionId,
+            title: data.sessionTitle ?? 'Session',
+            width: typeof width === 'number' ? width : null,
+            height: typeof height === 'number' ? height : null,
+          });
+          return;
+        }
         setIsProjectDragging(projectDragIds.has(String(event.active.id)));
       }}
-      onDragCancel={() => setIsProjectDragging(false)}
+      onDragCancel={() => {
+        setIsProjectDragging(false);
+        setActiveSessionDrag(null);
+      }}
       onDragEnd={(event) => {
         setIsProjectDragging(false);
+        setActiveSessionDrag(null);
         if (props.isInlineEditing) return;
         if (!event.over) return;
+        const activeData = event.active.data.current as { type?: string; sessionId?: string } | undefined;
+        const overData = event.over.data.current as { type?: string; folderId?: string } | undefined;
+        if (activeData?.type === 'session' && activeData.sessionId && overData?.type === 'folder' && overData.folderId) {
+          props.onSessionDroppedOnFolder(activeData.sessionId, overData.folderId);
+          return;
+        }
         const activeId = String(event.active.id);
         const overId = String(event.over.id);
         if (activeId === overId) return;
@@ -695,7 +724,22 @@ export function SessionSidebarList(props: SessionSidebarListProps): React.ReactN
           onFirstVisibleIndexChange={handleFirstVisibleIndexChange}
         />
       </SortableContext>
-      {isProjectDragging ? <DragOverlay dropAnimation={null} /> : null}
+      <DragOverlay dropAnimation={null}>
+        {activeSessionDrag ? (
+          <div
+            style={{
+              width: activeSessionDrag.width ? `${activeSessionDrag.width}px` : 'auto',
+              height: activeSessionDrag.height ? `${activeSessionDrag.height}px` : 'auto',
+            }}
+            className="flex items-center rounded-lg border border-[var(--interactive-border)] bg-[var(--surface-elevated)] px-2.5 py-1 shadow-none pointer-events-none"
+          >
+            <Icon name="sticky-note" className="h-4 w-4 text-muted-foreground mr-2 flex-shrink-0" />
+            <div className="min-w-0 flex-1 truncate typography-ui-label font-normal text-foreground">
+              {activeSessionDrag.title}
+            </div>
+          </div>
+        ) : null}
+      </DragOverlay>
     </DndContext>
   );
 
