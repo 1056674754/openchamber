@@ -24,16 +24,18 @@ new-session drafts hide both queue and suggestion. Hiding the queue does not
 pause its delivery.
 
 The queue header toggles an `aria-expanded` disclosure with the current count.
-Its collapse state is local to the mounted session queue and survives temporary
-hiding behind btw; switching sessions resets it. The expanded list retains its
+Its open/closed state is one persisted preference in `useUIStore`
+(`messageQueueExpanded`, open by default), shared by every session and
+surviving session switches and reloads. The expanded list retains its
 drag sensors, ordering, edit, send, and remove actions, and clamps to available
 space above the composer.
 
 The shared frame measures its height and gap into the composer's
 `--chat-floating-panel-clearance` (written on the `[data-composer-bound]`
 container in `ChatContainer`). `ScrollToBottomButton` translates upward by that
-amount. Transcript height, insets, and scroll position remain unchanged.
-Unmounting clears the offset; resizing or collapsing the frame updates it.
+amount, and the transcript's tail spacer grows by it (so the frame never
+covers the last rows). Unmounting clears the offset; resizing or collapsing
+the frame updates it.
 
 ## Layers
 
