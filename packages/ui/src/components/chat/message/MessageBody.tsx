@@ -481,7 +481,7 @@ const UserMessageBody = React.memo(({ sessionId, messageId, parts, isMobile, alw
         )}>
             <div
                 className={cn(
-                    'flex items-center justify-end gap-1',
+                    'flex items-center justify-end gap-1.5 [&_button]:!h-[26px] [&_button]:!w-[26px] [&_svg]:!size-3.5',
                     isMobile
                         ? userActionsMode === 'inline'
                             ? 'translate-x-5'
@@ -1877,7 +1877,7 @@ const AssistantMessageBody = React.memo(({
                 if (shouldShowStandaloneMessageActions && i === lastRenderableTextPartIndex) {
                     rendered.push(
                         <div key={`message-actions-${messageId}`} className={INLINE_MESSAGE_ACTIONS_CLASS_NAME} data-message-actions="true">
-                            <div className="flex items-center gap-1" data-message-action-group="true">
+                            <div className="flex items-center gap-1.5" data-message-action-group="true">
                                 {messageActionButtons}
                             </div>
                         </div>
@@ -2304,7 +2304,7 @@ const AssistantMessageBody = React.memo(({
                 ) : null}
                 {shouldRenderStandaloneActionsAfterContent && (
                     <div className={INLINE_MESSAGE_ACTIONS_CLASS_NAME} data-message-actions="true">
-                        <div className="flex items-center gap-1" data-message-action-group="true">
+                        <div className="flex items-center gap-1.5" data-message-action-group="true">
                             {messageActionButtons}
                         </div>
                     </div>
@@ -2387,7 +2387,7 @@ const AssistantMessageBody = React.memo(({
                         </div>
                         <div
                             className={cn(
-                                'flex items-center gap-1.5',
+                                'flex items-center gap-1.5 [&_button]:!h-[26px] [&_button]:!w-[26px] [&_svg]:!size-3.5',
                                 alwaysShowMessageActions || isTouchContext
                                     ? undefined
                                     : 'pointer-events-none opacity-0 transition-opacity duration-150 focus-within:pointer-events-auto focus-within:opacity-100 group-hover/message:pointer-events-auto group-hover/message:opacity-100',
