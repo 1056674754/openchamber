@@ -3566,3 +3566,17 @@ v1.20.0-sscity 尚未宣布完成：当前未关闭 `#135/#140/#142-#151/#154/#1
 - v1 能力面：capture/snapshot、open、status、back、forward、reload + 已有元素直通。click/type/scroll/inspect/resize 无模型面（需 CDP，后续）。
 
 验证：25/25 ✅ type-check ✅ eslint ✅ `git diff --check` ✅；三补丁标记确认在位 + `node --check` ✅；VSIX 已安装。待实机：重启 VS Code → 集成浏览器开页面 → agent 会话发 browser.capture → 返回该页面 JPEG + url/title。
+
+## v1.24.2 移植轮：v1.22.0-sscity → v1.24.2（2026-09-19，109 commits）
+
+上游区间 `v1.22.0..v1.24.2`（305 commits / 1907 文件 / +169k），B0-B9 十批次全部落地：109 commits、668 文件、+64,531/-10,591。计划与逐 commit 分类：[`docs/COMMUNITY_1_24_MANUAL_MERGE_PLAN.md`](COMMUNITY_1_24_MANUAL_MERGE_PLAN.md) + [`docs/merge-1.24.2/`](merge-1.24.2/)。
+
+**拓扑关键**：上游 `5012de6b8 release v1.22.2` 为无父 orphan（v1.22.1+v1.22.2 内容按 CHANGELOG 分解移植）；分类初期"orphan 引入 draft-target/markdownCore/sidebar 子目录"的说法已核实为误（均为 v1.22.0 前既有，fork 长期自研替换）。
+
+**批次**：B0 orphan 基线（22c：exe.dev+XDG、文件/渲染修复、git/worktree 簇、服务端消息队列+prompt history、project actions、零散）→ B1 settings registry（5c：fork 保 DesktopSettings canonical + registry 反向绑定、双侧 settings-registry.json、project.json 项目配置）→ B2 低风险（15c）→ B3 server 功能（16c：ClinePass/Hyper、git applyHunk+健壮性链 serial-refresh/stall-kill/进程树终止、PR diff 端点、proxy 就绪门）→ B4 主题全链路+hunk UI+libghostty-vt 整包+context panel/retention/精确 ID 搜索/KaTeX（12c）→ B5 composer 悬浮（8c：悬浮几何/玻璃/附件内移采纳，fork queue/follow-up 语义分层保留，真实上游序 a16d947a0 最先）→ B6a sidebar 新架构（5c：v1.24.2 rowModel+虚拟化，fork 9 项本地功能重挂，signature 12 项全存活，多服务器分组留 section 层）→ B6b sync/bootstrap 解耦（9c：去 MCP/command 预热、host status map 种子、队列 resync、D5 多服务器按需 bootstrap 重设计）→ B7 vscode/electron（11c：owned 进程收割、shell-environment、ssh-manager 复用/XDG、surfaceAttention、Ollama 校验）→ B8 routing 旗舰（3c：per-task 模型路由全套、contextWindowLimits、Auto 跨重启——fork openchamber-sessions/service.js 重写）。
+
+**范围决策（用户确认）**：D1 orphan 按功能块移植；D2 引入 settings registry；D3=(b) sidebar 跟新架构+重挂；D4 composer 采纳悬浮+保 queue；扩展/SDK 系统（packages/sdk+extensions，103 文件）整轮延后；mobile 按 Mobile 轨道政策；relay 流控（downstream-scheduler）单独轮；mcp-reconnect 不移植（上游 v1.24.0 已删）。
+
+**验证**：signature token 30/30 存活（temp-session-tracker 为移植前已失，文档过时项）；全量 type-check 0 错；web vitest 201 文件/1735 测试；build 全绿。**待人工回归**：多服务器切换、remote session、queue mode（Ctrl+Enter）、全局置顶拖拽、移动端 shared UI、terminal、git hunk 操作、routing 页、VSIX 重装实测。
+
+**已知 flake**：session-assist/runtime.test.js 与 git/service.test.js 满载偶发超时（隔离跑稳过）；ui 全量套件约 290 失败为基线并行/环境问题（与移植文件零交集，多 agent 基线对照复核过）。
