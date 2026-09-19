@@ -353,10 +353,10 @@ describe("finalizeActiveToolsInCompletedMessage", () => {
   } as Part)
 
   test("closes active tool parts of a completed assistant message as interrupted", () => {
-    const completed: Message = {
+    const completed = {
       ...message("msg_1"),
       time: { created: 1, completed: 100 },
-    }
+    } as Message
     const result = materializeSessionSnapshots(
       { message: {}, part: {} },
       "ses_1",
