@@ -18,6 +18,8 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { GoToLineDialog } from './GoToLineDialog';
 import { HtmlFilePreview } from './HtmlFilePreview';
 import { PreviewToggleButton } from './PreviewToggleButton';
+import { createFileContentPoller } from './fileContentPoller';
+import { hasFileStatChanged } from './fileStatChange';
 import { DiagramEditor } from '@/components/diagram';
 import { JsonTreeView } from '@/components/ui/JsonTreeView';
 import { SimpleMarkdownRenderer } from '@/components/chat/MarkdownRenderer';
@@ -317,6 +319,7 @@ const isFileMissingError = (error: unknown): boolean => {
 };
 
 const MAX_VIEW_CHARS = 200_000;
+const MAX_CONTENT_POLL_BYTES = 200_000;
 
 const getFileIcon = (filePath: string, extension?: string): React.ReactNode => {
   return <FileTypeIcon filePath={filePath} extension={extension} />;
@@ -810,6 +813,8 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
   const dialogInputRef = React.useRef<HTMLInputElement>(null);
   const autoSaveTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastLoadedFileStatRef = React.useRef<FileStatSnapshot | null>(null);
+  const lastLoadedFileContentRef = React.useRef('');
+  const lastLoadedFileRevisionRef = React.useRef(0);
   const activeFileLoadIdRef = React.useRef(0);
   const [autoSaveStatus, setAutoSaveStatus] = React.useState<'idle' | 'saved' | 'conflict'>('idle');
   const autoSaveEnabled = useUIStore((state) => state.autoSaveEnabled);
@@ -1432,7 +1437,9 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
     };
   }, [currentDirectory, debouncedSearchQuery, searchFiles, showHidden, showGitignored]);
 
-  const readFile = React.useCallback(async (path: string, options?: { allowOutsideWorkspace?: boolean; optional?: boolean }): Promise<string> => {
+  const readFile = React.useCallback(async (path: string, options?: { allowOutsideWorkspace?: boolean; optional?: boolean; fresh?: boolean }): Promise<string> => {
+    // `fresh` bypasses the content cache and HTTP cache so external-change polling
+    // compares against the file on disk rather than a cached copy.
     if (files.readFile && !serverBaseUrl) {
       const result = await files.readFile(path, { ...options, directory: currentDirectory });
       return result.content ?? '';
@@ -1449,7 +1456,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
     }
     const response = await runtimeFetch(`${resolveApiUrl('/api/fs/read', serverBaseUrl)}?${params.toString()}`, {
       // Avoid conditional requests (304 + empty body).
-      cache: options?.optional ? 'no-store' : 'default',
+      cache: (options?.optional || options?.fresh) ? 'no-store' : 'default',
     });
     if (!response.ok) {
       const error = await response.json().catch(() => ({ error: response.statusText }));
@@ -1539,6 +1546,8 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
         return false;
       }
       setFileContent(draftContent);
+      lastLoadedFileContentRef.current = draftContent;
+      lastLoadedFileRevisionRef.current += 1;
       if (root && selectedFile.path && isPathWithinRoot(selectedFile.path, root)) {
         const relativePath = getDisplayPath(root, selectedFile.path);
         if (relativePath) {
@@ -1690,6 +1699,17 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
     setAutoSaveStatus('idle');
   }, [selectedFile?.path]);
 
+  const applyLoadedTextContent = React.useCallback((content: string) => {
+    lastLoadedFileContentRef.current = content;
+    lastLoadedFileRevisionRef.current += 1;
+    setFileContent(content);
+    diagramXmlRef.current = content;
+    diagramSavedXmlRef.current = content;
+    setDraftContent(content.length > MAX_VIEW_CHARS
+      ? `${content.slice(0, MAX_VIEW_CHARS)}\n\n… truncated …`
+      : content);
+  }, []);
+
   const loadSelectedFile = React.useCallback(async (node: FileNode) => {
     if (!root && !files.readFile) {
       return;
@@ -1758,10 +1778,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
           setLoadedFilePath(node.path);
           return;
         }
-        setFileContent(content);
-        setDraftContent(content.length > MAX_VIEW_CHARS
-          ? `${content.slice(0, MAX_VIEW_CHARS)}\n\n… truncated …`
-          : content);
+        applyLoadedTextContent(content);
         setLoadedFilePath(node.path);
         void readFileStat(node.path, readOptions)
           .then((stat) => {
@@ -1828,7 +1845,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
           setFileLoading(false);
         }
       });
-  }, [expandPaths, files.readFile, isMobile, loadDirectory, mode, readFile, readFileStat, removeOpenPathsByPrefix, root, runtime.isDesktop, searchQuery, setSelectedPath, t]);
+  }, [applyLoadedTextContent, expandPaths, files.readFile, isMobile, loadDirectory, mode, readFile, readFileStat, removeOpenPathsByPrefix, root, runtime.isDesktop, searchQuery, setSelectedPath, t]);
 
   const ensurePathVisible = React.useCallback(async (targetPath: string, includeTarget: boolean) => {
     if (!root) {
@@ -1937,38 +1954,73 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
     setFileContentRevision((revision) => revision + 1);
   }), [selectedFile?.path, serverBaseUrl]);
 
-  // Poll open file for external changes.
-  // When a change is detected, reset loadedFilePath so the effect above
-  // triggers a single reload — no double-load.
+  // Poll open file for external changes. Metadata is compared first so an
+  // unchanged file never reads content, and a changed text file swaps content
+  // in place; only other files fall back to a full reload.
   React.useEffect(() => {
     if (!selectedFile?.path || loadedFilePath !== selectedFile.path) {
       return;
     }
 
+    const selectedPath = selectedFile.path;
+    // draw.io preview edits live in the XML refs, not the draft buffer, so an
+    // in-place content swap has to treat them as unsaved too.
+    const hasUnsavedChanges = () => isDirtyRef.current || (
+      isDrawioFile(selectedPath) && diagramXmlRef.current !== diagramSavedXmlRef.current
+    );
+    // Same exclusions as `isBinaryFile` covers PDFs, `isImageFile` covers SVG.
+    const contentPoller = !isBinaryFile(selectedPath) && !isImageFile(selectedPath) && !contentDetectedBinary
+      ? createFileContentPoller({
+          readContent: () => readFile(selectedPath, {
+            fresh: true,
+            allowOutsideWorkspace: selectedFileReadOptions.allowOutsideWorkspace,
+          }),
+          getLoadedContent: () => lastLoadedFileContentRef.current,
+          getLoadedRevision: () => lastLoadedFileRevisionRef.current,
+          isDirty: hasUnsavedChanges,
+          applyContent: (content) => {
+            // An external write can turn a text file binary; reload so the
+            // binary guards run instead of pasting binary into the editor.
+            if (looksLikeBinaryText(content)) {
+              setLoadedFilePath(null);
+              return;
+            }
+            applyLoadedTextContent(content);
+          },
+        })
+      : null;
+
     let cancelled = false;
+    let polling = false;
     const interval = window.setInterval(() => {
-      if (document.hidden) {
+      if (document.hidden || polling) {
         return;
       }
 
-      void readFileStat(selectedFile.path, selectedFileReadOptions)
-        .then((latestStat) => {
+      polling = true;
+      void readFileStat(selectedPath, selectedFileReadOptions)
+        .then(async (latestStat) => {
           if (cancelled || !latestStat) {
             return;
           }
 
           const previousStat = lastLoadedFileStatRef.current;
-          if (!previousStat || previousStat.path !== selectedFile.path) {
+          if (!previousStat || previousStat.path !== selectedPath) {
             lastLoadedFileStatRef.current = latestStat;
             return;
           }
 
-          const changedByMtime = latestStat.mtimeMs !== undefined
-            && previousStat.mtimeMs !== undefined
-            && latestStat.mtimeMs !== previousStat.mtimeMs;
-          const changedBySize = latestStat.size !== previousStat.size;
+          if (!hasFileStatChanged(previousStat, latestStat)) {
+            return;
+          }
 
-          if (!changedByMtime && !changedBySize) {
+          if (contentPoller && latestStat.size <= MAX_CONTENT_POLL_BYTES) {
+            // Only an observed read retires the change; a dirty buffer or a
+            // failed read leaves the baseline so the next tick retries.
+            const observed = await contentPoller.poll();
+            if (observed && !cancelled) {
+              lastLoadedFileStatRef.current = latestStat;
+            }
             return;
           }
 
@@ -1980,14 +2032,18 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
           // Reset loadedFilePath so the effect above triggers a single reload.
           setLoadedFilePath(null);
         })
-        .catch(() => {});
+        .catch(() => {})
+        .finally(() => {
+          polling = false;
+        });
     }, 2000);
 
     return () => {
       cancelled = true;
+      contentPoller?.dispose();
       window.clearInterval(interval);
     };
-  }, [loadedFilePath, readFileStat, selectedFile?.path, selectedFileReadOptions]);
+  }, [applyLoadedTextContent, contentDetectedBinary, loadedFilePath, readFile, readFileStat, selectedFile?.path, selectedFileReadOptions]);
 
   const discardAndContinue = React.useCallback(() => {
     const nextFile = pendingSelectFileRef.current;
@@ -2524,13 +2580,11 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
     if (!files.writeFile || xml === diagramSavedXmlRef.current) { return false; }
     const result = await files.writeFile(path, xml);
     if (!result?.success) { toast.error(t('filesView.toast.writeFileFailed')); return false; }
-    diagramXmlRef.current = xml;
-    diagramSavedXmlRef.current = xml;
-    setDraftContent(xml);
+    applyLoadedTextContent(xml);
     const stat = await readFileStat(path, selectedFileReadOptions).catch(() => null);
     if (stat) { lastLoadedFileStatRef.current = stat; }
     return true;
-  }, [files, readFileStat, selectedFileReadOptions, t]);
+  }, [applyLoadedTextContent, files, readFileStat, selectedFileReadOptions, t]);
 
   React.useEffect(() => {
     return () => {
