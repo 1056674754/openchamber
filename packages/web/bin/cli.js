@@ -8,6 +8,7 @@ import crypto from 'crypto';
 import { spawn, spawnSync } from 'child_process';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { isModuleCliExecution } from './cli-entry.js';
+import { applyConnectAttemptTimeout } from '../server/lib/network-defaults.js';
 import { cloudflareTunnelProviderCapabilities } from '../server/lib/tunnels/providers/cloudflare.js';
 import { ngrokTunnelProviderCapabilities } from '../server/lib/tunnels/providers/ngrok.js';
 import {
@@ -27,6 +28,12 @@ import {
 import { createCliLifecycle } from './cli-lifecycle.js';
 import { createControlCommands } from './control-commands.js';
 import { createConnectUrlCommand } from './lib/commands-connect-url.js';
+
+// The CLI process performs provider fetches (quota/usage, update notes) under
+// Node/undici, whose happy-eyeballs default aborts each connect attempt after
+// 250ms — distant provider endpoints routinely need longer handshakes, surfacing
+// as "fetch failed" (#3399). No-op on runtimes without the setter.
+applyConnectAttemptTimeout();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);

@@ -13,6 +13,7 @@ import updaterPkg from 'electron-updater';
 import { ElectronSshManager } from './ssh-manager.mjs';
 import { replaceFileWithRetry } from './windows-file-replace.mjs';
 import { hasSameHttpOrigin, loginRemotePasswordAndPersistSession } from './remote-password-login.mjs';
+import { applyConnectAttemptTimeout } from '@openchamber/web/server/lib/network-defaults.js';
 import {
   resolveDefaultHostBootStatus,
   shouldRetryDefaultHostProbe,
@@ -120,6 +121,11 @@ if (isDev) {
 app.setAppUserModelId(APP_USER_MODEL_ID);
 app.commandLine.appendSwitch('proxy-bypass-list', '<-loopback>');
 app.commandLine.appendSwitch('ignore-connections-limit', '127.0.0.1,localhost');
+// This process runs quota/provider fetches under Node/undici, whose happy-eyeballs
+// default aborts each connect attempt after 250ms — distant provider endpoints
+// routinely need longer handshakes, surfacing as "fetch failed" (#3399). No-op on
+// runtimes without the setter.
+applyConnectAttemptTimeout();
 // Workaround for upstream Electron 41 + macOS 26.5 V8/Oilpan GC crash
 // (fontations_ffi / rust_png / cppgc::CollectGarbageInYoungGenerationForTesting
 // + brk 0). Disabling the Rust fontations backend avoids a font-rasterisation
@@ -2834,6 +2840,10 @@ const runSpecChain = (specs, appName) => {
 
 const handleInvoke = async (browserWindow, command, args = {}) => {
   switch (command) {
+    case 'desktop_pick_theme_file': {
+      const { pickThemeFile } = await import('./theme-file-picker.mjs');
+      return pickThemeFile({ showDialog: (options) => dialog.showOpenDialog(browserWindow || undefined, options) });
+    }
     case 'desktop_start_window_drag':
       return null;
 
