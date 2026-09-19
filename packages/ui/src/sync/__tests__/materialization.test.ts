@@ -338,6 +338,53 @@ describe("materializeSessionSnapshots", () => {
   })
 })
 
+describe("finalizeActiveToolsInCompletedMessage", () => {
+  const toolPart = (id: string, status: string): Part => ({
+    id,
+    messageID: "msg_1",
+    sessionID: "ses_1",
+    type: "tool",
+    state: {
+      status,
+      time: { start: 5 },
+      ...(status === "running" ? { input: {}, metadata: {} } : {}),
+      ...(status === "completed" ? { input: {}, output: "done", metadata: {} } : {}),
+    },
+  } as Part)
+
+  test("closes active tool parts of a completed assistant message as interrupted", () => {
+    const completed: Message = {
+      ...message("msg_1"),
+      time: { created: 1, completed: 100 },
+    }
+    const result = materializeSessionSnapshots(
+      { message: {}, part: {} },
+      "ses_1",
+      [{ info: completed, parts: [toolPart("prt_run", "running"), toolPart("prt_done", "completed")] }],
+    )
+
+    const running = result.part.msg_1.find((item) => item.id === "prt_run") as { state: { status: string; error?: string; time?: { end?: number } } }
+    expect(running.state.status).toBe("error")
+    expect(running.state.error).toBe("Interrupted")
+    expect(running.state.time?.end).toBe(100)
+
+    const done = result.part.msg_1.find((item) => item.id === "prt_done") as { state: { status: string } }
+    expect(done.state.status).toBe("completed")
+  })
+
+  test("leaves active tool parts untouched while the assistant message is still open", () => {
+    const result = materializeSessionSnapshots(
+      { message: {}, part: {} },
+      "ses_1",
+      [{ info: message("msg_1"), parts: [toolPart("prt_run", "running")] }],
+    )
+
+    const running = result.part.msg_1[0] as { state: { status: string; error?: string } }
+    expect(running.state.status).toBe("running")
+    expect(running.state.error).toBeUndefined()
+  })
+})
+
 describe("getSessionMaterializationStatus", () => {
   test("requires assistant parts for renderable cached state", () => {
     const state = {

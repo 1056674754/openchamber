@@ -6,6 +6,8 @@ import { compareMessagesChronologically } from './message-ordering'
 
 const STREAMING_PART_FIELDS = ["text", "output"] as const
 
+const ACTIVE_TOOL_STATUSES = new Set(["pending", "running"])
+
 export type MaterializedMessageRecord = {
   info: Message
   parts: Part[]
@@ -55,6 +57,35 @@ function normalizeMaterializedMessageInfo(info: Message, parts: Part[]): Message
     ...info,
     finish,
   } as Message
+}
+
+// A completed assistant message can still carry tool parts stuck in an active
+// status when the terminal tool event was lost (cold reload, restart race).
+// Close them as interrupted with an end time so the UI never renders a tool
+// as running forever.
+function finalizeActiveToolsInCompletedMessage(message: Message, parts: Part[]): Part[] {
+  if (message.role !== "assistant" || message.time.completed === undefined) return parts
+
+  const completedAt = message.time.completed
+  let reconciledParts = parts
+  for (let index = 0; index < parts.length; index += 1) {
+    const part = parts[index]
+    if (part.type !== "tool" || !ACTIVE_TOOL_STATUSES.has(part.state.status)) continue
+
+    const start = getPartStateTime(part)?.start ?? completedAt
+    if (reconciledParts === parts) reconciledParts = [...parts]
+    reconciledParts[index] = {
+      ...part,
+      state: {
+        ...part.state,
+        status: "error" as const,
+        error: "Interrupted",
+        time: { start, end: completedAt },
+      },
+    }
+  }
+
+  return reconciledParts
 }
 
 function haveEquivalentPartSnapshots(left: Part[] | undefined, right: Part[]): boolean {
@@ -244,12 +275,13 @@ export function materializeSessionSnapshots(
     if (isPrepend && nextPartState[messageID]) continue
 
     const existing = nextPartState[messageID]
-    const nextParts = mergeMaterializedParts(
+    const mergedParts = mergeMaterializedParts(
       existing,
       sortParts(record.parts ?? [], skipPartTypes),
       skipPartTypes,
       record.info.role === "assistant" && !isReplace,
     )
+    const nextParts = finalizeActiveToolsInCompletedMessage(record.info, mergedParts)
     if (haveEquivalentPartSnapshots(existing, nextParts)) continue
 
     // Preserve authoritative empty snapshots: an absent key means parts have not materialized yet.

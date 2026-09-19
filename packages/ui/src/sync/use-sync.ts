@@ -8,7 +8,7 @@ import {
   mergeOptimisticPage,
   type OptimisticItem,
 } from "./optimistic"
-import { dropCachedSessionMessageRecordsSnapshots, resyncBlockingRequestsForDirectory, useDirectoryStore, useSyncDirectory, useChildStoreManager } from "./sync-context"
+import { dropCachedSessionMessageRecordsSnapshots, recoverInterruptedTurnAfterMessageLoad, resyncBlockingRequestsForDirectory, useDirectoryStore, useSyncDirectory, useChildStoreManager } from "./sync-context"
 import { resolveSdkForDirectory } from "./session-actions"
 import { requireExistingSessionDirectory } from "./session-routing"
 import { useSessionUIStore } from "./session-ui-store"
@@ -573,7 +573,12 @@ export function useSync() {
         }
         const cachedReady = cached && !needsVSCodeInitialTurnBoundary
         const hasSession = Binary.search(current.session, sessionID, (s) => s.id).found
-        if (cachedReady && hasSession && !force) return
+        if (cachedReady && hasSession && !force) {
+          // The cached transcript can postdate the status snapshot that
+          // settled this session; re-check an interrupted trailing turn.
+          await recoverInterruptedTurnAfterMessageLoad(target.directory, target.store, sessionID, target.serverId, isStale)
+          return
+        }
 
         if (!force && !needsVSCodeInitialTurnBoundary) {
           if (shouldSkipSessionPrefetch({
@@ -649,6 +654,10 @@ export function useSync() {
             }),
             loadChildren,
           ])
+        }
+
+        if (!isStale()) {
+          await recoverInterruptedTurnAfterMessageLoad(target.directory, target.store, sessionID, target.serverId, isStale)
         }
 
         if (force) {

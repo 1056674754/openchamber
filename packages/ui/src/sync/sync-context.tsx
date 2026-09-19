@@ -524,6 +524,56 @@ const applyInterruptedTurnSettlement = (store: StoreApi<DirectoryStore>, session
   })
 }
 
+function hasUnfinishedAssistantTurn(state: State, sessionID: string): boolean {
+  const messages = state.message[sessionID] ?? []
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const candidate = messages[index]
+    if (candidate.role === "user") return false
+    if (candidate.role !== "assistant") continue
+    return candidate.time.completed === undefined
+  }
+  return false
+}
+
+/**
+ * Re-checks a hydrated session whose trailing assistant turn is unfinished.
+ * A cold reload can hydrate messages after the initial status snapshot
+ * settled that session, so the settle decision must be repeated once the
+ * message records are available. If no per-session status exists yet, one
+ * authoritative snapshot is fetched first; a successful snapshot that omits
+ * the session establishes it as idle.
+ */
+export async function recoverInterruptedTurnAfterMessageLoad(
+  directory: string,
+  store: StoreApi<DirectoryStore>,
+  sessionID: string,
+  serverId: string,
+  isStale?: () => boolean,
+): Promise<void> {
+  if (isStale?.()) return
+  const initial = store.getState()
+  if (!hasUnfinishedAssistantTurn(initial, sessionID)) return
+  if ((initial.question?.[sessionID] ?? []).length > 0) return
+  if ((initial.permission?.[sessionID] ?? []).length > 0) return
+
+  if (!initial.session_status?.[sessionID]) {
+    const snapshot = await getSessionStatusForServer(directory, serverId)
+    if (snapshot === null || isStale?.()) return
+
+    // Do not overwrite a live status event that arrived while the snapshot was
+    // in flight. The snapshot only fills the previously unknown state.
+    if (!store.getState().session_status?.[sessionID]) {
+      const status = toSessionStatus(snapshot[sessionID]) ?? ({ type: "idle" } as SessionStatus)
+      store.setState((state) => ({
+        session_status: { ...state.session_status, [sessionID]: status },
+      }))
+      useGlobalSessionsStore.getState().upsertStatus(sessionID, status)
+    }
+  }
+
+  applyInterruptedTurnSettlement(store, sessionID)
+}
+
 async function listPendingQuestionsForServer(
   directory: string,
   serverId: string,
@@ -1227,7 +1277,9 @@ async function resyncDirectoryAfterReconnect(
   routingIndex: EventRoutingIndex,
   serverId: string,
   sdk: OpencodeClient,
+  isStale?: () => boolean,
 ) {
+  if (isStale?.()) return true
   const current = store.getState()
   const recoveryPlan = getReconnectRecoveryPlan(current, {
     directory,
@@ -1237,6 +1289,7 @@ async function resyncDirectoryAfterReconnect(
   if (authoritySessionIds.length === 0) return true
 
   const statusesSynced = await reconcileSessionStatusCandidates(directory, store, serverId, authoritySessionIds)
+  if (isStale?.()) return true
 
   const scopedClient = resolveSdkForDirectory(directory, undefined, serverId) ?? sdk
   const withReconnectTimeout = <T,>(promise: Promise<T>, label: string): Promise<T> => (
@@ -1320,6 +1373,10 @@ async function resyncDirectoryAfterReconnect(
     setIndexedSessionMessages(routingIndex, sessionId, directory, nextMessages)
     serverRegistry.indexSession(nextSession.id, serverId)
 
+    // Messages may have arrived after the status snapshot settled this
+    // session; re-check an interrupted trailing turn now that both exist.
+    await recoverInterruptedTurnAfterMessageLoad(directory, store, sessionId, serverId, isStale)
+
     const todoResult = await scopedClient.session.todo({ sessionID: sessionId }).catch(() => null)
     if (todoResult?.data) {
       store.setState((state: DirectoryStore) => ({
@@ -1330,13 +1387,16 @@ async function resyncDirectoryAfterReconnect(
     return true
   })
 
-  const blockingRequests = await resyncBlockingRequestsForDirectory(
-    directory,
-    store,
-    authoritySessionIds,
-    { serverId, sdk },
-  )
+  const blockingRequests = isStale?.()
+    ? { questions: true, permissions: true }
+    : await resyncBlockingRequestsForDirectory(
+      directory,
+      store,
+      authoritySessionIds,
+      { serverId, sdk },
+    )
 
+  if (isStale?.()) return true
   ingestDirectoryStateIntoRoutingIndex(routingIndex, directory, store.getState())
   return materializationsSynced
     && statusesSynced
@@ -2097,7 +2157,10 @@ export function SyncProvider(props: {
         }
         const { isConnected } = useConfigStore.getState().getConnectionState(serverId)
         if (isConnected && store.getState().status === "complete") {
-          void resyncDirectoryAfterReconnect(directory, store, routingIndex, serverId, props.sdk).catch(() => {})
+          // A bootstrap retry may have replaced the directory store mid-flight;
+          // the resync must not write into the superseded store.
+          const isStale = () => childStores.children.get(directory) !== store
+          void resyncDirectoryAfterReconnect(directory, store, routingIndex, serverId, props.sdk, isStale).catch(() => {})
         }
       }).finally(() => {
         bootingDirs.delete(directory)
@@ -2218,7 +2281,10 @@ export function SyncProvider(props: {
       if (reconnectResyncing.has(directory)) return
 
       reconnectResyncing.add(directory)
-      void resyncDirectoryAfterReconnect(directory, store, routingIndex, serverId, props.sdk)
+      // Runtime switches and directory disposal can replace or drop the store
+      // mid-resync; stale responses must not land in the replaced store.
+      const isStale = () => childStores.children.get(directory) !== store
+      void resyncDirectoryAfterReconnect(directory, store, routingIndex, serverId, props.sdk, isStale)
         .then((synced) => {
           if (!synced) {
             handleReconnectFailure(directory)
