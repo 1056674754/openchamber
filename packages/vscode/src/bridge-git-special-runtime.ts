@@ -1,6 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as gitService from './gitService';
+import { chooseBridgeGitGenerationModel, type BridgeGitGenerationPayloadModel } from './bridge-git-generation-model';
 import type { BridgeContext, BridgeResponse } from './bridge';
 
 type BridgeMessageInput = {
@@ -16,7 +17,6 @@ type SpecialGitDeps = {
   execGit: (args: string[], cwd: string) => Promise<ExecGitResult>;
 };
 
-const BRIDGE_ZEN_DEFAULT_MODEL = 'gpt-5-nano';
 const BRIDGE_GIT_GENERATION_TIMEOUT_MS = 2 * 60 * 1000;
 const BRIDGE_GIT_GENERATION_POLL_INTERVAL_MS = 500;
 const BRIDGE_GIT_MODEL_CATALOG_CACHE_TTL_MS = 30 * 1000;
@@ -81,7 +81,7 @@ const fetchBridgeGitModelCatalog = async (
 };
 
 const resolveBridgeGitGenerationModel = async (
-  payloadModel: { providerId?: string; modelId?: string; zenModel?: string },
+  payloadModel: BridgeGitGenerationPayloadModel,
   settings: Record<string, unknown>,
   apiUrl: string,
   authHeaders?: Record<string, string>
@@ -100,24 +100,17 @@ const resolveBridgeGitGenerationModel = async (
     return catalog.has(`${providerID}/${modelID}`);
   };
 
-  const requestProviderId = typeof payloadModel.providerId === 'string' ? payloadModel.providerId.trim() : '';
-  const requestModelId = typeof payloadModel.modelId === 'string' ? payloadModel.modelId.trim() : '';
-  if (requestProviderId && requestModelId && hasModel(requestProviderId, requestModelId)) {
-    return { providerID: requestProviderId, modelID: requestModelId };
-  }
-
+  // Fork: the commit-message picker's saved pair (gitProviderId/gitModelId)
+  // keeps its precedence; upstream dropped it for the small-model override.
   const settingsProviderId = readStringField(settings, 'gitProviderId');
   const settingsModelId = readStringField(settings, 'gitModelId');
   if (settingsProviderId && settingsModelId && hasModel(settingsProviderId, settingsModelId)) {
     return { providerID: settingsProviderId, modelID: settingsModelId };
   }
 
-  const payloadZenModel = typeof payloadModel.zenModel === 'string' ? payloadModel.zenModel.trim() : '';
-  const settingsZenModel = readStringField(settings, 'zenModel');
-  return {
-    providerID: 'zen',
-    modelID: payloadZenModel || settingsZenModel || BRIDGE_ZEN_DEFAULT_MODEL,
-  };
+  // Then upstream's chain: the request's explicit model, the user's small-model
+  // override, the zen fallback.
+  return chooseBridgeGitGenerationModel(payloadModel, settings, hasModel);
 };
 
 const extractTextFromMessageParts = (parts: unknown): string => {
