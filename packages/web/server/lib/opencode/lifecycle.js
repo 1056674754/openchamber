@@ -396,8 +396,8 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     return parts.length > 0 ? parts.join('\n\n') : 'No stdout/stderr captured';
   };
 
-  const createManagedOpenCodeServerProcess = async ({ hostname, port, timeout, cwd, env: processEnv, shellEnvKeysCount = 0 }) => {
-    let binary = (process.env.OPENCODE_BINARY || 'opencode').trim() || 'opencode';
+  const createManagedOpenCodeServerProcess = async ({ resolvedBinary, hostname, port, timeout, cwd, env: processEnv, shellEnvKeysCount = 0 }) => {
+    let binary = (resolvedBinary || process.env.OPENCODE_BINARY || 'opencode').trim() || 'opencode';
     let args = ['serve', '--hostname', hostname, '--port', String(port)];
     let launchWrapperType = null;
 
@@ -752,7 +752,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     );
 
     await applyOpencodeBinaryFromSettings({ strict: true });
-    ensureOpencodeCliEnv();
+    const resolvedBinary = ensureOpencodeCliEnv();
     const openCodePassword = await ensureLocalOpenCodeServerPassword({ rotateManaged: true });
     const envPath = typeof buildManagedOpenCodePath === 'function'
       ? buildManagedOpenCodePath()
@@ -766,6 +766,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
 
     try {
       const serverInstance = await createManagedOpenCodeServerProcess({
+        resolvedBinary,
         hostname: env.ENV_CONFIGURED_OPENCODE_HOSTNAME,
         port: spawnPort,
         timeout: startupTimeoutMs,
