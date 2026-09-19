@@ -66,7 +66,6 @@ import { SessionGroupSection } from './sidebar/SessionGroupSection';
 import { SidebarHeader } from './sidebar/SidebarHeader';
 import { SidebarActivitySections, type ActivitySection } from './sidebar/SidebarActivitySections';
 import { SidebarFooter } from './sidebar/SidebarFooter';
-import { SidebarProjectsList } from './sidebar/SidebarProjectsList';
 import { SessionSidebarList } from './sidebar/SessionSidebarList';
 import { SessionSidebarFolderItem } from './sidebar/folders/SessionSidebarFolderItem';
 import { SessionNodeItem } from './sidebar/SessionNodeItem';
@@ -2529,7 +2528,6 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
         projectRepoStatus={projectRepoStatus}
         showMoreGroupSessions={showMoreGroupSessions}
         resetGroupSessionLimit={resetGroupSessionLimit}
-        onSessionDroppedOnFolder={handleSessionDroppedOnFolder}
         mobileVariant={mobileVariant}
         alwaysShowActions={alwaysShowSidebarActions}
         activeProjectId={activeProjectId}
