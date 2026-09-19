@@ -26,6 +26,38 @@ type Args = {
 
 const isArchivedSession = (session: Session): boolean => Boolean(session.time?.archived);
 
+/** Queries beginning with `ses_` match only the full session ID, case-insensitively
+ * and ignoring surrounding whitespace: no partial IDs, no title/directory fallback,
+ * and no archived sessions. Ancestors stay as tree context for a matching child. */
+export const filterSessionNodesForSearchQuery = (
+  nodes: SessionNode[],
+  query: string,
+  buildSessionSearchText: (session: Session) => string,
+): SessionNode[] => {
+  if (!query) {
+    return nodes;
+  }
+
+  const normalizedQuery = query.trim().toLowerCase();
+  const isIdQuery = normalizedQuery.startsWith('ses_');
+
+  return nodes.flatMap((node) => {
+    const nodeMatches = isIdQuery
+      ? !isArchivedSession(node.session) && node.session.id.toLowerCase() === normalizedQuery
+      : buildSessionSearchText(node.session).includes(query);
+    if (nodeMatches) {
+      return [node];
+    }
+
+    const filteredChildren = filterSessionNodesForSearchQuery(node.children, query, buildSessionSearchText);
+    if (filteredChildren.length === 0) {
+      return [];
+    }
+
+    return [{ ...node, children: filteredChildren }];
+  });
+};
+
 export const useSessionGrouping = (args: Args) => {
   const { t } = useI18n();
   const buildGroupSearchText = React.useCallback((group: SessionGroup): string => {
@@ -40,23 +72,7 @@ export const useSessionGrouping = (args: Args) => {
 
   const filterSessionNodesForSearch = React.useCallback(
     (nodes: SessionNode[], query: string): SessionNode[] => {
-      if (!query) {
-        return nodes;
-      }
-
-      return nodes.flatMap((node) => {
-        const nodeMatches = buildSessionSearchText(node.session).includes(query);
-        if (nodeMatches) {
-          return [node];
-        }
-
-        const filteredChildren = filterSessionNodesForSearch(node.children, query);
-        if (filteredChildren.length === 0) {
-          return [];
-        }
-
-        return [{ ...node, children: filteredChildren }];
-      });
+      return filterSessionNodesForSearchQuery(nodes, query, buildSessionSearchText);
     },
     [buildSessionSearchText],
   );

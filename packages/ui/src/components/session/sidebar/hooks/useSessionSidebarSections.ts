@@ -132,14 +132,17 @@ export const useSessionSidebarSections = (args: Args) => {
 
     const countNodes = (nodes: SessionNode[]): number => nodes.reduce((total, node) => total + 1 + countNodes(node.children), 0);
 
+    // Exact-ID queries never fall back to group labels or folder names.
+    const isIdQuery = normalizedSessionSearchQuery.trim().toLowerCase().startsWith('ses_');
+
     visibleProjectSections.forEach((section) => {
       section.groups.forEach((group) => {
         const filteredNodes = filterSessionNodesForSearch(group.sessions, normalizedSessionSearchQuery);
         const matchedSessionCount = countNodes(filteredNodes);
-        const groupMatches = buildGroupSearchText(group).includes(normalizedSessionSearchQuery);
+        const groupMatches = isIdQuery ? false : buildGroupSearchText(group).includes(normalizedSessionSearchQuery);
         const scopeKey = normalizePath(group.directory ?? null);
         const scopeFolders = scopeKey ? (foldersMap[scopeKey] ?? []) : [];
-        const folderNameMatchCount = scopeFolders.filter((folder) => folder.name.toLowerCase().includes(normalizedSessionSearchQuery)).length;
+        const folderNameMatchCount = isIdQuery ? 0 : scopeFolders.filter((folder) => folder.name.toLowerCase().includes(normalizedSessionSearchQuery)).length;
 
         result.set(group, {
           filteredNodes,

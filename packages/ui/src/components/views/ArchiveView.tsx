@@ -84,6 +84,10 @@ export function ArchiveView(): React.ReactNode {
 
   const filteredSessions = React.useMemo(() => {
     if (normalizedQuery) {
+      // Exact session-ID queries match only the full ID, case-insensitively.
+      if (normalizedQuery.startsWith('ses_')) {
+        return sortedSessions.filter((session) => session.id.toLowerCase() === normalizedQuery);
+      }
       return sortedSessions.filter((session) => (
         (session.title ?? '').toLowerCase().includes(normalizedQuery)
       ));

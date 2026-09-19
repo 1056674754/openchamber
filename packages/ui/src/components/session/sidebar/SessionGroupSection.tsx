@@ -331,7 +331,10 @@ function SessionGroupSectionImpl(props: Props): React.ReactNode {
         return true;
       }
 
-      const folderMatches = entry.folder.name.toLowerCase().includes(normalizedSessionSearchQuery);
+      // Exact-ID queries retain folders containing results, but never folders
+      // merely named after the queried ID.
+      const isIdQuery = normalizedSessionSearchQuery.trim().toLowerCase().startsWith('ses_');
+      const folderMatches = !isIdQuery && entry.folder.name.toLowerCase().includes(normalizedSessionSearchQuery);
       if (folderMatches || entry.nodes.length > 0) {
         keepByFolderId.set(folderId, true);
         return true;
