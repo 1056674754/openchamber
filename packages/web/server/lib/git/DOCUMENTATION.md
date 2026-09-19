@@ -38,6 +38,7 @@ The following functions are exported and used by the web server:
 - `getFileDiff(directory, { path, staged })`: Get original and modified file contents for a single file (handles images as data URLs and symbolic links as their link-target text).
 - `collectDiffs(directory, files)`: Collect diff output for multiple files.
 - `revertFile(directory, filePath)`: Revert a file to HEAD state.
+- `applyHunk(directory, filePath, options)`: Apply a single-hunk patch via `git apply`. `options.action` is `stage` (`git apply --cached`), `unstage` (`git apply --cached --reverse`), or `discard` (`git apply --reverse` in the working tree). Inside the index mutation queue, the server verifies that the complete patch exactly matches one current three-context-line hunk for that file and scope, then runs `--check` before applying. Stale, historical and multi-file patches fail with a refresh error. Temporary patch files are removed on success and failure; hunk content retains CRLF bytes. Exposed as `POST /api/git/apply-hunk`.
 
 ### Branch Operations
 - `getBranches(directory)`: Get list of local and remote branches (filtered to active remote branches).

@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import simpleGit from 'simple-git';
 
 import {
+  applyHunk,
   checkoutBranch,
   checkoutCommit,
   cherryPick,
@@ -414,6 +415,124 @@ describe('git index path validation', () => {
   it('rejects unstage paths outside the repository before invoking git', async () => {
     await expect(unstageFiles('/repo', ['../secret.txt'])).rejects.toThrow(
       'Path is outside repository: ../secret.txt'
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// applyHunk (per-hunk stage / unstage / discard)
+// ---------------------------------------------------------------------------
+
+// Upstream exercises the client splitter (ui patchFileDiff) directly, but that
+// module imports @pierre/diffs, which needs a DOM at import time. Mirror the
+// upstream CRLF-preserving splitter algorithm here instead — the ui package
+// keeps its own tests for it.
+const splitHunks = (patch) => {
+  if (!patch) return [];
+
+  // Git's structural newlines are LF. A CR before LF inside a hunk belongs
+  // to the file contents and must survive an apply/reverse round trip.
+  const starts = [...patch.matchAll(/^@@\s/gm)].map((match) => match.index);
+  if (starts.length === 0) return [];
+  const header = patch.slice(0, starts[0]);
+  return starts.map((start, index) => {
+    const hunk = header + patch.slice(start, starts[index + 1] ?? patch.length);
+    return hunk.endsWith('\n') ? hunk : `${hunk}\n`;
+  });
+};
+
+const writeFile = (repo, name, contents) =>
+  fs.promises.writeFile(path.join(repo, name), contents, 'utf8');
+
+// Build a 20-line file so changes on line 1 and line 20 stay in separate hunks
+// (default 3-line diff context would merge closer edits into one hunk).
+const makeFile = (first, last) =>
+  [first, ...Array.from({ length: 18 }, (_, i) => `line${i + 2}`), last].join('\n') + '\n';
+const ORIGINAL_FILE = makeFile('line1', 'line20');
+const EDITED_FILE = makeFile('TOP', 'BOTTOM');
+
+const readWorking = (repo) => fs.promises.readFile(path.join(repo, 'file.txt'), 'utf8').then((c) => c.replace(/\r\n/g, '\n'));
+const readStaged = async (git) => (await git.raw(['show', ':file.txt'])).replace(/\r\n/g, '\n');
+
+describe('applyHunk', () => {
+  it('stages successive hunks and never discards a stale staged or committed patch', async () => {
+    if (!canRunGit()) return;
+    const { tmpDir, git } = await createTempRepo();
+    const original = Array.from({ length: 60 }, (_, index) => `line${index}`);
+    const changed = [...original];
+    changed[1] = 'FIRST'; changed[25] = 'SECOND'; changed[50] = 'THIRD';
+    await writeFile(tmpDir, 'file.txt', original.join('\n') + '\n');
+    await git.add('file.txt'); await git.commit('Initial');
+    await writeFile(tmpDir, 'file.txt', changed.join('\n') + '\n');
+    const historical = splitHunks(await getDiff(tmpDir, { path: 'file.txt' }));
+    expect(historical).toHaveLength(3);
+    await applyHunk(tmpDir, 'file.txt', { patch: historical[0], action: 'stage' });
+    const remaining = splitHunks(await getDiff(tmpDir, { path: 'file.txt' }));
+    expect(remaining).toHaveLength(2);
+    await applyHunk(tmpDir, 'file.txt', { patch: remaining[0], action: 'stage' });
+    const stalePath = path.join(tmpDir, 'stale.patch');
+    await fs.promises.writeFile(stalePath, historical[0]);
+    // Git's reverse applicability check accepts it, but it is no longer an
+    // unstaged hunk. The server must reject it before touching the working file.
+    await git.raw(['apply', '--reverse', '--check', stalePath]);
+    await expect(applyHunk(tmpDir, 'file.txt', { patch: historical[0], action: 'discard' })).rejects.toThrow('refresh and try again');
+    expect(await readWorking(tmpDir)).toBe(changed.join('\n') + '\n');
+    const last = splitHunks(await getDiff(tmpDir, { path: 'file.txt' }));
+    expect(last).toHaveLength(1);
+    await applyHunk(tmpDir, 'file.txt', { patch: last[0], action: 'discard' });
+    changed[50] = original[50];
+    expect(await readWorking(tmpDir)).toBe(changed.join('\n') + '\n');
+    expect(await readStaged(git)).toBe(changed.join('\n') + '\n');
+    const staged = splitHunks(await getDiff(tmpDir, { path: 'file.txt', staged: true }));
+    await applyHunk(tmpDir, 'file.txt', { patch: staged[0], action: 'unstage' });
+    expect(await readWorking(tmpDir)).toBe(changed.join('\n') + '\n');
+    await git.add('file.txt'); await git.commit('Committed changes');
+    await expect(applyHunk(tmpDir, 'file.txt', { patch: historical[0], action: 'discard' })).rejects.toThrow('refresh and try again');
+  });
+
+  it.each(['crlf', 'mixed'])('preserves %s file bytes through stage, unstage and discard', async (endings) => {
+    if (!canRunGit()) return;
+    const { tmpDir, git } = await createTempRepo();
+    await git.addConfig('core.autocrlf', 'false');
+    const serialize = (first, last) => Array.from({ length: 30 }, (_, index) => {
+      const text = index === 0 ? first : index === 29 ? last : `line${index}`;
+      return text + (endings === 'crlf' || index % 2 === 0 ? '\r\n' : '\n');
+    }).join('');
+    const original = serialize('first', 'last');
+    const edited = serialize('FIRST', 'LAST');
+    await writeFile(tmpDir, 'file.txt', original);
+    await git.add('file.txt'); await git.commit('Initial');
+    await writeFile(tmpDir, 'file.txt', edited);
+    const hunks = splitHunks(await getDiff(tmpDir, { path: 'file.txt' }));
+    await applyHunk(tmpDir, 'file.txt', { patch: hunks[0], action: 'stage' });
+    expect(await git.raw(['show', ':file.txt'])).toBe(serialize('FIRST', 'last'));
+    const staged = splitHunks(await getDiff(tmpDir, { path: 'file.txt', staged: true }));
+    await applyHunk(tmpDir, 'file.txt', { patch: staged[0], action: 'unstage' });
+    expect(await git.raw(['show', ':file.txt'])).toBe(original);
+    const working = splitHunks(await getDiff(tmpDir, { path: 'file.txt' }));
+    await applyHunk(tmpDir, 'file.txt', { patch: working[0], action: 'discard' });
+    expect(await fs.promises.readFile(path.join(tmpDir, 'file.txt'), 'utf8')).toBe(serialize('first', 'LAST'));
+  });
+
+  it('rejects extra files hidden before the requested patch', async () => {
+    if (!canRunGit()) return;
+    const { tmpDir, git } = await createTempRepo();
+    for (const name of ['file.txt', 'other.txt']) await writeFile(tmpDir, name, ORIGINAL_FILE);
+    await git.add('.'); await git.commit('Initial');
+    for (const name of ['file.txt', 'other.txt']) await writeFile(tmpDir, name, EDITED_FILE);
+    const other = splitHunks(await getDiff(tmpDir, { path: 'other.txt' }))[0];
+    const requested = splitHunks(await getDiff(tmpDir, { path: 'file.txt' }))[0];
+    await expect(applyHunk(tmpDir, 'file.txt', { patch: requested + other, action: 'stage' })).rejects.toThrow('refresh and try again');
+    expect(await git.raw(['diff', '--cached'])).toBe('');
+  });
+
+  it('rejects an invalid action or a patch without a hunk header', async () => {
+    const { tmpDir } = await createTempRepo();
+    await expect(applyHunk(tmpDir, 'file.txt', { patch: '@@ -1 +1 @@\n a\n', action: 'bogus' })).rejects.toThrow(
+      'Invalid hunk action'
+    );
+    await expect(applyHunk(tmpDir, 'file.txt', { patch: 'no hunk here', action: 'stage' })).rejects.toThrow(
+      'hunk header'
     );
   });
 });
