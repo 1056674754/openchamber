@@ -167,3 +167,90 @@ describe('VS Code system bridge api:workspace:addFolder', () => {
     }, undefined, deps)).resolves.toMatchObject({ success: false, error: 'Directory path is required' });
   });
 });
+
+describe('VS Code system bridge api:opencode/health', () => {
+  const originalFetch = globalThis.fetch;
+
+  test('normalizes OpenCode /global/health to {healthy:true}', async () => {
+    const fetchMock = mock(async () => ({
+      ok: true,
+      status: 200,
+      statusText: 'OK',
+      json: async () => ({ healthy: true, version: '1.0.0' }),
+    }));
+    globalThis.fetch = fetchMock;
+
+    try {
+      const response = await handleSystemBridgeMessage({
+        id: 'health-ok',
+        type: 'api:opencode/health',
+      }, {
+        manager: {
+          getApiUrl: () => 'http://127.0.0.1:41235',
+          getOpenCodeAuthHeaders: () => ({ Authorization: 'Bearer token' }),
+        },
+      }, deps);
+
+      expect(response).toEqual({
+        id: 'health-ok',
+        type: 'api:opencode/health',
+        success: true,
+        data: { healthy: true },
+      });
+      const [url, init] = fetchMock.mock.calls[0];
+      expect(url).toBe('http://127.0.0.1:41235/global/health');
+      expect(init.headers).toEqual({ Accept: 'application/json', Authorization: 'Bearer token' });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('reports healthy:false when the health endpoint fails', async () => {
+    globalThis.fetch = mock(async () => ({
+      ok: false,
+      status: 503,
+      statusText: 'Service Unavailable',
+      json: async () => null,
+    }));
+
+    try {
+      const response = await handleSystemBridgeMessage({
+        id: 'health-down',
+        type: 'api:opencode/health',
+      }, {
+        manager: {
+          getApiUrl: () => 'http://127.0.0.1:41235',
+          getOpenCodeAuthHeaders: () => ({}),
+        },
+      }, deps);
+
+      expect(response).toMatchObject({
+        id: 'health-down',
+        type: 'api:opencode/health',
+        success: true,
+        data: { healthy: false, error: 'Service Unavailable' },
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('reports healthy:false when the manager has no API URL', async () => {
+    const response = await handleSystemBridgeMessage({
+      id: 'health-no-manager',
+      type: 'api:opencode/health',
+    }, {
+      manager: {
+        getApiUrl: () => undefined,
+        getOpenCodeAuthHeaders: () => ({}),
+      },
+    }, deps);
+
+    expect(response).toEqual({
+      id: 'health-no-manager',
+      type: 'api:opencode/health',
+      success: true,
+      data: { healthy: false, error: 'OpenCode manager unavailable' },
+    });
+  });
+});

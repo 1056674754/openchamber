@@ -2116,7 +2116,11 @@ serverRegistry.register({
   label: "Local",
   baseUrl: opencodeClient.getBaseUrl(),
 });
-serverRegistry.startHealthPolling(30_000);
+// Delay the first probe until after app bootstrap: in the VS Code webview the
+// fetch shim installs during main.tsx evaluation, and a module-eval-time probe
+// would hit the unpatched native fetch (net::ERR_ABORTED 403) and mark the
+// default server unhealthy until the next interval.
+setTimeout(() => serverRegistry.startHealthPolling(30_000), 1_500);
 
 // HMR self-accept boundary: prevents re-eval of this singleton from
 // invalidating the ~35 consumer modules whose `opencodeClient` import binding

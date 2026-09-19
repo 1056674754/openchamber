@@ -24,7 +24,6 @@ import { getSafeStorage } from '@/stores/utils/safeStorage';
 import { useSessionPinnedStore } from '@/stores/useSessionPinnedStore';
 import { useGitStore, useGitAllBranches, useGitRepoStatusMap } from '@/stores/useGitStore';
 import type { DesktopSettings } from '@/lib/desktop';
-import { isVSCodeRuntime } from '@/lib/desktop';
 import { refreshDesktopSettingsFromHost, syncDesktopSettings, updateDesktopSettings } from '@/lib/persistence';
 import {
   SESSION_PINNED_BY_PROJECT_STORAGE_KEY,
@@ -312,7 +311,8 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   showOnlyMainWorkspace = false,
 }) => {
   const { t } = useI18n();
-  const isVSCode = React.useMemo(() => isVSCodeRuntime(), []);
+  const runtimeAPIs = useRuntimeAPIs();
+  const isVSCode = runtimeAPIs.runtime.isVSCode;
   const [isSessionSearchOpen, setIsSessionSearchOpen] = React.useState(false);
   const [sessionSearchQuery, setSessionSearchQuery] = React.useState('');
   const [serverSearchSessions, setServerSearchSessions] = React.useState<Session[]>([]);
@@ -980,7 +980,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
   const isDesktopShellRuntime = React.useMemo(() => isDesktopShell(), []);
 
   React.useEffect(() => {
-    if (!sidebarActive) return;
+    if (!sidebarActive || isVSCode) return;
 
     const loadTempSessions = async () => {
       try {
@@ -998,13 +998,17 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
     }, 30000);
 
     return () => clearInterval(interval);
-  }, [sidebarActive]);
+  }, [isVSCode, sidebarActive]);
 
   const { isTablet } = useDeviceInfo();
   const alwaysShowSidebarActions = mobileVariant || isTablet;
 
-  // Global pins only - project-scoped pins are resolved in useSessionGrouping per project section.
-  const effectivePinnedSessionIds = pinnedSessionIds;
+  // VS Code has workspace-scoped sessions only. Treat synced global pins as
+  // ordinary project sessions so they remain visible without exposing global pinning.
+  const effectivePinnedSessionIds = React.useMemo(
+    () => (isVSCode ? new Set<string>() : pinnedSessionIds),
+    [isVSCode, pinnedSessionIds],
+  );
 
   const {
     buildGroupSearchText,
@@ -1013,7 +1017,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
   } = useSessionGrouping({
     homeDirectory,
     worktreeMetadata,
-    globalPinnedSessionIds: pinnedSessionIds,
+    globalPinnedSessionIds: effectivePinnedSessionIds,
     pinnedSessionIdsByProject,
     pinnedOrderByProject,
     sessionSortMode,
@@ -1623,7 +1627,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
     [normalizedProjects],
   );
 
-  const { github } = useRuntimeAPIs();
+  const { github } = runtimeAPIs;
   const githubAuthStatus = useGitHubAuthStore((state) => state.status);
   const githubAuthChecked = useGitHubAuthStore((state) => state.hasChecked);
   const gitRepoStatus = useGitRepoStatusMap(normalizedProjectPaths);
@@ -2025,7 +2029,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
     // Use unfiltered catalogs — project-visibility `sessions` can omit pinned IDs
     // and would make the global pin section silently empty on mobile.
     return resolveGlobalPinnedSessions({
-      pinnedIds: pinnedSessionIds,
+      pinnedIds: effectivePinnedSessionIds,
       pinnedOrder,
       catalogs: [
         globalActiveSessions,
@@ -2041,7 +2045,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
     globalArchivedSessions,
     liveSessions,
     pinnedOrder,
-    pinnedSessionIds,
+    effectivePinnedSessionIds,
     pinnedMetadataCache,
     serverSearchSessions,
     t,
@@ -2199,7 +2203,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
     expandedParents: visibleExpandedParents,
     collapsedFolderIds,
     foldersMap,
-    pinnedSessionIds,
+    pinnedSessionIds: effectivePinnedSessionIds,
     pinnedSessionIdsByProject,
     sessionOrderIndex,
     getOrderedGroups,
@@ -2218,7 +2222,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
     hasSessionSearchQuery,
     hideDirectoryControls,
     normalizedSessionSearchQuery,
-    pinnedSessionIds,
+    effectivePinnedSessionIds,
     pinnedSessionIdsByProject,
     sectionsForSidebarRender,
     sessionGroupMinVisible,
@@ -2377,7 +2381,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
         archivedBucket={archivedBucket}
         directoryStatus={directoryStatus}
         currentSessionId={currentSessionId}
-        pinnedSessionIds={pinnedSessionIds}
+        pinnedSessionIds={effectivePinnedSessionIds}
         pinnedSessionIdsByProject={pinnedSessionIdsByProject}
         expandedParents={visibleExpandedParents}
         hasSessionSearchQuery={hasSessionSearchQuery}
@@ -2415,7 +2419,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
     [
       directoryStatus,
       currentSessionId,
-      pinnedSessionIds,
+      effectivePinnedSessionIds,
       pinnedSessionIdsByProject,
       visibleExpandedParents,
       hasSessionSearchQuery,
@@ -2533,7 +2537,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
         renameFolderDraft={renameFolderDraft}
         setRenameFolderDraft={setRenameFolderDraft}
         setRenamingFolderId={setRenamingFolderId}
-        pinnedSessionIds={pinnedSessionIds}
+        pinnedSessionIds={effectivePinnedSessionIds}
         projectPinnedSessionIds={group.directory ? (pinnedSessionIdsByProject.get(normalizePath(group.directory) ?? '') ?? new Set()) : new Set()}
         sessionOrderIndex={sessionOrderIndex}
         prVisualStateByDirectoryBranch={prVisualStateByDirectoryBranch}
@@ -2578,7 +2582,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
       createFolderAndStartRename,
       renamingFolderId,
       renameFolderDraft,
-      pinnedSessionIds,
+      effectivePinnedSessionIds,
       pinnedSessionIdsByProject,
       sessionOrderIndex,
       prVisualStateByDirectoryBranch,
@@ -2889,7 +2893,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
     });
   }, [mobileVariant, openNewSessionDraft, setActiveMainTab, setSessionSwitcherOpen]);
 
-  const tempSessionsSection = !hasSessionSearchQuery ? (
+  const tempSessionsSection = !isVSCode && !hasSessionSearchQuery ? (
     <TempSessionsSection
       tempSessions={tempSessionsWithSession}
       currentSessionDirectory={currentDirectory}

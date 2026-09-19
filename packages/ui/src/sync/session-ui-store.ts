@@ -945,6 +945,12 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
   // setCurrentSession
   // ---------------------------------------------------------------------------
   setCurrentSession: (id, directoryHint?: string | null, options?: { syncDirectory?: boolean; serverId?: string }) => {
+    console.error('[oc-session-select] setCurrentSession enter', {
+      id,
+      directoryHint: directoryHint ?? null,
+      serverId: options?.serverId ?? null,
+      prevSessionId: get().currentSessionId ?? null,
+    })
     if (id) {
       get().closeNewSessionDraft()
     }
@@ -973,6 +979,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     guessedSelectionSessionId = (!sessionDir && id) ? id : null
 
     if (id && resolvedServerId && resolvedServerId !== DEFAULT_SERVER_ID && !resolvedDir) {
+      console.error('[oc-session-select] ABORT remote session without directory', { id, resolvedServerId })
       set({ error: `Directory for remote session ${id} on ${resolvedServerId} is not available` })
       return
     }
@@ -987,6 +994,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     } catch { /* child stores may not be initialized yet */ }
 
     set({ currentSessionId: id })
+    console.error('[oc-session-select] currentSessionId set', { id, resolvedDir: resolvedDir ?? null, resolvedServerId: resolvedServerId ?? null })
 
     if (id && resolvedDir) {
       registerSessionDirectory(id, resolvedDir)
@@ -1065,6 +1073,12 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
   // openNewSessionDraft
   // ---------------------------------------------------------------------------
   openNewSessionDraft: (options) => {
+    console.error('[oc-session-select] openNewSessionDraft', {
+      target: options?.target ?? null,
+      directoryOverride: options?.directoryOverride ?? null,
+      prevSessionId: get().currentSessionId ?? null,
+      stack: new Error('draft-open-source').stack?.split('\n').slice(1, 5).join(' | '),
+    })
     const projectsState = useProjectsStore.getState()
     const projects = projectsState.projects
     const availableWorktreesByProject = get().availableWorktreesByProject
@@ -2512,6 +2526,16 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     return get().sessionPlanAvailable.get(sessionId) ?? false
   },
 }))
+
+declare global {
+  interface Window {
+    __zustand_session_ui_store__?: typeof useSessionUIStore
+  }
+}
+
+if (typeof window !== "undefined") {
+  window.__zustand_session_ui_store__ = useSessionUIStore
+}
 
 setSessionRoutingContextGetters({
   getProjects: () => useProjectsStore.getState().projects,

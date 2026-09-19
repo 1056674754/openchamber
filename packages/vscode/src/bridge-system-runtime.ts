@@ -33,6 +33,42 @@ type SystemRuntimeDeps = {
 const NOTIFICATION_CLAIM_TTL_MS = 10_000;
 const notificationClaims = new Map<string, number>();
 
+// Pending user messages — the webview's send-recovery safety net. The
+// OpenChamber web server implements /api/pending-messages on disk; in VS Code
+// the extension host owns an equivalent JSON file in global storage.
+type PendingMessageRecord = Record<string, unknown> & { sessionId?: unknown };
+let pendingMessagesCache: PendingMessageRecord[] | null = null;
+
+const pendingMessagesFilePath = (ctx: BridgeContext | undefined): string | null => {
+  const dir = ctx?.context?.globalStorageUri?.fsPath;
+  return dir ? path.join(dir, 'pending-messages.json') : null;
+};
+
+const loadPendingMessages = async (ctx: BridgeContext | undefined): Promise<PendingMessageRecord[]> => {
+  if (pendingMessagesCache) return pendingMessagesCache;
+  const file = pendingMessagesFilePath(ctx);
+  if (!file) return [];
+  try {
+    const raw = await fs.promises.readFile(file, 'utf8');
+    const parsed = JSON.parse(raw) as unknown;
+    pendingMessagesCache = Array.isArray(parsed) ? parsed as PendingMessageRecord[] : [];
+  } catch {
+    pendingMessagesCache = [];
+  }
+  return pendingMessagesCache;
+};
+
+const persistPendingMessages = async (ctx: BridgeContext | undefined): Promise<void> => {
+  const file = pendingMessagesFilePath(ctx);
+  if (!file || !pendingMessagesCache) return;
+  try {
+    await fs.promises.mkdir(path.dirname(file), { recursive: true });
+    await fs.promises.writeFile(file, JSON.stringify(pendingMessagesCache), 'utf8');
+  } catch (error) {
+    console.warn('[OpenChamber] Failed to persist pending messages:', error);
+  }
+};
+
 const claimNotification = (key: string): boolean => {
   const now = Date.now();
   for (const [claimKey, claimedAt] of notificationClaims) {
@@ -274,6 +310,67 @@ export async function handleSystemBridgeMessage(
         const errorMessage = error instanceof Error ? error.message : String(error);
         return { id, type, success: true, data: { version: null, error: errorMessage } };
       }
+    }
+
+    case 'api:opencode/health': {
+      // Webview checkHealth() requests /api/opencode/health (the OpenChamber web
+      // server route). The managed OpenCode server has no such path — its health
+      // lives at /global/health — so translate here and normalize to {healthy}.
+      try {
+        const apiUrl = ctx?.manager?.getApiUrl();
+        if (!apiUrl) {
+          return { id, type, success: true, data: { healthy: false, error: 'OpenCode manager unavailable' } };
+        }
+        const base = `${apiUrl.replace(/\/+$/, '')}/`;
+        const response = await fetch(new URL('global/health', base).toString(), {
+          method: 'GET',
+          headers: { Accept: 'application/json', ...(ctx?.manager?.getOpenCodeAuthHeaders() || {}) },
+        });
+        const health = await response.json().catch(() => null) as { healthy?: unknown; error?: unknown } | null;
+        if (!response.ok) {
+          const message = typeof health?.error === 'string'
+            ? health.error
+            : response.statusText || 'OpenCode health check failed';
+          return { id, type, success: true, data: { healthy: false, error: message } };
+        }
+        return { id, type, success: true, data: { healthy: health?.healthy === true } };
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        return { id, type, success: true, data: { healthy: false, error: errorMessage } };
+      }
+    }
+
+    case 'api:pending-messages:list': {
+      return { id, type, success: true, data: await loadPendingMessages(ctx) };
+    }
+
+    case 'api:pending-messages:save': {
+      const message = (payload as { message?: unknown } | undefined)?.message;
+      if (message && typeof message === 'object' && typeof (message as PendingMessageRecord).sessionId === 'string') {
+        const record = message as PendingMessageRecord;
+        const messages = await loadPendingMessages(ctx);
+        const index = messages.findIndex((entry) => entry.sessionId === record.sessionId);
+        if (index >= 0) {
+          messages[index] = record;
+        } else {
+          messages.push(record);
+        }
+        await persistPendingMessages(ctx);
+      }
+      return { id, type, success: true, data: { success: true } };
+    }
+
+    case 'api:pending-messages:delete': {
+      const sessionId = (payload as { sessionId?: unknown } | undefined)?.sessionId;
+      if (typeof sessionId === 'string' && sessionId.length > 0) {
+        const messages = await loadPendingMessages(ctx);
+        const next = messages.filter((entry) => entry.sessionId !== sessionId);
+        if (next.length !== messages.length) {
+          pendingMessagesCache = next;
+          await persistPendingMessages(ctx);
+        }
+      }
+      return { id, type, success: true, data: { success: true } };
     }
 
     case 'api:opencode/upgrade-status': {

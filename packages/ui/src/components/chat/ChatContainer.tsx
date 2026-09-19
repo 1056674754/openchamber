@@ -858,7 +858,13 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
     );
 
     React.useEffect(() => {
-        if (autoOpenDraft && !currentSessionId && !draftOpen) {
+        // Read live store state, not the closure values: during a
+        // session-selection transition this effect can re-run with a stale
+        // closure (currentSessionId still null) when another store update
+        // flushes a render mid-transition — the closure check would then
+        // stomp the just-selected session with a fresh draft.
+        const live = useSessionUIStore.getState();
+        if (autoOpenDraft && !live.currentSessionId && !live.newSessionDraft?.open) {
             openNewSessionDraft();
         }
     }, [autoOpenDraft, currentSessionId, draftOpen, openNewSessionDraft]);

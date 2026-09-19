@@ -13,7 +13,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
-import { canUseElectronDesktopIPC, invokeDesktop, isVSCodeRuntime } from '@/lib/desktop';
+import { canUseElectronDesktopIPC, invokeDesktop } from '@/lib/desktop';
 import { toast } from '@/components/ui';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -445,9 +445,9 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
   } = props;
   const displayMode = useSessionDisplayStore((state) => state.displayMode);
   const isMinimalMode = displayMode === 'minimal';
-  const isVSCode = React.useMemo(() => isVSCodeRuntime(), []);
-  const isElectron = React.useMemo(() => canUseElectronDesktopIPC(), []);
   const runtimeApis = React.useContext(RuntimeAPIContext);
+  const isVSCode = runtimeApis?.runtime.isVSCode === true;
+  const isElectron = React.useMemo(() => canUseElectronDesktopIPC(), []);
   const revealOnHoverClass = isVSCode
     ? 'group-hover:opacity-100 group-hover:pointer-events-auto'
     : 'group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto';
@@ -1116,10 +1116,12 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
       ) : null}
       <SessionUnreadMenuItem sessionId={session.id} isUnread={unseenCount > 0} />
       {isGloballyPinned ? (
-        <DropdownMenuItem onClick={() => togglePinnedSession(session.id, 'global')} className="[&>svg]:mr-1">
-          <Icon name="unpin" className="mr-1 h-4 w-4"  />
-          {t('sessions.sidebar.session.menu.unpinGlobal')}
-        </DropdownMenuItem>
+        !isVSCode ? (
+          <DropdownMenuItem onClick={() => togglePinnedSession(session.id, 'global')} className="[&>svg]:mr-1">
+            <Icon name="unpin" className="mr-1 h-4 w-4"  />
+            {t('sessions.sidebar.session.menu.unpinGlobal')}
+          </DropdownMenuItem>
+        ) : null
       ) : isPinnedSession ? (
         <DropdownMenuItem onClick={() => togglePinnedSession(session.id, groupDirectory ?? '')} className="[&>svg]:mr-1">
           <Icon name="unpin" className="mr-1 h-4 w-4"  />
@@ -1127,10 +1129,12 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
         </DropdownMenuItem>
       ) : (
         <>
-          <DropdownMenuItem onClick={() => togglePinnedSession(session.id, 'global')} className="[&>svg]:mr-1">
-            <Icon name="pushpin" className="mr-1 h-4 w-4"  />
-            {t('sessions.sidebar.session.menu.pinGlobal')}
-          </DropdownMenuItem>
+          {!isVSCode ? (
+            <DropdownMenuItem onClick={() => togglePinnedSession(session.id, 'global')} className="[&>svg]:mr-1">
+              <Icon name="pushpin" className="mr-1 h-4 w-4"  />
+              {t('sessions.sidebar.session.menu.pinGlobal')}
+            </DropdownMenuItem>
+          ) : null}
           {groupDirectory ? (
             <DropdownMenuItem onClick={() => togglePinnedSession(session.id, groupDirectory)} className="[&>svg]:mr-1">
               <Icon name="pushpin" className="mr-1 h-4 w-4"  />
@@ -1480,7 +1484,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
   return (
     <React.Fragment key={session.id}>
       <MobileSwipeActionsRow
-        enabled={mobileVariant && !archivedBucket && !isGlobalPinnedContext}
+        enabled={mobileVariant && !isVSCode && !archivedBucket && !isGlobalPinnedContext}
         actionsWidth={144}
         actions={(
           <>
@@ -1557,7 +1561,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
                     className={cn(
                       'flex min-w-0 flex-1 cursor-pointer flex-col gap-0 overflow-hidden rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 text-foreground select-none disabled:cursor-not-allowed',
                       isTouchPressed && 'bg-interactive-hover/70',
-                      alwaysShowActions ? 'pr-7' : (showOpenInEditorAction ? 'transition-[padding] group-hover:pr-12 group-focus-within:pr-12' : null),
+                      alwaysShowActions ? 'pr-7' : (showOpenInEditorAction ? 'transition-[padding] group-hover:pr-[68px] group-focus-within:pr-[68px]' : null),
                     )}
                     >
                     <div className={cn('flex w-full items-center min-w-0 flex-1 overflow-hidden', isGlobalPinnedContext ? 'gap-1.5' : 'gap-0.5')}>
@@ -1664,7 +1668,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
                 className={cn(
                   'flex min-w-0 flex-1 cursor-pointer flex-col gap-0 overflow-hidden rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 text-foreground select-none disabled:cursor-not-allowed',
                   isTouchPressed && 'bg-interactive-hover/70',
-                  alwaysShowActions ? 'pr-7' : (showOpenInEditorAction ? 'transition-[padding] group-hover:pr-12 group-focus-within:pr-12' : null),
+                  alwaysShowActions ? 'pr-7' : (showOpenInEditorAction ? 'transition-[padding] group-hover:pr-[68px] group-focus-within:pr-[68px]' : null),
                 )}
               >
                   <div className={cn('flex w-full items-center min-w-0 flex-1 overflow-hidden', isGlobalPinnedContext ? 'gap-1.5' : 'gap-0.5')}>

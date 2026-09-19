@@ -123,6 +123,7 @@ export const useSessionActions = (args: Args) => {
       );
 
       if (sessionId === args.currentSessionId && !needsSelectionRefresh) {
+        console.error('[oc-session-select] reselect-only', sessionId);
         if (args.allowReselect) {
           args.onSessionSelected?.(sessionId);
         }
@@ -131,6 +132,15 @@ export const useSessionActions = (args: Args) => {
       }
 
       const resolvedProjectId = resolveProjectIdForSessionSelection(sessionId, sessionDirectory, projectId);
+      console.error('[oc-session-select] click', {
+        sessionId,
+        sessionDirectory: sessionDirectory ?? null,
+        resolvedProjectId,
+        indexedServerId: indexedServerId ?? null,
+        currentDirectory: currentDirectory ?? null,
+        projectId: projectId ?? null,
+        currentSessionId: args.currentSessionId ?? null,
+      });
       if (sessionDirectory && resolvedProjectId) {
         useSessionUIStore.getState().navigateToSession(sessionId, sessionDirectory, resolvedProjectId);
       } else {
