@@ -415,6 +415,13 @@ Startup timeout (`startupTimeoutMs` dep, env `OPENCHAMBER_OPENCODE_STARTUP_TIMEO
   - Decoded payload accounting via `x-openchamber-decoded-content-length`; the proxy only derives it from an identity-encoded upstream `content-length`, before browser-facing compression
   - Windows `/session` merge fallback path behavior
 - OpenCode readiness gate for proxied `/api` requests
+- Worktree checkout gate before directory-scoped upstream reads and writes
+
+Git bootstrap must reach `git-ready` before OpenCode can cache a new worktree's
+project identity or config. Setup scripts may still be running; the optional UI
+setup wait remains separate. Failed or timed-out checkout returns 503 without
+forwarding. This server gate covers web, Electron, hosted mobile, and Capacitor
+connections; the VS Code extension owns its separate Git and proxy implementation.
 
 ## Public exports (watcher.js)
 - `createOpenCodeWatcherRuntime(dependencies)`: creates global event watcher runtime backed by the shared upstream SSE reader.
